@@ -1,0 +1,692 @@
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ flow/audioiocoreaudio.cc	2 Mar 2003 22:31:53 -0000	1.12
+@@ -0,0 +1,689 @@
++    /*
++    
++    Copyright (C) 2001 Stefan Westerfeld
++                        stefan@space.twc.de
++    
++    This library is free software; you can redistribute it and/or
++    modify it under the terms of the GNU Library General Public
++    License as published by the Free Software Foundation; either
++    version 2 of the License, or (at your option) any later version.
++    
++    This library is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++    Library General Public License for more details.
++    
++    You should have received a copy of the GNU Library General Public License
++    along with this library; see the file COPYING.LIB.  If not, write to
++    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++    Boston, MA 02111-1307, USA.
++    
++    */
++    /*
++        Modifications for ARTS -    
++        Ben Hines <bhines@alumni.ucsd.edu>
++        Ben Reed  <ranger@befunk.com>
++        
++        Some CoreAudio code borrowed from ESD -
++        Shawn Hsiao <phsiao@mac.com>
++        Masanori Sekino <m-sekino@mb.kcom.ne.jp>
++    */
++
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#ifdef HAVE_COREAUDIO
++
++#define DEBUG 1
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <pthread.h>
++#include <sys/socket.h>
++#include <sys/file.h>
++
++/* for useful debugging macros */
++#include <mach/error.h>
++
++#include <CoreAudio/CoreAudio.h>
++
++#include "debug.h"
++#include "audioio.h"
++#include "audiosubsys.h"
++
++#define NAME_LEN 256		/* max length of a device name */
++#define BUF_SIZE (4 * 1024)  /* from ESD */
++
++#define driverVersion "0.01 alpha"
++
++#ifdef BIG_ENDIAN
++#define defaultFormat 17
++#else
++#define defaultFormat 16
++#endif
++  
++bool NotifyOnError (OSStatus inRetVal, const char * inStringDesc);
++
++struct audio_queue {
++    float dataBuf[BUF_SIZE];
++    pthread_mutex_t mutex;
++    pthread_cond_t condition;
++    int numSamples;
++};
++
++static OSStatus PlaybackIOProc(AudioDeviceID inDevice,
++			const AudioTimeStamp *inNow,
++			const AudioBufferList *inInputData,
++			const AudioTimeStamp *inInputTime,
++			AudioBufferList *outOutputData,
++			const AudioTimeStamp *inOutputTime,
++			audio_queue *inClientData);
++
++static OSStatus RecordIOProc(AudioDeviceID inDevice,
++		      const AudioTimeStamp *inNow,
++		      const AudioBufferList *inInputData,
++		      const AudioTimeStamp *inInputTime,
++		      AudioBufferList *outOutputData,
++		      const AudioTimeStamp *inOutputTime,
++		      audio_queue *inClientData);
++                      
++OSStatus PropertyListenerProc(AudioHardwarePropertyID	inPropertyID,
++                      void* inClientData);
++
++namespace Arts {
++
++class AudioIOCoreAudio : public AudioIO {
++
++protected:
++     /* From ESD */
++     AudioDeviceID gOutputDeviceID, gInputDeviceID;
++    
++     audio_queue input;
++     audio_queue output;    
++    
++     int audioPlaybackStarted, audioRecordStarted;
++     int coreaudio_has_output_device;
++     int coreaudio_has_input_device;
++     int coreaudio_init;
++     
++     /* Arts Specific */
++     int audio_fd;
++     int bytesPerSec;
++     timeval start;
++        
++public:
++	AudioIOCoreAudio();
++	bool supportsFormat(AudioDeviceID device, AudioStreamBasicDescription *format);
++	void setParam(AudioParam param, int& value);
++	int getParam(AudioParam param);
++
++	bool open();
++	void close();
++	int read(void *buffer, int size);
++	int write(void *buffer, int size);
++
++};
++
++REGISTER_AUDIO_IO(AudioIOCoreAudio, "coreaudio", "Apple CoreAudio");
++}; // end namespace Arts
++
++using namespace std;
++using namespace Arts;
++             
++AudioIOCoreAudio::AudioIOCoreAudio() {
++        
++        artsdebug("CoreAudio driver version %s", driverVersion);
++        /*
++         * default parameters
++         */
++        param(samplingRate) = 44100;
++        paramStr(deviceName) = "default";
++        param(fragmentSize) = 1024;
++        param(fragmentCount) = 7;
++        param(channels) = 2;
++        param(direction) = 2;
++        param(format) = defaultFormat;
++        
++        input.numSamples = output.numSamples = 0;
++    
++        audioPlaybackStarted = 0, audioRecordStarted = 0;
++        coreaudio_has_output_device = 0;
++        coreaudio_has_input_device = 0;
++        coreaudio_init = 0;
++}
++
++void
++AudioIOCoreAudio::close()
++{   
++    artsdebug("AudioIOCoreAudio::close().. ");
++    /* deactivate both of them */
++    if (coreaudio_has_output_device) {
++        if(audioPlaybackStarted)
++        NotifyOnError(AudioDeviceStop(gOutputDeviceID, 
++                  (AudioDeviceIOProc) PlaybackIOProc),
++                        "AudioDeviceStop (PlaybackIOProc)");
++                        
++        NotifyOnError(AudioDeviceRemoveIOProc(gOutputDeviceID,
++                  (AudioDeviceIOProc) PlaybackIOProc),
++                        "AudioDeviceRemoveIOProc (PlaybackIOProc)");
++                            
++        NotifyOnError(AudioHardwareRemovePropertyListener(
++            kAudioHardwarePropertyDefaultOutputDevice, 
++            PropertyListenerProc),
++                "AudioHardwareRemovePropertyListener (PropertyListenerProc)");
++                        
++        artsdebug(" ... closing output\n");
++        audioPlaybackStarted = 0;
++        coreaudio_has_output_device = 0;
++    }
++    
++    if (coreaudio_has_input_device) {        
++        if(audioRecordStarted)
++        NotifyOnError(AudioDeviceStop(gInputDeviceID, 
++                            (AudioDeviceIOProc) RecordIOProc),
++                        "AudioDeviceStop (RecordIOProc)");
++                        
++        NotifyOnError(AudioDeviceRemoveIOProc(gInputDeviceID,
++                            (AudioDeviceIOProc) RecordIOProc),
++                        "AudioDeviceRemoveIOProc (RecordIOProc)");
++                            
++        NotifyOnError(AudioHardwareRemovePropertyListener(
++            kAudioHardwarePropertyDefaultOutputDevice, 
++            PropertyListenerProc),
++                "AudioHardwareRemovePropertyListener (PropertyListenerProc)");
++                        
++        artsdebug(" ... closing intput\n");
++        audioRecordStarted = 0;
++        coreaudio_has_input_device = 0;
++    }
++}
++
++ 
++int 
++AudioIOCoreAudio::write(void *buffer, int buf_size) {
++
++  float scale = 1.0 / SHRT_MAX;
++  int remain_to_write = buf_size;
++
++  if (!coreaudio_has_output_device)
++  {
++    arts_warning("AudioIOCoreAudio::write with no output device!");
++    return -1;
++  }
++  if (!audioPlaybackStarted) {
++    NotifyOnError(AudioDeviceStart(gOutputDeviceID,(AudioDeviceIOProc)  PlaybackIOProc),
++                    "AudioDeviceStart (PlaybackIOProc)");
++    audioPlaybackStarted = 1;
++  }
++
++  while (remain_to_write)
++  {
++    pthread_mutex_lock(&output.mutex);
++
++    while(output.numSamples == BUF_SIZE)
++      pthread_cond_wait(&output.condition, &output.mutex);
++
++    {
++      short *src_data = (short *)buffer + (buf_size - remain_to_write) / sizeof(short);
++      float *dst_data = output.dataBuf + output.numSamples;
++      int src_samples = remain_to_write / sizeof(short);
++      int dst_samples = BUF_SIZE - output.numSamples;
++      int n = (dst_samples < src_samples) ? dst_samples : src_samples;
++      int i;
++
++      for (i = 0; i < n; i++)
++        dst_data[i] = scale * src_data[i];
++
++      output.numSamples += n;
++      remain_to_write -= n * sizeof(short);
++    }
++
++    pthread_mutex_unlock(&output.mutex);
++  }
++
++  return (buf_size);
++
++}
++
++int AudioIOCoreAudio::read(void *buffer, int buf_size) {
++  float scale = SHRT_MAX;
++  int remain_to_read = buf_size;
++
++  if (!coreaudio_has_input_device)
++  {
++    arts_warning("AudioIOCoreAudio::read with no input device!");
++    return -1;
++  }
++
++  if (!audioRecordStarted) {
++    NotifyOnError(AudioDeviceStart(gInputDeviceID,(AudioDeviceIOProc)  RecordIOProc),
++                    "AudioDeviceStart (RecordIOProc)");
++    audioRecordStarted = 1;
++  }
++
++  while (remain_to_read)
++  {
++    pthread_mutex_lock(&input.mutex);
++
++    while(input.numSamples == BUF_SIZE)
++      pthread_cond_wait(&input.condition, &input.mutex);
++
++    {
++      float *src_data = input.dataBuf + input.numSamples;
++      short *dst_data = (short *)buffer + (buf_size - remain_to_read) / sizeof(short);
++      int src_samples = BUF_SIZE - input.numSamples;
++      int dst_samples = remain_to_read / sizeof(short);
++      int n = (dst_samples < src_samples) ? dst_samples : src_samples;
++      int i;
++
++      for (i = 0; i < n; i++)
++        dst_data[i] = (short)(scale * src_data[i]);
++
++      input.numSamples += n;
++      remain_to_read -= n * sizeof(short);
++    }
++
++    pthread_mutex_unlock(&input.mutex);
++  }
++
++  return (buf_size);
++
++}
++
++
++bool
++AudioIOCoreAudio::open()
++{
++        #define LEN_DEVICE_NAME 128
++        UInt32 propertySize, bufferByteCount;
++        char deviceName[LEN_DEVICE_NAME];
++        char fdName[LEN_DEVICE_NAME + 50];
++        struct AudioStreamBasicDescription streamDesc;
++
++        /***** Arts Specific ***/
++	arts_warning("info: requesting %d, %d channel sound at %d hz\n",
++            param(direction), param(channels), param(samplingRate));
++
++        bytesPerSec = param(channels) * 2 * param(samplingRate);
++        gettimeofday(&start,0);
++	if (param(direction) & directionWrite) {
++            if(coreaudio_has_output_device)
++            {
++                arts_warning("yes.. AudioIOCoreAudio::open() called twice for writing!");
++                return true;
++            }
++                
++            /* HACK - create the file descriptor?  */
++            sprintf(fdName, "/tmp/audioiocoreaudio");
++            fopen(fdName, "w+");
++            audio_fd = ::open(fdName,  O_RDWR | O_NDELAY, 0);
++            /* Obtain a file descriptor for our "listening" socket */
++            if(audio_fd == -1)
++            {
++                arts_warning("file descriptor can't be created, %s\n", strerror(errno));
++                return false;
++            }
++            /***** End Arts Specific ***/
++            /*  Stuff from ESD... */
++            /********************** playback section ***************************/
++            /* get default output device */
++            propertySize = sizeof(gOutputDeviceID);
++            NotifyOnError(AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice,
++                                                &propertySize,
++                                                &gOutputDeviceID),
++                        "AudioHardwareGetProperty (Default Output Device)");
++            
++            arts_assert(gOutputDeviceID != kAudioDeviceUnknown);
++            
++            /* got default output device */
++            coreaudio_has_output_device = 1;
++        
++            /* get output device name */
++            propertySize = sizeof(char)*LEN_DEVICE_NAME;
++            NotifyOnError(AudioDeviceGetProperty(gOutputDeviceID,
++                                            1,
++                                            0,
++                                            kAudioDevicePropertyDeviceName,
++                                            &propertySize,
++                                            deviceName),
++                            "AudioDeviceGetProperty (Output Device Name)");
++        
++            /* get output format */
++            propertySize = sizeof(struct AudioStreamBasicDescription);
++            NotifyOnError(AudioDeviceGetProperty(gOutputDeviceID,
++                                            1,
++                                            0,
++                                            kAudioDevicePropertyStreamFormat,
++                                            &propertySize,
++                                            &streamDesc),
++                        "AudioDeviceGetProperty (Output StreamFormat)");
++                        
++            if ((streamDesc.mSampleRate != 44100.0) ||
++                (streamDesc.mFormatID != kAudioFormatLinearPCM) ||
++               !(streamDesc.mFormatFlags & kLinearPCMFormatFlagIsFloat) ||
++                (streamDesc.mChannelsPerFrame != 2))
++            {
++            	arts_warning("Unsupported output device format!\n");
++                return (-2);
++            }
++        
++            /* set buffer size */
++            bufferByteCount = BUF_SIZE * sizeof(float);
++            propertySize = sizeof(bufferByteCount);
++            NotifyOnError(AudioDeviceSetProperty(gOutputDeviceID,
++                                            0,
++                                            0,
++                                            0,
++                                            kAudioDevicePropertyBufferSize,
++                                            propertySize,
++                                            &bufferByteCount),
++                        "AudioDeviceSetProperty (Output BufferSize)");
++    
++            artsdebug("using device %s for output:\n", deviceName);
++            artsdebug("\twith sample rate %f, %ld channels and %ld-bit sample\n",
++                    streamDesc.mSampleRate,
++                    streamDesc.mChannelsPerFrame,
++                    streamDesc.mBitsPerChannel);
++        
++            arts_return_val_if_fail(pthread_mutex_init(&output.mutex, NULL) == 0, -1);
++            arts_return_val_if_fail(pthread_cond_init(&output.condition, NULL) == 0, -1);
++            
++            /* Registers PlaybackIOProc with the device without activating it. */
++            NotifyOnError(AudioDeviceAddIOProc(gOutputDeviceID, 
++                            (AudioDeviceIOProc) PlaybackIOProc, 
++                                                (void *)&output),
++                            "AudioDeviceAddIOProc (PlaybackIOProc)");
++                            
++            NotifyOnError(AudioHardwareAddPropertyListener(
++                kAudioHardwarePropertyDefaultOutputDevice, 
++                PropertyListenerProc, this),
++                 "AudioHardwareAddPropertyListener (PropertyListenerProc)");
++                
++	}
++
++        if (param(direction) & directionRead) {
++            /********************** record section ***************************/
++            if(coreaudio_has_input_device)
++            {
++                arts_warning("AudioIOCoreAudio::open() called twice for reading!");
++                return true;
++            }
++                
++            /* get default input device */
++            propertySize = sizeof(gInputDeviceID);
++            NotifyOnError(AudioHardwareGetProperty(kAudioHardwarePropertyDefaultInputDevice,
++                                                &propertySize,
++                                                &gInputDeviceID),
++                          "AudioHardwareGetProperty (Default Input Device)");
++
++            arts_assert(gInputDeviceID != kAudioDeviceUnknown);         
++            
++            /* got default input device */
++            coreaudio_has_input_device = 1;
++        
++            /* get input device name */
++            propertySize = sizeof(char)*64;
++            NotifyOnError(AudioDeviceGetProperty(gInputDeviceID,
++                                            1,
++                                            1,
++                                            kAudioDevicePropertyDeviceName,
++                                            &propertySize,
++                                            deviceName),
++                        "AudioDeviceGetProperty (Input Device Name)");
++
++            /* get input format */
++            propertySize = sizeof(struct AudioStreamBasicDescription);
++            NotifyOnError(AudioDeviceGetProperty(gInputDeviceID,
++                                            1,
++                                            1,
++                                            kAudioDevicePropertyStreamFormat,
++                                            &propertySize,
++                                            &streamDesc),
++                        "AudioDeviceGetProperty (Input Stream Size)");
++        
++            if ((streamDesc.mSampleRate != 44100.0) ||
++                (streamDesc.mFormatID != kAudioFormatLinearPCM) ||
++                !(streamDesc.mFormatFlags & kLinearPCMFormatFlagIsFloat) ||
++                (streamDesc.mChannelsPerFrame != 2))
++            {
++                artsdebug("Unsupported Input Device format.\n");
++                return (-2);
++            }
++        
++            /* set buffer size */
++            bufferByteCount = BUF_SIZE * sizeof(float);
++            propertySize = sizeof(bufferByteCount);
++            NotifyOnError(AudioDeviceSetProperty(gInputDeviceID,
++                                            0,
++                                            0,
++                                            1,
++                                            kAudioDevicePropertyBufferSize,
++                                            propertySize,
++                                            &bufferByteCount),
++                        "AudioDeviceSetProperty (input buffersize)");
++
++            artsdebug("using device %s for input:\n", deviceName);
++            artsdebug("\twith sample rate %f, %ld channels and %ld-bit sample\n",
++                    streamDesc.mSampleRate,
++                    streamDesc.mChannelsPerFrame,
++                    streamDesc.mBitsPerChannel);
++
++            arts_return_val_if_fail(pthread_mutex_init(&input.mutex, NULL) == 0, -1);
++            arts_return_val_if_fail(pthread_cond_init(&input.condition, NULL) == 0, -1);
++        
++            /* Registers PlaybackIOProc with the device without activating it. */
++            NotifyOnError(AudioDeviceAddIOProc(gInputDeviceID, 
++                                (AudioDeviceIOProc) RecordIOProc, 
++                                                (void *)&input),
++                            "AudioDeviceAddIOProc (RecordIOProc)");
++                                                                                        
++            NotifyOnError(AudioHardwareAddPropertyListener(
++                kAudioHardwarePropertyDefaultInputDevice, 
++                PropertyListenerProc, this),
++                 "AudioHardwareAddPropertyListener (PropertyListenerProc)");
++
++	}
++        
++	return true;
++}
++
++void AudioIOCoreAudio::setParam(AudioParam p, int& value) {
++	switch(p)
++	{
++		default:
++			param(p) = value;
++			break;
++	}
++}
++
++int AudioIOCoreAudio::getParam(AudioParam p) {
++	timeval now;
++	double delta;
++	int bytes;
++
++	switch(p)
++	{
++		case canRead:
++		case canWrite:
++			gettimeofday(&now,0);
++			delta = (double)now.tv_sec + (double)now.tv_usec/1000000.0;
++			delta -= (double)start.tv_sec + (double)start.tv_usec/1000000.0;
++			bytes = (int)( (delta * bytesPerSec) -  ((p == canRead)?input.numSamples:output.numSamples));
++               //         printf("%s %d bytes\n", ((p == canRead)?"canRead":"canWrite"), bytes);
++			return bytes;
++			break;
++
++		case autoDetect:
++			return 1;
++			break;
++                        
++		case selectReadFD:
++			return (param(direction) & directionRead)?audio_fd:-1;
++			break;
++
++		case selectWriteFD:
++			return (param(direction) & directionWrite)?audio_fd:-1;
++			break;
++                        
++		default:
++			return param(p);
++			break;
++	}
++}
++
++bool 
++AudioIOCoreAudio::supportsFormat(AudioDeviceID device, 
++                                 AudioStreamBasicDescription *format) {
++
++	UInt32 formatSize;
++	OSStatus err;
++
++	formatSize = sizeof(*format);
++	err = AudioDeviceGetProperty(device, 0, false,
++		kAudioDevicePropertyStreamFormatSupported, &formatSize, format);
++	NotifyOnError(err, "supportsFormat");
++
++	if (err == noErr) {
++		return true;
++	} else {
++		return false;
++	}
++
++}
++
++/* Add __attribute__((unused)) to unused parameters when that gcc bug is fixed for OS X (3.4?)*/
++static OSStatus PlaybackIOProc(AudioDeviceID inDevice,
++			const AudioTimeStamp *inNow,
++			const AudioBufferList *inInputData,
++			const AudioTimeStamp *inInputTime,
++			AudioBufferList *outOutputData,
++			const AudioTimeStamp *inOutputTime,
++			audio_queue *inClientData)
++{
++  float *bufPtr = (float *) outOutputData->mBuffers[0].mData;
++  int i;
++
++  pthread_mutex_lock(&inClientData->mutex);
++
++  for (i = 0; i < inClientData->numSamples; i++)
++    bufPtr[i] = inClientData->dataBuf[i];
++  for ( ; i < BUF_SIZE; i++)
++    bufPtr[i] = 0;
++  inClientData->numSamples = 0;
++
++  pthread_mutex_unlock(&inClientData->mutex);
++  pthread_cond_signal(&inClientData->condition);
++
++  return (kAudioHardwareNoError);
++}
++
++/* Add __attribute__((unused)) to unused parameters when that gcc bug is fixed for OS X (3.4?)*/
++static OSStatus RecordIOProc(AudioDeviceID inDevice,
++		      const AudioTimeStamp *inNow,
++		      const AudioBufferList *inInputData,
++		      const AudioTimeStamp *inInputTime,
++		      AudioBufferList *outOutputData,
++		      const AudioTimeStamp *inOutputTime,
++		      audio_queue *inClientData)
++{
++  float *bufPtr = inInputData->mBuffers[0].mData;
++  int i;
++
++  pthread_mutex_lock(&inClientData->mutex);
++
++  for (i = 0; i < BUF_SIZE; i++)
++    inClientData->dataBuf[i] = bufPtr[i];
++  inClientData->numSamples = 0;
++
++  pthread_mutex_unlock(&inClientData->mutex);
++  pthread_cond_signal(&inClientData->condition);
++
++  return (kAudioHardwareNoError);
++}
++
++OSStatus PropertyListenerProc(AudioHardwarePropertyID	inPropertyID, 
++                                void *	inClientData)
++{
++   UInt32 propertySize = sizeof(AudioDeviceID);
++   AudioDeviceID deviceID;
++   
++   arts_warning("PropertyListenerProc called ... ");
++    
++   switch(inPropertyID)
++   {
++        case kAudioHardwarePropertyDefaultOutputDevice:
++            artsdebug("PropertyListenerProc kAudioHardwarePropertyDefaultOutputDevice:\n");
++            ((AudioIOCoreAudio*)inClientData)->close();
++            ((AudioIOCoreAudio*)inClientData)->open();
++            return noErr;
++        case kAudioHardwarePropertyDefaultInputDevice:
++            artsdebug("PropertyListenerProc kAudioHardwarePropertyDefaultOutputDevice:\n");
++            ((AudioIOCoreAudio*)inClientData)->close();
++            ((AudioIOCoreAudio*)inClientData)->open();
++            return noErr;
++            break;
++            
++        default:
++            return noErr;
++            break;    
++    }
++}
++
++/* Utility */
++
++bool NotifyOnError (OSStatus inRetVal, const char * inStringDesc) {
++	if (inRetVal == noErr) {
++		return true;
++	} else {
++		switch(inRetVal) {
++			case kAudioHardwareNoError:
++				break;
++			case kAudioHardwareNotRunningError:
++				arts_warning("error: hardware not running in %s", inStringDesc);
++				break;
++			case kAudioHardwareUnspecifiedError:
++				arts_warning("error: unspecified error in %s", inStringDesc);
++				break;
++			case kAudioHardwareUnknownPropertyError:
++				arts_warning("error: unknown property in %s", inStringDesc);
++				break;
++			case kAudioHardwareBadPropertySizeError:
++				arts_warning("error: bad property size in %s", inStringDesc);
++				break;
++			case kAudioHardwareIllegalOperationError:
++				arts_warning("error: illegal operation in %s", inStringDesc);
++				break;
++			case kAudioHardwareBadDeviceError:
++				arts_warning("error: bad device in %s", inStringDesc);
++				break;
++			case kAudioHardwareBadStreamError:
++				arts_warning("error: bad stream in %s", inStringDesc);
++				break;
++			case kAudioDeviceUnsupportedFormatError:
++				arts_warning("error: unsupported format in %s", inStringDesc);
++				break;
++			case kAudioDevicePermissionsError:
++				arts_warning("error: bad device permissions in %s", inStringDesc);
++				break;
++			default:
++				arts_warning("error: unknown CoreAudio error in %s", inStringDesc);
++				break;
++		}
++			
++		arts_warning("  system: 0x%d", err_get_system(inRetVal));
++		arts_warning("  sub:    0x%d", err_get_sub(inRetVal));
++		arts_warning("  code:   0x%d", err_get_code(inRetVal));
++		return false;
++	}
++}
++
++void ExitOnError (OSStatus inRetVal, const char * inStringDesc) {
++	if ( NotifyOnError (inRetVal, inStringDesc) ) {
++		exit(1);
++	}
++}
++
++#endif // HAVE_COREAUDIO
