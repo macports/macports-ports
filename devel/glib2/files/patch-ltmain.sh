@@ -1,5 +1,5 @@
---- ltmain.sh.orig	Mon Nov  4 07:57:20 2002
-+++ ltmain.sh	Sun Jan 19 01:09:12 2003
+--- ltmain.sh.orig	Sat Nov  9 05:40:11 2002
++++ ltmain.sh	Sat Apr 19 03:10:57 2003
 @@ -4047,10 +4047,10 @@
  
  # Directory that this library needs to be installed in:
