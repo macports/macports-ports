@@ -44,7 +44,7 @@ MACOSX_PATCHES=" \
 "
 
 CONFIGURE="-I${worksrcpath}/include -I${prefix}/include \
-		-I/usr/X11R6/include/freetype2 -L${prefix}/lib \
+		-I/usr/X11R6/include/freetype2 -L/usr/X11R6/lib -L${prefix}/lib \
 		-prefix ${prefix} -bindir ${prefix}/bin -libdir ${prefix}/lib \
 		-docdir ${prefix}/share/doc/${portname}/html -datadir ${prefix}/share/qt3 \
                 -headerdir ${prefix}/include/qt3 -plugindir ${prefix}/lib/qt3-plugins \
