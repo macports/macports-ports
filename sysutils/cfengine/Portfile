@@ -1,8 +1,8 @@
-# $Id: Portfile,v 1.10 2004/11/19 00:31:07 jkh Exp $
+# $Id: Portfile,v 1.11 2005/01/29 20:48:57 rshaw Exp $
 PortSystem		1.0
 
 name			cfengine
-version			2.1.11
+version			2.1.13
 categories		sysutils
 maintainers		rshaw@opendarwin.org
 description		a tool for setting up and maintaining computer systems
@@ -15,15 +15,13 @@ homepage		http://www.cfengine.org/
 master_sites	ftp://ftp.iu.hio.no/pub/cfengine/ \
 				ftp://sunsite.uio.no/pub/cfengine/ \
 				http://ftp.us.xemacs.org/ftp/pub/cfengine/cfengine-ftp/
-checksums		md5 6d6bd644e4e8b4374d4eb9ed5bd154a2
+checksums		md5 2c002fc37f2fc9f87248ad8b9e899091
 platforms		darwin
 
 depends_lib		lib:libdb-4:db4 \
-				lib:libssl.0.9:openssl
+				lib:libssl.0.9:openssl \
+				lib:libpcreposix:pcre
 
-patchfiles		patch-configure \
-				patch-conf.h.in \
-				patch-cf.defs.h
 post-patch {
 	cd ${worksrcpath}
 	foreach manfile [glob doc/*.8] {
@@ -39,6 +37,7 @@ configure.args	--mandir='\${prefix}/share/man' \
 				--with-workdir="${cfworkdir}" \
 				--with-berkeleydb=default \
 				--with-openssl=default \
+				--with-pcre=default \
 				--with-docs
 
 build.args		ps_DATA=
@@ -54,18 +53,29 @@ pre-destroot {
 	}
 }
 
+destroot.keepdirs	${destroot}${cfworkdir}/bin \
+					${destroot}${cfworkdir}/inputs \
+					${destroot}${cfworkdir}/modules \
+					${destroot}${cfworkdir}/outputs \
+					${destroot}${cfworkdir}/ppkeys \
+					${destroot}${cfworkdir}/rpc_in \
+					${destroot}${cfworkdir}/rpc_out \
+					${destroot}${cfworkdir}/state
 post-destroot {
 	# Create cfengine directories
 	xinstall -d -m 0755 ${destroot}${cfworkdir}
 	# Create cfengine sub-directories
-	foreach subdir {bin inputs modules outputs state} {
-		# accept the default directory creation modes
-		destroot.keepdirs-append ${destroot}${cfworkdir}/${subdir}
+	foreach subdir {bin modules state} {
+		xinstall -d -m 0755 ${destroot}${cfworkdir}/${subdir}
 	}
-	foreach subdir {ppkeys rpc_in rpc_out} {
+	foreach subdir {inputs masterfiles/inputs outputs ppkeys rpc_in rpc_out} {
 		xinstall -d -m 0700 ${destroot}${cfworkdir}/${subdir}
-		destroot.keepdirs-append ${destroot}${cfworkdir}/${subdir}
 	}
+	# Install minimum required executables in cfworkdir
+	#foreach exe {cfagent cfenvd cfexecd cfservd} {
+	#	xinstall -m 0755 ${destroot}${prefix}/sbin/$exe \
+	#		${destroot}${cfworkdir}/bin
+	#}
 	# Create distribution sample conf files
 	set hostname [exec hostname]
 	set host [lindex [split ${hostname} {.}] 0]
@@ -73,33 +83,64 @@ post-destroot {
 	set timezone [exec date +%Z]
 	foreach conf {cfagent.conf cfservd.conf update.conf cfrun.hosts} {
 		xinstall -m 0644  ${filespath}/${conf}.in \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
-		reinplace "s|@PREFIX@|${prefix}|g" \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
-		reinplace "s|@CFWORKDIR@|${cfworkdir}|g" \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
-		reinplace "s|@HOST@|${host}|g" \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
-		reinplace "s|@DOMAIN@|${domain}|g" \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
-		reinplace "s|@TIMEZONE@|${timezone}|g" \
-			${destroot}${cfworkdir}/inputs/${conf}-dist
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+		reinplace "s|__PREFIX|${prefix}|g" \
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+		reinplace "s|__CFWORKDIR|${cfworkdir}|g" \
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+		reinplace "s|__HOST|${host}|g" \
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+		reinplace "s|__DOMAIN|${domain}|g" \
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+		reinplace "s|__TIMEZONE|${timezone}|g" \
+			${destroot}${cfworkdir}/masterfiles/inputs/${conf}-dist
+	}
+	# Create startup rc script (if non-Darwin)
+	if {![variant_isset darwin]} {
+		xinstall -d -m 0755 ${destroot}${prefix}/etc/rc.d
+		xinstall -m 0755 ${filespath}/${name}.sh.in \
+			${destroot}${prefix}/etc/rc.d/${name}.sh
+		reinplace "s|__PREFIX|${prefix}|" \
+			${destroot}${prefix}/etc/rc.d/${name}.sh
+		reinplace "s|__CFWORKDIR|${cfworkdir}|" \
+			${destroot}${prefix}/etc/rc.d/${name}.sh
 	}
 }
 
-post-install {
-	ui_msg "-----------------------------------------------------------"
-	ui_msg "To complete ${name} installation, please do the following:"
-	ui_msg "1) Generate root server keys:"
-	ui_msg "     sudo cfkey"
-	ui_msg "2) Copy sample conf files:"
-	foreach conf {cfagent.conf cfservd.conf update.conf cfrun.hosts} {
-		ui_msg "     sudo cp ${cfworkdir}/inputs/${conf}-dist \\"
-		ui_msg "             ${cfworkdir}/inputs/${conf}"
+post-activate {
+	# Make sure initial minimum executables are in place
+	#foreach exe {cfagent cfexecd} {
+	#	if {![file exists ${cfworkdir}/bin/${exe}]} {
+	#		xinstall -m 0755 ${destroot}${prefix}/sbin/${exe} \
+	#			${destroot}${cfworkdir}/bin
+	#	}
+	#}
+	# Make sure initial conf files are present and setup correctly
+	if {![file exists ${cfworkdir}/inputs/update.conf]} {
+		xinstall -m 0644 ${cfworkdir}/masterfiles/inputs/update.conf-dist \
+			${cfworkdir}/inputs/update.conf
 	}
-	ui_msg "3) Edit conf files as desired."
-	ui_msg "4) Read documentation in ${prefix}/share/${name}/html"
-	ui_msg "-----------------------------------------------------------"
+	foreach conf {cfagent.conf cfservd.conf update.conf cfrun.hosts} {
+		if {![file exists ${cfworkdir}/masterfiles/inputs/${conf}]} {
+			xinstall -m 0644 ${cfworkdir}/masterfiles/inputs/${conf}-dist \
+				${cfworkdir}/masterfiles/inputs/${conf}
+		}
+		#if {![file exists ${cfworkdir}/inputs/${conf}]} {
+		#	xinstall -m 0644 ${cfworkdir}/masterfiles/inputs/${conf}-dist \
+		#		${cfworkdir}/inputs/${conf}
+		#}
+	}
+	# Check for root public-private keys, create if missing
+	if {![file exists ${cfworkdir}/ppkeys/localhost.priv] \
+		|| ![file exists ${cfworkdir}/ppkeys/localhost.pub]} {
+		if {[file exists ${cfworkdir}/ppkeys/localhost.priv]} {
+			file delete -force ${cfworkdir}/ppkeys/localhost.priv
+		}
+		if {[file exists ${cfworkdir}/ppkeys/localhost.pub]} {
+			file delete -force ${cfworkdir}/ppkeys/localhost.pub
+		}
+		system "${prefix}/sbin/cfkey"
+	}
 }
 
 variant psdocs {
@@ -110,17 +151,14 @@ variant psdocs {
 }
 
 platform darwin {
-	depends_run	path:/Library/StartupItems/DarwinPortsStartup:DarwinPortsStartup
-
-	post-destroot {
-		# Create DarwinPortsStartup script for cfengine
-		xinstall -d -m 0755 ${destroot}${prefix}/etc/rc.d
-		xinstall -m 0755 ${filespath}/${name}.sh.in \
-			${destroot}${prefix}/etc/rc.d/${name}.sh
-		reinplace "s|@PREFIX@|${prefix}|" \
-			${destroot}${prefix}/etc/rc.d/${name}.sh
-		reinplace "s|@CFWORKDIR@|${cfworkdir}|" \
-			${destroot}${prefix}/etc/rc.d/${name}.sh
-	}
+	startupitem.create			yes
+	startupitem.name			Cfengine
+	startupitem.start			"(\[ -x ${cfworkdir}/bin/cfexecd \] && \[ -x ${cfworkdir}/bin/cfagent \]) \\"
+	startupitem.start-append	"\t|| ${prefix}/sbin/cfagent --no-splay -f update.conf"
+	startupitem.start-append	"\[ -x ${cfworkdir}/bin/cfexecd \] && ${cfworkdir}/bin/cfexecd"
+	startupitem.stop			"/usr/bin/killall -SIGUSR1 cfexecd 2>/dev/null"
+	startupitem.stop-append		"/usr/bin/killall -SIGUSR1 cfenvd 2>/dev/null"
+	startupitem.stop-append		"/usr/bin/killall -SIGUSR1 cfservd 2>/dev/null"
+	startupitem.restart			"StopService; StartService"
 }
 
