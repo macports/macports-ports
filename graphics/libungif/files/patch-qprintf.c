@@ -1,26 +1,12 @@
---- lib/qprintf.c.orig	Mon Sep 30 16:14:40 2002
-+++ lib/qprintf.c	Mon Sep 30 16:15:06 2002
-@@ -33,22 +33,12 @@
- /*****************************************************************************
+--- lib/qprintf.c.orig	Sat Jun 21 20:52:46 2003
++++ lib/qprintf.c	Sat Jun 21 20:53:01 2003
+@@ -34,7 +34,8 @@
  * Same as fprintf to stderr but with optional print.			     *
  *****************************************************************************/
--#ifdef HAVE_VARARGS_H
+ #ifdef HAVE_VARARGS_H
 -void GifQprintf(int va_alist)
--{
--    char *Format, Line[128];
--    va_list ArgPtr;
--
--    va_start(ArgPtr);
--    Format = va_arg(ArgPtr, char *);
--#else
- void GifQprintf(char *Format, ...)
++void GifQprintf(va_alist)
++va_dcl
  {
-     char Line[128];
+     char *Format, Line[128];
      va_list ArgPtr;
- 
--    va_start(ArgPtr, Format);
--#endif /* HAVE_VARARGS_H */
-+    va_start(ArgPtr);
- 
-     if (GifQuietPrint) return;
- 
