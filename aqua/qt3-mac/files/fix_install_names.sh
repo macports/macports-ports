@@ -9,6 +9,8 @@ if [ -z "$PREFIX" ] || [ -z "$DESTROOT" ]; then
 	exit 1
 fi
 
+(set -x; install_name_tool -id "/Library/Frameworks/Qt.framework/Qt" "${DESTROOT}/Library/Frameworks/Qt.framework/Qt")
+
 for lib in $LIBS; do
 	(set -x; install_name_tool -id "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${lib}")
 
@@ -30,5 +32,4 @@ for lib in $LIBS; do
 			(set -x; install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}")
 		fi
 	done
-
 done
