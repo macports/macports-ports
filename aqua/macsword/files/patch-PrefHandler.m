@@ -5,7 +5,7 @@
  	
  	//setup some defaults
 -    [appDefaults setObject:@"./Modules" forKey:@"moduleLocation"];
-+    [appDefaults setObject:@"@PREFIX@/share/sword" forKey:@"moduleLocation"];
++    [appDefaults setObject:@"__PREFIX/share/sword" forKey:@"moduleLocation"];
  	[appDefaults setObject:@"YES" forKey:@"cache lexicons"];
  	[appDefaults setObject:@"NO" forKey:@"descriptions"];
  	[appDefaults setObject:@"YES" forKey:@"tool tips"];
