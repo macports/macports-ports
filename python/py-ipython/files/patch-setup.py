@@ -1,6 +1,6 @@
---- setup.py	Tue May 20 20:47:00 2003
-+++ setup.py.new	Thu May 13 13:27:23 2004
-@@ -84,7 +84,7 @@
+--- setup.py	Thu Nov  4 08:35:11 2004
++++ setup.py.new	Tue Nov 30 13:08:17 2004
+@@ -88,7 +88,7 @@
  
  # I can't find how to make distutils create a nested dir. structure, so
  # in the meantime do it manually. Butt ugly.
