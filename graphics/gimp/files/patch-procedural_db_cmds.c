@@ -1,15 +1,15 @@
---- app/pdb/procedural_db_cmds.c.orig	Mon Jun  2 17:23:17 2003
-+++ app/pdb/procedural_db_cmds.c	Fri Jun 20 23:20:33 2003
-@@ -122,7 +122,7 @@
-   if (!a)
-     a = "";	
- 
+--- app/procedural_db_cmds.c.orig	Tue Sep 17 20:14:49 2002
++++ app/procedural_db_cmds.c	Mon Sep 16 15:48:03 2002
+@@ -120,7 +120,7 @@
+ match_strings (regex_t *preg,
+ 	       gchar   *a)
+ {
 -  return regexec (preg, a, 0, NULL, 0);
 +  return gimpregexec (preg, a, 0, NULL, 0);
  }
  
  static void
-@@ -367,13 +367,13 @@
+@@ -351,13 +351,13 @@
  
    if (success)
      {

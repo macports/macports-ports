@@ -1,6 +1,6 @@
---- app/pdb/plug_in_cmds.c.orig	Mon Feb 17 15:31:37 2003
-+++ app/pdb/plug_in_cmds.c	Fri Jun 20 23:21:26 2003
-@@ -66,7 +66,7 @@
+--- app/plug_in_cmds.c.orig	Tue Sep 17 20:14:32 2002
++++ app/plug_in_cmds.c	Mon Sep 16 15:47:51 2002
+@@ -51,7 +51,7 @@
  match_strings (regex_t *preg,
                 gchar   *a)
  {
@@ -9,7 +9,7 @@
  }
  
  static Argument *
-@@ -229,7 +229,7 @@
+@@ -208,7 +208,7 @@
    search_str = (gchar *) args[0].value.pdb_pointer;
  
    if (search_str && strlen (search_str))

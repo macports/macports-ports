@@ -1,5 +1,5 @@
---- app/regex.c.orig	Tue Sep 17 20:15:02 2002
-+++ app/regex.c	Mon Sep 16 15:42:07 2002
+--- plug-ins/script-fu/regex.c.orig	Tue Sep 17 20:15:59 2002
++++ plug-ins/script-fu/regex.c	Mon Sep 16 15:49:25 2002
 @@ -5511,7 +5511,7 @@
     the return codes and their meanings.)  */
  
