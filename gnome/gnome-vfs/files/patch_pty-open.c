@@ -1,9 +1,10 @@
---- modules/pty-open.c.org	Mon Apr  5 12:09:11 2004
-+++ modules/pty-open.c	Mon Apr  5 12:11:40 2004
-@@ -44,6 +44,11 @@
+--- modules/pty-open.c.org	Fri Jun  4 20:51:58 2004
++++ modules/pty-open.c	Fri Jun  4 20:53:17 2004
+@@ -44,6 +44,12 @@
  #include <glib.h>
  #include "pty-open.h"
  
++#undef HAVE_POSIX_OPENPT
 +#undef HAVE_GETPT 
 +#undef HAVE_GRANTPT 
 +#undef HAVE_PTSNAME_R 
