@@ -1,16 +1,17 @@
---- ltmain.sh.orig	Sat Nov  9 05:40:11 2002
-+++ ltmain.sh	Sat Apr 19 03:10:57 2003
-@@ -4047,10 +4047,10 @@
+--- ltmain.sh.orig	Sun Jun 29 03:28:20 2003
++++ ltmain.sh	Sun Jun 29 03:28:56 2003
+@@ -5145,10 +5145,10 @@
  
  # Directory that this library needs to be installed in:
  libdir='$install_libdir'"
--	  if test "$installed" = no && test $need_relink = yes; then
+-	  if test "$installed" = no && test "$need_relink" = yes; then
 -	    $echo >> $output "\
 -relink_command=\"$relink_command\""
 -	  fi
-+#	  if test "$installed" = no && test $need_relink = yes; then
++#	  if test "$installed" = no && test "$need_relink" = yes; then
 +#	    $echo >> $output "\
 +#relink_command=\"$relink_command\""
 +#	  fi
  	done
        fi
+ 
