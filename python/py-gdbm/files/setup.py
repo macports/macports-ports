@@ -6,13 +6,13 @@ try:
 except:
     raise SystemExit, "Distutils problem"
 
-prefix = sysconfig.PREFIX
+prefix = "__PREFIX__"
 inc_dirs = [prefix + "/include"]
 lib_dirs = [prefix + "/lib"]
 libs = ["gdbm"]
 
 setup(name = "gdbm",
-      version = "VERSION",
+      version = "__VERSION__",
       description = "GDBM Extension to Python",
       
       ext_modules = [Extension('gdbm', ['gdbmmodule.c'],

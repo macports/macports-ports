@@ -6,7 +6,7 @@ try:
 except:
     raise SystemExit, "Distutils problem"
 
-prefix = sysconfig.PREFIX
+prefix = "__PREFIX__"
 inc_dirs = [prefix + "/include"]
 lib_dirs = [prefix + "/lib"]
 libs = ["db-4"]
