@@ -13,7 +13,7 @@ case "$1" in
 start)
 	if [ -f $CONFFILE ]; then
 		echo "Starting $NAME daemon"
-		__PREFIX/sbin/$NAME -daemon 300 -pid $PIDFILE
+		__PREFIX/sbin/$NAME -pid $PIDFILE
 	else
 		echo "Cannot start $NAME daemon: $CONFFILE does not exist!"
 		exit 1
