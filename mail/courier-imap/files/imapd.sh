@@ -1,0 +1,26 @@
+#!/bin/sh
+NAME=imapd
+CAT=/bin/cat
+KILL=/bin/kill
+
+case "$1" in
+
+start)
+  
+  echo "starting courier-imap - imapd"
+  source __PREFIX/etc/courier/imapd 
+  __PREFIX/libexec/imapd.rc start
+  ;;
+
+stop)
+  echo "stopping courier-imap - imapd"
+  source __PREFIX/etc/courier/imapd
+  __PREFIX/libexec/imapd.rc stop
+  ;;
+
+*)
+  echo "Usage: __PREFIX/etc/rc.d/$NAME {start|stop}"
+  exit 1
+  ;;
+
+esac
