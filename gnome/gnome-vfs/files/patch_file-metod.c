@@ -1,6 +1,6 @@
---- modules/file-method.c.org	Tue Sep 16 18:07:20 2003
-+++ modules/file-method.c	Tue Sep 16 18:08:26 2003
-@@ -91,19 +91,9 @@
+--- modules/file-method.c.org	Sun Nov 23 16:51:15 2003
++++ modules/file-method.c	Sun Nov 23 16:51:53 2003
+@@ -91,19 +91,10 @@
  }
  #endif
  
@@ -10,8 +10,8 @@
  #define OPEN open
 -#endif
 -
--#ifdef HAVE_LSEEK64
--#define LSEEK lseek64
+-#if defined(HAVE_LSEEK64) && defined(HAVE_OFF64_T)
+ #define LSEEK lseek64
 -#define OFF_T off64_t
 -#else
  #define LSEEK lseek
