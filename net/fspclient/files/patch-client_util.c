@@ -1,8 +1,8 @@
---- client/util.c	Mon Dec 20 17:14:59 2004
-+++ ../../util.c	Mon Dec 20 21:59:40 2004
-@@ -11,6 +11,7 @@
- #include "client.h"
+--- client/util.c	Tue Jan  4 14:06:05 2005
++++ client/util.c.new	Mon Jan 10 23:58:34 2005
+@@ -12,6 +12,7 @@
  #include <setjmp.h>
+ #include <stdarg.h>
  #include <stdlib.h>
 +#include <stdint.h>
  
