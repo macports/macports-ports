@@ -2,6 +2,6 @@ from distutils.core import setup
 
 setup(
 	name = 'eBay',
-	version = "VERSION",
+	version = "__VERSION__",
 	packages = ['eBay'],
 	)
