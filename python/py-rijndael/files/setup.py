@@ -1,7 +1,7 @@
 from distutils.core import setup
 
 setup(
-	name = 'rijndael',
+	name = 'pyRijndael',
 	version = "VERSION",
 	packages = [''],
 )
