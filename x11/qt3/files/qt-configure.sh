@@ -12,17 +12,21 @@ for ARG in "$@"; do
 	fi
 done
 
+# disabled from darwin
+#	patch-01-xft2.darwin
+
 DARWIN_PATCHES=" \
-	patch-01-xft2.darwin \
 	patch-02-qglobal.puredarwin \
 	patch-04-libname.darwin \
 	patch-05-compat_version.darwin \
 	patch-06-librarysearch.darwin \
 	patch-07-nonstatic.darwin \
-	patch-09-qinitimages.darwin \
 "
+
+# disabled from macosx
+#	patch-01-xft2.darwin
+
 MACOSX_PATCHES=" \
-	patch-01-xft2.darwin \
 	patch-02-qglobal.macosx \
 	patch-03-cf.macosx \
 	patch-04-libname.darwin \
@@ -56,7 +60,7 @@ if test "$PUREDARWIN" = "true"; then
 	echo "- using puredarwin configuration"
 	for patch in ${DARWIN_PATCHES}; do
 		echo "- applying ${patch}:"
-		sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/$patch" | patch -p0 | while read LINE; do
+		sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/$patch" | (patch -p0 --fuzz=4 || exit 1) | while read LINE; do
 			echo "    $LINE"
 		done
 	done
@@ -70,7 +74,7 @@ else
 	echo "- using MacOSX configuration"
 	for patch in ${MACOSX_PATCHES}; do
 		echo "- applying ${patch}:"
-		sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/$patch" | patch -p0 | while read LINE; do
+		sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/$patch" | (patch -p0 --fuzz=4 || exit 1) | while read LINE; do
 			echo "    $LINE"
 		done
 	done
