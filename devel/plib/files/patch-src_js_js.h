@@ -1,14 +1,5 @@
 --- src/js/js.h.orig	Sun Nov 30 15:16:19 2003
 +++ src/js/js.h	Wed Sep 22 11:15:01 2004
-@@ -18,7 +18,7 @@
- 
-      For further information visit http://plib.sourceforge.net
- 
--     $Id: js.h,v 1.30 2003/11/11 22:54:48 stromberg Exp $
-+     $Id: js.h,v 1.32 2004/09/21 11:45:55 smokydiamond Exp $
- */
- 
- #ifndef __INCLUDED_JS_H__
 @@ -32,106 +32,18 @@
  
  #define _JS_MAX_AXES 16
