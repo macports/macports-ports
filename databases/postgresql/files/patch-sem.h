@@ -1,5 +1,5 @@
---- postgresql-7.2.1/src/include/port/darwin/sem.h.orig	Thu Nov  8 12:37:52 2001
-+++ postgresql-7.2.1/src/include/port/darwin/sem.h	Thu Aug 22 18:36:58 2002
+--- src/include/port/darwin/sem.h.orig	Thu Nov  8 12:37:52 2001
++++ src/include/port/darwin/sem.h	Thu Aug 22 18:36:58 2002
 @@ -63,6 +63,12 @@
  	short		sem_flg;		/* operation flags		*/
  };
