@@ -1,11 +1,6 @@
---- src/qt_install.pri.orig	Thu Feb 12 09:07:52 2004
-+++ src/qt_install.pri	Thu Feb 12 09:08:18 2004
-@@ -20,11 +20,11 @@
- INSTALLS += translations
- 
- macx { #mac framework
--    QtFramework = /System/Library/Frameworks/Qt.framework
-+    QtFramework = /Library/Frameworks/Qt.framework
+--- src/qt_install.pri.orig	Mon Sep 13 09:25:13 2004
++++ src/qt_install.pri	Mon Sep 13 09:24:40 2004
+@@ -24,7 +24,7 @@
      QtDocs      = /Developer/Documentation/Qt
      framework.path = $$QtFramework/Headers/private $$QtDocs
      framework.extra  = -cp -rf $$htmldocs.files $(INSTALL_ROOT)/$$QtDocs;
