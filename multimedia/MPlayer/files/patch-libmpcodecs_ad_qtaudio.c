@@ -1,6 +1,6 @@
---- libmpcodecs/ad_qtaudio.c.orig	Wed Mar 26 09:48:17 2003
-+++ libmpcodecs/ad_qtaudio.c	Tue Dec 30 00:39:10 2003
-@@ -29,6 +29,7 @@
+--- libmpcodecs/ad_qtaudio.c.orig	Tue Apr 13 08:33:18 2004
++++ libmpcodecs/ad_qtaudio.c	Wed Apr 28 01:14:58 2004
+@@ -30,6 +30,7 @@
  LIBAD_EXTERN(qtaudio)
  
  #ifdef USE_QTX_CODECS
@@ -8,7 +8,7 @@
  typedef struct OpaqueSoundConverter*    SoundConverter;
  typedef unsigned long                   OSType;
  typedef unsigned long                   UnsignedFixed;
-@@ -43,6 +44,7 @@
+@@ -44,6 +45,7 @@
      Byte *                          buffer;
      long                            reserved;
  }SoundComponentData;
@@ -16,7 +16,7 @@
  
  typedef int (__cdecl* LPFUNC1)(long flag);
  typedef int (__cdecl* LPFUNC2)(const SoundComponentData *, const SoundComponentData *,SoundConverter *);
-@@ -68,14 +70,18 @@
+@@ -69,14 +71,18 @@
  
  static HINSTANCE qtml_dll;
  static LPFUNC1 InitializeQTML;
@@ -35,8 +35,8 @@
  
  #define siDecompressionParams 2002876005 // siDecompressionParams = FOUR_CHAR_CODE('wave')
  
-@@ -95,7 +101,7 @@
-         printf("failed loading dll\n" );
+@@ -96,7 +102,7 @@
+         mp_msg(MSGT_DECAUDIO,MSGL_ERR,"failed loading dll\n" );
  	return 1;
      }
 -#if 1

@@ -1,5 +1,5 @@
---- libmpcodecs/vd_qtvideo.c.orig	Tue Feb 25 08:36:30 2003
-+++ libmpcodecs/vd_qtvideo.c	Tue Dec 30 15:04:42 2003
+--- libmpcodecs/vd_qtvideo.c.orig	Tue Apr 13 08:48:31 2004
++++ libmpcodecs/vd_qtvideo.c	Wed Apr 28 01:18:36 2004
 @@ -55,10 +55,13 @@
  static HMODULE handler;
  
