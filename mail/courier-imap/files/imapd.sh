@@ -3,18 +3,27 @@ NAME=imapd
 CAT=/bin/cat
 KILL=/bin/kill
 
+checkinstall() 
+{
+        # test if imap service is present in /etc/pam.d
+        if [ ! -f "__PREFIX/etc/pam.d/imap" ]; then
+        	cp /etc/pam.d/passwd /etc/pam.d/imap
+	fi
+}
+
+
 case "$1" in
 
 start)
-  
+  checkinstall 
   echo "starting courier-imap - imapd"
-  source __PREFIX/etc/courier/imapd 
+  source __PREFIX/etc/courier-imap/imapd 
   __PREFIX/libexec/imapd.rc start
   ;;
 
 stop)
   echo "stopping courier-imap - imapd"
-  source __PREFIX/etc/courier/imapd
+  source __PREFIX/etc/courier-imap/imapd
   __PREFIX/libexec/imapd.rc stop
   ;;
 
