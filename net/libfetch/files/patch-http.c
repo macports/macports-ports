@@ -1,5 +1,5 @@
---- libfetch/http.c.orig	Tue Aug 20 19:47:22 2002
-+++ libfetch/http.c	Tue Aug 20 19:47:43 2002
+--- http.c.orig	Tue Aug 20 19:47:22 2002
++++ http.c	Tue Aug 20 19:47:43 2002
 @@ -80,8 +80,6 @@
  #include "common.h"
  #include "httperr.h"
