@@ -21,6 +21,7 @@ DARWIN_PATCHES=" \
 	patch-05-compat_version.darwin \
 	patch-06-librarysearch.darwin \
 	patch-07-nonstatic.darwin \
+	patch-10-no-underscore-prepend.darwin \
 "
 
 # disabled from macosx
@@ -35,6 +36,7 @@ MACOSX_PATCHES=" \
 	patch-07-nonstatic.darwin \
 	patch-08-macdefines.macosx \
 	patch-09-qinitimages.darwin \
+	patch-10-no-underscore-prepend.darwin \
 "
 
 CONFIGURE="-I${worksrcpath}/include -I${prefix}/include \
