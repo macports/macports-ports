@@ -3,10 +3,10 @@ PREFIX=@@PREFIX@@
 
 case "$1" in
 start)
-	[ -x ${PREFIX}/sbin/apachectl ] && ${PREFIX}/sbin/apachectl start > /dev/null && echo -n ' apache2'
+	[ -x ${PREFIX}/apache2/bin/apachectl ] && ${PREFIX}/apache2/bin/apachectl start > /dev/null && echo -n ' apache2'
 	;;
 stop)
-	[ -r /var/run/httpd.pid ] && ${PREFIX}/sbin/apachectl stop > /dev/null && echo -n ' apache2'
+	[ -r ${PREFIX}/apache2/logs/httpd.pid ] && ${PREFIX}/apache2/bin/apachectl stop > /dev/null && echo -n ' apache2'
 	;;
 *)
 	echo "Usage: `basename $0` {start|stop}" >&2
