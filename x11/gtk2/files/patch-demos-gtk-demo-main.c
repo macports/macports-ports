@@ -1,5 +1,5 @@
---- demos/gtk-demo/main.c	Fri May 17 04:00:25 2002
-+++ demos/gtk-demo/main.c	Sun Jun 23 02:06:02 2002
+--- demos/gtk-demo/main.c.orig	Fri May 17 04:11:57 2002
++++ demos/gtk-demo/main.c	Sat Jan 18 03:54:38 2003
 @@ -96,7 +96,7 @@
      {
        int c;

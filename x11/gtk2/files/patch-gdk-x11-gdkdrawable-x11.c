@@ -1,5 +1,5 @@
---- gdk/x11/gdkdrawable-x11.c	Thu Apr 18 07:55:01 2002
-+++ gdk/x11/gdkdrawable-x11.c	Sun Jun 23 02:06:02 2002
+--- gdk/x11/gdkdrawable-x11.c.orig	Fri Nov  8 07:39:56 2002
++++ gdk/x11/gdkdrawable-x11.c	Sat Jan 18 03:54:38 2003
 @@ -853,6 +853,7 @@
      }
    else
