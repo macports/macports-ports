@@ -1,14 +1,5 @@
 --- ../ruby-1.8.1/sprintf.c	Thu Jul  3 04:00:18 2003
 +++ sprintf.c	Mon Apr  5 00:45:13 2004
-@@ -3,7 +3,7 @@
-   sprintf.c -
- 
-   $Author: rshaw $
--  $Date: 2004/04/20 21:34:42 $
-+  $Date: 2004/04/20 21:34:42 $
-   created at: Fri Oct 15 10:39:26 JST 1993
- 
-   Copyright (C) 1993-2003 Yukihiro Matsumoto
 @@ -108,7 +108,7 @@
  	       (posarg = -1, GETNTHARG(n))))
  
