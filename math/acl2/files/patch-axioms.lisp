@@ -1,5 +1,5 @@
---- axioms.lisp.sav	Thu Mar 11 18:04:10 2004
-+++ axioms.lisp	Thu Mar 11 18:06:44 2004
+--- axioms.lisp.sav	Sun Mar 14 22:14:49 2004
++++ axioms.lisp	Sun Mar 14 22:16:27 2004
 @@ -643,11 +643,11 @@
  ; explains why the code below is so cumbersome.
  
@@ -23,12 +23,3 @@
      (packages-created-by-defpkg . nil)
      (print-doc-start-column . 15)
      (prompt-function . default-print-prompt)
-@@ -19879,7 +19879,7 @@
-       str
-     (let ((os (os state)))
-       (case os
--        (:unix str)
-+        (:unix (string-append str *directory-separator-string*))
-         ((:apple :mswindows)
-          (let ((sep (if (eq os :apple) #\: #\\)))
-            (if (position *directory-separator* str)
