@@ -16,7 +16,14 @@ for lib in $LIBS; do
 		install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${libchange}"
 	done
 
-	for bin in assistant designer linguist qtconfig; do
-		install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${bin}.app/Contents/MacOS/${bin}"
+	for app in assistant designer linguist qtconfig lrelease lupdate moc qm2ts qmake uic; do
+		if [ -d "${DESTROOT}${PREFIX}/bin/${app}.app" ]; then
+			install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}.app/Contents/MacOS/${app}"
+		fi
+
+		if [ -x "${DESTROOT}${PREFIX}/bin/${app}" ]; then
+			install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}"
+		fi
 	done
+
 done
