@@ -1,7 +1,7 @@
---- src/cf.defs.h.orig	Tue Feb 10 11:30:51 2004
-+++ src/cf.defs.h	Tue Feb 10 11:32:31 2004
-@@ -148,11 +148,13 @@
- #include <unistd.h>
+--- ../cfengine-2.1.6.orig/src/cf.defs.h	Thu Apr 22 04:14:15 2004
++++ src/cf.defs.h	Sun Jun 13 13:48:26 2004
+@@ -153,11 +153,13 @@
+ #include <sys/paths.h>
  #endif
  
 -#ifdef HAVE_MALLOC_H
