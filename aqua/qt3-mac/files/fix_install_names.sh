@@ -10,19 +10,24 @@ if [ -z "$PREFIX" ] || [ -z "$DESTROOT" ]; then
 fi
 
 for lib in $LIBS; do
-	install_name_tool -id "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${lib}"
+	(set -x; install_name_tool -id "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${lib}")
 
-	for libchange in $LIBS; do
-		install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${libchange}"
+	for libchange in $LIBS libcppeditor.dylib libdlgplugin.dylib libgladeplugin.dylib libkdevdlgplugin.dylib librcplugin.dylib libwizards.dylib; do
+		if [ -f "${DESTROOT}${PREFIX}/lib/qt3-plugins/designer/${libchange}" ]; then
+			(set -x; install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/qt3-plugins/designer/${libchange}")
+		fi
+		if [ -f "${DESTROOT}${PREFIX}/lib/${libchange}" ]; then
+			(set -x; install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/lib/${libchange}")
+		fi
 	done
 
 	for app in assistant designer linguist qtconfig lrelease lupdate moc qm2ts qmake uic; do
 		if [ -d "${DESTROOT}${PREFIX}/bin/${app}.app" ]; then
-			install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}.app/Contents/MacOS/${app}"
+			(set -x; install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}.app/Contents/MacOS/${app}")
 		fi
 
 		if [ -x "${DESTROOT}${PREFIX}/bin/${app}" ]; then
-			install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}"
+			(set -x; install_name_tool -change "${lib}" "${PREFIX}/lib/${lib}" "${DESTROOT}${PREFIX}/bin/${app}")
 		fi
 	done
 
