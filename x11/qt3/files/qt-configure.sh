@@ -53,6 +53,10 @@ CONFIGURE="-I${worksrcpath}/include -I${prefix}/include \
                 -system-zlib -largefile -sm -xinerama -xrender -xft -xkb \
 "
 
+if test -f /usr/lib/libresolv.dylib; then
+	CONFIGURE="$CONFIGURE -lresolv"
+fi
+
 if test "$PUREDARWIN" = "false"; then
 	for FRAMEWORK in Carbon CoreServices; do
 		if test ! -f /System/Library/Frameworks/${FRAMEWORK}.framework/Headers/${FRAMEWORK}.h; then
