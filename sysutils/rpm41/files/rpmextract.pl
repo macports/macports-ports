@@ -1,5 +1,13 @@
 #!/usr/bin/perl
 
+##
+# rpmextract.pl - pure Perl extracter for RPM (or SRPM) packages
+# Shantonu Sen - <ssen@opendarwin.org>
+#
+# Based on rpm2cpio.sh, from the RPM 4.1.x distribution. That script
+# depends on non-portable od(1) presence and syntax
+##
+
 use strict;
 use Fcntl qw(:seek :DEFAULT);
 
