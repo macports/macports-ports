@@ -31,11 +31,11 @@ MACOSX_PATCHES=" \
 	patch-08-macdefines.macosx \
 "
 
-CONFIGURE="-I'${worksrcpath}/include' -I'${prefix}/include' \
-		-I'/usr/X11R6/include/freetype2' -I'${prefix}/include/cups' -L'${prefix}/lib' \
-		-prefix '${prefix}' -bindir '${prefix}/bin' -libdir '${prefix}/lib' \
-		-docdir '${prefix}/share/doc/${portname}/html' -datadir '${prefix}/share/qt3' \
-                -headerdir '${prefix}/include/qt3' -plugindir '${prefix}/lib/qt3-plugins' \
+CONFIGURE="-I${worksrcpath}/include -I${prefix}/include \
+		-I/usr/X11R6/include/freetype2 -L${prefix}/lib \
+		-prefix ${prefix} -bindir ${prefix}/bin -libdir ${prefix}/lib \
+		-docdir ${prefix}/share/doc/${portname}/html -datadir ${prefix}/share/qt3 \
+                -headerdir ${prefix}/include/qt3 -plugindir ${prefix}/lib/qt3-plugins \
                 -release -shared -fast -no-exceptions -thread -stl -qt-gif -plugin-imgfmt-png \
                 -plugin-imgfmt-jpeg -plugin-imgfmt-mng -system-libpng -system-libjpeg \
                 -system-zlib -largefile -sm -xinerama -xrender -xft -xkb \
