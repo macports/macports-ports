@@ -1,7 +1,7 @@
---- src/plugins/macosx/ao_macosx.c Fri Jan 16 16:58:56 2004
-+++ src/plugins/macosx/ao_macosx.c Fri Jan 16 17:22:38 2004
+--- src/plugins/macosx/ao_macosx.c.orig	Tue Nov  9 03:20:26 2004
++++ src/plugins/macosx/ao_macosx.c	Sat Jan 22 10:21:17 2005
 @@ -173,6 +173,26 @@
-        return 0;
+ 	return 0;
      }
  
 +       if (internal->outputStreamBasicDescription.mChannelsPerFrame != format->channels)
