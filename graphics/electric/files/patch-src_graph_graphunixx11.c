@@ -1,5 +1,5 @@
---- src/graph/graphunixx11.c.orig	Thu May 22 12:35:30 2003
-+++ src/graph/graphunixx11.c	Mon Feb  9 18:45:31 2004
+--- src/graph/graphunixx11.c.orig	Thu Jul 15 19:59:53 2004
++++ src/graph/graphunixx11.c	Sat Nov  6 20:16:31 2004
 @@ -151,6 +151,10 @@
    INTBIG gra_initializetcl(void);
  #endif
@@ -11,7 +11,7 @@
  #ifdef _UNICODE
  #  define estat     _wstat
  #  define eaccess   _waccess
-@@ -3067,10 +3071,24 @@
+@@ -3087,10 +3091,24 @@
   */
  INTBIG enumprocessors(void)
  {
