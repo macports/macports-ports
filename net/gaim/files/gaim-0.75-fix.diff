@@ -1,0 +1,433 @@
+*** src/protocols/yahoo/yahoo.c.orig	Thu Jan 22 09:57:03 2004
+--- src/protocols/yahoo/yahoo.c	Thu Jan 22 10:15:11 2004
+***************
+*** 20,25 ****
+--- 20,26 ----
+   * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+   *
+   */
++ #include <limits.h>
+  #include "internal.h"
+  
+  #include "account.h"
+***************
+*** 131,138 ****
+--- 132,146 ----
+  		while (pos + 1 < len) {
+  			if (data[pos] == 0xc0 && data[pos + 1] == 0x80)
+  				break;
++ 			if (x >= sizeof(key)-1) {
++ 				x++;
++ 				continue;
++ 
++ 			}
+  			key[x++] = data[pos++];
+  		}
++ 		if (x >= sizeof(key)-1)
++ 			x = 0;
+  		key[x] = 0;
+  		pos += 2;
+  		pair->key = strtol(key, NULL, 10);
+***************
+*** 868,899 ****
+  	}
+  }
+  
+  #define OUT_CHARSET "utf-8"
+  
+  static char *yahoo_decode(const char *text)
+  {
+  	char *converted;
+! 	char *p, *n, *new;
+! 	
+! 	n = new = g_malloc(strlen (text) + 1);
+! 
+! 	for (p = (char *)text; *p; p++, n++) {
+  		if (*p == '\\') {
+! 			sscanf(p + 1, "%3o\n", (int *)n);
+! 			p += 3;
+! 		}
+! 		else
+! 			*n = *p;
+  	}
+- 
+  	*n = '\0';
+- 	
+  	converted = g_convert(new, n - new, OUT_CHARSET, "iso-8859-1", NULL, NULL, NULL);
+  	g_free(new);
+  
+  	return converted;
+  }
+  
+  static void yahoo_process_mail(GaimConnection *gc, struct yahoo_packet *pkt)
+  {
+  	GaimAccount *account = gaim_connection_get_account(gc);
+--- 876,941 ----
+  	}
+  }
+  
++ 
++ static void octal(const char **p, const char *end, unsigned char *n)
++ {
++ 	int i, c;
++ 
++ 	for (i = 0, c = 0; i < 3 && *p < end; ++i, ++*p) {
++ 		c <<= 3;
++ 		switch (**p) {
++ 		case '0': break;
++ 		case '1': c += 1; break;
++ 		case '2': c += 2; break;
++ 		case '3': c += 3; break;
++ 		case '4': c += 4; break;
++ 		case '5': c += 5; break;
++ 		case '6': c += 6; break;
++ 		case '7': c += 7; break;
++ 		default:
++ 			  if (i == 0) {
++ 				  *n = **p;
++ 				  ++*p;
++ 				  return;
++ 			  }
++ 			  c >>= 3;
++ 			  goto done;
++ 		}
++ 	}
++ done:
++ 	*n = (c > UCHAR_MAX) ? '?' : c;
++ 	return;
++ }
++ 
+  #define OUT_CHARSET "utf-8"
+  
+  static char *yahoo_decode(const char *text)
+  {
+  	char *converted;
+! 	unsigned char *n, *new;
+! 	size_t len;
+! 	const char *p, *end;
+! 
+! 	len = strlen (text);
+! 	p = text;
+! 	end = &text[len];
+! 	n = new = g_malloc(len + 1);
+! 	while (p < end) {
+  		if (*p == '\\') {
+! 			++p;
+! 			octal(&p, end, n);
+! 		} else
+! 			*n = *p++;
+! 		++n;
+  	}
+  	*n = '\0';
+  	converted = g_convert(new, n - new, OUT_CHARSET, "iso-8859-1", NULL, NULL, NULL);
+  	g_free(new);
+  
+  	return converted;
+  }
+  
++ 
+  static void yahoo_process_mail(GaimConnection *gc, struct yahoo_packet *pkt)
+  {
+  	GaimAccount *account = gaim_connection_get_account(gc);
+***************
+*** 1903,1934 ****
+  
+  static void yahoo_web_pending(gpointer data, gint source, GaimInputCondition cond)
+  {
+  	GaimConnection *gc = data;
+  	GaimAccount *account = gaim_connection_get_account(gc);
+  	struct yahoo_data *yd = gc->proto_data;
+! 	char buf[1024], buf2[256], *i = buf, *r = buf2;
+! 	int len, o = 0;
+  
+  	len = read(source, buf, sizeof(buf));
+! 	if (len <= 0  || strncmp(buf, "HTTP/1.0 302", strlen("HTTP/1.0 302"))) {
+  		gaim_connection_error(gc, _("Unable to read"));
+  		return;
+  	}
+! 	
+! 	while ((i = strstr(i, "Set-Cookie: ")) && 0 < 2) {
+! 		i += strlen("Set-Cookie: "); 
+! 		for (;*i != ';'; r++, i++) {
+! 			*r = *i;
+! 		}
+! 		*r=';';
+! 		r++;
+! 		*r=' ';
+! 		r++;
+! 		o++;
+! 	}
+! 	/* Get rid of that "; " */
+! 	*(r-2) = '\0';
+! 	yd->auth = g_strdup(buf2);
+  	gaim_input_remove(gc->inpa);
+  	close(source);
+  	/* Now we have our cookies to login with.  I'll go get the milk. */
+--- 1945,1974 ----
+  
+  static void yahoo_web_pending(gpointer data, gint source, GaimInputCondition cond)
+  {
++ 	static const char http302[] = "HTTP/1.0 302";
++ 	static const char setcookie[] = "Set-Cookie: ";
+  	GaimConnection *gc = data;
+  	GaimAccount *account = gaim_connection_get_account(gc);
+  	struct yahoo_data *yd = gc->proto_data;
+! 	char buf[1024], *i = buf;
+! 	int len;
+! 	GString *s;
+  
+  	len = read(source, buf, sizeof(buf));
+! 	if (len <= 0 || (len >= sizeof(http302)-1 &&
+! 	    memcmp(http302, buf, sizeof(http302)-1) != 0)) {
+  		gaim_connection_error(gc, _("Unable to read"));
+  		return;
+  	}
+! 	s = g_string_sized_new(len);
+! 	buf[len] = '\0';
+! 	while ((i = strstr(i, setcookie)) != NULL) {
+! 		i += sizeof(setcookie)-1;
+! 		for (;*i != ';'; i++)
+! 			g_string_append_c(s, *i);
+! 		g_string_append(s, "; ");
+! 	}
+! 	yd->auth = g_string_free(s, FALSE);
+  	gaim_input_remove(gc->inpa);
+  	close(source);
+  	/* Now we have our cookies to login with.  I'll go get the milk. */
+***************
+*** 1974,1988 ****
+  	const char *c = buf;
+  	char *d;
+  	char name[64], value[64];
+  	while ((c < (buf + len)) && (c = strstr(c, "<input "))) {
+  		c = strstr(c, "name=\"") + strlen("name=\"");
+! 		for (d = name; *c!='"'; c++, d++) 
+  			*d = *c;
+  		*d = '\0';
+  		d = strstr(c, "value=\"") + strlen("value=\"");
+  		if (strchr(c, '>') < d)
+  			break;
+! 		for (c = d, d = value; *c!='"'; c++, d++)
+  			*d = *c;
+  		*d = '\0';
+  		g_hash_table_insert(hash, g_strdup(name), g_strdup(value));
+--- 2014,2030 ----
+  	const char *c = buf;
+  	char *d;
+  	char name[64], value[64];
++ 	int count = sizeof(name)-1;
+  	while ((c < (buf + len)) && (c = strstr(c, "<input "))) {
+  		c = strstr(c, "name=\"") + strlen("name=\"");
+! 		for (d = name; *c!='"' && count; c++, d++, count--)
+  			*d = *c;
+  		*d = '\0';
++ 		count = sizeof(value)-1;
+  		d = strstr(c, "value=\"") + strlen("value=\"");
+  		if (strchr(c, '>') < d)
+  			break;
+! 		for (c = d, d = value; *c!='"' && count; c++, d++, count--)
+  			*d = *c;
+  		*d = '\0';
+  		g_hash_table_insert(hash, g_strdup(name), g_strdup(value));
+*** src/proxy.c.orig	Thu Jan 22 08:27:26 2004
+--- src/proxy.c	Thu Jan 22 08:28:05 2004
+***************
+*** 974,980 ****
+  
+  	gaim_input_remove(phb->inpa);
+  
+! 	while ((nlc != 2) && (read(source, &inputline[pos++], 1) == 1)) {
+  		if (inputline[pos - 1] == '\n')
+  			nlc++;
+  		else if (inputline[pos - 1] != '\r')
+--- 974,980 ----
+  
+  	gaim_input_remove(phb->inpa);
+  
+! 	while ((pos < sizeof(inputline)-1) && (nlc != 2) && (read(source, &inputline[pos++], 1) == 1)) {
+  		if (inputline[pos - 1] == '\n')
+  			nlc++;
+  		else if (inputline[pos - 1] != '\r')
+*** src/util.c.orig	Fri Jan  9 22:04:56 2004
+--- src/util.c	Thu Jan 22 08:26:14 2004
+***************
+*** 247,270 ****
+  /**************************************************************************
+   * Quoted Printable Functions
+   **************************************************************************/
+! void
+! gaim_quotedp_decode(const char *str, char **ret_str, int *ret_len)
+  {
+! 	char *p, *n, *new;
+  
+! 	n = new = g_malloc(strlen (str) + 1);
+  
+! 	for (p = (char *)str; *p; p++, n++) {
+  		if (*p == '=') {
+! 			sscanf(p + 1, "%2x\n", (int *)n);
+! 			p += 2;
+! 		}
+! 		else if (*p == '_')
+  			*n = ' ';
+  		else
+  			*n = *p;
+  	}
+- 
+  	*n = '\0';
+  
+  	if (ret_len)
+--- 247,317 ----
+  /**************************************************************************
+   * Quoted Printable Functions
+   **************************************************************************/
+! static void hex(const char **p, const char *end, unsigned char *n)
+  {
+! 	int i, c;
+  
+! 	for (i = 0, c = 0; i < 2 && *p < end; ++i, ++*p) {
+! 		c <<= 4;
+! 		switch (**p) {
+! 		case '0': break;
+! 		case '1': c += 1; break;
+! 		case '2': c += 2; break;
+! 		case '3': c += 3; break;
+! 		case '4': c += 4; break;
+! 		case '5': c += 5; break;
+! 		case '6': c += 6; break;
+! 		case '7': c += 7; break;
+! 		case '8': c += 8; break;
+! 		case '9': c += 9; break;
+! 		case 'a': c += 10; break;
+! 		case 'b': c += 11; break;
+! 		case 'c': c += 12; break;
+! 		case 'd': c += 13; break;
+! 		case 'e': c += 14; break;
+! 		case 'f': c += 15; break;
+! 		case 'A': c += 10; break;
+! 		case 'B': c += 11; break;
+! 		case 'C': c += 12; break;
+! 		case 'D': c += 13; break;
+! 		case 'E': c += 14; break;
+! 		case 'F': c += 15; break;
+! 		default:
+! 			  if (i == 0) {
+! 				  *n = **p;
+! 				  ++*p;
+! 				  return;
+! 			  }
+! 			  c >>= 4;
+! 			  goto done;
+! 		}
+! 	}
+! done:
+! 	*n = (c > UCHAR_MAX) ? '?' : c;
+! 	return;
+! }
+  
+! void
+! gaim_quotedp_decode(const char *str, char **ret_str, int *ret_len)
+! {
+! 	const char *p, *end;
+! 	unsigned char *n, *new;
+! 	size_t len;
+! 
+! 	len = strlen (str);
+! 	n = new = g_malloc(len + 1);
+! 	p = str;
+! 	end = &p[len];
+! 	while (p < end) {
+  		if (*p == '=') {
+! 			++p;
+! 			hex(&p, end, n);
+! 		} else if (*p == '_')
+  			*n = ' ';
+  		else
+  			*n = *p;
++ 		++n;
+  	}
+  	*n = '\0';
+  
+  	if (ret_len)
+***************
+*** 1962,1968 ****
+  			   char **ret_path)
+  {
+  	char scan_info[255];
+! 	char port_str[5];
+  	int f;
+  	const char *turl;
+  	char host[256], path[256];
+--- 2009,2015 ----
+  			   char **ret_path)
+  {
+  	char scan_info[255];
+! 	char port_str[6];
+  	int f;
+  	const char *turl;
+  	char host[256], path[256];
+***************
+*** 1982,1997 ****
+  	}
+  
+  	g_snprintf(scan_info, sizeof(scan_info),
+! 			   "%%[%s]:%%[%s]/%%[%s]", addr_ctrl, port_ctrl, page_ctrl);
+  
+  	f = sscanf(url, scan_info, host, port_str, path);
+  
+  	if (f == 1)
+  	{
+  		g_snprintf(scan_info, sizeof(scan_info),
+! 				   "%%[%s]/%%[%s]",
+  				   addr_ctrl, page_ctrl);
+  		f = sscanf(url, scan_info, host, path);
+  		g_snprintf(port_str, sizeof(port_str), "80");
+  	}
+  
+--- 2029,2049 ----
+  	}
+  
+  	g_snprintf(scan_info, sizeof(scan_info),
+! 			   "%%255[%s]:%%5[%s]/%%255[%s]", addr_ctrl, port_ctrl, page_ctrl);
+! 	addr_ctrl[sizeof(addr_ctrl)-1] = '\0';
+! 	port_ctrl[sizeof(port_ctrl)-1] = '\0';
+! 	page_ctrl[sizeof(page_ctrl)-1] = '\0';
+  
+  	f = sscanf(url, scan_info, host, port_str, path);
+  
+  	if (f == 1)
+  	{
+  		g_snprintf(scan_info, sizeof(scan_info),
+! 				   "%%255[%s]/%%255[%s]",
+  				   addr_ctrl, page_ctrl);
+  		f = sscanf(url, scan_info, host, path);
++ 		addr_ctrl[sizeof(addr_ctrl)-1] = '\0';
++ 		page_ctrl[sizeof(page_ctrl)-1] = '\0';
+  		g_snprintf(port_str, sizeof(port_str), "80");
+  	}
+  
+***************
+*** 2081,2089 ****
+  static size_t
+  parse_content_len(const char *data, size_t data_len)
+  {
+! 	size_t content_len = 0;
+  
+! 	sscanf(data, "Content-Length: %d", (int *)&content_len);
+  
+  	return content_len;
+  }
+--- 2133,2146 ----
+  static size_t
+  parse_content_len(const char *data, size_t data_len)
+  {
+! 	int content_len = 0;
+! 	char *tmp;
+  
+! 	tmp = g_malloc(data_len + 1);
+! 	memcpy(tmp, data, data_len);
+! 	tmp[data_len] = '\0';
+! 	sscanf(tmp, "Content-Length: %d", &content_len);
+! 	g_free(tmp);
+  
+  	return content_len;
+  }
