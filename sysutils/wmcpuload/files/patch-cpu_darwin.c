@@ -5,7 +5,7 @@ diff -rwubN wmcpuload-1.0.0/src/cpu_darwin.c wmcpuload-1.0.0-darwin/src/cpu_darw
 +/*
 + * cpu_darwin - module to get cpu usage, for Darwin
 + *
-+ * Copyright (C) 2001, 2002 Seiichi SATO <ssato@sh.rim.or.jp>
++ * Copyright (C) 2002 Landon J. Fuller <landonf@opendarwin.org>
 + *
 + * Licensed under the GPL
 + */

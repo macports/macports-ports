@@ -5,7 +5,7 @@ diff -wubrN wmmemmon-0.7.0/src/mem_darwin.c wmmemmon-0.7.0-mac/src/mem_darwin.c
 +/*
 + * mem_darwin.c - module to get memory/swap usages in percent, for Darwin
 + *
-+ * Copyright(c) 2001 Seiichi SATO <ssato@sh.rim.or.jp>
++ * Copyright(c) 2002 Landon J. Fuller <landonf@opendarwin.org>
 + *
 + * licensed under the GPL
 + */
