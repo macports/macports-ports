@@ -1,6 +1,6 @@
---- gdk/x11/gdkdrawable-x11.c.orig	Fri Nov  8 07:39:56 2002
-+++ gdk/x11/gdkdrawable-x11.c	Sat Jan 18 03:54:38 2003
-@@ -853,6 +853,7 @@
+--- gdk/x11/gdkdrawable-x11.c.orig	Fri Nov  8 07:27:22 2002
++++ gdk/x11/gdkdrawable-x11.c	Mon Apr  7 02:00:38 2003
+@@ -1006,6 +1006,7 @@
      }
    else
      {
@@ -8,7 +8,7 @@
        pf.direct.alpha = 0;
      }
    
-@@ -869,10 +870,18 @@
+@@ -1022,10 +1023,18 @@
     * RENDER's preferred order
     */
    pf.direct.alphaMask = 0;
@@ -31,7 +31,7 @@
    
    *format = XRenderFindFormat (xdisplay,
  			       (PictFormatType | PictFormatDepth |
-@@ -884,7 +893,14 @@
+@@ -1037,7 +1046,14 @@
  			       0);
  
    pf.direct.alphaMask = 0xff;
@@ -47,7 +47,7 @@
    
    *mask = XRenderFindFormat (xdisplay,
  			     (PictFormatType | PictFormatDepth |
-@@ -901,11 +917,19 @@
+@@ -1054,11 +1070,19 @@
  
    pf.type = PictTypeDirect;
    pf.depth = 32;
