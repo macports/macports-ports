@@ -1,6 +1,6 @@
---- setup.py.orig	Sun Feb 13 17:45:49 2005
-+++ setup.py	Sun Feb 13 17:50:34 2005
-@@ -878,7 +878,8 @@
+--- setup.py	Wed Mar  9 23:27:24 2005
++++ ../../setup.py	Thu Mar 31 18:34:35 2005
+@@ -905,7 +905,8 @@
          self.extensions.extend(exts)
  
          # Call the method for detecting whether _tkinter can be compiled
