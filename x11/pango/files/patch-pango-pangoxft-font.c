@@ -1,5 +1,5 @@
---- pango/pangoxft-font.c	Fri Aug  9 08:25:30 2002
-+++ pango/pangoxft-font.c	Sun Nov 24 06:33:34 2002
+--- pango/pangoxft-font.c.orig	Fri Aug  9 08:25:30 2002
++++ pango/pangoxft-font.c	Mon Apr 14 01:44:26 2003
 @@ -544,7 +544,7 @@
    face = pango_xft_font_get_face (font);
  

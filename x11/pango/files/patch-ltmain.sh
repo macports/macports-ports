@@ -1,5 +1,5 @@
---- ltmain.sh	Tue Aug 20 10:13:37 2002
-+++ ltmain.sh	Sun Nov 24 06:33:34 2002
+--- ltmain.sh.orig	Tue Aug 20 10:13:37 2002
++++ ltmain.sh	Mon Apr 14 01:44:26 2003
 @@ -2952,7 +2952,17 @@
  	if test -n "$export_symbols" && test -n "$archive_expsym_cmds"; then
  	  eval cmds=\"$archive_expsym_cmds\"
@@ -31,4 +31,4 @@
 +#relink_command=\"$relink_command\""
 +#	  fi
  	done
-       fi 
+       fi
