@@ -1,6 +1,6 @@
 --- include/freetype/config/ftconfig.h.old	Mon Mar  1 05:35:28 2004
 +++ include/freetype/config/ftconfig.h	Mon Mar  1 05:36:03 2004
-@@ -108,9 +108,11 @@
+@@ -121,9 +121,11 @@
    /*   This is the only necessary change, so it is defined here instead    */
    /*   providing a new configuration file.                                 */
    /*                                                                       */
