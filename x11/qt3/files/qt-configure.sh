@@ -24,6 +24,7 @@ DARWIN_PATCHES=" \
 	patch-09-qinitimages.darwin \
 	patch-10-no-underscore-prepend.darwin \
 	patch-11-nopic-binaries.darwin \
+	patch-12-qmake.darwin \
 "
 
 # disabled from macosx
