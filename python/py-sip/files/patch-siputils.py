@@ -1,6 +1,6 @@
---- siputils.py.orig	Sat May 22 11:47:59 2004
-+++ siputils.py	Mon May 31 17:56:58 2004
-@@ -947,8 +947,8 @@
+--- siputils.py	Fri Sep 24 18:56:34 2004
++++ siputils.py.new	Mon Sep 27 13:34:52 2004
+@@ -994,8 +994,8 @@
  
          self.LFLAGS.extend(self.optional_list(lflags_console))
  
