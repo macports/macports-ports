@@ -1,5 +1,5 @@
---- src/rootsh.c.orig	Fri Dec 17 20:04:39 2004
-+++ src/rootsh.c	Wed Feb  2 16:59:16 2005
+--- src/rootsh.c.orig	Thu Mar 24 08:08:20 2005
++++ src/rootsh.c	Sun Mar 27 00:38:09 2005
 @@ -42,6 +42,9 @@
  #include <sys/stat.h>
  #include <dirent.h>
@@ -10,7 +10,7 @@
  #if HAVE_SYS_SELECT_H
  #  include <sys/select.h>
  #endif
-@@ -167,7 +170,6 @@
+@@ -177,7 +180,6 @@
  //  
  */
  extern char **environ;
@@ -18,12 +18,12 @@
  
  static char progName[MAXPATHLEN];
  static char sessionId[MAXPATHLEN + 11];
-@@ -222,7 +224,7 @@
+@@ -235,7 +237,7 @@
    //  
    //  long_options	Used by getopt_long.
    */
 -  char *shell, *dashShell, *shellCommands = NULL;
 +  char *shell, *dashShell = NULL, *shellCommands = NULL;
    char *sucmd = SUCMD;
+   static char sessionIdEnv[sizeof(sessionId) + 17];
    fd_set readmask;
-   int n, childPid;
