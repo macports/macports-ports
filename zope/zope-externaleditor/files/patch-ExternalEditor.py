@@ -1,5 +1,5 @@
---- ExternalEditor.py.orig	Fri Mar  5 12:02:24 2004
-+++ ExternalEditor.py	Fri Mar  5 12:01:54 2004
+--- ExternalEditor/ExternalEditor.py.orig	Fri Mar  5 12:02:24 2004
++++ ExternalEditor/ExternalEditor.py	Fri Mar  5 12:01:54 2004
 @@ -17,6 +17,7 @@
  # Zope External Editor Product by Casey Duncan
  
