@@ -1,5 +1,5 @@
---- app/regex.c.orig	Tue Sep 17 20:15:02 2002
-+++ app/regex.c	Mon Sep 16 15:42:07 2002
+--- regexrepl/regex.c.orig	Tue Sep 17 20:15:02 2002
++++ regexrepl/regex.c	Mon Sep 16 15:42:07 2002
 @@ -5511,7 +5511,7 @@
     the return codes and their meanings.)  */
  

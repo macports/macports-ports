@@ -1,6 +1,6 @@
---- plug-ins/script-fu/interp_regex.c.orig	Tue Sep 17 20:15:46 2002
-+++ plug-ins/script-fu/interp_regex.c	Mon Sep 16 15:48:54 2002
-@@ -58,7 +58,7 @@
+--- plug-ins/script-fu/interp_regex.c.orig	Sun Jan  5 13:11:51 2003
++++ plug-ins/script-fu/interp_regex.c	Fri Jun 20 23:24:19 2003
+@@ -66,7 +66,7 @@
    result->type = tc_regex;
    result->storage_as.string.data = (char *) h;
    h->r = (regex_t *) must_malloc (sizeof (regex_t));
@@ -9,7 +9,7 @@
      {
        regerror (error, h->r, errbuff, sizeof (errbuff));
        return (my_err (errbuff, pattern));
-@@ -91,7 +91,7 @@
+@@ -99,7 +99,7 @@
    LISP result;
    struct tc_regex *h;
    h = get_tc_regex (ptr);
@@ -18,7 +18,7 @@
  		       get_c_string (str),
  		       h->nmatch,
  		       h->m,
-@@ -111,7 +111,7 @@
+@@ -119,7 +119,7 @@
    if ((h = (struct tc_regex *) ptr->storage_as.string.data))
      {
        if ((h->compflag) && h->r)

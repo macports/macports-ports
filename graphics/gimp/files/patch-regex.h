@@ -1,5 +1,5 @@
---- app/regex.h.orig	Tue Sep 17 20:15:07 2002
-+++ app/regex.h	Mon Sep 16 15:41:47 2002
+--- regexrepl/regex.h.orig	Tue Sep 17 20:15:07 2002
++++ regexrepl/regex.h	Mon Sep 16 15:41:47 2002
 @@ -511,14 +511,14 @@
  #endif
  
