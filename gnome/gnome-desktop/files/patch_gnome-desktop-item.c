@@ -1,23 +1,15 @@
---- libgnome-desktop/gnome-desktop-item.c.org	Tue Nov 25 20:59:15 2003
-+++ libgnome-desktop/gnome-desktop-item.c	Tue Nov 25 21:00:05 2003
-@@ -27,6 +27,11 @@
-   @NOTATION@
-  */
+--- libgnome-desktop/gnome-desktop-item.c.org	Fri Sep 17 22:05:13 2004
++++ libgnome-desktop/gnome-desktop-item.c	Fri Sep 17 22:05:16 2004
+@@ -62,7 +62,11 @@
  
+ #define sure_string(s) ((s)!=NULL?(s):"")
+ 
+-extern char **environ;
 +#ifdef __APPLE__
 +# include <crt_externs.h>
 +# define environ (*_NSGetEnviron())
++#elif extern char **environ;
 +#endif
-+
- #include "config.h"
  
- #include <limits.h>
-@@ -1482,8 +1487,6 @@
- {
- 	gdk_error_trap_pop ();
- }
--
--extern char **environ;
- 
- static char **
- make_spawn_environment_for_sn_context (SnLauncherContext *sn_context,
+ struct _GnomeDesktopItem {
+ 	int refcount;
