@@ -1,5 +1,5 @@
---- autogen.sh.orig	Sat Dec  6 19:11:19 2003
-+++ autogen.sh	Sat Dec  6 19:14:07 2003
+--- autogen.sh.orig	Sat Apr  3 17:44:13 2004
++++ autogen.sh	Sat Apr  3 17:44:32 2004
 @@ -24,7 +24,7 @@
  aclocal
  
@@ -17,4 +17,3 @@
 +#./configure $*
  
  # end
-
