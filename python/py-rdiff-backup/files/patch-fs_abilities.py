@@ -9,7 +9,7 @@
  
  This may be caused when you copy an rdiff-backup directory from a
  normal file system on to a windows one that cannot support the same
-@@ -291,7 +291,7 @@
+@@ -297,7 +297,7 @@
  		assert rp.lstat()
  		try: import xattr
  		except ImportError:
