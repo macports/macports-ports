@@ -1,6 +1,6 @@
---- source/dcc.c.orig	Wed Feb  2 18:58:21 2005
-+++ source/dcc.c	Wed Feb  2 18:58:24 2005
-@@ -1155,7 +1155,7 @@
+--- source/dcc.c.orig	Tue Mar 15 19:35:22 2005
++++ source/dcc.c	Sat Mar 26 00:59:36 2005
+@@ -1192,7 +1192,7 @@
  
  	if (dcc->flags & DCC_QUOTED)
  	{
