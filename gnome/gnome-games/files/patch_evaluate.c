@@ -1,5 +1,5 @@
---- gnect/src/evaluate.c.org	Sat Jul 26 15:24:21 2003
-+++ gnect/src/evaluate.c	Sat Jul 26 15:24:40 2003
+--- gnect/src/evaluate.c.org	Thu Nov 27 22:23:45 2003
++++ gnect/src/evaluate.c	Thu Nov 27 22:23:58 2003
 @@ -25,7 +25,7 @@
  #include <stdio.h>
  #include <string.h>

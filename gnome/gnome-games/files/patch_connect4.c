@@ -1,5 +1,5 @@
---- gnect/src/connect4.c.org	Sat Jul 26 15:19:02 2003
-+++ gnect/src/connect4.c	Sat Jul 26 15:19:26 2003
+--- gnect/src/connect4.c.org	Thu Nov 27 22:01:45 2003
++++ gnect/src/connect4.c	Thu Nov 27 22:01:42 2003
 @@ -27,7 +27,7 @@
  #include <stdio.h>
  #include <string.h>
