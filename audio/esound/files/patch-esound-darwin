@@ -1,0 +1,641 @@
+diff -uNbr ../esound-0.2.29/Makefile.in ./Makefile.in
+--- ../esound-0.2.29/Makefile.in	Mon Aug 26 13:23:28 2002
++++ ./Makefile.in	Sun Oct 20 01:29:02 2002
+@@ -173,7 +173,7 @@
+ 
+ LDADD = libesd.la $(AUDIOFILE_LIBS)
+ 
+-esd_LDADD = $(WRAP_LIB) $(LDADD)
++esd_LDADD = $(WRAP_LIB) $(LDADD) $(SOUND_LIBS)
+ 
+ m4datadir = $(datadir)/aclocal
+ m4data_DATA = esd.m4
+@@ -250,11 +250,12 @@
+ esdplay_LDFLAGS = 
+ @NEED_GETOPT_FALSE@esd_OBJECTS =  esd.$(OBJEXT) clients.$(OBJEXT) \
+ @NEED_GETOPT_FALSE@filter.$(OBJEXT) mix.$(OBJEXT) players.$(OBJEXT) \
+-@NEED_GETOPT_FALSE@proto.$(OBJEXT) samples.$(OBJEXT) util.$(OBJEXT)
++@NEED_GETOPT_FALSE@proto.$(OBJEXT) samples.$(OBJEXT) util.$(OBJEXT) \
++@NEED_GETOPT_FALSE@esd_audio.$(OBJEXT)
+ @NEED_GETOPT_TRUE@esd_OBJECTS =  esd.$(OBJEXT) clients.$(OBJEXT) \
+ @NEED_GETOPT_TRUE@filter.$(OBJEXT) mix.$(OBJEXT) players.$(OBJEXT) \
+ @NEED_GETOPT_TRUE@proto.$(OBJEXT) samples.$(OBJEXT) getopt.$(OBJEXT) \
+-@NEED_GETOPT_TRUE@getopt1.$(OBJEXT) util.$(OBJEXT)
++@NEED_GETOPT_TRUE@getopt1.$(OBJEXT) util.$(OBJEXT) esd_audio.$(OBJEXT)
+ esd_DEPENDENCIES =  libesd.la
+ esd_LDFLAGS = 
+ SCRIPTS =  $(bin_SCRIPTS)
+diff -uNbr ../esound-0.2.29/acconfig.h ./acconfig.h
+--- ../esound-0.2.29/acconfig.h	Mon Aug 26 12:41:22 2002
++++ ./acconfig.h	Sun Oct 20 01:29:02 2002
+@@ -9,6 +9,7 @@
+ #undef DRIVER_NEWALSA
+ #undef DRIVER_ALSA_09
+ #undef DRIVER_DART
++#undef DRIVER_COREAUDIO
+ #undef DRIVER_NONE
+ #undef HAVE_INET_ATON
+ #undef HAVE_NANOSLEEP
+diff -uNbr ../esound-0.2.29/audio.c ./audio.c
+--- ../esound-0.2.29/audio.c	Mon Aug 26 12:41:22 2002
++++ ./audio.c	Sun Oct 20 01:29:02 2002
+@@ -20,6 +20,8 @@
+ /*******************************************************************/
+ /* returns audio_fd for use by main prog - platform dependent */
+ 
++#if defined(INSIDE_ESD)
++
+ /* ALSA before OSS as ALSA is OSS compatible */
+ #if defined(DRIVER_ALSA) || defined(DRIVER_NEWALSA) 
+ #  include "audio_alsa.c"
+@@ -41,9 +43,16 @@
+ #  include "audio_mklinux.c"
+ #elif defined(DRIVER_DART)
+ #  include "audio_dart.c"
++#elif defined(DRIVER_COREAUDIO)
++#  include "audio_coreaudio.c"
+ #else
+ #  include "audio_none.c"
+ #endif
++
++#else
++#define DRIVER_NONE 1
++#include "audio_none.c"
++#endif /* INSIDE_ESD */
+ 
+ /*******************************************************************/
+ /* display available devices */
+diff -uNbr ../esound-0.2.29/audio_coreaudio.c ./audio_coreaudio.c
+--- ../esound-0.2.29/audio_coreaudio.c	Wed Dec 31 19:00:00 1969
++++ ./audio_coreaudio.c	Sun Oct 20 01:29:02 2002
+@@ -0,0 +1,451 @@
++
++/*
++ * for CoreAudio
++ *
++ * If the playback/recording sound device is not stereo and its sample
++ * size is not float (32 bit), this will not work.
++ *
++ * Please let me know if there is such a case.
++ *
++ * Shawn Hsiao <phsiao@mac.com>
++ * Some enhancement by Masanori Sekino <m-sekino@mb.kcom.ne.jp>
++ */
++
++#include <CoreAudio/CoreAudio.h>
++#include <limits.h>
++#include <pthread.h>
++
++#define BUF_SIZE ESD_BUF_SIZE
++
++static AudioDeviceID gOutputDeviceID, gInputDeviceID;
++
++static float OutputDataBuf[BUF_SIZE];
++static float InputDataBuf[BUF_SIZE];
++static int OutputWroteSamples = 0;
++static int InputReadSamples = 0;
++
++static pthread_mutex_t mutexOutput, mutexInput;
++static pthread_cond_t condOutput, condInput;
++
++static int audioPlaybackStarted = 0, audioRecordStarted = 0;
++static int coreaudio_has_output_device = 0;
++static int coreaudio_has_input_device = 0;
++static int coreaudio_init = 0;
++
++OSStatus PlaybackIOProc(AudioDeviceID inDevice,
++			const AudioTimeStamp *inNow,
++			const AudioBufferList *inInputData,
++			const AudioTimeStamp *inInputTime,
++			AudioBufferList *outOutputData,
++			const AudioTimeStamp *inOutputTime,
++			void *inClientData)
++{
++  float *bufPtr = outOutputData->mBuffers[0].mData;
++  int i;
++
++  pthread_mutex_lock(&mutexOutput);
++
++  for (i = 0; i < OutputWroteSamples; i++)
++    bufPtr[i] = OutputDataBuf[i];
++  for ( ; i < BUF_SIZE; i++)
++    bufPtr[i] = 0;
++  OutputWroteSamples = 0;
++
++  pthread_mutex_unlock(&mutexOutput);
++  pthread_cond_signal(&condOutput);
++
++  return (kAudioHardwareNoError);
++}
++
++OSStatus RecordIOProc(AudioDeviceID inDevice,
++		      const AudioTimeStamp *inNow,
++		      const AudioBufferList *inInputData,
++		      const AudioTimeStamp *inInputTime,
++		      AudioBufferList *outOutputData,
++		      const AudioTimeStamp *inOutputTime,
++		      void *inClientData)
++{
++  float *bufPtr = inInputData->mBuffers[0].mData;
++  int i;
++
++  pthread_mutex_lock(&mutexInput);
++
++  for (i = 0; i < BUF_SIZE; i++)
++    InputDataBuf[i] = bufPtr[i];
++  InputReadSamples = 0;
++
++  pthread_mutex_unlock(&mutexInput);
++  pthread_cond_signal(&condInput);
++
++  return (kAudioHardwareNoError);
++}
++
++#define ARCH_esd_audio_devices
++const char *esd_audio_devices()
++{
++    return "coreaudio API only";
++}
++
++/*
++ * This is called to reset the device status.
++ * Returns -2 to indicate the device failed to initialize;
++ * returns  -1 means any of rate/size/{mono,stereo} mismatched.
++ */
++#define ARCH_esd_audio_open
++int esd_audio_open()
++{
++#define LEN_DEVICE_NAME 128
++  OSStatus status;
++  UInt32 propertySize, bufferByteCount;
++  char deviceName[LEN_DEVICE_NAME];
++  struct AudioStreamBasicDescription streamDesc;
++  int rval;
++
++  /*
++   * We only need to do this once, the rest are taken cared by
++   * disable/enable calback.
++   */
++  if (coreaudio_init) {
++    return (0);
++  }
++
++  /********************** playback section ***************************/
++  /* get default output device */
++  propertySize = sizeof(gOutputDeviceID);
++  status = AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice,
++	                            &propertySize,
++				    &gOutputDeviceID);
++  if (status) {
++    fprintf(stderr, "get default output device failed, status = %d\n",
++	    (int)status);
++    return (-2);
++  }
++
++  if (gOutputDeviceID != kAudioDeviceUnknown) {
++    /* got default output device */
++    coreaudio_has_output_device = 1;
++
++    /* get output device name */
++    propertySize = sizeof(char)*LEN_DEVICE_NAME;
++    status = AudioDeviceGetProperty(gOutputDeviceID,
++				    1,
++				    0,
++				    kAudioDevicePropertyDeviceName,
++				    &propertySize,
++				    deviceName);
++    if (status) {
++      fprintf(stderr, "get device name failed, status = %d\n",
++	      (int)status);
++      return (-2);
++    }
++
++    /* get output format */
++    propertySize = sizeof(struct AudioStreamBasicDescription);
++    status = AudioDeviceGetProperty(gOutputDeviceID,
++				    1,
++				    0,
++				    kAudioDevicePropertyStreamFormat,
++				    &propertySize,
++				    &streamDesc);
++    if (status) {
++      fprintf(stderr, "get device property failed, status = %d\n",
++	      (int)status);
++      return (-2);
++    }
++
++    if ((streamDesc.mSampleRate != 44100.0) ||
++        (streamDesc.mFormatID != kAudioFormatLinearPCM) ||
++       !(streamDesc.mFormatFlags & kLinearPCMFormatFlagIsFloat) ||
++        (streamDesc.mChannelsPerFrame != 2))
++    {
++      fprintf (stderr, "unsupported device.\n");
++      return (-2);
++    }
++
++    /* set buffer size */
++    bufferByteCount = BUF_SIZE * sizeof(float);
++    propertySize = sizeof(bufferByteCount);
++    status = AudioDeviceSetProperty(gOutputDeviceID,
++                                    0,
++                                    0,
++                                    0,
++                                    kAudioDevicePropertyBufferSize,
++                                    propertySize,
++                                    &bufferByteCount);
++    if (status) {
++      fprintf(stderr, "set device property failed, status = %d\n",
++              (int)status);
++    }
++
++    fprintf(stderr, "using device %s for output:\n", deviceName);
++    fprintf(stderr, "\twith sample rate %f, %ld channels and %ld-bit sample\n",
++	    streamDesc.mSampleRate,
++	    streamDesc.mChannelsPerFrame,
++	    streamDesc.mBitsPerChannel);
++
++    rval = pthread_mutex_init(&mutexOutput, NULL);
++    if (rval) {
++      fprintf(stderr, "mutex init failed\n");
++      return (-1);
++    }
++    rval = pthread_cond_init(&condOutput, NULL);
++    if (rval) {
++      fprintf(stderr, "condition init failed\n");
++      return (-1);
++    }
++
++    /* Registers PlaybackIOProc with the device without activating it. */
++    status = AudioDeviceAddIOProc(gOutputDeviceID, PlaybackIOProc, (void *)1);
++  }
++
++  /********************** record section ***************************/
++  /* get default input device */
++  propertySize = sizeof(gInputDeviceID);
++  status = AudioHardwareGetProperty(kAudioHardwarePropertyDefaultInputDevice,
++	                            &propertySize,
++				    &gInputDeviceID);
++  if (status) {
++    fprintf(stderr, "get default input device failed, status = %d\n",
++	    (int)status);
++    return (-2);
++  }
++
++  if (gInputDeviceID != kAudioDeviceUnknown) {
++    /* got default input device */
++    coreaudio_has_input_device = 1;
++
++    /* get input device name */
++    propertySize = sizeof(char)*64;
++    status = AudioDeviceGetProperty(gInputDeviceID,
++				    1,
++				    1,
++				    kAudioDevicePropertyDeviceName,
++				    &propertySize,
++				    deviceName);
++    if (status) {
++      fprintf(stderr, "get device name failed, status = %d\n",
++	      (int)status);
++      return (-2);
++    }
++
++    /* get input format */
++    propertySize = sizeof(struct AudioStreamBasicDescription);
++    status = AudioDeviceGetProperty(gInputDeviceID,
++				    1,
++				    1,
++				    kAudioDevicePropertyStreamFormat,
++				    &propertySize,
++				    &streamDesc);
++    if (status) {
++      fprintf(stderr, "get device property failed, status = %d\n",
++	      (int)status);
++      return (-2);
++    }
++
++    if ((streamDesc.mSampleRate != 44100.0) ||
++        (streamDesc.mFormatID != kAudioFormatLinearPCM) ||
++       !(streamDesc.mFormatFlags & kLinearPCMFormatFlagIsFloat) ||
++        (streamDesc.mChannelsPerFrame != 2))
++    {
++      fprintf (stderr, "unsupported device.\n");
++      return (-2);
++    }
++
++    /* set buffer size */
++    bufferByteCount = BUF_SIZE * sizeof(float);
++    propertySize = sizeof(bufferByteCount);
++    status = AudioDeviceSetProperty(gInputDeviceID,
++                                    0,
++                                    0,
++                                    1,
++                                    kAudioDevicePropertyBufferSize,
++                                    propertySize,
++                                    &bufferByteCount);
++    if (status) {
++      fprintf(stderr, "set device property failed, status = %d\n",
++              (int)status);
++    }
++
++    fprintf(stderr, "using device %s for input:\n", deviceName);
++    fprintf(stderr, "\twith sample rate %f, %ld channels and %ld-bit sample\n",
++	    streamDesc.mSampleRate,
++	    streamDesc.mChannelsPerFrame,
++	    streamDesc.mBitsPerChannel);
++
++    rval = pthread_mutex_init(&mutexInput, NULL);
++    if (rval) {
++      fprintf(stderr, "mutex init failed\n");
++      return (-1);
++    }
++    rval = pthread_cond_init(&condInput, NULL);
++    if (rval) {
++      fprintf(stderr, "condition init failed\n");
++      return (-1);
++    }
++
++    /* Registers PlaybackIOProc with the device without activating it. */
++    status = AudioDeviceAddIOProc(gInputDeviceID, RecordIOProc, (void *)1);
++  }
++
++  if (!coreaudio_has_output_device) {
++    fprintf(stderr, "unknown output device.\n");
++    return (-2);
++  }
++  /* Allow lack of recording device */
++  /*
++  if (!coreaudio_has_input_device) {
++    fprintf(stderr, "unknown input device.\n");
++    return (-2);
++  }
++  */
++
++  /* Indicates the initialization is done */
++  coreaudio_init = 1;
++
++  esd_audio_fd = 0; /* this is meaningless anyway */
++
++  return 0;
++}
++
++/*
++ * This is called to reset the device status.
++ * (before calls esd_audio_open again)
++ */
++#define ARCH_esd_audio_close
++void esd_audio_close()
++{
++  OSStatus status;
++
++  /* deactivate both of them */
++  if (coreaudio_has_output_device && audioPlaybackStarted) {
++    status = AudioDeviceStop(gOutputDeviceID, PlaybackIOProc);
++    audioPlaybackStarted = 0;
++  }
++
++  if (coreaudio_has_input_device && audioRecordStarted) {
++    status = AudioDeviceStop(gInputDeviceID, RecordIOProc);
++    audioRecordStarted = 0;
++  }
++
++  return;
++}
++
++
++#define ARCH_esd_audio_pause
++void esd_audio_pause()
++{
++  OSStatus status;
++
++  if (coreaudio_has_output_device && audioPlaybackStarted) {
++    status = AudioDeviceStop(gOutputDeviceID, PlaybackIOProc);
++    audioPlaybackStarted = 0;
++  }
++
++  if (coreaudio_has_input_device && audioRecordStarted) {
++    status = AudioDeviceStop(gInputDeviceID, RecordIOProc);
++    audioRecordStarted = 0;
++  }
++
++  return;
++}
++
++
++#define ARCH_esd_audio_write
++/*******************************************************************/
++/* dump a buffer to the sound device */
++int esd_audio_write( void *buffer, int buf_size )
++{
++  OSStatus status;
++  float scale = 1.0 / SHRT_MAX;
++  int remain_to_write = buf_size;
++
++  if (!coreaudio_has_output_device)
++    return -1;
++
++  if (!audioPlaybackStarted) {
++    status = AudioDeviceStart(gOutputDeviceID, PlaybackIOProc);
++    audioPlaybackStarted = 1;
++  }
++
++  while (remain_to_write)
++  {
++    pthread_mutex_lock(&mutexOutput);
++
++    while(OutputWroteSamples == BUF_SIZE)
++      pthread_cond_wait(&condOutput, &mutexOutput);
++
++    {
++      short *src_data = (short *)buffer + (buf_size - remain_to_write) / sizeof(short);
++      float *dst_data = OutputDataBuf + OutputWroteSamples;
++      int src_samples = remain_to_write / sizeof(short);
++      int dst_samples = BUF_SIZE - OutputWroteSamples;
++      int n = (dst_samples < src_samples) ? dst_samples : src_samples;
++      int i;
++
++      for (i = 0; i < n; i++)
++        dst_data[i] = scale * src_data[i];
++
++      OutputWroteSamples += n;
++      remain_to_write -= n * sizeof(short);
++    }
++
++    pthread_mutex_unlock(&mutexOutput);
++  }
++
++  return (buf_size);
++}
++
++#define ARCH_esd_audio_read
++/*******************************************************************/
++/* read a chunk from the sound device */
++int esd_audio_read( void *buffer, int buf_size )
++{
++  OSStatus status;
++  float scale = SHRT_MAX;
++  int remain_to_read = buf_size;
++
++  if (!coreaudio_has_input_device)
++    return -1;
++
++  if (!audioRecordStarted) {
++    status = AudioDeviceStart(gInputDeviceID, RecordIOProc);
++    audioRecordStarted = 1;
++  }
++
++  while (remain_to_read)
++  {
++    pthread_mutex_lock(&mutexInput);
++
++    while(InputReadSamples == BUF_SIZE)
++      pthread_cond_wait(&condInput, &mutexInput);
++
++    {
++      float *src_data = InputDataBuf + InputReadSamples;
++      short *dst_data = (short *)buffer + (buf_size - remain_to_read) / sizeof(short);
++      int src_samples = BUF_SIZE - InputReadSamples;
++      int dst_samples = remain_to_read / sizeof(short);
++      int n = (dst_samples < src_samples) ? dst_samples : src_samples;
++      int i;
++
++      for (i = 0; i < n; i++)
++        dst_data[i] = (short)(scale * src_data[i]);
++
++      InputReadSamples += n;
++      remain_to_read -= n * sizeof(short);
++    }
++
++    pthread_mutex_unlock(&mutexInput);
++  }
++
++  return (buf_size);
++}
++
++
++#define ARCH_esd_audio_flush
++/*******************************************************************/
++/* flush the audio buffer */
++void esd_audio_flush()
++{
++  /* nothing needed */
++  return;
++}
+diff -uNbr ../esound-0.2.29/config.h.in ./config.h.in
+--- ../esound-0.2.29/config.h.in	Mon Aug 26 12:45:48 2002
++++ ./config.h.in	Sun Oct 20 01:29:02 2002
+@@ -43,6 +43,7 @@
+ #undef DRIVER_NEWALSA
+ #undef DRIVER_ALSA_09
+ #undef DRIVER_DART
++#undef DRIVER_COREAUDIO
+ #undef DRIVER_NONE
+ #undef HAVE_INET_ATON
+ #undef HAVE_NANOSLEEP
+diff -uNbr ../esound-0.2.29/configure ./configure
+--- ../esound-0.2.29/configure	Mon Aug 26 13:18:46 2002
++++ ./configure	Sun Oct 20 01:29:02 2002
+@@ -6915,6 +6915,14 @@
+ EOF
+ 
+       ;;
++   darwin*)
++      found_sound=yes
++      cat >> confdefs.h <<\EOF
++#define DRIVER_COREAUDIO 1
++EOF
++
++      SOUND_LIBS="-framework CoreAudio"
++      ;;
+    esac
+ 
+    if test "${ac_cv_header_dmedia_audio_h}" = "yes"; then
+diff -uNbr ../esound-0.2.29/esd.c ./esd.c
+--- ../esound-0.2.29/esd.c	Mon Aug 26 12:41:24 2002
++++ ./esd.c	Sun Oct 20 01:29:02 2002
+@@ -21,6 +21,13 @@
+ #define gethostbyname2(host, family) gethostbyname((host))
+ #endif /* HAVE_GETHOSTBYNAME2 */
+ 
++#if defined (__APPLE__)
++#include <mach/mach.h>
++#include <mach/thread_policy.h>
++#include <sys/param.h>
++#include <sys/sysctl.h>
++#endif
++
+ /*******************************************************************/
+ /* esd.c - prototypes */
+ void set_audio_buffer( void *buf, esd_format_t format, int magl, int magr,
+@@ -517,6 +524,29 @@
+ 
+     int default_format = ESD_BITS16 | ESD_STEREO;
+     /* end test scaffolding parameters */
++
++#if defined (__APPLE__)
++    /* get realtime priority */
++    {
++	struct thread_time_constraint_policy ttcpolicy;
++	int bus_speed, mib [2] = { CTL_HW, HW_BUS_FREQ };
++	size_t len;   
++
++	len = sizeof (bus_speed);
++	sysctl (mib, 2, &bus_speed, &len, NULL, 0);
++
++	/* Is it enough? */
++	ttcpolicy.period = bus_speed / 120;
++	ttcpolicy.computation = bus_speed / 2400;
++	ttcpolicy.constraint = bus_speed / 1200;
++	ttcpolicy.preemptible = 1;
++
++	thread_policy_set (mach_thread_self (),
++			   THREAD_TIME_CONSTRAINT_POLICY,
++			   (int*)&ttcpolicy,
++			   THREAD_TIME_CONSTRAINT_POLICY_COUNT);
++    }
++#endif
+ 
+     programname = *argv;
+ 
+diff -uNbr ../esound-0.2.29/esd.conf ./esd.conf
+--- ../esound-0.2.29/esd.conf	Tue Jun  4 10:30:47 2002
++++ ./esd.conf	Sun Oct 20 01:29:02 2002
+@@ -1,4 +1,4 @@
+ [esd]
+ auto_spawn=1
+ spawn_options=-terminate -nobeeps -as 2
+-spawn_wait_ms=100
++spawn_wait_ms=999
+diff -uNbr ../esound-0.2.29/esd_audio.c ./esd_audio.c
+--- ../esound-0.2.29/esd_audio.c	Wed Dec 31 19:00:00 1969
++++ ./esd_audio.c	Sun Oct 20 01:29:02 2002
+@@ -0,0 +1,4 @@
++/* dirty trickery to reduce shared library dependencies */
++
++#define INSIDE_ESD
++#include "audio.c"
+diff -uNbr ../esound-0.2.29/esd_config.c ./esd_config.c
+--- ../esound-0.2.29/esd_config.c	Wed Jun 19 08:14:24 2002
++++ ./esd_config.c	Sun Oct 20 01:29:02 2002
+@@ -16,7 +16,7 @@
+ int esd_no_spawn=1; /* If we can't find even the system config file,
+ 		       things are screwed up - don't try to make things
+ 		       worse. */
+-int esd_spawn_wait_ms=100; /* Time to wait trying to connect to an
++int esd_spawn_wait_ms=999; /* Time to wait trying to connect to an
+ 			      autospawned ESD, in milliseconds. */
+ char esd_spawn_options[LINEBUF_SIZE] = "-terminate -nobeeps -as 2";
+ 
+diff -uNbr ../esound-0.2.29/esdlib.c ./esdlib.c
+--- ../esound-0.2.29/esdlib.c	Mon Jul 15 05:28:26 2002
++++ ./esdlib.c	Sun Oct 20 01:29:02 2002
+@@ -681,8 +681,8 @@
+ 	FD_ZERO (&fdset);
+ 	FD_SET (esd_pipe[0], &fdset);
+ 	
+-	timeout.tv_sec = 0;
+-	timeout.tv_usec = esd_spawn_wait_ms * 1000;
++	timeout.tv_sec = (esd_spawn_wait_ms * 1000) / 1000000;
++	timeout.tv_usec = (esd_spawn_wait_ms * 1000) % 1000000;
+ 	
+ 	ret = select (esd_pipe[0] + 1, &fdset, NULL, NULL, &timeout);
+ 	
