@@ -1,11 +1,8 @@
---- setup.py	Wed Sep  1 12:34:21 2004
-+++ setup.py.new	Wed Sep  1 22:32:35 2004
-@@ -222,9 +222,9 @@
-              ['share/locale/fr/LC_MESSAGES/linkcheck.mo']),
-          ('share/locale/nl/LC_MESSAGES',
-              ['share/locale/nl/LC_MESSAGES/linkcheck.mo']),
--         ('share/linkchecker', ['config/linkcheckerrc',
-+         ('share/doc/linkchecker', ['config/linkcheckerrc',
+--- setup.py	Tue Sep 14 21:50:24 2004
++++ ../../setup.py	Fri Sep 17 20:27:15 2004
+@@ -234,7 +234,7 @@
+              ['share/locale/nl/LC_MESSAGES/linkchecker.mo']),
+          ('share/linkchecker', ['config/linkcheckerrc',
                                  'config/logging.conf', ]),
 -         ('share/linkchecker/examples',
 +         ('share/doc/linkchecker/examples',
