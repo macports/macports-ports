@@ -1,15 +1,11 @@
-diff -uNbr ltmain.sh libxslt-1.0.18-new/ltmain.sh
---- ltmain.sh	Mon May 27 17:31:19 2002
-+++ libxslt-1.0.18-new/ltmain.sh	Thu Jun  6 22:49:06 2002
-@@ -2858,6 +2858,11 @@
- 	if test -n "$export_symbols" && test -n "$archive_expsym_cmds"; then
- 	  eval cmds=\"$archive_expsym_cmds\"
- 	else
-+         if test "x$verstring" = "x0.0"; then
-+           tmp_verstring=
-+         else
-+           tmp_verstring="$verstring"
-+         fi
- 	  eval cmds=\"$archive_cmds\"
- 	fi
- 	IFS="${IFS= 	}"; save_ifs="$IFS"; IFS='~'
+--- ltmain.sh.orig	Tue Apr  1 06:38:42 2003
++++ ltmain.sh	Fri Apr 25 15:51:34 2003
+@@ -1777,7 +1777,7 @@
+ 
+ 	  if test "$installed" = no; then
+ 	    notinst_deplibs="$notinst_deplibs $lib"
+-	    need_relink=yes
++	    need_relink=no
+ 	  fi
+ 
+ 	  if test -n "$old_archive_from_expsyms_cmds"; then
