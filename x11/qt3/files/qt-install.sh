@@ -46,10 +46,10 @@ ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.1.0.dylib
 ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.1.dylib
 ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.dylib
 
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/man/man1
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/man/man3
-install -c -m 644  doc/man/man1/* ${DESTROOT}${PREFIX}/share/man/man1/
-install -c -m 644  doc/man/man3/* ${DESTROOT}${PREFIX}/share/man/man3/
+install -d -m 0755 ${DESTROOT}${PREFIX}/man/man1
+install -d -m 0755 ${DESTROOT}${PREFIX}/man/man3
+install -c -m 644  doc/man/man1/* ${DESTROOT}${PREFIX}/man/man1/
+install -c -m 644  doc/man/man3/* ${DESTROOT}${PREFIX}/man/man3/
 
 # clean up the makefiles
 make -C tutorial clean
