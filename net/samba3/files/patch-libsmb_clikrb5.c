@@ -24,7 +24,7 @@
  	krb5_krbhst_handle hnd;
  	krb5_krbhst_info *hinfo;
  	krb5_error_code rc;
-@@ -261,6 +267,10 @@
+@@ -260,6 +266,10 @@
  
  	*naddrs = num_kdcs;
  	*addr_pp = sa;
