@@ -2,10 +2,15 @@
 
 FILEPREFIX=`dirname $0`
 PUREDARWIN="false"
+ARGS=""
 
-worksrcpath="$1"; shift
-prefix="$1";      shift
-portname="$1";    shift
+for ARG in "$@"; do
+	if test "$ARG" = "-puredarwin"; then
+		PUREDARWIN="true"
+	else
+		ARGS="$ARGS $ARG"
+	fi
+done
 
 DARWIN_PATCHES=" \
 	patch-01-xft2.darwin \
@@ -27,8 +32,8 @@ MACOSX_PATCHES=" \
 "
 
 CONFIGURE="-I'${worksrcpath}/include' -I'${prefix}/include' \
-		-I'/usr/X11R6/include/freetype2' -L'${prefix}/lib' -prefix '${prefix}' \
-		-bindir '${prefix}/bin' -libdir '${prefix}/lib' \
+		-I'/usr/X11R6/include/freetype2' -I'${prefix}/include/cups' -L'${prefix}/lib' \
+		-prefix '${prefix}' -bindir '${prefix}/bin' -libdir '${prefix}/lib' \
 		-docdir '${prefix}/share/doc/${portname}/html' -datadir '${prefix}/share/qt3' \
                 -headerdir '${prefix}/include/qt3' -plugindir '${prefix}/lib/qt3-plugins' \
                 -release -shared -fast -no-exceptions -thread -stl -qt-gif -plugin-imgfmt-png \
@@ -36,11 +41,14 @@ CONFIGURE="-I'${worksrcpath}/include' -I'${prefix}/include' \
                 -system-zlib -largefile -sm -xinerama -xrender -xft -xkb \
 "
 
-for FRAMEWORK in Carbon CoreServices; do
-	if test ! -f /System/Library/Frameworks/${FRAMEWORK}.framework/Headers/${FRAMEWORK}.h; then
-		PUREDARWIN="true"
-	fi
-done
+if test "$PUREDARWIN" = "false"; then
+	for FRAMEWORK in Carbon CoreServices; do
+		if test ! -f /System/Library/Frameworks/${FRAMEWORK}.framework/Headers/${FRAMEWORK}.h; then
+			echo "you have not specified the pure darwin variant, but you are missing the ${FRAMEWORK} framework!"
+			exit 1
+		fi
+	done
+fi
 
 if test "$PUREDARWIN" = "true"; then
 	echo "- using puredarwin configuration"
@@ -52,10 +60,10 @@ if test "$PUREDARWIN" = "true"; then
 	done
 
 	echo "- setting up qmake.conf"
-	cp "${FILEPREFIX}/qmake.conf.puredarwin" "mkspecs/darwin-g++/qmake.conf"
+	sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/qmake.conf.puredarwin" > "mkspecs/darwin-g++/qmake.conf"
 
 	echo "- running configure"
-	echo yes | sh ./configure $CONFIGURE -buildkey qt3-darwin -platform darwin-g++ -xplatform darwin-g++ "$@"
+	echo yes | sh ./configure $CONFIGURE -buildkey qt3-darwin -platform darwin-g++ -xplatform darwin-g++ $ARGS
 else
 	echo "- using MacOSX configuration"
 	for patch in ${MACOSX_PATCHES}; do
@@ -66,8 +74,9 @@ else
 	done
 
 	echo "- setting up qmake.conf"
-	cp "${FILEPREFIX}/qmake.conf.macosx" "mkspecs/darwin-g++/qmake.conf"
+	sed -e "s#@PREFIX@#${prefix}#g" "${FILEPREFIX}/qmake.conf.macosx" > "mkspecs/darwin-g++/qmake.conf"
 
 	echo "- running configure"
-	echo yes | sh ./configure $CONFIGURE -buildkey qt3-jaguar -platform darwin-g++ -xplatform darwin-g++ -DQ_OS_DARWIN -DQ_OS_FREEBSD "$@"
+	echo yes | sh ./configure $CONFIGURE -buildkey qt3-jaguar -platform darwin-g++ -xplatform darwin-g++ -DQ_OS_DARWIN -DQ_OS_FREEBSD $ARGS
 fi
+
