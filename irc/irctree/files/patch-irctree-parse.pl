@@ -1,5 +1,5 @@
---- irctree-parse.pl	Mon Dec 23 16:25:58 2002
-+++ irctree-parse.pl.new	Mon Aug 30 10:41:56 2004
+--- irctree-parse.pl.orig	Sun Oct 17 01:52:53 2004
++++ irctree-parse.pl	Sun Oct 17 01:53:17 2004
 @@ -1,4 +1,4 @@
 -#!/usr/bin/perl -w
 +#!/usr/bin/env perl
