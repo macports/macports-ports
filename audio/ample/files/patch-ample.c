@@ -1,5 +1,5 @@
---- src/ample.c.org	Sun Dec  8 15:20:15 2002
-+++ src/ample.c	Tue Jul  8 16:37:53 2003
+--- src/ample.c.orig	Sat Mar 27 15:01:42 2004
++++ src/ample.c	Sat Mar 27 15:01:48 2004
 @@ -92,7 +92,7 @@
  	
  	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));

@@ -1,5 +1,5 @@
---- src/ample.h.org	Mon Nov 25 13:24:07 2002
-+++ src/ample.h	Tue Jul  8 16:37:59 2003
+--- src/ample.h.orig	Sat Mar 27 15:03:48 2004
++++ src/ample.h	Sat Mar 27 15:04:51 2004
 @@ -1,3 +1,5 @@
 +#include <sys/types.h>
 +
