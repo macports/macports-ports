@@ -3,7 +3,7 @@
 case "$1" in
 
 start)
-  su postgres -c "__PREFIX/bin/pg_ctl start -D __DBDIR -l __PREFIX/log/pgsql.log"
+  su postgres -c "__PREFIX/bin/pg_ctl start -D __DBDIR -l __LOGDIR/pgsql.log"
   ;;
 
 restart)
