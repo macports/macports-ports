@@ -1,25 +1,23 @@
 #!/bin/sh
 
-ZOPEINST=%%ZOPEINST%%
-ZOPEUSER=%%ZOPEUSER%%
+ZOPEINST="__ZOPEINST"
 
-exec >$ZOPEINST/log/zope_sh.log
-exec 2>&1
-echo "`date +'%b %d %H:%M:%S'` `hostname -s` $0[$$]: $@"
+echo "`date`: $0: $1" >>${zopeinst}/log/zopectl.log 2>&1
 
-CURRUSER=`([ -x /usr/bin/id ] && /usr/bin/id -un) || echo unknown`
-
-case "$CURRUSER" in
-	$ZOPEUSER)
-		exec $ZOPEINST/bin/zopectl "$@"
-		;;
-	root)
-		exec su -m $ZOPEUSER -c "$ZOPEINST/bin/zopectl $*"
-		;;
-	*)
-		echo "Error: Must be run as user 'root' or '$ZOPEUSER' not '$CURRUSER'!"
-		echo " "
-		$ZOPEINST/bin/zopectl -h | sed "s/^Usage:/& sudo [-u $ZOPEUSER]/"
-		exit 1
-		;;
+case "$1" in
+start)
+	__PREFIX/bin/zopectl start >>$ZOPEINST/log/zopectl.log 2>&1
+	;;
+stop)
+	__PREFIX/bin/zopectl stop >>$ZOPEINST/log/zopectl.log 2>&1
+	;;
+restart)
+	__PREFIX/bin/zopectl restart >>$ZOPEINST/log/zopectl.log 2>&1
+	;;
+*)
+	echo "Usage: `basename $0` {start|stop|restart}" >&2
+	;;
 esac
+
+exit 0
+
