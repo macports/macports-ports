@@ -1,29 +1,30 @@
---- utils/start-stop-daemon.c	Sun May 13 15:01:28 2001
-+++ utils/start-stop-daemon.c	Sat Oct  5 22:22:21 2002
-@@ -30,6 +30,8 @@
- #  define OSsunos
- #elif defined(OPENBSD)
- #  define OSOpenBSD
+--- utils/start-stop-daemon.c	Sat Apr 10 11:10:57 2004
++++ utils/start-stop-daemon.c	Sat Apr 10 11:28:43 2004
+@@ -36,6 +36,8 @@
+ #  define OSFreeBSD
+ #elif defined(__NetBSD__)
+ #  define OSNetBSD
 +#elif defined(__APPLE__)
 +#  define OSDarwin
  #else
  #  error Unknown architecture - cannot build start-stop-daemon
  #endif
-@@ -41,7 +43,7 @@
+@@ -47,7 +49,7 @@
  #  include <ps.h>
  #endif
  
--#if defined(OSOpenBSD)
-+#if defined(OSOpenBSD) || defined(OSDarwin)
+-#if defined(OSOpenBSD) || defined(OSFreeBSD) || defined(OSNetBSD)
++#if defined(OSOpenBSD) || defined(OSFreeBSD) || defined(OSNetBSD) || defined(OSDarwin)
  #include <sys/param.h>
  #include <sys/user.h>
  #include <sys/proc.h>
-@@ -653,11 +655,12 @@
+@@ -690,11 +692,12 @@
  {
- #if defined(OSLinux)
+ #if defined(OSLinux) || defined(OShpux)
  	if (execname && !pid_is_exec(pid, &exec_stat))
+-#elif defined(OSHURD) || defined(OSFreeBSD) || defined(OSNetBSD)
 +		return;
- #elif defined(OSHURD)
++#elif defined(OSHURD) || defined(OSFreeBSD) || defined(OSNetBSD) || defined(OSDarwin)
      /* I will try this to see if it works */
  	if (execname && !pid_is_cmd(pid, execname))
 -#endif
@@ -32,28 +33,10 @@
  	if (userspec && !pid_is_user(pid, user_id))
  		return;
  	if (cmdname && !pid_is_cmd(pid, cmdname))
-@@ -787,7 +790,7 @@
- }
-  
- int
--pid_is_user(pid_t pid, int uid)
-+pid_is_user(pid_t pid, uid_t uid)
- {
- 	kvm_t *kd;
- 	int nentries;   /* Value not used */
-@@ -828,7 +831,6 @@
- 	return (strcmp(name, pidexec) == 0) ? 1 : 0;
- }
- 
--
- static void
- do_procinit(void)
- {
-@@ -836,6 +838,80 @@
- }
+@@ -877,6 +880,78 @@
  
  #endif /* OSOpenBSD */
-+
+ 
 +#if defined(OSDarwin)
 +int
 +pid_is_user(pid_t pid, uid_t uid)
@@ -125,8 +108,7 @@
 +		check(procs[i].kp_proc.p_pid);
 +	}
 +}
-+#endif
-+
++#endif /* OSDarwin */
  
- 
- static void
+ #if defined(OShpux)
+ static int
