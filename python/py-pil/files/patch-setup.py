@@ -5,7 +5,7 @@
  # for Tcl/Tk files.  None enables automatic searching; to override, set
  # this to a directory name.
 -TCLROOT = None
-+TCLROOT = "/opt/local"
++TCLROOT = "@prefix@"
  
  from PIL.Image import VERSION
  
@@ -17,10 +17,10 @@
 -    INCLUDE_DIRS.append('/sw/include')
 -if os.path.exists('/sw/lib'):
 -    LIBRARY_DIRS.append('/sw/lib')
-+if os.path.exists('/opt/local/include'):
-+    INCLUDE_DIRS.append('/opt/local/include')
-+if os.path.exists('/opt/local/lib'):
-+    LIBRARY_DIRS.append('/opt/local/lib')
++if os.path.exists('@prefix@/include'):
++    INCLUDE_DIRS.append('@prefix@/include')
++if os.path.exists('@prefix@/lib'):
++    LIBRARY_DIRS.append('@prefix@/lib')
  
  HAVE_LIBJPEG = 0
  HAVE_LIBTIFF = 0
@@ -28,8 +28,8 @@
          lib = m.group(1)
          if lib == "JPEG":
              HAVE_LIBJPEG = 1
-+            INCLUDE_DIRS.append("/opt/local/include")
-+            LIBRARY_DIRS.append("/opt/local/lib")
++            INCLUDE_DIRS.append("@prefix@/include")
++            LIBRARY_DIRS.append("@prefix@/lib")
              if sys.platform == "win32":
                  LIBRARIES.append("jpeg")
                  INCLUDE_DIRS.append(JPEGDIR)
@@ -37,8 +37,8 @@
                  LIBRARIES.append("jpeg")
          elif lib == "TIFF":
              HAVE_LIBTIFF = 1
-+            INCLUDE_DIRS.append("/opt/local/include")
-+            LIBRARY_DIRS.append("/opt/local/lib")
++            INCLUDE_DIRS.append("@prefix@/include")
++            LIBRARY_DIRS.append("@prefix@/lib")
              LIBRARIES.append("tiff")
          elif lib == "Z":
              HAVE_LIBZ = 1
@@ -80,15 +80,15 @@
 +        LIBRARIES.append("freetype")
 +        INCLUDE_DIRS.append("/usr/X11R6/include/freetype2")
 +        LIBRARY_DIRS.append("/usr/X11R6/lib")
-+    elif os.path.isdir("/opt/local/include/freetype2"):
++    elif os.path.isdir("@prefix@/include/freetype2"):
          # assume that the freetype library is installed in a
          # standard location
          # FIXME: search for libraries
          LIBRARIES.append("freetype")
 -        INCLUDE_DIRS.append("/sw/include/freetype2")
 -        LIBRARY_DIRS.append("/sw/lib")
-+        INCLUDE_DIRS.append("/opt/local/include/freetype2")
-+        LIBRARY_DIRS.append("/opt/local/lib")
++        INCLUDE_DIRS.append("@prefix@/include/freetype2")
++        LIBRARY_DIRS.append("@prefix@/lib")
      else:
          have_freetype = 0
  
