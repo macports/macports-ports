@@ -1,5 +1,5 @@
---- ltmain.sh.orig	Sat Feb  1 13:04:12 2003
-+++ ltmain.sh	Mon Feb 17 16:15:57 2003
+--- ltmain.sh.orig	Mon Apr 21 11:02:29 2003
++++ ltmain.sh	Sat Mar  6 15:39:07 2004
 @@ -49,14 +49,14 @@
  fi
  
@@ -629,6 +629,21 @@
  	      if test -z "$libdir"; then
  		$echo "$modename: \`$lib' is not a valid libtool archive" 1>&2
  		exit 1
+@@ -4045,10 +3952,10 @@
+ 
+ # Directory that this library needs to be installed in:
+ libdir='$install_libdir'"
+-	  if test "$installed" = no && test $need_relink = yes; then
+-	    $echo >> $output "\
+-relink_command=\"$relink_command\""
+-	  fi
++#	  if test "$installed" = no && test $need_relink = yes; then
++#	    $echo >> $output "\
++#relink_command=\"$relink_command\""
++#	  fi
+ 	done
+       fi
+ 
 @@ -4221,7 +4128,7 @@
  
        *.la)
