@@ -19,6 +19,7 @@ DARWIN_PATCHES=" \
 	patch-05-compat_version.darwin \
 	patch-06-librarysearch.darwin \
 	patch-07-nonstatic.darwin \
+	patch-09-qinitimages.darwin \
 "
 MACOSX_PATCHES=" \
 	patch-01-xft2.darwin \
@@ -29,6 +30,7 @@ MACOSX_PATCHES=" \
 	patch-06-librarysearch.darwin \
 	patch-07-nonstatic.darwin \
 	patch-08-macdefines.macosx \
+	patch-09-qinitimages.darwin \
 "
 
 CONFIGURE="-I${worksrcpath}/include -I${prefix}/include \
