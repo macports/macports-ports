@@ -1,7 +1,7 @@
-diff -rub cvs-1.11.5.orig/src/client.c cvs-1.11.5/src/client.c
---- src/client.c	Tue Jul  8 21:51:08 2003
-+++ src/client.c	Tue Jul  8 21:51:57 2003
-@@ -1431,7 +1431,8 @@
+diff -rub cvs-1.11.6.orig/src/client.c cvs-1.11.6/src/client.c
+--- src/client.c	Tue Jul  8 22:09:06 2003
++++ src/client.c	Tue Jul  8 22:15:32 2003
+@@ -1429,7 +1429,8 @@
     the contents of that file and write them to FILENAME.  FULLNAME is
     the name of the file for use in error messages.  FIXME-someday:
     extend this to deal with compressed files and make update_entries
@@ -11,7 +11,7 @@ diff -rub cvs-1.11.5.orig/src/client.c cvs-1.11.5/src/client.c
  static void
  read_counted_file (filename, fullname)
      char *filename;
-@@ -1450,7 +1451,7 @@
+@@ -1448,7 +1449,7 @@
      size_t nread;
      size_t nwrite;
  
@@ -20,7 +20,7 @@ diff -rub cvs-1.11.5.orig/src/client.c cvs-1.11.5/src/client.c
  
      read_line (&size_string);
      if (size_string[0] == 'z')
-@@ -1471,9 +1472,12 @@
+@@ -1469,9 +1470,12 @@
         is binary or not.  I haven't carefully looked into whether
         CVS/Template files should use local text file conventions or
         not.  */
@@ -33,7 +33,7 @@ diff -rub cvs-1.11.5.orig/src/client.c cvs-1.11.5/src/client.c
      nread = size;
      nwrite = 0;
      pread = buf;
-@@ -1492,16 +1496,20 @@
+@@ -1490,16 +1494,20 @@
  
  	if (nwrite > 0)
  	{
@@ -54,20 +54,13 @@ diff -rub cvs-1.11.5.orig/src/client.c cvs-1.11.5/src/client.c
  }
  
  /* OK, we want to swallow the "U foo.c" response and then output it only
-@@ -2529,9 +2537,15 @@
-     char *short_pathname;
-     char *filename;
- {
-+    char *output;
+@@ -2531,6 +2539,9 @@
+ 	    		  + strlen ( CVSADM_TEMPLATE )
+ 			  + 2 );
+     sprintf ( buf, "%s/%s", short_pathname, CVSADM_TEMPLATE );
 +    if (strcmp (command_name, "export") == 0)
-+	    output = NULL;
++	    read_counted_file ( NULL, buf );
 +    else
-+	    output = CVSADM_TEMPLATE;
-+
-     /* FIXME: should be computing second argument from CVSADM_TEMPLATE
-        and short_pathname.  */
--    read_counted_file (CVSADM_TEMPLATE, "<CVS/Template file>");
-+    read_counted_file (output, "<CVS/Template file>");
+     read_counted_file ( CVSADM_TEMPLATE, buf );
+     free ( buf );
  }
- 
- static void handle_template PROTO ((char *, int));
