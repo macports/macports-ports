@@ -1,5 +1,5 @@
---- setup.py.orig	Thu May  6 13:42:34 2004
-+++ setup.py	Thu May  6 14:32:29 2004
+--- setup.py.orig	Mon Feb 14 12:49:53 2005
++++ setup.py	Mon Feb 14 15:34:12 2005
 @@ -30,7 +30,7 @@
  # on Windows, the following is used to control how and where to search
  # for Tcl/Tk files.  None enables automatic searching; to override, set
@@ -42,7 +42,7 @@
              LIBRARIES.append("tiff")
          elif lib == "Z":
              HAVE_LIBZ = 1
-@@ -119,6 +123,9 @@
+@@ -119,10 +123,17 @@
  # --------------------------------------------------------------------
  # configure imagingtk module
  
@@ -52,7 +52,15 @@
  try:
      import _tkinter
      TCL_VERSION = _tkinter.TCL_VERSION[:3]
-@@ -204,10 +211,15 @@
+ except (ImportError, AttributeError):
++    if (os.getenv('WITH_TK') == "yes"):
++        print "*** Python",sys.version[0]+"."+sys.version[2],"was not built with Tk support!"
++        print "*** _imagingtk extension can not be built!"
++        sys.exit(1)
+     pass
+ else:
+     INCLUDE_DIRS = ["libImaging"]
+@@ -204,10 +215,18 @@
                  EXTRA_LINK_ARGS = frameworks
                  HAVE_TCLTK = 1
  
@@ -65,10 +73,30 @@
 +            LIBRARY_DIRS.append(os.path.join(TCLROOT, "lib"))
 +            INCLUDE_DIRS.append("/usr/X11R6/include")
 +            LIBRARY_DIRS.append("/usr/X11R6/lib")
++
++    if (os.getenv('WITH_TK') != "yes") and HAVE_TCLTK:
++        HAVE_TCLTK = 0
  
      if HAVE_TCLTK:
          MODULES.append(
-@@ -266,13 +278,20 @@
+@@ -220,6 +239,16 @@
+                 )
+             )
+ 
++if (os.getenv('WITH_TK') == "yes") and not HAVE_TCLTK:
++    print "*** Unable to locate required Tk installation!"
++    print "*** _imagingtk extension can not be built!"
++    sys.exit(1)
++
++if HAVE_TCLTK:
++    print "*** Tk enabled."
++else:
++    print "*** Tk disabled."
++
+ # --------------------------------------------------------------------
+ # configure imagingft module
+ 
+@@ -266,13 +295,20 @@
          # FIXME: search for libraries
          LIBRARIES.append("freetype")
          INCLUDE_DIRS.append("/usr/include/freetype2")
