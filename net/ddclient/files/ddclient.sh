@@ -6,14 +6,14 @@ CAT=/bin/cat
 KILL=/bin/kill
 
 CONFFILE=__PREFIX/etc/$NAME.conf
-PIDFILE=/var/run/$NAME.pid
+PIDFILE=__PREFIX/var/run/$NAME.pid
 
 case "$1" in
 
 start)
 	if [ -f $CONFFILE ]; then
 		echo "Starting $NAME daemon"
-		__PREFIX/sbin/$NAME
+		__PREFIX/sbin/$NAME -daemon 300 -pid $PIDFILE
 	else
 		echo "Cannot start $NAME daemon: $CONFFILE does not exist!"
 		exit 1
