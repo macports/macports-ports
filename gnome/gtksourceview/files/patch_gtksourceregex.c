@@ -8,7 +8,8 @@
 -#include <sys/types.h>
 -#include <regex.h>
 -#else
- #include "gnu-regex/regex.h"
+-#include "gnu-regex/regex.h"
++#include <gnuregex.h>
 -#endif
  
  #include "gtksourceview-i18n.h"
