@@ -1,6 +1,6 @@
 diff -rwub pkg_install/Makefile.inc pkg_install-wrk/Makefile.inc
---- pkg_install/Makefile.inc	Fri Aug 27 18:17:53 1999
-+++ pkg_install-wrk/Makefile.inc	Thu Aug 15 00:13:54 2002
+--- Makefile.inc	Fri Aug 27 18:17:53 1999
++++ Makefile.inc	Thu Aug 15 00:13:54 2002
 @@ -6,5 +6,4 @@
  LIBINSTALL=	${.CURDIR}/../lib/libinstall.a
  .endif
