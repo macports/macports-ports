@@ -2,7 +2,7 @@
 +++ hier.c	Wed Jan 12 16:54:25 2005
 @@ -1,11 +1,11 @@
 -#include "auto_home.h"
-+const char auto_home[] = "/opt/dports-dev/net/djbdns/work/destroot/opt/local";
++const char auto_home[] = "__DESTROOT__PREFIX";
  
  void hier()
  {
