@@ -119,6 +119,11 @@ rm -rf \
        ${DESTROOT}${PREFIX}/lib/libqmotif.prl \
        ${DESTROOT}${PLUGINDIR}/accessibleqtwidgets.prl
 
+ find ${DESTROOT}${PREFIX}/share/doc/qt3 -name .moc -exec rm -rf {} \; >/dev/null 2>&1
+ find ${DESTROOT}${PREFIX}/share/doc/qt3 -name .obj -exec rm -rf {} \; >/dev/null 2>&1
+ find ${DESTROOT}${PREFIX}/share/doc/qt3/examples ${DESTROOT}${PREFIX}/share/doc/qt3/tutorial -name Makefile -exec rm -rf {} \; >/dev/null 2>&1
+ find ${DESTROOT}${PREFIX}/share/doc/qt3 -name \*.pro -exec perl -pi -e 's,^(CONFIG\s*.*)$,$1 thread,' {} \; >/dev/null 2>&1
+
 ranlib ${DESTROOT}${PREFIX}/lib/*.a
 
 exit 0
