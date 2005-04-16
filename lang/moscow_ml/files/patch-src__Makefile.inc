@@ -14,7 +14,7 @@
  # For Linux (x86 or Alpha), use:
  # ------------------------------
 -CPP=/lib/cpp -P -traditional -Dunix -Umsdos
-+CPP=cpp3 -P -traditional -Dunix -Umsdos
++CPP=cpp -P -traditional -Dunix -Umsdos
  STRIP=strip
 -LD=gcc -rdynamic
 +LD=gcc
