@@ -1,6 +1,6 @@
 --- bsdtar.c.orig	Sun Feb 20 04:01:01 2005
 +++ bsdtar.c	Sun Feb 20 04:02:15 2005
-@@ -68,6 +68,12 @@
+@@ -67,6 +67,12 @@
  #define	_PATH_DEFTAPE "/dev/st0"
  #endif
  
