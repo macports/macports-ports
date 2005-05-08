@@ -1,0 +1,24 @@
+--- errors.c.orig	2005-05-08 15:28:32.000000000 -0400
++++ errors.c	2005-05-08 15:30:38.000000000 -0400
+@@ -77,8 +77,10 @@
+     MAP(EAI_AGAIN)
+     MAP(EAI_FAIL)
+     MAP(EAI_MEMORY)
++#if 0
+     MAP(EAI_ADDRFAMILY)
+     MAP(EAI_NODATA)
++#endif
+     MAP(EAI_FAMILY)
+     MAP(EAI_BADFLAGS)
+     MAP(EAI_NONAME)
+@@ -98,8 +100,10 @@
+     MAP(EAI_AGAIN)
+     MAP(EAI_FAIL)
+     MAP(EAI_MEMORY)
++#if 0
+     MAP(EAI_ADDRFAMILY)
+     MAP(EAI_NODATA)
++#endif
+     MAP(EAI_FAMILY)
+     MAP(EAI_BADFLAGS)
+     MAP(EAI_NONAME)
