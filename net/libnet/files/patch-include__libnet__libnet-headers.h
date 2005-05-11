@@ -5,7 +5,7 @@
  
  
 -#if (__linux__)
-+#if (__linux__) || defined(__Darwin__)
++#if (__linux__) || defined(__APPLE__)
  /*
   *  Linux has a radically different IP options structure from BSD.
   */
