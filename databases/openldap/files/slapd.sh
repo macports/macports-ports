@@ -7,12 +7,12 @@ KILL=/bin/kill
 case "$1" in
 
 start)
-  echo "starting exim mail transfer agent"
+  echo "starting slapd"
   __PREFIX/libexec/slapd -f __PREFIX/etc/openldap/slapd.conf 
   ;;
 
 stop)
-  echo "stopping exim mail transfer agent"
+  echo "stopping slapd"
   $KILL -15 `$CAT __PREFIX/var/run/$PIDFILE` 
   ;;
 
