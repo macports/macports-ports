@@ -5,7 +5,7 @@
  
  /* Darwin and Win32 do not have socklen_t */
 -#if defined(__APPLE_CC__) || defined(_WIN32)
-+#if defined(_WIN32)
++#if (defined(__APPLE_CC__) && !defined(_SOCKLEN_T)) || defined(_WIN32)
  typedef int socklen_t;
  #endif
  
