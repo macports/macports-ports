@@ -1,11 +1,15 @@
---- malloc.c.orig	Thu Sep  9 21:07:49 2004
-+++ malloc.c	Thu Sep  9 21:07:58 2004
-@@ -39,15 +39,7 @@
+--- malloc.c.orig	2005-06-15 12:19:14.000000000 -0700
++++ malloc.c	2005-06-15 12:19:28.000000000 -0700
+@@ -38,19 +38,8 @@
+ 
  
  #include <stdio.h>
- #include <string.h>
 -#if linux /* daved - 0.19.0 */
  #include <stdlib.h>
+-#endif
+ #include <string.h>
+-#if linux /* daved - 0.19.0 */
+-#include <stdlib.h>
 -#endif
 -
 -#if AMIGA
