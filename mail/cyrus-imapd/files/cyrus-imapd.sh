@@ -13,7 +13,7 @@ stop)
     ;;
 
 *)
-    echo "Usage: __PREFIX__/etc/rc.d/cyrus-imapd.sh {start|stop}
+    echo "Usage: __PREFIX__/etc/rc.d/cyrus-imapd.sh {start|stop}"
     exit 1
     ;;
 
