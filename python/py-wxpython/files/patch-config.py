@@ -1,5 +1,5 @@
---- config.py	Tue Apr 26 17:15:40 2005
-+++ config.py.new	Thu Apr 28 21:39:24 2005
+--- config.py	2005-06-04 18:23:06.000000000 +0200
++++ config.py	2005-07-08 16:51:30.000000000 +0200
 @@ -107,7 +107,7 @@
                     # cause the two strings to be combined and output
                     # as the full docstring.
@@ -9,7 +9,7 @@
                     # will ensure that the right headers are found and the
                     # right libs are linked.
  
-@@ -760,7 +760,7 @@
+@@ -762,7 +762,7 @@
          cflags.append('-g')
          cflags.append('-O0')
      else:
