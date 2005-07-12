@@ -1,11 +1,22 @@
---- src/stream.d.orig	Thu Aug 12 22:02:44 2004
-+++ src/stream.d	Thu Aug 12 21:43:00 2004
-@@ -3221,7 +3221,7 @@
-     #endif
-     #ifdef UNIX_TERM_TERMIOS
-       if (!( TCDRAIN(handle) ==0)) {
--        if (!((errno==ENOTTY)||(errno==EINVAL)))
-+        if (!((errno==ENOTTY)||(errno==EINVAL)||(errno=EOPNOTSUPP)))
-           { OS_error(); } # no TTY: OK, report other Error
-       }
-     #endif
+--- src/stream.d.sav	2005-07-12 08:39:34.000000000 -0400
++++ src/stream.d	2005-07-12 08:58:02.000000000 -0400
+@@ -3214,6 +3214,9 @@
+           #ifdef UNIX_CYGWIN32 /* for win95 and xterm/rxvt */
+           if ((errno != EBADF) && (errno != EACCES))
+           #endif
++          #ifdef UNIX_DARWIN
++          if ((errno!=EOPNOTSUPP) && (errno!=ENODEV))
++          #endif
+           if (!(errno==EINVAL))
+             { OS_error(); }
+         #endif
+@@ -3267,6 +3270,9 @@
+         #ifdef UNIX_CYGWIN32 /* for win95 and xterm/rxvt */
+         if ((errno != EBADF) && (errno != EACCES))
+         #endif
++        #ifdef UNIX_DARWIN
++        if ((errno!=EOPNOTSUPP) && (errno!=ENODEV))
++        #endif
+         if (!(errno==EINVAL))
+           OS_error();
+       #endif
