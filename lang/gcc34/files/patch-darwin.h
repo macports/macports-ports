@@ -1,5 +1,5 @@
---- ../gcc-3.4.3/gcc/config/darwin.h.sav	2005-05-18 13:56:37.000000000 -0400
-+++ ../gcc-3.4.3/gcc/config/darwin.h	2005-05-18 13:57:48.000000000 -0400
+--- gcc/config/darwin.h.sav	2005-05-18 13:56:37.000000000 -0400
++++ gcc/config/darwin.h		2004-05-18 13:57:48.000000000 -0400
 @@ -275,7 +275,8 @@
  /* Machine dependent libraries.  */
  
