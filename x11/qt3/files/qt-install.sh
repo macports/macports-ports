@@ -1,90 +1,77 @@
-#!/bin/sh
+#!/bin/sh -ex
 
-for arg in "$@"; do
-	eval "$arg"
-done
+ cd $WORKSRCPATH
 
-echo "destroot = ${DESTROOT}"
-echo "prefix   = ${PREFIX}"
-echo "version  = ${VERSION}"
+ mkdir -p $PREFIX/share/qt3
 
-if test -z "${DESTROOT}" || test -z "${PREFIX}" || test -z "${VERSION}"; then
-	exit 1
-fi
+ perl -pi -e 's,\$\(QTDIR\),$QTDIR,g' lib/*.la
 
-INCLUDEDIR="${PREFIX}/include/qt3"
-PLUGINDIR="${PREFIX}/lib/qt3-plugins"
+ install -d -m 0755 $PREFIX/bin
+ install -c -m 0755 bin/* $PREFIX/bin/
 
-mkdir -p ${DESTROOT}${PREFIX}/share/qt3
-export QTDIR=`pwd`
-export DYLD_LIBRARY_PATH="$QTDIR/lib:${PREFIX}/lib:$DYLD_LIBRARY_PATH"
-export PATH="$QTDIR/bin:$PATH"
+ install -d -m 0755 $PREFIX/lib
+ install -c -m 0755 lib/* $PREFIX/lib/
 
-# it appears that make install is a tad broken
-install -d -m 0755 ${DESTROOT}${PREFIX}/bin
-install -c -m 0755 bin/* ${DESTROOT}${PREFIX}/bin/
+ install -d -m 0755 $PREFIX/lib/qt3-plugins
+ /bin/cp -fRL plugins/* $PREFIX/lib/qt3-plugins/
 
-install -d -m 0755 ${DESTROOT}${PREFIX}/lib
-install -c -m 0755 lib/* ${DESTROOT}${PREFIX}/lib/
+ ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.1.0.dylib
+ ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.1.dylib
+ ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.dylib
 
-install -d -m 0755 ${DESTROOT}${PLUGINDIR}
-cp -R plugins/* ${DESTROOT}${PLUGINDIR}
+ ln -sf libqt-mt.$VERSION.dylib $PREFIX/lib/libqt-mt.3.3.dylib
+ ln -sf libqt-mt.$VERSION.dylib $PREFIX/lib/libqt-mt.3.dylib
+ ln -sf libqt-mt.$VERSION.dylib $PREFIX/lib/libqt-mt.dylib
 
-ln -sf libdesigner.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libdesigner.1.0.dylib
-ln -sf libdesigner.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libdesigner.1.dylib
-ln -sf libdesigner.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libdesigner.dylib
+ ln -sf libqui.1.0.0.dylib $PREFIX/lib/libqui.1.0.dylib
+ ln -sf libqui.1.0.0.dylib $PREFIX/lib/libqui.1.dylib
+ ln -sf libqui.1.0.0.dylib $PREFIX/lib/libqui.dylib
 
-ln -sf libeditor.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libeditor.1.0.dylib
-ln -sf libeditor.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libeditor.1.dylib
-ln -sf libeditor.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libeditor.dylib
+ install -d -m 0755 $PREFIX/lib/pkgconfig
+ install -c -m 644  $PREFIX/lib/qt-mt.pc $PREFIX/lib/pkgconfig/
 
-ln -sf libqt-mt.${VERSION}.dylib ${DESTROOT}${PREFIX}/lib/libqt-mt.3.1.dylib
-ln -sf libqt-mt.${VERSION}.dylib ${DESTROOT}${PREFIX}/lib/libqt-mt.3.dylib
-ln -sf libqt-mt.${VERSION}.dylib ${DESTROOT}${PREFIX}/lib/libqt-mt.dylib
+ install -d -m 0755 $PREFIX/share/man/man1
+ install -d -m 0755 $PREFIX/share/man/man3
+ install -c -m 644  doc/man/man1/* $PREFIX/share/man/man1/
+ install -c -m 644  doc/man/man3/* $PREFIX/share/man/man3/
 
-ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.1.0.dylib
-ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.1.dylib
-ln -sf libqui.1.0.0.dylib ${DESTROOT}${PREFIX}/lib/libqui.dylib
+ # clean up the makefiles
+ make -C tutorial clean
+ make -C examples clean
+ perl -pi -e "s,^DEPENDPATH.*,,g;s,^REQUIRES.*,,g" `/usr/bin/find examples -name "*.pro"`
+ for a in */*/Makefile ; do
+  perl -pi -e 's,^SYSCONF_MOC.*,SYSCONF_MOC             = $QTDIR/bin/moc,' $a
+ done
 
-install -d -m 0755 ${DESTROOT}${PREFIX}/man/man1
-install -d -m 0755 ${DESTROOT}${PREFIX}/man/man3
-install -c -m 644  doc/man/man1/* ${DESTROOT}${PREFIX}/man/man1/
-install -c -m 644  doc/man/man3/* ${DESTROOT}${PREFIX}/man/man3/
+ # install the includes
+ for i in include/* include/*/*; do [ -e $i ] || rm -f $i; done
+ install -d -m 0755 $PREFIX/include/qt
+ /bin/cp -fRL include/* $PREFIX/include/qt/
 
-# clean up the makefiles
-make -C tutorial clean
-make -C examples clean
-perl -pi -e "s,^DEPENDPATH.*,,g;s,^REQUIRES.*,,g" `find examples -name "*.pro"`
-for a in */*/Makefile ; do
- perl -pi -e 's,^SYSCONF_MOC.*,SYSCONF_MOC             = ${PREFIX}/bin/moc,' $a
-done
+ # and now the docs
+ install -d -m 0755 $PREFIX/share/doc/qt3/html
+ install -d -m 0755 $PREFIX/share/doc/qt3/tutorial
+ install -d -m 0755 $PREFIX/share/doc/qt3/examples
+ /bin/cp -fRL doc/html/* $PREFIX/share/doc/qt3/html/
+ /bin/cp -fRL tutorial/* $PREFIX/share/doc/qt3/tutorial/
+ /bin/cp -fRL examples/* $PREFIX/share/doc/qt3/examples/
 
-# install the includes
-for i in include/* include/*/*; do [ -e $i ] || rm -f $i; done
-install -d -m 0755 ${DESTROOT}${INCLUDEDIR}
-cp -fRL include/* ${DESTROOT}${INCLUDEDIR}
+ # the mkspecs
+ install -d -m 0755 $PREFIX/share/qt3/mkspecs
+ /bin/cp -fRL mkspecs/* $PREFIX/share/qt3/mkspecs/
 
-# and now the docs
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/doc/qt3/html
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/doc/qt3/tutorial
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/doc/qt3/examples
-cp -fRL doc/html/* ${DESTROOT}${PREFIX}/share/doc/qt3/html/
-cp -fRL tutorial/* ${DESTROOT}${PREFIX}/share/doc/qt3/tutorial/
-cp -fRL examples/* ${DESTROOT}${PREFIX}/share/doc/qt3/examples/
+ # qt designer and linguist templates and phrasebooks
+ install -d -m 0755 $PREFIX/share/qt3/templates
+ install -d -m 0755 $PREFIX/share/qt3/phrasebooks
+ /bin/cp -fRL tools/designer/templates/* $PREFIX/share/qt3/templates/
+ /bin/cp -fRL tools/linguist/phrasebooks/* $PREFIX/share/qt3/phrasebooks/
 
-# the mkspecs
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/qt3/mkspecs
-cp -fRL mkspecs/* ${DESTROOT}${PREFIX}/share/qt3/mkspecs/
+ install -d -m 0755 $PREFIX/share/qt3/translations
+ install -c -m 644 `find . -name \*.qm` $PREFIX/share/qt3/translations/
 
-# qt designer and linguist templates and phrasebooks
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/qt3/templates
-install -d -m 0755 ${DESTROOT}${PREFIX}/share/qt3/phrasebooks
-cp -fRL tools/designer/templates/* ${DESTROOT}${PREFIX}/share/qt3/templates/
-cp -fRL tools/linguist/phrasebooks/* ${DESTROOT}${PREFIX}/share/qt3/phrasebooks/
-
-# kde icon for qt designer
-mkdir -p ${DESTROOT}${PREFIX}/share/applnk/Development
-cat >${DESTROOT}${PREFIX}/share/applnk/Development/designer.desktop <<EOF
+ # kde icon for qt designer
+ /bin/mkdir -p $PREFIX/share/applnk/Development
+ cat >$PREFIX/share/applnk/Development/designer.desktop <<EOF
 [Desktop Entry]
 BinaryPattern=designer;
 Name=Qt Designer
@@ -98,7 +85,7 @@ Terminal=false
 Encoding=UTF-8
 Type=Application
 EOF
-cat >${DESTROOT}${PREFIX}/share/applnk/Development/linguist.desktop <<EOF
+ cat >$PREFIX/share/applnk/Development/linguist.desktop <<EOF
 [Desktop Entry]
 BinaryPattern=linguist;
 Name=Qt Linguist
@@ -112,18 +99,21 @@ Encoding=UTF-8
 Type=Application
 EOF
 
-# remove extra junk
-rm -rf \
-       ${DESTROOT}${PREFIX}/lib/README \
-       ${DESTROOT}${PLUGINDIR}/src \
-       ${DESTROOT}${PREFIX}/lib/libqmotif.prl \
-       ${DESTROOT}${PLUGINDIR}/accessibleqtwidgets.prl
+ # remove extra junk
+ /bin/rm -rf \
+        $PREFIX/lib/README \
+        $PREFIX/lib/qt3-plugins/src \
+        $PREFIX/lib/*f.prl
 
- find ${DESTROOT}${PREFIX}/share/doc/qt3 -name .moc -exec rm -rf {} \; >/dev/null 2>&1
- find ${DESTROOT}${PREFIX}/share/doc/qt3 -name .obj -exec rm -rf {} \; >/dev/null 2>&1
- find ${DESTROOT}${PREFIX}/share/doc/qt3/examples ${DESTROOT}${PREFIX}/share/doc/qt3/tutorial -name Makefile -exec rm -rf {} \; >/dev/null 2>&1
- find ${DESTROOT}${PREFIX}/share/doc/qt3 -name \*.pro -exec perl -pi -e 's,^(CONFIG\s*.*)$,$1 thread,' {} \; >/dev/null 2>&1
+ /usr/bin/find $PREFIX/share/doc/qt3 -name \*.moc -print0 | xargs -0 rm -rf {} >/dev/null 2>&1 || :
+ /usr/bin/find $PREFIX/share/doc/qt3 -name \*.obj -print0 | xargs -0 rm -rf {} >/dev/null 2>&1 || :
+ /usr/bin/find $PREFIX/share/doc/qt3/examples $PREFIX/share/doc/qt3/tutorial -name Makefile -print0 | xargs -0 rm -rf >/dev/null 2>&1 || :
+ /usr/bin/find $PREFIX/share/doc/qt3 -name \*.pro -print0 | xargs -0 perl -pi -e 's,^(CONFIG\s*.*)$,$1 thread,' >/dev/null 2>&1 || :
+ /usr/bin/find $PREFIX -name \*.bak -print0 | xargs -0 rm -rf >/dev/null 2>&1 || :
 
-ranlib ${DESTROOT}${PREFIX}/lib/*.a
+ perl -pi -e 's,\$\(QTDIR\),$QTDIR,g' $PREFIX/lib/libqt-mt.la
 
-exit 0
+ install -d -m 755 $PREFIX/share/doc/installed-packages
+ touch $PREFIX/share/doc/installed-packages/qt3
+ touch $PREFIX/share/doc/installed-packages/qt3-dev
+
