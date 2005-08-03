@@ -45,8 +45,8 @@
 
  # install the includes
  for i in include/* include/*/*; do [ -e $i ] || rm -f $i; done
- install -d -m 0755 $PREFIX/include/qt
- /bin/cp -fRL include/* $PREFIX/include/qt/
+ install -d -m 0755 $PREFIX/include/qt3
+ /bin/cp -fRL include/* $PREFIX/include/qt3/
 
  # and now the docs
  install -d -m 0755 $PREFIX/share/doc/qt3/html
