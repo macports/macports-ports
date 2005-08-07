@@ -1,5 +1,5 @@
---- main.c	Sun Dec  7 02:14:30 2003
-+++ main.c	Sun Dec  7 02:20:06 2003
+--- main.c.orig	2005-06-20 15:29:38.000000000 +0900
++++ main.c	2005-06-20 15:30:16.000000000 +0900
 @@ -125,23 +125,11 @@
  char **SLOCATE_PATH = NULL;
  
@@ -28,3 +28,12 @@
  char *EXCLUDE_DIR=NULL;
  int EXCLUDE=0;
  int VERBOSE=0;
+@@ -1031,7 +1019,7 @@
+ 	*dirchk = dirstr;
+ 	dirchk[1] = NULL;
+ 	
+-	dir = fts_open(dirchk,FTS_PHYSICAL,NULL);
++	dir = fts_open(dirchk,FTS_PHYSICAL|FTS_NOCHDIR,NULL);
+ 	
+ 	/* If fts_open failes, report and exit */
+ 	if (!dir)
