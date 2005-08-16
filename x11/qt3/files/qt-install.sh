@@ -59,6 +59,8 @@
  # the mkspecs
  install -d -m 0755 $PREFIX/share/qt3/mkspecs
  /bin/cp -fRL mkspecs/* $PREFIX/share/qt3/mkspecs/
+ rm -rf $PREFIX/share/qt3/mkspecs/default
+ ln -s darwin-g++ $PREFIX/share/qt3/mkspecs/default
 
  # qt designer and linguist templates and phrasebooks
  install -d -m 0755 $PREFIX/share/qt3/templates
