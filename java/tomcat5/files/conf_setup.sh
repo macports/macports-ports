@@ -24,8 +24,17 @@ if [ ! -d "${CONF}" ]; then
 	exit 1
 fi
 
+CONF_FILES=" \
+	conf/catalina.policy \
+	conf/catalina.properties \
+	conf/server.xml \
+	conf/tomcat-users.xml \
+	conf/web.xml \
+	conf/setenv.local \
+	"
+
 # Try to repair any needed files in conf
-for FILE in conf/catalina.policy conf/catalina.properties conf/server.xml conf/tomcat-users.xml conf/web.xml; do
+for FILE in $CONF_FILES; do
 	SAMPLE="${FILE}.sample"
 	if [ ! -f "${CATALINA_BASE}/${FILE}" ]; then
 		if [ ! -f "${CATALINA_BASE}/${SAMPLE}" ]; then
