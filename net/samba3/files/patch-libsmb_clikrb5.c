@@ -1,6 +1,6 @@
---- libsmb/clikrb5.c	Sun Nov  7 21:43:23 2004
-+++ libsmb/clikrb5.c.new	Wed Jan  5 00:38:45 2005
-@@ -53,8 +53,13 @@
+--- libsmb/clikrb5.c	2005-07-28 15:19:46.000000000 +0200
++++ libsmb/clikrb5.c	2005-08-26 01:48:58.000000000 +0200
+@@ -56,8 +56,13 @@
  }
  #endif
  
@@ -16,7 +16,7 @@
  {
  	return krb5_set_default_in_tkt_etypes(ctx, enc);
  }
-@@ -206,6 +211,7 @@
+@@ -209,6 +214,7 @@
  #if !defined(HAVE_KRB5_LOCATE_KDC)
   krb5_error_code krb5_locate_kdc(krb5_context ctx, const krb5_data *realm, struct sockaddr **addr_pp, int *naddrs, int get_masters)
  {
@@ -24,7 +24,7 @@
  	krb5_krbhst_handle hnd;
  	krb5_krbhst_info *hinfo;
  	krb5_error_code rc;
-@@ -260,6 +266,10 @@
+@@ -263,6 +269,10 @@
  
  	*naddrs = num_kdcs;
  	*addr_pp = sa;
