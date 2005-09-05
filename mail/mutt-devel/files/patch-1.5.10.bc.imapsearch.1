@@ -1,0 +1,340 @@
+# HG changeset patch
+# User Brendan Cully <brendan@kublai.com>
+# Node ID 9e7f6e2fd959d28e0f84b925fb4d831f5f52a037
+# Parent  796908c4398ba505e4d0c2c8d48257c506aeabeb
+First draft of server-side searching
+
+diff -r 796908c4398b -r 9e7f6e2fd959 imap/command.c
+--- a/imap/command.c	Sun Sep  4 21:18:50 2005
++++ b/imap/command.c	Mon Sep  5 03:16:32 2005
+@@ -44,6 +44,7 @@
+ static void cmd_parse_lsub (IMAP_DATA* idata, char* s);
+ static void cmd_parse_fetch (IMAP_DATA* idata, char* s);
+ static void cmd_parse_myrights (IMAP_DATA* idata, char* s);
++static void cmd_parse_search (IMAP_DATA* idata, char* s);
+ 
+ static char *Capabilities[] = {
+   "IMAP4",
+@@ -367,6 +368,8 @@
+     cmd_parse_lsub (idata, s);
+   else if (ascii_strncasecmp ("MYRIGHTS", s, 8) == 0)
+     cmd_parse_myrights (idata, s);
++  else if (ascii_strncasecmp ("SEARCH", s, 6) == 0)
++    cmd_parse_search (idata, s);
+   else if (ascii_strncasecmp ("BYE", s, 3) == 0)
+   {
+     dprint (2, (debugfile, "Handling BYE\n"));
+@@ -624,3 +627,33 @@
+     s++;
+   }
+ }
++
++/* This should be optimised (eg with a tree or hash) */
++static int uid2msgno (IMAP_DATA* idata, unsigned int uid)
++{
++  int i;
++  
++  for (i = 0; i < idata->ctx->msgcount; i++)
++  {
++    HEADER* h = idata->ctx->hdrs[i];
++    if (HEADER_DATA(h)->uid == uid)
++      break;
++  }
++  
++  return i;
++}
++
++/* cmd_parse_search: store SEARCH response for later use */
++static void cmd_parse_search (IMAP_DATA* idata, char* s)
++{
++  unsigned int uid;
++
++  dprint (2, (debugfile, "Handling SEARCH\n"));
++
++  while ((s = imap_next_word (s)) && *s != '\0')
++  {
++    uid = atoi (s);
++    
++    idata->ctx->hdrs[uid2msgno (idata, uid)]->matched = 1;
++  }
++}
+diff -r 796908c4398b -r 9e7f6e2fd959 imap/imap.c
+--- a/imap/imap.c	Sun Sep  4 21:18:50 2005
++++ b/imap/imap.c	Mon Sep  5 03:16:32 2005
+@@ -1298,6 +1298,149 @@
+   return msgcount;
+ }
+ 
++/* returns number of patterns in the search that should be done server-side
++ * (eg are full-text) */
++static int do_search (const pattern_t* search, int allpats)
++{
++  int rc = 0;
++  const pattern_t* pat;
++
++  for (pat = search; pat; pat = pat->next)
++  {
++    switch (pat->op)
++    {
++      case M_BODY:
++      case M_HEADER:
++      case M_WHOLE_MSG:
++        rc++;
++        break;
++      default:
++        if (pat->child && do_search (pat->child, 1))
++          rc++;
++    }
++    
++    if (!allpats)
++      break;
++  }
++  
++  return rc;
++}
++
++/* convert mutt pattern_t to IMAP SEARCH command containing only elements
++ * that require full-text search (mutt already has what it needs for most
++ * match types, and does a better job (eg server doesn't support regexps). */
++static int imap_compile_search (const pattern_t* search, BUFFER* buf)
++{
++  char term[STRING];
++
++  if (do_search (search, 0) && search->not)
++    mutt_buffer_addstr (buf, "NOT ");
++
++  if (search->child)
++  {
++    int clauses;
++
++    if ((clauses = do_search (search->child, 1)) > 0)
++    {
++      const pattern_t* clause = search->child;
++
++      mutt_buffer_addch (buf, '(');
++
++      while (clauses)
++      {
++        if (do_search (clause, 0))
++        {
++          if (search->op == M_OR && clauses > 1)
++            mutt_buffer_addstr (buf, "OR ");
++          clauses--;
++          
++          if (imap_compile_search (clause, buf) < 0)
++            return -1;
++
++          if (clauses)
++            mutt_buffer_addch (buf, ' ');
++          
++          clause = clause->next;
++        }
++      }
++
++      mutt_buffer_addch (buf, ')');
++    }
++  }
++  else
++  {
++    char *delim;
++
++    switch (search->op)
++    {
++      case M_HEADER:
++        mutt_buffer_addstr (buf, "HEADER ");
++
++        /* extract header name */
++        if (! (delim = strchr (search->substr, ':')))
++        {
++          mutt_error (_("Header search without header name: %s"), search->substr);
++          return -1;
++        }
++        *delim = '\0';
++        imap_quote_string (term, sizeof (term), search->substr);
++        mutt_buffer_addstr (buf, term);
++        mutt_buffer_addch (buf, ' ');
++        
++        /* and field */
++        *delim = ':';
++        delim++;
++        SKIPWS(delim);
++        imap_quote_string (term, sizeof (term), delim);
++        mutt_buffer_addstr (buf, term);
++        break;
++      case M_BODY:
++        mutt_buffer_addstr (buf, "BODY ");
++        imap_quote_string (term, sizeof (term), search->substr);
++        mutt_buffer_addstr (buf, term);
++        break;
++      case M_WHOLE_MSG:
++        mutt_buffer_addstr (buf, "TEXT ");
++        imap_quote_string (term, sizeof (term), search->substr);
++        mutt_buffer_addstr (buf, term);
++        break;
++      default:
++        return 0;
++    }
++  }
++
++  return 0;
++}
++
++int imap_search (CONTEXT* ctx, const pattern_t* search)
++{
++  BUFFER buf;
++  IMAP_DATA* idata = (IMAP_DATA*)ctx->data;
++  int i;
++
++  for (i = 0; i < ctx->msgcount; i++)
++    ctx->hdrs[i]->matched = 0;
++
++  if (!do_search (search, 1))
++    return 0;
++
++  memset (&buf, 0, sizeof (buf));
++  mutt_buffer_addstr (&buf, "UID SEARCH ");
++  if (imap_compile_search (search, &buf) < 0)
++  {
++    FREE (&buf.data);
++    return -1;
++  }
++  if (imap_exec (idata, buf.data, 0) < 0)
++  {
++    FREE (&buf.data);
++    return -1;
++  }
++
++  FREE (&buf.data);
++  return 0;
++}
++
+ /* all this listing/browsing is a mess. I don't like that name is a pointer
+  *   into idata->buf (used to be a pointer into the passed in buffer, just
+  *   as bad), nor do I like the fact that the fetch is done here. This
+diff -r 796908c4398b -r 9e7f6e2fd959 imap/imap.h
+--- a/imap/imap.h	Sun Sep  4 21:18:50 2005
++++ b/imap/imap.h	Mon Sep  5 03:16:32 2005
+@@ -41,6 +41,7 @@
+ void imap_close_mailbox (CONTEXT *ctx);
+ int imap_buffy_check (char *path);
+ int imap_mailbox_check (char *path, int new);
++int imap_search (CONTEXT* ctx, const pattern_t* search);
+ int imap_subscribe (char *path, int subscribe);
+ int imap_complete (char* dest, size_t dlen, char* path);
+ 
+diff -r 796908c4398b -r 9e7f6e2fd959 mutt.h
+--- a/mutt.h	Sun Sep  4 21:18:50 2005
++++ b/mutt.h	Mon Sep  5 03:16:32 2005
+@@ -798,6 +798,10 @@
+   struct pattern_t *next;
+   struct pattern_t *child;		/* arguments to logical op */
+   regex_t *rx;
++#ifdef USE_IMAP
++  /* server-side search only understands substring searches, not regexp */
++  char *substr;
++#endif
+ } pattern_t;
+ 
+ typedef struct
+diff -r 796908c4398b -r 9e7f6e2fd959 pattern.c
+--- a/pattern.c	Sun Sep  4 21:18:50 2005
++++ b/pattern.c	Mon Sep  5 03:16:32 2005
+@@ -34,6 +34,13 @@
+ #include <stdarg.h>
+ 
+ #include "mutt_crypt.h"
++
++#ifdef USE_IMAP
++#include "mx.h"
++#include "imap/imap.h"
++
++static int eat_substr (pattern_t *pat, BUFFER *, BUFFER *);
++#endif
+ 
+ static int eat_regexp (pattern_t *pat, BUFFER *, BUFFER *);
+ static int eat_date (pattern_t *pat, BUFFER *, BUFFER *);
+@@ -245,6 +252,23 @@
+   return match;
+ }
+ 
++static int eat_substr (pattern_t* pat, BUFFER *s, BUFFER *err)
++{
++  BUFFER buf;
++  
++  memset (&buf, 0, sizeof (buf));
++  if (mutt_extract_token (&buf, s, M_TOKEN_PATTERN) != 0 || !buf.data)
++  {
++    snprintf (err->data, err->dsize, _("Error in expression: %s"), s->dptr);
++    return -1;
++  }
++  
++  pat->substr = safe_strdup (buf.data);
++  FREE (&buf.data);
++  
++  return 0;
++}
++
+ int eat_regexp (pattern_t *pat, BUFFER *s, BUFFER *err)
+ {
+   BUFFER buf;
+@@ -708,6 +732,9 @@
+       regfree (tmp->rx);
+       FREE (&tmp->rx);
+     }
++#ifdef USE_IMAP
++    FREE (&tmp->substr);
++#endif
+     if (tmp->child)
+       mutt_pattern_free (&tmp->child);
+     FREE (&tmp);
+@@ -821,6 +848,16 @@
+ 	    mutt_pattern_free (&curlist);
+ 	    return NULL;
+ 	  }
++#ifdef USE_IMAP
++          if (Context && Context->magic == M_IMAP && entry->class == M_FULL_MSG)
++          {
++            if (eat_substr (tmp, &ps, err) == -1)
++            {
++              mutt_pattern_free (&curlist);
++              return NULL;
++            }
++          } else
++#endif
+ 	  if (entry->eat_arg (tmp, &ps, err) == -1)
+ 	  {
+ 	    mutt_pattern_free (&curlist);
+@@ -1013,6 +1050,10 @@
+     case M_BODY:
+     case M_HEADER:
+     case M_WHOLE_MSG:
++#ifdef USE_IMAP
++      /* IMAP search sets h->matched at search compile time */
++      return (h->matched);
++#endif
+       return (pat->not ^ msg_search (ctx, pat->rx, pat->op, h->msgno));
+     case M_SENDER:
+       return (pat->not ^ match_adrlist (pat->rx, flags & M_MATCH_FULL_ADDRESS,
+@@ -1171,6 +1212,11 @@
+     return (-1);
+   }
+ 
++#ifdef USE_IMAP
++  if (Context->magic == M_IMAP && imap_search (Context, pat) < 0)
++    return -1;
++#endif
++  
+   mutt_message _("Executing command on matching messages...");
+ 
+ #define THIS_BODY Context->hdrs[i]->content
+@@ -1303,6 +1349,10 @@
+   {
+     for (i = 0; i < Context->msgcount; i++)
+       Context->hdrs[i]->searched = 0;
++#ifdef USE_IMAP
++    if (Context->magic == M_IMAP && imap_search (Context, SearchPattern) < 0)
++      return -1;
++#endif
+     unset_option (OPTSEARCHINVALID);
+   }
+ 
