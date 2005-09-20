@@ -6,7 +6,7 @@
  
 -extern char **environ;
 +#ifdef __APPLE__
-+# include <crt_externs.h
++# include <crt_externs.h>
 ++# define environ (*_NSGetEnviron())
 +#elif
 + extern char **environ;
