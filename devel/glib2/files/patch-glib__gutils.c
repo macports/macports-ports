@@ -1,14 +1,10 @@
---- glib/gutils.c.org	2005-09-08 08:58:41.000000000 +0200
-+++ glib/gutils.c	2005-09-08 08:58:58.000000000 +0200
-@@ -46,9 +46,10 @@
- #ifdef HAVE_SYS_PARAM_H
- #include <sys/param.h>
+--- glib/gutils.c.orig	2005-09-28 00:06:16.000000000 -0700
++++ glib/gutils.c	2005-09-28 00:06:48.000000000 -0700
+@@ -48,6 +48,7 @@
  #endif
  #ifdef HAVE_CRT_EXTERNS_H 
--#include <crt-externs.h> /* for _NSGetEnviron */
-+#include <crt_externs.h> /* for _NSGetEnviron */
+ #include <crt_externs.h> /* for _NSGetEnviron */
 +#define HAVE__NSGETENVIRON
  #endif
  
  /* implement gutils's inline functions
-  */
