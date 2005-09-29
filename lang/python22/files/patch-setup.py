@@ -1,12 +1,12 @@
---- setup.py.orig	Sun Feb 13 17:55:38 2005
-+++ setup.py	Sun Feb 13 17:56:40 2005
-@@ -879,7 +879,8 @@
+--- setup.py	2003-05-22 19:36:54.000000000 +0200
++++ setup.py	2005-09-29 16:32:09.000000000 +0200
+@@ -690,7 +690,8 @@
          self.extensions.extend(exts)
  
          # Call the method for detecting whether _tkinter can be compiled
 -        self.detect_tkinter(inc_dirs, lib_dirs)
-+        if ("--disable-tk" not in sysconfig.get_config_var("CONFIG_ARGS")):
++        if sysconfig.get_config_var("CONFIG_ARGS").find("--disable-tk") == -1:
 +            self.detect_tkinter(inc_dirs, lib_dirs)
  
-     def detect_tkinter_darwin(self, inc_dirs, lib_dirs):
-         # The _tkinter module, using frameworks. Since frameworks are quite
+ 
+     def detect_tkinter(self, inc_dirs, lib_dirs):
