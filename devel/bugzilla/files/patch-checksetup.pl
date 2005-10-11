@@ -1,6 +1,6 @@
---- checksetup.pl.orig	Thu Sep 30 19:47:00 2004
-+++ checksetup.pl	Thu Sep 30 19:47:43 2004
-@@ -378,7 +378,7 @@
+--- checksetup.pl	2005-09-27 19:16:55.000000000 +0200
++++ checksetup.pl	2005-10-11 13:55:12.000000000 +0200
+@@ -442,7 +442,7 @@
          }
      }
      print "\n";
@@ -9,7 +9,7 @@
  }
  
  }
-@@ -596,7 +596,7 @@
+@@ -661,7 +661,7 @@
  
  my $webservergroup_default;
  if ($^O !~ /MSWin32/i) {
@@ -18,12 +18,3 @@
  } else {
      $webservergroup_default = '';
  }
-@@ -1099,7 +1099,7 @@
-            print "\n\n";
-            print "The directory '$datadir/template' could not be removed. Please\n";
-            print "remove it manually and rerun checksetup.pl.\n\n";
--           exit;
-+           exit 1;
-        }
-     }
- 
