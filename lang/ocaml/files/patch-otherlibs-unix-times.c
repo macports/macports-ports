@@ -4,7 +4,7 @@
  #include <time.h>
  #include <sys/types.h>
  #include <sys/times.h>
-+#include <machine/limits.h> /* workaround for radr://4215384 */
++#include <machine/limits.h> /* workaround for Ocaml bug 0003756 */
  
  #ifndef CLK_TCK
  #ifdef HZ
