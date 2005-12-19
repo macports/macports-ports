@@ -1,6 +1,6 @@
---- work/Botan-1.4.7/configure.pl	2005-09-26 03:57:10.000000000 +0200
-+++ configure.pl	2005-09-26 12:34:33.000000000 +0200
-@@ -374,7 +374,7 @@
+--- work/Botan-1.4.10/configure.pl	2005-12-18 23:19:29.000000000 +0100
++++ configure.pl	2005-12-19 17:07:25.000000000 +0100
+@@ -372,7 +372,7 @@
        'root'       => 'c:\Botan',
        },
     'darwin'     => {
@@ -9,7 +9,7 @@
        'group'      => 'wheel',
        },
     'defaults'   => {
-@@ -703,7 +703,7 @@
+@@ -701,7 +701,7 @@
     'gcc'        => {
        'aix'        => '$(CXX) -shared -fPIC',
        'beos'       => 'ld -shared -h $(SONAME)',
@@ -18,7 +18,7 @@
        'default'    => '$(CXX) -shared -fPIC -Wl,-soname,$(SONAME)',
        'hpux'       => '$(CXX) -shared -fPIC -Wl,+h,$(SONAME)',
        'solaris'    => '$(CXX) -shared -fPIC -Wl,-h,$(SONAME)',
-@@ -2111,7 +2111,7 @@
+@@ -2125,7 +2125,7 @@
  BINDIR        = \$(INSTALLROOT)/bin
  LIBDIR        = \$(INSTALLROOT)/$lib_dir
  HEADERDIR     = \$(INSTALLROOT)/$header_dir/botan
