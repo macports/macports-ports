@@ -1,6 +1,6 @@
---- lib/mkmf.rb.orig	2005-08-14 17:03:02.000000000 +0900
-+++ lib/mkmf.rb	2005-08-14 17:03:36.000000000 +0900
-@@ -47,6 +47,9 @@
+--- lib/mkmf.rb.orig	2005-11-27 16:22:53.000000000 -0800
++++ lib/mkmf.rb	2006-01-08 08:38:20.000000000 -0800
+@@ -50,6 +50,9 @@
  $sitedir = CONFIG["sitedir"]
  $sitelibdir = CONFIG["sitelibdir"]
  $sitearchdir = CONFIG["sitearchdir"]
@@ -10,7 +10,7 @@
  
  $mswin = /mswin/ =~ RUBY_PLATFORM
  $bccwin = /bccwin/ =~ RUBY_PLATFORM
-@@ -347,7 +350,7 @@
+@@ -409,7 +412,7 @@
  
  def try_func(func, libs, headers = nil, &b)
    headers = cpp_include(headers)
@@ -19,7 +19,7 @@
  #{headers}
  /*top*/
  int main() { return 0; }
-@@ -359,6 +362,11 @@
+@@ -421,6 +424,11 @@
  int main() { return 0; }
  int t() { void ((*volatile p)()); p = (void ((*)()))#{func}; return 0; }
  SRC
@@ -30,16 +30,16 @@
 +SRC
  end
  
- def egrep_cpp(pat, src, opt = "", &b)
-@@ -751,6 +759,7 @@
+ def try_var(var, headers = nil, &b)
+@@ -970,6 +978,7 @@
  RUBY_SO_NAME = #{CONFIG['RUBY_SO_NAME']}
  arch = #{CONFIG['arch']}
  sitearch = #{CONFIG['sitearch']}
 +vendorarch = #{CONFIG['vendorarch']}
  ruby_version = #{Config::CONFIG['ruby_version']}
  ruby = #{$ruby}
- RUBY = #{($nmake && !$extmk && !$configure_args.has_key?('--ruby')) ? '$(ruby:/=\)' : '$(ruby)'}
-@@ -962,7 +971,7 @@
+ RUBY = $(ruby#{sep})
+@@ -1269,7 +1278,7 @@
    $CFLAGS = with_config("cflags", arg_config("CFLAGS", config["CFLAGS"])).dup
    $ARCH_FLAG = with_config("arch_flag", arg_config("ARCH_FLAG", config["ARCH_FLAG"])).dup
    $CPPFLAGS = with_config("cppflags", arg_config("CPPFLAGS", config["CPPFLAGS"])).dup

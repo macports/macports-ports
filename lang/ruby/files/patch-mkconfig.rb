@@ -1,17 +1,17 @@
---- ../ruby-1.8.2.orig/mkconfig.rb	Tue Aug  5 02:27:20 2003
-+++ mkconfig.rb	Tue Dec 28 21:52:28 2004
-@@ -111,6 +111,14 @@
+--- mkconfig.rb.orig	2005-11-10 15:22:03.000000000 -0800
++++ mkconfig.rb	2006-01-08 08:36:13.000000000 -0800
+@@ -112,6 +112,14 @@
    CONFIG["archdir"] = "$(rubylibdir)/$(arch)"
    CONFIG["sitelibdir"] = "$(sitedir)/$(ruby_version)"
    CONFIG["sitearchdir"] = "$(sitelibdir)/$(sitearch)"
 +  CONFIG["vendorlibdir"] = "$(vendordir)/$(ruby_version)"
 +  CONFIG["vendorarchdir"] = "$(vendorlibdir)/$(vendorarch)"
 +  if defined?(VENDOR_SPECIFIC) && VENDOR_SPECIFIC
-+	CONFIG["sitearch"] = CONFIG["vendorarch"]
-+	CONFIG["sitedir"] = CONFIG["vendordir"]
-+	CONFIG["sitelibdir"] = CONFIG["vendorlibdir"]
-+	CONFIG["sitearchdir"] = CONFIG["vendorarchdir"]
++ 	CONFIG["sitearch"] = CONFIG["vendorarch"]
++ 	CONFIG["sitedir"] = CONFIG["vendordir"]
++ 	CONFIG["sitelibdir"] = CONFIG["vendorlibdir"]
++ 	CONFIG["sitearchdir"] = CONFIG["vendorarchdir"]
 +  end
-   CONFIG["compile_dir"] = "#{Dir.pwd}"
+   CONFIG["topdir"] = File.dirname(__FILE__)
    MAKEFILE_CONFIG = {}
    CONFIG.each{|k,v| MAKEFILE_CONFIG[k] = v.dup}
