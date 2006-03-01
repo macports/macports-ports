@@ -6,10 +6,7 @@
         ./build-helper.sh install        %N %v %r make -j1 install DESTDIR=%d
 #apidox#./build-helper.sh install-apidox %N %v %r make -j1 install-apidox install-apidox-recurse DESTDIR=%d
 
-	#fink
-        #rm -rf %i/share/icons/hicolor/index.theme
-	#darwinports
-	#
+        rm -rf %i/share/icons/hicolor/index.theme
 
         install -c -m 644 darwin/* %i/share/config
 
