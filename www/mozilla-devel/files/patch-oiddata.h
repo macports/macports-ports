@@ -1,5 +1,5 @@
---- mozilla/security/nss/lib/pki1/oiddata.h.orig	2006-03-05 13:24:38.000000000 -0500
-+++ mozilla/security/nss/lib/pki1/oiddata.h	2006-03-05 13:26:33.000000000 -0500
+--- security/nss/lib/pki1/oiddata.h.orig	2006-03-05 13:24:38.000000000 -0500
++++ security/nss/lib/pki1/oiddata.h	2006-03-05 13:26:33.000000000 -0500
 @@ -43,7 +43,7 @@
  #include "nsspki1t.h"
  #endif /* NSSPKI1T_H */
