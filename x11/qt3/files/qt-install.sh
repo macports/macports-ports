@@ -15,6 +15,10 @@
  install -d -m 0755 $PREFIX/lib/qt3-plugins
  /bin/cp -fRL plugins/* $PREFIX/lib/qt3-plugins/
 
+ ln -sf libdesignercore.1.0.0.dylib $PREFIX/lib/libdesignercore.1.0.dylib
+ ln -sf libdesignercore.1.0.dylib   $PREFIX/lib/libdesignercore.1.dylib
+ ln -sf libdesignercore.1.dylib     $PREFIX/lib/libdesignercore.dylib
+
  ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.1.0.dylib
  ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.1.dylib
  ln -sf libeditor.1.0.0.dylib $PREFIX/lib/libeditor.dylib
