@@ -23,7 +23,7 @@
  # ------------------------- Recursive make targets ------------------------- #
  
 -SODEFS=LDFLAGS='$(LDFLAGS) $(CFLAGS_SO) -shared -Wl,-soname=$(GS_SONAME_MAJOR)'\
-+SODEFS=LDFLAGS='$(LDFLAGS) $(CFLAGS_SO) -dynamiclib -install_name $(prefix)/lib/$(GS_SONAME_MAJOR)'\
++SODEFS=LDFLAGS='$(LDFLAGS) $(CFLAGS_SO) -unexported_symbols_list @@FILESPATH@@/unexported_symbols_list -dynamiclib -install_name $(prefix)/lib/$(GS_SONAME_MAJOR)'\
   GS_XE=$(BINDIR)/$(SOBINRELDIR)/$(GS_SONAME_MAJOR_MINOR)\
   STDIO_IMPLEMENTATION=c\
   DISPLAY_DEV=$(DD)$(SOOBJRELDIR)/display.dev\
