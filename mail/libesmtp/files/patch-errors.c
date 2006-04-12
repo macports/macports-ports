@@ -1,24 +1,31 @@
---- errors.c.orig	2005-05-08 15:28:32.000000000 -0400
-+++ errors.c	2005-05-08 15:30:38.000000000 -0400
-@@ -77,8 +77,10 @@
-     MAP(EAI_AGAIN)
-     MAP(EAI_FAIL)
-     MAP(EAI_MEMORY)
-+#if 0
-     MAP(EAI_ADDRFAMILY)
-     MAP(EAI_NODATA)
-+#endif
-     MAP(EAI_FAMILY)
-     MAP(EAI_BADFLAGS)
-     MAP(EAI_NONAME)
-@@ -98,8 +100,10 @@
-     MAP(EAI_AGAIN)
-     MAP(EAI_FAIL)
-     MAP(EAI_MEMORY)
-+#if 0
-     MAP(EAI_ADDRFAMILY)
-     MAP(EAI_NODATA)
-+#endif
-     MAP(EAI_FAMILY)
-     MAP(EAI_BADFLAGS)
-     MAP(EAI_NONAME)
+*** errors.c.orig	2006-03-30 19:28:00.000000000 +0200
+--- errors.c	2006-03-30 19:49:13.000000000 +0200
+***************
+*** 31,36 ****
+--- 31,37 ----
+  #include <stdio.h>
+  #include <errno.h>
+  #include <string.h>
++ #include <strings.h>
+  #include <stdlib.h>
+  #if HAVE_LWRES_NETDB_H
+  # include <lwres/netdb.h>
+***************
+*** 256,264 ****
+    SMTPAPI_CHECK_ARGS (buf != NULL && buflen > 0, NULL);
+  
+    if (error < 0)
+! #if HAVE_WORKING_STRERROR_R
+!     return strerror_r (-error, buf, buflen);
+! #elif HAVE_STRERROR_R
+      {
+        /* Assume the broken OSF1 strerror_r which returns an int. */
+        int n = strerror_r (-error, buf, buflen);
+--- 257,263 ----
+    SMTPAPI_CHECK_ARGS (buf != NULL && buflen > 0, NULL);
+  
+    if (error < 0)
+! #if HAVE_STRERROR_R
+      {
+        /* Assume the broken OSF1 strerror_r which returns an int. */
+        int n = strerror_r (-error, buf, buflen);
