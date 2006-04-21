@@ -3,7 +3,7 @@
   export PREFIX="%p"
   . ./environment-helper.sh
 
-  ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d all_libraries="$ALL_LIBRARIES" PQXX_INCDIR="%p/include/postgresql"
+  ./build-helper.sh install %N %v %r unsermake install DESTDIR="%d"
 
   mkdir -p %i/share/doc/installed-packages
   touch %i/share/doc/installed-packages/%N
