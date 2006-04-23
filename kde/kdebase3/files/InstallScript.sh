@@ -3,6 +3,9 @@
         export HOME=/tmp PREFIX="%p" QTDOCDIR="%p/share/doc/qt3/html"
         . ./environment-helper.sh
 
+#darwinports
+	export UNSERMAKE="no"
+
         ./build-helper.sh install        %N %v %r make -j1 install DESTDIR=%d
 #apidox#./build-helper.sh install-apidox %N %v %r make -j1 install-apidox install-apidox-recurse DESTDIR=%d
 

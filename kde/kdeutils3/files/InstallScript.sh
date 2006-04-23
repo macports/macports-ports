@@ -3,6 +3,9 @@
         export PREFIX="%p"
         . ./environment-helper.sh
 
+#darwinports
+	export UNSERMAKE="no"
+
         ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d kgpg_SUBDIR_included_TRUE=# kgpg_SUBDIR_included_FALSE=
 
         mkdir -p %i/share/doc/installed-packages

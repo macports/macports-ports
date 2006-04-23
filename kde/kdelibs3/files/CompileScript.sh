@@ -4,6 +4,9 @@
         export lt_cv_sys_max_cmd_len=65536
         . ./environment-helper.sh
 
+#darwinports
+	export UNSERMAKE="no"
+
         PRODUCT_VERSION=`uname -r`
 
         case $PRODUCT_VERSION in 

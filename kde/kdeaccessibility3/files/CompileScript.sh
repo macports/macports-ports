@@ -5,6 +5,9 @@
         . ./environment-helper.sh
         export lt_cv_sys_max_cmd_len=65536
 
+#darwinports
+	export UNSERMAKE="no"
+
         export DO_NOT_COMPILE="kmouth"
 
         export CC=gcc CXX=g++

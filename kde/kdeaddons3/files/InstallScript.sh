@@ -3,6 +3,9 @@
         export HOME=/tmp PREFIX="%p" QTDOCDIR="%p/share/doc/qt3/html"
         . ./environment-helper.sh
 
+#darwinports
+	export UNSERMAKE="no"
+
         ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d
 
         mkdir -p %i/share/doc/installed-packages

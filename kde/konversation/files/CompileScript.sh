@@ -4,6 +4,9 @@
   export EH_PREFIX="%p"
   . ./environment-helper.sh
 
+#darwinports
+  export UNSERMAKE="no"
+
   export CC=gcc CXX=g++
 
   ./build-helper.sh cvs       %N %v %r make -f admin/Makefile.common cvs

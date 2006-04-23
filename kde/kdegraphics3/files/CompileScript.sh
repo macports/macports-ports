@@ -5,6 +5,9 @@
         . ./environment-helper.sh
         export lt_cv_sys_max_cmd_len=65536
 
+#unsermake
+	export UNSERMAKE="no"
+
         export CC=gcc CXX=g++
 
         ./build-helper.sh cvs       %N %v %r make -f admin/Makefile.common cvs

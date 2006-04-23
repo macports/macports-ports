@@ -4,6 +4,9 @@
         . ./environment-helper.sh
         export lt_cv_sys_max_cmd_len=65536
 
+#darwinports
+	export UNSERMAKE="no"
+
         export CC=gcc CXX=g++
 
         export PKG_CONFIG_PATH="%p/lib/fontconfig2/lib/pkgconfig:%p/lib/freetype219/lib/pkgconfig:$PKG_CONFIG_PATH"

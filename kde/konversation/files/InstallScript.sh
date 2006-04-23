@@ -3,6 +3,9 @@
   export PREFIX="%p"
   . ./environment-helper.sh
 
+#darwinports
+  export UNSERMAKE="no"
+
   ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d
 
   [ -f %i/share/services/irc.protocol  ] && mv %i/share/services/irc.protocol  %i/share/services/konvirc.protocol

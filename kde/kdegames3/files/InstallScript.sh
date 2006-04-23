@@ -3,6 +3,9 @@
         export PREFIX="%p"
         . ./environment-helper.sh
 
+#unsermake
+	export UNSERMAKE="no"
+
         ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d
 
         mkdir -p %i/share/doc/installed-packages

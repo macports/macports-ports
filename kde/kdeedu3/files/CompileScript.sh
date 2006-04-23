@@ -6,6 +6,9 @@
         export LDFLAGS="-L%p/lib/python2.4/config"
         export lt_cv_sys_max_cmd_len=65536
 
+#darwinports
+	export UNSERMAKE="no"
+
         export CC=gcc CXX=g++
 
         ./build-helper.sh cvs       %N %v %r make -f admin/Makefile.common cvs
