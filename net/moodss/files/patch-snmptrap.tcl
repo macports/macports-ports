@@ -1,14 +1,14 @@
---- snmptrap/snmptrap.tcl.org	2006-05-10 22:13:29.000000000 -0700
-+++ snmptrap/snmptrap.tcl	2006-05-10 22:17:12.000000000 -0700
-@@ -1,11 +1,15 @@
--# copyright (C) 1997-2006 Jean-Luc Fontaine (mailto:jfontain@free.fr)
--# this program is free software: please read the COPYRIGHT file enclosed in this package or use the Help Copyright menu
--
--# $Id: patch-snmptrap.tcl,v 1.2 2006/05/11 05:19:58 markd Exp $
-+# $Id: patch-snmptrap.tcl,v 1.2 2006/05/11 05:19:58 markd Exp $
+--- snmptrap/snmptrap.tcl.org	2006-05-11 07:38:41.000000000 -0700
++++ snmptrap/snmptrap.tcl	2006-05-11 07:41:14.000000000 -0700
+@@ -1,11 +1,18 @@
+ # copyright (C) 1997-2006 Jean-Luc Fontaine (mailto:jfontain@free.fr)
+ # this program is free software: please read the COPYRIGHT file enclosed in this package or use the Help Copyright menu
+ 
+-# $Id: patch-snmptrap.tcl,v 1.3 2006/05/11 14:41:12 markd Exp $
++# $Id: patch-snmptrap.tcl,v 1.3 2006/05/11 14:41:12 markd Exp $
  
  
- package provide snmptrap [lindex {$Revision: 1.2 $} 1]
+ package provide snmptrap [lindex {$Revision: 1.3 $} 1]
 -package require Tnm 2.1.10
 +set version [package require Tnm]
 +if {[package vcompare $version 2.1.10] < 0} {
@@ -21,7 +21,7 @@
  
  namespace eval snmptrap {
  
-@@ -19,7 +23,7 @@
+@@ -19,7 +26,7 @@
          3,label type 3,type dictionary 3,message {trap type}
          4,label identifiers 4,type dictionary 4,message {additional object identifiers} 4,anchor left
          5,label values 5,type dictionary 5,message {additional object values} 5,anchor left
@@ -30,7 +30,7 @@
          pollTimes -10
      }
      set file [open snmptrap.htm]
-@@ -60,11 +64,6 @@
+@@ -60,11 +67,6 @@
              }
          }
          set arguments {}
@@ -42,7 +42,7 @@
          set type trap                                                                                    ;# for default SNMP version
          if {[info exists options(--version)]} {                                                     ;# default is 1 (SNMP version 1)
              switch $options(--version) {
-@@ -82,12 +81,19 @@
+@@ -82,12 +84,19 @@
                  }
              }
          }
@@ -66,7 +66,7 @@
          catch {set numberOfRows $options(--rows)}
      }
  
-@@ -100,7 +106,7 @@
+@@ -100,7 +109,7 @@
          return $string
      }
  
@@ -75,7 +75,7 @@
          variable session
          variable trace
          variable data
-@@ -110,7 +116,7 @@
+@@ -110,7 +119,7 @@
              puts "<<< trap($status):[formattedObjects $objects]"
          }
          if {[string compare $status noError]} {
@@ -84,3 +84,8 @@
              return                                                                                                           ;# done
          }
          for {set row [expr {[llength [array names data *,0]] - 1}]} {$row >= 0} {incr row -1} {          ;# shift existing rows down
+@@ -155,3 +164,4 @@
+     }
+ 
+ }
++
