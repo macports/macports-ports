@@ -1,14 +1,14 @@
---- snmptrap/snmptrap.tcl.org	2006-05-11 07:38:41.000000000 -0700
-+++ snmptrap/snmptrap.tcl	2006-05-11 07:41:14.000000000 -0700
+--- snmptrap/snmptrap.tcl.org	2006-04-10 13:00:46.000000000 -0700
++++ snmptrap/snmptrap.tcl	2006-05-11 08:42:33.000000000 -0700
 @@ -1,11 +1,18 @@
  # copyright (C) 1997-2006 Jean-Luc Fontaine (mailto:jfontain@free.fr)
  # this program is free software: please read the COPYRIGHT file enclosed in this package or use the Help Copyright menu
  
--# $Id: patch-snmptrap.tcl,v 1.3 2006/05/11 14:41:12 markd Exp $
-+# $Id: patch-snmptrap.tcl,v 1.3 2006/05/11 14:41:12 markd Exp $
+-# $Id: patch-snmptrap.tcl,v 1.4 2006/05/11 15:47:31 markd Exp $
++# $Id: patch-snmptrap.tcl,v 1.4 2006/05/11 15:47:31 markd Exp $
  
  
- package provide snmptrap [lindex {$Revision: 1.3 $} 1]
+ package provide snmptrap [lindex {$Revision: 1.4 $} 1]
 -package require Tnm 2.1.10
 +set version [package require Tnm]
 +if {[package vcompare $version 2.1.10] < 0} {
