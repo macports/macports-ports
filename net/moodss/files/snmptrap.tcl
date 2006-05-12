@@ -1,10 +1,10 @@
 # copyright (C) 1997-2006 Jean-Luc Fontaine (mailto:jfontain@free.fr)
 # this program is free software: please read the COPYRIGHT file enclosed in this package or use the Help Copyright menu
 
-# $Id: snmptrap.tcl,v 1.1 2006/05/11 16:40:10 markd Exp $
+# $Id: snmptrap.tcl,v 1.2 2006/05/12 17:05:47 markd Exp $
 
 
-package provide snmptrap [lindex {$Revision: 1.1 $} 1]
+package provide snmptrap [lindex {$Revision: 1.2 $} 1]
 set version [package require Tnm]
 if {[package vcompare $version 2.1.10] < 0} {
     error {Tnm version 2.1.10 or above is required}
@@ -132,7 +132,17 @@ namespace eval snmptrap {
         }
         set data(0,0) 0
         foreach {identifier type value} [lindex $objects 0] {}
-        scan $value {%ud %s} data(0,1) data(0,2)
+
+	if {$::tnm3} {
+  	  set days [expr {$value / 8640000}]; set value [expr {$value - ($days *8640000)}]
+	  set hours [expr {$value / 360000}]; set value [expr {$value - ($hours *360000)}]
+	  set minutes [expr {$value / 6000}]; set value [expr {$value - ($minutes *6000)}]
+	  set seconds [expr {$value / 100}]; set value [expr {$value - ($seconds *100)}]
+	  set data(0,1) $days; set data(0,2) $hours:$minutes:$seconds.$value
+	} else {
+		scan $value {%ud %s} data(0,1) data(0,2)
+	}
+
         foreach {identifier type value} [lindex $objects 1] {}                                                          ;# trap type
         if {[catch {set data(0,3) [mib name $value]} message]} {                                   ;# convert to trap readable value
             append message "\n(check that MIB including this trap is loaded)."
