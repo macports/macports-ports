@@ -1,9 +1,9 @@
 #!/bin/sh -e
 
-  export PREFIX="%p"
+  export PREFIX="%p" UNSERMAKE=1
   . ./environment-helper.sh
 
-  ./build-helper.sh install %N %v %r unsermake install DESTDIR="%d"
+  ./build-helper.sh install %N %v %r unsermake -p -j1 install DESTDIR="%d"
 
   mkdir -p %i/share/doc/installed-packages
   touch %i/share/doc/installed-packages/%N
