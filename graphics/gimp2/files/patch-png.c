@@ -1,12 +1,5 @@
 --- plug-ins/common/png.c.orig	2004/11/23 14:28:43	1.118
 +++ plug-ins/common/png.c	2006/04/23 07:01:47	1.118.2.1
-@@ -1,5 +1,5 @@
- /*
-- * "$Id: patch-png.c,v 1.1 2006/05/27 18:41:14 yves Exp $"
-+ * "$Id: patch-png.c,v 1.1 2006/05/27 18:41:14 yves Exp $"
-  *
-  *   Portable Network Graphics (PNG) plug-in for The GIMP -- an image
-  *   manipulation program
 @@ -1012,7 +1012,11 @@
     * Done with the file...
     */
