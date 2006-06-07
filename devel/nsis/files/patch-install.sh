@@ -1,5 +1,5 @@
---- install.sh.old	Thu Mar  3 13:57:48 2005
-+++ install.sh	Thu Mar  3 14:00:50 2005
+--- install.sh.orig	2006-06-06 14:11:20.000000000 -0700
++++ install.sh	2006-06-06 14:11:48.000000000 -0700
 @@ -1,4 +1,4 @@
 -#!/bin/sh
 +#!/bin/sh -x
@@ -25,12 +25,12 @@
  
  # Install executable
 -install --preserve-timestamps --owner=$OWNER --group=$GROUP --mode=755 \
-+install -o $OWNER -g $GROUP --mode=755 \
++install -o $OWNER -g $GROUP -m 755 \
   makensis "${INSTALL_PREFIX}${TARGETDIR}"
  
  # Install config file
 -install --preserve-timestamps --owner=$OWNER --group=$GROUP --mode=644 \
-+install -o $OWNER -g $GROUP --mode=644 \
++install -o $OWNER -g $GROUP -m 644 \
   nsisconf.nsh "${INSTALL_PREFIX}${TARGETDIR}"
  
  # Now create a script that runs the compiler
@@ -44,7 +44,7 @@
  EOF
  
 -install -D --mode=755 --owner=$OWNER --group=$GROUP \
-+install -o $OWNER -g $GROUP --mode=755 \
++install -o $OWNER -g $GROUP -m 755 \
   "$tempfile" "${INSTALL_PREFIX}${PREFIX}/bin/makensis"
  
  \rm -f "$tempfile"
