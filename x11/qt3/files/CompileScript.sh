@@ -60,15 +60,12 @@
 	export HOME="$QTDIR"
 
 
-#fink
-#        if [ -f /usr/lib/libresolv.dylib ]; then
-#                LIBRESOLV="-lresolv"
-#                perl -pi -e 's,#define QT_AOUT_UNDERSCORE,,' mkspecs/darwin-g++/qplatformdefs.h
-#        else
-#                LIBRESOLV=""
-#        fi
-#darwinports
-#
+        if [ -f /usr/lib/libresolv.dylib ]; then
+                LIBRESOLV="-lresolv"
+                perl -pi -e 's,#define QT_AOUT_UNDERSCORE,,' mkspecs/darwin-g++/qplatformdefs.h
+        else
+                LIBRESOLV=""
+        fi
 
 #fink
 #        # we have to force header/lib ordering or things get really wiggy
@@ -92,6 +89,6 @@
 	    '-I$(QTDIR)/include' '-L$(QTDIR)/lib' \
 	    '-I%p/include' '-L%p/lib' \
 	    '-I/usr/X11R6/include' '-L/usr/X11R6/lib' \
-	    %c
+	    $LIBRESOLV %c
 
         make
