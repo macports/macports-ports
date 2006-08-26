@@ -1,13 +1,13 @@
---- siputils.py	Fri Sep 24 18:56:34 2004
-+++ siputils.py.new	Mon Sep 27 13:34:52 2004
-@@ -994,8 +994,8 @@
- 
-         self.LFLAGS.extend(self.optional_list(lflags_console))
- 
--        if sys.platform == "darwin":
--            self.LFLAGS.append("-framework Python")
-+#        if sys.platform == "darwin":
-+#            self.LFLAGS.append("-framework Python")
+--- siputils.py.orig	2006-08-18 16:36:18.000000000 -0400
++++ siputils.py	2006-08-18 16:52:22.000000000 -0400
+@@ -1273,8 +1273,8 @@
+             # This allows Apple's Python to be used even if a later python.org
+             # version is also installed.
+             dl = string.split(sys.exec_prefix, os.sep)
+-            dl = dl[:dl.index("Python.framework")]
+-            self.LFLAGS.append("-F%s" % string.join(dl, os.sep))
++            #dl = dl[:dl.index("Python.framework")]
++            #self.LFLAGS.append("-F%s" % string.join(dl, os.sep))
+             self.LFLAGS.append("-framework Python")
  
          Makefile.finalise(self)
- 
