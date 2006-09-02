@@ -5,10 +5,10 @@
      default_x11_include_dirs = []
  else:
 -    default_lib_dirs = ['/usr/local/lib', '/opt/lib', '/usr/lib',
-+    default_lib_dirs = ['DPORT_PREFIX/lib', '/usr/local/lib', '/opt/lib', '/usr/lib',
++    default_lib_dirs = ['DPORT_PREFIX/lib', 'DPORT_PREFIX/lib/gcc41', '/usr/local/lib', '/opt/lib', '/usr/lib',
                          '/opt/local/lib', '/sw/lib']
 -    default_include_dirs = ['/usr/local/include',
-+    default_include_dirs = ['DPORT_PREFIX/include', '/usr/local/include',
++    default_include_dirs = ['DPORT_PREFIX/include', 'DPORT_PREFIX/include/gcc41', '/usr/local/include',
                              '/opt/include', '/usr/include',
                              '/opt/local/include', '/sw/include']
      default_src_dirs = ['.','/usr/local/src', '/opt/src','/sw/src']
