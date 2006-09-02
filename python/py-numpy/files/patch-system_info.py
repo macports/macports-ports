@@ -1,6 +1,6 @@
---- numpy/distutils/system_info.py.orig 2006-02-15 21:50:00.000000000 -0800
-+++ numpy/distutils/system_info.py      2006-02-20 13:10:31.000000000 -0800
-@@ -129,14 +129,14 @@
+--- numpy/distutils/system_info.py.old	2006-09-02 13:02:31.000000000 -0700
++++ numpy/distutils/system_info.py	2006-09-02 13:04:09.000000000 -0700
+@@ -137,14 +137,14 @@
      default_x11_lib_dirs = []
      default_x11_include_dirs = []
  else:

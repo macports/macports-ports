@@ -1,22 +1,11 @@
---- numpy/distutils/fcompiler/gnu.py.old	2006-01-29 02:10:27.000000000 -0800
-+++ numpy/distutils/fcompiler/gnu.py	2006-01-29 02:10:59.000000000 -0800
-@@ -107,8 +107,8 @@
-             opt.append('gcc')
-         if g2c is not None:
-             opt.append(g2c)
--        if sys.platform == 'darwin':
--            opt.append('cc_dynamic')
-+        #if sys.platform == 'darwin':
-+        #    opt.append('cc_dynamic')
-         return opt
- 
-     def get_flags_debug(self):
-@@ -216,7 +216,7 @@
-     # 'gfortran --version' results:
-     # Debian: GNU Fortran 95 (GCC 4.0.3 20051023 (prerelease) (Debian 4.0.2-3))
+--- numpy/distutils/fcompiler/gnu.py.old	2006-09-02 13:00:19.000000000 -0700
++++ numpy/distutils/fcompiler/gnu.py	2006-09-02 13:00:51.000000000 -0700
+@@ -245,7 +245,7 @@
+     # OS X: GNU Fortran 95 (GCC) 4.1.0
+     #       GNU Fortran 95 (GCC) 4.2.0 20060218 (experimental)
  
 -    for fc_exe in map(find_executable,['gfortran','f95']):
-+    for fc_exe in map(find_executable,['gfortran-dp-4.0','f95']):
++    for fc_exe in map(find_executable,['gfortran-dp-4.1','f95']):
          if os.path.isfile(fc_exe):
              break
      executables = {
