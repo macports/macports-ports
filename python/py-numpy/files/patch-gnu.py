@@ -5,7 +5,7 @@
      #       GNU Fortran 95 (GCC) 4.2.0 20060218 (experimental)
  
 -    for fc_exe in map(find_executable,['gfortran','f95']):
-+    for fc_exe in map(find_executable,['gfortran-dp-4.1','f95']):
++    for fc_exe in map(find_executable,['MACPORTS_FORTRAN','f95']):
          if os.path.isfile(fc_exe):
              break
      executables = {
