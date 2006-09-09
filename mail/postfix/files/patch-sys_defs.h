@@ -5,7 +5,7 @@
  #define HAS_SA_LEN
  #define DEF_DB_TYPE	"hash"
 -#define ALIAS_DB_MAP	"hash:/etc/aliases"
-+#define ALIAS_DB_MAP	"hash:__PREFIX/etc/aliases"
++#define ALIAS_DB_MAP	"hash:__PREFIX/etc/postfix/aliases"
  #define GETTIMEOFDAY(t) gettimeofday(t,(struct timezone *) 0)
  #define RESOLVE_H_NEEDS_NAMESER8_COMPAT_H
 -#define ROOT_PATH	"/bin:/usr/bin:/sbin:/usr/sbin"
