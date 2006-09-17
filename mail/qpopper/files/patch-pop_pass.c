@@ -1,20 +1,20 @@
---- popper/pop_pass.c.old	Thu Nov 13 12:11:01 2003
-+++ popper/pop_pass.c	Thu Nov 13 16:58:38 2003
-@@ -12,6 +12,9 @@
-  *
-  * Revisions:
+--- popper/pop_pass.c.orig	2006-03-10 07:32:38.000000000 +0900
++++ popper/pop_pass.c	2006-09-17 17:46:00.000000000 +0900
+@@ -40,6 +40,10 @@
+  *                <security/pam_appl.h> (otherwise build fails)
+  *                (thanks to Kyle McKay for the patch)
   *
 + *     11/13/03  [pguyot]
 + *             - Added DirectoryService authentication for MacOS X (required on
 + *               10.3+).
++ *
   *     01/16/03  [rcg]
   *             - Renamed PASSWD macro to QPASSWD to avoid redefining
   *               PASSWD in shadow.h.
-@@ -1156,6 +1159,143 @@
- 
+@@ -1054,6 +1058,143 @@
  #    endif /* AIX */
  
-+
+ 
 +/*----------------------------------------------- DARWIN/MacOS X  */
 +#    ifdef DARWIN
 +
@@ -151,6 +151,7 @@
 +}
 +
 +#    endif /* DARWIN/MacOS X */
- 
++
  /*----------------------------------------------- generic AUTH_USER */
  #    ifndef DECLARED_AUTH_USER 
+ 
