@@ -42,7 +42,7 @@ gs_lang=${REPLY:-false}
 if [ $gs_lang = "list" ]
 	then
 	$t_clear
-	ls "@PREFIX@/GNUstep/System/Library/Libraries/Resources/gnustep-base/Languages" | grep -v Locale
+	ls "$GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/Languages" | grep -v Locale
 	echo
 	echo -n 'you can enter a name right now or "enter" to continue : '
 	read
@@ -91,7 +91,7 @@ if [ $zone != false ]
 	then
 	if [ $zone = "list" ]
 		then
-		cat @PREFIX@/GNUstep/System/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions | awk '{print $2}' | more
+		cat $GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions | awk '{print $2}' | more
 		echo
 		echo -n 'you can enter timezone right now or "enter" to continue : '
 		read
@@ -101,7 +101,7 @@ fi
 if [ $zone != false ]
 	then
 	$t_bold
-	if ! `grep -q $zone @PREFIX@/GNUstep/System/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions`
+	if ! `grep -q $zone $GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions`
 		then
 		echo "$zone is not a recognized region name"
 		zone=false
@@ -158,6 +158,16 @@ echo "XShm            : disabled"
 gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 
 sleep 2
+bundledir="$GNUSTEP_SYSTEM_ROOT/Library/Bundles"
+echo "Resetting GSAppKitUserBundles (in NSGlobalDomain)"
+gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileWildMenus)"
+sleep 2
+echo "Setting User Interface Theme to Nesedah (in Camaelon domain)"
+gdefaults write Camaelon Theme Nesedah
+
+echo
+
+sleep 2
 echo
 echo "All done !"
 
@@ -168,7 +178,7 @@ echo "Note that even though the GNUstep environment is set"
 sleep 2
 echo "You may need to reset it if you experience DYLD errors when trying to start a GNUstep app"
 sleep 2
-echo "You can do so with '. @PREFIX@/GNUstep/System/Library/Makefiles/GNUstep.sh'"
+echo "You can do so with '. $GNUSTEP_SYSTEM_ROOT/Library/Makefiles/GNUstep.sh'"
 sleep 2
 
 echo
