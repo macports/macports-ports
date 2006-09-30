@@ -160,10 +160,10 @@ gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 sleep 2
 bundledir="$GNUSTEP_SYSTEM_ROOT/Library/Bundles"
 echo "Resetting GSAppKitUserBundles (in NSGlobalDomain)"
-gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileWildMenus)"
+#gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileWildMenus)"
 sleep 2
 echo "Setting User Interface Theme to Nesedah (in Camaelon domain)"
-gdefaults write Camaelon Theme Nesedah
+#gdefaults write Camaelon Theme Nesedah
 
 echo
 
