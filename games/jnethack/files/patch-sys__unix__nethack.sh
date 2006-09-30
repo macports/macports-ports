@@ -1,10 +1,10 @@
---- sys/unix/nethack.sh.orig	2006-08-11 15:25:54.000000000 +0900
-+++ sys/unix/nethack.sh	2006-08-11 15:27:39.000000000 +0900
+--- sys/unix/nethack.sh.orig	2006-08-24 23:23:30.000000000 +0900
++++ sys/unix/nethack.sh	2006-08-24 23:24:35.000000000 +0900
 @@ -5,6 +5,7 @@
  export HACKDIR
  HACK=$HACKDIR/nethack
  MAXNROFPLAYERS=20
-+NKF="nkf -u -w"
++COCOT="__PREFIX__/bin/cocot -t UTF-8 -p EUC-JP"
  
  # JP
  # set LC_ALL, NETHACKOPTIONS etc..
@@ -13,7 +13,7 @@
  fi
  
 +if [ "X$LANG" = "Xja_JP.eucJP" ] ; then
-+	NKF="nkf -u -e"
++	COCOT=""
 +fi
 +
  #if [ "X$DISPLAY" ] ; then
@@ -24,10 +24,10 @@
  case $1 in
  	-s*)
 -		exec $HACK "$@"
-+		exec $HACK "$@" | $NKF
++		exec $COCOT $HACK "$@"
  		;;
  	*)
 -		exec $HACK "$@" $MAXNROFPLAYERS
-+		exec $HACK "$@" $MAXNROFPLAYERS | $NKF
++		exec $COCOT $HACK "$@" $MAXNROFPLAYERS
  		;;
  esac
