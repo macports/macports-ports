@@ -1,21 +1,17 @@
 #!/bin/sh -e
 
-        export PREFIX="%p"
+        export PREFIX="%p" USE_UNSERMAKE=1
         . ./environment-helper.sh
-
-#darwinports
-	export UNSERMAKE="no"
-
-        ./build-helper.sh install %N %v %r make -j1 install DESTDIR=%d
+ 
+        ./build-helper.sh install %N %v %r unsermake -p -j1 install DESTDIR=%d
 
         mkdir -p %i/share/doc/installed-packages
         touch %i/share/doc/installed-packages/%N
         touch %i/share/doc/installed-packages/%N-base
 
-        rm -rf %i/share/doc/kde/en/kmouth
+        rm -rf %i/share/doc/kde/en/kmouth %i/share/man/man1/kmouth*
         install -d -m 755 %i/share/config
-        cat <<EOF #!/bin/sh -e
-END > %i/share/config/kttsdrc
+        cat <<END > %i/share/config/kttsdrc
 [FreeTTS]
 FreeTTSJarPath=%p/share/java/freetts/freetts.jar
 
