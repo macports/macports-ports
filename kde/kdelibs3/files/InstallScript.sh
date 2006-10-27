@@ -1,12 +1,9 @@
 #!/bin/sh -e
 
-        export HOME=/tmp PREFIX="%p" QTDOCDIR="%p/share/doc/qt3/html"
+        export PREFIX="%p" USE_UNSERMAKE=1
         . ./environment-helper.sh
 
-#darwinports
-	export UNSERMAKE="no"
-
-        ./build-helper.sh install        %N %v %r make -j1 install DESTDIR=%d
+        ./build-helper.sh install        %N %v %r unsermake -p -j1 install DESTDIR=%d
 #apidox#./build-helper.sh install-apidox %N %v %r make -j1 install-apidox install-apidox-recurse DESTDIR=%d
 
         rm -rf %i/share/icons/hicolor/index.theme
