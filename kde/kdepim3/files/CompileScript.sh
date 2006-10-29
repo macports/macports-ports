@@ -2,10 +2,7 @@
 
         export PREFIX="%p" USE_UNSERMAKE=1
         . ./environment-helper.sh
-#fink
-#       export ac_cv_path_GPGME_CONFIG="%p/bin/gpgme-config --thread=pthread"
-#macports
-        export ac_cv_path_GPGME_CONFIG="%p/bin/gpgme-config --thread=pth"
+        export ac_cv_path_GPGME_CONFIG="%p/bin/gpgme-config --thread=pthread"
 
         export CC=gcc CXX=g++
 
