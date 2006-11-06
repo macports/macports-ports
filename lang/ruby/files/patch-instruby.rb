@@ -17,4 +17,4 @@
 +makedirs [bindir, libdir, rubylibdir, archlibdir, sitelibdir, sitearchlibdir, vendorlibdir, vendorarchlibdir]
  
  install?(:bin) do
- ruby_bin = File.join(bindir, ruby_install_name)
+   ruby_bin = File.join(bindir, ruby_install_name)
