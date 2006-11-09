@@ -13,4 +13,4 @@
 	#fink
         #./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.2
 	#darwinports
-        ./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.3
+        ./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.4
