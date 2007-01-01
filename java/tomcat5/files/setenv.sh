@@ -30,7 +30,14 @@ if [ -z "$JAVA_HOME" ]; then
 		for jversion in $JAVA_JVM_VERSION CurrentJDK ; do
 			jhome="/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}/Home"
 			if [ -z "$JAVA_HOME" -a -d "${jhome}" ]; then
-				export JAVA_JVM_VERSION=${jversion}
+				# Get the actual version that any symlink points to, since
+				# jni doesn't like JAVA_JVM_VERSION set to CurrentJDK
+				saved=`pwd`
+				cd "/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}"
+				actualvers=$(basename $(pwd -P))
+				cd $saved
+				
+				export JAVA_JVM_VERSION=${actualvers}
 				export JAVA_HOME=${jhome}
 			fi
 		done
