@@ -6,10 +6,9 @@ try:
 except:
     raise SystemExit, "Distutils problem"
 
-prefix = "__PREFIX__"
-inc_dirs = [prefix + "/include"]
-lib_dirs = [prefix + "/lib"]
-libs = ["db-4"]
+inc_dirs = ["__INCDIR__"]
+lib_dirs = ["__LIBDIR__"]
+libs = ["db"]
 
 setup(name = "_bsddb",
       version = "__VERSION__",
