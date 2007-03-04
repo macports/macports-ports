@@ -1,0 +1,150 @@
+--- generator.c.orig	2006-01-09 13:04:42.000000000 -0600
++++ generator.c	2006-01-09 13:09:18.000000000 -0600
+@@ -23,6 +23,10 @@
+ 
+ #include "rsync.h"
+ 
++#ifdef HAVE_COPYFILE
++#include <libgen.h>
++#endif
++
+ extern int verbose;
+ extern int dry_run;
+ extern int do_xfers;
+@@ -89,6 +93,10 @@
+ extern struct file_list *the_file_list;
+ extern struct filter_list_struct server_filter_list;
+ 
++#ifdef EA_SUPPORT
++extern int extended_attributes;
++#endif
++
+ static int deletion_count = 0; /* used to implement --max-delete */
+ 
+ 
+@@ -125,6 +133,18 @@
+ 			deletion_count--;
+ 			return 0;
+ 		}
++#ifdef EA_SUPPORT
++		/* Prevent flooding the syslog when trying to delete the
++		   synthetic (= fake) file containing extended attributes. */
++#ifdef HAVE_COPYFILE
++		if (errno == ENOENT && extended_attributes 
++			&& !strncmp(basename(fname), "._", 2)) {
++			if (verbose)
++			rprintf(FINFO, "synthetic file %s could not be deleted\n",
++				safe_fname(fname));
++		} else
++#endif
++#endif
+ 		rsyserr(FERROR, errno, "delete_file: unlink %s failed",
+ 			full_fname(fname));
+ 		return -1;
+@@ -1152,6 +1172,10 @@
+ 	int save_opt_ignore_existing = opt_ignore_existing;
+ 	int save_do_progress = do_progress;
+ 	int save_make_backups = make_backups;
++#ifdef HAVE_COPYFILE
++	int ea_map[flist->count];
++	int ea_saved = -1;
++#endif
+ 
+ 	if (protocol_version >= 29) {
+ 		itemizing = 1;
+@@ -1195,9 +1219,77 @@
+ 	 * notice that and let us know via the redo pipe (or its closing). */
+ 	ignore_timeout = 1;
+ 
++#ifdef HAVE_COPYFILE
++	/* APPLE: extended attribute files (._foo) need to be transferred
++	 * after the corresponding file (foo).  This creates a map the size
++	 * of flist with the number of the file that preempts the current 
++	 * file's delivery.  Set to -1 if there's nothing to do.
++	 */
++	if (extended_attributes) {
++	    int j;
++	    struct file_struct *file2;
++	    struct file_struct *file3;
++
++	    if (verbose > 3)
++		rprintf(FINFO,"initializing extended attribute map\n");
++
++	    for (i = 0; i < flist->count; ++i) {
++		ea_map[i] = -1;
++		file2 = flist->files[i];
++
++		if (!file2->basename || strncmp(file2->basename, "._", 2))
++		    continue;
++
++		for (j = i; j < flist->count; ++j) {
++		    file3 = flist->files[j];
++
++		    if (!file3->basename)
++			continue;
++
++		    if(!(file2->dirname || file3->dirname)
++			|| (file2->dirname && file3->dirname &&
++			!strcmp(file3->dirname, file2->dirname))) {
++
++			if(!strcmp(file3->basename, file2->basename + 2)) {
++			    ea_map[i] = j;
++
++			    if (verbose > 4)
++				rprintf(FINFO,"mapped %s/%s (%d) -> %s/%s (%d)\n",
++					(file2->dirname) ? file2->dirname : ".",
++					file2->basename, i,
++					(file2->dirname) ? file2->dirname : ".",
++					file3->basename, j);
++			    break;
++			}
++		    }
++		}
++	    }
++	}
++#endif
++
+ 	for (i = 0; i < flist->count; i++) {
+ 		struct file_struct *file = flist->files[i];
+ 
++#ifdef HAVE_COPYFILE
++		if (extended_attributes) {
++		    if(ea_map[i] < -1)
++			continue;
++
++		    if(ea_map[i] > 0) {
++			/* save the current index and set it to the
++			 * file to skip to
++			 */
++			if (verbose > 4)
++			    rprintf(FINFO,"skipping from %d to %d\n", i, ea_map[i]);
++
++			ea_saved = i;
++			i = ea_map[i];
++			ea_map[i] = -1;
++		    }
++next:		    file = flist->files[i];
++		}
++#endif
++
+ 		if (!file->basename)
+ 			continue;
+ 
+@@ -1227,6 +1319,17 @@
+ 			maybe_send_keepalive();
+ 		else if (!(i % 200))
+ 			maybe_flush_socket();
++
++#ifdef HAVE_COPYFILE
++		if (extended_attributes) {
++		    if(ea_saved > -1) {
++			ea_map[i] = -2;
++			i = ea_saved;
++			ea_saved = -1;
++			goto next;
++		    }
++		}
++#endif
+ 	}
+ 	recv_generator(NULL, NULL, 0, 0, 0, code, -1);
+ 	if (delete_during)
