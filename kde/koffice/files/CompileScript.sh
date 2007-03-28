@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh -ev
 
         export PREFIX="%p" USE_UNSERMAKE=1
 
@@ -18,4 +18,5 @@
         find . -name \*.h | xargs touch
 
         MAKEFLAGS="-j1" ./build-helper.sh make-drivers %N %v %r unsermake $UNSERMAKEFLAGS kexi/kexidb/drivers/sqlite/kexidb_sqlite3driver.la kexi/kexidb/drivers/sqlite2/kexidb_sqlite2driver.la
-        ./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS
+	MAKEFLAGS="-j1" ./build-helper.sh make-ksqlite %N %v %r unsermake $UNSERMAKEFLAGS kexi/3rdparty/kexisql3/src/ksqlite
+	./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS
