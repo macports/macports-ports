@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh -ev
 
         export PREFIX="%p" USE_UNSERMAKE=1
         . ./environment-helper.sh
@@ -9,6 +9,8 @@
                         ;; 
         esac
 
+        #export CPPFLAGS="-I/usr/include/gssapi -I%p/lib/fam/include $CPPFLAGS"
+        #export LDFLAGS="-L%p/lib/fam/lib $LDFLAGS"
         export CPPFLAGS="-I/usr/include/gssapi $CPPFLAGS"
 
         ./build-helper.sh cvs       %N %v %r make -f admin/Makefile.common cvs
