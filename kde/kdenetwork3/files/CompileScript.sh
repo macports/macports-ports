@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh -ev
 
         export PREFIX="%p" USE_UNSERMAKE=1 CC=gcc
         . ./environment-helper.sh
