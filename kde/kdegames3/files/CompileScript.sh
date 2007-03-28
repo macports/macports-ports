@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh -ev
 
         export HOME=/tmp
         export PREFIX="%p" USE_UNSERMAKE=1
