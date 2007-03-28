@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/sh -ev
 
         if [ `id -un` != "root" ]; then
                 echo "you must be root to build this package, it creates setuid binaries!"
