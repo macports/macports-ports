@@ -1,14 +1,15 @@
---- tsocks.c.orig	2006-01-28 16:36:44.000000000 -0800
-+++ tsocks.c	2006-01-28 16:27:51.000000000 -0800
-@@ -99,6 +99,7 @@
- static int read_socksv4_req(struct connreq *conn);
- static int read_socksv5_connect(struct connreq *conn);
- static int read_socksv5_auth(struct connreq *conn);
-+void _init(void) __attribute__ ((constructor));
+--- tsocks.c.orig	2007-03-28 12:26:49.000000000 +0100
++++ tsocks.c	2007-03-28 12:25:55.000000000 +0100
+@@ -76,7 +76,7 @@
+ static char *conffile = NULL;
  
- void _init(void) {
- #ifdef USE_OLD_DLSYM
-@@ -191,9 +192,10 @@
+ /* Exported Function Prototypes */
+-void _init(void);
++void _init(void) __attribute__ ((constructor));
+ int connect(CONNECT_SIGNATURE);
+ int select(SELECT_SIGNATURE);
+ int poll(POLL_SIGNATURE);
+@@ -225,9 +225,10 @@
  	struct sockaddr_in *connaddr;
  	struct sockaddr_in peer_address;
  	struct sockaddr_in server_address;
@@ -21,7 +22,7 @@
  	unsigned int res = -1;
  	struct serverent *path;
     struct connreq *newconn;
-@@ -660,7 +660,7 @@
+@@ -699,7 +700,7 @@
               * come around again (since we can't flag it for read, we don't know
               * if there is any data to be read and can't be bothered checking) */
              if (conn->selectevents & WRITE) {
@@ -30,14 +31,15 @@
                 nevents++;
              }
           }
-@@ -854,7 +854,11 @@
+@@ -937,7 +938,12 @@
                      sizeof(conn->serveraddr));
-
+ 
     show_msg(MSGDEBUG, "Connect returned %d, errno is %d\n", rc, errno); 
--	if (rc) {
-+	if (rc && errno == EISCONN) {
+-   if (rc) {
++   if (rc && errno == EISCONN) {
 +      rc = 0;
-+      show_msg(MSGDEBUG, "Socket %d already connected to SOCKS server\n", conn->sockid);
++      show_msg(MSGDEBUG, "Socket %d already connected to SOCKS server\n",
++conn->sockid);
 +      conn->state = CONNECTED;
 +   } else if (rc) {
        if (errno != EINPROGRESS) {
