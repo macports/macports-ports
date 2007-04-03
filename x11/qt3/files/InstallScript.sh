@@ -15,48 +15,44 @@
 
         # %p/bin
         install -d -m 0755 %i/bin
-        for file in `cd %i/lib/qt3/bin; ls`; do
-                ln -sf %p/lib/qt3/bin/$file %i/bin/$file
+        for file in `cd %i/lib/%N/bin; ls`; do
+                ln -sf %p/lib/%N/bin/$file %i/bin/$file
         done
 
 #fink
 #        # %p/include/qt
 #        install -d -m 0755 %i/include
-#        ln -sf %p/include/qt %i/lib/qt3/include
-#darwinports
+#        ln -sf %p/include/qt %i/lib/%N/include
+#macports
         # %p/include/qt3
         install -d -m 0755 %i/include
-        ln -sf %p/include/qt3 %i/lib/qt3/include
+        ln -sf %p/include/qt3 %i/lib/%N/include
 
         # %p/lib
-        install -d -m 0755 %i/lib/qt3/lib
-        mv %i/lib/*.* %i/lib/qt3/lib/
+        install -d -m 0755 %i/lib/%N/lib
+        mv %i/lib/*.* %i/lib/%N/lib/
 
-        for file in `cd %i/lib/qt3/lib; ls`; do
-                [ "$file" != "pkgconfig" ] && ln -sf %p/lib/qt3/lib/$file %i/lib/$file
+        for file in `cd %i/lib/%N/lib; ls`; do
+                [ "$file" != "pkgconfig" ] && ln -sf %N/lib/$file %i/lib/$file
         done
-#fink
-#        install -d -m 0755 %i/lib/pkgconfig
-#        ln -sf %p/lib/qt3/lib/pkgconfig/qt-mt.pc %i/lib/pkgconfig/
-#darwinports
-        perl -pi -e 's,\$\(QTDIR\),%p/lib/qt3,g' %i/lib/pkgconfig/qt-mt.pc
-        install -d -m 0755 %i/lib/qt3/lib/pkgconfig
-        ln -sf %p/lib/pkgconfig/qt-mt.pc %i/lib/qt3/lib/pkgconfig/
 
-        # %p/lib/qt3/doc
-        ln -sf %p/share/doc/%N %i/lib/qt3/doc
+        # clean up some bad data in the .la and .pc files
+        perl -pi -e "s,^libdir=.*,libdir='%p/lib/%N/lib',; s,-L..QTDIR./lib ,,; s,^includedir=.*,includedir='%p/lib/%N/include'," %i/lib/%N/lib/*.la %i/lib/pkgconfig/*.pc
+
+        # %p/lib/%N/doc
+        ln -sf ../../share/doc/%N %i/lib/%N/doc
+
+        # mkspecs bad symlink
+        rm -rf %i/lib/%N/mkspecs/default
+        ln -sf darwin-g++ %i/lib/%N/mkspecs/default
 
         #### CLEAN UP FILES ####
 
         # fix the -L$(QTDIR) junk in the .la file
-        perl -pi -e 's,\$\(QTDIR\),%p/lib/qt3,g' %i/lib/qt3/lib/*.la
+        perl -pi -e 's,\$\(QTDIR\),%p/lib/qt3,g' %i/lib/%N/lib/*.la
 
         # remove the .prl files, we don't want them
-#fink
-#        rm -rf %i/lib/qt3/lib/*.prl
-#darwinports
-        rm -rf %i/lib/qt3/lib/*.prl
-	rm -rf %i/lib/*.prl
+        rm -rf %i/lib{,/%N/lib}/*.prl
 
         #### MAN PAGES ####
 
@@ -113,4 +109,3 @@ EOF
 
         install -d -m 755 %i/share/doc/installed-packages
         touch %i/share/doc/installed-packages/%N
-        touch %i/share/doc/installed-packages/%N-dev

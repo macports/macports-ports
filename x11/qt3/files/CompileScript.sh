@@ -8,7 +8,7 @@
 #                        DOREMOVE=1
 #                fi
 #        done
-#darwinports
+#macports
 #
 
 #fink
@@ -16,7 +16,7 @@
 #                echo "WARNING: found suspicious file or directory \"$file\" -- moving to \"${file}.bad\""
 #                /bin/mv "/lib/${file}" "/lib/${file}.bad"
 #        done
-#darwinports
+#macports
         for file in `ls -1 /lib/ 2>/dev/null | grep -E '(qt-mt|qt3)' | grep -v '.bad$'`; do
                 echo "WARNING: found suspicious file or directory \"$file\" -- please remove it first.\""
 		exit 1
@@ -41,7 +41,7 @@
 #                        cat /tmp/dpkg.output
 #                fi
 #        fi
-#darwinports
+#macports
 #
 
 #fink
@@ -50,7 +50,7 @@
 #        export DYLD_LIBRARY_PATH="$QTDIR/lib:$QTDIR/plugins/designer:$QTDIR/plugins/imageformats"
 #        export PATH="$QTDIR/bin:%p/lib/freetype219/bin:$PATH"
 #        export INSTALL_ROOT=""
-#darwinports
+#macports
         unset QMAKESPEC
         export QTDIR=`pwd`
         export DYLD_LIBRARY_PATH="$QTDIR/lib:$QTDIR/plugins/designer:$QTDIR/plugins/imageformats"
@@ -75,7 +75,7 @@
 #                '-I%p/lib/freetype219/include' '-I%p/lib/freetype219/include/freetype2' '-L%p/lib/freetype219/lib' \
 #                '-I%p/include' '-L%p/lib' \
 #                '-I/usr/X11R6/include' '-L/usr/X11R6/lib' \
-#                $LIBRESOLV -fast -buildkey qt3-jaguar \
+#                $LIBRESOLV -buildkey qt3-jaguar \
 #                -platform darwin-g++ -xplatform darwin-g++ \
 #                -prefix '%p/lib/qt3' -docdir '%p/share/doc/%n' \
 #                -headerdir '%p/include/qt' -libdir '%p/lib' \
@@ -84,7 +84,7 @@
 #                -system-libpng -system-libjpeg -system-zlib -largefile \
 #                -sm -xinerama -xrender -xft -xkb \
 #                -plugin-sql-sqlite -no-sql-ibase -no-sql-mysql -no-sql-odbc -no-sql-psql 
-#darwinports
+#macports
         echo "yes" | ./configure \
 	    '-I$(QTDIR)/include' '-L$(QTDIR)/lib' \
 	    '-I%p/include' '-L%p/lib' \
