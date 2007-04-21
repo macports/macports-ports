@@ -7,7 +7,7 @@ except:
     raise SystemExit, "Distutils problem"
 
 setup(name = "aspects",
-      version = "0.4",
+      version = "VERSION",
       description = "aspect oriented programming for python",
       py_modules=['aspects']
       )
