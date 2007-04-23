@@ -1,6 +1,6 @@
---- AppController.m	2007-01-25 15:11:40.000000000 -0500
-+++ AppController.m	2007-02-01 15:20:50.000000000 -0500
-@@ -70,8 +70,7 @@
+--- ../sshfs-gui.old/AppController.m	2007-04-23 18:37:41.000000000 -0400
++++ AppController.m	2007-04-23 18:38:39.000000000 -0400
+@@ -75,8 +75,7 @@
    // setup for task
    NSString *askPassPath = [[NSBundle mainBundle] pathForResource:@"askpass"
                                                            ofType:@""];
