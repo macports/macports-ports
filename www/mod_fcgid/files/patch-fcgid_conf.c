@@ -1,11 +1,11 @@
---- fcgid_conf.c.orig	Mon Jul 26 07:08:03 2004
-+++ fcgid_conf.c	Fri Aug 13 05:04:44 2004
-@@ -15,7 +15,7 @@
+--- fcgid_conf.c.org	2007-02-15 18:34:41.000000000 -0800
++++ fcgid_conf.c	2007-05-15 09:40:35.000000000 -0700
+@@ -16,7 +16,7 @@
  #define DEFAULT_ERROR_SCAN_INTERVAL 3
  #define DEFAULT_ZOMBIE_SCAN_INTERVAL 3
  #define DEFAULT_PROC_LIFETIME (60*60)
 -#define DEFAULT_SOCKET_PREFIX "logs/fcgidsock"
 +#define DEFAULT_SOCKET_PREFIX "/var/run/fcgidsock"
+ #define DEFAULT_SHM_PATH "logs/fcgid_shm"
  #define DEFAULT_SPAWNSOCRE_UPLIMIT 10
  #define DEFAULT_SPAWN_SCORE 1
- #define DEFAULT_TERMINATION_SCORE 2
