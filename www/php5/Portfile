@@ -119,7 +119,10 @@ variant macosx {
 		--with-iodbc=/usr
 }
 
-variant apache conflicts apache2 fastcgi {
+# Build an Apache 1 module. On Mac OS X, it uses Apple's provided Apache 1 server.
+# On other platforms, the MacPorts apache port is used. Keep the options here
+# in sync with those in the relevant part of the post-destroot phase.
+variant apache conflicts apache2 {
 	if { ! [variant_isset macosx] } {
 		depends_lib-append \
 			path:${prefix}/sbin/apxs:apache
@@ -131,18 +134,24 @@ variant apache conflicts apache2 fastcgi {
 	}
 }
 
-variant apache2 conflicts apache fastcgi {
+# Build an Apache 2 module. Keep the options here in sync with those in the
+# relevant part of the post-destroot phase.
+variant apache2 conflicts apache {
 	depends_lib-append \
 		path:${prefix}/apache2/bin/apxs:apache2
 	configure.args-append \
 		--with-apxs2=${prefix}/apache2/bin/apxs
 }
 
-variant fastcgi conflicts apache apache2 {
-	configure.args-append \
-		--enable-fastcgi \
-		--enable-force-cgi-redirect \
-		--enable-memory-limit
+# Build a FastCGI binary. Keep the options here in sync with those in the
+# relevant part of the post-destroot phase.
+variant fastcgi {
+	if { ![variant_isset apache] && ![variant_isset apache2] } {
+		configure.args-append \
+			--enable-fastcgi \
+			--enable-force-cgi-redirect \
+			--enable-memory-limit
+	}
 }
 
 # Add IMAP support. See:
@@ -303,20 +312,15 @@ destroot.target \
 	install-cli install-build install-headers install-programs
 
 post-destroot {
-	# copy fastcgi php binary to the bin dir under a new name so it doesn't overwrite cli version
-	if { [variant_isset fastcgi] } {
-		xinstall -m 755 ${worksrcpath}/sapi/cgi/php ${destroot}${prefix}/bin/php-fcgi
-	}
-	
-	#copy module
+	# Copy the Apache 1 module.
 	if { [variant_isset apache] } {
-	
 		xinstall -m 755 -d ${destroot}${prefix}/libexec/apache \
 			${destroot}${prefix}/etc/apache/extras-conf
 		xinstall -m 755 ${worksrcpath}/libs/libphp5.so ${destroot}${prefix}/libexec/apache/
 		xinstall -m 755 -c ${filespath}/mod_php.conf ${destroot}$prefix/etc/apache/extras-conf
 	} 
 	
+	# Copy the Apache 2 module.
 	if { [variant_isset apache2] } {
 		xinstall -m 755 -d ${destroot}${prefix}/apache2/modules \
 			${destroot}${prefix}/apache2/conf/extras-conf
@@ -324,9 +328,47 @@ post-destroot {
 		xinstall -m 755 -c ${filespath}/mod_php.conf ${destroot}${prefix}/apache2/conf/extras-conf
 	}
 	
+	if { [variant_isset fastcgi] } {
+		# If we've built an Apache module (any version) then the FastCGI binary
+		# will not have been built, so we need to run through the whole process
+		# again and build just the FastCGI binary. Keep the options here in sync
+		# with the options specified in the apache and apache2 variants.
+		if { [variant_isset apache] } {
+			if { ![variant_isset macosx] } {
+				configure.args-delete \
+					--with-apxs=${prefix}/sbin/apxs
+			} else {
+				configure.args-delete \
+					--with-apxs=/usr/sbin/apxs
+			}
+		}
+		if { [variant_isset apache2] } {
+			configure.args-delete \
+				--with-apxs2=${prefix}/apache2/bin/apxs
+		}
+		
+		# Run the build again to get the FastCGI binary. Keep the options here
+		# in sync with those in the fastcgi variant.
+		if { [variant_isset apache] || [variant_isset apache2] } {
+			configure.args-append \
+				--enable-fastcgi \
+				--enable-force-cgi-redirect \
+				--enable-memory-limit
+			ui_msg "$UI_PREFIX Configuring ${name} fastcgi"
+			command_exec configure
+			ui_msg "$UI_PREFIX Building ${name} fastcgi"
+			command_exec build
+			ui_msg "$UI_PREFIX Staging ${name} fastcgi into destroot"
+		}
+		
+		# Copy the FastCGI binary to the bin dir under a new name so it doesn't
+		# conflict with the cli version.
+		xinstall -m 755 ${worksrcpath}/sapi/cgi/php ${destroot}${prefix}/bin/php-fcgi
+	}
+	
 #	file rename ${destroot}${prefix}/etc/pear.conf ${destroot}${prefix}/etc/pear.conf.sample
 	
-	#copy php.ini
+	# Copy the default php.ini files.
 	xinstall -m 755 -d ${destroot}${prefix}/etc
 	xinstall -m 755 ${workpath}/${worksrcdir}/php.ini-dist ${destroot}${prefix}/etc/php.ini-dist
 	xinstall -m 755 ${workpath}/${worksrcdir}/php.ini-recommended ${destroot}${prefix}/etc/php.ini-recommended
@@ -351,4 +393,3 @@ post-install {
 	
 #	ui_msg "* copy  ${prefix}/etc/pear.conf.sample to  ${prefix}/etc/pear.conf" 
 }
-
