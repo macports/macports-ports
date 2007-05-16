@@ -1,23 +1,11 @@
---- IO/Dumper.pm.orig	Fri Jan 17 01:27:26 2003
-+++ IO/Dumper.pm	Thu May 20 18:24:41 2004
-@@ -395,7 +395,7 @@
- sub PDL::IO::Dumper::uudecode_PDL {
-     my $lines = shift;
-     my $out;
--    my $fname = "/tmp/tmp-$$.fits";
-+    my $fname = "tmp-pdl_io_dumper-$$.fits";
-     if($PDL::IO::Dumper::uudecode_ok) {
- 	open(FITS,"|uudecode");
- 	$lines =~ s/^[^\n]*\n/begin 664 $fname\n/o;
-@@ -458,9 +458,9 @@
-     else { 
-       
-       ##
--      ## Write FITS file, uuencode it, snarf it up, and clean up /tmp
-+      ## Write FITS file, uuencode it, snarf it up, and clean up tmpfiles
-       ##
--      my($fname) = "/tmp/$$.fits";
-+      my($fname) = "tmp-pdl_io_dumper-$$.fits";
-       wfits($_,$fname);
-       my(@uulines);
+--- IO/Dumper.pm.org	2006-03-14 15:19:11.000000000 -0800
++++ IO/Dumper.pm	2007-05-16 13:32:37.000000000 -0700
+@@ -404,7 +404,7 @@
+ #
+ sub _make_tmpname () {
+     # should we use File::Spec routines to create the file name?
+-    return $PDL::Config{TEMPDIR} . "/tmp-$$.fits";
++    return $PDL::Config{TEMPDIR} . "/tmp/tmp-$$.fits";
+ }
  
+ # For uudecode_PDL:
