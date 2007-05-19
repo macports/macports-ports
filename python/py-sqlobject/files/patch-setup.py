@@ -1,13 +1,18 @@
---- setup.py	2005-10-02 00:59:54.000000000 +0200
-+++ setup.py	2006-02-27 23:05:28.000000000 +0100
-@@ -1,9 +1,7 @@
+--- setup.py	2007-02-13 12:29:27.000000000 +0100
++++ setup.py.new	2007-03-05 14:26:53.000000000 +0100
+@@ -1,13 +1,7 @@
  # ez_setup doesn't work with Python 2.2, so we use distutils
  # in that case:
- try:
+-try:
 -    from ez_setup import use_setuptools
 -    use_setuptools()
 -    from setuptools import setup
-+	from distutils.core import setup, Extension, Command
- except ImportError:
-     from distutils.core import setup
+-    is_setuptools = True
+-except ImportError:
+-    from distutils.core import setup
+-    is_setuptools = False
++from distutils.core import setup
++is_setuptools = False
  
+ subpackages = ['firebird', 'include', 'include.pydispatch', 'inheritance',
+                'manager', 'maxdb', 'mysql', 'mssql', 'postgres', 'sqlite',
