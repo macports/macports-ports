@@ -1,5 +1,5 @@
---- include/config.h.orig	Mon Sep  2 17:43:56 2002
-+++ include/config.h	Mon Sep  2 17:44:14 2002
+--- nethack-3.4.3/include/config.h.orig	Mon Sep  2 17:43:56 2002
++++ nethack-3.4.3/include/config.h	Mon Sep  2 17:44:14 2002
 @@ -43,7 +43,7 @@
   * Some combinations make no sense.  See the installation document.
   */
