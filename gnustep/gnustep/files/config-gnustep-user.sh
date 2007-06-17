@@ -110,15 +110,15 @@ echo "XShm            : disabled"
 gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 
 sleep 2
-bundledir="$GNUSTEP_SYSTEM_ROOT/Library/Bundles"
+bundledir="$GNUSTEP_LOCAL_ROOT/Library/Bundles"
 echo "Resetting GSAppKitUserBundles (in NSGlobalDomain)"
-defaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileMenus.bundle, $bundledir/EtoileBehavior.bundle)"
+gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileMenus.bundle, $bundledir/EtoileBehavior.bundle)"
 sleep 2
 echo "Setting User Interface Theme to Nesedah (in Camaelon domain)"
 gdefaults write Camaelon Theme Nesedah
 
-defaults write GWorkspace NoWarnOnQuit YES
-defaults write NSGlobalDomain GSWorkspaceApplication "NotExist.app"
+gdefaults write GWorkspace NoWarnOnQuit YES
+gdefaults write NSGlobalDomain GSWorkspaceApplication "NotExist.app"
 
 echo
 
