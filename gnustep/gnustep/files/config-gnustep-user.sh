@@ -35,49 +35,6 @@ sleep 2
 echo
 echo
 
-echo 'You can enter your language name right now or '
-echo -n '"list" for a list of supported languages or "enter" to continue : '
-read
-gs_lang=${REPLY:-false}
-if [ $gs_lang = "list" ]
-	then
-	$t_clear
-	ls "$GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/Languages" | grep -v Locale
-	echo
-	echo -n 'you can enter a name right now or "enter" to continue : '
-	read
-	gs_lang=${REPLY:-false}
-fi
-if [ $gs_lang != false ]
-	then
-	$t_bold ; echo "GNUstep language = $gs_lang" ; $t_norm
-	echo
-	if [ -z $LANG ] && [ -d @PREFIX@/share/locale ]
-	   then
-	   echo
-	   echo 'You should also set your LANG environment before running this script'
-	   echo
-	   echo 'You can enter "list" for a hint and exit or "enter" to continue : '
-       read
-       sh_lang=${REPLY:-false}
-       if [ $sh_lang = "list" ]
-        then
-        $t_clear
-        echo "Language codes available for LANG :"
-        echo
-        ls @PREFIX@/share/locale
-        echo
-        echo "For example, you can set your LANG environment by adding"
-        echo "export LANG=fr"
-        echo "to your ~/.profile"
-        echo "if you use the French language"
-        echo
-        exit 1
-       fi
-    fi
-fi
-
-
 #
 # ask for timezone
 #
@@ -147,12 +104,6 @@ if [ $zone != false ]
 	gdefaults write NSGlobalDomain "Local Time Zone" $zone
 fi
 
-if [ $gs_lang != false ]
-	then
-	sleep 2
-    echo "Language        : $gs_lang"
-	gdefaults write NSGlobalDomain Language $gs_lang
-fi
 sleep 2
 echo "XShm            : disabled"
 gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
@@ -160,10 +111,13 @@ gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 sleep 2
 bundledir="$GNUSTEP_SYSTEM_ROOT/Library/Bundles"
 echo "Resetting GSAppKitUserBundles (in NSGlobalDomain)"
-gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileWildMenus)"
+defaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileMenus.bundle, $bundledir/EtoileBehavior.bundle)"
 sleep 2
 echo "Setting User Interface Theme to Nesedah (in Camaelon domain)"
 gdefaults write Camaelon Theme Nesedah
+
+defaults write GWorkspace NoWarnOnQuit YES
+defaults write NSGlobalDomain GSWorkspaceApplication "NotExist.app"
 
 echo
 
