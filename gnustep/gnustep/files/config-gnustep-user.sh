@@ -21,7 +21,7 @@ fi
 
 $t_clear
 
-. @PREFIX@/GNUstep/System/Library/Makefiles/GNUstep.sh
+. /opt/local/GNUstep/System/Library/Makefiles/GNUstep.sh
 
 $t_bold
 echo
@@ -48,7 +48,7 @@ if [ $zone != false ]
 	then
 	if [ $zone = "list" ]
 		then
-		cat $GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions | awk '{print $2}' | more
+		cat $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions | awk '{print $2}' | more
 		echo
 		echo -n 'you can enter timezone right now or "enter" to continue : '
 		read
@@ -58,7 +58,7 @@ fi
 if [ $zone != false ]
 	then
 	$t_bold
-	if ! `grep -q $zone $GNUSTEP_SYSTEM_ROOT/Library/Libraries/Resources/gnustep-base/NSTimeZones/regions`
+	if ! `grep -q $zone $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions`
 		then
 		echo "$zone is not a recognized region name"
 		zone=false
@@ -71,14 +71,15 @@ fi
 echo
 echo
 
-if [ ! -d $HOME/GNUstep/Library/WindowMaker ]
+if [ ! -d $GNUSTEP_USER_ROOT/Library/WindowMaker ]
 	then
 	echo -n "Installing WindowMaker resources ... "
+	mkdir $GNUSTEP_USER_ROOT
 	wmaker.inst
 	echo "Done"
 fi
 echo "Setting AntiAliased text in WindowMaker"
-def=$HOME/GNUstep/Defaults/WindowMaker
+def=$GNUSTEP_USER_ROOT/Defaults/WindowMaker
 sed '/AntialiasedText/ s/NO/YES/' $def > $def.new
 mv -f $def.new $def
 
