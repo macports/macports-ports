@@ -35,6 +35,58 @@ sleep 2
 echo
 echo
 
+echo 'You can enter your language right now or '
+echo -n '"list" for a list of supported languages or "enter" to continue : '
+read
+gs_lang=${REPLY:-false}
+if [ $gs_lang = "list" ]
+    then
+    $t_clear
+    ls "$GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/Languages" | grep -v Locale
+    echo
+    echo -n 'you can enter a name right now or "enter" to continue : '
+    read
+    gs_lang=${REPLY:-false}
+fi
+if [ $gs_lang != false ]
+    then
+    $t_bold
+    if [ ! -f $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/Languages/$gs_lang ]
+        then
+        echo "$gs_lang is not a language supported by GNUstep"
+        gs_lang=false
+    else
+        echo "GNUstep language = $gs_lang"
+    fi
+    $t_norm
+    echo
+    if [ -z $LANG ] && [ -d /usr/share/locale ]
+        then
+        echo
+        echo 'You should also set your LANG environment before running this script'
+        echo
+        echo 'You can enter "list" for a hint and exit or "enter" to continue : '
+        read
+        sh_lang=${REPLY:-false}
+        if [ $sh_lang = "list" ]
+            then
+            $t_clear
+            echo "Language codes available for LANG :"
+            echo
+            ls /usr/share/locale
+            echo
+            echo "For example, you can set your LANG environment by adding"
+            echo "export LANG=fr_CA.UTF-8"
+            echo "export LC_ALL=fr_CA.UTF-8"
+            echo "to your ~/.profile"
+            echo "if you use the French language"
+            echo
+            exit 1
+        fi
+    fi
+fi
+
+
 #
 # ask for timezone
 #
@@ -45,38 +97,38 @@ echo -n 'or type "list" for a list of available zones or "enter" : '
 read
 zone=${REPLY:-false}
 if [ $zone != false ]
-	then
-	if [ $zone = "list" ]
-		then
-		cat $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions | awk '{print $2}' | more
-		echo
-		echo -n 'you can enter timezone right now or "enter" to continue : '
-		read
-		zone=${REPLY:-false}
-	fi
+    then
+    if [ $zone = "list" ]
+        then
+        cat $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions | awk '{print $2}' | more
+        echo
+        echo -n 'you can enter timezone right now or "enter" to continue : '
+        read
+        zone=${REPLY:-false}
+    fi
 fi
 if [ $zone != false ]
-	then
-	$t_bold
-	if ! `grep -q $zone $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions`
-		then
-		echo "$zone is not a recognized region name"
-		zone=false
-	else
-		echo Timezone = $zone
-	fi
-	$t_norm
+    then
+    $t_bold
+    if ! `grep -q " $zone\$" $GNUSTEP_SYSTEM_ROOT/Library/Libraries/gnustep-base/Versions/1.14/Resources/NSTimeZones/regions`
+        then
+        echo "$zone is not a recognized region name"
+        zone=false
+    else
+        echo Timezone = $zone
+    fi
+    $t_norm
 fi
 
 echo
 echo
 
 if [ ! -d $GNUSTEP_USER_ROOT/Library/WindowMaker ]
-	then
-	echo -n "Installing WindowMaker resources ... "
-	mkdir $GNUSTEP_USER_ROOT
-	wmaker.inst
-	echo "Done"
+    then
+    echo -n "Installing WindowMaker resources ... "
+    mkdir $GNUSTEP_USER_ROOT
+    wmaker.inst
+    echo "Done"
 fi
 echo "Setting AntiAliased text in WindowMaker"
 def=$GNUSTEP_USER_ROOT/Defaults/WindowMaker
@@ -98,11 +150,18 @@ sleep 2
 echo "Font size       : 10"
 gdefaults write NSGlobalDomain NSFontSize '10'
 
+if [ $gs_lang != false ]
+    then
+    sleep 2
+    echo "Language        : $gs_lang"
+    gdefaults write NSGlobalDomain Language "($gs_lang)"
+fi
+
 if [ $zone != false ]
-	then
-	sleep 2
+    then
+    sleep 2
     echo "Local Time Zone : $zone"
-	gdefaults write NSGlobalDomain "Local Time Zone" $zone
+    gdefaults write NSGlobalDomain "Local Time Zone" $zone
 fi
 
 sleep 2
@@ -111,10 +170,10 @@ gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 
 sleep 2
 bundledir="$GNUSTEP_LOCAL_ROOT/Library/Bundles"
-echo "Resetting GSAppKitUserBundles (in NSGlobalDomain)"
+echo "Resetting       : GSAppKitUserBundles (in NSGlobalDomain)"
 gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileMenus.bundle, $bundledir/EtoileBehavior.bundle)"
 sleep 2
-echo "Setting User Interface Theme to Nesedah (in Camaelon domain)"
+echo "Setting         : User Interface Theme to Nesedah (in Camaelon domain)"
 gdefaults write Camaelon Theme Nesedah
 
 gdefaults write GWorkspace NoWarnOnQuit YES
