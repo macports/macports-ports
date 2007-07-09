@@ -169,7 +169,7 @@ echo "XShm            : disabled"
 gdefaults write NSGlobalDomain XWindowBufferUseXShm NO
 
 sleep 2
-bundledir="$GNUSTEP_LOCAL_ROOT/Library/Bundles"
+bundledir="$GNUSTEP_SYSTEM_ROOT/Library/Bundles"
 echo "Resetting       : GSAppKitUserBundles (in NSGlobalDomain)"
 gdefaults write NSGlobalDomain GSAppKitUserBundles "($bundledir/Camaelon.themeEngine, $bundledir/EtoileMenus.bundle, $bundledir/EtoileBehavior.bundle)"
 sleep 2
