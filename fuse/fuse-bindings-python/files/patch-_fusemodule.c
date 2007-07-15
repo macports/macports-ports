@@ -1,6 +1,6 @@
---- fuseparts/_fusemodule.c.bak	2007-02-24 13:59:44.000000000 -0500
-+++ fuseparts/_fusemodule.c	2007-02-24 14:00:06.000000000 -0500
-@@ -22,7 +22,9 @@
+--- fuseparts/_fusemodule.c.old	2007-07-15 15:09:32.000000000 -0700
++++ fuseparts/_fusemodule.c	2007-07-15 15:10:56.000000000 -0700
+@@ -32,7 +32,9 @@
  #define FUSE_USE_VERSION 26
  #endif
  
