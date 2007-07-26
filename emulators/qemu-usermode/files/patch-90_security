@@ -1,0 +1,374 @@
+Index: qemu-0.8.2/hw/cirrus_vga.c
+===================================================================
+--- qemu-0.8.2.orig/hw/cirrus_vga.c	2007-04-20 06:05:59.000000000 +0300
++++ qemu-0.8.2/hw/cirrus_vga.c	2007-04-20 06:05:59.000000000 +0300
+@@ -217,6 +217,20 @@
+ #define CIRRUS_HOOK_NOT_HANDLED 0
+ #define CIRRUS_HOOK_HANDLED 1
+ 
++#define BLTUNSAFE(s) \
++    ( \
++        ( /* check dst is within bounds */ \
++            (s)->cirrus_blt_height * (s)->cirrus_blt_dstpitch \
++                + ((s)->cirrus_blt_dstaddr & (s)->cirrus_addr_mask) > \
++                    (s)->vram_size \
++        ) || \
++        ( /* check src is within bounds */ \
++            (s)->cirrus_blt_height * (s)->cirrus_blt_srcpitch \
++                + ((s)->cirrus_blt_srcaddr & (s)->cirrus_addr_mask) > \
++                    (s)->vram_size \
++        ) \
++    )
++
+ struct CirrusVGAState;
+ typedef void (*cirrus_bitblt_rop_t) (struct CirrusVGAState *s,
+                                      uint8_t * dst, const uint8_t * src,
+@@ -589,7 +603,7 @@ static void cirrus_invalidate_region(Cir
+ 
+     for (y = 0; y < lines; y++) {
+ 	off_cur = off_begin;
+-	off_cur_end = off_cur + bytesperline;
++	off_cur_end = (off_cur + bytesperline) & s->cirrus_addr_mask;
+ 	off_cur &= TARGET_PAGE_MASK;
+ 	while (off_cur < off_cur_end) {
+ 	    cpu_physical_memory_set_dirty(s->vram_offset + off_cur);
+@@ -604,7 +618,11 @@ static int cirrus_bitblt_common_patternc
+ {
+     uint8_t *dst;
+ 
+-    dst = s->vram_ptr + s->cirrus_blt_dstaddr;
++    dst = s->vram_ptr + (s->cirrus_blt_dstaddr & s->cirrus_addr_mask);
++    
++    if (BLTUNSAFE(s))
++        return 0;
++
+     (*s->cirrus_rop) (s, dst, src,
+                       s->cirrus_blt_dstpitch, 0, 
+                       s->cirrus_blt_width, s->cirrus_blt_height);
+@@ -620,8 +638,11 @@ static int cirrus_bitblt_solidfill(Cirru
+ {
+     cirrus_fill_t rop_func;
+ 
++    if (BLTUNSAFE(s))
++        return 0;
++
+     rop_func = cirrus_fill[rop_to_index[blt_rop]][s->cirrus_blt_pixelwidth - 1];
+-    rop_func(s, s->vram_ptr + s->cirrus_blt_dstaddr, 
++    rop_func(s, s->vram_ptr + (s->cirrus_blt_dstaddr & s->cirrus_addr_mask), 
+              s->cirrus_blt_dstpitch,
+              s->cirrus_blt_width, s->cirrus_blt_height);
+     cirrus_invalidate_region(s, s->cirrus_blt_dstaddr,
+@@ -640,8 +661,8 @@ static int cirrus_bitblt_solidfill(Cirru
+ static int cirrus_bitblt_videotovideo_patterncopy(CirrusVGAState * s)
+ {
+     return cirrus_bitblt_common_patterncopy(s,
+-					    s->vram_ptr + 
+-                                            (s->cirrus_blt_srcaddr & ~7));
++					    s->vram_ptr + ((s->cirrus_blt_srcaddr & ~7) & 
++                        s->cirrus_addr_mask));
+ }
+ 
+ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
+@@ -691,8 +712,10 @@ static void cirrus_do_copy(CirrusVGAStat
+     if (notify)
+ 	video_hw_update();
+ 
+-    (*s->cirrus_rop) (s, s->vram_ptr + s->cirrus_blt_dstaddr,
+-		      s->vram_ptr + s->cirrus_blt_srcaddr,
++    (*s->cirrus_rop) (s, s->vram_ptr + 
++                (s->cirrus_blt_dstaddr & s->cirrus_addr_mask),
++		      s->vram_ptr + 
++                (s->cirrus_blt_srcaddr & s->cirrus_addr_mask),
+ 		      s->cirrus_blt_dstpitch, s->cirrus_blt_srcpitch,
+ 		      s->cirrus_blt_width, s->cirrus_blt_height);
+ 
+@@ -718,8 +741,14 @@ static int cirrus_bitblt_videotovideo_co
+ 		       s->cirrus_blt_srcaddr - s->start_addr,
+ 		       s->cirrus_blt_width, s->cirrus_blt_height);
+     } else {
+-	(*s->cirrus_rop) (s, s->vram_ptr + s->cirrus_blt_dstaddr,
+-			  s->vram_ptr + s->cirrus_blt_srcaddr,
++
++    if (BLTUNSAFE(s))
++        return 0;
++
++	(*s->cirrus_rop) (s, s->vram_ptr + 
++                (s->cirrus_blt_dstaddr & s->cirrus_addr_mask),
++			  s->vram_ptr + 
++                (s->cirrus_blt_srcaddr & s->cirrus_addr_mask),
+ 			  s->cirrus_blt_dstpitch, s->cirrus_blt_srcpitch,
+ 			  s->cirrus_blt_width, s->cirrus_blt_height);
+ 
+@@ -751,8 +780,9 @@ static void cirrus_bitblt_cputovideo_nex
+         } else {
+             /* at least one scan line */
+             do {
+-                (*s->cirrus_rop)(s, s->vram_ptr + s->cirrus_blt_dstaddr,
+-                                 s->cirrus_bltbuf, 0, 0, s->cirrus_blt_width, 1);
++                (*s->cirrus_rop)(s, s->vram_ptr + 
++                    (s->cirrus_blt_dstaddr & s->cirrus_addr_mask),
++                        s->cirrus_bltbuf, 0, 0, s->cirrus_blt_width, 1);
+                 cirrus_invalidate_region(s, s->cirrus_blt_dstaddr, 0,
+                                          s->cirrus_blt_width, 1);
+                 s->cirrus_blt_dstaddr += s->cirrus_blt_dstpitch;
+@@ -1852,7 +1882,7 @@ static void cirrus_mem_writeb_mode4and5_
+     unsigned val = mem_value;
+     uint8_t *dst;
+ 
+-    dst = s->vram_ptr + offset;
++    dst = s->vram_ptr + (offset &= s->cirrus_addr_mask);
+     for (x = 0; x < 8; x++) {
+ 	if (val & 0x80) {
+ 	    *dst = s->cirrus_shadow_gr1;
+@@ -1875,7 +1905,7 @@ static void cirrus_mem_writeb_mode4and5_
+     unsigned val = mem_value;
+     uint8_t *dst;
+ 
+-    dst = s->vram_ptr + offset;
++    dst = s->vram_ptr + (offset &= s->cirrus_addr_mask);
+     for (x = 0; x < 8; x++) {
+ 	if (val & 0x80) {
+ 	    *dst = s->cirrus_shadow_gr1;
+Index: qemu-0.8.2/hw/cirrus_vga_rop.h
+===================================================================
+--- qemu-0.8.2.orig/hw/cirrus_vga_rop.h	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/hw/cirrus_vga_rop.h	2007-04-20 06:05:59.000000000 +0300
+@@ -31,6 +31,12 @@ glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(C
+     int x,y;
+     dstpitch -= bltwidth;
+     srcpitch -= bltwidth;
++
++    if (dstpitch < 0 || srcpitch < 0) {
++        /* is 0 valid? srcpitch == 0 could be useful */
++        return;
++    }
++
+     for (y = 0; y < bltheight; y++) {
+         for (x = 0; x < bltwidth; x++) {
+             ROP_OP(*dst, *src);
+Index: qemu-0.8.2/hw/dma.c
+===================================================================
+--- qemu-0.8.2.orig/hw/dma.c	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/hw/dma.c	2007-04-20 06:05:59.000000000 +0300
+@@ -340,9 +340,11 @@ static void channel_run (int ncont, int 
+ #endif
+ 
+     r = dma_controllers[ncont].regs + ichan;
+-    n = r->transfer_handler (r->opaque, ichan + (ncont << 2),
+-                             r->now[COUNT], (r->base[COUNT] + 1) << ncont);
+-    r->now[COUNT] = n;
++    if (r->transfer_handler) {
++        n = r->transfer_handler (r->opaque, ichan + (ncont << 2),
++                                 r->now[COUNT], (r->base[COUNT] + 1) << ncont);
++        r->now[COUNT] = n;
++    }
+     ldebug ("dma_pos %d size %d\n", n, (r->base[COUNT] + 1) << ncont);
+ }
+ 
+Index: qemu-0.8.2/hw/fdc.c
+===================================================================
+--- qemu-0.8.2.orig/hw/fdc.c	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/hw/fdc.c	2007-04-20 06:05:59.000000000 +0300
+@@ -1110,8 +1110,13 @@ static uint32_t fdctrl_read_data (fdctrl
+             len = fdctrl->data_len - fdctrl->data_pos;
+             if (len > FD_SECTOR_LEN)
+                 len = FD_SECTOR_LEN;
+-            bdrv_read(cur_drv->bs, fd_sector(cur_drv),
+-                      fdctrl->fifo, len);
++            if (cur_drv->bs) {
++                bdrv_read(cur_drv->bs, fd_sector(cur_drv),
++                          fdctrl->fifo, len);
++            } else {
++                FLOPPY_ERROR("can't read data from drive\n");
++                return 0;
++            }
+         }
+     }
+     retval = fdctrl->fifo[pos];
+Index: qemu-0.8.2/hw/ne2000.c
+===================================================================
+--- qemu-0.8.2.orig/hw/ne2000.c	2007-04-20 06:05:59.000000000 +0300
++++ qemu-0.8.2/hw/ne2000.c	2007-04-20 06:05:59.000000000 +0300
+@@ -230,7 +230,7 @@ static void ne2000_receive(void *opaque,
+ {
+     NE2000State *s = opaque;
+     uint8_t *p;
+-    int total_len, next, avail, len, index, mcast_idx;
++    unsigned int total_len, next, avail, len, index, mcast_idx;
+     uint8_t buf1[60];
+     static const uint8_t broadcast_macaddr[6] = 
+         { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+@@ -299,7 +299,11 @@ static void ne2000_receive(void *opaque,
+ 
+     /* write packet data */
+     while (size > 0) {
+-        avail = s->stop - index;
++        /* taviso: this can wrap, so check its okay. */
++        if (index <= s->stop)
++            avail = s->stop - index;
++        else
++            avail = 0;
+         len = size;
+         if (len > avail)
+             len = avail;
+Index: qemu-0.8.2/hw/pc.c
+===================================================================
+--- qemu-0.8.2.orig/hw/pc.c	2007-04-20 06:05:58.000000000 +0300
++++ qemu-0.8.2/hw/pc.c	2007-04-20 06:05:59.000000000 +0300
+@@ -312,7 +312,8 @@ void bochs_bios_write(void *opaque, uint
+     case 0x400:
+     case 0x401:
+         fprintf(stderr, "BIOS panic at rombios.c, line %d\n", val);
+-        exit(1);
++        /* according to documentation, these can be safely ignored */
++        break;
+     case 0x402:
+     case 0x403:
+ #ifdef DEBUG_BIOS
+@@ -335,8 +336,9 @@ void bochs_bios_write(void *opaque, uint
+         /* LGPL'ed VGA BIOS messages */
+     case 0x501:
+     case 0x502:
++        /* according to documentation, these can be safely ignored */
+         fprintf(stderr, "VGA BIOS panic, line %d\n", val);
+-        exit(1);
++        break;
+     case 0x500:
+     case 0x503:
+ #ifdef DEBUG_BIOS
+Index: qemu-0.8.2/hw/sb16.c
+===================================================================
+--- qemu-0.8.2.orig/hw/sb16.c	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/hw/sb16.c	2007-04-20 06:05:59.000000000 +0300
+@@ -1235,8 +1235,10 @@ static int SB_read_DMA (void *opaque, in
+             s->block_size);
+ #endif
+ 
+-    while (s->left_till_irq <= 0) {
+-        s->left_till_irq = s->block_size + s->left_till_irq;
++    if (s->block_size) {
++        while (s->left_till_irq <= 0) {
++            s->left_till_irq = s->block_size + s->left_till_irq;
++        }
+     }
+ 
+     return dma_pos;
+Index: qemu-0.8.2/slirp/slirp.c
+===================================================================
+--- qemu-0.8.2.orig/slirp/slirp.c	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/slirp/slirp.c	2007-04-20 06:05:59.000000000 +0300
+@@ -611,6 +611,10 @@ void slirp_input(const uint8_t *pkt, int
+         if (!m)
+             return;
+         /* Note: we add to align the IP header */
++        /* taviso: large values in ne2k TCNT register may exceed msize on transmit */
++        if (M_FREEROOM(m) < pkt_len + 2) {
++            m_inc(m, pkt_len + 2);
++        }
+         m->m_len = pkt_len + 2;
+         memcpy(m->m_data + 2, pkt, pkt_len);
+ 
+Index: qemu-0.8.2/target-i386/translate.c
+===================================================================
+--- qemu-0.8.2.orig/target-i386/translate.c	2006-07-22 20:23:34.000000000 +0300
++++ qemu-0.8.2/target-i386/translate.c	2007-04-20 06:05:59.000000000 +0300
+@@ -5244,7 +5244,12 @@ static target_ulong disas_insn(DisasCont
+         if (CODE64(s))
+             goto illegal_op;
+         val = ldub_code(s->pc++);
+-        gen_op_aam(val);
++        /* taviso: operand can be zero */
++        if (val) {
++            gen_op_aam(val);
++        } else {
++            gen_exception(s, EXCP00_DIVZ, s->pc - s->cs_base);
++        }
+         s->cc_op = CC_OP_LOGICB;
+         break;
+     case 0xd5: /* aad */
+@@ -5292,6 +5297,7 @@ static target_ulong disas_insn(DisasCont
+         gen_jmp_im(pc_start - s->cs_base);
+         gen_op_into(s->pc - pc_start);
+         break;
++#ifdef WANT_ICEBP
+     case 0xf1: /* icebp (undocumented, exits to external debugger) */
+ #if 1
+         gen_debug(s, pc_start - s->cs_base);
+@@ -5301,6 +5307,7 @@ static target_ulong disas_insn(DisasCont
+         cpu_set_log(CPU_LOG_INT | CPU_LOG_TB_IN_ASM);
+ #endif
+         break;
++#endif /* icebp */
+     case 0xfa: /* cli */
+         if (!s->vm86) {
+             if (s->cpl <= s->iopl) {
+Index: qemu-0.8.2/vl.c
+===================================================================
+--- qemu-0.8.2.orig/vl.c	2007-04-20 06:05:59.000000000 +0300
++++ qemu-0.8.2/vl.c	2007-04-20 06:05:59.000000000 +0300
+@@ -3139,8 +3139,8 @@ typedef struct NetSocketState {
+     VLANClientState *vc;
+     int fd;
+     int state; /* 0 = getting length, 1 = getting data */
+-    int index;
+-    int packet_len;
++    unsigned int index;
++    unsigned int packet_len;
+     uint8_t buf[4096];
+     struct sockaddr_in dgram_dst; /* contains inet host and port destination iff connectionless (SOCK_DGRAM) */
+ } NetSocketState;
+@@ -3171,7 +3171,8 @@ static void net_socket_receive_dgram(voi
+ static void net_socket_send(void *opaque)
+ {
+     NetSocketState *s = opaque;
+-    int l, size, err;
++    int size, err;
++    unsigned l;
+     uint8_t buf1[4096];
+     const uint8_t *buf;
+ 
+@@ -3210,7 +3211,15 @@ static void net_socket_send(void *opaque
+             l = s->packet_len - s->index;
+             if (l > size)
+                 l = size;
+-            memcpy(s->buf + s->index, buf, l);
++            if (s->index + l <= sizeof(s->buf)) {
++                memcpy(s->buf + s->index, buf, l);
++            } else {
++                fprintf(stderr, "serious error: oversized packet received,"
++                    "connection terminated.\n");
++                s->state = 0;
++                goto eoc;
++            }
++
+             s->index += l;
+             buf += l;
+             size -= l;
+Index: qemu/block.c
+@@ -539,8 +539,15 @@
+         return -ENOMEDIUM;
+     if (bs->read_only)
+         return -EACCES;
++    if (sector_num < 0)
++	return -EACCES;
+     if (sector_num == 0 && bs->boot_sector_enabled && nb_sectors > 0) {
+         memcpy(bs->boot_sector_data, buf, 512);   
++    }
++    {
++	unsigned int ns = sector_num * 512;
++	if (ns < 0)
++	    return -EACCES;
+     }
+     if (drv->bdrv_pwrite) {
+         int ret, len;
+Index: qemu/hw/i8259.c
+@@ -302,7 +302,8 @@
+             s->init4 = val & 1;
+             s->single_mode = val & 2;
+             if (val & 0x08)
+-                hw_error("level sensitive irq not supported");
++                /* hw_error("level sensitive irq not supported"); */
++		return;
+         } else if (val & 0x08) {
+             if (val & 0x04)
+                 s->poll = 1;
