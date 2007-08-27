@@ -36,6 +36,8 @@ case "$1" in
 
 start)
   echo "starting postgrey"
+  # db cleanup because files may be unusable in some cases
+  rm -f __PREFIX/var/spool/postgrey/__db.*
   unset PATH
   cd /
   __PREFIX/sbin/postgrey $POSTGREY_OPTS "$POSTGREY_TEXT_OPT"
