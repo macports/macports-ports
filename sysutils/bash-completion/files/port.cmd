@@ -30,7 +30,7 @@ _port()
 			outdated|upgrade|selfupdate|sync|\
 			clean|list|search|info|variants|deps|contents|\
 			unarchive|fetch|extract|patch|configure|build|destroot|test|archive|\
-			pkg|mpkg|dmg|rpmpackage|provides)
+			pkg|mpkg|dmg|rpm|srpm|provides)
                         mode=$i
 			;;
 		esac
@@ -130,7 +130,7 @@ _port()
 				clean list search info variants deps contents \
 				unarchive fetch extract patch configure build \
                                 destroot test archive \
-                                pkg mpkg dmg rpmpackage provides' -- $cur ) )
+                                pkg mpkg dmg rpm srpm provides' -- $cur ) )
 
 	
 	return 0
