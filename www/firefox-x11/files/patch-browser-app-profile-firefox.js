@@ -4,9 +4,9 @@
  #endif
  #endif
  
-+// DarwinPorts-specific preferences
-+pref("general.useragent.vendorComment", "DarwinPorts Community Edition");
++// MacPorts-specific preferences
++pref("general.useragent.vendorComment", "MacPorts Community Edition");
 +
- pref("startup.homepage_override_url","chrome://browser-region/locale/region.properties");
  pref("general.startup.browser", true);
  
+ pref("browser.chromeURL","chrome://browser/content/");
