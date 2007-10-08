@@ -1,5 +1,5 @@
---- 7font-search.sh.orig	2007-03-07 02:53:02.000000000 +0900
-+++ 7font-search.sh	2007-05-17 13:30:38.000000000 +0900
+--- ./7font-search.sh.orig	2007-07-30 18:40:56.000000000 +0900
++++ ./7font-search.sh	2007-08-07 06:16:51.000000000 +0900
 @@ -101,37 +101,8 @@
  
  # -----------------------------------
@@ -55,6 +55,6 @@
 -EOF
 -fi
 -
- echo ""
- echo "searching xdvi fonts..."
- $MKTEXLSR 2> /dev/null
+ (IFS=";"; NUM=1; for f in $EXTRA_CMAP; do
+     echo "extra$NUM $f"
+     NUM=`expr $NUM + 1`
