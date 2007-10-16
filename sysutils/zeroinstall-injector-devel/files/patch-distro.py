@@ -1,8 +1,6 @@
-Index: zeroinstall/injector/distro.py
-===================================================================
 --- zeroinstall/injector/distro.py	(revision 2053)
 +++ zeroinstall/injector/distro.py	(arbetskopia)
-@@ -228,12 +228,112 @@
+@@ -228,12 +228,108 @@
  		impl = factory('package:rpm:%s:%s' % (package, version)) 
  		impl.version = model.parse_version(version)
  
@@ -39,9 +37,6 @@ Index: zeroinstall/injector/distro.py
 +			if name == 'mtime' and (int(value) !=
 +					    int(self.status_details.st_mtime)):
 +				raise Exception("Modification time of mp status file has changed")
-+			if name == 'size' and (int(value) !=
-+					       self.status_details.st_size):
-+				raise Exception("Size of mp status file has changed")
 +		else:
 +			raise Exception('Invalid cache format (bad header)')
 +			
@@ -52,7 +47,7 @@ Index: zeroinstall/injector/distro.py
 +
 +	def __parse_port_line(self, line):
 +
-+		package, version, category = line.strip().split()
++		package, version = line.strip().split()
 +		if version.startswith('@'):
 +			version = version.lstrip('@')
 +		if '_' in version:
@@ -67,7 +62,7 @@ Index: zeroinstall/injector/distro.py
 +	def generate_cache(self):
 +		cache = []
 +
-+		for line in os.popen("port list installed"):
++		for line in os.popen("port echo installed"):
 +			package, version = self.__parse_port_line(line)
 +			if package and version:
 +				cache.append('%s\t%s' % (package, version))
@@ -81,7 +76,6 @@ Index: zeroinstall/injector/distro.py
 +		try:
 +			stream = os.fdopen(fd, 'wb')
 +			stream.write('mtime: %d\n' % int(self.status_details.st_mtime))
-+			stream.write('size: %d\n' % self.status_details.st_size)
 +			stream.write('\n')
 +			for line in cache:
 +				stream.write(line + '\n')
