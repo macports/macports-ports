@@ -1,5 +1,5 @@
---- tripwire-2.3.1-2.orig/install/install.sh	Tue Apr 27 17:09:17 2004
-+++ tripwire-2.3.1-2/install/install.sh	Wed Apr 28 12:04:20 2004
+--- install/install.sh		Sat Sep  1 19:54:34 2007
++++ install/install.sh		Sun Sep  2 07:10:58 2007
 @@ -19,10 +19,6 @@
  
  PATH='.:/bin:/usr/bin'
@@ -11,44 +11,47 @@
  
  ##-------------------------------------------------------
  ## The usage message.
-@@ -268,8 +264,8 @@
+@@ -262,9 +258,8 @@
  ##-------------------------------------------------------
  
  paths="TWBIN TWMAN TWPOLICY TWREPORT TWDB TWSITEKEYDIR TWLOCALKEYDIR"
 -path2="TWBIN TWPOLICY TWREPORT TWDB TWSITEKEYDIR TWLOCALKEYDIR"
 -path3="TWMAN TWDOCS"
+-
 +path2="TWPOLICY TWDB TWREPORT TWSITEKEYDIR TWLOCALKEYDIR"
 +path3="TWBIN TWMAN TWDOCS"
- 
  ##=======================================================
  ## User License Agreement
-@@ -285,6 +281,10 @@
+ ##=======================================================
+@@ -279,6 +274,12 @@
  ##-------------------------------------------------------
  
  if [ "$PROMPT" = "true" ] ; then
++
 +  if [ ! -t 0 ] ; then
-+	echo "Say 'sh install.sh', not 'sh < install.sh'"
-+	exit 1
++       echo "Say 'sh install.sh', not 'sh < install.sh'"
++       exit 1
 +  fi
++
    echo
-   echo "LICENSE AGREEMENT for Tripwire(R) 2.3 Open Source"
+   echo "LICENSE AGREEMENT for Tripwire(R) 2.4 Open Source"
    echo
-@@ -479,6 +479,14 @@
+@@ -474,6 +475,14 @@
  		eval "echo \"\$${i}\""
  	fi
  done
 +if [ -n "$DESTDIR" ]; then
-+	echo
-+	echo "Using destination root directory:"
-+	echo "  $DESTDIR"
-+	echo
++       echo
++       echo "Using destination root directory:"
++       echo "  $DESTDIR"
++       echo
 +else
-+	DESTDIR=""
++       DESTDIR=""
 +fi
  
  ##-------------------------------------------------------
  ## Display value of clobber.
-@@ -519,7 +527,7 @@
+@@ -514,7 +523,7 @@
  ##-------------------------------------------------------
  
  for i in $path2; do
@@ -57,7 +60,7 @@
  	if [ ! -d "$d" ] ; then
  		mkdir -p "$d"
  		if [ ! -d "$d" ] ; then
-@@ -535,7 +543,7 @@
+@@ -530,7 +539,7 @@
  done
  
  for i in $path3; do
@@ -66,7 +69,7 @@
  	if [ ! -d "$d" ] ; then
  		mkdir -p "$d"
  		if [ ! -d "$d" ] ; then
-@@ -598,11 +606,11 @@
+@@ -591,11 +600,11 @@
  for i in $loosefiles; do
  	eval "eval \"\$$i\""
  	f=${TAR_DIR}$d/$ff
@@ -80,15 +83,16 @@
                  if [ $? -eq 0 ]; then
  			echo "$ff: copied"
  			    chmod "$rr" "$ff" > /dev/null
-@@ -636,6 +644,7 @@
+@@ -628,7 +637,7 @@
+ ## If user has to enter a passphrase, give some
  ## advice about what is appropriate.
  ##-------------------------------------------------------
- 
+-
 +if [ -z "$DESTDIR" ]; then
  if [ -z "$TW_SITE_PASS" ] || [ -z "$TW_LOCAL_PASS" ]; then
  cat << END_OF_TEXT
  
-@@ -683,7 +692,7 @@
+@@ -676,7 +685,7 @@
  	if [ $? -ne 0 ] ; then
  		echo "Error: site key generation failed"
  		exit 1
@@ -97,7 +101,7 @@
  	fi
  fi
  
-@@ -711,9 +720,10 @@
+@@ -704,9 +713,10 @@
  	if [ $? -ne 0 ] ; then
  		echo "Error: local key generation failed"
  		exit 1
@@ -109,7 +113,7 @@
  
  ##=======================================================
  ## Generate tripwire configuration file.
-@@ -723,7 +733,7 @@
+@@ -716,7 +726,7 @@
  echo "----------------------------------------------"
  echo "Generating Tripwire configuration file..."
  
@@ -118,7 +122,7 @@
  ROOT          =$TWBIN
  POLFILE       =$POLICY_FILE
  DBFILE        =$TWDB/\$(HOSTNAME).twd
-@@ -741,27 +751,28 @@
+@@ -734,27 +744,27 @@
  END_OF_TEXT
  
  if [ "$TWMAILMETHOD" = "SMTP" ] ; then
@@ -147,12 +151,12 @@
  ##=======================================================
  ## Create signed tripwire configuration file.
  ##=======================================================
- 
+-
 +if [ -z "$DESTDIR" ]; then
  echo
  echo "----------------------------------------------"
  echo "Creating signed configuration file..."
-@@ -803,7 +814,7 @@
+@@ -796,7 +806,7 @@
  fi
  
  # Set the rights properly
@@ -161,7 +165,7 @@
  
  ##-------------------------------------------------------
  ## We keep the cleartext version around.
-@@ -817,6 +828,7 @@
+@@ -810,6 +820,7 @@
  that you delete this file manually after you have examined it.
  
  END_OF_TEXT
@@ -169,7 +173,7 @@
  
  ##=======================================================
  ## Modify default policy file with file locations
-@@ -827,6 +839,7 @@
+@@ -820,6 +831,7 @@
  echo "Customizing default policy file..."
  
  sed '/@@section GLOBAL/,/@@section FS/  {
@@ -177,7 +181,7 @@
    s?^\(TWROOT=\).*$?TWDOCS='\""$TWDOCS"\"';?
    s?^\(TWBIN=\).*$?\1'\""$TWBIN"\"';?
    s?^\(TWPOL=\).*$?\1'\""$TWPOLICY"\"';?
-@@ -835,22 +848,23 @@
+@@ -828,22 +840,22 @@
    s?^\(TWLKEY=\).*$?\1'\""$TWLOCALKEYDIR"\"';?
    s?^\(TWREPORT=\).*$?\1'\""$TWREPORT"\"';?
    s?^\(HOSTNAME=\).*$?\1'"$HOST_NAME"';?
@@ -204,12 +208,12 @@
  ##=======================================================
  ## Create signed tripwire policy file.
  ##=======================================================
- 
+-
 +if [ -z "$DESTDIR" ]; then
  echo
  echo "----------------------------------------------"
  echo "Creating signed policy file..."
-@@ -909,6 +923,7 @@
+@@ -902,6 +914,7 @@
  a new signed copy of the Tripwire policy.
  
  END_OF_TEXT
