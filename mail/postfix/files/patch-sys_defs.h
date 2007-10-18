@@ -1,6 +1,6 @@
---- src/util/sys_defs.h.orig	2006-07-03 22:37:32.000000000 +1000
-+++ src/util/sys_defs.h	2006-08-11 02:11:36.000000000 +1000
-@@ -161,10 +161,10 @@
+--- src/util/sys_defs.h.org	2007-10-17 21:27:59.000000000 -0700
++++ src/util/sys_defs.h	2007-10-17 21:32:35.000000000 -0700
+@@ -185,10 +185,10 @@
  #define HAS_DB
  #define HAS_SA_LEN
  #define DEF_DB_TYPE	"hash"
@@ -13,10 +13,10 @@
  #define USE_STATFS
  #define STATFS_IN_SYS_MOUNT_H
  #define HAS_POSIX_REGEXP
-@@ -178,11 +178,11 @@
- # define HAS_IPV6
+@@ -203,11 +203,11 @@
  # define HAVE_GETIFADDRS
  #endif
+ #define HAS_FUTIMES			/* XXX Guessing */
 -#define NATIVE_SENDMAIL_PATH "/usr/sbin/sendmail"
 -#define NATIVE_MAILQ_PATH "/usr/bin/mailq"
 -#define NATIVE_NEWALIAS_PATH "/usr/bin/newaliases"
@@ -27,6 +27,6 @@
 +#define NATIVE_NEWALIAS_PATH "__PREFIX/bin/newaliases"
 +#define NATIVE_COMMAND_DIR "__PREFIX/sbin"
 +#define NATIVE_DAEMON_DIR "__PREFIX/libexec/postfix"
+ #define SOCKADDR_SIZE	socklen_t
+ #define SOCKOPT_SIZE	socklen_t
  #endif
- 
-  /*
