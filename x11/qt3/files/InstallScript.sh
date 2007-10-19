@@ -7,7 +7,7 @@
         export DYLD_LIBRARY_PATH="$QTDIR/lib:$QTDIR/plugins/designer:$QTDIR/plugins/imageformats"
         export PATH="$QTDIR/bin:$PATH"
 
-        make install INSTALL_ROOT=%d
+        make -j1 install INSTALL_ROOT=%d
 
         #### COMPATIBILITY WITH OLD QT3 PACKAGES ####
 
@@ -21,12 +21,12 @@
 
 #fink
 #        # %p/include/qt
-#        install -d -m 0755 %i/include
-#        ln -sf %p/include/qt %i/lib/%N/include
+#        install -d -m 0755 %i/lib/%N/include
+#        /bin/cp -fRL %i/include/qt/* %i/lib/%N/include/
 #macports
         # %p/include/qt3
-        install -d -m 0755 %i/include
-        ln -sf %p/include/qt3 %i/lib/%N/include
+        install -d -m 0755 %i/lib/%N/include
+        /bin/cp -fRL %i/include/qt3/* %i/lib/%N/include/
 
         # %p/lib
         install -d -m 0755 %i/lib/%N/lib
