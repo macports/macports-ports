@@ -1,6 +1,6 @@
 --- mkconfig.rb.orig	2005-11-10 15:22:03.000000000 -0800
 +++ mkconfig.rb	2006-01-08 08:36:13.000000000 -0800
-@@ -112,6 +112,14 @@
+@@ -143,6 +143,14 @@
    CONFIG["archdir"] = "$(rubylibdir)/$(arch)"
    CONFIG["sitelibdir"] = "$(sitedir)/$(ruby_version)"
    CONFIG["sitearchdir"] = "$(sitelibdir)/$(sitearch)"

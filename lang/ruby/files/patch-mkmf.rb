@@ -10,7 +10,7 @@
  
  $mswin = /mswin/ =~ RUBY_PLATFORM
  $bccwin = /bccwin/ =~ RUBY_PLATFORM
-@@ -410,7 +413,7 @@
+@@ -417,7 +420,7 @@
  
  def try_func(func, libs, headers = nil, &b)
    headers = cpp_include(headers)
@@ -19,7 +19,7 @@
  #{COMMON_HEADERS}
  #{headers}
  /*top*/
-@@ -422,6 +425,11 @@
+@@ -429,6 +435,11 @@
  int main() { return 0; }
  int t() { #{func}(); return 0; }
  SRC
@@ -31,7 +31,7 @@
  end
  
  def try_var(var, headers = nil, &b)
-@@ -1087,6 +1095,7 @@
+@@ -1097,6 +1105,7 @@
  RUBY_SO_NAME = #{CONFIG['RUBY_SO_NAME']}
  arch = #{CONFIG['arch']}
  sitearch = #{CONFIG['sitearch']}
