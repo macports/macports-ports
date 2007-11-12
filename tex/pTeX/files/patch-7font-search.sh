@@ -1,5 +1,5 @@
---- ./7font-search.sh.orig	2007-07-30 18:40:56.000000000 +0900
-+++ ./7font-search.sh	2007-08-07 06:16:51.000000000 +0900
+--- ./7font-search.sh.orig	2007-11-01 22:49:05.000000000 +0900
++++ ./7font-search.sh	2007-11-01 22:52:34.000000000 +0900
 @@ -101,37 +101,8 @@
  
  # -----------------------------------
@@ -18,9 +18,9 @@
 -
 -mksymlink $TRUETYPE <<EOF
 -### リンク名  検索ディレクトリ/ファイル
--x11       /usr/X11R6/lib/X11/fonts/truetype
--X11       /usr/X11R6/lib/X11/fonts/TrueType
--X11TTF    /usr/X11R6/lib/X11/fonts/TTF
+-x11       /usr{,/local,/X11R6}/lib/X11/fonts/truetype
+-X11       /usr{,/local,/X11R6}/lib/X11/fonts/TrueType
+-X11TTF    /usr{,/local,/X11R6}/lib/X11/fonts/TTF
 -openwin   /usr/openwin/lib/locale/ja/X11/fonts/TT
 -truetype  /usr/share/fonts/truetype
 -TTF	  /usr/share/fonts/TTF
