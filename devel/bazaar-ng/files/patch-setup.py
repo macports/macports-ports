@@ -1,6 +1,6 @@
---- setup.py.orig	2007-09-25 22:47:54.000000000 -0400
-+++ setup.py	2007-09-26 11:29:44.000000000 -0400
-@@ -320,7 +320,7 @@
+--- setup.py.orig	2007-11-09 08:19:32.000000000 -0500
++++ setup.py	2007-11-12 18:01:19.000000000 -0500
+@@ -321,7 +321,7 @@
      DATA_FILES = []
      if not 'bdist_egg' in sys.argv:
          # generate and install bzr.1 only with plain install, not easy_install one
