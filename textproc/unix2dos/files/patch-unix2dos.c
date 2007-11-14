@@ -1,5 +1,5 @@
---- unix2dos.c.segf	Thu Jan 17 17:09:49 2002
-+++ unix2dos.c	Thu Jan 17 17:12:47 2002
+--- work/unix2dos-2.2.src/unix2dos.c	1995-03-30 18:03:23.000000000 +0200
++++ unix2dos.c	2007-11-14 23:21:10.000000000 +0100
 @@ -131,9 +131,9 @@
   * RetVal: NULL if failure
   *         file stream otherwise
@@ -24,7 +24,7 @@
  
 -  strcpy (TempPath, "./u2dtmp");
 -  strcat (TempPath, "XXXXXX");
--  mkstemp (TempPath);
+-  mktemp (TempPath);
 +  strcpy (TempPath, "./u2dtmpXXXXXX");
 +  if((fd=mkstemp (TempPath)) < 0) {
 +	  perror("Can't open output temp file");
@@ -64,7 +64,7 @@
  
 -  strcpy (TempPath, "./u2dtmp");
 -  strcat (TempPath, "XXXXXX");
--  mkstemp (TempPath);
+-  mktemp (TempPath);
 +  strcpy (TempPath, "./u2dtmpXXXXXX");
 +  if((fd=mkstemp (TempPath)) < 0) {
 +      perror("Can't open output temp file");
