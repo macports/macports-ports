@@ -8,7 +8,7 @@
  # include	<sys/endian.h>
 +#elif defined(__APPLE__) && defined(__MACH__)
 +# include	<machine/endian.h>
-+# define be32toh OSSwapBigToHostInt32
++# define be32toh ntohl
 +#else
 +# include	<netinet/in.h>
 +# define be32toh ntohl

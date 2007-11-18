@@ -19,7 +19,7 @@
  # include	<sys/endian.h>
 +#elif defined(__APPLE__) && defined(__MACH__)
 +# include	<machine/endian.h>
-+# define htobe32 OSSwapHostToBigInt32
++# define htobe32 htonl
 +#else
 +# include	<netinet/in.h>
 +# define htobe32 htonl
