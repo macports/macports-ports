@@ -6,8 +6,8 @@ try:
 except:
     raise SystemExit, "Distutils problem"
 
-inc_dirs = ["__INCDIR__"]
-lib_dirs = ["__LIBDIR__"]
+inc_dirs = ['__INCDIR__']
+lib_dirs = ['__LIBDIR__']
 
 sqlite_defines = []
 sqlite_defines.append(('MODULE_NAME', '"sqlite3"'))
@@ -27,7 +27,7 @@ setup(name = "_sqlite3",
       
       ext_modules = [Extension('_sqlite3', sqlite_srcs,
                                define_macros=sqlite_defines,
-                               include_dirs = ["_sqlite", inc_dirs],
+                               include_dirs = inc_dirs,
                                libraries = ["sqlite3"],
                                library_dirs = lib_dirs)]
       )
