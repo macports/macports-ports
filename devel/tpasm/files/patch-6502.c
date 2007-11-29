@@ -1,5 +1,5 @@
---- processors/6502.c.sav	2006-08-12 18:31:48.000000000 -0400
-+++ processors/6502.c		2007-09-20 06:47:51.000000000 -0400
+--- processors/6502.c.sav	2007-11-29 08:56:32.000000000 -0500
++++ processors/6502.c	2007-11-29 08:58:43.000000000 -0500
 @@ -28,39 +28,41 @@
  
  // enumerated addressing modes
@@ -62,7 +62,7 @@
  
  struct OPCODE
  {
-@@ -94,141 +96,173 @@
+@@ -94,141 +96,174 @@
  
  // This macro creates the typeFlags and baseOpcode list. For each non-white entry in the baseOpcode
  // list, a bit is set in typeFlags.
@@ -358,10 +358,11 @@
 +		{"txa",		OP_ENTRY(0x8A,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    )},
 +		{"txs",		OP_ENTRY(0x9A,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    )},
 +		{"tya",		OP_ENTRY(0x98,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    )},
++		{"wai",		OP_ENTRY(0xCB,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    ,    )},
  
  // bbr, bbs, rmb, smb should be added some day
  //	BBR	#n,zp,addr	branch to addr if bit n of location zp is clear
-@@ -236,7 +270,7 @@
+@@ -236,7 +271,7 @@
  //	RMB	#n,zp		clear bit n of location zp
  //	SMB	#n,zp		set bit n of location zp
  
@@ -370,7 +371,7 @@
  
  //	BBRn	zp,addr
  //	BBSn	zp,addr
-@@ -291,15 +325,16 @@
+@@ -291,15 +326,16 @@
  enum
  {
  	POT_IMMEDIATE,
@@ -394,7 +395,7 @@
  // parse the operand as a value with a possible offset
  {
  	if(ParseExpression(line,lineIndex,value,unresolved))
-@@ -327,6 +362,14 @@
+@@ -327,6 +363,14 @@
  					return(true);
  				}
  			}
@@ -409,7 +410,7 @@
  		}
  	}
  	return(false);
-@@ -368,7 +411,7 @@
+@@ -368,7 +412,7 @@
  	return(false);
  }
  
@@ -418,7 +419,7 @@
  // Try to parse an operand and determine its type
  // return true if the parsing succeeds
  {
-@@ -414,12 +457,12 @@
+@@ -414,12 +458,12 @@
  			else
  			{
  				*lineIndex=startIndex;					// value does not look indirect, so try direct approach
@@ -433,7 +434,7 @@
  		}
  	}
  	return(false);
-@@ -883,6 +926,44 @@
+@@ -883,6 +927,44 @@
  	return(!fail);
  }
  
@@ -478,7 +479,7 @@
  static OPCODE *MatchOpcode(const char *string)
  // match opcodes for this processor, return NULL if none matched
  {
-@@ -909,9 +990,9 @@
+@@ -909,9 +991,9 @@
  	unsigned int
  		elementType;
  	int
@@ -490,7 +491,7 @@
  
  	result=true;					// no hard failure yet
  	*success=false;					// no match yet
-@@ -924,7 +1005,7 @@
+@@ -924,7 +1006,7 @@
  			*success=true;
  			if(!ParseComment(line,lineIndex))
  			{
@@ -499,7 +500,7 @@
  				{
  					switch(elementType)
  					{
-@@ -949,6 +1030,9 @@
+@@ -949,6 +1031,9 @@
  						case POT_ZP_INDIRECT_OFF_Y:
  							result=HandleIndirectOffY(opcode,value,unresolved,listingRecord);
  							break;
