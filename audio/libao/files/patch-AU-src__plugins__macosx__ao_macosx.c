@@ -1,5 +1,5 @@
---- src/plugins/macosx/ao_macosx.c	2006-12-06 22:56:12.000000000 +0100
-+++ src/plugins/macosx/ao_macosx.c	2006-12-07 00:04:31.000000000 +0100
+--- src/plugins/macosx/ao_macosx.c.orig	2004-11-09 09:20:26.000000000 +0100
++++ src/plugins/macosx/ao_macosx.c	2007-11-30 13:37:22.000000000 +0100
 @@ -29,7 +29,7 @@
    audio samples rather than having them pushed at it (which is nice
    when you are wanting to do good buffering of audio).  */
@@ -32,7 +32,7 @@
  	"",
  	AO_FMT_NATIVE,
  	30,
-@@ -65,374 +64,404 @@
+@@ -65,374 +64,407 @@
  
  typedef struct ao_macosx_internal
  {
@@ -283,6 +283,9 @@
 +  /* Setup a AudioStreamBasicDescription with the requested format */
 +  requestedDesc.mFormatID = kAudioFormatLinearPCM;
 +  requestedDesc.mFormatFlags = kAudioFormatFlagIsPacked;
++
++	if (ao_is_big_endian())
++		requestedDesc.mFormatFlags |= kAudioFormatFlagIsBigEndian;
 +
 +  if (format->bits > 8)
 +    requestedDesc.mFormatFlags |= kAudioFormatFlagIsSignedInteger;
