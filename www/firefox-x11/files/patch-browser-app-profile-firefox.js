@@ -5,7 +5,7 @@
  #endif
  
 +// MacPorts-specific preferences
-+pref("general.useragent.vendorComment", "MacPorts Community Edition");
++pref("general.useragent.vendorComment", "MacPorts Firefox Community Edition");
 +
  pref("general.startup.browser", true);
  
