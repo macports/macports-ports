@@ -24,7 +24,7 @@ checksums		md5 acf70a16359bf3658bdfb74bda1c4419 \
 depends_lib		port:zlib
 
 platform darwin {
-	patchfiles	patch-Makefile.org patch-crypto-Makefile
+	patchfiles	patch-Makefile.org patch-crypto-Makefile patch-Configure
 }
 
 configure.cmd	./config
@@ -32,10 +32,6 @@ configure.args	-L${prefix}/lib --openssldir=${prefix}/etc/openssl zlib no-asm no
 
 platform darwin 6 {
 	depends_lib-append	port:dlcompat
-}
-
-platform darwin 8 {
-	build.args	CC=/usr/bin/gcc-4.0
 }
 
 variant rfc3779 {
@@ -51,76 +47,97 @@ livecheck.check	regex
 livecheck.url	${master_sites}
 livecheck.regex	${name}-(0.9.8\[a-z\])
 
+#make 4-way universal build ready
 variant universal {
-    
-# port-specific procedure
-    proc clean {} {
-        system "make clean"
-        foreach f [glob lib*.a lib*.*.*.*.dylib] {
-            file delete ${f}
-        }
-    }
+	post-patch {
+#		foreach arch {i386 x86_64 ppc ppc64}
+		foreach arch {i386 ppc} {
+			file copy ${worksrcpath} ${workpath}/${arch}
+		}
+	}
 
-# i386
-    # configure
-    pre-configure {
-        system "./Configure darwin-i386-cc ${configure.pre_args} ${configure.args} && \
-		patch < ${filespath}/patch-Makefiles-universal-i386"
-        reinplace "s|^PROCESSOR=.*|PROCESSOR=|" ${worksrcpath}/Makefile
-    }
-    # build
-    configure {
-        system "make"
-    }
-    # backup, clean up
-    post-configure {
-        # get list of files to be backed up - only needs to be done once
-        fs-traverse file . {
-          if {![string equal [string range [file tail $file] end-1 end] .o]} {
-            set type [exec file -b $file]
-            if {[regexp {(Mach-O|ar archive)} $type]} {
-              global universal_filelist
-              lappend universal_filelist $file
-            }
-          }
-        }
+	configure {
+		foreach arch {i386 ppc} {
+			system "cd ${workpath}/${arch} && ./Configure darwin-${arch}-cc ${configure.pre_args} ${configure.args}"
+		}
+#		system "cd ${workpath}/x86_64 && ./Configure darwin64-x86_64-cc ${configure.pre_args} ${configure.args}"
+#		system "cd ${workpath}/ppc64 && ./Configure darwin64-ppc-cc ${configure.pre_args} ${configure.args}"
+	}
 
-        backup i386
+	build {
+#		foreach arch {i386 x86_64 ppc ppc64}
+		foreach arch {i386 ppc} {
+			system "cd ${workpath}/${arch} && make all"
+		}
+	}
 
-        clean
-    }
-# ppc
-    # configure
-    pre-build {
-        system "./Configure darwin-ppc-cc ${configure.pre_args} ${configure.args} && \
-		patch < ${filespath}/patch-Makefiles-universal-ppc"
-    }
-    # build
-    build {
-        system "make"
-    }
-    # backup
-    post-build {
-        # there's already a list of files to be backed up
+	destroot {
+# in port 1.7, just call:
+#		merge "${workpath}/pre-dest"
+# till then, do this:
+#		foreach arch {i386 x86_64 ppc ppc64}
+		foreach arch {i386 ppc} {
+			xinstall -d ${workpath}/pre-dest/${arch}
+			system "cd ${workpath}/${arch} && make install INSTALL_PREFIX=${workpath}/pre-dest/${arch} MANDIR=${prefix}/share/man"
+		}
 
-        global fileList
+		set basepath "${workpath}/pre-dest/i386"
+		fs-traverse file "${basepath}" {
+			set fpath [string range "${file}" [string length "${basepath}"] [string length "${file}"]]
+			if {${fpath} != ""} {
+				ui_debug ":: ${fpath}"
 
-        backup ppc
-
-        clean
-    }
-
-# universal
-    pre-destroot {
-        global fileList
-        system "make openssl.pc libssl.pc libcrypto.pc"
-        lipo
-        system "patch < ${filespath}/patch-Makefile-universal-install"
-    }
-    destroot.target     install_docs install_sw
-
-    # the test suite can only be run *after* destrooting
-    test.run            yes
-    test.dir            ${worksrcpath}/test
-    test.target         alltests
+				switch -exact [file type "${basepath}${fpath}"] {
+					directory {
+						# just create directories
+						ui_debug "-- dir:: ${fpath}"
+						file mkdir "${destroot}${fpath}"
+					}
+					link {
+						# copy symlinks (TODO: check if target matches)
+						ui_debug "-- lnk:: ${fpath}"
+						file copy "${basepath}${fpath}" "${destroot}${fpath}"
+					}
+					file { 
+						# treat files depending on their filetype
+						ui_debug "-- file:: ${fpath}"
+						set filetype [exec "/usr/bin/file" "-b" "${basepath}${fpath}"]
+						switch -regexp ${filetype} {
+							Mach-O.* {
+								# Mach-O binaries get lipo-ed
+								ui_debug "Mach-O file -- lipo-ing"
+#								system "lipo -arch i386 ${workpath}/pre-dest/i386/${fpath} -arch x86_64 ${workpath}/pre-dest/x86_64/${fpath} -arch ppc ${workpath}/pre-dest/ppc/${fpath} -arch ppc64 ${workpath}/pre-dest/ppc64/${fpath} -create -output ${destroot}${fpath}"
+								system "lipo -arch i386 ${workpath}/pre-dest/i386/${fpath} -arch ppc ${workpath}/pre-dest/ppc/${fpath} -create -output ${destroot}${fpath}"
+							}
+							current\ ar\ archive {
+								# ar archives get lipo-ed
+								ui_debug "ar archive -- lipo-ing"
+#								system "lipo -arch i386 ${workpath}/pre-dest/i386/${fpath} -arch x86_64 ${workpath}/pre-dest/x86_64/${fpath} -arch ppc ${workpath}/pre-dest/ppc/${fpath} -arch ppc64 ${workpath}/pre-dest/ppc64/${fpath} -create -output ${destroot}${fpath}"
+								system "lipo -arch i386 ${workpath}/pre-dest/i386/${fpath} -arch ppc ${workpath}/pre-dest/ppc/${fpath} -create -output ${destroot}${fpath}"
+							}
+							default {
+								# unknown file types are copied IF they do not differ across ALL architectures -- if they do: This is an error!
+								ui_debug "unknown filetype: ${filetype}"
+								set differ1 [exec "/usr/bin/diff" "-q" "${workpath}/pre-dest/i386/${fpath}" "${workpath}/pre-dest/ppc/${fpath}"]
+#								set differ2 [exec "/usr/bin/diff" "-q" "${workpath}/pre-dest/i386/${fpath}" "${workpath}/pre-dest/x86_64/${fpath}"]
+#								set differ3 [exec "/usr/bin/diff" "-q" "${workpath}/pre-dest/i386/${fpath}" "${workpath}/pre-dest/ppc64/${fpath}"]
+								if {${differ1} != ""} {
+									ui_debug "ERROR"
+								} else {
+									ui_debug "files match, just copying"
+									file copy "${basepath}${fpath}" "${destroot}${fpath}"
+								}
+							}
+						}
+					}
+					default { ui_debug "serious error" }
+				}
+			}
+		}
+	}
 }
+
+# the test suite can only be run *after* destrooting
+#    test.run            yes
+#    test.dir            ${worksrcpath}/test
+#    test.target         alltests
