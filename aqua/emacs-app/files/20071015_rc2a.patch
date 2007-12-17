@@ -1,1283 +1,0 @@
---- emacs-23.0.0_NS-9.0rc2a/src/image.c	2007-09-15 21:36:19.000000000 +0300
-+++ src/image.c	2007-10-14 06:30:25.000000000 +0300
-@@ -1583,6 +1583,9 @@
- 
- 	  img->background_transparent
- 	    = (four_corners_best (mask, img->corners, img->width, img->height) == PIX_MASK_RETAIN);
-+#ifdef HAVE_NS
-+          ns_retain_object(img->background_transparent);
-+#endif
- 
- 	  if (free_mask)
- 	    Destroy_Image (mask, prev);
-@@ -1625,16 +1628,21 @@
-     {
-       Free_Pixmap (FRAME_X_DISPLAY (f), img->pixmap);
-       img->pixmap = NO_PIXMAP;
--      img->background_valid = 0;
- #ifdef HAVE_NS
--      ns_release_object(img->background);
-+      if (img->background_valid)
-+        ns_release_object(img->background);
- #endif
-+      img->background_valid = 0;
-     }
- 
-   if (mask_p && img->mask)
-     {
-       Free_Pixmap (FRAME_X_DISPLAY (f), img->mask);
-       img->mask = NO_PIXMAP;
-+#ifdef HAVE_NS
-+      if (img->background_transparent_valid)
-+        ns_release_object(img->background_transparent);
-+#endif
-       img->background_transparent_valid = 0;
-     }
- 
-@@ -4688,20 +4696,21 @@
- 	  Lisp_Object color_val =
- 	    (*get_color_table) (color_table, str, chars_per_pixel);
- 
--	  XPutPixel (ximg, x, y,
- #ifndef HAVE_NS
-+	  XPutPixel (ximg, x, y,
- 		     (INTEGERP (color_val) ? XINT (color_val)
-+		      : FRAME_FOREGROUND_PIXEL (f)));
- #else
--                     (STRINGP (color_val) ? *(void **)SDATA(color_val)
-+          if (STRINGP (color_val))
-+            XPutPixel (ximg, x, y, *(void **)SDATA(color_val));
- #endif
--		      : FRAME_FOREGROUND_PIXEL (f)));
- #ifndef HAVE_NS
- 	  XPutPixel (mask_img, x, y,
- 		     (!EQ (color_val, Qt) ? PIX_MASK_DRAW
- 		      : (have_mask = 1, PIX_MASK_RETAIN)));
- #else
-           if (EQ(color_val, Qt))
--              ns_set_alpha(ximg, x, y, 0);
-+            ns_set_alpha(ximg, x, y, 0);
- #endif
- 	}
-       if (y + 1 < height)
-@@ -5477,7 +5486,7 @@
-       Display *dpy = FRAME_X_DISPLAY (f);
-       GC gc;
- 
--#ifndef HAVE_NS  //PENDING: NS XPM support
-+#ifndef HAVE_NS  //PENDING
- 
- #ifdef MAC_OS
- #define MaskForeground(f)  PIX_MASK_DRAW
---- emacs-23.0.0_NS-9.0rc2a/src/frame.c	2007-08-21 01:57:48.000000000 +0300
-+++ src/frame.c	2007-09-25 22:46:40.000000000 +0300
-@@ -734,6 +734,11 @@
-     }
- #endif /* !WINDOWSNT */
- 
-+#ifdef COCOA
-+  /* term gets no other notification of this */
-+  Fraise_frame(Qnil);
-+#endif
-+
-   /* We want to make sure that the next event generates a frame-switch
-      event to the appropriate frame.  This seems kludgy to me, but
-      before you take it out, make sure that evaluating something like
---- emacs-23.0.0_NS-9.0rc2a/src/nsterm.h	2007-09-19 18:13:06.000000000 +0300
-+++ src/nsterm.h	2007-10-13 22:47:25.000000000 +0300
-@@ -78,7 +78,7 @@
- - (void)keyDown:(NSEvent *)theEvent;
- - (void)mouseDown:(NSEvent *)theEvent;
- - (void)mouseUp:(NSEvent *)theEvent;
--- setMiniwindowImage;
-+- setMiniwindowImage: (BOOL)setMini;
- 
- // Emacs-side interface
- - initFrameFromEmacs: (struct frame *) f;
-@@ -136,6 +136,7 @@
-      NSMutableDictionary *identifierToItem;
-      NSMutableArray *activeIdentifiers;
-      NSArray *prevIdentifiers;
-+     unsigned long enablement, prevEnablement;
-    }
- - initForView: (EmacsView *)view withIdentifier: (NSString *)identifier;
- - (void) clearActive;
-@@ -369,8 +370,8 @@
-    no_highlight=0,
-    filled_box,
-    hollow_box,
--   bar,
--   line
-+   underscore,
-+   bar
- };
- 
- 
-@@ -535,6 +536,7 @@
-   Lisp_Object icon_top;
-   Lisp_Object icon_left;
-   enum ns_cursor_types current_cursor, desired_cursor;
-+  unsigned char last_inactive;
- 
-   /* The size of the extra width currently allotted for vertical
-      scroll bars, in pixels.  */
-@@ -597,6 +599,7 @@
- #define FRAME_NEW_CURSOR_COLOR(f) ((f)->output_data.ns->desired_cursor_color)
- #define FRAME_NEW_CURSOR(f)  ((f)->output_data.ns->desired_cursor)
- #define FRAME_POINTER_TYPE(f) ((f)->output_data.ns->current_pointer)
-+#define FRAME_LAST_INACTIVE(f) ((f)->output_data.ns->last_inactive)
- 
- #ifndef COMPILING_MULTI_TERM
- #define FRAME_FONT(f) ((f)->output_data.ns->font)
---- emacs-23.0.0_NS-9.0rc2a/src/nsterm.m	2007-09-19 22:22:05.000000000 +0300
-+++ src/nsterm.m	2007-10-14 21:27:38.000000000 +0300
-@@ -20,10 +20,9 @@
- 
- Originally by Carl Edman
- Updated by Christian Limpach (chris@nice.ch)
--OpenStep/Rhapsody  port by Scott Bender (sbender@harmony-ds.com)
-+OpenStep/Rhapsody port by Scott Bender (sbender@harmony-ds.com)
- MacOSX/Aqua port by Christophe de Dinechin (descubes@earthlink.net)
- GNUstep port and post-20 update by Adrian Robert (arobert@cogsci.ucsd.edu)
--
- */
- 
- #include <math.h>
-@@ -241,11 +240,10 @@
- static int select_nfds;
- static NSAutoreleasePool *outerpool;
- static BOOL ns_shutdown_properly = NO;
--
- static struct input_event *emacs_event = NULL;
- static struct input_event *q_event_ptr = NULL;
- static int n_emacs_events_pending = 0;
--
-+static NSMutableArray *ns_pending_files;
- 
- /* Convert modifiers in a NeXTSTEP event to emacs style modifiers.  */
- #define NS_FUNCTION_KEY_MASK 0x800000
-@@ -348,8 +346,8 @@
-   if (!getenv("EMACSLOADPATH"))
-     {
-       NSArray *paths = [resourceDir stringsByAppendingPaths:
--                                  [NSArray arrayWithObjects: @"lisp", @"leim",
--                                                             @"site-lisp",nil]];
-+                                  [NSArray arrayWithObjects: @"site-lisp", @"lisp",
-+                                                             @"leim",nil]];
-       NSEnumerator *pathEnum = [paths objectEnumerator];
-       resourcePaths = @"";
-       while (resourcePath = [pathEnum nextObject])
-@@ -982,7 +980,9 @@
- //   External: Show the window (X11 semantics)
- // ----------------------------------------------------------------------------
- {
--  ns_raise_frame(f);
-+  NSTRACE(x_make_frame_visible);
-+  // not needed, as the only place that calls this (frame.c:Fraise_frame()) also calls raise_lower
-+  // ns_raise_frame(f);
- }
- 
- 
-@@ -993,6 +993,7 @@
- // ----------------------------------------------------------------------------
- {
-   NSView * view = FRAME_NS_VIEW(f);
-+  NSTRACE(x_make_frame_invisible);
-   check_ns();
-   [[view window] orderOut:NSApp];
- }
-@@ -1006,6 +1007,7 @@
- {
-   NSView * view = FRAME_NS_VIEW(f);
-   struct ns_display_info *dpyinfo = FRAME_NS_DISPLAY_INFO (f);
-+  NSTRACE(x_iconify_frame);
-   check_ns();
- 
-   if (dpyinfo->ns_highlight_frame == f)
-@@ -1035,7 +1037,9 @@
- {
-   NSView *view = FRAME_NS_VIEW(f);
-   struct ns_display_info *dpyinfo = FRAME_NS_DISPLAY_INFO (f);
-+  NSTRACE(x_destroy_window);
-   check_ns();
-+
-   [(EmacsView *)view setWindowClosing: YES]; // may not have been informed
- 
-   BLOCK_INPUT;
-@@ -1430,15 +1434,13 @@
-     {
-       [[col colorUsingColorSpaceName:NSCalibratedWhiteColorSpace]
-             getWhite:&gray alpha:&alpha];
--      sprintf(buf,"GRAY%02.2x%02.2x",
--              (int)rint(gray*0xff),
--              (int)rint(alpha*0xff));
-+      sprintf(buf,"GRAY%02.2x%02.2x", lrint(gray*0xff), lrint(alpha*0xff));
-       UNBLOCK_INPUT;
-       return build_string(buf);
-     }
- 
--  sprintf(buf,"ARGB%02.2x%02.2x%02.2x%02.2x",(int)rint(alpha*0xff),
--          (int)rint(red*0xff),(int)rint(green*0xff),(int)rint(blue*0xff));
-+  sprintf(buf,"ARGB%02.2x%02.2x%02.2x%02.2x",lrint(alpha*0xff),
-+          lrint(red*0xff), lrint(green*0xff), lrint(blue*0xff));
- 
-   UNBLOCK_INPUT;
-   return build_string(buf);
-@@ -1588,20 +1590,28 @@
-   int xchar, ychar;
-   Lisp_Object frame, tail;
-   struct frame *f;
--  struct ns_display_info *dpyinfo = FRAME_NS_DISPLAY_INFO (*fp);
-+  struct ns_display_info *dpyinfo;
- 
-   NSTRACE(ns_mouse_position);
- 
-+  if (*fp == NULL)
-+    {
-+      fprintf(stderr, "Warning: ns_mouse_position() called with null *fp.\n");
-+      return;
-+    }
-+
-+  dpyinfo = FRAME_NS_DISPLAY_INFO (*fp);
-+
-   BLOCK_INPUT;
- 
--  if (! NILP (last_mouse_scroll_bar) && insist == 0)
-+  if (last_mouse_scroll_bar != nil && insist == 0)
-     {
-       //PENDING: we do not use this path at the moment because drag events will
-       // go directly to the EmacsScroller.  Leaving code in for now.
-       [last_mouse_scroll_bar getMouseMotionPart: part window:bar_window
-                                               x:x y:y];
-       if (time) *time = last_mouse_movement_time;
--      last_mouse_scroll_bar = Qnil;
-+      last_mouse_scroll_bar = nil;
-     }
-   else
-     {
-@@ -1610,7 +1620,7 @@
-         if (FRAME_NS_DISPLAY (XFRAME (frame)) == FRAME_NS_DISPLAY (*fp))
-           XFRAME (frame)->mouse_moved = 0;
- 
--      last_mouse_scroll_bar = Qnil;
-+      last_mouse_scroll_bar = nil;
-       if (last_mouse_frame && FRAME_LIVE_P(last_mouse_frame))
-         f = last_mouse_frame;
-       else
-@@ -1628,8 +1638,8 @@
-           if (bar_window) *bar_window = Qnil;
-           if (part) *part = 0; //scroll_bar_handle;
- 
--          if (x) XSETINT (*x, (int)rint(position.x));
--          if (y) XSETINT (*y, (int)rint(position.y));
-+          if (x) XSETINT (*x, lrint(position.x));
-+          if (y) XSETINT (*y, lrint(position.y));
-           if (time) *time = last_mouse_movement_time;
-           *fp = f;
-         }
-@@ -2051,7 +2061,8 @@
-   struct frame *f = XFRAME (WINDOW_FRAME (w));
-   struct face *face = p->face;
-   int rowY;
--  static EmacsImage **bimgs;
-+  static EmacsImage **bimgs = NULL;
-+  static int nBimgs = 0;
-   // NS-specific: move internal border inside fringe
-   int x = p->bx < 0 ? p->x : p->bx;
-   int wd = p->bx < 0 ? p->wd : p->nx;
-@@ -2064,10 +2075,21 @@
-   int xAdjust = FRAME_INTERNAL_BORDER_WIDTH(f) *
-     (fringeOnVeryLeft ? -1 : (fringeOnVeryRight ? 1 : 0));
- 
--  if (!bimgs)
-+  // grow bimgs if needed
-+  if (nBimgs < max_used_fringe_bitmap)
-     {
--      bimgs = xmalloc(max_used_fringe_bitmap * sizeof (EmacsImage *));
--      bzero(bimgs, max_used_fringe_bitmap * sizeof (EmacsImage *));
-+      EmacsImage **newBimgs =
-+        xmalloc(max_used_fringe_bitmap * sizeof (EmacsImage *));
-+      bzero(newBimgs, max_used_fringe_bitmap * sizeof (EmacsImage *));
-+
-+      if (nBimgs)
-+        {
-+          bcopy(bimgs, newBimgs, nBimgs * sizeof (EmacsImage *));
-+          xfree(bimgs);
-+        }
-+
-+      bimgs = newBimgs;
-+      nBimgs = max_used_fringe_bitmap;
-     }
- 
-   /* Must clip because of partially visible lines.  */
-@@ -2143,16 +2165,17 @@
- //   External call (RIF): draw cursor
- // ----------------------------------------------------------------------------
- {
--  NSRect r,s;
-+  NSRect r, s;
-   int fx, fy, h;
-   struct frame *f = WINDOW_XFRAME (w);
-   struct glyph *phys_cursor_glyph;
-   int overspill;
-+  unsigned char drawGlyph = 0, cursorType, oldCursorType;
- 
-   NSTRACE(dumpcursor);
- 
-   if (!on_p)
--    return;  //PENDING: erase?
-+      return;
- 
-   w->phys_cursor_type = cursor_type;
-   w->phys_cursor_on_p = 1;
-@@ -2189,7 +2212,8 @@
-     r.size.width -= overspill;
- 
-   //PENDING: 23: use emacs stored f->cursor_type instead of ns-specific
--  FRAME_CURSOR(f) = FRAME_NEW_CURSOR(f);
-+  oldCursorType = FRAME_CURSOR(f);
-+  cursorType = FRAME_CURSOR(f) = FRAME_NEW_CURSOR(f);
-   FRAME_CURSOR_COLOR(f) = FRAME_NEW_CURSOR_COLOR(f);
- 
-   //PENDING: only needed in rare cases with last-resort font in HELLO..
-@@ -2197,41 +2221,64 @@
-   ns_clip_to_row(w, glyph_row, -1, NULL);
- //  ns_focus(f, &r, 1);
- 
--  // draw the cursor
--  // needed for bar and line cursors
--  [FRAME_BACKGROUND_COLOR(f) set];
--  NSRectFill(r);
--  [FRAME_CURSOR_COLOR(f) set];
-+  if (FRAME_LAST_INACTIVE(f))
-+    {
-+      // previously hollow box; clear entire area
-+      [FRAME_BACKGROUND_COLOR(f) set];
-+      NSRectFill(r);
-+      drawGlyph = 1;
-+      FRAME_LAST_INACTIVE(f) = NO;
-+    }
-+
-+  // prepare to draw
-+  if (cursorType == no_highlight || cursor_type == NO_CURSOR)
-+    {
-+      // clearing for blink: erase the cursor itself
-+      [FRAME_BACKGROUND_COLOR(f) set];
-+      cursorType = oldCursorType; // just clear what we had before
-+    }
-+  else
-+      [FRAME_CURSOR_COLOR(f) set];
-+
-+  if (!active_p)
-+    {
-+      // inactive window: ignore what we just set and use a hollow box
-+      cursorType = hollow_box;
-+      [FRAME_CURSOR_COLOR(f) set];
-+    }
- 
--  switch (active_p ? FRAME_CURSOR(f) : hollow_box)
-+  switch (cursorType)
-     {
-     case no_highlight:
-       break;
-     case filled_box:
-       NSRectFill(r);
-+      drawGlyph = 1;
-       break;
-     case hollow_box:
-       NSRectFill(r);
-       [FRAME_BACKGROUND_COLOR(f) set];
-       NSRectFill(NSInsetRect(r, 1, 1));
-       [FRAME_CURSOR_COLOR(f) set];
-+      drawGlyph = 1;
-       break;
--    case bar:
-+    case underscore:
-       s = r;
--      s.origin.y += 0.75 * s.size.height;
--      s.size.height *= 0.25;
-+      s.origin.y += lrint(0.75 * s.size.height);
-+      s.size.height = lrint(s.size.height * 0.25);
-       NSRectFill(s);
-       break;
--    case line:
-+    case bar:
-       s = r;
--      s.size.width = 2;
-+      s.size.width = 1;
-       NSRectFill(s);
-       break;
-     }
-   ns_unfocus(f);
- 
--  // draw the character under the cursor
--  draw_phys_cursor_glyph (w, glyph_row, DRAW_CURSOR);
-+  // if needed, draw the character under the cursor
-+  if (drawGlyph)
-+    draw_phys_cursor_glyph (w, glyph_row, DRAW_CURSOR);
- }
- 
- 
-@@ -2570,7 +2617,9 @@
- 
-   bg_x = x;
-   bg_y =  s->slice.y == 0 ? s->y : s->y + box_line_vwidth;
--  bg_height = s->height - 2 * box_line_vwidth;
-+  bg_height = s->height;
-+  // other terms have this, but was causing problems w/tabbar mode
-+  // - 2 * box_line_vwidth;
- 
-   if (s->slice.x == 0) x += s->img->hmargin;
-   if (s->slice.y == 0) y += s->img->vmargin;
-@@ -2600,9 +2649,8 @@
-           br.size.height += br.origin.y;
-           br.origin.y = 0;
-         }
--      if (br.origin.x <= fibw+1)
-+      if (br.origin.x <= fibw+1 + box_line_vwidth)
-         {
--          br.size.height += 2*box_line_vwidth;
-           br.size.width += br.origin.x;
-           br.origin.x = 0;
-         }
-@@ -2868,19 +2916,28 @@
-   [outerpool release];
-   outerpool = [[NSAutoreleasePool alloc] init];
- 
--    /* We must always send one NX_APPDEFINED event to ourself, otherwise
--       [NXApp run] will never exit.  */
--  send_appdefined = YES;
--
--  if (!expected)
-+  /* If we've got pending open-file requests, attend to the next one of those. */
-+  if (ns_pending_files && [ns_pending_files count] != 0
-+      && [NSApp openFile: [ns_pending_files objectAtIndex: 0]])
-     {
--      /* Post an application defined event on the event queue.  When this is
--         received the [NXApp run] will return, thus having processed all
--         events which are currently queued, if any.  */
--      ns_send_appdefined (-1);
-+      [ns_pending_files removeObjectAtIndex: 0];
-     }
-+  else
-+    {
-+      /* Run and wait for events.  We must always send one NX_APPDEFINED event
-+         to ourself, otherwise [NXApp run] will never exit.  */
-+      send_appdefined = YES;
- 
--  [NSApp run];
-+      if (!expected)
-+        {
-+          /* Post an application defined event on the event queue.  When this is
-+             received the [NXApp run] will return, thus having processed all
-+             events which are currently queued, if any.  */
-+          ns_send_appdefined (-1);
-+        }
-+
-+      [NSApp run];
-+    }
- 
-   nevents = n_emacs_events_pending;
-   n_emacs_events_pending = 0;
-@@ -2948,11 +3005,11 @@
-       if (!NUMBERP(ns_cursor_blink_rate))
-         ns_cursor_blink_rate = make_float(0.5);
-       cursor_blink_entry =
--        [[NSTimer scheduledTimerWithTimeInterval: XFLOATINT(ns_cursor_blink_rate)
--                                          target: NSApp
--                                        selector: @selector(cursor_blink_handler:)
--                                        userInfo:0
--                                         repeats:YES]
-+       [[NSTimer scheduledTimerWithTimeInterval: XFLOATINT(ns_cursor_blink_rate)
-+                                         target: NSApp
-+                                       selector: @selector(cursor_blink_handler:)
-+                                       userInfo:0
-+                                        repeats:YES]
-           retain];
-     }
-   else if (NILP(ns_cursor_blink_mode) && cursor_blink_entry)
-@@ -3464,11 +3521,17 @@
-   // Start app and create the main menu, window, view.
-   // Needs to be here because ns_initialize_display_info() uses AppKit classes.
-   // The view will then ask the NSApp to stop and return to Emacs.
-+  ns_pending_files = [[NSMutableArray alloc] init];
-   [EmacsApp sharedApplication];
-   if (NSApp == nil)
-     return NULL;
-   [NSApp setDelegate: NSApp];
- 
-+  // debugging: log all notifications
-+//   [[NSNotificationCenter defaultCenter] addObserver: NSApp
-+//                                            selector:@selector(logNotification:)
-+//                                                name: nil object: nil];
-+
-   dpyinfo = (struct ns_display_info *)xmalloc(sizeof(struct ns_display_info));
-   bzero (dpyinfo, sizeof (struct ns_display_info));
- 
-@@ -3798,6 +3861,15 @@
- 
- @implementation EmacsApp
- 
-+- (void)logNotification:(NSNotification *)notification
-+{
-+  char *name = [[notification name] UTF8String];
-+  if (!strstr(name, "Update") && !strstr(name, "NSMenu")
-+      && !strstr(name, "WindowNumber"))
-+    NSLog(@"notification: '%@'", [notification name]);
-+}
-+
-+
- - (void)sendEvent:(NSEvent *)theEvent
- // ----------------------------------------------------------------------------
- //   Events posted by ns_send_appdefined interrupt the run loop here
-@@ -3873,6 +3945,15 @@
-   NSTRACE(applicationDidFinishLaunching);
-   ns_send_appdefined (-2);
- }
-+/*- (void)applicationWillFinishLaunching:(NSNotification *)notification
-+// ----------------------------------------------------------------------------
-+//   When application is loaded, terminate event loop in ns_term_init
-+// ----------------------------------------------------------------------------
-+{
-+  NSTRACE(applicationWillFinishLaunching);
-+fprintf(stderr, "willfinishlaunching\n");
-+  ns_send_appdefined (-2);
-+}*/
- 
- 
- - (void) terminate: (id)sender
-@@ -3886,10 +3967,8 @@
- }
- 
- 
--// Open a file (used by below)
---(BOOL) openFile: (char *)fileName
--        fromLine: (int)startLine
--          toLine: (int)endLine
-+// Open a file (used by below, after going into queue read by ns_read_socket)
-+-(BOOL) openFile: (NSString *)fileName
- {
-   struct frame *emacsframe = SELECTED_FRAME();
-   NSEvent *theEvent = [NSApp currentEvent];
-@@ -3899,11 +3978,8 @@
- 
-   emacs_event->kind = NON_ASCII_KEYSTROKE_EVENT;
-   emacs_event->code = KEY_NS_OPEN_FILE_LINE;
--  ns_input_file = append2(ns_input_file, build_string(fileName));
--  if (startLine == endLine)
--    ns_input_line = (startLine >= 0) ? make_number(startLine) : Qnil;
--  else
--    ns_input_line = Fcons(make_number(startLine), make_number(endLine));
-+  ns_input_file = append2(ns_input_file, build_string([fileName UTF8String]));
-+  ns_input_line = Qnil; // can be start or cons start,end
-   emacs_event->modifiers=0;
-   EV_TRAILER(theEvent);
- 
-@@ -3912,35 +3988,37 @@
- 
- 
- //   Notification from the Workspace to open a file
--- (BOOL)application: sender openFile: (NSString *)fileName
-+- (BOOL)application: sender openFile: (NSString *)file
- {
--  return [self openFile: (char *) [fileName UTF8String] fromLine:-1 toLine:-1];
-+  [ns_pending_files addObject: file];
-+  return YES;
- }
- 
- 
- //   Open a file as a temporary file
- - (BOOL)application:sender openTempFile:(NSString *)file
- {
--  return [self application: sender openFile: file];
-+  [ns_pending_files addObject: file];
-+  return YES;
- }
- 
- 
- //   Notification from the Workspace to open a file noninteractively (?)
--- (BOOL)application: sender openFileWithoutUI: (NSString *)fileName
-+- (BOOL)application: sender openFileWithoutUI: (NSString *)file
- {
--  return [self openFile: (char *) [fileName UTF8String] fromLine:-1 toLine:-1];
-+  [ns_pending_files addObject: file];
-+  return YES;
- }
- 
- 
- //   Notification from the Workspace to open multiple files
- - (void)application: sender openFiles: (NSArray *)fileList
- {
--  NSEnumerator *filenames = [fileList objectEnumerator];
--  NSString *fileName;
--  while ((fileName = [filenames nextObject]) != nil)
--    if ([self openFile: (char *)[fileName UTF8String] fromLine:-1 toLine:-1]
--        == NO)
--      return;
-+  NSEnumerator *files = [fileList objectEnumerator];
-+  NSString *file;
-+  while ((file = [files nextObject]) != nil)
-+    [ns_pending_files addObject: file];
-+  return YES;
- }
- 
- 
-@@ -3980,7 +4058,7 @@
-     }
-   else
-     {
--      f->output_data.ns->desired_cursor=no_highlight;
-+      f->output_data.ns->desired_cursor = no_highlight;
-     }
-   update_window_cursor (XWINDOW(FRAME_SELECTED_WINDOW(f)), 1);
-   //x_update_cursor (f, 1);
-@@ -4058,8 +4136,8 @@
- 
-       size = [newFont pointSize];
-       //PENDING: stick w/integer sizes for now.
--//        if (size == rint(size))
--        ns_input_fontsize = make_number((int)rint(size));
-+//        if (size == lrint(size))
-+        ns_input_fontsize = make_number(lrint(size));
- //        else
- //          ns_input_fontsize = make_float(size);
-       ns_input_font= build_string([[newFont familyName/*fontName*/] UTF8String]);
-@@ -4489,8 +4567,8 @@
-       emacs_event->modifiers = EV_MODIFIERS (theEvent)
-                              | EV_UDMODIFIERS (theEvent);
-     }
--  XSETINT (emacs_event->x, (int)rint(p.x));
--  XSETINT (emacs_event->y, (int)rint(p.y));
-+  XSETINT (emacs_event->x, lrint(p.x));
-+  XSETINT (emacs_event->y, lrint(p.y));
-   EV_TRAILER (theEvent);
- }
- 
-@@ -4706,7 +4784,7 @@
-   struct frame *old_focus = dpyinfo->ns_focus_frame;
- 
-   NSTRACE(windowDidBecomeKey);
--  
-+
-   if (emacsframe != old_focus)
-     dpyinfo->ns_focus_frame = emacsframe;
-   ///last_mouse_frame = emacsframe;?
-@@ -4736,6 +4814,7 @@
-     {
-       FRAME_NEW_CURSOR(emacsframe) = hollow_box;
-       x_update_cursor(emacsframe, 1);
-+      FRAME_LAST_INACTIVE(emacsframe) = YES;
-     }
- 
-   if (dpyinfo->ns_highlight_frame == emacsframe)
-@@ -4761,7 +4840,6 @@
- - (void)windowWillMiniaturize:sender
- {
-   NSTRACE(windowWillMiniaturize);
--  [self setMiniwindowImage];
- }
- 
- 
-@@ -5090,7 +5168,7 @@
- 
-   NSTRACE(performDragOperation);
-   position = [self convertPoint:[sender draggingLocation] fromView:nil];
--  x = (int)rint(position.x);  y = (int)rint(position.y);
-+  x = lrint(position.x);  y = lrint(position.y);
- 
-   pb = [sender draggingPasteboard];
-   type = [pb availableTypeFromArray:ns_drag_types];
-@@ -5211,19 +5289,23 @@
- }
- 
- 
--- setMiniwindowImage
-+// setMini=YES means set from internal (gives a finder icon), NO means set nil
-+// (gives a miniaturized version of the window); currently we use the latter for
-+// frames whose active buffer doesn't correspond to any file (e.g., '*scratch*')
-+- setMiniwindowImage: (BOOL) setMini
- {
-   id image = [[self window] miniwindowImage];
-   NSTRACE(setMiniwindowImage);
- 
--  // NOTE: under Cocoa this always returns nil, documentation about
--  // "AppleDockIconEnabled" notwithstanding, however the set message
-+  // NOTE: under Cocoa miniwindowImage always returns nil, documentation
-+  // about "AppleDockIconEnabled" notwithstanding, however the set message
-   // below has its effect nonetheless.
-   if (image != emacsframe->output_data.ns->miniimage)
-     {
-       if (image && [image isKindOfClass: [EmacsImage class]])
-         [image release];
--      [[self window] setMiniwindowImage: emacsframe->output_data.ns->miniimage];
-+      [[self window] setMiniwindowImage:
-+                       setMini ? emacsframe->output_data.ns->miniimage : nil];
-     }
- 
-   return self;
-@@ -5739,7 +5821,7 @@
-   [cursorBlinkSlider setFloatValue: prevBlinkRate];
-   [cursorTypeMatrix selectCellWithTag: (cursorType == filled_box ? 1 :
-                                         (cursorType == bar ? 2 :
--                                         (cursorType == line ? 3 : 4)))];
-+                                         (cursorType == underscore ? 3 : 4)))];
-   selectItemWithTag(alternateModMenu, ns_lisp_to_mod(ns_alternate_modifier));
-   selectItemWithTag(commandModMenu, ns_lisp_to_mod(ns_command_modifier));
- #ifdef COCOA
-@@ -5813,7 +5895,7 @@
-   FRAME_NEW_CURSOR(frame) =
-                          (cursorTag == 1 ? filled_box :
-                           (cursorTag == 2 ? bar :
--                           (cursorTag == 3 ? line : hollow_box)));
-+                           (cursorTag == 3 ? underscore : hollow_box)));
-   store_frame_param(frame, Qcursor_type,
-                     ns_cursor_type_to_lisp(FRAME_NEW_CURSOR(frame)));
-   ns_alternate_modifier = ns_mod_to_lisp(altTag);
---- emacs-23.0.0_NS-9.0rc2a/src/nsmenu.m	2007-09-17 04:10:30.000000000 +0300
-+++ src/nsmenu.m	2007-10-15 20:58:50.000000000 +0300
-@@ -743,12 +743,11 @@
- static Lisp_Object
- ns_popup_menu(Lisp_Object position, Lisp_Object menu)
- {
--  // NOTE: this also gets called when a choice is made in the app main menu;
--  //       the second part of ns-menu-path is sent back
-   EmacsMenu *pmenu;
-   struct frame *f;
-   NSPoint p;
-   Lisp_Object window, x, y, tem, keymap, title;
-+  struct gcpro gcpro1;
-   int specpdl_count = SPECPDL_INDEX (), specpdl_count2;
-   char *error_name = NULL;
-   int keymaps = 0;
-@@ -758,16 +757,14 @@
- 
-   if (!NILP(position))
-     {
--  
-       check_ns();
-   
-       if (EQ (position, Qt)
-           || (CONSP (position) && (EQ (XCAR (position), Qmenu_bar)
-                                    || EQ (XCAR (position), Qtool_bar))))
--
-         {
-           /* Use the mouse's current position.  */
--          struct frame *new_f = 0;
-+          struct frame *new_f = SELECTED_FRAME();
- 
-           if (mouse_position_hook)
-             (*mouse_position_hook) (&new_f, 0, 0, 0, &x, &y, 0);
-@@ -821,18 +818,21 @@
- 
-       p.x += XINT(x); p.y += XINT(y);
- 
--//       p = [FRAME_NS_VIEW(f) convertPoint: p toView: nil];
--//       p = [[FRAME_NS_VIEW(f) window] convertBaseToScreen: p];
--
-       XSETFRAME (Vmenu_updating_frame, f);
-     }
-   else
--    {
--      // no position given
-+    {      // no position given
-+      //PENDING: if called during dump, we need to stop precomputation of
-+      // key equivalents (see below) because the keydefs in ns-win.el have
-+      // not been loaded yet.
-+      if (noninteractive)
-+        return Qnil;
-       Vmenu_updating_frame = Qnil;
-     }
- 
-   // now parse the lisp menus
-+  title = Qnil;
-+  GCPRO1 (title);
- 
-   /* Decode the menu items from what was specified.  */
- 
-@@ -899,8 +899,8 @@
-       keymaps = 0;
-     }
- 
--  // OK, now if no position given, we're just supposed to discard all that
--  // work (except for whatever was cached during key equivalent computation)
-+  // If no position given, that was a signal to just precompute and cache
-+  // key equivalents, which was a side-effect of what we just did.
-   if (NILP (position))
-     {
-       discard_menu_items ();
-@@ -1169,15 +1169,8 @@
-       image = TOOLPROP (TOOL_BAR_ITEM_IMAGES);
-       if (VECTORP (image))
- 	{
--	  if (enabled_p)
--              idx = (selected_p
--		   ? TOOL_BAR_IMAGE_ENABLED_SELECTED
--		   : TOOL_BAR_IMAGE_ENABLED_DESELECTED);
--	  else
--              idx = (selected_p
--		   ? TOOL_BAR_IMAGE_DISABLED_SELECTED
--		   : TOOL_BAR_IMAGE_DISABLED_DESELECTED);
--
-+          // NS toolbar auto-computes disabled and selected images
-+          idx = TOOL_BAR_IMAGE_ENABLED_SELECTED;
- 	  xassert (ASIZE (image) >= idx);
- 	  image = AREF (image, idx);
- 	}
-@@ -1257,6 +1250,7 @@
-   [self setDelegate: self];
-   identifierToItem = [[NSMutableDictionary alloc] initWithCapacity: 10];
-   activeIdentifiers = [[NSMutableArray alloc] initWithCapacity: 8];
-+  prevEnablement = enablement = 0L;
-   return self;
- }
- 
-@@ -1273,11 +1267,14 @@
-   [prevIdentifiers release];
-   prevIdentifiers = [activeIdentifiers copy];
-   [activeIdentifiers removeAllObjects];
-+  prevEnablement = enablement;
-+  enablement = 0L;
- }
- 
- - (BOOL) changed
- {
--  return [activeIdentifiers isEqualToArray: prevIdentifiers] ? NO : YES;
-+  return [activeIdentifiers isEqualToArray: prevIdentifiers] &&
-+    enablement == prevEnablement ? NO : YES;
- }
- 
- - (void) addDisplayItemWithImage: (EmacsImage *)img idx: (int)idx
-@@ -1305,6 +1302,7 @@
-   // 3) update state
-   [identifierToItem setObject: item forKey: identifier];
-   [activeIdentifiers addObject: identifier];
-+  enablement = (enablement << 1) | (enabled == YES);
- }
- 
- // This overrides super's implementation, which automatically sets
---- emacs-23.0.0_NS-9.0rc2a/src/nsfns.m	2007-09-17 16:35:23.000000000 +0300
-+++ src/nsfns.m	2007-10-14 21:22:54.000000000 +0300
-@@ -755,6 +755,8 @@
-   id image=nil;
-   Lisp_Object chain, elt;
-   NSAutoreleasePool *pool;
-+  BOOL setMini = YES;
-+
-   NSTRACE(ns_implicitly_set_icon_type);
- 
-   BLOCK_INPUT;
-@@ -803,11 +805,14 @@
-     }
- 
-   if (image == nil)
--    image = [[[NSWorkspace sharedWorkspace] iconForFileType:@"text"] retain];
-+    {
-+      image = [[[NSWorkspace sharedWorkspace] iconForFileType:@"text"] retain];
-+      setMini = NO;
-+    }
- 
-   [f->output_data.ns->miniimage release];
--  f->output_data.ns->miniimage=image;
--  [view setMiniwindowImage];
-+  f->output_data.ns->miniimage = image;
-+  [view setMiniwindowImage: setMini];
-   [pool release];
-   UNBLOCK_INPUT;
- }
-@@ -818,6 +823,8 @@
- {
-   EmacsView *view = FRAME_NS_VIEW(f);
-   id image = nil;
-+  BOOL setMini = YES;
-+
-   NSTRACE(ns_set_icon_type);
- 
-   if (!NILP (arg) && SYMBOLP (arg))
-@@ -840,10 +847,14 @@
-     image=[NSImage imageNamed:[NSString stringWithUTF8String:
-                                             XSTRING(arg)->data]];
- 
--  if (image==nil) image=[NSImage imageNamed:@"text"];
-+  if (image == nil)
-+    {
-+      image = [NSImage imageNamed:@"text"];
-+      setMini = NO;
-+    }
- 
--  f->output_data.ns->miniimage=image;
--  [view setMiniwindowImage];
-+  f->output_data.ns->miniimage = image;
-+  [view setMiniwindowImage: setMini];
- }
- 
- 
-@@ -867,11 +878,11 @@
-   else if (XTYPE(arg) == Lisp_Symbol)
-     str=XSTRING(XSYMBOL(arg)->xname)->data;
-   else return -1;
--  if (!strcmp(str,"bar"))    return bar;
--  if (!strcmp(str,"box"))    return filled_box;
--  if (!strcmp(str,"hollow")) return hollow_box;
--  if (!strcmp(str,"line"))   return line;
--  if (!strcmp(str,"no"))     return no_highlight;
-+  if (!strcmp(str,"box"))	 return filled_box;
-+  if (!strcmp(str,"hollow"))	 return hollow_box;
-+  if (!strcmp(str,"underscore")) return underscore;
-+  if (!strcmp(str,"bar"))	 return bar;
-+  if (!strcmp(str,"no"))	 return no_highlight;
-   return -1;
- }
- 
-@@ -881,12 +892,12 @@
- {
-   switch (arg)
-     {
--    case bar: return intern("bar");
-     case filled_box: return Qbox;
-     case hollow_box: return intern("hollow");
--    case line: return intern("line");
-+    case underscore: return intern("underscore");
-+    case bar:	     return intern("bar");
-     case no_highlight:
--    default: return intern("no");
-+    default:	     return intern("no");
-     }
- }
- 
-@@ -904,8 +915,8 @@
-   else
-     {
-       store_frame_param(f,Qcursor_type,oldval);
--      error ("the `cursor-type' frame parameter should be either `no', `bar', \
--`box', `hollow' or `line'.");
-+      error ("the `cursor-type' frame parameter should be either `no', `box', \
-+`hollow', `underscore' or `bar'.");
-     }
- 
-   update_mode_lines++;
-@@ -2227,10 +2238,10 @@
- 
-   [[col colorUsingColorSpaceName:NSCalibratedRGBColorSpace]
-         getRed:&red green:&green blue:&blue alpha:&alpha];
--  rgba[0] = make_number ((int) rint(red*65280));
--  rgba[1] = make_number ((int) rint(green*65280));
--  rgba[2] = make_number ((int) rint(blue*65280));
--  rgba[3] = make_number ((int) rint(alpha*65280));
-+  rgba[0] = make_number (lrint(red*65280));
-+  rgba[1] = make_number (lrint(green*65280));
-+  rgba[2] = make_number (lrint(blue*65280));
-+  rgba[3] = make_number (lrint(alpha*65280));
- 
-   return Flist (4, rgba);
- }
---- emacs-23.0.0_NS-9.0rc2a/src/nsimage.m	2007-09-19 18:16:53.000000000 +0300
-+++ src/nsimage.m	2007-10-13 23:35:59.000000000 +0300
-@@ -316,6 +316,10 @@
-   }
- 
-   [self addRepresentation: bmRep];
-+
-+  bzero(planes[0], w*h);
-+  bzero(planes[1], w*h);
-+  bzero(planes[2], w*h);
-   [self setXBMColor: [NSColor blackColor]];
-   return self;
- }
-@@ -342,15 +346,28 @@
-   [rgbColor getRed: &r green: &g blue: &b alpha: &a];
- 
-   [bmRep getBitmapDataPlanes: planes];
--  memset(planes[0], r*0xff, len);
--  memset(planes[1], g*0xff, len);
--  memset(planes[2], b*0xff, len);
-+
-+  // we used to just do this, but Cocoa seems to have a bug when rendering
-+  // an alpha-masked image onto a dark background where it bloats the mask
-+//   memset(planes[0..2], r,g,b*0xff, len);
-+  {
-+    int i, len = s.width*s.height;
-+    int rr = r * 0xff, gg = g * 0xff, bb = b * 0xff;
-+    for (i=0; i<len; i++)
-+      if (planes[3][i] != 0)
-+        {
-+          planes[0][i] = rr;
-+          planes[1][i] = gg;
-+          planes[2][i] = bb;
-+        }
-+  }
- }
- 
- 
- - initForXPMWithDepth: (int)depth width: (int)width height: (int)height
- {
-   NSSize s = {width, height};
-+  int i;
- 
-   [self initWithSize: s];
- 
-@@ -363,6 +380,8 @@
-                                   bytesPerRow: width bitsPerPixel: 0];
- 
-   [bmRep getBitmapDataPlanes: pixmapData];
-+  for (i=0; i<4; i++)
-+    bzero(pixmapData[i], width*height);
-   [self addRepresentation: bmRep];
-   return self;
- }
---- emacs-23.0.0_NS-9.0rc2a/lisp/frame.el	2007-08-21 01:56:18.000000000 +0300
-+++ lisp/frame.el	2007-09-23 03:38:59.000000000 +0300
-@@ -706,7 +706,7 @@
- 	(nreverse frame-initial-geometry-arguments))
-   (cdr param-list))
- 
--(defcustom focus-follows-mouse (not (eq window-system 'mac))
-+(defcustom focus-follows-mouse (not (memq window-system '(mac ns)))
-   "*Non-nil if window system changes focus when you move the mouse.
- You should set this variable to tell Emacs how your window manager
- handles focus, since there is no way in general for Emacs to find out
---- emacs-23.0.0_NS-9.0rc2a/man/ns-emacs.texi	2007-09-11 14:43:46.000000000 +0300
-+++ man/ns-emacs.texi	2007-09-25 00:57:31.000000000 +0300
-@@ -405,9 +405,9 @@
- @item
- Box - the cursor is displayed as a box
- @item
--Bar - the cursor is displayed as a horizontal bar
-+Underscore - the cursor is displayed as a horizontal bar
- @item
--Line - the cursor is displayed as a vertical bar
-+Bar - the cursor is displayed as a vertical bar
- @item
- Hollow - the cursor is displayed as a box with an outline but no fill
- @end itemize
-@@ -540,7 +540,7 @@
- 
- @item CursorType
- Name of the default cursor type for Emacs.  Allowed values are
--@samp{bar}, @samp{box}, @samp{hollow}, @samp{line} and @samp{no}.
-+@samp{box}, @samp{hollow}, @samp{underscore}, @samp{bar},  @samp{line} and @samp{no}.
- 
- @example
- defaults write Emacs CursorType box
---- emacs-23.0.0_NS-9.0rc2a/nextstep/Cocoa/Info.plist	2007-09-20 14:20:38.000000000 +0300
-+++ nextstep/Cocoa/Info.plist	2007-09-25 23:57:10.000000000 +0300
-@@ -105,6 +105,10 @@
- 			</array>
- 			<key>CFBundleTypeName</key>
- 			<string>Any</string>
-+			<key>CFBundleTypeOSTypes</key>
-+			<array>
-+				<string>****</string>
-+			</array>
- 			<key>CFBundleTypeRole</key>
- 			<string>Editor</string>
- 		</dict>
-diff -Naur emacs-23.0.0_NS-9.0rc2a/nextstep/Cocoa/preferences.nib/keyedobjects.nib emacs/nextstep/Cocoa/preferences.nib/keyedobjects.nib
---- emacs-23.0.0_NS-9.0rc2a/nextstep/Cocoa/preferences.nib/keyedobjects.nib	2007-09-11 06:34:28.000000000 +0300
-+++ nextstep/Cocoa/preferences.nib/keyedobjects.nib	2007-09-25 23:08:20.000000000 +0300
-@@ -1,35 +1,42 @@
- bplist00Ô        
- Y$archiverX$versionT$topX$objects_NSKeyedArchiver † Ñ  	]IB.objectdata€¯"   1 5 6 < = A E \ d r x y “ ” œ    ¤ ¥ ¨ © ® ´ » ¼ Å Æ Ç Ë Ğ × Ø ã ä å ì í õ ö Æ ÷ ü Æ !)*+0167<EFZ\abehinuv~‚…Š‘’š›£ª«³´¶·¼½ÂÃÈÉÎåæçèë $)*,012:;EFGKMPSV]^fgklqruz{~‚‰Š‘’›Ÿ)¤1¥:«­´µ¼½ÂÉÊÑÒÙÚáâéêñòùú	
--$&),34;<CDKLW[`a1bhinpŠ‹’:š ¬­µ¶º ’¿ÃÄÈÊÍÑÚÛäåæ ­çîïóúû
-- #%9>?ÏDEIMNOQT]fNgqNr|N}‡Nˆ‘N’”˜›¢£«¬³´¿ÁÊ|NÎĞ×>Nà‡Né‘Nòùú	
-- qN$&.>N7|N@‡NI‘NRYZabijqryz…‡fN”–ŸqN¨>N±|Nº‡NÃ‘NÌÕÙ)Ş1ß:åçèéêëîïôõúû \¥ê/0123š4567896 ²:;<6 °=>?5@ABACBDEFG5H5IJ6KL1MNOPQRSTMMMUVWAAXYZ1[^a¿ !"#$%&'()*+,-.B/01
--234567 89:;<=>?@ABCDEFGHIJKLMNOPQRSTU ŞVWXYZ[\]^_`abcdefghijklmnopqrsvy|U$nullß                      ! " # $ % & ' ( ) * + , - . / 0_NSObjectsValues_NSAccessibilityConnectors_NSClassesValuesZNSOidsKeys[NSNamesKeys]NSClassesKeys_NSAccessibilityOidsValues\NSOidsValues_NSVisibleWindowsV$class]NSConnections]NSNamesValues]NSObjectsKeys_NSAccessibilityOidsKeys[NSFramework]NSFontManagerYNSNextOidVNSRootzÀÁ{¿ Â€!€|y€€ Ø€Ò  2 3 4[NSClassName€€_EmacsPrefsControllerÒ 7 8 9 :X$classesZ$classname¢ : ;^NSCustomObjectXNSObject_IBCocoaFrameworkÒ >  ? @ZNS.objects €Ò 7 8 B C£ C D ;\NSMutableSetUNSSetÒ >  F [¯ G H I J K L M N O P Q R S T U V W X Y Z€	€€*€1€7€9€;€E€M€T€[€]€_€amoqsuw€mÔ ] ^  _ ` a b c]NSDestinationWNSLabelXNSSource€€€€
--× e f g h i  j k k m n o p q_NSNextResponder[NSSuperviewWNSFrameYNSEnabledXNSvFlagsVNSCell€€€	 €€Ô s e g  t . v wZNSSubviews€g€ g€l_{{168, 372}, {265, 18}}İ z { | } ~  €   ‚ ƒ „ … † ‡ ˆ ‰ c ‹ Œ     † ’_NSKeyEquivalent_NSAlternateImageYNSSupportZNSContents]NSControlView^NSButtonFlags2_NSPeriodicInterval]NSButtonFlags_NSPeriodicDelay[NSCellFlags_NSAlternateContents\NSCellFlags2€€€€€
--H<Qÿ€Èÿÿÿÿ„ş € \Smooth fontsÔ • –  — ˜ ™ š ›VNSSizeVNSNameXNSfFlags"AP  €€\LucidaGrandeÒ 7 8  Ÿ¢ Ÿ ;VNSFontÒ ¡  ¢ £[NSImageName€€XNSSwitchÒ 7 8 ¦ §¢ § ;_NSButtonImageSourcePÒ 7 8 ª «¥ « ¬ ­ j ;\NSButtonCell]%NSButtonCell\NSActionCellÒ 7 8 ¯ °¥ ° ± ² ³ ;XNSButtonYNSControlVNSView[NSResponder× e f g h i  j k k · n o p º€€€	€€_{{168, 350}, {265, 18}}İ z { | } ~  €   ‚ ƒ „ … † ‡ ˆ À ` ‹ Œ    Ã † ’€€€€€€ş €_!Use Quickdraw (lighter) smoothing[nextKeyViewÒ 7 8 È É£ É Ê ;_NSNibOutletConnector^NSNibConnectorÔ ] ^  _ Ì Í b Ï€$€)€€× e f g h i  j k k Ó n o p Ö€€€ 	€€!_{{286, 12}, {80, 32}}İ z { | } ~  €   ‚ ƒ „ … Ù ˆ ˆ Ü Ï Ş Œ ß   Ã † â€#€€€"€ÿÿÿÿ†‚@ÿ€€   VCancelQ× e f g h i  j k k è n o p ë€€€%	€€&_{{366, 12}, {80, 32}}İ z { | } ~  €   ‚ ƒ „ … î ˆ ˆ ñ Ì Ş Œ ß   Ã † â€(€€€'€$€€ROKQÔ ] ^  _ Ï ù b û€€0€€+× e f g h i  j k k ÿ n o p€€€,	€€-_{{20, 17}, {21, 23}}İ z { | } ~  €   ‚ ƒ „ … ˆ ˆ † û
-+$&),34;<CDKLW[`a1bhinpŠ‹’š›Ÿ¡­®¶·» ’ÀÄÅÉËÎÒÛÜåæç ­èïğôûü!$&:?@ĞEFJNOPRU^gOhrOs}O~ˆO‰’O“•™œ£¤¬­´µÀÂË}OÏÑØ?OáˆOê’Oóúû
-+!rO%'/?O8}OAˆOJ’OSZ[bcjkrsz{†ˆ‘gO•— rO©?O²}O»ˆOÄ’OÍÖÚ)ß1à:æèéêëìïğõöûü]¦ë01234356789:;33<=>?@A›B7CDEE ²FGHIJBEKLGBMNO °PEQRBSTUVW7XYZ[799\_bÀ !"#$%&'()*+,-./0 Ş123456789:;<=>?@ABCDEFGHIJKLMNOPQR STUVWXYZ
-+[\]^_`abBcdefghijklmnopqrstwz}U$nullß                      ! " # $ % & ' ( ) * + , - . / 0_NSObjectsValues_NSAccessibilityConnectors_NSClassesValuesZNSOidsKeys[NSNamesKeys]NSClassesKeys_NSAccessibilityOidsValues\NSOidsValues_NSVisibleWindowsV$class]NSConnections]NSNamesValues]NSObjectsKeys_NSAccessibilityOidsKeys[NSFramework]NSFontManagerYNSNextOidVNSRootzÀÁ{¿ Â€!€|y€€ Ø€Ò  2 3 4[NSClassName€€_EmacsPrefsControllerÒ 7 8 9 :X$classesZ$classname¢ : ;^NSCustomObjectXNSObject_IBCocoaFrameworkÒ >  ? @ZNS.objects €Ò 7 8 B C£ C D ;\NSMutableSetUNSSetÒ >  F [¯ G H I J K L M N O P Q R S T U V W X Y Z€	€€*€1€7€9€;€E€M€T€[€]€_€amoqsuw€mÔ ] ^  _ ` a b c]NSDestinationWNSLabelXNSSource€€€€
-+× e f g h i  j k k m n o p q_NSNextResponder[NSSuperviewWNSFrameYNSEnabledXNSvFlagsVNSCell€€€	 €€Ô s e g  t . v wZNSSubviews€g€ g€l_{{168, 395}, {265, 18}}İ z { | } ~  €   ‚ ƒ „ … † ‡ ˆ ‰ c ‹ Œ     † ’_NSKeyEquivalent_NSAlternateImageYNSSupportZNSContents]NSControlView^NSButtonFlags2_NSPeriodicInterval]NSButtonFlags_NSPeriodicDelay[NSCellFlags_NSAlternateContents\NSCellFlags2€€€€€
-+H<Qÿ€Èÿÿÿÿ„ş € \Smooth fontsÔ • –  — ˜ ™ š ›VNSSizeVNSNameXNSfFlags"AP  €€\LucidaGrandeÒ 7 8  Ÿ¢ Ÿ ;VNSFontÒ ¡  ¢ £[NSImageName€€XNSSwitchÒ 7 8 ¦ §¢ § ;_NSButtonImageSourcePÒ 7 8 ª «¥ « ¬ ­ j ;\NSButtonCell]%NSButtonCell\NSActionCellÒ 7 8 ¯ °¥ ° ± ² ³ ;XNSButtonYNSControlVNSView[NSResponder× e f g h i  j k k · n o p º€€€	€€_{{168, 373}, {265, 18}}İ z { | } ~  €   ‚ ƒ „ … † ‡ ˆ À ` ‹ Œ    Ã † ’€€€€€€ş €_!Use Quickdraw (lighter) smoothing[nextKeyViewÒ 7 8 È É£ É Ê ;_NSNibOutletConnector^NSNibConnectorÔ ] ^  _ Ì Í b Ï€$€)€€× e f g h i  j k k Ó n o p Ö€€€ 	€€!_{{286, 12}, {80, 32}}İ z { | } ~  €   ‚ ƒ „ … Ù ˆ ˆ Ü Ï Ş Œ ß   Ã † â€#€€€"€ÿÿÿÿ†‚@ÿ€€   VCancelQ× e f g h i  j k k è n o p ë€€€%	€€&_{{366, 12}, {80, 32}}İ z { | } ~  €   ‚ ƒ „ … î ˆ ˆ ñ Ì Ş Œ ß   Ã † â€(€€€'€$€€ROKQÔ ] ^  _ Ï ù b û€€0€€+× e f g h i  j k k ÿ n o p€€€,	€€-_{{20, 17}, {21, 23}}İ z { | } ~  €   ‚ ƒ „ … ˆ ˆ † û
-  Œ ß   Ã † â€.€€€€+!€€Ò  ¨YNS.string€/Ò 7 8£ ;_NSMutableStringXNSStringÔ ] ^  _ b 0€2€6€€× e f g h i  j k k n o p€€€3	€€4_{{236, 237}, {198, 18}}İ z { | } ~  €   ‚ ƒ „ … † ‡ ˆ% ‹ Œ     † ’€€€€5€2€€_Use System Highlight Color_useSysHiliteCheckÔ ] ^  _ `- b 0€€8€€_useQuickdrawCheckÔ ] ^  _ c3 b 0€
--€:€€_smoothFontsCheckÔ ] ^  _89 b 0€<€D€€Ø e f g h i = j k k@ n oBCDUNSTag€€€=	€C€>_{{74, 232}, {135, 17}}ßGH | } ~IJKL M= ƒN … ’OPQ8S nUVWOC ÃXY_NSTickMarkPosition]NSAltIncValue_NSNumberOfTickMarks_NSAllowsTickMarkValuesOnlyZNSMaxValueWNSValueZNSMinValueZNSVertical#        €@€?€<		#@       #?à      €B   Ò  ¨€/Ô • –  —]^ š`"A@  €A€YHelveticaÒ 7 8cd¤d ­ j ;\NSSliderCellÒ 7 8fg¥g ± ² ³ ;XNSSlider_cursorBlinkSliderÔ ] ^  _ 0klm€€K€L€F× e f g h i  j k kq n o pt€€€G	€€H_{{32, 390}, {130, 32}}İ z { | } ~  €   ‚ ƒ „ …w ˆ ˆzm Ş Œ ß   Ã † â€J€€€I€F€€_Default Font...Ò  ¨€/_setDefaultFont:Ò 7 8ƒ„£„ Ê ;_NSNibControlConnectorÔ ] ^  _ 0‡l‰€€S€L€N× e f g h i  j k k n o p€€€O	€€P_{{50, 358}, {94, 32}}İ z { | } ~  €   ‚ ƒ „ …“ ˆ ˆ–‰ Ş Œ ß   Ã † â€R€€€Q€N€€YColors...Ò  ¨€/ZsetColors:Ô ] ^  _ 0 l¢€€Z€L€U× e f g h i  j k k¦ n o p©€€€V	€€W_{{88, 12}, {148, 32}}İ z { | } ~  €   ‚ ƒ „ …¬ ˆ ˆ¯¢ Ş Œ ß   Ã † â€Y€€€X€U€€_Reset to DefaultsÒ  ¨€/_resetToDefaults:Ô ] ^  _ 0¹l Ï€€\€L€Wcancel:Ô ] ^  _ 0¿l Ì€€^€L€$Sok:Ô ] ^  _ 0Ål û€€`€L€+XrunHelp:Ô ] ^  _ÊË b 0€bl€€ÜÏĞÑÒÓÔÕÖ×Ø ÙÚ ‹ÛÜİŞßà kâãä_NSWindowStyleMask_NSWindowBackingYNSMinSize]NSWindowTitle]NSWindowClass\NSWindowRect\NSScreenRectYNSMaxSize\NSWindowViewYNSWTFlags[NSViewClassi€d€e€chj€ÿÿÿÿğx  k€f_{{194, 370}, {452, 474}}_Emacs PreferencesXNSWindowÒ éTView€/Ò > ì [¯#í ` c û Ï Ìôõ¢÷8ùúûüışÿ m‰	
-+€:€€_smoothFontsCheckÔ ] ^  _89 b 0€<€D€€Ø e f g h i = j k k@ n oBCDUNSTag€€€=	€C€>_{{74, 232}, {135, 17}}ßGH | } ~IJKL M= ƒN … ’OPQ8S nUVWOC ÃXY_NSTickMarkPosition]NSAltIncValue_NSNumberOfTickMarks_NSAllowsTickMarkValuesOnlyZNSMaxValueWNSValueZNSMinValueZNSVertical#        €@€?€<		#@       #?à      €B   Ò  ¨€/Ô • –  —]^ š`"A@  €A€YHelveticaÒ 7 8cd¤d ­ j ;\NSSliderCellÒ 7 8fg¥g ± ² ³ ;XNSSlider_cursorBlinkSliderÔ ] ^  _ 0klm€€K€L€F× e f g h i  j k kq n o pt€€€G	€€H_{{32, 413}, {130, 32}}İ z { | } ~  €   ‚ ƒ „ …w ˆ ˆzm Ş Œ ß   Ã † â€J€€€I€F€€_Default Font...Ò  ¨€/_setDefaultFont:Ò 7 8ƒ„£„ Ê ;_NSNibControlConnectorÔ ] ^  _ 0‡l‰€€S€L€N× e f g h i  j k k n o p€€€O	€€P_{{50, 381}, {94, 32}}İ z { | } ~  €   ‚ ƒ „ …“ ˆ ˆ–‰ Ş Œ ß   Ã † â€R€€€Q€N€€YColors...Ò  ¨€/ZsetColors:Ô ] ^  _ 0 l¢€€Z€L€U× e f g h i  j k k¦ n o p©€€€V	€€W_{{88, 12}, {148, 32}}İ z { | } ~  €   ‚ ƒ „ …¬ ˆ ˆ¯¢ Ş Œ ß   Ã † â€Y€€€X€U€€_Reset to DefaultsÒ  ¨€/_resetToDefaults:Ô ] ^  _ 0¹l Ï€€\€L€Wcancel:Ô ] ^  _ 0¿l Ì€€^€L€$Sok:Ô ] ^  _ 0Ål û€€`€L€+XrunHelp:Ô ] ^  _ÊË b 0€bl€€ÜÏĞÑÒÓÔÕÖ×Ø ÙÚ ‹ÛÜİŞßà kâãä_NSWindowStyleMask_NSWindowBackingYNSMinSize]NSWindowTitle]NSWindowClass\NSWindowRect\NSScreenRectYNSMaxSize\NSWindowViewYNSWTFlags[NSViewClassi€d€e€chj€ÿÿÿÿğx  k€f_{{194, 347}, {452, 497}}_Emacs PreferencesXNSWindowÒ éTView€/Ò > ì [¯#í ` c û Ï Ìôõ¢÷8ùúûüışÿ m‰	
- €h€€
--€+€2€€$€z€‡€U€‹€<€”€™€€¡€¥€©€­€³€·€F€N€»€Å€ä€è#'=AE^€mÛ s e f g  k kÚ ’X ‹\NSBorderType_NSTitlePosition[NSTitleCellYNSOffsets]NSTransparentYNSBoxType€i€€€p€n€o€yÒ > ! [¡"€j€mÔ e f g íí' w€h€h€k€l_{{2, 2}, {125, 1}}Ò 7 8+ ²£ ² ³ ;Ò 7 8-.£./ ;^NSMutableArrayWNSArray_{{20, 337}, {420, 5}}V{0, 0}×34 | }  ƒ …56 ˆ89 Ã ’_NSBackgroundColor[NSTextColor€r€w€€q€xSBoxÕ<=>? @ABCDWNSColor[NSColorName\NSColorSpace]NSCatalogName€u€t€s€vVSystem_textBackgroundColorÓH> IÚDWNSWhiteB1 €vÒ 7 8L<¢< ;ÓH> NÚDM0 0.80000001 €vÒ 7 8QR¤R ­ j ;_NSTextFieldCellÒ 7 8TU¤U ² ³ ;UNSBox× e f g h i  j k kY n o[\€€€{	€†€|_{{17, 309}, {129, 17}}Ø34 | } ~  ƒ …_`abô9 Ãe€€€ƒ€~€}€z€x @  XDisplay:Ô • –  — ˜h šj€€_LucidaGrande-BoldÕ<=>? mnBCD€‚€€s€v\controlColorÓH> sÚDK0.66666669 €vÕ<=>? vwBCD€…€„€s€v_controlTextColorÓH> |ÚDB0 €vÒ 7 8€¦€ ± ² ³ ;[NSTextField\%NSTextField× e f g h i  j k k… n o[ˆ€€€ˆ	€†€‰_{{17, 445}, {129, 17}}Ø34 | } ~  ƒ …_`aõ9 Ãe€€€ƒ€~€Š€‡€x_Text Rendering:Û s e f g “ k kÚ ’–—˜X ‹€Œ€€€‘€€€yÒ > œ [¡€€mÔ e f g ÷÷¢ w€‹€‹€€l_{{20, 191}, {420, 5}}×34 | }  ƒ …5§ ˆ©9 Ã ’€r€“€€’€xÓH> NÚD€v× e f g h i  j k k° n o[³€€€•	€†€–_{{69, 211}, {28, 13}}Ø34 | } ~  ƒ …_`¸¹ù9 Ãe€€€ƒ€˜€—€”€xSOffÔ • –  —¾ ™ šÁ"A   €€× e f g h i  j k kÅ n o[È€€€š	€†€›_{{126, 211}, {32, 13}}Ø34 | } ~  ƒ …_`¸Îú9 Ãe€€€ƒ€˜€œ€™€xU1 sec× e f g h i  j k kÕ n o[Ø€€€	€†€Ÿ_{{187, 211}, {32, 13}}Ø34 | } ~  ƒ …_`¸Şû9 Ãe€€€ƒ€˜€ €€xU2 sec× e f g h i  j k kå n o[è€€€¢	€†€£_{{86, 256}, {114, 17}}Ø34 | } ~  ƒ …_` ˆîü9 Ãe€€€ƒ€€¤€¡€x_Cursor Blink Rate× e f g h i  j k kõ n o[ø€€€¦	€†€§_{{267, 445}, {147, 17}}Ø34 | } ~  ƒ …_` ˆşı9 Ãe€€€ƒ€€¨€¥€x_Expand Line Spacing× e f g h i  j k k n o[€€€ª	€†€«_{{260, 402}, {32, 13}}Ø34 | } ~  ƒ …_`¸ş9 Ãe€€€ƒ€˜€¬€©€xT-1.0Ø e f g h i = j k k n oB Ş€€€®	€C€¯_{{267, 421}, {135, 17}}ßGH | } ~IJKL M= ƒN … ’OÿX OW" Ş ÃXY€±€°€­#?ğ      €B#¿ğ      Ò  ¨€/Ô • –  —]' š`€²€Ò *_Helvetica-Oblique€/× e f g h i  j k k/ n o[2€€€´	€†€µ_{{325, 402}, {32, 13}}Ø34 | } ~  ƒ …_`¸8 9 Ãe€€€ƒ€˜€¶€³€xS0.0× e f g h i  j k k? n o[B€€€¸	€†€¹_{{386, 402}, {29, 13}}Ø34 | } ~  ƒ …_`¸H9 Ãe€€€ƒ€˜€º€·€xS1.0Ü s e f gM N k k ‹ ‹QRSXU Ş]NSContentView€¼€€€Á€¿€À€½€yÒ > X [¡U€½€mÔ e f g ^ w€»€»€¾€l_{{3, 3}, {319, 30}}_{{97, 282}, {325, 48}}×34 | }  ƒ …5def9 Ã ’€r€Ä€Ã€Â€x[Cursor TypeÔ • –  —j ™ šm"A0  €€ÓH> NÚD€vß gqrs=tu e hv fw xyz Ÿ3 i{| Ş} ‹C~ k n kƒ„@†‡ ˆ_ o[NSCellClassYNSNumRowsZNSCellSizeYNSNumColsWNSCells[NSProtoCell^NSSelectedCell_NSCellBackgroundColor]NSMatrixFlags_NSIntercellSpacing€Æ€à€Ş€Ç€	€á€€È€ã€uD¨  €ß€€€_{{122, 292}, {276, 18}}Ò > Œ [¤ƒ€È€Í€Ú€Ü€mŞ z ‚ { | } ~  €  = ƒ „ …“ ” ˆ– ’ Œ   Ş  † ’€Ì€Ê€€É€Å€€Ò ¡ › £€Ë€]NSRadioButtonÒ  ¨€/ß z ‚ {¡ | } ~  €  = ƒ „ … †£”¥ ˆ§ ’©   ‹ Ã † ’]NSNormalImage€€Ê€Ï€€Î€ÅK€€SBarÕ •< ®¯°±²³´VNSReps\NSImageFlags€Ğ€Ø€Ù€Ñ À  X{18, 18}Ò > · [¡¸€Ò€mÒ > »¾¢¼½€Ó€Ô€×ÒÀ ÁÂ_NSTIFFRepresentation€Õ€ÖOÊMM *                                                                                            <‹'''É+++ğ555ğ###É‹			<                                  uPPPà¨¨¨ÿÛÛÛÿùùùÿúúúÿÚÚÚÿªªªÿTTTàu                          yuuu÷ÃÃÃÿüüüÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÔÔÔÿ|||÷%%%y                  Fjjjæµµµÿíííÿşşşÿşşşÿşşşÿıııÿıııÿıııÿ÷÷÷ÿÄÄÄÿwwwæF              
-+€+€2€€$€z€‡€U€‹€<€”€™€€¡€¥€©€­€³€·€F€N€»€Å€ä€è#'=AE^€mÛ s e f g  k kÚ ’X ‹\NSBorderType_NSTitlePosition[NSTitleCellYNSOffsets]NSTransparentYNSBoxType€i€€€p€n€o€yÒ > ! [¡"€j€mÔ e f g íí' w€h€h€k€l_{{2, 2}, {125, 1}}Ò 7 8+ ²£ ² ³ ;Ò 7 8-.£./ ;^NSMutableArrayWNSArray_{{20, 360}, {420, 5}}V{0, 0}×34 | }  ƒ …56 ˆ89 Ã ’_NSBackgroundColor[NSTextColor€r€w€€q€xSBoxÕ<=>? @ABCDWNSColor[NSColorName\NSColorSpace]NSCatalogName€u€t€s€vVSystem_textBackgroundColorÓH> IÚDWNSWhiteB1 €vÒ 7 8L<¢< ;ÓH> NÚDM0 0.80000001 €vÒ 7 8QR¤R ­ j ;_NSTextFieldCellÒ 7 8TU¤U ² ³ ;UNSBox× e f g h i  j k kY n o[\€€€{	€†€|_{{17, 332}, {129, 17}}Ø34 | } ~  ƒ …_`abô9 Ãe€€€ƒ€~€}€z€x @  XDisplay:Ô • –  — ˜h šj€€_LucidaGrande-BoldÕ<=>? mnBCD€‚€€s€v\controlColorÓH> sÚDK0.66666669 €vÕ<=>? vwBCD€…€„€s€v_controlTextColorÓH> |ÚDB0 €vÒ 7 8€¦€ ± ² ³ ;[NSTextField\%NSTextField× e f g h i  j k k… n o[ˆ€€€ˆ	€†€‰_{{17, 468}, {129, 17}}Ø34 | } ~  ƒ …_`aõ9 Ãe€€€ƒ€~€Š€‡€x_Text Rendering:Û s e f g “ k kÚ ’–—˜X ‹€Œ€€€‘€€€yÒ > œ [¡€€mÔ e f g ÷÷¢ w€‹€‹€€l_{{20, 191}, {420, 5}}×34 | }  ƒ …5§ ˆ©9 Ã ’€r€“€€’€xÓH> NÚD€v× e f g h i  j k k° n o[³€€€•	€†€–_{{69, 211}, {28, 13}}Ø34 | } ~  ƒ …_`¸¹ù9 Ãe€€€ƒ€˜€—€”€xSOffÔ • –  —¾ ™ šÁ"A   €€× e f g h i  j k kÅ n o[È€€€š	€†€›_{{126, 211}, {32, 13}}Ø34 | } ~  ƒ …_`¸Îú9 Ãe€€€ƒ€˜€œ€™€xU1 sec× e f g h i  j k kÕ n o[Ø€€€	€†€Ÿ_{{187, 211}, {32, 13}}Ø34 | } ~  ƒ …_`¸Şû9 Ãe€€€ƒ€˜€ €€xU2 sec× e f g h i  j k kå n o[è€€€¢	€†€£_{{86, 256}, {114, 17}}Ø34 | } ~  ƒ …_` ˆîü9 Ãe€€€ƒ€€¤€¡€x_Cursor Blink Rate× e f g h i  j k kõ n o[ø€€€¦	€†€§_{{267, 468}, {147, 17}}Ø34 | } ~  ƒ …_` ˆşı9 Ãe€€€ƒ€€¨€¥€x_Expand Line Spacing× e f g h i  j k k n o[€€€ª	€†€«_{{260, 425}, {32, 13}}Ø34 | } ~  ƒ …_`¸ş9 Ãe€€€ƒ€˜€¬€©€xT-1.0Ø e f g h i = j k k n oB Ş€€€®	€C€¯_{{267, 444}, {135, 17}}ßGH | } ~IJKL M= ƒN … ’OÿX OW" Ş ÃXY€±€°€­#?ğ      €B#¿ğ      Ò  ¨€/Ô • –  —]' š`€²€Ò *_Helvetica-Oblique€/× e f g h i  j k k/ n o[2€€€´	€†€µ_{{325, 425}, {32, 13}}Ø34 | } ~  ƒ …_`¸8 9 Ãe€€€ƒ€˜€¶€³€xS0.0× e f g h i  j k k? n o[B€€€¸	€†€¹_{{386, 425}, {29, 13}}Ø34 | } ~  ƒ …_`¸H9 Ãe€€€ƒ€˜€º€·€xS1.0Ü s e f gM N k k ‹ ‹QRSXU Ş]NSContentView€¼€€€Á€¿€À€½€yÒ > X [¡U€½€mÔ e f g ^ w€»€»€¾€l_{{3, 3}, {375, 30}}_{{53, 279}, {381, 48}}×34 | }  ƒ …5def9 Ã ’€r€Ä€Ã€Â€x[Cursor TypeÔ • –  —j ™ šm"A0  €€ÓH> NÚD€vß gqrs=tu e hv fw xyz Ÿ3 i{| Ş} ‹C~ k n kƒ„@†‡ ˆ_ o[NSCellClassYNSNumRowsZNSCellSizeYNSNumColsWNSCells[NSProtoCell^NSSelectedCell_NSCellBackgroundColor]NSMatrixFlags_NSIntercellSpacing€Æ€à€Ş€Ç€	€á€€È€ã€uD¨  €ß€€€_{{66, 289}, {388, 18}}Ò > Œ [¤ƒ€È€Í€Ú€Ü€mŞ z ‚ { | } ~  €  = ƒ „ …“ ” ˆ– ’ Œ   Ş  † ’€Ì€Ê€€É€Å€€ZFilled BoxÒ ¡ œ £€Ë€]NSRadioButtonÒ  ¨€/ß z ‚ {¢ | } ~  €  = ƒ „ … †¤”¦ ˆ¨ ’ª   ‹ Ã † ’]NSNormalImage€€Ê€Ï€€Î€ÅK€€\Vertical BarÕ •< ¯°±²³´µVNSReps\NSImageFlags€Ğ€Ø€Ù€Ñ À  X{18, 18}Ò > ¸ [¡¹€Ò€mÒ > ¼¿¢½¾€Ó€Ô€×ÒÁ ÂÃ_NSTIFFRepresentation€Õ€ÖOÊMM *                                                                                            <‹'''É+++ğ555ğ###É‹			<                                  uPPPà¨¨¨ÿÛÛÛÿùùùÿúúúÿÚÚÚÿªªªÿTTTàu                          yuuu÷ÃÃÃÿüüüÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÔÔÔÿ|||÷%%%y                  Fjjjæµµµÿíííÿşşşÿşşşÿşşşÿıııÿıııÿıııÿ÷÷÷ÿÄÄÄÿwwwæF              
- BBB¡­­­ÿÆÆÆÿëëëÿòòòÿõõõÿõõõÿóóóÿõõõÿòòòÿîîîÿÒÒÒÿ¯¯¯ÿJJJ¡   
-            xxxİ¿¿¿ÿÏÏÏÿİİİÿêêêÿïïïÿïïïÿğğğÿíííÿíííÿâââÿÎÎÎÿÅÅÅÿ|||İ             $¤¤¤øÎÎÎÿÙÙÙÿàààÿâââÿåååÿæææÿçççÿåååÿâââÿŞŞŞÿÚÚÚÿĞĞĞÿ¬¬¬ø   $         .°°°úÖÖÖÿŞŞŞÿäääÿéééÿëëëÿìììÿéééÿëëëÿçççÿäääÿàààÿÙÙÙÿ³³³ú   .         .ìàààÿåååÿêêêÿîîîÿğğğÿğğğÿñññÿğğğÿîîîÿêêêÿæææÿáááÿ™™™ì   .         $nnnÏåååÿéééÿïïïÿòòòÿöööÿúúúÿùùùÿ÷÷÷ÿöööÿñññÿëëëÿäääÿkkkÏ   $          ...“ÂÂÂúìììÿóóóÿùùùÿşşşÿşşşÿşşşÿşşşÿûûûÿõõõÿğğğÿÂÂÂú,,,“              
-    C___Òäääşùùùÿşşşÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿüüüÿæææş___Ò   C   
-                  ebbbÜÒÒÒıÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÕÕÕıdddÜ   e                           e333Â€€€ğ¿¿¿üíííÿíííÿ¿¿¿ü€€€ğ333Â   e                                   C   w   Ÿ   ³   ³   Ÿ   w   C                                        
-       $   .   .   $      
--                                                                                                             º                                                      R       S      Â            Ò 7 8ÅÆ£ÆÇ ;_NSBitmapImageRepZNSImageRepÒ 7 8É/¢/ ;ÓH> ËÚDD0 0 €vÒ 7 8ÎÏ£ÏĞ ;WNSImageX%NSImageß z ‚ {¡ | } ~  €  = ƒ „ … †£”¥ ˆÖ ’©  Ú Ã † ’€€Ê€Ï€€Û€Å€€TLineß z ‚ {¡ | } ~  €  = ƒ „ … †£”¥ ˆà ’©  C Ã † ’€€Ê€Ï€€İ€Å€€VHollowX{66, 18}V{4, 2}Û { | } €    ‚ ƒ z …” ˆê© ’ë £ Ã † ’€Ê€€âH8Qÿ€€URadioÒ 7 8ğñ¦ñò ± ² ³ ;XNSMatrixY%NSMatrix× e f g h i  j k kö n o[ù€€€å	€†€æ_{{17, 164}, {107, 17}}Ø34 | } ~  ƒ …_`aÿ9 Ãe€€€ƒ€~€ç€ä€xZModifiers:× e f g h i  j k k n o	€€€é	€ê_{{103, 133}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş ‹ †Ú£ n ˆ n© ŞVNSMenuZNSMenuItem_NSSelectedIndex_NSPreferredEdge]NSAltersState_NSUsesItemFromMenu_NSArrowPosition€ëÿÿÿÿ„Aş@‚@ÿ€î€í€
--  	€è€ì€	Ô • –  — ˜ ™ š`€€Ò  ¨€/Ü&'()*+,- =.01 Ş23 †	67 â8]NSMnemonicLoc_NSKeyEquivModMaskWNSStateWNSTitleYNSOnImageZNSKeyEquivXNSTarget\NSMixedImageXNSAction€îÿÿÿ   €ï€ğ€€ê€ô€÷€öÓ) :;<=[NSMenuItems€ø	€ùTMetaÓ@  2ABC^NSResourceName€ò€ó€ñ_NSMenuCheckmarkÒ 7 8FG£GH ;_NSCustomResource_%NSCustomResourceÓ@  2JBC€õ€ó€ñ_NSMenuMixedState__popUpItemAction:Ò 7 8P¢ ;Ò RZOtherViews€/Ò > U [¦VWYZ[€ú€ı€í €mÚ&')*+,- .01_3 †	67e€î€û€ğ€€ê€ô€÷€üTNoneÛ&')*+,- =.01i3 †	67op€î€ş€ğ€€ê€ô€÷   €ÿWControlÛ&')*+,- =.01t3 †	67z{€î€ğ€€ê€ô€÷ €  WCommandÛ&')*+,- =.013 †	67…†€î€ğ€€ê€ô€÷   UHyperÛ&')*+,- =.01Š3 †	67e€î€ğ€€ê€ô€÷SAltÒ 7 8“¢ ;Ò 7 8•–§–— « ¬ ­ j ;_NSPopUpButtonCell^NSMenuItemCellÒ 7 8™š¦š ° ± ² ³ ;]NSPopUpButton× e f g h i  j k k n o[¡€€	€†_{{128, 165}, {94, 17}}Ø34 | } ~  ƒ …_` ˆ§9 Ãª€€€ƒ€€x@  [Alt/Opt Key× e f g h i  j k k¯ n o²€€	_{{269, 133}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş¶· Ş †Ú£ n	¼ ˆ n© Ş€ë€
--	€	Ò  ¨€/Ü&'()*+,- =.¶01 ŞÃ3 †²67zÉ€ğ€€ô€÷Ó) :Ë<Í	Ò R€/Ò > Ñ [¤Ò·ÔÕ €mÛ&')*+,- =.¶01Ù3 †²67 âß€ğ€€ô€÷Û&')*+,- =.¶01â3 †²67…è€ğ€€ô€÷Û&')*+,- =.¶01ë3 †²67eñ!€ğ€€ô€÷"× e f g h i  j k kõ n o[ø€€$	€†%_{{284, 165}, {110, 17}}Ø34 | } ~  ƒ …_` ˆş
--9 Ãª€€€ƒ€&#€x[Command Key× e f g h i  j k k n o€€(	)_{{103, 73}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş †Ú£ n ˆ n© Ş€ë,+€
--	'*€	Ò  ¨€/Ü&'()*+,- =.01 Ş3 †67o,-€ğ€)€ô€÷.Ó) :!<#/	0Ò R€/Ò > ' [¥)*+,+147:€mÛ&')*+,- =.0103 †67 â6,2€ğ€)€ô€÷3Û&')*+,- =.0193 †67z?,5€ğ€)€ô€÷6Û&')*+,- =.01B3 †67…H,8€ğ€)€ô€÷9Û&')*+,- =.01K3 †67eQ,;€ğ€)€ô€÷<× e f g h i  j k kU n o[X€€>	€†?_{{128, 105}, {94, 17}}Ø34 | } ~  ƒ …_` ˆ^9 Ãª€€€ƒ€@=€x[Control Key× e f g h i  j k ke n o[h€€B	€†C_{{264, 105}, {151, 17}}Ø34 | } ~  ƒ …_` ˆn9 Ãª€€€ƒ€DA€x_Function Key (laptops)× e f g h i  j k ku n ox€€F	G_{{269, 73}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş|} †Ú£ n‚ ˆ n© Ş€ëJI€
--	EH€	Ò  ¨€/Û&'()*+,- .|01 Ş‰3 †x67JK€ğ€G€ô€÷LÓ) :‘<“M	NÒ R€/Ò > — [¦}™š›œIORUX[€mÛ&')*+,- =.|01¡3 †x67o§JP€ğ€G€ô€÷QÛ&')*+,- =.|01ª3 †x67 â°JS€ğ€G€ô€÷TÛ&')*+,- =.|01³3 †x67z¹JV€ğ€G€ô€÷WÛ&')*+,- =.|01¼3 †x67…ÂJY€ğ€G€ô€÷ZÛ&')*+,- =.|01Å3 †x67eËJ\€ğ€G€ô€÷]Û s e f g Í k kÚ ’ĞÑÒX ‹_€€dbc€yÒ > Ö [¡×`€mÔ e f g Ü w^^a€l_{{20, 59}, {420, 5}}×34 | }  ƒ …5á ˆã9 Ã ’€rf€e€xÓH> NÚD€v_{{1, 9}, {452, 474}}_{{0, 0}, {1440, 878}}Z{213, 129}_{3.40282e+38, 3.40282e+38}Ò 7 8ìí¢í ;_NSWindowTemplate[prefsWindowÔ ] ^  _ñ b 0€Ån€€_cursorTypeMatrixÔ ] ^  _ÿ÷ b 0€­p€€_expandSpaceSliderÔ ] ^  _ı b 0€èr€€_alternateModMenuÔ ] ^  _	 b 0t€€^commandModMenuÔ ] ^  _	 b 0Ev€€_functionModMenuÔ ] ^  _ b 0'x€€^controlModMenuÒ > ¾¯Fü÷ƒ)Ô|û›"ùı¶¢ Ê·8Z k[*Õ™Wÿmõ+œ} û Ì `U‰Yú Ï cÒVšôí
--,	ş×€¡'€€‹€È€è€21J€AU,€j€”€¥€U€³€b€<€^4 O€ı€­€F€Å€‡€Ü7EXI€+€$€í€î€€ä€½+€N €™€=€Í€·€
--€Ú€úR€z€h#:[€»€©`€×Ò > ]¾¯F k k÷ k k k¶ k k|í k k k	 k k 0¶ kÊ k¶| k k k k k|| k k k k k k k k k k¶| k k k| k k k€€€‹€€Å€€,E€€J'€h€€€€€€€€î€b€€î,J€î€€€€€Å,€JJ€€€î€è€€€»,€€î€€€€Å€€€Å€îJ€€€,J€€€^€×Ò > ¦¾¯Bü 0÷)Ô|û›"ùı¶¢ Ê8·Z[*Õ™Wÿmõ+œ} û Ì `U‰Yú Ï cÒVšôí
--,	ş×€¡€€€‹'€è€21J€AU,€j€”€¥€U€³€b€<^4 O€ı€­€F€Å€‡7EXI€+€$€í€î€€ä€½+€N €™€=€·€
--€úR€z€h#:[€»€©`€×Ò > ë¾¯Bìíîïğñòóôõö÷øùúûüışÿ 	
-- !"#$%&'()*+,-}~€‚ƒ„…†‡ˆ‰Š‹Œ‘’“”•–—˜™š›œŸ ¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾€×\NSTextField2\File's OwnerWNSView1ZNSBox11111^NSPopUpButton2[NSButton421\NSMenuItem21YPopUpList_NSTextField1111111111_NSTextField2121[NSMenuItem3_NSTextField11111111]NSTextField21]NSTextField23_NSTextField1111111114VWindow[NSSlider211[NSBox111111[NSMenuItem2]NSMenuItem211[NSMenuItem4\NSSlider2113YNSButton1ZNSMatrix11]NSTextField25_NSPopUpButton11ZNSButton51YNSButton2[NSButton411^NSTextField221[NSMenuItem1YNSButton3^NSMenuItem2111_NSTextField111111111ZNSButton11^NSTextField213_NSTextField11111111113ZNSButton44^NSTextField211WNSBox12^NSTextField212WNSBox11^NSPopUpButton1_NSTextField111111114Ò > \¾ €×Ò > _¾ €×Ò > b¾¯[ c× Mı8"Ô‰| Ym `} k Ì¢ Hí÷ IœÊõ* X W›üù, K N Vş R O[W) G S+Z 0š¶ Y P
-- JUÕú Ï T ûƒV Qÿ Uô™	· LÒ Zû€
--€·`€;€¥€<€j€NJ€è[€³€2 €F€I€€$€U€€h€‹,€*X€b€‡4sqA€ÍU€¡€”:^=€7E€E€îo€©€]+€M€ä€ı1€€	'€_7€Ü€Ru€T#€Ú€1€½ €™€€a€í€+€È€»€ú€[€­m€zO€Å€9w€€×Ò > À¾¯[ÁÂÃÄÅÆÇÈÉÊËÌÍÎÏĞÑÒÓÔÕÖ×ØÙÚÛÜİŞßàáâãäåæçèéêëìíîïğñòóôõö÷øùúûüışÿ 	
--ÃÄÅÆÇÈÉÊËÌÍÎÏĞÑÒÓÔÕÖ×ØÙÚÛÜİŞßàáâãäåæçèéêëìíîïğñòóôõö÷øùúûüışÿ 	
--€×#×‹}n:ºƒË°Ï€)Ò‚"Î1mf4ÃjÍ·8ÁÀĞ¢ÑroÆÖÉ‡ÊŒ±¯~Å0´¶Ç-^Â‘Ä¡µÌ¹Ô¿¤†§¼p.’³(£¨²«2Ó¥¸¾ˆ½ÕqÒ > t [ €mÒ > w¾ €×Ò > z¾ €×Ò 7 8}~¢~ ;^NSIBObjectData   # , 1 : L Q V d f®´ÿ-?JVd€ §µÃÑë÷"%(+.0358;>@BDFO[]_vˆ“˜§°ÃÌ×ØÚãê÷ı13579;=?ACEGIKMPSVY\_ar€ˆ‘“•—™¶ÈÔÜæïöøúüı  "$')CxŠ§²ÀÏäò			&	3	5	7	9	;	=	?	A	F	H	J	S	U	W	d	u	|	ƒ	Œ	‘	“	•	˜	¥	®	³	º	Ã	Ï	Ñ	Ó	Ü	å	ê
-+                                                                                                             º                                                      R       S      Â            Ò 7 8ÆÇ£ÇÈ ;_NSBitmapImageRepZNSImageRepÒ 7 8Ê/¢/ ;ÓH> ÌÚDD0 0 €vÒ 7 8ÏĞ£ĞÑ ;WNSImageX%NSImageß z ‚ {¢ | } ~  €  = ƒ „ … †¤”¦ ˆ× ’ª  Ú Ã † ’€€Ê€Ï€€Û€Å€€ZUnderscoreß z ‚ {¢ | } ~  €  = ƒ „ … †¤”¦ ˆá ’ª  C Ã † ’€€Ê€Ï€€İ€Å€€VHollowX{94, 18}V{4, 2}Û { | } €    ‚ ƒ z …” ˆëª ’ì ¤ Ã † ’€Ê€€âH8Qÿ€€URadioÒ 7 8ñò¦òó ± ² ³ ;XNSMatrixY%NSMatrix× e f g h i  j k k÷ n o[ú€€€å	€†€æ_{{17, 164}, {107, 17}}Ø34 | } ~  ƒ …_`a 9 Ãe€€€ƒ€~€ç€ä€xZModifiers:× e f g h i  j k k n o	
-+€€€é	€ê_{{103, 133}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş ‹ †Ú¤ n ˆ nª ŞVNSMenuZNSMenuItem_NSSelectedIndex_NSPreferredEdge]NSAltersState_NSUsesItemFromMenu_NSArrowPosition€ëÿÿÿÿ„Aş@‚@ÿ€î€í€
-+  	€è€ì€	Ô • –  — ˜ ™ š`€€Ò  ¨€/Ü'()*+,-. =/12 Ş34 †
-+78 â9]NSMnemonicLoc_NSKeyEquivModMaskWNSStateWNSTitleYNSOnImageZNSKeyEquivXNSTarget\NSMixedImageXNSAction€îÿÿÿ   €ï€ğ€€ê€ô€÷€öÓ* ;<=>[NSMenuItems€ø	€ùTMetaÓA  2BCD^NSResourceName€ò€ó€ñ_NSMenuCheckmarkÒ 7 8GH£HI ;_NSCustomResource_%NSCustomResourceÓA  2KCD€õ€ó€ñ_NSMenuMixedState__popUpItemAction:Ò 7 8Q¢ ;Ò SZOtherViews€/Ò > V [¦WXZ[\€ú€ı€í €mÚ'(*+,-. /12`4 †
-+78f€î€û€ğ€€ê€ô€÷€üTNoneÛ'(*+,-. =/12j4 †
-+78pq€î€ş€ğ€€ê€ô€÷   €ÿWControlÛ'(*+,-. =/12u4 †
-+78{|€î€ğ€€ê€ô€÷ €  WCommandÛ'(*+,-. =/12€4 †
-+78†‡€î€ğ€€ê€ô€÷   UHyperÛ'(*+,-. =/12‹4 †
-+78e‘€î€ğ€€ê€ô€÷SAltÒ 7 8”¢ ;Ò 7 8–—§—˜ « ¬ ­ j ;_NSPopUpButtonCell^NSMenuItemCellÒ 7 8š›¦› ° ± ² ³ ;]NSPopUpButton× e f g h i  j k kŸ n o[¢€€	€†_{{128, 165}, {94, 17}}Ø34 | } ~  ƒ …_` ˆ¨9 Ã«€€€ƒ€€x@  [Alt/Opt Key× e f g h i  j k k° n o	³€€	_{{269, 133}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş·¸ Ş †Ú¤ n	½ ˆ nª Ş€ë€
-+	€	Ò  ¨€/Ü'()*+,-. =/·12 ŞÄ4 †³78{Ê€ğ€€ô€÷Ó* ;Ì=Î	Ò S€/Ò > Ò [¤Ó¸ÕÖ €mÛ'(*+,-. =/·12Ú4 †³78 âà€ğ€€ô€÷Û'(*+,-. =/·12ã4 †³78†é€ğ€€ô€÷Û'(*+,-. =/·12ì4 †³78eò!€ğ€€ô€÷"× e f g h i  j k kö n o[ù€€$	€†%_{{284, 165}, {110, 17}}Ø34 | } ~  ƒ …_` ˆÿ
-+9 Ã«€€€ƒ€&#€x[Command Key× e f g h i  j k k n o		€€(	)_{{103, 73}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş †Ú¤ n ˆ nª Ş€ë,+€
-+	'*€	Ò  ¨€/Ü'()*+,-. =/12 Ş4 †	78p ,-€ğ€)€ô€÷.Ó* ;"=$/	0Ò S€/Ò > ( [¥*+,-+147:€mÛ'(*+,-. =/1214 †	78 â7,2€ğ€)€ô€÷3Û'(*+,-. =/12:4 †	78{@,5€ğ€)€ô€÷6Û'(*+,-. =/12C4 †	78†I,8€ğ€)€ô€÷9Û'(*+,-. =/12L4 †	78eR,;€ğ€)€ô€÷<× e f g h i  j k kV n o[Y€€>	€†?_{{128, 105}, {94, 17}}Ø34 | } ~  ƒ …_` ˆ_9 Ã«€€€ƒ€@=€x[Control Key× e f g h i  j k kf n o[i€€B	€†C_{{264, 105}, {151, 17}}Ø34 | } ~  ƒ …_` ˆo9 Ã«€€€ƒ€DA€x_Function Key (laptops)× e f g h i  j k kv n o	y€€F	G_{{269, 73}, {130, 26}}ß { ƒ   „ ‚  … ~ z | € Ş}~ †Ú¤ nƒ ˆ nª Ş€ëJI€
-+	EH€	Ò  ¨€/Û'()*+,-. /}12 ŞŠ4 †y78JK€ğ€G€ô€÷LÓ* ;’=”M	NÒ S€/Ò > ˜ [¦~š›œIORUX[€mÛ'(*+,-. =/}12¢4 †y78p¨JP€ğ€G€ô€÷QÛ'(*+,-. =/}12«4 †y78 â±JS€ğ€G€ô€÷TÛ'(*+,-. =/}12´4 †y78{ºJV€ğ€G€ô€÷WÛ'(*+,-. =/}12½4 †y78†ÃJY€ğ€G€ô€÷ZÛ'(*+,-. =/}12Æ4 †y78eÌJ\€ğ€G€ô€÷]Û s e f g Î k kÚ ’ÑÒÓX ‹_€€dbc€yÒ > × [¡Ø`€mÔ e f g İ w^^a€l_{{20, 59}, {420, 5}}×34 | }  ƒ …5â ˆä9 Ã ’€rf€e€xÓH> NÚD€v_{{1, 9}, {452, 497}}_{{0, 0}, {1440, 878}}Z{213, 129}_{3.40282e+38, 3.40282e+38}Ò 7 8íî¢î ;_NSWindowTemplate[prefsWindowÔ ] ^  _ò b 0€Ån€€_cursorTypeMatrixÔ ] ^  _ÿø b 0€­p€€_expandSpaceSliderÔ ] ^  _ş b 0€èr€€_alternateModMenuÔ ] ^  _	 b 0t€€^commandModMenuÔ ] ^  _
-+ b 0Ev€€_functionModMenuÔ ] ^  _ b 0'x€€^controlModMenuÒ > ¿¯FÿU Ï, Ìƒ~‰Wõ	8[Õô* c·›
-+-¸" `Xù÷Öúû+} œü¢ û\ÊmıíZşÓ kØš€­€½€7EX€$€ÈI€N€ú€‡€€<^€z€ä1€»€
-+A€èR#€Ú:[€j€€ı€”'€‹€î €™€4J€í€³U€¡€U€+€·,€b€F€2€¥€h€Ü+=€Å €©€€Í`O€×Ò > ^¿¯F k k k} k} k k÷ k k· k k k k k k k	} k k}·í k k k k· k k k} k k k k 0 k k k k k k k·Ê}€€»€,€J€€ÅJ€€î€€‹€€€î€€€,€€€€J€€€Å,J€h€€î€€€€è€€,E€î€J€€€€î€'€€€€€€Å,€€€î€€b€Å^J€×Ò > §¿¯Bšÿ Ï, Ì~‰Wõ	8[Õô* c·›
-+-¸" `Xù÷Öúû+} œü¢ û\ 0ÊmıíZşÓØUO€­€7EX€$I€N€ú€‡€€<^€z€ä1€»€
-+A€èR#:[€j€€ı€”'€‹€î €™€4J€í€³U€¡€U€+€€·,€b€F€2€¥€h+=€Å €©`€½€×Ò > ì¿¯Bíîïğñòóôõö÷øùúûüışÿ 	
-+ !"#$%&'()*+,-.}~€‚ƒ„…†‡ˆ‰Š‹Œ‘’“”•–—˜™š›œŸ ¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾€×[NSMenuItem4\NSSlider2113ZNSButton11\NSMenuItem21_NSPopUpButton11YNSButton2YNSButton3[NSMenuItem1]NSTextField25WNSView1^NSPopUpButton1[NSSlider211[NSBox111111^NSTextField211^NSTextField221WNSBox11ZNSButton44_NSTextField2121YPopUpList]NSTextField21^NSTextField212[NSMenuItem2[NSButton411]NSMenuItem211_NSTextField11111111^NSPopUpButton2ZNSBox11111_NSTextField111111111_NSTextField1111111111_NSTextField1111111114[NSMenuItem3\NSTextField2ZNSButton51\File's Owner_NSTextField11111111113VWindowYNSButton1[NSButton421]NSTextField23WNSBox12^NSTextField213ZNSMatrix11^NSMenuItem2111_NSTextField111111114Ò > ]¿ €×Ò > `¿ €×Ò > c¿¯[ R*Ómô P	ƒ Z}ÿı K~ 0  Yû Ì LUØ" W Sõ-\œ X[ù cÖ8 J,Z ûüÊ+X V
-+ T›Õ Híş¢÷· G M‰ k Ï Uš NW I Q `ú¸ O€]1^€F€z€T€È€2€ÍwJ[€­€¥€€7I€€³u€A€$€9€½X`€jq€_€‡:UsE=€”€
-+ €<€17 €Ü€·€î€+€¡,€b4€ıo#€aR€€Ú€h€©€U€‹€í€	€;€N€€m€ÅO+€è€ä€E€»€ú€*€[€€™'€M€×Ò > Á¿¯[ÂÃÄÅÆÇÈÉÊËÌÍÎÏĞÑÒÓÔÕÖ×ØÙÚÛÜİŞßàáâãäåæçèéêëìíîïğñòóôõö÷øùúûüışÿ 	
-+ÃÄÅÆÇÈÉÊËÌÍÎÏĞÑÒÓÔÕÖ×ØÙÚÛÜİŞßàáâãäåæçèéêëìíîïğñòóôõö÷øùúûüışÿ 	
-+€×ÇÖ½‚2¸£)¢ÕËÏ}-‡Î€Ôq·Ğ1ˆ§Í×:À‘8Æ´ÑÁµÊÉo#¼n†ÄÒ¡±(rÃ¶¯¿’Ìºf¤~m4³¹^‹ƒ.«¥ÓÅ°0Œ¨²j"pÂ¾Ò > u [ €mÒ > x¿ €×Ò > {¿ €×Ò 7 8~¢ ;^NSIBObjectData   # , 1 : L Q V d f®´ÿ-?JVd€ §µÃÑë÷"%(+.0358;>@BDFO[]_vˆ“˜§°ÃÌ×ØÚãê÷ı13579;=?ACEGIKMPSVY\_ar€ˆ‘“•—™¶ÈÔÜæïöøúüı  "$')CxŠ§²ÀÏäò			&	3	5	7	9	;	=	?	A	F	H	J	S	U	W	d	u	|	ƒ	Œ	‘	“	•	˜	¥	®	³	º	Ã	Ï	Ñ	Ó	Ü	å	ê
-  
- 
- 
-@@ -62,10 +69,10 @@
- ÿ%1:AXgxz|~€Ÿ¡£¤¦¨Àõ÷ùûıÿ
- 9;=?@BD\‘“•—™›Ÿ¢¤µ·¹»½ÚÜŞàáãåü13579;=?AJTV_fx’”–˜š·¹»½¾ÀÂÜ<Pacegi}’”–©º¼¾ÀÂãéëíïğòôöNcq‡¤¯·ÂÍÖØÚÜŞßèñóôù *3<IR]fz‹‘“°²´¶·¹»Ô	)24FOVnƒ…‡¤¦¨ª«­¯Çüş 
- *;=?AC`bdfgikƒ¸º¼¾ÀÂÄÆÚãåø	*,.026GIKMOXiknpr£·ÉÓáïü	 *68;=?ADGIRUWr†˜Ÿ¨ñóõ÷ùûıÿ	!#%'*-0369<?An{™£±»½¿ÁÃÅÇÈÊÓÖØÚëíïñó!(7?W^{›Ÿ¡£¥©¾ÆÒßíïñóõ÷ş!),.7<IWYbk}†•²´¶¸¹»½Ö÷ùûıÿ"$&)=RTVXZgt€‚—™›Ÿ²¿ÂÄÍÚæó4UWY[]_as ¢¤¦¨ª¬­¯¸»½¿ĞÒÔÖØğ$&CEGIJLNf‡‰‹‘“—¨­¯±´ÑÓÕ×ØÚÜõ "(EGIKLNPiŠŒ’”–œ¹»½¿ÀÂÄİş 
--;=?ABDF`ƒ…‡‰‹£ÀÂÄÆÇÉËä	79;=>@B\›Ÿ¡£¤­¯¸¹ÂÄÕ×Ùâöø 9Z\^`bdfj‡‰‹’«ÌÎĞÒÔÖØÜ!#%'(*,58:<MOQSUk„¡£¥§©«·ÈÍÏÑÔáã 2 > H S ] e q € ˜ ¦ » ½ ¿ Á Ã Å Æ È Ê Ì Î Ğ Õ × Ù Û õ ş!!	!!!!!J!L!N!P!R!T!V!X!a!c!e!s!|!~!½!Ë!Í!Ğ!Ò!Ô!Ö!Ø!Ú!Ü!Ş!à!ä!ù" """""""#","/"1"3"<"A"C"E"G"P"g"i"k(9(B(I(\(g(p(u(‚(‡(‰(’(™(¡(ª(é(ë(í(ï(ñ(ó(õ(÷(ù(ş)=)?)A)C)E)G)I)K)M)T)])d)‘)“)•)—)œ)) )¦)¯)¼)Å)Ï)ì)î)ğ)ò)ó)õ)÷**1*3*5*7*9*;*=*H*e*g*i*k*l*o*q*‹*Ú*á*ì*ş+++3+E+G+P+U+W+Y+[+^+c+d+f+h+j+k+|+~+€+‰+‹+¼+Ê+Ş+æ+î+ø,,,,",$,),.,0,2,4,6,8,:,<,I,U,W,Z,\,a,n,},,,ƒ,•,,¥,¸,Ì,Ù,Û,İ,ß,ò-----(-*-3-@-B-D-F-I-L-O-Q-z-|-~-€-‚-„-†-ˆ-Š--¼-¾-À-Â-Ä-Æ-È-Ê-Ï-Ñ-Ù...........%.R.T.W.Y.[.]._.a.f.i.o.œ..¡.£.¥.§.©.«.®.².».À.É.Ø.ì.û////</>/@/C/D/F/I/b/ƒ/…/‡/‰/Œ//‘/–/¢/¿/Á/Ã/Æ/Ç/Ê/Í/ç06080;0>0@0C0D0G0J0L0M0V0X0‰0Œ00‘0“0–0˜0š00ª0­0°0³0¼0¾0Ç0Ğ0Ó0Ö0Ù0Ü0Ş1111111111L1O1R1T1V1Y1[1]1`111“1•1—1š1œ11¡1¾1À1Â1Å1Æ1È1Ë1å222
--22222 2=2?2A2D2E2H2K2d2¯2±2´2·2¹2¼2½2À2Ã2Å2Æ2Ï2Ñ3333
--333333#3&3)3,35373@3K3N3Q3T3W3Z3\3‰3Œ33‘3“3–3˜3š33Ê3Í3Ğ3Ò3Ô3×3Ù3Û3Ş4444444444L4O4R4T4V4Y4[4]4`4}444„4…4‡4Š4£4Ä4Æ4È4Ê4Í4Ğ4Ò4Ş4û4ı4ÿ55555"5C5E5G5I5L5O5Q5j5‡5‰5‹555’5•5®5ù5û5ş66666
--666666H6K6N6P6R6U6W6Y6\6i6l6o6r6{6}6†6“6–6™6œ6Ÿ6¢6¥6§6Ô6×6Ú6Ü6Ş6á6ã6å6è777777"7$7&7)7V7Y7\7^7`7c7e7g7j7—7š77Ÿ7¡7¤7¦7¨7«7Ø7Û7Ş7à7â7å7ç7é7ì8888 8#8&8)8*8,85888;8=8N8Q8T8W8Y8p888’8”8—8™8¦8¨8¿8×8â8ÿ999 9,9=9?9B9D9F9Y9j9l9o9q9s9‡9˜9š99Ÿ9¡9´9Å9È9Ë9Í9Ï9Ş9ï9ò9õ9÷9ù::::":$:&:5:>:Í:Ï:Ò:Ô:Ö:Ø:Ú:Ü:ß:â:å:ç:ê:í:ğ:ò:ô:÷:ù:ü:ş; ;;;;
--;;;;;;;;;!;#;%;';*;-;0;3;5;7;9;;;=;?;A;D;F;I;K;M;P;R;T;V;Y;[;];`;b;d;g;j;m;o;r;t;w;y;‚<<<<<<<<<"<%<(<*<,</<2<4<6<8<:<=<?<A<C<F<H<J<L<N<P<S<V<Y<[<]<_<a<c<e<h<j<m<p<r<t<v<x<z<|<~<<ƒ<…<‡<‰<‹<<<‘<”<–<˜<›<<Ÿ<¡<¤<§<©<«<­<°<²<»=B=D=F=H=J=M=O=Q=T=W=Z=\=_=b=e=g=i=l=n=q=s=u=w=y=|==‚=…=ˆ=‹===’=”=–=˜=›==¡=¤=¦=¨=ª=¬=®=°=²=µ=·=º=¼=¾=Á=Ã=Å=È=Ê=Í=Ï=Ñ=Ô=×=Ú=Ü=ß=á=ä=æ=ï>v>y>|>>‚>…>ˆ>‹>>‘>”>—>š>> >£>¦>©>¬>¯>²>µ>¸>»>¾>Á>Ä>Ç>Ê>Í>Ğ>Ó>Ö>Ù>Ü>ß>â>å>è>ë>î>ñ>ô>÷>ú>ı? ???	????????!?$?'?*?-?0?3?6?9?<?>?K?X?`?k?z?†?“??µ?Ç?Ó?é?÷@@@$@0@<@H@V@b@o@y@„@’@¤@¯@¹@Å@Ô@à@ê@ùAAA*ACANA]AeAtA|A‹A¢A«A¬A®A·A¸AºAÃB|B~B€BƒB…B‡B‰B‹BBB“B•B˜BšBœBŸB¡B£B¦B¨BªB¬B®B°B²BµB·BºB½B¿BÁBÄBÇBÊBÍBÏBÒBÔBÖBÙBÜBßBáBäBæBèBëBíBïBòBôBöBùBûBşC CCCC
--CCCCCCCCC!C#C%C(C*C,C.C0C2C4C6C8C:C<C?CACDCFCICLCNCQCTCVCXCaDDD D#D&D)D,D/D2D5D8D;D>DADDDGDJDMDPDSDVDYD\D_DbDeDhDkDnDqDtDwDzD}D€DƒD†D‰DŒDD’D•D˜D›DD¡D¤D§DªD­D°D³D¶D¹D¼D¿DÂDÅDÈDËDÎDÑDÔD×DÚDİDàDãDæDéDìDïDòDõDøDûDşEEEE
--EEEEEEEE"E%E(E+E-E/E1E3E5E7E9E;E=E?EAECEEEGEIEKEMEOEQESEUEWEYE[E]E_EaEcEeEgEiEkEmEoEqEsEuEwEyE{E}EEEƒE…E‡E‰E‹EEE‘E“E•E—E™E›EEŸE¡E£E¥E§E©E«E­E¯E±E³EµE·E¹E»E½E¿EÁEÃEÅEÇEÉEËEÍEÏEÑEÓEÕE×EÙEâEãEåEîEïEñEúEûEıFF                          F
-\ No newline at end of file
-+;=?ABDF`ƒ…‡‰‹£ÀÂÄÆÇÉËä	79;=>@B\›Ÿ¡£¤­¯¸¹ÂÄÕ×Ùâöø 9Z\^`bdfj‡‰‹’«ÌÎĞÒÔÖØÜ!#%'(*,58:<MOQSUk„¡£¥§©«·ÈÍÏÑÔáã 2 > H S ] e q € ˜ ¦ » ½ ¿ Á Ã Å Æ È Ê Ì Î Ğ Õ × Ù Û ô ı!!!
-+!!!!I!K!M!O!Q!S!U!W!b!k!m!o!}!†!ˆ!Ç!Õ!×!Ú!Ü!Ş!à!â!ä!æ!è!ê!÷""" """$"&"("-"6"?"B"D"F"O"T"V"X"Z"c"z"|"~(L(U(\(o(z(ƒ(ˆ(•(š(œ(¥(¬(´(½(ü(ş) )))))
-+)))V)X)Z)\)^)`)b)d)f)m)v)})ª)¬)®)°)µ)·)¹)¿)È)Õ)Ş)è***	*****)*J*L*N*P*R*T*V*a*~*€*‚*„*…*ˆ*Š*¤*ó*ú+++)+7+L+^+`+i+n+p+r+t+w+|+}+++ƒ+„+•+—+™+¢+¤+Õ+ã+÷+ÿ,,,,%,2,;,=,B,G,I,K,M,O,Q,S,U,b,n,p,s,u,z,‡,–,˜,š,œ,®,·,¾,Ñ,å,ò,ô,ö,ø---(---6-A-C-L-Y-[-]-_-b-e-h-j-“-•-—-™-›--Ÿ-¡-£-¨-Õ-×-Ù-Û-İ-ß-á-ã-è-ê-ò..!.$.&.(.*.,...3.6.>.k.m.p.r.t.v.x.z..‚.ˆ.µ.·.º.¼.¾.À.Â.Ä.Ç.Ë.Ô.Ù.â.ñ////*/8/U/W/Y/\/]/_/b/{/œ// /¢/¥/¨/ª/¯/»/Ø/Ú/Ü/ß/à/ã/æ0 0O0Q0T0W0Y0\0]0`0c0e0f0o0q0¢0¥0¨0ª0¬0¯0±0³0¶0Ã0Æ0É0Ì0Õ0×0à0é0ì0ï0ò0õ0÷1$1'1*1,1.111315181e1h1k1m1o1r1t1v1y1¦1©1¬1®1°1³1µ1·1º1×1Ù1Û1Ş1ß1á1ä1ş22!2#2%2(2+2-292V2X2Z2]2^2a2d2}2È2Ê2Í2Ğ2Ò2Õ2Ö2Ù2Ü2Ş2ß2è2ê333!3#3%3(3*3,3/3<3?3B3E3N3P3Y3d3g3j3m3p3s3u3¢3¥3¨3ª3¬3¯3±3³3¶3ã3æ3é3ë3í3ğ3ò3ô3÷4$4'4*4,4.414345484e4h4k4m4o4r4t4v4y4–4˜4š444 4£4¼4İ4ß4á4ã4æ4é4ë4÷5555555!5;5\5^5`5b5e5h5j5ƒ5 5¢5¤5§5¨5«5®5Ç6666666 6#6&6(6)62646a6d6g6i6k6n6p6r6u6‚6…6ˆ6‹6”6–6Ÿ6¬6¯6²6µ6¸6»6¾6À6í6ğ6ó6õ6÷6ú6ü6ş77.717476787;7=7?7B7o7r7u7w7y7|7~7€7ƒ7°7³7¶7¸7º7½7¿7Á7Ä7ñ7ô7÷7ù7û7ş8 88828587898<8?8B8C8E8N8Q8T8V8g8j8m8p8r8‰8¦8¨8«8­8°8²8¿8Á8Ø8ğ8û99!9&999E9V9X9[9]9_9r9ƒ9…9ˆ9Š9Œ9 9±9³9¶9¸9º9Í9Ş9á9ä9æ9è9÷::::::$:5:8:;:=:?:N:W:æ:è:ê:ì:ï:ò:õ:÷:ù:ü:ş; ;;;;	;;;;;;;;; ;";%;(;+;.;0;3;6;9;;;=;?;A;D;F;H;K;M;O;R;U;W;Y;\;^;`;b;e;g;j;l;n;p;r;t;v;y;|;~;;ƒ;†;ˆ;Š;;;’;›<*<,<.<0<3<5<8<:<<<?<A<C<E<G<I<K<M<P<R<T<V<Y<[<]<_<a<d<g<i<k<m<p<s<v<x<z<|<~<€<‚<„<‡<‰<‹<<‘<“<•<˜<š<œ<< <¢<¥<§<©<«<­<¯<±<´<¶<¸<º<¼<¿<Á<Ã<Æ<É<Ë<Ô=[=^=`=b=e=h=k=m=p=r=t=v=x={=}=€=ƒ=†=ˆ=Š===‘=”=–=™=œ=Ÿ=¢=¥=¨=«=­=¯=±=³=¶=¸=º=½=¿=Á=Ä=Ç=É=Ë=Î=Ğ=Ò=Ô=×=Ù=Û=Ş=à=â=ä=æ=è=ë=î=ğ=ó=õ=ø=û=ı=ÿ>>>’>•>˜>›>>¡>¤>§>ª>­>°>³>¶>¹>¼>¿>Â>Å>È>Ë>Î>Ñ>Ô>×>Ú>İ>à>ã>æ>é>ì>ï>ò>õ>ø>û>ş????
-+????????"?%?(?+?.?1?4?7?:?=?@?C?F?I?L?O?R?U?W?c?p?{?ˆ?š?¤?®?º?È?Ğ?ß?ë?÷@@@@(@:@D@R@a@m@y@‡@@¬@·@Î@æ@şA
-+AA"A/AHAOAYAeAsA{AŠA•A¤A»AÄAÅAÇAĞAÑAÓAÜB•B—BšBB B¢B¤B¦B©B«B­B¯B²BµB¸BºB¼B¾BÀBÃBÅBÇBÊBÌBÏBÒBÔBÖBØBÛBŞBàBãBåBçBêBíBğBóBöBùBüBşC CCCC
-+CCCCCCCCCC!C$C'C)C,C/C1C3C5C7C9C;C=C@CBCDCFCHCJCMCOCRCUCWCYC[C]C_CaCcCeCgCjCmCoCqCzD3D6D9D<D?DBDEDHDKDNDQDTDWDZD]D`DcDfDiDlDoDrDuDxD{D~DD„D‡DŠDDD“D–D™DœDŸD¢D¥D¨D«D®D±D´D·DºD½DÀDÃDÆDÉDÌDÏDÒDÕDØDÛDŞDáDäDçDêDíDğDóDöDùDüDÿEEEEEEEEEEE E#E&E)E,E/E2E5E8E;E>EAEDEFEHEJELENEPERETEVEXEZE\E^E`EbEdEfEhEjElEnEpErEtEvExEzE|E~E€E‚E„E†EˆEŠEŒEEE’E”E–E˜EšEœEE E¢E¤E¦E¨EªE¬E®E°E²E´E¶E¸EºE¼E¾EÀEÂEÄEÆEÈEÊEÌEÎEĞEÒEÔEÖEØEÚEÜEŞEàEâEäEæEèEêEìEîEğEòEûEüEşFFF
-+FFFFF$            €              F3
-\ No newline at end of file
---- emacs-23.0.0_NS-9.0rc2a/nextstep/compile	2007-09-18 17:20:43.000000000 +0300
-+++ nextstep/compile	2007-10-14 07:45:34.000000000 +0300
-@@ -22,15 +22,22 @@
- 
- # Set up path and config variables.
- 
--if [ $# -gt 0 ]; then
--    if [ $# -ne 2 ] || [ $1 != "--shared-lisp" ]; then
--	echo "Usage: $0 [--shared-lisp 'install_root']"
--	exit
--    fi
--    PREFIX=${2}
--else
--    PREFIX=""
--fi
-+PREFIX=""
-+while [ $# -gt 0 ]; do
-+    case "$1" in
-+	--shared-lisp=*)
-+            PREFIX=`echo "$1" | sed s/--shared-lisp=//`
-+            shift
-+            ;;
-+	--enable-local-lisp-path=*)
-+            locallisppath=`echo "$1" | sed s/--enable-local-lisp-path=//`
-+            shift
-+            ;;
-+	*)
-+            echo "Usage: $0 [--shared-lisp='install_root' --enable-local-lisp-path='some path(s)']"
-+            exit
-+    esac
-+done
- 
- DISTDIR=`pwd`/..
- 
-@@ -116,6 +123,15 @@
-     fi
- fi
- 
-+# Pete's addition for local lisp load-path
-+    echo "Local lisp path is being enabled"
-+    (cd src; mv epaths.h epaths.h-orig; \
-+       printf "s,\(#define PATH_LOADSEARCH \"\),\\\1%s:,\n" "${locallisppath}" > locallisppath.sed; \
-+       cat epaths.h-orig | sed -f locallisppath.sed > epaths.h; rm locallisppath.sed)
-+
-+# Clean up to avoid DOC-xxx and emacs-xxx out-of-controlness
-+rm -f ../etc/DOC-* ../src/emacs-*
-+
- # Go (installs binaries to ./build/Emacs.app, lisp to there or PREFIX)
- echo "make install"
- $MAKE
-@@ -175,3 +191,7 @@
- #    cp ispell-3.3.01/bin/ispell* ${BINDIR}/libexec
- #    cp -R ispell-3.3.01/lib ${BINDIR}/libexec
- #fi
-+
-+echo ""
-+echo "Build successful."
-+echo ""
---- emacs-23.0.0_NS-9.0rc2a/nextstep/ChangeLog	2007-09-20 14:27:27.000000000 +0300
-+++ nextstep/ChangeLog	2007-10-14 21:01:50.000000000 +0300
-@@ -1,3 +1,60 @@
-+2007-10-14  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* nsmenu.m (ns_popup_menu): Set frame in call to mouse_position_hook.
-+	* nsterm.m (ns_mouse_position): Check for null frame.
-+
-+2007-10-14  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* nsmenu.m (EmacsToolbar-changed): Report changed on enablement state
-+	change.
-+
-+2007-10-13  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* image.c (xpm_load_image): Work around an apparent bug in NSImage
-+	alpha management (avoids blocky appearance of startup image on black bg).
-+	* nsimage.m (-setXBMColor:): Only set color for non-alpha-masked pixels.
-+	Shouldn't have to do this, but... (Fixes "fat" rendering w/colored or
-+	dark fringe backgrounds).
-+	* nsterm.m (ns_dumpglyphs_image): Fix minor glitch w/background drawing.
-+	(-setMiniwindowImage:): Add argument to set to optionally set nil (for
-+	miniaturized version of window).
-+	* nsfns.m (ns_implicitly_set_icon_type): Use it.
-+
-+2007-10-12  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* lisp/ns-menu-bar.el: Cut down to minimal code, eliminating most
-+	remaining redundancy with menu-bar.el, and move the remnant to
-+	ns-win.el.
-+
-+2007-10-10  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* Patch 20071010_rc2a released.
-+
-+2007-10-10  Peter Dyballa <dyballa@gmx.de>
-+	* nextstep/compile: Add --local-lisp-path=<dir> option to prepend a
-+	path to epaths.h to search for lisp before other directories.
-+
-+2007-10-10  Seiji Zenitani <zenitani@mac.com>
-+	* nsterm.m (ns_init_paths): Switch order from lisp, leim, site-lisp to
-+	site-lisp, lisp, leim.
-+	* ns-win.el (ns-utf8-nfd-post-read-conversion etc.): Define coding
-+	system utf-nfd to handle decomposed (normal form D) UTF-8 in MacOSX
-+	filenames.  Based on initial contribution by Carsten Bormann.  (This
-+	change went into rc2 but was not noted in the ChanngeLog there.)
-+
-+2007-09-26  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* nsterm.m (ns_pending_files, -openFile:, ns_read_socket): Handle
-+	openFile requests by storing to a queue and acting on later when
-+	events can be processed.
-+
-+2007-09-25  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* nsterm.m (ns_draw_window_cursor, EmacsView-windowDidResignKey):
-+	Be more clever about drawing background (to avoid flicker with
-+	blinking cursor).  Also, rename cursor type line -> bar, bar ->
-+	underscore.
-+	* frame.c (do_switch_frame): Explicitly call Fraise_frame() on
-+	for_deletion case (to fully focus the frame).
-+	* nsterm.m (x_make_frame_visible): Make into a no-op (unneeded).
-+
-+2007-09-21  Adrian Robert <Adrian.B.Robert@gmail.com>
-+	* nsterm.m (ns_draw_fringe_bitmap): Expand bitmap images cache as needed.
-+	* image.c: Be more careful about retain/release on image backgrounds.
-+
- 2007-09-20  Adrian Robert <Adrian.B.Robert@gmail.com>
- 	* Version 9.0-rc2a released.
- 
