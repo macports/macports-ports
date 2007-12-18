@@ -32,6 +32,12 @@ depends_lib \
 	port:zlib \
 	port:expat
 
+# The +universal variant is easier to code if there is always something in
+# configure.args, so define these here, even though they're the default.
+configure.args \
+	--enable-shared \
+	--enable-static
+
 variant glitz conflicts no_x11 description {Add glitz graphics interface} {
 	depends_lib-append port:glitz
 	configure.args-append --enable-glitz
@@ -56,8 +62,58 @@ variant pdf description "Enable PDF backend" {
 	configure.args-append --enable-pdf
 }
 
+set my_worksrcpaths ${worksrcpath}
+
 post-configure {
-	reinplace "s/-dynamiclib/-dynamiclib -flat_namespace/" ${worksrcpath}/libtool
+	foreach my_worksrcpath ${my_worksrcpaths} {
+		reinplace "s/-dynamiclib/-dynamiclib -flat_namespace/" ${my_worksrcpath}/libtool
+	}
+}
+
+set my_universal_archs {i386 ppc}
+set first_arch [lindex ${my_universal_archs} 0]
+set my_worksrcpaths {}
+
+variant universal {
+	post-patch {
+		foreach arch ${my_universal_archs} {
+			if {[string equal ${arch} ${first_arch}]} {
+				move ${worksrcpath} ${workpath}/${first_arch}
+			} else {
+				copy ${workpath}/${first_arch} ${workpath}/${arch}
+			}
+			lappend my_worksrcpaths ${workpath}/${arch}
+		}
+	}
+	
+	configure {
+		foreach arch ${my_universal_archs} {
+			set my_arch_flag "-arch ${arch}"
+			set my_cflags "${configure.cflags} -isysroot ${sysroot} ${my_arch_flag}"
+			set my_ldflags "${configure.ldflags} ${my_arch_flag}"
+			system "cd ${workpath}/${arch} && CFLAGS=\"${my_cflags}\" CXXFLAGS=\"${my_cflags}\" LDFLAGS=\"${my_ldflags}\" ${configure.cmd} ${configure.pre_args} ${configure.args}"
+		}
+	}
+	
+	build {
+		foreach arch ${my_universal_archs} {
+			system "cd ${workpath}/${arch} && ${build.cmd} ${build.pre_args}"
+		}
+	}
+	
+	destroot {
+		system "cd ${workpath}/${first_arch} && ${destroot.cmd} ${destroot.pre_args} ${destroot.post_args}"
+		foreach lib [list [file readlink ${workpath}/${first_arch}/src/.libs/libcairo.dylib] libcairo.a] {
+			set output_lib ${destroot}${prefix}/lib/${lib}
+			set lipo_args {}
+			foreach arch ${my_universal_archs} {
+				lappend lipo_args -arch ${arch} ${workpath}/${arch}/src/.libs/${lib}
+			}
+			lappend lipo_args -create -output ${output_lib}
+			delete ${output_lib}
+			system "lipo ${lipo_args}"
+		}
+	}
 }
 
 livecheck.check     regex
