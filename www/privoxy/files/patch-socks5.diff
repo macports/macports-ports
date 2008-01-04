@@ -1,0 +1,357 @@
+diff -r 6ce92f2e919b config
+--- config	Sat Dec 22 21:46:02 2007 -0800
++++ config	Thu Jan 03 11:47:15 2008 -0800
+@@ -991,7 +991,7 @@ buffer-limit 4096
+ #
+ 
+ #
+-#  5.2. forward-socks4 and forward-socks4a
++#  5.2. forward-socks4, forward-socks4a and forward-socks5
+ #  =======================================
+ #
+ #  Specifies:
+@@ -1023,10 +1023,12 @@ buffer-limit 4096
+ #      Multiple lines are OK, they are checked in sequence, and the
+ #      last match wins.
+ #
+-#      The difference between forward-socks4 and forward-socks4a
+-#      is that in the SOCKS 4A protocol, the DNS resolution of the
+-#      target hostname happens on the SOCKS server, while in SOCKS 4
+-#      it happens locally.
++
++#      The difference between forward-socks4 and either
++#      forward-socks4a or forward-socks5 is that in the SOCKS 4A and
++#      SOCKS 5 protocols, the DNS resolution of the target hostname
++#      happens on the SOCKS server, while in SOCKS 4 it happens
++#      locally.
+ #
+ #      If http_parent is ".", then requests are not forwarded to another
+ #      HTTP proxy but are made (HTTP-wise) directly to the web servers,
+@@ -1046,6 +1048,17 @@ buffer-limit 4096
+ #      HTTP parent looks like this:
+ #  
+ #        forward-socks4   /               socks-gw.example.com:1080  .
++#
++#      ssh dynamic forwarding can handle either SOCKS 4 or SOCKS 5
++#      requests.  But name lookups on the server can only be done with
++#      SOCKS 5.  To chain Privoxy and ssh dynamic forwarding using
++#      SOCKS5 when they are both running on the same system, you
++#      should use the rule:
++#
++#        forward-socks5             /     127.0.0.1:3129 .
++#
++#      This presumes, of course, that you've configured your ssh
++#      connection with 'DynamicForward 3129'.
+ #
+ #      To chain Privoxy and Tor, both running on the same system,
+ #      you should use the rule:
+diff -r 6ce92f2e919b gateway.c
+--- gateway.c	Sat Dec 22 21:46:02 2007 -0800
++++ gateway.c	Thu Jan 03 11:47:15 2008 -0800
+@@ -161,11 +161,25 @@ static jb_socket socks4_connect(const st
+                                 int target_port,
+                                 struct client_state *csp);
+ 
++static jb_socket socks5_connect(const struct forward_spec * fwd,
++                                const char * target_host,
++                                int target_port,
++                                struct client_state *csp);
++
+ 
+ #define SOCKS_REQUEST_GRANTED          90
+ #define SOCKS_REQUEST_REJECT           91
+ #define SOCKS_REQUEST_IDENT_FAILED     92
+ #define SOCKS_REQUEST_IDENT_CONFLICT   93
++#define SOCKS5_REQUEST_GRANTED             0
++#define SOCKS5_REQUEST_FAILED              1
++#define SOCKS5_REQUEST_DENIED              2
++#define SOCKS5_REQUEST_NETWORK_UNREACHABLE 3
++#define SOCKS5_REQUEST_HOST_UNREACHABLE    4
++#define SOCKS5_REQUEST_CONNECTION_REFUSEDD 5
++#define SOCKS5_REQUEST_TTL_EXPIRED         6
++#define SOCKS5_REQUEST_PROTOCOL_ERROR      7
++#define SOCKS5_REQUEST_BAD_ADDRESS_TYPE    8
+ 
+ /* structure of a socks client operation */
+ struct socks_op {
+@@ -233,6 +247,9 @@ jb_socket forwarded_connect(const struct
+       case SOCKS_4:
+       case SOCKS_4A:
+          return (socks4_connect(fwd, dest_host, dest_port, csp));
++
++      case SOCKS_5:
++         return (socks5_connect(fwd, dest_host, dest_port, csp));
+ 
+       default:
+          /* Should never get here */
+@@ -396,6 +413,200 @@ static jb_socket socks4_connect(const st
+ }
+ 
+ 
++/*********************************************************************
++ *
++ * Function    :  socks4_connect
++ *
++ * Description :  Connect to the SOCKS server, and connect through
++ *                it to the specified server.   This handles
++ *                all the SOCKS negotiation, and returns a file
++ *                descriptor for a socket which can be treated as a
++ *                normal (non-SOCKS) socket.
++ *
++ * Parameters  :
++ *          1  :  fwd = Specifies the SOCKS proxy to use.
++ *          2  :  target_host = The final server to connect to.
++ *          3  :  target_port = The final port to connect to.
++ *          4  :  csp = Current client state (buffers, headers, etc...)
++ *
++ * Returns     :  JB_INVALID_SOCKET => failure, else a socket file descriptor.
++ *
++ *********************************************************************/
++static jb_socket socks5_connect(const struct forward_spec * fwd,
++                                const char * target_host,
++                                int target_port,
++                                struct client_state *csp)
++{
++   int err = 0;
++   char cbuf[BUFFER_SIZE];
++   char sbuf[BUFFER_SIZE];
++   size_t client_pos = 0;
++   ssize_t server_size = 0;
++   size_t hostlen = 0;
++   jb_socket sfd;
++
++   if ((fwd->gateway_host == NULL) || (*fwd->gateway_host == '\0'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "socks5_connect: NULL gateway host specified");
++      err = 1;
++   }
++
++   if (fwd->gateway_port <= 0)
++   {
++      log_error(LOG_LEVEL_CONNECT, "socks5_connect: invalid gateway port specified");
++      err = 1;
++   }
++
++   hostlen = strlen(target_host);
++   if (hostlen > 0xff)
++   {
++      log_error(LOG_LEVEL_CONNECT, "socks5_connect: target host name is longer than 255 characters.");
++      err = 1;
++   }
++
++   if (fwd->type != SOCKS_5)
++   {
++      /* Should never get here */
++      log_error(LOG_LEVEL_FATAL, "SOCKS4 impossible internal error - bad SOCKS type.");
++      err = 1;
++   }
++
++   if (err)
++   {
++      errno = EINVAL;
++      return(JB_INVALID_SOCKET);
++   }
++
++   /* pass the request to the socks server */
++   sfd = connect_to(fwd->gateway_host, fwd->gateway_port, csp);
++
++   if (sfd == JB_INVALID_SOCKET)
++   {
++      return(JB_INVALID_SOCKET);
++   }
++
++   cbuf[client_pos++] = '\x05'; // Version
++   cbuf[client_pos++] = '\x01'; // One authentication method supported
++   cbuf[client_pos++] = '\x00'; // The no authentication authentication method
++
++   if (write_socket(sfd, cbuf, client_pos))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation write failed...");
++      close_socket(sfd);
++      return(JB_INVALID_SOCKET);
++   }
++
++   if (read_socket(sfd, sbuf, sizeof(sbuf)) != 2)
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation read failed...");
++      err = 1;
++   }
++
++   if (!err && (sbuf[0] != '\x05'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation protocol version error");
++      err = 1;
++   }
++
++   if (!err && (sbuf[1] == '\xff'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 authentication required");
++      err = 1;
++   }
++
++   if (!err && (sbuf[1] != '\x00'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation protocol error");
++      err = 1;
++   }
++
++   if (err)
++   {
++      close_socket(sfd);
++      errno = EINVAL;
++      return(JB_INVALID_SOCKET);
++   }
++
++   client_pos = 0;
++   cbuf[client_pos++] = '\x05'; // Version
++   cbuf[client_pos++] = '\x01'; // TCP connect
++   cbuf[client_pos++] = '\x00'; // Reserved, must be 0x00
++   cbuf[client_pos++] = '\x03'; // Address is domain name
++   cbuf[client_pos++] = (char)(hostlen & 0xffu);
++   strncpy(cbuf + client_pos, target_host, 0xffu);
++   client_pos += (hostlen & 0xffu);
++   cbuf[client_pos++] = (char)((target_port >> 8) & 0xffu);
++   cbuf[client_pos++] = (char)((target_port     ) & 0xffu);
++
++   if (write_socket(sfd, cbuf, client_pos))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation write failed...");
++      close_socket(sfd);
++      errno = EINVAL;
++      return(JB_INVALID_SOCKET);
++   }
++
++   server_size = read_socket(sfd, sbuf, sizeof(sbuf));
++   if (server_size < 3)
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation read failed...");
++      err = 1;
++   }
++
++   if (!err && (sbuf[0] != '\x05'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation protocol version error");
++      err = 1;
++   }
++
++   if (!err && (sbuf[2] != '\x00'))
++   {
++      log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation protocol error");
++      err = 1;
++   }
++
++   if (!err)
++   {
++      switch (sbuf[1]) {
++       case SOCKS5_REQUEST_GRANTED:
++         return(sfd);
++         break;
++       case SOCKS5_REQUEST_FAILED:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request failed");
++         break;
++       case SOCKS5_REQUEST_DENIED:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request denied");
++         break;
++       case SOCKS5_REQUEST_NETWORK_UNREACHABLE:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - network unreachable");
++         break;
++       case SOCKS5_REQUEST_HOST_UNREACHABLE:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - host unreachable");
++         break;
++       case SOCKS5_REQUEST_CONNECTION_REFUSEDD:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - connection refused");
++         break;
++       case SOCKS5_REQUEST_TTL_EXPIRED:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - TTL expired");
++         break;
++       case SOCKS5_REQUEST_PROTOCOL_ERROR:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - client protocol error");
++         break;
++       case SOCKS5_REQUEST_BAD_ADDRESS_TYPE:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 request - domain names unsupported");
++         break;
++       default:
++         log_error(LOG_LEVEL_CONNECT, "SOCKS5 negotiation protocol error");
++         break;
++      }
++      err = 1;
++   }
++
++   close_socket(sfd);
++   errno = EINVAL;
++   return(JB_INVALID_SOCKET);
++}
++
+ /*
+   Local Variables:
+   tab-width: 3
+diff -r 6ce92f2e919b loadcfg.c
+--- loadcfg.c	Sat Dec 22 21:46:02 2007 -0800
++++ loadcfg.c	Thu Jan 03 11:47:15 2008 -0800
+@@ -465,6 +465,7 @@ static struct file_list *current_configf
+ #define hash_forward                      2029845ul /* "forward" */
+ #define hash_forward_socks4            3963965521ul /* "forward-socks4" */
+ #define hash_forward_socks4a           2639958518ul /* "forward-socks4a" */
++#define hash_forward_socks5            3963965522ul /* "forward-socks5" */
+ #define hash_forwarded_connect_retries  101465292ul /* "forwarded-connect-retries" */
+ #define hash_jarfile                      2046641ul /* "jarfile" */
+ #define hash_listen_address            1255650842ul /* "listen-address" */
+@@ -690,6 +691,7 @@ struct configuration_spec * load_config(
+       struct forward_spec *cur_fwd;
+       int vec_count;
+       char *vec[3];
++      unsigned long int directive_hash = 0ul;
+ 
+       strcpy(tmp, buf);
+ 
+@@ -730,7 +732,8 @@ struct configuration_spec * load_config(
+       savearg(cmd, arg, config);
+ 
+ 
+-      switch( hash_string( cmd ) )
++      directive_hash = hash_string( cmd );
++      switch( directive_hash )
+       {
+ /* *************************************************************************
+  * actionsfile actions-file-name
+@@ -1089,6 +1092,7 @@ struct configuration_spec * load_config(
+  * forward-socks4a url-pattern socks-proxy[:port] (.|http-proxy[:port])
+  * *************************************************************************/
+          case hash_forward_socks4a:
++         case hash_forward_socks5:
+             vec_count = ssplit(arg, " \t", vec, SZ(vec), 1, 1);
+ 
+             if (vec_count != 3)
+@@ -1110,7 +1114,11 @@ struct configuration_spec * load_config(
+                continue;
+             }
+ 
+-            cur_fwd->type = SOCKS_4A;
++            if (directive_hash == hash_forward_socks4a) {
++               cur_fwd->type = SOCKS_4A;
++            } else {
++               cur_fwd->type = SOCKS_5;
++            }
+ 
+             /* Save the URL pattern */
+             if (create_url_spec(cur_fwd->url, vec[0]))
+diff -r 6ce92f2e919b project.h
+--- project.h	Sat Dec 22 21:46:02 2007 -0800
++++ project.h	Thu Jan 03 11:47:15 2008 -0800
+@@ -1326,6 +1326,7 @@ struct block_spec
+ #define SOCKS_NONE    0    /**< Don't use a SOCKS server               */
+ #define SOCKS_4      40    /**< original SOCKS 4 protocol              */
+ #define SOCKS_4A     41    /**< as modified for hosts w/o external DNS */
++#define SOCKS_5      50    /**< as modified for hosts w/o external DNS */
+ 
+ 
+ /**
+@@ -1336,7 +1337,7 @@ struct forward_spec
+    /** URL pattern that this forward_spec is for. */
+    struct url_spec url[1];
+ 
+-   /** Connection type.  Must be SOCKS_NONE, SOCKS_4, or SOCKS_4A. */
++   /** Connection type.  Must be SOCKS_NONE, SOCKS_4, SOCKS_4A or SOCKS_5. */
+    int   type;
+ 
+    /** SOCKS server hostname.  Only valid if "type" is SOCKS_4 or SOCKS_4A. */
