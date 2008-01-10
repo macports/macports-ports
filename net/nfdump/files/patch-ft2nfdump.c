@@ -1,14 +1,11 @@
-
-$FreeBSD: /repoman/r/pcvs/ports/net-mgmt/nfdump/files/patch-ft2nfdump.c,v 1.2 2006/11/01 09:09:36 miwi Exp $
-
---- ft2nfdump.c.orig
-+++ ft2nfdump.c
-@@ -64,7 +64,7 @@
- #endif
- 
- #include "version.h"
--#include "ftbuild.h"
-+/*#include "ftbuild.h"*/
- #include "nf_common.h"
+--- ft2nfdump.c.org	2007-10-14 23:34:23.000000000 -0700
++++ ft2nfdump.c	2008-01-09 22:14:57.000000000 -0800
+@@ -66,7 +66,7 @@
  #include "nffile.h"
  #include "launch.h"
+ 
+-#include "ftbuild.h"
++/*#include "ftbuild.h"*/
+ 
+ /* Global defines */
+ #define MAXRECORDS 30
