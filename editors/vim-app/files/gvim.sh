@@ -12,7 +12,7 @@
 # or by un-commenting and editing the following line:
 # VIM_APP_DIR=/Applications
 
-binary="/Applications/MacPorts/Vim/Vim.app/Contents/MacOS/Vim"
+binary="@APPPATH@Vim.app/Contents/MacOS/Vim"
 
 # Next, peek at the name used to invoke this script, and set options
 # accordingly.
