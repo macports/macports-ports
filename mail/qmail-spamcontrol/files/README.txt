@@ -13,10 +13,10 @@ qmail-smtpd-log-run -> QMAIL HOME/supervise/qmail-smtpd/log/run
 
 You will definitely want to at least review the Life with Qmail site carefully
 if this is your first experience with Qmail. Also, this is the enhanced version
-of Qmail with the SPAMCONTROL patches from www.fehcom.de, you will want to read
-that site careifully to see what features you may want to take advantage of.
+of Qmail with the SPAMCONTROL patches from www.fehcom.de. You will want to read
+that site carefully to see what features you may want to take advantage of.
 
-The files here are samples only, modify and use them as you see fit!
+The files here are samples only. Modify and use them as you see fit!
 The qmail-smtpd-run file has an example of using some Spamcontrol add-ons as
 well a using some rbl spam lists. It also uses fixcrio which is part of
 ucspi-tcp to fix up buggy email software.
