@@ -18,6 +18,16 @@
  #include <sys/param.h>
  #include <sys/user.h>
  #include <sys/proc.h>
+@@ -58,7 +58,9 @@
+ #include <sys/types.h>
+  
+ #include <err.h>
++#if !defined(OSDarwin)
+ #include <kvm.h>
++#endif
+ #include <limits.h>
+ #endif
+ 
 @@ -723,11 +725,12 @@
  {
  #if defined(OSLinux) || defined(OShpux)
