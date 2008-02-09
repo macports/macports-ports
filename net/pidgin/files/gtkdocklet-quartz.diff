@@ -1,0 +1,642 @@
+diff -Naur configure.ac configure.ac
+--- configure.ac	2008-02-09 21:18:34.000000000 +0100
++++ configure.ac	2008-02-09 21:51:11.000000000 +0100
+@@ -361,6 +361,10 @@
+ 	[AC_HELP_STRING([--disable-gestures],
+ 		[compile without the gestures plugin])],
+ 	enable_gestures="$enableval", enable_gestures="yes")
++AC_ARG_ENABLE(gtkstatusicon,
++	[AC_HELP_STRING([--enable-gtkstatusicon],
++		[Use GtkStatusIcon instead of X11 docklet])],
++	enable_gtkstatusicon="$enableval", enable_gtkstatusicon="no")
+ 
+ AC_PATH_XTRA
+ # We can't assume that $x_libraries will be set, because autoconf does not
+@@ -541,6 +545,16 @@
+ 			])
+ 	fi
+         
++	dnl #######################################################################
++	dnl # Check for GtkStatusIcon support
++	dnl #######################################################################
++	if test "x$enable_gtkstatusicon" = "xyes"; then
++		AC_MSG_CHECKING(GtkStatusIcon)    
++		PKG_CHECK_MODULES(GTK, [gtk+-2.0 >= 2.9.0],
++			[enable_gtkstatusicon="yes"],
++			[enable_gtkstatusicon="no"]
++		)
++	fi
+ 
+ else # GTK
+ 	enable_cap=no
+@@ -555,6 +569,7 @@
+ AM_CONDITIONAL(BUILD_GEVOLUTION, test "x$enable_gevolution" = "xyes")
+ AM_CONDITIONAL(ENABLE_CAP, test "x$enable_cap" = "xyes")
+ AM_CONDITIONAL(ENABLE_GESTURES, test "x$enable_gestures" = "xyes")
++AM_CONDITIONAL(GTK_STATUS_ICON, test "x$enable_gtkstatusicon" = "xyes")
+ 
+ 
+ dnl #######################################################################
+@@ -2304,6 +2319,7 @@
+ echo Build console UI.............. : $enable_consoleui
+ echo Build for X11................. : $with_x
+ echo
++echo Build with GtkStatusIcon...... : $enable_gtkstatusicon
+ echo Enable Gestures............... : $enable_gestures
+ echo Protocols to build dynamically : $DYNAMIC_PRPLS
+ echo Protocols to link statically.. : $STATIC_PRPLS
+diff -Naur pidgin/Makefile.am pidgin/Makefile.am
+--- pidgin/Makefile.am	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/Makefile.am	2008-02-09 21:51:11.000000000 +0100
+@@ -73,7 +73,6 @@
+ bin_PROGRAMS = pidgin
+ 
+ pidgin_SOURCES = \
+-	eggtrayicon.c \
+ 	pidgincombobox.c \
+ 	pidginstock.c \
+ 	gtkaccount.c \
+@@ -90,7 +89,6 @@
+ 	gtkdialogs.c \
+ 	gtkdnd-hints.c \
+ 	gtkdocklet.c \
+-	gtkdocklet-x11.c \
+ 	gtkeventloop.c \
+ 	gtkexpander.c \
+ 	gtkft.c \
+@@ -121,6 +119,15 @@
+ 	gtkwhiteboard.c \
+ 	minidialog.c
+ 
++if GTK_STATUS_ICON
++pidgin_SOURCES += \
++	gtkdocklet-gtk.c
++else
++pidgin_SOURCES += \
++	gtkdocklet-x11.c \
++	eggtrayicon.c
++endif
++ 
+ pidgin_headers = \
+ 	eggtrayicon.h \
+ 	gtkaccount.h \
+diff -Naur pidgin/gtkdocklet-gtk.c pidgin/gtkdocklet-gtk.c
+--- pidgin/gtkdocklet-gtk.c	1970-01-01 01:00:00.000000000 +0100
++++ pidgin/gtkdocklet-gtk.c	2008-02-09 21:51:11.000000000 +0100
+@@ -0,0 +1,195 @@
++/*
++ * System tray icon (aka docklet) plugin for Purple
++ *
++ * Copyright (C) 2007 Anders Hasselqvist
++ * 
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ * 
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++ * 02111-1307, USA.
++ */
++
++#include "internal.h"
++#include "pidgin.h"
++#include "debug.h"
++#include "prefs.h"
++#include "pidginstock.h"
++#include "gtkdocklet.h"
++
++#include <gtk/gtkstatusicon.h>
++
++
++/* globals */
++GtkStatusIcon *docklet = NULL;
++
++static void
++docklet_gtk_status_clicked_cb(GtkStatusIcon *status_icon, guint button, guint activate_time, gpointer user_data)
++{
++	purple_debug(PURPLE_DEBUG_INFO, "docklet", "button clicked %d\n", button);
++
++#if defined(__APPLE__) && !defined(HAVE_X11) 
++	/* You can only click left mouse button on MacOSX native GTK. Let that be the menu */ 
++	pidgin_docklet_clicked(3); 
++#else 
++	pidgin_docklet_clicked(button); 
++#endif
++}
++
++static void
++docklet_gtk_status_update_icon(PurpleStatusPrimitive status, gboolean connecting, gboolean pending)
++{
++	const gchar *icon_name = NULL;
++
++	switch (status) {
++		case PURPLE_STATUS_OFFLINE:
++			icon_name = PIDGIN_STOCK_TRAY_OFFLINE;
++			break;
++		case PURPLE_STATUS_AWAY:
++			icon_name = PIDGIN_STOCK_TRAY_AWAY;
++			break;
++		case PURPLE_STATUS_UNAVAILABLE:
++			icon_name = PIDGIN_STOCK_TRAY_BUSY;
++			break;
++		case PURPLE_STATUS_EXTENDED_AWAY:
++			icon_name = PIDGIN_STOCK_TRAY_XA;
++			break;
++		case PURPLE_STATUS_INVISIBLE:
++			icon_name = PIDGIN_STOCK_TRAY_INVISIBLE;
++			break;
++		default:
++			icon_name = PIDGIN_STOCK_TRAY_AVAILABLE;
++			break;
++	}
++
++	if (pending)
++		icon_name = PIDGIN_STOCK_TRAY_PENDING;
++	if (connecting)
++		icon_name = PIDGIN_STOCK_TRAY_CONNECT;
++
++	if(icon_name) {
++		GtkWidget *win;
++		GdkPixbuf *pixbuf;
++
++		/* We do these steps because gtk_status_icon_set_from_stock()
++		   only accepts icons of exactly size GTK_ICON_SIZE_SMALL_TOOLBAR.
++		   Doing it this way we force GtkStatusIcon to scale the pixbuf
++		   itself */
++		
++		/* Er, yeah, a hack, but it works :).
++		   We need to have a widget for getting a style */
++		win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
++		gtk_widget_realize(win);
++
++		pixbuf = gtk_widget_render_icon(win, icon_name,
++										GTK_ICON_SIZE_MENU, NULL);
++
++		if (pixbuf == NULL)
++		{
++			gtk_widget_destroy(win);
++			return;
++		}
++
++		gtk_status_icon_set_from_pixbuf(docklet, pixbuf);
++		g_object_unref(pixbuf);
++		gtk_widget_destroy(win);
++	}
++}
++
++static gboolean
++docklet_gtk_status_resize_icon(GtkStatusIcon *status_icon, gint size, gpointer user_data)
++{
++	/* Let GTK rescale for now */
++	return FALSE;
++}
++
++static void
++docklet_gtk_status_set_tooltip(gchar *tooltip)
++{
++	if (tooltip) {
++		gtk_status_icon_set_tooltip(docklet, tooltip);
++	} else {
++		gtk_status_icon_set_tooltip(docklet, NULL);
++	}
++}
++
++static void
++docklet_gtk_status_position_menu(GtkMenu *menu, int *x, int *y, gboolean *push_in,
++									gpointer user_data)
++{
++	gtk_status_icon_position_menu(menu, x, y, push_in, docklet);
++}
++
++static void
++docklet_gtk_status_destroy()
++{
++	g_return_if_fail(docklet != NULL);
++
++	pidgin_docklet_remove();
++	
++	g_object_unref(G_OBJECT(docklet));
++	docklet = NULL;
++
++	purple_debug(PURPLE_DEBUG_INFO, "docklet", "destroyed\n");
++}
++
++static void
++docklet_gtk_status_create(gboolean recreate)
++{
++	if (docklet) {
++		/* if this is being called when a tray icon exists, it's because
++		   something messed up. try destroying it before we proceed,
++		   although docklet_refcount may be all hosed. hopefully won't happen. */
++		purple_debug(PURPLE_DEBUG_WARNING, "docklet", "trying to create icon but it already exists?\n");
++		docklet_gtk_status_destroy();
++	}
++
++	docklet = gtk_status_icon_new();
++	g_return_if_fail(docklet != NULL);
++
++	g_signal_connect(G_OBJECT(docklet), "popup-menu", G_CALLBACK(docklet_gtk_status_clicked_cb), NULL);
++	g_signal_connect(G_OBJECT(docklet), "size-changed", G_CALLBACK(docklet_gtk_status_resize_icon), NULL);
++
++	pidgin_docklet_embedded();
++	gtk_status_icon_set_visible(docklet, TRUE);
++	purple_debug(PURPLE_DEBUG_INFO, "docklet", "created\n");
++}
++
++static void
++docklet_gtk_status_create_ui_op()
++{
++	docklet_gtk_status_create(FALSE);
++}
++
++
++static void
++docklet_gtk_status_set_blink(gboolean blinking)
++{
++	gtk_status_icon_set_blinking(docklet, blinking);
++}
++
++static struct docklet_ui_ops ui_ops =
++{
++	docklet_gtk_status_create_ui_op,
++	docklet_gtk_status_destroy,
++	docklet_gtk_status_update_icon,
++	NULL,
++	docklet_gtk_status_set_tooltip,
++	docklet_gtk_status_position_menu,
++	docklet_gtk_status_set_blink
++};
++
++void
++docklet_ui_init()
++{
++	pidgin_docklet_set_ui_ops(&ui_ops);
++}
+diff -Naur pidgin/gtkdocklet-x11.c pidgin/gtkdocklet-x11.c
+--- pidgin/gtkdocklet-x11.c	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/gtkdocklet-x11.c	2008-02-09 21:51:11.000000000 +0100
+@@ -313,10 +313,11 @@
+ 	docklet_x11_blank_icon,
+ 	docklet_x11_set_tooltip,
+ #if GTK_CHECK_VERSION(2,2,0)
+-	docklet_x11_position_menu
++	docklet_x11_position_menu,
+ #else
+-	NULL
++	NULL,
+ #endif
++	NULL /* blink */
+ };
+ 
+ void
+diff -Naur pidgin/gtkdocklet.c pidgin/gtkdocklet.c
+--- pidgin/gtkdocklet.c	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/gtkdocklet.c	2008-02-09 21:51:11.000000000 +0100
+@@ -62,7 +62,7 @@
+  * docklet status and utility functions
+  **************************************************************************/
+ static gboolean
+-docklet_blink_icon()
++docklet_blink_icon_cb()
+ {
+ 	static gboolean blinked = FALSE;
+ 	gboolean ret = FALSE; /* by default, don't keep blinking */
+@@ -85,6 +85,15 @@
+ 	return ret;
+ }
+ 
++static void
++docklet_blink_icon(gboolean blink)
++{
++	if (ui_ops->blink)
++		ui_ops->blink(blink);
++	else if (blink)
++		docklet_blinking_timer = g_timeout_add(500, docklet_blink_icon_cb, NULL);
++}
++
+ static GList *
+ get_pending_list(guint max)
+ {
+@@ -211,7 +220,9 @@
+ 		/* and schedule the blinker function if messages are pending */
+ 		if (purple_prefs_get_bool(PIDGIN_PREFS_ROOT "/docklet/blink")
+ 			&& pending && !connecting && docklet_blinking_timer == 0) {
+-			docklet_blinking_timer = g_timeout_add(500, docklet_blink_icon, NULL);
++			docklet_blink_icon(TRUE);
++		} else {
++			docklet_blink_icon(FALSE);
+ 		}
+ 	}
+ 
+diff -Naur pidgin/gtkdocklet.h pidgin/gtkdocklet.h
+--- pidgin/gtkdocklet.h	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/gtkdocklet.h	2008-02-09 21:51:11.000000000 +0100
+@@ -35,6 +35,7 @@
+ 	void (*blank_icon)(void);
+ 	void (*set_tooltip)(gchar *);
+ 	GtkMenuPositionFunc position_menu;
++	void (*blink)(gboolean);
+ };
+ 
+ 
+diff -Naur pidgin/pidginstock.c pidgin/pidginstock.c
+--- pidgin/pidginstock.c	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/pidginstock.c	2008-02-09 21:51:11.000000000 +0100
+@@ -208,39 +208,39 @@
+ 
+ 	filename = g_build_filename(DATADIR, "pixmaps", "pidgin", dir, size, file, NULL);
+ 	source = gtk_icon_source_new();
+-        gtk_icon_source_set_filename(source, filename);
++	gtk_icon_source_set_filename(source, filename);
+ 	gtk_icon_source_set_direction(source, GTK_TEXT_DIR_LTR);
+-        gtk_icon_source_set_direction_wildcarded(source, !rtl);
++	gtk_icon_source_set_direction_wildcarded(source, !rtl);
+ 	gtk_icon_source_set_size(source, sizeid);
+-        gtk_icon_source_set_size_wildcarded(source, FALSE);
+-        gtk_icon_source_set_state_wildcarded(source, TRUE);
+-        gtk_icon_set_add_source(iconset, source);
++	gtk_icon_source_set_size_wildcarded(source, FALSE);
++	gtk_icon_source_set_state_wildcarded(source, TRUE);
++	gtk_icon_set_add_source(iconset, source);
+ 	gtk_icon_source_free(source);
+ 
+ 	if (sizeid == gtk_icon_size_from_name(PIDGIN_ICON_SIZE_TANGO_EXTRA_SMALL)) {
+ 		source = gtk_icon_source_new();
+-	        gtk_icon_source_set_filename(source, filename);
+-        	gtk_icon_source_set_direction_wildcarded(source, TRUE);
+-	        gtk_icon_source_set_size(source, GTK_ICON_SIZE_MENU);
+-	        gtk_icon_source_set_size_wildcarded(source, FALSE);
+-        	gtk_icon_source_set_state_wildcarded(source, TRUE);
+-	        gtk_icon_set_add_source(iconset, source);
+-	        gtk_icon_source_free(source);
++		gtk_icon_source_set_filename(source, filename);
++		gtk_icon_source_set_direction_wildcarded(source, TRUE);
++		gtk_icon_source_set_size(source, GTK_ICON_SIZE_MENU);
++		gtk_icon_source_set_size_wildcarded(source, FALSE);
++		gtk_icon_source_set_state_wildcarded(source, TRUE);
++		gtk_icon_set_add_source(iconset, source);
++		gtk_icon_source_free(source);
+ 	}
+-        g_free(filename);
++	g_free(filename);
+ 
+-       if (rtl) {
++	if (rtl) {
+ 		filename = g_build_filename(DATADIR, "pixmaps", "pidgin", dir, size, "rtl", file, NULL);
+-                source = gtk_icon_source_new();
+-                gtk_icon_source_set_filename(source, filename);
+-                gtk_icon_source_set_direction(source, GTK_TEXT_DIR_RTL);
+-                gtk_icon_source_set_size(source, sizeid);
+-                gtk_icon_source_set_size_wildcarded(source, FALSE);
+-                gtk_icon_source_set_state_wildcarded(source, TRUE);
+-                gtk_icon_set_add_source(iconset, source);
++		source = gtk_icon_source_new();
++		gtk_icon_source_set_filename(source, filename);
++		gtk_icon_source_set_direction(source, GTK_TEXT_DIR_RTL);
++		gtk_icon_source_set_size(source, sizeid);
++		gtk_icon_source_set_size_wildcarded(source, FALSE);
++		gtk_icon_source_set_state_wildcarded(source, TRUE);
++		gtk_icon_set_add_source(iconset, source);
+ 		g_free(filename);
+ 		gtk_icon_source_free(source);
+-        }
++	}
+ 
+ 
+ }
+@@ -249,36 +249,36 @@
+ static void
+ do_alphashift (GdkPixbuf *dest, GdkPixbuf *src)
+ {
+-        gint i, j;
+-        gint width, height, has_alpha, srcrowstride, destrowstride;
+-        guchar *target_pixels;
+-        guchar *original_pixels;
+-        guchar *pixsrc;
+-        guchar *pixdest;
+-        guchar a;
+-
+-        has_alpha = gdk_pixbuf_get_has_alpha (src);
+-        if (!has_alpha)
+-          return;
+-
+-        width = gdk_pixbuf_get_width (src);
+-        height = gdk_pixbuf_get_height (src);
+-        srcrowstride = gdk_pixbuf_get_rowstride (src);
+-        destrowstride = gdk_pixbuf_get_rowstride (dest);
+-        target_pixels = gdk_pixbuf_get_pixels (dest);
+-        original_pixels = gdk_pixbuf_get_pixels (src);
+-
+-        for (i = 0; i < height; i++) {
+-                pixdest = target_pixels + i*destrowstride;
+-                pixsrc = original_pixels + i*srcrowstride;
+-                for (j = 0; j < width; j++) {
+-                        *(pixdest++) = *(pixsrc++);
+-                        *(pixdest++) = *(pixsrc++);
+-                        *(pixdest++) = *(pixsrc++);
+-                        a = *(pixsrc++);
+-                        *(pixdest++) = a / 2;
+-                }
+-        }
++	gint i, j;
++	gint width, height, has_alpha, srcrowstride, destrowstride;
++	guchar *target_pixels;
++	guchar *original_pixels;
++	guchar *pixsrc;
++	guchar *pixdest;
++	guchar a;
++
++	has_alpha = gdk_pixbuf_get_has_alpha (src);
++	if (!has_alpha)
++		return;
++
++	width = gdk_pixbuf_get_width (src);
++	height = gdk_pixbuf_get_height (src);
++	srcrowstride = gdk_pixbuf_get_rowstride (src);
++	destrowstride = gdk_pixbuf_get_rowstride (dest);
++	target_pixels = gdk_pixbuf_get_pixels (dest);
++	original_pixels = gdk_pixbuf_get_pixels (src);
++
++	for (i = 0; i < height; i++) {
++		pixdest = target_pixels + i*destrowstride;
++		pixsrc = original_pixels + i*srcrowstride;
++		for (j = 0; j < width; j++) {
++			*(pixdest++) = *(pixsrc++);
++			*(pixdest++) = *(pixsrc++);
++			*(pixdest++) = *(pixsrc++);
++			a = *(pixsrc++);
++			*(pixdest++) = a / 2;
++		}
++	}
+ }
+ 
+ /* TODO: This is almost certainly not the best way to do this, but it's late, I'm tired,
+@@ -297,43 +297,43 @@
+ 	do_alphashift(pixbuf, pixbuf);
+ 
+ 	source = gtk_icon_source_new();
+-        gtk_icon_source_set_pixbuf(source, pixbuf);
++	gtk_icon_source_set_pixbuf(source, pixbuf);
+ 	gtk_icon_source_set_direction(source, GTK_TEXT_DIR_LTR);
+-        gtk_icon_source_set_direction_wildcarded(source, !rtl);
++	gtk_icon_source_set_direction_wildcarded(source, !rtl);
+ 	gtk_icon_source_set_size(source, sizeid);
+-        gtk_icon_source_set_size_wildcarded(source, FALSE);
+-        gtk_icon_source_set_state_wildcarded(source, TRUE);
+-        gtk_icon_set_add_source(iconset, source);
++	gtk_icon_source_set_size_wildcarded(source, FALSE);
++	gtk_icon_source_set_state_wildcarded(source, TRUE);
++	gtk_icon_set_add_source(iconset, source);
+ 	gtk_icon_source_free(source);
+ 
+ 	if (sizeid == gtk_icon_size_from_name(PIDGIN_ICON_SIZE_TANGO_EXTRA_SMALL)) {
+ 		source = gtk_icon_source_new();
+-	        gtk_icon_source_set_pixbuf(source, pixbuf);
+-        	gtk_icon_source_set_direction_wildcarded(source, TRUE);
+-	        gtk_icon_source_set_size(source, GTK_ICON_SIZE_MENU);
+-	        gtk_icon_source_set_size_wildcarded(source, FALSE);
+-        	gtk_icon_source_set_state_wildcarded(source, TRUE);
+-	        gtk_icon_set_add_source(iconset, source);
+-	        gtk_icon_source_free(source);
++		gtk_icon_source_set_pixbuf(source, pixbuf);
++		gtk_icon_source_set_direction_wildcarded(source, TRUE);
++		gtk_icon_source_set_size(source, GTK_ICON_SIZE_MENU);
++		gtk_icon_source_set_size_wildcarded(source, FALSE);
++		gtk_icon_source_set_state_wildcarded(source, TRUE);
++		gtk_icon_set_add_source(iconset, source);
++		gtk_icon_source_free(source);
+ 	}
+-        g_free(filename);
++	g_free(filename);
+ 	g_object_unref(pixbuf);
+ 
+-       if (rtl) {
++	if (rtl) {
+ 		filename = g_build_filename(DATADIR, "pixmaps", "pidgin", dir, size, "rtl", file, NULL);
+  		pixbuf = gdk_pixbuf_new_from_file(filename, NULL);
+ 		do_alphashift(pixbuf, pixbuf);
+ 		source = gtk_icon_source_new();
+-                gtk_icon_source_set_pixbuf(source, pixbuf);
+-                gtk_icon_source_set_direction(source, GTK_TEXT_DIR_RTL);
+-                gtk_icon_source_set_size(source, sizeid);
+-                gtk_icon_source_set_size_wildcarded(source, FALSE);
+-                gtk_icon_source_set_state_wildcarded(source, TRUE);
+-                gtk_icon_set_add_source(iconset, source);
++		gtk_icon_source_set_pixbuf(source, pixbuf);
++		gtk_icon_source_set_direction(source, GTK_TEXT_DIR_RTL);
++		gtk_icon_source_set_size(source, sizeid);
++		gtk_icon_source_set_size_wildcarded(source, FALSE);
++		gtk_icon_source_set_state_wildcarded(source, TRUE);
++		gtk_icon_set_add_source(iconset, source);
+ 		g_free(filename);
+ 		g_object_unref(pixbuf);
+ 		gtk_icon_source_free(source);
+-        }
++	}
+ 
+ 
+ }
+@@ -420,24 +420,24 @@
+ 					"11", sized_stock_icons[i].filename);
+ 		if (sized_stock_icons[i].extra_small)
+ 			add_sized_icon(iconset, extra_small,
+-				       sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
+-				       "16", sized_stock_icons[i].filename);
+-               if (sized_stock_icons[i].small)
+-                        add_sized_icon(iconset, small,
+-				       sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-                                       "22", sized_stock_icons[i].filename);
+-               if (sized_stock_icons[i].medium)
+-                        add_sized_icon(iconset, medium,
+-			               sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-                                       "32", sized_stock_icons[i].filename);
+-	       if (sized_stock_icons[i].large)
+-		       add_sized_icon(iconset, large,
+-                                      sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
+-                                      "48", sized_stock_icons[i].filename);
+-               if (sized_stock_icons[i].huge)
+-                        add_sized_icon(iconset, huge,
+-	                               sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-                                       "64", sized_stock_icons[i].filename);
++					sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
++					"16", sized_stock_icons[i].filename);
++		if (sized_stock_icons[i].small)
++			add_sized_icon(iconset, small,
++				sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++					"22", sized_stock_icons[i].filename);
++		if (sized_stock_icons[i].medium)
++			add_sized_icon(iconset, medium,
++				sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++					"32", sized_stock_icons[i].filename);
++		if (sized_stock_icons[i].large)
++			add_sized_icon(iconset, large,
++				sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
++					"48", sized_stock_icons[i].filename);
++		if (sized_stock_icons[i].huge)
++			add_sized_icon(iconset, huge,
++				sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++					"64", sized_stock_icons[i].filename);
+ 
+ 		gtk_icon_factory_add(icon_factory, sized_stock_icons[i].name, iconset);
+ 		gtk_icon_set_unref(iconset);
+@@ -452,23 +452,23 @@
+ 				add_translucent_sized_icon(iconset, extra_small,
+ 					       sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
+ 					       "16", sized_stock_icons[i].filename);
+-	               if (sized_stock_icons[i].small)
+-        	                add_translucent_sized_icon(iconset, small,
+-					       sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-	                                       "22", sized_stock_icons[i].filename);
+-	               if (sized_stock_icons[i].medium)
+-	                        add_translucent_sized_icon(iconset, medium,
+-				               sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-	                                       "32", sized_stock_icons[i].filename);
+-		       if (sized_stock_icons[i].large)
+-			       add_translucent_sized_icon(iconset, large,
+-	                                      sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
+-	                                      "48", sized_stock_icons[i].filename);
+-	               if (sized_stock_icons[i].huge)
+-	                        add_translucent_sized_icon(iconset, huge,
+-		                               sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
+-	                                       "64", sized_stock_icons[i].filename);
+-	
++			if (sized_stock_icons[i].small)
++				add_translucent_sized_icon(iconset, small,
++					sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++						"22", sized_stock_icons[i].filename);
++			if (sized_stock_icons[i].medium)
++				add_translucent_sized_icon(iconset, medium,
++					sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++						"32", sized_stock_icons[i].filename);
++			if (sized_stock_icons[i].large)
++				add_translucent_sized_icon(iconset, large,
++					sized_stock_icons[i].dir, sized_stock_icons[i].rtl,
++						"48", sized_stock_icons[i].filename);
++			if (sized_stock_icons[i].huge)
++				add_translucent_sized_icon(iconset, huge,
++					sized_stock_icons[i].dir,  sized_stock_icons[i].rtl,
++						"64", sized_stock_icons[i].filename);
++
+ 			gtk_icon_factory_add(icon_factory, sized_stock_icons[i].translucent_name, iconset);
+ 			gtk_icon_set_unref(iconset);
+ 		}
+diff -Naur pidgin/win32/gtkdocklet-win32.c pidgin/win32/gtkdocklet-win32.c
+--- pidgin/win32/gtkdocklet-win32.c	2008-02-09 21:18:32.000000000 +0100
++++ pidgin/win32/gtkdocklet-win32.c	2008-02-09 21:51:11.000000000 +0100
+@@ -658,7 +658,8 @@
+ 	winpidgin_tray_update_icon,
+ 	winpidgin_tray_blank_icon,
+ 	winpidgin_tray_set_tooltip,
+-	NULL
++	NULL,						/* position menu */
++	NULL						/* blink */
+ };
+ 
+ /* Used by docklet's plugin load func */
