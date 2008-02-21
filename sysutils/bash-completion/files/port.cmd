@@ -26,11 +26,13 @@ _port()
 			portdir=${COMP_WORDS[((count+1))]}
 			portdiropt="-D $portdir"
 			;;
-		    install|uninstall|activate|deactivate|installed|\
-			outdated|upgrade|selfupdate|sync|\
-			clean|list|search|info|variants|deps|contents|\
-			unarchive|fetch|extract|patch|configure|build|destroot|test|archive|\
-			pkg|mpkg|dmg|rpm|srpm|provides)
+                    activate|archive|build|cat|cd|checksum|clean|compact|configure|\
+                        contents|deactivate|dependents|deps|destroot|dir|distcheck|dmg|\
+                        dpkg|echo|ed|edit|exit|extract|fetch|file|gohome|help|info|\
+                        install|installed|lint|list|livecheck|load|location|mdmg|mirror|\
+                        mpkg|outdated|patch|pkg|platform|provides|quit|rpm|search|selfupdate|\
+                        srpm|submit|sync|test|trace|unarchive|uncompact|uninstall|unload|\
+                        upgrade|url|usage|variants|version|work)
                         mode=$i
 			;;
 		esac
@@ -124,15 +126,14 @@ _port()
 		esac
 	fi
 
-	COMPREPLY=( $( compgen -W '-v -d -q -c -k -n -a -u -D -f -o -s -b \
-				install uninstall activate deactivate installed \
-                                outdated upgrade selfupdate sync \
-				clean list search info variants deps contents \
-				unarchive fetch extract patch configure build \
-                                destroot test archive \
-                                pkg mpkg dmg rpm srpm provides' -- $cur ) )
-
-	
+	COMPREPLY=( $( compgen -W '-b -c -d -f -i -k -n -o -p -q -R -s -t -u -v -x \
+                                activate archive build cat cd checksum clean compact configure \
+                                contents deactivate dependents deps destroot dir distcheck dmg \
+                                dpkg echo ed edit exit extract fetch file gohome help info \
+                                install installed lint list livecheck load location mdmg mirror \
+                                mpkg outdated patch pkg platform provides quit rpm search selfupdate \
+                                srpm submit sync test trace unarchive uncompact uninstall unload \
+                                upgrade url usage variants version work' -- $cur ) )
 	return 0
 }
 complete -F _port $filenames port
