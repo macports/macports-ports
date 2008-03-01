@@ -1,0 +1,2129 @@
+--- pidgin/gtkblist.c	2007-12-07 15:37:11.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/gtkblist.c	2008-02-11 15:59:25.000000000 +0100
+@@ -27,6 +27,9 @@
+ #include "internal.h"
+ #include "pidgin.h"
+ 
++#include "ige-mac-menu.h"
++#include "ige-mac-dock.h"
++#include "ige-mac-bundle.h"
+ #include "account.h"
+ #include "connection.h"
+ #include "core.h"
+@@ -5311,6 +5314,7 @@
+ 	pidgin_blist_restore_position();
+ 	gtk_widget_show_all(GTK_WIDGET(gtkblist->vbox));
+ 	gtk_widget_realize(GTK_WIDGET(gtkblist->window));
++      	ige_mac_menu_set_menu_bar(GTK_MENU_SHELL(menu)); 
+ 	purple_blist_set_visible(purple_prefs_get_bool(PIDGIN_PREFS_ROOT "/blist/list_visible"));
+ 
+ 	/* start the refresh timer */
+--- pidgin/ige-mac-bundle.c	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-bundle.c	2008-02-11 14:38:28.000000000 +0100
+@@ -0,0 +1,377 @@
++/* GTK+ Integration for app bundles.
++ *
++ * Copyright (C) 2007-2008 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++/* TODO: Add command line parsing and remove any
++ * -psn_... arguments?
++ */
++
++#include <gtk/gtk.h>
++#include <Carbon/Carbon.h>
++
++#include "ige-mac-bundle.h"
++
++typedef struct IgeMacBundlePriv IgeMacBundlePriv;
++
++struct IgeMacBundlePriv {
++  CFBundleRef  cf_bundle; 
++  gchar       *path;
++  gchar       *id;
++  gchar       *datadir;
++  gchar       *localedir;
++  UInt32       type;
++  UInt32       creator;
++};
++
++static void   mac_bundle_finalize              (GObject      *object);
++static gchar *cf_string_to_utf8                (CFStringRef   str);
++static void   mac_bundle_set_environment_value (IgeMacBundle *bundle,
++                                                const gchar  *key,
++                                                const gchar  *value);
++
++static IgeMacBundle *global_bundle;
++
++G_DEFINE_TYPE (IgeMacBundle, ige_mac_bundle, G_TYPE_OBJECT)
++
++#define GET_PRIV(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), IGE_TYPE_MAC_BUNDLE, IgeMacBundlePriv))
++
++static void
++ige_mac_bundle_class_init (IgeMacBundleClass *class)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (class);
++
++  object_class->finalize = mac_bundle_finalize;
++
++  g_type_class_add_private (object_class, sizeof (IgeMacBundlePriv));
++}
++
++static void
++ige_mac_bundle_init (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++  CFURLRef          cf_url;
++  CFStringRef       cf_string;
++  CFDictionaryRef   cf_dict;
++
++  priv->cf_bundle = CFBundleGetMainBundle ();
++  if (!priv->cf_bundle)
++    return;
++
++  CFRetain (priv->cf_bundle);
++
++  /* Bundle or binary location. */
++  cf_url = CFBundleCopyBundleURL (priv->cf_bundle);
++  cf_string = CFURLCopyFileSystemPath (cf_url, kCFURLPOSIXPathStyle);
++  priv->path = cf_string_to_utf8 (cf_string);
++  CFRelease (cf_string);
++  CFRelease (cf_url);
++
++  /* Package info. */
++  CFBundleGetPackageInfo (priv->cf_bundle, &priv->type, &priv->creator);
++
++  /* Identifier. */
++  cf_string = CFBundleGetIdentifier (priv->cf_bundle);
++  if (cf_string)
++    priv->id = cf_string_to_utf8 (cf_string);
++
++  /* Get non-localized keys. */
++  cf_dict = CFBundleGetInfoDictionary (priv->cf_bundle);
++  if (cf_dict)
++    {
++      CFDictionaryRef   env_dict;
++      CFIndex           n_keys, i;
++      const void      **keys;
++      const void      **values;
++
++      env_dict = (CFDictionaryRef) CFDictionaryGetValue (cf_dict, CFSTR ("LSEnvironment"));
++      if (env_dict)
++        {
++          n_keys = CFDictionaryGetCount (env_dict);
++
++          keys = (const void **) g_new (void *, n_keys);
++          values = (const void **) g_new (void *, n_keys);
++
++          CFDictionaryGetKeysAndValues (env_dict, keys, values);
++
++          for (i = 0; i < n_keys; i++)
++            {
++              gchar *key;
++              gchar *value;
++
++              key = cf_string_to_utf8 ((CFStringRef) keys[i]);
++              value = cf_string_to_utf8 ((CFStringRef) values[i]);
++
++              mac_bundle_set_environment_value (bundle, key, value);
++
++              g_free (key);
++              g_free (value);
++            }
++
++          g_free (keys);
++          g_free (values);
++        }      
++    }
++}
++
++static void
++mac_bundle_finalize (GObject *object)
++{
++  IgeMacBundlePriv *priv;
++
++  priv = GET_PRIV (object);
++
++  g_free (priv->path);
++  g_free (priv->id);
++  g_free (priv->datadir);
++  g_free (priv->localedir);
++
++  CFRelease (priv->cf_bundle);
++
++  G_OBJECT_CLASS (ige_mac_bundle_parent_class)->finalize (object);
++}
++
++IgeMacBundle *
++ige_mac_bundle_new (void)
++{
++  return g_object_new (IGE_TYPE_MAC_BUNDLE, NULL);
++}
++
++IgeMacBundle *
++ige_mac_bundle_get_default (void)
++{
++  if (!global_bundle)
++    global_bundle = ige_mac_bundle_new ();
++
++  return global_bundle;
++}
++
++static gchar *
++cf_string_to_utf8 (CFStringRef str)
++{
++  CFIndex  len;
++  gchar   *ret;
++
++  len = CFStringGetMaximumSizeForEncoding (CFStringGetLength (str), 
++                                           kCFStringEncodingUTF8) + 1;
++
++  ret = g_malloc (len);
++  ret[len] = '\0';
++
++  if (CFStringGetCString (str, ret, len, kCFStringEncodingUTF8))
++    return ret;
++
++  g_free (ret);
++  return NULL;
++}
++
++static void
++mac_bundle_set_environment_value (IgeMacBundle *bundle,
++                                  const gchar  *key, 
++                                  const gchar  *value)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++  GRegex           *regex;
++  gchar            *new_value;
++
++  regex = g_regex_new ("@executable_path", 0, 0, NULL);
++
++  new_value = g_regex_replace_literal (regex,
++                                       value,
++                                       -1,
++                                       0,
++                                       priv->path,
++                                       0, NULL);
++
++  g_print ("%s => %s\n", value, new_value);
++
++  if (new_value)
++    value = new_value;
++
++
++  g_setenv (key, value, TRUE);
++
++  g_free (new_value);
++  g_regex_unref (regex);
++}
++
++const gchar *
++ige_mac_bundle_get_id (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++
++  return priv->id;
++}
++
++const gchar *
++ige_mac_bundle_get_path (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++
++  return priv->path;
++}
++
++gboolean
++ige_mac_bundle_get_is_app_bundle (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++
++  return (priv->type == 'APPL' && priv->id);
++}
++
++const gchar *
++ige_mac_bundle_get_datadir (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++
++  if (!ige_mac_bundle_get_is_app_bundle (bundle))
++    return NULL;
++
++  if (!priv->datadir)
++    {
++      priv->datadir = g_build_filename (priv->path,
++                                        "Contents",
++                                        "Resources",
++                                        "share",
++                                        NULL);
++    }
++
++  return priv->datadir;
++}
++
++const gchar *
++ige_mac_bundle_get_localedir (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++
++  if (!ige_mac_bundle_get_is_app_bundle (bundle))
++    return NULL;
++
++  if (!priv->localedir)
++    {
++      priv->localedir = g_build_filename (priv->path,
++                                          "Contents",
++                                          "Resources",
++                                          "share",
++                                          "locale",
++                                          NULL);
++    }
++
++  return priv->localedir;
++}
++
++void
++ige_mac_bundle_setup_environment (IgeMacBundle *bundle)
++{
++  IgeMacBundlePriv *priv = GET_PRIV (bundle);
++  gchar            *resources;
++  gchar            *share, *lib, *etc;
++  gchar            *etc_xdg, *etc_immodules, *etc_gtkrc;
++  gchar            *etc_pixbuf, *etc_pangorc;
++  const gchar      *rc_files;
++
++  if (!ige_mac_bundle_get_is_app_bundle (bundle))
++    return;
++
++  resources = g_build_filename (priv->path,
++                                "Contents",
++                                "Resources",
++                                NULL);
++
++  share = g_build_filename (resources, "share", NULL);
++  lib = g_build_filename (resources, "lib", NULL);
++  etc = g_build_filename (resources, "etc", NULL);
++  etc_xdg = g_build_filename (etc, "xdg", NULL);
++  etc_immodules = g_build_filename (etc, "gtk-2.0", "gtk.immodules", NULL);
++  etc_gtkrc = g_build_filename (etc, "gtk-2.0", "gtkrc", NULL);
++  etc_pixbuf = g_build_filename (etc, "gtk-2.0", "gdk-pixbuf.loaders", NULL);
++  etc_pangorc = g_build_filename (etc, "pango", "pangorc", NULL);
++
++  g_setenv ("XDG_CONFIG_DIRS", etc_xdg, TRUE);
++  g_setenv ("XDG_DATA_DIRS", share, TRUE);
++  g_setenv ("GTK_DATA_PREFIX", share, TRUE);
++  g_setenv ("GTK_EXE_PREFIX", resources, TRUE);
++  g_setenv ("GTK_PATH_PREFIX", resources, TRUE);
++
++  /* Append the normal gtkrc path to allow customizing the theme from
++   * Info.plist.
++   */
++  rc_files = g_getenv ("GTK2_RC_FILES");
++  if (rc_files)
++    {
++      gchar *tmp;
++
++      tmp = g_strdup_printf ("%s:%s", rc_files, etc_gtkrc);
++      g_setenv ("GTK2_RC_FILES", tmp, TRUE);
++      g_free (tmp);
++    }
++  else
++    g_setenv ("GTK2_RC_FILES", etc_gtkrc, TRUE);
++
++  g_setenv ("GTK_IM_MODULE_FILE", etc_immodules, TRUE);
++  g_setenv ("GDK_PIXBUF_MODULE_FILE", etc_pixbuf, TRUE);
++  g_setenv ("PANGO_RC_FILE", etc_pangorc, TRUE);
++  g_setenv ("CHARSETALIASDIR", lib, TRUE);
++
++  // could add FONTCONFIG_FILE
++
++  /*export LANG="\`grep \"\\\`defaults read .GlobalPreferences AppleCollationOrder \
++ 2>&1\\\`_\" /usr/share/locale/locale.alias | tail -n1 | sed 's/\./ /' | \
++ awk '{print \$2}'\`.UTF-8"*/
++
++  g_free (share);
++  g_free (lib);
++  g_free (etc);
++  g_free (etc_xdg);
++  g_free (etc_immodules);
++  g_free (etc_gtkrc);
++  g_free (etc_pixbuf);
++  g_free (etc_pangorc);
++}
++
++gchar *
++ige_mac_bundle_get_resource_path (IgeMacBundle *bundle,
++                                  const gchar  *name,
++                                  const gchar  *type,
++                                  const gchar  *subdir)
++{
++  IgeMacBundlePriv *priv;
++  CFURLRef          cf_url;
++  CFStringRef       cf_string;
++  gchar            *path;
++
++  if (!bundle)
++    bundle = ige_mac_bundle_get_default ();
++
++  priv = GET_PRIV (bundle);
++
++  if (!priv->cf_bundle)
++    return NULL;
++
++  // FIXME: Look at using CFURLGetFileSystemRepresentation (urlcf_, true, (UInt8*)outPathName, 256)
++
++  // FIXME: crate real cfstring here...
++  cf_url = CFBundleCopyResourceURL (priv->cf_bundle, 
++                                    CFSTR("name"), CFSTR("type"), CFSTR("subdir"));
++  cf_string = CFURLCopyFileSystemPath (cf_url, kCFURLPOSIXPathStyle);
++  path = cf_string_to_utf8 (cf_string);
++  CFRelease (cf_string);
++  CFRelease (cf_url);
++
++  return path;
++}
+--- pidgin/ige-mac-bundle.h	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-bundle.h	2008-02-11 14:38:30.000000000 +0100
+@@ -0,0 +1,62 @@
++/* GTK+ Integration for app bundles.
++ *
++ * Copyright (C) 2007-2008 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#ifndef __IGE_MAC_BUNDLE_H__
++#define __IGE_MAC_BUNDLE_H__
++
++#include <glib-object.h>
++
++G_BEGIN_DECLS
++
++#define IGE_TYPE_MAC_BUNDLE            (ige_mac_bundle_get_type ())
++#define IGE_MAC_BUNDLE(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), IGE_TYPE_MAC_BUNDLE, IgeMacBundle))
++#define IGE_MAC_BUNDLE_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), IGE_TYPE_MAC_BUNDLE, IgeMacBundleClass))
++#define IGE_IS_MAC_BUNDLE(obj)	       (G_TYPE_CHECK_INSTANCE_TYPE ((obj), IGE_TYPE_MAC_BUNDLE))
++#define IGE_IS_MAC_BUNDLE_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), IGE_TYPE_MAC_BUNDLE))
++#define IGE_MAC_BUNDLE_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), IGE_TYPE_MAC_BUNDLE, IgeMacBundleClass))
++
++typedef struct _IgeMacBundle      IgeMacBundle;
++typedef struct _IgeMacBundleClass IgeMacBundleClass;
++
++struct _IgeMacBundle {
++  GObject parent_instance;
++};
++
++struct _IgeMacBundleClass {
++  GObjectClass parent_class;
++};
++
++GType         ige_mac_bundle_get_type          (void);
++IgeMacBundle *ige_mac_bundle_new               (void);
++IgeMacBundle *ige_mac_bundle_get_default       (void);
++void          ige_mac_bundle_setup_environment (IgeMacBundle *bundle);
++const gchar * ige_mac_bundle_get_id            (IgeMacBundle *bundle);
++const gchar * ige_mac_bundle_get_path          (IgeMacBundle *bundle);
++gboolean      ige_mac_bundle_get_is_app_bundle (IgeMacBundle *bundle);
++const gchar * ige_mac_bundle_get_localedir     (IgeMacBundle *bundle);
++const gchar * ige_mac_bundle_get_datadir       (IgeMacBundle *bundle);
++gchar *       ige_mac_bundle_get_resource_path (IgeMacBundle *bundle,
++                                                const gchar  *name,
++                                                const gchar  *type,
++                                                const gchar  *subdir);
++
++G_END_DECLS
++
++#endif /* __IGE_MAC_BUNDLE_H__ */
+--- pidgin/ige-mac-dock.c	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-dock.c	2008-02-11 14:38:28.000000000 +0100
+@@ -0,0 +1,449 @@
++/* GTK+ Integration for the Mac OS X Dock.
++ *
++ * Copyright (C) 2007-2008 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++/* FIXME: Add example like this to docs for the open documents stuff:
++
++    <key>CFBundleDocumentTypes</key>
++    <array>
++      <dict>
++        <key>CFBundleTypeExtensions</key>
++        <array>
++          <string>txt</string>
++        </array>
++      </dict>
++    </array>
++
++*/
++
++#include <config.h>
++#include <Carbon/Carbon.h>
++#include <sys/param.h>
++#include <gtk/gtk.h>
++
++#include "ige-mac-dock.h"
++#include "ige-mac-bundle.h"
++#include "ige-mac-image-utils.h"
++
++enum {
++  CLICKED,
++  QUIT_ACTIVATE,
++  OPEN_DOCUMENTS,
++  LAST_SIGNAL
++};
++
++static guint signals[LAST_SIGNAL] = { 0 };
++
++typedef struct IgeMacDockPriv IgeMacDockPriv;
++
++struct IgeMacDockPriv {
++  glong id;
++};
++
++static void  mac_dock_finalize                  (GObject          *object);
++static OSErr mac_dock_handle_quit               (const AppleEvent *inAppleEvent,
++                                                 AppleEvent       *outAppleEvent,
++                                                 long              inHandlerRefcon);
++static OSErr mac_dock_handle_open_documents     (const AppleEvent *inAppleEvent,
++                                                 AppleEvent       *outAppleEvent,
++                                                 long              inHandlerRefcon);
++static OSErr mac_dock_handle_open_application   (const AppleEvent *inAppleEvent,
++                                                 AppleEvent       *outAppleEvent,
++                                                 long              inHandlerRefcon);
++static OSErr mac_dock_handle_reopen_application (const AppleEvent *inAppleEvent,
++                                                 AppleEvent       *outAppleEvent,
++                                                 long              inHandlerRefcon);
++
++G_DEFINE_TYPE (IgeMacDock, ige_mac_dock, G_TYPE_OBJECT)
++
++#define GET_PRIV(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), IGE_TYPE_MAC_DOCK, IgeMacDockPriv))
++
++static GList      *handlers;
++static IgeMacDock *global_dock;
++
++static void
++ige_mac_dock_class_init (IgeMacDockClass *class)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (class);
++
++  object_class->finalize = mac_dock_finalize;
++
++  signals[CLICKED] =
++    g_signal_new ("clicked",
++                  IGE_TYPE_MAC_DOCK,
++                  G_SIGNAL_RUN_LAST,
++                  0,
++                  NULL, NULL,
++                  g_cclosure_marshal_VOID__VOID,
++                  G_TYPE_NONE, 0);
++
++  /* FIXME: Need marshaller. */
++  signals[OPEN_DOCUMENTS] =
++    g_signal_new ("open-documents",
++                  IGE_TYPE_MAC_DOCK,
++                  G_SIGNAL_RUN_LAST,
++                  0,
++                  NULL, NULL,
++                  g_cclosure_marshal_VOID__VOID,
++                  G_TYPE_NONE, 0);
++
++  signals[QUIT_ACTIVATE] =
++    g_signal_new ("quit-activate",
++                  IGE_TYPE_MAC_DOCK,
++                  G_SIGNAL_RUN_LAST,
++                  0,
++                  NULL, NULL,
++                  g_cclosure_marshal_VOID__VOID,
++                  G_TYPE_NONE, 0);
++
++  g_type_class_add_private (object_class, sizeof (IgeMacDockPriv));
++
++  /* FIXME: Just testing with triggering Carbon to take control over
++   * the dock menu events instead of Cocoa (which happens when the
++   * sharedApplication is created) to get custom dock menu working
++   * with carbon menu code. However, doing this makes the dock icon
++   * not get a "running triangle".
++   */
++#if 0
++  EventTypeSpec kFakeEventList[] = { { INT_MAX, INT_MAX } };
++  EventRef event;
++  
++  ReceiveNextEvent (GetEventTypeCount (kFakeEventList),
++                    kFakeEventList,
++                    kEventDurationNoWait, false, 
++                    &event);
++#endif
++}
++
++static void
++ige_mac_dock_init (IgeMacDock *dock)
++{
++  IgeMacDockPriv *priv = GET_PRIV (dock);
++  static glong    id;
++
++  priv->id = ++id;
++
++  handlers = g_list_prepend (handlers, dock);
++
++  AEInstallEventHandler (kCoreEventClass, kAEQuitApplication, 
++                         mac_dock_handle_quit,
++                         priv->id, true);
++  AEInstallEventHandler (kCoreEventClass, kAEOpenApplication,
++                         mac_dock_handle_open_application,
++                         priv->id, true);
++  AEInstallEventHandler (kCoreEventClass, kAEReopenApplication, 
++                         mac_dock_handle_reopen_application,
++                         priv->id, true);
++  AEInstallEventHandler (kCoreEventClass, kAEOpenDocuments,
++                         mac_dock_handle_open_documents,
++                         priv->id, true);
++}
++
++static void
++mac_dock_finalize (GObject *object)
++{
++  IgeMacDockPriv *priv;
++
++  priv = GET_PRIV (object);
++
++  AERemoveEventHandler (kCoreEventClass, kAEQuitApplication,
++                        mac_dock_handle_quit, false);
++  AERemoveEventHandler (kCoreEventClass, kAEReopenApplication,
++                        mac_dock_handle_reopen_application, false);
++  AERemoveEventHandler (kCoreEventClass, kAEOpenApplication,
++                        mac_dock_handle_open_application, false);
++  AERemoveEventHandler (kCoreEventClass, kAEOpenDocuments,
++                        mac_dock_handle_open_documents, false);
++
++  handlers = g_list_remove (handlers, object);
++
++  G_OBJECT_CLASS (ige_mac_dock_parent_class)->finalize (object);
++}
++
++IgeMacDock *
++ige_mac_dock_new (void)
++{
++  return g_object_new (IGE_TYPE_MAC_DOCK, NULL);
++}
++
++IgeMacDock *
++ige_mac_dock_get_default (void)
++{
++  if (!global_dock)
++    global_dock = g_object_new (IGE_TYPE_MAC_DOCK, NULL);
++
++  return global_dock;
++}
++
++static IgeMacDock *
++mac_dock_get_from_id (gulong id)
++{
++  GList      *l;
++  IgeMacDock *dock = NULL;
++
++  for (l = handlers; l; l = l->next)
++    {
++      dock = l->data;
++      if (GET_PRIV (dock)->id == id)
++        break;
++
++      dock = NULL;
++  }
++
++  return dock;
++}
++
++static OSErr
++mac_dock_handle_quit (const AppleEvent *inAppleEvent, 
++                      AppleEvent       *outAppleEvent, 
++                      long              inHandlerRefcon)
++{
++  IgeMacDock *dock;
++
++  dock = mac_dock_get_from_id (inHandlerRefcon);
++
++  if (dock)
++    g_signal_emit (dock, signals[QUIT_ACTIVATE], 0);
++
++  return noErr;
++}
++
++static OSErr
++mac_dock_handle_open_application (const AppleEvent *inAppleEvent,
++                                  AppleEvent       *outAppleEvent,
++                                  long              inHandlerRefCon)
++{
++  g_print ("FIXME: mac_dock_handle_open_application\n");
++
++  return noErr;
++}
++
++static OSErr
++mac_dock_handle_reopen_application (const AppleEvent *inAppleEvent, 
++                                    AppleEvent       *outAppleEvent, 
++                                    long              inHandlerRefcon)
++{
++  IgeMacDock *dock;
++
++  dock = mac_dock_get_from_id (inHandlerRefcon);
++
++  if (dock)
++    g_signal_emit (dock, signals[CLICKED], 0);
++  
++  return noErr;
++}
++
++static OSErr
++mac_dock_handle_open_documents (const AppleEvent *inAppleEvent,
++                                AppleEvent       *outAppleEvent,
++                                long              inHandlerRefCon)
++{
++  IgeMacDock *dock;
++  OSStatus    status;
++  AEDescList  documents;
++  gchar       path[MAXPATHLEN];
++
++  g_print ("FIXME: mac_dock_handle_open_documents\n");
++
++  dock = mac_dock_get_from_id (inHandlerRefCon);
++
++  status = AEGetParamDesc (inAppleEvent,
++                           keyDirectObject, typeAEList,
++                           &documents);
++  if (status == noErr)
++    {
++      long count = 0;
++      int  i;
++
++      AECountItems (&documents, &count);
++
++      for (i = 0; i < count; i++)
++        {
++          FSRef ref;
++
++          status = AEGetNthPtr (&documents, i + 1, typeFSRef, 
++                                0, 0, &ref, sizeof (ref),
++                                0);
++          if (status != noErr)
++            continue;
++
++          FSRefMakePath (&ref, path, MAXPATHLEN);
++
++          /* FIXME: Add to a list, then emit the open-documents
++           * signal.
++           */
++          g_print ("  %s\n", path);
++        }
++    }
++        
++    return status;
++}
++
++void
++ige_mac_dock_set_icon_from_pixbuf (IgeMacDock *dock,
++                                   GdkPixbuf  *pixbuf)
++{
++  if (!pixbuf)
++    RestoreApplicationDockTileImage ();
++  else
++    {
++      CGImageRef image;
++
++      image = ige_mac_image_from_pixbuf (pixbuf);
++      SetApplicationDockTileImage (image);
++      CGImageRelease (image);
++    }
++}
++
++void
++ige_mac_dock_set_icon_from_resource (IgeMacDock   *dock,
++                                     IgeMacBundle *bundle,
++                                     const gchar  *name,
++                                     const gchar  *type,
++                                     const gchar  *subdir)
++{
++  gchar *path;
++
++  g_return_if_fail (IGE_IS_MAC_DOCK (dock));
++  g_return_if_fail (name != NULL);
++
++  path = ige_mac_bundle_get_resource_path (bundle, name, type, subdir);
++  if (path)
++    {
++      GdkPixbuf *pixbuf;
++
++      pixbuf = gdk_pixbuf_new_from_file (path, NULL);
++      if (pixbuf)
++        {
++          ige_mac_dock_set_icon_from_pixbuf (dock, pixbuf);
++          g_object_unref (pixbuf);
++        }
++
++      g_free (path);
++    }
++}
++
++void
++ige_mac_dock_set_overlay_from_pixbuf (IgeMacDock  *dock,
++                                      GdkPixbuf   *pixbuf)
++{
++  CGImageRef image;
++
++  g_return_if_fail (IGE_IS_MAC_DOCK (dock));
++  g_return_if_fail (GDK_IS_PIXBUF (pixbuf));
++
++  image = ige_mac_image_from_pixbuf (pixbuf);
++  OverlayApplicationDockTileImage (image);
++  CGImageRelease (image);
++}
++
++void
++ige_mac_dock_set_overlay_from_resource (IgeMacDock   *dock,
++                                        IgeMacBundle *bundle,
++                                        const gchar  *name,
++                                        const gchar  *type,
++                                        const gchar  *subdir)
++{
++  gchar *path;
++
++  g_return_if_fail (IGE_IS_MAC_DOCK (dock));
++  g_return_if_fail (name != NULL);
++
++  path = ige_mac_bundle_get_resource_path (bundle, name, type, subdir);
++  if (path)
++    {
++      GdkPixbuf *pixbuf;
++
++      pixbuf = gdk_pixbuf_new_from_file (path, NULL);
++      if (pixbuf)
++        {
++          ige_mac_dock_set_overlay_from_pixbuf (dock, pixbuf);
++          g_object_unref (pixbuf);
++        }
++
++      g_free (path);
++    }
++}
++
++struct _IgeMacAttentionRequest {
++  NMRec    nm_request;
++  guint    timeout_id;
++  gboolean is_cancelled;
++};
++
++static gboolean
++mac_dock_attention_cb (IgeMacAttentionRequest *request)
++{
++  request->timeout_id = 0;
++  request->is_cancelled = TRUE;
++
++  NMRemove (&request->nm_request);
++
++  return FALSE;
++}
++
++
++/* FIXME: Add listener for "application activated" and cancel any
++ * requests.
++ */
++IgeMacAttentionRequest *
++ige_mac_dock_attention_request (IgeMacDock          *dock,
++                                IgeMacAttentionType  type)
++{
++  IgeMacAttentionRequest *request;
++
++  request = g_new0 (IgeMacAttentionRequest, 1);
++
++  request->nm_request.nmMark = 1;
++  request->nm_request.qType = nmType;
++  
++  if (NMInstall (&request->nm_request) != noErr)
++    {
++      g_free (request);
++      return NULL;
++    }
++
++  if (type == IGE_MAC_ATTENTION_INFO)
++    request->timeout_id = gdk_threads_add_timeout (
++            1000,
++            (GSourceFunc) mac_dock_attention_cb,
++            request);
++
++  return request;
++}
++
++void
++ige_mac_dock_attention_cancel (IgeMacDock             *dock,
++                               IgeMacAttentionRequest *request)
++{
++  if (request->timeout_id)
++    g_source_remove (request->timeout_id);
++
++  if (!request->is_cancelled)
++    NMRemove (&request->nm_request);
++
++  g_free (request);
++}
++
++GType
++ige_mac_attention_type_get_type (void)
++{
++  /* FIXME */
++  return 0;
++}
+--- pidgin/ige-mac-dock.h	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-dock.h	2008-02-11 14:38:30.000000000 +0100
+@@ -0,0 +1,83 @@
++/* GTK+ Integration for the Mac OS X Dock.
++ *
++ * Copyright (C) 2007-2008 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#ifndef __IGE_MAC_DOCK_H__
++#define __IGE_MAC_DOCK_H__
++
++#include <gtk/gtk.h>
++#include <ige-mac-bundle.h>
++
++G_BEGIN_DECLS
++
++#define IGE_TYPE_MAC_DOCK            (ige_mac_dock_get_type ())
++#define IGE_MAC_DOCK(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), IGE_TYPE_MAC_DOCK, IgeMacDock))
++#define IGE_MAC_DOCK_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), IGE_TYPE_MAC_DOCK, IgeMacDockClass))
++#define IGE_IS_MAC_DOCK(obj)	     (G_TYPE_CHECK_INSTANCE_TYPE ((obj), IGE_TYPE_MAC_DOCK))
++#define IGE_IS_MAC_DOCK_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), IGE_TYPE_MAC_DOCK))
++#define IGE_MAC_DOCK_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), IGE_TYPE_MAC_DOCK, IgeMacDockClass))
++
++typedef struct _IgeMacDock      IgeMacDock;
++typedef struct _IgeMacDockClass IgeMacDockClass;
++
++typedef struct _IgeMacAttentionRequest IgeMacAttentionRequest;
++
++struct _IgeMacDock
++{
++  GObject parent_instance;
++};
++
++struct _IgeMacDockClass
++{
++  GObjectClass parent_class;
++};
++
++typedef enum {
++        IGE_MAC_ATTENTION_CRITICAL,
++        IGE_MAC_ATTENTION_INFO
++} IgeMacAttentionType;
++
++GType                   ige_mac_dock_get_type                  (void);
++IgeMacDock *            ige_mac_dock_new                       (void);
++IgeMacDock *            ige_mac_dock_get_default               (void);
++void                    ige_mac_dock_set_icon_from_pixbuf      (IgeMacDock             *dock,
++                                                                GdkPixbuf              *pixbuf);
++void                    ige_mac_dock_set_icon_from_resource    (IgeMacDock             *dock,
++                                                                IgeMacBundle           *bundle,
++                                                                const gchar            *name,
++                                                                const gchar            *type,
++                                                                const gchar            *subdir);
++void                    ige_mac_dock_set_overlay_from_pixbuf   (IgeMacDock             *dock,
++                                                                GdkPixbuf              *pixbuf);
++void                    ige_mac_dock_set_overlay_from_resource (IgeMacDock             *dock,
++                                                                IgeMacBundle           *bundle,
++                                                                const gchar            *name,
++                                                                const gchar            *type,
++                                                                const gchar            *subdir);
++IgeMacAttentionRequest *ige_mac_dock_attention_request         (IgeMacDock             *dock,
++                                                                IgeMacAttentionType     type);
++void                    ige_mac_dock_attention_cancel          (IgeMacDock             *dock,
++                                                                IgeMacAttentionRequest *request);
++
++#define IGE_TYPE_MAC_ATTENTION_TYPE (ige_mac_attention_type_get_type())
++GType                   ige_mac_attention_type_get_type        (void);
++
++G_END_DECLS
++
++#endif /* __IGE_MAC_DOCK_H__ */
+--- pidgin/ige-mac-image-utils.c	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-image-utils.c	2008-02-11 14:38:28.000000000 +0100
+@@ -0,0 +1,60 @@
++/*
++ * Copyright (C) 2007 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#include <config.h>
++#include <gtk/gtk.h>
++#include <Carbon/Carbon.h>
++
++#include "ige-mac-image-utils.h"
++
++CGImageRef
++ige_mac_image_from_pixbuf (GdkPixbuf *pixbuf)
++{
++  CGColorSpaceRef   colorspace;
++  CGDataProviderRef data_provider;
++  CGImageRef        image;
++  void             *data;
++  gint              rowstride;
++  gint              pixbuf_width, pixbuf_height;
++  gboolean          has_alpha;
++ 
++  pixbuf_width = gdk_pixbuf_get_width (pixbuf);
++  pixbuf_height = gdk_pixbuf_get_height (pixbuf);
++  rowstride = gdk_pixbuf_get_rowstride (pixbuf);
++  has_alpha = gdk_pixbuf_get_has_alpha (pixbuf);
++
++  data = gdk_pixbuf_get_pixels (pixbuf);
++
++  colorspace = CGColorSpaceCreateDeviceRGB ();
++  data_provider = CGDataProviderCreateWithData (NULL, data, 
++                                                pixbuf_height * rowstride, 
++                                                NULL);
++
++  image = CGImageCreate (pixbuf_width, pixbuf_height, 8,
++                         has_alpha ? 32 : 24, rowstride, 
++                         colorspace, 
++                         has_alpha ? kCGImageAlphaLast : 0,
++                         data_provider, NULL, FALSE, 
++                         kCGRenderingIntentDefault);
++
++  CGDataProviderRelease (data_provider);
++  CGColorSpaceRelease (colorspace);
++
++  return image;
++}
+--- pidgin/ige-mac-image-utils.h	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-image-utils.h	2008-02-11 14:38:30.000000000 +0100
+@@ -0,0 +1,32 @@
++/*
++ * Copyright (C) 2007 Imendio AB
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#ifndef __IGE_MAC_IMAGE_UTILS_H__
++#define __IGE_MAC_IMAGE_UTILS_H__
++
++#include <gdk-pixbuf/gdk-pixbuf.h>
++#include <Carbon/Carbon.h>
++
++G_BEGIN_DECLS
++
++CGImageRef ige_mac_image_from_pixbuf (GdkPixbuf *pixbuf);
++
++G_END_DECLS
++
++#endif /* __IGE_MAC_IMAGE_UTILS_H__ */
+--- pidgin/ige-mac-menu.c	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-menu.c	2008-02-11 14:38:28.000000000 +0100
+@@ -0,0 +1,936 @@
++/* GTK+ Integration for the Mac OS X Menubar.
++ *
++ * Copyright (C) 2007 Pioneer Research Center USA, Inc.
++ * Copyright (C) 2007 Imendio AB
++ *
++ * For further information, see:
++ * http://developer.imendio.com/projects/gtk-macosx/menubar
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#include <gtk/gtk.h>
++#include <gdk/gdkkeysyms.h>
++#include <Carbon/Carbon.h>
++
++#include "ige-mac-menu.h"
++
++/* TODO
++ *
++ * - Adding a standard Window menu (Minimize etc)?
++ * - Sync reordering items? Does that work now?
++ * - Create on demand? (can this be done with gtk+? ie fill in menu
++     items when the menu is opened)
++ * - Figure out what to do per app/window...
++ *
++ */
++
++#define IGE_QUARTZ_MENU_CREATOR 'IGEC'
++#define IGE_QUARTZ_ITEM_WIDGET  'IWID'
++
++
++static void   sync_menu_shell (GtkMenuShell *menu_shell,
++			       MenuRef       carbon_menu,
++			       gboolean      toplevel,
++			       gboolean      debug);
++
++
++/*
++ * utility functions
++ */
++
++static GtkWidget *
++find_menu_label (GtkWidget *widget)
++{
++  GtkWidget *label = NULL;
++
++  if (GTK_IS_LABEL (widget))
++    return widget;
++
++  if (GTK_IS_CONTAINER (widget))
++    {
++      GList *children;
++      GList *l;
++
++      children = gtk_container_get_children (GTK_CONTAINER (widget));
++
++      for (l = children; l; l = l->next)
++	{
++	  label = find_menu_label (l->data);
++	  if (label)
++	    break;
++	}
++
++      g_list_free (children);
++    }
++
++  return label;
++}
++
++static const gchar *
++get_menu_label_text (GtkWidget  *menu_item,
++		     GtkWidget **label)
++{
++  GtkWidget *my_label;
++
++  my_label = find_menu_label (menu_item);
++  if (label)
++    *label = my_label;
++
++  if (my_label)
++    return gtk_label_get_text (GTK_LABEL (my_label));
++
++  return NULL;
++}
++
++static gboolean
++accel_find_func (GtkAccelKey *key,
++		 GClosure    *closure,
++		 gpointer     data)
++{
++  return (GClosure *) data == closure;
++}
++
++
++/*
++ * CarbonMenu functions
++ */
++
++typedef struct
++{
++  MenuRef menu;
++  guint   toplevel : 1;
++} CarbonMenu;
++
++static GQuark carbon_menu_quark = 0;
++
++static CarbonMenu *
++carbon_menu_new (void)
++{
++  return g_slice_new0 (CarbonMenu);
++}
++
++static void
++carbon_menu_free (CarbonMenu *menu)
++{
++  g_slice_free (CarbonMenu, menu);
++}
++
++static CarbonMenu *
++carbon_menu_get (GtkWidget *widget)
++{
++  return g_object_get_qdata (G_OBJECT (widget), carbon_menu_quark);
++}
++
++static void
++carbon_menu_connect (GtkWidget *menu,
++		     MenuRef    menuRef,
++                     gboolean   toplevel)
++{
++  CarbonMenu *carbon_menu = carbon_menu_get (menu);
++
++  if (!carbon_menu)
++    {
++      carbon_menu = carbon_menu_new ();
++
++      g_object_set_qdata_full (G_OBJECT (menu), carbon_menu_quark,
++			       carbon_menu,
++			       (GDestroyNotify) carbon_menu_free);
++    }
++
++  carbon_menu->menu = menuRef;
++  carbon_menu->toplevel = toplevel;
++}
++
++
++/*
++ * CarbonMenuItem functions
++ */
++
++typedef struct
++{
++  MenuRef        menu;
++  MenuItemIndex  index;
++  MenuRef        submenu;
++  GClosure      *accel_closure;
++} CarbonMenuItem;
++
++static GQuark carbon_menu_item_quark = 0;
++
++static CarbonMenuItem *
++carbon_menu_item_new (void)
++{
++  return g_slice_new0 (CarbonMenuItem);
++}
++
++static void
++carbon_menu_item_free (CarbonMenuItem *menu_item)
++{
++  if (menu_item->accel_closure)
++    g_closure_unref (menu_item->accel_closure);
++
++  g_slice_free (CarbonMenuItem, menu_item);
++}
++
++static CarbonMenuItem *
++carbon_menu_item_get (GtkWidget *widget)
++{
++  return g_object_get_qdata (G_OBJECT (widget), carbon_menu_item_quark);
++}
++
++static void
++carbon_menu_item_update_state (CarbonMenuItem *carbon_item,
++			       GtkWidget      *widget)
++{
++  gboolean sensitive;
++  gboolean visible;
++  UInt32   set_attrs = 0;
++  UInt32   clear_attrs = 0;
++
++  g_object_get (widget,
++                "sensitive", &sensitive,
++                "visible",   &visible,
++                NULL);
++
++  if (!sensitive)
++    set_attrs |= kMenuItemAttrDisabled;
++  else
++    clear_attrs |= kMenuItemAttrDisabled;
++
++  if (!visible)
++    set_attrs |= kMenuItemAttrHidden;
++  else
++    clear_attrs |= kMenuItemAttrHidden;
++
++  ChangeMenuItemAttributes (carbon_item->menu, carbon_item->index,
++                            set_attrs, clear_attrs);
++}
++
++static void
++carbon_menu_item_update_active (CarbonMenuItem *carbon_item,
++				GtkWidget      *widget)
++{
++  gboolean active;
++
++  g_object_get (widget,
++                "active", &active,
++                NULL);
++
++  CheckMenuItem (carbon_item->menu, carbon_item->index,
++		 active);
++}
++
++static void
++carbon_menu_item_update_submenu (CarbonMenuItem *carbon_item,
++				 GtkWidget      *widget)
++{
++  GtkWidget *submenu;
++
++  submenu = gtk_menu_item_get_submenu (GTK_MENU_ITEM (widget));
++
++  if (submenu)
++    {
++      const gchar *label_text;
++      CFStringRef  cfstr = NULL;
++
++      label_text = get_menu_label_text (widget, NULL);
++      if (label_text)
++        cfstr = CFStringCreateWithCString (NULL, label_text,
++					   kCFStringEncodingUTF8);
++
++      CreateNewMenu (0, 0, &carbon_item->submenu);
++      SetMenuTitleWithCFString (carbon_item->submenu, cfstr);
++      SetMenuItemHierarchicalMenu (carbon_item->menu, carbon_item->index,
++				   carbon_item->submenu);
++
++      sync_menu_shell (GTK_MENU_SHELL (submenu), carbon_item->submenu, FALSE, FALSE);
++
++      if (cfstr)
++	CFRelease (cfstr);
++    }
++  else
++    {
++      SetMenuItemHierarchicalMenu (carbon_item->menu, carbon_item->index,
++				   NULL);
++      carbon_item->submenu = NULL;
++    }
++}
++
++static void
++carbon_menu_item_update_label (CarbonMenuItem *carbon_item,
++			       GtkWidget      *widget)
++{
++  const gchar *label_text;
++  CFStringRef  cfstr = NULL;
++
++  label_text = get_menu_label_text (widget, NULL);
++  if (label_text)
++    cfstr = CFStringCreateWithCString (NULL, label_text,
++				       kCFStringEncodingUTF8);
++
++  SetMenuItemTextWithCFString (carbon_item->menu, carbon_item->index,
++			       cfstr);
++
++  if (cfstr)
++    CFRelease (cfstr);
++}
++
++static void
++carbon_menu_item_update_accelerator (CarbonMenuItem *carbon_item,
++				     GtkWidget      *widget)
++{
++  GtkWidget *label;
++
++  get_menu_label_text (widget, &label);
++
++  if (GTK_IS_ACCEL_LABEL (label) &&
++      GTK_ACCEL_LABEL (label)->accel_closure)
++    {
++      GtkAccelKey *key;
++
++      key = gtk_accel_group_find (GTK_ACCEL_LABEL (label)->accel_group,
++				  accel_find_func,
++				  GTK_ACCEL_LABEL (label)->accel_closure);
++
++      if (key            &&
++	  key->accel_key &&
++	  key->accel_flags & GTK_ACCEL_VISIBLE)
++	{
++	  GdkDisplay      *display = gtk_widget_get_display (widget);
++	  GdkKeymap       *keymap  = gdk_keymap_get_for_display (display);
++	  GdkKeymapKey    *keys;
++	  gint             n_keys;
++
++	  if (gdk_keymap_get_entries_for_keyval (keymap, key->accel_key,
++						 &keys, &n_keys))
++	    {
++	      UInt8 modifiers = 0;
++
++	      SetMenuItemCommandKey (carbon_item->menu, carbon_item->index,
++				     true, keys[0].keycode);
++
++	      g_free (keys);
++
++	      if (key->accel_mods)
++		{
++		  if (key->accel_mods & GDK_SHIFT_MASK)
++		    modifiers |= kMenuShiftModifier;
++
++		  if (key->accel_mods & GDK_MOD1_MASK)
++		    modifiers |= kMenuOptionModifier;
++		}
++
++	      if (!(key->accel_mods & GDK_CONTROL_MASK))
++		{
++		  modifiers |= kMenuNoCommandModifier;
++		}
++
++	      SetMenuItemModifiers (carbon_item->menu, carbon_item->index,
++				    modifiers);
++
++	      return;
++	    }
++	}
++    }
++
++  /*  otherwise, clear the menu shortcut  */
++  SetMenuItemModifiers (carbon_item->menu, carbon_item->index,
++			kMenuNoModifiers | kMenuNoCommandModifier);
++  ChangeMenuItemAttributes (carbon_item->menu, carbon_item->index,
++			    0, kMenuItemAttrUseVirtualKey);
++  SetMenuItemCommandKey (carbon_item->menu, carbon_item->index,
++			 false, 0);
++}
++
++static void
++carbon_menu_item_accel_changed (GtkAccelGroup   *accel_group,
++				guint            keyval,
++				GdkModifierType  modifier,
++				GClosure        *accel_closure,
++				GtkWidget       *widget)
++{
++  CarbonMenuItem *carbon_item = carbon_menu_item_get (widget);
++  GtkWidget      *label;
++
++  get_menu_label_text (widget, &label);
++
++  if (GTK_IS_ACCEL_LABEL (label) &&
++      GTK_ACCEL_LABEL (label)->accel_closure == accel_closure)
++    carbon_menu_item_update_accelerator (carbon_item, widget);
++}
++
++static void
++carbon_menu_item_update_accel_closure (CarbonMenuItem *carbon_item,
++				       GtkWidget      *widget)
++{
++  GtkAccelGroup *group;
++  GtkWidget     *label;
++
++  get_menu_label_text (widget, &label);
++
++  if (carbon_item->accel_closure)
++    {
++      group = gtk_accel_group_from_accel_closure (carbon_item->accel_closure);
++
++      g_signal_handlers_disconnect_by_func (group,
++					    carbon_menu_item_accel_changed,
++					    widget);
++
++      g_closure_unref (carbon_item->accel_closure);
++      carbon_item->accel_closure = NULL;
++    }
++
++  if (GTK_IS_ACCEL_LABEL (label))
++    carbon_item->accel_closure = GTK_ACCEL_LABEL (label)->accel_closure;
++
++  if (carbon_item->accel_closure)
++    {
++      g_closure_ref (carbon_item->accel_closure);
++
++      group = gtk_accel_group_from_accel_closure (carbon_item->accel_closure);
++
++      g_signal_connect_object (group, "accel-changed",
++			       G_CALLBACK (carbon_menu_item_accel_changed),
++			       widget, 0);
++    }
++
++  carbon_menu_item_update_accelerator (carbon_item, widget);
++}
++
++static void
++carbon_menu_item_notify (GObject        *object,
++			 GParamSpec     *pspec,
++			 CarbonMenuItem *carbon_item)
++{
++  if (!strcmp (pspec->name, "sensitive") ||
++      !strcmp (pspec->name, "visible"))
++    {
++      carbon_menu_item_update_state (carbon_item, GTK_WIDGET (object));
++    }
++  else if (!strcmp (pspec->name, "active"))
++    {
++      carbon_menu_item_update_active (carbon_item, GTK_WIDGET (object));
++    }
++  else if (!strcmp (pspec->name, "submenu"))
++    {
++      carbon_menu_item_update_submenu (carbon_item, GTK_WIDGET (object));
++    }
++}
++
++static void
++carbon_menu_item_notify_label (GObject    *object,
++			       GParamSpec *pspec,
++			       gpointer    data)
++{
++  CarbonMenuItem *carbon_item = carbon_menu_item_get (GTK_WIDGET (object));
++
++  if (!strcmp (pspec->name, "label"))
++    {
++      carbon_menu_item_update_label (carbon_item,
++				     GTK_WIDGET (object));
++    }
++  else if (!strcmp (pspec->name, "accel-closure"))
++    {
++      carbon_menu_item_update_accel_closure (carbon_item,
++					     GTK_WIDGET (object));
++    }
++}
++
++static CarbonMenuItem *
++carbon_menu_item_connect (GtkWidget     *menu_item,
++			  GtkWidget     *label,
++			  MenuRef        menu,
++			  MenuItemIndex  index)
++{
++  CarbonMenuItem *carbon_item = carbon_menu_item_get (menu_item);
++
++  if (!carbon_item)
++    {
++      carbon_item = carbon_menu_item_new ();
++
++      g_object_set_qdata_full (G_OBJECT (menu_item), carbon_menu_item_quark,
++			       carbon_item,
++			       (GDestroyNotify) carbon_menu_item_free);
++
++      g_signal_connect (menu_item, "notify",
++                        G_CALLBACK (carbon_menu_item_notify),
++                        carbon_item);
++
++      if (label)
++	g_signal_connect_swapped (label, "notify::label",
++				  G_CALLBACK (carbon_menu_item_notify_label),
++				  menu_item);
++    }
++
++  carbon_item->menu  = menu;
++  carbon_item->index = index;
++
++  return carbon_item;
++}
++
++
++/*
++ * carbon event handler
++ */
++
++static OSStatus
++menu_event_handler_func (EventHandlerCallRef  event_handler_call_ref,
++			 EventRef             event_ref,
++			 void                *data)
++{
++  UInt32  event_class = GetEventClass (event_ref);
++  UInt32  event_kind = GetEventKind (event_ref);
++  MenuRef menu_ref;
++
++  switch (event_class)
++    {
++    case kEventClassCommand:
++      /* This is called when activating (is that the right GTK+ term?)
++       * a menu item.
++       */
++      if (event_kind == kEventCommandProcess)
++	{
++	  HICommand command;
++	  OSStatus  err;
++
++	  /*g_printerr ("Menu: kEventClassCommand/kEventCommandProcess\n");*/
++
++	  err = GetEventParameter (event_ref, kEventParamDirectObject,
++				   typeHICommand, 0,
++				   sizeof (command), 0, &command);
++
++	  if (err == noErr)
++	    {
++	      GtkWidget *widget = NULL;
++
++	      /* Get any GtkWidget associated with the item. */
++	      err = GetMenuItemProperty (command.menu.menuRef,
++					 command.menu.menuItemIndex,
++					 IGE_QUARTZ_MENU_CREATOR,
++					 IGE_QUARTZ_ITEM_WIDGET,
++					 sizeof (widget), 0, &widget);
++	      if (err == noErr && GTK_IS_WIDGET (widget))
++		{
++		  gtk_menu_item_activate (GTK_MENU_ITEM (widget));
++		  return noErr;
++		}
++	    }
++	}
++      break;
++
++    case kEventClassMenu:
++      GetEventParameter (event_ref,
++			 kEventParamDirectObject,
++			 typeMenuRef,
++			 NULL,
++			 sizeof (menu_ref),
++			 NULL,
++			 &menu_ref);
++
++      switch (event_kind)
++	{
++	case kEventMenuTargetItem:
++	  /* This is called when an item is selected (what is the
++	   * GTK+ term? prelight?)
++	   */
++	  /*g_printerr ("kEventClassMenu/kEventMenuTargetItem\n");*/
++	  break;
++
++	case kEventMenuOpening:
++	  /* Is it possible to dynamically build the menu here? We
++	   * can at least set visibility/sensitivity.
++	   */
++	  /*g_printerr ("kEventClassMenu/kEventMenuOpening\n");*/
++	  break;
++
++	case kEventMenuClosed:
++	  /*g_printerr ("kEventClassMenu/kEventMenuClosed\n");*/
++	  break;
++
++	default:
++	  break;
++	}
++
++      break;
++
++    default:
++      break;
++    }
++
++  return CallNextEventHandler (event_handler_call_ref, event_ref);
++}
++
++static void
++setup_menu_event_handler (void)
++{
++  static gboolean is_setup;
++  EventHandlerUPP menu_event_handler_upp;
++  EventHandlerRef menu_event_handler_ref;
++  const EventTypeSpec menu_events[] = {
++    { kEventClassCommand, kEventCommandProcess },
++    { kEventClassMenu, kEventMenuTargetItem },
++    { kEventClassMenu, kEventMenuOpening },
++    { kEventClassMenu, kEventMenuClosed }
++  };
++
++  if (is_setup)
++    return;
++
++  /* FIXME: We might have to install one per window? */
++
++  menu_event_handler_upp = NewEventHandlerUPP (menu_event_handler_func);
++  InstallEventHandler (GetApplicationEventTarget (), menu_event_handler_upp,
++		       GetEventTypeCount (menu_events), menu_events, 0,
++		       &menu_event_handler_ref);
++
++#if 0
++  /* FIXME: Remove the handler with: */
++  RemoveEventHandler(menu_event_handler_ref);
++  DisposeEventHandlerUPP(menu_event_handler_upp);
++#endif
++  is_setup = TRUE;
++}
++
++static void
++sync_menu_shell (GtkMenuShell *menu_shell,
++                 MenuRef       carbon_menu,
++		 gboolean      toplevel,
++		 gboolean      debug)
++{
++  GList         *children;
++  GList         *l;
++  MenuItemIndex  carbon_index = 1;
++
++  if (debug)
++    g_printerr ("%s: syncing shell %p\n", G_STRFUNC, menu_shell);
++
++  carbon_menu_connect (GTK_WIDGET (menu_shell), carbon_menu, toplevel);
++
++  children = gtk_container_get_children (GTK_CONTAINER (menu_shell));
++
++  for (l = children; l; l = l->next)
++    {
++      GtkWidget      *menu_item = l->data;
++      CarbonMenuItem *carbon_item;
++
++      if (GTK_IS_TEAROFF_MENU_ITEM (menu_item))
++	continue;
++
++      if (toplevel && g_object_get_data (G_OBJECT (menu_item),
++					 "gtk-empty-menu-item"))
++	continue;
++
++      carbon_item = carbon_menu_item_get (menu_item);
++
++      if (debug)
++	g_printerr ("%s: carbon_item %d for menu_item %d (%s, %s)\n",
++		    G_STRFUNC, carbon_item ? carbon_item->index : -1,
++		    carbon_index, get_menu_label_text (menu_item, NULL),
++		    g_type_name (G_TYPE_FROM_INSTANCE (menu_item)));
++
++      if (carbon_item && carbon_item->index != carbon_index)
++	{
++	  if (debug)
++	    g_printerr ("%s:   -> not matching, deleting\n", G_STRFUNC);
++
++	  DeleteMenuItem (carbon_item->menu, carbon_index);
++	  carbon_item = NULL;
++	}
++
++      if (!carbon_item)
++	{
++	  GtkWidget          *label      = NULL;
++	  const gchar        *label_text;
++	  CFStringRef         cfstr      = NULL;
++	  MenuItemAttributes  attributes = 0;
++
++	  if (debug)
++	    g_printerr ("%s:   -> creating new\n", G_STRFUNC);
++
++	  label_text = get_menu_label_text (menu_item, &label);
++	  if (label_text)
++	    cfstr = CFStringCreateWithCString (NULL, label_text,
++					       kCFStringEncodingUTF8);
++
++	  if (GTK_IS_SEPARATOR_MENU_ITEM (menu_item))
++	    attributes |= kMenuItemAttrSeparator;
++
++	  if (!GTK_WIDGET_IS_SENSITIVE (menu_item))
++	    attributes |= kMenuItemAttrDisabled;
++
++	  if (!GTK_WIDGET_VISIBLE (menu_item))
++	    attributes |= kMenuItemAttrHidden;
++
++	  InsertMenuItemTextWithCFString (carbon_menu, cfstr,
++					  carbon_index - 1,
++					  attributes, 0);
++	  SetMenuItemProperty (carbon_menu, carbon_index,
++			       IGE_QUARTZ_MENU_CREATOR,
++			       IGE_QUARTZ_ITEM_WIDGET,
++			       sizeof (menu_item), &menu_item);
++
++	  if (cfstr)
++	    CFRelease (cfstr);
++
++	  carbon_item = carbon_menu_item_connect (menu_item, label,
++						  carbon_menu,
++						  carbon_index);
++
++	  if (GTK_IS_CHECK_MENU_ITEM (menu_item))
++	    carbon_menu_item_update_active (carbon_item, menu_item);
++
++	  carbon_menu_item_update_accel_closure (carbon_item, menu_item);
++
++	  if (gtk_menu_item_get_submenu (GTK_MENU_ITEM (menu_item)))
++	    carbon_menu_item_update_submenu (carbon_item, menu_item);
++	}
++
++      carbon_index++;
++    }
++
++  g_list_free (children);
++}
++
++static gulong emission_hook_id = 0;
++static gint   emission_hook_count = 0;
++
++static gboolean
++parent_set_emission_hook (GSignalInvocationHint *ihint,
++			  guint                  n_param_values,
++			  const GValue          *param_values,
++			  gpointer               data)
++{
++  GtkWidget *instance = g_value_get_object (param_values);
++
++  if (GTK_IS_MENU_ITEM (instance))
++    {
++      GtkWidget *previous_parent = g_value_get_object (param_values + 1);
++      GtkWidget *menu_shell      = NULL;
++
++      if (GTK_IS_MENU_SHELL (previous_parent))
++	{
++	  menu_shell = previous_parent;
++        }
++      else if (GTK_IS_MENU_SHELL (instance->parent))
++	{
++	  menu_shell = instance->parent;
++	}
++
++      if (menu_shell)
++        {
++	  CarbonMenu *carbon_menu = carbon_menu_get (menu_shell);
++
++	  if (carbon_menu)
++	    {
++#if 0
++	      g_printerr ("%s: item %s %p (%s, %s)\n", G_STRFUNC,
++			  previous_parent ? "removed from" : "added to",
++			  menu_shell,
++			  get_menu_label_text (instance, NULL),
++			  g_type_name (G_TYPE_FROM_INSTANCE (instance)));
++#endif
++
++	      sync_menu_shell (GTK_MENU_SHELL (menu_shell),
++			       carbon_menu->menu,
++			       carbon_menu->toplevel,
++			       FALSE);
++	    }
++        }
++    }
++
++  return TRUE;
++}
++
++static void
++parent_set_emission_hook_remove (GtkWidget *widget,
++				 gpointer   data)
++{
++  emission_hook_count--;
++
++  if (emission_hook_count > 0)
++    return;
++
++  g_signal_remove_emission_hook (g_signal_lookup ("parent-set",
++						  GTK_TYPE_WIDGET),
++				 emission_hook_id);
++  emission_hook_id = 0;
++}
++
++
++/*
++ * public functions
++ */
++
++void
++ige_mac_menu_set_menu_bar (GtkMenuShell *menu_shell)
++{
++  MenuRef carbon_menubar;
++
++  g_return_if_fail (GTK_IS_MENU_SHELL (menu_shell));
++
++  if (carbon_menu_quark == 0)
++    carbon_menu_quark = g_quark_from_static_string ("CarbonMenu");
++
++  if (carbon_menu_item_quark == 0)
++    carbon_menu_item_quark = g_quark_from_static_string ("CarbonMenuItem");
++
++  CarbonMenu *current_menu;
++  current_menu = carbon_menu_get (GTK_WIDGET (menu_shell));
++  if (current_menu)
++    {
++      SetRootMenu (current_menu->menu);
++      return;
++    }
++
++  CreateNewMenu (0 /*id*/, 0 /*options*/, &carbon_menubar);
++  SetRootMenu (carbon_menubar);
++
++  setup_menu_event_handler ();
++
++  if (emission_hook_id == 0)
++    {
++      emission_hook_id =
++        g_signal_add_emission_hook (g_signal_lookup ("parent-set",
++                                                     GTK_TYPE_WIDGET),
++                                    0,
++                                    parent_set_emission_hook,
++                                    NULL, NULL);
++    }
++
++  emission_hook_count++;
++
++  g_signal_connect (menu_shell, "destroy",
++		    G_CALLBACK (parent_set_emission_hook_remove),
++		    NULL);
++
++  sync_menu_shell (menu_shell, carbon_menubar, TRUE, FALSE);
++}
++
++void
++ige_mac_menu_set_quit_menu_item (GtkMenuItem *menu_item)
++{
++  MenuRef       appmenu;
++  MenuItemIndex index;
++
++  g_return_if_fail (GTK_IS_MENU_ITEM (menu_item));
++
++  setup_menu_event_handler ();
++
++  if (GetIndMenuItemWithCommandID (NULL, kHICommandQuit, 1,
++                                   &appmenu, &index) == noErr)
++    {
++      SetMenuItemCommandID (appmenu, index, 0);
++      SetMenuItemProperty (appmenu, index,
++                           IGE_QUARTZ_MENU_CREATOR,
++                           IGE_QUARTZ_ITEM_WIDGET,
++                           sizeof (menu_item), &menu_item);
++
++      gtk_widget_hide (GTK_WIDGET (menu_item));
++    }
++}
++
++
++struct _IgeMacMenuGroup
++{
++  GList *items;
++};
++
++static GList *app_menu_groups = NULL;
++
++IgeMacMenuGroup *
++ige_mac_menu_add_app_menu_group (void)
++{
++  IgeMacMenuGroup *group = g_slice_new0 (IgeMacMenuGroup);
++
++  app_menu_groups = g_list_append (app_menu_groups, group);
++
++  return group;
++}
++
++void
++ige_mac_menu_add_app_menu_item (IgeMacMenuGroup *group,
++				GtkMenuItem     *menu_item,
++				const gchar     *label)
++{
++  MenuRef  appmenu;
++  GList   *list;
++  gint     index = 0;
++
++  g_return_if_fail (group != NULL);
++  g_return_if_fail (GTK_IS_MENU_ITEM (menu_item));
++
++  setup_menu_event_handler ();
++
++  if (GetIndMenuItemWithCommandID (NULL, kHICommandHide, 1,
++                                   &appmenu, NULL) != noErr)
++    {
++      g_warning ("%s: retrieving app menu failed",
++		 G_STRFUNC);
++      return;
++    }
++
++  for (list = app_menu_groups; list; list = g_list_next (list))
++    {
++      IgeMacMenuGroup *list_group = list->data;
++
++      index += g_list_length (list_group->items);
++
++      /*  adjust index for the separator between groups, but not
++       *  before the first group
++       */
++      if (list_group->items && list->prev)
++	index++;
++
++      if (group == list_group)
++	{
++	  CFStringRef cfstr;
++
++	  /*  add a separator before adding the first item, but not
++	   *  for the first group
++	   */
++	  if (!group->items && list->prev)
++	    {
++	      InsertMenuItemTextWithCFString (appmenu, NULL, index,
++					      kMenuItemAttrSeparator, 0);
++	      index++;
++	    }
++
++	  if (!label)
++	    label = get_menu_label_text (GTK_WIDGET (menu_item), NULL);
++
++	  cfstr = CFStringCreateWithCString (NULL, label,
++					     kCFStringEncodingUTF8);
++
++	  InsertMenuItemTextWithCFString (appmenu, cfstr, index, 0, 0);
++	  SetMenuItemProperty (appmenu, index + 1,
++			       IGE_QUARTZ_MENU_CREATOR,
++			       IGE_QUARTZ_ITEM_WIDGET,
++			       sizeof (menu_item), &menu_item);
++
++	  CFRelease (cfstr);
++
++	  gtk_widget_hide (GTK_WIDGET (menu_item));
++
++	  group->items = g_list_append (group->items, menu_item);
++
++	  return;
++	}
++    }
++
++  if (!list)
++    g_warning ("%s: app menu group %p does not exist",
++	       G_STRFUNC, group);
++}
+--- pidgin/ige-mac-menu.h	1970-01-01 01:00:00.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/ige-mac-menu.h	2008-02-11 14:38:30.000000000 +0100
+@@ -0,0 +1,44 @@
++/* GTK+ Integration for the Mac OS X Menubar.
++ *
++ * Copyright (C) 2007 Pioneer Research Center USA, Inc.
++ * Copyright (C) 2007 Imendio AB
++ *
++ * For further information, see:
++ * http://developer.imendio.com/projects/gtk-macosx/menubar
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; version 2.1
++ * of the License.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#ifndef __IGE_MAC_MENU_H__
++#define __IGE_MAC_MENU_H__
++
++#include <gtk/gtk.h>
++
++G_BEGIN_DECLS
++
++typedef struct _IgeMacMenuGroup IgeMacMenuGroup;
++
++void              ige_mac_menu_set_menu_bar       (GtkMenuShell    *menu_shell);
++void              ige_mac_menu_set_quit_menu_item (GtkMenuItem     *menu_item);
++
++IgeMacMenuGroup * ige_mac_menu_add_app_menu_group (void);
++void              ige_mac_menu_add_app_menu_item  (IgeMacMenuGroup *group,
++						   GtkMenuItem     *menu_item,
++						   const gchar     *label);
++
++G_END_DECLS
++
++#endif /* __IGE_MAC_MENU_H__ */
+--- pidgin/Makefile.am	2008-02-11 16:07:09.000000000 +0100
++++ ../pidgin-2.3.1/pidgin/Makefile.am	2008-02-11 16:08:11.000000000 +0100
+@@ -117,7 +117,11 @@
+ 	gtkthemes.c \
+ 	gtkutils.c \
+ 	gtkwhiteboard.c \
+-	minidialog.c
++	minidialog.c \
++	ige-mac-bundle.c \
++	ige-mac-dock.c \
++	ige-mac-image-utils.c \
++	ige-mac-menu.c
+ 
+ pidgin_headers = \
+ 	eggtrayicon.h \
+@@ -170,7 +174,11 @@
+ 	gtkutils.h \
+ 	gtkwhiteboard.h \
+ 	minidialog.h \
+-	pidgin.h
++	pidgin.h \
++	ige-mac-bundle.h \
++	ige-mac-dock.h \
++	ige-mac-image-utils.h \
++	ige-mac-menu.h
+ 
+ pidginincludedir=$(includedir)/pidgin
+ pidgininclude_HEADERS = \
+--- configure.ac	2007-12-07 15:36:58.000000000 +0100
++++ ../pidgin-2.3.1/configure.ac	2008-02-11 16:46:34.000000000 +0100
+@@ -123,6 +123,11 @@
+ 		], [])
+ 	], [])
+ 
++        AC_CHECK_HEADER(Carbon/Carbon.h, [
++                        AC_DEFINE(HAVE_CARBON, 1, [Define if we have CARBON])
++                        LIBS="$LIBS -framework Carbon"
++        ], [])
++
+ 	AC_MSG_CHECKING([for fink])
+ 	if test -d /sw; then
+ 		AC_MSG_RESULT([found, adding /sw to search paths])
