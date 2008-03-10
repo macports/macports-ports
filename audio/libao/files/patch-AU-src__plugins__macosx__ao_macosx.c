@@ -1,11 +1,12 @@
 --- src/plugins/macosx/ao_macosx.c.orig	2004-11-09 09:20:26.000000000 +0100
 +++ src/plugins/macosx/ao_macosx.c	2007-11-30 13:37:22.000000000 +0100
-@@ -29,7 +29,7 @@
+@@ -29,7 +29,8 @@
    audio samples rather than having them pushed at it (which is nice
    when you are wanting to do good buffering of audio).  */
  
 -#include <CoreAudio/AudioHardware.h>
 +#include <AudioUnit/AudioUnit.h>
++#include <AudioUnit/AUNTComponent.h>
  #include <stdio.h>
  #include <pthread.h>
  
@@ -32,7 +33,7 @@
  	"",
  	AO_FMT_NATIVE,
  	30,
-@@ -65,374 +64,407 @@
+@@ -65,374 +64,409 @@
  
  typedef struct ao_macosx_internal
  {
@@ -201,6 +202,8 @@
 -	
 -	device->internal = internal;
 +  internal->buffer_time = DEFAULT_BUFFER_TIME;
++  internal->started = false;
++  internal->isStopping = false;
  
 -	return 1; /* Memory alloc successful */
 -}
