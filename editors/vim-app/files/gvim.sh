@@ -48,7 +48,11 @@ if [ "$gui" ]; then
 	# terminal instead of the console log.
 	# But if you use open instead, you will need to fully qualify the
 	# path names for any filenames you specify, which is hard.
-	exec "$binary" -g $opts ${1:+"$@"} &
+	if [[ "$1" == "-" ]]; then
+		cat | exec "$binary" -g $opts ${1:+"$@"} &
+	else
+		exec "$binary" -g $opts ${1:+"$@"} &
+	fi
 else
 	exec "$binary" $opts ${1:+"$@"}
 fi
