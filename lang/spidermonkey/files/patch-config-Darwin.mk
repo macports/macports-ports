@@ -1,7 +1,5 @@
-$NetBSD: patch-ac,v 1.2 2006/12/05 18:04:18 tron Exp $
-
---- config/Darwin.mk.orig	2005-02-12 20:10:33.000000000 +0000
-+++ config/Darwin.mk	2006-12-05 16:41:04.000000000 +0000
+--- config/Darwin.mk.orig	2008-03-27 00:54:53.000000000 +0900
++++ config/Darwin.mk	2008-03-27 00:57:23.000000000 +0900
 @@ -43,13 +43,13 @@
  # Just ripped from Linux config
  #
@@ -15,12 +13,12 @@ $NetBSD: patch-ac,v 1.2 2006/12/05 18:04:18 tron Exp $
 +OS_CFLAGS = -DJS_THREADSAFE -DXP_UNIX -DSVR4 -DSYSV -D_BSD_SOURCE -DPOSIX_SOURCE -DDARWIN
  
  RANLIB = ranlib
--MKSHLIB = libtool $(XMKSHLIBOPTS) -framework System
+-MKSHLIB = $(CC) -dynamiclib $(XMKSHLIBOPTS) -framework System
 +MKSHLIB = $(CC) -framework System -dynamiclib $(XMKSHLIBOPTS) -lm -lplds4 -lplc4 -lnspr4 $(LDFLAGS)
  
- #.c.o:
- #      $(CC) -c -MD $*.d $(CFLAGS) $<
-@@ -57,7 +57,6 @@
+ SO_SUFFIX = dylib
+ 
+@@ -59,7 +59,6 @@
  CPU_ARCH = $(shell uname -m)
  ifeq (86,$(findstring 86,$(CPU_ARCH)))
  CPU_ARCH = x86
@@ -28,7 +26,7 @@ $NetBSD: patch-ac,v 1.2 2006/12/05 18:04:18 tron Exp $
  endif
  GFX_ARCH = x
  
-@@ -65,14 +64,6 @@
+@@ -67,14 +66,6 @@
  
  ASFLAGS += -x assembler-with-cpp
  
