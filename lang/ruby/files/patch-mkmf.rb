@@ -1,16 +1,6 @@
---- lib/mkmf.rb.orig	2007-02-28 22:23:42.000000000 +0900
-+++ lib/mkmf.rb	2007-03-15 13:39:26.000000000 +0900
-@@ -51,6 +51,9 @@
- $sitedir = CONFIG["sitedir"]
- $sitelibdir = CONFIG["sitelibdir"]
- $sitearchdir = CONFIG["sitearchdir"]
-+$vendordir = CONFIG["vendordir"]
-+$vendorlibdir = CONFIG["vendorlibdir"]
-+$vendorarchdir = CONFIG["vendorarchdir"]
- 
- $mswin = /mswin/ =~ RUBY_PLATFORM
- $bccwin = /bccwin/ =~ RUBY_PLATFORM
-@@ -417,7 +420,7 @@
+--- lib/mkmf.rb.orig	2008-05-29 13:23:36.000000000 +0200
++++ lib/mkmf.rb	2008-06-15 11:08:36.000000000 +0200
+@@ -461,7 +461,7 @@
  
  def try_func(func, libs, headers = nil, &b)
    headers = cpp_include(headers)
@@ -19,7 +9,7 @@
  #{COMMON_HEADERS}
  #{headers}
  /*top*/
-@@ -429,6 +435,11 @@
+@@ -473,6 +473,11 @@
  int main() { return 0; }
  int t() { #{func}(); return 0; }
  SRC
@@ -31,7 +21,7 @@
  end
  
  def try_var(var, headers = nil, &b)
-@@ -1097,6 +1105,7 @@
+@@ -1307,6 +1312,7 @@
  RUBY_SO_NAME = #{CONFIG['RUBY_SO_NAME']}
  arch = #{CONFIG['arch']}
  sitearch = #{CONFIG['sitearch']}
