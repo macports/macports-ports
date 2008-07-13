@@ -1,14 +1,5 @@
 --- extconf.rb	Sat Aug 16 23:04:32 2003
 +++ ../opengl-0.32c-patched/extconf.rb	Tue Jan 27 22:25:34 2004
-@@ -17,8 +17,6 @@
- File.unlink("Makefile.ogl") if (FileTest.exist? "Makefile.ogl")
- File.unlink("Makefile.glut") if (FileTest.exist? "Makefile.glut")
- 
--header = nil
--
- if (/cygwin/ =~ PLATFORM)
-   $CFLAGS="-DWIN32"
-   gl_libname = "opengl32"
 @@ -33,21 +31,13 @@
  else
    $CPPFLAGS += " -I."
