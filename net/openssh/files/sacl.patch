@@ -1,0 +1,124 @@
+diff -Naur ../openssh-4.4p1.orig/auth.c ./auth.c
+--- ../openssh-4.4p1.orig/auth.c	2006-09-06 17:36:43.000000000 -0700
++++ ./auth.c	2006-10-19 17:22:43.000000000 -0700
+@@ -45,6 +45,11 @@
+ #ifdef HAVE_LIBGEN_H
+ #include <libgen.h>
+ #endif
++
++#ifdef __APPLE_SACL__
++#include <membershipPriv.h>
++#endif
++
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <string.h>
+@@ -233,6 +238,46 @@
+ 			}
+ 		ga_free();
+ 	}
++	
++	if( options.sacl_support )
++	{
++#ifdef __APPLE_SACL__
++		/*
++	 	* Here we check with memberd if the Service ACLs allow this user to
++	 	* use the ssh service.
++	 	*/
++
++		debug("Checking with Service ACLs for ssh login restrictions");
++
++		uuid_t user_uuid;
++		int isMember = 0;
++		int mbrErr = 0;
++	
++		// get the uuid
++		if ( mbr_user_name_to_uuid(pw->pw_name, user_uuid) )
++		{
++			debug("call to mbr_user_name_to_uuid with <%s> failed to retrieve user_uuid", pw->pw_name);
++			return 0;
++		}	
++		debug("call to mbr_user_name_to_uuid with <%s> suceeded to retrieve user_uuid", pw->pw_name);
++	
++		// check the sacl
++		if((mbrErr = mbr_check_service_membership(user_uuid, "ssh", &isMember)))
++		{
++			debug("Called mbr_check_service_membership with isMember <%d> with status <%d>", isMember, mbrErr);
++			if(mbrErr == ENOENT)	// no ACL exists
++			{
++				return 1;	
++			} else {
++				return 0;
++			}
++		}
++		debug("Call to mbr_check_service_membership failed with status <%d>", mbrErr);
++		return isMember;
++#endif /* __APPLE_SACL__ */
++	}
++
++
+ 
+ #ifdef CUSTOM_SYS_AUTH_ALLOWED_USER
+ 	if (!sys_auth_allowed_user(pw, &loginmsg))
+diff -Naur ../openssh-4.4p1.orig/servconf.c ./servconf.c
+--- ../openssh-4.4p1.orig/servconf.c	2006-08-18 07:23:15.000000000 -0700
++++ ./servconf.c	2006-10-19 17:24:47.000000000 -0700
+@@ -97,6 +97,7 @@
+ 	options->permit_empty_passwd = -1;
+ 	options->permit_user_env = -1;
+ 	options->use_login = -1;
++	options->sacl_support = -1;
+ 	options->compression = -1;
+ 	options->allow_tcp_forwarding = -1;
+ 	options->num_allow_users = 0;
+@@ -293,6 +294,7 @@
+ 	sGssAuthentication, sGssCleanupCreds, sAcceptEnv, sPermitTunnel,
+ 	sMatch, sPermitOpen, sForceCommand,
+ 	sUsePrivilegeSeparation,
++	sSACLSupport,
+ 	sDeprecated, sUnsupported
+ } ServerOpCodes;
+ 
+@@ -398,6 +400,7 @@
+ 	{ "authorizedkeysfile", sAuthorizedKeysFile, SSHCFG_GLOBAL },
+ 	{ "authorizedkeysfile2", sAuthorizedKeysFile2, SSHCFG_GLOBAL },
+ 	{ "useprivilegeseparation", sUsePrivilegeSeparation, SSHCFG_GLOBAL },
++	{ "saclsupport", sSACLSupport },
+ 	{ "acceptenv", sAcceptEnv, SSHCFG_GLOBAL },
+ 	{ "permittunnel", sPermitTunnel, SSHCFG_GLOBAL },
+  	{ "match", sMatch, SSHCFG_ALL },
+@@ -912,6 +915,10 @@
+ 		charptr = &options->xauth_location;
+ 		goto parse_filename;
+ 
++	case sSACLSupport:
++		intptr = &options->sacl_support;
++		goto parse_flag;
++
+ 	case sStrictModes:
+ 		intptr = &options->strict_modes;
+ 		goto parse_flag;
+diff -Naur ../openssh-4.4p1.orig/servconf.h ./servconf.h
+--- ../openssh-4.4p1.orig/servconf.h	2006-08-18 07:23:15.000000000 -0700
++++ ./servconf.h	2006-10-19 17:25:18.000000000 -0700
+@@ -137,6 +137,7 @@
+ 	char   *adm_forced_command;
+ 
+ 	int	use_pam;		/* Enable auth via PAM */
++	int	sacl_support;		/* Enable use of SACLs */
+ 
+ 	int	permit_tun;
+ 
+diff -Naur ../openssh-4.4p1.orig/sshd_config ./sshd_config
+--- ../openssh-4.4p1.orig/sshd_config	2006-07-23 21:06:47.000000000 -0700
++++ ./sshd_config	2006-10-19 17:26:01.000000000 -0700
+@@ -56,6 +56,9 @@
+ #PasswordAuthentication yes
+ #PermitEmptyPasswords no
+ 
++# SACL options
++#SACLSupport yes
++
+ # Change to no to disable s/key passwords
+ #ChallengeResponseAuthentication yes
+ 
