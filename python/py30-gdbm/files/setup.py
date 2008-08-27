@@ -15,7 +15,7 @@ setup(name = "gdbm",
       version = "__VERSION__",
       description = "GDBM Extension to Python",
       
-      ext_modules = [Extension('gdbm', ['gdbmmodule.c'],
+      ext_modules = [Extension('gdbm', ['_gdbmmodule.c'],
                                include_dirs = inc_dirs,
                                libraries = libs,
                                library_dirs = lib_dirs)]
