@@ -1,0 +1,279 @@
+diff -u -r ../gzip-1.3.12.orig/deflate.c ./deflate.c
+--- ../gzip-1.3.12.orig/deflate.c	2006-12-07 17:53:00.000000000 -0600
++++ ./deflate.c	2008-09-01 20:49:37.000000000 -0500
+@@ -135,6 +135,14 @@
+ #endif
+ /* Matches of length 3 are discarded if their distance exceeds TOO_FAR */
+ 
++#ifndef RSYNC_WIN
++#  define RSYNC_WIN 4096
++#endif
++/* Size of rsync window, must be < MAX_DIST */
++
++#define RSYNC_SUM_MATCH(sum) ((sum) % RSYNC_WIN == 0)
++/* Whether window sum matches magic value */
++
+ /* ===========================================================================
+  * Local data used by the "longest match" routines.
+  */
+@@ -216,6 +224,8 @@
+ unsigned near good_match;
+ /* Use a faster search when the previous match is longer than this */
+ 
++local ulg rsync_sum;  /* rolling sum of rsync window */
++local ulg rsync_chunk_end; /* next rsync sequence point */
+ 
+ /* Values for max_lazy_match, good_match and max_chain_length, depending on
+  * the desired pack level (0..9). The values given below have been tuned to
+@@ -314,6 +324,10 @@
+ #endif
+     /* prev will be initialized on the fly */
+ 
++    /* rsync params */
++    rsync_chunk_end = 0xFFFFFFFFUL;
++    rsync_sum = 0;
++
+     /* Set the default configuration parameters:
+      */
+     max_lazy_match   = configuration_table[pack_level].max_lazy;
+@@ -550,6 +564,8 @@
+         memcpy((char*)window, (char*)window+WSIZE, (unsigned)WSIZE);
+         match_start -= WSIZE;
+         strstart    -= WSIZE; /* we now have strstart >= MAX_DIST: */
++	if (rsync_chunk_end != 0xFFFFFFFFUL)
++	    rsync_chunk_end -= WSIZE;
+ 
+         block_start -= (long) WSIZE;
+ 
+@@ -577,13 +593,46 @@
+     }
+ }
+ 
++local void rsync_roll(start, num)
++    unsigned start;
++    unsigned num;
++{
++    unsigned i;
++
++    if (start < RSYNC_WIN) {
++	/* before window fills. */
++	for (i = start; i < RSYNC_WIN; i++) {
++	    if (i == start + num) return;
++	    rsync_sum += (ulg)window[i];
++	}
++	num -= (RSYNC_WIN - start);
++	start = RSYNC_WIN;
++    }
++
++    /* buffer after window full */
++    for (i = start; i < start+num; i++) {
++	/* New character in */
++	rsync_sum += (ulg)window[i];
++	/* Old character out */
++	rsync_sum -= (ulg)window[i - RSYNC_WIN];
++	if (rsync_chunk_end == 0xFFFFFFFFUL && RSYNC_SUM_MATCH(rsync_sum))
++	    rsync_chunk_end = i;
++    }
++}
++
++/* ===========================================================================
++ * Set rsync_chunk_end if window sum matches magic value.
++ */
++#define RSYNC_ROLL(s, n) \
++   do { if (rsync) rsync_roll((s), (n)); } while(0)
++
+ /* ===========================================================================
+  * Flush the current block, with given end-of-file flag.
+  * IN assertion: strstart is set to the end of the current match.
+  */
+ #define FLUSH_BLOCK(eof) \
+    flush_block(block_start >= 0L ? (char*)&window[(unsigned)block_start] : \
+-                (char*)NULL, (long)strstart - block_start, (eof))
++                (char*)NULL, (long)strstart - block_start, flush-1, (eof))
+ 
+ /* ===========================================================================
+  * Processes a new input file and return its compressed length. This
+@@ -594,7 +643,7 @@
+ local off_t deflate_fast()
+ {
+     IPos hash_head; /* head of the hash chain */
+-    int flush;      /* set if current block must be flushed */
++    int flush;      /* set if current block must be flushed, 2=>and padded  */
+     unsigned match_length = 0;  /* length of best match */
+ 
+     prev_length = MIN_MATCH-1;
+@@ -624,6 +673,7 @@
+ 
+             lookahead -= match_length;
+ 
++	    RSYNC_ROLL(strstart, match_length);
+ 	    /* Insert new strings in the hash table only if the match length
+              * is not too large. This saves time but degrades compression.
+              */
+@@ -652,9 +702,14 @@
+             /* No match, output a literal byte */
+             Tracevv((stderr,"%c",window[strstart]));
+             flush = ct_tally (0, window[strstart]);
++            RSYNC_ROLL(strstart, 1);
+             lookahead--;
+ 	    strstart++;
+         }
++        if (rsync && strstart > rsync_chunk_end) {
++            rsync_chunk_end = 0xFFFFFFFFUL;
++            flush = 2;
++        }
+         if (flush) FLUSH_BLOCK(0), block_start = strstart;
+ 
+         /* Make sure that we always have enough lookahead, except
+@@ -728,6 +783,7 @@
+              */
+             lookahead -= prev_length-1;
+             prev_length -= 2;
++	    RSYNC_ROLL(strstart, prev_length+1);
+             do {
+                 strstart++;
+                 INSERT_STRING(strstart, hash_head);
+@@ -740,24 +796,39 @@
+             match_available = 0;
+             match_length = MIN_MATCH-1;
+             strstart++;
+-            if (flush) FLUSH_BLOCK(0), block_start = strstart;
+ 
++	    if (rsync && strstart > rsync_chunk_end) {
++		rsync_chunk_end = 0xFFFFFFFFUL;
++		flush = 2;
++	    }
++            if (flush) FLUSH_BLOCK(0), block_start = strstart;
+         } else if (match_available) {
+             /* If there was no match at the previous position, output a
+              * single literal. If there was a match but the current match
+              * is longer, truncate the previous match to a single literal.
+              */
+             Tracevv((stderr,"%c",window[strstart-1]));
+-            if (ct_tally (0, window[strstart-1])) {
+-                FLUSH_BLOCK(0), block_start = strstart;
+-            }
++	    flush = ct_tally (0, window[strstart-1]);
++	    if (rsync && strstart > rsync_chunk_end) {
++		rsync_chunk_end = 0xFFFFFFFFUL;
++		flush = 2;
++	    }
++            if (flush) FLUSH_BLOCK(0), block_start = strstart;
++	    RSYNC_ROLL(strstart, 1);
+             strstart++;
+             lookahead--;
+         } else {
+             /* There is no previous match to compare with, wait for
+              * the next step to decide.
+              */
++	    if (rsync && strstart > rsync_chunk_end) {
++		/* Reset huffman tree */
++		rsync_chunk_end = 0xFFFFFFFFUL;
++		flush = 2;
++		FLUSH_BLOCK(0), block_start = strstart;
++	    }
+             match_available = 1;
++	    RSYNC_ROLL(strstart, 1);
+             strstart++;
+             lookahead--;
+         }
+diff -u -r ../gzip-1.3.12.orig/doc/gzip.texi ./doc/gzip.texi
+--- ../gzip-1.3.12.orig/doc/gzip.texi	2007-02-05 17:29:04.000000000 -0600
++++ ./doc/gzip.texi	2008-09-01 20:55:58.000000000 -0500
+@@ -350,6 +350,14 @@
+ into the directory and compress all the files it finds there (or
+ decompress them in the case of @command{gunzip}).
+ 
++@item --rsyncable
++While compressing, synchronize the output occasionally based on the
++input.  This reduces compression by about 1 percent most cases, but
++means that the @command{rsync} program can take advantage of similarities
++in the uncompressed input when syncronizing two files compressed with
++this flag.  @command{gunzip} cannot tell the difference between a
++compressed file created with this option, and one created without it.
++
+ @item --suffix @var{suf}
+ @itemx -S @var{suf}
+ Use suffix @var{suf} instead of @samp{.gz}.  Any suffix can be
+diff -u -r ../gzip-1.3.12.orig/gzip.c ./gzip.c
+--- ../gzip-1.3.12.orig/gzip.c	2007-03-20 00:09:51.000000000 -0500
++++ ./gzip.c	2008-09-01 20:45:28.000000000 -0500
+@@ -231,6 +231,7 @@
+ unsigned insize;           /* valid bytes in inbuf */
+ unsigned inptr;            /* index of next byte to be processed in inbuf */
+ unsigned outcnt;           /* bytes in output buffer */
++int rsync = 0;             /* make ryncable chunks */
+ 
+ struct option longopts[] =
+ {
+@@ -260,6 +261,7 @@
+     {"best",       0, 0, '9'}, /* compress better */
+     {"lzw",        0, 0, 'Z'}, /* make output compatible with old compress */
+     {"bits",       1, 0, 'b'}, /* max number of bits per code (implies -Z) */
++    {"rsyncable",  0, 0, 'R'}, /* make rsync-friendly archive */
+     { 0, 0, 0, 0 }
+ };
+ 
+@@ -341,6 +343,7 @@
+  "  -Z, --lzw         produce output compatible with old compress",
+  "  -b, --bits=BITS   max number of bits per code (implies -Z)",
+ #endif
++ "      --rsyncable   Make rsync-friendly archive",
+  "",
+  "With no FILE, or when FILE is -, read standard input.",
+  "",
+@@ -469,6 +472,8 @@
+ 	    recursive = 1;
+ #endif
+ 	    break;
++	case 'R':
++	    rsync = 1; break;
+ 	case 'S':
+ #ifdef NO_MULTIPLE_DOTS
+             if (*optarg == '.') optarg++;
+diff -u -r ../gzip-1.3.12.orig/gzip.h ./gzip.h
+--- ../gzip-1.3.12.orig/gzip.h	2007-03-20 00:09:51.000000000 -0500
++++ ./gzip.h	2008-09-01 20:43:35.000000000 -0500
+@@ -158,6 +158,7 @@
+ extern unsigned insize; /* valid bytes in inbuf */
+ extern unsigned inptr;  /* index of next byte to be processed in inbuf */
+ extern unsigned outcnt; /* bytes in output buffer */
++extern int rsync;  /* deflate into rsyncable chunks */
+ 
+ extern off_t bytes_in;   /* number of input bytes */
+ extern off_t bytes_out;  /* number of output bytes */
+@@ -306,7 +307,7 @@
+         /* in trees.c */
+ void ct_init     OF((ush *attr, int *method));
+ int  ct_tally    OF((int dist, int lc));
+-off_t flush_block OF((char *buf, ulg stored_len, int eof));
++off_t flush_block OF((char *buf, ulg stored_len, int pad, int eof));
+ 
+         /* in bits.c */
+ void     bi_init    OF((file_t zipfile));
+diff -u -r ../gzip-1.3.12.orig/trees.c ./trees.c
+--- ../gzip-1.3.12.orig/trees.c	2006-11-20 02:40:33.000000000 -0600
++++ ./trees.c	2008-09-01 20:53:37.000000000 -0500
+@@ -860,9 +860,10 @@
+  * trees or store, and output the encoded block to the zip file. This function
+  * returns the total compressed length for the file so far.
+  */
+-off_t flush_block(buf, stored_len, eof)
++off_t flush_block(buf, stored_len, pad, eof)
+     char *buf;        /* input block, or NULL if too old */
+     ulg stored_len;   /* length of input block */
++    int pad;          /* pad output to byte boundary */
+     int eof;          /* true if this is the last block for a file */
+ {
+     ulg opt_lenb, static_lenb; /* opt_len and static_len in bytes */
+@@ -955,6 +956,10 @@
+         Assert (input_len == bytes_in, "bad input size");
+         bi_windup();
+         compressed_len += 7;  /* align on byte boundary */
++    } else if (pad && (compressed_len % 8) != 0) {
++        send_bits((STORED_BLOCK<<1)+eof, 3);  /* send block type */
++        compressed_len = (compressed_len + 3 + 7) & ~7L;
++        copy_block(buf, 0, 1); /* with header */
+     }
+ 
+     return compressed_len >> 3;
