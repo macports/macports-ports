@@ -1,0 +1,540 @@
+Index: src/eunit_xml.erl
+===================================================================
+--- src/eunit_xml.erl	(revision 0)
++++ src/eunit_xml.erl	(revision 0)
+@@ -0,0 +1,496 @@
++%% This library is free software; you can redistribute it and/or modify
++%% it under the terms of the GNU Lesser General Public License as
++%% published by the Free Software Foundation; either version 2 of the
++%% License, or (at your option) any later version.
++%%
++%% This library is distributed in the hope that it will be useful, but
++%% WITHOUT ANY WARRANTY; without even the implied warranty of
++%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++%% Lesser General Public License for more details.
++%%
++%% You should have received a copy of the GNU Lesser General Public
++%% License along with this library; if not, write to the Free Software
++%% Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++%% USA
++%%
++%% $Id$ 
++%%
++%% @author Paul Guyot <paulguyot@ieee.org>
++%% @copyright 2008 Paul Guyot
++%% @private
++%% @see eunit
++%% @doc XML reports for EUnit
++
++-module(eunit_xml).
++
++-include("eunit.hrl").
++-include("eunit_internal.hrl").
++
++-export([start/3]).
++
++%% ============================================================================
++%% MACROS
++%% ============================================================================
++-define(INDENT, <<"  ">>).
++-define(NEWLINE, <<"\n">>).
++
++%% ============================================================================
++%% TYPES
++%% ============================================================================
++-type(chars() :: [char() | any()]). % chars()
++-type(item_name() :: {
++    Module :: atom(),
++    Function :: atom(),
++    Line :: integer() } | {
++    Module :: atom(),
++    Function :: atom() }).
++-type(tree_entry() :: {
++    Kind :: group | item,
++    Id :: [integer()],
++    Description :: string(),
++    item_name() | [any()]}). % tree_entry()
++
++%% ============================================================================
++%% RECORDS
++%% ============================================================================
++-record(testcase,
++    {
++    name :: chars(),
++    description :: chars(),
++    result :: ok | {failed, tuple()} | {aborted, tuple()} | {skipped, tuple()},
++    time :: integer(),
++    output :: chars()
++    }).
++-record(testsuite,
++    {
++    name = [] :: chars(),
++    time = 0 :: integer(),
++    output = [] :: chars(),
++    succeeded = 0 :: integer(),
++    failed = 0 :: integer(),
++    aborted = 0 :: integer(),
++    skipped = 0 :: integer(),
++    testcases = [] :: [#testcase{}]
++    }).
++
++-spec(start/3::([any()], [any()], string())->pid()).
++start(List, Options, XmlDir) ->
++    spawn(fun() -> init(List, Options, XmlDir) end).
++
++init(List, _Options, XmlDir) ->
++    TestSuites = dict:new(),
++    loop(TestSuites, List, XmlDir).
++
++loop(TestSuites, List, XmlDir) ->
++    receive
++        {status, Id, Status} ->
++            NewTestSuites = process_status(TestSuites, List, Id, Status),
++            loop(NewTestSuites, List, XmlDir);
++        {start, _Reference} ->
++            loop(TestSuites, List, XmlDir);
++        {stop, _Reference, _Pid} ->
++            write_reports(TestSuites, XmlDir);
++        Unknown ->
++            io:format("Unknown message: ~p~n", [Unknown]),
++            loop(TestSuites, List, XmlDir)
++    end.
++
++%% ----------------------------------------------------------------------------
++%% Process a status message.
++%% ----------------------------------------------------------------------------
++process_status(TestSuites, _List, _Id, {progress, 'begin', _Result}) ->
++    TestSuites;
++process_status(TestSuites, _List, [], {progress, 'end', _Result}) ->
++    TestSuites;
++process_status(TestSuites, List, [GroupId] = Id, {progress, 'end', {Count, Time, Output}}) when is_integer(Count) ->
++    TestSuite = case dict:find(GroupId, TestSuites) of
++        {ok, Value} -> Value;
++        error -> #testsuite{}
++    end,
++    Name = case entry(List, Id) of
++        {value, {group, Id, Description, _Items}} ->
++            Description;
++        _ -> ["Unknown-", integer_to_list(GroupId)]
++    end,
++    NewTestSuite = TestSuite#testsuite{
++        name = Name,
++        time = Time,
++        output = Output},
++    dict:store(GroupId, NewTestSuite, TestSuites);
++process_status(TestSuites, _List, _Id, {progress, 'end', {Count, _Time, _Output}}) when is_integer(Count)->
++    TestSuites;
++process_status(TestSuites, List, [GroupId | _Tail] = Id, {progress, 'end', {ok, Time, Output}}) ->
++    case entry(List, Id) of
++        {value, {item, Id, Description, NameTuple}} ->
++            TestSuite = case dict:find(GroupId, TestSuites) of
++                {ok, Value} -> Value;
++                error -> #testsuite{}
++            end,
++            Name = format_name(NameTuple),
++            TestCase = #testcase{
++                    name = Name,
++                    description = Description,
++                    result = ok,
++                    time = Time,
++                    output = Output},
++            NewTestSuite = TestSuite#testsuite{
++                succeeded = TestSuite#testsuite.succeeded + 1,
++                testcases = [TestCase | TestSuite#testsuite.testcases]},
++            dict:store(GroupId, NewTestSuite, TestSuites);
++        _ -> TestSuites
++    end;
++process_status(
++        TestSuites, List, [GroupId | _Tail] = Id,
++        {progress, 'end', {{error, {error, {AssertionException, _Details}, _Trace} = Exception}, Time, Output}})
++            when
++                AssertionException == assertion_failed;
++                AssertionException == assertMatch_failed;
++                AssertionException == assertEqual_failed;
++                AssertionException == assertException_failed;
++                AssertionException == assertCmd_failed;
++                AssertionException == assertCmdOutput_failed ->
++    case entry(List, Id) of
++        {value, {item, Id, Description, NameTuple}} ->
++            TestSuite = case dict:find(GroupId, TestSuites) of
++                {ok, Value} -> Value;
++                error -> #testsuite{}
++            end,
++            Name = format_name(NameTuple),
++            TestCase = #testcase{
++                    name = Name,
++                    description = Description,
++                    result = {failed, Exception},
++                    time = Time,
++                    output = Output},
++            NewTestSuite = TestSuite#testsuite{
++                failed = TestSuite#testsuite.failed + 1,
++                testcases = [TestCase | TestSuite#testsuite.testcases]},
++            dict:store(GroupId, NewTestSuite, TestSuites);
++        _ -> TestSuites
++    end;
++process_status(TestSuites, List, [GroupId | _Tail] = Id, {progress, 'end', {{error, Exception}, Time, Output}}) ->
++    case entry(List, Id) of
++        {value, {item, Id, Description, NameTuple}} ->
++            TestSuite = case dict:find(GroupId, TestSuites) of
++                {ok, Value} -> Value;
++                error -> #testsuite{}
++            end,
++            Name = format_name(NameTuple),
++            TestCase = #testcase{
++                    name = Name,
++                    description = Description,
++                    result = {aborted, Exception},
++                    time = Time,
++                    output = Output},
++            NewTestSuite = TestSuite#testsuite{
++                aborted = TestSuite#testsuite.aborted + 1,
++                testcases = [TestCase | TestSuite#testsuite.testcases]},
++            dict:store(GroupId, NewTestSuite, TestSuites);
++        _ -> TestSuites
++    end;
++process_status(TestSuites, _List, _Id, {cancel, undefined}) -> TestSuites;
++process_status(TestSuites, List, [GroupId, _Tail] = Id, {cancel, Reason}) ->
++    TestSuite = case dict:find(GroupId, TestSuites) of
++        {ok, Value} -> Value;
++        error -> #testsuite{}
++    end,
++    dict:store(GroupId, process_cancel(TestSuite, List, Id, Reason), TestSuites);
++process_status(TestSuites, _List, _Id, Status) ->
++    io:format("Unknown status = ~p~n", [Status]),
++    TestSuites.
++
++%% ----------------------------------------------------------------------------
++%% Process a cancel status.
++%% ----------------------------------------------------------------------------
++process_cancel(TestSuite, List, Id, Reason) ->
++    case entry(List, Id) of
++        {value, {item, Id, _Description, _NameTuple} = Item} ->
++            process_cancel_items(TestSuite, [Item], [], Reason);
++        {value, {group, Id, _Description, Items}} ->
++            process_cancel_items(TestSuite, Items, [], Reason);
++        _ -> TestSuite
++    end.
++
++%% ----------------------------------------------------------------------------
++%% Process the tests that were skipped because of an error.
++%%
++-spec(process_cancel_items/4 :: (#testsuite{}, Items :: [tree_entry()], Acc :: [[tree_entry()]], Reason :: tuple()) -> #testsuite{}).
++%% ----------------------------------------------------------------------------
++process_cancel_items(TestSuite, [], [], _Reason) -> TestSuite;
++process_cancel_items(TestSuite, [], [Acc | Tail], Reason) ->
++    process_cancel_items(TestSuite, Acc, Tail, Reason);
++process_cancel_items(TestSuite, [{item, _Id, Description, NameTuple} | Tail], Acc, Reason) ->
++    Name = format_name(NameTuple),
++    TestCase = #testcase{
++        name = Name,
++        description = Description,
++        result = {skipped, Reason},
++        time = 0,
++        output = []},
++    NewTestSuite = TestSuite#testsuite{
++        skipped = TestSuite#testsuite.skipped + 1,
++        testcases = [TestCase | TestSuite#testsuite.testcases]},
++    process_cancel_items(NewTestSuite, Tail, Acc, Reason);
++process_cancel_items(TestSuite, [{group, _Id, _Description, Items} | Tail], Acc, Reason) ->
++    process_cancel_items(TestSuite, Items, [Tail | Acc], Reason).
++
++%% ----------------------------------------------------------------------------
++%% Convert a test description into a test case name.
++%% If the test description is a module function, use the function's name.
++%% If the test description is a module function plus a line, use function.line.
++%% ----------------------------------------------------------------------------
++format_name({_Module, Function}) -> atom_to_list(Function);
++format_name({_Module, Function, Line}) -> [atom_to_list(Function), $., integer_to_list(Line)].
++
++%% ----------------------------------------------------------------------------
++%% Write the reports to the XML directory.
++%% ----------------------------------------------------------------------------
++write_reports(TestSuites, XmlDir) ->
++    dict:fold(fun(_GroupId, TestSuite, Acc) -> write_report(TestSuite, XmlDir), Acc end, [], TestSuites).
++
++%% ----------------------------------------------------------------------------
++%% Write a report to the XML directory.
++%% This function opens the report file, calls write_report_to/2 and closes the file.
++%% ----------------------------------------------------------------------------
++write_report(#testsuite{name = Name} = TestSuite, XmlDir) ->
++    Filename = filename:join(XmlDir, lists:flatten(["TEST-", escape_suitename(Name)], ".xml")),
++    case file:open(Filename, [write, raw]) of
++        {ok, FileDescriptor} ->
++            try
++                write_report_to(TestSuite, FileDescriptor)
++            after
++                file:close(FileDescriptor)
++            end;
++        {error, _Reason} = Error -> throw(Error)
++    end.
++
++%% ----------------------------------------------------------------------------
++%% Actually write a report.
++%% ----------------------------------------------------------------------------
++write_report_to(TestSuite, FileDescriptor) ->
++    write_header(FileDescriptor),
++    write_start_tag(TestSuite, FileDescriptor),
++    write_testcases(TestSuite#testsuite.testcases, FileDescriptor),
++    write_end_tag(FileDescriptor).
++
++%% ----------------------------------------------------------------------------
++%% Write the XML header.
++%% ----------------------------------------------------------------------------
++write_header(FileDescriptor) ->
++    file:write(FileDescriptor, [<<"<?xml version=\"1.0\" encoding=\"UTF-8\" ?>">>, ?NEWLINE]).
++
++%% ----------------------------------------------------------------------------
++%% Write the testsuite start tag, with attributes describing the statistics
++%% of the test suite.
++%% ----------------------------------------------------------------------------
++write_start_tag(
++        #testsuite{
++            name = Name,
++            time = Time,
++            succeeded = Succeeded,
++            failed = Failed,
++            skipped = Skipped,
++            aborted = Aborted},
++        FileDescriptor) ->
++    Total = Succeeded + Failed + Skipped + Aborted,
++    StartTag = [
++        <<"<testsuite tests=\"">>, integer_to_list(Total),
++        <<"\" failures=\"">>, integer_to_list(Failed),
++        <<"\" errors=\"">>, integer_to_list(Aborted),
++        <<"\" skipped=\"">>, integer_to_list(Skipped),
++        <<"\" time=\"">>, format_time(Time),
++        <<"\" name=\"">>, escape_attr(Name),
++        <<"\">">>, ?NEWLINE],        
++    file:write(FileDescriptor, StartTag).
++
++%% ----------------------------------------------------------------------------
++%% Recursive function to write the test cases.
++%% ----------------------------------------------------------------------------
++write_testcases([], _FileDescriptor) -> void;
++write_testcases([TestCase| Tail], FileDescriptor) ->
++    write_testcase(TestCase, FileDescriptor),
++    write_testcases(Tail, FileDescriptor).
++
++%% ----------------------------------------------------------------------------
++%% Write the testsuite end tag.
++%% ----------------------------------------------------------------------------
++write_end_tag(FileDescriptor) ->
++    file:write(FileDescriptor, [<<"</testsuite>">>, ?NEWLINE]).
++
++%% ----------------------------------------------------------------------------
++%% Write a test case, as a testcase tag.
++%% If the test case was successful and if there was no output, we write an empty
++%% tag.
++%% ----------------------------------------------------------------------------
++write_testcase(
++        #testcase{
++            name = Name,
++            description = Description,
++            result = Result,
++            time = Time,
++            output = Output},
++        FileDescriptor) ->
++    DescriptionAttr = case Description of
++        [] -> [];
++        _ -> [<<" description=\"">>, escape_attr(Description), <<"\"">>]
++    end,
++    StartTag = [
++        ?INDENT, <<"<testcase time=\"">>, format_time(Time),
++        <<"\" name=\"">>, escape_attr(Name), <<"\"">>,
++        DescriptionAttr],
++    ContentAndEndTag = case {Result, Output} of
++        {ok, []} -> [<<"/>">>, ?NEWLINE];
++        _ -> [<<">">>, ?NEWLINE, format_testcase_result(Result), format_testcase_output(Output), ?INDENT, <<"</testcase>">>, ?NEWLINE]
++    end,
++    file:write(FileDescriptor, [StartTag, ContentAndEndTag]).
++
++%% ----------------------------------------------------------------------------
++%% Format the result of the test.
++%% Failed tests are represented with a failure tag.
++%% Aborted tests are represented with an error tag.
++%% Skipped tests are represented with a skipped tag.
++%% ----------------------------------------------------------------------------
++format_testcase_result(ok) -> [];
++format_testcase_result({failed, {error, {Type, _}, _} = Exception}) when is_atom(Type) ->
++    [?INDENT, ?INDENT, <<"<failure type=\"">>, escape_attr(atom_to_list(Type)), <<"\">">>, ?NEWLINE,
++    <<"::">>, escape_text(eunit_lib:format_exception(Exception)),
++    ?INDENT, ?INDENT, <<"</failure>">>, ?NEWLINE];
++format_testcase_result({failed, Term}) ->
++    [?INDENT, ?INDENT, <<"<failure type=\"unknown\">">>, ?NEWLINE,
++    escape_text(io_lib:write(Term)),
++    ?INDENT, ?INDENT, <<"</failure>">>, ?NEWLINE];
++format_testcase_result({aborted, {Class, _Term, _Trace} = Exception}) when is_atom(Class) ->
++    [?INDENT, ?INDENT, <<"<error type=\"">>, escape_attr(atom_to_list(Class)), <<"\">">>, ?NEWLINE,
++    <<"::">>, escape_text(eunit_lib:format_exception(Exception)),
++    ?INDENT, ?INDENT, <<"</error>">>, ?NEWLINE];
++format_testcase_result({aborted, Term}) ->
++    [?INDENT, ?INDENT, <<"<error type=\"unknown\">">>, ?NEWLINE,
++    escape_text(io_lib:write(Term)),
++    ?INDENT, ?INDENT, <<"</error>">>, ?NEWLINE];
++format_testcase_result({skipped, {abort, Error}}) when is_tuple(Error) ->
++    [?INDENT, ?INDENT, <<"<skipped type=\"">>, escape_attr(atom_to_list(element(1, Error))), <<"\">">>, ?NEWLINE,
++    escape_text(eunit_lib:format_error(Error)),
++    ?INDENT, ?INDENT, <<"</skipped>">>, ?NEWLINE];
++format_testcase_result({skipped, {Type, Term}}) when is_atom(Type) ->
++    [?INDENT, ?INDENT, <<"<skipped type=\"">>, escape_attr(atom_to_list(Type)), <<"\">">>, ?NEWLINE,
++    escape_text(io_lib:write(Term)),
++    ?INDENT, ?INDENT, <<"</skipped>">>, ?NEWLINE];
++format_testcase_result({skipped, Term}) ->
++    [?INDENT, ?INDENT, <<"<skipped type=\"unknown\">">>, ?NEWLINE,
++    escape_text(io_lib:write(Term)),
++    ?INDENT, ?INDENT, <<"</skipped>">>, ?NEWLINE].
++
++%% ----------------------------------------------------------------------------
++%% Format the output of a test case in xml.
++%% Empty output is simply the empty string.
++%% Other output is inside a <system-out> xml tag.
++%% ----------------------------------------------------------------------------
++format_testcase_output([]) -> [];
++format_testcase_output(Output) ->
++    [?INDENT, ?INDENT, <<"<system-out>">>, escape_text(Output), ?NEWLINE, ?INDENT, ?INDENT, <<"</system-out>">>, ?NEWLINE].
++
++%% ----------------------------------------------------------------------------
++%% Return the time in the SECS.MILLISECS format.
++%% ----------------------------------------------------------------------------
++format_time(Time) ->
++    format_time_s(lists:reverse(integer_to_list(Time))).
++format_time_s([Digit]) -> ["0.00", Digit];
++format_time_s([Digit1, Digit2]) -> ["0.0", Digit2, Digit1];
++format_time_s([Digit1, Digit2, Digit3]) -> ["0.", Digit3, Digit2, Digit1];
++format_time_s([Digit1, Digit2, Digit3 | Tail]) -> [lists:reverse(Tail), $., Digit3, Digit2, Digit1].
++
++%% ----------------------------------------------------------------------------
++%% Escape a suite's name to generate the filename.
++%% Remark: we might overwrite another testsuite's file.
++%% ----------------------------------------------------------------------------
++escape_suitename([Head | _T] = List) when is_list(Head) ->
++    escape_suitename(lists:flatten(List));
++escape_suitename("module '" ++ String) ->
++    escape_suitename(String);
++escape_suitename(String) ->
++    escape_suitename(String, []).
++
++escape_suitename([], Acc) -> lists:reverse(Acc);
++escape_suitename([$  | Tail], Acc) -> escape_suitename(Tail, [$_ | Acc]);
++escape_suitename([$' | Tail], Acc) -> escape_suitename(Tail, Acc);
++escape_suitename([$/ | Tail], Acc) -> escape_suitename(Tail, [$: | Acc]);
++escape_suitename([$\\ | Tail], Acc) -> escape_suitename(Tail, [$: | Acc]);
++escape_suitename([Char | Tail], Acc) when Char < $! -> escape_suitename(Tail, Acc);
++escape_suitename([Char | Tail], Acc) when Char > $~ -> escape_suitename(Tail, Acc);
++escape_suitename([Char | Tail], Acc) -> escape_suitename(Tail, [Char | Acc]).
++
++%% ----------------------------------------------------------------------------
++%% Escape text for XML text nodes.
++%% Replace < with &lt;, > with &gt; and & with &amp;
++%% ----------------------------------------------------------------------------
++escape_text(Text) -> escape_xml(lists:flatten(Text), [], false).
++
++%% ----------------------------------------------------------------------------
++%% Escape text for XML attribute nodes.
++%% Replace < with &lt;, > with &gt; and & with &amp;
++%% ----------------------------------------------------------------------------
++escape_attr(Text) -> escape_xml(lists:flatten(Text), [], true).
++
++escape_xml([], Acc, _ForAttr) -> lists:reverse(Acc);
++escape_xml([$< | Tail], Acc, ForAttr) -> escape_xml(Tail, [$;, $t, $l, $& | Acc], ForAttr);
++escape_xml([$> | Tail], Acc, ForAttr) -> escape_xml(Tail, [$;, $t, $g, $& | Acc], ForAttr);
++escape_xml([$& | Tail], Acc, ForAttr) -> escape_xml(Tail, [$;, $p, $m, $a, $& | Acc], ForAttr);
++escape_xml([$" | Tail], Acc, true) -> escape_xml(Tail, [$;, $t, $o, $u, $q, $& | Acc], true);
++escape_xml([Char | Tail], Acc, ForAttr) when is_integer(Char) -> escape_xml(Tail, [Char | Acc], ForAttr).
++
++%% ----------------------------------------------------------------------------
++%% Determine if the second list begins with the first list.
++%% Return true if it does, false if it doesn't.
++%% ----------------------------------------------------------------------------
++begins_with([], _L2) -> true;
++begins_with([H|T1], [H|T2]) -> begins_with(T1, T2);
++begins_with(_, _) -> false.
++
++%% ----------------------------------------------------------------------------
++%% Return the entry in the tree for a given ID.
++%% Return {value, Entry} if the entry was found or
++%% not_found if it wasn't.
++-spec(entry/2 :: (List :: [tree_entry()], Id :: [integer()]) -> {value, tree_entry()} | not_found).
++%% ----------------------------------------------------------------------------
++entry([{_Kind, Id, _Description, _Data} = Entry | _Tail], Id) -> {value, Entry};
++entry([{group, [H|_] = Id, _Description, Subnodes} | Tail], [H|_] = NodeId) ->
++    case begins_with(Id, NodeId) of
++        true -> entry(Subnodes, NodeId);
++        false -> entry(Tail, NodeId)
++    end;
++entry([_Node | Tail], NodeId) -> entry(Tail, NodeId);
++entry([], _NodeId) -> not_found.
++
++-ifdef(TEST).
++
++format_time_test_() ->
++    [
++    ?_assertEqual("0.000", lists:flatten(format_time(0))),
++    ?_assertEqual("0.001", lists:flatten(format_time(1))),
++    ?_assertEqual("0.042", lists:flatten(format_time(42))),
++    ?_assertEqual("0.123", lists:flatten(format_time(123))),
++    ?_assertEqual("1.000", lists:flatten(format_time(1000))),
++    ?_assertEqual("1.001", lists:flatten(format_time(1001))),
++    ?_assertEqual("1.042", lists:flatten(format_time(1042))),
++    ?_assertEqual("20.042", lists:flatten(format_time(20042)))
++    ].
++
++escape_suitename_test_() ->
++    [
++    ?_assertEqual("sqlite_test", escape_suitename("module 'sqlite_test'")),
++    ?_assertEqual("Unknown-2", escape_suitename(["Unknown-", "2"]))
++    ].
++
++escape_test_() ->
++    [
++    ?_assertEqual("bla bla bla", escape_text("bla bla bla")),
++    ?_assertEqual("1 &lt; 2 -&gt; true", escape_text("1 < 2 -> true")),
++    ?_assertEqual("1 &amp; 2 -&gt; 0", escape_text("1 & 2 -> 0")),
++    ?_assertEqual("and then it said \"Hello, Dave!\"", escape_text("and then it said \"Hello, Dave!\"")),
++    ?_assertEqual("bla bla bla", escape_attr("bla bla bla")),
++    ?_assertEqual("1 &lt; 2 -&gt; true", escape_attr("1 < 2 -> true")),
++    ?_assertEqual("1 &amp; 2 -&gt; 0", escape_attr("1 & 2 -> 0")),
++    ?_assertEqual("and then it said &quot;Hello, Dave!&quot;", escape_attr("and then it said \"Hello, Dave!\""))
++    ].
++
++-endif.  % TEST
+Index: src/eunit.erl
+===================================================================
+--- src/eunit.erl	(revision 249)
++++ src/eunit.erl	(working copy)
+@@ -113,7 +113,7 @@
+     try eunit_data:list(T) of
+ 	List ->
+ 	    Listeners = [eunit_tty:start(List, Options)
+-			 | listeners(Options)],
++			 | listeners(List, Options)],
+ 	    Serial = eunit_serial:start(Listeners),
+ 	    case eunit_server:start_test(Server, Serial, T, Options) of
+ 		{ok, Reference} -> test_run(Reference, Listeners);
+@@ -159,10 +159,12 @@
+     Dummy = spawn(fun devnull/0),
+     eunit_server:start_test(Server, Dummy, T, Options).
+ 
+-listeners(Options) ->
++listeners(List, Options) ->
+     case proplists:get_value(event_log, Options) of
+ 	undefined ->
+ 	    [];
++	{xml, XmlDirectory} ->
++	    [eunit_xml:start(List, Options, XmlDirectory)];
+ 	LogFile ->
+ 	    [spawn(fun () -> event_logger(LogFile) end)]
+     end.
+Index: src/Makefile
+===================================================================
+--- src/Makefile	(revision 249)
++++ src/Makefile	(working copy)
+@@ -22,6 +22,7 @@
+ 	eunit_lib.erl \
+ 	eunit_data.erl \
+ 	eunit_tty.erl \
++	eunit_xml.erl \
+ 	code_monitor.erl \
+ 	file_monitor.erl \
+ 	autoload.erl
