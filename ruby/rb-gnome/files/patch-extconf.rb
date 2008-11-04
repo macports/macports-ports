@@ -1,11 +1,11 @@
---- extconf.rb.orig	Thu Apr 29 20:56:56 2004
-+++ extconf.rb	Thu Apr 29 20:57:21 2004
-@@ -44,7 +44,7 @@
-   topdir = File.join(*([".."] * subdir.split(/\/+/).size))
-   /^\// =~ (dir = $topsrcdir) or dir = File.join(topdir, $topsrcdir)
+--- extconf.rb.orig	2008-10-23 07:24:04.000000000 -0600
++++ extconf.rb	2008-11-03 22:26:51.000000000 -0700
+@@ -67,7 +67,7 @@
+   dir = $topsrcdir
+   dir = File.join(topdir, dir) unless Pathname.new(dir).absolute?
    srcdir = File.join(dir, subdir)
--  ret = system($ruby, "-C", subdir, File.join(srcdir, "extconf.rb"),
-+  ret = system($ruby, "-rvendor-specific", "-C", subdir, File.join(srcdir, "extconf.rb"),
-    "--topsrcdir=#{dir}", "--topdir=#{topdir}", "--srcdir=#{srcdir}",
-    *ARGV)
-   STDERR.puts("#{$0}: Leaving directory '#{subdir}'")
+-  args = ruby_args + ["-C", subdir, File.join(srcdir, "extconf.rb"),
++  args = ruby_args + ["-rvendor-specific", "-C", subdir, File.join(srcdir, "extconf.rb"),
+                       "--topsrcdir=#{dir}", "--topdir=#{topdir}",
+                       "--srcdir=#{srcdir}", *extra_args]
+   ret = system(ruby, *args)
