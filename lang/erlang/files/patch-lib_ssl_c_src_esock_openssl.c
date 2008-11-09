@@ -1,6 +1,6 @@
---- lib/ssl/c_src/esock_openssl.c.orig	2008-03-12 22:15:41.000000000 -0700
-+++ lib/ssl/c_src/esock_openssl.c	2008-03-12 22:16:01.000000000 -0700
-@@ -905,8 +905,8 @@
+--- lib/ssl/c_src/esock_openssl.c.orig	2008-11-04 12:17:23.000000000 +0100
++++ lib/ssl/c_src/esock_openssl.c	2008-11-06 07:46:48.000000000 +0100
+@@ -907,8 +907,8 @@
      }
  
      /* info callback */
