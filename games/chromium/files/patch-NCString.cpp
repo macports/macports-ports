@@ -5,7 +5,7 @@
  {
  	int n;
 -	ulong tmp = 0;
-+	u_long tmp = 0;
++	unsigned long tmp = 0;
  	if(str)
  	{
  		n = sscanf(str, "%lu", &tmp);
