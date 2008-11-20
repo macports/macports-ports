@@ -1,5 +1,14 @@
---- /Users/roederja/Desktop/setup.py.orig	2007-05-20 13:02:39.000000000 -0700
-+++ setup.py	2007-05-20 14:49:50.000000000 -0700
+--- setup.py.orig	2006-10-08 11:41:25.000000000 -0600
++++ setup.py	2008-11-19 22:13:50.000000000 -0700
+@@ -15,7 +15,7 @@
+ from distutils.command.install_lib import install_lib
+ 
+ # This global variable is used to hold the list of modules to be disabled.
+-disabled_module_list = []
++disabled_module_list = ["readline"]
+ 
+ def add_dir_to_list(dirlist, dir):
+     """Add the directory 'dir' to the list 'dirlist' (at the front) if
 @@ -246,11 +246,11 @@
          # Add paths to popular package managers on OS X/darwin
          if sys.platform == "darwin":
