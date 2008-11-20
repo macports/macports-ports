@@ -1,12 +1,11 @@
---- shapely/geos.py.orig	2008-07-31 15:01:11.000000000 -0700
-+++ shapely/geos.py	2008-07-31 15:01:28.000000000 -0700
-@@ -29,8 +29,7 @@
+--- shapely/geos.py.orig	2008-11-19 09:31:43.000000000 +0300
++++ shapely/geos.py	2008-11-19 09:31:25.000000000 +0300
+@@ -27,6 +27,8 @@
      if lib is None:
          ## try a few more locations
          lib_paths = [
--            # The Framework build from Kyng Chaos:
--            "/Library/Frameworks/GEOS.framework/Versions/Current/GEOS",
-+            "@PREFIX@/lib/libgeos_c.dylib"
-         ]
-         for path in lib_paths:
-             if os.path.exists(path):
++            # local macports
++            '@PREFIX@/lib/libgeos_c.dylib',
+             # The Framework build from Kyng Chaos:
+             "/Library/Frameworks/GEOS.framework/Versions/Current/GEOS",
+             # macports
