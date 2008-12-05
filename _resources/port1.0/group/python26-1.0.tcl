@@ -39,8 +39,8 @@ if {![info exists frameworks_dir]} {
 set prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
 set python.bin	${prefix}/bin/python2.6
-set python.lib	${prefix}/lib/libpython2.6.dylib
-set python.libdir ${prefix}/Python
+set python.lib	${prefix}/Python
+set python.libdir ${prefix}/lib/python2.6
 set python.pkgd	${prefix}/lib/python2.6/site-packages
 set python.include	${prefix}/include/python2.6
 
