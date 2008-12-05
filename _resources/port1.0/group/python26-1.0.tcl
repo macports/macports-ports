@@ -32,6 +32,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+# Can be removed once MacPorts 1.7.0 is released
+if {![info exists frameworks_dir]} {
+    set frameworks_dir ${prefix}/Library/Frameworks
+}
 set prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
 set python.bin	${prefix}/bin/python2.6
@@ -48,10 +52,10 @@ depends_lib		port:python26
 
 use_configure	no
 
-build.cmd		${python.bin} setup.py
+build.cmd		${python.bin} setup.py --no-user-cfg
 build.target	build
 
-destroot.cmd	${python.bin} setup.py
+destroot.cmd	${python.bin} setup.py --no-user-cfg
 destroot.destdir	--prefix=${prefix} --root=${destroot}
 
 pre-destroot	{
