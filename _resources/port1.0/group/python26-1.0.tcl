@@ -36,13 +36,13 @@
 if {![info exists frameworks_dir]} {
     set frameworks_dir ${prefix}/Library/Frameworks
 }
-set prefix ${frameworks_dir}/Python.framework/Versions/2.6
+set python.prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
-set python.bin	${prefix}/bin/python2.6
-set python.lib	${prefix}/Python
-set python.libdir ${prefix}/lib/python2.6
-set python.pkgd	${prefix}/lib/python2.6/site-packages
-set python.include	${prefix}/include/python2.6
+set python.bin	${python.prefix}/bin/python2.6
+set python.lib	${python.prefix}/Python
+set python.libdir ${python.prefix}/lib/python2.6
+set python.pkgd	${python.prefix}/lib/python2.6/site-packages
+set python.include	${python.prefix}/include/python2.6
 
 categories		python
 
@@ -56,7 +56,7 @@ build.cmd		${python.bin} setup.py --no-user-cfg
 build.target	build
 
 destroot.cmd	${python.bin} setup.py --no-user-cfg
-destroot.destdir	--prefix=${prefix} --root=${destroot}
+destroot.destdir	--prefix=${python.prefix} --root=${destroot}
 
 pre-destroot	{
 	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
