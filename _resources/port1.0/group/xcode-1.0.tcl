@@ -272,7 +272,11 @@ build {
     if {[variant_isset universal]} {
         set xcode_build_args "$xcode_build_args ${xcode.universal.settings}"
         if {"${xcode.universal.sdk}" != ""} {
-            set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+            if {${os.major} >= 9} {
+                set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+            } else {
+                set xcode_build_args "SDKROOT=\"${xcode.universal.sdk}\" $xcode_build_args"
+            }
         }
     }
     
@@ -312,7 +316,11 @@ destroot {
     if {[variant_isset universal]} {
         set xcode_build_args "$xcode_build_args ${xcode.universal.settings}"
         if {"${xcode.universal.sdk}" != ""} {
-            set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+            if {${os.major} >= 9} {
+                set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+            } else {
+                set xcode_build_args "SDKROOT=\"${xcode.universal.sdk}\" $xcode_build_args"
+            }
         }
     }
 
