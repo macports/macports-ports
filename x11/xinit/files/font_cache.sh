@@ -189,7 +189,7 @@ setup_fontdirs() {
     # Finally, update fontconfig's cache
     echo "font_cache: Updating FC cache"
     if [[ $system == 1 ]] ; then
-        HOME="$(echo ~root)" ${X11DIR}/bin/fc-cache \
+        ${X11DIR}/bin/fc-cache -s \
             $([[ $force == 1 ]] && echo "-f -r") \
             $([[ $verbose == 1 ]] && echo "-v")
     else
