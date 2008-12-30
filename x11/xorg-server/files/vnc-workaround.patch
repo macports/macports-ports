@@ -1,0 +1,207 @@
+diff --git a/hw/xquartz/X11Application.m xorg-server-1.4.2-apple30hw/xquartz/X11Application.m
+index 990c008..90077fe 100644
+--- hw/xquartz/X11Application.m
++++ hw/xquartz/X11Application.m
+@@ -63,13 +63,8 @@ extern BOOL xpbproxy_init (void);
+ #define ProximityIn    0
+ #define ProximityOut   1
+ 
+-/* workaround a bug in vnc for those hit by a bug in Remote Desktop on OSX */
+-#define VNCMODIFIERBUGWORKAROUND 1 
+-
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-static BOOL vncModifierBugWorkaround = YES;
++/* Stuck modifier / button state... force release when we context switch */
+ static NSEventType keyState[NUM_KEYCODES];
+-#endif
+ 
+ int X11EnableKeyEquivalents = TRUE, quartzFullscreenMenu = FALSE;
+ int quartzHasRoot = FALSE, quartzEnableRootless = TRUE;
+@@ -187,41 +182,36 @@ static void message_kit_thread (SEL selector, NSObject *arg) {
+ 
+ - (void) activateX:(OSX_BOOL)state {
+     /* Create a TSM document that supports full Unicode input, and
+-     * have it activated while X is active
+-     */
++     have it activated while X is active */
+     static TSMDocumentID x11_document;
+-#ifdef VNCMODIFIERBUGWORKAROUND
+     size_t i;
+-#endif
+     DEBUG_LOG("state=%d, _x_active=%d, \n", state, _x_active)
+     if (state) {
+         DarwinSendDDXEvent(kXquartzActivate, 0);
+-        
++
+         if (!_x_active) {
+             if (x11_document == 0) {
+                 OSType types[1];
+                 types[0] = kUnicodeDocument;
+                 NewTSMDocument (1, types, &x11_document, 0);
+             }
+-            
++
+             if (x11_document != 0)	ActivateTSMDocument (x11_document);
+         }
+     } else {
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-        if(vncModifierBugWorkaround) {
+-            DarwinUpdateModKeys(0);
+-            for(i=0; i < NUM_KEYCODES; i++) {
+-                if(keyState[i] == NSKeyDown)
+-                    DarwinSendKeyboardEvents(KeyRelease, i);
+-            }
++
++        DarwinUpdateModKeys(0);
++        for(i=0; i < NUM_KEYCODES; i++) {
++            if(keyState[i] == NSKeyDown)
++                DarwinSendKeyboardEvents(KeyRelease, i);
+         }
+-#endif
+-        DarwinSendDDXEvent(kXquartzDeactivate, 0);
+         
++        DarwinSendDDXEvent(kXquartzDeactivate, 0);
++
+         if (_x_active && x11_document != 0)
+             DeactivateTSMDocument (x11_document);
+     }
+-    
++
+     _x_active = state;
+ }
+ 
+@@ -697,11 +687,7 @@ static NSMutableArray * cfarray_to_nsarray (CFArrayRef in) {
+ {
+     NSString *nsstr;
+     const char *tem;
+-
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-    vncModifierBugWorkaround = [self prefs_get_boolean:@"vncModifierBugWorkaround" default:vncModifierBugWorkaround];
+-#endif
+-    
++	
+     quartzUseSysBeep = [self prefs_get_boolean:@PREFS_SYSBEEP
+                                        default:quartzUseSysBeep];
+     quartzEnableRootless = [self prefs_get_boolean:@PREFS_ROOTLESS
+@@ -884,10 +870,7 @@ environment the next time you start X11?", @"Startup xinitrc dialog");
+ 
+ void X11ApplicationMain (int argc, char **argv, char **envp) {
+     NSAutoreleasePool *pool;
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-    size_t i;
+-#endif
+-    
++
+ #ifdef DEBUG
+     while (access ("/tmp/x11-block", F_OK) == 0) sleep (1);
+ #endif
+@@ -904,14 +887,6 @@ void X11ApplicationMain (int argc, char **argv, char **envp) {
+ 					selector:@selector (became_key:)
+ 					name:NSWindowDidBecomeKeyNotification object:nil];
+ 
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-    if(vncModifierBugWorkaround) {
+-        for(i=0; i < NUM_KEYCODES; i++) {
+-            keyState[i] = NSKeyUp;
+-        }
+-    }
+-#endif
+-
+     /*
+      * The xpr Quartz mode is statically linked into this server.
+      * Initialize all the Quartz functions.
+@@ -957,6 +932,18 @@ void X11ApplicationMain (int argc, char **argv, char **envp) {
+ @implementation X11Application (Private)
+ extern int darwin_modifier_flags; // darwinEvents.c
+ 
++#ifdef NX_DEVICELCMDKEYMASK
++/* This is to workaround a bug in the VNC server where we sometimes see the L
++ * modifier and sometimes see no "side"
++ */
++static inline int ensure_flag(int flags, int device_independent, int device_dependents, int device_dependent_default) {
++    if( (flags & device_independent) &&
++       !(flags & device_dependents))
++        flags |= device_dependent_default;
++    return flags;
++}
++#endif
++
+ - (void) sendX11NSEvent:(NSEvent *)e {
+     NSRect screen;
+     NSPoint location;
+@@ -964,6 +951,7 @@ extern int darwin_modifier_flags; // darwinEvents.c
+     int ev_button, ev_type;
+     float pointer_x, pointer_y, pressure, tilt_x, tilt_y;
+     DeviceIntPtr pDev;
++    int modifierFlags;
+ 
+     /* convert location to be relative to top-left of primary display */
+     location = [e locationInWindow];
+@@ -984,17 +972,34 @@ extern int darwin_modifier_flags; // darwinEvents.c
+     pressure = 0;
+     tilt_x = 0;
+     tilt_y = 0;
++    
++    modifierFlags = [e modifierFlags];
++    
++    /* These are the "only" modifier keys we care about */
++    modifierFlags &= (NX_COMMANDMASK | NX_CONTROLMASK | NX_ALTERNATEMASK | NX_SHIFTMASK |
++                      NX_SECONDARYFNMASK | NX_ALPHASHIFTMASK | NX_NUMERICPADMASK |
++                      NX_HELPMASK | NX_DEVICELCTLKEYMASK | NX_DEVICELSHIFTKEYMASK |
++                      NX_DEVICERSHIFTKEYMASK | NX_DEVICELCMDKEYMASK | NX_DEVICERCMDKEYMASK |
++                      NX_DEVICELALTKEYMASK | NX_DEVICERALTKEYMASK | NX_DEVICERCTLKEYMASK);
++    
++#ifdef NX_DEVICELCMDKEYMASK
++    /* This is to workaround a bug in the VNC server where we sometimes see the L
++     * modifier and sometimes see no "side"
++     */
++    modifierFlags = ensure_flag(modifierFlags, NX_CONTROLMASK,   NX_DEVICELCTLKEYMASK   | NX_DEVICERCTLKEYMASK,     NX_DEVICELCTLKEYMASK);
++    modifierFlags = ensure_flag(modifierFlags, NX_SHIFTMASK,     NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK,   NX_DEVICELSHIFTKEYMASK);
++    modifierFlags = ensure_flag(modifierFlags, NX_COMMANDMASK,   NX_DEVICELCMDKEYMASK   | NX_DEVICERCMDKEYMASK,     NX_DEVICELCMDKEYMASK);
++    modifierFlags = ensure_flag(modifierFlags, NX_ALTERNATEMASK, NX_DEVICELALTKEYMASK   | NX_DEVICERALTKEYMASK,     NX_DEVICELALTKEYMASK);
++#endif
+ 
+     /* We don't receive modifier key events while out of focus, and 3button
+      * emulation mucks this up, so we need to check our modifier flag state
+      * on every event... ugg
+      */
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-    if(!vncModifierBugWorkaround)
+-#endif
+-    if(darwin_modifier_flags != [e modifierFlags])
+-        DarwinUpdateModKeys([e modifierFlags]);
+-
++    
++    if(darwin_modifier_flags != modifierFlags)
++        DarwinUpdateModKeys(modifierFlags);
++    
+ 	switch ([e type]) {
+ 		case NSLeftMouseDown:     ev_button=1; ev_type=ButtonPress;   goto handle_mouse;
+ 		case NSOtherMouseDown:    ev_button=2; ev_type=ButtonPress;   goto handle_mouse;
+@@ -1133,21 +1138,14 @@ extern int darwin_modifier_flags; // darwinEvents.c
+                 }
+             }
+ 
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-            if(vncModifierBugWorkaround)
+-                keyState[[e keyCode]] == [e type];
+-#endif
++            /* Avoid stuck keys on context switch */
++            if(keyState[[e keyCode]] == [e type])
++                return;
++            keyState[[e keyCode]] = [e type];
+ 
+             DarwinSendKeyboardEvents(([e type] == NSKeyDown) ? KeyPress : KeyRelease, [e keyCode]);
+             break;
+-
+-#ifdef VNCMODIFIERBUGWORKAROUND
+-        case NSFlagsChanged:
+-            if(vncModifierBugWorkaround)
+-                DarwinUpdateModKeys([e modifierFlags]);
+-            break;
+-#endif
+-
++            
+         default: break; /* for gcc */
+ 	}	
+ }
