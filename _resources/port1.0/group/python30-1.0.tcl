@@ -32,14 +32,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-set prefix ${frameworks_dir}/Python.framework/Versions/3.0
-
-set python.branch       3.0
-set python.bin	${prefix}/bin/python${python.branch}
-set python.lib	${prefix}/lib/libpython${python.branch}.dylib
-set python.libdir ${prefix}/lib/python${python.branch}
-set python.pkgd	${prefix}/lib/python${python.branch}/site-packages
-set python.include	${prefix}/include/python${python.branch}
+set python.branch	3.0
+set python.prefix	${frameworks_dir}/Python.framework/Versions/${python.branch}
+set python.bin	${python.prefix}/bin/python${python.branch}
+set python.lib	${python.prefix}/Python
+set python.libdir ${python.prefix}/lib/python${python.branch}
+set python.pkgd	${python.prefix}/lib/python${python.branch}/site-packages
+set python.include	${python.prefix}/include/python${python.branch}
 
 categories		python
 
@@ -53,7 +52,7 @@ build.cmd		${python.bin} setup.py
 build.target	build
 
 destroot.cmd	${python.bin} setup.py
-destroot.destdir	--prefix=${prefix} --root=${destroot}
+destroot.destdir	--prefix=${python.prefix} --root=${destroot}
 
 pre-destroot	{
 	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
