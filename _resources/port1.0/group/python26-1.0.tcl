@@ -32,10 +32,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-# Can be removed once MacPorts 1.7.0 is released
-if {![info exists frameworks_dir]} {
-    set frameworks_dir ${prefix}/Library/Frameworks
-}
 set python.prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
 set python.version	2.6.1
