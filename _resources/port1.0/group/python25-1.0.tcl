@@ -32,7 +32,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-set python.version	2.5.4
 set python.branch	2.5
 set python.bin	${prefix}/bin/python${python.branch}
 set python.lib	${prefix}/lib/libpython${python.branch}.dylib

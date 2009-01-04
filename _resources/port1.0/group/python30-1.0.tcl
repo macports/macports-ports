@@ -34,7 +34,6 @@
 
 set prefix ${frameworks_dir}/Python.framework/Versions/3.0
 
-set python.version      3.0
 set python.branch       3.0
 set python.bin	${prefix}/bin/python${python.branch}
 set python.lib	${prefix}/lib/libpython${python.branch}.dylib

@@ -34,7 +34,6 @@
 
 set python.prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
-set python.version	2.6.1
 set python.branch	2.6
 set python.bin	${python.prefix}/bin/python${python.branch}
 set python.lib	${python.prefix}/Python
