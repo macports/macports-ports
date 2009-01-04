@@ -32,11 +32,13 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-set python.bin	${prefix}/bin/python2.5
-set python.lib	${prefix}/lib/libpython2.5.dylib
-set python.libdir ${prefix}/lib/python2.5
-set python.pkgd	${prefix}/lib/python2.5/site-packages
-set python.include	${prefix}/include/python2.5
+set python.version	2.5.4
+set python.branch	2.5
+set python.bin	${prefix}/bin/python${python.branch}
+set python.lib	${prefix}/lib/libpython${python.branch}.dylib
+set python.libdir ${prefix}/lib/python${python.branch}
+set python.pkgd	${prefix}/lib/python${python.branch}/site-packages
+set python.include	${prefix}/include/python${python.branch}
 
 categories		python
 

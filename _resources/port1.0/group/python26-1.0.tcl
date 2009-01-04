@@ -38,11 +38,13 @@ if {![info exists frameworks_dir]} {
 }
 set python.prefix ${frameworks_dir}/Python.framework/Versions/2.6
 
-set python.bin	${python.prefix}/bin/python2.6
+set python.version	2.6.1
+set python.branch	2.6
+set python.bin	${python.prefix}/bin/python${python.branch}
 set python.lib	${python.prefix}/Python
-set python.libdir ${python.prefix}/lib/python2.6
-set python.pkgd	${python.prefix}/lib/python2.6/site-packages
-set python.include	${python.prefix}/include/python2.6
+set python.libdir ${python.prefix}/lib/python${python.branch}
+set python.pkgd	${python.prefix}/lib/python${python.branch}/site-packages
+set python.include	${python.prefix}/include/python${python.branch}
 
 categories		python
 
