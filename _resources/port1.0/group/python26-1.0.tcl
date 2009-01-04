@@ -32,9 +32,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-set python.prefix ${frameworks_dir}/Python.framework/Versions/2.6
-
 set python.branch	2.6
+set python.prefix	${frameworks_dir}/Python.framework/Versions/${python.branch}
 set python.bin	${python.prefix}/bin/python${python.branch}
 set python.lib	${python.prefix}/Python
 set python.libdir ${python.prefix}/lib/python${python.branch}
