@@ -220,7 +220,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
     ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
     ftp://mirror.hiwaay.net/CPAN/modules/by-module/
-    ftp://csociety-ftp.ecn.purdue.edu/pub/CPAN/modules/by-module/
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     ftp://ftp.cs.colorado.edu/pub/perl/CPAN/modules/by-module/
     ftp://cpan.pop-mg.com.br/pub/CPAN/modules/by-module/
