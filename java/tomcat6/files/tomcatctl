@@ -1,0 +1,235 @@
+#!/bin/sh
+#
+#	tomcatctl
+#
+#	Tomcat control script to control tomcat running under jsvc.
+#
+#	USAGE: tomcatctl [--jdpa] start|stop|restart|status|info
+#
+
+# To be customized by installer...
+PREFIX=
+TOMCAT_USER=
+
+WC=wc
+JSVC="$PREFIX/bin/jsvc"
+#JSVC_ENV=
+#JSVC_DEBUG="-debug -verbose"
+
+
+# Calculate CATALINA_HOME based on our location
+if [ -z "$CATALINA_HOME" ]; then
+    # Handle symlinks
+    PRG="$0"    
+    while [ -L "$PRG" ]; do
+        ls=`ls -ld "$PRG"`
+        link=`expr "$ls" : '.*-> \(.*\)$'`
+        if expr "$link" : '/.*' > /dev/null; then
+            PRG="$link"
+        else
+            PRG="`dirname $PRG`/$link"
+        fi
+    done
+    
+    pushd "`dirname \"$PRG\"`/.." > /dev/null
+    CATALINA_HOME="`pwd -P`"
+    popd > /dev/null
+fi
+
+# Source the setenv.sh file to allow user to configure environment
+# including JAVA_HOME
+if [ -r "$CATALINA_HOME/bin/setenv.sh" ]; then
+    . "$CATALINA_HOME/bin/setenv.sh"
+fi
+
+# Source the setclasspath.sh file to allow setup of the CLASSPATH variable
+BASEDIR="$CATALINA_HOME"
+. "$CATALINA_HOME/bin/setclasspath.sh"
+
+# Set variable default values
+[ -z "$CATALINA_BASE" ]     	&& CATALINA_BASE="${CATALINA_HOME}"
+[ -z "$CATALINA_TMPDIR" ]   	&& CATALINA_TMPDIR="${CATALINA_BASE}/temp"
+
+[ -z "$TOMCAT_PIDNAME" ]    	&& TOMCAT_PIDNAME="tomcat5.pid"
+[ -z "$TOMCAT_PIDFILE" ]    	&& TOMCAT_PIDFILE="${CATALINA_BASE}/logs/${TOMCAT_PIDNAME}"
+[ -z "$TOMCAT_USER" ]       	&& TOMCAT_USER=tomcat
+
+[ -z "$JAVA_ENDORSED_DIRS" ]	&& JAVA_ENDORSED_DIRS=${CATALINA_BASE}/common/endorsed
+
+[ -z "$JPDA_TRANSPORT" ]    	&& JPDA_TRANSPORT=dt_socket
+[ -z "$JPDA_ADDRESS" ]      	&& JPDA_ADDRESS=8000
+
+CLASSPATH="$CLASSPATH":"$CATALINA_HOME"/bin/bootstrap.jar:"$CATALINA_HOME"/bin/commons-logging-api.jar
+
+if [ -r "${CATALINA_HOME}/bin/tomcat-juli.jar" ]; then
+  JAVA_OPTS="$JAVA_OPTS -Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager"
+fi
+
+usage()
+{
+    cat <<EOT
+USAGE: `basename $0` [--jpda] start|stop|restart|status|info
+EOT
+}
+
+
+check()
+{
+    PID=
+    RUNNING=
+    STATUS=
+    
+    if [ -f "$TOMCAT_PIDFILE" ]; then
+        PID=`cat $TOMCAT_PIDFILE`
+        if [ -n "$PID" -a `ps $PID | $WC -l` -gt 1 ]; then
+            STATUS="running (pid $PID)"
+            RUNNING=$PID
+        else
+            STATUS="not running (stale pid $PID?)"
+            RUNNING=
+        fi
+    else
+        STATUS="not running"
+        RUNNING=
+    fi
+}
+
+
+start()
+{
+	# Run conf_setup.sh to check and repair the conf directory
+	if [ -x "$CATALINA_HOME/bin/conf_setup.sh" ]; then
+		CATALINA_BASE="$CATALINA_BASE" "$CATALINA_HOME/bin/conf_setup.sh"
+	fi
+
+    printf "Starting Tomcat..."
+    check
+    
+    if [ -n "$RUNNING" ]; then
+        printf "already $STATUS\n"
+    else
+        # Remove any existing pid file
+        rm -f "$TOMCAT_PIDFILE"
+        
+        # Start Tomcat using jsvc
+        $JSVC_ENV $JSVC $JSVC_DEBUG $JAVA_OPTS $JPDA_OPTS \
+            -home "$JAVA_HOME" \
+            -user "$TOMCAT_USER" \
+            -classpath "${CLASSPATH}" \
+            -pidfile "$TOMCAT_PIDFILE" \
+            -outfile "$CATALINA_BASE/logs/catalina.out" \
+            -errfile "$CATALINA_BASE/logs/catalina.err" \
+            -Dcatalina.home="$CATALINA_HOME" \
+            -Dcatalina.base="$CATALINA_BASE" \
+            -Djava.io.tmpdir="$CATALINA_TMPDIR" \
+            -Djava.endorsed.dirs="$JAVA_ENDORSED_DIRS" \
+            org.apache.catalina.startup.Bootstrap "$@" start
+            
+        # Wait for it to really start
+        for ((CNT=0; CNT < 15; ++CNT)); do
+            [ -f "$TOMCAT_PIDFILE" ] && break
+            printf "."
+            sleep 1
+        done
+        
+        # Let 'em know what happened
+        check
+        if [ -n "$RUNNING" ]; then
+            printf " started. (pid $PID)\n"
+        else
+            printf " giving up.\n"
+        fi
+    fi
+}
+
+
+stop()
+{
+    printf "Stopping Tomcat..."
+    check
+    
+    if [ -z "$RUNNING" ]; then
+        printf "already $STATUS\n"
+    else
+        printf "(pid $PID)"
+        
+        # Stop Tomcat
+        kill $PID
+        
+        # Wait for it to really stop
+        for ((CNT=0; CNT < 15; ++CNT)); do
+            [ -f "$TOMCAT_PIDFILE" ] || break
+            printf "."
+            sleep 1
+        done
+        
+        # Let 'em know what happened
+        check
+        if [ -z "$RUNNING" ]; then
+            printf " stopped.\n"
+        else
+            printf " giving up.\n"
+        fi
+    fi
+}
+
+
+# Ensure at least one parameter
+if [ $# -lt 1 ]; then
+   usage
+   exit 1
+fi
+
+# Parameter Handling
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--jpda)
+		[ -z "$JPDA_OPTS" ] && JPDA_OPTS="-Xdebug -Xrunjdwp:transport=$JPDA_TRANSPORT,address=$JPDA_ADDRESS,server=y,suspend=n"
+		;;
+		
+	start)
+		start
+		;;
+		
+	stop)
+		stop
+		;;
+		
+	restart)
+		stop
+		start
+		;;
+		
+	status)
+		check
+		printf "Tomcat is $STATUS\n"
+		;;
+		
+	info)
+		check
+		cat <<EOT
+	
+Tomcat is $STATUS
+
+CATALINA_HOME       $CATALINA_HOME
+CATALINA_BASE       $CATALINA_BASE
+CATALINA_TMPDIR     $CATALINA_TMPDIR
+JAVA_HOME           $JAVA_HOME
+CLASSPATH           $CLASSPATH
+TOMCAT_PIDFILE      $TOMCAT_PIDFILE
+JAVA_OPTS           $JAVA_OPTS
+JPDA_OPTS           $JPDA_OPTS
+EOT
+		;;
+		
+	*)
+		printf "$0: unrecognized option '$1'\n"
+		usage
+		exit 1
+		;;
+	esac
+	
+	shift
+done
+
+
