@@ -47,10 +47,10 @@ depends_lib		port:python25
 
 use_configure	no
 
-build.cmd		${python.bin} setup.py
+build.cmd		${python.bin} setup.py --no-user-cfg
 build.target	build
 
-destroot.cmd	${python.bin} setup.py
+destroot.cmd	${python.bin} setup.py --no-user-cfg
 destroot.destdir	--prefix=${prefix} --root=${destroot}
 
 pre-destroot	{
