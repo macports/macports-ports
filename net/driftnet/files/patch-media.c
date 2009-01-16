@@ -2,7 +2,7 @@
 +++ media.c	Mon Jul 14 10:31:56 2003
 @@ -9,6 +9,7 @@
  
- static const char rcsid[] = "$Id: patch-media.c,v 1.1 2003/07/14 16:41:51 gwright Exp $";
+ static const char rcsid[] = "$Id: media.c,v 1.6 2002/07/08 23:32:33 chris Exp $";
  
 +#include <sys/types.h>
  #include <assert.h>
