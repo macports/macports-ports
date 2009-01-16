@@ -1,4 +1,5 @@
-# $Id: site-specific.rb,v 1.1 2004/04/02 04:47:43 rshaw Exp $
+# $Id$
+#
 # Default site_ruby install library setting for normal module
 # installation. You can force site installation with the following:
 #

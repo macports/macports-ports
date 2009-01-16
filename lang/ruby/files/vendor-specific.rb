@@ -1,5 +1,6 @@
-# $Id: vendor-specific.rb,v 1.1 2004/04/02 04:47:43 rshaw Exp $
-# Custom vendor_ruby install library setting for DarwinPorts module
+# $Id$
+#
+# Custom vendor_ruby install library setting for MacPorts module
 # installation. You can force vendor installation with the following:
 #
 #    ruby -rvendor-specific extconf.rb
