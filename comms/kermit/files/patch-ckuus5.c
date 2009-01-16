@@ -4,7 +4,7 @@
  char * k_info_dir = NULL;               /* Where to find text files */
  #ifdef UNIX
  static char * txtdir[] = {
-+    "@@prefix@@/share/kermit"		/* MacOS X DarwinPorts*/
++    "@@prefix@@/share/kermit"		/* Mac OS X MacPorts*/
      "/usr/local/doc/",                  /* Linux, SunOS, ... */
      "/usr/share/lib/",                  /* HP-UX 10.xx... */
      "/usr/share/doc/",                  /* Other possibilities... */
