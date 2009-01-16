@@ -6,8 +6,8 @@
  
 +### Darwin ###
 +
-+# Note, this is DarwinPorts-specific, as is relies on DP to make sure g77
-+# is installed prior to this module being installed
++# Note, this is MacPorts-specific, as it relies on MacPorts to make
++# sure g77 is installed prior to this module being installed
 +
 +$F77config{Darwin}{G77} = $F77config{Generic}{G77};
 +$F77config{Darwin}{F2c} = $F77config{Generic}{G77};
