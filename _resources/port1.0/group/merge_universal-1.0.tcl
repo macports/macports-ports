@@ -38,9 +38,13 @@
 #    merger_configure_args: associative array of configure.args
 #         merger_dont_diff: list of file names for which diff will not work
 
-set universal_archs_supported  ${universal_archs}
+if { ! [info exists universal_archs_supported] } {
+    set universal_archs_supported  ${universal_archs}
+}
 
 variant universal {
+    global universal_archs_to_use
+
     eval configure.args-append      ${configure.universal_args}
     eval configure.cflags-append    ${configure.universal_cflags}
     eval configure.cxxflags-append  ${configure.universal_cxxflags}
@@ -53,8 +57,21 @@ variant universal {
         configure.ldflags-delete   -arch ${arch}
     }
 
+    set universal_archs_to_use {}
+    foreach arch ${universal_archs} {
+        set arch_ok no
+        foreach archt ${universal_archs_supported} {
+            if { ${arch}==${archt} } {
+                set arch_ok yes
+            }
+        }
+        if { ${arch_ok}=="yes" } {
+            lappend universal_archs_to_use ${arch}
+        }
+    }
+
     configure {
-        foreach arch ${universal_archs_supported} {
+        foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running configure for architecture ${arch}"
 
             copy ${worksrcpath} ${workpath}/${arch}
@@ -122,7 +139,7 @@ variant universal {
     }
 
     build {
-        foreach arch ${universal_archs_supported} {
+        foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running build for architecture ${arch}"
             build.dir  ${workpath}/${arch}
 			build_main
@@ -130,7 +147,7 @@ variant universal {
     }
 
 	destroot {
-        foreach arch ${universal_archs_supported} {
+        foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running destroot for architecture ${arch}"
             copy ${destroot} ${workpath}/destroot-${arch}
             destroot.dir  ${workpath}/${arch}
@@ -173,10 +190,7 @@ variant universal {
                         error "${dir1}/${fl} and ${dir2}/${fl} are of different types"
                     }
 
-                    if { [file isdirectory ${dir1}/${fl}] } {
-                        # Files are directories, so recursively call function
-                        merge2Dir ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
-                    } elseif { [file type ${dir1}/${fl}]=="link" } {
+                    if { [file type ${dir1}/${fl}]=="link" } {
                         # Files are links
                         ui_debug "universal: merge: ${prefixDir}/${fl} is a link"
 
@@ -186,9 +200,11 @@ variant universal {
                         } else {
                             error "${dir1}/${fl} and ${dir2}/${fl} point to different targets (can't merge them)"
                         }
+                    } elseif { [file isdirectory ${dir1}/${fl}] } {
+                        # Files are directories (but not links), so recursively call function
+                        merge2Dir ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
                     } else {
                         # Files are neither directories nor links
-
                         if { ! [catch {system "/usr/bin/cmp ${dir1}/${fl} ${dir2}/${fl} && /bin/cp -v ${dir1}/${fl} ${dir}"}] } {
                             # Files are byte by byte the same
                             ui_debug "universal: merge: ${prefixDir}${fl} is identical in ${base1} and ${base2}"
@@ -277,7 +293,7 @@ variant universal {
     }
 
     test {
-        foreach arch ${universal_archs_supported} {
+        foreach arch ${universal_archs_to_use} {
             # Rosetta does not translate G5 instructions
             # PowerPC systems can't translate Intel instructions
             if { (${os.arch}=="i386" && ${arch}!="ppc64") || (${os.arch}=="powerpc" && ${arch}!="i386" && ${arch}!="x86_64") } {
