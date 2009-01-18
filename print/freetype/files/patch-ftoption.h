@@ -1,6 +1,6 @@
---- include/freetype/config/ftoption.h.orig	2005-06-06 08:37:53.000000000 -0700
-+++ include/freetype/config/ftoption.h	2006-02-15 21:57:57.000000000 -0800
-@@ -436,7 +436,7 @@
+--- include/freetype/config/ftoption.h.orig 2008-11-05 03:25:14.000000000 -0600
++++ include/freetype/config/ftoption.h 2009-01-18 03:35:45.000000000 -0600
+@@ -480,7 +480,7 @@
    /*   Do not #undef this macro here, since the build system might         */
    /*   define it for certain configurations only.                          */
    /*                                                                       */
