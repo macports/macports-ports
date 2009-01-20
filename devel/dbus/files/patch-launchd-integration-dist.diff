@@ -105,29 +105,6 @@ diff -Nurp Makefile.in Makefile.in
  	      END { if (nonempty) { for (i in files) print i; }; }'`; \
  	mkid -fID $$unique
  tags: TAGS
-diff -Nurp bus/Makefile.am bus/Makefile.am
---- bus/Makefile.am	2008-08-07 20:44:35.000000000 +0200
-+++ bus/Makefile.am	2009-01-10 16:36:24.000000000 +0100
-@@ -9,12 +9,18 @@ EFENCE=
- 
- CONFIG_IN_FILES=				\
- 	session.conf.in				\
--	system.conf.in
-+	system.conf.in				\
-+	org.freedesktop.dbus-session.plist.in
- 
- config_DATA=					\
- 	session.conf				\
- 	system.conf
- 
-+if DBUS_ENABLE_LAUNCHD
-+agentdir=$(LAUNCHD_AGENT_DIR)
-+agent_DATA=org.freedesktop.dbus-session.plist
-+endif
-+
- if DBUS_USE_LIBXML
- XML_SOURCES=config-loader-libxml.c
- endif
 diff -Nurp bus/Makefile.in bus/Makefile.in
 --- bus/Makefile.in	2009-01-07 01:30:41.000000000 +0100
 +++ bus/Makefile.in	2009-01-10 16:39:18.000000000 +0100
@@ -461,79 +438,6 @@ diff -Nurp bus/Makefile.in bus/Makefile.in
  
  
  clean-local:
-diff -Nurp bus/org.freedesktop.dbus-session.plist.in bus/org.freedesktop.dbus-session.plist.in
---- bus/org.freedesktop.dbus-session.plist.in	1970-01-01 01:00:00.000000000 +0100
-+++ bus/org.freedesktop.dbus-session.plist.in	2009-01-10 16:36:24.000000000 +0100
-@@ -0,0 +1,31 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-+<plist version="1.0">
-+<dict>
-+	<key>Label</key>
-+	<string>org.freedesktop.dbus-session</string>
-+
-+	<key>ServiceIPC</key>
-+	<true/>
-+
-+	<!-- bug in 10.4's launchd - on-demand loading does not work -->
-+	<key>OnDemand</key>
-+	<false />
-+
-+	<key>ProgramArguments</key>
-+	<array>
-+		<string>@DBUS_DAEMONDIR@/dbus-daemon</string>
-+		<string>--nofork</string>
-+		<string>--session</string>
-+	</array>
-+
-+	<key>Sockets</key>
-+	<dict>
-+		<key>session</key>
-+		<dict>
-+			<key>SecureSocketWithKey</key>
-+			<string>DBUS_LAUNCHD_SESSION_BUS_SOCKET</string>
-+		</dict>
-+	</dict>
-+</dict>
-+</plist>
-diff -Nurp bus/session.conf.in bus/session.conf.in
---- bus/session.conf.in	2009-01-06 23:52:22.000000000 +0100
-+++ bus/session.conf.in	2009-01-10 16:36:24.000000000 +0100
-@@ -12,7 +12,7 @@
-        the behavior of child processes. -->
-   <keep_umask/>
- 
--  <listen>unix:tmpdir=@DBUS_SESSION_SOCKET_DIR@</listen>
-+  <listen>@DBUS_SESSION_BUS_DEFAULT_ADDRESS@</listen>
- 
-   <standard_session_servicedirs />
- 
-diff -Nurp dbus/Makefile.am dbus/Makefile.am
---- dbus/Makefile.am	2008-08-07 20:44:36.000000000 +0200
-+++ dbus/Makefile.am	2009-01-10 16:36:24.000000000 +0100
-@@ -9,6 +9,12 @@ INCLUDES=-I$(top_builddir) -I$(top_srcdi
- dbusincludedir=$(includedir)/dbus-1.0/dbus
- dbusarchincludedir=$(libdir)/dbus-1.0/include/dbus
- 
-+if DBUS_ENABLE_LAUNCHD
-+LAUNCHD_SOURCES = \
-+	dbus-server-launchd.h \
-+	dbus-server-launchd.c
-+endif
-+
- lib_LTLIBRARIES=libdbus-1.la
- 
- dbusinclude_HEADERS=				\
-@@ -92,7 +98,8 @@ DBUS_LIB_SOURCES=				\
- 	dbus-uuidgen.c				\
- 	dbus-uuidgen.h				\
- 	dbus-watch.c				\
--	dbus-watch.h
-+	dbus-watch.h				\
-+	$(LAUNCHD_SOURCES)
- 
- ##	dbus-md5.c				\
- ##	dbus-md5.h				\
 diff -Nurp dbus/Makefile.in dbus/Makefile.in
 --- dbus/Makefile.in	2009-01-07 01:30:42.000000000 +0100
 +++ dbus/Makefile.in	2009-01-10 16:39:18.000000000 +0100
@@ -856,713 +760,6 @@ diff -Nurp dbus/Makefile.in dbus/Makefile.in
  	    test `echo "$$skipped" | wc -c` -le `echo "$$banner" | wc -c` || \
  	      dashes="$$skipped"; \
  	  fi; \
-diff -Nurp dbus/dbus-bus.c dbus/dbus-bus.c
---- dbus/dbus-bus.c	2008-08-07 20:44:36.000000000 +0200
-+++ dbus/dbus-bus.c	2009-01-10 16:36:24.000000000 +0100
-@@ -22,6 +22,7 @@
-  *
-  */
- 
-+#include <config.h>
- #include "dbus-bus.h"
- #include "dbus-protocol.h"
- #include "dbus-internals.h"
-@@ -29,6 +30,7 @@
- #include "dbus-marshal-validate.h"
- #include "dbus-threads-internal.h"
- #include "dbus-connection-internal.h"
-+#include "dbus-string.h"
- #include <string.h>
- 
- /**
-@@ -147,6 +149,63 @@ get_from_env (char           **connectio
- }
- 
- static dbus_bool_t
-+init_session_address (void)
-+{
-+  dbus_bool_t retval;
-+ 
-+  retval = FALSE;
-+
-+  /* First, look in the environment.  This is the normal case on 
-+   * freedesktop.org/Unix systems. */
-+  get_from_env (&bus_connection_addresses[DBUS_BUS_SESSION],
-+                     "DBUS_SESSION_BUS_ADDRESS");
-+  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
-+    {
-+      dbus_bool_t supported;
-+      DBusString addr;
-+      DBusError error = DBUS_ERROR_INIT;
-+
-+      if (!_dbus_string_init (&addr))
-+        return FALSE;
-+
-+      supported = FALSE;
-+      /* So it's not in the environment - let's try a platform-specific method.
-+       * On MacOS, this involves asking launchd.  On Windows (not specified yet)
-+       * we might do a COM lookup.
-+       * Ignore errors - if we failed, fall back to autolaunch. */
-+      retval = _dbus_lookup_session_address (&supported, &addr, &error);
-+      if (supported && retval)
-+        {
-+          retval =_dbus_string_steal_data (&addr, &bus_connection_addresses[DBUS_BUS_SESSION]);
-+        }
-+      else if (supported && !retval)
-+        {
-+          if (dbus_error_is_set(&error))
-+            _dbus_warn ("Dynamic session lookup supported but failed: %s\n", error.message);
-+          else
-+            _dbus_warn ("Dynamic session lookup supported but failed silently\n");
-+        }
-+      _dbus_string_free (&addr);
-+    }
-+  else
-+    retval = TRUE;
-+
-+  if (!retval)
-+    return FALSE;
-+
-+  /* The DBUS_SESSION_BUS_DEFAULT_ADDRESS should have really been named
-+   * DBUS_SESSION_BUS_FALLBACK_ADDRESS. 
-+   */
-+  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
-+    bus_connection_addresses[DBUS_BUS_SESSION] =
-+      _dbus_strdup (DBUS_SESSION_BUS_DEFAULT_ADDRESS);
-+  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
-+    return FALSE;
-+
-+  return TRUE;
-+}
-+
-+static dbus_bool_t
- init_connections_unlocked (void)
- {
-   if (!initialized)
-@@ -198,17 +257,9 @@ init_connections_unlocked (void)
-         {
-           _dbus_verbose ("Filling in session bus address...\n");
-           
--          if (!get_from_env (&bus_connection_addresses[DBUS_BUS_SESSION],
--                             "DBUS_SESSION_BUS_ADDRESS"))
-+          if (!init_session_address ())
-             return FALSE;
- 
--	  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
--	    bus_connection_addresses[DBUS_BUS_SESSION] =
--	      _dbus_strdup (DBUS_SESSION_BUS_DEFAULT_ADDRESS);
--          
--          if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
--             return FALSE;
--
-           _dbus_verbose ("  \"%s\"\n", bus_connection_addresses[DBUS_BUS_SESSION] ?
-                          bus_connection_addresses[DBUS_BUS_SESSION] : "none set");
-         }
-diff -Nurp dbus/dbus-server-launchd.c dbus/dbus-server-launchd.c
---- dbus/dbus-server-launchd.c	1970-01-01 01:00:00.000000000 +0100
-+++ dbus/dbus-server-launchd.c	2009-01-10 16:36:24.000000000 +0100
-@@ -0,0 +1,150 @@
-+/* dbus-server-launchd.c Server methods for interacting with launchd.
-+ * Copyright (C) 2007, Tanner Lovelace <lovelace@wayfarer.org>
-+ * Copyright (C) 2008, Benjamin Reed <rangerrick@befunk.com>
-+ *
-+ * Permission is hereby granted, free of charge, to any person
-+ * obtaining a copy of this software and associated documentation
-+ * files (the "Software"), to deal in the Software without
-+ * restriction, including without limitation the rights to use, copy,
-+ * modify, merge, publish, distribute, sublicense, and/or sell copies
-+ * of the Software, and to permit persons to whom the Software is
-+ * furnished to do so, subject to the following conditions:
-+ *
-+ * The above copyright notice and this permission notice shall be
-+ * included in all copies or substantial portions of the Software.
-+ *
-+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-+ * DEALINGS IN THE SOFTWARE.
-+ */
-+
-+#include <config.h>
-+#include <launch.h>
-+#include <errno.h>
-+
-+#include "dbus-server-socket.h"
-+#include "dbus-server-launchd.h"
-+
-+/**
-+ * @defgroup DBusServerLaunchd DBusServer implementations for Launchd
-+ * @ingroup  DBusInternals
-+ * @brief Implementation details of DBusServer with Launchd support
-+ *
-+ * @{
-+ */
-+
-+/**
-+ * Creates a new server from launchd.
-+ *
-+ * @param socket_key they key to use when looking up the file descriptor from launchd
-+ * @param error location to store reason for failure.
-+ * @returns the new server, or #NULL on failure.
-+ */
-+
-+DBusServer*
-+_dbus_server_new_for_launchd_fd (const char *socket_key,
-+                                 DBusError *error)
-+{
-+  DBusServer *server;
-+  DBusString address;
-+  int launchd_fd;
-+  launch_data_t sockets_dict, checkin_response;
-+  launch_data_t checkin_request;
-+  launch_data_t listening_fd_array, listening_fd;
-+
-+  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
-+
-+  if (!_dbus_string_init (&address))
-+    {
-+      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
-+      return NULL;
-+    }
-+  if (!_dbus_string_append (&address, "launchd:key="))
-+    {
-+      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
-+      goto l_failed_0;
-+    }
-+  if (!_dbus_string_append (&address, socket_key))
-+    {
-+      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
-+      goto l_failed_0;
-+    }
-+
-+  if ((checkin_request = launch_data_new_string (LAUNCH_KEY_CHECKIN)) == NULL) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, 
-+                      "launch_data_new_string(\"%s\") Unable to create string.\n", LAUNCH_KEY_CHECKIN);
-+      goto l_failed_0;
-+    }
-+
-+  if ((checkin_response = launch_msg (checkin_request)) == NULL) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "launch_msg(\"%s\") IPC failure: %s\n", 
-+                      LAUNCH_KEY_CHECKIN, strerror (errno));
-+      goto l_failed_0;
-+    }
-+
-+  if (LAUNCH_DATA_ERRNO == launch_data_get_type (checkin_response)) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_FAILED, "Check-in failed: %s\n", 
-+                      strerror (launch_data_get_errno (checkin_response)));
-+      goto l_failed_0;
-+    }
-+
-+  sockets_dict = launch_data_dict_lookup (checkin_response, LAUNCH_JOBKEY_SOCKETS);
-+  if (NULL == sockets_dict) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "No sockets found to answer requests on!\n");
-+      goto l_failed_0;
-+    }
-+
-+  listening_fd_array = launch_data_dict_lookup (sockets_dict, socket_key);
-+  if (NULL == listening_fd_array) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "No known sockets found to answer requests on!\n");
-+      goto l_failed_0;
-+    }
-+
-+  if (launch_data_array_get_count (listening_fd_array) != 1) 
-+    {
-+      dbus_set_error (error, DBUS_ERROR_LIMITS_EXCEEDED, 
-+                      "Expected 1 socket from launchd, got %d.\n", 
-+                      launch_data_array_get_count (listening_fd_array));
-+      goto l_failed_0;
-+    }
-+
-+  listening_fd = launch_data_array_get_index (listening_fd_array, 0);
-+  launchd_fd = launch_data_get_fd (listening_fd);
-+
-+  _dbus_fd_set_close_on_exec (launchd_fd);
-+
-+  if (launchd_fd < 0)
-+    {
-+      _DBUS_ASSERT_ERROR_IS_SET (error);
-+      goto l_failed_0;
-+    }
-+
-+  server = _dbus_server_new_for_socket (&launchd_fd, 1, &address);
-+  if (server == NULL)
-+    {
-+      dbus_set_error (error, DBUS_ERROR_NO_SERVER, "Unable to listen on launchd fd %d.", launchd_fd);
-+      goto l_failed_0;
-+    }
-+
-+  _dbus_string_free (&address);
-+
-+  return server;
-+
-+ l_failed_0:
-+  _dbus_string_free (&address);
-+
-+  return NULL;
-+}
-+
-+/** @} */
-+
-diff -Nurp dbus/dbus-server-launchd.h dbus/dbus-server-launchd.h
---- dbus/dbus-server-launchd.h	1970-01-01 01:00:00.000000000 +0100
-+++ dbus/dbus-server-launchd.h	2009-01-10 16:36:24.000000000 +0100
-@@ -0,0 +1,37 @@
-+/* dbus-server-launchd.h Server methods for interacting with launchd.
-+* Copyright (C) 2008, Benjamin Reed <rangerrick@befunk.com>
-+*
-+* Permission is hereby granted, free of charge, to any person
-+* obtaining a copy of this software and associated documentation
-+* files (the "Software"), to deal in the Software without
-+* restriction, including without limitation the rights to use, copy,
-+* modify, merge, publish, distribute, sublicense, and/or sell copies
-+* of the Software, and to permit persons to whom the Software is
-+* furnished to do so, subject to the following conditions:
-+*
-+* The above copyright notice and this permission notice shall be
-+* included in all copies or substantial portions of the Software.
-+*
-+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-+* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-+* HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-+* WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-+* DEALINGS IN THE SOFTWARE.
-+*/
-+
-+#ifndef DBUS_SERVER_LAUNCHD_H
-+#define DBUS_SERVER_LAUNCHD_H
-+
-+#include <dbus/dbus-internals.h>
-+#include <dbus/dbus-server-protected.h>
-+
-+DBUS_BEGIN_DECLS
-+
-+DBusServer* _dbus_server_new_for_launchd_fd (const char *socket_fd, DBusError  *error);
-+
-+DBUS_END_DECLS
-+
-+#endif /* DBUS_SERVER_LAUNCHD_H */
-diff -Nurp dbus/dbus-server-unix.c dbus/dbus-server-unix.c
---- dbus/dbus-server-unix.c	2008-08-07 20:44:36.000000000 +0200
-+++ dbus/dbus-server-unix.c	2009-01-10 16:36:24.000000000 +0100
-@@ -21,6 +21,7 @@
-  *
-  */
- 
-+#include <config.h>
- #include "dbus-internals.h"
- #include "dbus-server-unix.h"
- #include "dbus-server-socket.h"
-@@ -29,6 +30,10 @@
- #include "dbus-sysdeps-unix.h"
- #include "dbus-string.h"
- 
-+#ifdef DBUS_ENABLE_LAUNCHD
-+#include "dbus-server-launchd.h"
-+#endif
-+
- /**
-  * @defgroup DBusServerUnix DBusServer implementations for UNIX
-  * @ingroup  DBusInternals
-@@ -145,6 +150,26 @@ _dbus_server_listen_platform_specific (D
-           return DBUS_SERVER_LISTEN_DID_NOT_CONNECT;
-         }
-     }
-+#ifdef DBUS_ENABLE_LAUNCHD
-+  else if (strcmp (method, "launchd") == 0)
-+    {
-+      const char *launchd_key = dbus_address_entry_get_value (entry, "key");
-+      if (launchd_key == NULL)
-+        launchd_key = "session";
-+      *server_p = _dbus_server_new_for_launchd_fd (launchd_key, error);
-+
-+      if (*server_p != NULL)
-+        {
-+          _DBUS_ASSERT_ERROR_IS_CLEAR(error);
-+          return DBUS_SERVER_LISTEN_OK;
-+        }
-+      else
-+        {
-+          _DBUS_ASSERT_ERROR_IS_SET(error);
-+          return DBUS_SERVER_LISTEN_DID_NOT_CONNECT;
-+        }
-+    }
-+#endif 
-   else
-     {
-       /* If we don't handle the method, we return NULL with the
-diff -Nurp dbus/dbus-sysdeps-unix.c dbus/dbus-sysdeps-unix.c
---- dbus/dbus-sysdeps-unix.c	2009-01-06 23:38:11.000000000 +0100
-+++ dbus/dbus-sysdeps-unix.c	2009-01-10 16:36:24.000000000 +0100
-@@ -2835,23 +2835,30 @@ _dbus_get_tmpdir(void)
- }
- 
- /**
-- * Determines the address of the session bus by querying a
-- * platform-specific method.
-+ * Execute a subprocess, returning up to 1024 bytes of output
-+ * into @p result.
-  *
-- * If successful, returns #TRUE and appends the address to @p
-- * address. If a failure happens, returns #FALSE and
-+ * If successful, returns #TRUE and appends the output to @p
-+ * result. If a failure happens, returns #FALSE and
-  * sets an error in @p error.
-  *
-- * @param address a DBusString where the address can be stored
-+ * @note It's not an error if the subprocess terminates normally
-+ * without writing any data to stdout. Verify the @p result length
-+ * before and after this function call to cover this case.
-+ *
-+ * @param progname initial path to exec
-+ * @param argv NULL-terminated list of arguments
-+ * @param result a DBusString where the output can be append
-  * @param error a DBusError to store the error in case of failure
-  * @returns #TRUE on success, #FALSE if an error happened
-  */
--dbus_bool_t
--_dbus_get_autolaunch_address (DBusString *address,
--                              DBusError  *error)
-+static dbus_bool_t
-+_read_subprocess_line_argv (const char *progpath,
-+                            const char * const *argv,
-+                            DBusString *result,
-+                            DBusError  *error)
- {
--  static char *argv[6];
--  int address_pipe[2] = { -1, -1 };
-+  int result_pipe[2] = { -1, -1 };
-   int errors_pipe[2] = { -1, -1 };
-   pid_t pid;
-   int ret;
-@@ -2870,33 +2877,11 @@ _dbus_get_autolaunch_address (DBusString
-       return FALSE;
-     }
-   
--  if (!_dbus_get_local_machine_uuid_encoded (&uuid))
--    {
--      _DBUS_SET_OOM (error);
--      goto out;
--    }
--  
--  i = 0;
--  argv[i] = "dbus-launch";
--  ++i;
--  argv[i] = "--autolaunch";
--  ++i;
--  argv[i] = _dbus_string_get_data (&uuid);
--  ++i;
--  argv[i] = "--binary-syntax";
--  ++i;
--  argv[i] = "--close-stderr";
--  ++i;
--  argv[i] = NULL;
--  ++i;
--
--  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
--  
--  orig_len = _dbus_string_get_length (address);
-+  orig_len = _dbus_string_get_length (result);
-   
- #define READ_END        0
- #define WRITE_END       1
--  if (pipe (address_pipe) < 0)
-+  if (pipe (result_pipe) < 0)
-     {
-       dbus_set_error (error, _dbus_error_from_errno (errno),
-                       "Failed to create a pipe: %s",
-@@ -2940,7 +2925,7 @@ _dbus_get_autolaunch_address (DBusString
-       _dbus_verbose ("/dev/null fd %d opened\n", fd);
-       
-       /* set-up stdXXX */
--      close (address_pipe[READ_END]);
-+      close (result_pipe[READ_END]);
-       close (errors_pipe[READ_END]);
-       close (0);                /* close stdin */
-       close (1);                /* close stdout */
-@@ -2948,7 +2933,7 @@ _dbus_get_autolaunch_address (DBusString
- 
-       if (dup2 (fd, 0) == -1)
-         _exit (1);
--      if (dup2 (address_pipe[WRITE_END], 1) == -1)
-+      if (dup2 (result_pipe[WRITE_END], 1) == -1)
-         _exit (1);
-       if (dup2 (errors_pipe[WRITE_END], 2) == -1)
-         _exit (1);
-@@ -2963,25 +2948,36 @@ _dbus_get_autolaunch_address (DBusString
-       for (i = 3; i < maxfds; i++)
-         close (i);
- 
--      execv (DBUS_BINDIR "/dbus-launch", argv);
--
--      /* failed, try searching PATH */
--      execvp ("dbus-launch", argv);
-+      /* If it looks fully-qualified, try execv first */
-+      if (progpath[0] == '/')
-+        {
-+          const char *progname;
-+
-+          execv (progpath, (char **) argv);
-+
-+          /* If we failed with a direct exec, try extracting
-+             the binary name and search the PATH for it */
-+          progname = strrchr (progpath, '/');
-+          if (progname != NULL)
-+            execvp (progname+1, (char **) argv);
-+        }
-+      else
-+        execvp (progpath, (char **) argv);
- 
-       /* still nothing, we failed */
-       _exit (1);
-     }
- 
-   /* parent process */
--  close (address_pipe[WRITE_END]);
-+  close (result_pipe[WRITE_END]);
-   close (errors_pipe[WRITE_END]);
--  address_pipe[WRITE_END] = -1;
-+  result_pipe[WRITE_END] = -1;
-   errors_pipe[WRITE_END] = -1;
- 
-   ret = 0;
-   do 
-     {
--      ret = _dbus_read (address_pipe[READ_END], address, 1024);
-+      ret = _dbus_read (result_pipe[READ_END], result, 1024);
-     }
-   while (ret > 0);
- 
-@@ -2994,8 +2990,7 @@ _dbus_get_autolaunch_address (DBusString
- 
-   /* We succeeded if the process exited with status 0 and
-      anything was read */
--  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0 ||
--      _dbus_string_get_length (address) == orig_len)
-+  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0 )
-     {
-       /* The process ended with error */
-       DBusString error_message;
-@@ -3007,14 +3002,14 @@ _dbus_get_autolaunch_address (DBusString
- 	}
-       while (ret > 0);
- 
--      _dbus_string_set_length (address, orig_len);
-+      _dbus_string_set_length (result, orig_len);
-       if (_dbus_string_get_length (&error_message) > 0)
- 	dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
--			"dbus-launch failed to autolaunch D-Bus session: %s",
-+			"Subprocess terminated abnormally with the following error: %s",
- 			_dbus_string_get_data (&error_message));
-       else
- 	dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
--			"Failed to execute dbus-launch to autolaunch D-Bus session");
-+			"Subprocess terminated abnormally without any error message");
-       goto out;
-     }
- 
-@@ -3026,19 +3021,172 @@ _dbus_get_autolaunch_address (DBusString
-   else
-     _DBUS_ASSERT_ERROR_IS_SET (error);
- 
--  if (address_pipe[0] != -1)
--    close (address_pipe[0]);
--  if (address_pipe[1] != -1)
--    close (address_pipe[1]);
-+  if (result_pipe[0] != -1)
-+    close (result_pipe[0]);
-+  if (result_pipe[1] != -1)
-+    close (result_pipe[1]);
-   if (errors_pipe[0] != -1)
-     close (errors_pipe[0]);
-   if (errors_pipe[1] != -1)
-     close (errors_pipe[1]);
- 
-+  return retval;  
-+}
-+
-+/**
-+ * Returns the address of a new session bus.
-+ *
-+ * If successful, returns #TRUE and appends the address to @p
-+ * address. If a failure happens, returns #FALSE and
-+ * sets an error in @p error.
-+ *
-+ * @param address a DBusString where the address can be stored
-+ * @param error a DBusError to store the error in case of failure
-+ * @returns #TRUE on success, #FALSE if an error happened
-+ */
-+dbus_bool_t
-+_dbus_get_autolaunch_address (DBusString *address,
-+                              DBusError  *error)
-+{
-+  static char *argv[6];
-+  int i;
-+  DBusString uuid;
-+  dbus_bool_t retval;
-+  
-+  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
-+  retval = FALSE;
-+
-+  if (!_dbus_string_init (&uuid))
-+    {
-+      _DBUS_SET_OOM (error);
-+      return FALSE;
-+    }
-+  
-+  if (!_dbus_get_local_machine_uuid_encoded (&uuid))
-+    {
-+      _DBUS_SET_OOM (error);
-+      goto out;
-+    }
-+  
-+  i = 0;
-+  argv[i] = "dbus-launch";
-+  ++i;
-+  argv[i] = "--autolaunch";
-+  ++i;
-+  argv[i] = _dbus_string_get_data (&uuid);
-+  ++i;
-+  argv[i] = "--binary-syntax";
-+  ++i;
-+  argv[i] = "--close-stderr";
-+  ++i;
-+  argv[i] = NULL;
-+  ++i;
-+
-+  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
-+
-+  retval = _read_subprocess_line_argv (DBUS_BINDIR "/dbus-launch", 
-+                                       (const char * const*) argv,
-+                                       address, error);
-+
-+ out:
-   _dbus_string_free (&uuid);
-   return retval;
- }
- 
-+#ifdef DBUS_ENABLE_LAUNCHD
-+static dbus_bool_t
-+_dbus_lookup_session_address_launchd (DBusString *address,
-+                                    DBusError  *error)
-+{
-+  static char *argv[4];
-+  int i;
-+  int orig_len;
-+  dbus_bool_t retval;
-+  
-+  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
-+  
-+  i = 0;
-+  argv[i] = "launchctl";
-+  ++i;
-+  argv[i] = "getenv";
-+  ++i;
-+  argv[i] = "DBUS_LAUNCHD_SESSION_BUS_SOCKET";
-+  ++i;
-+  argv[i] = NULL;
-+  ++i;
-+
-+  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
-+
-+  /* from launchd's environment we get only the path to the socket */
-+  if (!_dbus_string_append (address, "unix:path="))
-+  {
-+    _DBUS_SET_OOM (error);
-+    return FALSE;
-+  }
-+
-+  orig_len = _dbus_string_get_length(address);
-+  /* append the process output to address */
-+  if (!_read_subprocess_line_argv(argv[0], (const char * const*) argv,
-+                                  address, error))
-+  {
-+    /* reset the address */
-+    _dbus_string_set_length(address, 0);
-+    return FALSE;
-+  }
-+
-+  /* test if we got something from the subprocess */
-+  if (_dbus_string_get_length(address) == orig_len)
-+  {
-+    /* reset the address */
-+    _dbus_string_set_length(address, 0);
-+    dbus_set_error(error, "no socket path",
-+              "launchd did not provide a socket path, "
-+              "verify that org.freedesktop.dbus-session.plist is loaded!");
-+    return FALSE;
-+  }
-+
-+  /* strip the carriage-return */
-+  _dbus_string_shorten(address, 1);
-+  return TRUE;
-+}
-+#endif
-+
-+/**
-+ * Determines the address of the session bus by querying a
-+ * platform-specific method.  
-+ *
-+ * The first parameter will be a boolean specifying whether
-+ * or not a dynamic session lookup is supported on this platform.
-+ * 
-+ * If supported is TRUE and the return value is #TRUE, the
-+ * address will be  appended to @p address.
-+ * If a failure happens, returns #FALSE and sets an error in 
-+ * @p error.
-+ *
-+ * If supported is FALSE, ignore the return value.
-+ *
-+ * @param address a DBusString where the address can be stored
-+ * @param error a DBusError to store the error in case of failure
-+ * @returns #TRUE on success, #FALSE if an error happened
-+ */
-+dbus_bool_t
-+_dbus_lookup_session_address (dbus_bool_t *supported,
-+                              DBusString  *address,
-+                              DBusError   *error)
-+{
-+#ifdef DBUS_ENABLE_LAUNCHD
-+  *supported = TRUE;
-+  return _dbus_lookup_session_address_launchd (address, error);
-+#else
-+  /* On non-Mac Unix platforms, if the session address isn't already
-+   * set in DBUS_SESSION_BUS_ADDRESS environment variable, we punt and
-+   * fall back to the autolaunch: global default; see 
-+   * init_session_address in dbus/dbus-bus.c. */
-+  *supported = FALSE;
-+  return TRUE;
-+#endif
-+}
-+
- /**
-  * Reads the uuid of the machine we're running on from
-  * the dbus configuration. Optionally try to create it
-diff -Nurp dbus/dbus-sysdeps.h dbus/dbus-sysdeps.h
---- dbus/dbus-sysdeps.h	2009-01-06 23:52:23.000000000 +0100
-+++ dbus/dbus-sysdeps.h	2009-01-10 16:36:24.000000000 +0100
-@@ -468,6 +468,10 @@ void _dbus_log_security (const char *msg
- dbus_bool_t _dbus_get_autolaunch_address (DBusString *address, 
- 					  DBusError *error);
- 
-+dbus_bool_t _dbus_lookup_session_address (dbus_bool_t *supported,
-+                                          DBusString  *address,
-+                                          DBusError   *error);
-+
- /** Type representing a universally unique ID
-  * @todo rename to UUID instead of GUID
-  */
 diff -Nurp doc/Makefile.in doc/Makefile.in
 --- doc/Makefile.in	2009-01-07 01:30:42.000000000 +0100
 +++ doc/Makefile.in	2009-01-10 16:39:18.000000000 +0100
@@ -2402,7 +1599,7 @@ diff -Nurp tools/Makefile.in tools/Makefile.in
 +
 +
 +if test x$have_launchd = xyes; then
-+   DBUS_SESSION_BUS_DEFAULT_ADDRESS="launchd:key=session"
++   DBUS_SESSION_BUS_DEFAULT_ADDRESS="launchd:env=DBUS_LAUNCHD_SESSION_BUS_SOCKET"
 +else
 +   DBUS_SESSION_BUS_DEFAULT_ADDRESS="unix:tmpdir=$DBUS_SESSION_SOCKET_DIR"
 +fi
@@ -2491,3 +1688,999 @@ diff -Nurp tools/Makefile.in tools/Makefile.in
  /* Define to 1 if your C compiler doesn't accept -c and -o together. */
  #undef NO_MINUS_C_MINUS_O
  
+diff --git a/README.launchd b/README.launchd
+--- /dev/null
++++ README.launchd
+@@ -0,0 +1,61 @@
++Launchd[1,2] replaces init, inetd and cron on Mac OS X since 10.4 "Tiger".
++dbus uses this service to provide a common session bus address for each user
++and so deprecates the X11 enabled dbus-launcher.
++
++[1] http://developer.apple.com/MacOsX/launchd.html
++[2] http://launchd.macosforge.org/
++
++
++Setup
++===
++
++Configure with --enable-launchd and --without-x (X11 should not harm but it's
++simply not necessary any more)
++After installation, to prevent a reboot, load the dbus session starter into
++launchd by executing:
++$ launchctl load /Library/LaunchAgents/org.freedesktop.dbus-session.plist
++
++You can change the launch agent dir via configure, but it's not recommended.
++Make sure to execute the above line as the actual user for which you want to
++use a session bus since launchd manages its agents on a per user basis.
++
++
++How it works
++===
++
++Launchd allocates a socket and provides the unix path to it via the variable
++DBUS_LAUNCHD_SESSION_BUS_SOCKET in launchd's environment. Every process
++spawned by launchd (or dbus-daemon, if stared by launchd) can access it through
++its own environment. Other processes can query launchd for it by executing:
++$ launchctl getenv DBUS_LAUNCHD_SESSION_BUS_SOCKET
++However, this is normally done by the dbus client lib for you.
++
++If launchd start dbus-daemon with a config file containing a "launchd:env=FOO"
++address, as the default session config does with env=DBUS_LAUNCHD_SESSION_BUS_SOCKET,
++the daemon will get the file descriptor from launchd and start listening on it.
++The environment variable is used to get the actual socket path which is passed
++to every service spawned by dbus-daemon as a result from autolaunch messages.
++Please note that it's not possible to start dbus-daemon manually when using a
++"launchd:" address. Only child processes of launchd can access the above
++mentioned file descriptor!
++
++To create custom buses just set up an other launch agent. As a quick start copy
++/Library/LaunchAgents/org.freedesktop.dbus-session.plist, change the label
++to i.e. "org.freedesktop.dbus-foo" and change the SecureSocketWithKey value,
++i.e. to "DBUS_LAUNCHD_FOO_BUS_SOCKET". This environment variable has to be set
++in the config file for your new bus in the <listen> element (see session.config).
++Then edit your /Library/LaunchAgents/org.freedesktop.dbus-foo.plist to start
++dbus-daemon with "--config-file=/opt/local/etc/dbus-1/foo.conf" instead of
++"--session". Now load the new plist onto launchd as described in the setup
++section of this document.
++Executing "launchctl export" should now give you two sockets, one in
++DBUS_LAUNCHD_SESSION_BUS_SOCKET and the new DBUS_LAUNCHD_FOO_BUS_SOCKET.
++To connect to this new bus use "launchd:env=DBUS_LAUNCHD_FOO_BUS_SOCKET".
++
++Since Mac OS X 10.5 "Leopard" you can also configure launchd to start
++dbus-daemon on demand as soon as some process connects to the socket. Since
++it's broken on 10.4 this feature is disabled per default. Look at
++/Library/LaunchAgents/org.freedesktop.dbus-session.plist to change it.
++
++On the client side, the envvar DBUS_SESSION_BUS_ADDRESS can be normally used
++but if it's not set, launchd is queried for the session bus socket.
+diff --git a/bus/Makefile.am b/bus/Makefile.am
+--- bus/Makefile.am
++++ bus/Makefile.am
+@@ -9,12 +9,18 @@ EFENCE=
+ 
+ CONFIG_IN_FILES=				\
+ 	session.conf.in				\
+-	system.conf.in
++	system.conf.in				\
++	org.freedesktop.dbus-session.plist.in
+ 
+ config_DATA=					\
+ 	session.conf				\
+ 	system.conf
+ 
++if DBUS_ENABLE_LAUNCHD
++agentdir=$(LAUNCHD_AGENT_DIR)
++agent_DATA=org.freedesktop.dbus-session.plist
++endif
++
+ if DBUS_USE_LIBXML
+ XML_SOURCES=config-loader-libxml.c
+ endif
+diff --git a/bus/org.freedesktop.dbus-session.plist.in b/bus/org.freedesktop.dbus-session.plist.in
+--- /dev/null
++++ bus/org.freedesktop.dbus-session.plist.in
+@@ -0,0 +1,31 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>Label</key>
++	<string>org.freedesktop.dbus-session</string>
++
++	<key>ServiceIPC</key>
++	<true/>
++
++	<!-- bug in 10.4's launchd - on-demand loading does not work -->
++	<key>OnDemand</key>
++	<false />
++
++	<key>ProgramArguments</key>
++	<array>
++		<string>@DBUS_DAEMONDIR@/dbus-daemon</string>
++		<string>--nofork</string>
++		<string>--session</string>
++	</array>
++
++	<key>Sockets</key>
++	<dict>
++		<key>unix_domain_listener</key>
++		<dict>
++			<key>SecureSocketWithKey</key>
++			<string>DBUS_LAUNCHD_SESSION_BUS_SOCKET</string>
++		</dict>
++	</dict>
++</dict>
++</plist>
+diff --git a/bus/session.conf.in b/bus/session.conf.in
+--- bus/session.conf.in
++++ bus/session.conf.in
+@@ -12,7 +12,7 @@
+        the behavior of child processes. -->
+   <keep_umask/>
+ 
+-  <listen>unix:tmpdir=@DBUS_SESSION_SOCKET_DIR@</listen>
++  <listen>@DBUS_SESSION_BUS_DEFAULT_ADDRESS@</listen>
+ 
+   <standard_session_servicedirs />
+ 
+diff --git a/dbus/Makefile.am b/dbus/Makefile.am
+--- dbus/Makefile.am
++++ dbus/Makefile.am
+@@ -70,6 +70,8 @@ DBUS_LIB_SOURCES=				\
+ 	dbus-server.c				\
+ 	dbus-server-debug-pipe.c		\
+ 	dbus-server-debug-pipe.h		\
++	dbus-server-launchd.c			\
++	dbus-server-launchd.h			\
+ 	dbus-server-protected.h			\
+ 	dbus-server-socket.c			\
+ 	dbus-server-socket.h			\
+diff --git a/dbus/dbus-bus.c b/dbus/dbus-bus.c
+--- dbus/dbus-bus.c
++++ dbus/dbus-bus.c
+@@ -22,6 +22,7 @@
+  *
+  */
+ 
++#include <config.h>
+ #include "dbus-bus.h"
+ #include "dbus-protocol.h"
+ #include "dbus-internals.h"
+@@ -29,7 +30,7 @@
+ #include "dbus-marshal-validate.h"
+ #include "dbus-threads-internal.h"
+ #include "dbus-connection-internal.h"
+-#include <string.h>
++#include "dbus-string.h"
+ 
+ /**
+  * @defgroup DBusBus Message bus APIs
+@@ -147,6 +148,63 @@ get_from_env (char           **connection_p,
+ }
+ 
+ static dbus_bool_t
++init_session_address (void)
++{
++  dbus_bool_t retval;
++ 
++  retval = FALSE;
++
++  /* First, look in the environment.  This is the normal case on 
++   * freedesktop.org/Unix systems. */
++  get_from_env (&bus_connection_addresses[DBUS_BUS_SESSION],
++                     "DBUS_SESSION_BUS_ADDRESS");
++  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
++    {
++      dbus_bool_t supported;
++      DBusString addr;
++      DBusError error = DBUS_ERROR_INIT;
++
++      if (!_dbus_string_init (&addr))
++        return FALSE;
++
++      supported = FALSE;
++      /* So it's not in the environment - let's try a platform-specific method.
++       * On MacOS, this involves asking launchd.  On Windows (not specified yet)
++       * we might do a COM lookup.
++       * Ignore errors - if we failed, fall back to autolaunch. */
++      retval = _dbus_lookup_session_address (&supported, &addr, &error);
++      if (supported && retval)
++        {
++          retval =_dbus_string_steal_data (&addr, &bus_connection_addresses[DBUS_BUS_SESSION]);
++        }
++      else if (supported && !retval)
++        {
++          if (dbus_error_is_set(&error))
++            _dbus_warn ("Dynamic session lookup supported but failed: %s\n", error.message);
++          else
++            _dbus_warn ("Dynamic session lookup supported but failed silently\n");
++        }
++      _dbus_string_free (&addr);
++    }
++  else
++    retval = TRUE;
++
++  if (!retval)
++    return FALSE;
++
++  /* The DBUS_SESSION_BUS_DEFAULT_ADDRESS should have really been named
++   * DBUS_SESSION_BUS_FALLBACK_ADDRESS. 
++   */
++  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
++    bus_connection_addresses[DBUS_BUS_SESSION] =
++      _dbus_strdup (DBUS_SESSION_BUS_DEFAULT_ADDRESS);
++  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
++    return FALSE;
++
++  return TRUE;
++}
++
++static dbus_bool_t
+ init_connections_unlocked (void)
+ {
+   if (!initialized)
+@@ -198,17 +256,9 @@ init_connections_unlocked (void)
+         {
+           _dbus_verbose ("Filling in session bus address...\n");
+           
+-          if (!get_from_env (&bus_connection_addresses[DBUS_BUS_SESSION],
+-                             "DBUS_SESSION_BUS_ADDRESS"))
++          if (!init_session_address ())
+             return FALSE;
+ 
+-	  if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
+-	    bus_connection_addresses[DBUS_BUS_SESSION] =
+-	      _dbus_strdup (DBUS_SESSION_BUS_DEFAULT_ADDRESS);
+-          
+-          if (bus_connection_addresses[DBUS_BUS_SESSION] == NULL)
+-             return FALSE;
+-
+           _dbus_verbose ("  \"%s\"\n", bus_connection_addresses[DBUS_BUS_SESSION] ?
+                          bus_connection_addresses[DBUS_BUS_SESSION] : "none set");
+         }
+diff --git a/dbus/dbus-server-launchd.c b/dbus/dbus-server-launchd.c
+--- /dev/null
++++ dbus/dbus-server-launchd.c
+@@ -0,0 +1,176 @@
++/* dbus-server-launchd.c Server methods for interacting with launchd.
++ * Copyright (C) 2007, Tanner Lovelace <lovelace@wayfarer.org>
++ * Copyright (C) 2008, Benjamin Reed <rangerrick@befunk.com>
++ *
++ * Permission is hereby granted, free of charge, to any person
++ * obtaining a copy of this software and associated documentation
++ * files (the "Software"), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy,
++ * modify, merge, publish, distribute, sublicense, and/or sell copies
++ * of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be
++ * included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#include <config.h>
++#include "dbus-server-launchd.h"
++
++/**
++ * @defgroup DBusServerLaunchd DBusServer implementations for Launchd
++ * @ingroup  DBusInternals
++ * @brief Implementation details of DBusServer with Launchd support
++ *
++ * @{
++ */
++
++#ifdef DBUS_ENABLE_LAUNCHD
++#include <launch.h>
++#include <errno.h>
++
++#include "dbus-server-socket.h"
++
++/* put other private launchd functions here */
++
++#endif /* DBUS_ENABLE_LAUNCHD */
++
++/**
++ * @brief Creates a new server from launchd.
++ *
++ * launchd has allocaed a socket for us. We now query launchd for the
++ * file descriptor of this socket and create a server on it.
++ * In addition we inherit launchd's environment which holds a variable
++ * containing the path to the socket. This is used to init the server's
++ * address which is passed to autolaunched services.
++ *
++ * @param launchd_env_var the environment variable which holds the unix path to the socket
++ * @param error location to store reason for failure.
++ * @returns the new server, or #NULL on failure.
++ */
++
++DBusServer*
++_dbus_server_new_for_launchd (const char *launchd_env_var,
++                              DBusError  *error)
++{
++#ifdef DBUS_ENABLE_LAUNCHD
++  DBusServer *server;
++  DBusString address;
++  int launchd_fd;
++  launch_data_t sockets_dict, checkin_response;
++  launch_data_t checkin_request;
++  launch_data_t listening_fd_array, listening_fd;
++  const char * launchd_socket_path = _dbus_getenv(launchd_env_var);
++
++  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
++
++  if (*launchd_socket_path == '\0')
++    {
++      dbus_set_error (error, DBUS_ERROR_BAD_ADDRESS,
++                      "launchd's environment variable %s is empty, but should contain a socket path");
++      return NULL;
++    }
++
++  if (!_dbus_string_init (&address))
++    {
++      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
++      return NULL;
++    }
++  if (!_dbus_string_append (&address, "unix:path="))
++    {
++      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
++      goto l_failed_0;
++    }
++  if (!_dbus_string_append (&address, launchd_socket_path))
++    {
++      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
++      goto l_failed_0;
++    }
++
++  if ((checkin_request = launch_data_new_string (LAUNCH_KEY_CHECKIN)) == NULL) 
++    {
++      dbus_set_error (error, DBUS_ERROR_NO_MEMORY, 
++                      "launch_data_new_string(\"%s\") Unable to create string.\n", LAUNCH_KEY_CHECKIN);
++      goto l_failed_0;
++    }
++
++  if ((checkin_response = launch_msg (checkin_request)) == NULL) 
++    {
++      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "launch_msg(\"%s\") IPC failure: %s\n", 
++                      LAUNCH_KEY_CHECKIN, strerror (errno));
++      goto l_failed_0;
++    }
++
++  if (LAUNCH_DATA_ERRNO == launch_data_get_type (checkin_response)) 
++    {
++      dbus_set_error (error, DBUS_ERROR_FAILED, "Check-in failed: %s\n", 
++                      strerror (launch_data_get_errno (checkin_response)));
++      goto l_failed_0;
++    }
++
++  sockets_dict = launch_data_dict_lookup (checkin_response, LAUNCH_JOBKEY_SOCKETS);
++  if (NULL == sockets_dict) 
++    {
++      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "No sockets found to answer requests on!\n");
++      goto l_failed_0;
++    }
++
++  listening_fd_array = launch_data_dict_lookup (sockets_dict, "unix_domain_listener");
++  if (NULL == listening_fd_array) 
++    {
++      dbus_set_error (error, DBUS_ERROR_IO_ERROR, "No known sockets found to answer requests on!\n");
++      goto l_failed_0;
++    }
++
++  if (launch_data_array_get_count (listening_fd_array) != 1) 
++    {
++      dbus_set_error (error, DBUS_ERROR_LIMITS_EXCEEDED, 
++                      "Expected 1 socket from launchd, got %d.\n", 
++                      launch_data_array_get_count (listening_fd_array));
++      goto l_failed_0;
++    }
++
++  listening_fd = launch_data_array_get_index (listening_fd_array, 0);
++  launchd_fd = launch_data_get_fd (listening_fd);
++
++  _dbus_fd_set_close_on_exec (launchd_fd);
++
++  if (launchd_fd < 0)
++    {
++      _DBUS_ASSERT_ERROR_IS_SET (error);
++      goto l_failed_0;
++    }
++
++  server = _dbus_server_new_for_socket (&launchd_fd, 1, &address);
++  if (server == NULL)
++    {
++      dbus_set_error (error, DBUS_ERROR_NO_SERVER, "Unable to listen on launchd fd %d.", launchd_fd);
++      goto l_failed_0;
++    }
++
++  _dbus_string_free (&address);
++
++  return server;
++
++ l_failed_0:
++  _dbus_string_free (&address);
++
++  return NULL;
++#else /* DBUS_ENABLE_LAUNCHD */
++  dbus_set_error(error, DBUS_ERROR_BAD_ADDRESS,
++                 "address type 'launchd' requested, but launchd support not compiled in");
++  return NULL;
++#endif
++}
++
++/** @} */
++
+diff --git a/dbus/dbus-server-launchd.h b/dbus/dbus-server-launchd.h
+--- /dev/null
++++ dbus/dbus-server-launchd.h
+@@ -0,0 +1,38 @@
++/* dbus-server-launchd.h Server methods for interacting with launchd.
++* Copyright (C) 2008, Benjamin Reed <rangerrick@befunk.com>
++*
++* Permission is hereby granted, free of charge, to any person
++* obtaining a copy of this software and associated documentation
++* files (the "Software"), to deal in the Software without
++* restriction, including without limitation the rights to use, copy,
++* modify, merge, publish, distribute, sublicense, and/or sell copies
++* of the Software, and to permit persons to whom the Software is
++* furnished to do so, subject to the following conditions:
++*
++* The above copyright notice and this permission notice shall be
++* included in all copies or substantial portions of the Software.
++*
++* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++* HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++* WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++* DEALINGS IN THE SOFTWARE.
++*/
++
++#ifndef DBUS_SERVER_LAUNCHD_H
++#define DBUS_SERVER_LAUNCHD_H
++
++#include <dbus/dbus-internals.h>
++#include <dbus/dbus-server-protected.h>
++
++DBUS_BEGIN_DECLS
++
++DBusServer* _dbus_server_new_for_launchd (const char *launchd_env_var,
++                                          DBusError  *error);
++
++DBUS_END_DECLS
++
++#endif /* DBUS_SERVER_LAUNCHD_H */
+diff --git a/dbus/dbus-server-unix.c b/dbus/dbus-server-unix.c
+--- dbus/dbus-server-unix.c
++++ dbus/dbus-server-unix.c
+@@ -21,9 +21,11 @@
+  *
+  */
+ 
++#include <config.h>
+ #include "dbus-internals.h"
+ #include "dbus-server-unix.h"
+ #include "dbus-server-socket.h"
++#include "dbus-server-launchd.h"
+ #include "dbus-transport-unix.h"
+ #include "dbus-connection-internal.h"
+ #include "dbus-sysdeps-unix.h"
+@@ -145,6 +147,27 @@ _dbus_server_listen_platform_specific (DBusAddressEntry *entry,
+           return DBUS_SERVER_LISTEN_DID_NOT_CONNECT;
+         }
+     }
++  else if (strcmp (method, "launchd") == 0)
++    {
++      const char *launchd_env_var = dbus_address_entry_get_value (entry, "env");
++      if (launchd_env_var == NULL)
++        {
++          _dbus_set_bad_address (error, "launchd", "env", NULL);
++          return DBUS_SERVER_LISTEN_DID_NOT_CONNECT;
++        }
++      *server_p = _dbus_server_new_for_launchd (launchd_env_var, error);
++
++      if (*server_p != NULL)
++        {
++          _DBUS_ASSERT_ERROR_IS_CLEAR(error);
++          return DBUS_SERVER_LISTEN_OK;
++        }
++      else
++        {
++          _DBUS_ASSERT_ERROR_IS_SET(error);
++          return DBUS_SERVER_LISTEN_DID_NOT_CONNECT;
++        }
++    }
+   else
+     {
+       /* If we don't handle the method, we return NULL with the
+diff --git a/dbus/dbus-sysdeps-unix.c b/dbus/dbus-sysdeps-unix.c
+--- dbus/dbus-sysdeps-unix.c
++++ dbus/dbus-sysdeps-unix.c
+@@ -2841,23 +2841,30 @@ _dbus_get_tmpdir(void)
+ }
+ 
+ /**
+- * Determines the address of the session bus by querying a
+- * platform-specific method.
++ * Execute a subprocess, returning up to 1024 bytes of output
++ * into @p result.
+  *
+- * If successful, returns #TRUE and appends the address to @p
+- * address. If a failure happens, returns #FALSE and
++ * If successful, returns #TRUE and appends the output to @p
++ * result. If a failure happens, returns #FALSE and
+  * sets an error in @p error.
+  *
+- * @param address a DBusString where the address can be stored
++ * @note It's not an error if the subprocess terminates normally
++ * without writing any data to stdout. Verify the @p result length
++ * before and after this function call to cover this case.
++ *
++ * @param progname initial path to exec
++ * @param argv NULL-terminated list of arguments
++ * @param result a DBusString where the output can be append
+  * @param error a DBusError to store the error in case of failure
+  * @returns #TRUE on success, #FALSE if an error happened
+  */
+-dbus_bool_t
+-_dbus_get_autolaunch_address (DBusString *address,
+-                              DBusError  *error)
++static dbus_bool_t
++_read_subprocess_line_argv (const char *progpath,
++                            char       * const *argv,
++                            DBusString *result,
++                            DBusError  *error)
+ {
+-  static char *argv[6];
+-  int address_pipe[2] = { -1, -1 };
++  int result_pipe[2] = { -1, -1 };
+   int errors_pipe[2] = { -1, -1 };
+   pid_t pid;
+   int ret;
+@@ -2876,48 +2883,26 @@ _dbus_get_autolaunch_address (DBusString *address,
+       return FALSE;
+     }
+   
+-  if (!_dbus_get_local_machine_uuid_encoded (&uuid))
+-    {
+-      _DBUS_SET_OOM (error);
+-      goto out;
+-    }
+-  
+-  i = 0;
+-  argv[i] = "dbus-launch";
+-  ++i;
+-  argv[i] = "--autolaunch";
+-  ++i;
+-  argv[i] = _dbus_string_get_data (&uuid);
+-  ++i;
+-  argv[i] = "--binary-syntax";
+-  ++i;
+-  argv[i] = "--close-stderr";
+-  ++i;
+-  argv[i] = NULL;
+-  ++i;
+-
+-  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
+-  
+-  orig_len = _dbus_string_get_length (address);
++  orig_len = _dbus_string_get_length (result);
+   
+ #define READ_END        0
+ #define WRITE_END       1
+-  if (pipe (address_pipe) < 0)
++  if (pipe (result_pipe) < 0)
+     {
+       dbus_set_error (error, _dbus_error_from_errno (errno),
+-                      "Failed to create a pipe: %s",
+-                      _dbus_strerror (errno));
+-      _dbus_verbose ("Failed to create a pipe to call dbus-launch: %s\n",
+-                     _dbus_strerror (errno));
++                      "Failed to create a pipe to call %s: %s",
++                      progpath, _dbus_strerror (errno));
++      _dbus_verbose ("Failed to create a pipe to call %s: %s\n",
++                     progpath, _dbus_strerror (errno));
+       goto out;
+     }
+   if (pipe (errors_pipe) < 0)
+     {
+       dbus_set_error (error, _dbus_error_from_errno (errno),
+-                      "Failed to create a pipe: %s",
+-                      _dbus_strerror (errno));
+-      _dbus_verbose ("Failed to create a pipe to call dbus-launch: %s\n",
+-                     _dbus_strerror (errno));
++                      "Failed to create a pipe to call %s: %s",
++                      progpath, _dbus_strerror (errno));
++      _dbus_verbose ("Failed to create a pipe to call %s: %s\n",
++                     progpath, _dbus_strerror (errno));
+       goto out;
+     }
+ 
+@@ -2925,10 +2910,10 @@ _dbus_get_autolaunch_address (DBusString *address,
+   if (pid < 0)
+     {
+       dbus_set_error (error, _dbus_error_from_errno (errno),
+-                      "Failed to fork(): %s",
+-                      _dbus_strerror (errno));
+-      _dbus_verbose ("Failed to fork() to call dbus-launch: %s\n",
+-                     _dbus_strerror (errno));
++                      "Failed to fork() to call %s: %s",
++                      progpath, _dbus_strerror (errno));
++      _dbus_verbose ("Failed to fork() to call %s: %s\n",
++                     progpath, _dbus_strerror (errno));
+       goto out;
+     }
+ 
+@@ -2946,7 +2931,7 @@ _dbus_get_autolaunch_address (DBusString *address,
+       _dbus_verbose ("/dev/null fd %d opened\n", fd);
+       
+       /* set-up stdXXX */
+-      close (address_pipe[READ_END]);
++      close (result_pipe[READ_END]);
+       close (errors_pipe[READ_END]);
+       close (0);                /* close stdin */
+       close (1);                /* close stdout */
+@@ -2954,7 +2939,7 @@ _dbus_get_autolaunch_address (DBusString *address,
+ 
+       if (dup2 (fd, 0) == -1)
+         _exit (1);
+-      if (dup2 (address_pipe[WRITE_END], 1) == -1)
++      if (dup2 (result_pipe[WRITE_END], 1) == -1)
+         _exit (1);
+       if (dup2 (errors_pipe[WRITE_END], 2) == -1)
+         _exit (1);
+@@ -2969,25 +2954,26 @@ _dbus_get_autolaunch_address (DBusString *address,
+       for (i = 3; i < maxfds; i++)
+         close (i);
+ 
+-      execv (DBUS_BINDIR "/dbus-launch", argv);
+-
+-      /* failed, try searching PATH */
+-      execvp ("dbus-launch", argv);
++      /* If it looks fully-qualified, try execv first */
++      if (progpath[0] == '/')
++        execv (progpath, argv);
++      else
++        execvp (progpath, argv);
+ 
+       /* still nothing, we failed */
+       _exit (1);
+     }
+ 
+   /* parent process */
+-  close (address_pipe[WRITE_END]);
++  close (result_pipe[WRITE_END]);
+   close (errors_pipe[WRITE_END]);
+-  address_pipe[WRITE_END] = -1;
++  result_pipe[WRITE_END] = -1;
+   errors_pipe[WRITE_END] = -1;
+ 
+   ret = 0;
+   do 
+     {
+-      ret = _dbus_read (address_pipe[READ_END], address, 1024);
++      ret = _dbus_read (result_pipe[READ_END], result, 1024);
+     }
+   while (ret > 0);
+ 
+@@ -3000,27 +2986,27 @@ _dbus_get_autolaunch_address (DBusString *address,
+ 
+   /* We succeeded if the process exited with status 0 and
+      anything was read */
+-  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0 ||
+-      _dbus_string_get_length (address) == orig_len)
++  if (!WIFEXITED (status) || WEXITSTATUS (status) != 0 )
+     {
+       /* The process ended with error */
+       DBusString error_message;
+       _dbus_string_init (&error_message);
+       ret = 0;
+       do
+-	{
+-	  ret = _dbus_read (errors_pipe[READ_END], &error_message, 1024);
+-	}
++        {
++          ret = _dbus_read (errors_pipe[READ_END], &error_message, 1024);
++        }
+       while (ret > 0);
+ 
+-      _dbus_string_set_length (address, orig_len);
++      _dbus_string_set_length (result, orig_len);
+       if (_dbus_string_get_length (&error_message) > 0)
+-	dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
+-			"dbus-launch failed to autolaunch D-Bus session: %s",
+-			_dbus_string_get_data (&error_message));
++        dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
++                        "%s terminated abnormally with the following error: %s",
++                        progpath, _dbus_string_get_data (&error_message));
+       else
+-	dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
+-			"Failed to execute dbus-launch to autolaunch D-Bus session");
++        dbus_set_error (error, DBUS_ERROR_SPAWN_EXEC_FAILED,
++                        "%s terminated abnormally without any error message",
++                        progpath);
+       goto out;
+     }
+ 
+@@ -3032,20 +3018,202 @@ _dbus_get_autolaunch_address (DBusString *address,
+   else
+     _DBUS_ASSERT_ERROR_IS_SET (error);
+ 
+-  if (address_pipe[0] != -1)
+-    close (address_pipe[0]);
+-  if (address_pipe[1] != -1)
+-    close (address_pipe[1]);
++  if (result_pipe[0] != -1)
++    close (result_pipe[0]);
++  if (result_pipe[1] != -1)
++    close (result_pipe[1]);
+   if (errors_pipe[0] != -1)
+     close (errors_pipe[0]);
+   if (errors_pipe[1] != -1)
+     close (errors_pipe[1]);
+ 
++  return retval;  
++}
++
++/**
++ * Returns the address of a new session bus.
++ *
++ * If successful, returns #TRUE and appends the address to @p
++ * address. If a failure happens, returns #FALSE and
++ * sets an error in @p error.
++ *
++ * @param address a DBusString where the address can be stored
++ * @param error a DBusError to store the error in case of failure
++ * @returns #TRUE on success, #FALSE if an error happened
++ */
++dbus_bool_t
++_dbus_get_autolaunch_address (DBusString *address,
++                              DBusError  *error)
++{
++  static char *argv[6];
++  int i;
++  DBusString uuid;
++  dbus_bool_t retval;
++  
++  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
++  retval = FALSE;
++
++  if (!_dbus_string_init (&uuid))
++    {
++      _DBUS_SET_OOM (error);
++      return FALSE;
++    }
++  
++  if (!_dbus_get_local_machine_uuid_encoded (&uuid))
++    {
++      _DBUS_SET_OOM (error);
++      goto out;
++    }
++  
++  i = 0;
++  argv[i] = "dbus-launch";
++  ++i;
++  argv[i] = "--autolaunch";
++  ++i;
++  argv[i] = _dbus_string_get_data (&uuid);
++  ++i;
++  argv[i] = "--binary-syntax";
++  ++i;
++  argv[i] = "--close-stderr";
++  ++i;
++  argv[i] = NULL;
++  ++i;
++
++  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
++
++  retval = _read_subprocess_line_argv (DBUS_BINDIR "/dbus-launch", 
++                                       argv, address, error);
++
++ out:
+   _dbus_string_free (&uuid);
+   return retval;
+ }
+ 
+ /**
++ * quries launchd for a specific env var which holds the socket path.
++ * @param launchd_env_var the env var to look up
++ * @param error a DBusError to store the error in case of failure
++ * @return the value of the env var
++ */
++const char *
++_dbus_lookup_launchd_socket (const char *launchd_env_var,
++                             DBusError  *error)
++{
++#ifdef DBUS_ENABLE_LAUNCHD
++  char *argv[4];
++  int i;
++  DBusString socket_path;
++  
++  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
++
++  if (!_dbus_string_init (&socket_path))
++    {
++      _DBUS_SET_OOM (error);
++      return FALSE;
++    }
++  
++  i = 0;
++  argv[i] = "launchctl";
++  ++i;
++  argv[i] = "getenv";
++  ++i;
++  argv[i] = (char*)launchd_env_var;
++  ++i;
++  argv[i] = NULL;
++  ++i;
++
++  _dbus_assert (i == _DBUS_N_ELEMENTS (argv));
++
++  if (!_read_subprocess_line_argv(argv[0], argv, &socket_path, error))
++    {
++      _dbus_string_free(&socket_path);
++      return NULL;
++    }
++
++  /* no error, but no result either */
++  if (_dbus_string_get_length(&socket_path) == 0)
++    {
++      _dbus_string_free(&socket_path);
++      return NULL;
++    }
++
++  /* strip the carriage-return */
++  _dbus_string_shorten(&socket_path, 1);
++  return _dbus_string_get_const_data(&socket_path);
++#else /* DBUS_ENABLE_LAUNCHD */
++  dbus_set_error(error, DBUS_ERROR_NOT_SUPPORTED,
++                "can't lookup socket from launchd; launchd support not compiled in");
++  return NULL;
++#endif
++}
++
++static dbus_bool_t
++_dbus_lookup_session_address_launchd (DBusString *address,
++                                    DBusError  *error)
++{
++  const char *launchd_socket = _dbus_lookup_launchd_socket ("DBUS_LAUNCHD_SESSION_BUS_SOCKET",
++                                                            error);
++  if (dbus_error_is_set(error))
++    return FALSE;
++  if (launchd_socket == NULL)
++    {
++      dbus_set_error(error, "no socket path",
++                "launchd did not provide a socket path, "
++                "verify that org.freedesktop.dbus-session.plist is loaded!");
++      return FALSE;
++    }
++  if (!_dbus_string_append (address, "unix:path="))
++    {
++      _DBUS_SET_OOM (error);
++      return FALSE;
++    }
++  if (!_dbus_string_append (address, launchd_socket))
++    {
++      _DBUS_SET_OOM (error);
++      return FALSE;
++    }
++
++  return TRUE;
++}
++
++/**
++ * Determines the address of the session bus by querying a
++ * platform-specific method.  
++ *
++ * The first parameter will be a boolean specifying whether
++ * or not a dynamic session lookup is supported on this platform.
++ * 
++ * If supported is TRUE and the return value is #TRUE, the
++ * address will be  appended to @p address.
++ * If a failure happens, returns #FALSE and sets an error in 
++ * @p error.
++ *
++ * If supported is FALSE, ignore the return value.
++ *
++ * @param supported returns whether this method is supported
++ * @param address a DBusString where the address can be stored
++ * @param error a DBusError to store the error in case of failure
++ * @returns #TRUE on success, #FALSE if an error happened
++ */
++dbus_bool_t
++_dbus_lookup_session_address (dbus_bool_t *supported,
++                              DBusString  *address,
++                              DBusError   *error)
++{
++#ifdef DBUS_ENABLE_LAUNCHD
++  *supported = TRUE;
++  return _dbus_lookup_session_address_launchd (address, error);
++#else
++  /* On non-Mac Unix platforms, if the session address isn't already
++   * set in DBUS_SESSION_BUS_ADDRESS environment variable, we punt and
++   * fall back to the autolaunch: global default; see 
++   * init_session_address in dbus/dbus-bus.c. */
++  *supported = FALSE;
++  return TRUE;
++#endif
++}
++
++/**
+  * Reads the uuid of the machine we're running on from
+  * the dbus configuration. Optionally try to create it
+  * (only root can do this usually).
+diff --git a/dbus/dbus-sysdeps-unix.h b/dbus/dbus-sysdeps-unix.h
+--- dbus/dbus-sysdeps-unix.h
++++ dbus/dbus-sysdeps-unix.h
+@@ -77,6 +77,9 @@ dbus_bool_t _dbus_read_credentials (int               client_fd,
+ dbus_bool_t _dbus_send_credentials (int              server_fd,
+                                     DBusError       *error);
+ 
++const char *_dbus_lookup_launchd_socket (const char *launchd_env_var,
++                                         DBusError  *error);
++
+ /** Information about a UNIX user */
+ typedef struct DBusUserInfo  DBusUserInfo;
+ /** Information about a UNIX group */
+diff --git a/dbus/dbus-sysdeps.h b/dbus/dbus-sysdeps.h
+--- dbus/dbus-sysdeps.h
++++ dbus/dbus-sysdeps.h
+@@ -468,6 +468,10 @@ void _dbus_log_security (const char *msg, va_list args);
+ dbus_bool_t _dbus_get_autolaunch_address (DBusString *address, 
+ 					  DBusError *error);
+ 
++dbus_bool_t _dbus_lookup_session_address (dbus_bool_t *supported,
++                                          DBusString  *address,
++                                          DBusError   *error);
++
+ /** Type representing a universally unique ID
+  * @todo rename to UUID instead of GUID
+  */
+diff --git a/dbus/dbus-transport-unix.c b/dbus/dbus-transport-unix.c
+--- dbus/dbus-transport-unix.c
++++ dbus/dbus-transport-unix.c
+@@ -171,6 +171,34 @@ _dbus_transport_open_platform_specific (DBusAddressEntry  *entry,
+           return DBUS_TRANSPORT_OPEN_OK;
+         }      
+     }
++  else if (strcmp (method, "launchd") == 0)
++    {
++      const char *launchd_env_var = dbus_address_entry_get_value (entry, "env");
++      if (launchd_env_var == NULL)
++        {
++          _dbus_set_bad_address (error, "launchd", "env", NULL);
++          return DBUS_TRANSPORT_OPEN_BAD_ADDRESS;
++        }
++
++      const char *launchd_socket = _dbus_lookup_launchd_socket (launchd_env_var, error);
++      if (launchd_socket)
++        *transport_p = _dbus_transport_new_for_domain_socket (launchd_socket, FALSE,
++                                                           error);
++      else
++        dbus_set_error(error, DBUS_ERROR_BAD_ADDRESS,
++                       "launchd's env var %s does not exist", launchd_env_var);
++
++      if (*transport_p == NULL)
++        {
++          _DBUS_ASSERT_ERROR_IS_SET (error);
++          return DBUS_TRANSPORT_OPEN_DID_NOT_CONNECT;
++        }
++      else
++        {
++          _DBUS_ASSERT_ERROR_IS_CLEAR (error);
++          return DBUS_TRANSPORT_OPEN_OK;
++        }
++    }
+   else
+     {
+       _DBUS_ASSERT_ERROR_IS_CLEAR (error);
