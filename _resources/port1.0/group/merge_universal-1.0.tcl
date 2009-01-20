@@ -224,7 +224,7 @@ variant universal {
                                 }
                                 if { ${dontdiff}==yes } {
                                     # user has specified that diff does not work
-                                    # attempt to give each file a unique name and create a new file which includes one of the origional depending on the arch
+                                    # attempt to give each file a unique name and create a new file which includes one of the original depending on the arch
 
                                     set fh [open ${dir}/${arch1}-${fl} w 0644]
                                     puts ${fh} "#include \"${arch1}-${fl}\""
