@@ -89,11 +89,12 @@ variant universal {
             }
             configure.cflags-append    ${archf}
             configure.cxxflags-append  ${archf}
+            configure.ldflags-append  ${archf}
 
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append  $merger_configure_env(${arch})
             }
-
+            
             # Don't set the --host unless we have to.
             set host ""
             if { ${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64") } {
@@ -119,6 +120,11 @@ variant universal {
                 configure.args-append  $merger_configure_args(${arch})
             }
 
+            set configure_cc_save ${configure.cc}
+            set configure_cxx_save ${configure.cxx}
+            configure.cc   ${configure.cc}  ${archf}
+            configure.cxx  ${configure.cxx} ${archf}
+
             set worksrcpathSave  ${worksrcpath}
             set worksrcpath  ${workpath}/${arch}
 
@@ -126,6 +132,8 @@ variant universal {
 
             # Undo changes to the configure related variables
             set worksrcpath  ${worksrcpathSave}
+            configure.cc   ${configure_cc_save}
+            configure.cxx  ${configure_cxx_save}
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-delete  $merger_configure_args(${arch})
             }
@@ -133,6 +141,7 @@ variant universal {
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-delete  $merger_configure_env(${arch})
             }
+            configure.ldflags-delete  ${archf}
             configure.cxxflags-delete ${archf}
             configure.cflags-delete ${archf}
         }
