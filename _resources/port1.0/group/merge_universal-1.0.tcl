@@ -142,11 +142,11 @@ variant universal {
         foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running build for architecture ${arch}"
             build.dir  ${workpath}/${arch}
-			build_main
-		}
+            build_main
+        }
     }
 
-	destroot {
+    destroot {
         foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running destroot for architecture ${arch}"
             copy ${destroot} ${workpath}/destroot-${arch}
