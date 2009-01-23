@@ -46,47 +46,47 @@ set haskell.compiler_list {ghc}
 
 # Configuration for each compiler
 array set haskell.compiler_configuration {
-   ghc {port       ghc
-        compiler   ${prefix}/bin/ghc}
+    ghc {port       ghc
+         compiler   ${prefix}/bin/ghc}
 }
 
 proc haskell.setup {package version {compiler ghc}} {
-   global haskell.compiler_list
-   global haskell.compiler_configuration
-   global homepage prefix configure.cmd destroot worksrcpath name
+    global haskell.compiler_list
+    global haskell.compiler_configuration
+    global homepage prefix configure.cmd destroot worksrcpath name
 
-   if {![info exists haskell.compiler_configuration($compiler)]} {
-      return -code error "Compiler ${compiler} not currently supported"
-   }
-   array set compiler_config [lindex [array get haskell.compiler_configuration $compiler] 1]
-   name                hs-[string tolower ${package}]
-   version             ${version}
-   categories          devel haskell
-   homepage            http://hackage.haskell.org
-   master_sites        ${homepage}/packages/archive/${package}/${version}
-   distname            ${package}-${version}
-   depends_build       port:${compiler_config(port)}
-   configure.cmd       runhaskell
-   configure.pre_args
-   configure.args      Setup configure --prefix=${prefix} --with-compiler=[subst ${compiler_config(compiler)}]
-   build.cmd           ${configure.cmd}
-   build.args          Setup build
-   build.target
-   destroot.cmd        ${configure.cmd}
-   destroot.destdir
-   destroot.target     Setup copy --destdir=${destroot}
-   post-destroot {
-      system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
-      system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
-      xinstall -m 755 -d ${destroot}${prefix}/libexec/${name}
-      xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
-         ${destroot}${prefix}/libexec/${name}
-   }
-   post-activate {
-      system "${prefix}/libexec/${name}/register.sh"
-   }
-#   pre-deactivate {
-#      system "${prefix}/libexec/${name}/unregister.sh"
-#   }
+    if {![info exists haskell.compiler_configuration($compiler)]} {
+        return -code error "Compiler ${compiler} not currently supported"
+    }
+    array set compiler_config [lindex [array get haskell.compiler_configuration $compiler] 1]
+    name                hs-[string tolower ${package}]
+    version             ${version}
+    categories          devel haskell
+    homepage            http://hackage.haskell.org
+    master_sites        ${homepage}/packages/archive/${package}/${version}
+    distname            ${package}-${version}
+    depends_build       port:${compiler_config(port)}
+    configure.cmd       runhaskell
+    configure.pre_args
+    configure.args      Setup configure --prefix=${prefix} --with-compiler=[subst ${compiler_config(compiler)}]
+    build.cmd           ${configure.cmd}
+    build.args          Setup build
+    build.target
+    destroot.cmd        ${configure.cmd}
+    destroot.destdir
+    destroot.target     Setup copy --destdir=${destroot}
+    post-destroot {
+        system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
+        system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
+        xinstall -m 755 -d ${destroot}${prefix}/libexec/${name}
+        xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
+            ${destroot}${prefix}/libexec/${name}
+    }
+    post-activate {
+        system "${prefix}/libexec/${name}/register.sh"
+    }
+#    pre-deactivate {
+#        system "${prefix}/libexec/${name}/unregister.sh"
+#    }
 }
 
