@@ -53,7 +53,7 @@ array set haskell.compiler_configuration {
 proc haskell.setup {package version {compiler ghc}} {
     global haskell.compiler_list
     global haskell.compiler_configuration
-    global homepage prefix configure.cmd destroot worksrcpath name
+    global homepage prefix configure.cmd destroot worksrcpath name master_sites
 
     if {![info exists haskell.compiler_configuration($compiler)]} {
         return -code error "Compiler ${compiler} not currently supported"
@@ -88,5 +88,9 @@ proc haskell.setup {package version {compiler ghc}} {
 #    pre-deactivate {
 #        system "${prefix}/libexec/${name}/unregister.sh"
 #    }
+
+    livecheck.check     regex
+    livecheck.url       ${homepage}/cgi-bin/hackage-scripts/package/${package}
+    livecheck.regex     /packages/archive/${package}/.*/${package}-(.*)\.tar\.gz
 }
 
