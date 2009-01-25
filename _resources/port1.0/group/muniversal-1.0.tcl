@@ -1,5 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# merge_universal-1.0.tcl
+# muniversal-1.0.tcl
 #
 # $Id$
 #
@@ -57,6 +57,7 @@ variant universal {
         configure.ldflags-delete   -arch ${arch}
     }
 
+    # set universal_archs_to_use as the intersection of universal_archs and universal_archs_supported
     set universal_archs_to_use {}
     foreach arch ${universal_archs} {
         set arch_ok no
@@ -76,20 +77,10 @@ variant universal {
 
             copy ${worksrcpath} ${workpath}/${arch}
 
-            # Prefer -m to -arch
-            set archf "-arch ${arch}"
-            if { ${os.arch}=="i386" && ${arch}=="i386" } {
-                set archf -m32
-            } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
-                set archf -m64
-            } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
-                set archf -m32
-            } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
-                set archf -m64
-            }
+            set archf [muniversal_get_arch_flag ${arch}]
             configure.cflags-append    ${archf}
             configure.cxxflags-append  ${archf}
-            configure.ldflags-append  ${archf}
+            configure.ldflags-append   ${archf}
 
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append  $merger_configure_env(${arch})
@@ -311,5 +302,21 @@ variant universal {
                 test_main
             }
         }
+    }
+
+    proc muniversal_get_arch_flag {arch} {
+        global os.arch
+        # Prefer -m to -arch
+        set archf "-arch ${arch}"
+        if { ${os.arch}=="i386" && ${arch}=="i386" } {
+            set archf -m32
+        } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
+            set archf -m64
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
+            set archf -m32
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
+            set archf -m64
+        }
+        return ${archf}
     }
 }
