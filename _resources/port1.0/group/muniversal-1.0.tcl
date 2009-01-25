@@ -33,10 +33,14 @@
 #
 
 # User variables:
-#     merger_configure_env: associative array of configure.env variables
-#              merger_host: associative array of host values
-#    merger_configure_args: associative array of configure.args
-#         merger_dont_diff: list of file names for which diff will not work
+#         merger_configure_env: associative array of configure.env variables
+#                  merger_host: associative array of host values
+#        merger_configure_args: associative array of configure.args
+#    merger_configure_cppflags: associative array of configure.cppflags
+#      merger_configure_cflags: associative array of configure.cflags
+#    merger_configure_cxxflags: associative array of configure.cxxflags
+#     merger_configure_ldflags: associative array of configure.ldflags
+#             merger_dont_diff: list of file names for which diff will not work
 
 if { ! [info exists universal_archs_supported] } {
     set universal_archs_supported  ${universal_archs}
@@ -85,7 +89,19 @@ variant universal {
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append  $merger_configure_env(${arch})
             }
-            
+            if { [info exists merger_configure_cppflags(${arch})] } {
+                configure.cflags-append  $merger_configure_cppflags(${arch})
+            }
+            if { [info exists merger_configure_cflags(${arch})] } {
+                configure.cflags-append  $merger_configure_cflags(${arch})
+            }
+            if { [info exists merger_configure_cxxflags(${arch})] } {
+                configure.cflags-append  $merger_configure_cxxflags(${arch})
+            }
+            if { [info exists merger_configure_ldflags(${arch})] } {
+                configure.cflags-append  $merger_configure_ldflags(${arch})
+            }
+
             # Don't set the --host unless we have to.
             set host ""
             if { ${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64") } {
@@ -129,6 +145,18 @@ variant universal {
                 configure.args-delete  $merger_configure_args(${arch})
             }
             configure.args-delete  ${host}
+            if { [info exists merger_configure_ldflags(${arch})] } {
+                configure.cflags-delete  $merger_configure_ldflags(${arch})
+            }
+            if { [info exists merger_configure_cxxflags(${arch})] } {
+                configure.cflags-delete  $merger_configure_cxxflags(${arch})
+            }
+            if { [info exists merger_configure_cflags(${arch})] } {
+                configure.cflags-delete  $merger_configure_cflags(${arch})
+            }
+            if { [info exists merger_configure_cppflags(${arch})] } {
+                configure.cflags-delete  $merger_configure_cppflags(${arch})
+            }
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-delete  $merger_configure_env(${arch})
             }
