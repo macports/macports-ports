@@ -42,7 +42,7 @@ configure.args-append   -DBUILD_SHARED_LIBS=ON \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X" \
                         -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake
 
-variant with_docs description "Install documentation" {
+variant docs description "Install documentation" {
     depends_lib             port:doxygen
     configure.args-append   -DBUILD_doc=ON
 }
