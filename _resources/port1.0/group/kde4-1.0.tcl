@@ -40,7 +40,10 @@ post-extract            { file mkdir ${worksrcpath} }
 configure.compiler      gcc-4.2
 
 configure.args-append   -DBUILD_SHARED_LIBS=ON \
+                        -DBUILD_doc=OFF \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
+
+default_variants        +docs
 
 variant docs description "Install documentation" {
     depends_lib             port:doxygen
