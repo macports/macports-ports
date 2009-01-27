@@ -110,7 +110,11 @@ variant universal {
                         set host  --host=$merger_host(${arch})
                     }
                 } else {
-                    set host --host=powerpc64-apple-darwin
+                    if { ${arch}=="ppc" } {
+                        set host --host=powerpc-apple-darwin
+                    } else {
+                        set host --host=powerpc64-apple-darwin
+                    }
                 }
             } elseif { ${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64") } {
                 if { [info exists merger_host(${arch})] } {
@@ -118,7 +122,11 @@ variant universal {
                         set host  --host=$merger_host(${arch})
                     }
                 } else {
-                    set host --host=core2-apple-darwin
+                    if { ${arch}=="i386" } {
+                        set host --host=i386-apple-darwin
+                    } else {
+                        set host --host=x86_64-apple-darwin
+                    }
                 }
             }
             configure.args-append  ${host}
