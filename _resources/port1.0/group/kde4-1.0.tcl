@@ -39,8 +39,8 @@ post-extract            { file mkdir ${worksrcpath} }
 
 configure.compiler      gcc-4.2
 
-configure.args-append   -DBUILD_SHARED_LIBS=ON \
-                        -DBUILD_doc=OFF \
+configure.args-append   -DBUILD_doc=OFF \
+                        -DBUILD_SHARED_LIBS=ON \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
 default_variants        +docs
