@@ -37,19 +37,20 @@ worksrcdir              build
 
 post-extract            { file mkdir ${worksrcpath} }
 
+depends_lib-append             port:doxygen
+
 configure.compiler      gcc-4.2
 
-configure.args-append   -DBUILD_doc=OFF \
+configure.args-append   -DBUILD_doc=ON \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
                         -DPHONON_INCLUDE_DIR=${prefix}/include \
                         -DPHONON_LIBRARY=${prefix}/lib/libphonon.dylib \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
-default_variants        +docs
-
-variant docs description "Install documentation" {
-    depends_lib             port:doxygen
-    configure.args-append   -DBUILD_doc=ON
+variant no_docs description "Does not install documentation" {
+    depends_lib-delete      port:doxygen
+    configure.args-delete   -DBUILD_doc=ON
+    configure.args-append   -DBUILD_doc=OFF
 }
 
