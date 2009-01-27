@@ -42,6 +42,8 @@ configure.compiler      gcc-4.2
 configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
+                        -DPHONON_INCLUDE_DIR=${prefix}/include \
+                        -DPHONON_LIBRARY=${prefix}/lib/libphonon.dylib \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
 default_variants        +docs
