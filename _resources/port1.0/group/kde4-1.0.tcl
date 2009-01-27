@@ -27,28 +27,23 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Use CMake Portgroup
-PortGroup cmake 1.0
+PortGroup       cmake   1.0
 
-depends_build           port:automoc
+depends_build-append    port:automoc
+
 use_parallel_build      yes
+
 worksrcdir              build
+
 post-extract            { file mkdir ${worksrcpath} }
 
 configure.compiler      gcc-4.2
+
 configure.args-append   -DBUILD_SHARED_LIBS=ON \
-                        -DCMAKE_BUILD_TYPE=Release \
-                        -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
-                        -DKDE_DEFAULT_HOME=Library/Preferences/KDE \
-                        -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X" \
-                        -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake
+                        -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
 variant docs description "Install documentation" {
     depends_lib             port:doxygen
     configure.args-append   -DBUILD_doc=ON
-}
-
-variant debug description "Enable debug binaries" {
-    configure.args-delete   -DCMAKE_BUILD_TYPE=Release
-    configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
 }
 

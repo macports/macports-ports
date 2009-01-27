@@ -31,18 +31,28 @@ depends_build       port:cmake
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
+
 configure.cmd       cmake
+
 configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
+
 configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
+                    -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
                     -DCMAKE_OSX_SYSROOT=${universal_sysroot} \
                     -DCMAKE_SYSTEM_PREFIX_PATH=\"${prefix}\;/usr\" \
+                    -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
                     -Wno-dev
 
 variant universal {
     configure.universal_args-delete --disable-dependency-tracking
     configure.args-append \
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
+}
+
+variant debug description "Enable debug binaries" {
+    configure.args-delete   -DCMAKE_BUILD_TYPE=Release
+    configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
 }
 
