@@ -54,3 +54,12 @@ variant no_docs description "Does not install documentation" {
     configure.args-append   -DBUILD_doc=OFF
 }
 
+post-activate {
+    ui_msg "######################################################"
+    ui_msg "#  Programs will not start until you issue the foll: #"
+    ui_msg "#  'sudo chown -R $USER ~/Library/Preferences/KDE'   #"
+    ui_msg "#  replacing $USER with your username, followed by   #"
+    ui_msg "#  'open /Applications/Macports/KDE4/kdeinit4.app'   #" 
+    ui_msg "#  in a Terminal.                                    #"
+    ui_msg "######################################################"
+}
