@@ -34,6 +34,7 @@
 
 # User variables:
 #         merger_configure_env: associative array of configure.env variables
+#             merger_build_env: assoicative array of build.env variables
 #                  merger_host: associative array of host values
 #        merger_configure_args: associative array of configure.args
 #    merger_configure_cppflags: associative array of configure.cppflags
@@ -177,8 +178,15 @@ variant universal {
     build {
         foreach arch ${universal_archs_to_use} {
             ui_msg "universal: Running build for architecture ${arch}"
+            
+            if { [info exists merger_build_env(${arch})] } {
+                build.env-append  $merger_build_env(${arch})
+            }
             build.dir  ${workpath}/${arch}
             build_main
+            if { [info exists merger_build_env(${arch})] } {
+                build.env-delete  $merger_build_env(${arch})
+            }
         }
     }
 
@@ -243,7 +251,7 @@ variant universal {
                         # Files are neither directories nor links
                         if { ! [catch {system "/usr/bin/cmp ${dir1}/${fl} ${dir2}/${fl} && /bin/cp -v ${dir1}/${fl} ${dir}"}] } {
                             # Files are byte by byte the same
-                            ui_debug "universal: merge: ${prefixDir}${fl} is identical in ${base1} and ${base2}"
+                            ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
                             # Actually try to merge the files
                             # First try lipo
