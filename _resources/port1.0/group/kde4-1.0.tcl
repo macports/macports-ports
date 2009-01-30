@@ -37,7 +37,7 @@ worksrcdir              build
 
 post-extract            { file mkdir ${worksrcpath} }
 
-depends_lib-append             port:doxygen
+depends_lib-append      port:doxygen
 
 configure.compiler      gcc-4.2
 
@@ -56,9 +56,9 @@ variant no_docs description "Does not install documentation" {
 
 post-activate {
     ui_msg "######################################################"
-    ui_msg "#  Programs will not start until you issue the foll: #"
-    ui_msg "#  'sudo chown -R $USER ~/Library/Preferences/KDE'   #"
-    ui_msg "#  replacing $USER with your username, followed by   #"
+    ui_msg "#  Programs will not start until you run the command #"
+    ui_msg "#  'sudo chown -R \$USER ~/Library/Preferences/KDE'   #"
+    ui_msg "#  replacing \$USER with your username, followed by   #"
     ui_msg "#  'open /Applications/Macports/KDE4/kdeinit4.app'   #" 
     ui_msg "#  in a Terminal.                                    #"
     ui_msg "######################################################"
