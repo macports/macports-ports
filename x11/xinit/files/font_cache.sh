@@ -187,15 +187,17 @@ setup_fontdirs() {
     IFS=$OIFS
 
     # Finally, update fontconfig's cache
-    echo "font_cache: Updating FC cache"
-    if [[ $system == 1 ]] ; then
-        ${X11DIR}/bin/fc-cache -s \
-            $([[ $force == 1 ]] && echo "-f -r") \
-            $([[ $verbose == 1 ]] && echo "-v")
-    else
-        ${X11DIR}/bin/fc-cache \
-            $([[ $force == 1 ]] && echo "-f -r") \
-            $([[ $verbose == 1 ]] && echo "-v")
+    if [[ -x ${X11DIR}/bin/fc-cache ]] ; then
+        echo "font_cache: Updating FC cache"
+        if [[ $system == 1 ]] ; then
+            ${X11DIR}/bin/fc-cache -s \
+                $([[ $force == 1 ]] && echo "-f -r") \
+                $([[ $verbose == 1 ]] && echo "-v")
+        else
+            ${X11DIR}/bin/fc-cache \
+                $([[ $force == 1 ]] && echo "-f -r") \
+                $([[ $verbose == 1 ]] && echo "-v")
+        fi
     fi
     echo "font_cache: Done"
 }
