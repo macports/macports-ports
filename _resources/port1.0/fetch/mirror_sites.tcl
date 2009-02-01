@@ -232,7 +232,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
-    http://ftp8.us.postgresql.org/postgresql/
     http://ftp9.us.postgresql.org/pub/mirrors/postgresql/
     http://www.mirrorservice.org/sites/ftp.postgresql.org/
     http://ftp7.de.postgresql.org/ftp.postgresql.org/
