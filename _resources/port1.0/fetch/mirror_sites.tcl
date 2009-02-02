@@ -41,6 +41,40 @@ set portfetch::mirror_sites::sites(apache) {
     http://archive.apache.org/dist/
 }
 
+# Note that mirror_sites aren't intelligent enough to handle how this should
+# work automatically (which is, append first letter of port name, then
+# port name) so just use a basic form here and fake it in ports that need
+# to use this.
+set portfetch::mirror_sites::sites(debian) {
+    ftp://ftp.us.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.au.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.bg.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.cl.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.cz.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.de.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.ee.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.es.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.fi.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.fr.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.hk.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.hr.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.hu.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.ie.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.is.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.it.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.jp.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.nl.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.no.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.pl.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.ru.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.se.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.si.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.sk.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.uk.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
+    ftp://ftp2.de.debian.org/debian/pool/main/:nosubdir
+}
+
 set portfetch::mirror_sites::sites(freebsd) {
     ftp://ftp5.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp5.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
