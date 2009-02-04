@@ -48,7 +48,7 @@ configure.args-append   -DBUILD_doc=ON \
                         -DPHONON_LIBRARY=${prefix}/lib/libphonon.dylib \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
-variant no_docs description "Does not install documentation" {
+variant no_docs description "Omit documentation" {
     depends_lib-delete      port:doxygen
     configure.args-delete   -DBUILD_doc=ON
     configure.args-append   -DBUILD_doc=OFF
