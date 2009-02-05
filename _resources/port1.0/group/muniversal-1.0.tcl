@@ -42,9 +42,19 @@
 #    merger_configure_cxxflags: associative array of configure.cxxflags
 #     merger_configure_ldflags: associative array of configure.ldflags
 #             merger_dont_diff: list of file names for which diff will not work
+#     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
+#            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
 
 if { ! [info exists universal_archs_supported] } {
     set universal_archs_supported  ${universal_archs}
+}
+
+if { ! [info exists merger_must_run_binaries] } {
+    set merger_must_run_binaries "no"
+}
+
+if { ! [info exists merger_no_3_archs] } {
+    set merger_no_3_archs "no"
 }
 
 variant universal {
@@ -62,6 +72,16 @@ variant universal {
         configure.ldflags-delete   -arch ${arch}
     }
 
+    # user has specified that build platform must be able to run binaries for supported architectures
+    if { ${merger_must_run_binaries}=="yes" } {
+        if { ${os.arch}=="i386" } {
+            set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
+        } else {
+            set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
+            set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
+        }
+    }
+
     # set universal_archs_to_use as the intersection of universal_archs and universal_archs_supported
     set universal_archs_to_use {}
     foreach arch ${universal_archs} {
@@ -73,6 +93,30 @@ variant universal {
         }
         if { ${arch_ok}=="yes" } {
             lappend universal_archs_to_use ${arch}
+        }
+    }
+
+    # if merger_no_3_archs is yes, prune universal_archs_to_use until it only has two elements
+    if { ${merger_no_3_archs}=="yes" } {
+        if { [llength ${universal_archs_to_use}] == 3 } {
+            # first try to remove cross-compiled 64-bit arch
+            if { ${os.arch}=="i386" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc64"]
+            } else {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "x86_64"]
+            }
+        }
+        if { [llength ${universal_archs_to_use}] == 3 } {
+            # next try to remove cross-compiled 32-bit arch
+            if { ${os.arch}=="i386" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc"]
+            } else {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "i386"]
+            }
+        }
+        if { [llength ${universal_archs_to_use}] == 3 } {
+            # at least one arch should have been removed from universal_archs_to_use
+            error "Should Not Happen"
         }
     }
 
