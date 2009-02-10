@@ -274,7 +274,7 @@ set portfetch::mirror_sites::sites(postgresql) {
     ftp://ftp.de.postgresql.org/mirror/postgresql/
     ftp://ftp.fr.postgresql.org/
     http://mirror.aarnet.edu.au/pub/postgresql/
-    ftp://ftp.au.postgresql.org/pub/postgresql/
+    ftp://ftp2.au.postgresql.org/pub/postgresql/
     ftp://ftp.ru.postgresql.org/pub/unix/database/pgsql/
     ftp://ftp.postgresql.org/pub/
 }
