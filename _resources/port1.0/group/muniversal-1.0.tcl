@@ -72,6 +72,13 @@ variant universal {
         configure.ldflags-delete   -arch ${arch}
     }
 
+    # undo setting of --host and --target from portconfigure.tcl procedure configure_get_universal_args
+    set undo_system_value [configure_get_universal_system_name]
+    if {[llength ${configure.universal_archs}] == 1 &&
+        [info exists undo_system_value] && $undo_system_value != ""} {
+        configure.args-delete --host=${undo_system_value} --target=${undo_system_value}
+    }
+
     # user has specified that build platform must be able to run binaries for supported architectures
     if { ${merger_must_run_binaries}=="yes" } {
         if { ${os.arch}=="i386" } {
