@@ -158,7 +158,6 @@ set portfetch::mirror_sites::sites(gnu) {
 }
 
 set portfetch::mirror_sites::sites(gnupg) {
-    http://mirrors.rootmode.com/ftp.gnupg.org/
     http://gulus.USherbrooke.ca/pub/appl/GnuPG/
     http://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
