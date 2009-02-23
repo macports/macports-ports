@@ -1,4 +1,4 @@
-#!@PREFIX@/bin/zsh
+#!/bin/zsh
 ############################################################## {{{1 ##########
 #   $Author$
 #   $Revision$
@@ -7,19 +7,26 @@
 ############################################################## }}}1 ##########
 
 local User_Data="${HOME}/Library/Application Support/Atari800"
-local System_Data="@PREFIX@/share/atari800";
+local System_Data="/opt/local/share/atari800";
 
 if test ! -d "${User_Data}"; then
     mkdir "${User_Data}";
 fi;
 
-if test ! -w  "${User_Data}/MYDOS45D.ATR"; then
-    cp						\
-	@PREFIX@/share/atari800/MYDOS45D.ATR	\
-	"${User_Data}/MYDOS45D.ATR"		;
-fi;
+for I in	    \
+    "DEMOS1.XFD	    \
+    "DEMOS2.XFD	    \
+    "DOS25.XFD	    \
+    "MYDOS45D.ATR
+do
+    if test ! -f  "${User_Data}/MYDOS45D.ATR"; then
+	cp					\
+	    "/opt/local/share/atari800/${I}"	\
+	    "${User_Data}/${I}"			;
+    fi;
+done; unset I
 
-@PREFIX@/bin/atari800				\
+/opt/local/bin/atari800				\
     -320xe					\
     -basic					\
     -pal					\
