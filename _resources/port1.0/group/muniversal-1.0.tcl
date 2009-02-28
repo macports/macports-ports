@@ -41,6 +41,7 @@
 #      merger_configure_cflags: associative array of configure.cflags
 #    merger_configure_cxxflags: associative array of configure.cxxflags
 #     merger_configure_ldflags: associative array of configure.ldflags
+#          merger_destroot_env: assoicative array of desroot.env variables
 #             merger_dont_diff: list of file names for which diff will not work
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
 #            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
@@ -248,7 +249,13 @@ variant universal {
             destroot.dir  ${workpath}/${arch}
             set destdirSave ${destroot.destdir}
             destroot.destdir  [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+            if { [info exists merger_destroot_env(${arch})] } {
+                destroot.env-append  $merger_destroot_env(${arch})
+            }
             destroot_main
+            if { [info exists merger_destroot_env(${arch})] } {
+                destroot.env-delete  $merger_destroot_env(${arch})
+            }
             destroot.destdir ${destdirSave} 
         }
         delete ${destroot}
