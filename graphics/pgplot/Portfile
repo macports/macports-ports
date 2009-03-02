@@ -4,7 +4,7 @@
 PortSystem			1.0
 name				pgplot
 version				5.2.2
-revision			4
+revision			5
 categories			graphics devel
 maintainers			mcalhoun openmaintainer
 description			C/Fortran graphics library
@@ -23,120 +23,215 @@ master_sites            ftp://ftp.astro.caltech.edu/pub/pgplot/
 
 distname			${name}[join [split ${version} .] ""]
 
-worksrcdir			${name}/build
+worksrcdir			build
+set srcdir          ${workpath}/${name}
 
 checksums \
     md5 e8a6e8d0d5ef9d1709dfb567724525ae \
     sha1 1f1c9aa17eeec9a2fb23fd15a0e4a91dcc49ddc1 \
     rmd160 4c21cad6613772f4104c65ac3d8d9a42e3c4afe1
 
-depends_lib  lib:libpng:libpng lib:libz:zlib bin:g77-dp-3.4:gcc34
+patchfiles-append     patch-makemake.diff patch-drivers.list.patch patch-proccom.c.diff
+depends_lib-append    port:libpng port:zlib port:g95
+depends_build-append  bin:perl:perl5
 
-patchfiles \
-    patch-makemake \
-    patch-src_grgfil.f \
-    patch-drivers.list \
-    patch-pgdispd_proccom.c
+configure.fc  ${prefix}/bin/g95
 
-post-extract {
-	file mkdir ${worksrcpath}
-}
+# Tell the compiler not to treat backslash characters as C-style escape sequences.
+configure.fcflags-append  -fno-backslash
+
+set compat_version  [join [lrange [split ${version} .] 0 0] .]
 
 pre-patch {
-	file copy ${worksrcpath}/../drivers.list ${worksrcpath}/drivers.list
+    file mkdir ${worksrcpath}
 }
 
 post-patch {
-	reinplace "s|@@PREFIX@@|${prefix}|g" ${worksrcpath}/../src/grgfil.f
+    # Ensure MacPorts libraries are being used.
+    reinplace "s|\\(-L\\\\`pwd\\\\`\\)|\\1 -L${prefix}/lib|" ${srcdir}/makemake
+
+    # Look in the correct place for run-time data files.
+    reinplace "s|/usr/local/pgplot/|${prefix}/share/${name}/|" ${srcdir}/src/grgfil.f
+
+    # /usr/local/bin/perl may not exist.
+    reinplace "s|#!/usr/local/bin/perl|#!/usr/bin/env perl|" ${srcdir}/makehtml ${srcdir}/maketex
+
+    copy ${srcdir}/drivers.list ${worksrcpath}
+
+    set drivers  "GIF VGIF LATEX PNG TPNG PS VPS CPS VCPS"
+
+    if {![variant_isset no_x11]} {
+        # XDISP does not work because the program figdisp can not be found.
+        lappend drivers XWINDOW XSERVE
+    }
+
+    if {[variant_isset aquaterm]} {
+        lappend drivers AQT
+    }
+
+    foreach driver ${drivers} {
+        reinplace "s|!\\(.*/${driver} .*\\)| \\1|" ${worksrcpath}/drivers.list
+    }
 }
 
-configure {
-	system "cd ${worksrcpath} && ../makemake .. ${os.platform} ${ppCompilerSpec}"
+pre-configure {
+    set shlib_opts \
+        "-dynamiclib -single_module -current_version ${version} -compatibility_version ${compat_version}"
+
+    if {![variant_isset no_x11]} {
+        if { [file exists ${prefix}/lib/pkgconfig/x11.pc] || [file exists ${x11prefix}/lib/pkgconfig/x11.pc] } {
+            # XQuartz or MacPorts X11 (pkg-config gives precedence to MacPorts X11)
+            eval configure.ldflags-append   [exec pkg-config x11 --libs-only-L]
+            set x11Libs                     [exec pkg-config x11 --libs-only-l]
+            eval configure.cppflags-append  [exec pkg-config x11 --cflags]
+        } else {
+            # Tiger or earlier X11 (xorg-libX11 installed with system_x11 variant)
+            configure.ldflags-append   "-L${x11prefix}/lib"
+            set x11Libs                -lX11
+            configure.cppflags-append  "-I${x11prefix}/include"
+        }
+    } else {
+        set x11Libs  ""
+    }
+
+    if {[variant_isset aquaterm]} {
+        set aqtLibs  "-laquaterm -Wl,-framework -Wl,Foundation"
+    } else {
+        set aqtLibs  ""
+    }
+
+    # Create configuration file.
+    #    For a description of options, see ${srcdir}/sys_linux/g77_gcc.conf
+    lappend options  XINCL            "${configure.cppflags}"
+    lappend options  MOTIF_INCL       ""
+    lappend options  ATHENA_INCL      ""
+    lappend options  TK_INCL          ""
+    lappend options  RV_INCL          ""
+    lappend options  FCOMPL           "${configure.fc}"
+    lappend options  FFLAGC           "${configure.fcflags}"
+    lappend options  FFLAGD           ""
+    lappend options  CCOMPL           "${configure.cc}"
+    lappend options  CFLAGC           "${configure.cppflags} ${configure.cflags}"
+    lappend options  CFLAGD           ""
+    lappend options  PGBIND_FLAGS     "bsd"
+    lappend options  LIBS             "${configure.ldflags} ${x11Libs} ${aqtLibs}"
+    lappend options  MOTIF_LIBS       ""
+    lappend options  ATHENA_LIBS      ""
+    lappend options  TK_LIBS          ""
+    lappend options  RANLIB           "/usr/bin/ranlib"
+    lappend options  SHARED_LIB       "libpgplot${version}.dylib"
+    lappend options  SHARED_LD        "${configure.fc} ${shlib_opts} ${configure.ldflags} ${x11Libs} -install_name ${prefix}/lib/libpgplot${compat_version}.dylib"
+    lappend options  SHARED_LIB_LIBS  "${configure.ldflags} -lpng ${aqtLibs}"
+    lappend options  MCOMPL           "${configure.objc}"
+    lappend options  MFLAGC           "${configure.objcflags}"
+    lappend options  SYSDIR           "\\\$SYSDIR"
+
+    # The following variables are not part of the unpatched pgplot.
+    #     They have been added to facilitate building a shared C library.
+    lappend options  CSHARED_LIB      "libcpgplot${version}.dylib"
+    lappend options  CSHARED_LD       "${configure.fc} ${shlib_opts} ${configure.ldflags} ${x11Libs} -install_name ${prefix}/lib/libcpgplot${compat_version}.dylib"
+
+    file mkdir ${srcdir}/sys_darwin
+    foreach {var val} ${options} {
+        system "/bin/echo \"   ${var}=\\\"${val}\\\"\" >> ${srcdir}/sys_darwin/marcports.conf"
+    }
+
+    # Create optional routine which makemake will find and compile.
+    system "/bin/echo \"int iand_ (int *a, int *b) { return *a & *b;}\" >> ${srcdir}/sys_darwin/iand.c"
 }
 
-build.target		all
+configure.cmd       ${srcdir}/makemake
+configure.pre_args
+configure.args      ${srcdir} ${os.platform}
 
-post-build {
-	system "cd ${worksrcpath} && make cpg"
-}
+# When linking against fortran code, PG_PPU gets number of underscores correct.
+configure.cppflags-append  -DPG_PPU
+
+# Build the C PGPLOT wrapper library, HTML documentation, and TeX files.
+build.target-append cpg pgplot.html pgplot-routines.tex
 
 destroot {
-	xinstall -m 755 -d ${destroot}${prefix}/share/${name} \
-		${destroot}${prefix}/share/doc/${name}
-	xinstall -m 644 -W ${worksrcpath} grfont.dat rgb.txt \
-		${destroot}${prefix}/share/${name}
-	xinstall -m 644 -W ${worksrcpath} libpgplot.a libcpgplot.a \
-		${destroot}${prefix}/lib
-	system "ranlib ${destroot}${prefix}/lib/libpgplot.a \
-		${destroot}${prefix}/lib/libcpgplot.a"
-	xinstall -m 644 -W ${worksrcpath} cpgplot.h ${destroot}${prefix}/include
-	xinstall -m 644 -W ${worksrcpath} pgplot.doc ../copyright.notice \
-		${destroot}${prefix}/share/doc/${name}
+    # pgxwin_server is only built if the X11 drivers are requested.
+    # pgdisp is only built if the XDISP driver is requested.
+    foreach fl [glob -directory ${worksrcpath} -nocomplain pgxwin_server pgdisp] {
+        xinstall -m 755 ${fl} ${destroot}${prefix}/bin
+    }
+
+    foreach fl [glob -directory ${worksrcpath} -nocomplain *.dylib] {
+        xinstall -m 755 ${fl} ${destroot}${prefix}/lib
+    }
+
+    foreach fl [glob -directory ${worksrcpath} -nocomplain *.a] {
+        xinstall -m 644 ${fl} ${destroot}${prefix}/lib
+    }
+
+    foreach fl [glob -directory ${worksrcpath} -nocomplain *.h] {
+        xinstall -m 644 ${fl} ${destroot}${prefix}/include
+    }
+
+    # Install run-time data files.
+    xinstall -d -m 755 ${destroot}${prefix}/share/${name}
+    foreach fl [glob -directory ${worksrcpath} -nocomplain *.dat *.txt] {
+        xinstall -m 644 ${fl} ${destroot}${prefix}/share/${name}
+    }
+
+    # Install docs.
+    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 644 ${srcdir}/copyright.notice ${destroot}${prefix}/share/doc/${name}
+    foreach fl [glob -directory ${worksrcpath} -nocomplain *.doc *.html *.pdf] {
+        xinstall -m 644 ${fl} ${destroot}${prefix}/share/doc/${name}
+    }
+
+    # Install examples.
+    xinstall -d -m 755 ${destroot}${prefix}/share/${name}/examples
+    foreach fl [glob -directory ${srcdir} examples/pgdemo*.f cpg/cpgdemo*.c drivers/*/pg*demo.*] {
+        xinstall -m 644 ${fl} ${destroot}${prefix}/share/${name}/examples
+    }
+    foreach fl [glob -directory ${worksrcpath} *demo*] {
+        xinstall -m 755 ${fl} ${destroot}${prefix}/share/${name}/examples
+    }
+
+    # Create more library names.
+    ln -s libcpgplot${version}.dylib ${destroot}${prefix}/lib/libcpgplot.dylib
+    ln -s libcpgplot${version}.dylib ${destroot}${prefix}/lib/libcpgplot[join [lrange [split ${version} .] 0 0] .].dylib
+    ln -s libcpgplot${version}.dylib ${destroot}${prefix}/lib/libcpgplot[join [lrange [split ${version} .] 0 1] .].dylib
+
+    ln -s libpgplot${version}.dylib  ${destroot}${prefix}/lib/libpgplot.dylib
+    ln -s libpgplot${version}.dylib  ${destroot}${prefix}/lib/libpgplot[join [lrange [split ${version} .] 0 0] .].dylib
+    ln -s libpgplot${version}.dylib  ${destroot}${prefix}/lib/libpgplot[join [lrange [split ${version} .] 0 1] .].dylib
 }
 
-platform darwin {
-	global ppCompilerSpec
-	set ppCompilerSpec		g77_gcc
-	
-    patchfiles-append \
-        patch-sys_darwin_aaaread.me \
-        patch-sys_darwin_g77_gcc.conf
+variant no_x11 {}
 
-	post-patch {
-		reinplace "s|@@PREFIX@@|${prefix}|g" \
-			${worksrcpath}/../sys_darwin/${ppCompilerSpec}.conf
-		reinplace "s|@@X11PREFIX@@|${x11prefix}|g" \
-			${worksrcpath}/../sys_darwin/${ppCompilerSpec}.conf
-	}
+if {![variant_isset no_x11]} {
+    depends_lib-append    port:xorg-libX11
+    depends_build-append  port:pkgconfig
 }
 
-platform darwin i386 {
-	depends_lib-delete	bin:g77-dp-3.4:gcc34
-	depends_lib-append	port:gcc42
+variant aquaterm description {install driver for aquaterm} {
+    depends_lib-append port:aquaterm
 
-	set ppCompilerSpec	gfortran_gcc_42
-
-	patchfiles-delete	patch-sys_darwin_g77_gcc.conf
-	patchfiles-append	patch-sys_darwin_gfortran_gcc_42.conf
+    post-extract {
+        copy ${prefix}/share/aquaterm/adapters/pgplot/aqdriv.m ${srcdir}/drivers
+    }
 }
 
-default_variants +x11 +aqt
-
-variant x11 {
-	depends_lib-append	port:xorg-libs
-
-	patchfiles-append	patch-drivers_x11.list
-
-	post-destroot {
-		xinstall -m 755 -W ${worksrcpath} pgdisp pgxwin_server \
-			${destroot}${prefix}/bin
-	}
+variant gcc42 description {build with gfortran from gcc42 instead of g95} conflicts gcc43 {
+    depends_lib-delete  port:g95
+    depends_lib-append  port:gcc42
+    configure.fc  ${prefix}/bin/gfortran-mp-4.2
 }
 
-variant aqt {
-# Variant that adds aquaterm driver support
-	depends_lib-append	port:aquaterm
-
-	patchfiles-append \
-        patch-drivers.list_aqt \
-        patch-sys_darwin_${ppCompilerSpec}.conf_aqt \
-        patch-makemake_aqt
-
-	pre-patch {
-		file copy ${prefix}/share/aquaterm/adapters/pgplot/aqdriv.m ${workpath}/pgplot/drivers/
-	}
-
-	post-destroot {
-		xinstall -m 755 -W ${worksrcpath} libpgplot.dylib \
-			${destroot}${prefix}/lib
-	}
+variant gcc43 description {build with gfortran from gcc43 instead of g95} conflicts gcc42 {
+    depends_lib-delete  port:g95
+    depends_lib-append  port:gcc43
+    configure.fc  ${prefix}/bin/gfortran-mp-4.3
 }
 
-# Variant to install demo programs
-variant demos {
-	post-destroot {
-		foreach f [glob {pgdemo[1-9]} {pgdemo1[0-7]}] {
-			xinstall -m 755 -W ${worksrcpath} $f ${destroot}${prefix}/bin
-		}
-	}
+variant docs {
+    depends_build-append bin:pdflatex:texlive
+
+    post-build {
+        system "cd ${worksrcpath} && pdflatex pgplot-routines.tex && pdflatex pgplot-routines.tex"
+    }
 }
