@@ -143,16 +143,16 @@ variant universal {
                 configure.env-append  $merger_configure_env(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cflags-append  $merger_configure_cppflags(${arch})
+                configure.cppflags-append  $merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
                 configure.cflags-append  $merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cflags-append  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-append  $merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.cflags-append  $merger_configure_ldflags(${arch})
+                configure.ldflags-append  $merger_configure_ldflags(${arch})
             }
 
             # Don't set the --host unless we have to.
@@ -207,16 +207,16 @@ variant universal {
             }
             configure.args-delete  ${host}
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.cflags-delete  $merger_configure_ldflags(${arch})
+                configure.ldflags-delete  $merger_configure_ldflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cflags-delete  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-delete  $merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
                 configure.cflags-delete  $merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cflags-delete  $merger_configure_cppflags(${arch})
+                configure.cppflags-delete  $merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-delete  $merger_configure_env(${arch})
