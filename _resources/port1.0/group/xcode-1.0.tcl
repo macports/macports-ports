@@ -133,9 +133,9 @@ proc xcode::get_project_path {} {
     if {${xcode.project} == ""} {
         set suffix ""
     } else {
-        set suffix [file dirname ${xcode.project}]
+        set suffix [file dirname [join ${xcode.project}]]
     }
-    return [file normalize "${worksrcpath}/${suffix}"]
+    return [file normalize [file join ${worksrcpath} ${suffix}]]
 }
 
 # fix resource dependencies (with Xcode >= 2.1).
@@ -172,7 +172,7 @@ proc xcode::get_configuration_arg { style } {
 # get the project argument.
 proc xcode::get_project_arg { project } {
     if {$project != ""} {
-        return "-project $project"
+        return "-project \"[join $project]\""
     } else {
         return ""
     }
