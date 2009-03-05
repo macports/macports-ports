@@ -41,6 +41,7 @@
 #      merger_configure_cflags: associative array of configure.cflags
 #    merger_configure_cxxflags: associative array of configure.cxxflags
 #     merger_configure_ldflags: associative array of configure.ldflags
+#             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
 #          merger_destroot_env: assoicative array of desroot.env variables
 #             merger_dont_diff: list of file names for which diff will not work
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
@@ -56,6 +57,26 @@ if { ! [info exists merger_must_run_binaries] } {
 
 if { ! [info exists merger_no_3_archs] } {
     set merger_no_3_archs "no"
+}
+
+proc muniversal_get_arch_flag {arch} {
+    global os.arch
+    # Prefer -m to -arch
+    set archf "-arch ${arch}"
+    if { ${os.arch}=="i386" && ${arch}=="i386" } {
+        set archf -m32
+    } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
+        set archf -m64
+    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
+        set archf -m32
+    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
+        set archf -m64
+    }
+    return ${archf}
+}
+
+if { ! [info exists merger_arch_flag ] } {
+        set merger_arch_flag "yes"
 }
 
 variant universal {
@@ -135,9 +156,12 @@ variant universal {
             copy ${worksrcpath} ${workpath}/${arch}
 
             set archf [muniversal_get_arch_flag ${arch}]
-            configure.cflags-append    ${archf}
-            configure.cxxflags-append  ${archf}
-            configure.ldflags-append   ${archf}
+
+            if { ${merger_arch_flag} != "no" } {
+                configure.cflags-append    ${archf}
+                configure.cxxflags-append  ${archf}
+                configure.ldflags-append   ${archf}
+            }
 
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append  $merger_configure_env(${arch})
@@ -190,6 +214,7 @@ variant universal {
 
             set configure_cc_save ${configure.cc}
             set configure_cxx_save ${configure.cxx}
+
             configure.cc   ${configure.cc}  ${archf}
             configure.cxx  ${configure.cxx} ${archf}
 
@@ -221,9 +246,11 @@ variant universal {
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-delete  $merger_configure_env(${arch})
             }
-            configure.ldflags-delete  ${archf}
-            configure.cxxflags-delete ${archf}
-            configure.cflags-delete ${archf}
+            if { ${merger_arch_flag} != "no" } {
+                configure.ldflags-delete   ${archf}
+                configure.cxxflags-delete  ${archf}
+                configure.cflags-delete    ${archf}
+            }
         }
     }
 
@@ -404,21 +431,5 @@ variant universal {
                 test_main
             }
         }
-    }
-
-    proc muniversal_get_arch_flag {arch} {
-        global os.arch
-        # Prefer -m to -arch
-        set archf "-arch ${arch}"
-        if { ${os.arch}=="i386" && ${arch}=="i386" } {
-            set archf -m32
-        } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
-            set archf -m64
-        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
-            set archf -m32
-        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
-            set archf -m64
-        }
-        return ${archf}
     }
 }
