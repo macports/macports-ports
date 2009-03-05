@@ -7,7 +7,7 @@
 ############################################################## }}}1 ##########
 
 pushd @PREFIX@/lib/nonpareil 
-    @PREFIX@/bin/nonpareil @PREFIX@/lib/nonpareil/41cx.kml &
+    @PREFIX@/bin/nonpareil @PREFIX@/lib/nonpareil/25.kml &
 popd
 
 ############################################################ {{{1 ###########
