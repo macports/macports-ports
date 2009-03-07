@@ -188,9 +188,9 @@ variant universal {
                     }
                 } else {
                     if { ${arch}=="ppc" } {
-                        set host --host=powerpc-apple-darwin
+                        set host --host=powerpc-apple-darwin${os.version}
                     } else {
-                        set host --host=powerpc64-apple-darwin
+                        set host --host=powerpc64-apple-darwin${os.version}
                     }
                 }
             } elseif { ${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64") } {
@@ -200,9 +200,9 @@ variant universal {
                     }
                 } else {
                     if { ${arch}=="i386" } {
-                        set host --host=i386-apple-darwin
+                        set host --host=i386-apple-darwin${os.version}
                     } else {
-                        set host --host=x86_64-apple-darwin
+                        set host --host=x86_64-apple-darwin${os.version}
                     }
                 }
             }
