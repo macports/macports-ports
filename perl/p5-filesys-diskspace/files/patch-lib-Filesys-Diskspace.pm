@@ -10,6 +10,6 @@
 -      my ($f1, $f2);
 -      ($f1, $bsize, $f2, $blocks, $bfree, $bavail, $files, $ffree) =
 +      (undef, $bsize, undef, $blocks, $bfree, $bavail, $files, $ffree) =
-        unpack "L8", $fmt;
+ 	unpack "L8", $fmt;
        $type = 0; # read it from 'f_type' field ?
      }
