@@ -1,11 +1,20 @@
---- Rendering/vtkTkWidgetsInit.cxx.orig	2006-02-12 20:38:50.000000000 -0600
-+++ Rendering/vtkTkWidgetsInit.cxx	2006-02-12 20:39:15.000000000 -0600
-@@ -24,7 +24,7 @@
+--- ./Rendering/vtkTkWidgetsInit.cxx.orig	2007-11-11 15:56:48.000000000 -0500
++++ ./Rendering/vtkTkWidgetsInit.cxx	2007-11-11 15:59:34.000000000 -0500
+@@ -20,17 +20,6 @@
+ #include "vtkImageData.h"
  
  
- //-----  This hack needed to compile using gcc3 on OSX until new stdc++.dylib
+-//-----  This hack needed to compile using gcc3 on OSX until new stdc++.dylib
 -#ifdef __APPLE_CC__
-+#if defined(__APPLE_CC__) && (__GNUC__ == 3)
- extern "C"
- {
-   void oft_initRenWidgets()
+-extern "C"
+-{
+-  void oft_initRenderingWidgets()
+-  {
+-    extern void _ZNSt8ios_base4InitC4Ev();
+-    _ZNSt8ios_base4InitC4Ev();
+-  }
+-}
+-#endif
+ 
+ 
+ //----------------------------------------------------------------------------
