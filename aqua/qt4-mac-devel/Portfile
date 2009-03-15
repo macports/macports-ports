@@ -5,7 +5,7 @@ PortSystem          1.0
 
 name                qt4-mac-devel
 version             4.5.0
-revision            0
+revision            1
 categories          aqua
 platforms           macosx
 maintainers         illogic-al openmaintainer
@@ -32,11 +32,20 @@ depends_lib                                \
     port:libmng                            \
     port:jpeg                              \
     port:dbus                              \
-    port:unixODBC                          \
     port:openssl                           \
     port:sqlite3
 
-patchfiles          patch-compile.test.diff patch-mac.conf.diff patch-configure.diff
+# Build plugins as bundle files instead of dylib files.
+# Allow the use of -isystem instead of -I to include files.
+# Test for Precompiled-headers support requires a C++ compiler, but configure calls it, by default, with a C compiler.
+# Use unixODBC provided by MacPorts instead of iODBC provided my Mac OS.
+# Ensure that securesocketclient demo is built even with configure option -openssl-linked.
+patchfiles                   \
+    patch-mac.conf.diff      \
+    patch-isystem.diff       \
+    patch-precomp.test.diff  \
+    patch-odbc.diff          \
+    patch-network.pro.diff
 
 # have to build with Apple gcc because of -fconstant-cfstrings
 # configure.compiler should therefore not be one of the MacPorts compilers
@@ -51,20 +60,18 @@ configure.ldflags
 set dirname qt4-mac
 set qt_dir ${prefix}/libexec/${dirname}
 
-# See
-#   http://doc.trolltech.com/qtopia4.3/buildsystem/over-configure-options-qt-1.html
-# for options
-#
 # -isystem is used instead of -I to avoid conflicts with other ports (e.g. pcre).
 #  See http://trac.macports.org/ticket/15219 and http://trac.macports.org/ticket/18723.
+#
+# -system-sqlite ensures the use SQLite provided by MacPorts instead of Qt.
 #
 # -dbus-linked prevends qt4 from trying to dynamically load libdbus-1,
 #     which it is not able to find in ${prefix}
 # -openssl-linked ensures that the MacPorts openssl is used
+#
 configure.args                                                 \
     -v                                                         \
     -debug-and-release                                         \
-    -framework                                                 \
     -confirm-license                                           \
     -prefix          ${qt_dir}                                 \
     -docdir          ${prefix}/share/doc/${dirname}            \
@@ -76,29 +83,86 @@ configure.args                                                 \
     -isystem${prefix}/include                                  \
     -L${prefix}/lib
 
+# Stop configure script from searching for SQL Drivers
+#    not available from MacPorts.
+foreach driver {db2 ibase oci tds} {
+    configure.args-append -no-sql-${driver}
+}
+
+# By default, disable most SQL Drivers.
+# There must be at least one enabled (http://trac.macports.org/ticket/15627).
+# SQLite is chosen to be always enabled because a copy of it is distributed
+#    with Qt, so it is reasonable for the user to expect it.
+foreach driver {mysql odbc psql sqlite2} {
+    configure.args-append -no-sql-${driver}
+}
+
+variant mysql description {Enable MySQL SQL Driver} {
+    depends_lib-append path:lib/mysql5:mysql5
+
+    configure.args-append \
+        -isystem${prefix}/include/mysql5/mysql \
+        -L${prefix}/lib/mysql5/mysql
+
+    configure.args-delete -no-sql-mysql
+}
+
+variant odbc description {Enable unixODBC SQL Driver} {
+    depends_lib-append port:unixODBC
+    configure.args-delete -no-sql-odbc
+}
+
+variant psql description {Enable PostgreSQL SQL Driver} {
+    depends_lib-append port:postgresql83
+
+    configure.args-append \
+        -isystem${prefix}/include/postgresql83 \
+        -L${prefix}/lib/postgresql83
+
+    configure.args-delete -no-sql-psql
+}
+
+variant sqlite2 description {Enable MySQL version 2 SQL Driver} {
+    depends_lib-append port:sqlite2
+    configure.args-delete -no-sql-sqlite2
+}
+
+variant cocoa description {Build the Cocoa version of Qt in 32-bit mode} conflicts noframework {
+    configure.args-append  -cocoa
+
+    # Everything might build, but nothing will run.
+    pre-fetch {
+        if { ${os.major} < 9 } {
+            return -code error "Variant cocoa creates Qt binaries which require Mac OS X 10.5 or higher."
+        }
+    }
+}
+
+variant noframework description {Do not build frameworks} conflicts cocoa {
+    configure.args-append   -no-framework
+}
+
 build.target        first
 use_parallel_build  yes
 
 destroot.destdir    INSTALL_ROOT="${destroot}"
 
 post-patch {
-    # ensure that the MacPorts odbc is used
-    reinplace "s|-liodbc|-lodbc|" \
-        ${worksrcpath}/src/plugins/sqldrivers/odbc/odbc.pro
-
     # ensure that securesocketclient demo is built
     reinplace "s|contains(QT_CONFIG, openssl)|contains(QT_CONFIG, openssl) \\| contains(QT_CONFIG, openssl-linked)|" \
         ${worksrcpath}/examples/network/network.pro
 
     # ensure that MacPorts compilers are used
-    reinplace "s| gcc\$| ${configure.cc}|" ${worksrcpath}/mkspecs/common/mac-g++.conf
+    reinplace "s| g++\$| ${configure.cxx}|" ${worksrcpath}/mkspecs/common/g++.conf
+    reinplace "s| gcc\$| ${configure.cc}|"  ${worksrcpath}/mkspecs/common/g++.conf
     reinplace "s| g++\$| ${configure.cxx}|" ${worksrcpath}/mkspecs/common/mac-g++.conf
+    reinplace "s| gcc\$| ${configure.cc}|"  ${worksrcpath}/mkspecs/common/g++.conf
+    reinplace "s| g++\$| ${configure.cxx}|" ${worksrcpath}/mkspecs/macx-g++/qmake.conf
 }
 
 post-destroot {
     # install documentation
-    foreach doc {INSTALL LICENSE.LGPL LICENSE.GPL3 LGPL_EXCEPTION.txt \
-        KNOWN.ISSUES README} {
+    foreach doc { INSTALL LICENSE.LGPL LICENSE.GPL3 LGPL_EXCEPTION.txt README } {
         xinstall -c -m 644 ${worksrcpath}/$doc ${destroot}${prefix}/share/doc/${portname}
     }
 
@@ -124,11 +188,6 @@ post-destroot {
     }
 
     # Fix the .pc and .prl files by removing ${destroot}
-    foreach fixfile [glob -directory ${destroot}${qt_dir}/lib/pkgconfig *.pc] {
-        reinplace \
-            "s|[regsub ${prefix} ${worksrcpath} {}]/bin|[regsub ${prefix} ${qt_dir}/bin {}]|g" \
-            ${fixfile}
-    }
     foreach fixfile [glob -nocomplain -directory ${destroot} ${qt_dir}/lib/pkgconfig/*.pc ${qt_dir}/lib/*.prl ${qt_dir}/lib/*/*.prl ${prefix}/share/${dirname}/demos/shared/*.prl] {
         reinplace  \
             "s|-L${worksrcpath}/lib|-L${qt_dir}/lib|g" \
@@ -155,38 +214,13 @@ post-destroot {
     xinstall -m 644 ${filespath}/${dirname} ${destroot}${prefix}/etc/select/qt4/
 }
 
-variant cocoa description {Build the Cocoa version of Qt} {
-    configure.args-append   -cocoa
-}
-
-variant nomysql description {Disable mysql} {
-    depends_lib-delete      path:lib/mysql5:mysql5
-    configure.args-delete   -isystem${prefix}/include/mysql5/mysql  \
-                            -L${prefix}/lib/mysql5/mysql
-}
-
-variant nopostgresql description {Disable postgresql support} {
-    depends_lib-delete      port:postgresql83
-    configure.args-delete   -isystem${prefix}/include/postgresql83  \
-                            -L${prefix}/lib/postgresql83
-}
-
-variant noframework conflicts cocoa description {Do not build frameworks} {
-    configure.args-delete   -framework
-    configure.args-append   -no-framework
-}
-
 variant raster description {Use raster graphics system by default} {
     configure.args-append   -graphicssystem  raster
 }
 
-variant webkit description {Use WebKit as html rendering engine in Assistant} {
-    configure.args-append   -assistant-webkit
-}
-
 variant universal {
     configure.universal_args-delete --disable-dependency-tracking
-    configure.args-append           -universal
+    configure.args-append -arch \"${universal_archs}\"
 }
 
 livecheck.check     regex
