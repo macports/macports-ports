@@ -124,15 +124,12 @@ set portfetch::mirror_sites::sites(gnome) {
     http://ftp.unina.it/pub/linux/GNOME/
     http://ftp.acc.umu.se/pub/GNOME/
     http://ftp.belnet.be/mirror/ftp.gnome.org/
-    http://ftp.linux.org.uk/mirrors/ftp.gnome.org/
     http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
     ftp://ftp.dit.upm.es/pub/GNOME/
     ftp://ftp.no.gnome.org/pub/GNOME/
-    ftp://ftp.isu.edu.tw/pub/Unix/Desktop/GNOME/
     ftp://ftp.nara.wide.ad.jp/pub/X11/GNOME/
     ftp://ftp.chg.ru/pub/X11/gnome/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
-    ftp://ftp.dti.ad.jp/pub/X/gnome/
     http://mirror.internode.on.net/pub/gnome/
     http://ftp.gnome.org/pub/GNOME/
 }
