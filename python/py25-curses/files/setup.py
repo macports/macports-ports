@@ -25,6 +25,6 @@ setup(name = "_curses_panel",
       
       ext_modules = [Extension('_curses_panel', ['_curses_panel.c'],
                                include_dirs = inc_dirs,
-                               libraries = libs,
+                               libraries = libs + ['panelw'],
                                library_dirs = lib_dirs)]
       )
