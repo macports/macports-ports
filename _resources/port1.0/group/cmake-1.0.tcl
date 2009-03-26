@@ -44,7 +44,7 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
                     -DCMAKE_OSX_SYSROOT=${universal_sysroot} \
                     -DCMAKE_SYSTEM_PREFIX_PATH=\"${prefix}\;/usr\" \
-                    -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
+                    -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-kde/bin/qmake \
                     -Wno-dev
 
 variant universal {
