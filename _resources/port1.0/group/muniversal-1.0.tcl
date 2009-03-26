@@ -281,11 +281,8 @@ variant universal {
                     file mkdir ${build.dir}
                 }
             }
-            set worksrcdirSave  ${worksrcdir}
-            set worksrcdir ${arch}
             build_main
             eval build.dir  ${build_dir_save}
-            set worksrcdir ${worksrcdirSave}
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete  $merger_build_env(${arch})
             }
