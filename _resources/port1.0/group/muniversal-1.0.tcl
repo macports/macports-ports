@@ -153,7 +153,7 @@ variant universal {
         foreach arch ${universal_archs_to_use} {
             ui_msg "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] [option portname] ${arch}]"
 
-            copy ${worksrcpath} ${workpath}/${arch}
+            copy ${worksrcpath} ${worksrcpath}-${arch}
 
             set archf [muniversal_get_arch_flag ${arch}]
 
@@ -212,21 +212,30 @@ variant universal {
                 configure.args-append  $merger_configure_args(${arch})
             }
 
-            set configure_cc_save ${configure.cc}
-            set configure_cxx_save ${configure.cxx}
+            set configure_cc_save   ${configure.cc}
+            set configure_cxx_save  ${configure.cxx}
 
             configure.cc   ${configure.cc}  ${archf}
             configure.cxx  ${configure.cxx} ${archf}
 
-            set worksrcpathSave  ${worksrcpath}
-            set worksrcpath  ${workpath}/${arch}
+            set configure_dir_save  ${configure.dir}
+            if { [string match "${worksrcpath}/*" ${configure.dir}] } {
+                # The configure directory is inside the source directory, so put in the new source directory name.
+                eval configure.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${configure.dir}]
+            } else {
+                # The configure directory is outside the source directory, so give it a new name by appending ${arch}.
+                configure.dir  ${configure.dir}-${arch}
+                if { ![file exists ${configure.dir}] } {
+                    file mkdir ${configure.dir}
+                }
+            }
 
             configure_main
 
             # Undo changes to the configure related variables
-            set worksrcpath  ${worksrcpathSave}
-            configure.cc   ${configure_cc_save}
-            configure.cxx  ${configure_cxx_save}
+            eval configure.dir  ${configure_dir_save}
+            eval configure.cc   ${configure_cc_save}
+            eval configure.cxx  ${configure_cxx_save}
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-delete  $merger_configure_args(${arch})
             }
@@ -261,8 +270,22 @@ variant universal {
             if { [info exists merger_build_env(${arch})] } {
                 build.env-append  $merger_build_env(${arch})
             }
-            build.dir  ${workpath}/${arch}
+            set build_dir_save  ${build.dir}
+            if { [string match "${worksrcpath}/*" ${build.dir}] } {
+                # The build directory is inside the source directory, so put in the new source directory name.
+                eval build.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${build.dir}]
+            } else {
+                # The build directory is outside the source directory, so give it a new name by appending ${arch}.
+                build.dir  ${build.dir}-${arch}
+                if { ![file exists ${build.dir}] } {
+                    file mkdir ${build.dir}
+                }
+            }
+            set worksrcdirSave  ${worksrcdir}
+            set worksrcdir ${arch}
             build_main
+            eval build.dir  ${build_dir_save}
+            set worksrcdir ${worksrcdirSave}
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete  $merger_build_env(${arch})
             }
@@ -273,17 +296,29 @@ variant universal {
         foreach arch ${universal_archs_to_use} {
             ui_msg "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] [option portname] ${arch}]"
             copy ${destroot} ${workpath}/destroot-${arch}
-            destroot.dir  ${workpath}/${arch}
             set destdirSave ${destroot.destdir}
-            destroot.destdir  [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+            eval destroot.destdir  [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-append  $merger_destroot_env(${arch})
             }
+            set destroot_dir_save ${destroot.dir}
+            if { [string match "${worksrcpath}/*" ${destroot.dir}] } {
+                # The destroot directory is inside the source directory, so put in the new source directory name.
+                eval destroot.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${destroot.dir}]
+            } else {
+                # The destroot directory is outside the source directory, so give it a new name by appending ${arch}.
+                destroot.dir  ${destroot.dir}-${arch}
+                if { ![file exists ${destroot.dir}] } {
+                    file mkdir ${destroot.dir}
+                }
+            }
             destroot_main
+            destroot.dir  ${destroot_dir_save}
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
             }
-            destroot.destdir ${destdirSave} 
+            eval destroot.destdir ${destdirSave} 
         }
         delete ${destroot}
 
@@ -427,7 +462,17 @@ variant universal {
             # PowerPC systems can't translate Intel instructions
             if { (${os.arch}=="i386" && ${arch}!="ppc64") || (${os.arch}=="powerpc" && ${arch}!="i386" && ${arch}!="x86_64") } {
                 ui_msg "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] [option portname] ${arch}]"
-                test.dir  ${workpath}/${arch}
+                set test_dir_save ${destroot.dir}
+                if { [string match "${worksrcpath}/*" ${test.dir}] } {
+                    # The test directory is inside the source directory, so put in the new source directory name.
+                    eval test.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${test.dir}]
+                } else {
+                    # The test directory is outside the source directory, so give it a new name by appending ${arch}.
+                    test.dir  ${test.dir}-${arch}
+                    if { ![file exists ${test.dir}] } {
+                        file mkdir ${destroot.dir}
+                    }
+                }
                 test_main
             }
         }
