@@ -48,6 +48,7 @@ configure.args-append   -DBUILD_doc=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
                         -DPHONON_INCLUDE_DIR=${prefix}/include \
                         -DPHONON_LIBRARY=${prefix}/lib/libphonon.dylib \
+                        -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-kde/bin/qmake \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
 variant no_docs description "Omit documentation" {
