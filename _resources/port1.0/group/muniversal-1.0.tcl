@@ -42,6 +42,7 @@
 #    merger_configure_cxxflags: associative array of configure.cxxflags
 #     merger_configure_ldflags: associative array of configure.ldflags
 #             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
+#         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
 #          merger_destroot_env: assoicative array of desroot.env variables
 #             merger_dont_diff: list of file names for which diff will not work
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
@@ -77,6 +78,10 @@ proc muniversal_get_arch_flag {arch} {
 
 if { ! [info exists merger_arch_flag ] } {
         set merger_arch_flag "yes"
+}
+
+if { ! [info exists merger_arch_compiler ] } {
+        set merger_arch_compiler "yes"
 }
 
 variant universal {
@@ -215,8 +220,10 @@ variant universal {
             set configure_cc_save   ${configure.cc}
             set configure_cxx_save  ${configure.cxx}
 
-            configure.cc   ${configure.cc}  ${archf}
-            configure.cxx  ${configure.cxx} ${archf}
+            if { ${merger_arch_compiler} != "no" } {
+                configure.cc   ${configure.cc}  ${archf}
+                configure.cxx  ${configure.cxx} ${archf}
+            }
 
             set configure_dir_save  ${configure.dir}
             if { [string match "${worksrcpath}/*" ${configure.dir}] } {
