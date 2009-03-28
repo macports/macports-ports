@@ -466,7 +466,7 @@ variant universal {
             # PowerPC systems can't translate Intel instructions
             if { (${os.arch}=="i386" && ${arch}!="ppc64") || (${os.arch}=="powerpc" && ${arch}!="i386" && ${arch}!="x86_64") } {
                 ui_msg "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] [option portname] ${arch}]"
-                set test_dir_save ${destroot.dir}
+                set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
                     # The test directory is inside the source directory, so put in the new source directory name.
                     eval test.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${test.dir}]
@@ -474,10 +474,11 @@ variant universal {
                     # The test directory is outside the source directory, so give it a new name by appending ${arch}.
                     test.dir  ${test.dir}-${arch}
                     if { ![file exists ${test.dir}] } {
-                        file mkdir ${destroot.dir}
+                        file mkdir ${test.dir}
                     }
                 }
                 test_main
+                test.dir ${test_dir_save}
             }
         }
     }
