@@ -290,6 +290,41 @@ set portfetch::mirror_sites::sites(ruby) {
     ftp://ftp.ruby-lang.org/pub/ruby/
 }
 
+set portfetch::mirror_sites::sites(savannah) {
+    http://download.savannah.nongnu.org/releases-noredirect/
+    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    http://ftp.twaren.net/Unix/NonGNU/
+    ftp://ftp.twaren.net/Unix/NonGNU/
+    http://mirror.cinquix.com/pub/savannah/
+    ftp://mirror.cinquix.com/pub/savannah/
+    http://mirror.csclub.uwaterloo.ca/nongnu/
+    ftp://mirror.csclub.uwaterloo.ca/nongnu/
+    http://mirror.dknss.com/nongnu/
+    http://mirror.publicns.net/pub/nongnu/
+    ftp://mirror.publicns.net/pub/nongnu/
+    http://mirror.sourceshare.org/savannah/
+    ftp://mirrors.localhost.net.ar/pub/mirrors/savannah-nongnu/
+    http://mirrors.openfountain.cl/savannah/
+    http://mirrors.zerg.biz/nongnu/
+    http://nongnu.askapache.com/
+    http://nongnu.bigsearcher.com/
+    http://mirror.its.uidaho.edu/pub/savannah//
+    ftp://mirror.its.uidaho.edu/savannah/
+    http://nongnu.mirror.ironie.org/
+    ftp://ftp.ironie.org/savannah.nongnu.org/
+    http://piotrkosoft.net/pub/mirrors/savannah.gnu.org/
+    ftp://ftp.piotrkosoft.net/pub/mirrors/savannah.gnu.org/
+    http://savannah.c3sl.ufpr.br/
+    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
+    http://savannah.inetbridge.net/
+    http://savannah.releasenotes.org/
+    http://www.centervenus.com/mirrors/nongnu/
+    http://www.de-mirrors.de/nongnu/
+    http://www.very-clever.com/download/nongnu/
+}
+# Alias nongnu to savannah
+set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
+
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
     http://easynews.dl.sourceforge.net/
