@@ -165,6 +165,9 @@ variant universal {
             if { ${merger_arch_flag} != "no" } {
                 configure.cflags-append    ${archf}
                 configure.cxxflags-append  ${archf}
+                configure.fflags-append    ${archf}
+                configure.fcflags-append   ${archf}
+                configure.f90flags-append  ${archf}
                 configure.ldflags-append   ${archf}
             }
 
@@ -219,10 +222,16 @@ variant universal {
 
             set configure_cc_save   ${configure.cc}
             set configure_cxx_save  ${configure.cxx}
+            set configure_fc_save   ${configure.fc}
+            set configure_f77_save  ${configure.f77}
+            set configure_f90_save  ${configure.f90}
 
             if { ${merger_arch_compiler} != "no" } {
                 configure.cc   ${configure.cc}  ${archf}
                 configure.cxx  ${configure.cxx} ${archf}
+                if { ${configure.fc}  != "" } { configure.fc   ${configure.fc}  ${archf} }
+                if { ${configure.f77} != "" } { configure.f77  ${configure.f77} ${archf} }
+                if { ${configure.f90} != "" } { configure.f90  ${configure.f90} ${archf} }
             }
 
             set configure_dir_save  ${configure.dir}
@@ -241,6 +250,9 @@ variant universal {
 
             # Undo changes to the configure related variables
             eval configure.dir  ${configure_dir_save}
+            eval configure.f90  ${configure_f90_save}
+            eval configure.f77  ${configure_f77_save}
+            eval configure.fc   ${configure_fc_save}
             eval configure.cc   ${configure_cc_save}
             eval configure.cxx  ${configure_cxx_save}
             if { [info exists merger_configure_args(${arch})] } {
@@ -264,6 +276,9 @@ variant universal {
             }
             if { ${merger_arch_flag} != "no" } {
                 configure.ldflags-delete   ${archf}
+                configure.f90flags-delete  ${archf}
+                configure.fcflags-delete   ${archf}
+                configure.fflags-delete    ${archf}
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
             }
