@@ -61,19 +61,7 @@ if { ! [info exists merger_no_3_archs] } {
 }
 
 proc muniversal_get_arch_flag {arch} {
-    global os.arch
-    # Prefer -m to -arch
-    set archf "-arch ${arch}"
-    if { ${os.arch}=="i386" && ${arch}=="i386" } {
-        set archf -m32
-    } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
-        set archf -m64
-    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
-        set archf -m32
-    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
-        set archf -m64
-    }
-    return ${archf}
+    return "-arch ${arch}"
 }
 
 if { ! [info exists merger_arch_flag ] } {
@@ -326,7 +314,11 @@ variant universal {
                     file mkdir ${build.dir}
                 }
             }
-            build_main
+            if {[llength [info commands "portbuild::*"]] > 0} {
+                portbuild::build_main
+            } else {
+                build_main
+            }
             eval build.dir  ${build_dir_save}
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete  $merger_build_env(${arch})
@@ -355,7 +347,11 @@ variant universal {
                     file mkdir ${destroot.dir}
                 }
             }
-            destroot_main
+            if {[llength [info commands "portdestroot::*"]] > 0} {
+                portdestroot::destroot_main
+            } else {
+                destroot_main
+            }
             destroot.dir  ${destroot_dir_save}
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
@@ -515,7 +511,11 @@ variant universal {
                         file mkdir ${test.dir}
                     }
                 }
-                test_main
+                if {[llength [info commands "porttest::*"]] > 0} {
+                    porttest::test_main
+                } else {
+                    test_main
+                }
                 test.dir ${test_dir_save}
             }
         }
