@@ -246,9 +246,22 @@ variant universal {
                 }
             }
 
+            set autoreconf_dir_save  ${autoreconf.dir}
+            if { [string match "${worksrcpath}/*" ${autoreconf.dir}] } {
+                # The autoreconf directory is inside the source directory, so put in the new source directory name.
+                eval autoreconf.dir  [string map "${worksrcpath} ${worksrcpath}-${arch}" ${autoreconf.dir}]
+            } else {
+                # The autoreconf directory is outside the source directory, so give it a new name by appending ${arch}.
+                autoreconf.dir  ${autoreconf.dir}-${arch}
+                if { ![file exists ${autoreconf.dir}] } {
+                    file mkdir ${autoreconf.dir}
+                }
+            }
+
             configure_main
 
             # Undo changes to the configure related variables
+            eval autoreconf.dir ${autoreconf_dir_save}
             eval configure.dir  ${configure_dir_save}
             eval configure.f90  ${configure_f90_save}
             eval configure.f77  ${configure_f77_save}
