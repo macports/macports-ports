@@ -1,6 +1,7 @@
 # $Id$
 
 PortSystem 1.0
+PortGroup  muniversal 1.0
 
 name			openssl
 version			0.9.8k
@@ -52,135 +53,45 @@ livecheck.check	regex
 livecheck.url	${master_sites}
 livecheck.regex	${name}-(0.9.8\[a-z\])
 
-if { ![info exists universal_archs] } {
-	set universal_archs {i386 ppc}
-	#set universal_archs {i386 x86_64 ppc ppc64}
+post-patch {
+	# Ensure that the correct compiler is used
+	reinplace "s|cc:|${configure.cc}:|" ${worksrcpath}/Configure
 }
-set first_arch [lindex ${universal_archs} 0]
 
-variant universal {
-    patchfiles-append patch-Configure-sysroot.diff
+if { [variant_isset universal] } {
+	configure.cmd	./Configure
+
 	post-patch {
-	    reinplace "s|__UNIVERSAL_SYSROOT__|${universal_sysroot}|" ${worksrcpath}/Configure
-		foreach arch ${universal_archs} {
-			if {[string equal ${arch} ${first_arch}]} {
-				move ${worksrcpath} ${workpath}/${first_arch}
-			} else {
-				copy ${workpath}/${first_arch} ${workpath}/${arch}
-			}
+		# For universal builds, add "-isysroot ${universal_sysroot}" to compiler options
+		reinplace "s|\\(-arch \[_a-zA-Z0-9\]*\\)|\\1 -isysroot ${universal_sysroot}|" ${worksrcpath}/Configure
+	}
+
+	set merger_arch_compiler "no"
+
+	pre-configure {
+		configure.args-delete  --disable-dependency-tracking
+	}
+
+	pre-destroot {
+		global merger_dont_diff
+		if { [llength ${universal_archs_to_use}] > 2 } {
+			lappend merger_dont_diff ${prefix}/include/openssl/opensslconf.h
 		}
 	}
 
-	configure {
-		foreach arch ${universal_archs} {
-			if { [string first 64 $arch] == -1 } {
-				set my_cc "darwin-${arch}-cc"
-			} else {
-				if {[string first ppc $arch] != -1} {
-					set my_cc "darwin64-ppc-cc"
-				} else {
-					set my_cc "darwin64-${arch}-cc"
-				}
-			}
-			system "cd ${workpath}/${arch} && ./Configure ${my_cc} ${configure.pre_args} ${configure.args}"
-		}
+	array set merger_configure_args {
+		ppc     darwin-ppc-cc
+		i386    darwin-i386-cc
+		ppc64   darwin64-ppc-cc
+		x86_64  darwin64-x86_64-cc
 	}
 
-	build {
-		foreach arch ${universal_archs} {
-			system "cd ${workpath}/${arch} && make all"
-		}
-	}
-
-	destroot {
-# in port 1.7, just call:
-#		merge "${workpath}/pre-dest"
-# till then, do this:
-		foreach arch ${universal_archs} {
-			xinstall -d ${workpath}/pre-dest/${arch}
-			system "cd ${workpath}/${arch} && make install INSTALL_PREFIX=${workpath}/pre-dest/${arch} MANDIR=${prefix}/share/man"
-			
-			# opensslconf.h will differ between 32- and 64-bit, so patch it so it doesn't
-			if { [string first 64 $arch] != -1 } {
-				if { [string first ppc $arch] != -1 } {
-					set configpatch ${filespath}/patch-opensslconf.h-ppc64.diff
-				} else {
-					set configpatch ${filespath}/patch-opensslconf.h-x86_64.diff
-				}
-			} else {
-				set configpatch ${filespath}/patch-opensslconf.h-32.diff
-			}
-			system "cd ${workpath}/pre-dest/${arch}${prefix} && patch --no-backup-if-mismatch -p0 < ${configpatch}"
-		}
-
-		set basepath "${workpath}/pre-dest/${first_arch}"
-		fs-traverse file "${basepath}" {
-			set fpath [string range "${file}" [string length "${basepath}"] [string length "${file}"]]
-			if {${fpath} != ""} {
-				ui_debug ":: ${fpath}"
-
-				switch -exact [file type "${basepath}${fpath}"] {
-					directory {
-						# just create directories
-						ui_debug "-- dir:: ${fpath}"
-						file mkdir "${destroot}${fpath}"
-					}
-					link {
-						# copy symlinks (TODO: check if target matches)
-						ui_debug "-- lnk:: ${fpath}"
-						file copy "${basepath}${fpath}" "${destroot}${fpath}"
-					}
-					file {
-						# treat files depending on their filetype
-						ui_debug "-- file:: ${fpath}"
-						set filetype [exec "/usr/bin/file" "-b" "${basepath}${fpath}"]
-						switch -regexp ${filetype} {
-							Mach-O.* {
-								# Mach-O binaries get lipo-ed
-								ui_debug "Mach-O file -- lipo-ing"
-								set machocmd "lipo"
-								foreach arch ${universal_archs} {
-									set machocmd "${machocmd} -arch $arch ${workpath}/pre-dest/${arch}/${fpath}"
-								}
-								set machocmd "${machocmd} -create -output ${destroot}${fpath}"
-								system ${machocmd}
-							}
-							current\ ar\ archive {
-								# ar archives get lipo-ed
-								ui_debug "ar archive -- lipo-ing"
-								set arcmd "lipo"
-								foreach arch ${universal_archs} {
-									set arcmd "${arcmd} -arch $arch ${workpath}/pre-dest/${arch}/${fpath}"
-								}
-								set arcmd "${arcmd} -create -output ${destroot}${fpath}"
-								system ${arcmd}
-							}
-							default {
-								# unknown file types are copied IF they do not differ across ALL architectures -- if they do: This is an error!
-								ui_debug "unknown filetype: ${filetype}"
-								
-								set any_difference no
-								foreach arch ${universal_archs} {
-									if {![string equal ${arch} ${first_arch}]} {
-										set differ1 [exec "/usr/bin/diff" "-q" "${workpath}/pre-dest/${first_arch}/${fpath}" "${workpath}/pre-dest/${arch}/${fpath}"]
-										if {![string equal ${differ1} ""]} {
-											set any_difference yes
-										}
-									}
-								}
-								if {${any_difference}} {
-									ui_debug "ERROR: files differ"
-								} else {
-									ui_debug "files match, just copying"
-									file copy "${basepath}${fpath}" "${destroot}${fpath}"
-								}
-							}
-						}
-					}
-					default { ui_debug "serious error" }
-				}
-			}
-		}
+	# Do not set --host.
+	array set merger_host {
+		ppc     ""
+		i386    ""
+		ppc64   ""
+		x86_64  ""
 	}
 }
 
