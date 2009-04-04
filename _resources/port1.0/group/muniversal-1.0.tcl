@@ -100,7 +100,12 @@ variant universal {
     }
 
     # undo setting of --host and --target from portconfigure.tcl procedure configure_get_universal_args
-    set undo_system_value [configure_get_universal_system_name]
+    # XXX Quick hack for base after r49087
+    if {[llength [info commands "portconfigure::*"]] > 0} {
+        set undo_system_value [portconfigure::configure_get_universal_system_name]
+    } else {
+        set undo_system_value [configure_get_universal_system_name]
+    }
     if {[llength ${configure.universal_archs}] == 1 &&
         [info exists undo_system_value] && $undo_system_value != ""} {
         configure.args-delete --host=${undo_system_value} --target=${undo_system_value}
@@ -258,7 +263,12 @@ variant universal {
                 }
             }
 
-            configure_main
+            # XXX Quick hack for base after r49087
+            if {[llength [info commands "portconfigure::*"]] > 0} {
+                portconfigure::configure_main
+            } else {
+                configure_main
+            }
 
             # Undo changes to the configure related variables
             eval autoreconf.dir ${autoreconf_dir_save}
