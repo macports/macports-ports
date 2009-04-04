@@ -61,7 +61,19 @@ if { ! [info exists merger_no_3_archs] } {
 }
 
 proc muniversal_get_arch_flag {arch} {
-    return "-arch ${arch}"
+    global os.arch 
+    # Prefer -m to -arch 
+    set archf "-arch ${arch}" 
+    if { ${os.arch}=="i386" && ${arch}=="i386" } { 
+        set archf -m32 
+    } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } { 
+        set archf -m64 
+    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } { 
+        set archf -m32 
+    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } { 
+        set archf -m64 
+    } 
+    return ${archf}
 }
 
 if { ! [info exists merger_arch_flag ] } {
