@@ -55,32 +55,42 @@ import os
 import re
 import shutil
 
-from mercurial import cmdutil, commands, hg, hgweb, node, util
+from mercurial import cmdutil, commands, error, hg, hgweb, node, util
 from mercurial import localrepo, sshrepo, sshserver, httprepo, statichttprepo
 from mercurial.i18n import gettext as _
-from mercurial.repo import RepoError
 
 # For backwards compatibility, we need the following function definition.
 # If we didn't want that, we'd have just written:
 #     from mercurial.commands import 
-def findcmd(ui, cmd, table):
-    """Find and execute mercurial.*.findcmd(ui, cmd[, table])."""
+def findcmd(ui, cmd, table, strict=True):
+    """Find and execute mercurial.*.findcmd([ui,] cmd[, table, strict])."""
     try:
-        # ui argument was removed as of b4c035057d34
-        return findcmd.findcmd(cmd, table)
+        return findcmd.findcmd(cmd=cmd, table=table, strict=strict)
     except TypeError:
         try:
-            return findcmd.findcmd(ui, cmd, table)
+            return findcmd.findcmd(ui=ui, cmd=cmd, table=table)
         except TypeError:
             return findcmd.findcmd(ui, cmd)
 try:
     findcmd.findcmd = cmdutil.findcmd
     findcmd.__doc__ = cmdutil.findcmd.__doc__
-    findcmd.UnknownCommand = cmdutil.UnknownCommand
 except AttributeError:
     findcmd.findcmd = commands.findcmd
     findcmd.__doc__ = commands.findcmd.__doc__
-    findcmd.UnknownCommand = commands.UnknownCommand
+for m in (error, cmdutil, commands):
+    if hasattr(m, "UnknownCommand"):
+        findcmd.UnknownCommand = m.UnknownCommand
+        break
+try:
+    # Assign the exceptions explicitely to avoid demandload issues
+    import mercurial.repo
+    import mercurial.cmdutil
+    RepoError = mercurial.repo.RepoError
+    ParseError = mercurial.dispatch.ParseError
+except AttributeError:
+    import mercurial.error
+    RepoError = mercurial.error.RepoError
+    ParseError = mercurial.error.ParseError
 
 # For backwards compatibility, find the parseurl() function that splits
 # urls and revisions.  Mercurial 0.9.3 doesn't have this, so we need
@@ -1122,7 +1132,7 @@ def seed(ui, snapshot=None, source='default', **opts):
 
     snapfile = snapshot or opts['snapfile']
     if not snapfile:
-        raise cmdutil.ParseError("fseed", _("invalid arguments"))
+        raise ParseError("fseed", _("invalid arguments"))
     forest = Forest(snapfile=snapfile)
     tip = opts['tip']
     dest = opts['root']
