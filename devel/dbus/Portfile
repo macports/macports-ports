@@ -6,7 +6,7 @@ PortGroup       muniversal 1.0
 
 name            dbus
 version         1.2.12
-revision        4
+revision        5
 maintainers     mcalhoun openmaintainer
 categories      devel
 platforms       darwin
@@ -22,32 +22,82 @@ checksums           md5     39bd582c3b06a261cac44d4cab6fd60b \
                     sha1    13de8dc28c9edae7b9d2928ff691549bb2bef21a \
                     rmd160  779d76320f1343dae7447c82a683e372e6c11729
 
-                
-patchfiles      patch-dbus-sysdeps-unix.c.diff \
-                patch-launchd-integration-dist.diff
+# There is a proposeal to use launchd with dbus (see https://bugs.freedesktop.org/show_bug.cgi?id=14259).
+# patch-launchd-integration.diff is a slightly modified patch from Fink.
+patchfiles      patch-launchd-integration.diff
 
-post-patch {
-   reinplace "s|@@PREFIX@@|${prefix}|g" ${worksrcpath}/dbus/dbus-sysdeps-unix.c
-}
+use_autoreconf  yes
 
-depends_build   port:pkgconfig
+depends_build       \
+    port:pkgconfig  \
+    port:autoconf   \
+    port:automake   \
+    port:libtool
+
+set dbus_user     messagebus
+set dbus_group    messagebus
+set startup_root  ""
 
 depends_lib     port:expat
 
 configure.args  --disable-doxygen-docs \
                 --disable-xml-docs \
                 --without-x \
-                --enable-launchd
+                --enable-launchd \
+                --with-launchd-agent-dir=${prefix}/Library/LaunchAgents
+
+pre-configure {
+    # Value must be set in pre-configure because dbus_user may change in variant.
+    configure.args-append  --with-dbus-user=${dbus_user}
+}
+
+post-patch {
+    reinplace "s|/usr/local|${prefix}|g" ${worksrcpath}/dbus/dbus-sysdeps-unix.c
+    reinplace {s|broken_poll="no (cross compiling)"|broken_poll=yes|} ${worksrcpath}/configure
+    
+    if { ! [variant_isset no_startupitem] } {
+        # Disable if installed into startup directory.
+        reinplace "s|<false />|<false />\\\n\\\n\\\t<key>Disabled</key>\\\n\\\t<true/>|" \
+            ${worksrcpath}/bus/org.freedesktop.dbus-session.plist.in
+    }
+    
+    if { ${os.major} >= 9 } {
+        # Allow OnDemand for Leopard and above.
+        reinplace {s|<false />|<true />|} \
+            ${worksrcpath}/bus/org.freedesktop.dbus-session.plist.in
+    }
+}
 
 platform darwin 7 {
-    patchfiles              patch-dbus-launch-x11.c.diff \
-                            patch-dbus-sysdeps-util-unix.c.diff
+    depends_build-delete    port:autoconf port:automake port:libtool
+    depends_lib-append      port:xorg-libsm port:xorg-libX11
 
-    depends_lib-append      port:xorg-libX11
+    patchfiles-delete      patch-launchd-integration.diff
+
+    use_autoreconf          no
 
     configure.args-delete   --without-x \
-                            --enable-launchd
+                            --enable-launchd \
+                            --with-launchd-agent-dir=${prefix}/Library/LaunchAgents
     configure.args-append   --with-x
+
+    post-patch {
+        # Neither _SC_GETPW_R_SIZE_MAX nor _SC_GETGR_R_SIZE_MAX are defined in Panther.
+        # The value of -1 is used to emulate a failed sysconf call.
+        reinplace "s|sysconf (_SC_GETPW_R_SIZE_MAX)|-1|" \
+            ${worksrcpath}/dbus/dbus-sysdeps-unix.c
+        reinplace "s|sysconf (_SC_GETGR_R_SIZE_MAX)|-1|" \
+            ${worksrcpath}/dbus/dbus-sysdeps-util-unix.c
+        
+        # -Wno-pointer-sign does not work on Panther.
+        reinplace {/CFLAGS="$CFLAGS -Wno-pointer-sign"/d} ${worksrcpath}/configure
+    }
+
+    if { ! [variant_isset  no_startupitem] } {
+        startupitem.create       yes
+    }
+    startupitem.name         dbus
+    startupitem.executable   ${prefix}/bin/dbus-daemon --system --nofork
 }
 
 use_parallel_build  yes
@@ -62,42 +112,89 @@ pre-test {
     }
 }
 
-post-destroot {
-    foreach dir ${destroot.keepdirs} {
-        file mkdir $dir
-    }
-}
-
 destroot.keepdirs \
     ${destroot}${prefix}/share/dbus-1/services \
     ${destroot}${prefix}/var/run/dbus \
-    ${destroot}${prefix}/var/lib/dbus \
     ${destroot}${prefix}/etc/dbus-1/system.d \
     ${destroot}${prefix}/etc/dbus-1/session.d
 
-startupitem.create  yes
-startupitem.name    dbus
-startupitem.executable   ${prefix}/bin/dbus-daemon --system --nofork
+post-destroot {
+    global plistFl
+    
+    if {![variant_isset darwin_7]} {
+        # Simplify startup script over startupitem.create.
+        # See http://trac.macports.org/ticket/15081
+        set plistDir  ${prefix}/Library/LaunchDaemons
+        xinstall -d -m 0755 ${destroot}${plistDir}
+        set plistFl   ${plistDir}/org.freedesktop.dbus-system.plist
+        set plist [open "${destroot}${plistFl}" w 0644]
+        
+        puts ${plist} "<?xml version='1.0' encoding='UTF-8'?>"
+        puts ${plist} "<!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\""
+        puts ${plist} "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\" >"
+        puts ${plist} "<plist version='1.0'>"
+        puts ${plist} "<dict>"
+        
+        puts ${plist} "<key>Label</key><string>org.freedesktop.dbus-system.plist</string>"
+        
+        puts ${plist} "<key>ProgramArguments</key>"
+        puts ${plist} "<array>"
+        puts ${plist} "\t<string>${prefix}/bin/dbus-daemon</string>"
+        puts ${plist} "\t<string>--system</string>"
+        puts ${plist} "\t<string>--nofork</string>"
+        puts ${plist} "</array>"
+        
+        puts ${plist} "<key>OnDemand</key><false/>"
+        
+        if { ! [variant_isset no_startupitem] } {
+            puts ${plist} "<key>Disabled</key><true/>"
+        }
+        
+        puts ${plist} "</dict>"
+        puts ${plist} "</plist>"
+        
+        close ${plist}
+        
+        if { ! [variant_isset no_startupitem] } {
+            xinstall -d -m 0755 ${destroot}${startup_root}/Library/LaunchDaemons
+            xinstall -d -m 0755 ${destroot}${startup_root}/Library/LaunchAgents
+            ln -s ${plistFl} ${destroot}${startup_root}/Library/LaunchDaemons
+            ln -s ${prefix}/Library/LaunchAgents/org.freedesktop.dbus-session.plist ${destroot}${startup_root}/Library/LaunchAgents
+        }
+    }
+    
+    system "env DYLD_LIBRARY_PATH=${destroot}${prefix}/lib ${destroot}${prefix}/bin/dbus-uuidgen --ensure=${destroot}${prefix}/var/lib/dbus/machine-id"
+}
 
 pre-activate {
-    addgroup messagebus
-    adduser messagebus gid=[existsgroup messagebus] realname=Message\ Bus
+    addgroup  ${dbus_group}
+    adduser   ${dbus_user} gid=[existsgroup ${dbus_group}] realname=Message\ Bus
 }
 
 post-activate {
-    file attributes ${prefix}/var/run/dbus -group messagebus -owner messagebus
-    file attributes ${prefix}/libexec/dbus-daemon-launch-helper -group messagebus
-    system "dbus-uuidgen --ensure"
+    global plistFl
 
-    if {![variant_isset darwin_7]} {
-        ui_msg "##############################################################################"
-        ui_msg "# It is absolutely necessary for dbus enabled programs to work to execute"
+    file attributes ${prefix}/var/run/dbus -group ${dbus_group} -owner ${dbus_user}
+    file attributes ${prefix}/libexec/dbus-daemon-launch-helper -group ${dbus_group}
+    
+    if {![variant_isset darwin_7] && ![variant_isset no_startupitem] } {        
+        if { ! [variant_isset no_root] } {
+            set sudo "sudo "
+            file attributes /Library/LaunchAgents/org.freedesktop.dbus-session.plist -owner root -group wheel
+            file attributes /Library/LaunchDaemons/[file tail ${plistFl}] -owner root -group wheel
+        } else {
+            set sudo ""
+        }
+        
+        ui_msg "#################################################################################################"
+        ui_msg "# Startup items have been generated that will aid in"
+        ui_msg "# starting ${portname} with launchd. They are disabled"
+        ui_msg "# by default. Execute the following command to start them,"
+        ui_msg "# and to cause it to launch at startup:"
         ui_msg "#"
-        ui_msg "# launchctl load /Library/LaunchAgents/org.freedesktop.dbus-session.plist"
-        ui_msg "#"
-        ui_msg "# once for every user. Don't use 'sudo', else it will work only for root!"
-        ui_msg "# You also have to unload it before deactivating/uninstalling this software!"
-        ui_msg "##############################################################################"
+        ui_msg "# ${sudo}launchctl load -w ${startup_root}/Library/LaunchDaemons/[file tail ${plistFl}]"
+        ui_msg "# ${sudo}launchctl load -w ${startup_root}/Library/LaunchAgents/org.freedesktop.dbus-session.plist"
+        ui_msg "##################################################################################################"
     }
 }
 
@@ -105,25 +202,37 @@ variant test description {enable tests} {
     configure.args-append   --enable-tests
 }
 
-if {[variant_isset universal]} {
-    if { ${os.arch}=="i386" } {
-        array set merger_configure_args {
-            ppc64   --config-cache
-        }
-        if { ${os.major} > 9 } {
-            set merger_configure_args(ppc)  --config-cache
-        }
-    } else {
-        array set merger_configure_args {
-            i386    --config-cache
-            x86_64  --config-cache
+variant no_startupitem description {Do not install startup files.} {}
+
+variant no_root description {Run the DBUS daemon as MacPorts install user.} {
+    pre-fetch {
+        if { ${install.user}=="root" || ${install.group}=="wheel" } {
+            ui_error "The DBUS daemon should not be run as root."
+            erorr "Please do not use this variant with your MacPorts configuration."
         }
     }
 
-    post-extract {
-        # Answers to questions configure can't determine without running a program.
-        copy ${filespath}/config.cache ${worksrcpath}
+    set dbus_user     ${install.user}
+    set dbus_group    ${install.group}
+    set startup_root  [join [lrange [exec /usr/bin/dscl . -read Users/${install.user} NFSHomeDirectory] 1 end]]
+    
+    # Files are installed into user's startup directory.
+    if { ![variant_isset no_staruptitem] } {
+        destroot.violate_mtree  yes
     }
+}
+
+set cross_opts  "ac_cv_have_abstract_sockets=no NM='/usr/bin/nm -p'"
+if { ${os.arch}=="i386" } {
+    if { ${os.major} >= 10 } {
+        set merger_configure_env(ppc) ${cross_opts}
+    } else {
+        set merger_configure_env(ppc) "NM='/usr/bin/nm -p'"
+    }
+    set merger_configure_env(ppc64)   ${cross_opts}
+} else {
+    set merger_configure_env(i386)    ${cross_opts}
+    set merger_configure_env(x86_64)  ${cross_opts}
 }
 
 livecheck.check regex
