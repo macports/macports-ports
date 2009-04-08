@@ -39,7 +39,7 @@ worksrcdir              build
 
 post-extract            { file mkdir ${worksrcpath} }
 
-depends_lib-append      port:doxygen
+depends_lib-append      port:doxygen port:qt4-kde
 
 configure.compiler      gcc-4.2
 
