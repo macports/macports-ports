@@ -87,17 +87,17 @@ if { ! [info exists merger_arch_compiler ] } {
 variant universal {
     global universal_archs_to_use
 
+    foreach arch ${universal_archs} {
+        configure.universal_cflags-delete    -arch ${arch}
+        configure.universal_cxxflags-delete  -arch ${arch}
+        configure.universal_ldflags-delete   -arch ${arch}
+    }
+
     eval configure.args-append      ${configure.universal_args}
     eval configure.cflags-append    ${configure.universal_cflags}
     eval configure.cxxflags-append  ${configure.universal_cxxflags}
     eval configure.ldflags-append   ${configure.universal_ldflags}
     eval configure.cppflags-append  ${configure.universal_cppflags}
-
-    foreach arch ${universal_archs} {
-        configure.cflags-delete    -arch ${arch}
-        configure.cxxflags-delete  -arch ${arch}
-        configure.ldflags-delete   -arch ${arch}
-    }
 
     # undo setting of --host and --target from portconfigure.tcl procedure configure_get_universal_args
     # XXX Quick hack for base after r49087
