@@ -5,6 +5,7 @@
 
 cljjar='lib/clojure.jar'
 cljclass='clojure.lang.Repl'
+cljscript='clojure.lang.Script'
 
 dir=$0
 while [ -h "$dir" ]; do
@@ -22,4 +23,9 @@ dir=`dirname $dir`
 dir=`cd "$dir" > /dev/null && pwd`
 cljjar="$dir/../$cljjar"
 
-exec java -classpath $cljjar $cljclass
+if [ -z "$1" ]; then
+  exec java -classpath $cljjar $cljclass
+else
+  scriptname=$1
+  exec java -classpath $cljjar $cljscript $scriptname --$*
+fi

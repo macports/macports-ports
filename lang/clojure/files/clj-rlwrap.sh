@@ -2,11 +2,12 @@
 
 # clj - Clojure launcher script
 
+BREAK_CHARS="\(\){}[],^%$#@\"\";:''|\\"
 
 cljjar='lib/clojure.jar'
 cljclass='clojure.lang.Repl'
 cljscript='clojure.lang.Script'
-jlineclass='jline.ConsoleRunner'
+cljcompletions='.clj_completions'
 
 dir=$0
 while [ -h "$dir" ]; do
@@ -23,13 +24,13 @@ done
 dir=`dirname $dir`
 dir=`cd "$dir" > /dev/null && pwd`
 cljjar="$dir/../$cljjar"
-jlinejar="$dir/../../jline.jar"
+cljcompletions="$dir/../$cljcompletions"
 
-
-if [ -z "$1" ]; then
-  exec java -classpath $jlinejar:$cljjar $jlineclass $cljclass
+if [ $# -eq 0 ]; then
+  rlwrap --remember -c -b $BREAK_CHARS -f $cljcompletions \
+           java -cp $cljjar $cljclass
 else
   scriptname=$1
-  exec java -classpath $jlinejar:$cljjar $jlineclass $cljscript $scriptname --$*
+  exec java -classpath $cljjar $cljscript $scriptname --$*
 fi
 
