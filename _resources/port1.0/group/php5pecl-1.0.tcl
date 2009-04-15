@@ -61,4 +61,13 @@ proc php5pecl.setup {extension version} {
     }
     
     destroot.destdir        INSTALL_ROOT=${destroot}
+    
+    post-install {
+        ui_msg "To enable this extension in php,"
+        ui_msg "set 'extension_dir' to"
+        ui_msg "${php5pecl.extension_dir}"
+        ui_msg "And add the line"
+        ui_msg "extension=${php5pecl.extension}.so"
+        ui_msg "in ${prefix}/etc/php.ini"
+    }
 }
