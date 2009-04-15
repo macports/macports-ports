@@ -46,21 +46,21 @@ proc php5pecl.setup {extension version} {
     set php5pecl.extension      ${extension}
     set php5pecl.extension_dir  [exec ${prefix}/bin/php-config --extension-dir]
     
-    name                    php5-${php5pecl.extension}
-    version                 ${version}
-    categories              php
-    homepage                http://pecl.php.net/package/${php5pecl.extension}/
-    master_sites            http://pecl.php.net/get/
-    distname                ${php5pecl.extension}-${version}
-    extract.suffix          .tgz
+    name                        php5-${php5pecl.extension}
+    version                     ${version}
+    categories                  php
+    homepage                    http://pecl.php.net/package/${php5pecl.extension}/
+    master_sites                http://pecl.php.net/get/
+    distname                    ${php5pecl.extension}-${version}
+    extract.suffix              .tgz
     
-    depends_lib             path:bin/phpize:php5
+    depends_lib                 path:bin/phpize:php5
     
     pre-configure {
         system "cd ${worksrcpath} && ${prefix}/bin/phpize"
     }
     
-    destroot.destdir        INSTALL_ROOT=${destroot}
+    destroot.destdir            INSTALL_ROOT=${destroot}
     
     post-install {
         ui_msg "To enable this extension in php,"
