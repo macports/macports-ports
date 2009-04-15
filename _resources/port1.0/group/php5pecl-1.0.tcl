@@ -32,22 +32,26 @@
 # Usage:
 # 
 #   PortGroup               php5pecl 1.0
-#   php5pecl.setup          pecl_package version
+#   php5pecl.setup          pecl_extension version
 # 
-# where pecl_package is the name of the package (e.g. APC), and version
+# where pecl_extension is the name of the extension (e.g. APC), and version
 # is its version. This automatically sets up the standard environment for
-# building PECL modules.
+# building PECL extensions.
 
 
-proc php5pecl.setup {package version} {
+proc php5pecl.setup {extension version} {
+    global php5pecl.extension php5pecl.extension_dir
     global destroot prefix worksrcpath
     
-    name                    php5-${package}
+    set php5pecl.extension      ${extension}
+    set php5pecl.extension_dir  [exec ${prefix}/bin/php-config --extension-dir]
+    
+    name                    php5-${php5pecl.extension}
     version                 ${version}
     categories              php
-    homepage                http://pecl.php.net/package/${package}/
+    homepage                http://pecl.php.net/package/${php5pecl.extension}/
     master_sites            http://pecl.php.net/get/
-    distname                ${package}-${version}
+    distname                ${php5pecl.extension}-${version}
     extract.suffix          .tgz
     
     depends_lib             path:bin/phpize:php5
