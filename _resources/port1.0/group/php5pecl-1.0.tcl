@@ -40,16 +40,17 @@
 
 
 proc php5pecl.setup {extension version} {
-    global php5pecl.extension php5pecl.extension_dir
+    global php5pecl.extension php5pecl.extension_dir php5pecl.homepage
     global destroot prefix worksrcpath
     
     set php5pecl.extension      ${extension}
     set php5pecl.extension_dir  [exec ${prefix}/bin/php-config --extension-dir]
+    set php5pecl.homepage       http://pecl.php.net/package/${php5pecl.extension}/
     
     name                        php5-${php5pecl.extension}
     version                     ${version}
     categories                  php
-    homepage                    http://pecl.php.net/package/${php5pecl.extension}/
+    homepage                    ${php5pecl.homepage}
     master_sites                http://pecl.php.net/get/
     distname                    ${php5pecl.extension}-${version}
     extract.suffix              .tgz
@@ -70,4 +71,8 @@ proc php5pecl.setup {extension version} {
         ui_msg "extension=${php5pecl.extension}.so"
         ui_msg "in ${prefix}/etc/php.ini"
     }
+    
+    livecheck.check             regex
+    livecheck.url               ${php5pecl.homepage}
+    livecheck.regex             >(\[0-9.\]+)<
 }
