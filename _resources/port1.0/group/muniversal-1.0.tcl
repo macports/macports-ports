@@ -454,27 +454,52 @@ variant universal {
 
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
-                                } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} ${dir1}/${fl} ${dir2}/${fl} > ${dir}/${fl}; test \$? -le 1"} ] } {
-                                    # diff worked
-                                    ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                 } else {
-                                    # File created by diff is invalid
-                                    delete ${dir}/${fl}
+                                    set known_file "no"
 
-                                    # nothing has worked so far.
+                                    # Text file on which diff will not give correct results.
                                     switch -glob ${fl} {
-                                        *.jar {
-                                            # jar files can be different becasue of timestamp
-                                            ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume timestamp difference"
-                                            copy ${dir1}/${fl} ${dir}
+                                        *.mod {
+                                            # .mod files from Fortran modules.
+                                            # Create a sepcial module directory for each architecture.
+                                            # To find these modules, GFortran might require -M or -J.
+                                            set known_file "yes"
+                                            file mkdir ${dir}/mods32
+                                            file mkdir ${dir}/mods64
+                                            if { ${arch1}=="i386" || ${arch1}=="ppc" } {
+                                                copy ${dir1}/${fl} ${dir}/mods32
+                                                copy ${dir2}/${fl} ${dir}/mods64
+                                            } else {
+                                                copy ${dir2}/${fl} ${dir}/mods32
+                                                copy ${dir1}/${fl} ${dir}/mods64
+                                            }
                                         }
-                                        *.elc {
-                                            # elc files can be differet because they record when and where they were built.
-                                            ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume trivial difference"
-                                            copy ${dir1}/${fl} ${dir}
-                                        }
-                                        default {
-                                            error "Can not create ${prefixDir}/${fl} from ${base1} and ${base2}"
+                                    }
+
+                                    if { ${known_file}=="no" } {
+                                        if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} ${dir1}/${fl} ${dir2}/${fl} > ${dir}/${fl}; test \$? -le 1"} ] } {
+                                            # diff worked
+                                            ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
+                                        } else {
+                                            # File created by diff is invalid
+                                            delete ${dir}/${fl}
+                                            
+                                            # nothing has worked so far.
+                                            switch -glob ${fl} {
+                                                *.jar {
+                                                    # jar files can be different becasue of timestamp
+                                                    ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume timestamp difference"
+                                                    copy ${dir1}/${fl} ${dir}
+                                                }
+                                                *.elc {
+                                                    # elc files can be differet because they record when and where they were built.
+                                                    ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume trivial difference"
+                                                    copy ${dir1}/${fl} ${dir}
+                                                }
+                                                default {
+                                                    error "Can not create ${prefixDir}/${fl} from ${base1} and ${base2}"
+                                                }
+                                            }
                                         }
                                     }
                                 }
