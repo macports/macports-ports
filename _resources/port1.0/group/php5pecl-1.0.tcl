@@ -40,11 +40,10 @@
 
 
 proc php5pecl.setup {extension version} {
-    global php5pecl.extension php5pecl.extension_dir php5pecl.homepage
+    global php5pecl.extension php5pecl.homepage
     global destroot prefix worksrcpath
     
     set php5pecl.extension      ${extension}
-    set php5pecl.extension_dir  [exec ${prefix}/bin/php-config --extension-dir]
     set php5pecl.homepage       http://pecl.php.net/package/${php5pecl.extension}/
     
     name                        php5-${php5pecl.extension}
@@ -66,7 +65,7 @@ proc php5pecl.setup {extension version} {
     post-install {
         ui_msg "To enable this extension in php,"
         ui_msg "set 'extension_dir' to"
-        ui_msg "${php5pecl.extension_dir}"
+        ui_msg "[exec ${prefix}/bin/php-config --extension-dir]"
         ui_msg "And add the line"
         ui_msg "extension=${php5pecl.extension}.so"
         ui_msg "in ${prefix}/etc/php.ini"
