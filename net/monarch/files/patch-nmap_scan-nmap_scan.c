@@ -1,5 +1,5 @@
---- nmap_scan/nmap_scan.c.org	2006-03-14 18:26:47.000000000 -0800
-+++ nmap_scan/nmap_scan.c	2006-07-15 23:58:37.000000000 -0700
+--- nmap_scan/nmap_scan.c.org	2008-06-17 15:41:59.000000000 -0700
++++ nmap_scan/nmap_scan.c	2009-04-16 23:34:38.000000000 -0700
 @@ -1,8 +1,8 @@
  #include <signal.h>
  #include <sys/param.h>
