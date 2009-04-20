@@ -40,6 +40,7 @@
 #    merger_configure_cppflags: associative array of configure.cppflags
 #      merger_configure_cflags: associative array of configure.cflags
 #    merger_configure_cxxflags: associative array of configure.cxxflags
+#   merger_configure_objcflags: associative array of configure.objcflags
 #     merger_configure_ldflags: associative array of configure.ldflags
 #             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
 #         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
@@ -96,6 +97,7 @@ variant universal {
     eval configure.args-append      ${configure.universal_args}
     eval configure.cflags-append    ${configure.universal_cflags}
     eval configure.cxxflags-append  ${configure.universal_cxxflags}
+    eval configure.objcflags-append ${configure.universal_cflags}
     eval configure.ldflags-append   ${configure.universal_ldflags}
     eval configure.cppflags-append  ${configure.universal_cppflags}
 
@@ -170,6 +172,7 @@ variant universal {
             if { ${merger_arch_flag} != "no" } {
                 configure.cflags-append    ${archf}
                 configure.cxxflags-append  ${archf}
+                configure.objcflags-append ${archf}
                 configure.fflags-append    ${archf}
                 configure.fcflags-append   ${archf}
                 configure.f90flags-append  ${archf}
@@ -187,6 +190,9 @@ variant universal {
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
                 configure.cxxflags-append  $merger_configure_cxxflags(${arch})
+            }
+            if { [info exists merger_configure_objcflags(${arch})] } {
+                configure.objcflags-append  $merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_ldflags(${arch})] } {
                 configure.ldflags-append  $merger_configure_ldflags(${arch})
@@ -227,13 +233,15 @@ variant universal {
 
             set configure_cc_save   ${configure.cc}
             set configure_cxx_save  ${configure.cxx}
+            set configure_objc_save ${configure.objc}
             set configure_fc_save   ${configure.fc}
             set configure_f77_save  ${configure.f77}
             set configure_f90_save  ${configure.f90}
 
             if { ${merger_arch_compiler} != "no" } {
-                configure.cc   ${configure.cc}  ${archf}
-                configure.cxx  ${configure.cxx} ${archf}
+                configure.cc   ${configure.cc}   ${archf}
+                configure.cxx  ${configure.cxx}  ${archf}
+                configure.objc ${configure.objc} ${archf}
                 if { ${configure.fc}  != "" } { configure.fc   ${configure.fc}  ${archf} }
                 if { ${configure.f77} != "" } { configure.f77  ${configure.f77} ${archf} }
                 if { ${configure.f90} != "" } { configure.f90  ${configure.f90} ${archf} }
@@ -278,6 +286,7 @@ variant universal {
             eval configure.fc   ${configure_fc_save}
             eval configure.cc   ${configure_cc_save}
             eval configure.cxx  ${configure_cxx_save}
+            eval configure.objc ${configure_objc_save}
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-delete  $merger_configure_args(${arch})
             }
@@ -287,6 +296,9 @@ variant universal {
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
                 configure.cxxflags-delete  $merger_configure_cxxflags(${arch})
+            }
+            if { [info exists merger_configure_objcflags(${arch})] } {
+                configure.objcflags-delete  $merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
                 configure.cflags-delete  $merger_configure_cflags(${arch})
@@ -302,6 +314,7 @@ variant universal {
                 configure.f90flags-delete  ${archf}
                 configure.fcflags-delete   ${archf}
                 configure.fflags-delete    ${archf}
+                configure.objcflags-delete ${archf}
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
             }
