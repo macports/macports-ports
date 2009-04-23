@@ -70,6 +70,11 @@
 #fink
 #        # we have to force header/lib ordering or things get really wiggy
 #        # looks ugly, but it's better than patching the source
+#
+#        # TODO: also, can't change the -buildkey until the next major OS release, unless
+#        # I want to break binary-compat.  Wish I'd noticed it before it made it into
+#        # the wild.   Lookin' forward to 10.5!  :)
+#
 #        echo "yes" | ./configure $DEFINES \
 #                '-I$(QTDIR)/include' '-L$(QTDIR)/lib' \
 #                '-I%p/lib/freetype219/include' '-I%p/lib/freetype219/include/freetype2' '-L%p/lib/freetype219/lib' \
@@ -90,5 +95,13 @@
 	    '-I%p/include' '-L%p/lib' \
 	    '-I/usr/X11R6/include' '-L/usr/X11R6/lib' \
 	    $LIBRESOLV %c
+
+        # don't link against older versions of self
+        /usr/bin/find . -name Makefile -print0 | xargs -0 perl -pi -e 's,-L%p/lib/%n/lib,,g'
+        # attempt to counterfix qmake's warped fileFixify logic that makes install break
+        # when %p is a symlink and something exists already at -libdir or -datadir etc
+        # second, better attempt at unfixifying %p:
+        pushd %p; FixifiedSW=`/bin/pwd -P`; popd
+        /usr/bin/find . -name Makefile -print0 | xargs -0 perl -pi -e "s,\\$\\(INSTALL_ROOT\\)$FixifiedSW,\\$\\(INSTALL_ROOT\\)%p,g"
 
         __MAKE__
