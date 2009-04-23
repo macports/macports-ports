@@ -13,5 +13,7 @@
 	rm -rf %i/share/doc/kde/en/kcontrol/kxmlrpcd
 	rm -rf %i/share/doc/kde/en/kppp
 	rm -rf %i/share/doc/kde/en/kwifimanager
+	rm -rf %i/share/doc/kde/en/kcontrol/kcmtalkd
+	rm -rf %i/share/doc/kde/en/ktalkd
 
 	find %i/share/apps/kopete -type d -name CVS -exec rm -rf {} \; || :

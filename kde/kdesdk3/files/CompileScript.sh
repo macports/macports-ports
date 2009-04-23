@@ -11,6 +11,6 @@
 	find . -name \*.ll -exec touch {} \;
 
 #fink
-#	./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.2
+#	./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.7
 #macports
 	./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS LIB_DBIV=-ldb-4.6

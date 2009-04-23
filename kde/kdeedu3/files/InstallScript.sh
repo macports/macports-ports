@@ -19,4 +19,5 @@
 	ln -s libkdeeduui.3.dylib libkdeeduui.1.dylib
 	popd
 
-	perl -pi -e 's,-L%b,-L%p,g' %i/lib/*.la %i/lib/kde3/*.la
+	pushd %b; FixifiedB=`/bin/pwd`; popd
+	perl -pi -e "s,-L$FixifiedB,-L%p,g" %i/lib/*.la %i/lib/kde3/*.la

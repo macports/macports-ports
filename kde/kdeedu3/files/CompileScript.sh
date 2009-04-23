@@ -3,7 +3,7 @@
 	export PREFIX="%p" USE_UNSERMAKE=1
 	. ./environment-helper.sh
 #fink
-#	export LDFLAGS="-L%p/lib/python2.4/config"
+#	export LDFLAGS="-L%p/lib/python2.4/config $LDFLAGS"
 #macports
 #
 

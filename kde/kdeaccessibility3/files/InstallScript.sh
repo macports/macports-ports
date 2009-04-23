@@ -9,6 +9,8 @@
 	touch %i/share/doc/installed-packages/%N
 	touch %i/share/doc/installed-packages/%N-base
 
+	rm -rf %i/lib/libkttsd.dylib
+	rm -rf %i/lib/libKTTSD_Lib.dylib
 	rm -rf %i/share/doc/kde/en/kmouth %i/share/man/man1/kmouth*
 	install -d -m 755 %i/share/config
 	cat <<END > %i/share/config/kttsdrc
