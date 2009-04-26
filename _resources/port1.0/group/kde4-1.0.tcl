@@ -29,7 +29,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Use CMake Portgroup
-PortGroup       cmake   1.0
+
+PortGroup               cmake 1.0
 
 depends_build-append    port:automoc
 
