@@ -28,7 +28,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# Here lies the CMake 1.0 Portgroup
+#
+# Usage:
+# PortGroup     cmake-1.0
+
+
 depends_build       port:cmake
 
 #FIXME: ccache works with cmake on linux

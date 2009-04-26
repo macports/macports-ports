@@ -28,8 +28,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# Use CMake Portgroup
+#
+# Usage:
+# PortGroup     kde4-1.0
 
+
+# Use CMake Portgroup
 PortGroup               cmake 1.0
 
 depends_build-append    port:automoc
