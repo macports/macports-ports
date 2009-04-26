@@ -30,7 +30,7 @@
 #
 #
 # Usage:
-# PortGroup     cmake-1.0
+# PortGroup     cmake 1.0
 
 
 depends_build       port:cmake

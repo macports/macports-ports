@@ -30,7 +30,7 @@
 #
 #
 # Usage:
-# PortGroup     kde4-1.0
+# PortGroup     kde4 1.0
 
 
 # Use CMake Portgroup
