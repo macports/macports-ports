@@ -31,47 +31,27 @@
 # 
 # Usage:
 # 
-#   PortGroup               php5pecl 1.0
-#   php5pecl.setup          pecl_extension version
+#   PortGroup               php5peclextension 1.0
+#   php5peclextension.setup extension version
 # 
-# where pecl_extension is the name of the extension (e.g. APC), and version
+# where extension is the name of the extension (e.g. APC), and version
 # is its version. This automatically sets up the standard environment for
-# building PECL extensions.
+# building PHP extensions hosted at PECL.
 
 
-proc php5pecl.setup {extension version} {
-    global php5pecl.extension php5pecl.homepage
-    global destroot prefix worksrcpath
+PortGroup                       php5extension 1.0
+
+proc php5peclextension.setup {extension version} {
+    php5extension.setup ${extension} ${version}
     
-    set php5pecl.extension      ${extension}
-    set php5pecl.homepage       http://pecl.php.net/package/${php5pecl.extension}/
+    global php5extension.extension php5peclextension.homepage
+    set php5peclextension.homepage      http://pecl.php.net/package/${php5extension.extension}/
     
-    name                        php5-${php5pecl.extension}
-    version                     ${version}
-    categories                  php
-    homepage                    ${php5pecl.homepage}
+    homepage                    ${php5peclextension.homepage}
     master_sites                http://pecl.php.net/get/
-    distname                    ${php5pecl.extension}-${version}
     extract.suffix              .tgz
     
-    depends_lib                 path:bin/phpize:php5
-    
-    pre-configure {
-        system "cd ${worksrcpath} && ${prefix}/bin/phpize"
-    }
-    
-    destroot.destdir            INSTALL_ROOT=${destroot}
-    
-    post-install {
-        ui_msg "To enable this extension in php,"
-        ui_msg "set 'extension_dir' to"
-        ui_msg "[exec ${prefix}/bin/php-config --extension-dir]"
-        ui_msg "And add the line"
-        ui_msg "extension=${php5pecl.extension}.so"
-        ui_msg "in ${prefix}/etc/php.ini"
-    }
-    
     livecheck.check             regex
-    livecheck.url               ${php5pecl.homepage}
+    livecheck.url               ${php5peclextension.homepage}
     livecheck.regex             >(\[0-9.\]+)<
 }
