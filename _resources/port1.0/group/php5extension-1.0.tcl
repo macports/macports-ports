@@ -40,10 +40,12 @@
 
 
 proc php5extension.setup {extension version} {
-    global php5extension.extension
-    global destroot prefix worksrcpath
+    global php5extension.extension php5extension.ini php5extension.inidir
+    global destroot prefix workpath worksrcpath
     
     set php5extension.extension ${extension}
+    set php5extension.ini       ${extension}.ini
+    set php5extension.inidir    ${prefix}/var/db/php5
     
     name                        php5-${php5extension.extension}
     version                     ${version}
@@ -58,12 +60,14 @@ proc php5extension.setup {extension version} {
     
     destroot.destdir            INSTALL_ROOT=${destroot}
     
-    post-install {
-        ui_msg "To enable this extension in php,"
-        ui_msg "set 'extension_dir' to"
-        ui_msg "[exec ${prefix}/bin/php-config --extension-dir]"
-        ui_msg "And add the line"
-        ui_msg "extension=${php5extension.extension}.so"
-        ui_msg "in ${prefix}/etc/php.ini"
+    post-build {
+        set fp [open ${workpath}/${php5extension.ini} w]
+        puts $fp "extension=${php5extension.extension}.so"
+        close $fp
+    }
+    
+    post-destroot {
+        xinstall -m 755 -d ${destroot}${php5extension.inidir}
+        xinstall -m 644 ${workpath}/${php5extension.ini} ${destroot}${php5extension.inidir}
     }
 }
