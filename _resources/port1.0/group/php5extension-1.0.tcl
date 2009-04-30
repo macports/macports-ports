@@ -29,17 +29,20 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # 
 # 
+# This PortGroup automatically sets up the standard environment for building
+# a PHP extension.
+# 
 # Usage:
 # 
 #   PortGroup               php5extension 1.0
-#   php5extension.setup     extension version
+#   php5extension.setup     extension version source
 # 
-# where extension is the name of the extension (e.g. APC), and version
-# is its version. This automatically sets up the standard environment for
-# building PHP extensions.
+# where extension is the name of the extension (e.g. APC), version is its
+# version, and if the extension is hosted at PECL, source is "pecl"; otherwise
+# don't use source.
 
 
-proc php5extension.setup {extension version} {
+proc php5extension.setup {extension version {source ""}} {
     global php5extension.extension php5extension.ini php5extension.inidir
     global destroot prefix workpath worksrcpath
     
@@ -69,5 +72,18 @@ proc php5extension.setup {extension version} {
     post-destroot {
         xinstall -m 755 -d ${destroot}${php5extension.inidir}
         xinstall -m 644 ${workpath}/${php5extension.ini} ${destroot}${php5extension.inidir}
+    }
+    
+    if {"pecl" == ${source}} {
+        global php5extension.homepage
+        set php5extension.homepage  http://pecl.php.net/package/${php5extension.extension}/
+        
+        homepage                    ${php5extension.homepage}
+        master_sites                http://pecl.php.net/get/
+        extract.suffix              .tgz
+        
+        livecheck.check             regex
+        livecheck.url               ${php5extension.homepage}
+        livecheck.regex             >(\[0-9.\]+)<
     }
 }
