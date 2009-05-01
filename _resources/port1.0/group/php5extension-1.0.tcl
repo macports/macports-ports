@@ -40,7 +40,14 @@
 # where extension is the name of the extension (e.g. APC), version is its
 # version, and if the extension is hosted at PECL, source is "pecl"; otherwise
 # don't use source.
+# 
+# If this is a Zend extension, use
+# 
+#   php5extension.type      zend
 
+
+options php5extension.type
+default php5extension.type      php
 
 proc php5extension.setup {extension version {source ""}} {
     global php5extension.extension php5extension.ini php5extension.inidir
@@ -65,7 +72,11 @@ proc php5extension.setup {extension version {source ""}} {
     
     post-build {
         set fp [open ${workpath}/${php5extension.ini} w]
-        puts $fp "extension=${php5extension.extension}.so"
+        if {"zend" == ${php5extension.type}} {
+            puts $fp "zend_extension=[exec ${prefix}/bin/php-config --extension-dir]/${php5extension.extension}.so"
+        } else {
+            puts $fp "extension=${php5extension.extension}.so"
+        }
         close $fp
     }
     
