@@ -93,8 +93,8 @@ proc php5extension.setup {extension version {source ""}} {
         master_sites                http://pecl.php.net/get/
         extract.suffix              .tgz
         
-        livecheck.check             regex
+        livecheck.check             regexm
         livecheck.url               ${php5extension.homepage}
-        livecheck.regex             >(\[0-9.\]+)<
+        livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     }
 }
