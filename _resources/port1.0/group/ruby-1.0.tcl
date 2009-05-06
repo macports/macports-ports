@@ -129,8 +129,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 		rubyforge_gem:* {
 			set ruby.project [lindex [split ${source} {:}] 1]
 			homepage		http://rubyforge.org/projects/${ruby.project}
-			master_sites	http://rubyforge.rubyuser.de/gems/ \
-			                http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
+			master_sites	http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
 			                http://rubyforge.iasi.roedu.net/gems/ \
 			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
@@ -140,8 +139,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 		}
 		rubyforge_gem {
 			homepage		http://rubyforge.org/projects/${ruby.project}
-			master_sites	http://rubyforge.rubyuser.de/gems/ \
-			                http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
+			master_sites	http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
 			                http://rubyforge.iasi.roedu.net/gems/ \
 			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
