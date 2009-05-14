@@ -104,7 +104,8 @@ variant universal {
     # undo setting of --host and --target from portconfigure.tcl procedure configure_get_universal_args
     # XXX Quick hack for base after r49087
     if {[llength [info commands "portconfigure::*"]] > 0} {
-        set undo_system_value [portconfigure::configure_get_universal_system_name]
+        # XXX even more hackery, since portconfigure::configure_get_universal_system_name is gone on trunk
+        set undo_system_value ""
     } else {
         set undo_system_value [configure_get_universal_system_name]
     }
