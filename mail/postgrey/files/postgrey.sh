@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Postgrey darwinports startup script
+# Postgrey Macports startup script
 
 # default values
 POSTGREY_OPTS="--inet=127.0.0.1:60000"
