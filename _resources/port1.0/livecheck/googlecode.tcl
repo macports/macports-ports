@@ -15,4 +15,4 @@ if {${livecheck.distname} eq "default"} {
 if {${livecheck.regex} eq ""} {
     set livecheck.regex [list "<a href=\"http://[quotemeta ${livecheck.name}].googlecode.com/files/${livecheck.distname}\""]
 }
-set livecheck.check "regex"
+set livecheck.type "regex"

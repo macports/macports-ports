@@ -11,4 +11,4 @@ if {${livecheck.distname} eq "default"} {
 if {${livecheck.regex} eq ""} {
     set livecheck.regex [list "(?i)<title>[quotemeta ${livecheck.distname}] (.*) released.*</title>"]
 }
-set livecheck.check "regex"
+set livecheck.type "regex"

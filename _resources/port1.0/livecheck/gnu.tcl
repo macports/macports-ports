@@ -15,4 +15,4 @@ if {${livecheck.distname} eq "default"} {
 if {${livecheck.regex} eq ""} {
     set livecheck.regex [list "[quotemeta ${livecheck.distname}]-(\\d+(?:\\.\\d+)*)"]
 }
-set livecheck.check "regex"
+set livecheck.type "regex"

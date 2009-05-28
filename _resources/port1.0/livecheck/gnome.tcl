@@ -8,4 +8,4 @@ if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
 if {${livecheck.regex} eq ""} {
     set livecheck.regex [list "\"LATEST-IS-(.*)\""]
 }
-set livecheck.check "regex"
+set livecheck.type "regex"
