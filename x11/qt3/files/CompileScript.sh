@@ -93,7 +93,6 @@
         echo "yes" | ./configure \
 	    '-I$(QTDIR)/include' '-L$(QTDIR)/lib' \
 	    '-I%p/include' '-L%p/lib' \
-	    '-I/usr/X11R6/include' '-L/usr/X11R6/lib' \
 	    $LIBRESOLV %c
 
         # don't link against older versions of self
