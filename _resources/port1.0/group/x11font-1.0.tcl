@@ -52,7 +52,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     use_bzip2        yes
     depends_build    port:pkgconfig bin:bdftopcf:bdftopcf \
                      port:xorg-font-util port:mkfontscale port:mkfontdir \
-                     bin:gzip:gzip
+                     port:fontconfig bin:gzip:gzip
     set x11font_myfontdir    ${prefix}/share/fonts/${myfontsubdir}
     configure.args   --with-fontdir=${x11font_myfontdir}
 
@@ -67,6 +67,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     post-activate {
         system "mkfontscale ${x11font_myfontdir}"
         system "mkfontdir ${x11font_myfontdir}"
+        system "fc-cache ${x11font_myfontdir}"
     }
 
     # This should be done when uninstalling, but deactivate doesn't currently
@@ -74,6 +75,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
 #    post-deactivate {
 #        system "mkfontscale ${x11font_myfontdir}"
 #        system "mkfontdir ${x11font_myfontdir}"
+#        system "fc-cache ${x11font_myfontdir}"
 #    }
 
     livecheck.check     regex
