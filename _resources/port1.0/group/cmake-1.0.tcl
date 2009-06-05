@@ -46,10 +46,13 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-                    -DCMAKE_OSX_SYSROOT=${universal_sysroot} \
                     -DCMAKE_SYSTEM_PREFIX_PATH=\"${prefix}\;/usr\" \
                     -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
                     -Wno-dev
+
+if {[info exists universal_sysroot]} {
+    configure.args-append -DCMAKE_OSX_SYSROOT=${universal_sysroot}
+}
 
 variant universal {
     configure.universal_args-delete --disable-dependency-tracking
