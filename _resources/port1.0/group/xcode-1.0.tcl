@@ -122,6 +122,9 @@ default xcode.destroot.settings ""
 options xcode.universal.sdk
 default xcode.universal.sdk {${universal_sysroot}}
 
+# XXX: Needed to satisfy a check in portutil.tcl, remove when 1.8 is released.
+default xcode.universal.settings {}
+
 namespace eval xcode {}
 
 # Some utility functions.
