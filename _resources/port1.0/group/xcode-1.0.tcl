@@ -65,12 +65,6 @@
 #   xcode.destroot.path      install path (INSTALL_PATH setting value).
 #   xcode.destroot.settings  additional settings passed to $xcodebuildcmd (in
 #                            the X=Y form)
-#   xcode.universal.settings settings passed to $xcodebuildcmd when the +universal
-#                            variant is selected. Defaults to ARCHS="${universal_archs}"
-#                            MACOSX_DEPLOYMENT_TARGET=${universal_target}.
-#   xcode.universal.sdk      sdk to use when the +universal variant is selected.
-#                            Defaults to ${universal_sysroot}. If set to the empty
-#                            list, no sdk option will be passed to xcodebuild.
 #
 #  Usual parameters:
 #   destroot            where to destroot the project.
@@ -119,11 +113,8 @@ default xcode.destroot.path ""
 options xcode.destroot.settings
 default xcode.destroot.settings ""
 
-options xcode.universal.sdk
-default xcode.universal.sdk {${universal_sysroot}}
-
 # XXX: Needed to satisfy a check in portutil.tcl, remove when 1.8 is released.
-default xcode.universal.settings {}
+#default xcode.universal.settings {}
 
 namespace eval xcode {}
 
@@ -278,11 +269,11 @@ build {
 
     if {[variant_isset universal]} {
         set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
-        if {"${xcode.universal.sdk}" != ""} {
+        if {[info exists universal_sysroot] && "${universal_sysroot}" != ""} {
             if {${os.major} >= 9} {
-                set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+                set xcode_build_args "-sdk ${universal_sysroot} $xcode_build_args"
             } else {
-                set xcode_build_args "SDKROOT=\"${xcode.universal.sdk}\" $xcode_build_args"
+                set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
             }
         }
     }
@@ -328,11 +319,11 @@ destroot {
 
     if {[variant_isset universal]} {
         set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
-        if {"${xcode.universal.sdk}" != ""} {
+        if {[info exists universal_sysroot] && "${universal_sysroot}" != ""} {
             if {${os.major} >= 9} {
-                set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
+                set xcode_build_args "-sdk ${universal_sysroot} $xcode_build_args"
             } else {
-                set xcode_build_args "SDKROOT=\"${xcode.universal.sdk}\" $xcode_build_args"
+                set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
             }
         }
     }
