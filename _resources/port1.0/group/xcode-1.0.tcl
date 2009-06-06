@@ -119,8 +119,6 @@ default xcode.destroot.path ""
 options xcode.destroot.settings
 default xcode.destroot.settings ""
 
-options xcode.universal.settings
-default xcode.universal.settings {ARCHS=\"${universal_archs}\"}
 options xcode.universal.sdk
 default xcode.universal.sdk {${universal_sysroot}}
 
@@ -276,7 +274,7 @@ build {
     }
 
     if {[variant_isset universal]} {
-        set xcode_build_args "$xcode_build_args ${xcode.universal.settings}"
+        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
         if {"${xcode.universal.sdk}" != ""} {
             if {${os.major} >= 9} {
                 set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
@@ -319,8 +317,14 @@ destroot {
                                         ${xcode.destroot.path} ${xcode.destroot.type}]
     set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
     
+    if {[variant_isset universal] && [info exists universal_target]} {
+        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${universal_target}"
+    } else {
+        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+    }
+
     if {[variant_isset universal]} {
-        set xcode_build_args "$xcode_build_args ${xcode.universal.settings}"
+        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
         if {"${xcode.universal.sdk}" != ""} {
             if {${os.major} >= 9} {
                 set xcode_build_args "-sdk ${xcode.universal.sdk} $xcode_build_args"
