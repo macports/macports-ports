@@ -114,7 +114,7 @@ options xcode.destroot.settings
 default xcode.destroot.settings ""
 
 # XXX: Needed to satisfy a check in portutil.tcl, remove when 1.8 is released.
-#default xcode.universal.settings {}
+default xcode.universal.settings {}
 
 namespace eval xcode {}
 
