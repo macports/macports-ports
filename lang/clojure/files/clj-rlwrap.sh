@@ -24,13 +24,19 @@ done
 dir=`dirname $dir`
 dir=`cd "$dir" > /dev/null && pwd`
 cljjar="$dir/../$cljjar"
+cp="${PWD}:${cljjar}"
 cljcompletions="$dir/../$cljcompletions"
 
+# Add extra jars as specified by `.clojure` file
+# Borrowed from <http://github.com/mreid/clojure-framework>
+if [ -f .clojure ]; then
+  cp=$cp:`cat .clojure`
+fi
+
 if [ $# -eq 0 ]; then
-  rlwrap --remember -c -b $BREAK_CHARS -f $cljcompletions \
-           java -cp $cljjar $cljclass
+  rlwrap --remember -c -b $BREAK_CHARS -f $cljcompletions java -cp $cp $cljclass
 else
   scriptname=$1
-  exec java -classpath $cljjar $cljscript $scriptname --$*
+  exec java -classpath $cp $cljscript $scriptname --$*
 fi
 
