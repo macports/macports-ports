@@ -44,22 +44,35 @@ worksrcdir              build
 
 post-extract            { file mkdir ${worksrcpath} }
 
-depends_lib-append      port:doxygen port:qt4-kde
+set qt                  qt4-mac
+set qt_dir              ${prefix}/libexec/${qt}
+
+post-patch {
+    if { ![file exists ${prefix}/libexec/${qt}/lib/phonon.framework/phonon] } {
+        ui_error "######################################################"
+        ui_error "A copy of phonon could not be found. Please install  "
+        ui_error "${qt} to provide this. If you have already done this "
+        ui_error "your Qt installation is missing the phonon backend.  "
+        ui_error "Please reinstall Qt4 with phonon support.            "
+        ui_error "######################################################"
+    }
+}
+
+depends_lib-append      port:${qt}
 
 configure.compiler      gcc-4.2
 
-configure.args-append   -DBUILD_doc=ON \
+configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
-                        -DPHONON_INCLUDE_DIR=${prefix}/include \
-                        -DPHONON_LIBRARY=${prefix}/lib/libphonon.dylib \
-                        -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-kde/bin/qmake \
+                        -DPHONON_INCLUDE_DIR=${qt_dir}/include \
+                        -DPHONON_LIBRARY=${qt_dir}/lib/phonon.framework/phonon \
+                        -DQT_QMAKE_EXECUTABLE=${qt_dir}/bin/qmake \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
-variant no_docs description "Omit documentation" {
-    depends_lib-delete      port:doxygen
-    configure.args-delete   -DBUILD_doc=ON
-    configure.args-append   -DBUILD_doc=OFF
+variant docs description "Omit documentation" {
+    depends_lib-append      port:doxygen
+    configure.args-delete   -DBUILD_doc=OFF
 }
 
 post-activate {
