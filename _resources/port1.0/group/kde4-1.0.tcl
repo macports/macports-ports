@@ -70,7 +70,7 @@ configure.args-append   -DBUILD_doc=OFF \
                         -DQT_QMAKE_EXECUTABLE=${qt_dir}/bin/qmake \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X"
 
-variant docs description "Omit documentation" {
+variant docs description "Build documentation" {
     depends_lib-append      port:doxygen
     configure.args-delete   -DBUILD_doc=OFF
 }
