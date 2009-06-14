@@ -276,6 +276,10 @@ build {
                 set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
             }
         }
+    } else {
+        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
+            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
+        }
     }
     
     # iterate on targets if there is any, do -alltargets otherwise.
@@ -325,6 +329,10 @@ destroot {
             } else {
                 set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
             }
+        }
+    } else {
+        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
+            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
         }
     }
 
