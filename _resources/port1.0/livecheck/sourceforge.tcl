@@ -5,6 +5,9 @@
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     set livecheck.url "http://sourceforge.net/export/rss2_projfiles.php?project=${livecheck.name}"
 }
+if {${livecheck.name} eq "default"} {
+    set livecheck.name ${name}
+}
 if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
 }
