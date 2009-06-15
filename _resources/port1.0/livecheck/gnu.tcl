@@ -2,9 +2,12 @@
 #
 # This file contains the defaults for gnu.
 
-if {$has_homepage && [regexp {^http://www.gnu.org/software/([^/]+)} $homepage _ tag] &&
-    ${livecheck.name} eq "default"} {
+if {${livecheck.name} eq "default"} {
+    if {$has_homepage && [regexp {^http://www.gnu.org/software/([^/]+)} $homepage _ tag]} {
         set livecheck.name $tag
+    } else {
+        set livecheck.name ${name}
+    }
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     set livecheck.url "http://ftp.gnu.org/gnu/${livecheck.name}/?C=M&O=D"
