@@ -277,7 +277,11 @@ proc xcode::get_build_args {args} {
 
     # SDKROOT
     if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
-        set xcode_build_args "SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+        if {[info exists developer_dir]} {
+            set xcode_build_args "SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+        } else {
+            set xcode_build_args "SDKROOT=\"/Developer/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+        }
     } else {
         set xcode_build_args "SDKROOT= $xcode_build_args"
     }
