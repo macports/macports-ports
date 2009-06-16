@@ -247,6 +247,42 @@ proc xcode::destroot_one_target {args settings} {
     system "$cmdstring"
 }
 
+proc xcode::get_build_args {args} {
+    global tcl_platform
+    global universal_target macosx_deployment_target
+    global os.major os.arch
+    global developer_dir
+
+    set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
+
+    # MACOSX_DEPLOYMENT_TARGET
+    if {[variant_isset universal] && [info exists universal_target]} {
+        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${universal_target}"
+    } else {
+        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+    }
+
+    # ARCHS
+    if {[variant_isset universal]} {
+        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
+    } else {
+        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
+            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
+        } elseif {${os.arch} == "powerpc"} {
+            set xcode_build_args "$xcode_build_args ARCHS=ppc"
+        } else {
+            set xcode_build_args "$xcode_build_args ARCHS=i386"
+        }
+    }
+
+    # SDKROOT
+    if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
+        set xcode_build_args "SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+    } else {
+        set xcode_build_args "SDKROOT= $xcode_build_args"
+    }
+}
+
 # build procedure.
 build {
     # determine the targets.
@@ -255,33 +291,12 @@ build {
     } else {
         set xcode_targets ${build.target}
     }
-    
+
     # set some arguments.
     set xcode_configuration_arg [xcode::get_configuration_arg ${xcode.configuration}]
     set xcode_project_arg [xcode::get_project_arg ${xcode.project}]
-    set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
+    set xcode_build_args [xcode::get_build_args]
 
-    if {[variant_isset universal] && [info exists universal_target]} {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${universal_target}"
-    } else {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    }
-
-    if {[variant_isset universal]} {
-        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
-        if {[info exists universal_sysroot] && "${universal_sysroot}" != ""} {
-            if {${os.major} >= 9} {
-                set xcode_build_args "-sdk ${universal_sysroot} $xcode_build_args"
-            } else {
-                set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
-            }
-        }
-    } else {
-        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
-            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
-        }
-    }
-    
     # iterate on targets if there is any, do -alltargets otherwise.
     if {"$xcode_targets" == ""} {
         xcode::build_one_target \
@@ -300,41 +315,20 @@ build {
 destroot {
     # let Xcode 2.1+ find resources.
     xcode::fix_resource_dependencies
-    
+
     # determine the targets.
     if {${xcode.target} != ""} {
         set xcode_targets ${xcode.target}
     } else {
         set xcode_targets ${destroot.target}
     }
-    
+
     # set some arguments.
     set xcode_configuration_arg [xcode::get_configuration_arg ${xcode.configuration}]
     set xcode_project_arg [xcode::get_project_arg ${xcode.project}]
     set xcode_install_path_setting [xcode::get_install_path_setting \
                                         ${xcode.destroot.path} ${xcode.destroot.type}]
-    set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
-    
-    if {[variant_isset universal] && [info exists universal_target]} {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${universal_target}"
-    } else {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    }
-
-    if {[variant_isset universal]} {
-        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
-        if {[info exists universal_sysroot] && "${universal_sysroot}" != ""} {
-            if {${os.major} >= 9} {
-                set xcode_build_args "-sdk ${universal_sysroot} $xcode_build_args"
-            } else {
-                set xcode_build_args "SDKROOT=\"${universal_sysroot}\" $xcode_build_args"
-            }
-        }
-    } else {
-        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
-            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
-        }
-    }
+    set xcode_build_args [xcode::get_build_args]
 
     # iterate on targets if there is any, do -alltargets otherwise.
     if {"$xcode_targets" == ""} {
