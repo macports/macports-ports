@@ -204,31 +204,31 @@ proc xcode::setup_command_line {command args settings} {
     }
     if {[info exists ${command}.env]} {
         foreach string [set ${command}.env] {
-            set cmdstring "$cmdstring $string"
+            append cmdstring " $string"
         }
     }
     if {[info exists ${command}.cmd]} {
         foreach string [set ${command}.cmd] {
-            set cmdstring "$cmdstring $string"
+            append cmdstring " $string"
         }
     } else {
         return -code error "No ${command}.cmd was specified"
     }
     if {[info exists ${command}.pre_args]} {
         foreach string [set ${command}.pre_args] {
-            set cmdstring "$cmdstring $string"
+            append cmdstring " $string"
         }
     }
-    set cmdstring "$cmdstring $args"
+    append cmdstring " $args"
     if {[info exists ${command}.args]} {
         foreach string [set ${command}.args] {
-            set cmdstring "$cmdstring $string"
+            append cmdstring " $string"
         }
     }
-    set cmdstring "$cmdstring $settings"
+    append cmdstring " $settings"
     if {[info exists ${command}.post_args]} {
         foreach string [set ${command}.post_args] {
-            set cmdstring "$cmdstring $string"
+            append cmdstring " $string"
         }
     }
     ui_debug "Assembled command: '$cmdstring'"
@@ -257,34 +257,36 @@ proc xcode::get_build_args {args} {
 
     # MACOSX_DEPLOYMENT_TARGET
     if {[variant_isset universal] && [info exists universal_target]} {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${universal_target}"
+        append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${universal_target}"
     } else {
-        set xcode_build_args "$xcode_build_args MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+        append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
     }
 
     # ARCHS
     if {[variant_isset universal]} {
-        set xcode_build_args "$xcode_build_args ARCHS=\"${universal_archs}\""
+        append xcode_build_args " ARCHS=\"${universal_archs}\""
     } else {
         if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
-            set xcode_build_args "$xcode_build_args ARCHS=x86_64"
+            append xcode_build_args " ARCHS=x86_64"
         } elseif {${os.arch} == "powerpc"} {
-            set xcode_build_args "$xcode_build_args ARCHS=ppc"
+            append xcode_build_args " ARCHS=ppc"
         } else {
-            set xcode_build_args "$xcode_build_args ARCHS=i386"
+            append xcode_build_args " ARCHS=i386"
         }
     }
 
     # SDKROOT
     if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
         if {[info exists developer_dir]} {
-            set xcode_build_args "SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+            append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
         } else {
-            set xcode_build_args "SDKROOT=\"/Developer/SDKs/MacOSX10.4u.sdk\" $xcode_build_args"
+            append xcode_build_args " SDKROOT=\"/Developer/SDKs/MacOSX10.4u.sdk\""
         }
     } else {
-        set xcode_build_args "SDKROOT= $xcode_build_args"
+        append xcode_build_args " SDKROOT="
     }
+    
+    return $xcode_build_args
 }
 
 # build procedure.
