@@ -249,7 +249,7 @@ proc xcode::destroot_one_target {args settings} {
 
 proc xcode::get_build_args {args} {
     global tcl_platform
-    global universal_target macosx_deployment_target
+    global universal_archs universal_target macosx_deployment_target
     global os.major os.arch
     global developer_dir
 
