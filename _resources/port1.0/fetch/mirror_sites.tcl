@@ -337,7 +337,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://heanet.dl.sourceforge.net/
     http://kent.dl.sourceforge.net/
     http://mesh.dl.sourceforge.net/
-    http://puzzle.dl.sourceforge.net/
     http://surfnet.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
