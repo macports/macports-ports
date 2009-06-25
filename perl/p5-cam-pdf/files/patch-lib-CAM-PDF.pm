@@ -1,148 +1,65 @@
---- lib/CAM/PDF.pm.orig	2007-11-28 21:42:46.000000000 -0800
-+++ lib/CAM/PDF.pm	2008-03-27 20:06:54.000000000 -0700
-@@ -566,6 +566,9 @@
-             $CAM::PDF::errstr = "Could not decipher xref row:\n" . $self->trimstr($row);
-             return;
-          }
-+		if ((0 == $1) && (0 == $2)) {
-+			next;
-+		}
-          if ($type eq 'n')
-          {
-             $index->{$objnum} = $indexnum;
-@@ -3785,6 +3788,7 @@
-    my $otherdoc = shift;
-    my $otherkey = shift;
-    my $follow = shift;
-+   my %traversedNodes = ();
+--- lib/CAM/PDF.pm	2008-10-02 21:31:43.000000000 -0700
++++ lib/CAM/PDF.pm	2009-06-24 16:59:11.000000000 -0700
+@@ -1019,7 +1019,7 @@
  
-    # careful! 'undef' means something different from '0' here!
-    if (!defined $follow)
-@@ -3838,10 +3842,10 @@
-          my $newkey = $self->appendObject($otherdoc, $oldrefkey, 0);
-          $newrefkeys{$oldrefkey} = $newkey;
-       }
--      $self->changeRefKeys($objnode, \%newrefkeys);
-+      $self->changeRefKeys($objnode, \%newrefkeys, \%traversedNodes);
-       for my $newkey (values %newrefkeys)
+    if (${$c} !~ m/ \G(\d+)\s+(\d+)\s+obj\s* /cgxms) ##no critic(ProhibitUnusedCapture)
+    {
+-      die "Expected object open tag\n" . $self->trimstr(${$c});
++      die "Expected object open tag, got:  \"" . $self->trimstr(${$c} . "\"");
+    }
+    # need to implement like this with explicit capture vars for 5.6.1
+    # compatibility
+@@ -1699,8 +1699,9 @@
+       #print "Filling cache for obj \#$key...\n";
+ 
+       my $pos = $self->{xref}->{$key};
++      my $posAsInt = int($pos);
+ 
+-      if (!$pos)
++      if (!$posAsInt)
        {
--         $self->changeRefKeys($self->dereference($newkey), \%newrefkeys);
-+         $self->changeRefKeys($self->dereference($newkey), \%newrefkeys, \%traversedNodes);
-       }
-    }
-    return (%newrefkeys);
-@@ -5040,7 +5044,7 @@
-    if ($stream)
+          warn "Bad request for object $key at position 0 in the file\n";
+          return;
+@@ -4834,9 +4835,20 @@
+ 
+    # Turn off Linearization, if set
+    my $first;
++   my $firstObjPos = undef;
+    if (exists $self->{order})
     {
-       $stream = $self->{crypt}->encrypt($self, $stream, $objnode->{objnum}, $objnode->{gennum});
--      $str .= "\nstream\n" . $stream . 'endstream';
-+      $str .= "\nstream\n" . $stream . '\nendstream';
+-      $first = $self->{order}->[0];
++      my $iterator = 0;
++      my $iteratorMAX = $#{$self->{order}};
++      ## find the first object at a non-zero position:
++      do {
++         $first = $self->{order}->[$iterator];
++         $firstObjPos = int($self->{xref}->{$first});
++         $iterator++;
++      } while (!$firstObjPos && $iterator < $iteratorMAX);
++      if (!$firstObjPos) {
++         die "ERROR: Failed to find first object with non-zero position";
++      }
     }
-    return "obj\n$str\nendobj\n";
- }
-@@ -5072,6 +5076,7 @@
-    my $objnode = shift;
-    my $func = shift;
-    my $funcdata = shift;
-+   my $funcResult = undef;
- 
-    my $traversed = {};
-    my @stack = ($objnode);
-@@ -5080,7 +5085,8 @@
-    while ($i < @stack)
+    else
     {
-       my $objnode = $stack[$i++];
--      $self->$func($objnode, $funcdata);
-+      $funcResult = undef;
-+      $funcResult = $self->$func($objnode, $funcdata);
+@@ -4844,6 +4856,7 @@
+       ($first) = sort {$x->{$a} <=> $x->{$b}} grep {!ref $x->{$_}} keys %{$x};
+    }
  
-       my $type = $objnode->{type};
-       my $val = $objnode->{value};
-@@ -5108,6 +5114,62 @@
-    return;
- }
- 
-+sub recurseTraverse {
-+	my ($self, $deref, $objnode, $traversedRef, $func, $funcdata, $objnum) = @_;
-+	
-+	my $type;
-+	my $val;
-+	my @nodes = ();
-+	my $node = undef;
-+	my $newObjNum = undef;
-+	
-+	if ((!defined($objnode)) || (! ref $objnode )) {
-+		return;
-+	}
-+	
-+	if (defined($objnum)) {
-+		$newObjNum = $objnum;
-+	}
 +
-+	$type = $objnode->{type};
-+	$val = $objnode->{value};
-+	
-+	if (exists $objnode->{objnum}) {
-+		$newObjNum = $objnode->{objnum};
-+	}
-+	
-+	if ((defined($newObjNum)) && 
-+	    (exists ($traversedRef->{$newObjNum}))) {
-+		return;
-+	} else {
-+		$self->$func($objnode, $funcdata);
-+	}
-+	
-+	if ($type eq 'dictionary') {
-+		push (@nodes, values %{$val});
-+	} elsif ($type eq 'array') {
-+		push (@nodes, @{$val});
-+	} elsif ($type eq 'object') {
-+		push (@nodes, $val);
-+	} elsif ($type eq 'reference') {
-+		if ($deref) {
-+			push (@nodes, $self->dereference($val));
-+		} else {
-+			return;
-+		}
-+	} 
-+
-+	for $node (@nodes) {
-+		recurseTraverse($self, $deref, $node, $traversedRef, $func, $funcdata, $newObjNum);
-+	}
-+	
-+	if (($type eq 'object')) {
-+		$traversedRef->{$newObjNum} = 1;
-+	} 
-+
-+	return;
-+}
-+
- # decodeObject and decodeAll differ from each other like this:
- #
- #  decodeObject JUST decodes a single stream directly below the object
-@@ -5538,10 +5600,11 @@
+    my $objnode = $self->dereference($first);
+    if ($objnode->{value}->{type} eq 'dictionary')
+    {
+@@ -5159,6 +5172,12 @@
+ {
     my $self = shift;
-    my $objnode = shift;
-    my $newrefkeys = shift;
-+   my $traversedRef = shift;
+    my $objnum = shift;
++   my $objref = $self->dereference($objnum);
++
++   if ((!defined($objref)) || (!ref $objref)) {
++      warn "WARN:  Failed to get object reference for object number $objnum, not writing it out...\n";
++      return "";
++   }
  
-    my $follow = shift || 0;   # almost always false
- 
--   $self->traverse($follow, $objnode, \&_changeRefKeysCB, $newrefkeys);
-+   $self->recurseTraverse($follow, $objnode, $traversedRef, \&_changeRefKeysCB, $newrefkeys, 0);
-    return;
+    return "$objnum 0 " . $self->writeAny($self->dereference($objnum));
  }
- 
-@@ -5558,9 +5621,10 @@
-       if (exists $newrefkeys->{$objnode->{value}})
-       {
-          $objnode->{value} = $newrefkeys->{$objnode->{value}};
-+         return 1;
-       }
-    }
--   return;
-+   return 0;
- }
- 
- =item $doc->abbrevInlineImage($object)
