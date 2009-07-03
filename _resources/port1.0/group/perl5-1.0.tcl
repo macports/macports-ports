@@ -89,6 +89,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     depends_lib     path:[string range ${perl5.bin} [string length ${prefix}/] end]:perl5
 
     configure.cmd       ${perl5.bin}
+    configure.env       PERL_AUTOINSTALL=--skipdeps
     configure.pre_args  Makefile.PL
     configure.args      INSTALLDIRS=vendor
 
