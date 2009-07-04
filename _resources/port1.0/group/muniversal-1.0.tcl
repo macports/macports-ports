@@ -101,6 +101,9 @@ variant universal {
         configure.universal_cflags-delete    -arch ${arch}
         configure.universal_cxxflags-delete  -arch ${arch}
         configure.universal_ldflags-delete   -arch ${arch}
+        configure.cflags-delete    -arch ${arch}
+        configure.cxxflags-delete  -arch ${arch}
+        configure.ldflags-delete   -arch ${arch}
     }
 
     eval configure.args-append      ${configure.universal_args}
