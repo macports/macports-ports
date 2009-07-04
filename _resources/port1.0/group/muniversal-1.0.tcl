@@ -54,7 +54,7 @@ default universal_archs_supported {${universal_archs}}
 default merger_must_run_binaries {no}
 default merger_no_3_archs {no}
 default merger_arch_flag {yes}
-default merger_arch_compiler {yes}
+default merger_arch_compiler {no}
 
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
