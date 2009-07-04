@@ -56,19 +56,41 @@ default merger_no_3_archs {no}
 default merger_arch_flag {yes}
 default merger_arch_compiler {yes}
 
+proc muniversal_arch_flag_supported {args} {
+    global configure.compiler
+    switch -exact ${configure.compiler} {
+        gcc-4.0 -
+        gcc-4.2 -
+        llvm-gcc-4.2 -
+        clang -
+        apple-gcc-4.0 -
+        apple-gcc-4.2 {
+            return yes
+        }
+        default {
+            return no
+        }
+    }
+}
+
 proc muniversal_get_arch_flag {arch} {
     global os.arch 
-    # Prefer -m to -arch 
-    set archf "-arch ${arch}" 
-    if { ${os.arch}=="i386" && ${arch}=="i386" } { 
-        set archf -m32 
-    } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } { 
-        set archf -m64 
-    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } { 
-        set archf -m32 
-    } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } { 
-        set archf -m64 
-    } 
+    # Prefer -arch to -m
+    if {[muniversal_arch_flag_supported]} {
+        set archf "-arch ${arch}"
+    } else {
+        if { ${os.arch}=="i386" && ${arch}=="i386" } { 
+            set archf -m32 
+        } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } { 
+            set archf -m64 
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } { 
+            set archf -m32 
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } { 
+            set archf -m64 
+        } else {
+            return -code error "selected compiler can't build for ${arch}"
+        }
+    }
     return ${archf}
 }
 
