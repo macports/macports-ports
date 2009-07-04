@@ -49,17 +49,12 @@
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
 #            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
 
-if { ! [info exists universal_archs_supported] } {
-    set universal_archs_supported  ${universal_archs}
-}
-
-if { ! [info exists merger_must_run_binaries] } {
-    set merger_must_run_binaries "no"
-}
-
-if { ! [info exists merger_no_3_archs] } {
-    set merger_no_3_archs "no"
-}
+options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
+default universal_archs_supported {${universal_archs}}
+default merger_must_run_binaries {no}
+default merger_no_3_archs {no}
+default merger_arch_flag {yes}
+default merger_arch_compiler {yes}
 
 proc muniversal_get_arch_flag {arch} {
     global os.arch 
@@ -75,14 +70,6 @@ proc muniversal_get_arch_flag {arch} {
         set archf -m64 
     } 
     return ${archf}
-}
-
-if { ! [info exists merger_arch_flag ] } {
-        set merger_arch_flag "yes"
-}
-
-if { ! [info exists merger_arch_compiler ] } {
-        set merger_arch_compiler "yes"
 }
 
 variant universal {
