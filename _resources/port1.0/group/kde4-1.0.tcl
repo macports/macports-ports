@@ -60,7 +60,14 @@ post-patch {
 
 depends_lib-append      port:${qt}
 
-configure.compiler      gcc-4.2
+platform darwin 8 {
+	depends_lib-append 	port:apple-gcc42-devel
+	configure.compiler	apple-gcc-4.2
+}
+
+platform darwin 9 {
+	configure.compiler      gcc-4.2
+}
 
 configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
