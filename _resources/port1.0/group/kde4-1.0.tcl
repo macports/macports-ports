@@ -36,8 +36,6 @@
 # Use CMake Portgroup
 PortGroup               cmake 1.0
 
-depends_build-append    port:automoc
-
 use_parallel_build      yes
 
 worksrcdir              build
@@ -58,6 +56,11 @@ post-patch {
     }
 }
 
+# Automoc added as build dependency here as most, if not all kde programs 
+# currently need it. The automoc port, which includes this PortGroup 
+# overrides depends_build, removing "port:automoc" to prevent a
+# cyclic dependency
+depends_build-append    port:automoc
 depends_lib-append      port:${qt}
 
 platform darwin 8 {
