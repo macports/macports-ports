@@ -73,7 +73,7 @@ proc php5extension.setup {extension version {source ""}} {
     post-build {
         set fp [open ${workpath}/${php5extension.ini} w]
         if {"zend" == ${php5extension.type}} {
-            puts $fp "zend_extension=[exec ${prefix}/bin/php-config --extension-dir]/${php5extension.extension}.so"
+            puts $fp "zend_extension=[php5extension.extension_dir]/${php5extension.extension}.so"
         } else {
             puts $fp "extension=${php5extension.extension}.so"
         }
@@ -83,6 +83,33 @@ proc php5extension.setup {extension version {source ""}} {
     post-destroot {
         xinstall -m 755 -d ${destroot}${php5extension.inidir}
         xinstall -m 644 ${workpath}/${php5extension.ini} ${destroot}${php5extension.inidir}
+    }
+    
+    post-install {
+        set phpini ${prefix}/etc/php5/php.ini
+        if {[file exists ${phpini}]} {
+            set extensiondir [php5extension.extension_dir]
+            set count 0
+            set fp [open ${phpini} r]
+            while {![eof $fp]} {
+                set line [gets $fp]
+                regexp {^extension_dir *= *"?([^\"]*)"?} $line -> phpiniextensiondir
+                if {[info exists phpiniextensiondir]} {
+                    ui_debug "Found extension_dir ${phpiniextensiondir} in ${phpini}"
+                    if {${phpiniextensiondir} != ${extensiondir}} {
+                        if {0 == ${count}} {
+                            ui_msg "To use ${name} and other PHP extensions, please delete this line"
+                            ui_msg "from your ${phpini}:"
+                            ui_msg ""
+                        }
+                        ui_msg ${line}
+                        incr count
+                    }
+                    unset phpiniextensiondir
+                }
+            }
+            close $fp
+        }
     }
     
     if {"pecl" == ${source}} {
@@ -97,4 +124,9 @@ proc php5extension.setup {extension version {source ""}} {
         livecheck.url               ${php5extension.homepage}
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     }
+}
+
+proc php5extension.extension_dir {} {
+    global prefix
+    return [exec ${prefix}/bin/php-config --extension-dir]
 }
