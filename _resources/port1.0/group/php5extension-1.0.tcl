@@ -64,8 +64,10 @@ proc php5extension.setup {extension version {source ""}} {
     
     depends_lib                 path:bin/phpize:php5
     
-    pre-configure {
-        system "cd ${worksrcpath} && ${prefix}/bin/phpize"
+    if {"bundled" != ${source}} {
+        pre-configure {
+            system "cd ${worksrcpath} && ${prefix}/bin/phpize"
+        }
     }
     
     destroot.destdir            INSTALL_ROOT=${destroot}
@@ -123,6 +125,35 @@ proc php5extension.setup {extension version {source ""}} {
         livecheck.check             regexm
         livecheck.url               ${php5extension.homepage}
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
+    } elseif {"bundled" == ${source}} {
+        homepage                    http://www.php.net/${php5extension.extension}
+        master_sites                http://www.php.net/distributions/ \
+                                    http://it.php.net/distributions/ \
+                                    http://fi.php.net/distributions/ \
+                                    http://de.php.net/distributions/ \
+                                    http://gr.php.net/distributions/ \
+                                    http://fr.php.net/distributions/ \
+                                    http://es.php.net/distributions/ \
+                                    http://se.php.net/distributions/
+        
+        dist_subdir                 php5
+        distname                    php-${version}
+        use_bzip2                   yes
+        
+        configure.args              --disable-cgi \
+                                    --without-pear
+        
+        build.target                build-modules
+        
+        destroot {
+            set extensiondir [php5extension.extension_dir]
+            xinstall -d ${destroot}${extensiondir}
+            xinstall -m 644 ${worksrcpath}/modules/${php5extension.extension}.so ${destroot}${extensiondir}
+        }
+        
+        livecheck.check             regex
+        livecheck.url               http://www.php.net/downloads.php
+        livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
     }
 }
 
