@@ -74,19 +74,19 @@ proc muniversal_arch_flag_supported {args} {
 }
 
 proc muniversal_get_arch_flag {arch} {
-    global os.arch 
+    global os.arch
     # Prefer -arch to -m
     if {[muniversal_arch_flag_supported]} {
         set archf "-arch ${arch}"
     } else {
-        if { ${os.arch}=="i386" && ${arch}=="i386" } { 
-            set archf -m32 
-        } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } { 
-            set archf -m64 
-        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } { 
-            set archf -m32 
-        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } { 
-            set archf -m64 
+        if { ${os.arch}=="i386" && ${arch}=="i386" } {
+            set archf -m32
+        } elseif { ${os.arch}=="i386" && ${arch}=="x86_64" } {
+            set archf -m64
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc" } {
+            set archf -m32
+        } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
+            set archf -m64
         } else {
             return -code error "selected compiler can't build for ${arch}"
         }
@@ -394,7 +394,7 @@ variant universal {
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
             }
-            eval destroot.destdir ${destdirSave} 
+            eval destroot.destdir ${destdirSave}
         }
         delete ${destroot}
 
