@@ -195,7 +195,7 @@ proc xcode::setup_command_line {command args settings} {
     # Check that xcode is installed.
     if {[set ${command}.cmd] == "none"} {
         return -code error "This port requires 'pbxbuild/xcodebuild', which \
-    couldn't be found (not MacOS X?)"
+    couldn't be found (not Mac OS X?)"
     }
 
     set cmdstring ""
