@@ -266,12 +266,14 @@ proc xcode::get_build_args {args} {
     if {[variant_isset universal]} {
         append xcode_build_args " ARCHS=\"${universal_archs}\""
     } else {
-        if {${os.major} >= 10 && $tcl_platform(wordSize) == 8} {
-            append xcode_build_args " ARCHS=x86_64"
-        } elseif {${os.arch} == "powerpc"} {
-            append xcode_build_args " ARCHS=ppc"
+        if {[info exists build_arch]} {
+            append xcode_build_args " ARCHS=${build_arch}"
         } else {
-            append xcode_build_args " ARCHS=i386"
+            if {${os.arch} == "powerpc"} {
+                append xcode_build_args " ARCHS=ppc"
+            } else {
+                append xcode_build_args " ARCHS=i386"
+            }
         }
     }
 
