@@ -45,9 +45,7 @@ default minimum_xcodeversions {}
 
 pre-extract {
     if {"darwin" == ${os.platform}} {
-        if {[info exists macports::developer_dir]} {
-            set developer_dir ${macports::developer_dir}
-        } else {
+        if {![info exists developer_dir]} {
             if {${os.major} < 9} {
                 set developer_dir /Developer
             } else {
