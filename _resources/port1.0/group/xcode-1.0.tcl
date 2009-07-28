@@ -252,6 +252,7 @@ proc xcode::get_build_args {args} {
     global universal_archs universal_target macosx_deployment_target
     global os.major os.arch
     global developer_dir
+    global build_arch
 
     set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
 
