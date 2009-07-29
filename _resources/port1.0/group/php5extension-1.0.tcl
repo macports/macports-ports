@@ -140,7 +140,8 @@ proc php5extension.setup {extension version {source ""}} {
         distname                    php-${version}
         use_bzip2                   yes
         
-        configure.args              --disable-cgi \
+        configure.args              --disable-all \
+                                    --disable-cgi \
                                     --without-pear
         
         build.target                build-modules
