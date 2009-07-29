@@ -72,19 +72,18 @@ proc php5extension.setup {extension version {source ""}} {
     
     destroot.destdir            INSTALL_ROOT=${destroot}
     
-    post-build {
-        set fp [open ${workpath}/${php5extension.ini} w]
-        if {"zend" == ${php5extension.type}} {
-            puts $fp "zend_extension=[php5extension.extension_dir]/${php5extension.extension}.so"
-        } else {
-            puts $fp "extension=${php5extension.extension}.so"
-        }
-        close $fp
-    }
-    
     post-destroot {
         xinstall -m 755 -d ${destroot}${php5extension.inidir}
-        xinstall -m 644 ${workpath}/${php5extension.ini} ${destroot}${php5extension.inidir}
+        set extensiondir [php5extension.extension_dir]
+        set fp [open ${destroot}${php5extension.inidir}/${php5extension.ini} w]
+        foreach extensionfile [glob -tails -directory ${destroot}${extensiondir} *.so] {
+            if {"zend" == ${php5extension.type}} {
+                puts $fp "zend_extension=${extensiondir}/${extensionfile}"
+            } else {
+                puts $fp "extension=${extensionfile}"
+            }
+        }
+        close $fp
     }
     
     post-install {
@@ -149,7 +148,7 @@ proc php5extension.setup {extension version {source ""}} {
         destroot {
             set extensiondir [php5extension.extension_dir]
             xinstall -d ${destroot}${extensiondir}
-            xinstall -m 644 ${worksrcpath}/modules/${php5extension.extension}.so ${destroot}${extensiondir}
+            eval xinstall -m 644 [glob ${worksrcpath}/modules/*.so] ${destroot}${extensiondir}
         }
         
         livecheck.check             regex
