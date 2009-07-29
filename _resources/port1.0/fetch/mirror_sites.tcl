@@ -32,7 +32,6 @@ set portfetch::mirror_sites::sites(apache) {
     ftp://ftp.pop-mg.com.br/data/apache/dist/
     http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
-    http://apache.adcserver.com.ar/
     http://apache.mirror.phpchina.com/
     http://apache-mirror.dkuug.dk/
     http://apache.digimirror.nl/
