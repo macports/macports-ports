@@ -105,6 +105,12 @@ variant universal {
         configure.cxxflags-delete  -arch ${arch}
         configure.ldflags-delete   -arch ${arch}
     }
+    # workaround for #17865 (deleting all option contents also deletes the option)
+    foreach flags {universal_cflags universal_cxxflags universal_ldflags cflags cxxflags ldflags} {
+        if {![info exists configure.${flags}]} {
+            configure.${flags}
+        }
+    }
 
     eval configure.args-append      ${configure.universal_args}
     eval configure.cflags-append    ${configure.universal_cflags}
