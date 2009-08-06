@@ -46,18 +46,27 @@
 #   php5extension.type      zend
 
 
+default build.dir                   {[php5extension.build_dir_proc]}
+default build.target                {[php5extension.build_target_proc]}
+default configure.args              {[php5extension.configure_args_proc]}
+default configure.dir               {[php5extension.build_dir_proc]}
 options php5extension.extension_dir
 default php5extension.extension_dir {[php5extension.extension_dir_proc]}
 options php5extension.type
 default php5extension.type      php
+options php5extension.source
+default php5extension.source        standalone
+options php5extension.use_phpize
+default php5extension.use_phpize    yes
 
 proc php5extension.setup {extension version {source ""}} {
-    global php5extension.extension php5extension.ini php5extension.inidir
-    global destroot prefix workpath worksrcpath
+    global php5extension.extension php5extension.ini php5extension.inidir php5extension.source
+    global build.dir destroot prefix
     
     set php5extension.extension ${extension}
     set php5extension.ini       ${extension}.ini
     set php5extension.inidir    ${prefix}/var/db/php5
+    php5extension.source        ${source}
     
     name                        php5-${php5extension.extension}
     version                     ${version}
@@ -66,9 +75,9 @@ proc php5extension.setup {extension version {source ""}} {
     
     depends_lib                 path:bin/phpize:php5
     
-    if {"bundled" != ${source}} {
-        pre-configure {
-            system "cd ${worksrcpath} && ${prefix}/bin/phpize"
+    pre-configure {
+        if {"yes" == ${php5extension.use_phpize}} {
+            system "cd ${configure.dir} && ${prefix}/bin/phpize"
         }
     }
     
@@ -140,21 +149,49 @@ proc php5extension.setup {extension version {source ""}} {
         distname                    php-${version}
         use_bzip2                   yes
         
-        configure.args              --disable-all \
-                                    --disable-cgi \
-                                    --without-pear
-        
-        build.target                build-modules
-        
         destroot {
             xinstall -d ${destroot}${php5extension.extension_dir}
-            eval xinstall -m 644 [glob ${worksrcpath}/modules/*.so] ${destroot}${php5extension.extension_dir}
+            eval xinstall -m 644 [glob ${build.dir}/modules/*.so] ${destroot}${php5extension.extension_dir}
         }
         
         livecheck.check             regex
         livecheck.url               http://www.php.net/downloads.php
         livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
     }
+}
+
+proc php5extension.build_dir_proc {} {
+    global php5extension.extension php5extension.source php5extension.use_phpize worksrcpath
+    if {"bundled" == ${php5extension.source}} {
+        if {"yes" == ${php5extension.use_phpize}} {
+            return ${worksrcpath}/ext/${php5extension.extension}
+        }
+    }
+    return ${worksrcpath}
+}
+
+proc php5extension.build_target_proc {} {
+    global php5extension.source php5extension.use_phpize
+    if {"bundled" == ${php5extension.source}} {
+        if {"yes" != ${php5extension.use_phpize}} {
+            return build-modules
+        }
+    }
+    return all
+}
+
+proc php5extension.configure_args_proc {} {
+    global php5extension.source php5extension.use_phpize
+    if {"bundled" == ${php5extension.source}} {
+        if {"yes" != ${php5extension.use_phpize}} {
+            return {
+                --disable-all
+                --disable-cgi
+                --without-pear
+            }
+        }
+    }
+    return {}
 }
 
 proc php5extension.extension_dir_proc {} {
