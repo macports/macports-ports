@@ -46,6 +46,8 @@
 #   php5extension.type      zend
 
 
+options php5extension.extension_dir
+default php5extension.extension_dir {[php5extension.extension_dir_proc]}
 options php5extension.type
 default php5extension.type      php
 
@@ -74,11 +76,10 @@ proc php5extension.setup {extension version {source ""}} {
     
     post-destroot {
         xinstall -m 755 -d ${destroot}${php5extension.inidir}
-        set extensiondir [php5extension.extension_dir]
         set fp [open ${destroot}${php5extension.inidir}/${php5extension.ini} w]
-        foreach extensionfile [glob -tails -directory ${destroot}${extensiondir} *.so] {
+        foreach extensionfile [glob -tails -directory ${destroot}${php5extension.extension_dir} *.so] {
             if {"zend" == ${php5extension.type}} {
-                puts $fp "zend_extension=${extensiondir}/${extensionfile}"
+                puts $fp "zend_extension=${php5extension.extension_dir}/${extensionfile}"
             } else {
                 puts $fp "extension=${extensionfile}"
             }
@@ -89,7 +90,6 @@ proc php5extension.setup {extension version {source ""}} {
     post-install {
         set phpini ${prefix}/etc/php5/php.ini
         if {[file exists ${phpini}]} {
-            set extensiondir [php5extension.extension_dir]
             set count 0
             set fp [open ${phpini} r]
             while {![eof $fp]} {
@@ -97,7 +97,7 @@ proc php5extension.setup {extension version {source ""}} {
                 regexp {^extension_dir *= *"?([^\"]*)"?} $line -> phpiniextensiondir
                 if {[info exists phpiniextensiondir]} {
                     ui_debug "Found extension_dir ${phpiniextensiondir} in ${phpini}"
-                    if {${phpiniextensiondir} != ${extensiondir}} {
+                    if {${phpiniextensiondir} != ${php5extension.extension_dir}} {
                         if {0 == ${count}} {
                             ui_msg "To use ${name} and other PHP extensions, please delete this line"
                             ui_msg "from your ${phpini}:"
@@ -147,9 +147,8 @@ proc php5extension.setup {extension version {source ""}} {
         build.target                build-modules
         
         destroot {
-            set extensiondir [php5extension.extension_dir]
-            xinstall -d ${destroot}${extensiondir}
-            eval xinstall -m 644 [glob ${worksrcpath}/modules/*.so] ${destroot}${extensiondir}
+            xinstall -d ${destroot}${php5extension.extension_dir}
+            eval xinstall -m 644 [glob ${worksrcpath}/modules/*.so] ${destroot}${php5extension.extension_dir}
         }
         
         livecheck.check             regex
@@ -158,7 +157,7 @@ proc php5extension.setup {extension version {source ""}} {
     }
 }
 
-proc php5extension.extension_dir {} {
+proc php5extension.extension_dir_proc {} {
     global prefix
     return [exec ${prefix}/bin/php-config --extension-dir]
 }
