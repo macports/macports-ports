@@ -110,7 +110,7 @@ proc php5extension.setup {extension version {source ""}} {
                         if {0 == ${count}} {
                             ui_msg "Your php.ini contains a line that will prevent ${name}"
                             ui_msg "and other PHP extensions from working. To fix this,"
-                            ui_msg "delete this line from ${phpini}:"
+                            ui_msg "edit ${phpini} and delete this line:"
                             ui_msg ""
                         }
                         ui_msg ${line}
