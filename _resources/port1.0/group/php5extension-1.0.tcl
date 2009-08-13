@@ -136,14 +136,7 @@ proc php5extension.setup {extension version {source ""}} {
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
         homepage                    http://www.php.net/${php5extension.extension}
-        master_sites                http://www.php.net/distributions/ \
-                                    http://it.php.net/distributions/ \
-                                    http://fi.php.net/distributions/ \
-                                    http://de.php.net/distributions/ \
-                                    http://gr.php.net/distributions/ \
-                                    http://fr.php.net/distributions/ \
-                                    http://es.php.net/distributions/ \
-                                    http://au.php.net/distributions/
+        master_sites                php
         
         dist_subdir                 php5
         distname                    php-${version}
