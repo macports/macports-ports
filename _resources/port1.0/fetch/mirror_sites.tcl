@@ -377,21 +377,21 @@ set portfetch::mirror_sites::sites(tcltk) {
 }
 
 set portfetch::mirror_sites::sites(tex_ctan) {
-	http://mirrors.ibiblio.org/pub/mirrors/CTAN/
-	http://ctan.math.utah.edu/ctan/tex-archive/
-	ftp://ftp.funet.fi/pub/TeX/CTAN/
-	http://mirror.internode.on.net/pub/ctan/
-	ftp://ctan.unsw.edu.au/tex-archive/
-	http://mirror.aarnet.edu.au/pub/CTAN/
-	ftp://ftp.kddlabs.co.jp/CTAN/
-	ftp://ftp.chg.ru/pub/TeX/CTAN/
-	ftp://mirror.macomnet.net/pub/CTAN/
-	http://ftp.sun.ac.za/ftp/CTAN/
-	http://ftp.inf.utfsm.cl/pub/tex-archive/
-	http://ftp.das.ufsc.br/pub/ctan/
-	ftp://ftp.tex.ac.uk/tex-archive/
-	ftp://ftp.dante.de/tex-archive/
-	ftp://ctan.tug.org/tex-archive/
+    http://mirrors.ibiblio.org/pub/mirrors/CTAN/
+    http://ctan.math.utah.edu/ctan/tex-archive/
+    ftp://ftp.funet.fi/pub/TeX/CTAN/
+    http://mirror.internode.on.net/pub/ctan/
+    ftp://ctan.unsw.edu.au/tex-archive/
+    http://mirror.aarnet.edu.au/pub/CTAN/
+    ftp://ftp.kddlabs.co.jp/CTAN/
+    ftp://ftp.chg.ru/pub/TeX/CTAN/
+    ftp://mirror.macomnet.net/pub/CTAN/
+    http://ftp.sun.ac.za/ftp/CTAN/
+    http://ftp.inf.utfsm.cl/pub/tex-archive/
+    http://ftp.das.ufsc.br/pub/ctan/
+    ftp://ftp.tex.ac.uk/tex-archive/
+    ftp://ftp.dante.de/tex-archive/
+    ftp://ctan.tug.org/tex-archive/
 }
 
 set portfetch::mirror_sites::sites(trolltech) {
