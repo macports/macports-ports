@@ -259,6 +259,17 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
 }
 
+set portfetch::mirror_sites::sites(php) {
+    http://au.php.net/distributions/
+    http://de.php.net/distributions/
+    http://es.php.net/distributions/
+    http://fi.php.net/distributions/
+    http://fr.php.net/distributions/
+    http://gr.php.net/distributions/
+    http://it.php.net/distributions/
+    http://www.php.net/distributions/
+}
+
 set portfetch::mirror_sites::sites(postgresql) {
     http://ftp9.us.postgresql.org/pub/mirrors/postgresql/
     http://www.mirrorservice.org/sites/ftp.postgresql.org/
