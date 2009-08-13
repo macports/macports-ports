@@ -231,7 +231,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://gd.tuwien.ac.at/opsys/OpenBSD/
     ftp://ftp.stacken.kth.se/pub/OpenBSD/
     ftp://ftp3.usa.openbsd.org/pub/OpenBSD/
-    ftp://ftp5.usa.openbsd.org/pub/OpenBSD/
     ftp://rt.fm/pub/OpenBSD/
     ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
     ftp://ftp.jp.openbsd.org/pub/OpenBSD/
