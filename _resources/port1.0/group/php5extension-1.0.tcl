@@ -143,7 +143,6 @@ proc php5extension.setup {extension version {source ""}} {
                                     http://gr.php.net/distributions/ \
                                     http://fr.php.net/distributions/ \
                                     http://es.php.net/distributions/ \
-                                    http://se.php.net/distributions/ \
                                     http://au.php.net/distributions/
         
         dist_subdir                 php5
