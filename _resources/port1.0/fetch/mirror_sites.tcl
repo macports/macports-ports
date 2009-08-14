@@ -260,14 +260,14 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 }
 
 set portfetch::mirror_sites::sites(php) {
-    http://au.php.net/distributions/
-    http://de.php.net/distributions/
-    http://es.php.net/distributions/
-    http://fi.php.net/distributions/
-    http://fr.php.net/distributions/
-    http://gr.php.net/distributions/
-    http://it.php.net/distributions/
-    http://www.php.net/distributions/
+    http://au.php.net/distributions/:nosubdir
+    http://de.php.net/distributions/:nosubdir
+    http://es.php.net/distributions/:nosubdir
+    http://fi.php.net/distributions/:nosubdir
+    http://fr.php.net/distributions/:nosubdir
+    http://gr.php.net/distributions/:nosubdir
+    http://it.php.net/distributions/:nosubdir
+    http://www.php.net/distributions/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
