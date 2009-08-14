@@ -316,7 +316,7 @@ set portfetch::mirror_sites::sites(savannah) {
     http://mirrors.zerg.biz/nongnu/
     http://nongnu.askapache.com/
     http://nongnu.bigsearcher.com/
-    http://mirror.its.uidaho.edu/pub/savannah//
+    http://mirror.its.uidaho.edu/pub/savannah/
     ftp://mirror.its.uidaho.edu/savannah/
     http://nongnu.mirror.ironie.org/
     ftp://ftp.ironie.org/savannah.nongnu.org/
