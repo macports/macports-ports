@@ -63,13 +63,14 @@ post-patch {
 depends_build-append    port:automoc
 depends_lib-append      port:${qt}
 
-platform darwin 8 {
-	depends_lib-append 	port:apple-gcc42-devel
-	configure.compiler	apple-gcc-4.2
-}
-
-platform darwin 9 {
-	configure.compiler      gcc-4.2
+switch ${os.platform}_${os.major} {
+    darwin_8 {
+	    depends_lib-append 	port:apple-gcc42-devel
+	    configure.compiler	apple-gcc-4.2
+    }
+    darwin_9 {
+	    configure.compiler      gcc-4.2
+    }
 }
 
 configure.args-append   -DBUILD_doc=OFF \
