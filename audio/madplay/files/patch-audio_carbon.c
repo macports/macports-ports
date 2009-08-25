@@ -1,5 +1,5 @@
---- audio_carbon.c.bak	2006-03-11 18:24:37.000000000 +0100
-+++ audio_carbon.c	2006-03-11 18:25:03.000000000 +0100
+--- audio_carbon.c.orig	2004-01-23 01:41:31.000000000 -0800
++++ audio_carbon.c	2009-08-24 23:07:41.000000000 -0700
 @@ -94,7 +94,7 @@
  }
  
@@ -9,7 +9,19 @@
  {
    if (MPWaitOnSemaphore(buffer->semaphore, kDurationForever) != noErr) {
      audio_error = _("MPWaitOnSemaphore() failed");
-@@ -263,7 +263,7 @@
+@@ -234,7 +234,11 @@
+     break;
+ 
+   case 16:
++#ifdef __BIG_ENDIAN__
+     audio_pcm = audio_pcm_s16be;
++#else
++    audio_pcm = audio_pcm_s16le;
++#endif
+     break;
+   }
+ 
+@@ -263,7 +267,7 @@
    /* wait for block to finish playing */
  
    if (buffer->pcm_nsamples == 0) {
