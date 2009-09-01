@@ -5,11 +5,12 @@ diff -Naur libscg/scsi-mac-iokit.c libscg-patched/scsi-mac-iokit.c
  #include <Carbon/Carbon.h>
  #include <IOKit/IOKitLib.h>
  #include <IOKit/IOCFPlugIn.h>
+-#include <IOKit/scsi-commands/SCSITaskLib.h>
 +
 +/* VERSION is used as an identifier somewhere in the Apple headers. */
 +#define AVOID_COLLISION_SAVE_VERSION VERSION
 +#undef VERSION
- #include <IOKit/scsi-commands/SCSITaskLib.h>
++#include <IOKit/scsi/SCSITaskLib.h>
 +#define VERSION AVOID_COLLISION_SAVE_VERSION
 +#undef AVOID_COLLISION_SAVE_VERSION
 +
