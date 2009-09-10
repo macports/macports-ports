@@ -38,15 +38,23 @@ options select.group select.file
 default select.group ""
 default select.file ""
 
+namespace eval select {}
+
+proc select::install {group file} {
+    global prefix destroot frameworks_dir applications_dir
+
+    xinstall -m 755 -d ${destroot}${prefix}/etc/select/${group}
+    xinstall -m 644 ${file} ${destroot}${prefix}/etc/select/${group}
+
+    reinplace s|\${prefix}|${prefix}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
+    reinplace s|\${frameworks_dir}|${frameworks_dir}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
+    reinplace s|\${applications_dir}|${applications_dir}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
+}
+
 post-destroot {
     if {${select.file} != "" || ${select.group} != ""} {
-        xinstall -m 755 -d ${destroot}${prefix}/etc/select/${select.group}
-        xinstall -m 644 ${select.file} ${destroot}${prefix}/etc/select/${select.group}
-
-        reinplace s|\${prefix}|${prefix}|g ${destroot}${prefix}/etc/select/${select.group}/[file tail ${select.file}]
-        reinplace s|\${frameworks_dir}|${frameworks_dir}|g ${destroot}${prefix}/etc/select/${select.group}/[file tail ${select.file}]
-        reinplace s|\${applications_dir}|${applications_dir}|g ${destroot}${prefix}/etc/select/${select.group}/[file tail ${select.file}]
+        select::install ${select.group} ${select.file}
     } else {
-        ui_debug "PortGroup select: select.group and select.file not set"
+        ui_debug "PortGroup select: select.group or select.file not set"
     }
 }
