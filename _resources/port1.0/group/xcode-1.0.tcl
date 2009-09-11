@@ -113,9 +113,6 @@ default xcode.destroot.path ""
 options xcode.destroot.settings
 default xcode.destroot.settings ""
 
-# XXX: Needed to satisfy a check in portutil.tcl, remove when 1.8 is released.
-default xcode.universal.settings {}
-
 namespace eval xcode {}
 
 # Some utility functions.
@@ -249,42 +246,25 @@ proc xcode::destroot_one_target {args settings} {
 
 proc xcode::get_build_args {args} {
     global tcl_platform
-    global universal_archs universal_target macosx_deployment_target
+    global configure.universal_archs configure.build_arch macosx_deployment_target
     global os.major os.arch
     global developer_dir
-    global build_arch
 
     set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
 
     # MACOSX_DEPLOYMENT_TARGET
-    if {[variant_isset universal] && [info exists universal_target]} {
-        append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${universal_target}"
-    } else {
-        append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    }
+    append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
 
     # ARCHS
     if {[variant_isset universal]} {
-        append xcode_build_args " ARCHS=\"${universal_archs}\""
+        append xcode_build_args " ARCHS=\"${configure.universal_archs}\""
     } else {
-        if {[info exists build_arch]} {
-            append xcode_build_args " ARCHS=${build_arch}"
-        } else {
-            if {${os.arch} == "powerpc"} {
-                append xcode_build_args " ARCHS=ppc"
-            } else {
-                append xcode_build_args " ARCHS=i386"
-            }
-        }
+        append xcode_build_args " ARCHS=${configure.build_arch}"
     }
 
     # SDKROOT
     if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
-        if {[info exists developer_dir]} {
-            append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
-        } else {
-            append xcode_build_args " SDKROOT=\"/Developer/SDKs/MacOSX10.4u.sdk\""
-        }
+        append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
     } else {
         append xcode_build_args " SDKROOT="
     }
