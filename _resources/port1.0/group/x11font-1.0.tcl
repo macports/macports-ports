@@ -78,7 +78,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
 #        system "fc-cache ${x11font_myfontdir}"
 #    }
 
-    livecheck.check     regex
+    livecheck.type      regex
     livecheck.regex     ${name}-(\[\\d.\]+)${extract.suffix}
     livecheck.url       ${master_sites}
 }
