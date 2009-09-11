@@ -108,7 +108,7 @@ proc perl5.setup {module vers {cpandir ""}} {
         }
     }
 
-    livecheck.check     regexm
+    livecheck.type      regexm
     livecheck.url       http://search.cpan.org/dist/${perl5.module}/
     livecheck.regex     (?:This Release)?<td class=label>(?:This|Latest) Release</td>.*<td class=cell>(?:<\[^<\]+>)?${perl5.module}-(\[^<\]+?)<
 }

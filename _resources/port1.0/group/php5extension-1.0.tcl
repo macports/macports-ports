@@ -131,7 +131,7 @@ proc php5extension.setup {extension version {source ""}} {
         master_sites                http://pecl.php.net/get/
         extract.suffix              .tgz
         
-        livecheck.check             regexm
+        livecheck.type              regexm
         livecheck.url               ${php5extension.homepage}
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
@@ -147,7 +147,7 @@ proc php5extension.setup {extension version {source ""}} {
             eval xinstall -m 644 [glob ${build.dir}/modules/*.so] ${destroot}${php5extension.extension_dir}
         }
         
-        livecheck.check             regex
+        livecheck.type              regex
         livecheck.url               http://www.php.net/downloads.php
         livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
     }

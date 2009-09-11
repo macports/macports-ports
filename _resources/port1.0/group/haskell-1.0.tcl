@@ -89,7 +89,7 @@ proc haskell.setup {package version {compiler ghc}} {
 #        system "${prefix}/libexec/${name}/unregister.sh"
 #    }
 
-    livecheck.check     regex
+    livecheck.type      regex
     livecheck.url       ${homepage}/cgi-bin/hackage-scripts/package/${package}
     livecheck.regex     /packages/archive/${package}/.*/${package}-(.*)\.tar\.gz
 }

@@ -114,7 +114,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			set ruby.project [string tolower [lindex [split ${source} {:}] 2]]
 			homepage		http://rubyforge.org/projects/${ruby.project}
 			master_sites	http://rubyforge.org/frs/download.php/${num}/
-			livecheck.check	regex
+			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.project}</strong></td><td>(?:REL )?(.*)$"
 		}
@@ -122,7 +122,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			set num [lindex [split ${source} {:}] 1]
 			homepage		http://rubyforge.org/projects/${ruby.project}
 			master_sites	http://rubyforge.org/frs/download.php/${num}/
-			livecheck.check	regex
+			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.project}</strong></td><td>(?:REL )?(.*)$"
 		}
@@ -133,7 +133,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			                http://rubyforge.iasi.roedu.net/gems/ \
 			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
-			livecheck.check	regex
+			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
 		}
@@ -143,7 +143,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			                http://rubyforge.iasi.roedu.net/gems/ \
 			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
-			livecheck.check	regex
+			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
 		}
