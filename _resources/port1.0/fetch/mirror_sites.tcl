@@ -222,9 +222,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
 }
 
 set portfetch::mirror_sites::sites(openbsd) {
-    http://mirror.roothell.org/pub/OpenBSD/
     http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
-    http://ftp-stud.fht-esslingen.de/pub/OpenBSD/
     ftp://carroll.cac.psu.edu/pub/OpenBSD/
     ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
     ftp://gd.tuwien.ac.at/opsys/OpenBSD/
