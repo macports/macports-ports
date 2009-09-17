@@ -55,9 +55,19 @@ import os
 import re
 import shutil
 
-from mercurial import cmdutil, commands, error, hg, hgweb, node, util
+from mercurial import cmdutil, commands, hg, hgweb, node, util
 from mercurial import localrepo, sshrepo, sshserver, httprepo, statichttprepo
 from mercurial.i18n import gettext as _
+
+# Import exceptions with backwards compatibility
+try:
+    from mercurial.error import RepoError, UnknownCommand
+except ImportError:
+    from mercurial.repo import RepoError
+    try:
+        from mercurial.cmdutil import UnknownCommand
+    except ImportError:
+        from mercurial.commands import UnknownCommand
 
 # For backwards compatibility, we need the following function definition.
 # If we didn't want that, we'd have just written:
@@ -77,20 +87,6 @@ try:
 except AttributeError:
     findcmd.findcmd = commands.findcmd
     findcmd.__doc__ = commands.findcmd.__doc__
-for m in (error, cmdutil, commands):
-    if hasattr(m, "UnknownCommand"):
-        findcmd.UnknownCommand = m.UnknownCommand
-        break
-try:
-    # Assign the exceptions explicitely to avoid demandload issues
-    import mercurial.repo
-    import mercurial.cmdutil
-    RepoError = mercurial.repo.RepoError
-    ParseError = mercurial.dispatch.ParseError
-except AttributeError:
-    import mercurial.error
-    RepoError = mercurial.error.RepoError
-    ParseError = mercurial.error.ParseError
 
 # For backwards compatibility, find the parseurl() function that splits
 # urls and revisions.  Mercurial 0.9.3 doesn't have this, so we need
@@ -377,6 +373,8 @@ def die_on_numeric_revs(revs):
     """
     if revs is None:
         return
+    if not hasattr(revs, '__iter__'):
+        revs = [revs]
     for strrev in revs:
         try:
             intrev = int(strrev)
@@ -1132,7 +1130,7 @@ def seed(ui, snapshot=None, source='default', **opts):
 
     snapfile = snapshot or opts['snapfile']
     if not snapfile:
-        raise ParseError("fseed", _("invalid arguments"))
+        raise cmdutil.ParseError("fseed", _("invalid arguments"))
     forest = Forest(snapfile=snapfile)
     tip = opts['tip']
     dest = opts['root']
@@ -1244,6 +1242,48 @@ def status(ui, top, *pats, **opts):
                  prehooks=[lambda tree: check_mq(tree)])
 
 
+def tag(ui, top, name, revision=None, **opts):
+    """add a tag for the current or given revision in the working forest
+
+    Name a particular revision using <name>.
+
+    Tags are used to name particular revisions of the repository and are
+    very useful to compare different revision, to go back to significant
+    earlier versions or to mark branch points as releases, etc.
+
+    If no revision is given, the parent of the working directory is used,
+    or tip if no revision is checked out.
+
+    To facilitate version control, distribution, and merging of tags,
+    they are stored as a file named ".hgtags" which is managed
+    similarly to other project files and can be hand-edited if
+    necessary.  The file '.hg/localtags' is used for local tags (not
+    shared among repositories).
+    """
+    if revision is not None:
+        ui.warn(_("use of 'hg ftag NAME [REV]' is deprecated, "
+                  "please use 'hg ftag [-r REV] NAME' instead\n"))
+        if opts['rev']:
+            raise util.Abort(_("use only one form to specify the revision"))
+        opts['rev'] = revision
+    forest = Forest(top=top, snapfile=None,
+                    walkhg=walkhgenabled(ui, opts['walkhg']))
+
+    def function(tree, ignore, opts):
+        try:
+            commands.tag(ui, tree.getrepo(ui), name, rev_=None, **opts)
+        except Exception, err:
+            ui.warn(_("skipped: %s\n") % err)
+            tree.repo.transaction().__del__()
+
+    @Forest.Tree.skip
+    def check_mq(tree):
+        tree.die_on_mq(top.root)
+
+    forest.apply(ui, function, None, opts,
+                 prehooks=[lambda tree: check_mq(tree)])
+
+
 def trees(ui, top, **opts):
     """show the roots of the repositories
 
@@ -1288,9 +1328,9 @@ def update(ui, top, revision=None, **opts):
                 ui.warn(_("warning: %s\n") % err)
             else:
                 raise err
-            snapfile = opts['snapfile']
-            opts['rev'] = revision
-    tip = opts['tip']
+    if snapfile is None:
+        snapfile = opts['snapfile']
+        opts['rev'] = revision
     forest = Forest(top=top, snapfile=snapfile,
                     walkhg=walkhgenabled(ui, opts['walkhg']))
 
@@ -1299,10 +1339,8 @@ def update(ui, top, revision=None, **opts):
             rev = opts['rev'] or None
         else:
             rev = None
-        if type(rev) is str:
-            rev = rev
-        elif rev:
-            rev = rev[0]
+        if hasattr(rev, '__iter__'):
+            rev = rev[-1]
         try:
             if rev is not None:
                 commands.update(ui, tree.getrepo(ui),
@@ -1377,6 +1415,10 @@ def uisetup(ui):
             (status,
              [walkhgopts] + cmd_options(ui, 'status'),
              _('hg fstatus [OPTION]... [FILE]...')),
+        "ftag":
+            (tag,
+             [walkhgopts] + cmd_options(ui, 'tag'),
+             _('hg ftag [-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME')),
         "ftrees" :
             (trees,
              [('c', 'convert', False,
@@ -1404,7 +1446,7 @@ def uisetup(ui):
                                                   remove=('bundle',),
                                                   table=hgext.fetch.cmdtable),
                                     _('hg ffetch [OPTION]... [SOURCE]'))})
-    except findcmd.UnknownCommand:
+    except UnknownCommand:
         return
 
 commands.norepo += " fclone fseed"
