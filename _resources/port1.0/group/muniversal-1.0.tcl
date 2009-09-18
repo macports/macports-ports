@@ -101,15 +101,6 @@ variant universal {
         configure.universal_cflags-delete    -arch ${arch}
         configure.universal_cxxflags-delete  -arch ${arch}
         configure.universal_ldflags-delete   -arch ${arch}
-        configure.cflags-delete    -arch ${arch}
-        configure.cxxflags-delete  -arch ${arch}
-        configure.ldflags-delete   -arch ${arch}
-    }
-    # workaround for #17865 (deleting all option contents also deletes the option)
-    foreach flags {universal_cflags universal_cxxflags universal_ldflags cflags cxxflags ldflags} {
-        if {![info exists configure.${flags}]} {
-            configure.${flags}
-        }
     }
 
     eval configure.args-append      ${configure.universal_args}
@@ -118,19 +109,6 @@ variant universal {
     eval configure.objcflags-append ${configure.universal_cflags}
     eval configure.ldflags-append   ${configure.universal_ldflags}
     eval configure.cppflags-append  ${configure.universal_cppflags}
-
-    # undo setting of --host and --target from portconfigure.tcl procedure configure_get_universal_args
-    # XXX Quick hack for base after r49087
-    if {[llength [info commands "portconfigure::*"]] > 0} {
-        # XXX even more hackery, since portconfigure::configure_get_universal_system_name is gone on trunk
-        set undo_system_value ""
-    } else {
-        set undo_system_value [configure_get_universal_system_name]
-    }
-    if {[llength ${configure.universal_archs}] == 1 &&
-        [info exists undo_system_value] && $undo_system_value != ""} {
-        configure.args-delete --host=${undo_system_value} --target=${undo_system_value}
-    }
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if { ${merger_must_run_binaries}=="yes" } {
