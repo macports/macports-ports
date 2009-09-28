@@ -1,4 +1,4 @@
-# $Id: php5extension-1.0.tcl 57450 2009-09-11 08:06:58Z ryandesign@macports.org $
+# $Id$
 # 
 # Copyright (c) 2009 The MacPorts Project
 # All rights reserved.
