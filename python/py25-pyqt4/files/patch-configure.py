@@ -1,22 +1,11 @@
---- configure.py.orig	2006-03-24 19:09:08.000000000 -0500
-+++ configure.py	2006-04-19 06:05:07.000000000 -0400
-@@ -253,6 +253,7 @@
-             0x030200: "Qt_3_1_2",
-             0x030300: "Qt_3_2_0",
-             0x030305: "Qt_3_3_0",
-+            0x030304: "Qt_3_3_4",
-             0x030306: "Qt_3_3_5",
-             0x040000: "Qt_3_3_6"
-         }
-@@ -1026,9 +1027,9 @@
-     """
-     # Get the name of the qmake configuration file to take the macros from.
-     if "QMAKESPEC" in os.environ.keys():
--        fname = os.path.join(qt_dir, "mkspecs", os.environ["QMAKESPEC"], "qmake.conf")
-+        fname = "qmake.conf"
-     else:
--        fname = os.path.join(qt_dir, "mkspecs", "default", "qmake.conf")
-+        fname = "qmake.conf"
- 
-         if not os.access(fname, os.F_OK):
-             sipconfig.error("Unable to find the default configuration file %s. You can use the QMAKESPEC environment variable to specify the correct platform instead of \"default\"." % fname)
+--- configure.py.orig	2009-07-15 01:37:10.000000000 +1200
++++ configure.py	2009-07-19 18:28:19.000000000 +1200
+@@ -840,7 +840,7 @@
+                 if sys.platform == "darwin":
+                     # We need to work out how to specify the right framework
+                     # version.
+-                    link = "-framework Python"
++                    link = "%s @@MACPORTS_PYTHON_FRAMEWORK@@" % sipcfg.build_macros().get('LFLAGS', '')
+                 elif ("--enable-shared" in ducfg.get("CONFIG_ARGS", "") and
+                       glob.glob("%s/lib/libpython%d.%d*" % (ducfg["exec_prefix"], py_major, py_minor))):
+                     lib_dir_flag = quote("-L%s/lib" % ducfg["exec_prefix"])
