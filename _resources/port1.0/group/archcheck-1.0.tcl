@@ -61,7 +61,7 @@ pre-extract {
                 set requested_arch ppc7400
             }
             if {-1 == [string first " ${requested_arch} " ${file_archs}]} {
-                ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}\nbecause ${file} does not contain the architecture ${requested_arch}.\nYou may want to rebuild the port that provides that file using the universal variant."
+                ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}\nbecause ${file} does not contain the architecture ${requested_arch}."
                 return -code error "incompatible architectures in dependencies"
             }
         }
