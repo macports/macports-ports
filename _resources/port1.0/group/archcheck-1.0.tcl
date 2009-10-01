@@ -57,7 +57,7 @@ pre-extract {
         }
         set file_archs " [strsed [exec lipo -info ${file}] {s/.*://}] "
         foreach requested_arch ${requested_archs} {
-            if {${requested_arch} == "ppc"} {
+            if {9 == ${os.major} && ${requested_arch} == "ppc"} {
                 set requested_arch ppc7400
             }
             if {-1 == [string first " ${requested_arch} " ${file_archs}]} {
