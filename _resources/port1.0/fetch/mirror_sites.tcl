@@ -322,7 +322,6 @@ set portfetch::mirror_sites::sites(savannah) {
     http://savannah.c3sl.ufpr.br/
     ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
     http://savannah.inetbridge.net/
-    http://savannah.releasenotes.org/
     http://www.centervenus.com/mirrors/nongnu/
     http://www.de-mirrors.de/nongnu/
     http://www.very-clever.com/download/nongnu/
