@@ -45,10 +45,10 @@ options archcheck.files
 default archcheck.files {}
 
 pre-extract {
-    if {[variant_isset universal]} {
-        set requested_archs ${universal_archs}
+    if {[variant_exists universal] && [variant_isset universal]} {
+        set requested_archs ${configure.universal_archs}
     } else {
-        set requested_archs ${build_arch}
+        set requested_archs ${configure.build_arch}
     }
     foreach file ${archcheck.files} {
         # Prepend prefix if necessary.
