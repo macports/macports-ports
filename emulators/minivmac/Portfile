@@ -84,17 +84,30 @@ set my_rom_dir          "~/Library/Preferences/Gryphel/mnvm_rom"
 set my_bootstrap_app    "Mini vMac.app"
 set my_rom_file         vMac.ROM
 set my_base_options     "-maintainer MacPorts -homepage http://www.macports.org/ -cl -eol unx -nex -im 1"
-set my_target           ""
+set my_archs            {}
 
 options my_variations
 default my_variations   {}
 
-platform powerpc {
-    set my_target mach
+# The universal variant is disabled until MacPorts 1.8.2 is released
+# and this port is upgraded to version 3.1.x final.
+if {0} {
+variant universal {
+    configure.universal_args
+    configure.universal_archs ppc i386
+    set my_archs ${configure.universal_archs}
 }
-
-platform i386 {
-    set my_target imch
+}
+if {![variant_isset universal]} {
+    switch ${os.arch} {
+        powerpc {
+            configure.build_arch ppc
+        }
+        default {
+            configure.build_arch ${os.arch}
+        }
+    }
+    set my_archs ${configure.build_arch}
 }
 
 pre-fetch {
@@ -155,16 +168,19 @@ post-extract {
 
 pre-configure {
     set i 0
-    foreach {my_machine my_variation_options} ${my_variations} {
-        if {${i} > 0} {
-            configure.args-append {\;}
+    foreach my_arch ${my_archs} {
+        set my_target [my_arch_to_target ${my_arch}]
+        foreach {my_machine my_variation_options} ${my_variations} {
+            if {${i} > 0} {
+                configure.args-append {\;}
+            }
+            configure.args-append \
+                ${my_base_options} \
+                -t ${my_target} \
+                ${my_variation_options} \
+                -n ${version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
+            incr i
         }
-        configure.args-append \
-            ${my_base_options} \
-            -t ${my_target} \
-            ${my_variation_options} \
-            -n ${version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
-        incr i
     }
     
     # Launch Mini vMac so the configure script can talk to it.
@@ -180,18 +196,26 @@ post-configure {
     file mkdir ${build.dir}
     set my_variation_dirs ""
     set my_src_disk_mount [my_attach_disk_image ${worksrcpath}/${my_src}/${my_src}.img]
-    foreach my_variation_dir [glob -nocomplain -type d -tails -directory ${my_src_disk_mount}/output *] {
-        set my_variation_dirs "${my_variation_dirs} ${my_variation_dir}"
-        
-        # Get the configured source code.
-        file copy ${my_src_disk_mount}/output/${my_variation_dir} ${build.dir}
-        
-        # Use the right compiler.
-        reinplace "s|gcc|${configure.cc}|g" ${build.dir}/${my_variation_dir}/Makefile
-        
-        # Remove references to SDKs -- the 10.4u SDK is not installed by default on 10.6
-        # and even if you install it manually it does not work here.
-        reinplace -E {s|-isysroot /Developer/SDKs/[^ ]+||g} ${build.dir}/${my_variation_dir}/Makefile
+    foreach my_arch ${my_archs} {
+        file mkdir ${build.dir}/${my_arch}
+        set my_target [my_arch_to_target ${my_arch}]
+        foreach {my_machine unused} ${my_variations} {
+            set my_src_dir ${my_src_disk_mount}/output/${version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
+            if {[file isdirectory ${my_src_dir}]} {
+                set my_variation_dir ${my_arch}/${my_machine}
+                set my_variation_dirs "${my_variation_dirs} [strsed ${my_variation_dir} {g/ /\\\\ /}]"
+                
+                # Get the configured source code.
+                file copy ${my_src_dir} ${build.dir}/${my_variation_dir}
+                
+                # Use the right compiler.
+                reinplace "s|gcc|${configure.cc}|g" ${build.dir}/${my_variation_dir}/Makefile
+                
+                # Remove references to SDKs -- the 10.4u SDK is not installed by default on 10.6
+                # and even if you install it manually it does not work here.
+                reinplace -E {s|-isysroot /Developer/SDKs/[^ ]+||g} ${build.dir}/${my_variation_dir}/Makefile
+            }
+        }
     }
     my_detach_disk_image ${my_src_disk_mount}
     
@@ -212,15 +236,21 @@ set my_share_dir        ${prefix}/share/${my_name}
 post-build {
     # To save space, keep only a single copy of the Resources directory.
     set i 0
-    foreach my_variation_dir [glob -type d -tails -directory ${build.dir} *] {
-        set my_resources_dir ${build.dir}/${my_variation_dir}/minivmac.app/Contents/Resources
-        if {0 == ${i}} {
-            move ${my_resources_dir} ${build.dir}
-        } else {
-            delete ${my_resources_dir}
+    foreach my_arch ${my_archs} {
+        set my_target [my_arch_to_target ${my_arch}]
+        foreach {my_machine unused} ${my_variations} {
+            if {[variant_isset universal]} {
+                reinplace "s|${my_target}|umch|" ${build.dir}/${my_arch}/${my_machine}/minivmac.app/Contents/Info.plist
+            }
+            set my_resources_dir ${build.dir}/${my_arch}/${my_machine}/minivmac.app/Contents/Resources
+            if {0 == ${i}} {
+                move ${my_resources_dir} ${build.dir}
+            } else {
+                delete ${my_resources_dir}
+            }
+            ln -s ${my_share_dir}/Resources ${my_resources_dir}
+            incr i
         }
-        ln -s ${my_share_dir}/Resources ${my_resources_dir}
-        incr i
     }
     
     # Install the prettier icons.
@@ -233,11 +263,20 @@ destroot {
     copy ${build.dir}/Resources ${destroot}${my_share_dir}
     
     # Install the programs.
-    xinstall -d ${destroot}${my_app_dir}
-    foreach {my_machine my_variation_options} ${my_variations} {
-        set my_variation_dir ${version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
-        file copy ${build.dir}/${my_variation_dir}/minivmac.app \
-            "${destroot}${my_app_dir}/Mini vMac ${my_machine}.app"
+    foreach my_arch ${my_archs} {
+        if {[variant_isset universal]} {
+            set my_dest ${workpath}/pre-dest/${my_arch}
+        } else {
+            set my_dest ${destroot}
+        }
+        xinstall -d ${my_dest}${my_app_dir}
+        foreach {my_machine unused} ${my_variations} {
+            copy ${build.dir}/${my_arch}/${my_machine}/minivmac.app \
+                "${my_dest}${my_app_dir}/Mini vMac ${my_machine}.app"
+        }
+    }
+    if {[variant_isset universal]} {
+        merge ${workpath}/pre-dest
     }
 }
 
@@ -263,6 +302,21 @@ variant macplus conflicts mac128k mac512k mac512ke macse description {Emulate a 
 
 variant macse conflicts mac128k mac512k mac512ke macplus description {Emulate a Macintosh SE with 4 MB RAM and 6 drives} {
     my_variations-append {SE} {-m SE}
+}
+
+# Converts normal arch names into Mini vMac target names.
+proc my_arch_to_target {arch} {
+    switch ${arch} {
+        i386 {
+            return imch
+        }
+        ppc {
+            return mach
+        }
+        default {
+            return -code error "unsupported architecture ${arch}"
+        }
+    }
 }
 
 # Mounts a disk image.
