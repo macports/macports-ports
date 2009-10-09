@@ -55,13 +55,14 @@ pre-extract {
         if {"/" != [string index ${file} 0]} {
             set file [file join ${prefix} ${file}]
         }
-        set file_archs " [strsed [exec lipo -info ${file}] {s/.*://}] "
+        set file_archs [string trim [strsed [exec lipo -info ${file}] {s/.*://}]]
         foreach requested_arch ${requested_archs} {
             if {9 <= ${os.major} && ${requested_arch} == "ppc"} {
                 set requested_arch ppc7400
             }
-            if {-1 == [string first " ${requested_arch} " ${file_archs}]} {
-                ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}\nbecause ${file} does not contain the architecture ${requested_arch}."
+            if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
+                ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}"
+                ui_error "because ${file} only contains the architecture(s) ${file_archs}."
                 return -code error "incompatible architectures in dependencies"
             }
         }
