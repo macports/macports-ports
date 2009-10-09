@@ -130,6 +130,8 @@ set portfetch::mirror_sites::sites(gnome) {
     ftp://ftp.chg.ru/pub/X11/gnome/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
     http://mirror.internode.on.net/pub/gnome/
+    http://ftp.df.lth.se/pub/gnome/
+    http://linorg.usp.br/gnome/
     http://ftp.gnome.org/pub/GNOME/
 }
 
