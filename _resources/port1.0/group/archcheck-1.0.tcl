@@ -63,6 +63,9 @@ pre-extract {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
                 ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}"
                 ui_error "because ${file} only contains the architecture(s) ${file_archs}."
+                if {[variant_exists universal] && [variant_isset universal] && 1 == [llength ${file_archs}]} {
+                    ui_error "Try reinstalling the port that provides ${file} with the +universal variant."
+                }
                 return -code error "incompatible architectures in dependencies"
             }
         }
