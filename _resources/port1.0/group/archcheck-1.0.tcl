@@ -62,10 +62,17 @@ pre-extract {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
                 ui_error "You cannot install ${name} for the architecture(s) ${requested_archs}"
                 ui_error "because ${file} only contains the architecture(s) ${file_archs}."
-                # Recommend reinstalling dependency universal if dependency is not universal and
-                # trying to install this port either universal or for non-default build_arch.
-                if {1 == [llength ${file_archs}] && (([variant_exists universal] && [variant_isset universal]) || (${build_arch} != ${configure.build_arch}))} {
-                    ui_error "Try reinstalling the port that provides ${file} with the +universal variant."
+                # Dependency is not universal?
+                if {1 == [llength ${file_archs}]} {
+                    # Trying to install this port either universal or for non-default arch?
+                    if {([variant_exists universal] && [variant_isset universal]) || (${build_arch} != ${configure.build_arch})} {
+                        ui_error "Try reinstalling the port that provides ${file} with the +universal variant."
+                    # Dependency's arch is not the default arch? User has likely upgraded
+                    # from Leopard to Snow Leopard and has not reinstalled all ports.
+                    } elseif {${file_archs} != ${build_arch}} {
+                        ui_error "Did you upgrade to a new version of Mac OS X? If so, please see"
+                        ui_error "http://trac.macports.org/wiki/Migration"
+                    }
                 }
                 return -code error "incompatible architectures in dependencies"
             }
