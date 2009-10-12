@@ -48,7 +48,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     version          ${myportversion}
     categories       x11 x11-font graphics
     homepage         http://www.x.org/
-    master_sites     ${homepage}pub/individual/font/
+    master_sites     http://xorg.freedesktop.org/archive/individual/font/
     use_bzip2        yes
     depends_build    port:pkgconfig bin:bdftopcf:bdftopcf \
                      port:xorg-font-util port:mkfontscale port:mkfontdir \
