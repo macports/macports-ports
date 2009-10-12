@@ -199,7 +199,7 @@ set portfetch::mirror_sites::sites(kde) {
     http://kde.mirrors.hoobly.com/
     http://ftp.gtlib.cc.gatech.edu/pub/kde/
     http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
-    http://gd.tuwien.ac.at/kde/
+#    http://gd.tuwien.ac.at/kde/
     http://mirrors.isc.org/pub/kde/
     http://kde.mirrors.tds.net/pub/kde/
     ftp://ftp.oregonstate.edu/pub/kde/
