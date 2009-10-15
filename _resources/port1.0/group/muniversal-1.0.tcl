@@ -44,7 +44,7 @@
 #     merger_configure_ldflags: associative array of configure.ldflags
 #             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
 #         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
-#          merger_destroot_env: assoicative array of desroot.env variables
+#          merger_destroot_env: assoicative array of destroot.env variables
 #             merger_dont_diff: list of file names for which diff will not work
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
 #            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
