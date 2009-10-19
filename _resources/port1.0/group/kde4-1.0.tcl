@@ -97,8 +97,6 @@ post-activate {
     ui_msg "######################################################"
     ui_msg "#  Programs will not start until you run the command "
     ui_msg "#  'sudo chown -R \$USER ~/Library/Preferences/KDE'  "
-    ui_msg "#  replacing \$USER with your username, followed by  "
-    ui_msg "#  'open ${applications_dir}/KDE4/kdeinit4.app'      " 
-    ui_msg "#  in a Terminal.                                    "
+    ui_msg "#  replacing \$USER with your username.              "
     ui_msg "######################################################"
 }
