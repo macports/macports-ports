@@ -50,8 +50,15 @@ default build.dir                   {[php5extension.build_dir_proc]}
 default build.target                {[php5extension.build_target_proc]}
 default configure.args              {[php5extension.configure_args_proc]}
 default configure.dir               {[php5extension.build_dir_proc]}
+options php5extension.extension
 options php5extension.extension_dir
 default php5extension.extension_dir {[php5extension.extension_dir_proc]}
+options php5extension.extract_dirs
+default php5extension.extract_dirs  {ext/${php5extension.extension}}
+options php5extension.ini
+default php5extension.ini           {${php5extension.extension}.ini}
+options php5extension.inidir
+default php5extension.inidir        {${prefix}/var/db/php5}
 options php5extension.type
 default php5extension.type      php
 options php5extension.source
@@ -63,9 +70,7 @@ proc php5extension.setup {extension version {source ""}} {
     global php5extension.extension php5extension.ini php5extension.inidir php5extension.source
     global build.dir destroot prefix
     
-    set php5extension.extension ${extension}
-    set php5extension.ini       ${extension}.ini
-    set php5extension.inidir    ${prefix}/var/db/php5
+    php5extension.extension     ${extension}
     php5extension.source        ${source}
     
     name                        php5-${php5extension.extension}
@@ -141,6 +146,14 @@ proc php5extension.setup {extension version {source ""}} {
         dist_subdir                 php5
         distname                    php-${version}
         use_bzip2                   yes
+        
+        pre-extract {
+            if {"yes" == ${php5extension.use_phpize}} {
+                foreach extract_dir ${php5extension.extract_dirs} {
+                    extract.post_args-append ${worksrcdir}/${extract_dir}
+                }
+            }
+        }
         
         destroot {
             xinstall -d ${destroot}${php5extension.extension_dir}
