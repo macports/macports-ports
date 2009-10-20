@@ -80,6 +80,8 @@ proc php5extension.setup {extension version {source ""}} {
     
     depends_lib                 path:bin/phpize:php5
     
+    configure.universal_args-delete --disable-dependency-tracking
+    
     pre-configure {
         if {"yes" == ${php5extension.use_phpize}} {
             system "cd ${configure.dir} && ${prefix}/bin/phpize"
