@@ -76,6 +76,6 @@ proc pure.setup {module version} {
     }
     
     livecheck.type              regex
-    livecheck.url               http://code.google.com/p/pure-lang/downloads/list
+    livecheck.url               http://code.google.com/p/pure-lang/downloads/list?q=${name}&sort=filename
     livecheck.regex             ${name}-(\[0-9.\]+)\\.tar
 }
