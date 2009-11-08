@@ -5,7 +5,7 @@ PortSystem 1.0
 
 name            g95
 version         0.91
-revision        1
+revision        2
 platforms       darwin
 categories      lang
 maintainers     takeshi
@@ -19,11 +19,21 @@ homepage        http://g95.org/
 master_sites    ftp://gcc.gnu.org/pub/gcc/releases/gcc-4.0.4/:gcc \
                 http://ftp.g95.org/v${version}/:g95
 
-set version_gcc 4.0.4
+if {[variant_isset gcc42] || (${os.platform}=="darwin" && ${os.major}>=10)} {
+    set version_gcc 4.2.4
+    dist_subdir     gcc42
+    array set barch {ppc powerpc ppc64 powerpc64 i386 i386 x86_64 x86_64}
+    set triple      $barch(${build_arch})-apple-darwin${os.major}
+} else {
+    set version_gcc 4.0.4
+    dist_subdir     gcc40
+    set triple      ${os.arch}-apple-darwin${os.major}
+}
+set buildhost   "--build=${triple} --host=${triple}"
+
 set dcore       gcc-core-${version_gcc}.tar.bz2
-dist_subdir     gcc40
 set dg95        ${name}_source.tgz
-set gcclib      lib/gcc-lib/${os.arch}-apple-${os.platform}${os.version}/${version_gcc}
+set gcclib      lib/${name}/${triple}/${version_gcc}
 distfiles       ${dcore}:gcc ${dg95}:g95
 
 checksums       ${dcore} md5    193e0a7a471cca70e374974bc5a60137         \
@@ -32,6 +42,8 @@ checksums       ${dcore} md5    193e0a7a471cca70e374974bc5a60137         \
                 ${dg95}  md5    35e1852e09b69555bc07f30d0ab4b6ba         \
                 ${dg95}  sha1   aa58510c04e357439a4bf34c54d380e9079395d5 \
                 ${dg95}  rmd160 f0a8325c0e930d69d2def16eaa3c6c21dfd2b5a8
+
+depends_lib     port:libtool port:libiconv
 
 patchfiles      patch-Makefile.in.diff \
                 patch-host-darwin.c.diff \
@@ -46,7 +58,13 @@ pre-fetch {
 }
 
 post-extract {
-    system "tar jxvf ${distpath}/${dcore} -C ${workpath}"
+    system "tar jxvf ${distpath}/${dcore} -C ${workpath}; \
+            cd ${worksrcpath}; tar zxvf libf95.a-${version}.tar.gz"
+}
+
+post-patch {
+    reinplace "s|gcc-lib|$name|" ${worksrcpath}/configure
+    reinplace "s|gcc-lib|$name|" ${worksrcpath}/libf95.a-${version}/configure
 }
 
 pre-configure {
@@ -59,41 +77,44 @@ pre-configure {
         reinplace "s|/usr/bin/libtool|${prefix}/bin/odlibtool|" ${workpath}/gcc-${version_gcc}/gcc/config/darwin.h
         set gcc_configargs "--with-as=${prefix}/bin/odas --with-ld=${prefix}/bin/odld --with-nm=${prefix}/bin/odnm"
     }
-    system "unset CPPFLAGS; unset LDFLAGS; \
-            export CPPFLAGS=-I${prefix}/include; \
+    system "export CPPFLAGS=\"${configure.cppflags}\"; \
+            export CFLAGS=\"${configure.cflags}\"; \
+            export LDFLAGS=\"${configure.ldflags}\"; \
             cd ${workpath}/gcc-${version_gcc}/${name}; \
-            ../configure --prefix=${prefix}/${gcclib} --with-libiconv-prefix=${prefix}/include \
-            --enable-languages=c ${gcc_configargs} --with-included-gettext; \
+            ../configure --prefix=${prefix}/${gcclib} \
+                         --enable-languages=c \
+                         --with-included-gettext \
+                         --with-libiconv=${prefix} \
+                         --libdir=${prefix}/lib/${name} \
+                         ${gcc_configargs} ${buildhost}; \
             make"
+    if {[variant_isset gcc42]} {
+        system "cd ${workpath}/gcc-${version_gcc}/${name}/gcc; \
+                ar d libbackend.a options.o; \
+                cd ${workpath}/gcc-${version_gcc}/gcc/; \
+                patch -p0 < ${portpath}/files/patch-gcc.c.diff" 
+    }
 }
 
-configure.args  --with-gcc-dir=${workpath}/gcc-${version_gcc}
+configure.args  --with-gcc-dir=${workpath}/gcc-${version_gcc} ${buildhost}
 
 post-build {
-    system "cd ${worksrcpath}; tar zxvf libf95.a-${version}.tar.gz; \
-           cd libf95.a-${version}; \
-           export CFLAGS='-O2 -fno-common'; \
-           ./configure --prefix=${prefix}; \
+    system "cd ${worksrcpath}/libf95.a-${version}; \
+           export CFLAGS=${configure.cflags}; \
+           ./configure --prefix=${prefix} ${buildhost}; \
            make"
 }
 
-pre-destroot {
-    reinplace "s|${prefix}/${gcclib}|${destroot}${prefix}/${gcclib}|g" ${worksrcpath}/Makefile
-    reinplace "s|${prefix}/${gcclib}|${destroot}${prefix}/${gcclib}|g" ${worksrcpath}/libf95.a-${version}/Makefile
-}
-
-destroot {
-    system "cd ${worksrcpath}; \
-           make install prefix=${destroot}${prefix}; \
-           cd libf95.a-${version}; \
-           make install prefix=${destroot}${prefix}; \
-           ranlib ${destroot}${prefix}/${gcclib}/libf95.a; \
-           ranlib ${destroot}${prefix}/${gcclib}/libgcc.a; \
-           ranlib ${destroot}${prefix}/${gcclib}/libgcc_eh.a"
-    file mkdir ${destroot}${prefix}/share/doc/${name}
-    file rename ${destroot}${prefix}/G95Manual.pdf ${destroot}${prefix}/share/doc/${name}
+post-destroot {
+    system "cd ${worksrcpath}/libf95.a-${version}; \
+            make install DESTDIR=${destroot}; \
+            ranlib ${destroot}${prefix}/${gcclib}/libf95.a; \
+            ranlib ${destroot}${prefix}/${gcclib}/libgcc.a; \
+            ranlib ${destroot}${prefix}/${gcclib}/libgcc_eh.a"
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    xinstall -m 644 ${worksrcpath}/G95Manual.pdf ${destroot}${prefix}/share/doc/${name}
     system "ln -sf ${prefix}/${gcclib}/libf95.a ${destroot}${prefix}/lib/libf95.a"
-    file mkdir ${destroot}${prefix}/${gcclib}/lib
+    xinstall -d ${destroot}${prefix}/${gcclib}/lib
     system "ln -sf ${prefix}/${gcclib}/libgcc_s.1.0.dylib ${destroot}${prefix}/${gcclib}/lib/libgcc_s.1.0.dylib"
     system "ln -sf ${prefix}/${gcclib}/libgcc_s.1.0.dylib ${destroot}${prefix}/${gcclib}/lib/libgcc_s.dylib"
 }
@@ -101,4 +122,30 @@ destroot {
 platform darwin 8 {
     patchfiles-delete patch-host-darwin.c.diff patch-darwin-fallback.c.diff
     depends_lib-append port:odcctools
+}
+
+platform darwin 10 {}
+if {[variant_isset darwin_10]} {
+    default_variants +gcc42
+}
+
+variant gcc42 description {link against gcc42} {
+    master_sites-delete ftp://gcc.gnu.org/pub/gcc/releases/gcc-4.0.4/:gcc
+    master_sites-append ftp://gcc.gnu.org/pub/gcc/releases/gcc-4.2.4/:gcc
+    checksums-delete    ${dcore} md5    193e0a7a471cca70e374974bc5a60137         \
+                        ${dcore} sha1   55c664b33a4dc6b2130c47da28a1d6daab732ce9 \
+                        ${dcore} rmd160 af67dc8385942450f6b27ad83a6b9e3d22f779a1
+    checksums-append    ${dcore} md5     b7a4c167f6a05301591b139b356e36d0 \
+                        ${dcore} sha1    540fa6949415ded321a7cbe80bbf8befe85e3566 \
+                        ${dcore} rmd160  d54581d0a2ecc22718e6be101c6dc524a4a88463
+    patchfiles-append   patch-lang.opt.diff patch-darwin.h.diff
+    patchfiles-delete   patch-host-darwin.c.diff patch-darwin-fallback.c.diff
+
+    post-configure {
+        reinplace "s|\(f951_LDADD\)|(f951_LDADD) ${workpath}/gcc-${version_gcc}/g95/libdecnumber/*.o|" ${worksrcpath}/Makefile
+    }
+
+    pre-build {
+        reinplace "s|\(g95_LDADD\)|(g95_LDADD) ${workpath}/gcc-${version_gcc}/g95/gcc/driver-i386.o|" ${worksrcpath}/Makefile
+    }
 }
