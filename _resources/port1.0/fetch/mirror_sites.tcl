@@ -29,12 +29,10 @@ set portfetch::mirror_sites::sites(apache) {
     http://mirror.internode.on.net/pub/apache/
     http://mirror.pacific.net.au/pub1/apache-dist/
     http://apache.wildit.net.au/
-    ftp://ftp.pop-mg.com.br/data/apache/dist/
     http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
     http://apache.mirror.phpchina.com/
     http://apache-mirror.dkuug.dk/
-    http://apache.digimirror.nl/
     http://apache.is.co.za/
     http://www.apache.org/dist/
     http://archive.apache.org/dist/
