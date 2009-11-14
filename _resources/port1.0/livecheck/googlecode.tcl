@@ -4,7 +4,7 @@
 
 if {$has_homepage && ${livecheck.name} eq "default"
     && ([regexp {^http://code.google.com/p/([^/]+)} $homepage _ tag]
-        || [regex {^http://(.*).googlecode.com} $homepage _ tag])} {
+        || [regexp {^http://(.*).googlecode.com} $homepage _ tag])} {
         set livecheck.name $tag
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
