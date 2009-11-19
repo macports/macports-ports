@@ -1,5 +1,5 @@
---- etc/uams/uams_randnum.c	Thu Oct 28 17:28:54 2004
-+++ etc/uams/uams_randnum.c.new	Thu Oct 28 17:28:43 2004
+--- etc/uams/uams_randnum.c~	2009-03-29 09:23:23.000000000 +0200
++++ etc/uams/uams_randnum.c	2009-11-14 16:33:14.000000000 +0100
 @@ -50,7 +50,7 @@
  #include <des.h>
  
@@ -8,4 +8,4 @@
 +#include <packer.h>
  #endif /* USE_CRACKLIB */
  
- #ifndef __inline__
+ #define PASSWDLEN 8
