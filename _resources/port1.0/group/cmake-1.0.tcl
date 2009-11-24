@@ -50,12 +50,10 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
                     -Wno-dev
 
-# Eventually, this will need to change, see #19875
-if {[info exists universal_sysroot]} {
-    configure.args-append -DCMAKE_OSX_SYSROOT=${universal_sysroot}
-}
-
 variant universal {
+    if {${os.arch} == "powerpc" && ${os.major} == "8"} {
+        configure.args-append -DCMAKE_OSX_SYSROOT="${developer_dir}/SDKs/MacOSX10.4u.sdk"
+    }
     configure.universal_args-delete --disable-dependency-tracking
     configure.args-append \
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
@@ -65,4 +63,3 @@ variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
     configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
 }
-
