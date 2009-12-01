@@ -383,7 +383,7 @@ variant universal {
         delete ${destroot}
 
         # Merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
-        #        arch1, arch2: names to prepend to files if a diff merge of two files is forbiddend by merger_dont_diff
+        #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
         #    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
         #          diffFormat: format used by diff to merge two text files
         proc merge2Dir {base1 base2 base prefixDir arch1 arch2 merger_dont_diff diffFormat} {
@@ -502,12 +502,12 @@ variant universal {
                                                     copy ${dir1}/${fl} ${dir}
                                                 }
                                                 *.elc {
-                                                    # elc files can be differet because they record when and where they were built.
+                                                    # elc files can be different because they record when and where they were built.
                                                     ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume trivial difference"
                                                     copy ${dir1}/${fl} ${dir}
                                                 }
                                                 default {
-                                                    error "Can not create ${prefixDir}/${fl} from ${base1} and ${base2}"
+                                                    error "Cannot create ${prefixDir}/${fl} from ${base1} and ${base2}"
                                                 }
                                             }
                                         }
