@@ -484,6 +484,11 @@ variant universal {
                                                 copy ${dir1}/${fl} ${dir}/mods64
                                             }
                                         }
+                                        *.la -
+                                        *.pc -
+                                        *-config {
+                                            return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                        }
                                     }
 
                                     if { ${known_file}=="no" } {
@@ -507,7 +512,7 @@ variant universal {
                                                     copy ${dir1}/${fl} ${dir}
                                                 }
                                                 default {
-                                                    error "Cannot create ${prefixDir}/${fl} from ${base1} and ${base2}"
+                                                    return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
                                                 }
                                             }
                                         }
