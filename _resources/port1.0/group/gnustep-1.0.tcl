@@ -183,7 +183,9 @@ proc set_gnustep_env {} {
 #
 
 options gnustep.cc
-default gnustep.cc          CC=gcc-mp-4.2
+default gnustep.cc          {CC=${configure.cc}}
+
+configure.compiler          macports-gcc-4.2
 
 options system_library
 options local_library
