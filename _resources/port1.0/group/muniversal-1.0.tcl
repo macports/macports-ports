@@ -503,13 +503,41 @@ variant universal {
                                             switch -glob ${fl} {
                                                 *.jar {
                                                     # jar files can be different becasue of timestamp
-                                                    ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume timestamp difference"
+                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume timestamp difference"
                                                     copy ${dir1}/${fl} ${dir}
                                                 }
                                                 *.elc {
                                                     # elc files can be different because they record when and where they were built.
-                                                    ui_debug "universal: merge: ${prefixDir}/${fl} is different in ${base1} and ${base2}; assume trivial difference"
+                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                                     copy ${dir1}/${fl} ${dir}
+                                                }
+                                                *.gz -
+                                                *.bz2 {
+                                                    # compressed files can differ due to entropy
+                                                    switch -glob ${fl} {
+                                                        *.gz {
+                                                            set cat /usr/bin/gzcat
+                                                        }
+                                                        *.bz2 {
+                                                            set cat /usr/bin/bzcat
+                                                        }
+                                                    }
+                                                    set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+                                                    set tempfile1 "${tempdir}/${arch1}-[file rootname ${fl}]"
+                                                    set tempfile2 "${tempdir}/${arch2}-[file rootname ${fl}]"
+                                                    system "${cat} ${dir1}/${fl} > ${tempfile1}"
+                                                    system "${cat} ${dir2}/${fl} > ${tempfile2}"
+                                                    set identical "no"
+                                                    if { ! [catch {system "/usr/bin/cmp -s ${tempfile1} ${tempfile2}"}] } {
+                                                        # files are identical
+                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but the contents are the same"
+                                                        set identical "yes"
+                                                        copy ${dir1}/${fl} ${dir}
+                                                    }
+                                                    delete ${tempfile1} ${tempfile2} ${tempdir}
+                                                    if {${identical}=="no"} {
+                                                        return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                                    }
                                                 }
                                                 default {
                                                     return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
