@@ -502,7 +502,7 @@ variant universal {
                                             # nothing has worked so far.
                                             switch -glob ${fl} {
                                                 *.jar {
-                                                    # jar files can be different becasue of timestamp
+                                                    # jar files can be different because of timestamp
                                                     ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume timestamp difference"
                                                     copy ${dir1}/${fl} ${dir}
                                                 }
