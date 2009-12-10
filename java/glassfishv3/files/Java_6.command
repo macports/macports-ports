@@ -1,9 +1,9 @@
 #!/bin/zsh
 ############################################################## {{{1 ##########
-#   $Author: krischik@macports.org $
-#   $Revision: 46159 $
-#   $Date: 2009-01-30 18:43:49 +0100 (Fr, 30. Jan 2009) $
-#   $HeadURL: http://svn.macports.org/repository/macports/trunk/dports/news/leafnode/files/Restart_Fetchnews.command.in $
+#   $Author$
+#   $Revision$
+#   $Date$
+#   $HeadURL$
 ############################################################## }}}1 ##########
 
 setopt X_Trace;
