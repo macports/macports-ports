@@ -1,9 +1,9 @@
 #!/bin/zsh
 ############################################################## {{{1 ##########
-#   $Author: krischik@macports.org $
-#   $Revision: 61399 $
-#   $Date: 2009-12-10 14:11:28 +0100 (Do, 10. Dez 2009) $
-#   $HeadURL: http://svn.macports.org/repository/macports/trunk/dports/java/glassfishv3/files/Java_6.command $
+#   $Author$
+#   $Revision$
+#   $Date$
+#   $HeadURL$
 ############################################################## }}}1 ##########
 
 setopt X_Trace;
