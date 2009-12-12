@@ -211,6 +211,7 @@ default build.type          gnu
 build.pre_args-append       "messages=yes [set_gnustep_make]"
 
 default destroot.env        {[set_gnustep_env]}
+default destroot.violate_mtree  yes
 destroot.pre_args-append    "messages=yes [set_gnustep_make]"
 
 #
