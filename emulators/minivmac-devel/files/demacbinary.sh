@@ -28,6 +28,12 @@ if [ ! -d "$OUTDIR" ]; then
 	exit 1
 fi
 
+MACBINARY="/usr/bin/macbinary"
+if [ -x "$MACBINARY" ]; then
+	"$MACBINARY" decode -C "$OUTDIR" -o "$OUTFILE" "$INFILE"
+	exit $?
+fi
+
 DATAFORKFILE="$OUTFILE.data"
 RSRCFORKFILE="$OUTFILE.rsrc"
 INFOFILE="$OUTFILE.info"
