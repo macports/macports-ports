@@ -9,16 +9,20 @@
 setopt X_Trace;
 
 if test "${USER}" = "root"; then
+    typeset -r in_User="${1}"
+
     if test -d "@PREFIX@/share/java/glassfishv3/glassfish/domains/domain1"; then
-	gchown -R martin "@PREFIX@/share/java/glassfishv3/glassfish/domains/domain1"
+	gchown -R "${in_User}" "@PREFIX@/share/java/glassfishv3/glassfish/domains/domain1"
     fi;
 else
     sudo ${0} ${USER}
 
     if test -d "@PREFIX@/share/java/glassfishv3"; then
+	typeset -U path
 	typeset -x -g -U -T CLASSPATH classpath ":";
-	typeset -x -g JAVA_HOME="/Library/Java/Home";
+	typeset -x -g JAVA_HOME="/System/Library/Frameworks/JavaVM.framework/Versions/1.6/Home";
 
+	path=("/System/Library/Frameworks/JavaVM.framework/Versions/1.6/Commands" ${path})
         path+="@PREFIX@/share/java/glassfishv3/bin";
     fi;
     

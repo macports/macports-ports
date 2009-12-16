@@ -14,9 +14,9 @@ if test "${USER}" = "root"; then
 	    rm "Current";
 	    ln -s "A" "Current";   
 	fi;
-	if test -d "1.6"; then
+	if test -d "1.5"; then
 	    rm "CurrentJDK";
-	    ln -s "1.6" "CurrentJDK";
+	    ln -s "1.5" "CurrentJDK";
 	fi;
     popd;
 else
