@@ -49,14 +49,17 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_SYSTEM_PREFIX_PATH=\"${prefix}\;/usr\" \
                     -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
                     -Wno-dev
-
-variant universal {
-    if {${os.arch} == "powerpc" && ${os.major} == "8"} {
-        configure.args-append -DCMAKE_OSX_SYSROOT="${developer_dir}/SDKs/MacOSX10.4u.sdk"
+pre-configure {
+    if {${os.platform} == "darwin" && ![variant_isset universal]} {
+        configure.args-append \
+            -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
     }
-    configure.universal_args-delete --disable-dependency-tracking
-    configure.args-append \
+    configure.universal_args-append \
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
+}
+configure.universal_args-delete --disable-dependency-tracking
+if {${os.arch} == "powerpc" && ${os.major} == "8"} {
+    configure.universal_args-append -DCMAKE_OSX_SYSROOT="${developer_dir}/SDKs/MacOSX10.4u.sdk"
 }
 
 variant debug description "Enable debug binaries" {
