@@ -44,7 +44,7 @@
 options archcheck.files
 default archcheck.files {}
 
-pre-extract {
+pre-configure {
     if {[variant_exists universal] && [variant_isset universal]} {
         set requested_archs ${configure.universal_archs}
     } else {
