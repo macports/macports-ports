@@ -50,7 +50,7 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
                     -Wno-dev
 pre-configure {
-    if {${os.platform} == "darwin" && ![variant_isset universal]} {
+    if {${os.platform} == "darwin" && (![variant_isset universal] || ![variant_exists universal])} {
         configure.args-append \
             -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
     }
