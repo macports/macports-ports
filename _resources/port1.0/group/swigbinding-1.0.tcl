@@ -82,4 +82,6 @@ build.target
 test.run            yes
 test.target         check
 
-livecheck.name      swig
+livecheck.type      regex
+livecheck.url       http://www.swig.org/download.html
+livecheck.regex     {swig-(\d+(?:\.\d+)*)}
