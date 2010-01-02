@@ -4,8 +4,7 @@
 
 
 cljjar='lib/clojure.jar'
-cljclass='clojure.lang.Repl'
-cljscript='clojure.lang.Script'
+cljclass='clojure.main'
 jlineclass='jline.ConsoleRunner'
 
 dir=$0
@@ -36,5 +35,5 @@ if [ -z "$1" ]; then
   exec java -classpath $cp $jlineclass $cljclass
 else
   scriptname=$1
-  exec java -classpath $cp $jlineclass $cljscript $scriptname --$*
+  exec java -classpath $cp $jlineclass $cljclass $scriptname -- $*
 fi

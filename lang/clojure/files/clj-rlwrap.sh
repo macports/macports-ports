@@ -5,8 +5,7 @@
 BREAK_CHARS="\(\){}[],^%$#@\"\";:''|\\"
 
 cljjar='lib/clojure.jar'
-cljclass='clojure.lang.Repl'
-cljscript='clojure.lang.Script'
+cljclass='clojure.main'
 cljcompletions='.clj_completions'
 
 dir=$0
@@ -37,6 +36,6 @@ if [ $# -eq 0 ]; then
   rlwrap --remember -c -b $BREAK_CHARS -f $cljcompletions java -cp $cp $cljclass
 else
   scriptname=$1
-  exec java -classpath $cp $cljscript $scriptname --$*
+  exec java -classpath $cp $cljclass $scriptname -- $*
 fi
 
