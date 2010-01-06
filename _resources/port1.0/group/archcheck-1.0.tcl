@@ -55,6 +55,19 @@ pre-configure {
         if {"/" != [string index ${file} 0]} {
             set file [file join ${prefix} ${file}]
         }
+        
+        # Make sure the file exists -- there have been cases where dylibs are
+        # inexplicably absent (e.g. #23057).
+        if {![file exists ${file}]} {
+            ui_error "The file ${file} does not exist, though it was"
+            ui_error "expected to have been provided by one of ${name}'s dependencies. Try"
+            ui_error "rebuilding the port that should have provided that file by running"
+            ui_error ""
+            ui_error "    sudo port -n upgrade --force <portname>"
+            ui_error ""
+            return -code error "missing required file"
+        }
+        
         set file_archs [string trim [strsed [exec lipo -info ${file}] {s/.*://}]]
         set file_archs [string map {ppc7400 ppc} ${file_archs}]
 
