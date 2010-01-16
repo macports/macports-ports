@@ -35,7 +35,7 @@
 # Usage:
 # 
 #   PortGroup               unspelldict 1.0
-#   php5extension.setup     locale version lang source
+#   hunspelldict.setup      locale version lang source
 # 
 # If the dictionary is hosted on OpenOffice website, set "source" to "ooo",
 # otherwise don't use it.
@@ -43,7 +43,7 @@
 # Example:
 # 
 #   PortGroup               unspelldict 1.0
-#   php5extension.setup     en_US 2006-02-07 {English (United States)} ooo
+#   hunspelldict.setup      en_US 2006-02-07 {English (United States)} ooo
 
 options hunspelldict.locale
 
