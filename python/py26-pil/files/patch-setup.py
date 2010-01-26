@@ -1,24 +1,26 @@
 --- setup.py.orig	2006-12-03 04:37:29.000000000 -0700
 +++ setup.py	2009-09-18 19:58:45.000000000 -0600
-@@ -34,11 +34,11 @@
+@@ -33,12 +33,12 @@
  #
  # TIFF_ROOT = libinclude("/opt/tiff")
  
--FREETYPE_ROOT = None
--JPEG_ROOT = None
--TIFF_ROOT = None
--ZLIB_ROOT = None
 -TCL_ROOT = None
-+FREETYPE_ROOT = "__PREFIX__/lib/", "__PREFIX__/include/freetype2/"
-+JPEG_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
-+TIFF_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
-+ZLIB_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
+-JPEG_ROOT = None
+-ZLIB_ROOT = None
+-TIFF_ROOT = None
+-FREETYPE_ROOT = None
+-LCMS_ROOT = None
 +TCL_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
++JPEG_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
++ZLIB_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
++TIFF_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
++FREETYPE_ROOT = "__PREFIX__/lib/", "__PREFIX__/include/freetype2/"
++LCMS_ROOT = "__PREFIX__/lib", "__PREFIX__/include"
  
  # FIXME: add mechanism to explicitly *disable* the use of a library
  
-@@ -302,30 +302,7 @@
-                 "_imagingtiff", ["_imagingtiff.c"], libraries=["tiff"]
+@@ -331,30 +331,7 @@
+                 "_imagingcms", ["_imagingcms.c"], libraries=["lcms"] + extra
                  ))
  
 -        if sys.platform == "darwin":
