@@ -5,7 +5,7 @@
  #define file_open(s,m) fopen(s, m)
  #endif
 -#ifdef HAVE_STAT64
-+#ifdef 0
++#if 0
  typedef struct stat64 statbuf;
  #define file_stat(f,s) stat64(f, s)
  #else
