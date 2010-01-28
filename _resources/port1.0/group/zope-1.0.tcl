@@ -134,11 +134,12 @@ proc zope.setup {product vers {products {}} {extensions {}}} {
 	destroot {
 		# Warn user if not running as root
 		if {$env(USER) != "root"} {
-			ui_msg "-----------------------------------------------------------"
-			ui_msg "Note that you are not running as root, so files installed"
-			ui_msg "by this port will not end up with proper ownership and"
-			ui_msg "likely not work correctly with Zope."
-			ui_msg "-----------------------------------------------------------"
+			notes \
+"-----------------------------------------------------------
+			Note that you are not running as root, so files installed
+			by this port will not end up with proper ownership and
+			likely not work correctly with Zope.
+			-----------------------------------------------------------"
 		}
 		cd ${worksrcpath}
 

@@ -87,16 +87,17 @@ variant docs description "Build documentation" {
 }
 
 post-activate {
-    ui_msg "##########################################################"
-    ui_msg "# Don't forget that dbus needs to be started as the local "
-    ui_msg "# user (not with sudo) before any KDE programs will launch"
-    ui_msg "# To start it run the following command:                  "
-    ui_msg "# launchctl load /Library/LaunchAgents/org.freedesktop.dbus-session.plist"
-    ui_msg "##########################################################"
-    ui_msg " "
-    ui_msg "######################################################"
-    ui_msg "#  Programs will not start until you run the command "
-    ui_msg "#  'sudo chown -R \$USER ~/Library/Preferences/KDE'  "
-    ui_msg "#  replacing \$USER with your username.              "
-    ui_msg "######################################################"
+    notes \
+##########################################################
+# Don't forget that dbus needs to be started as the local 
+# user (not with sudo) before any KDE programs will launch
+# To start it run the following command:                  
+# launchctl load /Library/LaunchAgents/org.freedesktop.dbus-session.plist
+##########################################################
+ 
+######################################################
+#  Programs will not start until you run the command 
+#  'sudo chown -R \$USER ~/Library/Preferences/KDE'  
+#  replacing \$USER with your username.              
+######################################################"
 }
