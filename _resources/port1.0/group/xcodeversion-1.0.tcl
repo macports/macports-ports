@@ -56,7 +56,7 @@ pre-extract {
         foreach {darwin_major minimum_xcodeversion} [join ${minimum_xcodeversions}] {
             if {${darwin_major} == ${os.major}} {
                 if {[rpm-vercomp ${current_xcodeversion} ${minimum_xcodeversion}] < 0} {
-                    notes "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${current_xcodeversion}."
+                    ui_msg "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${current_xcodeversion}."
                     return -code error "incompatible Xcode version"
                 }
             }

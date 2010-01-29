@@ -229,7 +229,7 @@ variant with_docs {
         
         if {[file exists ${worksrcpath}/Documentation/GNUmakefile]} {
             
-            notes "--->  Making Documentation for ${name}"
+            ui_msg "--->  Making Documentation for ${name}"
             
             _cd ${worksrcpath}/Documentation
             system "${destroot.env} ${destroot.cmd} \
@@ -243,7 +243,7 @@ variant with_docs {
                     ${info_dir}/${manual_name}-manual.info
             }
         } else {
-            notes "--->  No Documentation for ${name}"
+            ui_msg "--->  No Documentation for ${name}"
         }
     }    
 }

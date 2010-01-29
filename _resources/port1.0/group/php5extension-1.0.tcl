@@ -148,12 +148,12 @@ proc php5extension.setup {extensions version {source ""}} {
                     ui_debug "Found extension_dir ${phpiniextensiondir} in ${php5extension.php_ini}"
                     if {${phpiniextensiondir} != ${php5extension.extension_dir}} {
                         if {0 == ${count}} {
-                            notes \
-                            "Your php.ini contains a line that will prevent ${name}
-                            and other PHP extensions from working. To fix this,
-                            edit ${php5extension.php_ini} and delete this line:"
+                            ui_msg "Your php.ini contains a line that will prevent ${name}"
+                            ui_msg "and other PHP extensions from working. To fix this,"
+                            ui_msg "edit ${php5extension.php_ini} and delete this line:"
+                            ui_msg ""
                         }
-                        notes ${line}
+                        ui_msg ${line}
                         incr count
                     }
                     unset phpiniextensiondir
