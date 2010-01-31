@@ -37,6 +37,7 @@
 #             merger_build_env: associative array of build.env variables
 #                  merger_host: associative array of host values
 #        merger_configure_args: associative array of configure.args
+#            merger_build_args: associative array of build.args
 #    merger_configure_cppflags: associative array of configure.cppflags
 #      merger_configure_cflags: associative array of configure.cflags
 #    merger_configure_cxxflags: associative array of configure.cxxflags
@@ -325,6 +326,9 @@ variant universal {
             if { [info exists merger_build_env(${arch})] } {
                 build.env-append  $merger_build_env(${arch})
             }
+            if { [info exists merger_build_args(${arch})] } {
+                build.args-append  $merger_build_args(${arch})
+            }
             set build_dir_save  ${build.dir}
             if { [string match "${worksrcpath}/*" ${build.dir}] } {
                 # The build directory is inside the source directory, so put in the new source directory name.
@@ -342,6 +346,9 @@ variant universal {
                 build_main
             }
             eval build.dir  ${build_dir_save}
+            if { [info exists merger_build_args(${arch})] } {
+                build.args-delete $merger_build_args(${arch})
+            }
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete  $merger_build_env(${arch})
             }
