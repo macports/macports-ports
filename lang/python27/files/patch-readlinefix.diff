@@ -1,0 +1,162 @@
+--- Modules/readline.c	2008-11-04 12:43:31.000000000 -0800
++++ Modules/readline.c	2009-04-22 15:50:49.000000000 -0700
+@@ -759,6 +759,10 @@
+ static char **
+ flex_complete(char *text, int start, int end)
+ {
++#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
++	rl_completion_append_character ='\0';
++	rl_completion_suppress_append = 0;
++#endif
+ 	Py_XDECREF(begidx);
+ 	Py_XDECREF(endidx);
+ 	begidx = PyInt_FromLong((long) start);
+@@ -799,11 +803,8 @@
+ 	rl_attempted_completion_function = (CPPFunction *)flex_complete;
+ 	/* Set Python word break characters */
+ 	rl_completer_word_break_characters =
+-		strdup(" \t\n`~!@#$%^&*()-=+[{]}\\|;:'\",<>/?");
++		strdup(" \t\n`!@#%^&*()=+[{]}\\|;:,<>?");
+ 		/* All nonalphanums except '.' */
+-#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
+-	rl_completion_append_character ='\0';
+-#endif
+ 
+ 	begidx = PyInt_FromLong(0L);
+ 	endidx = PyInt_FromLong(0L);
+--- Lib/rlcompleter.py	2009-04-22 15:42:38.000000000 -0700
++++ Lib/rlcompleter.py	2009-04-22 15:43:00.000000000 -0700
+@@ -1,9 +1,10 @@
+ """Word completion for GNU readline 2.0.
+ 
+ This requires the latest extension to the readline module. The completer
+-completes keywords, built-ins and globals in a selectable namespace (which
+-defaults to __main__); when completing NAME.NAME..., it evaluates (!) the
+-expression up to the last dot and completes its attributes.
++completes keywords, built-ins, globals, and file names in a selectable
++namespace (which defaults to __main__); when completing NAME.NAME...,
++it evaluates (!) the expression up to the last dot and completes its
++attributes.
+ 
+ It's very cool to do "import sys" type "sys.", hit the
+ completion key (twice), and see the list of names defined by the
+@@ -72,24 +73,34 @@
+             self.use_main_ns = 0
+             self.namespace = namespace
+ 
++        # The cache of matches for a particular text fragment.
++        self.matches = []
++
+     def complete(self, text, state):
+         """Return the next possible completion for 'text'.
+ 
+         This is called successively with state == 0, 1, 2, ... until it
+-        returns None.  The completion should begin with 'text'.
++        returns None.  The completion should begin with 'text'.  Any text
++        with a period (.) will match as an attribute.  Any text that begins
++        with a single or double quote will match using file name expansion.
+ 
+         """
+         if self.use_main_ns:
+             self.namespace = __main__.__dict__
+ 
++        # For the first call with this set of text, compute all possible
++        # matches and store them in a member variable.  Subsequent calls
++        # will then iterate through this set of matches.
+         if state == 0:
+-            if "." in text:
++            if ('"' in text) or ("'" in text):
++                self.matches = self.file_matches(text)
++            elif "." in text:
+                 self.matches = self.attr_matches(text)
+             else:
+                 self.matches = self.global_matches(text)
+-        try:
++        if state < len(self.matches):
+             return self.matches[state]
+-        except IndexError:
++        else:
+             return None
+ 
+     def _callable_postfix(self, val, word):
+@@ -129,9 +140,14 @@
+ 
+         """
+         import re
++        import types
++
++        # Setup the regular expression for attributes
+         m = re.match(r"(\w+(\.\w+)*)\.(\w*)", text)
+         if not m:
+             return []
++
++        # Group 1 is the class name, group 3 is the attribute text
+         expr, attr = m.group(1, 3)
+         try:
+             thisobject = eval(expr, self.namespace)
+@@ -143,9 +159,18 @@
+         if "__builtins__" in words:
+             words.remove("__builtins__")
+ 
+-        if hasattr(thisobject, '__class__'):
+-            words.append('__class__')
+-            words.extend(get_class_members(thisobject.__class__))
++        # If this type is a class instance, use the __class__ member to
++        # get the dictionary of attributes
++        if type(thisobject) == types.InstanceType:
++            if hasattr(thisobject, '__class__'):
++                words.append('__class__')
++                words.extend(get_class_members(thisobject.__class__))
++        elif type(thisobject) == types.ClassType:
++            words.extend(get_class_members(thisobject))
++        else:
++            words.extend(dir(thisobject))
++
++        # Build the full matching text from class.attribute matches
+         matches = []
+         n = len(attr)
+         for word in words:
+@@ -155,6 +180,43 @@
+                 matches.append(word)
+         return matches
+ 
++    def file_matches(self, text):
++        """Compute matches when text is a file name.
++
++        Expects a leading single or double quote character in the text.
++        Will expand a leading ~ or ~user to a valid home directory.
++        Will expand a leading $VAR to an environment variable name."""
++        import glob
++        import os
++
++        # save the leading quote character so we can re-add it later
++        quote = text[0]
++        # strip the leading quote character
++        path = text[1:]
++
++        # expand a tilde (~) or a leading environment variable in the text
++        path = os.path.expanduser( path )
++        path = os.path.expandvars( path )
++
++        # append the any match character to send to the glob routine
++        path = path + "*"
++
++        # use the glob module to get all of the matches
++        rawMatches = glob.glob( path )
++
++        # re-prefix the text with the quoting character and append the correct
++        # terminating character depending on the type of match that was found.
++        # Directories are terminated with '/' and files with an ending quote.
++        matches = []
++        for entry in rawMatches:
++            if os.path.isdir( entry ):
++                matches.append( quote + entry + os.sep )
++            elif os.path.isfile( entry ):
++                matches.append( quote + entry + quote )
++            else:
++                matches.append( quote + entry )
++        return matches
++
+ def get_class_members(klass):
+     ret = dir(klass)
+     if hasattr(klass,'__bases__'):
