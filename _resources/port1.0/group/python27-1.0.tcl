@@ -1,9 +1,9 @@
 # et:ts=4
 # python27-1.0.tcl
 #
-# $Id: python27-1.0.tcl 63036 2010-01-24 10:43:40Z jmr@macports.org $
+# $Id$
 #
-# Copyright (c) 2008 The MacPorts Project,
+# Copyright (c) 2010 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
