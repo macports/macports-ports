@@ -541,6 +541,17 @@ variant universal {
                                                         set identical "yes"
                                                         copy ${dir1}/${fl} ${dir}
                                                     }
+                                                    if { ${identical}=="no" } {
+                                                        switch -glob ${fl} {
+                                                            *.el.gz {
+                                                                # Emacs lisp files should be same across architectures
+                                                                # the emacs package (and perhaps others) records the date of automatically generated el files
+                                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                                                set identical "yes"
+                                                                copy ${dir1}/${fl} ${dir}
+                                                            }
+                                                        }
+                                                    }
                                                     delete ${tempfile1} ${tempfile2} ${tempdir}
                                                     if {${identical}=="no"} {
                                                         return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
