@@ -74,10 +74,10 @@ proc muniversal_arch_flag_supported {args} {
     }
 }
 
-proc muniversal_get_arch_flag {arch} {
+proc muniversal_get_arch_flag {arch {fortran ""}} {
     global os.arch
     # Prefer -arch to -m
-    if {[muniversal_arch_flag_supported]} {
+    if {[muniversal_arch_flag_supported] && ${fortran}==""} {
         set archf "-arch ${arch}"
     } else {
         if { ${os.arch}=="i386" && ${arch}=="i386" } {
@@ -89,7 +89,11 @@ proc muniversal_get_arch_flag {arch} {
         } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
             set archf -m64
         } else {
-            return -code error "selected compiler can't build for ${arch}"
+            if { ${fortran}=="" } {
+                return -code error "selected compiler can't build for ${arch}"
+            } else {
+                return ""
+            }
         }
     }
     return ${archf}
@@ -166,14 +170,15 @@ variant universal {
             copy ${worksrcpath} ${worksrcpath}-${arch}
 
             set archf [muniversal_get_arch_flag ${arch}]
+            set archff [muniversal_get_arch_flag ${arch} "fortran"]
 
             if { ${merger_arch_flag} != "no" } {
                 configure.cflags-append    ${archf}
                 configure.cxxflags-append  ${archf}
                 configure.objcflags-append ${archf}
-                configure.fflags-append    ${archf}
-                configure.fcflags-append   ${archf}
-                configure.f90flags-append  ${archf}
+                configure.fflags-append    ${archff}
+                configure.fcflags-append   ${archff}
+                configure.f90flags-append  ${archff}
                 configure.ldflags-append   ${archf}
             }
 
@@ -240,9 +245,9 @@ variant universal {
                 configure.cc   ${configure.cc}   ${archf}
                 configure.cxx  ${configure.cxx}  ${archf}
                 configure.objc ${configure.objc} ${archf}
-                if { ${configure.fc}  != "" } { configure.fc   ${configure.fc}  ${archf} }
-                if { ${configure.f77} != "" } { configure.f77  ${configure.f77} ${archf} }
-                if { ${configure.f90} != "" } { configure.f90  ${configure.f90} ${archf} }
+                if { ${configure.fc}  != "" } { configure.fc   ${configure.fc}  ${archff} }
+                if { ${configure.f77} != "" } { configure.f77  ${configure.f77} ${archff} }
+                if { ${configure.f90} != "" } { configure.f90  ${configure.f90} ${archff} }
             }
 
             set configure_dir_save  ${configure.dir}
@@ -309,9 +314,9 @@ variant universal {
             }
             if { ${merger_arch_flag} != "no" } {
                 configure.ldflags-delete   ${archf}
-                configure.f90flags-delete  ${archf}
-                configure.fcflags-delete   ${archf}
-                configure.fflags-delete    ${archf}
+                configure.f90flags-delete  ${archff}
+                configure.fcflags-delete   ${archff}
+                configure.fflags-delete    ${archff}
                 configure.objcflags-delete ${archf}
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
