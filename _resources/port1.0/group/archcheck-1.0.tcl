@@ -73,7 +73,7 @@ pre-configure {
 
         foreach requested_arch ${requested_archs} {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
-                set dependency [strsed [exec ${prefix}/bin/port provides ${file}] {s/.*: //}]
+                set dependency [strsed [exec ${prefix}/bin/port provides ${file} 2>/dev/null] {s/.*: //}]
                 ui_error "You cannot install ${name} for the architecture(s) ${requested_archs} because"
                 ui_error "its dependency ${dependency} only contains the architecture(s) ${file_archs}."
                 # Dependency is not universal?
