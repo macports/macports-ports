@@ -1,0 +1,198 @@
+Index: CHANGELOG
+===================================================================
+--- CHANGELOG (revision 4204)
++++ CHANGELOG (revision 4227)
+@@ -1,3 +1,16 @@
+-0.2.7   25-Jan-2009
++0.2.8   xx-xxx-2010
++  o Stop using our custom dock icon implementation on OS X and just use
++    QSystemTrayIcon everywhere. Fixes the build on Snow Leopard.
++    (Ticket #562)
++  o Include a pre-configured qt.conf file in the Mac OS X bundles that
++    disable Qt plugin loading from the default directories. Otherwise,
++    users who have Qt installed in a system-wide location would end up
++    loading the libraries twice and crashing.
++  o Include libgcc_s_dw2-1.dll in the Windows installers, since Qt 4.6 now
++    depends on that DLL. (Ticket #555)
++  o Add Burmese and Thai UI translations.
++
++
++0.2.7   25-Jan-2010
+   o Remove the explicit palette set for the configuration dialog that
+     prevented the dialog from inheriting colors from the user's current
+Index: src/vidalia/MainWindow.h
+===================================================================
+--- src/vidalia/MainWindow.h (revision 4054)
++++ src/vidalia/MainWindow.h (revision 4227)
+@@ -23,5 +23,4 @@
+ #include "VidaliaWindow.h"
+ #include "HelperProcess.h"
+-#include "TrayIcon.h"
+ #include "AboutDialog.h"
+ #include "MessageLog.h"
+@@ -43,5 +42,5 @@
+ #include <QMainWindow>
+ #include <QTimer>
+-
++#include <QSystemTrayIcon>
+ 
+ class MainWindow : public VidaliaWindow
+@@ -64,4 +63,7 @@
+ 
+ private slots:
++  /** Respond to a double-click on the tray icon by opening the Control Panel
++   * window. */
++  void trayIconActivated(QSystemTrayIcon::ActivationReason reason);
+   /** Displays the help browser and displays the most recently viewed help
+    * topic. */
+@@ -189,4 +191,6 @@
+   /** Creates a default menubar on Mac */
+   void createMenuBar();
++  /** Sets the current tray or dock icon image to <b>iconFile</b>. */
++  void setTrayIcon(const QString &iconFile);
+   /** Updates the UI to reflect Tor's current <b>status</b>. Returns the
+    * previously set TorStatus value. */
+@@ -253,5 +257,5 @@
+   bool _useSavedPassword;
+   /** The Vidalia icon that sits in the tray. */
+-  TrayIcon _trayIcon;
++  QSystemTrayIcon _trayIcon;
+ 
+ #if defined(USE_AUTOUPDATE)
+Index: src/vidalia/CMakeLists.txt
+===================================================================
+--- src/vidalia/CMakeLists.txt (revision 4074)
++++ src/vidalia/CMakeLists.txt (revision 4227)
+@@ -21,5 +21,4 @@
+   ${CMAKE_CURRENT_SOURCE_DIR}/log
+   ${CMAKE_CURRENT_SOURCE_DIR}/network
+-  ${CMAKE_CURRENT_SOURCE_DIR}/tray
+   ${MARBLE_INCLUDE_DIR}
+ )
+@@ -225,16 +224,4 @@
+ endif(USE_MARBLE)
+ 
+-## Choose the correct tray icon implementation for the current platform
+-set(vidalia_SRCS ${vidalia_SRCS} tray/TrayIcon.cpp)
+-qt4_wrap_cpp(vidalia_SRCS tray/TrayIcon.h)
+-if(APPLE)
+-  set(vidalia_SRCS ${vidalia_SRCS} tray/TrayIconImpl_mac.cpp)
+-  qt4_wrap_cpp(vidalia_SRCS tray/TrayIconImpl_mac.h)
+-else(APPLE)
+-  ## Use Qt's QSystemTrayIcon implementation
+-  set(vidalia_SRCS ${vidalia_SRCS} tray/TrayIconImpl_qt.cpp)
+-  qt4_wrap_cpp(vidalia_SRCS tray/TrayIconImpl_qt.h)
+-endif(APPLE)
+-
+ ## Main Vidalia sources
+ set(vidalia_SRCS ${vidalia_SRCS}
+Index: src/vidalia/res/vidalia.qrc
+===================================================================
+--- src/vidalia/res/vidalia.qrc (revision 4084)
++++ src/vidalia/res/vidalia.qrc (revision 4227)
+@@ -114,4 +114,8 @@
+     <qresource prefix="/images">
+         <file>128x128/tor-logo.png</file>
++        <file>128x128/tor-off.png</file>
++        <file>128x128/tor-on.png</file>
++        <file>128x128/tor-starting.png</file>
++        <file>128x128/tor-stopping.png</file>
+     </qresource>
+     <qresource prefix="/images">
+Index: src/vidalia/MainWindow.cpp
+===================================================================
+--- src/vidalia/MainWindow.cpp (revision 4054)
++++ src/vidalia/MainWindow.cpp (revision 4227)
+@@ -68,10 +68,11 @@
+ #define IMG_TOR_STOPPING ":/images/16x16/tor-stopping.png"
+ #elif defined(Q_WS_MAC)
+-/* On Mac, we always go straight to Carbon to load our dock images 
+- * from .icns files */
+-#define IMG_TOR_STOPPED    "tor-off"
+-#define IMG_TOR_RUNNING    "tor-on"
+-#define IMG_TOR_STARTING   "tor-starting"
+-#define IMG_TOR_STOPPING   "tor-stopping"
++/* On Mac, the dock icons look best at 128x128, otherwise they get blurry
++ * if resized from a smaller image */
++#define IMG_TOR_STOPPED    ":/images/128x128/tor-off.png"
++#define IMG_TOR_RUNNING    ":/images/128x128/tor-on.png"
++#define IMG_TOR_STARTING   ":/images/128x128/tor-starting.png"
++#define IMG_TOR_STOPPING   ":/images/128x128/tor-stopping.png"
++void qt_mac_set_dock_menu(QMenu *menu);
+ #else
+ /* On X11, we just use always the 22x22 .png files */
+@@ -92,5 +93,4 @@
+ #define STARTUP_PROGRESS_CIRCUITBUILD     75
+ #define STARTUP_PROGRESS_MAXIMUM          (STARTUP_PROGRESS_BOOTSTRAPPING+100)
+-
+ 
+ /** Default constructor. It installs an icon in the system tray area and
+@@ -232,5 +232,5 @@
+   if (visible) {
+     /* In Gnome, will hide buttons if Vidalia is run on startup. */
+-    if (!TrayIcon::isTrayIconSupported()) {
++    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+       /* Don't let people hide the main window, since that's all they have. */
+       ui.chkShowOnStartup->hide();
+@@ -471,9 +471,16 @@
+ MainWindow::createTrayIcon()
+ {
+-  /* Create the default menu bar (Mac) */
++  QMenu *menu = createTrayMenu();
++
++  /* Add the menu it to the tray icon */
++  _trayIcon.setContextMenu(menu);
++
++  connect(&_trayIcon, SIGNAL(activated(QSystemTrayIcon::ActivationReason)),
++          this, SLOT(trayIconActivated(QSystemTrayIcon::ActivationReason)));
++
++#if defined(Q_WS_MAC)
+   createMenuBar();
+-  /* Create a tray menu and add it to the tray icon */
+-  _trayIcon.setContextMenu(createTrayMenu());
+-  connect(&_trayIcon, SIGNAL(doubleClicked()), this, SLOT(show()));
++  qt_mac_set_dock_menu(menu);
++#endif
+ }
+ 
+@@ -558,4 +565,24 @@
+   helpMenu->addAction(_actionShowAbout);
+ #endif
++}
++
++/** Sets the current tray or dock icon image to <b>iconFile</b>. */
++void
++MainWindow::setTrayIcon(const QString &iconFile)
++{
++#if defined(Q_WS_MAC)
++  QApplication::setWindowIcon(QPixmap(iconFile));
++#else
++  _trayIcon.setIcon(QIcon(iconFile));
++#endif
++}
++
++/** Respond to a double-click on the tray icon by opening the Control Panel
++ * window. */
++void
++MainWindow::trayIconActivated(QSystemTrayIcon::ActivationReason reason)
++{
++  if (reason == QSystemTrayIcon::DoubleClick)
++    setVisible(true);
+ }
+ 
+@@ -911,5 +938,5 @@
+   /* Update the tray icon */
+   if (!trayIconFile.isEmpty()) {
+-    _trayIcon.setIcon(trayIconFile);
++    setTrayIcon(trayIconFile);
+   }
+   /* Update the status banner on the control panel */
+@@ -1719,6 +1746,6 @@
+                        this, SLOT(enableNewIdentity()));
+ 
+-    if (TrayIcon::supportsBalloonMessages())
+-      _trayIcon.showBalloonMessage(title, message, TrayIcon::Information);
++    if (QSystemTrayIcon::supportsMessages())
++      _trayIcon.showMessage(title, message, QSystemTrayIcon::Information);
+     else
+       VMessageBox::information(this, title, message, VMessageBox::Ok);
