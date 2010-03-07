@@ -43,33 +43,33 @@ set portfetch::mirror_sites::sites(apache) {
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
 set portfetch::mirror_sites::sites(debian) {
-    ftp://ftp.us.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.au.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.bg.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.cl.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.cz.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.de.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.ee.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.es.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.fi.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.fr.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.hk.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.hr.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.hu.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.ie.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.is.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.it.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.jp.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.nl.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.no.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.pl.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.ru.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.se.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.si.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.sk.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.uk.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
-    ftp://ftp2.de.debian.org/debian/pool/main/:nosubdir
+    http://ftp.us.debian.org/debian/pool/main/:nosubdir
+    http://ftp.au.debian.org/debian/pool/main/:nosubdir
+    http://ftp.bg.debian.org/debian/pool/main/:nosubdir
+    http://ftp.cl.debian.org/debian/pool/main/:nosubdir
+    http://ftp.cz.debian.org/debian/pool/main/:nosubdir
+    http://ftp.de.debian.org/debian/pool/main/:nosubdir
+    http://ftp.ee.debian.org/debian/pool/main/:nosubdir
+    http://ftp.es.debian.org/debian/pool/main/:nosubdir
+    http://ftp.fi.debian.org/debian/pool/main/:nosubdir
+    http://ftp.fr.debian.org/debian/pool/main/:nosubdir
+    http://ftp.hk.debian.org/debian/pool/main/:nosubdir
+    http://ftp.hr.debian.org/debian/pool/main/:nosubdir
+    http://ftp.hu.debian.org/debian/pool/main/:nosubdir
+    http://ftp.ie.debian.org/debian/pool/main/:nosubdir
+    http://ftp.is.debian.org/debian/pool/main/:nosubdir
+    http://ftp.it.debian.org/debian/pool/main/:nosubdir
+    http://ftp.jp.debian.org/debian/pool/main/:nosubdir
+    http://ftp.nl.debian.org/debian/pool/main/:nosubdir
+    http://ftp.no.debian.org/debian/pool/main/:nosubdir
+    http://ftp.pl.debian.org/debian/pool/main/:nosubdir
+    http://ftp.ru.debian.org/debian/pool/main/:nosubdir
+    http://ftp.se.debian.org/debian/pool/main/:nosubdir
+    http://ftp.si.debian.org/debian/pool/main/:nosubdir
+    http://ftp.sk.debian.org/debian/pool/main/:nosubdir
+    http://ftp.uk.debian.org/debian/pool/main/:nosubdir
+    http://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
+    http://ftp2.de.debian.org/debian/pool/main/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(freebsd) {
