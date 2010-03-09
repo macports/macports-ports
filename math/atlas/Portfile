@@ -42,10 +42,8 @@ checksums           atlas${version}.tar.bz2 \
                     rmd160  e8fabba2fdd944afbc02a83599cf45a0d721030d
 
 
-# the following patch corrects extension conventions for osx's dynamic libs
-set make_patch      patch-build-Make.top.diff
 use_parallel_build  no
-build.target build
+build.target        build
 build.dir           ${workpath}/${name}-${version}/build
 
 destroot.dir        ${build.dir}
@@ -167,56 +165,59 @@ post-configure {
     # recursively remove directories
     ui_debug "reinplace for make to recursively remove directories on clean"
     reinplace "s|rm -f|rm -rf|g" ${workpath}/${name}-${version}/build/Makefile
-
-    ui_debug "patch ${name}-${version}/build/Make.top to install dynamic libs"
-    system "cd ${worksrcpath}/build/ && \
-            patch -p0 < ${filespath}/${make_patch}"
 }
 
-pre-destroot {
+proc make_dylib { lib libs } {
+    global destroot prefix myarch
+    system "cd ${destroot}/${prefix}/lib && \
+            ( test ! -e ${lib}.a ||
+              ld -arch ${myarch} -dynamic -dylib -single_module -dead_strip \
+              -x -all_load -L. -L${prefix}/lib/gcc43 -ldylib1.o \
+              -dylib_install_name ${prefix}/lib/${lib}.dylib \
+              ${lib}.a -o ${lib}.dylib ${libs} && rm -f ${lib}.a)"
+}
+
+
+post-destroot {
   # We have to manually create the dylib shared libs as the default build does not do this
+  global myarch
+
   if {[string equal "${os.arch}" "powerpc"]} {
     if {${my_arch} == "64" } {
       set myarch "ppc64"
     } else {
       set myarch "ppc"
     }
+  } else {
+    if {${my_arch} == "64" } {
+      set myarch "x86_64"
     } else {
-      if {${my_arch} == "64" } {
-        set myarch "x86_64"
-      } else {
-        set myarch "i386"
-      }
+      set myarch "i386"
     }
+  }
 
-  set ld "ld -arch ${myarch} -dynamic -dylib -single_module -dead_strip -x \
-          -all_load -L. -L${prefix}/lib/gcc43 -ldylib1.o -dylib_install_name"
+  set ncpu [exec sysctl -n hw.ncpu]
 
-  system "cd ${workpath}/${name}-${version}/build/lib && \
-          ${ld} ${prefix}/lib/libatlas.dylib libatlas.a -o libatlas.dylib \
-           -lSystem"
+  make_dylib libatlas { -lSystem }
 
-  system "cd ${workpath}/${name}-${version}/build/lib && \
-          ${ld} ${prefix}/lib/libptcblas.dylib libptcblas.a -o \
-           libptcblas.dylib -latlas \
-           -lSystem"
+  if {${ncpu} == "1" } {
+    # there are no threaded libraries (libpt*) on single-core machines
+    make_dylib libcblas   { -latlas -lSystem }
+    make_dylib libf77blas { -lgfortran -latlas -lSystem }
+  } else {
+    make_dylib libptcblas   { -latlas -lSystem }
+    make_dylib libptf77blas { -lgfortran -latlas -lSystem }
 
-  system "cd ${workpath}/${name}-${version}/build/lib && \
-          ${ld} ${prefix}/lib/libptf77blas.dylib \
-          libptf77blas.a -o libptf77blas.dylib \
-           -lgfortran -latlas -lSystem"
+    # we make soft links to the parallel built libs
+    system "cd ${destroot}${prefix}/lib && \
+            ln -s ./libptcblas.dylib libcblas.dylib && \
+            ln -s ./libptf77blas.dylib libf77blas.dylib"
 
-  system "cd ${workpath}/${name}-${version}/build/lib && \
-          ${ld} ${prefix}/lib/liblapack.dylib liblapack.a -o liblapack.dylib \
-           -lptf77blas -lgfortran -lptcblas -latlas -lgcc_s.1 -lSystem"
+    file delete ${destroot}/${prefix}/lib/libcblas.a
+    file delete ${destroot}/${prefix}/lib/libf77blas.a
+  }
 
-}
-
-post-destroot {
-  # we make soft links to the parallel built libs
-  system "cd ${destroot}${prefix}/lib && \
-          ln -sf ./libptcblas.dylib libcblas.dylib && \
-          ln -sf ./libptf77blas.dylib libf77blas.dylib"
+  make_dylib liblapack { -lf77blas -lcblas -latlas -lgfortran -lgcc_s.1 -lSystem }
 }
 
 livecheck.name      math-atlas
