@@ -99,7 +99,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
     http://mirror.mcs.anl.gov/pub/gentoo/distfiles/:nosubdir
     http://gentoo.localhost.net.ar/distfiles/:nosubdir
-    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdirosubdir
+    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
     http://gentoo.inode.at/distfiles/:nosubdir
     http://mirror.bih.net.ba/gentoo/distfiles/:nosubdir
     http:/distfiles.gentoo.bg/distfiles/:nosubdir
