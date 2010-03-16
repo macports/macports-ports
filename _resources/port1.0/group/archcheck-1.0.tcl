@@ -69,7 +69,7 @@ pre-configure {
         }
         
         set file_archs [string trim [strsed [exec lipo -info ${file}] {s/.*://}]]
-        set file_archs [string map {ppc7400 ppc} ${file_archs}]
+        set file_archs [string map {ppc7400 ppc ppc7450 ppc} ${file_archs}]
 
         foreach requested_arch ${requested_archs} {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
