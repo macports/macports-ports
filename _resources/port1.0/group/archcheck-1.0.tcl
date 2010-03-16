@@ -70,7 +70,23 @@ pre-configure {
         
         set file_archs [string trim [strsed [exec lipo -info ${file}] {s/.*://}]]
         set file_archs [string map {ppc7400 ppc ppc7450 ppc} ${file_archs}]
-
+        
+        foreach file_arch ${file_archs} {
+            switch ${file_arch} {
+                i386 -
+                x86_64 -
+                ppc -
+                ppc64 {
+                    # ok
+                }
+                default {
+                    ui_error "File ${file} contains unexpected architecture ${file_arch}."
+                    ui_error "This may be a bug in the archcheck portgroup."
+                    return -code error "unexpected architecture"
+                }
+            }
+        }
+        
         foreach requested_arch ${requested_archs} {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
                 set dependency [strsed [exec ${prefix}/bin/port provides ${file} 2>/dev/null] {s/.*: //}]
