@@ -1,33 +1,28 @@
 #!/bin/bash
-# Copyright (c) 2008 Apple Inc.
+# Copyright (c) 2008-2010 Apple Inc. All Rights Reserved.
 #
-# Permission is hereby granted, free of charge, to any person
-# obtaining a copy of this software and associated documentation files
-# (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge,
-# publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
+# @APPLE_LICENSE_HEADER_START@
 #
-# The above copyright notice and this permission notice shall be
-# included in all copies or substantial portions of the Software.
+# This file contains Original Code and/or Modifications of Original Code
+# as defined in and that are subject to the Apple Public Source License
+# Version 2.0 (the 'License'). You may not use this file except in
+# compliance with the License. Please obtain a copy of the License at
+# http://www.opensource.apple.com/apsl/ and read it before using this
+# file.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT.  IN NO EVENT SHALL THE ABOVE LISTED COPYRIGHT
-# HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# The Original Code and all software distributed under the License are
+# distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+# EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+# INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+# Please see the License for the specific language governing rights and
+# limitations under the License.
 #
-# Except as contained in this notice, the name(s) of the above
-# copyright holders shall not be used in advertising or otherwise to
-# promote the sale, use or other dealings in this Software without
-# prior written authorization.
+# @APPLE_LICENSE_HEADER_END@
 
-X11DIR=/usr/X11
-X11FONTDIR=${X11DIR}/lib/X11/fonts
+X11DIR=__PREFIX__
+X11FONTDIR=${X11DIR}/share/fonts
+FC_LOCKFILE=""
 
 # Are we caching system fonts or user fonts?
 system=0
@@ -187,17 +182,15 @@ setup_fontdirs() {
     IFS=$OIFS
 
     # Finally, update fontconfig's cache
-    if [[ -x ${X11DIR}/bin/fc-cache ]] ; then
-        echo "font_cache: Updating FC cache"
-        if [[ $system == 1 ]] ; then
-            ${X11DIR}/bin/fc-cache -s \
-                $([[ $force == 1 ]] && echo "-f -r") \
-                $([[ $verbose == 1 ]] && echo "-v")
-        else
-            ${X11DIR}/bin/fc-cache \
-                $([[ $force == 1 ]] && echo "-f -r") \
-                $([[ $verbose == 1 ]] && echo "-v")
-        fi
+    echo "font_cache: Updating FC cache"
+    if [[ $system == 1 ]] ; then
+        ${X11DIR}/bin/fc-cache -s \
+            $([[ $force == 1 ]] && echo "-f -r") \
+            $([[ $verbose == 1 ]] && echo "-v")
+    else
+        ${X11DIR}/bin/fc-cache \
+            $([[ $force == 1 ]] && echo "-f -r") \
+            $([[ $verbose == 1 ]] && echo "-v")
     fi
     echo "font_cache: Done"
 }
@@ -209,6 +202,11 @@ do_usage() {
     echo "                         (-n just pertains to XFont cache, not fontconfig)"
     echo "    -s, --system       : Cache system font dirs instead of user dirs"
     echo "    -v, --verbose      : Verbose Output"
+}
+
+cleanup() {
+    [[ -r "${FC_LOCKFILE}" ]] && rm -f "${FC_LOCKFILE}"
+    exit 1
 }
 
 while [[ $# -gt 0 ]] ; do
@@ -223,4 +221,52 @@ while [[ $# -gt 0 ]] ; do
     shift
 done
 
+if [[ $system == 1 ]] ; then
+    FC_LOCKFILE="${X11DIR}/var/run/font_cache.lock"
+elif [[ -w "${TMPDIR}" ]] ; then
+    FC_LOCKFILE="${TMPDIR}/font_cache.lock"
+elif [[ -w "/tmp" ]] ; then
+    FC_LOCKFILE="/tmp/font_cache.$UID.lock"
+else
+    FC_LOCKFILE="${HOME}/.font_cache.lock"
+fi
+
+if [[ -x /usr/bin/lockfile ]] ; then
+    if /usr/bin/lockfile -r 0 -l 240 -s 4 -! "${FC_LOCKFILE}" ; then
+            echo "font_cache is already running." >&2
+            echo "If you believe this to be erroneous, please remove ${FC_LOCKFILE}." >&2
+            exit 1
+    fi
+else
+    if [[ -r "${FC_LOCKFILE}" ]] ; then
+        read OLD_PID < "${FC_LOCKFILE}"
+        if kill -0 ${OLD_PID} >& /dev/null ; then
+            echo "font_cache is already running with PID ${OLD_PID}." >&2
+            echo "If you believe this to be erroneous, please remove ${FC_LOCKFILE}." >&2
+            exit 1
+        fi
+
+        echo "Removing stale ${FC_LOCKFILE}" >&2
+        rm -f "${FC_LOCKFILE}"
+    fi
+
+    echo $$ > "${FC_LOCKFILE}"
+
+    if [[ ! -r "${FC_LOCKFILE}" ]] ; then
+        echo "Unable to write to ${FC_LOCKFILE}." >&2
+        exit 1
+    fi
+
+    # Now make sure we didn't collide mid-air
+    read OLD_PID < "${FC_LOCKFILE}"
+    if [[ $$ != ${OLD_PID} ]] ; then
+        echo "font_cache is already running with PID ${OLD_PID}." >&2
+        exit 1
+    fi
+fi
+
+trap cleanup SIGINT SIGQUIT SIGABRT SIGTERM
+
 setup_fontdirs
+
+rm -f "${FC_LOCKFILE}"
