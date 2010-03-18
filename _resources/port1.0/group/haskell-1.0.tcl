@@ -62,8 +62,8 @@ proc haskell.setup {package version {compiler ghc}} {
     name                hs-[string tolower ${package}]
     version             ${version}
     categories          devel haskell
-    homepage            http://hackage.haskell.org
-    master_sites        ${homepage}/packages/archive/${package}/${version}
+    homepage            http://hackage.haskell.org/package/${package}
+    master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
     distname            ${package}-${version}
     depends_build       port:${compiler_config(port)}
     configure.cmd       runhaskell
@@ -90,7 +90,7 @@ proc haskell.setup {package version {compiler ghc}} {
 #    }
 
     livecheck.type      regex
-    livecheck.url       ${homepage}/cgi-bin/hackage-scripts/package/${package}
+    livecheck.url       http://hackage.haskell.org/cgi-bin/hackage-scripts/package/${package}
     livecheck.regex     /packages/archive/${package}/.*/${package}-(.*)\.tar\.gz
 }
 
