@@ -80,7 +80,7 @@ proc hocbinding.setup {framework version {source ""}} {
         pre-configure {
             set args ""
             foreach dep ${hocbinding.deps} {
-                append args " -d ${hocbinding.deps}"
+                append args " -d ${dep}"
             }
 
             system "cd [file dirname ${worksrcpath}] && \
