@@ -87,6 +87,13 @@ proc hocbinding.setup {framework version {source ""}} {
                 hoc-ifgen -f ${hocbinding.framework} -b ../binding-script.txt \
                     -a ../AdditionalCode ${args}"
         }
+
+        post-destroot {
+            set pidir ${prefix}/share/HOC
+            xinstall -d ${destroot}${pidir}
+            xinstall -m 0644 ${worksrcpath}/${hocbinding.framework}.pi \
+                ${destroot}${pidir}
+        }
     }
 
     universal_variant no
