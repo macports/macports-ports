@@ -19,4 +19,4 @@
 	perl -pi -e 's/-weak_framework /-Wl,-weak_framework,/g' Makefile
 
 	./build-helper.sh make      %N %v %r unsermake $UNSERMAKEFLAGS
-#apidox#./build-helper.sh apidox    %N %v %r make apidox all_libraries="$ALL_LIBRARIES"
+#apidox#./build-helper.sh apidox    %N %v %r unsermake $UNSERMAKEFLAGS apidox all_libraries="$ALL_LIBRARIES"

@@ -4,6 +4,7 @@
 	. ./environment-helper.sh
 
 	./build-helper.sh install        %N %v %r unsermake -p -j1 install DESTDIR=%d
+#apidox#./build-helper.sh install-apidox %N %v %r unsermake -p -j1 install-apidox DESTDIR=%d
 
 #fink
 #	cat <<END >%i/bin/kde-update-caches.sh
