@@ -4,7 +4,7 @@
 	. ./environment-helper.sh
 
 	./build-helper.sh install        %N %v %r unsermake -p -j1 install DESTDIR=%d
-#apidox#./build-helper.sh install-apidox %N %v %r make -j1 install-apidox install-apidox-recurse DESTDIR=%d
+#apidox#./build-helper.sh install-apidox %N %v %r unsermake -p -j1 install-apidox DESTDIR=%d
 
 	mkdir -p %i/share/doc/installed-packages
 	touch %i/share/doc/installed-packages/%N
