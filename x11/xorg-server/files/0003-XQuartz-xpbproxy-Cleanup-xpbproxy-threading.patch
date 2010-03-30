@@ -1,0 +1,347 @@
+From 088777f2b683d61d948cf346564a73b048da1ea2 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston <jeremyhu@freedesktop.org>
+Date: Sat, 20 Mar 2010 03:28:57 -0700
+Subject: [PATCH 03/14] XQuartz: xpbproxy: Cleanup xpbproxy threading
+
+Confine xpbproxy to a single thread
+Runs inside its own CFRunLoop
+
+Signed-off-by: Jeremy Huddleston <jeremyhu@freedesktop.org>
+(cherry picked from commit 69869d79f4c21eb385ff3c64bac649d93c7dd2ad)
+---
+ hw/xquartz/X11Application.m   |   25 +++++++++-
+ hw/xquartz/pbproxy/app-main.m |    8 +---
+ hw/xquartz/pbproxy/main.m     |   43 +++++------------
+ hw/xquartz/pbproxy/pbproxy.h  |    3 +-
+ hw/xquartz/pbproxy/x-input.m  |  100 +++++++++++++++++-----------------------
+ 5 files changed, 80 insertions(+), 99 deletions(-)
+
+diff --git xorg-server-1.7.6/hw/xquartz/X11Application.m xorg-server-1.7.6/hw/xquartz/X11Application.m
+index 3faa1cb..5406640 100644
+--- xorg-server-1.7.6/hw/xquartz/X11Application.m
++++ xorg-server-1.7.6/hw/xquartz/X11Application.m
+@@ -52,7 +52,7 @@
+ #include <Xplugin.h>
+ 
+ // pbproxy/pbproxy.h
+-extern BOOL xpbproxy_init (void);
++extern int xpbproxy_run (void);
+ 
+ #define DEFAULTS_FILE X11LIBDIR"/X11/xserver/Xquartz.plist"
+ 
+@@ -908,6 +908,26 @@ environment the next time you start X11?", @"Startup xinitrc dialog");
+     [X11App prefs_synchronize];
+ }
+ 
++static inline pthread_t create_thread(void *func, void *arg) {
++    pthread_attr_t attr;
++    pthread_t tid;
++    
++    pthread_attr_init(&attr);
++    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
++    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++    pthread_create(&tid, &attr, func, arg);
++    pthread_attr_destroy(&attr);
++    
++    return tid;
++}
++
++static void *xpbproxy_x_thread(void *args) {
++    xpbproxy_run();
++
++    fprintf(stderr, "xpbproxy thread is terminating unexpectedly.\n");
++    return NULL;
++}
++
+ void X11ApplicationMain (int argc, char **argv, char **envp) {
+     NSAutoreleasePool *pool;
+ 
+@@ -962,8 +982,7 @@ void X11ApplicationMain (int argc, char **argv, char **envp) {
+      */
+     check_xinitrc();
+     
+-    if(!xpbproxy_init())
+-        fprintf(stderr, "Error initializing xpbproxy\n");
++    create_thread(xpbproxy_x_thread, NULL);
+ 
+ #if XQUARTZ_SPARKLE
+     [[X11App controller] setup_sparkle];
+diff --git xorg-server-1.7.6/hw/xquartz/pbproxy/app-main.m xorg-server-1.7.6/hw/xquartz/pbproxy/app-main.m
+index f3f683a..b30dfb8 100644
+--- xorg-server-1.7.6/hw/xquartz/pbproxy/app-main.m
++++ xorg-server-1.7.6/hw/xquartz/pbproxy/app-main.m
+@@ -84,16 +84,10 @@ int main (int argc, const char *argv[]) {
+     
+     app_prefs_domain_cfstr = CFStringCreateWithCString(NULL, app_prefs_domain, kCFStringEncodingUTF8);
+     
+-    if(!xpbproxy_init())
+-        return EXIT_FAILURE;
+-    
+     signal (SIGINT, signal_handler);
+     signal (SIGTERM, signal_handler);
+     signal (SIGHUP, signal_handler);
+     signal (SIGPIPE, SIG_IGN);
+ 
+-    [NSApplication sharedApplication];
+-    [NSApp run];
+-    
+-    return EXIT_SUCCESS;
++    return xpbproxy_run();
+ }
+diff --git xorg-server-1.7.6/hw/xquartz/pbproxy/main.m xorg-server-1.7.6/hw/xquartz/pbproxy/main.m
+index d26b1b1..560cf01 100644
+--- xorg-server-1.7.6/hw/xquartz/pbproxy/main.m
++++ xorg-server-1.7.6/hw/xquartz/pbproxy/main.m
+@@ -82,25 +82,12 @@ static int x_error_handler (Display *dpy, XErrorEvent *errevent) {
+     return 0;
+ }
+ 
+-static inline pthread_t create_thread(void *func, void *arg) {
+-    pthread_attr_t attr;
+-    pthread_t tid;
+-    
+-    pthread_attr_init(&attr);
+-    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+-    pthread_create(&tid, &attr, func, arg);
+-    pthread_attr_destroy(&attr);
+-    
+-    return tid;
+-}
+-
+-static void *xpbproxy_x_thread(void *args) {
++int xpbproxy_run (void) {
+     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+     size_t i;
+-
++    
+     wait_for_server_init();
+-
++    
+     for(i=0, xpbproxy_dpy=NULL; !xpbproxy_dpy && i<5; i++) {
+         xpbproxy_dpy = XOpenDisplay(NULL);
+         
+@@ -108,7 +95,7 @@ static void *xpbproxy_x_thread(void *args) {
+             char _display[32];
+             snprintf(_display, sizeof(_display), ":%s", display);
+             setenv("DISPLAY", _display, TRUE);
+-
++            
+             xpbproxy_dpy=XOpenDisplay(_display);
+         }
+         if(!xpbproxy_dpy)
+@@ -118,7 +105,7 @@ static void *xpbproxy_x_thread(void *args) {
+     if (xpbproxy_dpy == NULL) {
+         fprintf (stderr, "xpbproxy: can't open default display\n");
+         [pool release];
+-        return NULL;
++        return EXIT_FAILURE;
+     }
+     
+     XSetIOErrorHandler (x_io_error_handler);
+@@ -128,11 +115,11 @@ static void *xpbproxy_x_thread(void *args) {
+                                  &xpbproxy_apple_wm_error_base)) {
+         fprintf (stderr, "xpbproxy: can't open AppleWM server extension\n");
+         [pool release];
+-        return NULL;
++        return EXIT_FAILURE;
+     }
+-    
++
+     xpbproxy_have_xfixes = XFixesQueryExtension(xpbproxy_dpy, &xpbproxy_xfixes_event_base, &xpbproxy_xfixes_error_base);
+-    
++
+     XAppleWMSelectInput (xpbproxy_dpy, AppleWMActivationNotifyMask |
+                          AppleWMPasteboardNotifyMask);
+     
+@@ -140,18 +127,14 @@ static void *xpbproxy_x_thread(void *args) {
+     
+     if(!xpbproxy_input_register()) {
+         [pool release];
+-        return NULL;
++        return EXIT_FAILURE;
+     }
+-
++    
+     [pool release];
+- 
+-    xpbproxy_input_loop();
+-    return NULL;
+-}
++    
++    CFRunLoopRun();
+ 
+-BOOL xpbproxy_init (void) {
+-    create_thread(xpbproxy_x_thread, NULL);
+-    return TRUE;
++    return EXIT_SUCCESS;
+ }
+ 
+ id xpbproxy_selection_object (void) {
+diff --git xorg-server-1.7.6/hw/xquartz/pbproxy/pbproxy.h xorg-server-1.7.6/hw/xquartz/pbproxy/pbproxy.h
+index a6798ef..013f981 100644
+--- xorg-server-1.7.6/hw/xquartz/pbproxy/pbproxy.h
++++ xorg-server-1.7.6/hw/xquartz/pbproxy/pbproxy.h
+@@ -67,7 +67,7 @@ extern void xpbproxy_set_is_active (BOOL state);
+ extern BOOL xpbproxy_get_is_active (void);
+ extern id xpbproxy_selection_object (void);
+ extern Time xpbproxy_current_timestamp (void);
+-extern BOOL xpbproxy_init (void);
++extern int xpbproxy_run (void);
+ 
+ extern Display *xpbproxy_dpy;
+ extern int xpbproxy_apple_wm_event_base, xpbproxy_apple_wm_error_base;
+@@ -76,7 +76,6 @@ extern BOOL xpbproxy_have_xfixes;
+ 
+ /* from x-input.m */
+ extern BOOL xpbproxy_input_register (void);
+-extern void xpbproxy_input_loop();
+ 
+ #ifdef DEBUG
+ /* BEWARE: this can cause a string memory leak, according to the leaks program. */
+diff --git xorg-server-1.7.6/hw/xquartz/pbproxy/x-input.m xorg-server-1.7.6/hw/xquartz/pbproxy/x-input.m
+index 6ba30c6..405ba3c 100644
+--- xorg-server-1.7.6/hw/xquartz/pbproxy/x-input.m
++++ xorg-server-1.7.6/hw/xquartz/pbproxy/x-input.m
+@@ -39,17 +39,12 @@
+ 
+ #include <unistd.h>
+ 
+-#include <pthread.h>
+-
+ static CFRunLoopSourceRef xpbproxy_dpy_source;
+ 
+ #ifdef STANDALONE_XPBPROXY
+ BOOL xpbproxy_prefs_reload = NO;
+ #endif
+ 
+-static pthread_mutex_t xpbproxy_dpy_rdy_lock = PTHREAD_MUTEX_INITIALIZER;
+-static pthread_cond_t xpbproxy_dpy_rdy_cond = PTHREAD_COND_INITIALIZER;
+-
+ /* Timestamp when the X server last told us it's active */
+ static Time last_activation_time;
+ 
+@@ -88,58 +83,51 @@ static void x_event_apple_wm_notify(XAppleWMNotifyEvent *e) {
+     }
+ }
+ 
+-void xpbproxy_input_loop() {
+-    pthread_mutex_lock(&xpbproxy_dpy_rdy_lock);
+-    while(true) {
+-        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
++static void xpbproxy_process_xevents(void) {
++    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
++    
++    if(pool == nil) {
++        fprintf(stderr, "unable to allocate/init auto release pool!\n");
++        return;
++    }
++    
++    while (XPending(xpbproxy_dpy) != 0) {
++        XEvent e;
+         
+-        if(pool == nil) {
+-            fprintf(stderr, "unable to allocate/init auto release pool!\n");
+-            break;
+-        }
++        XNextEvent (xpbproxy_dpy, &e);
+         
+-        while (XPending(xpbproxy_dpy) != 0) {
+-            XEvent e;
+-            
+-            pthread_mutex_unlock(&xpbproxy_dpy_rdy_lock);
+-            XNextEvent (xpbproxy_dpy, &e);
+-            
+-            switch (e.type) {                
+-                case SelectionClear:
+-                    if([xpbproxy_selection_object() is_active])
+-                        [xpbproxy_selection_object () clear_event:&e.xselectionclear];
+-                    break;
+-                    
+-                case SelectionRequest:
+-                    [xpbproxy_selection_object () request_event:&e.xselectionrequest];
+-                    break;
+-                    
+-                case SelectionNotify:
+-                    [xpbproxy_selection_object () notify_event:&e.xselection];
+-                    break;
+-                    
+-                case PropertyNotify:
+-                    [xpbproxy_selection_object () property_event:&e.xproperty];
+-                    break;
+-                    
+-                default:
+-                    if(e.type >= xpbproxy_apple_wm_event_base &&
+-                       e.type < xpbproxy_apple_wm_event_base + AppleWMNumberEvents) {
+-                        x_event_apple_wm_notify((XAppleWMNotifyEvent *) &e);
+-                    } else if(e.type == xpbproxy_xfixes_event_base + XFixesSelectionNotify) {
+-                        [xpbproxy_selection_object() xfixes_selection_notify:(XFixesSelectionNotifyEvent *)&e];
+-                    }
+-                    break;
+-            }
+-            
+-            XFlush(xpbproxy_dpy);
+-            pthread_mutex_lock(&xpbproxy_dpy_rdy_lock);
++        switch (e.type) {                
++            case SelectionClear:
++                if([xpbproxy_selection_object() is_active])
++                    [xpbproxy_selection_object () clear_event:&e.xselectionclear];
++                break;
++                
++            case SelectionRequest:
++                [xpbproxy_selection_object () request_event:&e.xselectionrequest];
++                break;
++                
++            case SelectionNotify:
++                [xpbproxy_selection_object () notify_event:&e.xselection];
++                break;
++                
++            case PropertyNotify:
++                [xpbproxy_selection_object () property_event:&e.xproperty];
++                break;
++                
++            default:
++                if(e.type >= xpbproxy_apple_wm_event_base &&
++                   e.type < xpbproxy_apple_wm_event_base + AppleWMNumberEvents) {
++                    x_event_apple_wm_notify((XAppleWMNotifyEvent *) &e);
++                } else if(e.type == xpbproxy_xfixes_event_base + XFixesSelectionNotify) {
++                    [xpbproxy_selection_object() xfixes_selection_notify:(XFixesSelectionNotifyEvent *)&e];
++                }
++                break;
+         }
+         
+-        [pool release];
+-        
+-        pthread_cond_wait(&xpbproxy_dpy_rdy_cond, &xpbproxy_dpy_rdy_lock);
++        XFlush(xpbproxy_dpy);
+     }
++    
++    [pool release];
+ }
+ 
+ static BOOL add_input_socket (int sock, CFOptionFlags callback_types,
+@@ -161,7 +149,7 @@ static BOOL add_input_socket (int sock, CFOptionFlags callback_types,
+     if (*cf_source == NULL)
+         return FALSE;
+     
+-    CFRunLoopAddSource (CFRunLoopGetMain (),
++    CFRunLoopAddSource (CFRunLoopGetCurrent (),
+                         *cf_source, kCFRunLoopDefaultMode);
+     return TRUE;
+ }
+@@ -175,10 +163,8 @@ static void x_input_callback (CFSocketRef sock, CFSocketCallBackType type,
+         xpbproxy_prefs_reload = NO;
+     }
+ #endif
+-
+-    pthread_mutex_lock(&xpbproxy_dpy_rdy_lock);
+-    pthread_cond_broadcast(&xpbproxy_dpy_rdy_cond);
+-    pthread_mutex_unlock(&xpbproxy_dpy_rdy_lock);
++    
++    xpbproxy_process_xevents();
+ }
+ 
+ BOOL xpbproxy_input_register(void) {
+-- 
+1.7.0.2
+
