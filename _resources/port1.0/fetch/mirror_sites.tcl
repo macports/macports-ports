@@ -163,7 +163,7 @@ set portfetch::mirror_sites::sites(gnome) {
     http://www.gtlib.cc.gatech.edu/pub/gnome/
     http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     http://fr2.rpmfind.net/linux/gnome.org/
-    http://mirror.aarnet.edu.au/pub/GNOME/
+    http://mirror.aarnet.edu.au/pub/gnome/
     http://ftp.unina.it/pub/linux/GNOME/
     http://ftp.acc.umu.se/pub/GNOME/
     http://ftp.belnet.be/mirror/ftp.gnome.org/
