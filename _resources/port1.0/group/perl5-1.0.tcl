@@ -87,8 +87,6 @@ proc perl5.setup {module vers {cpandir ""}} {
     dist_subdir         perl5
 
     depends_lib     path:[string range ${perl5.bin} [string length ${prefix}/] end]:perl5
-    
-    universal_variant   no
 
     configure.cmd       ${perl5.bin}
     configure.env       PERL_AUTOINSTALL=--skipdeps
