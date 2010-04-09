@@ -60,11 +60,13 @@ pre-destroot	{
 
 options         python.link_binaries
 default python.link_binaries yes
+options         python.link_binaries_suffix
+default python.link_binaries_suffix -${python.branch}
 post-destroot {
     if {${python.link_binaries}} {
         foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
             if {[catch {file type "${destroot}${prefix}/bin/${bin}-${python.branch}"}]} {
-                ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}-${python.branch}"
+                ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
             }
         }
     }
