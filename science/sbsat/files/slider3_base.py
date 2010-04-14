@@ -52,20 +52,20 @@ def slider3(out_type, size, sat, offset):
 
 def slider3_sat(out_type, size, offset):
 	s = size/20
-	start1 = [1, 2*s+3, 2*s+1, size/2-1-3*s, size/2-1, size/2+1+offset]
-	start2 = [1, 2*s-1, 2*s+2, size/2-1-4*s, size/2-1-2*s, size/2-1-s, size/2+1+offset]
+	start1 = [1, 2*s+3, 2*s+1, size/2-1-3*s, size/2-1, size/2+1]
+	start2 = [1, 2*s-1, 2*s+2, size/2-1-4*s, size/2-1-2*s, size/2-1-s, size/2+1]
 	'''
 	print >> sys.stderr, start1
 	print >> sys.stderr, start2
 	'''
-	print "p bdd %d %d" % (size+offset,size)
+	print "p bdd %d %d" % (size+offset,size+2*offset)
 	print "; automatically generated SAT slider3 with size=%d " % size
 	print "; Disclaimer: no formal analysis was done to verify SAT and UNSAT"
 
 	#first function
 	print "#define add_state1(1, 2, 3, 5, 4, 6)"
 	print "#equ(xor(1, and(-3, 5), nand(6, 4)), ite(2, or(5, -6), -5)))"
-	for i in range(0, size/2):
+	for i in range(0, size/2+offset):
 		sys.stdout.write("add_state1")
 		print tuple(start1)
 		for item in range(len(start1)):
@@ -76,7 +76,7 @@ def slider3_sat(out_type, size, offset):
 	print("#xor(-1, xor(3, and(-4, 5), 4), equ(6, 2))")
 	print("#define add_state3(1, 2, 3, 4, 5, 6)")
 	print("#xor(-1, xor(3, and(-4, 5), 4), equ(6, 2))")
-	for i in range(0, size-size/2):
+	for i in range(0, size-size/2+offset):
 		test = (i%2)+2
 		sys.stdout.write("add_state%d" % test)
 		print tuple(start2[0:5]+start2[6:])
