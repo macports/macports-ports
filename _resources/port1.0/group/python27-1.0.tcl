@@ -58,10 +58,9 @@ pre-destroot	{
 	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
 }
 
-options         python.link_binaries
+options         python.link_binaries python.link_binaries_suffix
 default python.link_binaries yes
-options         python.link_binaries_suffix
-default python.link_binaries_suffix -${python.branch}
+default python.link_binaries_suffix {-${python.branch}}
 post-destroot {
     if {${python.link_binaries}} {
         foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
