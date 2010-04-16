@@ -57,3 +57,16 @@ destroot.destdir	--prefix=${python.prefix} --root=${destroot}
 pre-destroot	{
 	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
 }
+
+options         python.link_binaries python.link_binaries_suffix
+default python.link_binaries yes
+default python.link_binaries_suffix {-${python.branch}}
+post-destroot {
+    if {${python.link_binaries}} {
+        foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
+            if {[catch {file type "${destroot}${prefix}/bin/${bin}-${python.branch}"}]} {
+                ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
+            }
+        }
+    }
+}
