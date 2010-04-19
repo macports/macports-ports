@@ -52,8 +52,8 @@ def slider3(out_type, size, sat, offset):
 
 def slider3_sat(out_type, size, offset):
 	s = size/20
-	start1 = [1, 2*s+3, 2*s+1, size/2-1-3*s, size/2-1, size/2+1]
-	start2 = [1, 2*s-1, 2*s+2, size/2-1-4*s, size/2-1-2*s, size/2-1-s, size/2+1]
+	start1 = [1, 2*s+3, 2*s+1, size/2-1-3*s, size/2-1, size/2]
+	start2 = [1, 2*s-1, 2*s+2, size/2-1-4*s, size/2-1-2*s, size/2-1-s, size/2]
 	'''
 	print >> sys.stderr, start1
 	print >> sys.stderr, start2
@@ -75,7 +75,7 @@ def slider3_sat(out_type, size, offset):
 	print("#define add_state2(1, 2, 3, 4, 5, 6)")
 	print("#xor(-1, xor(3, and(-4, 5), 4), equ(6, 2))")
 	print("#define add_state3(1, 2, 3, 4, 5, 6)")
-	print("#xor(-1, xor(3, and(-4, 5), 4), equ(6, 2))")
+	print("#not(xor(-1, xor(3, and(-4, 5), 4), equ(6, 2)))")
 	for i in range(0, size-size/2+offset):
 		test = (i%2)+2
 		sys.stdout.write("add_state%d" % test)
