@@ -38,7 +38,7 @@
 #
 # base/ provides stuff prefixed with xcode without a dot:
 # - extraction of xcode version to $xcodeversion
-# - extraction of xcode/pbx command line tool to $xcodebuildcmd
+# - extraction of xcodebuild command line tool to $xcodebuildcmd
 #
 # This group provides:
 #  categories set to aqua
@@ -46,9 +46,8 @@
 #  use_configure set to no
 #  build procedure
 #  destroot procedure
-#  build.cmd set to $xcodebuildcmd
+#  build.type set to xcode
 #  build.args set to build
-#  destroot.cmd set to $xcodebuildcmd
 #  destroot.args set to install
 #
 # build and destroot parameters use the following parameters:
@@ -87,11 +86,11 @@
 default categories          aqua
 default platforms           macosx
 default use_configure       no
-default build.cmd           $xcodebuildcmd
+# change build.type to 'xcode' when 1.9 is released
+default build.type          pbx
 default build.args          build
 default build.pre_args      {}
 default build.target        ""
-default destroot.cmd        $xcodebuildcmd
 default destroot.args       install
 default destroot.pre_args   {}
 default destroot.target     ""
@@ -130,7 +129,7 @@ proc xcode::get_project_path {} {
 # fix resource dependencies (with Xcode >= 2.1).
 proc xcode::fix_resource_dependencies {} {
     global xcodeversion xcode.configuration
-    if {$xcodeversion == "2.1"} {
+    if {[rpm-vercomp $xcodeversion 2.1] >= 0} {
         set build_path "[xcode::get_project_path]/build/"
         set config_build_path "[xcode::get_project_path]/build/${xcode.configuration}/"
         if {[file isdirectory ${config_build_path}]} {
@@ -148,7 +147,7 @@ proc xcode::fix_resource_dependencies {} {
 proc xcode::get_configuration_arg { style } {
     global xcodeversion
     if {$style != ""} {
-        if {$xcodeversion == "2.1"} {
+        if {[rpm-vercomp $xcodeversion 2.1] >= 0} {
             return "-configuration $style"
         } else {
             return "-buildstyle $style"
@@ -191,7 +190,7 @@ proc xcode::setup_command_line {command args settings} {
 
     # Check that xcode is installed.
     if {[set ${command}.cmd] == "none"} {
-        return -code error "This port requires 'pbxbuild/xcodebuild', which \
+        return -code error "This port requires 'xcodebuild', which \
     couldn't be found (not Mac OS X?)"
     }
 
