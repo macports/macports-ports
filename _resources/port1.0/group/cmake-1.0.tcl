@@ -59,7 +59,9 @@ pre-configure {
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
 }
 configure.universal_args-delete --disable-dependency-tracking
-if {${os.arch} == "powerpc" && ${os.major} == "8"} {
+if {[info exists configure.sdkroot] && ${configure.sdkroot} != ""} {
+    configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
+} elseif {${os.arch} == "powerpc" && ${os.major} == "8"} {
     configure.universal_args-append -DCMAKE_OSX_SYSROOT="${developer_dir}/SDKs/MacOSX10.4u.sdk"
 }
 
