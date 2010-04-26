@@ -247,7 +247,7 @@ proc xcode::get_build_args {args} {
     global tcl_platform
     global configure.universal_archs configure.build_arch macosx_deployment_target
     global os.major os.arch
-    global developer_dir
+    global developer_dir configure.sdkroot
 
     set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
 
@@ -262,10 +262,14 @@ proc xcode::get_build_args {args} {
     }
 
     # SDKROOT
-    if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
-        append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
+    if {[info exists configure.sdkroot]} {
+        append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
     } else {
-        append xcode_build_args " SDKROOT="
+        if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
+            append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
+        } else {
+            append xcode_build_args " SDKROOT="
+        }
     }
     
     return $xcode_build_args
