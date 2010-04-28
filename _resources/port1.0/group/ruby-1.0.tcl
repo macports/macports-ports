@@ -325,6 +325,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 		}
 	}
 
+    if {$type != "gnu"} {
+        configure.universal_args-delete  --disable-dependency-tracking
+	}
+
 	post-destroot {
 		# Install documentation files (if specified)
 		if {[llength ${ruby.docs}] > 0} {
