@@ -47,12 +47,12 @@ proc ruby.extract_config {var {default ""}} {
 	return $val
 }
 
-set ruby.version	[ruby.extract_config ruby_version]
-set ruby.arch		[ruby.extract_config arch ${os.platform}]
-
+options ruby.version ruby.arch ruby.lib ruby.archlib
+default ruby.version	{[ruby.extract_config ruby_version]}
+default ruby.arch		{[ruby.extract_config arch "${os.arch}-${os.platform}${os.major}"]}
 # define installation libraries as vendor location
-set ruby.lib		[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.version}]
-set ruby.archlib	[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]
+default ruby.lib		{[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.version}]}
+default ruby.archlib	{[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]}
 
 set ruby.module		""
 set ruby.filename	""
@@ -65,8 +65,7 @@ set ruby.srcdir		""
 proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {implementation "ruby"}} {
 	global destroot prefix worksrcpath os.platform
 	global ruby.bin ruby.rdoc ruby.gem
-	global ruby.version 
-	global ruby.lib ruby.archlib
+	global ruby.version ruby.lib
 	global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
 
 	if {${implementation} eq "ruby19"} {
@@ -81,12 +80,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 		ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19 possible)"
 		return -code error "ruby.setup failed"
 	}
-
-	# re-define variables to pick up possible implemantation change
-	set ruby.version	[ruby.extract_config ruby_version]
-	set ruby.arch		[ruby.extract_config arch ${os.platform}]
-	set ruby.lib		[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.version}]
-	set ruby.archlib	[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]
 
 	# define ruby global names and lists
 	# check if module is a list or string
