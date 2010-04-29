@@ -47,12 +47,13 @@ proc perl5.extract_config {var {default ""}} {
     return $val
 }
 
-set perl5.version [perl5.extract_config version]
-set perl5.arch [perl5.extract_config archname ${os.platform}]
+options perl5.version perl5.arch perl5.lib perl5.archlib
+default perl5.version {[perl5.extract_config version]}
+default perl5.arch {[perl5.extract_config archname ${os.platform}]}
 
 # define installation libraries as vendor location
-set perl5.lib ${prefix}/lib/perl5/vendor_perl/${perl5.version}
-set perl5.archlib ${perl5.lib}/${perl5.arch}
+default perl5.lib {${prefix}/lib/perl5/vendor_perl/${perl5.version}}
+default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
 # define these empty initially, they are set by perl5.setup arguments
 set perl5.module ""
