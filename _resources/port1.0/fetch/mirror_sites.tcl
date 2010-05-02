@@ -442,10 +442,7 @@ set portfetch::mirror_sites::sites(tex_ctan) {
 
 set portfetch::mirror_sites::sites(trolltech) {
     ftp://ftp.trolltech.com/qt/source/:nosubdir
-    http://wftp.tu-chemnitz.de/pub/Qt/qt/source/:nosubdir
     http://ftp.heanet.ie/mirrors/ftp.trolltech.com/pub/qt/source/:nosubdir
-    http://mirror.aarnet.edu.au/pub/qt/source/:nosubdir
-    http://ftp.ntua.gr/pub/X11/Qt/qt/source/:nosubdir
     ftp://ftp.informatik.hu-berlin.de/pub1/Mirrors/ftp.troll.no/QT/qt/source/:nosubdir
 }
 
