@@ -46,8 +46,10 @@ dist_subdir		python
 
 depends_lib		port:python26
 
-# we want the default universal variant to be added, so no 'use_configure no'
-configure       {}
+# we want the default universal variant added, so use a bad hack for 1.8
+set xcode.project ""
+use_configure   no
+universal_variant yes
 
 build.cmd		${python.bin} setup.py --no-user-cfg
 build.target	build
