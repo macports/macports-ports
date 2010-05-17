@@ -64,10 +64,14 @@ pre-build {
             build.env-append CFLAGS="${configure.cc_archflags}" \
                              OBJCFLAGS="${configure.objc_archflags}" \
                              CXXFLAGS="${configure.cxx_archflags}" \
-                             LDFLAGS="${configure.ld_archflags}" \
                              FFLAGS="${configure.f77_archflags}" \
                              F90FLAGS="${configure.f90_archflags}" \
                              FCFLAGS="${configure.fc_archflags}"
+            if {[info exists configure.ld_archflags]} {
+                build.env-append LDFLAGS="${configure.ld_archflags}"
+            } else {
+                build.env-append LDFLAGS="${configure.cc_archflags}"
+            }
         }
     }
 }
