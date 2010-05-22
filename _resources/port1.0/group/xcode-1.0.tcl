@@ -86,6 +86,7 @@
 default categories          aqua
 default platforms           macosx
 default use_configure       no
+default universal_variant   yes
 # change build.type to 'xcode' when 1.9 is released
 default build.type          pbx
 default build.args          build
