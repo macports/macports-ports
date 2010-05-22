@@ -256,7 +256,7 @@ proc xcode::get_build_args {args} {
     append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
 
     # ARCHS
-    if {[variant_isset universal]} {
+    if {[variant_exists universal] && [variant_isset universal]} {
         append xcode_build_args " ARCHS=\"${configure.universal_archs}\""
     } else {
         append xcode_build_args " ARCHS=${configure.build_arch}"
@@ -266,7 +266,7 @@ proc xcode::get_build_args {args} {
     if {[info exists configure.sdkroot]} {
         append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
     } else {
-        if {[variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
+        if {[variant_exists universal] && [variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
             append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
         } else {
             append xcode_build_args " SDKROOT="
