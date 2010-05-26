@@ -69,5 +69,5 @@ post-destroot {
 }
 
 post-activate {
-    system "octave --eval \"pkg rebuild\""
+    system "${prefix}/bin/octave --eval \"pkg rebuild\""
 }
