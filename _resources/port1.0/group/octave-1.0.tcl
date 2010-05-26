@@ -56,6 +56,9 @@ proc octave.setup {module version} {
     
     depends_lib                 port:octave
     
+    # octave is not universal
+    universal_variant           no
+    
     livecheck.type              regex
     livecheck.url               http://octave.sourceforge.net/packages.php
     livecheck.regex             http://downloads\\.sourceforge\\.net/octave/${octave.module}-(\\d+(\\.\\d+)*)\\.tar
