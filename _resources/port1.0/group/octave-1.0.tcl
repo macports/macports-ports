@@ -50,7 +50,7 @@ proc octave.setup {module version} {
     name                        octave-${module}
     version                     ${version}
     categories                  math science
-    homepage                    http://octave.sourceforge.net/
+    homepage                    http://octave.sourceforge.net/${octave.module}/
     master_sites                sourceforge:octave
     distname                    ${octave.module}-${version}
     
