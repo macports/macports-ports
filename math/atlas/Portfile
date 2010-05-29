@@ -1,11 +1,12 @@
 # $Id$
 
 PortSystem          1.0
+PortGroup           muniversal 1.0
 
 categories          math
 name                atlas
 version             3.8.3
-revision            1
+revision            2
 
 # additional versions
 set lapackversion   3.2.1
@@ -47,16 +48,32 @@ use_parallel_build  no
 build.target        build
 build.dir           ${workpath}/${name}-${version}/build
 
+variant gcc43 conflicts gcc42 conflicts universal {}
+variant gcc42 conflicts gcc43 conflicts universal {}
+
+if { [variant_isset gcc42] } {
+  set gccversion    4.2
+} elseif { [variant_isset gcc43] } {
+  set gccversion    4.3
+} else {
+  set gccversion    4.4
+}
+
+set gccnumber       [join [split ${gccversion} .] ""]
+
 destroot.dir        ${build.dir}
 destroot.destdir    DESTDIR=${destroot}${prefix}
-depends_lib         port:gcc43 \
+depends_lib         port:gcc${gccnumber} \
                     port:bzip2 \
                     port:gzip
 
-universal_variant   no
+configure.compiler  macports-gcc-${gccversion}
 
-# Set fortran compiler flags
-set myf77           ${prefix}/bin/gfortran-mp-4.3
+if { ${os.arch}=="i386" } {
+    set universal_archs_supported { i386 x86_64 }
+} else {
+    set universal_archs_supported { ppc  ppc64 }
+}
 
 if {${build_arch} == "x86_64" || ${build_arch} == "ppc64" } {
   set my_arch 64
@@ -64,22 +81,33 @@ if {${build_arch} == "x86_64" || ${build_arch} == "ppc64" } {
   set my_arch 32
 }
 
-configure.args      -C xc ${prefix}/bin/gcc-mp-4.3 \
-                    -C gc ${prefix}/bin/gcc-mp-4.3 \
-                    -C if ${myf77} \
-                    -C ic ${prefix}/bin/gcc-mp-4.3 \
-                    -C dm ${prefix}/bin/gcc-mp-4.3 \
-                    -C sm ${prefix}/bin/gcc-mp-4.3 \
-                    -C dk ${prefix}/bin/gcc-mp-4.3 \
-                    -C sk ${prefix}/bin/gcc-mp-4.3 \
-                    --cc=${prefix}/bin/gcc-mp-4.3 \
+configure.args      -C xc ${configure.cc} \
+                    -C gc ${configure.cc} \
+                    -C if ${configure.f77} \
+                    -C ic ${configure.cc} \
+                    -C dm ${configure.cc} \
+                    -C sm ${configure.cc} \
+                    -C dk ${configure.cc} \
+                    -C sk ${configure.cc} \
+                    --cc=${configure.cc} \
                     -b ${my_arch} \
                     -Fa alg -fPIC 
                     
-configure.compiler  macports-gcc-4.3
-configure.cc        ${prefix}/bin/gcc-mp-4.3  
-configure.cxx       ${prefix}/bin/g++-mp-4.3
-build.env-append    "CC=${prefix}/bin/gcc-mp-4.3 CXX=${prefix}/bin/g++-mp-4.3"
+if { [variant_isset universal] } {
+    configure.universal_args-delete --disable-dependency-tracking
+    configure.args-delete -b ${my_arch}
+    lappend merger_configure_args(ppc)     -b 32
+    lappend merger_configure_args(ppc64)   -b 64
+    lappend merger_configure_args(i386)    -b 32
+    lappend merger_configure_args(x86_64)  -b 64
+} else {
+    lappend merger_configure_args(ppc)
+    lappend merger_configure_args(ppc64)
+    lappend merger_configure_args(i386)
+    lappend merger_configure_args(x86_64)
+}
+
+build.env-append    "CC=${configure.cc} CXX=${configure.cxx}"
         
 
 # we are configuring from the build directory
@@ -87,7 +115,7 @@ configure.dir       ${workpath}/${name}-${version}/build
 configure.cmd       ../configure
 
 
-# change the default compilers to those of gcc43 and make into shared library
+# change the default compilers to those of gcc and make into shared library
 extract {
     # extract atlas and move to a consistent working directory name
     system "cd ${workpath} && bunzip2 -dc ${distpath}/${atlasdist} | \
@@ -103,9 +131,15 @@ post-patch {
     reinplace "s|__MACPORTS_GCC__|${configure.cc}|g" ${workpath}/${name}-${version}/CONFIG/src/SpewMakeInc.c
 }
 
-
 pre-configure {
-    reinplace "s|cc=gcc|cc=${prefix}/bin/gcc-mp-4.3|g" ${worksrcpath}/configure
+    if { [variant_isset universal] } {
+        foreach arch ${universal_archs_to_use} {
+            copy ${workpath}/${name}-${version} ${workpath}/${name}-${version}-${arch}
+            copy ${workpath}/${lapackname}-${lapackversion} ${workpath}/${lapackname}-${lapackversion}-${arch}
+        }
+    }
+
+    reinplace "s|cc=gcc|cc=${configure.cc}|g" ${worksrcpath}/configure
     reinplace "s|-no-cpp-precomp||g" ${workpath}/${name}-${version}/CONFIG/src/atlcomp.txt
     
     # Get some system specific variables for maximum optimization
@@ -117,17 +151,31 @@ pre-configure {
     } else {
       configure.args-append -D c -DPentiumCPS=${cpufreq}
     }
+
+    if { [variant_isset universal] } {
+        set archs ${universal_archs_to_use}
+    } else {
+        set archs ${build_arch}
+    }
+
+    foreach arch ${archs} {
  
     # first do a 'fake configure' of atlas so we get optimized lapack libraries
     ui_debug "performing fake configure of atlas for optimized lapack"
     # atlas docs: 3.1.2
-    set atlas_path ${workpath}/${name}-${version}
+    if { ! [variant_isset universal] } {
+        set atlas_path  ${workpath}/${name}-${version}
+        set lapack_path ${workpath}/${lapackname}-${lapackversion}
+    } else {
+        set atlas_path ${workpath}/${name}-${version}-${arch}
+        set lapack_path ${workpath}/${lapackname}-${lapackversion}-${arch}
+    }
     ui_debug "Clean out old temp directory if exists"
     file delete -force ${atlas_path}/temp
     file mkdir ${atlas_path}/temp
-    ui_debug "Assembled Command: '${configure.cmd} ${configure.args}"
+    ui_debug "Assembled Command: '${configure.cmd} ${configure.args} $merger_configure_args(${arch})"
     system "cd ${atlas_path}/temp && \
-            ${configure.cmd} ${configure.args}"
+            ${configure.cmd} ${configure.args} $merger_configure_args(${arch})"
 
     # Get the F77FLAGS
     set atlas_f77    [join [lrange [split [exec grep "F77 = " $atlas_path/temp/Make.inc     ] =] 1 end] =]
@@ -140,88 +188,138 @@ pre-configure {
     file delete -force ${atlas_path}/temp
 
     # compile lapack
-    system "cd ${workpath}/${lapackname}-${lapackversion} && \
+    system "cd ${lapack_path} && \
             cp INSTALL/make.inc.gfortran make.inc"
     reinplace "s|gfortran|${atlas_f77}|" \
-           ${workpath}/${lapackname}-${lapackversion}/make.inc
+           ${lapack_path}/make.inc
     reinplace "s|OPTS     = -O2|OPTS = ${atlas_fflags}|" \
-           ${workpath}/${lapackname}-${lapackversion}/make.inc
+           ${lapack_path}/make.inc
       
-    reinplace "s|NOOPT    = -O0|NOOPT = -O2 -m${my_arch}|" \
-           ${workpath}/${lapackname}-${lapackversion}/make.inc
+    if { ! [variant_isset universal] } {
+        reinplace "s|NOOPT    = -O0|NOOPT = -O2 -m${my_arch}|" \
+               ${lapack_path}/make.inc
+    } else {
+        if { ${arch}=="i386" || ${arch}=="ppc" } {
+            reinplace "s|NOOPT    = -O0|NOOPT = -O2 -m32|" \
+                   ${lapack_path}/make.inc
+        } else {
+            reinplace "s|NOOPT    = -O0|NOOPT = -O2 -m64|" \
+                   ${lapack_path}/make.inc
+        }
+    }
 
     reinplace "s|PLAT = _LINUX|PLAT = _darwin|" \
-           ${workpath}/${lapackname}-${lapackversion}/make.inc
+           ${lapack_path}/make.inc
 
     reinplace "s|LOADOPTS =|LOADOPTS = ${atlas_fflags}|" \
-           ${workpath}/${lapackname}-${lapackversion}/make.inc
+           ${lapack_path}/make.inc
 
-    system "cd ${workpath}/${lapackname}-${lapackversion} && make lib"
+    system "cd ${lapack_path} && make lib"
 
     # create a build directory for atlas
-    file mkdir ${workpath}/${name}-${version}/build
+    file mkdir ${atlas_path}/build
 
-
-    configure.args-append --with-netlib-lapack=${workpath}/${lapackname}-${lapackversion}/lapack_darwin.a
+    if { ! [variant_isset universal] } {
+        configure.args-append --with-netlib-lapack=${lapack_path}/lapack_darwin.a
+    } else {
+        lappend merger_configure_args(${arch}) --with-netlib-lapack=${lapack_path}/lapack_darwin.a
+    }
+}
 }
 
 post-configure {
+    if { [variant_isset universal] } {
+        set archs ${universal_archs_to_use}
+    } else {
+        set archs ${build_arch}
+    }
+ 
+    foreach arch ${archs} {
+        if { ! [variant_isset universal] } {
+            set atlas_path  ${workpath}/${name}-${version}
+        } else {
+            set atlas_path ${workpath}/${name}-${version}-${arch}
+        }
+
     # recursively remove directories
     ui_debug "reinplace for make to recursively remove directories on clean"
-    reinplace "s|rm -f|rm -rf|g" ${workpath}/${name}-${version}/build/Makefile
+    reinplace "s|rm -f|rm -rf|g" ${atlas_path}/build/Makefile
+    }
 }
 
-proc make_dylib { lib libs } {
-    global destroot prefix myarch
-    system "cd ${destroot}/${prefix}/lib && \
+proc make_dylib { lib lib_dir arch libs } {
+    global destroot prefix gccnumber
+    system "cd ${lib_dir} && \
             ( test ! -e ${lib}.a ||
-              ld -arch ${myarch} -dynamic -dylib -single_module -dead_strip \
-              -x -all_load -L. -L${prefix}/lib/gcc43 -ldylib1.o \
+              /usr/bin/ld -arch ${arch} -dynamic -dylib -single_module -dead_strip \
+              -x -all_load -L. -L${prefix}/lib/gcc${gccnumber}/${arch} -L${prefix}/lib/gcc${gccnumber} -ldylib1.o \
               -dylib_install_name ${prefix}/lib/${lib}.dylib \
-              ${lib}.a -o ${lib}.dylib ${libs} && rm -f ${lib}.a)"
+              ${lib}.a -o ${lib}.dylib ${libs} )"
 }
 
-
-post-destroot {
+post-build {
   # We have to manually create the dylib shared libs as the default build does not do this
-  global myarch
-
-  if {[string equal "${os.arch}" "powerpc"]} {
-    if {${my_arch} == "64" } {
-      set myarch "ppc64"
-    } else {
-      set myarch "ppc"
-    }
-  } else {
-    if {${my_arch} == "64" } {
-      set myarch "x86_64"
-    } else {
-      set myarch "i386"
-    }
-  }
 
   set ncpu [exec sysctl -n hw.ncpu]
 
-  make_dylib libatlas { -lSystem }
+    if { [variant_isset universal] } {
+        set archs ${universal_archs_to_use}
+    } else {
+        set archs ${build_arch}
+    }
+ 
+    foreach arch ${archs} {
+        if { ! [variant_isset universal] } {
+            set atlas_path  ${workpath}/${name}-${version}
+        } else {
+            set atlas_path ${workpath}/${name}-${version}-${arch}
+        }
+        set lib_dir ${atlas_path}/build/lib
+
+  make_dylib libatlas ${lib_dir} ${arch} { -lSystem }
 
   if {${ncpu} == "1" } {
     # there are no threaded libraries (libpt*) on single-core machines
-    make_dylib libcblas   { -latlas -lSystem }
-    make_dylib libf77blas { -lgfortran -latlas -lSystem }
+    make_dylib libcblas   ${lib_dir} ${arch} { -latlas -lSystem }
+    make_dylib libf77blas ${lib_dir} ${arch} { -lgfortran -latlas -lSystem }
   } else {
-    make_dylib libptcblas   { -latlas -lSystem }
-    make_dylib libptf77blas { -lgfortran -latlas -lSystem }
-
-    # we make soft links to the parallel built libs
-    system "cd ${destroot}${prefix}/lib && \
-            ln -s ./libptcblas.dylib libcblas.dylib && \
-            ln -s ./libptf77blas.dylib libf77blas.dylib"
-
-    file delete ${destroot}/${prefix}/lib/libcblas.a
-    file delete ${destroot}/${prefix}/lib/libf77blas.a
+    make_dylib libptcblas   ${lib_dir} ${arch} { -latlas -lSystem }
+    make_dylib libptf77blas ${lib_dir} ${arch} { -lgfortran -latlas -lSystem }
   }
 
-  make_dylib liblapack { -lf77blas -lcblas -latlas -lgfortran -lgcc_s.1 -lSystem }
+  make_dylib liblapack ${lib_dir} ${arch} { -lf77blas -lcblas -latlas -lgfortran -lgcc_s.1 -lSystem }
+}
+}
+
+pre-destroot {
+   if { [variant_isset universal] } {
+        set archs ${universal_archs_to_use}
+    } else {
+        set archs ${build_arch}
+    }
+ 
+    foreach arch ${archs} {
+        if { ! [variant_isset universal] } {
+            set atlas_path  ${workpath}/${name}-${version}
+            set dest_path   ${destroot}${prefix}/lib/
+        } else {
+            set atlas_path ${workpath}/${name}-${version}-${arch}
+            set dest_path  ${destroot}-${arch}${prefix}/lib/
+        }
+        set lib_dir ${atlas_path}/build/lib
+
+        file mkdir ${dest_path}
+        eval xinstall -m 755 [glob ${lib_dir}/*.dylib] ${dest_path}
+    }
+}
+
+post-destroot {
+    if { ![file exists ${destroot}${prefix}/lib/libcblas.dylib] && [file exists ${destroot}${prefix}/lib/libptcblas.dylib]} {
+        ln -s libptcblas.dylib ${destroot}${prefix}/lib/libcblas.dylib
+    }
+    if { ![file exists ${destroot}${prefix}/lib/libf77blas.dylib] && [file exists ${destroot}${prefix}/lib/libptf77blas.dylib]} {
+        ln -s libptf77blas.dylib ${destroot}${prefix}/lib/libf77blas.dylib
+    }
 }
 
 livecheck.name      math-atlas
