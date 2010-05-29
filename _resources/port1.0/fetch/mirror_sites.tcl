@@ -339,7 +339,7 @@ set portfetch::mirror_sites::sites(ruby) {
 }
 
 set portfetch::mirror_sites::sites(savannah) {
-    http://download.savannah.nongnu.org/releases-noredirect/
+    http://download.savannah.gnu.org/releases-noredirect/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://ftp.twaren.net/Unix/NonGNU/
     ftp://ftp.twaren.net/Unix/NonGNU/
