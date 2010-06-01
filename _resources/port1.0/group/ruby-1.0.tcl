@@ -67,19 +67,23 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 	global ruby.bin ruby.rdoc ruby.gem
 	global ruby.version ruby.lib
 	global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
+	global ruby.prog_suffix
 
 	if {${implementation} eq "ruby19"} {
-		set ruby.bin	${prefix}/bin/ruby1.9
-		set ruby.rdoc	${prefix}/bin/rdoc1.9
-		set ruby.gem    ${prefix}/bin/gem1.9
-		set ruby.port_prefix rb19
+	    set ruby.port_prefix rb19
+	    set ruby.prog_suffix "1.9"
 	} elseif {${implementation} eq "ruby"} {
 		# ruby.bin, ruby.rdoc, and ruby.gem set to 1.8 by default
 		set ruby.port_prefix rb
+		# no program suffix by default, so leave as blank
+		set ruby.prog_suffix ""
 	} else {
 		ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19 possible)"
 		return -code error "ruby.setup failed"
 	}
+	set ruby.bin	${prefix}/bin/ruby${ruby.prog_suffix}
+	set ruby.rdoc	${prefix}/bin/rdoc${ruby.prog_suffix}
+	set ruby.gem    ${prefix}/bin/gem${ruby.prog_suffix}
 
 	# define ruby global names and lists
 	# check if module is a list or string
@@ -140,13 +144,13 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
 		}
-        rubygems {
-            homepage        http://www.rubygems.org/gems/${ruby.project}
-            master_sites    http://www.rubygems.org/downloads/
-            livecheck.type  regex
-            livecheck.url   http://www.rubygems.org/gems/${ruby.project}
-            livecheck.regex {<h3>(\d|\d[0-9.]*\d)</h3>}
-        }
+		rubygems {
+		    homepage        http://www.rubygems.org/gems/${ruby.project}
+		    master_sites    http://www.rubygems.org/downloads/
+		    livecheck.type  regex
+		    livecheck.url   http://www.rubygems.org/gems/${ruby.project}
+		    livecheck.regex {<h3>(\d|\d[0-9.]*\d)</h3>}
+		}
 		sourceforge:* {
 			set ruby.project [lindex [split ${source} {:}] 1]
 			homepage		http://sourceforge.net/projects/${ruby.project}
@@ -295,19 +299,21 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			use_configure no
 			extract.suffix .gem
 			
-			depends_lib-append	port:rb-rubygems
+			if {${implementation} eq "ruby"} {
+			    depends_lib-append	port:rb-rubygems
+			}
 			
 			extract {}
 			build {}
 			
 			pre-destroot {
-				xinstall -d -m 0755 ${destroot}${prefix}/lib/ruby/gems/${ruby.version}
+				xinstall -d -m 0755 ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}
 			}
 			
 			destroot {
-			  system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${prefix}/lib/ruby/gems/${ruby.version} ${distpath}/${distname}"
+			  system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version} ${distpath}/${distname}"
 			
-				set binDir ${destroot}${prefix}/lib/ruby/gems/${ruby.version}/bin
+				set binDir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}/bin
 				if {[file isdirectory $binDir]} {
 					foreach file [readdir $binDir] {
 						file copy [file join $binDir $file] ${destroot}${prefix}/bin
