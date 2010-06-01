@@ -1,10 +1,11 @@
 # $Id$
 
 PortSystem 1.0
+PortGroup  muniversal 1.0
 
 name          arpack
 version       1
-revision      3
+revision      4
 categories    math
 platforms     darwin
 maintainers		mmoll
@@ -21,63 +22,164 @@ checksums     arpack96.tar.gz md5 fffaa970198b285676f4156cebc8626e \
 use_configure	no
 worksrcdir	ARPACK
 patchfiles	patch-arpack.diff
-post-patch { 
-    if {[variant_isset g95]} { 
-        reinplace "s|-ff2c||" ${worksrcpath}/ARmake.inc 
-    } 
-}
+
 use_parallel_build	no
-build.args 	all home=${worksrcpath}
-destroot    {
-   xinstall -m 644 -v -W ${worksrcpath} libarpack.a ${destroot}${prefix}/lib
-}
-post-destroot {
-	system "ranlib ${destroot}${prefix}/lib/libarpack.a"
+
+# Fortran compilers can not cross-compile
+if { ${os.arch}=="i386" } {
+    set universal_archs_supported "i386 x86_64"
+} else {
+    set universal_archs_supported "ppc ppc64"
 }
 
-variant gcc42 description {build with gfortran-mp-4.2} conflicts gcc43 gcc44 g95 {
-	build.args-append       FC=${prefix}/bin/gfortran-mp-4.2
+if { ! [variant_isset universal]} {
+	build.args-append home=${worksrcpath}
+	if { ${build_arch}=="x86_64" || ${build_arch}=="ppc64" } {
+		build.args-append FFLAGS='-O2 -m64'
+	} else {
+		build.args-append FFLAGS='-O2 -m32'
+	}
+} else {
+	foreach arch {x86_64 i386 ppc ppc64} {
+		set merger_build_args(${arch}) home=${worksrcpath}-${arch}
+		if { ${arch}=="x86_64" || ${arch}=="ppc64" } {
+			lappend merger_build_args(${arch}) FFLAGS='-O2 -m64'
+		} else {
+			lappend merger_build_args(${arch}) FFLAGS='-O2 -m32'
+		}
+	}
+
+}
+
+proc make_dylib { name lib_dir arch libs curVer } {
+    global destroot prefix gccnumber
+
+    set comVer [join [lrange [split ${curVer} '.'] 0 0] '.']
+
+    set cmd "\
+              /usr/bin/ld -arch ${arch} -dynamic -dylib -single_module -dead_strip \
+              -x -all_load -L. -L${prefix}/lib/gcc${gccnumber}/${arch} -L${prefix}/lib/gcc${gccnumber} -L${prefix}/lib \
+              -dylib_install_name ${prefix}/lib/lib${name}.${comVer}.dylib \
+              -current_version ${curVer} \
+              -compatibility_version ${comVer} \
+              lib${name}.a -o lib${name}.${curVer}.dylib ${libs}"
+
+    system "cd ${lib_dir} && ${cmd}"
+}
+
+pre-build {
+	build.args-append FC=${configure.fc} MAKE=${build.cmd}
+}
+
+post-build {
+    set curVer ${version}
+    set comVer [join [lrange [split ${version} '.'] 0 1 ] '.']
+
+    if { ![variant_isset universal] } {
+        set archs ${build_arch}
+    } else {
+        set archs ${universal_archs_to_use}
+    }
+
+    foreach arch ${archs} {
+        if { ![variant_isset universal] } {
+            set dir ${worksrcpath}
+        } else {
+            set dir ${worksrcpath}-${arch}
+        }
+
+        make_dylib arpack ${dir} ${arch} "-latlas -llapack -lgfortran -lSystem" ${version}
+
+        if { [variant_isset mpi] } {
+            make_dylib parpack ${dir} ${arch} "-llapack -lblas -lgfortran -lmpi_f77 -lSystem -larpack.1" ${version}
+        }
+    }
+}
+
+post-configure {
+        if { [variant_isset mpi] } {
+            set stlibs "libarpack.a libparpack.a"
+            set shlibs "libarpack.1.dylib libparpack.1.dylib"
+        } else {
+            set stlibs "libarpack.a"
+            set shlibs "libarpack.1.dylib"
+        }
+
+        if { ![variant_isset universal] } {
+            set fl [open ${worksrcpath}/Makefile "a"]
+            puts ${fl} "\n.PHONY install"
+            puts ${fl} "\t.install: ${stlibs} ${shlibs}"
+            foreach lib ${stlibs} {
+                puts ${fl} "\tinstall -m 644 -v ${lib}"
+            }
+            foreach lib ${shlibs} {
+                puts ${fl} "\tinstall -m 755 -v ${lib}"
+            }
+            close ${fl}
+        } else {
+            foreach arch ${universal_archs_to_use} {
+                set fl [open ${worksrcpath}-${arch}/Makefile "a"]
+                puts ${fl} "\n.PHONY: install"
+                puts ${fl} "install: ${stlibs} ${shlibs}"
+                foreach lib ${stlibs} {
+                    puts ${fl} "\tinstall -m 644 -v ${lib} ${destroot}-${arch}${prefix}/lib"
+                }
+                foreach lib ${shlibs} {
+                    puts ${fl} "\tinstall -m 755 -v ${lib} ${destroot}-${arch}${prefix}/lib"
+                }
+                close ${fl}
+            }
+        }
+}
+
+variant gcc42 description {build with gfortran-mp-4.2} conflicts gcc43 gcc44 gcc45 universal {
 	depends_build-append    port:gcc42
+	configure.fc ${prefix}/bin/gfortran-mp-4.2
 }
 
-variant gcc43 description {build with gfortran-mp-4.3} conflicts gcc42 gcc44 g95 {
-	build.args-append       FC=${prefix}/bin/gfortran-mp-4.3
+variant gcc43 description {build with gfortran-mp-4.3} conflicts gcc42 gcc44 gcc45 universal {
 	depends_build-append    port:gcc43
+	configure.fc ${prefix}/bin/gfortran-mp-4.3
 }
 
-variant gcc44 description {build with gfortran-mp-4.4} conflicts gcc42 gcc43 g95 {
-	build.args-append       FC=${prefix}/bin/gfortran-mp-4.4
+variant gcc44 description {build with gfortran-mp-4.4} conflicts gcc42 gcc43 gcc45 {
 	depends_build-append    port:gcc44
+	configure.fc ${prefix}/bin/gfortran-mp-4.4
 }
 
-variant g95 description {build with g95} conflicts gcc42 gcc43 gcc44 {
-	build.args-append       FC=${prefix}/bin/g95
-	depends_build-append    port:g95
+variant gcc45 description {build with gfortran-mp-4.5} conflicts gcc42 gcc43 gcc44 {
+	depends_build-append    port:gcc44
+	configure.fc ${prefix}/bin/gfortran-mp-4.5
 }
 
-variant mpi description {build PARPACK, the parallel eigenvalue solver library} {
+if { [variant_isset gcc42] } {
+  set gccversion    4.2
+} elseif { [variant_isset gcc43] } {
+  set gccversion    4.3
+} elseif { [variant_isset gcc44] } {
+  set gccversion    4.4
+} else {
+  set gccversion    4.5
+}
+set gccnumber       [join [split ${gccversion} .] ""]
+
+variant mpi description {build PARPACK, the parallel eigenvalue solver library} conflicts universal {
   distfiles-append parpack96.tar.gz ppatch.tar.gz
   checksums-append parpack96.tar.gz md5 598d0453b938ccd99a078246be5927f3 \
   		   ppatch.tar.gz md5 e6f0d70dd99f719c0efee351d0875c96
 	pre-fetch { 	 
 	   if {![file exists ${prefix}/bin/openmpif77]} {
-	     return -code error "Please install one of the following variants of the openmpi port: gcc42, gcc43, gcc44, g95."
+	     return -code error "Please install one of the following variants of the openmpi port: gcc42, gcc43, gcc44, gcc45."
 	   }
 	}
 	pre-build { foreach entry [glob -directory ${worksrcpath}/PARPACK */MPI/mpif.h] { delete $entry } }
+
 	depends_build port:openmpi
-	build.args all FC=${prefix}/bin/openmpif77 home=${worksrcpath}
-	destroot    {
-	   xinstall -m 644 -v -W ${worksrcpath} libarpack.a libparpack.a ${destroot}${prefix}/lib
-	}
-	post-destroot {
-		system "ranlib ${destroot}${prefix}/lib/libarpack.a"
-		system "ranlib ${destroot}${prefix}/lib/libparpack.a"
-	}
+	configure.fc ${prefix}/bin/openmpif77
 }
 
-if { ![variant_isset gcc42] && ![variant_isset gcc43] && ![variant_isset gcc44] && ![variant_isset g95] } {
-	default_variants      +gcc43
+if { ![variant_isset gcc42] && ![variant_isset gcc43] && ![variant_isset gcc44] && ![variant_isset gcc45] } {
+	default_variants      +gcc44
 }
 
 livecheck.type  none
