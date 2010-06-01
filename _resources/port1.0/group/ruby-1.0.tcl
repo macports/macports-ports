@@ -140,6 +140,13 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
 			livecheck.regex	"<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
 		}
+        rubygems {
+            homepage        http://www.rubygems.org/gems/${ruby.project}
+            master_sites    http://www.rubygems.org/downloads/
+            livecheck.type  regex
+            livecheck.url   http://www.rubygems.org/gems/${ruby.project}
+            livecheck.regex {<h3>(\d|\d[0-9.]*\d)</h3>}
+        }
 		sourceforge:* {
 			set ruby.project [lindex [split ${source} {:}] 1]
 			homepage		http://sourceforge.net/projects/${ruby.project}
