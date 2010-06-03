@@ -1,4 +1,4 @@
-#---------------------------------------------------------------------------------------------------
+#----------------------------------------------------------------------
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,17 +13,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-#---------------------------------------------------------------------------------------------------
+#----------------------------------------------------------------------
 #
-# GPL-licensed icons included in applet.icns are courtesy of KMyMoney's developers!
+# GPL-licensed icons used by the .app created from this script are
+# courtesy of KMyMoney's developers and taken from KMyMoney's sources.
+# (See ../Portfile for details.)
 #
-#---------------------------------------------------------------------------------------------------
+#----------------------------------------------------------------------
 #
 # Authors:
 #  - Brad Giesbrecht <brad@pixilla.com>
 #  - Marko K"aning <MK-MacPorts@techno.ms>
 #
-########################################################
+#----------------------------------------------------------------------
 
 try
 	
