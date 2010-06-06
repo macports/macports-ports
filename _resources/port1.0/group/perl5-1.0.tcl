@@ -55,6 +55,8 @@ default perl5.arch {[perl5.extract_config archname ${os.platform}]}
 default perl5.lib {${prefix}/lib/perl5/vendor_perl/${perl5.version}}
 default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
+default configure.universal_args {}
+
 # define these empty initially, they are set by perl5.setup arguments
 set perl5.module ""
 set perl5.cpandir ""
