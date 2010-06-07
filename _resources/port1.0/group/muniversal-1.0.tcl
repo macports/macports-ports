@@ -274,12 +274,7 @@ variant universal {
                 }
             }
 
-            # XXX Quick hack for base after r49087
-            if {[llength [info commands "portconfigure::*"]] > 0} {
-                portconfigure::configure_main
-            } else {
-                configure_main
-            }
+            portconfigure::configure_main
 
             # Undo changes to the configure related variables
             eval autoreconf.dir ${autoreconf_dir_save}
@@ -345,11 +340,9 @@ variant universal {
                     file mkdir ${build.dir}
                 }
             }
-            if {[llength [info commands "portbuild::*"]] > 0} {
-                portbuild::build_main
-            } else {
-                build_main
-            }
+
+            portbuild::build_main
+
             eval build.dir  ${build_dir_save}
             if { [info exists merger_build_args(${arch})] } {
                 build.args-delete $merger_build_args(${arch})
@@ -381,11 +374,9 @@ variant universal {
                     file mkdir ${destroot.dir}
                 }
             }
-            if {[llength [info commands "portdestroot::*"]] > 0} {
-                portdestroot::destroot_main
-            } else {
-                destroot_main
-            }
+
+            portdestroot::destroot_main
+
             destroot.dir  ${destroot_dir_save}
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
@@ -619,11 +610,9 @@ variant universal {
                         file mkdir ${test.dir}
                     }
                 }
-                if {[llength [info commands "porttest::*"]] > 0} {
-                    porttest::test_main
-                } else {
-                    test_main
-                }
+
+                porttest::test_main
+
                 test.dir ${test_dir_save}
             }
         }
