@@ -165,7 +165,7 @@ variant universal {
 
     configure {
         foreach arch ${universal_archs_to_use} {
-            ui_msg "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] $name ${arch}]"
+            ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] $name ${arch}]"
 
             copy ${worksrcpath} ${worksrcpath}-${arch}
 
@@ -326,7 +326,7 @@ variant universal {
 
     build {
         foreach arch ${universal_archs_to_use} {
-            ui_msg "$UI_PREFIX [format [msgcat::mc "Building %1\$s for architecture %2\$s"] $name ${arch}]"
+            ui_info "$UI_PREFIX [format [msgcat::mc "Building %1\$s for architecture %2\$s"] $name ${arch}]"
             
             if { [info exists merger_build_env(${arch})] } {
                 build.env-append  $merger_build_env(${arch})
@@ -362,7 +362,7 @@ variant universal {
 
     destroot {
         foreach arch ${universal_archs_to_use} {
-            ui_msg "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] $name ${arch}]"
+            ui_info "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] $name ${arch}]"
             copy ${destroot} ${workpath}/destroot-${arch}
             set destdirSave ${destroot.destdir}
             eval destroot.destdir  [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
@@ -607,7 +607,7 @@ variant universal {
             # Rosetta does not translate G5 instructions
             # PowerPC systems can't translate Intel instructions
             if { (${os.arch}=="i386" && ${arch}!="ppc64") || (${os.arch}=="powerpc" && ${arch}!="i386" && ${arch}!="x86_64") } {
-                ui_msg "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] $name ${arch}]"
+                ui_info "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] $name ${arch}]"
                 set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
                     # The test directory is inside the source directory, so put in the new source directory name.
