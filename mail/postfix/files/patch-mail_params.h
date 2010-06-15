@@ -57,7 +57,7 @@
  #define VAR_MANPAGE_DIR			"manpage_directory"
  #ifndef DEF_MANPAGE_DIR
 -#define DEF_MANPAGE_DIR			"/usr/local/man"
-+#define DEF_MANPAGE_DIR			"__PREFIX/local/man"
++#define DEF_MANPAGE_DIR			"__PREFIX/share/man"
  #endif
  
  #define VAR_SAMPLE_DIR			"sample_directory"

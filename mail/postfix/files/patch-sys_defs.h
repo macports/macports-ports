@@ -1,19 +1,18 @@
---- src/util/sys_defs.h.org	2007-10-17 21:27:59.000000000 -0700
-+++ src/util/sys_defs.h	2007-10-17 21:32:35.000000000 -0700
-@@ -185,10 +185,10 @@
+--- src/util/sys_defs.h.orig	2010-06-02 09:56:57.000000000 +1000
++++ src/util/sys_defs.h	2010-06-16 00:51:47.000000000 +1000
+@@ -206,9 +206,9 @@
  #define HAS_DB
  #define HAS_SA_LEN
  #define DEF_DB_TYPE	"hash"
 -#define ALIAS_DB_MAP	"hash:/etc/aliases"
 +#define ALIAS_DB_MAP	"hash:__PREFIX/etc/postfix/aliases"
  #define GETTIMEOFDAY(t) gettimeofday(t,(struct timezone *) 0)
- #define RESOLVE_H_NEEDS_NAMESER8_COMPAT_H
 -#define ROOT_PATH	"/bin:/usr/bin:/sbin:/usr/sbin"
-+#define ROOT_PATH	"__PREFIX/bin:/usr/bin:/sbin:/usr/sbin"
++#define ROOT_PATH	"__PREFIX/bin:/bin:/usr/bin:/sbin:/usr/sbin"
  #define USE_STATFS
  #define STATFS_IN_SYS_MOUNT_H
  #define HAS_POSIX_REGEXP
-@@ -203,11 +203,11 @@
+@@ -223,11 +223,11 @@
  # define HAVE_GETIFADDRS
  #endif
  #define HAS_FUTIMES			/* XXX Guessing */
@@ -29,4 +28,4 @@
 +#define NATIVE_DAEMON_DIR "__PREFIX/libexec/postfix"
  #define SOCKADDR_SIZE	socklen_t
  #define SOCKOPT_SIZE	socklen_t
- #endif
+ #ifndef NO_KQUEUE
