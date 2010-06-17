@@ -1,0 +1,185 @@
+diff --git a/libclamav/c++/llvm/lib/ExecutionEngine/JIT/JIT.cpp b/libclamav/c++/llvm/lib/ExecutionEngine/JIT/JIT.cpp
+index 4fc7d5a..b6c3367 100644
+--- libclamav/c++/llvm/lib/ExecutionEngine/JIT/JIT.cpp
++++ libclamav/c++/llvm/lib/ExecutionEngine/JIT/JIT.cpp
+@@ -255,12 +255,7 @@ public:
+     MutexGuard guard(Lock);
+     JITs.erase(jit);
+   }
+-  bool empty() {
+-    MutexGuard guard(Lock);
+-    return JITs.empty();
+-  }
+-  void *getPointerToNamedFunction(const char *Name,
+-                                  bool AbortOnFailure = true) const {
++  void *getPointerToNamedFunction(const char *Name) const {
+     MutexGuard guard(Lock);
+     assert(JITs.size() != 0 && "No Jit registered");
+     //search function in every instance of JIT
+@@ -272,19 +267,7 @@ public:
+     }
+     // The function is not available : fallback on the first created (will
+     // search in symbol of the current program/library)
+-    return (*JITs.begin())->getPointerToNamedFunction(Name, AbortOnFailure);
+-  }
+-  void *getPointerToGlobalIfAvailable(GlobalValue *V) const {
+-    MutexGuard guard(Lock);
+-    assert(JITs.size() != 0 && "No Jit registered");
+-    //search function in every instance of JIT
+-    for (SmallPtrSet<JIT*, 1>::const_iterator Jit = JITs.begin(),
+-           end = JITs.end();
+-         Jit != end; ++Jit) {
+-      if (void *Ptr = (*Jit)->getPointerToGlobalIfAvailable(V))
+-	return Ptr;
+-    }
+-    return 0;
++    return (*JITs.begin())->getPointerToNamedFunction(Name);
+   }
+ };
+ ManagedStatic<JitPool> AllJits;
+@@ -300,22 +283,6 @@ extern "C" {
+   }
+ }
+ 
+-extern "C" {
+-  // getPointerToNamedFunctionOrNull - same as the above, but returns
+-  // NULL instead of aborting if the function cannot be found.
+-  void *getPointerToNamedFunctionOrNull(const char *Name) {
+-    return !AllJits->empty() ? AllJits->getPointerToNamedFunction(Name, false) : 0;
+-  }
+-}
+-
+-extern "C" {
+-  // getPointerToGlobalIfAvailable - same as the above, but for global
+-  // variables, and only for those that have been codegened already.
+-  void *getPointerToGlobalIfAvailable(GlobalValue *V) {
+-    return !AllJits->empty() ? AllJits->getPointerToGlobalIfAvailable(V) : 0;
+-  }
+-}
+-
+ JIT::JIT(Module *M, TargetMachine &tm, TargetJITInfo &tji,
+          JITMemoryManager *JMM, CodeGenOpt::Level OptLevel, bool GVsWithCode)
+   : ExecutionEngine(M), TM(tm), TJI(tji), AllocateGVsWithCode(GVsWithCode),
+diff --git a/libclamav/c++/llvm/lib/Target/PowerPC/PPCISelLowering.cpp b/libclamav/c++/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
+index 167a0e6..efb0e21 100644
+--- libclamav/c++/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
++++ libclamav/c++/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
+@@ -2450,9 +2450,6 @@ void PrepareTailCall(SelectionDAG &DAG, SDValue &InFlag, SDValue &Chain,
+   InFlag = Chain.getValue(1);
+ }
+ 
+-extern "C" void *getPointerToNamedFunctionOrNull(const char *Name);
+-extern "C" void *getPointerToGlobalIfAvailable(GlobalValue *Value);
+-
+ static
+ unsigned PrepareCall(SelectionDAG &DAG, SDValue &Callee, SDValue &InFlag,
+                      SDValue &Chain, DebugLoc dl, int SPDiff, bool isTailCall,
+@@ -2464,41 +2461,30 @@ unsigned PrepareCall(SelectionDAG &DAG, SDValue &Callee, SDValue &InFlag,
+   NodeTys.push_back(MVT::Flag);    // Returns a flag for retval copy to use.
+ 
+   unsigned CallOpc = isSVR4ABI ? PPCISD::CALL_SVR4 : PPCISD::CALL_Darwin;
+-
+-  // XXX Work around for http://llvm.org/bugs/show_bug.cgi?id=5201
+-  // and http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=399
+-  // for Shark.
+-  //
+-  // If the callee is an ExternalSymbol node, and the symbol can be
+-  // resolved to a function pointer, then insert that pointer as a
+-  // constant.  This causes the next block of code to fall into the
+-  // block that emits an indirect call.  This works around
+-  //
+-  // This works for Shark because the only kinds of call that Shark
+-  // makes that do not already fall into the indirect call block are
+-  // calls to pre-existing external functions.
+-  if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+-    void *FuncPtr = getPointerToNamedFunctionOrNull(S->getSymbol());
+-    if (FuncPtr)
+-      Callee = DAG.getConstant((uint64_t) FuncPtr, PtrVT);
+-  }
+-  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+-    void *FuncPtr = getPointerToGlobalIfAvailable(G->getGlobal());
+-    if (FuncPtr)
+-      Callee = DAG.getConstant((uint64_t) FuncPtr, PtrVT);
+-  }
+-
+-  // If the callee is a GlobalAddress/ExternalSymbol node (quite common, every
+-  // direct call is) turn it into a TargetGlobalAddress/TargetExternalSymbol
+-  // node so that legalize doesn't hack it.
+-  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
+-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), Callee.getValueType());
+-  else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee))
+-    Callee = DAG.getTargetExternalSymbol(S->getSymbol(), Callee.getValueType());
+-  else if (SDNode *Dest = isBLACompatibleAddress(Callee, DAG))
++  bool needIndirectCall = true;
++  if (SDNode *Dest = isBLACompatibleAddress(Callee, DAG)) {
+     // If this is an absolute destination address, use the munged value.
+     Callee = SDValue(Dest, 0);
+-  else {
++    needIndirectCall = false;
++  }
++  // XXX Work around for http://llvm.org/bugs/show_bug.cgi?id=5201
++  // Use indirect calls for ALL functions calls in JIT mode, since the
++  // far-call stubs may be outside relocation limits for a BL instruction.
++  if (!DAG.getTarget().getSubtarget<PPCSubtarget>().isJITCodeModel()) {
++    // If the callee is a GlobalAddress/ExternalSymbol node (quite common, every
++    // direct call is) turn it into a TargetGlobalAddress/TargetExternalSymbol
++    // node so that legalize doesn't hack it.
++    if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
++      Callee = DAG.getTargetGlobalAddress(G->getGlobal(),
++					  Callee.getValueType());
++      needIndirectCall = false;
++    } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
++      Callee = DAG.getTargetExternalSymbol(S->getSymbol(),
++					   Callee.getValueType());
++      needIndirectCall = false;
++    }
++  }
++  if (needIndirectCall) {
+     // Otherwise, this is an indirect call.  We have to use a MTCTR/BCTRL pair
+     // to do the call, we can't use PPCISD::CALL.
+     SDValue MTCTROps[] = {Chain, Callee, InFlag};
+diff --git a/libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.cpp b/libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
+index 40914ba..5d46065 100644
+--- libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
++++ libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
+@@ -69,6 +69,7 @@ PPCSubtarget::PPCSubtarget(const std::string &TT, const std::string &FS,
+   , HasFSQRT(false)
+   , HasSTFIWX(false)
+   , HasLazyResolverStubs(false)
++  , IsJITCodeModel(false)
+   , DarwinVers(0) {
+ 
+   // Determine default and user specified characteristics
+@@ -117,6 +118,9 @@ void PPCSubtarget::SetJITMode() {
+   // everything is.  This matters for PPC64, which codegens in PIC mode without
+   // stubs.
+   HasLazyResolverStubs = false;
++
++  // Calls to external functions need to use indirect calls
++  IsJITCodeModel = true;
+ }
+ 
+ 
+diff --git a/libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.h b/libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.h
+index 75fcf62..00ec747 100644
+--- libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.h
++++ libclamav/c++/llvm/lib/Target/PowerPC/PPCSubtarget.h
+@@ -63,6 +63,7 @@ protected:
+   bool HasFSQRT;
+   bool HasSTFIWX;
+   bool HasLazyResolverStubs;
++  bool IsJITCodeModel;
+   
+   /// DarwinVers - Nonzero if this is a darwin platform.  Otherwise, the numeric
+   /// version of the platform, e.g. 8 = 10.4 (Tiger), 9 = 10.5 (Leopard), etc.
+@@ -124,6 +125,9 @@ public:
+   bool hasLazyResolverStub(const GlobalValue *GV, 
+                            const TargetMachine &TM) const;
+   
++  // isJITCodeModel - True if we're generating code for the JIT
++  bool isJITCodeModel() const { return IsJITCodeModel; }
++
+   // Specific obvious features.
+   bool hasFSQRT() const { return HasFSQRT; }
+   bool hasSTFIWX() const { return HasSTFIWX; }
+
