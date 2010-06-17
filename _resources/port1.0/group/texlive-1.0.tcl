@@ -217,7 +217,6 @@ proc texlive.texmfport {} {
                 }
 
                 foreach syn [concat $langname $langsyns] {
-                    ui_msg $syn
                     puts $langdeffile "\\addlanguage{$syn}{$langfile}{}{$langlhmin}{$langrhmin}"
                 }
             }
