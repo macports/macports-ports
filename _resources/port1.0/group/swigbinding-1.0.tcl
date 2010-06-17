@@ -36,7 +36,7 @@ proc swigbinding-setup {lang prettyname} {
     array set bindings { \
         python      {port:python_select     python=${prefix}/bin/python} \
         perl        {path:bin/perl:perl5    perl5=${prefix}/bin/perl} \
-        gcj         {port:gcc43             "gcj=${prefix}/bin/gcj-mp-4.3 --with-gcjh=${prefix}/bin/gcjh-mp-4.3"} \
+        gcj         {port:gcc44             "gcj=${prefix}/bin/gcj-mp-4.4 --with-gcjh=${prefix}/bin/gcjh-mp-4.4"} \
         guile       {port:guile             guile} \
         mzscheme    {port:mzscheme          mzscheme} \
         ruby        {port:ruby              ruby} \
