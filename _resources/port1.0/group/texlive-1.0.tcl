@@ -64,6 +64,18 @@ set texlive_texmfsysvar "${prefix}/var/db/texmf"
 # configuration data from texconfig
 set texlive_texmfsysconfig "${prefix}/etc/texmf"
 
+# Remove dependencies on any texlive-documentation-* ports, for use by
+# -doc variants
+proc texlive.removedocdepends {} {
+    global depends_lib
+    set toremove {}
+    foreach dep $depends_lib {
+        if [regexp {^port:texlive-documentation-} $dep] {
+            lappend toremove $dep
+        }
+    }
+    depends_lib-delete $toremove
+}
 
 #
 # For installing texmf ports
@@ -107,6 +119,11 @@ proc texlive.texmfport {} {
     variant src description "Install TeX source" { }
     default_variants +doc
 
+    if {![variant_isset "doc"]} {
+        # Skip any dependencies on texlive-documentation-* ports
+        texlive.removedocdepends
+    }
+    
     use_configure   no
 
     build           { }
@@ -154,6 +171,25 @@ proc texlive.texmfport {} {
             }
         }
 
+        # install a documentation file containing the list of TeX
+        # packages installed. This also ensures that each port
+        # provides at least one file, even if there's nothing to
+        # install (e.g. documentation ports with -doc)
+        xinstall -d ${destroot}${prefix}/share/doc/texlive
+        set docfile [open ${destroot}${prefix}/share/doc/texlive/${name} "w"]
+        puts $docfile "${name} version ${version} (MacPorts revision ${version}_${revision})"
+        puts $docfile "\nTeX Live packages contained in this port:"
+        set pkgfile [open ${worksrcpath}/tlpkginfo/pkgs]
+        while {[gets $pkgfile line] >= 0} {
+            set splitline [split $line]
+            set pkg [lindex $splitline 0]
+            set pkgdesc [join [lrange $splitline 1 end]]
+            puts $docfile "    $pkg: $pkgdesc"
+        }
+        close $pkgfile
+        close $docfile
+
+        # install fmtutil.cnf file
         if {${texlive.formats} != ""} {
             xinstall -d ${destroot}${texlive_texmfsysconfig}/fmtutil.d
             set fmtfilename \
@@ -185,6 +221,7 @@ proc texlive.texmfport {} {
             close $fmtfile
         }
 
+        # install updmap.cfg file
         if {${texlive.maps} != ""} {
             xinstall -d ${destroot}${texlive_texmfsysconfig}/updmap.d
             set mapfilename \
@@ -196,6 +233,7 @@ proc texlive.texmfport {} {
             close $mapfile
         }
 
+        # install languages.dat and languages.def files
         if {${texlive.languages} != ""} {
             xinstall -d ${destroot}${texlive_texmfsysconfig}/language.d
             set langdatfilename \
