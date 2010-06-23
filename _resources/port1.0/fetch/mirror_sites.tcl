@@ -348,21 +348,15 @@ set portfetch::mirror_sites::sites(savannah) {
     ftp://mirror.cinquix.com/pub/savannah/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
-    http://mirror.publicns.net/pub/nongnu/
-    ftp://mirror.publicns.net/pub/nongnu/
-    ftp://mirrors.localhost.net.ar/pub/mirrors/savannah-nongnu/
     http://mirrors.openfountain.cl/savannah/
     http://mirrors.zerg.biz/nongnu/
     http://nongnu.askapache.com/
-    http://nongnu.bigsearcher.com/
     http://mirror.its.uidaho.edu/pub/savannah/
     ftp://mirror.its.uidaho.edu/savannah/
     http://piotrkosoft.net/pub/mirrors/savannah.gnu.org/
     ftp://ftp.piotrkosoft.net/pub/mirrors/savannah.gnu.org/
     http://savannah.c3sl.ufpr.br/
     ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
-    http://savannah.inetbridge.net/
-    http://www.centervenus.com/mirrors/nongnu/
     http://www.de-mirrors.de/nongnu/
 }
 # Alias nongnu to savannah
