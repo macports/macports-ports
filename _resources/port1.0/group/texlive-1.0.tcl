@@ -68,13 +68,11 @@ set texlive_texmfsysconfig "${prefix}/etc/texmf"
 # -doc variants
 proc texlive.removedocdepends {} {
     global depends_lib
-    set toremove {}
     foreach dep $depends_lib {
         if [regexp {^port:texlive-documentation-} $dep] {
-            lappend toremove $dep
+            depends_lib-delete $dep
         }
     }
-    depends_lib-delete $toremove
 }
 
 #
