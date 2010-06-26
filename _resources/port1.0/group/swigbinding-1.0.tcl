@@ -14,11 +14,7 @@ depends_build	port:bison \
 
 depends_lib     port:swig
 
-if {[info exists supported_archs]} {
-    supported_archs noarch
-} else {
-    universal_variant no
-}
+supported_archs noarch
 
 # for use in post-destroot
 options         swig.lang

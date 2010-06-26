@@ -46,8 +46,7 @@ dist_subdir		python
 
 depends_lib		port:python31
 
-# we want the default universal variant added, so use a bad hack for 1.8
-set xcode.project ""
+# we want the default universal variant added despite not using configure
 use_configure   no
 universal_variant yes
 
@@ -68,12 +67,8 @@ pre-build {
                              CXXFLAGS="${configure.cxx_archflags}" \
                              FFLAGS="${configure.f77_archflags}" \
                              F90FLAGS="${configure.f90_archflags}" \
-                             FCFLAGS="${configure.fc_archflags}"
-            if {[info exists configure.ld_archflags]} {
-                build.env-append LDFLAGS="${configure.ld_archflags}"
-            } else {
-                build.env-append LDFLAGS="${configure.cc_archflags}"
-            }
+                             FCFLAGS="${configure.fc_archflags}" \
+                             LDFLAGS="${configure.ld_archflags}"
         }
     }
 }

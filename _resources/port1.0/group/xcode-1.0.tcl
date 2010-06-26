@@ -87,8 +87,7 @@ default categories          aqua
 default platforms           macosx
 default use_configure       no
 default universal_variant   yes
-# change build.type to 'xcode' when 1.9 is released
-default build.type          pbx
+default build.type          xcode
 default build.args          build
 default build.pre_args      {}
 default build.target        ""
@@ -263,16 +262,8 @@ proc xcode::get_build_args {args} {
     }
 
     # SDKROOT
-    if {[info exists configure.sdkroot]} {
-        append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
-    } else {
-        if {[variant_exists universal] && [variant_isset universal] && ${os.arch} == "powerpc" && ${os.major} == "8"} {
-            append xcode_build_args " SDKROOT=\"${developer_dir}/SDKs/MacOSX10.4u.sdk\""
-        } else {
-            append xcode_build_args " SDKROOT="
-        }
-    }
-    
+    append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
+
     return $xcode_build_args
 }
 
