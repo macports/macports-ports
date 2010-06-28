@@ -262,7 +262,7 @@ proc texlive.texmfport {} {
     }
 
     post-activate {
-        system "${prefix}/bin/texhash"
+        system "${prefix}/bin/mktexlsr"
         if {${texlive.forceupdatecnf} || ${texlive.languages} != ""} {
             system "${prefix}/libexec/texlive-update-cnf language.dat"
             system "${prefix}/libexec/texlive-update-cnf language.def"
@@ -280,7 +280,7 @@ proc texlive.texmfport {} {
     post-deactivate {
         # Update ls-R and any config files to reflect that the package
         # is now gone
-        system "${prefix}/bin/texhash"
+        system "${prefix}/bin/mktexlsr"
         if {${texlive.forceupdatecnf} || ${texlive.languages} != ""} {
             system "${prefix}/libexec/texlive-update-cnf language.dat"
             system "${prefix}/libexec/texlive-update-cnf language.def"
