@@ -61,7 +61,7 @@ post-patch {
 # overrides depends_build, removing "port:automoc" to prevent a
 # cyclic dependency
 depends_build-append    port:automoc
-depends_lib-append      path:libexec/${qt}:${qt}
+depends_lib-append      port:${qt}
 
 switch ${os.platform}_${os.major} {
     darwin_8 {
