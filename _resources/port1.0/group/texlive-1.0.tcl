@@ -263,17 +263,34 @@ proc texlive.texmfport {} {
 
     post-activate {
         system "${prefix}/bin/mktexlsr"
-        if {${texlive.forceupdatecnf} || ${texlive.languages} != ""} {
+        if {${texlive.forceupdatecnf}} {
+            # If force was specified, update all the config files, and
+            # regenerate all maps and formats.
             system "${prefix}/libexec/texlive-update-cnf language.dat"
             system "${prefix}/libexec/texlive-update-cnf language.def"
-        }
-        if {${texlive.forceupdatecnf} || ${texlive.maps} != ""} {
             system "${prefix}/libexec/texlive-update-cnf updmap.cfg"
-            system "${prefix}/bin/updmap-sys"
-        }
-        if {${texlive.forceupdatecnf} || ${texlive.formats} != ""} {
             system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
+            system "${prefix}/bin/updmap-sys"
             system "${prefix}/bin/fmtutil-sys --all"
+        } else {
+            # Otherwise, only update the config files that are
+            # actually affected, and only generate the formats that
+            # are being installed.
+            if {${texlive.languages} != ""} {
+                system "${prefix}/libexec/texlive-update-cnf language.dat"
+                system "${prefix}/libexec/texlive-update-cnf language.def"
+            }
+            if {${texlive.maps} != ""} {
+                system "${prefix}/libexec/texlive-update-cnf updmap.cfg"
+                system "${prefix}/bin/updmap-sys"
+            }
+            if {${texlive.formats} != ""} {
+                system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
+                foreach x ${texlive.formats} {
+                    set fmtname [lindex $x 1]
+                    system "${prefix}/bin/fmtutil-sys --byfmt $fmtname"
+                }
+            }
         }
     }
 
