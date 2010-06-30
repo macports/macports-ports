@@ -52,7 +52,7 @@ proc select::install {group file} {
 }
 
 post-destroot {
-    if {${select.file} != "" || ${select.group} != ""} {
+    if {${select.file} != "" && ${select.group} != ""} {
         select::install ${select.group} ${select.file}
     } else {
         ui_debug "PortGroup select: select.group or select.file not set"
