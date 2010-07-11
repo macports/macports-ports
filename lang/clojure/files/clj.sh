@@ -32,6 +32,5 @@ fi
 if [ -z "$1" ]; then
   exec java -classpath $cp $cljclass
 else
-  scriptname=$1
-  exec java -classpath $cp $cljclass $scriptname -- $*
+  exec java -classpath $cp $cljclass $*
 fi

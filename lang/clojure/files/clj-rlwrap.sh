@@ -10,14 +10,14 @@ cljcompletions='.clj_completions'
 
 dir=$0
 while [ -h "$dir" ]; do
-    ls=`ls -ld "$dir"`
-    link=`expr "$ls" : '.*-> \(.*\)$'`
+  ls=`ls -ld "$dir"`
+  link=`expr "$ls" : '.*-> \(.*\)$'`
 
-    if expr "$link" : '/.*' > /dev/null; then
-        dir="$link"
-    else
-        dir=`dirname "$dir"`"/$link"
-    fi
+  if expr "$link" : '/.*' > /dev/null; then
+    dir="$link"
+  else
+    dir=`dirname "$dir"`"/$link"
+  fi
 done
 
 dir=`dirname $dir`
@@ -35,7 +35,6 @@ fi
 if [ $# -eq 0 ]; then
   rlwrap --remember -c -b $BREAK_CHARS -f $cljcompletions java -cp $cp $cljclass
 else
-  scriptname=$1
-  exec java -classpath $cp $cljclass $scriptname -- $*
+  exec java -classpath $cp $cljclass $*
 fi
 
