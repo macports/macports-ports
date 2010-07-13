@@ -1,7 +1,7 @@
---- bin/catalina.sh.orig	2009-01-02 11:57:54.000000000 -0800
-+++ bin/catalina.sh	2009-01-02 11:58:16.000000000 -0800
-@@ -185,6 +185,11 @@
-   LOGGING_CONFIG="-Djava.util.logging.config.file=$CATALINA_BASE/conf/logging.properties"
+--- bin/catalina.sh.orig	2010-06-29 07:33:40.000000000 -0700
++++ bin/catalina.sh	2010-07-13 08:47:10.000000000 -0700
+@@ -220,6 +220,11 @@
+   JAVA_OPTS="$JAVA_OPTS $LOGGING_MANAGER"
  fi
  
 +# Run conf_setup.sh to check and repair the conf directory
