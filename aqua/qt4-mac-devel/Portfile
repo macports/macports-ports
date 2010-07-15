@@ -8,12 +8,9 @@ set select_group    qt4
 set select_branch   mac-devel
 set select_port     ${select_group}_select
 set select_name     ${select_group}-${select_branch}
-# select.group        ${select_group}
 
 name                ${select_name}
-#conflicts           kdelibs3 kdelibs4 xmlrpcxx
-version             4.7.0-beta1
-revision        1
+version             4.7.0-beta2
 categories          aqua
 platforms           macosx
 maintainers         michaelld
@@ -22,19 +19,21 @@ homepage            http://qt.nokia.com/
 description         Qt Tool Kit (Native Aqua Version)
 long_description    \
     Qt is a cross-platform application and UI framework for writing \
-    cross-platform GUI applications. This version uses the native Aqua UI. \
-    For a X11 version, see qt4-x11\[-devel\].
+    cross-platform GUI applications. This port is for Qt version 4 \
+    using the native Aqua UI. For X11 UI versions, see qt3-x11 or \
+    qt4-x11\[-devel\].
 
 master_sites        trolltech
 distname            qt-everywhere-opensource-src-${version}
-checksums           md5     1a863712da64dd2c1d08380075b74f39 \
-                    sha1    ae3c3b0fa6e50d333c4bcac7ecd8c50078273046 \
-                    rmd160  ebcca033b22d5919097c111731a61aa3ac37316c
+checksums           md5     1449443c2d33ab9fefbd37b7104d0cdf \
+                    sha1    7906280feafd7c4bb4a9653e4f5988dcd3be9b54 \
+                    rmd160  029f0c37fdbb3c36ecffc1e77da403607a055a39
 
-depends_build       port:pkgconfig port:${select_port}
+depends_build       port:pkgconfig
 
 depends_lib         port:zlib port:dbus port:openssl port:sqlite3 \
-                    port:tiff port:libpng port:libmng port:jpeg
+                    port:tiff port:libpng port:libmng port:jpeg \
+                    port:${select_port}
 
 # Test for Precompiled-headers support requires a C++ compiler,
 # but configure calls it, by default, with a C compiler.
@@ -95,7 +94,7 @@ set library_path [ list ${prefix}/lib ]
 
 configure.args                                            \
     -v                                                    \
-    -debug-and-release                                    \
+    -release                                              \
     -confirm-license                                      \
     -opensource                                           \
     -prefix          ${qt_dir}                            \
@@ -106,6 +105,9 @@ configure.args                                            \
     -system-sqlite                                        \
     -openssl-linked                                       \
     -dbus-linked                                          \
+    -fast                                                 \
+    -nomake demos                                         \
+    -nomake examples                                      \
     -arch            \"${build_arch}\"
 
 # Stop configure script from searching for SQL Drivers
@@ -177,17 +179,17 @@ variant raster description {Use raster graphics system by default} {
     configure.args-append -graphicssystem raster
 }
 
-variant no_demos description {Do not build demo programs} {
-   configure.args-append -nomake demos
+variant demos description {Build demos} {
+   configure.args-delete -nomake demos
 }
 
-variant no_examples description {Do not build example programs} {
-   configure.args-append -nomake examples
+variant examples description {Build examples} {
+   configure.args-delete -nomake examples
 }
 
-variant no_debug description {Do not include debugging libraries and pkgconfig files} {
-    configure.args-delete -debug-and-release
-    configure.args-append -release
+variant debug description {Build debugging libraries and pkgconfig files as well as release versions} {
+    configure.args-delete -release
+    configure.args-append -debug-and-release
 }
 
 variant universal {
@@ -254,6 +256,8 @@ post-patch {
 }
 
 post-destroot {
+    set destroot_qt ${destroot}${qt_dir}
+
     # Fix .pc and .prl files by changing ${destroot}/lib to ${qt_dir}/lib
     foreach fixfile [glob -nocomplain -directory ${destroot} ${qt_dir}/lib/pkgconfig/* ${qt_dir}/lib/*.prl ${qt_dir}/lib/*/*.prl ${qt_dir}/share/${dirname}/demos/shared/*.prl] {
         reinplace  \
@@ -264,17 +268,59 @@ post-destroot {
     # Install documentation.
     foreach doc { INSTALL LGPL_EXCEPTION.txt LICENSE.GPL3 LICENSE.LGPL README } {
         xinstall -c -m 644 ${worksrcpath}/${doc} \
-            ${destroot}${qt_dir}/share/doc/${name}
+            ${destroot_qt}/share/doc/${name}
     }
 
-    # install the appropriate select file
+    # Fix includes
+    # (1) Remove include/Qt ; it should never be used in Qt 4 or newer
+    # it is there for legacy purposes (for Qt 3 compatibility)
+    if {[file exists ${destroot_qt}/include/Qt]} {
+        delete ${destroot_qt}/include/Qt
+    }
+
+    # (2) remove from ${qt_dir}/include/FOO, for each FOO in the
+    # frameworks, and link into the headers provided by the FOO framework
+    foreach fms [glob -nocomplain -directory ${destroot} \
+                     ${qt_dir}/lib/*.framework] {
+        # 0: split the framework abs path using '/'
+        set tmp [split ${fms} /]
+        # 1: retrieve the framework name
+        set tfm [lindex [split [lindex ${tmp} [expr [llength ${tmp}] - 1]] .] 0]
+        # 2: remove the include directory, if it exists
+        if {[file exists ${destroot_qt}/include/${tfm}] } {
+            # if it exists
+            delete ${destroot_qt}/include/${tfm}
+        }
+        # 3: link into the framework's Headers
+        ln -s ${qt_dir}/lib/${tfm}.framework/Headers \
+            ${destroot_qt}/include/${tfm}
+    }
+
+    # install the select file
     xinstall -m 755 -d ${destroot}${prefix}/etc/select/${select_group}
-    if {[variant_isset no_debug]} {
-        xinstall -c -m 644 ${filespath}/${select_name}-no-debug \
+    xinstall -c -m 644 ${filespath}/${select_name} \
+        ${destroot}${prefix}/etc/select/${select_group}/${select_name}
+
+    # then, reinplace the select file as necessary for variants; put
+    # these here instead of in the variants because I don't know which
+    # are executed first (this post-destroot or a variant's) & the
+    # select file needs to be in place first.
+    if {![variant_isset debug]} {
+        # remove select entries for debug
+        reinplace "/debug/ c\\\n-\n" \
             ${destroot}${prefix}/etc/select/${select_group}/${select_name}
-    } else {
-        xinstall -c -m 644 ${filespath}/${select_name} \
+    }
+    if {![variant_isset demos]} {
+        # remove select entries for demos
+        reinplace "/demo/ c\\\n-\n" \
             ${destroot}${prefix}/etc/select/${select_group}/${select_name}
+
+        # special case: if no examples and no demos,
+        if {![variant_isset examples]} {
+            # remove select entry for share/qt4-mac
+            reinplace "/share\\/qt4-mac/ c\\\n-\n" \
+                ${destroot}${prefix}/etc/select/${select_group}/${select_name}
+        }
     }
 }
 
@@ -292,6 +338,24 @@ To fully complete this installation and make ${name} the default,\n \
 please run:\n \
 \tsudo ${select_port} ${select_name}"
         }
+    }
+}
+
+pre-deactivate {
+    # If this is qt4-* is selected, select 'none' & tell the user
+    set current_select [exec ${prefix}/bin/${select_port} -s]
+    if { [exec ${prefix}/bin/${select_port} -s] == ${select_name} } {
+        system "${prefix}/bin/${select_port} none"
+        ui_msg "\
+Port '${current_select}' was selected; none is now selected.\n \
+To select another port for group '${select_group}', \
+please run '${select_port}'."
+    }
+
+    # remove case-sensitive ${prefix}/${qt_dir}/include/phonon/[Pp]honon
+    foreach tf [glob -directory ${prefix}/${qt_dir}/include/phonon \
+                     ?honon] {
+        delete ${tf}
     }
 }
 
