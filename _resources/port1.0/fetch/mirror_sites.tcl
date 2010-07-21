@@ -266,6 +266,17 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
     http://sea.us.distfiles.macports.org/macports/mpdistfiles/:mirror
 }
 
+set portfetch::mirror_sites::sites(netbsd) {
+    http://ftp7.de.NetBSD.org/pub/ftp.netbsd.org/pub/NetBSD/
+    http://ftp.fr.NetBSD.org/pub/NetBSD/
+    ftp://ftp7.us.NetBSD.org/pub/NetBSD/
+    ftp://ftp.uk.NetBSD.org/pub/NetBSD/
+    ftp://ftp.tw.NetBSD.org/pub/NetBSD/
+    ftp://ftp7.jp.NetBSD.org/pub/NetBSD/
+    ftp://ftp.ru.NetBSD.org/pub/NetBSD/
+    http://ftp.NetBSD.org/pub/NetBSD/
+}
+
 set portfetch::mirror_sites::sites(openbsd) {
     http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
     ftp://carroll.cac.psu.edu/pub/OpenBSD/
