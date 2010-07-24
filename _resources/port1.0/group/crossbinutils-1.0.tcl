@@ -37,8 +37,6 @@
 #   PortGroup               crossbinutils 1.0
 #   crossbinutils.setup     spu 2.20.51.0.5
 
-PortGroup archcheck 1.0
-
 options crossbinutils.target
 
 proc crossbinutils.setup {target version} {
@@ -106,9 +104,6 @@ proc crossbinutils.setup {target version} {
 
     depends_lib \
         port:gettext
-
-    archcheck.files \
-        lib/libintl.dylib
 
     configure.dir   ${workpath}/build
     configure.cmd   ${worksrcpath}/configure
