@@ -432,13 +432,13 @@ variant universal {
                         merge2Dir ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
                     } else {
                         # Files are neither directories nor links
-                        if { ! [catch {system "/usr/bin/cmp ${dir1}/${fl} ${dir2}/${fl} && /bin/cp -v ${dir1}/${fl} ${dir}"}] } {
+                        if { ! [catch {system "/usr/bin/cmp \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
                             # Files are byte by byte the same
                             ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
                             # Actually try to merge the files
                             # First try lipo
-                            if { ! [catch {system "/usr/bin/lipo -create ${dir1}/${fl} ${dir2}/${fl} -output ${dir}/${fl}"}] } {
+                            if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
                                 # lipo worked
                                 ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
                             } else {
@@ -463,7 +463,7 @@ variant universal {
 
                                     ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                                    system "/usr/bin/diff -d ${diffFormat} ${dir}/${arch1}-${fl} ${dir}/${arch2}-${fl} > ${dir}/${fl}; test \$? -le 1"
+                                    system "/usr/bin/diff -d \"${diffFormat}\" \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
@@ -495,7 +495,7 @@ variant universal {
                                     }
 
                                     if { ${known_file}=="no" } {
-                                        if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} ${dir1}/${fl} ${dir2}/${fl} > ${dir}/${fl}; test \$? -le 1"} ] } {
+                                        if { ! [catch {system "/usr/bin/diff -dw \"${diffFormat}\" \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
                                             # diff worked
                                             ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                         } else {
@@ -528,10 +528,10 @@ variant universal {
                                                     set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
                                                     set tempfile1 "${tempdir}/${arch1}-[file rootname ${fl}]"
                                                     set tempfile2 "${tempdir}/${arch2}-[file rootname ${fl}]"
-                                                    system "${cat} ${dir1}/${fl} > ${tempfile1}"
-                                                    system "${cat} ${dir2}/${fl} > ${tempfile2}"
+                                                    system "${cat} \"${dir1}/${fl}\" > \"${tempfile1}\""
+                                                    system "${cat} \"${dir2}/${fl}\" > \"${tempfile2}\""
                                                     set identical "no"
-                                                    if { ! [catch {system "/usr/bin/cmp -s ${tempfile1} ${tempfile2}"}] } {
+                                                    if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
                                                         # files are identical
                                                         ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but the contents are the same"
                                                         set identical "yes"
