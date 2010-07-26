@@ -135,9 +135,24 @@ proc texlive.texmfport {} {
         foreach indexname $indexlist {            
             set filelist [open ${worksrcpath}/tlpkginfo/${indexname}]
             while {[gets $filelist line] >= 0} {
-                if {[lsearch -exact ${texlive.exclude} $line] >= 0} {
+                # Check if file is excluded
+                set excluded false
+                foreach excludeline ${texlive.exclude} {
+                    if {[string equal -nocase $line $excludeline]} {
+                        # file is specifically excluded
+                        set excluded true
+                        break
+                    }
+                    if {[string equal -nocase -length [expr [string length $excludeline] + 1] $line "$excludeline/"]} {
+                        # this is a file in an excluded directory
+                        set excluded true
+                        break;
+                    }
+                }
+                if {$excluded} {
                     continue
                 }
+                    
                 set srcfile ${worksrcpath}/${indexname}/$line
 
                 # check for manpages and treat specially
