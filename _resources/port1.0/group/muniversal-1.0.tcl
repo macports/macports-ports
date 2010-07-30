@@ -164,6 +164,9 @@ variant universal {
     }
 
     configure {
+        # Fix inability to find nm when cross-compiling (#22224, #23431, #23687, #24477, et al)
+        configure.env-append    NM=/usr/bin/nm
+
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] $name ${arch}]"
 
