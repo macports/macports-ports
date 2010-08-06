@@ -190,8 +190,10 @@ proc php5extension.setup {extensions version {source ""}} {
         
         pre-configure {
             set php_version [exec ${prefix}/bin/php-config --version]
-            if {${version} != ${php_version}} {
-                ui_error "${name} ${version} requires PHP ${version} but you have PHP ${php_version}."
+            set php_branch [join [lrange [split ${php_version} .] 0 1] .]
+            set port_branch [join [lrange [split ${version} .] 0 1] .]
+            if {${port_branch} != ${php_branch}} {
+                ui_error "${name} ${version} requires PHP ${port_branch}.x but you have PHP ${php_version}."
                 return -code error "incompatible PHP installation"
             }
         }
