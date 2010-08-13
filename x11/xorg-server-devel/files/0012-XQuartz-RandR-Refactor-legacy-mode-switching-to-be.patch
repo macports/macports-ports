@@ -1,0 +1,598 @@
+From 4fa0b305404517854efbc1ed48e8f0b806ad91f8 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston <jeremyhu@apple.com>
+Date: Tue, 3 Aug 2010 12:51:51 -0700
+Subject: [PATCH] XQuartz: RandR: Refactor legacy mode-switching to be better integrated with RandR
+
+Adds three new functions
+void QuartzRandRSetFakeRootless (void);
+void QuartzRandRSetFakeFullscreen (void);
+void QuartzRandRToggleFullscreen (void);
+
+The first two are identical to requesting the fake modes from a RandR client
+The third responds to cmd-alt-a to leave fullscreen or RandR.
+
+Signed-off-by: Jeremy Huddleston <jeremyhu@apple.com>
+---
+ hw/xquartz/X11Application.m |    2 +-
+ hw/xquartz/darwinEvents.c   |   14 ++--
+ hw/xquartz/quartz.c         |   64 ++++++++++-------
+ hw/xquartz/quartz.h         |   10 +--
+ hw/xquartz/quartzRandR.c    |  163 ++++++++++++++++++++++++++++---------------
+ hw/xquartz/quartzRandR.h    |   20 +++++
+ 6 files changed, 175 insertions(+), 98 deletions(-)
+
+diff --git xorg-server-1.8.99.906/hw/xquartz/X11Application.m xorg-server-1.8.99.906/hw/xquartz/X11Application.m
+index 781dccc..8f4f23f 100644
+--- xorg-server-1.8.99.906/hw/xquartz/X11Application.m
++++ xorg-server-1.8.99.906/hw/xquartz/X11Application.m
+@@ -370,7 +370,7 @@ static void message_kit_thread (SEL selector, NSObject *arg) {
+                     break;
+                     
+                 case 18: /* ApplicationDidReactivate */
+-                    if (XQuartzHasRoot) for_appkit = NO;
++                    if (XQuartzFullscreenVisible) for_appkit = NO;
+                     break;
+                     
+                 case NSApplicationDeactivatedEventType:
+diff --git xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
+index 4332202..74fadf4 100644
+--- xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
++++ xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
+@@ -241,17 +241,17 @@ static void DarwinEventHandler(int screenNum, InternalEvent *ie, DeviceIntPtr de
+             DEBUG_LOG("kXquartzToggleFullscreen\n");
+             if(XQuartzIsRootless)
+                 ErrorF("Ignoring kXquartzToggleFullscreen because of rootless mode.");
+-            else if (XQuartzHasRoot)
+-                QuartzHide();
+-            else
+-                QuartzShow();
++            else 
++                QuartzRandRToggleFullscreen();
+             break;
+             
+         case kXquartzSetRootless:
+             DEBUG_LOG("kXquartzSetRootless\n");
+-            QuartzSetRootless(e->data[0]);
+-            if (!XQuartzIsRootless && !XQuartzHasRoot)
+-                QuartzHide();
++            if(e->data[0]) {
++                QuartzRandRSetFakeRootless();
++            } else {
++                QuartzRandRSetFakeFullscreen(FALSE);
++            }
+             break;
+             
+         case kXquartzSetRootClip:
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartz.c xorg-server-1.8.99.906/hw/xquartz/quartz.c
+index cd90457..e21303c 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartz.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartz.c
+@@ -74,7 +74,7 @@ const char             *quartzOpenGLBundle = NULL;
+ Bool XQuartzFullscreenDisableHotkeys = TRUE;
+ Bool XQuartzOptionSendsAlt = FALSE;
+ Bool XQuartzEnableKeyEquivalents = TRUE;
+-Bool XQuartzHasRoot = FALSE;
++Bool XQuartzFullscreenVisible = FALSE;
+ Bool XQuartzRootlessDefault = TRUE;
+ Bool XQuartzIsRootless = TRUE;
+ Bool XQuartzServerVisible = FALSE;
+@@ -246,44 +246,58 @@ void QuartzUpdateScreens(void) {
+     quartzProcs->UpdateScreen(pScreen);
+ }
+ 
+-void QuartzSetFullscreen(Bool state) {
++void QuartzShowFullscreen(int state) {
++    int i;
++    
++    DEBUG_LOG("QuartzShowFullscreen: state=%d\n", state);
+     
+-    DEBUG_LOG("QuartzSetFullscreen: state=%d\n", state);
++    if(XQuartzIsRootless) {
++        ErrorF("QuartzShowFullscreen called while in rootless mode.\n");
++        return;
++    }
+     
+-    if(XQuartzHasRoot == state)
++    if(XQuartzFullscreenVisible == state)
+         return;
+     
+-    XQuartzHasRoot = state;
++    XQuartzFullscreenVisible = state;
+     
+     xp_disable_update ();
+     
+-    if (!XQuartzHasRoot && !XQuartzIsRootless)
++    if (!XQuartzFullscreenVisible)
+         RootlessHideAllWindows();
+     
+-    RootlessUpdateRooted(XQuartzHasRoot);
++    RootlessUpdateRooted(XQuartzFullscreenVisible);
+     
+-    if (XQuartzHasRoot && !XQuartzIsRootless)
++    if (XQuartzFullscreenVisible) {
+         RootlessShowAllWindows ();
+-    
+-    if (XQuartzHasRoot || XQuartzIsRootless) {
+-        RootlessRepositionWindows(screenInfo.screens[0]);
++        for (i=0; i < screenInfo.numScreens; i++) {
++            ScreenPtr pScreen = screenInfo.screens[i];        
++            RootlessRepositionWindows(pScreen);
++            // JH: I don't think this is necessary, but keeping it here as a reminder
++            //RootlessUpdateScreenPixmap(pScreen);
++        }
+     }
+ 
+     /* Somehow the menubar manages to interfere with our event stream
+      * in fullscreen mode, even though it's not visible. 
+      */
+-    X11ApplicationShowHideMenubar(!XQuartzHasRoot);
++    X11ApplicationShowHideMenubar(!XQuartzFullscreenVisible);
+     
+     xp_reenable_update ();
+     
+     if (XQuartzFullscreenDisableHotkeys)
+-        xp_disable_hot_keys(XQuartzHasRoot);
++        xp_disable_hot_keys(XQuartzFullscreenVisible);
+ }
+ 
+-void QuartzSetRootless(Bool state) {
++void QuartzSetRootless(Bool state) {    
++    DEBUG_LOG("QuartzSetRootless state=%d\n", state);
++    
+     if(XQuartzIsRootless == state)
+         return;
+     
++    if(state)
++        QuartzShowFullscreen(FALSE);
++    
+     XQuartzIsRootless = state;
+ 
+     xp_disable_update();
+@@ -291,20 +305,17 @@ void QuartzSetRootless(Bool state) {
+     /* When in rootless, the menubar is not part of the screen, so we need to update our screens on toggle */    
+     QuartzUpdateScreens();
+ 
+-    if(!XQuartzHasRoot) {
+-        if(!XQuartzIsRootless) {
+-            RootlessHideAllWindows();
+-        } else {
+-            RootlessShowAllWindows();
+-        }
++    if(XQuartzIsRootless) {
++        RootlessShowAllWindows();
++    } else {
++        RootlessHideAllWindows();
+     }
+ 
+-    X11ApplicationShowHideMenubar(!XQuartzHasRoot);
++    X11ApplicationShowHideMenubar(TRUE);
+ 
+     xp_reenable_update();
+ 
+-    if (!XQuartzIsRootless && XQuartzFullscreenDisableHotkeys)
+-        xp_disable_hot_keys(XQuartzHasRoot);
++    xp_disable_hot_keys(FALSE);
+ }
+ 
+ /*
+@@ -327,7 +338,7 @@ void QuartzShow(void) {
+     }
+     
+     if (!XQuartzIsRootless)
+-        QuartzSetFullscreen(TRUE);
++        QuartzShowFullscreen(TRUE);
+ }
+ 
+ 
+@@ -348,8 +359,9 @@ void QuartzHide(void)
+             }
+         }
+     }
+-    
+-    QuartzSetFullscreen(FALSE);
++
++    if(!XQuartzIsRootless)
++        QuartzShowFullscreen(FALSE);
+     XQuartzServerVisible = FALSE;
+ }
+ 
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartz.h xorg-server-1.8.99.906/hw/xquartz/quartz.h
+index a0a17cb..7efb7e0 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartz.h
++++ xorg-server-1.8.99.906/hw/xquartz/quartz.h
+@@ -115,12 +115,8 @@ typedef struct _QuartzModeProcs {
+ 
+ extern QuartzModeProcsPtr quartzProcs;
+ 
+-extern Bool XQuartzHasRoot;          /* TODO: These two booleans are very similar and */
+-extern Bool XQuartzServerVisible;    /* the code that uses them needs to be refactored
+-                                      * XQuartzHasRoot is essentially the "saved" XQuartzServerVisible
+-                                      * value from when the server was not in rootless mode.
+-                                      */
+-
++extern Bool XQuartzFullscreenVisible; /* Are the windows visible (predicated on !rootless) */
++extern Bool XQuartzServerVisible;     /* Is the server visible ... TODO: Refactor to "active" */
+ extern Bool XQuartzEnableKeyEquivalents;
+ extern Bool XQuartzRootlessDefault;  /* Is our default mode rootless? */
+ extern Bool XQuartzIsRootless;       /* Is our current mode rootless (or FS)? */
+@@ -144,7 +140,7 @@ void QuartzSetRootClip(BOOL enable);
+ void QuartzSpaceChanged(uint32_t space_id);
+ 
+ void QuartzSetRootless(Bool state);
+-void QuartzSetFullscreen(Bool state);
++void QuartzShowFullscreen(Bool state);
+ 
+ int server_main(int argc, char **argv, char **envp);
+ #endif
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
+index 7534267..586d299 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
+@@ -62,7 +62,7 @@ static Bool ignore_next_fake_mode_update = FALSE;
+ #define CALLBACK_ERROR -1
+ 
+ typedef int (*QuartzModeCallback)
+-    (ScreenPtr, CGDirectDisplayID, QuartzModeInfoPtr, void *);
++    (ScreenPtr, QuartzModeInfoPtr, void *);
+ 
+ #if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+ 
+@@ -98,6 +98,7 @@ static void QuartzRandRGetModeInfo (CFDictionaryRef modeRef,
+     if (pMode->refresh == 0)
+         pMode->refresh = DEFAULT_REFRESH;
+     pMode->ref = NULL;
++    pMode->pSize = NULL;
+ }
+ 
+ static Bool QuartzRandRCopyCurrentModeInfo (CGDirectDisplayID screenId,
+@@ -112,14 +113,13 @@ static Bool QuartzRandRCopyCurrentModeInfo (CGDirectDisplayID screenId,
+     return TRUE;
+ }
+ 
+-static Bool QuartzRandRSetMode (CGDirectDisplayID screenId,
++static Bool QuartzRandRSetCGMode (CGDirectDisplayID screenId,
+                                 QuartzModeInfoPtr pMode) {
+     CFDictionaryRef modeRef = (CFDictionaryRef) pMode->ref;
+     return (CGDisplaySwitchToMode(screenId, modeRef) == kCGErrorSuccess);
+ }
+ 
+ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+-                                       CGDirectDisplayID screenId,
+                                        QuartzModeCallback callback,
+                                        void *data) {
+     CFDictionaryRef curModeRef, modeRef;
+@@ -129,8 +129,9 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+     int i;
+     BOOL retval = FALSE;
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++    CGDirectDisplayID screenId = pQuartzScreen->displayIDs[0];
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->rootlessMode, data)) {
++    switch(callback(pScreen, &pQuartzScreen->rootlessMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -140,7 +141,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+             break;
+     }
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->fullscreenMode, data)) {
++    switch(callback(pScreen, &pQuartzScreen->fullscreenMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -172,7 +173,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+ 
+         QuartzRandRGetModeInfo(modeRef, &modeInfo);
+         modeInfo.ref = modeRef;
+-        cb = callback(pScreen, screenId, &modeInfo, data);
++        cb = callback(pScreen, &modeInfo, data);
+         if (cb == CALLBACK_SUCCESS)
+             break;
+         if (cb == CALLBACK_ERROR) {
+@@ -193,6 +194,7 @@ static void QuartzRandRGetModeInfo (CGDisplayModeRef modeRef,
+     if (pMode->refresh == 0)
+         pMode->refresh = DEFAULT_REFRESH;
+     pMode->ref = NULL;
++    pMode->pSize = NULL;
+ }
+ 
+ static Bool QuartzRandRCopyCurrentModeInfo (CGDirectDisplayID screenId,
+@@ -206,7 +208,7 @@ static Bool QuartzRandRCopyCurrentModeInfo (CGDirectDisplayID screenId,
+     return TRUE;
+ }
+ 
+-static Bool QuartzRandRSetMode (CGDirectDisplayID screenId,
++static Bool QuartzRandRSetCGMode (CGDirectDisplayID screenId,
+                                 QuartzModeInfoPtr pMode) {
+     CGDisplayModeRef modeRef = (CGDisplayModeRef) pMode->ref;
+     if (!modeRef)
+@@ -216,7 +218,6 @@ static Bool QuartzRandRSetMode (CGDirectDisplayID screenId,
+ }
+ 
+ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+-                                       CGDirectDisplayID screenId,
+                                        QuartzModeCallback callback,
+                                        void *data) {
+     CGDisplayModeRef curModeRef, modeRef;
+@@ -228,8 +229,9 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+     Bool retval = TRUE;
+ 
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++    CGDirectDisplayID screenId = pQuartzScreen->displayIDs[0];
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->rootlessMode, data)) {
++    switch(callback(pScreen, &pQuartzScreen->rootlessMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -239,7 +241,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+             break;
+     }
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->fullscreenMode, data)) {
++    switch(callback(pScreen, &pQuartzScreen->fullscreenMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -277,7 +279,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+ 
+         QuartzRandRGetModeInfo(modeRef, &modeInfo);
+         modeInfo.ref = modeRef;
+-        cb = callback(pScreen, screenId, &modeInfo, data);
++        cb = callback(pScreen, &modeInfo, data);
+         if (cb == CALLBACK_SUCCESS)
+             break;
+ 		if (cb == CALLBACK_ERROR) {
+@@ -306,14 +308,15 @@ static Bool QuartzRandRRegisterMode (ScreenPtr pScreen,
+                                      QuartzModeInfoPtr pMode) {
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
+     Bool isCurrentMode = QuartzRandRModesEqual(&pQuartzScreen->currentMode, pMode);
+-    RRScreenSizePtr pSize = RRRegisterSize(pScreen,
+-        pMode->width, pMode->height, pScreen->mmWidth, pScreen->mmHeight);
+-    if (pSize) {
++
++    /* TODO: DPI */
++    pMode->pSize = RRRegisterSize(pScreen, pMode->width, pMode->height, pScreen->mmWidth, pScreen->mmHeight);
++    if (pMode->pSize) {
+         //DEBUG_LOG("registering: %d x %d @ %d %s\n", (int)pMode->width, (int)pMode->height, (int)pMode->refresh, isCurrentMode ? "*" : "");
+-        RRRegisterRate(pScreen, pSize, pMode->refresh);
++        RRRegisterRate(pScreen, pMode->pSize, pMode->refresh);
+ 
+         if (isCurrentMode)
+-            RRSetCurrentConfig(pScreen, RR_Rotate_0, pMode->refresh, pSize);
++            RRSetCurrentConfig(pScreen, RR_Rotate_0, pMode->refresh, pMode->pSize);
+ 
+         return TRUE;
+     }
+@@ -321,7 +324,6 @@ static Bool QuartzRandRRegisterMode (ScreenPtr pScreen,
+ }
+ 
+ static int QuartzRandRRegisterModeCallback (ScreenPtr pScreen,
+-                                        CGDirectDisplayID screenId,
+                                         QuartzModeInfoPtr pMode,
+                                         void *data __unused) {
+     if(QuartzRandRRegisterMode(pScreen, pMode)) {
+@@ -331,40 +333,53 @@ static int QuartzRandRRegisterModeCallback (ScreenPtr pScreen,
+     }
+ }
+ 
++static Bool QuartzRandRSetMode(ScreenPtr pScreen, QuartzModeInfoPtr pMode, BOOL doRegister) {
++    QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++    CGDirectDisplayID screenId = pQuartzScreen->displayIDs[0];
++
++    if (pQuartzScreen->currentMode.ref && CFEqual(pMode->ref, pQuartzScreen->currentMode.ref)) {
++        DEBUG_LOG("Requested RandR resolution matches current CG mode\n");
++    } if (QuartzRandRSetCGMode(screenId, pMode)) {
++        ignore_next_fake_mode_update = TRUE;
++    } else {
++        DEBUG_LOG("Error while requesting CG resolution change.\n");
++        return FALSE;
++    }
++
++    /* If the client requested the fake rootless mode, switch to rootless.
++     * Otherwise, force fullscreen mode.
++     */
++    QuartzSetRootless(pMode->refresh == FAKE_REFRESH_ROOTLESS);
++    if (pMode->refresh != FAKE_REFRESH_ROOTLESS) {
++        QuartzShowFullscreen(TRUE);
++    }
++
++    if(pQuartzScreen->currentMode.ref)
++        CFRelease(pQuartzScreen->currentMode.ref);
++    pQuartzScreen->currentMode = *pMode;
++    CFRetain(pQuartzScreen->currentMode.ref);
++    
++    return TRUE;
++}
++
+ static int QuartzRandRSetModeCallback (ScreenPtr pScreen,
+-                                       CGDirectDisplayID screenId,
+                                        QuartzModeInfoPtr pMode,
+                                        void *data) {
+     QuartzModeInfoPtr pReqMode = (QuartzModeInfoPtr) data;
+-    QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
+ 	
+     if (!QuartzRandRModesEqual(pMode, pReqMode))
+         return CALLBACK_CONTINUE;  /* continue enumeration */
+ 
+     DEBUG_LOG("Found a match for requested RandR resolution (%dx%d@%d).\n", (int)pMode->width, (int)pMode->height, (int)pMode->refresh);
+ 
+-    if (pQuartzScreen->currentMode.ref && CFEqual(pMode->ref, pQuartzScreen->currentMode.ref)) {
+-        DEBUG_LOG("Requested RandR resolution matches current CG mode\n");
+-        return CALLBACK_SUCCESS; /* We don't need to do anything in CG */
+-    }
+-
+-    if (QuartzRandRSetMode(screenId, pMode)) {
+-        if(pQuartzScreen->currentMode.ref)
+-            CFRelease(pQuartzScreen->currentMode.ref);
+-        pQuartzScreen->currentMode = *pMode;
+-        CFRetain(pQuartzScreen->currentMode.ref);
+-
+-        ignore_next_fake_mode_update = TRUE;
++    if(QuartzRandRSetMode(pScreen, pMode, FALSE))
+         return CALLBACK_SUCCESS;
+-    } else {
+-        DEBUG_LOG("Error while requesting CG resolution change.\n");
++    else
+         return CALLBACK_ERROR;
+-    }
+ }
+ 
+ static Bool QuartzRandRGetInfo (ScreenPtr pScreen, Rotation *rotations) {
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
+-    CGDirectDisplayID screenId;
+ 
+     *rotations = RR_Rotate_0;  /* TODO: support rotation */
+ 
+@@ -381,8 +396,7 @@ static Bool QuartzRandRGetInfo (ScreenPtr pScreen, Rotation *rotations) {
+         return TRUE;
+     }
+ 
+-    screenId = pQuartzScreen->displayIDs[0];
+-    return QuartzRandREnumerateModes(pScreen, screenId, QuartzRandRRegisterModeCallback, NULL);
++    return QuartzRandREnumerateModes(pScreen, QuartzRandRRegisterModeCallback, NULL);
+ }
+ 
+ static Bool QuartzRandRSetConfig (ScreenPtr           pScreen,
+@@ -390,39 +404,20 @@ static Bool QuartzRandRSetConfig (ScreenPtr           pScreen,
+                                   int                 rate,
+                                   RRScreenSizePtr     pSize) {
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
+-    CGDirectDisplayID screenId;
+     QuartzModeInfo reqMode;
+ 
+     reqMode.width = pSize->width;
+     reqMode.height = pSize->height;
+     reqMode.refresh = rate;
+ 
+-    /* If the client requested the fake rootless mode, switch to rootless.
+-     * Otherwise, force fullscreen mode.
+-     * TODO: Refactor all this fullscreen/rootless crap as it is spaghetti
+-     *       has redundancies.
+-     */
+-    QuartzSetRootless(reqMode.refresh == FAKE_REFRESH_ROOTLESS);
+-    QuartzSetFullscreen(reqMode.refresh != FAKE_REFRESH_ROOTLESS);
+-    if(reqMode.refresh != FAKE_REFRESH_ROOTLESS &&
+-       reqMode.refresh != FAKE_REFRESH_FULLSCREEN)
+-        QuartzShow();
+-
+     if (pQuartzScreen->displayCount == 0)
+         return FALSE;
+-    if (pQuartzScreen->displayCount > 1) {
+-        /* RandR operations are not well-defined for an X11 screen spanning
+-           multiple CG displays. Do not accept any configuations that differ
+-           from the current configuration. */
+-        return TRUE;
+-    }
+ 
+     /* Do not switch modes if requested mode is equal to current mode. */
+     if (QuartzRandRModesEqual(&reqMode, &pQuartzScreen->currentMode))
+         return TRUE;
+         
+-    screenId = pQuartzScreen->displayIDs[0];
+-    if (QuartzRandREnumerateModes(pScreen, screenId, QuartzRandRSetModeCallback, &reqMode)) {
++    if (QuartzRandREnumerateModes(pScreen, QuartzRandRSetModeCallback, &reqMode)) {
+         return TRUE;
+     }
+     
+@@ -499,3 +494,57 @@ Bool QuartzRandRInit (ScreenPtr pScreen) {
+     pScrPriv->rrSetConfig = QuartzRandRSetConfig;
+     return TRUE;
+ }
++
++void QuartzRandRSetFakeRootless (void) {
++    int i;
++    
++    DEBUG_LOG("QuartzRandRSetFakeRootless called.\n");
++    
++    for (i=0; i < screenInfo.numScreens; i++) {
++        ScreenPtr pScreen = screenInfo.screens[i];
++        QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++
++        QuartzRandRSetMode(pScreen, &pQuartzScreen->rootlessMode, TRUE);
++    }
++}
++
++void QuartzRandRSetFakeFullscreen (BOOL state) {
++    int i;
++
++    DEBUG_LOG("QuartzRandRSetFakeFullscreen called.\n");
++    
++    for (i=0; i < screenInfo.numScreens; i++) {
++        ScreenPtr pScreen = screenInfo.screens[i];
++        QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++
++        QuartzRandRSetMode(pScreen, &pQuartzScreen->fullscreenMode, TRUE);
++    }
++    
++    QuartzShowFullscreen(state);
++}
++
++/* Toggle fullscreen mode.  If "fake" fullscreen is the current mode,
++ * this will just show/hide the X11 windows.  If we are in a RandR fullscreen
++ * mode, this will toggles us to the default fake mode and hide windows if
++ * it is fullscreen
++ */
++void QuartzRandRToggleFullscreen (void) {
++    ScreenPtr pScreen = screenInfo.screens[0];
++    QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
++
++    if (pQuartzScreen->currentMode.ref == NULL) {
++        ErrorF("Ignoring QuartzRandRToggleFullscreen because don't have a current mode set.\n");
++    } else if (pQuartzScreen->currentMode.refresh == FAKE_REFRESH_ROOTLESS) {
++        ErrorF("Ignoring QuartzRandRToggleFullscreen because we are in rootless mode.\n");
++    } else if (pQuartzScreen->currentMode.refresh == FAKE_REFRESH_FULLSCREEN) {
++        /* Legacy fullscreen mode.  Hide/Show */
++        QuartzShowFullscreen(!XQuartzFullscreenVisible);
++    } else {
++        /* RandR fullscreen mode.  Return to default mode and hide if it is fullscreen. */
++        if(XQuartzRootlessDefault) {
++            QuartzRandRSetFakeRootless();
++        } else {
++            QuartzRandRSetFakeFullscreen(FALSE);
++        }
++    }    
++}
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
+index b2d4d09..fb0ce0c 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
++++ xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
+@@ -31,9 +31,12 @@
+ #ifndef _QUARTZRANDR_H_
+ #define _QUARTZRANDR_H_
+ 
++#include "randrstr.h"
++
+ typedef struct {
+     size_t width, height;
+     int refresh;
++    RRScreenSizePtr pSize;
+     void *ref; /* CGDisplayModeRef or CFDictionaryRef */
+ } QuartzModeInfo, *QuartzModeInfoPtr;
+ 
+@@ -57,4 +60,21 @@ void QuartzCopyDisplayIDs(ScreenPtr pScreen,
+ Bool QuartzRandRUpdateFakeModes (BOOL force_update);
+ Bool QuartzRandRInit (ScreenPtr pScreen);
+ 
++/* These two functions provide functionality expected by the legacy
++ * mode switching.  They are equivalent to a client requesting one
++ * of the modes corresponding to these "fake" modes.
++ * QuartzRandRSetFakeFullscreen takes an argument which is used to determine
++ * the visibility of the windows after the change.
++ */
++void QuartzRandRSetFakeRootless (void);
++void QuartzRandRSetFakeFullscreen (BOOL state);
++
++
++/* Toggle fullscreen mode.  If "fake" fullscreen is the current mode,
++ * this will just show/hide the X11 windows.  If we are in a RandR fullscreen
++ * mode, this will toggles us to the default fake mode and hide windows if
++ * it is fullscreen
++ */
++void QuartzRandRToggleFullscreen (void);
++
+ #endif
+-- 
+1.5.6.6
+

@@ -1,0 +1,742 @@
+From 0541f9c9b5d232c48454d98f9f21ffd66c09d97e Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston <jeremyhu@apple.com>
+Date: Mon, 26 Jul 2010 23:34:49 -0700
+Subject: [PATCH] XQuartz: RandR: Don't change the rootless preference when changing RandR mode
+
+Also renames a bunch of other variables for better consistency.
+
+Signed-off-by: Jeremy Huddleston <jeremyhu@apple.com>
+---
+ hw/xquartz/X11Application.h |    3 --
+ hw/xquartz/X11Application.m |   44 +++++++++++++++----------------
+ hw/xquartz/X11Controller.m  |   42 +++++++++++++++---------------
+ hw/xquartz/darwinEvents.c   |    6 ++--
+ hw/xquartz/quartz.c         |   59 +++++++++++++++++++++++-------------------
+ hw/xquartz/quartz.h         |   18 +++++++++++-
+ hw/xquartz/quartzAudio.c    |    4 +-
+ hw/xquartz/quartzCommon.h   |    6 ----
+ hw/xquartz/quartzKeyboard.c |    6 ++--
+ hw/xquartz/quartzRandR.c    |   32 +++++++++++-----------
+ hw/xquartz/quartzRandR.h    |    2 +-
+ hw/xquartz/xpr/xprAppleWM.c |    2 +-
+ hw/xquartz/xpr/xprCursor.c  |    6 ++--
+ hw/xquartz/xpr/xprFrame.c   |    4 +-
+ hw/xquartz/xpr/xprScreen.c  |    5 ++-
+ 15 files changed, 124 insertions(+), 115 deletions(-)
+
+diff --git xorg-server-1.8.99.906/hw/xquartz/X11Application.h xorg-server-1.8.99.906/hw/xquartz/X11Application.h
+index ce19e03..4621284 100644
+--- xorg-server-1.8.99.906/hw/xquartz/X11Application.h
++++ xorg-server-1.8.99.906/hw/xquartz/X11Application.h
+@@ -75,9 +75,6 @@ void X11ApplicationLaunchClient (const char *cmd);
+ 
+ void X11ApplicationMain(int argc, char **argv, char **envp);
+ 
+-extern int X11EnableKeyEquivalents;
+-extern int quartzHasRoot, quartzEnableRootless, quartzFullscreenMenu;
+-
+ #define PREFS_APPSMENU              "apps_menu"
+ #define PREFS_FAKEBUTTONS           "enable_fake_buttons"
+ #define PREFS_SYSBEEP               "enable_system_beep"
+diff --git xorg-server-1.8.99.906/hw/xquartz/X11Application.m xorg-server-1.8.99.906/hw/xquartz/X11Application.m
+index 36c39e5..781dccc 100644
+--- xorg-server-1.8.99.906/hw/xquartz/X11Application.m
++++ xorg-server-1.8.99.906/hw/xquartz/X11Application.m
+@@ -38,6 +38,7 @@
+ #import "X11Application.h"
+ 
+ #include "darwin.h"
++#include "quartz.h"
+ #include "darwinEvents.h"
+ #include "quartzKeyboard.h"
+ #include "quartz.h"
+@@ -63,9 +64,6 @@ extern int xpbproxy_run (void);
+ /* Stuck modifier / button state... force release when we context switch */
+ static NSEventType keyState[NUM_KEYCODES];
+ 
+-int X11EnableKeyEquivalents = TRUE, quartzFullscreenMenu = FALSE;
+-int quartzHasRoot = FALSE, quartzEnableRootless = TRUE;
+-
+ extern Bool noTestExtensions;
+ 
+ #if MAC_OS_X_VERSION_MIN_REQUIRED >= 1050
+@@ -287,23 +285,23 @@ static void message_kit_thread (SEL selector, NSObject *arg) {
+                         do_swallow = YES;
+                         for_x = NO;
+ #if XPLUGIN_VERSION >= 1
+-                    } else if(X11EnableKeyEquivalents &&
++                    } else if(XQuartzEnableKeyEquivalents &&
+                              xp_is_symbolic_hotkey_event([e eventRef])) {
+                         swallow_keycode = [e keyCode];
+                         do_swallow = YES;
+                         for_x = NO;
+ #endif
+-                    } else if(X11EnableKeyEquivalents &&
++                    } else if(XQuartzEnableKeyEquivalents &&
+                               [[self mainMenu] performKeyEquivalent:e]) {
+                         swallow_keycode = [e keyCode];
+                         do_swallow = YES;
+                         for_appkit = NO;
+                         for_x = NO;
+-                    } else if(!quartzEnableRootless
++                    } else if(!XQuartzIsRootless
+                               && ([e modifierFlags] & ALL_KEY_MASKS) == (NSCommandKeyMask | NSAlternateKeyMask)
+                               && ([e keyCode] == 0 /*a*/ || [e keyCode] == 53 /*Esc*/)) {
+                         /* We have this here to force processing fullscreen 
+-                         * toggle even if X11EnableKeyEquivalents is disabled */
++                         * toggle even if XQuartzEnableKeyEquivalents is disabled */
+                         swallow_keycode = [e keyCode];
+                         do_swallow = YES;
+                         for_x = NO;
+@@ -372,7 +370,7 @@ static void message_kit_thread (SEL selector, NSObject *arg) {
+                     break;
+                     
+                 case 18: /* ApplicationDidReactivate */
+-                    if (quartzHasRoot) for_appkit = NO;
++                    if (XQuartzHasRoot) for_appkit = NO;
+                     break;
+                     
+                 case NSApplicationDeactivatedEventType:
+@@ -422,7 +420,7 @@ static void message_kit_thread (SEL selector, NSObject *arg) {
+     if ([state boolValue])
+         SetSystemUIMode(kUIModeNormal, 0); 
+     else
+-        SetSystemUIMode(kUIModeAllHidden, quartzFullscreenMenu ? kUIOptionAutoShowMenuBar : 0); // kUIModeAllSuppressed or kUIOptionAutoShowMenuBar can be used to allow "mouse-activation"
++        SetSystemUIMode(kUIModeAllHidden, XQuartzFullscreenMenu ? kUIOptionAutoShowMenuBar : 0); // kUIModeAllSuppressed or kUIOptionAutoShowMenuBar can be used to allow "mouse-activation"
+ }
+ 
+ - (void) launch_client:(NSString *)cmd {
+@@ -720,18 +718,18 @@ static NSMutableArray * cfarray_to_nsarray (CFArrayRef in) {
+     NSString *nsstr;
+     const char *tem;
+ 	
+-    quartzUseSysBeep = [self prefs_get_boolean:@PREFS_SYSBEEP
+-                                       default:quartzUseSysBeep];
+-    quartzEnableRootless = [self prefs_get_boolean:@PREFS_ROOTLESS
+-                                           default:quartzEnableRootless];
+-    quartzFullscreenMenu = [self prefs_get_boolean:@PREFS_FULLSCREEN_MENU
+-                                           default:quartzFullscreenMenu];
+-    quartzFullscreenDisableHotkeys = ![self prefs_get_boolean:@PREFS_FULLSCREEN_HOTKEYS
+-                                                      default:!quartzFullscreenDisableHotkeys];
++    XQuartzUseSysBeep = [self prefs_get_boolean:@PREFS_SYSBEEP
++                                       default:XQuartzUseSysBeep];
++    XQuartzRootlessDefault = [self prefs_get_boolean:@PREFS_ROOTLESS
++                                           default:XQuartzRootlessDefault];
++    XQuartzFullscreenMenu = [self prefs_get_boolean:@PREFS_FULLSCREEN_MENU
++                                           default:XQuartzFullscreenMenu];
++    XQuartzFullscreenDisableHotkeys = ![self prefs_get_boolean:@PREFS_FULLSCREEN_HOTKEYS
++                                                      default:!XQuartzFullscreenDisableHotkeys];
+     darwinFakeButtons = [self prefs_get_boolean:@PREFS_FAKEBUTTONS
+                                         default:darwinFakeButtons];
+-    quartzOptionSendsAlt = [self prefs_get_boolean:@PREFS_OPTION_SENDS_ALT
+-                                           default:quartzOptionSendsAlt];
++    XQuartzOptionSendsAlt = [self prefs_get_boolean:@PREFS_OPTION_SENDS_ALT
++                                           default:XQuartzOptionSendsAlt];
+ 
+     if (darwinFakeButtons) {
+         const char *fake2, *fake3;
+@@ -759,8 +757,8 @@ static NSMutableArray * cfarray_to_nsarray (CFArrayRef in) {
+         }
+     }
+ 
+-    X11EnableKeyEquivalents = [self prefs_get_boolean:@PREFS_KEYEQUIVS
+-                                              default:X11EnableKeyEquivalents];
++    XQuartzEnableKeyEquivalents = [self prefs_get_boolean:@PREFS_KEYEQUIVS
++                                              default:XQuartzEnableKeyEquivalents];
+ 	
+     darwinSyncKeymap = [self prefs_get_boolean:@PREFS_SYNC_KEYMAP
+                                        default:darwinSyncKeymap];
+@@ -1158,7 +1156,7 @@ static inline int ensure_flag(int flags, int device_independent, int device_depe
+                 pDev = darwinTabletCurrent;
+             }
+ 
+-            if(!quartzServerVisible && noTestExtensions) {
++            if(!XQuartzServerVisible && noTestExtensions) {
+ #if defined(XPLUGIN_VERSION) && XPLUGIN_VERSION > 0
+ /* Older libXplugin (Tiger/"Stock" Leopard) aren't thread safe, so we can't call xp_find_window from the Appkit thread */
+                 xp_window_id wid = 0;
+@@ -1218,7 +1216,7 @@ static inline int ensure_flag(int flags, int device_independent, int device_depe
+             /* If we're in the background, we need to send a MotionNotify event
+              * first, since we aren't getting them on background mouse motion
+              */
+-            if(!quartzServerVisible && noTestExtensions) {
++            if(!XQuartzServerVisible && noTestExtensions) {
+                 bgMouseLocationUpdated = FALSE;
+                 DarwinSendPointerEvents(darwinPointer, MotionNotify, 0, location.x,
+                                         location.y, pressure, tilt.x, tilt.y);
+diff --git xorg-server-1.8.99.906/hw/xquartz/X11Controller.m xorg-server-1.8.99.906/hw/xquartz/X11Controller.m
+index d66d039..13b6366 100644
+--- xorg-server-1.8.99.906/hw/xquartz/X11Controller.m
++++ xorg-server-1.8.99.906/hw/xquartz/X11Controller.m
+@@ -609,13 +609,13 @@ objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+ }
+ 
+ - (IBAction) enable_fullscreen_changed:sender {
+-    int value = ![enable_fullscreen intValue];
++    XQuartzRootlessDefault = ![enable_fullscreen intValue];
+ 
+-    [enable_fullscreen_menu setEnabled:!value];
++    [enable_fullscreen_menu setEnabled:!XQuartzRootlessDefault];
+ 
+-    DarwinSendDDXEvent(kXquartzSetRootless, 1, value);
++    DarwinSendDDXEvent(kXquartzSetRootless, 1, XQuartzRootlessDefault);
+ 
+-    [NSApp prefs_set_boolean:@PREFS_ROOTLESS value:value];
++    [NSApp prefs_set_boolean:@PREFS_ROOTLESS value:XQuartzRootlessDefault];
+     [NSApp prefs_synchronize];
+ }
+ 
+@@ -638,24 +638,24 @@ objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+         darwinFakeButtons = [fake_buttons intValue];
+         [NSApp prefs_set_boolean:@PREFS_FAKEBUTTONS value:darwinFakeButtons];
+     } else if(sender == use_sysbeep) {
+-        quartzUseSysBeep = [use_sysbeep intValue];
+-        [NSApp prefs_set_boolean:@PREFS_SYSBEEP value:quartzUseSysBeep];
++        XQuartzUseSysBeep = [use_sysbeep intValue];
++        [NSApp prefs_set_boolean:@PREFS_SYSBEEP value:XQuartzUseSysBeep];
+     } else if(sender == enable_keyequivs) {
+-        X11EnableKeyEquivalents =  [enable_keyequivs intValue];
+-        [NSApp prefs_set_boolean:@PREFS_KEYEQUIVS value:X11EnableKeyEquivalents];
++        XQuartzEnableKeyEquivalents =  [enable_keyequivs intValue];
++        [NSApp prefs_set_boolean:@PREFS_KEYEQUIVS value:XQuartzEnableKeyEquivalents];
+     } else if(sender == sync_keymap) {
+         darwinSyncKeymap = [sync_keymap intValue];
+         [NSApp prefs_set_boolean:@PREFS_SYNC_KEYMAP value:darwinSyncKeymap];
+     } else if(sender == enable_fullscreen_menu) {
+-        quartzFullscreenMenu = [enable_fullscreen_menu intValue];
+-        [NSApp prefs_set_boolean:@PREFS_FULLSCREEN_MENU value:quartzFullscreenMenu];
++        XQuartzFullscreenMenu = [enable_fullscreen_menu intValue];
++        [NSApp prefs_set_boolean:@PREFS_FULLSCREEN_MENU value:XQuartzFullscreenMenu];
+     } else if(sender == option_sends_alt) {
+-        BOOL prev_opt_sends_alt = quartzOptionSendsAlt;
++        BOOL prev_opt_sends_alt = XQuartzOptionSendsAlt;
+         
+-        quartzOptionSendsAlt = [option_sends_alt intValue];
+-        [NSApp prefs_set_boolean:@PREFS_OPTION_SENDS_ALT value:quartzOptionSendsAlt];
++        XQuartzOptionSendsAlt = [option_sends_alt intValue];
++        [NSApp prefs_set_boolean:@PREFS_OPTION_SENDS_ALT value:XQuartzOptionSendsAlt];
+ 
+-        if(prev_opt_sends_alt != quartzOptionSendsAlt)
++        if(prev_opt_sends_alt != XQuartzOptionSendsAlt)
+             QuartsResyncKeymap(TRUE);
+     } else if(sender == click_through) {
+         [NSApp prefs_set_boolean:@PREFS_CLICK_THROUGH value:[click_through intValue]];
+@@ -701,10 +701,10 @@ objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+     BOOL pbproxy_active = [NSApp prefs_get_boolean:@PREFS_SYNC_PB default:YES];
+     
+     [fake_buttons setIntValue:darwinFakeButtons];
+-    [use_sysbeep setIntValue:quartzUseSysBeep];
+-    [enable_keyequivs setIntValue:X11EnableKeyEquivalents];
++    [use_sysbeep setIntValue:XQuartzUseSysBeep];
++    [enable_keyequivs setIntValue:XQuartzEnableKeyEquivalents];
+     [sync_keymap setIntValue:darwinSyncKeymap];
+-    [option_sends_alt setIntValue:quartzOptionSendsAlt];
++    [option_sends_alt setIntValue:XQuartzOptionSendsAlt];
+     [click_through setIntValue:[NSApp prefs_get_boolean:@PREFS_CLICK_THROUGH default:NO]];
+     [focus_follows_mouse setIntValue:[NSApp prefs_get_boolean:@PREFS_FFM default:NO]];
+     [focus_on_new_window setIntValue:[NSApp prefs_get_boolean:@PREFS_FOCUS_ON_NEW_WINDOW default:YES]];
+@@ -729,9 +729,9 @@ objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+     [sync_text1 setTextColor:pbproxy_active ? [NSColor controlTextColor] : [NSColor disabledControlTextColor]];
+     [sync_text2 setTextColor:pbproxy_active ? [NSColor controlTextColor] : [NSColor disabledControlTextColor]];
+ 	
+-    [enable_fullscreen setIntValue:!quartzEnableRootless];
+-    [enable_fullscreen_menu setEnabled:!quartzEnableRootless];
+-    [enable_fullscreen_menu setIntValue:quartzFullscreenMenu];
++    [enable_fullscreen setIntValue:!XQuartzRootlessDefault];
++    [enable_fullscreen_menu setEnabled:!XQuartzRootlessDefault];
++    [enable_fullscreen_menu setIntValue:XQuartzFullscreenMenu];
+     
+     [prefs_panel makeKeyAndOrderFront:sender];
+ }
+@@ -752,7 +752,7 @@ objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+   NSMenu *menu = [item menu];
+     
+   if (item == toggle_fullscreen_item)
+-    return !quartzEnableRootless;
++    return !XQuartzIsRootless;
+   else if (menu == [X11App windowsMenu] || menu == dock_menu
+ 	   || (menu == [x11_about_item menu] && [item tag] == 42))
+     return (AppleWMSelectedEvents () & AppleWMControllerNotifyMask) != 0;
+diff --git xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
+index 7367068..4332202 100644
+--- xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
++++ xorg-server-1.8.99.906/hw/xquartz/darwinEvents.c
+@@ -239,9 +239,9 @@ static void DarwinEventHandler(int screenNum, InternalEvent *ie, DeviceIntPtr de
+             
+         case kXquartzToggleFullscreen:
+             DEBUG_LOG("kXquartzToggleFullscreen\n");
+-            if(quartzEnableRootless) 
++            if(XQuartzIsRootless)
+                 ErrorF("Ignoring kXquartzToggleFullscreen because of rootless mode.");
+-            else if (quartzHasRoot)
++            else if (XQuartzHasRoot)
+                 QuartzHide();
+             else
+                 QuartzShow();
+@@ -250,7 +250,7 @@ static void DarwinEventHandler(int screenNum, InternalEvent *ie, DeviceIntPtr de
+         case kXquartzSetRootless:
+             DEBUG_LOG("kXquartzSetRootless\n");
+             QuartzSetRootless(e->data[0]);
+-            if (!quartzEnableRootless && !quartzHasRoot)
++            if (!XQuartzIsRootless && !XQuartzHasRoot)
+                 QuartzHide();
+             break;
+             
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartz.c xorg-server-1.8.99.906/hw/xquartz/quartz.c
+index a52cac9..cd90457 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartz.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartz.c
+@@ -66,15 +66,20 @@
+ #include <rootlessCommon.h>
+ #include <Xplugin.h>
+ 
+-// Shared global variables for Quartz modes
+-int                     quartzUseSysBeep = 0;
+-int                     quartzServerVisible = FALSE;
+ DevPrivateKeyRec        quartzScreenKeyRec;
+ int                     aquaMenuBarHeight = 0;
+ QuartzModeProcsPtr      quartzProcs = NULL;
+ const char             *quartzOpenGLBundle = NULL;
+-int                     quartzFullscreenDisableHotkeys = TRUE;
+-int                     quartzOptionSendsAlt = FALSE;
++
++Bool XQuartzFullscreenDisableHotkeys = TRUE;
++Bool XQuartzOptionSendsAlt = FALSE;
++Bool XQuartzEnableKeyEquivalents = TRUE;
++Bool XQuartzHasRoot = FALSE;
++Bool XQuartzRootlessDefault = TRUE;
++Bool XQuartzIsRootless = TRUE;
++Bool XQuartzServerVisible = FALSE;
++Bool XQuartzFullscreenMenu = FALSE;
++Bool XQuartzUseSysBeep = FALSE;
+ 
+ /*
+ ===========================================================================
+@@ -245,61 +250,61 @@ void QuartzSetFullscreen(Bool state) {
+     
+     DEBUG_LOG("QuartzSetFullscreen: state=%d\n", state);
+     
+-    if(quartzHasRoot == state)
++    if(XQuartzHasRoot == state)
+         return;
+     
+-    quartzHasRoot = state;
++    XQuartzHasRoot = state;
+     
+     xp_disable_update ();
+     
+-    if (!quartzHasRoot && !quartzEnableRootless)
++    if (!XQuartzHasRoot && !XQuartzIsRootless)
+         RootlessHideAllWindows();
+     
+-    RootlessUpdateRooted(quartzHasRoot);
++    RootlessUpdateRooted(XQuartzHasRoot);
+     
+-    if (quartzHasRoot && !quartzEnableRootless)
++    if (XQuartzHasRoot && !XQuartzIsRootless)
+         RootlessShowAllWindows ();
+     
+-    if (quartzHasRoot || quartzEnableRootless) {
++    if (XQuartzHasRoot || XQuartzIsRootless) {
+         RootlessRepositionWindows(screenInfo.screens[0]);
+     }
+ 
+     /* Somehow the menubar manages to interfere with our event stream
+      * in fullscreen mode, even though it's not visible. 
+      */
+-    X11ApplicationShowHideMenubar(!quartzHasRoot);
++    X11ApplicationShowHideMenubar(!XQuartzHasRoot);
+     
+     xp_reenable_update ();
+     
+-    if (quartzFullscreenDisableHotkeys)
+-        xp_disable_hot_keys(quartzHasRoot);
++    if (XQuartzFullscreenDisableHotkeys)
++        xp_disable_hot_keys(XQuartzHasRoot);
+ }
+ 
+ void QuartzSetRootless(Bool state) {
+-    if(quartzEnableRootless == state)
++    if(XQuartzIsRootless == state)
+         return;
+     
+-    quartzEnableRootless = state;
++    XQuartzIsRootless = state;
+ 
+     xp_disable_update();
+ 
+     /* When in rootless, the menubar is not part of the screen, so we need to update our screens on toggle */    
+     QuartzUpdateScreens();
+ 
+-    if(!quartzHasRoot) {
+-        if(!quartzEnableRootless) {
++    if(!XQuartzHasRoot) {
++        if(!XQuartzIsRootless) {
+             RootlessHideAllWindows();
+         } else {
+             RootlessShowAllWindows();
+         }
+     }
+ 
+-    X11ApplicationShowHideMenubar(!quartzHasRoot);
++    X11ApplicationShowHideMenubar(!XQuartzHasRoot);
+ 
+     xp_reenable_update();
+ 
+-    if (!quartzEnableRootless && quartzFullscreenDisableHotkeys)
+-        xp_disable_hot_keys(quartzHasRoot);
++    if (!XQuartzIsRootless && XQuartzFullscreenDisableHotkeys)
++        xp_disable_hot_keys(XQuartzHasRoot);
+ }
+ 
+ /*
+@@ -311,17 +316,17 @@ void QuartzSetRootless(Bool state) {
+ void QuartzShow(void) {
+     int i;
+ 
+-    if (quartzServerVisible)
++    if (XQuartzServerVisible)
+         return;
+     
+-    quartzServerVisible = TRUE;
++    XQuartzServerVisible = TRUE;
+     for (i = 0; i < screenInfo.numScreens; i++) {
+         if (screenInfo.screens[i]) {
+             quartzProcs->ResumeScreen(screenInfo.screens[i]);
+         }
+     }
+     
+-    if (!quartzEnableRootless)
++    if (!XQuartzIsRootless)
+         QuartzSetFullscreen(TRUE);
+ }
+ 
+@@ -336,7 +341,7 @@ void QuartzHide(void)
+ {
+     int i;
+ 
+-    if (quartzServerVisible) {
++    if (XQuartzServerVisible) {
+         for (i = 0; i < screenInfo.numScreens; i++) {
+             if (screenInfo.screens[i]) {
+                 quartzProcs->SuspendScreen(screenInfo.screens[i]);
+@@ -345,7 +350,7 @@ void QuartzHide(void)
+     }
+     
+     QuartzSetFullscreen(FALSE);
+-    quartzServerVisible = FALSE;
++    XQuartzServerVisible = FALSE;
+ }
+ 
+ 
+@@ -358,7 +363,7 @@ void QuartzSetRootClip(
+ {
+     int i;
+ 
+-    if (!quartzServerVisible)
++    if (!XQuartzServerVisible)
+         return;
+ 
+     for (i = 0; i < screenInfo.numScreens; i++) {
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartz.h xorg-server-1.8.99.906/hw/xquartz/quartz.h
+index 1b924e7..a0a17cb 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartz.h
++++ xorg-server-1.8.99.906/hw/xquartz/quartz.h
+@@ -35,6 +35,7 @@
+ 
+ #include "screenint.h"
+ #include "window.h"
++#include "pixmap.h"
+ 
+ /*------------------------------------------
+    Quartz display mode function types
+@@ -113,7 +114,20 @@ typedef struct _QuartzModeProcs {
+ } QuartzModeProcsRec, *QuartzModeProcsPtr;
+ 
+ extern QuartzModeProcsPtr quartzProcs;
+-extern int quartzHasRoot, quartzEnableRootless;
++
++extern Bool XQuartzHasRoot;          /* TODO: These two booleans are very similar and */
++extern Bool XQuartzServerVisible;    /* the code that uses them needs to be refactored
++                                      * XQuartzHasRoot is essentially the "saved" XQuartzServerVisible
++                                      * value from when the server was not in rootless mode.
++                                      */
++
++extern Bool XQuartzEnableKeyEquivalents;
++extern Bool XQuartzRootlessDefault;  /* Is our default mode rootless? */
++extern Bool XQuartzIsRootless;       /* Is our current mode rootless (or FS)? */
++extern Bool XQuartzFullscreenMenu;   /* Show the menu bar (autohide) while in FS */
++extern Bool XQuartzFullscreenDisableHotkeys;
++extern Bool XQuartzOptionSendsAlt;   /* Alt or Mode_switch? */
++extern Bool XQuartzUseSysBeep;       /* Sys beep or our own? */
+ 
+ Bool QuartzAddScreen(int index, ScreenPtr pScreen);
+ Bool QuartzSetupScreen(int index, ScreenPtr pScreen);
+@@ -129,8 +143,8 @@ void QuartzHide(void);
+ void QuartzSetRootClip(BOOL enable);
+ void QuartzSpaceChanged(uint32_t space_id);
+ 
+-void QuartzSetFullscreen(Bool state);
+ void QuartzSetRootless(Bool state);
++void QuartzSetFullscreen(Bool state);
+ 
+ int server_main(int argc, char **argv, char **envp);
+ #endif
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzAudio.c xorg-server-1.8.99.906/hw/xquartz/quartzAudio.c
+index 708202b..d0f7c53 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzAudio.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartzAudio.c
+@@ -42,7 +42,7 @@
+ #include <dix-config.h>
+ #endif
+ 
+-#include "quartzCommon.h"
++#include "quartz.h"
+ #include "quartzAudio.h"
+ 
+ #include <CoreAudio/CoreAudio.h>
+@@ -220,7 +220,7 @@ void DDXRingBell(
+     int pitch,          // pitch is Hz
+     int duration )      // duration is milliseconds
+ {
+-    if (quartzUseSysBeep) {
++    if (XQuartzUseSysBeep) {
+         if (volume)
+             NSBeep();
+         return;
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzCommon.h xorg-server-1.8.99.906/hw/xquartz/quartzCommon.h
+index 718df4b..fbfe6f8 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzCommon.h
++++ xorg-server-1.8.99.906/hw/xquartz/quartzCommon.h
+@@ -38,13 +38,7 @@
+ #include <X11/Xdefs.h>
+ #include "privates.h"
+ 
+-// User preferences used by Quartz modes
+-extern int              quartzUseSysBeep;
+-extern int              quartzFullscreenDisableHotkeys;
+-extern int              quartzOptionSendsAlt;
+-
+ // Other shared data
+-extern int              quartzServerVisible;
+ extern DevPrivateKeyRec quartzScreenKeyRec;
+ #define quartzScreenKey (&quartzScreenKeyRec)
+ extern int              aquaMenuBarHeight;
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzKeyboard.c xorg-server-1.8.99.906/hw/xquartz/quartzKeyboard.c
+index 75cf23f..f54c686 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzKeyboard.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartzKeyboard.c
+@@ -48,7 +48,7 @@
+ #include <sys/stat.h>
+ #include <AvailabilityMacros.h>
+ 
+-#include "quartzCommon.h"
++#include "quartz.h"
+ #include "darwin.h"
+ #include "darwinEvents.h"
+ 
+@@ -262,7 +262,7 @@ static void DarwinBuildModifierMaps(darwinKeyboardInfo *info) {
+             case XK_Alt_L:
+                 info->modifierKeycodes[NX_MODIFIERKEY_ALTERNATE][0] = i;
+                 info->modMap[MIN_KEYCODE + i] = Mod1Mask;
+-                if(!quartzOptionSendsAlt)
++                if(!XQuartzOptionSendsAlt)
+                     *k = XK_Mode_switch; // Yes, this is ugly.  This needs to be cleaned up when we integrate quartzKeyboard with this code and refactor.
+                 break;
+ 
+@@ -272,7 +272,7 @@ static void DarwinBuildModifierMaps(darwinKeyboardInfo *info) {
+ #else
+                 info->modifierKeycodes[NX_MODIFIERKEY_ALTERNATE][0] = i;
+ #endif
+-                if(!quartzOptionSendsAlt)
++                if(!XQuartzOptionSendsAlt)
+                     *k = XK_Mode_switch; // Yes, this is ugly.  This needs to be cleaned up when we integrate quartzKeyboard with this code and refactor.
+                 info->modMap[MIN_KEYCODE + i] = Mod1Mask;
+                 break;
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
+index 9b84fa1..7534267 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
++++ xorg-server-1.8.99.906/hw/xquartz/quartzRandR.c
+@@ -140,7 +140,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+             break;
+     }
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->fullScreenMode, data)) {
++    switch(callback(pScreen, screenId, &pQuartzScreen->fullscreenMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -239,7 +239,7 @@ static Bool QuartzRandREnumerateModes (ScreenPtr pScreen,
+             break;
+     }
+ 
+-    switch(callback(pScreen, screenId, &pQuartzScreen->fullScreenMode, data)) {
++    switch(callback(pScreen, screenId, &pQuartzScreen->fullscreenMode, data)) {
+         case CALLBACK_SUCCESS:
+             return TRUE;
+         case CALLBACK_ERROR:
+@@ -377,7 +377,7 @@ static Bool QuartzRandRGetInfo (ScreenPtr pScreen, Rotation *rotations) {
+            resolution including/excluding the menu bar. */
+ 
+         QuartzRandRRegisterMode(pScreen, &pQuartzScreen->rootlessMode);
+-        QuartzRandRRegisterMode(pScreen, &pQuartzScreen->fullScreenMode);
++        QuartzRandRRegisterMode(pScreen, &pQuartzScreen->fullscreenMode);
+         return TRUE;
+     }
+ 
+@@ -434,37 +434,37 @@ static Bool _QuartzRandRUpdateFakeModes (ScreenPtr pScreen) {
+     QuartzScreenPtr pQuartzScreen = QUARTZ_PRIV(pScreen);
+ 
+     if (pQuartzScreen->displayCount == 1) {
+-        if(pQuartzScreen->fullScreenMode.ref)
+-            CFRelease(pQuartzScreen->fullScreenMode.ref);
++        if(pQuartzScreen->fullscreenMode.ref)
++            CFRelease(pQuartzScreen->fullscreenMode.ref);
+         if(pQuartzScreen->currentMode.ref)
+             CFRelease(pQuartzScreen->currentMode.ref);
+         
+         if (!QuartzRandRCopyCurrentModeInfo(pQuartzScreen->displayIDs[0],
+-                                            &pQuartzScreen->fullScreenMode))
++                                            &pQuartzScreen->fullscreenMode))
+             return FALSE;
+ 
+-        CFRetain(pQuartzScreen->fullScreenMode.ref);  /* This extra retain is for currentMode's copy */
++        CFRetain(pQuartzScreen->fullscreenMode.ref);  /* This extra retain is for currentMode's copy */
+     } else {
+-        pQuartzScreen->fullScreenMode.width = pScreen->width;
+-        pQuartzScreen->fullScreenMode.height = pScreen->height;
+-        if(quartzEnableRootless)
+-            pQuartzScreen->fullScreenMode.height += aquaMenuBarHeight;
++        pQuartzScreen->fullscreenMode.width = pScreen->width;
++        pQuartzScreen->fullscreenMode.height = pScreen->height;
++        if(XQuartzIsRootless)
++            pQuartzScreen->fullscreenMode.height += aquaMenuBarHeight;
+     }
+ 
+-    pQuartzScreen->fullScreenMode.refresh = FAKE_REFRESH_FULLSCREEN;
++    pQuartzScreen->fullscreenMode.refresh = FAKE_REFRESH_FULLSCREEN;
+ 
+-    pQuartzScreen->rootlessMode = pQuartzScreen->fullScreenMode;
++    pQuartzScreen->rootlessMode = pQuartzScreen->fullscreenMode;
+     pQuartzScreen->rootlessMode.refresh = FAKE_REFRESH_ROOTLESS;
+     pQuartzScreen->rootlessMode.height -= aquaMenuBarHeight;
+ 
+-    if(quartzEnableRootless) {
++    if(XQuartzIsRootless) {
+         pQuartzScreen->currentMode = pQuartzScreen->rootlessMode;
+     } else {
+-        pQuartzScreen->currentMode = pQuartzScreen->fullScreenMode;
++        pQuartzScreen->currentMode = pQuartzScreen->fullscreenMode;
+     }
+     
+     DEBUG_LOG("rootlessMode: %d x %d\n", (int)pQuartzScreen->rootlessMode.width, (int)pQuartzScreen->rootlessMode.height);
+-    DEBUG_LOG("fullScreenMode: %d x %d\n", (int)pQuartzScreen->fullScreenMode.width, (int)pQuartzScreen->fullScreenMode.height);
++    DEBUG_LOG("fullscreenMode: %d x %d\n", (int)pQuartzScreen->fullscreenMode.width, (int)pQuartzScreen->fullscreenMode.height);
+     DEBUG_LOG("currentMode: %d x %d\n", (int)pQuartzScreen->currentMode.width, (int)pQuartzScreen->currentMode.height);
+     
+     return TRUE;
+diff --git xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
+index 4a7990e..b2d4d09 100644
+--- xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
++++ xorg-server-1.8.99.906/hw/xquartz/quartzRandR.h
+@@ -45,7 +45,7 @@ typedef struct {
+     // No CG display will be covered by more than one X11 screen.
+     int displayCount;
+     CGDirectDisplayID *displayIDs;
+-    QuartzModeInfo rootlessMode, fullScreenMode, currentMode;
++    QuartzModeInfo rootlessMode, fullscreenMode, currentMode;
+ } QuartzScreenRec, *QuartzScreenPtr;
+ 
+ #define QUARTZ_PRIV(pScreen) \
+diff --git xorg-server-1.8.99.906/hw/xquartz/xpr/xprAppleWM.c xorg-server-1.8.99.906/hw/xquartz/xpr/xprAppleWM.c
+index 4b31e3a..1a3d427 100644
+--- xorg-server-1.8.99.906/hw/xquartz/xpr/xprAppleWM.c
++++ xorg-server-1.8.99.906/hw/xquartz/xpr/xprAppleWM.c
+@@ -67,7 +67,7 @@ static int xprSetWindowLevel(
+     if(!winRec)
+         return BadWindow;
+     
+-    if(quartzEnableRootless)
++    if(XQuartzIsRootless)
+         wc.window_level = normal_window_levels[level];
+     else
+         wc.window_level = rooted_window_levels[level];
+diff --git xorg-server-1.8.99.906/hw/xquartz/xpr/xprCursor.c xorg-server-1.8.99.906/hw/xquartz/xpr/xprCursor.c
+index a106e72..216678e 100644
+--- xorg-server-1.8.99.906/hw/xquartz/xpr/xprCursor.c
++++ xorg-server-1.8.99.906/hw/xquartz/xpr/xprCursor.c
+@@ -35,7 +35,7 @@
+ #include <dix-config.h>
+ #endif
+ 
+-#include "quartzCommon.h"
++#include "quartz.h"
+ #include "xpr.h"
+ #include "darwin.h"
+ #include "darwinEvents.h"
+@@ -226,7 +226,7 @@ QuartzSetCursor(DeviceIntPtr pDev, ScreenPtr pScreen, CursorPtr pCursor, int x,
+ {
+     QuartzCursorScreenPtr ScreenPriv = CURSOR_PRIV(pScreen);
+ 
+-    if (!quartzServerVisible)
++    if (!XQuartzServerVisible)
+         return;
+ 
+     if (pCursor == NULL)
+@@ -295,7 +295,7 @@ QuartzCrossScreen(ScreenPtr pScreen, Bool entering)
+ static void
+ QuartzWarpCursor(DeviceIntPtr pDev, ScreenPtr pScreen, int x, int y)
+ {
+-    if (quartzServerVisible)
++    if (XQuartzServerVisible)
+     {
+         int sx, sy;
+ 
+diff --git xorg-server-1.8.99.906/hw/xquartz/xpr/xprFrame.c xorg-server-1.8.99.906/hw/xquartz/xpr/xprFrame.c
+index 42f06ef..ede5af5 100644
+--- xorg-server-1.8.99.906/hw/xquartz/xpr/xprFrame.c
++++ xorg-server-1.8.99.906/hw/xquartz/xpr/xprFrame.c
+@@ -171,7 +171,7 @@ xprCreateFrame(RootlessWindowPtr pFrame, ScreenPtr pScreen,
+ 
+     pFrame->level = !IsRoot (pWin) ? AppleWMWindowLevelNormal : AppleWMNumWindowLevels;
+ 
+-    if(quartzEnableRootless)
++    if(XQuartzIsRootless)
+         wc.window_level = normal_window_levels[pFrame->level];
+     else
+         wc.window_level = rooted_window_levels[pFrame->level];
+@@ -285,7 +285,7 @@ static void xprRestackFrame(RootlessFrameID wid, RootlessFrameID nextWid) {
+         RootlessWindowRec *winRec = x_hash_table_lookup(window_hash, wid, NULL);
+ 
+         if(winRec) {
+-            if(quartzEnableRootless)
++            if(XQuartzIsRootless)
+                 wc.window_level = normal_window_levels[winRec->level];
+             else
+                 wc.window_level = rooted_window_levels[winRec->level];
+diff --git xorg-server-1.8.99.906/hw/xquartz/xpr/xprScreen.c xorg-server-1.8.99.906/hw/xquartz/xpr/xprScreen.c
+index b3ac693..599ef6f 100644
+--- xorg-server-1.8.99.906/hw/xquartz/xpr/xprScreen.c
++++ xorg-server-1.8.99.906/hw/xquartz/xpr/xprScreen.c
+@@ -158,7 +158,7 @@ displayScreenBounds(CGDirectDisplayID id)
+               (int)frame.origin.x, (int)frame.origin.y);
+     
+     /* Remove menubar to help standard X11 window managers. */
+-    if (quartzEnableRootless && 
++    if (XQuartzIsRootless && 
+         frame.origin.x == 0 && frame.origin.y == 0) {
+         frame.origin.y += aquaMenuBarHeight;
+         frame.size.height -= aquaMenuBarHeight;
+@@ -274,7 +274,8 @@ xprDisplayInit(void)
+     AppleDRIExtensionInit();
+     xprAppleWMInit();
+ 
+-    if (!quartzEnableRootless)
++    XQuartzIsRootless = XQuartzRootlessDefault;
++    if (!XQuartzIsRootless)
+         RootlessHideAllWindows();
+ }
+ 
+-- 
+1.5.6.6
+
