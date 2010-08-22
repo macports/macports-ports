@@ -376,7 +376,6 @@ set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savan
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
     http://easynews.dl.sourceforge.net/
-    http://internap.dl.sourceforge.net/
     http://voxel.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
     http://dfn.dl.sourceforge.net/
