@@ -43,8 +43,8 @@
 options minimum_xcodeversions
 default minimum_xcodeversions {}
 
-pre-extract {
-    if {"darwin" == ${os.platform}} {
+platform macosx {
+    pre-extract {
         set current_xcodeversion [exec defaults read ${developer_dir}/Applications/Xcode.app/Contents/Info CFBundleShortVersionString]
         foreach {darwin_major minimum_xcodeversion} [join ${minimum_xcodeversions}] {
             if {${darwin_major} == ${os.major}} {
