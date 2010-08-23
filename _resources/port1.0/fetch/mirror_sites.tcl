@@ -373,22 +373,43 @@ set portfetch::mirror_sites::sites(savannah) {
 # Alias nongnu to savannah
 set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
 
+# http://sourceforge.net/apps/trac/sourceforge/wiki/Mirrors
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
-    http://easynews.dl.sourceforge.net/
-    http://voxel.dl.sourceforge.net/
-    http://ufpr.dl.sourceforge.net/
+    http://biznetnetworks.dl.sourceforge.net/
+    http://cdnetworks-us-1.dl.sourceforge.net/
+    http://cdnetworks-us-2.dl.sourceforge.net/
+    http://cdnetworks-kr-1.dl.sourceforge.net/
+    http://cdnetworks-kr-2.dl.sourceforge.net/
+    http://citylan.dl.sourceforge.net/
     http://dfn.dl.sourceforge.net/
+    http://fastbull.dl.sourceforge.net/
+    http://freefr.dl.sourceforge.net/
     http://garr.dl.sourceforge.net/
     http://heanet.dl.sourceforge.net/
+    http://hivelocity.dl.sourceforge.net/
+    http://ignum.dl.sourceforge.net/
+    http://internode.dl.sourceforge.net/
+    http://iweb.dl.sourceforge.net/
+    http://jaist.dl.sourceforge.net/
     http://kent.dl.sourceforge.net/
     http://mesh.dl.sourceforge.net/
+    http://nchc.dl.sourceforge.net/
+    http://ncu.dl.sourceforge.net/
+    http://netcologne.dl.sourceforge.net/
+    http://ovh.dl.sourceforge.net/
+    http://puzzle.dl.sourceforge.net/
+    http://softlayer.dl.sourceforge.net/
+    http://space.dl.sourceforge.net/
+    http://sunet.dl.sourceforge.net/
+    http://superb-east.dl.sourceforge.net/
+    http://superb-west.dl.sourceforge.net/
     http://surfnet.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
-    http://nchc.dl.sourceforge.net/
-    http://internode.dl.sourceforge.net/
     http://transact.dl.sourceforge.net/
-    http://optusnet.dl.sourceforge.net/
+    http://ufpr.dl.sourceforge.net/
+    http://voxel.dl.sourceforge.net/
+    http://waix.dl.sourceforge.net/
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {
