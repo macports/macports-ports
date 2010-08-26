@@ -256,7 +256,6 @@ set portfetch::mirror_sites::sites(kde) {
 
 set portfetch::mirror_sites::sites(macports) {
     http://svn.macports.org/repository/macports/distfiles/
-    http://svn.macports.org/repository/macports/distfiles/general/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(macports_distfiles) {
