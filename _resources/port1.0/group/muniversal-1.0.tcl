@@ -466,7 +466,7 @@ variant universal {
 
                                     ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                                    system "/usr/bin/diff -d \"${diffFormat}\" \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                                    system "/usr/bin/diff -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
@@ -498,7 +498,7 @@ variant universal {
                                     }
 
                                     if { ${known_file}=="no" } {
-                                        if { ! [catch {system "/usr/bin/diff -dw \"${diffFormat}\" \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
+                                        if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
                                             # diff worked
                                             ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                         } else {
