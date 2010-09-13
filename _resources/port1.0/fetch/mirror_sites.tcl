@@ -33,6 +33,7 @@ set portfetch::mirror_sites::sites(apache) {
     http://mirror.aarnet.edu.au/pub/apache/
     http://apache-mirror.dkuug.dk/
     http://apache.is.co.za/
+    http://mirror.facebook.net/apache/
     http://www.apache.org/dist/
     http://archive.apache.org/dist/
 }
@@ -137,6 +138,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.in.th/distfiles/:nosubdir
     http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
     http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
+    http://mirror.facebook.net/gentoo/distfiles/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(gimp) {
@@ -183,6 +185,7 @@ set portfetch::mirror_sites::sites(gnu) {
     http://mirrors.ibiblio.org/pub/mirrors/gnu/ftp/gnu/
     http://mirrors.kernel.org/gnu/
     http://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
+    http://mirror.facebook.net/gnu/gnu/
     ftp://ftp.funet.fi/pub/gnu/prep/
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
     ftp://ftp.kddlabs.co.jp/pub/gnu/old-gnu/
@@ -252,6 +255,7 @@ set portfetch::mirror_sites::sites(kde) {
     http://ftp.chg.ru/pub/kde/
     http://ftp.kddlabs.co.jp/pub/X11/kde/
     ftp://ftp.kde.org/pub/kde/
+    http://mirror.facebook.net/kde/
 }
 
 set portfetch::mirror_sites::sites(macports) {
@@ -308,6 +312,7 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
+    http://mirror.facebook.net/cpan/modules/by-module/
     ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
 }
 
