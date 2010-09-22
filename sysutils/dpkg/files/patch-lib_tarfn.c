@@ -1,8 +1,8 @@
 --- lib/tarfn.c.orig	Wed Jan 26 18:31:15 2005
 +++ lib/tarfn.c	Wed Jan 26 19:26:19 2005
-@@ -13,6 +13,9 @@
- #include <errno.h>
- #include <tarfn.h>
+@@ -18,6 +18,9 @@
+ 
+ #include "strnlen.h"
  
 +static const char ustarMagic[] = { 'u', 's', 't', 'a', 'r', '\0', '0', '0', '\0' };
 +static const char gnutarMagic[] = { 'u', 's', 't', 'a', 'r', ' ', ' ', '\0' };
@@ -10,7 +10,7 @@
  struct TarHeader {
  	char Name[100];
  	char Mode[8];
-@@ -23,11 +26,12 @@
+@@ -28,11 +31,12 @@
  	char Checksum[8];
  	char LinkFlag;
  	char LinkName[100];
@@ -24,7 +24,7 @@
  };
  typedef struct TarHeader	TarHeader;
  
-@@ -74,6 +78,10 @@
+@@ -78,6 +82,10 @@
  	struct passwd *		passwd = NULL;
  	struct group *		group = NULL;
  	unsigned int		i;
@@ -35,7 +35,7 @@
  	long			sum;
  	long			checksum;
  
-@@ -82,7 +90,35 @@
+@@ -86,7 +94,35 @@
  	if ( *h->GroupName )
  		group = getgrnam(h->GroupName);
  
@@ -72,14 +72,3 @@
  	d->LinkName = StoC(h->LinkName, sizeof(h->LinkName));
  	d->Mode = (mode_t)OtoL(h->Mode, sizeof(h->Mode));
  	d->Size = (size_t)OtoL(h->Size, sizeof(h->Size));
-@@ -181,7 +217,9 @@
- 			}
- 			/* Else, Fall Through */
- 		case Directory:
--			h.Name[nameLength - 1] = '\0';
-+			if (h.Name[nameLength - 1] == '/') {
-+				h.Name[nameLength - 1] = '\0';
-+			}
- 			status = (*functions->MakeDirectory)(&h);
- 			break;
- 		case HardLink:
