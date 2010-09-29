@@ -28,7 +28,6 @@ set portfetch::mirror_sites::sites(apache) {
     http://apache.multidist.com/
     http://mirror.internode.on.net/pub/apache/
     http://mirror.pacific.net.au/pub1/apache-dist/
-    http://apache.wildit.net.au/
     http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
     http://apache-mirror.dkuug.dk/
