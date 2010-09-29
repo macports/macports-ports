@@ -391,6 +391,7 @@ set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savan
 # http://sourceforge.net/apps/trac/sourceforge/wiki/Mirrors
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
+    http://aarnet.dl.sourceforge.net/
     http://biznetnetworks.dl.sourceforge.net/
     http://cdnetworks-us-1.dl.sourceforge.net/
     http://cdnetworks-us-2.dl.sourceforge.net/
