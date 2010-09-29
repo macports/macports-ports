@@ -27,7 +27,6 @@ set portfetch::mirror_sites::sites(apache) {
     ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
     http://apache.multidist.com/
     http://mirror.internode.on.net/pub/apache/
-    http://mirror.pacific.net.au/pub1/apache-dist/
     http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
     http://apache-mirror.dkuug.dk/
@@ -139,7 +138,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
     http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
     http://gentoo.kiev.ua/ftp/distfiles/:nosubdir
-    http://mirror.pacific.net.au/linux/Gentoo/distfiles/:nosubdir
     http://ftp.swin.edu.au/gentoo/distfiles/:nosubdir
     http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
     http://mirror2.corbina.ru/gentoo-distfiles/distfiles/:nosubdir
@@ -204,7 +202,6 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.lip6.fr/pub/gnu/
     ftp://ftp.chg.ru/pub/gnu/
     http://mirror.internode.on.net/pub/gnu/
-    http://mirror.pacific.net.au/pub1/gnu/gnu/
     http://mirror.aarnet.edu.au/pub/GNU/
     ftp://ftp.gnu.org/gnu/
     http://ftp.gnu.org/gnu/
