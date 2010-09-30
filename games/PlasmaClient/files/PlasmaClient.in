@@ -1,21 +1,22 @@
 #!/bin/sh
 # $Id$
 
-if [ -z "$PREFIX" ]; then
-    PREFIX="@PREFIX@"
-fi
+[ -n "${PREFIX}" ] || PREFIX="@PREFIX@"
+[ -n "${APPLICATIONS_DIR}" ] || APPLICATIONS_DIR="@APPLICATIONS_DIR@"
 
+NEED_RELAUNCH=0
 MOULDATADIR="${PREFIX}/share/mystonline/data"
 LOGDIR="${PREFIX}/var/log/PlasmaClient"
 LOGFILE="PlasmaClient.$(date '+%s').log"
 LOGLINK="PlasmaClient.log"
 PLIST="org.macports.PlasmaClient"
 
-if [ ! -d "${MOULDATADIR}" ]; then
+if [ ! -d "${MOULDATADIR}/dat" ]; then
     osascript \
         -e 'tell app "Finder"' \
         -e 'activate' \
         -e "display dialog \"PlasmaClient needs the Myst Online: URU Live again game data files. Install the “mystonline-cider” port and run the application to let it download all the game data. Then come back to PlasmaClient.\" buttons {\"OK\"} default button \"OK\" with title \"PlasmaClient\" with icon note" \
+        -e 'return' \
         -e 'end'
     exit
 fi
@@ -31,15 +32,15 @@ fi
 
 
 if [ -z "${USERNAME}" -o -z "${PASSWORD}" -o ${LASTLOGINFAILED} -eq 1 ]; then
+    NEED_RELAUNCH=1
+    
     USERNAME="$(osascript \
         -e 'tell app "Finder"' \
         -e 'activate' \
         -e "display dialog \"PlasmaClient needs to know your Myst Online: URU Live again account name (email address). (If you enter this incorrectly, PlasmaClient will hang during startup.)\" default answer \"${USERNAME}\" buttons {\"Cancel\", \"OK\"} default button \"OK\" with title \"PlasmaClient\" with icon note" \
         -e 'return text returned of the result' \
         -e 'end')" || exit
-    if [ -z "${USERNAME}" ]; then
-        exit
-    fi
+    [ -n "${USERNAME}" ] || exit
     
     PASSWORD="$(osascript \
         -e 'tell app "Finder"' \
@@ -47,9 +48,7 @@ if [ -z "${USERNAME}" -o -z "${PASSWORD}" -o ${LASTLOGINFAILED} -eq 1 ]; then
         -e "display dialog \"PlasmaClient needs to know your Myst Online: URU Live again password. (If you enter this incorrectly, PlasmaClient will hang during startup.)\" default answer \"${PASSWORD}\" with hidden answer buttons {\"Cancel\", \"OK\"} default button \"OK\" with title \"PlasmaClient\" with icon note" \
         -e 'return text returned of the result' \
         -e 'end')" || exit
-    if [ -z "${PASSWORD}" ]; then
-        exit
-    fi
+    [ -n "${PASSWORD}" ] || exit
     
     defaults write $PLIST username "$USERNAME"
     defaults write $PLIST password "$PASSWORD"
@@ -62,6 +61,45 @@ ls PlasmaClient.*.log 2>/dev/null | sort -n -r | sed "1,$((${KEEPLOGS} - 1))d" |
 rm -f "${LOGDIR}/${LOGLINK}"
 ln -s "${LOGFILE}" "${LOGDIR}/${LOGLINK}"
 echo "Logging to ${LOGDIR}/${LOGFILE}"
+exec > "${LOGDIR}/${LOGFILE}" 2>&1
+
+if [ ! -d "${MOULDATADIR}/SDL" -o ! -d "${MOULDATADIR}/python" ]; then
+    NEED_RELAUNCH=1
+    
+    osascript \
+        -e 'tell app "Finder"' \
+        -e 'activate' \
+        -e "display dialog \"PlasmaClient needs to download the Myst Online: URU Live again Python and SDL data files. This may take a few minutes but only needs to be done once.\" buttons {\"Cancel\", \"OK\"} default button \"OK\" with title \"PlasmaClient\" with icon note" \
+        -e 'return' \
+        -e 'end' || exit
+    TMPDIR="$(mktemp -d /tmp/PlasmaClientXXXXXXXX)"
+    
+    echo "Downloading secure MOULa files"
+    # Drizzle doesn't quit when it's done downloading the files so we have to kill it.
+    ${PREFIX}/bin/drizzle -downloadsecuremoulagainfiles "${USERNAME}" "${PASSWORD}" "${TMPDIR}" &
+    PID=$!
+    sleep 5
+    while [ -z "$(tail -n 10 "${LOGDIR}/${LOGFILE}" | grep '^All done!$')" ]; do
+        sleep 1
+    done
+    kill $PID
+    wait $PID
+    mv "${TMPDIR}/Python/python.pak" "${TMPDIR}"
+    rmdir "${TMPDIR}/Python"
+    
+    echo "Decompiling secure MOULa Python files"
+    ${PREFIX}/bin/drizzle -decompilepak "${TMPDIR}/python.pak" "${TMPDIR}/python" moul || exit
+    rm "${TMPDIR}/python.pak"
+    rm -rf "${MOULDATADIR}/SDL" "${MOULDATADIR}/python"
+    mv "${TMPDIR}/python" "${TMPDIR}/SDL" "${MOULDATADIR}"
+    rmdir "$TMPDIR"
+fi
+
+if [ ${NEED_RELAUNCH} -eq 1 ]; then
+    # Relaunch to fix the Dock icon.
+    open -a "${APPLICATIONS_DIR}/PlasmaClient.app"
+    exit
+fi
 
 cd "${MOULDATADIR}"
-"${PREFIX}/bin/PlasmaClient" "${USERNAME}" "${PASSWORD}" > "${LOGDIR}/${LOGFILE}" 2>&1
+exec "${PREFIX}/bin/PlasmaClient" "${USERNAME}" "${PASSWORD}"
