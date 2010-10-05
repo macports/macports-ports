@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Copyright (c) 2007-2009 Jon Buffington. All rights reserved.
+# Copyright (c) 2010 Jon Buffington. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,17 +17,10 @@
 # Is the location of the SBT launcher JAR file.
 LAUNCHJAR="__SBT_LAUNCHER_PATH__"
 
-# Capture any arguments
-QUOTED_ARGS=""
-while [ "$1" != "" ] ; do
-	QUOTED_ARGS="$QUOTED_ARGS \"$1\""
-	shift
-done
-
 # Ensure enough heap space is created for SBT.
 if [ -z "$JAVA_OPTS" ]; then
 	JAVA_OPTS="-Xmx512M"
 fi
 
 # Assume java is already in the shell path.
-exec java $JAVA_OPTS -jar "$LAUNCHJAR" $QUOTED_ARGS
+exec java $JAVA_OPTS -jar "$LAUNCHJAR" "$@"
