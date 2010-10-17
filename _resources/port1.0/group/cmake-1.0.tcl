@@ -1,6 +1,7 @@
 # $Id$
 
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
+# Copyright (c) 2010 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -32,8 +33,10 @@
 # Usage:
 # PortGroup     cmake 1.0
 
+# standard place to install extra CMake modules
+set cmake_share_module_dir ${prefix}/share/cmake/modules
 
-depends_build       port:cmake
+depends_build-append port:cmake
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
@@ -48,8 +51,9 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
                     -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
                     -DCMAKE_SYSTEM_PREFIX_PATH=\"${prefix}\;/usr\" \
-                    -DQT_QMAKE_EXECUTABLE=${prefix}/libexec/qt4-mac/bin/qmake \
+                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -Wno-dev
+
 pre-configure {
     if {${os.platform} == "darwin" && (![variant_isset universal] || ![variant_exists universal])} {
         configure.args-append \
@@ -58,6 +62,7 @@ pre-configure {
     configure.universal_args-append \
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
 }
+
 configure.universal_args-delete --disable-dependency-tracking
 if {[info exists configure.sdkroot] && ${configure.sdkroot} != ""} {
     configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
