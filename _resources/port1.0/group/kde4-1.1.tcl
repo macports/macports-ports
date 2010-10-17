@@ -83,10 +83,13 @@ post-extract {
     }
 }
 
-# create the CMake module lookup path
-set cmake_module_path ${qt_cmake_module_dir}
+# augment the CMake module lookup path, if necessary depending on
+# where Qt4 is installed.
 if {${qt_dir} != ${prefix}} {
-    set cmake_module_path ${prefix}/share/cmake/modules\;${cmake_module_path}
+    set cmake_module_path ${cmake_share_module_dir}\;${qt_cmake_module_dir}
+    configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
+    configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}"
+    unset cmake_module_path
 }
 
 # standard configure args; virtuall all KDE ports use CMake and Qt4
@@ -94,10 +97,7 @@ configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X" \
-                        ${qt_cmake_defines} \
-                        -DCMAKE_MODULE_PATH="${cmake_module_path}"
-
-unset cmake_module_path
+                        ${qt_cmake_defines}
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
