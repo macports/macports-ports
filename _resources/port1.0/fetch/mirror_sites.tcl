@@ -508,18 +508,20 @@ set portfetch::mirror_sites::sites(xfree) {
 }
 
 set portfetch::mirror_sites::sites(xorg) {
-    http://x.paracoda.com/pub/
+    http://mirror.csclub.uwaterloo.ca/x.org/
     http://www.mirrorservice.org/sites/ftp.x.org/pub/
+    http://mirror.switch.ch/ftp/mirror/X11/pub/
     ftp://ftp.gwdg.de/pub/x11/x.org/pub/
-    ftp://ftp.cs.cuhk.edu.hk/pub/X11/
-    http://ftp.nara.wide.ad.jp/pub/X11/x.org/pub/
-    http://www.qtopia.org.cn/ftp/mirror/ftp.x.org/pub/
-    ftp://ftp.cica.es/pub/X/pub/
+    http://ftp.cica.es/mirrors/X/pub/
+    http://mirror.cict.fr/x.org/pub/
     ftp://ftp.ntua.gr/pub/X11/X.org/
+    ftp://ftp.cs.cuhk.edu.hk/pub/X11/
+    http://mi.mirror.garr.it/mirrors/x.org/
+    http://ftp.nara.wide.ad.jp/pub/X11/x.org/
+    ftp://sunsite.uio.no/pub/X11/
     ftp://ftp.task.gda.pl/mirror/ftp.x.org/pub/
     ftp://ftp.sunet.se/pub/X11/ftp.x.org/
-    ftp://sunsite.uio.no/pub/X11/
-    ftp://ftp.chg.ru/pub/X11/x.org/pub/
+    http://x.cs.pu.edu.tw/
     ftp://ftp.is.co.za/pub/x.org/pub/
     http://xorg.freedesktop.org/releases/
     ftp://ftp.x.org/pub/
