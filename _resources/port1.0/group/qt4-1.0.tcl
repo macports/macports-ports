@@ -29,7 +29,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #
-# This portgroup defined standard settings when using Qt4.
+# This portgroup defines standard settings when using Qt4.
 #
 # Usage:
 # PortGroup     qt4 1.0
@@ -53,7 +53,7 @@ set qt_mkspecs_dir      ${qt_dir}/share/${qt_name}/mkspecs
 set qt_imports_dir      ${qt_dir}/share/${qt_name}/imports
 
 # standard Qt includes directory
-set qt_includes_dir     ${qt_dir}/includes
+set qt_includes_dir     ${qt_dir}/include
 
 # standard Qt libraries directory
 set qt_libs_dir         ${qt_dir}/lib
@@ -91,7 +91,8 @@ set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 # standard cmake info for Qt4
 set qt_cmake_defines    "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
                          -DQT_LIBRARY_DIR=${qt_libs_dir} \
-                         -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd}"
+                         -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd} \
+                         -DQT_ZLIB_LIBRARY:FILEPATH=${prefix}/lib/libz.dylib"
 
 # allow for both qt4 and qt4 devel
 depends_lib-append      bin:qmake:qt4-mac
