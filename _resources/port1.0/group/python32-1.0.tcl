@@ -1,7 +1,7 @@
 # et:ts=4
 # python32-1.0.tcl
 #
-# $Id: python32-1.0.tcl 69161 2010-06-26 08:55:14Z jmr@macports.org $
+# $Id$
 #
 # Copyright (c) 2007 Markus W. Weissman <mww@macports.org>,
 # All rights reserved.
