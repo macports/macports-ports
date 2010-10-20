@@ -1,3 +1,4 @@
+# -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 # $Id: $
 
 # Copyright (c) 2010 The MacPorts Project
@@ -89,10 +90,12 @@ set qt_uic_cmd          ${qt_dir}/bin/uic
 set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 
 # standard cmake info for Qt4
-set qt_cmake_defines    "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
-                         -DQT_LIBRARY_DIR=${qt_libs_dir} \
-                         -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd} \
-                         -DQT_ZLIB_LIBRARY:FILEPATH=${prefix}/lib/libz.dylib"
+set qt_cmake_defines    \
+    "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
+     -DQT_LIBRARY_DIR=${qt_libs_dir} \
+     -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd} \
+     -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
+     -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
 # allow for both qt4 and qt4 devel
 depends_lib-append      bin:qmake:qt4-mac
@@ -102,10 +105,18 @@ configure.env-append    QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
                         MOC=${qt_moc_cmd}
 
+if {${qt_dir} != ${prefix}} {
+    configure.env-append PATH=${qt_dir}/bin:$env(PATH)
+}
+
 # standard build environment
 build.env-append        QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
                         MOC=${qt_moc_cmd}
+
+if {${qt_dir} != ${prefix}} {
+    build.env-append    PATH=${qt_dir}/bin:$env(PATH)
+}
 
 # use PKGCONFIG for Qt discovery in configure scripts
 depends_build-append    bin:pkg-config:pkgconfig
@@ -119,6 +130,9 @@ destroot.env-append     QTDIR=${qt_dir} \
                         MOC=${qt_moc_cmd} \
                         INSTALL_ROOT=${destroot} \
                         DESTDIR=${destroot}
+if {${qt_dir} != ${prefix}} {
+    destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
+}
 
 # append Qt's PKGCONFIG path to whatever is there now.
 set qt_pkg_config_path ${qt_dir}/lib/pkgconfig
