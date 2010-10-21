@@ -98,7 +98,7 @@ set qt_cmake_defines    \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
 # allow for both qt4 and qt4 devel
-depends_lib-append      bin:qmake:qt4-mac
+depends_lib-append      path:bin/qmake:qt4-mac
 
 # standard configure environment
 configure.env-append    QTDIR=${qt_dir} \
@@ -119,7 +119,7 @@ if {${qt_dir} != ${prefix}} {
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
-depends_build-append    bin:pkg-config:pkgconfig
+depends_build-append    path:bin/pkg-config:pkgconfig
 
 # use a parallel build by default
 use_parallel_build      yes
