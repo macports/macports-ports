@@ -36,66 +36,104 @@
 # PortGroup     qt4 1.0
 
 # standard Qt4 name
+global qt_name
 set qt_name             qt4
 
 # standard install directory
+global qt_dir
 set qt_dir              ${prefix}
 
 # standard Qt documents directory
+global qt_docs_dir
 set qt_docs_dir         ${qt_dir}/share/doc/${qt_name}
 
 # standard Qt plugins directory
+global qt_plugins_dir
 set qt_plugins_dir      ${qt_dir}/share/${qt_name}/plugins
 
 # standard Qt mkspecs directory
+global qt_mkspecs_dir
 set qt_mkspecs_dir      ${qt_dir}/share/${qt_name}/mkspecs
 
 # standard Qt imports directory
+global qt_imports_dir
 set qt_imports_dir      ${qt_dir}/share/${qt_name}/imports
 
 # standard Qt includes directory
+global qt_includes_dir
 set qt_includes_dir     ${qt_dir}/include
 
 # standard Qt libraries directory
+global qt_libs_dir
 set qt_libs_dir         ${qt_dir}/lib
 
+# standard Qt non-.app executables directory
+global qt_bins_dir
+set qt_bins_dir         ${qt_dir}/bin
+
+# standard Qt .app executables directory, if created
+global qt_apps_dir
+set qt_apps_dir         ${applications_dir}/Qt
+
 # standard Qt data directory
+global qt_data_dir
 set qt_data_dir         ${qt_dir}/share/${qt_name}
 
 # standard Qt translations directory
+global qt_translations_dir
 set qt_translations_dir ${qt_dir}/share/${qt_name}/translations
 
 # standard Qt sysconf directory
+global qt_sysconf_dir
 set qt_sysconf_dir      ${qt_dir}/etc/${qt_name}
 
 # standard Qt examples directory
+global qt_examples_dir
 set qt_examples_dir     ${qt_dir}/share/${qt_name}/examples
 
 # standard Qt demos directory
+global qt_demos_dir
 set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
 
 # standard CMake module directory for Qt-related files
+global qt_cmake_module_dir
 set qt_cmake_module_dir ${qt_dir}/share/cmake/modules
 
 # standard qmake command location
+global qt_qmake_cmd
 set qt_qmake_cmd        ${qt_dir}/bin/qmake
 
 # standard moc command location
+global qt_moc_cmd
 set qt_moc_cmd          ${qt_dir}/bin/moc
 
 # standard uic command location
+global qt_uic_cmd
 set qt_uic_cmd          ${qt_dir}/bin/uic
 
 # standard lrelease command location
+global qt_lrelease_cmd
 set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 
 # standard cmake info for Qt4
+global qt_cmake_defines
 set qt_cmake_defines    \
     "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
      -DQT_LIBRARY_DIR=${qt_libs_dir} \
      -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd} \
      -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
+
+# set Qt understood arch types, based on user preference
+pre-patch {
+    global qt_arch_types
+    if {[variant_exists universal] && [variant_isset universal]} {
+        set qt_arch_types ${universal_archs}
+    } else {
+        set qt_arch_types ${build_arch}
+    }
+    set qt_arch_types [string map {i386 x86} ${qt_arch_types}]
+}
 
 # allow for both qt4 and qt4 devel
 depends_lib-append      path:bin/qmake:qt4-mac
