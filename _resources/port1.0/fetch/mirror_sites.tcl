@@ -480,9 +480,12 @@ set portfetch::mirror_sites::sites(tex_ctan) {
 }
 
 set portfetch::mirror_sites::sites(trolltech) {
-    ftp://ftp.trolltech.com/qt/source/:nosubdir
     http://ftp.heanet.ie/mirrors/ftp.trolltech.com/pub/qt/source/:nosubdir
     ftp://ftp.informatik.hu-berlin.de/pub1/Mirrors/ftp.troll.no/QT/qt/source/:nosubdir
+    http://ftp.iasi.roedu.net/mirrors/ftp.trolltech.com/qt/source/:nosubdir
+    http://ftp.ntua.gr/pub/X11/Qt/qt/source/:nosubdir
+    http://get.qt.nokia.com/qt/source/:nosubdir
+    ftp://ftp.trolltech.com/qt/source/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(xcontrib) {
