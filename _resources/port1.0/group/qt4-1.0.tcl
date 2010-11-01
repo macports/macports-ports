@@ -125,15 +125,8 @@ set qt_cmake_defines    \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
 # set Qt understood arch types, based on user preference
-pre-patch {
-    global qt_arch_types
-    if {[variant_exists universal] && [variant_isset universal]} {
-        set qt_arch_types ${universal_archs}
-    } else {
-        set qt_arch_types ${build_arch}
-    }
-    set qt_arch_types [string map {i386 x86} ${qt_arch_types}]
-}
+options qt_arch_types
+default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 
 # allow for both qt4 and qt4 devel
 depends_lib-append      path:bin/qmake:qt4-mac
