@@ -62,12 +62,12 @@ pre-configure {
     }
     configure.universal_args-append \
         -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
+    if {[info exists configure.sdkroot] && ${configure.sdkroot} != ""} {
+        configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
+    }
 }
 
 configure.universal_args-delete --disable-dependency-tracking
-if {[info exists configure.sdkroot] && ${configure.sdkroot} != ""} {
-    configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
-}
 
 variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
