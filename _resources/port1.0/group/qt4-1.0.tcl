@@ -35,6 +35,30 @@
 # Usage:
 # PortGroup     qt4 1.0
 
+# always archcheck QtCore
+PortGroup               archcheck 1.0
+
+# check arch of libraries on which this port depends
+if {![info exists building_qt4]} {
+    archcheck.files-append  lib/libQtCore.dylib
+}
+
+# check for +debug variant of this port, and make sure Qt was
+# installed with +debug as well; if not, error out.
+platform darwin {
+    pre-extract {
+        if {[variant_exists debug] && \
+            [variant_isset debug] && \
+           ![info exists building_qt4]} {
+            if {![file exists ${prefix}/lib/libQtCore_debug.dylib]} {
+                return -code error "\n\nERROR:\n\
+In order to install this port as +debug,
+Qt4 must also be installed with +debug.\n"
+            }
+        }
+    }
+}
+
 # standard Qt4 name
 global qt_name
 set qt_name             qt4
@@ -73,7 +97,7 @@ set qt_bins_dir         ${qt_dir}/bin
 
 # standard Qt .app executables directory, if created
 global qt_apps_dir
-set qt_apps_dir         ${applications_dir}/Qt
+set qt_apps_dir         ${applications_dir}/Qt4
 
 # standard Qt data directory
 global qt_data_dir
@@ -129,7 +153,9 @@ options qt_arch_types
 default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 
 # allow for both qt4 and qt4 devel
-depends_lib-append      path:bin/qmake:qt4-mac
+if {![info exists building_qt4]} {
+    depends_lib-append      path:bin/qmake:qt4-mac
+}
 
 # standard configure environment
 configure.env-append    QTDIR=${qt_dir} \
