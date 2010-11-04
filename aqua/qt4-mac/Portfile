@@ -2,16 +2,16 @@
 # $Id$
 
 PortSystem          1.0
-PortGroup           archcheck 1.0
 
-# use the qt4 group, except for the depends_lib
-# since we're building qt4 here.
+# use the qt4 group; set 'building_qt4' so that the portgroup
+# does not include certain parts
+set building_qt4    1
 PortGroup           qt4 1.0
-depends_lib-delete  path:bin/qmake:qt4-mac
 
 name                qt4-mac
 conflicts           qt4-mac-devel
 version             4.7.0
+revision            1
 categories          aqua
 platforms           macosx
 maintainers         michaelld
@@ -36,6 +36,11 @@ archcheck.files     lib/libz.dylib lib/libdbus-1.dylib \
                     lib/libtiff.dylib lib/libpng.dylib \
                     lib/libmng.dylib lib/libjpeg.dylib
 
+# (0) Fix the testing script to properly handle both +universal as
+# well as the native arch for both CXX and CC compiling; also make
+# sure it does not create a Mac app bundle.
+patchfiles-append   patch-config.tests_unix_compile.test.diff
+
 # (1) Test for Precompiled-headers support requires a C++ compiler,
 # but configure calls it, by default, with a C compiler.
 patchfiles-append   patch-precomp.test.diff
@@ -49,16 +54,42 @@ patchfiles-append   patch-macosx-deployment-target.diff
 # 'patch' should be able to figure it out.
 patchfiles-append   patch-configure-arch.diff
 
+# (4) Tweak Qt spec files:
+# (4a) Place the -I path for local moc-created headers -before-
+# all other -I paths.
+patchfiles-append   patch-mkspecs-features-moc.prf.diff
+
+# (4b) Remove Qt's LIBDIR and INCDIR from various Qmake internal
+# variables, since they are already included in the user-supplied
+# LIBS and INCLUDEPATH.
+patchfiles-append   patch-mkspecs-features-qt.prf.diff
+
+# (4c) Change placement of Qt's LIBDIR and INCDIR, to always be after
+# those supplied by the user's QMake (.pro) files.  By the time QMake
+# gets to the patched function, it is creating the Makefile parts to
+# find Qt's headers and libraries, so moving these paths to this
+# location should always work.
+patchfiles-append   patch-mkspecs-features-qt_functions.prf.diff
+
+# (4d) Add "absolute_library_soname" to the default CONFIG variables,
+# so that when a DYLIB is created, if "target.path" is set for it then
+# that path is prepended to its "install_name".
+patchfiles-append   patch-mkspecs-macx-g++-qmake.prf.diff
+
+# (4e) allow use of 'ccache' via "qmake && make CCACHE=ccache", in mac
+# only; this patch requires that (2) already be in place.
+patchfiles-append   patch-mkspecs_common_mac.conf.diff
+
 post-patch {
-    # set ARCHES in configure (per the second patchfile),
-    # for building QMake.
+    # set ARCHES in configure (per the third patchfile above), for
+    # building QMake.  join any 2 or more arch entries with the GCC
+    # arch flag (join does not effect a single entry).  first "-arch"
+    # is already in place in the 'configure' script (since there has
+    # to be at least 1 arch).
     set ARCHES ""
     if {[variant_exists universal] && [variant_isset universal]} {
-        # build for universal, as defined by the local user
-        # first "-arch" is already in place; just 'join' the rest
         set ARCHES [join ${universal_archs} " -arch "]
     } else {
-        # build arch & OS-version specific
         set ARCHES ${build_arch}
     }
     reinplace "s|@ARCHES@|${ARCHES}|g" ${worksrcpath}/configure
@@ -84,6 +115,20 @@ post-patch {
         ${worksrcpath}/mkspecs/macx-g++/qmake.conf
     reinplace "s| gcc\$| ${configure.cc}|"  \
         ${worksrcpath}/mkspecs/macx-g++/qmake.conf
+
+    # fix up tests to work with ccache, if used
+    foreach fixfile [exec find ${worksrcpath}/config.tests \
+                         -name "*.test"] {
+        reinplace "s@\\\"\\\$COMPILER\\\"@\$COMPILER@g" ${fixfile}
+    }
+
+    # fix 'configure' script to find the correct QMAKE CXX compiler by
+    # removing possibilities that include the character "$".  Yes,
+    # that's a lot of "\"s: each "\\\\" -> a single "\" in the patched
+    # file, and need "\\\\$" (with the "s) there.
+    reinplace "/QMAKE_CONF_COMPILER/ \
+             s@tail@grep -v \"\\\\\\\\\\\\\\\\\$\" | tail@" \
+        ${worksrcpath}/configure
 }
 
 # The build process uses -fconstant-cfstrings.
@@ -150,11 +195,13 @@ set library_path [ list ${prefix}/lib ]
 
 configure.args                                            \
     -v                                                    \
-    -release                                              \
     -confirm-license                                      \
     -opensource                                           \
     -prefix          ${qt_dir}                            \
+    -bindir          ${qt_bins_dir}                       \
+    -libdir          ${qt_libs_dir}                       \
     -docdir          ${qt_docs_dir}                       \
+    -headerdir       ${qt_includes_dir}                   \
     -plugindir       ${qt_plugins_dir}                    \
     -importdir       ${qt_imports_dir}                    \
     -datadir         ${qt_data_dir}                       \
@@ -166,8 +213,6 @@ configure.args                                            \
     -openssl-linked                                       \
     -dbus-linked                                          \
     -fast                                                 \
-    -nomake demos                                         \
-    -nomake examples                                      \
     -optimized-qmake                                      \
     -no-framework                                         \
     -no-phonon                                            \
@@ -187,8 +232,8 @@ foreach driver {mysql odbc psql sqlite2} {
     configure.args-append -no-sql-${driver}
 }
 
-# use the corrected CPATH and LIBRARY_PATH for configure
 pre-configure {
+    # use the corrected CPATH and LIBRARY_PATH for build
     compiler.cpath [join ${header_path} :]
     compiler.library_path [join ${library_path} :]
 }
@@ -206,62 +251,61 @@ platform darwin 8 {
     }
 }
 
-# make sure the universal variant exists
-variant universal {}
-
 platform darwin {
-    set ARCHES ""
-    set SDK ""
-    if {[variant_exists universal] && [variant_isset universal]} {
-        # build for universal, as defined by the local user
-        set ARCHES ${universal_archs}
-        if {[info exists universal_sysroot]} {
-            set SDK ${universal_sysroot}
-        }
-    } else {
-        # build arch specific
-        set ARCHES ${build_arch}
-    }
-    configure.args-append -arch \"${ARCHES}\"
+    pre-configure {
+        # retrieve the arch type(s) to use, in Qt-speak
+        configure.args-append -arch \"${qt_arch_types}\"
 
-    # cannot use pre-compiled headers when compiling with more than 1
-    # arch type (typically +universal) or for X11
-    if {[llength ${ARCHES}] != 1 || [variant_isset x11]} {
-        configure.args-append -no-pch
-    } else {
-        configure.args-append -pch
-    }
-
-    # check to see if not compiling for the native machine hardware
-    # (e.g., compiling for just i386 but CPU is x86_64); optimization
-    # of QMake does not work in this circumstance.
-    if {[lsearch -exact ${ARCHES} [exec uname -m]] == -1} {
-        # yes: disable optimizing qmake
-        configure.args-delete -optimized-qmake
-    }
-
-    # find a way to specify the SDK to use
-    if {${SDK} == ""} {
-        # else use the one for this OS version, if installed
-        set minor [expr [lindex [split ${os.version} "."] 0] - 4]
-        # set SDK version depending on OS version
-        set sdk_version ""
-        if {${minor} == "4"} {
-            # OSX 10.4 requires an additional 'u'
-            set sdk_version "10.4u"
+        # cannot use pre-compiled headers when compiling with more than 1
+        # arch type (typically +universal) or for X11
+        if {[llength ${qt_arch_types}] != 1 || [variant_isset x11]} {
+            configure.args-append -no-pch
         } else {
-            set sdk_version "10.${minor}"
+            configure.args-append -pch
         }
-        set SDK ${developer_dir}/SDKs/MacOSX${sdk_version}.sdk
-    }
-    if {[file exists ${SDK}]} {
-        configure.args-append -sdk ${SDK}
-    } else {
-        ui_msg \
+
+        # check to see if not compiling for the native machine hardware
+        # (e.g., compiling for just i386 but CPU is x86_64); optimization
+        # of QMake does not work in this circumstance.
+        if {[lsearch -exact ${qt_arch_types} ${os.arch}] == -1} {
+            # not building for native arch: disable optimizing qmake
+            configure.args-delete -optimized-qmake
+        }
+
+        # find a way to specify the SDK to use
+        set SDK ""
+        if {[variant_exists universal] && [variant_isset universal]} {
+            if {[info exists universal_sysroot]} {
+                set SDK ${universal_sysroot}
+            }
+        }
+        if {${SDK} == ""} {
+            # else use the one for this OS version, if installed
+            set minor [expr [lindex [split ${os.version} "."] 0] - 4]
+            # set SDK version depending on OS version
+            set sdk_version ""
+            if {${minor} == "4"} {
+                # OSX 10.4 requires an additional 'u'
+                set sdk_version "10.4u"
+            } else {
+                set sdk_version "10.${minor}"
+            }
+            set SDK ${developer_dir}/SDKs/MacOSX${sdk_version}.sdk
+        }
+        if {[file exists ${SDK}]} {
+            configure.args-append -sdk ${SDK}
+        } else {
+            ui_msg \
 "No SDK found in ${developer_dir}/SDKs for ${sdk_version} ; \
 configure will probably fail. \n \
 Please install Apple's Developer Tools again."
+        }
     }
+}
+
+platform darwin 10 i386 {
+    # optimization of QMake does not work on 10.6 32-bit native
+    configure.args-delete -optimized-qmake
 }
 
 # Remove any '-I' string from the C*FLAGS for SQLITE and DBUS, so that
@@ -279,8 +323,8 @@ post-configure {
     # depend on any of these changed files.
 }
 
-# use the corrected CPATH and LIBRARY_PATH for build
 pre-build {
+    # use the corrected CPATH and LIBRARY_PATH for build
     compiler.cpath [join ${header_path} :]
     compiler.library_path [join ${library_path} :]
 }
@@ -313,8 +357,14 @@ post-destroot {
     # It should never be used in Qt4 or newer.
     # It is there for legacy purposes: it's how
     # Qt3's headers were installed.
-    if {[file exists ${destroot_qt}/include/Qt]} {
-        delete ${destroot_qt}/include/Qt
+    if {[file exists ${destroot}/${qt_includes_dir}/Qt]} {
+        delete ${destroot}/${qt_includes_dir}/Qt
+    }
+
+    # Move .apps into the applications_dir
+    xinstall -m 755 -d ${destroot}${qt_apps_dir}
+    foreach app [glob ${destroot}/${qt_bins_dir}/*.app] {
+        move ${app} ${destroot}${qt_apps_dir}
     }
 
     # Install cmake files (taken from port 'kdelibs4'). To use this
@@ -351,6 +401,9 @@ pre-activate {
         }
     }
 }
+
+# make sure the universal variant exists
+variant universal {}
 
 variant mysql description {Enable MySQL SQL Driver} {
     depends_lib-append path:lib/mysql5:mysql5
@@ -411,18 +464,24 @@ variant raster description {Use raster graphics system by default} {
     configure.args-append -graphicssystem raster
 }
 
-variant demos description {Build demos} {
-   configure.args-delete -nomake demos
+variant demos description {Build demos} {}
+
+if {![variant_isset demos]} {
+   configure.args-append -nomake demos
 }
 
-variant examples description {Build examples} {
-   configure.args-delete -nomake examples
+variant examples description {Build examples} {}
+
+if {![variant_isset examples]} {
+   configure.args-append -nomake examples
 }
 
-variant debug description \
-{Build both release and debug library} {
-    configure.args-delete -release
+variant debug description {Build both release and debug library} {}
+
+if {[variant_isset debug]} {
     configure.args-append -debug-and-release
+} else {
+    configure.args-append -release
 }
 
 variant quartz conflicts x11 \
