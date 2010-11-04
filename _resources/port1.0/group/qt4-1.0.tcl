@@ -35,14 +35,6 @@
 # Usage:
 # PortGroup     qt4 1.0
 
-# always archcheck QtCore
-PortGroup               archcheck 1.0
-
-# check arch of libraries on which this port depends
-if {![info exists building_qt4]} {
-    archcheck.files-append  lib/libQtCore.dylib
-}
-
 # check for +debug variant of this port, and make sure Qt was
 # installed with +debug as well; if not, error out.
 platform darwin {
