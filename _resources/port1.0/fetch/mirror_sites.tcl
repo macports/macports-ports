@@ -150,13 +150,11 @@ set portfetch::mirror_sites::sites(gentoo) {
 }
 
 set portfetch::mirror_sites::sites(gimp) {
-    ftp://ftp.gimp.org/pub/
     ftp://ftp.gtk.org/pub/
     http://ftp.gtk.org/pub/
     http://gimp.mirrors.hoobly.com/
     ftp://gd.tuwien.ac.at/graphics/gimp/
     http://ftp.iut-bm.univ-fcomte.fr/gimp/
-    http://gimp.krecio.pl/
     ftp://ftp.gwdg.de/pub/misc/grafik/gimp/
     http://ftp.gwdg.de/pub/misc/grafik/gimp/
     ftp://ftp.esat.net/mirrors/ftp.gimp.org/pub/
