@@ -128,7 +128,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			homepage		http://rubyforge.org/projects/${ruby.project}
 			master_sites	http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
 			                http://rubyforge.iasi.roedu.net/gems/ \
-			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
 			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
@@ -138,7 +137,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 			homepage		http://rubyforge.org/projects/${ruby.project}
 			master_sites	http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
 			                http://rubyforge.iasi.roedu.net/gems/ \
-			                http://rubyforge-gems.ruby-forum.com/gems/ \
 			                http://ruby.inoack.com/gems/
 			livecheck.type	regex
 			livecheck.url	http://rubyforge.org/projects/${ruby.project}
