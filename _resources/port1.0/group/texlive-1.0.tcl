@@ -212,7 +212,6 @@ proc texlive.texmfport {} {
 
         # create symlinks for any binaries activated by the port
         foreach bin ${texlive.binaries} {
-            ui_msg "activating binary $bin"
             ln -s ${texlive_bindir}/$bin ${destroot}${prefix}/bin
             ln -s ${texlive_bindir}/$bin ${destroot}${texlive_mactex_texbindir}
         }
