@@ -55,14 +55,36 @@ set texlive_texmfmain "${prefix}/share/texmf-texlive"
 # well too
 set texlive_texmfdist "${prefix}/share/texmf-texlive-dist"
 
-# "local" texmf files, e.g. installed by ports other than texlive
-set texlive_texmflocal "${prefix}/share/texmf"
+# texmf files installed by ports other than texlive
+set texlive_texmfports "${prefix}/share/texmf"
+
+# optional tree for user-installed texmf files
+set texlive_texmflocal "${prefix}/share/texmf-local"
 
 # variable runtime data, e.g. formats
 set texlive_texmfsysvar "${prefix}/var/db/texmf"
 
 # configuration data from texconfig
 set texlive_texmfsysconfig "${prefix}/etc/texmf"
+
+# location of binaries installed by texlive-bin
+#
+# All TeXLive binaries are built by texlive-bin, but most of them
+# aren't usable without the support files installed by other ports:
+# for example, xetex needs texlive-xetex, tex4ht needs
+# texlive-htmlxml, and just about everything needs texlive-basic.  We
+# don't want to install useless files into $prefix/bin, so instead
+# texlive-bin installs its binaries into this "hidden" directory, and
+# other ports "activate" them when they are ready to be used by creating
+# symlinks into $prefix/bin.
+set texlive_bindir "${prefix}/libexec/texlive/binaries"
+
+# another directory containing symlinks to activated texlive binaries
+#
+# This is provided to support MacTeX's TeX Distribution preference
+# pane: it can select the active TeX distribution by pointing the
+# /usr/texbin symlink here
+set texlive_mactex_texbindir "${prefix}/libexec/texlive/texbin"
 
 # Remove dependencies on any texlive-documentation-* ports, for use by
 # -doc variants
@@ -84,12 +106,8 @@ proc texlive.removedocdepends {} {
 options texlive.exclude
 default texlive.exclude {}
 
-# Skip installing all manpages. A number of texmf ports include
-# manpages, but many of them are already installed by texmf-bin.
-options texlive.excludemanpages
-default texlive.excludemanpages no
-
-options texlive.formats texlive.languages texlive.maps
+options texlive.binaries texlive.formats texlive.languages texlive.maps
+default texlive.binaries {}
 default texlive.formats {}
 default texlive.languages {}
 default texlive.maps {}
@@ -104,12 +122,12 @@ proc texlive.texmfport {} {
     supported_archs noarch 
     
     master_sites    http://flute.csail.mit.edu/texlive/
-    use_bzip2       yes
+    use_xz          yes
 
     global name master_sites
     livecheck.type  regex
     livecheck.url   ${master_sites}
-    livecheck.regex ${name}-(\\d+)\\.tar\\.bz2
+    livecheck.regex ${name}-(\\d+)\\.tar
 
     depends_lib-append port:texlive-common port:texlive-bin
 
@@ -127,6 +145,8 @@ proc texlive.texmfport {} {
     build           { }
 
     destroot {
+        xinstall -d ${destroot}${texlive_mactex_texbindir}
+
         set indexlist {"runfiles"}
         if {[variant_isset "doc"]} { lappend indexlist "docfiles" }
         if {[variant_isset "src"]} { lappend indexlist "srcfiles" }
@@ -157,14 +177,20 @@ proc texlive.texmfport {} {
 
                 # check for manpages and treat specially
                 if [regexp {^texmf/doc/man/man(\d)/([^/]+)} $line -> section filename] {
-                    if {![tbool texlive.excludemanpages]} {
-                        if [string match "*.$section" $filename] {
-                            # actually a manpage; install it
-                            copy $srcfile ${destroot}${prefix}/share/man/man$section/
+                    if [string match "*.$section" $filename] {
+                        # actually a manpage; install it.  If
+                        # texlive-bin installed a manpage with the
+                        # same name, use it instead to make sure the
+                        # documentation matches the binary.
+                        if [file exists ${texlive_bindir}/man${section}/$filename.gz] {
+                            ln -s ${texlive_bindir}/man${section}/$filename.gz \
+                                ${destroot}${prefix}/share/man/man$section/
                         } else {
-                            # not actually a manpage; do nothing
-                            # (e.g. don't install PDF manpages)
+                            copy $srcfile ${destroot}${prefix}/share/man/man$section/
                         }
+                    } else {
+                        # not actually a manpage; do nothing
+                        # (e.g. don't install PDF manpages)
                     }
                 } else {
                     # not a manpage; install into requested target dir
@@ -182,6 +208,13 @@ proc texlive.texmfport {} {
                     copy ${srcfile} ${destroot}${dstfile}
                 }
             }
+        }
+
+        # create symlinks for any binaries activated by the port
+        foreach bin ${texlive.binaries} {
+            ui_msg "activating binary $bin"
+            ln -s ${texlive_bindir}/$bin ${destroot}${prefix}/bin
+            ln -s ${texlive_bindir}/$bin ${destroot}${texlive_mactex_texbindir}
         }
 
         # install a documentation file containing the list of TeX
@@ -228,6 +261,8 @@ proc texlive.texmfport {} {
                     ![file exists ${destroot}${prefix}/bin/$fmtname]} {
                     ln -s ${prefix}/bin/$fmtengine \
                         ${destroot}${prefix}/bin/$fmtname
+                    ln -s ${prefix}/bin/$fmtengine \
+                        ${destroot}${texlive_mactex_texbindir}/$fmtname
                 }
             }
             
@@ -277,7 +312,7 @@ proc texlive.texmfport {} {
     }
 
     post-activate {
-        system "${prefix}/bin/mktexlsr"
+        system "${texlive_bindir}/mktexlsr"
         if {${texlive.forceupdatecnf}} {
             # If force was specified, update all the config files, and
             # regenerate all maps and formats.
@@ -312,7 +347,7 @@ proc texlive.texmfport {} {
     post-deactivate {
         # Update ls-R and any config files to reflect that the package
         # is now gone
-        system "${prefix}/bin/mktexlsr"
+        system "${texlive_bindir}/mktexlsr"
         if {${texlive.forceupdatecnf} || ${texlive.languages} != ""} {
             system "${prefix}/libexec/texlive-update-cnf language.dat"
             system "${prefix}/libexec/texlive-update-cnf language.def"
