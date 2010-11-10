@@ -471,7 +471,6 @@ set portfetch::mirror_sites::sites(tex_ctan) {
     ftp://mirror.macomnet.net/pub/CTAN/
     http://ftp.sun.ac.za/ftp/CTAN/
     http://ftp.inf.utfsm.cl/pub/tex-archive/
-    http://ftp.das.ufsc.br/pub/ctan/
     ftp://ftp.tex.ac.uk/tex-archive/
     ftp://ftp.dante.de/tex-archive/
     ftp://ctan.tug.org/tex-archive/
