@@ -47,7 +47,8 @@ proc swigbinding-setup {lang prettyname} {
         tcl         {port:tcl               tcl} \
         csharp      {port:mono              csharp} \
         octave      {port:octave            octave} \
-        java        {bin:java:kaffe         java}
+        java        {bin:java:kaffe         java} \
+        go          {port:go-devel          go}
     }
 
     foreach binding [array names bindings] {
