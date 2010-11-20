@@ -111,7 +111,7 @@ proc perl5.setup {module vers {cpandir ""}} {
 
     livecheck.type      regexm
     livecheck.url       http://search.cpan.org/dist/${perl5.module}/
-    livecheck.regex     (?:This Release)?<td class=label>(?:This|Latest) Release</td>.*<td class=cell>(?:<\[^<\]+>)?${perl5.module}-(\[^<\]+?)<
+    livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","${perl5.module}-(\[^"\]+?)\"
 }
 
 # Switch from default MakeMaker-style routine to Module::Build-style
