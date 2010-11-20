@@ -313,7 +313,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://mirror.hiwaay.net/CPAN/modules/by-module/
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     ftp://ftp.cs.colorado.edu/pub/perl/CPAN/modules/by-module/
-    ftp://cpan.pop-mg.com.br/pub/CPAN/modules/by-module/
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     ftp://ftp.chg.ru/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
