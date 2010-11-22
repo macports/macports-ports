@@ -170,12 +170,10 @@ proc set_gnustep_env {} {
     global env prefix
     
     if {[gnustep_layout]} {
-        return "\
-            DYLD_LIBRARY_PATH=${prefix}/GNUstep/Local/Library/Libraries:${prefix}/GNUstep/System/Library/Libraries \
-            PATH=${prefix}/GNUstep/Local/Tools:${prefix}/GNUstep/System/Tools:$env(PATH) \
-        "
+        return [list "DYLD_LIBRARY_PATH=${prefix}/GNUstep/Local/Library/Libraries:${prefix}/GNUstep/System/Library/Libraries" \
+            "PATH=${prefix}/GNUstep/Local/Tools:${prefix}/GNUstep/System/Tools:$env(PATH)"]
     }
-    return
+    return [list]
 }
 
 #
