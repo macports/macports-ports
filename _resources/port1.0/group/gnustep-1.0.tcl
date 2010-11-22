@@ -185,7 +185,12 @@ proc set_gnustep_env {} {
 options gnustep.cc
 default gnustep.cc          {CC=${configure.cc}}
 
-configure.compiler          macports-gcc-4.2
+platform darwin 8 {
+    configure.compiler      macports-gcc-4.2
+}
+platform darwin 9 {
+    configure.compiler      gcc-4.2
+}
 
 options system_library
 options local_library
