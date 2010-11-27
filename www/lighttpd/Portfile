@@ -3,8 +3,7 @@
 
 PortSystem 1.0
 name              lighttpd
-version           1.4.26
-revision          1
+version           1.4.28
 set branch        [join [lrange [split ${version} .] 0 1] .]
 categories        www
 platforms         darwin
@@ -19,35 +18,63 @@ homepage          http://www.lighttpd.net/
 master_sites      http://download.lighttpd.net/lighttpd/releases-${branch}.x/
 use_bzip2         yes
 
-checksums         md5     a682c8efce47a2f4263a247ba0813c9b \
-                  sha1    f9710da0152792d83c223a1248345a2d145d6f32 \
-                  rmd160  2d294083fbcd4040dc8efec06090cf1c1bf66bbf
+checksums                   sha1    42915dffe2af4f870cc1cdc0218edb60a0a315c2 \
+                            rmd160  5af6c848dd251c9d15f5185f54411744ae41c67b
 
-depends_lib       port:pcre \
+depends_build-append        port:pkgconfig
+
+depends_lib                 port:bzip2 \
+                            port:pcre \
                   port:spawn-fcgi \
                   port:zlib
-patchfiles        patch-doc-lighttpd.conf.diff
+
+patchfiles                  patch-conf.diff
 
 post-patch {
-    reinplace "s|__PREFIX|${prefix}|g" "${worksrcpath}/doc/lighttpd.conf"
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/doc/config/conf.d/cgi.conf \
+        ${worksrcpath}/doc/config/conf.d/fastcgi.conf \
+        ${worksrcpath}/doc/config/conf.d/mysql_vhost.conf \
+        ${worksrcpath}/doc/config/conf.d/rrdtool.conf \
+        ${worksrcpath}/doc/config/lighttpd.conf
 }
 
-# Startup item.
-set lighttpd_config_name   lighttpd.conf
-set lighttpd_config        ${prefix}/etc/${name}/${lighttpd_config_name}
+platform darwin {
+    depends_lib-append      port:libev
+    patchfiles-append       patch-conf-darwin.diff
+    post-patch {
+        if {${os.major} <= 8} {
+            set user "www"
+            set group "www"
+        } else {
+            set user "_www"
+            set group "_www"
+        }
+        reinplace "s|@USER@|${user}|g" ${worksrcpath}/doc/config/lighttpd.conf
+        reinplace "s|@GROUP@|${group}|g" ${worksrcpath}/doc/config/lighttpd.conf
+    }
+    configure.args-append   --with-libev
+}
+
+set lighttpd_config_dir     ${prefix}/etc/${name}
 
 startupitem.create  yes
-startupitem.executable ${prefix}/sbin/lighttpd -D -f ${lighttpd_config}
+startupitem.executable      ${prefix}/sbin/lighttpd -D -f ${lighttpd_config_dir}/lighttpd.conf
 
 destroot.keepdirs   ${destroot}${prefix}/var/log/lighttpd \
                     ${destroot}${prefix}/www/htdocs \
                     ${destroot}${prefix}/var/run/lighttpd \
-                    ${destroot}${prefix}/var/lib/lighttpd \
+                    ${destroot}${prefix}/var/lib/lighttpd/sockets \
                     ${destroot}${prefix}/var/cache/lighttpd/compress
 post-destroot {
-   file mkdir "${destroot}${prefix}/etc/${name}/"
-   xinstall -m 644 -v "${worksrcpath}/doc/lighttpd.conf" \
-                      "${destroot}${lighttpd_config}.default"
+    xinstall -d ${destroot}${lighttpd_config_dir}/conf.d
+    foreach f [glob ${worksrcpath}/doc/config/*.conf] {
+        xinstall -m 644 ${f} ${destroot}${lighttpd_config_dir}/[file tail ${f}].default
+    }
+    foreach f [glob ${worksrcpath}/doc/config/conf.d/*.conf] {
+        xinstall -m 644 ${f} ${destroot}${lighttpd_config_dir}/conf.d/[file tail ${f}].default
+    }
+
    set docdir ${destroot}${prefix}/share/doc/${name}
    xinstall -d ${docdir}
    xinstall -m 644 -W ${worksrcpath} \
@@ -60,43 +87,43 @@ post-destroot {
 
 install.asroot      yes
 
-post-install {
-  ui_msg "\n Before starting lighttpd it must be configured.\n\
-    Lighttpd is configured by editing ${lighttpd_config}\n\
-    There's a sample config file at ${lighttpd_config}.default."
+post-activate {
+    # Copy default conf files if not present
+    foreach f [glob ${lighttpd_config_dir}/*.conf.default] {
+        set f [file rootname ${f}]
+        if {![file exists ${f}]} {
+            copy ${f}.default ${f}
+        }
+    }
+    foreach f [glob ${lighttpd_config_dir}/conf.d/*.conf.default] {
+        set f [file rootname ${f}]
+        if {![file exists ${f}]} {
+            copy ${f}.default ${f}
+        }
+    }
 }
-
 
 variant mysql4 conflicts mysql5 {
    depends_lib-append    port:mysql4
    configure.args-append --with-mysql=${prefix}/bin/mysql_config
-
-   post-configure {
-      reinplace "s|<mysql/mysql.h>|\"${prefix}/include/mysql/mysql.h\"|g" \
-                "${worksrcpath}/src/mod_mysql_vhost.c"
-   }
+   #configure.cppflags-append -I${prefix}/include/mysql
 }
 
 variant mysql5 conflicts mysql4 {
    depends_lib-append    path:bin/mysql_config5:mysql5
    configure.args-append --with-mysql=${prefix}/bin/mysql_config5
-
-   post-configure {
-      reinplace "s|<mysql/mysql.h>|\"${prefix}/include/mysql5/mysql/mysql.h\"|g" \
-                "${worksrcpath}/src/mod_mysql_vhost.c"
-   }
+   #configure.cppflags-append -I${prefix}/include/mysql5/mysql
 }
 
 variant ssl {
    depends_lib-append   port:openssl
-   configure.args-append --with-openssl=${prefix}/include/openssl
+    configure.args-append   --with-openssl
 }
 
 variant cml {
    depends_lib-append   port:lua \
                         port:libmemcache \
-                        port:memcached \
-                        port:pkgconfig
+                        port:memcached
                         
    configure.args-append --with-lua \
                          --with-memcache
@@ -104,10 +131,20 @@ variant cml {
 
 variant davprops {
    depends_lib-append   port:libxml2 \
-                        port:sqlite3 \
-                        port:pkgconfig
+                        port:sqlite3
                         
    configure.args-append --with-webdav-props
 }
 
 default_variants            +ssl
+
+notes "
+Before starting lighttpd it must be configured.\
+Basic server configuration is in the file ${lighttpd_config_dir}/lighttpd.conf.\
+Select which modules you want enabled in ${lighttpd_config_dir}/modules.conf.\
+Individual modules' settings are in ${lighttpd_config_dir}/conf.d.
+
+Sample config files have the .conf.default extension.\
+When updating lighttpd, you should investigate whether you need to update\
+your .conf files with changes from the corresponding .conf.default files.
+"
