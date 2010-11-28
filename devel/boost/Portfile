@@ -4,8 +4,7 @@
 PortSystem      1.0
 
 name            boost
-version         1.44.0
-revision        1
+version         1.45.0
 license         Boost-1.0
 categories      devel
 platforms       darwin
@@ -23,26 +22,37 @@ set distver     [join [split ${version} .] _]
 distname        ${name}_${distver}
 use_bzip2       yes
 
-checksums       md5     f02578f5218f217a9f20e9c30e119c6a \
-                sha1    0dfeaad7a316ddfdcdb8a7e42443ef048ad18c01 \
-                rmd160  1fe1bf83ce5699dc43cbfc3d5a6997722c34c938
+checksums       md5     d405c606354789d0426bc07bea617e58 \
+                sha1    eb7424ef99df4e38af7431e38ff9849651b8aaf5 \
+                rmd160  1402cb49e0d680268109ef1bf16aea9bc4a127b0
 
-depends_build   path:bin/bjam:boost-jam
+conflicts       boost-jam
 
 depends_lib     port:zlib \
                 port:expat \
                 port:bzip2
 
-configure {
+proc write_jam s {
+    global worksrcpath
+    set config [open ${worksrcpath}/user-config.jam a]
+    puts ${config} ${s}
+    close ${config}
+}
+
+configure.cmd       ./bootstrap.sh
+configure.args      --without-libraries=python \
+                    --without-libraries=mpi \
+                    --without-icu
+
+post-configure {
 
     reinplace -E "s|-install_name \"|&${prefix}/lib/|" \
         ${worksrcpath}/tools/build/v2/tools/darwin.jam
-        
-    # Copied from portconfigure.tcl (modified below)
-    # Set pre-compiler filter to use (ccache/distcc), if any.
+
+    # Modified from 'portconfigure.tcl':
+    # set pre-compiler filter to use (ccache/distcc), if any.
     if {[tbool configure.ccache] && [tbool configure.distcc]} {
         set filter "ccache "
-        # Modified from portconfigure.tcl
         ui_msg "Warning: boost does not support distcc with ccache"
     } elseif {[tbool configure.ccache]} {
         set filter "ccache "
@@ -55,31 +65,30 @@ configure {
 
 }
 
-build.cmd       bjam
+build.cmd       ${worksrcpath}/bjam
 build.target
 build.args      -d2 \
                 --layout=tagged \
                 --debug-configuration \
-                --ignore-site-config \
                 --user-config=user-config.jam \
-                --without-python \
-                --without-mpi \
                 -sBZIP2_INCLUDE=${prefix}/include \
                 -sBZIP2_LIBPATH=${prefix}/lib \
                 -sEXPAT_INCLUDE=${prefix}/include \
                 -sEXPAT_LIBPATH=${prefix}/lib \
                 -sZLIB_INCLUDE=${prefix}/include \
                 -sZLIB_LIBPATH=${prefix}/lib \
+                variant=release \
                 threading=single,multi \
-                variant=release
+                link=static,shared
 
 use_parallel_build  no
 
-destroot.cmd        bjam
-destroot.destdir    --prefix=${destroot}${prefix}
-
+destroot.cmd            ${worksrcpath}/bjam
+destroot.post_args
+#
 pre-destroot {
-    eval destroot.args  ${build.args}
+    eval destroot.args  ${build.args} --prefix=${destroot}${prefix}
+    system "find ${worksrcpath} -type f -name '*.gch' -exec rm {} \\;"
 }
 
 post-destroot {
@@ -118,49 +127,46 @@ proc python_dir {} {
     error "Python support not enabled."
 }
 
-proc write_jam s {
-    global worksrcpath
-    set config [open ${worksrcpath}/user-config.jam a]
-    puts ${config} ${s}
-    close ${config}
-}
-
 foreach s ${pythons_suffixes} {
     set p python${s}
     set v [string index ${s} 0].[string index ${s} 1]
     set i [lsearch -exact ${pythons_ports} ${p}]
     set c [lreplace ${pythons_ports} ${i} ${i}]
     eval [subst {
-        variant ${p} description "Build Boost.Python for Python ${v}" conflicts ${c} debug {
-            # Cannot build debug variants with openmpi and python variants as per the following:
+        variant ${p} description "Build Boost.Python for Python ${v}" conflicts ${c} {
+            
+            # There is a conflict with python and debug support, so we should really change the 'variant' line above
+            # to end with "conflicts ${c} debug" above. However, we leave it enabled for those who want to try it.
+            # The issue has been reported to both the MacPorts team and the boost team, as per:
             # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+            
+            depends_lib-append      port:${p}
+            configure.args-delete   --without-libraries=python
+            configure.args-append   --with-python=${prefix}/bin/python${v}
+            
             patchfiles-append   patch-tools-build-v2-tools-python.jam.diff
-
+            
             post-patch {
                 reinplace s|@PREFIX@|${prefix}| ${worksrcpath}/tools/build/v2/tools/python.jam
             }
-
-            depends_lib-append  port:${p}
-            build.args-delete   --without-python
-
-            post-configure {
-                write_jam "using python : : ${prefix}/bin/python${v} : : ${prefix}/lib ;"
-            }
+            
         }
     }]
 }
 
-variant debug description {Builds debug versions of the libraries as well} conflicts openmpi {
+variant debug description {Builds debug versions of the libraries as well} {
     build.args-delete   variant=release
     build.args-append   variant=debug,release
 }
 
 variant icu description {Enable Unicode support in Boost.Regex through ICU} {
-    depends_lib-append  port:icu
-    build.args-append   -sICU_PATH=${prefix}
+    depends_lib-append      port:icu
+    configure.args-delete   --without-icu
+    configure.args-append   --with-icu=${prefix}
 }
 
 variant no_static description {Disable building static libraries} {
+    build.args-delete   link=shared,static
     build.args-append   link=shared
 }
 
@@ -169,30 +175,37 @@ variant no_single description {Disable building single-threaded libraries} {
     build.args-append   threading=multi
 }
 
-variant openmpi description {Build Boost.MPI} conflicts debug {
-    # Cannot build debug variants with openmpi and python variants as per the following:
+variant openmpi description {Build Boost.MPI} {
+    
+    # There is a conflict with python and debug support, so we should really change the 'variant' line above
+    # to end with "conflicts debug" above. However, we leave it enabled for those who want to try it.
+    # The issue has been reported to both the MacPorts team and the boost team, as per:
     # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
-    depends_lib-append  port:openmpi
-    build.args-delete   --without-mpi
+
+    depends_lib-append      port:openmpi
+    configure.args-delete   --without-libraries=mpi
 
     post-configure {
         write_jam "using mpi : ${prefix}/bin/openmpic++ : : ${prefix}/bin/openmpirun ;"
     }
 
     if {![catch python_dir]} {
+        
         patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
-
+    
         post-destroot {
             set site_packages [python_dir]
             xinstall -d ${destroot}${site_packages}/boost
             xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
                 ${destroot}${site_packages}/boost
-
+    
             set l ${site_packages}/boost/mpi.so
             move ${destroot}${prefix}/lib/mpi.so ${destroot}${l}
             system "install_name_tool -id ${l} ${destroot}${l}"
         }
+
     }
+    
 }
 
 variant regex_match_extra description \
