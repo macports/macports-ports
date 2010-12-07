@@ -37,17 +37,24 @@
 PortGroup               cmake 1.0
 PortGroup               qt4 1.0
 
+# build in a separate directory; have to put these into phases because
+# ${distname} and ${workpath} are not necessarily defined at the
+# top-level while they are guaranteed to be by the pre-fetch phase.
+
 # setup all KDE4 ports to build in a separate directory from the source;
 # this setting must be the full directory path
 post-extract            { file mkdir ${workpath}/build }
 
+# Have to set for configure, build, and destroot phases only.
 pre-configure {
     # standard post-arg, where to find the primary CMakeLists.txt file.
     configure.post_args ../${distname}
     configure.dir       ${workpath}/build
 }
-
 pre-build {
+    build.dir           ${workpath}/build
+}
+pre-destroot {
     build.dir           ${workpath}/build
 }
 
@@ -78,9 +85,9 @@ post-extract {
     # Following the official word: Change #include ["<]Phonon...[">] to
     # ...phonon... in all files that contain that header.
     fs-traverse item ${workpath}/${distname} {
-	if {[file isfile ${item}]} {
-	   reinplace "/#include/s@Phonon@phonon@" ${item}
-	}
+        if {[file isfile ${item}]} {
+            reinplace "/#include/s@Phonon@phonon@" ${item}
+        }
     }
 }
 
