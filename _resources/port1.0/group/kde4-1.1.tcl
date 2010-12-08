@@ -37,6 +37,11 @@
 PortGroup               cmake 1.0
 PortGroup               qt4 1.0
 
+# Make sure to not use any already installed headers and libraries;
+# these are set in CPATH and LIBRARY_PATH anyway.  
+configure.ldflags-delete  -L${prefix}/lib
+configure.cppflags-delete -I${prefix}/include
+
 # build in a separate directory; have to put these into phases because
 # ${distname} and ${workpath} are not necessarily defined at the
 # top-level while they are guaranteed to be by the pre-fetch phase.
