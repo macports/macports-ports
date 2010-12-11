@@ -65,10 +65,11 @@ proc pure.setup {module version} {
     
     post-destroot {
         xinstall -d ${destroot}${prefix}/share/doc/${name}
-        xinstall -m 644 -W ${worksrcpath} \
-            COPYING \
-            README \
-            ${destroot}${prefix}/share/doc/${name}
+        foreach f {COPYING README} {
+            if {[file exists ${worksrcpath}/${f}]} {
+                xinstall -m 644 ${worksrcpath}/${f} ${destroot}${prefix}/share/doc/${name}
+            }
+        }
         if {[file exists ${worksrcpath}/examples]} {
             xinstall -d ${destroot}${prefix}/share/examples
             copy ${worksrcpath}/examples ${destroot}${prefix}/share/examples/${name}
