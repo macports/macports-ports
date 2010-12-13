@@ -135,8 +135,6 @@ set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 global qt_cmake_defines
 set qt_cmake_defines    \
     "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
-     -DQT_LIBRARY_DIR=${qt_libs_dir} \
-     -DQT_QMAKE_EXECUTABLE=${qt_qmake_cmd} \
      -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
