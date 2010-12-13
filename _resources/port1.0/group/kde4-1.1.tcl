@@ -105,12 +105,34 @@ if {${qt_dir} != ${prefix}} {
     unset cmake_module_path
 }
 
-# standard configure args; virtuall all KDE ports use CMake and Qt4
+# standard configure args; virtuall all KDE ports use CMake and Qt4.
 configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
                         -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X" \
                         ${qt_cmake_defines}
+
+# explicitly define certain headers and libraries, to avoid
+# conflicts with those installed into system paths by the user.
+configure.args-append   -DGETTEXT_INCLUDE_DIR=${prefix}/include \
+                        -DGIF_INCLUDE_DIR=${prefix}/include \
+                        -DJASPER_INCLUDE_DIR=${prefix}/include \
+                        -DJASPER_LIBRARY=${prefix}/lib/libjasper.dylib \
+                        -DJPEG_INCLUDE_DIR=${prefix}/include \
+                        -DLIBINTL_INCLUDE_DIR=${prefix}/include \
+                        -DPNG_PNG_INCLUDE_DIR=${prefix}/include \
+                        -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
+                        -DTIFF_INCLUDE_DIR=${prefix}/include \
+                        -DLIBXSLT_INCLUDE_DIR=${prefix}/include \
+                        -DLIBXSLT_LIBRARIES=${prefix}/lib/libxslt.dylib \
+                        -DLIBEXSLT_LIBRARIES=${prefix}/lib/libexslt.dylib \
+                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
+                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.2.dylib \
+                        -DDOCBOOKXSL_DIR=${prefix}/share/xml/ \
+                        -DMYSQLD_EXECUTABLE=${prefix}/libexec/mysqld \
+                        -DMYSQL_INCLUDE_DIR=${prefix}/include/mysql5/mysql \
+                        -DMYSQL_LIB_DIR=${prefix}/lib/mysql5/mysql \
+                        -DMYSQLCONFIG_EXECUTABLE=${prefix}/bin/mysql_config5
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
