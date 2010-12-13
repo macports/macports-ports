@@ -105,7 +105,7 @@ if {${qt_dir} != ${prefix}} {
     unset cmake_module_path
 }
 
-# standard configure args; virtuall all KDE ports use CMake and Qt4.
+# standard configure args; virtually all KDE ports use CMake and Qt4.
 configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
