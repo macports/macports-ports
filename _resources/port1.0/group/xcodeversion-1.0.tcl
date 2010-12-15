@@ -45,11 +45,24 @@ default minimum_xcodeversions {}
 
 platform macosx {
     pre-extract {
-        set current_xcodeversion [exec defaults read ${developer_dir}/Applications/Xcode.app/Contents/Info CFBundleShortVersionString]
+        set xcode_app ${developer_dir}/Applications/Xcode.app
+        if {![file exists ${xcode_app}]} {
+            ui_error "Couldn't find Xcode; expected it to be at ${xcode_app}."
+            ui_error ""
+            ui_error "If you have not installed Xcode, install it now; see:"
+            ui_error "http://guide.macports.org/chunked/installing.xcode.html"
+            ui_error ""
+            ui_error "If you have installed Xcode in a nonstandard location, inform MacPorts"
+            ui_error "of that location by changing the 'developer_dir' variable in"
+            ui_error "${prefix}/etc/macports/macports.conf"
+            ui_error ""
+            return -code error "unable to find Xcode"
+        }
+        set current_xcodeversion [exec defaults read ${xcode_app}/Contents/Info CFBundleShortVersionString]
         foreach {darwin_major minimum_xcodeversion} [join ${minimum_xcodeversions}] {
             if {${darwin_major} == ${os.major}} {
                 if {[rpm-vercomp ${current_xcodeversion} ${minimum_xcodeversion}] < 0} {
-                    ui_msg "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${current_xcodeversion}."
+                    ui_error "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${current_xcodeversion}."
                     return -code error "incompatible Xcode version"
                 }
             }
