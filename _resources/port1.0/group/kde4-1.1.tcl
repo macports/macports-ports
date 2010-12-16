@@ -109,30 +109,40 @@ if {${qt_dir} != ${prefix}} {
 configure.args-append   -DBUILD_doc=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
-                        -DKDE_DISTRIBUTION_TEXT="MacPorts\/Mac OS X" \
+                        -DKDE_DISTRIBUTION_TEXT=\"MacPorts\/Mac OS X\" \
                         ${qt_cmake_defines}
 
 # explicitly define certain headers and libraries, to avoid
 # conflicts with those installed into system paths by the user.
-configure.args-append   -DGETTEXT_INCLUDE_DIR=${prefix}/include \
+configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xml/ \
+                        -DGETTEXT_INCLUDE_DIR=${prefix}/include \
+                        -DGETTEXT_LIBRARY=${prefix}/libgettextlib.dylib \
                         -DGIF_INCLUDE_DIR=${prefix}/include \
+                        -DGIF_LIBRARY=${prefix}/libgif.dylib \
                         -DJASPER_INCLUDE_DIR=${prefix}/include \
                         -DJASPER_LIBRARY=${prefix}/lib/libjasper.dylib \
                         -DJPEG_INCLUDE_DIR=${prefix}/include \
+                        -DJPEG_LIBRARY=${prefix}/lib/libjpeg.dylib \
+                        -DLBER_LIBRARIES=${prefix}/lib/liblber.dylib \
+                        -DLDAP_INCLUDE_DIR=${prefix}/include \
+                        -DLDAP_LIBRARIES=${prefix}/lib/libldap.dylib \
+                        -DLIBEXSLT_INCLUDE_DIR=${prefix}/include \
+                        -DLIBEXSLT_LIBRARIES=${prefix}/lib/libexslt.dylib \
                         -DLIBINTL_INCLUDE_DIR=${prefix}/include \
-                        -DPNG_PNG_INCLUDE_DIR=${prefix}/include \
-                        -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
-                        -DTIFF_INCLUDE_DIR=${prefix}/include \
+                        -DLIBINTL_LIBRARY=${prefix}/lib/libintl.dylib \
                         -DLIBXSLT_INCLUDE_DIR=${prefix}/include \
                         -DLIBXSLT_LIBRARIES=${prefix}/lib/libxslt.dylib \
-                        -DLIBEXSLT_LIBRARIES=${prefix}/lib/libexslt.dylib \
-                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
-                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.2.dylib \
-                        -DDOCBOOKXSL_DIR=${prefix}/share/xml/ \
                         -DMYSQLD_EXECUTABLE=${prefix}/libexec/mysqld \
                         -DMYSQL_INCLUDE_DIR=${prefix}/include/mysql5/mysql \
                         -DMYSQL_LIB_DIR=${prefix}/lib/mysql5/mysql \
-                        -DMYSQLCONFIG_EXECUTABLE=${prefix}/bin/mysql_config5
+                        -DMYSQLCONFIG_EXECUTABLE=${prefix}/bin/mysql_config5 \
+                        -DPNG_INCLUDE_DIR=${prefix}/include \
+                        -DPNG_PNG_INCLUDE_DIR=${prefix}/include \
+                        -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
+                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
+                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.dylib \
+                        -DTIFF_INCLUDE_DIR=${prefix}/include \
+                        -DTIFF_LIBRARY=${prefix}/lib/libtiff.dylib
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
