@@ -53,7 +53,7 @@ options php5extension.build_dirs
 default php5extension.build_dirs    {[php5extension.build_dirs_proc]}
 options php5extension.extensions
 options php5extension.extension_dir
-default php5extension.extension_dir {[exec ${prefix}/bin/php-config --extension-dir]}
+default php5extension.extension_dir {[exec ${prefix}/bin/php-config --extension-dir 2>/dev/null]}
 options php5extension.ini
 default php5extension.ini           {[lindex ${php5extension.extensions} 0].ini}
 options php5extension.inidir
@@ -189,7 +189,7 @@ proc php5extension.setup {extensions version {source ""}} {
         }
         
         pre-configure {
-            set php_version [exec ${prefix}/bin/php-config --version]
+            set php_version [exec ${prefix}/bin/php-config --version 2>/dev/null]
             if {${version} != ${php_version}} {
                 ui_error "${name} ${version} requires PHP ${version} but you have PHP ${php_version}."
                 return -code error "incompatible PHP installation"
