@@ -275,6 +275,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
     http://lil.fr.distfiles.macports.org/:mirror
     http://sea.us.distfiles.macports.org/macports/mpdistfiles/:mirror
     http://trd.no.distfiles.macports.org/:mirror
+    http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
 }
 
 set portfetch::mirror_sites::sites(netbsd) {
