@@ -74,6 +74,9 @@ patchfiles-append   patch-mkspecs-macx-g++-qmake.prf.diff
 # only; this patch requires that (2) already be in place.
 patchfiles-append   patch-mkspecs_common_mac.conf.diff
 
+global TARGET
+set TARGET ""
+
 post-patch {
     # set ARCHES in configure (per the third patchfile above), for
     # building QMake.  join any 2 or more arch entries with the GCC
@@ -91,12 +94,18 @@ post-patch {
     # set MACOSX_DEPLOYMENT_TARGET version in various places.  These
     # were all patched in (2) above, and can be easily changed or
     # overridden by the user in a project-local qmake .pro script.
-    set minor [expr [lindex [split ${os.version} "."] 0] - 4]
-    set MACOSX_DEPLOYMENT_TARGET "10.${minor}"
+    set TARGET ${macosx_deployment_target}
+
+    # hopefully the TARGET exists and is set by now.  if not, last
+    # resort (which is not desirable) is to use the os.version.
+    if {${TARGET} == ""} {
+        set minor [expr [lindex [split ${os.version} "."] 0] - 4]
+        set TARGET "10.${minor}"
+    }
     foreach fixfile {configure mkspecs/common/mac-g++.conf \
                      mkspecs/common/mac.conf qmake/qmake.pri \
                      src/tools/bootstrap/bootstrap.pro } {
-        reinplace "s|@MACOSX_DEPLOYMENT_TARGET@|${MACOSX_DEPLOYMENT_TARGET}|g" \
+        reinplace "s|@MACOSX_DEPLOYMENT_TARGET@|${TARGET}|g" \
             ${worksrcpath}/${fixfile}
     }
 
@@ -238,18 +247,10 @@ platform darwin 8 {
     # required linking flags?
     configure.ldflags-append -lcrypto -ldbus-1 -ljpeg -llcms -lsqlite3 -lssl -lz
 
-    # build all Makefiles during configure, ...
-    configure.args-delete -fast
-    # ... then patch them: 10.4 requires -lQtHelp to be followed by
-    # -lQtCLucene (10.5+ figures this out) as found in Makefiles only.
-    # If just release, will be just "Makefile".  If using +debug, will
-    # be "Makefile.Release" and "Makefile.Debug", so do a find on
-    # "Makefile*" to work no matter which is selected.
-    post-configure {
-        foreach fixfile [exec find ${worksrcpath} -name "Makefile*"] {
-            reinplace "s|-lQtHelp|-lQtHelp -lQtCLucene|g" ${fixfile}
-        }
-    }
+    # Under 10.4 only: patch QMake build files using just "-lQtHelp"
+    # to do "-lQtHelp -lQtCLucene -lQtNetwork -lQtWebKit" instead.
+    # For some reason 10.5+ "knows" that how to do this correctly.
+    patchfiles-append patch-QtHelp_10.4_only.diff
 }
 
 platform darwin {
@@ -274,16 +275,21 @@ platform darwin {
             configure.args-delete -optimized-qmake
         }
 
-        # find a way to specify the SDK to use
-        set SDK ""
-        if {[variant_exists universal] && [variant_isset universal]} {
-            if {[info exists universal_sysroot]} {
-                set SDK ${universal_sysroot}
-            }
-        }
+        # find a way to specify the SDK to use; Qt will use the 10.4u
+        # by default which won't work on 10.6 since it is not
+        # supported.  Allow the user to specify the SDK if desired.
+        set SDK ${configure.sdkroot}
         if {${SDK} == ""} {
-            # else use the one for this OS version, if installed
-            set minor [expr [lindex [split ${os.version} "."] 0] - 4]
+            # find a way to specify the SDK to use, based on the TARGET
+            # hopefully the TARGET exists and is set by now.
+            # last resort: use os.version to get target (bad)
+            set minor ""
+            global TARGET
+            if {${TARGET} == ""} {
+                set minor [expr [lindex [split ${os.version} "."] 0] - 4]
+            } else {
+                set minor [lindex [split ${TARGET} "."] 1]
+            }
             # set SDK version depending on OS version
             set sdk_version ""
             if {${minor} == "4"} {
@@ -351,7 +357,7 @@ pre-build {
     compiler.library_path [join ${library_path} :]
 }
 
-build.target        first
+build.target all
 
 post-destroot {
     set destroot_qt ${destroot}${qt_dir}
@@ -375,29 +381,11 @@ post-destroot {
         LICENSE.GPL3 LICENSE.LGPL README \
         ${destroot}${qt_docs_dir}
 
-    # Fix includes: Remove include/Qt.
-    # It should never be used in Qt4 or newer.
-    # It is there for legacy purposes: it's how
-    # Qt3's headers were installed.
-    if {[file exists ${destroot}/${qt_includes_dir}/Qt]} {
-        delete ${destroot}/${qt_includes_dir}/Qt
-    }
-
     # Move .apps into the applications_dir
     xinstall -m 755 -d ${destroot}${qt_apps_dir}
     foreach app [glob ${destroot}/${qt_bins_dir}/*.app] {
         move ${app} ${destroot}${qt_apps_dir}
     }
-
-    # Install cmake files (taken from port 'kdelibs4'). To use this
-    # file, include '-DCMAKE_MODULE_PATH=...' in configure.args during
-    # the initial 'configure' stage (which uses CMake), to the full
-    # path of where the CMake files are installed.
-    xinstall -m 755 -d ${destroot}${qt_cmake_module_dir}
-    xinstall -m 644 -W ${filespath} \
-        FindQt4.cmake Qt4ConfigDependentSettings.cmake \
-        Qt4Macros.cmake MacroPushRequiredVars.cmake \
-        ${destroot}${qt_cmake_module_dir}
 
     # install qt_menu.nib, used by any applications making use of Qt's
     # application class.
