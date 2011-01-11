@@ -49,25 +49,14 @@ partial = (0|no|false|1|yes|true)
 
 """
 
-import ConfigParser
 import errno
 import os
 import re
 import shutil
 
-from mercurial import cmdutil, commands, hg, hgweb, node, util
+from mercurial import cmdutil, commands, error, hg, hgweb, node, util
 from mercurial import localrepo, sshrepo, sshserver, httprepo, statichttprepo
 from mercurial.i18n import gettext as _
-
-# Import exceptions with backwards compatibility
-try:
-    from mercurial.error import RepoError, UnknownCommand
-except ImportError:
-    from mercurial.repo import RepoError
-    try:
-        from mercurial.cmdutil import UnknownCommand
-    except ImportError:
-        from mercurial.commands import UnknownCommand
 
 # For backwards compatibility, we need the following function definition.
 # If we didn't want that, we'd have just written:
@@ -87,6 +76,20 @@ try:
 except AttributeError:
     findcmd.findcmd = commands.findcmd
     findcmd.__doc__ = commands.findcmd.__doc__
+for m in (error, cmdutil, commands):
+    if hasattr(m, "UnknownCommand"):
+        UnknownCommand = m.UnknownCommand
+        break
+try:
+    # Assign the exceptions explicitely to avoid demandload issues
+    import mercurial.repo
+    import mercurial.cmdutil
+    RepoError = mercurial.repo.RepoError
+    ParseError = mercurial.dispatch.ParseError
+except AttributeError:
+    import mercurial.error
+    RepoError = mercurial.error.RepoError
+    ParseError = mercurial.error.ParseError
 
 # For backwards compatibility, find the parseurl() function that splits
 # urls and revisions.  Mercurial 0.9.3 doesn't have this, so we need
@@ -95,16 +98,50 @@ try:
     parseurl = cmdutil.parseurl
 except:
     try:
-        parseurl = hg.parseurl
+        _parseurl = hg.parseurl
+        def parseurl(url, branches=None):
+            url, revs = _parseurl(url, branches)
+            if isinstance(revs, tuple):
+                # hg >= 1.6
+                return url, revs[1]
+            return url, revs
     except:
         def parseurl(url, revs):
             """Mercurial <= 0.9.3 doesn't have this feature."""
             return url, (revs or None)
 
-
 # For backwards compatibility, find the HTTP protocol.
 if not hasattr(hgweb, 'protocol'):
     hgweb.protocol = hgweb.hgweb_mod.hgweb
+
+# There are no issues with backward compatibility and ConfigParser.
+# But since it was replaced in mercurial >= 1.3, the module is not
+# longer shipped by Windows binary packages. In this case, use
+# mercurial.config instead.
+try:
+    from mercurial import config
+    ConfigError = error.ConfigError
+
+    def readconfig(path):
+        cfg = config.config()
+        try:
+            cfg.read(path)
+            return cfg
+        except IOError:
+            return None
+
+except (ImportError, AttributeError):
+    import ConfigParser
+    ConfigError = ConfigParser.Error    
+
+    def readconfig(path):
+        cfg = ConfigParser.RawConfigParser()
+        if not cfg.read([path]):
+            return None
+        return cfg
+
+class SnapshotError(ConfigError):
+    pass
 
 def cmd_options(ui, cmd, remove=None, table=commands.table):
     aliases, spec = findcmd(ui, cmd, table)
@@ -179,6 +216,13 @@ def _localrepo_forests(self, walkhg):
 
 localrepo.localrepository.forests = _localrepo_forests
 
+def repocall(repo, *args, **kwargs):
+    if hasattr(repo, '_call'):
+        # hg >= 1.7
+        callfn = repo._call
+    else:
+        callfn = repo.do_read
+    return callfn(*args, **kwargs)
 
 def _sshrepo_forests(self, walkhg):
     """Shim this function into mercurial.sshrepo.sshrepository so
@@ -191,7 +235,7 @@ def _sshrepo_forests(self, walkhg):
         raise util.Abort(_("Remote forests cannot be cloned because the "
                            "other repository doesn't support the forest "
                            "extension."))
-    data = self.call("forests", walkhg=("", "True")[walkhg])
+    data = repocall(self, "forests", walkhg=("", "True")[walkhg])
     return data.splitlines()
 
 sshrepo.sshrepository.forests = _sshrepo_forests
@@ -243,7 +287,7 @@ def _httprepo_forests(self, walkhg):
         raise util.Abort(_("Remote forests cannot be cloned because the "
                            "other repository doesn't support the forest "
                            "extension."))
-    data = self.do_read("forests", walkhg=("", "True")[walkhg])
+    data = repocall(self, "forests", walkhg=("", "True")[walkhg])
     return data.splitlines()
 
 httprepo.httprepository.forests = _httprepo_forests
@@ -409,10 +453,7 @@ class Forest(object):
     This data structure describes the Forest contained within the
     current repository.  It contains a list of Trees that describe
     each sub-repository.
-    """
-
-    class SnapshotError(ConfigParser.NoSectionError):
-        pass
+    """    
 
     class Tree(object):
         """Describe a local sub-repository within a forest."""
@@ -634,7 +675,7 @@ class Forest(object):
         elif 'rev' in opts:
             revs = opts['rev']
         else:
-            revs = None
+            revs = []
         die_on_numeric_revs(revs)
         for tree in self.trees:
             rpath = relpath(self.top().root, tree.root)
@@ -674,8 +715,8 @@ class Forest(object):
         """
         if not toppath:
             toppath = "."
-        cfg = ConfigParser.RawConfigParser()
-        if not cfg.read([snapfile]):
+        cfg = readconfig(snapfile)
+        if not cfg:
             raise util.Abort("%s: %s" % (snapfile, os.strerror(errno.ENOENT)))
         seen_root = False
         sections = {}
@@ -711,8 +752,8 @@ class Forest(object):
                                                     revs=[rev],
                                                     paths=paths)
         if not seen_root:
-            raise Forest.SnapshotError("Could not find 'root = .' in '%s'" %
-                                       snapfile)
+            raise SnapshotError("Could not find 'root = .' in '%s'" %
+                                snapfile)
         self.trees = sections.values()
         self.trees.sort(key=(lambda tree: tree.root))
 
@@ -1130,7 +1171,7 @@ def seed(ui, snapshot=None, source='default', **opts):
 
     snapfile = snapshot or opts['snapfile']
     if not snapfile:
-        raise cmdutil.ParseError("fseed", _("invalid arguments"))
+        raise ParseError("fseed", _("invalid arguments"))
     forest = Forest(snapfile=snapfile)
     tip = opts['tip']
     dest = opts['root']
@@ -1206,8 +1247,9 @@ def status(ui, top, *pats, **opts):
         def __init__(self, transform, ui):
             self._transform = transform
             self._ui = ui
-        def write(self, output):
-            self._ui.write(self._transform(output))
+        def write(self, *args, **opts):
+            args = [self._transform(a) for a in args]
+            self._ui.write(*args, **opts)
         def __getattr__(self, attrname):
             return getattr(self._ui, attrname)
 
@@ -1318,16 +1360,12 @@ def update(ui, top, revision=None, **opts):
 
     snapfile = None
     if revision:
-        cp = ConfigParser.RawConfigParser()
         try:
-            if cp.read([revision]):
+            if readconfig(revision):
                 # Compatibility with old 'hg fupdate SNAPFILE' syntax
                 snapfile = revision
-        except Exception, err:
-            if isinstance(err, ConfigParser.Error):
-                ui.warn(_("warning: %s\n") % err)
-            else:
-                raise err
+        except ConfigError, err:
+            ui.warn(_("warning: %s\n") % err)
     if snapfile is None:
         snapfile = opts['snapfile']
         opts['rev'] = revision
@@ -1360,7 +1398,7 @@ def update(ui, top, revision=None, **opts):
                  prehooks=[lambda tree: check_mq(tree)])
 
 
-cmdtable = None
+cmdtable = {}
 
 def uisetup(ui):
     global cmdtable
