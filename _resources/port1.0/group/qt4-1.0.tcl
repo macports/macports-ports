@@ -42,7 +42,8 @@ platform darwin {
         if {[variant_exists debug] && \
             [variant_isset debug] && \
            ![info exists building_qt4]} {
-            if {![file exists ${prefix}/lib/libQtCore_debug.dylib]} {
+            if {![file exists ${qt_frameworks_dir}/QtCore/QtCore_debug] &&
+                ![file exists ${qt_libs_dir}/libQtCore_debug.dylib]} {
                 return -code error "\n\nERROR:\n\
 In order to install this port as +debug,
 Qt4 must also be installed with +debug.\n"
@@ -82,6 +83,10 @@ set qt_includes_dir     ${qt_dir}/include
 # standard Qt libraries directory
 global qt_libs_dir
 set qt_libs_dir         ${qt_dir}/lib
+
+# standard Qt libraries directory
+global qt_frameworks_dir
+set qt_frameworks_dir   ${qt_dir}/Library/Frameworks
 
 # standard Qt non-.app executables directory
 global qt_bins_dir
@@ -130,6 +135,10 @@ set qt_uic_cmd          ${qt_dir}/bin/uic
 # standard lrelease command location
 global qt_lrelease_cmd
 set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
+
+# standard PKGCONFIG path
+global qt_pkg_config_dir
+set qt_pkg_config_dir   ${qt_dir}/lib/pkgconfig
 
 # standard cmake info for Qt4
 global qt_cmake_defines
@@ -182,7 +191,7 @@ if {${qt_dir} != ${prefix}} {
 }
 
 # append Qt's PKGCONFIG path to whatever is there now.
-set qt_pkg_config_path ${qt_dir}/lib/pkgconfig
+set qt_pkg_config_path ${qt_pkg_config_dir}
 if {${qt_dir} != ${prefix}} {
     set qt_pkg_config_path ${pkg_config_path}:${prefix}/lib/pkgconfig
 }
