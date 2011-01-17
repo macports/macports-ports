@@ -323,8 +323,8 @@ proc texlive.texmfport {} {
             system "${prefix}/bin/fmtutil-sys --all"
         } else {
             # Otherwise, only update the config files that are
-            # actually affected, and only generate the formats that
-            # are being installed.
+            # actually affected, and only generate the needed
+            # formats.
             if {${texlive.languages} != ""} {
                 system "${prefix}/libexec/texlive-update-cnf language.dat"
                 system "${prefix}/libexec/texlive-update-cnf language.def"
@@ -335,6 +335,15 @@ proc texlive.texmfport {} {
             }
             if {${texlive.formats} != ""} {
                 system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
+            }
+
+            # Regenerate formats. If we installed any hyphenation
+            # patterns, then we need to regenerate all
+            # formats. Otherwise, just generate the formats we just
+            # installed.
+            if {${texlive.languages} != ""} {
+                system "${prefix}/bin/fmtutil-sys --all"                
+            } elseif {${texlive.formats} != ""} {
                 foreach x ${texlive.formats} {
                     set fmtname [lindex $x 1]
                     system "${prefix}/bin/fmtutil-sys --byfmt $fmtname"
