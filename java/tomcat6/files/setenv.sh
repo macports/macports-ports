@@ -18,27 +18,27 @@ fi
 
 # Attempt to set JAVA_HOME if it's not already set
 if [ -z "$JAVA_HOME" ]; then
-	
-	# Set JAVA_JVM_VERSION and JAVA_HOME for Darwin
-	if [ `uname -s` = "Darwin" ]; then
-	
-		# Look for a java version specified by JAVA_JVM_VERSION, falling back to current version
-		# Set JAVA_HOME to reflect the version
-		for jversion in $JAVA_JVM_VERSION CurrentJDK ; do
-			jhome="/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}/Home"
-			if [ -z "$JAVA_HOME" -a -d "${jhome}" ]; then
-				# Get the actual version that any symlink points to, since
-				# jni doesn't like JAVA_JVM_VERSION set to CurrentJDK
-				saved=`pwd`
-				cd "/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}"
-				actualvers=$(basename $(pwd -P))
-				cd $saved
-				
-				export JAVA_JVM_VERSION=${actualvers}
-				export JAVA_HOME=${jhome}
-			fi
-		done
-		
-	fi
-	
+
+    # Set JAVA_JVM_VERSION and JAVA_HOME for Darwin
+    if [ `uname -s` = "Darwin" ]; then
+
+        # Look for a java version specified by JAVA_JVM_VERSION, falling back to current version
+        # Set JAVA_HOME to reflect the version
+        for jversion in $JAVA_JVM_VERSION CurrentJDK ; do
+            jhome="/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}/Home"
+            if [ -z "$JAVA_HOME" -a -d "${jhome}" ]; then
+                # Get the actual version that any symlink points to, since
+                # jni doesn't like JAVA_JVM_VERSION set to CurrentJDK
+                saved=`pwd`
+                cd "/System/Library/Frameworks/JavaVM.framework/Versions/${jversion}"
+                actualvers=$(basename $(pwd -P))
+                cd $saved
+
+                export JAVA_JVM_VERSION=${actualvers}
+                export JAVA_HOME=${jhome}
+            fi
+        done
+
+    fi
+
 fi
