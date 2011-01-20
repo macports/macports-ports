@@ -175,7 +175,7 @@ if {${qt_dir} != ${prefix}} {
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
-depends_build-append    path:bin/pkg-config:pkgconfig
+depends_build-append    port:pkgconfig
 
 # use a parallel build by default
 use_parallel_build      yes
