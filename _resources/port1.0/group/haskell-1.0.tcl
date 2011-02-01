@@ -85,9 +85,9 @@ proc haskell.setup {package version {compiler ghc}} {
     post-activate {
         system "${prefix}/libexec/${name}/register.sh"
     }
-#    pre-deactivate {
-#        system "${prefix}/libexec/${name}/unregister.sh"
-#    }
+    pre-deactivate {
+        system "${prefix}/libexec/${name}/unregister.sh"
+    }
 
     livecheck.type      regex
     livecheck.url       http://hackage.haskell.org/cgi-bin/hackage-scripts/package/${package}
