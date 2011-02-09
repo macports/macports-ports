@@ -177,9 +177,6 @@ if {${qt_dir} != ${prefix}} {
 # use PKGCONFIG for Qt discovery in configure scripts
 depends_build-append    port:pkgconfig
 
-# use a parallel build by default
-use_parallel_build      yes
-
 # standard destroot environment
 destroot.env-append     QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
