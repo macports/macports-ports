@@ -389,6 +389,8 @@ set portfetch::mirror_sites::sites(savannah) {
 set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
 
 # http://sourceforge.net/apps/trac/sourceforge/wiki/Mirrors
+# Do not add superb-east and superb-west; they don't seem to have current files.
+# See http://lists.macosforge.org/pipermail/macports-dev/2010-July/012387.html
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
     http://aarnet.dl.sourceforge.net/
@@ -418,8 +420,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://softlayer.dl.sourceforge.net/
     http://space.dl.sourceforge.net/
     http://sunet.dl.sourceforge.net/
-    http://superb-east.dl.sourceforge.net/
-    http://superb-west.dl.sourceforge.net/
     http://surfnet.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
     http://transact.dl.sourceforge.net/
