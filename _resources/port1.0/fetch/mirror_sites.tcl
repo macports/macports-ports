@@ -190,7 +190,6 @@ set portfetch::mirror_sites::sites(gnome) {
 set portfetch::mirror_sites::sites(gnu) {
     http://mirrors.ibiblio.org/pub/mirrors/gnu/ftp/gnu/
     http://mirrors.kernel.org/gnu/
-    http://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
     http://mirror.facebook.net/gnu/gnu/
     ftp://ftp.funet.fi/pub/gnu/prep/
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
