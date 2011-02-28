@@ -27,7 +27,6 @@ set portfetch::mirror_sites::sites(apache) {
     ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
     http://apache.multidist.com/
     http://mirror.internode.on.net/pub/apache/
-    http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
     http://apache-mirror.dkuug.dk/
     http://apache.is.co.za/
@@ -77,7 +76,6 @@ set portfetch::mirror_sites::sites(fink) {
     http://distfiles.dub.ie.eu.finkmirrors.net/:nosubdir
     http://distfiles.ams.nl.eu.finkmirrors.net/:nosubdir
     http://distfiles.sjc.ca.us.finkmirrors.net/:nosubdir
-    http://www.mirrorservice.org/sites/master.us.finkmirrors.net/distfiles/:nosubdir
     http://distfiles.master.finkmirrors.net/:nosubdir
 }
 
@@ -96,8 +94,6 @@ set portfetch::mirror_sites::sites(freebsd) {
     ftp://ftp.se.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     http://mirror.aarnet.edu.au/pub/FreeBSD/ports/distfiles/:nosubdir
     http://mirror.aarnet.edu.au/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
 }
@@ -136,7 +132,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
     http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
     http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
     http://gentoo.kiev.ua/ftp/distfiles/:nosubdir
     http://ftp.swin.edu.au/gentoo/distfiles/:nosubdir
     http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
@@ -169,7 +164,6 @@ set portfetch::mirror_sites::sites(gimp) {
 set portfetch::mirror_sites::sites(gnome) {
     ftp://ftp.cse.buffalo.edu/pub/Gnome/
     http://www.gtlib.cc.gatech.edu/pub/gnome/
-    http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     http://fr2.rpmfind.net/linux/gnome.org/
     http://mirror.aarnet.edu.au/pub/gnome/
     http://ftp.unina.it/pub/linux/GNOME/
@@ -206,7 +200,6 @@ set portfetch::mirror_sites::sites(gnu) {
 }
 
 set portfetch::mirror_sites::sites(gnupg) {
-    http://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
     ftp://gd.tuwien.ac.at/privacy/gnupg/
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
     ftp://ftp.jyu.fi/pub/crypt/gcrypt/
@@ -228,7 +221,6 @@ set portfetch::mirror_sites::sites(isc) {
     ftp://ftp.epix.net/pub/isc/
     ftp://ftp.nominum.com/pub/isc/
     http://mirrors.24-7-solutions.net/pub/isc/
-    http://www.mirrorservice.org/sites/ftp.isc.org/isc/
     ftp://gd.tuwien.ac.at/infosys/servers/isc/
     ftp://ftp.ciril.fr/pub/isc/
     ftp://ftp.grolier.fr/pub/isc/
@@ -250,7 +242,6 @@ set portfetch::mirror_sites::sites(kde) {
     http://ibiblio.org/pub/mirrors/kde/
     http://kde.mirrors.hoobly.com/
     http://ftp.gtlib.cc.gatech.edu/pub/kde/
-    http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
     http://gd.tuwien.ac.at/kde/
     http://mirrors.isc.org/pub/kde/
     http://kde.mirrors.tds.net/pub/kde/
@@ -289,7 +280,6 @@ set portfetch::mirror_sites::sites(netbsd) {
 }
 
 set portfetch::mirror_sites::sites(openbsd) {
-    http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
     ftp://carroll.cac.psu.edu/pub/OpenBSD/
     ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
     ftp://gd.tuwien.ac.at/opsys/OpenBSD/
@@ -306,7 +296,6 @@ set portfetch::mirror_sites::sites(openbsd) {
 
 set portfetch::mirror_sites::sites(perl_cpan) {
     http://mirrors.ibiblio.org/pub/mirrors/CPAN/modules/by-module/
-    http://www.mirrorservice.org/sites/ftp.cpan.org/pub/CPAN/modules/by-module/
     http://ftp.ucr.ac.cr/Unix/CPAN/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
@@ -338,7 +327,6 @@ set portfetch::mirror_sites::sites(php) {
 
 set portfetch::mirror_sites::sites(postgresql) {
     http://ftp9.us.postgresql.org/pub/mirrors/postgresql/
-    http://www.mirrorservice.org/sites/ftp.postgresql.org/
     http://ftp7.de.postgresql.org/ftp.postgresql.org/
     ftp://ftp2.ch.postgresql.org/pub/mirrors/postgresql
     ftp://ftp.de.postgresql.org/mirror/postgresql/
@@ -351,7 +339,6 @@ set portfetch::mirror_sites::sites(postgresql) {
 
 set portfetch::mirror_sites::sites(ruby) {
     http://www.ibiblio.org/pub/languages/ruby/
-    http://www.mirrorservice.org/sites/ftp.ruby-lang.org/pub/ruby/
     http://mirrors.sunsite.dk/ruby/
     ftp://xyz.lcs.mit.edu/pub/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
@@ -452,7 +439,6 @@ set portfetch::mirror_sites::sites(sunsite) {
 }
 
 set portfetch::mirror_sites::sites(tcltk) {
-    http://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
     ftp://mirror.switch.ch/mirror/tcl.tk/
     ftp://ftp.informatik.uni-hamburg.de/pub/soft/lang/tcl/
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
@@ -490,7 +476,6 @@ set portfetch::mirror_sites::sites(trolltech) {
 
 set portfetch::mirror_sites::sites(xcontrib) {
     ftp://ftp.net.ohio-state.edu/pub/X11/contrib/
-    http://www.mirrorservice.org/sites/ftp.x.org/contrib/
     ftp://ftp.gwdg.de/pub/x11/x.org/contrib/
     http://mirror.aarnet.edu.au/pub/X11/contrib/
     ftp://ftp.chg.ru/pub/X11/x.org/contrib/
@@ -500,7 +485,6 @@ set portfetch::mirror_sites::sites(xcontrib) {
 
 set portfetch::mirror_sites::sites(xfree) {
     http://www.gtlib.cc.gatech.edu/pub/XFree86/
-    http://www.mirrorservice.org/sites/ftp.xfree86.org/pub/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     ftp://ftp.fit.vutbr.cz/pub/XFree86/
     ftp://mir1.ovh.net/ftp.xfree86.org/
@@ -516,7 +500,6 @@ set portfetch::mirror_sites::sites(xfree) {
 
 set portfetch::mirror_sites::sites(xorg) {
     http://mirror.csclub.uwaterloo.ca/x.org/
-    http://www.mirrorservice.org/sites/ftp.x.org/pub/
     http://mirror.switch.ch/ftp/mirror/X11/pub/
     ftp://ftp.gwdg.de/pub/x11/x.org/pub/
     http://ftp.cica.es/mirrors/X/pub/
