@@ -4,7 +4,7 @@
  
  #include "logging.h"
  
-+#ifdef __APPLE__
++#if defined(__APPLE__) && defined(MAC_OS_X_VERSION_MIN_REQUIRED) && (MAC_OS_X_VERSION_MIN_REQUIRED < 1060)
 +#include <pam/pam_appl.h>
 +#else
  #include <security/pam_appl.h>
