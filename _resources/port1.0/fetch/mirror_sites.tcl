@@ -487,14 +487,9 @@ set portfetch::mirror_sites::sites(xfree) {
     http://www.gtlib.cc.gatech.edu/pub/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     ftp://ftp.fit.vutbr.cz/pub/XFree86/
-    ftp://mir1.ovh.net/ftp.xfree86.org/
     ftp://ftp.gwdg.de/pub/xfree86/XFree86/
-    ftp://ftp.rediris.es/mirror/XFree86/
     ftp://ftp.esat.net/pub/X11/XFree86/
-    ftp://sunsite.uio.no/pub/XFree86/
     ftp://ftp.physics.uvt.ro/pub/XFree86/
-    ftp://ftp.chg.ru/pub/XFree86/
-    http://mirror.aarnet.edu.au/pub/XFree86/
     ftp://ftp.xfree86.org/pub/XFree86/
 }
 
