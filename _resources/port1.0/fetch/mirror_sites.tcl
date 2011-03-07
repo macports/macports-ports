@@ -489,6 +489,7 @@ set portfetch::mirror_sites::sites(xfree) {
     ftp://ftp.gwdg.de/pub/xfree86/XFree86/
     ftp://ftp.esat.net/pub/X11/XFree86/
     ftp://ftp.physics.uvt.ro/pub/XFree86/
+    http://mirror.aarnet.edu.au/pub/xfree86/
     ftp://ftp.xfree86.org/pub/XFree86/
 }
 
