@@ -401,7 +401,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://nchc.dl.sourceforge.net/
     http://ncu.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
-    http://ovh.dl.sourceforge.net/
     http://puzzle.dl.sourceforge.net/
     http://softlayer.dl.sourceforge.net/
     http://space.dl.sourceforge.net/
