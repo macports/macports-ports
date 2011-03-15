@@ -1,0 +1,4560 @@
+diff -urN galeon-2.0.7.orig/configure.in galeon-2.0.7/configure.in
+--- galeon-2.0.7.orig/configure.in	2008-09-27 04:15:11.000000000 +0200
++++ galeon-2.0.7/configure.in	2009-02-15 09:39:07.000000000 +0100
+@@ -28,7 +28,7 @@
+ GCONF_REQUIRED=2.3.2
+ GLIB_REQUIRED=2.4.0
+ GNOME_VFS_REQUIRED=2.0.0
+-GTK_REQUIRED=2.4.0
++GTK_REQUIRED=2.12.0
+ ORBIT_REQUIRED=2.0.0
+ SCROLLKEEPER_REQUIRED=0.1.4
+ 
+@@ -129,6 +129,7 @@
+ 
+ PKG_CHECK_MODULES(GALEON_DEPENDENCY, \
+ 		  gtk+-2.0 >= $GTK_REQUIRED \
++		  gtk+-unix-print-2.0 >= $GTK_REQUIRED \
+ 		  libxml-2.0 >= $LIBXML_REQUIRED \
+ 		  libgnomeui-2.0 >= $LIBGNOMEUI_REQUIRED \
+ 		  libbonoboui-2.0 >= $LIBBONOBOUI_REQUIRED \
+@@ -707,22 +708,44 @@
+ 	[result=no])
+ AC_MSG_RESULT([$result])
+ 
+-dnl Printer enumeration was changed in gecko 1.9
+-dnl https://bugzilla.mozilla.org/show_bug.cgi?id=341313
+-AC_MSG_CHECKING([for nsIPrintOptions::AvailablePrinters])
++AC_MSG_CHECKING([for nsIPrintSettings::SetOutputFormat])
+ AC_COMPILE_IFELSE(
+ 	[AC_LANG_PROGRAM(
+-		[[#define MOZILLA_INTERNAL_API
+-		  #include <nsIPrintOptions.h>]],
+-		[[nsIPrintOptions *p;
+-		  nsISimpleEnumerator *s;
+-		  p->AvailablePrinters(&s);]]
++		[[#include <nsIPrintSettings.h>]],
++		[[nsIPrintSettings *ps;
++		  PRInt16 out;
++		  ps->SetOutputFormat(out);]]
++	)],
++	[AC_DEFINE([HAVE_NSIPRINTSETTINGS_SETOUTPUTFORMAT], [1],
++		   [Define if nsIPrintSettings::SetOutputFormat exists]) result=yes],
++	[result=no])
++AC_MSG_RESULT([$result])
++
++AC_MSG_CHECKING([for nsIPrintSettings::SetPaperSize])
++AC_COMPILE_IFELSE(
++	[AC_LANG_PROGRAM(
++		[[#include <nsIPrintSettings.h>]],
++		[[nsIPrintSettings *ps;
++		  PRInt16 size;
++		  ps->SetPaperSize(size);]]
+ 	)],
+-	[AC_DEFINE([HAVE_NSIPRINTOPTIONS_AVAILABLEPRINTERS], [1],
+-		   [Define if nsIPrintOptions::AvailablePrinters exists]) result=yes],
++	[AC_DEFINE([HAVE_NSIPRINTSETTINGS_SETPAPERSIZE], [1],
++		   [Define if nsIPrintSettings::SetPaperSize exists]) result=yes],
+ 	[result=no])
+ AC_MSG_RESULT([$result])
+ 
++AC_MSG_CHECKING([for nsIPrintSettings::SetPaperName])
++AC_COMPILE_IFELSE(
++	[AC_LANG_PROGRAM(
++		[[#include <nsIPrintSettings.h>]],
++		[[nsIPrintSettings *ps;
++		  PRUnichar *s;
++		  ps->SetPaperName(s);]]
++	)],
++	[AC_DEFINE([HAVE_NSIPRINTSETTINGS_SETPAPERNAME], [1],
++		   [Define if nsIPrintSettings::SetPaperName exists]) result=yes],
++	[result=no])
++AC_MSG_RESULT([$result])
+ dnl GetMessage -> GetMessageMoz
+ AC_MSG_CHECKING([for nsIConsoleMessage::GetMessageMoz])
+ AC_COMPILE_IFELSE(
+diff -urN galeon-2.0.7.orig/embed/galeon-embed.c galeon-2.0.7/embed/galeon-embed.c
+--- galeon-2.0.7.orig/embed/galeon-embed.c	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/embed/galeon-embed.c	2009-02-15 09:39:07.000000000 +0100
+@@ -702,11 +702,10 @@
+ }
+ 
+ gboolean
+-galeon_embed_print (GaleonEmbed *embed, 
+-                    EmbedPrintInfo *info)
++galeon_embed_print (GaleonEmbed *embed)
+ {
+ 	GaleonEmbedClass *klass = GALEON_EMBED_GET_CLASS (embed);
+-        return klass->print (embed, info);
++        return klass->print (embed);
+ }
+ 
+ void
+diff -urN galeon-2.0.7.orig/embed/galeon-embed.h galeon-2.0.7/embed/galeon-embed.h
+--- galeon-2.0.7.orig/embed/galeon-embed.h	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/embed/galeon-embed.h	2009-02-15 09:39:07.000000000 +0100
+@@ -353,8 +353,7 @@
+ 					     EmbedSecurityLevel *level, 
+ 					     char **description);
+ 	
+-	gboolean  (* print)                (GaleonEmbed *embed, 
+-				            EmbedPrintInfo *info);
++	gboolean  (* print)                (GaleonEmbed *embed);
+ 	void	  (* print_preview_close)  (GaleonEmbed *embed);
+ 	int       (* print_preview_num_pages)	(GaleonEmbed *embed);
+ 
+@@ -513,8 +512,7 @@
+ gboolean     galeon_embed_has_modified_forms   (GaleonEmbed *embed);
+ /* Printing */
+ 
+-gboolean      galeon_embed_print                (GaleonEmbed *embed, 
+-						 EmbedPrintInfo *info);
++gboolean      galeon_embed_print                (GaleonEmbed *embed);
+ 
+ void	      galeon_embed_print_preview_close  (GaleonEmbed *embed);
+ 
+diff -urN galeon-2.0.7.orig/embed/galeon-embed-shell.c galeon-2.0.7/embed/galeon-embed-shell.c
+--- galeon-2.0.7.orig/embed/galeon-embed-shell.c	2008-09-03 05:27:06.000000000 +0200
++++ galeon-2.0.7/embed/galeon-embed-shell.c	2009-02-15 09:39:07.000000000 +0100
+@@ -21,8 +21,13 @@
+ #include "galeon-embed-shell.h"
+ #include "galeon-marshal.h"
+ 
++#include "galeon-config.h"
++
+ #include <string.h>
+ 
++#define PAGE_SETUP_FILENAME     GALEON_DIR "/page-setup-gtk.ini"
++#define PRINT_SETTINGS_FILENAME GALEON_DIR "/print-settings.ini"
++
+ enum
+ {
+ 	NEW_WINDOW,
+@@ -40,6 +45,8 @@
+ 	GlobalHistory *global_history;
+ 	DownloaderView *downloader_view;
+ 	GaleonJSConsole *js_console;
++	GtkPageSetup *page_setup;
++	GtkPrintSettings *print_settings;
+ };
+ 
+ static void
+@@ -281,14 +288,6 @@
+         klass->remove_passwords (shell, passwords, type);
+ }
+ 
+-GList *
+-galeon_embed_shell_get_printer_info(GaleonEmbedShell *shell,
+-				    gint *defaultPrinter)
+-{
+-	GaleonEmbedShellClass *klass = GALEON_EMBED_SHELL_GET_CLASS (shell);
+-        return klass->get_printer_info (shell, defaultPrinter);
+-}
+-
+ static GlobalHistory *
+ impl_get_global_history (GaleonEmbedShell *shell)
+ {
+@@ -344,6 +343,121 @@
+ 	g_list_free (permissions);
+ }
+ 
++GtkPageSetup *
++galeon_embed_shell_get_page_setup (GaleonEmbedShell *shell)
++{
++	GaleonEmbedShellPrivate *priv;
++
++	g_return_val_if_fail (GALEON_IS_EMBED_SHELL (shell), NULL);
++	priv = shell->priv;
++
++	if (priv->page_setup == NULL)
++	{
++		GError *error = NULL;
++		char *path;
++
++		path = g_build_filename (g_get_home_dir (), PAGE_SETUP_FILENAME, NULL);
++		priv->page_setup = gtk_page_setup_new_from_file (path, &error);
++		g_free (path);
++		if (error)
++		{
++			g_error_free (error);
++		}
++
++		/* If that still didn't work, create a new, empty one */
++		if (priv->page_setup == NULL)
++		{
++			priv->page_setup = gtk_page_setup_new ();
++		}
++	}
++
++	return priv->page_setup;
++}
++
++void
++galeon_embed_shell_set_page_setup (GaleonEmbedShell *shell,
++                                   GtkPageSetup *page_setup)
++{
++	GaleonEmbedShellPrivate *priv;
++	char *path;
++
++	g_return_if_fail (GALEON_IS_EMBED_SHELL (shell));
++	priv = shell->priv;
++
++	if (page_setup != NULL)
++	{
++		g_object_ref (page_setup);
++	}
++	else
++	{
++		page_setup = gtk_page_setup_new ();
++	}
++
++	if (priv->page_setup != NULL)
++	{
++		g_object_unref (priv->page_setup);
++	}
++
++	priv->page_setup = page_setup;
++
++	path = g_build_filename (g_get_home_dir (), PAGE_SETUP_FILENAME, NULL);
++	gtk_page_setup_to_file (page_setup, path, NULL);
++	g_free (path);
++}
++
++GtkPrintSettings *
++galeon_embed_shell_get_print_settings (GaleonEmbedShell *shell)
++{
++	GaleonEmbedShellPrivate *priv;
++
++	g_return_val_if_fail (GALEON_IS_EMBED_SHELL (shell), NULL);              
++	priv = shell->priv;
++
++	if (priv->print_settings == NULL)
++	{
++		GError *error = NULL;
++		char *path;
++
++		path = g_build_filename (g_get_home_dir (), PRINT_SETTINGS_FILENAME, NULL);
++		priv->print_settings = gtk_print_settings_new_from_file (path, &error);
++		g_free (path);
++
++		if (priv->print_settings == NULL)
++		{
++			priv->print_settings = gtk_print_settings_new ();
++		}
++	}
++
++	return priv->print_settings;
++}
++
++void
++galeon_embed_shell_set_print_settings (GaleonEmbedShell *shell,
++                                       GtkPrintSettings *settings)
++{
++	GaleonEmbedShellPrivate *priv;
++	char *path;
++
++	g_return_if_fail (GALEON_IS_EMBED_SHELL (shell));
++	priv = shell->priv;
++
++	if (settings != NULL)
++	{
++		g_object_ref (settings);
++	}
++
++	if (priv->print_settings != NULL)
++	{
++		g_object_unref (priv->print_settings);
++	}
++
++	priv->print_settings = settings ? settings : gtk_print_settings_new ();
++
++	path = g_build_filename (g_get_home_dir (), PRINT_SETTINGS_FILENAME, NULL);
++	gtk_print_settings_to_file (settings, path, NULL);
++	g_free (path);
++}
++
+ void
+ galeon_embed_shell_free_cookies (GaleonEmbedShell *shell,
+ 				 GList *cookies)
+diff -urN galeon-2.0.7.orig/embed/galeon-embed-shell.h galeon-2.0.7/embed/galeon-embed-shell.h
+--- galeon-2.0.7.orig/embed/galeon-embed-shell.h	2008-09-03 05:24:28.000000000 +0200
++++ galeon-2.0.7/embed/galeon-embed-shell.h	2009-02-15 09:39:07.000000000 +0100
+@@ -27,7 +27,7 @@
+ #include "galeon-encodings.h"
+ 
+ #include <glib-object.h>
+-#include <glib.h>
++#include <gtk/gtk.h>
+ 
+ G_BEGIN_DECLS
+ 
+@@ -168,8 +168,7 @@
+ 	void            (* remove_passwords)    (GaleonEmbedShell *shell,
+ 						 GList *passwords, 
+ 						 PasswordType type);
+-	GList *		(* get_printer_info)	(GaleonEmbedShell *shell,
+-						 gint *defaultPrinter);
++	GtkPageSetup *  (* get_page_setup)	(GaleonEmbedShell *shell);
+ };
+ 
+ GType             galeon_embed_shell_get_type            (void);
+@@ -245,10 +244,13 @@
+ 							  GList *passwords, 
+ 							  PasswordType type);
+ 
+-/* Printers */
+-GList *		  galeon_embed_shell_get_printer_info	 (GaleonEmbedShell *shell,
+-							  gint *defaultPrinter);
+-
++/* Print */
++GtkPageSetup*     galeon_embed_shell_get_page_setup      (GaleonEmbedShell *shell);
++void              galeon_embed_shell_set_page_setup      (GaleonEmbedShell *shell,
++							  GtkPageSetup     *page_setup);
++GtkPrintSettings* galeon_embed_shell_get_print_settings  (GaleonEmbedShell *shell);
++void              galeon_embed_shell_set_print_settings  (GaleonEmbedShell *shell,
++                                                          GtkPrintSettings *settings);
+ 
+ /* accumulator for the new_window signals */
+ gboolean _galeon_embed_new_window_signal_accumulator (GSignalInvocationHint *ihint,
+diff -urN galeon-2.0.7.orig/embed/Makefile.am galeon-2.0.7/embed/Makefile.am
+--- galeon-2.0.7.orig/embed/Makefile.am	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/embed/Makefile.am	2009-02-15 09:39:07.000000000 +0100
+@@ -45,8 +45,6 @@
+ 	galeon-embed-find.h		\
+ 	galeon-encodings.h		\
+ 	galeon-encodings.c		\
+-	print-dialog.c			\
+-	print-dialog.h			\
+ 	galeon-embed-prefs.h		\
+ 	galeon-embed-helper-list.c	\
+ 	galeon-embed-helper-list.h	\
+diff -urN galeon-2.0.7.orig/galeon.schemas.in galeon-2.0.7/galeon.schemas.in
+--- galeon-2.0.7.orig/galeon.schemas.in	2008-07-04 18:30:59.000000000 +0200
++++ galeon-2.0.7/galeon.schemas.in	2009-02-15 09:39:07.000000000 +0100
+@@ -856,135 +856,75 @@
+         <long>Group history by hosts.</long>
+         </locale>
+       </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/top_margin</key>
+-        <applyto>/apps/galeon/Print/top_margin</applyto>
+-        <owner>galeon</owner>
+-        <type>float</type>
+-        <default>0.5</default>
+-        <locale name="C">
+-        <short>Printing top margin</short>
+-        <long>Printing top margin (in inches).</long>
+-        </locale>
+-      </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/bottom_margin</key>
+-        <applyto>/apps/galeon/Print/bottom_margin</applyto>
+-        <owner>galeon</owner>
+-        <type>float</type>
+-        <default>0.5</default>
+-        <locale name="C">
+-        <short>Printing bottom margin</short>
+-        <long>Printing bottom margin (in inches).</long>
+-        </locale>
+-      </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/left_margin</key>
+-        <applyto>/apps/galeon/Print/left_margin</applyto>
+-        <owner>galeon</owner>
+-        <type>float</type>
+-        <default>0.5</default>
+-        <locale name="C">
+-        <short>Printing left margin</short>
+-        <long>Printing left margin (in inches).</long>
+-        </locale>
+-      </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/right_margin</key>
+-        <applyto>/apps/galeon/Print/right_margin</applyto>
+-        <owner>galeon</owner>
+-        <type>float</type>
+-        <default>0.5</default>
++       <schema>
++        <key>/schemas/apps/galeon/Print/print_page_title</key>
++        <applyto>/apps/galeon/Print/print_page_title</applyto>
++        <owner>epiphany</owner>
++        <type>bool</type>
++        <default>true</default>
+         <locale name="C">
+-        <short>Printing right margin</short>
+-        <long>Printing right margin (in inches).</long>
++        <short>Whether to print the page title in the header</short>
+         </locale>
+       </schema>
+       <schema>
+-        <key>/schemas/apps/galeon/Print/page_title_toggle</key>
+-        <applyto>/apps/galeon/Print/page_title_toggle</applyto>
+-        <owner>galeon</owner>
++        <key>/schemas/apps/galeon/Print/print_page_url</key>
++        <applyto>/apps/galeon/Print/print_page_url</applyto>
++        <owner>epiphany</owner>
+         <type>bool</type>
+         <default>true</default>
+         <locale name="C">
+-        <short>Whether to print the page title in the header.</short>
+-        <long>Whether to print the page title in the header.</long>
++        <short>Whether to print the page address in the header</short>
+         </locale>
+       </schema>
+       <schema>
+-        <key>/schemas/apps/galeon/Print/page_url_toggle</key>
+-        <applyto>/apps/galeon/Print/page_url_toggle</applyto>
+-        <owner>galeon</owner>
++        <key>/schemas/apps/galeon/Print/print_date</key>
++        <applyto>/apps/galeon/Print/print_date</applyto>
++        <owner>epiphany</owner>
+         <type>bool</type>
+         <default>true</default>
+         <locale name="C">
+-        <short>Whether to print the page URL in the header</short>
+-        <long>Whether to print the page URL in the header</long>
++        <short>Whether to print the date in the footer</short>
+         </locale>
+       </schema>
+       <schema>
+-        <key>/schemas/apps/galeon/Print/date_toggle</key>
+-        <applyto>/apps/galeon/Print/date_toggle</applyto>
+-        <owner>galeon</owner>
++        <key>/schemas/apps/galeon/Print/print_background_colors</key>
++        <applyto>/apps/galeon/Print/print_background_colors</applyto>
++        <owner>epiphany</owner>
+         <type>bool</type>
+-        <default>true</default>
++        <default>false</default>
+         <locale name="C">
+-        <short>Whether to print the date in the footer.</short>
+-        <long>Whether to print the date in the footer.</long>
++        <short>Whether to print the background color</short>
+         </locale>
+       </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/page_numbers_toggle</key>
+-        <applyto>/apps/galeon/Print/page_numbers_toggle</applyto>
+-        <owner>galeon</owner>
++       <schema>
++        <key>/schemas/apps/galeon/Print/print_background_images</key>
++        <applyto>/apps/galeon/Print/print_background_images</applyto>
++        <owner>epiphany</owner>
+         <type>bool</type>
+         <default>true</default>
+         <locale name="C">
+-        <short>Whether to print the page numbers (x of total) in the footer.</short>
+-        <long>Whether to print the page numbers (x of total) in the footer.</long>
++        <short>Whether to print the background images</short>
+         </locale>
+       </schema>
+       <schema>
+-        <key>/schemas/apps/galeon/Print/printer</key>
+-        <applyto>/apps/galeon/Print/printer</applyto>
+-        <owner>galeon</owner>
+-        <type>string</type>
+-        <default>lpr</default>
++        <key>/schemas/apps/galeon/Print/print_page_numbers</key>
++        <applyto>/apps/galeon/Print/print_page_numbers</applyto>
++        <owner>epiphany</owner>
++        <type>bool</type>
++        <default>true</default>
+         <locale name="C">
+-        <short>Printer name</short>
+-        <long>Printer name.</long>
++        <short>Whether to print the page numbers (x of total) in the footer</short>
+         </locale>
+       </schema>
+       <schema>
+-        <key>/schemas/apps/galeon/Print/file</key>
+-        <applyto>/apps/galeon/Print/file</applyto>
+-        <owner>galeon</owner>
++        <key>/schemas/apps/galeon/Print/print_frames</key>
++        <applyto>/apps/galeon/Print/print_frames</applyto>
++        <owner>epiphany</owner>
+         <type>string</type>
++        <default>normal</default>
+         <locale name="C">
+-        <short>Filename to print to</short>
+-        <long>Filename to print to.</long>
+-        </locale>
+-      </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/printon</key>
+-        <applyto>/apps/galeon/Print/printon</applyto>
+-        <owner>galeon</owner>
+-        <type>int</type>
+-        <default>0</default>
+-        <locale name="C">
+-        <short>Print range</short>
+-        <long>Print range: 0 (all pages), 1 (specific range).</long>
+-        </locale>
+-      </schema>
+-      <schema>
+-        <key>/schemas/apps/galeon/Print/paper</key>
+-        <applyto>/apps/galeon/Print/paper</applyto>
+-        <owner>galeon</owner>
+-        <type>int</type>
+-        <default>0</default>
+-        <locale name="C">
+-        <short>Paper type</short>
+-        <long>Paper type: 0 (Letter), 1 (Legal), 2 (Executive), 3 (A4).</long>
++        <short>How to print frames</short>
++        <long>How to print pages containing frames. Allowed values are "normal", "separately" and "selected".</long>
+         </locale>
+       </schema>
+       <schema>
+diff -urN galeon-2.0.7.orig/mozilla/GaleonUtils.cpp galeon-2.0.7/mozilla/GaleonUtils.cpp
+--- galeon-2.0.7.orig/mozilla/GaleonUtils.cpp	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/mozilla/GaleonUtils.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -224,96 +224,3 @@
+ 
+ 	return NS_OK;
+ }
+-
+-nsresult
+-GaleonUtils::EmbedPrintInfoToPrintSettings(const EmbedPrintInfo *info,
+-					   nsIPrintSettings **aPrintSettings)
+-{
+-	nsresult rv = NS_OK;
+-
+-	nsCOMPtr<nsIPrintSettingsService> pss =
+-		do_GetService("@mozilla.org/gfx/printsettings-service;1", &rv);
+-	NS_ENSURE_SUCCESS(rv, rv);
+-
+-	nsCOMPtr<nsIPrintSettings> options;
+-	rv = pss->GetNewPrintSettings(getter_AddRefs(options));
+-	NS_ENSURE_SUCCESS(rv, rv);
+-
+-	GulString printerName (info->name);
+-	rv = pss->InitPrintSettingsFromPrinter (printerName.get(), options);
+-	NS_ENSURE_SUCCESS(rv, rv);
+-
+-	// Name field isn't inited. How dumb can we get?
+-	rv = options->SetPrinterName (printerName.get());
+-	NS_ENSURE_SUCCESS(rv, rv);
+-
+-	const static int frame_types[] = {
+-		nsIPrintSettings::kFramesAsIs,
+-		nsIPrintSettings::kSelectedFrame,
+-		nsIPrintSettings::kEachFrameSep
+-	};
+-
+-	switch (info->pages)
+-	{
+-	case 0:
+-		break;
+-	case 1:
+-		options->SetPrintRange (nsIPrintSettings::kRangeSpecifiedPageRange);
+-		options->SetStartPageRange (info->from_page);
+-		options->SetEndPageRange (info->to_page);
+-		break;
+-	case 2:
+-		options->SetPrintRange (nsIPrintSettings::kRangeSelection);
+-		break;
+-	}
+-
+-	options->SetMarginTop (info->top_margin);
+-	options->SetMarginBottom (info->bottom_margin);
+-	options->SetMarginLeft (info->left_margin);
+-	options->SetMarginRight (info->right_margin);
+-
+-        options->SetHeaderStrLeft(GulString(info->header_left_string).get());
+-
+-        options->SetHeaderStrCenter(GulString(info->header_center_string).get());
+-
+-        options->SetHeaderStrRight(GulString(info->header_right_string).get());
+-
+-        options->SetFooterStrLeft(GulString(info->footer_left_string).get());
+-
+-        options->SetFooterStrCenter(GulString(info->footer_center_string).get());
+-
+-        options->SetFooterStrRight(GulString(info->footer_right_string).get());
+-
+-        options->SetToFileName (GulString(info->file).get());
+-
+-	options->SetPrintCommand (GulString(info->command).get());
+-
+-	/**
+-	 * Work around a mozilla bug where paper size & orientation are ignored
+-	 * and the specified file is created (containing invalid postscript)
+-	 * in print preview mode if we set "print to file" to true.
+-	 * See epiphany bug #119818.
+-	 */
+-	if (info->preview)
+-	{
+-		options->SetPrintToFile (PR_FALSE);
+-	}
+-	else
+-	{
+-		options->SetPrintToFile (info->print_to_file);
+-	}
+-
+-	/* native paper size formats. Our dialog does not support custom yet */
+-	options->SetPaperSizeType (nsIPrintSettings::kPaperSizeNativeData);
+-
+-	gchar *paperName = (gchar *)g_ptr_array_index(info->paper_array, info->paper);
+-	options->SetPaperName (GulString (paperName).get());
+-
+-	options->SetPrintInColor (info->print_color);
+-	options->SetOrientation (info->orientation);
+-	options->SetPrintFrameType (frame_types[info->frame_type]);
+-
+-	NS_ADDREF(*aPrintSettings = options);
+-
+-	return NS_OK;
+-}
+diff -urN galeon-2.0.7.orig/mozilla/GaleonWrapper.cpp galeon-2.0.7/mozilla/GaleonWrapper.cpp
+--- galeon-2.0.7.orig/mozilla/GaleonWrapper.cpp	2008-09-05 04:31:01.000000000 +0200
++++ galeon-2.0.7/mozilla/GaleonWrapper.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -20,8 +20,11 @@
+ #include "config.h"
+ #endif
+ 
++struct JSContext;
++
+ #include <nscore.h>
+ #include <nsServiceManagerUtils.h>
++#include <nsIJSContextStack.h>
+ 
+ #include "galeon-embed.h"
+ #include "galeon-debug.h"
+@@ -92,6 +95,8 @@
+ #include <nsICacheService.h>
+ #include <nsICacheSession.h>
+ #include <nsIDOMLocation.h>
++#include <nsIPrintSettings.h>
++#include <nsIPrintSettingsService.h>
+ #include <nsTime.h>
+ #include <nsITransportSecurityInfo.h>
+ #include <nsIConsoleService.h>
+@@ -224,26 +229,31 @@
+ 	return ourDocShell->GetContentViewer(aViewer);
+ }
+ 
+-nsresult GaleonWrapper::Print (nsIPrintSettings *options, PRBool preview, GtkWindow *parent)
++nsresult GaleonWrapper::Print ()
+ {
+-	nsresult rv;
+-
+-	g_return_val_if_fail (mWebBrowser, NS_ERROR_FAILURE);
++	NS_ENSURE_TRUE (mWebBrowser, NS_ERROR_FAILURE);
+ 
+ 	nsCOMPtr<nsIWebBrowserPrint> print(do_GetInterface(mWebBrowser));
+ 	NS_ENSURE_TRUE (print, NS_ERROR_FAILURE);
+ 
+-	if (!preview)
+-	{
+-		GPrintListener *listener = new GPrintListener(print, options, parent);
+-		rv = print->Print (options, listener);
+-	}
+-	else
+-	{
+-		rv = print->PrintPreview(options, nsnull, nsnull);
+-	}
++	nsCOMPtr<nsIPrintSettingsService> printSettingsService
++		(do_GetService("@mozilla.org/gfx/printsettings-service;1"));
++	NS_ENSURE_STATE (printSettingsService);
+ 
+-	return rv;
++	nsCOMPtr<nsIPrintSettings> settings;
++	printSettingsService->GetNewPrintSettings (getter_AddRefs (settings));
++	NS_ENSURE_STATE (settings);
++
++	settings->SetTitle (nsnull);
++	settings->SetDocURL (nsnull);
++
++	nsresult rv;
++	nsCOMPtr<nsIJSContextStack> mStack = do_GetService ("@mozilla.org/js/xpc/ContextStack;1", &rv);
++	NS_ENSURE_SUCCESS (rv, rv);
++
++	mStack->Push (nsnull);
++
++	return  print->Print (settings, nsnull);
+ }
+ 
+ nsresult GaleonWrapper::PrintPreviewClose (void)
+diff -urN galeon-2.0.7.orig/mozilla/GaleonWrapper.h galeon-2.0.7/mozilla/GaleonWrapper.h
+--- galeon-2.0.7.orig/mozilla/GaleonWrapper.h	2008-09-05 04:25:39.000000000 +0200
++++ galeon-2.0.7/mozilla/GaleonWrapper.h	2009-02-15 09:39:07.000000000 +0100
+@@ -105,7 +105,7 @@
+ 	nsresult SetZoom (float aTextZoom);
+ 	nsresult GetZoom (float *aTextZoom);
+ 
+-	nsresult Print (nsIPrintSettings *options, PRBool preview, GtkWindow *parent);
++	nsresult Print ();
+ 	nsresult GetPrintSettings (nsIPrintSettings * *options);
+ 	nsresult PrintPreviewClose (void);
+ 	nsresult PrintPreviewNumPages (int *numPages);
+diff -urN galeon-2.0.7.orig/mozilla/GeckoPrintService.cpp galeon-2.0.7/mozilla/GeckoPrintService.cpp
+--- galeon-2.0.7.orig/mozilla/GeckoPrintService.cpp	1970-01-01 01:00:00.000000000 +0100
++++ galeon-2.0.7/mozilla/GeckoPrintService.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -0,0 +1,567 @@
++/*
++ *  Copyright © 2006, 2007 Christian Persch
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU Lesser General Public License as published by
++ *  the Free Software Foundation; either version 2.1, or (at your option)
++ *  any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ *  $Id$
++ */
++
++#include "mozilla-config.h"
++#include "config.h"
++
++#include "src/galeon-shell.h"
++#include "utils/eel-gconf-extensions.h"
++#include "utils/gul-gui.h"
++
++#include <glib.h>
++#include <glib/gi18n.h>
++#include <gtk/gtkcheckbutton.h>
++#include <gtk/gtkdialog.h>
++#include <gtk/gtklabel.h>
++#include <gtk/gtkmessagedialog.h>
++#include <gtk/gtkprintunixdialog.h>
++#include <gtk/gtkstock.h>
++#include <gtk/gtkwindow.h>
++#include <glade/glade-xml.h>
++
++#include <nsStringAPI.h>
++
++#include <nsCOMPtr.h>
++#include <nsIDOMWindow.h>
++#include <nsIDOMWindowInternal.h>
++
++#include "GeckoPrintSession.h"
++#include "GeckoPrintService.h"
++#include "GaleonUtils.h"
++
++/* Some printing keys */
++
++#define CONF_PRINT_BG_COLORS		"/apps/galeon/Print/print_background_colors"
++#define CONF_PRINT_BG_IMAGES		"/apps/galeon/Print/print_background_images"
++#define CONF_PRINT_COLOR        "/apps/galeon/Print/print_color"
++#define CONF_PRINT_DATE         "/apps/galeon/Print/print_date"
++#define CONF_PRINT_PAGE_NUMBERS "/apps/galeon/Print/print_page_numbers"
++#define CONF_PRINT_PAGE_TITLE   "/apps/galeon/Print/print_page_title"
++#define CONF_PRINT_PAGE_URL     "/apps/galeon/Print/print_page_url"
++
++#define LITERAL(s) reinterpret_cast<const nsAString::char_type*>(NS_L(s))
++
++/* From nsIDeviceContext.h */
++#define NS_ERROR_GFX_PRINTER_BASE (1) /* adjustable :-) */
++#define NS_ERROR_GFX_PRINTER_ACCESS_DENIED \
++  NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_GFX,NS_ERROR_GFX_PRINTER_BASE+5)
++#define NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND         \
++  NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_GFX,NS_ERROR_GFX_PRINTER_BASE+4)
++
++NS_IMPL_ISUPPORTS1 (GeckoPrintService,
++		    nsIPrintingPromptService)
++
++GeckoPrintService::GeckoPrintService()
++{
++}
++
++GeckoPrintService::~GeckoPrintService()
++{
++}
++
++/* nsIPrintingPromptService implementation */
++
++/* void showPrintDialog (in nsIDOMWindow parent,
++			 in nsIWebBrowserPrint webBrowserPrint,
++			 in nsIPrintSettings printSettings); */
++NS_IMETHODIMP
++GeckoPrintService::ShowPrintDialog (nsIDOMWindow *aParent,
++				    nsIWebBrowserPrint *aWebBrowserPrint,
++				    nsIPrintSettings *aSettings)
++{
++  GaleonEmbedShell *shell;
++
++  GeckoPrintSession *session = GeckoPrintSession::FromSettings (aSettings);
++  NS_ENSURE_TRUE (session, NS_ERROR_INVALID_POINTER);
++
++  shell = galeon_shell_get_embed_shell (galeon_shell);
++
++  nsresult rv;
++  PRBool haveSelection = PR_FALSE;
++  rv = aSettings->GetPrintOptions(nsIPrintSettings::kEnableSelectionRB, &haveSelection);
++  NS_ENSURE_SUCCESS (rv, rv);
++
++  PRInt16 frameUI = nsIPrintSettings::kFrameEnableAll;
++  rv = aSettings->GetHowToEnableFrameUI (&frameUI);
++  NS_ENSURE_SUCCESS (rv, rv);
++
++  GtkWindow *parent = GTK_WINDOW (GaleonUtils::FindGtkParent (aParent));
++  NS_ENSURE_TRUE(parent, NS_ERROR_INVALID_POINTER);
++
++  GtkWidget *custom_tab              = NULL,
++            *frame_box               = NULL,
++            *print_frames_normal     = NULL,
++            *print_frames_selected   = NULL,
++            *print_frames_separately = NULL;
++  GError    *gerror                  = NULL;
++  guint      builder_ret;
++  
++  GtkBuilder *builder = gtk_builder_new ();
++  builder_ret = gtk_builder_add_from_file (builder, SHARE_DIR "/print-tab.xml", &gerror);
++  if (builder_ret) {
++    /* Build the custom tab */
++    custom_tab = GTK_WIDGET (gtk_builder_get_object (builder, "custom_tab_container"));
++
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_bg_colors_checkbutton")),
++                                          CONF_PRINT_BG_COLORS);
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_bg_images_checkbutton")),
++                                          CONF_PRINT_BG_IMAGES);
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_date_checkbutton")),
++                                          CONF_PRINT_DATE);
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_page_numbers_checkbutton")),
++                                          CONF_PRINT_PAGE_NUMBERS);
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_page_title_checkbutton")),
++                                          CONF_PRINT_PAGE_TITLE);
++    gul_gui_connect_checkbutton_to_gconf (GTK_WIDGET (gtk_builder_get_object (builder, "print_page_url_checkbutton")),
++                                          CONF_PRINT_PAGE_URL);
++
++    frame_box = GTK_WIDGET (gtk_builder_get_object (builder, "frame_box"));
++    print_frames_normal = GTK_WIDGET (gtk_builder_get_object (builder, "print_frames_normal"));
++    print_frames_selected = GTK_WIDGET (gtk_builder_get_object (builder, "print_frames_selected"));
++    print_frames_separately = GTK_WIDGET (gtk_builder_get_object (builder, "print_frames_separately"));
++
++    /* FIXME: store/load from pref */
++    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (print_frames_normal), TRUE);
++
++    if (frameUI == nsIPrintSettings::kFrameEnableAll) {
++      /* Allow all frame options */
++      gtk_widget_set_sensitive (frame_box, TRUE);
++    } else if (frameUI == nsIPrintSettings::kFrameEnableAsIsAndEach) {
++      /* Allow all except "selected frame" */
++      gtk_widget_set_sensitive (frame_box, TRUE);
++      gtk_widget_set_sensitive (print_frames_selected, FALSE);
++      /* Preselect this one, since the default above only prints _one page_ ! */
++      gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (print_frames_separately), TRUE);
++    }
++  }
++
++  /* FIXME: this sucks! find some way to do all of this async! */
++  GtkWidget *dialog = gtk_print_unix_dialog_new (NULL /* FIXME title */,
++                                                 GTK_WINDOW (parent));
++  GtkPrintUnixDialog *print_dialog = GTK_PRINT_UNIX_DIALOG (dialog);
++
++  GtkPrintCapabilities capabilities =
++	 GtkPrintCapabilities (GTK_PRINT_CAPABILITY_PAGE_SET |
++			       GTK_PRINT_CAPABILITY_COPIES   |
++			       GTK_PRINT_CAPABILITY_COLLATE  |
++			       GTK_PRINT_CAPABILITY_REVERSE  |
++			       GTK_PRINT_CAPABILITY_SCALE |
++			       GTK_PRINT_CAPABILITY_GENERATE_PS);
++#ifdef HAVE_GECKO_1_9
++  capabilities = GtkPrintCapabilities (capabilities | GTK_PRINT_CAPABILITY_GENERATE_PDF);
++#endif
++  gtk_print_unix_dialog_set_manual_capabilities	(print_dialog, capabilities);
++
++  gtk_print_unix_dialog_set_page_setup (print_dialog,
++					galeon_embed_shell_get_page_setup (shell));
++  gtk_print_unix_dialog_set_settings (print_dialog,
++				      galeon_embed_shell_get_print_settings (shell));
++
++  PRInt16 printFrames = nsIPrintSettings::kNoFrames;
++  if (builder_ret) {
++    g_object_ref_sink (custom_tab);
++    gtk_print_unix_dialog_add_custom_tab (print_dialog, custom_tab,
++					  gtk_label_new (_("Options"))); /* FIXME better name! */
++  
++    g_object_unref (custom_tab);
++    g_object_unref (builder);
++
++    if (frameUI != nsIPrintSettings::kFrameEnableNone) {
++      if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (print_frames_normal))) {
++        printFrames = nsIPrintSettings::kFramesAsIs;
++      } else if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (print_frames_selected))) {
++        printFrames = nsIPrintSettings::kSelectedFrame;
++      } if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (print_frames_separately))) {
++        printFrames = nsIPrintSettings::kEachFrameSep;
++      }
++    }
++  }
++
++  int response = gtk_dialog_run (GTK_DIALOG (dialog));
++  gtk_widget_hide (dialog);
++
++  GtkPrinter *printer = gtk_print_unix_dialog_get_selected_printer (print_dialog);
++
++  if (response != GTK_RESPONSE_OK || !printer) {
++    gtk_widget_destroy (dialog);
++
++    return NS_ERROR_ABORT;
++  }
++
++  GtkPageSetup *pageSetup = gtk_print_unix_dialog_get_page_setup (print_dialog); /* no reference owned */
++  galeon_embed_shell_set_page_setup (shell, pageSetup);
++
++  GtkPrintSettings *settings = gtk_print_unix_dialog_get_settings (print_dialog);
++  galeon_embed_shell_set_print_settings (shell, settings);
++
++  /* We copy the setup and settings so we can modify them to unset
++   * options handled by gecko.
++   */
++  GtkPageSetup *pageSetupCopy = gtk_page_setup_copy (pageSetup);
++  pageSetup = pageSetupCopy;
++
++  GtkPrintSettings *settingsCopy = gtk_print_settings_copy (settings);
++  g_object_unref (settings);
++  settings = settingsCopy;
++
++  rv = session->SetSettings (aSettings, settings, pageSetup, printer);
++
++  /* Now translate the settings to nsIPrintSettings */
++  if (NS_SUCCEEDED (rv)) {
++    nsCString sourceFile;
++    session->GetSourceFile (sourceFile);
++    if (!sourceFile.IsEmpty ()) {
++      rv = TranslateSettings (settings, pageSetup, printer, sourceFile, printFrames, PR_TRUE, aSettings);
++    } else {
++      rv = NS_ERROR_FAILURE;
++    }
++  }
++
++  gtk_widget_destroy (dialog);
++
++  g_object_unref (settings);
++  g_object_unref (pageSetup);
++
++  return rv;
++}
++
++/* void showProgress (in nsIDOMWindow parent,
++		      in nsIWebBrowserPrint webBrowserPrint,
++		      in nsIPrintSettings printSettings,
++		      in nsIObserver openDialogObserver,
++		      in boolean isForPrinting,
++		      out nsIWebProgressListener webProgressListener,
++		      out nsIPrintProgressParams printProgressParams,
++		      out boolean notifyOnOpen); */
++NS_IMETHODIMP
++GeckoPrintService::ShowProgress (nsIDOMWindow *aParent,
++				 nsIWebBrowserPrint *aWebBrowserPrint,
++				 nsIPrintSettings *aPrintSettings,
++				 nsIObserver *aOpenDialogObserver,
++				 PRBool aIsForPrinting,
++				 nsIWebProgressListener **_webProgressListener,
++				 nsIPrintProgressParams **_printProgressParams,
++				 PRBool *_notifyOnOpen)
++{
++  /* Print preview */
++  if (!aIsForPrinting) {
++    return NS_OK;
++  }
++
++  nsresult rv;
++  nsCOMPtr<nsIDOMWindowInternal> domWin (do_QueryInterface (aParent, &rv));
++  NS_ENSURE_SUCCESS (rv, rv);
++
++  nsCOMPtr<nsIPrintSession> session;
++  rv = aPrintSettings->GetPrintSession (getter_AddRefs (session));
++  NS_ENSURE_TRUE (NS_SUCCEEDED (rv) && session, nsnull);
++
++  nsCOMPtr<nsIPrintProgress> progress (do_QueryInterface (session, &rv));
++  NS_ENSURE_SUCCESS (rv, rv);
++  
++  /* Our print session implements those interfaces */
++  rv = CallQueryInterface (session, _webProgressListener);
++  rv |= CallQueryInterface (session, _printProgressParams);
++  NS_ENSURE_SUCCESS (rv, rv);
++
++  /* Setting this to PR_FALSE will make gecko immediately start printing
++   * when we return from this function.
++   * If we set this to PR_TRUE, we need to call aOpenDialogObserver::Observe
++   * (topic, subject and data don't matter) when we're ready for printing.
++   */
++  *_notifyOnOpen = PR_FALSE; 
++
++  return progress->OpenProgressDialog (domWin, nsnull, nsnull, aOpenDialogObserver, _notifyOnOpen);
++}
++
++/* void showPageSetup (in nsIDOMWindow parent,
++		       in nsIPrintSettings printSettings,
++		       in nsIObserver aObs); */
++NS_IMETHODIMP GeckoPrintService::ShowPageSetup (nsIDOMWindow *aParent,
++						nsIPrintSettings *aPrintSettings,
++						nsIObserver *aObserver)
++{
++  /* This function is never called from gecko code */
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* void showPrinterProperties (in nsIDOMWindow parent,
++			       in wstring printerName,
++			       in nsIPrintSettings printSettings); */
++NS_IMETHODIMP
++GeckoPrintService::ShowPrinterProperties (nsIDOMWindow *aParent,
++					  const PRUnichar *aPrinterName,
++					  nsIPrintSettings *aPrintSettings)
++{
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* Private methods */
++
++nsresult
++GeckoPrintService::PrintUnattended (nsIDOMWindow *aParent,
++				    nsIPrintSettings *aPrintSettings)
++{
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* Static methods */
++
++/* static */ nsresult
++GeckoPrintService::TranslateSettings (GtkPrintSettings *aGtkSettings,
++				      GtkPageSetup *aPageSetup,
++				      GtkPrinter *aPrinter,
++				      const nsACString &aSourceFile,
++				      PRInt16 aPrintFrames,
++				      PRBool aIsForPrinting,
++				      nsIPrintSettings *aSettings)
++{
++  NS_ENSURE_ARG (aGtkSettings);
++  NS_ENSURE_ARG (aPageSetup);
++
++  GtkPrintCapabilities capabilities = GtkPrintCapabilities (0);
++  if (aIsForPrinting) {
++    NS_ENSURE_TRUE (aPrinter, NS_ERROR_FAILURE);
++
++    capabilities = gtk_printer_get_capabilities (aPrinter);
++  }
++
++  /* Initialisation */
++  aSettings->SetIsInitializedFromPrinter (PR_FALSE); /* FIXME: PR_TRUE? */
++  aSettings->SetIsInitializedFromPrefs (PR_FALSE); /* FIXME: PR_TRUE? */
++  aSettings->SetPrintSilent (PR_FALSE);
++  aSettings->SetShowPrintProgress (PR_TRUE);
++
++  /* We always print PS to a file and then hand that off to gtk-print */
++  aSettings->SetPrinterName (LITERAL ("PostScript/default"));
++
++  if (aIsForPrinting) {
++    aSettings->SetPrintToFile (PR_TRUE);
++
++    nsString sourceFile;
++    NS_CStringToUTF16 (aSourceFile,
++		       NS_CSTRING_ENCODING_NATIVE_FILESYSTEM,
++		       sourceFile);
++
++    aSettings->SetToFileName (sourceFile.get ());
++  } else {
++    /* Otherwise mozilla will create the file nevertheless and 
++     * fail since we haven't set a name!
++     */
++    aSettings->SetPrintToFile (PR_FALSE);
++  }
++
++  /* This is the time between printing each page, in ms.
++   * It 'gives the user more time to press cancel' !
++   * We don't want any of this nonsense, so set this to a low value,
++   * just enough to update the print dialogue.
++   */
++  aSettings->SetPrintPageDelay (50);
++
++  if (aIsForPrinting) {
++#ifdef HAVE_NSIPRINTSETTINGS_SETOUTPUTFORMAT
++    NS_ENSURE_TRUE (aPrinter, NS_ERROR_FAILURE);
++
++    const char *format = gtk_print_settings_get (aGtkSettings, GTK_PRINT_SETTINGS_OUTPUT_FILE_FORMAT);
++    if (!format)
++      format = "ps";
++
++    if (strcmp (format, "pdf") == 0 &&
++	gtk_printer_accepts_pdf (aPrinter)) {
++      aSettings->SetOutputFormat (nsIPrintSettings::kOutputFormatPDF);
++    } else if (strcmp (format, "ps") == 0 &&
++	       gtk_printer_accepts_ps (aPrinter)) {
++      aSettings->SetOutputFormat (nsIPrintSettings::kOutputFormatPS);
++    } else {
++      g_warning ("Output format '%s' specified, but printer '%s' does not support it!",
++		 format, gtk_printer_get_name (aPrinter));
++      return NS_ERROR_FAILURE;
++    }
++#endif
++	  
++    int n_copies = gtk_print_settings_get_n_copies (aGtkSettings);
++    if (n_copies <= 0)
++      return NS_ERROR_FAILURE;
++    if (capabilities & GTK_PRINT_CAPABILITY_COPIES) {
++      aSettings->SetNumCopies (1);
++    } else {
++      /* We have to copy them ourself */
++      aSettings->SetNumCopies (n_copies);
++      gtk_print_settings_set_n_copies (aGtkSettings, 1);
++    }
++
++    gboolean reverse = gtk_print_settings_get_reverse (aGtkSettings);
++    if (capabilities & GTK_PRINT_CAPABILITY_REVERSE) {
++      aSettings->SetPrintReversed (PR_FALSE);
++    } else {
++      aSettings->SetPrintReversed (reverse);
++      gtk_print_settings_set_reverse (aGtkSettings, FALSE);
++    }
++
++    GtkPageSet pageSet = gtk_print_settings_get_page_set (aGtkSettings);
++    aSettings->SetPrintOptions (nsIPrintSettings::kPrintEvenPages,
++			        pageSet != GTK_PAGE_SET_ODD);
++    aSettings->SetPrintOptions (nsIPrintSettings::kPrintEvenPages,
++			        pageSet != GTK_PAGE_SET_EVEN);
++
++    GtkPrintPages printPages = gtk_print_settings_get_print_pages (aGtkSettings);
++    switch (printPages) {
++      case GTK_PRINT_PAGES_RANGES: {
++        int numRanges = 0;
++        GtkPageRange *pageRanges = gtk_print_settings_get_page_ranges (aGtkSettings, &numRanges);
++        if (numRanges > 0) {
++          /* FIXME: We can only support one range, ignore more ranges or raise error? */
++          aSettings->SetPrintRange (nsIPrintSettings::kRangeSpecifiedPageRange);
++	  /* Gecko page numbers start at 1, while gtk page numbers start at 0 */
++          aSettings->SetStartPageRange (pageRanges[0].start + 1);
++	  aSettings->SetEndPageRange (pageRanges[0].end + 1);
++
++	  g_free (pageRanges);
++          break;
++        }
++	/* Fall-through to PAGES_ALL */
++      }
++      case GTK_PRINT_PAGES_CURRENT:
++        /* not supported, fall through */
++      case GTK_PRINT_PAGES_ALL:
++        aSettings->SetPrintRange (nsIPrintSettings::kRangeAllPages);
++        break;
++        /* FIXME: we need some custom ranges here, "Selection" and "Focused Frame" */
++    }
++  } else {
++    aSettings->SetPrintOptions (nsIPrintSettings::kPrintEvenPages, PR_TRUE);
++    aSettings->SetPrintOptions (nsIPrintSettings::kPrintEvenPages, PR_TRUE);
++    aSettings->SetPrintReversed (PR_FALSE);
++    aSettings->SetPrintRange (nsIPrintSettings::kRangeAllPages);
++  }
++
++  /* And clear those in the settings, so the printer doesn't try to apply them too */
++  gtk_print_settings_set_print_pages (aGtkSettings, GTK_PRINT_PAGES_ALL);
++  gtk_print_settings_set_page_ranges (aGtkSettings, NULL, 0);
++  gtk_print_settings_set_page_set (aGtkSettings, GTK_PAGE_SET_ALL);
++
++  /* We must use the page setup here instead of the print settings, see gtk bug #485685 */
++  switch (gtk_page_setup_get_orientation (aPageSetup)) {
++    case GTK_PAGE_ORIENTATION_PORTRAIT:
++    case GTK_PAGE_ORIENTATION_REVERSE_PORTRAIT: /* not supported */
++      aSettings->SetOrientation (nsIPrintSettings::kPortraitOrientation);
++      break;
++    case GTK_PAGE_ORIENTATION_LANDSCAPE:
++    case GTK_PAGE_ORIENTATION_REVERSE_LANDSCAPE: /* not supported */
++      aSettings->SetOrientation (nsIPrintSettings::kLandscapeOrientation);
++      break;
++  }
++
++  aSettings->SetPrintInColor (gtk_print_settings_get_use_color (aGtkSettings));
++
++  aSettings->SetPaperSizeUnit(nsIPrintSettings::kPaperSizeMillimeters);
++
++#ifdef HAVE_NSIPRINTSETTINGS_SETPAPERSIZE
++  aSettings->SetPaperSize (nsIPrintSettings::kPaperSizeDefined);
++#endif
++
++  GtkPaperSize *paperSize = gtk_page_setup_get_paper_size (aPageSetup);
++  if (!paperSize) {
++    return NS_ERROR_FAILURE;
++  }
++
++  aSettings->SetPaperSizeType (nsIPrintSettings::kPaperSizeDefined);
++  aSettings->SetPaperWidth (gtk_paper_size_get_width (paperSize, GTK_UNIT_MM));
++  aSettings->SetPaperHeight (gtk_paper_size_get_height (paperSize, GTK_UNIT_MM));
++
++#ifdef HAVE_NSIPRINTSETTINGS_SETPAPERNAME
++  aSettings->SetPaperName (NS_ConvertUTF8toUTF16 (gtk_paper_size_get_name (paperSize)).get ());
++#else
++{
++  /* Mozilla bug https://bugzilla.mozilla.org/show_bug.cgi?id=307404
++   * means that we cannot actually use any paper sizes except mozilla's
++   * builtin list, and we must refer to them *by name*!
++  */
++  static const struct {
++    const char gtkPaperName[13];
++    const char mozPaperName[10];
++  } paperTable [] = {
++    { GTK_PAPER_NAME_A5, "A5" },
++    { GTK_PAPER_NAME_A4, "A4" },
++    { GTK_PAPER_NAME_A3, "A3" },
++    { GTK_PAPER_NAME_LETTER, "Letter" },
++    { GTK_PAPER_NAME_LEGAL, "Legal" },
++    { GTK_PAPER_NAME_EXECUTIVE, "Executive" },
++  };
++
++  const char *paperName = gtk_paper_size_get_name (paperSize);
++	
++  PRUint32 i;
++  for (i = 0; i < G_N_ELEMENTS (paperTable); i++) {
++    if (g_ascii_strcasecmp (paperTable[i].gtkPaperName, paperName) == 0) {
++      paperName = paperTable[i].mozPaperName;
++      break;
++    }
++  }
++  if (i == G_N_ELEMENTS (paperTable)) {
++    /* Not in table, fall back to A4 */
++    g_warning ("Unknown paper name '%s', falling back to A4", gtk_paper_size_get_name (paperSize));
++    paperName = paperTable[1].mozPaperName;
++  }
++
++  aSettings->SetPaperName (NS_ConvertUTF8toUTF16 (paperName).get ());
++}
++#endif /* !HAVE_NSIPRINTSETTINGS_SETPAPERNAME */
++
++  /* Sucky mozilla wants margins in inch! */
++  aSettings->SetMarginTop (gtk_page_setup_get_top_margin (aPageSetup, GTK_UNIT_INCH));
++  aSettings->SetMarginBottom (gtk_page_setup_get_bottom_margin (aPageSetup, GTK_UNIT_INCH));
++  aSettings->SetMarginLeft (gtk_page_setup_get_left_margin (aPageSetup, GTK_UNIT_INCH));
++  aSettings->SetMarginRight (gtk_page_setup_get_right_margin (aPageSetup, GTK_UNIT_INCH));
++
++  aSettings->SetHeaderStrLeft (eel_gconf_get_boolean (CONF_PRINT_PAGE_TITLE) ? LITERAL ("&T") : LITERAL (""));
++  aSettings->SetHeaderStrCenter (LITERAL (""));
++  aSettings->SetHeaderStrRight (eel_gconf_get_boolean (CONF_PRINT_PAGE_URL) ? LITERAL ("&U") : LITERAL (""));
++  aSettings->SetFooterStrLeft (eel_gconf_get_boolean (CONF_PRINT_PAGE_NUMBERS) ? LITERAL ("&PT") : LITERAL (""));
++  aSettings->SetFooterStrCenter (LITERAL (""));
++  aSettings->SetFooterStrRight (eel_gconf_get_boolean (CONF_PRINT_DATE) ? LITERAL ("&D") : LITERAL (""));
++
++  aSettings->SetPrintFrameType (aPrintFrames);
++  aSettings->SetPrintFrameTypeUsage (nsIPrintSettings::kUseSettingWhenPossible);
++
++  /* FIXME: only if GTK_PRINT_CAPABILITY_SCALE is not set? */
++  aSettings->SetScaling (gtk_print_settings_get_scale (aGtkSettings) / 100.0);
++  gtk_print_settings_set_scale (aGtkSettings, 1.0);
++
++  aSettings->SetShrinkToFit (PR_FALSE); /* FIXME setting */
++  
++  aSettings->SetPrintBGColors (eel_gconf_get_boolean (CONF_PRINT_BG_COLORS) != FALSE);
++  aSettings->SetPrintBGImages (eel_gconf_get_boolean (CONF_PRINT_BG_IMAGES) != FALSE);
++
++  /* aSettings->SetPlexName (LITERAL ("default")); */
++  /* aSettings->SetColorspace (LITERAL ("default")); */
++  /* aSettings->SetResolutionName (LITERAL ("default")); */
++  /* aSettings->SetDownloadFonts (PR_TRUE); */
++
++  /* Unset those setting that we can handle, so they don't get applied
++   * again for the print job.
++   */
++  /* gtk_print_settings_set_collate (aGtkSettings, FALSE); not yet */
++  /* FIXME: Unset the orientation for the print job? */
++  /* gtk_page_setup_set_orientation (aPageSetup, GTK_PAGE_ORIENTATION_PORTRAIT); */
++  /* FIXME: unset output format -> "ps" ? */
++
++  return NS_OK;
++}
+diff -urN galeon-2.0.7.orig/mozilla/GeckoPrintService.h galeon-2.0.7/mozilla/GeckoPrintService.h
+--- galeon-2.0.7.orig/mozilla/GeckoPrintService.h	1970-01-01 01:00:00.000000000 +0100
++++ galeon-2.0.7/mozilla/GeckoPrintService.h	2009-02-15 09:39:07.000000000 +0100
+@@ -0,0 +1,54 @@
++/*
++ *  Copyright © 2006 Christian Persch
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU Lesser General Public License as published by
++ *  the Free Software Foundation; either version 2.1, or (at your option)
++ *  any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ *  $Id$
++ */
++
++#ifndef GECKO_PRINT_SERVICE_H
++#define GECKO_PRINT_SERVICE_H
++
++#include <gtk/gtkpagesetup.h>
++#include <gtk/gtkprintsettings.h>
++#include <gtk/gtkprinter.h>
++
++#include <nsIPrintingPromptService.h>
++
++class nsIPrintSettings;
++
++/* 6a71ff30-7f4d-4d91-b71a-d5c9764b34be */
++#define GECKO_PRINT_SERVICE_IID \
++{ 0x6a71ff30, 0x7f4d, 0x4d91, \
++  { 0xb7, 0x1a, 0xd5, 0xc9, 0x76, 0x4b, 0x34, 0xbe } }
++
++#define GECKO_PRINT_SERVICE_CLASSNAME "Gecko Print Service"
++
++class GeckoPrintService : public nsIPrintingPromptService
++{
++public:
++	NS_DECL_ISUPPORTS
++	NS_DECL_NSIPRINTINGPROMPTSERVICE
++
++	GeckoPrintService();
++	virtual ~GeckoPrintService();
++
++	static nsresult TranslateSettings (GtkPrintSettings*, GtkPageSetup *, GtkPrinter *, const nsACString&, PRInt16, PRBool, nsIPrintSettings*);
++
++private:
++	nsresult PrintUnattended (nsIDOMWindow *, nsIPrintSettings *);
++};
++
++#endif /* GECKO_PRINT_SERVICE_H */
+diff -urN galeon-2.0.7.orig/mozilla/GeckoPrintSession.cpp galeon-2.0.7/mozilla/GeckoPrintSession.cpp
+--- galeon-2.0.7.orig/mozilla/GeckoPrintSession.cpp	1970-01-01 01:00:00.000000000 +0100
++++ galeon-2.0.7/mozilla/GeckoPrintSession.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -0,0 +1,620 @@
++/*
++ *  Copyright © 2006 Christian Persch
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU Lesser General Public License as published by
++ *  the Free Software Foundation; either version 2.1, or (at your option)
++ *  any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ *  $Id$
++ */
++
++#include "mozilla-config.h"
++#include "config.h"
++
++#include <unistd.h>
++
++#include <glib/gi18n.h>
++#include <gtk/gtk.h>
++
++#include <nsStringAPI.h>
++
++#include <nsIDOMWindow.h>
++#include <nsIDOMWindowInternal.h>
++#include <nsIPrintSettings.h>
++
++#include "GeckoPrintSession.h"
++#include "GaleonUtils.h"
++
++#define MAX_STRING_LENGTH 512
++
++GeckoPrintSession::GeckoPrintSession ()
++: mSettings(NULL)
++, mPageSetup(NULL)
++, mPrinter(NULL)
++, mJob(NULL)
++, mProgressDialog(NULL)
++, mTitleLabel(NULL)
++, mProgressBar(NULL)
++, mStartPrintIdleID(0)
++, mSourceFileIsTemp(PR_FALSE)
++, mDone(PR_FALSE)
++, mCancelled(PR_FALSE)
++{
++  /* FIXME: connect to "prepare-close" ? */
++}
++
++GeckoPrintSession::~GeckoPrintSession ()
++{
++  NS_ASSERTION (mStartPrintIdleID == 0, "Impossible");
++
++  if (!mDone && !mCancelled) {
++    Cancel ();
++  }
++  DestroyJob ();
++
++  if (mSettings) {
++    g_object_unref (mSettings);
++  }
++  if (mPageSetup) {
++    g_object_unref (mPageSetup);
++  }
++  if (mPrinter) {
++    g_object_unref (mPrinter);
++  }
++  if (mProgressDialog) {
++    gtk_widget_destroy (mProgressDialog);
++  }
++  if (mSourceFileIsTemp) {
++    unlink (mSourceFile.get ());
++  }
++}
++
++void
++GeckoPrintSession::GetSourceFile (nsACString &aSource)
++{
++  aSource.Assign (mSourceFile);
++}
++
++nsresult
++GeckoPrintSession::SetSettings (nsIPrintSettings *aPrintSettings,
++                                GtkPrintSettings *aSettings,
++				GtkPageSetup *aPageSetup,
++				GtkPrinter *aPrinter)
++{
++  NS_ASSERTION (!mPrintSettings && !mSettings && !mPageSetup && !mPrinter, "Already have settings!");
++
++  NS_ENSURE_ARG (aPrintSettings);
++  NS_ENSURE_ARG (aSettings);
++
++  mPrintSettings = aPrintSettings;
++  mSettings = (GtkPrintSettings *) g_object_ref (aSettings);
++
++  NS_ENSURE_ARG (aPageSetup);
++  NS_ENSURE_ARG (aPrinter);
++
++  mPageSetup = (GtkPageSetup *) g_object_ref (aPageSetup);
++  mPrinter = (GtkPrinter *) g_object_ref (aPrinter);
++
++#if 0
++  /* Compute the source file name */
++  if (gtk_print_settings_get_print_to_file (mSettings)) {
++    /* FIXME: support gnome-VFS uris here! */
++    const char *fileURI = gtk_print_settings_get (aSettings, "export-uri");
++    NS_ENSURE_TRUE (fileURI, NS_ERROR_FAILURE);
++
++    char *fileName = g_filename_from_uri (fileURI, NULL, NULL);
++    NS_ENSURE_TRUE (fileURI, NS_ERROR_FAILURE);
++
++    mSourceFile.Assign (fileName);
++    g_free (fileName);
++  } else
++#endif
++  {
++    char *tmpl, *tmpName;
++
++    tmpl = g_strdup ("print-XXXXXX.ps");
++    
++    tmpName = g_build_filename (g_get_tmp_dir (), tmpl, (const char *) NULL);
++    g_free (tmpl);
++
++    NS_ENSURE_TRUE (tmpName, NS_ERROR_FAILURE);
++    mSourceFile.Assign (tmpName);
++    g_free (tmpName);
++
++    mSourceFileIsTemp = PR_TRUE;
++  }
++
++  return NS_OK;
++}
++
++/* static methods */
++
++/* static */ GeckoPrintSession *
++GeckoPrintSession::FromSettings (nsIPrintSettings *aSettings)
++{
++  nsresult rv;
++  nsCOMPtr<nsIPrintSession> session;
++  rv = aSettings->GetPrintSession (getter_AddRefs (session));
++  NS_ENSURE_TRUE (NS_SUCCEEDED (rv) && session, nsnull);
++
++  /* this is ok since the caller holds a ref to the settings which hold a ref to the session */
++  nsIPrintSession *sessionPtr = session.get();
++  return static_cast<GeckoPrintSession*>(sessionPtr);
++}
++
++/* static functions */
++
++static void
++ReleaseSession (GeckoPrintSession *aSession)
++{
++  NS_RELEASE (aSession);
++}
++
++static gboolean
++ProgressDeleteCallback (GtkDialog *aDialog)
++{
++  gtk_dialog_response (aDialog, GTK_RESPONSE_DELETE_EVENT);
++  return TRUE;
++}
++
++static void
++ProgressResponseCallback (GtkDialog *aDialog,
++		 	  int aResponse,
++			  GeckoPrintSession *aSession)
++{
++  aSession->Cancel ();
++}
++
++static gboolean
++StartPrintIdleCallback (GeckoPrintSession *aSession)
++{
++  aSession->StartPrinting ();
++
++  return FALSE;
++}
++
++static void
++JobStatusChangedCallback (GtkPrintJob *aJob,
++			  GeckoPrintSession *aSession)
++{
++  aSession->JobStatusChanged ();
++}
++
++static void
++JobCompletedCallback (GtkPrintJob *aJob,
++		      GeckoPrintSession *aSession,
++		      GError *aError)
++{
++  aSession->JobDone ();
++
++  if (aError) {
++    aSession->JobError (aError->message);
++  }
++}
++
++/* Private methods */
++
++void
++GeckoPrintSession::SetProgress (PRInt32 aCurrent,
++			        PRInt32 aMaximum)
++{
++  NS_ENSURE_TRUE (mProgressDialog, );
++
++  if (mCancelled) return;
++
++  /* Mozilla is weird */
++  if (aCurrent > aMaximum || (aCurrent == 100 && aMaximum == 100)) return;
++
++  double fraction = 0.0;
++  if (aMaximum > 0 && aCurrent >= 0) {
++    char *text = g_strdup_printf (_("Page %d of %d"), aCurrent, aMaximum);
++    gtk_progress_bar_set_text (GTK_PROGRESS_BAR (mProgressBar), text);
++    g_free (text);
++
++    fraction = (double) aCurrent / (double) aMaximum;
++  }
++	
++  gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (mProgressBar), CLAMP (fraction, 0.0, 1.0));
++}
++
++void
++GeckoPrintSession::SetProgressText (const char *aText)
++{
++  NS_ENSURE_TRUE (mProgressDialog, );
++
++  gtk_progress_bar_set_text (GTK_PROGRESS_BAR (mProgressBar), aText);
++}
++
++void
++GeckoPrintSession::Cancel ()
++{
++  SetProcessCanceledByUser (PR_TRUE);
++
++  if (mProgressDialog) {
++    gtk_dialog_set_response_sensitive (GTK_DIALOG (mProgressDialog),
++				       GTK_RESPONSE_CANCEL, FALSE);
++
++    SetProgress (0, 0);
++    SetProgressText (_("Cancelling print")); /* FIXME text! */
++  }
++
++  if (mJob) {
++    /* FIXME: There's no way to cancel mJob! Bug #339323 */
++  }
++}
++
++void
++GeckoPrintSession::StartPrinting ()
++{
++  mStartPrintIdleID = 0;
++
++  GError *error = NULL;
++
++#if 0
++  /* FIXME: this could also be a print job to a file which was
++   * printed to a temp file and now needs to be uploaded to its
++   * final location with gnome-vfs.
++   */
++  if (gtk_print_settings_get_print_to_file (mSettings)) return;
++#endif
++
++  NS_ENSURE_TRUE (mSettings && mPageSetup && mPrinter, );
++
++  mJob = gtk_print_job_new (mTitle.get (),
++			    mPrinter,
++			    mSettings,
++			    mPageSetup);
++  if (!gtk_print_job_set_source_file (mJob, mSourceFile.get (), &error)) {
++    /* FIXME: error dialogue! */
++    g_warning ("Couldn't set print job source: %s", error->message);
++    g_error_free (error);
++
++    g_object_unref (mJob);
++    mJob = NULL;
++  
++    return;
++  }
++
++  g_signal_connect (mJob, "status-changed",
++		    G_CALLBACK (JobStatusChangedCallback), this);
++
++  /* Keep us alive until the job is done! */
++  NS_ADDREF_THIS ();
++  gtk_print_job_send (mJob,
++		      (GtkPrintJobCompleteFunc) JobCompletedCallback,
++		      this,
++		      (GDestroyNotify) ReleaseSession);
++}
++
++void
++GeckoPrintSession::JobStatusChanged ()
++{
++  NS_ENSURE_TRUE (mProgressDialog, );
++	
++  /* FIXME: are any other status codes relevant info for the user? */
++  if (gtk_print_job_get_status (mJob) == GTK_PRINT_STATUS_SENDING_DATA) {
++    gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (mProgressBar), 0.75);
++    /* FIXME text! */
++    SetProgressText (_("Spooling..."));
++  }
++}
++
++void
++GeckoPrintSession::JobError (const char *aErrorMessage)
++{
++  /* FIXME better text */
++  GtkWidget *dialog = gtk_message_dialog_new (NULL,
++					      GtkDialogFlags (0),
++					      GTK_MESSAGE_ERROR,
++					      GTK_BUTTONS_OK,
++					      _("Print error"));
++  gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
++					    "%s", aErrorMessage);
++  g_signal_connect (dialog, "response",
++		    G_CALLBACK (gtk_widget_destroy), NULL);
++
++  gtk_widget_show (dialog);
++}
++
++void
++GeckoPrintSession::JobDone ()
++{
++  NS_ENSURE_TRUE (mProgressDialog, );
++
++  mDone = PR_TRUE;
++
++  gtk_widget_hide (mProgressDialog);
++
++  DestroyJob ();
++}
++
++void
++GeckoPrintSession::DestroyJob ()
++{
++  if (!mJob) return;
++
++  g_signal_handlers_disconnect_by_func (mJob, (void*) JobStatusChangedCallback, this);
++  g_object_unref (mJob);
++  mJob = NULL;
++}
++
++void
++GeckoPrintSession::LaunchJobOnIdle ()
++{
++  NS_ASSERTION (!mStartPrintIdleID, "Already started printing!");
++
++  /* Don't send the job to the printer if the user cancelled the print */
++  if (mCancelled) return;
++
++  /* Keep us alive until the idle handler runs! */
++  NS_ADDREF_THIS ();
++  mStartPrintIdleID = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE,
++				       (GSourceFunc) StartPrintIdleCallback,
++				       this,
++				       (GDestroyNotify) ReleaseSession);
++}
++
++/* XPCOM interfaces */
++
++NS_IMPL_THREADSAFE_ISUPPORTS5 (GeckoPrintSession,
++			       nsIPrintSession,
++			       nsIWebProgressListener,
++			       nsIPrintProgress,
++			       nsIPrintProgressParams,
++			       nsISupportsWeakReference)
++
++/* nsIPrintSession implementation */
++
++/* nsIWebProgressListener implementation */
++
++/* void onStateChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in unsigned long aStateFlags, in nsresult aStatus); */
++NS_IMETHODIMP
++GeckoPrintSession::OnStateChange (nsIWebProgress *aWebProgress,
++				  nsIRequest *aRequest,
++				  PRUint32 aStateFlags,
++				  nsresult aStatus)
++{
++  if (NS_SUCCEEDED (aStatus) &&
++      aStateFlags & nsIWebProgressListener::STATE_IS_DOCUMENT) {
++    if (aStateFlags & nsIWebProgressListener::STATE_START) {
++      /* Printing starts now */
++      SetProgress (0, 0);
++    } else if ((aStateFlags & nsIWebProgressListener::STATE_STOP)) {
++      /* Printing done, upload to printer */
++      LaunchJobOnIdle ();
++    }
++  }
++
++  return NS_OK;
++}
++
++/* void onProgressChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in long aCurSelfProgress, in long aMaxSelfProgress, in long aCurTotalProgress, in long aMaxTotalProgress); */
++NS_IMETHODIMP
++GeckoPrintSession::OnProgressChange (nsIWebProgress *aWebProgress,
++				     nsIRequest *aRequest,
++				     PRInt32 aCurSelfProgress,
++				     PRInt32 aMaxSelfProgress,
++				     PRInt32 aCurTotalProgress,
++				     PRInt32 aMaxTotalProgress)
++{
++  SetProgress (aCurTotalProgress, aMaxTotalProgress);
++
++  return NS_OK;
++}
++
++/* void onLocationChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsIURI aLocation); */
++NS_IMETHODIMP
++GeckoPrintSession::OnLocationChange (nsIWebProgress *aWebProgress,
++				     nsIRequest *aRequest,
++				     nsIURI *aLocation)
++{
++  NS_ASSERTION (0, "OnLocationChange reached!");
++  return NS_OK;
++}
++
++/* void onStatusChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in nsresult aStatus, in wstring aMessage); */
++NS_IMETHODIMP
++GeckoPrintSession::OnStatusChange (nsIWebProgress *aWebProgress,
++				   nsIRequest *aRequest,
++				   nsresult aStatus,
++				   const PRUnichar *aMessage)
++{
++  NS_ASSERTION (0, "OnStatusChange reached!");
++  return NS_OK;
++}
++
++/* void onSecurityChange (in nsIWebProgress aWebProgress, in nsIRequest aRequest, in unsigned long aState); */
++NS_IMETHODIMP
++GeckoPrintSession::OnSecurityChange (nsIWebProgress *aWebProgress,
++				     nsIRequest *aRequest,
++				     PRUint32 aState)
++{
++  NS_ASSERTION (0, "OnSecurityChange reached!");
++  return NS_OK;
++}
++
++/* nsIPrintProgress implementation */
++
++/* void openProgressDialog (in nsIDOMWindowInternal parent, in string dialogURL, in nsISupports parameters, in nsIObserver openDialogObserver, out boolean notifyOnOpen); */
++NS_IMETHODIMP
++GeckoPrintSession::OpenProgressDialog (nsIDOMWindowInternal *aParent,
++				       const char *aDialogURL,
++				       nsISupports *aParameters,
++				       nsIObserver *aOpenDialogObserver,
++				       PRBool *_notifyOnOpen)
++{
++  NS_ENSURE_STATE (!mProgressDialog);
++
++  nsCOMPtr<nsIDOMWindow> domWindow (do_QueryInterface (aParent));
++  GtkWidget *parent = GaleonUtils::FindGtkParent (domWindow);
++
++  GtkWidget *vbox, *hbox, *image;
++
++  mProgressDialog = gtk_dialog_new ();
++  GtkDialog *dialog = GTK_DIALOG (mProgressDialog);
++
++  gtk_dialog_add_button (dialog, GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
++
++  g_signal_connect (dialog, "delete-event",
++		    G_CALLBACK (ProgressDeleteCallback), NULL);
++  g_signal_connect (dialog, "response",
++		    G_CALLBACK (ProgressResponseCallback), this);
++
++  /* FIXME do we need transient? initially on top should suffice */
++  gtk_window_set_transient_for (GTK_WINDOW (dialog),
++				GTK_WINDOW (parent));
++
++  gtk_dialog_set_has_separator (dialog, FALSE);
++  gtk_window_set_resizable (GTK_WINDOW (dialog), FALSE);
++  gtk_container_set_border_width (GTK_CONTAINER (dialog), 5);
++  gtk_box_set_spacing (GTK_BOX (dialog->vbox), 14); /* 2 * 5 + 14 = 24 */
++  gtk_box_set_spacing (GTK_BOX (dialog->action_area), 5);
++
++  hbox = gtk_hbox_new (FALSE, 12);
++  gtk_container_set_border_width (GTK_CONTAINER (hbox), 5);
++  gtk_container_add (GTK_CONTAINER (dialog->vbox), hbox);
++
++  image = gtk_image_new_from_stock (GTK_STOCK_PRINT, GTK_ICON_SIZE_DIALOG);
++  gtk_misc_set_alignment (GTK_MISC (image), 0.5, 0.0);
++  gtk_box_pack_start (GTK_BOX (hbox), image, FALSE, FALSE, 0);
++
++  vbox = gtk_vbox_new (FALSE, 12);
++  gtk_box_pack_start (GTK_BOX (hbox), vbox, TRUE, TRUE, 0);
++
++  mTitleLabel = gtk_label_new (NULL);
++  gtk_label_set_line_wrap (GTK_LABEL (mTitleLabel), TRUE);
++  gtk_misc_set_alignment (GTK_MISC (mTitleLabel), 0.0, 0.0);
++  gtk_box_pack_start (GTK_BOX (vbox), mTitleLabel, FALSE, FALSE, 0);
++
++  mProgressBar = gtk_progress_bar_new ();
++  gtk_box_pack_start (GTK_BOX (vbox), mProgressBar, FALSE, FALSE, 0);
++
++  gtk_widget_show_all (hbox);
++  gtk_window_present (GTK_WINDOW (dialog));
++
++  *_notifyOnOpen = PR_FALSE;
++
++  return NS_OK;
++}
++
++/* void closeProgressDialog (in boolean forceClose); */
++NS_IMETHODIMP
++GeckoPrintSession::CloseProgressDialog (PRBool forceClose)
++{
++  return NS_OK;
++}
++
++/* void registerListener (in nsIWebProgressListener listener); */
++NS_IMETHODIMP
++GeckoPrintSession::RegisterListener (nsIWebProgressListener *listener)
++{
++  return NS_OK;
++}
++
++/* void unregisterListener (in nsIWebProgressListener listener); */
++NS_IMETHODIMP
++GeckoPrintSession::UnregisterListener (nsIWebProgressListener *listener)
++{
++  return NS_OK;
++}
++
++/* void doneIniting (); */
++NS_IMETHODIMP
++GeckoPrintSession::DoneIniting()
++{
++  return NS_OK;
++}
++
++/* nsIPrompt getPrompter (); */
++NS_IMETHODIMP
++GeckoPrintSession::GetPrompter (nsIPrompt **_retval)
++{
++  g_return_val_if_reached (NS_ERROR_NOT_IMPLEMENTED);
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute boolean processCanceledByUser; */
++NS_IMETHODIMP
++GeckoPrintSession::GetProcessCanceledByUser (PRBool *aProcessCanceledByUser)
++{
++  *aProcessCanceledByUser = mCancelled;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++GeckoPrintSession::SetProcessCanceledByUser (PRBool aProcessCanceledByUser)
++{
++  mCancelled = aProcessCanceledByUser;
++  if (mPrintSettings) {
++    mPrintSettings->SetIsCancelled (aProcessCanceledByUser);
++  }
++
++  return NS_OK;
++}
++
++/* nsIPrintProgressParams implementation */
++
++/* attribute wstring docTitle; */
++NS_IMETHODIMP
++GeckoPrintSession::GetDocTitle (PRUnichar * *aDocTitle)
++{
++  g_return_val_if_reached (NS_ERROR_NOT_IMPLEMENTED);
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++GeckoPrintSession::SetDocTitle (const PRUnichar * aDocTitle)
++{
++  NS_ENSURE_STATE (mProgressDialog);
++
++  char *converted;
++  if (aDocTitle == nsnull) return NULL;
++
++  /* This depends on the assumption that
++   * typeof(PRUnichar) == typeof (gunichar2) == uint16,
++   * which should be pretty safe.
++   */
++  glong n_read = 0, n_written = 0;
++  converted = g_utf16_to_utf8 ((gunichar2*) aDocTitle, MAX_STRING_LENGTH,
++                                &n_read, &n_written, NULL);
++  /* FIXME loop from the end while !g_unichar_isspace (char)? */
++  if (!converted)
++    return NULL;
++
++  g_strdelimit (converted, "\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037", ' ');
++
++  if (converted) {
++    mTitle.Assign (converted);
++
++    char *title = g_strdup_printf (_("Printing “%s”"), converted);
++    gtk_window_set_title (GTK_WINDOW (mProgressDialog), title);
++    gtk_label_set_text (GTK_LABEL (mTitleLabel), title);
++    g_free (converted);
++    g_free (title);
++  }
++  return NS_OK;
++}
++
++/* attribute wstring docURL; */
++NS_IMETHODIMP
++GeckoPrintSession::GetDocURL (PRUnichar * *aDocURL)
++{
++  g_return_val_if_reached (NS_ERROR_NOT_IMPLEMENTED);
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++GeckoPrintSession::SetDocURL (const PRUnichar * aDocURL)
++{
++  return NS_OK;
++}
+diff -urN galeon-2.0.7.orig/mozilla/GeckoPrintSession.h galeon-2.0.7/mozilla/GeckoPrintSession.h
+--- galeon-2.0.7.orig/mozilla/GeckoPrintSession.h	1970-01-01 01:00:00.000000000 +0100
++++ galeon-2.0.7/mozilla/GeckoPrintSession.h	2009-02-15 09:39:07.000000000 +0100
+@@ -0,0 +1,94 @@
++/*
++ *  Copyright © 2006 Christian Persch
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU Lesser General Public License as published by
++ *  the Free Software Foundation; either version 2.1, or (at your option)
++ *  any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU Lesser General Public License for more details.
++ *
++ *  You should have received a copy of the GNU Lesser General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ *  $Id$
++ */
++
++#ifndef GECKO_PRINT_SESSION_H
++#define GECKO_PRINT_SESSION_H
++
++#include <nsCOMPtr.h>
++#include <nsIPrintSession.h>
++#include <nsIWebProgressListener.h>
++#include <nsIPrintProgress.h>
++#include <nsIPrintProgressParams.h>
++#include <nsWeakReference.h>
++
++#include <gtk/gtkwidget.h>
++#include <gtk/gtkprintjob.h>
++#include <gtk/gtkprinter.h>
++#include <gtk/gtkprintjob.h>
++
++class nsIPrintSettings;
++class nsIDOMWindow;
++
++/* 0940c973-97e7-476f-a612-4ed9473a0b36 */
++#define GECKO_PRINT_SESSION_IID \
++{ 0x0940c973, 0x97e7, 0x476f, \
++  { 0xa6, 0x12, 0x4e, 0xd9, 0x47, 0x3a, 0x0b, 0x36 } }
++
++#define GECKO_PRINT_SESSION_CLASSNAME "Gecko Print Session"
++
++class GeckoPrintSession : public nsIPrintSession,
++			  public nsIPrintProgress,
++			  public nsIPrintProgressParams,
++			  public nsSupportsWeakReference
++{
++  public:
++    GeckoPrintSession();
++    virtual ~GeckoPrintSession();
++
++    NS_DECL_ISUPPORTS
++    NS_DECL_NSIPRINTSESSION
++    NS_DECL_NSIWEBPROGRESSLISTENER
++    NS_DECL_NSIPRINTPROGRESS
++    NS_DECL_NSIPRINTPROGRESSPARAMS
++
++    nsresult SetSettings (nsIPrintSettings *, GtkPrintSettings*, GtkPageSetup*, GtkPrinter*);
++    void GetSourceFile (nsACString&);
++
++    static GeckoPrintSession *FromSettings (nsIPrintSettings *);
++
++    void Cancel ();
++    void StartPrinting ();
++    void JobStatusChanged ();
++    void JobDone ();
++    void JobError (const char *);
++
++  private:
++    nsCOMPtr<nsIPrintSettings> mPrintSettings;
++    GtkPrintSettings *mSettings;
++    GtkPageSetup *mPageSetup;
++    GtkPrinter *mPrinter;
++    GtkPrintJob *mJob;
++    GtkWidget *mProgressDialog;
++    GtkWidget *mTitleLabel;
++    GtkWidget *mProgressBar;
++    nsCString mSourceFile;
++    nsCString mTitle;
++    guint mStartPrintIdleID;
++    PRPackedBool mSourceFileIsTemp;
++    PRPackedBool mDone;
++    PRPackedBool mCancelled;
++
++    void SetProgress (PRInt32, PRInt32);
++    void SetProgressText (const char *);
++    void LaunchJobOnIdle ();
++    void DestroyJob ();
++};
++
++#endif /* GECKO_PRINT_SESSION_H */
+diff -urN galeon-2.0.7.orig/mozilla/Makefile.am galeon-2.0.7/mozilla/Makefile.am
+--- galeon-2.0.7.orig/mozilla/Makefile.am	2008-09-03 05:13:36.000000000 +0200
++++ galeon-2.0.7/mozilla/Makefile.am	2009-02-15 09:39:07.000000000 +0100
+@@ -127,8 +127,10 @@
+ 	MozillaPrivate.h		\
+ 	MozRegisterComponents.cpp       \
+ 	MozRegisterComponents.h         \
+-	PrintingPromptService.cpp	\
+-	PrintingPromptService.h		\
++	GeckoPrintService.cpp		\
++	GeckoPrintService.h		\
++	GeckoPrintSession.cpp		\
++	GeckoPrintSession.h		\
+ 	PrintProgressListener.cpp       \
+ 	PrintProgressListener.h         \
+ 	JSConsoleListener.cpp           \
+diff -urN galeon-2.0.7.orig/mozilla/mozilla-embed.cpp galeon-2.0.7/mozilla/mozilla-embed.cpp
+--- galeon-2.0.7.orig/mozilla/mozilla-embed.cpp	2008-09-05 04:29:53.000000000 +0200
++++ galeon-2.0.7/mozilla/mozilla-embed.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -22,6 +22,8 @@
+ 
+ #include <nscore.h>
+ #include <nsServiceManagerUtils.h>
++#include <nsIPrintSettingsService.h>
++#include <nsIPrintSettings.h>
+ 
+ #define MOZILLA_CLIENT
+ #include "gtkmozembed.h"
+@@ -995,33 +997,12 @@
+ }
+ 
+ static gboolean
+-impl_print (GaleonEmbed *embed,
+-            EmbedPrintInfo *info)
++impl_print (GaleonEmbed *embed)
+ {
+ 	GaleonWrapper *wrapper = MOZILLA_EMBED(embed)->priv->wrapper;
+-	nsresult result;
+-
+-        nsCOMPtr<nsIPrintSettings> options;
+-	result = GaleonUtils::EmbedPrintInfoToPrintSettings(info,
+-							    getter_AddRefs(options));
+-	if (NS_FAILED (result)) return FALSE;
+-
+-	char *string;
+-
+-	string = gtk_moz_embed_get_title (GTK_MOZ_EMBED (embed));
+-	options->SetTitle (GulString (string).get());
+-	g_free (string);
+ 
+-	string = mozilla_embed_get_real_location (MOZILLA_EMBED (embed));
+-	options->SetDocURL(GulString (string).get());
+-	g_free (string);
+-
+-        options->SetPrintSilent (PR_TRUE);
+-
+-	result = wrapper->Print(options, info->preview,
+-				GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (embed))));
+-
+-	options->SetPrintSilent (PR_FALSE);
++	nsresult result;
++	result = wrapper->Print();
+ 
+ 	return NS_SUCCEEDED (result) ? TRUE : FALSE;
+ }
+diff -urN galeon-2.0.7.orig/mozilla/mozilla-embed-shell.cpp galeon-2.0.7/mozilla/mozilla-embed-shell.cpp
+--- galeon-2.0.7.orig/mozilla/mozilla-embed-shell.cpp	2008-09-03 06:58:17.000000000 +0200
++++ galeon-2.0.7/mozilla/mozilla-embed-shell.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -1040,14 +1040,6 @@
+ #endif
+ }
+ 
+-static GList *
+-impl_get_printer_info(GaleonEmbedShell *shell,
+-                      gint *defaultPrinterIndex)
+-{
+-	return MozillaPrivate::GetPrinterList (defaultPrinterIndex);
+-}
+-
+-
+ static void
+ mozilla_embed_shell_class_init (MozillaEmbedShellClass *klass)
+ {
+@@ -1073,7 +1065,6 @@
+ 	shell_class->remove_cookies = impl_remove_cookies;
+ 	shell_class->list_passwords = impl_list_passwords;
+ 	shell_class->remove_passwords = impl_remove_passwords;
+-	shell_class->get_printer_info = impl_get_printer_info;
+ 
+ 	g_type_class_add_private (klass, sizeof (MozillaEmbedShellPrivate));
+ }
+diff -urN galeon-2.0.7.orig/mozilla/MozillaPrivate.cpp galeon-2.0.7/mozilla/MozillaPrivate.cpp
+--- galeon-2.0.7.orig/mozilla/MozillaPrivate.cpp	2008-09-05 04:34:37.000000000 +0200
++++ galeon-2.0.7/mozilla/MozillaPrivate.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -32,7 +32,6 @@
+ #include <nsIHTMLDocument.h>
+ #endif
+ 
+-#include <nsIPrintOptions.h>
+ #include <nsIDocument.h>
+ #include <nsIPresShell.h>
+ #include <nsIStyleSheet.h>
+@@ -62,96 +61,6 @@
+ 
+ #include "GaleonUtils.h"
+ 
+-GList *
+-MozillaPrivate::GetPrinterList (gint* defaultPrinterIndex)
+-{
+-	GList *printerList = NULL;
+-	nsresult rv = NS_OK;
+-
+-	*defaultPrinterIndex = -1;
+-
+-	nsCOMPtr<nsIPrintSettingsService> pss =
+-		do_GetService("@mozilla.org/gfx/printsettings-service;1", &rv);
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-
+-	nsCOMPtr<nsIPrintOptions> po = do_QueryInterface(pss, &rv);
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-
+-        PRUnichar *uDefaultPrinter;
+-        rv = pss->GetDefaultPrinterName(&uDefaultPrinter);
+-        nsAutoString defaultPrinter(uDefaultPrinter);
+-        NS_Free(uDefaultPrinter);
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-
+-#ifdef HAVE_NSIPRINTOPTIONS_AVAILABLEPRINTERS
+-	nsCOMPtr<nsISimpleEnumerator> printers;
+-	rv = po->AvailablePrinters(getter_AddRefs(printers));
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-#else
+-	nsCOMPtr<nsIPrinterEnumerator> pe = do_QueryInterface(pss, &rv);
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-
+-	nsCOMPtr<nsIStringEnumerator> printers;
+-	rv = pe->GetPrinterNameList(getter_AddRefs(printers));
+-	NS_ENSURE_SUCCESS(rv, NULL);
+-#endif
+-
+-	PRBool more = PR_FALSE;
+-	gint index = 0;
+-
+-#ifdef HAVE_NSIPRINTOPTIONS_AVAILABLEPRINTERS
+-	for (printers->HasMoreElements(&more), index = 0;
+-	     more == PR_TRUE;
+-	     printers->HasMoreElements(&more), index++)
+-	{
+-		nsCOMPtr<nsISupports> i;
+-		rv = printers->GetNext(getter_AddRefs(i));
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-
+-		nsCOMPtr<nsISupportsString> printer = do_QueryInterface(i, &rv);
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-
+-		nsAutoString name;
+-		rv = printer->GetData(name);
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-#else
+-	for (printers->HasMore(&more), index = 0;
+-	     more == PR_TRUE;
+-	     printers->HasMore(&more), index++)
+-	{
+-		nsAutoString name;
+-		rv = printers->GetNext(name);
+-#endif
+-
+-		if (defaultPrinter.Equals(name)) *defaultPrinterIndex = index;
+-
+-		nsCOMPtr<nsIPrintSettings> ps;
+-		rv = pss->GetNewPrintSettings(getter_AddRefs(ps));
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-
+-		rv = pss->InitPrintSettingsFromPrinter(name.get(), ps);
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-
+-		// Name field isn't inited. How dumb can we get?
+-		rv = ps->SetPrinterName(name.get());
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-
+-		EmbedPrintInfo *info;
+-		GaleonUtils::PrintSettingsToEmbedPrintInfo(ps, &info);
+-		printerList = g_list_append(printerList, info);
+-
+-#if HAVE_NSIPRINTOPTIONS_AVAILABLEPRINTERS
+-		rv = printers->HasMoreElements(&more);
+-#else
+-		rv = printers->HasMore(&more);
+-#endif
+-		NS_ENSURE_SUCCESS(rv, NULL);
+-	}
+-
+-	return printerList;
+-}
+-
+-
+ nsresult
+ MozillaPrivate::LoadOverrideStyleSheet (nsIDocShell *aDocShell, nsIURI *aUri,
+ 					nsIStyleSheet**aStyleSheet)
+diff -urN galeon-2.0.7.orig/mozilla/MozRegisterComponents.cpp galeon-2.0.7/mozilla/MozRegisterComponents.cpp
+--- galeon-2.0.7.orig/mozilla/MozRegisterComponents.cpp	2008-09-03 05:08:44.000000000 +0200
++++ galeon-2.0.7/mozilla/MozRegisterComponents.cpp	2009-02-15 09:39:07.000000000 +0100
+@@ -25,7 +25,8 @@
+ #include "FilePicker.h"
+ #include "GlobalHistory.h"
+ #include "MyportalProtocolHandler.h"
+-#include "PrintingPromptService.h"
++#include "GeckoPrintService.h"
++#include "GeckoPrintSession.h"
+ #include "ProgressListener.h"
+ #include "SideBarProxy.h"
+ #include "EphyPromptService.h"
+@@ -69,7 +70,8 @@
+ NS_GENERIC_FACTORY_CONSTRUCTOR(GFilePicker)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(GContentHandler)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(MozGlobalHistory)
+-NS_GENERIC_FACTORY_CONSTRUCTOR(GPrintingPromptService)
++NS_GENERIC_FACTORY_CONSTRUCTOR(GeckoPrintService)
++NS_GENERIC_FACTORY_CONSTRUCTOR(GeckoPrintSession)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(GSidebarProxy)
+ NS_DECL_CLASSINFO(GSidebarProxy)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(GCookiePromptService)
+@@ -161,11 +163,17 @@
+ 		MozGlobalHistoryConstructor
+ 	},
+ 	{
+-		G_PRINTINGPROMPTSERVICE_CLASSNAME,
+-		G_PRINTINGPROMPTSERVICE_CID,
+-		G_PRINTINGPROMPTSERVICE_CONTRACTID,
+-		GPrintingPromptServiceConstructor
+-	},
++		GECKO_PRINT_SERVICE_CLASSNAME,
++		GECKO_PRINT_SERVICE_IID,
++		"@mozilla.org/embedcomp/printingprompt-service;1",
++		GeckoPrintServiceConstructor
++        },
++        {
++		GECKO_PRINT_SESSION_CLASSNAME,
++		GECKO_PRINT_SESSION_IID,
++		"@mozilla.org/gfx/printsession;1",
++		GeckoPrintSessionConstructor
++        },
+ 	{
+ 		G_SIDEBAR_CLASSNAME,
+ 		G_SIDEBAR_CID,
+diff -urN galeon-2.0.7.orig/src/window-commands.c galeon-2.0.7/src/window-commands.c
+--- galeon-2.0.7.orig/src/window-commands.c	2008-07-04 18:30:50.000000000 +0200
++++ galeon-2.0.7/src/window-commands.c	2009-02-15 09:39:07.000000000 +0100
+@@ -21,7 +21,6 @@
+ #include "galeon-shell.h"
+ #include "galeon-config.h"
+ #include "window-commands.h"
+-#include "print-dialog.h"
+ #include "bookmarks-add-dialog.h"
+ #include "bookmarks-editor.h"
+ #include "eel-gconf-extensions.h"
+@@ -66,14 +65,6 @@
+ 	RESPONSE_ADD_TOOLBAR
+ };
+ 
+-
+-static void 
+-print_dialog_preview_cb (PrintDialog *dialog, 
+-			 GaleonWindow *window)
+-{
+-	galeon_window_set_chrome (window, EMBED_CHROME_PPVIEWTOOLBARON);
+-}
+-
+ void 
+ window_cmd_file_print (GtkAction *action, 
+ 		       GaleonWindow *window) 
+@@ -83,15 +74,8 @@
+ 	
+ 	embed = galeon_window_get_active_embed (window);
+ 	g_return_if_fail (embed != NULL);
+-	
+-	dialog = print_dialog_new_with_parent (GTK_WIDGET(window),
+-					       embed, NULL);
+-	g_signal_connect (G_OBJECT(dialog),
+-			  "preview",
+-			  G_CALLBACK (print_dialog_preview_cb),
+-			  window);
+-	galeon_dialog_set_modal (dialog, TRUE);
+-	galeon_dialog_show (dialog);
++
++	galeon_embed_print (embed);	
+ }
+ 
+ void 
+diff -urN galeon-2.0.7.orig/ui/Makefile.am galeon-2.0.7/ui/Makefile.am
+--- galeon-2.0.7.orig/ui/Makefile.am	2008-07-04 18:30:59.000000000 +0200
++++ galeon-2.0.7/ui/Makefile.am	2009-02-15 09:39:07.000000000 +0100
+@@ -1,5 +1,5 @@
+ ui_DATA = prefs-dialog.glade \
+-	print.glade \
++	print-tab.xml \
+ 	bookmarks-editor.glade \
+ 	bookmarks-editor-small.glade \
+ 	bookmarks.glade \
+diff -urN galeon-2.0.7.orig/ui/print.glade galeon-2.0.7/ui/print.glade
+--- galeon-2.0.7.orig/ui/print.glade	2008-07-04 18:30:59.000000000 +0200
++++ galeon-2.0.7/ui/print.glade	2009-02-15 09:39:07.000000000 +0100
+@@ -1,1746 +0,0 @@
+-<?xml version="1.0" standalone="no"?> <!--*- mode: xml -*-->
+-<!DOCTYPE glade-interface SYSTEM "http://glade.gnome.org/glade-2.0.dtd">
+-
+-<glade-interface>
+-<requires lib="gnome"/>
+-
+-<widget class="GtkDialog" id="print_dialog">
+-  <property name="border_width">7</property>
+-  <property name="visible">True</property>
+-  <property name="title" translatable="yes">Print</property>
+-  <property name="type">GTK_WINDOW_TOPLEVEL</property>
+-  <property name="window_position">GTK_WIN_POS_NONE</property>
+-  <property name="modal">False</property>
+-  <property name="resizable">False</property>
+-  <property name="destroy_with_parent">False</property>
+-  <property name="role">galeon-print-dialog</property>
+-  <property name="decorated">True</property>
+-  <property name="skip_taskbar_hint">False</property>
+-  <property name="skip_pager_hint">False</property>
+-  <property name="type_hint">GDK_WINDOW_TYPE_HINT_DIALOG</property>
+-  <property name="gravity">GDK_GRAVITY_NORTH_WEST</property>
+-  <property name="has_separator">False</property>
+-
+-  <child internal-child="vbox">
+-    <widget class="GtkVBox" id="dialog-vbox8">
+-      <property name="visible">True</property>
+-      <property name="homogeneous">False</property>
+-      <property name="spacing">6</property>
+-
+-      <child internal-child="action_area">
+-	<widget class="GtkHButtonBox" id="dialog-action_area8">
+-	  <property name="visible">True</property>
+-	  <property name="layout_style">GTK_BUTTONBOX_END</property>
+-
+-	  <child>
+-	    <widget class="GtkButton" id="preview_button">
+-	      <property name="visible">True</property>
+-	      <property name="can_default">True</property>
+-	      <property name="can_focus">True</property>
+-	      <property name="label">gtk-print-preview</property>
+-	      <property name="use_stock">True</property>
+-	      <property name="relief">GTK_RELIEF_NORMAL</property>
+-	      <property name="focus_on_click">True</property>
+-	      <property name="response_id">50</property>
+-	      <signal name="clicked" handler="print_preview_button_cb"/>
+-	    </widget>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkButton" id="cancel_button">
+-	      <property name="visible">True</property>
+-	      <property name="can_default">True</property>
+-	      <property name="can_focus">True</property>
+-	      <property name="label">gtk-cancel</property>
+-	      <property name="use_stock">True</property>
+-	      <property name="relief">GTK_RELIEF_NORMAL</property>
+-	      <property name="focus_on_click">True</property>
+-	      <property name="response_id">-6</property>
+-	      <signal name="clicked" handler="print_cancel_button_cb"/>
+-	    </widget>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkButton" id="print_button">
+-	      <property name="visible">True</property>
+-	      <property name="can_default">True</property>
+-	      <property name="has_default">True</property>
+-	      <property name="can_focus">True</property>
+-	      <property name="label">gtk-print</property>
+-	      <property name="use_stock">True</property>
+-	      <property name="relief">GTK_RELIEF_NORMAL</property>
+-	      <property name="focus_on_click">True</property>
+-	      <property name="response_id">-5</property>
+-	      <signal name="clicked" handler="print_ok_button_cb"/>
+-	    </widget>
+-	  </child>
+-	</widget>
+-	<packing>
+-	  <property name="padding">0</property>
+-	  <property name="expand">False</property>
+-	  <property name="fill">True</property>
+-	  <property name="pack_type">GTK_PACK_END</property>
+-	</packing>
+-      </child>
+-
+-      <child>
+-	<widget class="GtkNotebook" id="print_notebook">
+-	  <property name="border_width">5</property>
+-	  <property name="visible">True</property>
+-	  <property name="can_focus">True</property>
+-	  <property name="show_tabs">True</property>
+-	  <property name="show_border">True</property>
+-	  <property name="tab_pos">GTK_POS_TOP</property>
+-	  <property name="scrollable">False</property>
+-	  <property name="enable_popup">False</property>
+-
+-	  <child>
+-	    <widget class="GtkVBox" id="vbox127">
+-	      <property name="border_width">12</property>
+-	      <property name="visible">True</property>
+-	      <property name="homogeneous">False</property>
+-	      <property name="spacing">18</property>
+-
+-	      <child>
+-		<widget class="GtkVBox" id="vbox128">
+-		  <property name="visible">True</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="spacing">6</property>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="label251">
+-		      <property name="visible">True</property>
+-		      <property name="label" translatable="yes">&lt;b&gt;Printer&lt;/b&gt;</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">False</property>
+-		      <property name="selectable">False</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">False</property>
+-		      <property name="fill">False</property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkHBox" id="hbox70">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">0</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label252">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">    </property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkTable" id="table47">
+-			  <property name="visible">True</property>
+-			  <property name="n_rows">3</property>
+-			  <property name="n_columns">2</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="row_spacing">6</property>
+-			  <property name="column_spacing">12</property>
+-
+-			  <child>
+-			    <widget class="GnomeFileEntry" id="print_gnome_file_entry">
+-			      <property name="visible">True</property>
+-			      <property name="max_saved">10</property>
+-			      <property name="browse_dialog_title" translatable="yes">Choose a file to print to</property>
+-			      <property name="directory_entry">False</property>
+-			      <property name="modal">True</property>
+-			      <property name="use_filechooser">True</property>
+-			      <property name="filechooser-action">1</property>
+-
+-			      <child internal-child="entry">
+-				<widget class="GtkEntry" id="file_entry">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="editable">True</property>
+-				  <property name="visibility">True</property>
+-				  <property name="max_length">0</property>
+-				  <property name="text" translatable="yes"></property>
+-				  <property name="has_frame">True</property>
+-				  <property name="invisible_char" translatable="yes">*</property>
+-				  <property name="activates_default">False</property>
+-				</widget>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">2</property>
+-			      <property name="bottom_attach">3</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkCheckButton" id="print_to_file_checkbox">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">Print to _file:</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			      <signal name="toggled" handler="print_to_file_toggled_cb" last_modification_time="Sat, 10 Jul 2004 05:06:56 GMT"/>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">2</property>
+-			      <property name="bottom_attach">3</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="command_label">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">Co_mmand:</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			      <property name="mnemonic_widget">printer_entry</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">1</property>
+-			      <property name="bottom_attach">2</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkEntry" id="printer_entry">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="editable">True</property>
+-			      <property name="visibility">True</property>
+-			      <property name="max_length">0</property>
+-			      <property name="text" translatable="yes">lpr</property>
+-			      <property name="has_frame">True</property>
+-			      <property name="invisible_char" translatable="yes">*</property>
+-			      <property name="activates_default">False</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">1</property>
+-			      <property name="bottom_attach">2</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="printer_label">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">Print_er:</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">0</property>
+-			      <property name="bottom_attach">1</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkComboBox" id="printer_name_combobox">
+-			      <property name="visible">True</property>
+-			      <property name="items" translatable="yes">DYNAMIC</property>
+-			      <signal name="changed" handler="print_printer_combo_cb" last_modification_time="Mon, 05 Jul 2004 18:49:50 GMT"/>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">0</property>
+-			      <property name="bottom_attach">1</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">True</property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">False</property>
+-		</packing>
+-	      </child>
+-
+-	      <child>
+-		<widget class="GtkVBox" id="vbox145">
+-		  <property name="visible">True</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="spacing">6</property>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="label279">
+-		      <property name="visible">True</property>
+-		      <property name="label" translatable="yes">&lt;b&gt;Paper&lt;/b&gt;</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">False</property>
+-		      <property name="selectable">False</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">False</property>
+-		      <property name="fill">False</property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkHBox" id="hbox86">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">0</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label278">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">    </property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkTable" id="table50">
+-			  <property name="visible">True</property>
+-			  <property name="n_rows">3</property>
+-			  <property name="n_columns">2</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="row_spacing">6</property>
+-			  <property name="column_spacing">12</property>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="size_label">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">Si_ze:</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">0</property>
+-			      <property name="bottom_attach">1</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="orientation_label">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">Orientation:</property>
+-			      <property name="use_underline">False</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">1</property>
+-			      <property name="bottom_attach">2</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkComboBox" id="paper_combobox">
+-			      <property name="visible">True</property>
+-			      <property name="items" translatable="yes">DYNAMIC</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">0</property>
+-			      <property name="bottom_attach">1</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkRadioButton" id="orient_p_radiobutton">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">P_ortrait</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">1</property>
+-			      <property name="bottom_attach">2</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkRadioButton" id="orient_l_radiobutton">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">Lan_dscape</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			      <property name="group">orient_p_radiobutton</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">2</property>
+-			      <property name="bottom_attach">3</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">True</property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">True</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-
+-	      <child>
+-		<widget class="GtkVBox" id="vbox129">
+-		  <property name="visible">True</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="spacing">6</property>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="label253">
+-		      <property name="visible">True</property>
+-		      <property name="label" translatable="yes">&lt;b&gt;Pages range&lt;/b&gt;</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">False</property>
+-		      <property name="selectable">False</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">False</property>
+-		      <property name="fill">False</property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkHBox" id="hbox71">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">0</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label254">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">    </property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">False</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0.5</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkTable" id="table49">
+-			  <property name="visible">True</property>
+-			  <property name="n_rows">3</property>
+-			  <property name="n_columns">2</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="row_spacing">6</property>
+-			  <property name="column_spacing">12</property>
+-
+-			  <child>
+-			    <widget class="GtkRadioButton" id="all_pages_radiobutton">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">_All pages</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">0</property>
+-			      <property name="bottom_attach">1</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkRadioButton" id="pages_radiobutton">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">Pa_ges</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			      <property name="group">all_pages_radiobutton</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">2</property>
+-			      <property name="bottom_attach">3</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkHBox" id="hbox49">
+-			      <property name="visible">True</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="spacing">5</property>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label241">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">from:</property>
+-				  <property name="use_underline">False</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0.5</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="from_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">1</property>
+-				  <property name="digits">0</property>
+-				  <property name="numeric">False</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">1 0 100 1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">True</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label242">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">to:</property>
+-				  <property name="use_underline">False</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0.5</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="to_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">1</property>
+-				  <property name="digits">0</property>
+-				  <property name="numeric">False</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">1 0 100 1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">True</property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">1</property>
+-			      <property name="right_attach">2</property>
+-			      <property name="top_attach">2</property>
+-			      <property name="bottom_attach">3</property>
+-			      <property name="y_options">fill</property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkRadioButton" id="selection_radiobutton">
+-			      <property name="visible">True</property>
+-			      <property name="can_focus">True</property>
+-			      <property name="label" translatable="yes">_Selection</property>
+-			      <property name="use_underline">True</property>
+-			      <property name="relief">GTK_RELIEF_NORMAL</property>
+-			      <property name="focus_on_click">True</property>
+-			      <property name="active">False</property>
+-			      <property name="inconsistent">False</property>
+-			      <property name="draw_indicator">True</property>
+-			      <property name="group">all_pages_radiobutton</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="left_attach">0</property>
+-			      <property name="right_attach">1</property>
+-			      <property name="top_attach">1</property>
+-			      <property name="bottom_attach">2</property>
+-			      <property name="x_options">fill</property>
+-			      <property name="y_options"></property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">True</property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-	    </widget>
+-	    <packing>
+-	      <property name="tab_expand">False</property>
+-	      <property name="tab_fill">True</property>
+-	    </packing>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkLabel" id="label249">
+-	      <property name="visible">True</property>
+-	      <property name="label" translatable="yes">General</property>
+-	      <property name="use_underline">False</property>
+-	      <property name="use_markup">False</property>
+-	      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-	      <property name="wrap">False</property>
+-	      <property name="selectable">False</property>
+-	      <property name="xalign">0.5</property>
+-	      <property name="yalign">0.5</property>
+-	      <property name="xpad">0</property>
+-	      <property name="ypad">0</property>
+-	    </widget>
+-	    <packing>
+-	      <property name="type">tab</property>
+-	    </packing>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkVBox" id="vbox144">
+-	      <property name="border_width">12</property>
+-	      <property name="visible">True</property>
+-	      <property name="homogeneous">False</property>
+-	      <property name="spacing">18</property>
+-
+-	      <child>
+-		<widget class="GtkHBox" id="hbox84">
+-		  <property name="visible">True</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="spacing">18</property>
+-
+-		  <child>
+-		    <widget class="GtkVBox" id="vbox137">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">6</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label261">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">&lt;b&gt;Margins (inches)&lt;/b&gt;</property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">True</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkHBox" id="hbox78">
+-			  <property name="visible">True</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="spacing">0</property>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="label271">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">    </property>
+-			      <property name="use_underline">False</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkTable" id="table48">
+-			      <property name="visible">True</property>
+-			      <property name="n_rows">4</property>
+-			      <property name="n_columns">2</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="row_spacing">6</property>
+-			      <property name="column_spacing">12</property>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label238">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">_Bottom:</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				  <property name="mnemonic_widget">bottom_spinbutton</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">0</property>
+-				  <property name="right_attach">1</property>
+-				  <property name="top_attach">1</property>
+-				  <property name="bottom_attach">2</property>
+-				  <property name="x_options">fill</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label239">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">_Left:</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				  <property name="mnemonic_widget">left_spinbutton</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">0</property>
+-				  <property name="right_attach">1</property>
+-				  <property name="top_attach">2</property>
+-				  <property name="bottom_attach">3</property>
+-				  <property name="x_options">fill</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label240">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">_Right:</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				  <property name="mnemonic_widget">right_spinbutton</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">0</property>
+-				  <property name="right_attach">1</property>
+-				  <property name="top_attach">3</property>
+-				  <property name="bottom_attach">4</property>
+-				  <property name="x_options">fill</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkLabel" id="label237">
+-				  <property name="visible">True</property>
+-				  <property name="label" translatable="yes">_Top:</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="use_markup">False</property>
+-				  <property name="justify">GTK_JUSTIFY_CENTER</property>
+-				  <property name="wrap">False</property>
+-				  <property name="selectable">False</property>
+-				  <property name="xalign">0</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				  <property name="mnemonic_widget">top_spinbutton</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">0</property>
+-				  <property name="right_attach">1</property>
+-				  <property name="top_attach">0</property>
+-				  <property name="bottom_attach">1</property>
+-				  <property name="x_options">fill</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="bottom_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">0.1</property>
+-				  <property name="digits">1</property>
+-				  <property name="numeric">True</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">0.6 0 100 0.1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">1</property>
+-				  <property name="right_attach">2</property>
+-				  <property name="top_attach">1</property>
+-				  <property name="bottom_attach">2</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="left_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">0.1</property>
+-				  <property name="digits">1</property>
+-				  <property name="numeric">True</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">0.5 0 100 0.1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">1</property>
+-				  <property name="right_attach">2</property>
+-				  <property name="top_attach">2</property>
+-				  <property name="bottom_attach">3</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="top_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">0.1</property>
+-				  <property name="digits">1</property>
+-				  <property name="numeric">True</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">0.3 0 100 0.1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">1</property>
+-				  <property name="right_attach">2</property>
+-				  <property name="top_attach">0</property>
+-				  <property name="bottom_attach">1</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkSpinButton" id="right_spinbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="climb_rate">0.1</property>
+-				  <property name="digits">1</property>
+-				  <property name="numeric">True</property>
+-				  <property name="update_policy">GTK_UPDATE_ALWAYS</property>
+-				  <property name="snap_to_ticks">False</property>
+-				  <property name="wrap">False</property>
+-				  <property name="adjustment">0.5 0 100 0.1 10 10</property>
+-				</widget>
+-				<packing>
+-				  <property name="left_attach">1</property>
+-				  <property name="right_attach">2</property>
+-				  <property name="top_attach">3</property>
+-				  <property name="bottom_attach">4</property>
+-				  <property name="y_options"></property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">False</property>
+-		      <property name="fill">False</property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkVBox" id="vbox141">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">6</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label272">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">&lt;b&gt;Colors&lt;/b&gt;</property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">True</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkHBox" id="hbox80">
+-			  <property name="visible">True</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="spacing">0</property>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="label273">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">    </property>
+-			      <property name="use_underline">False</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkVBox" id="vbox142">
+-			      <property name="visible">True</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="spacing">6</property>
+-
+-			      <child>
+-				<widget class="GtkRadioButton" id="print_color_radiobutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">C_olor</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkRadioButton" id="print_grayscale_radiobutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">_Grayscale</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				  <property name="group">print_color_radiobutton</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkImage" id="image2">
+-				  <property name="visible">True</property>
+-				  <property name="stock">gtk-select-color</property>
+-				  <property name="icon_size">6</property>
+-				  <property name="xalign">0.5</property>
+-				  <property name="yalign">0.5</property>
+-				  <property name="xpad">0</property>
+-				  <property name="ypad">0</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">True</property>
+-				  <property name="fill">True</property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">False</property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-
+-	      <child>
+-		<widget class="GtkHBox" id="hbox85">
+-		  <property name="visible">True</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="spacing">0</property>
+-
+-		  <child>
+-		    <widget class="GtkVBox" id="vbox140">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">6</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label269">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">&lt;b&gt;Footers&lt;/b&gt;</property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">True</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkHBox" id="hbox77">
+-			  <property name="visible">True</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="spacing">0</property>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="label270">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">    </property>
+-			      <property name="use_underline">False</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkVBox" id="vbox125">
+-			      <property name="visible">True</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="spacing">6</property>
+-
+-			      <child>
+-				<widget class="GtkCheckButton" id="print_page_numbers_checkbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">Page nu_mbers</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkCheckButton" id="print_date_checkbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">_Date</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">True</property>
+-			      <property name="fill">True</property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">True</property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkVBox" id="vbox138">
+-		      <property name="visible">True</property>
+-		      <property name="homogeneous">False</property>
+-		      <property name="spacing">6</property>
+-
+-		      <child>
+-			<widget class="GtkLabel" id="label267">
+-			  <property name="visible">True</property>
+-			  <property name="label" translatable="yes">&lt;b&gt;Headers&lt;/b&gt;</property>
+-			  <property name="use_underline">False</property>
+-			  <property name="use_markup">True</property>
+-			  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			  <property name="wrap">False</property>
+-			  <property name="selectable">False</property>
+-			  <property name="xalign">0</property>
+-			  <property name="yalign">0.5</property>
+-			  <property name="xpad">0</property>
+-			  <property name="ypad">0</property>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">False</property>
+-			  <property name="fill">False</property>
+-			</packing>
+-		      </child>
+-
+-		      <child>
+-			<widget class="GtkHBox" id="hbox76">
+-			  <property name="visible">True</property>
+-			  <property name="homogeneous">False</property>
+-			  <property name="spacing">0</property>
+-
+-			  <child>
+-			    <widget class="GtkLabel" id="label268">
+-			      <property name="visible">True</property>
+-			      <property name="label" translatable="yes">    </property>
+-			      <property name="use_underline">False</property>
+-			      <property name="use_markup">False</property>
+-			      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-			      <property name="wrap">False</property>
+-			      <property name="selectable">False</property>
+-			      <property name="xalign">0.5</property>
+-			      <property name="yalign">0.5</property>
+-			      <property name="xpad">0</property>
+-			      <property name="ypad">0</property>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-
+-			  <child>
+-			    <widget class="GtkVBox" id="vbox124">
+-			      <property name="visible">True</property>
+-			      <property name="homogeneous">False</property>
+-			      <property name="spacing">6</property>
+-
+-			      <child>
+-				<widget class="GtkCheckButton" id="print_page_title_checkbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">P_age Title</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-
+-			      <child>
+-				<widget class="GtkCheckButton" id="print_page_url_checkbutton">
+-				  <property name="visible">True</property>
+-				  <property name="can_focus">True</property>
+-				  <property name="label" translatable="yes">Page _URL</property>
+-				  <property name="use_underline">True</property>
+-				  <property name="relief">GTK_RELIEF_NORMAL</property>
+-				  <property name="focus_on_click">True</property>
+-				  <property name="active">False</property>
+-				  <property name="inconsistent">False</property>
+-				  <property name="draw_indicator">True</property>
+-				</widget>
+-				<packing>
+-				  <property name="padding">0</property>
+-				  <property name="expand">False</property>
+-				  <property name="fill">False</property>
+-				</packing>
+-			      </child>
+-			    </widget>
+-			    <packing>
+-			      <property name="padding">0</property>
+-			      <property name="expand">False</property>
+-			      <property name="fill">False</property>
+-			    </packing>
+-			  </child>
+-			</widget>
+-			<packing>
+-			  <property name="padding">0</property>
+-			  <property name="expand">True</property>
+-			  <property name="fill">True</property>
+-			</packing>
+-		      </child>
+-		    </widget>
+-		    <packing>
+-		      <property name="padding">0</property>
+-		      <property name="expand">True</property>
+-		      <property name="fill">True</property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">True</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-	    </widget>
+-	    <packing>
+-	      <property name="tab_expand">False</property>
+-	      <property name="tab_fill">True</property>
+-	    </packing>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkLabel" id="label276">
+-	      <property name="visible">True</property>
+-	      <property name="label" translatable="yes">Appearance</property>
+-	      <property name="use_underline">False</property>
+-	      <property name="use_markup">False</property>
+-	      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-	      <property name="wrap">False</property>
+-	      <property name="selectable">False</property>
+-	      <property name="xalign">0.5</property>
+-	      <property name="yalign">0.5</property>
+-	      <property name="xpad">0</property>
+-	      <property name="ypad">0</property>
+-	    </widget>
+-	    <packing>
+-	      <property name="type">tab</property>
+-	    </packing>
+-	  </child>
+-	</widget>
+-	<packing>
+-	  <property name="padding">0</property>
+-	  <property name="expand">True</property>
+-	  <property name="fill">True</property>
+-	</packing>
+-      </child>
+-    </widget>
+-  </child>
+-</widget>
+-
+-<widget class="GtkDialog" id="print_progress_dialog">
+-  <property name="border_width">7</property>
+-  <property name="title" translatable="yes">Printing...</property>
+-  <property name="type">GTK_WINDOW_TOPLEVEL</property>
+-  <property name="window_position">GTK_WIN_POS_NONE</property>
+-  <property name="modal">True</property>
+-  <property name="resizable">True</property>
+-  <property name="destroy_with_parent">True</property>
+-  <property name="decorated">True</property>
+-  <property name="skip_taskbar_hint">False</property>
+-  <property name="skip_pager_hint">False</property>
+-  <property name="type_hint">GDK_WINDOW_TYPE_HINT_DIALOG</property>
+-  <property name="gravity">GDK_GRAVITY_NORTH_WEST</property>
+-  <property name="has_separator">False</property>
+-
+-  <child internal-child="vbox">
+-    <widget class="GtkVBox" id="dialog-vbox1">
+-      <property name="visible">True</property>
+-      <property name="homogeneous">False</property>
+-      <property name="spacing">12</property>
+-
+-      <child internal-child="action_area">
+-	<widget class="GtkHButtonBox" id="dialog-action_area1">
+-	  <property name="layout_style">GTK_BUTTONBOX_END</property>
+-	</widget>
+-	<packing>
+-	  <property name="padding">0</property>
+-	  <property name="expand">False</property>
+-	  <property name="fill">True</property>
+-	  <property name="pack_type">GTK_PACK_END</property>
+-	</packing>
+-      </child>
+-
+-      <child>
+-	<widget class="GtkHBox" id="hbox1">
+-	  <property name="border_width">5</property>
+-	  <property name="visible">True</property>
+-	  <property name="homogeneous">False</property>
+-	  <property name="spacing">12</property>
+-
+-	  <child>
+-	    <widget class="GtkImage" id="image1">
+-	      <property name="visible">True</property>
+-	      <property name="stock">gtk-print</property>
+-	      <property name="icon_size">6</property>
+-	      <property name="xalign">0.5</property>
+-	      <property name="yalign">0</property>
+-	      <property name="xpad">0</property>
+-	      <property name="ypad">0</property>
+-	    </widget>
+-	    <packing>
+-	      <property name="padding">0</property>
+-	      <property name="expand">False</property>
+-	      <property name="fill">True</property>
+-	    </packing>
+-	  </child>
+-
+-	  <child>
+-	    <widget class="GtkVBox" id="vbox1">
+-	      <property name="visible">True</property>
+-	      <property name="homogeneous">False</property>
+-	      <property name="spacing">12</property>
+-
+-	      <child>
+-		<widget class="GtkLabel" id="label1">
+-		  <property name="visible">True</property>
+-		  <property name="label" translatable="yes">&lt;span weight=&quot;bold&quot; size=&quot;larger&quot;&gt;Printing...&lt;/span&gt;</property>
+-		  <property name="use_underline">False</property>
+-		  <property name="use_markup">True</property>
+-		  <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		  <property name="wrap">False</property>
+-		  <property name="selectable">False</property>
+-		  <property name="xalign">0</property>
+-		  <property name="yalign">0.5</property>
+-		  <property name="xpad">0</property>
+-		  <property name="ypad">0</property>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">False</property>
+-		</packing>
+-	      </child>
+-
+-	      <child>
+-		<widget class="GtkTable" id="table1">
+-		  <property name="visible">True</property>
+-		  <property name="n_rows">2</property>
+-		  <property name="n_columns">2</property>
+-		  <property name="homogeneous">False</property>
+-		  <property name="row_spacing">6</property>
+-		  <property name="column_spacing">12</property>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="label2">
+-		      <property name="visible">True</property>
+-		      <property name="label" translatable="yes">&lt;b&gt;Document:&lt;/b&gt;</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">False</property>
+-		      <property name="selectable">False</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="left_attach">0</property>
+-		      <property name="right_attach">1</property>
+-		      <property name="top_attach">0</property>
+-		      <property name="bottom_attach">1</property>
+-		      <property name="x_options">fill</property>
+-		      <property name="y_options"></property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="destination_label">
+-		      <property name="visible">True</property>
+-		      <property name="label" translatable="yes">DYNAMIC</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">False</property>
+-		      <property name="selectable">False</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="left_attach">0</property>
+-		      <property name="right_attach">1</property>
+-		      <property name="top_attach">1</property>
+-		      <property name="bottom_attach">2</property>
+-		      <property name="x_options">fill</property>
+-		      <property name="y_options"></property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="document">
+-		      <property name="visible">True</property>
+-		      <property name="can_focus">True</property>
+-		      <property name="label" translatable="yes">DYNAMIC</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">True</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">True</property>
+-		      <property name="selectable">True</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="left_attach">1</property>
+-		      <property name="right_attach">2</property>
+-		      <property name="top_attach">0</property>
+-		      <property name="bottom_attach">1</property>
+-		      <property name="y_options"></property>
+-		    </packing>
+-		  </child>
+-
+-		  <child>
+-		    <widget class="GtkLabel" id="destination">
+-		      <property name="visible">True</property>
+-		      <property name="can_focus">True</property>
+-		      <property name="label" translatable="yes">DYNAMIC</property>
+-		      <property name="use_underline">False</property>
+-		      <property name="use_markup">False</property>
+-		      <property name="justify">GTK_JUSTIFY_LEFT</property>
+-		      <property name="wrap">True</property>
+-		      <property name="selectable">True</property>
+-		      <property name="xalign">0</property>
+-		      <property name="yalign">0.5</property>
+-		      <property name="xpad">0</property>
+-		      <property name="ypad">0</property>
+-		    </widget>
+-		    <packing>
+-		      <property name="left_attach">1</property>
+-		      <property name="right_attach">2</property>
+-		      <property name="top_attach">1</property>
+-		      <property name="bottom_attach">2</property>
+-		      <property name="y_options"></property>
+-		    </packing>
+-		  </child>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">True</property>
+-		</packing>
+-	      </child>
+-
+-	      <child>
+-		<widget class="GtkProgressBar" id="progressbar">
+-		  <property name="visible">True</property>
+-		  <property name="orientation">GTK_PROGRESS_LEFT_TO_RIGHT</property>
+-		  <property name="fraction">0</property>
+-		  <property name="pulse_step">0.1</property>
+-		  <property name="text" translatable="yes"></property>
+-		</widget>
+-		<packing>
+-		  <property name="padding">0</property>
+-		  <property name="expand">False</property>
+-		  <property name="fill">False</property>
+-		</packing>
+-	      </child>
+-	    </widget>
+-	    <packing>
+-	      <property name="padding">0</property>
+-	      <property name="expand">True</property>
+-	      <property name="fill">True</property>
+-	    </packing>
+-	  </child>
+-	</widget>
+-	<packing>
+-	  <property name="padding">0</property>
+-	  <property name="expand">True</property>
+-	  <property name="fill">True</property>
+-	</packing>
+-      </child>
+-
+-      <child>
+-	<widget class="GtkHBox" id="hbox2">
+-	  <property name="visible">True</property>
+-	  <property name="homogeneous">False</property>
+-	  <property name="spacing">0</property>
+-
+-	  <child>
+-	    <placeholder/>
+-	  </child>
+-	</widget>
+-	<packing>
+-	  <property name="padding">0</property>
+-	  <property name="expand">True</property>
+-	  <property name="fill">True</property>
+-	</packing>
+-      </child>
+-    </widget>
+-  </child>
+-</widget>
+-
+-</glade-interface>
+diff -urN galeon-2.0.7.orig/ui/print-tab.xml galeon-2.0.7/ui/print-tab.xml
+--- galeon-2.0.7.orig/ui/print-tab.xml	1970-01-01 01:00:00.000000000 +0100
++++ galeon-2.0.7/ui/print-tab.xml	2009-02-15 09:39:07.000000000 +0100
+@@ -0,0 +1,431 @@
++<?xml version="1.0"?>
++<!--*- mode: xml -*-->
++<interface>
++      <object class="GtkVBox" id="custom_tab_container">
++        <property name="border_width">12</property>
++        <property name="visible">True</property>
++        <property name="homogeneous">False</property>
++        <property name="spacing">18</property>
++        <child>
++          <object class="GtkVBox" id="frame_box">
++            <property name="visible">True</property>
++            <property name="sensitive">False</property>
++            <property name="homogeneous">False</property>
++            <property name="spacing">6</property>
++            <child>
++              <object class="GtkLabel" id="label273">
++                <property name="visible">True</property>
++                <property name="label" translatable="yes">&lt;b&gt;Frames&lt;/b&gt;</property>
++                <property name="use_underline">False</property>
++                <property name="use_markup">True</property>
++                <property name="justify">GTK_JUSTIFY_LEFT</property>
++                <property name="wrap">False</property>
++                <property name="selectable">False</property>
++                <property name="xalign">0</property>
++                <property name="yalign">0.5</property>
++                <property name="xpad">0</property>
++                <property name="ypad">0</property>
++                <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++                <property name="width_chars">-1</property>
++                <property name="single_line_mode">False</property>
++                <property name="angle">0</property>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">False</property>
++                <property name="fill">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkAlignment" id="alignment5">
++                <property name="visible">True</property>
++                <property name="xalign">0.5</property>
++                <property name="yalign">0.5</property>
++                <property name="xscale">1</property>
++                <property name="yscale">1</property>
++                <property name="top_padding">0</property>
++                <property name="bottom_padding">0</property>
++                <property name="left_padding">12</property>
++                <property name="right_padding">0</property>
++                <child>
++                  <object class="GtkVBox" id="vbox144">
++                    <property name="visible">True</property>
++                    <property name="homogeneous">False</property>
++                    <property name="spacing">6</property>
++                    <child>
++                      <object class="GtkRadioButton" id="print_frames_normal">
++                        <property name="visible">True</property>
++                        <property name="can_focus">True</property>
++                        <property name="label" translatable="yes">As laid out on the _screen</property>
++                        <property name="use_underline">True</property>
++                        <property name="relief">GTK_RELIEF_NORMAL</property>
++                        <property name="focus_on_click">True</property>
++                        <property name="active">False</property>
++                        <property name="inconsistent">False</property>
++                        <property name="draw_indicator">True</property>
++                      </object>
++                      <packing>
++                        <property name="padding">0</property>
++                        <property name="expand">False</property>
++                        <property name="fill">False</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkRadioButton" id="print_frames_selected">
++                        <property name="visible">True</property>
++                        <property name="can_focus">True</property>
++                        <property name="label" translatable="yes">O_nly the selected frame</property>
++                        <property name="use_underline">True</property>
++                        <property name="relief">GTK_RELIEF_NORMAL</property>
++                        <property name="focus_on_click">True</property>
++                        <property name="active">False</property>
++                        <property name="inconsistent">False</property>
++                        <property name="draw_indicator">True</property>
++                        <property name="group">print_frames_normal</property>
++                      </object>
++                      <packing>
++                        <property name="padding">0</property>
++                        <property name="expand">False</property>
++                        <property name="fill">False</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkRadioButton" id="print_frames_separately">
++                        <property name="visible">True</property>
++                        <property name="can_focus">True</property>
++                        <property name="label" translatable="yes">_Each frame separately</property>
++                        <property name="use_underline">True</property>
++                        <property name="relief">GTK_RELIEF_NORMAL</property>
++                        <property name="focus_on_click">True</property>
++                        <property name="active">False</property>
++                        <property name="inconsistent">False</property>
++                        <property name="draw_indicator">True</property>
++                        <property name="group">print_frames_normal</property>
++                      </object>
++                      <packing>
++                        <property name="padding">0</property>
++                        <property name="expand">False</property>
++                        <property name="fill">False</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">True</property>
++                <property name="fill">True</property>
++              </packing>
++            </child>
++          </object>
++          <packing>
++            <property name="padding">0</property>
++            <property name="expand">False</property>
++            <property name="fill">False</property>
++          </packing>
++        </child>
++        <child>
++          <object class="GtkVBox" id="vbox141">
++            <property name="visible">True</property>
++            <property name="homogeneous">False</property>
++            <property name="spacing">6</property>
++            <child>
++              <object class="GtkLabel" id="label272">
++                <property name="visible">True</property>
++                <property name="label" translatable="yes">&lt;b&gt;Background&lt;/b&gt;</property>
++                <property name="use_underline">False</property>
++                <property name="use_markup">True</property>
++                <property name="justify">GTK_JUSTIFY_LEFT</property>
++                <property name="wrap">False</property>
++                <property name="selectable">False</property>
++                <property name="xalign">0</property>
++                <property name="yalign">0.5</property>
++                <property name="xpad">0</property>
++                <property name="ypad">0</property>
++                <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++                <property name="width_chars">-1</property>
++                <property name="single_line_mode">False</property>
++                <property name="angle">0</property>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">False</property>
++                <property name="fill">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkAlignment" id="alignment4">
++                <property name="visible">True</property>
++                <property name="xalign">0.5</property>
++                <property name="yalign">0.5</property>
++                <property name="xscale">1</property>
++                <property name="yscale">1</property>
++                <property name="top_padding">0</property>
++                <property name="bottom_padding">0</property>
++                <property name="left_padding">12</property>
++                <property name="right_padding">0</property>
++                <child>
++                  <object class="GtkVBox" id="vbox142">
++                    <property name="visible">True</property>
++                    <property name="homogeneous">False</property>
++                    <property name="spacing">6</property>
++                    <child>
++                      <object class="GtkCheckButton" id="print_bg_colors_checkbutton">
++                        <property name="visible">True</property>
++                        <property name="can_focus">True</property>
++                        <property name="label" translatable="yes">Print background c_olors</property>
++                        <property name="use_underline">True</property>
++                        <property name="relief">GTK_RELIEF_NORMAL</property>
++                        <property name="focus_on_click">True</property>
++                        <property name="active">False</property>
++                        <property name="inconsistent">False</property>
++                        <property name="draw_indicator">True</property>
++                      </object>
++                      <packing>
++                        <property name="padding">0</property>
++                        <property name="expand">False</property>
++                        <property name="fill">False</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkCheckButton" id="print_bg_images_checkbutton">
++                        <property name="visible">True</property>
++                        <property name="can_focus">True</property>
++                        <property name="label" translatable="yes">Print background i_mages</property>
++                        <property name="use_underline">True</property>
++                        <property name="relief">GTK_RELIEF_NORMAL</property>
++                        <property name="focus_on_click">True</property>
++                        <property name="active">False</property>
++                        <property name="inconsistent">False</property>
++                        <property name="draw_indicator">True</property>
++                      </object>
++                      <packing>
++                        <property name="padding">0</property>
++                        <property name="expand">False</property>
++                        <property name="fill">False</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">True</property>
++                <property name="fill">True</property>
++              </packing>
++            </child>
++          </object>
++          <packing>
++            <property name="padding">0</property>
++            <property name="expand">False</property>
++            <property name="fill">False</property>
++          </packing>
++        </child>
++        <child>
++          <object class="GtkHBox" id="hbox1">
++            <property name="visible">True</property>
++            <property name="homogeneous">False</property>
++            <property name="spacing">18</property>
++            <child>
++              <object class="GtkVBox" id="vbox140">
++                <property name="visible">True</property>
++                <property name="homogeneous">False</property>
++                <property name="spacing">6</property>
++                <child>
++                  <object class="GtkLabel" id="label269">
++                    <property name="visible">True</property>
++                    <property name="label" translatable="yes">&lt;b&gt;Footers&lt;/b&gt;</property>
++                    <property name="use_underline">False</property>
++                    <property name="use_markup">True</property>
++                    <property name="justify">GTK_JUSTIFY_LEFT</property>
++                    <property name="wrap">False</property>
++                    <property name="selectable">False</property>
++                    <property name="xalign">0</property>
++                    <property name="yalign">0.5</property>
++                    <property name="xpad">0</property>
++                    <property name="ypad">0</property>
++                    <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++                    <property name="width_chars">-1</property>
++                    <property name="single_line_mode">False</property>
++                    <property name="angle">0</property>
++                  </object>
++                  <packing>
++                    <property name="padding">0</property>
++                    <property name="expand">False</property>
++                    <property name="fill">False</property>
++                  </packing>
++                </child>
++                <child>
++                  <object class="GtkAlignment" id="alignment2">
++                    <property name="visible">True</property>
++                    <property name="xalign">0.5</property>
++                    <property name="yalign">0.5</property>
++                    <property name="xscale">1</property>
++                    <property name="yscale">1</property>
++                    <property name="top_padding">0</property>
++                    <property name="bottom_padding">0</property>
++                    <property name="left_padding">12</property>
++                    <property name="right_padding">0</property>
++                    <child>
++                      <object class="GtkVBox" id="vbox125">
++                        <property name="visible">True</property>
++                        <property name="homogeneous">False</property>
++                        <property name="spacing">6</property>
++                        <child>
++                          <object class="GtkCheckButton" id="print_page_numbers_checkbutton">
++                            <property name="visible">True</property>
++                            <property name="can_focus">True</property>
++                            <property name="label" translatable="yes">Page _numbers</property>
++                            <property name="use_underline">True</property>
++                            <property name="relief">GTK_RELIEF_NORMAL</property>
++                            <property name="focus_on_click">True</property>
++                            <property name="active">False</property>
++                            <property name="inconsistent">False</property>
++                            <property name="draw_indicator">True</property>
++                          </object>
++                          <packing>
++                            <property name="padding">0</property>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                          </packing>
++                        </child>
++                        <child>
++                          <object class="GtkCheckButton" id="print_date_checkbutton">
++                            <property name="visible">True</property>
++                            <property name="can_focus">True</property>
++                            <property name="label" translatable="yes">_Date</property>
++                            <property name="use_underline">True</property>
++                            <property name="relief">GTK_RELIEF_NORMAL</property>
++                            <property name="focus_on_click">True</property>
++                            <property name="active">False</property>
++                            <property name="inconsistent">False</property>
++                            <property name="draw_indicator">True</property>
++                          </object>
++                          <packing>
++                            <property name="padding">0</property>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                          </packing>
++                        </child>
++                      </object>
++                    </child>
++                  </object>
++                  <packing>
++                    <property name="padding">0</property>
++                    <property name="expand">False</property>
++                    <property name="fill">False</property>
++                  </packing>
++                </child>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">False</property>
++                <property name="fill">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkVBox" id="vbox138">
++                <property name="visible">True</property>
++                <property name="homogeneous">False</property>
++                <property name="spacing">6</property>
++                <child>
++                  <object class="GtkLabel" id="label267">
++                    <property name="visible">True</property>
++                    <property name="label" translatable="yes">&lt;b&gt;Headers&lt;/b&gt;</property>
++                    <property name="use_underline">False</property>
++                    <property name="use_markup">True</property>
++                    <property name="justify">GTK_JUSTIFY_LEFT</property>
++                    <property name="wrap">False</property>
++                    <property name="selectable">False</property>
++                    <property name="xalign">0</property>
++                    <property name="yalign">0.5</property>
++                    <property name="xpad">0</property>
++                    <property name="ypad">0</property>
++                    <property name="ellipsize">PANGO_ELLIPSIZE_NONE</property>
++                    <property name="width_chars">-1</property>
++                    <property name="single_line_mode">False</property>
++                    <property name="angle">0</property>
++                  </object>
++                  <packing>
++                    <property name="padding">0</property>
++                    <property name="expand">False</property>
++                    <property name="fill">False</property>
++                  </packing>
++                </child>
++                <child>
++                  <object class="GtkAlignment" id="alignment3">
++                    <property name="visible">True</property>
++                    <property name="xalign">0.5</property>
++                    <property name="yalign">0.5</property>
++                    <property name="xscale">1</property>
++                    <property name="yscale">1</property>
++                    <property name="top_padding">0</property>
++                    <property name="bottom_padding">0</property>
++                    <property name="left_padding">12</property>
++                    <property name="right_padding">0</property>
++                    <child>
++                      <object class="GtkVBox" id="vbox124">
++                        <property name="visible">True</property>
++                        <property name="homogeneous">False</property>
++                        <property name="spacing">6</property>
++                        <child>
++                          <object class="GtkCheckButton" id="print_page_title_checkbutton">
++                            <property name="visible">True</property>
++                            <property name="can_focus">True</property>
++                            <property name="label" translatable="yes">P_age title</property>
++                            <property name="use_underline">True</property>
++                            <property name="relief">GTK_RELIEF_NORMAL</property>
++                            <property name="focus_on_click">True</property>
++                            <property name="active">False</property>
++                            <property name="inconsistent">False</property>
++                            <property name="draw_indicator">True</property>
++                          </object>
++                          <packing>
++                            <property name="padding">0</property>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                          </packing>
++                        </child>
++                        <child>
++                          <object class="GtkCheckButton" id="print_page_url_checkbutton">
++                            <property name="visible">True</property>
++                            <property name="can_focus">True</property>
++                            <property name="label" translatable="yes">_Page address</property>
++                            <property name="use_underline">True</property>
++                            <property name="relief">GTK_RELIEF_NORMAL</property>
++                            <property name="focus_on_click">True</property>
++                            <property name="active">False</property>
++                            <property name="inconsistent">False</property>
++                            <property name="draw_indicator">True</property>
++                          </object>
++                          <packing>
++                            <property name="padding">0</property>
++                            <property name="expand">False</property>
++                            <property name="fill">False</property>
++                          </packing>
++                        </child>
++                      </object>
++                    </child>
++                  </object>
++                  <packing>
++                    <property name="padding">0</property>
++                    <property name="expand">True</property>
++                    <property name="fill">True</property>
++                  </packing>
++                </child>
++              </object>
++              <packing>
++                <property name="padding">0</property>
++                <property name="expand">False</property>
++                <property name="fill">False</property>
++              </packing>
++            </child>
++          </object>
++          <packing>
++            <property name="padding">0</property>
++            <property name="expand">False</property>
++            <property name="fill">False</property>
++          </packing>
++        </child>
++      </object>
++</interface>
+diff -urN galeon-2.0.7.orig/utils/gul-gui.c galeon-2.0.7/utils/gul-gui.c
+--- galeon-2.0.7.orig/utils/gul-gui.c	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/utils/gul-gui.c	2009-02-15 09:39:07.000000000 +0100
+@@ -801,3 +801,21 @@
+ 		g_error_free (error);
+ 	}
+ }
++
++static void
++checkbutton_toggled_cb (GtkToggleButton *button,
++                        const char *pref)
++{
++        eel_gconf_set_boolean (pref, gtk_toggle_button_get_active (button));
++}
++
++
++void
++gul_gui_connect_checkbutton_to_gconf (GtkWidget *widget,
++                                      const char *pref)
++{
++	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (widget),
++                                      eel_gconf_get_boolean (pref));
++	g_signal_connect (widget, "toggled",
++			  G_CALLBACK (checkbutton_toggled_cb), (gpointer) pref);
++}
+diff -urN galeon-2.0.7.orig/utils/gul-gui.h galeon-2.0.7/utils/gul-gui.h
+--- galeon-2.0.7.orig/utils/gul-gui.h	2008-07-04 18:30:58.000000000 +0200
++++ galeon-2.0.7/utils/gul-gui.h	2009-02-15 09:39:07.000000000 +0100
+@@ -102,6 +102,8 @@
+ void            gul_gui_help                           (GtkWindow* parent,
+ 							const char *file,
+ 							const char *link_id);
++void            gul_gui_connect_checkbutton_to_gconf   (GtkWidget *widget,
++                                                        const char *pref);
+ G_END_DECLS
+ 
+ #endif
