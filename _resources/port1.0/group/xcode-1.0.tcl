@@ -264,6 +264,18 @@ proc xcode::get_build_args {args} {
     # SDKROOT
     append xcode_build_args " SDKROOT=\"${configure.sdkroot}\""
 
+    # GCC_VERSION
+    switch -- [option configure.compiler] {
+        gcc-3.3 {set gcc_version 3.3}
+        gcc-4.0 {set gcc_version 4.0}
+        gcc-4.2 {set gcc_version 4.2}
+        llvm-gcc-4.2 {set gcc_version com.apple.compilers.llvmgcc42}
+        clang {set gcc_version com.apple.compilers.llvm.clang.1_0}
+    }
+    if {[info exists gcc_version]} {
+        append xcode_build_args " GCC_VERSION=${gcc_version}"
+    }
+
     return $xcode_build_args
 }
 
