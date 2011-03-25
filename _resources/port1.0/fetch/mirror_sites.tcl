@@ -189,7 +189,7 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
     ftp://ftp.kddlabs.co.jp/pub/gnu/old-gnu/
     ftp://ftp.dti.ad.jp/pub/GNU/
-    ftp://ftp.informatik.hu-berlin.de/pub/gnu/
+    ftp://ftp.informatik.hu-berlin.de/pub/gnu/gnu/
     ftp://ftp.lip6.fr/pub/gnu/
     ftp://ftp.chg.ru/pub/gnu/
     http://mirror.internode.on.net/pub/gnu/
