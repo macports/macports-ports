@@ -38,7 +38,7 @@ tmpdir="create-dylib.${$}"
 liba=${1}
 version=${2}
 libdir=${3}
-if [ -z ${CC} ]; then
+if [ -z "${CC}" ]; then
 	CC=gcc
 fi
 if [ -z ${AR} ]; then
