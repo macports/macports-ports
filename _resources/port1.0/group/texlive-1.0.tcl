@@ -256,11 +256,20 @@ proc texlive.texmfport {} {
                     "$fmtprefix$fmtname\t$fmtengine\t$fmtpatterns\t$fmtoptions"
 
                 # Simulate texlinks
-                if {($fmtengine != $fmtname) &&
-                    ![file exists ${destroot}${prefix}/bin/$fmtname]} {
-                    ln -s ${prefix}/bin/$fmtengine \
+                if {![file exists ${destroot}${prefix}/bin/$fmtname]} {
+                    # Decide what to link. Use the specified engine
+                    # unless a binary with the same name as the
+                    # program exists (this can happen for metafont;
+                    # see #28890)
+                    if {[file exists ${texlive_bindir}/$fmtname]} {
+                        set linksource ${texlive_bindir}/$fmtname
+                    } else {
+                        set linksource ${prefix}/bin/$fmtengine
+                    }
+                    
+                    ln -s $linksource \
                         ${destroot}${prefix}/bin/$fmtname
-                    ln -s ${prefix}/bin/$fmtengine \
+                    ln -s $linksource \
                         ${destroot}${texlive_mactex_texbindir}/$fmtname
                 }
             }
