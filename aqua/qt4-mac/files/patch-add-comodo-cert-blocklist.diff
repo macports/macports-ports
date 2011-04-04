@@ -1,0 +1,85 @@
+--- src/network/ssl/qsslcertificate.cpp.orig	2011-04-02 15:06:01.000000000 -0400
++++ src/network/ssl/qsslcertificate.cpp	2011-04-02 15:15:19.000000000 -0400
+@@ -219,17 +219,18 @@
+     Returns true if this certificate is valid; otherwise returns
+     false.
+ 
+-    Note: Currently, this function only checks that the current
+-    data-time is within the date-time range during which the
+-    certificate is considered valid. No other checks are
+-    currently performed.
++    Note: Currently, this function checks that the current
++    certificate is considered valid, and checks that the
++    certificate is not in a blocklist of fraudulent certificates.
+ 
+     \sa isNull()
+ */
+ bool QSslCertificate::isValid() const
+ {
+     const QDateTime currentTime = QDateTime::currentDateTime();
+-    return currentTime >= d->notValidBefore && currentTime <= d->notValidAfter;
++    return currentTime >= d->notValidBefore &&
++      currentTime <= d->notValidAfter &&
++      ! QSslCertificatePrivate::isBlocklisted(*this);
+ }
+ 
+ /*!
+@@ -798,6 +799,31 @@
+     return certificates;
+ }
+ 
++// These certificates are known to be fraudulent and were created
++// during the comodo compromise. See
++// http://www.comodo.com/Comodo-Fraud-Incident-2011-03-23.html
++static const char *certificate_blocklist[] = {
++  "04:7e:cb:e9:fc:a5:5f:7b:d0:9e:ae:36:e1:0c:ae:1e",
++  "f5:c8:6a:f3:61:62:f1:3a:64:f5:4f:6d:c9:58:7c:06",
++  "d7:55:8f:da:f5:f1:10:5b:b2:13:28:2b:70:77:29:a3",
++  "39:2a:43:4f:0e:07:df:1f:8a:a3:05:de:34:e0:c2:29",
++  "3e:75:ce:d4:6b:69:30:21:21:88:30:ae:86:a8:2a:71",
++  "e9:02:8b:95:78:e4:15:dc:1a:71:0a:2b:88:15:44:47",
++  "92:39:d5:34:8f:40:d1:69:5a:74:54:70:e1:f2:3f:43",
++  "b0:b7:13:3e:d0:96:f9:b5:6f:ae:91:c8:74:bd:3a:c0",
++  "d8:f3:5f:4e:b7:87:2b:2d:ab:06:92:e3:15:38:2f:b0",
++  0
++};
++
++bool QSslCertificatePrivate::isBlocklisted(const QSslCertificate &certificate)
++{
++  for (int a = 0; certificate_blocklist[a] != 0; a++) {
++    if (certificate.serialNumber() == certificate_blocklist[a])
++      return true;
++  }
++  return false;
++}
++
+ #ifndef QT_NO_DEBUG_STREAM
+ QDebug operator<<(QDebug debug, const QSslCertificate &certificate)
+ {
+--- src/network/ssl/qsslcertificate_p.h.orig	2011-04-02 15:06:20.000000000 -0400
++++ src/network/ssl/qsslcertificate_p.h	2011-04-02 15:14:55.000000000 -0400
+@@ -96,6 +96,7 @@
+     static QSslCertificate QSslCertificate_from_X509(X509 *x509);
+     static QList<QSslCertificate> certificatesFromPem(const QByteArray &pem, int count = -1);
+     static QList<QSslCertificate> certificatesFromDer(const QByteArray &der, int count = -1);
++    static bool isBlocklisted(const QSslCertificate &certificate);
+ 
+     friend class QSslSocketBackendPrivate;
+ 
+--- src/network/ssl/qsslsocket_openssl.cpp.orig	2011-04-02 15:06:39.000000000 -0400
++++ src/network/ssl/qsslsocket_openssl.cpp	2011-04-02 15:14:50.000000000 -0400
+@@ -1184,6 +1184,14 @@
+     configuration.peerCertificate = QSslCertificatePrivate::QSslCertificate_from_X509(x509);
+     q_X509_free(x509);
+ 
++    if (QSslCertificatePrivate::isBlocklisted(configuration.peerCertificate)) {
++      q->setErrorString(QSslSocket::tr("The peer certificate is blocklisted"));
++      q->setSocketError(QAbstractSocket::SslHandshakeFailedError);
++      emit q->error(QAbstractSocket::SslHandshakeFailedError);
++      plainSocket->disconnectFromHost();
++      return false;
++    }
++
+     // Start translating errors.
+     QList<QSslError> errors;
+     bool doVerifyPeer = configuration.peerVerifyMode == QSslSocket::VerifyPeer
