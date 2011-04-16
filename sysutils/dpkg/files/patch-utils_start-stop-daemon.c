@@ -28,48 +28,22 @@
  	/* Let's try this to see if it works */
  	if (execname && !pid_is_cmd(pid, execname))
  		return;
-@@ -931,7 +934,6 @@
- {
- 	kvm_t *kd;
- 	int nentries; /* Value not used */
--	uid_t proc_uid;
- 	struct kinfo_proc *kp;
- 	char errbuf[_POSIX2_LINE_MAX];
- 
-@@ -941,32 +944,8 @@
- 	kp = kvm_getprocs(kd, KERN_PROC_PID, pid, &nentries);
- 	if (kp == NULL)
- 		errx(1, "%s", kvm_geterr(kd));
--	if (kp->kp_proc.p_cred)
--		kvm_read(kd, (u_long)&(kp->kp_proc.p_cred->p_ruid),
--		         &proc_uid, sizeof(uid_t));
--	else
--		return 0;
--	return (proc_uid == (uid_t)uid);
--}
--
--static int
--pid_is_exec(pid_t pid, const char *name)
--{
--	kvm_t *kd;
--	int nentries;
--	struct kinfo_proc *kp;
--	char errbuf[_POSIX2_LINE_MAX], *pidexec;
- 
--	kd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, errbuf);
--	if (kd == NULL)
--		errx(1, "%s", errbuf);
--	kp = kvm_getprocs(kd, KERN_PROC_PID, pid, &nentries);
--	if (kp == NULL)
--		errx(1, "%s", kvm_geterr(kd));
--	pidexec = (&kp->kp_proc)->p_comm;
--	if (strlen(name) != strlen(pidexec))
--		return 0;
--	return (strcmp(name, pidexec) == 0) ? 1 : 0;
-+	return (kp->ki_uid == (uid_t)uid);
+@@ -882,6 +882,7 @@
  }
+ #endif /* OSHURD */
  
- static void
++#if defined(OSOpenBSD) || defined(OSFreeBSD) || defined(OSNetBSD)
+ #ifdef HAVE_KVM_H
+ static int
+ pid_is_cmd(pid_t pid, const char *name)
+@@ -974,6 +975,7 @@
+ {
+ 	/* Nothing to do */
+ }
++#endif
+ #endif /* OSOpenBSD */
+ 
+ #if defined(OShpux)
 @@ -975,6 +954,80 @@
  	/* Nothing to do */
  }
