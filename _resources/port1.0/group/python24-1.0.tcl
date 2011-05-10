@@ -50,10 +50,32 @@ dist_subdir		python
 
 depends_lib		port:python24
 
+# we want the default universal variant added despite not using configure
 use_configure	no
+universal_variant yes
 
 build.cmd		${python.bin} setup.py
 build.target	build
+options python.add_archflags
+default python.add_archflags yes
+pre-build {
+    if {${python.add_archflags}} {
+        if {[variant_exists universal] && [variant_isset universal]} {
+            build.env-append CFLAGS="${configure.universal_cflags}" \
+                             OBJCFLAGS="${configure.universal_cflags}" \
+                             CXXFLAGS="${configure.universal_cxxflags}" \
+                             LDFLAGS="${configure.universal_ldflags}"
+        } else {
+            build.env-append CFLAGS="${configure.cc_archflags}" \
+                             OBJCFLAGS="${configure.objc_archflags}" \
+                             CXXFLAGS="${configure.cxx_archflags}" \
+                             FFLAGS="${configure.f77_archflags}" \
+                             F90FLAGS="${configure.f90_archflags}" \
+                             FCFLAGS="${configure.fc_archflags}" \
+                             LDFLAGS="${configure.ld_archflags}"
+        }
+    }
+}
 
 destroot.cmd	${python.bin} setup.py
 destroot.destdir	--prefix=${prefix} --root=${destroot}
