@@ -57,6 +57,7 @@ platform macosx {
             if {${darwin_major} == ${os.major}} {
                 if {[rpm-vercomp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
                     ui_error "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
+                    ui_error "See http://guide.macports.org/chunked/installing.xcode.html for download links."
                     return -code error "incompatible Xcode version"
                 }
             }
