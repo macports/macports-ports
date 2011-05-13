@@ -5,7 +5,7 @@
 categories      devel lang
 homepage        http://www.swig.org/
 platforms       darwin
-master_sites    sourceforge
+master_sites    sourceforge:swig
 default distname        {swig-${version}}
 dist_subdir     swig
 
