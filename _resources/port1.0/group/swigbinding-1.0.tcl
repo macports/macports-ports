@@ -30,7 +30,7 @@ proc swigbinding-setup {lang prettyname} {
     # we can't have each port just pass in its info for this stuff, since we
     # have to turn all other bindings off as well as turning this one on
     array set bindings { \
-        python      {port:python_select     python=${prefix}/bin/python} \
+        python      {port:python_select     python} \
         perl        {path:bin/perl:perl5    perl5=${prefix}/bin/perl} \
         gcj         {port:gcc44             "gcj=${prefix}/bin/gcj-mp-4.4 --with-gcjh=${prefix}/bin/gcjh-mp-4.4"} \
         guile       {port:guile             guile} \
