@@ -56,11 +56,11 @@ proc pure.setup {module version} {
     use_parallel_build          yes
     pre-build {
         build.args-append       CC=${configure.cc} \
-                                CFLAGS="${configure.cflags}" \
+                                CFLAGS="${configure.cflags} ${configure.cc_archflags}" \
                                 CPPFLAGS="${configure.cppflags}" \
                                 CXX=${configure.cxx} \
-                                CXXFLAGS="${configure.cxxflags}" \
-                                LDFLAGS="${configure.ldflags}"
+                                CXXFLAGS="${configure.cxxflags} ${configure.cxx_archflags}" \
+                                LDFLAGS="${configure.ldflags} ${configure.ld_archflags}"
     }
     
     post-destroot {
