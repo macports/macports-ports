@@ -61,7 +61,7 @@ pre-configure {
             -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
     }
     configure.universal_args-append \
-        -DCMAKE_OSX_ARCHITECTURES=\"[strsed ${configure.universal_archs} "g| |;|"]\"
+        -DCMAKE_OSX_ARCHITECTURES=\"[join ${configure.universal_archs} \;]\"
     if {${configure.sdkroot} != ""} {
         configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
     } else {
