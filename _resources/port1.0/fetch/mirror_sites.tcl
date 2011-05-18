@@ -204,7 +204,6 @@ set portfetch::mirror_sites::sites(gnupg) {
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
     ftp://ftp.jyu.fi/pub/crypt/gcrypt/
     http://www.ring.gr.jp/pub/net/gnupg/
-    http://ftp.gnupg.org/gcrypt/
     ftp://ftp.gnupg.org/gcrypt/
 }
 
