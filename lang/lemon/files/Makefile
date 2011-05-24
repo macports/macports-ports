@@ -1,4 +1,3 @@
-#!/bin/sh
 include flags
 all: lemon lemoncxx
 lemon: lemon.c
