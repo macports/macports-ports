@@ -1,7 +1,7 @@
---- ssmtp.c.old	Sun Feb  1 22:28:40 2004
-+++ ssmtp.c	Sun Feb  1 22:28:55 2004
+--- ssmtp.c.orig	2009-11-23 20:55:11.000000000 +1100
++++ ssmtp.c	2011-05-27 01:52:00.000000000 +1000
 @@ -13,6 +13,7 @@
- #define VERSION "2.62"
+ #define VERSION "2.64"
  #define _GNU_SOURCE
  
 +#include <sys/types.h>
