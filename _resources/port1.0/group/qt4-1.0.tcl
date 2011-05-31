@@ -124,6 +124,10 @@ set qt_cmake_module_dir ${qt_dir}/share/cmake/modules
 global qt_qmake_cmd
 set qt_qmake_cmd        ${qt_dir}/bin/qmake
 
+# standard qmake spec
+global qt_qmake_spec
+set qt_qmake_spec       macx-g++
+
 # standard moc command location
 global qt_moc_cmd
 set qt_moc_cmd          ${qt_dir}/bin/moc
@@ -144,6 +148,7 @@ set qt_pkg_config_dir   ${qt_dir}/lib/pkgconfig
 global qt_cmake_defines
 set qt_cmake_defines    \
     "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
+     -DQT_QMAKESPEC=${qt_qmake_spec} \
      -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
@@ -159,6 +164,7 @@ if {![info exists building_qt4]} {
 # standard configure environment
 configure.env-append    QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
+                        QMAKESPEC=${qt_qmake_spec} \
                         MOC=${qt_moc_cmd}
 
 if {${qt_dir} != ${prefix}} {
@@ -168,6 +174,7 @@ if {${qt_dir} != ${prefix}} {
 # standard build environment
 build.env-append        QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
+                        QMAKESPEC=${qt_qmake_spec} \
                         MOC=${qt_moc_cmd}
 
 if {${qt_dir} != ${prefix}} {
@@ -180,6 +187,7 @@ depends_build-append    port:pkgconfig
 # standard destroot environment
 destroot.env-append     QTDIR=${qt_dir} \
                         QMAKE=${qt_qmake_cmd} \
+                        QMAKESPEC=${qt_qmake_spec} \
                         MOC=${qt_moc_cmd} \
                         INSTALL_ROOT=${destroot} \
                         DESTDIR=${destroot}
