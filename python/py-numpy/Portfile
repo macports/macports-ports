@@ -5,7 +5,7 @@ PortSystem          1.0
 PortGroup           python24 1.0
 
 name                py-numpy
-version             1.4.1
+version             1.6.0
 categories          python
 platforms           darwin
 maintainers         dh openmaintainer
@@ -16,18 +16,112 @@ homepage            http://numpy.scipy.org/
 master_sites        sourceforge:numpy
 distname            numpy-${version}
 
-checksums           md5 5c7b5349dc3161763f7f366ceb96516b \
-                    sha1 ec6078aa09acbcca3d90f9f36353fc83e7e1daa0 \
-                    rmd160 a0bbebd1138ffc93517095e3c06459cd9744a9d6
+checksums           md5 e0993c74cb8e83292e560eac1a9be8e9 \
+                    sha1 0692acfb5cdc55ca251aa2b950e321a662810c36 \
+                    rmd160 29bee854e1436e0baad46150606d7a0d2d80ac61
 
-patchfiles          patch-f2py_setup.py.diff
+patchfiles          patch-f2py_setup.py.diff \
+                    patch-system_info.py.diff \
+                    patch-fcompiler_g95.diff
 
 depends_lib-append  port:fftw-3 \
                     port:py-nose
 
+if {[variant_isset universal] && ![variant_isset atlas]} {
+    build.env-append    ARCHFLAGS="${configure.universal_ldflags}"
+} else {
+    build.env-append    ARCHFLAGS="${configure.ld_archflags}"
+}
+
+variant atlas \
+description {Use the MacPorts' ATLAS libraries \
+             instead of Apple's Accelerate framework} {
+    build.env-append    ATLAS=${prefix}/lib \
+                        LAPACK=${prefix}/lib \
+                        BLAS=${prefix}/lib
+    destroot.env-append ATLAS=${prefix}/lib \
+                        LAPACK=${prefix}/lib \
+                        BLAS=${prefix}/lib
+    depends_lib-append  port:atlas
+}
+
+# use ATLAS by default; if MacPorts' ATLAS is not used, numpy will
+# link with that supplied by Apple's Accelerate framework.
+default_variants +atlas
+
+# when using ATLAS (whether by default or specified by the user via
+# the +atlas variant) ...
+set gcc_version ""
+if {[variant_isset atlas]} {
+    universal_variant no
+
+    # see if the user has set -gcc4X to disable using MacPorts'
+    # compiler; if not, either use what the user set (as +gcc4X) or
+    # default to gcc44.
+
+    variant gcc43 conflicts gcc44 gcc45 \
+    description {Use the gcc43 compiler (enables fortran linking)} {}
+
+    variant gcc44 conflicts gcc43 gcc45 \
+    description {Use the gcc44 compiler (enables fortran linking)} {}
+
+    variant gcc45 conflicts gcc43 gcc44 \
+    description {Use the gcc45 compiler (enables fortran linking)} {}
+
+    if {![variant_isset gcc43] && ![variant_isset gcc45]} {
+        default_variants +gcc44
+    }
+    if {[variant_isset gcc43]} {
+        set gcc_version "4.3"
+    } elseif {[variant_isset gcc44]} {
+        set gcc_version "4.4"
+    } elseif {[variant_isset gcc45]} {
+        set gcc_version "4.5"
+    }
+
+    # when using non-Apple GCC for universal install, it can
+    # create binaries only for the native OS architecture, at
+    # either 32 or 64 bits.  Restrict the supported archs
+    # accordingly.
+    if {${os.arch} == "i386"} {
+        supported_archs i386 x86_64
+    } elseif {${os.arch} == "powerpc"} {
+        supported_archs ppc ppc64
+    }
+
+    # include all the correct GCC4X port
+    depends_lib-append port:gcc[join [split ${gcc_version} "."] ""]
+
+    # force LDFLAGS for correct linking of the linalg module
+    # for non-Apple GCC compilers
+    patchfiles-append  patch-numpy_linalg_setup.py.diff
+
+    if {${gcc_version} == ""} {
+        # user specified -gcc4X but +atlas (either as default or
+        # explicitly); do not allow since it might lead to
+        # undetermined runtime execution.
+        return -code error \
+"\n\nWhen using the +atlas variant (either as the default or setting
+explicitly), one of the +gcc4X variants must be selected.\n"
+    }
+} else {
+    variant universal {
+        patchfiles-append   patch-setup.py.diff
+    }
+}
+
 post-patch {
-  reinplace "s|@@MPORTS_PREFIX@@|${prefix}|" ${worksrcpath}/numpy/distutils/fcompiler/g95.py
-  reinplace "s|@@MPORTS_PYTHON@@|${python.bin}|" ${worksrcpath}/numpy/f2py/setup.py 
+    reinplace "s|@@MPORTS_PYTHON@@|${python.bin}|" \
+        ${worksrcpath}/numpy/f2py/setup.py
+
+    # disallow searching for any fortran executable except what is
+    # specified in this Portfile; NOTE: this change only works when
+    # setting the GCC version; if this flag is not set (meaning no
+    # +gcc4X variant is set), then F2PY may or not work.
+    if {${gcc_version} != ""} {
+        # set which fortran to use in the f2py Python scripts
+        reinplace "/possible_executables/s|\\\[.*\\\]|\['gfortran-mp-${gcc_version}'\]|g" ${worksrcpath}/numpy/distutils/fcompiler/gnu.py
+    }
 }
 
 post-destroot {
@@ -36,4 +130,6 @@ post-destroot {
   }
 }
 
-livecheck.distname  NumPy
+livecheck.type        regex
+livecheck.url         http://www.scipy.org
+livecheck.regex       {NumPy (\d+(\.\d+)*) released}
