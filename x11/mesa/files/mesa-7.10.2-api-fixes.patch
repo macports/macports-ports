@@ -1,0 +1,318 @@
+diff --git a/configs/darwin b/configs/darwin
+index 9906107..3cf1110 100644
+--- a/configs/darwin
++++ b/configs/darwin
+@@ -31,18 +31,20 @@ CXXFLAGS =  -ggdb3 -Os -Wall -fno-strict-aliasing \
+ 	-I$(INSTALL_DIR)/include -I$(X11_DIR)/include $(OPT_FLAGS) $(PIC_FLAGS) $(ARCH_FLAGS) $(ASM_FLAGS) $(DEFINES)
+ 
+ # Library names (actual file names)
+-GL_LIB_NAME = libGL.dylib
+-GLU_LIB_NAME = libGLU.dylib
+-GLUT_LIB_NAME = libglut.dylib
+-GLW_LIB_NAME = libGLw.dylib
+-OSMESA_LIB_NAME = libOSMesa.dylib
++GL_LIB_NAME = lib$(GL_LIB).dylib
++GLU_LIB_NAME = lib$(GLU_LIB).dylib
++GLUT_LIB_NAME = lib$(GLUT_LIB).dylib
++GLW_LIB_NAME = lib$(GLW_LIB).dylib
++OSMESA_LIB_NAME = lib$(OSMESA_LIB).dylib
++VG_LIB_NAME = lib$(VG_LIB).dylib
+ 
+ # globs used to install the lib and all symlinks
+-GL_LIB_GLOB = libGL.*dylib
+-GLU_LIB_GLOB = libGLU.*dylib
+-GLUT_LIB_GLOB = libglut.*dylib
+-GLW_LIB_GLOB = libGLw.*dylib
+-OSMESA_LIB_GLOB = libOSMesa.*dylib
++GL_LIB_GLOB = lib$(GL_LIB).*dylib
++GLU_LIB_GLOB = lib$(GLU_LIB).*dylib
++GLUT_LIB_GLOB = lib$(GLUT_LIB).*dylib
++GLW_LIB_GLOB = lib$(GLW_LIB).*dylib
++OSMESA_LIB_GLOB = lib$(OSMESA_LIB).*dylib
++VG_LIB_GLOB = lib$(VG_LIB).*dylib
+ 
+ GL_LIB_DEPS = -L$(INSTALL_DIR)/$(LIB_DIR) -L$(X11_DIR)/$(LIB_DIR) -lX11 -lXext -lm -lpthread
+ OSMESA_LIB_DEPS = -L$(TOP)/$(LIB_DIR) -l$(GL_LIB)
+@@ -57,3 +59,5 @@ GLU_DIRS = sgi
+ DRIVER_DIRS = osmesa
+ #DRIVER_DIRS = dri
+ DRI_DIRS = swrast
++GALLIUM_DRIVERS_DIRS = softpipe trace rbug noop identity galahad failover
++#GALLIUM_DRIVERS_DIRS += llvmpipe
+diff --git a/src/glx/applegl_glx.c b/src/glx/applegl_glx.c
+index 3da1f19..9b8605f 100644
+--- a/src/glx/applegl_glx.c
++++ b/src/glx/applegl_glx.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright © 2010 Intel Corporation
++ * Copyright © 2011 Apple Inc.
+  *
+  * Permission is hereby granted, free of charge, to any person obtaining a
+  * copy of this software and associated documentation files (the "Soft-
+@@ -32,6 +33,13 @@
+ 
+ #if defined(GLX_USE_APPLEGL)
+ 
++#include <stdbool.h>
++
++#include "glxclient.h"
++#include "apple_glx_context.h"
++#include "apple_glx.h"
++#include "glx_error.h"
++
+ static void
+ applegl_destroy_context(struct glx_context *gc)
+ {
+@@ -42,13 +50,14 @@ static int
+ applegl_bind_context(struct glx_context *gc, struct glx_context *old,
+ 		     GLXDrawable draw, GLXDrawable read)
+ {
++   Display *dpy = gc->psc->dpy;
+    bool error = apple_glx_make_current_context(dpy,
+-					       (oldGC && oldGC != &dummyContext) ? oldGC->driContext : NUL~
++					       (old && old != &dummyContext) ? old->driContext : NULL,
+ 					       gc ? gc->driContext : NULL, draw);
+ 
+    apple_glx_diagnostic("%s: error %s\n", __func__, error ? "YES" : "NO");
+    if (error)
+-      return GLXBadContext;
++      return 1; /* GLXBadContext is the same as Success (0) */
+ 
+    return Success;
+ }
+@@ -67,7 +76,8 @@ applegl_wait_gl(struct glx_context *gc)
+ static void
+ applegl_wait_x(struct glx_context *gc)
+ {
+-   apple_glx_waitx(gc->dpy, gc->driContext);
++   Display *dpy = gc->psc->dpy;
++   apple_glx_waitx(dpy, gc->driContext);
+ }
+ 
+ static const struct glx_context_vtable applegl_context_vtable = {
+@@ -81,24 +91,25 @@ static const struct glx_context_vtable applegl_context_vtable = {
+    NULL, /* release_tex_image, */
+ };
+ 
+-static struct glx_context *
++struct glx_context *
+ applegl_create_context(struct glx_screen *psc,
+-		       struct glx_config *mode,
++		       struct glx_config *config,
+ 		       struct glx_context *shareList, int renderType)
+ {
+    struct glx_context *gc;
+    int errorcode;
+    bool x11error;
++   Display *dpy = psc->dpy;
++   int screen = psc->scr;
+ 
+    /* TODO: Integrate this with apple_glx_create_context and make
+     * struct apple_glx_context inherit from struct glx_context. */
+ 
+-   gc = Xmalloc(sizeof *gc);
+-   if (pcp == NULL)
++   gc = Xcalloc(1, sizeof (*gc));
++   if (gc == NULL)
+       return NULL;
+ 
+-   memset(gc, 0, sizeof *gc);
+-   if (!glx_context_init(&gc->base, &psc->base, mode)) {
++   if (!glx_context_init(gc, psc, config)) {
+       Xfree(gc);
+       return NULL;
+    }
+@@ -108,7 +119,7 @@ applegl_create_context(struct glx_screen *psc,
+    gc->do_destroy = False;
+ 
+    /* TODO: darwin: Integrate with above to do indirect */
+-   if(apple_glx_create_context(&gc->driContext, dpy, screen, fbconfig, 
++   if(apple_glx_create_context(&gc->driContext, dpy, screen, config, 
+ 			       shareList ? shareList->driContext : NULL,
+ 			       &errorcode, &x11error)) {
+       __glXSendError(dpy, errorcode, 0, X_GLXCreateContext, x11error);
+@@ -117,15 +128,15 @@ applegl_create_context(struct glx_screen *psc,
+    }
+ 
+    gc->currentContextTag = -1;
+-   gc->mode = fbconfig;
+-   gc->isDirect = allowDirect;
++   gc->config = config;
++   gc->isDirect = GL_TRUE;
+    gc->xid = 1; /* Just something not None, so we know when to destroy
+ 		 * it in MakeContextCurrent. */
+ 
+    return gc;
+ }
+ 
+-struct glx_screen_vtable appegl_screen_vtable = {
++struct glx_screen_vtable applegl_screen_vtable = {
+    applegl_create_context
+ };
+ 
+@@ -146,10 +157,12 @@ applegl_create_screen(int screen, struct glx_display * priv)
+ }
+ 
+ _X_HIDDEN int
+-applegl_create_display(struct glx_display *display)
++applegl_create_display(struct glx_display *glx_dpy)
+ {
+-   /* create applegl display and stuff in display->appleglDisplay */
+-   apple_init_glx(display);
++   if(!apple_init_glx(glx_dpy->dpy))
++      return 1;
++
++   return GLXBadContext;
+ }
+ 
+ #endif
+diff --git a/src/glx/glx_pbuffer.c b/src/glx/glx_pbuffer.c
+index 5f91bc6..55f570a 100644
+--- a/src/glx/glx_pbuffer.c
++++ b/src/glx/glx_pbuffer.c
+@@ -843,7 +843,7 @@ glXCreatePixmap(Display * dpy, GLXFBConfig config, Pixmap pixmap,
+    WARN_ONCE_GLX_1_3(dpy, __func__);
+ 
+ #ifdef GLX_USE_APPLEGL
+-   const struct glx_config *modes = (const __GLcontextModes *) config;
++   const struct glx_config *modes = (const struct glx_config *) config;
+ 
+    if (apple_glx_pixmap_create(dpy, modes->screen, pixmap, modes))
+       return None;
+diff --git a/src/glx/glxclient.h b/src/glx/glxclient.h
+index 36a0808..2152e16 100644
+--- a/src/glx/glxclient.h
++++ b/src/glx/glxclient.h
+@@ -341,6 +341,11 @@ struct glx_context
+      */
+    Bool isDirect;
+ 
++#if defined(GLX_DIRECT_RENDERING) && defined(GLX_USE_APPLEGL)
++   void *driContext;
++   Bool do_destroy;
++#endif
++
+     /**
+      * \c dpy of current display for this context.  Will be \c NULL if not
+      * current to any display, or if this is the "dummy context".
+@@ -770,7 +775,19 @@ GarbageCollectDRIDrawables(struct glx_screen *psc);
+ 
+ extern __GLXDRIdrawable *
+ GetGLXDRIDrawable(Display *dpy, GLXDrawable drawable);
++#endif
++
++#ifdef GLX_USE_APPLEGL
++extern struct glx_screen *
++applegl_create_screen(int screen, struct glx_display * priv);
+ 
++extern struct glx_context *
++applegl_create_context(struct glx_screen *psc,
++			struct glx_config *mode,
++			struct glx_context *shareList, int renderType);
++
++extern int
++applegl_create_display(struct glx_display *display);
+ #endif
+ 
+ extern struct glx_context dummyContext;
+diff --git a/src/glx/glxcmds.c b/src/glx/glxcmds.c
+index d9ca3f5..55fdeb6 100644
+--- a/src/glx/glxcmds.c
++++ b/src/glx/glxcmds.c
+@@ -228,10 +228,14 @@ CreateContext(Display * dpy, int generic_id,
+       return NULL;
+ 
+    gc = NULL;
++#ifdef GLX_USE_APPLEGL
++   gc = applegl_create_context(psc, config, shareList, renderType);
++#else
+    if (allowDirect && psc->vtable->create_context)
+       gc = psc->vtable->create_context(psc, config, shareList, renderType);
+    if (!gc)
+       gc = indirect_create_context(psc, config, shareList, renderType);
++#endif
+    if (!gc)
+       return NULL;
+ 
+@@ -606,7 +610,7 @@ glXCreateGLXPixmap(Display * dpy, XVisualInfo * vis, Pixmap pixmap)
+    struct glx_screen *const psc = GetGLXScreenConfigs(dpy, screen);
+    const struct glx_config *config;
+ 
+-   config = _gl_context_modes_find_visual(psc->visuals, vis->visualid);
++   config = glx_config_find_visual(psc->visuals, vis->visualid);
+    
+    if(apple_glx_pixmap_create(dpy, vis->screen, pixmap, config))
+       return None;
+@@ -710,7 +714,7 @@ _X_EXPORT void
+ glXSwapBuffers(Display * dpy, GLXDrawable drawable)
+ {
+ #ifdef GLX_USE_APPLEGL
+-   GLXContext gc = glXGetCurrentContext();
++   struct glx_context * gc = __glXGetCurrentContext();
+    if(gc && apple_glx_is_current_drawable(dpy, gc->driContext, drawable)) {
+       apple_glx_swap_buffers(gc->driContext);
+    } else {
+diff --git a/src/glx/glxcurrent.c b/src/glx/glxcurrent.c
+index 3631738..4b1133c 100644
+--- a/src/glx/glxcurrent.c
++++ b/src/glx/glxcurrent.c
+@@ -160,12 +160,10 @@ _X_HIDDEN void
+ __glXSetCurrentContextNull(void)
+ {
+    __glXSetCurrentContext(&dummyContext);
+-#ifndef GLX_USE_APPLEGL
+ #if defined(GLX_DIRECT_RENDERING) && !defined(GLX_USE_APPLEGL)
+    _glapi_set_dispatch(NULL);   /* no-op functions */
+    _glapi_set_context(NULL);
+ #endif
+-#endif
+ }
+ 
+ _X_EXPORT GLXContext
+@@ -234,6 +232,7 @@ MakeContextCurrent(Display * dpy, GLXDrawable draw,
+       return False;
+    }
+ 
++#ifndef GLX_USE_APPLEGL
+    _glapi_check_multithread();
+ 
+    if (gc != NULL && gc->thread_id != 0 && gc->thread_id != _glthread_GetID()) {
+@@ -241,6 +240,7 @@ MakeContextCurrent(Display * dpy, GLXDrawable draw,
+                          BadAccess, X_GLXMakeContextCurrent);
+       return False;
+    }
++#endif
+ 
+    if (oldGC == gc &&
+        gc->currentDrawable == draw && gc->currentReadable == read)
+@@ -258,7 +258,9 @@ MakeContextCurrent(Display * dpy, GLXDrawable draw,
+       gc->currentDpy = dpy;
+       gc->currentDrawable = draw;
+       gc->currentReadable = read;
++#ifndef GLX_USE_APPLEGL
+       gc->thread_id = _glthread_GetID();
++#endif
+       __glXSetCurrentContext(gc);
+       ret = gc->vtable->bind(gc, oldGC, draw, read);
+    } else {
+diff --git a/src/glx/glxext.c b/src/glx/glxext.c
+index 120a4b7..7fd710c 100644
+--- a/src/glx/glxext.c
++++ b/src/glx/glxext.c
+@@ -769,11 +769,12 @@ AllocAndFetchScreenConfigs(Display * dpy, struct glx_display * priv)
+ 	 psc = (*priv->driswDisplay->createScreen) (i, priv);
+ #endif
+ #if defined(GLX_USE_APPLEGL)
+-      if (psc == NULL && priv->appleglDisplay)
+-	 psc = (*priv->appleglDisplay->createScreen) (i, priv);
+-#endif
++      if (psc == NULL)
++         psc = applegl_create_screen(i, priv);
++#else
+       if (psc == NULL)
+ 	 psc = indirect_create_screen(i, priv);
++#endif
+       priv->screens[i] = psc;
+    }
+    SyncHandle();
