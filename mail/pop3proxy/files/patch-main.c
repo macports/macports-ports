@@ -1,10 +1,10 @@
---- main.c	Tue Nov 23 23:26:12 2004
-+++ ../../pop3proxy-1.3.0-beta3/main.c	Tue Jan 11 22:34:30 2005
+--- main.c.orig	2007-01-15 11:33:37.000000000 -0600
++++ main.c	2011-06-13 03:20:33.000000000 -0500
 @@ -34,6 +34,7 @@
  #include <syslog.h>
  #include <signal.h>
  #include <time.h>
 +#include <sys/time.h>
  
- #include "pop3.h"
  #include "ip-lib.h"
+ #include "procinfo.h"

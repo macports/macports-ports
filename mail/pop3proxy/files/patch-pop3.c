@@ -1,5 +1,5 @@
---- pop3.c	Thu Nov 18 00:06:38 2004
-+++ ../../pop3proxy-1.3.0-beta3/pop3.c	Tue Jan 11 22:33:14 2005
+--- pop3.c.orig	2007-01-15 11:35:59.000000000 -0600
++++ pop3.c	2011-06-13 03:20:33.000000000 -0500
 @@ -37,7 +37,7 @@
  #include <netinet/in.h>
  #include <syslog.h>
@@ -7,5 +7,5 @@
 -#include <wait.h>
 +#include <sys/wait.h>
  
- #include "pop3.h"
- #include "ip-lib.h"
+ #if defined (__linux__)
+ #  include <linux/netfilter_ipv4.h>
