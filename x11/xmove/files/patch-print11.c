@@ -1,5 +1,5 @@
---- xmove/print11.c	Mon Jun 30 22:01:43 1997
-+++ ../../xmove.patches/xmove/print11.c	Tue Mar 22 10:28:17 2005
+--- xmove/print11.c.orig	1997-06-30 15:01:43.000000000 -0500
++++ xmove/print11.c	2011-06-13 03:47:06.000000000 -0500
 @@ -109,7 +109,6 @@
   *
   */

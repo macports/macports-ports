@@ -1,5 +1,5 @@
---- xmove/XMOVELib.c	Sat Oct 18 22:03:47 1997
-+++ ../../xmove.patches/xmove/XMOVELib.c	Tue Mar 22 10:28:17 2005
+--- xmove/XMOVELib.c.orig	1997-10-18 15:03:47.000000000 -0500
++++ xmove/XMOVELib.c	2011-06-13 03:47:06.000000000 -0500
 @@ -24,7 +24,6 @@
  
  #include <X11/Xatom.h>

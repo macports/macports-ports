@@ -1,5 +1,5 @@
---- xmove/move_window.c	Sun Apr 20 06:21:32 1997
-+++ ../../xmove.patches/xmove/move_window.c	Tue Mar 22 10:28:17 2005
+--- xmove/move_window.c.orig	1997-04-19 23:21:32.000000000 -0500
++++ xmove/move_window.c	2011-06-13 03:47:06.000000000 -0500
 @@ -20,7 +20,6 @@
  #define NEED_REPLIES
  #include <X11/Xproto.h>

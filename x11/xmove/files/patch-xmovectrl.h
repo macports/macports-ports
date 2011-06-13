@@ -1,5 +1,5 @@
---- xmovectrl/xmovectrl.h	Mon Jan  9 20:02:28 1995
-+++ ../../xmove.patches/xmovectrl/xmovectrl.h	Tue Mar 22 10:28:17 2005
+--- xmovectrl/xmovectrl.h.orig	1995-01-09 13:02:28.000000000 -0600
++++ xmovectrl/xmovectrl.h	2011-06-13 03:47:06.000000000 -0500
 @@ -54,7 +54,6 @@
  
  #include <sys/time.h>
