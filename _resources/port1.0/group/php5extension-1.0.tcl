@@ -60,6 +60,8 @@ options php5extension.inidir
 default php5extension.inidir        {${prefix}/var/db/php5}
 options php5extension.php_ini
 default php5extension.php_ini       {${prefix}/etc/php5/php.ini}
+options php5extension.phpize
+default php5extension.phpize        {${prefix}/bin/phpize}
 options php5extension.type
 default php5extension.type      php
 options php5extension.source
@@ -79,7 +81,7 @@ proc php5extension.setup {extensions version {source ""}} {
     categories                  php
     distname                    [lindex ${php5extension.extensions} 0]-${version}
     
-    depends_lib                 path:bin/phpize:php5
+    depends_lib                 path:bin/php:php5
     
     configure.universal_args-delete --disable-dependency-tracking
     
@@ -96,7 +98,7 @@ proc php5extension.setup {extensions version {source ""}} {
         }
         foreach dir ${php5extension.build_dirs} {
             ui_debug "Generating configure script in [file tail ${dir}]"
-            system "cd ${dir} && ${prefix}/bin/phpize"
+            system "cd ${dir} && ${php5extension.phpize}"
         }
     }
     
