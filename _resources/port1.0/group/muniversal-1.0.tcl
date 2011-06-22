@@ -206,32 +206,37 @@ variant universal {
 
             # Don't set the --host unless we have to.
             set host ""
-            if { ${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64") } {
-                if { [info exists merger_host(${arch})] } {
-                    if { $merger_host(${arch}) != "" } {
-                        set host  --host=$merger_host(${arch})
-                    }
-                } else {
-                    if { ${arch}=="ppc" } {
-                        set host --host=powerpc-apple-darwin${os.version}
-                    } else {
-                        set host --host=powerpc64-apple-darwin${os.version}
-                    }
+            if { [info exists merger_host($arch)] } {
+                if { $merger_host($arch) != "" } {
+                    set host  --host=$merger_host($arch)
                 }
-            } elseif { ${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64") } {
-                if { [info exists merger_host(${arch})] } {
-                    if { $merger_host(${arch}) != "" } {
-                        set host  --host=$merger_host(${arch})
-                    }
-                } else {
-                    if { ${arch}=="i386" } {
-                        set host --host=i386-apple-darwin${os.version}
+            } else {
+                # check if building for a word length we can't run
+                set bits_differ 0
+                if {(${arch}=="x86_64" || ${arch}=="ppc64") &&
+                    (${os.major} < 9 || [sysctl hw.cpu64bit_capable] == 0)} {
+                    set bits_differ 1
+                }
+                # check if building for a completely different arch
+                if {$bits_differ || (${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64"))
+                        || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))
+                        || $macosx_deployment_target != $macosx_version} {
+                    if {$macosx_deployment_target == $macosx_version} {
+                        set hostversion ${os.version}
                     } else {
-                        set host --host=x86_64-apple-darwin${os.version}
+                        set hostversion [expr [lindex [split $macosx_deployment_target .] 1] + 4]
+                    }
+                    switch -- ${arch} {
+                        x86_64  {set host "--host=x86_64-apple-${os.platform}${hostversion}"}
+                        i386    {set host "--host=i686-apple-${os.platform}${hostversion}"}
+                        ppc     {set host "--host=powerpc-apple-${os.platform}${hostversion}"}
+                        ppc64   {set host "--host=powerpc64-apple-${os.platform}${hostversion}"}
                     }
                 }
             }
-            configure.args-append  ${host}
+            if {$host != ""} {
+                configure.args-append  ${host}
+            }
 
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-append  $merger_configure_args(${arch})
