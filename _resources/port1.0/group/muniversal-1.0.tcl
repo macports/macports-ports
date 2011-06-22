@@ -119,9 +119,15 @@ variant universal {
     if { ${merger_must_run_binaries}=="yes" } {
         if { ${os.arch}=="i386" } {
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
+            if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
+                set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
+            }
         } else {
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
+            if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
+                set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
+            }
         }
     }
 
