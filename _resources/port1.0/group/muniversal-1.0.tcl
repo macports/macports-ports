@@ -585,15 +585,15 @@ variant universal {
         # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
         # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
         set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
- %<#endif /* __ppc__ || __ppc64__ */
+ %<#endif
 ' \
 --new-group-format='#if defined (__i386__) || defined(__x86_64__)
-%>#endif /* __i386__ || __x86_64__ */
+%>#endif
 ' \
 --unchanged-group-format='%=' \
 --changed-group-format='#if (defined(__ppc__) || defined(__ppc64__))
-%<#else /* ! __ppc__ && ! __ppc64__ */
-%>#endif /* __ppc__ || __ppc64__ */
+%<#else
+%>#endif
 '}
 
         set diffFormatM "-D __LP64__"
