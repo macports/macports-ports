@@ -1,11 +1,13 @@
---- fcgid_conf.c.org	2007-02-15 18:34:41.000000000 -0800
-+++ fcgid_conf.c	2007-05-15 09:40:35.000000000 -0700
-@@ -16,7 +16,7 @@
- #define DEFAULT_ERROR_SCAN_INTERVAL 3
- #define DEFAULT_ZOMBIE_SCAN_INTERVAL 3
- #define DEFAULT_PROC_LIFETIME (60*60)
--#define DEFAULT_SOCKET_PREFIX "logs/fcgidsock"
-+#define DEFAULT_SOCKET_PREFIX "/var/run/fcgidsock"
- #define DEFAULT_SHM_PATH "logs/fcgid_shm"
- #define DEFAULT_SPAWNSOCRE_UPLIMIT 10
- #define DEFAULT_SPAWN_SCORE 1
+--- modules/fcgid/fcgid_conf.c.orig	2011-06-24 15:15:55.000000000 -0700
++++ modules/fcgid/fcgid_conf.c	2011-06-24 15:41:58.000000000 -0700
+@@ -28,9 +28,7 @@
+ #include "fcgid_global.h"
+ #include "fcgid_conf.h"
+ 
+-#ifndef DEFAULT_REL_RUNTIMEDIR /* Win32, etc. */
+-#define DEFAULT_REL_RUNTIMEDIR "logs"
+-#endif
++#define DEFAULT_REL_RUNTIMEDIR "var/run"
+ 
+ #define DEFAULT_IDLE_TIMEOUT 300
+ #define DEFAULT_IDLE_SCAN_INTERVAL 120
