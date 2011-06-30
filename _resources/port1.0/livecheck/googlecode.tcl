@@ -2,10 +2,16 @@
 #
 # This file contains the defaults for googlecode.
 
-if {$has_homepage && ${livecheck.name} eq "default"
-    && ([regexp {^http://code.google.com/p/([^/]+)} $homepage _ tag]
-        || [regexp {^http://(.*).googlecode.com} $homepage _ tag])} {
+if {${livecheck.name} eq "default"} {
+    # Extract the googlecode project name from the homepage, if possible
+    if {$has_homepage
+        && ([regexp {^http://code.google.com/p/([^/]+)} $homepage _ tag]
+            || [regexp {^http://(.*).googlecode.com} $homepage _ tag])} {
         set livecheck.name $tag
+    } else {
+        # Otherwise, fall back on the port name
+        set livecheck.name $name
+    }
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     set livecheck.url "http://code.google.com/p/${livecheck.name}/downloads/list"
