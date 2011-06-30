@@ -14,6 +14,6 @@ if {${livecheck.distname} eq "default"} {
     set livecheck.distname [regsub ***=[quotemeta ${livecheck.version}] [quotemeta [file tail [lindex ${distfiles} 0]]] (\[^'\]+)]
 }
 if {${livecheck.regex} eq ""} {
-    set livecheck.regex [list "href=\"http://[quotemeta ${livecheck.name}].googlecode.com/files/${livecheck.distname}\""]
+    set livecheck.regex [list "href=\"//[quotemeta ${livecheck.name}].googlecode.com/files/${livecheck.distname}\""]
 }
 set livecheck.type "regex"
