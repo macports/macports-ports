@@ -78,5 +78,5 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
 
     livecheck.type      regex
     livecheck.regex     ${name}-(\[\\d.\]+)${extract.suffix}
-    livecheck.url       ${master_sites}
+    livecheck.url       http://xorg.freedesktop.org/archive/individual/font/?C=M&O=D
 }
