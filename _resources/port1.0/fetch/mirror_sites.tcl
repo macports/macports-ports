@@ -507,5 +507,6 @@ set portfetch::mirror_sites::sites(xorg) {
     http://x.cs.pu.edu.tw/
     ftp://ftp.is.co.za/pub/x.org/pub/
     http://xorg.freedesktop.org/releases/
+    http://www.x.org/pub/
     ftp://ftp.x.org/pub/
 }
