@@ -346,6 +346,7 @@ set portfetch::mirror_sites::sites(ruby) {
     ftp://ftp.ntua.gr/pub/lang/ruby/
     ftp://ftp.chg.ru/pub/lang/ruby/
     ftp://ftp.iDaemons.org/pub/mirror/ftp.ruby-lang.org/ruby/
+    http://ftp.ruby-lang.org/pub/ruby/
     ftp://ftp.ruby-lang.org/pub/ruby/
 }
 
