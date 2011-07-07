@@ -1,15 +1,17 @@
 # $Id$
 
 PortSystem 1.0
+PortGroup select 1.0
 
 name			apple-gcc42
 version			5666.3
+revision		1
 categories		lang
 platforms		darwin
-maintainers		nomaintainer
+maintainers		jeremyhu openmaintainer
 description		Apple's version of gcc 4.2
 long_description	Apple's version of the GNU compiler collection, \
-			version 4.2. Supports C and Objective-C.
+			version 4.2. Supports C, Objective-C, anc C++
 
 homepage		http://opensource.apple.com/
 master_sites		http://opensource.apple.com/tarballs/gcc/
@@ -18,46 +20,99 @@ checksums               md5     188c7769db5c898922b0976fab148a63 \
                         sha1    292a0cfcfdc061cb083658efd9a3812a120a1f50 \
                         rmd160  a01d000f89c0e89dd0079dcd202bba7629ba78dc
 
-post-extract { file mkdir ${workpath}/build }
+depends_run             port:gcc_select
 
-set nprefix ${prefix}/lib/${name}
+use_configure no
 
-# try to avoid non-Apple programs at all costs (rather volatile build)
-configure.dir		${workpath}/build
-configure.cmd		${worksrcpath}/configure
-configure.pre_args	--prefix=${nprefix}
-configure.ccache	no
-configure.distcc	no
-# C++ support breaks the build
-configure.args		--enable-languages=c,objc \
-			--program-suffix=-apple-4.2
-configure.cflags
-configure.ldflags
-configure.cppflags
-configure.cc_archflags
-configure.cxx_archflags
-configure.objc_archflags
-configure.ld_archflags
-configure.env		PATH="/bin:/usr/bin:/sbin:/usr/sbin"
+select.group    gcc
+select.file     ${filespath}/${name}
 
-build.dir		${configure.dir}
+set srcroot ${worksrcpath}
+set objroot ${workpath}/objroot
+set symroot ${workpath}/symroot
 
-destroot.dir		${build.dir}
+# system-libstdc++.patch   : Adjust build system to use libstdc++ from / since we don't have it in MacPorts
+# no-rm-system.patch       : Comment out a rogue rm /usr/... in the build script
+# prefix.patch             : Fix hardcoded instances of /usr
+# suffix.patch             : Make binaries end in -apple-4.2
+# makeinfo.patch           : Fix version detection for makeinfo in configure scripts
+# werror-*.patch           : Fix compilation errors when building for x86_64
+patchfiles \
+	system-libstdc++.patch \
+	no-rm-system.patch \
+	prefix.patch \
+	suffix.patch \
+	makeinfo.patch \
+	werror-c-incpath.patch \
+	werror-local-alloc.patch
 
-# STAGE1_CFLAGS="-O2 -fkeep-inline-functions" : from configure.ac
-# BOOT_CFLAGS="-O2 -g" : from Makefile.tpl
-# -std=gnu89 : for building with compilers that default to c99 (clang)
-# -D_FORTIFY_SOURCE=0 : The built compiler might not understand newer builtins
-#                       exposed in libc headers for fortified string functions.
-#                       Yes, we need to set both BOOT_CFLAGS and STAGE1_CFLAGS
-#                       because STAGE1_CFLAGS is used with xgcc for libgcc
-build.args-append BOOT_CFLAGS="-O2 -g -D_FORTIFY_SOURCE=0" STAGE1_CFLAGS="-O2 -fkeep-inline-functions -D_FORTIFY_SOURCE=0 -std=gnu89"
+post-patch {
+	# Install documentation in a MacPorts location
+	reinplace "/^HTMLDIR=/ s:=.*$:=\"${prefix}/share/doc/${name}/html\":" ${worksrcpath}/build_gcc
 
-post-destroot {
-	file delete -force \
-		${destroot}${nprefix}/man ${destroot}${nprefix}/info
-	system "cd ${destroot}${prefix}/bin && ln -sf ${nprefix}/bin/gcc-apple-4.2 && ln -sf ${nprefix}/bin/cpp-apple-4.2"
+	# arch returns i386 even when we want x86_64
+	reinplace "/^BUILD=/ s:arch:echo ${build_arch}:" ${worksrcpath}/build_gcc
+
+	# Use our CC
+	# TODO: This seems insufficient as "gcc" is still being used
+	reinplace "/^unset CC/ s:^:#:" ${worksrcpath}/build_gcc
+
+	# ppc not tested, but it should hopefully work...
+	if {${build_arch} == "ppc"} {
+		reinplace "/^PPC_SYSROOT=/ s:=.*$:=/:" ${worksrcpath}/build_gcc
+	} elseif {[file exists ${developer_dir}/SDKs/MacOSX10.5.sdk]} {
+		reinplace "/^PPC_SYSROOT=/ s:=.*$:=${developer_dir}/SDKs/MacOSX10.5.sdk:" ${worksrcpath}/build_gcc
+	} elseif {[file exists ${developer_dir}/SDKs/MacOSX10.4u.sdk]} {
+		reinplace "/^PPC_SYSROOT=/ s:=.*$:=${developer_dir}/SDKs/MacOSX10.4u.sdk:" ${worksrcpath}/build_gcc
+	} elseif {[file exists ${developer_dir}/SDKs/MacOSX10.3.9.sdk]} {
+		reinplace "/^PPC_SYSROOT=/ s:=.*$:=${developer_dir}/SDKs/MacOSX10.3.9.sdk:" ${worksrcpath}/build_gcc
+	}
 }
+
+# TODO: Use MacPorts dependencies
+build.env \
+	CC="${configure.cc}" \
+        LIBRARY_PATH="/usr/lib" \
+        CPATH="/usr/include" \
+	PATH="/bin:/usr/bin:/sbin:/usr/sbin"
+
+#	MAKEINFO=${prefix}/bin/makeinfo
+
+build.args-append \
+	PREFIX="${prefix}" \
+	SRCROOT="${srcroot}" \
+	OBJROOT="${objroot}" \
+	SYMROOT="${symroot}" \
+	DSTROOT="${destroot}" \
+	RC_NONARCH_CFLAGS="-pipe -std=gnu89" \
+	RC_OS="macos"
+
+if {[variant_isset universal]} {
+	build.args-append \
+		RC_ARCHS="${universal_archs}"
+} else {
+	build.args-append \
+		RC_ARCHS="${build_arch}"
+}
+
+set build_targets {i386}
+
+if {[file exists ${developer_dir}/SDKs/MacOSX10.3.9.sdk] ||
+    [file exists ${developer_dir}/SDKs/MacOSX10.4u.sdk] ||
+    [file exists ${developer_dir}/SDKs/MacOSX10.5.sdk] ||
+    ${build_arch} == "ppc"} {
+	lappend build_targets ppc
+}
+
+# TODO: arm?
+
+build.args-append \
+	TARGETS="${build_targets}"
+
+# Yes, use "install" ... the build system does make/install in one go
+# TODO: split the build_gcc script into two to better match MacPorts
+build.target install
+destroot {}
 
 livecheck.type		regex
 livecheck.url		[lindex ${master_sites} 0]
