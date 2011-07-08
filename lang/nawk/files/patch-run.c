@@ -1,6 +1,6 @@
 --- run.c.orig	Tue Dec 28 23:53:45 2004
 +++ run.c	Tue Dec 28 23:53:57 2004
-@@ -902,7 +902,7 @@
+@@ -903,7 +903,7 @@
  			break;
  		case 'f':	sprintf(p, fmt, getfval(x)); break;
  		case 'd':	sprintf(p, fmt, (long) getfval(x)); break;
