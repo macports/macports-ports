@@ -8,12 +8,21 @@ require 'openssl'
 
 # target Portfiles of Ruby/Gnome2 modules
 PORTFILES =
-	%w[rb-glib2 rb-atk rb-pango rb-gtk2 rb-rsvg rb-poppler
-	   rb-gconf rb-gnomecanvas rb-libgnome rb-libart rb-gnomeprint
-	   rb-gnomeprintui rb-gnomevfs rb-gtkhtml rb-libglade2
-	   rb-gstreamer rb-vte rb-gtkglext rb-gtksourceview2
-	   rb-gnome]
-# TODO: GtkMozeEmbed[add]
+	# meta package
+	%w[rb-gnome] +
+	# gtk
+	%w[rb-glib2 rb-atk rb-pango rb-gtk2] +
+	# gnome modules
+	%w[rb-rsvg rb-poppler rb-vte rb-gtksourceview2] +
+	# experimental
+	%w[rb-gstreamer]
+	# deprecated: after 1.0.0, the bellow modules are not contained
+	#             source tree of ruby-gnome2. these ports will not
+	#             be updated.
+	#%w[rb-gconf rb-libgnome rb-gnomecanvas rb-gnomeprint rb-gnomeprintui
+	#   rb-gnomevfs rb-gtkhtml rb-gtkglext rb-libglade3 rb-libart]
+# no ports: gio2 - no port for Gnome GIO
+# deprecated and no ports: GtkMozeEmbed, GtkSourceView, PanelApplet
 
 class App
 
