@@ -262,6 +262,7 @@ set portfetch::mirror_sites::sites(macports) {
 set portfetch::mirror_sites::sites(macports_distfiles) {
     http://distfiles.macports.org/:mirror
     http://aarnet.au.distfiles.macports.org/pub/macports/mpdistfiles/:mirror
+    http://her.gr.distfiles.macports.org/mirrors/macports/mpdistfiles/:mirror
     http://lil.fr.distfiles.macports.org/:mirror
     http://sea.us.distfiles.macports.org/macports/mpdistfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
