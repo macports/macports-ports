@@ -54,7 +54,7 @@ proc octave.setup {module version} {
     master_sites                sourceforge:octave
     distname                    ${octave.module}-${version}
     
-    depends_lib                 port:octave
+    depends_lib                 path:bin/octave:octave
     
     # octave is not universal
     universal_variant           no

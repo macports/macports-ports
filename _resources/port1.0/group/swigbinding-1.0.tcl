@@ -46,7 +46,7 @@ proc swigbinding-setup {lang prettyname} {
         r           {port:R                 r} \
         tcl         {port:tcl               tcl} \
         csharp      {port:mono              csharp} \
-        octave      {port:octave            octave} \
+        octave      {path:bin/octave:octave octave} \
         java        {bin:java:kaffe         java} \
         go          {port:go                go}
     }
