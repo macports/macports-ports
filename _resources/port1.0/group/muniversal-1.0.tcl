@@ -451,12 +451,15 @@ variant universal {
                             ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
                             # Actually try to merge the files
-                            # First try lipo
+                            # First try lipo, then libtool
                             if { ! [catch {system "/usr/bin/lipo -create \"${dir1}/${fl}\" \"${dir2}/${fl}\" -output \"${dir}/${fl}\""}] } {
                                 # lipo worked
                                 ui_debug "universal: merge: lipo created ${prefixDir}/${fl}"
+                            } elseif { ! [catch {system "/usr/bin/libtool \"${dir1}/${fl}\" \"${dir2}/${fl}\" -o \"${dir}/${fl}\""}] } {
+                                # libtool worked
+                                ui_debug "universal: merge: libtool created ${prefixDir}/${fl}"
                             } else {
-                                # lipo has failed, so assume they are text files to be merged
+                                # lipo and libtool have failed, so assume they are text files to be merged
                                 set dontdiff no
                                 foreach dont ${merger_dont_diff} {
                                     if { ${dont}=="${prefixDir}/${fl}" } {
