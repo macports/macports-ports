@@ -86,7 +86,7 @@ proc zope.setup {product vers {products {}} {extensions {}}} {
 
 	name			zope-[string tolower ${zope.product}]
 	version			${vers}
-	categories		www zope python
+	categories		zope www python
 
 	distname		${zope.product}-${vers}
 	dist_subdir		zope
