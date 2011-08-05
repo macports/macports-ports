@@ -1,0 +1,91 @@
+http://sourceforge.net/apps/trac/openocd/ticket/22
+--- src/target/cortex_m3.c	So Feb 21 11:17:08 2010
++++ src/target/cortex_m3.c	Mo Mai  3 15:27:24 2010
+@@ -153,7 +153,7 @@
+ 	return ERROR_OK;
+ }
+ 
+-static int cortex_m3_single_step_core(struct target *target)
++static int cortex_m3_single_step_core(struct target *target, bool mask_interrupts)
+ {
+ 	struct cortex_m3_common *cortex_m3 = target_to_cm3(target);
+ 	struct swjdp_common *swjdp = &cortex_m3->armv7m.swjdp_info;
+@@ -162,18 +162,29 @@
+ 	/* backup dhcsr reg */
+ 	dhcsr_save = cortex_m3->dcb_dhcsr;
+ 
+-	/* Mask interrupts before clearing halt, if done already.  This avoids
+-	 * Erratum 377497 (fixed in r1p0) where setting MASKINTS while clearing
+-	 * HALT can put the core into an unknown state.
+-	 */
+-	if (!(cortex_m3->dcb_dhcsr & C_MASKINTS))
++	if(mask_interrupts) {
++		/* Mask interrupts before clearing halt, if not done already.  This avoids
++		 * Erratum 377497 (fixed in r1p0) where setting MASKINTS while clearing
++		 * HALT can put the core into an unknown state.
++		 */
++		if (!(cortex_m3->dcb_dhcsr & C_MASKINTS))
++			mem_ap_write_atomic_u32(swjdp, DCB_DHCSR,
++					DBGKEY | C_MASKINTS | C_HALT | C_DEBUGEN);
+ 		mem_ap_write_atomic_u32(swjdp, DCB_DHCSR,
+-				DBGKEY | C_MASKINTS | C_HALT | C_DEBUGEN);
+-	mem_ap_write_atomic_u32(swjdp, DCB_DHCSR,
+-				DBGKEY | C_MASKINTS | C_STEP | C_DEBUGEN);
++					DBGKEY | C_MASKINTS | C_STEP | C_DEBUGEN);
++	}
++	else {
++		mem_ap_write_atomic_u32(swjdp, DCB_DHCSR,
++					DBGKEY | C_STEP | C_DEBUGEN);
++	}
+ 	LOG_DEBUG(" ");
+ 
+-	/* restore dhcsr reg */
++	/* restore dhcsr reg
++	 *
++	 * FIXME Why restore cortex_m3->dcb_dhcsr? It isn't changed by above write
++	 * operations. Don't we introduce an inconsistency between cortex_m3->dcb_dhcsr
++	 * and the acutal register contents?
++	 */
+ 	cortex_m3->dcb_dhcsr = dhcsr_save;
+ 	cortex_m3_clear_halt(target);
+ 
+@@ -677,7 +688,7 @@
+ 					  breakpoint->address,
+ 					  breakpoint->unique_id);
+ 			cortex_m3_unset_breakpoint(target, breakpoint);
+-			cortex_m3_single_step_core(target);
++			cortex_m3_single_step_core(target, 1); // Mask interrupts during step
+ 			cortex_m3_set_breakpoint(target, breakpoint);
+ 		}
+ 	}
+@@ -716,6 +727,7 @@
+ 	struct breakpoint *breakpoint = NULL;
+ 	struct reg *pc = armv7m->core_cache->reg_list + 15;
+ 	bool bkpt_inst_found = false;
++	bool on_bkpt;
+ 
+ 	if (target->state != TARGET_HALTED)
+ 	{
+@@ -723,6 +735,9 @@
+ 		return ERROR_TARGET_NOT_HALTED;
+ 	}
+ 
++	// We've stopped on a breakpoint
++	on_bkpt = (target->debug_reason == DBG_REASON_BREAKPOINT);
++
+ 	/* current = 1: continue on current pc, otherwise continue at <address> */
+ 	if (!current)
+ 		buf_set_u32(pc->value, 0, 32, address);
+@@ -748,8 +763,10 @@
+ 	 * instruction - as such simulate a step */
+ 	if (bkpt_inst_found == false)
+ 	{
+-		/* set step and clear halt */
+-		cortex_m3_write_debug_halt_mask(target, C_STEP, C_HALT);
++		/* Disable interrupts diring step if we stopped on a break point.
++		 * Otherwise any pending interrupt will get served next and we will
++		 * return to the same break point after the interrupt completes. */
++		cortex_m3_single_step_core(target, on_bkpt);
+ 	}
+ 
+ 	mem_ap_read_atomic_u32(swjdp, DCB_DHCSR, &cortex_m3->dcb_dhcsr);
