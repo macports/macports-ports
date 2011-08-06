@@ -217,17 +217,19 @@ set portfetch::mirror_sites::sites(googlecode) {
 }
 
 set portfetch::mirror_sites::sites(isc) {
+    http://www.mirrorservice.org/sites/ftp.isc.org/isc/
     ftp://ftp.epix.net/pub/isc/
     ftp://ftp.nominum.com/pub/isc/
     http://mirrors.24-7-solutions.net/pub/isc/
     ftp://gd.tuwien.ac.at/infosys/servers/isc/
+    http://ftp.arcane-networks.fr/pub/mirrors/ftp.isc.org/isc/
     ftp://ftp.ciril.fr/pub/isc/
-    ftp://ftp.grolier.fr/pub/isc/
     ftp://ftp.funet.fi/pub/mirrors/ftp.isc.org/isc/
     ftp://ftp.freenet.de/pub/ftp.isc.org/isc/
     ftp://ftp.fsn.hu/pub/isc/
     ftp://ftp.iij.ad.jp/pub/network/isc/
     ftp://ftp.dti.ad.jp/pub/net/isc/
+    http://ftp.kaist.ac.kr/pub/isc/
     ftp://ftp.task.gda.pl/mirror/ftp.isc.org/isc/
     ftp://ftp.sunet.se/pub/network/isc/
     ftp://ftp.ripe.net/mirrors/sites/ftp.isc.org/isc/
