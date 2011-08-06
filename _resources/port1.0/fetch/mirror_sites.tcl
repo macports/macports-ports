@@ -295,6 +295,7 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://carroll.cac.psu.edu/pub/OpenBSD/
     ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
     ftp://gd.tuwien.ac.at/opsys/OpenBSD/
+    http://ftp.ch.openbsd.org/pub/OpenBSD/
     ftp://ftp.stacken.kth.se/pub/OpenBSD/
     ftp://ftp3.usa.openbsd.org/pub/OpenBSD/
     ftp://rt.fm/pub/OpenBSD/
