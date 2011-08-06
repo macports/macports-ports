@@ -80,10 +80,18 @@ set portfetch::mirror_sites::sites(fink) {
 }
 
 set portfetch::mirror_sites::sites(freebsd) {
+    http://ftp4.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
+    http://ftp4.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp5.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp5.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
+    http://ftp10.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
+    http://ftp10.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
+    http://ftp14.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
+    http://ftp14.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp.uk.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp.uk.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
+    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
+    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp.jp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp.jp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp.tw.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
@@ -94,6 +102,8 @@ set portfetch::mirror_sites::sites(freebsd) {
     ftp://ftp.se.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     http://mirror.aarnet.edu.au/pub/FreeBSD/ports/distfiles/:nosubdir
     http://mirror.aarnet.edu.au/pub/FreeBSD/ports/local-distfiles/:nosubdir
+    http://ftp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
+    http://ftp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
     ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
     ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
 }
