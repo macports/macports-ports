@@ -163,6 +163,8 @@ proc crossgcc.setup {target version} {
             configure.compiler clang
         }
 
+        universal_variant no
+
         destroot.violate_mtree yes
 
         pre-destroot {
