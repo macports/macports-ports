@@ -85,7 +85,7 @@ proc python_set_versions {option action args} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             distfiles
             supported_archs noarch
-            #replaced_by py[option python.default_version][string trimleft $name py]
+            replaced_by py[option python.default_version][string trimleft $name py]
             depends_lib port:py[option python.default_version][string trimleft $name py]
             build {}
             destroot {
