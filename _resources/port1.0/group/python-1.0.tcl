@@ -103,6 +103,7 @@ proc python_set_default_version {option action args} {
     global name subport
     if {[string match py-* $name]} {
         if {$subport == $name || $subport == ""} {
+            replaced_by py[option python.default_version][string trimleft $name py]
             depends_lib port:py[option python.default_version][string trimleft $name py]
         }
     } else {
