@@ -1,0 +1,187 @@
+Based on http://git.gnome.org/browse/epiphany/commit/?id=4ac121ff0e7bd0882a66b3171a855575350ca08e
+--- configure.ac.orig	2010-09-15 18:26:00.000000000 +0200
++++ configure.ac	2011-08-08 09:42:10.000000000 +0200
+@@ -95,20 +95,11 @@
+ LIBXML_REQUIRED=2.6.12
+ LIBXSLT_REQUIRED=1.1.7
+ LIBSTARTUP_NOTIFICATION_REQUIRED=0.5
+-LIBNOTIFY_REQUIRED=0.4
+ DBUS_GLIB_REQUIRED=0.35
+ WEBKIT_GTK_REQUIRED=1.2.3
+ LIBSOUP_GNOME_REQUIRED=2.29.91
+ GNOME_KEYRING_REQUIRED=2.26.0
+ 
+-PKG_CHECK_EXISTS([libnotify >= $LIBNOTIFY_REQUIRED],[have_libnotify=yes],[have_libnotify=no])
+-
+-LIBNOTIFY_PACKAGE=
+-if test "$have_libnotify" = "yes"; then
+-  LIBNOTIFY_PACKAGE="libnotify >= $LIBNOTIFY_REQUIRED"
+-  AC_DEFINE([HAVE_LIBNOTIFY],[1],[Define if libnotify is available])
+-fi
+-
+ # Tests
+ 
+ AC_MSG_CHECKING([whether to build tests])
+@@ -133,7 +124,6 @@
+ 		  libxslt >= $LIBXSLT_REQUIRED
+ 		  gconf-2.0
+ 		  libstartup-notification-1.0 >= $LIBSTARTUP_NOTIFICATION_REQUIRED
+-		  $LIBNOTIFY_PACKAGE
+ 		  webkit-1.0 >= $WEBKIT_GTK_REQUIRED
+ 		  libsoup-gnome-2.4 >= $LIBSOUP_GNOME_REQUIRED
+ 		  gnome-keyring-1 >= $GNOME_KEYRING_REQUIRED
+--- src/ephy-main.c.orig	2010-09-15 15:38:18.000000000 +0200
++++ src/ephy-main.c	2011-08-08 09:43:39.000000000 +0200
+@@ -50,10 +50,6 @@
+ #include <girepository.h>
+ #endif
+ 
+-#ifdef HAVE_LIBNOTIFY
+-#include <libnotify/notify.h>
+-#endif
+-
+ static GQuark startup_error_quark = 0;
+ #define STARTUP_ERROR_QUARK	(startup_error_quark)
+ 
+@@ -731,20 +727,11 @@
+ 
+ 	queue_commands (user_time);
+ 
+-#ifdef HAVE_LIBNOTIFY	
+-	/* Init notifications for the download manager */
+-	notify_init (PACKAGE);
+-#endif
+-
+ 	gtk_main ();
+ 
+ 	/* Shutdown */
+ 	g_object_unref (ephy_shell);
+ 
+-#ifdef HAVE_LIBNOTIFY	
+-	if (notify_is_initted ())
+-		notify_uninit ();
+-#endif
+ 	eel_gconf_monitor_remove ("/apps/epiphany/general");
+ 	save_accels ();
+ 	ephy_state_save ();
+--- embed/downloader-view.c.orig	2010-09-09 22:33:19.000000000 +0200
++++ embed/downloader-view.c	2011-08-08 09:46:18.000000000 +0200
+@@ -34,10 +34,6 @@
+ #include <gtk/gtk.h>
+ #include <gdk/gdkx.h>
+ 
+-#ifdef HAVE_LIBNOTIFY
+-#include <libnotify/notify.h>
+-#endif
+-
+ enum
+ {
+ 	COL_STATUS,
+@@ -296,65 +292,6 @@
+ 			 			   NULL));
+ }
+ 
+-#ifdef HAVE_LIBNOTIFY
+-static void
+-notification_closed_cb (NotifyNotification *notification,
+-			DownloaderView *dv)
+-{
+-	g_object_unref (dv);
+-}
+-
+-static gboolean
+-show_notification_cb (NotifyNotification *notification)
+-{
+-	DownloaderView *dv;
+-	GError *error = NULL;
+-
+-	dv = g_object_get_data (G_OBJECT (notification), "dv");
+-	notify_notification_show (notification, &error);
+-
+-	if (error)
+-	{
+-		/* notification_closed_cb () will never be called. */
+-		g_warning ("Error showing download notification: %s",
+-			   error->message);
+-		g_object_unref (dv);
+-		g_error_free (error);
+-	}
+-
+-	return FALSE;
+-}
+-
+-static void
+-show_notification (DownloaderView *dv, const char *title, const char *msg)
+-{
+-	NotifyNotification *notification;
+-	GtkStatusIcon *status_icon;
+-
+-	status_icon = dv->priv->status_icon;
+-
+-	/* We keep the DownloaderView alive until the notification is gone. */
+-	g_object_ref (dv);
+-
+-	notification = notify_notification_new (title, msg,
+-						GTK_STOCK_INFO, NULL);
+-
+-	g_signal_connect_after (notification, "closed",
+-				G_CALLBACK (notification_closed_cb), dv);
+-	g_object_set_data (G_OBJECT (notification), "dv", dv);
+-
+-	notify_notification_set_timeout (notification, NOTIFY_EXPIRES_DEFAULT);
+-	notify_notification_set_urgency (notification, NOTIFY_URGENCY_LOW);
+-
+-	notify_notification_attach_to_status_icon (notification, status_icon);
+-
+-	/* There are some visual glitches when the notification is shown and
+-	 * the GtkStatusIcon is still not visible. To avoid that, we delay the
+-	 * popup a bit. */
+-	g_timeout_add (500, (GSourceFunc) show_notification_cb, notification);
+-}
+-#endif
+-
+ static char *
+ format_interval (gdouble interval)
+ {
+@@ -527,9 +464,6 @@
+ 	struct tm;
+ 	int percent = 0;
+ 	DownloadAction action;
+-#ifdef HAVE_LIBNOTIFY
+-	char *downloaded;
+-#endif
+ 
+ 	row_ref = get_row_from_download (dv, download);
+ 	/* In downloader_view_add_download() we call this function manually to
+@@ -573,11 +507,6 @@
+ 			break;
+ 		}
+ 
+-#ifdef HAVE_LIBNOTIFY
+-		downloaded = g_strdup_printf (_("The file “%s” has been downloaded."), name);
+-		show_notification (dv, _("Download finished"), downloaded);
+-		g_free (downloaded);
+-#endif
+ 		downloader_view_remove_download (dv, download);
+ 
+ 		return;
+@@ -754,19 +683,6 @@
+ 	
+ 	if (eel_gconf_get_boolean (CONF_DOWNLOADS_HIDDEN) && !visible)
+ 	{
+-#ifdef HAVE_LIBNOTIFY
+-		char *name;
+-		char *downloading;
+-
+-		name = ephy_download_get_name (download);
+-		downloading = g_strdup_printf(_("The file “%s” has been added to the downloads queue."), name);
+-		
+-		show_notification (dv, _("Download started"), downloading);
+-
+-		g_free (name);
+-		g_free (downloading);
+-#endif
+-
+ 		ephy_dialog_hide (EPHY_DIALOG (dv));
+ 	}
+ 	else
