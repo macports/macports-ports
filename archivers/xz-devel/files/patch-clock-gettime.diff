@@ -1,0 +1,155 @@
+commit 9c1b05828a88eff54409760b92162c7cc2c7cff6
+Author: Lasse Collin <lasse.collin@tukaani.org>
+Date:   Tue Apr 19 09:20:44 2011 +0300
+
+    Fix portability problems in mythread.h.
+    
+    Use gettimeofday() if clock_gettime() isn't available
+    (e.g. Darwin).
+    
+    The test for availability of pthread_condattr_setclock()
+    and CLOCK_MONOTONIC was incorrect. Instead of fixing the
+    #ifdefs, use an Autoconf test. That way if there exists a
+    system that supports them but doesn't specify the matching
+    POSIX #defines, the features will still get detected.
+    
+    Don't try to use pthread_sigmask() on OpenVMS. It doesn't
+    have that function.
+    
+    Guard mythread.h against being #included multiple times.
+
+diff --git a/configure.ac b/configure.ac
+index 8cba630..73dc358 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -435,7 +435,14 @@ if test "x$enable_threads" = xyes; then
+ 	LIBS="$LIBS $PTHREAD_LIBS"
+ 	AM_CFLAGS="$AM_CFLAGS $PTHREAD_CFLAGS"
+ 	CC="$PTHREAD_CC"
++
++	# These are nice to have but not mandatory.
++	OLD_CFLAGS=$CFLAGS
++	CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+ 	AC_SEARCH_LIBS([clock_gettime], [rt])
++	AC_CHECK_FUNCS([clock_gettime pthread_condattr_setclock])
++	AC_CHECK_DECLS([CLOCK_MONOTONIC], [], [], [[#include <time.h>]])
++	CFLAGS=$OLD_CFLAGS
+ fi
+ AM_CONDITIONAL([COND_THREADS], [test "x$ax_pthread_ok" = xyes])
+ 
+diff --git a/src/common/mythread.h b/src/common/mythread.h
+index 3964140..47af493 100644
+--- a/src/common/mythread.h
++++ b/src/common/mythread.h
+@@ -10,6 +10,9 @@
+ //
+ ///////////////////////////////////////////////////////////////////////////////
+ 
++#ifndef MYTHREAD_H
++#define MYTHREAD_H
++
+ #include "sysdefs.h"
+ 
+ 
+@@ -19,19 +22,23 @@
+ // Using pthreads //
+ ////////////////////
+ 
++#include <sys/time.h>
+ #include <pthread.h>
+ #include <signal.h>
+ #include <time.h>
+-#include <unistd.h>
+ 
+ 
++#ifdef __VMS
++// Do nothing on OpenVMS. It doesn't have pthread_sigmask().
++#define mythread_sigmask(how, set, oset) do { } while (0)
++#else
+ /// \brief      Set the process signal mask
+ ///
+ /// If threads are disabled, sigprocmask() is used instead
+ /// of pthread_sigmask().
+ #define mythread_sigmask(how, set, oset) \
+ 	pthread_sigmask(how, set, oset)
+-
++#endif
+ 
+ /// \brief      Call the given function once
+ ///
+@@ -96,7 +103,9 @@ typedef struct {
+ static inline int
+ mythread_cond_init(mythread_cond *mycond)
+ {
+-#if defined(_POSIX_CLOCK_SELECTION) && defined(_POSIX_MONOTONIC_CLOCK)
++#ifdef HAVE_CLOCK_GETTIME
++	// NOTE: HAVE_DECL_CLOCK_MONOTONIC is always defined to 0 or 1.
++#	if defined(HAVE_PTHREAD_CONDATTR_SETCLOCK) && HAVE_DECL_CLOCK_MONOTONIC
+ 	struct timespec ts;
+ 	pthread_condattr_t condattr;
+ 
+@@ -119,9 +128,11 @@ mythread_cond_init(mythread_cond *mycond)
+ 	}
+ 
+ 	// If anything above fails, fall back to the default CLOCK_REALTIME.
+-#endif
++#	endif
+ 
+ 	mycond->clk_id = CLOCK_REALTIME;
++#endif
++
+ 	return pthread_cond_init(&mycond->cond, NULL);
+ }
+ 
+@@ -133,11 +144,21 @@ mythread_cond_init(mythread_cond *mycond)
+ static inline void
+ mythread_cond_abstime(const mythread_cond *mycond, struct timespec *ts)
+ {
++#ifdef HAVE_CLOCK_GETTIME
+ 	struct timespec now;
+ 	clock_gettime(mycond->clk_id, &now);
+ 
+ 	ts->tv_sec += now.tv_sec;
+ 	ts->tv_nsec += now.tv_nsec;
++#else
++	(void)mycond;
++
++	struct timeval now;
++	gettimeofday(&now, NULL);
++
++	ts->tv_sec += now.tv_sec;
++	ts->tv_nsec += now.tv_usec * 1000L;
++#endif
+ 
+ 	// tv_nsec must stay in the range [0, 999_999_999].
+ 	if (ts->tv_nsec >= 1000000000L) {
+@@ -200,3 +221,5 @@ do { \
+ } while (0)
+ 
+ #endif
++
++#endif
+commit f004128678d43ea10b4a6401aa184cf83252d6ec
+Author: Lasse Collin <lasse.collin@tukaani.org>
+Date:   Tue May 17 12:52:18 2011 +0300
+
+    Don't use clockid_t in mythread.h when clock_gettime() isn't available.
+    
+    Thanks to Wim Lewis for the patch.
+
+diff --git a/src/common/mythread.h b/src/common/mythread.h
+index 47af493..c538dea 100644
+--- a/src/common/mythread.h
++++ b/src/common/mythread.h
+@@ -86,9 +86,11 @@ typedef struct {
+ 	/// Condition variable
+ 	pthread_cond_t cond;
+ 
++#ifdef HAVE_CLOCK_GETTIME
+ 	/// Clock ID (CLOCK_REALTIME or CLOCK_MONOTONIC) associated with
+ 	/// the condition variable
+ 	clockid_t clk_id;
++#endif
+ 
+ } mythread_cond;
+ 
