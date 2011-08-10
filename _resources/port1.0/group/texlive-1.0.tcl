@@ -423,7 +423,10 @@ proc texlive.texmfport {} {
             system "${prefix}/libexec/texlive-update-cnf updmap.cfg"
             system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
             system "${prefix}/bin/updmap-sys"
-            system "${prefix}/bin/fmtutil-sys --all"
+            # format generation might fail if we are in the middle of
+            # a major upgrade and have not yet updated all texlive ports.
+            # Catch the error to prevent the upgrade from failing.
+            catch {system "${prefix}/bin/fmtutil-sys --all"}
         } else {
             # Otherwise, only update the config files that are
             # actually affected, and only generate the needed
@@ -446,11 +449,11 @@ proc texlive.texmfport {} {
             # formats. Otherwise, just generate the formats we just
             # installed.
             if {${texlive.languages} != ""} {
-                system "${prefix}/bin/fmtutil-sys --all"                
+                catch {system "${prefix}/bin/fmtutil-sys --all"}
             } elseif {${texlive.formats} != ""} {
                 foreach x ${texlive.formats} {
                     set fmtname [lindex $x 1]
-                    system "${prefix}/bin/fmtutil-sys --byfmt $fmtname"
+                    catch {system "${prefix}/bin/fmtutil-sys --byfmt $fmtname"}
                 }
             }
         }
