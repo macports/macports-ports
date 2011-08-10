@@ -146,10 +146,15 @@ default texlive.maps {}
 options texlive.forceupdatecnf
 default texlive.forceupdatecnf no
 
-# Whether to run mktexlsr after activation. Usually required if
+# Whether to run mktexlsr after (de)activation. Usually required if
 # installing any texmf files.
 options texlive.use_mktexlsr
 default texlive.use_mktexlsr yes
+
+# Running mktexlsr after deactivation can be disabled separately. Note
+# that the value of this option is ignored if use_mktexlsr is disabled.
+options texlive.use_mktexlsr_on_deactivate
+default texlive.use_mktexlsr_on_deactivate yes
 
 proc texlive.texmfport {} {
     homepage        http://www.tug.org/texlive/
@@ -462,7 +467,9 @@ proc texlive.texmfport {} {
     post-deactivate {
         # Update ls-R and any config files to reflect that the package
         # is now gone
-        texlive.mktexlsr
+        if {${texlive.use_mktexlsr} && ${texlive.use_mktexlsr_on_deactivate}} {
+            texlive.mktexlsr
+        }
         if {${texlive.forceupdatecnf} || ${texlive.languages} != ""} {
             system "${prefix}/libexec/texlive-update-cnf language.dat"
             system "${prefix}/libexec/texlive-update-cnf language.def"
