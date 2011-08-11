@@ -415,6 +415,15 @@ proc texlive.texmfport {} {
     }
 
     post-activate {
+        # Disable mktexlsr if it's not installed and this is a
+        # texlive-documentation-* port. It's possible (if unlikely) to
+        # install them without texlive-basic, so mktexlsr might not
+        # exist, but if it does we do want to run it.
+        if {[regexp {^texlive-documentation-} $name] &&
+            ![file exists ${prefix}/bin/mktexlsr]} {
+            texlive.use_mktexlsr no
+        }
+        
         if {${texlive.use_mktexlsr}} {
             texlive.mktexlsr
         }
@@ -465,6 +474,13 @@ proc texlive.texmfport {} {
     }
 
     post-deactivate {
+        # Disable mktexlsr if it's not installed and this is a
+        # texlive-documentation-* port. See post-activate for why.
+        if {[regexp {^texlive-documentation-} $name] &&
+            ![file exists ${prefix}/bin/mktexlsr]} {
+            texlive.use_mktexlsr no
+        }
+
         # Update ls-R and any config files to reflect that the package
         # is now gone
         if {${texlive.use_mktexlsr} && ${texlive.use_mktexlsr_on_deactivate}} {
