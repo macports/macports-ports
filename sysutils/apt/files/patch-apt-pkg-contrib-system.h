@@ -1,5 +1,5 @@
---- build/include/system.h.orig	2011-08-08 13:14:47.000000000 +0200
-+++ build/include/system.h	2011-08-08 13:24:37.000000000 +0200
+--- apt-pkg/contrib/system.h.orig	1999-12-11 00:40:29.000000000 +0100
++++ apt-pkg/contrib/system.h	2011-08-08 13:24:37.000000000 +0200
 @@ -26,7 +26,7 @@
  #endif
  
