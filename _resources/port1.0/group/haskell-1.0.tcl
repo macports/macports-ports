@@ -65,7 +65,7 @@ proc haskell.setup {package version {compiler ghc}} {
     homepage            http://hackage.haskell.org/package/${package}
     master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
     distname            ${package}-${version}
-    depends_build       port:${compiler_config(port)}
+    depends_lib         port:${compiler_config(port)}
     configure.cmd       runhaskell
     configure.pre_args
     configure.args      Setup configure --prefix=${prefix} --with-compiler=[subst ${compiler_config(compiler)}]
