@@ -80,8 +80,7 @@ proc python_set_versions {option action args} {
         foreach v [option $option] {
             subport py${v}[string trimleft $name py] { depends_lib port:python${v} }
         }
-        # check if none of the subport blocks was executed
-        if {![exists depends_lib]} {
+        if {$subport == $name || $subport == ""} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             distfiles
             supported_archs noarch
