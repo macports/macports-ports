@@ -75,7 +75,7 @@ proc python_set_versions {option action args} {
     if {$action != "set"} {
         return
     }
-    global name
+    global name subport
     if {[string match py-* $name]} {
         foreach v [option $option] {
             subport py${v}[string trimleft $name py] { depends_lib port:python${v} }
