@@ -134,8 +134,8 @@ proc app.get_default_identifier {} {
         set identifier [lrange ${identifier} 1 end]
     }
     set identifier [lreverse ${identifier}]
-    lappend identifier [regsub -all -nocase {[^a-z0-9.-]} ${app.name} "-"]
-    return [join ${identifier} .]
+    lappend identifier [string map {"." ""} ${app.name}]
+    return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
 }
 
 
