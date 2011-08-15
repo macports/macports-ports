@@ -89,7 +89,9 @@ proc perl5.setup {module vers {cpandir ""}} {
         set perl5.cpandir ${cpandir}
     }
 
-    name                p5-[string tolower ${perl5.module}]
+    if {![info exists name]} {
+        name            p5-[string tolower ${perl5.module}]
+    }
     version             [perl5_convert_version ${perl5.moduleversion}]
     categories          perl
     homepage            http://search.cpan.org/dist/${perl5.module}/
@@ -98,16 +100,18 @@ proc perl5.setup {module vers {cpandir ""}} {
     distname            ${perl5.module}-${perl5.moduleversion}
     dist_subdir         perl5
 
+    set rootname        [string range $name 3 end]
+
     foreach v ${perl5.branches} {
-        subport p${v}-[string tolower ${perl5.module}] { depends_lib port:perl${v} }
+        subport p${v}-${rootname} { depends_lib port:perl${v} }
     }
 
     if {$subport == $name} {
         perl5.major
         distfiles
         supported_archs noarch
-        replaced_by p[option perl5.default_branch]-[string tolower ${perl5.module}]
-        depends_lib port:p[option perl5.default_branch]-[string tolower ${perl5.module}]
+        replaced_by p[option perl5.default_branch]-${rootname}
+        depends_lib port:p[option perl5.default_branch]-${rootname}
         use_configure no
         build {}
         destroot {
