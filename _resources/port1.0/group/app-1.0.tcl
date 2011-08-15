@@ -143,7 +143,7 @@ proc app.get_default_identifier {} {
 }
 
 # Implement our own lreverse proc, if it doesn't already exist. This will be
-# the case on Tiger which has Tcl 8.4; lreverse is new in Tcl 8.5.
+# the case on Tiger and Leopard which have Tcl 8.4; lreverse is new in Tcl 8.5.
 # Taken from http://wiki.tcl.tk/17188
 if {[info command lreverse] == ""} {
     proc lreverse l {
