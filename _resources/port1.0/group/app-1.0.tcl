@@ -252,5 +252,21 @@ platform macosx {
     }
 }
 
-# TODO: automatically add depends_build-append port:makeicns
+
+# Trace writes to app.icon and add or remove makeicns dependency as necessary.
+trace variable app.icon w app._icon_trace
+
+proc app._icon_trace {optionName unusedIndex unusedOperation} {
+    global depends_build
+    upvar ${optionName} option
+    set has_dep [expr {[lsearch ${depends_build} port:makeicns] != -1}]
+    set needs_dep [expr {[file extension ${option}] != ".icns"}]
+    if {${has_dep} && !${needs_dep}} {
+        depends_build-delete port:makeicns
+    } elseif {${needs_dep} && !${has_dep}} {
+        depends_build-append port:makeicns
+    }
+}
+
+
 # TODO: for Tiger we probably need our own lreverse implementation e.g. http://wiki.tcl.tk/17188
