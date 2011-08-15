@@ -142,6 +142,18 @@ proc app.get_default_identifier {} {
     return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
 }
 
+# Implement our own lreverse proc, if it doesn't already exist. This will be
+# the case on Tiger which has Tcl 8.4; lreverse is new in Tcl 8.5.
+# Taken from http://wiki.tcl.tk/17188
+if {[info command lreverse] == ""} {
+    proc lreverse l {
+        set r {}
+        set i [llength $l]
+        while {[incr i -1]} {lappend r [lindex $l $i]}
+        lappend r [lindex $l 0]
+    }
+}
+
 
 platform macosx {
     post-destroot {
@@ -267,6 +279,3 @@ proc app._icon_trace {optionName unusedIndex unusedOperation} {
         depends_build-append port:makeicns
     }
 }
-
-
-# TODO: for Tiger we probably need our own lreverse implementation e.g. http://wiki.tcl.tk/17188
