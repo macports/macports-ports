@@ -39,7 +39,6 @@
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
-default perl5.default_branch 5.12
 default perl5.branches {"5.8 5.10 5.12 5.14"}
 
 proc perl5.extract_config {var {default ""}} {
@@ -71,12 +70,23 @@ set perl5.cpandir ""
 
 # perl5 group setup procedure
 proc perl5.setup {module vers {cpandir ""}} {
-    global perl5.branches perl5.bin perl5.lib perl5.module perl5.moduleversion perl5.cpandir
-    global prefix subport name 
+    global perl5.branches perl5.default_branch perl5.bin perl5.lib \
+           perl5.module perl5.moduleversion perl5.cpandir \
+           prefix subport name
 
     # define perl5.module
     set perl5.module ${module}
     set perl5.moduleversion $vers
+
+    # check if a default version was set, otherwise use whatever
+    # ${prefix}/bin/perl was chosen, and if none, fall back to 5.12
+    if {![info exists perl5.default_branch]} {
+        if {[catch {set val [lindex [split [exec ${prefix}/bin/perl -V:version] {'}] 1]}]} {
+            perl5.default_branch 5.12
+        } else {
+            perl5.default_branch [join [lrange [split $val .] 0 1] .]
+        }
+    }
 
     # define perl5.cpandir
     # check if optional CPAN dir specified to perl5.setup
