@@ -134,6 +134,10 @@ proc app.get_default_identifier {} {
         set identifier [lrange ${identifier} 1 end]
     }
     set identifier [lreverse ${identifier}]
+    set identifier [concat ${identifier} [lrange [split ${homepage} "/"] 3 end]]
+    if {[lindex ${identifier} end] == ""} {
+        set identifier [lrange ${identifier} 0 end-1]
+    }
     lappend identifier [string map {"." ""} ${app.name}]
     return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
 }
