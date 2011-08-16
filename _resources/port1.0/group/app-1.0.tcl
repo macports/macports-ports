@@ -271,7 +271,7 @@ trace variable app.icon w app._icon_trace
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build
     upvar ${optionName} option
-    set has_dep [expr {[lsearch ${depends_build} port:makeicns] != -1}]
+    set has_dep [expr {[info exists depends_build] ? [lsearch ${depends_build} port:makeicns] != -1 : 0}]
     set needs_dep [expr {[file extension ${option}] != ".icns"}]
     if {${has_dep} && !${needs_dep}} {
         depends_build-delete port:makeicns
