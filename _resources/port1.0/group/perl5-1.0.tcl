@@ -61,6 +61,8 @@ default perl5.bin {${prefix}/bin/perl${perl5.major}}
 default perl5.lib {${prefix}/lib/perl5/vendor_perl/${perl5.version}}
 default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
+default livecheck.version {${perl5.moduleversion}}
+
 default configure.universal_args {}
 
 # define these empty initially, they are set by perl5.setup arguments
