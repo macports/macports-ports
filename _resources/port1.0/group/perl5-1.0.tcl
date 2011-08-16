@@ -112,35 +112,43 @@ proc perl5.setup {module vers {cpandir ""}} {
     distname            ${perl5.module}-${perl5.moduleversion}
     dist_subdir         perl5
 
-    set rootname        [string range $name 3 end]
+    if {[string match p5-* $name]} {
+        set rootname        [string range $name 3 end]
 
-    foreach v ${perl5.branches} {
-        subport p${v}-${rootname} { depends_lib port:perl${v} }
-    }
+        foreach v ${perl5.branches} {
+            subport p${v}-${rootname} {
+                depends_lib port:perl${v}
+                perl5.major ${v}
+            }
+        }
 
-    if {$subport == $name} {
-        perl5.major
-        distfiles
-        supported_archs noarch
-        replaced_by p[option perl5.default_branch]-${rootname}
-        depends_lib port:p[option perl5.default_branch]-${rootname}
-        use_configure no
-        build {}
-        destroot {
-            xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
-            system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
+        if {$subport == $name} {
+            perl5.major
+            distfiles
+            supported_archs noarch
+            replaced_by p[option perl5.default_branch]-${rootname}
+            depends_lib port:p[option perl5.default_branch]-${rootname}
+            use_configure no
+            build {}
+            destroot {
+                xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
+            }
         }
     } else {
-        perl5.major [string range $subport 1 [expr [string first - $subport]-1]]
+        perl5.major ${perl5.default_branch}
+        depends_lib port:perl${perl5.default_branch}
+    }
+    if {![string match p5-* $name] || $subport != $name} {
         configure.cmd       ${perl5.bin}
         configure.env       PERL_AUTOINSTALL=--skipdeps
         configure.pre_args  Makefile.PL
         configure.args      INSTALLDIRS=vendor
-    
+
         test.run            yes
-    
+
         destroot.target     pure_install
-    
+
         post-destroot {
             fs-traverse file ${destroot}${perl5.lib} {
                 if {[file tail ${file}] eq ".packlist"} {
