@@ -40,6 +40,15 @@
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
 default perl5.branches {"5.8 5.10 5.12 5.14"}
+default perl5.default_branch {[perl5_get_default_branch]}
+proc perl5_get_default_branch {} {
+    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.12
+    if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
+        return [join [lrange [split $val .] 0 1] .]
+    } else {
+        return 5.12
+    }
+}
 
 proc perl5.extract_config {var {default ""}} {
     global perl5.bin
@@ -54,6 +63,7 @@ proc perl5.extract_config {var {default ""}} {
 # Set some variables.
 options perl5.version perl5.major perl5.arch perl5.lib perl5.archlib perl5.bin
 default perl5.version {[perl5.extract_config version]}
+default perl5.major {${perl5.default_branch}}
 default perl5.arch {[perl5.extract_config archname ${os.platform}]}
 default perl5.bin {${prefix}/bin/perl${perl5.major}}
 
@@ -79,16 +89,6 @@ proc perl5.setup {module vers {cpandir ""}} {
     # define perl5.module
     set perl5.module ${module}
     set perl5.moduleversion $vers
-
-    # check if a default version was set, otherwise use whatever
-    # ${prefix}/bin/perl was chosen, and if none, fall back to 5.12
-    if {![info exists perl5.default_branch]} {
-        if {[catch {set val [lindex [split [exec ${prefix}/bin/perl -V:version] {'}] 1]}]} {
-            perl5.default_branch 5.12
-        } else {
-            perl5.default_branch [join [lrange [split $val .] 0 1] .]
-        }
-    }
 
     # define perl5.cpandir
     # check if optional CPAN dir specified to perl5.setup
@@ -136,7 +136,6 @@ proc perl5.setup {module vers {cpandir ""}} {
             }
         }
     } else {
-        perl5.major ${perl5.default_branch}
         depends_lib port:perl${perl5.default_branch}
     }
     if {![string match p5-* $name] || $subport != $name} {
