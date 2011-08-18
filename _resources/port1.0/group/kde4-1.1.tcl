@@ -95,6 +95,7 @@ if {${qt_dir} != ${prefix}} {
 
 # standard configure args; virtually all KDE ports use CMake and Qt4.
 configure.args-append   -DBUILD_doc=OFF \
+                        -DBUILD_docs=OFF \
                         -DBUILD_SHARED_LIBS=ON \
                         -DBUNDLE_INSTALL_DIR=${applications_dir}/KDE4 \
                         -DKDE_DISTRIBUTION_TEXT=\"MacPorts\/Mac OS X\" \
@@ -140,7 +141,7 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
 # standard variant for building documentation
 variant docs description "Build documentation" {
     depends_lib-append      port:doxygen
-    configure.args-delete   -DBUILD_doc=OFF
+    configure.args-delete   -DBUILD_doc=OFF -DBUILD_docs=OFF
 }
 
 post-activate {
