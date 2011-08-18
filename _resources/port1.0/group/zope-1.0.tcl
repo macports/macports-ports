@@ -36,8 +36,8 @@
 #
 
 # Set some variables.
-set python.bin	${prefix}/bin/python2.3
-set python.lib	${prefix}/lib/python2.3
+set python.bin	${prefix}/bin/python2.6
+set python.lib	${prefix}/lib/python2.6
 
 set zope.home		${prefix}/libexec/Zope
 set zope.softhome	${zope.home}/lib/python
