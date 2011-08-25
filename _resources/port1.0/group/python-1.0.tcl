@@ -84,8 +84,11 @@ proc python_set_versions {option action args} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             distfiles
             supported_archs noarch
-            replaced_by py[option python.default_version][string trimleft $name py]
-            depends_lib port:py[option python.default_version][string trimleft $name py]
+            global python.default_version
+            if {${python.default_version} == "24"} {
+                replaced_by py24[string trimleft $name py]
+            }
+            depends_lib port:py${python.default_version}[string trimleft $name py]
             build {}
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
@@ -102,8 +105,11 @@ proc python_set_default_version {option action args} {
     global name subport
     if {[string match py-* $name]} {
         if {$subport == $name || $subport == ""} {
-            replaced_by py[option python.default_version][string trimleft $name py]
-            depends_lib port:py[option python.default_version][string trimleft $name py]
+            global python.default_version
+            if {${python.default_version} == "24"} {
+                replaced_by py24[string trimleft $name py]
+            }
+            depends_lib port:py${python.default_version}[string trimleft $name py]
         }
     } else {
         depends_lib-append port:python[option python.default_version]
