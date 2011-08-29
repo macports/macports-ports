@@ -108,6 +108,9 @@ proc python_set_default_version {option action args} {
             global python.default_version
             if {${python.default_version} == "24"} {
                 replaced_by py24[string trimleft $name py]
+            } else {
+                global replaced_by
+                unset replaced_by
             }
             depends_lib port:py${python.default_version}[string trimleft $name py]
         }
