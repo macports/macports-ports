@@ -1,5 +1,13 @@
 --- fetch.c.orig	2006-01-13 10:07:49.000000000 +0100
 +++ fetch.c	2007-09-08 23:13:26.000000000 +0200
+@@ -33,6 +33,7 @@
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/time.h>
++#include <sys/ioctl.h>
+ 
+ #include <ctype.h>
+ #include <err.h>
 @@ -202,12 +202,16 @@
  
  	fprintf(stderr, "\r%-46.46s", xs->name);
