@@ -47,7 +47,7 @@ configure.cppflags-delete -I${prefix}/include
 post-extract            { file mkdir ${workpath}/build }
 
 # standard post-arg, where to find the primary CMakeLists.txt file.
-default configure.post_args {../${distname}}
+default configure.post_args {../${worksrcdir}}
 default configure.dir       {${workpath}/build}
 default build.dir           {${workpath}/build}
 
@@ -77,7 +77,7 @@ switch ${os.platform}_${os.major} {
 post-extract {
     # Following the official word: Change #include ["<]Phonon...[">] to
     # ...phonon... in all files that contain that header.
-    fs-traverse item ${workpath}/${distname} {
+    fs-traverse item ${worksrcpath} {
         if {[file isfile ${item}]} {
             reinplace "/#include/s@Phonon@phonon@" ${item}
         }
