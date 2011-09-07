@@ -1,5 +1,5 @@
---- ../common/key.h.orig	2009-09-14 11:42:00.000000000 -0700
-+++ ../common/key.h	2009-09-14 11:42:10.000000000 -0700
+--- common/key.h.orig	2009-09-14 11:42:00.000000000 -0700
++++ common/key.h	2009-09-14 11:42:10.000000000 -0700
 @@ -196,19 +196,6 @@
  	(KEYS_WAITING(sp) &&						\
  	    FL_ISSET((sp)->wp->i_event[(sp)->wp->i_next].e_flags, CH_MAPPED))
