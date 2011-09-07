@@ -211,7 +211,7 @@ platform macosx {
             }
             
             # If app.executable is in the destroot, link to it.
-            if {[file exists ${destroot}${executable}]} {
+            if {[file exists ${destroot}[app._resolve_symlink ${executable} ${destroot}]]} {
                 ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
             } elseif {[file exists ${executable}]} {
                 # If app.executable starts with ${workpath} or ${filespath}, copy it.
@@ -278,4 +278,15 @@ proc app._icon_trace {optionName unusedIndex unusedOperation} {
     } elseif {${needs_dep} && !${has_dep}} {
         depends_build-append port:makeicns
     }
+}
+
+
+# Recursively resolve a symlink in a destroot.
+proc app._resolve_symlink {path destroot} {
+    if {[catch {set resolved_path [file join [file dirname ${path}] [file readlink ${destroot}${path}]]}]} {
+#        ui_debug "In ${destroot}, ${path} is not a symlink"
+        return ${path}
+    }
+#    ui_debug "In ${destroot}, ${path} is a symlink to ${resolved_path}"
+    return [app._resolve_symlink ${resolved_path} ${destroot}]
 }
