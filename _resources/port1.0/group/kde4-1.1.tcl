@@ -149,7 +149,7 @@ post-activate {
     ui_msg "# Don't forget that dbus needs to be started as the local "
     ui_msg "# user (not with sudo) before any KDE programs will launch"
     ui_msg "# To start it run the following command:                  "
-    ui_msg "# launchctl load /Library/LaunchAgents/org.freedesktop.dbus-session.plist"
+    ui_msg "# launchctl load -w /Library/LaunchAgents/org.freedesktop.dbus-session.plist"
     ui_msg "##########################################################"
     ui_msg " "
     ui_msg "######################################################"
