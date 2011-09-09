@@ -42,6 +42,7 @@ options perl5.default_branch perl5.branches
 default perl5.branches {"5.8 5.10 5.12 5.14"}
 default perl5.default_branch {[perl5_get_default_branch]}
 proc perl5_get_default_branch {} {
+    global prefix
     # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.12
     if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
         return [join [lrange [split $val .] 0 1] .]
