@@ -3,6 +3,7 @@
 
 PortSystem 1.0
 PortGroup xcodeversion 1.0
+PortGroup muniversal 1.0
 
 name            ffmpeg-devel
 conflicts       ffmpeg
@@ -68,6 +69,10 @@ depends_lib     port:lame \
                 port:bzip2 \
                 port:zlib
 
+build.cmd       ${prefix}/bin/gmake
+build.env-append V=1
+
+#
 # enable auto configure of mmx and related Intel optimizations by default
 # requires Xcode 3.1 or better on Leopard
 #
@@ -75,8 +80,21 @@ minimum_xcodeversions {9 3.1}
 
 # Under some conditions, llvm-gcc-4.2 drops some "unused" code even though it is used
 # fixed in llvm-gcc trunk, but not in Apple's shipped llvm-gccs.
-if {${configure.compiler} == "llvm-gcc-4.2"} {
-	configure.compiler clang
+#
+# similarly clang fails to build on i386 platforms
+#
+# use code provided by jeremyhu here to use gcc-4.2 instead
+#
+# http://lists.macosforge.org/pipermail/macports-dev/2011-July/015263.html
+#
+
+if {${configure.compiler} == "clang" ||
+    ${configure.compiler} == "llvm-gcc-4.2"} {
+    configure.compiler gcc-4.2
+    if {![file executable ${configure.cc}]} {
+        depends_build-append port:apple-gcc42
+        configure.compiler apple-gcc-4.2
+    }
 }
 
 configure.cflags-append    -DHAVE_LRINTF ${configure.cppflags}
@@ -101,44 +119,46 @@ configure.args \
 
 #add --enable-libopenjpeg when problems with openjpeg.h are resolved
 
-if {$build_arch != ""} {
-    configure.args-append --arch=${build_arch}
-}
-
-build.cmd       ${prefix}/bin/gmake
-build.env-append V=1
-
 test.run        yes
 
 #
 # configure isn't autoconf and they do use a dep cache
 #
 
-universal_variant no
-
 post-destroot {
     file mkdir ${destroot}${prefix}/share/doc/ffmpeg
     file copy ${worksrcpath}/doc/APIchanges ${destroot}${prefix}/share/doc/ffmpeg
-    foreach f [glob ${worksrcpath}/doc/*.txt ${worksrcpath}/doc/*.html] {
+    file copy ${worksrcpath}/doc/RELEASE_NOTES ${destroot}${prefix}/share/doc/ffmpeg
+    foreach f [glob ${worksrcpath}/doc/*.txt] {
         file copy $f ${destroot}${prefix}/share/doc/ffmpeg
-    }
-}
-
-platform darwin 10 {
-    # ticket #20938 -- disable mmx for 32 bit intel only
-    if { $build_arch == "i386" } {
-        # swscale is no longer GPL only
-        configure.args-delete --enable-swscale
-        if { ![variant_isset no_mmx] } {
-            configure.args-append --disable-mmx --disable-mmx2 --disable-sse --disable-ssse3 --disable-amd3dnow --disable-amd3dnowext
-        }
     }
 }
 
 platform powerpc {
     # absence of altivec is not automatically detected
-    if {[exec sysctl -n hw.vectorunit] == 0} {
+    if {[catch {sysctl hw.vectorunit} result] || $result == 0} {
         configure.args-append --disable-altivec
+    }
+}
+
+configure.universal_args-delete --disable-dependency-tracking
+
+if {[variant_isset universal]} {
+    foreach arch ${configure.universal_archs} {
+        lappend merger_configure_args($arch) --arch=${arch}
+        lappend merger_configure_env($arch)  ASFLAGS='-arch ${arch}'
+    }
+    if {[string match "*86*" ${configure.universal_archs}]} {
+        depends_build-append port:yasm
+    }
+    lappend merger_configure_args(i386) --enable-yasm
+    lappend merger_configure_args(x86_64) --enable-yasm
+} else {
+    configure.args-append --arch=${configure.build_arch}
+    configure.env-append  ASFLAGS='[get_canonical_archflags]'
+    if {$build_arch == "i386" || $build_arch == "x86_64"} {
+        depends_build-append port:yasm
+        configure.args-append --enable-yasm
     }
 }
 
@@ -146,20 +166,26 @@ variant no_mmx description {disable all x86 asm optimizations} {
     configure.args-append --disable-mmx --disable-mmx2 --disable-sse --disable-ssse3 --disable-amd3dnow --disable-amd3dnowext
 }
 
-variant no_gpl description {disallow use of GPL code, license will be LGPL if +no_nonfree is selected} {
-    configure.args-delete   --enable-gpl
-    configure.args-delete   --enable-postproc
-    configure.args-delete   --enable-libx264
-    depends_build-delete    port:x264
-    configure.args-delete   --enable-libxvid
+variant no_gpl description {disallow use of GPL code, license will be LGPL} {
+    configure.args-delete   --enable-gpl \
+                            --enable-postproc \
+                            --enable-libx264 \
+                            --enable-libxvid
     depends_lib-delete      port:XviD
+    depends_build-delete    port:x264
+    license-delete          GPL-2+
 }
 
 variant no_nonfree description {disallow use of nonfree code, libraries and binaries will be redistributable under GPL/LGPL} {
-    configure.args-delete   --enable-nonfree
-    configure.args-delete   --enable-libfaac
+    configure.args-delete   --enable-nonfree \
+                            --enable-libfaac
     depends_lib-delete      port:faac
+    license-delete          nonfree
 }
+
+# the build server uses the default variants, and we want distributable binaries
+
+default_variants    +no_nonfree
 
 #
 # jack indev support is currently broken
@@ -172,9 +198,8 @@ variant jack description {Enable jack input device support (currently broken)} {
     depends_lib-append port:jack
 }
 
-post-activate {
-    if {![variant_isset no_nonfree]} {
-        ui_msg "
+if {![variant_isset no_nonfree]} {
+notes "
 *******
 ******* This build of ${name} includes nonfree code as follows:
 *******
@@ -192,8 +217,8 @@ post-activate {
 ******* To remove this restriction use variant +no_nonfree
 *******
 "
-    } elseif {![variant_isset no_gpl]} {
-        ui_msg "
+} elseif {![variant_isset no_gpl]} {
+notes "
 *******
 ******* This build of ${name} includes GPLed code and
 ******* is therefore licensed under GPL v2 or later.
@@ -207,15 +232,15 @@ post-activate {
 ******* To include only LGPLed code use variant +no_gpl +no_nonfree
 *******
 "
-    } else {
-        ui_msg "
+} else {
+notes "
 *******
 ******* This build of ${name} includes no GPLed or nonfree
 ******* code and is therefore licensed under LGPL v2.1 or later.
 *******
 "
-    }
 }
+
 #
 #disable livecheck
 #
