@@ -509,7 +509,6 @@ set portfetch::mirror_sites::sites(xorg) {
     http://mirror.switch.ch/ftp/mirror/X11/pub/
     ftp://ftp.gwdg.de/pub/x11/x.org/pub/
     http://ftp.cica.es/mirrors/X/pub/
-    http://mirror.cict.fr/x.org/pub/
     ftp://ftp.ntua.gr/pub/X11/X.org/
     ftp://ftp.cs.cuhk.edu.hk/pub/X11/
     http://mi.mirror.garr.it/mirrors/x.org/
