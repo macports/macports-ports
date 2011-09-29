@@ -34,6 +34,9 @@
 # Usage:
 # PortGroup     ocaml 1.0
 
+# ocaml is not universal
+universal_variant no
+
 # ocaml executable
 global ocaml
 set ocaml "${prefix}/bin/ocaml"
@@ -79,6 +82,16 @@ proc use_oasis {option} {
         global destroot.cmd destroot.target
         destroot.cmd ${configure.cmd}
         destroot.target "setup.ml -install"
+        destroot.destdir
+    }
+}
+
+proc use_oasis_doc {option} {
+    if {${option} == "yes"} {
+        global ocaml worksrcpath
+        post-build {
+            system -W ${worksrcpath} "${ocaml} setup.ml -doc"
+        }
     }
 }
 
