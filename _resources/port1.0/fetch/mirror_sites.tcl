@@ -158,6 +158,9 @@ set portfetch::mirror_sites::sites(gimp) {
     ftp://ftp.gtk.org/pub/
     http://ftp.gtk.org/pub/
     http://gimp.mirrors.hoobly.com/
+    http://gimp.cp-dev.com/
+    http://gimp.promotionalpromos.com/
+    http://gimp.sixsigmaonline.org/
     ftp://gd.tuwien.ac.at/graphics/gimp/
     http://ftp.iut-bm.univ-fcomte.fr/gimp/
     ftp://ftp.gwdg.de/pub/misc/grafik/gimp/
@@ -167,7 +170,6 @@ set portfetch::mirror_sites::sites(gimp) {
     ftp://ftp.u-aizu.ac.jp/pub/graphics/tools/gimp/
     ftp://ftp.snt.utwente.nl/pub/software/gimp/
     http://ftp.snt.utwente.nl/pub/software/gimp/
-    ftp://ftp.sai.msu.su/pub/unix/graphics/gimp/mirror/
     ftp://ftp.acc.umu.se/pub/gimp/
 }
 
