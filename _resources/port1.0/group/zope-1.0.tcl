@@ -133,21 +133,20 @@ proc zope.setup {product vers {products {}} {extensions {}}} {
 
 	destroot {
 		# Warn user if not running as root
-		if {$env(USER) != "root"} {
+		if {[geteuid] != 0} {
 			ui_msg "-----------------------------------------------------------"
 			ui_msg "Note that you are not running as root, so files installed"
 			ui_msg "by this port will not end up with proper ownership and"
 			ui_msg "likely not work correctly with Zope."
 			ui_msg "-----------------------------------------------------------"
 		}
-		cd ${worksrcpath}
 
 		# Install product(s)
 		if {[llength ${zope.products}] > 0} {
 			xinstall -d -m 0755 ${destroot}${zope.prodhome}
 			foreach item ${zope.products} {
 				set cmd "cp -R ${item} ${destroot}${zope.prodhome}/${item}"
-				ui_info ${cmd}; system ${cmd}
+				ui_info ${cmd}; system -W ${worksrcpath} ${cmd}
 			}
 		}
 
@@ -156,12 +155,12 @@ proc zope.setup {product vers {products {}} {extensions {}}} {
 			xinstall -d -m 0755 ${destroot}${zope.exthome}
 			foreach item ${zope.extensions} {
 				set cmd "cp -R ${item} ${destroot}${zope.exthome}/${item}"
-				ui_info ${cmd}; system ${cmd}
+				ui_info ${cmd}; system -W ${worksrcpath} ${cmd}
 			}
 		}
 
 		# Fix owner and group on installed data
-		if {$env(USER) == "root"} {
+		if {[geteuid] == 0} {
 			if {[llength ${zope.products}] > 0} {
 				set cmd "chown -R ${zope.user} ${destroot}${zope.home}"
 				ui_info ${cmd}; system ${cmd}
