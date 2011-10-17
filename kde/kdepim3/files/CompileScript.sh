@@ -6,7 +6,6 @@
 
 	export CC=gcc CXX=g++
 
-	ranlib %p/lib/libgpg*.a >/dev/null 2>&1
 	./build-helper.sh cvs       %N %v %r make -f admin/Makefile.common cvs
 	./build-helper.sh configure %N %v %r ./configure %c $CONFIGURE_PARAMS
 
