@@ -3,13 +3,15 @@
 
 PortSystem	1.0
 PortGroup   qt4 1.0
+PortGroup   python 1.0
 
 name		py-pyqt4
-version		4.7.7
+version		4.8.5
 revision    1
-platforms	macosx
+python.versions   24 25 26 27 31
 categories	python devel
-maintainers	gmail.com:tim.stoop
+platforms	macosx
+maintainers     michaelld openmaintainer
 license             {GPL-2 GPL-3}
 description	PyQt4 is a set of Python bindings for the Qt4 toolkit
 long_description \
@@ -17,44 +19,165 @@ long_description \
 		bindings are implemented as a set of Python modules: qt, \
 		qtcanvas, qtgl, qtnetwork, qtsql, qttable, qtui and qtxml, \
 		and contains 300 classes and over 5,750 functions and methods.
-homepage	http://www.riverbankcomputing.co.uk/pyqt/index.php
-master_sites    http://www.riverbankcomputing.com/static/Downloads/PyQt4/ \
-                http://pyqwt.sourceforge.net/support/
+homepage	http://www.riverbankcomputing.co.uk/software/pyqt/intro
+master_sites	http://www.riverbankcomputing.com/static/Downloads/PyQt4/ \
+		http://pyqwt.sourceforge.net/support/
 distname	PyQt-mac-gpl-${version}
+dist_subdir         python
 
-checksums           md5     18213126857b7c6e6da6f7a1720d4870 \
-                    sha1    e07f851b54fa5cf6ec3e146f07b1c234c5069ca3 \
-                    rmd160  fe1a01ce93a012224a4c590b56dc3bfa8fcdbe74
+checksums           md5     a085fdd5052d22a76e09f14943e8b988 \
+                    sha1    8a1152d4344212153b7c0140bc902077fb2171fe \
+                    rmd160  0e22ea863e5bd81df4ae81f839b8cd4fed2958dd
 
-depends_lib-append port:py-sip
+if {$subport != $name} {
 
-#patchfiles	patch-configure.py
+    depends_lib-append port:py${python.version}-sip
 
-pre-configure {
-	file copy -force ${qt_mkspecs_dir}/macx-g++/qmake.conf \
-		${worksrcpath}/qmake.conf
+    configure.args-append   -e QtGui \
+                            -e QtHelp \
+                            -e QtMultimedia \
+                            -e QtNetwork \
+                            -e QtDeclarative \
+                            -e QtOpenGL \
+                            -e QtScript \
+                            -e QtScriptTools \
+                            -e QtSql \
+                            -e QtSvg \
+                            -e QtTest \
+                            -e QtWebKit \
+                            -e QtXml \
+                            -e QtXmlPatterns \
+                            -e QtAssistant \
+                            -e QtDesigner \
+                            -e QAxContainer \
+                            --no-qsci-api
 
-	reinplace "s|-bundle|-bundle -flat_namespace -undefined suppress|" \
-		${worksrcpath}/qmake.conf
+    variant phonon description {Add phonon support} {
+        configure.args-append   -e phonon
+        depends_lib-append      port:phonon
+    }
+
+    if {${python.version} == 26 || ${python.version} == 27} {
+        variant scintilla description {Add QScintilla API file } {
+            configure.args-delete   --no-qsci-api
+            configure.args-append   --qsci-api
+            depends_lib-append      port:py${python.version}-qscintilla
+        }
+    }
+
+    # The patch file alters configure.py so that the qtdesigner plugin can link.
+    # - it ensures that both LFLAGS are included and that the relevant version framework is linked
+    patchfiles	patch-configure.py
+    post-patch {
+        reinplace "s|@@MACPORTS_PYTHON_FRAMEWORK@@|${python.prefix}/Python|" ${worksrcpath}/configure.py
+    }
+
+    use_configure yes
+
+    pre-configure {
+        # allow ccache, if specified by the user
+        if {[tbool configure.ccache]} {
+            configure.env-append "CCACHE=ccache"
+        }
+    }
+
+    configure.cmd	"${python.bin} configure.py -q ${qt_qmake_cmd} --verbose --confirm-license"
+    configure.pre_args
+    configure.post_args	LFLAGS="-F${frameworks_dir} -L${prefix}/lib"
+
+    variant universal {
+        configure.universal_args
+        configure.post_args	LFLAGS="-F${frameworks_dir} -L${prefix}/lib \
+                                    ${configure.universal_ldflags}"
+        configure.post_args-append	CFLAGS="${configure.universal_cflags}"
+        configure.post_args-append	CXXFLAGS="${configure.universal_cxxflags}"
+    }
+
+    post-configure {
+        if {[variant_isset universal]} {
+            set conflags ""
+            foreach arch ${configure.universal_archs} {
+                if {${arch} == "i386"} {append conflags "x86 "} else {
+                    if {${arch} == "ppc64"} {append conflags "ppc_64 "} else {
+                        append conflags ${arch} " "
+                    }
+                }
+            }
+
+            set profiles [exec find ${worksrcpath} -name "*.pro"]
+            foreach profile ${profiles} {
+                reinplace -E "s|^(CONFIG\[ \\t].*)|\\1 ${conflags}|" ${profile}
+            }
+            
+            # This file exists if Qt was installed non-universal. 
+            # Easiest just to check if it was created
+            if {[file exists ${worksrcpath}/designer/python.pro ]} {
+                system "cd ${worksrcpath}/designer && \
+                    ${qt_qmake_cmd} -spec ${qt_mkspecs_dir}/macx-g++ \
+                        -o Makefile python.pro"
+            }
+        }
+    }
+
+# allow ccache, if specified by the user
+    pre-build {
+        if {[tbool configure.ccache]} {
+            build.post_args "CCACHE=ccache"
+        }
+    }
+
+    build.cmd         make
+    build.target    all
+    use_parallel_build yes
+
+    destroot.cmd      ${build.cmd}
+    destroot.destdir  DESTDIR=${destroot}
+
+    test.run	yes
+    test.cmd	cd qt && ${python.bin} -c 'import PyQt4'
+
+    post-destroot {
+        # Clean out empty dirs first
+        set docdir ${destroot}${prefix}/share/doc
+        file delete ${docdir}/${subport}/examples
+        file delete ${docdir}/${subport}/
+        file copy ${worksrcpath}/doc ${docdir}/${subport}
+        file copy ${worksrcpath}/examples \
+            ${docdir}/${subport}
+        xinstall -m 644 -W ${worksrcpath} \
+            GPL_EXCEPTION.TXT GPL_EXCEPTION_ADDENDUM.TXT \
+            LICENSE.GPL2 LICENSE.GPL3 OPENSOURCE-NOTICE.TXT NEWS README \
+            THANKS \
+            ${docdir}/${subport}
+
+        # This file exists if Qt was installed non-universal. 
+        # Easiest just to check if it was created
+        if {[file exists ${destroot}${qt_plugins_dir}/designer/libpythonplugin.dylib]} {
+            # rename Qt4 specific files
+            # (a) designer plugin
+            set old_name libpythonplugin.dylib
+            set new_name libpython${python.version}plugin.dylib
+
+            move ${destroot}${qt_plugins_dir}/designer/${old_name} \
+                ${destroot}${qt_plugins_dir}/designer/${new_name}
+            system "install_name_tool -id ${new_name} \
+                ${destroot}${qt_plugins_dir}/designer/${new_name}"
+        }
+
+        # (b) Qsci API file, if it exists (if Qsci is installed at build time)
+        if {[variant_isset scintilla]} {
+            move ${destroot}${qt_data_dir}/qsci/api/python/PyQt4.api \
+                ${destroot}${qt_data_dir}/qsci/api/python/PyQt4-Python${python.branch}.api
+        }
+    }
+
+    variant debug description "Build debug libraries" {
+        configure.cmd-append --debug
+    }
+
 }
 
-configure.cmd	"${prefix}/bin/python2.4 configure.py \
-		-g -q ${qt_qmake_cmd} \
-		--confirm-license"
-configure.pre_args
-configure.post_args	LFLAGS="-F${prefix}/Library/Frameworks -L${prefix}/lib"
+livecheck.type   regex
+livecheck.url    http://www.riverbankcomputing.co.uk/software/pyqt/download
+livecheck.regex  "PyQt-mac-gpl-(\[0-9.\]\\.\[0-9.\]\\.\[0-9.\]).tar.gz"
 
-test.run	yes
-test.cmd	cd qt && ${prefix}/bin/python2.4 -c 'import PyQt4'
-
-post-destroot {
-	xinstall -m 755 -d ${destroot}${prefix}/share/doc
-	file copy ${worksrcpath}/doc ${destroot}${prefix}/share/doc/${name}
-	file copy ${worksrcpath}/examples \
-		${destroot}${prefix}/share/doc/${name}
-	xinstall -m 644 -W ${worksrcpath} \
-		GPL_EXCEPTION.TXT GPL_EXCEPTION_ADDENDUM.TXT \
-		LICENSE-MERGED-GPL2-GPL3 LICENSE.GPL2 LICENSE.GPL3 OPENSOURCE-NOTICE.TXT NEWS README \
-		THANKS \
-		${destroot}${prefix}/share/doc/${name}
-}
