@@ -31,6 +31,7 @@ set portfetch::mirror_sites::sites(apache) {
     http://apache-mirror.dkuug.dk/
     http://apache.is.co.za/
     http://mirror.facebook.net/apache/
+    http://apache.pesat.net.id/
     http://www.apache.org/dist/
     http://archive.apache.org/dist/
 }
@@ -291,6 +292,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
     http://distfiles.macports.org/:mirror
     http://aarnet.au.distfiles.macports.org/pub/macports/mpdistfiles/:mirror
     http://her.gr.distfiles.macports.org/mirrors/macports/mpdistfiles/:mirror
+    http://jog.id.distfiles.macports.org/macports/mpdistfiles/:mirror
     http://lil.fr.distfiles.macports.org/:mirror
     http://sea.us.distfiles.macports.org/macports/mpdistfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
@@ -347,6 +349,7 @@ set portfetch::mirror_sites::sites(php) {
     http://es.php.net/distributions/:nosubdir
     http://fi.php.net/distributions/:nosubdir
     http://fr2.php.net/distributions/:nosubdir
+    http://id.php.net/distributions/:nosubdir
     http://jp2.php.net/distributions/:nosubdir
     http://uk3.php.net/distributions/:nosubdir
     http://us.php.net/distributions/:nosubdir
