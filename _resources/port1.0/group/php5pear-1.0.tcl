@@ -1,4 +1,4 @@
-# $Id: php5pear-1.0.tcl 76571 2011-02-28 15:42:47Z pixilla@macports.org $
+# $Id$
 # 
 # Copyright (c) 2009 The MacPorts Project
 # All rights reserved.
