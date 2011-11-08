@@ -457,7 +457,7 @@ set portfetch::mirror_sites::sites(sunsite) {
     ftp://ftp.tuwien.ac.at/pub/linux/ibiblio/
     ftp://ftp.cs.tu-berlin.de/pub/linux/Mirrors/sunsite.unc.edu/
     ftp://ftp.lip6.fr/pub/linux/sunsite/
-    http://ftp.surfnet.nl/pub/sunsite/
+    http://ftp.nluug.nl/pub/sunsite/
     ftp://ftp.nvg.ntnu.no/pub/mirrors/metalab.unc.edu/
     ftp://ftp.icm.edu.pl/vol/rzm1/linux-ibiblio/
     ftp://ftp.cse.cuhk.edu.hk/pub4/Linux/
