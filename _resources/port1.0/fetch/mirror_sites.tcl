@@ -267,16 +267,14 @@ set portfetch::mirror_sites::sites(isc) {
 
 set portfetch::mirror_sites::sites(kde) {
     http://mirrors.mit.edu/kde/
-    http://ibiblio.org/pub/mirrors/kde/
     http://kde.mirrors.hoobly.com/
     http://ftp.gtlib.cc.gatech.edu/pub/kde/
     http://gd.tuwien.ac.at/kde/
     http://mirrors.isc.org/pub/kde/
     http://kde.mirrors.tds.net/pub/kde/
-    ftp://ftp.oregonstate.edu/pub/kde/
     ftp://ftp.solnet.ch/mirror/KDE/
     http://mirror.internode.on.net/pub/kde/
-    http://mirror.aarnet.edu.au/pub/kde/
+    http://mirror.aarnet.edu.au/pub/KDE/
     http://ftp.chg.ru/pub/kde/
     http://ftp.kddlabs.co.jp/pub/X11/kde/
     ftp://ftp.kde.org/pub/kde/
