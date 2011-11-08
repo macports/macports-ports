@@ -370,14 +370,12 @@ set portfetch::mirror_sites::sites(postgresql) {
 }
 
 set portfetch::mirror_sites::sites(ruby) {
-    http://www.ibiblio.org/pub/languages/ruby/
-    http://mirrors.sunsite.dk/ruby/
+    http://mirrors.ibiblio.org/pub/mirrors/ruby/
     ftp://xyz.lcs.mit.edu/pub/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
     ftp://ftp.fu-berlin.de/unix/languages/ruby/
     ftp://ftp.easynet.be/ruby/ruby/
     ftp://ftp.ntua.gr/pub/lang/ruby/
-    ftp://ftp.chg.ru/pub/lang/ruby/
     ftp://ftp.iDaemons.org/pub/mirror/ftp.ruby-lang.org/ruby/
     http://ftp.ruby-lang.org/pub/ruby/
     ftp://ftp.ruby-lang.org/pub/ruby/
