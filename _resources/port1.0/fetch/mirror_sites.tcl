@@ -14,7 +14,6 @@ namespace eval portfetch::mirror_sites { }
 
 set portfetch::mirror_sites::sites(afterstep) {
     ftp://ftp.kddlabs.co.jp/X11/AfterStep/
-    ftp://ftp.chg.ru/pub/X11/windowmanagers/afterstep/
     ftp://ftp.dti.ad.jp/pub/X/AfterStep/
     ftp://ftp.afterstep.org/
 }
@@ -200,7 +199,6 @@ set portfetch::mirror_sites::sites(gnome) {
     ftp://ftp.dit.upm.es/pub/GNOME/
     ftp://ftp.no.gnome.org/pub/GNOME/
     ftp://ftp.nara.wide.ad.jp/pub/X11/GNOME/
-    ftp://ftp.chg.ru/pub/X11/gnome/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
     http://mirror.internode.on.net/pub/gnome/
     http://ftp.df.lth.se/pub/gnome/
@@ -217,7 +215,6 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.dti.ad.jp/pub/GNU/
     ftp://ftp.informatik.hu-berlin.de/pub/gnu/gnu/
     ftp://ftp.lip6.fr/pub/gnu/
-    ftp://ftp.chg.ru/pub/gnu/
     http://mirror.internode.on.net/pub/gnu/
     http://mirror.aarnet.edu.au/pub/gnu/
     ftp://ftp.gnu.org/gnu/
@@ -275,7 +272,6 @@ set portfetch::mirror_sites::sites(kde) {
     ftp://ftp.solnet.ch/mirror/KDE/
     http://mirror.internode.on.net/pub/kde/
     http://mirror.aarnet.edu.au/pub/KDE/
-    http://ftp.chg.ru/pub/kde/
     http://ftp.kddlabs.co.jp/pub/X11/kde/
     ftp://ftp.kde.org/pub/kde/
     http://mirror.facebook.net/kde/
@@ -318,7 +314,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://ftp.jp.openbsd.org/pub/OpenBSD/
     http://mirror.internode.on.net/pub/OpenBSD/
     http://mirror.aarnet.edu.au/pub/OpenBSD/
-    ftp://ftp.chg.ru/pub/OpenBSD/
     ftp://ftp.openbsd.org/pub/OpenBSD/
 }
 
@@ -332,7 +327,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     ftp://ftp.cs.colorado.edu/pub/perl/CPAN/modules/by-module/
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
-    ftp://ftp.chg.ru/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
@@ -460,7 +454,6 @@ set portfetch::mirror_sites::sites(sunsite) {
     ftp://ftp.icm.edu.pl/vol/rzm1/linux-ibiblio/
     ftp://ftp.cse.cuhk.edu.hk/pub4/Linux/
     ftp://ftp.kddlabs.co.jp/Linux/metalab.unc.edu/
-    ftp://ftp.chg.ru/pub/Linux/sunsite/
 }
 
 set portfetch::mirror_sites::sites(tcltk) {
@@ -469,7 +462,6 @@ set portfetch::mirror_sites::sites(tcltk) {
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.kddlabs.co.jp/lang/tcl/ftp.scriptics.com/
     http://www.etsimo.uniovi.es/pub/mirrors/ftp.scriptics.com/
-    http://ftp.chg.ru/pub/lang/tcl/
     ftp://ftp.tcl.tk/pub/tcl/
 }
 
@@ -481,7 +473,6 @@ set portfetch::mirror_sites::sites(tex_ctan) {
     ftp://ctan.unsw.edu.au/tex-archive/
     http://mirror.aarnet.edu.au/pub/CTAN/
     ftp://ftp.kddlabs.co.jp/CTAN/
-    ftp://ftp.chg.ru/pub/TeX/CTAN/
     ftp://mirror.macomnet.net/pub/CTAN/
     http://ftp.sun.ac.za/ftp/CTAN/
     http://ftp.inf.utfsm.cl/pub/tex-archive/
@@ -503,7 +494,6 @@ set portfetch::mirror_sites::sites(xcontrib) {
     ftp://ftp.net.ohio-state.edu/pub/X11/contrib/
     ftp://ftp.gwdg.de/pub/x11/x.org/contrib/
     http://mirror.aarnet.edu.au/pub/X11/contrib/
-    ftp://ftp.chg.ru/pub/X11/x.org/contrib/
     ftp://ftp2.x.org/contrib/
     ftp://ftp.x.org/contrib/
 }
