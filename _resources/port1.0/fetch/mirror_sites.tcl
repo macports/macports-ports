@@ -20,10 +20,9 @@ set portfetch::mirror_sites::sites(afterstep) {
 }
 
 set portfetch::mirror_sites::sites(apache) {
-    http://www.ibiblio.org/pub/mirrors/apache/
+    http://mirrors.ibiblio.org/pub/mirrors/apache/
     http://www.gtlib.gatech.edu/pub/apache/
-    http://apache.mirror.rafal.ca/
-    http://apache.mirroring.de/
+    http://apache.mirror.rafal.ca:8080/
     ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
     http://apache.multidist.com/
     http://mirror.internode.on.net/pub/apache/
