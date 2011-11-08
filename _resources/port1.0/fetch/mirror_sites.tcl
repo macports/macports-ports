@@ -20,7 +20,7 @@ set portfetch::mirror_sites::sites(afterstep) {
 }
 
 set portfetch::mirror_sites::sites(apache) {
-    http://mirrors.ibiblio.org/pub/mirrors/apache/
+    http://mirrors.ibiblio.org/apache/
     http://www.gtlib.gatech.edu/pub/apache/
     http://apache.mirror.rafal.ca:8080/
     ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
@@ -209,7 +209,7 @@ set portfetch::mirror_sites::sites(gnome) {
 }
 
 set portfetch::mirror_sites::sites(gnu) {
-    http://mirrors.ibiblio.org/pub/mirrors/gnu/ftp/gnu/
+    http://mirrors.ibiblio.org/gnu/ftp/gnu/
     http://mirror.facebook.net/gnu/gnu/
     ftp://ftp.funet.fi/pub/gnu/prep/
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
@@ -325,7 +325,7 @@ set portfetch::mirror_sites::sites(openbsd) {
 }
 
 set portfetch::mirror_sites::sites(perl_cpan) {
-    http://mirrors.ibiblio.org/pub/mirrors/CPAN/modules/by-module/
+    http://mirrors.ibiblio.org/CPAN/modules/by-module/
     http://ftp.ucr.ac.cr/Unix/CPAN/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
@@ -369,7 +369,7 @@ set portfetch::mirror_sites::sites(postgresql) {
 }
 
 set portfetch::mirror_sites::sites(ruby) {
-    http://mirrors.ibiblio.org/pub/mirrors/ruby/
+    http://mirrors.ibiblio.org/ruby/
     ftp://xyz.lcs.mit.edu/pub/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
     ftp://ftp.fu-berlin.de/unix/languages/ruby/
@@ -476,7 +476,7 @@ set portfetch::mirror_sites::sites(tcltk) {
 }
 
 set portfetch::mirror_sites::sites(tex_ctan) {
-    http://mirrors.ibiblio.org/pub/mirrors/CTAN/
+    http://mirrors.ibiblio.org/CTAN/
     http://ctan.math.utah.edu/ctan/tex-archive/
     ftp://ftp.funet.fi/pub/TeX/CTAN/
     http://mirror.internode.on.net/pub/ctan/
