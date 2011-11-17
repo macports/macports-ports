@@ -1,6 +1,6 @@
---- src/NAnt.DotNet/Tasks/ScriptTask.cs.orig	2008-04-26 23:06:17.000000000 -0400
-+++ src/NAnt.DotNet/Tasks/ScriptTask.cs	2008-04-26 23:07:28.000000000 -0400
-@@ -516,7 +516,7 @@
+--- src/NAnt.DotNet/Tasks/ScriptTask.cs.orig	2011-09-17 15:08:23.000000000 -0500
++++ src/NAnt.DotNet/Tasks/ScriptTask.cs	2011-11-17 15:19:28.000000000 -0600
+@@ -517,7 +517,7 @@
          #region Private Static Methods
  
          private static CodeDomProvider CreateCodeDomProvider(string typeName, string assemblyName) {
