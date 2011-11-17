@@ -1,6 +1,6 @@
 # $Id$
 # 
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2011 The MacPorts Project
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
 # 
 # 
 # This PortGroup automatically sets up the standard environment for installing
-# a PHP PEAR classes.
+# a PHP PEAR class.
 # 
 # Usage:
 # 
@@ -66,8 +66,8 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
   php5pear.package    ${php5pear.package}
   # The pear channel for the package.
   php5pear.channel    ${php5pear.channel}
-  # The name of the packages xml file used by pear to build the package.
-  # Note: so far the two knowns names are package.xml and package2.xml.
+  # The name of the package's xml file used by pear to build the package.
+  # Note: so far the two known names are package.xml and package2.xml.
   php5pear.packagexml ${php5pear.packagexml}
 
   name                pear-${php5pear.package}
@@ -138,7 +138,7 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
   post-extract {
     # Get the name of our package xml file.
     php5pear.packagexml [lindex [exec tar -tzf ${distpath}/${distname}${extract.suffix} | grep package.*\.xml] 0]
-    # The "--strip-components 1" causes the lose of our package file so we will extract it now.
+    # The "--strip-components 1" causes the loss of our package file so we will extract it now.
     system "tar -z -x -v -f '${distpath}/${distname}${extract.suffix}' - -C '${php5pear.sourceroot}' ${php5pear.packagexml}"
     # Install the pear command using the phar file.
     system "${php5pear.cmd-pre} ${php5pear.cmd-php} ${php5pear.cmd-phar}"
@@ -151,8 +151,8 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
   }
 
   configure {
-    # Setup pears conf file.
-    # The order of appears to be important, we get errors if we set php_dir before adding channels 
+    # Set up pear's conf file.
+    # The order appears to be important; we get errors if we set php_dir before adding channels
     # and the directory is not writable.
     xinstall -d "${php5pear.installer}/pear/php"
     system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set auto_discover 1"
@@ -174,7 +174,7 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
   build {
     # Get the name of our package xml file.
     php5pear.packagexml [lindex [exec tar -tzf ${distpath}/${distname}${extract.suffix} | grep package.*\.xml] 0]
-    # Install our package into our pears packagingroot.
+    # Install our package into our pear's packagingroot.
     system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} install -n -f -P '${php5pear.destroot}' ${php5pear.packagexml}"
   }
   
