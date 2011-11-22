@@ -1,8 +1,6 @@
-$FreeBSD: /repoman/r/pcvs/ports/benchmarks/bonnie++/files/patch-bonnie++.cpp,v 1.3 2003/12/21 03:19:28 petef Exp $
-
---- bonnie++.cpp.orig	Mon Aug 25 17:08:46 2003
-+++ bonnie++.cpp	Mon Aug 25 17:08:46 2003
-@@ -322,11 +322,7 @@
+--- bonnie++.cpp.orig	2009-07-03 11:38:14.000000000 +0900
++++ bonnie++.cpp	2011-11-22 08:42:45.000000000 +0900
+@@ -294,11 +294,7 @@
        {
          char *sbuf = _strdup(optarg);
          char *size = strtok(sbuf, ":");
@@ -14,7 +12,7 @@ $FreeBSD: /repoman/r/pcvs/ports/benchmarks/bonnie++/files/patch-bonnie++.cpp,v 1
          size = strtok(NULL, "");
          if(size)
          {
-@@ -411,15 +407,6 @@
+@@ -384,15 +380,6 @@
      if(file_size % 1024 > 512)
        file_size = file_size + 1024 - (file_size % 1024);
    }
@@ -30,7 +28,7 @@ $FreeBSD: /repoman/r/pcvs/ports/benchmarks/bonnie++/files/patch-bonnie++.cpp,v 1
    globals.byte_io_size = __min(file_size, globals.byte_io_size);
    globals.byte_io_size = __max(0, globals.byte_io_size);
  
-@@ -503,14 +490,6 @@
+@@ -465,14 +452,6 @@
       && (directory_max_size < directory_min_size || directory_max_size < 0
       || directory_min_size < 0) )
      usage();
