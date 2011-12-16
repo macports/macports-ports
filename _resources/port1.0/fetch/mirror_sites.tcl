@@ -135,7 +135,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.prz.rzeszow.pl/distfiles/:nosubdir
     http://darkstar.ist.utl.pt/gentoo/distfiles/:nosubdir
     http://mirrors.evolva.ro/gentoo/distfiles/:nosubdir
-    http://gentoo.ynet.sk/pub/distfiles/:nosubdir
     http://gentoo-euetib.upc.es/mirror/gentoo/distfiles/:nosubdir
     http://ftp.ds.karen.hj.se/gentoo/distfiles/:nosubdir
     http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
