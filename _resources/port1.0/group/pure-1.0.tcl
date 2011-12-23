@@ -46,8 +46,8 @@ proc pure.setup {module version} {
     
     name                        pure-${module}
     version                     ${version}
-    homepage                    http://pure-lang.googlecode.com/
-    master_sites                ${homepage}files/
+    homepage                    http://code.google.com/p/pure-lang/wiki/Addons#${name}
+    master_sites                googlecode:pure-lang
     
     depends_lib                 path:lib/libpure.dylib:pure
     
