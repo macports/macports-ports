@@ -48,8 +48,10 @@ proc crossbinutils.setup {target version} {
     version         ${version}
     categories      cross devel
     platforms       darwin
-    description     FSF Binutils for ${target} cross development
+    license         GPL-3+
+    maintainers     nomaintainer
 
+    description     FSF Binutils for ${target} cross development
     long_description \
         Free Software Foundation development toolchain ("binutils") for \
         ${target} cross development.
