@@ -153,7 +153,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${destroot}${perl5.lib} {
                 if {[file tail ${file}] eq ".packlist"} {
                     ui_info "Fixing packlist ${file}"
-                    reinplace "s|${destroot}||" ${file}
+                    reinplace -n "s|${destroot}||p" ${file}
                 }
             }
         }
