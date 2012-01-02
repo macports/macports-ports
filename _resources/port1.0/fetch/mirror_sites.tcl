@@ -348,7 +348,7 @@ set portfetch::mirror_sites::sites(php) {
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
-    http://ftp9.us.postgresql.org/pub/mirrors/postgresql/
+    http://ftp.postgresql.org/pub/
     http://ftp7.de.postgresql.org/ftp.postgresql.org/
     ftp://ftp2.ch.postgresql.org/pub/mirrors/postgresql
     ftp://ftp.de.postgresql.org/mirror/postgresql/
