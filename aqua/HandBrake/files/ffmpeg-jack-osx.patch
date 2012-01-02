@@ -1,0 +1,119 @@
+diff --git ffmpeg-r25689/configure ffmpeg-r25689/configure
+index 3fceb31..a0317d4 100755
+--- ffmpeg-r25689/configure
++++ ffmpeg-r25689/configure
+@@ -1085,6 +1085,7 @@ HAVE_LIST="
+     lrint
+     lrintf
+     lzo1x_999_compress
++    mach_semaphore_h
+     machine_ioctl_bt848_h
+     machine_ioctl_meteor_h
+     malloc_h
+@@ -1500,6 +1501,8 @@ ffserver_extralibs='$ldl'
+ 
+ doc_deps="texi2html"
+ 
++mach_semaphore_deps="mach_semaphore_h"
++
+ # tests
+ 
+ test_deps(){
+@@ -2951,6 +2954,8 @@ check_header soundcard.h
+ 
+ enabled_any alsa_indev alsa_outdev && check_lib2 alsa/asoundlib.h snd_pcm_htimestamp -lasound
+ 
++check_header mach/semaphore.h
++
+ enabled jack_indev && check_lib2 jack/jack.h jack_client_open -ljack
+ 
+ enabled_any sndio_indev sndio_outdev && check_lib2 sndio.h sio_open -lsndio
+diff --git ffmpeg-r25689/libavdevice/jack_audio.c ffmpeg-r25689/libavdevice/jack_audio.c
+index 9062e7f..274380d 100644
+--- ffmpeg-r25689/libavdevice/jack_audio.c
++++ ffmpeg-r25689/libavdevice/jack_audio.c
+@@ -21,7 +21,12 @@
+  */
+ 
+ #include "config.h"
++#ifdef HAVE_MACH_SEMAPHORE_H
++#include <mach/task.h>
++#include <mach/semaphore.h>
++#endif
+ #include <semaphore.h>
++
+ #include <jack/jack.h>
+ 
+ #include "libavutil/log.h"
+@@ -38,7 +43,11 @@
+ typedef struct {
+     jack_client_t * client;
+     int             activated;
++#ifdef HAVE_MACH_SEMAPHORE_H
++    semaphore_t     packet_count;
++#else
+     sem_t           packet_count;
++#endif
+     jack_nframes_t  sample_rate;
+     jack_nframes_t  buffer_size;
+     jack_port_t **  ports;
+@@ -99,7 +108,11 @@ static int process_callback(jack_nframes_t nframes, void *arg)
+ 
+     /* Send the now filled packet back, and increase packet counter */
+     av_fifo_generic_write(self->filled_pkts, &pkt, sizeof(pkt), NULL);
++#ifdef HAVE_MACH_SEMAPHORE_H
++    semaphore_signal(self->packet_count);
++#else
+     sem_post(&self->packet_count);
++#endif
+ 
+     return 0;
+ }
+@@ -150,7 +163,11 @@ static int start_jack(AVFormatContext *context, AVFormatParameters *params)
+         return AVERROR(EIO);
+     }
+ 
++#ifdef HAVE_MACH_SEMAPHORE_H
++    semaphore_create(TASK_NULL, &self->packet_count, 0, 0);
++#else
+     sem_init(&self->packet_count, 0, 0);
++#endif
+ 
+     self->sample_rate = jack_get_sample_rate(self->client);
+     self->nports      = params->channels;
+@@ -212,7 +229,11 @@ static void stop_jack(JackData *self)
+             jack_deactivate(self->client);
+         jack_client_close(self->client);
+     }
++#ifdef HAVE_MACH_SEMAPHORE_H
++    semaphore_destroy(TASK_NULL, self->packet_count);
++#else
+     sem_destroy(&self->packet_count);
++#endif
+     free_pkt_fifo(self->new_pkts);
+     free_pkt_fifo(self->filled_pkts);
+     av_freep(&self->ports);
+@@ -253,7 +274,11 @@ static int audio_read_header(AVFormatContext *context, AVFormatParameters *param
+ static int audio_read_packet(AVFormatContext *context, AVPacket *pkt)
+ {
+     JackData *self = context->priv_data;
++#ifdef HAVE_MACH_SEMAPHORE_H
++    mach_timespec_t timeout = {0, 0};
++#else
+     struct timespec timeout = {0, 0};
++#endif
+     int test;
+ 
+     /* Activate the JACK client on first packet read. Activating the JACK client
+@@ -274,7 +299,11 @@ static int audio_read_packet(AVFormatContext *context, AVPacket *pkt)
+ 
+     /* Wait for a packet comming back from process_callback(), if one isn't available yet */
+     timeout.tv_sec = av_gettime() / 1000000 + 2;
++#ifdef HAVE_MACH_SEMAPHORE_H
++    if (semaphore_timedwait(self->packet_count, timeout)) {
++#else
+     if (sem_timedwait(&self->packet_count, &timeout)) {
++#endif
+         if (errno == ETIMEDOUT) {
+             av_log(context, AV_LOG_ERROR,
+                    "Input error: timed out when waiting for JACK process callback output\n");
