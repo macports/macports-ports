@@ -70,7 +70,7 @@ post-extract {
 
 # if this is an oasis/setup.ml based installation
 proc use_oasis {option} {
-    depends_build-append port:caml-findlib
+    depends_build-append port:ocaml-findlib
     if {${option} == "yes"} {
         global ocaml prefix ocamlfind_wrapper
         global configure.cmd configure.pre_args
