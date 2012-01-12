@@ -160,7 +160,8 @@ proc texlive.texmfport {} {
     homepage        http://www.tug.org/texlive/
     platforms       darwin
     
-    supported_archs noarch 
+    supported_archs noarch
+    installs_libs   no
     
     master_sites    http://flute.csail.mit.edu/texlive/
     use_xz          yes
