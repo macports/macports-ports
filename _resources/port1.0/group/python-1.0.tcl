@@ -53,6 +53,10 @@ universal_variant yes
 
 build.target    build
 
+pre-destroot    {
+    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
+}
+
 options python.versions python.version python.default_version
 option_proc python.versions python_set_versions
 # py-foo historically meant python24
@@ -122,9 +126,6 @@ proc python_set_versions {option action args} {
                     }
                 }
             }
-        }
-        pre-destroot    {
-            xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
         }
         post-destroot {
             if {${python.link_binaries}} {
