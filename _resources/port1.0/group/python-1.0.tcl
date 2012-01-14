@@ -53,10 +53,6 @@ universal_variant yes
 
 build.target    build
 
-pre-destroot    {
-    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
-}
-
 options python.versions python.version python.default_version
 option_proc python.versions python_set_versions
 # py-foo historically meant python24
@@ -94,6 +90,49 @@ proc python_set_versions {option action args} {
             build {}
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
+            }
+        } else {
+            set addcode 1
+        }
+    } else {
+        set addcode 1
+    }
+    if {[info exists addcode]} {
+        pre-build {
+            if {${python.add_archflags}} {
+                if {[variant_exists universal] && [variant_isset universal]} {
+                    build.env-append CFLAGS="${configure.universal_cflags}" \
+                                     OBJCFLAGS="${configure.universal_cflags}" \
+                                     CXXFLAGS="${configure.universal_cxxflags}" \
+                                     LDFLAGS="${configure.universal_ldflags}"
+                } else {
+                    build.env-append CFLAGS="${configure.cc_archflags}" \
+                                     OBJCFLAGS="${configure.objc_archflags}" \
+                                     CXXFLAGS="${configure.cxx_archflags}" \
+                                     FFLAGS="${configure.f77_archflags}" \
+                                     F90FLAGS="${configure.f90_archflags}" \
+                                     FCFLAGS="${configure.fc_archflags}" \
+                                     LDFLAGS="${configure.ld_archflags}"
+                }
+            }
+            if {${python.set_compiler}} {
+                foreach var {cc objc cxx fc f77 f90} {
+                    if {[set configure.${var}] != ""} {
+                        build.env-append [string toupper $var]="[set configure.${var}]"
+                    }
+                }
+            }
+        }
+        pre-destroot    {
+            xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
+        }
+        post-destroot {
+            if {${python.link_binaries}} {
+                foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
+                    if {[catch {file type "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"}]} {
+                        ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
+                    }
+                }
             }
         }
     }
@@ -204,41 +243,6 @@ default python.add_archflags yes
 options python.set_compiler
 default python.set_compiler yes
 
-pre-build {
-    if {${python.add_archflags}} {
-        if {[variant_exists universal] && [variant_isset universal]} {
-            build.env-append CFLAGS="${configure.universal_cflags}" \
-                             OBJCFLAGS="${configure.universal_cflags}" \
-                             CXXFLAGS="${configure.universal_cxxflags}" \
-                             LDFLAGS="${configure.universal_ldflags}"
-        } else {
-            build.env-append CFLAGS="${configure.cc_archflags}" \
-                             OBJCFLAGS="${configure.objc_archflags}" \
-                             CXXFLAGS="${configure.cxx_archflags}" \
-                             FFLAGS="${configure.f77_archflags}" \
-                             F90FLAGS="${configure.f90_archflags}" \
-                             FCFLAGS="${configure.fc_archflags}" \
-                             LDFLAGS="${configure.ld_archflags}"
-        }
-    }
-    if {${python.set_compiler}} {
-        foreach var {cc objc cxx fc f77 f90} {
-            if {[set configure.${var}] != ""} {
-                build.env-append [string toupper $var]="[set configure.${var}]"
-            }
-        }
-    }
-}
-
 options python.link_binaries python.link_binaries_suffix
 default python.link_binaries {[python_get_defaults link_binaries]}
 default python.link_binaries_suffix {-${python.branch}}
-post-destroot {
-    if {${python.link_binaries}} {
-        foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
-            if {[catch {file type "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"}]} {
-                ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
-            }
-        }
-    }
-}
