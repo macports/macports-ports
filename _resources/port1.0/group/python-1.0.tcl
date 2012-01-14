@@ -88,6 +88,8 @@ proc python_set_versions {option action args} {
             if {${python.default_version} == "24"} {
                 replaced_by py24[string trimleft $name py]
             }
+            global python.version
+            unset python.version
             depends_lib port:py${python.default_version}[string trimleft $name py]
             build {}
             destroot {
