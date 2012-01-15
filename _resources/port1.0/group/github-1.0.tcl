@@ -56,7 +56,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     distname                ${github.project}-${github.version}
     
     post-extract {
-        if {"standard" == ${fetch.type}} {
+        if {"standard" == ${fetch.type} && ${master_sites} == ${github.master_sites}} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
