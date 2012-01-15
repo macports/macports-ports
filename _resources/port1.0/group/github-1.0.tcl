@@ -36,12 +36,13 @@
 #   PortGroup               github 1.0
 #   github.setup            author project version [tag_prefix]
 
-options github.author github.project github.version github.tag_prefix github.homepage
+options github.author github.project github.version github.tag_prefix github.homepage github.master_sites
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
+default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
-    global github.author github.project github.version github.tag_prefix github.homepage
+    global github.author github.project github.version github.tag_prefix github.homepage github.master_sites
     
     github.author           ${gh_author}
     github.project          ${gh_project}
@@ -51,7 +52,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     name                    ${github.project}
     version                 ${github.version}
     homepage                ${github.homepage}
-    master_sites            ${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}
+    master_sites            ${github.master_sites}
     distname                ${github.project}-${github.version}
     
     post-extract {
