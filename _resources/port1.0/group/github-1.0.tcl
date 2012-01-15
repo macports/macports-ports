@@ -52,6 +52,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     name                    ${github.project}
     version                 ${github.version}
     homepage                ${github.homepage}
+    git.url                 ${github.homepage}.git
     master_sites            ${github.master_sites}
     distname                ${github.project}-${github.version}
     
