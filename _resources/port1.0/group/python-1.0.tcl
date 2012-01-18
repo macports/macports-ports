@@ -144,10 +144,9 @@ proc python_set_default_version {option action args} {
     if {$action != "set"} {
         return
     }
-    global name subport
+    global name subport python.default_version
     if {[string match py-* $name]} {
         if {$subport == $name || $subport == ""} {
-            global python.default_version
             if {${python.default_version} == "24"} {
                 replaced_by py24[string trimleft $name py]
             } else {
@@ -157,6 +156,7 @@ proc python_set_default_version {option action args} {
             depends_lib port:py${python.default_version}[string trimleft $name py]
         }
     } else {
+        python.versions ${python.default_version}
         depends_lib-append port:python[option python.default_version]
     }
 }
