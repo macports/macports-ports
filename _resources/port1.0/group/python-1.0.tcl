@@ -75,7 +75,7 @@ proc python_set_versions {option action args} {
     if {$action != "set"} {
         return
     }
-    global name subport
+    global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
             subport py${v}[string trimleft $name py] { depends_lib port:python${v} }
@@ -101,7 +101,7 @@ proc python_set_versions {option action args} {
     } else {
         set addcode 1
     }
-    if {[info exists addcode]} {
+    if {[info exists addcode] && ![info exists python._addedcode]} {
         pre-build {
             if {${python.add_archflags}} {
                 if {[variant_exists universal] && [variant_isset universal]} {
@@ -136,6 +136,7 @@ proc python_set_versions {option action args} {
                 }
             }
         }
+        set python._addedcode 1
     }
 }
 
