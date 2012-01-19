@@ -36,9 +36,11 @@
 #   PortGroup               github 1.0
 #   github.setup            author project version [tag_prefix]
 
-options github.author github.project github.version github.tag_prefix github.homepage github.master_sites
+options github.author github.project github.version github.tag_prefix
+options github.homepage github.raw github.master_sites
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
+default github.raw {https://raw.github.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
