@@ -56,6 +56,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     git.branch              [join ${github.tag_prefix}]${github.version}
     master_sites            ${github.master_sites}
     distname                ${github.project}-${github.version}
+    fetch.ignore_sslcert    yes
     
     post-extract {
         if {"standard" == ${fetch.type} && ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0} {
