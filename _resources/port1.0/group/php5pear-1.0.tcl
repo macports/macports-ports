@@ -144,7 +144,7 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
         # Get the name of our package xml file.
         php5pear.packagexml [lindex [exec tar -tzf ${distpath}/${distname}${extract.suffix} | grep package.*\.xml] 0]
         # The "--strip-components 1" causes the loss of our package file so we will extract it now.
-        system "tar -z -x -v -f '${distpath}/${distname}${extract.suffix}' - -C '${php5pear.sourceroot}' ${php5pear.packagexml}"
+        system "tar -z -x -v -f '${distpath}/${distname}${extract.suffix}' -C '${php5pear.sourceroot}' ${php5pear.packagexml}"
         # Install the pear command using the phar file.
         system "${php5pear.cmd-pre} ${php5pear.cmd-php} ${php5pear.cmd-phar}"
     }
