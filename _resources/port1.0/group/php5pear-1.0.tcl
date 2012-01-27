@@ -118,6 +118,7 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
     php5pear.cmd-pre \
         cd ${php5pear.sourceroot} && \
         TZ=UTC \
+        HOME=${php5pear.installer} \
         PHP_PEAR_INSTALL_DIR=${php5pear.installer}/pear \
         PHP_PEAR_BIN_DIR=${php5pear.installer}/bin \
         PHP_PEAR_PHP_BIN=${php5pear.cmd-php} \
