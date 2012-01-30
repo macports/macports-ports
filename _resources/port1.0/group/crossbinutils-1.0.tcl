@@ -124,8 +124,8 @@ proc crossbinutils.setup {target version} {
     post-destroot {
         set docdir ${prefix}/share/doc/${name}
         xinstall -d ${destroot}${docdir}
-        xinstall -m 644 -W ${worksrcpath} COPYING COPYING.LIB COPYING.LIBGLOSS \
-            COPYING3 COPYING3.LIB ChangeLog MAINTAINERS README \
+        eval xinstall -m 644 \
+            [glob -type f ${worksrcpath}/{COPYING*,ChangeLog,MAINTAINERS,README*}] \
             ${destroot}${docdir}
     }
 
