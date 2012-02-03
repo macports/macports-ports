@@ -42,52 +42,97 @@
 # version, and channel is the channel hosting the package (default: pear.php.net).
 # 
 
-options php5pear.package
-options php5pear.channel
-options php5pear.cmd-pre
-options php5pear.cmd-pear
-options php5pear.cmd-phar
-options php5pear.cmd-php
-options php5pear.cmd-post
-options php5pear.cmd
-options php5pear.destroot
-options php5pear.sourceroot
-options php5pear.instpath
-options php5pear.pearpath
-options php5pear.installer
-options php5pear.packagexml
+# Args placed before the php or pear commands.
+options php5pear.env
+default php5pear.env    {
+    "TZ=UTC \
+    HOME=${php5pear.installer} \
+    PHP_PEAR_INSTALL_DIR=${php5pear.installer}/pear \
+    PHP_PEAR_BIN_DIR=${php5pear.installer}/bin \
+    PHP_PEAR_PHP_BIN=${php5pear.cmd-php} \
+    PHP_PEAR_CFG_DIR=${php5pear.installer}/pear/cfg \
+    PHP_PEAR_DOC_DIR=${php5pear.installer}/pear/docs \
+    PHP_PEAR_DATA_DIR=${php5pear.installer}/pear/data \
+    PHP_PEAR_WWW_DIR=${php5pear.installer}/pear/www \
+    PHP_PEAR_TEST_DIR=${php5pear.installer}/pear/tests \
+    PHP_PEAR_SYSCONF_DIR=${php5pear.installer}"
+}
 
-proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} {php5pear.packagexml "package.xml"}} {
-    global worksrcpath distname extract.suffix master_sites prefix destroot distpath
-    global php5pear.cmd-pre php5pear.cmd-pear php5pear.cmd-phar php5pear.cmd-php php5pear.cmd-post
-    global php5pear.cmd php5pear.instpath php5pear.pearpath
-    global php5pear.installer name php5pear.sourceroot
+# Args placed after php or pear commands.
+options php5pear.configure.pre_args
+default php5pear.configure.pre_args   {
+    "-c ${php5pear.installer}/pear.conf \
+    -C ${php5pear.installer}/pear.conf"
+}
+
+# Where we instruct pear to install our package.
+options php5pear.destroot
+default php5pear.destroot       {${worksrcpath}/packagingroot}
+
+# Where the pear installer is installed for each port.
+options php5pear.installer
+default php5pear.installer      {${worksrcpath}/installer}
+
+# Where we expand our source files.
+options php5pear.sourceroot
+default php5pear.sourceroot     {${worksrcpath}/packagesource}
+
+# The base paths for our pear.conf.
+options php5pear.instpath
+default php5pear.instpath       {${prefix}/lib/php}
+options php5pear.pearpath
+default php5pear.pearpath       {${php5pear.instpath}/pear}
+
+# The pear command we will use.
+options php5pear.cmd-pear
+default php5pear.cmd-pear       {${php5pear.installer}/bin/pear}
+
+# The phar file that contains our pear installer.
+options php5pear.cmd-phar
+default php5pear.cmd-phar       {${prefix}/lib/php/pear/install-pear-nozlib.phar}
+
+# The php binary we will use.
+options php5pear.cmd-php
+default php5pear.cmd-php        {${prefix}/bin/php}
+
+# The pear channel for our package.
+options php5pear.channel
+
+# The name of the package xml file inside the pear package archive.
+options php5pear.packagexml
+default php5pear.packagexml     {[lindex [exec tar -tzf ${php5pear.packagefile} | grep package.*\.xml] 0]}
+
+# Package name.
+options php5pear.package
+
+# Package file.
+options php5pear.packagefile
+default php5pear.packagefile    {"${distpath}/[lindex $distfiles 0]"}
+
+proc php5pear.setup {package_name package_version {package_channel "pear.php.net"}} {
+    global name extract.suffix version
+    global php5pear.env php5pear.cmd-pear php5pear.destroot php5pear.sourceroot
+    global php5pear.channel php5pear.package php5pear.packagexml
     
     # The pear name for the package.
-    php5pear.package    ${php5pear.package}
+    php5pear.package        ${package_name}
     # The pear channel for the package.
-    php5pear.channel    ${php5pear.channel}
-    # The name of the package's xml file used by pear to build the package.
-    # Note: so far the two known names are package.xml and package2.xml.
-    php5pear.packagexml ${php5pear.packagexml}
+    php5pear.channel        ${package_channel}
     
-    name                pear-${php5pear.package}
-    version             ${version}
-    categories          php
-    distname            ${php5pear.package}-${version}
-    extract.suffix      .tgz
-    homepage            http://${php5pear.channel}/package/${php5pear.package}
-    master_sites        http://${php5pear.channel}/get
-    livecheck.type      regex
-    livecheck.url       http://${php5pear.channel}/package/${php5pear.package}/download
-    livecheck.regex     "http://download.${php5pear.channel}/package/${php5pear.package}-((?!\.tgz).*)${extract.suffix}"
-    
-    dist_subdir         pear
-    supported_archs     noarch
-    use_parallel_build  yes
-    depends_lib         path:bin/phpize:php5 port:php5-pear
+    name                    pear-${php5pear.package}
+    version                 ${package_version}
+    categories              php
+    distname                ${php5pear.package}-${version}
+    extract.suffix          .tgz
+    homepage                http://${php5pear.channel}/package/${php5pear.package}
+    master_sites            http://${php5pear.channel}/get
+    dist_subdir             pear
+    supported_archs         noarch
+    use_parallel_build      yes
+    depends_lib             path:bin/phpize:php5 port:php5-pear
     
     # List of ports that pear-PEAR depends on.
+    # Add some pear-PEAR deps to make programmatic creation of pear Portfiles easier.
     if {
         ${name} != "pear-Archive_Tar" &&
         ${name} != "pear-Console_Getopt" &&
@@ -95,58 +140,28 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
         ${name} != "pear-XML_Util" &&
         ${name} != "pear-PEAR"
     } {
-        depends_lib-append    port:pear-PEAR
+        depends_lib-append  port:pear-PEAR
+    } elseif {
+        ${name} == "pear-PEAR"
+    } {
+        depends_lib-append  port:pear-Archive_Tar \
+                            port:pear-Console_Getopt \
+                            port:pear-Structures_Graph \
+                            port:pear-XML_Util
+                            
     }
     
-    # Where the pear installer is installed for each port.
-    php5pear.installer  ${worksrcpath}/installer
-    # The base paths for our pear.conf.
-    php5pear.instpath   ${prefix}/lib/php
-    php5pear.pearpath   ${php5pear.instpath}/pear
-    # Where we expand our source files.
-    php5pear.sourceroot ${worksrcpath}/packagesource    
-    # Where we instruct pear to install our package.
-    php5pear.destroot   ${worksrcpath}/packagingroot    
-    
-    # The pear command we will use.
-    php5pear.cmd-pear   ${php5pear.installer}/bin/pear
-    # The phar file that contains our pear installer.
-    php5pear.cmd-phar   ${prefix}/lib/php/pear/install-pear-nozlib.phar
-    # The php binary we will use.
-    php5pear.cmd-php    ${prefix}/bin/php
-    # Args placed before the php or pear commands.
-    php5pear.cmd-pre \
-        cd ${php5pear.sourceroot} && \
-        TZ=UTC \
-        HOME=${php5pear.installer} \
-        PHP_PEAR_INSTALL_DIR=${php5pear.installer}/pear \
-        PHP_PEAR_BIN_DIR=${php5pear.installer}/bin \
-        PHP_PEAR_PHP_BIN=${php5pear.cmd-php} \
-        PHP_PEAR_CFG_DIR=${php5pear.installer}/pear/cfg \
-        PHP_PEAR_DOC_DIR=${php5pear.installer}/pear/docs \
-        PHP_PEAR_DATA_DIR=${php5pear.installer}/pear/data \
-        PHP_PEAR_WWW_DIR=${php5pear.installer}/pear/www \
-        PHP_PEAR_TEST_DIR=${php5pear.installer}/pear/tests \
-        PHP_PEAR_SYSCONF_DIR=${php5pear.installer}
-    # Args placed after php or pear commands.
-    php5pear.cmd-post \
-        -c ${php5pear.installer}/pear.conf \
-        -C ${php5pear.installer}/pear.conf
-    
-    extract.mkdir       yes
-    extract.post_args   "| tar --strip-components 1 -x -f - -C '${php5pear.sourceroot}'"
-    
+    extract.post_args-append   -C '${php5pear.sourceroot}' --strip-components 1
+
     pre-extract {
-        xinstall -d ${php5pear.sourceroot}
+        xinstall -d "${php5pear.sourceroot}"
     }
     
     post-extract {
-        # Get the name of our package xml file.
-        php5pear.packagexml [lindex [exec tar -tzf ${distpath}/${distname}${extract.suffix} | grep package.*\.xml] 0]
         # The "--strip-components 1" causes the loss of our package file so we will extract it now.
-        system "tar -z -x -v -f '${distpath}/${distname}${extract.suffix}' -C '${php5pear.sourceroot}' ${php5pear.packagexml}"
-        # Install the pear command using the phar file.
-        system "${php5pear.cmd-pre} ${php5pear.cmd-php} ${php5pear.cmd-phar}"
+        extract.post_args-delete    --strip-components 1
+        extract.post_args-append    ${php5pear.packagexml}
+        command_exec                extract
     }
     
     post-patch {
@@ -155,41 +170,59 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
           ${php5pear.sourceroot}/${php5pear.packagexml}
     }
     
+    configure.env           ${php5pear.env}
+    configure.dir           ${php5pear.sourceroot}
     configure {
+        # Install the pear command using the phar file.
+        configure.cmd           ${php5pear.cmd-php}
+        configure.pre_args      ${php5pear.cmd-phar}
+        command_exec configure
+        configure.cmd           ${php5pear.cmd-pear}
+        configure.pre_args      -c ${php5pear.installer}/pear.conf \
+                                -C ${php5pear.installer}/pear.conf
         # Set up pear's conf file.
         # The order appears to be important; we get errors if we set php_dir before adding channels
         # and the directory is not writable.
         xinstall -d "${php5pear.installer}/pear/php"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set auto_discover 1"
+        set pear_config [list]
+        lappend pear_config         "config-set auto_discover 1"
         if { "${php5pear.channel}" != "pear.php.net" } {
-            system "curl -s http://${php5pear.channel}/channel.xml -o ${worksrcpath}/channel.xml"
-            system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} channel-add ${worksrcpath}/channel.xml"
-            system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set default_channel ${php5pear.channel}"
+            lappend pear_config         "channel-discover ${php5pear.channel}"
+            lappend pear_config         "config-set default_channel ${php5pear.channel}"
         }
         # Change the install directories to the final destinations
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set php_dir ${php5pear.pearpath}"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set bin_dir ${php5pear.pearpath}/bin"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set doc_dir ${php5pear.pearpath}/docs"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set data_dir ${php5pear.pearpath}/data"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set www_dir ${php5pear.pearpath}/www"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-set test_dir ${php5pear.pearpath}/tests"
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} config-show"
+        lappend pear_config         "config-set php_dir ${php5pear.pearpath}"
+        lappend pear_config         "config-set bin_dir ${php5pear.pearpath}/bin"
+        lappend pear_config         "config-set cfg_dir ${php5pear.pearpath}/cfg"
+        lappend pear_config         "config-set doc_dir ${php5pear.pearpath}/docs"
+        lappend pear_config         "config-set data_dir ${php5pear.pearpath}/data"
+        lappend pear_config         "config-set www_dir ${php5pear.pearpath}/www"
+        lappend pear_config         "config-set test_dir ${php5pear.pearpath}/tests"
+        lappend pear_config         "config-show"
+        foreach pear_args $pear_config {
+            configure.args          "${pear_args}"
+            command_exec configure
+        }
     }
     
     build {
-        # Get the name of our package xml file.
-        php5pear.packagexml [lindex [exec tar -tzf ${distpath}/${distname}${extract.suffix} | grep package.*\.xml] 0]
-        # Install our package into our pear's packagingroot.
-        system "${php5pear.cmd-pre} ${php5pear.cmd-pear} ${php5pear.cmd-post} install -n -f -P '${php5pear.destroot}' ${php5pear.packagexml}"
+        build.env           ${php5pear.env}
+        build.dir           ${php5pear.sourceroot}
+        build.cmd           ${php5pear.cmd-pear}
+        build.target        install
+        build.args          "-n -f -P '${php5pear.destroot}' ${php5pear.packagexml}"
+        command_exec build
     }
-    
+
     destroot {
         copy ${php5pear.destroot}${php5pear.instpath} ${destroot}${prefix}/lib
         # Remove all invisible "dot" files.
         fs-traverse -ignoreErrors item "${destroot}${php5pear.instpath}" {
             if {[string first . [file tail ${item}] 0] == 0} {
-                # Using system rm because I could not find a way to delete dot files with [file delete].
-                system "rm -R ${item}"
+                if {[file tail ${item}] != "." && [file tail ${item}] != ".."} {
+                    puts "Removing dot file ${item}"
+                    delete ${item}
+                }
             }
         }
         if { [file exists "${destroot}${php5pear.pearpath}/generate_package_xml.php"] } {
@@ -201,4 +234,9 @@ proc php5pear.setup {php5pear.package version {php5pear.channel "pear.php.net"} 
             delete "${destroot}${php5pear.pearpath}/package.php"
         }
     }
+
+    livecheck.type          regex
+    livecheck.url           http://${php5pear.channel}/package/${php5pear.package}/download
+    livecheck.regex         http://download.${php5pear.channel}/package/
+    livecheck.regex-append  "${php5pear.package}-((?!\\${extract.suffix}).*)\\${extract.suffix}"
 }
