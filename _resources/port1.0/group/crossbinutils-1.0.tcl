@@ -40,7 +40,7 @@
 options crossbinutils.target
 
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath
+    global master_sites workpath worksrcpath extract.suffix
 
     crossbinutils.target ${target}
 
@@ -57,7 +57,8 @@ proc crossbinutils.setup {target version} {
         ${target} cross development.
 
     homepage        http://www.gnu.org/software/binutils/binutils.html
-    master_sites    http://ftp.kernel.org/pub/linux/devel/binutils/
+    master_sites    gnu:binutils \
+                    http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
     dist_subdir     binutils
     distname        binutils-${version}
     use_bzip2       yes
@@ -132,6 +133,6 @@ proc crossbinutils.setup {target version} {
     universal_variant no
 
     livecheck.type  regex
-    livecheck.url   ${master_sites}
-    livecheck.regex {binutils-(\d+(?:\.\d+)*)}
+    livecheck.url   [lindex ${master_sites} 1]
+    livecheck.regex "binutils-((?!.*binutils.*|\\${extract.suffix}).*)\\${extract.suffix}"
 }
