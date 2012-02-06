@@ -67,7 +67,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     fetch.ignore_sslcert    yes
     
     post-extract {
-        if {"standard" == ${fetch.type} && ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0} {
+        if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
