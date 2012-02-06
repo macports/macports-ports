@@ -38,10 +38,26 @@
 #   github.setup            author project version [tag_prefix]
 
 options github.author github.project github.version github.tag_prefix
-options github.homepage github.raw github.master_sites
+options github.homepage github.raw github.master_sites github.tarball_from
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.github.com/${github.author}/${github.project}}
+default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
+default github.tarball_from {tags}
+
+option_proc github.tarball_from handle_tarball_from
+
+proc handle_tarball_from {option action args} {
+    global github.author github.project github.master_sites master_sites
+
+    # keeping the default at tags like many portfiles already do
+    # the port writer can set github.tarball_from to "downloads" and have the URI path accordingly changed
+    if {[string equal ${action} "set"] && $args == "downloads"} {
+        github.tarball_from ${args}
+        github.master_sites https://github.com/downloads/${github.author}/${github.project}
+        master_sites        ${github.master_sites}    
+    }
+}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     global github.author github.project github.version github.tag_prefix github.homepage github.master_sites
@@ -56,19 +72,13 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     homepage                ${github.homepage}
     git.url                 ${github.homepage}.git
     git.branch              [join ${github.tag_prefix}]${github.version}
-    # github supports two types of downloads "tags" and "downloads" with different URI scheme
-    # choose either one according to existence of tag_prefix optional argument
-    if {[info exists github.tag_prefix] && ![string equal ${github.tag_prefix} "{}"]} {
-        github.master_sites ${github.homepage}/tarball/[join ${github.tag_prefix} ""]
-    } else {
-        github.master_sites https://github.com/downloads/${github.author}/${github.project}
-    }
     master_sites            ${github.master_sites}
     distname                ${github.project}-${github.version}
     fetch.ignore_sslcert    yes
     
     post-extract {
-        if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0} {
+        if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && \
+            ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
