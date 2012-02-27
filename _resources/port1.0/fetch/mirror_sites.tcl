@@ -191,7 +191,7 @@ set portfetch::mirror_sites::sites(gimp) {
 
 set portfetch::mirror_sites::sites(gnome) {
     ftp://ftp.cse.buffalo.edu/pub/Gnome/
-    http://www.gtlib.cc.gatech.edu/pub/gnome/
+    http://www.gtlib.gatech.edu/pub/gnome/
     http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     http://fr2.rpmfind.net/linux/gnome.org/
     http://mirror.aarnet.edu.au/pub/gnome/
@@ -271,7 +271,7 @@ set portfetch::mirror_sites::sites(isc) {
 set portfetch::mirror_sites::sites(kde) {
     http://mirrors.mit.edu/kde/
     http://kde.mirrors.hoobly.com/
-    http://ftp.gtlib.cc.gatech.edu/pub/kde/
+    http://ftp.gtlib.gatech.edu/pub/kde/
     http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
     http://gd.tuwien.ac.at/kde/
     http://mirrors.isc.org/pub/kde/
@@ -454,7 +454,7 @@ set portfetch::mirror_sites::sites(sourceforge_jp) {
 
 set portfetch::mirror_sites::sites(sunsite) {
     http://www.ibiblio.org/pub/Linux/
-    http://www.gtlib.cc.gatech.edu/pub/Linux/
+    http://www.gtlib.gatech.edu/pub/Linux/
     ftp://sunsite.unc.edu/pub/Linux/
     ftp://ftp.unicamp.br/pub/systems/Linux/
     ftp://ftp.tuwien.ac.at/pub/linux/ibiblio/
@@ -512,7 +512,7 @@ set portfetch::mirror_sites::sites(xcontrib) {
 }
 
 set portfetch::mirror_sites::sites(xfree) {
-    http://www.gtlib.cc.gatech.edu/pub/XFree86/
+    http://www.gtlib.gatech.edu/pub/XFree86/
     http://www.mirrorservice.org/sites/ftp.xfree86.org/pub/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     ftp://ftp.fit.vutbr.cz/pub/XFree86/
