@@ -1,0 +1,88 @@
+From 236f914ea7205f5f74e87fcc1b06d87bd0789a7a Mon Sep 17 00:00:00 2001
+From: Uli Schlachter <psychon@znc.in>
+Date: Thu, 1 Mar 2012 20:26:39 +0100
+Subject: [PATCH 8/8] Fix a busy loop on BSD and Mac OS
+
+On FreeBSD MSG_WAITALL on a non-blocking socket fails immediately if less bytes
+than were asked for are available. This is different than the behavior on linux
+where as many bytes as are available are returned in this case. Other OS
+apparently follow the FreeBSD behavior.
+
+_xcb_in_read() is used to fill xcb's read buffer, thus this function will call
+recv() with a big length argument (xcb's read buffer is by default 16 KiB
+large). That many bytes are highly unlikely to be available in the kernel
+buffer.
+
+This means that _xcb_in_read() always failed on FreeBSD. Since the socket was
+still signaled as readable by poll(), this bug even resulted in a busy loop.
+
+The same issue is present in read_block(), but here it is slightly different.
+read_block() is called when we read the first few bytes of an event or a reply,
+so that we already know its length. This means that we should be able to use
+MSG_WAITALL here, because we know how many bytes there have to be.
+
+However, that function could busy loop, too, when only the first few bytes of
+the packet were sent while the rest is stuck somewhere on the way to us. Thus,
+MSG_WAITALL should be removed here, too.
+
+Thanks to Christoph Egger from Debian for noticing the problem, doing all the
+necessary debugging and figuring out what the problem was! This patch is 99%
+from debian. Thanks for all the work.
+
+This bug was introduced in commit 2dcf8b025be88a25d4333abdc28d425b88238d96.
+
+This commit also reverts commit 9061ee45b8dbe5431c23e3f628089d703ccad0b1.
+
+Fixes: https://bugs.freedesktop.org/show_bug.cgi?id=45776
+
+Signed-off-by: Uli Schlachter <psychon@znc.in>
+Reviewed-by: Josh Triplett <josh@joshtriplett.org>
+---
+ src/xcb_in.c |   17 ++---------------
+ 1 file changed, 2 insertions(+), 15 deletions(-)
+
+diff --git libxcb-1.8/src/xcb_in.c libxcb-1.8/src/xcb_in.c
+index fdcc813..4998cdd 100644
+--- libxcb-1.8/src/xcb_in.c
++++ libxcb-1.8/src/xcb_in.c
+@@ -51,11 +51,6 @@
+ #define XCB_REPLY 1
+ #define XCB_XGE_EVENT 35
+ 
+-/* required for compiling for Win32 using MinGW */
+-#ifndef MSG_WAITALL
+-#define MSG_WAITALL 0
+-#endif
+-
+ struct event_list {
+     xcb_generic_event_t *event;
+     struct event_list *next;
+@@ -269,11 +264,7 @@ static int read_block(const int fd, void *buf, const ssize_t len)
+     int done = 0;
+     while(done < len)
+     {
+-#ifdef __APPLE__
+-        int ret = read(fd, ((char *) buf) + done, len - done);
+-#else
+-        int ret = recv(fd, ((char *) buf) + done, len - done,MSG_WAITALL);
+-#endif
++        int ret = recv(fd, ((char *) buf) + done, len - done, 0);
+         if(ret > 0)
+             done += ret;
+ #ifndef _WIN32
+@@ -665,11 +656,7 @@ void _xcb_in_replies_done(xcb_connection_t *c)
+ 
+ int _xcb_in_read(xcb_connection_t *c)
+ {
+-#ifdef __APPLE__
+-    int n = read(c->fd, c->in.queue + c->in.queue_len, sizeof(c->in.queue) - c->in.queue_len);
+-#else
+-    int n = recv(c->fd, c->in.queue + c->in.queue_len, sizeof(c->in.queue) - c->in.queue_len,MSG_WAITALL);
+-#endif
++    int n = recv(c->fd, c->in.queue + c->in.queue_len, sizeof(c->in.queue) - c->in.queue_len, 0);
+     if(n > 0)
+         c->in.queue_len += n;
+     while(read_packet(c))
+-- 
+1.7.9.2
+
