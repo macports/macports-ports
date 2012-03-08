@@ -148,11 +148,15 @@ proc python_set_default_version {option action args} {
     global name subport python.default_version
     if {[string match py-* $name]} {
         if {$subport == $name || $subport == ""} {
-            if {${python.default_version} == "24"} {
-                replaced_by py24[string trimleft $name py]
-            } else {
+            # Mark stub as replaced_by py24 subport if that's the
+            # default version, for backwards compatibility.  If the
+            # default version isn't 24, clear replaced_by -- it might
+            # have already been set by python_set_versions. (But make
+            # sure we've set it first, or unset might complain.)
+            replaced_by py24[string trimleft $name py]
+            if {${python.default_version} != "24"} {
                 global replaced_by
-                unset -nocomplain replaced_by
+                unset replaced_by
             }
             depends_lib port:py${python.default_version}[string trimleft $name py]
         }
