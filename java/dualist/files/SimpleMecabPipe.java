@@ -1,4 +1,4 @@
-package dualist.ja;
+package dualist.pipes;
 
 import cc.mallet.pipe.Pipe;
 import cc.mallet.extract.StringSpan;
