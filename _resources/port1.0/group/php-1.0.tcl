@@ -52,45 +52,77 @@
 default build.dir               {[lindex ${php.build_dirs} 0]}
 default configure.dir           {[lindex ${php.build_dirs} 0]}
 default destroot.dir            {[lindex ${php.build_dirs} 0]}
+options php
+default php                     {php${php.version}}
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
 options php.config
-default php.config              {${prefix}/bin/php-config}
+default php.config              {${prefix}/bin/php-config${php.version}}
 options php.extensions
 options php.extension_dir
 default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
 options php.ini
 default php.ini                 {[lindex ${php.extensions} 0].ini}
 options php.inidir
-default php.inidir              {${prefix}/var/db/php5}
+default php.inidir              {${prefix}/var/db/${php}}
 options php.php_ini
-default php.php_ini             {${prefix}/etc/php5/php.ini}
+default php.php_ini             {${prefix}/etc/${php}/php.ini}
 options php.phpize
-default php.phpize              {${prefix}/bin/phpize}
+default php.phpize              {${prefix}/bin/phpize${php.version}}
 options php.type
 default php.type                php
 options php.rootname
 default php.rootname            {[lindex ${php.extensions} 0]}
 options php.source
 default php.source              standalone
+options php.version
+options php.versions
+default php.versions            {{54}}
 
 proc php.setup {extensions version {source ""}} {
-    global php.build_dirs php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source
-    global destroot
+    global php php.build_dirs php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source php.versions
+    global destroot name subport
     
     # Use "set" to preserve the list structure.
     set php.extensions ${extensions}
     
     php.source                  ${source}
     
+    # Sort versions so we can use lindex 0 and end to get the min and max versions respectively.
+    set php.versions            [lsort ${php.versions}]
+    
     if {![info exists name]} {
-        name                    php5-${php.rootname}
+        name                    php-${php.rootname}
     }
     version                     ${version}
     categories                  php
-    distname                    ${php.rootname}-${version}
     
-    depends_lib                 path:bin/php:php5
+    foreach v ${php.versions} {
+        subport php${v}-${php.rootname} {
+            php.version         ${v}
+        }
+    }
+    
+    if {${name} == ${subport}} {
+        supported_archs         noarch
+        distfiles
+        depends_lib             port:php[lindex ${php.versions} end]-${php.rootname}
+        use_configure           no
+        build {}
+        destroot {
+            xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
+            system "echo \"${name} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
+        }
+    } else {
+    
+    distname                    ${php.rootname}-${version}
+        if {[string index [lindex ${php.versions} 0] 0] == "5"} {
+            default dist_subdir     {php5-${php.rootname}}
+        }
+        
+        depends_lib                 port:${php}
+        
+        configure.args              --with-php-config=${php.config}
     
     configure.universal_args-delete --disable-dependency-tracking
     
@@ -172,6 +204,8 @@ proc php.setup {extensions version {source ""}} {
             }
             close $fp
         }
+    }
+        
     }
     
     if {"pecl" == ${source}} {
