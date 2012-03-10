@@ -69,11 +69,13 @@ options php.phpize
 default php.phpize              {${prefix}/bin/phpize}
 options php.type
 default php.type                php
+options php.rootname
+default php.rootname            {[lindex ${php.extensions} 0]}
 options php.source
 default php.source              standalone
 
 proc php.setup {extensions version {source ""}} {
-    global php.build_dirs php.extensions php.ini php.inidir php.source
+    global php.build_dirs php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source
     global destroot
     
     # Use "set" to preserve the list structure.
@@ -81,10 +83,12 @@ proc php.setup {extensions version {source ""}} {
     
     php.source                  ${source}
     
-    name                        php5-[lindex ${php.extensions} 0]
+    if {![info exists name]} {
+        name                    php5-${php.rootname}
+    }
     version                     ${version}
     categories                  php
-    distname                    [lindex ${php.extensions} 0]-${version}
+    distname                    ${php.rootname}-${version}
     
     depends_lib                 path:bin/php:php5
     
@@ -171,8 +175,7 @@ proc php.setup {extensions version {source ""}} {
     }
     
     if {"pecl" == ${source}} {
-        global php.homepage
-        set php.homepage            http://pecl.php.net/package/[lindex ${php.extensions} 0]/
+        set php.homepage            http://pecl.php.net/package/${php.rootname}/
         
         homepage                    ${php.homepage}
         master_sites                http://pecl.php.net/get/
@@ -182,7 +185,7 @@ proc php.setup {extensions version {source ""}} {
         livecheck.url               ${php.homepage}
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
-        homepage                    http://www.php.net/[lindex ${php.extensions} 0]
+        homepage                    http://www.php.net/${php.rootname}
         master_sites                php
         
         dist_subdir                 php5
