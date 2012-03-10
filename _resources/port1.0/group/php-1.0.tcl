@@ -35,8 +35,8 @@
 # 
 # Usage:
 # 
-#   PortGroup           php 1.0
-#   php.setup           extension version source
+#   PortGroup                   php 1.0
+#   php.setup                   extension version source
 # 
 # where extension is the name of the extension (e.g. APC), version is its
 # version, and if the extension is hosted at PECL, source is "pecl"; otherwise
@@ -44,7 +44,7 @@
 # 
 # If this is a Zend extension, use
 # 
-#   php.type            zend
+#   php.type                    zend
 
 ### This portgroup is not ready to be used yet ###
 
@@ -69,12 +69,12 @@ options php.php_ini
 default php.php_ini             {${prefix}/etc/${php}/php.ini}
 options php.phpize
 default php.phpize              {${prefix}/bin/phpize${php.version}}
-options php.type
-default php.type                php
 options php.rootname
 default php.rootname            {[lindex ${php.extensions} 0]}
 options php.source
 default php.source              standalone
+options php.type
+default php.type                php
 options php.version
 options php.versions
 default php.versions            {{54}}
@@ -84,7 +84,7 @@ proc php.setup {extensions version {source ""}} {
     global destroot name subport
     
     # Use "set" to preserve the list structure.
-    set php.extensions ${extensions}
+    set php.extensions          ${extensions}
     
     php.source                  ${source}
     
@@ -114,117 +114,115 @@ proc php.setup {extensions version {source ""}} {
             system "echo \"${name} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
         }
     } else {
-    
-    distname                    ${php.rootname}-${version}
+        distname                ${php.rootname}-${version}
         if {[string index [lindex ${php.versions} 0] 0] == "5"} {
-            default dist_subdir     {php5-${php.rootname}}
+            default dist_subdir {php5-${php.rootname}}
         }
         
-        depends_lib                 port:${php}
+        depends_lib             port:${php}
         
-        configure.args              --with-php-config=${php.config}
-    
-    configure.universal_args-delete --disable-dependency-tracking
-    
-    variant debug description {Enable debug support (useful to analyze a PHP-related core dump)} {}
-    
-    pre-configure {
-        set php_debug_variant [regexp {/debug-[^/]+$} ${php.extension_dir}]
-        if {${php_debug_variant} && ![variant_isset debug]} {
-            ui_error "${name} cannot be installed without the debug variant because PHP is installed with the debug variant."
-            return -code error "incompatible variant selection"
-        } elseif {[variant_isset debug] && !${php_debug_variant}} {
-            ui_error "${name} cannot be installed with the debug variant because PHP is installed without the debug variant."
-            return -code error "incompatible variant selection"
+        configure.args          --with-php-config=${php.config}
+        
+        configure.universal_args-delete --disable-dependency-tracking
+        
+        variant debug description {Enable debug support (useful to analyze a PHP-related core dump)} {}
+        
+        pre-configure {
+            set php_debug_variant [regexp {/debug-[^/]+$} ${php.extension_dir}]
+            if {${php_debug_variant} && ![variant_isset debug]} {
+                ui_error "${name} cannot be installed without the debug variant because PHP is installed with the debug variant."
+                return -code error "incompatible variant selection"
+            } elseif {[variant_isset debug] && !${php_debug_variant}} {
+                ui_error "${name} cannot be installed with the debug variant because PHP is installed without the debug variant."
+                return -code error "incompatible variant selection"
+            }
+            foreach dir ${php.build_dirs} {
+                ui_debug "Generating configure script in [file tail ${dir}]"
+                system "cd ${dir} && ${php.phpize}"
+            }
         }
-        foreach dir ${php.build_dirs} {
-            ui_debug "Generating configure script in [file tail ${dir}]"
-            system "cd ${dir} && ${php.phpize}"
+        
+        configure {
+            foreach configure.dir ${php.build_dirs} {
+                ui_debug "Configuring in [file tail ${configure.dir}]"
+                portconfigure::configure_main
+            }
         }
-    }
-    
-    configure {
-        foreach configure.dir ${php.build_dirs} {
-            ui_debug "Configuring in [file tail ${configure.dir}]"
-            portconfigure::configure_main
+        
+        build {
+            foreach build.dir ${php.build_dirs} {
+                ui_debug "Building in [file tail ${build.dir}]"
+                portbuild::build_main
+            }
         }
-    }
-    
-    build {
-        foreach build.dir ${php.build_dirs} {
-            ui_debug "Building in [file tail ${build.dir}]"
-            portbuild::build_main
-        }
-    }
-    
-    destroot.destdir            INSTALL_ROOT=${destroot}
-    
-    destroot {
-        foreach destroot.dir ${php.build_dirs} {
-            ui_debug "Staging in [file tail ${destroot.dir}]"
-            portdestroot::destroot_main
-        }
-        xinstall -m 755 -d ${destroot}${php.inidir}
-        if {"zend" == ${php.type}} {
-            set extension_prefix "zend_extension=${php.extension_dir}/"
-        } else {
-            set extension_prefix "extension="
-        }
-        set fp [open ${destroot}${php.inidir}/${php.ini} w]
-        puts $fp "; Do not edit this file; it is automatically generated by MacPorts."
-        puts $fp "; Any changes you make will be lost if you upgrade or uninstall ${name}."
-        puts $fp "; To configure PHP, edit ${php.php_ini}."
-        foreach extension ${php.extensions} {
-            puts $fp "${extension_prefix}${extension}.so"
-        }
-        close $fp
-    }
-    
-    post-install {
-        if {[file exists ${php.php_ini}]} {
-            set count 0
-            set fp [open ${php.php_ini} r]
-            while {![eof $fp]} {
-                set line [gets $fp]
-                regexp {^extension_dir *= *"?([^\"]*)"?} $line -> phpiniextensiondir
-                if {[info exists phpiniextensiondir]} {
-                    ui_debug "Found extension_dir ${phpiniextensiondir} in ${php.php_ini}"
-                    if {${phpiniextensiondir} != ${php.extension_dir}} {
-                        if {0 == ${count}} {
-                            ui_msg "Your php.ini contains a line that will prevent ${name}"
-                            ui_msg "and other PHP extensions from working. To fix this,"
-                            ui_msg "edit ${php.php_ini} and delete this line:"
-                            ui_msg ""
-                        }
-                        ui_msg ${line}
-                        incr count
-                    }
-                    unset phpiniextensiondir
-                }
+        
+        destroot.destdir        INSTALL_ROOT=${destroot}
+        
+        destroot {
+            foreach destroot.dir ${php.build_dirs} {
+                ui_debug "Staging in [file tail ${destroot.dir}]"
+                portdestroot::destroot_main
+            }
+            xinstall -m 755 -d ${destroot}${php.inidir}
+            if {"zend" == ${php.type}} {
+                set extension_prefix "zend_extension=${php.extension_dir}/"
+            } else {
+                set extension_prefix "extension="
+            }
+            set fp [open ${destroot}${php.inidir}/${php.ini} w]
+            puts $fp "; Do not edit this file; it is automatically generated by MacPorts."
+            puts $fp "; Any changes you make will be lost if you upgrade or uninstall ${name}."
+            puts $fp "; To configure PHP, edit ${php.php_ini}."
+            foreach extension ${php.extensions} {
+                puts $fp "${extension_prefix}${extension}.so"
             }
             close $fp
         }
-    }
         
+        post-install {
+            if {[file exists ${php.php_ini}]} {
+                set count 0
+                set fp [open ${php.php_ini} r]
+                while {![eof $fp]} {
+                    set line [gets $fp]
+                    regexp {^extension_dir *= *"?([^\"]*)"?} $line -> phpiniextensiondir
+                    if {[info exists phpiniextensiondir]} {
+                        ui_debug "Found extension_dir ${phpiniextensiondir} in ${php.php_ini}"
+                        if {${phpiniextensiondir} != ${php.extension_dir}} {
+                            if {0 == ${count}} {
+                                ui_msg "Your php.ini contains a line that will prevent ${name}"
+                                ui_msg "and other PHP extensions from working. To fix this,"
+                                ui_msg "edit ${php.php_ini} and delete this line:"
+                                ui_msg ""
+                            }
+                            ui_msg ${line}
+                            incr count
+                        }
+                        unset phpiniextensiondir
+                    }
+                }
+                close $fp
+            }
+        }
     }
     
     if {"pecl" == ${source}} {
-        set php.homepage            http://pecl.php.net/package/${php.rootname}/
+        set php.homepage        http://pecl.php.net/package/${php.rootname}/
         
-        homepage                    ${php.homepage}
-        master_sites                http://pecl.php.net/get/
-        extract.suffix              .tgz
+        homepage                ${php.homepage}
+        master_sites            http://pecl.php.net/get/
+        extract.suffix          .tgz
         
-        livecheck.type              regexm
-        livecheck.url               ${php.homepage}
-        livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
+        livecheck.type          regexm
+        livecheck.url           ${php.homepage}
+        livecheck.regex         {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
-        homepage                    http://www.php.net/${php.rootname}
-        master_sites                php
+        homepage                http://www.php.net/${php.rootname}
+        master_sites            php
         
-        dist_subdir                 php5
-        distname                    php-${version}
-        use_bzip2                   yes
+        dist_subdir             php5
+        distname                php-${version}
+        use_bzip2               yes
         
         pre-extract {
             foreach extension ${php.extensions} {
@@ -240,11 +238,11 @@ proc php.setup {extensions version {source ""}} {
             }
         }
         
-        destroot.target             install-modules install-headers
+        destroot.target         install-modules install-headers
         
-        livecheck.type              regex
-        livecheck.url               http://www.php.net/downloads.php
-        livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
+        livecheck.type          regex
+        livecheck.url           http://www.php.net/downloads.php
+        livecheck.regex         get/php-(5\\.\[0-9.\]+)\\.tar
     }
 }
 
