@@ -54,9 +54,11 @@ default configure.dir           {[lindex ${php.build_dirs} 0]}
 default destroot.dir            {[lindex ${php.build_dirs} 0]}
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
+options php.config
+default php.config              {${prefix}/bin/php-config}
 options php.extensions
 options php.extension_dir
-default php.extension_dir       {[exec ${prefix}/bin/php-config --extension-dir 2>/dev/null]}
+default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
 options php.ini
 default php.ini                 {[lindex ${php.extensions} 0].ini}
 options php.inidir
@@ -194,7 +196,7 @@ proc php.setup {extensions version {source ""}} {
         }
         
         pre-configure {
-            set php_version [exec ${prefix}/bin/php-config --version 2>/dev/null]
+            set php_version [exec ${php.config} --version 2>/dev/null]
             if {${version} != ${php_version}} {
                 ui_error "${name} ${version} requires PHP ${version} but you have PHP ${php_version}."
                 return -code error "incompatible PHP installation"
