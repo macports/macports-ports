@@ -49,36 +49,40 @@
 ### This portgroup is not ready to be used yet ###
 
 
+# Options that relate to the PHP extension.
 default build.dir               {[lindex ${php.build_dirs} 0]}
 default configure.dir           {[lindex ${php.build_dirs} 0]}
 default destroot.dir            {[lindex ${php.build_dirs} 0]}
-options php
-default php                     {php${php.version}}
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
 options php.bundled
-options php.config
-default php.config              {${prefix}/bin/php-config${php.version}}
 options php.extensions
-options php.extension_dir
-default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
 options php.ini
 default php.ini                 {${php.rootname}.ini}
-options php.inidir
-default php.inidir              {${prefix}/var/db/${php}}
-options php.php_ini
-default php.php_ini             {${prefix}/etc/${php}/php.ini}
-options php.phpize
-default php.phpize              {${prefix}/bin/phpize${php.version}}
 options php.rootname
 default php.rootname            {[lindex ${php.extensions} 0]}
 options php.source
 default php.source              standalone
 options php.type
 default php.type                php
-options php.version
 options php.versions
 default php.versions            {{54}}
+
+# Options that relate to the version of PHP.
+options php
+default php                     {php${php.version}}
+options php.config
+default php.config              {${prefix}/bin/php-config${php.version}}
+options php.extension_dir
+default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
+options php.inidir
+default php.inidir              {${prefix}/var/db/${php}}
+options php.php_ini
+default php.php_ini             {${prefix}/etc/${php}/php.ini}
+options php.phpize
+default php.phpize              {${prefix}/bin/phpize${php.version}}
+options php.version
+
 
 proc php.setup {extensions version {source ""}} {
     global php php.build_dirs php.bundled php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source php.version php.versions
