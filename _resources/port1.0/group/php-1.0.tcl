@@ -56,13 +56,14 @@ options php
 default php                     {php${php.version}}
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
+options php.bundled
 options php.config
 default php.config              {${prefix}/bin/php-config${php.version}}
 options php.extensions
 options php.extension_dir
 default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
 options php.ini
-default php.ini                 {[lindex ${php.extensions} 0].ini}
+default php.ini                 {${php.rootname}.ini}
 options php.inidir
 default php.inidir              {${prefix}/var/db/${php}}
 options php.php_ini
@@ -80,7 +81,7 @@ options php.versions
 default php.versions            {{54}}
 
 proc php.setup {extensions version {source ""}} {
-    global php php.build_dirs php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source php.versions
+    global php php.build_dirs php.bundled php.config php.extensions php.homepage php.ini php.inidir php.rootname php.source php.version php.versions
     global destroot name subport
     
     # Use "set" to preserve the list structure.
@@ -97,16 +98,20 @@ proc php.setup {extensions version {source ""}} {
     version                     ${version}
     categories                  php
     
-    foreach v ${php.versions} {
-        subport php${v}-${php.rootname} {
-            php.version         ${v}
+    if {[regexp {^php-} ${name}]} {
+        foreach v ${php.versions} {
+            subport php${v}-${php.rootname} {}
         }
     }
+    
+    regexp {^php(\d+)} ${subport} -> php.version
+    
+    php.bundled                 [regexp {^php\d+$} ${name}]
     
     if {${name} == ${subport}} {
         supported_archs         noarch
         distfiles
-        depends_lib             port:php[lindex ${php.versions} end]-${php.rootname}
+        depends_lib-append      port:php[lindex ${php.versions} end]-${php.rootname}
         use_configure           no
         build {}
         destroot {
@@ -114,14 +119,18 @@ proc php.setup {extensions version {source ""}} {
             system "echo \"${name} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
         }
     } else {
-        distname                ${php.rootname}-${version}
-        if {[string index [lindex ${php.versions} 0] 0] == "5"} {
-            default dist_subdir {php5-${php.rootname}}
+        # Set up distfiles for non-bundled extensions.
+        if {!${php.bundled}} {
+            distname            ${php.rootname}-${version}
+            # Legacy dist_subdir to match old php5- port layout.
+            if {[string index [lindex ${php.versions} 0] 0] == "5"} {
+                dist_subdir     php5-${php.rootname}
+            }
         }
         
-        depends_lib             port:${php}
+        depends_lib-append      port:${php}
         
-        configure.args          --with-php-config=${php.config}
+        configure.args-append   --with-php-config=${php.config}
         
         configure.universal_args-delete --disable-dependency-tracking
         
@@ -216,13 +225,10 @@ proc php.setup {extensions version {source ""}} {
         livecheck.type          regexm
         livecheck.url           ${php.homepage}
         livecheck.regex         {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
-    } elseif {"bundled" == ${source}} {
+    }
+    
+    if {${php.bundled}} {
         homepage                http://www.php.net/${php.rootname}
-        master_sites            php
-        
-        dist_subdir             php5
-        distname                php-${version}
-        use_bzip2               yes
         
         pre-extract {
             foreach extension ${php.extensions} {
@@ -239,16 +245,12 @@ proc php.setup {extensions version {source ""}} {
         }
         
         destroot.target         install-modules install-headers
-        
-        livecheck.type          regex
-        livecheck.url           http://www.php.net/downloads.php
-        livecheck.regex         get/php-(5\\.\[0-9.\]+)\\.tar
     }
 }
 
 proc php.build_dirs_proc {} {
-    global php.extensions php.source worksrcpath
-    if {"bundled" == ${php.source}} {
+    global php.extensions php.bundled worksrcpath
+    if {${php.bundled}} {
         set dirs {}
         foreach extension ${php.extensions} {
             lappend dirs ${worksrcpath}/ext/${extension}
