@@ -79,8 +79,8 @@ options php.ini
 default php.ini                 {${prefix}/etc/${php}/php.ini}
 options php.inidir
 default php.inidir              {${prefix}/var/db/${php}}
-options php.phpize
-default php.phpize              {${prefix}/bin/phpize${php.version}}
+options php.ize
+default php.ize                 {${prefix}/bin/phpize${php.version}}
 options php.version
 
 
@@ -151,7 +151,7 @@ proc php.setup {extensions version {source ""}} {
             }
             foreach dir ${php.build_dirs} {
                 ui_debug "Generating configure script in [file tail ${dir}]"
-                system "cd ${dir} && ${php.phpize}"
+                system -W ${dir} "${php.ize}"
             }
         }
         
