@@ -198,10 +198,10 @@ proc php.setup {extensions version {source ""}} {
                 set fp [open ${php.ini} r]
                 while {![eof $fp]} {
                     set line [gets $fp]
-                    regexp {^extension_dir *= *"?([^\"]*)"?} $line -> phpiniextensiondir
-                    if {[info exists phpiniextensiondir]} {
-                        ui_debug "Found extension_dir ${phpiniextensiondir} in ${php.ini}"
-                        if {${phpiniextensiondir} != ${php.extension_dir}} {
+                    regexp {^extension_dir *= *"?([^\"]*)"?} $line -> php_ini_extension_dir
+                    if {[info exists php_ini_extension_dir]} {
+                        ui_debug "Found extension_dir ${php_ini_extension_dir} in ${php.ini}"
+                        if {${php_ini_extension_dir} != ${php.extension_dir}} {
                             if {0 == ${count}} {
                                 ui_msg "Your php.ini contains a line that will prevent ${name}"
                                 ui_msg "and other PHP extensions from working. To fix this,"
@@ -211,7 +211,7 @@ proc php.setup {extensions version {source ""}} {
                             ui_msg ${line}
                             incr count
                         }
-                        unset phpiniextensiondir
+                        unset php_ini_extension_dir
                     }
                 }
                 close $fp
