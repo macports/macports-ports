@@ -66,21 +66,33 @@ proc crossgcc.setup {target version} {
         set dcxx        gcc-g++-${version}.tar.bz2
         set dobjc       gcc-objc-${version}.tar.bz2
         
-        master_sites    gnu:gcc/gcc-${version}/:gcc
+        master_sites    gnu:gcc/gcc-${version}/:gcc \
+						ftp://ftp.gnu.org/pub/gnu/gcc/gcc-${version}
+
         distfiles       ${dcore}:gcc \
                         ${dcxx}:gcc \
                         ${dobjc}:gcc
-        dist_subdir     gcc
-        use_bzip2 yes
-        worksrcdir      build
+        use_bzip2		yes
+		
+        worksrcdir      gcc-${version}
 
         depends_lib     port:${crossgcc.target}-binutils \
                         port:gmp \
                         port:mpfr \
                         port:libiconv \
                         port:libmpc
+						
+	depends_build	port:gettext
 
-        extract.only    ${dcore} ${dcxx} ${dobjc}
+        # I don't know why is this here, it looks redundant.
+        # macports should already extract all the distfiles!
+        #extract.only    ${dcore} ${dcxx} ${dobjc}
+
+        
+	# Build in a different directory, as advised in the README file.
+	post-extract {
+	    file mkdir "${workpath}/build"
+	}
 
         post-patch {
                 # Fix the info pages and related stuff.
@@ -89,7 +101,6 @@ proc crossgcc.setup {target version} {
                 # makefile: path to Makefile.in (e.g. gas/doc/Makefile.in)
                 # name: name of the info page (e.g. as)
                 # suffix: suffix of the source page (texinfo or texi)
-            
                 # path makefile name suffix
                 set infopages {
                     gcc/doc/ gcc/Makefile.in cpp texi
@@ -97,12 +108,14 @@ proc crossgcc.setup {target version} {
                     gcc/doc/ gcc/Makefile.in gcc texi
                     gcc/doc/ gcc/Makefile.in gccint texi
                     gcc/doc/ gcc/Makefile.in gccinstall info
-                    libquadmath libquadmath/Makefile.in libquadmath info
+		    libquadmath libquadmath/Makefile.in libquadmath info
                 }
             
                 foreach { path makefile name suffix } $infopages {
-                    set src      ${workpath}/gcc-${version}/${path}/${name}.${suffix}
-                    set makefile ${workpath}/gcc-${version}/${makefile}
+                    set src      ${worksrcpath}/${path}/${name}.${suffix}
+                    set makefile ${worksrcpath}/${makefile}
+                    # If the makefile doesn't exists, skip it.
+                    if { ! [file exists ${makefile}] } {continue}
 
                     # Fix the source
                     reinplace "s|setfilename ${name}.info|setfilename ${crossgcc.target}-${name}.info|g" ${src}
@@ -110,8 +123,8 @@ proc crossgcc.setup {target version} {
                     reinplace "s|@file{${name}}|@file{${crossgcc.target}-${name}}|g" ${src}
 
                     # Rename the source
-                    file rename ${workpath}/gcc-${version}/${path}/${name}.${suffix} \
-                                ${workpath}/gcc-${version}/${path}/${crossgcc.target}-${name}.${suffix}
+                    file rename ${worksrcpath}/${path}/${name}.${suffix} \
+                                ${worksrcpath}/${path}/${crossgcc.target}-${name}.${suffix}
 
                     # Fix the Makefile
                     reinplace -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${crossgcc.target}-&:g" ${makefile}
@@ -122,7 +135,7 @@ proc crossgcc.setup {target version} {
                 }
 
                 # Do not install libiberty
-                reinplace {/^install:/s/ .*//} ${workpath}/gcc-${version}/libiberty/Makefile.in
+                reinplace {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
         }
 
         # the generated compiler doesn't accept -arch
@@ -131,18 +144,18 @@ proc crossgcc.setup {target version} {
         configure.objc_archflags
         configure.ld_archflags
 
-        pre-configure   {
-            file mkdir ${worksrcpath}
-        }
-
-        configure.cmd   ../gcc-${version}/configure
+	# We don't need system includes(this prevents xgcc to include system-wide
+	# unwind.h if it is present)!
+	compiler.cpath
+	
+	configure.dir   ${workpath}/build
+        configure.cmd   ${worksrcpath}/configure
         configure.args  --target=${crossgcc.target} \
                         --enable-languages="c,objc,c++,obj-c++" \
                         --infodir=${prefix}/share/info \
                         --mandir=${prefix}/share/man \
                         --datarootdir=${prefix}/share/${name} \
                         --with-system-zlib \
-                        --disable-nls \
                         --with-gmp=${prefix} \
                         --with-mpfr=${prefix} \
                         --with-mpc=${prefix} \
@@ -164,6 +177,10 @@ proc crossgcc.setup {target version} {
         }
 
         universal_variant no
+
+	#GCC suports parallel building
+	use_parallel_build yes
+	build.dir               ${workpath}/build
 
         destroot.violate_mtree yes
 
