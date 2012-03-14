@@ -84,10 +84,9 @@ proc crossgcc.setup {target version} {
 
         depends_build   port:gettext
 
-        # I don't know why is this here, it looks redundant.
-        # macports should already extract all the distfiles!
-        #extract.only    ${dcore} ${dcxx} ${dobjc}
-
+        # Extract gcc distfiles only. newlib tarball is available as gzip only;
+        # handled below in post-extract in the variant.
+        extract.only    ${dcore} ${dcxx} ${dobjc}
 
         # Build in a different directory, as advised in the README file.
         post-extract {
