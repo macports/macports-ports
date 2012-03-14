@@ -65,15 +65,15 @@ proc crossgcc.setup {target version} {
         set dcore       gcc-core-${version}.tar.bz2
         set dcxx        gcc-g++-${version}.tar.bz2
         set dobjc       gcc-objc-${version}.tar.bz2
-        
+
         master_sites    gnu:gcc/gcc-${version}/:gcc \
-						ftp://ftp.gnu.org/pub/gnu/gcc/gcc-${version}
+                                                ftp://ftp.gnu.org/pub/gnu/gcc/gcc-${version}
 
         distfiles       ${dcore}:gcc \
                         ${dcxx}:gcc \
                         ${dobjc}:gcc
-        use_bzip2		yes
-		
+        use_bzip2       yes
+
         worksrcdir      gcc-${version}
 
         depends_lib     port:${crossgcc.target}-binutils \
@@ -81,18 +81,18 @@ proc crossgcc.setup {target version} {
                         port:mpfr \
                         port:libiconv \
                         port:libmpc
-						
-	depends_build	port:gettext
+
+        depends_build   port:gettext
 
         # I don't know why is this here, it looks redundant.
         # macports should already extract all the distfiles!
         #extract.only    ${dcore} ${dcxx} ${dobjc}
 
-        
-	# Build in a different directory, as advised in the README file.
-	post-extract {
-	    file mkdir "${workpath}/build"
-	}
+
+        # Build in a different directory, as advised in the README file.
+        post-extract {
+            file mkdir "${workpath}/build"
+        }
 
         post-patch {
                 # Fix the info pages and related stuff.
@@ -108,9 +108,9 @@ proc crossgcc.setup {target version} {
                     gcc/doc/ gcc/Makefile.in gcc texi
                     gcc/doc/ gcc/Makefile.in gccint texi
                     gcc/doc/ gcc/Makefile.in gccinstall info
-		    libquadmath libquadmath/Makefile.in libquadmath info
+                    libquadmath libquadmath/Makefile.in libquadmath info
                 }
-            
+
                 foreach { path makefile name suffix } $infopages {
                     set src      ${worksrcpath}/${path}/${name}.${suffix}
                     set makefile ${worksrcpath}/${makefile}
@@ -144,11 +144,11 @@ proc crossgcc.setup {target version} {
         configure.objc_archflags
         configure.ld_archflags
 
-	# We don't need system includes(this prevents xgcc to include system-wide
-	# unwind.h if it is present)!
-	compiler.cpath
-	
-	configure.dir   ${workpath}/build
+        # We don't need system includes(this prevents xgcc to include system-wide
+        # unwind.h if it is present)!
+        compiler.cpath
+
+        configure.dir   ${workpath}/build
         configure.cmd   ${worksrcpath}/configure
         configure.args  --target=${crossgcc.target} \
                         --enable-languages="c,objc,c++,obj-c++" \
@@ -178,9 +178,9 @@ proc crossgcc.setup {target version} {
 
         universal_variant no
 
-	#GCC suports parallel building
-	use_parallel_build yes
-	build.dir               ${workpath}/build
+        #GCC suports parallel building
+        use_parallel_build yes
+        build.dir               ${workpath}/build
 
         destroot.violate_mtree yes
 
