@@ -91,6 +91,7 @@ proc python_set_versions {option action args} {
             global python.version
             unset python.version
             depends_lib port:py${python.default_version}[string trimleft $name py]
+            patch {}
             build {}
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
