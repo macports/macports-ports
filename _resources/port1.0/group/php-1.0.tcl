@@ -116,6 +116,7 @@ proc php.setup {extensions version {source ""}} {
         supported_archs         noarch
         distfiles
         depends_lib-append      port:php[lindex ${php.versions} end]-${php.rootname}
+        patch {}
         use_configure           no
         build {}
         destroot {
