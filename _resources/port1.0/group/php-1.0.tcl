@@ -135,7 +135,7 @@ proc php.setup {extensions version {source ""}} {
         
         depends_lib-append      port:${php}
         
-        configure.args-append   --with-php-config=${php.config}
+        configure.pre_args-append --with-php-config=${php.config}
         
         configure.universal_args-delete --disable-dependency-tracking
         
