@@ -32,24 +32,30 @@
 #
 #
 # Usage:
-# replaced_by   name-of-port-that-deprecated-this-port
-# PortGroup     obsolete 1.0
+#
+#   replaced_by         name-of-port-that-deprecated-this-port
+#   PortGroup           obsolete 1.0
 
 # set a number of reasonable defaults for a port that is only there to
 # inform users that they should uninstall it and install something else
 # instead; you might want to override some of the defaults though.
-description      this port is only a stub and has been made obsolete by ${replaced_by}
-long_description ${description}
-livecheck.type   none
-maintainers      nomaintainer
-homepage         http://www.macports.org/
-license          BSD
-platforms        darwin
-supported_archs	 noarch
+
+platforms           darwin
+maintainers         nomaintainer
+license             BSD
+supported_archs     noarch
+
+description         this port is only a stub and has been made obsolete by ${replaced_by}
+
+long_description    ${description}
+
+homepage            http://www.macports.org/
+
 distfiles
 
 pre-configure {
-   ui_error "${name} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
-   return -code error "obsolete port"
+    ui_error "${name} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
+    return -code error "obsolete port"
 }
 
+livecheck.type      none
