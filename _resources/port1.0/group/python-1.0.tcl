@@ -54,9 +54,6 @@ universal_variant yes
 build.target    build
 
 pre-destroot    {
-    foreach part ${build.env} {
-        destroot.env-append $part
-    }
     xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
 }
 
