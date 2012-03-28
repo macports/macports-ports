@@ -50,6 +50,7 @@ long_description    ${description}
 
 homepage            http://www.macports.org/
 
+archive_sites
 distfiles
 
 pre-configure {
