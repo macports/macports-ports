@@ -42,7 +42,6 @@
 
 platforms           darwin
 maintainers         nomaintainer
-license             BSD
 supported_archs     noarch
 
 description         this port is only a stub and has been made obsolete by ${replaced_by}
