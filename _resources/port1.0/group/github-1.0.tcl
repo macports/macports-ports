@@ -45,17 +45,18 @@ default github.raw {https://raw.github.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
 default github.tarball_from {tags}
 
+default master_sites {${github.master_sites}}
+
 option_proc github.tarball_from handle_tarball_from
 
 proc handle_tarball_from {option action args} {
-    global github.author github.project github.master_sites master_sites
+    global github.author github.project github.master_sites
 
     # keeping the default at tags like many portfiles already do
     # the port writer can set github.tarball_from to "downloads" and have the URI path accordingly changed
     if {[string equal ${action} "set"] && $args == "downloads"} {
         github.tarball_from ${args}
         github.master_sites https://github.com/downloads/${github.author}/${github.project}
-        master_sites        ${github.master_sites}    
     }
 }
 
@@ -72,7 +73,6 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     homepage                ${github.homepage}
     git.url                 ${github.homepage}.git
     git.branch              [join ${github.tag_prefix}]${github.version}
-    master_sites            ${github.master_sites}
     distname                ${github.project}-${github.version}
     fetch.ignore_sslcert    yes
     
