@@ -65,7 +65,11 @@ proc muniversal_arch_flag_supported {args} {
         llvm-gcc-4.2 -
         clang -
         apple-gcc-4.0 -
-        apple-gcc-4.2 {
+        apple-gcc-4.2 -
+        macports-clang-2.9 -
+        macports-clang-3.0 -
+        macports-clang-3.1 -
+        macports-clang {
             return yes
         }
         default {
