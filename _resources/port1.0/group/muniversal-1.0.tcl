@@ -38,6 +38,7 @@
 #                  merger_host: associative array of host values
 #        merger_configure_args: associative array of configure.args
 #            merger_build_args: associative array of build.args
+#    merger_configure_compiler: associative array of configure.compiler
 #    merger_configure_cppflags: associative array of configure.cppflags
 #      merger_configure_cflags: associative array of configure.cflags
 #    merger_configure_cxxflags: associative array of configure.cxxflags
@@ -252,12 +253,23 @@ variant universal {
                 configure.args-append  $merger_configure_args(${arch})
             }
 
-            set configure_cc_save   ${configure.cc}
-            set configure_cxx_save  ${configure.cxx}
-            set configure_objc_save ${configure.objc}
-            set configure_fc_save   ${configure.fc}
-            set configure_f77_save  ${configure.f77}
-            set configure_f90_save  ${configure.f90}
+            set configure_compiler_save ${configure.compiler}
+            set configure_cc_save       ${configure.cc}
+            set configure_cxx_save      ${configure.cxx}
+            set configure_objc_save     ${configure.objc}
+            set configure_fc_save       ${configure.fc}
+            set configure_f77_save      ${configure.f77}
+            set configure_f90_save      ${configure.f90}
+
+            if { [info exists merger_configure_compiler($arch)] } {
+                configure.compiler  $merger_configure_compiler($arch)
+                configure.cc        [portconfigure::configure_get_compiler cc]
+                configure.cxx       [portconfigure::configure_get_compiler cxx]
+                configure.objc      [portconfigure::configure_get_compiler objc]
+                configure.f77       [portconfigure::configure_get_compiler f77]
+                configure.f90       [portconfigure::configure_get_compiler f90]
+                configure.fc        [portconfigure::configure_get_compiler fc]
+            }
 
             if { ${merger_arch_compiler} != "no" } {
                 configure.cc   ${configure.cc}   ${archf}
@@ -297,6 +309,7 @@ variant universal {
             # Undo changes to the configure related variables
             eval autoreconf.dir ${autoreconf_dir_save}
             eval configure.dir  ${configure_dir_save}
+            eval configure.compiler ${configure_compiler_save}
             eval configure.f90  ${configure_f90_save}
             eval configure.f77  ${configure_f77_save}
             eval configure.fc   ${configure_fc_save}
