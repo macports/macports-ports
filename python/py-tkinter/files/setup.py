@@ -6,7 +6,7 @@ try:
     from distutils.command.install import install
     from distutils.core import setup, Extension
 except:
-    raise SystemExit, "Distutils problem"
+    raise SystemExit("Distutils problem")
 
 tkversion = "__TK-VERSION__"
 prefix = "__PREFIX__"
@@ -14,7 +14,7 @@ inc_dirs = [prefix + "/include"]
 lib_dirs = [prefix + "/lib"]
 libs = ["tcl" + tkversion, "tk" + tkversion]
 
-setup(name = "Tkinter",
+setup(name = "__MODULE_NAME__",
       description = "Tk Extension to Python",
       
       ext_modules = [Extension('_tkinter', ['_tkinter.c', 'tkappinit.c'],
