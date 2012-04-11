@@ -74,8 +74,6 @@ default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
 default livecheck.version {${perl5.moduleversion}}
 
-# Needed for get_canonical_archflags
-variant universal {}
 default configure.universal_args {}
 
 # define these empty initially, they are set by perl5.setup arguments
