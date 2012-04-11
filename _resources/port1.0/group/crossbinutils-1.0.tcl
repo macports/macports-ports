@@ -61,6 +61,7 @@ proc crossbinutils.setup {target version} {
                     http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
     dist_subdir     binutils
     distname        binutils-${version}
+    worksrcdir      binutils-[string trimright ${version} {[a-zA-Z]}]
     use_bzip2       yes
 
     post-extract {
