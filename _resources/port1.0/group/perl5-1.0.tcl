@@ -147,10 +147,9 @@ proc perl5.setup {module vers {cpandir ""}} {
 
         # CCFLAGS can be passed in to "configure" but it's not necessarilary inherited
         # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how)
-        depends_build port:gsed
         post-configure {
-            system "find ${worksrcpath} -name Makefile | xargs ${prefix}/bin/gsed -i '/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/' \;"
-            system "find ${worksrcpath} -name Makefile | xargs ${prefix}/bin/gsed -i '/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/'"
+            system "find ${worksrcpath} -name Makefile | xargs /usr/bin/sed -i \"\" '/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/' \;"
+            system "find ${worksrcpath} -name Makefile | xargs /usr/bin/sed -i \"\" '/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/'"
         }
 
         test.run            yes
