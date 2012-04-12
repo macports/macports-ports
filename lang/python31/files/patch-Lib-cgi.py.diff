@@ -12,7 +12,7 @@
 -# binary installations by Linux vendors often install Python in
 -# /usr/bin.  So let those vendors patch cgi.py to match their choice
 -# of installation.
-+# NOTE: /usr/local/bin/python patched for MacPorts installation
++# NOTE: The original #!/usr/local/bin/python patched for MacPorts installation
  
  """Support module for CGI (Common Gateway Interface) scripts.
  
