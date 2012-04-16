@@ -158,7 +158,11 @@ default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 
 # allow for both qt4 and qt4 devel
 if {![info exists building_qt4]} {
-    depends_lib-append      path:bin/qmake:qt4-mac
+    if {${os.platform} == "darwin"} {
+        depends_lib-append      path:lib/libQtCore.4.dylib:qt4-mac
+    } else {
+        depends_lib-append      path:lib/libQtCore.so.4:qt4-x11
+    }
 }
 
 # standard configure environment
