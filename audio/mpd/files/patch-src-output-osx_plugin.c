@@ -1,11 +1,13 @@
 --- src/output/osx_plugin.c.orig	2009-09-11 00:11:55.000000000 -0500
 +++ src/output/osx_plugin.c	2009-09-11 22:02:46.000000000 -0500
-@@ -101,7 +101,7 @@
+@@ -90,9 +90,9 @@
  
  	AudioOutputUnitStop(od->au);
  	AudioUnitUninitialize(od->au);
 -	CloseComponent(od->au);
 +	AudioComponentInstanceDispose(od->au);
+ 
+	fifo_buffer_free(od->buffer);
  }
  
  static OSStatus
