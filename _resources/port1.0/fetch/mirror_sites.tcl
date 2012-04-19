@@ -534,7 +534,6 @@ set portfetch::mirror_sites::sites(xorg) {
     http://mi.mirror.garr.it/mirrors/x.org/
     http://ftp.nara.wide.ad.jp/pub/X11/x.org/
     ftp://sunsite.uio.no/pub/X11/
-    ftp://ftp.task.gda.pl/mirror/ftp.x.org/pub/
     ftp://ftp.sunet.se/pub/X11/ftp.x.org/
     http://x.cs.pu.edu.tw/
     ftp://ftp.is.co.za/pub/x.org/pub/
