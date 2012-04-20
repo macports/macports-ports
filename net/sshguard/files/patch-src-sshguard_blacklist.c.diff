@@ -1,0 +1,273 @@
+--- a/src/sshguard_blacklist.c	2012-04-20 15:25:23.000000000 -0700
++++ b/src/sshguard_blacklist.c	2012-04-20 15:25:36.000000000 -0700
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2007,2008,2009 Mij <mij@sshguard.net>
++ * Copyright (c) 2007,2008,2009,2011 Mij <mij@sshguard.net>
+  *
+  * Permission to use, copy, modify, and distribute this software for any
+  * purpose with or without fee is hereby granted, provided that the above
+@@ -24,17 +24,22 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <sys/types.h>
++#include <inttypes.h>
+ /* for hton*() functions */
+ #include <arpa/inet.h>
+ #include <assert.h>
++#include <ctype.h>
+ 
+ #include "sshguard_addresskind.h"
+ #include "sshguard_log.h"
+ #include "sshguard_blacklist.h"
+ 
+-#define BL_MAXBUF      50
++#define BL_MAXBUF      1024
+ #define BL_NUMENT      5
+ 
++#define stringify(x)    xstr(x)
++#define xstr(x)         #x
++
+ 
+ /*          UTILITY FUNCTIONS           */
+ 
+@@ -49,163 +54,111 @@
+     return (strcmp(atk->attack.address.value, adr->value) == 0);
+ }
+ 
+-/* use custom comparator for portability: don't know sizeof(time_t) */
+-/*
+-static int time_comparator(const void *a, const void *b) {
+-    const attacker_t *atka = (const attacker_t *)a;
+-    const attacker_t *atkb = (const attacker_t *)b;
+-
+-    return ((atka->whenfirst < atkb->whenfirst) - (atka->whenfirst > atkb->whenfirst));
+-}
+-*/
+-
+-static void *attacker_serializer(const void *restrict el, uint32_t *restrict len) {
+-    /* buffer for serialization operations */
+-    char *serialization_buf;
+-    attacker_t atkr = *(const attacker_t *restrict)el;
+-    uint32_t val;
+-    
+-
+-    if (el == NULL || len == NULL) return NULL;
+-
+-    serialization_buf = (char *)malloc(ATTACKER_T_LEN);
+-    if (serialization_buf == NULL) return NULL;
+-
+-    memset(serialization_buf, 0x00, ATTACKER_T_LEN);
+-    *len = 0;
+-
+-
+-    /* store the attacker address first */
+-    switch (atkr.attack.address.kind) {
+-        case ADDRKIND_IPv4:
+-            memcpy(serialization_buf, ((const attacker_t *restrict)el)->attack.address.value, INET_ADDRSTRLEN);
+-            break;
+-
+-        case ADDRKIND_IPv6:
+-            memcpy(serialization_buf, ((const attacker_t *restrict)el)->attack.address.value, INET6_ADDRSTRLEN);
+-            break;
+-    }
+-
+-    /* but always leap by the longest address (possible "tail" stays 0-filled) */
+-    *len += ADDRLEN;
+-
+-    val = htonl((uint32_t)atkr.attack.address.kind);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    val = htonl((uint32_t)atkr.attack.service);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    val = htonl((uint32_t)atkr.whenfirst);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    val = htonl((uint32_t)atkr.whenlast);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    val = htonl((uint32_t)atkr.pardontime);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    val = htonl((uint32_t)atkr.cumulated_danger);
+-    memcpy(serialization_buf+*len, & val, sizeof(val));
+-    *len += sizeof(val);
+-
+-    assert(*len == ATTACKER_T_LEN);
+-
+-    return serialization_buf;
++static size_t attacker_el_meter(const void *el) {
++    if (el) {}
++    return sizeof(attacker_t);
+ }
+ 
++/*          INTERFACE FUNCTIONS             */
+ 
+-static void *attacker_unserializer(const void *restrict el, uint32_t *restrict len) {
+-    attacker_t *atkr = malloc(sizeof(attacker_t));
+-    *atkr = *(const attacker_t *restrict)el;
+-    uint32_t val;
+-
+-    memcpy(atkr->attack.address.value, el, ADDRLEN);
+-    *len = ADDRLEN;
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->attack.address.kind = ntohl(val);
+-    *len += sizeof(val);
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->attack.service = ntohl(val);
+-    *len += sizeof(val);
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->whenfirst = ntohl(val);
+-    *len += sizeof(val);
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->whenlast = ntohl(val);
+-    *len += sizeof(val);
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->pardontime = ntohl(val);
+-    *len += sizeof(val);
+-
+-    memcpy(&val, el + *len, sizeof(val));
+-    atkr->cumulated_danger = ntohl(val);
+-    *len += sizeof(val);
+-
+-    assert(*len == ATTACKER_T_LEN);
+-
+-    return atkr;
+-}
+-
++list_t *blacklist_load(const char *filename) {
++    attacker_t newattacker;
++    list_t *blacklist;
++    FILE *blacklist_file;
++    char blacklist_line[BL_MAXBUF];
++    unsigned int linecnt;
+ 
++    blacklist_file = fopen(filename, "r");
+ 
+-/*          INTERFACE FUNCTIONS             */
+-list_t *blacklist_load(const char *filename) {
+-    list_t * blacklist = (list_t *)malloc(sizeof(list_t));
++    if (blacklist_file == NULL)
++        return NULL;
+ 
++    blacklist = (list_t *)malloc(sizeof(list_t));
+     list_init(blacklist);
+-    list_attributes_unserializer(blacklist, attacker_unserializer);
++    list_attributes_copy(blacklist, attacker_el_meter, 1);
+ 
+-    if (list_restore_file(blacklist, filename, NULL) != 0) {
+-        return NULL;
++    /* loading content of the file in the blacklist */
++    for (linecnt = 1; fgets(blacklist_line, BL_MAXBUF, blacklist_file) != NULL; ++linecnt) {
++        /* discard empty lines and lines starting with a white-space or # */
++        if (isspace(blacklist_line[0]) || blacklist_line[0] == '#') {
++            while (blacklist_line[strlen(blacklist_line)-1] != '\n') {
++                /* consume until end of line */
++                if (fgets(blacklist_line, BL_MAXBUF, blacklist_file) == NULL) return blacklist;
++            }
++            continue;
++        }
++
++        /* line is valid, do create a list entry for it */
++        if (sscanf(blacklist_line, "%lu|%d|%d|%" stringify(ADDRLEN) "s", & newattacker.whenlast,
++               & newattacker.attack.service,
++               & newattacker.attack.address.kind, newattacker.attack.address.value) != 4) {
++            sshguard_log(LOG_NOTICE, "Blacklist entry (line #%d of '%s') appears to be malformatted. Ignoring.", linecnt, filename);
++            continue;
++        }
++        if (newattacker.attack.address.kind != ADDRKIND_IPv4 && newattacker.attack.address.kind != ADDRKIND_IPv6) {
++            /* unknown address type */
++            sshguard_log(LOG_NOTICE, "Blacklist entry (line #%d of '%s') has unknown type %d. Ignoring.", linecnt, filename, newattacker.attack.address.kind);
++            continue;
++        }
++
++        /* initialization of other default information */
++        newattacker.attack.dangerousness = 1;
++        newattacker.whenfirst = 0;
++        newattacker.pardontime = 0;
++        newattacker.numhits = 1;
++        newattacker.cumulated_danger = 1;
++
++        /* add new element to the blacklist */
++        list_append(blacklist, & newattacker);
+     }
+ 
++    fclose(blacklist_file);
++
+     return blacklist;
+ }
+ 
+ int blacklist_create(const char *filename) {
+-    list_t blacklist;
+-
+-    list_init(& blacklist);
+-    list_attributes_serializer(& blacklist, attacker_serializer);
++    FILE * blacklist_file = fopen(filename, "w");
+ 
+-    if (list_dump_file(& blacklist, filename, NULL) != 0)
++    if (blacklist_file == NULL)
+         return -1;
+ 
+-    list_destroy(& blacklist);
++    fprintf(blacklist_file, "# SSHGuard blacklist file ( http://www.sshguard.net/ ).\n");
++    fprintf(blacklist_file, "# Format of entries: BLACKLIST_TIMESTAMP|SERVICE|ADDRESS_TYPE|ADDRESS\n");
++    fclose(blacklist_file);
+ 
+     return 0;
+ }
+ 
+ int blacklist_add(const char *restrict filename, const attacker_t *restrict newel) {
+-    list_t *blacklist = blacklist_load(filename);
++    FILE * blacklist_file;
++    char blacklist_line[BL_MAXBUF];
++    unsigned int counter = 0;
+ 
+-    if (blacklist == NULL)
+-        return -1;
++    /* append the new attacker in the blacklist */
++    blacklist_file = fopen(filename, "r+");
+ 
+-    list_attributes_serializer(blacklist, attacker_serializer);
++    if (blacklist_file == NULL)
++        return -1;
+ 
+-    list_prepend(blacklist, newel);
++    /* count existing entries */
++    while (fgets(blacklist_line, BL_MAXBUF, blacklist_file) != NULL) {
++        /* discard empty lines */
++        // TODO: check again this condition
++        if ((blacklist_line != NULL || (blacklist_line[0] == '\0')))
++          continue;
++
++        /* check if the line is a comment */
++        if (blacklist_line[0] == '#')
++          continue;
+ 
+-    if (list_dump_file(blacklist, filename, NULL) != 0) {
+-        list_destroy(blacklist);
+-        free(blacklist);
+-        return -1;
++        ++counter;
+     }
+ 
+-    sshguard_log(LOG_DEBUG, "Attacker '%s:%d' blacklisted. Blacklist now %d entries.", newel->attack.address.value, newel->attack.address.kind, list_size(blacklist));
++    fprintf(blacklist_file, "%lu|%d|%d|%s\n", newel->whenlast, newel->attack.service, newel->attack.address.kind, newel->attack.address.value);
++    fclose(blacklist_file);
+ 
+-    list_destroy(blacklist);
+-    free(blacklist);
++    sshguard_log(LOG_DEBUG, "Attacker '%s:%d' blacklisted. Blacklist now %d entries.", newel->attack.address.value, newel->attack.address.kind, counter);
+ 
+     return 0;
+ }
