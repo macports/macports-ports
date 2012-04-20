@@ -1,0 +1,212 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+# $Id$
+
+PortSystem          1.0
+
+name                mysql51
+# Fixme: Subdir mysql5.
+# Conflict due to mysqld_safe finding mysql5 ports ${prefix}/libexec/mysqld.
+conflicts           mysql5
+version             5.1.62
+categories          databases
+platforms           darwin
+maintainers         pixilla openmaintainer
+license             GPL-2
+
+if {"darwin" == ${os.platform} && ${os.major} > 8} {
+    set mysqluser       _mysql
+} else {
+    set mysqluser       mysql
+}
+
+if {$subport == $name} {
+
+# http://bugs.mysql.com/bug.php?id=47360
+    PortGroup           muniversal 1.0
+    PortGroup           archcheck 1.0
+    PortGroup           select 1.0
+    
+    set branch          [join [lrange [split ${version} .] 0 1] .]
+
+    license             GPL-2
+    description         Multithreaded SQL database server
+    long_description    MySQL is an open-source, multi-threaded SQL database with a command \
+                        syntax very similar to mSQL.
+    
+    homepage            http://www.mysql.com/
+    master_sites \
+        http://mysql.mirrors.pair.com/Downloads/MySQL-${branch}/ \
+        http://mysql.he.net/Downloads/MySQL-${branch}/ \
+        http://mirrors.sunsite.dk/mysql/Downloads/MySQL-${branch}/ \
+        http://sunsite.informatik.rwth-aachen.de/mysql/Downloads/MySQL-${branch}/ \
+        http://mirror.facebook.net/mysql/Downloads/MySQL-${branch}/ \
+        http://ftp.plusline.de/mysql/Downloads/MySQL-${branch}/
+    
+    
+    distname            mysql-${version}
+    use_parallel_build  yes
+    
+    patch.pre_args      -p1
+    patchfiles          patch-Makefile.in.diff \
+                        patch-scripts-mysql_secure_installation.sh.diff
+
+    checksums           rmd160  c5720deee2b04a40a20f56a3b305b37fecb343fe \
+                        sha256  97c07b2478e25892fe915b2c46e99083973f541ecdf06672241f0c22f79fead3
+    
+    depends_lib         port:zlib
+    
+    depends_run         port:mysql_select
+    
+    select.group        mysql
+    select.file         ${filespath}/${name}
+    
+    archcheck.files     lib/libz.dylib
+    
+    post-patch {
+        reinplace s%@BINDIR@%${prefix}/lib/${name}/bin%g ${worksrcpath}/scripts/mysql_secure_installation.sh
+    }
+    
+    configure.args \
+        --bindir=${prefix}/lib/${name}/bin \
+        --sbindir=${prefix}/lib/${name}/bin \
+        --libexecdir=${prefix}/lib/${name}/bin \
+        --sysconfdir=${prefix}/etc/${name} \
+        --localstatedir=${prefix}/var/db/${name} \
+        --libdir=${prefix}/lib/${name} \
+        --includedir=${prefix}/include/${name} \
+        --datarootdir=${prefix}/share/${name} \
+        --infodir=${prefix}/share/info/${name} \
+        --mandir=${prefix}/share/man/${name} \
+        --with-zlib-dir=${prefix} \
+        --without-ssl \
+        --with-extra-charsets=complex \
+        --with-unix-socket-path=${prefix}/var/run/${name}/mysqld.sock \
+        --with-mysqld-user=${mysqluser} \
+        --without-docs \
+        --with-plugins=all \
+        --enable-thread-safe-client
+    
+    # Add readline support.
+    # "--without-readline" has the peculiar meaning "do not use the bundled copy
+    # of readline but use the system's (i.e. MacPorts') copy of readline"
+    depends_lib-append      port:readline
+    archcheck.files-append  lib/libreadline.dylib
+    configure.args-append   --without-readline
+    
+    # Build libmysqld embedded server.
+    configure.cflags-append -fPIC
+    configure.cxxflags-append -fPIC
+    configure.args-append --with-embedded-server --with-pic
+    
+    # BUILD FIX TODO: clang, build system
+    # doesn't build with clang as of 2011.06.27
+    # This looks like a bug in mysql's build system
+    if {${configure.compiler} == "clang"} {
+        configure.compiler llvm-gcc-4.2
+    }
+    
+    post-build {
+        if {[variant_isset universal]} {
+            set dirs {}
+            foreach arch ${universal_archs_to_use} {
+                lappend dirs ${worksrcpath}-${arch}
+            }
+        } else {
+            set dirs ${worksrcpath}
+        }
+        foreach dir ${dirs} {
+            reinplace -E {s|-arch [a-z0-9_]+||g} \
+                ${dir}/scripts/mysql_config \
+                ${dir}/scripts/mysqlbug
+        }
+    }
+    
+    pre-destroot {
+        xinstall -m 755 -d ${destroot}${prefix}/etc/${name}
+        destroot.keepdirs-append ${destroot}${prefix}/etc/${name}
+    }
+    
+    post-destroot {
+        # proc portdestroot::destroot_finish fails to find and compress our man pages
+        # so borrow the compress command and run on our files now.
+        set manpath "${destroot}${prefix}/share/man"
+        set gzip [findBinary gzip ${portutil::autoconf::gzip_path}]
+        foreach manpage [glob -type f ${destroot}${prefix}/share/man/${name}/man\[1-9\]/*] {
+            # Fix paths in manpages
+            reinplace "s|/etc/|${prefix}/etc/${name}/|g" ${manpage}
+            # Compress all manpages with gzip
+            system "$gzip -9vf ${manpage}"
+        }
+        foreach samp_conffile [glob -type f ${destroot}${prefix}/share/${name}/mysql/my-*.cnf] {
+            # Fix paths in sample configuration files
+            reinplace "s|/etc/my.cnf|${prefix}/etc/${name}/my.cnf|g" ${samp_conffile}
+        }
+        
+    }
+    
+    post-install {
+        if {![file exists ${prefix}/etc/LaunchDaemons/org.macports.${name}/org.macports.${name}.plist]} {
+            ui_msg "The MySQL client has been installed."
+            ui_msg "If you also want a MySQL server, install the mysql5-server port."
+        }
+    }
+    
+    variant openssl description {Enable OpenSSL support} {
+    
+        license-append          OpenSSL SSLeay
+        depends_lib-append      port:openssl
+        configure.args-delete   --without-ssl
+        configure.args-append   --with-ssl=${prefix}
+        archcheck.files-append  lib/libssl.dylib
+    }
+
+    livecheck.type          regex
+    livecheck.version       [lindex [split ${version} -] 0]
+    livecheck.url           http://dev.mysql.com/
+    livecheck.regex         "<a href=\"http://dev.mysql.com/downloads/mysql/\[^\"\]+\">(${branch}(\.\[0-9.\]+)?)\[^<\]*</a>"
+}
+subport mysql51-server {
+
+    license                 BSD
+    description             Multithreaded SQL database server
+    long_description        MySQL is an open-source, multi-threaded SQL database with a command \
+                            syntax very similar to mSQL.
+    
+    homepage                http://www.mysql.com/
+    supported_archs         noarch
+    distfiles
+    
+    depends_run             port:${name}
+    
+    add_users ${mysqluser} group=${mysqluser} realname=MySQL\ Server
+    
+    startupitem.create      yes
+    startupitem.name        ${name}
+    startupitem.start       "${prefix}/share/${name}/mysql/mysql.server start"
+    startupitem.stop        "${prefix}/share/${name}/mysql/mysql.server stop"
+    
+    use_configure           no
+    
+    build {}
+    
+    destroot {
+        xinstall -m 755 -o root -d ${destroot}${prefix}/var/run
+        xinstall -m 755 -o ${mysqluser} -g ${mysqluser} -d \
+            ${destroot}${prefix}/var/db/${name} \
+            ${destroot}${prefix}/var/log/${name} \
+            ${destroot}${prefix}/var/run/${name}
+        destroot.keepdirs-append  \
+            ${destroot}${prefix}/var/db/${name} \
+            ${destroot}${prefix}/var/log/${name} \
+            ${destroot}${prefix}/var/run/${name}
+    }
+    
+    notes "
+    
+    If this is a new install you might want to run:
+        \$ sudo -u ${mysqluser} ${prefix}/lib/${name}/bin/mysql_install_db
+    
+    "
+    
+    livecheck.type          none
+}
