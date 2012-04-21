@@ -29,6 +29,8 @@ checksums               ${distname}${extract.suffix} \
                         rmd160  0da68b89669233d7b6cc6ebdb92482e191bc9051 \
                         sha256  96a912464e2d4d3d7cdaab0744003b0fa93d139f203c82867f659ee94b4ae9f7
 
+patchfiles              ld64-version.patch
+
 if {![variant_isset llvm29] && ![variant_isset llvm30] && ![variant_isset llvm31]} {
     default_variants +llvm30
 }
@@ -49,24 +51,21 @@ variant llvm31 conflicts llvm29 llvm30 description {Use llvm-3.1 for libLTO} {
     depends_lib-append      port:llvm-${llvm_version}
 }
 
-if {${os.major} < 9} {
-    # Between XCode 3.0 (OS X 10.5.2)
-    version             77.1
-    revision            0
-    checksums           rmd160  a50eaef9ccd49c9e0db81b7e2abc392574bd552d \
-                        sha256  abd66f0dd92d52da6f0b9c44ca5c2a39d92f8be47941f6c35a9af39b790bf163
-    supported_archs     i386 ppc
-    depends_lib-delete  port:llvm-${llvm_version}
-    patchfiles          ld64-77-version.patch
-} elseif {${os.arch} == "powerpc"} {
+if {(${os.arch} == "powerpc" || ${os.major} < 9)} {
     # XCode 3.1.4
-    # 127.2 should work, but it will require some build fixes for ppc.
+    # 127.2 should work for powerpc, but it will require some build fixes.
     version             85.2.1
     revision            4
     checksums           rmd160 42c80bd4ad6e9f96a757245e6a2b95084c009ff1 \
                         sha256 4bcbcbdfd62efdc46c51700b8f5dae2cbd1638e9e50f649d5c7f242d32fca804
     supported_archs     i386 ppc
-    patchfiles          patch-MATH85-ld.cpp.diff
+
+    # No LTO Support until we work around CFLAGS and CXXFLAGS setting with XCode 2.5 below
+    # We will also need to edit the XCode project to define LTO_SUPPORT correctly
+    depends_lib-delete  port:llvm-${llvm_version}
+
+    patchfiles-delete   ld64-version.patch
+    patchfiles-append   patch-MATH85-ld.cpp.diff ld64-85-version.patch
 } elseif {${os.major} < 11} {
     # XCode 3.2.6
     # This was the last XCode release that supported building for ppc.
@@ -81,7 +80,7 @@ xcode.target            all ObjectDump machocheck
 xcode.destroot.path     ${prefix}/bin
 
 post-patch {
-    if {${os.major} >= 9} {
+    if {(${os.arch} != "powerpc" && ${os.major} >= 9)} {
         reinplace "s|/Developer/usr/lib|${prefix}/libexec/llvm-${llvm_version}/lib|g" \
             ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     }
@@ -95,6 +94,16 @@ post-patch {
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     reinplace "s|\$(RC_ProjectSourceVersion)|${version}|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+    reinplace "/VERSIONING_SYSTEM/d" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+
+    if {[file exists ${worksrcpath}/src/ld/Options.cpp]} {
+        reinplace "s|@@VERSION@@|${version}|g" \
+            ${worksrcpath}/src/ld/Options.cpp
+    } else {
+        reinplace "s|@@VERSION@@|${version}|g" \
+            ${worksrcpath}/src/Options.cpp
+    }
 
     if {${os.major} < 9} {
         # No CommonCrypto, use openssl
@@ -103,7 +112,7 @@ post-patch {
     }
 }
 
-if {${os.major} >= 9} {
+if {(${os.arch} != "powerpc" && ${os.major} >= 9)} {
     pre-build {
         set extra_flags "[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --cflags] -I${prefix}/include"
         build.env       OTHER_CFLAGS="${extra_flags}" OTHER_CPLUSPLUSFLAGS="${extra_flags}"
@@ -113,8 +122,15 @@ if {${os.major} >= 9} {
         destrootd.env   OTHER_CFLAGS="${extra_flags}" OTHER_CPLUSPLUSFLAGS="${extra_flags}"
     }
 } else {
-    xcode.build.settings    OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include' OTHER_LDFLAGS='-lcrypto'
-    xcode.destroot.settings OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include' OTHER_LDFLAGS='-lcrypto'
+    # XCode 2.5 doesn't honor the env settings as above, and the xcode
+    # PortGroup doesn't work right with spaces in the build settings
+    xcode.build.settings    OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include'
+    xcode.destroot.settings OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include'
+
+    if {${os.major} < 9} {
+        xcode.build.settings-append    OTHER_LDFLAGS='-lcrypto'
+        xcode.destroot.settings-append OTHER_LDFLAGS='-lcrypto'
+    }
 }
 
 post-destroot {
