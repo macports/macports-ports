@@ -1,0 +1,298 @@
+diff -Naurp include/stuff/lto.h include/stuff/lto.h
+--- include/stuff/lto.h	2009-03-13 13:44:10.000000000 -0700
++++ include/stuff/lto.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,14 +1,15 @@
+ #ifndef _STUFF_LTO_H_
+ #define _STUFF_LTO_H_
+ 
+-#ifdef LTO_SUPPORT
++#include "stuff/arch.h"
+ 
+-#include "stuff/ofile.h"
++#ifdef LTO_SUPPORT
+ 
+-__private_extern__ int is_llvm_bitcode(
+-    struct ofile *ofile,
++__private_extern__ int is_llvm_bitcode_from_memory(
+     char *addr,
+-    size_t size);
++    uint32_t size,
++    struct arch_flag *arch_flag,
++    void **mod); /* maybe NULL */
+ 
+ __private_extern__ uint32_t lto_get_nsyms(
+     void *mod);
+diff -Naurp include/stuff/ofile.h include/stuff/ofile.h
+--- include/stuff/ofile.h	1969-12-31 16:00:00.000000000 -0800
++++ include/stuff/ofile.h	1969-12-31 16:00:00.000000000 -0800
+@@ -216,4 +216,11 @@ __private_extern__ void Mach_O_error(
+ #endif
+     ;
+ 
++#ifdef LTO_SUPPORT
++__private_extern__ int is_llvm_bitcode(
++    struct ofile *ofile,
++    char *addr,
++    size_t size);
++#endif /* LTO_SUPPORT */
++
+ #endif /* _STUFF_OFILE_H_ */
+diff -Naurp libstuff/lto.c libstuff/lto.c
+--- libstuff/lto.c	1969-12-31 16:00:00.000000000 -0800
++++ libstuff/lto.c	1969-12-31 16:00:00.000000000 -0800
+@@ -12,8 +12,8 @@
+ #include <mach-o/nlist.h>
+ #include <mach-o/dyld.h>
+ 
+-static int set_lto_cputype(
+-    struct ofile *ofile,
++static int get_lto_cputype(
++    struct arch_flag *arch_flag,
+     char *target_triple);
+ 
+ static int tried_to_load_lto = 0;
+@@ -39,9 +39,7 @@ struct ofile *ofile,
+ char *addr,
+ size_t size)
+ {
+-   size_t bufsize;
+-   char *p, *prefix, *lto_path, buf[MAXPATHLEN], resolved_name[PATH_MAX];
+-   int i;
++    struct arch_flag arch_flag;
+ 
+ 	/*
+ 	 * If this is an llvm bitcode file these will be filled in.
+@@ -55,6 +53,35 @@ size_t size)
+ 	 *"llvm bitcode file" could be in an archive or fat file.
+ 	 */
+ 
++	if(is_llvm_bitcode_from_memory(addr, size, &arch_flag,
++				       &ofile->lto) != 0){
++	    ofile->lto_cputype = arch_flag.cputype;
++	    ofile->lto_cpusubtype = arch_flag.cpusubtype;
++	    return(1);
++	}
++	return(0);
++}
++
++/*
++ * is_llvm_bitcode_from_memory() is passed a pointer and size of a memory
++ * buffer, a pointer to an arch_flag struct and an pointer to return the lto
++ * module if not NULL.  If it the memory is an llvm bit code it returns 1 and
++ * sets the fields in the arch flag.  If pmod is not NULL it stores the lto
++ * module in their, if not it frees the lto module.  If the memory buffer is
++ * not an llvm bit code it returns 0.
++ */
++__private_extern__ int is_llvm_bitcode_from_memory(
++char *addr,
++uint32_t size,
++struct arch_flag *arch_flag,
++void **pmod) /* maybe NULL */
++{
++
++   size_t bufsize;
++   char *p, *prefix, *lto_path, buf[MAXPATHLEN], resolved_name[PATH_MAX];
++   int i;
++   void *mod;
++
+ 	/*
+ 	 * The libLTO API's can't handle empty files.  So return 0 to indicate
+ 	 * this is not a bitcode file if it has a zero size.
+@@ -131,33 +158,40 @@ size_t size)
+ 	if(!lto_is_object(addr, size))
+ 	    return(0);
+ 	
+-	ofile->lto = lto_create(addr, size);
+-	if(ofile->lto == NULL)
++	mod = lto_create(addr, size);
++	if(mod == NULL)
+ 	    return(0);
+ 
+ 	/*
+ 	 * It is possible for new targets to be added to lto that are not yet
+ 	 * known to this code.  So we will try to get lucky and let them pass
+-	 * through with the lto_cputype set to 0. This should work for things
++	 * through with the cputype set to 0. This should work for things
+ 	 * like libtool(1) as long as we don't get two different unknown
+ 	 * targets.  But we'll hope that just doesn't happen.
+ 	 */
+-	set_lto_cputype(ofile, lto_get_target(ofile->lto));
++	arch_flag->cputype = 0;
++	arch_flag->cpusubtype = 0;
++	arch_flag->name = NULL;
++	(void)get_lto_cputype(arch_flag, lto_get_target(mod));
++
++	if(pmod != NULL)
++	    *pmod = mod;
++	else
++	    lto_free(mod);
+ 
+ 	return(1);
+ }
+ 
+ /*
+- * set_lto_cputype() takes an ofile pointer and the target_triple string
+- * returned from lto_module_get_target_triple() and sets the fields lto_cputype
+- * and lto_cpusubtype in the ofile pointer.  If it can parse and knows the
+- * strings values it returns 1 and the fields are set.  Otherwise it returns 0
+- * and the fields are not set.
++ * get_lto_cputype() takes an arch_flag pointer and the target_triple string
++ * returned from lto_module_get_target_triple() and sets the fields in the
++ * arch_flag.  If it can parse and knows the strings values it returns 1 and
++ * the fields are set.  Otherwise it returns 0 and the fields are not set.
+  */
+ static
+ int
+-set_lto_cputype(
+-struct ofile *ofile,
++get_lto_cputype(
++struct arch_flag *arch_flag,
+ char *target_triple)
+ {
+     char *p;
+@@ -171,45 +205,47 @@ char *target_triple)
+ 	n = p - target_triple;
+ 	if(strncmp(target_triple, "i686", n) == 0 ||
+ 	   strncmp(target_triple, "i386", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_I386;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_I386_ALL;
++	    arch_flag->cputype = CPU_TYPE_I386;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_I386_ALL;
+ 	}
+ 	else if(strncmp(target_triple, "x86_64", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_X86_64;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_X86_64_ALL;
++	    arch_flag->cputype = CPU_TYPE_X86_64;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_X86_64_ALL;
+ 	}
+ 	else if(strncmp(target_triple, "powerpc", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_POWERPC;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_POWERPC_ALL;
++	    arch_flag->cputype = CPU_TYPE_POWERPC;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_POWERPC_ALL;
+ 	}
+ 	else if(strncmp(target_triple, "powerpc64", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_POWERPC64;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_POWERPC_ALL;
++	    arch_flag->cputype = CPU_TYPE_POWERPC64;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_POWERPC_ALL;
+ 	}
+ 	else if(strncmp(target_triple, "arm", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_ARM;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_ARM_V4T;
++	    arch_flag->cputype = CPU_TYPE_ARM;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_ARM_V4T;
+ 	}
+ 	else if(strncmp(target_triple, "armv5", n) == 0 ||
+ 	        strncmp(target_triple, "armv5e", n) == 0 ||
+ 		strncmp(target_triple, "thumbv5", n) == 0 ||
+ 		strncmp(target_triple, "thumbv5e", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_ARM;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_ARM_V5TEJ;
++	    arch_flag->cputype = CPU_TYPE_ARM;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_ARM_V5TEJ;
+ 	}
+ 	else if(strncmp(target_triple, "armv6", n) == 0 ||
+ 	        strncmp(target_triple, "thumbv6", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_ARM;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_ARM_V6;
++	    arch_flag->cputype = CPU_TYPE_ARM;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_ARM_V6;
+ 	}
+ 	else if(strncmp(target_triple, "armv7", n) == 0 ||
+ 	        strncmp(target_triple, "thumbv7", n) == 0){
+-	    ofile->lto_cputype = CPU_TYPE_ARM;
+-	    ofile->lto_cpusubtype = CPU_SUBTYPE_ARM_V7;
++	    arch_flag->cputype = CPU_TYPE_ARM;
++	    arch_flag->cpusubtype = CPU_SUBTYPE_ARM_V7;
+ 	}
+ 	else{
+ 	    return(0);
+ 	}
++	arch_flag->name = (char *)get_arch_name_from_types(arch_flag->cputype,
++						         arch_flag->cpusubtype);
+ 	return(1);
+ }
+ 
+diff -Naurp misc/lipo.c misc/lipo.c
+--- misc/lipo.c	1969-12-31 16:00:00.000000000 -0800
++++ misc/lipo.c	1969-12-31 16:00:00.000000000 -0800
+@@ -61,6 +61,7 @@
+ #include "stuff/arch.h"
+ #include "stuff/errors.h"
+ #include "stuff/allocate.h"
++#include "stuff/lto.h"
+ 
+ /* The maximum section alignment allowed to be specified, as a power of two */
+ #define MAXSECTALIGN		15 /* 2**15 or 0x8000 */
+@@ -1190,8 +1191,21 @@ struct input_file *input)
+ 		thin->fat_arch.align = 0;
+ 	    }
+ 	    else{
+-		fatal("can't figure out the architecture type of: %s",
+-		      input->name);
++		if(is_llvm_bitcode_from_memory(addr, size, &input->arch_flag,
++					       NULL) != 0){
++		    /* create a thin file struct for it */
++		    thin = new_thin();
++		    thin->name = input->name;
++		    thin->addr = addr;
++		    thin->fat_arch.cputype = input->arch_flag.cputype;
++		    thin->fat_arch.cpusubtype = input->arch_flag.cpusubtype;
++		    thin->fat_arch.offset = 0;
++		    thin->fat_arch.size = size;
++		    thin->fat_arch.align = 0;
++		}
++		else
++		    fatal("can't figure out the architecture type of: %s",
++			  input->name);
+ 	    }
+ 	}
+ }
+@@ -1344,11 +1358,12 @@ uint32_t size,
+ cpu_type_t *cputype,
+ cpu_subtype_t *cpusubtype)
+ {
+-    uint32_t offset, magic, i, ar_name_size;
++    uint32_t offset, magic, i, ar_name_size, ar_size;
+     struct mach_header mh;
+     struct mach_header_64 mh64;
+     struct ar_hdr *ar_hdr;
+-    char *ar_name;
++    char *ar_name, *ar_addr;
++    struct arch_flag arch_flag;
+ 
+ 	/*
+ 	 * Check this archive out to make sure that it does not contain
+@@ -1425,7 +1440,30 @@ cpu_subtype_t *cpusubtype)
+ 			      ~CPU_SUBTYPE_MASK);
+ 		    }
+ 		}
+-	    }
++		else{
++		    if(strncmp(ar_name, SYMDEF, sizeof(SYMDEF) - 1) != 0){
++			ar_addr = addr + offset + ar_name_size;
++			ar_size = strtoul(ar_hdr->ar_size, NULL, 10);
++			if(is_llvm_bitcode_from_memory(ar_addr, ar_size,
++						       &arch_flag, NULL) != 0){
++			    if(*cputype == 0){
++				*cputype = arch_flag.cputype;
++				*cpusubtype = arch_flag.cpusubtype;
++			    }
++			    else if(*cputype != arch_flag.cputype){
++				fatal("archive member %s(%.*s) cputype (%d) "
++				      "and cpusubtype (%d) does not match "
++				      "previous archive members cputype (%d) "
++				      "and cpusubtype (%d) (all members must "
++				      "match)", name, (int)i, ar_name,
++				      arch_flag.cputype, arch_flag.cpusubtype &
++				      ~CPU_SUBTYPE_MASK, *cputype,
++				      (*cpusubtype) & ~CPU_SUBTYPE_MASK);
++			    }
++			}
++		    }
++		}
++	    } 
+ 	    offset += rnd(strtoul(ar_hdr->ar_size, NULL, 10),
+ 			    sizeof(short));
+ 	}
