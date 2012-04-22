@@ -29,13 +29,13 @@ checksums               ${distname}${extract.suffix} \
                         rmd160  0da68b89669233d7b6cc6ebdb92482e191bc9051 \
                         sha256  96a912464e2d4d3d7cdaab0744003b0fa93d139f203c82867f659ee94b4ae9f7
 
-patchfiles              ld64-version.patch
+patchfiles              ld64-pbxproj.patch ld64-version.patch
 
-if {![variant_isset llvm29] && ![variant_isset llvm30] && ![variant_isset llvm31] &&
-    ${os.arch} != "powerpc" && ${os.major} >= 9} {
+if {![variant_isset llvm29] && ![variant_isset llvm30] && ![variant_isset llvm31] && ${os.major} >= 9} {
     default_variants +llvm30
 
-    if {![variant_isset llvm30]} {
+    # Leopard/powerpc has the option to not be LTO
+    if {![variant_isset llvm30] && ${os.arch} != "powerpc"} {
         ui_error "Your platform cannot be configured without LTO support in ld64.  Please enable one of the llvmXX variants, and try again."
         return -code error "Your platform cannot be configured without LTO support in ld64.  Please enable one of the llvmXX variants, and try again."
     }
@@ -59,25 +59,17 @@ variant llvm31 conflicts llvm29 llvm30 description {Use llvm-3.1 for libLTO} {
 
 if {${os.arch} == "powerpc" || ${os.major} < 9} {
     # XCode 3.1.4
-    # 97.17 could work, but it requires gcc-4.2 to build, but xcodebuild
-    # isn't UsingTheRightCompiler
+    # 97.17 could work, but it requires gcc-4.2 to build, and xcodebuild
+    # isn't UsingTheRightCompiler.  We could use it for Leopard/ppc, but
+    # I don't want to support too many differnet versions
     version             85.2.1
-    revision            4
+    revision            5
     checksums           rmd160 42c80bd4ad6e9f96a757245e6a2b95084c009ff1 \
                         sha256 4bcbcbdfd62efdc46c51700b8f5dae2cbd1638e9e50f649d5c7f242d32fca804
     supported_archs     i386 ppc
 
-    if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
-        ui_error "Your platform does not yet support LTO in ld64.  Please disable the llvmXX variant, and try again."
-        return -code error "Your platform does not yet support LTO in ld64.  Please disable the llvmXX variant, and try again."
-    }
-
-    # No LTO Support until we work around CFLAGS and CXXFLAGS setting with XCode 2.5 below
-    # We will also need to edit the XCode project to define LTO_SUPPORT correctly
-    depends_lib-delete  port:llvm-${llvm_version}
-
-    patchfiles-delete   ld64-version.patch
-    patchfiles-append   patch-MATH85-ld.cpp.diff ld64-85-version.patch
+    patchfiles-delete   ld64-pbxproj.patch ld64-version.patch
+    patchfiles-append   patch-MATH85-ld.cpp.diff ld64-85-pbxproj.patch ld64-85-version.patch
 } elseif {${os.major} < 11} {
     # XCode 3.2.6
     # This was the last XCode release that supported building for ppc.
@@ -90,21 +82,55 @@ if {${os.arch} == "powerpc" || ${os.major} < 9} {
     patchfiles-append   ld64-127-any-cctools.patch
 }
 
+platform darwin 8 {
+    if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
+        ui_error "Your platform does not yet support LTO in ld64.  Please disable the llvmXX variant, and try again."
+        return -code error "Your platform does not yet support LTO in ld64.  Please disable the llvmXX variant, and try again."
+    }
+
+    # No LTO Support until we work around a bootstrapping issue since XCode
+    # won't use the right compiler which results in ld_classic being used to
+    # link, and that spits out warnings... fun times.
+    depends_lib-delete  port:llvm-${llvm_version}
+}
+
+
 xcode.target            all ObjectDump machocheck
 xcode.destroot.path     ${prefix}/bin
 
 post-patch {
+    set extra_flags {}
+
     if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
-        reinplace "s|/Developer/usr/lib|${prefix}/libexec/llvm-${llvm_version}/lib|g" \
+        reinplace "s|-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib|-Wl,-lazy_library,[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --libdir]/libLTO.dylib|g" \
+            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+        reinplace "s|MACPORTS_LLVM_INCLUDEDIR|[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --includedir]|g" \
+            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+
+        set extra_flags [exec ${prefix}/bin/llvm-config-mp-${llvm_version} --cflags]
+    } else {
+        reinplace "s|-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib||g" \
             ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     }
+
+    reinplace "s|MACPORTS_CFLAGS|${extra_flags}|g" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+    reinplace "s|MACPORTS_CPLUSPLUSFLAGS|${extra_flags}|g" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+
     reinplace "s|/usr/share/man/man1|${prefix}/share/man/man1|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     reinplace "s|usr/share/man/man1|${prefix}/share/man/man1|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     reinplace "s|/usr/local|${prefix}|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|/Developer/usr/local|${prefix}|g" \
+    reinplace "s|/SDKs/Extra/usr|${prefix}|g" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+    reinplace "s|/Developer${prefix}|${prefix}|g" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+    reinplace "s|\$(DEVELOPER_DIR)/usr|${prefix}|g" \
+        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+    reinplace "s|\$(DEVELOPER_DIR)${prefix}|${prefix}|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     reinplace "s|\$(RC_ProjectSourceVersion)|${version}|g" \
         ${worksrcpath}/ld64.xcodeproj/project.pbxproj
@@ -120,34 +146,19 @@ post-patch {
     }
 
     if {${os.major} < 9} {
+        reinplace "s:-lazy_library,::g" \
+            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
+
         # No CommonCrypto, use openssl
-        reinplace "s:<CommonCrypto/CommonDigest.h>:<openssl/md5.h>:" ${worksrcpath}/src/MachOWriterExecutable.hpp
-        reinplace "s:CC_MD5:MD5:" ${worksrcpath}/src/MachOWriterExecutable.hpp
-    }
-}
-
-if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
-    pre-build {
-        set extra_flags "[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --cflags] -I${prefix}/include"
-        build.env       OTHER_CFLAGS="${extra_flags}" OTHER_CPLUSPLUSFLAGS="${extra_flags}"
-    }
-    pre-destroot {
-        set extra_flags "[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --cflags] -I${prefix}/include"
-        destroot.env    OTHER_CFLAGS="${extra_flags}" OTHER_CPLUSPLUSFLAGS="${extra_flags}"
-    }
-} else {
-    # XCode 2.5 doesn't honor the env settings as above, and the xcode
-    # PortGroup doesn't work right with spaces in the build settings
-    xcode.build.settings    OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include'
-    xcode.destroot.settings OTHER_CFLAGS='-I${prefix}/include' OTHER_CPLUSPLUSFLAGS='-I${prefix}/include'
-
-    if {${os.major} < 9} {
-        xcode.build.settings-append    OTHER_LDFLAGS='-lcrypto'
-        xcode.destroot.settings-append OTHER_LDFLAGS='-lcrypto'
+        reinplace "s:<CommonCrypto/CommonDigest.h>:<openssl/md5.h>:" \
+            ${worksrcpath}/src/MachOWriterExecutable.hpp
+        reinplace "s:CC_MD5:MD5:" \
+            ${worksrcpath}/src/MachOWriterExecutable.hpp
+        reinplace "s:MACPORTS_LD64_LDFLAGS:-lcrypto:g" \
+            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     } else {
-        # To remove a potential weak link against libLTO.dylib
-        xcode.build.settings-append    OTHER_LDFLAGS=''
-        xcode.destroot.settings-append OTHER_LDFLAGS=''
+        reinplace "s:MACPORTS_LD64_LDFLAGS::g" \
+            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
     }
 }
 
