@@ -1,9 +1,6 @@
 # $Id$
 
 PortSystem              1.0
-PortGroup               xcode 1.0
-PortGroup               xcodeversion 1.0
-minimum_xcodeversions   {10 3.2.3}
 
 # cctools uses a static library from this port when it builds, please
 # revbump cctools whenever this port updates
@@ -14,6 +11,7 @@ version                 128.2
 revision                3
 set llvm_version        3.0
 categories              devel
+platforms               darwin
 maintainers             mfeiri jeremyhu
 homepage                http://opensource.apple.com/source/${name}/
 master_sites            http://opensource.apple.com/tarballs/${name}/
@@ -29,7 +27,7 @@ checksums               ${distname}${extract.suffix} \
                         rmd160  0da68b89669233d7b6cc6ebdb92482e191bc9051 \
                         sha256  96a912464e2d4d3d7cdaab0744003b0fa93d139f203c82867f659ee94b4ae9f7
 
-patchfiles              ld64-pbxproj.patch ld64-version.patch
+patchfiles              ld64-version.patch
 
 # We don't set llvmXX as the default variant on Tiger because it would introduce a
 # dependency cycle as llvm requires apple-gcc42 and ld64 to build correctly.  Users
@@ -44,6 +42,8 @@ if {![variant_isset llvm29] && ![variant_isset llvm30] && ![variant_isset llvm31
         return -code error "Your platform cannot be configured without LTO support in ld64.  Please enable one of the llvmXX variants, and try again."
     }
 }
+
+variant universal {}
 
 set llvm_version {}
 variant llvm29 conflicts llvm30 llvm31 description {Use llvm-2.9 for libLTO} {
@@ -62,19 +62,14 @@ variant llvm31 conflicts llvm29 llvm30 description {Use llvm-3.1 for libLTO} {
 }
 
 if {${os.arch} == "powerpc" || ${os.major} < 9} {
-    # XCode 3.1.4
-    # 97.17 could work, but it requires gcc-4.2 to build, and xcodebuild
-    # isn't UsingTheRightCompiler.  We could use it for Leopard/ppc, but
-    # I don't want to support too many different versions.
-    version             85.2.1
-    revision            6
-    checksums           rmd160 42c80bd4ad6e9f96a757245e6a2b95084c009ff1 \
-                        sha256 4bcbcbdfd62efdc46c51700b8f5dae2cbd1638e9e50f649d5c7f242d32fca804
-    supported_archs     i386 ppc
+    # 127.2 should work for powerpc, but it will require some build fixes.
+    version             97.17
+    revision            0
+    checksums           rmd160  d52df7d7f741c8bedd29cbac73dbb9db992b4795 \
+                        sha256  02bd46af0809eaa415d096d7d41c3e8e7d80f7d8d181840866fb87f036b4e089
+    supported_archs     x86_64 i386 ppc
 
-    patchfiles-delete   ld64-pbxproj.patch ld64-version.patch
-    patchfiles-append   patch-MATH85-ld.cpp.diff ld64-85-pbxproj.patch \
-                        ld64-85-version.patch ld64-85-no_pie.patch
+    patchfiles-append   ld64-97-no-LTO.patch ld64-97-Makefile.patch
 } elseif {${os.major} < 11} {
     # XCode 3.2.6
     # This was the last XCode release that supported linking ppc executables.
@@ -84,7 +79,7 @@ if {${os.arch} == "powerpc" || ${os.major} < 9} {
                         sha256  97b75547b2bd761306ab3e15ae297f01e7ab9760b922bc657f4ef72e4e052142
     supported_archs     i386 x86_64
 
-    patchfiles-append   ld64-127-any-cctools.patch
+    patchfiles-append   ld64-127-any-cctools.patch ld64-127-Makefile.patch
 }
 
 platform darwin 8 {
@@ -98,71 +93,52 @@ platform darwin 8 {
     }
 }
 
-xcode.target            all ObjectDump machocheck
-xcode.destroot.path     ${prefix}/bin
+if {${configure.compiler} == "gcc-4.0"} {
+    configure.compiler gcc-4.2
+    if {![file exists ${configure.cc}]} {
+        depends_build-append port:apple-gcc42
+        depends_skip_archcheck-append apple-gcc42
+        configure.compiler apple-gcc-4.2
+    }
+}
+
+post-extract {
+    file copy ${filespath}/Makefile ${worksrcpath}
+}
 
 post-patch {
-    set extra_flags {}
+    reinplace "s|@@VERSION@@|${version}|g" \
+        ${worksrcpath}/src/ld/Options.cpp
 
+    if {${os.major} < 9} {
+        # No CommonCrypto, use openssl
+        reinplace "s:<CommonCrypto/CommonDigest.h>:<openssl/md5.h>:" \
+            ${worksrcpath}/src/ld/MachOWriterExecutable.hpp
+        reinplace "s:CC_MD5:MD5:" \
+            ${worksrcpath}/src/ld/MachOWriterExecutable.hpp
+    } 
+}
+
+use_configure no
+build.args \
+    CC="${configure.cc}" \
+    CXX="${configure.cxx}" \
+    OTHER_CPPFLAGS="${configure.cppflags}" \
+    OTHER_CFLAGS="${configure.cflags} [get_canonical_archflags]" \
+    OTHER_CXXFLAGS="${configure.cxxflags} [get_canonical_archflags]" \
+    OTHER_LDFLAGS="${configure.ldflags} [get_canonical_archflags]"
+
+destroot.args \
+    PREFIX=${prefix}
+
+pre-build {
     if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
-        reinplace "s|-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib|-Wl,-lazy_library,[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --libdir]/libLTO.dylib|g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-        reinplace "s|MACPORTS_LLVM_INCLUDEDIR|[exec ${prefix}/bin/llvm-config-mp-${llvm_version} --includedir]|g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-
-        set extra_flags [exec ${prefix}/bin/llvm-config-mp-${llvm_version} --cflags]
-    } else {
-        reinplace "s|-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib||g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    }
-
-    reinplace "s|MACPORTS_CFLAGS|-I${prefix}/include ${extra_flags}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|MACPORTS_CPLUSPLUSFLAGS|-I${prefix}/include ${extra_flags}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-
-    reinplace "s|/usr/share/man/man1|${prefix}/share/man/man1|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|usr/share/man/man1|${prefix}/share/man/man1|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|/usr/local|${prefix}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|/SDKs/Extra/usr|${prefix}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|/Developer${prefix}|${prefix}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|\$(DEVELOPER_DIR)/usr|${prefix}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|\$(DEVELOPER_DIR)${prefix}|${prefix}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "s|\$(RC_ProjectSourceVersion)|${version}|g" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    reinplace "/VERSIONING_SYSTEM/d" \
-        ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-
-    if {[file exists ${worksrcpath}/src/ld/Options.cpp]} {
-        reinplace "s|@@VERSION@@|${version}|g" \
-            ${worksrcpath}/src/ld/Options.cpp
-    } else {
-        reinplace "s|@@VERSION@@|${version}|g" \
-            ${worksrcpath}/src/Options.cpp
+        build.args-append LLVM_CONFIG=${prefix}/bin/llvm-config-mp-${llvm_version}
     }
 
     if {${os.major} < 9} {
-        reinplace "s:-lazy_library,::g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-
-        # No CommonCrypto, use openssl
-        reinplace "s:<CommonCrypto/CommonDigest.h>:<openssl/md5.h>:" \
-            ${worksrcpath}/src/MachOWriterExecutable.hpp
-        reinplace "s:CC_MD5:MD5:" \
-            ${worksrcpath}/src/MachOWriterExecutable.hpp
-        reinplace "s:MACPORTS_LD64_LDFLAGS:-lcrypto:g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    } else {
-        reinplace "s:MACPORTS_LD64_LDFLAGS::g" \
-            ${worksrcpath}/ld64.xcodeproj/project.pbxproj
-    }
+        build.args-append OTHER_LDFLAGS_LD64=-lcrypto
+    }    
 }
 
 post-destroot {
@@ -174,10 +150,6 @@ post-destroot {
     if {[variant_isset llvm29] || [variant_isset llvm30] || [variant_isset llvm31]} {
         system "install_name_tool -change ${prefix}/libexec/llvm-${llvm_version}/lib/libLTO.dylib \
                 @executable_path/../lib/libLTO.dylib ${destroot}${prefix}/libexec/ld64/ld"
-    }
-
-    if {[file exists ${destroot}${prefix}/bin/libprunetrie.a]} {
-        file rename ${destroot}${prefix}/bin/libprunetrie.a ${destroot}${prefix}/lib/libprunetrie.a
     }
 }
 
