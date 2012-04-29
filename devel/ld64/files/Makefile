@@ -75,6 +75,7 @@ libprunetrie.a : src/other/PruneTrie.o
 install : all
 	install -d -m 755 $(DESTDIR)$(PREFIX)/bin
 	install -d -m 755 $(DESTDIR)$(PREFIX)/lib
+	install -d -m 755 $(DESTDIR)$(PREFIX)/include/mach-o
 	install -d -m 755 $(DESTDIR)$(PREFIX)/share/man/man1
 	
 	install -m 755 ObjectDump $(DESTDIR)$(PREFIX)/bin
@@ -84,6 +85,7 @@ install : all
 	install -m 755 rebase     $(DESTDIR)$(PREFIX)/bin
 	install -m 755 unwinddump $(DESTDIR)$(PREFIX)/bin
 
+	install -m 644 src/other/prune_trie.h $(DESTDIR)$(PREFIX)/include/mach-o
 	install -m 644 libprunetrie.a $(DESTDIR)$(PREFIX)/lib
 
 	install -m 644 doc/man/man1/dyldinfo.1   $(DESTDIR)$(PREFIX)/share/man/man1
