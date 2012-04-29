@@ -1,0 +1,149 @@
+# $Id$
+
+PortSystem              1.0
+PortGroup select        1.0
+
+set llvm_version        3.2
+name                    llvm-${llvm_version}
+set suffix              mp-${llvm_version}
+set sub_prefix          ${prefix}/libexec/${name}
+dist_subdir             llvm
+categories              lang
+platforms               darwin
+license                 NCSA
+maintainers             jeremyhu openmaintainer
+description             llvm is a next generation compiler infrastructure (svn trunk version)
+long_description        The LLVM Core libraries provide a modern source- and \
+                        target-independent optimizer, along with code \
+                        generation support for many popular CPUs (as well as \
+                        some less common ones!) These libraries are built \
+                        around a well specified code representation known as \
+                        the LLVM intermediate representation ("LLVM IR").
+
+homepage                http://llvm.org/
+
+depends_lib             port:libffi
+depends_run             bin:perl:perl5 port:llvm_select
+
+fetch.type              svn
+svn.revision            155781
+version                 ${llvm_version}-r${svn.revision}
+worksrcdir              trunk
+svn.url                 http://llvm.org/svn/llvm-project/llvm/trunk
+#worksrcdir              release_32
+#svn.url                 http://llvm.org/svn/llvm-project/llvm/branches/release_32
+default_variants-append +assertions
+
+#version                 ${llvm_version}
+#epoch                   1
+#master_sites            ${homepage}releases/${version}/
+#extract.suffix          .tgz
+#distfiles               llvm-${version}${extract.suffix}
+#worksrcdir              llvm-${version}.src
+
+patchfiles      tiger.patch \
+                tiger-shlib.patch
+patch.pre_args  -p1
+
+build.env-append        VERBOSE=1 REQUIRE_RTTI=1
+destroot.env-append     VERBOSE=1 REQUIRE_RTTI=1
+configure.cppflags
+configure.ldflags
+configure.pre_args-delete --prefix=${prefix}
+configure.args          --enable-bindings=none --enable-libffi --enable-shared --enable-jit \
+                        --enable-optimized --disable-profiling \
+                        --enable-debug-symbols --disable-debug-runtime \
+                        --prefix="${sub_prefix}"
+
+select.group    llvm
+select.file     ${filespath}/mp-${name}
+
+# g++-4.0 fails to build some of the newer C++ for ppc
+# Intel looks ok, but I prefer using gcc-4.2 for consistency
+if {${configure.compiler} == "gcc-4.0"} {
+    configure.compiler gcc-4.2
+    if {![file exists ${configure.cc}]} {
+        depends_build-append port:apple-gcc42
+        configure.compiler apple-gcc-4.2
+    }
+}
+
+# linking fails for ppc
+supported_archs i386 x86_64
+
+variant universal {
+    build.env-append \
+        UNIVERSAL=1 \
+        UNIVERSAL_ARCH="[get_canonical_archs]"
+    destroot.env-append \
+        UNIVERSAL=1 \
+        UNIVERSAL_ARCH="[get_canonical_archs]"
+
+    post-extract {
+        # workaround a bug in Apple's shipped gcc driver-driver, patched in
+        # ours with driverdriver-num_infiles.patch
+        if {${configure.compiler} == "gcc-4.0" ||
+            ${configure.compiler} == "gcc-4.2"} {
+            system "echo \"static int ___ignoreme;\" > ${worksrcpath}/tools/llvm-shlib/ignore.c"
+        }
+    }
+}
+
+variant assertions description "Enable assertions for error detection (has performance impacts, especially on JIT)" {
+    configure.args-append --enable-assertions
+}
+
+platform darwin {
+    if {${build_arch} == "i386" } {
+        configure.pre_args-append --build=i686-apple-darwin${os.major}
+    } else {
+        configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
+    }
+
+    post-destroot {
+        foreach liba [glob ${destroot}${sub_prefix}/lib/*dylib] {
+            set liba_nodr [string map "${destroot} {}" ${liba}]
+            system "install_name_tool -id ${liba_nodr} ${liba}"
+
+            foreach libb [glob ${destroot}${sub_prefix}/lib/*dylib] {
+                set libb_base [string map "${destroot}${sub_prefix}/lib/ {}" ${libb}]
+                set libb_nodr [string map "${destroot} {}" ${libb}]
+
+                system "install_name_tool -change @executable_path/../lib/${libb_base} ${libb_nodr} ${liba}"
+            }
+        }
+    }
+}
+
+platform darwin 8 {
+    post-configure {
+        reinplace "/^RPATH/s/=.*/=/" ${worksrcpath}/Makefile.config
+    }
+}
+
+variant ocaml description {Enable generation of OCaml binding} {
+    depends_lib-append   port:ocaml
+
+    configure.args-delete --enable-bindings=none
+    configure.args-append --enable-bindings=ocaml
+
+    destroot.args-append  OVERRIDE_libdir=${sub_prefix}/lib
+}
+
+post-destroot {
+    file mkdir ${destroot}${prefix}/share/doc
+    file rename ${destroot}${sub_prefix}/docs/llvm ${destroot}${prefix}/share/doc/${name}
+
+    foreach man [glob ${destroot}${sub_prefix}/share/man/man1/*.1] {
+	set basename [string map "${destroot}${sub_prefix}/share/man/man1/ {}" ${man}]
+        file rename ${man} ${destroot}${prefix}/share/man/man1/[string map ".1 -${suffix}.1" ${basename}]
+    }
+
+    foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
+        set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-${suffix}
+        set exec_path [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
+
+        xinstall -m 755 "${filespath}/llvm-bin" "${bin_filename}"
+        reinplace "s:EXEC_PATH:${exec_path}:" "${bin_filename}"
+    }
+}

@@ -1,0 +1,211 @@
+# $Id$
+
+PortSystem              1.0
+PortGroup select        1.0
+
+set llvm_version        3.2
+name                    clang-${llvm_version}
+set suffix              mp-${llvm_version}
+set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
+dist_subdir             llvm
+categories              lang
+platforms               darwin
+maintainers             jeremyhu openmaintainer
+license                 NCSA
+description             C, C++, Objective C and Objective C++ compiler
+long_description        Clang is an "LLVM native" C/C++/Objective-C compiler, \
+                        which aims to deliver amazingly fast compiles (e.g. \
+                        about 3x faster than GCC when compiling Objective-C \
+                        code in a debug configuration), extremely useful error \
+                        and warning messages and to provide a platform for \
+                        building great source level tools. The included Clang \
+                        Static Analyzer is a tool automatically finds bugs in \
+                        your code, and is a great example of the sort of tool \
+                        that can be built using the Clang frontend as a \
+                        library to parse C/C++ code.
+
+homepage                http://clang.llvm.org/
+
+depends_lib             port:llvm-${llvm_version} port:libffi
+depends_run             port:clang_select
+
+default_variants        +analyzer
+
+fetch.type              svn
+svn.revision            155781
+version                 ${llvm_version}-r${svn.revision}
+set compiler_rt_rev     ${svn.revision}
+worksrcdir              trunk
+svn.url                 http://llvm.org/svn/llvm-project/llvm/trunk
+#worksrcdir              release_32
+#svn.url                 http://llvm.org/svn/llvm-project/llvm/branches/release_32
+default_variants-append +assertions
+
+#version                 ${llvm_version}
+#set compiler_rt_rev     150641
+#epoch                   1
+#master_sites            http://llvm.org/releases/${version}/
+#extract.suffix          .tgz
+#distfiles               llvm-${version}${extract.suffix} clang-${version}${extract.suffix}
+#worksrcdir              llvm-${version}.src
+
+patchfiles      install_target.patch \
+                tiger.patch  \
+                tiger-shlib.patch \
+                tiger-shlib-clang.patch
+patch.pre_args  -p1
+
+build.target            clang-only
+destroot.target         install-clang
+build.env-append        VERBOSE=1 REQUIRE_RTTI=1
+destroot.env-append     VERBOSE=1 REQUIRE_RTTI=1
+configure.cppflags
+configure.ldflags
+configure.pre_args-delete --prefix=${prefix}
+configure.args          --enable-bindings=none --enable-libffi --enable-shared --enable-jit \
+                        --enable-optimized --disable-profiling \
+                        --enable-debug-symbols --disable-debug-runtime \
+                        --prefix="${sub_prefix}"
+
+select.group    clang
+select.file     ${filespath}/mp-${name}
+
+# g++-4.0 fails to build some of the newer C++ for ppc
+# Intel looks ok, but I prefer using gcc-4.2 for consistency
+if {${configure.compiler} == "gcc-4.0"} {
+    configure.compiler gcc-4.2
+    if {![file exists ${configure.cc}]} {
+        depends_build-append port:apple-gcc42
+        configure.compiler apple-gcc-4.2
+    }
+}
+
+# linking fails for ppc
+supported_archs i386 x86_64
+
+variant universal {
+    build.env-append \
+        UNIVERSAL=1 \
+        UNIVERSAL_ARCH="[get_canonical_archs]"
+    destroot.env-append \
+        UNIVERSAL=1 \
+        UNIVERSAL_ARCH="[get_canonical_archs]"
+
+    post-extract {
+        # workaround a bug in Apple's shipped gcc driver-driver, patched in
+        # ours with driverdriver-num_infiles.patch
+        if {${configure.compiler} == "gcc-4.0" ||
+            ${configure.compiler} == "gcc-4.2"} {
+            system "echo \"static int ___ignoreme;\" > ${worksrcpath}/tools/llvm-shlib/ignore.c"
+        }
+    }
+}
+
+variant assertions description "Enable assertions for error detection (has performance impacts, especially on JIT)" {
+    configure.args-append --enable-assertions
+}
+
+platform darwin {
+    depends_run-append      port:ld64
+    depends_skip_archcheck-append ld64
+
+    if {${build_arch} == "i386" } {
+        configure.pre_args-append --build=i686-apple-darwin${os.major}
+    } else {
+        configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
+    }
+}
+
+platform darwin 8 {
+    # Tiger's DevTools make has issues with the nested ifs in compiler-rt
+    depends_run-append      port:gmake
+    depends_skip_archcheck-append gmake
+    build.cmd               ${prefix}/bin/gmake
+    destroot.cmd            ${prefix}/bin/gmake
+
+    post-configure {
+        reinplace "/^RPATH/s/=.*/=/" ${worksrcpath}/Makefile.config
+    }
+}
+
+post-extract {
+    system "cd ${worksrcpath}/tools && svn co -r ${svn.revision} http://llvm.org/svn/llvm-project/cfe/trunk clang"
+    #system "cd ${worksrcpath}/tools && svn co -r ${svn.revision} http://llvm.org/svn/llvm-project/cfe/branches/release_32 clang"
+    #file rename ${workpath}/clang-${llvm_version}.src ${worksrcpath}/tools/clang
+    system "cd ${worksrcpath}/projects && svn co -r ${compiler_rt_rev} http://llvm.org/svn/llvm-project/compiler-rt/trunk compiler-rt"
+    #system "cd ${worksrcpath}/projects && svn co -r ${compiler_rt_rev} http://llvm.org/svn/llvm-project/compiler-rt/branches/release_32 compiler-rt"
+}
+
+variant arm_runtime description {Build and install the arm runtime for iOS development (requires iOS SDK)} {}
+
+post-patch {
+    # http://trac.macports.org/ticket/33272
+    if {![variant_isset arm_runtime]} {
+        reinplace {/^SubDirs/ s/arm//} ${worksrcpath}/projects/compiler-rt/lib/Makefile.mk
+        reinplace {/^UniversalArchs/ s/arm[^ )]* *//g} ${worksrcpath}/projects/compiler-rt/make/platform/clang_darwin.mk
+    }
+
+    if {! [file exists /usr/include/dispatch/dispatch.h]} {
+        reinplace {/^SubDirs/ s/asan//} ${worksrcpath}/projects/compiler-rt/lib/Makefile.mk
+    }
+
+}
+
+variant analyzer description {Install clang static analyzer} {
+    depends_run-append  bin:python:python26 bin:perl:perl5
+    post-patch {
+        reinplace "s|/usr/bin/env perl|${prefix}/bin/perl5|g" \
+            ${worksrcpath}/tools/clang/tools/scan-build/ccc-analyzer \
+            ${worksrcpath}/tools/clang/tools/scan-build/c++-analyzer \
+            ${worksrcpath}/tools/clang/tools/scan-build/scan-build
+        reinplace "s|/usr/bin/env python|${prefix}/bin/python2.6|g" \
+            ${worksrcpath}/tools/clang/tools/scan-build/set-xcode-analyzer \
+            ${worksrcpath}/tools/clang/tools/scan-view/scan-view
+    }
+
+    post-destroot {
+        file mkdir ${destroot}${sub_prefix}/libexec
+        file copy ${worksrcpath}/tools/clang/tools/scan-build ${destroot}${sub_prefix}/libexec/scan-build
+        file copy ${worksrcpath}/tools/clang/tools/scan-view ${destroot}${sub_prefix}/libexec/scan-view
+
+        file delete -force ${destroot}${sub_prefix}/libexec/scan-build/.svn
+        file delete -force ${destroot}${sub_prefix}/libexec/scan-view/.svn
+        file delete -force ${destroot}${sub_prefix}/libexec/scan-view/Resources/.svn
+
+        ln -s ${sub_prefix}/libexec/scan-build/scan-build ${destroot}${sub_prefix}/bin/scan-build
+        ln -s ${sub_prefix}/libexec/scan-view/scan-view ${destroot}${sub_prefix}/bin/scan-view
+        ln -s ${sub_prefix}/bin ${destroot}${sub_prefix}/libexec/scan-build/bin
+
+        xinstall -m 755 "${filespath}/llvm-bin" "${destroot}${prefix}/bin/scan-build-${suffix}"
+        reinplace "s:EXEC_PATH:${sub_prefix}/bin/scan-build:" "${destroot}${prefix}/bin/scan-build-${suffix}"
+
+        xinstall -m 755 "${filespath}/llvm-bin" "${destroot}${prefix}/bin/scan-view-${suffix}"
+        reinplace "s:EXEC_PATH:${sub_prefix}/bin/scan-view:" "${destroot}${prefix}/bin/scan-view-${suffix}"
+    }
+}
+
+post-destroot {
+    foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
+        set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-${suffix}
+        set exec_path [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
+
+        xinstall -m 755 "${filespath}/llvm-bin" "${bin_filename}"
+        reinplace "s:EXEC_PATH:${exec_path}:" "${bin_filename}"
+    }
+
+    # http://trac.macports.org/ticket/33207
+    ln -s ${prefix}/libexec/ld64/ld ${destroot}${sub_prefix}/bin/ld
+
+    system "install_name_tool -id ${sub_prefix}/lib/libclang.dylib ${destroot}${sub_prefix}/lib/libclang.dylib"
+    system "install_name_tool -change @executable_path/../lib/libLLVM-${llvm_version}svn.dylib ${sub_prefix}/lib/libLLVM-${llvm_version}svn.dylib ${destroot}${sub_prefix}/lib/libclang.dylib"
+}
+
+pre-activate {
+    # An earlier version of this port accidentally installed ${sub_prefix}/bin/ld
+    # rather than ${destroot}${sub_prefix}/bin/ld
+    if {[file exists ${sub_prefix}/bin/ld]} {
+        if {[catch {delete ${sub_prefix}/bin/ld}]} {
+            ui_warn "Cannot delete ${sub_prefix}/bin/ld; please remove it manually."
+        } 
+    }
+}
