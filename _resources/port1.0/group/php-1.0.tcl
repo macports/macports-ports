@@ -56,6 +56,7 @@ default destroot.dir            {[lindex ${php.build_dirs} 0]}
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
 options php.bundled
+default php.bundled             {[string equal ${name} "php"]}
 options php.extension_ini
 default php.extension_ini       {${php.rootname}.ini}
 options php.extensions
@@ -109,8 +110,6 @@ proc php.setup {extensions version {source ""}} {
     }
     
     regexp {^php(\d+)} ${subport} -> php.version
-    
-    php.bundled                 [regexp {^php\d+$} ${name}]
     
     if {${name} == ${subport}} {
         supported_archs         noarch
