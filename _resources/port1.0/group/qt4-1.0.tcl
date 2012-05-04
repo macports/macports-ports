@@ -142,7 +142,7 @@ set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 
 # standard PKGCONFIG path
 global qt_pkg_config_dir
-set qt_pkg_config_dir   ${qt_dir}/lib/pkgconfig
+set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
 # standard cmake info for Qt4
 global qt_cmake_defines
@@ -156,47 +156,89 @@ set qt_cmake_defines    \
 options qt_arch_types
 default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 
-# allow for both qt4 and qt4 devel
+# allow for depending on either qt4-mac and qt4-mac-devel, simultaneously
+
 if {![info exists building_qt4]} {
     if {${os.platform} == "darwin"} {
-        depends_lib-append      path:lib/libQtCore.4.dylib:qt4-mac
+
+        # see if the framework install exists, and if so depend on it;
+        # if not, depend on the library version
+
+        if {[file exists ${qt_frameworks_dir}/QtCore/QtCore]} {
+            depends_lib-append path:Library/Frameworks/QtCore/QtCore:qt4-mac
+        } else {
+            depends_lib-append path:lib/libQtCore.4.dylib:qt4-mac
+        }
+
     } else {
         depends_lib-append      path:lib/libQtCore.so.4:qt4-x11
     }
 }
 
-# standard configure environment
-configure.env-append    QTDIR=${qt_dir} \
-                        QMAKE=${qt_qmake_cmd} \
-                        QMAKESPEC=${qt_qmake_spec} \
-                        MOC=${qt_moc_cmd}
+# standard configure environment, when not building qt4
 
-if {${qt_dir} != ${prefix}} {
-    configure.env-append PATH=${qt_dir}/bin:$env(PATH)
+if {![info exists building_qt4]} {
+    configure.env-append \
+        QTDIR=${qt_dir} \
+        QMAKE=${qt_qmake_cmd} \
+        QMAKESPEC=${qt_qmake_spec} \
+        MOC=${qt_moc_cmd}
+
+    # make sure the Qt binaries' directory is in the path, if it is
+    # not the current prefix
+
+    if {${qt_dir} != ${prefix}} {
+        configure.env-append PATH=${qt_dir}/bin:$env(PATH)
+    }
+} else {
+    configure.env-append QMAKE_NO_DEFAULTS=""
 }
 
-# standard build environment
-build.env-append        QTDIR=${qt_dir} \
-                        QMAKE=${qt_qmake_cmd} \
-                        QMAKESPEC=${qt_qmake_spec} \
-                        MOC=${qt_moc_cmd}
+# standard build environment, when not building qt4
 
-if {${qt_dir} != ${prefix}} {
-    build.env-append    PATH=${qt_dir}/bin:$env(PATH)
+if {![info exists building_qt4]} {
+    build.env-append \
+        QTDIR=${qt_dir} \
+        QMAKE=${qt_qmake_cmd} \
+        QMAKESPEC=${qt_qmake_spec} \
+        MOC=${qt_moc_cmd}
+
+    # make sure the Qt binaries' directory is in the path, if it is
+    # not the current prefix
+
+    if {${qt_dir} != ${prefix}} {
+        build.env-append    PATH=${qt_dir}/bin:$env(PATH)
+    }
+} else {
+    build.env-append QMAKE_NO_DEFAULTS=""
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
 depends_build-append    port:pkgconfig
 
 # standard destroot environment
-destroot.env-append     QTDIR=${qt_dir} \
-                        QMAKE=${qt_qmake_cmd} \
-                        QMAKESPEC=${qt_qmake_spec} \
-                        MOC=${qt_moc_cmd} \
-                        INSTALL_ROOT=${destroot} \
-                        DESTDIR=${destroot}
-if {${qt_dir} != ${prefix}} {
-    destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
+
+destroot.env-append \
+    INSTALL_ROOT=${destroot} \
+    DESTDIR=${destroot}
+
+# standard destroot environment, when not building qt4
+
+if {![info exists building_qt4]} {
+    destroot.env-append \
+        QTDIR=${qt_dir} \
+        QMAKE=${qt_qmake_cmd} \
+        QMAKESPEC=${qt_qmake_spec} \
+        MOC=${qt_moc_cmd}
+
+    # make sure the Qt binaries' directory is in the path, if it is
+    # not the current prefix
+
+    if {${qt_dir} != ${prefix}} {
+        destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
+    }
+} else {
+    destroot.env-append QMAKE_NO_DEFAULTS=""
 }
 
 # append Qt's PKGCONFIG path to whatever is there now.
