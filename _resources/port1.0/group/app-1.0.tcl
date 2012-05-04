@@ -85,9 +85,10 @@ default app.executable {${name}}
 # app.icon: the icon the app will have.
 #
 # The default is empty; if no icon graphic is available for this software, this
-# is fine. You can specify an absolute or relative path to an existing .icns
-# file, or the path to a .png or other graphic file that the makeicns program
-# can convert. Relative paths are relative to ${worksrcpath}.
+# is fine. You can supply the path to an existing .icns file, or the path to a
+# .png or other graphic file that the makeicns program can convert. A build
+# dependency on makeicns will be automatically added if needed. Paths may
+# absolute or relative to ${worksrcpath}.
 #
 # Relates to Info.plist key CFBundleIconFile.
 
