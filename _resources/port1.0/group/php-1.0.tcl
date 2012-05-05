@@ -37,10 +37,14 @@
 # 
 #   PortGroup                   php 1.0
 #   php.setup                   extension version source
+#   php.branches                5.3 5.4
 # 
 # where extension is the name of the extension (e.g. APC), version is its
 # version, and if the extension is hosted at PECL, source is "pecl"; otherwise
 # don't use source.
+# 
+# php.branches must be set to the list of PHP branches for which this extension
+# should be made available.
 # 
 # If this is a Zend extension, use
 # 
@@ -50,30 +54,27 @@
 
 
 # Options that relate to the PHP extension.
-default build.dir               {[lindex ${php.build_dirs} 0]}
-default configure.dir           {[lindex ${php.build_dirs} 0]}
-default destroot.dir            {[lindex ${php.build_dirs} 0]}
+options php.branches
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
-options php.bundled
-default php.bundled             {[string equal ${name} "php"]}
+options php.default_branch
+default php.default_branch      {[lindex ${php.branches} end]}
 options php.extension_ini
 default php.extension_ini       {${php.rootname}.ini}
 options php.extensions
 options php.rootname
 default php.rootname            {[lindex ${php.extensions} 0]}
-options php.source
-default php.source              standalone
 options php.type
 default php.type                php
-options php.versions
-default php.versions            {{54}}
+option_proc php.branches        php._set_branches
 
-# Options that relate to the version of PHP.
+# Options that relate to the branch of PHP being used by a subport.
 options php
-default php                     {php${php.version}}
+default php                     {php${php.suffix}}
+options php.branch
+default php.branch              {[php.branch_from_subport]}
 options php.config
-default php.config              {${prefix}/bin/php-config${php.version}}
+default php.config              {${prefix}/bin/php-config${php.suffix}}
 options php.extension_dir
 default php.extension_dir       {[exec ${php.config} --extension-dir 2>/dev/null]}
 options php.ini
@@ -81,21 +82,59 @@ default php.ini                 {${prefix}/etc/${php}/php.ini}
 options php.ini_dir
 default php.ini_dir             {${prefix}/var/db/${php}}
 options php.ize
-default php.ize                 {${prefix}/bin/phpize${php.version}}
-options php.version
+default php.ize                 {${prefix}/bin/phpize${php.suffix}}
+options php.suffix
+default php.suffix              {[php.suffix_from_branch ${php.branch}]}
 
+# Private options you don't need to worry about.
+options php._bundled
+default php._bundled            {[string equal ${name} "php"]}
+
+
+proc php._set_branches {option action args} {
+    if {"set" != ${action}} {
+        return
+    }
+    
+    # Sort the values so we can use lindex 0 and end to get the min and max branches respectively.
+    option ${option} [lsort -command vercmp [option ${option}]]
+    
+    global php.default_branch php.rootname php._bundled name subport
+    if {[regexp {^php-} ${name}]} {
+        # Create subport for each PHP branch.
+        foreach branch [option ${option}] {
+            subport php[php.suffix_from_branch ${branch}]-${php.rootname} {
+                # Legacy dist_subdir to match old php5- port layout.
+                if {!${php._bundled}} {
+                    if {[lindex [split [lindex [option ${option}] 0] .] 0] == "5"} {
+                        dist_subdir php5-${php.rootname}
+                    }
+                }
+            }
+        }
+        
+        # Set up stub port.
+        if {${name} == ${subport}} {
+            supported_archs     noarch
+            distfiles
+            depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
+            patch {}
+            use_configure       no
+            build {}
+            destroot {
+                xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
+                system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
+            }
+        }
+    }
+}
 
 proc php.setup {extensions version {source ""}} {
-    global php php.build_dirs php.bundled php.config php.extension_ini php.extensions php.homepage php.ini_dir php.rootname php.source php.version php.versions
+    global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.homepage php.ini_dir php.rootname php._bundled
     global destroot name subport
     
     # Use "set" to preserve the list structure.
     set php.extensions          ${extensions}
-    
-    php.source                  ${source}
-    
-    # Sort versions so we can use lindex 0 and end to get the min and max versions respectively.
-    set php.versions            [lsort ${php.versions}]
     
     if {![info exists name]} {
         name                    php-${php.rootname}
@@ -103,36 +142,20 @@ proc php.setup {extensions version {source ""}} {
     version                     ${version}
     categories                  php
     
-    if {[regexp {^php-} ${name}]} {
-        foreach v ${php.versions} {
-            subport php${v}-${php.rootname} {}
-        }
-    }
-    
-    regexp {^php(\d+)} ${subport} -> php.version
-    
-    if {${name} == ${subport}} {
-        supported_archs         noarch
-        distfiles
-        depends_lib-append      port:php[lindex ${php.versions} end]-${php.rootname}
-        patch {}
-        use_configure           no
-        build {}
-        destroot {
-            xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
-            system "echo \"${name} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
-        }
-    } else {
+    if {${name} != ${subport}} {
         # Set up distfiles for non-bundled extensions.
-        if {!${php.bundled}} {
+        if {!${php._bundled}} {
             distname            ${php.rootname}-${version}
-            # Legacy dist_subdir to match old php5- port layout.
-            if {[string index [lindex ${php.versions} 0] 0] == "5"} {
-                dist_subdir     php5-${php.rootname}
-            }
         }
         
         depends_lib-append      port:${php}
+        
+        # These are set only for the convenience of subports that want to access
+        # these variables directly, e.g. the ${php}-openssl subport which wants
+        # to move a file in ${build.dir} in a post-extract block.
+        configure.dir           [lindex ${php.build_dirs} 0]
+        build.dir               [lindex ${php.build_dirs} 0]
+        destroot.dir            [lindex ${php.build_dirs} 0]
         
         configure.pre_args-append --with-php-config=${php.config}
         
@@ -143,10 +166,10 @@ proc php.setup {extensions version {source ""}} {
         pre-configure {
             set php_debug_variant [regexp {/debug-[^/]+$} ${php.extension_dir}]
             if {${php_debug_variant} && ![variant_isset debug]} {
-                ui_error "${name} cannot be installed without the debug variant because PHP is installed with the debug variant."
+                ui_error "${subport} cannot be installed without the debug variant because ${php} is installed with the debug variant."
                 return -code error "incompatible variant selection"
             } elseif {[variant_isset debug] && !${php_debug_variant}} {
-                ui_error "${name} cannot be installed with the debug variant because PHP is installed without the debug variant."
+                ui_error "${subport} cannot be installed with the debug variant because ${php} is installed without the debug variant."
                 return -code error "incompatible variant selection"
             }
             foreach dir ${php.build_dirs} {
@@ -184,8 +207,8 @@ proc php.setup {extensions version {source ""}} {
             }
             set fp [open ${destroot}${php.ini_dir}/${php.extension_ini} w]
             puts $fp "; Do not edit this file; it is automatically generated by MacPorts."
-            puts $fp "; Any changes you make will be lost if you upgrade or uninstall ${name}."
-            puts $fp "; To configure PHP, edit ${php.ini}."
+            puts $fp "; Any changes you make will be lost if you upgrade or uninstall ${subport}."
+            puts $fp "; To configure ${php}, edit ${php.ini}."
             foreach extension ${php.extensions} {
                 puts $fp "${extension_prefix}${extension}.so"
             }
@@ -203,8 +226,8 @@ proc php.setup {extensions version {source ""}} {
                         ui_debug "Found extension_dir ${php_ini_extension_dir} in ${php.ini}"
                         if {${php_ini_extension_dir} != ${php.extension_dir}} {
                             if {0 == ${count}} {
-                                ui_msg "Your php.ini contains a line that will prevent ${name}"
-                                ui_msg "and other PHP extensions from working. To fix this,"
+                                ui_msg "Your php.ini contains a line that will prevent ${subport}"
+                                ui_msg "and other ${php} extensions from working. To fix this,"
                                 ui_msg "edit ${php.ini} and delete this line:"
                                 ui_msg ""
                             }
@@ -231,10 +254,11 @@ proc php.setup {extensions version {source ""}} {
         livecheck.regex         {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     }
     
-    if {${php.bundled}} {
+    if {${php._bundled}} {
         homepage                http://www.php.net/${php.rootname}
         
         pre-extract {
+            # Speed up extraction by extracting only the modules we're going to be building.
             foreach extension ${php.extensions} {
                 extract.post_args-append ${worksrcdir}/ext/${extension}
             }
@@ -243,8 +267,8 @@ proc php.setup {extensions version {source ""}} {
         pre-configure {
             set php_version [exec ${php.config} --version 2>/dev/null]
             if {${version} != ${php_version}} {
-                ui_error "${name} ${version} requires PHP ${version} but you have PHP ${php_version}."
-                return -code error "incompatible PHP installation"
+                ui_error "${subport} @${version} requires ${php} @${version} but you have ${php} @${php_version}."
+                return -code error "incompatible ${php} installation"
             }
         }
         
@@ -252,9 +276,10 @@ proc php.setup {extensions version {source ""}} {
     }
 }
 
+# Return the list of directories we need to phpize / configure / make in.
 proc php.build_dirs_proc {} {
-    global php.extensions php.bundled worksrcpath
-    if {${php.bundled}} {
+    global php.extensions php._bundled worksrcpath
+    if {${php._bundled}} {
         set dirs {}
         foreach extension ${php.extensions} {
             lappend dirs ${worksrcpath}/ext/${extension}
@@ -262,4 +287,28 @@ proc php.build_dirs_proc {} {
         return ${dirs}
     }
     return ${worksrcpath}
+}
+
+# Calculate suffix from given branch.
+proc php.suffix_from_branch {branch} {
+    return [strsed ${branch} {g/\\.//}]
+}
+
+# Calculate branch from given suffix.
+proc php.branch_from_suffix {suffix} {
+    return [string index ${suffix} 0].[string range ${suffix} 1 end]
+}
+
+# Calculate branch from subport.
+proc php.branch_from_subport {} {
+    global php.default_branch subport
+    
+    # For the subports, get the branch from ${subport}.
+    regexp {^php(\d+)} ${subport} -> suffix
+    if {[info exists suffix]} {
+        return [php.branch_from_suffix ${suffix}]
+    }
+    
+    # For the stub port, use the default branch.
+    return ${php.default_branch}
 }
