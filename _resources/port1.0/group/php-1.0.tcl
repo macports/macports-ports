@@ -255,7 +255,7 @@ proc php.setup {extensions version {source ""}} {
     }
     
     if {${php._bundled}} {
-        homepage                http://www.php.net/${php.rootname}
+        default homepage        http://www.php.net/${php.rootname}
         
         pre-extract {
             # Speed up extraction by extracting only the modules we're going to be building.
