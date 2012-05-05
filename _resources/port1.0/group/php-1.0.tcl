@@ -243,7 +243,7 @@ proc php.setup {extensions version {source ""}} {
     }
     
     if {"pecl" == ${source}} {
-        set php.homepage        http://pecl.php.net/package/${php.rootname}/
+        set php.homepage        http://pecl.php.net/package/${php.rootname}
         
         homepage                ${php.homepage}
         master_sites            http://pecl.php.net/get/
