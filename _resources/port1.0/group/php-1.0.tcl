@@ -253,37 +253,6 @@ proc php.setup {extensions version {source ""}} {
         livecheck.url           ${php.homepage}
         livecheck.regex         {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     }
-    
-    if {${php._bundled}} {
-        default homepage        http://www.php.net/${php.rootname}
-        
-        pre-extract {
-            # Speed up extraction by extracting only the modules we're going to be building.
-            foreach extension ${php.extensions} {
-                extract.post_args-append ${worksrcdir}/ext/${extension}
-            }
-        }
-        
-        post-extract {
-            # The PDO extensions need the PDO headers which are installed by the ${php} port.
-            foreach extension ${php.extensions} {
-                if {[regexp {^pdo_} ${extension}]} {
-                    file mkdir ${worksrcpath}/ext/${extension}/ext
-                    ln -s ${prefix}/include/${php}/php/ext/pdo ${worksrcpath}/ext/${extension}/ext
-                }
-            }
-        }
-        
-        pre-configure {
-            set php_version [exec ${php.config} --version 2>/dev/null]
-            if {${version} != ${php_version}} {
-                ui_error "${subport} @${version} requires ${php} @${version} but you have ${php} @${php_version}."
-                return -code error "incompatible ${php} installation"
-            }
-        }
-        
-        destroot.target         install-modules install-headers
-    }
 }
 
 # Return the list of directories we need to phpize / configure / make in.
