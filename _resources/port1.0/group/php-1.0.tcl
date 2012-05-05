@@ -264,6 +264,16 @@ proc php.setup {extensions version {source ""}} {
             }
         }
         
+        post-extract {
+            # The PDO extensions need the PDO headers which are installed by the ${php} port.
+            foreach extension ${php.extensions} {
+                if {[regexp {^pdo_} ${extension}]} {
+                    file mkdir ${worksrcpath}/ext/${extension}/ext
+                    ln -s ${prefix}/include/${php}/php/ext/pdo ${worksrcpath}/ext/${extension}/ext
+                }
+            }
+        }
+        
         pre-configure {
             set php_version [exec ${php.config} --version 2>/dev/null]
             if {${version} != ${php_version}} {
