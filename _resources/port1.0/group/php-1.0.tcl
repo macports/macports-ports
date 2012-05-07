@@ -55,6 +55,7 @@
 
 # Options that relate to the PHP extension.
 options php.branches
+option_proc php.branches        php._set_branches
 options php.build_dirs
 default php.build_dirs          {[php.build_dirs_proc]}
 options php.default_branch
@@ -62,11 +63,13 @@ default php.default_branch      {[lindex ${php.branches} end]}
 options php.extension_ini
 default php.extension_ini       {${php.rootname}.ini}
 options php.extensions
+options php.pecl_livecheck_stable
+default php.pecl_livecheck_stable yes
+option_proc php.pecl_livecheck_stable php._set_pecl_livecheck_stable
 options php.rootname
 default php.rootname            {[lindex ${php.extensions} 0]}
 options php.type
 default php.type                php
-option_proc php.branches        php._set_branches
 
 # Options that relate to the branch of PHP being used by a subport.
 options php
@@ -126,6 +129,20 @@ proc php._set_branches {option action args} {
                 system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
             }
         }
+    }
+}
+
+proc php._set_pecl_livecheck_stable {option action args} {
+    global livecheck.regex
+    
+    if {"set" != ${action}} {
+        return
+    }
+    
+    if {${args}} {
+        livecheck.regex     {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
+    } else {
+        livecheck.regex     {>([0-9.]+)</a></th>}
     }
 }
 
@@ -243,6 +260,8 @@ proc php.setup {extensions version {source ""}} {
     }
     
     if {"pecl" == ${source}} {
+        global php.pecl_livecheck_stable
+        
         set php.homepage        http://pecl.php.net/package/${php.rootname}
         
         homepage                ${php.homepage}
@@ -251,7 +270,7 @@ proc php.setup {extensions version {source ""}} {
         
         livecheck.type          regexm
         livecheck.url           ${php.homepage}
-        livecheck.regex         {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
+        php.pecl_livecheck_stable yes
     }
 }
 
