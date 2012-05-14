@@ -201,7 +201,7 @@ proc php5extension.setup {extensions version {source ""}} {
         
         destroot.target             install-modules install-headers
         
-        livecheck.type              regex
+        livecheck.type              none
         livecheck.url               http://www.php.net/downloads.php
         livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
     }
