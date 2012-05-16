@@ -140,9 +140,9 @@ proc php._set_pecl_livecheck_stable {option action args} {
     }
     
     if {${args}} {
-        livecheck.regex     {>([0-9a-z.]+)</a></th>\s*<[^>]+>stable<}
+        livecheck.regex     {>([0-9a-zA-Z.]+)</a></th>\s*<[^>]+>stable<}
     } else {
-        livecheck.regex     {>([0-9a-z.]+)</a></th>}
+        livecheck.regex     {>([0-9a-zA-Z.]+)</a></th>}
     }
 }
 
