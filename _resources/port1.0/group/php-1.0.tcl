@@ -104,16 +104,16 @@ proc php._set_branches {option action args} {
     
     global php.default_branch php.rootname php._bundled name subport
     if {[regexp {^php-} ${name}]} {
+        # Legacy dist_subdir to match old php5- port layout.
+        if {!${php._bundled}} {
+            if {[lindex [split [lindex [option ${option}] 0] .] 0] == "5"} {
+                dist_subdir php5-${php.rootname}
+            }
+        }
+        
         # Create subport for each PHP branch.
         foreach branch [option ${option}] {
-            subport php[php.suffix_from_branch ${branch}]-${php.rootname} {
-                # Legacy dist_subdir to match old php5- port layout.
-                if {!${php._bundled}} {
-                    if {[lindex [split [lindex [option ${option}] 0] .] 0] == "5"} {
-                        dist_subdir php5-${php.rootname}
-                    }
-                }
-            }
+            subport php[php.suffix_from_branch ${branch}]-${php.rootname} {}
         }
         
         # Set up stub port.
