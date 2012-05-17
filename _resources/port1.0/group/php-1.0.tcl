@@ -121,6 +121,7 @@ proc php._set_branches {option action args} {
             supported_archs     noarch
             depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
             fetch {}
+            checksum {}
             extract {}
             patch {}
             use_configure       no
