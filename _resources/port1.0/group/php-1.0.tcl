@@ -126,6 +126,7 @@ proc php._set_branches {option action args} {
             patch {}
             use_configure       no
             build {}
+            test {}
             destroot {
                 xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
                 system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
