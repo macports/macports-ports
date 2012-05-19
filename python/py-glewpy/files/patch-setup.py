@@ -6,11 +6,11 @@
  
 -glew_extensions = [Extension('glew', ['src/glew.pyx'], libraries=libs)]
 +glew_extensions = [Extension('glew', ['src/glew.pyx'], 
-+                             include_dirs=['/opt/local/include'], 
++                             include_dirs=['__PREFIX__/include'], 
 +                             libraries=libs)]
  gl_extensions = [Extension('gl.%s' % g,
                             ['src/gl/%s.pyx' % g],
-+                           include_dirs=['/opt/local/include'],
++                           include_dirs=['__PREFIX__/include'],
                             libraries=libs) for g in gl_modules]
  
  all_extensions = []
