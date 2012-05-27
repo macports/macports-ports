@@ -76,15 +76,24 @@ proc php._set_branches {option action args} {
             if {${name} == ${subport}} {
                 supported_archs     noarch
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
+                
+                # Ensure the stub port does not do anything with distfiles—not
+                # if the port overrides distfiles, not if there's a post-extract
+                # block (e.g. the github portgroup).
+                distfiles
                 pre-fetch {
                     distfiles
                 }
+                fetch {}
                 pre-checksum {
                     distfiles
                 }
+                checksum {}
                 pre-extract {
                     distfiles
                 }
+                extract {}
+                
                 patch {}
                 use_configure       no
                 build {}
