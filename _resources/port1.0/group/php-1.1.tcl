@@ -354,6 +354,8 @@ proc php.add_port_code {} {
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
     
+    depends_build-append    port:autoconf
+    
     depends_lib-append      port:${php}
     
     # These are set only for the convenience of subports that want to access
