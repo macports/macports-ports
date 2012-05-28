@@ -358,13 +358,6 @@ proc php.add_port_code {} {
     
     depends_lib-append      port:${php}
     
-    # These are set only for the convenience of subports that want to access
-    # these variables directly, e.g. the ${php}-openssl subport which wants
-    # to move a file in ${build.dir} in a post-extract block.
-    #configure.dir           [lindex ${php.build_dirs} 0]
-    #build.dir               [lindex ${php.build_dirs} 0]
-    #destroot.dir            [lindex ${php.build_dirs} 0]
-    
     configure.pre_args-append --with-php-config=${php.config}
     
     configure.universal_args-delete --disable-dependency-tracking
