@@ -82,6 +82,8 @@ proc php5extension.setup {extensions version {source ""}} {
     categories                  php
     distname                    [lindex ${php5extension.extensions} 0]-${version}
     
+    depends_build               port:autoconf
+    
     depends_lib                 path:bin/php:php5
     
     configure.universal_args-delete --disable-dependency-tracking
