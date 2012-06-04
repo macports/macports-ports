@@ -60,9 +60,9 @@ post-extract {
     set wrapper [open ${ocamlfind_wrapper} "w"]
     puts ${wrapper} "#!/bin/sh"
     puts ${wrapper} "if \[ \"\$1\" = \"install\" \]; then"
-    puts ${wrapper} "    ${prefix}/bin/ocamlfind \$* -destdir ${ocamlfind_destdir} -ldconf ignore"
+    puts ${wrapper} "    ${prefix}/bin/ocamlfind \"\$@\" -destdir ${ocamlfind_destdir} -ldconf ignore"
     puts ${wrapper} "else"
-    puts ${wrapper} "    ${prefix}/bin/ocamlfind \$*"
+    puts ${wrapper} "    ${prefix}/bin/ocamlfind \"\$@\""
     puts ${wrapper} "fi"
     close ${wrapper}
     file attributes ${ocamlfind_wrapper} -permissions +x
