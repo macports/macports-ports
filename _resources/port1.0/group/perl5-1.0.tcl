@@ -39,7 +39,7 @@
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
-default perl5.branches {"5.8 5.10 5.12 5.14 5.16"}
+default perl5.branches {"5.8 5.10 5.12 5.14"}
 default perl5.default_branch {[perl5_get_default_branch]}
 proc perl5_get_default_branch {} {
     global prefix
