@@ -411,8 +411,6 @@ set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savan
 set portfetch::mirror_sites::sites(sourceforge) {
     http://downloads.sourceforge.net/
     http://aarnet.dl.sourceforge.net/
-    http://biznetnetworks.dl.sourceforge.net/
-    http://cdnetworks-us-1.dl.sourceforge.net/
     http://cdnetworks-us-2.dl.sourceforge.net/
     http://cdnetworks-kr-1.dl.sourceforge.net/
     http://cdnetworks-kr-2.dl.sourceforge.net/
@@ -428,17 +426,13 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
     http://kent.dl.sourceforge.net/
-    http://mesh.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
     http://ncu.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
-    http://puzzle.dl.sourceforge.net/
-    http://softlayer.dl.sourceforge.net/
     http://space.dl.sourceforge.net/
     http://sunet.dl.sourceforge.net/
     http://surfnet.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
-    http://transact.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
     http://voxel.dl.sourceforge.net/
     http://waix.dl.sourceforge.net/
