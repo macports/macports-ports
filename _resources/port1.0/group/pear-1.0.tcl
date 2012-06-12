@@ -129,7 +129,7 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
     dist_subdir             pear
     supported_archs         noarch
     use_parallel_build      yes
-    depends_lib             port:pear-install-phar
+    depends_build           port:pear-install-phar
     
     # List of ports that pear-PEAR depends on.
     # Add some pear-PEAR deps to make programmatic creation of pear Portfiles easier.
