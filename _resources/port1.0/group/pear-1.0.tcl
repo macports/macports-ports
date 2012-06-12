@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id: pear-1.0.tcl 89609 2012-02-03 23:25:15Z pixilla@macports.org $
 # 
-# Copyright (c) 2011 The MacPorts Project
+# Copyright (c) 2011-2012 The MacPorts Project
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
