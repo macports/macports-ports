@@ -495,6 +495,7 @@ set portfetch::mirror_sites::sites(tex_ctan) {
 }
 
 set portfetch::mirror_sites::sites(trolltech) {
+    http://releases.qt-project.org/qt4/source/:nosubdir
     http://ftp.heanet.ie/mirrors/ftp.trolltech.com/pub/qt/source/:nosubdir
     ftp://ftp.informatik.hu-berlin.de/pub1/Mirrors/ftp.troll.no/QT/qt/source/:nosubdir
     http://ftp.iasi.roedu.net/mirrors/ftp.trolltech.com/qt/source/:nosubdir
