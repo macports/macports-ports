@@ -1,17 +1,12 @@
---- src/constants.h	2006-09-30 10:13:00.000000000 +0200
-+++ src/constants.h	2007-02-18 00:01:30.000000000 +0100
-@@ -121,6 +121,7 @@
- #  define	KEY_BACKSPACE	0402
- # endif
+--- src/constants.h	2009-12-10 13:07:26.000000000 -0800
++++ src/constants.h	2009-12-10 13:07:07.000000000 -0800
+@@ -103,7 +103,7 @@
+ #define INCLUDES	8
+ #define	FIELDS		9
  
-+#ifndef __APPLE__
- # if !sun
- #  define cbreak()	crmode()			/* name change */
- # endif
-@@ -133,5 +134,6 @@
- #  define killchar()  (_tty.sg_kill)			/* equivalent */
- # endif /* if UNIXPC */
- #endif	/* if !TERMINFO */
-+#endif
- 
- #endif /* CSCOPE_CONSTANTS_H */
+-#if (BSD || V9) && !__NetBSD__ && !__FreeBSD__
++#if (BSD || V9) && !__NetBSD__ && !__FreeBSD__ && !__APPLE__
+ # define TERMINFO	0	/* no terminfo curses */
+ #else
+ # define TERMINFO	1
+
