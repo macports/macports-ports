@@ -39,7 +39,6 @@
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
-default perl5.branches {"5.8 5.10 5.12 5.14"}
 default perl5.default_branch {[perl5_get_default_branch]}
 proc perl5_get_default_branch {} {
     global prefix
@@ -62,7 +61,7 @@ proc perl5.extract_config {var {default ""}} {
 }
 
 # Set some variables.
-options perl5.version perl5.major perl5.arch perl5.lib perl5.archlib perl5.bin
+options perl5.version perl5.major perl5.arch perl5.lib perl5.bindir perl5.archlib perl5.bin
 default perl5.version {[perl5.extract_config version]}
 default perl5.major {${perl5.default_branch}}
 default perl5.arch {[perl5.extract_config archname ${os.platform}]}
@@ -70,11 +69,16 @@ default perl5.bin {${prefix}/bin/perl${perl5.major}}
 
 # define installation libraries as vendor location
 default perl5.lib {${prefix}/lib/perl5/vendor_perl/${perl5.version}}
+default perl5.bindir {${prefix}/libexec/perl${perl5.major}}
 default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
 default livecheck.version {${perl5.moduleversion}}
 
 default configure.universal_args {}
+
+options perl5.link_binaries perl5.link_binaries_suffix
+default perl5.link_binaries yes
+default perl5.link_binaries_suffix {-${perl5.major}}
 
 # define these empty initially, they are set by perl5.setup arguments
 set perl5.module ""
@@ -161,6 +165,13 @@ proc perl5.setup {module vers {cpandir ""}} {
                 if {[file tail ${file}] eq ".packlist"} {
                     ui_info "Fixing packlist ${file}"
                     reinplace -n "s|${destroot}||p" ${file}
+                }
+            }
+            if {${perl5.link_binaries}} {
+                foreach bin [glob -nocomplain -tails -directory "${destroot}${perl5.bindir}" *] {
+                    if {[catch {file type "${destroot}${prefix}/bin/${bin}${perl5.link_binaries_suffix}"}]} {
+                        ln -s "${perl5.bindir}/${bin}" "${destroot}${prefix}/bin/${bin}${perl5.link_binaries_suffix}"
+                    }
                 }
             }
         }
