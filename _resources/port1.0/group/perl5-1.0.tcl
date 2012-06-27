@@ -40,6 +40,9 @@
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
+# perl5.branches exists here for backward compatibility with old p5 portfiles.
+# You should still set it in the portfile.
+default perl5.branches {"5.8 5.10 5.12 5.14"}
 proc perl5_get_default_branch {} {
     global prefix
     # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.12
