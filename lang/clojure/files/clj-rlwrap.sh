@@ -2,7 +2,7 @@
 
 # clj - Clojure launcher script
 
-BREAK_CHARS="\(\){}[],^%$#@\"\";:''|\\"
+BREAK_CHARS="\(\){}[],^%\$#@\"\";:''|\\"
 
 cljjar='lib/clojure.jar'
 cljclass='clojure.main'
@@ -37,4 +37,3 @@ if [ $# -eq 0 ]; then
 else
   exec java -classpath $cp $cljclass $*
 fi
-
