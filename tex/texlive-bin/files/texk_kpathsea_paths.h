@@ -146,6 +146,14 @@
 #define DEFAULT_MLBSTINPUTS "/nonesuch"
 #endif
 
+#ifndef DEFAULT_RISINPUTS
+#define DEFAULT_RISINPUTS "/nonesuch"
+#endif
+
+#ifndef DEFAULT_BLTXMLINPUTS
+#define DEFAULT_BLTXMLINPUTS "/nonesuch"
+#endif
+
 #ifndef DEFAULT_MFTINPUTS
 #define DEFAULT_MFTINPUTS "/nonesuch"
 #endif
@@ -215,7 +223,7 @@
 #endif
 
 #ifndef DEFAULT_TRFONTS
-#define DEFAULT_TRFONTS "/nonesuch"
+#define DEFAULT_TRFONTS "/usr{/local,}/share/groff/{current/font,site-font}/devps"
 #endif
 
 #ifndef DEFAULT_MPSUPPORT
