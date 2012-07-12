@@ -341,6 +341,7 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     http://mirror.facebook.net/cpan/modules/by-module/
     ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
+    http://backpan.perl.org/modules/by-module/
 }
 
 # http://php.net/mirrors.php
