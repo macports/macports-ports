@@ -239,6 +239,5 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
 
     livecheck.type          regex
     livecheck.url           http://${pear.channel}/package/${pear.package}/download
-    livecheck.regex         http://download.${pear.channel}/package/
-    livecheck.regex-append  "${pear.package}-((?!\\${extract.suffix}).*)\\${extract.suffix}"
+    livecheck.regex         http://download.${pear.channel}/package/${pear.package}-(.*?)${extract.suffix}
 }
