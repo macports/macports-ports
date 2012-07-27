@@ -79,7 +79,7 @@ post-extract {
     # ...phonon... in all files that contain that header.
     fs-traverse item ${worksrcpath} {
         if {[file isfile ${item}]} {
-            reinplace "/#include/s@Phonon@phonon@" ${item}
+            reinplace -locale C "/#include/s@Phonon@phonon@" ${item}
         }
     }
 }
