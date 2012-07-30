@@ -396,8 +396,6 @@ set portfetch::mirror_sites::sites(savannah) {
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://ftp.twaren.net/Unix/NonGNU/
     ftp://ftp.twaren.net/Unix/NonGNU/
-    http://mirror.cinquix.com/pub/savannah/
-    ftp://mirror.cinquix.com/pub/savannah/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirrors.openfountain.cl/savannah/
