@@ -1,7 +1,7 @@
 # et:ts=4
 # java-1.0.tcl
 #
-# $Id $
+# $Id$
 #
 # Copyright (c) 2012 The MacPorts Project,
 # All rights reserved.
