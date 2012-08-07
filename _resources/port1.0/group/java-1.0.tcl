@@ -38,7 +38,7 @@ proc find_java_home {} {
 
     # Default to any valid value that made it through the environment
     if { [info exists ::env(JAVA_HOME)] } {
-        val = $::env(JAVA_HOME)
+        set val $::env(JAVA_HOME)
         if { [file isdirectory $val] } {
             set home_value $val
             ui_debug "Discovered JAVA_HOME via env: $home_value"
