@@ -1,0 +1,142 @@
+diff -ur ../kamera-4.8.3.orig/CMakeLists.txt ./CMakeLists.txt
+--- ../kamera-4.8.3.orig/CMakeLists.txt	2011-07-28 03:42:05.000000000 +0900
++++ ./CMakeLists.txt	2012-08-16 13:16:05.000000000 +0900
+@@ -10,6 +10,13 @@
+ find_package(Gphoto2)
+ macro_log_feature(GPHOTO2_FOUND "gphoto2" "Required to build kamera" "http://heanet.dl.sourceforge.net/sourceforge/gphoto" TRUE "" "")
+ 
++check_library_exists(gphoto2_port gp_port_info_get_name "" GPHOTO2_5)
++if(GPHOTO2_5)
++    message(STATUS "Found libgphoto 2.5")
++else(GPHOTO2_5)
++    message(STATUS "libgphoto 2.5 not found, assuming libgphoto2 2.4")
++endif(GPHOTO2_5)
++set(HAVE_GPHOTO2_5 ${GPHOTO2_5})
+ 
+ configure_file(config-kamera.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-kamera.h)
+ include_directories(${CMAKE_CURRENT_BINARY_DIR})
+diff -ur ../kamera-4.8.3.orig/config-kamera.h.cmake ./config-kamera.h.cmake
+--- ../kamera-4.8.3.orig/config-kamera.h.cmake	2011-07-28 03:42:05.000000000 +0900
++++ ./config-kamera.h.cmake	2012-08-16 13:18:34.000000000 +0900
+@@ -3,3 +3,6 @@
+ 
+ /* Define if we have __va_copy */
+ #cmakedefine HAVE___VA_COPY 1
++
++/* Define if we have gp_port_info_get_name (trigger for 2.5) */
++#cmakedefine HAVE_GPHOTO2_5 1
+Only in ./kcontrol: .DS_Store
+diff -ur ../kamera-4.8.3.orig/kcontrol/kameradevice.cpp ./kcontrol/kameradevice.cpp
+--- ../kamera-4.8.3.orig/kcontrol/kameradevice.cpp	2011-07-28 03:42:05.000000000 +0900
++++ ./kcontrol/kameradevice.cpp	2012-08-16 13:45:37.000000000 +0900
+@@ -35,6 +35,8 @@
+ #include <KConfig>
+ #include <KMessageBox>
+ 
++#include "config-kamera.h"
++
+ extern "C" {
+ 	#include <gphoto2.h>
+ }
+@@ -373,8 +375,15 @@
+ 	}
+ 	for (int i = 0; i < gphoto_ports; i++) {
+ 		if (gp_port_info_list_get_info(list, i, &info) >= 0) {
++#ifdef HAVE_GPHOTO2_5
++			char *xpath;
++			gp_port_info_get_path (info, &xpath);
++			if (strncmp(xpath, "serial:", 7) == 0)
++				m_serialPortCombo->addItem(QString::fromLocal8Bit(xpath).mid(7));
++#else
+ 			if (strncmp(info.path, "serial:", 7) == 0)
+ 				m_serialPortCombo->addItem(QString::fromLocal8Bit(info.path).mid(7));
++#endif
+ 		}
+ 	}
+ 	gp_port_info_list_free(list);
+diff -ur ../kamera-4.8.3.orig/kioslave/kamera.cpp ./kioslave/kamera.cpp
+--- ../kamera-4.8.3.orig/kioslave/kamera.cpp	2011-07-28 03:42:05.000000000 +0900
++++ ./kioslave/kamera.cpp	2012-08-16 13:18:10.000000000 +0900
+@@ -3,6 +3,7 @@
+     Copyright (C) 2001 The Kompany
+ 		  2001-2003	Ilya Konstantinov <kde-devel@future.shiny.co.il>
+ 		  2001-2008	Marcus Meissner <marcus@jet.franken.de>
++		  2012		Marcus Meissner <marcus@jet.franken.de>
+ 
+     This program is free software; you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+@@ -59,11 +60,19 @@
+ {
+ 	KDE_EXPORT int kdemain(int argc, char **argv);
+ 
++#ifdef HAVE_GPHOTO2_5
++	static void frontendCameraStatus(GPContext *context, const char *status, void *data);
++	static unsigned int frontendProgressStart(
++		GPContext *context, float totalsize, const char *status,
++		void *data
++	);
++#else
+ 	static void frontendCameraStatus(GPContext *context, const char *format, va_list args, void *data);
+ 	static unsigned int frontendProgressStart(
+ 		GPContext *context, float totalsize, const char *format,
+ 		va_list args, void *data
+ 	);
++#endif
+ 	static void frontendProgressUpdate(
+ 		GPContext *context, unsigned int id, float current, void *data
+ 	);
+@@ -972,10 +981,16 @@
+ }
+ 
+ unsigned int frontendProgressStart(
+-	GPContext * /*context*/, float totalsize, const char *format, va_list args,
++	GPContext * /*context*/, float totalsize,
++#ifdef HAVE_GPHOTO2_5
++	const char *status,
++#else
++	const char *format, va_list args,
++#endif
+ 	void *data
+ ) {
+ 	KameraProtocol *object = (KameraProtocol*)data;
++#ifndef HAVE_GPHOTO2_5
+ 	char *status;
+ 
+ 	/* We must copy the va_list to walk it twice, or all hell
+@@ -1009,14 +1024,26 @@
+ 
+ 	object->infoMessage(QString::fromLocal8Bit(status));
+ 	delete [] status;
++#else
++	/* libgphoto2 2.5 has resolved this already, no need for print */
++	object->infoMessage(QString::fromLocal8Bit(status));
++#endif
+ 	object->totalSize((int)totalsize); // hack: call slot directly
+ 	return GP_OK;
+ }
+ 
+ // this callback function is activated on every status message from gphoto2
+-static void frontendCameraStatus(GPContext * /*context*/, const char *format, va_list args, void *data)
+-{
++static void frontendCameraStatus(
++	GPContext * /*context*/,
++#ifdef HAVE_GPHOTO2_5
++	const char *status,
++#else
++	const char *format, va_list args,
++#endif
++	void *data
++) {
+ 	KameraProtocol *object = (KameraProtocol*)data;
++#ifndef HAVE_GPHOTO2_5
+ 	char *status;
+ 
+ 	/* We must copy the va_list to walk it twice, or all hell
+@@ -1049,4 +1076,7 @@
+ #endif
+ 	object->infoMessage(QString::fromLocal8Bit(status));
+ 	delete [] status;
++#else
++	object->infoMessage(QString::fromLocal8Bit(status));
++#endif
+ }
