@@ -39,7 +39,7 @@ set ruby.gem            ${prefix}/bin/gem
 
 proc ruby.extract_config {var {default ""}} {
     global ruby.bin
-    if {[catch {set val [exec ${ruby.bin} -e "require 'rbconfig';puts Config::CONFIG\[\"${var}\"\]"]}]} {
+    if {[catch {set val [exec ${ruby.bin} -e "require 'rbconfig';puts RbConfig::CONFIG\[\"${var}\"\]"]}]} {
         set val ${default}
     }
     return $val
