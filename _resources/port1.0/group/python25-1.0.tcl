@@ -78,3 +78,15 @@ destroot.destdir	--prefix=${prefix} --root=${destroot}
 pre-destroot	{
 	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
 }
+
+options         python.move_binaries python.move_binaries_suffix
+default python.move_binaries yes
+default python.move_binaries_suffix {-${python.branch}}
+post-destroot {
+    if {${python.move_binaries}} {
+        foreach bin [glob -nocomplain -tails -directory "${destroot}${prefix}/bin" *] {
+            move ${destroot}${prefix}/bin/${bin} \
+                ${destroot}${prefix}/bin/${bin}${python.move_binaries_suffix}
+        }
+    }
+}
