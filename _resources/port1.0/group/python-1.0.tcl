@@ -151,6 +151,12 @@ proc python_set_versions {option action args} {
                     }
                 }
             }
+            if {${python.move_binaries}} {
+                foreach bin [glob -nocomplain -tails -directory "${destroot}${prefix}/bin" *] {
+                    move ${destroot}${prefix}/bin/${bin} \
+                        ${destroot}${prefix}/bin/${bin}${python.move_binaries_suffix}
+                }
+            }
         }
         set python._addedcode 1
     }
@@ -254,6 +260,13 @@ proc python_get_defaults {var} {
                 return no
             }
         }
+        move_binaries {
+            if {${python.version} == 24 || ${python.version} == 25} {
+                return yes
+            } else {
+                return no
+            }
+        }
         default {
             error "unknown option $var"
         }
@@ -268,3 +281,7 @@ default python.set_compiler yes
 options python.link_binaries python.link_binaries_suffix
 default python.link_binaries {[python_get_defaults link_binaries]}
 default python.link_binaries_suffix {-${python.branch}}
+
+options python.move_binaries python.move_binaries_suffix
+default python.move_binaries {[python_get_defaults move_binaries]}
+default python.move_binaries_suffix {-${python.branch}}
