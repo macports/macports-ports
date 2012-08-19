@@ -33,9 +33,9 @@
 #
 
 set python.branch	2.4
-set python.bin	${prefix}/bin/python${python.branch}
-set python.lib	${prefix}/lib/libpython${python.branch}.dylib
-set python.pkgd	${prefix}/lib/python${python.branch}/site-packages
+set python.bin		${prefix}/bin/python${python.branch}
+set python.lib		${prefix}/lib/libpython${python.branch}.dylib
+set python.pkgd		${prefix}/lib/python${python.branch}/site-packages
 set python.libdir	${frameworks_dir}/Python.framework/Versions/${python.branch}/lib/python${python.branch}
 set python.include	${frameworks_dir}/Python.framework/Versions/${python.branch}/include/python${python.branch}
 if {![file isfile ${python.include}/Python.h] &&

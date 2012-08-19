@@ -34,10 +34,10 @@
 
 set python.branch	3.2
 set python.prefix	${frameworks_dir}/Python.framework/Versions/${python.branch}
-set python.bin	${python.prefix}/bin/python${python.branch}
-set python.lib	${python.prefix}/Python
-set python.libdir ${python.prefix}/lib/python${python.branch}
-set python.pkgd	${python.prefix}/lib/python${python.branch}/site-packages
+set python.bin		${python.prefix}/bin/python${python.branch}
+set python.lib		${python.prefix}/Python
+set python.libdir	${python.prefix}/lib/python${python.branch}
+set python.pkgd		${python.prefix}/lib/python${python.branch}/site-packages
 set python.include	${python.prefix}/include/python${python.branch}
 
 categories		python

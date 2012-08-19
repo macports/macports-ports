@@ -33,10 +33,10 @@
 #
 
 set python.branch	2.5
-set python.bin	${prefix}/bin/python${python.branch}
-set python.lib	${prefix}/lib/libpython${python.branch}.dylib
-set python.libdir ${prefix}/lib/python${python.branch}
-set python.pkgd	${prefix}/lib/python${python.branch}/site-packages
+set python.bin		${prefix}/bin/python${python.branch}
+set python.lib		${prefix}/lib/libpython${python.branch}.dylib
+set python.libdir	${prefix}/lib/python${python.branch}
+set python.pkgd		${prefix}/lib/python${python.branch}/site-packages
 set python.include	${prefix}/include/python${python.branch}
 
 categories		python
