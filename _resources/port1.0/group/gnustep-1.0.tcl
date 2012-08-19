@@ -18,7 +18,7 @@
 # 3. Neither the name of Apple Computer, Inc. nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -46,12 +46,12 @@
 # default master_sites          gnustep:core
 # default depends_lib           port:gnustep-core
 #
-# array set gnustep.post_flags  Apple CC two-level namespaces requires all 
-#                               symbols to be resolved at link time, 
+# array set gnustep.post_flags  Apple CC two-level namespaces requires all
+#                               symbols to be resolved at link time,
 #                               so most of the patches are just that.
 #                               Setting the gnustep.post_flags array makes this
 #                               simple beyond common understanding !
-#                               ex: 
+#                               ex:
 #                               platform darwin {
 #                                   array set gnustep.post_flags {
 #                                       BundleSubDir  "-lfoo -lbar"
@@ -59,10 +59,10 @@
 #                               }
 #
 #
-# proc set_gnustep_make         Sets GNUSTEP_MAKEFILES 
-#                               according to the FilesystemLayout 
+# proc set_gnustep_make         Sets GNUSTEP_MAKEFILES
+#                               according to the FilesystemLayout
 #
-# proc set_gnustep_env          Sets DYLD_LIBRARY_PATH and PATH 
+# proc set_gnustep_env          Sets DYLD_LIBRARY_PATH and PATH
 #                               for the gnustep FilesystemLayout
 #
 #
@@ -88,9 +88,9 @@
 #
 
 #
-# Adds SHARED_LD_POSTFLAGS for Darwin's linker 
+# Adds SHARED_LD_POSTFLAGS for Darwin's linker
 #
-# Sets GNUSTEP_INSTALLATION_DOMAIN for ports using the 
+# Sets GNUSTEP_INSTALLATION_DOMAIN for ports using the
 # deprecated GNUSTEP_SYSTEM_ROOT variable
 #
 
@@ -116,7 +116,7 @@ post-patch {
 
 proc gnustep_layout {} {
     global prefix
-    
+
     if {[file exists ${prefix}/GNUstep/System/Library/Makefiles]} {
         return 1
     }
@@ -129,7 +129,7 @@ proc gnustep_layout {} {
 
 proc set_system_library {} {
     global prefix
-    
+
     if {[gnustep_layout]} {
         return "${prefix}/GNUstep/System/Library"
     }
@@ -142,7 +142,7 @@ proc set_system_library {} {
 
 proc set_local_library {} {
     global prefix
-    
+
     if {[gnustep_layout]} {
         return "${prefix}/GNUstep/Local/Library"
     }
@@ -155,7 +155,7 @@ proc set_local_library {} {
 
 proc set_gnustep_make {} {
     global prefix
-    
+
     if {[gnustep_layout]} {
         return "GNUSTEP_MAKEFILES=${prefix}/GNUstep/System/Library/Makefiles"
     }
@@ -168,7 +168,7 @@ proc set_gnustep_make {} {
 
 proc set_gnustep_env {} {
     global env prefix
-    
+
     if {[gnustep_layout]} {
         return [list "DYLD_LIBRARY_PATH=${prefix}/GNUstep/Local/Library/Libraries:${prefix}/GNUstep/System/Library/Libraries" \
             "PATH=${prefix}/GNUstep/Local/Tools:${prefix}/GNUstep/System/Tools:$env(PATH)"]
@@ -230,15 +230,15 @@ variant with_docs {
                             port:gnustep-base
 
     post-destroot {
-        
+
         if {[file exists ${worksrcpath}/Documentation/GNUmakefile]} {
-            
+
             ui_msg "$UI_PREFIX Making documentation for ${name}"
-            
+
             _cd ${worksrcpath}/Documentation
             system "${destroot.env} ${destroot.cmd} \
                     ${destroot.pre_args} ${destroot.destdir}"
-            
+
             set info_dir \
                 ${destroot}${prefix}/GNUstep/System/Library/Documentation/info
             if {[file exists ${info_dir}/manual.info]} {
@@ -247,7 +247,7 @@ variant with_docs {
                     ${info_dir}/${manual_name}-manual.info
             }
         }
-    }    
+    }
 }
 
-                    
+

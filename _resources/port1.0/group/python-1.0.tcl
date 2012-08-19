@@ -15,7 +15,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -42,7 +42,7 @@
 #   always set this (even if you have your own subport blocks)
 # python.default_version: which version will be installed if the user asks
 #   for py-foo rather than pyXY-foo
-# 
+#
 # Note: setting these options requires name to be set beforehand
 
 categories      python
@@ -210,7 +210,7 @@ proc python_get_defaults {var} {
         prefix {
             global build_arch frameworks_dir
             set ret "${frameworks_dir}/Python.framework/Versions/${python.branch}"
-            if {${python.version} == 25 || (${python.version} == 24 && 
+            if {${python.version} == 25 || (${python.version} == 24 &&
                 ![file isfile ${ret}/include/python${python.branch}/Python.h] &&
                 ([file isfile ${prefix}/include/python${python.branch}/Python.h]
                 || [string match *64* $build_arch]))} {

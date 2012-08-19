@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2009-2012 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,8 +28,8 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup builds PHP extensions. Set name and version as for a normal
 # standalone port, then set php.branches and optionally any other php options,
 # described in more detail below.
@@ -40,11 +40,11 @@ default categories              php
 # php.branches: the list of PHP branches for which the extension(s) will be
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
-# 
+#
 #   php.branches                5.3 5.4
-# 
+#
 # For unified ports, setting php.branches will create the subports.
-# 
+#
 # For single-branch extension ports (name begins with e.g. "php54-")
 # php.branches is set automatically based on the port name and should not be
 # changed.
@@ -56,27 +56,27 @@ proc php._set_branches {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     # Sort the values so we can use lindex 0 and end to get the min and max branches respectively.
     option ${option} [lsort -command vercmp [option ${option}]]
-    
+
     global php.default_branch php.rootname name subport
-    
+
     if {[regexp {^php\d*-} ${name}]} {
         # Legacy dist_subdir to match old php5- port layout.
         if {[lindex [split [lindex [option ${option}] 0] .] 0] == "5"} {
             dist_subdir php5-${php.rootname}
         }
-        
+
         if {[regexp {^php-} ${name}]} {
             # Create subport for each PHP branch.
             php.create_subports
-            
+
             # Set up stub port.
             if {${name} == ${subport}} {
                 supported_archs     noarch
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
-                
+
                 # Ensure the stub port does not do anything with distfiles—not
                 # if the port overrides distfiles, not if there's a post-extract
                 # block (e.g. the github portgroup).
@@ -93,7 +93,7 @@ proc php._set_branches {option action args} {
                     distfiles
                 }
                 extract {}
-                
+
                 patch {}
                 use_configure       no
                 build {}
@@ -119,7 +119,7 @@ proc php._set_name {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     if {[regexp {^php\d+-} ${args}]} {
         php.branches            [php.branch_from_subport]
     }
@@ -138,9 +138,9 @@ proc php._set_default_branch {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     global name subport php.rootname
-    
+
     if {[regexp {^php-} ${name}] && ${name} == ${subport}} {
         depends_run             port:php[php.suffix_from_branch [option ${option}]]-${php.rootname}
     }
@@ -165,7 +165,7 @@ proc php._get_rootname {} {
 
 
 # php.create_subports: creates subports for each PHP branch
-# 
+#
 # For a normal extension port whose name starts with "php-" this will be called
 # automatically when you set php.branches so you shouldn't need to call it
 # manually unless for example you're adding PHP extension subports to a port
@@ -227,14 +227,14 @@ proc php._set_pecl {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     if {${args}} {
         global php.rootname
-        
+
         php.pecl.name           ${php.rootname}
         master_sites            http://pecl.php.net/get/
         extract.suffix          .tgz
-        
+
         livecheck.type          regexm
         php.pecl.prerelease     no
     }
@@ -253,9 +253,9 @@ proc php._set_pecl_name {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     global php.pecl
-    
+
     if {${php.pecl}} {
         set pecl_homepage       http://pecl.php.net/package/${args}
         default distname        {${php.pecl.name}-${version}}
@@ -278,9 +278,9 @@ proc php._set_pecl_prerelease {option action args} {
     if {"set" != ${action}} {
         return
     }
-    
+
     global php.pecl
-    
+
     if {${php.pecl}} {
         if {${args}} {
             livecheck.regex     {>([0-9a-zA-Z.]+)</a></th>}
@@ -350,20 +350,20 @@ default php.suffix              {[php.suffix_from_branch ${php.branch}]}
 proc php.add_port_code {} {
     global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname php._bundled
     global destroot name subport version
-    
+
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
-    
+
     depends_build-append    port:autoconf
-    
+
     depends_lib-append      port:${php}
-    
+
     configure.pre_args-append --with-php-config=${php.config}
-    
+
     configure.universal_args-delete --disable-dependency-tracking
-    
+
     variant debug description {Enable debug support (useful to analyze a PHP-related core dump)} {}
-    
+
     pre-configure {
         set php_debug_variant [regexp {/debug-[^/]+$} ${php.extension_dir}]
         if {${php_debug_variant} && ![variant_isset debug]} {
@@ -378,30 +378,30 @@ proc php.add_port_code {} {
             system -W ${dir} "${php.ize}"
         }
     }
-    
+
     configure {
         foreach configure.dir ${php.build_dirs} {
             ui_debug "Configuring in [file tail ${configure.dir}]"
             portconfigure::configure_main
         }
     }
-    
+
     build {
         foreach build.dir ${php.build_dirs} {
             ui_debug "Building in [file tail ${build.dir}]"
             portbuild::build_main
         }
     }
-    
+
     destroot.destdir        INSTALL_ROOT=${destroot}
-    
+
     destroot {
         foreach destroot.dir ${php.build_dirs} {
             ui_debug "Staging in [file tail ${destroot.dir}]"
             portdestroot::destroot_main
         }
     }
-    
+
     post-destroot {
         # Get the list of extensions that got installed by the port.
         set installed_extension_files [lsort [glob -nocomplain -tails -directory ${destroot}${php.extension_dir} *.so]]
@@ -409,7 +409,7 @@ proc php.add_port_code {} {
         foreach installed_extension_file ${installed_extension_files} {
             lappend installed_extensions [file rootname ${installed_extension_file}]
         }
-        
+
         # If the portfile author didn't specify which extensions to load,
         # load all of them.
         if {![info exists php.extensions]} {
@@ -419,14 +419,14 @@ proc php.add_port_code {} {
                 set php.extensions ${installed_extensions}
             }
         }
-        
+
         foreach extension [concat ${php.extensions} ${php.extensions.zend}] {
             if {-1 == [lsearch -exact ${installed_extensions} ${extension}]} {
                 ui_error "Cannot list extension \"${extension}\" in ${php.extension_ini} because the port only installed the extensions \"[join ${installed_extensions} "\", \""]\""
                 return -code error "invalid extension name"
             }
         }
-        
+
         if {0 < [llength ${php.extensions}] || 0 < [llength ${php.extensions.zend}]} {
             xinstall -m 755 -d ${destroot}${php.ini_dir}
             set fp [open ${destroot}${php.ini_dir}/${php.extension_ini} w]
@@ -442,7 +442,7 @@ proc php.add_port_code {} {
             close $fp
         }
     }
-    
+
     post-install {
         if {[file exists ${php.ini}]} {
             set count 0
@@ -489,13 +489,13 @@ proc php.branch_from_suffix {suffix} {
 
 proc php.branch_from_subport {} {
     global php.default_branch subport
-    
+
     # For the subports, get the branch from ${subport}.
     regexp {^php(\d+)} ${subport} -> suffix
     if {[info exists suffix]} {
         return [php.branch_from_suffix ${suffix}]
     }
-    
+
     # For the stub port, use the default branch.
     return ${php.default_branch}
 }

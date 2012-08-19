@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
 # Copyright (c) 2002 Apple Computer, Inc.
 # All rights reserved.
@@ -17,7 +17,7 @@
 # 3. Neither the name of Apple Computer, Inc. nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -66,7 +66,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global ruby.version ruby.lib
     global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
     global ruby.prog_suffix
-    
+
     if {${implementation} eq "ruby19"} {
         set ruby.port_prefix rb19
         set ruby.prog_suffix "1.9"
@@ -82,7 +82,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     set ruby.bin    ${prefix}/bin/ruby${ruby.prog_suffix}
     set ruby.rdoc   ${prefix}/bin/rdoc${ruby.prog_suffix}
     set ruby.gem    ${prefix}/bin/gem${ruby.prog_suffix}
-    
+
     # define ruby global names and lists
     # check if module is a list or string
     if {[llength ${module}] > 1} {
@@ -98,11 +98,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         set ruby.filename   ${module}
     }
     set ruby.docs   ${docs}
-    
+
     name            ${ruby.port_prefix}-[string tolower ${ruby.module}]
     version         ${vers}
     categories      ruby
-    
+
     switch -glob ${source} {
         rubyforge:*:* {
             set num [lindex [split ${source} {:}] 1]
@@ -155,18 +155,18 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             master_sites    sourceforge:${ruby.project}
         }
     }
-    
+
     distname        ${ruby.filename}-${vers}
     dist_subdir     ruby
-    
+
     depends_lib     port:${implementation}
-    
+
     post-extract {
         # Create the work directory for gem-based ruby ports.
         system "mkdir -p ${worksrcpath}"
         system "find ${worksrcpath} -type d -name CVS | xargs rm -rf"
     }
-    
+
     switch -glob ${type} {
         basic_install.rb {
             post-patch {
@@ -187,11 +187,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 # adjust basic install.rb script
                 reinplace "s|site_ruby|vendor_ruby|" ${worksrcpath}/install.rb
             }
-            
+
             use_configure   no
-            
+
             build           {}
-            
+
             pre-destroot {
                 xinstall -d -m 0755 ${destroot}${ruby.lib}
             }
@@ -202,11 +202,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
         copy_install:* {
             set ruby.srcdir [lindex [split ${type} {:}] 1]
-            
+
             use_configure   no
-            
+
             build           {}
-            
+
             destroot {
                 set root ${worksrcpath}/${ruby.srcdir}
                 xinstall -d -m 0755 ${destroot}${ruby.lib}
@@ -226,10 +226,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         install.rb {
             configure.cmd       ${ruby.bin} -rvendor-specific install.rb
             configure.pre_args  config
-            
+
             build.cmd           ${ruby.bin} -rvendor-specific install.rb
             build.target        setup
-            
+
             pre-destroot {
                 if {[file isfile ${worksrcpath}/config.save]} {
                     reinplace "s|^prefix=${prefix}|prefix=${destroot}${prefix}|g" \
@@ -247,10 +247,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         setup.rb {
             configure.cmd       ${ruby.bin} -rvendor-specific setup.rb
             configure.pre_args  config
-            
+
             build.cmd           ${ruby.bin} -rvendor-specific setup.rb
             build.target        setup
-            
+
             pre-destroot {
                 if {[file isfile ${worksrcpath}/config.save]} {
                     reinplace "s|${prefix}|${destroot}${prefix}|g" \
@@ -269,14 +269,14 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             configure.cmd       ${ruby.bin} -rvendor-specific extconf.rb
             configure.pre_args
             configure.args      --prefix=${prefix}
-            
+
             build.args          RUBY="${ruby.bin} -rvendor-specific"
-            
+
             destroot.args       RUBY="${ruby.bin} -rvendor-specific"
         }
         gnu {
             build.args          RUBY="${ruby.bin} -rvendor-specific"
-            
+
             pre-destroot {
                 if {[file isfile ${worksrcpath}/config.save]} {
                     reinplace "s|${prefix}|${destroot}${prefix}|g" \
@@ -292,21 +292,21 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         gem {
             use_configure no
             extract.suffix .gem
-            
+
             if {${implementation} eq "ruby"} {
                 depends_lib-append  port:rb-rubygems
             }
-            
+
             extract {}
             build {}
-            
+
             pre-destroot {
                 xinstall -d -m 0755 ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}
             }
-            
+
             destroot {
                 system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version} ${distpath}/${distname}"
-                
+
                 set binDir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}/bin
                 if {[file isdirectory $binDir]} {
                     foreach file [readdir $binDir] {
@@ -324,11 +324,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             return -code error "ruby.setup failed"
         }
     }
-    
+
     if {$type != "gnu"} {
         configure.universal_args-delete  --disable-dependency-tracking
     }
-    
+
     post-destroot {
         # Install documentation files (if specified)
         if {[llength ${ruby.docs}] > 0} {

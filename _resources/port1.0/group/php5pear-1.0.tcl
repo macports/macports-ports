@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2011 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,19 +28,19 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup automatically sets up the standard environment for installing
 # a PHP PEAR class.
-# 
+#
 # Usage:
-# 
+#
 #   PortGroup           php5pear 1.0
 #   php5pear.setup      package version channel
-# 
+#
 # where package is the name of the PEAR package (e.g. AUTH), version is its
 # version, and channel is the channel hosting the package (default: pear.php.net).
-# 
+#
 
 # Args placed before the php or pear commands.
 options php5pear.env
@@ -113,12 +113,12 @@ proc php5pear.setup {package_name package_version {package_channel "pear.php.net
     global name extract.suffix version
     global php5pear.env php5pear.cmd-pear php5pear.destroot php5pear.sourceroot
     global php5pear.channel php5pear.package php5pear.packagexml
-    
+
     # The pear name for the package.
     php5pear.package        ${package_name}
     # The pear channel for the package.
     php5pear.channel        ${package_channel}
-    
+
     name                    pear-${php5pear.package}
     version                 ${package_version}
     categories              php
@@ -130,7 +130,7 @@ proc php5pear.setup {package_name package_version {package_channel "pear.php.net
     supported_archs         noarch
     use_parallel_build      yes
     depends_lib             path:bin/phpize:php5 port:php5-pear
-    
+
     # List of ports that pear-PEAR depends on.
     # Add some pear-PEAR deps to make programmatic creation of pear Portfiles easier.
     if {
@@ -148,28 +148,28 @@ proc php5pear.setup {package_name package_version {package_channel "pear.php.net
                             port:pear-Console_Getopt \
                             port:pear-Structures_Graph \
                             port:pear-XML_Util
-                            
+
     }
-    
+
     extract.post_args-append   -C '${php5pear.sourceroot}' --strip-components 1
 
     pre-extract {
         xinstall -d "${php5pear.sourceroot}"
     }
-    
+
     post-extract {
         # The "--strip-components 1" causes the loss of our package file so we will extract it now.
         extract.post_args-delete    --strip-components 1
         extract.post_args-append    ${php5pear.packagexml}
         command_exec                extract
     }
-    
+
     post-patch {
         # Some ports use a "." baseinstalldir which can cause issues creating pears packagingroot directory.
         reinplace "s|baseinstalldir=\"\.\"|baseinstalldir=\"/\"|g" \
           ${php5pear.sourceroot}/${php5pear.packagexml}
     }
-    
+
     configure.env           ${php5pear.env}
     configure.dir           ${php5pear.sourceroot}
     configure {
@@ -204,7 +204,7 @@ proc php5pear.setup {package_name package_version {package_channel "pear.php.net
             command_exec configure
         }
     }
-    
+
     build {
         build.env           ${php5pear.env}
         build.dir           ${php5pear.sourceroot}

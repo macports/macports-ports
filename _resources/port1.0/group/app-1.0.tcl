@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2011 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,8 +28,8 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup helps create an application bundle the user can open from the
 # Finder or the Dock. This is useful for ports that install a program built
 # with an SDK like SDL or Qt that, when launched, causes an icon to appear in
@@ -163,11 +163,11 @@ platform macosx {
             if {[regexp {[/]} ${app.name}]} {
                 return -code error "app.name ${app.name} contains illegal characters"
             }
-            
+
             # Make the app bundle directories.
             xinstall -d ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS \
                         ${destroot}${applications_dir}/${app.name}.app/Contents/Resources
-            
+
             # Ensure app.identifier is valid.
             if {[regexp -nocase {[^a-z0-9.-]} ${app.identifier}]} {
                 return -code error "app.identifier ${app.identifier} contains illegal characters"
@@ -175,23 +175,23 @@ platform macosx {
             if {[llength [split ${app.identifier} "."]] < 3} {
                 return -code error "app.identifier ${app.identifier} does not look like a valid CFBundleIdentifier"
             }
-            
+
             if {${app.icon} != ""} {
                 # Turn relative app.icon paths into absolute ones.
                 set icon ${app.icon}
                 if {[string index ${icon} 0] != "/"} {
                     set icon ${worksrcpath}/${icon}
                 }
-                
+
                 # Ensure app.icon exists.
                 if {![file exists ${icon}]} {
                     return -code error "app.icon ${app.icon} does not exist"
                 }
-                
+
                 # If app.icon is an .icns file, copy it.
                 if {[file extension ${icon}] == ".icns"} {
                     xinstall -m 644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
-                
+
                 # If app.icon is another type of image file, convert it.
                 } else {
                     if {[catch {exec ${prefix}/bin/makeicns -in ${icon} -out ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns 2>@1}]} {
@@ -199,18 +199,18 @@ platform macosx {
                     }
                 }
             }
-            
+
             # Turn relative app.executable paths into absolute ones.
             set executable ${app.executable}
             if {[string index ${executable} 0] != "/"} {
                 set executable ${prefix}/bin/${executable}
             }
-            
+
             # Check for a possible maintainer error.
             if {[string first ${destroot} ${executable}] == 0} {
                 return -code error "app.executable ${app.executable} should not start with \${destroot}"
             }
-            
+
             # If app.executable is in the destroot, link to it.
             if {[file exists ${destroot}[app._resolve_symlink ${executable} ${destroot}]]} {
                 ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
@@ -224,7 +224,7 @@ platform macosx {
             } else {
                 return -code error "app.executable ${app.executable} does not exist"
             }
-            
+
             # Build the Info.plist.
             set fp [open ${destroot}${applications_dir}/${app.name}.app/Contents/Info.plist w]
             puts ${fp} "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
@@ -256,7 +256,7 @@ platform macosx {
 </dict>
 </plist>"
             close ${fp}
-            
+
             # Build the PkgInfo file.
             set fp [open ${destroot}${applications_dir}/${app.name}.app/Contents/PkgInfo w]
             puts -nonewline ${fp} "APPL????"

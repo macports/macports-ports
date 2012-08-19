@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2009 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,15 +28,15 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup checks that the architecture(s) of the given files match
 # the architecture(s) we are trying to install this port as now. This is
 # a crutch to get us by until a proper solution is implemented in base.
 # See #20728.
-# 
+#
 # Usage:
-# 
+#
 #   PortGroup               archcheck 1.0
 #   archcheck.files         file1 file2 ...
 #
@@ -57,7 +57,7 @@ pre-configure {
         if {"/" != [string index ${file} 0]} {
             set file [file join ${prefix} ${file}]
         }
-        
+
         # Make sure the file exists -- there have been cases where dylibs are
         # inexplicably absent (e.g. #23057).
         if {![file exists ${file}]} {
@@ -69,10 +69,10 @@ pre-configure {
             ui_error ""
             return -code error "missing required file"
         }
-        
+
         set file_archs [string trim [strsed [exec lipo -info ${file}] {s/.*://}]]
         set file_archs [string map {ppc7400 ppc ppc7450 ppc} ${file_archs}]
-        
+
         foreach file_arch ${file_archs} {
             switch ${file_arch} {
                 i386 -
@@ -88,7 +88,7 @@ pre-configure {
                 }
             }
         }
-        
+
         foreach requested_arch ${requested_archs} {
             if {-1 == [string first " ${requested_arch} " " ${file_archs} "]} {
                 set dependency [strsed [exec ${prefix}/bin/port provides ${file} 2>/dev/null] {s/.*: //}]

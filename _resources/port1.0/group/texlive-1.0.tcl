@@ -1,12 +1,12 @@
 # $Id$
-# 
+#
 # Copyright (c) 2010 Dan R. K. Ports <dports@macports.org>
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -27,7 +27,7 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 
 #
 # This portgroup contains common definitions for a MacPorts
@@ -159,10 +159,10 @@ default texlive.use_mktexlsr_on_deactivate yes
 proc texlive.texmfport {} {
     homepage        http://www.tug.org/texlive/
     platforms       darwin
-    
+
     supported_archs noarch
     installs_libs   no
-    
+
     master_sites    http://flute.csail.mit.edu/texlive/
     use_xz          yes
 
@@ -181,7 +181,7 @@ proc texlive.texmfport {} {
     # - $distname-src contains optional source code for installed files
     # The latter two are only downloaded if the corresponding variant
     # is enabled. Currently, each package must have all three distfiles
-    # even if some are empty. 
+    # even if some are empty.
     distfiles       ${distname}-run${extract.suffix}
 
     variant doc description "Install documentation" {
@@ -196,7 +196,7 @@ proc texlive.texmfport {} {
         # Skip any dependencies on texlive-documentation-* ports
         texlive.removedocdepends
     }
-    
+
     use_configure   no
 
     build           { }
@@ -209,7 +209,7 @@ proc texlive.texmfport {} {
         if {[variant_isset "src"]} { lappend indexlist "srcfiles" }
 
         # copy files listed in tlpkginfo/$indexname into destroot
-        foreach indexname $indexlist {            
+        foreach indexname $indexlist {
             set filelist [open ${worksrcpath}/tlpkginfo/${indexname}]
             while {[gets $filelist line] >= 0} {
                 # Check if file is excluded
@@ -229,7 +229,7 @@ proc texlive.texmfport {} {
                 if {$excluded} {
                     continue
                 }
-                    
+
                 set srcfile ${worksrcpath}/${indexname}/$line
 
                 # check for manpages and treat specially
@@ -259,7 +259,7 @@ proc texlive.texmfport {} {
                         default { ui_msg "warning: unknown file destination" }
                     }
                     set dstfile [join $splitline "/"]
-                    
+
                     # create directory if necessary, and install file
                     xinstall -d ${destroot}[file dirname $dstfile]
                     copy ${srcfile} ${destroot}${dstfile}
@@ -321,7 +321,7 @@ proc texlive.texmfport {} {
                     } else {
                         set linksource ${prefix}/bin/$fmtengine
                     }
-                    
+
                     ln -s $linksource \
                         ${destroot}${prefix}/bin/$fmtname
                     ln -s $linksource \
@@ -333,7 +333,7 @@ proc texlive.texmfport {} {
                     texlive.binaries-delete $fmtname
                 }
             }
-            
+
             close $fmtfile
         }
 
@@ -361,7 +361,7 @@ proc texlive.texmfport {} {
             set langdatfile [open $langdatfilename "w"]
             set langdeffile [open $langdeffilename "w"]
             set langluafile [open $langluafilename "w"]
-            
+
             foreach x ${texlive.languages} {
                 set langname [lindex $x 0]
                 set langfile [lindex $x 1]
@@ -400,9 +400,9 @@ proc texlive.texmfport {} {
                 if {$langspecial != ""} {
                     puts $langluafile "\t\tpatterns = '$langspecial',"
                 }
-                puts $langluafile "\t},\n"                
+                puts $langluafile "\t},\n"
             }
-            
+
             close $langdatfile
             close $langdeffile
             close $langluafile
@@ -424,11 +424,11 @@ proc texlive.texmfport {} {
             ![file exists ${prefix}/bin/mktexlsr]} {
             texlive.use_mktexlsr no
         }
-        
+
         if {${texlive.use_mktexlsr}} {
             texlive.mktexlsr
         }
-        
+
         if {${texlive.forceupdatecnf}} {
             # If force was specified, update all the config files, and
             # regenerate all maps and formats.
@@ -498,7 +498,7 @@ proc texlive.texmfport {} {
         if {${texlive.forceupdatecnf} || ${texlive.formats} != ""} {
             system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
         }
-        
+
         # Remove any generated format files
         foreach x ${texlive.formats} {
             set fmtname [lindex $x 1]
@@ -508,7 +508,7 @@ proc texlive.texmfport {} {
                 "mf-nowin" {set fmtengine "metafont"}
                 "mpost"    {set fmtengine "metapost"}
             }
-            
+
             foreach filename [glob -nocomplain ${texlive_texmfsysvar}/web2c/$fmtengine/$fmtname.*] {
                 delete $filename
             }

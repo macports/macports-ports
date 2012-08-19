@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2011-2012 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,19 +28,19 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup automatically sets up the standard environment for installing
 # a PHP PEAR class.
-# 
+#
 # Usage:
-# 
+#
 #   PortGroup           pear 1.0
 #   pear.setup      package version channel
-# 
+#
 # where package is the name of the PEAR package (e.g. AUTH), version is its
 # version, and channel is the channel hosting the package (default: pear.php.net).
-# 
+#
 
 # Args placed before the php or pear commands.
 options pear.env
@@ -113,12 +113,12 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
     global name extract.suffix version
     global pear.env pear.cmd-pear pear.destroot pear.sourceroot
     global pear.channel pear.package pear.packagexml
-    
+
     # The pear name for the package.
     pear.package        ${package_name}
     # The pear channel for the package.
     pear.channel        ${package_channel}
-    
+
     name                    pear-${pear.package}
     version                 ${package_version}
     categories              php
@@ -130,7 +130,7 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
     supported_archs         noarch
     use_parallel_build      yes
     depends_build           port:pear-install-phar
-    
+
     # List of ports that pear-PEAR depends on.
     # Add some pear-PEAR deps to make programmatic creation of pear Portfiles easier.
     if {
@@ -148,30 +148,30 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
                             port:pear-Console_Getopt \
                             port:pear-Structures_Graph \
                             port:pear-XML_Util
-                            
+
     }
-    
+
     fetch.ignore_sslcert yes
-    
+
     extract.post_args-append   -C '${pear.sourceroot}' --strip-components 1
 
     pre-extract {
         xinstall -d "${pear.sourceroot}"
     }
-    
+
     post-extract {
         # The "--strip-components 1" causes the loss of our package file so we will extract it now.
         extract.post_args-delete    --strip-components 1
         extract.post_args-append    ${pear.packagexml}
         command_exec                extract
     }
-    
+
     post-patch {
         # Some ports use a "." baseinstalldir which can cause issues creating pears packagingroot directory.
         reinplace "s|baseinstalldir=\"\.\"|baseinstalldir=\"/\"|g" \
           ${pear.sourceroot}/${pear.packagexml}
     }
-    
+
     configure.env           ${pear.env}
     configure.dir           ${pear.sourceroot}
     configure {
@@ -206,7 +206,7 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
             command_exec configure
         }
     }
-    
+
     build {
         build.env           ${pear.env}
         build.dir           ${pear.sourceroot}

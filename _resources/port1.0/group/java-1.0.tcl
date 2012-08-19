@@ -18,7 +18,7 @@
 # 3. Neither the name of Apple Computer, Inc. nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -44,13 +44,13 @@ proc find_java_home {} {
             ui_debug "Discovered JAVA_HOME via env: $home_value"
         }
     }
-    
+
     # First, ask the system where java home is
     if { ![file isdirectory $home_value] && ![catch {set val [exec "/usr/libexec/java_home"]}] } {
         set home_value $val
         ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
     }
-    
+
     # Fall back to more conventional way to find java home
     if { ![file isdirectory $home_value] } {
         foreach loc { "/System/Library/Frameworks/JavaVM.framework/Home" } {
@@ -61,12 +61,12 @@ proc find_java_home {} {
             }
         }
     }
-    
+
     # Warn user if we couldn't find a likely JAVA_HOME
     if { ![file isdirectory $home_value]} {
         ui_warn "No value for java JAVA_HOME was automatically discovered"
     }
-    
+
     return $home_value
 }
 

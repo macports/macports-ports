@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
-# 
+#
 # Copyright (c) 2009 The MacPorts Project
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright
@@ -16,7 +16,7 @@
 # 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -28,22 +28,22 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
-# 
+#
+#
 # This PortGroup automatically sets up the standard environment for building
 # a PHP extension.
-# 
+#
 # Usage:
-# 
+#
 #   PortGroup               php5extension 1.0
 #   php5extension.setup     extension version source
-# 
+#
 # where extension is the name of the extension (e.g. APC), version is its
 # version, and if the extension is hosted at PECL, source is "pecl"; otherwise
 # don't use source.
-# 
+#
 # If this is a Zend extension, use
-# 
+#
 #   php5extension.type      zend
 
 
@@ -71,25 +71,25 @@ default php5extension.source        standalone
 proc php5extension.setup {extensions version {source ""}} {
     global php5extension.build_dirs php5extension.extensions php5extension.ini php5extension.inidir php5extension.source
     global destroot
-    
+
     # Use "set" to preserve the list structure.
     set php5extension.extensions ${extensions}
-    
+
     php5extension.source        ${source}
-    
+
     name                        php5-[lindex ${php5extension.extensions} 0]
     version                     ${version}
     categories                  php
     distname                    [lindex ${php5extension.extensions} 0]-${version}
-    
+
     depends_build               port:autoconf
-    
+
     depends_lib                 path:bin/php:php5
-    
+
     configure.universal_args-delete --disable-dependency-tracking
-    
+
     variant debug description {Enable debug support (useful to analyze a PHP-related core dump)} {}
-    
+
     pre-configure {
         set php_debug_variant [regexp {/debug-[^/]+$} ${php5extension.extension_dir}]
         if {${php_debug_variant} && ![variant_isset debug]} {
@@ -104,23 +104,23 @@ proc php5extension.setup {extensions version {source ""}} {
             system "cd ${dir} && ${php5extension.phpize}"
         }
     }
-    
+
     configure {
         foreach configure.dir ${php5extension.build_dirs} {
             ui_debug "Configuring in [file tail ${configure.dir}]"
             portconfigure::configure_main
         }
     }
-    
+
     build {
         foreach build.dir ${php5extension.build_dirs} {
             ui_debug "Building in [file tail ${build.dir}]"
             portbuild::build_main
         }
     }
-    
+
     destroot.destdir            INSTALL_ROOT=${destroot}
-    
+
     destroot {
         foreach destroot.dir ${php5extension.build_dirs} {
             ui_debug "Staging in [file tail ${destroot.dir}]"
@@ -141,7 +141,7 @@ proc php5extension.setup {extensions version {source ""}} {
         }
         close $fp
     }
-    
+
     post-install {
         if {[file exists ${php5extension.php_ini}]} {
             set count 0
@@ -167,32 +167,32 @@ proc php5extension.setup {extensions version {source ""}} {
             close $fp
         }
     }
-    
+
     if {"pecl" == ${source}} {
         global php5extension.homepage
         set php5extension.homepage  http://pecl.php.net/package/[lindex ${php5extension.extensions} 0]/
-        
+
         homepage                    ${php5extension.homepage}
         master_sites                http://pecl.php.net/get/
         extract.suffix              .tgz
-        
+
         livecheck.type              regexm
         livecheck.url               ${php5extension.homepage}
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
         homepage                    http://www.php.net/[lindex ${php5extension.extensions} 0]
         master_sites                php
-        
+
         dist_subdir                 php5
         distname                    php-${version}
         use_bzip2                   yes
-        
+
         pre-extract {
             foreach extension ${php5extension.extensions} {
                 extract.post_args-append ${worksrcdir}/ext/${extension}
             }
         }
-        
+
         pre-configure {
             set php_version [exec ${prefix}/bin/php-config --version 2>/dev/null]
             if {${version} != ${php_version}} {
@@ -200,9 +200,9 @@ proc php5extension.setup {extensions version {source ""}} {
                 return -code error "incompatible PHP installation"
             }
         }
-        
+
         destroot.target             install-modules install-headers
-        
+
         livecheck.type              none
         livecheck.url               http://www.php.net/downloads.php
         livecheck.regex             get/php-(5\\.\[0-9.\]+)\\.tar
