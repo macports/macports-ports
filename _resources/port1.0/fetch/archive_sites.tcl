@@ -4,7 +4,7 @@ namespace eval portfetch::mirror_sites { }
 
 set portfetch::mirror_sites::sites(macports_archives) {
     http://packages.macports.org/:nosubdir
-    http://macports.packages.ionic.de/:nosubdir
+    http://lil.fr.packages.macports.org/:nosubdir
 }
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2
