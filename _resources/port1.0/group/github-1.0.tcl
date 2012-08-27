@@ -84,6 +84,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     }
 
     livecheck.type          regex
+    livecheck.version       ${github.version}
     livecheck.url           ${github.homepage}/tags
     livecheck.regex         tarball/[join ${github.tag_prefix} ""](\[^"\]+)
 }
