@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Be noise.
+# Be verbose.
 VERBOSE=no
 # Stop on path failures.
 STOP=no
