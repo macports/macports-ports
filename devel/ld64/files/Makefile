@@ -20,10 +20,17 @@ endif
 
 all : ObjectDump dyldinfo ld machocheck rebase unwinddump libprunetrie.a
 
+src/ld/Snapshot.o : src/ld/compile_stubs.h
+src/ld/compile_stubs.h : compile_stubs
+	echo "static const char *compile_stubs = " > $@
+	cat $^ | sed s/\"/\\\\\"/g | sed s/^/\"/ | sed s/$$/\\\\n\"/ >> $@
+	echo ";" >> $@
+
 src/ld/ld.o : src/ld/configure.h
+src/other/ObjectDump.o : src/ld/configure.h
 src/ld/Options.o : src/ld/configure.h
-src/ld/configure.h :
-	touch $@
+src/ld/configure.h : src/create_configure
+	DERIVED_SOURCES_DIR=src/ld DERIVED_FILE_DIR=src/ld $^ > $@
 
 ObjectDump : src/ld/debugline.o
 ObjectDump : src/ld/parsers/macho_relocatable_file.o 
@@ -40,6 +47,7 @@ ld : src/ld/InputFiles.o
 ld : src/ld/Options.o
 ld : src/ld/OutputFile.o
 ld : src/ld/Resolver.o
+ld : src/ld/Snapshot.o
 ld : src/ld/SymbolTable.o
 ld : src/ld/parsers/archive_file.o
 ld : src/ld/parsers/lto_file.o
