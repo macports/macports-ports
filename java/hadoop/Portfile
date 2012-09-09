@@ -5,7 +5,7 @@ PortSystem          1.0
 
 name                hadoop
 version             1.0.3
-revision            2
+revision            3
 categories          java devel science
 maintainers         hum openmaintainer
 
@@ -23,7 +23,8 @@ checksums           rmd160  e41421483156fd0fa65d608b206a17cd2a73a989 \
                     sha256  716ab51f75ffb70343c3cca02f7ba4722f42376edb67eecbd42a426a054e6423
 
 patchfiles          patch-hadoop-env.sh.diff \
-                    patch-native.diff
+                    patch-native.diff \
+                    patch-c++.diff
 
 depends_build       bin:ant:apache-ant
 depends_lib         port:zlib \
@@ -44,15 +45,33 @@ pre-fetch {
     }
 }
 
+# Fix a file permission to build c++-libhdfs.
+post-extract {
+    file attributes ${worksrcpath}/src/c++/libhdfs/install-sh -permissions 0755
+}
+
 universal_variant   no
 
 use_configure       no
 
+# Build native and c++ libraries.
 build.cmd           ant
 build.args          -Dcompile.native=true \
                     -Dsnappy.prefix=${prefix} \
-                    -Dinstall.native=${prefix}
-build.target        compile
+                    -Dcompile.c++=true \
+                    -Dlibhdfs=true
+build.target        compile-native compile-c++-libhdfs
+
+# Fix install_name of dylib.
+post-build {
+    foreach file [glob ${worksrcpath}/build/native/**/lib/*.dylib \
+                       ${worksrcpath}/build/c++/**/lib/*.dylib] {
+        if {[file isfile ${file}]} {
+            set libname [file tail ${file}]
+            system "install_name_tool -id ${prefix}/lib/${libname} ${file}"
+        }
+    }
+}
 
 # Hadoop home and conf directories.
 set hadoop_basedir  ${prefix}/share/java
@@ -68,6 +87,41 @@ set hadoop_log_dir  ${hadoop_var_dir}/log
 set hadoop_pid_dir  ${hadoop_var_dir}/run
 
 set hadoopuser      hadoop
+
+add_users ${hadoopuser} \
+    group=${hadoopuser} \
+    realname=Hadoop\ Server \
+    home=${hadoop_var_dir} \
+    shell=/bin/bash
+
+variant fusedfs description {Add Fuse-DFS} {
+    depends_lib-append port:fuse4x
+
+    patchfiles-append  patch-fusedfs.diff
+
+    post-patch {
+        set cppflags "-I${prefix}/include -I/System/Library/Frameworks/JavaVM.framework/Headers"
+        set ldflags  "-L${prefix}/lib -L$@"
+        reinplace "s|configure|configure CPPFLAGS=\"${cppflags}\" LDFLAGS=\"${ldflags}\"|" \
+            ${worksrcpath}/src/contrib/fuse-dfs/bootstrap.sh
+    }
+
+    post-build {
+        system -W ${worksrcpath} "ant compile-contrib -Dlibhdfs=1 -Dfusedfs=1"
+    }
+
+    post-destroot {
+        xinstall -m 755 \
+            ${worksrcpath}/build/contrib/fuse-dfs/fuse_dfs \
+            ${destroot}${prefix}/bin
+        # Install fuse_dfs_wrapper.sh.
+        xinstall -m 755 ${filespath}/fuse_dfs_wrapper.sh ${destroot}${hadoop_home}/bin
+        set sh ${destroot}${hadoop_home}/bin/fuse_dfs_wrapper.sh
+        reinplace "s|@hadoop_home@|${hadoop_home}|" ${sh}
+        reinplace "s|@java_home@|${java_home}|"     ${sh}
+        reinplace "s|@prefix@|${prefix}|"           ${sh}
+    }
+}
 
 destroot {
     # Copy the distribution to Hadoop home directory.
@@ -86,8 +140,9 @@ destroot {
     xinstall -m 755 -d ${webinf}
     destroot.keepdirs-append ${webinf}
 
-    # Install native libraries.
-    foreach file [glob ${worksrcpath}/build/native/**/lib/*] {
+    # Install native and c++ libraries.
+    foreach file [glob ${worksrcpath}/build/native/**/lib/* \
+                       ${worksrcpath}/build/c++/**/lib/*] {
         xinstall -m 644 ${file} ${destroot}${prefix}/lib
     }
     
@@ -111,8 +166,6 @@ destroot {
     reinplace "s|@hadoop_log_dir@|${hadoop_log_dir}|g" ${env_sh}
     reinplace "s|@hadoop_pid_dir@|${hadoop_pid_dir}|g" ${env_sh}
 
-    add_hadoop_user_and_group
-
     # Create working directories.
     xinstall -m 755 -o ${hadoopuser} -g ${hadoopuser} -d \
         ${destroot}${hadoop_var_dir} \
@@ -122,22 +175,6 @@ destroot {
         ${destroot}${hadoop_var_dir} \
         ${destroot}${hadoop_log_dir} \
         ${destroot}${hadoop_pid_dir}
-}
-
-pre-activate {
-    add_hadoop_user_and_group
-}
-
-proc add_hadoop_user_and_group {} {
-    global hadoopuser hadoop_var_dir
-    if {![existsgroup ${hadoopuser}]} {
-        addgroup ${hadoopuser}
-        adduser ${hadoopuser} \
-            gid=[existsgroup ${hadoopuser}] \
-            realname=Hadoop\ Server \
-            home=${hadoop_var_dir} \
-            shell=/bin/bash
-    }
 }
 
 post-deactivate {
