@@ -5,7 +5,7 @@ PortSystem          1.0
 
 name                hadoop
 version             1.0.3
-revision            3
+revision            4
 categories          java devel science
 maintainers         hum openmaintainer
 
@@ -22,9 +22,9 @@ master_sites        apache:hadoop/common/${distname}
 checksums           rmd160  e41421483156fd0fa65d608b206a17cd2a73a989 \
                     sha256  716ab51f75ffb70343c3cca02f7ba4722f42376edb67eecbd42a426a054e6423
 
-patchfiles          patch-hadoop-env.sh.diff \
-                    patch-native.diff \
-                    patch-c++.diff
+patchfiles          patch-conf-hadoop-env.sh.diff \
+                    patch-src-native.diff \
+                    patch-src-c++.diff
 
 depends_build       bin:ant:apache-ant
 depends_lib         port:zlib \
@@ -50,11 +50,30 @@ post-extract {
     file attributes ${worksrcpath}/src/c++/libhdfs/install-sh -permissions 0755
 }
 
-universal_variant   no
+variant universal {}
 
 use_configure       no
 
-# Build native and c++ libraries.
+set java_include    -I/System/Library/Frameworks/JavaVM.framework/Headers
+set cflags          "${configure.cflags} [get_canonical_archflags]"
+set cxxflags        "${configure.cxxflags} [get_canonical_archflags cxx]"
+set ldflags         "${configure.ldflags} [get_canonical_archflags] -framework JavaVM"
+set cppflags        "${configure.cppflags} ${java_include}"
+
+# Set configure args to build native and c++-libhdfs.
+post-patch {
+    set libs  "-ldl -lz -lsnappy"
+    reinplace "s|@cc@|${configure.cc}|g"      ${worksrcpath}/build.xml
+    reinplace "s|@cflags@|${cflags}|g"        ${worksrcpath}/build.xml
+    reinplace "s|@cxx@|${configure.cxx}|g"    ${worksrcpath}/build.xml
+    reinplace "s|@cxxflags@|${cxxflags}|g"    ${worksrcpath}/build.xml
+    reinplace "s|@ldflags@|${ldflags}|g"      ${worksrcpath}/build.xml
+    reinplace "s|@libs@|${libs}|g"            ${worksrcpath}/build.xml
+    reinplace "s|@cppflags@|${cppflags}|g"    ${worksrcpath}/build.xml
+    reinplace "s|@args@|--prefix=${prefix}|g" ${worksrcpath}/build.xml
+}
+
+# Build native and c++-libhdfs.
 build.cmd           ant
 build.args          -Dcompile.native=true \
                     -Dsnappy.prefix=${prefix} \
@@ -63,7 +82,7 @@ build.args          -Dcompile.native=true \
 build.target        compile-native compile-c++-libhdfs
 
 # Fix install_name of dylib.
-post-build {
+pre-destroot {
     foreach file [glob ${worksrcpath}/build/native/**/lib/*.dylib \
                        ${worksrcpath}/build/c++/**/lib/*.dylib] {
         if {[file isfile ${file}]} {
@@ -97,16 +116,22 @@ add_users ${hadoopuser} \
 variant fusedfs description {Add Fuse-DFS} {
     depends_lib-append port:fuse4x
 
-    patchfiles-append  patch-fusedfs.diff
+    patchfiles-append  patch-src-contrib-fusedfs.diff
 
-    post-patch {
-        set cppflags "-I${prefix}/include -I/System/Library/Frameworks/JavaVM.framework/Headers"
-        set ldflags  "-L${prefix}/lib -L$@"
-        reinplace "s|configure|configure CPPFLAGS=\"${cppflags}\" LDFLAGS=\"${ldflags}\"|" \
-            ${worksrcpath}/src/contrib/fuse-dfs/bootstrap.sh
-    }
-
+    # libhdfs.dylib must be built before configuring fuse-dfs.
     post-build {
+        set libs  "-lfuse -lhdfs"
+        # "$@" is replaced with "${hadoop.root}/build/c++/${build.platform}/lib".
+        # See files/patch-src-contrib-fusedfs.diff.
+        set args  "--prefix=${prefix} \
+                   CC=${configure.cc} \
+                   CFLAGS=\"${cflags}\" \
+                   LDFLAGS=\"${ldflags} -L$@\" \
+                   LIBS=\"${libs}\" \
+                   CPPFLAGS=\"${cppflags}\""
+        set sh ${worksrcpath}/src/contrib/fuse-dfs/bootstrap.sh
+        reinplace "s|\./configure|\./configure ${args}|" ${sh}
+        # Build fusedfs.
         system -W ${worksrcpath} "ant compile-contrib -Dlibhdfs=1 -Dfusedfs=1"
     }
 
@@ -114,6 +139,10 @@ variant fusedfs description {Add Fuse-DFS} {
         xinstall -m 755 \
             ${worksrcpath}/build/contrib/fuse-dfs/fuse_dfs \
             ${destroot}${prefix}/bin
+        # Fix install_name in fuse_dfs.
+        set bin ${destroot}${prefix}/bin/fuse_dfs
+        regexp {(\S+\/libhdfs\S+dylib)} [exec otool -L ${bin}] path
+        system "install_name_tool -change ${path} ${prefix}/lib/libhdfs.dylib ${bin}"
         # Install fuse_dfs_wrapper.sh.
         xinstall -m 755 ${filespath}/fuse_dfs_wrapper.sh ${destroot}${hadoop_home}/bin
         set sh ${destroot}${hadoop_home}/bin/fuse_dfs_wrapper.sh
@@ -193,7 +222,7 @@ default_variants    +pseudo
 set hadoop_tmp_dir  ${hadoop_var_dir}/cache
 
 variant pseudo description {Run on a single-node in a pseudo-distributed mode} {
-    patchfiles-append  patch-conf.diff
+    patchfiles-append  patch-pseudo.diff
 
     post-destroot {
         # Set conf directory for a pseudo-distributed mode.
