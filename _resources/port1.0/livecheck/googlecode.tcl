@@ -17,7 +17,7 @@ if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     set livecheck.url "http://code.google.com/p/${livecheck.name}/downloads/list"
 }
 if {${livecheck.distname} eq "default"} {
-    set livecheck.distname [regsub ***=[quotemeta ${livecheck.version}] [quotemeta [file tail [lindex ${distfiles} 0]]] (\[^'\]+)]
+    set livecheck.distname [regsub ***=[quotemeta ${livecheck.version}] [quotemeta [file tail [lindex ${distfiles} 0]]] (\[^\"'\]+)]
 }
 if {${livecheck.regex} eq ""} {
     set livecheck.regex [list "href=\"//[quotemeta ${livecheck.name}].googlecode.com/files/${livecheck.distname}\""]
