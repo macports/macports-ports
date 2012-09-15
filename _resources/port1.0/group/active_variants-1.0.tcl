@@ -54,6 +54,26 @@
 #    is a list of variants that may not be enabled for the test to succeed
 #    (default is empty list, see description of $required for values that can be
 #    interpreted as list by Tcl)
+#
+#
+# In situations where you know that a version of the port is active (e.g., when
+# checking in pre-configure of a port and the checked port is a dependency),
+# this can be simplified to:
+# if {[active_variants $name $required $forbidden]} {
+#   # code to be run if $name is active with all from $required and none from
+#   # $forbidden
+# } else {
+#   # code to be run if $name is active, but either not with all variants in
+#   # $required or any variant in $forbidden
+# }
+#
+# If all you want to do is bail out when the condition isn't fulfilled, there's
+# a convience wrapper available. If the condition isn't met it will print an
+# error message and exit. This will also error out, if the port $name isn't
+# active, so you should probably not be using this before configure phase.
+#
+# require_active_variants $name $required $forbidden
+#
 
 proc active_variants {name required {forbidden {}}} {
 	# registry_active comes from a list of aliased procedures in
@@ -84,6 +104,8 @@ proc active_variants {name required {forbidden {}}} {
 	# a boolean indicating whether the port is installed and the epoch. So,
 	# we're interested in the field at offset 3.
 	set variants [lindex $installed 3]
+	ui_debug "$name is installed with the following variants: $variants"
+	ui_debug "  required: $required, forbidden: $forbidden"
 
 	# split by "+" into the separate variant names
 	set variant_list [split $variants +]
@@ -91,6 +113,7 @@ proc active_variants {name required {forbidden {}}} {
 	# check that each required variant is there
 	foreach required_variant $required {
 		if {![_variant_in_variant_list $required_variant $variant_list]} {
+			ui_debug "  rejected, because required variant $required_variant is missing"
 			return 0
 		}
 	}
@@ -98,8 +121,33 @@ proc active_variants {name required {forbidden {}}} {
 	# check that no forbidden variant is there
 	foreach forbidden_variant $forbidden {
 		if {[_variant_in_variant_list $forbidden_variant $variant_list]} {
+			ui_debug "  rejected, because forbidden variant $forbidden_variant is present"
 			return 0
 		}
+	}
+
+	ui_debug "  accepted"
+	return 1
+}
+
+proc require_active_variants {name required {forbidden {}}} {
+	if {[catch {set result [active_variants $name $required $forbidden]}] != 0} {
+		error "$name is required, but not active."
+	}
+	if {!$result} {
+		set str_required ""
+		if {[llength $required] > 0} {
+			set str_required "with +[join $required +]"
+		}
+		set str_forbidden ""
+		if {[llength $forbidden] > 0} {
+			set str_forbidden "without +[join $forbidden +]"
+		}
+		set str_combine ""
+		if {$str_required != "" && $str_forbidden != ""} {
+			set str_combine " and "
+		}
+		error "$name must be installed ${str_required}${str_combine}${str_forbidden}."
 	}
 }
 
