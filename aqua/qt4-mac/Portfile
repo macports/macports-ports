@@ -11,8 +11,7 @@ PortGroup           xcodeversion 1.0
 
 name                qt4-mac
 conflicts           qt3 qt3-mac qt4-mac-devel
-version             4.8.2
-revision            3
+version             4.8.3
 categories          aqua
 platforms           macosx
 maintainers         michaelld openmaintainer
@@ -27,8 +26,8 @@ long_description    Qt Tool Kit: A cross-platform framework \
 master_sites        trolltech
 distname            qt-everywhere-opensource-src-${version}
 
-checksums           sha1    e1e2edef1d63ed677d6534d32800c2e1f7ad0e73 \
-                    rmd160  6a15077aee1e84076380787127b80c7bb97ebe86
+checksums           sha1    bc352a283610e0cd2fe0dbedbc45613844090fcb \
+                    rmd160  fe56e5da874503a79d6f84a1e15460eba5a6feae
 
 minimum_xcodeversions   {8 2.5}
 
@@ -205,14 +204,13 @@ patchfiles-append   \
 patchfiles-append   \
     patch-src_3rdparty_webkit_Source_WebCore_WebCore.pro.diff
 
-# Temporary patch to get ML working; some of this is already upstream 
-# https://codereview.qt-project.org/#change,31759
-# See also https://trac.macports.org/ticket/35430
+# (23) Under 10.8 only: Patch to fix corelib linking
+
 platform darwin 12 {
-    patchfiles-append patch-EXPERIMENTAL-ML-fixes.diff
+    patchfiles-append patch-src_corelib_corelib.pro.diff
 }
 
-# (23) fix Framework directory in MacDeployQt tool
+# (24) fix Framework directory in MacDeployQt tool
 
 patchfiles-append   \
     patch-tools_macdeployqt_shared_shared.cpp.diff
@@ -389,8 +387,12 @@ set library_path [ list ${prefix}/lib ]
 #
 # -openssl-linked ensures that the MacPorts openssl is used.
 #
-# -no-framework ensures that this port is installed as separate
-#     libraries and headers, with guaranteed locations and names.
+# -framework ensures that this port is installed as frameworks
+#     (collections of {library, headers, resources}); in
+#     post-destroot, link headers and libraries from the frameworks
+#     into non-framework locations as if "-no-framework" were
+#     specified.  Some dependent projects will not work properly if Qt
+#     is installed as libraries by default, thus make it so #1.
 #
 # -no-phonon ensures that Qt does not install the 3rd-parth Phonon
 #     port or its backend to QuickTime 7; Phonon is now installed via
@@ -418,7 +420,7 @@ configure.args                                            \
     -dbus-linked                                          \
     -fast                                                 \
     -optimized-qmake                                      \
-    -no-framework                                         \
+    -framework                                            \
     -no-phonon                                            \
     -no-phonon-backend
 
@@ -571,76 +573,100 @@ post-destroot {
         reinplace "s|${prefix}/|\${prefix}/|g" ${fixfile}
     }
 
-    if {![variant_isset framework]} {
+    # remove -L entries from .prl, and .la files; this is a
+    # framework install, not a library install
 
-        # if not doing framework install: install qt_menu.nib, used by
-        # any applications making use of Qt's application class
+    foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
+        reinplace "/QMAKE_PRL_LIBS/s|-L\[^ \]*||g" ${fixfile}
+    }
+    foreach fixfile [exec find ${destroot_qt} -name "*.la"] {
+        reinplace "/dependency_libs/s|-L\[^ \]*||g" ${fixfile}
+    }
 
-        xinstall -m 755 -d ${destroot_qt}/lib/Resources
-        copy ${worksrcpath}/src/gui/mac/qt_menu.nib \
-            ${destroot_qt}/lib/Resources
+    # remove redundant -F${prefix}/Library/Frameworks entries
 
-    } else {
+    foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
+        reinplace "/QMAKE_PRL_LIBS/s|-F\[^ \]*|FREPLACEME|1" \
+            ${fixfile}
+        reinplace "/QMAKE_PRL_LIBS/s|-F\[^ \]*||g" ${fixfile}
+        reinplace "s|FREPLACEME|-F${prefix}/Library/Frameworks|1" \
+            ${fixfile}
+    }
+    foreach fixfile [exec find ${destroot_qt} -name "*.la"] {
+        reinplace "/dependency_libs/s|-F\[^ \]*|FREPLACEME|1" \
+            ${fixfile}
+        reinplace "/dependency_libs/s|-F\[^ \]*||g" ${fixfile}
+        reinplace "s|FREPLACEME|-F${prefix}/Library/Frameworks|1" \
+            ${fixfile}
+    }
 
-        # remove -L entries from .prl, and .la files; this is a
-        # framework install, not a library install
+    # move .pc files from ${qt_frameworks_dir}/pkgconfig to
+    # ${qt_pkg_config_dir}
 
-        foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
-            reinplace "/QMAKE_PRL_LIBS/s|-L\[^ \]*||g" ${fixfile}
-        }
-        foreach fixfile [exec find ${destroot_qt} -name "*.la"] {
-            reinplace "/dependency_libs/s|-L\[^ \]*||g" ${fixfile}
-        }
+    file delete -force ${destroot}${qt_pkg_config_dir}
+    xinstall -m 755 -d ${destroot}${qt_libs_dir}
+    move ${destroot}${qt_frameworks_dir}/pkgconfig \
+        ${destroot}${qt_libs_dir}
 
-        # remove redundant -F${prefix}/Library/Frameworks entries
+    # get Qt's version numbers
 
-        foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
-            reinplace "/QMAKE_PRL_LIBS/s|-F\[^ \]*|FREPLACEME|1" \
-                ${fixfile}
-            reinplace "/QMAKE_PRL_LIBS/s|-F\[^ \]*||g" ${fixfile}
-            reinplace "s|FREPLACEME|-F${prefix}/Library/Frameworks|1" \
-                ${fixfile}
-        }
-        foreach fixfile [exec find ${destroot_qt} -name "*.la"] {
-            reinplace "/dependency_libs/s|-F\[^ \]*|FREPLACEME|1" \
-                ${fixfile}
-            reinplace "/dependency_libs/s|-F\[^ \]*||g" ${fixfile}
-            reinplace "s|FREPLACEME|-F${prefix}/Library/Frameworks|1" \
-                ${fixfile}
-        }
+    set qt_vers [split ${version} "."]
+    set qt_major [lindex ${qt_vers} 0]
+    set qt_minor [lindex ${qt_vers} 1]
+    set qt_patch [lindex ${qt_vers} 2]
 
-        # move .pc files from ${qt_frameworks_dir}/pkgconfig to
-        # ${qt_pkg_config_dir}
+    # link includes and libraries for each actual installed framework
 
-        file delete -force ${destroot}${qt_pkg_config_dir}
-        xinstall -m 755 -d ${destroot}${qt_libs_dir}
-        move ${destroot}${qt_frameworks_dir}/pkgconfig \
-            ${destroot}${qt_libs_dir}
+    foreach fixfile [exec find ${destroot}${qt_frameworks_dir} \
+                         -name "*.framework" | \
+                         sed -e "s@${destroot}@@g"] {
+
+        set tf_full [strsed ${fixfile} {s@\\.framework@@}]
+        set tf [strsed ${tf_full} {g@.*\/@@}]
 
         # link headers into ${qt_includes_dir}, removing directories
         # if they are already there first
 
-        foreach fixfile [exec find ${destroot}${qt_frameworks_dir} \
-                             -name "*.framework" | \
-                             sed -e "s@${destroot}@@g"] {
-            set tf_full [strsed ${fixfile} {s@\\.framework@@}]
-            set tf [strsed ${tf_full} {g@.*\/@@}]
-            set inc_file ${destroot}${qt_includes_dir}/${tf}
-            if {[file exists ${inc_file}]} {
-                file delete -force ${inc_file}
-            }
-            ln -s ${tf_full}.framework/Headers ${inc_file}
+        set inc_file ${destroot}${qt_includes_dir}/${tf}
+        if {[file exists ${inc_file}]} {
+            file delete -force ${inc_file}
         }
+        ln -s ${tf_full}.framework/Headers ${inc_file}
+
+        # link libraries into ${qt_libs_dir}, all 4 number variants as
+        # well as the .prl and .la files
+
+        set libs_dir ${destroot}${qt_libs_dir}
+
+        ln -s ${tf_full}.framework/${tf}.prl ${libs_dir}/lib${tf}.prl
+        ln -s ${tf_full}.la ${libs_dir}/lib${tf}.la
+        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.dylib
+        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.dylib
+        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.${qt_minor}.dylib
+        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.${qt_minor}.${qt_patch}.dylib
+
     }
 
     # Install documentation.
+
     xinstall -m 755 -d ${worksrcpath}/${qt_docs_dir}
     xinstall -m 644 -W ${worksrcpath} \
         INSTALL LGPL_EXCEPTION.txt LICENSE.FDL \
         LICENSE.GPL3 LICENSE.LGPL README \
         ${destroot}${qt_docs_dir}
 
+    # Install private headers needed by QtCreator 
+
+    foreach {src_dir include_dir} \
+    {corelib QtCore gui QtGui script QtScript declarative QtDeclarative} {
+        set dest_dir ${destroot}${qt_frameworks_dir}/${include_dir}.framework/Headers/private
+        xinstall -m 755 -d ${dest_dir}
+        set files [exec find ${worksrcpath}/src/${src_dir} -type f -name "*_p.h"]
+        eval xinstall -m 644 [split ${files}] ${dest_dir}
+    }
+
     # Move .apps into the applications_dir
+
     xinstall -m 755 -d ${destroot}${qt_apps_dir}
     foreach app [glob ${destroot}/${qt_bins_dir}/*.app] {
         move ${app} ${destroot}${qt_apps_dir}
@@ -662,9 +688,9 @@ pre-activate {
     }
 }
 
-variant framework description {Build as Frameworks} {
-    configure.args-delete -no-framework
-    configure.args-append -framework
+variant framework description {Framework Legacy Compatibility Variant} {
+    ui_error "${name} variant +framework has been disabled because ${name} now installs as both libraries and frameworks.  Please install ${name} without +framework."
+    return -code error "Variant disabled"
 }
 
 variant mysql description {MySQL Qt4 Plugin Legacy Compatibility Variant} {
