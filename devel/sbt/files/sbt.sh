@@ -19,7 +19,7 @@ LAUNCHJAR="__SBT_LAUNCHER_PATH__"
 
 # Ensure enough heap space is created for SBT.
 if [ -z "$JAVA_OPTS" ]; then
-	JAVA_OPTS="-Xmx512M"
+    JAVA_OPTS="-Xmx512M"
 fi
 
 # Assume java is already in the shell path.
