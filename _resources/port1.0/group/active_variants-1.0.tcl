@@ -1,6 +1,6 @@
 # $Id: haskell-1.0.tcl 96776 2012-08-19 05:52:01Z blair@macports.org $
 #
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2012 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
