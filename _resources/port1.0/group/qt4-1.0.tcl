@@ -42,8 +42,7 @@ platform darwin {
         if {[variant_exists debug] && \
             [variant_isset debug] && \
            ![info exists building_qt4]} {
-            if {![file exists ${qt_frameworks_dir}/QtCore/QtCore_debug] &&
-                ![file exists ${qt_libs_dir}/libQtCore_debug.dylib]} {
+            if {![file exists ${qt_frameworks_dir}/QtCore.framework/QtCore_debug]} {
                 return -code error "\n\nERROR:\n\
 In order to install this port as +debug,
 Qt4 must also be installed with +debug.\n"
