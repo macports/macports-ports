@@ -262,12 +262,34 @@ def _sshserver_do_hello(self):
 sshserver.sshserver.do_hello = _sshserver_do_hello
 
 
+try:
+    from mercurial import wireproto
+    # Force the lazy importer to trigger
+    wireproto.capabilities
+except ImportError:
+    pass
+else:
+    # hg >= 1.7
+    _old_caps = wireproto.capabilities
+    def _forest_caps(*args, **kwargs):
+        caps = _old_caps(*args, **kwargs)
+        caps += ' forests'
+        return caps
+    wireproto.capabilities = _forest_caps
+
+    def do_forests(repo, proto, walkhg):
+        forests = repo.forests(bool(walkhg))
+        return "\n".join(forests)
+    wireproto.commands['forests'] = (do_forests, 'walkhg')
+
+
+
 def _sshserver_do_forests(self):
     """Shim this function into the sshserver so that it responds to
     the forests command.  It gives a list of roots relative to the
     self.repo repository, sorted lexigraphically.
     """
-    
+    # hg < 1.7
     key, walkhg = self.getarg()
     forests = self.repo.forests(bool(walkhg))
     self.respond("\n".join(forests))
@@ -579,6 +601,16 @@ class Forest(object):
                 ctx = self.repo.workingctx()
             parents = ctx.parents()
             return [node.hex(parents[0].node())]
+
+        def rollback(self):
+            if self._repo:
+                try:
+                    self._repo.transaction('forest').__del__()
+                except TypeError, err:
+                    # Wrong number of arguments for hg < 1.6
+                    if '2 given' not in str(err):
+                        raise
+                    self._repo.transaction().__del__()
 
         def __repr__(self):
             return ("<forest.Tree object "
@@ -906,6 +938,8 @@ def fetch(ui, top, source="default", **opts):
     source = [source]
     try:
         import hgext.fetch as fetch
+        # Force the lazy importer to trigger
+        fetch.cmdtable
     except ImportError:
         raise util.Abort(_("could not import fetch module\n"))
 
@@ -923,10 +957,7 @@ def fetch(ui, top, source="default", **opts):
             fetch.fetch(ui, tree.getrepo(ui), srcpath, **opts)
         except Exception, err:
             ui.warn(_("skipped: %s\n") % err)
-            try:
-                tree.repo.transaction().__del__()
-            except AttributeError:
-                pass
+            tree.rollback()
 
     @Forest.Tree.skip
     def check_mq(tree):
@@ -1100,8 +1131,7 @@ def pull(ui, top, source="default", pathalias=None, **opts):
             commands.pull(ui, tree.getrepo(ui), srcpath, **opts)
         except Exception, err:
             ui.warn(_("skipped: %s\n") % err)
-            if tree._repo:
-                tree.repo.transaction().__del__()
+            tree.rollback()
 
     @Forest.Tree.skip
     def check_mq(tree):
@@ -1141,10 +1171,7 @@ def push(ui, top, dest=None, pathalias=None, **opts):
             commands.push(ui, tree.getrepo(ui), destpath, **opts)
         except Exception, err:
             ui.warn(_("skipped: %s\n") % err)
-            try:
-                tree.repo.transaction().__del__()
-            except AttributeError:
-                pass
+            tree.rollback()
 
     @Forest.Tree.skip
     def check_mq(tree):
@@ -1316,7 +1343,7 @@ def tag(ui, top, name, revision=None, **opts):
             commands.tag(ui, tree.getrepo(ui), name, rev_=None, **opts)
         except Exception, err:
             ui.warn(_("skipped: %s\n") % err)
-            tree.repo.transaction().__del__()
+            tree.rollback()
 
     @Forest.Tree.skip
     def check_mq(tree):
@@ -1388,7 +1415,7 @@ def update(ui, top, revision=None, **opts):
                                 clean=opts['clean'], date=opts['date'])
         except Exception, err:
             ui.warn(_("skipped: %s\n") % err)
-            tree.repo.transaction().__del__()
+            tree.rollback()
 
     @Forest.Tree.skip
     def check_mq(tree):
@@ -1475,6 +1502,8 @@ def uisetup(ui):
 
     try:
         import hgext.fetch
+        # Force the lazy importer to trigger
+        hgext.fetch.cmdtable
     except ImportError:
         return
     try:
