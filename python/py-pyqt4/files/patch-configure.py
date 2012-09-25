@@ -1,5 +1,5 @@
---- configure.py.orig	2012-09-18 10:30:46.000000000 -0400
-+++ configure.py	2012-09-18 10:31:58.000000000 -0400
+--- configure.py.orig	2012-09-25 11:54:11.000000000 -0400
++++ configure.py	2012-09-25 11:55:51.000000000 -0400
 @@ -44,6 +44,7 @@
  qt_dir = None
  qt_incdir = None
@@ -49,6 +49,15 @@
      }
  
      sipconfig.create_config_module(module, template, content, macros)
+@@ -1787,7 +1785,7 @@
+             lfile = license.LicenseFile
+         except AttributeError:
+             lfile = None
+-    except ImportError:
++    except:
+         ltype = None
+ 
+     if ltype is None:
 @@ -1894,12 +1892,14 @@
      names = list(sipcfg.build_macros().keys())
      names.append("INCDIR_QT")
