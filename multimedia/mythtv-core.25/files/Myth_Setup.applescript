@@ -3,10 +3,11 @@ For use with MacPorts install of Myth
 Author:  Craig Treleaven, ctreleaven at cogeco.ca
 Myth Version: 0.25.0
 Modified: 2012May17
+          2012Sep08 Force working themepainter
 
 *)
 property MSUappPath : "@PREFIX@/bin/mythtv-setup"
-property MSUlogArg : "--logpath @MYTHTVLOGDIR@"
+property MSUlogArg : "-O ThemePainter=qt --logpath @MYTHTVLOGDIR@"
 property MSUlogLevel : "info" -- single string
 property MSUverboseLevel : {"general"} -- a list, can be multiple strings
 
