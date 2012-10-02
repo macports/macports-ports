@@ -414,33 +414,23 @@ set portfetch::mirror_sites::sites(savannah) {
 set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
 
 # http://sourceforge.net/apps/trac/sourceforge/wiki/Mirrors
-# Do not add superb-east and superb-west; they don't seem to have current files.
-# See http://lists.macosforge.org/pipermail/macports-dev/2010-July/012387.html
 set portfetch::mirror_sites::sites(sourceforge) {
-    http://downloads.sourceforge.net/
     http://aarnet.dl.sourceforge.net/
-    http://cdnetworks-us-2.dl.sourceforge.net/
-    http://cdnetworks-kr-1.dl.sourceforge.net/
-    http://cdnetworks-kr-2.dl.sourceforge.net/
     http://citylan.dl.sourceforge.net/
-    http://dfn.dl.sourceforge.net/
-    http://fastbull.dl.sourceforge.net/
     http://freefr.dl.sourceforge.net/
     http://garr.dl.sourceforge.net/
     http://heanet.dl.sourceforge.net/
-    http://hivelocity.dl.sourceforge.net/
     http://ignum.dl.sourceforge.net/
     http://internode.dl.sourceforge.net/
     http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
-    http://kent.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
-    http://ncu.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
     http://space.dl.sourceforge.net/
-    http://sunet.dl.sourceforge.net/
-    http://surfnet.dl.sourceforge.net/
+    http://superb-dca2.dl.sourceforge.net/
+    http://superb-dca3.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
+    http://tenet.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
     http://voxel.dl.sourceforge.net/
     http://waix.dl.sourceforge.net/
