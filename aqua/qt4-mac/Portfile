@@ -12,6 +12,7 @@ PortGroup           xcodeversion 1.0
 name                qt4-mac
 conflicts           qt3 qt3-mac qt4-mac-devel
 version             4.8.3
+revision            1
 categories          aqua
 platforms           macosx
 maintainers         michaelld openmaintainer
@@ -334,9 +335,15 @@ post-patch {
 # The build process uses -fconstant-cfstrings.
 # configure.compiler should therefore not be one of the MacPorts compilers.
 
-# http://llvm.org/bugs/show_bug.cgi?id=8971, #30271, #31076, #31638
-compiler.blacklist {macports-clang-2.9}
-if {[vercmp $xcodeversion 4.3] < 0} {
+# Qt4 does not compile with clang 3.0 or older; it also does not work
+# with Apple's clang from XCode 4.4 or older.  Block the clang
+# versions, both from Apple and MacPorts, and that don't meet these
+# requirements.
+#
+# http://llvm.org/bugs/show_bug.cgi?id=8971, # #30271, #31076, #31638
+
+compiler.blacklist { macports-clang-2.9 macports-clang-3.0 }
+if {[vercmp $xcodeversion 4.4] <= 0} {
     compiler.blacklist-append clang
 }
 
@@ -545,11 +552,13 @@ pre-build {
 build.target all
 
 post-destroot {
+
     set destroot_qt ${destroot}${qt_dir}
 
     # Fix .pc and .prl files by changing ${worksrcpath}\${prefix} to
     # ${qt_dir}\${prefix} ("\" means 'take away').  Cannot use
     # "find -E" since it is not necessarily portable.
+
     regsub ${prefix} ${worksrcpath} "" from_dir
     regsub ${prefix} ${qt_dir} "" to_dir
     foreach fixfile [exec find ${destroot_qt} -name "*.pc"] {
@@ -559,18 +568,60 @@ post-destroot {
         reinplace "s|${from_dir}|${to_dir}|g" ${fixfile}
     }
 
-    # remove Libs.private from all pc files
+    # fix .pc files
+
     foreach fixfile [exec find ${destroot_qt} -name "*.pc"] {
+
+        # remove Libs.private; they can mess up linking
+
         reinplace "/Libs\.private/d" ${fixfile}
-    }
 
-    # Fix .pc files to use ${prefix} correctly
-    foreach fixfile [exec find ${destroot_qt} -name "*.pc"] {
+        # use ${prefix} correctly
+
         reinplace "s|${prefix}/|\${prefix}/|g" ${fixfile}
+
+        # fix libdir
+
+        reinplace "/libdir=/s|Library/Frameworks|lib|" ${fixfile}
+
+        # fix Libs: to use -L instead of -F
+
+        reinplace "/Libs:/s|-F|-L|" ${fixfile}
+
+        # fix Libs: to use -lQt* instead of "-framework Qt*"
+        # depends on whether for release or debug
+
+        set fn [lindex [split ${fixfile} /] end]
+
+        if {[lsearch -regexp ${fn} debug] == 0} {
+
+            # debug; need to add that string to all Qt dependency libraries
+            reinplace "/Libs:/s|-framework Qt\\(\[^ \]*\\)|-lQt\\1_debug|" \
+                ${fixfile}
+
+        } else {
+
+            # no debug; just replace
+            reinplace "/Libs:/s|-framework Qt|-lQt|" ${fixfile}
+
+        }
     }
 
-    # remove -L entries from .prl, and .la files; this is a
-    # framework install, not a library install
+    # move .pc files from ${qt_frameworks_dir}/pkgconfig to
+    # ${qt_pkg_config_dir}
+
+    file delete -force ${destroot}${qt_pkg_config_dir}
+    xinstall -m 755 -d ${destroot}${qt_libs_dir}
+    move ${destroot}${qt_frameworks_dir}/pkgconfig \
+        ${destroot}${qt_libs_dir}
+
+    # move .la files from ${qt_frameworks_dir} to ${qt_libs_dir}
+
+    foreach laf [glob ${destroot}/${qt_frameworks_dir}/*.la] {
+        move ${laf} ${destroot}${qt_libs_dir}
+    }
+
+    # remove -L entries from .prl and .la files
 
     foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
         reinplace "/QMAKE_PRL_LIBS/s|-L\[^ \]*||g" ${fixfile}
@@ -579,7 +630,7 @@ post-destroot {
         reinplace "/dependency_libs/s|-L\[^ \]*||g" ${fixfile}
     }
 
-    # remove redundant -F${prefix}/Library/Frameworks entries
+    # remove redundant -F entries from .prl and .la files
 
     foreach fixfile [exec find ${destroot_qt} -name "*.prl"] {
         reinplace "/QMAKE_PRL_LIBS/s|-F\[^ \]*|FREPLACEME|1" \
@@ -595,14 +646,6 @@ post-destroot {
         reinplace "s|FREPLACEME|-F${prefix}/Library/Frameworks|1" \
             ${fixfile}
     }
-
-    # move .pc files from ${qt_frameworks_dir}/pkgconfig to
-    # ${qt_pkg_config_dir}
-
-    file delete -force ${destroot}${qt_pkg_config_dir}
-    xinstall -m 755 -d ${destroot}${qt_libs_dir}
-    move ${destroot}${qt_frameworks_dir}/pkgconfig \
-        ${destroot}${qt_libs_dir}
 
     # get Qt's version numbers
 
@@ -620,6 +663,15 @@ post-destroot {
         set tf_full [strsed ${fixfile} {s@\\.framework@@}]
         set tf [strsed ${tf_full} {g@.*\/@@}]
 
+        # special for QtWebKit entries
+
+        set t_minor ${qt_minor}
+        set is_QtWebKit 0
+        if {[string compare ${tf} QtWebKit] == 0} {
+            set t_minor 9
+            set is_QtWebKit 1
+        }
+
         # link headers into ${qt_includes_dir}, removing directories
         # if they are already there first
 
@@ -629,18 +681,142 @@ post-destroot {
         }
         ln -s ${tf_full}.framework/Headers ${inc_file}
 
-        # link libraries into ${qt_libs_dir}, all 4 number variants as
-        # well as the .prl and .la files
+        # link libraries into ${qt_libs_dir}, all 4 number variants
 
-        set libs_dir ${destroot}${qt_libs_dir}
+        set dr_qt_libs_dir ${destroot}${qt_libs_dir}
 
-        ln -s ${tf_full}.framework/${tf}.prl ${libs_dir}/lib${tf}.prl
-        ln -s ${tf_full}.la ${libs_dir}/lib${tf}.la
-        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.dylib
-        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.dylib
-        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.${qt_minor}.dylib
-        ln -s ${tf_full}.framework/${tf} ${libs_dir}/lib${tf}.${qt_major}.${qt_minor}.${qt_patch}.dylib
+        ln -s ${tf_full}.framework/${tf} ${dr_qt_libs_dir}/lib${tf}.dylib
+        ln -s ${tf_full}.framework/${tf} ${dr_qt_libs_dir}/lib${tf}.${qt_major}.dylib
+        ln -s ${tf_full}.framework/${tf} ${dr_qt_libs_dir}/lib${tf}.${qt_major}.${t_minor}.dylib
+        ln -s ${tf_full}.framework/${tf} ${dr_qt_libs_dir}/lib${tf}.${qt_major}.${t_minor}.${qt_patch}.dylib
 
+        # copy .prl file, then correct it for library usage
+
+        copy ${destroot}${tf_full}.framework/${tf}.prl ${dr_qt_libs_dir}/lib${tf}.prl
+
+        # fix TARGET in .prl file
+
+        reinplace "/QMAKE_PRL_TARGET/s|Qt\\(\[^ \]*\\)|libQt\\1.${qt_major}.${t_minor}.${qt_patch}.dylib|" ${dr_qt_libs_dir}/lib${tf}.prl
+
+        # fix PRL_LIBS -F -> -L in .prl file
+
+        reinplace "/QMAKE_PRL_LIBS/s|-F${qt_frameworks_dir}|-L${qt_libs_dir}|" ${dr_qt_libs_dir}/lib${tf}.prl
+
+        # fix "-framework Qt*" -> "-lQt*" in .prl file
+
+        reinplace "/QMAKE_PRL_LIBS/s|-framework Qt|-lQt|g" \
+            ${dr_qt_libs_dir}/lib${tf}.prl
+
+        # fix up .la files to work with ${prefix}/lib entries
+
+        # rename .la file
+
+        move ${dr_qt_libs_dir}/${tf}.la ${dr_qt_libs_dir}/lib${tf}.la
+
+        # fix "name that we can dlopen" in .la file
+
+        reinplace "s|dlname=''|dlname='lib${tf}.${qt_major}.${t_minor}.${qt_patch}.dylib'|" ${dr_qt_libs_dir}/lib${tf}.la
+
+        # fix "names of this library" in .la file
+
+        reinplace "s|library_names='\[^'\]*'|library_names='lib${tf}.${qt_major}.${t_minor}.${qt_patch}.dylib lib${tf}.${qt_major}.${t_minor}.dylib lib${tf}.${qt_major}.dylib lib${tf}.dylib'|" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+
+        # fix "name of the static archive"; there is none in .la file
+
+        reinplace "s|old_library='\[^'\]*'|old_library=''|" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+
+        # fix "libraries that this one depends upon" in .la file
+
+        reinplace "/dependency_libs/s|-F${qt_frameworks_dir}|-L${qt_libs_dir}|"  ${dr_qt_libs_dir}/lib${tf}.la
+        reinplace "/dependency_libs/s|-framework Qt|-lQt|g" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+        reinplace "/dependency_libs/s| ${worksrcpath}\[^ \]*||g" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+        reinplace "/dependency_libs/s| -lwebcore||" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+        reinplace "/dependency_libs/s| -ljscore||" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+
+        # fix "directory that this library needs to be installed in" in .la file
+
+        reinplace "/libdir/s|${qt_frameworks_dir}|${qt_libs_dir}|" \
+            ${dr_qt_libs_dir}/lib${tf}.la
+
+        # deal with debug files
+
+        if {[variant_isset debug]} {
+
+            # but not if QtWebKit and +universal, since that one does
+            # not exist (the 32-bit version of the debug library is
+            # larger than fits into the 32-bit filespace).
+
+            if {[variant_isset debug] && ${is_QtWebKit}} {
+                continue
+            }
+
+            # link libraries into ${qt_libs_dir}, all 4 number variants
+
+            ln -s ${tf_full}.framework/${tf}_debug ${dr_qt_libs_dir}/lib${tf}_debug.dylib
+            ln -s ${tf_full}.framework/${tf}_debug ${dr_qt_libs_dir}/lib${tf}_debug.${qt_major}.dylib
+            ln -s ${tf_full}.framework/${tf}_debug ${dr_qt_libs_dir}/lib${tf}_debug.${qt_major}.${t_minor}.dylib
+            ln -s ${tf_full}.framework/${tf}_debug ${dr_qt_libs_dir}/lib${tf}_debug.${qt_major}.${t_minor}.${qt_patch}.dylib
+
+            # copy .prl file, then correct it for library usage
+
+            copy ${destroot}${tf_full}.framework/${tf}_debug.prl ${dr_qt_libs_dir}/lib${tf}_debug.prl
+
+            # fix TARGET in .prl file
+
+            reinplace "/QMAKE_PRL_TARGET/s|Qt\\(\[^ \]*\\)|libQt\\1.${qt_major}.${t_minor}.${qt_patch}.dylib|" ${dr_qt_libs_dir}/lib${tf}_debug.prl
+
+            # fix PRL_LIBS -F -> -L in .prl file
+
+            reinplace "/QMAKE_PRL_LIBS/s|-F${qt_frameworks_dir}|-L${qt_libs_dir}|" ${dr_qt_libs_dir}/lib${tf}_debug.prl
+
+            # fix "-framework Qt*" -> "-lQt*_debug" in .prl file
+
+            reinplace "/QMAKE_PRL_LIBS/s|-framework Qt\\(\[^ \]*\\)|-lQt\\1_debug|g" ${dr_qt_libs_dir}/lib${tf}_debug.prl
+
+            # fix up .la files to work with ${prefix}/lib entries
+
+            # rename .la file
+
+            move ${dr_qt_libs_dir}/${tf}_debug.la \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+            # fix "name that we can dlopen" in .la file
+
+            reinplace "s|dlname=''|dlname='lib${tf}_debug.${qt_major}.${t_minor}.${qt_patch}.dylib'|" ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+            # fix "names of this library" in .la file
+
+            reinplace "s|library_names='\[^'\]*'|library_names='lib${tf}_debug.${qt_major}.${t_minor}.${qt_patch}.dylib lib${tf}_debug.${qt_major}.${t_minor}.dylib lib${tf}_debug.${qt_major}.dylib lib${tf}_debug.dylib'|" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+            # fix "name of the static archive"; there is none in .la file
+
+            reinplace "s|old_library='\[^'\]*'|old_library=''|" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+            # fix "libraries that this one depends upon" in .la file
+
+            reinplace "/dependency_libs/s|-F${qt_frameworks_dir}|-L${qt_libs_dir}|" ${dr_qt_libs_dir}/lib${tf}_debug.la
+            reinplace "/dependency_libs/s|-framework Qt\\(\[^ \]*\\)|-lQt\\1_debug|g" ${dr_qt_libs_dir}/lib${tf}_debug.la
+            reinplace "/dependency_libs/s| ${worksrcpath}\[^ \]*||g" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+            reinplace "/dependency_libs/s| -lwebcored||" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+            reinplace "/dependency_libs/s| -ljscored||" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+            # fix "directory that this library needs to be installed in" in .la file
+
+            reinplace "/libdir/s|${qt_frameworks_dir}|${qt_libs_dir}|" \
+                ${dr_qt_libs_dir}/lib${tf}_debug.la
+
+        }
     }
 
     # Install documentation.
@@ -668,9 +844,11 @@ post-destroot {
         move ${app} ${destroot}${qt_apps_dir}
     }
 
-    # remove 'tests' directory
+    # move tests to ${qt_data_dir}
 
-    file delete -force ${destroot}${prefix}/tests
+    xinstall -m 755 -d ${destroot}${qt_data_dir}
+    move ${destroot_qt}/tests/qt4 ${destroot}${qt_data_dir}/tests
+
 }
 
 pre-activate {
@@ -727,10 +905,9 @@ if {${psql_version} != ""} {
     return -code error "Variant disabled"
 }
 
-variant sqlite2 description {Enable SQLite version 2 SQL Driver} {
-    depends_lib-append port:sqlite2
-    configure.args-delete -no-sql-sqlite2
-    configure.args-append -plugin-sql-sqlite2
+variant sqlite2 description {SQLite version 2 SQL Plugin Legacy Compatibility Variant} {
+    ui_error "${name} variant +sqlite2 has been replaced by the port 'qt4-mac-sqlite2-plugin'.  Please install ${name} without +sqlite2, then install this new SQLite version 2 Qt plugin port."
+    return -code error "Variant disabled"
 }
 
 variant raster description {Use raster graphics system by default} {
