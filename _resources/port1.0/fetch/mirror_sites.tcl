@@ -403,10 +403,6 @@ set portfetch::mirror_sites::sites(savannah) {
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirrors.openfountain.cl/savannah/
     http://mirrors.zerg.biz/nongnu/
-    http://mirror.its.uidaho.edu/pub/savannah/
-    ftp://mirror.its.uidaho.edu/savannah/
-    http://piotrkosoft.net/pub/mirrors/savannah.gnu.org/
-    ftp://ftp.piotrkosoft.net/pub/mirrors/savannah.gnu.org/
     http://savannah.c3sl.ufpr.br/
     ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
     http://www.de-mirrors.de/nongnu/
