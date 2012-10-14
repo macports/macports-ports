@@ -102,8 +102,18 @@ proc crossbinutils.setup {target version} {
                 ${worksrcpath}/${dir}/configure
         }
 
-        # Do not install libiberty
-        reinplace {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
+	# Install target-compatible libbfd/libiberty in the target's directory
+	reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
+		${worksrcpath}/bfd/configure                                \
+		${worksrcpath}/opcodes/configure
+	reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
+		${worksrcpath}/bfd/configure                                             \
+		${worksrcpath}/opcodes/configure
+
+	reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
+		${worksrcpath}/libiberty/Makefile.in
+	reinplace "s|\$(MULTIOSDIR)||g" \
+		${worksrcpath}/libiberty/Makefile.in
     }
 
     depends_lib \
@@ -117,7 +127,9 @@ proc crossbinutils.setup {target version} {
 
     configure.args \
         --target=${target} \
-        --program-prefix=${target}-
+        --program-prefix=${target}- \
+        --enable-install-libiberty \
+        --enable-install-libbfd
 
     build.dir ${workpath}/build
 
