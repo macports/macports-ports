@@ -33,7 +33,7 @@
       /* if you malloced the palette, free it here */
 -     free(info_ptr->palette);
 +     if (eight_bit)
-+        png_free(palette);
++        png_free(png_ptr, palette);
  
       /* if you allocated any text comments, free them here */
  
