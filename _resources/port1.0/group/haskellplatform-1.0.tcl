@@ -1,4 +1,4 @@
-# $Id: haskell-1.0.tcl 82262 2011-08-11 20:48:36Z jmr@macports.org $
+# $Id$
 #
 # Copyright (c) 2009-2012 The MacPorts Project
 # All rights reserved.
