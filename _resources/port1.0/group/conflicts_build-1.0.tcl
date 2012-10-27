@@ -47,12 +47,17 @@ default conflicts_build {}
 
 
 proc conflicts_build._check_for_conflicting_ports {} {
-    global conflicts_build name
+    global conflicts_build subport
     foreach badport ${conflicts_build} {
         if {![catch "registry_active ${badport}"]} {
-            ui_error "${name} cannot be built while ${badport} is active."
-            ui_error "Please deactivate ${badport} and try again."
-            ui_error "You can reactivate ${badport} again later."
+            if {${subport} == ${badport}} {
+                ui_error "${subport} cannot be built while another version of ${badport} is active."
+                ui_error "Please deactivate the existing copy of ${badport} and try again."
+            } else {
+                ui_error "${subport} cannot be built while ${badport} is active."
+                ui_error "Please deactivate ${badport} and try again."
+                ui_error "You can reactivate ${badport} again later."
+            }
             return -code error "${badport} is active"
         }
     }
