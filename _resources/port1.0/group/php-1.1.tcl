@@ -342,13 +342,41 @@ options php.suffix
 default php.suffix              {[php.suffix_from_branch ${php.branch}]}
 
 
+# php._first_version: keep track of the first version line in the port.
+
+global php._first_version
+option_proc version             php._set_version
+
+proc php._set_version {option action args} {
+    if {"set" != ${action}} {
+        return
+    }
+
+    global php._first_version
+
+    if {![info exists php._first_version]} {
+        set php._first_version [option ${option}]
+    }
+}
+
+
+# If a subport has not changed the version, disable livecheck.
+
+pre-livecheck {
+    global name subport version php._first_version
+    if {${name} != ${subport} && ${version} == ${php._first_version}} {
+        livecheck.type          none
+    }
+}
+
+
 # php.add_port_code: adds the code to the port or subport to do the actual
 # building. For normal extension ports, the portgroup automatically calls this
 # for you when appropriate; the php port's extension subports are a special case
 # and call it manually.
 
 proc php.add_port_code {} {
-    global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname php._bundled
+    global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname
     global destroot name subport version
 
     # Set up distfiles default for non-bundled extensions.
