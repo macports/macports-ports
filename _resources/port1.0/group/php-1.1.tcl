@@ -364,7 +364,7 @@ proc php._set_version {option action args} {
 
 pre-livecheck {
     global name subport version php._first_version
-    if {${name} != ${subport} && ${version} == ${php._first_version}} {
+    if {${name} != ${subport} && ${name} != "php" && ${version} == ${php._first_version}} {
         livecheck.type          none
     }
 }
