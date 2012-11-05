@@ -54,7 +54,7 @@ archive_sites
 distfiles
 
 pre-configure {
-    ui_error "${name} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
+    ui_error "${subport} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
     return -code error "obsolete port"
 }
 
