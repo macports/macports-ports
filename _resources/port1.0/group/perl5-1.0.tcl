@@ -1,6 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
-# perl5-1.0.tcl
-#
 # $Id$
 #
 # Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>,
@@ -35,7 +33,7 @@
 #
 
 # portfile configuration options
-# perl5.branches: the major perl version supported by this module. A
+# perl5.branches: the major perl versions supported by this module. A
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
@@ -152,8 +150,8 @@ proc perl5.setup {module vers {cpandir ""}} {
         configure.pre_args  Makefile.PL
         default configure.args {"INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\""}
 
-        # CCFLAGS can be passed in to "configure" but it's not necessarilary inherited
-        # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how)
+        # CCFLAGS can be passed in to "configure" but it's not necessarily inherited.
+        # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how).
         post-configure {
             system "find ${worksrcpath} -name Makefile -type f -print0 | xargs -0 /usr/bin/sed -i \"\" '/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/' \;"
             system "find ${worksrcpath} -name Makefile -type f -print0 | xargs -0 /usr/bin/sed -i \"\" '/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/'"
@@ -185,7 +183,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","[quotemeta ${perl5.module}]-(\[^"\]+?)\"
 }
 
-# Switch from default MakeMaker-style routine to Module::Build-style
+# Switch from default MakeMaker-style routine to Module::Build-style.
 proc perl5.use_module_build {} {
     global perl5.bin destroot perl5.major
 
@@ -211,7 +209,7 @@ proc perl5.use_module_build {} {
     destroot.destdir    destdir=${destroot}
 }
 
-# convert a floating point version to an dotted-integer one
+# Convert a floating-point version to a dotted-integer one.
 proc perl5_convert_version {vers} {
     set index [string first . $vers]
     set other_dot [string first . [string range $vers [expr $index + 1] end]]
