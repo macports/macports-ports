@@ -56,17 +56,17 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -Wno-dev
 
 platform darwin {
-pre-configure {
+    pre-configure {
         if {![variant_isset universal] || ![variant_exists universal]} {
-        configure.args-append \
-            -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
-    }
-    configure.universal_args-append \
-        -DCMAKE_OSX_ARCHITECTURES=\"[join ${configure.universal_archs} \;]\"
-    if {${configure.sdkroot} != ""} {
-        configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
-    } else {
-        configure.args-append -DCMAKE_OSX_SYSROOT=/
+            configure.args-append \
+                -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
+        }
+        configure.universal_args-append \
+            -DCMAKE_OSX_ARCHITECTURES=\"[join ${configure.universal_archs} \;]\"
+        if {${configure.sdkroot} != ""} {
+            configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
+        } else {
+            configure.args-append -DCMAKE_OSX_SYSROOT=/
         }
     }
 }
