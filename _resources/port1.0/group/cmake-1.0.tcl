@@ -1,8 +1,8 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 # $Id$
-
+#
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
-# Copyright (c) 2010 The MacPorts Project
+# Copyright (c) 2010-2012 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -55,8 +55,9 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -Wno-dev
 
+platform darwin {
 pre-configure {
-    if {${os.platform} == "darwin" && (![variant_isset universal] || ![variant_exists universal])} {
+        if {![variant_isset universal] || ![variant_exists universal]} {
         configure.args-append \
             -DCMAKE_OSX_ARCHITECTURES=\"${configure.build_arch}\"
     }
@@ -66,6 +67,7 @@ pre-configure {
         configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
     } else {
         configure.args-append -DCMAKE_OSX_SYSROOT=/
+        }
     }
 }
 
