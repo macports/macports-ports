@@ -58,8 +58,15 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
 platform darwin {
     pre-configure {
         if {[variant_exists universal] && [variant_isset universal]} {
-            configure.universal_args-append \
-                -DCMAKE_OSX_ARCHITECTURES="[join ${configure.universal_archs} \;]"
+            if {[info exists universal_archs_supported]} {
+                global merger_configure_args
+                foreach arch ${universal_archs_to_use} {
+                    lappend merger_configure_args(${arch}) -DCMAKE_OSX_ARCHITECTURES=${arch}
+                }
+            } else {
+                configure.universal_args-append \
+                    -DCMAKE_OSX_ARCHITECTURES="[join ${configure.universal_archs} \;]"
+            }
         } else {
             configure.args-append \
                 -DCMAKE_OSX_ARCHITECTURES="${configure.build_arch}"
