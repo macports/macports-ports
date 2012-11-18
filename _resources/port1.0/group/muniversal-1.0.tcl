@@ -1,9 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# muniversal-1.0.tcl
-#
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project,
+# Copyright (c) 2009-2012 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -428,14 +426,14 @@ variant universal {
             xinstall -d -m 0755 ${dir}
 
             foreach fl [glob -directory ${dir2} -tails -nocomplain *] {
-                if { ![file exists ${dir1}/${fl}] } {
+                if { ![muniversal_file_or_symlink_exists ${dir1}/${fl}] } {
                     # File only exists in ${dir1}
                     ui_debug "universal: merge: ${prefixDir}/${fl} only exists in ${base2}"
                     copy ${dir2}/${fl} ${dir}
                 }
             }
             foreach fl [glob -directory ${dir1} -tails -nocomplain *] {
-                if { ![file exists ${dir2}/${fl}] } {
+                if { ![muniversal_file_or_symlink_exists ${dir2}/${fl}] } {
                     # File only exists in ${dir2}
                     ui_debug "universal: merge: ${prefixDir}/${fl} only exists in ${base1}"
                     copy ${dir1}/${fl} ${dir}
@@ -651,4 +649,16 @@ variant universal {
             }
         }
     }
+}
+
+# [muniversal_file_or_symlink_exists ${f}] tells you if ${f} exists. And unlike
+# [file exists ${f}], if used on a symlink, [muniversal_file_or_symlink_exists ${f}]
+# tells you about the symlink, not what it points to.
+proc muniversal_file_or_symlink_exists {f} {
+    # If [file type ${f}] throws an error, ${f} doesn't exist.
+    if {[catch {file type ${f}}]} {
+        return 0
+    }
+    # Otherwise, it does.
+    return 1
 }
