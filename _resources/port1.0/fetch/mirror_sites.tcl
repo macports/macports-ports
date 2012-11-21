@@ -423,7 +423,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://jaist.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
-    http://space.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-dca3.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
