@@ -7,6 +7,9 @@
 		6*|7*)
 			export CPPFLAGS="$CPPFLAGS -DHAVE_SYS_EXEC_H=1"
 			;; 
+                10.8)
+                        export CXXFLAGS="$CXXFLAGS -D_IPP_PRIVATE_STRUCTURES=1"
+                        ;;
 	esac
 
 	export CPPFLAGS="-I/usr/include/gssapi $CPPFLAGS"
