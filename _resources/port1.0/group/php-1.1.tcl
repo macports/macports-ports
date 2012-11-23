@@ -126,12 +126,22 @@ proc php._set_name {option action args} {
 }
 
 
-# php.default_branch: the branch of PHP which should be installed if the user
-# installs the stub port. The default is the largest value in php.branches and
-# most ports should not need to change this.
+# php.latest_stable_branch: the latest stable branch of PHP in the php port.
+# Ports should not change this. It should be changed here in this portgroup
+# when the php port is updated.
+
+options php.latest_stable_branch
+default php.latest_stable_branch 5.4
+
+
+# php.default_branch: the branch of PHP for which the port should be installed
+# (i.e. the subport on which a dependency will be declared) if the user
+# installs the stub port. The default is the latest stable branch, if the port
+# supports it, or otherwise the latest listed in ${php.branches}. Ports should
+# not need to change this.
 
 options php.default_branch
-default php.default_branch      {[lindex ${php.branches} end]}
+default php.default_branch      {[expr {[lsearch -exact ${php.branches} ${php.latest_stable_branch}] != -1 ? ${php.latest_stable_branch} : [lindex ${php.branches} end]}]}
 option_proc php.default_branch  php._set_default_branch
 
 proc php._set_default_branch {option action args} {
