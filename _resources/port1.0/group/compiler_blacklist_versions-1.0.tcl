@@ -49,7 +49,7 @@
 #
 # Known limitations:
 #
-# Trying to remove an enhanced compiler.blacklist specifications will not work
+# Trying to remove an enhanced compiler.blacklist specification will not work
 # (it will silently do nothing):
 # compiler.blacklist-delete {clang >= 421.11.66}
 # Workaround:
@@ -98,6 +98,10 @@ proc compiler_blacklist_versions._version_matches {compiler comparison_operator 
 }
 
 proc compiler_blacklist_versions._get_compiler_version {compiler} {
+    global compiler_blacklist_versions._compiler_versions
+    if {[info exists compiler_blacklist_versions._compiler_versions(${compiler})]} {
+        return [set compiler_blacklist_versions._compiler_versions(${compiler})]
+    }
     switch ${compiler} {
         clang {
             set re {clang-([0-9.]+)}
@@ -118,5 +122,6 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
     if {![info exists compiler_version]} {
         return -code error "couldn't determine build number of compiler “${compiler}”"
     }
+    set compiler_blacklist_versions._compiler_versions(${compiler}) ${compiler_version}
     return ${compiler_version}
 }
