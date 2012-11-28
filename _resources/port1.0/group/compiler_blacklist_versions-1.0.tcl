@@ -69,7 +69,7 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
             set comparisons [lrange ${blacklist} 1 end]
             set compiler_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
             if {[compiler_blacklist_versions._matches_all_versions ${compiler} ${comparisons}]} {
-                ui_debug "${compiler} ${compiler_version} blacklisted because matches ${blacklist}"
+                ui_debug "${compiler} ${compiler_version} blacklisted because matches {${blacklist}}"
                 compiler.blacklist-append ${compiler}
             } else {
                 ui_debug "${compiler} ${compiler_version} not blacklisted because does not match {${blacklist}}"
