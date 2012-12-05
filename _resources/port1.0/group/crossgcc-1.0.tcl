@@ -69,6 +69,7 @@ proc crossgcc.setup {target version} {
         master_sites    gnu:gcc/gcc-${version}/:gcc \
                                                 ftp://ftp.gnu.org/pub/gnu/gcc/gcc-${version}
 
+        dist_subdir     gcc
         distfiles       ${dcore}:gcc \
                         ${dcxx}:gcc \
                         ${dobjc}:gcc
