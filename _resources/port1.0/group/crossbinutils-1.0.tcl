@@ -117,7 +117,8 @@ proc crossbinutils.setup {target version} {
     }
 
     depends_lib \
-        port:gettext
+        port:gettext \
+        port:zlib
 
     configure.dir   ${workpath}/build
     configure.cmd   ${worksrcpath}/configure
