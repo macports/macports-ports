@@ -137,8 +137,32 @@ proc active_variants {name required {forbidden {}}} {
 	return 1
 }
 
+proc _variant_in_variant_list {needle haystack} {
+	foreach variant $haystack {
+		if {$variant == $needle} {
+			return 1
+		}
+	}
+	return 0
+}
+
+# global list holding all items the should be checked for and cause an error if
+# not present
+set _require_active_variants_list [list]
+
 proc require_active_variants {name required {forbidden {}}} {
-	pre-configure {
+	global _require_active_variants_list
+	lappend _require_active_variants_list [list $name $required $forbidden]
+}
+
+# function to be called in pre-configure to check for all items added using
+# require_active_variants
+proc _check_require_active_variants {} {
+	global _require_active_variants_list
+	foreach _require_active_variant $_require_active_variants_list {
+		set name [lindex $_require_active_variant 0]
+		set required [lindex $_require_active_variant 1]
+		set forbidden [lindex $_require_active_variant 2]
 		if {[catch {set result [active_variants $name $required $forbidden]}] != 0} {
 			error "$name is required, but not active."
 		}
@@ -160,11 +184,7 @@ proc require_active_variants {name required {forbidden {}}} {
 	}
 }
 
-proc _variant_in_variant_list {needle haystack} {
-	foreach variant $haystack {
-		if {$variant == $needle} {
-			return 1
-		}
-	}
-	return 0
+# register pre-configure handler that checks for all requested variants
+pre-configure {
+	_check_require_active_variants
 }
