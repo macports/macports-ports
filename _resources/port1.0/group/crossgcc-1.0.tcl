@@ -37,10 +37,17 @@
 #   PortGroup           crossgcc 1.0
 #
 #   crossgcc.setup      arm-none-eabi 4.6.1
-#   # Optional
+#
+#   # Optional: libc support
 #   crossgcc.setup_libc newlib 1.19.0
+#
+#   # Optional: additional language support (e.g. Objective-C/Objective-C++)
+#   crossgcc.languages-append objc obj-c++
 
-options crossgcc.target
+options crossgcc.target \
+        crossgcc.languages
+
+default crossgcc.languages {{c c++}}
 
 proc crossgcc.setup {target version} {
     global crossgcc.target crossgcc.version
@@ -145,7 +152,6 @@ proc crossgcc.setup {target version} {
         configure.dir   ${workpath}/build
         configure.cmd   ${worksrcpath}/configure
         configure.args  --target=${crossgcc.target} \
-                        --enable-languages="c,objc,c++,obj-c++" \
                         --infodir=${prefix}/share/info \
                         --mandir=${prefix}/share/man \
                         --datarootdir=${prefix}/share/${name} \
@@ -155,6 +161,12 @@ proc crossgcc.setup {target version} {
                         --with-mpc=${prefix} \
                         --enable-stage1-checking \
                         --enable-multilib
+
+        # The Portfile may modify crossgcc.languages, thus, evaluate the option
+        # late in this pre-configure phase
+        pre-configure {
+            configure.args-append --enable-languages="[join ${crossgcc.languages} ","]"
+        }
 
         configure.env-append \
             AR_FOR_TARGET=${crossgcc.target}-ar \
