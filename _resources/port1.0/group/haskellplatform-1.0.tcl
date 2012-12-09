@@ -51,7 +51,7 @@ proc haskellplatform.setup {package version {register_scripts "yes"}} {
     homepage            http://hackage.haskell.org/package/${package}
     master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
     distname            ${package}-${version}
-    depends_lib         port:hs-platform-ghc
+    depends_lib         port:ghc
     configure.args      Setup configure \
                         --prefix=${prefix} \
                         --with-compiler=${prefix}/bin/ghc \
