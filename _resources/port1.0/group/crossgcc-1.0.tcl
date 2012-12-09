@@ -60,20 +60,13 @@ proc crossgcc.setup {target version} {
         long_description \
             The GNU compiler collection, including front ends for C, C++, Objective-C \
             and Objective-C++ for cross development for ${crossgcc.target}.
+
         homepage        http://gcc.gnu.org/
-
-        set dcore       gcc-core-${version}.tar.bz2
-        set dcxx        gcc-g++-${version}.tar.bz2
-        set dobjc       gcc-objc-${version}.tar.bz2
-
-        master_sites    gnu:gcc/gcc-${version}/:gcc \
-                        ftp://ftp.gnu.org/pub/gnu/gcc/gcc-${version}
+        master_sites    gnu:gcc/gcc-${version}/:gcc
+        use_bzip2       yes
 
         dist_subdir     gcc
-        distfiles       ${dcore}:gcc \
-                        ${dcxx}:gcc \
-                        ${dobjc}:gcc
-        use_bzip2       yes
+        distfiles       gcc-${version}.tar.bz2:gcc
 
         worksrcdir      gcc-${version}
 
@@ -85,9 +78,9 @@ proc crossgcc.setup {target version} {
 
         depends_build   port:gettext
 
-        # Extract gcc distfiles only. newlib tarball is available as gzip only;
+        # Extract gcc distfiles only. libc tarball might be available as gzip only;
         # handled below in post-extract in the variant.
-        extract.only    ${dcore} ${dcxx} ${dobjc}
+        extract.only    gcc-${version}.tar.bz2
 
         # Build in a different directory, as advised in the README file.
         post-extract {
@@ -172,16 +165,16 @@ proc crossgcc.setup {target version} {
             STRIP_FOR_TARGET=${crossgcc.target}-strip
 
         # http://trac.macports.org/ticket/29104
-        if {${configure.compiler} == "llvm-gcc-4.2"} {
-            configure.compiler clang
+        # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
+        if {[vercmp ${xcodeversion} 4.3] < 0} {
+            compiler.blacklist llvm-gcc-4.2
         }
 
         universal_variant no
 
-        #GCC suports parallel building
-        use_parallel_build yes
         build.dir               ${workpath}/build
 
+        # this port installs files to ${prefix}/${crossgcc.target}
         destroot.violate_mtree yes
 
         pre-destroot {
