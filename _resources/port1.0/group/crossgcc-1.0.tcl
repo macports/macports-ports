@@ -74,7 +74,8 @@ proc crossgcc.setup {target version} {
                         port:gmp \
                         port:mpfr \
                         port:libiconv \
-                        port:libmpc
+                        port:libmpc \
+                        port:zlib
 
         depends_build   port:gettext
 
