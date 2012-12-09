@@ -178,15 +178,15 @@ proc crossgcc.setup {target version} {
         destroot.violate_mtree yes
 
         pre-destroot {
-                # gcc needs the cross directory structure to be present
-                # in order to fill it during installation.
-                file mkdir "${destroot}/${prefix}/${crossgcc.target}/bin"
-                file mkdir "${destroot}/${prefix}/${crossgcc.target}/lib"
+            # gcc needs the cross directory structure to be present
+            # in order to fill it during installation.
+            file mkdir "${destroot}/${prefix}/${crossgcc.target}/bin"
+            file mkdir "${destroot}/${prefix}/${crossgcc.target}/lib"
         }
 
         post-destroot {
-                # FSF propaganda (should already be there or would conflict)
-                file delete -force "${destroot}/${prefix}/share/man/man7"
+            # FSF propaganda (should already be there or would conflict)
+            file delete -force "${destroot}/${prefix}/share/man/man7"
         }
 
         livecheck.type  regex
