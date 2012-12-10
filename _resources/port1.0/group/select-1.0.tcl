@@ -40,16 +40,21 @@ default select.file ""
 
 namespace eval select {}
 
-proc select::install {group file} {
+proc select::install {group file {name ""}} {
     global prefix destroot frameworks_dir applications_dir developer_dir
 
-    xinstall -m 755 -d ${destroot}${prefix}/etc/select/${group}
-    xinstall -m 644 ${file} ${destroot}${prefix}/etc/select/${group}
+    # Optional argument specifies file name
+    if {${name} == ""} {
+        set name [file tail ${file}]
+    }
 
-    reinplace s|\${prefix}|${prefix}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
-    reinplace s|\${frameworks_dir}|${frameworks_dir}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
-    reinplace s|\${applications_dir}|${applications_dir}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
-    reinplace s|\${developer_dir}|${developer_dir}|g ${destroot}${prefix}/etc/select/${group}/[file tail ${file}]
+    xinstall -m 755 -d ${destroot}${prefix}/etc/select/${group}
+    xinstall -m 644 ${file} ${destroot}${prefix}/etc/select/${group}/${name}
+
+    reinplace s|\${prefix}|${prefix}|g ${destroot}${prefix}/etc/select/${group}/${name}
+    reinplace s|\${frameworks_dir}|${frameworks_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
+    reinplace s|\${applications_dir}|${applications_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
+    reinplace s|\${developer_dir}|${developer_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
 }
 
 post-destroot {
