@@ -22,7 +22,7 @@
 -                        opts.designer_plugin = False
  
 -                    link = "%s -lpython%d.%d%s" % (lib_dir_flag, py_major, py_minor, abi)
-+                    link = "%s /opt/local/Library/Frameworks/Python.framework/Versions/2.7/Python" % sipcfg.build_macros().get('LFLAGS', '')
++                    link = "%s @@MACPORTS_PYTHON_FRAMEWORK@@" % sipcfg.build_macros().get('LFLAGS', '')
 +
                  else:
                      sipconfig.inform("Qt Designer plugin disabled because Python library is static")
