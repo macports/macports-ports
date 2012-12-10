@@ -1,5 +1,5 @@
---- BuildSupport.py.FCS	2010-11-12 09:35:52.000000000 -0800
-+++ BuildSupport.py	2011-08-09 10:06:05.000000000 -0700
+--- BuildSupport.py.orig	2012-02-04 11:37:22.000000000 -0600
++++ BuildSupport.py	2012-11-04 05:02:45.000000000 -0600
 @@ -70,19 +70,15 @@
  # ------------------------------------------------------------------------------
  
@@ -24,12 +24,16 @@
      "linux2" : { arch32 : ["/usr/local/lib"],
                   arch64 : ["/usr/local64/lib"]}
  }
-@@ -213,17 +209,10 @@
+@@ -214,6 +210,8 @@
+         env.Append(LIBS = [Site.boostThreadLib])
+     else:
+         env.Append(LIBS = ["boost_thread-mt"])
++    # Boost system
++    env.Append(LIBS = ["boost_system-mt"])
+     # Compile flags
      if isDebugBuild():
          env.Append(CCFLAGS = ["-g"])
-     else:
--        env.Append(CCFLAGS = ["-O3"])
-+        env.Append(CCFLAGS = ["-g", "-O3"])
+@@ -222,13 +220,6 @@
      env.Append(CCFLAGS = ["-Wall"])
      # Set number of jobs to use
      env.SetOption('num_jobs', numCPUs())
@@ -40,6 +44,6 @@
 -    else:
 -        env.Append(CCFLAGS = ["-m32"])
 -        env.Append(LINKFLAGS = ["-m32"])
- 
- # ------------------------------------------------------------------------------
- 
+     # Prettify SCons output
+     if ARGUMENTS.get("verbose", 0) != "1":
+         env["ARCOMSTR"] = "AR $TARGET"
