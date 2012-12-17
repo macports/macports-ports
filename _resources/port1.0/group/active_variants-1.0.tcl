@@ -31,7 +31,7 @@
 #
 # Usage:
 # PortGroup       active_variants 1.0
-# if {[catch {set result [active_variants $name $required $forbidden]}]} {
+# if {![catch {set result [active_variants $name $required $forbidden]}]} {
 #   if {$result} {
 #     # code to be executed if $name is active with at least all variants in
 #     # $required and none from $forbidden
