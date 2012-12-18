@@ -43,12 +43,13 @@ options github.homepage github.raw github.master_sites github.tarball_from
 default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.github.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
-default github.tarball_from {tags}
 
 default master_sites {${github.master_sites}}
 
+# The ability to host downloads on github is going away
+# https://github.com/blog/1302-goodbye-uploads
+default github.tarball_from {tags}
 option_proc github.tarball_from handle_tarball_from
-
 proc handle_tarball_from {option action args} {
     global github.author github.project github.master_sites
 
