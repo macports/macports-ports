@@ -1,0 +1,153 @@
+From 4a8df7a33c298d22bf78b947d0e861fc03ec70e1 Mon Sep 17 00:00:00 2001
+From: Michael Natterer <mitch@lanedo.com>
+Date: Fri, 07 Dec 2012 11:19:52 +0000
+Subject: quartz: fix crash in the recent clipboard "fix", and really fix it
+
+We must not release the GtkClipboardOwner in pasteboardChangedOwner
+becaue we don't own a reference to ourselves (NSPasteboard does).
+Instead, release the owner right after setting it, transferring
+ownership to NSPasteboard
+
+Also, fix repeated setting of the same owner by keeping the
+owner around in GtkCLipboard, and re-use it if "user_data"
+doesn't change. To avoid clipboard_unset()ting our own contents
+in the process, add an ugly "setting_same_owner" boolean to
+GtkClipboardOwner, set it during re-setting the same owner,
+and avoid calling clipboard_unset() from pasteboardChangedOwner
+if it's TRUE.
+---
+(limited to 'gtk/gtkclipboard-quartz.c')
+
+diff --git gtk/gtkclipboard-quartz.c gtk/gtkclipboard-quartz.c
+index 743f037..14b0974 100644
+--- gtk/gtkclipboard-quartz.c
++++ gtk/gtkclipboard-quartz.c
+@@ -39,6 +39,14 @@ enum {
+   LAST_SIGNAL
+ };
+ 
++@interface GtkClipboardOwner : NSObject {
++  GtkClipboard *clipboard;
++  @public
++  gboolean setting_same_owner;
++}
++
++@end
++
+ typedef struct _GtkClipboardClass GtkClipboardClass;
+ 
+ struct _GtkClipboard 
+@@ -46,6 +54,7 @@ struct _GtkClipboard
+   GObject parent_instance;
+ 
+   NSPasteboard *pasteboard;
++  GtkClipboardOwner *owner;
+   NSInteger change_count;
+ 
+   GdkAtom selection;
+@@ -88,12 +96,6 @@ static GtkClipboard *clipboard_peek       (GdkDisplay       *display,
+ 					   GdkAtom           selection,
+ 					   gboolean          only_if_exists);
+ 
+-@interface GtkClipboardOwner : NSObject {
+-  GtkClipboard *clipboard;
+-}
+-
+-@end
+-
+ @implementation GtkClipboardOwner
+ -(void)pasteboard:(NSPasteboard *)sender provideDataForType:(NSString *)type
+ {
+@@ -132,9 +135,8 @@ static GtkClipboard *clipboard_peek       (GdkDisplay       *display,
+  */
+ - (void)pasteboardChangedOwner:(NSPasteboard *)sender
+ {
+-  clipboard_unset (clipboard);
+-
+-  [self release];
++  if (! setting_same_owner)
++    clipboard_unset (clipboard);
+ }
+ 
+ - (id)initWithClipboard:(GtkClipboard *)aClipboard
+@@ -144,6 +146,7 @@ static GtkClipboard *clipboard_peek       (GdkDisplay       *display,
+   if (self) 
+     {
+       clipboard = aClipboard;
++      setting_same_owner = FALSE;
+     }
+ 
+   return self;
+@@ -334,10 +337,6 @@ gtk_clipboard_set_contents (GtkClipboard         *clipboard,
+   NSSet *types;
+   NSAutoreleasePool *pool;
+ 
+-  pool = [[NSAutoreleasePool alloc] init];
+-
+-  owner = [[GtkClipboardOwner alloc] initWithClipboard:clipboard];
+-
+   if (!(clipboard->have_owner && have_owner) ||
+       clipboard->user_data != user_data)
+     {
+@@ -352,26 +351,44 @@ gtk_clipboard_set_contents (GtkClipboard         *clipboard,
+               clipboard->user_data != user_data)
+             {
+               (*clear_func) (clipboard, user_data);
+-              [pool release];
+               return FALSE;
+             }
+           else
+             {
+-              [pool release];
+               return TRUE;
+             }
+         }
+     }
+ 
++  pool = [[NSAutoreleasePool alloc] init];
++
++  types = _gtk_quartz_target_entries_to_pasteboard_types (targets, n_targets);
++
+   /*  call declareTypes before setting the clipboard members because
+    *  declareTypes might clear the clipboard
+    */
+-  types = _gtk_quartz_target_entries_to_pasteboard_types (targets, n_targets);
+-  clipboard->change_count = [clipboard->pasteboard declareTypes: [types allObjects]
+-                                                          owner: owner];
++  if (user_data && user_data == clipboard->user_data)
++    {
++      owner = [clipboard->owner retain];
++
++      owner->setting_same_owner = TRUE;
++      clipboard->change_count = [clipboard->pasteboard declareTypes: [types allObjects]
++                                                              owner: owner];
++      owner->setting_same_owner = FALSE;
++    }
++  else
++    {
++      owner = [[GtkClipboardOwner alloc] initWithClipboard:clipboard];
++
++      clipboard->change_count = [clipboard->pasteboard declareTypes: [types allObjects]
++                                                              owner: owner];
++    }
++
++  [owner release];
+   [types release];
+   [pool release];
+ 
++  clipboard->owner = owner;
+   clipboard->user_data = user_data;
+   clipboard->have_owner = have_owner;
+   if (have_owner)
+@@ -460,7 +477,8 @@ clipboard_unset (GtkClipboard *clipboard)
+   clipboard->n_storable_targets = -1;
+   g_free (clipboard->storable_targets);
+   clipboard->storable_targets = NULL;
+-      
++
++  clipboard->owner = NULL;
+   clipboard->get_func = NULL;
+   clipboard->clear_func = NULL;
+   clipboard->user_data = NULL;
+--
+cgit v0.9.0.2
