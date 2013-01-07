@@ -40,15 +40,15 @@
 # inform users that they should uninstall it and install something else
 # instead; you might want to override some of the defaults though.
 
-default platforms   darwin
-default maintainers nomaintainer
+platforms   darwin
+maintainers nomaintainer
 supported_archs     noarch
 
-description         this port is only a stub and has been made obsolete by ${replaced_by}
+default description     {this port is only a stub and has been made obsolete by ${replaced_by}}
 
-long_description    ${description}
+default long_description    {${description}}
 
-default homepage    http://www.macports.org/
+homepage    http://www.macports.org/
 
 archive_sites
 distfiles
