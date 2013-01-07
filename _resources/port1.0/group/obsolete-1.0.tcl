@@ -44,9 +44,9 @@ platforms   darwin
 maintainers nomaintainer
 supported_archs     noarch
 
-default description     {this port is only a stub and has been made obsolete by ${replaced_by}}
+description     this port is only a stub and has been made obsolete by ${replaced_by}
 
-default long_description    {${description}}
+default long_description    ${description}
 
 homepage    http://www.macports.org/
 
