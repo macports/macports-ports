@@ -73,6 +73,9 @@ platform darwin {
         }
         if {${configure.sdkroot} != ""} {
             configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
+        } else {
+            # Witout this, cmake will choose an SDK and deployment target on its own.
+            configure.args-append -DCMAKE_OSX_SYSROOT=/ -DCMAKE_OSX_DEPLOYMENT_TARGET=""
         }
     }
 }
