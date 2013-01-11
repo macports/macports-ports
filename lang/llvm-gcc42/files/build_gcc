@@ -178,8 +178,9 @@ fi
 # APPLE LOCAL end ARM
 
 # LLVM LOCAL begin
-# If the user has CC set in their environment unset it now
-unset CC
+RANLIB=${RANLIB_FOR_HOST-ranlib}
+STRIP=${STRIP_FOR_HOST-strip}
+DSYMUTIL=${DSYMUTIL_FOR_HOST-dsymutil}
 # LLVM LOCAL end
 
 ########################################
@@ -197,7 +198,7 @@ rm -rf $SRC_DIR/tcl $SRC_DIR/expect $SRC_DIR/dejagnu || exit 1
 # LLVM LOCAL: The following line was commented out; uncomment it.
 rm -rf $SRC_DIR/libstdc++-v3 || exit 1
 # Clean out old specs files
-rm -f /usr/lib/gcc/*/4.0.0/specs
+#rm -f /usr/lib/gcc/*/4.0.0/specs
 
 # These are the configure and build flags that are used.
 # LLVM LOCAL begin
@@ -211,8 +212,13 @@ CONFIGFLAGS="$CHECKING_FLAGS \
   --prefix=$DEST_ROOT \
   --mandir=\${prefix}/share/man \
   --enable-languages=$LANGUAGES \
+  --libexecdir=$DEST_ROOT/libexec/llvm-gcc42 \
+  --libdir=$DEST_ROOT/lib/llvm-gcc42 \
+  --includedir=$DEST_ROOT/include/llvm-gcc42 \
   --program-prefix=llvm- \
-  --program-transform-name=/^[cg][^.-]*$/s/$/-$MAJ_VERS/ \
+  --program-suffix=-$MAJ_VERS \
+  --with-system-zlib \
+  --disable-nls \
   --with-slibdir=/usr/lib \
   --build=$BUILD-apple-darwin$DARWIN_VERS"
 
@@ -243,6 +249,22 @@ BUILD_CXX=0
 for lang in `echo $LANGUAGES | sed 's/,/ /g'`; do
   if [ $lang = "c++" -o $lang = "obj-c++" ]; then
     BUILD_CXX=1
+    break
+  fi
+done
+
+BUILD_JAVA=0
+for lang in `echo $LANGUAGES | sed 's/,/ /g'`; do
+  if [ $lang = "java" ]; then
+    BUILD_JAVA=1
+    break
+  fi
+done
+
+BUILD_FORTRAN=0
+for lang in `echo $LANGUAGES | sed 's/,/ /g'`; do
+  if [ $lang = "fortran" ]; then
+    BUILD_FORTRAN=1
     break
   fi
 done
@@ -288,7 +310,10 @@ fi
 # comparable to the native built libraries.
 unset RC_DEBUG_OPTIONS
 make $MAKEFLAGS CFLAGS="$CFLAGS" CXXFLAGS="$CFLAGS" || exit 1
-make $MAKEFLAGS html CFLAGS="$CFLAGS" CXXFLAGS="$CFLAGS" || exit 1
+# The version check for makeinfo is broken in all the configure scripts,
+# and building documentation which is already available online isn't worth
+# the effort in fixing it
+#make $MAKEFLAGS html CFLAGS="$CFLAGS" CXXFLAGS="$CFLAGS" || exit 1
 make $MAKEFLAGS DESTDIR=$DIR/dst-$BUILD-$BUILD install-gcc install-target \
   CFLAGS="$CFLAGS" CXXFLAGS="$CFLAGS" || exit 1
 
@@ -300,10 +325,13 @@ if [ x$forcedCXX != x ] ; then unset CXX forcedCXX ; fi
 # Add the compiler we just built to the path, giving it appropriate names.
 # LLVM LOCAL begin Support for non /usr $DEST_ROOT
 D=$DIR/dst-$BUILD-$BUILD$DEST_ROOT/bin
-ln -f $D/llvm-gcc $D/gcc || exit 1
+ln -f $D/llvm-gcc-$MAJ_VERS $D/gcc || exit 1
 ln -f $D/gcc $D/$BUILD-apple-darwin$DARWIN_VERS-gcc || exit 1
 PATH=$DIR/dst-$BUILD-$BUILD$DEST_ROOT/bin:$PATH
 # LLVM LOCAL end Support for non /usr $DEST_ROOT
+
+# Set CC to our bootstrap CC
+export CC=$D/gcc
 
 # The cross-tools' build process expects to find certain programs
 # under names like 'i386-apple-darwin$DARWIN_VERS-ar'; so make them.
@@ -405,7 +433,7 @@ done
 for t in $CROSS_TARGETS ; do
   DT=$DIR/dst-$BUILD-$t
   # LLVM LOCAL Support for non /usr $DEST_ROOT
-  D=`echo $DT/$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS`
+  D=`echo $DT/$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS`
   mv $D/static/libgcc.a $D/libgcc_static.a || exit 1
   mv $D/kext/libgcc.a $D/libcc_kext.a || exit 1
   rm -r $D/static $D/kext || exit 1
@@ -441,6 +469,12 @@ for h in $HOSTS ; do
         else
           T_CONFIGFLAGS="$T_CONFIGFLAGS $NON_ARM_CONFIGFLAGS"
         fi
+
+        # http://trac.macports.org/ticket/31603
+        if [ $h = "i686" ] && [ $BUILD = "x86_64" ] ; then
+          T_CONFIGFLAGS="$T_CONFIGFLAGS --build=$h-apple-darwin$DARWIN_VERS"
+        fi
+
         $SRC_DIR/configure $T_CONFIGFLAGS || exit 1
 	# APPLE LOCAL end ARM ARM_CONFIGFLAGS
       fi
@@ -504,13 +538,13 @@ cp -Rp $DIR/dst-$BUILD-$BUILD$DEST_ROOT/share/man .$DEST_ROOT/share/ \
 rm -rf .$DEST_ROOT/share/man/man7
 
 # libexec
-cd $DIR/dst-$BUILD-$BUILD$DEST_ROOT/libexec/gcc/$BUILD-apple-darwin$DARWIN_VERS/$VERS \
+cd $DIR/dst-$BUILD-$BUILD$DEST_ROOT/libexec/llvm-gcc42/gcc/$BUILD-apple-darwin$DARWIN_VERS/$VERS \
   || exit 1
 LIBEXEC_FILES=`find . -type f -print || exit 1`
 LIBEXEC_DIRS=`find . -type d -print || exit 1`
 cd $DEST_DIR || exit 1
 for t in $TARGETS ; do
-  DL=$DEST_ROOT/libexec/gcc/$t-apple-darwin$DARWIN_VERS/$VERS
+  DL=$DEST_ROOT/libexec/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS
   for d in $LIBEXEC_DIRS ; do
     mkdir -p .$DL/$d || exit 1
   done
@@ -531,33 +565,35 @@ done
 
 # bin
 # The native drivers ('native' is different in different architectures).
-# LLVM LOCAL begin
+BIN_FILES=`ls $DIR/dst-$BUILD-$BUILD$DEST_ROOT/bin | grep '^[^-]*-apple-[0-9.]*$' \
+  | grep -v gccbug | grep -v gcov || exit 1`
 mkdir .$DEST_ROOT/bin
-cpp_files=`ls $DIR/dst-*$DEST_ROOT/bin/{llvm-cpp,cpp-$MAJ_VERS} 2>/dev/null`
-lipo -output .$DEST_ROOT/bin/llvm-cpp-$MAJ_VERS -create $cpp_files || exit 1
-# LLVM LOCAL end
-
+for f in $BIN_FILES ; do
+  lipo -output .$DEST_ROOT/bin/$f -create $DIR/dst-*$DEST_ROOT/bin/$f || exit 1
+done
 # gcov, which is special only because it gets built multiple times and lipo
 # will complain if we try to add two architectures into the same output.
 TARG0=`echo $TARGETS | cut -d ' ' -f 1`
-lipo -output .$DEST_ROOT/bin/gcov-$MAJ_VERS -create \
+lipo -output .$DEST_ROOT/bin/llvm-gcov-$MAJ_VERS -create \
   $DIR/dst-*-$TARG0$DEST_ROOT/bin/*gcov* || exit 1
 # The fully-named drivers, which have the same target on every host.
 for t in $TARGETS ; do
 # LLVM LOCAL build_gcc bug with non-/usr $DEST_ROOT
   lipo -output .$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS -create \
-    $DIR/dst-*-$t/$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-gcc-$VERS || exit 1
+    $DIR/dst-*-$t/$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-gcc-$MAJ_VERS || exit 1
+  lipo -output .$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-llvm-cpp-$MAJ_VERS -create \
+    $DIR/dst-*-$t$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-cpp-$MAJ_VERS || exit 1
 # LLVM LOCAL build_gcc bug with non-/usr $DEST_ROOT
   lipo -output .$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS -create \
-    $DIR/dst-*-$t/$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-*g++* || exit 1
+    $DIR/dst-*-$t/$DEST_ROOT/bin/$t-apple-darwin$DARWIN_VERS-g++* || exit 1
 done
 
 # lib
-mkdir -p .$DEST_ROOT/lib/gcc || exit 1
+mkdir -p .$DEST_ROOT/lib/llvm-gcc42/gcc || exit 1
 for t in $TARGETS ; do
   # LLVM LOCAL build_gcc bug with non-/usr $DEST_ROOT
-  cp -Rp $DIR/dst-$BUILD-$t/$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS \
-    .$DEST_ROOT/lib/gcc || exit 1
+  cp -Rp $DIR/dst-$BUILD-$t/$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS \
+    .$DEST_ROOT/lib/llvm-gcc42/gcc || exit 1
 done
 
 # APPLE LOCAL begin native compiler support
@@ -569,20 +605,20 @@ LIBGOMP_HOSTS=`echo $HOSTS | $OMIT_X86_64 | sed -E -e 's/(^|[[:space:]])arm($|[[
 for t in $LIBGOMP_TARGETS ; do
     for h in $LIBGOMP_HOSTS ; do
 	if [ $h = $t ] ; then
-	    cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/libgomp.a \
-		.$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ || exit 1
-	    cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/libgomp.spec \
-		.$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ || exit 1
+	    cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/libgomp.a \
+		.$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ || exit 1
+	    cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/libgomp.spec \
+		.$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ || exit 1
 	    if [ $h = 'powerpc' ] ; then
-		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/ppc64/libgomp.a \
-		    .$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ppc64/
-		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/ppc64/libgomp.spec \
-		    .$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ppc64/
+		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/ppc64/libgomp.a \
+		    .$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ppc64/
+		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/ppc64/libgomp.spec \
+		    .$DEST_ROOT/lib/llvm-gcc42/v$t-apple-darwin$DARWIN_VERS/$VERS/ppc64/
 	    elif [ $h = 'i686' ] ; then
-		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/x86_64/libgomp.a \
-		    .$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/x86_64/ || exit 1
-		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/x86_64/libgomp.spec \
-		    .$DEST_ROOT/lib/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/x86_64/ || exit 1
+		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/x86_64/libgomp.a \
+		    .$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/x86_64/ || exit 1
+		cp -p $DIR/dst-$h-$t$DEST_ROOT/lib/llvm-gcc42/x86_64/libgomp.spec \
+		    .$DEST_ROOT/lib/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/x86_64/ || exit 1
 	    fi
 	fi
     done
@@ -593,7 +629,7 @@ done
 
 
 # include
-HEADERPATH=$DEST_ROOT/include/gcc/darwin/$MAJ_VERS
+HEADERPATH=$DEST_ROOT/include/gcc/darwin/llvm-gcc42
 mkdir -p .$HEADERPATH || exit 1
 
 # Some headers are installed from more-hdrs/.  They all share
@@ -608,9 +644,9 @@ for h in `echo *.h` ; do
   if [ ! -f /usr/include/$h -o -L /usr/include/$h ] ; then
     cp -R $h $DEST_DIR$HEADERPATH/$h || exit 1
     for t in $TARGETS ; do
-      THEADERPATH=$DEST_DIR$DEST_ROOT/lib/gcc/${t}-apple-darwin$DARWIN_VERS/$VERS/include
+      THEADERPATH=$DEST_DIR$DEST_ROOT/lib/llvm-gcc42/gcc/${t}-apple-darwin$DARWIN_VERS/$VERS/include
       [ -f $THEADERPATH/$h ] || \
-        ln -s ../../../../../include/gcc/darwin/$MAJ_VERS/$h $THEADERPATH/$h || \
+        ln -s ../../../../../include/gcc/darwin/llvm-gcc42/$h $THEADERPATH/$h || \
         exit 1
     done
   fi
@@ -620,40 +656,40 @@ done
 MDIR=$DEST_DIR$DEST_ROOT/share/man/man1
 if [ $BUILD_CXX -eq 1 ]; then
   # LLVM LOCAL
-  ln -f $MDIR/llvm-g++.1 $MDIR/llvm-c++.1 || exit 1
+  ln -f $MDIR/llvm-g++-4.2.1 $MDIR/llvm-c++-4.2.1 || exit 1
 fi
 for t in $TARGETS ; do
   # LLVM LOCAL begin
-  ln -f $MDIR/llvm-gcc.1 $MDIR/$t-apple-darwin$DARWIN_VERS-llvm-gcc.1 \
+  ln -f $MDIR/llvm-gcc-4.2.1 $MDIR/$t-apple-darwin$DARWIN_VERS-llvm-gcc-4.2.1 \
       || exit 1
   if [ $BUILD_CXX -eq 1 ]; then
-    ln -f $MDIR/llvm-g++.1 $MDIR/$t-apple-darwin$DARWIN_VERS-llvm-g++.1 \
+    ln -f $MDIR/llvm-g++-4.2.1 $MDIR/$t-apple-darwin$DARWIN_VERS-llvm-g++-4.2.1 \
         || exit 1
   fi
   # LLVM LOCAL end
 done
 
 # LLVM LOCAL begin
-if [ "x$RC_ProjectName" = "xllvmgcc42_Embedded" ]; then
-MAN1_DIR=${DEST_DIR}${ARM_PLATFORM}/Developer/usr/share/man/man1
-else
-MAN1_DIR=$DEST_DIR$DEST_ROOT/../share/man/man1
-fi
-mkdir -p ${MAN1_DIR}
-for i in gcc.1 g++.1 cpp.1 gcov.1 ; do
-    cp $DIR/obj-$BUILD-$BUILD/gcc/doc/$i ${MAN1_DIR}/$i
-done
-cp $ORIG_SRC_DIR/gcc/doc/llvm-gcc.1 ${MAN1_DIR}/llvm-gcc.1
-# llvm-g++ manpage is a dup of llvm-gcc manpage
-cp $ORIG_SRC_DIR/gcc/doc/llvm-gcc.1 ${MAN1_DIR}/llvm-g++.1
-# Compress manpages
-gzip -f $MDIR/* ${MAN1_DIR}/*
-# LLVM LOCAL end
+#if [ "x$RC_ProjectName" = "xllvmgcc42_Embedded" ]; then
+#MAN1_DIR=${DEST_DIR}${ARM_PLATFORM}/Developer/usr/share/man/man1
+#else
+#MAN1_DIR=$DEST_DIR$DEST_ROOT/../share/man/man1
+#fi
+#mkdir -p ${MAN1_DIR}
+#for i in gcc.1 g++.1 cpp.1 gcov.1 ; do
+#    cp $DIR/obj-$BUILD-$BUILD/gcc/doc/$i ${MAN1_DIR}/$i
+#done
+#cp $ORIG_SRC_DIR/gcc/doc/llvm-gcc.1 ${MAN1_DIR}/llvm-gcc.1
+## llvm-g++ manpage is a dup of llvm-gcc manpage
+#cp $ORIG_SRC_DIR/gcc/doc/llvm-gcc.1 ${MAN1_DIR}/llvm-g++.1
+## Compress manpages
+#gzip -f $MDIR/* ${MAN1_DIR}/*
+## LLVM LOCAL end
 
 # Build driver-driver using fully-named drivers
 for h in $HOSTS ; do
     # LLVM LOCAL begin
-    $h-apple-darwin$DARWIN_VERS-gcc \
+    $DIR/dst-$BUILD-$h$DEST_ROOT/bin/$h-apple-darwin$DARWIN_VERS-gcc-$VERS \
 	$ORIG_SRC_DIR/driverdriver.c                               \
 	-DPDN="\"-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS\""                                    \
 	-DIL="\"$DEST_ROOT/bin/\"" -I  $ORIG_SRC_DIR/include                   \
@@ -663,8 +699,18 @@ for h in $HOSTS ; do
         -L$DIR/obj-$h-$BUILD/libiberty/                                        \
 	-o $DEST_DIR/$DEST_ROOT/bin/tmp-$h-llvm-gcc-$MAJ_VERS || exit 1
 
+    $DIR/dst-$BUILD-$h$DEST_ROOT/bin/$h-apple-darwin$DARWIN_VERS-gcc-$VERS \
+	$ORIG_SRC_DIR/driverdriver.c                               \
+	-DPDN="\"-apple-darwin$DARWIN_VERS-llvm-cpp-$MAJ_VERS\""                                    \
+	-DIL="\"$DEST_ROOT/bin/\"" -I  $ORIG_SRC_DIR/include                   \
+	-I  $ORIG_SRC_DIR/gcc -I  $ORIG_SRC_DIR/gcc/config                     \
+	-liberty -L$DIR/dst-$BUILD-$h$DEST_ROOT/lib/                           \
+	-L$DIR/dst-$BUILD-$h$DEST_ROOT/$h-apple-darwin$DARWIN_VERS/lib/                    \
+        -L$DIR/obj-$h-$BUILD/libiberty/                                        \
+	-o $DEST_DIR/$DEST_ROOT/bin/tmp-$h-llvm-cpp-$MAJ_VERS || exit 1    
+
     if [ $BUILD_CXX -eq 1 ]; then
-        $h-apple-darwin$DARWIN_VERS-gcc \
+	    $DIR/dst-$BUILD-$h$DEST_ROOT/bin/$h-apple-darwin$DARWIN_VERS-gcc-$VERS \
 	    $ORIG_SRC_DIR/driverdriver.c                               \
 	    -DPDN="\"-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS\""                                    \
 	    -DIL="\"$DEST_ROOT/bin/\"" -I  $ORIG_SRC_DIR/include                   \
@@ -674,6 +720,30 @@ for h in $HOSTS ; do
             -L$DIR/obj-$h-$BUILD/libiberty/                                        \
 	    -o $DEST_DIR/$DEST_ROOT/bin/tmp-$h-llvm-g++-$MAJ_VERS || exit 1
     fi
+
+    if [ $BUILD_JAVA -eq 1 ]; then
+	    $DIR/dst-$BUILD-$h$DEST_ROOT/bin/$h-apple-darwin$DARWIN_VERS-gcc-$VERS \
+	    $ORIG_SRC_DIR/driverdriver.c                               \
+	    -DPDN="\"-apple-darwin$DARWIN_VERS-llvm-gcj-$MAJ_VERS\""                                    \
+	    -DIL="\"$DEST_ROOT/bin/\"" -I  $ORIG_SRC_DIR/include                   \
+	    -I  $ORIG_SRC_DIR/gcc -I  $ORIG_SRC_DIR/gcc/config                     \
+	    -liberty -L$DIR/dst-$BUILD-$h$DEST_ROOT/lib/                           \
+	    -L$DIR/dst-$BUILD-$h$DEST_ROOT/$h-apple-darwin$DARWIN_VERS/lib/                    \
+            -L$DIR/obj-$h-$BUILD/libiberty/                                        \
+	    -o $DEST_DIR/$DEST_ROOT/bin/tmp-$h-llvm-gcj-$MAJ_VERS || exit 1
+    fi
+
+    if [ $BUILD_FORTRAN -eq 1 ]; then
+	    $DIR/dst-$BUILD-$h$DEST_ROOT/bin/$h-apple-darwin$DARWIN_VERS-gcc-$VERS \
+	    $ORIG_SRC_DIR/driverdriver.c                               \
+	    -DPDN="\"-apple-darwin$DARWIN_VERS-llvm-gfortran-$MAJ_VERS\""                                    \
+	    -DIL="\"$DEST_ROOT/bin/\"" -I  $ORIG_SRC_DIR/include                   \
+	    -I  $ORIG_SRC_DIR/gcc -I  $ORIG_SRC_DIR/gcc/config                     \
+	    -liberty -L$DIR/dst-$BUILD-$h$DEST_ROOT/lib/                           \
+	    -L$DIR/dst-$BUILD-$h$DEST_ROOT/$h-apple-darwin$DARWIN_VERS/lib/                    \
+            -L$DIR/obj-$h-$BUILD/libiberty/                                        \
+	    -o $DEST_DIR/$DEST_ROOT/bin/tmp-$h-llvm-gfortran-$MAJ_VERS || exit 1
+    fi
     # LLVM LOCAL end
 done
 
@@ -682,11 +752,27 @@ lipo -output $DEST_DIR/$DEST_ROOT/bin/llvm-gcc-$MAJ_VERS -create \
   $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-gcc-$MAJ_VERS || exit 1
 rm $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-gcc-$MAJ_VERS || exit 1
 
+lipo -output $DEST_DIR/$DEST_ROOT/bin/llvm-cpp-$MAJ_VERS -create \
+  $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-cpp-$MAJ_VERS || exit 1
+rm $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-cpp-$MAJ_VERS || exit 1
+
 if [ $BUILD_CXX -eq 1 ]; then
     lipo -output $DEST_DIR/$DEST_ROOT/bin/llvm-g++-$MAJ_VERS -create \
         $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-g++-$MAJ_VERS || exit 1
     ln -f $DEST_DIR/$DEST_ROOT/bin/llvm-g++-$MAJ_VERS $DEST_DIR/$DEST_ROOT/bin/llvm-c++-$MAJ_VERS || exit 1
     rm $DEST_DIR/$DEST_ROOT/bin/tmp-*-llvm-g++-$MAJ_VERS || exit 1
+fi
+
+if [ $BUILD_JAVA -eq 1 ]; then
+   lipo -output $DEST_DIR/$DEST_ROOT/bin/llvm-gcj-$MAJ_VERS -create \
+        $DEST_DIR/$DEST_ROOT/bin/tmp-*-gcj-$MAJ_VERS || exit 1
+   rm $DEST_DIR/$DEST_ROOT/bin/tmp-*-gcj-$MAJ_VERS || exit 1
+fi
+
+if [ $BUILD_FORTRAN -eq 1 ]; then
+   lipo -output $DEST_DIR/$DEST_ROOT/bin/llvm-gfortran-$MAJ_VERS -create \
+        $DEST_DIR/$DEST_ROOT/bin/tmp-*-gfortran-$MAJ_VERS || exit 1
+   rm $DEST_DIR/$DEST_ROOT/bin/tmp-*-gfortran-$MAJ_VERS || exit 1
 fi
 # LLVM LOCAL end
 
@@ -700,7 +786,7 @@ rm -rf * || exit 1
 
 # Generate .dSYM files
 find $DEST_DIR -perm -0111 \! -name fixinc.sh \
-    \! -name mkheaders -type f -print | xargs -n 1 -P ${SYSCTL} dsymutil
+    \! -name mkheaders -type f -print | xargs -n 1 ${DSYMUTIL}
 
 # Save .dSYM files and .a archives
 cd $DEST_DIR || exit 1
@@ -719,15 +805,16 @@ if [ "x$LLVM_DEBUG" != "x1" ]; then
     find $DEST_DIR -perm -0111 \! -path '*DWARF*' \! -name \*.dylib \
         \! -name fixinc.sh \! -name mkheaders \! -name libstdc++.dylib \
         -type f -print \
-        | xargs strip || exit 1
+        | xargs ${STRIP} || exit 1
     # LLVM LOCAL begin - Strip with -Sx instead of -SX
+	# Ignore errors from this next one due to possible issues on Tiger
     find $DEST_DIR \! -path '*DWARF*' \( -name \*.a -or -name \*.dylib \) \
         \! -name libgcc_s.10.*.dylib \! -name libstdc++.dylib -type f \
 	-print \
-       	| xargs strip -SX || exit 1
+       	| xargs ${STRIP} -SX
     # LLVM LOCAL end - Strip with -Sx instead of -SX
     find $DEST_DIR \! -path '*DWARF*' -name \*.a -type f -print \
-        | xargs ranlib || exit 1
+        | xargs ${RANLIB} || exit 1
     # LLVM LOCAL end - don't strip dSYM objects
 fi
 
@@ -735,32 +822,32 @@ fi
 # Set up the llvm-gcc/llvm-g++ symlinks.
 
 # LLVM_BIN_DIR - This is the place where llvm-gcc/llvm-g++ symlinks get installed.
-LLVM_BIN_DIR=$DEST_ROOT/../bin
-
-mkdir -p $DEST_DIR$LLVM_BIN_DIR
-cd $DEST_DIR$LLVM_BIN_DIR
-ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-gcc-$MAJ_VERS llvm-gcc-$MAJ_VERS || exit 1
-ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-g++-$MAJ_VERS llvm-g++-$MAJ_VERS || exit 1
-ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-cpp-$MAJ_VERS llvm-cpp-$MAJ_VERS || exit 1
-ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-gcc-$MAJ_VERS llvm-gcc || exit 1
-ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-g++-$MAJ_VERS llvm-g++ || exit 1
+#LLVM_BIN_DIR=$DEST_ROOT/../bin
+#
+#mkdir -p $DEST_DIR$LLVM_BIN_DIR
+#cd $DEST_DIR$LLVM_BIN_DIR
+#ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-gcc-$MAJ_VERS llvm-gcc-$MAJ_VERS || exit 1
+#ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-g++-$MAJ_VERS llvm-g++-$MAJ_VERS || exit 1
+#ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-cpp-$MAJ_VERS llvm-cpp-$MAJ_VERS || exit 1
+#ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-gcc-$MAJ_VERS llvm-gcc || exit 1
+#ln -s -f ../llvm-gcc-$MAJ_VERS/bin/llvm-g++-$MAJ_VERS llvm-g++ || exit 1
 
 # FIXME: This is a hack to get things working.
-for t in $TARGETS ; do
-    ln -s -f ../llvm-gcc-$MAJ_VERS/bin/$t-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS $t-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS || exit 1
-    ln -s -f ../llvm-gcc-$MAJ_VERS/bin/$t-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS $t-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS || exit 1
-done
+#for t in $TARGETS ; do
+#    ln -s -f ../llvm-gcc-$MAJ_VERS/bin/$t-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS $t-apple-darwin$DARWIN_VERS-llvm-gcc-$MAJ_VERS || exit 1
+#    ln -s -f ../llvm-gcc-$MAJ_VERS/bin/$t-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS $t-apple-darwin$DARWIN_VERS-llvm-g++-$MAJ_VERS || exit 1
+#done
 
-# Copy one of the libllvmgcc.dylib's up to libexec/gcc.
-cp $DEST_DIR/$DEST_ROOT/libexec/gcc/$BUILD-apple-darwin$DARWIN_VERS/$VERS/libllvmgcc.dylib \
-    $DEST_DIR/$DEST_ROOT/libexec/gcc/
+# Copy one of the libllvmgcc.dylib's up to libexec/llvm-gcc42.
+#cp $DEST_DIR/$DEST_ROOT/libexec/llvm-gcc42/gcc/$BUILD-apple-darwin$DARWIN_VERS/$VERS/libllvmgcc.dylib \
+#    $DEST_DIR/$DEST_ROOT/libexec/llvm-gcc42/gcc/ || exit 1
 
 # Replace the installed ones with symlinks to the common one.
-for t in $TARGETS ; do
-    cd $DEST_DIR/$DEST_ROOT/libexec/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/
-    rm libllvmgcc.dylib
-    ln -s ../../libllvmgcc.dylib
-done
+#for t in $TARGETS ; do
+#    cd $DEST_DIR/$DEST_ROOT/libexec/llvm-gcc42/gcc/$t-apple-darwin$DARWIN_VERS/$VERS/ || exit 1
+#    rm libllvmgcc.dylib || exit 1
+#    ln -s ../../libllvmgcc.dylib || exit 1
+#done
 
 # Remove unwind.h from the install directory for > 10.6
 if [ $DARWIN_VERS -gt 10 ]; then
