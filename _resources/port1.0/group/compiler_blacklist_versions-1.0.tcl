@@ -84,7 +84,7 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
 
 proc compiler_blacklist_versions._matches_all_versions {compiler comparisons} {
     if {[llength ${comparisons}] % 2} {
-        return -code error "invalid/incomplete comparison specification \"{comparisons}\""
+        return -code error "invalid/incomplete comparison specification \"${comparisons}\""
     }
     while {[llength ${comparisons}] > 0} {
         set comparison_operator [lindex ${comparisons} 0]
