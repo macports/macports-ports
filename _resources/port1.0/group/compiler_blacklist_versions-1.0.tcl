@@ -84,7 +84,7 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
 
 proc compiler_blacklist_versions._matches_all_versions {compiler comparisons} {
     if {[llength ${comparisons}] % 2} {
-        return -code error "invalid/incomplete comparison specification “${comparisons}”"
+        return -code error "invalid/incomplete comparison specification \"{comparisons}\""
     }
     while {[llength ${comparisons}] > 0} {
         set comparison_operator [lindex ${comparisons} 0]
@@ -121,14 +121,14 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
             set re {build ([0-9.]+)}
         }
         default {
-            return -code error "don't know how to determine build number of compiler “${compiler}”"
+            return -code error "don't know how to determine build number of compiler \"${compiler}\""
         }
     }
     set cc [portconfigure::configure_get_compiler cc ${compiler}]
     if {![file exists ${cc}]} return
     regexp ${re} [exec ${cc} -v 2>@1] -> compiler_version
     if {![info exists compiler_version]} {
-        return -code error "couldn't determine build number of compiler “${compiler}”"
+        return -code error "couldn't determine build number of compiler \"${compiler}\""
     }
     set compiler_blacklist_versions._compiler_versions(${compiler}) ${compiler_version}
     return ${compiler_version}
