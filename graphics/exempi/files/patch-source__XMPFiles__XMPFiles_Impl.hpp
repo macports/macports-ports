@@ -1,5 +1,5 @@
---- a/source/XMPFiles/XMPFiles_Impl.hpp.orig	2012-02-13 23:32:15.000000000 -0800
-+++ b/source/XMPFiles/XMPFiles_Impl.hpp	2012-02-13 23:33:03.000000000 -0800
+--- source/XMPFiles/XMPFiles_Impl.hpp.orig	2011-11-12 22:57:42.000000000 -0800
++++ source/XMPFiles/XMPFiles_Impl.hpp	2013-01-11 10:20:43.000000000 -0800
 @@ -35,7 +35,7 @@
  	#define snprintf _snprintf
  #else
@@ -8,4 +8,4 @@
 +		#include <CoreServices/CoreServices.h>
  	#endif
  	// POSIX headers for both Mac and generic UNIX.
- 	#include <pthread.h>
+ 	#include <fcntl.h>
