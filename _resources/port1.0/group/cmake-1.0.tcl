@@ -53,6 +53,7 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
+                    -DCMAKE_FIND_FRAMEWORK=LAST \
                     -Wno-dev
 
 platform darwin {
