@@ -97,7 +97,9 @@ proc python_set_versions {option action args} {
         }
         if {$subport == $name || $subport == ""} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
-            distfiles
+            fetch {}
+            checksum {}
+            extract {}
             supported_archs noarch
             global python.default_version
             if {${python.default_version} == "24"} {
