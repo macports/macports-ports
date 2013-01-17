@@ -1,19 +1,23 @@
---- setup.py.org.py	2006-09-22 14:03:02.000000000 -0700
-+++ setup.py	2007-01-19 00:53:39.000000000 -0800
-@@ -70,14 +70,10 @@
+--- setup.py.orig	2009-02-05 07:11:49.000000000 +0900
++++ setup.py	2009-04-28 14:12:21.000000000 +0900
+@@ -81,18 +81,10 @@
  
  else:	# try some generic paths
  	include_dirs = [
--		'/usr/include', '/usr/local/include',
--		'/usr/include/freetds', '/usr/local/include/freetds',
--		'/usr/pkg/freetds/include'	# netbsd
+-		'/usr/local/include', '/usr/local/include/freetds',  # first local install
+-		'/usr/include', '/usr/include/freetds',   # some generic Linux paths
+-		'/usr/include/freetds_mssql',             # some versions of Mandriva 
+-		'/usr/local/freetds/include',             # FreeBSD
+-		'/usr/pkg/freetds/include'	              # NetBSD
 +		'__PREFIX__/include', '__PREFIX__/include/freetds'
  	]
  	library_dirs = [
--		'/usr/lib', '/usr/local/lib',
--		'/usr/lib/freetds', '/usr/local/lib/freetds'
--		'/usr/pkg/freetds/lib'		# netbsd
+-		'/usr/local/lib', '/usr/local/lib/freetds',
+-		'/usr/lib', '/usr/lib/freetds',
+-		'/usr/lib/freetds_mssql', 
+-		'/usr/local/freetds/lib',
+-		'/usr/pkg/freetds/lib'
 +		'__PREFIX__/lib', '__PREFIX__/lib/freetds'
  	]
- 	libraries = ["sybdb"]
+ 	libraries = [ "sybdb" ]   # on Mandriva you may have to change it to sybdb_mssql
  	data_files = []
