@@ -65,7 +65,9 @@ proc octave.setup {module version} {
 }
 
 post-destroot {
-    move ${destroot}${prefix}/share/octave/octave_packages ${destroot}${prefix}/share/octave/octave_packages_${name}
+    if {[file exists ${destroot}${prefix}/share/octave/octave_packages]} {
+        move ${destroot}${prefix}/share/octave/octave_packages ${destroot}${prefix}/share/octave/octave_packages_${name}
+    }
 }
 
 post-activate {
