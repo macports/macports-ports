@@ -58,18 +58,39 @@ proc octave.setup {module version} {
 
     # octave is not universal
     universal_variant           no
+    use_configure               no
 
     livecheck.type              regex
     livecheck.url               http://octave.sourceforge.net/packages.php
     livecheck.regex             http://downloads\\.sourceforge\\.net/octave/${octave.module}-(\\d+(\\.\\d+)*)\\.tar
 }
 
-post-destroot {
-    if {[file exists ${destroot}${prefix}/share/octave/octave_packages]} {
-        move ${destroot}${prefix}/share/octave/octave_packages ${destroot}${prefix}/share/octave/octave_packages_${name}
-    }
+extract {
+    xinstall -d -m 755 ${worksrcpath}
+}
+
+build {
+    system "${prefix}/bin/octave -q -f --eval 'pkg build -verbose -nodeps ${worksrcpath} ${distpath}/${distfiles}'"
+}
+
+destroot.keepdirs   ${destroot}${prefix}/lib/octave/packages \
+                    ${destroot}${prefix}/share/octave/packages
+
+pre-destroot {
+    xinstall -d -m 755 ${destroot}${prefix}/lib/octave/packages
+    xinstall -d -m 755 ${destroot}${prefix}/share/octave/packages
+}
+
+destroot {
+    xinstall    -m 644 ${worksrcpath}/${distname}.tar.gz ${destroot}${prefix}/share/octave/${octave.module}.tar.gz
+}
+
+post-deactivate {
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall ${octave.module}'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
 }
 
 post-activate {
-    system "${prefix}/bin/octave --eval \"pkg rebuild\""
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg install -verbose -global ${prefix}/share/octave/${octave.module}.tar.gz'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
 }
