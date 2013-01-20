@@ -32,6 +32,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+# This PortGroup is DEPRECATED. Please do not use for new development.
+# Please switch existing ports using this to 'PortGroup python 1.0' (which
+# supports multiple python versions) at your earliest convenience.
+
 set python.branch	2.5
 set python.bin		${prefix}/bin/python${python.branch}
 set python.lib		${prefix}/lib/libpython${python.branch}.dylib
