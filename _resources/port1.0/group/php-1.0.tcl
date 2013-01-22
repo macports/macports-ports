@@ -49,8 +49,16 @@
 # If this is a Zend extension, use
 #
 #   php.type                    zend
-
-### This portgroup is not ready to be used yet ###
+#
+#
+# The php 1.0 PortGroup is DEPRECATED. Please do not use for new development.
+# Please switch any existing ports using it to the php 1.1 PortGroup at your
+# earliest convenience.
+#
+# The php 1.0 PortGroup was only used briefly for official ports; all official
+# ports using it have already been switched to the php 1.1 PortGroup and the
+# php 1.0 PortGroup will be removed once it is believed that all users have
+# upgraded and are no longer using those old port versions.
 
 
 # Options that relate to the PHP extension.

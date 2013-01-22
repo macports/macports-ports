@@ -45,6 +45,19 @@
 # If this is a Zend extension, use
 #
 #   php5extension.type      zend
+#
+#
+# The php5extension 1.0 PortGroup is DEPRECATED. Please do not use for new
+# development. Please switch any existing ports using it to the php 1.1
+# PortGroup (which supports multiple PHP versions) at your earliest
+# convenience.
+#
+# Most official ports using the php5extension 1.0 PortGroup already have
+# corresponding ports using the php 1.1 PortGroup; the php5extension ports
+# will be marked as replaced_by their php 1.1 counterparts as soon as all
+# ports depending on them are updated to depend on the new ports instead.
+# Then, after a suitable morning period, the php5extension PortGroup will
+# be removed.
 
 
 default build.dir                   {[lindex ${php5extension.build_dirs} 0]}
