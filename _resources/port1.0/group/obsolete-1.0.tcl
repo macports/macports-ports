@@ -1,4 +1,4 @@
-# -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+# -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 
 # Copyright (c) 2012 Markus Weissmann <mww@macports.org>
@@ -40,15 +40,14 @@
 # inform users that they should uninstall it and install something else
 # instead; you might want to override some of the defaults though.
 
-platforms   darwin
-maintainers nomaintainer
-supported_archs     noarch
+platforms       darwin
+maintainers     nomaintainer
+supported_archs noarch
 
 description     this port is only a stub and has been made obsolete by ${replaced_by}
+default long_description ${description}
 
-default long_description    ${description}
-
-homepage    http://www.macports.org/
+homepage        http://www.macports.org/
 
 archive_sites
 distfiles
@@ -58,4 +57,4 @@ pre-configure {
     return -code error "obsolete port"
 }
 
-livecheck.type      none
+livecheck.type  none
