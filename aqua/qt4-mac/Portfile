@@ -16,7 +16,7 @@ name                qt4-mac
 #conflicts           qt3 qt3-mac qt4-mac-devel
 conflicts           qt3 qt3-mac
 version             4.8.4
-revision            2
+revision            3
 categories          aqua
 platforms           macosx
 maintainers         michaelld openmaintainer
@@ -66,12 +66,13 @@ patchfiles-append   patch-config.tests_unix_precomp.test.diff
 # and set QT_INSTALL_FRAMEWORKS and QMAKE_FRAMEWORKDIR_QT, both here
 # and in the resulting .qmake.cache files. (d) to allow easy
 # replacement of MACOSX_DEPLOYMENT_TARGET: build for just the user's
-# current OS.
+# current OS. (e) add hooks for C++11 testing.
 
 patchfiles-append   patch-configure.diff
 
-# (3) Tweak various scripts to allow easy replacement of
+# (3) (a) Tweak various scripts to allow easy replacement of
 # MACOSX_DEPLOYMENT_TARGET: build for just the user's current OS.
+# (b) Assign initial OBJECTIVE_CXXFLAGS.
 
 patchfiles-append   patch-mkspecs_common_g++-macx.conf.diff
 
@@ -86,7 +87,7 @@ patchfiles-append   patch-mkspecs_common_mac.conf.diff
 
 patchfiles-append   patch-mkspecs_features_moc.prf.diff
 
-# (6) Remove Qt's LIBDIR and INCDIR from various Qmake internal
+# (6) Remove Qt's LIBDIR and INCDIR from various QMake internal
 # variables, since they are already included in the user-supplied
 # LIBS and INCLUDEPATH.
 
@@ -102,6 +103,15 @@ patchfiles-append   patch-mkspecs_features_qt.prf.diff
 # debug library for 32-bit system cannot be created (too large).
 
 patchfiles-append   patch-mkspecs_features_qt_functions.prf.diff
+
+# (7.1) (a) Change "gcc" and "g++" to @'s for replacement in
+# post-patch; (b) add hooks for C++11.
+
+patchfiles-append   patch-mkspecs_common_g++-base.conf.diff
+
+# (7.2) Add default QMake variables for Objective C++.
+
+patchfiles-append   patch-mkspecs_objective_cxx.diff
 
 # (8) Add "absolute_library_soname" to the default CONFIG variables,
 # so that when a DYLIB is created, if "target.path" is set for it then
@@ -226,11 +236,6 @@ patchfiles-append   \
 
 configure.ccache no
 
-# create the global for the psql version, if selected
-
-global psql_version
-set psql_version ""
-
 # find a way to specify the OS MINOR version.
 global MINOR
 set MINOR ""
@@ -296,9 +301,9 @@ post-patch {
 
     # Ensure that correct C/C++ compilers are used.
 
-    reinplace "s| g++\$| ${configure.cxx}|" \
+    reinplace "s|@CXX@|${configure.cxx}|" \
         ${worksrcpath}/mkspecs/common/g++-base.conf
-    reinplace "s| gcc\$| ${configure.cc}|"  \
+    reinplace "s|@CC@|${configure.cc}|"  \
         ${worksrcpath}/mkspecs/common/g++-base.conf
 
     # fix the corewlan .pro file to use the correct developer SDK
@@ -310,12 +315,6 @@ post-patch {
 
     reinplace "s,@QT_PLUGINS_DIR@,${qt_plugins_dir},g" \
         ${worksrcpath}/tools/macdeployqt/macdeployqt/main.cpp
-
-    # fix path to "pg_config", if the variant was selected
-
-    if {${psql_version} != ""} {
-        reinplace "s,@PATH_TO_PG_CONFIG@,${prefix}/lib/postgresql${psql_version}/bin/,g" ${worksrcpath}/configure
-    }
 
     # if no debug, then do not even build debug code
 
@@ -334,15 +333,32 @@ post-patch {
                 ${worksrcpath}/${fixfile}
         }
     }
+
+    # copy C++11 tests into place, if that variant is set
+
+    if {[variant_isset cxx11]} {
+        copy ${filespath}/c++11.prf ${worksrcpath}/mkspecs/features
+        copy ${filespath}/c++11 ${worksrcpath}/config.tests/unix
+    }
+
+    # copy Objective C / CXX files into place
+
+    copy ${filespath}/objective_cxx.prf \
+        ${worksrcpath}/mkspecs/features/mac
+    copy ${filespath}/split_sources.prf \
+        ${worksrcpath}/mkspecs/features/mac
+
 }
 
-# The build process uses -fconstant-cfstrings.
-# configure.compiler should therefore not be one of the MacPorts compilers.
+# The build process uses -fconstant-cfstrings.  configure.compiler
+# should therefore not be one of the MacPorts compilers unless it
+# supports this flag.
 
 # Some older versions of Clang do not honor CPATH or LIBRARY_PATH,
 # which are required for compiling this port.  The versions seem to
 # be: MacPorts Clang 3.0 or earlier, and Apple Clang 318.0.58 or
 # older.  Block these.
+# http://llvm.org/bugs/show_bug.cgi?id=8971, # #30271, #31076, #31638
 
 compiler.blacklist \
     macports-clang-2.9 \
@@ -553,6 +569,12 @@ pre-build {
 }
 
 build.target all
+
+# do not use DESTDIR directly in the destroot command; Qt uses DISTDIR
+# internally for other purposes, and instead uses INSTALL_ROOT for the
+# additional install root prefix.
+
+destroot.post_args
 
 post-destroot {
 
@@ -881,6 +903,12 @@ post-destroot {
         copy ${worksrcpath}/include/Qt ${destroot}${qt_includes_dir}
 
     }
+
+    # link in Resource to ${qt_libs_dir}
+
+    ln -s ${qt_frameworks_dir}/QtGui.framework/Resources \
+        ${destroot}${qt_libs_dir}
+
 }
 
 pre-activate {
@@ -921,6 +949,9 @@ description {PostgreSQL 9.0 Qt4 Plugin Legacy Compatibility Variant} {}
 
 variant psql91 conflicts psql83 psql84 psql90 \
 description {PostgreSQL 9.1 Qt4 Plugin Legacy Compatibility Variant} {}
+
+global psql_version
+set psql_version ""
 
 if {[variant_isset psql83]} {
     set psql_version "83"
@@ -972,21 +1003,34 @@ variant openvg description {Build with support for OpenVG} {
         reinplace "s@CONFIG_ARG@QMAKE_OPENVG_ARG@g" \
             ${worksrcpath}/configure
 
-        # allow us to set the QMAKE_SWITCHES
-
-        reinplace "s@QMAKE_SWITCHES=@@g" \
-            ${worksrcpath}/configure
-
     }
 
     pre-configure {
 
         # set OpenVG arg, for both testing and building
 
-        configure.env-append \
-            QMAKE_OPENVG_ARG=-lOpenVG \
-            QMAKE_SWITCHES=\"QMAKE_LIBS_OPENVG=-lOpenVG\"
+        configure.env-append QMAKE_OPENVG_ARG=-lOpenVG
+
     }
+}
+
+variant cxx11 description {Add library support for C++11 (EXPERIMENTAL)} {
+
+    pre-extract {
+
+        ui_msg "WARNING: You have enabled C++11 support for Qt4, which is EXPERIMENTAL.  Qt's libraries and applications (not including QMake) will be compiled using C++11.  That said, C++11 will NOT be enabled by default when using QMake.  You can enable C++11 by specifying \'CONFIG += c++11\' in any QMake build file."
+
+    }
+
+    # patches for C++11 only
+
+    patchfiles-append patch-cxx11.diff
+
+    # have configure test for C++11; our hooks
+    # will error out if C++11 is not found.
+
+    configure.args-append -c++11
+
 }
 
 #variant quartz conflicts x11
