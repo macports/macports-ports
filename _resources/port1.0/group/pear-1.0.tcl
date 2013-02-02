@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2011-2012 The MacPorts Project
+# Copyright (c) 2011-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -167,9 +167,9 @@ proc pear.setup {package_name package_version {package_channel "pear.php.net"}} 
     }
 
     post-patch {
-        # Some ports use a "." baseinstalldir which can cause issues creating pears packagingroot directory.
-        reinplace "s|baseinstalldir=\"\.\"|baseinstalldir=\"/\"|g" \
-          ${pear.sourceroot}/${pear.packagexml}
+        # Some ports use a "." baseinstalldir which can cause issues creating pear's packagingroot directory.
+        reinplace -locale C "s|baseinstalldir=\"\.\"|baseinstalldir=\"/\"|g" \
+            ${pear.sourceroot}/${pear.packagexml}
     }
 
     configure.env           ${pear.env}
