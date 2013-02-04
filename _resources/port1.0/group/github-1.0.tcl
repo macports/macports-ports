@@ -37,12 +37,13 @@
 #   PortGroup               github 1.0
 #   github.setup            author project version [tag_prefix]
 
-options github.author github.project github.version github.tag_prefix
+options github.author github.project github.version github.tag_prefix github.livecheck_type
 options github.homepage github.raw github.master_sites github.tarball_from
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.github.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
+default github.livecheck_type ""
 
 default master_sites {${github.master_sites}}
 
@@ -62,7 +63,7 @@ proc handle_tarball_from {option action args} {
 }
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites
+    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites github.livecheck_type
 
     github.author           ${gh_author}
     github.project          ${gh_project}
@@ -84,8 +85,21 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
         }
     }
 
-    livecheck.type          regex
-    livecheck.version       ${github.version}
-    livecheck.url           ${github.homepage}/tags
-    livecheck.regex         archive/[join ${github.tag_prefix} ""](\[^"\]+)${extract.suffix}"
+    if {[join ${github.tag_prefix}] == "" && [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
+        github.livecheck_type "commits"
+    } else {
+        github.livecheck_type "tags"
+    }
+
+    if {[string equal ${github.livecheck_type} "commits"]} {
+        livecheck.type          regexm
+        livecheck.url           ${github.homepage}/commits/master.atom
+        livecheck.version       ${github.version}
+        livecheck.regex         <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
+    } else {
+        livecheck.type          regex
+        livecheck.version       ${github.version}
+        livecheck.url           ${github.homepage}/tags
+        livecheck.regex         archive/[join ${github.tag_prefix} ""](\[^"\]+)${extract.suffix}
+    }
 }
