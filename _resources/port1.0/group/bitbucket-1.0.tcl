@@ -78,7 +78,8 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
 
     post-extract {
         if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && \
-            ${master_sites} == ${bitbucket.master_sites} && [llength ${distfiles}] > 0} {
+            ${master_sites} == ${bitbucket.master_sites} && [llength ${distfiles}] > 0 && \
+            [llength [glob -nocomplain ${workpath}/*]] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
