@@ -188,3 +188,10 @@ proc _check_require_active_variants {} {
 pre-configure {
 	_check_require_active_variants
 }
+
+# register pre-archivefetch handler that checks for all requested variants
+# this is required when downloading binary archives for a package, because
+# pre-configure is never run for those
+pre-archivefetch {
+	_check_require_active_variants
+}
