@@ -73,7 +73,7 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     homepage                ${bitbucket.homepage}
     hg.url                  ${bitbucket.homepage}
     hg.tag                  [join ${bitbucket.tag_prefix}]${bitbucket.version}
-    distname                ${bitbucket.version}
+    distname                [join ${bitbucket.tag_prefix}]${bitbucket.version}
     fetch.ignore_sslcert    yes
 
     post-extract {
