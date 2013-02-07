@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -85,9 +85,9 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     }
 
     if {[join ${bitbucket.tag_prefix}] == "" && [regexp "^\[0-9a-f\]{9,}\$" ${bitbucket.version}]} {
-        bitbucket.livecheck_type "commits"
+        bitbucket.livecheck_type commits
     } else {
-        bitbucket.livecheck_type "tags"
+        bitbucket.livecheck_type tags
     }
 
     if {[string equal ${bitbucket.livecheck_type} "commits"]} {

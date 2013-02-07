@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2012-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -87,9 +87,9 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     }
 
     if {[join ${github.tag_prefix}] == "" && [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
-        github.livecheck_type "commits"
+        github.livecheck_type commits
     } else {
-        github.livecheck_type "tags"
+        github.livecheck_type tags
     }
 
     if {[string equal ${github.livecheck_type} "commits"]} {
