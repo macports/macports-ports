@@ -47,6 +47,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     version          ${myportversion}
     categories       x11 x11-font graphics
     supported_archs  noarch
+    installs_libs    no
     homepage         http://www.x.org/
     master_sites     xorg:individual/font/
     use_bzip2        yes
