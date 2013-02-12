@@ -114,10 +114,12 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
         clang {
             set re {clang-([0-9.]+)}
         }
+        llvm-gcc-4.2 {
+            set re {LLVM build ([0-9.]+)}
+        }
         gcc-4.0 -
         gcc-4.2 -
-        apple-gcc-4.2 -
-        llvm-gcc-4.2 {
+        apple-gcc-4.2 {
             set re {build ([0-9.]+)}
         }
         default {
