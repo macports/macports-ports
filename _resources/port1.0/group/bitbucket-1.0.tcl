@@ -52,7 +52,6 @@ option_proc bitbucket.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
     global bitbucket.author bitbucket.project bitbucket.master_sites
 
-    # keeping the default at tags like many portfiles already do
     # the port writer can set bitbucket.tarball_from to "downloads" and have the URI path accordingly changed
     if {[string equal ${action} "set"] && $args == "downloads"} {
         bitbucket.tarball_from ${args}
