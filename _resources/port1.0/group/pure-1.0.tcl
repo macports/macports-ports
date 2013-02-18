@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2009-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -47,8 +47,8 @@ proc pure.setup {module version} {
 
     name                        pure-${module}
     version                     ${version}
-    homepage                    http://code.google.com/p/pure-lang/wiki/Addons#${name}
-    master_sites                googlecode:pure-lang
+    homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#${name}
+    master_sites                http://cdn.bitbucket.org/purelang/pure-lang/downloads/
 
     depends_lib                 path:lib/libpure.dylib:pure
 
@@ -78,6 +78,6 @@ proc pure.setup {module version} {
     }
 
     livecheck.type              regex
-    default livecheck.url       {http://code.google.com/p/pure-lang/downloads/list?q=${name}&sort=filename}
+    default livecheck.url       {https://bitbucket.org/purelang/pure-lang/downloads}
     default livecheck.regex     {${name}-(\[0-9.\]+)\\.tar}
 }
