@@ -29,140 +29,147 @@ in the "mutt-patched" package.
   - 2008-08-02 myon: Refreshed patch using quilt push -f to remove hunks we do
     not need (Makefile.in).
 
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -32,6 +32,7 @@
+ 	rfc822.c rfc1524.c rfc2047.c rfc2231.c rfc3676.c \
+ 	score.c send.c sendlib.c signal.c sort.c \
+ 	status.c system.c thread.c charset.c history.c lib.c \
++	sidebar.c \
+ 	muttlib.c editmsg.c mbyte.c \
+ 	url.c ascii.c crypt-mod.c crypt-mod.h safe_asprintf.c
+ 
+--- a/OPS
++++ b/OPS
+@@ -180,3 +180,8 @@
+ OP_MAIN_SHOW_LIMIT "show currently active limit pattern"
+ OP_MAIN_COLLAPSE_THREAD "collapse/uncollapse current thread"
+ OP_MAIN_COLLAPSE_ALL "collapse/uncollapse all threads"
++OP_SIDEBAR_SCROLL_UP "scroll the mailbox pane up 1 page"
++OP_SIDEBAR_SCROLL_DOWN "scroll the mailbox pane down 1 page"
++OP_SIDEBAR_NEXT "go down to next mailbox"
++OP_SIDEBAR_PREV "go to previous mailbox"
++OP_SIDEBAR_OPEN "open hilighted mailbox"
 --- a/buffy.c
 +++ b/buffy.c
-@@ -312,6 +312,10 @@
-     return 0;
-   }
+@@ -340,6 +340,68 @@
+   return rc;
+ }
  
++/* update message counts for the sidebar */
++void buffy_maildir_update (BUFFY* mailbox)
++{
++  char path[_POSIX_PATH_MAX];
++  DIR *dirp;
++  struct dirent *de;
++  char *p;
++
 +  mailbox->msgcount = 0;
 +  mailbox->msg_unread = 0;
 +  mailbox->msg_flagged = 0;
 +
-   while ((de = readdir (dirp)) != NULL)
-   {
-     if (*de->d_name == '.')
-@@ -329,7 +333,9 @@
- 	  continue;
-       }
-       /* one new and undeleted message is enough */
--      mailbox->new = 1;
-+      mailbox->has_new = mailbox->new = 1;
-+      mailbox->msgcount++;
-+      mailbox->msg_unread++;
-       rc = 1;
-       break;
-     }
-@@ -337,6 +343,32 @@
- 
-   closedir (dirp);
- 
-+  /*
-+   * count read messages (for folderlist (sidebar) we also need to count
-+   * messages in cur so that we the total number of messages
-+   */
-+  snprintf (path, sizeof (path), "%s/cur", mailbox->path);
++  snprintf (path, sizeof (path), "%s/new", mailbox->path);
++        
 +  if ((dirp = opendir (path)) == NULL)
-+  {
++  {   
 +    mailbox->magic = 0;
-+  }
++    return;
++  } 
++      
 +  while ((de = readdir (dirp)) != NULL)
 +  {
-+    char *p;
-+    if (*de->d_name != '.') {
++    if (*de->d_name == '.')
++      continue;
++
++    if (!(p = strstr (de->d_name, ":2,")) || !strchr (p + 3, 'T')) {
++      mailbox->new = 1;
++      mailbox->msgcount++;
++      mailbox->msg_unread++;
++    }
++  }
++
++  closedir (dirp);
++  snprintf (path, sizeof (path), "%s/cur", mailbox->path);
++        
++  if ((dirp = opendir (path)) == NULL)
++  {   
++    mailbox->magic = 0;
++    return;
++  } 
++      
++  while ((de = readdir (dirp)) != NULL)
++  {
++    if (*de->d_name == '.')
++      continue;
++
++    if (!(p = strstr (de->d_name, ":2,")) || !strchr (p + 3, 'T')) {
++      mailbox->msgcount++;
 +      if ((p = strstr (de->d_name, ":2,"))) {
 +        if (!strchr (p + 3, 'T')) {
-+          mailbox->msgcount++;
-+          if ( !strchr (p + 3, 'S'))
++          if (!strchr (p + 3, 'S'))
 +            mailbox->msg_unread++;
 +          if (strchr(p + 3, 'F'))
 +            mailbox->msg_flagged++;
 +        }
-+      } else
-+        mailbox->msgcount++;
++      }
 +    }
 +  }
 +
++  closedir (dirp);
++}
++
+ /* returns 1 if mailbox has new mail */ 
+ static int buffy_mbox_hasnew (BUFFY* mailbox, struct stat *sb)
+ {
+@@ -371,6 +433,20 @@
    return rc;
  }
  
-@@ -345,14 +377,33 @@
- {
-   int rc = 0;
-   int statcheck;
-+  CONTEXT *ctx;
- 
-   if (option (OPTCHECKMBOXSIZE))
-     statcheck = sb->st_size > mailbox->size;
-   else
-     statcheck = sb->st_mtime > sb->st_atime
-       || (mailbox->newly_created && sb->st_ctime == sb->st_mtime && sb->st_ctime == sb->st_atime);
--  if (statcheck)
-+  if (statcheck || mailbox->msgcount == 0)
-   {
-+	  BUFFY b = *mailbox;
-+ 	  int msgcount = 0;
-+ 	  int msg_unread = 0;
-+ 	  /* parse the mailbox, to see how much mail there is */
-+ 	  ctx = mx_open_mailbox( mailbox->path, M_READONLY | M_QUIET | M_NOSORT | M_PEEK, NULL);
-+ 	  if(ctx)
-+ 	  {
-+        msgcount = ctx->msgcount;
-+ 	    msg_unread = ctx->unread;
-+ 	    mx_close_mailbox(ctx, 0);
-+ 	  }
-+ 	  *mailbox = b;
-+ 	  mailbox->msgcount = msgcount;
-+ 	  mailbox->msg_unread = msg_unread;
-+ 	  if(statcheck)
-+      {
-+ 	    mailbox->has_new = mailbox->new = 1;
-+      }
-     if (!option(OPTMAILCHECKRECENT) || sb->st_mtime > mailbox->last_visited)
-     {
-       rc = 1;
-@@ -374,9 +425,11 @@
++/* update message counts for the sidebar */
++void buffy_mbox_update (BUFFY* mailbox)
++{
++  CONTEXT *ctx = NULL;
++
++  ctx = mx_open_mailbox(mailbox->path, M_READONLY | M_QUIET | M_NOSORT | M_PEEK, NULL);
++  if(ctx)
++  {
++    mailbox->msgcount = ctx->msgcount;
++    mailbox->msg_unread = ctx->unread;
++    mx_close_mailbox(ctx, 0);
++  }
++}
++
  int mutt_buffy_check (int force)
  {
    BUFFY *tmp;
-+  struct dirent *de, *dp;
-   struct stat sb;
-   struct stat contex_sb;
-   time_t t;
-+  CONTEXT *ctx;
+@@ -444,16 +520,19 @@
+       {
+       case M_MBOX:
+       case M_MMDF:
++	buffy_mbox_update (tmp);
+ 	if (buffy_mbox_hasnew (tmp, &sb) > 0)
+ 	  BuffyCount++;
+ 	break;
  
-   sb.st_size=0;
-   contex_sb.st_dev=0;
-@@ -456,6 +509,20 @@
+       case M_MAILDIR:
++	buffy_maildir_update (tmp);
+ 	if (buffy_maildir_hasnew (tmp) > 0)
+ 	  BuffyCount++;
+ 	break;
+ 
        case M_MH:
++	mh_buffy_update (tmp->path, &tmp->msgcount, &tmp->msg_unread, &tmp->msg_flagged);
  	if ((tmp->new = mh_buffy (tmp->path)) > 0)
  	  BuffyCount++;
-+
-+  if ((dp = opendir (tmp->path)) == NULL)
-+    break;
-+  tmp->msgcount = 0;
-+  while ((de = readdir (dp)))
-+  {
-+    if (mh_valid_message (de->d_name))
-+    {
-+      tmp->msgcount++;
-+      tmp->has_new = tmp->new = 1;
-+    }
-+  }
-+  closedir (dp);
-+
  	break;
-       }
-     }
 --- a/buffy.h
 +++ b/buffy.h
-@@ -25,7 +25,12 @@
+@@ -25,7 +25,11 @@
    char path[_POSIX_PATH_MAX];
    off_t size;
    struct buffy_t *next;
 +  struct buffy_t *prev;
    short new;			/* mailbox has new mail */
-+  short has_new;		/* set it new if new and not read */
 +  int msgcount;			/* total number of messages */
 +  int msg_unread;		/* number of unread messages */
 +  int msg_flagged;		/* number of flagged messages */
@@ -196,7 +203,7 @@ in the "mutt-patched" package.
    int off = 0;
  
 -  mvaddstr (HDR_CRYPT, 0, "Security: ");
-+  mvaddstr (HDR_CRYPT, SidebarWidth,     "Security: ");
++  mvaddstr (HDR_CRYPT, SidebarWidth, "Security: ");
  
    if ((WithCrypto & (APPLICATION_PGP | APPLICATION_SMIME)) == 0)
    {
@@ -368,7 +375,7 @@ in the "mutt-patched" package.
 +          if ( op == OP_SIDEBAR_OPEN ) {
 +              if(!CurBuffy)
 +                break;
-+            strncpy( buf, CurBuffy->path, sizeof(buf) );
++            strncpy( buf, CurBuffy->path, sizeof(buf) );  
 +	    } else if (mutt_enter_fname (cp, buf, sizeof (buf), &menu->redraw, 1) == -1)
  	  {
  	    if (menu->menu == MENU_PAGER)
@@ -461,6 +468,33 @@ in the "mutt-patched" package.
  #ifdef USE_IMAP
  WHERE short ImapKeepalive;
  WHERE short ImapPipelineDepth;
+--- a/imap/command.c
++++ b/imap/command.c
+@@ -1011,6 +1011,13 @@
+ 	     opened */
+ 	  status->uidnext = oldun;
+ 
++        /* Added to make the sidebar show the correct numbers */
++        if (status->messages)
++        {
++          inc->msgcount = status->messages;
++          inc->msg_unread = status->unseen;
++        }
++
+         FREE (&value);
+         return;
+       }
+--- a/imap/imap.c
++++ b/imap/imap.c
+@@ -1527,7 +1527,7 @@
+ 
+     imap_munge_mbox_name (munged, sizeof (munged), name);
+     snprintf (command, sizeof (command),
+-	      "STATUS %s (UIDNEXT UIDVALIDITY UNSEEN RECENT)", munged);
++	      "STATUS %s (UIDNEXT UIDVALIDITY UNSEEN RECENT MESSAGES)", munged);
+ 
+     if (imap_exec (idata, command, IMAP_CMD_QUEUE) < 0)
+     {
 --- a/init.h
 +++ b/init.h
 @@ -1965,6 +1965,22 @@
@@ -470,7 +504,7 @@ in the "mutt-patched" package.
 +  {"sidebar_delim", DT_STR, R_BOTH, UL &SidebarDelim, "|"},
 +  /*
 +  ** .pp
-+  ** This specifies the delimiter between the sidebar (if visible) and
++  ** This specifies the delimiter between the sidebar (if visible) and 
 +  ** other screens.
 +  */
 +  { "sidebar_visible", DT_BOOL, R_BOTH, OPTSIDEBAR, 0 },
@@ -496,18 +530,6 @@ in the "mutt-patched" package.
  
  /* mx_open_new_message() */
  #define M_ADD_FROM	1	/* add a From_ line */
---- a/Makefile.am
-+++ b/Makefile.am
-@@ -33,7 +33,8 @@
- 	score.c send.c sendlib.c signal.c sort.c \
- 	status.c system.c thread.c charset.c history.c lib.c \
- 	muttlib.c editmsg.c mbyte.c \
--	url.c ascii.c crypt-mod.c crypt-mod.h safe_asprintf.c
-+	url.c ascii.c crypt-mod.c crypt-mod.h safe_asprintf.c \
-+    sidebar.c
- 
- nodist_mutt_SOURCES = $(BUILT_SOURCES)
- 
 --- a/mbox.c
 +++ b/mbox.c
 @@ -104,6 +104,7 @@
@@ -631,25 +653,47 @@ in the "mutt-patched" package.
      else if (option (OPTBRAILLEFRIENDLY))
        move (menu->current - menu->top + menu->offset, 0);
      else
---- a/mutt_curses.h
-+++ b/mutt_curses.h
-@@ -64,6 +64,7 @@
- #undef lines
- #endif /* lines */
+--- a/mh.c
++++ b/mh.c
+@@ -235,13 +235,37 @@
  
-+#define CLEARLINE_WIN(x) move(x,SidebarWidth), clrtoeol()
- #define CLEARLINE(x) move(x,0), clrtoeol()
- #define CENTERLINE(x,y) move(y, (COLS-strlen(x))/2), addstr(x)
- #define BEEP() do { if (option (OPTBEEP)) beep(); } while (0)
-@@ -126,6 +127,8 @@
-   MT_COLOR_BOLD,
-   MT_COLOR_UNDERLINE,
-   MT_COLOR_INDEX,
-+  MT_COLOR_NEW,
-+  MT_COLOR_FLAGGED,
-   MT_COLOR_MAX
- };
+   if (mh_read_sequences (&mhs, path) < 0)
+     return 0;
++
+   for (i = 0; !r && i <= mhs.max; i++)
+-    if (mhs_check (&mhs, i) & MH_SEQ_UNSEEN)
++    if (mhs_check (&mhs, i) & MH_SEQ_UNSEEN) {
+       r = 1;
++    }
+   mhs_free_sequences (&mhs);
+   return r;
+ }
  
++void mh_buffy_update (const char *path, int *msgcount, int *msg_unread, int *msg_flagged)
++{
++  int i;
++  struct mh_sequences mhs;
++  memset (&mhs, 0, sizeof (mhs));
++
++  if (mh_read_sequences (&mhs, path) < 0)
++    return;
++
++  msgcount = 0;
++  msg_unread = 0;
++  msg_flagged = 0;
++  for (i = 0; i <= mhs.max; i++)
++    msgcount++;
++    if (mhs_check (&mhs, i) & MH_SEQ_UNSEEN) {
++      msg_unread++;
++    }
++    if (mhs_check (&mhs, i) & MH_SEQ_FLAGGED)
++      msg_flagged++;
++  mhs_free_sequences (&mhs);
++}
++
+ static int mh_mkstemp (CONTEXT * dest, FILE ** fp, char **tgt)
+ {
+   int fd;
 --- a/mutt.h
 +++ b/mutt.h
 @@ -431,6 +431,7 @@
@@ -676,6 +720,25 @@ in the "mutt-patched" package.
  
    /* driver hooks */
    void *data;			/* driver specific data */
+--- a/mutt_curses.h
++++ b/mutt_curses.h
+@@ -64,6 +64,7 @@
+ #undef lines
+ #endif /* lines */
+ 
++#define CLEARLINE_WIN(x) move(x,SidebarWidth), clrtoeol()
+ #define CLEARLINE(x) move(x,0), clrtoeol()
+ #define CENTERLINE(x,y) move(y, (COLS-strlen(x))/2), addstr(x)
+ #define BEEP() do { if (option (OPTBEEP)) beep(); } while (0)
+@@ -126,6 +127,8 @@
+   MT_COLOR_BOLD,
+   MT_COLOR_UNDERLINE,
+   MT_COLOR_INDEX,
++  MT_COLOR_NEW,
++  MT_COLOR_FLAGGED,
+   MT_COLOR_MAX
+ };
+ 
 --- a/muttlib.c
 +++ b/muttlib.c
 @@ -1286,6 +1286,8 @@
@@ -775,23 +838,22 @@ in the "mutt-patched" package.
 +  {
 +    ut.actime = ctx->atime;
 +    ut.modtime = ctx->mtime;
-+    utime (ctx->path, &ut);
++    utime (ctx->path, &ut); 
 +  }
 +#endif
  
    /* never announce that a mailbox we've just left has new mail. #3290
     * XXX: really belongs in mx_close_mailbox, but this is a nice hook point */
---- a/OPS
-+++ b/OPS
-@@ -180,3 +180,8 @@
- OP_MAIN_SHOW_LIMIT "show currently active limit pattern"
- OP_MAIN_COLLAPSE_THREAD "collapse/uncollapse current thread"
- OP_MAIN_COLLAPSE_ALL "collapse/uncollapse all threads"
-+OP_SIDEBAR_SCROLL_UP "scroll the mailbox pane up 1 page"
-+OP_SIDEBAR_SCROLL_DOWN "scroll the mailbox pane down 1 page"
-+OP_SIDEBAR_NEXT "go down to next mailbox"
-+OP_SIDEBAR_PREV "go to previous mailbox"
-+OP_SIDEBAR_OPEN "open hilighted mailbox"
+--- a/mx.h
++++ b/mx.h
+@@ -61,6 +61,7 @@
+ int mh_sync_mailbox (CONTEXT *, int *);
+ int mh_check_mailbox (CONTEXT *, int *);
+ int mh_buffy (const char *);
++void mh_buffy_update (const char *, int *, int *, int *);
+ int mh_check_empty (const char *);
+ 
+ int maildir_read_dir (CONTEXT *);
 --- a/pager.c
 +++ b/pager.c
 @@ -29,6 +29,7 @@
@@ -802,14 +864,14 @@ in the "mutt-patched" package.
  
  #include "mutt_crypt.h"
  
-@@ -1099,6 +1100,7 @@
+@@ -1095,6 +1096,7 @@
+   wchar_t wc;
+   mbstate_t mbstate;
+   int wrap_cols = mutt_term_width ((flags & M_PAGER_NOWRAP) ? 0 : Wrap);
++  wrap_cols -= SidebarWidth;
+ 
    if (check_attachment_marker ((char *)buf) == 0)
      wrap_cols = COLS;
- 
-+  wrap_cols -= SidebarWidth;
-   /* FIXME: this should come from lineInfo */
-   memset(&mbstate, 0, sizeof(mbstate));
- 
 @@ -1745,7 +1747,7 @@
      if ((redraw & REDRAW_BODY) || topline != oldtopline)
      {
@@ -835,7 +897,7 @@ in the "mutt-patched" package.
        }
        /* We are going to update the pager status bar, so it isn't
         * necessary to reset to normal color now. */
-@@ -1794,11 +1798,11 @@
+@@ -1794,21 +1798,21 @@
        /* print out the pager status bar */
        SETCOLOR (MT_COLOR_STATUS);
        BKGDSET (MT_COLOR_STATUS);
@@ -845,16 +907,19 @@ in the "mutt-patched" package.
        if (IsHeader (extra) || IsMsgAttach (extra))
        {
 -	size_t l1 = COLS * MB_LEN_MAX;
-+ 	size_t l1 = (COLS-SidebarWidth) * MB_LEN_MAX;
++	size_t l1 = (COLS-SidebarWidth) * MB_LEN_MAX;
  	size_t l2 = sizeof (buffer);
  	hfi.hdr = (IsHeader (extra)) ? extra->hdr : extra->bdy->hdr;
  	mutt_make_string_info (buffer, l1 < l2 ? l1 : l2, NONULL (PagerFmt), &hfi, M_FORMAT_MAKEPRINT);
-@@ -1808,7 +1812,7 @@
+-	mutt_paddstr (COLS, buffer);
++	mutt_paddstr (COLS-SidebarWidth, buffer);
+       }
+       else
        {
  	char bn[STRING];
  	snprintf (bn, sizeof (bn), "%s (%s)", banner, pager_progress_str);
 -	mutt_paddstr (COLS, bn);
-+        mutt_paddstr (COLS, IsHeader (extra) || IsMsgAttach (extra) ?  buffer : banner);
++	mutt_paddstr (COLS-SidebarWidth, bn);
        }
        BKGDSET (MT_COLOR_NORMAL);
        SETCOLOR (MT_COLOR_NORMAL);
@@ -900,25 +965,25 @@ in the "mutt-patched" package.
  	break;
 --- /dev/null
 +++ b/sidebar.c
-@@ -0,0 +1,333 @@
+@@ -0,0 +1,336 @@
 +/*
 + * Copyright (C) ????-2004 Justin Hibbits <jrh29@po.cwru.edu>
 + * Copyright (C) 2004 Thomer M. Gil <mutt@thomer.com>
-+ *
++ * 
 + *     This program is free software; you can redistribute it and/or modify
 + *     it under the terms of the GNU General Public License as published by
 + *     the Free Software Foundation; either version 2 of the License, or
 + *     (at your option) any later version.
-+ *
++ * 
 + *     This program is distributed in the hope that it will be useful,
 + *     but WITHOUT ANY WARRANTY; without even the implied warranty of
 + *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 + *     GNU General Public License for more details.
-+ *
++ * 
 + *     You should have received a copy of the GNU General Public License
 + *     along with this program; if not, write to the Free Software
 + *     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111, USA.
-+ */
++ */ 
 +
 +
 +#if HAVE_CONFIG_H
@@ -1040,6 +1105,8 @@ in the "mutt-patched" package.
 +int draw_sidebar(int menu) {
 +
 +	int lines = option(OPTHELP) ? 1 : 0;
++    lines += option(OPTSTATUSONTOP) ? 1 : 0;
++
 +	BUFFY *tmp;
 +#ifndef USE_SLANG_CURSES
 +        attr_t attrs;
@@ -1119,8 +1186,9 @@ in the "mutt-patched" package.
 +
 +	if ( Incoming == 0 ) return 0;
 +	lines = option(OPTHELP) ? 1 : 0; /* go back to the top */
++    lines += option(OPTSTATUSONTOP) ? 1 : 0;
 +
-+	if ( known_lines != LINES || TopBuffy == 0 || BottomBuffy == 0 )
++	if ( known_lines != LINES || TopBuffy == 0 || BottomBuffy == 0 ) 
 +		calc_boundaries(menu);
 +	if ( CurBuffy == 0 ) CurBuffy = Incoming;
 +
@@ -1159,7 +1227,7 @@ in the "mutt-patched" package.
 +			tmp_folder_name = tmp->path + strlen(Maildir);
 +			for (i = 0; i < strlen(tmp->path) - strlen(Maildir); i++) {
 +				if (tmp_folder_name[i] == '/') sidebar_folder_depth++;
-+			}
++			}   
 +			if (sidebar_folder_depth > 0) {
 +				sidebar_folder_name = malloc(strlen(basename(tmp->path)) + sidebar_folder_depth + 1);
 +				for (i=0; i < sidebar_folder_depth; i++)
@@ -1240,21 +1308,21 @@ in the "mutt-patched" package.
 +/*
 + * Copyright (C) ????-2004 Justin Hibbits <jrh29@po.cwru.edu>
 + * Copyright (C) 2004 Thomer M. Gil <mutt@thomer.com>
-+ *
++ * 
 + *     This program is free software; you can redistribute it and/or modify
 + *     it under the terms of the GNU General Public License as published by
 + *     the Free Software Foundation; either version 2 of the License, or
 + *     (at your option) any later version.
-+ *
++ * 
 + *     This program is distributed in the hope that it will be useful,
 + *     but WITHOUT ANY WARRANTY; without even the implied warranty of
 + *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 + *     GNU General Public License for more details.
-+ *
++ * 
 + *     You should have received a copy of the GNU General Public License
 + *     along with this program; if not, write to the Free Software
 + *     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111, USA.
-+ */
++ */ 
 +
 +#ifndef SIDEBAR_H
 +#define SIDEBAR_H
@@ -1273,59 +1341,3 @@ in the "mutt-patched" package.
 +void set_buffystats(CONTEXT*);
 +
 +#endif /* SIDEBAR_H */
---- a/doc/Muttrc
-+++ b/doc/Muttrc
-@@ -657,6 +657,26 @@
- # $crypt_autosign, $crypt_replysign and $smime_is_default.
- # 
- # 
-+# set sidebar_visible=no
-+#
-+# Name: sidebar_visible
-+# Type: boolean
-+# Default: no
-+#
-+#
-+# This specifies whether or not to show sidebar (left-side list of folders).
-+#
-+#
-+# set sidebar_width=0
-+#
-+# Name: sidebar_width
-+# Type: number
-+# Default: 0
-+#
-+#
-+# The width of the sidebar.
-+#
-+#
- # set crypt_autosign=no
- #
- # Name: crypt_autosign
---- a/imap/imap.c
-+++ b/imap/imap.c
-@@ -1521,7 +1521,7 @@
- 
-     imap_munge_mbox_name (munged, sizeof (munged), name);
-     snprintf (command, sizeof (command),
--	      "STATUS %s (UIDNEXT UIDVALIDITY UNSEEN RECENT)", munged);
-+	      "STATUS %s (UIDNEXT UIDVALIDITY UNSEEN RECENT MESSAGES)", munged);
- 
-     if (imap_exec (idata, command, IMAP_CMD_QUEUE) < 0)
-     {
---- a/imap/command.c
-+++ b/imap/command.c
-@@ -1011,6 +1011,13 @@
- 	     opened */
- 	  status->uidnext = oldun;
- 
-+        /* Added to make the sidebar show the correct numbers */
-+        if (status->messages)
-+        {
-+          inc->msgcount = status->messages;
-+          inc->msg_unread = status->unseen;
-+        }
-+
-         FREE (&value);
-         return;
-       }
