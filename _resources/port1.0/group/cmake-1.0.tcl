@@ -2,7 +2,7 @@
 # $Id$
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
-# Copyright (c) 2010-2012 The MacPorts Project
+# Copyright (c) 2010-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -38,6 +38,7 @@
 set cmake_share_module_dir ${prefix}/share/cmake/modules
 
 depends_build-append port:cmake
+depends_skip_archcheck cmake
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
