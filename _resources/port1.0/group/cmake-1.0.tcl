@@ -43,7 +43,7 @@ depends_skip_archcheck cmake
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
 
-configure.cmd       cmake
+configure.cmd       ${prefix}/bin/cmake
 
 configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
 
