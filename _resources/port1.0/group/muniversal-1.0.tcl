@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009-2012 The MacPorts Project,
+# Copyright (c) 2009-2013 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -219,7 +219,7 @@ variant universal {
                 if { $merger_host($arch) != "" } {
                     set host  --host=$merger_host($arch)
                 }
-            } else {
+            } elseif {[file tail ${configure.cmd}] != "cmake"} {
                 # check if building for a word length we can't run
                 set bits_differ 0
                 if {(${arch}=="x86_64" || ${arch}=="ppc64") &&
