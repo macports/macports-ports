@@ -7,7 +7,7 @@ categories              math
 license                 BSD
 name                    atlas
 version                 3.10.1
-revision                1
+revision                2
 
 # additional versions
 set lapackversion       3.4.2
@@ -221,11 +221,6 @@ if {[variant_isset nofortran]} {
     configure.args-append   --nof77
 }
 
-if {${build_arch} == "ppc" || ${build_arch} == "ppc64"} {
-
-    configure.args-append   -t 0
-}
-
 # MacPorts defaults to ppc on G4 and G5, so we must override 64-bit
 # detection by Atlas, even if we are on a G5
 
@@ -318,6 +313,16 @@ if {[variant_isset universal]} {
 if {[info exists gccversion] && ${gccnumber} > 45} {
     configure.args-append   -Si omp 1 
 }
+
+pre-fetch {
+    # If we run on a mono-processor machine (PPC), then disable threading
+
+    if {![catch {sysctl hw.logicalcpu} result] && $result == 1} {
+    configure.args-append    -t 0
+    ui_msg "Building sequential only version of atlas."
+    }
+}
+
 
 extract {
     # extract Atlas and move to a consistent working directory name
@@ -499,16 +504,16 @@ post-configure {
 
         # Ensure libgomp is linked
         if {[info exists gccversion] && ${gccnumber} > 45} {
-			set gmpfx	${prefix}/lib/gcc${gccnumber}
-			if {[file exists ${gmpfx}/${arch}/libgomp.dylib]} {
-				reinplace -E \
-					"s|(LIBS =.*)|\\1 ${gmpfx}/${arch}/libgomp.dylib|" \
-					${atlas_path}/build/Make.inc
-			} else {
-				reinplace -E \
-					"s|(LIBS =.*)|\\1 ${gmpfx}/libgomp.dylib|" \
-					${atlas_path}/build/Make.inc
-			}
+            set gmpfx    ${prefix}/lib/gcc${gccnumber}
+            if {[file exists ${gmpfx}/${arch}/libgomp.dylib]} {
+                reinplace -E \
+                    "s|(LIBS =.*)|\\1 ${gmpfx}/${arch}/libgomp.dylib|" \
+                    ${atlas_path}/build/Make.inc
+            } else {
+                reinplace -E \
+                    "s|(LIBS =.*)|\\1 ${gmpfx}/libgomp.dylib|" \
+                    ${atlas_path}/build/Make.inc
+            }
         }
     }
 }
@@ -520,19 +525,30 @@ build.dir               ${workpath}/${name}-${version}/build
 
 post-build {
     if {! [variant_isset universal]} {
+        set libdir ${build.dir}/lib
         reinplace "s|^LIBTOOL=.*$|LIBTOOL=\$\(GCC\) \$\(GCCFLAGS\)|" \
-            ${build.dir}/lib/Makefile
-        reinplace "s|dynamic|dynamiclib|g" \
-            ${build.dir}/lib/Makefile
-        system "cd ${build.dir}/lib && ${build.cmd} shared_all"
+            ${libdir}/Makefile
+        reinplace "s|dynamic|dynamiclib|g" ${libdir}/Makefile
+
+        # On mono-processors machines, build libsatlas.dylib only
+        if {![catch {sysctl hw.logicalcpu} result] && $result == 1} {
+            system -W ${libdir} "${build.cmd} dylib"
+        } else {
+            system -W ${libdir} "${build.cmd} shared_all"
+        }
     } else {
         foreach arch ${universal_archs_to_use} {
+            set libdir ${workpath}/${name}-${version}-${arch}/build/lib
             reinplace "s|^LIBTOOL=.*$|LIBTOOL=\$\(GCC\) \$\(GCCFLAGS\)|" \
-                ${workpath}/${name}-${version}-${arch}/build/lib/Makefile
-            reinplace "s|dynamic|dynamiclib|g" \
-                ${workpath}/${name}-${version}-${arch}/build/lib/Makefile
-            system "cd ${workpath}/${name}-${version}-${arch}/build/lib && \
-                    ${build.cmd} shared_all"
+                ${libdir}/Makefile
+            reinplace "s|dynamic|dynamiclib|g" ${libdir}/Makefile
+
+        # Same as above
+            if {![catch {sysctl hw.logicalcpu} result] && $result == 1} {
+                system -W ${libdir} "${build.cmd} dylib"
+            } else {
+                system -W ${libdir} "${build.cmd} shared_all"
+            }
         }
     }
 }
@@ -540,5 +556,13 @@ post-build {
 destroot.dir          ${build.dir}
 destroot.destdir      DESTDIR=${destroot}${prefix}
 
+post-destroot {
+    # On monoprocessor machines, make tatlas and satlas synonymous
+    if {![catch {sysctl hw.logicalcpu} result] && $result == 1} {
+        set libdir ${destroot}${prefix}/lib
+        system -W ${libdir} "ln -s libsatlas.dylib libtatlas.dylib"
+    }
+}
+    
 livecheck.name        math-atlas
 livecheck.distname    Stable
