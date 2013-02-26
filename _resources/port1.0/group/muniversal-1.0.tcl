@@ -58,23 +58,7 @@ default merger_arch_compiler {no}
 
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
-    switch -exact ${configure.compiler} {
-        gcc-4.0 -
-        gcc-4.2 -
-        llvm-gcc-4.2 -
-        clang -
-        apple-gcc-4.0 -
-        apple-gcc-4.2 -
-        macports-clang-2.9 -
-        macports-clang-3.0 -
-        macports-clang-3.1 -
-        macports-clang {
-            return yes
-        }
-        default {
-            return no
-        }
-    }
+    return [regexp {^gcc-4|llvm|apple|clang} ${configure.compiler}]
 }
 
 proc muniversal_get_arch_flag {arch {fortran ""}} {
