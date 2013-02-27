@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2009-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -194,7 +194,7 @@ proc php5extension.setup {extensions version {source ""}} {
         livecheck.regex             {>([0-9.]+)</a></th>\s*<[^>]+>stable<}
     } elseif {"bundled" == ${source}} {
         homepage                    http://www.php.net/[lindex ${php5extension.extensions} 0]
-        master_sites                php
+        default master_sites        {php:get/[lindex ${distfiles} 0]/from/this/mirror?dummy=}
 
         dist_subdir                 php5
         distname                    php-${version}

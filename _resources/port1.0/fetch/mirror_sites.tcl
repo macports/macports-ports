@@ -1,5 +1,4 @@
 # $Id$
-# mirror_sites.tcl
 #
 # List of master site classes for use in Portfiles
 # Most of these are taken shamelessly from FreeBSD.
@@ -347,25 +346,63 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 }
 
 # http://php.net/mirrors.php
+# The country code domains without number suffix are supposed to do round-robin
+# redirects to an available mirror in that country and should be used if available.
 set portfetch::mirror_sites::sites(php) {
-    http://at2.php.net/distributions/:nosubdir
-    http://au.php.net/distributions/:nosubdir
-    http://ch2.php.net/distributions/:nosubdir
-    http://cn2.php.net/distributions/:nosubdir
-    http://de3.php.net/distributions/:nosubdir
-    http://es.php.net/distributions/:nosubdir
-    http://fr2.php.net/distributions/:nosubdir
-    http://id.php.net/distributions/:nosubdir
-    http://ie.php.net/distributions/:nosubdir
-    http://in.php.net/distributions/:nosubdir
-    http://jp2.php.net/distributions/:nosubdir
-    http://nl.php.net/distributions/:nosubdir
-    http://no2.php.net/distributions/:nosubdir
-    http://se2.php.net/distributions/:nosubdir
-    http://tw2.php.net/distributions/:nosubdir
-    http://uk.php.net/distributions/:nosubdir
-    http://us2.php.net/distributions/:nosubdir
-    http://us3.php.net/distributions/:nosubdir
+    http://am.php.net/:nosubdir
+    http://ar2.php.net/:nosubdir
+    http://at.php.net/:nosubdir
+    http://au.php.net/:nosubdir
+    http://bd.php.net/:nosubdir
+    http://be.php.net/:nosubdir
+    http://bg.php.net/:nosubdir
+    http://br.php.net/:nosubdir
+    http://ca.php.net/:nosubdir
+    http://ch.php.net/:nosubdir
+    http://cl.php.net/:nosubdir
+    http://cn1.php.net/:nosubdir
+    http://cz.php.net/:nosubdir
+    http://de.php.net/:nosubdir
+    http://dk1.php.net/:nosubdir
+    http://ee1.php.net/:nosubdir
+    http://es.php.net/:nosubdir
+    http://fr.php.net/:nosubdir
+    http://gr.php.net/:nosubdir
+    http://hk.php.net/:nosubdir
+    http://hu.php.net/:nosubdir
+    http://id.php.net/:nosubdir
+    http://ie.php.net/:nosubdir
+    http://il.php.net/:nosubdir
+    http://in.php.net/:nosubdir
+    http://ir.php.net/:nosubdir
+    http://is.php.net/:nosubdir
+    http://it.php.net/:nosubdir
+    http://jm.php.net/:nosubdir
+    http://jp.php.net/:nosubdir
+    http://kr1.php.net/:nosubdir
+    http://li1.php.net/:nosubdir
+    http://lt.php.net/:nosubdir
+    http://lu.php.net/:nosubdir
+    http://lv.php.net/:nosubdir
+    http://mx.php.net/:nosubdir
+    http://nc.php.net/:nosubdir
+    http://nl.php.net/:nosubdir
+    http://no.php.net/:nosubdir
+    http://nz.php.net/:nosubdir
+    http://pa.php.net/:nosubdir
+    http://pk.php.net/:nosubdir
+    http://pl.php.net/:nosubdir
+    http://pt.php.net/:nosubdir
+    http://se.php.net/:nosubdir
+    http://sg.php.net/:nosubdir
+    http://si.php.net/:nosubdir
+    http://th.php.net/:nosubdir
+    http://tr.php.net/:nosubdir
+    http://tw.php.net/:nosubdir
+    http://tz.php.net/:nosubdir
+    http://ua2.php.net/:nosubdir
+    http://uk.php.net/:nosubdir
+    http://us.php.net/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
