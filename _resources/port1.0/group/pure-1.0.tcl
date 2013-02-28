@@ -47,7 +47,7 @@ proc pure.setup {module version} {
 
     name                        pure-${module}
     version                     ${version}
-    homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#${name}
+    homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#markdown-header-${name}
     master_sites                http://cdn.bitbucket.org/purelang/pure-lang/downloads/
 
     depends_lib                 path:lib/libpure.dylib:pure
