@@ -105,9 +105,9 @@ configure.args-append   -DBUILD_doc=OFF \
 # conflicts with those installed into system paths by the user.
 configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
                         -DGETTEXT_INCLUDE_DIR=${prefix}/include \
-                        -DGETTEXT_LIBRARY=${prefix}/libgettextlib.dylib \
+                        -DGETTEXT_LIBRARY=${prefix}/lib/libgettextlib.dylib \
                         -DGIF_INCLUDE_DIR=${prefix}/include \
-                        -DGIF_LIBRARY=${prefix}/libgif.dylib \
+                        -DGIF_LIBRARY=${prefix}/lib/libgif.dylib \
                         -DJASPER_INCLUDE_DIR=${prefix}/include \
                         -DJASPER_LIBRARY=${prefix}/lib/libjasper.dylib \
                         -DJPEG_INCLUDE_DIR=${prefix}/include \
