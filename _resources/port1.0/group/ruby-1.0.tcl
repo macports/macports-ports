@@ -30,12 +30,69 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Define these variables assuming ruby1.8 to make them accessible in
-# the portfile after port group declaration. They can be modified by
-# ruby.setup, e.g. to use another ruby than 1.8.
-set ruby.bin            ${prefix}/bin/ruby
-set ruby.rdoc           ${prefix}/bin/rdoc
-set ruby.gem            ${prefix}/bin/gem
+# Usage:
+#
+#   1. use ruby.setup
+#
+#     PortGroup        ruby 1.0
+#     ruby.setup       module version type {} ruby19
+#
+#   2. use ruby.branch
+#
+#     PortGroup        ruby 1.0
+#     ruby.branch      1.9
+#     depends_lib      port:ruby${ruby.suffix}
+#     build.cmd        ${ruby.bin}
+
+# options:
+#   ruby.branch: select ruby version. 1.8 or 1.9.
+#   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
+#        or not.
+# values:
+#   ruby.bin, ruby.rdoc, ruby.gem: fullpath to commands for ${ruby.branch}.
+#   ruby.suffix: suffix of portname. port:ruby${ruby.suffix} or
+#        port:rb${ruby.suffix}-foo.
+#   ruby.bindir: install location of commands without suffix from rb-foo.
+#   ruby.gemdir: install location of rubygems.
+#        such as "${prefix}/lib/ruby1.9/gems/1.9.1".
+#   ruby.link_binaries_suffix: suffix of commands from rb-foo under
+#        ${prefix}/bin. such as "-1.8" or "-1.9".
+#   (obsoleted values)
+#   ruby.prog_suffix: use ruby.branch.
+#   ruby.version: use ruby.api_version.
+# values from ruby.setup:
+#   ruby.module: port name without prefix. rb-${ruby.module}.
+#   ruby.project: project name at rubygems, rubyforge or sourceforge.
+
+options ruby.default_branch
+default ruby.default_branch 1.8
+options ruby.branch
+options ruby.bin ruby.rdoc ruby.gem ruby.bindir ruby.gemdir ruby.suffix
+option_proc ruby.branch ruby_set_branch
+proc ruby_set_branch {option action args} {
+    if {$action != "set"} {
+        return
+    }
+    global prefix ruby.branch \
+           ruby.bin ruby.rdoc ruby.gem ruby.bindir ruby.gemdir \
+           ruby.suffix ruby.link_binaries_suffix ruby.api_version
+    set ruby.bin            ${prefix}/bin/ruby${ruby.branch}
+    set ruby.rdoc           ${prefix}/bin/rdoc${ruby.branch}
+    set ruby.gem            ${prefix}/bin/gem${ruby.branch}
+    set ruby.bindir         ${prefix}/libexec/ruby${ruby.branch}
+    set ruby.gemdir         ${prefix}/lib/ruby${ruby.branch}/gems/${ruby.api_version}
+    # gem command for 1.8 from port:rb-rubygems
+    if {${ruby.branch} eq "1.8"} {
+        set ruby.gem        ${ruby.bindir}/gem
+        set ruby.gemdir     ${prefix}/lib/ruby/gems/${ruby.api_version}
+    }
+    set ruby.suffix         [join [split ${ruby.branch} .] {}]
+    if {${ruby.branch} eq "1.8"} {
+        set ruby.suffix     ""
+    }
+    set ruby.link_binaries_suffix -${ruby.branch}
+    set ruby.prog_suffix    ${ruby.branch}
+}
 
 proc ruby.extract_config {var {default ""}} {
     global ruby.bin
@@ -45,43 +102,48 @@ proc ruby.extract_config {var {default ""}} {
     return $val
 }
 
-options ruby.version ruby.arch ruby.lib ruby.archlib
-default ruby.version    {[ruby.extract_config ruby_version]}
-default ruby.arch       {[ruby.extract_config arch "${os.arch}-${os.platform}${os.major}"]}
+options ruby.api_version ruby.lib ruby.archlib
+default ruby.api_version    {[ruby.extract_config ruby_version]}
+default ruby.arch           {[ruby.extract_config arch "${os.arch}-${os.platform}${os.major}"]}
 # define installation libraries as vendor location
-default ruby.lib        {[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.version}]}
-default ruby.archlib    {[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]}
+default ruby.lib            {[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.api_version}]}
+default ruby.archlib        {[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]}
+# ruby.version is obsoleted. use ruby.api_version.
+options ruby.version
+default ruby.version        {[ruby.extract_config ruby_version]}
 
-set ruby.module     ""
-set ruby.filename   ""
-set ruby.project    ""
-set ruby.docs       {}
-set ruby.srcdir     ""
+set ruby.module         ""
+set ruby.filename       ""
+set ruby.project        ""
+set ruby.docs           {}
+set ruby.srcdir         ""
+
+options ruby.link_binaries
+default ruby.link_binaries yes
+
+default ruby.branch         ${ruby.default_branch}
 
 # ruby group setup procedure; optional for ruby 1.8 if you want only
 # basic variables, like ruby.lib and ruby.archlib.
 proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {implementation "ruby"}} {
     global destroot prefix worksrcpath os.platform
     global ruby.bin ruby.rdoc ruby.gem
-    global ruby.version ruby.lib
+    global ruby.api_version ruby.lib ruby.suffix ruby.bindir ruby.gemdir
     global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
+    global ruby.link_binaries_suffix
+    # ruby.version is obsoleted. use ruby.gemdir.
     global ruby.prog_suffix
 
     if {${implementation} eq "ruby19"} {
-        set ruby.port_prefix rb19
-        set ruby.prog_suffix "1.9"
+        ruby.branch 1.9
+        set ruby.prog_suffix 1.9
     } elseif {${implementation} eq "ruby"} {
-        # ruby.bin, ruby.rdoc, and ruby.gem set to 1.8 by default
-        set ruby.port_prefix rb
-        # no program suffix by default, so leave as blank
+        ruby.branch 1.8
         set ruby.prog_suffix ""
     } else {
         ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19 possible)"
         return -code error "ruby.setup failed"
     }
-    set ruby.bin    ${prefix}/bin/ruby${ruby.prog_suffix}
-    set ruby.rdoc   ${prefix}/bin/rdoc${ruby.prog_suffix}
-    set ruby.gem    ${prefix}/bin/gem${ruby.prog_suffix}
 
     # define ruby global names and lists
     # check if module is a list or string
@@ -99,7 +161,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     }
     set ruby.docs   ${docs}
 
-    name            ${ruby.port_prefix}-[string tolower ${ruby.module}]
+    name            rb${ruby.suffix}-[string tolower ${ruby.module}]
     version         ${vers}
     categories      ruby
 
@@ -199,6 +261,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.cmd    ${ruby.bin} -rvendor-specific -rdestroot install.rb
             destroot.target
             destroot.destdir
+            post-destroot {
+                foreach file [readdir ${destroot}${prefix}/bin] {
+                    move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
+                }
+            }
         }
         copy_install:* {
             set ruby.srcdir [lindex [split ${type} {:}] 1]
@@ -225,7 +292,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
         install.rb {
             configure.cmd       ${ruby.bin} -rvendor-specific install.rb
-            configure.pre_args  config
+            configure.pre_args  config --bin-dir=${destroot}${ruby.bindir}
 
             build.cmd           ${ruby.bin} -rvendor-specific install.rb
             build.target        setup
@@ -264,6 +331,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.cmd        ${ruby.bin} -rvendor-specific setup.rb
             destroot.target     install
             destroot.destdir
+            post-destroot {
+                foreach file [readdir ${destroot}${prefix}/bin] {
+                    move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
+                }
+            }
         }
         extconf.rb {
             configure.cmd       ${ruby.bin} -rvendor-specific extconf.rb
@@ -273,6 +345,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             build.args          RUBY="${ruby.bin} -rvendor-specific"
 
             destroot.args       RUBY="${ruby.bin} -rvendor-specific"
+            post-destroot {
+                foreach file [readdir ${destroot}${prefix}/bin] {
+                    move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
+                }
+            }
         }
         gnu {
             build.args          RUBY="${ruby.bin} -rvendor-specific"
@@ -301,16 +378,16 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             build {}
 
             pre-destroot {
-                xinstall -d -m 0755 ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}
+                xinstall -d -m 0755 ${destroot}${ruby.gemdir}
             }
 
             destroot {
-                system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version} ${distpath}/${distname}"
+                system "cd ${worksrcpath} && ${ruby.gem} install --no-ri --no-rdoc --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
 
-                set binDir ${destroot}${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.version}/bin
+                set binDir ${destroot}${ruby.gemdir}/bin
                 if {[file isdirectory $binDir]} {
                     foreach file [readdir $binDir] {
-                        file copy [file join $binDir $file] ${destroot}${prefix}/bin
+                        file copy [file join $binDir $file] ${destroot}${ruby.bindir}
                     }
                 }
             }
@@ -329,7 +406,18 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         configure.universal_args-delete  --disable-dependency-tracking
     }
 
+    pre-destroot {
+        xinstall -d -m 0755 ${destroot}${ruby.bindir}
+    }
+
     post-destroot {
+        if {${ruby.link_binaries}} {
+            foreach bin [glob -nocomplain -tails -directory "${destroot}${ruby.bindir}" *] {
+                if {[catch {file type "${destroot}${prefix}/bin/${bin}${ruby.link_binaries_suffix}"}]} {
+                    ln -s "${ruby.bindir}/${bin}" "${destroot}${prefix}/bin/${bin}${ruby.link_binaries_suffix}"
+                }
+            }
+        }
         # Install documentation files (if specified)
         if {[llength ${ruby.docs}] > 0} {
             set docPath ${prefix}/share/doc/${name}
