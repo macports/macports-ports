@@ -75,7 +75,8 @@ proc ruby_set_branch {option action args} {
     }
     global prefix ruby.branch \
            ruby.bin ruby.rdoc ruby.gem ruby.bindir ruby.gemdir \
-           ruby.suffix ruby.link_binaries_suffix ruby.api_version
+           ruby.suffix ruby.link_binaries_suffix ruby.api_version \
+           ruby.prog_suffix
     set ruby.bin            ${prefix}/bin/ruby${ruby.branch}
     set ruby.rdoc           ${prefix}/bin/rdoc${ruby.branch}
     set ruby.gem            ${prefix}/bin/gem${ruby.branch}
