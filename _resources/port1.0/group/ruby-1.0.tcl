@@ -45,7 +45,7 @@
 #     build.cmd        ${ruby.bin}
 
 # options:
-#   ruby.branch: select ruby version. 1.8 or 1.9.
+#   ruby.branch: select ruby version. 1.8, 1.9 or 2.0.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 # values:
@@ -93,6 +93,9 @@ proc ruby_set_branch {option action args} {
     }
     set ruby.link_binaries_suffix -${ruby.branch}
     set ruby.prog_suffix    ${ruby.branch}
+    if {${ruby.branch} eq "1.8"} {
+        set ruby.prog_suffix     ""
+    }
 }
 
 proc ruby.extract_config {var {default ""}} {
@@ -137,12 +140,12 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 
     if {${implementation} eq "ruby19"} {
         ruby.branch 1.9
-        set ruby.prog_suffix 1.9
+    } elseif {${implementation} eq "ruby20"} {
+        ruby.branch 2.0
     } elseif {${implementation} eq "ruby"} {
         ruby.branch 1.8
-        set ruby.prog_suffix ""
     } else {
-        ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19 possible)"
+        ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19, ruby20 possible)"
         return -code error "ruby.setup failed"
     }
 
@@ -383,7 +386,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             }
 
             destroot {
-                system "cd ${worksrcpath} && ${ruby.gem} install --no-ri --no-rdoc --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
+                system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
 
                 set binDir ${destroot}${ruby.gemdir}/bin
                 if {[file isdirectory $binDir]} {
