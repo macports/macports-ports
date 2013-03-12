@@ -1,5 +1,5 @@
---- configure.py.orig	2013-03-05 11:02:19.000000000 -0500
-+++ configure.py	2013-03-05 11:02:41.000000000 -0500
+--- configure.py.orig	2013-03-12 11:48:19.000000000 -0400
++++ configure.py	2013-03-12 11:49:23.000000000 -0400
 @@ -44,6 +44,7 @@
  qt_dir = None
  qt_incdir = None
@@ -8,7 +8,16 @@
  qt_bindir = None
  qt_datadir = None
  qt_pluginsdir = None
-@@ -1003,16 +1004,9 @@
+@@ -398,8 +399,6 @@
+ 
+         if not qt_shared:
+             sipconfig.inform("QtDesigner module disabled with static Qt libraries.")
+-        elif sipcfg.universal:
+-            sipconfig.inform("QtDesigner module disabled with universal binaries.")
+         else:
+             check_module("QtDesigner", "QExtensionFactory",
+                     "new QExtensionFactory()")
+@@ -1003,16 +1002,9 @@
                      dynamic_pylib = "--enable-shared" in config_args
  
                  if dynamic_pylib:
@@ -27,7 +36,7 @@
                  else:
                      sipconfig.inform("Qt Designer plugin disabled because Python library is static")
                      opts.designer_plugin = False
-@@ -1111,7 +1105,10 @@
+@@ -1111,7 +1103,10 @@
  
      sipconfig.inform("SIP %s is being used." % sipcfg.sip_version_str)
      sipconfig.inform("The Qt header files are in %s." % qt_incdir)
@@ -39,7 +48,7 @@
      sipconfig.inform("The Qt binaries are in %s." % qt_bindir)
      sipconfig.inform("The Qt mkspecs directory is in %s." % qt_datadir)
      sipconfig.inform("These PyQt modules will be built: %s." % ", ".join(pyqt_modules))
-@@ -1174,7 +1171,8 @@
+@@ -1174,7 +1169,8 @@
          "qt_dir":             qt_dir,
          "qt_data_dir":        qt_datadir,
          "qt_inc_dir":         qt_incdir,
@@ -49,7 +58,7 @@
      }
  
      sipconfig.create_config_module(module, template, content, macros)
-@@ -1830,7 +1828,7 @@
+@@ -1830,7 +1826,7 @@
              lfile = license.LicenseFile
          except AttributeError:
              lfile = None
@@ -58,7 +67,7 @@
          ltype = None
  
      if ltype is None:
-@@ -1947,12 +1945,14 @@
+@@ -1947,12 +1943,14 @@
      names = list(sipcfg.build_macros().keys())
      names.append("INCDIR_QT")
      names.append("LIBDIR_QT")
@@ -74,7 +83,7 @@
      }
  
      macros = sipconfig.parse_build_macros(fname, names, overrides, properties)
-@@ -1998,7 +1998,7 @@
+@@ -1998,7 +1996,7 @@
  
      # Work out how Qt was built on MacOS.
      if sys.platform == "darwin":
@@ -83,7 +92,7 @@
              global qt_framework
              qt_framework = 1
  
-@@ -2015,6 +2015,7 @@
+@@ -2015,6 +2013,7 @@
      sipcfg.qt_threaded = 1
      sipcfg.qt_dir = qt_dir
      sipcfg.qt_lib_dir = qt_libdir
@@ -91,7 +100,7 @@
  
      return ConfigurePyQt4(generator)
  
-@@ -2030,7 +2031,7 @@
+@@ -2030,7 +2029,7 @@
  
  
  def get_qt_configuration():
@@ -100,7 +109,7 @@
      qt_pluginsdir and qt_xfeatures globals for the Qt installation.
      """
      sipconfig.inform("Determining the layout of your Qt installation...")
-@@ -2103,6 +2104,7 @@
+@@ -2103,6 +2102,7 @@
      out << QLibraryInfo::location(QLibraryInfo::PrefixPath) << '\\n';
      out << QLibraryInfo::location(QLibraryInfo::HeadersPath) << '\\n';
      out << QLibraryInfo::location(QLibraryInfo::LibrariesPath) << '\\n';
@@ -108,7 +117,7 @@
      out << QLibraryInfo::location(QLibraryInfo::BinariesPath) << '\\n';
      out << QLibraryInfo::location(QLibraryInfo::DataPath) << '\\n';
      out << QLibraryInfo::location(QLibraryInfo::PluginsPath) << '\\n';
-@@ -2225,20 +2227,21 @@
+@@ -2225,20 +2225,21 @@
      lines = f.read().strip().split("\n")
      f.close()
  
