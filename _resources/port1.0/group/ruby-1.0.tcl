@@ -229,7 +229,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 
     post-extract {
         # Create the work directory for gem-based ruby ports.
-        system "mkdir -p ${worksrcpath}"
+        file mkdir ${worksrcpath}
         system "find ${worksrcpath} -type d -name CVS | xargs rm -rf"
     }
 
@@ -386,7 +386,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             }
 
             destroot {
-                system "cd ${worksrcpath} && ${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
+                system -W ${worksrcpath} "${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
 
                 set binDir ${destroot}${ruby.gemdir}/bin
                 if {[file isdirectory $binDir]} {
