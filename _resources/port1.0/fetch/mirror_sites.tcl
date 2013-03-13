@@ -465,7 +465,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://switch.dl.sourceforge.net/
     http://tenet.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
-    http://voxel.dl.sourceforge.net/
     http://waix.dl.sourceforge.net/
 }
 
