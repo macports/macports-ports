@@ -342,13 +342,13 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             }
         }
         extconf.rb {
-            configure.cmd       ${ruby.bin} -rvendor-specific extconf.rb
+            configure.cmd       ${ruby.bin} extconf.rb
             configure.pre_args
-            configure.args      --prefix=${prefix}
+            configure.args      --prefix=${prefix} --vendor
 
-            build.args          RUBY="${ruby.bin} -rvendor-specific"
+            build.args          RUBY="${ruby.bin}"
 
-            destroot.args       RUBY="${ruby.bin} -rvendor-specific"
+            destroot.args       RUBY="${ruby.bin}"
             post-destroot {
                 foreach file [readdir ${destroot}${prefix}/bin] {
                     move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
