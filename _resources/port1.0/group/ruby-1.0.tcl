@@ -386,7 +386,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             }
 
             destroot {
-                system -W ${worksrcpath} "${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}"
+                system -W ${worksrcpath} "${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}.gem"
 
                 set binDir ${destroot}${ruby.gemdir}/bin
                 if {[file isdirectory $binDir]} {
