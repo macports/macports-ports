@@ -88,3 +88,9 @@ variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
     configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
 }
+
+# cmake doesn't like --enable-debug, so in case a portfile sets
+# --enable-debug (regardless of variant) we remove it
+if {[string first "--enable-debug" ${configure.args}] > -1} {
+    configure.args-delete     --enable-debug
+}
