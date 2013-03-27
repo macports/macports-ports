@@ -86,6 +86,34 @@ proc muniversal_get_arch_flag {arch {fortran ""}} {
     return ${archf}
 }
 
+# set up the merger-post-destroot hook
+
+proc merger_target_provides {ditem args} {
+    global targets
+    # register just the procedure, no pre-/post-
+    # User-code exceptions are caught and returned as a result of the target.
+    # Thus if the user code breaks, dependent targets will not execute.
+    foreach target $args {
+        set origproc [ditem_key $ditem procedure]
+        set ident [ditem_key $ditem name]
+        proc merger-post-$target {args} "
+            variable proc_index
+            set proc_index \[llength \[ditem_key $ditem post\]\]
+            ditem_append $ditem merger-post proc-merger-post-${ident}-${target}-\${proc_index}
+            proc proc-merger-post-${ident}-${target}-\${proc_index} {name} \"
+                if {\\\[catch userproc-merger-post-${ident}-${target}-\${proc_index} result\\\]} {
+                    return -code error \\\$result
+                } else {
+                    return 0
+                }
+            \"
+            makeuserproc userproc-merger-post-${ident}-${target}-\${proc_index} \$args
+        "
+    }
+}
+
+merger_target_provides ${org.macports.destroot} destroot
+
 variant universal {
     global universal_archs_to_use
 
@@ -397,6 +425,26 @@ variant universal {
             eval destroot.destdir ${destdirSave}
         }
         delete ${destroot}
+
+        # execute merger-post-destroot, if it exists
+
+        set ditem ${org.macports.destroot}
+        set procedure [ditem_key $ditem merger-post]
+        if {$procedure != ""} {
+            set targetname [ditem_key $ditem name]
+            ui_debug "Executing org.macports.merger-post-destroot"
+            set result [catch { $procedure $targetname } errstr]
+            # Save variables in order to re-throw the same error code.
+            set errcode $::errorCode
+            set errinfo $::errorInfo
+            if {$result != 0} {
+                set portname $subport
+                ui_error "$targetname for port $portname returned: $errstr"
+                ui_debug "Error code: $errcode"
+                ui_debug "Backtrace: $errinfo"
+                return $result
+            }
+        }
 
         # Merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
         #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
