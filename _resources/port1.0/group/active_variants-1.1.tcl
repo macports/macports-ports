@@ -45,7 +45,9 @@
 #
 # where
 #  $name
-#    is the name of the port you're trying to check (required)
+#    is the name of the port you're trying to check (required), which can be
+#    specified as either just the port, or via "(bin:lib:path):FOO:port"
+#    as accepted by the dependency parser.
 #  $required
 #    is a list of variants that must be enabled for the test to succeed
 #    (required; remember this can also be a space-separated string or just
@@ -81,8 +83,24 @@
 #  v1.1:
 #   - require_active_variants no longer needs to be used in a pre-configure
 #     phase manually, because it automatically wraps itself in pre-configure.
+#   - the active_variants portgroup can now also deal with depspec-style
+#     dependencies, e.g., require_active_variants path:foo/bar:standardport
+#     variant
 
 proc active_variants {name required {forbidden {}}} {
+	# get the port which will provide $name; this allows us to support e.g.,
+	# path-style dependencies. This comes from port1.0/portutil.tcl and should
+	# probably not be considered public API.
+	set port [_get_dep_port $name]
+	if {$port == ""} {
+	    ui_error "active_variants: Error: invalid port name '${name}'"
+	    ui_error "  expecting either: port or (bin:lib:path):foo:port"
+	    return 0
+	}
+	if {$name != $port} {
+	    ui_debug "Checking $port for active variants for depspec '$name'"
+	}
+
 	# registry_active comes from a list of aliased procedures in
 	# macports1.0/macports.tcl, line 1238 - 1303.
 	#
@@ -105,13 +123,13 @@ proc active_variants {name required {forbidden {}}} {
 	# block.
 
 	# this will throw if $name isn't active
-	set installed [lindex [registry_active $name] 0]
+	set installed [lindex [registry_active $port] 0]
 
 	# In $installed there are in order: name, version, revision, variants,
 	# a boolean indicating whether the port is installed and the epoch. So,
 	# we're interested in the field at offset 3.
 	set variants [lindex $installed 3]
-	ui_debug "$name is installed with the following variants: $variants"
+	ui_debug "$port is installed with the following variants: $variants"
 	ui_debug "  required: $required, forbidden: $forbidden"
 
 	# split by "+" into the separate variant names
