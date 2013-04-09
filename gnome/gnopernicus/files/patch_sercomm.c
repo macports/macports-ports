@@ -1,6 +1,6 @@
---- braille/libbrl/sercomm.c.org	Mon Sep 27 16:45:19 2004
-+++ braille/libbrl/sercomm.c	Mon Sep 27 16:45:54 2004
-@@ -118,6 +118,11 @@
+--- braille/libbrl/sercomm.c.orig	2006-05-08 03:01:52.000000000 -0700
++++ braille/libbrl/sercomm.c	2013-04-08 21:20:22.000000000 -0700
+@@ -102,6 +102,11 @@
  #if defined(OLCUC)
  	options.c_oflag &= ~OLCUC;
  #endif
