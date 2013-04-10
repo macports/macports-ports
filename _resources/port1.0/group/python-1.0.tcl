@@ -200,7 +200,7 @@ default python.bin  {[python_get_defaults bin]}
 default python.lib  {[python_get_defaults lib]}
 default python.pkgd {[python_get_defaults pkgd]}
 default python.libdir {${python.prefix}/lib/python${python.branch}}
-default python.include  {${python.prefix}/include/python${python.branch}}
+default python.include  {[python_get_defaults include]}
 
 default build.cmd       {"${python.bin} setup.py [python_get_defaults setup_args]"}
 default destroot.cmd    {"${python.bin} setup.py [python_get_defaults setup_args]"}
@@ -225,6 +225,24 @@ proc python_get_defaults {var} {
                 return "${python.prefix}/bin/python${python.branch}"
             } else {
                 return "${prefix}/bin/python${python.branch}"
+            }
+        }
+        include {
+            set inc_dir "${python.prefix}/include/python${python.branch}"
+            if {[file exists ${inc_dir}]} {
+                return ${inc_dir}
+            } else {
+                # look for "${inc_dir}*" and pick the first one found;
+                # make assumptions if none are found
+                if {[catch {set inc_dirs [glob ${inc_dir}*]}]} {
+                    if {${python.version} < 30} {
+                        return ${inc_dir}
+                    } else {
+                        return ${inc_dir}m
+                    }
+                } else {
+                    return [lindex ${inc_dirs} 0]
+                }
             }
         }
         lib {
