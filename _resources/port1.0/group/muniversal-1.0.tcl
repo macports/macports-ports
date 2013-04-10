@@ -191,7 +191,9 @@ variant universal {
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] $name ${arch}]"
 
-            copy ${worksrcpath} ${worksrcpath}-${arch}
+            if {![file exists ${worksrcpath}-${arch}]} {
+                copy ${worksrcpath} ${worksrcpath}-${arch}
+            }
 
             set archf [muniversal_get_arch_flag ${arch}]
             set archff [muniversal_get_arch_flag ${arch} "fortran"]
