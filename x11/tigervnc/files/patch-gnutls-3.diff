@@ -1,0 +1,334 @@
+gnutls 3 support
+http://tigervnc.svn.sourceforge.net/viewvc/tigervnc?view=revision&revision=4921
+http://tigervnc.svn.sourceforge.net/viewvc/tigervnc?view=revision&revision=4922
+Index: config.h.in
+===================================================================
+--- config.h.in	(revision 4920)
++++ config.h.in	(revision 4922)
+@@ -8,7 +8,8 @@
+ #cmakedefine HAVE_STRCASECMP
+ #cmakedefine HAVE_STRNCASECMP
+ #cmakedefine HAVE_VSNPRINTF
+-#cmakedefine HAVE_OLD_GNUTLS
++#cmakedefine HAVE_GNUTLS_SET_GLOBAL_ERRNO
++#cmakedefine HAVE_GNUTLS_SET_ERRNO
+ #cmakedefine HAVE_GNUTLS_X509_CRT_PRINT
+ #cmakedefine HAVE_GNUTLS_X509_CRT_T
+ #cmakedefine HAVE_GNUTLS_DATUM_T
+Index: common/rdr/TLSInStream.h
+===================================================================
+--- common/rdr/TLSInStream.h	(revision 4920)
++++ common/rdr/TLSInStream.h	(revision 4922)
+@@ -41,6 +41,7 @@
+   private:
+     int overrun(int itemSize, int nItems, bool wait);
+     int readTLS(U8* buf, int len, bool wait);
++    static ssize_t pull(gnutls_transport_ptr str, void* data, size_t size);
+ 
+     gnutls_session session;
+     InStream* in;
+@@ -48,9 +49,6 @@
+     int offset;
+     U8* start;
+   };
+-
+-  ssize_t gnutls_InStream_pull(gnutls_transport_ptr,void*, size_t);
+-
+ };
+ 
+ #endif
+Index: common/rdr/TLSOutStream.cxx
+===================================================================
+--- common/rdr/TLSOutStream.cxx	(revision 4920)
++++ common/rdr/TLSOutStream.cxx	(revision 4922)
+@@ -25,27 +25,25 @@
+ #include <rdr/Exception.h>
+ #include <rdr/TLSException.h>
+ #include <rdr/TLSOutStream.h>
++#include <rdr/TLSErrno.h>
+ #include <errno.h>
+ 
+-#ifdef HAVE_OLD_GNUTLS
+-#define gnutls_transport_set_global_errno(A) do { errno = (A); } while(0)
+-#endif
+-
+ #ifdef HAVE_GNUTLS
+ using namespace rdr;
+ 
+ enum { DEFAULT_BUF_SIZE = 16384 };
+ 
+-ssize_t rdr::gnutls_OutStream_push(gnutls_transport_ptr str, const void* data,
++ssize_t TLSOutStream::push(gnutls_transport_ptr str, const void* data,
+ 				   size_t size)
+ {
+-  OutStream* out = (OutStream*) str;
++  TLSOutStream* self= (TLSOutStream*) str;
++  OutStream *out = self->out;
+ 
+   try {
+     out->writeBytes(data, size);
+     out->flush();
+   } catch (Exception& e) {
+-    gnutls_transport_set_global_errno(EINVAL);
++    gnutls_errno_helper(self->session, EINVAL);
+     return -1;
+   }
+ 
+@@ -55,8 +53,14 @@
+ TLSOutStream::TLSOutStream(OutStream* _out, gnutls_session _session)
+   : session(_session), out(_out), bufSize(DEFAULT_BUF_SIZE), offset(0)
+ {
++  gnutls_transport_ptr recv, send;
++
+   ptr = start = new U8[bufSize];
+   end = start + bufSize;
++
++  gnutls_transport_set_push_function(session, push);
++  gnutls_transport_get_ptr2(session, &recv, &send);
++  gnutls_transport_set_ptr2(session, recv, this);
+ }
+ 
+ TLSOutStream::~TLSOutStream()
+@@ -67,6 +71,8 @@
+   } catch (Exception&) {
+   }
+ #endif
++  gnutls_transport_set_push_function(session, NULL);
++
+   delete [] start;
+ }
+ 
+Index: common/rdr/TLSOutStream.h
+===================================================================
+--- common/rdr/TLSOutStream.h	(revision 4920)
++++ common/rdr/TLSOutStream.h	(revision 4922)
+@@ -43,6 +43,7 @@
+ 
+   private:
+     int writeTLS(const U8* data, int length);
++    static ssize_t push(gnutls_transport_ptr str, const void* data, size_t size);
+ 
+     gnutls_session session;
+     OutStream* out;
+@@ -50,8 +51,6 @@
+     U8* start;
+     int offset;
+   };
+-
+-  ssize_t gnutls_OutStream_push(gnutls_transport_ptr, const void*, size_t);
+ };
+ 
+ #endif
+Index: common/rdr/TLSErrno.h
+===================================================================
+--- common/rdr/TLSErrno.h	(revision 0)
++++ common/rdr/TLSErrno.h	(revision 4922)
+@@ -0,0 +1,46 @@
++/* Copyright (C) 2012 Pierre Ossman for Cendio AB
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ * 
++ * This software is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ * 
++ * You should have received a copy of the GNU General Public License
++ * along with this software; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307,
++ * USA.
++ */
++
++#ifndef __RDR_TLSERRNO_H__
++#define __RDR_TLSERRNO_H__
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#ifdef HAVE_GNUTLS
++
++#include <errno.h>
++
++namespace rdr {
++
++  static inline void gnutls_errno_helper(gnutls_session session, int _errno)
++  {
++#if defined(HAVE_GNUTLS_SET_ERRNO)
++    gnutls_transport_set_errno(session, _errno);
++#elif defined(HAVE_GNUTLS_SET_GLOBAL_ERRNO)
++    gnutls_transport_set_global_errno(_errno);
++#else
++    errno = _errno;
++#endif
++  }
++};
++
++#endif
++
++#endif
+Index: common/rdr/TLSInStream.cxx
+===================================================================
+--- common/rdr/TLSInStream.cxx	(revision 4920)
++++ common/rdr/TLSInStream.cxx	(revision 4922)
+@@ -25,25 +25,22 @@
+ #include <rdr/Exception.h>
+ #include <rdr/TLSException.h>
+ #include <rdr/TLSInStream.h>
++#include <rdr/TLSErrno.h>
+ #include <errno.h>
+ 
+-#ifdef HAVE_OLD_GNUTLS
+-#define gnutls_transport_set_global_errno(A) do { errno = (A); } while(0)
+-#endif
+-
+ #ifdef HAVE_GNUTLS 
+ using namespace rdr;
+ 
+ enum { DEFAULT_BUF_SIZE = 16384 };
+ 
+-ssize_t rdr::gnutls_InStream_pull(gnutls_transport_ptr str, void* data,
+-				  size_t size)
++ssize_t TLSInStream::pull(gnutls_transport_ptr str, void* data, size_t size)
+ {
+-  InStream* in= (InStream*) str;
++  TLSInStream* self= (TLSInStream*) str;
++  InStream *in = self->in;
+ 
+   try {
+     if (!in->check(1, 1, false)) {
+-      gnutls_transport_set_global_errno(EAGAIN);
++      gnutls_errno_helper(self->session, EAGAIN);
+       return -1;
+     }
+ 
+@@ -53,7 +50,7 @@
+     in->readBytes(data, size);
+ 
+   } catch (Exception& e) {
+-    gnutls_transport_set_global_errno(EINVAL);
++    gnutls_errno_helper(self->session, EINVAL);
+     return -1;
+   }
+ 
+@@ -63,11 +60,19 @@
+ TLSInStream::TLSInStream(InStream* _in, gnutls_session _session)
+   : session(_session), in(_in), bufSize(DEFAULT_BUF_SIZE), offset(0)
+ {
++  gnutls_transport_ptr recv, send;
++
+   ptr = end = start = new U8[bufSize];
++
++  gnutls_transport_set_pull_function(session, pull);
++  gnutls_transport_get_ptr2(session, &recv, &send);
++  gnutls_transport_set_ptr2(session, this, send);
+ }
+ 
+ TLSInStream::~TLSInStream()
+ {
++  gnutls_transport_set_pull_function(session, NULL);
++
+   delete[] start;
+ }
+ 
+Index: common/rfb/CSecurityTLS.cxx
+===================================================================
+--- common/rfb/CSecurityTLS.cxx	(revision 4920)
++++ common/rfb/CSecurityTLS.cxx	(revision 4922)
+@@ -188,20 +188,20 @@
+       throw AuthFailureException("gnutls_set_default_priority failed");
+ 
+     setParam();
+-    
+-    gnutls_transport_set_pull_function(session, rdr::gnutls_InStream_pull);
+-    gnutls_transport_set_push_function(session, rdr::gnutls_OutStream_push);
+-    gnutls_transport_set_ptr2(session,
+-			      (gnutls_transport_ptr) is,
+-			      (gnutls_transport_ptr) os);
+   }
+ 
++  rdr::TLSInStream *tlsis = new rdr::TLSInStream(is, session);
++  rdr::TLSOutStream *tlsos = new rdr::TLSOutStream(os, session);
++
+   int err;
+   err = gnutls_handshake(session);
+-  if (err != GNUTLS_E_SUCCESS && !gnutls_error_is_fatal(err))
+-    return false;
+-
+   if (err != GNUTLS_E_SUCCESS) {
++    delete tlsis;
++    delete tlsos;
++
++    if (!gnutls_error_is_fatal(err))
++      return false;
++
+     vlog.error("TLS Handshake failed: %s\n", gnutls_strerror (err));
+     shutdown(false);
+     throw AuthFailureException("TLS Handshake failed");
+@@ -209,8 +209,7 @@
+ 
+   checkSession();
+ 
+-  cc->setStreams(fis = new rdr::TLSInStream(is, session),
+-		 fos = new rdr::TLSOutStream(os, session));
++  cc->setStreams(fis = tlsis, fos = tlsos);
+ 
+   return true;
+ }
+Index: common/rfb/SSecurityTLS.cxx
+===================================================================
+--- common/rfb/SSecurityTLS.cxx	(revision 4920)
++++ common/rfb/SSecurityTLS.cxx	(revision 4922)
+@@ -148,17 +148,19 @@
+       throw;
+     }
+ 
+-    gnutls_transport_set_pull_function(session,rdr::gnutls_InStream_pull);
+-    gnutls_transport_set_push_function(session,rdr::gnutls_OutStream_push);
+-    gnutls_transport_set_ptr2(session,
+-			      (gnutls_transport_ptr)is,
+-			      (gnutls_transport_ptr)os);
+     os->writeU8(1);
+     os->flush();
+   }
+ 
++  rdr::TLSInStream *tlsis = new rdr::TLSInStream(is, session);
++  rdr::TLSOutStream *tlsos = new rdr::TLSOutStream(os, session);
++
+   int err;
+-  if ((err = gnutls_handshake(session)) != GNUTLS_E_SUCCESS) {
++  err = gnutls_handshake(session);
++  if (err != GNUTLS_E_SUCCESS) {
++    delete tlsis;
++    delete tlsos;
++
+     if (!gnutls_error_is_fatal(err)) {
+       vlog.debug("Deferring completion of TLS handshake: %s", gnutls_strerror(err));
+       return false;
+@@ -170,8 +172,7 @@
+ 
+   vlog.debug("Handshake completed");
+ 
+-  sc->setStreams(fis=new rdr::TLSInStream(is,session),
+-		 fos=new rdr::TLSOutStream(os,session));
++  sc->setStreams(fis = tlsis, fos = tlsos);
+ 
+   return true;
+ }
+Index: CMakeLists.txt
+===================================================================
+--- CMakeLists.txt	(revision 4920)
++++ CMakeLists.txt	(revision 4922)
+@@ -356,7 +356,8 @@
+       # system's version (if available) to perform this test.
+       set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES};-lz)
+     endif()
+-    check_function_exists(gnutls_transport_set_global_errno HAVE_OLD_GNUTLS)
++    check_function_exists(gnutls_transport_set_errno HAVE_GNUTLS_SET_ERRNO)
++    check_function_exists(gnutls_transport_set_global_errno HAVE_GNUTLS_SET_GLOBAL_ERRNO)
+     check_function_exists(gnutls_x509_crt_print HAVE_GNUTLS_X509_CRT_PRINT)
+     check_type_size(gnutls_x509_crt_t GNUTLS_X509_CRT_T)
+     check_type_size(gnutls_datum_t GNUTLS_DATUM_T)
