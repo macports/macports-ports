@@ -117,7 +117,7 @@ set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
 
 # standard CMake module directory for Qt-related files
 global qt_cmake_module_dir
-set qt_cmake_module_dir ${qt_dir}/share/cmake/modules
+set qt_cmake_module_dir ${qt_dir}/share/cmake/Modules
 
 # standard qmake command location
 global qt_qmake_cmd
