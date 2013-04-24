@@ -33,9 +33,11 @@
 # User variables:
 #         merger_configure_env: associative array of configure.env variables
 #             merger_build_env: associative array of build.env variables
+#          merger_destroot_env: associative array of destroot.env variables
 #                  merger_host: associative array of host values
 #        merger_configure_args: associative array of configure.args
 #            merger_build_args: associative array of build.args
+#         merger_destroot_args: associative array of destroot.args
 #    merger_configure_compiler: associative array of configure.compiler
 #    merger_configure_cppflags: associative array of configure.cppflags
 #      merger_configure_cflags: associative array of configure.cflags
@@ -44,7 +46,6 @@
 #     merger_configure_ldflags: associative array of configure.ldflags
 #             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
 #         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
-#          merger_destroot_env: associative array of destroot.env variables
 #             merger_dont_diff: list of file names for which diff will not work
 #     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
 #            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
@@ -406,6 +407,9 @@ variant universal {
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-append  $merger_destroot_env(${arch})
             }
+            if { [info exists merger_destroot_args(${arch})] } {
+                destroot.args-append  $merger_destroot_args(${arch})
+            }
             set destroot_dir_save ${destroot.dir}
             if { [string match "${worksrcpath}/*" ${destroot.dir}] } {
                 # The destroot directory is inside the source directory, so put in the new source directory name.
@@ -421,6 +425,9 @@ variant universal {
             portdestroot::destroot_main
 
             destroot.dir  ${destroot_dir_save}
+            if { [info exists merger_destroot_args(${arch})] } {
+                destroot.args-delete $merger_destroot_args(${arch})
+            }
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
             }
