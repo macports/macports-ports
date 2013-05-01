@@ -32,14 +32,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-# This PortGroup is DEPRECATED. Please do not use for new development.
-# Please switch existing ports using this to 'PortGroup python 1.0' (which
-# supports multiple python versions) at your earliest convenience.
-
-pre-archivefetch {
-    ui_warn "The $name port is using the deprecated 'python24'\
-PortGroup, which will be disabled in the near future and eventually removed.\
-The maintainer should switch to the 'python' PortGroup."
+pre-fetch {
+    ui_error "The $name port is using the obsolete 'python24'\
+PortGroup. The maintainer should switch to the 'python' PortGroup."
+    error "obsolete PortGroup"
 }
 
 set python.branch	2.4
@@ -58,8 +54,6 @@ categories		python
 
 dist_subdir		python
 
-depends_lib		port:python24
-
 # we want the default universal variant added despite not using configure
 use_configure	no
 universal_variant yes
@@ -68,28 +62,6 @@ build.cmd		${python.bin} setup.py
 build.target	build
 options python.add_archflags
 default python.add_archflags yes
-pre-build {
-    if {${python.add_archflags}} {
-        if {[variant_exists universal] && [variant_isset universal]} {
-            build.env-append CFLAGS="${configure.universal_cflags}" \
-                             OBJCFLAGS="${configure.universal_cflags}" \
-                             CXXFLAGS="${configure.universal_cxxflags}" \
-                             LDFLAGS="${configure.universal_ldflags}"
-        } else {
-            build.env-append CFLAGS="${configure.cc_archflags}" \
-                             OBJCFLAGS="${configure.objc_archflags}" \
-                             CXXFLAGS="${configure.cxx_archflags}" \
-                             FFLAGS="${configure.f77_archflags}" \
-                             F90FLAGS="${configure.f90_archflags}" \
-                             FCFLAGS="${configure.fc_archflags}" \
-                             LDFLAGS="${configure.ld_archflags}"
-        }
-    }
-}
 
 destroot.cmd	${python.bin} setup.py
 destroot.destdir	--prefix=${prefix} --root=${destroot}
-
-pre-destroot	{
-	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
-}
