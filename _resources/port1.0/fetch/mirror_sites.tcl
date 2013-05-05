@@ -367,7 +367,6 @@ set portfetch::mirror_sites::sites(php) {
     http://es.php.net/:nosubdir
     http://fr.php.net/:nosubdir
     http://hk.php.net/:nosubdir
-    http://id.php.net/:nosubdir
     http://ie.php.net/:nosubdir
     http://in.php.net/:nosubdir
     http://is.php.net/:nosubdir
