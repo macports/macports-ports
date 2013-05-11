@@ -1,8 +1,9 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
 # Copyright (c) 2002 Apple Computer, Inc.
+# Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
+# Copyright (c) 2006-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -181,6 +182,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
         rubyforge:* {
             set num [lindex [split ${source} {:}] 1]
+            set ruby.project [string tolower ${ruby.project}]
             homepage        http://rubyforge.org/projects/${ruby.project}
             master_sites    http://rubyforge.org/frs/download.php/${num}/
             livecheck.type  regex
@@ -188,7 +190,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             livecheck.regex "<strong>${ruby.project}</strong></td><td>(?:REL )?(.*)$"
         }
         rubyforge_gem:* {
-            set ruby.project [lindex [split ${source} {:}] 1]
+            set ruby.project [string tolower [lindex [split ${source} {:}] 1]]
             homepage        http://rubyforge.org/projects/${ruby.project}
             master_sites    http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
                             http://rubyforge.iasi.roedu.net/gems/
@@ -197,6 +199,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             livecheck.regex "<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
         }
         rubyforge_gem {
+            set ruby.project [string tolower ${ruby.project}]
             homepage        http://rubyforge.org/projects/${ruby.project}
             master_sites    http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
                             http://rubyforge.iasi.roedu.net/gems/
