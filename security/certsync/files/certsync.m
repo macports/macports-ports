@@ -192,8 +192,19 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     }
     
     for (id certObj in result) {
-        CFErrorRef cferror;
-        CFStringRef subject = SecCertificateCopyShortDescription(NULL, (SecCertificateRef) certObj, &cferror);
+        CFErrorRef cferror = NULL;
+        CFStringRef subject;
+
+#if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_6
+        if (SecCertificateCopyShortDescription != NULL) {
+            subject = PLCFAutorelease(SecCertificateCopyShortDescription(NULL, (SecCertificateRef) certObj, &cferror));
+        } else {
+            subject = PLCFAutorelease(SecCertificateCopySubjectSummary((SecCertificateRef) certObj));
+        }
+#else
+        subject = PLCFAutorelease(SecCertificateCopySubjectSummary((SecCertificateRef) certObj));
+#endif
+
         if (subject == NULL) {
             nsfprintf(stderr, @"Failed to extract certificate description: %@\n", cferror);
             return EXIT_FAILURE;
@@ -216,7 +227,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         err = SecKeychainItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
     }
 #else
-    err = SecItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
+    err = SecKeychainItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
 #endif
     
     if (err != errSecSuccess) {
@@ -244,36 +255,40 @@ static void usage (const char *progname) {
 }
 
 int main (int argc, char * const argv[]) {
-    @autoreleasepool {
-        /* Parse the command line arguments */
-        BOOL userAnchors = NO;
-        NSString *outputFile = nil;
-        
-        int ch;
-        while ((ch = getopt(argc, argv, "huo:")) != -1) {
-            switch (ch) {
-                case 'u':
-                    userAnchors = YES;
-                    break;
-                    
-                case 'o':
-                    outputFile = [NSString stringWithUTF8String: optarg];
-                    break;
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
-                case 'h':
-                    usage(argv[0]);
-                    exit(EXIT_SUCCESS);
+    /* Parse the command line arguments */
+    BOOL userAnchors = NO;
+    NSString *outputFile = nil;
+    
+    int ch;
+    while ((ch = getopt(argc, argv, "huo:")) != -1) {
+        switch (ch) {
+            case 'u':
+                userAnchors = YES;
+                break;
+                
+            case 'o':
+                outputFile = [NSString stringWithUTF8String: optarg];
+                break;
 
-                default:
-                    usage(argv[0]);
-                    exit(EXIT_FAILURE);
-            }
+            case 'h':
+                usage(argv[0]);
+                exit(EXIT_SUCCESS);
+
+            default:
+                usage(argv[0]);
+                exit(EXIT_FAILURE);
         }
-        argc -= optind;
-        argv += optind;
-        
-        /* Perform export  */
-        return exportCertificates(userAnchors, outputFile);
     }
+    argc -= optind;
+    argv += optind;
+    
+    /* Perform export  */
+    int ret = exportCertificates(userAnchors, outputFile);
+
+    [pool release];
+    
+    return ret;
 }
 
