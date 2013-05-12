@@ -26,6 +26,8 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <AvailabilityMacros.h>
+
 #import <unistd.h>
 #import <stdio.h>
 
@@ -52,7 +54,7 @@ int nsvfprintf (FILE *stream, NSString *format, va_list args) {
     int retval;
     
     NSString *str;
-    str = (__bridge_transfer NSString *) CFStringCreateWithFormatAndArguments(NULL, NULL, (CFStringRef) format, args);
+    str = (NSString *) CFStringCreateWithFormatAndArguments(NULL, NULL, (CFStringRef) format, args);
     retval = fprintf(stream, "%s", [str UTF8String]);
     
     return retval;
@@ -113,8 +115,8 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
     
     /* Extract trusted roots */
     NSMutableArray *results = [NSMutableArray arrayWithCapacity: CFArrayGetCount(certs)];
-    for (id certObj in (__bridge NSArray *) certs) {
-        SecCertificateRef cert = (__bridge SecCertificateRef) certObj;
+    for (id certObj in (NSArray *) certs) {
+        SecCertificateRef cert = (SecCertificateRef) certObj;
         
         /* Fetch the trust settings */
         CFArrayRef trustSettings = nil;
@@ -132,11 +134,11 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
             [results addObject: certObj];
         } else {
             /* Otherwise, walk the properties and evaluate the trust settings result */
-            for (NSDictionary *trustProps in (__bridge NSArray *) trustSettings) {
+            for (NSDictionary *trustProps in (NSArray *) trustSettings) {
                 CFNumberRef settingsResultNum;
                 SInt32 settingsResult;
                 
-                settingsResultNum = (__bridge CFNumberRef) [trustProps objectForKey: (__bridge id) kSecTrustSettingsResult];
+                settingsResultNum = (CFNumberRef) [trustProps objectForKey: (id) kSecTrustSettingsResult];
                 CFNumberGetValue(settingsResultNum, kCFNumberSInt32Type, &settingsResult);
                 
                 /* If a root, add to the result set */
@@ -191,7 +193,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     
     for (id certObj in result) {
         CFErrorRef cferror;
-        CFStringRef subject = SecCertificateCopyShortDescription(NULL, (__bridge SecCertificateRef) certObj, &cferror);
+        CFStringRef subject = SecCertificateCopyShortDescription(NULL, (SecCertificateRef) certObj, &cferror);
         if (subject == NULL) {
             nsfprintf(stderr, @"Failed to extract certificate description: %@\n", cferror);
             return EXIT_FAILURE;
@@ -206,12 +208,16 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     CFDataRef pemData;
     OSStatus err;
     
-    /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7 */
-    if (NO && SecItemExport != NULL) {
-        err = SecItemExport((__bridge CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
+    /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7. We use an ifdef to keep the code buildable with earlier SDKs, too. */
+#if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_6
+    if (SecItemExport != NULL) {
+        err = SecItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
     } else {
-        err = SecKeychainItemExport((__bridge CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
+        err = SecKeychainItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
     }
+#else
+    err = SecItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
+#endif
     
     if (err != errSecSuccess) {
         nsfprintf(stderr, @"Failed to export certificates: %@\n", [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo:nil]);
@@ -219,10 +225,10 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     }
 
     if (outputFile == nil) {
-        NSString *str = [[NSString alloc] initWithData: (__bridge NSData *) pemData encoding:NSUTF8StringEncoding];
+        NSString *str = [[[NSString alloc] initWithData: (NSData *) pemData encoding:NSUTF8StringEncoding] autorelease];
         nsfprintf(stdout, @"%@", str);
     } else {
-        if (![(__bridge NSData *) pemData writeToFile: outputFile options: NSDataWritingAtomic error: &error]) {
+        if (![(NSData *) pemData writeToFile: outputFile options: NSDataWritingAtomic error: &error]) {
             nsfprintf(stderr, @"Failed to write to pem output file: %@\n", error);
             return EXIT_FAILURE;
         }
@@ -265,7 +271,8 @@ int main (int argc, char * const argv[]) {
         }
         argc -= optind;
         argv += optind;
-
+        
+        /* Perform export  */
         return exportCertificates(userAnchors, outputFile);
     }
 }
