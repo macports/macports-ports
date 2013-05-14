@@ -1,4 +1,4 @@
-# $Id: texlive-1.0.tcl 96776 2012-08-19 05:52:01Z blair@macports.org $
+# $Id$
 #
 # Copyright (c) 2013 Dan R. K. Ports <dports@macports.org>
 # Copyright (c) 2013 The MacPorts Project
@@ -37,7 +37,7 @@
 # installations of Emacs, e.g. the emacs and emacs-app ports.  The
 # assumption here is that all of these emacsen install into the same
 # site-lisp directory, ${emacs_lispdir}, and have compatible
-# byte-code, so it odesn't matter which one is used to byte-compile
+# byte-code, so it doesn't matter which one is used to byte-compile
 # the lisp code.
 #
 # Accordingly, the portgroup detects any installed versions of
