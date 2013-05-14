@@ -338,7 +338,7 @@ int main (int argc, char * const argv[]) {
     argv += optind;
     
     /* Perform single-shot export  */
-    if (NO && !runServer)
+    if (!runServer)
         return exportCertificates(userAnchors, outputFile);
     
     /* Formulate the list of directories to observe; We use FSEvents rather than SecKeychainAddCallback(), as during testing the keychain
