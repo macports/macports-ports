@@ -128,9 +128,10 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
     } else if (err != errSecSuccess) {
         /* Lookup failed */
         if (outError != NULL)
-            *outError = [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo:nil];
+            *outError = [[NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo:nil] retain];
         
         [pool release];
+        [*outError autorelease];
         return nil;
     }
     
@@ -290,11 +291,15 @@ static void usage (const char *progname) {
 
 static void certsync_keychain_cb (ConstFSEventStreamRef streamRef, void *clientCallBackInfo, size_t numEvents, void *eventPaths, const FSEventStreamEventFlags eventFlags[], const FSEventStreamEventId eventIds[])
 {
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+
     MPCertSyncConfig *config = (MPCertSyncConfig *) clientCallBackInfo;
 
     int ret;
     if ((ret = exportCertificates(config->userAnchors, config->outputFile)) != EXIT_SUCCESS)
         exit(ret);
+
+    [pool release];
 }
 
 int main (int argc, char * const argv[]) {
@@ -333,46 +338,55 @@ int main (int argc, char * const argv[]) {
     argv += optind;
     
     /* Perform single-shot export  */
-    if (!runServer)
+    if (NO && !runServer)
         return exportCertificates(userAnchors, outputFile);
     
     /* Formulate the list of directories to observe; We use FSEvents rather than SecKeychainAddCallback(), as during testing the keychain
      * API never actually fired a callback for the target keychains. */
-    NSSearchPathDomainMask searchPathDomains = NSLocalDomainMask|NSSystemDomainMask;
-    if (userAnchors)
-        searchPathDomains |= NSUserDomainMask;
+    FSEventStreamRef eventStream;
+    {
+        NSAutoreleasePool *streamPool = [[NSAutoreleasePool alloc] init];
 
-    NSArray *libraryDirectories = NSSearchPathForDirectoriesInDomains(NSAllLibrariesDirectory, searchPathDomains, YES);
-    NSMutableArray *keychainDirectories = [NSMutableArray arrayWithCapacity: [libraryDirectories count]];
-    for (NSString *dir in libraryDirectories) {
-        [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Keychains"]];
-        [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Security/Trust Settings"]];
+        NSSearchPathDomainMask searchPathDomains = NSLocalDomainMask|NSSystemDomainMask;
+        if (userAnchors)
+            searchPathDomains |= NSUserDomainMask;
+
+        NSArray *libraryDirectories = NSSearchPathForDirectoriesInDomains(NSAllLibrariesDirectory, searchPathDomains, YES);
+        NSMutableArray *keychainDirectories = [NSMutableArray arrayWithCapacity: [libraryDirectories count]];
+        for (NSString *dir in libraryDirectories) {
+            [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Keychains"]];
+            [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Security/Trust Settings"]];
+        }
+
+        /* Configure the listener */
+        MPCertSyncConfig *config = [[[MPCertSyncConfig alloc] init] autorelease];
+        config->userAnchors = userAnchors;
+        config->outputFile = [outputFile retain];
+
+        FSEventStreamContext ctx = {
+            .version = 0,
+            .info = config,
+            .retain = CFRetain,
+            .release = CFRelease,
+            .copyDescription = CFCopyDescription
+        };
+        eventStream = FSEventStreamCreate(NULL, certsync_keychain_cb, &ctx, (CFArrayRef)keychainDirectories, kFSEventStreamEventIdSinceNow, 0.0, kFSEventStreamCreateFlagUseCFTypes);
+        FSEventStreamScheduleWithRunLoop(eventStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
+        FSEventStreamStart(eventStream);
+        
+        [streamPool release];
     }
 
-    /* Configure the listener */
-    FSEventStreamRef eventStream;
-    MPCertSyncConfig *config = [[[MPCertSyncConfig alloc] init] autorelease];
-    config->userAnchors = userAnchors;
-    config->outputFile = [outputFile retain];
-
-    FSEventStreamContext ctx = {
-        .version = 0,
-        .info = config,
-        .retain = CFRetain,
-        .release = CFRelease,
-        .copyDescription = CFCopyDescription
-    };
-    eventStream = FSEventStreamCreate(NULL, certsync_keychain_cb, &ctx, (CFArrayRef)keychainDirectories, kFSEventStreamEventIdSinceNow, 0.0, kFSEventStreamCreateFlagUseCFTypes);
-    FSEventStreamScheduleWithRunLoop(eventStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
-    FSEventStreamStart(eventStream);
-
     /* Perform an initial one-shot export, and then run forever */
-    int ret;
-    if ((ret = exportCertificates(userAnchors, outputFile)) != EXIT_SUCCESS)
-        return EXIT_FAILURE;
-    
-    CFRunLoopRun();
+    {
+    NSAutoreleasePool *shotPool = [[NSAutoreleasePool alloc] init];
+        int ret;
+        if ((ret = exportCertificates(userAnchors, outputFile)) != EXIT_SUCCESS)
+            return EXIT_FAILURE;
+        [shotPool release];
+    }
 
+    CFRunLoopRun();
     FSEventStreamRelease(eventStream);
     [pool release];
 
