@@ -8,10 +8,11 @@ LDFLAGS ?= -L%%PREFIX%%/lib
 DEPLOYMENT_TARGET ?= 10.5
 PREFIX ?= /tmp
 
+LUA_VERSION = 5.1
 INSTALL_ROOT = $(DESTDIR)$(PREFIX)
-INSTALL_INC = $(INSTALL_ROOT)/include/lua5.1
-INSTALL_LUA = $(INSTALL_ROOT)/share/lua/5.1/numlua
-INSTALL_LIB = $(INSTALL_ROOT)/lib/lua/5.1
+INSTALL_INC = $(INSTALL_ROOT)/include/lua$(LUA_VERSION)
+INSTALL_LUA = $(INSTALL_ROOT)/share/lua/$(LUA_VERSION)/numlua
+INSTALL_LIB = $(INSTALL_ROOT)/lib/lua/$(LUA_VERSION)
 TO_INC = amos.h blas.h cdflib.h lapack.h numlua.h rng.h
 TO_LUA = matrix.lua seeall.lua
 TO_LIB = numlua.so
