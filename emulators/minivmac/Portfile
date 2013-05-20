@@ -83,8 +83,7 @@ checksums               ${my_src_distfile} \
                         sha1    d4c8b8653de9c7a9b2594dd6126ec7120e3e2e9e \
                         rmd160  89fc3780c9c5d575a8da4068dc810c1f56c70211
 
-depends_extract         port:bsdiff \
-                        bin:expect:expect
+depends_extract         port:bsdiff
 
 if {${os.major} < 9} {
     depends_extract-append port:macutil
@@ -159,17 +158,40 @@ extract.mkdir           yes
 extract.asroot          yes
 
 post-extract {
-    # Decode the system disk container image.
+    # Decode MacBinary encoding of the system disk container image.
+    ui_debug "Decoding ${my_system_disk_container_distfile}."
     my_system "sh ${filespath}/demacbinary.sh ${distpath}/${my_system_disk_container_distfile} ${worksrcpath}"
     
-    # Copy the Disk Tools image from the container image. The binary patchfile applied with bspatch
-    # places an alias of the output disk at System Folder:Preferences:Gryphel:Build:output.
-    set my_system_disk_container_mount [my_attach_disk_image ${worksrcpath}/${my_system_disk_container}]
-    my_system "${prefix}/bin/bspatch '${my_system_disk_container_mount}/Disk Tools.image' '${worksrcpath}/Disk Tools.dsk' '${filespath}/Disk Tools.dsk.bsdiff'"
-    my_detach_disk_image ${my_system_disk_container_mount}
+    # Decompress the system disk container image.
+    ui_debug "Decompressing ${my_system_disk_container}."
+    set my_system_disk_container_decompressed "[file rootname ${my_system_disk_container}].uncompressed.dmg"
+    system -W ${worksrcpath} "hdiutil convert '${my_system_disk_container}' -format UDRO -o '${my_system_disk_container_decompressed}'"
+    
+    # The images on the container image. Images we don't need are commented out for future reference.
+    set my_images {
+        {Disk Tools.image}   233472 eb1979132c843560ebab490faeb7520d9a94757ecef3121a21abace8d3ae63ff
+    }
+#        {Fonts.image}       1709056 8b06f086a96b75bd23b16ae018bd334696239cb56e65bfa20166ea00d14cdef0
+#        {Install 1.image}   3184640 8c3ea898eeb88b795041108cd8a09bf4ebdf920d7d4763e4419df14713dbd952
+#        {Install 2.image}   4660224 0fc558475df55f3aed217d2eceebfa29e4a465a795807cd627b258740a9ec55b
+#        {Printing.image}    6135808 246cbf69ad1c2e588ee482fddec781135a67fbfe02734bb0f732eb055faa15fa
+#        {Tidbits.image}     7611392 3e3600bed1b5c7c595bc176b5eaadcc8c1517032489efc548b9b781c0ee1f062
+    
+    # Extract the disk images from the system disk container image. `hdiutil` on OS X 10.8 Mountain Lion
+    # does not mount this disk image correctly, so extract the files manually using `dd`.
+    foreach {my_image_filename my_image_offset my_image_sha256} ${my_images} {
+        ui_debug "Extracting ${my_image_filename} from ${my_system_disk_container_decompressed}."
+        system -W ${worksrcpath} "dd bs=1 if='${my_system_disk_container_decompressed}' count=1474644 skip=${my_image_offset} of='${my_image_filename}'"
+        if {${my_image_sha256} != [sha256 file ${worksrcpath}/${my_image_filename}]} {
+            return -code error "extract failed"
+        }
+    }
     
     # Get a large empty disk image to store the output.
     my_system "unzip -q ${worksrcpath}/${my_blanks}/hfs24M.zip -d ${worksrcpath}"
+    
+    # Delete temporary files we no longer need.
+    delete ${worksrcpath}/${my_system_disk_container} ${worksrcpath}/${my_system_disk_container_decompressed} ${worksrcpath}/${my_blanks}
     
     # Make the data directory, where Mini vMac looks for the files it needs.
     set my_mnvm_dat "${worksrcpath}/${my_bootstrap_app}/Contents/mnvm_dat"
@@ -180,10 +202,16 @@ post-extract {
     
     # Symlink the disk images into the data directory with sequentially-numbered
     # names so Mini vMac will find them and automatically mount them.
-    ln -s "${worksrcpath}/Disk Tools.dsk" "${my_mnvm_dat}/disk1.dsk"
+    ln -s "${worksrcpath}/Disk Tools.image" "${my_mnvm_dat}/disk1.dsk"
     ln -s ${worksrcpath}/output.img "${my_mnvm_dat}/disk2.dsk"
     ln -s ${worksrcpath}/${my_src}/${my_src}.dsk "${my_mnvm_dat}/disk3.dsk"
     ln -s ${worksrcpath}/${my_clipin}/${my_clipin}.dsk "${my_mnvm_dat}/disk4.dsk"
+}
+
+post-patch {
+    # Place an alias of the output disk at System Folder:Preferences:Gryphel:Build:output.
+    system -W ${worksrcpath} "${prefix}/bin/bspatch 'Disk Tools.image' 'Disk Tools.image.tmp' '${filespath}/patch-Disk Tools.image.bsdiff'"
+    move -force "${worksrcpath}/Disk Tools.image.tmp" "${worksrcpath}/Disk Tools.image"
 }
 
 pre-configure {
@@ -363,11 +391,9 @@ proc my_arch_to_target {arch} {
 
 # Mounts a disk image.
 proc my_attach_disk_image {disk_image} {
-    global my_name filespath
+    global my_name
     set mountpoint [mkdtemp "/tmp/${my_name}.XXXXXXXX"]
-    # Use this expect script instead of using hdiutil directly, because the
-    # system disk image has a license agreement we must agree to.
-    my_system "expect ${filespath}/attach.exp '${disk_image}' '${mountpoint}'"
+    system "hdiutil attach '${disk_image}' -mountpoint '${mountpoint}' -private -nobrowse -noautoopen -noautofsck -noverify -readonly"
     return ${mountpoint}
 }
 
