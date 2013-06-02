@@ -350,7 +350,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 # an available mirror in that country. To update this list use:
 # curl -s http://php.net/mirrors.php | sed -E -n 's,^.*http://([a-z]{2})[0-9]*(\.php\.net)/.*$,\1\2,p' | sort -u | xargs -n 1 -I % sh -c '{ ping -c 1 -t 2 % >/dev/null 2>&1 && echo "    http://%/:nosubdir"; }' | tee /dev/tty | pbcopy
 set portfetch::mirror_sites::sites(php) {
-    http://am.php.net/:nosubdir
     http://at.php.net/:nosubdir
     http://bd.php.net/:nosubdir
     http://be.php.net/:nosubdir
@@ -365,7 +364,6 @@ set portfetch::mirror_sites::sites(php) {
     http://ee.php.net/:nosubdir
     http://es.php.net/:nosubdir
     http://fi.php.net/:nosubdir
-    http://fr.php.net/:nosubdir
     http://hk.php.net/:nosubdir
     http://ie.php.net/:nosubdir
     http://in.php.net/:nosubdir
