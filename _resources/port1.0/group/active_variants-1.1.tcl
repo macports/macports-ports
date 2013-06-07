@@ -179,10 +179,11 @@ proc _check_require_active_variants {} {
 	global _require_active_variants_list
 	foreach _require_active_variant $_require_active_variants_list {
 		set name [lindex $_require_active_variant 0]
+		set port [_get_dep_port $name]
 		set required [lindex $_require_active_variant 1]
 		set forbidden [lindex $_require_active_variant 2]
 		if {[catch {set result [active_variants $name $required $forbidden]}] != 0} {
-			error "$name is required, but not active."
+			error "${port} is required, but not active."
 		}
 		if {!$result} {
 			set str_required ""
@@ -197,7 +198,7 @@ proc _check_require_active_variants {} {
 			if {$str_required != "" && $str_forbidden != ""} {
 				set str_combine " and "
 			}
-			error "$name must be installed ${str_required}${str_combine}${str_forbidden}."
+			error "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
 		}
 	}
 }
