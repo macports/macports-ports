@@ -91,14 +91,14 @@ proc active_variants {depspec required {forbidden {}}} {
 	# get the port which will provide $depspec; this allows us to support e.g.,
 	# path-style dependencies. This comes from port1.0/portutil.tcl and should
 	# probably not be considered public API.
-	set name [_get_dep_port $depspec]
-	if {$name == ""} {
+	set port [_get_dep_port $depspec]
+	if {$port == ""} {
 	    ui_error "active_variants: Error: invalid port depspec '${depspec}'"
 	    ui_error "  expecting either: port or (bin:lib:path):foo:port"
 	    return 0
 	}
-	if {$depspec != $name} {
-	    ui_debug "Checking $name for active variants for depspec '$depspec'"
+	if {$depspec != $port} {
+	    ui_debug "Checking $port for active variants for depspec '$depspec'"
 	}
 
 	# registry_active comes from a list of aliased procedures in
@@ -111,7 +111,7 @@ proc active_variants {depspec required {forbidden {}}} {
 	#
 	# In the SQLite case the call goes to registry2.0/receipt_sqlite.tcl,
 	# line 45, proc active, which in turn calls registry::entry installed
-	# $name, which comes from registry2.0/entry.c, line 387. I won't dig
+	# $port, which comes from registry2.0/entry.c, line 387. I won't dig
 	# deeper than that, since that's as far as we need to go to handle this
 	# correctly.
 	#
@@ -122,8 +122,8 @@ proc active_variants {depspec required {forbidden {}}} {
 	# same time). This explains the [lindex $active_list 0] in the following
 	# block.
 
-	# this will throw if $name isn't active
-	set installed [lindex [registry_active $name] 0]
+	# this will throw if $port isn't active
+	set installed [lindex [registry_active $port] 0]
 
 	# In $installed there are in order: name, version, revision, variants,
 	# a boolean indicating whether the port is installed and the epoch. So,
@@ -179,11 +179,11 @@ proc _check_require_active_variants {} {
 	global _require_active_variants_list
 	foreach _require_active_variant $_require_active_variants_list {
 		set depspec [lindex $_require_active_variant 0]
-		set name [_get_dep_port $depspec]
+		set port [_get_dep_port $depspec]
 		set required [lindex $_require_active_variant 1]
 		set forbidden [lindex $_require_active_variant 2]
 		if {[catch {set result [active_variants $depspec $required $forbidden]}] != 0} {
-			error "${name} is required, but not active."
+			error "${port} is required, but not active."
 		}
 		if {!$result} {
 			set str_required ""
@@ -198,7 +198,7 @@ proc _check_require_active_variants {} {
 			if {$str_required != "" && $str_forbidden != ""} {
 				set str_combine " and "
 			}
-			error "${name} must be installed ${str_required}${str_combine}${str_forbidden}."
+			error "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
 		}
 	}
 }
