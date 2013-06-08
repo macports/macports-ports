@@ -31,20 +31,20 @@
 #
 # Usage:
 # PortGroup       active_variants 1.1
-# if {![catch {set result [active_variants $name $required $forbidden]}]} {
+# if {![catch {set result [active_variants $depspec $required $forbidden]}]} {
 #   if {$result} {
-#     # code to be executed if $name is active with at least all variants in
+#     # code to be executed if $depspec is active with at least all variants in
 #     # $required and none from $forbidden
 #   } else {
-#     # code to be executed if $name is active, but either not with all
+#     # code to be executed if $depspec is active, but either not with all
 #     # variants in $required or any variant in $forbidden
 #   }
 # } else {
-#   # code to be executed if $name isn't active
+#   # code to be executed if $depspec isn't active
 # }
 #
 # where
-#  $name
+#  $depspec
 #    is the name of the port you're trying to check (required), which can be
 #    specified as either just the port, or via "(bin:lib:path):FOO:port"
 #    as accepted by the dependency parser.
@@ -61,11 +61,11 @@
 # In situations where you know that a version of the port is active (e.g., when
 # checking in pre-configure of a port and the checked port is a dependency),
 # this can be simplified to:
-# if {[active_variants $name $required $forbidden]} {
-#   # code to be run if $name is active with all from $required and none from
+# if {[active_variants $depspec $required $forbidden]} {
+#   # code to be run if $depspec is active with all from $required and none from
 #   # $forbidden
 # } else {
-#   # code to be run if $name is active, but either not with all variants in
+#   # code to be run if $depspec is active, but either not with all variants in
 #   # $required or any variant in $forbidden
 # }
 #
@@ -77,7 +77,7 @@
 # require_active_variants in a pre-configure block. This is now done
 # automatically.
 #
-# require_active_variants $name $required $forbidden
+# require_active_variants $depspec $required $forbidden
 #
 # ChangeLog:
 #  v1.1:
@@ -87,18 +87,18 @@
 #     dependencies, e.g., require_active_variants path:foo/bar:standardport
 #     variant
 
-proc active_variants {name required {forbidden {}}} {
-	# get the port which will provide $name; this allows us to support e.g.,
+proc active_variants {depspec required {forbidden {}}} {
+	# get the port which will provide $depspec; this allows us to support e.g.,
 	# path-style dependencies. This comes from port1.0/portutil.tcl and should
 	# probably not be considered public API.
-	set port [_get_dep_port $name]
-	if {$port == ""} {
-	    ui_error "active_variants: Error: invalid port name '${name}'"
+	set name [_get_dep_port $depspec]
+	if {$name == ""} {
+	    ui_error "active_variants: Error: invalid port depspec '${depspec}'"
 	    ui_error "  expecting either: port or (bin:lib:path):foo:port"
 	    return 0
 	}
-	if {$name != $port} {
-	    ui_debug "Checking $port for active variants for depspec '$name'"
+	if {$depspec != $name} {
+	    ui_debug "Checking $name for active variants for depspec '$depspec'"
 	}
 
 	# registry_active comes from a list of aliased procedures in
@@ -123,7 +123,7 @@ proc active_variants {name required {forbidden {}}} {
 	# block.
 
 	# this will throw if $name isn't active
-	set installed [lindex [registry_active $port] 0]
+	set installed [lindex [registry_active $name] 0]
 
 	# In $installed there are in order: name, version, revision, variants,
 	# a boolean indicating whether the port is installed and the epoch. So,
@@ -168,9 +168,9 @@ proc _variant_in_variant_list {needle haystack} {
 # not present
 set _require_active_variants_list [list]
 
-proc require_active_variants {name required {forbidden {}}} {
+proc require_active_variants {depspec required {forbidden {}}} {
 	global _require_active_variants_list
-	lappend _require_active_variants_list [list $name $required $forbidden]
+	lappend _require_active_variants_list [list $depspec $required $forbidden]
 }
 
 # function to be called in pre-configure to check for all items added using
@@ -178,12 +178,12 @@ proc require_active_variants {name required {forbidden {}}} {
 proc _check_require_active_variants {} {
 	global _require_active_variants_list
 	foreach _require_active_variant $_require_active_variants_list {
-		set name [lindex $_require_active_variant 0]
-		set port [_get_dep_port $name]
+		set depspec [lindex $_require_active_variant 0]
+		set name [_get_dep_port $depspec]
 		set required [lindex $_require_active_variant 1]
 		set forbidden [lindex $_require_active_variant 2]
-		if {[catch {set result [active_variants $name $required $forbidden]}] != 0} {
-			error "${port} is required, but not active."
+		if {[catch {set result [active_variants $depspec $required $forbidden]}] != 0} {
+			error "${name} is required, but not active."
 		}
 		if {!$result} {
 			set str_required ""
@@ -198,7 +198,7 @@ proc _check_require_active_variants {} {
 			if {$str_required != "" && $str_forbidden != ""} {
 				set str_combine " and "
 			}
-			error "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
+			error "${name} must be installed ${str_required}${str_combine}${str_forbidden}."
 		}
 	}
 }
