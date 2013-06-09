@@ -50,7 +50,7 @@ array set haskell.compiler_configuration {
          compiler   ${prefix}/bin/ghc}
 }
 
-proc haskell.setup {package version {compiler ghc}} {
+proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
     global haskell.compiler_list
     global haskell.compiler_configuration
     global homepage prefix configure.cmd destroot worksrcpath name master_sites configure.cc
@@ -80,19 +80,21 @@ proc haskell.setup {package version {compiler ghc}} {
     destroot.cmd        ${configure.cmd}
     destroot.destdir
     destroot.target     Setup copy --destdir=${destroot}
-    post-destroot {
-        system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
-        system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
-        xinstall -m 755 -d ${destroot}${prefix}/libexec/${name}
-        xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
-            ${destroot}${prefix}/libexec/${name}
-    }
-    post-activate {
-        system "${prefix}/libexec/${name}/register.sh"
-    }
-    pre-deactivate {
-        system "${prefix}/libexec/${name}/unregister.sh"
-    }
+	if {${register_scripts} == "yes"} {
+		post-destroot {
+			system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
+			system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
+			xinstall -m 755 -d ${destroot}${prefix}/libexec/${name}
+			xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
+				${destroot}${prefix}/libexec/${name}
+		}
+		post-activate {
+			system "${prefix}/libexec/${name}/register.sh"
+		}
+		pre-deactivate {
+			system "${prefix}/libexec/${name}/unregister.sh"
+		}
+	}
 
     livecheck.type      regex
     livecheck.url       http://hackage.haskell.org/cgi-bin/hackage-scripts/package/${package}
