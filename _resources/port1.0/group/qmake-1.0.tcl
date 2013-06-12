@@ -46,10 +46,8 @@ pre-configure {
                                     "QMAKE_OBJC=${configure.objc}"
     configure.args-append           "CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\""
     configure.universal_args-delete --disable-dependency-tracking
-}
 
-if {[variant_exists universal] && [variant_isset universal]} {
-    pre-configure {
+    if {[variant_exists universal] && [variant_isset universal]} {
         configure.pre_args-append   "CONFIG+=\"${qt_arch_types}\""
     }
 }
