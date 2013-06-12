@@ -48,7 +48,7 @@ pre-configure {
     configure.universal_args-delete --disable-dependency-tracking
 }
 
-if {[variant_isset universal]} {
+if {[variant_exists universal] && [variant_isset universal]} {
     pre-configure {
         configure.pre_args-append   "CONFIG+=\"${qt_arch_types}\""
     }
