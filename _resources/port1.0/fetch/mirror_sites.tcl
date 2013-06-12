@@ -348,7 +348,7 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 # http://php.net/mirrors.php
 # The country code domains without number suffix are supposed to redirect to
 # an available mirror in that country. To update this list use:
-# curl -s http://php.net/mirrors.php | sed -E -n 's,^.*http://([a-z]{2})[0-9]*(\.php\.net)/.*$,\1\2,p' | sort -u | xargs -n 1 -I % sh -c '{ ping -c 1 -t 2 % >/dev/null 2>&1 && echo "    http://%/:nosubdir"; }' | tee /dev/tty | pbcopy
+# curl -s http://php.net/mirrors.php | sed -E -n 's,^.*http://([a-z]{2})[0-9]*(\.php\.net)/.*$,\1\2,p' | sort -u | xargs -n 1 -I % sh -c '{ ping -o -c 4 -t 15 % >/dev/null 2>&1 && echo "    http://%/:nosubdir"; }' | tee /dev/tty | pbcopy
 set portfetch::mirror_sites::sites(php) {
     http://at.php.net/:nosubdir
     http://bd.php.net/:nosubdir
@@ -357,7 +357,6 @@ set portfetch::mirror_sites::sites(php) {
     http://br.php.net/:nosubdir
     http://ca.php.net/:nosubdir
     http://ch.php.net/:nosubdir
-    http://cn.php.net/:nosubdir
     http://cz.php.net/:nosubdir
     http://de.php.net/:nosubdir
     http://dk.php.net/:nosubdir
