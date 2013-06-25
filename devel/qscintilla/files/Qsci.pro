@@ -4,5 +4,5 @@ TEMPLATE = subdirs
 CONFIG   += ordered
 
 SUBDIRS = \
-    Qt4 \
-    designer-Qt4
+    Qt4Qt5 \
+    designer-Qt4Qt5
