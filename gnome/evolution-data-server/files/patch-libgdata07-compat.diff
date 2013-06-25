@@ -1,0 +1,279 @@
+--- addressbook/backends/google/e-book-backend-google.c.orig	2013-05-09 15:13:08.000000000 -0700
++++ addressbook/backends/google/e-book-backend-google.c	2013-05-09 15:20:35.000000000 -0700
+@@ -511,7 +511,11 @@
+ 		GTimeVal updated;
+ 
+ 		g_assert (g_time_val_from_iso8601 (last_updated, &updated) == TRUE);
+-		gdata_query_set_updated_min (query, &updated);
++                #ifdef HAVE_GDATA_07
++                gdata_query_set_updated_min (query, updated.tv_sec);
++                #else
++                gdata_query_set_updated_min (query, &updated);
++                #endif
+ 		gdata_contacts_query_set_show_deleted (GDATA_CONTACTS_QUERY (query), TRUE);
+ 	}
+ 
+@@ -788,11 +792,18 @@
+ 	g_free (xml);
+ 
+ 	/* Update the contact on the server */
+-	new_entry = GDATA_ENTRY (
+-		gdata_contacts_service_update_contact (
+-			GDATA_CONTACTS_SERVICE (priv->service),
+-			GDATA_CONTACTS_CONTACT (entry),
+-			NULL, &error));
++        #ifdef HAVE_GDATA_07
++        new_entry = gdata_service_update_entry (
++                        GDATA_SERVICE (priv->service),
++                        entry,
++                        NULL, &error);
++        #else
++        new_entry = GDATA_ENTRY (
++                gdata_contacts_service_update_contact (
++                        GDATA_CONTACTS_SERVICE (priv->service),
++                        GDATA_CONTACTS_CONTACT (entry),
++                        NULL, &error));
++        #endif
+ 	g_object_unref (entry);
+ 
+ 	if (!new_entry) {
+@@ -1189,6 +1200,12 @@
+ 		E_CONTACT_ORG_UNIT,
+ 		E_CONTACT_TITLE,
+ 		E_CONTACT_ROLE,
++                #ifdef HAVE_GDATA_07
++                E_CONTACT_HOMEPAGE_URL,
++                E_CONTACT_BLOG_URL,
++                E_CONTACT_BIRTH_DATE,
++                E_CONTACT_ANNIVERSARY,
++                #endif
+ 		E_CONTACT_NOTE
+ 	};
+ 
+--- addressbook/backends/google/util.c.orig	2013-05-09 15:25:00.000000000 -0700
++++ addressbook/backends/google/util.c	2013-05-09 15:33:18.000000000 -0700
+@@ -58,6 +58,57 @@
+ 	return NULL;
+ }
+ 
++#ifdef HAVE_GDATA_07
++static void
++remove_anniversary (GDataContactsContact *contact)
++{
++        GList *events, *itr;
++
++        events = gdata_contacts_contact_get_events (contact);
++        if (!events)
++                return;
++
++        events = g_list_copy (events);
++        g_list_foreach (events, (GFunc) g_object_ref, NULL);
++
++        gdata_contacts_contact_remove_all_events (contact);
++        for (itr = events; itr; itr = itr->next) {
++                GDataGContactEvent *event = itr->data;
++
++                if (g_strcmp0 (gdata_gcontact_event_get_relation_type (event), GDATA_GCONTACT_EVENT_ANNIVERSARY) != 0)
++                        gdata_contacts_contact_add_event (contact, event);
++        }
++
++        g_list_foreach (events, (GFunc) g_object_unref, NULL);
++        g_list_free (events);
++}
++
++static void
++remove_websites (GDataContactsContact *contact)
++{
++        GList *websites, *itr;
++
++        websites = gdata_contacts_contact_get_websites (contact);
++        if (!websites)
++                return;
++
++        websites = g_list_copy (websites);
++        g_list_foreach (websites, (GFunc) g_object_ref, NULL);
++
++        gdata_contacts_contact_remove_all_websites (contact);
++        for (itr = websites; itr; itr = itr->next) {
++                GDataGContactWebsite *website = itr->data;
++
++                if (g_strcmp0 (gdata_gcontact_website_get_relation_type (website), GDATA_GCONTACT_WEBSITE_HOME_PAGE) != 0 &&
++                    g_strcmp0 (gdata_gcontact_website_get_relation_type (website), GDATA_GCONTACT_WEBSITE_BLOG) != 0)
++                        gdata_contacts_contact_add_website (contact, website);
++        }
++
++        g_list_foreach (websites, (GFunc) g_object_unref, NULL);
++        g_list_free (websites);
++}
++#endif
++
+ gboolean
+ _gdata_entry_update_from_e_contact (GDataEntry *entry, EContact *contact)
+ {
+@@ -69,6 +120,10 @@
+ 	gboolean have_postal_primary = FALSE;
+ 	gboolean have_org_primary = FALSE;
+ 	const gchar *title, *role, *note;
++        #ifdef HAVE_GDATA_07
++        EContactDate *bdate;
++        const gchar *url;
++        #endif
+ 
+ 	attributes = e_vcard_get_attributes (E_VCARD (contact));
+ 
+@@ -214,6 +269,58 @@
+ 			gdata_gd_organization_set_job_description (org, role);
+ 	}
+ 
++        #ifdef HAVE_GDATA_07
++        remove_websites (GDATA_CONTACTS_CONTACT (entry));
++
++        url = e_contact_get_const (contact, E_CONTACT_HOMEPAGE_URL);
++        if (url && *url) {
++                GDataGContactWebsite *website = gdata_gcontact_website_new (url, GDATA_GCONTACT_WEBSITE_HOME_PAGE, NULL, FALSE);
++                if (website) {
++                        gdata_contacts_contact_add_website (GDATA_CONTACTS_CONTACT (entry), website);
++                        g_object_unref (website);
++                }
++        }
++
++        url = e_contact_get_const (contact, E_CONTACT_BLOG_URL);
++        if (url && *url) {
++                GDataGContactWebsite *website = gdata_gcontact_website_new (url, GDATA_GCONTACT_WEBSITE_BLOG, NULL, FALSE);
++                if (website) {
++                        gdata_contacts_contact_add_website (GDATA_CONTACTS_CONTACT (entry), website);
++                        g_object_unref (website);
++                }
++        }
++
++        gdata_contacts_contact_set_birthday (GDATA_CONTACTS_CONTACT (entry), NULL, TRUE);
++        bdate = e_contact_get (contact, E_CONTACT_BIRTH_DATE);
++        if (bdate) {
++                GDate *gdate = g_date_new_dmy (bdate->day, bdate->month, bdate->year);
++
++                if (gdate) {
++                        gdata_contacts_contact_set_birthday (GDATA_CONTACTS_CONTACT (entry), gdate, TRUE);
++                        g_date_free (gdate);
++                }
++                e_contact_date_free (bdate);
++        }
++
++        remove_anniversary (GDATA_CONTACTS_CONTACT (entry));
++        bdate = e_contact_get (contact, E_CONTACT_ANNIVERSARY);
++        if (bdate) {
++                GDate *gdate = g_date_new_dmy (bdate->day, bdate->month, bdate->year);
++
++                if (gdate) {
++                        GDataGContactEvent *anni = gdata_gcontact_event_new (gdate, GDATA_GCONTACT_EVENT_ANNIVERSARY, NULL);
++
++                        if (anni) {
++                                gdata_contacts_contact_add_event (GDATA_CONTACTS_CONTACT (entry), anni);
++                                g_object_unref (anni);
++                        }
++
++                        g_date_free (gdate);
++                }
++                e_contact_date_free (bdate);
++        }
++        #endif
++
+ 	return TRUE;
+ }
+ 
+@@ -241,6 +348,11 @@
+ 	GDataGDPostalAddress *postal_address;
+ 	GDataGDOrganization *org;
+ 	GHashTable *extended_props;
++        #ifdef HAVE_GDATA_07
++        GList *websites, *events;
++        GDate bdate;
++        gboolean bdate_has_year;
++        #endif
+ 
+ 	uid = gdata_entry_get_id (entry);
+ 	if (NULL == uid)
+@@ -352,6 +464,84 @@
+ 	extended_props = gdata_contacts_contact_get_extended_properties (GDATA_CONTACTS_CONTACT (entry));
+ 	g_hash_table_foreach (extended_props, (GHFunc) foreach_extended_props_cb, vcard);
+ 
++        #ifdef HAVE_GDATA_07
++        websites = gdata_contacts_contact_get_websites (GDATA_CONTACTS_CONTACT (entry));
++        for (itr = websites; itr != NULL; itr = itr->next) {
++                GDataGContactWebsite *website = itr->data;
++                const gchar *uri, *reltype;
++
++                if (!website)
++                        continue;
++
++                uri = gdata_gcontact_website_get_uri (website);
++                reltype = gdata_gcontact_website_get_relation_type (website);
++
++                if (!uri || !*uri || !reltype)
++                        continue;
++
++                if (g_str_equal (reltype, GDATA_GCONTACT_WEBSITE_HOME_PAGE))
++                        e_contact_set (E_CONTACT (vcard), E_CONTACT_HOMEPAGE_URL, uri);
++                else if (g_str_equal (reltype, GDATA_GCONTACT_WEBSITE_BLOG))
++                        e_contact_set (E_CONTACT (vcard), E_CONTACT_BLOG_URL, uri);
++        }
++
++        g_date_clear (&bdate, 1);
++        bdate_has_year = gdata_contacts_contact_get_birthday (GDATA_CONTACTS_CONTACT (entry), &bdate);
++        if (!bdate_has_year) {
++                GTimeVal curr_time = { 0 };
++                GDate tmp_date;
++
++                g_get_current_time (&curr_time);
++                g_date_clear (&tmp_date, 1);
++                g_date_set_time_val (&tmp_date, &curr_time);
++
++                g_date_set_year (&bdate, g_date_get_year (&tmp_date));
++        }
++
++        if (g_date_valid (&bdate)) {
++                EContactDate *date = e_contact_date_new ();
++
++                if (date) {
++                        date->day = g_date_get_day (&bdate);
++                        date->month =  g_date_get_month (&bdate);
++                        date->year = g_date_get_year (&bdate);
++
++                        e_contact_set (E_CONTACT (vcard), E_CONTACT_BIRTH_DATE, date);
++                        e_contact_date_free (date);
++                }
++        }
++
++        events = gdata_contacts_contact_get_events (GDATA_CONTACTS_CONTACT (entry));
++        for (itr = events; itr; itr = itr->next) {
++                GDataGContactEvent *event = itr->data;
++
++                if (!event)
++                        continue;
++
++                if (!gdata_gcontact_event_get_relation_type (event) ||
++                    !g_str_equal (gdata_gcontact_event_get_relation_type (event), GDATA_GCONTACT_EVENT_ANNIVERSARY))
++                        continue;
++
++                g_date_clear (&bdate, 1);
++                gdata_gcontact_event_get_date (event, &bdate);
++
++                if (g_date_valid (&bdate)) {
++                        EContactDate *date = e_contact_date_new ();
++
++                        if (date) {
++                                date->day = g_date_get_day (&bdate);
++                                date->month =  g_date_get_month (&bdate);
++                                date->year = g_date_get_year (&bdate);
++
++                                e_contact_set (E_CONTACT (vcard), E_CONTACT_ANNIVERSARY, date);
++                                e_contact_date_free (date);
++                        }
++                }
++
++                break;
++        }
++        #endif
++
+ 	return E_CONTACT (vcard);
+ }
+ 
