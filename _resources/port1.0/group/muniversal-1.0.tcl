@@ -577,6 +577,13 @@ variant universal {
 
                                             # nothing has worked so far.
                                             switch -glob ${fl} {
+                                                *.typelib {
+                                                    # Sometimes garbage ends up in ignored trailing bytes
+                                                    # https://trac.macports.org/ticket/39629
+                                                    # TODO: Compare the g-ir-generate output
+                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                                    copy ${dir1}/${fl} ${dir}
+                                                }
                                                 *.jar {
                                                     # jar files can be different because of timestamp
                                                     ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume timestamp difference"
