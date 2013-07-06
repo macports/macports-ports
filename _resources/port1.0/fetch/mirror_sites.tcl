@@ -351,7 +351,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 # curl -s http://php.net/mirrors.php | sed -E -n 's,^.*http://([a-z]{2})[0-9]*(\.php\.net)/.*$,\1\2,p' | sort -u | xargs -n 1 -I % sh -c '{ ping -o -c 4 -t 15 % >/dev/null 2>&1 && echo "    http://%/:nosubdir"; }' | tee /dev/tty | pbcopy
 set portfetch::mirror_sites::sites(php) {
     http://at.php.net/:nosubdir
-    http://bd.php.net/:nosubdir
     http://be.php.net/:nosubdir
     http://bg.php.net/:nosubdir
     http://br.php.net/:nosubdir
@@ -368,7 +367,6 @@ set portfetch::mirror_sites::sites(php) {
     http://in.php.net/:nosubdir
     http://is.php.net/:nosubdir
     http://jp.php.net/:nosubdir
-    http://md.php.net/:nosubdir
     http://mx.php.net/:nosubdir
     http://nc.php.net/:nosubdir
     http://nl.php.net/:nosubdir
@@ -380,9 +378,7 @@ set portfetch::mirror_sites::sites(php) {
     http://ro.php.net/:nosubdir
     http://se.php.net/:nosubdir
     http://sg.php.net/:nosubdir
-    http://th.php.net/:nosubdir
     http://tr.php.net/:nosubdir
-    http://tw.php.net/:nosubdir
     http://tz.php.net/:nosubdir
     http://ua.php.net/:nosubdir
     http://uk.php.net/:nosubdir
