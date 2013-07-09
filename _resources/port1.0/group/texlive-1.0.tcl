@@ -47,13 +47,13 @@
 #
 
 # texmf files installed by texlive
-set texlive_texmfmain "${prefix}/share/texmf-texlive"
-
-# texmf files installed by texlive, but nominally distribution-independent
-# not clear it's really necessary to separate these from texmfmain,
-# but texlive goes to great effort to keep them separate, so we might as
-# well too
-set texlive_texmfdist "${prefix}/share/texmf-texlive-dist"
+# TeXLive used to maintain a separation between files that were
+# nominally distribution-independent ("texmf-dist") and those that
+# were tied to the binaries. This separation is now gone; everything
+# now goes into the texmfdist tree. $texlive_texmfmain points to the
+# same place for backwards-compatibility.
+set texlive_texmfdist "${prefix}/share/texmf-texlive"
+set texlive_texmfmain "${texlive_texmfdist}"
 
 # texmf files installed by ports other than texlive
 set texlive_texmfports "${prefix}/share/texmf"
@@ -163,7 +163,7 @@ proc texlive.texmfport {} {
     supported_archs noarch
     installs_libs   no
 
-    master_sites    http://flute.csail.mit.edu/texlive/
+    master_sites    http://giraffe.cs.washington.edu/texlive/
     use_xz          yes
 
     global name master_sites distname extract.suffix
