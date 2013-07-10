@@ -437,10 +437,10 @@ proc texlive.texmfport {} {
             system "${prefix}/libexec/texlive-update-cnf language.dat.lua"
             system "${prefix}/libexec/texlive-update-cnf updmap.cfg"
             system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
-            system "${prefix}/bin/updmap-sys"
-            # format generation might fail if we are in the middle of
+            # map/format generation might fail if we are in the middle of
             # a major upgrade and have not yet updated all texlive ports.
             # Catch the error to prevent the upgrade from failing.
+            catch {system "${prefix}/bin/updmap-sys"}
             catch {system "${prefix}/bin/fmtutil-sys --all"}
         } else {
             # Otherwise, only update the config files that are
@@ -453,7 +453,7 @@ proc texlive.texmfport {} {
             }
             if {${texlive.maps} != ""} {
                 system "${prefix}/libexec/texlive-update-cnf updmap.cfg"
-                system "${prefix}/bin/updmap-sys"
+                catch {system "${prefix}/bin/updmap-sys"}
             }
             if {${texlive.formats} != ""} {
                 system "${prefix}/libexec/texlive-update-cnf fmtutil.cnf"
