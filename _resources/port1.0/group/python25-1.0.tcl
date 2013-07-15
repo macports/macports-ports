@@ -36,6 +36,12 @@
 # Please switch existing ports using this to 'PortGroup python 1.0' (which
 # supports multiple python versions) at your earliest convenience.
 
+pre-fetch {
+    ui_warn "The $name port is using the deprecated 'python25'\
+PortGroup, which will be disabled in the near future and eventually removed.\
+The maintainer should switch to the 'python' PortGroup."
+}
+
 set python.branch	2.5
 set python.bin		${prefix}/bin/python${python.branch}
 set python.lib		${prefix}/lib/libpython${python.branch}.dylib
