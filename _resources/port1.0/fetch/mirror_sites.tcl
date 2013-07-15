@@ -352,11 +352,9 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 set portfetch::mirror_sites::sites(php) {
     http://at.php.net/:nosubdir
     http://be.php.net/:nosubdir
-    http://bg.php.net/:nosubdir
     http://br.php.net/:nosubdir
     http://ca.php.net/:nosubdir
     http://ch.php.net/:nosubdir
-    http://cz.php.net/:nosubdir
     http://de.php.net/:nosubdir
     http://dk.php.net/:nosubdir
     http://ee.php.net/:nosubdir
@@ -369,7 +367,6 @@ set portfetch::mirror_sites::sites(php) {
     http://jp.php.net/:nosubdir
     http://mx.php.net/:nosubdir
     http://nc.php.net/:nosubdir
-    http://nl.php.net/:nosubdir
     http://no.php.net/:nosubdir
     http://nz.php.net/:nosubdir
     http://pa.php.net/:nosubdir
