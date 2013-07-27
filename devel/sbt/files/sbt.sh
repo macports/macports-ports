@@ -17,9 +17,14 @@
 # Is the location of the SBT launcher JAR file.
 LAUNCHJAR="__SBT_LAUNCHER_PATH__"
 
-# Ensure enough heap space is created for sbt.  These settings are the
-# default settings from Typesafe's sbt wrapper.
+# Customization: this may define JAVA_OPTS.
+SBTCONF=$HOME/.sbtconfig
+if [ -f "$SBTCONF" ]; then
+    . $SBTCONF
+fi
 if [ -z "$JAVA_OPTS" ]; then
+    # Ensure enough heap space is created for sbt.  These settings are
+    # the default settings from Typesafe's sbt wrapper.
     JAVA_OPTS="-XX:+CMSClassUnloadingEnabled -Xms1536m -Xmx1536m -XX:MaxPermSize=384m -XX:ReservedCodeCacheSize=192m -Dfile.encoding=UTF8"
 fi
 
