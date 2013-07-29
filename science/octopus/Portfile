@@ -30,26 +30,82 @@ configure.args      --with-libxc-prefix=${prefix} --with-blas=-lsatlas \
                     --disable-gdlib --without-sparskit --with-netcdf-prefix=no \
                     --with-etsf-io-prefix=no --with-berkeleygw-prefix=no \
                     --with-arpack=no --with-libfm=no --with-pfft-prefix=no \
-                    --with-pspio-prefix=no --with-nfft=no
+                    --with-pspio-prefix=no --with-nfft=no --with-blacs=no \
+                    --with-scalapack=no FCCPP="${configure.cc} -E -ansi" \
+                    --enable-utils
 # configure will find and use these other libraries unless they are explicitly disabled
-
-pre-configure {
-    configure.args-append  FCCPP="${configure.cpp} -ansi"
-
-    # use of the same Fortran compiler as the one being used here does not seem necessary
-    if { ![active_variants fftw-3 gcc43] && ![active_variants fftw-3 gcc44] && \
-         ![active_variants fftw-3 gcc45] && ![active_variants fftw-3 gcc46] && \
-         ![active_variants fftw-3 gcc47] && ![active_variants fftw-3 gcc48] && \
-         ![active_variants fftw-3 g95] } {
-        ui_error "fftw-3 must be built with a Fortran variant"
-        return -code error "fftw-3 needs Fortran variant"
-    }
-}
 configure.optflags  -O3
 
+default_variants +newuoa
+if {![variant_isset gcc46] && ![variant_isset gcc48] && ![variant_isset openmpi] && ![variant_isset mpich]} {
+    default_variants    +gcc47
+}
+
+pre-fetch {
+    set fortran unknown
+    set fortrans { gcc42 gcc43 gcc44 gcc45 gcc46 gcc47 gcc48 g95 }
+
+    foreach fc_name ${fortrans} {
+        if { [variant_isset ${fc_name}] } {
+            set fortran ${fc_name}
+        } elseif { [variant_isset openmpi] } {
+            if { [active_variants openmpi ${fc_name}] } { set fortran ${fc_name} }
+        } elseif { [variant_isset mpich] } {
+            if { [_portnameactive mpich] } {
+                if { [active_variants mpich ${fc_name}] } { set fortran ${fc_name} }
+            } elseif { [_portnameactive mpich-devel] } {
+                if { [active_variants mpich-devel ${fc_name}] } { set fortran ${fc_name} }
+            }
+        }
+    }
+
+    if { ${fortran} == "unknown" } {
+        if { [variant_isset openmpi] } {
+            ui_error "Variant +openmpi requires openmpi to have been built with Fortran support."
+            return -code error "Variant +openmpi requires openmpi to have been built with Fortran support."
+        } elseif { [variant_isset mpich] } {
+            ui_error "Variant +mpich requires mpich/mpich-devel to have been built with Fortran support."
+            return -code error "Variant +mpich requires mpich/mpich-devel to have been built with Fortran support."
+        } else {
+            ui_error "Internal error: cannot determine Fortran compiler."
+            return -code error "Internal error: cannot determine Fortran compiler."
+        }
+    }
+    ui_msg "Fortran compiler is ${fortran}."
+
+    if { ![active_variants libxc ${fortran}] } {
+        ui_error "libxc must have been built with +${fortran}."
+        return -code error "libxc must have been built with +${fortran}."
+    }
+
+    if { [variant_isset netcdf-fortran] } {
+        if {![active_variants netcdf-fortran ${fortran}] } {
+            ui_error "netcdf-fortran must have been built with +${fortran}."
+            return -code error "netcdf-fortran must have been built with +${fortran}."
+        }
+    }
+
+    if { [variant_isset etsf_io] } {
+        if {![active_variants etsf_io ${fortran}] } {
+            ui_error "etsf_io must have been built with +${fortran}."
+            return -code error "etsf_io must have been built with +${fortran}."
+        }
+    }
+
+    # use of the same Fortran compiler as the one being used here does not seem necessary
+    set fftw_fortran no
+    foreach fc_name ${fortrans} {
+        if { [active_variants fftw-3 ${fc_name}] } { set fftw_fortran yes }
+    }
+    if { ${fftw_fortran} == "no" } {
+        ui_error "fftw-3 must have been built with a Fortran variant"
+        return -code error "fftw-3 must have been built with a Fortran variant"
+    }
+}
+
 # More options that could be added:
-# variants: berkeleygw, openmp, openmpi, mpich, threads (for fftw, atlas?), scalapack, arpack
-# with MPI would need to disable zoltan, scalapack explicitly. no way to turn off PAPI.
+# variants: berkeleygw, openmp, threads (for fftw, atlas?), scalapack, arpack
+# no way to turn off PAPI.
 
 # libxc does not have universal variant, so octopus cannot either
 universal_variant   no
@@ -57,21 +113,37 @@ universal_variant   no
 test.run            yes
 test.target         check-full
 
-variant gcc46 conflicts gcc47 description {Build with GCC 4.6} {
+variant gcc46 conflicts gcc47 gcc48 openmpi mpich description {Build with GCC 4.6} {
     configure.compiler  macports-gcc-4.6
     depends_lib-append  port:gcc46
-    require_active_variants libxc gcc46
 }
 
-variant gcc47 conflicts gcc46 description {Build with GCC 4.7} {
+variant gcc47 conflicts gcc46 gcc48 openmpi mpich description {Build with GCC 4.7} {
     configure.compiler  macports-gcc-4.7
     depends_lib-append  port:gcc47
-    require_active_variants libxc gcc47
 }
 
-default_variants +newuoa
-if {![variant_isset gcc46]} {
-    default_variants    +gcc47
+variant gcc48 conflicts gcc46 gcc47 openmpi mpich description {Build with GCC 4.8} {
+    configure.compiler  macports-gcc-4.8
+    depends_lib-append  port:gcc48
+}
+
+variant openmpi conflicts gcc46 gcc47 gcc48 mpich description {Build with OpenMPI} {
+    configure.cc           openmpicc
+    configure.fc           openmpif90
+    configure.args-delete  --disable-mpi
+    # an in-place allreduce of lxyz_inv in mesh_init.F90 leads to zeroes afterwards with MPI2
+    configure.args-append  --enable-mpi --without-external_zoltan --disable-mpi2
+    depends_lib-append     port:openmpi
+    test.env-append        MPIEXEC=${prefix}/bin/openmpiexec
+}
+
+variant mpich conflicts gcc46 gcc47 gcc48 openmpi description {Build with MPICH} {
+    configure.cc           mpicc
+    configure.fc           mpif90
+    configure.args-delete  --disable-mpi
+    configure.args-append  --enable-mpi --without-external_zoltan
+    depends_lib-append     path:bin/mpif90:mpich
 }
 
 variant newuoa description {Build with internal newuoa library for optimal control} {
@@ -82,25 +154,13 @@ variant netcdf description {Build with support for NetCDF output} {
     configure.args-delete   --with-netcdf-prefix=no
     configure.args-append   --with-netcdf-prefix=${prefix}
     depends_lib-append      port:netcdf-fortran
-
     require_active_variants netcdf-fortran {} universal
-    if {[variant_isset gcc46]} {
-        require_active_variants netcdf-fortran gcc46
-    } else {
-        require_active_variants netcdf-fortran gcc47
-    }
 }
 
 variant etsf_io requires netcdf description {Build with support for ETSF_IO output} {
     configure.args-delete   --with-etsf-io-prefix=no
     configure.args-append   --with-etsf-io-prefix=${prefix}
     depends_lib-append      port:etsf_io
-
-    if {[variant_isset gcc46]} {
-        require_active_variants etsf_io gcc46
-    } else {
-        require_active_variants etsf_io gcc47
-    }
 }
 
 variant sparskit description {Build with support for SPARSKIT propagators} {
