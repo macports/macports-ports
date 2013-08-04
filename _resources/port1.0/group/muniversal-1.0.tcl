@@ -466,14 +466,20 @@ variant universal {
 
             xinstall -d -m 0755 ${dir}
 
-            foreach fl [glob -directory ${dir2} -tails -nocomplain *] {
+            foreach fl [glob -directory ${dir2} -tails -nocomplain * .*] {
+                if { ${fl} == "." || ${fl} == ".." } {
+                    continue
+                }
                 if { ![muniversal_file_or_symlink_exists ${dir1}/${fl}] } {
                     # File only exists in ${dir1}
                     ui_debug "universal: merge: ${prefixDir}/${fl} only exists in ${base2}"
                     copy ${dir2}/${fl} ${dir}
                 }
             }
-            foreach fl [glob -directory ${dir1} -tails -nocomplain *] {
+            foreach fl [glob -directory ${dir1} -tails -nocomplain * .*] {
+                if { ${fl} == "." || ${fl} == ".." } {
+                    continue
+                }
                 if { ![muniversal_file_or_symlink_exists ${dir2}/${fl}] } {
                     # File only exists in ${dir2}
                     ui_debug "universal: merge: ${prefixDir}/${fl} only exists in ${base1}"
