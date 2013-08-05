@@ -550,7 +550,7 @@ set portfetch::mirror_sites::sites(xorg) {
 # $ curl -s http://dev.mysql.com/downloads/mirrors.html | grep -E '>HTTP<' | sed -e 's,.*href="\(.*\)">.*,    \1/Downloads/:nosubdir,g' -e 's,//Downloads/:nosubdir,/Downloads/:nosubdir,g' | sort -u
 # To remove bad mirrors look at this inexpensive output:
 # $ for port in mysql{5,51,55,56} ; do echo "port: ${port}" ; for mirror in $(port distfiles $port | grep -v macports | grep -E "^ *(http|ftp)://") ; do echo $mirror ; curl -sI $mirror | grep -E "(^213|Content-Length)" | sed -e '/Content-Length/ s/.*: //' -e '/213/ s/.* //' ; done ; done
-# Bad mirrors
+# Mirrors with bad or missing files
 #     http://mirror-cybernet.lums.edu.pk/pub/mysql/Downloads/:nosubdir
 #     http://mysql.isu.edu.tw/Downloads/:nosubdir
 #     http://mysql.mirror.kangaroot.net/Downloads/:nosubdir
@@ -559,13 +559,17 @@ set portfetch::mirror_sites::sites(xorg) {
 #     http://mysql.mivzakim.net/Downloads/:nosubdir
 #     http://opensource.become.com/mysql/Downloads/:nosubdir
 #     http://sunsite.informatik.rwth-aachen.de/mysql/Downloads/:nosubdir
+# Mirrors with ping failures
+#     http://ftp.itu.edu.tr/Mirror/Mysql/Downloads/:nosubdir
+#     http://mysql.blic.net/Downloads/:nosubdir
+#     http://mysql.cs.pu.edu.tw/Downloads/:nosubdir
+#     http://mysql.dataphone.se/Downloads/:nosubdir
 set portfetch::mirror_sites::sites(mysql) {
     http://artfiles.org/mysql/Downloads/:nosubdir
     http://ftp.arnes.si/mysql/Downloads/:nosubdir
     http://ftp.gwdg.de/pub/misc/mysql/Downloads/:nosubdir
     http://ftp.heanet.ie/mirrors/www.mysql.com/Downloads/:nosubdir
     http://ftp.iij.ad.jp/pub/db/mysql/Downloads/:nosubdir
-    http://ftp.itu.edu.tr/Mirror/Mysql/Downloads/:nosubdir
     http://ftp.jaist.ac.jp/pub/mysql/Downloads/:nosubdir
     http://ftp.ntua.gr/pub/databases/mysql/Downloads/:nosubdir
     http://ftp.sunet.se/pub/unix/databases/relational/mysql/Downloads/:nosubdir
@@ -581,10 +585,7 @@ set portfetch::mirror_sites::sites(mysql) {
     http://mirrors.ircam.fr/pub/mysql/Downloads/:nosubdir
     http://mirrors.ukfast.co.uk/sites/ftp.mysql.com/Downloads/:nosubdir
     http://mirrors.xservers.ro/mysql/Downloads/:nosubdir
-    http://mysql.blic.net/Downloads/:nosubdir
     http://mysql.cdpa.nsysu.edu.tw/Downloads/:nosubdir
-    http://mysql.cs.pu.edu.tw/Downloads/:nosubdir
-    http://mysql.dataphone.se/Downloads/:nosubdir
     http://mysql.easynet.be/Downloads/:nosubdir
     http://mysql.he.net/Downloads/:nosubdir
     http://mysql.infocom.ua/Downloads/:nosubdir
