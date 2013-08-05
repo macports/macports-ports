@@ -544,3 +544,104 @@ set portfetch::mirror_sites::sites(xorg) {
     http://www.x.org/pub/
     ftp://ftp.x.org/pub/
 }
+
+# MySQL Mirrors
+# To update this list use:
+# $ curl -s http://dev.mysql.com/downloads/mirrors.html | grep -E '>(HTTP|FTP)<' | sed -e 's,.*href="\(.*\)">.*,    \1/Downloads/:nosubdir,g' -e 's,//Downloads/:nosubdir,/Downloads/:nosubdir,g' | sort -u
+# To remove bad mirrors look at this inexpensive output:
+# $ for port in mysql{5,51,55,56} ; do echo "port: ${port}" ; for mirror in $(port distfiles $port | grep -v macports | grep -E "^ *(http|ftp)://") ; do echo $mirror ; curl -sI $mirror | grep -E "(^213|Content-Length)" | sed -e '/Content-Length/ s/.*: //' -e '/213/ s/.* //' ; done ; done
+# Bad mirrors
+#     ftp://ftp.crysys.hu/pub/mysql/Downloads/:nosubdir
+#     ftp://ftp.linorg.usp.br/mysql/Downloads/:nosubdir
+#     ftp://mirror-cybernet.lums.edu.pk/pub/mysql/Downloads/:nosubdir
+#     ftp://mysql.mirror.kangaroot.net/pub/mysql/Downloads/:nosubdir
+#     ftp://sunsite.informatik.rwth-aachen.de/pub/mirror/www.mysql.com/Downloads/:nosubdir
+#     http://mirror-cybernet.lums.edu.pk/pub/mysql/Downloads/:nosubdir
+#     http://mysql.isu.edu.tw/Downloads/:nosubdir
+#     http://mysql.mirror.kangaroot.net/Downloads/:nosubdir
+#     http://mysql.mirrors.crysys.hit.bme.hu/Downloads/:nosubdir
+#     http://mysql.mirrors.ilisys.com.au/Downloads/:nosubdir
+#     http://mysql.mivzakim.net/Downloads/:nosubdir
+#     http://opensource.become.com/mysql/Downloads/:nosubdir
+#     http://sunsite.informatik.rwth-aachen.de/mysql/Downloads/:nosubdir
+set portfetch::mirror_sites::sites(mysql) {
+    ftp://ftp.arnes.si/packages/mysql/Downloads/:nosubdir
+    ftp://ftp.cs.pu.edu.tw/Unix/mysql/Downloads/:nosubdir
+    ftp://ftp.easynet.be/mysql/Downloads/:nosubdir
+    ftp://ftp.fi.muni.cz/pub/mysql/Downloads/:nosubdir
+    ftp://ftp.fu-berlin.de/unix/databases/mysql/Downloads/:nosubdir
+    ftp://ftp.gwdg.de/pub/misc/mysql/Downloads/:nosubdir
+    ftp://ftp.heanet.ie/mirrors/www.mysql.com/Downloads/:nosubdir
+    ftp://ftp.iij.ad.jp/pub/db/mysql/Downloads/:nosubdir
+    ftp://ftp.itu.edu.tr/Mirror/Mysql/Downloads/:nosubdir
+    ftp://ftp.jaist.ac.jp/pub/mysql/Downloads/:nosubdir
+    ftp://ftp.mirrorservice.org/sites/ftp.mysql.com/Downloads/:nosubdir
+    ftp://ftp.nfsi.pt/pub/mysql/Downloads/:nosubdir
+    ftp://ftp.ntu.edu.tw/pub/MySQL/Downloads/:nosubdir
+    ftp://ftp.ntua.gr/pub/databases/mysql/Downloads/:nosubdir
+    ftp://ftp.sunet.se/pub/unix/databases/relational/mysql/Downloads/:nosubdir
+    ftp://gd.tuwien.ac.at/db/mysql/Downloads/:nosubdir
+    ftp://linorg.usp.br/mysql/Downloads/:nosubdir
+    ftp://mirror.anl.gov/pub/mysql/Downloads/:nosubdir
+    ftp://mirror.csclub.uwaterloo.ca/mysql/Downloads/:nosubdir
+    ftp://mirror.leaseweb.com/mysql/Downloads/:nosubdir
+    ftp://mirror.switch.ch/mirror/mysql/Downloads/:nosubdir
+    ftp://mirror2.dataphone.se/pub/mysql/Downloads/:nosubdir
+    ftp://mirrors.dotsrc.org/mysql/Downloads/:nosubdir
+    ftp://mirrors.ircam.fr/pub/mysql/Downloads/:nosubdir
+    ftp://mirrors.ukfast.co.uk/ftp.mysql.com/Downloads/:nosubdir
+    ftp://mysql.cdpa.nsysu.edu.tw/Unix/Database/MySQL/Downloads/:nosubdir
+    ftp://mysql.inspire.net.nz/mysql/Downloads/:nosubdir
+    ftp://mysql.llarian.net/pub/mysql/Downloads/:nosubdir
+    ftp://mysql.mirror.ac.za/Downloads/:nosubdir
+    ftp://mysql.mirror.iweb.ca/Downloads/:nosubdir
+    ftp://mysql.mirror.rafal.ca/pub/mysql/Downloads/:nosubdir
+    ftp://mysql.mirrors.ovh.net/ftp.mysql.com/Downloads/:nosubdir
+    ftp://na.mirror.garr.it/mirrors/MySQL/Downloads/:nosubdir
+    ftp://sunsite.icm.edu.pl/pub/unix/mysql/Downloads/:nosubdir
+    http://artfiles.org/mysql/Downloads/:nosubdir
+    http://ftp.arnes.si/mysql/Downloads/:nosubdir
+    http://ftp.gwdg.de/pub/misc/mysql/Downloads/:nosubdir
+    http://ftp.heanet.ie/mirrors/www.mysql.com/Downloads/:nosubdir
+    http://ftp.iij.ad.jp/pub/db/mysql/Downloads/:nosubdir
+    http://ftp.itu.edu.tr/Mirror/Mysql/Downloads/:nosubdir
+    http://ftp.jaist.ac.jp/pub/mysql/Downloads/:nosubdir
+    http://ftp.ntua.gr/pub/databases/mysql/Downloads/:nosubdir
+    http://ftp.sunet.se/pub/unix/databases/relational/mysql/Downloads/:nosubdir
+    http://gd.tuwien.ac.at/db/mysql/Downloads/:nosubdir
+    http://it.mysql.contactlab.it/Downloads/:nosubdir
+    http://linorg.usp.br/mysql/Downloads/:nosubdir
+    http://mirror.csclub.uwaterloo.ca/mysql/Downloads/:nosubdir
+    http://mirror.leaseweb.com/mysql/Downloads/:nosubdir
+    http://mirror.switch.ch/ftp/mirror/mysql/Downloads/:nosubdir
+    http://mirror.trouble-free.net/mysql_mirror/Downloads/:nosubdir
+    http://mirrors.dedipower.com/www.mysql.com/Downloads/:nosubdir
+    http://mirrors.dotsrc.org/mysql/Downloads/:nosubdir
+    http://mirrors.ircam.fr/pub/mysql/Downloads/:nosubdir
+    http://mirrors.ukfast.co.uk/sites/ftp.mysql.com/Downloads/:nosubdir
+    http://mirrors.xservers.ro/mysql/Downloads/:nosubdir
+    http://mysql.blic.net/Downloads/:nosubdir
+    http://mysql.cdpa.nsysu.edu.tw/Downloads/:nosubdir
+    http://mysql.cs.pu.edu.tw/Downloads/:nosubdir
+    http://mysql.dataphone.se/Downloads/:nosubdir
+    http://mysql.easynet.be/Downloads/:nosubdir
+    http://mysql.he.net/Downloads/:nosubdir
+    http://mysql.infocom.ua/Downloads/:nosubdir
+    http://mysql.inspire.net.nz/Downloads/:nosubdir
+    http://mysql.linux.cz/Downloads/:nosubdir
+    http://mysql.llarian.net/Downloads/:nosubdir
+    http://mysql.mirror.ac.za/Downloads/:nosubdir
+    http://mysql.mirror.iweb.ca/Downloads/:nosubdir
+    http://mysql.mirror.rafal.ca/Downloads/:nosubdir
+    http://mysql.mirrors.arminco.com/Downloads/:nosubdir
+    http://mysql.mirrors.hoobly.com/Downloads/:nosubdir
+    http://mysql.mirrors.ovh.net/ftp.mysql.com/Downloads/:nosubdir
+    http://mysql.mirrors.pair.com/Downloads/:nosubdir
+    http://mysql.nfsi.pt/Downloads/:nosubdir
+    http://mysql.ntu.edu.tw/Downloads/:nosubdir
+    http://mysql.spd.co.il/Downloads/:nosubdir
+    http://na.mirror.garr.it/mirrors/MySQL/Downloads/:nosubdir
+    http://sunsite.icm.edu.pl/mysql/Downloads/:nosubdir
+    http://www.linorg.usp.br/mysql/Downloads/:nosubdir
+    http://www.mirrorservice.org/sites/ftp.mysql.com/Downloads/:nosubdir
+}
