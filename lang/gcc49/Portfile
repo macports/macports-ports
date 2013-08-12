@@ -5,11 +5,11 @@ PortGroup select 1.0
 PortGroup compiler_blacklist_versions 1.0
 
 name                gcc49
-subport             libstdcxx-devel {}
+subport             libgcc-devel {}
 
 # Whenever this port is bumped for version/revision, please revbump dragonegg-3.4-gcc-4.9
 version             4.9-20130811
-revision            0
+revision            1
 platforms           darwin
 categories          lang
 maintainers         mww openmaintainer
@@ -35,8 +35,8 @@ checksums           rmd160  80701294efbe381b9f2f1ca37ba98434dda8d142 \
 
 use_bzip2           yes
 
-depends_lib         port:gmp port:mpfr port:libiconv port:libmpc port:ppl port:cloog
-depends_run         port:gcc_select port:ld64 port:cctools port:libstdcxx-devel
+depends_lib         port:gmp port:mpfr port:libiconv port:libmpc port:cloog
+depends_run         port:gcc_select port:ld64 port:cctools port:libgcc-devel
 
 depends_skip_archcheck-append gcc_select ld64 cctools
 license_noconflict  gmp mpfr ppl libmpc
@@ -70,7 +70,6 @@ configure.args      --enable-languages=c,c++,objc,obj-c++,fortran,java \
                     --with-gmp=${prefix} \
                     --with-mpfr=${prefix} \
                     --with-mpc=${prefix} \
-                    --with-ppl=${prefix} \
                     --with-cloog=${prefix} --enable-cloog-backend=isl \
                     --disable-cloog-version-check \
                     --enable-stage1-checking \
@@ -108,77 +107,92 @@ use_parallel_build  yes
 
 destroot.target     install install-info-host
 
-if {${subport} == "libstdcxx-devel"} {
-    conflicts       libstdcxx
+if {${subport} == "libgcc-devel"} {
+    conflicts       libgcc
 
-    patchfiles-append  force-static-gcc.patch
+    # http://trac.macports.org/ticket/35770
+    # http://trac.macports.org/ticket/38814
+    # While there can be multiple versions of these runtimes in a single
+    # process, it is not possible to pass objects between different versions,
+    # so we simplify this by having the libgcc port provide the newest version
+    # of these runtimes for all versions of gcc to use.
+    #
+    # If there is a binary incompatible change to the runtime in a future
+    # version of gcc, then the latest version of gcc to provide a given ABI
+    # version should continue to provide a subport for that and older gcc
+    # versions.
 
-    depends_run-delete port:${subport}
+    depends_run-delete port:libgcc-devel
 
     configure.args-delete --libdir=${prefix}/lib/${name}
+    configure.args-append --libdir=${prefix}/lib/libgcc
 
     configure.args-delete --enable-languages=c,c++,objc,obj-c++,lto,fortran,java
-    configure.args-append --enable-languages=c++
+    configure.args-append --enable-languages=c,c++,objc,obj-c++,lto,fortran
 
+    # TODO: Possibly disable bootstrap with appropriate configure flags.
+    #       the problem is that libstdc++'s configure script tests for tls support
+    #       using the running compiler (not gcc for which libstdc++ is being built).
+    #       Thus when we build with clang, we get a mismatch
     # http://trac.macports.org/ticket/36116
-    compiler.blacklist-append {clang < 425}
-
-    configure.args-append --disable-bootstrap
-    build.target        all
-
-    destroot.target     install-target-libstdc++-v3
+    #compiler.blacklist-append {clang < 425}
+    #configure.args-append --disable-bootstrap
+    #build.target        all
 
     post-destroot {
-        eval file delete [glob ${destroot}${prefix}/lib/*{a,py}]
-        eval file delete [glob ${destroot}${prefix}/lib/libgcc*]
-        file delete -force ${destroot}${prefix}/lib/gcc
-        file delete -force ${destroot}${prefix}/share/gcc-${major}
-        file delete -force ${destroot}${prefix}/include/${name}
+        file mkdir ${destroot}${prefix}/lib/libgcc.merged
 
-        # Don't install the linktime symlink.  The compilers will place this
-        # in their libdir, and we don't want to break other toolchains by having
-        # them link against this libstdc++ (at least not until it is built on
-        # top of libc++abi).
-        file delete ${destroot}${prefix}/lib/libstdc++.dylib
+        set dylibs {libgcc_s.1.dylib libgfortran.3.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.0.dylib libatomic.1.dylib}
 
-        # For compatibility.  Delete this eventually.
-        system "touch ${destroot}${prefix}/lib/.libstdcxx"
-
-        if {[variant_isset universal]} {
-            foreach archdir [glob ${destroot}${prefix}/lib/*/] {
-                if {[file exists ${archdir}/libstdc++.6.dylib]} {
-                    system "install_name_tool -id ${prefix}/lib/libstdc++.6.dylib ${archdir}/libstdc++.6.dylib"
-                    system "lipo -create -output ${destroot}${prefix}/lib/libstdc++.6.dylib~ ${destroot}${prefix}/lib/libstdc++.6.dylib ${archdir}/libstdc++.6.dylib && mv ${destroot}${prefix}/lib/libstdc++.6.dylib~ ${destroot}${prefix}/lib/libstdc++.6.dylib"
+        foreach dylib ${dylibs} {
+            move ${destroot}${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/libgcc.merged
+            if {[variant_isset universal]} {
+                foreach archdir [glob ${destroot}${prefix}/lib/libgcc/*/] {
+                    set archdir_nodestroot [string map "${destroot}/ /" ${archdir}]
+                    if {[file exists ${archdir}/${dylib}]} {
+                        system "install_name_tool -id ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}"
+                        foreach link ${dylibs} {
+                            system "install_name_tool -change ${archdir_nodestroot}${link} ${prefix}/lib/libgcc/${link} ${archdir}/${dylib}"
+                        }
+                        system "lipo -create -output ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib} ${archdir}/${dylib} && mv ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib}"
+                    }
                 }
-                file delete -force ${archdir}
             }
+
+            # strip debug symbols to supress debugger warnings:
+            # http://trac.macports.org/attachment/ticket/34831
+            system "strip -x ${destroot}${prefix}/lib/libgcc.merged/${dylib}"
         }
+
+        file delete -force ${destroot}${prefix}/bin              
+        file delete -force ${destroot}${prefix}/share
+        file delete -force ${destroot}${prefix}/include
+        file delete -force ${destroot}${prefix}/lib/libgcc
+        file delete -force ${destroot}${prefix}/libexec
+
+        move ${destroot}${prefix}/lib/libgcc.merged ${destroot}${prefix}/lib/libgcc
+
+        # For binary compatibility with binaries that linked against the old libstdcxx port
+        ln -s libgcc/libstdc++.6.dylib ${destroot}${prefix}/lib/libstdc++.6.dylib
     }
 } else {
 post-destroot {
     file delete -force ${destroot}${prefix}/share/man/man7
     file delete -force ${destroot}${prefix}/share/info
 
-    if {[variant_isset universal]} {
-        foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
-            if {[file exists ${archdir}/libstdc++.6.dylib]} {
-                eval delete [glob ${archdir}/libstdc++*]
+    foreach dylib {libgcc_s.1.dylib libgfortran.3.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.0.dylib libatomic.1.dylib} {
+        delete ${destroot}${prefix}/lib/${name}/${dylib}
+        ln -s ${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/${name}/${dylib}
 
-		# This symlink is provided as a transition aide and will be removed
-		# with a future revision of this port.
-                ln -s ${prefix}/lib/libstdc++.6.dylib ${archdir}/libstdc++.6.dylib
+        if {[variant_isset universal]} {
+            foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
+                if {[file exists ${archdir}/${dylib}]} {
+                    delete ${archdir}/${dylib}
+                    ln -s ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}
+                }
             }
         }
     }
-
-    # http://trac.macports.org/ticket/35770
-    eval delete [glob ${destroot}${prefix}/lib/${name}/libstdc++*]
-
-    ln -s ${prefix}/lib/libstdc++.6.dylib ${destroot}${prefix}/lib/${name}/libstdc++.dylib
-
-    # This symlink is provided as a transition aide and will be removed
-    # with a future revision of this port.
-    ln -s ${prefix}/lib/libstdc++.6.dylib ${destroot}${prefix}/lib/${name}/libstdc++.6.dylib
 }
 
 select.group        gcc
