@@ -55,15 +55,7 @@
  * @param cfObj Object to add to the current autorelease pool.
  */
 CFTypeRef PLCFAutorelease (CFTypeRef cfObj) {
-    /* ARC forbids the use of @selector(autorelease), so we have to get creative */
-    static SEL autorelease;
-    static dispatch_once_t pred;
-    dispatch_once(&pred, ^{
-        autorelease = sel_getUid("autorelease");
-    });
-    
-    /* Cast and hand-dispatch */
-    return ((CFTypeRef (*)(CFTypeRef, SEL)) objc_msgSend)(cfObj, autorelease);
+    return [(id)cfObj autorelease];
 }
 
 int nsvfprintf (FILE *stream, NSString *format, va_list args) {
