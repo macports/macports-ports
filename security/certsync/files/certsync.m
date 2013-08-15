@@ -33,6 +33,24 @@
 
 #import <objc/message.h>
 
+/* Allow building with SDKs < 10.6 */
+#ifndef MAC_OS_X_VERSION_10_6
+#define MAC_OS_X_VERSION_10_6 1060
+#endif /* !MAC_OS_X_VERSION_10_6 */
+
+/* Allow building with SDKs < 10.5 */
+#ifndef MAC_OS_X_VERSION_10_5
+#define MAC_OS_X_VERSION_10_5 1050
+#endif /* !MAC_OS_X_VERSION_10_5 */
+
+#if MAC_OS_X_VERSION_MAX_ALLOWED <= MAC_OS_X_VERSION_10_5
+/* errSecSuccess was not defined until 10.6 */
+#define errSecSuccess noErr
+
+/* NSDataWritingAtomic was not defined until 10.6 */
+#define NSDataWritingAtomic NSAtomicWrite
+#endif
+
 /* A wrapper class that may be used to pass configuration through the
  * FSEvent callback API */
 @interface MPCertSyncConfig : NSObject {
@@ -179,7 +197,8 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     NSMutableArray *anchors = [NSMutableArray array];
     NSArray *result;
     NSError *error;
-    
+    OSStatus err;
+
     /* Current user */
     if (userAnchors) {
         result = certificatesForTrustDomain(kSecTrustSettingsDomainUser, &error);
@@ -222,14 +241,24 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         } else {
             subject = PLCFAutorelease(SecCertificateCopySubjectSummary((SecCertificateRef) certObj));
         }
-#else
+#elif MAC_OS_X_VERSION_MAX_ALLOWED == MAC_OS_X_VERSION_10_6
         subject = PLCFAutorelease(SecCertificateCopySubjectSummary((SecCertificateRef) certObj));
+#elif MAC_OS_X_VERSION_MAX_ALLOWED <= MAC_OS_X_VERSION_10_5
+        if ((err = SecCertificateCopyCommonName((SecCertificateRef) certObj, &subject)) == errSecSuccess && subject != NULL) {
+            PLCFAutorelease(subject);
+        } else {
+            /* In the case that the CN is simply unavailable, provide a more useful error code */
+            if (err == errSecSuccess)
+                err = errSecNoSuchAttr;
+    
+            NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys: @"SecCertificateCopyCommonName() failed", NSLocalizedDescriptionKey, nil];
+            cferror = (CFErrorRef) [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo: userInfo];
+            subject = NULL;
+        }
 #endif
 
         if (subject == NULL) {
             nsfprintf(stderr, @"Failed to extract certificate description: %@\n", cferror);
-            [pool release];
-            return EXIT_FAILURE;
         } else {
             nsfprintf(stderr, @"Extracting %@\n", subject);
         }
@@ -239,7 +268,6 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
      * Perform export
      */
     CFDataRef pemData;
-    OSStatus err;
     
     /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7. We use an ifdef to keep the code buildable with earlier SDKs, too. */
 #if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_6
