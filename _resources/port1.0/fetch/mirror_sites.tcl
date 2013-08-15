@@ -329,7 +329,6 @@ set portfetch::mirror_sites::sites(openbsd) {
 set portfetch::mirror_sites::sites(perl_cpan) {
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
     http://www.mirrorservice.org/sites/ftp.cpan.org/pub/CPAN/modules/by-module/
-    http://ftp.ucr.ac.cr/Unix/CPAN/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
     ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
