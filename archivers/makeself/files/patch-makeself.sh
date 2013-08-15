@@ -1,11 +1,11 @@
---- makeself.sh.orig	2008-01-04 17:53:49.000000000 -0600
-+++ makeself.sh	2010-08-14 21:17:27.000000000 -0500
-@@ -126,7 +126,7 @@
- APPEND=n
- COPY=none
+--- makeself.sh.orig	2013-04-12 19:09:57.000000000 -0500
++++ makeself.sh	2013-08-15 05:16:12.000000000 -0500
+@@ -143,7 +143,7 @@
  TAR_ARGS=cvf
--HEADER=`dirname $0`/makeself-header.sh
+ TAR_EXTRA=""
+ DU_ARGS=-ks
+-HEADER=`dirname "$0"`/makeself-header.sh
 +HEADER=@PREFIX@/libexec/makeself/makeself-header.sh
+ TARGETDIR=""
  
  # LSM file stuff
- LSM_CMD="echo No LSM. >> \"\$archname\""
