@@ -246,7 +246,6 @@ set portfetch::mirror_sites::sites(googlecode) {
 set portfetch::mirror_sites::sites(isc) {
     http://www.mirrorservice.org/sites/ftp.isc.org/isc/
     ftp://ftp.nominum.com/pub/isc/
-    http://mirrors.24-7-solutions.net/pub/isc/
     http://www.mirrorservice.org/sites/ftp.isc.org/isc/
     ftp://gd.tuwien.ac.at/infosys/servers/isc/
     http://ftp.arcane-networks.fr/pub/mirrors/ftp.isc.org/isc/
