@@ -28,7 +28,7 @@
 +    #if defined( _LIBCPP_VERSION )
 +    auto now  = std::chrono::system_clock::now();
 +    #else
-+    auto now  = std::chrono::high_resolulution_clock::now();
++    auto now  = std::chrono::high_resolution_clock::now();
 +    #endif
      auto diff = now - s_program_start_time;
 +    #if defined( _LIBCPP_VERSION )
