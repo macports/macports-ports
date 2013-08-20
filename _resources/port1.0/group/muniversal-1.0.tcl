@@ -566,7 +566,6 @@ variant universal {
                                                 copy ${dir1}/${fl} ${dir}/mods64
                                             }
                                         }
-                                        *.la -
                                         *.pc -
                                         *-config {
                                             return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
@@ -583,6 +582,13 @@ variant universal {
 
                                             # nothing has worked so far.
                                             switch -glob ${fl} {
+                                                *.la {
+                                                    if {${destroot.delete_la_files} == "yes"} {
+                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; ignoring due to delete_la_files"
+                                                    } else {
+                                                        return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                                    }
+                                                }
                                                 *.typelib {
                                                     # Sometimes garbage ends up in ignored trailing bytes
                                                     # https://trac.macports.org/ticket/39629
