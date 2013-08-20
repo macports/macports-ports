@@ -580,11 +580,11 @@ variant universal {
                                                 # modified files are identical
                                                 ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but are the same when stripping out -m32, -m64, and -arch XXX"
                                                 copy ${tempfile1} ${dir}/${fl}
+                                                delete ${tempfile1} ${tempfile2} ${tempdir}
                                             } else {
-                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged (see ${tempdir})"
+                                                delete ${tempfile1} ${tempfile2} ${tempdir}
+                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
                                             }
-
-                                            delete ${tempfile1} ${tempfile2} ${tempdir}
                                         }
                                         *.la {
                                             if {${destroot.delete_la_files} == "yes"} {
