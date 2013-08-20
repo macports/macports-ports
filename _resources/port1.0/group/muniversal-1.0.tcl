@@ -568,7 +568,28 @@ variant universal {
                                         }
                                         *.pc -
                                         *-config {
-                                            return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                            set known_file "yes"
+
+                                            set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+                                            set tempfile1 "${tempdir}/${arch1}-${fl}"
+                                            set tempfile2 "${tempdir}/${arch2}-${fl}"
+
+                                            copy ${dir1}/${fl} ${tempfile1}
+                                            copy ${dir2}/${fl} ${tempfile2}
+
+                                            reinplace {s:-arch  *[^ ][^ ]*::} ${tempfile1} ${tempfile2}
+                                            reinplace {s:-m32::} ${tempfile1} ${tempfile2}
+                                            reinplace {s:-m64::} ${tempfile1} ${tempfile2}
+
+                                            if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
+                                                # modified files are identical
+                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but are the same when stripping out -m32, -m64, and -arch XXX"
+                                                copy ${tempfile1} ${dir}/${fl}
+                                            } else {
+                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged (see ${tempdir})"
+                                            }
+
+                                            delete ${tempfile1} ${tempfile2} ${tempdir}
                                         }
                                     }
 
