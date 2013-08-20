@@ -547,15 +547,12 @@ variant universal {
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
                                 } else {
-                                    set known_file "no"
-
                                     # Text file on which diff will not give correct results.
                                     switch -glob ${fl} {
                                         *.mod {
                                             # .mod files from Fortran modules.
                                             # Create a sepcial module directory for each architecture.
                                             # To find these modules, GFortran might require -M or -J.
-                                            set known_file "yes"
                                             file mkdir ${dir}/mods32
                                             file mkdir ${dir}/mods64
                                             if { ${arch1}=="i386" || ${arch1}=="ppc" } {
@@ -568,8 +565,6 @@ variant universal {
                                         }
                                         *.pc -
                                         *-config {
-                                            set known_file "yes"
-
                                             set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
                                             set tempfile1 "${tempdir}/${arch1}-${fl}"
                                             set tempfile2 "${tempdir}/${arch2}-${fl}"
@@ -591,84 +586,77 @@ variant universal {
 
                                             delete ${tempfile1} ${tempfile2} ${tempdir}
                                         }
-                                    }
-
-                                    if { ${known_file}=="no" } {
-                                        if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
-                                            # diff worked
-                                            ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
-                                        } else {
-                                            # File created by diff is invalid
-                                            delete ${dir}/${fl}
-
-                                            # nothing has worked so far.
+                                        *.la {
+                                            if {${destroot.delete_la_files} == "yes"} {
+                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; ignoring due to delete_la_files"
+                                            } else {
+                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                            }
+                                        }
+                                        *.typelib {
+                                            # Sometimes garbage ends up in ignored trailing bytes
+                                            # https://trac.macports.org/ticket/39629
+                                            # TODO: Compare the g-ir-generate output
+                                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                            copy ${dir1}/${fl} ${dir}
+                                        }
+                                        *.jar {
+                                            # jar files can be different because of timestamp
+                                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume timestamp difference"
+                                            copy ${dir1}/${fl} ${dir}
+                                        }
+                                        *.elc {
+                                            # elc files can be different because they record when and where they were built.
+                                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                            copy ${dir1}/${fl} ${dir}
+                                        }
+                                        *.gz -
+                                        *.bz2 {
+                                            # compressed files can differ due to entropy
                                             switch -glob ${fl} {
-                                                *.la {
-                                                    if {${destroot.delete_la_files} == "yes"} {
-                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; ignoring due to delete_la_files"
-                                                    } else {
-                                                        return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
-                                                    }
+                                                *.gz {
+                                                    set cat /usr/bin/gzcat
                                                 }
-                                                *.typelib {
-                                                    # Sometimes garbage ends up in ignored trailing bytes
-                                                    # https://trac.macports.org/ticket/39629
-                                                    # TODO: Compare the g-ir-generate output
-                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
-                                                    copy ${dir1}/${fl} ${dir}
-                                                }
-                                                *.jar {
-                                                    # jar files can be different because of timestamp
-                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume timestamp difference"
-                                                    copy ${dir1}/${fl} ${dir}
-                                                }
-                                                *.elc {
-                                                    # elc files can be different because they record when and where they were built.
-                                                    ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
-                                                    copy ${dir1}/${fl} ${dir}
-                                                }
-                                                *.gz -
                                                 *.bz2 {
-                                                    # compressed files can differ due to entropy
-                                                    switch -glob ${fl} {
-                                                        *.gz {
-                                                            set cat /usr/bin/gzcat
-                                                        }
-                                                        *.bz2 {
-                                                            set cat /usr/bin/bzcat
-                                                        }
-                                                    }
-                                                    set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
-                                                    set tempfile1 "${tempdir}/${arch1}-[file rootname ${fl}]"
-                                                    set tempfile2 "${tempdir}/${arch2}-[file rootname ${fl}]"
-                                                    system "${cat} \"${dir1}/${fl}\" > \"${tempfile1}\""
-                                                    system "${cat} \"${dir2}/${fl}\" > \"${tempfile2}\""
-                                                    set identical "no"
-                                                    if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
-                                                        # files are identical
-                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but the contents are the same"
+                                                    set cat /usr/bin/bzcat
+                                                }
+                                            }
+                                            set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+                                            set tempfile1 "${tempdir}/${arch1}-[file rootname ${fl}]"
+                                            set tempfile2 "${tempdir}/${arch2}-[file rootname ${fl}]"
+                                            system "${cat} \"${dir1}/${fl}\" > \"${tempfile1}\""
+                                            system "${cat} \"${dir2}/${fl}\" > \"${tempfile2}\""
+                                            set identical "no"
+                                            if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
+                                                # files are identical
+                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but the contents are the same"
+                                                set identical "yes"
+                                                copy ${dir1}/${fl} ${dir}
+                                            }
+                                            if { ${identical}=="no" } {
+                                                switch -glob ${fl} {
+                                                    *.el.gz {
+                                                        # Emacs lisp files should be same across architectures
+                                                        # the emacs package (and perhaps others) records the date of automatically generated el files
+                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                                         set identical "yes"
                                                         copy ${dir1}/${fl} ${dir}
                                                     }
-                                                    if { ${identical}=="no" } {
-                                                        switch -glob ${fl} {
-                                                            *.el.gz {
-                                                                # Emacs lisp files should be same across architectures
-                                                                # the emacs package (and perhaps others) records the date of automatically generated el files
-                                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
-                                                                set identical "yes"
-                                                                copy ${dir1}/${fl} ${dir}
-                                                            }
-                                                        }
-                                                    }
-                                                    delete ${tempfile1} ${tempfile2} ${tempdir}
-                                                    if {${identical}=="no"} {
-                                                        return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
-                                                    }
                                                 }
-                                                default {
-                                                    return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
-                                                }
+                                            }
+                                            delete ${tempfile1} ${tempfile2} ${tempdir}
+                                            if {${identical}=="no"} {
+                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
+                                            }
+                                        }
+                                        default {
+                                            if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
+                                                # diff worked
+                                                ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
+                                            } else {
+                                                # File created by diff is invalid
+                                                delete ${dir}/${fl}
+                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
                                             }
                                         }
                                     }
