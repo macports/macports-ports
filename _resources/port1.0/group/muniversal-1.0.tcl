@@ -617,10 +617,18 @@ variant universal {
                                             ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                             copy ${dir1}/${fl} ${dir}
                                         }
+                                        *.lzma -
+                                        *.xz -
                                         *.gz -
                                         *.bz2 {
                                             # compressed files can differ due to entropy
                                             switch -glob ${fl} {
+                                                *.lzma {
+                                                    set cat ${prefix}/bin/lzcat
+                                                }
+                                                *.xz {
+                                                    set cat ${prefix}/bin/xzcat
+                                                }
                                                 *.gz {
                                                     set cat /usr/bin/gzcat
                                                 }
