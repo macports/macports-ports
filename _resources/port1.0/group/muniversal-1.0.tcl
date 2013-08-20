@@ -455,6 +455,31 @@ variant universal {
             }
         }
 
+        # Merge two files (${dir1}/${fl} and ${dir2}/${fl}) to ${dir}/${fl}
+        # by stripping out -arch XXXX, -m32, and -m64
+        proc mergeStripArchFlags {dir1 dir2 dir fl} {
+            set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+            set tempfile1 "${tempdir}/1-${fl}"
+            set tempfile2 "${tempdir}/2-${fl}"
+
+            copy ${dir1}/${fl} ${tempfile1}
+            copy ${dir2}/${fl} ${tempfile2}
+
+            reinplace {s:-arch  *[^ ][^ ]*::} ${tempfile1} ${tempfile2}
+            reinplace {s:-m32::} ${tempfile1} ${tempfile2}
+            reinplace {s:-m64::} ${tempfile1} ${tempfile2}
+
+            if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
+                # modified files are identical
+                ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -m32, -m64, and -arch XXX"
+                copy ${tempfile1} ${dir}/${fl}
+                delete ${tempfile1} ${tempfile2} ${tempdir}
+            } else {
+                delete ${tempfile1} ${tempfile2} ${tempdir}
+                return -code error "${fl} differs in ${dir1} and ${dir2} and cannot be merged"
+            }
+        }
+
         # Merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
         #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
         #    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
@@ -565,26 +590,7 @@ variant universal {
                                         }
                                         *.pc -
                                         *-config {
-                                            set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
-                                            set tempfile1 "${tempdir}/${arch1}-${fl}"
-                                            set tempfile2 "${tempdir}/${arch2}-${fl}"
-
-                                            copy ${dir1}/${fl} ${tempfile1}
-                                            copy ${dir2}/${fl} ${tempfile2}
-
-                                            reinplace {s:-arch  *[^ ][^ ]*::} ${tempfile1} ${tempfile2}
-                                            reinplace {s:-m32::} ${tempfile1} ${tempfile2}
-                                            reinplace {s:-m64::} ${tempfile1} ${tempfile2}
-
-                                            if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
-                                                # modified files are identical
-                                                ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but are the same when stripping out -m32, -m64, and -arch XXX"
-                                                copy ${tempfile1} ${dir}/${fl}
-                                                delete ${tempfile1} ${tempfile2} ${tempdir}
-                                            } else {
-                                                delete ${tempfile1} ${tempfile2} ${tempdir}
-                                                return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
-                                            }
+                                            mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
                                         }
                                         *.la {
                                             if {${destroot.delete_la_files} == "yes"} {
