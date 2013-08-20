@@ -658,7 +658,10 @@ variant universal {
                                             }
                                         }
                                         default {
-                                            if { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
+                                            if { ! [catch {system "test `head -c2 ${dir1}/${fl}` == '#!'"}] } {
+                                                # Shell script, hopefully striping out arch flags works...
+                                                mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
+                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
                                                 # diff worked
                                                 ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                             } else {
