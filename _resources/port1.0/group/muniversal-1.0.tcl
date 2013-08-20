@@ -610,6 +610,13 @@ variant universal {
                                             ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                             copy ${dir1}/${fl} ${dir}
                                         }
+                                        *.el.gz -
+                                        *.el.bz2 {
+                                            # Emacs lisp files should be same across architectures
+                                            # the emacs package (and perhaps others) records the date of automatically generated el files
+                                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                            copy ${dir1}/${fl} ${dir}
+                                        }
                                         *.gz -
                                         *.bz2 {
                                             # compressed files can differ due to entropy
@@ -626,26 +633,13 @@ variant universal {
                                             set tempfile2 "${tempdir}/${arch2}-[file rootname ${fl}]"
                                             system "${cat} \"${dir1}/${fl}\" > \"${tempfile1}\""
                                             system "${cat} \"${dir2}/${fl}\" > \"${tempfile2}\""
-                                            set identical "no"
                                             if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
                                                 # files are identical
                                                 ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} but the contents are the same"
-                                                set identical "yes"
                                                 copy ${dir1}/${fl} ${dir}
-                                            }
-                                            if { ${identical}=="no" } {
-                                                switch -glob ${fl} {
-                                                    *.el.gz {
-                                                        # Emacs lisp files should be same across architectures
-                                                        # the emacs package (and perhaps others) records the date of automatically generated el files
-                                                        ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
-                                                        set identical "yes"
-                                                        copy ${dir1}/${fl} ${dir}
-                                                    }
-                                                }
-                                            }
-                                            delete ${tempfile1} ${tempfile2} ${tempdir}
-                                            if {${identical}=="no"} {
+                                                delete ${tempfile1} ${tempfile2} ${tempdir}
+                                            } else {
+                                                delete ${tempfile1} ${tempfile2} ${tempdir}
                                                 return -code error "${prefixDir}/${fl} differs in ${base1} and ${base2} and cannot be merged"
                                             }
                                         }
