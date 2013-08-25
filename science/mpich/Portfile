@@ -7,7 +7,7 @@ PortGroup           compiler_blacklist_versions 1.0
 
 name                mpich
 version             3.0.4
-revision            1
+revision            2
 
 license             BSD
 categories          science parallel net
@@ -41,13 +41,13 @@ checksums \
     sha256  cf638c85660300af48b6f776e5ecd35b5378d5905ec5d34c3da7a27da0acf0b3
 
 configure.args      --disable-dependency-tracking \
-                    --disable-f77 \
-                    --disable-fc \
+                    --enable-f77 \
+                    --enable-fc \
                     --disable-silent-rules \
                     --enable-base-cache \
                     --enable-cache \
                     --enable-cxx \
-                    --enable-fast=O2 \
+                    --enable-fast=Os \
                     --enable-shared \
                     --enable-smpcoll \
                     --with-device=ch3:nemesis \
@@ -82,61 +82,13 @@ platform darwin {
     configure.args-append   --enable-timer-type=mach_absolute_time
 }
 
-# We're making compiler wrappers here... don't default to -O2 for wrappers.
-# Actual library code is compiled with -O2 via --enable-fast=O2 configure arg
-configure.cflags-delete     -O2
-configure.cxxflags-delete   -O2
-configure.fflags-delete     -O2
-configure.fcflags-delete    -O2
-configure.cppflags-delete   -I${prefix}/include
+# We're making compiler wrappers here... don't default to -Os for wrappers.
+# Actual library code is compiled with -Os via --enable-fast=Os configure arg
+configure.optflags-delete -O2 -Os
+configure.cppflags-delete -I${prefix}/include
 
 # As MPICH creates compiler wrappers, there are lots of
 # variants for what compiler the user would like to wrap.
-
-# Compiler variant set
-#   name     configure.compiler  Description
-array set clist {
-    clang   {clang               "Apple native"}
-    clang31 {macports-clang-3.1  "MacPorts' version"}
-    clang32 {macports-clang-3.2  "MacPorts' version"}
-    clang33 {macports-clang-3.3  "MacPorts' version"}
-    clang34 {macports-clang-3.4  "MacPorts' version"}
-    gcc43   {macports-gcc-4.3    "enables Fortran wrappers"}
-    gcc44   {macports-gcc-4.4    "enables Fortran wrappers"}
-    gcc45   {macports-gcc-4.5    "enables Fortran wrappers"}
-    gcc46   {macports-gcc-4.6    "enables Fortran wrappers"}
-    gcc47   {macports-gcc-4.7    "enables Fortran wrappers"}
-    gcc48   {macports-gcc-4.8    "enables Fortran wrappers"}
-    gcc49   {macports-gcc-4.9    "enables Fortran wrappers"}
-    llvm    {llvm-gcc-4.2        "Apple native"}
-}
-
-# Alphabetized list of compiler variants
-set clist_keys [lsort [array names clist]]
-
-foreach clist_item $clist_keys {
-    # Conflict with everyone else (remove ourselves from full list)
-    set this_key [lsearch $clist_keys $clist_item]
-    set conf_list [lreplace $clist_keys $this_key $this_key]
-    
-    # Describe variant
-    variant $clist_item \
-        description "Wraps $clist_item -- [lindex $clist($clist_item) 1]" \
-        conflicts $conf_list "
-            configure.compiler  [lindex $clist($clist_item) 0] 
-        "
-}
-
-if {[ variant_isset gcc43 ] ||
-    [ variant_isset gcc44 ] ||
-    [ variant_isset gcc45 ] ||
-    [ variant_isset gcc46 ] ||
-    [ variant_isset gcc47 ] ||
-    [ variant_isset gcc48 ] ||
-    [ variant_isset gcc49 ]} {
-    configure.args-append   --enable-f77 --enable-fc
-    configure.args-delete   --disable-f77 --disable-fc
-}
 
 variant gforker description {
     Use gforker process manager instead of the default hydra
@@ -146,16 +98,70 @@ variant gforker description {
 }
 
 variant tuned description {Build with more optimizations} {
-    configure.args-delete       --enable-fast=O2
+    configure.args-delete       --enable-fast=Os
     configure.args-append       --enable-fast=all \
                                 MPICHLIB_CFLAGS='-fomit-frame-pointer -O2'
 }
 
-if {[regexp -all -- {\yclang\y} ${compiler.blacklist}] != 0 &&
-    [variant_isset clang]} {
-    ui_error \
-        "The linker called from this version of clang segfaults."
-    return -code error "Unsupported clang version. Use +clang31 or +clang32"
+set gcc_versions {4.3 4.4 4.5 4.6 4.7 4.8 4.9}
+set default_fortran_variant +gcc48
+
+foreach ver ${gcc_versions} {
+    set ver_no_dot [join [split ${ver} "."] ""]
+
+    variant gcc${ver_no_dot} description {build with gfortran from gcc${ver_no_dot}} {}
+
+    variant gcc${ver_no_dot} conflicts g95 {}
+    variant g95 conflicts gcc${ver_no_dot} {}
+
+    foreach over ${gcc_versions} {
+        if {${ver} == ${over}} {
+            continue
+        }
+
+        set over_no_dot [join [split ${over} "."] ""]
+        variant gcc${ver_no_dot} conflicts gcc${over_no_dot} {}
+    }
+
+    if {[variant_isset gcc${ver_no_dot}]} {
+        if {${default_fortran_variant} != "+gcc${ver_no_dot}"} {
+            set default_fortran_variant ""
+        }
+    }
+}
+
+variant g95 description {build with g95} {}
+
+if {[variant_isset g95]} {
+    if {${default_fortran_variant} != "+g95"} {
+        set default_fortran_variant ""
+    }
+}
+
+if {${default_fortran_variant} != ""} {
+    default_variants "${default_fortran_variant}"
+}
+
+foreach ver ${gcc_versions} {
+    set ver_no_dot [join [split ${ver} "."] ""]
+
+    if {[variant_isset gcc${ver_no_dot}]} {
+        depends_lib-append port:libgcc
+        depends_build-append port:gcc${ver_no_dot}
+
+        configure.fc  ${prefix}/bin/gfortran-mp-${ver}
+        configure.f77 ${prefix}/bin/gfortran-mp-${ver}
+        configure.f90 ${prefix}/bin/gfortran-mp-${ver}
+    }
+}
+
+if {[variant_isset g95]} {
+    depends_lib-append port:libgcc
+    depends_build-append port:g95
+
+    configure.fc ${prefix}/bin/g95
+    configure.f77 ${prefix}/bin/g95
+    configure.f90 ${prefix}/bin/g95
 }
 
 livecheck.type      regex
