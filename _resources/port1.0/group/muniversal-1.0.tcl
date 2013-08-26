@@ -593,6 +593,7 @@ variant universal {
                                             mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
                                         }
                                         *.la {
+                                            global destroot.delete_la_files
                                             if {${destroot.delete_la_files} == "yes"} {
                                                 ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; ignoring due to delete_la_files"
                                             } else {
