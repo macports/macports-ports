@@ -3,10 +3,11 @@
 
 PortSystem          1.0
 PortGroup           active_variants 1.1
+PortGroup           compiler_blacklist_versions 1.0
 
 name                octave-devel
 version             3.6.4
-revision            7
+revision            8
 conflicts           octave
 categories          math science
 maintainers         michaelld openmaintainer
@@ -41,7 +42,8 @@ depends_build       port:bison \
                     port:pkgconfig \
                     port:texinfo
 
-depends_lib         port:arpack \
+depends_lib         path:lib/libgcc/libgcc_s.1.dylib:libgcc \
+                    port:arpack \
                     port:curl \
                     port:fftw-3 \
                     port:fftw-3-single \
@@ -95,6 +97,16 @@ patchfiles-append \
     patch-liboctave-eigs-base.cc.diff \
     patch-liboctave-regexp.h.diff
 
+# Block compilers: Some older versions of CLANG do not honor the CPATH
+# environment variables, which is required for compiling this port
+# when using MacPorts.  The versions seem to be: MacPorts CLANG 2.9 or
+# earlier, and Apple CLANG 318.0.58 or older.
+#
+# See also < http://llvm.org/bugs/show_bug.cgi?id=8971 >
+#          < https://trac.macports.org/ticket/40250 >.
+
+compiler.blacklist-append { clang <= 318.0.61 } macports-clang-2.9
+
 platform darwin 11 {
     # 10.7 requires an extra patch; this patch will break the build on
     # 10.6 and prior, so apply it only under 10.7.
@@ -114,65 +126,87 @@ platform darwin 12 {
 }
 
 set gcc_versions {4.3 4.4 4.5 4.6 4.7 4.8 4.9}
-set default_fortran_variant +gcc48
 
+# create g95 variant, with full conflicts of GCC versions
+
+set gcc_conflicts ""
 foreach ver ${gcc_versions} {
-    set ver_no_dot [join [split ${ver} "."] ""]
+    set gcc_ver_no_dot gcc[join [split ${ver} "."] ""]
+    set gcc_conflicts "${gcc_conflicts} ${gcc_ver_no_dot}"
+}
 
-    variant gcc${ver_no_dot} description {build with gfortran from gcc${ver_no_dot}} {}
+eval [subst {
+    variant g95 conflicts ${gcc_conflicts} requires accelerate \
+        description "Build with MacPorts g95 as the Fortran Compiler" {
+            depends_build-append port:g95
+            configure.fc ${prefix}/bin/g95
+            configure.f77 ${prefix}/bin/g95
+            configure.f90 ${prefix}/bin/g95
+        }
+}]
 
-    variant gcc${ver_no_dot} conflicts g95 {}
-    variant g95 conflicts gcc${ver_no_dot} {}
+# create GCC variants, with partial conflicts of other GCC versions
 
-    foreach over ${gcc_versions} {
-        if {${ver} == ${over}} {
+foreach ver1 ${gcc_versions} {
+
+    set gcc_ver1_no_dot gcc[join [split ${ver1} "."] ""]
+
+    set gcc_conflicts "conflicts g95"
+    foreach ver2 ${gcc_versions} {
+        if {${ver1} == ${ver2}} {
             continue
         }
-
-        set over_no_dot [join [split ${over} "."] ""]
-        variant gcc${ver_no_dot} conflicts gcc${over_no_dot} {}
+        set gcc_ver2_no_dot gcc[join [split ${ver2} "."] ""]
+        set gcc_conflicts "${gcc_conflicts} ${gcc_ver2_no_dot}"
     }
 
-    if {[variant_isset gcc${ver_no_dot}]} {
-        if {${default_fortran_variant} != "+gcc${ver_no_dot}"} {
-            set default_fortran_variant ""
+    eval [subst {
+        variant ${gcc_ver1_no_dot} ${gcc_conflicts} \
+            description "Build with the MacPorts ${gcc_ver1_no_dot} Toolchain" {
+                configure.compiler macports-gcc-${ver1}
+                configure.ldflags  -lgfortran
+            }
+    }]
+}
+
+# check for setting the default variant
+
+set var_selection ""
+if {[variant_isset g95]} {
+    set var_selection "g95"
+} else {
+    foreach ver ${gcc_versions} {
+        set gcc_ver_no_dot gcc[join [split ${ver} "."] ""]
+        if {[variant_isset ${gcc_ver_no_dot}]} {
+            set var_selection "${gcc_ver_no_dot}"
         }
     }
 }
 
-variant g95 description {build with g95} {}
+if {"${var_selection}" == ""} {
+    default_variants +gcc48
+}
 
+# check if the user disabled just the default variant
+
+set var_selection ""
 if {[variant_isset g95]} {
-    if {${default_fortran_variant} != "+g95"} {
-        set default_fortran_variant ""
+    set var_selection "g95"
+} else {
+    foreach ver ${gcc_versions} {
+        set gcc_ver_no_dot gcc[join [split ${ver} "."] ""]
+        if {[variant_isset ${gcc_ver_no_dot}]} {
+            set var_selection "${gcc_ver_no_dot}"
+        }
     }
 }
 
-if {${default_fortran_variant} != ""} {
-    default_variants "${default_fortran_variant}"
+if {"${var_selection}" == ""} {
+    ui_error "\n\nYou cannot use the -gcc48 variant alone; a Fortran compiler is required.\n"
+    return -code error "Invalid variant selection"
 }
 
-foreach ver ${gcc_versions} {
-    set ver_no_dot [join [split ${ver} "."] ""]
-
-    if {[variant_isset gcc${ver_no_dot}]} {
-        depends_lib-append port:libgcc
-        depends_build-append port:gcc${ver_no_dot}
-
-        configure.fc  ${prefix}/bin/gfortran-mp-${ver}
-        configure.f77 ${prefix}/bin/gfortran-mp-${ver}
-        configure.f90 ${prefix}/bin/gfortran-mp-${ver}
-    }
-}
-
-if {[variant_isset g95]} {
-    depends_lib-append port:libgcc
-    depends_build-append port:g95
-
-    configure.fc ${prefix}/bin/g95
-    configure.f77 ${prefix}/bin/g95
-    configure.f90 ${prefix}/bin/g95
-}
+# atlas does not work with g95, so always conflict with it
 
 variant atlas description {use BLAS from MacPorts' atlas port} \
     conflicts g95 accelerate {}
@@ -254,7 +288,7 @@ if {[variant_isset fltk]} {
 
 variant metis description {Use SuiteSparse + Metis for graph partitioning} {
     pre-fetch {
-        ui_msg "\nWARNING: ${name} variant +metis uses the metis port, whose license metis is incompatible with Octave's.  You can use this combination locally, but you cannot distribute them as a single package (e.g., tarball, m/pkg, archive)."
+        ui_msg "\nWARNING: ${name} variant +metis uses the metis port, whose license is incompatible with Octave's.  You can use this combination locally, but you cannot distribute them as a single package (e.g., tarball, m/pkg, archive)."
     }
 }
 
