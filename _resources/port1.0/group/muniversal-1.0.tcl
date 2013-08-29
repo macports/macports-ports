@@ -533,7 +533,7 @@ variant universal {
                         merge2Dir ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
                     } else {
                         # Files are neither directories nor links
-                        if { ! [catch {system "/usr/bin/cmp \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
+                        if { ! [catch {system "/usr/bin/cmp -s \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
                             # Files are byte by byte the same
                             ui_debug "universal: merge: ${prefixDir}/${fl} is identical in ${base1} and ${base2}"
                         } else {
