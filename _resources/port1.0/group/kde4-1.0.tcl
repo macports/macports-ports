@@ -65,7 +65,6 @@ depends_lib-append      port:${qt}
 
 switch ${os.platform}_${os.major} {
     darwin_8 {
-	    depends_lib-append 	port:apple-gcc42
 	    configure.compiler	apple-gcc-4.2
     }
     darwin_9 {
