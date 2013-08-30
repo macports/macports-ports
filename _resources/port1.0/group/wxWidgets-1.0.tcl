@@ -59,7 +59,9 @@ proc wxWidgets._set {option action args} {
         # wxWidgets is not universal and is 32-bit only
         universal_variant   no
         supported_archs     i386 ppc
-        compiler.blacklist  clang
+
+        # wxWidgets-2.8 fails to build with clang
+        compiler.blacklist  *clang*
 
         pre-fetch {
             # 10.8 (or later) -or- 10.7 with Xcode 4.4 (or later)
