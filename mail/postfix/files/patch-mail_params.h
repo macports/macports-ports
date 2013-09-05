@@ -1,6 +1,6 @@
---- src/global/mail_params.h	Mon Feb 28 02:06:07 2005
-+++ src/global/mail_params.h.new	Thu Jul  7 11:35:14 2005
-@@ -212,7 +212,7 @@
+--- src/global/mail_params.h	2013-09-05 12:24:12.000000000 -0700
++++ src/global/mail_params.h.new	2013-09-05 12:22:41.000000000 -0700
+@@ -241,7 +241,7 @@
    */
  #define VAR_QUEUE_DIR	"queue_directory"
  #ifndef DEF_QUEUE_DIR
@@ -9,7 +9,7 @@
  #endif
  extern char *var_queue_dir;
  
-@@ -221,13 +221,13 @@
+@@ -250,13 +250,13 @@
    */
  #define VAR_DAEMON_DIR		"daemon_directory"
  #ifndef DEF_DAEMON_DIR
@@ -25,7 +25,7 @@
  #endif
  extern char *var_command_dir;
  
-@@ -250,7 +250,7 @@
+@@ -288,7 +288,7 @@
    */
  #define VAR_CONFIG_DIR		"config_directory"
  #ifndef DEF_CONFIG_DIR
@@ -34,7 +34,7 @@
  #endif
  extern char *var_config_dir;
  
-@@ -1966,22 +1966,22 @@
+@@ -2489,22 +2489,22 @@
    */
  #define VAR_SENDMAIL_PATH		"sendmail_path"
  #ifndef DEF_SENDMAIL_PATH

@@ -1,6 +1,6 @@
---- src/util/sys_defs.h.orig	2010-06-02 09:56:57.000000000 +1000
-+++ src/util/sys_defs.h	2010-06-16 00:51:47.000000000 +1000
-@@ -206,9 +206,9 @@
+--- src/util/sys_defs.h.orig	2013-09-05 12:24:13.000000000 -0700
++++ src/util/sys_defs.h	2013-09-05 12:22:41.000000000 -0700
+@@ -216,9 +216,9 @@
  #define HAS_DB
  #define HAS_SA_LEN
  #define DEF_DB_TYPE	"hash"
@@ -12,7 +12,7 @@
  #define USE_STATFS
  #define STATFS_IN_SYS_MOUNT_H
  #define HAS_POSIX_REGEXP
-@@ -223,11 +223,11 @@
+@@ -233,11 +233,11 @@
  # define HAVE_GETIFADDRS
  #endif
  #define HAS_FUTIMES			/* XXX Guessing */
