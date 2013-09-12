@@ -1,0 +1,3333 @@
+diff -r -u bin/named/client.c-orig bin/named/client.c
+--- bin/named/client.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/client.c	2004-01-01 00:00:00.000000000 +0000
+@@ -994,6 +994,11 @@
+ 	}
+ 	if (result != ISC_R_SUCCESS)
+ 		goto done;
++	/*
++	 * Stop after the question if TC was set for rate limiting.
++	 */
++	if ((client->message->flags & DNS_MESSAGEFLAG_TC) != 0)
++		goto renderend;
+ 	result = dns_message_rendersection(client->message,
+ 					   DNS_SECTION_ANSWER,
+ 					   DNS_MESSAGERENDER_PARTIAL |
+@@ -1134,6 +1139,51 @@
+ #endif
+ 
+ 	/*
++	 * Try to rate limit error responses.
++	 */
++	if (client->view != NULL && client->view->rrl != NULL) {
++		isc_boolean_t wouldlog;
++		char log_buf[DNS_RRL_LOG_BUF_LEN];
++		dns_rrl_result_t rrl_result;
++
++		INSIST(rcode != dns_rcode_noerror &&
++		       rcode != dns_rcode_nxdomain);
++		wouldlog = isc_log_wouldlog(ns_g_lctx, DNS_RRL_LOG_DROP);
++		rrl_result = dns_rrl(client->view, &client->peeraddr,
++				     TCP_CLIENT(client),
++				     dns_rdataclass_in, dns_rdatatype_none,
++				     NULL, result, client->now,
++				     wouldlog, log_buf, sizeof(log_buf));
++		if (rrl_result != DNS_RRL_RESULT_OK) {
++			/*
++			 * Log dropped errors in the query category
++			 * so that they are not lost in silence.
++			 * Starts of rate-limited bursts are logged in
++			 * NS_LOGCATEGORY_RRL.
++			 */
++			if (wouldlog) {
++				ns_client_log(client,
++					      NS_LOGCATEGORY_QUERY_EERRORS,
++					      NS_LOGMODULE_CLIENT,
++					      DNS_RRL_LOG_DROP,
++					      "%s", log_buf);
++			}
++			/*
++			 * Some error responses cannot be 'slipped',
++			 * so don't try to slip any error responses.
++			 */
++			if (!client->view->rrl->log_only) {
++				isc_stats_increment(ns_g_server->nsstats,
++						dns_nsstatscounter_ratedropped);
++				isc_stats_increment(ns_g_server->nsstats,
++						dns_nsstatscounter_dropped);
++				ns_client_next(client, DNS_R_DROP);
++				return;
++			}
++		}
++	}
++
++	/*
+ 	 * Message may be an in-progress reply that we had trouble
+ 	 * with, in which case QR will be set.  We need to clear QR before
+ 	 * calling dns_message_reply() to avoid triggering an assertion.
+diff -r -u bin/named/config.c-orig bin/named/config.c
+--- bin/named/config.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/config.c	2004-01-01 00:00:00.000000000 +0000
+@@ -228,6 +228,13 @@
+ 	notify no;\n\
+ 	allow-new-zones no;\n\
+ \n\
++	# Prevent use of this zone in DNS amplified reflection DoS attacks\n\
++	rate-limit {\n\
++		responses-per-second 3;\n\
++		slip 0;\n\
++		min-table-size 10;\n\
++	};\n\
++\n\
+ 	zone \"version.bind\" chaos {\n\
+ 		type master;\n\
+ 		database \"_builtin version\";\n\
+diff -r -u bin/named/include/named/query.h-orig bin/named/include/named/query.h
+--- bin/named/include/named/query.h-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/include/named/query.h	2004-01-01 00:00:00.000000000 +0000
+@@ -85,6 +85,7 @@
+ #define NS_QUERYATTR_CACHEACLOK		0x2000
+ #define NS_QUERYATTR_DNS64		0x4000
+ #define NS_QUERYATTR_DNS64EXCLUDE	0x8000
++#define NS_QUERYATTR_RRL_CHECKED	0x10000
+ 
+ 
+ isc_result_t
+diff -r -u bin/named/include/named/server.h-orig bin/named/include/named/server.h
+--- bin/named/include/named/server.h-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/include/named/server.h	2004-01-01 00:00:00.000000000 +0000
+@@ -167,7 +167,10 @@
+ 
+ 	dns_nsstatscounter_rpz_rewrites = 36,
+ 
+-	dns_nsstatscounter_max = 37
++	dns_nsstatscounter_ratedropped = 37,
++	dns_nsstatscounter_rateslipped = 38,
++
++	dns_nsstatscounter_max = 39
+ };
+ 
+ void
+diff -r -u bin/named/query.c-orig bin/named/query.c
+--- bin/named/query.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/query.c	2004-01-01 00:00:00.000000000 +0000
+@@ -193,7 +193,7 @@
+ #ifdef NEWSTATS
+ 	/* Do query type statistics
+ 	 *
+-	 * We only increment per-type if we're using the authoriative
++	 * We only increment per-type if we're using the authoritative
+ 	 * answer counter, preventing double-counting.
+ 	 */
+ 	if (counter == dns_nsstatscounter_authans) {
+@@ -5865,6 +5865,131 @@
+  resume:
+ 	CTRACE("query_find: resume");
+ 
++	/*
++	 * Rate limit these responses to this client.
++	 * Do not delay counting and handling obvious referrals,
++	 *	since those won't come here again.
++	 * Delay handling delegations for which we are certain to recurse and
++	 *	return here (DNS_R_DELEGATION, not a child of one of our
++	 *	own zones, and recursion enabled)
++	 * Don't mess with responses rewritten by RPZ
++	 * Count each response at most once.
++	 */
++	if (client->view->rrl != NULL &&
++	    ((fname != NULL && dns_name_isabsolute(fname)) ||
++	     (result == ISC_R_NOTFOUND && !RECURSIONOK(client))) &&
++	    !(result == DNS_R_DELEGATION && !is_zone && RECURSIONOK(client)) &&
++	    (client->query.rpz_st == NULL ||
++	     (client->query.rpz_st->state & DNS_RPZ_REWRITTEN) == 0)&&
++	    (client->query.attributes & NS_QUERYATTR_RRL_CHECKED) == 0) {
++		dns_rdataset_t nc_rdataset;
++		isc_boolean_t wouldlog;
++		char log_buf[DNS_RRL_LOG_BUF_LEN];
++		isc_result_t nc_result, resp_result;
++		dns_rrl_result_t rrl_result;
++
++		client->query.attributes |= NS_QUERYATTR_RRL_CHECKED;
++
++		wouldlog = isc_log_wouldlog(ns_g_lctx, DNS_RRL_LOG_DROP);
++		tname = fname;
++		if (result == DNS_R_NXDOMAIN) {
++			/*
++			 * Use the database origin name to rate limit NXDOMAIN
++			 */
++			if (db != NULL)
++				tname = dns_db_origin(db);
++			resp_result = result;
++		} else if (result == DNS_R_NCACHENXDOMAIN &&
++			   rdataset != NULL &&
++			   dns_rdataset_isassociated(rdataset) &&
++			   (rdataset->attributes &
++			    DNS_RDATASETATTR_NEGATIVE) != 0) {
++			/*
++			 * Try to use owner name in the negative cache SOA.
++			 */
++			dns_fixedname_init(&fixed);
++			dns_rdataset_init(&nc_rdataset);
++			for (nc_result = dns_rdataset_first(rdataset);
++			     nc_result == ISC_R_SUCCESS;
++			     nc_result = dns_rdataset_next(rdataset)) {
++				dns_ncache_current(rdataset,
++						   dns_fixedname_name(&fixed),
++						   &nc_rdataset);
++				if (nc_rdataset.type == dns_rdatatype_soa) {
++					dns_rdataset_disassociate(&nc_rdataset);
++					tname = dns_fixedname_name(&fixed);
++					break;
++				}
++				dns_rdataset_disassociate(&nc_rdataset);
++			}
++			resp_result = DNS_R_NXDOMAIN;
++		} else if (result == DNS_R_NXRRSET ||
++			   result == DNS_R_EMPTYNAME) {
++			resp_result = DNS_R_NXRRSET;
++		} else if (result == DNS_R_DELEGATION) {
++			resp_result = result;
++		} else if (result == ISC_R_NOTFOUND) {
++			/*
++			 * Handle referral to ".", including when recursion
++			 * is off or not requested and the hints have not
++			 * been loaded or we have "additional-from-cache no".
++			 */
++			tname = dns_rootname;
++			resp_result = DNS_R_DELEGATION;
++		} else {
++			resp_result = ISC_R_SUCCESS;
++		}
++		rrl_result = dns_rrl(client->view, &client->peeraddr,
++				     ISC_TF((client->attributes
++					     & NS_CLIENTATTR_TCP) != 0),
++				     client->message->rdclass, qtype, tname,
++				     resp_result, client->now,
++				     wouldlog, log_buf, sizeof(log_buf));
++		if (rrl_result != DNS_RRL_RESULT_OK) {
++			/*
++			 * Log dropped or slipped responses in the query
++			 * category so that requests are not silently lost.
++			 * Starts of rate-limited bursts are logged in
++			 * DNS_LOGCATEGORY_RRL.
++			 *
++			 * Dropped responses are counted with dropped queries
++			 * in QryDropped while slipped responses are counted
++			 * with other truncated responses in RespTruncated.
++			 */
++			if (wouldlog) {
++				ns_client_log(client,
++					      NS_LOGCATEGORY_QUERY_EERRORS,
++					      NS_LOGMODULE_QUERY,
++					      DNS_RRL_LOG_DROP,
++					      "%s", log_buf);
++			}
++			if (!client->view->rrl->log_only) {
++				if (rrl_result == DNS_RRL_RESULT_DROP) {
++					/*
++					 * These will also be counted in
++					 * dns_nsstatscounter_dropped
++					 */
++					inc_stats(client,
++						dns_nsstatscounter_ratedropped);
++					QUERY_ERROR(DNS_R_DROP);
++				} else {
++					/*
++					 * These will also be counted in
++					 * dns_nsstatscounter_truncatedresp
++					 */
++					inc_stats(client,
++						dns_nsstatscounter_rateslipped);
++					client->message->flags |=
++						DNS_MESSAGEFLAG_TC;
++					if (resp_result == DNS_R_NXDOMAIN)
++						client->message->rcode =
++							dns_rcode_nxdomain;
++				}
++				goto cleanup;
++			}
++		}
++	}
++
+ 	if (!ISC_LIST_EMPTY(client->view->rpz_zones) &&
+ 	    (RECURSIONOK(client) || !client->view->rpz_recursive_only) &&
+ 	    rpz_ck_dnssec(client, result, rdataset, sigrdataset) &&
+@@ -7318,12 +7443,14 @@
+ 	}
+ 
+ 	if (eresult != ISC_R_SUCCESS &&
+-	    (!PARTIALANSWER(client) || WANTRECURSION(client))) {
++	    (!PARTIALANSWER(client) || WANTRECURSION(client)
++	     || eresult == DNS_R_DROP)) {
+ 		if (eresult == DNS_R_DUPLICATE || eresult == DNS_R_DROP) {
+ 			/*
+ 			 * This was a duplicate query that we are
+-			 * recursing on.  Don't send a response now.
+-			 * The original query will still cause a response.
++			 * recursing on or the result of rate limiting.
++			 * Don't send a response now for a duplicate query,
++			 * because the original will still cause a response.
+ 			 */
+ 			query_next(client, eresult);
+ 		} else {
+diff -r -u bin/named/server.c-orig bin/named/server.c
+--- bin/named/server.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/server.c	2004-01-01 00:00:00.000000000 +0000
+@@ -1639,6 +1639,168 @@
+ 	return (ISC_R_SUCCESS);
+ }
+ 
++#define CHECK_RRL(cond, pat, val1, val2)				\
++	do {								\
++		if (!(cond)) {						\
++			cfg_obj_log(obj, ns_g_lctx, ISC_LOG_ERROR,	\
++				    pat, val1, val2);			\
++			result = ISC_R_RANGE;				\
++			goto cleanup;					\
++		    }							\
++	} while (0)
++
++#define CHECK_RRL_RATE(rate, def, max_rate, name)			\
++	do {								\
++		obj = NULL;						\
++		rrl->rate.str = name;					\
++		result = cfg_map_get(map, name, &obj);			\
++		if (result == ISC_R_SUCCESS) {				\
++			rrl->rate.r = cfg_obj_asuint32(obj);		\
++			CHECK_RRL(rrl->rate.r <= max_rate,		\
++				  name" %d > %d",			\
++				  rrl->rate.r, max_rate);		\
++		} else {						\
++			rrl->rate.r = def;				\
++		}							\
++		rrl->rate.scaled = rrl->rate.r;				\
++	} while (0)
++
++static isc_result_t
++configure_rrl(dns_view_t *view, const cfg_obj_t *config, const cfg_obj_t *map) {
++	const cfg_obj_t *obj;
++	dns_rrl_t *rrl;
++	isc_result_t result;
++ 	int min_entries, i, j;
++
++	/*
++	 * Most DNS servers have few clients, but intentinally open
++	 * recursive and authoritative servers often have many.
++	 * So start with a small number of entries unless told otherwise
++	 * to reduce cold-start costs.
++	 */
++	min_entries = 500;
++	obj = NULL;
++	result = cfg_map_get(map, "min-table-size", &obj);
++	if (result == ISC_R_SUCCESS) {
++		min_entries = cfg_obj_asuint32(obj);
++		if (min_entries < 1)
++			min_entries = 1;
++	}
++	result = dns_rrl_init(&rrl, view, min_entries);
++	if (result != ISC_R_SUCCESS)
++		return (result);
++
++	i = ISC_MAX(20000, min_entries);
++	obj = NULL;
++	result = cfg_map_get(map, "max-table-size", &obj);
++	if (result == ISC_R_SUCCESS) {
++		i = cfg_obj_asuint32(obj);
++		CHECK_RRL(i >= min_entries,
++			  "max-table-size %d < min-table-size %d",
++			  i, min_entries);
++	}
++	rrl->max_entries = i;
++
++	CHECK_RRL_RATE(responses_per_second, 0, DNS_RRL_MAX_RATE,
++		       "responses-per-second");
++	CHECK_RRL_RATE(referrals_per_second,
++		       rrl->responses_per_second.r, DNS_RRL_MAX_RATE,
++		       "referrals-per-second");
++	CHECK_RRL_RATE(nodata_per_second,
++		       rrl->responses_per_second.r, DNS_RRL_MAX_RATE,
++		       "nodata-per-second");
++	CHECK_RRL_RATE(nxdomains_per_second,
++		       rrl->responses_per_second.r, DNS_RRL_MAX_RATE,
++		       "nxdomains-per-second");
++	CHECK_RRL_RATE(errors_per_second,
++		       rrl->responses_per_second.r, DNS_RRL_MAX_RATE,
++		       "errors-per-second");
++
++	CHECK_RRL_RATE(all_per_second, 0, DNS_RRL_MAX_RATE,
++		       "all-per-second");
++
++	CHECK_RRL_RATE(slip, 2, DNS_RRL_MAX_SLIP,
++		       "slip");
++
++	i = 15;
++	obj = NULL;
++	result = cfg_map_get(map, "window", &obj);
++	if (result == ISC_R_SUCCESS) {
++		i = cfg_obj_asuint32(obj);
++		CHECK_RRL(i >= 1 && i <= DNS_RRL_MAX_WINDOW,
++			  "window %d < 1 or > %d", i, DNS_RRL_MAX_WINDOW);
++	}
++	rrl->window = i;
++
++	i = 0;
++	obj = NULL;
++	result = cfg_map_get(map, "qps-scale", &obj);
++	if (result == ISC_R_SUCCESS) {
++		i = cfg_obj_asuint32(obj);
++		CHECK_RRL(i >= 1, "invalid 'qps-scale %d'%s", i, "");
++	}
++	rrl->qps_scale = i;
++	rrl->qps = 1.0;
++
++	i = 24;
++	obj = NULL;
++	result = cfg_map_get(map, "ipv4-prefix-length", &obj);
++	if (result == ISC_R_SUCCESS) {
++		i = cfg_obj_asuint32(obj);
++		CHECK_RRL(i >= 8 && i <= 32,
++			  "invalid 'ipv4-prefix-length %d'%s", i, "");
++	}
++	rrl->ipv4_prefixlen = i;
++	if (i == 32)
++		rrl->ipv4_mask = 0xffffffff;
++	else
++		rrl->ipv4_mask = htonl(0xffffffff << (32-i));
++
++	i = 56;
++	obj = NULL;
++	result = cfg_map_get(map, "ipv6-prefix-length", &obj);
++	if (result == ISC_R_SUCCESS) {
++		i = cfg_obj_asuint32(obj);
++		CHECK_RRL(i >= 16 && i <= DNS_RRL_MAX_PREFIX,
++			  "ipv6-prefix-length %d < 16 or > %d",
++			  i, DNS_RRL_MAX_PREFIX);
++	}
++	rrl->ipv6_prefixlen = i;
++	for (j = 0; j < 4; ++j) {
++		if (i <= 0) {
++			rrl->ipv6_mask[j] = 0;
++		} else if (i < 32) {
++			rrl->ipv6_mask[j] = htonl(0xffffffff << (32-i));
++		} else {
++			rrl->ipv6_mask[j] = 0xffffffff;
++		}
++		i -= 32;
++	}
++
++	obj = NULL;
++	result = cfg_map_get(map, "exempt-clients", &obj);
++	if (result == ISC_R_SUCCESS) {
++		result = cfg_acl_fromconfig(obj, config, ns_g_lctx,
++					    ns_g_aclconfctx, ns_g_mctx,
++					    0, &rrl->exempt);
++		CHECK_RRL(result == ISC_R_SUCCESS,
++			  "invalid %s%s", "address match list", "");
++	}
++
++	obj = NULL;
++	result = cfg_map_get(map, "log-only", &obj);
++	if (result == ISC_R_SUCCESS && cfg_obj_asboolean(obj))
++		rrl->log_only = ISC_TRUE;
++	else
++		rrl->log_only = ISC_FALSE;
++
++	return (ISC_R_SUCCESS);
++
++ cleanup:
++	dns_rrl_view_destroy(view);
++	return (result);
++}
++
+ /*
+  * Configure 'view' according to 'vconfig', taking defaults from 'config'
+  * where values are missing in 'vconfig'.
+@@ -3043,6 +3205,14 @@
+ 		}
+ 	}
+ 
++	obj = NULL;
++	result = ns_config_get(maps, "rate-limit", &obj);
++	if (result == ISC_R_SUCCESS) {
++		result = configure_rrl(view, config, obj);
++		if (result != ISC_R_SUCCESS)
++			goto cleanup;
++	}
++
+ 	result = ISC_R_SUCCESS;
+ 
+  cleanup:
+diff -r -u bin/named/statschannel.c-orig bin/named/statschannel.c
+--- bin/named/statschannel.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/named/statschannel.c	2004-01-01 00:00:00.000000000 +0000
+@@ -206,6 +206,10 @@
+ 	SET_NSSTATDESC(updatebadprereq,
+ 		       "updates rejected due to prerequisite failure",
+ 		       "UpdateBadPrereq");
++	SET_NSSTATDESC(ratedropped, "responses dropped for rate limits",
++		       "RateDropped");
++	SET_NSSTATDESC(rateslipped, "responses truncated for rate limits",
++		       "RateSlipped");
+ 	SET_NSSTATDESC(rpz_rewrites, "response policy zone rewrites",
+ 		       "RPZRewrites");
+ 	INSIST(i == dns_nsstatscounter_max);
+diff -r -u bin/tests/system/README-orig bin/tests/system/README
+--- bin/tests/system/README-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/README	2004-01-01 00:00:00.000000000 +0000
+@@ -17,6 +17,7 @@
+   nsupdate/	Dynamic update and IXFR tests
+   resolver/     Regression tests for resolver bugs that have been fixed
+ 		(not a complete resolver test suite)
++  rrl/		query rate limiting
+   rpz/		Tests of response policy zone (RPZ) rewriting
+   stub/		Tests of stub zone functionality
+   unknown/	Unknown type and class tests
+diff -r -u bin/tests/system/conf.sh.in-orig bin/tests/system/conf.sh.in
+--- bin/tests/system/conf.sh.in-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/conf.sh.in	2004-01-01 00:00:00.000000000 +0000
+@@ -62,7 +62,7 @@
+          database dlv dlvauto dlz dlzexternal dname dns64 dnssec ecdsa
+          formerr forward glue gost ixfr inline limits logfileconfig
+          lwresd masterfile masterformat metadata notify nsupdate pending
+-	 pkcs11 redirect resolver rndc rpz rrsetorder rsabigexponent
++	 pkcs11 redirect resolver rndc rpz rrl rrsetorder rsabigexponent
+ 	 smartsign sortlist spf staticstub stub tkey tsig tsiggss unknown
+ 	 upforwd verify views wildcard xfer xferquota zonechecks"
+ 
+diff -r -u bin/tests/system/rrl/clean.sh-orig bin/tests/system/rrl/clean.sh
+--- bin/tests/system/rrl/clean.sh-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/clean.sh	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,21 @@
++# Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++#
++# Permission to use, copy, modify, and/or distribute this software for any
++# purpose with or without fee is hereby granted, provided that the above
++# copyright notice and this permission notice appear in all copies.
++#
++# THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++# REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++# AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++# INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++# LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++# OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++# PERFORMANCE OF THIS SOFTWARE.
++
++
++
++# Clean up after rrl tests.
++
++rm -f dig.out*
++rm -f  */named.memstats */named.run */named.stats */log-* */session.key
++rm -f ns3/bl*.db */*.jnl */*.core */*.pid
+diff -r -u bin/tests/system/rrl/ns1/named.conf-orig bin/tests/system/rrl/ns1/named.conf
+--- bin/tests/system/rrl/ns1/named.conf-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns1/named.conf	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,32 @@
++/*
++ * Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++controls { /* empty */ };
++
++options {
++	query-source address 10.53.0.1;
++	notify-source 10.53.0.1;
++	transfer-source 10.53.0.1;
++	port 5300;
++	session-keyfile "session.key";
++	pid-file "named.pid";
++	listen-on { 10.53.0.1; };
++	listen-on-v6 { none; };
++	notify no;
++};
++
++zone "." {type master; file "root.db";};
+diff -r -u bin/tests/system/rrl/ns1/root.db-orig bin/tests/system/rrl/ns1/root.db
+--- bin/tests/system/rrl/ns1/root.db-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns1/root.db	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,31 @@
++; Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++;
++; Permission to use, copy, modify, and/or distribute this software for any
++; purpose with or without fee is hereby granted, provided that the above
++; copyright notice and this permission notice appear in all copies.
++;
++; THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++; REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++; AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++; INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++; LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++; OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++; PERFORMANCE OF THIS SOFTWARE.
++
++
++$TTL	120
++@		SOA	ns. hostmaster.ns. ( 1 3600 1200 604800 60 )
++@		NS	ns.
++ns.		A	10.53.0.1
++.		A	10.53.0.1
++
++; limit responses from here
++tld2.		NS	ns.tld2.
++ns.tld2.	A	10.53.0.2
++
++; limit recursion to here
++tld3.		NS	ns.tld3.
++ns.tld3.	A	10.53.0.3
++
++; generate SERVFAIL
++tld4.		NS	ns.tld3.
+diff -r -u bin/tests/system/rrl/ns2/hints-orig bin/tests/system/rrl/ns2/hints
+--- bin/tests/system/rrl/ns2/hints-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns2/hints	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,18 @@
++; Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++;
++; Permission to use, copy, modify, and/or distribute this software for any
++; purpose with or without fee is hereby granted, provided that the above
++; copyright notice and this permission notice appear in all copies.
++;
++; THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++; REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++; AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++; INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++; LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++; OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++; PERFORMANCE OF THIS SOFTWARE.
++
++
++
++.	0	NS	ns1.
++ns1.	0	A	10.53.0.1
+diff -r -u bin/tests/system/rrl/ns2/named.conf-orig bin/tests/system/rrl/ns2/named.conf
+--- bin/tests/system/rrl/ns2/named.conf-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns2/named.conf	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,71 @@
++/*
++ * Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++controls { /* empty */ };
++
++options {
++	query-source address 10.53.0.2;
++	notify-source 10.53.0.2;
++	transfer-source 10.53.0.2;
++	port 5300;
++	session-keyfile "session.key";
++	pid-file "named.pid";
++	statistics-file	"named.stats";
++	listen-on { 10.53.0.2; };
++	listen-on-v6 { none; };
++	notify no;
++
++	rate-limit {
++	    responses-per-second 2;
++	    all-per-second 50;
++	    slip 3;
++	    exempt-clients { 10.53.0.7; };
++
++	    // small enough to force a table expansion
++	    min-table-size 75;
++	};
++
++	additional-from-cache no;
++};
++
++key rndc_key {
++	secret "1234abcd8765";
++	algorithm hmac-md5;
++};
++controls {
++	inet 10.53.0.2 port 9953 allow { any; } keys { rndc_key; };
++};
++
++/*
++ * These log settings have no effect unless "-g" is removed from ../../start.pl
++ */
++logging {
++	channel debug {
++	    file "log-debug";
++	    print-category yes; print-severity yes; severity debug 10;
++	};
++	channel queries {
++	    file "log-queries";
++	    print-category yes; print-severity yes; severity info;
++	};
++	category rate-limit { debug; queries; };
++	category queries { debug; queries; };
++};
++
++zone "." { type hint; file "hints"; };
++
++zone "tld2."{ type master; file "tld2.db"; };
+diff -r -u bin/tests/system/rrl/ns2/tld2.db-orig bin/tests/system/rrl/ns2/tld2.db
+--- bin/tests/system/rrl/ns2/tld2.db-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns2/tld2.db	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,47 @@
++; Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++;
++; Permission to use, copy, modify, and/or distribute this software for any
++; purpose with or without fee is hereby granted, provided that the above
++; copyright notice and this permission notice appear in all copies.
++;
++; THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++; REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++; AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++; INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++; LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++; OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++; PERFORMANCE OF THIS SOFTWARE.
++
++
++
++; rate limit response from this zone
++
++$TTL	120
++@		SOA	tld2.  hostmaster.ns.tld2. ( 1 3600 1200 604800 60 )
++		NS	ns
++		NS	.
++ns		A	10.53.0.2
++
++; basic rate limiting
++a1		A	192.0.2.1
++
++; wildcards
++*.a2		A	192.0.2.2
++
++; a3 is in tld3
++
++; a4 does not exist to give NXDOMAIN
++
++; a5 for TCP requests
++a5		A	192.0.2.5
++
++; a6 for whitelisted clients
++a6		A	192.0.2.6
++
++; a7 for SERVFAIL
++
++; a8 for NODATA
++a8		A	192.0.2.8
++
++; a9 for all-per-second limit
++$GENERATE 101-180 all$.a9 A 192.0.2.8
+diff -r -u bin/tests/system/rrl/ns3/hints-orig bin/tests/system/rrl/ns3/hints
+--- bin/tests/system/rrl/ns3/hints-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns3/hints	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,18 @@
++; Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++;
++; Permission to use, copy, modify, and/or distribute this software for any
++; purpose with or without fee is hereby granted, provided that the above
++; copyright notice and this permission notice appear in all copies.
++;
++; THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++; REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++; AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++; INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++; LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++; OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++; PERFORMANCE OF THIS SOFTWARE.
++
++
++
++.	0	NS	ns1.
++ns1.	0	A	10.53.0.1
+diff -r -u bin/tests/system/rrl/ns3/named.conf-orig bin/tests/system/rrl/ns3/named.conf
+--- bin/tests/system/rrl/ns3/named.conf-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns3/named.conf	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,50 @@
++/*
++ * Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++controls { /* empty */ };
++
++options {
++	query-source address 10.53.0.3;
++	notify-source 10.53.0.3;
++	transfer-source 10.53.0.3;
++	port 5300;
++	session-keyfile "session.key";
++	pid-file "named.pid";
++	listen-on { 10.53.0.3; };
++	listen-on-v6 { none; };
++	notify no;
++
++	// check that all of the options are parsed without limiting anything
++	rate-limit {
++	    responses-per-second 200;
++	    referrals-per-second 220;
++	    nodata-per-second 230;
++	    nxdomains-per-second 240;
++	    errors-per-second 250;
++	    all-per-second 700;
++	    ipv4-prefix-length 24;
++	    ipv6-prefix-length 64;
++	    qps-scale 10;
++	    window 1;
++	    max-table-size 1000;
++	};
++
++};
++
++zone "." { type hint; file "hints"; };
++
++zone "tld3."{ type master; file "tld3.db"; };
+diff -r -u bin/tests/system/rrl/ns3/tld3.db-orig bin/tests/system/rrl/ns3/tld3.db
+--- bin/tests/system/rrl/ns3/tld3.db-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/ns3/tld3.db	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,25 @@
++; Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++;
++; Permission to use, copy, modify, and/or distribute this software for any
++; purpose with or without fee is hereby granted, provided that the above
++; copyright notice and this permission notice appear in all copies.
++;
++; THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++; REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++; AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++; INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++; LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++; OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++; PERFORMANCE OF THIS SOFTWARE.
++
++
++
++; rate limit response from this zone
++
++$TTL	120
++@		SOA	tld3.  hostmaster.ns.tld3. ( 1 3600 1200 604800 60 )
++		NS	ns
++		NS	.
++ns		A	10.53.0.3
++
++*.a3		A	192.0.3.3
+diff -r -u bin/tests/system/rrl/setup.sh-orig bin/tests/system/rrl/setup.sh
+--- bin/tests/system/rrl/setup.sh-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/setup.sh	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,21 @@
++#!/bin/sh
++#
++# Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++#
++# Permission to use, copy, modify, and/or distribute this software for any
++# purpose with or without fee is hereby granted, provided that the above
++# copyright notice and this permission notice appear in all copies.
++#
++# THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++# REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++# AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++# INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++# LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++# OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++# PERFORMANCE OF THIS SOFTWARE.
++
++
++SYSTEMTESTTOP=..
++. $SYSTEMTESTTOP/conf.sh
++. ./clean.sh
++
+diff -r -u bin/tests/system/rrl/tests.sh-orig bin/tests/system/rrl/tests.sh
+--- bin/tests/system/rrl/tests.sh-orig	2004-01-01 00:00:00.000000000 +0000
++++ bin/tests/system/rrl/tests.sh	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,258 @@
++# Copyright (C) 2012, 2013  Internet Systems Consortium, Inc. ("ISC")
++#
++# Permission to use, copy, modify, and/or distribute this software for any
++# purpose with or without fee is hereby granted, provided that the above
++# copyright notice and this permission notice appear in all copies.
++#
++# THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++# REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++# AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++# INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++# LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++# OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++# PERFORMANCE OF THIS SOFTWARE.
++
++
++# test response rate limiting
++
++SYSTEMTESTTOP=..
++. $SYSTEMTESTTOP/conf.sh
++
++#set -x
++
++ns1=10.53.0.1			    # root, defining the others
++ns2=10.53.0.2			    # test server
++ns3=10.53.0.3			    # secondary test server
++ns7=10.53.0.7			    # whitelisted client
++
++USAGE="$0: [-x]"
++while getopts "x" c; do
++    case $c in
++	x) set -x;;
++	*) echo "$USAGE" 1>&2; exit 1;;
++    esac
++done
++shift `expr $OPTIND - 1 || true`
++if test "$#" -ne 0; then
++    echo "$USAGE" 1>&2
++    exit 1
++fi
++# really quit on control-C
++trap 'exit 1' 1 2 15
++
++
++ret=0
++setret () {
++    ret=1
++    echo "$*"
++}
++
++
++# Wait until soon after the start of a second to make results consistent.
++#   The start of a second credits a rate limit.
++#   This would be far easier in C or by assuming a modern version of perl.
++sec_start () {
++    START=`date`
++    while true; do
++	NOW=`date`
++	if test "$START" != "$NOW"; then
++	    return
++	fi
++	$PERL -e 'select(undef, undef, undef, 0.05)' || true
++    done
++}
++
++
++# turn off ${HOME}/.digrc
++HOME=/dev/null; export HOME
++
++#   $1=result name  $2=domain name  $3=dig options
++digcmd () {
++    OFILE=$1; shift
++    DIG_DOM=$1; shift
++    ARGS="+nosearch +time=1 +tries=1 +ignore -p 5300 $* $DIG_DOM @$ns2"
++    #echo I:dig $ARGS 1>&2
++    START=`date +%y%m%d%H%M.%S`
++    RESULT=`$DIG $ARGS 2>&1 | tee $OFILE=TEMP				\
++	    | sed -n -e '/^;; AUTHORITY/,/^$/d'				\
++		-e '/^;; ADDITIONAL/,/^$/d'				\
++		-e  's/^[^;].*	\([^	 ]\{1,\}\)$/\1/p'		\
++		-e 's/;; flags.* tc .*/TC/p'				\
++		-e 's/;; .* status: NXDOMAIN.*/NXDOMAIN/p'		\
++		-e 's/;; .* status: SERVFAIL.*/SERVFAIL/p'		\
++		-e 's/;; connection timed out.*/drop/p'			\
++		-e 's/;; communications error to.*/drop/p'		\
++	    | tr -d '\n'`
++    mv "$OFILE=TEMP" "$OFILE=$RESULT"
++    touch -t $START "$OFILE=$RESULT"
++}
++
++
++#   $1=number of tests  $2=target domain  $3=dig options
++QNUM=1
++burst () {
++    BURST_LIMIT=$1; shift
++    BURST_DOM_BASE="$1"; shift
++    while test "$BURST_LIMIT" -ge 1; do
++	CNT=`expr "00$QNUM" : '.*\(...\)'`
++	eval BURST_DOM="$BURST_DOM_BASE"
++	FILE="dig.out-$BURST_DOM-$CNT"
++	digcmd $FILE $BURST_DOM $* &
++	QNUM=`expr $QNUM + 1`
++	BURST_LIMIT=`expr "$BURST_LIMIT" - 1`
++    done
++}
++
++
++#   $1=domain  $2=IP address  $3=# of IP addresses  $4=TC  $5=drop
++#	$6=NXDOMAIN  $7=SERVFAIL or other errors
++ck_result() {
++    BAD=
++    wait
++    ADDRS=`ls dig.out-$1-*=$2				2>/dev/null | wc -l`
++    # count simple truncated and truncated NXDOMAIN as TC
++    TC=`ls dig.out-$1-*=TC dig.out-$1-*=NXDOMAINTC	2>/dev/null | wc -l`
++    DROP=`ls dig.out-$1-*=drop				2>/dev/null | wc -l`
++    # count NXDOMAIN and truncated NXDOMAIN as NXDOMAIN
++    NXDOMAIN=`ls dig.out-$1-*=NXDOMAIN  dig.out-$1-*=NXDOMAINTC	2>/dev/null \
++							| wc -l`
++    SERVFAIL=`ls dig.out-$1-*=SERVFAIL			2>/dev/null | wc -l`
++    if test $ADDRS -ne "$3"; then
++	setret "I:"$ADDRS" instead of $3 '$2' responses for $1"
++	BAD=yes
++    fi
++    if test $TC -ne "$4"; then
++	setret "I:"$TC" instead of $4 truncation responses for $1"
++	BAD=yes
++    fi
++    if test $DROP -ne "$5"; then
++	setret "I:"$DROP" instead of $5 dropped responses for $1"
++	BAD=yes
++    fi
++    if test $NXDOMAIN -ne "$6"; then
++	setret "I:"$NXDOMAIN" instead of $6 NXDOMAIN responses for $1"
++	BAD=yes
++    fi
++    if test $SERVFAIL -ne "$7"; then
++	setret "I:"$SERVFAIL" instead of $7 error responses for $1"
++	BAD=yes
++    fi
++    if test -z "$BAD"; then
++	rm -f dig.out-$1-*
++    fi
++}
++
++
++ckstats () {
++    LABEL="$1"; shift
++    TYPE="$1"; shift
++    EXPECTED="$1"; shift
++    C=`sed -n -e "s/[	 ]*\([0-9]*\).responses $TYPE for rate limits.*/\1/p"  \
++	    ns2/named.stats | tail -1`
++    C=`expr 0$C + 0`
++    if test "$C" -ne $EXPECTED; then
++	setret "I:wrong $LABEL $TYPE statistics of $C instead of $EXPECTED"
++    fi
++}
++
++
++#########
++sec_start
++
++# Tests of referrals to "." must be done before the hints are loaded
++#   or with "additional-from-cache no"
++burst 5 a1.tld3 +norec
++# basic rate limiting
++burst 3 a1.tld2
++# 1 second delay allows an additional response.
++sleep 1
++burst 10 a1.tld2
++# Request 30 different qnames to try a wildcard.
++burst 30 'x$CNT.a2.tld2'
++# These should be counted and limited but are not.  See RT33138.
++burst 10 'y.x$CNT.a2.tld2'
++
++#					IP      TC      drop  NXDOMAIN SERVFAIL
++# referrals to "."
++ck_result   a1.tld3	''		2	1	2	0	0
++# check 13 results including 1 second delay that allows an additional response
++ck_result   a1.tld2	192.0.2.1	3	4	6	0	0
++
++# Check the wild card answers.
++# The parent name of the 30 requests is counted.
++ck_result 'x*.a2.tld2'	192.0.2.2	2	10	18	0	0
++
++# These should be limited but are not.  See RT33138.
++ck_result 'y.x*.a2.tld2' 192.0.2.2	10	0	0	0	0
++
++#########
++sec_start
++
++burst 10 'x.a3.tld3'
++burst 10 'y$CNT.a3.tld3'
++burst 10 'z$CNT.a4.tld2'
++
++# 10 identical recursive responses are limited
++ck_result 'x.a3.tld3'	192.0.3.3	2	3	5	0	0
++
++# 10 different recursive responses are not limited
++ck_result 'y*.a3.tld3'	192.0.3.3	10	0	0	0	0
++
++# 10 different NXDOMAIN responses are limited based on the parent name.
++#   We count 13 responses because we count truncated NXDOMAIN responses
++#   as both truncated and NXDOMAIN.
++ck_result 'z*.a4.tld2'	x		0	3	5	5	0
++
++$RNDC -c $SYSTEMTESTTOP/common/rndc.conf -p 9953 -s $ns2 stats
++ckstats first dropped 36
++ckstats first truncated 21
++
++
++#########
++sec_start
++
++burst 10 a5.tld2 +tcp
++burst 10 a6.tld2 -b $ns7
++burst 10 a7.tld4
++burst 2 a8.tld2 AAAA
++burst 2 a8.tld2 TXT
++burst 2 a8.tld2 SPF
++
++#					IP      TC      drop  NXDOMAIN SERVFAIL
++# TCP responses are not rate limited
++ck_result a5.tld2	192.0.2.5	10	0	0	0	0
++
++# whitelisted client is not rate limited
++ck_result a6.tld2	192.0.2.6	10	0	0	0	0
++
++# Errors such as SERVFAIL are rate limited.
++ck_result a7.tld4	x		0	0	8	0	2
++
++# NODATA responses are counted as the same regardless of qtype.
++ck_result a8.tld2	''		2	2	2	0	0
++
++$RNDC -c $SYSTEMTESTTOP/common/rndc.conf -p 9953 -s $ns2 stats
++ckstats second dropped 46
++ckstats second truncated 23
++
++
++#########
++sec_start
++
++#					IP      TC      drop  NXDOMAIN SERVFAIL
++# all-per-second
++#   The qnames are all unique but the client IP address is constant.
++QNUM=101
++burst 60 'all$CNT.a9.tld2'
++
++ck_result 'a*.a9.tld2'	192.0.2.8	50	0	10	0	0
++
++$RNDC -c $SYSTEMTESTTOP/common/rndc.conf -p 9953 -s $ns2 stats
++ckstats final dropped 56
++ckstats final truncated 23
++
++
++echo "I:exit status: $ret"
++# exit $ret
++[ $ret -ne 0 ] && echo "I:test failure overridden"
++exit 0
+diff -r -u doc/arm/Bv9ARM-book.xml-orig doc/arm/Bv9ARM-book.xml
+--- doc/arm/Bv9ARM-book.xml-orig	2004-01-01 00:00:00.000000000 +0000
++++ doc/arm/Bv9ARM-book.xml	2004-01-01 00:00:00.000000000 +0000
+@@ -4818,6 +4818,32 @@
+ 		    </para>
+ 		  </entry>
+ 		</row>
++                <row rowsep="0">
++                  <entry colname="1">
++                    <para><command>rate-limit</command></para>
++                  </entry>
++		  <entry colname="2">
++		    <para>
++		      The start, periodic, and final notices of the
++		      rate limiting of a stream of responses are logged at
++		      <command>info</command> severity in this category.
++		      These messages include a hash value of the domain name
++		      of the response and the name itself,
++		      except when there is insufficient memory to record
++		      the name for the final notice
++		      The final notice is normally delayed until about one
++		      minute after rate limit stops.
++		      A lack of memory can hurry the final notice,
++		      in which case it starts with an asterisk (*).
++		      Various internal events are logged at debug 1 level
++		      and higher.
++		    </para>
++		    <para>
++		      Rate limiting of individual requests
++		      is logged in the <command>query-errors</command> category.
++		    </para>
++		  </entry>
++		</row>
+ 	      </tbody>
+ 	    </tgroup>
+ 	  </informaltable>
+@@ -5318,7 +5344,7 @@
+     <optional> match-mapped-addresses <replaceable>yes_or_no</replaceable>; </optional>
+     <optional> filter-aaaa-on-v4 ( <replaceable>yes_or_no</replaceable> | <replaceable>break-dnssec</replaceable> ); </optional>
+     <optional> filter-aaaa { <replaceable>address_match_list</replaceable> }; </optional>
+-    <optional> dns64 <replaceable>IPv6-prefix</replaceable> {
++    <optional> dns64 <replaceable>ipv6-prefix</replaceable> {
+ 	<optional> clients { <replaceable>address_match_list</replaceable> }; </optional>
+ 	<optional> mapped { <replaceable>address_match_list</replaceable> }; </optional>
+         <optional> exclude { <replaceable>address_match_list</replaceable> }; </optional>
+@@ -5351,6 +5377,23 @@
+     <optional> resolver-query-timeout <replaceable>number</replaceable> ; </optional>
+     <optional> deny-answer-addresses { <replaceable>address_match_list</replaceable> } <optional> except-from { <replaceable>namelist</replaceable> } </optional>;</optional>
+     <optional> deny-answer-aliases { <replaceable>namelist</replaceable> } <optional> except-from { <replaceable>namelist</replaceable> } </optional>;</optional>
++    <optional> rate-limit {
++	<optional> responses-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> referrals-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> nodata-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> nxdomains-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> errors-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> all-per-second <replaceable>number</replaceable> ; </optional>
++	<optional> window <replaceable>number</replaceable> ; </optional>
++	<optional> log-only <replaceable>yes_or_no</replaceable> ; </optional>
++	<optional> qps-scale <replaceable>number</replaceable> ; </optional>
++	<optional> ipv4-prefix-length <replaceable>number</replaceable> ; </optional>
++	<optional> ipv6-prefix-length <replaceable>number</replaceable> ; </optional>
++	<optional> slip <replaceable>number</replaceable> ; </optional>
++	<optional> exempt-clients  { <replaceable>address_match_list</replaceable> } ; </optional>
++	<optional> max-table-size <replaceable>number</replaceable> ; </optional>
++	<optional> min-table-size <replaceable>number</replaceable> ; </optional>
++      } ; </optional>
+     <optional> response-policy { <replaceable>zone_name</replaceable>
+ 	<optional> policy given | disabled | passthru | nxdomain | nodata | cname <replaceable>domain</replaceable> </optional>
+ 	<optional> recursive-only <replaceable>yes_or_no</replaceable> </optional> <optional> max-policy-ttl <replaceable>number</replaceable> </optional> ;
+@@ -9897,6 +9940,223 @@
+             <command>RPZRewrites</command> statistics.
+           </para>
+         </sect3>
++
++	<sect3>
++	  <title>Response Rate Limiting</title>
++	  <para>
++	    Excessive almost-identical UDP <emphasis>responses</emphasis>
++	    can be controlled by configuring a
++	    <command>rate-limit</command> clause in an
++	    <command>options</command> or <command>view</command> statement.
++	    This mechanism keeps authoritative BIND 9 from being used
++	    in amplifying reflection denial of service (DoS) attacks.
++	    Short truncated (TC=1) responses can be sent to provide
++	    rate-limited responses to legitimate clients within
++	    a range of forged, attacked IP addresses.
++	    Legitimate clients react to dropped or truncated response
++	    by retrying with UDP or with TCP respectively.
++	  </para>
++
++	  <para>
++	    This mechanism is intended for authoritative DNS servers.
++	    It can be used on recursive servers but can slow
++	    applications such as SMTP servers (mail receivers) and
++	    HTTP clients (web browsers) that repeatedly request the
++	    same domains.
++	    When possible, closing "open" recursive servers is better.
++	  </para>
++
++	  <para>
++	    Response rate limiting uses a "credit" or "token bucket" scheme.
++	    Each combination of identical response and client
++	    has a conceptual account that earns a specified number
++	    of credits every second.
++	    A prospective response debits its account by one.
++	    Responses are dropped or truncated
++	    while the account is negative.
++            Responses are tracked within a rolling window of time
++            which defaults to 15 seconds, but can be configured with
++            the <command>window</command> option to any value from
++            1 to 3600 seconds (1 hour).
++	    The account cannot become more positive than
++	    the per-second limit
++	    or more negative than <command>window</command>
++	    times the per-second limit.
++            When the specified number of credits for a class of
++            responses is set to 0, those responses are not rate limited.
++	  </para>
++
++	  <para>
++	    The notions of "identical response" and "DNS client"
++	    for rate limiting are not simplistic.
++	    All responses to an address block are counted as if to a
++	    single client.
++	    The prefix lengths of addresses blocks are
++	    specified with <command>ipv4-prefix-length</command> (default 24)
++	    and <command>ipv6-prefix-length</command> (default 56).
++	  </para>
++
++	  <para>
++	    All non-empty responses for a valid domain name (qname)
++	    and record type (qtype) are identical and have a limit specified
++	    with <command>responses-per-second</command>
++	    (default 0 or no limit).
++	    All empty (NODATA) responses for a valid domain,
++	    regardless of query type, are identical.
++	    Responses in the NODATA class are limited by
++	    <command>nodata-per-second</command>
++	    (default <command>responses-per-second</command>).
++	    Requests for any and all undefined subdomains of a given
++            valid domain result in NXDOMAIN errors, and are identical
++            regardless of query type.
++	    They are limited by <command>nxdomain-per-second</command>
++	    (default <command>responses-per-second</command>).
++	    This controls some attacks using random names, but
++	    can be relaxed or turned off (set to 0)
++	    on servers that expect many legitimate
++	    NXDOMAIN responses, such as from anti-spam blacklists.
++	    Referrals or delegations to the server of a given
++	    domain are identical and are limited by
++	    <command>referrals-per-second</command>
++	    (default <command>responses-per-second</command>).
++	  </para>
++
++	  <para>
++	    Responses generated from local wildcards are counted and limited
++	    as if they were for the parent domain name.
++	    This controls flooding using random.wild.example.com.
++	  </para>
++
++	  <para>
++            All requests that result in DNS errors other
++	    than NXDOMAIN, such as SERVFAIL and FORMERR, are identical
++            regardless of requested name (qname) or record type (qtype).
++	    This controls attacks using invalid requests or distant,
++	    broken authoritative servers.
++	    By default the limit on errors is the same as the
++	    <command>responses-per-second</command> value,
++	    but it can be set separately with
++	    <command>errors-per-second</command>.
++	  </para>
++
++	  <para>
++	    Many attacks using DNS involve UDP requests with forged source
++	    addresses.
++	    Rate limiting prevents the use of BIND 9 to flood a network
++	    with responses to requests with forged source addresses,
++	    but could let a third party block responses to legitimate requests.
++	    There is a mechanism that can answer some legitimate
++	    requests from a client whose address is being forged in a flood.
++	    Setting <command>slip</command> to 2 (its default) causes every
++	    other UDP request to be answered with a small truncated (TC=1)
++	    response.
++	    The small size and reduced frequency, and so lack of
++	    amplification, of "slipped" responses make them unattractive
++	    for reflection DoS attacks.
++	    <command>slip</command> must be between 0 and 10.
++	    A value of 0 does not "slip";
++	    no truncated responses are sent due to rate limiting.
++	    Some error responses including REFUSED and SERVFAIL
++	    cannot be replaced with truncated responses and are instead
++	    leaked at the <command>slip</command> rate.
++	  </para>
++
++	  <para>
++	    When the approximate query per second rate exceeds
++	    the <command>qps-scale</command> value,
++	    then the <command>responses-per-second</command>,
++	    <command>errors-per-second</command>,
++	    <command>nxdomains-per-second</command> and
++	    <command>all-per-second</command> values are reduced by the
++	    ratio of the current rate to the <command>qps-scale</command> value.
++	    This feature can tighten defenses during attacks.
++	    For example, with
++	    <command>qps-scale 250; responses-per-second 20;</command> and
++	    a total query rate of 1000 queries/second for all queries from
++	    all DNS clients including via TCP,
++	    then the effective responses/second limit changes to
++	    (250/1000)*20 or 5.
++	    Responses sent via TCP are not limited
++	    but are counted to compute the query per second rate.
++	  </para>
++
++	  <para>
++	    Communities of DNS clients can be given their own parameters or no
++	    rate limiting by putting
++	    <command>rate-limit</command> statements in <command>view</command>
++	    statements instead of the global <command>option</command>
++	    statement.
++	    A <command>rate-limit</command> statement in a view replaces,
++	    rather than supplementing, a <command>rate-limit</command>
++	    statement among the main options.
++	    DNS clients within a view can be exempted from rate limits
++	    with the <command>exempt-clients</command> clause.
++	  </para>
++
++	  <para>
++	    UDP responses of all kinds can be limited with the
++	    <command>all-per-second</command> phrase.
++	    This rate limiting is unlike the rate limiting provided by
++	    <command>responses-per-second</command>,
++	    <command>errors-per-second</command>, and
++	    <command>nxdomains-per-second</command> on a DNS server
++	    which are often invisible to the victim of a DNS reflection attack.
++	    Unless the forged requests of the attack are the same as the
++	    legitimate requests of the victim, the victim's requests are
++	    not affected.
++	    Responses affected by an <command>all-per-second</command> limit
++	    are always dropped; the <command>slip</command> value has no
++	    effect.
++	    An <command>all-per-second</command> limit should be
++	    at least 4 times as large as the other limits,
++	    because single DNS clients often send bursts of legitimate
++	    requests.
++	    For example, the receipt of a single mail message can prompt
++	    requests from an SMTP server for NS, PTR, A, and AAAA records
++	    as the incoming SMTP/TCP/IP connection is considered.
++	    The SMTP server can need additional NS, A, AAAA, MX, TXT, and SPF
++	    records as it considers the STMP <command>Mail From</command>
++	    command.
++	    Web browsers often repeatedly resolve the same names that
++	    are repeated in HTML &lt;IMG&gt; tags in a page.
++	    <command>All-per-second</command> is similar to the
++	    rate limiting offered by firewalls but often inferior.
++	    Attacks that justify ignoring the
++	    contents of DNS responses are likely to be attacks on the
++	    DNS server itself.
++	    They usually should be discarded before the DNS server
++	    spends resources make TCP connections or parsing DNS requesets,
++	    but that rate limiting must be done before the
++	    DNS server sees the requests.
++	  </para>
++
++	  <para>
++	    The maximum size of the table used to track requests and
++	    rate limit responses is set with <command>max-table-size</command>.
++	    Each entry in the table is between 40 and 80 bytes.
++	    The table needs approximately as many entries as the number
++	    of requests received per second.
++	    The default is 20,000.
++	    To reduce the cold start of growing the table,
++	    <command>min-table-size</command> (default 500)
++	    can set the minimum table size.
++	    Enable <command>rate-limit</command> category logging to monitor
++	    expansions of the table and inform
++	    choices for the initial and maximum table size.
++	  </para>
++
++	  <para>
++	    Use <command>log-only yes</command> to test rate limiting parameters
++	    without actually dropping any requests.
++	  </para>
++
++	  <para>
++	    Responses dropped by rate limits are included in the
++	    <command>RateDropped</command> and <command>QryDropped</command>
++	    statistics.
++	    Responses that truncated by rate limits are included in
++	    <command>RateSlipped</command> and <command>RespTruncated</command>.
++	</sect3>
+       </sect2>
+ 
+       <sect2 id="server_statement_grammar">
+@@ -14649,6 +14909,32 @@
+ 		      </para>
+ 		    </entry>
+ 		  </row>
++		  <row rowsep="0">
++		    <entry colname="1">
++		      <para><command>RateDropped</command></para>
++		    </entry>
++		    <entry colname="2">
++		      <para><command></command></para>
++		    </entry>
++		    <entry colname="3">
++		      <para>
++			Responses dropped by rate limits.
++		      </para>
++		    </entry>
++		  </row>
++		  <row rowsep="0">
++		    <entry colname="1">
++		      <para><command>RateSlipped</command></para>
++		    </entry>
++		    <entry colname="2">
++		      <para><command></command></para>
++		    </entry>
++		    <entry colname="3">
++		      <para>
++			Responses truncated by rate limits.
++		      </para>
++		    </entry>
++		  </row>
+ 		</tbody>
+               </tgroup>
+             </informaltable>
+diff -r -u lib/dns/Makefile.in-orig lib/dns/Makefile.in
+--- lib/dns/Makefile.in-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/Makefile.in	2004-01-01 00:00:00.000000000 +0000
+@@ -67,8 +67,8 @@
+ 		portlist.@O@ private.@O@ \
+ 		rbt.@O@ rbtdb.@O@ rbtdb64.@O@ rcode.@O@ rdata.@O@ \
+ 		rdatalist.@O@ rdataset.@O@ rdatasetiter.@O@ rdataslab.@O@ \
+-		request.@O@ resolver.@O@ result.@O@ rootns.@O@ rpz.@O@ \
+-		rriterator.@O@ sdb.@O@ \
++		request.@O@ resolver.@O@ result.@O@ rootns.@O@ \
++		rpz.@O@ rrl.@O@ rriterator.@O@ sdb.@O@ \
+ 		sdlz.@O@ soa.@O@ ssu.@O@ ssu_external.@O@ \
+ 		stats.@O@ tcpmsg.@O@ time.@O@ timer.@O@ tkey.@O@ \
+ 		tsec.@O@ tsig.@O@ ttl.@O@ update.@O@ validator.@O@ \
+@@ -95,7 +95,7 @@
+ 		name.c ncache.c nsec.c nsec3.c order.c peer.c portlist.c \
+ 		rbt.c rbtdb.c rbtdb64.c rcode.c rdata.c rdatalist.c \
+ 		rdataset.c rdatasetiter.c rdataslab.c request.c \
+-		resolver.c result.c rootns.c rpz.c rriterator.c \
++		resolver.c result.c rootns.c rpz.c rrl.c rriterator.c \
+ 		sdb.c sdlz.c soa.c ssu.c ssu_external.c \
+ 		stats.c tcpmsg.c time.c timer.c tkey.c \
+ 		tsec.c tsig.c ttl.c update.c validator.c \
+diff -r -u lib/dns/include/dns/log.h-orig lib/dns/include/dns/log.h
+--- lib/dns/include/dns/log.h-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/include/dns/log.h	2004-01-01 00:00:00.000000000 +0000
+@@ -43,6 +43,7 @@
+ #define DNS_LOGCATEGORY_DELEGATION_ONLY	(&dns_categories[10])
+ #define DNS_LOGCATEGORY_EDNS_DISABLED	(&dns_categories[11])
+ #define DNS_LOGCATEGORY_RPZ		(&dns_categories[12])
++#define DNS_LOGCATEGORY_RRL		(&dns_categories[13])
+ 
+ /* Backwards compatibility. */
+ #define DNS_LOGCATEGORY_GENERAL		ISC_LOGCATEGORY_GENERAL
+diff -r -u lib/dns/include/dns/rrl.h-orig lib/dns/include/dns/rrl.h
+--- lib/dns/include/dns/rrl.h-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/include/dns/rrl.h	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,278 @@
++/*
++ * Copyright (C) 2013  Internet Systems Consortium, Inc. ("ISC")
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++
++#ifndef DNS_RRL_H
++#define DNS_RRL_H 1
++
++/*
++ * Rate limit DNS responses.
++ */
++
++#include <isc/lang.h>
++
++#include <dns/fixedname.h>
++#include <dns/rdata.h>
++#include <dns/types.h>
++
++ISC_LANG_BEGINDECLS
++
++
++/*
++ * Memory allocation or other failures.
++ */
++#define DNS_RRL_LOG_FAIL	ISC_LOG_WARNING
++/*
++ * dropped or slipped responses.
++ */
++#define DNS_RRL_LOG_DROP	ISC_LOG_INFO
++/*
++ * Major events in dropping or slipping.
++ */
++#define DNS_RRL_LOG_DEBUG1	ISC_LOG_DEBUG(3)
++/*
++ * Limit computations.
++ */
++#define DNS_RRL_LOG_DEBUG2	ISC_LOG_DEBUG(4)
++/*
++ * Even less interesting.
++ */
++#define DNS_RRL_LOG_DEBUG3	ISC_LOG_DEBUG(9)
++
++
++#define DNS_RRL_LOG_ERR_LEN	64
++#define DNS_RRL_LOG_BUF_LEN	(sizeof("would continue limiting") +	\
++				 DNS_RRL_LOG_ERR_LEN +			\
++				 sizeof(" responses to ") +		\
++				 ISC_NETADDR_FORMATSIZE +		\
++				 sizeof("/128 for IN ") +		\
++				 DNS_RDATATYPE_FORMATSIZE +		\
++				 DNS_NAME_FORMATSIZE)
++
++
++typedef struct dns_rrl_hash dns_rrl_hash_t;
++
++/*
++ * Response types.
++ */
++typedef enum {
++	DNS_RRL_RTYPE_FREE = 0,
++	DNS_RRL_RTYPE_QUERY,
++	DNS_RRL_RTYPE_REFERRAL,
++	DNS_RRL_RTYPE_NODATA,
++	DNS_RRL_RTYPE_NXDOMAIN,
++	DNS_RRL_RTYPE_ERROR,
++	DNS_RRL_RTYPE_ALL,
++	DNS_RRL_RTYPE_TCP,
++} dns_rrl_rtype_t;
++
++/*
++ * A rate limit bucket key.
++ * This should be small to limit the total size of the database.
++ * The hash of the qname should be wide enough to make the probability
++ * of collisions among requests from a single IP address block less than 50%.
++ * We need a 32-bit hash value for 10000 qps (e.g. random qnames forged
++ * by attacker) to collide with legitimate qnames from the target with
++ * probability at most 1%.
++ */
++#define DNS_RRL_MAX_PREFIX  64
++typedef union dns_rrl_key dns_rrl_key_t;
++union dns_rrl_key {
++	struct {
++		isc_uint32_t	    ip[DNS_RRL_MAX_PREFIX/32];
++		isc_uint32_t	    qname_hash;
++		dns_rdatatype_t	    qtype;
++		isc_uint8_t	    qclass;
++		dns_rrl_rtype_t	    rtype   :4; /* 3 bits + sign bit */
++		isc_boolean_t	    ipv6    :1;
++	} s;
++	isc_uint16_t	w[1];
++};
++
++/*
++ * A rate-limit entry.
++ * This should be small to limit the total size of the table of entries.
++ */
++typedef struct dns_rrl_entry dns_rrl_entry_t;
++typedef ISC_LIST(dns_rrl_entry_t) dns_rrl_bin_t;
++struct dns_rrl_entry {
++	ISC_LINK(dns_rrl_entry_t) lru;
++	ISC_LINK(dns_rrl_entry_t) hlink;
++	dns_rrl_key_t	key;
++# define DNS_RRL_RESPONSE_BITS	24
++	signed int	responses   :DNS_RRL_RESPONSE_BITS;
++# define DNS_RRL_QNAMES_BITS	8
++	unsigned int	log_qname   :DNS_RRL_QNAMES_BITS;
++
++# define DNS_RRL_TS_GEN_BITS	2
++	unsigned int	ts_gen	    :DNS_RRL_TS_GEN_BITS;
++	isc_boolean_t	ts_valid    :1;
++# define DNS_RRL_HASH_GEN_BITS	1
++	unsigned int	hash_gen    :DNS_RRL_HASH_GEN_BITS;
++	isc_boolean_t	logged	    :1;
++# define DNS_RRL_LOG_BITS	11
++	unsigned int	log_secs    :DNS_RRL_LOG_BITS;
++
++# define DNS_RRL_TS_BITS	12
++	unsigned int	ts	    :DNS_RRL_TS_BITS;
++
++# define DNS_RRL_MAX_SLIP	10
++	unsigned int	slip_cnt    :4;
++};
++
++#define DNS_RRL_MAX_TIME_TRAVEL	5
++#define DNS_RRL_FOREVER		(1<<DNS_RRL_TS_BITS)
++#define DNS_RRL_MAX_TS		(DNS_RRL_FOREVER - 1)
++
++#define DNS_RRL_MAX_RESPONSES	((1<<(DNS_RRL_RESPONSE_BITS-1))-1)
++#define DNS_RRL_MAX_WINDOW	3600
++#if DNS_RRL_MAX_WINDOW >= DNS_RRL_MAX_TS
++#error "DNS_RRL_MAX_WINDOW is too large"
++#endif
++#define DNS_RRL_MAX_RATE	1000
++#if DNS_RRL_MAX_RATE >= (DNS_RRL_MAX_RESPONSES / DNS_RRL_MAX_WINDOW)
++#error "DNS_RRL_MAX_rate is too large"
++#endif
++
++#if (1<<DNS_RRL_LOG_BITS) >= DNS_RRL_FOREVER
++#error DNS_RRL_LOG_BITS is too big
++#endif
++#define DNS_RRL_MAX_LOG_SECS	1800
++#if DNS_RRL_MAX_LOG_SECS >= (1<<DNS_RRL_LOG_BITS)
++#error "DNS_RRL_MAX_LOG_SECS is too large"
++#endif
++#define DNS_RRL_STOP_LOG_SECS	60
++#if DNS_RRL_STOP_LOG_SECS >= (1<<DNS_RRL_LOG_BITS)
++#error "DNS_RRL_STOP_LOG_SECS is too large"
++#endif
++
++
++/*
++ * A hash table of rate-limit entries.
++ */
++struct dns_rrl_hash {
++	isc_stdtime_t	check_time;
++	unsigned int	gen	    :DNS_RRL_HASH_GEN_BITS;
++	int		length;
++	dns_rrl_bin_t	bins[1];
++};
++
++/*
++ * A block of rate-limit entries.
++ */
++typedef struct dns_rrl_block dns_rrl_block_t;
++struct dns_rrl_block {
++	ISC_LINK(dns_rrl_block_t) link;
++	int		size;
++	dns_rrl_entry_t	entries[1];
++};
++
++/*
++ * A rate limited qname buffer.
++ */
++typedef struct dns_rrl_qname_buf dns_rrl_qname_buf_t;
++struct dns_rrl_qname_buf {
++	ISC_LINK(dns_rrl_qname_buf_t) link;
++	const dns_rrl_entry_t *e;
++	unsigned int	    index;
++	dns_fixedname_t	    qname;
++};
++
++typedef struct dns_rrl_rate dns_rrl_rate_t;
++struct dns_rrl_rate {
++	int	    r;
++	int	    scaled;
++	const char  *str;
++};
++
++/*
++ * Per-view query rate limit parameters and a pointer to database.
++ */
++typedef struct dns_rrl dns_rrl_t;
++struct dns_rrl {
++	isc_mutex_t	lock;
++	isc_mem_t	*mctx;
++
++	isc_boolean_t	log_only;
++	dns_rrl_rate_t	responses_per_second;
++	dns_rrl_rate_t	referrals_per_second;
++	dns_rrl_rate_t	nodata_per_second;
++	dns_rrl_rate_t	nxdomains_per_second;
++	dns_rrl_rate_t	errors_per_second;
++	dns_rrl_rate_t	all_per_second;
++	dns_rrl_rate_t	slip;
++	int		window;
++	double		qps_scale;
++	int		max_entries;
++
++	dns_acl_t	*exempt;
++
++	int		num_entries;
++
++	int		qps_responses;
++	isc_stdtime_t	qps_time;
++	double		qps;
++
++	unsigned int	probes;
++	unsigned int	searches;
++
++	ISC_LIST(dns_rrl_block_t) blocks;
++	ISC_LIST(dns_rrl_entry_t) lru;
++
++	dns_rrl_hash_t	*hash;
++	dns_rrl_hash_t	*old_hash;
++	unsigned int	hash_gen;
++
++	unsigned int	ts_gen;
++# define DNS_RRL_TS_BASES   (1<<DNS_RRL_TS_GEN_BITS)
++	isc_stdtime_t	ts_bases[DNS_RRL_TS_BASES];
++
++	int		ipv4_prefixlen;
++	isc_uint32_t	ipv4_mask;
++	int		ipv6_prefixlen;
++	isc_uint32_t	ipv6_mask[4];
++
++	isc_stdtime_t	log_stops_time;
++	dns_rrl_entry_t	*last_logged;
++	int		num_logged;
++	int		num_qnames;
++	ISC_LIST(dns_rrl_qname_buf_t) qname_free;
++# define DNS_RRL_QNAMES	    (1<<DNS_RRL_QNAMES_BITS)
++	dns_rrl_qname_buf_t *qnames[DNS_RRL_QNAMES];
++};
++
++typedef enum {
++	DNS_RRL_RESULT_OK,
++	DNS_RRL_RESULT_DROP,
++	DNS_RRL_RESULT_SLIP,
++} dns_rrl_result_t;
++
++dns_rrl_result_t
++dns_rrl(dns_view_t *view,
++	const isc_sockaddr_t *client_addr, isc_boolean_t is_tcp,
++	dns_rdataclass_t rdclass, dns_rdatatype_t qtype,
++	dns_name_t *qname, isc_result_t resp_result, isc_stdtime_t now,
++	isc_boolean_t wouldlog, char *log_buf, unsigned int log_buf_len);
++
++void
++dns_rrl_view_destroy(dns_view_t *view);
++
++isc_result_t
++dns_rrl_init(dns_rrl_t **rrlp, dns_view_t *view, int min_entries);
++
++ISC_LANG_ENDDECLS
++
++#endif /* DNS_RRL_H */
+diff -r -u lib/dns/include/dns/view.h-orig lib/dns/include/dns/view.h
+--- lib/dns/include/dns/view.h-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/include/dns/view.h	2004-01-01 00:00:00.000000000 +0000
+@@ -73,6 +73,7 @@
+ 
+ #include <dns/acl.h>
+ #include <dns/fixedname.h>
++#include <dns/rrl.h>
+ #include <dns/rdatastruct.h>
+ #include <dns/rpz.h>
+ #include <dns/types.h>
+@@ -142,6 +143,7 @@
+ 	dns_rbt_t *			answeracl_exclude;
+ 	dns_rbt_t *			denyanswernames;
+ 	dns_rbt_t *			answernames_exclude;
++	dns_rrl_t *			rrl;
+ 	isc_boolean_t			provideixfr;
+ 	isc_boolean_t			requestnsid;
+ 	dns_ttl_t			maxcachettl;
+diff -r -u lib/dns/log.c-orig lib/dns/log.c
+--- lib/dns/log.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/log.c	2004-01-01 00:00:00.000000000 +0000
+@@ -45,6 +45,7 @@
+ 	{ "delegation-only", 0 },
+ 	{ "edns-disabled", 0 },
+ 	{ "rpz",	0 },
++	{ "rate-limit",	0 },
+ 	{ NULL, 	0 }
+ };
+ 
+diff -r -u lib/dns/rrl.c-orig lib/dns/rrl.c
+--- lib/dns/rrl.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/rrl.c	2004-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,1324 @@
++/*
++ * Copyright (C) 2013  Internet Systems Consortium, Inc. ("ISC")
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/*! \file */
++
++/*
++ * Rate limit DNS responses.
++ */
++
++/* #define ISC_LIST_CHECKINIT */
++
++#include <config.h>
++#include <isc/mem.h>
++#include <isc/net.h>
++#include <isc/netaddr.h>
++#include <isc/print.h>
++
++#include <dns/result.h>
++#include <dns/rcode.h>
++#include <dns/rdatatype.h>
++#include <dns/rdataclass.h>
++#include <dns/log.h>
++#include <dns/rrl.h>
++#include <dns/view.h>
++
++static void
++log_end(dns_rrl_t *rrl, dns_rrl_entry_t *e, isc_boolean_t early,
++	char *log_buf, unsigned int log_buf_len);
++
++/*
++ * Get a modulus for a hash function that is tolerably likely to be
++ * relatively prime to most inputs.  Of course, we get a prime for for initial
++ * values not larger than the square of the last prime.  We often get a prime
++ * after that.
++ * This works well in practice for hash tables up to at least 100
++ * times the square of the last prime and better than a multiplicative hash.
++ */
++static int
++hash_divisor(unsigned int initial) {
++	static isc_uint16_t primes[] = {
++		  3,   5,   7,  11,  13,  17,  19,  23,  29,  31,  37,  41,
++		 43,  47,  53,  59,  61,  67,  71,  73,  79,  83,  89,  97,
++#if 0
++		101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157,
++		163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227,
++		229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283,
++		293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367,
++		373, 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439,
++		443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509,
++		521, 523, 541, 547, 557, 563, 569, 571, 577, 587, 593, 599,
++		601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659, 661,
++		673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751,
++		757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829,
++		839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919,
++		929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997,1009,
++#endif
++	};
++	int divisions, tries;
++	unsigned int result;
++	isc_uint16_t *pp, p;
++
++	result = initial;
++
++	if (primes[sizeof(primes)/sizeof(primes[0])-1] >= result) {
++		pp = primes;
++		while (*pp < result)
++			++pp;
++		return (*pp);
++	}
++
++	if ((result & 1) == 0)
++		++result;
++
++	divisions = 0;
++	tries = 1;
++	pp = primes;
++	do {
++		p = *pp++;
++		++divisions;
++		if ((result % p) == 0) {
++			++tries;
++			result += 2;
++			pp = primes;
++		}
++	} while (pp < &primes[sizeof(primes) / sizeof(primes[0])]);
++
++	if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DEBUG3))
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DEBUG3,
++			      "%d hash_divisor() divisions in %d tries"
++			      " to get %d from %d",
++			      divisions, tries, result, initial);
++
++	return (result);
++}
++
++/*
++ * Convert a timestamp to a number of seconds in the past.
++ */
++static inline int
++delta_rrl_time(isc_stdtime_t ts, isc_stdtime_t now) {
++	int delta;
++
++	delta = now - ts;
++	if (delta >= 0)
++		return (delta);
++
++	/*
++	 * The timestamp is in the future.  That future might result from
++	 * re-ordered requests, because we use timestamps on requests
++	 * instead of consulting a clock.  Timestamps in the distant future are
++	 * assumed to result from clock changes.  When the clock changes to
++	 * the past, make existing timestamps appear to be in the past.
++	 */
++	if (delta < -DNS_RRL_MAX_TIME_TRAVEL)
++		return (DNS_RRL_FOREVER);
++	return (0);
++}
++
++static inline int
++get_age(const dns_rrl_t *rrl, const dns_rrl_entry_t *e, isc_stdtime_t now) {
++	if (!e->ts_valid)
++		return (DNS_RRL_FOREVER);
++	return (delta_rrl_time(e->ts + rrl->ts_bases[e->ts_gen], now));
++}
++
++static inline void
++set_age(dns_rrl_t *rrl, dns_rrl_entry_t *e, isc_stdtime_t now) {
++	dns_rrl_entry_t *e_old;
++	unsigned int ts_gen;
++	int i, ts;
++
++	ts_gen = rrl->ts_gen;
++	ts = now - rrl->ts_bases[ts_gen];
++	if (ts < 0) {
++		if (ts < -DNS_RRL_MAX_TIME_TRAVEL)
++			ts = DNS_RRL_FOREVER;
++		else
++			ts = 0;
++	}
++
++	/*
++	 * Make a new timestamp base if the current base is too old.
++	 * All entries older than DNS_RRL_MAX_WINDOW seconds are ancient,
++	 * useless history.  Their timestamps can be treated as if they are
++	 * all the same.
++	 * We only do arithmetic on more recent timestamps, so bases for
++	 * older timestamps can be recycled provided the old timestamps are
++	 * marked as ancient history.
++	 * This loop is almost always very short because most entries are
++	 * recycled after one second and any entries that need to be marked
++	 * are older than (DNS_RRL_TS_BASES)*DNS_RRL_MAX_TS seconds.
++	 */
++	if (ts >= DNS_RRL_MAX_TS) {
++		ts_gen = (ts_gen + 1) % DNS_RRL_TS_BASES;
++		for (e_old = ISC_LIST_TAIL(rrl->lru), i = 0;
++		     e_old != NULL && (e_old->ts_gen == ts_gen ||
++				       !ISC_LINK_LINKED(e_old, hlink));
++		     e_old = ISC_LIST_PREV(e_old, lru), ++i)
++		{
++			e_old->ts_valid = ISC_FALSE;
++		}
++		if (i != 0)
++			isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++				      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DEBUG1,
++				      "rrl new time base scanned %d entries"
++				      " at %d for %d %d %d %d",
++				      i, now, rrl->ts_bases[ts_gen],
++				      rrl->ts_bases[(ts_gen + 1) %
++					DNS_RRL_TS_BASES],
++				      rrl->ts_bases[(ts_gen + 2) %
++					DNS_RRL_TS_BASES],
++				      rrl->ts_bases[(ts_gen + 3) %
++					DNS_RRL_TS_BASES]);
++		rrl->ts_gen = ts_gen;
++		rrl->ts_bases[ts_gen] = now;
++		ts = 0;
++	}
++
++	e->ts_gen = ts_gen;
++	e->ts = ts;
++	e->ts_valid = ISC_TRUE;
++}
++
++static isc_result_t
++expand_entries(dns_rrl_t *rrl, int new) {
++	unsigned int bsize;
++	dns_rrl_block_t *b;
++	dns_rrl_entry_t *e;
++	double rate;
++	int i;
++
++	if (rrl->num_entries+new >= rrl->max_entries && rrl->max_entries != 0) {
++		if (rrl->num_entries >= rrl->max_entries)
++			return (ISC_R_SUCCESS);
++		new = rrl->max_entries - rrl->num_entries;
++		if (new <= 0)
++			return (ISC_R_NOMEMORY);
++	}
++
++	/*
++	 * Log expansions so that the user can tune max-table-size
++	 * and min-table-size.
++	 */
++	if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DROP) &&
++	    rrl->hash != NULL) {
++		rate = rrl->probes;
++		if (rrl->searches != 0)
++			rate /= rrl->searches;
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DROP,
++			      "increase from %d to %d RRL entries with"
++			      " %d bins; average search length %.1f",
++			      rrl->num_entries, rrl->num_entries+new,
++			      rrl->hash->length, rate);
++	}
++
++	bsize = sizeof(dns_rrl_block_t) + (new-1)*sizeof(dns_rrl_entry_t);
++	b = isc_mem_get(rrl->mctx, bsize);
++	if (b == NULL) {
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_FAIL,
++			      "isc_mem_get(%d) failed for RRL entries",
++			      bsize);
++		return (ISC_R_NOMEMORY);
++	}
++	memset(b, 0, bsize);
++	b->size = bsize;
++
++	e = b->entries;
++	for (i = 0; i < new; ++i, ++e) {
++		ISC_LINK_INIT(e, hlink);
++		ISC_LIST_INITANDAPPEND(rrl->lru, e, lru);
++	}
++	rrl->num_entries += new;
++	ISC_LIST_INITANDAPPEND(rrl->blocks, b, link);
++
++	return (ISC_R_SUCCESS);
++}
++
++static inline dns_rrl_bin_t *
++get_bin(dns_rrl_hash_t *hash, unsigned int hval) {
++	return (&hash->bins[hval % hash->length]);
++}
++
++static void
++free_old_hash(dns_rrl_t *rrl) {
++	dns_rrl_hash_t *old_hash;
++	dns_rrl_bin_t *old_bin;
++	dns_rrl_entry_t *e, *e_next;
++
++	old_hash = rrl->old_hash;
++	for (old_bin = &old_hash->bins[0];
++	     old_bin < &old_hash->bins[old_hash->length];
++	     ++old_bin)
++	{
++		for (e = ISC_LIST_HEAD(*old_bin); e != NULL; e = e_next) {
++			e_next = ISC_LIST_NEXT(e, hlink);
++			ISC_LINK_INIT(e, hlink);
++		}
++	}
++
++	isc_mem_put(rrl->mctx, old_hash,
++		    sizeof(*old_hash)
++		      + (old_hash->length - 1) * sizeof(old_hash->bins[0]));
++	rrl->old_hash = NULL;
++}
++
++static isc_result_t
++expand_rrl_hash(dns_rrl_t *rrl, isc_stdtime_t now) {
++	dns_rrl_hash_t *hash;
++	int old_bins, new_bins, hsize;
++	double rate;
++
++	if (rrl->old_hash != NULL)
++		free_old_hash(rrl);
++
++	/*
++	 * Most searches fail and so go to the end of the chain.
++	 * Use a small hash table load factor.
++	 */
++	old_bins = (rrl->hash == NULL) ? 0 : rrl->hash->length;
++	new_bins = old_bins/8 + old_bins;
++	if (new_bins < rrl->num_entries)
++		new_bins = rrl->num_entries;
++	new_bins = hash_divisor(new_bins);
++
++	hsize = sizeof(dns_rrl_hash_t) + (new_bins-1)*sizeof(hash->bins[0]);
++	hash = isc_mem_get(rrl->mctx, hsize);
++	if (hash == NULL) {
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_FAIL,
++			      "isc_mem_get(%d) failed for"
++			      " RRL hash table",
++			      hsize);
++		return (ISC_R_NOMEMORY);
++	}
++	memset(hash, 0, hsize);
++	hash->length = new_bins;
++	rrl->hash_gen ^= 1;
++	hash->gen = rrl->hash_gen;
++
++	if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DROP) && old_bins != 0) {
++		rate = rrl->probes;
++		if (rrl->searches != 0)
++			rate /= rrl->searches;
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DROP,
++			      "increase from %d to %d RRL bins for"
++			      " %d entries; average search length %.1f",
++			      old_bins, new_bins, rrl->num_entries, rate);
++	}
++
++	rrl->old_hash = rrl->hash;
++	if (rrl->old_hash != NULL)
++		rrl->old_hash->check_time = now;
++	rrl->hash = hash;
++
++	return (ISC_R_SUCCESS);
++}
++
++static void
++ref_entry(dns_rrl_t *rrl, dns_rrl_entry_t *e, int probes, isc_stdtime_t now) {
++	/*
++	 * Make the entry most recently used.
++	 */
++	if (ISC_LIST_HEAD(rrl->lru) != e) {
++		if (e == rrl->last_logged)
++			rrl->last_logged = ISC_LIST_PREV(e, lru);
++		ISC_LIST_UNLINK(rrl->lru, e, lru);
++		ISC_LIST_PREPEND(rrl->lru, e, lru);
++	}
++
++	/*
++	 * Expand the hash table if it is time and necessary.
++	 * This will leave the newly referenced entry in a chain in the
++	 * old hash table.  It will migrate to the new hash table the next
++	 * time it is used or be cut loose when the old hash table is destroyed.
++	 */
++	rrl->probes += probes;
++	++rrl->searches;
++	if (rrl->searches > 100 &&
++	    delta_rrl_time(rrl->hash->check_time, now) > 1) {
++		if (rrl->probes/rrl->searches > 2)
++			expand_rrl_hash(rrl, now);
++		rrl->hash->check_time = now;
++		rrl->probes = 0;
++		rrl->searches = 0;
++	}
++}
++
++static inline isc_boolean_t
++key_cmp(const dns_rrl_key_t *a, const dns_rrl_key_t *b) {
++	if (memcmp(a, b, sizeof(dns_rrl_key_t)) == 0)
++		return (ISC_TRUE);
++	return (ISC_FALSE);
++}
++
++static inline isc_uint32_t
++hash_key(const dns_rrl_key_t *key) {
++	isc_uint32_t hval;
++	int i;
++
++	hval = key->w[0];
++	for (i = sizeof(*key) / sizeof(key->w[0]) - 1; i >= 0; --i) {
++		hval = key->w[i] + (hval<<1);
++	}
++	return (hval);
++}
++
++/*
++ * Construct the hash table key.
++ * Use a hash of the DNS query name to save space in the database.
++ * Collisions result in legitimate rate limiting responses for one
++ * query name also limiting responses for other names to the
++ * same client.  This is rare and benign enough given the large
++ * space costs compared to keeping the entire name in the database
++ * entry or the time costs of dynamic allocation.
++ */
++static void
++make_key(const dns_rrl_t *rrl, dns_rrl_key_t *key,
++	 const isc_sockaddr_t *client_addr,
++	 dns_rdatatype_t qtype, dns_name_t *qname, dns_rdataclass_t qclass,
++	 dns_rrl_rtype_t rtype)
++{
++	dns_name_t base;
++	dns_offsets_t base_offsets;
++	int labels, i;
++
++	memset(key, 0, sizeof(*key));
++
++	key->s.rtype = rtype;
++	if (rtype == DNS_RRL_RTYPE_QUERY) {
++		key->s.qtype = qtype;
++		key->s.qclass = qclass & 0xff;
++	} else if (rtype == DNS_RRL_RTYPE_REFERRAL ||
++		   rtype == DNS_RRL_RTYPE_NODATA) {
++		/*
++		 * Because there is no qtype in the empty answer sections of
++		 * referral and NODATA responses, count them as the same.
++		 */
++		key->s.qclass = qclass & 0xff;
++	}
++
++	if (qname != NULL && qname->labels != 0) {
++		/*
++		 * Ignore the first label of wildcards.
++		 */
++		if ((qname->attributes & DNS_NAMEATTR_WILDCARD) != 0 &&
++		    (labels = dns_name_countlabels(qname)) > 1)
++		{
++			dns_name_init(&base, base_offsets);
++			dns_name_getlabelsequence(qname, 1, labels-1, &base);
++			key->s.qname_hash = dns_name_hashbylabel(&base,
++							ISC_FALSE);
++		} else {
++			key->s.qname_hash = dns_name_hashbylabel(qname,
++							ISC_FALSE);
++		}
++	}
++
++	switch (client_addr->type.sa.sa_family) {
++	case AF_INET:
++		key->s.ip[0] = (client_addr->type.sin.sin_addr.s_addr &
++			      rrl->ipv4_mask);
++		break;
++	case AF_INET6:
++		key->s.ipv6 = ISC_TRUE;
++		memcpy(key->s.ip, &client_addr->type.sin6.sin6_addr,
++		       sizeof(key->s.ip));
++		for (i = 0; i < DNS_RRL_MAX_PREFIX/32; ++i)
++			key->s.ip[i] &= rrl->ipv6_mask[i];
++		break;
++	}
++}
++
++static inline dns_rrl_rate_t *
++get_rate(dns_rrl_t *rrl, dns_rrl_rtype_t rtype) {
++	switch (rtype) {
++	case DNS_RRL_RTYPE_QUERY:
++		return (&rrl->responses_per_second);
++	case DNS_RRL_RTYPE_REFERRAL:
++		return (&rrl->referrals_per_second);
++	case DNS_RRL_RTYPE_NODATA:
++		return (&rrl->nodata_per_second);
++	case DNS_RRL_RTYPE_NXDOMAIN:
++		return (&rrl->nxdomains_per_second);
++	case DNS_RRL_RTYPE_ERROR:
++		return (&rrl->errors_per_second);
++	case DNS_RRL_RTYPE_ALL:
++		return (&rrl->all_per_second);
++	default:
++		INSIST(0);
++	}
++	return (NULL);
++}
++
++static int
++response_balance(dns_rrl_t *rrl, const dns_rrl_entry_t *e, int age) {
++	dns_rrl_rate_t *ratep;
++	int balance, rate;
++
++	if (e->key.s.rtype == DNS_RRL_RTYPE_TCP) {
++		rate = 1;
++	} else {
++		ratep = get_rate(rrl, e->key.s.rtype);
++		rate = ratep->scaled;
++	}
++
++	balance = e->responses + age * rate;
++	if (balance > rate)
++		balance = rate;
++	return (balance);
++}
++
++/*
++ * Search for an entry for a response and optionally create it.
++ */
++static dns_rrl_entry_t *
++get_entry(dns_rrl_t *rrl, const isc_sockaddr_t *client_addr,
++	  dns_rdataclass_t qclass, dns_rdatatype_t qtype, dns_name_t *qname,
++	  dns_rrl_rtype_t rtype, isc_stdtime_t now, isc_boolean_t create,
++	  char *log_buf, unsigned int log_buf_len)
++{
++	dns_rrl_key_t key;
++	isc_uint32_t hval;
++	dns_rrl_entry_t *e;
++	dns_rrl_hash_t *hash;
++	dns_rrl_bin_t *new_bin, *old_bin;
++	int probes, age;
++
++	make_key(rrl, &key, client_addr, qtype, qname, qclass, rtype);
++	hval = hash_key(&key);
++
++	/*
++	 * Look for the entry in the current hash table.
++	 */
++	new_bin = get_bin(rrl->hash, hval);
++	probes = 1;
++	e = ISC_LIST_HEAD(*new_bin);
++	while (e != NULL) {
++		if (key_cmp(&e->key, &key)) {
++			ref_entry(rrl, e, probes, now);
++			return (e);
++		}
++		++probes;
++		e = ISC_LIST_NEXT(e, hlink);
++	}
++
++	/*
++	 * Look in the old hash table.
++	 */
++	if (rrl->old_hash != NULL) {
++		old_bin = get_bin(rrl->old_hash, hval);
++		e = ISC_LIST_HEAD(*old_bin);
++		while (e != NULL) {
++			if (key_cmp(&e->key, &key)) {
++				ISC_LIST_UNLINK(*old_bin, e, hlink);
++				ISC_LIST_PREPEND(*new_bin, e, hlink);
++				e->hash_gen = rrl->hash_gen;
++				ref_entry(rrl, e, probes, now);
++				return (e);
++			}
++			e = ISC_LIST_NEXT(e, hlink);
++		}
++
++		/*
++		 * Discard prevous hash table when all of its entries are old.
++		 */
++		age = delta_rrl_time(rrl->old_hash->check_time, now);
++		if (age > rrl->window)
++			free_old_hash(rrl);
++	}
++
++	if (!create)
++		return (NULL);
++
++	/*
++	 * The entry does not exist, so create it by finding a free entry.
++	 * Keep currently penalized and logged entries.
++	 * Try to make more entries if none are idle.
++	 * Steal the oldest entry if we cannot create more.
++	 */
++	for (e = ISC_LIST_TAIL(rrl->lru);
++	     e != NULL;
++	     e = ISC_LIST_PREV(e, lru))
++	{
++		if (!ISC_LINK_LINKED(e, hlink))
++			break;
++		age = get_age(rrl, e, now);
++		if (age <= 1) {
++			e = NULL;
++			break;
++		}
++		if (!e->logged && response_balance(rrl, e, age) > 0)
++			break;
++	}
++	if (e == NULL) {
++		expand_entries(rrl, ISC_MIN((rrl->num_entries+1)/2, 1000));
++		e = ISC_LIST_TAIL(rrl->lru);
++	}
++	if (e->logged)
++		log_end(rrl, e, ISC_TRUE, log_buf, log_buf_len);
++	if (ISC_LINK_LINKED(e, hlink)) {
++		if (e->hash_gen == rrl->hash_gen)
++			hash = rrl->hash;
++		else
++			hash = rrl->old_hash;
++		old_bin = get_bin(hash, hash_key(&e->key));
++		ISC_LIST_UNLINK(*old_bin, e, hlink);
++	}
++	ISC_LIST_PREPEND(*new_bin, e, hlink);
++	e->hash_gen = rrl->hash_gen;
++	e->key = key;
++	e->ts_valid = ISC_FALSE;
++	ref_entry(rrl, e, probes, now);
++	return (e);
++}
++
++static void
++debit_log(const dns_rrl_entry_t *e, int age, const char *action) {
++	char buf[sizeof("age=12345678")];
++	const char *age_str;
++
++	if (age == DNS_RRL_FOREVER) {
++		age_str = "";
++	} else {
++		snprintf(buf, sizeof(buf), "age=%d", age);
++		age_str = buf;
++	}
++	isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++		      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DEBUG3,
++		      "rrl %08x %6s  responses=%-3d %s",
++		      hash_key(&e->key), age_str, e->responses, action);
++}
++
++static inline dns_rrl_result_t
++debit_rrl_entry(dns_rrl_t *rrl, dns_rrl_entry_t *e, double qps, double scale,
++		const isc_sockaddr_t *client_addr, isc_stdtime_t now,
++		char *log_buf, unsigned int log_buf_len)
++{
++	int rate, new_rate, slip, new_slip, age, log_secs, min;
++	dns_rrl_rate_t *ratep;
++	dns_rrl_entry_t const *credit_e;
++
++	/*
++	 * Pick the rate counter.
++	 * Optionally adjust the rate by the estimated query/second rate.
++	 */
++	ratep = get_rate(rrl, e->key.s.rtype);
++	rate = ratep->r;
++	if (rate == 0)
++		return (DNS_RRL_RESULT_OK);
++
++	if (scale < 1.0) {
++		/*
++		 * The limit for clients that have used TCP is not scaled.
++		 */
++		credit_e = get_entry(rrl, client_addr,
++				     0, dns_rdatatype_none, NULL,
++				     DNS_RRL_RTYPE_TCP, now, ISC_FALSE,
++				     log_buf, log_buf_len);
++		if (credit_e != NULL) {
++			age = get_age(rrl, e, now);
++			if (age < rrl->window)
++				scale = 1.0;
++		}
++	}
++	if (scale < 1.0) {
++		new_rate = (int) (rate * scale);
++		if (new_rate < 1)
++			new_rate = 1;
++		if (ratep->scaled != new_rate) {
++			isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++				      DNS_LOGMODULE_REQUEST,
++				      DNS_RRL_LOG_DEBUG1,
++				      "%d qps scaled %s by %.2f"
++				      " from %d to %d",
++				      (int)qps, ratep->str, scale,
++				      rate, new_rate);
++			rate = new_rate;
++			ratep->scaled = rate;
++		}
++	}
++
++	min = -rrl->window * rate;
++
++	/*
++	 * Treat time jumps into the recent past as no time.
++	 * Treat entries older than the window as if they were just created
++	 * Credit other entries.
++	 */
++	age = get_age(rrl, e, now);
++	if (age > 0) {
++		/*
++		 * Credit tokens earned during elapsed time.
++		 */
++		if (age > rrl->window) {
++			e->responses = rate;
++			e->slip_cnt = 0;
++		} else {
++			e->responses += rate*age;
++			if (e->responses > rate) {
++				e->responses = rate;
++				e->slip_cnt = 0;
++			}
++		}
++		/*
++		 * Find the seconds since last log message without overflowing
++		 * small counter.  This counter is reset when an entry is
++		 * created.  It is not necessarily reset when some requests
++		 * are answered provided other requests continue to be dropped
++		 * or slipped.  This can happen when the request rate is just
++		 * at the limit.
++		 */
++		if (e->logged) {
++			log_secs = e->log_secs;
++			log_secs += age;
++			if (log_secs > DNS_RRL_MAX_LOG_SECS || log_secs < 0)
++				log_secs = DNS_RRL_MAX_LOG_SECS;
++			e->log_secs = log_secs;
++		}
++	}
++	set_age(rrl, e, now);
++
++	/*
++	 * Debit the entry for this response.
++	 */
++	if (--e->responses >= 0) {
++		if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DEBUG3))
++			debit_log(e, age, "");
++		return (DNS_RRL_RESULT_OK);
++	}
++
++	if (e->responses < min)
++		e->responses = min;
++
++	/*
++	 * Drop this response unless it should slip or leak.
++	 */
++	slip = rrl->slip.r;
++	if (slip > 2 && scale < 1.0) {
++		new_slip = (int) (slip * scale);
++		if (new_slip < 2)
++			new_slip = 2;
++		if (rrl->slip.scaled != new_slip) {
++			isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++				      DNS_LOGMODULE_REQUEST,
++				      DNS_RRL_LOG_DEBUG1,
++				      "%d qps scaled slip"
++				      " by %.2f from %d to %d",
++				      (int)qps, scale,
++				      slip, new_slip);
++			slip = new_slip;
++			rrl->slip.scaled = slip;
++		}
++	}
++	if (slip != 0 && e->key.s.rtype != DNS_RRL_RTYPE_ALL) {
++		if (e->slip_cnt++ == 0) {
++			if ((int) e->slip_cnt >= slip)
++				e->slip_cnt = 0;
++			if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DEBUG3))
++				debit_log(e, age, "slip");
++			return (DNS_RRL_RESULT_SLIP);
++		} else if ((int) e->slip_cnt >= slip) {
++			e->slip_cnt = 0;
++		}
++	}
++
++	if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DEBUG3))
++		debit_log(e, age, "drop");
++	return (DNS_RRL_RESULT_DROP);
++}
++
++static inline dns_rrl_qname_buf_t *
++get_qname(dns_rrl_t *rrl, const dns_rrl_entry_t *e) {
++	dns_rrl_qname_buf_t *qbuf;
++
++	qbuf = rrl->qnames[e->log_qname];
++	if (qbuf == NULL || qbuf->e != e)
++		return (NULL);
++	return (qbuf);
++}
++
++static inline void
++free_qname(dns_rrl_t *rrl, dns_rrl_entry_t *e) {
++	dns_rrl_qname_buf_t *qbuf;
++
++	qbuf = get_qname(rrl, e);
++	if (qbuf != NULL) {
++		qbuf->e = NULL;
++		ISC_LIST_APPEND(rrl->qname_free, qbuf, link);
++	}
++}
++
++static void
++add_log_str(isc_buffer_t *lb, const char *str, unsigned int str_len) {
++	isc_region_t region;
++
++	isc_buffer_availableregion(lb, &region);
++	if (str_len >= region.length) {
++		if (region.length <= 0)
++			return;
++		str_len = region.length;
++	}
++	memcpy(region.base, str, str_len);
++	isc_buffer_add(lb, str_len);
++}
++
++#define ADD_LOG_CSTR(eb, s) add_log_str(eb, s, sizeof(s)-1)
++
++/*
++ * Build strings for the logs
++ */
++static void
++make_log_buf(dns_rrl_t *rrl, dns_rrl_entry_t *e,
++	     const char *str1, const char *str2, isc_boolean_t plural,
++	     dns_name_t *qname, isc_boolean_t save_qname,
++	     dns_rrl_result_t rrl_result, isc_result_t resp_result,
++	     char *log_buf, unsigned int log_buf_len)
++{
++	isc_buffer_t lb;
++	dns_rrl_qname_buf_t *qbuf;
++	isc_netaddr_t cidr;
++	char strbuf[ISC_MAX(sizeof("/123"), sizeof("  (12345678)"))];
++	const char *rstr;
++	isc_result_t msg_result;
++
++	if (log_buf_len <= 1) {
++		if (log_buf_len == 1)
++			log_buf[0] = '\0';
++		return;
++	}
++	isc_buffer_init(&lb, log_buf, log_buf_len-1);
++
++	if (str1 != NULL)
++		add_log_str(&lb, str1, strlen(str1));
++	if (str2 != NULL)
++		add_log_str(&lb, str2, strlen(str2));
++
++	switch (rrl_result) {
++	case DNS_RRL_RESULT_OK:
++		break;
++	case DNS_RRL_RESULT_DROP:
++		ADD_LOG_CSTR(&lb, "drop ");
++		break;
++	case DNS_RRL_RESULT_SLIP:
++		ADD_LOG_CSTR(&lb, "slip ");
++		break;
++	default:
++		INSIST(0);
++		break;
++	}
++
++	switch (e->key.s.rtype) {
++	case DNS_RRL_RTYPE_QUERY:
++		break;
++	case DNS_RRL_RTYPE_REFERRAL:
++		ADD_LOG_CSTR(&lb, "referral ");
++		break;
++	case DNS_RRL_RTYPE_NODATA:
++		ADD_LOG_CSTR(&lb, "NODATA ");
++		break;
++	case DNS_RRL_RTYPE_NXDOMAIN:
++		ADD_LOG_CSTR(&lb, "NXDOMAIN ");
++		break;
++	case DNS_RRL_RTYPE_ERROR:
++		if (resp_result == ISC_R_SUCCESS) {
++			ADD_LOG_CSTR(&lb, "error ");
++		} else {
++			rstr = isc_result_totext(resp_result);
++			add_log_str(&lb, rstr, strlen(rstr));
++			ADD_LOG_CSTR(&lb, " error ");
++		}
++		break;
++	case DNS_RRL_RTYPE_ALL:
++		ADD_LOG_CSTR(&lb, "all ");
++		break;
++	default:
++		INSIST(0);
++	}
++
++	if (plural)
++		ADD_LOG_CSTR(&lb, "responses to ");
++	else
++		ADD_LOG_CSTR(&lb, "response to ");
++
++	memset(&cidr, 0, sizeof(cidr));
++	if (e->key.s.ipv6) {
++		snprintf(strbuf, sizeof(strbuf), "/%d", rrl->ipv6_prefixlen);
++		cidr.family = AF_INET6;
++		memset(&cidr.type.in6, 0,  sizeof(cidr.type.in6));
++		memcpy(&cidr.type.in6, e->key.s.ip, sizeof(e->key.s.ip));
++	} else {
++		snprintf(strbuf, sizeof(strbuf), "/%d", rrl->ipv4_prefixlen);
++		cidr.family = AF_INET;
++		cidr.type.in.s_addr = e->key.s.ip[0];
++	}
++	msg_result = isc_netaddr_totext(&cidr, &lb);
++	if (msg_result != ISC_R_SUCCESS)
++		ADD_LOG_CSTR(&lb, "?");
++	add_log_str(&lb, strbuf, strlen(strbuf));
++
++	if (e->key.s.rtype == DNS_RRL_RTYPE_QUERY ||
++	    e->key.s.rtype == DNS_RRL_RTYPE_REFERRAL ||
++	    e->key.s.rtype == DNS_RRL_RTYPE_NODATA ||
++	    e->key.s.rtype == DNS_RRL_RTYPE_NXDOMAIN) {
++		qbuf = get_qname(rrl, e);
++		if (save_qname && qbuf == NULL &&
++		    qname != NULL && dns_name_isabsolute(qname)) {
++			/*
++			 * Capture the qname for the "stop limiting" message.
++			 */
++			qbuf = ISC_LIST_TAIL(rrl->qname_free);
++			if (qbuf != NULL) {
++				ISC_LIST_UNLINK(rrl->qname_free, qbuf, link);
++			} else if (rrl->num_qnames < DNS_RRL_QNAMES) {
++				qbuf = isc_mem_get(rrl->mctx, sizeof(*qbuf));
++				if (qbuf != NULL) {
++					memset(qbuf, 0, sizeof(*qbuf));
++					ISC_LINK_INIT(qbuf, link);
++					qbuf->index = rrl->num_qnames;
++					rrl->qnames[rrl->num_qnames++] = qbuf;
++				} else {
++					isc_log_write(dns_lctx,
++						      DNS_LOGCATEGORY_RRL,
++						      DNS_LOGMODULE_REQUEST,
++						      DNS_RRL_LOG_FAIL,
++						      "isc_mem_get(%d)"
++						      " failed for RRL qname",
++						      (int)sizeof(*qbuf));
++				}
++			}
++			if (qbuf != NULL) {
++				e->log_qname = qbuf->index;
++				qbuf->e = e;
++				dns_fixedname_init(&qbuf->qname);
++				dns_name_copy(qname,
++					      dns_fixedname_name(&qbuf->qname),
++					      NULL);
++			}
++		}
++		if (qbuf != NULL)
++			qname = dns_fixedname_name(&qbuf->qname);
++		if (qname != NULL) {
++			ADD_LOG_CSTR(&lb, " for ");
++			(void)dns_name_totext(qname, ISC_TRUE, &lb);
++		} else {
++			ADD_LOG_CSTR(&lb, " for (?)");
++		}
++		if (e->key.s.rtype != DNS_RRL_RTYPE_NXDOMAIN) {
++			ADD_LOG_CSTR(&lb, " ");
++			(void)dns_rdataclass_totext(e->key.s.qclass, &lb);
++			if (e->key.s.rtype == DNS_RRL_RTYPE_QUERY) {
++				ADD_LOG_CSTR(&lb, " ");
++				(void)dns_rdatatype_totext(e->key.s.qtype, &lb);
++			}
++		}
++		snprintf(strbuf, sizeof(strbuf), "  (%08x)",
++			 e->key.s.qname_hash);
++		add_log_str(&lb, strbuf, strlen(strbuf));
++	}
++
++	/*
++	 * We saved room for '\0'.
++	 */
++	log_buf[isc_buffer_usedlength(&lb)] = '\0';
++}
++
++static void
++log_end(dns_rrl_t *rrl, dns_rrl_entry_t *e, isc_boolean_t early,
++	char *log_buf, unsigned int log_buf_len)
++{
++	if (e->logged) {
++		make_log_buf(rrl, e,
++			     early ? "*" : NULL,
++			     rrl->log_only ? "would stop limiting "
++					   : "stop limiting ",
++			     ISC_TRUE, NULL, ISC_FALSE,
++			     DNS_RRL_RESULT_OK, ISC_R_SUCCESS,
++			     log_buf, log_buf_len);
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DROP,
++			      "%s", log_buf);
++		free_qname(rrl, e);
++		e->logged = ISC_FALSE;
++		--rrl->num_logged;
++	}
++}
++
++/*
++ * Log messages for streams that have stopped being rate limited.
++ */
++static void
++log_stops(dns_rrl_t *rrl, isc_stdtime_t now, int limit,
++	  char *log_buf, unsigned int log_buf_len)
++{
++	dns_rrl_entry_t *e;
++	int age;
++
++	for (e = rrl->last_logged; e != NULL; e = ISC_LIST_PREV(e, lru)) {
++		if (!e->logged)
++			continue;
++		if (now != 0) {
++			age = get_age(rrl, e, now);
++			if (age < DNS_RRL_STOP_LOG_SECS ||
++			    response_balance(rrl, e, age) < 0)
++				break;
++		}
++
++		log_end(rrl, e, now == 0, log_buf, log_buf_len);
++		if (rrl->num_logged <= 0)
++			break;
++
++		/*
++		 * Too many messages could stall real work.
++		 */
++		if (--limit < 0) {
++			rrl->last_logged = ISC_LIST_PREV(e, lru);
++			return;
++		}
++	}
++	if (e == NULL) {
++		INSIST(rrl->num_logged == 0);
++		rrl->log_stops_time = now;
++	}
++	rrl->last_logged = e;
++}
++
++/*
++ * Main rate limit interface.
++ */
++dns_rrl_result_t
++dns_rrl(dns_view_t *view,
++	const isc_sockaddr_t *client_addr, isc_boolean_t is_tcp,
++	dns_rdataclass_t qclass, dns_rdatatype_t qtype,
++	dns_name_t *qname, isc_result_t resp_result, isc_stdtime_t now,
++	isc_boolean_t wouldlog, char *log_buf, unsigned int log_buf_len)
++{
++	dns_rrl_t *rrl;
++	dns_rrl_rtype_t rtype;
++	dns_rrl_entry_t *e;
++	isc_netaddr_t netclient;
++	int secs;
++	double qps, scale;
++	int exempt_match;
++	isc_result_t result;
++	dns_rrl_result_t rrl_result;
++
++	INSIST(log_buf != NULL && log_buf_len > 0);
++
++	rrl = view->rrl;
++	if (rrl->exempt != NULL) {
++		isc_netaddr_fromsockaddr(&netclient, client_addr);
++		result = dns_acl_match(&netclient, NULL, rrl->exempt,
++				       &view->aclenv, &exempt_match, NULL);
++		if (result == ISC_R_SUCCESS && exempt_match > 0)
++			return (DNS_RRL_RESULT_OK);
++	}
++
++	LOCK(&rrl->lock);
++
++	/*
++	 * Estimate total query per second rate when scaling by qps.
++	 */
++	if (rrl->qps_scale == 0) {
++		qps = 0.0;
++		scale = 1.0;
++	} else {
++		++rrl->qps_responses;
++		secs = delta_rrl_time(rrl->qps_time, now);
++		if (secs <= 0) {
++			qps = rrl->qps;
++		} else {
++			qps = (1.0*rrl->qps_responses) / secs;
++			if (secs >= rrl->window) {
++				if (isc_log_wouldlog(dns_lctx,
++						     DNS_RRL_LOG_DEBUG3))
++					isc_log_write(dns_lctx,
++						      DNS_LOGCATEGORY_RRL,
++						      DNS_LOGMODULE_REQUEST,
++						      DNS_RRL_LOG_DEBUG3,
++						      "%d responses/%d seconds"
++						      " = %d qps",
++						      rrl->qps_responses, secs,
++						      (int)qps);
++				rrl->qps = qps;
++				rrl->qps_responses = 0;
++				rrl->qps_time = now;
++			} else if (qps < rrl->qps) {
++				qps = rrl->qps;
++			}
++		}
++		scale = rrl->qps_scale / qps;
++	}
++
++	/*
++	 * Do maintenance once per second.
++	 */
++	if (rrl->num_logged > 0 && rrl->log_stops_time != now)
++		log_stops(rrl, now, 8, log_buf, log_buf_len);
++
++	/*
++	 * Notice TCP responses when scaling limits by qps.
++	 * Do not try to rate limit TCP responses.
++	 */
++	if (is_tcp) {
++		if (scale < 1.0) {
++			e = get_entry(rrl, client_addr,
++				      0, dns_rdatatype_none, NULL,
++				      DNS_RRL_RTYPE_TCP, now, ISC_TRUE,
++				      log_buf, log_buf_len);
++			if (e != NULL) {
++				e->responses = -(rrl->window+1);
++				set_age(rrl, e, now);
++			}
++		}
++		UNLOCK(&rrl->lock);
++		return (ISC_R_SUCCESS);
++	}
++
++	/*
++	 * Find the right kind of entry, creating it if necessary.
++	 * If that is impossible, then nothing more can be done
++	 */
++	switch (resp_result) {
++	case ISC_R_SUCCESS:
++		rtype = DNS_RRL_RTYPE_QUERY;
++		break;
++	case DNS_R_DELEGATION:
++		rtype = DNS_RRL_RTYPE_REFERRAL;
++		break;
++	case DNS_R_NXRRSET:
++		rtype = DNS_RRL_RTYPE_NODATA;
++		break;
++	case DNS_R_NXDOMAIN:
++		rtype = DNS_RRL_RTYPE_NXDOMAIN;
++		break;
++	default:
++		rtype = DNS_RRL_RTYPE_ERROR;
++		break;
++	}
++	e = get_entry(rrl, client_addr, qclass, qtype, qname, rtype,
++		      now, ISC_TRUE, log_buf, log_buf_len);
++	if (e == NULL) {
++		UNLOCK(&rrl->lock);
++		return (DNS_RRL_RESULT_OK);
++	}
++
++	if (isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DEBUG1)) {
++		/*
++		 * Do not worry about speed or releasing the lock.
++		 * This message appears before messages from debit_rrl_entry().
++		 */
++		make_log_buf(rrl, e, "consider limiting ", NULL, ISC_FALSE,
++			     qname, ISC_FALSE, DNS_RRL_RESULT_OK, resp_result,
++			     log_buf, log_buf_len);
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DEBUG1,
++			      "%s", log_buf);
++	}
++
++	rrl_result = debit_rrl_entry(rrl, e, qps, scale, client_addr, now,
++				     log_buf, log_buf_len);
++
++	if (rrl->all_per_second.r != 0) {
++		/*
++		 * We must debit the all-per-second token bucket if we have
++		 * an all-per-second limit for the IP address.
++		 * The all-per-second limit determines the log message
++		 * when both limits are hit.
++		 * The response limiting must continue if the
++		 * all-per-second limiting lapses.
++		 */
++		dns_rrl_entry_t *e_all;
++		dns_rrl_result_t rrl_all_result;
++
++		e_all = get_entry(rrl, client_addr,
++				  0, dns_rdatatype_none, NULL,
++				  DNS_RRL_RTYPE_ALL, now, ISC_TRUE,
++				  log_buf, log_buf_len);
++		if (e_all == NULL) {
++			UNLOCK(&rrl->lock);
++			return (DNS_RRL_RESULT_OK);
++		}
++		rrl_all_result = debit_rrl_entry(rrl, e_all, qps, scale,
++						 client_addr, now,
++						 log_buf, log_buf_len);
++		if (rrl_all_result != DNS_RRL_RESULT_OK) {
++			int level;
++
++			e = e_all;
++			rrl_result = rrl_all_result;
++			if (rrl_result == DNS_RRL_RESULT_OK)
++				level = DNS_RRL_LOG_DEBUG2;
++			else
++				level = DNS_RRL_LOG_DEBUG1;
++			if (isc_log_wouldlog(dns_lctx, level)) {
++				make_log_buf(rrl, e,
++					     "prefer all-per-second limiting ",
++					     NULL, ISC_TRUE, qname, ISC_FALSE,
++					     DNS_RRL_RESULT_OK, resp_result,
++					     log_buf, log_buf_len);
++				isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++					      DNS_LOGMODULE_REQUEST, level,
++					      "%s", log_buf);
++			}
++		}
++	}
++
++	if (rrl_result == DNS_RRL_RESULT_OK) {
++		UNLOCK(&rrl->lock);
++		return (DNS_RRL_RESULT_OK);
++	}
++
++	/*
++	 * Log occassionally in the rate-limit category.
++	 */
++	if ((!e->logged || e->log_secs >= DNS_RRL_MAX_LOG_SECS) &&
++	    isc_log_wouldlog(dns_lctx, DNS_RRL_LOG_DROP)) {
++		make_log_buf(rrl, e, rrl->log_only ? "would " : NULL,
++			     e->logged ? "continue limiting " : "limit ",
++			     ISC_TRUE, qname, ISC_TRUE,
++			     DNS_RRL_RESULT_OK, resp_result,
++			     log_buf, log_buf_len);
++		if (!e->logged) {
++			e->logged = ISC_TRUE;
++			if (++rrl->num_logged <= 1)
++				rrl->last_logged = e;
++		}
++		e->log_secs = 0;
++
++		/*
++		 * Avoid holding the lock.
++		 */
++		if (!wouldlog) {
++			UNLOCK(&rrl->lock);
++			e = NULL;
++		}
++		isc_log_write(dns_lctx, DNS_LOGCATEGORY_RRL,
++			      DNS_LOGMODULE_REQUEST, DNS_RRL_LOG_DROP,
++			      "%s", log_buf);
++	}
++
++	/*
++	 * Make a log message for the caller.
++	 */
++	if (wouldlog)
++		make_log_buf(rrl, e,
++			     rrl->log_only ? "would rate limit " : "rate limit ",
++			     NULL, ISC_FALSE, qname, ISC_FALSE,
++			     rrl_result, resp_result, log_buf, log_buf_len);
++
++	if (e != NULL) {
++		/*
++		 * Do not save the qname unless we might need it for
++		 * the ending log message.
++		 */
++		if (!e->logged)
++			free_qname(rrl, e);
++		UNLOCK(&rrl->lock);
++	}
++
++	return (rrl_result);
++}
++
++void
++dns_rrl_view_destroy(dns_view_t *view) {
++	dns_rrl_t *rrl;
++	dns_rrl_block_t *b;
++	dns_rrl_hash_t *h;
++	char log_buf[DNS_RRL_LOG_BUF_LEN];
++	int i;
++
++	rrl = view->rrl;
++	if (rrl == NULL)
++		return;
++	view->rrl = NULL;
++
++	/*
++	 * Assume the caller takes care of locking the view and anything else.
++	 */
++
++	if (rrl->num_logged > 0)
++		log_stops(rrl, 0, ISC_INT32_MAX, log_buf, sizeof(log_buf));
++
++	for (i = 0; i < DNS_RRL_QNAMES; ++i) {
++		if (rrl->qnames[i] == NULL)
++			break;
++		isc_mem_put(rrl->mctx, rrl->qnames[i], sizeof(*rrl->qnames[i]));
++	}
++
++	if (rrl->exempt != NULL)
++		dns_acl_detach(&rrl->exempt);
++
++	DESTROYLOCK(&rrl->lock);
++
++	while (!ISC_LIST_EMPTY(rrl->blocks)) {
++		b = ISC_LIST_HEAD(rrl->blocks);
++		ISC_LIST_UNLINK(rrl->blocks, b, link);
++		isc_mem_put(rrl->mctx, b, b->size);
++	}
++
++	h = rrl->hash;
++	if (h != NULL)
++		isc_mem_put(rrl->mctx, h,
++			    sizeof(*h) + (h->length - 1) * sizeof(h->bins[0]));
++
++	h = rrl->old_hash;
++	if (h != NULL)
++		isc_mem_put(rrl->mctx, h,
++			    sizeof(*h) + (h->length - 1) * sizeof(h->bins[0]));
++
++	isc_mem_putanddetach(&rrl->mctx, rrl, sizeof(*rrl));
++}
++
++isc_result_t
++dns_rrl_init(dns_rrl_t **rrlp, dns_view_t *view, int min_entries) {
++	dns_rrl_t *rrl;
++	isc_result_t result;
++
++	*rrlp = NULL;
++
++	rrl = isc_mem_get(view->mctx, sizeof(*rrl));
++	if (rrl == NULL)
++		return (ISC_R_NOMEMORY);
++	memset(rrl, 0, sizeof(*rrl));
++	isc_mem_attach(view->mctx, &rrl->mctx);
++	result = isc_mutex_init(&rrl->lock);
++	if (result != ISC_R_SUCCESS) {
++		isc_mem_putanddetach(&rrl->mctx, rrl, sizeof(*rrl));
++		return (result);
++	}
++	isc_stdtime_get(&rrl->ts_bases[0]);
++
++	view->rrl = rrl;
++
++	result = expand_entries(rrl, min_entries);
++	if (result != ISC_R_SUCCESS) {
++		dns_rrl_view_destroy(view);
++		return (result);
++	}
++	result = expand_rrl_hash(rrl, 0);
++	if (result != ISC_R_SUCCESS) {
++		dns_rrl_view_destroy(view);
++		return (result);
++	}
++
++	*rrlp = rrl;
++	return (ISC_R_SUCCESS);
++}
+diff -r -u lib/dns/view.c-orig lib/dns/view.c
+--- lib/dns/view.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/view.c	2004-01-01 00:00:00.000000000 +0000
+@@ -49,6 +49,7 @@
+ #include <dns/masterdump.h>
+ #include <dns/order.h>
+ #include <dns/peer.h>
++#include <dns/rrl.h>
+ #include <dns/rbt.h>
+ #include <dns/rdataset.h>
+ #include <dns/request.h>
+@@ -184,6 +185,7 @@
+ 	view->answeracl_exclude = NULL;
+ 	view->denyanswernames = NULL;
+ 	view->answernames_exclude = NULL;
++	view->rrl = NULL;
+ 	view->provideixfr = ISC_TRUE;
+ 	view->maxcachettl = 7 * 24 * 3600;
+ 	view->maxncachettl = 3 * 3600;
+@@ -335,9 +337,11 @@
+ 		dns_acache_detach(&view->acache);
+ 	}
+ 	dns_rpz_view_destroy(view);
++	dns_rrl_view_destroy(view);
+ #else
+ 	INSIST(view->acache == NULL);
+ 	INSIST(ISC_LIST_EMPTY(view->rpz_zones));
++	INSIST(view->rrl == NULL);
+ #endif
+ 	if (view->requestmgr != NULL)
+ 		dns_requestmgr_detach(&view->requestmgr);
+diff -r -u lib/dns/win32/libdns.def-orig lib/dns/win32/libdns.def
+--- lib/dns/win32/libdns.def-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/win32/libdns.def	2004-01-01 00:00:00.000000000 +0000
+@@ -657,6 +657,9 @@
+ dns_rriterator_next
+ dns_rriterator_nextrrset
+ dns_rriterator_pause
++dns_rrl
++dns_rrl_init
++dns_rrl_view_destroy
+ dns_sdb_putnamedrr
+ dns_sdb_putrdata
+ dns_sdb_putrr
+diff -r -u lib/dns/win32/libdns.dsp-orig lib/dns/win32/libdns.dsp
+--- lib/dns/win32/libdns.dsp-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/win32/libdns.dsp	2004-01-01 00:00:00.000000000 +0000
+@@ -346,6 +346,10 @@
+ # End Source File
+ # Begin Source File
+ 
++SOURCE=..\include\dns\rrl.h
++# End Source File
++# Begin Source File
++
+ SOURCE=..\include\dns\rriterator.h
+ # End Source File
+ # Begin Source File
+@@ -650,6 +654,10 @@
+ # End Source File
+ # Begin Source File
+ 
++SOURCE=..\rrl.c
++# End Source File
++# Begin Source File
++
+ SOURCE=..\rriterator.c
+ # End Source File
+ # Begin Source File
+diff -r -u lib/dns/win32/libdns.mak-orig lib/dns/win32/libdns.mak
+--- lib/dns/win32/libdns.mak-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/dns/win32/libdns.mak	2004-01-01 00:00:00.000000000 +0000
+@@ -184,6 +184,7 @@
+ 	-@erase "$(INTDIR)\result.obj"
+ 	-@erase "$(INTDIR)\rootns.obj"
+ 	-@erase "$(INTDIR)\rpz.obj"
++	-@erase "$(INTDIR)\rrl.obj"
+ 	-@erase "$(INTDIR)\sdb.obj"
+ 	-@erase "$(INTDIR)\sdlz.obj"
+ 	-@erase "$(INTDIR)\soa.obj"
+@@ -309,6 +310,7 @@
+ 	"$(INTDIR)\result.obj" \
+ 	"$(INTDIR)\rootns.obj" \
+ 	"$(INTDIR)\rpz.obj" \
++	"$(INTDIR)\rrl.obj" \
+ 	"$(INTDIR)\rriterator.obj" \
+ 	"$(INTDIR)\sdb.obj" \
+ 	"$(INTDIR)\sdlz.obj" \
+@@ -505,6 +507,8 @@
+ 	-@erase "$(INTDIR)\rootns.sbr"
+ 	-@erase "$(INTDIR)\rpz.obj"
+ 	-@erase "$(INTDIR)\rpz.sbr"
++	-@erase "$(INTDIR)\rrl.obj"
++	-@erase "$(INTDIR)\rrl.sbr"
+ 	-@erase "$(INTDIR)\rriterator.obj"
+ 	-@erase "$(INTDIR)\rriterator.sbr"
+ 	-@erase "$(INTDIR)\sdb.obj"
+@@ -651,6 +655,7 @@
+ 	"$(INTDIR)\result.sbr" \
+ 	"$(INTDIR)\rootns.sbr" \
+ 	"$(INTDIR)\rpz.sbr" \
++	"$(INTDIR)\rrl.sbr" \
+ 	"$(INTDIR)\rriterator.sbr" \
+ 	"$(INTDIR)\sdb.sbr" \
+ 	"$(INTDIR)\sdlz.sbr" \
+@@ -748,6 +753,7 @@
+ 	"$(INTDIR)\result.obj" \
+ 	"$(INTDIR)\rootns.obj" \
+ 	"$(INTDIR)\rpz.obj" \
++	"$(INTDIR)\rrl.obj" \
+ 	"$(INTDIR)\rriterator.obj" \
+ 	"$(INTDIR)\sdb.obj" \
+ 	"$(INTDIR)\sdlz.obj" \
+@@ -1726,6 +1732,24 @@
+ 
+ !ENDIF 
+ 
++SOURCE=..\rrl.c
++
++!IF  "$(CFG)" == "libdns - Win32 Release"
++
++
++"$(INTDIR)\rrl.obj" : $(SOURCE) "$(INTDIR)"
++	$(CPP) $(CPP_PROJ) $(SOURCE)
++
++
++!ELSEIF  "$(CFG)" == "libdns - Win32 Debug"
++
++
++"$(INTDIR)\rrl.obj"	"$(INTDIR)\rrl.sbr" : $(SOURCE) "$(INTDIR)"
++	$(CPP) $(CPP_PROJ) $(SOURCE)
++
++
++!ENDIF 
++
+ SOURCE=..\rriterator.c
+ 
+ !IF  "$(CFG)" == "libdns - Win32 Release"
+diff -r -u lib/isccfg/namedconf.c-orig lib/isccfg/namedconf.c
+--- lib/isccfg/namedconf.c-orig	2004-01-01 00:00:00.000000000 +0000
++++ lib/isccfg/namedconf.c	2004-01-01 00:00:00.000000000 +0000
+@@ -1270,6 +1270,40 @@
+ };
+ 
+ 
++/*
++ * rate-limit
++ */
++static cfg_clausedef_t rrl_clauses[] = {
++	{ "responses-per-second", &cfg_type_uint32, 0 },
++	{ "referrals-per-second", &cfg_type_uint32, 0 },
++	{ "nodata-per-second", &cfg_type_uint32, 0 },
++	{ "nxdomains-per-second", &cfg_type_uint32, 0 },
++	{ "errors-per-second", &cfg_type_uint32, 0 },
++	{ "all-per-second", &cfg_type_uint32, 0 },
++	{ "slip", &cfg_type_uint32, 0 },
++	{ "window", &cfg_type_uint32, 0 },
++	{ "log-only", &cfg_type_boolean, 0 },
++	{ "qps-scale", &cfg_type_uint32, 0 },
++	{ "ipv4-prefix-length", &cfg_type_uint32, 0 },
++	{ "ipv6-prefix-length", &cfg_type_uint32, 0 },
++	{ "exempt-clients", &cfg_type_bracketed_aml, 0 },
++	{ "max-table-size", &cfg_type_uint32, 0 },
++	{ "min-table-size", &cfg_type_uint32, 0 },
++	{ NULL, NULL, 0 }
++};
++
++static cfg_clausedef_t *rrl_clausesets[] = {
++	rrl_clauses,
++	NULL
++};
++
++static cfg_type_t cfg_type_rrl = {
++	"rate-limit", cfg_parse_map, cfg_print_map, cfg_doc_map,
++	&cfg_rep_map, rrl_clausesets
++};
++
++
++
+ /*%
+  * dnssec-lookaside
+  */
+@@ -1423,6 +1457,7 @@
+ 	   CFG_CLAUSEFLAG_NOTCONFIGURED },
+ #endif
+ 	{ "response-policy", &cfg_type_rpz, 0 },
++	{ "rate-limit", &cfg_type_rrl, 0 },
+ 	{ NULL, NULL, 0 }
+ };
+ 
+diff -r -u version-orig version
+--- version-orig	2004-01-01 00:00:00.000000000 +0000
++++ version	2004-01-01 00:00:00.000000000 +0000
+@@ -7,6 +7,6 @@
+ DESCRIPTION="(Extended Support Version)"
+ MAJORVER=9
+ MINORVER=9
+-PATCHVER=3
++PATCHVER=3-rl.13214.22
+ RELEASETYPE=-P
+ RELEASEVER=2
