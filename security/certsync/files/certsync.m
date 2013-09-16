@@ -260,7 +260,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         if (subject == NULL) {
             nsfprintf(stderr, @"Failed to extract certificate description: %@\n", cferror);
         } else {
-            nsfprintf(stderr, @"Extracting %@\n", subject);
+            nsfprintf(stderr, @"Found %@\n", subject);
         }
     }
     
@@ -270,6 +270,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     CFDataRef pemData;
     
     /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7. We use an ifdef to keep the code buildable with earlier SDKs, too. */
+    nsfprintf(stderr, @"Exporting certificates from the keychain\n");
 #if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_6
     if (SecItemExport != NULL) {
         err = SecItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
@@ -287,6 +288,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         return EXIT_FAILURE;
     }
 
+    nsfprintf(stderr, @"Writing exported certificates\n");
     if (outputFile == nil) {
         NSString *str = [[[NSString alloc] initWithData: (NSData *) pemData encoding:NSUTF8StringEncoding] autorelease];
         nsfprintf(stdout, @"%@", str);
