@@ -128,7 +128,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             }
         }
 
-        if {$subport == $name} {
+        if {$subport eq $name} {
             perl5.major
             distfiles
             supported_archs noarch
@@ -144,7 +144,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     } else {
         depends_lib port:perl${perl5.default_branch}
     }
-    if {![string match p5-* $name] || $subport != $name} {
+    if {![string match p5-* $name] || $subport ne $name} {
         configure.cmd       ${perl5.bin}
         configure.env       PERL_AUTOINSTALL=--skipdeps
         configure.pre_args  Makefile.PL
@@ -187,7 +187,7 @@ proc perl5.setup {module vers {cpandir ""}} {
 proc perl5.use_module_build {} {
     global perl5.bin destroot perl5.major
 
-    if {${perl5.major} == ""} {
+    if {${perl5.major} eq ""} {
         return
     }
 
