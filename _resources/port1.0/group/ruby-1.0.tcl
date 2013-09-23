@@ -132,12 +132,14 @@ default ruby.branch         ${ruby.default_branch}
 # basic variables, like ruby.lib and ruby.archlib.
 proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {implementation "ruby"}} {
     global destroot prefix worksrcpath os.platform
-    global ruby.bin ruby.rdoc ruby.gem
+    global ruby.bin ruby.rdoc ruby.gem ruby.branch
     global ruby.api_version ruby.lib ruby.suffix ruby.bindir ruby.gemdir
     global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
     global ruby.link_binaries_suffix
     # ruby.version is obsoleted. use ruby.gemdir.
     global ruby.prog_suffix
+    # from muniversal
+    global universal_archs_supported merger_configure_env
 
     if {${implementation} eq "ruby19"} {
         ruby.branch 1.9
@@ -352,6 +354,16 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             build.args          RUBY="${ruby.bin}"
 
             destroot.args       RUBY="${ruby.bin}"
+
+            # extconf.rb|mkmf.rb of ruby-1.8 does not support universal binary.
+            # to build universal extentions, write "Portgrourp muniversal 1.0" in the Portfile.
+            if {[variant_isset universal] && (${ruby.branch} eq "1.8") && [info exists universal_archs_supported]} {
+                foreach arch ${universal_archs_supported} {
+                    lappend merger_configure_env(${arch}) \
+                        ARCHPREFERENCE=ruby${ruby.branch}:${arch}
+                }
+                configure.cmd   /usr/bin/arch ${ruby.bin} extconf.rb
+            }
             post-destroot {
                 foreach file [readdir ${destroot}${prefix}/bin] {
                     move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
