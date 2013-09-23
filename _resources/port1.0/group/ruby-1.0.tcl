@@ -126,6 +126,12 @@ set ruby.srcdir         ""
 options ruby.link_binaries
 default ruby.link_binaries yes
 
+# detect setup.rb config option name of --rubyprog.
+# some setup.rb accepts this option by other name, such as --ruby-prog.
+# NOTE: set the value *before ruby.setup* to use ohter name.
+options ruby.config_rubyprog_name
+default ruby.config_rubyprog_name --rubyprog
+
 default ruby.branch         ${ruby.default_branch}
 
 # ruby group setup procedure; optional for ruby 1.8 if you want only
@@ -139,7 +145,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     # ruby.version is obsoleted. use ruby.gemdir.
     global ruby.prog_suffix
     # from muniversal
-    global universal_archs_supported merger_configure_env
+    global universal_archs_supported
+    global merger_configure_env merger_build_env merger_destroot_env
+    # for setup.rb +universal
+    global ruby.config_rubyprog_name
 
     if {${implementation} eq "ruby19"} {
         ruby.branch 1.9
@@ -328,18 +337,49 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             build.target        setup
 
             pre-destroot {
-                if {[file isfile ${worksrcpath}/config.save]} {
-                    reinplace "s|${prefix}|${destroot}${prefix}|g" \
-                        ${worksrcpath}/config.save
-                }
-                if {[file isfile ${worksrcpath}/.config]} {
-                    reinplace "s|${prefix}|${destroot}${prefix}|g" \
-                        ${worksrcpath}/.config
+                foreach conf {config.save .config} {
+                    if {[file isfile ${worksrcpath}/${conf}]} {
+                        reinplace "s|${prefix}|${destroot}${prefix}|g" \
+                            ${worksrcpath}/${conf}
+                    }
+                    if {[variant_isset universal]  && [info exists universal_archs_supported]} {
+                        foreach arch ${universal_archs_supported} {
+                            if {[file isfile ${worksrcpath}-${arch}/${conf}]} {
+                                reinplace "s|${prefix}|${destroot}-${arch}${prefix}|g" \
+                                    ${worksrcpath}-${arch}/${conf}
+                            }
+                        }
+                    }
                 }
             }
             destroot.cmd        ${ruby.bin} -rvendor-specific setup.rb
             destroot.target     install
             destroot.destdir
+            # extconf.rb|mkmf.rb of ruby-1.8 does not support universal binary.
+            # to build universal extentions, write "Portgrourp muniversal 1.0" in the Portfile.
+            if {[variant_isset universal] && (${ruby.branch} eq "1.8") && [info exists universal_archs_supported]} {
+                # generate wrapper for --rubyprog option
+                pre-configure {
+                    set fo [open ${worksrcpath}/_mp_arch_ruby w]
+                    puts $fo "#!/bin/sh"
+                    puts $fo "/usr/bin/arch ${ruby.bin} \$@"
+                    close $fo
+                    system "chmod +x ${worksrcpath}/_mp_arch_ruby"
+                }
+                configure.args-append \
+                    ${ruby.config_rubyprog_name}=${worksrcpath}/_mp_arch_ruby
+                foreach arch ${universal_archs_supported} {
+                    lappend merger_configure_env(${arch}) \
+                        ARCHPREFERENCE=ruby${ruby.branch}:${arch}
+                    lappend merger_build_env(${arch}) \
+                        ARCHPREFERENCE=ruby${ruby.branch}:${arch}
+                    lappend merger_destroot_env(${arch}) \
+                        ARCHPREFERENCE=ruby${ruby.branch}:${arch}
+                }
+                configure.cmd   /usr/bin/arch ${ruby.bin} -rvendor-specific setup.rb
+                build.cmd       /usr/bin/arch ${ruby.bin} -rvendor-specific setup.rb
+                destroot.cmd    /usr/bin/arch ${ruby.bin} -rvendor-specific setup.rb
+            }
             post-destroot {
                 foreach file [readdir ${destroot}${prefix}/bin] {
                     move [file join ${destroot}${prefix}/bin $file] ${destroot}${ruby.bindir}
