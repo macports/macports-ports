@@ -366,7 +366,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                     close $fo
                     system "chmod +x ${worksrcpath}/_mp_arch_ruby"
                 }
-                configure.args-append \
+                configure.pre_args-append \
                     ${ruby.config_rubyprog_name}=${worksrcpath}/_mp_arch_ruby
                 foreach arch ${universal_archs_supported} {
                     lappend merger_configure_env(${arch}) \
