@@ -2,10 +2,11 @@
 # $Id$
 
 PortSystem          1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 name                VLC
-version             2.0.8
-revision            2
+version             2.1.0
+revision            0
 categories          multimedia
 
 maintainers         jeremyhu openmaintainer
@@ -22,23 +23,25 @@ conflicts           VLC-devel
 
 homepage            http://www.videolan.org
 
+# http://git.videolan.org/?p=vlc.git
 # http://git.videolan.org/?p=vlc.git;a=forks
 #fetch.type      git
-#git.url         git://git.videolan.org/vlc/vlc-2.0.git
-#git.branch      a4e92ec8b5ed0cd01478111a80c8f2be19503e92
+#git.url         git://git.videolan.org/vlc/vlc-2.1.git
+#git.url         git://git.videolan.org/vlc.git
+#git.branch      edd88358218f273fddde646a172a2104796d46c2
 
 master_sites        http://download.videolan.org/pub/videolan/vlc/${version}/
 distname            vlc-${version}
 use_xz              yes
 
-checksums           md5     6445eb55aa087f30abe27423535e1ab8 \
-                    sha1    8937ed30412bef49db77d2187a9e4734866f8ab7 \
-                    rmd160  cd2483e4447b8bc4a91dbcf95ff1213244dcf40f
+checksums           md5     8c77bda671821f5b9ede96b6816e2ade \
+                    sha1    f6bdf3971f764a9a192f44e4b6363ac482919dc2 \
+                    rmd160  b8f3240eb6941d3eb4b2fc21c8b279b80f4cd026
 
 depends_build   port:pkgconfig
 
 depends_lib     port:lame port:a52dec port:libogg port:flac \
-                port:libdca port:libcddb port:libcdio port:libmad \
+                port:libdca port:libcddb port:libcdio port:libgcrypt port:libmad \
                 port:libopus port:libvorbis port:libmatroska port:libid3tag \
                 port:ncurses port:lua port:libpng port:jpeg port:tiff port:libebml \
                 port:gnutls port:taglib port:libxml2 port:faad2 \
@@ -48,11 +51,17 @@ depends_lib     port:lame port:a52dec port:libogg port:flac \
                 port:avahi path:lib/libavcodec.dylib:ffmpeg \
                 port:openjpeg15 port:libbluray port:libgcrypt
 
-# TODO: port:live555
+# TODO: live555 opencv FreeRDP
+
+# VLC-2.1 and later are x86_64-only: https://trac.videolan.org/vlc/ticket/8161
+universal_variant   no
+supported_archs x86_64
+
+compiler.blacklist gcc-4.2 llvm-gcc-4.2 {clang < 300}
 
 pre-fetch {
-    if {"darwin" == ${os.platform} && ${os.major} < 9} {
-        ui_error "${name} ${version} requires Mac OS X 10.5 or greater."
+    if {"darwin" == ${os.platform} && ${os.major} < 10} {
+        ui_error "${name} ${version} requires Mac OS X 10.6 or greater."
         return -code error "incompatible Mac OS X version"
     }
 }
@@ -61,7 +70,9 @@ patchfiles \
     buildfix-package.mak.patch \
     configure.ac-no-arch.patch \
     PR-34741-no__clang_version__.patch \
+    class_struct.patch \
     qtkit.patch \
+    static_assert.patch \
     no-sparkle.patch
 
 post-patch {
@@ -74,13 +85,13 @@ pre-configure {
 }
 
 use_autoreconf yes
-autoreconf.args -fvi
+autoreconf.args -fi
 
 configure.env-append CXXCPP="${configure.cxx} -E"
 build.args-append    DESTDIR=${worksrcpath}/dest_ignore
 
-# Fix a build error in modules/lua due to deprecated functionality
-configure.cppflags-append -DLUA_COMPAT_ALL
+# gl.c:121:3: error: Platform not recognized.
+configure.cppflags-append -D__unix__=1
 
 build.target    all
 destroot.target install
@@ -88,17 +99,8 @@ destroot.target install
 livecheck.url   http://download.videolan.org/pub/videolan/vlc/
 livecheck.regex <a href=\"(\\d\[\\d|\.|\\w\]+).*/\">
 
-# live555 and possibly others are not universal, so disabling for now
-universal_variant   no
-
-# Older gcc fail at register allocation
-if {[lsearch [get_canonical_archs] i386] != -1} {
-    compiler.blacklist gcc-4.0 gcc-4.2 llvm-gcc-4.2 apple-gcc-4.2 macports-llvm-gcc-4.2
-}
-
 # Other
 configure.args-append \
-    --with-macosx-version-min=$macosx_deployment_target \
     --with-contrib=${worksrcpath}/contrib \
     --disable-debug --disable-update-check --enable-gnutls \
     --disable-notify --disable-telepathy --disable-dbus \
@@ -106,9 +108,12 @@ configure.args-append \
     --enable-libproxy --enable-lua
 
 # Input Plugins
+# build fails when FreeRDP is installed
+# build fails when opencv is installed
 configure.args-append \
     --enable-dvdnav --enable-dvdread --disable-smb --disable-vcdx \
     --disable-macosx-qtkit --disable-macosx-eyetv --disable-realrtsp \
+    --disable-libfreerdp --disable-opencv \
     --enable-sftp
 
 # Mux/Demux Plugins
@@ -158,11 +163,6 @@ variant jack description {Enable jack plugin for audio output} {
 variant qtkit description {Enable qtcapture and qtaudio} {
     configure.args-delete   --disable-macosx-qtkit
     configure.args-append   --enable-macosx-qtkit
-
-    if {${os.major} < 10} {
-        ui_error "The +qtkit variant requires Snow Leopard or greater"
-        return -code error "incompatible Mac OS X version"
-    }
 }
 
 variant eyetv description {Enable eyetv plugin} {
@@ -281,14 +281,7 @@ variant full \
     description {Enable all variants} {}
 
 platform macosx {
-    if {${os.major} > 9} {
-        default_variants-append +qtkit
-    }
-
-    if {${os.major} == 9} {
-        # FIXME: x86_64 segfaults on Leopard on dlclose() ... not sure why
-        supported_archs i386 ppc
-    }
+    default_variants-append +qtkit
 
     configure.args-delete \
         --disable-macosx-vout --disable-macosx-audio \
@@ -303,6 +296,7 @@ platform macosx {
     }
 
     post-patch {
+        reinplace "s/Appkit/AppKit/" ${worksrcpath}/configure.ac
         reinplace "/Sparkle.framework/d" \
             ${worksrcpath}/extras/package/macosx/vlc.xcodeproj/project.pbxproj 
         reinplace "/SDKROOT/d" \
@@ -315,11 +309,11 @@ platform macosx {
 
         reinplace "/argv/s/environ/*_NSGetEnviron()/" \
             ${worksrcpath}/modules/misc/inhibit/xdg.c \
-            ${worksrcpath}/modules/misc/inhibit/xscreensaver.c
+            ${worksrcpath}/modules/stream_filter/decomp.c
 
         reinplace "s/extern char \\*\\*environ;/#include <crt_externs.h>/" \
             ${worksrcpath}/modules/misc/inhibit/xdg.c \
-            ${worksrcpath}/modules/misc/inhibit/xscreensaver.c
+            ${worksrcpath}/modules/stream_filter/decomp.c
 
         ln -s ${frameworks_dir}/BGHUDAppKit.framework ${worksrcpath}/contrib/BGHUDAppKit.framework
 
