@@ -13,7 +13,7 @@ PORTFILES =
 	# gtk
 	%w[rb-glib2 rb-atk rb-pango rb-gtk2] +
 	# gnome modules
-	%w[rb-rsvg rb-poppler rb-vte rb-gtksourceview2] +
+	%w[rb-rsvg rb-poppler rb-gtksourceview2] +
 	# experimental
 	%w[rb-gstreamer]
 	# deprecated: after 1.0.0, the bellow modules are not contained
