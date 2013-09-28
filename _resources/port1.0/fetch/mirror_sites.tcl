@@ -428,16 +428,16 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://freefr.dl.sourceforge.net/
     http://garr.dl.sourceforge.net/
     http://heanet.dl.sourceforge.net/
-    http://ignum.dl.sourceforge.net/
+    http://hivelocity.dl.sourceforge.net/
     http://internode.dl.sourceforge.net/
-    http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
+    http://kent.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
+    http://optimate.dl.sourceforge.net/
+    http://softlayer-dal.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
-    http://superb-dca3.dl.sourceforge.net/
     http://switch.dl.sourceforge.net/
-    http://tenet.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
     http://waix.dl.sourceforge.net/
 }
