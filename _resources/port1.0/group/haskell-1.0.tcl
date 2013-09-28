@@ -53,7 +53,7 @@ array set haskell.compiler_configuration {
 proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
     global haskell.compiler_list
     global haskell.compiler_configuration
-    global homepage prefix configure.cmd destroot worksrcpath name master_sites configure.cc
+    global homepage prefix configure.cmd destroot worksrcpath name master_sites configure.cc extract.suffix
 
     if {![info exists haskell.compiler_configuration($compiler)]} {
         return -code error "Compiler ${compiler} not currently supported"
@@ -63,7 +63,7 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
     version             ${version}
     categories          devel haskell
     homepage            http://hackage.haskell.org/package/${package}
-    master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
+    master_sites        http://hackage.haskell.org/package/${package}-${version}
     distname            ${package}-${version}
     depends_lib         port:${compiler_config(port)}
     configure.cmd       runhaskell
@@ -97,8 +97,8 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
 	}
 
     livecheck.type      regex
-    livecheck.url       http://hackage.haskell.org/cgi-bin/hackage-scripts/package/${package}
-    livecheck.regex     /packages/archive/${package}/.*/${package}-(.*)\.tar\.gz
+    livecheck.url       http://hackage.haskell.org/package/${package}
+    livecheck.regex     "/package/[quotemeta ${package}]-\[^/\]+/[quotemeta ${package}]-(\[^\"\]+)[quotemeta ${extract.suffix}]"
 
     universal_variant   no
 }
