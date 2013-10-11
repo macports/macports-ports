@@ -56,7 +56,7 @@ proc handle_tarball_from {option action args} {
 
     # keeping the default at tags like many portfiles already do
     # the port writer can set github.tarball_from to "downloads" and have the URI path accordingly changed
-    if {[string equal ${action} "set"] && $args == "downloads"} {
+    if {${action} eq "set" && $args eq "downloads"} {
         github.tarball_from ${args}
         github.master_sites https://github.com/downloads/${github.author}/${github.project}
     }
@@ -79,20 +79,27 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     fetch.ignore_sslcert    yes
 
     post-extract {
-        if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && \
-            ${master_sites} == ${github.master_sites} && [llength ${distfiles}] > 0 && \
-            [llength [glob -nocomplain ${workpath}/*]] > 0} {
+        if {![file exists ${worksrcpath}] && \
+                ${fetch.type} eq "standard" && \
+                ${master_sites} eq ${github.master_sites} && \
+                [llength ${distfiles}] > 0 && \
+                [llength [glob -nocomplain ${workpath}/*]] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
 
-    if {[join ${github.tag_prefix}] == "" && [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
+    # If the "commit" string from start to end is in [0-9a-f] to at
+    # least 9 characters, and no tag is provided, then assume doing
+    # commits type livecheck; else tags type.
+
+    if {[join ${github.tag_prefix}] eq "" && \
+        [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
         github.livecheck_type commits
     } else {
         github.livecheck_type tags
     }
 
-    if {[string equal ${github.livecheck_type} "commits"]} {
+    if {${github.livecheck_type} eq "commits"} {
         livecheck.type          regexm
         livecheck.url           ${github.homepage}/commits/master.atom
         livecheck.version       ${github.version}
