@@ -153,8 +153,13 @@ proc perl5.setup {module vers {cpandir ""}} {
         # CCFLAGS can be passed in to "configure" but it's not necessarily inherited.
         # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how).
         post-configure {
-            system "find ${worksrcpath} -name Makefile -type f -print0 | xargs -0 /usr/bin/sed -i \"\" '/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/' \;"
-            system "find ${worksrcpath} -name Makefile -type f -print0 | xargs -0 /usr/bin/sed -i \"\" '/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/'"
+            fs-traverse file ${configure.dir} {
+                if {[file isfile ${file}] && [file tail ${file}] eq "Makefile"} {
+                    ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
+                    reinplace "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
+                    reinplace "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
+                }
+            }
         }
 
         test.run            yes
@@ -163,8 +168,8 @@ proc perl5.setup {module vers {cpandir ""}} {
 
         post-destroot {
             fs-traverse file ${destroot}${perl5.lib} {
-                if {[file tail ${file}] eq ".packlist"} {
-                    ui_info "Fixing packlist ${file}"
+                if {[file isfile ${file}] && [file tail ${file}] eq ".packlist"} {
+                    ui_info "Fixing paths in [string map "${destroot}${perl5.lib}/ {}" ${file}]"
                     reinplace -n "s|${destroot}||p" ${file}
                 }
             }
