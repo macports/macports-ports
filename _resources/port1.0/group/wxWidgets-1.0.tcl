@@ -87,11 +87,11 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxgtk-2.8"
     } elseif {${args} == "wxGTK-3.0"} {
         wxWidgets.name      "wxGTK"
-        wxWidgets.version   "2.9"
+        wxWidgets.version   "3.0"
         wxWidgets.port      "wxgtk-3.0"
     } elseif {${args} == "wxWidgets-3.0"} {
         wxWidgets.name      "wxWidgets"
-        wxWidgets.version   "2.9"
+        wxWidgets.version   "3.0"
         wxWidgets.port      "wxWidgets-3.0"
         if {${os.major} < 9} {
             pre-fetch {
