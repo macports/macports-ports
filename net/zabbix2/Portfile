@@ -4,7 +4,8 @@
 PortSystem          1.0
 
 name                zabbix2
-version             2.0.7
+version             2.0.9
+revision            0
 categories          net
 maintainers         nomaintainer
 platforms           darwin
@@ -25,8 +26,9 @@ livecheck.regex     "zabbix-(\[0-9.\]+\.\[0-9.\]+)\.tar"
 homepage            http://www.zabbix.com/
 master_sites        sourceforge:project/zabbix/ZABBIX%20Latest%20Stable/${version}
 
-checksums           rmd160  413ea8ac5e055c70c84954359e7c5a02ecc6444b \
-                    sha256  9082f70cdf2dcd98f63a248396b9a230b844ec62691b3c635a50d7a230c92a90
+checksums \
+    rmd160  1bb0ed7e4dcb74793d7b96ad165fdd3b2d991272 \
+    sha256  d5ef1ea94f6f09992a7f1f6fb9b58f99c3bca6196c5454ad29fa63c03996ee14
 
 universal_variant   no
 
@@ -61,7 +63,13 @@ if { ${name} ne ${subport} } {
     configure.args-append   --enable-agent
 } else {
     depends_lib-append      port:fping \
-                            port:curl
+                            port:curl \
+                            port:apache2 \
+                            port:php5 \
+                            port:php5-gd \
+                            port:php5-gettext \
+                            port:php5-mbstring \
+                            port:php5-sockets
 
     configure.args-append   --enable-server \
                             --with-libcurl=${prefix}/bin/curl-config \
@@ -71,36 +79,66 @@ if { ${name} ne ${subport} } {
     startupitem.start       "${prefix}/share/zabbix/zabbix_server.init start"
     startupitem.stop        "${prefix}/share/zabbix/zabbix_server.init stop"
 
+    variant full_server description {
+        Adds dependencies a complete server are installed.
+    } {
+    }
+    
+    # Items are "display name" "port name" "config arg" "php interface"
     array set DBLIST {
-        mysql5  {"MySQL 5.x"            path:bin/mysql_config5:mysql5 \
-                 mysql=${prefix}/lib/mysql5/bin/mysql_config}
-        pgsql81 {"PostgreSQL 8.1.x"     port:postgresql81 \
-                 pgsql=${prefix}/lib/postgresql81/bin/pg_config}
-        pgsql82 {"PostgreSQL 8.2.x"     port:postgresql82 \
-                 pgsql=${prefix}/lib/postgresql82/bin/pg_config}
-        pgsql83 {"PostgreSQL 8.3.x"     port:postgresql83 \
-                 pgsql=${prefix}/lib/postgresql83/bin/pg_config}
-        pgsql84 {"PostgreSQL 8.4.x"     port:postgresql84 \
-                 pgsql=${prefix}/lib/postgresql84/bin/pg_config}
-        sqlite3 {"SQLite 3.x"           port:sqlite3 \
-                 sqlite3=${prefix}}
+        mysql5  {"MySQL 5.x"            mysql5 \
+                 mysql=${prefix}/lib/mysql5/bin/mysql_config mysql}
+        mysql51 {"MySQL 5.1"            mysql51 \
+                 mysql=${prefix}/lib/mysql51/bin/mysql_config mysql}
+        mysql55 {"MySQL 5.5"            mysql55 \
+                 mysql=${prefix}/lib/mysql55/bin/mysql_config mysql}
+        mariadb {"MariaDB"              mariadb \
+                 mysql=${prefix}/lib/mariadb/bin/mysql_config mysql}
+        pgsql81 {"PostgreSQL 8.1.x"     postgresql81 \
+                 pgsql=${prefix}/lib/postgresql81/bin/pg_config postgresql}
+        pgsql82 {"PostgreSQL 8.2.x"     postgresql82 \
+                 pgsql=${prefix}/lib/postgresql82/bin/pg_config postgresql}
+        pgsql83 {"PostgreSQL 8.3.x"     postgresql83 \
+                 pgsql=${prefix}/lib/postgresql83/bin/pg_config postgresql}
+        pgsql84 {"PostgreSQL 8.4.x"     postgresql84 \
+                 pgsql=${prefix}/lib/postgresql84/bin/pg_config postgresql}
+        sqlite3 {"SQLite 3.x"           sqlite3 \
+                 sqlite3=${prefix} sqlite}
     }
     set DBLIST_KEYS [lsort [array names DBLIST]]
-
     foreach dbitem $DBLIST_KEYS {
-        set this_key [lsearch $DBLIST_KEYS $dbitem]
+        set this_key [lsearch -exact $DBLIST_KEYS $dbitem]
         set conf_list [lreplace $DBLIST_KEYS $this_key $this_key]
         set prms $DBLIST($dbitem)
+        
+        set variant_line {variant $dbitem description \
+          "Use [lindex ${prms} 0] for server database" }
 
-        variant $dbitem \
-            description "Use [lindex $prms 0] for server database" \
-            conflicts $conf_list "
-                depends_lib-append      [lindex $prms 1]
-                configure.args-append   --with-[lindex $prms 2]
-            "
+        foreach over ${conf_list} {
+            append variant_line " conflicts ${over}"
+        }
+
+        append variant_line { "
+            set ::ZDB [lindex ${prms} 1]
+            depends_lib-append      port:[lindex ${prms} 1]
+            configure.args-append   --with-[lindex ${prms} 2]
+            depends_run-append \
+                port:php5-[lindex ${prms} 3]
+
+            if {[string compare ${dbitem} sqlite3] && \
+                 [variant_isset full_server]} {
+                depends_run-append \
+                    port:[lindex ${prms} 1]-server
+            }
+        " }
+
+        eval $variant_line
     }
 
-    if {![variant_isset pgsql81] &&
+    if {![variant_isset mysql51] &&
+        ![variant_isset mysql55] &&
+        ![variant_isset mariadb] &&
+        ![variant_isset pgsql81] &&
         ![variant_isset pgsql82] &&
         ![variant_isset pgsql83] &&
         ![variant_isset pgsql84] &&
@@ -119,11 +157,18 @@ if { ${name} ne ${subport} } {
 }
 
 post-extract {
-    reinplace "s|# DBSocket=/tmp/mysql.sock|DBSocket=${prefix}/var/run/mysql5/mysqld.sock|" \
-            ${worksrcpath}/conf/zabbix_server.conf
-
-    reinplace "s|#FpingLocation=/usr/sbin/fping|FpingLocation=${prefix}/sbin/fping|" \
-        ${worksrcpath}/conf/zabbix_server.conf
+    if { ${name} == ${subport} } {
+        if { (![string compare -length 5 mysql ${ZDB}] || 
+              ![string compare -length 7 mariadb ${ZDB}]) &&
+             [variant_isset full_server] } {
+                set repstr "s|# DBSocket=/tmp/mysql.sock|"
+                append repstr "DBSocket=${prefix}/var/run/${ZDB}/mysqld.sock|"
+            reinplace ${repstr} ${worksrcpath}/conf/zabbix_server.conf
+        }
+    }
+    set repstr "s|# FpingLocation=/usr/sbin/fping|"
+    append repstr "FpingLocation=${prefix}/sbin/fping|"
+    reinplace ${repstr} ${worksrcpath}/conf/zabbix_server.conf
 }
 
 add_users zabbix group=zabbix
@@ -173,8 +218,16 @@ post-destroot {
 # Create a startup script for the server
 # This script has a delay built into it (waiting for DB to start) so we
 # don't use a simple startupitem.executable approach
-        xinstall -m 755 ${portpath}/${filesdir}/zabbix_server.init \
-            ${destroot}${prefix}/share/zabbix
+        if { (![string compare -length 5 mysql ${ZDB}] ||
+              ![string compare -length 7 mariadb ${ZDB}] )} {
+            xinstall -m 755 ${portpath}/${filesdir}/zabbix_server.init.mysql \
+                ${destroot}${prefix}/share/zabbix/zabbix_server.init
+            reinplace "s|__VER__|${ZDB}|g" \
+                ${destroot}${prefix}/share/zabbix/zabbix_server.init
+        } else {
+            xinstall -m 755 ${portpath}/${filesdir}/zabbix_server.init \
+                ${destroot}${prefix}/share/zabbix
+        }
         reinplace "s|__PREFIX__|${prefix}|g" \
             ${destroot}${prefix}/share/zabbix/zabbix_server.init
 
@@ -195,7 +248,7 @@ if { ${name} ne ${subport} } {
 ####                                        ####
 #### ZABBIX2 agent installation section     ####
 
-1) Edit the sample .conf file ${prefix}/etc/zabbix/zabbix_agentd.conf
+1) Edit the sample .conf file ${prefix}/etc/zabbix/zabbix_agentd.conf.sample
    (rename & omit .sample)
 
    Set the following variable to the ip address of your ZABBIX server to\
@@ -216,8 +269,11 @@ if { ${name} ne ${subport} } {
 "
 } else {
     notes "
-####                                           ####
-#### Begin ZABBIX2 server installation section ####
+####                                                 ####
+#### Begin ZABBIX2 local server installation section ####
+
+ (Installing with +full_server will add all of the dependants; configuration
+  will still be required.)
 
 1) Setup MySQL, i.e. via MacPorts: (for local MySQL server)
 
@@ -225,6 +281,9 @@ if { ${name} ne ${subport} } {
 
 
 2) Setup the ZABBIX MySQL database
+
+ For other databases, follow documentation from 
+ https://www.zabbix.com/documentation/2.0/manual/appendix/install/db_scripts
 
 -Create the ZABBIX database
     mysql5 -u root -p (enter password at prompt)
@@ -253,20 +312,17 @@ if { ${name} ne ${subport} } {
     DBName=zabbix
     DBUser=zabbix
     DBPassword=<zabbix-mysql-password>
+    DBSocket=<location for your active mysql5\[15\] server socket>
+      Typically ${prefix}/var/run/mysql\[51|55\]/mysqld.sock
 
 
-4) Install PHP 5, i.e. via MacPorts:
-
-    sudo port install php5 php5-gd php5-mbstring php5-mysql php5-sockets
-
-
-5) Set a symbolic link in your Apache document root pointing to the PHP
+4) Set a symbolic link in your Apache document root pointing to the PHP
    frontend files
 
     sudo ln -s ${prefix}/share/zabbix/frontends/php <Apache-docroot>/zabbix
 
 
-6) Set zabbix_server to run at system boot, then start it
+5) Set zabbix_server to run at system boot, then start it
 
     sudo port load zabbix2
 
@@ -276,20 +332,21 @@ if { ${name} ne ${subport} } {
  !! Note: Your shared memory will likely need to be increased  !!
  !!       (see http://support.apple.com/kb/HT4022)             !!
 
-7) A Win32 agent is in ${prefix}/share/zabbix/zabbix_agent_win32 for\
+
+6) A Win32 agent is in ${prefix}/share/zabbix/zabbix_agent_win32 for\
    installation on Windows NT 4.0, Windows 2000, and Windows XP.  See\
    the ReadMe.txt for instructions.
 
 
-8) Open http://localhost/zabbix/ in your browser and walk through the setup,
+7) Open http://localhost/zabbix/ in your browser and walk through the setup,
    then login with default user 'Admin' and password 'zabbix'.
 
 
-9) Read the fine manual at http://www.zabbix.com/documentation/
+8) Read the fine manual at http://www.zabbix.com/documentation/
 
 
-#### End ZABBIX2 server installation section   ####
-####                                           ####
+#### End ZABBIX2 local server installation section   ####
+####                                                 ####
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
