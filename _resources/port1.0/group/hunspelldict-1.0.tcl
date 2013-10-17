@@ -34,7 +34,7 @@
 #
 # Usage:
 #
-#   PortGroup               unspelldict 1.0
+#   PortGroup               hunspelldict 1.0
 #   hunspelldict.setup      locale version lang source
 #
 # If the dictionary is hosted on the OpenOffice.org website, set "source" to
@@ -56,6 +56,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
     version     ${version}
     categories  textproc
     platforms   darwin
+    supported_archs noarch
 
     eval description ${lang} dictionary for hunspell
     long_description ${description}
