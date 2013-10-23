@@ -440,8 +440,15 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 xinstall -d -m 0755 ${destroot}${ruby.gemdir}
             }
 
+            destroot.cmd    ${ruby.gem}
+            destroot.target install
+            destroot.args   --local --force --install-dir ${destroot}${ruby.gemdir}
+
             destroot {
-                system -W ${worksrcpath} "${ruby.gem} install --local --force --install-dir ${destroot}${ruby.gemdir} ${distpath}/${distname}.gem"
+                # note: port cannot read $distpath and $distname
+                #       outside of destroot {}
+                destroot.post_args ${distpath}/${distname}.gem
+                command_exec destroot
 
                 set binDir ${destroot}${ruby.gemdir}/bin
                 if {[file isdirectory $binDir]} {
