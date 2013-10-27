@@ -52,17 +52,13 @@ default master_sites {${github.master_sites}}
 default github.tarball_from {tags}
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
-    global github.author github.project github.tag_prefix github.version github.master_sites
-    
+    global github.author github.project github.master_sites
+
     # keeping the default at tags like many portfiles already do
     # the port writer can set github.tarball_from to "downloads" and have the URI path accordingly changed
     if {${action} eq "set" && $args eq "downloads"} {
         github.tarball_from ${args}
         github.master_sites https://github.com/downloads/${github.author}/${github.project}
-    } elseif {${action} eq "set" && $args eq "archive"} {
-        github.tarball_from ${args}
-        github.master_sites https://github.com/${github.author}/${github.project}/archive
-        distname            [join ${github.tag_prefix} ""]${github.version}
     }
 }
 
