@@ -50,7 +50,7 @@
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 # values:
-#   ruby.bin, ruby.rdoc, ruby.gem: fullpath to commands for ${ruby.branch}.
+#   ruby.bin, ruby.rdoc, ruby.gem ruby.rake: fullpath to commands for ${ruby.branch}.
 #   ruby.suffix: suffix of portname. port:ruby${ruby.suffix} or
 #        port:rb${ruby.suffix}-foo.
 #   ruby.bindir: install location of commands without suffix from rb-foo.
@@ -68,24 +68,27 @@
 options ruby.default_branch
 default ruby.default_branch 1.8
 options ruby.branch
-options ruby.bin ruby.rdoc ruby.gem ruby.bindir ruby.gemdir ruby.suffix
+options ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir ruby.suffix
 option_proc ruby.branch ruby_set_branch
 proc ruby_set_branch {option action args} {
     if {$action != "set"} {
         return
     }
     global prefix ruby.branch \
-           ruby.bin ruby.rdoc ruby.gem ruby.bindir ruby.gemdir \
+           ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir \
            ruby.suffix ruby.link_binaries_suffix ruby.api_version \
            ruby.prog_suffix
     set ruby.bin            ${prefix}/bin/ruby${ruby.branch}
     set ruby.rdoc           ${prefix}/bin/rdoc${ruby.branch}
     set ruby.gem            ${prefix}/bin/gem${ruby.branch}
+    set ruby.rake           ${prefix}/bin/rake${ruby.branch}
     set ruby.bindir         ${prefix}/libexec/ruby${ruby.branch}
     set ruby.gemdir         ${prefix}/lib/ruby${ruby.branch}/gems/${ruby.api_version}
     # gem command for 1.8 from port:rb-rubygems
+    # rake command for 1.8 from port:rb-rake
     if {${ruby.branch} eq "1.8"} {
         set ruby.gem        ${ruby.bindir}/gem
+        set ruby.rake       ${ruby.bindir}/rake
         set ruby.gemdir     ${prefix}/lib/ruby/gems/${ruby.api_version}
     }
     set ruby.suffix         [join [split ${ruby.branch} .] {}]
@@ -138,7 +141,7 @@ default ruby.branch         ${ruby.default_branch}
 # basic variables, like ruby.lib and ruby.archlib.
 proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {implementation "ruby"}} {
     global destroot prefix worksrcpath os.platform
-    global ruby.bin ruby.rdoc ruby.gem ruby.branch
+    global ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.branch
     global ruby.api_version ruby.lib ruby.suffix ruby.bindir ruby.gemdir
     global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
     global ruby.link_binaries_suffix
@@ -431,6 +434,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 
             if {${implementation} eq "ruby"} {
                 depends_lib-append  port:rb-rubygems
+                if {${ruby.module} ne "rake"} {
+                    depends_build-append    port:rb-rake
+                }
             }
 
             extract {}
@@ -443,6 +449,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.cmd    ${ruby.gem}
             destroot.target install
             destroot.args   --local --force --install-dir ${destroot}${ruby.gemdir}
+            destroot.env-append rake=${ruby.rake}
 
             destroot {
                 # note: port cannot read $distpath and $distname
