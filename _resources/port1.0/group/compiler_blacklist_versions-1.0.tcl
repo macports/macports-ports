@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2012-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -61,7 +61,7 @@
 option_proc compiler.blacklist compiler_blacklist_versions._set_compiler_blacklist
 
 proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
-    if {"set" != ${action}} return
+    if {${action} ne "set"} return
     foreach blacklist [option ${option}] {
         if {[llength ${blacklist}] > 1} {
             compiler.blacklist-delete ${blacklist}
@@ -69,14 +69,14 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
             set comparisons [lrange ${blacklist} 1 end]
             set compiler_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
             if {[compiler_blacklist_versions._matches_all_versions ${compiler} ${comparisons}]} {
-                if {[string equal ${compiler_version} ""]} {
-                    ui_debug "compiler ${compiler} blacklisted because not installed"
+                if {${compiler_version} eq ""} {
+                    ui_debug "compiler ${compiler} blacklisted because it's not installed or it doesn't work"
                 } else {
-                    ui_debug "compiler ${compiler} ${compiler_version} blacklisted because matches {${blacklist}}"
+                    ui_debug "compiler ${compiler} ${compiler_version} blacklisted because it matches {${blacklist}}"
                 }
                 compiler.blacklist-append ${compiler}
             } else {
-                ui_debug "compiler ${compiler} ${compiler_version} not blacklisted because does not match {${blacklist}}"
+                ui_debug "compiler ${compiler} ${compiler_version} not blacklisted because it doesn't match {${blacklist}}"
             }
         }
     }
@@ -99,7 +99,7 @@ proc compiler_blacklist_versions._matches_all_versions {compiler comparisons} {
 
 proc compiler_blacklist_versions._version_matches {compiler comparison_operator test_version} {
     set actual_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
-    if {[string equal ${actual_version} ""]} {
+    if {${actual_version} eq ""} {
         return 1
     }
     return [expr [vercmp ${actual_version} ${test_version}] ${comparison_operator} 0]
@@ -128,7 +128,7 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
     }
     set cc [portconfigure::configure_get_compiler cc ${compiler}]
     if {![file exists ${cc}]} return
-    regexp ${re} [exec ${cc} -v 2>@1] -> compiler_version
+    if {[catch {regexp ${re} [exec ${cc} -v 2>@1] -> compiler_version}]} return
     if {![info exists compiler_version]} {
         return -code error "couldn't determine build number of compiler \"${compiler}\""
     }
