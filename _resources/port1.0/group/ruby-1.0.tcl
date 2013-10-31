@@ -83,13 +83,11 @@ proc ruby_set_branch {option action args} {
     set ruby.gem            ${prefix}/bin/gem${ruby.branch}
     set ruby.rake           ${prefix}/bin/rake${ruby.branch}
     set ruby.bindir         ${prefix}/libexec/ruby${ruby.branch}
-    set ruby.gemdir         ${prefix}/lib/ruby${ruby.branch}/gems/${ruby.api_version}
-    # gem command for 1.8 from port:rb-rubygems
-    # rake command for 1.8 from port:rb-rake
+    default ruby.gemdir     {[exec ${ruby.gem} environment gemdir]}
+    # gem, rake command for 1.8 from port:rb-rubygems, port:rb-rake
     if {${ruby.branch} eq "1.8"} {
         set ruby.gem        ${ruby.bindir}/gem
         set ruby.rake       ${ruby.bindir}/rake
-        set ruby.gemdir     ${prefix}/lib/ruby/gems/${ruby.api_version}
     }
     set ruby.suffix         [join [split ${ruby.branch} .] {}]
     if {${ruby.branch} eq "1.8"} {
