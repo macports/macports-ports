@@ -69,6 +69,9 @@ options ruby.default_branch
 default ruby.default_branch 1.8
 options ruby.branch
 options ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir ruby.suffix
+options ruby.api_version ruby.lib ruby.archlib
+# ruby.version is obsoleted. use ruby.api_version.
+options ruby.version
 option_proc ruby.branch ruby_set_branch
 proc ruby_set_branch {option action args} {
     if {$action != "set"} {
@@ -76,14 +79,13 @@ proc ruby_set_branch {option action args} {
     }
     global prefix ruby.branch \
            ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir \
-           ruby.suffix ruby.link_binaries_suffix ruby.api_version \
-           ruby.prog_suffix
+           ruby.suffix ruby.link_binaries_suffix ruby.prog_suffix \
+           ruby.api_version ruby.lib ruby.archlib ruby.arch
     set ruby.bin            ${prefix}/bin/ruby${ruby.branch}
     set ruby.rdoc           ${prefix}/bin/rdoc${ruby.branch}
     set ruby.gem            ${prefix}/bin/gem${ruby.branch}
     set ruby.rake           ${prefix}/bin/rake${ruby.branch}
     set ruby.bindir         ${prefix}/libexec/ruby${ruby.branch}
-    default ruby.gemdir     {[exec ${ruby.gem} environment gemdir]}
     # gem, rake command for 1.8 from port:rb-rubygems, port:rb-rake
     if {${ruby.branch} eq "1.8"} {
         set ruby.gem        ${ruby.bindir}/gem
@@ -98,6 +100,17 @@ proc ruby_set_branch {option action args} {
     if {${ruby.branch} eq "1.8"} {
         set ruby.prog_suffix     ""
     }
+    #
+    switch -exact ${ruby.branch} {
+        1.8 {set ruby.api_version 1.8}
+        1.9 {set ruby.api_version 1.9.1}
+        2.0 {set ruby.api_version 2.0.0}
+    }
+    set ruby.gemdir         ${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.api_version}
+    # define installation libraries as vendor location
+    default ruby.lib        {[ruby.extract_config vendorlibdir ${prefix}/lib/ruby${ruby.prog_suffix}/vendor_ruby/${ruby.api_version}]}
+    default ruby.archlib    {[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]}
+    set ruby.version        ${ruby.api_version}
 }
 
 proc ruby.extract_config {var {default ""}} {
@@ -108,21 +121,15 @@ proc ruby.extract_config {var {default ""}} {
     return $val
 }
 
-options ruby.api_version ruby.lib ruby.archlib
-default ruby.api_version    {[ruby.extract_config ruby_version]}
+options ruby.arch
 default ruby.arch           {[ruby.extract_config arch "${os.arch}-${os.platform}${os.major}"]}
-# define installation libraries as vendor location
-default ruby.lib            {[ruby.extract_config vendorlibdir ${prefix}/lib/ruby/vendor_ruby/${ruby.api_version}]}
-default ruby.archlib        {[ruby.extract_config vendorarchdir ${ruby.lib}/${ruby.arch}]}
-# ruby.version is obsoleted. use ruby.api_version.
-options ruby.version
-default ruby.version        {[ruby.extract_config ruby_version]}
 
 set ruby.module         ""
 set ruby.filename       ""
 set ruby.project        ""
 set ruby.docs           {}
 set ruby.srcdir         ""
+set ruby.prog_suffix    ""
 
 options ruby.link_binaries
 default ruby.link_binaries yes
