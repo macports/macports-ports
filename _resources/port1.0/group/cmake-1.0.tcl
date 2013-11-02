@@ -138,6 +138,14 @@ configure.universal_args-delete --disable-dependency-tracking
 variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
     configure.args-append   -DCMAKE_BUILD_TYPE=Debug
+    # Consider the configure.cflags and configure.cxxflags for Debug builds.
+    # Attention, they contain configure.optflags by default!
+    if {${configure.cflags} != ""} {
+        configure.args-append -DCMAKE_C_FLAGS_DEBUG="-g ${configure.cflags}"
+    }
+    if {${configure.cxxflags} != ""} {
+        configure.args-append -DCMAKE_CXX_FLAGS_DEBUG="-g ${configure.cxxflags}"
+    }
 }
 
 # cmake doesn't like --enable-debug, so in case a portfile sets
