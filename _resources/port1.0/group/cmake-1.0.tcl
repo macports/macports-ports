@@ -149,8 +149,8 @@ variant debug description "Enable debug binaries" {
     if {${configure.cflags} != ""} {
         configure.args-append -DCMAKE_C_FLAGS_DEBUG="-g ${configure.cflags}"
     }
-    if {${configure.cxxflags} != ""} {
-        configure.args-append -DCMAKE_CXX_FLAGS_DEBUG="-g ${configure.cxxflags}"
+    if {${configure.cxxflags} != "" || ${cxx_stdlibflags} != ""} {
+        configure.args-append -DCMAKE_CXX_FLAGS_DEBUG="-g ${configure.cxxflags} ${cxx_stdlibflags}"
     }
 }
 
