@@ -146,7 +146,9 @@ proc crossgcc.setup {target version} {
         configure.ld_archflags
 
         # the bootstrap compiler doesn't accept -stdlib
-        configure.cxx_stdlib
+        if {[info exists configure.cxx_stdlib]} {
+            configure.cxx_stdlib
+        }
 
         # We don't need system includes(this prevents xgcc to include system-wide
         # unwind.h if it is present)!
