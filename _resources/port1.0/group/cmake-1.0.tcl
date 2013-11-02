@@ -56,6 +56,58 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -Wno-dev
 
+# Handle configure.cppflags, configure.optflags, configure.cflags,
+# configure.cxxflags, configure.ldflags by setting the equivalent CMAKE_*_FLAGS.
+#
+# Be aware that a CMake script can always override these flags when it runs, as
+# they are frequently set internally in function of other CMake build variables!
+#
+# Attention: If you want to be sure that no compiler flags are passed via
+# configure.args, you have to set manually configure.optflags to "", as it is by
+# default "-O2" and added to all language-specific flags. If you want to turn off
+# optimization, explicitly set configue.optflags to "-O0".
+if (${configure.cppflags} != "") {
+    # Add the preprocessor flags to the C/C++ compiler flags as CMake does not
+    # honor separately CPPFLAGS (it uses usually add_definitions() for that).
+    # We use the compiler flags for all build types, as they are usually empty.
+    # Cf. also to CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
+    # <http://www.cmake.org/Bug/view.php?id=12928>.
+    configure.args-append -DCMAKE_C_FLAGS="${configure.cppflags}"
+    configure.args-append -DCMAKE_CXX_FLAGS="${configure.cppflags}"
+}
+if {${configure.cflags} != ""} {
+    # The configure.cflags contain configure.optflags by default. Therefore, we
+    # set the Release flags, which would otherwise overrule the optimization
+    # flags, as they are set by default to "-O3 -NDEBUG". Therefore, be sure
+    # to add "-NDEBUG" to the configure.cflags if you want to turn off
+    # assertions in release builds!
+    configure.args-append -DCMAKE_C_FLAGS_RELEASE="${configure.cflags}"
+}
+if {${configure.cxxflags} != ""} {
+    # The configure.cxxflags contain configure.optflags by default. Therefore,
+    # we set the Release flags, which would otherwise overrule the optimization
+    # flags, as they are set by default to "-O3 -NDEBUG". Therefore, be sure
+    # to add "-NDEBUG" to the configure.cflags if you want to turn off
+    # assertions in release builds!
+    configure.args-append -DCMAKE_CXX_FLAGS_RELEASE="${configure.cxxflags}"
+}
+if {${configure.ldflags} != ""} {
+    # CMake supports individual linker flags for executables, modules, and dlls.
+    # By default, they are empty.
+    configure.args-append -DCMAKE_EXE_LINKER_FLAGS="${configure.ldflags}"
+    configure.args-append -DCMAKE_SHARED_LINKER_FLAGS="${configure.ldflags}"
+    configure.args-append -DCMAKE_MODULE_LINKER_FLAGS="${configure.ldflags}"
+}
+
+# TODO: Handle configure.objcflags (cf. to CMake upstream ticket #4756
+#       "CMake needs an Objective-C equivalent of CMAKE_CXX_FLAGS"
+#       <http://public.kitware.com/Bug/view.php?id=4756>)
+
+# TODO: Handle the Fortran-specific configure.* variables:
+#       configure.fflags, configure.fcflags, configure.f90flags
+
+# TODO: Handle the Java-specific configure.classpath variable.
+
 platform darwin {
     pre-configure {
         if {[variant_exists universal] && [variant_isset universal]} {
