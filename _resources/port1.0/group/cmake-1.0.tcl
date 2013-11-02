@@ -66,7 +66,7 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
 # configure.args, you have to set manually configure.optflags to "", as it is by
 # default "-O2" and added to all language-specific flags. If you want to turn off
 # optimization, explicitly set configue.optflags to "-O0".
-if (${configure.cppflags} != "") {
+if {${configure.cppflags} != ""} {
     # Add the preprocessor flags to the C/C++ compiler flags as CMake does not
     # honor separately CPPFLAGS (it uses usually add_definitions() for that).
     # We use the compiler flags for all build types, as they are usually empty.
