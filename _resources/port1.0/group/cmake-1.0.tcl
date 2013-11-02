@@ -137,7 +137,7 @@ configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
-    configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
+    configure.args-append   -DCMAKE_BUILD_TYPE=Debug
 }
 
 # cmake doesn't like --enable-debug, so in case a portfile sets
