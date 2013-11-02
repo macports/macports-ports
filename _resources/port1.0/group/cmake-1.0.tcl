@@ -83,13 +83,19 @@ if {${configure.cflags} != ""} {
     # assertions in release builds!
     configure.args-append -DCMAKE_C_FLAGS_RELEASE="${configure.cflags}"
 }
-if {${configure.cxxflags} != ""} {
+set cxx_stdlibflags {}
+if {[info exists configure.cxx_stdlib] &&
+    ${configure.cxx_stdlib} ne {} &&
+    [string match *clang* ${configure.cxx}]} {
+    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+}
+if {${configure.cxxflags} != "" || ${cxx_stdlibflags} != ""} {
     # The configure.cxxflags contain configure.optflags by default. Therefore,
     # we set the Release flags, which would otherwise overrule the optimization
     # flags, as they are set by default to "-O3 -NDEBUG". Therefore, be sure
     # to add "-NDEBUG" to the configure.cflags if you want to turn off
     # assertions in release builds!
-    configure.args-append -DCMAKE_CXX_FLAGS_RELEASE="${configure.cxxflags}"
+    configure.args-append -DCMAKE_CXX_FLAGS_RELEASE="${configure.cxxflags} ${cxx_stdlibflags}"
 }
 if {${configure.ldflags} != ""} {
     # CMake supports individual linker flags for executables, modules, and dlls.
