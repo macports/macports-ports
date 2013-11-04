@@ -56,54 +56,16 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -Wno-dev
 
-# Handle configure.cppflags, configure.optflags, configure.cflags,
-# configure.cxxflags, configure.ldflags by setting the equivalent CMAKE_*_FLAGS.
-#
-# Be aware that a CMake script can always override these flags when it runs, as
-# they are frequently set internally in function of other CMake build variables!
+# CMake honors set environment variables CFLAGS, CXXFLAGS, and LDFLAGS when it
+# is first run in a build directory to initialize CMAKE_C_FLAGS,
+# CMAKE_CXX_FLAGS, CMAKE_[EXE|SHARED|MODULE]_LINKER_FLAGS. However, be aware
+# that a CMake script can always override these flags when it runs, as they
+# are frequently set internally in functions of other CMake build variables!
 #
 # Attention: If you want to be sure that no compiler flags are passed via
-# configure.args, you have to set manually configure.optflags to "", as it is by
-# default "-O2" and added to all language-specific flags. If you want to turn off
-# optimization, explicitly set configue.optflags to "-O0".
-if {${configure.cppflags} != ""} {
-    # Add the preprocessor flags to the C/C++ compiler flags as CMake does not
-    # honor separately CPPFLAGS (it uses usually add_definitions() for that).
-    # We use the compiler flags for all build types, as they are usually empty.
-    # Cf. also to CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
-    # <http://www.cmake.org/Bug/view.php?id=12928>.
-    configure.args-append -DCMAKE_C_FLAGS="${configure.cppflags}"
-    configure.args-append -DCMAKE_CXX_FLAGS="${configure.cppflags}"
-}
-if {${configure.cflags} != ""} {
-    # The configure.cflags contain configure.optflags by default. Therefore, we
-    # set the Release flags, which would otherwise overrule the optimization
-    # flags, as they are set by default to "-O3 -NDEBUG". Therefore, be sure
-    # to add "-NDEBUG" to the configure.cflags if you want to turn off
-    # assertions in release builds!
-    configure.args-append -DCMAKE_C_FLAGS_RELEASE="${configure.cflags}"
-}
-set cxx_stdlibflags {}
-if {[info exists configure.cxx_stdlib] &&
-    ${configure.cxx_stdlib} ne {} &&
-    [string match *clang* ${configure.cxx}]} {
-    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
-}
-if {${configure.cxxflags} != "" || ${cxx_stdlibflags} != ""} {
-    # The configure.cxxflags contain configure.optflags by default. Therefore,
-    # we set the Release flags, which would otherwise overrule the optimization
-    # flags, as they are set by default to "-O3 -NDEBUG". Therefore, be sure
-    # to add "-NDEBUG" to the configure.cflags if you want to turn off
-    # assertions in release builds!
-    configure.args-append -DCMAKE_CXX_FLAGS_RELEASE="${configure.cxxflags} ${cxx_stdlibflags}"
-}
-if {${configure.ldflags} != ""} {
-    # CMake supports individual linker flags for executables, modules, and dlls.
-    # By default, they are empty.
-    configure.args-append -DCMAKE_EXE_LINKER_FLAGS="${configure.ldflags}"
-    configure.args-append -DCMAKE_SHARED_LINKER_FLAGS="${configure.ldflags}"
-    configure.args-append -DCMAKE_MODULE_LINKER_FLAGS="${configure.ldflags}"
-}
+# configure.args, you have to manually clear configure.optflags, as it is set
+# to "-Os" by default and added to all language-specific flags. If you want to
+# turn off optimization, explicitly set configure.optflags to "-O0".
 
 # TODO: Handle configure.objcflags (cf. to CMake upstream ticket #4756
 #       "CMake needs an Objective-C equivalent of CMAKE_CXX_FLAGS"
@@ -114,8 +76,30 @@ if {${configure.ldflags} != ""} {
 
 # TODO: Handle the Java-specific configure.classpath variable.
 
-platform darwin {
-    pre-configure {
+pre-configure {
+    # The environment variable CPPFLAGS is not considered by CMake.
+    # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
+    # <http://www.cmake.org/Bug/view.php?id=12928>).
+    # Thus, we have to add them manually to the CFLAGS and CXXFLAGS in the
+    # pre-configure phase.
+    if {${configure.cppflags} ne ""} {
+        configure.cflags-append ${configure.cppflags}
+        configure.cxxflags-append ${configure.cppflags}
+    }
+
+    # In addition, CMake provides build-type-specific flags for
+    # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
+    # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
+    # set (-Os by default), we have to remove the optimization flags from the
+    # from the concerned Release build type so that configure.optflags
+    # gets honored (Debug used by the +debug variant does not set
+    # optimization flags by default).
+    if {${configure.optflags} ne ""} {
+        configure.args-append -DCMAKE_C_FLAGS_RELEASE="-NDEBUG" \
+                              -DCMAKE_CXX_FLAGS_RELEASE="-NDEBUG"
+    }
+
+    platform darwin {
         if {[variant_exists universal] && [variant_isset universal]} {
             if {[info exists universal_archs_supported]} {
                 global merger_configure_args
@@ -144,14 +128,6 @@ configure.universal_args-delete --disable-dependency-tracking
 variant debug description "Enable debug binaries" {
     configure.args-delete   -DCMAKE_BUILD_TYPE=Release
     configure.args-append   -DCMAKE_BUILD_TYPE=Debug
-    # Consider the configure.cflags and configure.cxxflags for Debug builds.
-    # Attention, they contain configure.optflags by default!
-    if {${configure.cflags} != ""} {
-        configure.args-append -DCMAKE_C_FLAGS_DEBUG="-g ${configure.cflags}"
-    }
-    if {${configure.cxxflags} != "" || ${cxx_stdlibflags} != ""} {
-        configure.args-append -DCMAKE_CXX_FLAGS_DEBUG="-g ${configure.cxxflags} ${cxx_stdlibflags}"
-    }
 }
 
 # cmake doesn't like --enable-debug, so in case a portfile sets
