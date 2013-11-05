@@ -95,8 +95,8 @@ pre-configure {
     # gets honored (Debug used by the +debug variant does not set
     # optimization flags by default).
     if {${configure.optflags} ne ""} {
-        configure.args-append -DCMAKE_C_FLAGS_RELEASE="-NDEBUG" \
-                              -DCMAKE_CXX_FLAGS_RELEASE="-NDEBUG"
+        configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
+                              -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
     }
 
     platform darwin {
