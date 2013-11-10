@@ -8,7 +8,7 @@ Modified: 2012May15
           2013Sep25 -- revert logserver stuff, remove AirPlay setting that is now unnecessary 
 
 *)
-property MFEappPath : "/opt/local/bin/mythfrontend"
+property MFEappPath : "@PREFIX@/bin/mythfrontend"
 property MFElogArg : "--logpath @MYTHTVLOGDIR@"
 property MFElogLevel : "info" -- single string
 property MFEverboseLevel : {"general"} -- a list, can be multiple strings
