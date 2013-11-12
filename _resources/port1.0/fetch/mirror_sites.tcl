@@ -583,7 +583,6 @@ set portfetch::mirror_sites::sites(mysql) {
     http://mirrors.ukfast.co.uk/sites/ftp.mysql.com/Downloads/:nosubdir
     http://mirrors.xservers.ro/mysql/Downloads/:nosubdir
     http://mysql.cdpa.nsysu.edu.tw/Downloads/:nosubdir
-    http://mysql.easynet.be/Downloads/:nosubdir
     http://mysql.he.net/Downloads/:nosubdir
     http://mysql.infocom.ua/Downloads/:nosubdir
     http://mysql.inspire.net.nz/Downloads/:nosubdir
