@@ -157,7 +157,7 @@ if {[info commands lreverse] == ""} {
 
 
 platform macosx {
-    post-destroot {
+    pre-destroot {
         if {[tbool app.create]} {
             # Ensure app.name is valid.
             if {[regexp {[/]} ${app.name}]} {
@@ -167,7 +167,11 @@ platform macosx {
             # Make the app bundle directories.
             xinstall -d ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS \
                         ${destroot}${applications_dir}/${app.name}.app/Contents/Resources
+        }
+    }
 
+    post-destroot {
+        if {[tbool app.create]} {
             # Ensure app.identifier is valid.
             if {[regexp -nocase {[^a-z0-9.-]} ${app.identifier}]} {
                 return -code error "app.identifier ${app.identifier} contains illegal characters"
