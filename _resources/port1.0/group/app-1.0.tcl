@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2011 The MacPorts Project
+# Copyright (c) 2011-2013 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -218,8 +218,11 @@ platform macosx {
                 # If app.executable starts with ${workpath} or ${filespath}, copy it.
                 if {[string first ${workpath} ${executable}] == 0 || [string first ${filespath} ${executable}] == 0} {
                     xinstall ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                
+                # app.executable refers to a file that exists but does not belong to this port.
+                # Assume it belongs to a dependency and symlink it.
                 } else {
-                    return -code error "app.executable ${app.executable} does not belong to this port"
+                    ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
                 }
             } else {
                 return -code error "app.executable ${app.executable} does not exist"
