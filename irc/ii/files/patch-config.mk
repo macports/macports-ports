@@ -10,7 +10,7 @@
  MANDIR      = ${PREFIX}/share/man
  MAN1DIR     = ${MANDIR}/man1
 @@ -15,13 +15,13 @@
- VERSION     = 1.6
+ VERSION     = 1.7
  
  # includes and libs
 -INCLUDES    = -I. -I${INCDIR} -I/usr/include
