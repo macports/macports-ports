@@ -28,18 +28,16 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#
-# This PortGroup automatically sets up the standard environment for building
-# an octave module.
+# This PortGroup automatically sets up the standard environment for
+# building an octave module.
 #
 # Usage:
 #
 #   PortGroup               octave 1.0
 #   octave.setup            module version
 #
-# where module is the name of the module (e.g. communications) and version is
-# its version.
-
+# where module is the name of the module (e.g. communications) and
+# version is its version.
 
 options octave.module
 
@@ -56,22 +54,90 @@ proc octave.setup {module version} {
 
     depends_lib                 path:bin/octave:octave
 
+    worksrcdir                  ${octave.module}
+
     # octave is not universal
+
     universal_variant           no
-    use_configure               no
+
+    # do not build in parallel; many can't, and these are small builds
+    # anyway, so no major need for this.
+
+    use_parallel_build          no
+
+    configure.pre_args
+    configure.post_args
 
     livecheck.type              regex
     livecheck.url               http://octave.sourceforge.net/packages.php
     livecheck.regex             http://downloads\\.sourceforge\\.net/octave/${octave.module}-(\\d+(\\.\\d+)*)\\.tar
+
 }
 
-extract {
-    xinstall -d -m 755 ${worksrcpath}
+post-extract {
+
+    # rename the effective worksrcdir to always be ${octave.module}
+
+    set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
+    if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
+	move ${workpath}/${worksrcdir_name} ${workpath}/${octave.module}
+    }
+
 }
 
-build {
-    system "${prefix}/bin/octave -q -f --eval 'pkg build -verbose -nodeps ${worksrcpath} ${distpath}/${distfiles}'"
+post-patch {
+    # In 10.8+, set the locale to "C" otherwise /usr/bin/sed can fail
+    # with an error when processing unicode characters.
+
+    set locale ""
+    platform darwin {
+	if {${os.major} >= 12} {
+	    set locale "-locale \"C\""
+	}
+    }
+
+    # do not auto-load; like, ever.  Not all files will need this, but
+    # it's a simple catch-all.
+
+    eval [subst {
+	reinplace ${locale} "/Autoload/s@yes@no@g" ${worksrcpath}/DESCRIPTION
+    }]
+
+    # create a tarball of the resulting patched module
+
+    xinstall -d -m 755 ${workpath}
+    system "cd ${workpath} && tar zcf .tmp/${octave.module}.tar.gz ${worksrcdir}"
+    delete ${worksrcpath}
 }
+
+pre-configure {
+
+    # set parameters, now that variables are available for use
+
+    configure.cmd ${prefix}/bin/octave
+    configure.args -q -f --eval 'pkg build -verbose -nodeps ${worksrcpath} ${workpath}/.tmp/${octave.module}.tar.gz'
+
+    # fix usage of LAPACK_LIBS to include FLIBS, such that -lgfortran
+    # is always paired with the appropriate -Lpath statement.
+
+    configure.env-append \
+	LAPACK_LIBS='[exec ${prefix}/bin/mkoctfile -p FLIBS] [exec ${prefix}/bin/mkoctfile -p LAPACK_LIBS]'
+
+    platform darwin {
+	if {${os.major} >= 12} {
+
+	    # In 10.8+, set the LC_CTYPE (locale) to "C" otherwise
+	    # /usr/bin/sed can fail with an error when processing
+	    # unicode characters.
+
+	    configure.env-append LC_CTYPE="C"
+	}
+    }
+}
+
+# dummy build phase, since this has already been done
+
+build {}
 
 destroot.keepdirs   ${destroot}${prefix}/lib/octave/packages \
                     ${destroot}${prefix}/share/octave/packages
@@ -86,7 +152,7 @@ destroot {
 }
 
 post-deactivate {
-    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall ${octave.module}'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall -nodeps ${octave.module}'"
     system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
 }
 
