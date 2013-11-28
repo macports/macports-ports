@@ -105,9 +105,15 @@ post-patch {
 
     # create a tarball of the resulting patched module
 
-    xinstall -d -m 755 ${workpath}
     system "cd ${workpath} && tar zcf .tmp/${octave.module}.tar.gz ${worksrcdir}"
+
+    # delete the module's code since it is not used by Octave, but
+    # remake the directory since configure (sometimes) expects it to
+    # "cd" into for that stage.
+
     delete ${worksrcpath}
+    xinstall -d -m 755 ${worksrcpath}
+
 }
 
 pre-configure {
