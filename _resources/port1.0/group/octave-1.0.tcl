@@ -80,9 +80,16 @@ post-extract {
 
     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
-	move ${workpath}/${worksrcdir_name} ${workpath}/${octave.module}
-    }
 
+	# work-around for case-insensitive file systems when the
+	# extract directory name is the same as the octave module name
+	# except for letter case; should always work no matter if the
+	# file system is case-insensitive or case-sensitive.
+
+	move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
+	move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
+
+    }
 }
 
 post-patch {
