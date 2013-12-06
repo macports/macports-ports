@@ -47,11 +47,11 @@ option_proc wxWidgets.use wxWidgets._set
 proc wxWidgets._set {option action args} {
     global prefix frameworks_dir os.major
     global wxWidgets.name wxWidgets.version wxWidgets.prefix wxWidgets.wxdir
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
-    if {${args} == "wxWidgets-2.8"} {
+    if {${args} eq "wxWidgets-2.8"} {
         wxWidgets.name      "wxWidgets"
         wxWidgets.version   "2.8"
         wxWidgets.port      "wxWidgets-2.8"
@@ -81,15 +81,15 @@ proc wxWidgets._set {option action args} {
                 }
             }
         }
-    } elseif {${args} == "wxGTK-2.8"} {
+    } elseif {${args} eq "wxGTK-2.8"} {
         wxWidgets.name      "wxGTK"
         wxWidgets.version   "2.8"
         wxWidgets.port      "wxgtk-2.8"
-    } elseif {${args} == "wxGTK-3.0"} {
+    } elseif {${args} eq "wxGTK-3.0"} {
         wxWidgets.name      "wxGTK"
         wxWidgets.version   "3.0"
         wxWidgets.port      "wxgtk-3.0"
-    } elseif {${args} == "wxWidgets-3.0"} {
+    } elseif {${args} eq "wxWidgets-3.0"} {
         wxWidgets.name      "wxWidgets"
         wxWidgets.version   "3.0"
         wxWidgets.port      "wxWidgets-3.0"
@@ -99,7 +99,7 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible Mac OS X version"
             }
         }
-    } elseif {${args} == "wxPython-3.0"} {
+    } elseif {${args} eq "wxPython-3.0"} {
         wxWidgets.name      "wxPython"
         wxWidgets.version   "2.9"
         wxWidgets.port      "wxPython-3.0"
