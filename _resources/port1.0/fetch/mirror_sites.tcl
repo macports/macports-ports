@@ -26,7 +26,6 @@ set portfetch::mirror_sites::sites(apache) {
     http://mirror.internode.on.net/pub/apache/
     http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
-    http://apache-mirror.dkuug.dk/
     http://apache.is.co.za/
     http://mirror.facebook.net/apache/
     http://apache.pesat.net.id/
