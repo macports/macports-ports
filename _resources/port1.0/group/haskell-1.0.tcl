@@ -92,7 +92,8 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
 			system "${prefix}/libexec/${name}/register.sh"
 		}
 		pre-deactivate {
-			system "${prefix}/libexec/${name}/unregister.sh"
+			# deactivate even if that would break dependent ports; let MacPorts deal with this problem
+			system "${prefix}/libexec/${name}/unregister.sh --force"
 		}
 	}
 
