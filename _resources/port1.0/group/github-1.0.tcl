@@ -83,7 +83,8 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
                 ${fetch.type} eq "standard" && \
                 ${master_sites} eq ${github.master_sites} && \
                 [llength ${distfiles}] > 0 && \
-                [llength [glob -nocomplain ${workpath}/*]] > 0} {
+                [llength [glob -nocomplain ${workpath}/*]] > 0 && \
+                [file isdirectory [glob ${workpath}/*]]} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
