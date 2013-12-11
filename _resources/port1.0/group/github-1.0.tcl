@@ -78,14 +78,19 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     distname                ${github.project}-${github.version}
     fetch.ignore_sslcert    yes
 
+    # if worksrcpath does not exist, try to guess the directory that should be and rename it
     post-extract {
         if {![file exists ${worksrcpath}] && \
                 ${fetch.type} eq "standard" && \
                 ${master_sites} eq ${github.master_sites} && \
                 [llength ${distfiles}] > 0 && \
-                [llength [glob -nocomplain ${workpath}/*]] > 0 && \
-                [file isdirectory [glob ${workpath}/*]]} {
-            move [glob ${workpath}/*] ${worksrcpath}
+                [llength [glob -nocomplain ${workpath}/*]] > 0} {
+            foreach item [glob ${workpath}/*] {
+                if {[file isdirectory ${item}]} {
+                    move ${item} ${worksrcpath}
+                    break
+                }
+            }
         }
     }
 
