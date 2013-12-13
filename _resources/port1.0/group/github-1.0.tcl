@@ -85,11 +85,9 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
                 ${master_sites} eq ${github.master_sites} && \
                 [llength ${distfiles}] > 0 && \
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
-            foreach item [glob ${workpath}/*] {
-                if {[file isdirectory ${item}]} {
-                    move ${item} ${worksrcpath}
-                    break
-                }
+            if {[file exists [glob ${workpath}/${github.author}-${github.project}-*]] && \
+                [file isdirectory [glob ${workpath}/${github.author}-${github.project}-*]]} {
+                move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${name}-${version}
             }
         }
     }
