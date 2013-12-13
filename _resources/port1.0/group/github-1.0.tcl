@@ -87,7 +87,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
             if {[file exists [glob ${workpath}/${github.author}-${github.project}-*]] && \
                 [file isdirectory [glob ${workpath}/${github.author}-${github.project}-*]]} {
-                move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${name}-${version}
+                move [glob ${workpath}/${github.author}-${github.project}-*] ${worksrcpath}
             }
         }
     }
