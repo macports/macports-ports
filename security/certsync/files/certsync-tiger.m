@@ -150,34 +150,6 @@ BOOL compare_oids (const CSSM_OID *oid1, const CSSM_OID *oid2) {
     return NO;
 }
 
-static NSString *getCommonName (const CSSM_X509_NAME *x509Name) {
-    uint32 rdn_idx;
-    uint32 pair_idx;
-    
-    for (rdn_idx = 0; rdn_idx < x509Name->numberOfRDNs; rdn_idx++) {
-        CSSM_X509_RDN_PTR rdn = &x509Name->RelativeDistinguishedName[rdn_idx];
-
-        for (pair_idx = 0; pair_idx < rdn->numberOfPairs; pair_idx++) {
-            CSSM_X509_TYPE_VALUE_PAIR *pair = &rdn->AttributeTypeAndValue[pair_idx];
-            if (!compare_oids(&pair->type, &CSSMOID_CommonName))
-                continue;
-
-            switch (pair->valueType) {
-                case BER_TAG_PRINTABLE_STRING:
-                case BER_TAG_IA5_STRING:    
-                case BER_TAG_T61_STRING: {
-                    return (NSString *) PLCFAutorelease(CFStringCreateWithBytes(NULL, pair->value.Data, pair->value.Length, kCFStringEncodingUTF8, false));
-                    break;
-                }
-                default:
-                    return nil;
-            }
-        }
-    }
-    
-    return nil;
-}
-
 static int exportCertificates (NSString *outputFile) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
@@ -191,27 +163,6 @@ static int exportCertificates (NSString *outputFile) {
         nsfprintf(stderr, @"Failed to fetch system anchors: %@\n", error);
         [pool release];
         return EXIT_FAILURE;
-    }
-    
-    NSEnumerator *anchorEnumerator = [anchors objectEnumerator];
-    id certObj;
-    while ((certObj = [anchorEnumerator nextObject]) != nil) {
-        NSError *error = NULL;
-        const CSSM_X509_NAME *subject;
-        NSString *commonName = nil;
-
-        if ((err = SecCertificateGetSubject((SecCertificateRef) certObj, &subject)) == noErr) {
-            commonName = getCommonName(subject);
-        } else {
-            NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys: @"SecCertificateGetSubject() failed", NSLocalizedDescriptionKey, nil];
-            error = [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo: userInfo];
-        }
-
-        if (commonName == nil) {
-            nsfprintf(stderr, @"Failed to extract certificate description: %@\n", error);
-        } else {
-            nsfprintf(stderr, @"Found %@\n", commonName);
-        }
     }
     
     /*
