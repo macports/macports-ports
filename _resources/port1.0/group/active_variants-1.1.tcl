@@ -175,13 +175,61 @@ proc require_active_variants {depspec required {forbidden {}}} {
 
 # function to be called in pre-configure to check for all items added using
 # require_active_variants
-proc _check_require_active_variants {} {
-	global _require_active_variants_list
+proc _check_require_active_variants {method} {
+	global _require_active_variants_list PortInfo
+
+	# build a list of all dependencies to be checked in this pass
+	set depends {}
+	set deptypes {}
+
+	# determine the type of dependencies we need to consider
+	switch $method {
+		source {
+			set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run"
+		}
+		archivefetch {
+			set deptypes "depends_lib depends_run"
+		}
+		default {
+			error "active_variants 1.1: internal error: _check_require_active_variants called with unsupported \$method"
+		}
+	}
+
+	# for each type we're considering
+	foreach deptype $deptypes {
+		# check that there are any dependencies by that type
+		if {[info exists PortInfo($deptype)]} {
+			# and for each dependency
+			foreach depspec $PortInfo($deptype) {
+				# resolve names to actual ports
+				set depname [_get_dep_port $depspec]
+
+				# if depname is empty the dependency is already satisfied (e.g.
+				# with bin: dependencies)
+				if {$depname ne ""} {
+					# if the dependency isn't already in the list
+					if {[lsearch -exact $depends $depname] == -1} {
+						# append it
+						lappend depends $depname
+					}
+				}
+			}
+		}
+	}
+
+	ui_debug "Active variants check for ${method}-type install considers ${deptypes}: ${depends}"
+
 	foreach _require_active_variant $_require_active_variants_list {
 		set depspec [lindex $_require_active_variant 0]
 		set port [_get_dep_port $depspec]
 		set required [lindex $_require_active_variant 1]
 		set forbidden [lindex $_require_active_variant 2]
+
+		if {[lsearch -exact $depends $port] == -1} {
+			ui_debug "Ignoring active_variants requirement for ${port} because ${method}-type install only considers ${deptypes} and those do not contain ${port}"
+			continue
+		}
+
 		if {[catch {set result [active_variants $depspec $required $forbidden]}] != 0} {
 			error "${port} is required, but not active."
 		}
@@ -205,12 +253,12 @@ proc _check_require_active_variants {} {
 
 # register pre-configure handler that checks for all requested variants
 pre-configure {
-	_check_require_active_variants
+	_check_require_active_variants source
 }
 
 # register pre-archivefetch handler that checks for all requested variants
 # this is required when downloading binary archives for a package, because
 # pre-configure is never run for those
 pre-archivefetch {
-	_check_require_active_variants
+	_check_require_active_variants archivefetch
 }
