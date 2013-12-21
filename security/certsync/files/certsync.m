@@ -307,21 +307,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
 static void usage (const char *progname) {
     fprintf(stderr, "Usage: %s [-u] [-o <output file>]\n", progname);
     fprintf(stderr, "\t-u\t\t\tInclude the current user's anchor certificates.\n");
-    fprintf(stderr, "\t-s\t\t\tDo not exit; observe the system keychain(s) for changes and update the output file accordingly.");
     fprintf(stderr, "\t-o <output file>\tWrite the PEM certificates to the target file, rather than stdout\n");
-}
-
-static void certsync_keychain_cb (ConstFSEventStreamRef streamRef, void *clientCallBackInfo, size_t numEvents, void *eventPaths, const FSEventStreamEventFlags eventFlags[], const FSEventStreamEventId eventIds[])
-{
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-
-    MPCertSyncConfig *config = (MPCertSyncConfig *) clientCallBackInfo;
-
-    int ret;
-    if ((ret = exportCertificates(config->userAnchors, config->outputFile)) != EXIT_SUCCESS)
-        exit(ret);
-
-    [pool release];
 }
 
 int main (int argc, char * const argv[]) {
@@ -329,7 +315,6 @@ int main (int argc, char * const argv[]) {
 
     /* Parse the command line arguments */
     BOOL userAnchors = NO;
-    BOOL runServer = NO;
     NSString *outputFile = nil;
     
     int ch;
@@ -337,10 +322,6 @@ int main (int argc, char * const argv[]) {
         switch (ch) {
             case 'u':
                 userAnchors = YES;
-                break;
-                
-            case 's':
-                runServer = YES;
                 break;
                 
             case 'o':
@@ -359,59 +340,10 @@ int main (int argc, char * const argv[]) {
     argc -= optind;
     argv += optind;
     
-    /* Perform single-shot export  */
-    if (!runServer)
-        return exportCertificates(userAnchors, outputFile);
-    
-    /* Formulate the list of directories to observe; We use FSEvents rather than SecKeychainAddCallback(), as during testing the keychain
-     * API never actually fired a callback for the target keychains. */
-    FSEventStreamRef eventStream;
-    {
-        NSAutoreleasePool *streamPool = [[NSAutoreleasePool alloc] init];
+    /* Perform export  */
+    int result = exportCertificates(userAnchors, outputFile);
 
-        NSSearchPathDomainMask searchPathDomains = NSLocalDomainMask|NSSystemDomainMask;
-        if (userAnchors)
-            searchPathDomains |= NSUserDomainMask;
-
-        NSArray *libraryDirectories = NSSearchPathForDirectoriesInDomains(NSAllLibrariesDirectory, searchPathDomains, YES);
-        NSMutableArray *keychainDirectories = [NSMutableArray arrayWithCapacity: [libraryDirectories count]];
-        for (NSString *dir in libraryDirectories) {
-            [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Keychains"]];
-            [keychainDirectories addObject: [dir stringByAppendingPathComponent: @"Security/Trust Settings"]];
-        }
-
-        /* Configure the listener */
-        MPCertSyncConfig *config = [[[MPCertSyncConfig alloc] init] autorelease];
-        config->userAnchors = userAnchors;
-        config->outputFile = [outputFile retain];
-
-        FSEventStreamContext ctx = {
-            .version = 0,
-            .info = config,
-            .retain = CFRetain,
-            .release = CFRelease,
-            .copyDescription = CFCopyDescription
-        };
-        eventStream = FSEventStreamCreate(NULL, certsync_keychain_cb, &ctx, (CFArrayRef)keychainDirectories, kFSEventStreamEventIdSinceNow, 0.0, kFSEventStreamCreateFlagUseCFTypes);
-        FSEventStreamScheduleWithRunLoop(eventStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
-        FSEventStreamStart(eventStream);
-        
-        [streamPool release];
-    }
-
-    /* Perform an initial one-shot export, and then run forever */
-    {
-    NSAutoreleasePool *shotPool = [[NSAutoreleasePool alloc] init];
-        int ret;
-        if ((ret = exportCertificates(userAnchors, outputFile)) != EXIT_SUCCESS)
-            return EXIT_FAILURE;
-        [shotPool release];
-    }
-
-    CFRunLoopRun();
-    FSEventStreamRelease(eventStream);
     [pool release];
-
-    return EXIT_SUCCESS;
+    return result;
 }
 
