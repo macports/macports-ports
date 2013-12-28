@@ -70,7 +70,8 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     github.version          ${gh_version}
     github.tag_prefix       ${gh_tag_prefix}
 
-    name                    ${github.project}
+    default name            {${github.project}}
+
     version                 ${github.version}
     homepage                ${github.homepage}
     git.url                 ${github.homepage}.git
