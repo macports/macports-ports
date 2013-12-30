@@ -101,7 +101,7 @@ proc wxWidgets._set {option action args} {
         }
     } elseif {${args} eq "wxPython-3.0"} {
         wxWidgets.name      "wxPython"
-        wxWidgets.version   "2.9"
+        wxWidgets.version   "3.0"
         wxWidgets.port      "wxPython-3.0"
         if {${os.major} < 9} {
             pre-fetch {
