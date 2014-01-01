@@ -245,7 +245,7 @@ proc xcode::destroot_one_target {args settings} {
 
 proc xcode::get_build_args {args} {
     global tcl_platform
-    global configure.universal_archs configure.build_arch macosx_deployment_target
+    global configure.universal_archs configure.build_arch configure.cxx_stdlib macosx_deployment_target
     global os.major os.arch
     global developer_dir configure.sdkroot
 
@@ -274,6 +274,12 @@ proc xcode::get_build_args {args} {
     }
     if {[info exists gcc_version]} {
         append xcode_build_args " GCC_VERSION=${gcc_version}"
+    }
+
+    # CLANG_CXX_LIBRARY
+    # TODO: Simplify once MacPorts 2.3 is released
+    if {[info exists configure.cxx_stdlib]} {
+        append xcode_build_args " CLANG_CXX_LIBRARY=\"${configure.cxx_stdlib}\""
     }
 
     return $xcode_build_args
