@@ -46,7 +46,7 @@
 #     build.cmd        ${ruby.bin}
 
 # options:
-#   ruby.branch: select ruby version. 1.8, 1.9 or 2.0.
+#   ruby.branch: select ruby version. 1.8, 1.9, 2.0 or 2.1.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 # values:
@@ -105,6 +105,7 @@ proc ruby_set_branch {option action args} {
         1.8 {set ruby.api_version 1.8}
         1.9 {set ruby.api_version 1.9.1}
         2.0 {set ruby.api_version 2.0.0}
+        2.1 {set ruby.api_version 2.1.0}
     }
     set ruby.gemdir         ${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.api_version}
     # define installation libraries as vendor location
@@ -158,15 +159,15 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     # for setup.rb +universal
     global ruby.config_rubyprog_name
 
-    if {${implementation} eq "ruby19"} {
-        ruby.branch 1.9
-    } elseif {${implementation} eq "ruby20"} {
-        ruby.branch 2.0
-    } elseif {${implementation} eq "ruby"} {
-        ruby.branch 1.8
-    } else {
-        ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19, ruby20 possible)"
-        return -code error "ruby.setup failed"
+    switch ${implementation} {
+        ruby21 { ruby.branch 2.1 }
+        ruby20 { ruby.branch 2.0 }
+        ruby19 { ruby.branch 1.9 }
+        ruby   { ruby.branch 1.8 }
+        default {
+            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19, ruby20, ruby21 possible)"
+            return -code error "ruby.setup failed"
+        }
     }
 
     # define ruby global names and lists
