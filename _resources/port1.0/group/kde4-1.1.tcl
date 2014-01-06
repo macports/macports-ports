@@ -73,16 +73,6 @@ switch ${os.platform}_${os.major} {
     }
 }
 
-post-extract {
-    # Following the official word: Change #include ["<]Phonon...[">] to
-    # ...phonon... in all files that contain that header.
-    fs-traverse item ${worksrcpath} {
-        if {[file isfile ${item}]} {
-            reinplace -locale C "/#include/s@Phonon@phonon@" ${item}
-        }
-    }
-}
-
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
 if {${qt_dir} != ${prefix}} {
