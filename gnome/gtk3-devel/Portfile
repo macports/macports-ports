@@ -1,0 +1,249 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+# $Id$
+
+PortSystem          1.0
+PortGroup           archcheck 1.0
+PortGroup           muniversal 1.0
+PortGroup           xcodeversion 1.0
+PortGroup           active_variants 1.1
+
+name                gtk3-devel
+set real_name       gtk+
+epoch               1
+version             3.11.2
+set branch          [join [lrange [split ${version} .] 0 1] .]
+categories          gnome x11
+license             LGPL-2.1+
+maintainers         cal openmaintainer
+platforms           darwin
+
+checksums           rmd160  1d591207a119124d8c46d025908d6bd0af97b1ed \
+                    sha256  3c24c57fc5cb7a5ea39d3a3ff7b12be63d7f21a52fd6f20f7b983e19b7b0268a
+
+description         GTK+ widget toolkit
+
+long_description    \
+    GTK+ is a highly usable, feature rich toolkit for creating graphical \
+    user interfaces which boasts cross platform compatibility and an easy \
+    to use API. GTK+ it is written in C, but has bindings to many other \
+    popular programming languages such as C++, Python and C# among others.
+
+homepage            http://www.gtk.org/
+distname            ${real_name}-${version}
+use_xz              yes
+
+master_sites        gnome:sources/gtk+/${branch}/ \
+                    ftp://ftp.gtk.org/pub/gtk/${branch}/ \
+                    http://ftp.gtk.org/pub/gtk/${branch}/
+
+minimum_xcodeversions {9 3.1}
+depends_build       port:pkgconfig
+
+depends_lib         port:atk \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    port:gdk-pixbuf2 \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    port:gobject-introspection
+
+depends_run         port:shared-mime-info \
+                    port:hicolor-icon-theme
+
+patchfiles          patch-gdk_quartz_gdkevents-quartz.c-syntax-error.diff
+
+archcheck.files \
+    lib/libatk-1.0.dylib \
+    lib/libintl.dylib \
+    lib/libjasper.dylib \
+    lib/libpango-1.0.dylib \
+    lib/libtiff.dylib
+
+configure.args      --enable-static \
+                    --disable-glibtest \
+                    --enable-introspection \
+                    --disable-wayland-backend \
+                    --disable-schemas-compile \
+                    gio_can_sniff=yes
+
+# gobject-introspection uses g-ir-scanner, which uses $CC from env
+if {[variant_isset universal]} {
+    foreach arch ${configure.universal_archs} {
+        lappend merger_build_args(${arch})  CC='${configure.cc} -arch ${arch}'
+        lappend merger_build_args(${arch})  CC_FOR_BUILD='${configure.cc} -arch ${arch}'
+        lappend merger_destroot_args(${arch})  CC='${configure.cc} -arch ${arch}'
+        lappend merger_destroot_args(${arch})  CC_FOR_BUILD='${configure.cc} -arch ${arch}'
+    }
+} else {
+    build.args-append       CC="${configure.cc} ${configure.cc_archflags}" \
+                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
+    destroot.args-append    CC="${configure.cc} ${configure.cc_archflags}" \
+                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
+}
+
+build.args-append   V=1 \
+                    CPP_FOR_BUILD="${configure.cpp}"
+
+configure.ccache    no
+configure.cppflags-append   -DX_LOCALE
+configure.cflags-append     -fstrict-aliasing
+
+pre-configure {
+    if {![variant_isset quartz] && ![variant_isset x11]} {
+        error "Either +x11 or +quartz is required"
+    }
+}
+
+test.run            yes
+test.target         check
+
+post-destroot {
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING HACKING NEWS README \
+        ${destroot}${docdir}
+
+    # avoid conflict with the gtk-update-icon-cache installed by gtk2
+    move ${destroot}${prefix}/bin/gtk-update-icon-cache \
+         ${destroot}${prefix}/bin/gtk-update-icon-cache-3.0
+    
+    ui_debug "Creating gtk.immodules..."
+    system "DYLD_LIBRARY_PATH=${destroot}${prefix}/lib \
+        ${destroot}${prefix}/bin/gtk-query-immodules-3.0 \
+        ${destroot}${prefix}/lib/gtk-3.0/3.0.0/immodules/*.so \
+        >${destroot}${prefix}/etc/gtk-3.0/gtk.immodules"
+    reinplace "s|${destroot}||" ${destroot}${prefix}/etc/gtk-3.0/gtk.immodules
+}
+
+post-activate {
+    ui_debug "Updating gdk-pixbuf.loaders..."
+    system "${prefix}/bin/gdk-pixbuf-query-loaders \
+        >${prefix}/etc/gtk-3.0/gdk-pixbuf.loaders"
+    ui_debug "Updating GLib schemas..."
+    system "${prefix}/bin/glib-compile-schemas \
+        ${prefix}/share/glib-2.0/schemas"
+}
+
+platform darwin 8 {
+    # The rules enabled by gobject-introspection require GNU make 3.81+
+    depends_build-append    port:gmake
+    build.cmd               ${prefix}/bin/gmake
+
+    if {[variant_isset quartz] || ![variant_isset x11]} {
+        configure.ldflags-append  -framework Cocoa -framework Carbon
+    }
+}
+
+if {${os.major} <= 8} {
+    configure.args-append --disable-cups
+}
+
+if {[variant_isset no_x11]} {
+    default_variants +quartz
+} elseif {![variant_isset quartz]} {
+    default_variants +x11
+}
+
+if {[variant_isset universal]} {
+    set cups /usr/bin/cups-config
+    if {[info exists universal_sysroot]} {
+        set cups ${universal_sysroot}${cups}
+    }
+    configure.env-append CUPS_CONFIG=${cups}
+
+    # Find architectures which will not run on build platform.
+    set cpu64bit_capable [sysctl hw.cpu64bit_capable]
+    if {${os.arch} eq "i386"} {
+        set cross_archs ppc64
+        if {${os.major} >= 10} {
+            lappend cross_archs ppc
+        }
+        set host_archs "ppc ppc64"
+        set run_archs i386
+        if {${cpu64bit_capable}} {
+            set run_archs "x86_64 ${run_archs}"
+        }
+    } else {
+        set cross_archs "i386 x86_64"
+        set host_archs "i386 x86_64"
+        set run_archs ppc
+        if {${cpu64bit_capable}} {
+            set run_archs "ppc64 ${run_archs}"
+        }
+    }
+
+    pre-configure {
+        set run_arch ""
+        foreach arch ${run_archs} {
+            if {[lsearch ${universal_archs_to_use} ${arch}] != -1} {
+                set run_arch ${arch}
+                break
+            }
+        }
+
+        if {${run_arch} eq ""} {
+            ui_error ""
+            ui_error "${name} requires at least one architecture runnable on this"
+            ui_error "machine to be able to build universally. Please add at least"
+            ui_error "one of the following architectures to `universal_archs` in"
+            ui_error "\"${prefix}/etc/macports/macports.conf\":"
+            ui_error ""
+            ui_error "\t${run_archs}"
+            ui_error ""
+        }
+
+        foreach arch ${host_archs} {
+            lappend merger_configure_env(${arch}) \
+                NM='/usr/bin/nm -p'
+        }
+
+        foreach arch ${cross_archs} {
+            lappend merger_configure_env(${arch}) \
+                GTK_UPDATE_ICON_CACHE=${worksrcpath}-${run_arch}/gtk/gtk-update-icon-cache \
+                GDK_PIXBUF_CSOURCE=${worksrcpath}-${run_arch}/gdk-pixbuf/gdk-pixbuf-csource
+            lappend merger_build_env(${arch}) \
+                GDK_PIXBUF_MODULE_FILE=${worksrcpath}-${run_arch}/gdk-pixbuf/gdk-pixbuf.loaders
+        }
+
+        # Let gtk_host in .pc files be the same on all architectures
+        set host powerpc
+        if {${os.arch} eq "i386"} {
+            set host i686
+        }
+        eval reinplace s/@host@/${host}-apple-darwin${os.version}/ \
+            [glob -directory ${worksrcpath} *.pc.in]
+    }
+    
+    merger_arch_compiler yes
+} else {
+    configure.cc "${configure.cc} ${configure.cc_archflags}"
+}
+
+variant quartz conflicts x11 {
+    require_active_variants path:lib/pkgconfig/cairo.pc:cairo quartz
+    require_active_variants path:lib/pkgconfig/pango.pc:pango quartz
+
+    configure.args-append   --enable-quartz-backend
+}
+
+variant x11 conflicts quartz no_x11 {
+    require_active_variants path:lib/pkgconfig/cairo.pc:cairo x11
+    require_active_variants path:lib/pkgconfig/pango.pc:pango x11
+
+    depends_lib-append \
+        port:xorg-libXi \
+        port:xorg-libXrandr \
+        port:xorg-libXcursor \
+        port:xorg-libXinerama \
+        port:xorg-libXdamage \
+        port:xorg-libXcomposite \
+        port:xorg-libXfixes \
+        port:at-spi2-atk
+
+    configure.args-append      --enable-xinerama \
+                               --x-include=${prefix}/include --x-lib=${prefix}/lib \
+                               --enable-x11-backend
+}
+
+variant no_x11 conflicts x11 description {Legacy compatibility variant} {}
+
+livecheck.type  gnome-with-unstable
+livecheck.name  gtk+
