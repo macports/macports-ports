@@ -243,18 +243,12 @@ variant universal {
                 }
                 # check if building for a completely different arch
                 if {$bits_differ || (${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64"))
-                        || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))
-                        || $macosx_deployment_target != $macosx_version} {
-                    if {$macosx_deployment_target == $macosx_version} {
-                        set hostversion ${os.version}
-                    } else {
-                        set hostversion [expr [lindex [split $macosx_deployment_target .] 1] + 4]
-                    }
+                        || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))} {
                     switch -- ${arch} {
-                        x86_64  {set host "--host=x86_64-apple-${os.platform}${hostversion}"}
-                        i386    {set host "--host=i686-apple-${os.platform}${hostversion}"}
-                        ppc     {set host "--host=powerpc-apple-${os.platform}${hostversion}"}
-                        ppc64   {set host "--host=powerpc64-apple-${os.platform}${hostversion}"}
+                        x86_64  {set host "--host=x86_64-apple-${os.platform}${os.version}"}
+                        i386    {set host "--host=i686-apple-${os.platform}${os.version}"}
+                        ppc     {set host "--host=powerpc-apple-${os.platform}${os.version}"}
+                        ppc64   {set host "--host=powerpc64-apple-${os.platform}${os.version}"}
                     }
                 }
             }
