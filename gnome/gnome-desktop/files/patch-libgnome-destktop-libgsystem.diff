@@ -1,0 +1,674 @@
+diff -urN libgnome-desktop/libgsystem.orig/Makefile-libgsystem.am libgnome-desktop/libgsystem/Makefile-libgsystem.am
+--- libgnome-desktop/libgsystem.orig/Makefile-libgsystem.am	2013-10-04 15:18:43.000000000 -0700
++++ libgnome-desktop/libgsystem/Makefile-libgsystem.am	2013-12-12 16:16:36.000000000 -0800
+@@ -35,6 +35,8 @@
+ 	$(libgsystem_srcpath)/gsystem-subprocess.h \
+ 	$(libgsystem_srcpath)/gsystem-subprocess.c \
+ 	$(libgsystem_srcpath)/libgsystem.h \
++	$(libgsystem_srcpath)/gsystem-osx-compat.c \
++	$(libgsystem_srcpath)/gsystem-osx-compat.h \
+ 	$(NULL)
+ 
+ libgsystem_la_CFLAGS = $(AM_CFLAGS) $(libgsystem_cflags)
+diff -urN libgnome-desktop/libgsystem.orig/gsystem-file-utils.c libgnome-desktop/libgsystem/gsystem-file-utils.c
+--- libgnome-desktop/libgsystem.orig/gsystem-file-utils.c	2013-10-04 15:18:43.000000000 -0700
++++ libgnome-desktop/libgsystem/gsystem-file-utils.c	2013-12-12 16:16:36.000000000 -0800
+@@ -38,6 +38,10 @@
+ #include <limits.h>
+ #include <dirent.h>
+ 
++#ifdef __APPLE__
++#include "gsystem-osx-compat.h"
++#endif
++
+ static int
+ close_nointr (int fd)
+ {
+diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.c libgnome-desktop/libgsystem/gsystem-osx-compat.c
+--- libgnome-desktop/libgsystem.orig/gsystem-osx-compat.c	1969-12-31 16:00:00.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-osx-compat.c	2013-12-12 16:31:06.000000000 -0800
+@@ -0,0 +1,570 @@
++/*
++ * Mac OS X compatibility functions
++ * Based on GNU lib compatibility library
++ */
++
++/* provide a replacement openat function
++   Copyright (C) 2004-2013 Free Software Foundation, Inc.
++
++   This program is free software: you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3 of the License, or
++   (at your option) any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
++
++/* written by Jim Meyering */
++
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <dirent.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <errno.h>
++
++#include "gsystem-osx-compat.h"
++
++int
++openat (int fd, char const *file, int flags, ...)
++{
++  mode_t mode = 0;
++
++  if (flags & O_CREAT)
++    {
++      va_list arg;
++      va_start (arg, flags);
++
++      mode = (mode_t) va_arg (arg, int);
++
++      va_end (arg);
++    }
++
++  return openat_permissive (fd, file, flags, mode, NULL);
++}
++
++/* Like openat (FD, FILE, FLAGS, MODE), but if CWD_ERRNO is
++   nonnull, set *CWD_ERRNO to an errno value if unable to save
++   or restore the initial working directory.  This is needed only
++   the first time remove.c's remove_dir opens a command-line
++   directory argument.
++
++   If a previous attempt to restore the current working directory
++   failed, then we must not even try to access a '.'-relative name.
++   It is the caller's responsibility not to call this function
++   in that case.  */
++
++int
++openat_permissive (int fd, char const *file, int flags, mode_t mode,
++                   int *cwd_errno)
++{
++  struct saved_cwd saved_cwd;
++  int saved_errno;
++  int err;
++  bool save_ok;
++
++  if (fd == AT_FDCWD || IS_ABSOLUTE_FILE_NAME (file))
++    return open (file, flags, mode);
++
++//  {
++//    char buf[OPENAT_BUFFER_SIZE];
++//    char *proc_file = openat_proc_name (buf, fd, file);
++//    if (proc_file)
++//      {
++//        int open_result = open (proc_file, flags, mode);
++//        int open_errno = errno;
++//        if (proc_file != buf)
++//          free (proc_file);
++//        /* If the syscall succeeds, or if it fails with an unexpected
++//           errno value, then return right away.  Otherwise, fall through
++//           and resort to using save_cwd/restore_cwd.  */
++//        if (0 <= open_result || ! EXPECTED_ERRNO (open_errno))
++//          {
++//            errno = open_errno;
++//            return open_result;
++//          }
++//      }
++//  }
++
++  save_ok = (save_cwd (&saved_cwd) == 0);
++  if (! save_ok)
++    {
++      if (! cwd_errno)
++        openat_save_fail (errno);
++      *cwd_errno = errno;
++    }
++  if (0 <= fd && fd == saved_cwd.desc)
++    {
++      /* If saving the working directory collides with the user's
++         requested fd, then the user's fd must have been closed to
++         begin with.  */
++      free_cwd (&saved_cwd);
++      errno = EBADF;
++      return -1;
++    }
++
++  err = fchdir (fd);
++  saved_errno = errno;
++
++  if (! err)
++    {
++      err = open (file, flags, mode);
++      saved_errno = errno;
++      if (save_ok && restore_cwd (&saved_cwd) != 0)
++        {
++          if (! cwd_errno)
++            {
++              /* Don't write a message to just-created fd 2.  */
++              saved_errno = errno;
++              if (err == STDERR_FILENO)
++                close (err);
++              openat_restore_fail (saved_errno);
++            }
++          *cwd_errno = errno;
++        }
++    }
++
++  free_cwd (&saved_cwd);
++  errno = saved_errno;
++  return err;
++}
++
++/* Return true if our openat implementation must resort to
++   using save_cwd and restore_cwd.  */
++bool
++openat_needs_fchdir (void)
++{
++  bool needs_fchdir = true;
++//   int fd = open ("/", O_SEARCH);
++// 
++//   if (0 <= fd)
++//     {
++//       char buf[OPENAT_BUFFER_SIZE];
++//       char *proc_file = openat_proc_name (buf, fd, ".");
++//       if (proc_file)
++//         {
++//           needs_fchdir = false;
++//           if (proc_file != buf)
++//             free (proc_file);
++//         }
++//       close (fd);
++//     }
++// 
++  return needs_fchdir;
++}
++
++/* save-cwd.c -- Save and restore current working directory.
++
++   Copyright (C) 1995, 1997-1998, 2003-2006, 2009-2013 Free Software
++   Foundation, Inc.
++
++   This program is free software: you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3 of the License, or
++   (at your option) any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
++
++/* Written by Jim Meyering.  */
++
++/* Record the location of the current working directory in CWD so that
++   the program may change to other directories and later use restore_cwd
++   to return to the recorded location.  This function may allocate
++   space using malloc (via getcwd) or leave a file descriptor open;
++   use free_cwd to perform the necessary free or close.  Upon failure,
++   no memory is allocated, any locally opened file descriptors are
++   closed;  return non-zero -- in that case, free_cwd need not be
++   called, but doing so is ok.  Otherwise, return zero.
++
++   The _raison d'etre_ for this interface is that the working directory
++   is sometimes inaccessible, and getcwd is not robust or as efficient.
++   So, we prefer to use the open/fchdir approach, but fall back on
++   getcwd if necessary.  This module works for most cases with just
++   the getcwd-lgpl module, but to be truly robust, use the getcwd module.
++
++   Some systems lack fchdir altogether: e.g., OS/2, pre-2001 Cygwin,
++   SCO Xenix.  Also, SunOS 4 and Irix 5.3 provide the function, yet it
++   doesn't work for partitions on which auditing is enabled.  If
++   you're still using an obsolete system with these problems, please
++   send email to the maintainer of this code.  */
++
++int
++save_cwd (struct saved_cwd *cwd)
++{
++  cwd->name = NULL;
++
++  cwd->desc = open (".", O_SEARCH);
++  
++  if (cwd->desc < 0)
++    {
++      cwd->name = getcwd (NULL, 0);
++      return cwd->name ? 0 : -1;
++    }
++
++  set_cloexec_flag (cwd->desc, true);
++  return 0;
++}
++
++/* Change to recorded location, CWD, in directory hierarchy.
++   Upon failure, return -1 (errno is set by chdir or fchdir).
++   Upon success, return zero.  */
++
++int
++restore_cwd (const struct saved_cwd *cwd)
++{
++  return fchdir (cwd->desc);
++}
++
++void
++free_cwd (struct saved_cwd *cwd)
++{
++  if (cwd->desc >= 0)
++    close (cwd->desc);
++  free (cwd->name);
++}
++
++void
++openat_save_fail (int errnum)
++{
++   printf("Unable to record current working directory: error %d", errnum);
++   exit(1);
++}
++
++
++void
++openat_restore_fail (int errnum)
++{
++   printf("Failed to return to initial working directory: error %d", errnum);
++   exit(1);
++}
++
++/* Set the 'FD_CLOEXEC' flag of DESC if VALUE is true,
++   or clear the flag if VALUE is false.
++   Return 0 on success, or -1 on error with 'errno' set.
++
++   Note that on MingW, this function does NOT protect DESC from being
++   inherited into spawned children.  Instead, either use dup_cloexec
++   followed by closing the original DESC, or use interfaces such as
++   open or pipe2 that accept flags like O_CLOEXEC to create DESC
++   non-inheritable in the first place.  */
++
++int
++set_cloexec_flag (int desc, bool value)
++{
++#ifdef F_SETFD
++
++  int flags = fcntl (desc, F_GETFD, 0);
++
++  if (0 <= flags)
++    {
++      int newflags = (value ? flags | FD_CLOEXEC : flags & ~FD_CLOEXEC);
++
++      if (flags == newflags
++          || fcntl (desc, F_SETFD, newflags) != -1)
++        return 0;
++    }
++
++  return -1;
++
++#else /* !F_SETFD */
++
++  /* Use dup2 to reject invalid file descriptors; the cloexec flag
++     will be unaffected.  */
++  if (desc < 0)
++    {
++      errno = EBADF;
++      return -1;
++    }
++  if (dup2 (desc, desc) < 0)
++    /* errno is EBADF here.  */
++    return -1;
++
++  /* There is nothing we can do on this kind of platform.  Punt.  */
++  return 0;
++#endif /* !F_SETFD */
++}
++
++
++/* Duplicates a file handle FD, while marking the copy to be closed
++   prior to exec or spawn.  Returns -1 and sets errno if FD could not
++   be duplicated.  */
++
++int
++dup_cloexec (int fd)
++{
++  return fcntl (fd, F_DUPFD_CLOEXEC, 0);
++}
++
++static DIR *fdopendir_with_dup (int, int, struct saved_cwd const *);
++static DIR *fd_clone_opendir (int, struct saved_cwd const *);
++
++/* Replacement for POSIX fdopendir.
++
++   First, try to simulate it via opendir ("/proc/self/fd/...").  Failing
++   that, simulate it by using fchdir metadata, or by doing
++   save_cwd/fchdir/opendir(".")/restore_cwd.
++   If either the save_cwd or the restore_cwd fails (relatively unlikely),
++   then give a diagnostic and exit nonzero.
++
++   If successful, the resulting stream is based on FD in
++   implementations where streams are based on file descriptors and in
++   applications where no other thread or signal handler allocates or
++   frees file descriptors.  In other cases, consult dirfd on the result
++   to find out whether FD is still being used.
++
++   Otherwise, this function works just like POSIX fdopendir.
++
++   W A R N I N G:
++
++   Unlike other fd-related functions, this one places constraints on FD.
++   If this function returns successfully, FD is under control of the
++   dirent.h system, and the caller should not close or modify the state of
++   FD other than by the dirent.h functions.  */
++DIR *
++fdopendir (int fd)
++{
++  DIR *dir = fdopendir_with_dup (fd, -1, NULL);
++
++  if (!dir)
++    {
++      int saved_errno = errno;
++      if (EXPECTED_ERRNO (saved_errno))
++        {
++          struct saved_cwd cwd;
++          if (save_cwd (&cwd) != 0)
++            openat_save_fail (errno);
++          dir = fdopendir_with_dup (fd, -1, &cwd);
++          saved_errno = errno;
++          free_cwd (&cwd);
++          errno = saved_errno;
++        }
++    }
++
++  return dir;
++}
++
++/* Like fdopendir, except that if OLDER_DUPFD is not -1, it is known
++   to be a dup of FD which is less than FD - 1 and which will be
++   closed by the caller and not otherwise used by the caller.  This
++   function makes sure that FD is closed and all file descriptors less
++   than FD are open, and then calls fd_clone_opendir on a dup of FD.
++   That way, barring race conditions, fd_clone_opendir returns a
++   stream whose file descriptor is FD.
++
++   If REPLACE_CHDIR or CWD is null, use opendir ("/proc/self/fd/...",
++   falling back on fchdir metadata.  Otherwise, CWD is a saved version
++   of the working directory; use fchdir/opendir(".")/restore_cwd(CWD).  */
++static DIR *
++fdopendir_with_dup (int fd, int older_dupfd, struct saved_cwd const *cwd)
++{
++  int dupfd = dup (fd);
++  if (dupfd < 0 && errno == EMFILE)
++    dupfd = older_dupfd;
++  if (dupfd < 0)
++    return NULL;
++  else
++    {
++      DIR *dir;
++      int saved_errno;
++      if (dupfd < fd - 1 && dupfd != older_dupfd)
++        {
++          dir = fdopendir_with_dup (fd, dupfd, cwd);
++          saved_errno = errno;
++        }
++      else
++        {
++          close (fd);
++          dir = fd_clone_opendir (dupfd, cwd);
++          saved_errno = errno;
++          if (! dir)
++            {
++              int fd1 = dup (dupfd);
++              if (fd1 != fd)
++                openat_save_fail (fd1 < 0 ? errno : EBADF);
++            }
++        }
++
++      if (dupfd != older_dupfd)
++        close (dupfd);
++      errno = saved_errno;
++      return dir;
++    }
++}
++
++/* Like fdopendir, except the result controls a clone of FD.  It is
++   the caller's responsibility both to close FD and (if the result is
++   not null) to closedir the result.  */
++static DIR *
++fd_clone_opendir (int fd, struct saved_cwd const *cwd)
++{
++   if (fchdir (fd) != 0)
++      return NULL;
++   else
++      {
++          DIR *dir = opendir (".");
++          int saved_errno = errno;
++          if (restore_cwd (cwd) != 0)
++            openat_restore_fail (errno);
++          errno = saved_errno;
++          return dir;
++      }
++}
++
++/* Replacement for Solaris' function by the same name.
++   <http://www.google.com/search?q=unlinkat+site:docs.sun.com>
++   First, try to simulate it via (unlink|rmdir) ("/proc/self/fd/FD/FILE").
++   Failing that, simulate it via save_cwd/fchdir/(unlink|rmdir)/restore_cwd.
++   If either the save_cwd or the restore_cwd fails (relatively unlikely),
++   then give a diagnostic and exit nonzero.
++   Otherwise, this function works just like Solaris' unlinkat.  */
++
++# define AT_FUNC_NAME unlinkat
++# define AT_FUNC_F1 rmdir
++# define AT_FUNC_F2 unlink
++# define AT_FUNC_USE_F1_COND AT_REMOVEDIR
++# define AT_FUNC_POST_FILE_PARAM_DECLS , int flag
++# define AT_FUNC_POST_FILE_ARGS        /* empty */
++
++// # include "at-func.c"
++
++#ifdef AT_FUNC_USE_F1_COND
++# define CALL_FUNC(F)                           \
++  (flag == AT_FUNC_USE_F1_COND                  \
++    ? AT_FUNC_F1 (F AT_FUNC_POST_FILE_ARGS)     \
++    : AT_FUNC_F2 (F AT_FUNC_POST_FILE_ARGS))
++# define VALIDATE_FLAG(F)                       \
++  if (flag & ~AT_FUNC_USE_F1_COND)              \
++    {                                           \
++      errno = EINVAL;                           \
++      return FUNC_FAIL;                         \
++    }
++#else
++# define CALL_FUNC(F) (AT_FUNC_F1 (F AT_FUNC_POST_FILE_ARGS))
++# define VALIDATE_FLAG(F) /* empty */
++#endif
++
++#ifdef AT_FUNC_RESULT
++# define FUNC_RESULT AT_FUNC_RESULT
++#else
++# define FUNC_RESULT int
++#endif
++
++#ifdef AT_FUNC_FAIL
++# define FUNC_FAIL AT_FUNC_FAIL
++#else
++# define FUNC_FAIL -1
++#endif
++
++/* Call AT_FUNC_F1 to operate on FILE, which is in the directory
++   open on descriptor FD.  If AT_FUNC_USE_F1_COND is defined to a value,
++   AT_FUNC_POST_FILE_PARAM_DECLS must include a parameter named flag;
++   call AT_FUNC_F2 if FLAG is 0 or fail if FLAG contains more bits than
++   AT_FUNC_USE_F1_COND.  Return int and fail with -1 unless AT_FUNC_RESULT
++   or AT_FUNC_FAIL are defined.  If possible, do it without changing the
++   working directory.  Otherwise, resort to using save_cwd/fchdir,
++   then AT_FUNC_F?/restore_cwd.  If either the save_cwd or the restore_cwd
++   fails, then give a diagnostic and exit nonzero.  */
++FUNC_RESULT
++AT_FUNC_NAME (int fd, char const *file AT_FUNC_POST_FILE_PARAM_DECLS)
++{
++  VALIDATE_FLAG (flag);
++
++  if (fd == AT_FDCWD || IS_ABSOLUTE_FILE_NAME (file))
++    return CALL_FUNC (file);
++
++#ifdef GNULIB_SUPPORT_ONLY_AT_FDCWD
++  errno = ENOTSUP;
++  return FUNC_FAIL;
++#else
++  {
++  /* Be careful to choose names unlikely to conflict with
++     AT_FUNC_POST_FILE_PARAM_DECLS.  */
++  struct saved_cwd saved_cwd;
++  int saved_errno;
++  FUNC_RESULT err;
++
++//  {
++//    char proc_buf[OPENAT_BUFFER_SIZE];
++//    char *proc_file = openat_proc_name (proc_buf, fd, file);
++//    if (proc_file)
++//      {
++//        FUNC_RESULT proc_result = CALL_FUNC (proc_file);
++//        int proc_errno = errno;
++//        if (proc_file != proc_buf)
++//          free (proc_file);
++//        /* If the syscall succeeds, or if it fails with an unexpected
++//           errno value, then return right away.  Otherwise, fall through
++//           and resort to using save_cwd/restore_cwd.  */
++//        if (FUNC_FAIL != proc_result)
++//          return proc_result;
++//        if (! EXPECTED_ERRNO (proc_errno))
++//          {
++//            errno = proc_errno;
++//            return proc_result;
++//          }
++//      }
++//  }
++
++  if (save_cwd (&saved_cwd) != 0)
++    openat_save_fail (errno);
++  if (0 <= fd && fd == saved_cwd.desc)
++    {
++      /* If saving the working directory collides with the user's
++         requested fd, then the user's fd must have been closed to
++         begin with.  */
++      free_cwd (&saved_cwd);
++      errno = EBADF;
++      return FUNC_FAIL;
++    }
++
++  if (fchdir (fd) != 0)
++    {
++      saved_errno = errno;
++      free_cwd (&saved_cwd);
++      errno = saved_errno;
++      return FUNC_FAIL;
++    }
++
++  err = CALL_FUNC (file);
++  saved_errno = (err == FUNC_FAIL ? errno : 0);
++
++  if (restore_cwd (&saved_cwd) != 0)
++    openat_restore_fail (errno);
++
++  free_cwd (&saved_cwd);
++
++  if (saved_errno)
++    errno = saved_errno;
++  return err;
++  }
++#endif
++}
++#undef CALL_FUNC
++#undef FUNC_RESULT
++#undef FUNC_FAIL
++
++
++// End include at-func.c
++
++# undef AT_FUNC_NAME
++# undef AT_FUNC_F1
++# undef AT_FUNC_F2
++# undef AT_FUNC_USE_F1_COND
++# undef AT_FUNC_POST_FILE_PARAM_DECLS
++# undef AT_FUNC_POST_FILE_ARGS
++
+diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.h libgnome-desktop/libgsystem/gsystem-osx-compat.h
+--- libgnome-desktop/libgsystem.orig/gsystem-osx-compat.h	1969-12-31 16:00:00.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-osx-compat.h	2013-12-12 16:16:36.000000000 -0800
+@@ -0,0 +1,43 @@
++/*
++ * Mac OS X Compatibility
++ */
++
++#define IS_ABSOLUTE_FILE_NAME(name) (*name == '/')
++#define AT_FDCWD 0
++#define AT_REMOVEDIR 0
++
++#define EXPECTED_ERRNO(Errno)                   \
++  ((Errno) == ENOTDIR || (Errno) == ENOENT      \
++   || (Errno) == EPERM || (Errno) == EACCES     \
++   || (Errno) == ENOSYS /* Solaris 8 */         \
++   || (Errno) == EOPNOTSUPP /* FreeBSD */)
++
++#define O_SEARCH O_RDONLY
++
++typedef int bool;
++enum { false, true };
++
++bool openat_needs_fchdir (void);
++
++int openat (int fd, char const *file, int flags, ...);
++int openat_permissive (int fd, char const *file, int flags, mode_t mode, int *cwd_errno);
++
++struct saved_cwd {
++    int desc;
++    char *name;
++};
++
++int save_cwd (struct saved_cwd *cwd);
++int restore_cwd (const struct saved_cwd *cwd);
++void free_cwd (struct saved_cwd *cwd);
++
++void openat_save_fail (int errnum);
++void openat_restore_fail (int errnum);
++
++int set_cloexec_flag (int desc, bool value);
++int dup_cloexec (int fd);
++
++int fdatasync(int fildes);
++int unlinkat(int fd, const char *path, int flag);
++
++DIR *fdopendir(int fd);
+diff -urN libgnome-desktop/libgsystem.orig/gsystem-shutil.c libgnome-desktop/libgsystem/gsystem-shutil.c
+--- libgnome-desktop/libgsystem.orig/gsystem-shutil.c	2013-10-04 15:18:43.000000000 -0700
++++ libgnome-desktop/libgsystem/gsystem-shutil.c	2013-12-12 16:16:36.000000000 -0800
+@@ -33,6 +33,11 @@
+ #include <dirent.h>
+ #include <fcntl.h>
+ 
++#ifdef __APPLE__
++#include "gsystem-osx-compat.h"
++#endif
++
++
+ /* Taken from systemd/src/shared/util.h */
+ union dirent_storage {
+         struct dirent dent;
+@@ -248,7 +253,11 @@
+       if (dent->d_type == DT_UNKNOWN)
+         {
+           struct stat stbuf;
++#ifdef __APPLE__
++          if (lstat (dent->d_name, &stbuf) == -1)
++#else
+           if (fstatat (dfd, dent->d_name, &stbuf, AT_SYMLINK_NOFOLLOW) == -1)
++#endif
+             {
+               int errsv = errno;
+               if (errsv == ENOENT)
