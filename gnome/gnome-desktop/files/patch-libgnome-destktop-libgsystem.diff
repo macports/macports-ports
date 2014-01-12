@@ -1,6 +1,6 @@
 diff -urN libgnome-desktop/libgsystem.orig/Makefile-libgsystem.am libgnome-desktop/libgsystem/Makefile-libgsystem.am
 --- libgnome-desktop/libgsystem.orig/Makefile-libgsystem.am	2013-10-04 15:18:43.000000000 -0700
-+++ libgnome-desktop/libgsystem/Makefile-libgsystem.am	2013-12-12 16:16:36.000000000 -0800
++++ libgnome-desktop/libgsystem/Makefile-libgsystem.am	2014-01-11 15:28:58.000000000 -0800
 @@ -35,6 +35,8 @@
  	$(libgsystem_srcpath)/gsystem-subprocess.h \
  	$(libgsystem_srcpath)/gsystem-subprocess.c \
@@ -12,7 +12,7 @@ diff -urN libgnome-desktop/libgsystem.orig/Makefile-libgsystem.am libgnome-deskt
  libgsystem_la_CFLAGS = $(AM_CFLAGS) $(libgsystem_cflags)
 diff -urN libgnome-desktop/libgsystem.orig/gsystem-file-utils.c libgnome-desktop/libgsystem/gsystem-file-utils.c
 --- libgnome-desktop/libgsystem.orig/gsystem-file-utils.c	2013-10-04 15:18:43.000000000 -0700
-+++ libgnome-desktop/libgsystem/gsystem-file-utils.c	2013-12-12 16:16:36.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-file-utils.c	2014-01-11 16:08:49.000000000 -0800
 @@ -38,6 +38,10 @@
  #include <limits.h>
  #include <dirent.h>
@@ -24,9 +24,38 @@ diff -urN libgnome-desktop/libgsystem.orig/gsystem-file-utils.c libgnome-desktop
  static int
  close_nointr (int fd)
  {
+@@ -444,12 +448,28 @@
+                      GError       **error)
+ {
+   /* Linux specific probably */
++#ifdef O_CLOEXEC
+   *out_fd = open (gs_file_get_path_cached (path), O_RDONLY | O_NONBLOCK | O_DIRECTORY | O_CLOEXEC);
+   if (*out_fd == -1)
+     {
+       _set_error_from_errno (error);
+       return FALSE;
+     }
++#else
++  *out_fd = open (gs_file_get_path_cached (path), O_RDONLY | O_NONBLOCK | O_DIRECTORY);
++  if (*out_fd == -1)
++    {
++      _set_error_from_errno (error);
++      return FALSE;
++    }
++  int fc_error = fcntl(*out_fd, F_SETFD, FD_CLOEXEC);
++  if (fc_error != 0)
++    {
++      g_set_error_literal (error, G_IO_ERROR, g_io_error_from_errno (fc_error),
++                           g_strerror (fc_error));
++      return FALSE;
++    }
++#endif
+   return TRUE;
+ }
+ 
 diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.c libgnome-desktop/libgsystem/gsystem-osx-compat.c
 --- libgnome-desktop/libgsystem.orig/gsystem-osx-compat.c	1969-12-31 16:00:00.000000000 -0800
-+++ libgnome-desktop/libgsystem/gsystem-osx-compat.c	2013-12-12 16:31:06.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-osx-compat.c	2014-01-11 15:28:58.000000000 -0800
 @@ -0,0 +1,570 @@
 +/*
 + * Mac OS X compatibility functions
@@ -600,7 +629,7 @@ diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.c libgnome-desktop
 +
 diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.h libgnome-desktop/libgsystem/gsystem-osx-compat.h
 --- libgnome-desktop/libgsystem.orig/gsystem-osx-compat.h	1969-12-31 16:00:00.000000000 -0800
-+++ libgnome-desktop/libgsystem/gsystem-osx-compat.h	2013-12-12 16:16:36.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-osx-compat.h	2014-01-11 15:28:58.000000000 -0800
 @@ -0,0 +1,43 @@
 +/*
 + * Mac OS X Compatibility
@@ -647,7 +676,7 @@ diff -urN libgnome-desktop/libgsystem.orig/gsystem-osx-compat.h libgnome-desktop
 +DIR *fdopendir(int fd);
 diff -urN libgnome-desktop/libgsystem.orig/gsystem-shutil.c libgnome-desktop/libgsystem/gsystem-shutil.c
 --- libgnome-desktop/libgsystem.orig/gsystem-shutil.c	2013-10-04 15:18:43.000000000 -0700
-+++ libgnome-desktop/libgsystem/gsystem-shutil.c	2013-12-12 16:16:36.000000000 -0800
++++ libgnome-desktop/libgsystem/gsystem-shutil.c	2014-01-11 16:50:40.000000000 -0800
 @@ -33,6 +33,11 @@
  #include <dirent.h>
  #include <fcntl.h>
@@ -672,3 +701,96 @@ diff -urN libgnome-desktop/libgsystem.orig/gsystem-shutil.c libgnome-desktop/lib
              {
                int errsv = errno;
                if (errsv == ENOENT)
+@@ -271,6 +280,7 @@
+           
+       if (dent->d_type == DT_DIR)
+         {
++#ifdef O_CLOEXEC
+           int child_dfd = openat (dfd, dent->d_name, O_RDONLY | O_NONBLOCK | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+ 
+           if (child_dfd == -1)
+@@ -285,7 +295,31 @@
+                   goto out;
+                 }
+             }
++#else
++          int child_dfd = openat (dfd, dent->d_name, O_RDONLY | O_NONBLOCK | O_DIRECTORY | O_NOFOLLOW);
+ 
++          if (child_dfd == -1)
++            {
++              if (errno == ENOENT)
++                continue;
++              else
++                {
++                  int errsv = errno;
++                  g_set_error_literal (error, G_IO_ERROR, g_io_error_from_errno (errsv),
++                                       g_strerror (errsv));
++                  goto out;
++                }
++            }
++
++          int fc_error = fcntl(child_dfd, F_SETFD, FD_CLOEXEC);
++          
++          if (fc_error != 0)
++            {
++	          g_set_error_literal (error, G_IO_ERROR, g_io_error_from_errno (fc_error),
++                                       g_strerror (fc_error));
++                  goto out;
++	    }
++#endif
+           child_dir = fdopendir (child_dfd);
+           if (!child_dir)
+             {
+@@ -352,9 +386,9 @@
+   DIR *d = NULL;
+ 
+   /* With O_NOFOLLOW first */
++#ifdef O_CLOEXEC
+   dfd = openat (AT_FDCWD, gs_file_get_path_cached (path),
+                 O_RDONLY | O_NONBLOCK | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+-
+   if (dfd == -1)
+     {
+       int errsv = errno;
+@@ -374,7 +408,40 @@
+           goto out;
+         }
+     }
+-  else
++#else
++  dfd = openat (AT_FDCWD, gs_file_get_path_cached (path),
++                O_RDONLY | O_NONBLOCK | O_DIRECTORY | O_NOFOLLOW);
++  if (dfd == -1)
++    {
++      int errsv = errno;
++      if (errsv == ENOENT)
++        {
++          ;
++        }
++      else if (errsv == ENOTDIR || errsv == ELOOP)
++        {
++          if (!gs_file_unlink (path, cancellable, error))
++            goto out;
++        }
++      else
++        {
++          g_set_error_literal (error, G_IO_ERROR, g_io_error_from_errno (errsv),
++                               g_strerror (errsv));
++          goto out;
++        }
++    }
++
++  int fc_error = fcntl(dfd, F_SETFD, FD_CLOEXEC);
++  
++  if (fc_error != 0)
++    {
++      g_set_error_literal (error, G_IO_ERROR, g_io_error_from_errno (fc_error),
++                           g_strerror (fc_error));
++      goto out;
++    }
++
++#endif
++  if (dfd > 0)
+     {
+       d = fdopendir (dfd);
+       if (!d)
