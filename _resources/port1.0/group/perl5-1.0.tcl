@@ -35,20 +35,24 @@
 # portfile configuration options
 # perl5.branches: the major perl versions supported by this module. A
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
+# perl5.branches must be set in the portfile
 # perl5.default_branch: the branch used when you request p5-foo
 options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
-# perl5.branches exists here for backward compatibility with old p5 portfiles.
-# You should still set it in the portfile.
-default perl5.branches {"5.8 5.10 5.12 5.14"}
+
 proc perl5_get_default_branch {} {
-    global prefix
-    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.12
+    global prefix perl5.branches
+    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.16
     if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
-        return [join [lrange [split $val .] 0 1] .]
+        set ret [join [lrange [split $val .] 0 1] .]
     } else {
-        return 5.12
+        set ret 5.16
     }
+    # if the above default is not supported by this module, use the latest it does support
+    if {[info exists perl5.branches] && [lsearch -exact ${perl5.branches} $ret] == -1} {
+        set ret [lindex ${perl5.branches} end]
+    }
+    return $ret
 }
 
 proc perl5.extract_config {var {default ""}} {
