@@ -438,7 +438,6 @@ set portfetch::mirror_sites::sites(savannah) {
     http://mirrors.zerg.biz/nongnu/
     http://savannah.c3sl.ufpr.br/
     ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
-    http://www.de-mirrors.de/nongnu/
 }
 # Alias nongnu to savannah
 set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
