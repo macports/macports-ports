@@ -330,6 +330,16 @@ proc clang_variant_isset {} {
     return [expr {[clang_variant_name] ne ""}]
 }
 
+proc avx_compiler_isset {} {
+    global configure.cc
+
+    if {[string match *clang* ${configure.cc}]} {
+        return 1
+    }
+
+    return 0
+}
+
 proc fortran_variant_isset {} {
     return [expr {[fortran_variant_name] ne ""}]
 }
