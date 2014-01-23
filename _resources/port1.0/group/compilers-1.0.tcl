@@ -100,7 +100,7 @@ foreach v ${clang_versions} {
     set cdb(dragonegg3$v,variant)  dragonegg3$v
     set cdb(dragonegg3$v,compiler) macports-dragonegg-3.$v
     set cdb(dragonegg3$v,descrip)  "MacPorts dragonegg 3.$v"
-    set cdb(dragonegg3$v,depends)  port:dragonegg-3.$v
+    set cdb(dragonegg3$v,depends)  path:bin/dragonegg-3.$v-gcc:dragonegg-3.$v
     set cdb(dragonegg3$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
     set cdb(dragonegg3$v,dependsd) port:g95
     set cdb(dragonegg3$v,dependsa) dragonegg-3.$v
