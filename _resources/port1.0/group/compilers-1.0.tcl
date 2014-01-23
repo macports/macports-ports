@@ -279,7 +279,8 @@ proc compilers.setup_variants {args} {
 }
 
 foreach variant ${compilers.gcc_variants} {
-    if {[variant_isset $variant]} {
+    # we need to check the default_variants so we can't use variant_isset
+    if {[info exists variations($variant)] && $variations($variant) eq "+"} {
         depends_lib-delete      port:g95
         break
     }
@@ -328,10 +329,11 @@ proc fortran_active_variant_name {depspec} {
 }
 
 proc fortran_variant_name {} {
-    global compilers.fortran_variants
+    global compilers.fortran_variants variations
 
     foreach fc ${compilers.fortran_variants} {
-        if {[variant_isset $fc]} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($fc)] && $variations($fc) eq "+"} {
             return $fc
         }
     }
@@ -340,16 +342,18 @@ proc fortran_variant_name {} {
 }
 
 proc clang_variant_name {} {
-    global compilers.clang_variants compilers.dragonegg_variants
+    global compilers.clang_variants compilers.dragonegg_variants variations
 
     foreach c ${compilers.clang_variants} {
-        if {[variant_isset $c]} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($c)] && $variations($c) eq "+"} {
             return $c
         }
     }
 
     foreach c ${compilers.dragonegg_variants} {
-        if {[variant_isset $c]} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($c)] && $variations($c) eq "+"} {
             return $c
         }
     }
