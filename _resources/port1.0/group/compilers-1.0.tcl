@@ -96,8 +96,9 @@ foreach v ${clang_versions} {
     set cdb(clang3$v,f90)      ""
 }
 
-# dragonegg versions will always match the corresponding clang version
-foreach v ${clang_versions} {
+# dragonegg versions match the corresponding clang version until 3.5
+set dragonegg_versions {0 1 2 3 4}
+foreach v ${dragonegg_versions} {
     lappend compilers.dragonegg_variants dragonegg3$v
     set cdb(dragonegg3$v,variant)  dragonegg3$v
     set cdb(dragonegg3$v,compiler) macports-dragonegg-3.$v
