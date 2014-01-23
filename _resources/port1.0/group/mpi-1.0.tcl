@@ -47,6 +47,7 @@ set mpi.cxx  mpicxx
 set mpi.f77  mpif77
 set mpi.f90  mpif90
 set mpi.fc   mpif90
+set mpi.name ""
 
 set mpidb(mpich,variant)  mpich
 set mpidb(mpich,descrip)  "MPICH Compiler"
@@ -101,6 +102,7 @@ proc mpi.setup_variants {args} {
                     }
 
                     depends_lib-append path:\$path:$mpidb($variant,name)-\$d_name
+                    set mpi.name $mpidb($variant,name)-\$d_name
 
                     foreach compiler {cc cxx f77 f90} {
                         set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
