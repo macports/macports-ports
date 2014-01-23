@@ -365,6 +365,23 @@ proc clang_variant_isset {} {
     return [expr {[clang_variant_name] ne ""}]
 }
 
+proc gcc_variant_name {} {
+    global compilers.gcc_variants variations
+
+    foreach c ${compilers.gcc_variants} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($c)] && $variations($c) eq "+"} {
+            return $c
+        }
+    }
+
+    return ""
+}
+
+proc gcc_variant_isset {} {
+    return [expr {[gcc_variant_name] ne ""}]
+}
+
 proc avx_compiler_isset {} {
     global configure.cc
 
