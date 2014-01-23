@@ -150,6 +150,37 @@ proc mpi_variant_name {} {
     return ""
 }
 
+proc mpi.enforce_variant {args} {
+    foreach portname $args {
+        if {![catch {set result [active_variants $portname "" ""]}]} {
+            set otmpi  [mpi_active_variant_name $portname]
+            set mympi  [mpi_variant_name]
+
+            if {$otmpi ne "" && $mympi eq ""} {
+                default_variants +$otmpi
+            } elseif {$otmpi ne $mympi} {
+                ui_error "Install $portname +$mympi"
+                return -code error "$portname +$mympi not installed"
+            }
+
+            compilers.enforce_c $portname
+        }
+    }
+}
+
+# only run this if mpi is chosen
+pre-fetch {
+    if {${compilers.require_fortran} && [mpi_variant_isset]} {
+        set mpif [fortran_active_variant_name ${mpi.name}]
+        set myf  [fortran_variant_name]
+
+        if {$myf eq "g95" && $myf ne $mpif} {
+            ui_error "${mpi.name} has a different fortran variant ($mpif) than the selected $myf"
+            return -code error "${mpi.name} needs the $myf variant"
+        }
+    }
+}
+
 proc mpi_variant_isset {} {
     return [expr {[mpi_variant_name] ne ""}]
 }
