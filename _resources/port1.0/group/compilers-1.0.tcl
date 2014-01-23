@@ -36,6 +36,8 @@
 #
 #   PortGroup               compilers 1.0
 
+PortGroup active_variants 1.1
+
 options compilers.variants compilers.gcc_variants
 default compilers.variants {}
 default compilers.fortran_variants {}
