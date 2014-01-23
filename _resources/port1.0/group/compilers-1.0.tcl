@@ -407,6 +407,9 @@ proc compilers.setup {args} {
         if {[compilers.is_fortran_only]} {
             # remove gfortran since that only exists to "complete" clang/llvm
             set remove_list [remove_from_list ${compilers.fortran_variants} gfortran]
+        } elseif {[compilers.is_c_only]} {
+            # remove gfortran and g95 since those are purely for fortran
+            set remove_list [remove_from_list ${compilers.variants} {gfortran g95}]
         }
 
         foreach v $args {
