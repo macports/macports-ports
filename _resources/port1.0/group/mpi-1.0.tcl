@@ -122,6 +122,20 @@ proc mpi.setup_variants {args} {
     }
 }
 
+proc mpi_active_variant_name {depspec} {
+    global mpi.variants
+
+    foreach m ${mpi.variants} {
+        if {![catch {set result [active_variants $depspec $m ""]}]} {
+            if {$result} {
+                return $m
+            }
+        }
+    }
+
+    return ""
+}
+
 proc mpi_variant_name {} {
     global mpi.variants
 
