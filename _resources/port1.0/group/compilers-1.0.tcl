@@ -45,6 +45,8 @@ default compilers.dragonegg_variants {}
 default compilers.require_fortran 0
 default compilers.setup_done 0
 
+set compilers.list {cc cxx cpp objc fc f77 f90}
+
 # build database of gcc 4{4..9} compiler attributes
 set gcc_versions {4 5 6 7 8 9}
 foreach v ${gcc_versions} {
@@ -134,7 +136,8 @@ set cdb(llvm,fc)       ""
 set cdb(llvm,f77)      ""
 set cdb(llvm,f90)      ""
 
-# and lastly we add a gfortran and g95 variant for use with clang*
+# and lastly we add a gfortran and g95 variant for use with clang*; note that
+# we don't need gfortran when we are in an "only-fortran" mode
 set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
 set cdb(gfortran,descrip)  "Fortran compiler from gcc47"
@@ -185,7 +188,7 @@ foreach variant ${compilers.variants} {
 
 proc compilers.setup_variants {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
-    global compilers.dragonegg_variants compilers.fortran_variants
+    global compilers.dragonegg_variants compilers.fortran_variants compilers.list
 
     foreach variant [split $args] {
         if {$cdb($variant,f77) ne ""} {
@@ -240,7 +243,7 @@ proc compilers.setup_variants {args} {
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
             set comp ""
-            foreach compiler {cc cxx cpp objc fc f77 f90} {
+            foreach compiler ${compilers.list} {
                 if {$cdb($variant,$compiler) ne ""} {
                     append comp [subst {
                         configure.$compiler $cdb($variant,$compiler)
@@ -322,14 +325,44 @@ proc add_from_list {L A} {
     return [concat $L $A]
 }
 
+proc compilers.choose {args} {
+    global compilers.list
+
+    # zero out the variable before and append args
+    set compilers.list {}
+    foreach v $args {
+        lappend compilers.list $v
+    }
+}
+
+proc compilers.is_fortran_only {} {
+    global compilers.list
+
+    foreach c {cc cxx cpp objc} {
+        if {[lsearch -exact ${compilers.list} $c] >= 0} {
+            return 0
+        }
+    }
+
+    return 1
+}
+
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
-    global compilers.require_fortran compilers.setup_done
+    global compilers.require_fortran compilers.setup_done compilers.list
 
     if {!${compilers.setup_done}} {
         set add_list {}
         set remove_list ${compilers.variants}
+
+        # if we are only setting fortran compilers, then we are in "only fortran
+        # mode", i.e. we just need +gccXY and +dragoneggXY for the fortran
+        # compilers so we remove +clangXY and +llvm
+        if {[compilers.is_fortran_only]} {
+            # remove gfortran since that only exists to "complete" clang/llvm
+            set remove_list [remove_from_list ${compilers.fortran_variants} gfortran]
+        }
 
         foreach v $args {
             # if any negated compiler (e.g. -gcc47) is specified then we are
