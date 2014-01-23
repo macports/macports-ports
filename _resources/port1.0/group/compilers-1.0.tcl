@@ -311,6 +311,20 @@ proc c_variant_name {} {
     return ""
 }
 
+proc fortran_active_variant_name {depspec} {
+    global compilers.fortran_variants
+
+    foreach fc ${compilers.fortran_variants} {
+        if {![catch {set result [active_variants $depspec $fc ""]}]} {
+            if {$result} {
+                return $fc
+            }
+        }
+    }
+
+    return ""
+}
+
 proc fortran_variant_name {} {
     global compilers.fortran_variants
 
