@@ -140,8 +140,8 @@ set cdb(llvm,f90)      ""
 # we don't need gfortran when we are in an "only-fortran" mode
 set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
-set cdb(gfortran,descrip)  "Fortran compiler from gcc47"
-set cdb(gfortran,depends)  port:gcc47
+set cdb(gfortran,descrip)  "Fortran compiler from gcc48"
+set cdb(gfortran,depends)  port:gcc48
 set cdb(gfortran,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
 set cdb(gfortran,dependsd) ""
 set cdb(gfortran,dependsa) ""
@@ -153,9 +153,9 @@ set cdb(gfortran,cc)       ""
 set cdb(gfortran,cxx)      ""
 set cdb(gfortran,cpp)      ""
 set cdb(gfortran,objc)     ""
-set cdb(gfortran,fc)       ${prefix}/bin/gfortran-mp-4.7
-set cdb(gfortran,f77)      ${prefix}/bin/gfortran-mp-4.7
-set cdb(gfortran,f90)      ${prefix}/bin/gfortran-mp-4.7
+set cdb(gfortran,fc)       ${prefix}/bin/gfortran-mp-4.8
+set cdb(gfortran,f77)      ${prefix}/bin/gfortran-mp-4.8
+set cdb(gfortran,f90)      ${prefix}/bin/gfortran-mp-4.8
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
