@@ -423,6 +423,23 @@ proc compilers.is_c_only {} {
     return 1
 }
 
+# for the c compiler
+proc compilers.enforce_c {args} {
+    foreach portname $args {
+        if {![catch {set result [active_variants $portname "" ""]}]} {
+            set otcomp  [c_active_variant_name $portname]
+            set mycomp  [c_variant_name]
+
+            if {$otcomp ne "" && $mycomp eq ""} {
+                default_variants +$otcomp
+            } elseif {$otcomp ne $mycomp} {
+                ui_error "Install $portname +$mycomp"
+                return -code error "$portname +$mycomp not installed"
+            }
+        }
+    }
+}
+
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
