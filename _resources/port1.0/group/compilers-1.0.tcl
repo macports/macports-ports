@@ -283,12 +283,13 @@ foreach variant ${compilers.gcc_variants} {
     }
 }
 
-proc compiler_variant_name {} {
-    global compilers.variants
+proc c_variant_name {} {
+    global compilers.variants compilers.fortran_variants
+    set c_list [remove_from_list ${compilers.variants} {gfortran g95}]
 
-    foreach variant ${compilers.variants} {
-        if {[variant_isset $variant]} {
-            return $variant
+    foreach cc $c_list {
+        if {[variant_isset $cc]} {
+            return $cc
         }
     }
 
