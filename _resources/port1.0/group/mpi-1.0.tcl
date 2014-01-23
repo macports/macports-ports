@@ -139,10 +139,11 @@ proc mpi_active_variant_name {depspec} {
 }
 
 proc mpi_variant_name {} {
-    global mpi.variants
+    global mpi.variants variations
 
     foreach mpiv ${mpi.variants} {
-        if {[variant_isset $mpiv]} {
+        # we need to check the default_variants so we can't use variant_isset
+        if {[info exists variations($mpiv)] && $variations($mpiv) eq "+"} {
             return $mpiv
         }
     }
