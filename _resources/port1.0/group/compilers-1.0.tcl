@@ -385,7 +385,14 @@ proc gcc_variant_isset {} {
 proc avx_compiler_isset {} {
     global configure.cc
 
-    if {[string match *clang* ${configure.cc}]} {
+    set cc ${configure.cc}
+
+    # check for mpi
+    if {[string match *mpi* $cc]} {
+        set cc [exec ${configure.cc} -show]
+    }
+
+    if {[string match *clang* $cc]} {
         return 1
     }
 
