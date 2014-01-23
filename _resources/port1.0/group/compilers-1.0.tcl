@@ -308,6 +308,28 @@ proc fortran_variant_name {} {
     return ""
 }
 
+proc clang_variant_name {} {
+    global compilers.clang_variants compilers.dragonegg_variants
+
+    foreach c ${compilers.clang_variants} {
+        if {[variant_isset $c]} {
+            return $c
+        }
+    }
+
+    foreach c ${compilers.dragonegg_variants} {
+        if {[variant_isset $c]} {
+            return $c
+        }
+    }
+
+    return ""
+}
+
+proc clang_variant_isset {} {
+    return [expr {[clang_variant_name] ne ""}]
+}
+
 proc fortran_variant_isset {} {
     return [expr {[fortran_variant_name] ne ""}]
 }
