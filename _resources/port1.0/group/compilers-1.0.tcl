@@ -440,6 +440,28 @@ proc compilers.enforce_c {args} {
     }
 }
 
+proc compilers.enforce_fortran {args} {
+    foreach portname $args {
+        if {![catch {set result [active_variants $portname "" ""]}]} {
+            set otf  [fortran_active_variant_name $portname]
+            set myf  [fortran_variant_name]
+
+            # gfortran is nothing more than the fortran compiler from gcc48
+            set equiv 0
+            if {($otf eq "gcc48" || $otf eq "gfortran") && ($myf eq "gcc48" || $myf eq "gfortran")} {
+                set equiv 1
+            }
+
+            if {$otf ne "" && $myf eq ""} {
+                default_variants +$otf
+            } elseif {$otf ne $myf && !$equiv} {
+                ui_error "Install $portname +$myf"
+                return -code error "$portname +$myf not installed"
+            }
+        }
+    }
+}
+
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
