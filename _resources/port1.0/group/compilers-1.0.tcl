@@ -380,6 +380,18 @@ proc compilers.is_fortran_only {} {
     return 1
 }
 
+proc compilers.is_c_only {} {
+    global compilers.list
+
+    foreach c {f77 f90 fc} {
+        if {[lsearch -exact ${compilers.list} $c] >= 0} {
+            return 0
+        }
+    }
+
+    return 1
+}
+
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
