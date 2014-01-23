@@ -71,7 +71,7 @@ foreach v ${gcc_versions} {
     set cdb(gcc4$v,f90)      ${prefix}/bin/gfortran-mp-4.$v
 }
 
-set clang_versions {0 1 2 3 4}
+set clang_versions {0 1 2 3 4 5}
 foreach v ${clang_versions} {
     lappend compilers.clang_variants clang3$v
     set cdb(clang3$v,variant)  clang3$v
