@@ -221,6 +221,13 @@ proc compilers.setup_variants {args} {
                             configure.cflags-delete $old
                             configure.cflags-append $new
                         }
+                    }]
+                }
+            }
+
+            foreach flag $cdb($variant,flags) {
+                foreach {old new} $flag {
+                    append f [subst {
                         if {\[string first $old \${configure.cxxflags}\] > -1} {
                             configure.cxxflags-delete $old
                             configure.cxxflags-append $new
