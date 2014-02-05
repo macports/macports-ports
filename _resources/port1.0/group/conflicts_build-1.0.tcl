@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2012, 2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -32,8 +32,8 @@
 #
 # This PortGroup implements the "conflicts_build" option, which lets ports
 # specify that they would fail to build properly if certain other ports are
-# installed at configuration or build time. This is in contrast to the
-# MacPorts built-in "conflicts" option, which is for indicating activation-
+# installed at configure, build and/or destroot time. This is in contrast to
+# the MacPorts built-in "conflicts" option, which is for indicating activation-
 # time conflicts (i.e. ports that install files in the same locations).
 #
 # Ideally the conflicts_build option should be integrated into MacPorts base
@@ -41,7 +41,7 @@
 
 
 # conflicts_build: the list of ports with which this port conflicts at
-# configuration or build time.
+# configure, build and/or destroot time.
 options conflicts_build
 default conflicts_build {}
 
@@ -68,5 +68,9 @@ pre-configure {
 }
 
 pre-build {
+    conflicts_build._check_for_conflicting_ports
+}
+
+pre-destroot {
     conflicts_build._check_for_conflicting_ports
 }
