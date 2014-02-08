@@ -1,6 +1,6 @@
---- src/hostapi/coreaudio/pa_mac_core.c.orig	2011-10-20 18:40:12.000000000 +0900
-+++ src/hostapi/coreaudio/pa_mac_core.c	2012-01-07 20:30:48.000000000 +0900
-@@ -1128,8 +1128,8 @@
+--- src/hostapi/coreaudio/pa_mac_core.c.orig	2013-08-29 09:36:56.000000000 +0900
++++ src/hostapi/coreaudio/pa_mac_core.c	2014-02-01 13:00:46.000000000 +0900
+@@ -1158,8 +1158,8 @@
                                     const double sampleRate,
                                     void *refCon )
  {
@@ -11,7 +11,7 @@
      /*An Apple TN suggests using CAStreamBasicDescription, but that is C++*/
      AudioStreamBasicDescription desiredFormat;
      OSStatus result = noErr;
-@@ -1200,7 +1200,7 @@
+@@ -1230,7 +1230,7 @@
      desc.componentFlags        = 0;
      desc.componentFlagsMask    = 0;
      /* -- find the component -- */
@@ -20,7 +20,7 @@
      if( !comp )
      {
         DBUG( ( "AUHAL component not found." ) );
-@@ -1209,7 +1209,7 @@
+@@ -1239,7 +1239,7 @@
         return paUnanticipatedHostError;
      }
      /* -- open it -- */
@@ -29,7 +29,7 @@
      if( result )
      {
         DBUG( ( "Failed to open AUHAL component." ) );
-@@ -1562,7 +1562,7 @@
+@@ -1592,7 +1592,7 @@
  #undef ERR_WRAP
  
      error:
@@ -38,7 +38,7 @@
         *audioUnit = NULL;
         if( result )
            return PaMacCore_SetError( result, line, 1 );
-@@ -2575,13 +2575,13 @@
+@@ -2613,13 +2613,13 @@
         }
         if( stream->outputUnit && stream->outputUnit != stream->inputUnit ) {
            AudioUnitUninitialize( stream->outputUnit );
@@ -54,7 +54,7 @@
            stream->inputUnit = NULL;
         }
         if( stream->inputRingBuffer.buffer )
-@@ -2641,12 +2641,12 @@
+@@ -2679,12 +2679,12 @@
  
  // it's not clear from appl's docs that this really waits
  // until all data is flushed.
