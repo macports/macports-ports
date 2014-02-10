@@ -87,7 +87,7 @@ proc python_get_default_version {} {
 }
 
 proc python_set_versions {option action args} {
-    if {$action != "set"} {
+    if {$action ne "set"} {
         return
     }
     global name subport python._addedcode
@@ -95,7 +95,7 @@ proc python_set_versions {option action args} {
         foreach v [option $option] {
             subport py${v}[string trimleft $name py] { depends_lib port:python${v} }
         }
-        if {$subport == $name || $subport == ""} {
+        if {$subport eq $name || $subport eq ""} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             fetch {}
             checksum {}
@@ -139,7 +139,7 @@ proc python_set_versions {option action args} {
             }
             if {${python.set_compiler}} {
                 foreach var {cc objc cxx fc f77 f90} {
-                    if {[set configure.${var}] != ""} {
+                    if {[set configure.${var}] ne ""} {
                         build.env-append [string toupper $var]="[set configure.${var}]"
                     }
                 }
@@ -166,12 +166,12 @@ proc python_set_versions {option action args} {
 
 option_proc python.default_version python_set_default_version
 proc python_set_default_version {option action args} {
-    if {$action != "set"} {
+    if {$action ne "set"} {
         return
     }
     global name subport python.default_version
     if {[string match py-* $name]} {
-        if {$subport == $name || $subport == ""} {
+        if {$subport eq $name || $subport eq ""} {
             # Mark stub as replaced_by py24 subport if that's the
             # default version, for backwards compatibility.  If the
             # default version isn't 24, clear replaced_by -- it might
