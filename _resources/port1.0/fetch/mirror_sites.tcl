@@ -158,7 +158,6 @@ set portfetch::mirror_sites::sites(gimp) {
     ftp://ftp.gimp.org/pub/
     http://gimp.mirrors.hoobly.com/
     http://gimp.cp-dev.com/
-    http://gimp.promotionalpromos.com/
     http://gimp.sixsigmaonline.org/
     http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
     http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
