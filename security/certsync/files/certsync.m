@@ -96,6 +96,60 @@ int nsprintf (NSString *format, ...) {
 }
 
 /**
+ * Verify that the root certificate trusts itself; this filters out certificates that
+ * are still marked as trusted by the OS, but are expired or otherwise unusable.
+ */
+static BOOL ValidateSelfTrust (SecCertificateRef cert) {
+    OSStatus err;
+
+    /* Create a new trust evaluation instance */
+    SecTrustRef trust;
+    {
+        SecPolicyRef policy = SecPolicyCreateBasicX509();
+        if ((err = SecTrustCreateWithCertificates((CFTypeRef)cert, policy, &trust)) != errSecSuccess) {
+            /* Shouldn't happen */
+            nsfprintf(stderr, @"Failed to create SecTrustRef: %d\n", err);
+            CFRelease(policy);
+            return NO;
+        }
+        CFRelease(policy);
+    }
+    
+    /* Set this certificate as the only (self-)anchor */
+    {
+        CFArrayRef certs = CFArrayCreate(NULL, (const void **) &cert, 1, &kCFTypeArrayCallBacks);
+        if ((err = SecTrustSetAnchorCertificates(trust, certs)) != errSecSuccess) {
+            nsfprintf(stderr, @"Failed to set anchor certificates on our SecTrustRef: %d\n", err);
+            CFRelease(certs);
+            CFRelease(trust);
+            return NO;
+        }
+        CFRelease(certs);
+    }
+    
+    /* Evaluate the certificate trust */
+    SecTrustResultType rt;
+    if ((err = SecTrustEvaluate(trust, &rt)) != errSecSuccess) {
+        nsfprintf(stderr, @"SecTrustEvaluate() failed: %d\n", err);
+        CFRelease(trust);
+    }
+    
+    CFRelease(trust);
+    
+    /* Check the result */
+    switch (rt) {
+        case kSecTrustResultUnspecified:
+        case kSecTrustResultProceed:
+            /* Trusted */
+            return YES;
+            
+        default:
+            /* Untrusted */
+            return NO;
+    }
+}
+
+/**
  * Fetch all trusted roots for the given @a domain.
  *
  * @param domain The trust domain to query.
@@ -105,7 +159,7 @@ int nsprintf (NSString *format, ...) {
  */
 static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSError **outError) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    NSArray *trusted = nil;
+    NSMutableArray *trusted = nil;
     CFArrayRef certs = nil;
     OSStatus err;
     
@@ -131,8 +185,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
         }
     
         /* Extract trusted roots */
-        NSMutableArray *results = [NSMutableArray arrayWithCapacity: CFArrayGetCount(certs)];
-        trusted = results;
+        trusted = [NSMutableArray arrayWithCapacity: CFArrayGetCount(certs)];
         
         NSEnumerator *resultEnumerator = [(NSArray *)certs objectEnumerator];
         id certObj;
@@ -152,7 +205,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
         
             /* If empty, trust for everything (as per the Security Framework documentation) */
             if (CFArrayGetCount(trustSettings) == 0) {
-                [results addObject: certObj];
+                [trusted addObject: certObj];
             } else {
                 /* Otherwise, walk the properties and evaluate the trust settings result */
                 NSEnumerator *trustEnumerator = [(NSArray *)trustSettings objectEnumerator];
@@ -166,7 +219,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
                 
                     /* If a root, add to the result set */
                     if (settingsResult == kSecTrustSettingsResultTrustRoot || settingsResult == kSecTrustSettingsResultTrustAsRoot) {
-                        [results addObject: certObj];
+                        [trusted addObject: certObj];
                         break;
                     }
                 }
@@ -192,7 +245,29 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
         }
 
         /* All certs are trusted */
-        trusted = (NSArray *) certs;
+        trusted = [[(NSArray *) certs mutableCopy] autorelease];
+        CFRelease(certs);
+    }
+    
+    /*
+     * Filter out any trusted certificates that can not actually be used in verification; eg, they are expired.
+     *
+     * There are cases where CAs have issued new certificates using identical public keys, and the expired
+     * and current CA certificates are both included in the list of trusted certificates. In such a case,
+     * OpenSSL will use either of the two certificates; if that happens to be the expired certificate,
+     * validation will fail.
+     *
+     * This step ensures that we exclude any expired or known-unusable certificates.
+     *
+     * We enumerate a copy of the array so that we can safely modify the original during enumeration.
+     */
+    NSEnumerator *trustedEnumerator = [[[trusted copy] autorelease] objectEnumerator];
+    id certObj;
+    while ((certObj = [trustedEnumerator nextObject]) != nil) {
+        /* If self-trust validation fails, the certificate is expired or otherwise not useable */
+        if (!ValidateSelfTrust((SecCertificateRef) certObj)) {
+            [trusted removeObject: certObj];
+        }
     }
     
     [trusted retain];
