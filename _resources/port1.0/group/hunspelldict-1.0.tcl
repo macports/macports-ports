@@ -69,7 +69,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
         use_zip     yes
 
         master_sites \
-            http://ftp.services.openoffice.org/pub/OpenOffice.org/contrib/dictionaries/
+            http://archive.services.openoffice.org/pub/mirror/OpenOffice.org/contrib/dictionaries/
 
         extract.dir ${worksrcpath}
         pre-extract {
