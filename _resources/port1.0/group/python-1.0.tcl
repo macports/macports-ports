@@ -71,18 +71,14 @@ proc python_get_version {} {
 }
 proc python_get_default_version {} {
     global python.versions
-    # py-foo historically meant python24, so we default to that if present
     if {[info exists python.versions]} {
-        if {[lsearch -exact ${python.versions} 24] != -1} {
-            return 24
-        } elseif {[lsearch -exact ${python.versions} 27] != -1} {
-            # this is the actual preferred version
+        if {[lsearch -exact ${python.versions} 27] != -1} {
             return 27
         } else {
             return [lindex ${python.versions} end]
         }
     } else {
-        return 24
+        return 27
     }
 }
 
@@ -101,11 +97,7 @@ proc python_set_versions {option action args} {
             checksum {}
             extract {}
             supported_archs noarch
-            global python.default_version
-            if {${python.default_version} == "24"} {
-                replaced_by py24[string trimleft $name py]
-            }
-            global python.version
+            global python.default_version python.version
             unset python.version
             depends_lib port:py${python.default_version}[string trimleft $name py]
             patch {}
@@ -172,16 +164,6 @@ proc python_set_default_version {option action args} {
     global name subport python.default_version
     if {[string match py-* $name]} {
         if {$subport eq $name || $subport eq ""} {
-            # Mark stub as replaced_by py24 subport if that's the
-            # default version, for backwards compatibility.  If the
-            # default version isn't 24, clear replaced_by -- it might
-            # have already been set by python_set_versions. (But make
-            # sure we've set it first, or unset might complain.)
-            replaced_by py24[string trimleft $name py]
-            if {${python.default_version} != "24"} {
-                global replaced_by
-                unset replaced_by
-            }
             depends_lib port:py${python.default_version}[string trimleft $name py]
         }
     } else {
