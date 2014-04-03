@@ -6,7 +6,7 @@ PortGroup       muniversal 1.0
 
 name            dbus
 conflicts       dbus-devel
-version         1.6.12
+version         1.8.0
 maintainers     mcalhoun openmaintainer
 categories      devel
 platforms       darwin
@@ -19,21 +19,57 @@ long_description \
 homepage        http://www.freedesktop.org/Software/dbus
 master_sites    http://dbus.freedesktop.org/releases/dbus
 
-checksums           rmd160  2ffda0a66ac457ee77c498a95b85d04a147906d6 \
-                    sha256  f67a7abfd6d045c1e9eba2bba4199d301836bc0c6e8a727c765913aba780ee92
+checksums           rmd160  f0a4e143d7bd9d97cee1e0e59140e17eee92c132 \
+                    sha256  769f8c7282b535ccbe610f63a5f14137a5549834b0b0c8a783e90891b8d70b13
 
 # See r59386
 # See r68276
 patchfiles      patch-bus-system.conf.in.diff \
                 patch-dbus-dbus-sysdeps-unix.c.diff
 
+
 depends_build       \
     port:pkgconfig
 
-set dbus_user     messagebus
-set dbus_group    messagebus
+unset -nocomplain startup_root
+if { [variant_isset no_root] } {
+    set dbus_user     ${install.user}
+    set dbus_group    ${install.group}
+    
+    # See #28121 and #42994
+    #set startup_root  [join [lrange [exec /usr/bin/dscl . -read Users/${install.user} NFSHomeDirectory] 1 end]]
+    #set startup_root  [join [lrange [exec /usr/bin/dscl '/Active Directory/All Domains' -read Users/${install.user} NFSHomeDirectory] 1 end]]
+    foreach datasource [list . "'/Active Directory/All Domains'" ] {
+        if { ! [catch {system "/usr/bin/dscl ${datasource} -read Users/${install.user} NFSHomeDirectory"}] } {
+            ui_debug "dscl found ${install.user} in ${datasource}"
+            set startup_root [join [lrange [exec /usr/bin/dscl ${datasource} -read Users/${install.user} NFSHomeDirectory] 1 end]]
+            break
+        } else {
+            ui_debug "dscl can not find ${install.user} in ${datasource}"
+        }
+    }
+    if { ! [info exists startup_root] } {
+        if { ![tbool startupitem.install] } {
+            ui_debug "Unable to find a valid home directory, but user disallows startup items."
+        } else {
+            ui_warn "Unable to find a valid home directory even though user requested startup items be installed."
+        }
+    } else {
+        
+    }
+} else {
+    if { [variant_isset underscore] } {
+        set dbus_user     _messagebus
+    } else {
+        set dbus_user     messagebus
+    }
+    set dbus_group    ${dbus_user}
+    
+    if { [tbool startupitem.install] } {
+        set startup_root  ""
+    }
+}
 add_users         ${dbus_user} group=${dbus_group} realname=Message\ Bus
-set startup_root  ""
 
 depends_lib     port:expat
 
@@ -42,31 +78,56 @@ configure.args  --disable-doxygen-docs \
                 --without-x \
                 --enable-launchd \
                 --with-launchd-agent-dir=${prefix}/Library/LaunchAgents \
-                --with-session-socket-dir=/tmp \
-                --with-test-socket-dir=/tmp \
+                --with-dbus-user=${dbus_user} \
                 --disable-tests
 
-# The startupitem.install keyword does not exist in MacPorts < 2.1.
-if {![info exists startupitem.install]} {
-    set startupitem.install yes
-}
-# Set default variants taking the old no_startupitem variant into consideration.
-if {[variant_isset no_startupitem]} {
-    default_variants    -startupitem
-} else {
-    default_variants    +startupitem
+set sudo ""
+if {![variant_isset no_root]} {
+    set sudo "sudo "
 }
 
-pre-configure {
-    # Value must be set in pre-configure because dbus_user may change in variant.
-    configure.args-append  --with-dbus-user=${dbus_user}
+# These variants are obsolete
+# dbus should respect the global variable startupitem.install set in ${prefix}/etc/macports/macports.conf
+# See https://guide.macports.org/#reference.startupitems
+variant startupitem conflicts no_startupitem description {obsolete} {
+    pre-configure {
+        if { ![tbool startupitem.install] } {
+            ui_error "You have requested an obsolete variant that conflicts with the value of startupitem.install set in ${prefix}/etc/macports/macports.conf"
+            ui_error "If you want to install the startup items, please change the global variable in ${prefix}/etc/macports/macports.conf"
+            ui_error "Note: this will affect other ports"
+            ui_error "See https://guide.macports.org/#reference.startupitems"
+            ui_error "If you are upgrading and just want this error to go away, run \"${sudo}port clean dbus && ${sudo}port upgrade dbus -startupitem\""
+            return -code error "invalid obsolete variant"
+        } else {
+            ui_warn "You have requested an obsolete variant"
+            ui_warn "Installation of startup items are now determined by ${prefix}/etc/macports/macports.conf"
+            ui_warn "See https://guide.macports.org/#reference.startupitems"
+        }
+    }
+}
+
+variant no_startupitem conflicts startupitem description {obsolete} {
+    pre-configure {
+        if { [tbool startupitem.install] } {
+            ui_error "You have requested an obsolete variant that conflicts with the value of startupitem.install set in ${prefix}/etc/macports/macports.conf"
+            ui_error "If you do not want to install the startup items, please change the global variable in ${prefix}/etc/macports/macports.conf"
+            ui_error "Note: this will affect other ports"
+            ui_error "See https://guide.macports.org/#reference.startupitems"
+            ui_error "If you are upgrading and just want this error to go away, run \"${sudo}port clean dbus && port ${sudo}upgrade dbus -no_startupitem\""
+            return -code error "invalid obsolete variant"            
+        } else {
+            ui_warn "You have requested an obsolete variant"
+            ui_warn "Installation of startup items are now determined by ${prefix}/etc/macports/macports.conf"
+            ui_warn "See https://guide.macports.org/#reference.startupitems"
+        }
+    }
 }
 
 post-patch {
     reinplace "s|/usr/local|${prefix}|g" ${worksrcpath}/dbus/dbus-sysdeps-unix.c
     reinplace {s|broken_poll="no (cross compiling)"|broken_poll=yes|} ${worksrcpath}/configure
     
-    if { [variant_isset startupitem] } {
+    if { [tbool startupitem.create] } {
         # Disable if installed into startup directory.
         reinplace "s|</array>|</array>\\\n\\\n\\\t<key>Disabled</key>\\\n\\\t<true/>|" \
             ${worksrcpath}/bus/org.freedesktop.dbus-session.plist.in
@@ -94,6 +155,9 @@ destroot.keepdirs \
 set plistDir  ${prefix}/Library/LaunchDaemons
 set plistFl   ${plistDir}/org.freedesktop.dbus-system.plist
 
+set labelDaemon [file rootname [file tail ${plistFl}]]
+set labelAgent [file rootname org.freedesktop.dbus-session.plist]
+
 # universal_archs_to_use might not be set before pre-fetch.
 pre-destroot {
     global merger_dont_diff merger_configure_env
@@ -105,7 +169,7 @@ pre-destroot {
 }
 
 post-destroot {
-    # Simplify startup script over startupitem.create.
+    # Simplify startup script over startupitem.install.
     # See #15081
     xinstall -d -m 0755 ${destroot}${plistDir}
     set plist [open "${destroot}${plistFl}" w 0644]
@@ -124,13 +188,13 @@ post-destroot {
     puts ${plist} "\t<string>--system</string>"
     puts ${plist} "\t<string>--nofork</string>"
     puts ${plist} "</array>"
-    if {$macosx_deployment_target == "10.4"} {
+    if {$macosx_deployment_target eq "10.4"} {
         puts ${plist} "<key>OnDemand</key><false/>"
     } else {
         puts ${plist} "<key>KeepAlive</key><true/>"
     }
 
-    if { [variant_isset startupitem] } {
+    if { [tbool startupitem.install] } {
         puts ${plist} "<key>Disabled</key><true/>"
     }
     
@@ -139,8 +203,7 @@ post-destroot {
     
     close ${plist}
     
-    if { [variant_isset startupitem]
-    && ${startupitem.install} != "no" } {
+    if { [info exists startup_root] } {
         xinstall -d -m 0755 ${destroot}${startup_root}/Library/LaunchDaemons
         xinstall -d -m 0755 ${destroot}${startup_root}/Library/LaunchAgents
         ln -s ${plistFl} ${destroot}${startup_root}/Library/LaunchDaemons
@@ -157,31 +220,34 @@ pre-activate {
     }
 }
 
-set sudo ""
-if {![variant_isset no_root]} {
-    set sudo "sudo "
-}
 post-activate {
     file attributes ${prefix}/var/run/dbus -group ${dbus_group} -owner ${dbus_user}
     file attributes ${prefix}/libexec/dbus-daemon-launch-helper -group ${dbus_group}
     
-    if { [variant_isset startupitem] && ![variant_isset no_root] } {
+    if { [tbool startupitem.install] && ![variant_isset no_root] } {
         file attributes ${prefix}/Library/LaunchAgents/org.freedesktop.dbus-session.plist -owner root -group wheel
         file attributes ${prefix}/Library/LaunchDaemons/[file tail ${plistFl}] -owner root -group wheel
     }
 }
 
+#pre-deactivate {
+#    if { [info exists startup_root] } {
+#        catch {system "launchctl unload ${startup_root}/Library/LaunchDaemons/[file tail ${plistFl}]"}
+#        catch {system "launchctl unload ${startup_root}/Library/LaunchAgents/org.freedesktop.dbus-session.plist"}
+#    }
+#}
+
 # XXX Building with tests enabled causes dbus to link with dbus-glib,
 # which it shouldn't do because that port depends on this one: see #30088
 variant test description {enable tests} {
     configure.args-delete   --disable-tests
-    configure.args-append   --enable-tests
+    #configure.args-append   --enable-tests
+    configure.args-append   --enable-modular-tests
+    configure.args-append   --without-dbus-glib
+    depends_lib-append      port:glib2
 }
 
-variant startupitem description {Install startup files.} {}
-
-if { [variant_isset startupitem]
-&& ${startupitem.install} != "no" } {
+if { [info exists startup_root] } {
     notes "############################################################################
 # Startup items have been generated that will aid in
 # starting ${name} with launchd. They are disabled
@@ -191,24 +257,34 @@ if { [variant_isset startupitem]
 # ${sudo}launchctl load -w ${startup_root}/Library/LaunchDaemons/[file tail ${plistFl}]
 # launchctl load -w ${startup_root}/Library/LaunchAgents/org.freedesktop.dbus-session.plist
 ############################################################################"
+} else {
+    notes "############################################################################
+# Startup items were not installed for ${name}
+# Some programs which depend on ${name} might not function properly.
+# To load ${name} manually, run
+#
+# launchctl load -w ${prefix}/Library/LaunchDaemons/[file tail ${plistFl}]
+# launchctl load -w ${prefix}/Library/LaunchAgents/org.freedesktop.dbus-session.plist
+############################################################################"
 }
 
-variant no_root description {Run the DBUS daemon as MacPorts install user.} {
-    pre-fetch {
+variant no_root conflicts underscore description {Run the DBUS daemon as MacPorts install user.} {
+    pre-configure {
         if { ${install.user}=="root" || ${install.group}=="wheel" } {
             ui_error "The DBUS daemon should not be run as root."
             error "Please do not use this variant with your MacPorts configuration."
         }
     }
-
-    set dbus_user     ${install.user}
-    set dbus_group    ${install.group}
-    set startup_root  [join [lrange [exec /usr/bin/dscl . -read Users/${install.user} NFSHomeDirectory] 1 end]]
     
     # Files are installed into user's startup directory.
-    if { [variant_isset startupitem] } {
+    if { [tbool startupitem.install] } {
         destroot.violate_mtree  yes
     }
+}
+
+variant underscore conflicts no_root description {Put underscore in front of DBUS daemon user} {
+    # For darwin ${os.major} > 8, daemon users have an underscore in front of the usernames and groups.
+    # This variant allows the user to follow that convention.
 }
 
 set cross_opts  "ac_cv_have_abstract_sockets=no"
