@@ -1,0 +1,397 @@
+Post-5.18 fixes, will be included in 5.19
+
+--- ChangeLog	26 Mar 2014 15:28:41 -0000	1.225
++++ ChangeLog	1 Apr 2014 15:57:45 -0000	1.226
+@@ -1,3 +1,12 @@
++2014-04-01  15:25  Christos Zoulas <christos@zoulas.com>
++
++	* PR/341: Jan Kaluza, fix memory leak
++	* PR/342: Jan Kaluza, fix out of bounds read
++
++2014-03-28  15:25  Christos Zoulas <christos@zoulas.com>
++
++	* Fix issue with long formats not matching fmtcheck
++
+ 2014-03-26  11:25  Christos Zoulas <christos@zoulas.com>
+ 
+ 	* release 5.18
+Index: magic/Magdir/images
+===================================================================
+RCS file: /p/file/cvsroot/file/magic/Magdir/images,v
+retrieving revision 1.87
+retrieving revision 1.88
+diff -u -r1.87 -r1.88
+--- magic/Magdir/images	11 Dec 2013 14:14:20 -0000	1.87
++++ magic/Magdir/images	30 Mar 2014 21:41:45 -0000	1.88
+@@ -1,6 +1,6 @@
+ 
+ #------------------------------------------------------------------------------
+-# $File: images,v 1.87 2013/12/11 14:14:20 christos Exp $
++# $File: images,v 1.88 2014/03/30 21:41:45 christos Exp $
+ # images:  file(1) magic for image formats (see also "iff", and "c-lang" for
+ # XPM bitmaps)
+ #
+@@ -18,14 +18,17 @@
+ # `xv' recognizes only a subset of the following (RGB with pixelsize = 24)
+ # `tgatoppm' recognizes a superset (Index may be anything)
+ 1	belong&0xfff7ffff	0x01010000	Targa image data - Map
++!:strength + 2
+ >2	byte&8			8		- RLE
+ >12	leshort			>0		%hd x
+ >14	leshort			>0		%hd
+ 1	belong&0xfff7ffff	0x00020000	Targa image data - RGB
++!:strength + 2
+ >2	byte&8			8		- RLE
+ >12	leshort			>0		%hd x
+ >14	leshort			>0		%hd
+ 1	belong&0xfff7ffff	0x00030000	Targa image data - Mono
++!:strength + 2
+ >2	byte&8			8		- RLE
+ >12	leshort			>0		%hd x
+ >14	leshort			>0		%hd
+Index: magic/Magdir/msdos
+===================================================================
+RCS file: /p/file/cvsroot/file/magic/Magdir/msdos,v
+retrieving revision 1.92
+retrieving revision 1.94
+diff -u -r1.92 -r1.94
+--- magic/Magdir/msdos	14 Mar 2014 18:47:29 -0000	1.92
++++ magic/Magdir/msdos	30 Mar 2014 21:41:45 -0000	1.94
+@@ -1,6 +1,6 @@
+ 
+ #------------------------------------------------------------------------------
+-# $File: msdos,v 1.92 2014/03/14 18:47:29 christos Exp $
++# $File: msdos,v 1.94 2014/03/30 21:41:45 christos Exp $
+ # msdos:  file(1) magic for MS-DOS files
+ #
+ 
+@@ -590,7 +590,6 @@
+ >4  ubyte   !0  \b, %d colors
+ 
+ 0   belong  0x00000100
+-
+ >9  byte    0
+ >>0 byte    x           MS Windows icon resource
+ !:mime	image/x-icon
+Index: magic/Magdir/palm
+===================================================================
+RCS file: /p/file/cvsroot/file/magic/Magdir/palm,v
+retrieving revision 1.11
+retrieving revision 1.13
+diff -u -r1.11 -r1.13
+--- magic/Magdir/palm	31 Dec 2013 19:18:02 -0000	1.11
++++ magic/Magdir/palm	30 Mar 2014 21:40:08 -0000	1.13
+@@ -1,6 +1,6 @@
+ 
+ #------------------------------------------------------------------------------
+-# $File: palm,v 1.11 2013/12/31 19:18:02 christos Exp $
++# $File: palm,v 1.13 2014/03/30 21:40:08 christos Exp $
+ # palm:	 file(1) magic for PalmOS {.prc,.pdb}: applications, docfiles, and hacks
+ #
+ # Brian Lalor <blalor@hcirisc.cs.binghamton.edu>
+@@ -141,8 +141,12 @@
+ >>(0x4E.L+1)	byte		x		%02d)
+ 
+ # Palm OS .prc file types
+-60		string		libr		Palm OS dynamic library data
+->0		string		>\0		"%s"
++60		string		libr
++# flags, only bit 0 or bit 6
++# http://en.wikipedia.org/wiki/PRC_%28Palm_OS%29
++# http://web.mit.edu/tytso/www/pilot/prc-format.html
++>0x20		beshort&0xffbe	0
++>>0		string		>\0		Palm OS dynamic library data "%s"
+ 60		string		ptch		Palm OS operating system patch data
+ >0		string		>\0		"%s"
+ 
+Index: src/apprentice.c
+===================================================================
+RCS file: /p/file/cvsroot/file/src/apprentice.c,v
+retrieving revision 1.202
+retrieving revision 1.203
+diff -u -r1.202 -r1.203
+--- src/apprentice.c	14 Mar 2014 18:48:11 -0000	1.202
++++ src/apprentice.c	1 Apr 2014 15:57:28 -0000	1.203
+@@ -32,7 +32,7 @@
+ #include "file.h"
+ 
+ #ifndef	lint
+-FILE_RCSID("@(#)$File: apprentice.c,v 1.202 2014/03/14 18:48:11 christos Exp $")
++FILE_RCSID("@(#)$File: apprentice.c,v 1.203 2014/04/01 15:57:28 christos Exp $")
+ #endif	/* lint */
+ 
+ #include "magic.h"
+@@ -517,14 +517,18 @@
+ {
+ 	if (map == NULL)
+ 		return;
+-	if (map->p == NULL)
+-		return;
++	if (map->p != NULL) {
+ #ifdef QUICK
+-	if (map->len)
+-		(void)munmap(map->p, map->len);
+-	else
++		if (map->len)
++			(void)munmap(map->p, map->len);
++		else
+ #endif
+ 		free(map->p);
++	} else {
++		uint32_t j;
++		for (j = 0; j < MAGIC_SETS; j++)
++			free(map->magic[j]);
++	}
+ 	free(map);
+ }
+ 
+@@ -1290,11 +1294,7 @@
+ 		magic_entry_free(mset[j].me, mset[j].count);
+ 
+ 	if (errs) {
+-		for (j = 0; j < MAGIC_SETS; j++) {
+-			if (map->magic[j])
+-				free(map->magic[j]);
+-		}
+-		free(map);
++		apprentice_unmap(map);
+ 		return NULL;
+ 	}
+ 	return map;
+Index: src/softmagic.c
+===================================================================
+RCS file: /p/file/cvsroot/file/src/softmagic.c,v
+retrieving revision 1.180
+retrieving revision 1.183
+diff -u -r1.180 -r1.183
+--- src/softmagic.c	15 Mar 2014 21:47:40 -0000	1.180
++++ src/softmagic.c	1 Apr 2014 15:44:26 -0000	1.183
+@@ -32,11 +32,10 @@
+ #include "file.h"
+ 
+ #ifndef	lint
+-FILE_RCSID("@(#)$File: softmagic.c,v 1.180 2014/03/15 21:47:40 christos Exp $")
++FILE_RCSID("@(#)$File: softmagic.c,v 1.183 2014/04/01 15:44:26 christos Exp $")
+ #endif	/* lint */
+ 
+ #include "magic.h"
+-#define F(a, b) fmtcheck((a), (b))
+ #include <assert.h>
+ #include <string.h>
+ #include <ctype.h>
+@@ -88,6 +87,25 @@
+ 	return 0;
+ }
+ 
++#define FILE_FMTDEBUG
++#ifdef FILE_FMTDEBUG
++#define F(a, b, c) file_fmtcheck((a), (b), (c), __FILE__, __LINE__)
++
++private const char * __attribute__((__format_arg__(3)))
++file_fmtcheck(struct magic_set *ms, const struct magic *m, const char *def,
++	const char *file, size_t line)
++{
++	const char *ptr = fmtcheck(m->desc, def);
++	if (ptr == def)
++		file_magerror(ms,
++		    "%s, %zu: format `%s' does not match with `%s'",
++		    file, line, m->desc, def);
++	return ptr;
++}
++#else
++#define F(a, b, c) fmtcheck((b)->desc, (c))
++#endif
++
+ /*
+  * Go through the whole list, stopping if you find a match.  Process all
+  * the continuations of that match before returning.
+@@ -217,8 +235,8 @@
+ 		if (file_check_mem(ms, ++cont_level) == -1)
+ 			return -1;
+ 
+-		while (magic[magindex+1].cont_level != 0 &&
+-		    ++magindex < nmagic) {
++		while (++magindex < nmagic &&
++		    magic[magindex].cont_level != 0) {
+ 			m = &magic[magindex];
+ 			ms->line = m->lineno; /* for messages */
+ 
+@@ -411,11 +429,11 @@
+ 		case 1:
+ 			(void)snprintf(buf, sizeof(buf), "%c",
+ 			    (unsigned char)v);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%c"),
++			if (file_printf(ms, F(ms, m, "%c"),
+ 			    (unsigned char) v) == -1)
+ 				return -1;
+ 			break;
+@@ -433,11 +451,11 @@
+ 		case 1:
+ 			(void)snprintf(buf, sizeof(buf), "%hu",
+ 			    (unsigned short)v);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%hu"),
++			if (file_printf(ms, F(ms, m, "%hu"),
+ 			    (unsigned short) v) == -1)
+ 				return -1;
+ 			break;
+@@ -454,13 +472,14 @@
+ 		case -1:
+ 			return -1;
+ 		case 1:
+-			(void)snprintf(buf, sizeof(buf), "%u", (uint32_t)v);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			(void)snprintf(buf, sizeof(buf), "%lu",
++			    (unsigned long)(uint32_t) v);
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%u"),
+-			    (uint32_t) v) == -1)
++			if (file_printf(ms, F(ms, m, "%lu"),
++			    (unsigned long)(uint32_t) v) == -1)
+ 				return -1;
+ 			break;
+ 		}
+@@ -477,11 +496,11 @@
+ 		case 1:
+ 			(void)snprintf(buf, sizeof(buf), "%llu",
+ 			    (unsigned long long)v);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%llu"),
++			if (file_printf(ms, F(ms, m, "%llu"),
+ 			    (unsigned long long) v) == -1)
+ 				return -1;
+ 			break;
+@@ -494,7 +513,7 @@
+   	case FILE_BESTRING16:
+   	case FILE_LESTRING16:
+ 		if (m->reln == '=' || m->reln == '!') {
+-			if (file_printf(ms, F(m->desc, "%s"), m->value.s) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), m->value.s) == -1)
+ 				return -1;
+ 			t = ms->offset + m->vallen;
+ 		}
+@@ -520,7 +539,7 @@
+ 				*++last = '\0';
+ 			}
+ 
+-			if (file_printf(ms, F(m->desc, "%s"), str) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), str) == -1)
+ 				return -1;
+ 
+ 			if (m->type == FILE_PSTRING)
+@@ -532,7 +551,7 @@
+ 	case FILE_BEDATE:
+ 	case FILE_LEDATE:
+ 	case FILE_MEDATE:
+-		if (file_printf(ms, F(m->desc, "%s"),
++		if (file_printf(ms, F(ms, m, "%s"),
+ 		    file_fmttime(p->l, FILE_T_LOCAL, tbuf)) == -1)
+ 			return -1;
+ 		t = ms->offset + sizeof(uint32_t);
+@@ -542,7 +561,7 @@
+ 	case FILE_BELDATE:
+ 	case FILE_LELDATE:
+ 	case FILE_MELDATE:
+-		if (file_printf(ms, F(m->desc, "%s"),
++		if (file_printf(ms, F(ms, m, "%s"),
+ 		    file_fmttime(p->l, 0, tbuf)) == -1)
+ 			return -1;
+ 		t = ms->offset + sizeof(uint32_t);
+@@ -551,7 +570,7 @@
+ 	case FILE_QDATE:
+ 	case FILE_BEQDATE:
+ 	case FILE_LEQDATE:
+-		if (file_printf(ms, F(m->desc, "%s"),
++		if (file_printf(ms, F(ms, m, "%s"),
+ 		    file_fmttime(p->q, FILE_T_LOCAL, tbuf)) == -1)
+ 			return -1;
+ 		t = ms->offset + sizeof(uint64_t);
+@@ -560,7 +579,7 @@
+ 	case FILE_QLDATE:
+ 	case FILE_BEQLDATE:
+ 	case FILE_LEQLDATE:
+-		if (file_printf(ms, F(m->desc, "%s"),
++		if (file_printf(ms, F(ms, m, "%s"),
+ 		    file_fmttime(p->q, 0, tbuf)) == -1)
+ 			return -1;
+ 		t = ms->offset + sizeof(uint64_t);
+@@ -569,7 +588,7 @@
+ 	case FILE_QWDATE:
+ 	case FILE_BEQWDATE:
+ 	case FILE_LEQWDATE:
+-		if (file_printf(ms, F(m->desc, "%s"),
++		if (file_printf(ms, F(ms, m, "%s"),
+ 		    file_fmttime(p->q, FILE_T_WINDOWS, tbuf)) == -1)
+ 			return -1;
+ 		t = ms->offset + sizeof(uint64_t);
+@@ -584,11 +603,11 @@
+ 			return -1;
+ 		case 1:
+ 			(void)snprintf(buf, sizeof(buf), "%g", vf);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%g"), vf) == -1)
++			if (file_printf(ms, F(ms, m, "%g"), vf) == -1)
+ 				return -1;
+ 			break;
+ 		}
+@@ -604,11 +623,11 @@
+ 			return -1;
+ 		case 1:
+ 			(void)snprintf(buf, sizeof(buf), "%g", vd);
+-			if (file_printf(ms, F(m->desc, "%s"), buf) == -1)
++			if (file_printf(ms, F(ms, m, "%s"), buf) == -1)
+ 				return -1;
+ 			break;
+ 		default:
+-			if (file_printf(ms, F(m->desc, "%g"), vd) == -1)
++			if (file_printf(ms, F(ms, m, "%g"), vd) == -1)
+ 				return -1;
+ 			break;
+ 		}
+@@ -624,7 +643,7 @@
+ 			file_oomem(ms, ms->search.rm_len);
+ 			return -1;
+ 		}
+-		rval = file_printf(ms, F(m->desc, "%s"), cp);
++		rval = file_printf(ms, F(ms, m, "%s"), cp);
+ 		free(cp);
+ 
+ 		if (rval == -1)
+@@ -638,7 +657,7 @@
+ 	}
+ 
+ 	case FILE_SEARCH:
+-	  	if (file_printf(ms, F(m->desc, "%s"), m->value.s) == -1)
++	  	if (file_printf(ms, F(ms, m, "%s"), m->value.s) == -1)
+ 			return -1;
+ 		if ((m->str_flags & REGEX_OFFSET_START))
+ 			t = ms->search.offset;
+@@ -1756,7 +1775,7 @@
+ 		ms->offset = soffset;
+ 		if (rv == 1) {
+ 			if ((ms->flags & (MAGIC_MIME|MAGIC_APPLE)) == 0 &&
+-			    file_printf(ms, F(m->desc, "%u"), offset) == -1) {
++			    file_printf(ms, F(ms, m, "%u"), offset) == -1) {
+ 				free(rbuf);
+ 				return -1;
+ 			}
