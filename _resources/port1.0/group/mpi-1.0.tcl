@@ -204,7 +204,7 @@ proc mpi.choose {args} {
 }
 
 proc mpi.setup {args} {
-    global mpidb mpi.variants mpi.require compilers.variants
+    global cdb mpidb mpi.variants mpi.require compilers.variants
 
     set add_list {}
     set remove_list ${mpi.variants}
@@ -239,7 +239,7 @@ proc mpi.setup {args} {
                         $v eq "fortran" ||
                         $v eq "clang" ||
                         $v eq "require_fortran" ||
-                        [info exists cdb($v,vari)]} {
+                        [info exists cdb($v,variant)]} {
                         set cl [add_from_list $cl $variant]
                     } else {
                         return -code error "no such mpi package: $v"
