@@ -40,6 +40,7 @@ PortGroup compilers 1.0
 
 default mpi.variants {}
 default mpi.require 0
+default mpi.required_variants {}
 
 set mpi.list {cc cxx f77 f90 fc}
 set mpi.cc   mpicc
@@ -153,6 +154,11 @@ proc mpi_variant_name {} {
 }
 
 proc mpi.enforce_variant {args} {
+    global mpi.required_variants
+    set mpi.required_variants $args
+}
+
+proc mpi.action_enforce_variants {args} {
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
@@ -165,7 +171,7 @@ proc mpi.enforce_variant {args} {
                 return -code error "$portname +$mympi not installed"
             }
 
-            compilers.enforce_c $portname
+            eval compilers.action_enforce_c $portname
         }
     }
 }
@@ -274,4 +280,5 @@ pre-fetch {
     if {${mpi.require} && [mpi_variant_name] eq ""} {
         return -code error "must set at least one mpi variant"
     }
+    eval mpi.action_enforce_variants ${mpi.required_variants}
 }
