@@ -46,6 +46,8 @@ default compilers.clang_variants {}
 default compilers.dragonegg_variants {}
 default compilers.require_fortran 0
 default compilers.setup_done 0
+default compilers.required_c {}
+default compilers.required_f {}
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
@@ -454,6 +456,11 @@ proc compilers.is_c_only {} {
 
 # for the c compiler
 proc compilers.enforce_c {args} {
+    global compilers.required_c
+    set compilers.required_c $args
+}
+
+proc compilers.action_enforce_c {args} {
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otcomp  [c_active_variant_name $portname]
@@ -470,6 +477,11 @@ proc compilers.enforce_c {args} {
 }
 
 proc compilers.enforce_fortran {args} {
+    global compilers.required_f
+    set compilers.required_f $args
+}
+
+proc compilers.action_enforce_f {args} {
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
@@ -568,8 +580,11 @@ proc compilers.setup {args} {
     }
 }
 
+# this might also need to be in pre-archivefetch
 pre-fetch {
     if {${compilers.require_fortran} && [fortran_variant_name] eq ""} {
         return -code error "must set at least one fortran variant"
     }
+    eval compilers.action_enforce_c ${compilers.required_c}
+    eval compilers.action_enforce_f ${compilers.required_f}
 }
