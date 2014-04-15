@@ -154,24 +154,16 @@ set portfetch::mirror_sites::sites(gentoo) {
 
 set portfetch::mirror_sites::sites(gimp) {
     http://ftp.gtk.org/pub/
-    ftp://ftp.gtk.org/pub/
-    ftp://ftp.gimp.org/pub/
+    http://ftp.gimp.org/pub/
     http://gimp.mirrors.hoobly.com/
     http://gimp.cp-dev.com/
-    http://gimp.sixsigmaonline.org/
     http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
     http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
-    ftp://gd.tuwien.ac.at/graphics/gimp/
-    ftp://ftp.funet.fi/pub/sci/graphics/packages/
-    http://ftp.iut-bm.univ-fcomte.fr/gimp/
     ftp://ftp.gwdg.de/pub/misc/grafik/gimp/
     http://ftp.gwdg.de/pub/misc/grafik/gimp/
-    ftp://ftp.esat.net/mirrors/ftp.gimp.org/pub/
-    http://ftp.esat.net/mirrors/ftp.gimp.org/pub/
     ftp://ftp.heanet.ie/mirrors/ftp.gimp.org/pub/
     http://ftp.heanet.ie/mirrors/ftp.gimp.org/pub/
     ftp://ftp.u-aizu.ac.jp/pub/graphics/tools/gimp/
-    ftp://ftp.ring.gr.jp/pub/graphics/
     http://www.ring.gr.jp/pub/graphics/
     ftp://ftp.snt.utwente.nl/pub/software/gimp/
     http://ftp.snt.utwente.nl/pub/software/gimp/
@@ -179,7 +171,6 @@ set portfetch::mirror_sites::sites(gimp) {
     ftp://ftp.sai.msu.su/pub/unix/graphics/gimp/mirror/
     http://sunsite.rediris.es/mirror/
     ftp://ftp.rediris.es/mirror/
-    ftp://ftp.acc.umu.se/pub/gimp/
     ftp://ftp.sunet.se/pub/gnu/
     http://ftp.sunet.se/pub/gnu/
     ftp://ftp.is.co.za/mirror/ftp.gimp.org/
