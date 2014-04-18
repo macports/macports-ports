@@ -159,21 +159,34 @@ set portfetch::mirror_sites::sites(gimp) {
     http://gimp.cp-dev.com/
     http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
     http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
-    ftp://ftp.gwdg.de/pub/misc/grafik/gimp/
     http://ftp.gwdg.de/pub/misc/grafik/gimp/
-    ftp://ftp.heanet.ie/mirrors/ftp.gimp.org/pub/
     http://ftp.heanet.ie/mirrors/ftp.gimp.org/pub/
     ftp://ftp.u-aizu.ac.jp/pub/graphics/tools/gimp/
     http://www.ring.gr.jp/pub/graphics/
-    ftp://ftp.snt.utwente.nl/pub/software/gimp/
     http://ftp.snt.utwente.nl/pub/software/gimp/
     ftp://sunsite.icm.edu.pl/pub/graphics/
     ftp://ftp.sai.msu.su/pub/unix/graphics/gimp/mirror/
     http://sunsite.rediris.es/mirror/
     ftp://ftp.rediris.es/mirror/
-    ftp://ftp.sunet.se/pub/gnu/
     http://ftp.sunet.se/pub/gnu/
     ftp://ftp.is.co.za/mirror/ftp.gimp.org/
+    http://artfiles.org/gimp.org/
+    http://ftp.iut-bm.univ-fcomte.fr/
+    http://gimp.parentingamerica.com/
+    http://gimp.raffsoftware.com/
+    http://gimp.skazkaforyou.com/
+    http://mirror.hessmo.com/
+    http://mirror.ibcp.fr/pub/
+    http://mirror.umd.edu/gimp/
+    http://mirrors-au.go-parts.com/
+    http://mirrors-br.go-parts.com/
+    http://mirrors.dominios.pt/
+    http://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
+    http://mirrors.go-parts.com/
+    http://mirrors.serverhost.ro/
+    http://mirrors.xmission.com/gimp/
+    http://mirrors.zerg.biz/
+    http://servingzone.com/mirrors/
 }
 
 set portfetch::mirror_sites::sites(gnome) {
