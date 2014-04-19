@@ -5,7 +5,7 @@ PortSystem          1.0
 
 name                freeimage
 version             3.16.0
-revision            0
+revision            1
 set major           [lindex [split ${version} .] 0]
 categories          graphics
 platforms           macosx
@@ -29,9 +29,6 @@ worksrcdir          FreeImage
 
 checksums           rmd160  f0dcfb1514a288bbb2bc182130469b91d575e6cd \
                     sha256  03af32dd60140d07515ddfe7b4f467baa3b888a72ea78828811aded7adb42f60
-
-set libfreeimage libfreeimage.${major}.dylib
-set libfreeimageplus libfreeimageplus.${major}.dylib
 
 patchfiles          patch-Makefile.fip.diff
 
@@ -63,41 +60,75 @@ post-patch {
 
 use_configure       no
 
+# In the future, implement in the build phase?
+#configure.pipe      no
+#configure.ccache    no
+#configure.distcc    no
+
+# FreeImage uses -O3
+configure.cflags-delete   -Os
+configure.cxxflags-delete -Os
+
 variant universal {}
 
-build.args          -f Makefile.gnu \
-                    PREFIX=${prefix} \
-                    VERLIBNAME=${libfreeimage} \
-                    CC="${configure.cc} ${configure.cflags} [get_canonical_archflags cc]" \
-                    CXX="${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx]" \
-                    LDFLAGS="${configure.ldflags}"
-
-post-build {
-    # build FreeImagePlus
-    system -W ${worksrcpath} "${build.cmd} -f Makefile.fip \
-        PREFIX=${prefix} \
-        VERLIBNAME=${libfreeimageplus} \
-        CC='${configure.cc} ${configure.cflags} [get_canonical_archflags cc]' \
-        CXX='${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx]' \
-        LDFLAGS='${configure.ldflags}'"
+# Reimplement parts of portconfigure.tcl
+if {[info exists configure.cxx_stdlib] &&
+    ${configure.cxx_stdlib} ne {} &&
+    [string match *clang* ${configure.cxx}]
+} then {
+    configure.cxxflags-append -stdlib=${configure.cxx_stdlib}
+    configure.ldflags-append  -stdlib=${configure.cxx_stdlib}
 }
 
-destroot.args       -f Makefile.gnu \
-                    INCDIR=${destroot}${prefix}/include \
-                    INSTALLDIR=${destroot}${prefix}/lib \
-                    PREFIX=${prefix} \
-                    VERLIBNAME=${libfreeimage}
+if {${configure.sdkroot} ne ""} {
+    configure.ldflags-append "-Wl,-syslibroot,${configure.sdkroot}"
+}
+
+foreach flags {cflags cxxflags} compiler {cc cxx} {
+    eval configure.${flags}-append [get_canonical_archflags ${compiler}]
+    
+    if {${configure.sdkroot} ne ""} {
+        configure.${flags}-append -isysroot${configure.sdkroot}
+    }
+    
+    if {${configure.march} ne "" } {
+        configure.${flags}-append "-march=${configure.march}"
+    }
+    
+    if {${configure.mtune} ne "" } {
+        configure.${flags}-append "-mtune=${configure.mtune}"
+    }
+}
+
+# running build_main and destroot_main makes use of environmental variables like MACOSX_DEPLOYMENT_TARGET
+
+build {
+    foreach makefile {Makefile.gnu Makefile.fip} libname {libfreeimage libfreeimageplus} {
+        # Makefile overrides CFLAGS and CXXFLAGS, so append options to CC and CXX
+        build.args -f ${makefile} \
+            PREFIX=${prefix} \
+            VERLIBNAME=${libname}.${major}.dylib \
+            CC="${configure.cc} ${configure.cflags}" \
+            CXX="${configure.cxx} ${configure.cxxflags}" \
+            LDFLAGS="${configure.ldflags}"
+        
+        portbuild::build_main
+    }
+}
+
+destroot {
+    foreach makefile {Makefile.gnu Makefile.fip} libname {libfreeimage libfreeimageplus} {
+        destroot.args -f ${makefile} \
+            PREFIX="${prefix}" \
+            VERLIBNAME=${libname}.${major}.dylib \
+            INCDIR="${destroot}${prefix}/include" \
+            INSTALLDIR="${destroot}${prefix}/lib"
+        
+        portdestroot::destroot_main
+    }
+}
 
 post-destroot {
-    # install FreeImagePlus
-    system -W ${worksrcpath} "${destroot.cmd} -f Makefile.fip install \
-        VERLIBNAME=${libfreeimageplus} \
-        CC='${configure.cc} ${configure.cflags} [get_canonical_archflags cc]' \
-        CXX='${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx]' \
-        LDFLAGS='${configure.ldflags}' \
-        INCDIR='${destroot}${prefix}/include' \
-        INSTALLDIR='${destroot}${prefix}/lib'"
-
     set docdir ${prefix}/share/doc/${name}
     xinstall -d ${destroot}${docdir}
     xinstall -m 644 -W ${worksrcpath} Whatsnew.txt license-fi.txt \
@@ -106,16 +137,13 @@ post-destroot {
 }
 
 test.run            yes
-test.cmd            ./testAPI
+test.cmd            "${build.cmd} && ./testAPI"
 test.dir            ${worksrcpath}/TestAPI
 test.target
 
-pre-test {
+post-patch {
     # Use correct compiler and flags when compiling test
-    reinplace "s:g++:${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx]:" ${test.dir}/Makefile
-
-    # Build the test
-    system "make -C ${test.dir}"
+    reinplace "s:g++:${configure.cxx} ${configure.cxxflags}:" ${test.dir}/Makefile
 }
 
 livecheck.type      regex
