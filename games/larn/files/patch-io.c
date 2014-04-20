@@ -1,5 +1,14 @@
---- io.c.orig	2006-04-17 04:21:08.000000000 -0400
-+++ io.c	2006-04-17 22:33:36.000000000 -0400
+--- io.c.orig	2002-05-08 15:39:10.000000000 -0500
++++ io.c	2014-04-20 14:21:54.000000000 -0500
+@@ -24,7 +24,7 @@
+  *	FILE INPUT ROUTINES
+  *
+  *	long lgetc()				read one character from input buffer
+- *	long lrint()				read one integer from input buffer
++ *	long lrint_x()				read one integer from input buffer
+  *	lrfill(address,number)		put input bytes into a buffer
+  *	char *lgetw()				get a whitespace ended word from input
+  *	char *lgetl()				get a \n or EOF ended line from input
 @@ -81,7 +81,7 @@
  #endif /* not SYSV */
  
@@ -37,6 +46,24 @@
  	fmt = va_arg(ap, char *);	/* pointer to format string */
  	if (lpnt >= lpend) lflush();
  	outb = lpnt;
+@@ -345,7 +344,7 @@
+     }
+ 
+ /*
+- *	long lrint()			Read one integer from input buffer
++ *	long lrint_x()			Read one integer from input buffer
+  *
+  *		+---------+---------+---------+---------+
+  *		|	high  |			|		  |	  low	|
+@@ -357,7 +356,7 @@
+  *	The save order is low order first, to high order (4 bytes total)
+  *	Returns the int read
+  */
+-long lrint()
++long lrint_x()
+ 	{
+ 	unsigned long i;
+ 	i  = 255 & lgetc();				i |= (255 & lgetc()) << 8;
 @@ -454,7 +453,7 @@
  	if (str==NULL) return(lfd=1);
  	if ((lfd=creat(str,0644)) < 0)

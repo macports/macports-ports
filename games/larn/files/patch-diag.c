@@ -1,5 +1,5 @@
---- diag.c.orig	2002-05-30 17:04:11.000000000 -0400
-+++ diag.c	2006-04-17 22:24:21.000000000 -0400
+--- diag.c.orig	2002-05-30 16:04:11.000000000 -0500
++++ diag.c	2014-04-20 14:21:54.000000000 -0500
 @@ -31,10 +31,10 @@
  
  /*	for the character attributes	*/
@@ -99,3 +99,30 @@
  		nap(2000); c[GOLD]=c[BANKACCOUNT]=0;  died(-265); return;
  		}
  
+@@ -209,7 +209,7 @@
+ 		if (beenhere[k])
+ 			lrfill((char*)&cell[k*MAXX*MAXY],sizeof(struct cel)*MAXY*MAXX);
+ 
+-	lrfill((char*)&c[0],100*sizeof(long));	gtime = lrint();
++	lrfill((char*)&c[0],100*sizeof(long));	gtime = lrint_x();
+ 	level = c[CAVELEVEL] = lgetc();
+ 	playerx = lgetc();		playery = lgetc();
+ 	lrfill((char*)iven,26);		lrfill((char*)ivenarg,26*sizeof(short));
+@@ -240,7 +240,7 @@
+ 		}
+ 
+ 	time(&zzz);
+-	initialtime = zzz-lrint();
++	initialtime = zzz-lrint_x();
+ 	fstat(fd,&filetimes);	/*	get the creation and modification time of file	*/
+ 	lrfill((char*)&zzz,sizeof(long));	zzz += 6;
+ 	if (filetimes.st_ctime > zzz) fsorry();	/*	file create time	*/
+@@ -248,7 +248,7 @@
+ 	if (c[HP]<0) { died(284); return; }	/* died a post mortem death */
+ 
+ 	oldx = oldy = 0;
+-	i = lrint();  /* inode # */
++	i = lrint_x();  /* inode # */
+ 	if (i && (filetimes.st_ino!=i)) fsorry();
+ 	lrclose();
+ 	if (strcmp(fname,ckpfile) == 0)
