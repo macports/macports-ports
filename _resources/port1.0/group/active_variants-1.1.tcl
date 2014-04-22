@@ -1,6 +1,6 @@
 # $Id$
 #
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2012-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -46,7 +46,7 @@
 # where
 #  $depspec
 #    is the name of the port you're trying to check (required), which can be
-#    specified as either just the port, or via "(bin:lib:path):FOO:port"
+#    specified as either just the port, or via "(bin|lib|path):FOO:port"
 #    as accepted by the dependency parser.
 #  $required
 #    is a list of variants that must be enabled for the test to succeed
@@ -94,7 +94,7 @@ proc active_variants {depspec required {forbidden {}}} {
 	set port [_get_dep_port $depspec]
 	if {$port == ""} {
 	    ui_error "active_variants: Error: invalid port depspec '${depspec}'"
-	    ui_error "  expecting either: port or (bin:lib:path):foo:port"
+	    ui_error "  expecting either: port or (bin|lib|path):foo:port"
 	    return 0
 	}
 	if {$depspec != $port} {
