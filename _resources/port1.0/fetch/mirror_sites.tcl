@@ -190,23 +190,27 @@ set portfetch::mirror_sites::sites(gimp) {
 }
 
 set portfetch::mirror_sites::sites(gnome) {
+    http://ftp.gnome.org/pub/GNOME/
+    http://artfiles.org/gnome.org/
+    http://fr2.rpmfind.net/linux/gnome.org/
+    http://ftp.acc.umu.se/pub/GNOME/
+    http://ftp.belnet.be/ftp.gnome.org/
     ftp://ftp.cse.buffalo.edu/pub/Gnome/
+    http://ftp.df.lth.se/pub/gnome/
+    http://ftp.is.co.za/mirror/ftp.gnome.org/
+    ftp://ftp.kddlabs.co.jp/pub/GNOME/
+    http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
+    http://ftp.rpmfind.net/linux/gnome.org/
+    http://ftp.sunet.se/pub/X11/GNOME/
+    http://ftp1.nluug.nl/windowing/gnome/
+    http://ftp2.nluug.nl/windowing/gnome/
+    http://ftp2.uk.freebsd.org/sites/ftp.gnome.org/pub/GNOME/
+    http://mirror.internode.on.net/pub/gnome/
+    http://mirror.oss.maxcdn.com/gnome/
+    http://mirror.umd.edu/gnome/
+    http://mirrors.ustc.edu.cn/gnome/
     http://www.gtlib.gatech.edu/pub/gnome/
     http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
-    http://fr2.rpmfind.net/linux/gnome.org/
-    http://mirror.aarnet.edu.au/pub/gnome/
-    http://ftp.unina.it/pub/linux/GNOME/
-    http://ftp.acc.umu.se/pub/GNOME/
-    http://ftp.belnet.be/mirror/ftp.gnome.org/
-    http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
-    ftp://ftp.dit.upm.es/pub/GNOME/
-    ftp://ftp.no.gnome.org/pub/GNOME/
-    ftp://ftp.nara.wide.ad.jp/pub/X11/GNOME/
-    ftp://ftp.kddlabs.co.jp/pub/GNOME/
-    http://mirror.internode.on.net/pub/gnome/
-    http://ftp.df.lth.se/pub/gnome/
-    http://linorg.usp.br/gnome/
-    http://ftp.gnome.org/pub/GNOME/
 }
 
 set portfetch::mirror_sites::sites(gnu) {
