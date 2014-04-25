@@ -116,10 +116,22 @@ pre-configure {
                 -DCMAKE_OSX_ARCHITECTURES="${configure.build_arch}"
         }
         if {${configure.sdkroot} != ""} {
-            configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
+            configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}" -DCMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}" 
         } else {
-            # Witout this, cmake will choose an SDK and deployment target on its own.
-            configure.args-append -DCMAKE_OSX_SYSROOT=/ -DCMAKE_OSX_DEPLOYMENT_TARGET=""
+            # Without this, cmake will choose an SDK and deployment target on its own.
+            if {[vercmp $xcodeversion 4.3] < 0} {
+                set sdks_dir ${developer_dir}/SDKs
+            } else {
+                set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
+            }
+            if {$macosx_deployment_target eq "10.4"} {
+                set sdk ${sdks_dir}/MacOSX10.4u.sdk
+            } else {
+                set sdk ${sdks_dir}/MacOSX${macosx_deployment_target}.sdk
+            }
+            configure.args-append \
+                -DCMAKE_OSX_SYSROOT="${sdk}" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}" 
         }
     }
 }
