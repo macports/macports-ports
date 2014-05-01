@@ -1,8 +1,8 @@
---- screen.c    2003-09-08 07:26:41.000000000 -0700
-+++ screen.c    2009-02-13 12:05:05.000000000 -0800
-@@ -101,6 +101,11 @@
+--- screen.c	2014-04-26 18:22:09.000000000 +0200
++++ screen.c	2014-05-01 21:36:54.000000000 +0200
+@@ -109,6 +109,11 @@
  
- #include "logfile.h"   /* islogfile, logfflush */
+ #include "logfile.h"	/* islogfile, logfflush */
  
 +#ifdef __APPLE__
 +#include <vproc.h>
@@ -12,8 +12,8 @@
  #ifdef DEBUG
  FILE *dfp;
  #endif
-@@ -929,6 +934,16 @@
-    Panic(0, "No $SCREENDIR with multi screens, please.");
+@@ -1046,6 +1051,16 @@
+ 	Panic(0, "No $SCREENDIR with multi screens, please.");
  #endif
      }
 +#ifdef __APPLE__
@@ -29,7 +29,7 @@
  #ifdef MULTIUSER
    if (multiattach)
      {
-@@ -1211,6 +1226,11 @@
+@@ -1314,6 +1329,11 @@
    freopen("/dev/null", "w", stderr);
    debug("-- screen.back debug started\n");
  
@@ -41,4 +41,3 @@
    /* 
     * This guarantees that the session owner is listed, even when we
     * start detached. From now on we should not refer to 'LoginName'
-

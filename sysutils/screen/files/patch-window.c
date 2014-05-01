@@ -1,6 +1,6 @@
---- window.c.orig	2009-01-21 12:09:29.000000000 +0800
-+++ window.c	2009-01-21 12:14:04.000000000 +0800
-@@ -25,6 +25,7 @@
+--- window.c	2014-04-26 12:58:35.000000000 +0200
++++ window.c	2014-05-01 21:36:54.000000000 +0200
+@@ -33,6 +33,7 @@
  #include <sys/stat.h>
  #include <signal.h>
  #include <fcntl.h>
@@ -8,8 +8,8 @@
  #ifndef sun
  # include <sys/ioctl.h>
  #endif
-@@ -1387,6 +1388,38 @@
-   return pid;
+@@ -1660,6 +1661,38 @@
+   return r;
  }
  
 +#ifdef RUN_LOGIN
@@ -45,5 +45,5 @@
 +#endif /* RUN_LOGIN */
 +
  void
- execvpe(prog, args, env)
- char *prog, **args, **env;
+ FreePseudowin(w)
+ struct win *w;
