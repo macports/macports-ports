@@ -63,9 +63,6 @@ foreach v ${gcc_versions} {
     set cdb(gcc4$v,dependsd) port:g95
     set cdb(gcc4$v,dependsa) gcc4$v
     set cdb(gcc4$v,conflict) "gfortran g95"
-    set cdb(gcc4$v,flags)    {
-        {{"-PIC"} {"-fPIC"}}
-    }
     set cdb(gcc4$v,cc)       ${prefix}/bin/gcc-mp-4.$v
     set cdb(gcc4$v,cxx)      ${prefix}/bin/g++-mp-4.$v
     set cdb(gcc4$v,cpp)      ${prefix}/bin/cpp-mp-4.$v
@@ -86,9 +83,6 @@ foreach v ${clang_versions} {
     set cdb(clang3$v,dependsd) ""
     set cdb(clang3$v,dependsa) clang-3.$v
     set cdb(clang3$v,conflict) ""
-    set cdb(clang3$v,flags)    {
-        {{"-PIC"} {"-fPIC"}}
-    }
     set cdb(clang3$v,cc)       ${prefix}/bin/clang-mp-3.$v
     set cdb(clang3$v,cxx)      ${prefix}/bin/clang++-mp-3.$v
     set cdb(clang3$v,cpp)      "${prefix}/bin/clang-mp-3.$v -E"
@@ -110,9 +104,6 @@ foreach v ${dragonegg_versions} {
     set cdb(dragonegg3$v,dependsd) port:g95
     set cdb(dragonegg3$v,dependsa) dragonegg-3.$v
     set cdb(dragonegg3$v,conflict) "gfortran g95"
-    set cdb(dragonegg3$v,flags)    {
-        {{"-PIC"} {"-fPIC"}}
-    }
     set cdb(dragonegg3$v,cc)       ${prefix}/bin/dragonegg-3.$v-gcc
     set cdb(dragonegg3$v,cxx)      ${prefix}/bin/dragonegg-3.$v-g++
     set cdb(dragonegg3$v,cpp)      ${prefix}/bin/dragonegg-3.$v-cpp
@@ -130,9 +121,6 @@ set cdb(llvm,dependsl) ""
 set cdb(llvm,dependsd) ""
 set cdb(llvm,dependsa) ""
 set cdb(llvm,conflict) ""
-set cdb(llvm,flags)    {
-    {{"-fPIC"} {"-PIC"}}
-}
 set cdb(llvm,cc)       llvm-gcc-4.2
 set cdb(llvm,cxx)      llvm-g++-4.2
 set cdb(llvm,cpp)      llvm-cpp-4.2
@@ -151,9 +139,6 @@ set cdb(gfortran,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
 set cdb(gfortran,dependsd) ""
 set cdb(gfortran,dependsa) ""
 set cdb(gfortran,conflict) ""
-set cdb(gfortran,flags)    {
-    {{"-fPIC"} {"-PIC"}}
-}
 set cdb(gfortran,cc)       ""
 set cdb(gfortran,cxx)      ""
 set cdb(gfortran,cpp)      ""
@@ -170,9 +155,6 @@ set cdb(g95,dependsl) ""
 set cdb(g95,dependsd) ""
 set cdb(g95,dependsa) g95
 set cdb(g95,conflict) ""
-set cdb(g95,flags)    {
-    {{"-fPIC"} {"-PIC"}}
-}
 set cdb(g95,cc)       ""
 set cdb(g95,cxx)      ""
 set cdb(g95,cpp)      ""
@@ -219,31 +201,6 @@ proc compilers.setup_variants {args} {
                 set c [lreplace $c $i $i]
             }
 
-            # for each pair of flags (old,new), build a string of if statements to
-            # replace old with new
-            set f ""
-            foreach flag $cdb($variant,flags) {
-                foreach {old new} $flag {
-                    append f [subst {
-                        if {\[string first $old \${configure.cflags}\] > -1} {
-                            configure.cflags-delete $old
-                            configure.cflags-append $new
-                        }
-                    }]
-                }
-            }
-
-            foreach flag $cdb($variant,flags) {
-                foreach {old new} $flag {
-                    append f [subst {
-                        if {\[string first $old \${configure.cxxflags}\] > -1} {
-                            configure.cxxflags-delete $old
-                            configure.cxxflags-append $new
-                        }
-                    }]
-                }
-            }
-
             # for each compiler, set the value if not empty; we can't use
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
@@ -273,8 +230,6 @@ proc compilers.setup_variants {args} {
                     depends_skip_archcheck $cdb($variant,dependsa)
 
                     $comp
-
-                    $f
                 }
             }]
         }
