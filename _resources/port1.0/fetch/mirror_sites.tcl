@@ -367,7 +367,6 @@ set portfetch::mirror_sites::sites(php) {
     http://bd.php.net/:nosubdir
     http://be.php.net/:nosubdir
     http://bg.php.net/:nosubdir
-    http://br.php.net/:nosubdir
     http://ca.php.net/:nosubdir
     http://ch.php.net/:nosubdir
     http://cl.php.net/:nosubdir
@@ -387,10 +386,10 @@ set portfetch::mirror_sites::sites(php) {
     http://ir.php.net/:nosubdir
     http://is.php.net/:nosubdir
     http://it.php.net/:nosubdir
+    http://jm.php.net/:nosubdir
     http://jp.php.net/:nosubdir
     http://kr.php.net/:nosubdir
     http://li.php.net/:nosubdir
-    http://lt.php.net/:nosubdir
     http://lu.php.net/:nosubdir
     http://lv.php.net/:nosubdir
     http://md.php.net/:nosubdir
@@ -408,7 +407,6 @@ set portfetch::mirror_sites::sites(php) {
     http://ru.php.net/:nosubdir
     http://se.php.net/:nosubdir
     http://sg.php.net/:nosubdir
-    http://si.php.net/:nosubdir
     http://th.php.net/:nosubdir
     http://tr.php.net/:nosubdir
     http://tw.php.net/:nosubdir
