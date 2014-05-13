@@ -188,7 +188,6 @@ set portfetch::mirror_sites::sites(gimp) {
     http://mirrors.xmission.com/gimp/
     http://mirrors.zerg.biz/
     http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
-    http://piowindharfetrkosoft.net/pub/mirrors/ftp.gimp.org/
     ftp://sunsite.icm.edu.pl/pub/graphics/
     http://sunsite.rediris.es/mirror/
     http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
