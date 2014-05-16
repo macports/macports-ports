@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012-2013 The MacPorts Project
+# Copyright (c) 2012-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,6 @@ options github.homepage github.raw github.master_sites github.tarball_from
 default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.github.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
-default github.livecheck_type ""
 
 default master_sites {${github.master_sites}}
 
@@ -63,7 +62,7 @@ proc handle_tarball_from {option action args} {
 }
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites github.livecheck_type
+    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites
 
     github.author           ${gh_author}
     github.project          ${gh_project}
@@ -92,26 +91,18 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
         }
     }
 
-    # If the "commit" string from start to end is in [0-9a-f] to at
-    # least 9 characters, and no tag is provided, then assume doing
-    # commits type livecheck; else tags type.
-
+    # If the "version" is composed entirely of hex characters, and is at least
+    # nine characters long, and no tag_prefix is provided, then assume we are
+    # using a commit hash and livecheck commits; otherwise livecheck tags.
     if {[join ${github.tag_prefix}] eq "" && \
         [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
-        github.livecheck_type commits
+        livecheck.type      regexm
+        livecheck.url       ${github.homepage}/commits/master.atom
+        livecheck.regex     <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
     } else {
-        github.livecheck_type tags
+        livecheck.type      regex
+        livecheck.url       ${github.homepage}/tags
+        livecheck.regex     archive/[join ${github.tag_prefix} ""](\[^"\]+)${extract.suffix}
     }
-
-    if {${github.livecheck_type} eq "commits"} {
-        livecheck.type          regexm
-        livecheck.url           ${github.homepage}/commits/master.atom
-        livecheck.version       ${github.version}
-        livecheck.regex         <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
-    } else {
-        livecheck.type          regex
-        livecheck.version       ${github.version}
-        livecheck.url           ${github.homepage}/tags
-        livecheck.regex         archive/[join ${github.tag_prefix} ""](\[^"\]+)${extract.suffix}
-    }
+    livecheck.version       ${github.version}
 }
