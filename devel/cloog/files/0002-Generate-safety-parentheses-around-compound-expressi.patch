@@ -1,0 +1,2668 @@
+From 72a16907ae2ad7250d202f4605372d68f27baabb Mon Sep 17 00:00:00 2001
+From: Cedric Bastoul <cedric.bastoul@u-psud.fr>
+Date: Tue, 7 Jan 2014 18:55:40 +0100
+Subject: [PATCH 02/10] Generate safety parentheses around compound expressions
+
+Now CLooG generates statements with parentheses around expressions
+with more than one term, e.g., S1(0,c1,(c2+c3)) instead of S1(0,c1,c2+c3).
+The purpose of this change is to help users to avoid bugs when relying
+on macros.
+---
+ source/pprint.c                 |  37 +++++++++++-
+ test/1point-2.c                 |   4 +-
+ test/byu98-1-2-3.c              |   8 +--
+ test/cholesky2.c                |  24 ++++----
+ test/christian.c                |  14 ++---
+ test/classen.c                  |  98 +++++++++++++++---------------
+ test/classen2.c                 |   4 +-
+ test/darte.c                    |  20 +++----
+ test/dartef.f                   |  20 +++----
+ test/durbin_e_s.c               |   4 +-
+ test/equality2.c                |   6 +-
+ test/forwardsub-3-1-2.c         |  22 +++----
+ test/gesced.c                   |  12 ++--
+ test/gesced2.c                  |   8 +--
+ test/gesced3.c                  |  10 ++--
+ test/isl/jacobi-shared.c        |   4 +-
+ test/isl/mxm-shared.c           |   4 +-
+ test/isl/unroll2.c              |   4 +-
+ test/levenshtein-1-2-3.c        |  38 ++++++------
+ test/levenshtein-1-2-3f.f       |  16 ++---
+ test/lineality-2-1-2.c          |   8 +--
+ test/mod4.c                     |   8 +--
+ test/multi-stride2.c            |   4 +-
+ test/no_lindep.c                |   4 +-
+ test/non_optimal/nul_complex1.c |   4 +-
+ test/nul_basic1.c               |   4 +-
+ test/nul_basic2.c               |   6 +-
+ test/nul_lcpc.c                 |  10 ++--
+ test/orc.c                      |  24 ++++----
+ test/pouchet.c                  |   8 +--
+ test/rectangle.c                |   4 +-
+ test/reservoir/QR.c             | 130 ++++++++++++++++++++--------------------
+ test/reservoir/bastoul3.c       |   4 +-
+ test/reservoir/cholesky2.c      |  10 ++--
+ test/reservoir/fusion2.c        |  10 ++--
+ test/reservoir/jacobi3.c        |  10 ++--
+ test/reservoir/lim-lam1.c       |  12 ++--
+ test/reservoir/lim-lam3.c       |  14 ++---
+ test/reservoir/lim-lam4.c       |  10 ++--
+ test/reservoir/liu-zhuge1.c     |  18 +++---
+ test/reservoir/loechner3.c      |   4 +-
+ test/reservoir/loechner4.c      |   4 +-
+ test/reservoir/mg-interp.c      |  46 +++++++-------
+ test/reservoir/mg-psinv.c       |  14 ++---
+ test/reservoir/mg-resid.c       |  14 ++---
+ test/reservoir/mg-rprj3.c       |  34 +++++------
+ test/reservoir/pingali1.c       |   6 +-
+ test/reservoir/pingali5.c       |  10 ++--
+ test/reservoir/pingali6.c       |  10 ++--
+ test/reservoir/stride.c         |   4 +-
+ test/reservoir/stride2.c        |   4 +-
+ test/reservoir/tang-xue1.c      |   4 +-
+ test/sor1d.c                    |   8 +--
+ test/stride.c                   |   4 +-
+ test/stride2.c                  |   4 +-
+ test/stride3.c                  |   4 +-
+ test/thomasset.c                |   8 +--
+ test/vasilache.c                |   8 +--
+ test/vivien.c                   |  72 +++++++++++-----------
+ test/vivien2.c                  |  66 ++++++++++----------
+ test/walters.c                  |  10 ++--
+ test/walters3.c                 |   6 +-
+ test/wavefront.c                |   4 +-
+ 63 files changed, 521 insertions(+), 486 deletions(-)
+
+diff --git a/source/pprint.c b/source/pprint.c
+index f0b7110..f5fcfc7 100644
+--- source/pprint.c
++++ source/pprint.c
+@@ -348,9 +348,33 @@ int pprint_osl_body(struct cloogoptions *options, FILE *dst,
+   return 0;
+ }
+ 
++/* pprint_parentheses_are_safer function:
++ * this function returns 1 if it decides that it would be safer to put
++ * parentheses around the clast_assignment when it is used as a macro
++ * parameter, 0 otherwise.
++ * \param[in] s Pointer to the clast_assignment to check.
++ * \return 1 if we should print parentheses around s, 0 otherwise.
++ */
++static int pprint_parentheses_are_safer(struct clast_assignment * s) {
++  /* Expressions of the form X = Y should not be used in macros, so we
++   * consider readability first for them and avoid parentheses.
++   * Also, expressions having only one term can live without parentheses.
++   */
++  if ((s->LHS) ||
++      (s->RHS->type == clast_expr_term) ||
++      ((s->RHS->type == clast_expr_red) &&
++       (((struct clast_reduction *)(s->RHS))->n == 1) &&
++       (((struct clast_reduction *)(s->RHS))->elts[0]->type ==
++        clast_expr_term)))
++    return 0;
++
++  return 1;
++}
++
+ void pprint_user_stmt(struct cloogoptions *options, FILE *dst,
+ 		       struct clast_user_stmt *u)
+ {
++    int parenthesis_to_close = 0;
+     struct clast_stmt *t;
+ 
+     if (pprint_osl_body(options, dst, u))
+@@ -363,10 +387,21 @@ void pprint_user_stmt(struct cloogoptions *options, FILE *dst,
+     fprintf(dst, "(");
+     for (t = u->substitutions; t; t = t->next) {
+ 	assert(CLAST_STMT_IS_A(t, stmt_ass));
++        if (pprint_parentheses_are_safer((struct clast_assignment *)t)) {
++	  fprintf(dst, "(");
++          parenthesis_to_close = 1;
++        }
+ 	pprint_assignment(options, dst, (struct clast_assignment *)t);
+-	if (t->next)
++	if (t->next) {
++            if (parenthesis_to_close) {
++	      fprintf(dst, ")");
++              parenthesis_to_close = 0;
++            }
+ 	    fprintf(dst, ",");
++        }
+     }
++    if (parenthesis_to_close)
++      fprintf(dst, ")");
+     fprintf(dst, ")");
+     if (options->language != CLOOG_LANGUAGE_FORTRAN)
+ 	fprintf(dst, ";");
+diff --git a/test/1point-2.c b/test/1point-2.c
+index 48f6ad4..b5d76ca 100644
+--- test/1point-2.c
++++ test/1point-2.c
+@@ -1,2 +1,2 @@
+-/* Generated from ../../../git/cloog/test/1point-2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.01s. */
+-S1(2*M,N+2) ;
++/* Generated from ./1point-2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
++S1(2*M,(N+2));
+diff --git a/test/byu98-1-2-3.c b/test/byu98-1-2-3.c
+index 2a1e151..36f0866 100644
+--- test/byu98-1-2-3.c
++++ test/byu98-1-2-3.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/byu98-1-2-3.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.01s. */
++/* Generated from ./byu98-1-2-3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=2;i<=3;i++) {
+   for (j=-i+6;j<=6;j++) {
+     S1(i,j);
+@@ -11,11 +11,11 @@ for (i=4;i<=7;i++) {
+     }
+   }
+   if (i >= 6) {
+-    S2(i,-i+9);
++    S2(i,(-i+9));
+   }
+   if (i <= 5) {
+-    S1(i,-i+9);
+-    S2(i,-i+9);
++    S1(i,(-i+9));
++    S2(i,(-i+9));
+   }
+   for (j=max(-i+10,i-1);j<=6;j++) {
+     S1(i,j);
+diff --git a/test/cholesky2.c b/test/cholesky2.c
+index 3141bdc..98c8ad2 100644
+--- test/cholesky2.c
++++ test/cholesky2.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/cholesky2.cloog by CLooG 0.16.1-2-g33ac553 gmp bits in 0.02s. */
++/* Generated from ./cholesky2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if (M >= 1) {
+   for (c2=1;c2<=M-1;c2++) {
+     S1(c2);
+@@ -22,44 +22,44 @@ if (M >= 1) {
+   }
+   for (c1=3;c1<=3*M-7;c1++) {
+     if ((c1+2)%3 == 0) {
+-      S3((c1+2)/3);
++      S3(((c1+2)/3));
+     }
+     if (c1%3 == 0) {
+-      S2((c1+3)/3,c1/3);
++      S2(((c1+3)/3),(c1/3));
+     }
+     if ((c1+1)%3 == 0) {
+-      S6((c1+1)/3,(c1+4)/3);
++      S6(((c1+1)/3),((c1+4)/3));
+     }
+     if (c1%3 == 0) {
+-      S2((c1+6)/3,c1/3);
++      S2(((c1+6)/3),(c1/3));
+     }
+     for (c2=ceild(c1+7,3);c2<=M;c2++) {
+       if ((c1+1)%3 == 0) {
+-        S6((c1+1)/3,c2);
++        S6(((c1+1)/3),c2);
+       }
+       if (c1%3 == 0) {
+-        S2(c2,c1/3);
++        S2(c2,(c1/3));
+       }
+       if ((c1+1)%3 == 0) {
+         for (i=ceild(c1+4,3);i<=c2-1;i++) {
+-          S5(i,c2,(c1+1)/3);
++          S5(i,c2,((c1+1)/3));
+         }
+       }
+     }
+   }
+   if (M >= 3) {
+     for (c2=M-1;c2<=M;c2++) {
+-      S2(c2,M-2);
++      S2(c2,(M-2));
+     }
+   }
+   if (M >= 3) {
+-    S3(M-1);
++    S3((M-1));
+   }
+   if (M >= 3) {
+-    S6(M-1,M);
++    S6((M-1),M);
+   }
+   if (M >= 2) {
+-    S2(M,M-1);
++    S2(M,(M-1));
+   }
+   if (M >= 2) {
+     S3(M);
+diff --git a/test/christian.c b/test/christian.c
+index cc3c5d3..b68b392 100644
+--- test/christian.c
++++ test/christian.c
+@@ -1,17 +1,17 @@
+-/* Generated from ../../../git/cloog/test/christian.cloog by CLooG 0.16.2-5-g3b3bf96 gmp bits in 0.01s. */
++/* Generated from ./christian.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (N >= 1) {
+-  S1(0,N-1);
++  S1(0,(N-1));
+   for (p=-N+2;p<=N-1;p++) {
+     if (p >= 1) {
+-      S2(p-1,0);
++      S2((p-1),0);
+     }
+     for (i=max(0,p);i<=min(N-1,p+N-2);i++) {
+-      S1(i,-p+i);
+-      S2(i,-p+i+1);
++      S1(i,(-p+i));
++      S2(i,(-p+i+1));
+     }
+     if (p <= 0) {
+-      S1(p+N-1,N-1);
++      S1((p+N-1),(N-1));
+     }
+   }
+-  S2(N-1,0);
++  S2((N-1),0);
+ }
+diff --git a/test/classen.c b/test/classen.c
+index 3b5b05e..18166cf 100644
+--- test/classen.c
++++ test/classen.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/classen.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.45s. */
++/* Generated from ./classen.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.25s. */
+ if (m >= 1) {
+   if (m >= 2) {
+     S1(0,1,1,1);
+@@ -13,52 +13,52 @@ if (m >= 1) {
+   }
+   for (glT1=1;glT1<=2*m-4;glT1++) {
+     if (glT1 <= m-2) {
+-      S5(glT1-1,1,glT1,1,glT1,1,glT1+1,1);
+-      S1(glT1,1,glT1+1,1);
+-      S2(glT1,1,glT1+1,1,glT1+1,1,glT1+2,1);
+-      S3(glT1,1,glT1+1,2,glT1+1,1,glT1+1,2);
+-      S4(glT1,1,glT1+2,2,glT1+1,1,glT1+2,2);
++      S5((glT1-1),1,glT1,1,glT1,1,(glT1+1),1);
++      S1(glT1,1,(glT1+1),1);
++      S2(glT1,1,(glT1+1),1,(glT1+1),1,(glT1+2),1);
++      S3(glT1,1,(glT1+1),2,(glT1+1),1,(glT1+1),2);
++      S4(glT1,1,(glT1+2),2,(glT1+1),1,(glT1+2),2);
+     }
+     if (glT1 >= m) {
+-      S5(glT1-1,glT1-m+2,glT1,glT1-m+2,m-1,glT1-m+2,m,glT1-m+2);
+-      S6(glT1-1,glT1-m+1,glT1,glT1-m+2,m,glT1-m+1,m,glT1-m+2);
+-      S1(glT1,glT1-m+2,m,glT1-m+2);
+-      S3(glT1,glT1-m+2,glT1+1,glT1-m+3,m,glT1-m+2,m,glT1-m+3);
++      S5((glT1-1),(glT1-m+2),glT1,(glT1-m+2),(m-1),(glT1-m+2),m,(glT1-m+2));
++      S6((glT1-1),(glT1-m+1),glT1,(glT1-m+2),m,(glT1-m+1),m,(glT1-m+2));
++      S1(glT1,(glT1-m+2),m,(glT1-m+2));
++      S3(glT1,(glT1-m+2),(glT1+1),(glT1-m+3),m,(glT1-m+2),m,(glT1-m+3));
+     }
+     if (glT1 == m-1) {
+-      S5(m-2,1,m-1,1,m-1,1,m,1);
+-      S1(m-1,1,m,1);
+-      S3(m-1,1,m,2,m,1,m,2);
++      S5((m-2),1,(m-1),1,(m-1),1,m,1);
++      S1((m-1),1,m,1);
++      S3((m-1),1,m,2,m,1,m,2);
+     }
+     for (rp1=max(2,glT1-m+3);rp1<=min(glT1,m-1);rp1++) {
+-      S5(glT1-1,rp1,glT1,rp1,glT1-rp1+1,rp1,glT1-rp1+2,rp1);
+-      S6(glT1-1,rp1-1,glT1,rp1,glT1-rp1+2,rp1-1,glT1-rp1+2,rp1);
+-      S7(glT1-1,rp1-1,glT1+1,rp1,glT1-rp1+2,rp1-1,glT1-rp1+3,rp1);
+-      S1(glT1,rp1,glT1-rp1+2,rp1);
+-      S2(glT1,rp1,glT1+1,rp1,glT1-rp1+2,rp1,glT1-rp1+3,rp1);
+-      S3(glT1,rp1,glT1+1,rp1+1,glT1-rp1+2,rp1,glT1-rp1+2,rp1+1);
+-      S4(glT1,rp1,glT1+2,rp1+1,glT1-rp1+2,rp1,glT1-rp1+3,rp1+1);
++      S5((glT1-1),rp1,glT1,rp1,(glT1-rp1+1),rp1,(glT1-rp1+2),rp1);
++      S6((glT1-1),(rp1-1),glT1,rp1,(glT1-rp1+2),(rp1-1),(glT1-rp1+2),rp1);
++      S7((glT1-1),(rp1-1),(glT1+1),rp1,(glT1-rp1+2),(rp1-1),(glT1-rp1+3),rp1);
++      S1(glT1,rp1,(glT1-rp1+2),rp1);
++      S2(glT1,rp1,(glT1+1),rp1,(glT1-rp1+2),rp1,(glT1-rp1+3),rp1);
++      S3(glT1,rp1,(glT1+1),(rp1+1),(glT1-rp1+2),rp1,(glT1-rp1+2),(rp1+1));
++      S4(glT1,rp1,(glT1+2),(rp1+1),(glT1-rp1+2),rp1,(glT1-rp1+3),(rp1+1));
+     }
+     if (glT1 <= m-2) {
+-      S6(glT1-1,glT1,glT1,glT1+1,1,glT1,1,glT1+1);
+-      S7(glT1-1,glT1,glT1+1,glT1+1,1,glT1,2,glT1+1);
+-      S1(glT1,glT1+1,1,glT1+1);
+-      S2(glT1,glT1+1,glT1+1,glT1+1,1,glT1+1,2,glT1+1);
+-      S3(glT1,glT1+1,glT1+1,glT1+2,1,glT1+1,1,glT1+2);
+-      S4(glT1,glT1+1,glT1+2,glT1+2,1,glT1+1,2,glT1+2);
++      S6((glT1-1),glT1,glT1,(glT1+1),1,glT1,1,(glT1+1));
++      S7((glT1-1),glT1,(glT1+1),(glT1+1),1,glT1,2,(glT1+1));
++      S1(glT1,(glT1+1),1,(glT1+1));
++      S2(glT1,(glT1+1),(glT1+1),(glT1+1),1,(glT1+1),2,(glT1+1));
++      S3(glT1,(glT1+1),(glT1+1),(glT1+2),1,(glT1+1),1,(glT1+2));
++      S4(glT1,(glT1+1),(glT1+2),(glT1+2),1,(glT1+1),2,(glT1+2));
+     }
+     if (glT1 >= m) {
+-      S5(glT1-1,m,glT1,m,glT1-m+1,m,glT1-m+2,m);
+-      S6(glT1-1,m-1,glT1,m,glT1-m+2,m-1,glT1-m+2,m);
+-      S7(glT1-1,m-1,glT1+1,m,glT1-m+2,m-1,glT1-m+3,m);
+-      S1(glT1,m,glT1-m+2,m);
+-      S2(glT1,m,glT1+1,m,glT1-m+2,m,glT1-m+3,m);
++      S5((glT1-1),m,glT1,m,(glT1-m+1),m,(glT1-m+2),m);
++      S6((glT1-1),(m-1),glT1,m,(glT1-m+2),(m-1),(glT1-m+2),m);
++      S7((glT1-1),(m-1),(glT1+1),m,(glT1-m+2),(m-1),(glT1-m+3),m);
++      S1(glT1,m,(glT1-m+2),m);
++      S2(glT1,m,(glT1+1),m,(glT1-m+2),m,(glT1-m+3),m);
+     }
+     if (glT1 == m-1) {
+-      S6(m-2,m-1,m-1,m,1,m-1,1,m);
+-      S7(m-2,m-1,m,m,1,m-1,2,m);
+-      S1(m-1,m,1,m);
+-      S2(m-1,m,m,m,1,m,2,m);
++      S6((m-2),(m-1),(m-1),m,1,(m-1),1,m);
++      S7((m-2),(m-1),m,m,1,(m-1),2,m);
++      S1((m-1),m,1,m);
++      S2((m-1),m,m,m,1,m,2,m);
+     }
+     for (coordP1=max(1,glT1-m+2);coordP1<=min(m,glT1+1);coordP1++) {
+       S8(glT1,coordP1);
+@@ -66,10 +66,10 @@ if (m >= 1) {
+   }
+   if (m >= 2) {
+     if (m >= 3) {
+-      S5(2*m-4,m-1,2*m-3,m-1,m-1,m-1,m,m-1);
+-      S6(2*m-4,m-2,2*m-3,m-1,m,m-2,m,m-1);
+-      S1(2*m-3,m-1,m,m-1);
+-      S3(2*m-3,m-1,2*m-2,m,m,m-1,m,m);
++      S5((2*m-4),(m-1),(2*m-3),(m-1),(m-1),(m-1),m,(m-1));
++      S6((2*m-4),(m-2),(2*m-3),(m-1),m,(m-2),m,(m-1));
++      S1((2*m-3),(m-1),m,(m-1));
++      S3((2*m-3),(m-1),(2*m-2),m,m,(m-1),m,m);
+     }
+     if (m == 2) {
+       S5(0,1,1,1,1,1,2,1);
+@@ -77,25 +77,25 @@ if (m >= 1) {
+       S3(1,1,2,2,2,1,2,2);
+     }
+     if (m >= 3) {
+-      S5(2*m-4,m,2*m-3,m,m-2,m,m-1,m);
+-      S6(2*m-4,m-1,2*m-3,m,m-1,m-1,m-1,m);
+-      S7(2*m-4,m-1,2*m-2,m,m-1,m-1,m,m);
+-      S1(2*m-3,m,m-1,m);
++      S5((2*m-4),m,(2*m-3),m,(m-2),m,(m-1),m);
++      S6((2*m-4),(m-1),(2*m-3),m,(m-1),(m-1),(m-1),m);
++      S7((2*m-4),(m-1),(2*m-2),m,(m-1),(m-1),m,m);
++      S1((2*m-3),m,(m-1),m);
+     }
+     if (m == 2) {
+       S6(0,1,1,2,1,1,1,2);
+       S7(0,1,2,2,1,1,2,2);
+       S1(1,2,1,2);
+     }
+-    S2(2*m-3,m,2*m-2,m,m-1,m,m,m);
++    S2((2*m-3),m,(2*m-2),m,(m-1),m,m,m);
+     for (coordP1=m-1;coordP1<=m;coordP1++) {
+-      S8(2*m-3,coordP1);
++      S8((2*m-3),coordP1);
+     }
+   }
+   if (m >= 2) {
+-    S5(2*m-3,m,2*m-2,m,m-1,m,m,m);
+-    S6(2*m-3,m-1,2*m-2,m,m,m-1,m,m);
+-    S1(2*m-2,m,m,m);
+-    S8(2*m-2,m);
++    S5((2*m-3),m,(2*m-2),m,(m-1),m,m,m);
++    S6((2*m-3),(m-1),(2*m-2),m,m,(m-1),m,m);
++    S1((2*m-2),m,m,m);
++    S8((2*m-2),m);
+   }
+ }
+diff --git a/test/classen2.c b/test/classen2.c
+index 2afd378..b824b4d 100644
+--- test/classen2.c
++++ test/classen2.c
+@@ -1,9 +1,9 @@
+-/* Generated from ../../../git/cloog/test/classen2.cloog by CLooG 0.14.0-271-gaa1e292 gmp bits in 0.14s. */
++/* Generated from ./classen2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.08s. */
+ if ((M >= 2) && (N >= 3) && (outerProcTileScatter1 >= outerProcTileScatter2) && (5*outerProcTileScatter1 <= M+2*N-4) && (5*outerProcTileScatter1 <= 5*outerProcTileScatter2+N+2) && (outerProcTileScatter2 >= 0) && (5*outerProcTileScatter2 <= M+N-2) && (outerTimeTileScatter >= outerProcTileScatter1) && (outerTimeTileScatter <= 2*outerProcTileScatter1) && (outerTimeTileScatter <= outerProcTileScatter1+outerProcTileScatter2+1) && (5*outerTimeTileScatter <= 2*M+2*N-6) && (5*outerTimeTileScatter <= 5*outerProcTileScatter1+M+2) && (5*outerTimeTileScatter >= 10*outerProcTileScatter1-2*N-2) && (5*outerTimeTileScatter <= 5*outerProcTileScatter2+M+N) && (5*outerTimeTileScatter >= 10*outerProcTileScatter2-N-3) && (5*outerTimeTileScatter <= 10*outerProcTileScatter2+N+3) && (5*outerTimeTileScatter >= 5*outerProcTileScatter1+5*outerProcTileScatter2-N-4)) {
+   for (compScatter1=max(max(max(max(max(4,5*outerTimeTileScatter),5*outerProcTileScatter2+1),5*outerProcTileScatter1+5*outerProcTileScatter2-N),10*outerProcTileScatter1-2*N+2),10*outerProcTileScatter2-N+1);compScatter1<=min(min(min(min(min(5*outerTimeTileScatter+4,2*M+2*N-6),5*outerProcTileScatter1+M+2),5*outerProcTileScatter1+5*outerProcTileScatter2+5),5*outerProcTileScatter2+M+N),10*outerProcTileScatter2+N+3);compScatter1++) {
+     for (compScatter2=max(max(max(max(ceild(compScatter1+4,2),5*outerProcTileScatter1),5*outerProcTileScatter2+1),compScatter1-M+2),compScatter1-5*outerProcTileScatter2-1);compScatter2<=min(min(min(min(floord(compScatter1+2*N-2,2),compScatter1),5*outerProcTileScatter1+4),compScatter1-5*outerProcTileScatter2+N),5*outerProcTileScatter2+N+2);compScatter2++) {
+       for (compScatter3=max(max(5*outerProcTileScatter2,compScatter1-compScatter2+3),compScatter2-N+2);compScatter3<=min(min(compScatter2-1,5*outerProcTileScatter2+4),compScatter1-compScatter2+N);compScatter3++) {
+-        S1(compScatter1-compScatter2+1,-compScatter1+compScatter2+compScatter3-2,compScatter2-compScatter3,compScatter1,compScatter2,compScatter3);
++        S1((compScatter1-compScatter2+1),(-compScatter1+compScatter2+compScatter3-2),(compScatter2-compScatter3),compScatter1,compScatter2,compScatter3);
+       }
+     }
+   }
+diff --git a/test/darte.c b/test/darte.c
+index 2a4a1b8..65840ad 100644
+--- test/darte.c
++++ test/darte.c
+@@ -1,15 +1,15 @@
+-/* Generated from /home/skimo/git/cloog/test/darte.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.05s. */
++/* Generated from ./darte.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if (n >= 1) {
+   for (t3=n+3;t3<=3*n+1;t3++) {
+     if ((t3+n+1)%2 == 0) {
+-      S1(1,n,(t3-n-1)/2);
++      S1(1,n,((t3-n-1)/2));
+     }
+   }
+   for (t1=-n+2;t1<=n-1;t1++) {
+     if (t1 >= 0) {
+       for (t3=t1+4;t3<=t1+2*n+2;t3++) {
+         if ((t1+t3)%2 == 0) {
+-          S1(t1+1,1,(-t1+t3-2)/2);
++          S1((t1+1),1,((-t1+t3-2)/2));
+         }
+       }
+     }
+@@ -17,7 +17,7 @@ if (n >= 1) {
+       for (t3=t2+2;t3<=t2+2*n;t3++) {
+         if ((t1+t2)%2 == 0) {
+           if ((t1+t3)%2 == 0) {
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2);
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2));
+           }
+         }
+       }
+@@ -25,36 +25,36 @@ if (n >= 1) {
+     for (t2=max(-t1+5,t1+3);t2<=min(-t1+2*n,t1+2*n);t2++) {
+       for (t3=1;t3<=min(n,t2+1);t3++) {
+         if ((t1+t2+1)%2 == 0) {
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3);
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3);
+         }
+       }
+       for (t3=t2+2;t3<=n;t3++) {
+         if ((t1+t2+1)%2 == 0) {
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3);
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3);
+         }
+         if ((t1+t2)%2 == 0) {
+           if ((t1+t3)%2 == 0) {
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2);
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2));
+           }
+         }
+       }
+       for (t3=max(n+1,t2+2);t3<=t2+2*n;t3++) {
+         if ((t1+t2)%2 == 0) {
+           if ((t1+t3)%2 == 0) {
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2);
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2));
+           }
+         }
+       }
+     }
+     if (t1 <= -1) {
+       for (t3=1;t3<=n;t3++) {
+-        S2(t1+n-1,n,t3);
++        S2((t1+n-1),n,t3);
+       }
+     }
+     for (t2=-t1+2*n+1;t2<=min(-t1+2*n+3,t1+2*n+1);t2++) {
+       for (t3=1;t3<=n;t3++) {
+         if ((t1+t2+1)%2 == 0) {
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3);
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3);
+         }
+       }
+     }
+diff --git a/test/dartef.f b/test/dartef.f
+index 3b5e3e2..81ca031 100644
+--- test/dartef.f
++++ test/dartef.f
+@@ -1,15 +1,15 @@
+-! Generated from /home/skimo/git/cloog/test/dartef.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.08s.
++! Generated from ./dartef.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.03s.
+ IF (n >= 1) THEN
+   DO t3=n+3, 3*n+1
+     IF (MOD(t3+n+1, 2) == 0) THEN
+-      S1(1,n,(t3-n-1)/2)
++      S1(1,n,((t3-n-1)/2))
+     END IF
+   END DO
+   DO t1=-n+2, n-1
+     IF (t1 >= 0) THEN
+       DO t3=t1+4, t1+2*n+2
+         IF (MOD(t1+t3, 2) == 0) THEN
+-          S1(t1+1,1,(-t1+t3-2)/2)
++          S1((t1+1),1,((-t1+t3-2)/2))
+         END IF
+       END DO
+     END IF
+@@ -17,7 +17,7 @@ IF (n >= 1) THEN
+       DO t3=t2+2, t2+2*n
+         IF (MOD(t1+t2, 2) == 0) THEN
+           IF (MOD(t1+t3, 2) == 0) THEN
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2)
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2))
+           END IF
+         END IF
+       END DO
+@@ -25,36 +25,36 @@ IF (n >= 1) THEN
+     DO t2=MAX(-t1+5,t1+3), MIN(-t1+2*n,t1+2*n)
+       DO t3=1, MIN(n,t2+1)
+         IF (MOD(t1+t2+1, 2) == 0) THEN
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3)
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3)
+         END IF
+       END DO
+       DO t3=t2+2, n
+         IF (MOD(t1+t2+1, 2) == 0) THEN
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3)
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3)
+         END IF
+         IF (MOD(t1+t2, 2) == 0) THEN
+           IF (MOD(t1+t3, 2) == 0) THEN
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2)
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2))
+           END IF
+         END IF
+       END DO
+       DO t3=MAX(n+1,t2+2), t2+2*n
+         IF (MOD(t1+t2, 2) == 0) THEN
+           IF (MOD(t1+t3, 2) == 0) THEN
+-            S1((t1+t2)/2,(-t1+t2)/2,(-t2+t3)/2)
++            S1(((t1+t2)/2),((-t1+t2)/2),((-t2+t3)/2))
+           END IF
+         END IF
+       END DO
+     END DO
+     IF (t1 <= -1) THEN
+       DO t3=1, n
+-        S2(t1+n-1,n,t3)
++        S2((t1+n-1),n,t3)
+       END DO
+     END IF
+     DO t2=-t1+2*n+1, MIN(-t1+2*n+3,t1+2*n+1)
+       DO t3=1, n
+         IF (MOD(t1+t2+1, 2) == 0) THEN
+-          S2((t1+t2-3)/2,(-t1+t2-1)/2,t3)
++          S2(((t1+t2-3)/2),((-t1+t2-1)/2),t3)
+         END IF
+       END DO
+     END DO
+diff --git a/test/durbin_e_s.c b/test/durbin_e_s.c
+index d0301c8..51b337a 100644
+--- test/durbin_e_s.c
++++ test/durbin_e_s.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/durbin_e_s.cloog by CLooG 0.14.0-238-gb1cb779 gmp bits in 0.01s. */
++/* Generated from ./durbin_e_s.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ S4(1,0,0);
+ S7(1,0,0);
+ S8(1,0,3);
+@@ -7,7 +7,7 @@ for (i=2;i<=9;i++) {
+   for (j=-7;j<=i-9;j++) {
+     S3(i,j,1);
+   }
+-  S6(i,i-9,2);
++  S6(i,(i-9),2);
+   S8(i,0,3);
+   for (j=1;j<=i-1;j++) {
+     S5(i,j,3);
+diff --git a/test/equality2.c b/test/equality2.c
+index ea28ab2..507f906 100644
+--- test/equality2.c
++++ test/equality2.c
+@@ -1,13 +1,13 @@
+-/* Generated from ../../../git/cloog/test/equality2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.07s. */
++/* Generated from ./equality2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ for (i0=1;i0<=10000;i0++) {
+   for (i1=1000;i1<=1016;i1++) {
+     for (i2=1;i2<=min(-2*i1+2033,2*i1-1999);i2++) {
+       if (2*i1 == i2+1999) {
+-        S2(i0,i1,i2,1,i0,2*i1-1000,1,2,i0,i1-499,2*i1-1999,i0,2*i1-1999,i1-999,i1-999) ;
++        S2(i0,i1,i2,1,i0,(2*i1-1000),1,2,i0,(i1-499),(2*i1-1999),i0,(2*i1-1999),(i1-999),(i1-999));
+       }
+       if (i2 == 1) {
+         if (i1%2 == 0) {
+-          S1(i0,i1,i2,2,i0,(i1+2)/2,i1-999,i0,i1-999,(i1-998)/2,(i1-998)/2) ;
++          S1(i0,i1,i2,2,i0,((i1+2)/2),(i1-999),i0,(i1-999),((i1-998)/2),((i1-998)/2));
+         }
+       }
+     }
+diff --git a/test/forwardsub-3-1-2.c b/test/forwardsub-3-1-2.c
+index 0f398ed..da340ac 100644
+--- test/forwardsub-3-1-2.c
++++ test/forwardsub-3-1-2.c
+@@ -1,23 +1,23 @@
+-/* Generated from ../../../git/cloog/test/forwardsub-3-1-2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.02s. */
+-S3(2,1) ;
+-S1(3,1) ;
+-S1(4,1) ;
+-S4(4,2) ;
++/* Generated from ./forwardsub-3-1-2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
++S3(2,1);
++S1(3,1);
++S1(4,1);
++S4(4,2);
+ for (i=5;i<=M+1;i++) {
+-  S1(i,1) ;
++  S1(i,1);
+   for (j=2;j<=floord(i-1,2);j++) {
+-    S2(i,j) ;
++    S2(i,j);
+   }
+   if (i%2 == 0) {
+-    S4(i,i/2) ;
++    S4(i,(i/2));
+   }
+ }
+ for (i=M+2;i<=2*M-1;i++) {
+   for (j=i-M;j<=floord(i-1,2);j++) {
+-    S2(i,j) ;
++    S2(i,j);
+   }
+   if (i%2 == 0) {
+-    S4(i,i/2) ;
++    S4(i,(i/2));
+   }
+ }
+-S4(2*M,M) ;
++S4(2*M,M);
+diff --git a/test/gesced.c b/test/gesced.c
+index 6b69507..e95ae38 100644
+--- test/gesced.c
++++ test/gesced.c
+@@ -1,20 +1,20 @@
+-/* Generated from ../../../git/cloog/test/gesced.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.05s. */
++/* Generated from ./gesced.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (c1=1;c1<=N;c1++) {
+-  S1(c1) ;
++  S1(c1);
+ }
+ for (c1=N+1;c1<=2*N;c1++) {
+   for (i=1;i<=N;i++) {
+-    S2(i,c1-N) ;
++    S2(i,(c1-N));
+   }
+ }
+ for (c1=2*N+1;c1<=M+N;c1++) {
+   for (i=1;i<=N;i++) {
+-    S3(i,c1-2*N) ;
+-    S2(i,c1-N) ;
++    S3(i,(c1-2*N));
++    S2(i,(c1-N));
+   }
+ }
+ for (c1=M+N+1;c1<=M+2*N;c1++) {
+   for (i=1;i<=N;i++) {
+-    S3(i,c1-2*N) ;
++    S3(i,(c1-2*N));
+   }
+ }
+diff --git a/test/gesced2.c b/test/gesced2.c
+index 5cebdb5..475d36e 100644
+--- test/gesced2.c
++++ test/gesced2.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/gesced2.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.03s. */
++/* Generated from ./gesced2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ for (c1=1;c1<=4;c1++) {
+   for (c2=5;c2<=M-10;c2++) {
+     S1(c1,c2);
+@@ -6,17 +6,17 @@ for (c1=1;c1<=4;c1++) {
+ }
+ for (c1=5;c1<=M-10;c1++) {
+   for (c2=-c1+1;c2<=4;c2++) {
+-    S2(c1+c2,c1);
++    S2((c1+c2),c1);
+   }
+   for (c2=5;c2<=min(M-10,-c1+M);c2++) {
+     S1(c1,c2);
+-    S2(c1+c2,c1);
++    S2((c1+c2),c1);
+   }
+   for (c2=-c1+M+1;c2<=M-10;c2++) {
+     S1(c1,c2);
+   }
+   for (c2=M-9;c2<=-c1+M;c2++) {
+-    S2(c1+c2,c1);
++    S2((c1+c2),c1);
+   }
+ }
+ for (c1=M-9;c1<=M;c1++) {
+diff --git a/test/gesced3.c b/test/gesced3.c
+index 8d2119d..2eb7997 100644
+--- test/gesced3.c
++++ test/gesced3.c
+@@ -1,11 +1,11 @@
+-/* Generated from ../../../git/cloog/test/gesced3.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.02s. */
++/* Generated from ./gesced3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (c1=M+1;c1<=2*M;c1++) {
+-  S1(c1-M) ;
++  S1((c1-M));
+ }
+ for (c1=2*M+1;c1<=M+N;c1++) {
+-  S2(c1-2*M) ;
+-  S1(c1-M) ;
++  S2((c1-2*M));
++  S1((c1-M));
+ }
+ for (c1=M+N+1;c1<=2*M+N;c1++) {
+-  S2(c1-2*M) ;
++  S2((c1-2*M));
+ }
+diff --git a/test/isl/jacobi-shared.c b/test/isl/jacobi-shared.c
+index 0c9983d..8b0cfd1 100644
+--- test/isl/jacobi-shared.c
++++ test/isl/jacobi-shared.c
+@@ -1,10 +1,10 @@
+-/* Generated from ../../../git/cloog/test/isl/jacobi-shared.cloog by CLooG 0.16.3-2-g5511bef gmp bits in 1.82s. */
++/* Generated from ./isl/jacobi-shared.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.33s. */
+ if ((h0+1)%2 == 0) {
+   if ((16*floord(t0-1,16) >= -N+g1+t0+1) && (16*floord(g1+t0-3,16) >= -N+g1+t0+1) && (32*floord(t1-1,32) >= -N+g2+t1+1) && (32*floord(g2+t1-3,32) >= t1-32)) {
+     for (c0=max(-16*floord(t0-1,16)+t0,-16*floord(g1+t0-3,16)+t0);c0<=min(32,N-g1-1);c0+=16) {
+       for (c1=-32*floord(t1-1,32)+t1;c1<=min(32,N-g2-1);c1+=32) {
+         if ((c1 >= 1) && (c1 <= 32)) {
+-          S1(c0+g1-1,c1+g2-1);
++          S1((c0+g1-1),(c1+g2-1));
+         }
+       }
+     }
+diff --git a/test/isl/mxm-shared.c b/test/isl/mxm-shared.c
+index e5f4c66..0060441 100644
+--- test/isl/mxm-shared.c
++++ test/isl/mxm-shared.c
+@@ -1,8 +1,8 @@
+-/* Generated from ../../../git/cloog/test/isl/mxm-shared.cloog by CLooG 0.16.1-5-gcba2a9f gmp bits in 0.34s. */
++/* Generated from ./isl/mxm-shared.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.17s. */
+ if (g4%4 == 0) {
+   if ((N >= g0+t1+1) && (N >= g1+t0+1) && (t1 <= 7)) {
+     for (c0=t0;c0<=min(127,N-g1-1);c0+=16) {
+-      S1(g0+t1,c0+g1);
++      S1((g0+t1),(c0+g1));
+     }
+   }
+ }
+diff --git a/test/isl/unroll2.c b/test/isl/unroll2.c
+index 7ec66bd..709f773 100644
+--- test/isl/unroll2.c
++++ test/isl/unroll2.c
+@@ -1,7 +1,7 @@
+-/* Generated from ../../../git/cloog/test/isl/unroll2.cloog by CLooG 0.16.3-13-g27516e4 gmp bits in 0.00s. */
++/* Generated from ./isl/unroll2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if ((M >= -1) && (M <= 9)) {
+   if (M >= 0) {
+     S1(M);
+   }
+-  S1(M+1);
++  S1((M+1));
+ }
+diff --git a/test/levenshtein-1-2-3.c b/test/levenshtein-1-2-3.c
+index 224bd29..d854541 100644
+--- test/levenshtein-1-2-3.c
++++ test/levenshtein-1-2-3.c
+@@ -1,37 +1,37 @@
+-/* Generated from ../../../git/cloog/test/levenshtein-1-2-3.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.12s. */
+-S1(0,0) ;
+-S2(1,0) ;
+-S3(1,1) ;
++/* Generated from ./levenshtein-1-2-3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
++S1(0,0);
++S2(1,0);
++S3(1,1);
+ for (i=2;i<=N;i++) {
+-  S2(i,0) ;
++  S2(i,0);
+   for (j=1;j<=i-1;j++) {
+-    S6(i,j) ;
++    S6(i,j);
+   }
+-  S3(i,i) ;
++  S3(i,i);
+ }
+-S7(N+1,0) ;
++S7((N+1),0);
+ for (j=1;j<=N;j++) {
+-  S6(N+1,j) ;
+-  S8(N+1,j) ;
++  S6((N+1),j);
++  S8((N+1),j);
+ }
+ for (i=N+2;i<=2*M-N-2;i++) {
+-  j = floord(i-N-1,2) ;
+-  S7(i,j) ;
++  j = floord(i-N-1,2);
++  S7(i,j);
+   if ((i+N)%2 == 0) {
+-    S5(i,(i-N)/2) ;
+-    S8(i,(i-N)/2) ;
++    S5(i,((i-N)/2));
++    S8(i,((i-N)/2));
+   }
+   for (j=ceild(i-N+1,2);j<=floord(i+N-1,2);j++) {
+-    S6(i,j) ;
+-    S8(i,j) ;
++    S6(i,j);
++    S8(i,j);
+   }
+   if ((i+N)%2 == 0) {
+-    S4(i,(i+N)/2) ;
+-    S8(i,(i+N)/2) ;
++    S4(i,((i+N)/2));
++    S8(i,((i+N)/2));
+   }
+ }
+ for (i=2*M-N-1;i<=2*M-2;i++) {
+   for (j=i-M+1;j<=M-1;j++) {
+-    S6(i,j) ;
++    S6(i,j);
+   }
+ }
+diff --git a/test/levenshtein-1-2-3f.f b/test/levenshtein-1-2-3f.f
+index 5a57950..e24f77d 100644
+--- test/levenshtein-1-2-3f.f
++++ test/levenshtein-1-2-3f.f
+@@ -1,4 +1,4 @@
+-! Generated from ../../../git/cloog/test/levenshtein-1-2-3f.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.11s.
++! Generated from ./levenshtein-1-2-3f.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s.
+ S1(0,0)
+ S2(1,0)
+ S3(1,1)
+@@ -9,25 +9,25 @@ DO i=2, N
+   END DO
+   S3(i,i)
+ END DO
+-S7(N+1,0)
++S7((N+1),0)
+ DO j=1, N
+-  S6(N+1,j)
+-  S8(N+1,j)
++  S6((N+1),j)
++  S8((N+1),j)
+ END DO
+ DO i=N+2, 2*M-N-2
+   j = FLOOR(REAL(i-N-1)/REAL(2))
+   S7(i,j)
+   IF (MOD(i+N, 2) == 0) THEN
+-    S5(i,(i-N)/2)
+-    S8(i,(i-N)/2)
++    S5(i,((i-N)/2))
++    S8(i,((i-N)/2))
+   END IF
+   DO j=CEILING(REAL(i-N+1)/REAL(2)), FLOOR(REAL(i+N-1)/REAL(2))
+     S6(i,j)
+     S8(i,j)
+   END DO
+   IF (MOD(i+N, 2) == 0) THEN
+-    S4(i,(i+N)/2)
+-    S8(i,(i+N)/2)
++    S4(i,((i+N)/2))
++    S8(i,((i+N)/2))
+   END IF
+ END DO
+ DO i=2*M-N-1, 2*M-2
+diff --git a/test/lineality-2-1-2.c b/test/lineality-2-1-2.c
+index 37a7e2a..630c1d4 100644
+--- test/lineality-2-1-2.c
++++ test/lineality-2-1-2.c
+@@ -1,14 +1,14 @@
+-/* Generated from /home/skimo/git/cloog/test/lineality-2-1-2.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.00s. */
++/* Generated from ./lineality-2-1-2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=1;i<=M;i++) {
+   for (j=1;j<=min(M,i+1);j++) {
+     S1(i,j);
+   }
+   if (i >= M-1) {
+-    S2(i,i+2);
++    S2(i,(i+2));
+   }
+   if (i <= M-2) {
+-    S1(i,i+2);
+-    S2(i,i+2);
++    S1(i,(i+2));
++    S2(i,(i+2));
+   }
+   for (j=i+3;j<=M;j++) {
+     S1(i,j);
+diff --git a/test/mod4.c b/test/mod4.c
+index 6a1ad6a..eb898de 100644
+--- test/mod4.c
++++ test/mod4.c
+@@ -1,6 +1,6 @@
+-/* Generated from /home/skimo/git/cloog/test/mod4.cloog by CLooG 0.14.0-225-g6e2d019 gmp bits in 0.00s. */
++/* Generated from ./mod4.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (j=2;j<=10;j+=3) {
+-  S1(j,(j+1)/3,(j+1)/3,2,(j-2)/3);
+-  S2(j,(j+1)/3,(j+1)/3,2,(j-2)/3);
+-  S3(j,(j+1)/3,(j+1)/3,2,(j-2)/3);
++  S1(j,((j+1)/3),((j+1)/3),2,((j-2)/3));
++  S2(j,((j+1)/3),((j+1)/3),2,((j-2)/3));
++  S3(j,((j+1)/3),((j+1)/3),2,((j-2)/3));
+ }
+diff --git a/test/multi-stride2.c b/test/multi-stride2.c
+index 443107b..a30b9b7 100644
+--- test/multi-stride2.c
++++ test/multi-stride2.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/multi-stride2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.01s. */
++/* Generated from ./multi-stride2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=5;i<=100;i+=6) {
+-  S1(i,(i-1)/2,(i-2)/3) ;
++  S1(i,((i-1)/2),((i-2)/3));
+ }
+diff --git a/test/no_lindep.c b/test/no_lindep.c
+index 3c7c574..14d605b 100644
+--- test/no_lindep.c
++++ test/no_lindep.c
+@@ -1,2 +1,2 @@
+-/* Generated from ../../../git/cloog/test/no_lindep.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
+-S1(N+2) ;
++/* Generated from ./no_lindep.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
++S1((N+2));
+diff --git a/test/non_optimal/nul_complex1.c b/test/non_optimal/nul_complex1.c
+index ff78145..9a6760d 100644
+--- test/non_optimal/nul_complex1.c
++++ test/non_optimal/nul_complex1.c
+@@ -1,9 +1,9 @@
+-/* Generated from ../../../git/cloog/test/./non_optimal/nul_complex1.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
++/* Generated from ./non_optimal/nul_complex1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (n >= 0) {
+   for (c1=0;c1<=5*n;c1++) {
+     for (c2=max(ceild(2*c1,3),c1-n);c2<=min(floord(2*c1+2*n,3),c1);c2++) {
+       if (c2%2 == 0) {
+-        S1((-2*c1+3*c2)/2,c1-c2) ;
++        S1(((-2*c1+3*c2)/2),(c1-c2));
+       }
+     }
+   }
+diff --git a/test/nul_basic1.c b/test/nul_basic1.c
+index d6b0cf0..838fc58 100644
+--- test/nul_basic1.c
++++ test/nul_basic1.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/nul_basic1.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
++/* Generated from ./nul_basic1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (M >= 0) {
+   for (i=0;i<=M;i+=2) {
+-    S1(i,i/2) ;
++    S1(i,(i/2));
+   }
+ }
+diff --git a/test/nul_basic2.c b/test/nul_basic2.c
+index 6231f0e..ce5e3ae 100644
+--- test/nul_basic2.c
++++ test/nul_basic2.c
+@@ -1,7 +1,7 @@
+-/* Generated from ../../../git/cloog/test/nul_basic2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
++/* Generated from ./nul_basic2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=2;i<=n;i+=2) {
+   if (i%4 == 0) {
+-    S2(i,i/4) ;
++    S2(i,(i/4));
+   }
+-  S1(i,i/2) ;
++  S1(i,(i/2));
+ }
+diff --git a/test/nul_lcpc.c b/test/nul_lcpc.c
+index b9592f5..82b1704 100644
+--- test/nul_lcpc.c
++++ test/nul_lcpc.c
+@@ -1,15 +1,15 @@
+-/* Generated from ../../../git/cloog/test/nul_lcpc.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.03s. */
++/* Generated from ./nul_lcpc.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=1;i<=6;i+=2) {
+   for (j=1;j<=i;j++) {
+-    S1(i,(i-1)/2,j) ;
+-    S2(i,(i-1)/2,j) ;
++    S1(i,((i-1)/2),j);
++    S2(i,((i-1)/2),j);
+   }
+   for (j=i+1;j<=p;j++) {
+-    S1(i,(i-1)/2,j) ;
++    S1(i,((i-1)/2),j);
+   }
+ }
+ for (i=7;i<=m;i+=2) {
+   for (j=1;j<=p;j++) {
+-    S1(i,(i-1)/2,j) ;
++    S1(i,((i-1)/2),j);
+   }
+ }
+diff --git a/test/orc.c b/test/orc.c
+index 7ed1547..ff4ce2d 100644
+--- test/orc.c
++++ test/orc.c
+@@ -1,21 +1,21 @@
+-/* Generated from ../../../git/cloog/test/orc.cloog by CLooG 0.16.2-5-g590827b gmp bits in 0.03s. */
++/* Generated from ./orc.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ S1(0);
+ S2(0,0);
+ for (p2=1;p2<=22;p2++) {
+   if ((p2+1)%2 == 0) {
+-    S3(0,(p2-1)/2);
++    S3(0,((p2-1)/2));
+   }
+   if (p2%2 == 0) {
+-    S2(0,p2/2);
++    S2(0,(p2/2));
+   }
+ }
+ S3(0,11);
+ for (p1=2;p1<=6;p1++) {
+   if ((p1+1)%3 == 0) {
+-    S4((p1-2)/3);
++    S4(((p1-2)/3));
+   }
+   if (p1%3 == 0) {
+-    S1(p1/3);
++    S1((p1/3));
+   }
+   if (p1 == 4) {
+     S2(1,0);
+@@ -23,10 +23,10 @@ for (p1=2;p1<=6;p1++) {
+   if (p1 == 4) {
+     for (p2=1;p2<=20;p2++) {
+       if ((p2+1)%2 == 0) {
+-        S3(1,(p2-1)/2);
++        S3(1,((p2-1)/2));
+       }
+       if (p2%2 == 0) {
+-        S2(1,p2/2);
++        S2(1,(p2/2));
+       }
+     }
+   }
+@@ -37,10 +37,10 @@ for (p1=2;p1<=6;p1++) {
+ S2(2,0);
+ for (p2=1;p2<=18;p2++) {
+   if ((p2+1)%2 == 0) {
+-    S3(2,(p2-1)/2);
++    S3(2,((p2-1)/2));
+   }
+   if (p2%2 == 0) {
+-    S2(2,p2/2);
++    S2(2,(p2/2));
+   }
+ }
+ S3(2,9);
+@@ -51,14 +51,14 @@ for (p2=0;p2<=9;p2++) {
+ }
+ for (p1=2;p1<=42;p1++) {
+   if ((p1+1)%3 == 0) {
+-    S7((p1-2)/3);
++    S7(((p1-2)/3));
+   }
+   if (p1%3 == 0) {
+-    S5(p1/3);
++    S5((p1/3));
+   }
+   for (p2=0;p2<=9;p2++) {
+     if ((p1+2)%3 == 0) {
+-      S6((p1-1)/3,p2);
++      S6(((p1-1)/3),p2);
+     }
+   }
+ }
+diff --git a/test/pouchet.c b/test/pouchet.c
+index 3eb887f..ddf1537 100644
+--- test/pouchet.c
++++ test/pouchet.c
+@@ -1,18 +1,18 @@
+-/* Generated from ../../../git/cloog/test/pouchet.cloog by CLooG 0.16.2-3-gc1aebd7 gmp bits in 0.03s. */
++/* Generated from ./pouchet.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if (Ny >= 2) {
+   for (c0=1;c0<=floord(Ny+4,2);c0++) {
+     for (c1=max(ceild(c0+1,2),c0-1);c1<=min(floord(2*c0+Ny,4),c0);c1++) {
+       if (c0 >= ceild(4*c1-Ny+1,2)) {
+         for (c2=1;c2<=2;c2++) {
+-          S1(c0-c1,c1,2*c0-2*c1,-2*c0+4*c1,c2);
+-          S2(c0-c1,c1,2*c0-2*c1,-2*c0+4*c1-1,c2);
++          S1((c0-c1),c1,(2*c0-2*c1),(-2*c0+4*c1),c2);
++          S2((c0-c1),c1,(2*c0-2*c1),(-2*c0+4*c1-1),c2);
+         }
+       }
+       if (2*c0 == 4*c1-Ny) {
+         for (c2=1;c2<=2;c2++) {
+           if (Ny%2 == 0) {
+             if ((2*c0+3*Ny)%4 == 0) {
+-              S2((2*c0-Ny)/4,(2*c0+Ny)/4,(2*c0-Ny)/2,Ny-1,c2);
++              S2(((2*c0-Ny)/4),((2*c0+Ny)/4),((2*c0-Ny)/2),(Ny-1),c2);
+             }
+           }
+         }
+diff --git a/test/rectangle.c b/test/rectangle.c
+index dba226a..b8b671c 100644
+--- test/rectangle.c
++++ test/rectangle.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/rectangle.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
++/* Generated from ./rectangle.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (c1=0;c1<=2*n;c1++) {
+   for (i=max(0,c1-n);i<=min(c1,n);i++) {
+-    S1(i,c1-i) ;
++    S1(i,(c1-i));
+   }
+ }
+diff --git a/test/reservoir/QR.c b/test/reservoir/QR.c
+index 5a8c26f..8818d9f 100644
+--- test/reservoir/QR.c
++++ test/reservoir/QR.c
+@@ -1,117 +1,117 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/QR.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.21s. */
++/* Generated from ./reservoir/QR.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.07s. */
+ if (N >= 1) {
+-  S1(0) ;
++  S1(0);
+   if ((M >= 1) && (N == 1)) {
+     for (c4=0;c4<=M-1;c4++) {
+-      S2(0,c4) ;
++      S2(0,c4);
+     }
+-    S3(0) ;
++    S3(0);
+     for (c4=0;c4<=M-1;c4++) {
+-      S4(0,c4) ;
++      S4(0,c4);
+     }
+-    S10(0) ;
+-    S5(0) ;
++    S10(0);
++    S5(0);
+   }
+   if ((M <= 0) && (N == 1)) {
+-    S3(0) ;
+-    S10(0) ;
+-    S5(0) ;
++    S3(0);
++    S10(0);
++    S5(0);
+   }
+   if ((M >= 1) && (N >= 2)) {
+     for (c4=0;c4<=M-1;c4++) {
+-      S2(0,c4) ;
++      S2(0,c4);
+     }
+-    S3(0) ;
++    S3(0);
+     for (c4=0;c4<=M-1;c4++) {
+-      S4(0,c4) ;
++      S4(0,c4);
+     }
+-    S10(0) ;
+-    S1(1) ;
+-    S5(0) ;
++    S10(0);
++    S1(1);
++    S5(0);
+   }
+   if ((M <= 0) && (N >= 2)) {
+-    S3(0) ;
+-    S10(0) ;
+-    S1(1) ;
+-    S5(0) ;
++    S3(0);
++    S10(0);
++    S1(1);
++    S5(0);
+   }
+   for (c2=2;c2<=min(M,N-1);c2++) {
+     for (c4=c2-1;c4<=N-1;c4++) {
+-      S6(c2-2,c4) ;
++      S6((c2-2),c4);
+       for (c6=c2-2;c6<=M-1;c6++) {
+-        S7(c2-2,c4,c6) ;
++        S7((c2-2),c4,c6);
+       }
+-      S8(c2-2,c4) ;
++      S8((c2-2),c4);
+       for (c6=c2-2;c6<=M-1;c6++) {
+-        S9(c2-2,c4,c6) ;
++        S9((c2-2),c4,c6);
+       }
+     }
+     for (c4=c2-1;c4<=M-1;c4++) {
+-      S2(c2-1,c4) ;
++      S2((c2-1),c4);
+     }
+-    S3(c2-1) ;
++    S3((c2-1));
+     for (c4=c2-1;c4<=M-1;c4++) {
+-      S4(c2-1,c4) ;
++      S4((c2-1),c4);
+     }
+-    S10(c2-1) ;
+-    S1(c2) ;
+-    S5(c2-1) ;
++    S10((c2-1));
++    S1(c2);
++    S5((c2-1));
+   }
+   if ((M >= 1) && (M <= N-2)) {
+     for (c4=M;c4<=N-1;c4++) {
+-      S6(M-1,c4) ;
+-      S7(M-1,c4,M-1) ;
+-      S8(M-1,c4) ;
+-      S9(M-1,c4,M-1) ;
++      S6((M-1),c4);
++      S7((M-1),c4,(M-1));
++      S8((M-1),c4);
++      S9((M-1),c4,(M-1));
+     }
+-    S3(M) ;
+-    S10(M) ;
+-    S1(M+1) ;
+-    S5(M) ;
++    S3(M);
++    S10(M);
++    S1((M+1));
++    S5(M);
+   }
+   for (c2=max(2,M+2);c2<=N-1;c2++) {
+     for (c4=c2-1;c4<=N-1;c4++) {
+-      S6(c2-2,c4) ;
+-      S8(c2-2,c4) ;
++      S6((c2-2),c4);
++      S8((c2-2),c4);
+     }
+-    S3(c2-1) ;
+-    S10(c2-1) ;
+-    S1(c2) ;
+-    S5(c2-1) ;
++    S3((c2-1));
++    S10((c2-1));
++    S1(c2);
++    S5((c2-1));
+   }
+   if ((M >= N) && (N >= 2)) {
+-    S6(N-2,N-1) ;
++    S6((N-2),(N-1));
+     for (c6=N-2;c6<=M-1;c6++) {
+-      S7(N-2,N-1,c6) ;
++      S7((N-2),(N-1),c6);
+     }
+-    S8(N-2,N-1) ;
++    S8((N-2),(N-1));
+     for (c6=N-2;c6<=M-1;c6++) {
+-      S9(N-2,N-1,c6) ;
++      S9((N-2),(N-1),c6);
+     }
+     for (c4=N-1;c4<=M-1;c4++) {
+-      S2(N-1,c4) ;
++      S2((N-1),c4);
+     }
+-    S3(N-1) ;
++    S3((N-1));
+     for (c4=N-1;c4<=M-1;c4++) {
+-      S4(N-1,c4) ;
++      S4((N-1),c4);
+     }
+-    S10(N-1) ;
+-    S5(N-1) ;
++    S10((N-1));
++    S5((N-1));
+   }
+   if ((M == N-1) && (M >= 1)) {
+-    S6(M-1,M) ;
+-    S7(M-1,M,M-1) ;
+-    S8(M-1,M) ;
+-    S9(M-1,M,M-1) ;
+-    S3(M) ;
+-    S10(M) ;
+-    S5(M) ;
++    S6((M-1),M);
++    S7((M-1),M,(M-1));
++    S8((M-1),M);
++    S9((M-1),M,(M-1));
++    S3(M);
++    S10(M);
++    S5(M);
+   }
+   if ((M <= N-2) && (N >= 2)) {
+-    S6(N-2,N-1) ;
+-    S8(N-2,N-1) ;
+-    S3(N-1) ;
+-    S10(N-1) ;
+-    S5(N-1) ;
++    S6((N-2),(N-1));
++    S8((N-2),(N-1));
++    S3((N-1));
++    S10((N-1));
++    S5((N-1));
+   }
+ }
+diff --git a/test/reservoir/bastoul3.c b/test/reservoir/bastoul3.c
+index 5f4b050..a96d9bd 100644
+--- test/reservoir/bastoul3.c
++++ test/reservoir/bastoul3.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/reservoir/bastoul3.cloog by CLooG 0.16.3 gmp bits in 0.01s. */
++/* Generated from ./reservoir/bastoul3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (i=3;i<=9;i++) {
+   for (j=max(i-6,i-2*floord(i+1,2)+2);j<=min(3,i-2);j+=2) {
+-    S1(i,j,(i-j)/2);
++    S1(i,j,((i-j)/2));
+   }
+ }
+diff --git a/test/reservoir/cholesky2.c b/test/reservoir/cholesky2.c
+index ee3c52e..e0c3236 100644
+--- test/reservoir/cholesky2.c
++++ test/reservoir/cholesky2.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/reservoir/cholesky2.cloog by CLooG 0.14.0-283-g7c18f7a gmp bits in 0.04s. */
++/* Generated from ./reservoir/cholesky2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ if (M >= 1) {
+   if (M >= 2) {
+     S1(1);
+@@ -11,21 +11,21 @@ if (M >= 1) {
+   }
+   for (c2=4;c2<=3*M-4;c2++) {
+     if ((c2+1)%3 == 0) {
+-      S1((c2+1)/3);
++      S1(((c2+1)/3));
+     }
+     for (c4=ceild(c2+2,3);c4<=min(M,c2-2);c4++) {
+       for (c6=ceild(c2-c4+2,2);c6<=min(c4,c2-c4);c6++) {
+-        S3(c2-c4-c6+1,c4,c6);
++        S3((c2-c4-c6+1),c4,c6);
+       }
+     }
+     for (c4=ceild(c2+4,3);c4<=min(M,c2);c4++) {
+       if ((c2+c4)%2 == 0) {
+-        S2((c2-c4+2)/2,c4);
++        S2(((c2-c4+2)/2),c4);
+       }
+     }
+   }
+   for (c2=max(2*M,3*M-3);c2<=3*M-2;c2++) {
+-    S3(c2-2*M+1,M,M);
++    S3((c2-2*M+1),M,M);
+   }
+   if (M >= 2) {
+     S1(M);
+diff --git a/test/reservoir/fusion2.c b/test/reservoir/fusion2.c
+index d9d02d6..0df2ac2 100644
+--- test/reservoir/fusion2.c
++++ test/reservoir/fusion2.c
+@@ -1,17 +1,17 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/fusion2.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.02s. */
++/* Generated from ./reservoir/fusion2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if ((M >= 1) && (N >= 1)) {
+   for (c4=1;c4<=M;c4++) {
+-    S1(1,c4) ;
++    S1(1,c4);
+   }
+   for (c2=2;c2<=N;c2++) {
+     for (c4=1;c4<=M;c4++) {
+-      S2(c2-1,c4) ;
++      S2((c2-1),c4);
+     }
+     for (c4=1;c4<=M;c4++) {
+-      S1(c2,c4) ;
++      S1(c2,c4);
+     }
+   }
+   for (c4=1;c4<=M;c4++) {
+-    S2(N,c4) ;
++    S2(N,c4);
+   }
+ }
+diff --git a/test/reservoir/jacobi3.c b/test/reservoir/jacobi3.c
+index 0182c15..ec640cf 100644
+--- test/reservoir/jacobi3.c
++++ test/reservoir/jacobi3.c
+@@ -1,29 +1,29 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/jacobi3.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.02s. */
++/* Generated from ./reservoir/jacobi3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ if ((M >= 1) && (N >= 3)) {
+   for (c4=2;c4<=N-1;c4++) {
+     for (c6=2;c6<=N-1;c6++) {
+-      S1(1,c4,c6) ;
++      S1(1,c4,c6);
+     }
+   }
+   for (c2=3;c2<=2*M;c2++) {
+     for (c4=2;c4<=N-1;c4++) {
+       for (c6=2;c6<=N-1;c6++) {
+         if (c2%2 == 0) {
+-          S1(c2/2,c4,c6) ;
++          S1((c2/2),c4,c6);
+         }
+       }
+     }
+     for (c4=2;c4<=N-1;c4++) {
+       for (c6=2;c6<=N-1;c6++) {
+         if ((c2+1)%2 == 0) {
+-          S2((c2-1)/2,c4,c6) ;
++          S2(((c2-1)/2),c4,c6);
+         }
+       }
+     }
+   }
+   for (c4=2;c4<=N-1;c4++) {
+     for (c6=2;c6<=N-1;c6++) {
+-      S2(M,c4,c6) ;
++      S2(M,c4,c6);
+     }
+   }
+ }
+diff --git a/test/reservoir/lim-lam1.c b/test/reservoir/lim-lam1.c
+index 469117c..76603e6 100644
+--- test/reservoir/lim-lam1.c
++++ test/reservoir/lim-lam1.c
+@@ -1,25 +1,25 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/lim-lam1.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.01s. */
++/* Generated from ./reservoir/lim-lam1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ S1(1,100);
+ for (c2=-98;c2<=99;c2++) {
+   if (c2 <= 0) {
+-    S1(1,-c2+1);
++    S1(1,(-c2+1));
+   }
+   if (c2 >= 1) {
+     S2(c2,1);
+   }
+   for (c4=max(2,-2*c2+3);c4<=min(199,-2*c2+200);c4++) {
+     if (c4%2 == 0) {
+-      S1((2*c2+c4)/2,c4/2);
++      S1(((2*c2+c4)/2),(c4/2));
+     }
+     if ((c4+1)%2 == 0) {
+-      S2((2*c2+c4-1)/2,(c4+1)/2);
++      S2(((2*c2+c4-1)/2),((c4+1)/2));
+     }
+   }
+   if (c2 <= 0) {
+-    S1(c2+100,100);
++    S1((c2+100),100);
+   }
+   if (c2 >= 1) {
+-    S2(100,-c2+101);
++    S2(100,(-c2+101));
+   }
+ }
+ S2(100,1);
+diff --git a/test/reservoir/lim-lam3.c b/test/reservoir/lim-lam3.c
+index c68a629..1db4230 100644
+--- test/reservoir/lim-lam3.c
++++ test/reservoir/lim-lam3.c
+@@ -1,33 +1,33 @@
+-/* Generated from ../../../git/cloog/test/reservoir/lim-lam3.cloog by CLooG 0.16.2-8-g1421b58 gmp bits in 0.03s. */
++/* Generated from ./reservoir/lim-lam3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ S4(1);
+ for (c2=9;c2<=min(13,5*M-1);c2++) {
+   if (c2 <= M+7) {
+-    S2(c2-7,1);
++    S2((c2-7),1);
+   }
+   if (c2 == 10) {
+     S4(2);
+   }
+   if (c2 <= 3*M+3) {
+     if (c2%3 == 0) {
+-      S3((c2-3)/3,1);
++      S3(((c2-3)/3),1);
+     }
+   }
+ }
+ for (c2=14;c2<=5*M-1;c2++) {
+   for (c4=max(2,ceild(c2-M-3,4));c4<=min(floord(c2-8,3),M-1);c4++) {
+     for (c6=max(1,ceild(c2-2*c4-M-5,2));c6<=min(floord(c2-3*c4-6,2),c4-1);c6++) {
+-      S1(c2-2*c4-2*c6-5,c4,c6);
++      S1((c2-2*c4-2*c6-5),c4,c6);
+     }
+   }
+   for (c4=max(1,ceild(c2-M-3,4));c4<=floord(c2-4,5);c4++) {
+-    S2(c2-4*c4-3,c4);
++    S2((c2-4*c4-3),c4);
+   }
+   if (c2%5 == 0) {
+-    S4(c2/5);
++    S4((c2/5));
+   }
+   for (c4=max(1,ceild(c2-3*M-1,2));c4<=floord(c2-4,5);c4++) {
+     if ((c2+c4+2)%3 == 0) {
+-      S3((c2-2*c4-1)/3,c4);
++      S3(((c2-2*c4-1)/3),c4);
+     }
+   }
+ }
+diff --git a/test/reservoir/lim-lam4.c b/test/reservoir/lim-lam4.c
+index b2c0845..1b22312 100644
+--- test/reservoir/lim-lam4.c
++++ test/reservoir/lim-lam4.c
+@@ -1,17 +1,17 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/lim-lam4.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.04s. */
++/* Generated from ./reservoir/lim-lam4.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ if (M >= 2) {
+-  S1(1,0,0) ;
++  S1(1,0,0);
+   for (c2=2;c2<=2*M-2;c2++) {
+     for (c4=max(-M+1,-c2+1);c4<=-1;c4++) {
+       for (i=max(1,c2-M+1);i<=min(M-1,c2+c4);i++) {
+-        S1(i,c2+c4-i,-c4) ;
++        S1(i,(c2+c4-i),-c4);
+       }
+       for (c6=max(-c4,c2-M+1);c6<=min(M-1,c2-1);c6++) {
+-        S2(c2-c6,c4+c6,c6) ;
++        S2((c2-c6),(c4+c6),c6);
+       }
+     }
+     for (i=max(1,c2-M+1);i<=min(c2,M-1);i++) {
+-      S1(i,c2-i,0) ;
++      S1(i,(c2-i),0);
+     }
+   }
+ }
+diff --git a/test/reservoir/liu-zhuge1.c b/test/reservoir/liu-zhuge1.c
+index b0f8602..a083203 100644
+--- test/reservoir/liu-zhuge1.c
++++ test/reservoir/liu-zhuge1.c
+@@ -1,46 +1,46 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/liu-zhuge1.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.02s. */
++/* Generated from ./reservoir/liu-zhuge1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if ((M >= 0) && (N >= 0)) {
+   for (c2=-4;c2<=min(-1,3*M+N-4);c2++) {
+     for (c4=max(0,c2-3*M+4);c4<=min(N,c2+4);c4++) {
+       if ((c2+2*c4+1)%3 == 0) {
+-        S1((c2-c4+4)/3,c4);
++        S1(((c2-c4+4)/3),c4);
+       }
+     }
+   }
+   for (c2=0;c2<=3*M+N-4;c2++) {
+     for (c4=max(0,c2-3*M);c4<=min(c2,c2-3*M+3);c4++) {
+       if ((c2+2*c4)%3 == 0) {
+-        S2((c2-c4)/3,c4);
++        S2(((c2-c4)/3),c4);
+       }
+     }
+     for (c4=max(0,c2-3*M+4);c4<=min(N,c2);c4++) {
+       if ((c2+2*c4)%3 == 0) {
+-        S2((c2-c4)/3,c4);
++        S2(((c2-c4)/3),c4);
+       }
+       if ((c2+2*c4+1)%3 == 0) {
+-        S1((c2-c4+4)/3,c4);
++        S1(((c2-c4+4)/3),c4);
+       }
+     }
+     for (c4=max(c2+1,c2-3*M+4);c4<=min(N,c2+4);c4++) {
+       if ((c2+2*c4+1)%3 == 0) {
+-        S1((c2-c4+4)/3,c4);
++        S1(((c2-c4+4)/3),c4);
+       }
+     }
+     for (c4=max(0,c2-3*M);c4<=min(N,c2);c4++) {
+       if ((c2+2*c4)%3 == 0) {
+-        S3((c2-c4)/3,c4);
++        S3(((c2-c4)/3),c4);
+       }
+     }
+   }
+   for (c2=max(0,3*M+N-3);c2<=3*M+N;c2++) {
+     for (c4=max(0,c2-3*M);c4<=min(N,c2);c4++) {
+       if ((c2+2*c4)%3 == 0) {
+-        S2((c2-c4)/3,c4);
++        S2(((c2-c4)/3),c4);
+       }
+     }
+     for (c4=max(0,c2-3*M);c4<=min(N,c2);c4++) {
+       if ((c2+2*c4)%3 == 0) {
+-        S3((c2-c4)/3,c4);
++        S3(((c2-c4)/3),c4);
+       }
+     }
+   }
+diff --git a/test/reservoir/loechner3.c b/test/reservoir/loechner3.c
+index c3967b8..46856d5 100644
+--- test/reservoir/loechner3.c
++++ test/reservoir/loechner3.c
+@@ -1,9 +1,9 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/loechner3.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.01s. */
++/* Generated from ./reservoir/loechner3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (M >= 1) {
+   for (c2=1;c2<=M;c2++) {
+     for (c4=2;c4<=c2+M;c4++) {
+       for (c6=max(1,-c2+c4);c6<=min(M,c4-1);c6++) {
+-        S1(c2,c6,c4-c6) ;
++        S1(c2,c6,(c4-c6));
+       }
+     }
+   }
+diff --git a/test/reservoir/loechner4.c b/test/reservoir/loechner4.c
+index 8c4b9c7..377bb71 100644
+--- test/reservoir/loechner4.c
++++ test/reservoir/loechner4.c
+@@ -1,10 +1,10 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/loechner4.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.02s. */
++/* Generated from ./reservoir/loechner4.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (M >= 1) {
+   for (c2=2;c2<=2*M;c2++) {
+     for (c4=1;c4<=M;c4++) {
+       for (c6=1;c6<=M;c6++) {
+         for (c8=max(1,c2-M);c8<=min(M,c2-1);c8++) {
+-          S1(c6,c4,c8,c2-c8) ;
++          S1(c6,c4,c8,(c2-c8));
+         }
+       }
+     }
+diff --git a/test/reservoir/mg-interp.c b/test/reservoir/mg-interp.c
+index 3ed1fcf..6a26074 100644
+--- test/reservoir/mg-interp.c
++++ test/reservoir/mg-interp.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/reservoir/mg-interp.cloog by CLooG 0.16.2-5-g590827b gmp bits in 0.29s. */
++/* Generated from ./reservoir/mg-interp.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.16s. */
+ if ((M >= 2) && (N >= 2)) {
+   for (c2=1;c2<=O-1;c2++) {
+     for (c6=1;c6<=M;c6++) {
+@@ -55,58 +55,58 @@ if ((M >= 2) && (N >= 2)) {
+     for (c4=3;c4<=2*N-5;c4++) {
+       for (c6=1;c6<=M-1;c6++) {
+         if ((c4+1)%2 == 0) {
+-          S10(c2,(c4-1)/2,c6);
++          S10(c2,((c4-1)/2),c6);
+         }
+       }
+       for (c6=1;c6<=M;c6++) {
+         if ((c4+1)%2 == 0) {
+-          S3(c2,(c4+1)/2,c6);
++          S3(c2,((c4+1)/2),c6);
+         }
+       }
+       for (c6=1;c6<=M-1;c6++) {
+         if (c4%2 == 0) {
+-          S6(c2,(c4+2)/2,c6);
++          S6(c2,((c4+2)/2),c6);
+         }
+         if ((c4+1)%2 == 0) {
+-          S1(c2,(c4+3)/2,c6);
++          S1(c2,((c4+3)/2),c6);
+         }
+         if (c4%2 == 0) {
+-          S7(c2,(c4+2)/2,c6);
++          S7(c2,((c4+2)/2),c6);
+         }
+       }
+       if ((c4+1)%2 == 0) {
+-        S1(c2,(c4+3)/2,M);
++        S1(c2,((c4+3)/2),M);
+       }
+       for (c6=1;c6<=M-1;c6++) {
+         if (c4%2 == 0) {
+-          S11(c2,c4/2,c6);
++          S11(c2,(c4/2),c6);
+         }
+       }
+     }
+     if (N >= 4) {
+       for (c6=1;c6<=M-1;c6++) {
+-        S6(c2,N-1,c6);
+-        S7(c2,N-1,c6);
++        S6(c2,(N-1),c6);
++        S7(c2,(N-1),c6);
+       }
+       for (c6=1;c6<=M-1;c6++) {
+-        S11(c2,N-2,c6);
++        S11(c2,(N-2),c6);
+       }
+     }
+     if (N >= 3) {
+       for (c6=1;c6<=M-1;c6++) {
+-        S10(c2,N-2,c6);
++        S10(c2,(N-2),c6);
+       }
+       for (c6=1;c6<=M;c6++) {
+-        S3(c2,N-1,c6);
++        S3(c2,(N-1),c6);
+       }
+     }
+     if (N >= 3) {
+       for (c6=1;c6<=M-1;c6++) {
+-        S11(c2,N-1,c6);
++        S11(c2,(N-1),c6);
+       }
+     }
+     for (c6=1;c6<=M-1;c6++) {
+-      S10(c2,N-1,c6);
++      S10(c2,(N-1),c6);
+     }
+   }
+ }
+@@ -115,13 +115,13 @@ if ((M == 1) && (N >= 2)) {
+     S1(c2,1,1);
+     for (c4=1;c4<=2*N-5;c4++) {
+       if ((c4+1)%2 == 0) {
+-        S3(c2,(c4+1)/2,1);
++        S3(c2,((c4+1)/2),1);
+       }
+       if ((c4+1)%2 == 0) {
+-        S1(c2,(c4+3)/2,1);
++        S1(c2,((c4+3)/2),1);
+       }
+     }
+-    S3(c2,N-1,1);
++    S3(c2,(N-1),1);
+   }
+ }
+ if ((M >= 2) && (N >= 2)) {
+@@ -135,22 +135,22 @@ if ((M >= 2) && (N >= 2)) {
+     for (c4=3;c4<=2*N-2;c4++) {
+       for (c6=1;c6<=M;c6++) {
+         if (c4%2 == 0) {
+-          S2(c2,c4/2,c6);
++          S2(c2,(c4/2),c6);
+         }
+       }
+       for (c6=1;c6<=M-1;c6++) {
+         if (c4%2 == 0) {
+-          S8(c2,c4/2,c6);
++          S8(c2,(c4/2),c6);
+         }
+       }
+       for (c6=1;c6<=M-1;c6++) {
+         if ((c4+1)%2 == 0) {
+-          S9(c2,(c4-1)/2,c6);
++          S9(c2,((c4-1)/2),c6);
+         }
+       }
+     }
+     for (c6=1;c6<=M-1;c6++) {
+-      S9(c2,N-1,c6);
++      S9(c2,(N-1),c6);
+     }
+   }
+ }
+@@ -158,7 +158,7 @@ if ((M == 1) && (N >= 2)) {
+   for (c2=1;c2<=O-1;c2++) {
+     for (c4=2;c4<=2*N-2;c4++) {
+       if (c4%2 == 0) {
+-        S2(c2,c4/2,1);
++        S2(c2,(c4/2),1);
+       }
+     }
+   }
+diff --git a/test/reservoir/mg-psinv.c b/test/reservoir/mg-psinv.c
+index a0447e1..9fc6b38 100644
+--- test/reservoir/mg-psinv.c
++++ test/reservoir/mg-psinv.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/mg-psinv.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.02s. */
++/* Generated from ./reservoir/mg-psinv.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+   if (M >= 3) {
+     for (c2=2;c2<=O-1;c2++) {
+@@ -9,18 +9,18 @@ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+       for (c4=4;c4<=2*N-3;c4++) {
+         for (c6=1;c6<=M;c6++) {
+           if ((c4+1)%2 == 0) {
+-            S1(c2,(c4+1)/2,c6);
+-            S2(c2,(c4+1)/2,c6);
++            S1(c2,((c4+1)/2),c6);
++            S2(c2,((c4+1)/2),c6);
+           }
+         }
+         for (c6=2;c6<=M-1;c6++) {
+           if (c4%2 == 0) {
+-            S3(c2,c4/2,c6);
++            S3(c2,(c4/2),c6);
+           }
+         }
+       }
+       for (c6=2;c6<=M-1;c6++) {
+-        S3(c2,N-1,c6);
++        S3(c2,(N-1),c6);
+       }
+     }
+   }
+@@ -29,8 +29,8 @@ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+       for (c4=3;c4<=2*N-3;c4++) {
+         for (c6=1;c6<=M;c6++) {
+           if ((c4+1)%2 == 0) {
+-            S1(c2,(c4+1)/2,c6);
+-            S2(c2,(c4+1)/2,c6);
++            S1(c2,((c4+1)/2),c6);
++            S2(c2,((c4+1)/2),c6);
+           }
+         }
+       }
+diff --git a/test/reservoir/mg-resid.c b/test/reservoir/mg-resid.c
+index 89a3cda..73902be 100644
+--- test/reservoir/mg-resid.c
++++ test/reservoir/mg-resid.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/mg-resid.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.03s. */
++/* Generated from ./reservoir/mg-resid.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+   if (M >= 3) {
+     for (c2=2;c2<=O-1;c2++) {
+@@ -9,18 +9,18 @@ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+       for (c4=4;c4<=2*N-3;c4++) {
+         for (c6=1;c6<=M;c6++) {
+           if ((c4+1)%2 == 0) {
+-            S1(c2,(c4+1)/2,c6);
+-            S2(c2,(c4+1)/2,c6);
++            S1(c2,((c4+1)/2),c6);
++            S2(c2,((c4+1)/2),c6);
+           }
+         }
+         for (c6=2;c6<=M-1;c6++) {
+           if (c4%2 == 0) {
+-            S3(c2,c4/2,c6);
++            S3(c2,(c4/2),c6);
+           }
+         }
+       }
+       for (c6=2;c6<=M-1;c6++) {
+-        S3(c2,N-1,c6);
++        S3(c2,(N-1),c6);
+       }
+     }
+   }
+@@ -29,8 +29,8 @@ if ((M >= 1) && (N >= 3) && (O >= 3)) {
+       for (c4=3;c4<=2*N-3;c4++) {
+         for (c6=1;c6<=M;c6++) {
+           if ((c4+1)%2 == 0) {
+-            S1(c2,(c4+1)/2,c6);
+-            S2(c2,(c4+1)/2,c6);
++            S1(c2,((c4+1)/2),c6);
++            S2(c2,((c4+1)/2),c6);
+           }
+         }
+       }
+diff --git a/test/reservoir/mg-rprj3.c b/test/reservoir/mg-rprj3.c
+index f7f7a4d..0b9a395 100644
+--- test/reservoir/mg-rprj3.c
++++ test/reservoir/mg-rprj3.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/mg-rprj3.cloog by CLooG 0.14.0-284-ga90f184 gmp bits in 0.10s. */
++/* Generated from ./reservoir/mg-rprj3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.05s. */
+ if ((M >= 2) && (N >= 3) && (O >= 3)) {
+   if (M >= 3) {
+     for (c2=2;c2<=O-1;c2++) {
+@@ -7,41 +7,41 @@ if ((M >= 2) && (N >= 3) && (O >= 3)) {
+       }
+       for (c4=3;c4<=N-1;c4++) {
+         for (c6=2;c6<=M;c6++) {
+-          S2(c2,c4-1,c6);
++          S2(c2,(c4-1),c6);
+         }
+-        S4(c2,c4-1,2);
++        S4(c2,(c4-1),2);
+         for (c6=2;c6<=M-2;c6++) {
+-          S3(c2,c4-1,c6);
+-          S5(c2,c4-1,c6);
+-          S4(c2,c4-1,c6+1);
++          S3(c2,(c4-1),c6);
++          S5(c2,(c4-1),c6);
++          S4(c2,(c4-1),(c6+1));
+         }
+-        S3(c2,c4-1,M-1);
+-        S5(c2,c4-1,M-1);
++        S3(c2,(c4-1),(M-1));
++        S5(c2,(c4-1),(M-1));
+         for (c6=2;c6<=M;c6++) {
+           S1(c2,c4,c6);
+         }
+       }
+       for (c6=2;c6<=M;c6++) {
+-        S2(c2,N-1,c6);
++        S2(c2,(N-1),c6);
+       }
+-      S4(c2,N-1,2);
++      S4(c2,(N-1),2);
+       for (c6=2;c6<=M-2;c6++) {
+-        S3(c2,N-1,c6);
+-        S5(c2,N-1,c6);
+-        S4(c2,N-1,c6+1);
++        S3(c2,(N-1),c6);
++        S5(c2,(N-1),c6);
++        S4(c2,(N-1),(c6+1));
+       }
+-      S3(c2,N-1,M-1);
+-      S5(c2,N-1,M-1);
++      S3(c2,(N-1),(M-1));
++      S5(c2,(N-1),(M-1));
+     }
+   }
+   if (M == 2) {
+     for (c2=2;c2<=O-1;c2++) {
+       S1(c2,2,2);
+       for (c4=3;c4<=N-1;c4++) {
+-        S2(c2,c4-1,2);
++        S2(c2,(c4-1),2);
+         S1(c2,c4,2);
+       }
+-      S2(c2,N-1,2);
++      S2(c2,(N-1),2);
+     }
+   }
+ }
+diff --git a/test/reservoir/pingali1.c b/test/reservoir/pingali1.c
+index 505df8d..5b790c0 100644
+--- test/reservoir/pingali1.c
++++ test/reservoir/pingali1.c
+@@ -1,14 +1,14 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/pingali1.cloog by CLooG 0.14.0-225-g6e2d019 gmp bits in 0.01s. */
++/* Generated from ./reservoir/pingali1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if ((M >= 1) && (N >= 1)) {
+   if (N >= 2) {
+     for (c2=1;c2<=M;c2++) {
+       S2(c2,1);
+       for (c4=3;c4<=2*N-1;c4++) {
+         for (c6=max(1,c4-N);c6<=floord(c4-1,2);c6++) {
+-          S1(c2,c4-c6,c6);
++          S1(c2,(c4-c6),c6);
+         }
+         if ((c4+1)%2 == 0) {
+-          S2(c2,(c4+1)/2);
++          S2(c2,((c4+1)/2));
+         }
+       }
+     }
+diff --git a/test/reservoir/pingali5.c b/test/reservoir/pingali5.c
+index 1b2c415..8da6ad6 100644
+--- test/reservoir/pingali5.c
++++ test/reservoir/pingali5.c
+@@ -1,21 +1,21 @@
+-/* Generated from /home/skimo/git/cloog/test/./reservoir/pingali5.cloog by CLooG 0.14.0-225-g6e2d019 gmp bits in 0.02s. */
++/* Generated from ./reservoir/pingali5.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ if (M >= 2) {
+   for (c2=3;c2<=2*M-3;c2++) {
+     for (c4=ceild(c2+3,2);c4<=M;c4++) {
+       for (i=ceild(c2+1,2);i<=min(c2-1,c4-1);i++) {
+-        S1(i,c2-i,c4);
++        S1(i,(c2-i),c4);
+       }
+     }
+     for (c4=max(1,c2-M);c4<=floord(c2-1,2);c4++) {
+-      S2(c2-c4,c4);
++      S2((c2-c4),c4);
+     }
+     for (c4=ceild(c2+3,2);c4<=M;c4++) {
+       for (i=ceild(c2+1,2);i<=min(c2-1,c4-1);i++) {
+-        S3(i,c2-i,c4);
++        S3(i,(c2-i),c4);
+       }
+     }
+   }
+   for (c2=max(M+1,2*M-2);c2<=2*M-1;c2++) {
+-    S2(M,c2-M);
++    S2(M,(c2-M));
+   }
+ }
+diff --git a/test/reservoir/pingali6.c b/test/reservoir/pingali6.c
+index 5ce4a85..08765c1 100644
+--- test/reservoir/pingali6.c
++++ test/reservoir/pingali6.c
+@@ -1,29 +1,29 @@
+-/* Generated from ../../../git/cloog/test/./reservoir/pingali6.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.04s. */
++/* Generated from ./reservoir/pingali6.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ if (N >= 3) {
+   for (c4=2;c4<=N-1;c4++) {
+     for (c6=2;c6<=N-1;c6++) {
+-      S1(1,c4,c6) ;
++      S1(1,c4,c6);
+     }
+   }
+   for (c2=3;c2<=2*M;c2++) {
+     for (c4=2;c4<=N-1;c4++) {
+       for (c6=2;c6<=N-1;c6++) {
+         if (c2%2 == 0) {
+-          S1(c2/2,c4,c6) ;
++          S1((c2/2),c4,c6);
+         }
+       }
+     }
+     for (c4=2;c4<=N-1;c4++) {
+       for (c6=2;c6<=N-1;c6++) {
+         if ((c2+1)%2 == 0) {
+-          S2((c2-1)/2,c4,c6) ;
++          S2(((c2-1)/2),c4,c6);
+         }
+       }
+     }
+   }
+   for (c4=2;c4<=N-1;c4++) {
+     for (c6=2;c6<=N-1;c6++) {
+-      S2(M,c4,c6) ;
++      S2(M,c4,c6);
+     }
+   }
+ }
+diff --git a/test/reservoir/stride.c b/test/reservoir/stride.c
+index e22c74b..bfbabff 100644
+--- test/reservoir/stride.c
++++ test/reservoir/stride.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/reservoir/stride.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.00s. */
++/* Generated from ./reservoir/stride.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (M >= 2) {
+   for (c2=2;c2<=M;c2+=7) {
+-    S1(c2,(c2-2)/7) ;
++    S1(c2,((c2-2)/7));
+   }
+ }
+diff --git a/test/reservoir/stride2.c b/test/reservoir/stride2.c
+index 8c2b7bf..4c7c23c 100644
+--- test/reservoir/stride2.c
++++ test/reservoir/stride2.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/reservoir/stride2.cloog by CLooG 0.16.1-2-g0ae5c85 gmp bits in 0.00s. */
++/* Generated from ./reservoir/stride2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if (M >= 2) {
+   for (c2=2;c2<=M;c2+=7) {
+-    S1(c2,(c2-2)/7);
++    S1(c2,((c2-2)/7));
+   }
+ }
+diff --git a/test/reservoir/tang-xue1.c b/test/reservoir/tang-xue1.c
+index 7dd0610..b555ba6 100644
+--- test/reservoir/tang-xue1.c
++++ test/reservoir/tang-xue1.c
+@@ -1,11 +1,11 @@
+-/* Generated from ../../../git/cloog/test/reservoir/tang-xue1.cloog by CLooG 0.14.0-165-g01eb246 gmp bits in 0.01s. */
++/* Generated from ./reservoir/tang-xue1.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.01s. */
+ for (c2=0;c2<=9;c2++) {
+   for (c4=max(-1,c2-9);c4<=min(4,c2+3);c4++) {
+     for (c6=max(max(1,c2),c2-c4);c6<=min(min(9,c2+1),c2-c4+4);c6++) {
+       for (c8=max(1,-c2+c4+c6);c8<=min(4,-c2+c4+c6+1);c8++) {
+         if (c2%2 == 0) {
+           if (c4%2 == 0) {
+-            S1(c2/2,(-c2+c4)/2,-c2+c6,-c4+c8);
++            S1((c2/2),((-c2+c4)/2),(-c2+c6),(-c4+c8));
+           }
+         }
+       }
+diff --git a/test/sor1d.c b/test/sor1d.c
+index da1b5ec..19d807b 100644
+--- test/sor1d.c
++++ test/sor1d.c
+@@ -1,16 +1,16 @@
+-/* Generated from ../../../git/cloog/test/sor1d.cloog by CLooG 0.14.0-278-gcf1f323 gmp bits in 0.11s. */
++/* Generated from ./sor1d.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.13s. */
+ if ((M >= 1) && (N >= 3)) {
+   for (glT1=-1;glT1<=floord(3*M+N-5,100);glT1++) {
+     for (rp1=max(max(0,ceild(100*glT1-2*M-N+5,100)),ceild(100*glT1-N-193,300));rp1<=min(min(floord(glT1+1,3),floord(M,100)),glT1);rp1++) {
+       for (vT1=max(max(100*glT1-100*rp1,200*rp1-3),200*rp1-N+1);vT1<=min(min(min(2*M+N-5,100*glT1-100*rp1+99),200*rp1+N+193),100*glT1-100*rp1+N+95);vT1++) {
+         if (rp1 >= max(1,ceild(vT1-N+7,200))) {
+-          S3(glT1-rp1,rp1-1,rp1,100*rp1-1,-200*rp1+vT1+6);
++          S3((glT1-rp1),(rp1-1),rp1,(100*rp1-1),(-200*rp1+vT1+6));
+         }
+         for (vP1=max(max(1,ceild(vT1-N+5,2)),100*rp1);vP1<=min(min(floord(vT1+2,2),M),100*rp1+99);vP1++) {
+-          S1(glT1-rp1,rp1,vP1,vT1-2*vP1+4);
++          S1((glT1-rp1),rp1,vP1,(vT1-2*vP1+4));
+         }
+         if (rp1 <= min(floord(M-100,100),floord(vT1-197,200))) {
+-          S2(glT1-rp1,rp1,rp1+1,100*rp1+99,-200*rp1+vT1-194);
++          S2((glT1-rp1),rp1,(rp1+1),(100*rp1+99),(-200*rp1+vT1-194));
+         }
+       }
+     }
+diff --git a/test/stride.c b/test/stride.c
+index d2cf8fe..115b083 100644
+--- test/stride.c
++++ test/stride.c
+@@ -1,9 +1,9 @@
+-/* Generated from stride.cloog by CLooG 0.14.0-200-g26bdb56 gmp bits in 0.01s. */
++/* Generated from ./stride.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (c1=3;c1<=100;c1++) {
+   if (c1 == 25) {
+     S1(25);
+   }
+   if (c1%3 == 0) {
+-    S2(c1,c1/3);
++    S2(c1,(c1/3));
+   }
+ }
+diff --git a/test/stride2.c b/test/stride2.c
+index 320a2fb..bfc332d 100644
+--- test/stride2.c
++++ test/stride2.c
+@@ -1,7 +1,7 @@
+-/* Generated from stride2.cloog by CLooG 0.14.0-200-g26bdb56 gmp bits in 0.00s. */
++/* Generated from ./stride2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (c1=3;c1<=100;c1+=3) {
+   if (c1 == 27) {
+     S1(27);
+   }
+-  S2(c1,c1/3);
++  S2(c1,(c1/3));
+ }
+diff --git a/test/stride3.c b/test/stride3.c
+index c228cb6..9f7b828 100644
+--- test/stride3.c
++++ test/stride3.c
+@@ -1,6 +1,6 @@
+-/* Generated from ../../../git/cloog/test/stride3.cloog by CLooG 0.14.0-291-g5879c32 gmp bits in 0.00s. */
++/* Generated from ./stride3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if ((m <= n) && (n >= 1)) {
+   for (p1=max(50,50*m);p1<=50*n;p1+=50) {
+-    S1(p1/50);
++    S1((p1/50));
+   }
+ }
+diff --git a/test/thomasset.c b/test/thomasset.c
+index f201f6f..d118308 100644
+--- test/thomasset.c
++++ test/thomasset.c
+@@ -1,4 +1,4 @@
+-/* Generated from /home/skimo/git/cloog/test/thomasset.cloog by CLooG 0.14.0-292-g2bfd6ac gmp bits in 0.04s. */
++/* Generated from ./thomasset.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ if (n >= 1) {
+   for (c1=0;c1<=floord(n-4,3);c1++) {
+     for (i=3*c1+1;i<=3*c1+3;i++) {
+@@ -25,14 +25,14 @@ if (n >= 1) {
+   if (3*c1 == n-3) {
+     for (i=n-2;i<=n;i++) {
+       if (n%3 == 0) {
+-        S1(i,(n-3)/3);
++        S1(i,((n-3)/3));
+       }
+     }
+   }
+   if (c1 >= ceild(n-2,3)) {
+     for (c2=1;c2<=n-1;c2++) {
+       for (j=1;j<=2;j++) {
+-        S2(c2+1,j,0,c1,0);
++        S2((c2+1),j,0,c1,0);
+       }
+     }
+   }
+@@ -41,7 +41,7 @@ if (n >= 1) {
+       for (j=max(1,3*c1-n);j<=min(n,3*c1-n+4);j++) {
+         p = max(ceild(3*c1-j,3),ceild(n-2,3));
+         if (p <= min(floord(n,3),floord(3*c1-j+2,3))) {
+-          S2(c2+1,j,0,p,c1-p);
++          S2((c2+1),j,0,p,(c1-p));
+         }
+       }
+     }
+diff --git a/test/vasilache.c b/test/vasilache.c
+index fdff031..c5ef6a9 100644
+--- test/vasilache.c
++++ test/vasilache.c
+@@ -1,4 +1,4 @@
+-/* Generated from ../../../git/cloog/test/vasilache.cloog by CLooG 0.14.0-162-g1e599e0 gmp bits in 0.03s. */
++/* Generated from ./vasilache.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.02s. */
+ S1();
+ S2();
+ for (p1=0;p1<=N-1;p1++) {
+@@ -12,14 +12,14 @@ for (p1=0;p1<=N-1;p1++) {
+     for (p5=0;p5<=floord(N-1,32);p5++) {
+       S7(p1,p3,p5,32*p5);
+       for (p7=32*p5+1;p7<=min(N-1,32*p5+31);p7++) {
+-        S6(p1,p3,p5,p7-1);
++        S6(p1,p3,p5,(p7-1));
+         S7(p1,p3,p5,p7);
+       }
+       if (p5 >= ceild(N-31,32)) {
+-        S6(p1,p3,p5,N-1);
++        S6(p1,p3,p5,(N-1));
+       }
+       if (p5 <= floord(N-32,32)) {
+-        S6(p1,p3,p5,32*p5+31);
++        S6(p1,p3,p5,(32*p5+31));
+       }
+     }
+   }
+diff --git a/test/vivien.c b/test/vivien.c
+index d364046..6368e6d 100644
+--- test/vivien.c
++++ test/vivien.c
+@@ -1,8 +1,8 @@
+-/* Generated from /home/skimo/git/cloog/test/vivien.cloog by CLooG 0.14.0-292-g2bfd6ac gmp bits in 0.12s. */
++/* Generated from ./vivien.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.07s. */
+ if (n >= 0) {
+   for (p1=-54*n+4;p1<=4;p1++) {
+     if (p1%2 == 0) {
+-      S1((p1-2)/2);
++      S1(((p1-2)/2));
+     }
+   }
+   if (n >= 1) {
+@@ -30,164 +30,164 @@ if (n >= 0) {
+       S3(2);
+     }
+     if ((p1+1)%2 == 0) {
+-      S2((p1-3)/2,1);
++      S2(((p1-3)/2),1);
+     }
+   }
+   for (p1=10;p1<=min(2*n+58,4*n-2);p1++) {
+     p2 = ceild(-p1+2,4);
+     if (p2 <= min(floord(-p1+2*n,2),floord(-p1+5,4))) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+     }
+     if (p1 >= 4*n-4) {
+       if (p1%2 == 0) {
+         for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-          S5((p1-2*n)/2,n,p3);
++          S5(((p1-2*n)/2),n,p3);
+         }
+       }
+     }
+     p2 = ceild(-p1+6,4);
+     if (p2 <= min(floord(-p1+2*n,2),floord(-p1+9,4))) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+       for (p3=1;p3<=-p2;p3++) {
+         if (p1%2 == 0) {
+-          S5(-p2+1,(p1+2*p2-2)/2,p3);
++          S5((-p2+1),((p1+2*p2-2)/2),p3);
+         }
+       }
+     }
+     for (p2=ceild(-p1+10,4);p2<=min(-1,floord(-p1+2*n,2));p2++) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+       if (p1%2 == 0) {
+-        S6(-p2+2,(p1+2*p2-4)/2);
++        S6((-p2+2),((p1+2*p2-4)/2));
+       }
+       for (p3=1;p3<=-p2;p3++) {
+         if (p1%2 == 0) {
+-          S5(-p2+1,(p1+2*p2-2)/2,p3);
++          S5((-p2+1),((p1+2*p2-2)/2),p3);
+         }
+       }
+     }
+     if ((p1 >= 2*n+4) && (p1 <= 4*n-6)) {
+       if (p1%2 == 0) {
+-        S6((p1-2*n+2)/2,n-1);
++        S6(((p1-2*n+2)/2),(n-1));
+         for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-          S5((p1-2*n)/2,n,p3);
++          S5(((p1-2*n)/2),n,p3);
+         }
+       }
+     }
+     if (p1 >= 2*n+6) {
+       if (p1%2 == 0) {
+-        S6((p1-2*n)/2,n);
++        S6(((p1-2*n)/2),n);
+       }
+     }
+     if (p1 <= 2*n+4) {
+       if (p1%2 == 0) {
+-        S6(2,(p1-4)/2);
++        S6(2,((p1-4)/2));
+       }
+       if ((p1+3)%4 == 0) {
+-        S3((p1-1)/4);
++        S3(((p1-1)/4));
+       }
+       if (p1%2 == 0) {
+-        S1((p1-2)/2);
++        S1(((p1-2)/2));
+       }
+     }
+     if (p1 >= 2*n+5) {
+       if ((p1+3)%4 == 0) {
+-        S3((p1-1)/4);
++        S3(((p1-1)/4));
+       }
+       if (p1%2 == 0) {
+-        S1((p1-2)/2);
++        S1(((p1-2)/2));
+       }
+     }
+     if (p1 <= 2*n+2) {
+       if (p1%2 == 0) {
+-        S6(1,(p1-2)/2);
++        S6(1,((p1-2)/2));
+       }
+     }
+     for (p2=max(1,ceild(p1-2*n-1,2));p2<=floord(p1-3,4);p2++) {
+       if ((p1+1)%2 == 0) {
+-        S2((p1-2*p2-1)/2,p2);
++        S2(((p1-2*p2-1)/2),p2);
+       }
+     }
+   }
+   if ((n >= 2) && (n <= 29)) {
+-    S2(n,n-1);
++    S2(n,(n-1));
+   }
+   if ((n >= 2) && (n <= 29)) {
+-    S1(2*n-1);
++    S1((2*n-1));
+   }
+   if ((n >= 2) && (n <= 28)) {
+     S3(n);
+   }
+   for (p1=max(7,4*n+2);p1<=2*n+58;p1++) {
+     if (p1%2 == 0) {
+-      S1((p1-2)/2);
++      S1(((p1-2)/2));
+     }
+   }
+   for (p1=2*n+59;p1<=4*n-2;p1++) {
+     p2 = ceild(-p1+2,4);
+     if (p2 <= min(floord(-p1+2*n,2),floord(-p1+5,4))) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+     }
+     if (p1 >= 4*n-4) {
+       if (p1%2 == 0) {
+         for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-          S5((p1-2*n)/2,n,p3);
++          S5(((p1-2*n)/2),n,p3);
+         }
+       }
+     }
+     p2 = ceild(-p1+6,4);
+     if (p2 <= min(floord(-p1+2*n,2),floord(-p1+9,4))) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+       for (p3=1;p3<=-p2;p3++) {
+         if (p1%2 == 0) {
+-          S5(-p2+1,(p1+2*p2-2)/2,p3);
++          S5((-p2+1),((p1+2*p2-2)/2),p3);
+         }
+       }
+     }
+     for (p2=ceild(-p1+10,4);p2<=floord(-p1+2*n,2);p2++) {
+       if (p1%2 == 0) {
+-        S4(-p2,(p1+2*p2)/2);
++        S4(-p2,((p1+2*p2)/2));
+       }
+       if (p1%2 == 0) {
+-        S6(-p2+2,(p1+2*p2-4)/2);
++        S6((-p2+2),((p1+2*p2-4)/2));
+       }
+       for (p3=1;p3<=-p2;p3++) {
+         if (p1%2 == 0) {
+-          S5(-p2+1,(p1+2*p2-2)/2,p3);
++          S5((-p2+1),((p1+2*p2-2)/2),p3);
+         }
+       }
+     }
+     if (p1 <= 4*n-6) {
+       if (p1%2 == 0) {
+-        S6((p1-2*n+2)/2,n-1);
++        S6(((p1-2*n+2)/2),(n-1));
+         for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-          S5((p1-2*n)/2,n,p3);
++          S5(((p1-2*n)/2),n,p3);
+         }
+       }
+     }
+     if (p1%2 == 0) {
+-      S6((p1-2*n)/2,n);
++      S6(((p1-2*n)/2),n);
+     }
+     if ((p1+3)%4 == 0) {
+-      S3((p1-1)/4);
++      S3(((p1-1)/4));
+     }
+     for (p2=ceild(p1-2*n-1,2);p2<=floord(p1-3,4);p2++) {
+       if ((p1+1)%2 == 0) {
+-        S2((p1-2*p2-1)/2,p2);
++        S2(((p1-2*p2-1)/2),p2);
+       }
+     }
+   }
+   if (n >= 30) {
+-    S2(n,n-1);
++    S2(n,(n-1));
+   }
+   if (n >= 29) {
+     S3(n);
+diff --git a/test/vivien2.c b/test/vivien2.c
+index d4f1f04..91a0292 100644
+--- test/vivien2.c
++++ test/vivien2.c
+@@ -1,7 +1,7 @@
+-/* Generated from /home/skimo/git/cloog/test/vivien2.cloog by CLooG 0.14.0-292-g2bfd6ac gmp bits in 0.10s. */
++/* Generated from ./vivien2.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.08s. */
+ for (p1=-54*n+4;p1<=4;p1++) {
+   if (p1%2 == 0) {
+-    S1((p1-2)/2);
++    S1(((p1-2)/2));
+   }
+ }
+ S3(1);
+@@ -22,87 +22,87 @@ for (p1=7;p1<=9;p1++) {
+     S3(2);
+   }
+   if ((p1+1)%2 == 0) {
+-    S2((p1-3)/2,1);
++    S2(((p1-3)/2),1);
+   }
+ }
+ for (p1=10;p1<=2*n+58;p1++) {
+   p2 = ceild(-p1+2,4);
+   if (p2 <= min(floord(-p1+2*n,2),floord(-p1+5,4))) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+   }
+   if (p1 >= 4*n-4) {
+     if (p1%2 == 0) {
+       for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-        S5((p1-2*n)/2,n,p3);
++        S5(((p1-2*n)/2),n,p3);
+       }
+     }
+   }
+   p2 = ceild(-p1+6,4);
+   if (p2 <= min(floord(-p1+2*n,2),floord(-p1+9,4))) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+     for (p3=1;p3<=-p2;p3++) {
+       if (p1%2 == 0) {
+-        S5(-p2+1,(p1+2*p2-2)/2,p3);
++        S5((-p2+1),((p1+2*p2-2)/2),p3);
+       }
+     }
+   }
+   for (p2=ceild(-p1+10,4);p2<=min(-1,floord(-p1+2*n,2));p2++) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+     if (p1%2 == 0) {
+-      S6(-p2+2,(p1+2*p2-4)/2);
++      S6((-p2+2),((p1+2*p2-4)/2));
+     }
+     for (p3=1;p3<=-p2;p3++) {
+       if (p1%2 == 0) {
+-        S5(-p2+1,(p1+2*p2-2)/2,p3);
++        S5((-p2+1),((p1+2*p2-2)/2),p3);
+       }
+     }
+   }
+   if ((p1 >= 2*n+4) && (p1 <= 4*n-6)) {
+     if (p1%2 == 0) {
+-      S6((p1-2*n+2)/2,n-1);
++      S6(((p1-2*n+2)/2),(n-1));
+       for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-        S5((p1-2*n)/2,n,p3);
++        S5(((p1-2*n)/2),n,p3);
+       }
+     }
+   }
+   if (p1 >= 2*n+6) {
+     if (p1%2 == 0) {
+-      S6((p1-2*n)/2,n);
++      S6(((p1-2*n)/2),n);
+     }
+   }
+   if (p1 <= 2*n+4) {
+     if (p1%2 == 0) {
+-      S6(2,(p1-4)/2);
++      S6(2,((p1-4)/2));
+     }
+     if ((p1+3)%4 == 0) {
+-      S3((p1-1)/4);
++      S3(((p1-1)/4));
+     }
+     if (p1%2 == 0) {
+-      S1((p1-2)/2);
++      S1(((p1-2)/2));
+     }
+   }
+   if (p1 >= 2*n+5) {
+     if ((p1+3)%4 == 0) {
+-      S3((p1-1)/4);
++      S3(((p1-1)/4));
+     }
+     if (p1%2 == 0) {
+-      S1((p1-2)/2);
++      S1(((p1-2)/2));
+     }
+   }
+   if (p1 <= 2*n+2) {
+     if (p1%2 == 0) {
+-      S6(1,(p1-2)/2);
++      S6(1,((p1-2)/2));
+     }
+   }
+   for (p2=max(1,ceild(p1-2*n-1,2));p2<=floord(p1-3,4);p2++) {
+     if ((p1+1)%2 == 0) {
+-      S2((p1-2*p2-1)/2,p2);
++      S2(((p1-2*p2-1)/2),p2);
+     }
+   }
+ }
+@@ -110,59 +110,59 @@ for (p1=2*n+59;p1<=4*n-2;p1++) {
+   p2 = ceild(-p1+2,4);
+   if (p2 <= min(floord(-p1+2*n,2),floord(-p1+5,4))) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+   }
+   if (p1 >= 4*n-4) {
+     if (p1%2 == 0) {
+       for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-        S5((p1-2*n)/2,n,p3);
++        S5(((p1-2*n)/2),n,p3);
+       }
+     }
+   }
+   p2 = ceild(-p1+6,4);
+   if (p2 <= min(floord(-p1+2*n,2),floord(-p1+9,4))) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+     for (p3=1;p3<=-p2;p3++) {
+       if (p1%2 == 0) {
+-        S5(-p2+1,(p1+2*p2-2)/2,p3);
++        S5((-p2+1),((p1+2*p2-2)/2),p3);
+       }
+     }
+   }
+   for (p2=ceild(-p1+10,4);p2<=floord(-p1+2*n,2);p2++) {
+     if (p1%2 == 0) {
+-      S4(-p2,(p1+2*p2)/2);
++      S4(-p2,((p1+2*p2)/2));
+     }
+     if (p1%2 == 0) {
+-      S6(-p2+2,(p1+2*p2-4)/2);
++      S6((-p2+2),((p1+2*p2-4)/2));
+     }
+     for (p3=1;p3<=-p2;p3++) {
+       if (p1%2 == 0) {
+-        S5(-p2+1,(p1+2*p2-2)/2,p3);
++        S5((-p2+1),((p1+2*p2-2)/2),p3);
+       }
+     }
+   }
+   if (p1 <= 4*n-6) {
+     if (p1%2 == 0) {
+-      S6((p1-2*n+2)/2,n-1);
++      S6(((p1-2*n+2)/2),(n-1));
+       for (p3=1;p3<=floord(p1-2*n-2,2);p3++) {
+-        S5((p1-2*n)/2,n,p3);
++        S5(((p1-2*n)/2),n,p3);
+       }
+     }
+   }
+   if (p1%2 == 0) {
+-    S6((p1-2*n)/2,n);
++    S6(((p1-2*n)/2),n);
+   }
+   if ((p1+3)%4 == 0) {
+-    S3((p1-1)/4);
++    S3(((p1-1)/4));
+   }
+   for (p2=ceild(p1-2*n-1,2);p2<=floord(p1-3,4);p2++) {
+     if ((p1+1)%2 == 0) {
+-      S2((p1-2*p2-1)/2,p2);
++      S2(((p1-2*p2-1)/2),p2);
+     }
+   }
+ }
+-S2(n,n-1);
++S2(n,(n-1));
+ S3(n);
+diff --git a/test/walters.c b/test/walters.c
+index fdb2183..221dd80 100644
+--- test/walters.c
++++ test/walters.c
+@@ -1,21 +1,21 @@
+-/* Generated from ../../../git/cloog/test/walters.cloog by CLooG 0.16.1-3-g354eed5 gmp bits in 0.01s. */
++/* Generated from ./walters.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ S2(1,0,1,0);
+ S4(1,0,1,0);
+ S3(2,0,1,1);
+ S4(2,0,1,1);
+ for (i=3;i<=10;i++) {
+   if ((i+1)%3 == 0) {
+-    S3(i,(i-2)/3,(i+1)/3,(i+1)/3);
++    S3(i,((i-2)/3),((i+1)/3),((i+1)/3));
+   }
+   if ((i+2)%3 == 0) {
+-    S2(i,(i-1)/3,(i+2)/3,(i-1)/3);
++    S2(i,((i-1)/3),((i+2)/3),((i-1)/3));
+   }
+   if (i%3 == 0) {
+-    S1(i,i/3,i/3,i/3);
++    S1(i,(i/3),(i/3),(i/3));
+   }
+   div36 = floord(i,3);
+   div37 = ceild(2*i-3*div36-1,3);
+   if (div37 <= floord(i+2,3)) {
+-    S4(i,div36,div37,i-div36-div37);
++    S4(i,div36,div37,(i-div36-div37));
+   }
+ }
+diff --git a/test/walters3.c b/test/walters3.c
+index fc922d6..f9128a8 100644
+--- test/walters3.c
++++ test/walters3.c
+@@ -1,8 +1,8 @@
+-/* Generated from ../../../git/cloog/test/walters3.cloog by CLooG 0.14.0-338-g99c7504 gmp bits in 0.00s. */
++/* Generated from ./walters3.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ for (j=2;j<=8;j++) {
+   if (j%2 == 0) {
+-    S1(j,j/2,j/2);
+-    S2(j,j/2,j/2);
++    S1(j,(j/2),(j/2));
++    S2(j,(j/2),(j/2));
+   }
+ }
+ S2(10,5,5);
+diff --git a/test/wavefront.c b/test/wavefront.c
+index c6d2868..c4ee686 100644
+--- test/wavefront.c
++++ test/wavefront.c
+@@ -1,8 +1,8 @@
+-/* Generated from ../../../git/cloog/test/wavefront.cloog by CLooG 0.14.0-136-gb91ef26 gmp bits in 0.01s. */
++/* Generated from ./wavefront.cloog by CLooG 0.18.1-2-g43fc508 gmp bits in 0.00s. */
+ if ((m >= 1) && (n >= 1)) {
+   for (c1=2;c1<=n+m;c1++) {
+     for (c2=max(1,c1-m);c2<=min(n,c1-1);c2++) {
+-      S1(c2,c1-c2) ;
++      S1(c2,(c1-c2));
+     }
+   }
+ }
+-- 
+1.9.3
+
