@@ -114,6 +114,17 @@ proc wxWidgets._set {option action args} {
         # throw an error
         ui_error "You shouldn't be using 'wxWidgets.use wxPerl-3.0' any longer. Switch to wxWidgets-3.0."
         return -code error "invalid parameter for wxWidgets.use"
+    # preliminary support for wxWidgets 3.1/3.2
+    } elseif {${args} eq "wxWidgets-3.2"} {
+        wxWidgets.name      "wxWidgets"
+        wxWidgets.version   "3.1"
+        wxWidgets.port      "wxWidgets-3.2-devel"
+        if {${os.major} < 9} {
+            pre-fetch {
+                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
+                return -code error "incompatible Mac OS X version"
+            }
+        }
     } else {
         # throw an error
         ui_error "invalid parameter for wxWidgets.use; use one of: wxWidgets-2.8/wxGTK-2.8/wxWidgets-3.0/wxGTK-3.0/wxPython-3.0"
