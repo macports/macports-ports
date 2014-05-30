@@ -118,7 +118,7 @@ proc wxWidgets._set {option action args} {
     } elseif {${args} eq "wxWidgets-3.2"} {
         wxWidgets.name      "wxWidgets"
         wxWidgets.version   "3.1"
-        wxWidgets.port      "wxWidgets-3.2-devel"
+        wxWidgets.port      "wxWidgets-3.1"
         if {${os.major} < 9} {
             pre-fetch {
                 ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
