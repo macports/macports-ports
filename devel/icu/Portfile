@@ -8,8 +8,8 @@ name            icu
 set my_name     icu4c
 # Don't forget to increase the revision number of the dependents (e.g. boost)
 # whenever the library version number changes. Thanks.
-version         51.2
-revision        1
+# port echo depends:icu finds dependencies
+version         53.1
 categories      devel textproc
 platforms       darwin freebsd
 license         MIT
@@ -28,60 +28,92 @@ master_sites    http://download.icu-project.org/files/${my_name}/${version}/
 distname        ${my_name}-[join [split ${version} .] _]
 extract.suffix  .tgz
 distfiles       ${distname}-src${extract.suffix}
-patchfiles      patch-configure.diff \
-                patch-config-mh-darwin.diff \
-                inline.patch
 
 checksums       ${distname}-src.tgz \
-                rmd160  ef1256bb87b3dcec1cf40b32b11c5c3f1bd48af6 \
-                sha256  deb027a05f1b3bec03298b96fb93b28c84e9683c22e6f94effa67fdc7bd704cc
+                rmd160  9bd1b4bdc2010545c76a927dcf46049686beeab9 \
+                sha256  6fa74fb5aac070c23eaba1711a7178fe582c59867484c5ec07c49002787a9a28
 
 worksrcdir      ${name}/source
 set docdir      ${prefix}/share/doc/${name}
 
-if {[variant_isset universal]} {
-    patchfiles-append   patch-universal.diff
+# icu appends -O2 to the cflags and cxxflags
+configure.optflags-delete -Os
 
-    # weirdly, icu needs a separate source dir built for the build
-    # machine in order to cross-compile
-    pre-configure {
-        global merger_configure_args
-        set cross 0
-        set 32bit 0
-        set crosspath ${worksrcpath}-cross
-        if {${os.major} < 9 || [sysctl hw.cpu64bit_capable] == 0} {
-            set 32bit 1
-        }
-        foreach a $universal_archs_to_use {
-            if {($32bit && ($a eq "x86_64" || $a eq "ppc64")) 
-                || (${os.arch} eq "powerpc" && ($a eq "x86_64" || $a eq "i386"))
-                || (${os.arch} eq "i386" && ($a eq "ppc" || $a eq "ppc64"))} {
-                set cross 1
-                set merger_configure_args($a) --with-cross-build=${crosspath}
+# ICU has three mechanisms to aid other projects in building properly
+#     1) .pc files for pkg-config
+#     2) shell script icu-config that can output compiler flags
+#     3) Makefile include files Makefile.inc and pkgdata.inc
+# For a time, all three assumed other projects would want to be
+#     built as ICU had been built, regardless of whether it was appropriate.
+# For the most part, the extraneous flags have been removed.
+#     1) They have been removed completely from the .pc files.
+#        pkg-config is the recommended way of building against ICU.
+#     2) icu-config does not print them out, but they are still contained in the script itself.
+#     3) They still exist in the Makefile include files.
+#
+# for descriptions of the problem, see
+#     r101578
+#     #40069
+#     https://bugs.gentoo.org/show_bug.cgi?id=202059
+#
+# for upstream reports and discussion, see
+#    http://bugs.icu-project.org/trac/ticket/10308
+#    http://bugs.icu-project.org/trac/ticket/6102
+if {[variant_isset universal]} {
+    merger-post-destroot {
+        set rebuilton ""
+        foreach arch ${universal_archs_to_use} {
+            set dir ${destroot}-${arch}
+            
+            # SIZEOF_VOID_P is no longer used in icu-config, so remove it to facilitate merging of the shell script
+            reinplace {s| -DSIZEOF_VOID_P=[48]||g} ${dir}${prefix}/bin/icu-config
+            
+            # icu-config contains the exact time it was built, which makes merging difficult
+            # ensure that all versions of icu-config have the same build timestamp
+            if { ${rebuilton} eq "" } {
+                set rebuilton [exec /usr/bin/tail -n 1 ${dir}${prefix}/bin/icu-config]
+            } else {
+                reinplace "s|^# Rebuilt on .*|${rebuilton}|" ${dir}${prefix}/bin/icu-config
             }
+            
+            # Removing architecture specific information from the Makefile include files is necessary to merge them correctly.
+            # It is concivable that this could cause problems for certain projects.
+            # The developers of ICU suggest using pkg-config over both icu-config and the Makefile includes.
+            reinplace {s| -DSIZEOF_VOID_P=[48]||g} ${dir}${prefix}/lib/icu/${version}/Makefile.inc
+            reinplace -E {s:-arch +[^ ]+::g} ${dir}${prefix}/lib/icu/${version}/pkgdata.inc
         }
-        if {$cross} {
-            copy ${worksrcpath} ${crosspath}
-            set configure_dir_save  ${configure.dir}
-            configure.dir ${crosspath}
-            portconfigure::configure_main
-            configure.dir $configure_dir_save
-            system -W ${crosspath} "${build.cmd}[portbuild::build_getjobsarg]"
-        }
+    }
+} else {
+    post-destroot {
+        # stay consistent with the universal build (see comments above)
+        reinplace {s| -DSIZEOF_VOID_P=[48]||g} ${destroot}${prefix}/bin/icu-config
+        reinplace {s| -DSIZEOF_VOID_P=[48]||g} ${destroot}${prefix}/lib/icu/${version}/Makefile.inc
+        reinplace -E {s:-arch +[^ ]+::g} ${destroot}${prefix}/lib/icu/${version}/pkgdata.inc
     }
 }
 
-post-patch {
-    reinplace "s|__PREFIX__|${prefix}|g" ${worksrcpath}/config/mh-darwin
+post-destroot {
+    # The ICU build mechanism passes rpath to the linker, but this should not be necessary if the shared libraries were built correctly.
+    reinplace {s|^default_ENABLE_RPATH="YES"$|default_ENABLE_RPATH="NO"|g} ${destroot}${prefix}/bin/icu-config
+    reinplace -E {s| -Wl,-rpath,.+/lib||g} ${destroot}${prefix}/lib/icu/${version}/pkgdata.inc
 }
 
 set platform [switch ${os.platform} {darwin {format MacOSX} freebsd {format FreeBSD}}]
 configure.cmd   ./runConfigureICU ${platform}
 
+# enable-rpath forces ICU to build the shared library correctly (with directory name in -install_name)
 configure.args  --enable-static \
-                --disable-samples
+                --disable-samples \
+                --enable-rpath
 
 configure.universal_args-delete --disable-dependency-tracking
+if {[variant_isset universal]} {
+    # ICU detects cross compiling by trying to run binaries.
+    # r73849 and #29904 indicate that cross compiling is a problem.
+    # Of the solutions tried (r79660, r73865, and r73849), simply disallowing cross compiling is by far the simplest.
+    # Note that #29904 should not show up again because universal now better recognizes 32/64-bit cross compiling (r79658)
+    set merger_must_run_binaries "yes"
+}
 
 # Fix bug #11981 that prevents ICU from building when upgrading.
 # The default configure flags causes utilisation of outdated ICU
@@ -89,34 +121,9 @@ configure.universal_args-delete --disable-dependency-tracking
 configure.cppflags
 configure.ldflags
 
-post-configure {
-    if {[variant_isset universal]} {
-        # Ticket #23773
-        foreach a ${universal_archs_to_use} {
-            reinplace "s|__ARCH__|${a}|g" ${worksrcpath}-${a}/Makefile
-        }
-    }
-}
-
 build.type      gnu
 
 use_parallel_build  yes
-
-post-build {
-    if {[variant_isset universal]} {
-        set dirs {}
-        foreach arch ${universal_archs_to_use} {
-            lappend dirs ${worksrcpath}-${arch}
-        }
-    } else {
-        set dirs ${worksrcpath}
-    }
-    foreach dir ${dirs} {
-        foreach f {Makefile.inc icu-config icu-i18n.pc icu-io.pc icu-le.pc icu-lx.pc icu-uc.pc icu.pc pkgdata.inc} {
-            reinplace -E {s|-arch [a-z0-9_]+||g} ${dir}/config/${f}
-        }
-    }
-}
 
 test.run        yes
 test.target     check
@@ -124,48 +131,6 @@ test.target     check
 post-destroot {
     xinstall -d ${destroot}${docdir}
     eval xinstall -m 0644 [glob ${worksrcpath}/../*.{css,html,txt}] ${destroot}${docdir}
-
-    if {[variant_isset universal]} {
-        # Ticket #23773
-        foreach a ${universal_archs_to_use} {
-            reinplace "s|/Makefile.inc|/Makefile-${a}.inc|g" ${destroot}${prefix}/bin/icu-config-${a}
-        }
-        ln -s current/Makefile.inc ${destroot}${prefix}/lib/icu/Makefile.inc
-    }
-}
-
-post-activate {
-    if {[variant_isset universal]} {
-        # Ticket #23773
-        set a ${configure.build_arch}
-        if {$a == "ppc64"} {
-            if {![file exists ${prefix}/bin/icu-config-${a}]} {
-                set a "ppc"
-            }
-        } elseif {$a == "x86_64"} {
-            if {![file exists ${prefix}/bin/icu-config-${a}]} {
-                set a "i386"
-                if {![file exists ${prefix}/bin/icu-config-${a}]} {
-                    set a "ppc"
-                }
-            }
-        } elseif {$a == "i386"} {
-            if {![file exists ${prefix}/bin/icu-config-${a}]} {
-                set a "ppc"
-            }
-        }
-        foreach {p q} [list "${prefix}/bin/icu-config-${a}" "${prefix}/bin/icu-config" \
-                            "${prefix}/lib/icu/${version}/Makefile-${a}.inc" "${prefix}/lib/icu/${version}/Makefile.inc" \
-                            "${prefix}/lib/pkgconfig/icu-i18n-${a}.pc" "${prefix}/lib/pkgconfig/icu-i18n.pc" \
-                            "${prefix}/lib/pkgconfig/icu-io-${a}.pc" "${prefix}/lib/pkgconfig/icu-io.pc" \
-                            "${prefix}/lib/pkgconfig/icu-le-${a}.pc" "${prefix}/lib/pkgconfig/icu-le.pc" \
-                            "${prefix}/lib/pkgconfig/icu-lx-${a}.pc" "${prefix}/lib/pkgconfig/icu-lx.pc" \
-                            "${prefix}/lib/pkgconfig/icu-uc-${a}.pc" "${prefix}/lib/pkgconfig/icu-uc.pc"] {
-            if {[file exists ${p}]} {
-                ln -s ${p} ${q}
-            }
-        }
-    }
 }
 
 # icu @51.2_0 and earlier also installed the following files directly, bypassing destroot:
@@ -192,8 +157,8 @@ variant doc conflicts doxygen description {Install pre-built API documentation} 
     extract.only        ${distname}-src${extract.suffix}
     distfiles-append    ${distname}-docs.zip
     checksums-append    ${distname}-docs.zip \
-                        rmd160  87f332c1c2e4c5322cd110f93e8ccb288d0303a9 \
-                        sha256  c488b3ddbb99a4a368cfc74e725d6a9e491ae6ac0169caba2197c15ffb85b7c5
+                        rmd160  60ce19f8633c18d670ad2f0b8d7920cd6ed0a314 \
+                        sha256  2c700534d52b98615b4baffcf0502f37540604e67817625f05d6e2fbf98d0c0b
 
     post-extract {
         xinstall -m 0755 -d ${worksrcpath}/doc
