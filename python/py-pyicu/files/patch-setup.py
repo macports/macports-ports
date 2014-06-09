@@ -1,15 +1,15 @@
---- setup.py.orig	2013-02-09 04:17:06.000000000 -0600
-+++ setup.py	2013-02-09 04:24:46.000000000 -0600
+--- setup.py.orig	2014-06-05 14:43:04.000000000 -0700
++++ setup.py	2014-06-09 13:17:26.000000000 -0700
 @@ -10,9 +10,9 @@
- VERSION = '1.5'
+ VERSION = '1.8'
  
  INCLUDES = {
 -    'darwin': ['/usr/local/include'],
 -    'linux': [],
--    'freebsd7': ['/usr/local/include'],
+-    'freebsd': ['/usr/local/include'],
 +    'darwin': ['@PREFIX@/include'],
 +    'linux': ['@PREFIX@/include'],
-+    'freebsd7': ['@PREFIX@/include'],
++    'freebsd': ['@PREFIX@/include'],
      'win32': ['c:/icu/include'],
      'sunos5': [],
  }
@@ -19,10 +19,10 @@
  LFLAGS = {
 -    'darwin': ['-L/usr/local/lib'],
 -    'linux': [],
--    'freebsd7': ['-L/usr/local/lib'],
+-    'freebsd': ['-L/usr/local/lib'],
 +    'darwin': ['-L@PREFIX@/lib'],
 +    'linux': ['-L@PREFIX@/lib'],
-+    'freebsd7': ['-L@PREFIX@/lib'],
++    'freebsd': ['-L@PREFIX@/lib'],
      'win32': ['/LIBPATH:c:/icu/lib'],
      'sunos5': [],
  }
