@@ -81,12 +81,9 @@ pre-configure {
     # The environment variable CPPFLAGS is not considered by CMake.
     # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
     # <http://www.cmake.org/Bug/view.php?id=12928>).
-    # Thus, we have to add them manually to the CFLAGS and CXXFLAGS in the
-    # pre-configure phase.
-    if {${configure.cppflags} ne ""} {
-        configure.cflags-append ${configure.cppflags}
-        configure.cxxflags-append ${configure.cppflags}
-    }
+    #
+    # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
+    # If any other flags are needed, we need to add them.
 
     # In addition, CMake provides build-type-specific flags for
     # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
