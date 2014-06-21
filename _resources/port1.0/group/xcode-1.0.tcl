@@ -277,10 +277,7 @@ proc xcode::get_build_args {args} {
     }
 
     # CLANG_CXX_LIBRARY
-    # TODO: Simplify once MacPorts 2.3 is released
-    if {[info exists configure.cxx_stdlib]} {
-        append xcode_build_args " CLANG_CXX_LIBRARY=\"${configure.cxx_stdlib}\""
-    }
+    append xcode_build_args " CLANG_CXX_LIBRARY=\"${configure.cxx_stdlib}\""
 
     return $xcode_build_args
 }
