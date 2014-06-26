@@ -18,30 +18,32 @@ TODO:
  - Should rsync try to treat the compressed data as file data and use the
    rsync algorithm on the data transfer?
 
-based-on: patch/b3.0.x/crtimes
+based-on: patch/master/crtimes
 diff --git a/flist.c b/flist.c
 --- a/flist.c
 +++ b/flist.c
-@@ -1496,6 +1496,7 @@ static struct file_struct *send_file_name(int f, struct file_list *flist,
- #ifdef SUPPORT_FILEFLAGS
- 			sx.st.st_flags = preserve_fileflags ? F_FFLAGS(file) : 0;
- #endif
+@@ -1583,6 +1583,9 @@ static struct file_struct *send_file_name(int f, struct file_list *flist,
+ #ifdef SUPPORT_XATTRS
+ 		if (preserve_xattrs) {
+ 			sx.st.st_mode = file->mode;
++			if (preserve_fileflags)
++				sx.st.st_flags = F_FFLAGS(file);
 +			sx.st.st_mtime = file->modtime; /* get_xattr needs mtime for decmpfs xattrs */
- 			sx.xattr = NULL;
  			if (get_xattr(fname, &sx) < 0) {
  				io_error |= IOERR_GENERAL;
+ 				return NULL;
 diff --git a/generator.c b/generator.c
 --- a/generator.c
 +++ b/generator.c
-@@ -39,6 +39,7 @@ extern int keep_dirlinks;
- extern int force_change;
+@@ -37,6 +37,7 @@ extern int implied_dirs;
+ extern int keep_dirlinks;
  extern int preserve_acls;
  extern int preserve_xattrs;
 +extern int preserve_hfs_compression;
  extern int preserve_links;
  extern int preserve_devices;
  extern int preserve_specials;
-@@ -1888,6 +1889,14 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+@@ -1762,6 +1763,14 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
  					fname, fnamecmpbuf);
  			}
  			sx.st.st_size = F_LENGTH(fuzzy_file);
@@ -55,8 +57,8 @@ diff --git a/generator.c b/generator.c
 +#endif
  			statret = 0;
  			fnamecmp = fnamecmpbuf;
- 			fnamecmp_type = FNAMECMP_FUZZY;
-@@ -2072,6 +2081,18 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 		}
+@@ -1929,6 +1938,18 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
  	if (read_batch)
  		goto cleanup;
  
@@ -78,54 +80,48 @@ diff --git a/generator.c b/generator.c
 diff --git a/lib/sysxattrs.c b/lib/sysxattrs.c
 --- a/lib/sysxattrs.c
 +++ b/lib/sysxattrs.c
-@@ -22,6 +22,17 @@
+@@ -22,10 +22,17 @@
  #include "rsync.h"
  #include "sysxattrs.h"
  
 +extern int preserve_hfs_compression;
 +
-+#ifdef HAVE_OSX_XATTRS
+ #ifdef SUPPORT_XATTRS
+ 
+ #ifdef HAVE_OSX_XATTRS
 +#ifndef XATTR_SHOWCOMPRESSION
 +#define XATTR_SHOWCOMPRESSION 0x0020
 +#endif
-+#define GETXATTR_FETCH_LIMIT (64*1024*1024)
+ #define GETXATTR_FETCH_LIMIT (64*1024*1024)
 +
 +int xattr_options = XATTR_NOFOLLOW;
-+#endif
-+
- #ifdef SUPPORT_XATTRS
+ #endif
  
  #if defined HAVE_LINUX_XATTRS
-@@ -55,7 +66,27 @@ ssize_t sys_llistxattr(const char *path, char *list, size_t size)
+@@ -59,7 +66,12 @@ ssize_t sys_llistxattr(const char *path, char *list, size_t size)
  
  ssize_t sys_lgetxattr(const char *path, const char *name, void *value, size_t size)
  {
--	return getxattr(path, name, value, size, 0, XATTR_NOFOLLOW);
+-	ssize_t len = getxattr(path, name, value, size, 0, XATTR_NOFOLLOW);
 +	ssize_t len;
 +
 +	if (preserve_hfs_compression)
 +		xattr_options |= XATTR_SHOWCOMPRESSION;
 +
 +	len = getxattr(path, name, value, size, 0, xattr_options);
-+
-+	/* If we're retrieving data, handle resource forks > 64MB specially */
-+	if (value != NULL && strcmp(name, XATTR_RESOURCEFORK_NAME) == 0 && len == GETXATTR_FETCH_LIMIT) {
-+		/* getxattr will only return 64MB of data at a time, need to call again with a new offset */
-+		u_int32_t offset = GETXATTR_FETCH_LIMIT;
-+		ssize_t data_retrieved = len;
-+		while (data_retrieved < (ssize_t)size) {
-+			len = getxattr(path, name, value + offset, size - data_retrieved, offset, xattr_options);
-+			data_retrieved += len;
-+			offset += (u_int32_t)len;
-+		}
-+		len = data_retrieved;
-+	}
-+
-+	return len;
- }
  
- ssize_t sys_fgetxattr(int filedes, const char *name, void *value, size_t size)
-@@ -70,12 +101,16 @@ int sys_lsetxattr(const char *path, const char *name, const void *value, size_t
+ 	/* If we're retrieving data, handle resource forks > 64MB specially */
+ 	if (value != NULL && len == GETXATTR_FETCH_LIMIT && (size_t)len < size) {
+@@ -67,7 +79,7 @@ ssize_t sys_lgetxattr(const char *path, const char *name, void *value, size_t si
+ 		u_int32_t offset = len;
+ 		size_t data_retrieved = len;
+ 		while (data_retrieved < size) {
+-			len = getxattr(path, name, value + offset, size - data_retrieved, offset, XATTR_NOFOLLOW);
++			len = getxattr(path, name, value + offset, size - data_retrieved, offset, xattr_options);
+ 			if (len <= 0)
+ 				break;
+ 			data_retrieved += len;
+@@ -91,12 +103,16 @@ int sys_lsetxattr(const char *path, const char *name, const void *value, size_t
  
  int sys_lremovexattr(const char *path, const char *name)
  {
@@ -156,19 +152,25 @@ diff --git a/main.c b/main.c
 +#include <sys/mount.h> /* For statfs() */
 +#endif
  
- extern int verbose;
  extern int dry_run;
-@@ -50,7 +54,9 @@ extern int copy_dirlinks;
+ extern int list_only;
+@@ -53,6 +57,7 @@ extern int copy_dirlinks;
  extern int copy_unsafe_links;
  extern int keep_dirlinks;
  extern int preserve_hard_links;
 +extern int preserve_hfs_compression;
  extern int protocol_version;
-+extern int force_change;
+ extern int force_change;
  extern int file_total;
- extern int recurse;
- extern int xfer_dirs;
-@@ -490,6 +496,43 @@ static pid_t do_cmd(char *cmd, char *machine, char *user, char **remote_argv, in
+@@ -107,6 +112,7 @@ int daemon_over_rsh = 0;
+ mode_t orig_umask = 0;
+ int batch_gen_fd = -1;
+ int sender_keeps_checksum = 0;
++int fs_supports_hfs_compression = 0;
+ 
+ /* There's probably never more than at most 2 outstanding child processes,
+  * but set it higher, just in case. */
+@@ -559,6 +565,43 @@ static pid_t do_cmd(char *cmd, char *machine, char *user, char **remote_argv, in
  	return 0; /* not reached */
  }
  
@@ -212,7 +214,7 @@ diff --git a/main.c b/main.c
  /* The receiving side operates in one of two modes:
   *
   * 1. it receives any number of files into a destination directory,
-@@ -548,6 +591,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
+@@ -617,6 +660,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
  				exit_cleanup(RERR_FILESELECT);
  			}
  			filesystem_dev = st.st_dev; /* ensures --force works right w/-x */
@@ -222,7 +224,7 @@ diff --git a/main.c b/main.c
  			return NULL;
  		}
  		if (file_total > 1) {
-@@ -608,7 +654,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
+@@ -677,7 +723,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
  				full_fname(dest_path));
  			exit_cleanup(RERR_FILESELECT);
  		}
@@ -233,7 +235,7 @@ diff --git a/main.c b/main.c
  		return NULL;
  	}
  
-@@ -628,6 +676,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
+@@ -697,6 +745,9 @@ static char *get_local_name(struct file_list *flist, char *dest_path)
  			full_fname(dest_path));
  		exit_cleanup(RERR_FILESELECT);
  	}
@@ -243,18 +245,10 @@ diff --git a/main.c b/main.c
  	*cp = '/';
  
  	return cp + 1;
-@@ -981,7 +1032,6 @@ int child_main(int argc, char *argv[])
- 	return 0;
- }
- 
--
- void start_server(int f_in, int f_out, int argc, char *argv[])
- {
- 	set_nonblocking(f_in);
 diff --git a/options.c b/options.c
 --- a/options.c
 +++ b/options.c
-@@ -52,6 +52,7 @@ int preserve_links = 0;
+@@ -54,6 +54,7 @@ int preserve_links = 0;
  int preserve_hard_links = 0;
  int preserve_acls = 0;
  int preserve_xattrs = 0;
@@ -262,7 +256,7 @@ diff --git a/options.c b/options.c
  int preserve_perms = 0;
  int preserve_fileflags = 0;
  int preserve_executability = 0;
-@@ -355,6 +356,10 @@ void usage(enum logcode F)
+@@ -713,6 +714,10 @@ void usage(enum logcode F)
  #ifdef SUPPORT_XATTRS
    rprintf(F," -X, --xattrs                preserve extended attributes\n");
  #endif
@@ -273,7 +267,7 @@ diff --git a/options.c b/options.c
    rprintf(F," -o, --owner                 preserve owner (super-user only)\n");
    rprintf(F," -g, --group                 preserve group\n");
    rprintf(F,"     --devices               preserve device files (super-user only)\n");
-@@ -588,6 +593,12 @@ static struct poptOption long_options[] = {
+@@ -974,6 +979,12 @@ static struct poptOption long_options[] = {
    {"force-uchange",    0,  POPT_ARG_VAL,    &force_change, USR_IMMUTABLE, 0, 0 },
    {"force-schange",    0,  POPT_ARG_VAL,    &force_change, SYS_IMMUTABLE, 0, 0 },
  #endif
@@ -286,7 +280,7 @@ diff --git a/options.c b/options.c
    {"ignore-errors",    0,  POPT_ARG_VAL,    &ignore_errors, 1, 0, 0 },
    {"no-ignore-errors", 0,  POPT_ARG_VAL,    &ignore_errors, 0, 0, 0 },
    {"max-delete",       0,  POPT_ARG_INT,    &max_delete, 0, 0, 0 },
-@@ -1362,6 +1373,15 @@ int parse_arguments(int *argc_p, const char ***argv_p)
+@@ -1974,6 +1985,15 @@ int parse_arguments(int *argc_p, const char ***argv_p)
  	}
  #endif
  
@@ -299,10 +293,10 @@ diff --git a/options.c b/options.c
 +	}
 +#endif
 +
- 	if (write_batch && read_batch) {
+ 	if (block_size > MAX_BLOCK_SIZE) {
  		snprintf(err_buf, sizeof err_buf,
- 			"--write-batch and --read-batch can not be used together\n");
-@@ -1915,6 +1935,11 @@ void server_options(char **args, int *argc_p)
+ 			 "--block-size=%lu is too large (max: %u)\n", block_size, MAX_BLOCK_SIZE);
+@@ -2573,6 +2593,11 @@ void server_options(char **args, int *argc_p)
  	if (preserve_fileflags)
  		args[ac++] = "--fileflags";
  
@@ -317,7 +311,7 @@ diff --git a/options.c b/options.c
 diff --git a/rsync.c b/rsync.c
 --- a/rsync.c
 +++ b/rsync.c
-@@ -498,8 +498,14 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -573,8 +573,14 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  #ifdef SUPPORT_XATTRS
  	if (am_root < 0)
  		set_stat_xattr(fname, file, new_mode);
@@ -333,7 +327,7 @@ diff --git a/rsync.c b/rsync.c
  #endif
  
  	if (!preserve_times
-@@ -510,6 +516,9 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -585,6 +591,9 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  	if (sxp->st.st_ino == 2 && S_ISDIR(sxp->st.st_mode))
  		flags |= ATTRS_SKIP_CRTIME;
  	if (!(flags & ATTRS_SKIP_MTIME)
@@ -341,14 +335,14 @@ diff --git a/rsync.c b/rsync.c
 +	    && !(sxp->st.st_flags & UF_COMPRESSED) /* setting this alters mtime, so defer to after set_fileflags */
 +#endif
  	    && cmp_time(sxp->st.st_mtime, file->modtime) != 0) {
- 		int ret = set_modtime(fname, file->modtime, sxp->st.st_mode, ST_FLAGS(sxp->st));
+ 		int ret = set_modtime(fname, file->modtime, F_MOD_NSEC(file), sxp->st.st_mode, ST_FLAGS(sxp->st));
  		if (ret < 0) {
-@@ -620,6 +629,16 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -643,6 +652,16 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  		 && !set_fileflags(fname, fileflags))
  			goto cleanup;
  		updated = 1;
 +#ifdef SUPPORT_HFS_COMPRESSION
-+		int ret = set_modtime(fname, file->modtime, new_mode, fileflags);
++		int ret = set_modtime(fname, file->modtime, F_MOD_NSEC(file), new_mode, fileflags);
 +		if (ret < 0) {
 +			rsyserr(FERROR_XFER, errno, "failed to set times on %s",
 +				full_fname(fname));
@@ -363,7 +357,7 @@ diff --git a/rsync.c b/rsync.c
 diff --git a/rsync.h b/rsync.h
 --- a/rsync.h
 +++ b/rsync.h
-@@ -509,6 +509,17 @@ typedef unsigned int size_t;
+@@ -549,6 +549,17 @@ typedef unsigned int size_t;
  #define ST_FLAGS(st) NO_FFLAGS
  #endif
  
@@ -384,7 +378,7 @@ diff --git a/rsync.h b/rsync.h
 diff --git a/rsync.yo b/rsync.yo
 --- a/rsync.yo
 +++ b/rsync.yo
-@@ -360,6 +360,8 @@ to the detailed description below for a complete description.  verb(
+@@ -367,6 +367,8 @@ to the detailed description below for a complete description.  verb(
       --chmod=CHMOD           affect file and/or directory permissions
   -A, --acls                  preserve ACLs (implies -p)
   -X, --xattrs                preserve extended attributes
@@ -393,9 +387,9 @@ diff --git a/rsync.yo b/rsync.yo
   -o, --owner                 preserve owner (super-user only)
   -g, --group                 preserve group
       --devices               preserve device files (super-user only)
-@@ -1038,6 +1040,42 @@ flags on files and directories that are being updated or deleted on the
+@@ -1135,6 +1137,42 @@ flags on files and directories that are being updated or deleted on the
  receiving side.  It does not try to affect user flags.  This option overrides
- bf(--force-change) and bf(--force-schange).
+ bf(--force-change) and bf(--force-uchange).
  
 +dit(bf(--hfs-compression)) This option causes rsync to preserve HFS+
 +compression if the destination filesystem supports it.  If the destination
@@ -439,18 +433,18 @@ diff --git a/rsync.yo b/rsync.yo
 diff --git a/t_stub.c b/t_stub.c
 --- a/t_stub.c
 +++ b/t_stub.c
-@@ -29,6 +29,7 @@ int module_dirlen = 0;
- int force_change = 0;
+@@ -32,6 +32,7 @@ int force_change = 0;
+ int preserve_acls = 0;
  int preserve_times = 0;
  int preserve_xattrs = 0;
 +int preserve_hfs_compression = 0;
- mode_t orig_umask = 002;
  char *partial_dir;
  char *module_dir;
+ filter_rule_list daemon_filter_list;
 diff --git a/xattrs.c b/xattrs.c
 --- a/xattrs.c
 +++ b/xattrs.c
-@@ -32,6 +32,7 @@ extern int am_generator;
+@@ -33,6 +33,7 @@ extern int am_generator;
  extern int read_only;
  extern int list_only;
  extern int preserve_xattrs;
@@ -458,7 +452,7 @@ diff --git a/xattrs.c b/xattrs.c
  extern int preserve_links;
  extern int preserve_devices;
  extern int preserve_specials;
-@@ -40,6 +41,10 @@ extern int checksum_seed;
+@@ -41,6 +42,10 @@ extern int checksum_seed;
  #define RSYNC_XAL_INITIAL 5
  #define RSYNC_XAL_LIST_INITIAL 100
  
@@ -469,7 +463,7 @@ diff --git a/xattrs.c b/xattrs.c
  #define MAX_FULL_DATUM 32
  
  #define HAS_PREFIX(str, prfx) (*(str) == *(prfx) \
-@@ -72,6 +77,17 @@ extern int checksum_seed;
+@@ -73,6 +78,17 @@ extern int checksum_seed;
  #define XDEF_ACL_SUFFIX "dacl"
  #define XDEF_ACL_ATTR RSYNC_PREFIX "%" XDEF_ACL_SUFFIX
  
@@ -487,7 +481,7 @@ diff --git a/xattrs.c b/xattrs.c
  typedef struct {
  	char *datum, *name;
  	size_t datum_len, name_len;
-@@ -166,8 +182,7 @@ static ssize_t get_xattr_names(const char *fname)
+@@ -167,8 +183,7 @@ static ssize_t get_xattr_names(const char *fname)
  /* On entry, the *len_ptr parameter contains the size of the extra space we
   * should allocate when we create a buffer for the data.  On exit, it contains
   * the length of the datum. */
@@ -497,7 +491,7 @@ diff --git a/xattrs.c b/xattrs.c
  {
  	size_t datum_len = sys_lgetxattr(fname, name, NULL, 0);
  	size_t extra_len = *len_ptr;
-@@ -176,7 +191,7 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
+@@ -177,7 +192,7 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
  	*len_ptr = datum_len;
  
  	if (datum_len == (size_t)-1) {
@@ -506,7 +500,7 @@ diff --git a/xattrs.c b/xattrs.c
  			return NULL;
  		rsyserr(FERROR_XFER, errno,
  			"get_xattr_data: lgetxattr(\"%s\",\"%s\",0) failed",
-@@ -184,6 +199,15 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
+@@ -185,6 +200,15 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
  		return NULL;
  	}
  
@@ -522,7 +516,7 @@ diff --git a/xattrs.c b/xattrs.c
  	if (!datum_len && !extra_len)
  		extra_len = 1; /* request non-zero amount of memory */
  	if (datum_len + extra_len < datum_len)
-@@ -212,7 +236,29 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
+@@ -213,7 +237,29 @@ static char *get_xattr_data(const char *fname, const char *name, size_t *len_ptr
  	return ptr;
  }
  
@@ -553,8 +547,8 @@ diff --git a/xattrs.c b/xattrs.c
  {
  	ssize_t list_len, name_len;
  	size_t datum_len, name_offset;
-@@ -221,7 +267,8 @@ static int rsync_xal_get(const char *fname, item_list *xalp)
- 	int user_only = am_sender ? 0 : am_root <= 0;
+@@ -222,7 +268,8 @@ static int rsync_xal_get(const char *fname, item_list *xalp)
+ 	int user_only = am_sender ? 0 : !am_root;
  #endif
  	rsync_xa *rxa;
 -	int count;
@@ -563,7 +557,7 @@ diff --git a/xattrs.c b/xattrs.c
  
  	/* This puts the name list into the "namebuf" buffer. */
  	if ((list_len = get_xattr_names(fname)) < 0)
-@@ -251,20 +298,22 @@ static int rsync_xal_get(const char *fname, item_list *xalp)
+@@ -252,20 +299,22 @@ static int rsync_xal_get(const char *fname, item_list *xalp)
  		}
  
  		datum_len = name_len; /* Pass extra size to get_xattr_data() */
@@ -592,16 +586,16 @@ diff --git a/xattrs.c b/xattrs.c
  		} else
  			name_offset = datum_len;
  
-@@ -309,7 +358,7 @@ int get_xattr(const char *fname, stat_x *sxp)
- 			return 0;
- 	}
+@@ -311,7 +360,7 @@ int get_xattr(const char *fname, stat_x *sxp)
+ 	} else if (IS_MISSING_FILE(sxp->st))
+ 		return 0;
  
 -	if (rsync_xal_get(fname, sxp->xattr) < 0) {
 +	if (rsync_xal_get(fname, sxp) < 0) {
  		free_xattr(sxp);
  		return -1;
  	}
-@@ -344,6 +393,8 @@ int copy_xattrs(const char *source, const char *dest)
+@@ -346,6 +395,8 @@ int copy_xattrs(const char *source, const char *dest)
  		datum_len = 0;
  		if (!(ptr = get_xattr_data(source, name, &datum_len, 0)))
  			return -1;
@@ -610,7 +604,7 @@ diff --git a/xattrs.c b/xattrs.c
  		if (sys_lsetxattr(dest, name, ptr, datum_len) < 0) {
  			int save_errno = errno ? errno : EINVAL;
  			rsyserr(FERROR_XFER, errno,
-@@ -360,6 +411,10 @@ int copy_xattrs(const char *source, const char *dest)
+@@ -362,6 +413,10 @@ int copy_xattrs(const char *source, const char *dest)
  
  static int find_matching_xattr(item_list *xalp)
  {
@@ -621,7 +615,7 @@ diff --git a/xattrs.c b/xattrs.c
  	size_t i, j;
  	item_list *lst = rsync_xal_l.items;
  
-@@ -393,6 +448,7 @@ static int find_matching_xattr(item_list *xalp)
+@@ -395,6 +450,7 @@ static int find_matching_xattr(item_list *xalp)
  	}
  
  	return -1;
@@ -629,7 +623,7 @@ diff --git a/xattrs.c b/xattrs.c
  }
  
  /* Store *xalp on the end of rsync_xal_l */
-@@ -572,11 +628,13 @@ void send_xattr_request(const char *fname, struct file_struct *file, int f_out)
+@@ -574,11 +630,13 @@ void send_xattr_request(const char *fname, struct file_struct *file, int f_out)
  
  			/* Re-read the long datum. */
  			if (!(ptr = get_xattr_data(fname, rxa->name, &len, 0))) {
@@ -642,9 +636,9 @@ diff --git a/xattrs.c b/xattrs.c
  
 +			assert(ptr != UNREAD_DATA);
  			write_varint(f_out, len); /* length might have changed! */
- 			write_buf(f_out, ptr, len);
+ 			write_bigbuf(f_out, ptr, len);
  			free(ptr);
-@@ -792,7 +850,7 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
+@@ -795,7 +853,7 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
  	int user_only = am_root <= 0;
  #endif
  	size_t name_len;
@@ -653,7 +647,7 @@ diff --git a/xattrs.c b/xattrs.c
  
  	/* This puts the current name list into the "namebuf" buffer. */
  	if ((list_len = get_xattr_names(fname)) < 0)
-@@ -804,7 +862,10 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
+@@ -807,7 +865,10 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
  		if (XATTR_ABBREV(rxas[i])) {
  			/* See if the fnamecmp version is identical. */
  			len = name_len = rxas[i].name_len;
@@ -665,7 +659,7 @@ diff --git a/xattrs.c b/xattrs.c
  			  still_abbrev:
  				if (am_generator)
  					continue;
-@@ -813,14 +874,14 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
+@@ -816,14 +877,14 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
  				ret = -1;
  				continue;
  			}
@@ -683,7 +677,7 @@ diff --git a/xattrs.c b/xattrs.c
  			if (memcmp(sum, rxas[i].datum + 1, MAX_DIGEST_LEN) != 0) {
  				free(ptr);
  				goto still_abbrev;
-@@ -889,6 +950,10 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
+@@ -892,6 +953,10 @@ static int rsync_xal_set(const char *fname, item_list *xalp,
  		}
  	}
  
@@ -694,7 +688,7 @@ diff --git a/xattrs.c b/xattrs.c
  	return ret;
  }
  
-@@ -935,7 +1000,7 @@ char *get_xattr_acl(const char *fname, int is_access_acl, size_t *len_p)
+@@ -938,7 +1003,7 @@ char *get_xattr_acl(const char *fname, int is_access_acl, size_t *len_p)
  {
  	const char *name = is_access_acl ? XACC_ACL_ATTR : XDEF_ACL_ATTR;
  	*len_p = 0; /* no extra data alloc needed from get_xattr_data() */
@@ -703,7 +697,7 @@ diff --git a/xattrs.c b/xattrs.c
  }
  
  int set_xattr_acl(const char *fname, int is_access_acl, const char *buf, size_t buf_len)
-@@ -1078,11 +1143,33 @@ int set_stat_xattr(const char *fname, struct file_struct *file, mode_t new_mode)
+@@ -1081,11 +1146,33 @@ int set_stat_xattr(const char *fname, struct file_struct *file, mode_t new_mode)
  	return 0;
  }
  
@@ -737,7 +731,7 @@ diff --git a/xattrs.c b/xattrs.c
  	return ret;
  }
  
-@@ -1091,6 +1178,9 @@ int x_lstat(const char *fname, STRUCT_STAT *fst, STRUCT_STAT *xst)
+@@ -1094,6 +1181,9 @@ int x_lstat(const char *fname, STRUCT_STAT *fst, STRUCT_STAT *xst)
  	int ret = do_lstat(fname, fst);
  	if ((ret < 0 || get_stat_xattr(fname, -1, fst, xst) < 0) && xst)
  		xst->st_mode = 0;
@@ -747,7 +741,7 @@ diff --git a/xattrs.c b/xattrs.c
  	return ret;
  }
  
-@@ -1099,6 +1189,9 @@ int x_fstat(int fd, STRUCT_STAT *fst, STRUCT_STAT *xst)
+@@ -1102,6 +1192,9 @@ int x_fstat(int fd, STRUCT_STAT *fst, STRUCT_STAT *xst)
  	int ret = do_fstat(fd, fst);
  	if ((ret < 0 || get_stat_xattr(NULL, fd, fst, xst) < 0) && xst)
  		xst->st_mode = 0;
@@ -757,10 +751,10 @@ diff --git a/xattrs.c b/xattrs.c
  	return ret;
  }
  
-diff -up a/rsync.1 b/rsync.1
+diff -Nurp a/rsync.1 b/rsync.1
 --- a/rsync.1
 +++ b/rsync.1
-@@ -436,6 +436,8 @@ to the detailed description below for a
+@@ -443,6 +443,8 @@ to the detailed description below for a
       \-\-chmod=CHMOD           affect file and/or directory permissions
   \-A, \-\-acls                  preserve ACLs (implies \-p)
   \-X, \-\-xattrs                preserve extended attributes
@@ -769,9 +763,9 @@ diff -up a/rsync.1 b/rsync.1
   \-o, \-\-owner                 preserve owner (super\-user only)
   \-g, \-\-group                 preserve group
       \-\-devices               preserve device files (super\-user only)
-@@ -1195,6 +1197,44 @@ flags on files and directories that are
+@@ -1300,6 +1302,44 @@ flags on files and directories that are
  receiving side.  It does not try to affect user flags.  This option overrides
- \fB\-\-force\-change\fP and \fB\-\-force\-schange\fP.
+ \fB\-\-force\-change\fP and \fB\-\-force\-uchange\fP.
  .IP 
 +.IP "\fB\-\-hfs\-compression\fP"
 +This option causes rsync to preserve HFS+
