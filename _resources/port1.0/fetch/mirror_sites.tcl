@@ -179,11 +179,9 @@ set portfetch::mirror_sites::sites(gimp) {
     http://mirror.hessmo.com/
     http://mirror.ibcp.fr/pub/
     http://mirror.umd.edu/gimp/
-    http://mirrors-br.go-parts.com/
     http://mirrors.dominios.pt/
     ftp://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
     http://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
-    http://mirrors.go-parts.com/
     http://mirrors.serverhost.ro/
     http://mirrors.xmission.com/gimp/
     http://mirrors.zerg.biz/
