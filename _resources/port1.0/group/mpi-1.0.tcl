@@ -85,8 +85,15 @@ proc mpi.setup_variants {args} {
             set i [lsearch -exact $args $variant]
             set c [lreplace $args $i $i]
 
+            # only add conflicts for variants that exist
+            foreach j $mpidb($variant,conflict) {
+                if {[variant_exists $j]} {
+                    lappend c $j
+                }
+            }
+
             eval [subst {
-                variant ${variant} description {Build using the $mpidb($variant,descrip) compiler} conflicts $c $mpidb($variant,conflict) {
+                variant ${variant} description {Build using the $mpidb($variant,descrip) compiler} conflicts $c {
 
                     set c_name \[c_variant_name\]
                     set f_name \[fortran_variant_name\]
