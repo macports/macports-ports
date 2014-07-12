@@ -201,6 +201,14 @@ proc compilers.setup_variants {args} {
                 set c [lreplace $c $i $i]
             }
 
+            # only add conflicts from the compiler database (set above) if we
+            # actually have the compiler in the list of allowed variants
+            foreach j $cdb($variant,conflict) {
+                if {[lsearch -exact $j ${compilers.variants}] > -1} {
+                    lappend c $j
+                }
+            }
+
             # for each compiler, set the value if not empty; we can't use
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
@@ -222,7 +230,7 @@ proc compilers.setup_variants {args} {
             eval [subst {
                 variant ${variant} description \
                     {Build using the $cdb($variant,descrip) compiler} \
-                    conflicts $c $cdb($variant,conflict) {
+                    conflicts $c {
 
                     depends_build-append   $cdb($variant,depends)
                     depends_lib-append     $cdb($variant,dependsl)
