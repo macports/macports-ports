@@ -204,7 +204,7 @@ proc mpi.choose {args} {
 }
 
 proc mpi.setup {args} {
-    global cdb mpidb mpi.variants mpi.require compilers.variants
+    global cdb mpidb mpi.variants mpi.require compilers.variants name
 
     set add_list {}
     set remove_list ${mpi.variants}
@@ -256,7 +256,17 @@ proc mpi.setup {args} {
     # variants to detect an incompatibility
     eval compilers.setup $cl
 
+    # we need to check for a removed variant early so we can exit before
+    # the wrong variant is passed up the dependency chain
+    set badvariant [mpi_variant_name]
+    set origvariants ${mpi.variants}
     set mpi.variants [lsort [concat $remove_list $add_list]]
+    set removedvariants [remove_from_list $origvariants ${mpi.variants}]
+    if {[lsearch -exact $removedvariants $badvariant] > -1} {
+        ui_error "$name has disallowed +$badvariant! Please choose another mpi variant"
+        return -code error "$name +$badvariant not allowed"
+    }
+
     eval mpi.setup_variants ${mpi.variants}
 
     set mpi [ mpi_variant_name ]
