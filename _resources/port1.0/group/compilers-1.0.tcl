@@ -163,8 +163,8 @@ set cdb(g95,fc)       ${prefix}/bin/g95
 set cdb(g95,f77)      ${prefix}/bin/g95
 set cdb(g95,f90)      ${prefix}/bin/g95
 
-foreach name [array names cdb *,variant] {
-    lappend compilers.variants $cdb($name)
+foreach cname [array names cdb *,variant] {
+    lappend compilers.variants $cdb($cname)
 }
 
 foreach variant ${compilers.variants} {
