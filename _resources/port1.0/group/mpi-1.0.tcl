@@ -71,8 +71,8 @@ set mpidb(openmpi_devel,descrip)  "OpenMPI-devel Compiler"
 set mpidb(openmpi_devel,name)     openmpi-devel
 set mpidb(openmpi_devel,conflict) universal
 
-foreach name [array names mpidb *,variant] {
-    lappend mpi.variants $mpidb($name)
+foreach mpiname [array names mpidb *,variant] {
+    lappend mpi.variants $mpidb($mpiname)
 }
 
 proc mpi.setup_variants {args} {
