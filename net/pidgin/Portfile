@@ -5,7 +5,7 @@ PortSystem          1.0
 
 name                pidgin
 version             2.10.7
-revision            8
+revision            9
 categories          net
 platforms           darwin
 license             GPL-2+
@@ -30,24 +30,44 @@ use_bzip2           yes
 depends_build       port:pkgconfig \
                     port:intltool
 
-depends_lib         port:audiofile \
-                    port:gconf \
-                    port:gtk2 \
-                    port:gnutls \
-                    port:libao \
-                    port:libidn \
+depends_lib         path:lib/pkgconfig/glib-2.0.pc:glib2 \
                     port:libxml2 \
+                    port:gconf \
+                    port:libidn \
+                    port:gnutls
+
+if {${subport} ne "libpurple"} {
+    depends_lib-append \
+                    port:libpurple \
+                    port:audiofile \
+                    port:gtk2 \
+                    port:libao \
                     port:nspr \
                     port:nss \
                     port:perl5.16
 
-# nss is not universal
-universal_variant   no
+    post-destroot {
+        foreach file [glob -nocomplain -directory ${destroot}${prefix}/bin purple-*] {
+            delete $file
+        }
+        foreach file [glob -nocomplain -directory ${destroot}${prefix}/lib libpurple* pkgconfig purple-2] {
+            delete $file
+        }
+        delete ${destroot}${prefix}/include/libpurple \
+               ${destroot}${prefix}/share/aclocal \
+               ${destroot}${prefix}/share/man/man3/Purple.3pm \
+               ${destroot}${prefix}/share/purple \
+               ${destroot}${prefix}/share/sounds/purple \
+    }
+}
 
 patchfiles          patch-configure.ac.diff \
                     patch-libpurple-internal.h.diff
 
 use_autoreconf      yes
+
+# --disable-dependency-tracking was added because a +universal perl will result in
+# PERL_CFLAGS containing multiple -arch arguments... this is the easiest workaround
 
 configure.args      --disable-avahi \
                     --disable-consoleui \
@@ -71,67 +91,83 @@ configure.args      --disable-avahi \
                     --disable-dependency-tracking \
                     --without-x
 
-# --disable-dependency-tracking was added because a +universal perl will result in
-# PERL_CFLAGS containing multiple -arch arguments... this is the easiest workaround
-
 configure.args-append ac_cv_path_perlpath=${prefix}/bin/perl5.16
 
 configure.ldflags-append    -bind_at_load
 configure.cppflags-append   -no-cpp-precomp
 
-variant finch_only requires finch description {Build without pidgin} {
-    configure.args-append   --disable-gtkui
-}
-
-variant finch description {Build with finch} {
-    configure.args-delete   --disable-consoleui
-    patchfiles-append          patch-finch_libgnt_Makefile.in.diff patch-finch_libgnt_gntwm.c
-}
-
-post-destroot {
-    fs-traverse file ${destroot}${prefix}/lib/perl5 {
-        if {[file tail ${file}] == "perllocal.pod"} {
-            delete ${file}
+subport libpurple {
+    configure.args-append   --disable-gtkui \
+                            --disable-pixmaps-install \
+                            --disable-nls
+    pre-activate {
+        if {![catch {set installed [lindex [registry_active pidgin] 0]}]} {
+            set _version [lindex $installed 1]
+            if {[vercmp $_version 2.10.9] < 0} {
+                registry_deactivate_composite pidgin "" [list ports_nodepcheck 1]
+            }
         }
     }
 }
 
-variant x11 conflicts no_x11 quartz {
-    depends_lib-append      port:xorg-libX11 \
-                            port:xorg-libXext \
-                            port:xorg-libXScrnSaver \
-                            port:xorg-libice \
-                            port:xorg-libsm
+if {${subport} eq $name} {
 
-    configure.args-delete   --without-x \
-                            --disable-screensaver \
-                            --disable-sm
+    # nss is not universal
+    universal_variant   no
 
-    configure.args-append   --with-x \
-                            --x-includes=${prefix}/include \
-                            --x-libraries=${prefix}/lib \
-                            --enable-screensaver \
-                            --enable-sm
+    variant finch_only requires finch description {Build without pidgin} {
+        configure.args-append   --disable-gtkui
+    }
+
+    variant finch description {Build with finch} {
+        configure.args-delete   --disable-consoleui
+        patchfiles-append       patch-finch_libgnt_Makefile.in.diff patch-finch_libgnt_gntwm.c
+    }
+
+    variant x11 conflicts no_x11 quartz {
+        depends_lib-append      port:xorg-libX11 \
+                                port:xorg-libXext \
+                                port:xorg-libXScrnSaver \
+                                port:xorg-libice \
+                                port:xorg-libsm
+
+        configure.args-delete   --without-x \
+                                --disable-screensaver \
+                                --disable-sm
+
+        configure.args-append   --with-x \
+                                --x-includes=${prefix}/include \
+                                --x-libraries=${prefix}/lib \
+                                --enable-screensaver \
+                                --enable-sm
+    }
+
+    # Legacy no_x11 variant to be removed after May 2015.
+    variant no_x11 conflicts x11 description {Legacy compatibility variant} {}
+
+    if {[variant_isset no_x11] || [variant_isset quartz]} {
+        default_variants -x11
+    } else {
+        default_variants +x11
+    }
+
+    variant quartz conflicts x11 {
+        configure.args-append   --disable-gestures
+    }
+
+    variant spellcheck description {Allow spell checking} {
+        depends_lib-append      port:gtkspell2
+        configure.args-delete   --disable-gtkspell
+    }
+
+    post-activate {
+        system "dbus-uuidgen --ensure"
+        system "${prefix}/bin/gtk-update-icon-cache -f -t ${prefix}/share/icons/hicolor"
+        system "export GCONF_CONFIG_SOURCE=`gconftool-2 --get-default-source` && \
+            gconftool-2 --makefile-install-rule ${prefix}/etc/gconf/schemas/*.schemas"
+    }
 }
-
-# Legacy no_x11 variant to be removed after May 2015.
-variant no_x11 conflicts x11 description {Legacy compatibility variant} {}
-
-if {[variant_isset no_x11] || [variant_isset quartz]} {
-    default_variants -x11
-} else {
-    default_variants +x11
-}
-
-variant quartz conflicts x11 {
-    configure.args-append   --disable-gestures
-}
-
-variant spellcheck description {Allow spell checking} {
-    depends_lib-append      port:gtkspell2
-    configure.args-delete   --disable-gtkspell
-}
-
+    
 # Python is only required if --enable-dbus is used, and only for
 # the build process to generate the dbus code, not for running pidgin.
 
@@ -148,12 +184,13 @@ variant python27 conflicts python26 description {Generate dbus code using Python
 if {![variant_isset python26]} {
     default_variants    +python27
 }
-    
-post-activate {
-    system "dbus-uuidgen --ensure"
-    system "${prefix}/bin/gtk-update-icon-cache -f -t ${prefix}/share/icons/hicolor"
-    system "export GCONF_CONFIG_SOURCE=`gconftool-2 --get-default-source` && \
-        gconftool-2 --makefile-install-rule ${prefix}/etc/gconf/schemas/*.schemas"
+
+post-destroot {
+    fs-traverse file ${destroot}${prefix}/lib/perl5 {
+        if {[file tail ${file}] == "perllocal.pod"} {
+            delete ${file}
+        }
+    }
 }
 
 livecheck.type      regex
