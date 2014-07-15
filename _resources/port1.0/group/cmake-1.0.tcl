@@ -2,7 +2,7 @@
 # $Id$
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
-# Copyright (c) 2010-2013 The MacPorts Project
+# Copyright (c) 2010-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -121,10 +121,10 @@ pre-configure {
             } else {
                 set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
             }
-            if {$macosx_deployment_target eq "10.4"} {
+            if {${configure.sdk_version} eq "10.4"} {
                 set sdk ${sdks_dir}/MacOSX10.4u.sdk
             } else {
-                set sdk ${sdks_dir}/MacOSX${macosx_deployment_target}.sdk
+                set sdk ${sdks_dir}/MacOSX${configure.sdk_version}.sdk
             }
             configure.args-append \
                 -DCMAKE_OSX_SYSROOT="${sdk}" \
