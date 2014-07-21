@@ -40,7 +40,7 @@
 #
 # Then, replace the name and version lines with:
 #
-#   github.setup            author project version [tag_prefix]
+#   github.setup        author project version [tag_prefix]
 #
 # The port's name will be set to the github project name. If that's not correct,
 # override it by setting the port name as usual, for example:
@@ -142,14 +142,17 @@ proc handle_tarball_from {option action args} {
 }
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites
+    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites PortInfo
 
     github.author           ${gh_author}
     github.project          ${gh_project}
     github.version          ${gh_version}
     github.tag_prefix       ${gh_tag_prefix}
 
-    name                    ${github.project}
+    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${github.project}))} {
+        name                ${github.project}
+    }
+
     version                 ${github.version}
     homepage                ${github.homepage}
     git.url                 ${github.homepage}.git
