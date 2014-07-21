@@ -118,26 +118,7 @@ pre-configure {
         if {${configure.sdkroot} != ""} {
             configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
         } else {
-            # cmake seems to be unable to support building against / with a deployment target set:
-            #
-            #    "Either set CMAKE_OSX_SYSROOT to a valid SDK or set CMAKE_OSX_DEPLOYMENT_TARGET to empty."
-            #
-            # For now, fall back on an SDK, but this is a horrible workaround and needs to be fixed.
-            # http://trac.macports.org/ticket/44125
-
-            if {[vercmp $xcodeversion 4.3] < 0} {
-                set sdks_dir ${developer_dir}/SDKs
-            } else {
-                set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
-            }
-            if {${configure.sdk_version} eq "10.4"} {
-                set sdk ${sdks_dir}/MacOSX10.4u.sdk
-            } else {
-                set sdk ${sdks_dir}/MacOSX${configure.sdk_version}.sdk
-            }
-
-            configure.args-append \
-                -DCMAKE_OSX_SYSROOT="${sdk}"
+            configure.args-append -DCMAKE_OSX_SYSROOT="/"
         }
     }
 }
