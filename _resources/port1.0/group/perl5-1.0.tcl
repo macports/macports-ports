@@ -73,7 +73,7 @@ default perl5.arch {[perl5.extract_config archname ${os.platform}]}
 default perl5.bin {${prefix}/bin/perl${perl5.major}}
 
 # define installation libraries as vendor location
-default perl5.lib {${prefix}/lib/perl5/vendor_perl/${perl5.version}}
+default perl5.lib {[perl5.extract_config vendorlib]}
 default perl5.bindir {${prefix}/libexec/perl${perl5.major}}
 default perl5.archlib {${perl5.lib}/${perl5.arch}}
 

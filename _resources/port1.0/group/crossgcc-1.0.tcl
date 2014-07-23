@@ -235,6 +235,7 @@ proc crossgcc.setup_libc {libc_name libc_version} {
                 configure.args-append --with-newlib
             }
         }
+        ignore {}
         default {
             pre-fetch {
                 ui_error "libc $libc_name is not supported by port group crossgcc"
