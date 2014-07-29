@@ -99,6 +99,17 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible Mac OS X version"
             }
         }
+    # ugly workaround to allow some C++11-only applications to be built on < 10.9
+    } elseif {${args} eq "wxWidgets-3.0-libcxx"} {
+        wxWidgets.name      "wxWidgets"
+        wxWidgets.version   "3.0-libcxx"
+        wxWidgets.port      "wxWidgets-3.0-libcxx"
+        if {${os.major} < 9} {
+            pre-fetch {
+                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
+                return -code error "incompatible Mac OS X version"
+            }
+        }
     } elseif {${args} eq "wxPython-3.0"} {
         wxWidgets.name      "wxPython"
         wxWidgets.version   "3.0"
