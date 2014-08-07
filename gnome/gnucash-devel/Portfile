@@ -5,8 +5,7 @@ PortSystem        1.0
 
 name              gnucash-devel
 set my_name       gnucash
-version           2.5.5
-revision          1
+version           2.6.3
 categories        gnome x11
 license           GPL-2+
 maintainers       dports openmaintainer
@@ -32,34 +31,35 @@ dist_subdir       ${my_name}
 distname          ${my_name}-${version}
 use_bzip2         yes
 
-checksums         rmd160  cec3cff09e95c51a8cc6fba0ead091fd447e70fb \
-                  sha256  f877e510ff019c36bbbc3eac17b97178feadf7fd9f564d220de7c2f617c42ab9
-
-# patch configure to not set PLATFORM_OSX_QUARTZ even if we are
-# running gtk +quartz because we want gnucash to set up its
-# environment the same way it does for regular builds, rather than
-# using the gnucash-setup-environment script for OS X. We don't need
-# to use dbus-launch or muck with DYLD_LIBRARY_PATH.
-patchfiles        patch-configure.diff
+checksums         rmd160  f9426aa5b31e731bc4d7a0837387b3a8d364c0a6 \
+                  sha256  02104c1d6a563d1209e2116dcca7fa9e28445b0e3335bedbcae85c834b17d93f
 
 post-patch {
     # gnc-fq-dump needs to be patched to use MacPorts perl.
     # (autoconf takes care of the other perl scripts.)
-    reinplace "s|^#!/usr/bin/perl|#!${prefix}/bin/perl5.12|" ${worksrcpath}/src/quotes/gnc-fq-dump
+    reinplace "s|^#!/usr/bin/perl|#!${prefix}/bin/perl5.16|" ${worksrcpath}/src/quotes/gnc-fq-dump
 }
 
 depends_build     port:pkgconfig \
                   port:intltool \
                   port:libtool
 
-depends_lib       port:gconf \
-                  port:slib-guile \
+depends_lib       port:guile \
                   port:libgnomeui \
-                  port:libgnomeprintui \
                   path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk \
                   port:goffice08 \
-                  port:icu \
-                  port:p5.12-finance-quote   
+                  port:p5.16-finance-quote
+
+# yelp currently requires X11 to build so disable dependency if building
+# with +quartz
+#
+# TODO: add +x11 +quartz variants to distinguish one build from the other
+# since they have different binary dependencies.  Otherwise, rev-upgrade
+# errors may occur
+
+if {![variant_isset quartz]} {
+    depends_run port:yelp
+}
 
 platform darwin {
     if {${configure.cxx_stdlib} eq "libstdc++"} {
@@ -68,7 +68,7 @@ platform darwin {
     }
 }
 
-# aqbanking and libgtkhtml3 are not universal
+# aqbanking is not universal
 universal_variant no
 
 configure.args    --disable-glibtest \
@@ -77,16 +77,20 @@ configure.args    --disable-glibtest \
                   --disable-ofx \
                   --disable-dbi \
                   --with-html-engine=webkit
-configure.perl    ${prefix}/bin/perl5.12
+configure.perl    ${prefix}/bin/perl5.16
 
-variant gtkhtml description {Use gtkhtml instead of webkit-gtk for html rendering} {
-    configure.args-delete --with-html-engine=webkit
-    depends_lib-delete    path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk
-    depends_lib-append    port:libgtkhtml3
-}
+# this variant is obsolete as the current version of gnucash no longer
+# supports libgtkhtml3, only webkit-gtk. It didn't work anyway due to the
+# webkit-gtk dependency manipulations above.
+
+# variant gtkhtml description {Use gtkhtml instead of webkit-gtk for html rendering} {
+#    configure.args-delete --with-html-engine=webkit
+#    depends_lib-delete    path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk
+#    depends_lib-append    port:libgtkhtml3
+# }
 
 variant hbci description {AqBanking/HBCI support} {
-    depends_lib-append  port:aqbanking5-gtk
+    depends_lib-append  path:lib/libaqbanking.dylib:aqbanking5-gtk
     configure.args-delete   --disable-aqbanking
     configure.args-append   --enable-aqbanking
 }
@@ -97,60 +101,27 @@ variant ofx description {OFX support} {
     configure.args-append   --enable-ofx
 }
 
-variant without_hbci conflicts hbci description {Legacy compatibility variant} {}
-variant without_ofx conflicts ofx description {Legacy compatibility variant} {}
-if {![variant_isset without_hbci]} {
-    default_variants +hbci
-}
-if {![variant_isset without_ofx]} {
-    default_variants +ofx
-}
-
 variant dbi description {Adds dbi backend support} {
     depends_lib-append  port:libdbi \
-                        port:libdbi-drivers 
-    configure.args-delete --disable-dbi 
+                        port:libdbi-drivers
+    configure.args-delete --disable-dbi
     configure.args-append --enable-dbi
+    configure.args-append --with-dbi-dbd-dir=${prefix}/lib/dbd
     notes-append "gnucash DBI backend support requires the libdbi-drivers port to be built with support for the desired databases. sqlite3 is available by default; for MySQL or PostgreSQL support, ensure that the corresponding variant is selected for libdbi-drivers."
 }
 
-variant python27 description {Install Python bindings for Python 2.7} {
-    patchfiles-append patch-configure-python.diff
-    depends_lib-append port:python27
-    configure.args-append --enable-python-bindings
-    configure.python ${prefix}/bin/python2.7
-}
+default_variants +ofx +hbci
 
-set gnucash_register_schema ${prefix}/libexec/${my_name}-gconf-schema.sh
-
-post-destroot {
-    # We need to register some stuff to gconf. Just putting the
-    # schema files to the right place is not enough.
-    # Setup ${prefix}/libexec/${my_name}-gconf-schema.sh to handle this
-
-    set schemafiles ""
-    fs-traverse schema ${destroot}${prefix}/etc/gconf/schemas {
-        if {[file isfile $schema]} {
-            # The 'string range' bit is to remove the initial ${destroot} stuff
-            append schemafiles " [string range $schema [string length ${destroot}] end]"
-        }
-    }
-
-    if {[string length $schemafiles] > 0} {
-        set fh [open ${destroot}${gnucash_register_schema} w]
-        puts $fh "#!/bin/sh"
-        puts $fh "env GCONF_CONFIG_SOURCE=`${prefix}/bin/gconftool-2 --get-default-source` ${prefix}/bin/gconftool-2 --makefile-install-rule $schemafiles"
-        close $fh
-        file attributes ${destroot}${gnucash_register_schema} -permissions 0755
-    }
-}
+# variant python27 description {Install Python bindings for Python 2.7} {
+#     #patchfiles-append patch-configure-python.diff
+#     depends_lib-append port:python27
+#     configure.args-append --enable-python
+#     configure.python ${prefix}/bin/python2.7
+# }
 
 post-activate {
-    if {[file exists ${gnucash_register_schema}]} {
-        system "${gnucash_register_schema}"
-    }
-
     system "${prefix}/bin/gtk-update-icon-cache -f -t ${prefix}/share/icons/hicolor"
+    system "${prefix}/bin/glib-compile-schemas ${prefix}/share/glib-2.0/schemas"
 }
 
 livecheck.regex "/${my_name} .*/(\[0-9\]+\\.\[0-9\]*\[0-9\]\\.\[0-9\]+)/"
