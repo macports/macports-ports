@@ -2,89 +2,169 @@
 # $Id$
 
 PortSystem          1.0
+PortGroup           conflicts_build 1.0
+PortGroup           muniversal 1.0
 PortGroup           mpi 1.0
 
 name                hdf5
-version             1.6.9
-revision            4
+version             1.8.13
 categories          science
-license             NCSA
-maintainers         nomaintainer
+maintainers         mmoll openmaintainer
 
-description         HDF5 general purpose library and file format for storing scientific data
-long_description    ${description}
+description         HDF5 general purpose library and file format for storing\
+                    scientific data
+long_description    HDF5 is a data model, library, and file format for storing\
+                    and managing data. It supports an unlimited variety of\
+                    datatypes, and is designed for flexible and efficient I/O\
+                    and for high volume and complex data. HDF5 is portable and\
+                    is extensible, allowing applications to evolve in their use\
+                    of HDF5. The HDF5 Technology suite includes tools and\
+                    applications for managing, manipulating, viewing, and\
+                    analyzing data in the HDF5 format.
 homepage            http://www.hdfgroup.org/HDF5/
 platforms           darwin
-conflicts           hdf5-18
-master_sites        ftp://ftp.hdfgroup.org/HDF5/current16/src/ \
-                    ftp://ftp.hdfgroup.org/HDF5/prev-releases/hdf5-${version}/src/
-
-checksums           md5 751eb3317a47e7c58978e1c3a13a93fc \
-                    sha1 0481ce8cf2e62b9b10418065901369d4e0dbb4dc \
-                    rmd160 05ca8a3229bdd6e214d0e843afc065d0fe9f47c7
+conflicts           hdf5
+master_sites \
+    http://www.hdfgroup.org/ftp/HDF5/current/src \
+    ftp://ftp.hdfgroup.org/HDF5/current/src/ \
+    ftp://ftp.hdfgroup.org/HDF5/prev-releases/hdf5-${version}/src/
+checksums           rmd160  59e690fcc8ce80c438c3d6977729e12a75b5d162 \
+                    sha256  c2f5a412107aba6f99fd7a4a9db6ce5f5fc8171ec931472784e5839d26aa17ef
 
 mpi.setup
 
+use_bzip2           yes
 depends_lib         port:zlib
-patchfiles          patch-commence.diff patch-c-commence.diff \
-                    patch-fortran-commence.diff patch-H5f90i.diff \
-                    patch-configure.diff patch-c++_configure.diff \
-                    patch-fortran_configure.diff
-
-universal_variant   no
-
 use_parallel_build  yes
-configure.ccache    no
 
-configure.args      --enable-cxx --with-zlib=yes --with-szlib=no --enable-shared
-configure.ldflags   -L${worksrcpath}/src/.libs -L${prefix}/lib
+# nawk: bailing out at source line 273
+conflicts_build     nawk
 
-if {${os.platform} eq "darwin" && [string match *64 $build_arch]} {
-    configure.args-append --build=${build_arch}-apple-${os.platform}${os.version}
+# llvm-gcc-4.2 produced code fails type conversion tests
+# Upstream suggestion is use -O0. Clang-produced code passes all tests.
+compiler.blacklist  llvm-gcc-4.2
+
+configure.args      --with-zlib=yes --enable-filters=all \
+                    --enable-production --disable-fortran \
+                    --disable-cxx --enable-shared --enable-static \
+                    --disable-parallel --disable-threadsafe
+
+# http://mail.hdfgroup.org/pipermail/hdf-forum_hdfgroup.org/2010-March/002682.html
+license             NCSA
+
+default_variants    +cxx
+
+post-configure {
+    if {[variant_isset universal]} {
+        set dirs {}
+        foreach arch ${universal_archs_to_use} {
+            lappend dirs ${worksrcpath}-${arch}
+        }
+    } else {
+        set dirs ${worksrcpath}
+    }
+    foreach dir ${dirs} {
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+            ${dir}/tools/misc/h5cc \
+            ${dir}/c++/src/h5c++ \
+            ${dir}/src/libhdf5.settings \
+            ${dir}/fortran/src/h5fc
+    }
 }
 
 post-destroot {
-    # remove h5perf, which is pretty useless and would cause a rev-upgrade warning because it links
-    # against libh5test.dylib, which is not being installed
-    file delete ${destroot}${prefix}/bin/h5perf
+    xinstall -d ${destroot}${prefix}/share/hdf5/
+    xinstall -m 444 ${worksrcpath}/COPYING\
+      ${destroot}${prefix}/share/hdf5/
 }
 
-destroot.destdir    prefix=${destroot}${prefix}
+pre-activate {
+    if {![catch {set installed [lindex [registry_active hdf5-18] 0]}]} {
+        set _version [lindex $installed 1]
+        if {[vercmp $_version 1.8.14] < 0} {
+            registry_deactivate_composite hdf5-18 "" [list ports_nodepcheck 1]
+        }
+    }
+}
 
 test.run            yes
 test.target         check
 
-
-# variant descriptions
-
-if {![fortran_variant_isset]} {
-    configure.args-delete   --disable-fortran
-    configure.args-append   --enable-fortran
-}
-
-if {[variant_isset g95]} {
-    patchfiles-append           patch-powerpc-apple.diff
-}
-
-if {[mpi_variant_isset]} {
-    configure.args-delete       --enable-cxx
-}
-
-variant szip description {Enable szip compression support} {
-    configure.args-delete       --with-szlib=no
-    configure.args-append       --with-szlib=yes
+variant szip description {Enable szip support. (Noncommercial license)} {
     depends_lib-append          port:szip
+    configure.args-append       --with-szlib=yes
+    license                     Noncommercial
 }
 
-variant threadsafe description {Enable threadsafety (experimental, fails unit-tests)} {
-    configure.args-delete       --disable-threadsafe
-    configure.args-append       --enable-threadsafe
+variant cxx description {
+    Enable c++ interfance.
+  +cxx is EXPERIMENTAL with +threadsafe or any mpi variant
+} {
+    configure.args-delete       --disable-cxx
+    configure.args-append       --enable-cxx
 }
 
-variant optimized description {Higher compiler optimization for host machine} {
-    configure.optflags-delete     -O2
-    configure.optflags-append     -ftree-vectorize -O3
-    if {[gcc_variant_isset]} {
-        configure.optflags-append     -march=native
+variant fortran description {
+    Enable fortran bindings.
+  +fortran is EXPERIMENTAL with +threadsafe
+} {
+    configure.args-delete       --disable-fortran
+    configure.args-append       --enable-fortran
+
+    if {![fortran_variant_isset]} {
+        default_variants +gfortran
     }
 }
+
+if {[ variant_isset fortran ] && ![ fortran_variant_isset ] } {
+    ui_error "+fortran requires a fortran compiler to be selected"
+    return -code error
+}
+
+if {([ variant_isset gfortran ] || [ variant_isset g95 ]) && ![ variant_isset fortran ]} {
+    default_variants +fortran
+}
+
+variant threadsafe description {
+    Enable threadsafety.
+  +threadsafe is EXPERIMENTAL with +cxx, +fortran, or any mpi variant
+} {
+    configure.args-delete       --disable-threadsafe
+    configure.args-append       --enable-threadsafe --with-pthread
+}
+
+if {[ variant_isset threadsafe ] && ([ variant_isset cxx ] ||
+                                     [ variant_isset fortran ]) ||
+    ([ mpi_variant_isset ])  &&
+    ([ variant_isset cxx ]   || [ variant_isset threadsafe ])  } {
+
+    # Tell hdf5-18 to configure in this experimental configuration
+    configure.args-append       --enable-unsupported
+
+    notes {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5-18 has been installed in an unsupported "Experimental" mode due to\
+selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
+information.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+
+    pre-configure {
+        ui_warn {
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+hdf5-18 will been configured in an unsupported "Experimental" mode due to\
+selected variants. See "port variants hdf5 | grep EXPERIMENTAL" for more\
+information.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
+    }
+}
+
+if {[ mpi_variant_isset ]} {
+    configure.args-delete       --disable-parallel
+    configure.args-append       --enable-parallel
+}
+
+livecheck.type      regex
+livecheck.url       http://www.hdfgroup.org/HDF5/release/obtain5.html
+livecheck.regex     5-(\[0-9.\]+)
