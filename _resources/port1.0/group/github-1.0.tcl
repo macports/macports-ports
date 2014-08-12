@@ -112,7 +112,7 @@ options github.author github.project github.version github.tag_prefix github.liv
 options github.homepage github.raw github.master_sites github.tarball_from
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
-default github.raw {https://raw.github.com/${github.author}/${github.project}}
+default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
 
 default master_sites {${github.master_sites}}
