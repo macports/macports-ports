@@ -160,8 +160,8 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${configure.dir} {
                 if {[file isfile ${file}] && [file tail ${file}] eq "Makefile"} {
                     ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
-                    reinplace "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
-                    reinplace "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
+                    reinplace -locale C "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
+                    reinplace -locale C "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
                 }
             }
         }
