@@ -38,8 +38,9 @@ sub ensuredb {
         while ( read IN, $plen, 2 ) {
             my ($len) = unpack "S", $plen;
             read IN, $txt, $len;
-            my ( $sym, %hash ) = split chr(0), $txt;
-            $this->{SYMS}->{$sym} = {%hash};
+            my ($sym, @a) = split chr(0), $txt;
+            push @a, '' if @a % 2; # Ensure an even number of elements
+            $this->{SYMS}->{$sym} = {@a};
         }
         close IN;
         push @{ $this->{Scanned} }, $fi;
