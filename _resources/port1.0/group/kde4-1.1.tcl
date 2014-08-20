@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 # $Id$
 
-# Copyright (c) 2010 The MacPorts Project
+# Copyright (c) 2010-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -75,7 +75,7 @@ switch ${os.platform}_${os.major} {
 
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
-if {${qt_dir} != ${prefix}} {
+if {${qt_dir} ne ${prefix}} {
     set cmake_module_path ${cmake_share_module_dir}\;${qt_cmake_module_dir}
     configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
     configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}"
