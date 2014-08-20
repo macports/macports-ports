@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 
-# Copyright (c) 2010 The MacPorts Project
+# Copyright (c) 2010-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -158,7 +158,7 @@ default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 # allow for depending on either qt4-mac and qt4-mac-devel, simultaneously
 
 if {![info exists building_qt4]} {
-    if {${os.platform} == "darwin"} {
+    if {${os.platform} eq "darwin"} {
 
         # see if the framework install exists, and if so depend on it;
         # if not, depend on the library version
@@ -186,7 +186,7 @@ if {![info exists building_qt4]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         configure.env-append PATH=${qt_dir}/bin:$env(PATH)
     }
 } else {
@@ -205,7 +205,7 @@ if {![info exists building_qt4]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         build.env-append    PATH=${qt_dir}/bin:$env(PATH)
     }
 } else {
@@ -233,7 +233,7 @@ if {![info exists building_qt4]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
     }
 } else {
