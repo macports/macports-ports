@@ -60,91 +60,192 @@ CFTypeRef PLCFAutorelease (CFTypeRef cfObj) {
 
 int nsvfprintf (FILE *stream, NSString *format, va_list args) {
     int retval;
-    
+
     NSString *str;
     str = (NSString *) CFStringCreateWithFormatAndArguments(NULL, NULL, (CFStringRef) format, args);
     retval = fprintf(stream, "%s", [str UTF8String]);
     [str release];
-    
+
     return retval;
 }
 
 int nsfprintf (FILE *stream, NSString *format, ...) {
     va_list ap;
     int retval;
-    
+
     va_start(ap, format);
     {
         retval = nsvfprintf(stream, format, ap);
     }
     va_end(ap);
-    
+
     return retval;
 }
 
 int nsprintf (NSString *format, ...) {
     va_list ap;
     int retval;
-    
+
     va_start(ap, format);
     {
         retval = nsvfprintf(stderr, format, ap);
     }
     va_end(ap);
-    
+
     return retval;
 }
 
 /**
- * Verify that the root certificate trusts itself; this filters out certificates that
- * are still marked as trusted by the OS, but are expired or otherwise unusable.
+ * Wrapper method to retrieve the common name (CN) given a @code SecCertificateRef. If retrieving
+ * the CN isn't supported on this platform, returns @code NO, otherwise @code YES and points the
+ * given string ref @a subject to a string containing the common name. If an error occurs, subject
+ * is a NULL reference and *subjectError contains more information about the type of failure.
+ *
+ * @param cert A SecCertificateRef to the certificate for which the CN should be retrieved
+ * @param subject A pointer to a CFStringRef that will hold the CN if the retrieval is successful.
+ * @param subjectError A pointer to an NSError* that will hold an error message if an error occurs.
+ * @return BOOL indicating whether this system supports retrieving CNs from certificates
  */
-static BOOL ValidateSelfTrust (SecCertificateRef cert) {
+static BOOL GetCertSubject(SecCertificateRef cert, CFStringRef *subject, NSError **subjectError) {
+    if (SecCertificateCopyShortDescription != NULL /* 10.7 */) {
+        *subject = PLCFAutorelease(SecCertificateCopyShortDescription(NULL, cert, (CFErrorRef *) subjectError));
+        return YES;
+    }
+
+    if (SecCertificateCopySubjectSummary   != NULL /* 10.6 */) {
+        *subject = PLCFAutorelease(SecCertificateCopySubjectSummary(cert));
+        return YES;
+    }
+
+    if (SecCertificateCopyCommonName       != NULL /* 10.5 */) {
+        OSStatus err;
+        if ((err = SecCertificateCopyCommonName(cert, subject)) == errSecSuccess && *subject != NULL) {
+            PLCFAutorelease(subject);
+            return YES;
+        }
+
+        /* In the case that the CN is simply unavailable, provide a more useful error code */
+        if (err == errSecSuccess) {
+            err = errSecNoSuchAttr;
+        }
+
+        NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys: @"SecCertificateCopyCommonName() failed", NSLocalizedDescriptionKey, nil];
+        *subjectError = [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo: userInfo];
+        *subject = NULL;
+
+        return YES;
+    }
+
+    /* <= 10.4 */
+    return NO;
+}
+
+/**
+ * Verify that the root certificate is trusted by the system; this filters out
+ * certificates that are (1) expired, or (2) in the system keychain but marked
+ * as untrusted by a system administrator (or user).
+ *
+ * @param cert A @code SecCertificateRef representing a certificate to be
+ *             checked.
+ *
+ * @return Returns a BOOL indicating that the certificate is trusted (@code
+ *         YES), or not (@code NO).
+ */
+static BOOL ValidateSystemTrust(SecCertificateRef cert) {
     OSStatus err;
 
     /* Create a new trust evaluation instance */
     SecTrustRef trust;
+	{
+		SecPolicyRef policy;
+		if (SecPolicyCreateBasicX509 != NULL) /* >= 10.6 */ {
+			policy = SecPolicyCreateBasicX509();
+		} else /* < 10.6 */ {
+			SecPolicySearchRef searchRef = NULL;
+			const CSSM_OID *policyOID = &CSSMOID_APPLE_X509_BASIC;
+
+			if ((err = SecPolicySearchCreate(CSSM_CERT_X_509v3, policyOID, NULL, &searchRef)) != errSecSuccess) {
+				cssmPerror("SecPolicySearchCreate", err);
+				return NO;
+			}
+			if ((err = SecPolicySearchCopyNext(searchRef, &policy))) {
+				cssmPerror("SecPolicySearchCopyNext", err);
+				return NO;
+			}
+		}
+
+		if ((err = SecTrustCreateWithCertificates((CFTypeRef) cert, policy, &trust)) != errSecSuccess) {
+			/* Shouldn't happen */
+			nsfprintf(stderr, @"Failed to create SecTrustRef: %d\n", err);
+			CFRelease(policy);
+			return NO;
+		}
+
+		CFRelease(policy);
+	}
+
+    /* Allow verifying root certificates (which would otherwise be an error).
+     * Without this, intermediates added as roots aren't exported. */
     {
-        SecPolicyRef policy = SecPolicyCreateBasicX509();
-        if ((err = SecTrustCreateWithCertificates((CFTypeRef)cert, policy, &trust)) != errSecSuccess) {
-            /* Shouldn't happen */
-            nsfprintf(stderr, @"Failed to create SecTrustRef: %d\n", err);
-            CFRelease(policy);
+        CSSM_APPLE_TP_ACTION_FLAGS actionFlags = CSSM_TP_ACTION_LEAF_IS_CA;
+        CSSM_APPLE_TP_ACTION_DATA actionData;
+        CFDataRef cfActionData = NULL;
+
+        memset(&actionData, 0, sizeof(actionData));
+        actionData.Version = CSSM_APPLE_TP_ACTION_VERSION;
+        actionData.ActionFlags = actionFlags;
+        cfActionData = CFDataCreate(NULL, (UInt8 *) &actionData, sizeof(actionData));
+        if ((err = SecTrustSetParameters(trust, CSSM_TP_ACTION_DEFAULT, cfActionData))) {
+            nsfprintf(stderr, @"Failed to set SecTrustParameters: %d\n", err);
+            CFRelease(cfActionData);
             return NO;
         }
-        CFRelease(policy);
+        CFRelease(cfActionData);
     }
-    
-    /* Set this certificate as the only (self-)anchor */
-    {
-        CFArrayRef certs = CFArrayCreate(NULL, (const void **) &cert, 1, &kCFTypeArrayCallBacks);
-        if ((err = SecTrustSetAnchorCertificates(trust, certs)) != errSecSuccess) {
-            nsfprintf(stderr, @"Failed to set anchor certificates on our SecTrustRef: %d\n", err);
-            CFRelease(certs);
-            CFRelease(trust);
-            return NO;
-        }
-        CFRelease(certs);
-    }
-    
+
     /* Evaluate the certificate trust */
     SecTrustResultType rt;
     if ((err = SecTrustEvaluate(trust, &rt)) != errSecSuccess) {
         nsfprintf(stderr, @"SecTrustEvaluate() failed: %d\n", err);
         CFRelease(trust);
+        return NO;
     }
-    
+
     CFRelease(trust);
-    
+
     /* Check the result */
     switch (rt) {
         case kSecTrustResultUnspecified:
+            /* Reached a trusted root */
         case kSecTrustResultProceed:
-            /* Trusted */
+            /* User explicitly trusts */
             return YES;
-            
+
+        case kSecTrustResultDeny:
+            /* User explicitly distrusts */
+#if defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED < __MAC_10_7
+        case kSecTrustResultConfirm:
+            /* The user previously chose to ask for permission when this
+             * certificate is used. This is no longer used on modern OS X. */
+#endif
+            //nsfprintf(stderr, @"Marked as untrustable!\n");
+            return NO;
+
+        case kSecTrustResultRecoverableTrustFailure:
+            /* The chain as-is isn't trusted, but it could be trusted with some
+             * minor change (such as ignoring expired certs or adding an
+             * additional anchor). For certsync this likely means the cert was
+             * expired, which means we don't want to export it. */
+            return NO;
+
+        case kSecTrustResultFatalTrustFailure:
+            /* The chain is defective (e.g., ill-formatted). Don't export this. */
+            return NO;
+
         default:
             /* Untrusted */
+            nsfprintf(stderr, @"rt = %d\n", rt);
+            cssmPerror("CSSM verify error", err);
             return NO;
     }
 }
@@ -162,7 +263,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
     NSMutableArray *trusted = nil;
     CFArrayRef certs = nil;
     OSStatus err;
-    
+
     /* Mac OS X >= 10.5 provides SecTrustSettingsCopyCertificates() */
     if (SecTrustSettingsCopyCertificates != NULL) {
         /* Fetch all certificates in the given domain */
@@ -171,27 +272,27 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
             PLCFAutorelease(certs);
         } else if (err == errSecNoTrustSettings ) {
             /* No data */
-        
+
             [pool release];
             return [NSArray array];
         } else if (err != errSecSuccess) {
             /* Lookup failed */
             if (outError != NULL)
                 *outError = [[NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo:nil] retain];
-        
+
             [pool release];
             [*outError autorelease];
             return nil;
         }
-    
+
         /* Extract trusted roots */
         trusted = [NSMutableArray arrayWithCapacity: CFArrayGetCount(certs)];
-        
+
         NSEnumerator *resultEnumerator = [(NSArray *)certs objectEnumerator];
         id certObj;
         while ((certObj = [resultEnumerator nextObject]) != nil) {
             SecCertificateRef cert = (SecCertificateRef) certObj;
-        
+
             /* Fetch the trust settings */
             CFArrayRef trustSettings = nil;
             err = SecTrustSettingsCopyTrustSettings(cert, domain, &trustSettings);
@@ -202,7 +303,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
             } else {
                 PLCFAutorelease(trustSettings);
             }
-        
+
             /* If empty, trust for everything (as per the Security Framework documentation) */
             if (CFArrayGetCount(trustSettings) == 0) {
                 [trusted addObject: certObj];
@@ -213,10 +314,10 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
                 while ((trustProps = [trustEnumerator nextObject]) != nil) {
                     CFNumberRef settingsResultNum;
                     SInt32 settingsResult;
-                
+
                     settingsResultNum = (CFNumberRef) [trustProps objectForKey: (id) kSecTrustSettingsResult];
                     CFNumberGetValue(settingsResultNum, kCFNumberSInt32Type, &settingsResult);
-                
+
                     /* If a root, add to the result set */
                     if (settingsResult == kSecTrustSettingsResultTrustRoot || settingsResult == kSecTrustSettingsResultTrustAsRoot) {
                         [trusted addObject: certObj];
@@ -248,7 +349,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
         trusted = [[(NSArray *) certs mutableCopy] autorelease];
         CFRelease(certs);
     }
-    
+
     /*
      * Filter out any trusted certificates that can not actually be used in verification; eg, they are expired.
      *
@@ -265,11 +366,21 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
     id certObj;
     while ((certObj = [trustedEnumerator nextObject]) != nil) {
         /* If self-trust validation fails, the certificate is expired or otherwise not useable */
-        if (!ValidateSelfTrust((SecCertificateRef) certObj)) {
+        if (!ValidateSystemTrust((SecCertificateRef) certObj)) {
+            NSError *subjectError = NULL;
+            CFStringRef subject = NULL;
+
+            if (GetCertSubject((SecCertificateRef) certObj, &subject, &subjectError)) {
+                if (subject != NULL) {
+                    nsfprintf(stderr, @"Removing untrusted certificate: %@\n", subject);
+                } else {
+                    nsfprintf(stderr, @"Failed to extract certificate description for untrusted certificate: %@\n", subjectError);
+                }
+            }
             [trusted removeObject: certObj];
         }
     }
-    
+
     [trusted retain];
     [pool release];
     return [trusted autorelease];
@@ -281,7 +392,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     /*
      * Fetch all certificates
      */
-    
+
     NSMutableArray *anchors = [NSMutableArray array];
     NSArray *result;
     NSError *error;
@@ -289,6 +400,16 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
 
     /* Current user */
     if (userAnchors) {
+        /* Set the keychain preference domain to user, this causes
+         * ValidateSystemTrust to use the user's keychain */
+        if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainUser)) != errSecSuccess) {
+            CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
+            nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+
+            [pool release];
+            return EXIT_FAILURE;
+        }
+
         result = certificatesForTrustDomain(kSecTrustSettingsDomainUser, &error);
         if (result != nil) {
             [anchors addObjectsFromArray: result];
@@ -298,7 +419,17 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
             return EXIT_FAILURE;
         }
     }
-    
+
+    /* Admin & System */
+    /* Causes ValidateSystemTrust to ignore the user's keychain */
+    if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem)) != errSecSuccess) {
+        CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
+        nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+
+        [pool release];
+        return EXIT_FAILURE;
+    }
+
     /* Admin */
     result = certificatesForTrustDomain(kSecTrustSettingsDomainAdmin, &error);
     if (result != nil) {
@@ -308,7 +439,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         [pool release];
         return EXIT_FAILURE;
     }
-    
+
     /* System */
     result = certificatesForTrustDomain(kSecTrustSettingsDomainSystem, &error);
     if (result != nil) {
@@ -318,50 +449,27 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         [pool release];
         return EXIT_FAILURE;
     }
-    
-    NSEnumerator *resultEnumerator = [result objectEnumerator];
+
+    NSEnumerator *resultEnumerator = [anchors objectEnumerator];
     id certObj;
     while ((certObj = [resultEnumerator nextObject]) != nil) {
         NSError *subjectError = NULL;
         CFStringRef subject = NULL;
-        BOOL subjectUnsupported = NO;
 
-        if (SecCertificateCopyShortDescription != NULL /* 10.7 */) {
-            subject = PLCFAutorelease(SecCertificateCopyShortDescription(NULL, (SecCertificateRef) certObj, (CFErrorRef *) &subjectError));
-            
-        } else if (SecCertificateCopySubjectSummary != NULL /* 10.6 */) {
-            subject = PLCFAutorelease(SecCertificateCopySubjectSummary((SecCertificateRef) certObj));
-            
-        } else if (SecCertificateCopyCommonName != NULL /* 10.5 */) {
-            if ((err = SecCertificateCopyCommonName((SecCertificateRef) certObj, &subject)) == errSecSuccess && subject != NULL) {
-                PLCFAutorelease(subject);
+        if (GetCertSubject((SecCertificateRef) certObj, &subject, &subjectError)) {
+            if (subject != NULL) {
+                nsfprintf(stderr, @"Found %@\n", subject);
             } else {
-                /* In the case that the CN is simply unavailable, provide a more useful error code */
-                if (err == errSecSuccess)
-                    err = errSecNoSuchAttr;
-
-                NSDictionary *userInfo = [NSDictionary dictionaryWithObjectsAndKeys: @"SecCertificateCopyCommonName() failed", NSLocalizedDescriptionKey, nil];
-                subjectError = [NSError errorWithDomain: NSOSStatusErrorDomain code: err userInfo: userInfo];
-                subject = NULL;
-            }
-        } else /* <= 10.4 */ {
-            subjectUnsupported = YES;
-        }
-
-        if (subject == NULL) {
-            /* Don't print an error if fetching the subject is unsupported on the platform (eg, <= 10.4) */
-            if (!subjectUnsupported)
                 nsfprintf(stderr, @"Failed to extract certificate description: %@\n", subjectError);
-        } else {
-            nsfprintf(stderr, @"Found %@\n", subject);
+            }
         }
     }
-    
+
     /*
      * Perform export
      */
     CFDataRef pemData;
-    
+
     /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7. We use an ifdef to keep the code buildable with earlier SDKs, too. */
     nsfprintf(stderr, @"Exporting certificates from the keychain\n");
     if (SecItemExport != NULL) {
@@ -388,7 +496,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
             return EXIT_FAILURE;
         }
     }
-    
+
     [pool release];
     return EXIT_SUCCESS;
 }
@@ -405,14 +513,14 @@ int main (int argc, char * const argv[]) {
     /* Parse the command line arguments */
     BOOL userAnchors = NO;
     NSString *outputFile = nil;
-    
+
     int ch;
     while ((ch = getopt(argc, argv, "hsuo:")) != -1) {
         switch (ch) {
             case 'u':
                 userAnchors = YES;
                 break;
-                
+
             case 'o':
                 outputFile = [NSString stringWithUTF8String: optarg];
                 break;
@@ -428,7 +536,7 @@ int main (int argc, char * const argv[]) {
     }
     argc -= optind;
     argv += optind;
-    
+
     /* Perform export  */
     int result = exportCertificates(userAnchors, outputFile);
 

@@ -74,6 +74,10 @@
     /* SecCertificateCopySubjectSummary() was added in 10.6 */
     extern CFStringRef SecCertificateCopySubjectSummary (SecCertificateRef certificate) __attribute__((weak_import));
     #define SecCertificateCopySubjectSummary ((CFStringRef(*)(SecCertificateRef)) NULL) /* We can't safely weak-link what we don't have */
+
+    /* SecPolicyCreateBasicX509() was added in 10.6 */
+    extern SecPolicyRef SecPolicyCreateBasicX509 (void) __attribute__((weak_import));
+    #define SecPolicyCreateBasicX509 ((SecPolicyRef(*)(void)) NULL) /* We can't safely weak-link what we don't have */
 #endif
 
 /* Allow building with SDKs <= 10.6 */
