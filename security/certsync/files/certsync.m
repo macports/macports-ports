@@ -270,7 +270,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
         err = SecTrustSettingsCopyCertificates(domain, &certs);
         if (err == errSecSuccess) {
             PLCFAutorelease(certs);
-        } else if (err == errSecNoTrustSettings ) {
+        } else if (err == errSecNoTrustSettings) {
             /* No data */
 
             [pool release];
