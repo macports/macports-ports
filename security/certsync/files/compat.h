@@ -54,6 +54,13 @@
     /* SecTrustSettingsCopyCertificates() was added in 10.5 */
     extern OSStatus SecTrustSettingsCopyCertificates (SecTrustSettingsDomain domain, CFArrayRef *certArray) __attribute__((weak_import));
     #define SecTrustSettingsCopyCertificates ((OSStatus(*)(SecTrustSettingsDomain, CFArrayRef *)) NULL) /* We can't safely weak-link what we don't have */
+
+    /* SecTrustSettingsCopyTrustSettings() was added in 10.5 */
+    extern OSStatus SecTrustSettingsCopyTrustSettings (SecCertificateRef certRef, SecTrustSettingsDomain domain, CFArrayRef *trustSettings) __attribute__((weak_import));
+    #define SecTrustSettingsCopyTrustSettings ((OSStatus(*)(SecCertificateRef, SecTrustSettingsDomain, CFArrayRef *)) NULL) /* We can't safely weak-link what we don't have */
+
+    extern CFStringRef SecCopyErrorMessageString (OSStatus status, void *reserved) __attribute__((weak_import));
+    #define SecCopyErrorMessageString ((CFStringRef(*)(OSStatus, void *)) NULL) /* We can't safely weak-link what we don't have */
     
     /* CFError was added in 10.5 */
     typedef CFTypeRef CFErrorRef;

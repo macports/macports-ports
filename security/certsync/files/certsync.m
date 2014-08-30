@@ -403,8 +403,14 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         /* Set the keychain preference domain to user, this causes
          * ValidateSystemTrust to use the user's keychain */
         if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainUser)) != errSecSuccess) {
-            CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
-            nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+            if (SecCopyErrorMessageString != NULL) {
+                /* >= 10.5 */
+                CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
+                nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+            } else {
+                /* <= 10.4 */
+                nsfprintf(stderr, @"Failed to set keychain preference domain: %d\n", err);
+            }
 
             [pool release];
             return EXIT_FAILURE;
@@ -423,8 +429,14 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     /* Admin & System */
     /* Causes ValidateSystemTrust to ignore the user's keychain */
     if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem)) != errSecSuccess) {
-        CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
-        nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+        if (SecCopyErrorMessageString != NULL) {
+            /* >= 10.5 */
+            CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
+            nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
+        } else {
+            /* <= 10.4 */
+            nsfprintf(stderr, @"Failed to set keychain preference domain: %d\n", err);
+        }
 
         [pool release];
         return EXIT_FAILURE;
