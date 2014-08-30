@@ -120,7 +120,7 @@ static BOOL GetCertSubject(SecCertificateRef cert, CFStringRef *subject, NSError
     if (SecCertificateCopyCommonName       != NULL /* 10.5 */) {
         OSStatus err;
         if ((err = SecCertificateCopyCommonName(cert, subject)) == errSecSuccess && *subject != NULL) {
-            PLCFAutorelease(subject);
+            PLCFAutorelease(*subject);
             return YES;
         }
 
