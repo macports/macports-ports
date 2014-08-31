@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009-2013 The MacPorts Project
+# Copyright (c) 2009-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -41,11 +41,11 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4
+#   php.branches                5.3 5.4 5.5 5.6
 #
 # For unified ports, setting php.branches will create the subports.
 #
-# For single-branch extension ports (name begins with e.g. "php54-")
+# For single-branch extension ports (name begins with e.g. "php56-")
 # php.branches is set automatically based on the port name and should not be
 # changed.
 
@@ -53,7 +53,7 @@ options php.branches
 option_proc php.branches        php._set_branches
 
 proc php._set_branches {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -64,7 +64,7 @@ proc php._set_branches {option action args} {
 
     if {[regexp {^php\d*-} ${name}]} {
         # Legacy dist_subdir to match old php5- port layout.
-        if {[lindex [split [lindex [option ${option}] 0] .] 0] == "5"} {
+        if {[lindex [split [lindex [option ${option}] 0] .] 0] eq "5"} {
             dist_subdir php5-${php.rootname}
         }
 
@@ -73,7 +73,7 @@ proc php._set_branches {option action args} {
             php.create_subports
 
             # Set up stub port.
-            if {${name} == ${subport}} {
+            if {${name} eq ${subport}} {
                 supported_archs     noarch
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
 
@@ -116,7 +116,7 @@ proc php._set_branches {option action args} {
 option_proc name                php._set_name
 
 proc php._set_name {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -131,7 +131,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 5.5
+default php.latest_stable_branch 5.6
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
@@ -145,13 +145,13 @@ default php.default_branch      {[expr {[lsearch -exact ${php.branches} ${php.la
 option_proc php.default_branch  php._set_default_branch
 
 proc php._set_default_branch {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
     global name subport php.rootname
 
-    if {[regexp {^php-} ${name}] && ${name} == ${subport}} {
+    if {[regexp {^php-} ${name}] && ${name} eq ${subport}} {
         depends_run             port:php[php.suffix_from_branch [option ${option}]]-${php.rootname}
     }
 }
@@ -234,7 +234,7 @@ default php.pecl                no
 option_proc php.pecl            php._set_pecl
 
 proc php._set_pecl {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -260,7 +260,7 @@ default php.pecl.name           {${php.rootname}}
 option_proc php.pecl.name       php._set_pecl_name
 
 proc php._set_pecl_name {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -285,7 +285,7 @@ default php.pecl.prerelease     no
 option_proc php.pecl.prerelease php._set_pecl_prerelease
 
 proc php._set_pecl_prerelease {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -358,7 +358,7 @@ global php._first_version
 option_proc version             php._set_version
 
 proc php._set_version {option action args} {
-    if {"set" != ${action}} {
+    if {"set" ne ${action}} {
         return
     }
 
@@ -374,7 +374,7 @@ proc php._set_version {option action args} {
 
 pre-livecheck {
     global name subport version php._first_version
-    if {${name} != ${subport} && ${name} != "php" && ${version} == ${php._first_version}} {
+    if {${name} ne ${subport} && ${name} ne "php" && ${version} eq ${php._first_version}} {
         livecheck.type          none
     }
 }
@@ -490,7 +490,7 @@ proc php.add_port_code {} {
                 regexp {^extension_dir *= *"?([^\"]*)"?} $line -> php_ini_extension_dir
                 if {[info exists php_ini_extension_dir]} {
                     ui_debug "Found extension_dir ${php_ini_extension_dir} in ${php.ini}"
-                    if {${php_ini_extension_dir} != ${php.extension_dir}} {
+                    if {${php_ini_extension_dir} ne ${php.extension_dir}} {
                         if {0 == ${count}} {
                             ui_msg "Your php.ini contains a line that will prevent ${subport}"
                             ui_msg "and other ${php} extensions from working. To fix this,"
