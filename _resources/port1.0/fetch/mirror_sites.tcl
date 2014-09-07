@@ -72,7 +72,6 @@ set portfetch::mirror_sites::sites(fink) {
     http://distfiles.ber.de.eu.finkmirrors.net/:nosubdir
     http://distfiles.hel.fi.eu.finkmirrors.net/:nosubdir
     http://distfiles.dub.ie.eu.finkmirrors.net/:nosubdir
-    http://distfiles.ams.nl.eu.finkmirrors.net/:nosubdir
     http://distfiles.sjc.ca.us.finkmirrors.net/:nosubdir
     http://www.mirrorservice.org/sites/master.us.finkmirrors.net/distfiles/:nosubdir
     http://distfiles.master.finkmirrors.net/:nosubdir
