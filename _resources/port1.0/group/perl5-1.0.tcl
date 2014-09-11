@@ -65,6 +65,62 @@ proc perl5.extract_config {var {default ""}} {
     return $val
 }
 
+# Create perl subports
+proc perl5.create_subports {branches rootname} {
+    foreach v ${branches} {
+        subport p${v}-${rootname} {
+            depends_lib port:perl${v}
+            perl5.major ${v}
+        }
+    }
+}
+
+# Set perl variant options and defaults
+options perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants
+default perl5.default_variant [string map {. _} perl${perl5.default_branch}]
+default perl5.variant {[string map {. _} perl${perl5.major}]}
+default perl5.set_default_variant {true}
+default perl5.conflict_variants {true}
+# Get variant names from branches
+proc perl5.get_variant_names {branches} {
+    set ret {}
+    foreach branch ${branches} {
+        lappend ret "perl[string map {. _} ${branch}]"
+    }
+    return $ret
+}
+# Create perl variants
+proc perl5.create_variants {branches} {
+    global perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants
+    set variants [perl5.get_variant_names ${branches}]
+    foreach branch ${branches} {
+        set index [lsearch ${branches} ${branch}]
+        set variant [lindex ${variants} ${index}]
+# Add conflicts
+        set conflicts {}
+        if {${perl5.conflict_variants}} {
+            set conflicts "conflicts {[lreplace ${variants} ${index} ${index}]}"
+        }
+        eval "variant ${variant} ${conflicts} description Use MacPorts perl${branch} {}"
+        if {[variant_isset ${variant}]} {
+            perl5.variant ${variant}
+        }
+    }
+# Set default perl variant
+    if {${perl5.default_variant} eq ${perl5.variant} && ${perl5.set_default_variant}} {
+        default_variants-append +${perl5.variant}
+    }
+# Set perl version and deps
+    foreach branch ${branches} {
+        set index [lsearch ${branches} ${branch}]
+        set variant [lindex ${variants} ${index}]
+        if {[variant_isset ${variant}]} {
+            perl5.major ${branch}
+            depends_lib port:perl${branch}
+        }
+    }
+}
+
 # Set some variables.
 options perl5.version perl5.major perl5.arch perl5.lib perl5.bindir perl5.archlib perl5.bin
 default perl5.version {[perl5.extract_config version]}
@@ -124,13 +180,7 @@ proc perl5.setup {module vers {cpandir ""}} {
 
     if {[string match p5-* $name]} {
         set rootname        [string range $name 3 end]
-
-        foreach v ${perl5.branches} {
-            subport p${v}-${rootname} {
-                depends_lib port:perl${v}
-                perl5.major ${v}
-            }
-        }
+        perl5.create_subports ${perl5.branches} ${rootname}
 
         if {$subport eq $name} {
             perl5.major
