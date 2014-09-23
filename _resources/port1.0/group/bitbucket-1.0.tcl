@@ -37,30 +37,43 @@
 #   PortGroup               bitbucket 1.0
 #   bitbucket.setup         author project version [tag_prefix]
 
-options bitbucket.author bitbucket.project bitbucket.version bitbucket.tag_prefix bitbucket.livecheck_type
+options bitbucket.author bitbucket.project bitbucket.version bitbucket.tag_prefix
 options bitbucket.homepage bitbucket.master_sites bitbucket.tarball_from
 
 default bitbucket.homepage {https://bitbucket.org/${bitbucket.author}/${bitbucket.project}}
 default bitbucket.master_sites {${bitbucket.homepage}/get}
 default bitbucket.tarball_from {tags}
-default bitbucket.livecheck_type ""
 
 default master_sites {${bitbucket.master_sites}}
 
 option_proc bitbucket.tarball_from handle_tarball_from
 
 proc handle_tarball_from {option action args} {
-    global bitbucket.author bitbucket.project bitbucket.master_sites
+    global bitbucket.author bitbucket.project bitbucket.master_sites bitbucket.version
 
     # the port writer can set bitbucket.tarball_from to "downloads" and have the URI path accordingly changed
     if {[string equal ${action} "set"] && ${args} eq "downloads"} {
         bitbucket.tarball_from ${args}
         bitbucket.master_sites https://bitbucket.org/${bitbucket.author}/${bitbucket.project}/downloads
+        default distname {${bitbucket.project}-${bitbucket.version}}
     }
 }
 
+proc bitbucket.livecheck_regex {} {
+    global bitbucket.tag_prefix bitbucket.tarball_from distname extract.suffix version
+    switch ${bitbucket.tarball_from} {
+        tags {
+            set dir get
+        }
+        default {
+            set dir ${bitbucket.tarball_from}
+        }
+    }
+    return ${dir}/[regsub -- [quotemeta ${version}] ${distname} {([0-9.]+)}][quotemeta [quotemeta ${extract.suffix}]]
+}
+
 proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
-    global bitbucket.author bitbucket.project bitbucket.version bitbucket.tag_prefix bitbucket.homepage bitbucket.master_sites extract.suffix bitbucket.livecheck_type
+    global bitbucket.author bitbucket.homepage bitbucket.master_sites bitbucket.project bitbucket.tag_prefix bitbucket.version extract.suffix
 
     bitbucket.author        ${bb_author}
     bitbucket.project       ${bb_project}
@@ -72,7 +85,7 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     homepage                ${bitbucket.homepage}
     hg.url                  ${bitbucket.homepage}
     hg.tag                  [join ${bitbucket.tag_prefix}]${bitbucket.version}
-    distname                [join ${bitbucket.tag_prefix}]${bitbucket.version}
+    default distname        {${hg.tag}}
     fetch.ignore_sslcert    yes
 
     post-extract {
@@ -87,24 +100,15 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
 
     if {[join ${bitbucket.tag_prefix}] eq "" && \
         [regexp "^\[0-9a-f\]{9,}\$" ${bitbucket.version}]} {
-        bitbucket.livecheck_type commits
+        default livecheck.type      regexm
+        default livecheck.url       {${bitbucket.homepage}/atom}
+        default livecheck.regex     {<id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>}
     } else {
-        bitbucket.livecheck_type tags
+        default livecheck.type      regex
+        default livecheck.url       {${bitbucket.homepage}/downloads}
+        default livecheck.regex     {[bitbucket.livecheck_regex]}
     }
 
-    switch {${bitbucket.livecheck_type}} {
-        commits {
-            livecheck.type      regexm
-            livecheck.url       ${bitbucket.homepage}/atom
-            livecheck.version   ${bitbucket.version}
-            livecheck.regex     <id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>
-        }
-        default {
-            livecheck.type      regex
-            livecheck.version   ${bitbucket.version}
-            livecheck.url       ${bitbucket.homepage}/downloads
-            livecheck.regex     get/[join ${bitbucket.tag_prefix}](\[0-9\.\]+)${extract.suffix}
-        }
-    }
+    default livecheck.version   {${bitbucket.version}}
 }
 
