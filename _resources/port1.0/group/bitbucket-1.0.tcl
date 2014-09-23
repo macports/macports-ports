@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2013 The MacPorts Project
+# Copyright (c) 2013-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -53,7 +53,7 @@ proc handle_tarball_from {option action args} {
     global bitbucket.author bitbucket.project bitbucket.master_sites
 
     # the port writer can set bitbucket.tarball_from to "downloads" and have the URI path accordingly changed
-    if {[string equal ${action} "set"] && $args == "downloads"} {
+    if {[string equal ${action} "set"] && ${args} eq "downloads"} {
         bitbucket.tarball_from ${args}
         bitbucket.master_sites https://bitbucket.org/${bitbucket.author}/${bitbucket.project}/downloads
     }
@@ -76,14 +76,17 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     fetch.ignore_sslcert    yes
 
     post-extract {
-        if {![file exists ${worksrcpath}] && "standard" == ${fetch.type} && \
-            ${master_sites} == ${bitbucket.master_sites} && [llength ${distfiles}] > 0 && \
+        if {![file exists ${worksrcpath}] && \
+            ${fetch.type} eq "standard" && \
+            ${master_sites} eq ${bitbucket.master_sites} && \
+            [llength ${distfiles}] > 0 && \
             [llength [glob -nocomplain ${workpath}/*]] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
         }
     }
 
-    if {[join ${bitbucket.tag_prefix}] == "" && [regexp "^\[0-9a-f\]{9,}\$" ${bitbucket.version}]} {
+    if {[join ${bitbucket.tag_prefix}] eq "" && \
+        [regexp "^\[0-9a-f\]{9,}\$" ${bitbucket.version}]} {
         bitbucket.livecheck_type commits
     } else {
         bitbucket.livecheck_type tags
