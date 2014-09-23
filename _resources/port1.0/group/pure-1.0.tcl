@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009-2013 The MacPorts Project
+# Copyright (c) 2009-2014 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -36,21 +36,24 @@
 # Usage:
 #
 #   PortGroup               pure 1.0
-#   pure.setup              module version
+#   pure.setup              module module_version
 #
-# where module is the name of the module (e.g. gsl) and version is its
+# where module is the name of the module (e.g. gsl) and module_version is its
 # version.
 
 
-proc pure.setup {module version} {
+PortGroup                       bitbucket 1.0
+
+proc pure.setup {module module_version} {
     global name homepage
 
+    bitbucket.setup             purelang pure-lang ${module_version}
     name                        pure-${module}
-    version                     ${version}
     homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#markdown-header-${name}
-    master_sites                http://cdn.bitbucket.org/purelang/pure-lang/downloads/
+    bitbucket.tarball_from      downloads
+    default distname            ${name}-${module_version}
 
-    depends_lib                 path:lib/libpure.dylib:pure
+    depends_lib-append          port:pure
 
     use_configure               no
 
@@ -76,8 +79,4 @@ proc pure.setup {module version} {
             copy ${worksrcpath}/examples ${destroot}${prefix}/share/examples/${name}
         }
     }
-
-    livecheck.type              regex
-    default livecheck.url       {https://bitbucket.org/purelang/pure-lang/downloads}
-    default livecheck.regex     {${name}-(\[0-9.\]+)\\.tar}
 }
