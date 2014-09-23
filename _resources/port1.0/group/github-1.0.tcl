@@ -108,7 +108,7 @@
 #       system -W ${worksrcpath} "git submodule update --init"
 #   }
 
-options github.author github.project github.version github.tag_prefix github.livecheck_type
+options github.author github.project github.version github.tag_prefix
 options github.homepage github.raw github.master_sites github.tarball_from
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
