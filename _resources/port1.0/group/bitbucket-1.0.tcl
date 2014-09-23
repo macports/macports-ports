@@ -92,16 +92,19 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
         bitbucket.livecheck_type tags
     }
 
-    if {[string equal ${bitbucket.livecheck_type} "commits"]} {
-        livecheck.type      regexm
-        livecheck.url       ${bitbucket.homepage}/atom
-        livecheck.version   ${bitbucket.version}
-        livecheck.regex     <id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>
-    } else {
-        livecheck.type      regex
-        livecheck.version   ${bitbucket.version}
-        livecheck.url       ${bitbucket.homepage}/downloads
-        livecheck.regex     get/[join ${bitbucket.tag_prefix}](\[0-9\.\]+)${extract.suffix}
+    switch {${bitbucket.livecheck_type}} {
+        commits {
+            livecheck.type      regexm
+            livecheck.url       ${bitbucket.homepage}/atom
+            livecheck.version   ${bitbucket.version}
+            livecheck.regex     <id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>
+        }
+        default {
+            livecheck.type      regex
+            livecheck.version   ${bitbucket.version}
+            livecheck.url       ${bitbucket.homepage}/downloads
+            livecheck.regex     get/[join ${bitbucket.tag_prefix}](\[0-9\.\]+)${extract.suffix}
+        }
     }
 }
 
