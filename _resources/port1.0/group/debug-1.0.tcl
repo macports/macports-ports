@@ -45,12 +45,12 @@ configure.cppflags-append  -mtune=native
 
 ui_debug "adding the default debug variant"
 variant debug description {Enable debug flags and symbols} {
-    configure.cflags-delete     -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cxxflags-delete   -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cppflags-delete   -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fflags-delete     -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.f90flags-delete   -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fcflags-delete    -O1 -O2 -O3 -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.cflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.cxxflags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.cppflags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.fflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.f90flags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    configure.fcflags-delete    -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
 
     # certain options break the way cmake configures, so test for cmake variable
     if {[info exists cmake_share_module_dir]} {
