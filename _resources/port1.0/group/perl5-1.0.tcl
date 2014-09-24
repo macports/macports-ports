@@ -133,8 +133,6 @@ default perl5.lib {[perl5.extract_config vendorlib]}
 default perl5.bindir {${prefix}/libexec/perl${perl5.major}}
 default perl5.archlib {${perl5.lib}/${perl5.arch}}
 
-default livecheck.version {${perl5.moduleversion}}
-
 default configure.universal_args {}
 
 options perl5.link_binaries perl5.link_binaries_suffix
@@ -240,6 +238,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     livecheck.type      regexm
     livecheck.url       http://search.cpan.org/dist/${perl5.module}/
     livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    default livecheck.version {${perl5.moduleversion}}
 }
 
 # Switch from default MakeMaker-style routine to Module::Build-style.
