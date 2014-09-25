@@ -60,6 +60,9 @@ proc pure.setup {module module_version} {
     build.args-append           PUREC_FLAGS=-mcpu=generic
 
     pre-build {
+        if {${configure.cxx_stdlib} ne "" && [string match "*clang*" [option configure.cxx]]} {
+            configure.cxxflags-append -stdlib=${configure.cxx_stdlib}
+        }
         build.args-append       CC="${configure.cc}" \
                                 CFLAGS="${configure.cflags} ${configure.cc_archflags}" \
                                 CPPFLAGS="${configure.cppflags}" \
