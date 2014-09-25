@@ -63,7 +63,7 @@ proc pure.setup {module module_version} {
         build.args-append       CFLAGS="${configure.cflags} ${configure.cc_archflags}" \
                                 CPPFLAGS="${configure.cppflags}" \
                                 CXXFLAGS="${configure.cxxflags} ${configure.cxx_archflags}" \
-                                LDFLAGS="${configure.ldflags} ${configure.ld_archflags}" \
+                                LDFLAGS="${configure.ldflags} ${configure.ld_archflags}"
         build.env-append        CC=${configure.cc} \
                                 CXX=${configure.cxx}
     }
