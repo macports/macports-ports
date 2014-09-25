@@ -51,7 +51,7 @@ proc pure.setup {module module_version} {
     name                        pure-${module}
     homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#markdown-header-${name}
     bitbucket.tarball_from      downloads
-    default distname            ${name}-${module_version}
+    default distname            {${name}-${bitbucket.version}}
 
     depends_lib-append          port:pure
 
