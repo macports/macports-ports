@@ -57,11 +57,13 @@ proc pure.setup {module module_version} {
 
     use_configure               no
 
+    build.args-append           PUREC_FLAGS=-mcpu=generic
+
     pre-build {
         build.args-append       CFLAGS="${configure.cflags} ${configure.cc_archflags}" \
                                 CPPFLAGS="${configure.cppflags}" \
                                 CXXFLAGS="${configure.cxxflags} ${configure.cxx_archflags}" \
-                                LDFLAGS="${configure.ldflags} ${configure.ld_archflags}"
+                                LDFLAGS="${configure.ldflags} ${configure.ld_archflags}" \
         build.env-append        CC=${configure.cc} \
                                 CXX=${configure.cxx}
     }
