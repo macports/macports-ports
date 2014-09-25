@@ -57,7 +57,6 @@ proc pure.setup {module module_version} {
 
     use_configure               no
 
-    use_parallel_build          yes
     pre-build {
         build.args-append       CFLAGS="${configure.cflags} ${configure.cc_archflags}" \
                                 CPPFLAGS="${configure.cppflags}" \
