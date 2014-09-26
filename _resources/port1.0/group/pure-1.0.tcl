@@ -49,6 +49,7 @@ proc pure.setup {module module_version} {
 
     bitbucket.setup             purelang pure-lang ${module_version}
     name                        pure-${module}
+    categories-append           pure
     homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#markdown-header-${name}
     bitbucket.tarball_from      downloads
     default distname            {${name}-${bitbucket.version}}
