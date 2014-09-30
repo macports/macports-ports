@@ -32,14 +32,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-# This PortGroup is DEPRECATED. Please do not use for new development.
-# Please switch existing ports using this to 'PortGroup python 1.0' (which
-# supports multiple python versions) at your earliest convenience.
-
 pre-fetch {
-    ui_warn "The $name port is using the deprecated 'python25'\
-PortGroup, which will be disabled in the near future and eventually removed.\
-The maintainer should switch to the 'python' PortGroup."
+    ui_error "The $name port is using the obsolete 'python25'\
+PortGroup. The maintainer should switch to the 'python' PortGroup."
+    error "obsolete PortGroup"
 }
 
 set python.branch	2.5
@@ -53,8 +49,6 @@ categories		python
 
 dist_subdir		python
 
-depends_lib		port:python25
-
 # we want the default universal variant added despite not using configure
 use_configure	no
 universal_variant yes
@@ -63,40 +57,10 @@ build.cmd		${python.bin} setup.py --no-user-cfg
 build.target	build
 options python.add_archflags
 default python.add_archflags yes
-pre-build {
-    if {${python.add_archflags}} {
-        if {[variant_exists universal] && [variant_isset universal]} {
-            build.env-append CFLAGS="${configure.universal_cflags}" \
-                             OBJCFLAGS="${configure.universal_cflags}" \
-                             CXXFLAGS="${configure.universal_cxxflags}" \
-                             LDFLAGS="${configure.universal_ldflags}"
-        } else {
-            build.env-append CFLAGS="${configure.cc_archflags}" \
-                             OBJCFLAGS="${configure.objc_archflags}" \
-                             CXXFLAGS="${configure.cxx_archflags}" \
-                             FFLAGS="${configure.f77_archflags}" \
-                             F90FLAGS="${configure.f90_archflags}" \
-                             FCFLAGS="${configure.fc_archflags}" \
-                             LDFLAGS="${configure.ld_archflags}"
-        }
-    }
-}
 
 destroot.cmd	${python.bin} setup.py --no-user-cfg
 destroot.destdir	--prefix=${prefix} --root=${destroot}
 
-pre-destroot	{
-	xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}/examples
-}
-
 options         python.move_binaries python.move_binaries_suffix
 default python.move_binaries yes
 default python.move_binaries_suffix {-${python.branch}}
-post-destroot {
-    if {${python.move_binaries}} {
-        foreach bin [glob -nocomplain -tails -directory "${destroot}${prefix}/bin" *] {
-            move ${destroot}${prefix}/bin/${bin} \
-                ${destroot}${prefix}/bin/${bin}${python.move_binaries_suffix}
-        }
-    }
-}
