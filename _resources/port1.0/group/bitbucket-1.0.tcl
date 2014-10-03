@@ -39,6 +39,7 @@
 
 options bitbucket.author bitbucket.project bitbucket.version bitbucket.tag_prefix
 options bitbucket.homepage bitbucket.master_sites bitbucket.tarball_from
+options bitbucket.livecheck_branch
 
 default bitbucket.homepage {https://bitbucket.org/${bitbucket.author}/${bitbucket.project}}
 default bitbucket.master_sites {${bitbucket.homepage}/get}
@@ -112,3 +113,13 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     default livecheck.version   {${bitbucket.version}}
 }
 
+# proc that sets the livecheck to only check a branch instead of the newest
+# commits (meant to be used when the version is a hash); to be called *after*
+# bitbucket.setup
+proc bitbucket.livecheck {bb_branch} {
+    global bitbucket.homepage bitbucket.author bitbucket.project bitbucket.version
+
+    livecheck.url       ${bitbucket.homepage}/commits/branch/${bb_branch}
+    livecheck.type      regexm
+    livecheck.regex     <a  class="hash execute" href="/${bitbucket.author}/${bitbucket.project}/commits/(\[0-9a-f\]{[string length ${bitbucket.version}]}).*"
+}
