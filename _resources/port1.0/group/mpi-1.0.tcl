@@ -120,11 +120,11 @@ proc mpi.setup_variants {args} {
 
                     foreach compiler \${mpi.list} {
                         if {\$compiler ne "fc"} {
-                            configure.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                            configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
                         }
                     }
                     if {[lsearch -exact \${mpi.list} fc]} {
-                        set configure.fc mpif90-$mpidb($variant,name)-\$p_name
+                        set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
                     }
 
                 }
