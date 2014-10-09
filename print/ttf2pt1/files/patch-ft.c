@@ -1,10 +1,20 @@
---- ft.c	2004-01-01 06:30:50.000000000 +0900
-+++ ft.c	2005-08-17 12:04:06.000000000 +0900
-@@ -12,6 +12,7 @@
+--- ft.c.orig	2004-01-01 08:30:50.000000000 +1100
++++ ft.c	2014-10-10 06:38:57.000000000 +1100
+@@ -12,11 +12,12 @@
  #include <stdlib.h>
  #include <ctype.h>
  #include <sys/types.h>
+-#include <freetype/freetype.h>
+-#include <freetype/ftglyph.h>
+-#include <freetype/ftsnames.h>
+-#include <freetype/ttnameid.h>
+-#include <freetype/ftoutln.h>
 +#include <ft2build.h>
- #include <freetype/freetype.h>
- #include <freetype/ftglyph.h>
- #include <freetype/ftsnames.h>
++#include FT_FREETYPE_H
++#include FT_GLYPH_H
++#include FT_SFNT_NAMES_H
++#include FT_TRUETYPE_IDS_H
++#include FT_OUTLINE_H
+ #include "pt1.h"
+ #include "global.h"
+ 
