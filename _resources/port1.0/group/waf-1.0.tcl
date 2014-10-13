@@ -39,7 +39,7 @@ default waf.python ${prefix}/bin/python2.7
 depends_build-append    port:python27
 
 configure.cmd           ${waf.python} ./waf configure
-configure.args          --prefix=${prefix} --nocache
+configure.args          --nocache
 
 configure.universal_args-delete --disable-dependency-tracking
 
