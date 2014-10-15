@@ -269,6 +269,13 @@ proc python_get_defaults {var} {
                 return no
             }
         }
+        binary_suffix {
+            if {[string match py-* [option name]]} {
+                return -${python.branch}
+            } else {
+                return ""
+            }
+        }
         default {
             error "unknown option $var"
         }
@@ -282,8 +289,8 @@ default python.set_compiler yes
 
 options python.link_binaries python.link_binaries_suffix
 default python.link_binaries {[python_get_defaults link_binaries]}
-default python.link_binaries_suffix {-${python.branch}}
+default python.link_binaries_suffix {[python_get_defaults binary_suffix]}
 
 options python.move_binaries python.move_binaries_suffix
 default python.move_binaries {[python_get_defaults move_binaries]}
-default python.move_binaries_suffix {-${python.branch}}
+default python.move_binaries_suffix {[python_get_defaults binary_suffix]}
