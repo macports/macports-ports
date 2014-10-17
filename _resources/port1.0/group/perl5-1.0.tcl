@@ -76,11 +76,12 @@ proc perl5.create_subports {branches rootname} {
 }
 
 # Set perl variant options and defaults
-options perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants
+options perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant
 default perl5.default_variant [string map {. _} perl${perl5.default_branch}]
 default perl5.variant {[string map {. _} perl${perl5.major}]}
 default perl5.set_default_variant {true}
 default perl5.conflict_variants {true}
+default perl5.require_variant {false}
 # Get variant names from branches
 proc perl5.get_variant_names {branches} {
     set ret {}
@@ -91,7 +92,7 @@ proc perl5.get_variant_names {branches} {
 }
 # Create perl variants
 proc perl5.create_variants {branches} {
-    global perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants
+    global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant
     set variants [perl5.get_variant_names ${branches}]
     foreach branch ${branches} {
         set index [lsearch ${branches} ${branch}]
@@ -109,6 +110,11 @@ proc perl5.create_variants {branches} {
 # Set default perl variant
     if {${perl5.default_variant} eq ${perl5.variant} && ${perl5.set_default_variant}} {
         default_variants-append +${perl5.variant}
+    }
+# Require perl variant
+    if {![variant_isset ${perl5.variant}] && ${perl5.require_variant}} {
+        ui_error "${name} requires one of these variants: ${variants}"
+        return -code error "absence of required perl variant"
     }
 # Set perl version and deps
     foreach branch ${branches} {
