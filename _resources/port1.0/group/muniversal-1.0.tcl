@@ -689,7 +689,17 @@ variant universal {
 %>#endif
 '}
 
-        set diffFormatM "-D __LP64__"
+        set diffFormatM {--old-group-format='#ifndef __LP64__
+%<#endif
+' \
+--new-group-format='#ifdef __LP64__
+%>#endif
+' \
+--unchanged-group-format='%=' \
+--changed-group-format='#ifndef __LP64__
+%<#else
+%>#endif
+'}
 
         if { ![info exists merger_dont_diff] } {
             set merger_dont_diff {}
