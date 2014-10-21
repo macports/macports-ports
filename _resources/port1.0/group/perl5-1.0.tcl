@@ -77,7 +77,7 @@ proc perl5.create_subports {branches rootname} {
 
 # Set perl variant options and defaults
 options perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant
-default perl5.default_variant [string map {. _} perl${perl5.default_branch}]
+default perl5.default_variant {[string map {. _} perl${perl5.default_branch}]}
 default perl5.variant {[string map {. _} perl${perl5.major}]}
 default perl5.set_default_variant {true}
 default perl5.conflict_variants {true}
