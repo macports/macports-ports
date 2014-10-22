@@ -1,10 +1,7 @@
 (*  Applescript to stop/start Myth background apps
 For use with MacPorts install of Myth
 Author:  Craig Treleaven, ctreleaven at cogeco.ca
-Version: 0.27.0
-Modified: 2012Jul11 - new
-          2012Sep21 - log rotation
-          2013Sep25 - revert logserver stuff
+Version: 0.27.x
 
 NB - if mbe is running, we only stop it if it was launched under launchd
 *)
@@ -36,9 +33,9 @@ repeat until (myResult contains "Close")
 		set mythbackend to " running."
 		set mythbackendButton to "Stop MythBackend"
 		try
-			do shell script "mythshutdown --check"
-		on error
-			set mythbackend to " running but busy with something.  Are you sure you want to shut down now?"
+			do shell script "@PREFIX@/bin/mythshutdown --status"
+		on error the error_message number the error_number
+			set mythbackend to " running but busy with something.  Are you sure you want to shut down now?  Status: " & error_number
 		end try
 	else
 		set mythbackend to " not running."
@@ -48,7 +45,7 @@ repeat until (myResult contains "Close")
 	set myResult to display dialog newline & "Simple tool to start and stop Myth's background processes" & Â
 		newline & newline & newline & "Currently... " & Â
 		newline & newline & indent & "Log rotation " & rotatorStatus & Â
-		newline & newline & indent & "MySQL is" & mysqld & Â
+		newline & newline & indent & "Database (MySQL/MariaDB) is" & mysqld & Â
 		newline & newline & indent & "MythBackend is" & mythbackend & newline & newline Â
 		with icon note with title Â
 		"Stop/Start Myth-related programs" buttons {logrotButton, mythbackendButton, "Close"} Â
@@ -66,8 +63,11 @@ repeat until (myResult contains "Close")
 		set myResult to "Close"
 	else if myResult contains "Schedule log rotation" then
 		--check for existence of 
-		if (FileExists("@PREFIX@/etc/logrotate.conf") and Â
-			FileExists("@PREFIX@/etc/logrotate.d/logrotate.mythtv")) then
+		if not FileExists("@PREFIX@/etc/logrotate.conf") then
+			do shell script "sudo cp @PREFIX@/share/logrotate/logrotate.conf.example @PREFIX@/etc/logrotate.conf" with administrator privileges
+		end if
+		if FileExists("@PREFIX@/etc/logrotate.d/logrotate.mythtv") then
+			display dialog "Missing logrotate.conf to be added" buttons {"Close"}
 			do shell script "sudo launchctl load -w /Library/LaunchDaemons/org.macports.logrotate.plist" with administrator privileges
 		else
 			display dialog "logrotate is not configured.  Please see http://www.mythtv.org/wiki/MacPorts for instructions." buttons {"Close"}
