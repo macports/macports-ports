@@ -11,7 +11,7 @@ if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
-    if {![info exists master_sites] || [llength ${master_sites}] == 0} {
+    if {!$has_master_sites || [llength ${master_sites}] == 0} {
         set livecheck.type "none"
     } else {
         set livecheck.url [lindex ${master_sites} 0]
