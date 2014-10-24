@@ -52,7 +52,7 @@ repeat until (myResult contains "Close")
 		default button "Close" -- cancel button "Close" 
 	set myResult to button returned of myResult
 	if myResult contains "Start MythBackend" then
-		do shell script "sudo launchctl load -w /Library/LaunchDaemons/org.mythtv.mythbackend.plist" with administrator privileges
+		my startBackend()
 	else if myResult contains "Stop MythBackend" then
 		if ((do shell script "sudo launchctl list" with administrator privileges) contains "mythbackend") then
 			do shell script "sudo launchctl unload -w /Library/LaunchDaemons/org.mythtv.mythbackend.plist" with administrator privileges
@@ -62,21 +62,30 @@ repeat until (myResult contains "Close")
 		end if
 		set myResult to "Close"
 	else if myResult contains "Schedule log rotation" then
-		--check for existence of 
-		if not FileExists("@PREFIX@/etc/logrotate.conf") then
-			do shell script "sudo cp @PREFIX@/share/logrotate/logrotate.conf.example @PREFIX@/etc/logrotate.conf" with administrator privileges
-		end if
-		if FileExists("@PREFIX@/etc/logrotate.d/logrotate.mythtv") then
-			display dialog "Missing logrotate.conf to be added" buttons {"Close"}
-			do shell script "sudo launchctl load -w /Library/LaunchDaemons/org.macports.logrotate.plist" with administrator privileges
-		else
-			display dialog "logrotate is not configured.  Please see http://www.mythtv.org/wiki/MacPorts for instructions." buttons {"Close"}
-			set myResult to "Close"
-		end if
+		my enableLogRotation()
 	else if myResult contains "Disable log rotation" then
 		do shell script "sudo launchctl unload -w /Library/LaunchDaemons/org.macports.logrotate.plist" with administrator privileges
 	end if
 end repeat
+
+on startBackend()
+	--ensure plist is ready
+	if (not my FileExists("/Library/LaunchDaemons/org.mythtv.mythbackend.plist")) then
+		do shell script "sudo ln -s @PREFIX@/Library/LaunchDaemons/org.mythtv.mythbackend.plist /Library/LaunchDaemons/org.mythtv.mythbackend.plist" with administrator privileges
+	end if
+	do shell script "sudo launchctl load -w /Library/LaunchDaemons/org.mythtv.mythbackend.plist" with administrator privileges
+end startBackend
+
+on enableLogRotation()
+	--check for existence of conf file
+	if (not my FileExists("@PREFIX@/etc/logrotate.conf")) then
+		do shell script "sudo cp @PREFIX@/share/logrotate/logrotate.conf.example @PREFIX@/etc/logrotate.conf" with administrator privileges
+	end if
+	if (not my FileExists("/Library/LaunchDaemons/org.macports.logrotate.plist")) then
+		do shell script "sudo ln -s @PREFIX@/share/logrotate/org.macports.logrotate.plist.example /Library/LaunchDaemons/org.macports.logrotate.plist" with administrator privileges
+	end if
+	do shell script "sudo launchctl load -w /Library/LaunchDaemons/org.macports.logrotate.plist" with administrator privileges
+end enableLogRotation
 
 on FileExists(theFile) -- (String) as Boolean
 	tell application "System Events" to return (exists file theFile)
