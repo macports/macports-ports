@@ -193,7 +193,7 @@ set qt_cmake_defines    \
 # allow for depending on either qt5-mac and qt5-mac-devel, simultaneously
 
 if {![info exists building_qt5]} {
-    if {${os.platform} == "darwin"} {
+    if {${os.platform} eq "darwin"} {
 
         # see if the framework install exists, and if so depend on it;
         # if not, depend on the library version
@@ -224,7 +224,7 @@ if {![info exists building_qt5]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         configure.env-append PATH=${qt_dir}/bin:$env(PATH)
     }
 } else {
@@ -249,7 +249,7 @@ if {![info exists building_qt5]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         build.env-append    PATH=${qt_dir}/bin:$env(PATH)
     }
 }
@@ -285,7 +285,7 @@ if {![info exists building_qt5]} {
     # make sure the Qt binaries' directory is in the path, if it is
     # not the current prefix
 
-    if {${qt_dir} != ${prefix}} {
+    if {${qt_dir} ne ${prefix}} {
         destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
     }
 }
