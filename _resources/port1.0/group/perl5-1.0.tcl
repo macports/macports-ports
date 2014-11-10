@@ -258,7 +258,7 @@ proc perl5.use_module_build {} {
     depends_lib-append  port:p${perl5.major}-module-build
 
     configure.pre_args  Build.PL
-    default configure.args {"installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\""}
+    default configure.args {"--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\""}
 
     build.cmd           ${perl5.bin}
     build.pre_args      Build
@@ -270,7 +270,7 @@ proc perl5.use_module_build {} {
     destroot.cmd        ${perl5.bin}
     destroot.pre_args   Build
     destroot.args       install
-    destroot.destdir    destdir=${destroot}
+    destroot.destdir    --destdir=${destroot}
 }
 
 # Convert a floating-point version to a dotted-integer one.
