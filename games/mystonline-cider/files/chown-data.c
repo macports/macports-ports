@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
     extern char **environ;
     if (argc > 1)
         argc = 1;
-    new_argv = malloc(sizeof(*new_argv) * (argc + 4 + 1));
+    new_argv = malloc(sizeof(*new_argv) * (argc + 6));
     j = 0;
     new_argv[j++] = "chown";
     new_argv[j++] = "-R";
@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
     new_argv[j++] = "@WINEPREFIX@";
     new_argv[j++] = "@ASSETS@";
     new_argv[j++] = "@APP_PACKAGE@";
+    new_argv[j++] = 0;
     execve(real_exec, new_argv, environ);
     printErr();
     return 0;
