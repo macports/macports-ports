@@ -11,6 +11,10 @@ GROUP=$(id -g)
     "@LIBEXEC@/chown-data" "$USER:$GROUP"
 #fi
 
+# http://mystonline.com/forums/viewtopic.php?f=40&t=26954&start=0#p404798
+ASSETS="@ASSETS@"
+rm -f "$ASSETS/dat/GlobalClothing_District_FemaleFan01.prp" "$ASSETS/dat/GlobalClothing_District_MaleFan01.prp"
+
 LAUNCHER="@LAUNCHER@"
 BOOTSTRAP_LAUNCHER="@BOOTSTRAP_LAUNCHER@"
 if [ ! -r "$LAUNCHER" ]; then
