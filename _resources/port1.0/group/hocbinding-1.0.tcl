@@ -75,7 +75,7 @@ proc hocbinding.setup {framework version {source ""}} {
         }
 
         depends_build-append \
-            port:hs-HOC
+            port:hs-hoc
 
         pre-configure {
             set args ""
