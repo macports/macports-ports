@@ -220,7 +220,7 @@ proc texlive.texmfport {} {
                         set excluded true
                         break
                     }
-                    if {[string equal -nocase -length [expr [string length $excludeline] + 1] $line "$excludeline/"]} {
+                    if {[string equal -nocase -length [expr {[string length $excludeline] + 1}] $line "$excludeline/"]} {
                         # this is a file in an excluded directory
                         set excluded true
                         break;

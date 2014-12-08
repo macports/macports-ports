@@ -276,18 +276,18 @@ proc perl5.use_module_build {} {
 # Convert a floating-point version to a dotted-integer one.
 proc perl5_convert_version {vers} {
     set index [string first . $vers]
-    set other_dot [string first . [string range $vers [expr $index + 1] end]]
+    set other_dot [string first . [string range $vers [expr {$index + 1}] end]]
     if {$index == -1 || $other_dot != -1} {
         return $vers
     }
-    set ret [string range $vers 0 [expr $index - 1]]
+    set ret [string range $vers 0 [expr {$index - 1}]]
     incr index
     set fractional [string range $vers $index end]
     set index 0
     while {$index < [string length $fractional] || $index < 6} {
-        set sub [string range $fractional $index [expr $index + 2]]
+        set sub [string range $fractional $index [expr {$index + 2}]]
         if {[string length $sub] < 3} {
-            append sub [string repeat "0" [expr 3 - [string length $sub]]]
+            append sub [string repeat "0" [expr {3 - [string length $sub]}]]
         }
         append ret ".[scan $sub %u]"
         incr index 3
