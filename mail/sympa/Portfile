@@ -5,6 +5,7 @@ PortSystem          1.0
 
 name                sympa
 version             6.1.23
+revision            1
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          mail
 license             GPL-2
@@ -25,8 +26,7 @@ master_sites        http://www.sympa.org/distribution/ \
 checksums           rmd160  0c65549bc01e154081554a7d9ff8bb11db1d0ccc \
                     sha256  3d15aa8816dafcc4017cc06e52def44d5461498a05e9ef7634498b0993234ae4
 
-depends_lib         path:bin/mysql_config5:mysql5 \
-                    port:apache2 \
+depends_lib         port:apache2 \
                     port:mod_fcgid \
                     port:openssl \
                     port:postfix \
@@ -37,9 +37,9 @@ depends_lib         path:bin/mysql_config5:mysql5 \
                     port:p5.16-crypt-ciphersaber \
                     port:p5.16-crypt-openssl-x509 \
                     port:p5.16-data-password \
-                    port:p5.16-dbd-mysql \
                     port:p5.16-dbi \
                     port:p5.16-digest-md5 \
+                    port:p5.16-fcgi \
                     port:p5.16-file-copy-recursive \
                     port:p5.16-html-format \
                     port:p5.16-html-stripscripts-parser \
@@ -66,38 +66,122 @@ depends_lib         path:bin/mysql_config5:mysql5 \
                     port:p5.16-unicode-linebreak \
                     port:p5.16-xml-libxml
 
+pre-patch {
+    copy ${filespath}/httpd-sympa.conf ${worksrcpath}
+}
+
+patchfiles          patch-src-etc-script-sympa.in.diff \
+                    patch-src-lib-confdef.pm.diff
+
+post-patch {
+    reinplace "s|__MP_PREFIX__|${prefix}|" \
+                    ${worksrcpath}/httpd-sympa.conf \
+                    ${worksrcpath}/src/lib/confdef.pm
+}
+
 configure.args      --with-perl=${prefix}/bin/perl5.16 \
                     --with-user=www \
                     --with-group=www \
                     --enable-fhs \
-                    --with-aliases_file=${prefix}/etc/${name}/sympa_aliases \
-                    --with-newaliases=${prefix}/bin/newaliases \
-                    --with-postmap=${prefix}/sbin/postmap
+                    --sysconfdir=${prefix}/etc/${name} \
+                    --with-cgidir=${prefix}/www/${name}/cgi \
+                    --with-staticdir=${prefix}/www/${name}/static_content \
+                    --with-aliases_file=${prefix}/etc/${name}/sympa_aliases
 
-# Create a startupitem to start/stop the server
-startupitem.create    yes
-startupitem.start    "${prefix}/share/${name}/sympa"
-startupitem.stop     "${prefix}/share/${name}/sympa"
+# Create a startupitem to start/stop/restart the server processes
+
+startupitem.create  yes
+startupitem.start   "${prefix}/etc/sympa/rc.d/init.d/sympa start"
+startupitem.stop    "${prefix}/etc/sympa/rc.d/init.d/sympa stop"
+startupitem.restart "${prefix}/etc/sympa/rc.d/init.d/sympa restart"
+startupitem.pidfile auto ${prefix}/var/run/${name}/${name}.pid
+
+# Apache2 conf/extra directory violates mtree
+
+destroot.violate_mtree yes
+
+# Keep these empty directories
+
+destroot.keepdirs   ${destroot}${prefix}/var/lib/${name}/arc \
+                    ${destroot}${prefix}/var/lib/${name}/bounce \
+                    ${destroot}${prefix}/var/lib/${name}/list_data \
+                    ${destroot}${prefix}/var/lock/subsys \
+                    ${destroot}${prefix}/var/log/${name} \
+                    ${destroot}${prefix}/var/run/${name} \
+                    ${destroot}${prefix}/var/spool/${name}
 
 post-destroot {
     xinstall -m 644 ${worksrcpath}/INSTALL ${destroot}${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${prefix}/apache2/conf/extra
+    xinstall -m 644 ${worksrcpath}/httpd-sympa.conf ${destroot}${prefix}/apache2/conf/extra
+    delete  ${destroot}${prefix}/etc/sympa/sympa.conf ${destroot}${prefix}/etc/sympa/wwsympa.conf
+}
+
+variant postgresql description {Install optional dependencies for PostgreSQL database support} {
+    depends_lib-append \
+                    port:p5.16-dbd-pg
+}
+
+variant sqlite description {Install optional dependencies for SQLite version 3 database support} {
+    depends_lib-append \
+                    port:p5.16-dbd-sqlite
+}
+
+# if neither postgresql nor sqlite selected default to mysql
+
+if {![variant_isset postgresql] && ![variant_isset sqlite]} {
+    depends_lib-append \
+                    port:p5.16-dbd-mysql
+}
+
+post-activate {
+
+#   create default configuration files if they don't already exist
+
+    foreach cfile "sympa.conf wwsympa.conf" {
+        if {![file exists ${prefix}/etc/sympa/${cfile}]} {
+            system "${prefix}/sbin/sympa_wizard.pl --create ${cfile}"
+        }
+    }
 }
 
 notes "
-You can find documentation at:
+You can find the reference documentation at:
     http://www.sympa.org/manual_${branch}/index
 
 Check that you have all the required perl modules:
-    ${prefix}/sbin/sympa_wizard.pl --check
+    $ ${prefix}/sbin/sympa_wizard.pl --check
 
 First installation:
     Check the INSTALL file:
         ${prefix}/share/doc/sympa/INSTALL
-    Run the wizard to define some required parameters that can't be guessed:
-        ${prefix}/sbin/sympa_wizard.pl
+    Run the wizard to customize the default configuration files
+        $ sudo ${prefix}/sbin/sympa_wizard.pl
+    Create the sympa database and tables using the script for your database at
+        ${prefix}/share/sympa/bin/create_db.*
+    For example, if using MySQL, the appropriate command is
+        $ mysql -u root -p  < ${prefix}/share/sympa/bin/create_db.mysql
+    Create a database user with access to the sympa database. This should
+    match to the parameters db_name, db_host, db_user and db_passwd
+    in ${prefix}/etc/sympa/sympa.conf.
+        $ mysql -u root -p
+        mysql> CREATE USER 'sympa'@'localhost' IDENTIFIED BY 'my_password';
+        mysql> GRANT ALL ON sympa.* TO 'sympa'@'localhost';
+        mysql> FLUSH PRIVILEGES;
+        mysql> quit
+    Add these lines to the end of ${prefix}/apache2/conf/httpd.conf
+        # Include module mod_fcgid
+        Include conf/extra/httpd-fcgid.conf
+        # Include sympa configuration file
+        Include conf/extra/httpd-sympa.conf
+    You should then restart apache2 to enable mod_fcgid and the sympa web interface
+        $ sudo port unload apache2
+        $ sudo port load apache2
+    Start the sympa daemons now and at startup
+        $ sudo port load sympa
 
-Upgrading:
-    Run this script to upgrade your data structures:
+Upgrading to a new version:
+    Run this script to upgrade your existing data structures:
         ${prefix}/sbin/sympa.pl --upgrade
 "
 
