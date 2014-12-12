@@ -35,7 +35,7 @@
 # PortGroup     cmake 1.0
 
 # standard place to install extra CMake modules
-set cmake_share_module_dir ${prefix}/share/cmake/modules
+set cmake_share_module_dir ${prefix}/share/cmake/Modules
 
 depends_build-append port:cmake
 
