@@ -113,6 +113,8 @@ options github.homepage github.raw github.master_sites github.tarball_from
 
 default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
+
+# Later code assumes that github.master_sites is a simple string, not a list.
 default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
 
 default master_sites {${github.master_sites}}
@@ -166,9 +168,11 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
         # that hash is every time the version number changes, rename the
         # directory to the value of distname (not worksrcdir: ports may want to
         # set worksrcdir to a subdirectory of the extracted directory).
+        # It is assumed that github.master_sites is a simple string, not a list.
+        # Here be dragons.
         if {![file exists ${worksrcpath}] && \
                 ${fetch.type} eq "standard" && \
-                ${master_sites} eq ${github.master_sites} && \
+                [lsearch -exact ${master_sites} ${github.master_sites}] != -1 && \
                 [llength ${distfiles}] > 0 && \
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
             if {[file exists [glob ${workpath}/${github.author}-${github.project}-*]] && \

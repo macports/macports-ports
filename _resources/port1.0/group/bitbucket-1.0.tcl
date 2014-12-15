@@ -42,6 +42,8 @@ options bitbucket.homepage bitbucket.master_sites bitbucket.tarball_from
 options bitbucket.livecheck_branch
 
 default bitbucket.homepage {https://bitbucket.org/${bitbucket.author}/${bitbucket.project}}
+
+# Later code assumes that bitbucket.master_sites is a simple string, not a list.
 default bitbucket.master_sites {${bitbucket.homepage}/get}
 default bitbucket.tarball_from {tags}
 
@@ -90,9 +92,11 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     fetch.ignore_sslcert    yes
 
     post-extract {
+        # It is assumed that bitbucket.master_sites is a simple string, not a list.
+        # Here be dragons.
         if {![file exists ${worksrcpath}] && \
             ${fetch.type} eq "standard" && \
-            ${master_sites} eq ${bitbucket.master_sites} && \
+            [lsearch -exact ${master_sites} ${bitbucket.master_sites}] != -1 && \
             [llength ${distfiles}] > 0 && \
             [llength [glob -nocomplain ${workpath}/*]] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
