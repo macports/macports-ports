@@ -42,7 +42,6 @@ default mpi.variants {}
 default mpi.require 0
 default mpi.required_variants {}
 
-set mpi.list {cc cxx f77 f90 fc}
 set mpi.cc   mpicc
 set mpi.cxx  mpicxx
 set mpi.f77  mpif77
@@ -118,12 +117,12 @@ proc mpi.setup_variants {args} {
                     }
                     set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
 
-                    foreach compiler \${mpi.list} {
+                    foreach compiler \${compilers.list} {
                         if {\$compiler ne "fc"} {
                             configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
                         }
                     }
-                    if {[lsearch -exact \${mpi.list} fc]} {
+                    if {[lsearch -exact \${compilers.list} fc]} {
                         set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
                     }
 
@@ -198,16 +197,6 @@ pre-fetch {
 
 proc mpi_variant_isset {} {
     return [expr {[mpi_variant_name] ne ""}]
-}
-
-proc mpi.choose {args} {
-    global mpi.list
-
-    # zero out the variable before and append args
-    set mpi.list {}
-    foreach v $args {
-        lappend mpi.list $v
-    }
 }
 
 proc mpi.setup {args} {
