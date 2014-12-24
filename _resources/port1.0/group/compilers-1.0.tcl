@@ -470,6 +470,7 @@ proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
     global compilers.require_fortran compilers.setup_done compilers.list
+    global compiler.blacklist
 
     if {!${compilers.setup_done}} {
         set add_list {}
@@ -525,6 +526,21 @@ proc compilers.setup {args} {
                     }
                     set ${mode}_list [${mode}_from_list [expr $${mode}_list] $cdb($v,variant)]
                 }
+            }
+        }
+
+        # also remove compilers blacklisted
+        foreach compiler ${compiler.blacklist} {
+            set matched no
+            foreach variant ${compilers.variants} {
+                if {[string match $compiler $cdb($variant,compiler)]} {
+                    set matched yes
+                    set remove_list [remove_from_list $remove_list $cdb($variant,variant)]
+                }
+            }
+
+            if {!$matched} {
+                ui_debug "Unmatched blacklisted compiler: $compiler"
             }
         }
 
