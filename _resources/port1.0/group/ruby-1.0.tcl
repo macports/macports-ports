@@ -36,17 +36,17 @@
 #   1. use ruby.setup
 #
 #     PortGroup        ruby 1.0
-#     ruby.setup       module version type {} ruby19
+#     ruby.setup       module version type {} ruby22
 #
 #   2. use ruby.branch
 #
 #     PortGroup        ruby 1.0
-#     ruby.branch      1.9
+#     ruby.branch      2.2
 #     depends_lib      port:ruby${ruby.suffix}
 #     build.cmd        ${ruby.bin}
 
 # options:
-#   ruby.branch: select ruby version. 1.8, 1.9, 2.0 or 2.1.
+#   ruby.branch: select ruby version. 2.2, 2.1, 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 # values:
@@ -55,9 +55,9 @@
 #        port:rb${ruby.suffix}-foo.
 #   ruby.bindir: install location of commands without suffix from rb-foo.
 #   ruby.gemdir: install location of rubygems.
-#        such as "${prefix}/lib/ruby1.9/gems/1.9.1".
+#        such as "${prefix}/lib/ruby2.2/gems/2.2.0".
 #   ruby.link_binaries_suffix: suffix of commands from rb-foo under
-#        ${prefix}/bin. such as "-1.8" or "-1.9".
+#        ${prefix}/bin. such as "-2.2" or "-2.1".
 #   (obsoleted values)
 #   ruby.prog_suffix: use ruby.branch.
 #   ruby.version: use ruby.api_version.
@@ -102,10 +102,11 @@ proc ruby_set_branch {option action args} {
     }
     #
     switch -exact ${ruby.branch} {
-        1.8 {set ruby.api_version 1.8}
-        1.9 {set ruby.api_version 1.9.1}
-        2.0 {set ruby.api_version 2.0.0}
+        2.2 {set ruby.api_version 2.2.0}
         2.1 {set ruby.api_version 2.1.0}
+        2.0 {set ruby.api_version 2.0.0}
+        1.9 {set ruby.api_version 1.9.1}
+        1.8 {set ruby.api_version 1.8}
     }
     set ruby.gemdir         ${prefix}/lib/ruby${ruby.prog_suffix}/gems/${ruby.api_version}
     # define installation libraries as vendor location
@@ -160,12 +161,13 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global ruby.config_rubyprog_name
 
     switch ${implementation} {
+        ruby22 { ruby.branch 2.2 }
         ruby21 { ruby.branch 2.1 }
         ruby20 { ruby.branch 2.0 }
         ruby19 { ruby.branch 1.9 }
         ruby   { ruby.branch 1.8 }
         default {
-            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby, ruby19, ruby20, ruby21 possible)"
+            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby22, ruby21, ruby20, ruby19 or ruby possible)"
             return -code error "ruby.setup failed"
         }
     }
