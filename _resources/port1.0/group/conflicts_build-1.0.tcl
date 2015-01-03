@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012, 2014 The MacPorts Project
+# Copyright (c) 2012, 2014-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -52,11 +52,18 @@ proc conflicts_build._check_for_conflicting_ports {} {
         if {![catch "registry_active ${badport}"]} {
             if {${subport} == ${badport}} {
                 ui_error "${subport} cannot be built while another version of ${badport} is active."
-                ui_error "Please deactivate the existing copy of ${badport} and try again."
+                ui_error "Please forcibly deactivate the existing copy of ${badport}, e.g. by running:"
+                ui_error ""
+                ui_error "    sudo port -f deactivate ${badport}"
+                ui_error ""
+                ui_error "Then try again."
             } else {
                 ui_error "${subport} cannot be built while ${badport} is active."
-                ui_error "Please deactivate ${badport} and try again."
-                ui_error "You can reactivate ${badport} again later."
+                ui_error "Please forcibly deactivate ${badport}, e.g. by running:"
+                ui_error ""
+                ui_error "    sudo port -f deactivate ${badport}"
+                ui_error ""
+                ui_error "Then try again. You can reactivate ${badport} again later."
             }
             return -code error "${badport} is active"
         }
