@@ -133,8 +133,8 @@ set cdb(llvm,f90)      ""
 # we don't need gfortran when we are in an "only-fortran" mode
 set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
-set cdb(gfortran,descrip)  "Fortran compiler from gcc48"
-set cdb(gfortran,depends)  port:gcc48
+set cdb(gfortran,descrip)  "Fortran compiler from gcc49"
+set cdb(gfortran,depends)  port:gcc49
 set cdb(gfortran,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
 set cdb(gfortran,dependsd) ""
 set cdb(gfortran,dependsa) ""
@@ -143,9 +143,9 @@ set cdb(gfortran,cc)       ""
 set cdb(gfortran,cxx)      ""
 set cdb(gfortran,cpp)      ""
 set cdb(gfortran,objc)     ""
-set cdb(gfortran,fc)       ${prefix}/bin/gfortran-mp-4.8
-set cdb(gfortran,f77)      ${prefix}/bin/gfortran-mp-4.8
-set cdb(gfortran,f90)      ${prefix}/bin/gfortran-mp-4.8
+set cdb(gfortran,fc)       ${prefix}/bin/gfortran-mp-4.9
+set cdb(gfortran,f77)      ${prefix}/bin/gfortran-mp-4.9
+set cdb(gfortran,f90)      ${prefix}/bin/gfortran-mp-4.9
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
@@ -559,7 +559,7 @@ proc compilers.setup {args} {
             if {[lsearch -exact ${compilers.variants} gfortran] > -1} {
                 default_variants-append +gfortran
             } else {
-                default_variants-append +gcc48
+                default_variants-append +gcc49
             }
         }
 
