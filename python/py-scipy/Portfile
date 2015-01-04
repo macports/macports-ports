@@ -4,9 +4,11 @@
 PortSystem              1.0
 PortGroup               python 1.0
 PortGroup               active_variants 1.1
+PortGroup               compilers 1.0
 
 name                    py-scipy
 version                 0.14.1
+revision                1
 platforms               darwin
 license                 BSD
 maintainers             sean michaelld openmaintainer
@@ -20,10 +22,12 @@ distname                scipy-${version}
 checksums               rmd160 137ac20d4fad632b42c3c5ce9ca759aad22715c1 \
                         sha256 ab75f161107ee411c054abc35e28ec2d19bb5ec8437aaf6c32b80916568f7dad
 
-python.versions         26 27 32 33 34
+python.versions         26 27 33 34
 
 python.add_archflags    no
 universal_variant       no
+
+compilers.setup         require_fortran -clang -dragonegg -gcc44 -gcc45 -gcc46 -g95
 
 if {${name} ne ${subport}} {
 
@@ -38,8 +42,25 @@ if {${name} ne ${subport}} {
     destroot.env-append     CCFLAGS="-I${prefix}/include -L${prefix}/lib"
     configure.fflags-append -fno-second-underscore
 
-    if {[string match "*clang*" ${configure.compiler}]} {
-        configure.fflags-append -ff2c
+    pre-configure {
+        if {![fortran_variant_isset]} {
+            configure.fflags-append -ff2c
+        }
+
+        set fc_options      "config_fc --fcompiler gnu95 --f77exec ${configure.f77} --f77flags='${configure.f77_archflags} ${configure.fflags}' --f90exec ${configure.f90} --f90flags='${configure.f90_archflags} ${configure.fflags}'"
+        set config_options  "config --cc ${configure.cc} --include-dirs ${prefix}/include --library-dirs ${prefix}/lib"
+        build.cmd-append    ${fc_options} ${config_options}
+        destroot.cmd-append ${fc_options} ${config_options}
+
+        build.env-append    CC="${configure.cc}" \
+                            CXX="${configure.cxx}" \
+                            CFLAGS="${configure.cc_archflags}" \
+                            CXXFLAGS="${configure.cxx_archflags}"
+        destroot.env-append CC="${configure.cc}" \
+                            CXX="${configure.cxx}" \
+                            CFLAGS="${configure.cc_archflags}" \
+                            CXXFLAGS="${configure.cxx_archflags}"
+
     }
 
     patchfiles              umfpack_extra_libs.patch
@@ -61,6 +82,43 @@ if {${name} ne ${subport}} {
         destroot.env-append ATLAS=${prefix}/lib \
                             LAPACK=${prefix}/lib \
                             BLAS=${prefix}/lib
+
+        pre-fetch {
+            # get the c compiler name, if blank set to clang which is what atlas
+            # does
+            set cc [c_variant_name]
+            if {$cc eq ""} {
+                set cc clang
+            }
+
+            # check the C compiler for atlas: if not the same then error out; we
+            # don't need to check the fortran compiler because if atlas is compiled
+            # with +clang then gcc48 (+gfortran in the compilers portgroup
+            # language) is used for fortran. If a +gcc variant is used to compile
+            # atlas, then that gcc's fortran is used so the c compiler check will
+            # suffice.
+            if {![catch {set result [active_variants atlas $cc ""]}]} {
+                if {!$result} {
+                    return -code error \
+"You have selected the $cc compiler (either directly or indirectly) and the\
++atlas variant, which does not match the $cc compiler. Please ensure that both\
+are compiled with the same one."
+                }
+            }
+
+            # also check that numpy has the atlas variant active
+            if {![catch {set result [active_variants py${python.version}-numpy atlas ""]}]} {
+                if {!$result} {
+
+                    return -code error \
+"You have selected the +atlas variant but py${python.version}-numpy does not\
+have the +atlas variant active. Please ensure that numpy is activated with the\
++atlas variant."
+                }
+            }
+
+        }
+
     } else {
         build.env-append    ATLAS=None \
                             LAPACK=/usr/lib \
@@ -70,78 +128,9 @@ if {${name} ne ${subport}} {
                             BLAS=/usr/lib
     }
 
-    set gcc_versions {4.3 4.4 4.5 4.6 4.7 4.8 4.9}
-    set default_fortran_variant +gcc48
-
-    foreach ver ${gcc_versions} {
-        set ver_no_dot [join [split ${ver} "."] ""]
-
-        set variant_line {variant gcc${ver_no_dot} description "build with gfortran from gcc${ver_no_dot}"}
-
-        foreach over ${gcc_versions} {
-            if {${ver} == ${over}} {
-                continue
-            }
-
-            set over_no_dot [join [split ${over} "."] ""]
-            append variant_line " conflicts gcc${over_no_dot}"
-        }
-        append variant_line { {}}
-
-        eval $variant_line
-
-        if {[variant_isset gcc${ver_no_dot}]} {
-            if {${default_fortran_variant} != "+gcc${ver_no_dot}"} {
-                set default_fortran_variant ""
-            }
-        }
-    }
-
-    if {${default_fortran_variant} != ""} {
-        default_variants-append "${default_fortran_variant}"
-    }
-
-    foreach ver ${gcc_versions} {
-        set ver_no_dot [join [split ${ver} "."] ""]
-
-        if {[variant_isset gcc${ver_no_dot}]} {
-            depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
-            depends_build-append port:gcc${ver_no_dot}
-
-            configure.fc  ${prefix}/bin/gfortran-mp-${ver}
-            configure.f77 ${prefix}/bin/gfortran-mp-${ver}
-            configure.f90 ${prefix}/bin/gfortran-mp-${ver}
-        }
-    }
-
-    set fc_options      "config_fc --fcompiler gnu95 --f77exec ${configure.f77} --f77flags='${configure.f77_archflags} ${configure.fflags}' --f90exec ${configure.f90} --f90flags='${configure.f90_archflags} ${configure.fflags}'"
-    set config_options  "config --cc ${configure.cc} --include-dirs ${prefix}/include --library-dirs ${prefix}/lib"
-    build.cmd-append    ${fc_options} ${config_options}
-    destroot.cmd-append ${fc_options} ${config_options}
-
-    build.env-append    CC="${configure.cc}" \
-                        CXX="${configure.cxx}" \
-                        CFLAGS="${configure.cc_archflags}" \
-                        CXXFLAGS="${configure.cxx_archflags}"
-    destroot.env-append CC="${configure.cc}" \
-                        CXX="${configure.cxx}" \
-                        CFLAGS="${configure.cc_archflags}" \
-                        CXXFLAGS="${configure.cxx_archflags}"
-
     livecheck.type          none
 } else {
     livecheck.type          regex
     livecheck.url           http://sourceforge.net/projects/scipy/rss
     livecheck.regex         scipy-(\[0-9\.\]+)${extract.suffix}/download</guid>
-}
-
-subport py32-scipy {
-    pre-activate {
-        set regref [registry_open $subport $version $revision $portvariants ""]
-        foreach f [registry_prop_retr $regref imagefiles] {
-            if {[file extension $f] == ".pyc" && [file exists $f] && [registry_file_registered $f] == "0"} {
-                file delete -force $f
-            }
-        }
-    }
 }
