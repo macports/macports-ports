@@ -12,10 +12,13 @@ LIBUNWIND_INCDIR = $(INCDIR)/libunwind
 MACHO_INCDIR = $(INCDIR)/mach-o
 LIBUNWIND_FILENAME = libunwind.1.dylib
 LIBUNWIND_SYMLINKNAME = libunwind.dylib
+LIBUNWIND_FILENAME_STATIC = libunwind.a
 LIBUNWIND_COMPAT_VERSION = 1.0.0
 LIBUNWIND_CURRENT_VERSION = 1.0.0
 
 # Default toolchain
+AR =  $(shell xcrun -find ar)
+RANLIB =  $(shell xcrun -find ranlib)
 CC = $(shell xcrun -find cc)
 CXX = $(shell xcrun -find c++)
 STRIP = $(shell xcrun -find strip)
@@ -83,7 +86,11 @@ $(OBJROOT)/$(LIBUNWIND_FILENAME): $(OBJS)
 	    -compatibility_version $(LIBUNWIND_COMPAT_VERSION) -current_version $(LIBUNWIND_CURRENT_VERSION) \
 	    $(OBJS)
 
-all: $(OBJROOT)/$(LIBUNWIND_FILENAME)
+$(OBJROOT)/$(LIBUNWIND_FILENAME_STATIC): $(OBJS)
+	$(AR) cru $@ $(OBJS)
+	$(RANLIB) $@
+
+all: $(OBJROOT)/$(LIBUNWIND_FILENAME) $(OBJROOT)/$(LIBUNWIND_FILENAME_STATIC)
 
 installhdrs:
 	install -d -m 755 $(DSTROOT)$(INCDIR)
@@ -102,7 +109,7 @@ installhdrs:
 	  install -m 644 $$f $(DSTROOT)$(MACHO_INCDIR); \
 	done
 
-install: installhdrs $(OBJROOT)/$(LIBUNWIND_FILENAME)
+installdylib: $(OBJROOT)/$(LIBUNWIND_FILENAME)
 ifdef SYMROOT
 	install -m 755 $(OBJROOT)/$(LIBUNWIND_FILENAME) $(SYMROOT)
 	$(DSYMUTIL) --out $(SYMROOT)/$(LIBUNWIND_FILENAME).dSYM $(OBJROOT)/$(LIBUNWIND_FILENAME)
@@ -112,4 +119,11 @@ endif
 ifneq "NO" "$(STRIP_ON_INSTALL)"
 	$(STRIP) $(STRIP_LIB_FLAGS) $(DSTROOT)$(LIBDIR)/$(LIBUNWIND_FILENAME)
 endif
+	ln -s $(LIBUNWIND_FILENAME) $(DSTROOT)$(LIBDIR)/$(LIBUNWIND_SYMLINKNAME)
 
+installstatic: $(OBJROOT)/$(LIBUNWIND_FILENAME_STATIC)
+	install -d -m 755 $(DSTROOT)$(LIBDIR)
+	install -m 644 $(OBJROOT)/$(LIBUNWIND_FILENAME_STATIC) $(DSTROOT)$(LIBDIR)
+
+installlibs: installdylib installstatic
+install: installhdrs installlibs
