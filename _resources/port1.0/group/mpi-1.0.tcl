@@ -280,6 +280,11 @@ proc mpi.setup {args} {
 
         require_active_variants $mpi $cv $cl
     }
+
+    if {${mpi.require} && ![mpi_variant_isset]} {
+        default_variants-append +mpich
+    }
+
 }
 
 pre-fetch {
