@@ -555,6 +555,14 @@ proc compilers.setup {args} {
         set compilers.variants [lsort [concat [remove_from_list $remove_list $duplicates] $add_list]]
         eval compilers.setup_variants ${compilers.variants}
 
+        if {${compilers.require_fortran} && ![fortran_variant_isset]} {
+            if {[lsearch -exact ${compilers.variants} gfortran] > -1} {
+                default_variants-append +gfortran
+            } else {
+                default_variants-append +gcc48
+            }
+        }
+
         set compilers.setup_done 1
     }
 }
