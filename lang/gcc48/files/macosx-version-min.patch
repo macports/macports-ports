@@ -2,13 +2,14 @@ Index: gcc/config/darwin-c.c
 ===================================================================
 --- gcc/config/darwin-c.c.orig
 +++ gcc/config/darwin-c.c
-@@ -570,29 +570,180 @@ find_subframework_header (cpp_reader *pf
+@@ -570,42 +570,180 @@ find_subframework_header (cpp_reader *pf
    return 0;
  }
  
 -/* Return the value of darwin_macosx_version_min suitable for the
--   __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro,
--   so '10.4.2' becomes 1040.  The lowest digit is always zero.
+-   __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ macro, so '10.4.2'
+-   becomes 1040 and '10.10.0' becomes 101000.  The lowest digit is
+-   always zero, as is the second lowest for '10.10.x' and above.
 -   Print a warning if the version number can't be understood.  */
 +/*  Given a version string, return the version as a statically-allocated
 +    array of three non-negative integers.  If the version string is
@@ -85,7 +86,8 @@ Index: gcc/config/darwin-c.c
 -version_as_macro (void)
 +version_as_legacy_macro (const unsigned long *version)
  {
--  static char result[] = "1000";
+-  static char result[7] = "1000";
+-  int minorDigitIdx;
 +  unsigned long major, minor, tiny;
 +  static char result[sizeof "9999"];
 +
@@ -174,10 +176,20 @@ Index: gcc/config/darwin-c.c
 +  /* Do not assume that the major number will always be exactly 10.  */
 +  if (version_array[MAJOR] < 10 || version_array[MAJOR] > 10)
      goto fail;
--  result[2] = darwin_macosx_version_min[3];
--  if (darwin_macosx_version_min[4] != '\0'
--      && darwin_macosx_version_min[4] != '.')
-+
+ 
+-  minorDigitIdx = 3;
+-  result[2] = darwin_macosx_version_min[minorDigitIdx++];
+-  if (ISDIGIT (darwin_macosx_version_min[minorDigitIdx]))
+-  {
+-    /* Starting with OS X 10.10, the macro ends '00' rather than '0',
+-       i.e. 10.10.x becomes 101000 rather than 10100.  */
+-    result[3] = darwin_macosx_version_min[minorDigitIdx++];
+-    result[4] = '0';
+-    result[5] = '0';
+-    result[6] = '\0';
+-  }
+-  if (darwin_macosx_version_min[minorDigitIdx] != '\0'
+-      && darwin_macosx_version_min[minorDigitIdx] != '.')
 +  if (version_array[MAJOR] == 10 && version_array[MINOR] < 10)
 +    version_macro = version_as_legacy_macro (version_array);
 +  else
@@ -196,7 +208,7 @@ Index: gcc/config/darwin-c.c
    return "1000";
  }
  
-@@ -614,7 +765,7 @@ darwin_cpp_builtins (cpp_reader *pfile)
+@@ -627,7 +765,7 @@ darwin_cpp_builtins (cpp_reader *pfile)
      builtin_define ("__CONSTANT_CFSTRINGS__");
  
    builtin_define_with_value ("__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__",
@@ -205,124 +217,6 @@ Index: gcc/config/darwin-c.c
  
    /* Since we do not (at 4.6) support ObjC gc for the NeXT runtime, the
       following will cause a syntax error if one tries to compile gc attributed
-Index: gcc/config/darwin-driver.c
-===================================================================
---- gcc/config/darwin-driver.c.orig
-+++ gcc/config/darwin-driver.c
-@@ -29,8 +29,8 @@ along with GCC; see the file COPYING3.  
- #include <sys/sysctl.h>
- #include "xregex.h"
- 
--static bool
--darwin_find_version_from_kernel (char *new_flag)
-+static char *
-+darwin_find_version_from_kernel (void)
- {
-   char osversion[32];
-   size_t osversion_len = sizeof (osversion) - 1;
-@@ -39,6 +39,7 @@ darwin_find_version_from_kernel (char *n
-   char minor_vers[6];
-   char * version_p;
-   char * version_pend;
-+  char * new_flag;
- 
-   /* Determine the version of the running OS.  If we can't, warn user,
-      and do nothing.  */
-@@ -46,7 +47,7 @@ darwin_find_version_from_kernel (char *n
- 	      &osversion_len, NULL, 0) == -1)
-     {
-       warning (0, "sysctl for kern.osversion failed: %m");
--      return false;
-+      return NULL;
-     }
- 
-   /* Try to parse the first two parts of the OS version number.  Warn
-@@ -57,8 +58,6 @@ darwin_find_version_from_kernel (char *n
-   version_p = osversion + 1;
-   if (ISDIGIT (*version_p))
-     major_vers = major_vers * 10 + (*version_p++ - '0');
--  if (major_vers > 4 + 9)
--    goto parse_failed;
-   if (*version_p++ != '.')
-     goto parse_failed;
-   version_pend = strchr(version_p, '.');
-@@ -74,17 +73,16 @@ darwin_find_version_from_kernel (char *n
-   if (major_vers - 4 <= 4)
-     /* On 10.4 and earlier, the old linker is used which does not
-        support three-component system versions.  */
--    sprintf (new_flag, "10.%d", major_vers - 4);
-+    asprintf (&new_flag, "10.%d", major_vers - 4);
-   else
--    sprintf (new_flag, "10.%d.%s", major_vers - 4,
--	     minor_vers);
-+    asprintf (&new_flag, "10.%d.%s", major_vers - 4, minor_vers);
- 
--  return true;
-+  return new_flag;
- 
-  parse_failed:
-   warning (0, "couldn%'t understand kern.osversion %q.*s",
- 	   (int) osversion_len, osversion);
--  return false;
-+  return NULL;
- }
- 
- #endif
-@@ -105,7 +103,7 @@ darwin_default_min_version (unsigned int
-   const unsigned int argc = *decoded_options_count;
-   struct cl_decoded_option *const argv = *decoded_options;
-   unsigned int i;
--  static char new_flag[sizeof ("10.0.0") + 6];
-+  const char *new_flag;
- 
-   /* If the command-line is empty, just return.  */
-   if (argc <= 1)
-@@ -142,16 +140,16 @@ darwin_default_min_version (unsigned int
- 
- #ifndef CROSS_DIRECTORY_STRUCTURE
- 
-- /* Try to find the version from the kernel, if we fail - we print a message 
--    and give up.  */
-- if (!darwin_find_version_from_kernel (new_flag))
--   return;
-+  /* Try to find the version from the kernel, if we fail - we print a message
-+     and give up.  */
-+  new_flag = darwin_find_version_from_kernel ();
-+  if (!new_flag)
-+    return;
- 
- #else
- 
-- /* For cross-compilers, default to the target OS version. */
--
-- strncpy (new_flag, DEF_MIN_OSX_VERSION, sizeof (new_flag));
-+  /* For cross-compilers, default to the target OS version. */
-+  new_flag = DEF_MIN_OSX_VERSION;
- 
- #endif /* CROSS_DIRECTORY_STRUCTURE */
- 
-@@ -165,7 +163,6 @@ darwin_default_min_version (unsigned int
-   memcpy (*decoded_options + 2, argv + 1,
- 	  (argc - 1) * sizeof (struct cl_decoded_option));
-   return;
--  
- }
- 
- /* Translate -filelist and -framework options in *DECODED_OPTIONS
-Index: gcc/testsuite/gcc.dg/darwin-minversion-1.c
-===================================================================
---- gcc/testsuite/gcc.dg/darwin-minversion-1.c.orig
-+++ gcc/testsuite/gcc.dg/darwin-minversion-1.c
-@@ -2,7 +2,8 @@
- /* { dg-options "-mmacosx-version-min=10.1" } */
- /* { dg-do run { target *-*-darwin* } } */
- 
--int main(void)
-+int
-+main ()
- {
- #if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 1010
-   fail me;
 Index: gcc/testsuite/gcc.dg/darwin-minversion-10.c
 ===================================================================
 --- /dev/null
@@ -384,34 +278,19 @@ Index: gcc/testsuite/gcc.dg/darwin-minversion-12.c
 +#endif
 +  return 0;
 +}
-Index: gcc/testsuite/gcc.dg/darwin-minversion-2.c
-===================================================================
---- gcc/testsuite/gcc.dg/darwin-minversion-2.c.orig
-+++ gcc/testsuite/gcc.dg/darwin-minversion-2.c
-@@ -2,7 +2,8 @@
- /* { dg-options "-mmacosx-version-min=10.1 -mmacosx-version-min=10.3" } */
- /* { dg-do run { target *-*-darwin* } } */
- 
--int main(void)
-+int
-+main ()
- {
- #if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 1030
-   fail me;
 Index: gcc/testsuite/gcc.dg/darwin-minversion-3.c
 ===================================================================
 --- gcc/testsuite/gcc.dg/darwin-minversion-3.c.orig
 +++ gcc/testsuite/gcc.dg/darwin-minversion-3.c
-@@ -1,10 +1,11 @@
+@@ -1,11 +1,11 @@
 -/* Test that most-minor versions greater than 9 work.  */
 -/* { dg-options "-mmacosx-version-min=10.4.10" } */
 +/* Test that most minor versions < 10 work.  */
 +/* { dg-options "-mmacosx-version-min=10.4.1" } */
  /* { dg-do compile { target *-*-darwin* } } */
  
--int main(void)
-+int
-+main ()
+ int
+ main ()
  {
 -#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 1040
 +#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 1041
@@ -420,21 +299,23 @@ Index: gcc/testsuite/gcc.dg/darwin-minversion-3.c
    return 0;
 Index: gcc/testsuite/gcc.dg/darwin-minversion-4.c
 ===================================================================
---- /dev/null
+--- gcc/testsuite/gcc.dg/darwin-minversion-4.c.orig
 +++ gcc/testsuite/gcc.dg/darwin-minversion-4.c
-@@ -0,0 +1,12 @@
+@@ -1,11 +1,11 @@
+-/* Test that major versions greater than 9 work and have the additional 0.  */
+-/* { dg-options "-mmacosx-version-min=10.10.0" } */
 +/* Test that minor versions > 9 produce a six-character macro.  */
 +/* { dg-options "-mmacosx-version-min=10.10.1" } */
-+/* { dg-do compile { target *-*-darwin* } } */
-+
-+int
-+main ()
-+{
+ /* { dg-do compile { target *-*-darwin* } } */
+ 
+ int
+ main ()
+ {
+-#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 101000
 +#if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ != 101001
-+  fail me;
-+#endif
-+  return 0;
-+}
+   fail me;
+ #endif
+   return 0;
 Index: gcc/testsuite/gcc.dg/darwin-minversion-5.c
 ===================================================================
 --- /dev/null
