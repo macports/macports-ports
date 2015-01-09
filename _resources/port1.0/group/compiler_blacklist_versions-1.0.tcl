@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2012-2013 The MacPorts Project
+# Copyright (c) 2012-2013, 2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -32,6 +32,10 @@
 #
 # Including this PortGroup in a Portfile enhances the compiler.blacklist option
 # to support blacklisting only specific build numbers of the given compiler.
+# This PortGroup only knows about the build numbering scheme used by Apple's
+# versions of gcc, llvm-gcc and clang provided with Xcode and the command line
+# tools. As such, on platforms other than Darwin, any blacklist entries
+# specifying a compiler build number will just be removed without being checked.
 #
 # Examples:
 #
@@ -61,10 +65,14 @@
 option_proc compiler.blacklist compiler_blacklist_versions._set_compiler_blacklist
 
 proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
+    global os.platform
     if {${action} ne "set"} return
     foreach blacklist [option ${option}] {
         if {[llength ${blacklist}] > 1} {
             compiler.blacklist-delete ${blacklist}
+            if {${os.platform} ne "darwin"} {
+                continue
+            }
             set compiler [lindex ${blacklist} 0]
             set comparisons [lrange ${blacklist} 1 end]
             set compiler_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
