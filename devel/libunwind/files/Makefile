@@ -28,7 +28,7 @@ INCLUDES = -I../../include
 
 # Default archs
 RC_ARCHS = i386 x86_64 
-ARC_FLAGS := $(foreach arch,$(RC_ARCHS),-arch $(arch))
+ARCH_FLAGS := $(foreach arch,$(RC_ARCHS),-arch $(arch))
 
 # Use an SDK?
 ifdef SDKROOT
@@ -72,13 +72,13 @@ MACHO_HEADERS = \
 OBJS = $(C_SRCS:%.c=$(OBJROOT)/%.o) $(CXX_SRCS:%.cpp=$(OBJROOT)/%.o) $(ASM_SRCS:%.S=$(OBJROOT)/%.o)
 
 $(OBJROOT)/%.o : %.c
-	$(CC) $(ARC_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+	$(CC) $(ARCH_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 $(OBJROOT)/%.o : %.cpp
-	$(CXX) $(ARC_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(ARCH_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 $(OBJROOT)/%.o : %.S
-	$(CC) $(ARC_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(ARCH_FLAGS) -force_cpusubtype_ALL $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) -c -o $@ $<
 
 $(OBJROOT)/$(LIBUNWIND_FILENAME): $(OBJS)
 	$(CXX) -o $@ $(ARC_FLAGS) $(SYSROOT_FLAGS) $(LDFLAGS) \
