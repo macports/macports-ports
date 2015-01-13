@@ -558,8 +558,20 @@ proc compilers.setup {args} {
         if {${compilers.require_fortran} && ![fortran_variant_isset]} {
             if {[lsearch -exact ${compilers.variants} gfortran] > -1} {
                 default_variants-append +gfortran
-            } else {
+            } elseif {[lsearch -exact ${compilers.variants} gcc49] > -1} {
                 default_variants-append +gcc49
+            } elseif {[lsearch -exact ${compilers.variants} gcc48] > -1} {
+                default_variants-append +gcc48
+            } elseif {[lsearch -exact ${compilers.variants} gcc47] > -1} {
+                default_variants-append +gcc47
+            } elseif {[lsearch -exact ${compilers.variants} gcc46] > -1} {
+                default_variants-append +gcc46
+            } elseif {[lsearch -exact ${compilers.variants} gcc45] > -1} {
+                default_variants-append +gcc45
+            } elseif {[lsearch -exact ${compilers.variants} gcc44] > -1} {
+                default_variants-append +gcc44
+            } elseif {[lsearch -exact ${compilers.variants} g95] > -1} {
+                default_variants-append +g95
             }
         }
 
