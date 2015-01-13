@@ -165,13 +165,18 @@ proc mpi.enforce_variant {args} {
 }
 
 proc mpi.action_enforce_variants {args} {
+    global name
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
             set mympi  [mpi_variant_name]
 
             if {$otmpi ne "" && $mympi eq ""} {
-                default_variants +$otmpi
+                # instead of trying to append to a default variant (which fails
+                # silently for some cases), we should be explicit and tell the
+                # user about the error
+                ui_error "Need to select variant +$otmpi"
+                return -code error "$portname +$otmpi is installed, so +$otmpi needs to be selected for $name"
             } elseif {$otmpi ne $mympi} {
                 ui_error "Install $portname +$mympi"
                 return -code error "$portname +$mympi not installed"
