@@ -131,21 +131,22 @@ set cdb(llvm,f90)      ""
 
 # and lastly we add a gfortran and g95 variant for use with clang*; note that
 # we don't need gfortran when we are in an "only-fortran" mode
+set gfortran_equiv gcc49
 set cdb(gfortran,variant)  gfortran
-set cdb(gfortran,compiler) gfortran
-set cdb(gfortran,descrip)  "Fortran compiler from gcc49"
-set cdb(gfortran,depends)  port:gcc49
-set cdb(gfortran,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
-set cdb(gfortran,dependsd) ""
-set cdb(gfortran,dependsa) ""
-set cdb(gfortran,conflict) ""
-set cdb(gfortran,cc)       ""
-set cdb(gfortran,cxx)      ""
-set cdb(gfortran,cpp)      ""
-set cdb(gfortran,objc)     ""
-set cdb(gfortran,fc)       ${prefix}/bin/gfortran-mp-4.9
-set cdb(gfortran,f77)      ${prefix}/bin/gfortran-mp-4.9
-set cdb(gfortran,f90)      ${prefix}/bin/gfortran-mp-4.9
+set cdb(gfortran,compiler) $cdb($gfortran_equiv,compiler)
+set cdb(gfortran,descrip)  $cdb($gfortran_equiv,descrip)
+set cdb(gfortran,depends)  $cdb($gfortran_equiv,depends)
+set cdb(gfortran,dependsl) $cdb($gfortran_equiv,dependsl)
+set cdb(gfortran,dependsd) $cdb($gfortran_equiv,dependsd)
+set cdb(gfortran,dependsa) $cdb($gfortran_equiv,dependsa)
+set cdb(gfortran,conflict) $cdb($gfortran_equiv,conflict)
+set cdb(gfortran,cc)       $cdb($gfortran_equiv,cc)
+set cdb(gfortran,cxx)      $cdb($gfortran_equiv,cxx)
+set cdb(gfortran,cpp)      $cdb($gfortran_equiv,cpp)
+set cdb(gfortran,objc)     $cdb($gfortran_equiv,objc)
+set cdb(gfortran,fc)       $cdb($gfortran_equiv,fc)
+set cdb(gfortran,f77)      $cdb($gfortran_equiv,f77)
+set cdb(gfortran,f90)      $cdb($gfortran_equiv,f90)
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
@@ -450,9 +451,9 @@ proc compilers.action_enforce_f {args} {
             set otf  [fortran_active_variant_name $portname]
             set myf  [fortran_variant_name]
 
-            # gfortran is nothing more than the fortran compiler from gcc49
+            # gfortran is nothing more than the fortran compiler from a default version of gcc
             set equiv 0
-            if {($otf eq "gcc49" || $otf eq "gfortran") && ($myf eq "gcc49" || $myf eq "gfortran")} {
+            if {($otf eq $gfortran_equiv || $otf eq "gfortran") && ($myf eq $gfortran_equiv || $myf eq "gfortran")} {
                 set equiv 1
             }
 
