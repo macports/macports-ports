@@ -69,7 +69,7 @@ proc perl5.extract_config {var {default ""}} {
 proc perl5.create_subports {branches rootname} {
     foreach v ${branches} {
         subport p${v}-${rootname} {
-            depends_lib port:perl${v}
+            depends_lib-append port:perl${v}
             perl5.major ${v}
         }
     }
@@ -122,7 +122,7 @@ proc perl5.create_variants {branches} {
         set variant [lindex ${variants} ${index}]
         if {[variant_isset ${variant}]} {
             perl5.major ${branch}
-            depends_lib port:perl${branch}
+            depends_lib-append port:perl${branch}
         }
     }
 }
@@ -191,7 +191,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             distfiles
             supported_archs noarch
             replaced_by p[option perl5.default_branch]-${rootname}
-            depends_lib port:p[option perl5.default_branch]-${rootname}
+            depends_lib-append port:p[option perl5.default_branch]-${rootname}
             use_configure no
             build {}
             destroot {
@@ -200,7 +200,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             }
         }
     } else {
-        depends_lib port:perl${perl5.default_branch}
+        depends_lib-append port:perl${perl5.default_branch}
     }
     if {![string match p5-* $name] || $subport ne $name} {
         configure.cmd       ${perl5.bin}
