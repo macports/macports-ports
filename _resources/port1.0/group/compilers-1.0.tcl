@@ -450,9 +450,9 @@ proc compilers.action_enforce_f {args} {
             set otf  [fortran_active_variant_name $portname]
             set myf  [fortran_variant_name]
 
-            # gfortran is nothing more than the fortran compiler from gcc48
+            # gfortran is nothing more than the fortran compiler from gcc49
             set equiv 0
-            if {($otf eq "gcc48" || $otf eq "gfortran") && ($myf eq "gcc48" || $myf eq "gfortran")} {
+            if {($otf eq "gcc49" || $otf eq "gfortran") && ($myf eq "gcc49" || $myf eq "gfortran")} {
                 set equiv 1
             }
 
