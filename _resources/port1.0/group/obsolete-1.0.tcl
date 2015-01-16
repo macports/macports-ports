@@ -44,7 +44,11 @@ platforms       darwin
 maintainers     nomaintainer
 supported_archs noarch
 
-description     this port is only a stub and has been made obsolete by ${replaced_by}
+if {[info exists replaced_by]} {
+    description     this port is only a stub and has been made obsolete by ${replaced_by}
+} else {
+    description     this port is only a stub and has been made obsolete without replacement.
+}
 default long_description ${description}
 
 homepage        http://www.macports.org/
@@ -53,7 +57,11 @@ archive_sites
 distfiles
 
 pre-configure {
-    ui_error "${subport} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
+    if {[info exists replaced_by]} {
+        ui_error "${subport} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
+    } else {
+        ui_error "${subport} is an obsolete port.  Please uninstall it."
+    }
     return -code error "obsolete port"
 }
 
