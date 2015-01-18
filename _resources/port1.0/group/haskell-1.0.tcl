@@ -47,7 +47,8 @@ set haskell.compiler_list {ghc}
 # Configuration for each compiler
 array set haskell.compiler_configuration {
     ghc {port       ghc
-         compiler   ${prefix}/bin/ghc}
+         compiler   ${prefix}/bin/ghc
+         ghc-pkg    ${prefix}/bin/ghc-pkg}
 }
 
 proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
@@ -96,6 +97,13 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"}} {
 			system "${prefix}/libexec/${name}/unregister.sh --force"
 		}
 	}
+
+    pre-configure [subst {
+        ui_debug "Listing installed haskell packages"
+        catch {system "[subst ${compiler_config(ghc-pkg)}] list"}
+        ui_debug "Running ghc-pkg check"
+        catch {system "[subst ${compiler_config(ghc-pkg)}] check; exit 1"}
+   }]
 
     livecheck.type      regex
     livecheck.url       http://hackage.haskell.org/package/${package}
