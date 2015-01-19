@@ -78,7 +78,7 @@ $(OBJROOT)/%.o : %.cpp
 	$(CXX) $(ARCH_FLAGS) $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 $(OBJROOT)/%.o : %.S
-	$(CC) $(ARCH_FLAGS) -force_cpusubtype_ALL $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(ARCH_FLAGS) -force_cpusubtype_ALL $(SYSROOT_FLAGS) $(INCLUDES) $(CPPFLAGS) $(ASFLAGS) -c -o $@ $<
 
 $(OBJROOT)/$(LIBUNWIND_FILENAME): $(OBJS)
 	$(CXX) -o $@ $(ARC_FLAGS) $(SYSROOT_FLAGS) $(LDFLAGS) \
