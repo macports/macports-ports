@@ -131,22 +131,22 @@ set cdb(llvm,f90)      ""
 
 # and lastly we add a gfortran and g95 variant for use with clang*; note that
 # we don't need gfortran when we are in an "only-fortran" mode
-set gfortran_equiv gcc49
+set compilers.gfortran_equiv    gcc49
 set cdb(gfortran,variant)  gfortran
-set cdb(gfortran,compiler) $cdb($gfortran_equiv,compiler)
-set cdb(gfortran,descrip)  $cdb($gfortran_equiv,descrip)
-set cdb(gfortran,depends)  $cdb($gfortran_equiv,depends)
-set cdb(gfortran,dependsl) $cdb($gfortran_equiv,dependsl)
-set cdb(gfortran,dependsd) $cdb($gfortran_equiv,dependsd)
-set cdb(gfortran,dependsa) $cdb($gfortran_equiv,dependsa)
-set cdb(gfortran,conflict) $cdb($gfortran_equiv,conflict)
-set cdb(gfortran,cc)       $cdb($gfortran_equiv,cc)
-set cdb(gfortran,cxx)      $cdb($gfortran_equiv,cxx)
-set cdb(gfortran,cpp)      $cdb($gfortran_equiv,cpp)
-set cdb(gfortran,objc)     $cdb($gfortran_equiv,objc)
-set cdb(gfortran,fc)       $cdb($gfortran_equiv,fc)
-set cdb(gfortran,f77)      $cdb($gfortran_equiv,f77)
-set cdb(gfortran,f90)      $cdb($gfortran_equiv,f90)
+set cdb(gfortran,compiler) $cdb(${compilers.gfortran_equiv},compiler)
+set cdb(gfortran,descrip)  $cdb(${compilers.gfortran_equiv},descrip)
+set cdb(gfortran,depends)  $cdb(${compilers.gfortran_equiv},depends)
+set cdb(gfortran,dependsl) $cdb(${compilers.gfortran_equiv},dependsl)
+set cdb(gfortran,dependsd) $cdb(${compilers.gfortran_equiv},dependsd)
+set cdb(gfortran,dependsa) $cdb(${compilers.gfortran_equiv},dependsa)
+set cdb(gfortran,conflict) $cdb(${compilers.gfortran_equiv},conflict)
+set cdb(gfortran,cc)       $cdb(${compilers.gfortran_equiv},cc)
+set cdb(gfortran,cxx)      $cdb(${compilers.gfortran_equiv},cxx)
+set cdb(gfortran,cpp)      $cdb(${compilers.gfortran_equiv},cpp)
+set cdb(gfortran,objc)     $cdb(${compilers.gfortran_equiv},objc)
+set cdb(gfortran,fc)       $cdb(${compilers.gfortran_equiv},fc)
+set cdb(gfortran,f77)      $cdb(${compilers.gfortran_equiv},f77)
+set cdb(gfortran,f90)      $cdb(${compilers.gfortran_equiv},f90)
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
@@ -446,6 +446,7 @@ proc compilers.enforce_fortran {args} {
 }
 
 proc compilers.action_enforce_f {args} {
+    global compilers.gfortran_equiv
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
@@ -453,7 +454,8 @@ proc compilers.action_enforce_f {args} {
 
             # gfortran is nothing more than the fortran compiler from a default version of gcc
             set equiv 0
-            if {($otf eq $gfortran_equiv || $otf eq "gfortran") && ($myf eq $gfortran_equiv || $myf eq "gfortran")} {
+            if {($otf eq ${compilers.gfortran_equiv} || $otf eq "gfortran") &&
+                ($myf eq ${compilers.gfortran_equiv} || $myf eq "gfortran")} {
                 set equiv 1
             }
 
