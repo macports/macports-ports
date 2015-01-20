@@ -120,7 +120,7 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
     }
     switch ${compiler} {
         clang {
-            set re {clang-([0-9.]+)}
+            set re {clang(?:_.*)?-([0-9.]+)}
         }
         llvm-gcc-4.2 {
             set re {LLVM build ([0-9.]+)}
