@@ -32,57 +32,18 @@
 # Usage:
 # PortGroup                 haskell-platform 2.0
 # haskellplatform.setup     haskell_package version [register_scripts]
-# where haskell_package is the name of the package (eg, digest), version is the
-# version for it. This automatically defines name, version, categories,
-# homepage, master_sites, distname, and depends_build as appropriate, and sets
-# up the configure, build, destroot, and post-activate stages. It can do
-# pre-deactivate if that ever becomes an option in MacPorts. register_scripts
-# can be used to deactivate installing register.sh and unregister.sh as might be
-# needed for non-library parts of the haskell platform. Set it to "no" to
-# achieve this; defaults to "yes".
+# where haskell_package is the name of the package (eg, digest), version is
+# the version for it. This automatically defines version, categories,
+# homepage, master_sites, distname, and depends_build as appropriate, and
+# sets up the configure, build, destroot, and post-activate stages.
+# register_scripts can be used to deactivate package registration with
+# haskell's package database and might be needed for non-library parts of the
+# haskell platform. Set it to "no" to achieve this; defaults to "yes".
+#
+# This uses the haskell 1.0 PortGroup internally.
 
+PortGroup       haskell 1.0
 
 proc haskellplatform.setup {package version {register_scripts "yes"}} {
-    global homepage prefix configure.cmd configure.cc destroot worksrcpath name master_sites
-
-	# don't set name, that will prevent using this in subports
-    version             ${version}
-    categories          devel haskell
-    homepage            http://hackage.haskell.org/package/${package}
-    master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
-    distname            ${package}-${version}
-    depends_lib         port:ghc
-    configure.args      Setup configure \
-                        --prefix=${prefix} \
-                        --with-compiler=${prefix}/bin/ghc \
-                        -v \
-                        --enable-library-profiling \
-						--with-gcc=${configure.cc}
-    configure.cmd       runhaskell
-    configure.pre_args
-
-    build.cmd           ${configure.cmd}
-    build.args          Setup build -v
-    build.target
-    destroot.cmd        ${configure.cmd}
-    destroot.destdir
-    destroot.target     Setup copy --destdir=${destroot}
-	if {${register_scripts} == "yes"} {
-		post-destroot {
-    	    system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
-    	    system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
-    	    xinstall -m 755 -d ${destroot}${prefix}/libexec/${subport}
-    	    xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
-    	        ${destroot}${prefix}/libexec/${subport}
-    	}
-		post-activate {
-    	    system "${prefix}/libexec/${subport}/register.sh"
-    	}
-    	pre-deactivate {
-    	    system "${prefix}/libexec/${subport}/unregister.sh"
-    	}
-	}
-    universal_variant   no
-
-    livecheck.type      none
+    haskell.setup   ${package} ${version} ghc ${register_scripts} haskell-platform
 }
