@@ -52,7 +52,7 @@ proc octave.setup {module version} {
     master_sites                sourceforge:octave
     distname                    ${octave.module}-${version}
 
-    depends_lib                 path:bin/octave:octave
+    depends_lib-append          path:bin/octave:octave
 
     worksrcdir                  ${octave.module}
 
