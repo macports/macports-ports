@@ -234,7 +234,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             master_sites    http://www.rubygems.org/downloads/
             livecheck.type  regex
             livecheck.url   http://www.rubygems.org/gems/${ruby.project}
-            livecheck.regex {<h3>(\d|\d[0-9.]*\d)</h3>}
+            livecheck.regex {<i class="page__subheading">(\d|\d[0-9.]*\d)</i>}
         }
         sourceforge:* {
             set ruby.project [lindex [split ${source} {:}] 1]
