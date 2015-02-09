@@ -346,7 +346,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
-    http://mirror.facebook.net/cpan/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
     http://mirror.uta.edu/CPAN/modules/by-module/
