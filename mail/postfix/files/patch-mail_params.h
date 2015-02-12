@@ -1,6 +1,6 @@
---- src/global/mail_params.h	2013-09-05 12:24:12.000000000 -0700
-+++ src/global/mail_params.h.new	2013-09-05 12:22:41.000000000 -0700
-@@ -241,7 +241,7 @@
+--- src/global/mail_params.h.orig	2015-01-18 11:06:00.000000000 +1100
++++ src/global/mail_params.h	2015-02-12 15:50:26.000000000 +1100
+@@ -269,7 +269,7 @@ extern int var_smtp_mxsess_limit;
    */
  #define VAR_QUEUE_DIR	"queue_directory"
  #ifndef DEF_QUEUE_DIR
@@ -9,7 +9,7 @@
  #endif
  extern char *var_queue_dir;
  
-@@ -250,13 +250,13 @@
+@@ -278,13 +278,13 @@ extern char *var_queue_dir;
    */
  #define VAR_DAEMON_DIR		"daemon_directory"
  #ifndef DEF_DAEMON_DIR
@@ -25,7 +25,16 @@
  #endif
  extern char *var_command_dir;
  
-@@ -288,7 +288,7 @@
+@@ -302,7 +302,7 @@ extern char *var_pid_dir;
+   */
+ #define VAR_DATA_DIR		"data_directory"
+ #ifndef DEF_DATA_DIR
+-#define DEF_DATA_DIR		"/var/lib/postfix"
++#define DEF_DATA_DIR		"__PREFIX/var/lib/postfix"
+ #endif
+ extern char *var_data_dir;
+ 
+@@ -316,7 +316,7 @@ extern time_t var_starttime;
    */
  #define VAR_CONFIG_DIR		"config_directory"
  #ifndef DEF_CONFIG_DIR
@@ -34,7 +43,7 @@
  #endif
  extern char *var_config_dir;
  
-@@ -2489,22 +2489,22 @@
+@@ -2589,22 +2589,22 @@ extern int var_fault_inj_code;
    */
  #define VAR_SENDMAIL_PATH		"sendmail_path"
  #ifndef DEF_SENDMAIL_PATH
@@ -61,3 +70,12 @@
  #endif
  
  #define VAR_SAMPLE_DIR			"sample_directory"
+@@ -3881,7 +3881,7 @@ extern char *var_smtpd_dns_re_filter;
+   */
+ #define VAR_SHLIB_DIR	"shlib_directory"
+ #ifndef DEF_SHLIB_DIR
+-#define DEF_SHLIB_DIR	"/usr/lib/postfix"
++#define DEF_SHLIB_DIR	"__PREFIX/lib/postfix"
+ #endif
+ extern char *var_shlib_dir;
+ 

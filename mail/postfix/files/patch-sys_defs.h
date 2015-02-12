@@ -1,6 +1,6 @@
---- src/util/sys_defs.h.orig	2013-09-30 06:51:55.000000000 +1000
-+++ src/util/sys_defs.h	2014-01-17 15:24:37.000000000 +1100
-@@ -228,9 +228,9 @@
+--- src/util/sys_defs.h.orig	2014-12-26 09:33:02.000000000 +1100
++++ src/util/sys_defs.h	2015-02-12 15:40:02.000000000 +1100
+@@ -230,9 +230,9 @@
  #define HAS_DB
  #define HAS_SA_LEN
  #define NATIVE_DB_TYPE	"hash"
@@ -12,8 +12,8 @@
  #define USE_STATFS
  #define STATFS_IN_SYS_MOUNT_H
  #define HAS_POSIX_REGEXP
-@@ -245,11 +245,11 @@
- # define HAVE_GETIFADDRS
+@@ -244,11 +244,11 @@
+ #define HAVE_GETIFADDRS
  #endif
  #define HAS_FUTIMES			/* XXX Guessing */
 -#define NATIVE_SENDMAIL_PATH "/usr/sbin/sendmail"
