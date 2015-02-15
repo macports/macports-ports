@@ -1,0 +1,151 @@
+From f990dd936b5fd1a40290bb88cde517a0ac38f823 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+Date: Wed, 31 Dec 2014 02:42:17 -0800
+Subject: [PATCH 2/4] Update DISPLAY parsing to work with new launchd paths in
+ Yosemite
+
+Signed-off-by: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+---
+ gethost.c  | 63 ++++++++++++++++++++++++++++++++++++++++++++------------------
+ parsedpy.c | 31 +++++++++++++++++++++++++++++--
+ 2 files changed, 74 insertions(+), 20 deletions(-)
+
+diff --git a/gethost.c b/gethost.c
+index 0a5aff5..c75ae02 100644
+--- a/gethost.c
++++ b/gethost.c
+@@ -57,6 +57,8 @@ in this Software without prior written authorization from The Open Group.
+ #include <errno.h>
+ #include "xauth.h"
+ 
++#include <sys/stat.h>
++#include <sys/syslimits.h>
+ 
+ #ifndef WIN32
+ #include <arpa/inet.h>
+@@ -189,30 +191,55 @@ struct addrlist *get_address_info (
+ 		src = buf;
+ 		len = strlen (buf);
+ 	    }
+-	} else if(prefix == 0 && (strncmp (fulldpyname, "/tmp/launch", 11) == 0)) {
+-        /* Use the bundle id (part preceding : in the basename) as our src id */
+-        char *c;
++	} else {
++	    char path[PATH_MAX];
++	    struct stat sbuf;
++	    int is_path_to_socket = 0;
++
++#ifdef HAVE_STRLCPY
++	    strlcpy(path, fulldpyname, sizeof(path));
++#else
++	    strncpy(path, fulldpyname, sizeof(path));
++	    buf[sizeof(path) - 1] = '\0';
++#endif
++	    if (0 == stat(path, &sbuf)) {
++		is_path_to_socket = 1;
++	    } else {
++		char *dot = strrchr(path, '.');
++		if (dot) {
++		    *dot = '\0';
++		    /* screen = atoi(dot + 1); */
++		    if (0 == stat(path, &sbuf)) {
++		        is_path_to_socket = 1;
++		    }
++		}
++	    }
++
++	    if (is_path_to_socket) {
++		/* Use the bundle id (part preceding : in the basename) as our src id */
++		char *c;
+ #ifdef HAVE_STRLCPY
+-        strlcpy(buf, strrchr(fulldpyname, '/') + 1, sizeof(buf));
++		strlcpy(buf, strrchr(fulldpyname, '/') + 1, sizeof(buf));
+ #else
+-        strncpy(buf, strrchr(fulldpyname, '/') + 1, sizeof(buf));
+-	buf[sizeof(buf) - 1] = '\0';
++		strncpy(buf, strrchr(fulldpyname, '/') + 1, sizeof(buf));
++		buf[sizeof(buf) - 1] = '\0';
+ #endif
+ 
+-        c = strchr(buf, ':');
++		c = strchr(buf, ':');
+ 
+-        /* In the legacy case with no bundle id, use the full path */
+-        if(c == buf) {
+-            src = fulldpyname;
+-        } else {
+-            *c = '\0';
+-            src = buf;
+-        }
++		/* In the legacy case with no bundle id, use the full path */
++		if(c == buf) {
++			src = fulldpyname;
++		} else {
++			*c = '\0';
++			src = buf;
++		}
+ 
+-        len = strlen(src);
+-    } else {
+-	    src = fulldpyname;
+-	    len = prefix;
++		len = strlen(src);
++	    } else {
++		src = fulldpyname;
++		len = prefix;
++            }
+ 	}
+ 	break;
+       case FamilyInternet:		/* host:0 */
+diff --git a/parsedpy.c b/parsedpy.c
+index c591b77..7365224 100644
+--- a/parsedpy.c
++++ b/parsedpy.c
+@@ -42,6 +42,9 @@ in this Software without prior written authorization from The Open Group.
+ #include <X11/Xauth.h>			/* for FamilyLocal */
+ #include <X11/Xmu/SysUtil.h>
+ 
++#include <sys/stat.h>
++#include <sys/syslimits.h>
++
+ #if defined(UNIXCONN) || defined(LOCALCONN)
+ #define UNIX_CONNECTION "unix"
+ #define UNIX_CONNECTION_LENGTH 4
+@@ -158,8 +161,32 @@ parse_displayname (const char *displayname,
+ 
+     if (!host) return False;
+ 
+-    if(strncmp (host, "/tmp/launch", 11) == 0) {
+-        family = FamilyLocal;
++    {
++        /*
++         * If using launchd socket, remove the screen number from the end
++         * of $DISPLAY and check if it is a path to a socket.
++         */
++        char path[PATH_MAX];
++        struct stat sbuf;
++
++#ifdef HAVE_STRLCPY
++        strlcpy(path, displayname, sizeof(path));
++#else
++        strncpy(path, displayname, sizeof(path));
++        buf[sizeof(path) - 1] = '\0';
++#endif
++        if (0 == stat(path, &sbuf)) {
++            family = FamilyLocal;
++        } else {
++            char *dot = strrchr(path, '.');
++            if (dot) {
++                *dot = '\0';
++                /* screen = atoi(dot + 1); */
++                if (0 == stat(path, &sbuf)) {
++                    family = FamilyLocal;
++                }
++            }
++        }
+     }
+ 
+     /*
+-- 
+2.3.0
+
