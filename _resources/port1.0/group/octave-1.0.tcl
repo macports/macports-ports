@@ -42,6 +42,7 @@
 options octave.module
 
 proc octave.setup {module version} {
+
     global octave.module
 
     octave.module               ${module}
@@ -93,6 +94,7 @@ post-extract {
 }
 
 post-patch {
+
     # In 10.8+, set the locale to "C" otherwise /usr/bin/sed can fail
     # with an error when processing unicode characters.
 
@@ -134,15 +136,15 @@ pre-configure {
     # is always paired with the appropriate -Lpath statement.
 
     configure.env-append \
-	LAPACK_LIBS='[exec ${prefix}/bin/mkoctfile -p FLIBS] [exec ${prefix}/bin/mkoctfile -p LAPACK_LIBS]'
+	LAPACK_LIBS='[exec ${prefix}/bin/mkoctfile -p FLIBS] \
+	             [exec ${prefix}/bin/mkoctfile -p LAPACK_LIBS]'
+
+    # In 10.8+, set the LC_CTYPE (locale) to "C" otherwise
+    # /usr/bin/sed can fail with an error when processing unicode
+    # characters.
 
     platform darwin {
 	if {${os.major} >= 12} {
-
-	    # In 10.8+, set the LC_CTYPE (locale) to "C" otherwise
-	    # /usr/bin/sed can fail with an error when processing
-	    # unicode characters.
-
 	    configure.env-append LC_CTYPE="C"
 	}
     }
@@ -161,7 +163,7 @@ pre-destroot {
 }
 
 destroot {
-    xinstall    -m 644 ${worksrcpath}/${distname}.tar.gz ${destroot}${prefix}/share/octave/${octave.module}.tar.gz
+    xinstall -m 644 ${worksrcpath}/${distname}.tar.gz ${destroot}${prefix}/share/octave/${octave.module}.tar.gz
 }
 
 post-deactivate {
