@@ -125,10 +125,12 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
                         -DPNG_INCLUDE_DIR=${prefix}/include \
                         -DPNG_PNG_INCLUDE_DIR=${prefix}/include \
                         -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
-                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
-                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.dylib \
                         -DTIFF_INCLUDE_DIR=${prefix}/include \
                         -DTIFF_LIBRARY=${prefix}/lib/libtiff.dylib
+
+# These two can be removed (see #46240):
+#                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
+#                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.dylib \
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
