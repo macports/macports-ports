@@ -93,7 +93,7 @@ post-extract {
     }
 }
 
-post-patch {
+pre-configure {
 
     # In 10.8+, set the locale to "C" otherwise /usr/bin/sed can fail
     # with an error when processing unicode characters.
@@ -122,10 +122,6 @@ post-patch {
 
     delete ${worksrcpath}
     xinstall -d -m 755 ${worksrcpath}
-
-}
-
-pre-configure {
 
     # set parameters, now that variables are available for use
 
