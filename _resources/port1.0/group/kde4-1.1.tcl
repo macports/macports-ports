@@ -75,7 +75,7 @@ switch ${os.platform}_${os.major} {
 
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
-if {${qt_dir} ne ${prefix}} {
+if {${qt_cmake_module_dir} ne ${cmake_share_module_dir}} {
     set cmake_module_path ${cmake_share_module_dir}\;${qt_cmake_module_dir}
     configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
     configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}"
@@ -134,7 +134,7 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
-    depends_lib-append      port:doxygen
+    depends_build-append    path:bin/doxygen:doxygen
     configure.args-delete   -DBUILD_doc=OFF -DBUILD_docs=OFF
 }
 
