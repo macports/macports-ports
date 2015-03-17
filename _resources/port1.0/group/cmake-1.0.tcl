@@ -34,10 +34,25 @@
 # Usage:
 # PortGroup     cmake 1.0
 
+options cmake.build_dir cmake.out_of_source
+default cmake.build_dir {${workpath}/build}
+default cmake.out_of_source yes
+
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
 
 depends_build-append port:cmake
+
+proc _cmake_get_build_dir {} {
+    if {[option cmake.out_of_source]} {
+        return [option cmake.build_dir]
+    }
+    return [option worksrcpath]
+}
+default configure.dir {[_cmake_get_build_dir]}
+pre-configure {
+    file mkdir ${configure.dir}
+}
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
@@ -56,6 +71,8 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -Wno-dev
+
+default configure.post_args {${worksrcpath}}
 
 # CMake honors set environment variables CFLAGS, CXXFLAGS, and LDFLAGS when it
 # is first run in a build directory to initialize CMAKE_C_FLAGS,
@@ -134,3 +151,5 @@ variant debug description "Enable debug binaries" {
 if {[string first "--enable-debug" ${configure.args}] > -1} {
     configure.args-delete     --enable-debug
 }
+
+default build.dir {${configure.dir}}
