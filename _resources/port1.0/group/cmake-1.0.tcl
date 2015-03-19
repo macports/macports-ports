@@ -156,3 +156,5 @@ if {[string first "--enable-debug" ${configure.args}] > -1} {
 }
 
 default build.dir {${configure.dir}}
+
+default build.post_args {VERBOSE=ON}
