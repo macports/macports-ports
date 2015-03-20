@@ -42,14 +42,8 @@ PortGroup               qt4 1.0
 configure.ldflags-delete  -L${prefix}/lib
 configure.cppflags-delete -I${prefix}/include
 
-# setup all KDE4 ports to build in a separate directory from the source;
-# this setting must be the full directory path
-post-extract            { file mkdir ${workpath}/build }
-
-# standard post-arg, where to find the primary CMakeLists.txt file.
-default configure.post_args {../${worksrcdir}}
-default configure.dir       {${workpath}/build}
-default build.dir           {${workpath}/build}
+# setup all KDE4 ports to build in a separate directory from the source:
+cmake.out_of_source         yes
 
 # Automoc added as build dependency here as most, if not all kde
 # programs currently need it. The automoc port, which includes this
