@@ -83,7 +83,7 @@ run_or_die () { # beotch
 
 	OUTPUT=`mktemp autogen-XXXXXX`
 
-	printf "%s" "running ${CMD} ${@}... "
+	printf "running %s %s... " ${CMD} "$*"
 	${CMD} ${@} >${OUTPUT} 2>&1
 
 	if [ $? != 0 ] ; then
@@ -99,9 +99,17 @@ run_or_die () { # beotch
 	fi
 }
 
+cleanup () {
+	rm -f autogen-??????
+	echo
+	exit 2
+}
+
 ###############################################################################
 # We really start here, yes, very sneaky!
 ###############################################################################
+trap cleanup 2
+
 FIGLET=`which figlet 2> /dev/null`
 if [ x"${FIGLET}" != x"" ] ; then
 	${FIGLET} -f small ${PACKAGE}
@@ -129,6 +137,7 @@ fi
 check "$libtoolize";		LIBTOOLIZE=${BIN};
 check "glib-gettextize";	GLIB_GETTEXTIZE=${BIN};
 check "intltoolize";		INTLTOOLIZE=${BIN};
+check "gsed";				SED=${BIN};
 check "aclocal";		ACLOCAL=${BIN};
 check "autoheader";		AUTOHEADER=${BIN};
 check "automake";		AUTOMAKE=${BIN};
@@ -140,6 +149,9 @@ check "autoconf";		AUTOCONF=${BIN};
 run_or_die ${LIBTOOLIZE} ${LIBTOOLIZE_FLAGS:-"-c -f --automake"}
 run_or_die ${GLIB_GETTEXTIZE} ${GLIB_GETTEXTIZE_FLAGS:-"--force --copy"}
 run_or_die ${INTLTOOLIZE} ${INTLTOOLIZE_FLAGS:-"-c -f --automake"}
+# This call to sed is needed to work around an annoying bug in intltool 0.40.6
+# See http://developer.pidgin.im/ticket/9520 for details
+run_or_die ${SED} -i.bak -e "s:'\^\$\$lang\$\$':\^\$\$lang\$\$:g" po/Makefile.in.in
 run_or_die ${ACLOCAL} ${ACLOCAL_FLAGS:-"-I m4macros"}
 run_or_die ${AUTOHEADER} ${AUTOHEADER_FLAGS}
 run_or_die ${AUTOMAKE} ${AUTOMAKE_FLAGS:-"-a -c --gnu"}
@@ -148,4 +160,7 @@ run_or_die ${AUTOCONF} ${AUTOCONF_FLAGS}
 ###############################################################################
 # Run configure
 ###############################################################################
-echo "NOT running ./configure ${CONFIGURE_FLAGS} $@"
+if test -z "$NOCONFIGURE"; then
+	echo "running ./configure ${CONFIGURE_FLAGS} $@"
+	./configure ${CONFIGURE_FLAGS} $@
+fi
