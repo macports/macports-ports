@@ -1,0 +1,87 @@
+--- ipelib/ipebitmap.cpp.orig	2015-03-27 12:12:31.000000000 +0100
++++ ipelib/ipebitmap.cpp	2015-03-27 12:15:36.000000000 +0100
+@@ -32,7 +32,10 @@
+ #include "ipeutils.h"
+ #include <zlib.h>
+ 
+-#include <turbojpeg.h>
++#include <cstdio>
++#include <csetjmp>
++#include <jpeglib.h>
++
+ #include <png.h>
+ 
+ using namespace ipe;
+@@ -332,36 +335,47 @@
+ 
+ // --------------------------------------------------------------------
+ 
++// The following is error-handling code for decopressing jpeg using the
++// standard libjpeg API. Taken from the example.c and stackoverflow.
++struct jpegErrorManager {
++  struct jpeg_error_mgr pub;
++  jmp_buf setjmp_buffer;
++};
++char jpegLastErrorMsg[JMSG_LENGTH_MAX];
++void jpegErrorExit (j_common_ptr cinfo) {
++  jpegErrorManager *myerr = (jpegErrorManager*) cinfo->err;
++  (*(cinfo->err->format_message)) (cinfo, jpegLastErrorMsg);
++  longjmp(myerr->setjmp_buffer, 1);
++}
++
++// Decode jpeg image using the standard libjpeg API with errorhandling
+ bool dctDecode(Buffer dctData, Buffer pixelData, int components)
+ {
+-  tjhandle handle = tjInitDecompress();
+-  if (!handle) {
+-    ipeDebug("tjInitDecompress failed: %s",  tjGetErrorStr());
++  struct jpeg_decompress_struct cinfo;
++  // Error handling:
++  struct jpegErrorManager jerr;
++  cinfo.err = jpeg_std_error(&jerr.pub);
++  jerr.pub.error_exit = jpegErrorExit;
++  if (setjmp(jerr.setjmp_buffer)) {
++    ipeDebug("jpeg decompression failed: %s", jpegLastErrorMsg);
++    jpeg_destroy_decompress(&cinfo);
+     return false;
+   }
+-
+-  int width, height, jpegSubsamp;
+-  if (tjDecompressHeader2(handle, (uchar *) dctData.data(), dctData.size(),
+-			  &width, &height, &jpegSubsamp) < 0) {
+-    ipeDebug("tjDecompressHeader2 failed: %s",  tjGetErrorStr());
+-    tjDestroy(handle);
+-    return false;
+-  }
+-
+-  int flags = 0;
+-  // if (fast)
+-  // flags |= TJFLAG_FASTDCT;
+-
+-  if (tjDecompress2(handle, (uchar *) dctData.data(), dctData.size(),
+-		    (uchar *) pixelData.data(),
+-		    width, components * width, height,
+-		    (components == 3) ? TJPF_RGB : TJPF_GRAY,
+-		    flags) < 0) {
+-    ipeDebug("tjDecompress2 failed: %s",  tjGetErrorStr());
+-    tjDestroy(handle);
+-    return false;
++  // Decompression:
++  jpeg_create_decompress(&cinfo);
++  jpeg_mem_src(&cinfo, (unsigned char *) dctData.data(), dctData.size());
++  jpeg_read_header(&cinfo, 1);
++	cinfo.out_color_space = ((components == 3) ? JCS_RGB : JCS_GRAYSCALE);
++  jpeg_start_decompress(&cinfo);
++  while (cinfo.output_scanline < cinfo.output_height) {
++		int row_stride = cinfo.output_width * cinfo.output_components;
++		int index = cinfo.output_scanline * row_stride;
++		unsigned char *buffer[1];
++		buffer[0] = (unsigned char *) &(pixelData[index]);
++    jpeg_read_scanlines(&cinfo, buffer, 1);
+   }
+-  tjDestroy(handle);
++  jpeg_finish_decompress(&cinfo);
++  jpeg_destroy_decompress(&cinfo);
+   return true;
+ }
+ 
