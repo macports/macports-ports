@@ -77,33 +77,15 @@ set portfetch::mirror_sites::sites(fink) {
     http://distfiles.master.finkmirrors.net/:nosubdir
 }
 
+# FreeBSD switched to a Geo-IP-based load-balanced distcache.
+# Note that FreeBSD's pkg(8) utility does not just stupidly
+# download via HTTP, but issues DNS queries to fetch
+# SRV records and compute the "best" available server
+# given some weighting criteria.
+# It probably doesn't matter a bunch, though, and plain
+# DNS lookups and HTTP requests are fine.
 set portfetch::mirror_sites::sites(freebsd) {
-    http://ftp4.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://ftp4.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp5.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp5.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://ftp10.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://ftp10.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://ftp14.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://ftp14.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.uk.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.uk.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/ftp.freebsd.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.jp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.jp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.tw.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.tw.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.ru.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.ru.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.se.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.se.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://mirror.aarnet.edu.au/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://mirror.aarnet.edu.au/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    http://ftp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    http://ftp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
-    ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/distfiles/:nosubdir
-    ftp://ftp.FreeBSD.org/pub/FreeBSD/ports/local-distfiles/:nosubdir
+    http://distcache.FreeBSD.org/ports-distfiles/:nosubdir
 }
 
 # curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
