@@ -62,7 +62,7 @@ proc hocbinding.setup {framework version {source ""}} {
     categories      devel
     platforms       darwin
 
-    eval description ${framework} framework bindings for HOC
+    description ${framework} framework bindings for HOC
     long_description ${description}
 
     if {${source} eq "hoc"} {
