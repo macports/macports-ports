@@ -58,7 +58,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
     platforms   darwin
     supported_archs noarch
 
-    eval description ${lang} dictionary for hunspell
+    description {*}${lang} dictionary for hunspell
     long_description ${description}
 
     homepage    http://wiki.services.openoffice.org/wiki/Dictionaries
