@@ -125,7 +125,7 @@ set qt_examples_dir     ${qt_dir}/share/${qt_name}/examples
 
 # standard Qt tests directory
 global qt_tests_dir
-set qt_tests_dir     ${qt_dir}/share/${qt_name}/tests
+set qt_tests_dir        ${qt_dir}/share/${qt_name}/tests
 
 # standard Qt demos directory
 global qt_demos_dir
@@ -180,7 +180,7 @@ set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
 # data used by qmake
 global qt_host_data_dir
-set qt_host_data_dir   ${qt_dir}/share/${qt_name} 
+set qt_host_data_dir    ${qt_dir}/share/${qt_name} 
 
 # standard cmake info for Qt5
 global qt_cmake_defines
