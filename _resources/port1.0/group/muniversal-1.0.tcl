@@ -314,15 +314,15 @@ variant universal {
             portconfigure::configure_main
 
             # Undo changes to the configure related variables
-            autoreconf.dir ${autoreconf_dir_save}
-            configure.dir  ${configure_dir_save}
-            configure.compiler ${configure_compiler_save}
-            configure.f90  ${configure_f90_save}
-            configure.f77  ${configure_f77_save}
-            configure.fc   ${configure_fc_save}
-            configure.cc   ${configure_cc_save}
-            configure.cxx  ${configure_cxx_save}
-            configure.objc ${configure_objc_save}
+            autoreconf.dir      {*}${autoreconf_dir_save}
+            configure.dir       {*}${configure_dir_save}
+            configure.compiler  {*}${configure_compiler_save}
+            configure.f90       {*}${configure_f90_save}
+            configure.f77       {*}${configure_f77_save}
+            configure.fc        {*}${configure_fc_save}
+            configure.cc        {*}${configure_cc_save}
+            configure.cxx       {*}${configure_cxx_save}
+            configure.objc      {*}${configure_objc_save}
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-delete  $merger_configure_args(${arch})
             }
