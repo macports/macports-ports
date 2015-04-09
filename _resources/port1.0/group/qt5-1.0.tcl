@@ -190,6 +190,10 @@ set qt_cmake_defines    \
      -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
      -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
+# set Qt understood arch types, based on user preference
+options qt_arch_types
+default qt_arch_types   {[string map {i386 x86} [get_canonical_archs]]}
+
 # allow for depending on either qt5-mac and qt5-mac-devel, simultaneously
 
 if {![info exists building_qt5]} {
