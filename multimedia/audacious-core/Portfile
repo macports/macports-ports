@@ -3,12 +3,13 @@
 
 PortSystem          1.0
 PortGroup           conflicts_build 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 name                audacious-core
 set real_name       audacious
 
 # Please keep audacious, audacious-core and audacious-plugins synchronized.
-version             3.5.2
+version             3.6.1
 revision            0
 
 license             BSD
@@ -31,12 +32,15 @@ long_description    ${description} It is free, lightweight, based on GTK3, \
 master_sites        http://distfiles.audacious-media-player.org
 distname            ${real_name}-${version}
 use_bzip2           yes
-checksums           rmd160  dd41e56544d9563b47401a670d96a34d7be920b6 \
-                    sha256  3915b9692ef8acb2588b0e26c2738e59e36766cfe83e7e52c0e601688e6c1956
+checksums           rmd160  45efb8bd90e0c0529be6c4ce82952f300b422e90 \
+                    sha256  85d1d5a80240f45c858bb25af6565c13d53e4b92882eb15fb2b18511fabf3de6
+
+universal_variant   no
 
 conflicts_build     ${name}
 
-patchfiles          patch-buildsys.diff
+patchfiles          patch-buildsys.diff \
+                    patch-acinclude.m4-drop-libc++-switch-from-gnu++11-to-c++11.diff
 
 depends_build       path:bin/pkg-config:pkgconfig \
                     path:bin/aclocal:automake \
@@ -45,8 +49,7 @@ depends_build       path:bin/pkg-config:pkgconfig \
 depends_lib         port:libiconv \
                     port:gettext \
                     path:lib/pkgconfig/dbus-1.pc:dbus \
-                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
-                    path:lib/pkgconfig/gtk-3.0.pc:gtk3
+                    path:lib/pkgconfig/glib-2.0.pc:glib2
 
 # Note: rpath is required on Mac OS X.
 configure.args      --enable-nls \
@@ -59,17 +62,48 @@ use_autoreconf      yes
 autoreconf.cmd      ./autogen.sh
 autoreconf.args
 
+# A compiler supporting C++11 is required to build audacious and its plugins.
+# The newer, the merrier.
+# Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
+# We do not know what "cc" is, so blacklist it as well.
+compiler.blacklist-append   {*gcc-4.[0-5]} {clang < 500} macports-clang-2.* \
+                            {macports-clang-3.[0-2]} cc
+
 platform darwin {
-    if {${configure.cxx_stdlib} ne {} &&
-        [string equal ${configure.cxx_stdlib} "libc++"]} {
-        if {${os.major} > 10} {
-            configure.ldflags-append  "-mmacosx-version-min=10.7"
+    if {${os.major} >= 13} {
+        if {${configure.cxx_stdlib} ne {} &&
+            [string equal ${configure.cxx_stdlib} "libc++"]} {
+            # Blacklist all GCC compilers to not accidentally pull in libstdc++.
+            compiler.blacklist-append {*gcc*}
+
+            # Make sure binary runs on 10.9+ only.
+            configure.ldflags-append  "-mmacosx-version-min=10.9"
         } else {
-            ui_error "libc++ is only supported on OS X 10.7 and up for this port."
-            error "libc++ supported on >= 10.7 only."
+            ui_error "The system libraries in OS X 10.9 and higher use libc++. Thus, libstdc++ is not supported for this port."
+            error "libstdc++ supported on <= 10.8 only."
         }
     } else {
-        configure.ldflags-append  "-mmacosx-version-min=10.5"
+        if {${configure.cxx_stdlib} ne {} &&
+            [string equal ${configure.cxx_stdlib} "libc++"]} {
+            ui_error "The system libraries in OS X 10.8 and lower use libstdc++. Thus, libstdc++ is not supported for this port."
+            error "libc++ supported on >= 10.9 only."
+        } else {
+            # Shameless copy from rust.
+            depends_lib-append          {path:lib/libstdc\\+\\+.6.dylib:libgcc}
+
+            # Force GCC 4.9.
+            compiler.blacklist-append   {*clang*}
+            compiler.fallback-append    macports-gcc-4.9
+
+            # Make sure binary runs on 10.5+ only.
+            configure.ldflags-append    "-mmacosx-version-min=10.5"
+
+            notes-append {
+                            Upstream for some reason requires libc++.
+                            Your build will use libstdc++. The maintainer assumes this
+                            to be OK, but you're on your own if stuff breaks.\
+            }
+        }
     }
 }
 
@@ -85,6 +119,39 @@ post-destroot {
 #    configure.args-replace --disable-chardet \
 #                           --enable-chardet
 #}
+
+variant qt5 description {Add Qt5 support} {
+    PortGroup   qt5 1.0
+
+    configure.args-replace  --disable-qt \
+                            --enable-qt
+
+    notes-append {
+                    Qt5 support is optional and untested.
+                    If it breaks, you've got to keep the pieces.\
+    }
+}
+
+variant gtk2 conflicts gtk3 description {Add GTK2 support} {
+    depends_lib-append      path:lib/pkgconfig/gtk-2.0.pc:gtk2
+
+    configure.args-replace  --disable-gtk \
+                            --enable-gtk
+}
+
+variant gtk3 conflicts gtk2 description {Add GTK3 support} {
+    depends_lib-append      path:lib/pkgconfig/gtk-3.0.pc:gtk3
+
+    patchfiles-append       patch-gtk3.diff
+
+    configure.args-replace  --disable-gtk \
+                            --enable-gtk
+}
+
+# Need either one of gtk2 or gtk3. Default to gtk2, which is preferred by upstream.
+if {![variant_isset gtk2] && ![variant_isset gtk3]} {
+    default_variants-append +gtk2
+}
 
 livecheck.type      regex
 livecheck.url       ${master_sites}

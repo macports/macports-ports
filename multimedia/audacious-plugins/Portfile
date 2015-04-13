@@ -3,12 +3,13 @@
 
 PortSystem          1.0
 PortGroup           conflicts_build 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 name                audacious-plugins
 
 # Please keep audacious, audacious-core and audacious-plugins synchronized.
-version             3.5.2
-revision            3
+version             3.6.1
+revision            0
 
 # FIXME: probably more licenses involved here...
 license             BSD GPL-2+
@@ -27,13 +28,15 @@ long_description    This ports bundles most of the functionality for audacious. 
 
 master_sites        http://distfiles.audacious-media-player.org
 use_bzip2           yes
-checksums           rmd160  2cf98e4fbf0e778672d509cd486274a8f7e4f10d \
-                    sha256  179600d7f8ae31a7d9c5785ce6fa7e09184dbd1271e0adb8c57760432c6a4cd9
+checksums           rmd160  68d302c3cb9d1dce98fa801e6ed220fa48e17e03 \
+                    sha256  0ae17d573dd094b3124e0bbec0c059c4ca668436830c922eb00f0b7eb9745195
+
+universal_variant   no
 
 conflicts_build     ${name}
 
 patchfiles          patch-buildsys.diff \
-                    patch-configure.ac-select-libsdl.diff
+                    patch-acinclude.m4-drop-libc++-switch-from-gnu++11-to-c++11.diff
 
 depends_build       path:bin/pkg-config:pkgconfig \
                     path:bin/aclocal:automake \
@@ -43,29 +46,33 @@ depends_lib         port:audacious-core \
                     port:gettext\
                     port:libxml2 \
                     path:lib/pkgconfig/glib-2.0.pc:glib2 \
-                    path:lib/pkgconfig/gtk-3.0.pc:gtk3 \
-                    path:lib/pkgconfig/gdk-x11-3.0.pc:gtk3 \
                     port:neon
 
 depends_run         port:unzip
 
 # Note: rpath is required on Mac OS X.
 #       sdlout is the only working audio output plugin at the moment on OS X.
+#       coreaudio is always enabled on OS X.
 #       Try PulseAudio at your own risk.
+#       --with-system-libxml2 enables or disables usage of libxml2 in /usr.
+#       Play it safe and use our libxml2 port.
+#       mac-media-keys is currently broken.
 configure.args      --enable-nls \
+                    --disable-gtk \
+                    --disable-qt \
+                    --with-system-libxml2=no \
                     --enable-xsf \
                     --enable-psf \
                     --enable-hotkey \
                     --enable-songchange \
-                    --enable-statusicon \
                     --enable-neon \
                     --enable-filewriter \
                     --enable-rpath \
-                    --enable-gtkui \
-                    --enable-skins \
                     --enable-lyricwiki \
                     --disable-console \
+                    --disable-qtaudio \
                     --disable-pulse \
+                    --enable-coreaudio \
                     --disable-sdlout \
                     --disable-mp3 \
                     --disable-gnomeshortcuts \
@@ -99,7 +106,13 @@ configure.args      --enable-nls \
                     --disable-resample \
                     --disable-speedpitch \
                     --disable-soxr \
-                    --disable-glspectrum
+                    --disable-glspectrum \
+                    --disable-qtglspectrum \
+                    --enable-vtx \
+                    --enable-ladspa \
+                    --enable-blur-scope \
+                    --enable-cairo-spectrum \
+                    --disable-mac-media-keys
 
 default_variants    +full
 
@@ -107,23 +120,53 @@ use_autoreconf      yes
 autoreconf.cmd      ./autogen.sh
 autoreconf.args
 
+# A compiler supporting C++11 is required to build audacious and its plugins.
+# The newer, the merrier.
+# Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
+# We do not know what "cc" is, so blacklist it as well.
+compiler.blacklist-append   {*gcc-4.[0-5]} {clang < 500} macports-clang-2.* \
+                            {macports-clang-3.[0-2]} cc
+
 platform darwin {
-    if {${configure.cxx_stdlib} ne {} &&
-        [string equal ${configure.cxx_stdlib} "libc++"]} {
-        if {${os.major} > 10} {
-            configure.ldflags-append  "-mmacosx-version-min=10.7"
+    if {${os.major} >= 13} {
+        if {${configure.cxx_stdlib} ne {} &&
+            [string equal ${configure.cxx_stdlib} "libc++"]} {
+            # Blacklist all GCC compilers to not accidentally pull in libstdc++.
+            compiler.blacklist-append {*gcc*}
+
+            # Make sure binary runs on 10.9+ only.
+            configure.ldflags-append  "-mmacosx-version-min=10.9"
         } else {
-            ui_error "libc++ is only supported on OS X 10.7 and up for this port."
-            error "libc++ supported on >= 10.7 only."
+            ui_error "The system libraries in OS X 10.9 and higher use libc++. Thus, libstdc++ is not supported for this port."
+            error "libstdc++ supported on <= 10.8 only."
         }
     } else {
-        configure.ldflags-append  "-mmacosx-version-min=10.5"
+        if {${configure.cxx_stdlib} ne {} &&
+            [string equal ${configure.cxx_stdlib} "libc++"]} {
+            ui_error "The system libraries in OS X 10.8 and lower use libstdc++. Thus, libstdc++ is not supported for this port."
+            error "libc++ supported on >= 10.9 only."
+        } else {
+            # Shameless copy from rust.
+            depends_lib-append          {path:lib/libstdc\\+\\+.6.dylib:libgcc}
+
+            # Force GCC 4.9.
+            compiler.blacklist-append   {*clang*}
+            compiler.fallback-append    macports-gcc-4.9
+
+            # Make sure binary runs on 10.5+ only.
+            configure.ldflags-append    "-mmacosx-version-min=10.5"
+
+            notes-append {
+                            Upstream for some reason requires libc++.
+                            Your build will use libstdc++. The maintainer assumes this
+                            to be OK, but you're on your own if stuff breaks.\
+            }
+        }
     }
 }
 
 post-destroot {
     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
-    xinstall -m 0644 ${worksrcpath}/AUTHORS ${destroot}${prefix}/share/doc/${name}
     xinstall -m 0644 ${worksrcpath}/COPYING ${destroot}${prefix}/share/doc/${name}
 }
 
@@ -251,13 +294,13 @@ variant midi description {Add MIDI playback support via fluidsynth} {
                             --enable-amidiplug
 }
 
-# libcdio-paranoia not ported yet
-#variant cdaudio description {Add support for CDAudio-NG} {
-#    depends_lib-append      port:libcdio \
-#                            port:libcddb
-#    configure.args-replace  --disable-cdaudio \
-#                            --enable-cdaudio
-#}
+variant cdaudio description {Add support for CDAudio-NG} {
+    depends_lib-append      port:libcdio \
+                            port:libcdio-paranoia \
+                            port:libcddb
+    configure.args-replace  --disable-cdaudio \
+                            --enable-cdaudio
+}
 
 variant lastfm description {Add support for last.fm} {
     depends_lib-append      port:curl
@@ -318,9 +361,47 @@ variant sdl2 conflicts sdl1 ffmpeg description {Add SDL audio output via libsdl2
     configure.args-append   --with-libsdl=2
 }
 
+variant qt5 description {Add Qt5 support} {
+    PortGroup   qt5 1.0
+
+    configure.args-replace  --disable-qt \
+                            --enable-qt
+
+    if {[variant_isset opengl]} {
+        configure.args-replace  --disable-qtglspectrum \
+                                --enable-qtglspectrum
+    }
+
+    configure.args-replace  --disable-qtaudio \
+                            --enable-qtaudio
+
+    notes-append {
+                    Qt5 support is optional and untested.
+                    If it breaks, you've got to keep the pieces.\
+    }
+}
+
+variant gtk2 conflicts gtk3 description {Add GTK2 support} {
+    depends_lib-append      path:lib/pkgconfig/gtk-2.0.pc:gtk2 \
+                            path:lib/pkgconfig/gdk-x11-2.0.pc:gtk2
+
+    configure.args-replace  --disable-gtk \
+                            --enable-gtk
+}
+
+variant gtk3 conflicts gtk2 description {Add GTK3 support} {
+    depends_lib-append      path:lib/pkgconfig/gtk-3.0.pc:gtk3 \
+                            path:lib/pkgconfig/gdk-x11-3.0.pc:gtk3
+
+    patchfiles-append       patch-gtk3.diff
+
+    configure.args-replace  --disable-gtk \
+                            --enable-gtk
+}
+
 variant full requires console mp3 dbus lirc osd osd_composite notifications \
-                      vorbis flac wavpack aac sndfile modplug midi lastfm mms \
-                      cue lame transform opengl \
+                      vorbis flac wavpack aac sndfile modplug midi cdaudio \
+                      lastfm mms cue lame transform opengl \
              description {Build all plugins, except additional sound output plugins and potentially conflicting variants} {}
 
 if {[variant_isset jack]} {
@@ -328,12 +409,17 @@ if {[variant_isset jack]} {
                     You have selected the JACK audio output plugin.
                     To use this plugin, jackd needs to be started manually.
                     The plugin is known to have issues leading to crackling sound output.
-                    Please don't report bugs against this plugin.
+                    Please don't report bugs against this plugin.\
     }
 }
 
 if {![variant_isset sdl2]} {
     default_variants-append +sdl1 +ffmpeg
+}
+
+# Need either one of gtk2 or gtk3. Default to gtk2, which is preferred by upstream.
+if {![variant_isset gtk2] && ![variant_isset gtk3]} {
+    default_variants-append +gtk2
 }
 
 livecheck.type      regex
