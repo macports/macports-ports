@@ -49,7 +49,7 @@
 #  $required
 #    is a list of variants that must be enabled for the test to succeed
 #    (required; remember this can also be a space-separated string or just
-#    a string for a single value. It's iterpreted as list, though.)
+#    a string for a single value. It's interpreted as list, though.)
 #  $forbidden
 #    is a list of variants that may not be enabled for the test to succeed
 #    (default is empty list, see description of $required for values that can be
@@ -68,7 +68,7 @@
 # }
 #
 # If all you want to do is bail out when the condition isn't fulfilled, there's
-# a convience wrapper available. If the condition isn't met it will print an
+# a convenience wrapper available. If the condition isn't met it will print an
 # error message and exit. This will also error out, if the port $name isn't
 # active, so you should probably not be using this before configure phase.
 #
