@@ -12,7 +12,7 @@ if {${livecheck.name} eq "default"} {
     }
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
-    set livecheck.url "http://sourceforge.net/api/file/index/project-name/${livecheck.name}/rss"
+    set livecheck.url "http://sourceforge.net/projects/${livecheck.name}/rss"
 }
 if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
