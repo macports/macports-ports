@@ -290,10 +290,10 @@ variant universal {
             set configure_dir_save  ${configure.dir}
             if { [string match "${worksrcpath}/*" ${configure.dir}] } {
                 # The configure directory is inside the source directory, so put in the new source directory name.
-                configure.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${configure.dir}]
+                option configure.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${configure.dir}]
             } else {
                 # The configure directory is outside the source directory, so give it a new name by appending ${arch}.
-                configure.dir  ${configure.dir}-${arch}
+                option configure.dir ${configure.dir}-${arch}
                 if { ![file exists ${configure.dir}] } {
                     file mkdir ${configure.dir}
                 }
@@ -302,10 +302,10 @@ variant universal {
             set autoreconf_dir_save  ${autoreconf.dir}
             if { [string match "${worksrcpath}/*" ${autoreconf.dir}] } {
                 # The autoreconf directory is inside the source directory, so put in the new source directory name.
-                autoreconf.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${autoreconf.dir}]
+                option autoreconf.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${autoreconf.dir}]
             } else {
                 # The autoreconf directory is outside the source directory, so give it a new name by appending ${arch}.
-                autoreconf.dir  ${autoreconf.dir}-${arch}
+                option autoreconf.dir ${autoreconf.dir}-${arch}
                 if { ![file exists ${autoreconf.dir}] } {
                     file mkdir ${autoreconf.dir}
                 }
@@ -314,15 +314,15 @@ variant universal {
             portconfigure::configure_main
 
             # Undo changes to the configure related variables
-            autoreconf.dir      {*}${autoreconf_dir_save}
-            configure.dir       {*}${configure_dir_save}
-            configure.compiler  {*}${configure_compiler_save}
-            configure.f90       {*}${configure_f90_save}
-            configure.f77       {*}${configure_f77_save}
-            configure.fc        {*}${configure_fc_save}
-            configure.cc        {*}${configure_cc_save}
-            configure.cxx       {*}${configure_cxx_save}
-            configure.objc      {*}${configure_objc_save}
+            option autoreconf.dir       ${autoreconf_dir_save}
+            option configure.dir        ${configure_dir_save}
+            option configure.compiler   ${configure_compiler_save}
+            option configure.f90        ${configure_f90_save}
+            option configure.f77        ${configure_f77_save}
+            option configure.fc         ${configure_fc_save}
+            option configure.cc         ${configure_cc_save}
+            option configure.cxx        ${configure_cxx_save}
+            option configure.objc       ${configure_objc_save}
             if { [info exists merger_configure_args(${arch})] } {
                 configure.args-delete  $merger_configure_args(${arch})
             }
@@ -370,10 +370,10 @@ variant universal {
             set build_dir_save  ${build.dir}
             if { [string match "${worksrcpath}/*" ${build.dir}] } {
                 # The build directory is inside the source directory, so put in the new source directory name.
-                build.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${build.dir}]
+                option build.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${build.dir}]
             } else {
                 # The build directory is outside the source directory, so give it a new name by appending ${arch}.
-                build.dir  ${build.dir}-${arch}
+                option build.dir ${build.dir}-${arch}
                 if { ![file exists ${build.dir}] } {
                     file mkdir ${build.dir}
                 }
@@ -381,7 +381,7 @@ variant universal {
 
             portbuild::build_main
 
-            build.dir ${build_dir_save}
+            option build.dir ${build_dir_save}
             if { [info exists merger_build_args(${arch})] } {
                 build.args-delete $merger_build_args(${arch})
             }
@@ -396,7 +396,7 @@ variant universal {
             ui_info "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] ${subport} ${arch}]"
             copy ${destroot} ${workpath}/destroot-${arch}
             set destdirSave ${destroot.destdir}
-            destroot.destdir [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+            option destroot.destdir [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
 
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-append  $merger_destroot_env(${arch})
@@ -407,10 +407,10 @@ variant universal {
             set destroot_dir_save ${destroot.dir}
             if { [string match "${worksrcpath}/*" ${destroot.dir}] } {
                 # The destroot directory is inside the source directory, so put in the new source directory name.
-                destroot.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${destroot.dir}]
+                option destroot.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${destroot.dir}]
             } else {
                 # The destroot directory is outside the source directory, so give it a new name by appending ${arch}.
-                destroot.dir  ${destroot.dir}-${arch}
+                option destroot.dir ${destroot.dir}-${arch}
                 if { ![file exists ${destroot.dir}] } {
                     file mkdir ${destroot.dir}
                 }
@@ -418,14 +418,14 @@ variant universal {
 
             portdestroot::destroot_main
 
-            destroot.dir  ${destroot_dir_save}
+            option destroot.dir ${destroot_dir_save}
             if { [info exists merger_destroot_args(${arch})] } {
                 destroot.args-delete $merger_destroot_args(${arch})
             }
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete  $merger_destroot_env(${arch})
             }
-            destroot.destdir ${destdirSave}
+            option destroot.destdir ${destdirSave}
         }
         delete ${destroot}
 
@@ -719,10 +719,10 @@ variant universal {
                 set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
                     # The test directory is inside the source directory, so put in the new source directory name.
-                    test.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${test.dir}]
+                    option test.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${test.dir}]
                 } else {
                     # The test directory is outside the source directory, so give it a new name by appending ${arch}.
-                    test.dir  ${test.dir}-${arch}
+                    option test.dir ${test.dir}-${arch}
                     if { ![file exists ${test.dir}] } {
                         file mkdir ${test.dir}
                     }
@@ -730,7 +730,7 @@ variant universal {
 
                 porttest::test_main
 
-                test.dir ${test_dir_save}
+                option test.dir ${test_dir_save}
             }
         }
     }
