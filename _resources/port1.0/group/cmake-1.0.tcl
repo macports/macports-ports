@@ -42,7 +42,8 @@ default cmake.build_dir {${workpath}/build}
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
 
-depends_build-append port:cmake
+# can use cmake or cmake-devel; default to cmake if not installed
+depends_build-append path:bin/cmake:cmake
 
 proc _cmake_get_build_dir {} {
     if {[option cmake.out_of_source]} {
