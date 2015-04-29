@@ -1,6 +1,6 @@
 # $Id$
 #
-# Copyright (c) 2011 The MacPorts Project
+# Copyright (c) 2011-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -206,8 +206,8 @@ proc crossgcc.setup {target version} {
         }
 
         livecheck.type  regex
-        livecheck.url   http://gcc.gnu.org/releases.html
-        livecheck.regex {<tr><td><a href="gcc-.*/">GCC (.*)</a></td>   <td>.*</td></tr>}
+        livecheck.url   http://ftp.gnu.org/gnu/gcc/
+        livecheck.regex gcc-(\[0-9\]+\\.\[0-9.\]+)/
     # uplevel
     }
 # crossgcc.setup
