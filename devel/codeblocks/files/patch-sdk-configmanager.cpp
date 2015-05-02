@@ -1,3 +1,5 @@
+written by afb
+
 --- src/sdk/configmanager.cpp.orig
 +++ src/sdk/configmanager.cpp
 @@ -1442,8 +1442,10 @@ void ConfigManager::InitPaths()
