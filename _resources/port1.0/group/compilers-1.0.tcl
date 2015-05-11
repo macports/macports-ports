@@ -77,24 +77,29 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$version
 }
 
-set clang_versions {0 1 2 3 4 5}
+set clang_versions {30 31 32 33 34 35}
 foreach v ${clang_versions} {
-    lappend compilers.clang_variants clang3$v
-    set cdb(clang3$v,variant)  clang3$v
-    set cdb(clang3$v,compiler) macports-clang-3.$v
-    set cdb(clang3$v,descrip)  "MacPorts clang 3.$v"
-    set cdb(clang3$v,depends)  port:clang-3.$v
-    set cdb(clang3$v,dependsl) ""
-    set cdb(clang3$v,dependsd) ""
-    set cdb(clang3$v,dependsa) clang-3.$v
-    set cdb(clang3$v,conflict) ""
-    set cdb(clang3$v,cc)       ${prefix}/bin/clang-mp-3.$v
-    set cdb(clang3$v,cxx)      ${prefix}/bin/clang++-mp-3.$v
-    set cdb(clang3$v,cpp)      "${prefix}/bin/clang-mp-3.$v -E"
-    set cdb(clang3$v,objc)     ""
-    set cdb(clang3$v,fc)       ""
-    set cdb(clang3$v,f77)      ""
-    set cdb(clang3$v,f90)      ""
+    # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
+    set version $v
+    if {[string length $v] > 1} {
+        set version [string index $v 0].[string index $v 1]
+    }
+    lappend compilers.clang_variants clang$v
+    set cdb(clang$v,variant)  clang$v
+    set cdb(clang$v,compiler) macports-clang-$version
+    set cdb(clang$v,descrip)  "MacPorts clang $version"
+    set cdb(clang$v,depends)  port:clang-$version
+    set cdb(clang$v,dependsl) ""
+    set cdb(clang$v,dependsd) ""
+    set cdb(clang$v,dependsa) clang-$version
+    set cdb(clang$v,conflict) ""
+    set cdb(clang$v,cc)       ${prefix}/bin/clang-mp-$version
+    set cdb(clang$v,cxx)      ${prefix}/bin/clang++-mp-$version
+    set cdb(clang$v,cpp)      "${prefix}/bin/clang-mp-$version -E"
+    set cdb(clang$v,objc)     ""
+    set cdb(clang$v,fc)       ""
+    set cdb(clang$v,f77)      ""
+    set cdb(clang$v,f90)      ""
 }
 
 # dragonegg versions match the corresponding clang version until 3.5
