@@ -94,22 +94,27 @@ proc merger_target_provides {ditem args} {
     # register just the procedure, no pre-/post-
     # User-code exceptions are caught and returned as a result of the target.
     # Thus if the user code breaks, dependent targets will not execute.
+    set script_template {
+        variable proc_index
+        set proc_index [llength [ditem_key ${ditem} post]]
+        set proc_name proc-merger-post-${ident}-${target}-$proc_index
+        ditem_append ${ditem} merger-post $proc_name
+        proc $proc_name name {
+            set userproc_name user[lindex [info level 0] 0]
+            if {[catch $userproc_name result]} {
+                return -code error $result
+            }
+            return 0
+        }
+        makeuserproc user$proc_name $args
+    }
     foreach target $args {
-        set origproc [ditem_key $ditem procedure]
         set ident [ditem_key $ditem name]
-        proc merger-post-$target {args} "
-            variable proc_index
-            set proc_index \[llength \[ditem_key $ditem post\]\]
-            ditem_append $ditem merger-post proc-merger-post-${ident}-${target}-\${proc_index}
-            proc proc-merger-post-${ident}-${target}-\${proc_index} {name} \"
-                if {\\\[catch userproc-merger-post-${ident}-${target}-\${proc_index} result\\\]} {
-                    return -code error \\\$result
-                } else {
-                    return 0
-                }
-            \"
-            makeuserproc userproc-merger-post-${ident}-${target}-\${proc_index} \$args
-        "
+        proc merger-post-$target args \
+                [string map [list \${ditem} [list $ditem] \
+                                  \${ident} [list $ident] \
+                                  \${target} [list $target]] \
+                            $script_template]
     }
 }
 
