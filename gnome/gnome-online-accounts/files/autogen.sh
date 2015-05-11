@@ -21,4 +21,4 @@ cd telepathy-account-widgets
 sh autogen.sh --no-configure
 cd ..
 
-. gnome-autogen.sh --enable-gtk-doc "$@"
+. gnome-autogen.sh "$@"
