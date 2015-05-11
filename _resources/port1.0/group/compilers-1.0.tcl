@@ -52,24 +52,29 @@ default compilers.required_f {}
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc 4{4..9} compiler attributes
-set gcc_versions {4 5 6 7 8 9}
+set gcc_versions {44 45 46 47 48 49}
 foreach v ${gcc_versions} {
-    lappend compilers.gcc_variants gcc4$v
-    set cdb(gcc4$v,variant)  gcc4$v
-    set cdb(gcc4$v,compiler) macports-gcc-4.$v
-    set cdb(gcc4$v,descrip)  "MacPorts gcc 4.$v"
-    set cdb(gcc4$v,depends)  port:gcc4$v
-    set cdb(gcc4$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
-    set cdb(gcc4$v,dependsd) port:g95
-    set cdb(gcc4$v,dependsa) gcc4$v
-    set cdb(gcc4$v,conflict) "gfortran g95"
-    set cdb(gcc4$v,cc)       ${prefix}/bin/gcc-mp-4.$v
-    set cdb(gcc4$v,cxx)      ${prefix}/bin/g++-mp-4.$v
-    set cdb(gcc4$v,cpp)      ${prefix}/bin/cpp-mp-4.$v
-    set cdb(gcc4$v,objc)     ${prefix}/bin/gcc-mp-4.$v
-    set cdb(gcc4$v,fc)       ${prefix}/bin/gfortran-mp-4.$v
-    set cdb(gcc4$v,f77)      ${prefix}/bin/gfortran-mp-4.$v
-    set cdb(gcc4$v,f90)      ${prefix}/bin/gfortran-mp-4.$v
+    # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
+    set version $v
+    if {[string length $v] > 1} {
+        set version [string index $v 0].[string index $v 1]
+    }
+    lappend compilers.gcc_variants gcc$v
+    set cdb(gcc$v,variant)  gcc$v
+    set cdb(gcc$v,compiler) macports-gcc-$version
+    set cdb(gcc$v,descrip)  "MacPorts gcc $version"
+    set cdb(gcc$v,depends)  port:gcc$v
+    set cdb(gcc$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
+    set cdb(gcc$v,dependsd) port:g95
+    set cdb(gcc$v,dependsa) gcc$v
+    set cdb(gcc$v,conflict) "gfortran g95"
+    set cdb(gcc$v,cc)       ${prefix}/bin/gcc-mp-$version
+    set cdb(gcc$v,cxx)      ${prefix}/bin/g++-mp-$version
+    set cdb(gcc$v,cpp)      ${prefix}/bin/cpp-mp-$version
+    set cdb(gcc$v,objc)     ${prefix}/bin/gcc-mp-$version
+    set cdb(gcc$v,fc)       ${prefix}/bin/gfortran-mp-$version
+    set cdb(gcc$v,f77)      ${prefix}/bin/gfortran-mp-$version
+    set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$version
 }
 
 set clang_versions {0 1 2 3 4 5}
