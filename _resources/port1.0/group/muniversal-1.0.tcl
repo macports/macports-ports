@@ -106,7 +106,12 @@ proc merger_target_provides {ditem args} {
             }
             return 0
         }
-        makeuserproc user$proc_name $args
+        if {[info commands macports_version] ne ""
+                && [vercmp 2.3.99 [macports_version]] <= 0} {
+            makeuserproc user$proc_name [lindex $args 0]
+        } else {
+            makeuserproc user$proc_name $args
+        }
     }
     foreach target $args {
         set ident [ditem_key $ditem name]
