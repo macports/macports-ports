@@ -97,7 +97,7 @@ proc merger_target_provides {ditem args} {
     foreach target $args {
         set origproc [ditem_key $ditem procedure]
         set ident [ditem_key $ditem name]
-        proc merger-post-$target {args} "
+        proc merger-post-$target code "
             variable proc_index
             set proc_index \[llength \[ditem_key $ditem post\]\]
             ditem_append $ditem merger-post proc-merger-post-${ident}-${target}-\${proc_index}
@@ -108,7 +108,7 @@ proc merger_target_provides {ditem args} {
                     return 0
                 }
             \"
-            makeuserproc userproc-merger-post-${ident}-${target}-\${proc_index} \$args
+            makeuserproc userproc-merger-post-${ident}-${target}-\${proc_index} \$code
         "
     }
 }
