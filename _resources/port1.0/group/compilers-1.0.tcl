@@ -51,8 +51,8 @@ default compilers.required_f {}
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
-# build database of gcc 4{4..9} compiler attributes
-set gcc_versions {44 45 46 47 48 49}
+# build database of gcc {4{4..9} 5 6} compiler attributes
+set gcc_versions {44 45 46 47 48 49 5 6}
 foreach v ${gcc_versions} {
     # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
     set version $v
