@@ -35,17 +35,18 @@
 
 options select.group select.file
 
-default select.group ""
-default select.file ""
+default select.group {}
+default select.file {}
 
 namespace eval select {}
 
 proc select::install {group file {name ""}} {
-    global prefix destroot frameworks_dir applications_dir developer_dir
+    global applications_dir destroot developer_dir \
+            frameworks_dir prefix
 
     # Optional argument specifies file name
-    if {${name} == ""} {
-        set name [file tail ${file}]
+    if {$name eq ""} {
+        set name [file tail $file]
     }
 
     xinstall -m 755 -d ${destroot}${prefix}/etc/select/${group}
@@ -58,7 +59,7 @@ proc select::install {group file {name ""}} {
 }
 
 post-destroot {
-    if {${select.file} != "" && ${select.group} != ""} {
+    if {${select.file} ne "" && ${select.group} ne ""} {
         select::install ${select.group} ${select.file}
     } else {
         ui_debug "PortGroup select: select.group or select.file not set"
