@@ -49,13 +49,15 @@ proc select::install {group file {name ""}} {
         set name [file tail $file]
     }
 
-    xinstall -m 755 -d ${destroot}${prefix}/etc/select/${group}
-    xinstall -m 644 ${file} ${destroot}${prefix}/etc/select/${group}/${name}
+    set selectFile ${destroot}${prefix}/etc/select/$group/$name
 
-    reinplace s|\${prefix}|${prefix}|g ${destroot}${prefix}/etc/select/${group}/${name}
-    reinplace s|\${frameworks_dir}|${frameworks_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
-    reinplace s|\${applications_dir}|${applications_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
-    reinplace s|\${developer_dir}|${developer_dir}|g ${destroot}${prefix}/etc/select/${group}/${name}
+    xinstall -m 755 -d [file dirname $selectFile]
+    xinstall -m 644 $file $selectFile
+
+    reinplace s|\${prefix}|${prefix}|g $selectFile
+    reinplace s|\${frameworks_dir}|${frameworks_dir}|g $selectFile
+    reinplace s|\${applications_dir}|${applications_dir}|g $selectFile
+    reinplace s|\${developer_dir}|${developer_dir}|g $selectFile
 }
 
 post-destroot {
