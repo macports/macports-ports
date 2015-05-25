@@ -1,10 +1,8 @@
 # et:ts=4
-# select-1.0.tcl
-#
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project
 # Copyright (c) 2009 Rainer Mueller <raimue@macports.org>
+# Copyright (c) 2009-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -32,11 +30,19 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+#
+#
+# select-1.0.tcl
+#
+# This portgroup provides access to the port selection mechanism exposed
+# by the `port select` command. (Refer to the port(1) and port-select(1)
+# man pages for end-user information).
 
-options select.group select.file
+options select.group select.file select.entries
 
 default select.group {}
 default select.file {}
+default select.entries {}
 
 namespace eval select {}
 
@@ -65,9 +71,27 @@ proc select::install {group file {name ""}} {
 }
 
 post-destroot {
-    if {${select.file} ne "" && ${select.group} ne ""} {
-        select::install ${select.group} ${select.file}
-    } else {
-        ui_debug "PortGroup select: select.group or select.file not set"
+    if {${select.file} ne "" || ${select.group} ne ""} {
+        select.entries-prepend [list ${select.group} ${select.file}]
+    }
+    ui_debug {PortGroup select: Installing select files to destroot}
+    foreach entry ${select.entries} {
+        set extras [lassign $entry group file name]
+        if {[llength $extras] > 0} {
+            ui_debug "PortGroup select:\
+                    Ignoring entry with too many elements: '$entry'"
+            continue
+        }
+        if {$group eq ""} {
+            ui_debug "PortGroup select:\
+                    Ignoring entry with missing group name: '$entry'"
+            continue
+        }
+        if {$file eq ""} {
+            ui_debug "PortGroup select:\
+                    Ignoring entry with missing file name: '$entry'"
+            continue
+        }
+        select::install $group $file $name
     }
 }
