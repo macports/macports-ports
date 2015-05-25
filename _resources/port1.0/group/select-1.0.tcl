@@ -41,8 +41,12 @@ default select.file {}
 namespace eval select {}
 
 proc select::install {group file {name ""}} {
-    global applications_dir destroot developer_dir \
+    global applications_dir destroot developer_dir filespath \
             frameworks_dir prefix
+
+    if {[file pathtype $file] eq "relative"} {
+        set file ${filespath}/$file
+    }
 
     # Optional argument specifies file name
     if {$name eq ""} {
