@@ -75,23 +75,23 @@ post-destroot {
         select.entries-prepend [list ${select.group} ${select.file}]
     }
     ui_debug {PortGroup select: Installing select files to destroot}
-    foreach entry ${select.entries} {
-        set extras [lassign $entry group file name]
+    foreach selectEntry ${select.entries} {
+        set extras [lassign $selectEntry selectGroup selectFile selectName]
         if {[llength $extras] > 0} {
             ui_debug "PortGroup select:\
-                    Ignoring entry with too many elements: '$entry'"
+                    Ignoring entry with too many elements: '$selectEntry'"
             continue
         }
-        if {$group eq ""} {
+        if {$selectGroup eq ""} {
             ui_debug "PortGroup select:\
-                    Ignoring entry with missing group name: '$entry'"
+                    Ignoring entry with missing group name: '$selectEntry'"
             continue
         }
-        if {$file eq ""} {
+        if {$selectFile eq ""} {
             ui_debug "PortGroup select:\
-                    Ignoring entry with missing file name: '$entry'"
+                    Ignoring entry with missing file name: '$selectEntry'"
             continue
         }
-        select::install $group $file $name
+        select::install $selectGroup $selectFile $selectName
     }
 }
