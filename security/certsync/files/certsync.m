@@ -156,33 +156,33 @@ static BOOL ValidateSystemTrust(SecCertificateRef cert) {
 
     /* Create a new trust evaluation instance */
     SecTrustRef trust;
-	{
-		SecPolicyRef policy;
-		if (&SecPolicyCreateBasicX509 != NULL) /* >= 10.6 */ {
-			policy = SecPolicyCreateBasicX509();
-		} else /* < 10.6 */ {
-			SecPolicySearchRef searchRef = NULL;
-			const CSSM_OID *policyOID = &CSSMOID_APPLE_X509_BASIC;
+    {
+        SecPolicyRef policy;
+        if (&SecPolicyCreateBasicX509 != NULL) /* >= 10.6 */ {
+            policy = SecPolicyCreateBasicX509();
+        } else /* < 10.6 */ {
+            SecPolicySearchRef searchRef = NULL;
+            const CSSM_OID *policyOID = &CSSMOID_APPLE_X509_BASIC;
 
-			if ((err = SecPolicySearchCreate(CSSM_CERT_X_509v3, policyOID, NULL, &searchRef)) != errSecSuccess) {
-				cssmPerror("SecPolicySearchCreate", err);
-				return NO;
-			}
-			if ((err = SecPolicySearchCopyNext(searchRef, &policy))) {
-				cssmPerror("SecPolicySearchCopyNext", err);
-				return NO;
-			}
-		}
+            if ((err = SecPolicySearchCreate(CSSM_CERT_X_509v3, policyOID, NULL, &searchRef)) != errSecSuccess) {
+                cssmPerror("SecPolicySearchCreate", err);
+                return NO;
+            }
+            if ((err = SecPolicySearchCopyNext(searchRef, &policy))) {
+                cssmPerror("SecPolicySearchCopyNext", err);
+                return NO;
+            }
+        }
 
-		if ((err = SecTrustCreateWithCertificates((CFTypeRef) cert, policy, &trust)) != errSecSuccess) {
-			/* Shouldn't happen */
-			nsfprintf(stderr, @"Failed to create SecTrustRef: %d\n", err);
-			CFRelease(policy);
-			return NO;
-		}
+        if ((err = SecTrustCreateWithCertificates((CFTypeRef) cert, policy, &trust)) != errSecSuccess) {
+            /* Shouldn't happen */
+            nsfprintf(stderr, @"Failed to create SecTrustRef: %d\n", err);
+            CFRelease(policy);
+            return NO;
+        }
 
-		CFRelease(policy);
-	}
+        CFRelease(policy);
+    }
 
     /* Allow verifying root certificates (which would otherwise be an error).
      * Without this, intermediates added as roots aren't exported. */
