@@ -117,8 +117,10 @@ proc mpi.setup_variants {args} {
                     }
                     set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
 
+                    # there is no mpicpp or mpiobj
+                    # if more compilers are added in compilers portgroup, need to be added here
                     foreach compiler \${compilers.list} {
-                        if {\$compiler ne "fc"} {
+                        if {\$compiler ne "fc" && \$compiler ne "cpp" && \$compiler ne "objc"} {
                             configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
                         }
                     }
