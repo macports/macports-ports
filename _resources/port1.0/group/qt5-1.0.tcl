@@ -65,27 +65,11 @@ set qt_name             qt5
 
 # standard install directory
 global qt_dir
-set qt_dir              ${prefix}
+set qt_dir               ${prefix}/libexec/qt5-mac
 
-# standard Qt documents directory
-global qt_docs_dir
-set qt_docs_dir         ${qt_dir}/share/doc/${qt_name}
-
-# standard Qt plugins directory
-global qt_plugins_dir
-set qt_plugins_dir      ${qt_dir}/share/${qt_name}/plugins
-
-# standard Qt mkspecs directory
-global qt_mkspecs_dir
-set qt_mkspecs_dir      ${qt_dir}/share/${qt_name}/mkspecs
-
-# standard Qt imports directory
-global qt_imports_dir
-set qt_imports_dir      ${qt_dir}/share/${qt_name}/imports
-
-# standard Qt qml directory
-global qt_qml_dir
-set qt_qml_dir          ${qt_dir}/share/${qt_name}/qml
+# standard Qt non-.app executables directory
+global qt_bins_dir
+set qt_bins_dir         ${qt_dir}/bin
 
 # standard Qt includes directory
 global qt_includes_dir
@@ -97,70 +81,70 @@ set qt_libs_dir         ${qt_dir}/lib
 
 # standard Qt libraries directory
 global qt_frameworks_dir
-set qt_frameworks_dir   ${qt_dir}/Library/Frameworks
+set qt_frameworks_dir   ${qt_libs_dir}
 
-# standard Qt non-.app executables directory
-global qt_bins_dir
-set qt_bins_dir         ${qt_dir}/bin
+global qt_archdata_dir
+set qt_archdata_dir  ${qt_dir}
 
-# standard Qt .app executables directory, if created
-global qt_apps_dir
-set qt_apps_dir         ${applications_dir}/Qt5
+# standard Qt plugins directory
+global qt_plugins_dir
+set qt_plugins_dir      ${qt_archdata_dir}/plugins
+
+# standard Qt imports directory
+global qt_imports_dir
+set qt_imports_dir      ${qt_archdata_dir}/imports
+
+# standard Qt qml directory
+global qt_qml_dir
+set qt_qml_dir          ${qt_archdata_dir}/qml
 
 # standard Qt data directory
 global qt_data_dir
-set qt_data_dir         ${qt_dir}/share/${qt_name}
+set qt_data_dir         ${qt_dir}
+
+# standard Qt documents directory
+global qt_docs_dir
+set qt_docs_dir         ${qt_data_dir}/doc
 
 # standard Qt translations directory
 global qt_translations_dir
-set qt_translations_dir ${qt_dir}/share/${qt_name}/translations
+set qt_translations_dir ${qt_data_dir}/translations
 
 # standard Qt sysconf directory
 global qt_sysconf_dir
-set qt_sysconf_dir      ${qt_dir}/etc/${qt_name}
+set qt_sysconf_dir      ${qt_dir}/etc/xdg
 
 # standard Qt examples directory
 global qt_examples_dir
-set qt_examples_dir     ${qt_dir}/share/${qt_name}/examples
+set qt_examples_dir     ${qt_dir}/examples
 
 # standard Qt tests directory
 global qt_tests_dir
-set qt_tests_dir        ${qt_dir}/share/${qt_name}/tests
+set qt_tests_dir        ${qt_dir}/tests
+
+# data used by qmake
+global qt_host_data_dir
+set qt_host_data_dir    ${qt_dir}
 
 # standard Qt demos directory
-global qt_demos_dir
-set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
+#global qt_demos_dir
+#set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
+
+# standard Qt mkspecs directory
+global qt_mkspecs_dir
+set qt_mkspecs_dir      ${qt_dir}/mkspecs
+
+# standard Qt .app executables directory, if created?
+#global qt_apps_dir
+#set qt_apps_dir         ${qt_bins_dir}
 
 # standard CMake module directory for Qt-related files
-global qt_cmake_module_dir
-set qt_cmake_module_dir ${qt_libs_dir}/cmake
+#global qt_cmake_module_dir
+#set qt_cmake_module_dir ${qt_libs_dir}/cmake
 
 # standard qmake command location
 global qt_qmake_cmd
 set qt_qmake_cmd        ${qt_dir}/bin/qmake
-
-# standard qmake spec
-# configure script prefers clang (but "[a]dvertise[s] g++ as an alternative on Lion and below").
-# According to http://qt-project.org/doc/qt-5/supported-platforms.html#reference-configurations,
-#    however, Snow Leopard is only tested on "GCC as provided by Apple"
-# Create a variant for Snow Leopard that uses "-platform macx-g++-32" or "-platform macx-g++"?
-global qt_qmake_spec
-global qt_qmake_spec_32
-global qt_qmake_spec_64
-compiler.whitelist clang
-
-set qt_qmake_spec_32 macx-clang-32
-set qt_qmake_spec_64 macx-clang
-
-if { ![option universal_variant] || ![variant_isset universal] } {
-    if { ${build_arch} eq "i386" } {
-        set qt_qmake_spec ${qt_qmake_spec_32}
-    } else {
-        set qt_qmake_spec ${qt_qmake_spec_64}
-    }
-} else {
-    set qt_qmake_spec ""
-}
 
 # standard moc command location
 global qt_moc_cmd
@@ -178,9 +162,25 @@ set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
 global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
-# data used by qmake
-global qt_host_data_dir
-set qt_host_data_dir    ${qt_dir}/share/${qt_name} 
+# standard qmake spec
+# other platforms required? (see http://doc.qt.io/qt-5/supported-platforms.html and http://doc.qt.io/QtSupportedPlatforms/index.html)
+global qt_qmake_spec
+global qt_qmake_spec_32
+global qt_qmake_spec_64
+compiler.whitelist clang
+
+set qt_qmake_spec_32 macx-clang-32
+set qt_qmake_spec_64 macx-clang
+
+if { ![option universal_variant] || ![variant_isset universal] } {
+    if { ${build_arch} eq "i386" } {
+        set qt_qmake_spec ${qt_qmake_spec_32}
+    } else {
+        set qt_qmake_spec ${qt_qmake_spec_64}
+    }
+} else {
+    set qt_qmake_spec ""
+}
 
 # standard cmake info for Qt5
 global qt_cmake_defines
