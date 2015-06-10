@@ -139,7 +139,7 @@ set cdb(llvm,fc)       ""
 set cdb(llvm,f77)      ""
 set cdb(llvm,f90)      ""
 
-# and lastly we add a gfortran and g95 variant for use with clang*; note that
+# and lastly we add a gfortran and g95 variant for use with clang* and llvm; note that
 # we don't need gfortran when we are in an "only-fortran" mode
 set compilers.gfortran_equiv    gcc49
 set cdb(gfortran,variant)  gfortran
@@ -160,7 +160,7 @@ set cdb(gfortran,f90)      $cdb(${compilers.gfortran_equiv},f90)
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
-set cdb(g95,descrip)  "Fortran compiler from g95"
+set cdb(g95,descrip)  "g95 Fortran"
 set cdb(g95,depends)  port:g95
 set cdb(g95,dependsl) ""
 set cdb(g95,dependsd) ""
@@ -199,13 +199,14 @@ proc compilers.setup_variants {args} {
             set i [lsearch -exact ${compilers.variants} $variant]
             set c [lreplace ${compilers.variants} $i $i]
 
-            # fortran doesn't conflict with clang
+            # Fortran compilers do not conflict with C compilers.
+            # thus, llvm and clang do not conflict with g95 and gfortran
             if {$variant eq "gfortran" || $variant eq "g95"} {
-                foreach clangcomp ${compilers.clang_variants} {
+                foreach clangcomp [concat ${compilers.clang_variants} {llvm}] {
                     set i [lsearch -exact $c $clangcomp]
                     set c [lreplace $c $i $i]
                 }
-            } elseif {[string match clang* $variant]} {
+            } elseif {[string match clang* $variant] || $variant == "llvm"} {
                 set i [lsearch -exact $c gfortran]
                 set c [lreplace $c $i $i]
                 set i [lsearch -exact $c g95]
