@@ -432,7 +432,7 @@ proc compilers.is_c_only {} {
 # for the c compiler
 proc compilers.enforce_c {args} {
     global compilers.required_c
-    set compilers.required_c $args
+    lappend compilers.required_c $args
 }
 
 proc compilers.action_enforce_c {args} {
@@ -453,7 +453,7 @@ proc compilers.action_enforce_c {args} {
 
 proc compilers.enforce_fortran {args} {
     global compilers.required_f
-    set compilers.required_f $args
+    lappend compilers.required_f $args
 }
 
 proc compilers.action_enforce_f {args} {
