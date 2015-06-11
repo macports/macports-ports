@@ -63,7 +63,7 @@
 #   ruby.version: use ruby.api_version.
 # values from ruby.setup:
 #   ruby.module: port name without prefix. rb-${ruby.module}.
-#   ruby.project: project name at rubygems, rubyforge or sourceforge.
+#   ruby.project: project name at rubygems or sourceforge.
 
 options ruby.default_branch
 default ruby.default_branch 1.8
@@ -193,42 +193,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     categories      ruby
 
     switch -glob ${source} {
-        rubyforge:*:* {
-            set num [lindex [split ${source} {:}] 1]
-            set ruby.project [string tolower [lindex [split ${source} {:}] 2]]
-            homepage        http://rubyforge.org/projects/${ruby.project}
-            master_sites    http://rubyforge.org/frs/download.php/${num}/
-            livecheck.type  regex
-            livecheck.url   http://rubyforge.org/projects/${ruby.project}
-            livecheck.regex "<strong>${ruby.project}</strong></td><td>(?:REL )?(.*)$"
-        }
-        rubyforge:* {
-            set num [lindex [split ${source} {:}] 1]
-            set ruby.project [string tolower ${ruby.project}]
-            homepage        http://rubyforge.org/projects/${ruby.project}
-            master_sites    http://rubyforge.org/frs/download.php/${num}/
-            livecheck.type  regex
-            livecheck.url   http://rubyforge.org/projects/${ruby.project}
-            livecheck.regex "<strong>${ruby.project}</strong></td><td>(?:REL )?(.*)$"
-        }
-        rubyforge_gem:* {
-            set ruby.project [string tolower [lindex [split ${source} {:}] 1]]
-            homepage        http://rubyforge.org/projects/${ruby.project}
-            master_sites    http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
-                            http://rubyforge.iasi.roedu.net/gems/
-            livecheck.type  regex
-            livecheck.url   http://rubyforge.org/projects/${ruby.project}
-            livecheck.regex "<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
-        }
-        rubyforge_gem {
-            set ruby.project [string tolower ${ruby.project}]
-            homepage        http://rubyforge.org/projects/${ruby.project}
-            master_sites    http://gems.rubyforge.vm.bytemark.co.uk/gems/ \
-                            http://rubyforge.iasi.roedu.net/gems/
-            livecheck.type  regex
-            livecheck.url   http://rubyforge.org/projects/${ruby.project}
-            livecheck.regex "<strong>${ruby.module}</strong></td><td>(?:REL )?(.*)$"
-        }
         rubygems {
             homepage        http://www.rubygems.org/gems/${ruby.project}
             master_sites    http://www.rubygems.org/downloads/
