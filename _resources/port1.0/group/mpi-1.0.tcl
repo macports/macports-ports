@@ -232,7 +232,7 @@ proc mpi.setup {args} {
             require {
                 set mpi.require 1
             }
-            require_fortan {
+            require_fortran {
                 set cl [add_from_list $cl "require_fortran"]
             }
             default {
