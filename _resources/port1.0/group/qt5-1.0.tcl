@@ -135,8 +135,8 @@ global qt_mkspecs_dir
 set qt_mkspecs_dir      ${qt_dir}/mkspecs
 
 # standard Qt .app executables directory, if created?
-#global qt_apps_dir
-#set qt_apps_dir         ${qt_bins_dir}
+global qt_apps_dir
+set qt_apps_dir         ${qt_bins_dir}
 
 # standard CMake module directory for Qt-related files
 #global qt_cmake_module_dir
