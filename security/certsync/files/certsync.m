@@ -107,17 +107,17 @@ int nsprintf (NSString *format, ...) {
  * @return BOOL indicating whether this system supports retrieving CNs from certificates
  */
 static BOOL GetCertSubject(SecCertificateRef cert, CFStringRef *subject, NSError **subjectError) {
-    if (&SecCertificateCopyShortDescription != NULL /* 10.7 */) {
+    if (SecCertificateCopyShortDescription != NULL /* 10.7 */) {
         *subject = PLCFAutorelease(SecCertificateCopyShortDescription(NULL, cert, (CFErrorRef *) subjectError));
         return YES;
     }
 
-    if (&SecCertificateCopySubjectSummary   != NULL /* 10.6 */) {
+    if (SecCertificateCopySubjectSummary   != NULL /* 10.6 */) {
         *subject = PLCFAutorelease(SecCertificateCopySubjectSummary(cert));
         return YES;
     }
 
-    if (&SecCertificateCopyCommonName       != NULL /* 10.5 */) {
+    if (SecCertificateCopyCommonName       != NULL /* 10.5 */) {
         OSStatus err;
         if ((err = SecCertificateCopyCommonName(cert, subject)) == errSecSuccess && *subject != NULL) {
             PLCFAutorelease(*subject);
@@ -158,7 +158,7 @@ static BOOL ValidateSystemTrust(SecCertificateRef cert) {
     SecTrustRef trust;
     {
         SecPolicyRef policy;
-        if (&SecPolicyCreateBasicX509 != NULL) /* >= 10.6 */ {
+        if (SecPolicyCreateBasicX509 != NULL) /* >= 10.6 */ {
             policy = SecPolicyCreateBasicX509();
         } else /* < 10.6 */ {
             SecPolicySearchRef searchRef = NULL;
@@ -265,7 +265,7 @@ static NSArray *certificatesForTrustDomain (SecTrustSettingsDomain domain, NSErr
     OSStatus err;
 
     /* Mac OS X >= 10.5 provides SecTrustSettingsCopyCertificates() */
-    if (&SecTrustSettingsCopyCertificates != NULL) {
+    if (SecTrustSettingsCopyCertificates != NULL) {
         /* Fetch all certificates in the given domain */
         err = SecTrustSettingsCopyCertificates(domain, &certs);
         if (err == errSecSuccess) {
@@ -408,7 +408,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
         /* Set the keychain preference domain to user, this causes
          * ValidateSystemTrust to use the user's keychain */
         if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainUser)) != errSecSuccess) {
-            if (&SecCopyErrorMessageString != NULL) {
+            if (SecCopyErrorMessageString != NULL) {
                 /* >= 10.5 */
                 CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
                 nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
@@ -434,7 +434,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
     /* Admin & System */
     /* Causes ValidateSystemTrust to ignore the user's keychain */
     if ((err = SecKeychainSetPreferenceDomain(kSecPreferencesDomainSystem)) != errSecSuccess) {
-        if (&SecCopyErrorMessageString != NULL) {
+        if (SecCopyErrorMessageString != NULL) {
             /* >= 10.5 */
             CFStringRef errMsg = PLCFAutorelease(SecCopyErrorMessageString(err, NULL));
             nsfprintf(stderr, @"Failed to set keychain preference domain: %@\n", errMsg);
@@ -489,7 +489,7 @@ static int exportCertificates (BOOL userAnchors, NSString *outputFile) {
 
     /* Prefer the non-deprecated SecItemExport on Mac OS X >= 10.7. We use an ifdef to keep the code buildable with earlier SDKs, too. */
     nsfprintf(stderr, @"Exporting certificates from the keychain\n");
-    if (&SecItemExport != NULL) {
+    if (SecItemExport != NULL) {
         err = SecItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
     } else {
         err = SecKeychainItemExport((CFArrayRef) anchors, kSecFormatPEMSequence, kSecItemPemArmour, NULL, &pemData);
