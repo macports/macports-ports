@@ -411,6 +411,14 @@ set portfetch::mirror_sites::sites(postgresql) {
     ftp://ftp.postgresql.org/pub/
 }
 
+# Note that mirror_sites aren't intelligent enough to handle how this should
+# work automatically (which is, append first letter of port name, then
+# port name) so just use a basic form here and fake it in ports that need
+# to use this.
+set portfetch::mirror_sites::sites(pypi) {
+    https://pypi.python.org/packages/source/:nosubdir
+}
+
 set portfetch::mirror_sites::sites(ruby) {
     http://mirrors.ibiblio.org/ruby/
     http://www.mirrorservice.org/sites/ftp.ruby-lang.org/pub/ruby/
