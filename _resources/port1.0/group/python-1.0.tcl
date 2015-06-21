@@ -57,6 +57,13 @@ pre-destroot    {
     xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
 }
 
+# python.rootname: The "proper" name of the software. For a module
+#   pyXY-foo, this defaults to "foo"; for an app "foobar", this defaults
+#   to "foobar".
+
+options python.rootname
+default python.rootname {[regsub ^py- [option name] ""]}
+
 options python.versions python.version python.default_version
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
