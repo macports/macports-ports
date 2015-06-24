@@ -45,11 +45,11 @@ maintainers     nomaintainer
 supported_archs noarch
 
 if {[info exists replaced_by]} {
-    description     this port is only a stub and has been made obsolete by ${replaced_by}
+    description     Obsolete port, replaced by ${replaced_by}
 } else {
-    description     this port is only a stub and has been made obsolete without replacement.
+    description     Obsolete port
 }
-default long_description ${description}
+default long_description "This port has been replaced by ${replaced_by}."
 
 homepage        http://www.macports.org/
 
@@ -58,9 +58,10 @@ distfiles
 
 pre-configure {
     if {[info exists replaced_by]} {
-        ui_error "${subport} has been made obsolete by the port ${replaced_by}. Please install ${replaced_by} instead."
+        ui_error "${subport} has been replaced by ${replaced_by};\
+                please install that instead."
     } else {
-        ui_error "${subport} is an obsolete port.  Please uninstall it."
+        ui_error "${subport} is obsolete; please uninstall it."
     }
     return -code error "obsolete port"
 }
