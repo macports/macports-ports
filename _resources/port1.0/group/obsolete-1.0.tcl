@@ -46,10 +46,11 @@ supported_archs noarch
 
 if {[info exists replaced_by]} {
     description     Obsolete port, replaced by ${replaced_by}
+    default long_description "This port has been replaced by ${replaced_by}."
 } else {
     description     Obsolete port
+    default long_description "This port is obsolete."
 }
-default long_description "This port has been replaced by ${replaced_by}."
 
 homepage        http://www.macports.org/
 
