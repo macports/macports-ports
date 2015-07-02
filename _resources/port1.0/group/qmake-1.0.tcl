@@ -42,7 +42,8 @@ pre-configure {
     configure.cmd                   ${qt_qmake_cmd}
     configure.pre_args-delete       --prefix=${prefix}
     configure.pre_args-append       PREFIX=${prefix} \
-                                    "QMAKE_CC=${configure.cc} QMAKE_CXX=${configure.cxx}" \
+                                    "QMAKE_CC=${configure.cc}" \
+                                    "QMAKE_CXX=${configure.cxx}" \
                                     "QMAKE_OBJC=${configure.objc}"
     configure.args-append           "CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\""
     configure.universal_args-delete --disable-dependency-tracking
