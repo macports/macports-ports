@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 
-# Copyright (c) 2010-2014 The MacPorts Project
+# Copyright (c) 2010-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -59,22 +59,6 @@ set qt_name             qt4
 global qt_dir
 set qt_dir              ${prefix}
 
-# standard Qt documents directory
-global qt_docs_dir
-set qt_docs_dir         ${qt_dir}/share/doc/${qt_name}
-
-# standard Qt plugins directory
-global qt_plugins_dir
-set qt_plugins_dir      ${qt_dir}/share/${qt_name}/plugins
-
-# standard Qt mkspecs directory
-global qt_mkspecs_dir
-set qt_mkspecs_dir      ${qt_dir}/share/${qt_name}/mkspecs
-
-# standard Qt imports directory
-global qt_imports_dir
-set qt_imports_dir      ${qt_dir}/share/${qt_name}/imports
-
 # standard Qt includes directory
 global qt_includes_dir
 set qt_includes_dir     ${qt_dir}/include
@@ -95,33 +79,89 @@ set qt_bins_dir         ${qt_dir}/bin
 global qt_apps_dir
 set qt_apps_dir         ${applications_dir}/Qt4
 
+# standard Qt share directory
+global qt_share_dir
+set qt_share_dir        ${qt_dir}/share
+
+# standard Qt documents directory
+global qt_docs_dir
+if {${qt_dir} ne ${prefix}} {
+    set qt_docs_dir         ${qt_share_dir}/doc
+} else {
+    set qt_docs_dir         ${qt_share_dir}/share/doc/${qt_name}
+}
+
+# standard Qt plugins directory
+global qt_plugins_dir
+if {${qt_dir} ne ${prefix}} {
+    set qt_plugins_dir      ${qt_share_dir}/plugins
+} else {
+    set qt_plugins_dir      ${qt_share_dir}/${qt_name}/plugins
+}
+
+# standard Qt mkspecs directory
+global qt_mkspecs_dir
+if {${qt_dir} ne ${prefix}} {
+    set qt_mkspecs_dir      ${qt_share_dir}/mkspecs
+} else {
+    set qt_mkspecs_dir      ${qt_share_dir}/${qt_name}/mkspecs
+}
+
+# standard Qt imports directory
+global qt_imports_dir
+if {${qt_dir} ne ${prefix}} {
+    set qt_imports_dir      ${qt_share_dir}/imports
+} else {
+    set qt_imports_dir      ${qt_share_dir}/${qt_name}/imports
+}
+
 # standard Qt data directory
 global qt_data_dir
-set qt_data_dir         ${qt_dir}/share/${qt_name}
+if {${qt_dir} ne ${prefix}} {
+    set qt_data_dir         ${qt_share_dir}/data
+} else {
+    set qt_data_dir         ${qt_share_dir}/${qt_name}/data
+}
 
 # standard Qt translations directory
 global qt_translations_dir
-set qt_translations_dir ${qt_dir}/share/${qt_name}/translations
+if {${qt_dir} ne ${prefix}} {
+    set qt_translations_dir ${qt_share_dir}/translations
+} else {
+    set qt_translations_dir ${qt_share_dir}/${qt_name}/translations
+}
 
 # standard Qt sysconf directory
 global qt_sysconf_dir
-set qt_sysconf_dir      ${qt_dir}/etc/${qt_name}
+if {${qt_dir} ne ${prefix}} {
+    set qt_sysconf_dir      ${qt_share_dir}/sysconf
+} else {
+    set qt_sysconf_dir      ${qt_share_dir}/${qt_name}/sysconf
+}
 
 # standard Qt examples directory
 global qt_examples_dir
-set qt_examples_dir     ${qt_dir}/share/${qt_name}/examples
+if {${qt_dir} ne ${prefix}} {
+    set qt_examples_dir     ${qt_share_dir}/examples
+} else {
+    set qt_examples_dir     ${qt_share_dir}/${qt_name}/examples
+}
 
 # standard Qt demos directory
 global qt_demos_dir
-set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
+if {${qt_dir} ne ${prefix}} {
+    set qt_demos_dir        ${qt_share_dir}/demos
+} else {
+    set qt_demos_dir        ${qt_share_dir}/${qt_name}/demos
+}
 
 # standard CMake module directory for Qt-related files
 global qt_cmake_module_dir
-set qt_cmake_module_dir ${qt_dir}/share/cmake/Modules
+set qt_cmake_module_dir ${qt_share_dir}/cmake/Modules
 
 # standard qmake command location
 global qt_qmake_cmd
-set qt_qmake_cmd        ${qt_dir}/bin/qmake
+set qt_qmake_cmd        ${qt_bins_dir}/qmake
 
 # standard qmake spec
 global qt_qmake_spec
@@ -129,15 +169,15 @@ set qt_qmake_spec       macx-g++
 
 # standard moc command location
 global qt_moc_cmd
-set qt_moc_cmd          ${qt_dir}/bin/moc
+set qt_moc_cmd          ${qt_bins_dir}/moc
 
 # standard uic command location
 global qt_uic_cmd
-set qt_uic_cmd          ${qt_dir}/bin/uic
+set qt_uic_cmd          ${qt_bins_dir}/uic
 
 # standard lrelease command location
 global qt_lrelease_cmd
-set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
+set qt_lrelease_cmd     ${qt_bins_dir}/lrelease
 
 # standard PKGCONFIG path
 global qt_pkg_config_dir
@@ -183,11 +223,12 @@ if {![info exists building_qt4]} {
         QMAKESPEC=${qt_qmake_spec} \
         MOC=${qt_moc_cmd}
 
-    # make sure the Qt binaries' directory is in the path, if it is
-    # not the current prefix
+    # make sure Qt directories are in various paths, if Qt is not
+    # directly installed into ${prefix}
 
     if {${qt_dir} ne ${prefix}} {
         configure.env-append PATH=${qt_dir}/bin:$env(PATH)
+        configure.pkg_config_path-append ${qt_pkg_config_dir}
     }
 } else {
     configure.env-append QMAKE_NO_DEFAULTS=""
