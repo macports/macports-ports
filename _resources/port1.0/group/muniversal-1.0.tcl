@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009-2013 The MacPorts Project,
+# Copyright (c) 2009-2015 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -33,10 +33,12 @@
 # User variables:
 #         merger_configure_env: associative array of configure.env variables
 #             merger_build_env: associative array of build.env variables
+#              merger_test_env: associative array of test.env variables
 #          merger_destroot_env: associative array of destroot.env variables
 #                  merger_host: associative array of host values
 #        merger_configure_args: associative array of configure.args
 #            merger_build_args: associative array of build.args
+#             merger_test_args: associative array of test.args
 #         merger_destroot_args: associative array of destroot.args
 #    merger_configure_compiler: associative array of configure.compiler
 #    merger_configure_cppflags: associative array of configure.cppflags
@@ -726,6 +728,13 @@ variant universal {
             # PowerPC systems can't translate Intel instructions
             if { (${os.arch}=="i386" && ${arch}!="ppc64") || (${os.arch}=="powerpc" && ${arch}!="i386" && ${arch}!="x86_64") } {
                 ui_info "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] ${subport} ${arch}]"
+
+                if { [info exists merger_test_env(${arch})] } {
+                    test.env-append  $merger_test_env(${arch})
+                }
+                if { [info exists merger_test_args(${arch})] } {
+                    test.args-append  $merger_test_args(${arch})
+                }
                 set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
                     # The test directory is inside the source directory, so put in the new source directory name.
@@ -741,6 +750,12 @@ variant universal {
                 porttest::test_main
 
                 option test.dir ${test_dir_save}
+                if { [info exists merger_test_args(${arch})] } {
+                    test.args-delete $merger_test_args(${arch})
+                }
+                if { [info exists merger_test_env(${arch})] } {
+                    test.env-delete  $merger_test_env(${arch})
+                }
             }
         }
     }
