@@ -1,0 +1,273 @@
+--- host/include/uhd/exception.hpp.orig
++++ host/include/uhd/exception.hpp
+@@ -98,6 +98,14 @@ namespace uhd{
+         virtual void dynamic_throw(void) const;
+     };
+ 
++    struct UHD_API usb_error : runtime_error{
++        int _code;
++        usb_error(int code, const std::string &what);
++        virtual unsigned code(void) const;
++        virtual usb_error *dynamic_clone(void) const;
++        virtual void dynamic_throw(void) const;
++    };
++
+     struct UHD_API not_implemented_error : runtime_error{
+         not_implemented_error(const std::string &what);
+         virtual unsigned code(void) const;
+--- host/lib/exception.cpp.orig
++++ host/lib/exception.cpp
+@@ -38,8 +38,15 @@ make_exception_impl("KeyError",              key_error,               lookup_err
+ make_exception_impl("TypeError",             type_error,              exception)
+ make_exception_impl("ValueError",            value_error,             exception)
+ make_exception_impl("RuntimeError",          runtime_error,           exception)
++//make_exception_impl("USBError",              usb_error,           runtime_error)
+ make_exception_impl("NotImplementedError",   not_implemented_error,   runtime_error)
+ make_exception_impl("EnvironmentError",      environment_error,       exception)
+ make_exception_impl("IOError",               io_error,                environment_error)
+ make_exception_impl("OSError",               os_error,                environment_error)
+ make_exception_impl("SystemError",           system_error,            exception)
++
++usb_error::usb_error(int code, const std::string &what):
++    runtime_error(str(boost::format("%s %d: %s") % "USBError" % code % what)){_code = code;}
++unsigned usb_error::code(void) const{return _code;} \
++usb_error *usb_error::dynamic_clone(void) const{return new usb_error(*this);} \
++void usb_error::dynamic_throw(void) const{throw *this;}
+--- host/lib/transport/libusb1_zero_copy.cpp.orig
++++ host/lib/transport/libusb1_zero_copy.cpp
+@@ -155,7 +155,7 @@ public:
+         result.is_recv = _is_recv;
+ #endif
+         const int ret = libusb_submit_transfer(_lut);
+-        if (ret != 0) throw uhd::runtime_error(str(boost::format(
++        if (ret != 0) throw uhd::usb_error(ret, str(boost::format(
+             "usb %s submit failed: %s") % _name % libusb_error_name(ret)));
+     }
+ 
+@@ -266,17 +266,26 @@ public:
+             _all_luts.push_back(lut);
+         }
+ 
+-        //initial release for all buffers
+-        for (size_t i = 0; i < get_num_frames(); i++)
++        size_t i = 0;
++        //try
+         {
+-            libusb_zero_copy_mb &mb = *(_mb_pool[i]);
+-            if (is_recv) mb.release();
+-            else
++            //initial release for all buffers
++            for (; i < get_num_frames(); i++)
+             {
+-                mb.result.completed = 1;
+-                _enqueued.push_back(&mb);
++                //UHD_MSG(status) << "Releasing " << i << std::endl;
++                libusb_zero_copy_mb &mb = *(_mb_pool[i]);
++                if (is_recv) mb.release();
++                else
++                {
++                    mb.result.completed = 1;
++                    _enqueued.push_back(&mb);
++                }
+             }
+         }
++        //catch (uhd::runtime_error& e)
++        {
++        //    UHD_MSG(status) << "Releasing " << i << ":" << e.what() << std::endl;
++        }
+     }
+ 
+     ~libusb_zero_copy_single(void)
+--- host/lib/usrp/b200/b200_impl.cpp.orig
++++ host/lib/usrp/b200/b200_impl.cpp
+@@ -37,6 +37,9 @@
+ #include <ctime>
+ #include <cmath>
+ 
++#include <uhd/transport/usb_zero_copy.hpp>
++#include "../../transport/libusb1_base.hpp"
++
+ using namespace uhd;
+ using namespace uhd::usrp;
+ using namespace uhd::transport;
+@@ -194,7 +197,44 @@ static device_addrs_t b200_find(const device_addr_t &hint)
+  **********************************************************************/
+ static device::sptr b200_make(const device_addr_t &device_addr)
+ {
+-    return device::sptr(new b200_impl(device_addr));
++    b200_impl* p = NULL;
++
++    for (int i = 0; i < 2; ++i)
++    {
++        p = new b200_impl();
++        int ret;
++        
++        ret = p->make(device_addr);
++        if (ret == LIBUSB_SUCCESS)
++            break;
++
++        {
++            libusb::device_handle::sptr dev_handle(libusb::device_handle::get_cached_handle(
++                boost::static_pointer_cast<libusb::special_handle>(p->get_handle())->get_device()
++            ));
++
++            ret = libusb_clear_halt(dev_handle->get(), 8 | 0x80);
++            UHD_MSG(status) << "Ctrl Recv clear: " << libusb_error_name(ret) << std::endl;
++            ret = libusb_clear_halt(dev_handle->get(), 4 | 0x00);
++            UHD_MSG(status) << "Ctrl Send clear: " << libusb_error_name(ret) << std::endl;
++
++            ret = libusb_clear_halt(dev_handle->get(), 6 | 0x80);
++            UHD_MSG(status) << "Data Recv clear: " << libusb_error_name(ret) << std::endl;
++            ret = libusb_clear_halt(dev_handle->get(), 2 | 0x00);
++            UHD_MSG(status) << "Data Send clear: " << libusb_error_name(ret) << std::endl;
++
++            ret = libusb_reset_device(dev_handle->get());
++            UHD_MSG(status) << "Dev Reset: " << libusb_error_name(ret) << std::endl;
++        }
++
++        delete p;
++        p = NULL;
++    }
++
++    if (p == NULL)
++        throw uhd::runtime_error("USB error");
++
++    return device::sptr(p);
+ }
+ 
+ UHD_STATIC_BLOCK(register_b200_device)
+@@ -205,10 +245,14 @@ UHD_STATIC_BLOCK(register_b200_device)
+ /***********************************************************************
+  * Structors
+  **********************************************************************/
+-b200_impl::b200_impl(const device_addr_t &device_addr) :
++b200_impl::b200_impl(void) :
+     _revision(0),
+     _tick_rate(0.0) // Forces a clock initialization at startup
+ {
++}
++
++int b200_impl::make(const uhd::device_addr_t& device_addr)
++{
+     _tree = property_tree::make();
+     _type = device::USRP;
+     const fs_path mb_path = "/mboards/0";
+@@ -262,17 +306,17 @@ b200_impl::b200_impl(const device_addr_t &device_addr) :
+     std::vector<usb_device_handle::sptr> device_list = usb_device_handle::get_device_list(vid_pid_pair_list);
+ 
+     //locate the matching handle in the device list
+-    usb_device_handle::sptr handle;
++    //usb_device_handle::sptr _handle;
+     BOOST_FOREACH(usb_device_handle::sptr dev_handle, device_list) {
+         if (dev_handle->get_serial() == device_addr["serial"]){
+-            handle = dev_handle;
++            _handle = dev_handle;
+             break;
+         }
+     }
+-    UHD_ASSERT_THROW(handle.get() != NULL); //better be found
++    UHD_ASSERT_THROW(_handle.get() != NULL); //better be found
+ 
+     //create control objects
+-    usb_control::sptr control = usb_control::make(handle, 0);
++    usb_control::sptr control = usb_control::make(_handle, 0);
+     _iface = b200_iface::make(control);
+     this->check_fw_compat(); //check after making
+ 
+@@ -360,12 +404,22 @@ b200_impl::b200_impl(const device_addr_t &device_addr) :
+     ctrl_xport_args["send_frame_size"] = min_frame_size;
+     ctrl_xport_args["num_send_frames"] = "16";
+ 
+-    _ctrl_transport = usb_zero_copy::make(
+-        handle,
+-        4, 8, //interface, endpoint
+-        3, 4, //interface, endpoint
+-        ctrl_xport_args
+-    );
++    UHD_MSG(status) << "Creating ctrl transport..." << std::endl;
++    try
++    {
++        _ctrl_transport = usb_zero_copy::make(
++            _handle,
++            4, 8, //interface, endpoint
++            3, 4, //interface, endpoint
++            ctrl_xport_args
++        );
++    }
++    catch (const uhd::usb_error& e)
++    {
++        UHD_MSG(status) << e.what() << std::endl;
++        return e.code();
++    }
++    UHD_MSG(status) << "Flusing ctrl recv buff..." << std::endl;
+     while (_ctrl_transport->get_recv_buff(0.0)){} //flush ctrl xport
+     _tree->create<double>(mb_path / "link_max_rate").set((usb_speed == 3) ? B200_MAX_RATE_USB3 : B200_MAX_RATE_USB2);
+ 
+@@ -442,12 +496,22 @@ b200_impl::b200_impl(const device_addr_t &device_addr) :
+     data_xport_args["send_frame_size"] = device_addr.get("send_frame_size", "8192");
+     data_xport_args["num_send_frames"] = device_addr.get("num_send_frames", "16");
+ 
+-    _data_transport = usb_zero_copy::make(
+-        handle,        // identifier
+-        2, 6,          // IN interface, endpoint
+-        1, 2,          // OUT interface, endpoint
+-        data_xport_args    // param hints
+-    );
++    UHD_MSG(status) << "Creating data transport..." << std::endl;
++    try
++    {
++        _data_transport = usb_zero_copy::make(
++            _handle,        // identifier
++            2, 6,          // IN interface, endpoint
++            1, 2,          // OUT interface, endpoint
++            data_xport_args    // param hints
++        );
++    }
++    catch (const uhd::usb_error& e)
++    {
++        UHD_MSG(status) << e.what() << std::endl;
++        return e.code();
++    }
++    UHD_MSG(status) << "Flusing data recv buff..." << std::endl;
+     while (_data_transport->get_recv_buff(0.0)){} //flush ctrl xport
+     _demux = recv_packet_demuxer_3000::make(_data_transport);
+ 
+@@ -624,6 +688,9 @@ b200_impl::b200_impl(const device_addr_t &device_addr) :
+         _tree->access<std::string>(mb_path / "time_source/value").set("internal");
+     }
+ 
++    _handle.reset();
++
++    return LIBUSB_SUCCESS;
+ }
+ 
+ b200_impl::~b200_impl(void)
+--- host/lib/usrp/b200/b200_impl.hpp.orig
++++ host/lib/usrp/b200/b200_impl.hpp
+@@ -91,9 +91,13 @@ class b200_impl : public uhd::device
+ {
+ public:
+     //structors
+-    b200_impl(const uhd::device_addr_t &);
++    b200_impl(void);
+     ~b200_impl(void);
+ 
++    int make(const uhd::device_addr_t &);
++    uhd::transport::usb_device_handle::sptr get_handle(void) const
++    { return _handle; }
++
+     //the io interface
+     uhd::rx_streamer::sptr get_rx_stream(const uhd::stream_args_t &args);
+     uhd::tx_streamer::sptr get_tx_stream(const uhd::stream_args_t &args);
+@@ -107,6 +111,8 @@ public:
+     void check_streamer_args(const uhd::stream_args_t &args, double tick_rate, const std::string &direction = "");
+ 
+ private:
++    uhd::transport::usb_device_handle::sptr _handle;
++
+     b200_type_t _b200_type;
+     size_t      _revision;
+ 
+-- 
+2.3.1
+
