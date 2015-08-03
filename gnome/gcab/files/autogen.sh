@@ -7,8 +7,8 @@ test -z "$srcdir" && srcdir=.
 mkdir -p "$srcdir/m4"
 
 gtkdocize
-autoreconf -v --force --install
 intltoolize -f
+autoreconf -v --force --install
 
 if [ -z "$NOCONFIGURE" ]; then
     "$srcdir"/configure "$@"
