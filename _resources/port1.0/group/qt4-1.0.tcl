@@ -88,7 +88,7 @@ global qt_docs_dir
 if {${qt_dir} ne ${prefix}} {
     set qt_docs_dir         ${qt_share_dir}/doc
 } else {
-    set qt_docs_dir         ${qt_share_dir}/share/doc/${qt_name}
+    set qt_docs_dir         ${qt_share_dir}/doc/${qt_name}
 }
 
 # standard Qt plugins directory
