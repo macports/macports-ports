@@ -324,6 +324,7 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     http://cpan.mirror.euserv.net/modules/by-module/
+    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
@@ -600,7 +601,6 @@ set portfetch::mirror_sites::sites(mysql) {
     http://mysql.mirrors.arminco.com/Downloads/:nosubdir
     http://mysql.mirrors.crysys.hit.bme.hu/Downloads/:nosubdir
     http://mysql.mirrors.hoobly.com/Downloads/:nosubdir
-    http://mysql.mirrors.ilisys.com.au/Downloads/:nosubdir
     http://mysql.mirrors.ovh.net/ftp.mysql.com/Downloads/:nosubdir
     http://mysql.mirrors.pair.com/Downloads/:nosubdir
     http://mysql.spd.co.il/Downloads/:nosubdir
