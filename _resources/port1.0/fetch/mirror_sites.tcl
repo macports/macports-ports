@@ -324,7 +324,6 @@ set portfetch::mirror_sites::sites(perl_cpan) {
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     http://cpan.mirror.euserv.net/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
@@ -572,20 +571,6 @@ set portfetch::mirror_sites::sites(xorg) {
 # $ curl -s http://dev.mysql.com/downloads/mirrors.html | grep -E '>HTTP<' | sed -e 's,.*href="\(.*\)">.*,    \1/Downloads/:nosubdir,g' -e 's,//Downloads/:nosubdir,/Downloads/:nosubdir,g' | sort -u
 # To remove bad mirrors look at this inexpensive output:
 # $ for port in mysql{5,51,55,56} ; do echo "port: ${port}" ; for mirror in $(port distfiles $port | grep -v macports | grep -E "^ *(http|ftp)://") ; do echo $mirror ; curl -sI $mirror | grep -E "(^213|Content-Length)" | sed -e '/Content-Length/ s/.*: //' -e '/213/ s/.* //' ; done ; done
-# Mirrors with bad or missing files
-#     http://mirror-cybernet.lums.edu.pk/pub/mysql/Downloads/:nosubdir
-#     http://mysql.isu.edu.tw/Downloads/:nosubdir
-#     http://mysql.mirror.kangaroot.net/Downloads/:nosubdir
-#     http://mysql.mirrors.crysys.hit.bme.hu/Downloads/:nosubdir
-#     http://mysql.mirrors.ilisys.com.au/Downloads/:nosubdir
-#     http://mysql.mivzakim.net/Downloads/:nosubdir
-#     http://opensource.become.com/mysql/Downloads/:nosubdir
-#     http://sunsite.informatik.rwth-aachen.de/mysql/Downloads/:nosubdir
-# Mirrors with ping failures
-#     http://ftp.itu.edu.tr/Mirror/Mysql/Downloads/:nosubdir
-#     http://mysql.blic.net/Downloads/:nosubdir
-#     http://mysql.cs.pu.edu.tw/Downloads/:nosubdir
-#     http://mysql.dataphone.se/Downloads/:nosubdir
 set portfetch::mirror_sites::sites(mysql) {
     http://artfiles.org/mysql/Downloads/:nosubdir
     http://ftp.arnes.si/mysql/Downloads/:nosubdir
@@ -596,7 +581,6 @@ set portfetch::mirror_sites::sites(mysql) {
     http://ftp.ntua.gr/pub/databases/mysql/Downloads/:nosubdir
     http://ftp.sunet.se/pub/unix/databases/relational/mysql/Downloads/:nosubdir
     http://gd.tuwien.ac.at/db/mysql/Downloads/:nosubdir
-    http://it.mysql.contactlab.it/Downloads/:nosubdir
     http://linorg.usp.br/mysql/Downloads/:nosubdir
     http://mirror.csclub.uwaterloo.ca/mysql/Downloads/:nosubdir
     http://mirror.leaseweb.com/mysql/Downloads/:nosubdir
@@ -607,21 +591,18 @@ set portfetch::mirror_sites::sites(mysql) {
     http://mirrors.ircam.fr/pub/mysql/Downloads/:nosubdir
     http://mirrors.ukfast.co.uk/sites/ftp.mysql.com/Downloads/:nosubdir
     http://mirrors.xservers.ro/mysql/Downloads/:nosubdir
-    http://mysql.cdpa.nsysu.edu.tw/Downloads/:nosubdir
     http://mysql.he.net/Downloads/:nosubdir
     http://mysql.infocom.ua/Downloads/:nosubdir
     http://mysql.inspire.net.nz/Downloads/:nosubdir
     http://mysql.linux.cz/Downloads/:nosubdir
-    http://mysql.llarian.net/Downloads/:nosubdir
     http://mysql.mirror.ac.za/Downloads/:nosubdir
-    http://mysql.mirror.iweb.ca/Downloads/:nosubdir
-    http://mysql.mirror.rafal.ca/Downloads/:nosubdir
+    http://mysql.mirror.kangaroot.net/Downloads/:nosubdir
     http://mysql.mirrors.arminco.com/Downloads/:nosubdir
+    http://mysql.mirrors.crysys.hit.bme.hu/Downloads/:nosubdir
     http://mysql.mirrors.hoobly.com/Downloads/:nosubdir
+    http://mysql.mirrors.ilisys.com.au/Downloads/:nosubdir
     http://mysql.mirrors.ovh.net/ftp.mysql.com/Downloads/:nosubdir
     http://mysql.mirrors.pair.com/Downloads/:nosubdir
-    http://mysql.nfsi.pt/Downloads/:nosubdir
-    http://mysql.ntu.edu.tw/Downloads/:nosubdir
     http://mysql.spd.co.il/Downloads/:nosubdir
     http://na.mirror.garr.it/mirrors/MySQL/Downloads/:nosubdir
     http://sunsite.icm.edu.pl/mysql/Downloads/:nosubdir
