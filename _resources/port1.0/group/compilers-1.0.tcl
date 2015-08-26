@@ -30,7 +30,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #
-# This PortGroup sets up default variants for projects that want m
+# This PortGroup sets up default variants for projects that want multiple
+# compilers for providing options for, example, different optimizations. More
+# importantly, this port group provides the ability to interact with packages
+# that need MPI since MPI is juat a wrapper around a compiler.
 #
 # Usage:
 #
