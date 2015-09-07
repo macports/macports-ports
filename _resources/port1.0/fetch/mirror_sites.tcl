@@ -107,7 +107,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.inf.elte.hu/distfiles/:nosubdir
     http://ftp.rhnet.is/pub/gentoo/distfiles/:nosubdir
     http://ftp.heanet.ie/pub/gentoo/distfiles/:nosubdir
-    http://gentoo.tups.lv/source/distfiles/:nosubdir
     http://mirror.cambrium.nl/pub/os/linux/gentoo/distfiles/:nosubdir
     http://gentoo.tiscali.nl/distfiles/:nosubdir
     http://mirror.gentoo.no/distfiles/:nosubdir
