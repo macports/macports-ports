@@ -45,7 +45,7 @@
 options archcheck.files
 default archcheck.files {}
 
-if {"darwin" == ${os.platform}} {
+if {"darwin" eq ${os.platform}} {
 pre-configure {
     if {[variant_exists universal] && [variant_isset universal]} {
         set requested_archs ${configure.universal_archs}
