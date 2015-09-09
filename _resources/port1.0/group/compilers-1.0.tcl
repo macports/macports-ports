@@ -489,6 +489,7 @@ proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
     global compilers.require_fortran compilers.setup_done compilers.list
+    global compilers.gcc_default
     global compiler.blacklist
 
     if {!${compilers.setup_done}} {
@@ -574,23 +575,30 @@ proc compilers.setup {args} {
         set compilers.variants [lsort [concat [remove_from_list $remove_list $duplicates] $add_list]]
         eval compilers.setup_variants ${compilers.variants}
 
+        # reverse the gcc list so that the higher numbered ones are default
+        set ordered_variants {gfortran}
+        set seen 0
+        for {set i [llength ${compilers.gcc_variants}]} {[incr i -1] >= 0} {} {
+            # only add entries after the default gcc (the ones before are
+            # considered beta)
+            set v [lindex ${compilers.gcc_variants} $i]
+            if {${compilers.gcc_default} eq $v} {
+                set seen 1
+            }
+
+            if {$seen} {
+                lappend ordered_variants $v
+            }
+        }
+        lappend ordered_variants {g95}
+
         if {${compilers.require_fortran} && ![fortran_variant_isset]} {
-            if {[lsearch -exact ${compilers.variants} gfortran] > -1} {
-                default_variants-append +gfortran
-            } elseif {[lsearch -exact ${compilers.variants} gcc49] > -1} {
-                default_variants-append +gcc49
-            } elseif {[lsearch -exact ${compilers.variants} gcc48] > -1} {
-                default_variants-append +gcc48
-            } elseif {[lsearch -exact ${compilers.variants} gcc47] > -1} {
-                default_variants-append +gcc47
-            } elseif {[lsearch -exact ${compilers.variants} gcc46] > -1} {
-                default_variants-append +gcc46
-            } elseif {[lsearch -exact ${compilers.variants} gcc45] > -1} {
-                default_variants-append +gcc45
-            } elseif {[lsearch -exact ${compilers.variants} gcc44] > -1} {
-                default_variants-append +gcc44
-            } elseif {[lsearch -exact ${compilers.variants} g95] > -1} {
-                default_variants-append +g95
+            foreach fv $ordered_variants {
+                # if the variant exists, then make it default
+                if {[lsearch -exact ${compilers.variants} $fv] > -1} {
+                    default_variants-append +$fv
+                    break
+                }
             }
         }
 
