@@ -53,7 +53,7 @@ default compilers.required_c {}
 default compilers.required_f {}
 
 # also set a default gcc version
-set compilers.gcc_default gcc49
+set compilers.gcc_default gcc5
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
