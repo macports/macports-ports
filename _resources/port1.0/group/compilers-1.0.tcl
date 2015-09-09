@@ -146,17 +146,17 @@ set cdb(llvm,f90)      ""
 # we don't need gfortran when we are in an "only-fortran" mode
 set compilers.gfortran_equiv    gcc49
 set cdb(gfortran,variant)  gfortran
-set cdb(gfortran,compiler) $cdb(${compilers.gfortran_equiv},compiler)
-set cdb(gfortran,descrip)  $cdb(${compilers.gfortran_equiv},descrip)
+set cdb(gfortran,compiler) gfortran
+set cdb(gfortran,descrip)  "Fortran compiler from gcc49"
 set cdb(gfortran,depends)  $cdb(${compilers.gfortran_equiv},depends)
 set cdb(gfortran,dependsl) $cdb(${compilers.gfortran_equiv},dependsl)
 set cdb(gfortran,dependsd) $cdb(${compilers.gfortran_equiv},dependsd)
 set cdb(gfortran,dependsa) $cdb(${compilers.gfortran_equiv},dependsa)
 set cdb(gfortran,conflict) $cdb(${compilers.gfortran_equiv},conflict)
-set cdb(gfortran,cc)       $cdb(${compilers.gfortran_equiv},cc)
-set cdb(gfortran,cxx)      $cdb(${compilers.gfortran_equiv},cxx)
-set cdb(gfortran,cpp)      $cdb(${compilers.gfortran_equiv},cpp)
-set cdb(gfortran,objc)     $cdb(${compilers.gfortran_equiv},objc)
+set cdb(gfortran,cc)       ""
+set cdb(gfortran,cxx)      ""
+set cdb(gfortran,cpp)      ""
+set cdb(gfortran,objc)     ""
 set cdb(gfortran,fc)       $cdb(${compilers.gfortran_equiv},fc)
 set cdb(gfortran,f77)      $cdb(${compilers.gfortran_equiv},f77)
 set cdb(gfortran,f90)      $cdb(${compilers.gfortran_equiv},f90)
