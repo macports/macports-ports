@@ -52,6 +52,9 @@ default compilers.setup_done 0
 default compilers.required_c {}
 default compilers.required_f {}
 
+# also set a default gcc version
+set compilers.gcc_default gcc49
+
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc {4{4..9} 5 6} compiler attributes
@@ -144,22 +147,21 @@ set cdb(llvm,f90)      ""
 
 # and lastly we add a gfortran and g95 variant for use with clang* and llvm; note that
 # we don't need gfortran when we are in an "only-fortran" mode
-set compilers.gfortran_equiv    gcc49
 set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
 set cdb(gfortran,descrip)  "Fortran compiler from gcc49"
-set cdb(gfortran,depends)  $cdb(${compilers.gfortran_equiv},depends)
-set cdb(gfortran,dependsl) $cdb(${compilers.gfortran_equiv},dependsl)
-set cdb(gfortran,dependsd) $cdb(${compilers.gfortran_equiv},dependsd)
-set cdb(gfortran,dependsa) $cdb(${compilers.gfortran_equiv},dependsa)
-set cdb(gfortran,conflict) $cdb(${compilers.gfortran_equiv},conflict)
+set cdb(gfortran,depends)  $cdb(${compilers.gcc_default},depends)
+set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
+set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
+set cdb(gfortran,dependsa) $cdb(${compilers.gcc_default},dependsa)
+set cdb(gfortran,conflict) $cdb(${compilers.gcc_default},conflict)
 set cdb(gfortran,cc)       ""
 set cdb(gfortran,cxx)      ""
 set cdb(gfortran,cpp)      ""
 set cdb(gfortran,objc)     ""
-set cdb(gfortran,fc)       $cdb(${compilers.gfortran_equiv},fc)
-set cdb(gfortran,f77)      $cdb(${compilers.gfortran_equiv},f77)
-set cdb(gfortran,f90)      $cdb(${compilers.gfortran_equiv},f90)
+set cdb(gfortran,fc)       $cdb(${compilers.gcc_default},fc)
+set cdb(gfortran,f77)      $cdb(${compilers.gcc_default},f77)
+set cdb(gfortran,f90)      $cdb(${compilers.gcc_default},f90)
 
 set cdb(g95,variant)  g95
 set cdb(g95,compiler) g95
@@ -460,7 +462,7 @@ proc compilers.enforce_fortran {args} {
 }
 
 proc compilers.action_enforce_f {args} {
-    global compilers.gfortran_equiv
+    global compilers.gcc_default
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
@@ -468,8 +470,8 @@ proc compilers.action_enforce_f {args} {
 
             # gfortran is nothing more than the fortran compiler from a default version of gcc
             set equiv 0
-            if {($otf eq ${compilers.gfortran_equiv} || $otf eq "gfortran") &&
-                ($myf eq ${compilers.gfortran_equiv} || $myf eq "gfortran")} {
+            if {($otf eq ${compilers.gcc_default} || $otf eq "gfortran") &&
+                ($myf eq ${compilers.gcc_default} || $myf eq "gfortran")} {
                 set equiv 1
             }
 
