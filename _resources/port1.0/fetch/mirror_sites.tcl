@@ -445,25 +445,28 @@ set portfetch::mirror_sites::sites(savannah) {
 # Alias nongnu to savannah
 set portfetch::mirror_sites::sites(nongnu) $portfetch::mirror_sites::sites(savannah)
 
-# http://sourceforge.net/apps/trac/sourceforge/wiki/Mirrors
+# https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
-    http://aarnet.dl.sourceforge.net/
-    http://citylan.dl.sourceforge.net/
     http://freefr.dl.sourceforge.net/
-    http://garr.dl.sourceforge.net/
     http://heanet.dl.sourceforge.net/
-    http://hivelocity.dl.sourceforge.net/
     http://internode.dl.sourceforge.net/
+    http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
     http://kent.dl.sourceforge.net/
+    http://liquidtelecom.dl.sourceforge.net/
+    http://nbtelecom.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
+    http://ncu.dl.sourceforge.net/
+    http://netassist.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
-    http://optimate.dl.sourceforge.net/
-    http://softlayer-dal.dl.sourceforge.net/
+    http://netix.dl.sourceforge.net/
+    http://skylineservers.dl.sourceforge.net/
+    http://skylink.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
-    http://switch.dl.sourceforge.net/
+    http://tcpdiag.dl.sourceforge.net/
+    http://tenet.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
-    http://waix.dl.sourceforge.net/
+    http://vorboss.dl.sourceforge.net/
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {
