@@ -57,7 +57,7 @@ set qt_name             qt4
 
 # standard install directory
 global qt_dir
-set qt_dir              ${prefix}
+set qt_dir              ${prefix}/libexec/qt4
 
 # standard Qt includes directory
 global qt_includes_dir
