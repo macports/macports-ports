@@ -96,7 +96,8 @@ proc python_set_versions {option action args} {
     global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
-            subport py${v}[string trimleft $name py] { depends_lib port:python${v} }
+
+            subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
         }
         if {$subport eq $name || $subport eq ""} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
