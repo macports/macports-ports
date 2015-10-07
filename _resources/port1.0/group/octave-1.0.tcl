@@ -57,26 +57,6 @@ proc octave.setup {module version} {
 
     worksrcdir                  ${octave.module}
 
-    # depend on the Fortran compiler used to build octave
-
-    if {[catch {set installed [lindex [registry_active octave] 0]}]} {
-	ui_msg "Warning in octave 1.0 PortGroup:"
-	ui_msg "  Cannot find port 'octave' in the registry."
-	ui_msg "  This should never happen!"
-	ui_msg "  Continuing, and hoping for the best!"
-    } else {
-        set _variants [lindex ${installed} 3]
-	set gcc1 [string first {gcc} ${_variants}]
-	if {${gcc1} != -1} {
-	    # using +gccXY; retrieve that string
-	    set gcc [string range ${_variants} ${gcc1} [expr ${gcc1} + 4]]
-	} else {
-	    # must be using +g95
-	    set gcc "g95"
-	}
-	#depends_lib-append port:${gcc}
-    }
-
     # octave is not universal
 
     universal_variant           no
@@ -96,6 +76,7 @@ proc octave.setup {module version} {
 }
 
 post-extract {
+
     # rename the effective worksrcdir to always be ${octave.module}
 
     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
@@ -150,21 +131,9 @@ pre-configure {
     # fix usage of LAPACK_LIBS to include FLIBS, such that -lgfortran
     # is always paired with the appropriate -Lpath statement.
 
-    set GFORTRAN [glob ${prefix}/lib/libgcc/libgfortran*]
-    set QUADMATH [glob ${prefix}/lib/libgcc/libquadmath*]
-    set FLIBS [exec ${prefix}/bin/mkoctfile -p FLIBS | sed -e "s@-L\[^ \]* @@g" -e "s@-lgfortran@${GFORTRAN}@g" -e "s@-lquadmath@${QUADMATH}@g"]
-    set FLIBS "-L${prefix}/lib/libgcc ${FLIBS}"
-    set LAPACK_LIBS [exec ${prefix}/bin/mkoctfile -p LAPACK_LIBS | sed -e "s@-L\[^ \]* @@g" -e "s@-lgfortran@${GFORTRAN}@g" -e "s@-lquadmath@${QUADMATH}@g"]
-    set LAPACK_LIBS "${FLIBS} ${LAPACK_LIBS}"
-
-    ui_msg "GFORTRAN is '${GFORTRAN}'"
-    ui_msg "QUADMATH is '${QUADMATH}'"
-    ui_msg "FLIBS is '${FLIBS}'"
-    ui_msg "LAPACK_LIBS is '${LAPACK_LIBS}'"
-
     configure.env-append \
-	FLIBS='${FLIBS}' \
-	LAPACK_LIBS='${LAPACK_LIBS}'
+	LAPACK_LIBS='[exec ${prefix}/bin/mkoctfile -p FLIBS] \
+	             [exec ${prefix}/bin/mkoctfile -p LAPACK_LIBS]'
 
     # In 10.8+, set the LC_CTYPE (locale) to "C" otherwise
     # /usr/bin/sed can fail with an error when processing unicode
@@ -193,37 +162,12 @@ destroot {
     xinstall -m 644 ${worksrcpath}/${distname}.tar.gz ${destroot}${prefix}/share/octave/${octave.module}.tar.gz
 }
 
-pre-deactivate {
-    ui_debug "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall -nodeps ${octave.module}'"
-    system "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall -nodeps ${octave.module}'"
-    ui_debug "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
-    system "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
-
-    # remove cruft left behind; cruft sometimes happens ;)
-    foreach global_dir {lib/octave/packages share/octave/packages} {
-	if {![catch {set stk_dirs [glob ${prefix}/${global_dir}/${octave.module}*]}]} {
-	    foreach stk_dir ${stk_dirs} {
-		ui_debug "removing cruft directory ${stk_dir}"
-		file delete -force ${stk_dir}
-	    }
-	}
-    }
+post-deactivate {
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg uninstall -nodeps ${octave.module}'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
 }
 
 post-activate {
-
-    # remove cruft left behind; cruft sometimes happens ;)
-    foreach global_dir {lib/octave/packages share/octave/packages} {
-	if {![catch {set stk_dirs [glob ${prefix}/${global_dir}/${octave.module}*]}]} {
-	    foreach stk_dir ${stk_dirs} {
-		ui_debug "removing cruft directory ${stk_dir}"
-		file delete -force ${stk_dir}
-	    }
-	}
-    }
-
-    ui_debug "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg install -verbose -global ${prefix}/share/octave/${octave.module}.tar.gz'"
-    system "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg install -verbose -global ${prefix}/share/octave/${octave.module}.tar.gz'"
-    ui_debug "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
-    system "${prefix}/bin/octave -V -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg install -verbose -global ${prefix}/share/octave/${octave.module}.tar.gz'"
+    system "${prefix}/bin/octave -q -f --eval 'pkg prefix ${prefix}/share/octave/packages ${prefix}/lib/octave/packages; pkg rebuild'"
 }
