@@ -149,7 +149,7 @@ set cdb(llvm,f90)      ""
 # we don't need gfortran when we are in an "only-fortran" mode
 set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
-set cdb(gfortran,descrip)  "Fortran compiler from gcc49"
+set cdb(gfortran,descrip)  "$cdb(${compilers.gcc_default},descrip) Fortran"
 set cdb(gfortran,depends)  $cdb(${compilers.gcc_default},depends)
 set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
 set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
