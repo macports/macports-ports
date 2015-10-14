@@ -51,7 +51,7 @@
 #  $required
 #    is a list of variants that must be enabled for the test to succeed
 #    (required; remember this can also be a space-separated string or just
-#    a string for a single value. It's iterpreted as list, though.)
+#    a string for a single value. It's interpreted as list, though.)
 #  $forbidden
 #    is a list of variants that may not be enabled for the test to succeed
 #    (default is empty list, see description of $required for values that can be
@@ -70,7 +70,7 @@
 # }
 #
 # If all you want to do is bail out when the condition isn't fulfilled, there's
-# a convience wrapper available. If the condition isn't met it will print an
+# a convenience wrapper available. If the condition isn't met it will print an
 # error message and exit in a pre-configure phase. This can't be run any
 # earlier, because not all dependency types are installed before configure
 # phase. Previous versions of this PortGroup required you to manually put
@@ -164,7 +164,7 @@ proc _variant_in_variant_list {needle haystack} {
 	return 0
 }
 
-# global list holding all items the should be checked for and cause an error if
+# global list holding all items should be checked for and cause an error if
 # not present
 set _require_active_variants_list [list]
 
@@ -187,7 +187,8 @@ proc _check_require_active_variants {method} {
 		source {
 			set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run"
 		}
-		archivefetch {
+	        activate -
+	        archivefetch {
 			set deptypes "depends_lib depends_run"
 		}
 		default {
@@ -197,7 +198,7 @@ proc _check_require_active_variants {method} {
 
 	# for each type we're considering
 	foreach deptype $deptypes {
-		# check that there are any dependencies by that type
+		# check whether there are any dependencies of that type
 		if {[info exists PortInfo($deptype)]} {
 			# and for each dependency
 			foreach depspec $PortInfo($deptype) {
@@ -231,7 +232,12 @@ proc _check_require_active_variants {method} {
 		}
 
 		if {[catch {set result [active_variants $depspec $required $forbidden]}] != 0} {
-			error "${port} is required, but not active."
+		    set message "${port} is required, but not active."
+		    if {$method == activate} {
+			ui_msg "Warning: $message"
+		    } else {
+			error "$message"
+		    }
 		}
 		if {!$result} {
 			set str_required ""
@@ -246,7 +252,12 @@ proc _check_require_active_variants {method} {
 			if {$str_required != "" && $str_forbidden != ""} {
 				set str_combine " and "
 			}
-			error "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
+		        set message "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
+		        if {$method == "activate"} {
+			    ui_msg "Warning: $message"
+			} else {
+			    error "$message"
+			}
 		}
 	}
 }
@@ -261,4 +272,9 @@ pre-configure {
 # pre-configure is never run for those
 pre-archivefetch {
 	_check_require_active_variants archivefetch
+}
+
+# be sure that a required variant was not changed since this port was built or fetched
+pre-activate {
+        _check_require_active_variants activate
 }
