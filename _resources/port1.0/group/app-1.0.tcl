@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2011-2013 The MacPorts Project
+# Copyright (c) 2011-2013, 2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -141,18 +141,6 @@ proc app.get_default_identifier {} {
     }
     lappend identifier [string map {"." ""} ${app.name}]
     return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
-}
-
-# Implement our own lreverse proc, if it doesn't already exist. This will be
-# the case on Tiger and Leopard which have Tcl 8.4; lreverse is new in Tcl 8.5.
-# Taken from http://wiki.tcl.tk/17188
-if {[info commands lreverse] == ""} {
-    proc lreverse l {
-        set r {}
-        set i [llength $l]
-        while {[incr i -1]} {lappend r [lindex $l $i]}
-        lappend r [lindex $l 0]
-    }
 }
 
 
