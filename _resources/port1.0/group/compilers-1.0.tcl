@@ -33,11 +33,39 @@
 # This PortGroup sets up default variants for projects that want multiple
 # compilers for providing options for, example, different optimizations. More
 # importantly, this port group provides the ability to interact with packages
-# that need MPI since MPI is juat a wrapper around a compiler.
+# that need MPI since MPI is just a wrapper around a compiler.
 #
 # Usage:
 #
 #   PortGroup               compilers 1.0
+#
+# Available procedures:
+# compilers.choose {args}
+#   Possible arguments: cc cxx cpp objc fc f77 f90
+#   A list of which of these compilers you want to be set by the variants (e.g. ${configure.cc}).
+#   The default is all of them. Must come before compilers.setup in the Portfile to have an effect.
+# compilers.setup {args}
+#   Possible arguments: any compiler variant name with a minus removes it from the list of variants, e.g. -llvm.
+#   -gcc, -dragonegg, -clang remove all compilers of that category. -fortran removes gfortran and g95.
+#   Blacklisted compilers are automatically removed, as are ones that do not support the compilers in compilers.choose:
+#   e.g. if choose is just f90, clang variants will not be added.
+#   This procedure must be in the Portfile to create all the compiler variants and set the default.
+#   Appropriate conflicts, dependencies, etc. are created too.
+# c_active_variant_name {depspec}: which C variant a dependency has set
+# c_variant_name {}: which C variant is set
+# fortran_active_variant_name {depspec}: which Fortran variant a dependency has set
+# fortran_variant_name {}: which Fortran variant is set
+# clang_variant_isset {}: is a clang variant set
+# clang_variant_name {}: which clang variant is set
+# gcc_variant_isset {}: is a GCC variant set
+# gcc_variant_name {}: which GCC variant is set
+# avx_compiler_isset {}: is a C compiler supporting AVX set
+# fortran_variant_isset {}: is a Fortran variant set
+# compilers.enforce_c {args}: enforce that a dependency has the same C variant as is set here
+# compilers.enforce_fortran {args}: enforce that a dependency has the same Fortran variant as is set here
+#
+# The compilers.gcc_default variable may be useful for setting a default compiler variant
+# even in ports that do not use this PortGroup's automatic creation of variants.
 
 PortGroup active_variants 1.1
 
