@@ -2,7 +2,7 @@
 # $Id$
 
 # Copyright (c) 2012 Markus Weissmann <mww@macports.org>
-# Copyright (c) 2012 The MacPorts Project
+# Copyright (c) 2012-2013, 2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -56,6 +56,12 @@ homepage        http://www.macports.org/
 
 archive_sites
 distfiles
+depends_build
+depends_extract
+depends_fetch
+depends_lib
+depends_run
+#depends_test
 
 pre-configure {
     if {[info exists replaced_by]} {
