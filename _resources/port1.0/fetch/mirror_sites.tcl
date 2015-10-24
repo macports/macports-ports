@@ -529,10 +529,8 @@ set portfetch::mirror_sites::sites(trolltech) {
 }
 
 set portfetch::mirror_sites::sites(xcontrib) {
-    ftp://ftp.net.ohio-state.edu/pub/X11/contrib/
-    http://www.mirrorservice.org/sites/ftp.x.org/contrib/
+    http://ftp.x.org/contrib/
     ftp://ftp.gwdg.de/pub/x11/x.org/contrib/
-    http://mirror.aarnet.edu.au/pub/X11/contrib/
     ftp://ftp2.x.org/contrib/
     ftp://ftp.x.org/contrib/
 }
