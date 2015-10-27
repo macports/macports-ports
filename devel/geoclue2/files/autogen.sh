@@ -10,8 +10,8 @@ mkdir -p m4
 PKG_NAME=GeoClue
 
 gtkdocize
+intltoolize --force --copy
 autoreconf -v --force --install
-intltoolize -f
 
 if [ -z "$NOCONFIGURE" ]; then
     "$srcdir"/configure --enable-maintainer-mode --enable-debug ${1+"$@"}
