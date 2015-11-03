@@ -110,10 +110,6 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
                         -DLIBXML2_XMLLINT_EXECUTABLE=${prefix}/bin/xmllint \
                         -DLIBXSLT_INCLUDE_DIR=${prefix}/include \
                         -DLIBXSLT_LIBRARIES=${prefix}/lib/libxslt.dylib \
-                        -DMYSQLD_EXECUTABLE=${prefix}/libexec/mysqld \
-                        -DMYSQL_INCLUDE_DIR=${prefix}/include/mysql5/mysql \
-                        -DMYSQL_LIB_DIR=${prefix}/lib/mysql5/mysql \
-                        -DMYSQLCONFIG_EXECUTABLE=${prefix}/bin/mysql_config5 \
                         -DOPENAL_INCLUDE_DIR=/System/Library/Frameworks/OpenAL.framework/Headers \
                         -DOPENAL_LIBRARY=/System/Library/Frameworks/OpenAL.framework \
                         -DPNG_INCLUDE_DIR=${prefix}/include \
@@ -125,6 +121,11 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
 # These two can be removed (see #46240):
 #                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
 #                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.dylib \
+# These ones are obsolete, as purely based on mysql5 paths (see #49296):
+#                        -DMYSQLD_EXECUTABLE=${prefix}/libexec/mysqld \
+#                        -DMYSQL_INCLUDE_DIR=${prefix}/include/mysql5/mysql \
+#                        -DMYSQL_LIB_DIR=${prefix}/lib/mysql5/mysql \
+#                        -DMYSQLCONFIG_EXECUTABLE=${prefix}/bin/mysql_config5 \
 
 # standard variant for building documentation
 variant docs description "Build documentation" {
