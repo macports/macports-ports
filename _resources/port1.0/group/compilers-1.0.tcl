@@ -44,6 +44,9 @@
 #   Possible arguments: cc cxx cpp objc fc f77 f90
 #   A list of which of these compilers you want to be set by the variants (e.g. ${configure.cc}).
 #   The default is all of them. Must come before compilers.setup in the Portfile to have an effect.
+# compilers.set_variants_conflict {args}
+#   Add specified variants to the conflicts list of all variants created by this PortGroup.
+#   Useful if another compiler variant is created explicitly in the Portfile.
 # compilers.setup {args}
 #   Possible arguments: any compiler variant name with a minus removes it from the list of variants, e.g. -llvm.
 #   -gcc, -dragonegg, -clang remove all compilers of that category. -fortran removes gfortran and g95.
@@ -51,8 +54,10 @@
 #   e.g. if choose is just f90, clang variants will not be added.
 #   This procedure must be in the Portfile to create all the compiler variants and set the default.
 #   Appropriate conflicts, dependencies, etc. are created too.
+#   If a variant is declared already in the Portfile before this line, it will not be redefined.
 # c_active_variant_name {depspec}: which C variant a dependency has set
 # c_variant_name {}: which C variant is set
+# c_variant_isset {}: is a C variant set
 # fortran_active_variant_name {depspec}: which Fortran variant a dependency has set
 # fortran_variant_name {}: which Fortran variant is set
 # clang_variant_isset {}: is a clang variant set
@@ -66,6 +71,7 @@
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
+# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler 
 
 PortGroup active_variants 1.1
 
@@ -79,6 +85,8 @@ default compilers.require_fortran 0
 default compilers.setup_done 0
 default compilers.required_c {}
 default compilers.required_f {}
+default compilers.variants_conflict {}
+default compilers.libfortran {}
 
 # also set a default gcc version
 set compilers.gcc_default gcc5
@@ -99,6 +107,8 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,descrip)  "MacPorts gcc $version"
     set cdb(gcc$v,depends)  port:gcc$v
     set cdb(gcc$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
+    set cdb(gcc$v,libfortran) ${prefix}/lib/gcc$v/libgfortran.dylib
+    # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
     set cdb(gcc$v,dependsd) port:g95
     set cdb(gcc$v,dependsa) gcc$v
     set cdb(gcc$v,conflict) "gfortran g95"
@@ -124,6 +134,7 @@ foreach v ${clang_versions} {
     set cdb(clang$v,descrip)  "MacPorts clang $version"
     set cdb(clang$v,depends)  port:clang-$version
     set cdb(clang$v,dependsl) ""
+    set cdb(clang$v,libfortran) ""
     set cdb(clang$v,dependsd) ""
     set cdb(clang$v,dependsa) clang-$version
     set cdb(clang$v,conflict) ""
@@ -145,6 +156,7 @@ foreach v ${dragonegg_versions} {
     set cdb(dragonegg3$v,descrip)  "MacPorts dragonegg 3.$v"
     set cdb(dragonegg3$v,depends)  path:bin/dragonegg-3.$v-gcc:dragonegg-3.$v
     set cdb(dragonegg3$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
+    set cdb(dragonegg3$v,libfortran) ${prefix}/lib/gcc46/libgfortran.dylib
     set cdb(dragonegg3$v,dependsd) port:g95
     set cdb(dragonegg3$v,dependsa) dragonegg-3.$v
     set cdb(dragonegg3$v,conflict) "gfortran g95"
@@ -162,6 +174,7 @@ set cdb(llvm,compiler) llvm-gcc-4.2
 set cdb(llvm,descrip)  "Apple native llvm-gcc 4.2"
 set cdb(llvm,depends)  bin:llvm-gcc-4.2:llvm-gcc42
 set cdb(llvm,dependsl) ""
+set cdb(llvm,libfortran) ""
 set cdb(llvm,dependsd) ""
 set cdb(llvm,dependsa) ""
 set cdb(llvm,conflict) ""
@@ -180,6 +193,7 @@ set cdb(gfortran,compiler) gfortran
 set cdb(gfortran,descrip)  "$cdb(${compilers.gcc_default},descrip) Fortran"
 set cdb(gfortran,depends)  $cdb(${compilers.gcc_default},depends)
 set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
+set cdb(gfortran,libfortran) $cdb(${compilers.gcc_default},libfortran)
 set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
 set cdb(gfortran,dependsa) $cdb(${compilers.gcc_default},dependsa)
 set cdb(gfortran,conflict) $cdb(${compilers.gcc_default},conflict)
@@ -196,6 +210,7 @@ set cdb(g95,compiler) g95
 set cdb(g95,descrip)  "g95 Fortran"
 set cdb(g95,depends)  port:g95
 set cdb(g95,dependsl) ""
+set cdb(g95,libfortran) ${prefix}/lib/g95/x86_64-apple-darwin14/4.2.4/libf95.a
 set cdb(g95,dependsd) ""
 set cdb(g95,dependsa) g95
 set cdb(g95,conflict) ""
@@ -217,9 +232,16 @@ foreach variant ${compilers.variants} {
     }
 }
 
+proc compilers.set_variants_conflict {args} {
+    global compilers.variants_conflict
+
+    lappend compilers.variants_conflict $args
+}
+
 proc compilers.setup_variants {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants compilers.list
+    global compilers.variants_conflict
 
     foreach variant [split $args] {
         if {$cdb($variant,f77) ne ""} {
@@ -258,7 +280,7 @@ proc compilers.setup_variants {args} {
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
             set comp ""
-            foreach compiler ${compilers.list} {
+            foreach compiler ${compilers.list} {                
                 if {$cdb($variant,$compiler) ne ""} {
                     append comp [subst {
                         configure.$compiler $cdb($variant,$compiler)
@@ -275,13 +297,14 @@ proc compilers.setup_variants {args} {
             eval [subst {
                 variant ${variant} description \
                     {Build using the $cdb($variant,descrip) compiler} \
-                    conflicts $c {
+                    conflicts $c ${compilers.variants_conflict} {
 
                     depends_build-append   $cdb($variant,depends)
                     depends_lib-append     $cdb($variant,dependsl)
                     depends_lib-delete     $cdb($variant,dependsd)
                     depends_skip_archcheck $cdb($variant,dependsa)
 
+                    set compilers.libfortran $cdb($variant,libfortran)
                     $comp
                 }
             }]
@@ -323,6 +346,10 @@ proc c_variant_name {} {
     }
 
     return ""
+}
+
+proc c_variant_isset {} {
+    return [expr {[c_variant_name] ne ""}]
 }
 
 proc fortran_active_variant_name {depspec} {
