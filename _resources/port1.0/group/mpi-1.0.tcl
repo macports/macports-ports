@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2014 The MacPorts Project
+# Copyright (c) 2014-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -225,7 +225,7 @@ proc mpi_variant_isset {} {
 }
 
 proc mpi.setup {args} {
-    global cdb mpidb mpi.variants mpi.require compilers.variants name
+    global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants name
 
     set add_list {}
     set remove_list ${mpi.variants}
