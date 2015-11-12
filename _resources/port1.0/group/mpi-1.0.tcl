@@ -35,11 +35,29 @@
 # Usage:
 #
 #   PortGroup               mpi 1.0
+#
+# Available procedures:
+# proc mpi_active_variant_name {depspec}
+#   Returns the name of the active MPI variant of a dependency.
+# proc mpi_variant_name {}
+#   Returns the name of the active MPI variant of this port.
+# proc mpi.enforce_variant {args}
+#   Raise an error if the dependency does not have the same MPI variant
+#   as this port. Also enforces that the dependency has the same C variant.
+# proc mpi_variant_isset {}
+#   Whether an MPI variant has been set.
+# proc mpi.setup {args}
+#   Creates MPI variants.
+#   Available arguments: "require" means an MPI variant must be set. "-mpich", "-openmpi", etc.
+#   means remove this variant from the list. All of the arguments for compilers.setup are available
+#   too and will be passed to that procedure. "default" means an MPI variant (mpich) will be
+#   set as a default variant.
 
 PortGroup compilers 1.0
 
 default mpi.variants {}
 default mpi.require 0
+default mpi.default 0
 default mpi.required_variants {}
 
 set mpi.cc   mpicc
@@ -231,6 +249,10 @@ proc mpi.setup {args} {
         switch -exact $v {
             require {
                 set mpi.require 1
+                set mpi.default 1
+            }
+            "default" {
+                set mpi.default 1
             }
             require_fortran {
                 set cl [add_from_list $cl "require_fortran"]
@@ -288,10 +310,9 @@ proc mpi.setup {args} {
         require_active_variants $mpi $cv $cl
     }
 
-    if {${mpi.require} && ![mpi_variant_isset]} {
+    if {${mpi.default} && ![mpi_variant_isset]} {
         default_variants-append +mpich
     }
-
 }
 
 pre-fetch {
