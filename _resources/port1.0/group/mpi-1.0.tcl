@@ -213,7 +213,7 @@ pre-fetch {
         set mpif [fortran_active_variant_name ${mpi.name}]
         set myf  [fortran_variant_name]
 
-        if {$myf eq "g95" && $myf ne $mpif} {
+        if {[fortran_compiler_name $myf] ne [fortran_compiler_name $mpif]} {
             ui_error "${mpi.name} has a different fortran variant ($mpif) than the selected $myf"
             return -code error "${mpi.name} needs the $myf variant"
         }
