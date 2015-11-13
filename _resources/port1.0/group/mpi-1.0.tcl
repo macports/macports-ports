@@ -48,10 +48,12 @@
 #   Whether an MPI variant has been set.
 # proc mpi.setup {args}
 #   Creates MPI variants.
-#   Available arguments: "require" means an MPI variant must be set. "-mpich", "-openmpi", etc.
-#   means remove this variant from the list. All of the arguments for compilers.setup are available
-#   too and will be passed to that procedure. "default" means an MPI variant (mpich) will be
-#   set as a default variant.
+#   Available arguments: "require" means an MPI variant must be set.
+#   All of the arguments for compilers.setup are available too and will be passed to that procedure.
+#   "default" means an MPI variant (mpich) will be set as a default variant.
+#   You can either list which MPI's can be used (e.g. mpich mpich-devel),
+#   which cannot be used (e.g. -mpich -openmpi-devel).
+#   There are four MPI variants: mpich, mpich-devel, openmpi, openmpi-devel.
 
 PortGroup compilers 1.0
 
@@ -160,6 +162,8 @@ proc mpi_active_variant_name {depspec} {
             if {$result} {
                 return $m
             }
+        } else {
+            # warning or error!
         }
     }
 
@@ -203,19 +207,45 @@ proc mpi.action_enforce_variants {args} {
             }
 
             eval compilers.action_enforce_c $portname
+        } else {
+            # warning or error!
         }
     }
 }
 
 # only run this if mpi is chosen
 pre-fetch {
-    if {${compilers.require_fortran} && [mpi_variant_isset]} {
-        set mpif [fortran_active_variant_name ${mpi.name}]
-        set myf  [fortran_variant_name]
+    if {[fortran_variant_isset] && [mpi_variant_isset]} {
+        set gcc_name ""
+        regexp (gcc\[0-9\]*) ${mpi.name} gcc_name 
+        if {$gcc_name ne ""} {
+            if {[active_variants ${mpi.name} "fortran" ""]} {
+                set mpif $gcc_name
+            } else {
+                set mpif ""
+            }
+        } else {
+            # this is a default, clang, or llvm subport
+            set mpif [fortran_active_variant_name ${mpi.name}]
+            
+        }
+        # mpif will definitely have a real compiler name, not gfortran.
+        set myf [fortran_compiler_name [fortran_variant_name]]
 
-        if {[fortran_compiler_name $myf] ne [fortran_compiler_name $mpif]} {
-            ui_error "${mpi.name} has a different fortran variant ($mpif) than the selected $myf"
-            return -code error "${mpi.name} needs the $myf variant"
+        if {$myf ne $mpif} {
+            if {$mpif eq "" && $gcc_name ne ""} {
+                ui_error "${mpi.name} was built without Fortran support."
+                set need "fortran"
+            } else {
+                if {[fortran_variant_name] eq "gfortran"} {
+                    set selectedf " (via +gfortran)"
+                } else {
+                    set selectedf " "
+                }
+                ui_error "${mpi.name} has a different Fortran variant ($mpif) than the one selected, $myf$selectedf."
+                set need $myf
+            }
+            return -code error "Install ${mpi.name} +$need"
         }
     }
 }
