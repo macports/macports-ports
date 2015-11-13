@@ -60,6 +60,7 @@
 # c_variant_isset {}: is a C variant set
 # fortran_active_variant_name {depspec}: which Fortran variant a dependency has set
 # fortran_variant_name {}: which Fortran variant is set
+# fortran_compiler_name {arg}:  converts gfortran into the actual Fortran compiler name; otherwise returns arg
 # clang_variant_isset {}: is a clang variant set
 # clang_variant_name {}: which clang variant is set
 # gcc_variant_isset {}: is a GCC variant set
@@ -372,6 +373,16 @@ proc fortran_active_variant_name {depspec} {
     return ""
 }
 
+proc fortran_compiler_name {variant} {
+    global compilers.gcc_default
+
+    if {$variant eq "gfortran"} {
+        return ${compilers.gcc_default}
+    } else {
+        return $variant
+    }
+}
+
 proc fortran_variant_name {} {
     global compilers.fortran_variants variations
 
@@ -537,24 +548,16 @@ proc compilers.enforce_some_fortran {args} {
 }
 
 proc compilers.action_enforce_f {args} {
-    global compilers.gcc_default
-
     ui_debug "compilers.enforce_fortran list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
             set myf  [fortran_variant_name]
 
-            # gfortran is nothing more than the fortran compiler from a default version of gcc
-            set equiv 0
-            if {($otf eq ${compilers.gcc_default} || $otf eq "gfortran") &&
-                ($myf eq ${compilers.gcc_default} || $myf eq "gfortran")} {
-                set equiv 1
-            }
-
             if {$otf ne "" && $myf eq ""} {
                 default_variants +$otf
-            } elseif {$otf ne $myf && !$equiv} {
+            } elseif {[fortran_compiler_name $otf] ne [fortran_compiler_name $myf]} {
+                # what if $portname does not have that variant? e.g. maybe it has only gcc5 and we are asking for gfortran.
                 ui_error "Install $portname +$myf"
                 return -code error "$portname +$myf not installed"
             }
