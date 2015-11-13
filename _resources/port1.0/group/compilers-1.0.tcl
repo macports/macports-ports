@@ -68,6 +68,7 @@
 # fortran_variant_isset {}: is a Fortran variant set
 # compilers.enforce_c {args}: enforce that a dependency has the same C variant as is set here
 # compilers.enforce_fortran {args}: enforce that a dependency has the same Fortran variant as is set here
+# compilers.enforce_some_fortran {args}: enforce that a dependency has some Fortran variant set
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
@@ -85,6 +86,7 @@ default compilers.require_fortran 0
 default compilers.setup_done 0
 default compilers.required_c {}
 default compilers.required_f {}
+default compilers.required_some_f {}
 default compilers.variants_conflict {}
 default compilers.libfortran {}
 
@@ -527,6 +529,13 @@ proc compilers.enforce_fortran {args} {
     }
 }
 
+proc compilers.enforce_some_fortran {args} {
+    global compilers.required_some_f
+    foreach portname $args {
+        lappend compilers.required_some_f $portname
+    }
+}
+
 proc compilers.action_enforce_f {args} {
     global compilers.gcc_default
 
@@ -552,6 +561,21 @@ proc compilers.action_enforce_f {args} {
         } else {
             ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
             return -code error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
+        }
+    }
+}
+
+proc compilers.action_enforce_some_f {args} {
+    ui_debug "compilers.enforce_some_fortran list: ${args}"    
+    foreach portname $args {
+        if {![catch {set result [active_variants $portname "" ""]}]} {
+            if {[fortran_active_variant_name $portname] eq ""} {
+                ui_error "Install $portname with a Fortran variant (e.g. +gfortran, +gccX, +g95)"
+                return -code error "$portname not installed with a Fortran variant"
+            }
+        } else {
+            ui_error "Internal error: compilers.enforce_some_fortran: '$portname' is not an installed port."
+            return -code error "Internal error: compilers.enforce_some_fortran: '$portname' is not an installed port."
         }
     }
 }
@@ -684,4 +708,5 @@ pre-fetch {
     }
     eval compilers.action_enforce_c ${compilers.required_c}
     eval compilers.action_enforce_f ${compilers.required_f}
+    eval compilers.action_enforce_some_f ${compilers.required_some_f}
 }
