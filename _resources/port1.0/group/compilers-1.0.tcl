@@ -495,7 +495,9 @@ proc compilers.is_c_only {} {
 
 proc compilers.enforce_c {args} {
     global compilers.required_c
-    lappend compilers.required_c $args
+    foreach portname $args {
+        lappend compilers.required_c $portname
+    }
 }
 
 proc compilers.action_enforce_c {args} {
@@ -520,7 +522,9 @@ proc compilers.action_enforce_c {args} {
 
 proc compilers.enforce_fortran {args} {
     global compilers.required_f
-    lappend compilers.required_f $args
+    foreach portname $args {
+        lappend compilers.required_f $portname
+    }
 }
 
 proc compilers.action_enforce_f {args} {
