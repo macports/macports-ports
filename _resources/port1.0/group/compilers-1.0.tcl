@@ -493,13 +493,13 @@ proc compilers.is_c_only {} {
     return 1
 }
 
-# for the c compiler
 proc compilers.enforce_c {args} {
     global compilers.required_c
     lappend compilers.required_c $args
 }
 
 proc compilers.action_enforce_c {args} {
+    ui_debug "compilers.enforce_c list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otcomp  [c_active_variant_name $portname]
@@ -525,6 +525,8 @@ proc compilers.enforce_fortran {args} {
 
 proc compilers.action_enforce_f {args} {
     global compilers.gcc_default
+
+    ui_debug "compilers.enforce_fortran list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
@@ -543,10 +545,10 @@ proc compilers.action_enforce_f {args} {
                 ui_error "Install $portname +$myf"
                 return -code error "$portname +$myf not installed"
             }
-         } else {
-             ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
-             return -code error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
-         }
+        } else {
+            ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
+            return -code error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
+        }
     }
 }
 
