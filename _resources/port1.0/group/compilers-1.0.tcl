@@ -511,9 +511,9 @@ proc compilers.action_enforce_c {args} {
                 ui_error "Install $portname +$mycomp"
                 return -code error "$portname +$mycomp not installed"
             }
-         } else {
-             ui_error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
-             return -code error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
+        } else {
+            ui_error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
+            return -code error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
         }
     }
 }
@@ -674,7 +674,7 @@ proc compilers.setup {args} {
 # this might also need to be in pre-archivefetch
 pre-fetch {
     if {${compilers.require_fortran} && [fortran_variant_name] eq ""} {
-        return -code error "must set at least one fortran variant"
+        return -code error "must set at least one Fortran variant"
     }
     eval compilers.action_enforce_c ${compilers.required_c}
     eval compilers.action_enforce_f ${compilers.required_f}
