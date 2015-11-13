@@ -329,6 +329,8 @@ proc c_active_variant_name {depspec} {
             if {$result} {
                 return $c
             }
+        } else {
+            ui_warn "c_active_variant_name: [active_variants $depspec $fc \"\"] fails."
         }
     }
 
@@ -360,6 +362,8 @@ proc fortran_active_variant_name {depspec} {
             if {$result} {
                 return $fc
             }
+        } else {
+            ui_warn "fortran_active_variant_name: [active_variants $depspec $fc \"\"] fails."
         }
     }
 
@@ -507,6 +511,9 @@ proc compilers.action_enforce_c {args} {
                 ui_error "Install $portname +$mycomp"
                 return -code error "$portname +$mycomp not installed"
             }
+         } else {
+             ui_error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
+             return -code error "Internal error: compilers.enforce_c: '$portname' is not an installed port."
         }
     }
 }
@@ -536,7 +543,10 @@ proc compilers.action_enforce_f {args} {
                 ui_error "Install $portname +$myf"
                 return -code error "$portname +$myf not installed"
             }
-        }
+         } else {
+             ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
+             return -code error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
+         }
     }
 }
 
