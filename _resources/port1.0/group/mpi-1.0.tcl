@@ -163,7 +163,7 @@ proc mpi_active_variant_name {depspec} {
                 return $m
             }
         } else {
-            # warning or error!
+            ui_warn "mpi_active_variant_name: [active_variants $depspec $m \"\"] fails."
         }
     }
 
@@ -190,6 +190,7 @@ proc mpi.enforce_variant {args} {
 
 proc mpi.action_enforce_variants {args} {
     global name
+    ui_debug "mpi.enforce_variant list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
@@ -208,7 +209,7 @@ proc mpi.action_enforce_variants {args} {
 
             eval compilers.action_enforce_c $portname
         } else {
-            # warning or error!
+            ui_error "Internal error: '$portname' is not an installed port."
         }
     }
 }
