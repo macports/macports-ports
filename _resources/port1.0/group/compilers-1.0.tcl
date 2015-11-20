@@ -333,7 +333,7 @@ proc c_active_variant_name {depspec} {
                 return $c
             }
         } else {
-            ui_warn "c_active_variant_name: [active_variants $depspec $fc \"\"] fails."
+            ui_warn "c_active_variant_name: \[active_variants $depspec $fc \"\"\] fails."
         }
     }
 
@@ -366,7 +366,7 @@ proc fortran_active_variant_name {depspec} {
                 return $fc
             }
         } else {
-            ui_warn "fortran_active_variant_name: [active_variants $depspec $fc \"\"] fails."
+            ui_warn "fortran_active_variant_name: \[active_variants $depspec $fc \"\"\] fails."
         }
     }
 

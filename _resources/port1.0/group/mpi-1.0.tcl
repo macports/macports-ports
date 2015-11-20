@@ -163,7 +163,7 @@ proc mpi_active_variant_name {depspec} {
                 return $m
             }
         } else {
-            ui_warn "mpi_active_variant_name: [active_variants $depspec $m \"\"] fails."
+            ui_warn "mpi_active_variant_name: \[active_variants $depspec $m \"\"\] fails."
         }
     }
 
