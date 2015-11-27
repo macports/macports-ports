@@ -633,6 +633,7 @@ variant universal {
                                         *.lzma -
                                         *.xz -
                                         *.gz -
+                                        *.zip -
                                         *.bz2 {
                                             # compressed files can differ due to entropy
                                             switch -glob ${fl} {
@@ -644,6 +645,9 @@ variant universal {
                                                 }
                                                 *.gz {
                                                     set cat /usr/bin/gzcat
+                                                }
+                                                *.zip {
+                                                    set cat "/usr/bin/unzip -p"
                                                 }
                                                 *.bz2 {
                                                     set cat /usr/bin/bzcat
