@@ -4,6 +4,7 @@ PortSystem              1.0
 PortGroup select        1.0
 PortGroup compiler_blacklist_versions 1.0
 PortGroup active_variants 1.1
+PortGroup cmake         1.0
 
 set llvm_version        3.8
 set llvm_version_no_dot 38
@@ -70,11 +71,13 @@ set compiler_rt_rev     ${svn.revision}
 set libcxx_rev          ${svn.revision}
 set clang-modernize_rev ${svn.revision}
 version                 ${llvm_version}-r${svn.revision}
+revision                1
 worksrcdir              trunk
 svn.url                 https://llvm.org/svn/llvm-project/llvm/trunk
 #worksrcdir              release_${llvm_version_no_dot}
 #svn.url                 https://llvm.org/svn/llvm-project/llvm/branches/release_${llvm_version_no_dot}
 default_variants-append +assertions
+default_variants-append +debug
 
 #version                 ${llvm_version}.0
 #epoch                   1
@@ -119,6 +122,7 @@ if {${subport} eq "clang-${llvm_version}"} {
         2004-On-darwin-build-ppc-slices-of-the-compiler-runtime-i.patch \
         2005-MacPorts-Only-Don-t-build-x86_64h-slice-of-compiler-.patch \
         2006-MacPorts-Only-Fix-regression-introduced-when-fixing-.patch \
+        2007-MacPorts-Only-Don-t-check-for-the-macosx.internal-SD.patch \
         3001-buildit-build-fix-for-Leopard.patch \
         3002-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
         3003-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
@@ -130,25 +134,29 @@ if {${subport} eq "clang-${llvm_version}"} {
     # present, but we used to explicitly only use this patch for the llvm subport.
     patchfiles-delete \
         0005-MacPorts-Only-Skip-checking-for-python-in-configure.patch
-
-    build.target        clang-only
-    destroot.target     install-clang
 }
 
-build.env-append        VERBOSE=1 \
-                        REQUIRES_RTTI=1
-destroot.env-append     VERBOSE=1 \
-                        REQUIRES_RTTI=1
+configure.post_args         ../${worksrcdir}
+default configure.dir       {${workpath}/build}
+default build.dir           {${workpath}/build}
 
-configure.dir           ${workpath}/build
-build.dir               ${configure.dir}
+# https://llvm.org/bugs/show_bug.cgi?id=25664
+configure.ldflags-append    -Wl,-rpath,@loader_path
 
-configure.cmd           ${worksrcpath}/configure
-configure.pre_args-delete --prefix=${prefix}
-configure.args          --enable-bindings=none --enable-libffi --enable-shared --enable-jit \
-                        --enable-optimized --disable-profiling --enable-pic \
-                        --enable-debug-symbols --disable-debug-runtime \
-                        --prefix="${sub_prefix}" --disable-assertions
+# https://llvm.org/bugs/show_bug.cgi?id=25674
+configure.cxxflags-append   -std=c++11
+
+configure.args-append \
+    -DLLVM_BUILD_LLVM_DYLIB=ON \
+    -DCMAKE_INSTALL_PREFIX="${sub_prefix}" \
+    -DLLVM_ENABLE_ASSERTIONS=OFF \
+    -DLLVM_ENABLE_RTTI=ON \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_EXAMPLES=OFF \
+    -DLLVM_ENABLE_FFI=ON \
+    -DLLVM_BINDINGS_LIST=none \
+    -DFFI_INCLUDE_DIR=${prefix}/include \
+    -DFFI_LIBRARY_DIR=${prefix}/lib
 
 if {${subport} eq "llvm-${llvm_version}"} {
     select.group        llvm
@@ -157,7 +165,15 @@ if {${subport} eq "llvm-${llvm_version}"} {
     select.group        clang
     select.file         ${filespath}/mp-${subport}
 
-    configure.args-append --with-python=${prefix}/bin/python2.7 --disable-clang-static-analyzer
+    configure.args-append \
+        -DCLANG_INCLUDE_TESTS=OFF \
+        -DCLANG_ENABLE_STATIC_ANALYZER=OFF
+
+    # https://llvm.org/bugs/show_bug.cgi?id=25665
+    configure.args-append \
+        -DLLVM_BUILD_RUNTIME=ON \
+        -DLIBCXX_INSTALL_LIBRARY=OFF \
+        -DLIBCXX_ENABLE_SHARED=OFF
 }
 
 # llvm-3.5 and later requires a C++11 runtime
@@ -200,13 +216,6 @@ platform darwin {
 }
 
 variant universal {
-    build.env-append \
-        UNIVERSAL=1 \
-        UNIVERSAL_ARCH="[get_canonical_archs]"
-    destroot.env-append \
-        UNIVERSAL=1 \
-        UNIVERSAL_ARCH="[get_canonical_archs]"
-
     post-extract {
         # workaround a bug in Apple's shipped gcc driver-driver, patched in
         # ours with driverdriver-num_infiles.patch
@@ -219,29 +228,20 @@ variant universal {
 }
 
 variant assertions description "Enable assertions for error detection (has performance impacts, especially on JIT)" {
-    configure.args-delete --disable-assertions
-    configure.args-append --enable-assertions
+    configure.args-delete -DLLVM_ENABLE_ASSERTIONS=OFF
+    configure.args-append -DLLVM_ENABLE_ASSERTIONS=ON
 }
 
 platform darwin {
-    if {${build_arch} eq "i386"} {
-        configure.pre_args-append --build=i686-apple-darwin${os.major}
-    } elseif {${build_arch} eq "ppc"} {
-        configure.pre_args-append --build=powerpc-apple-darwin${os.major}
-    } elseif {${build_arch} eq "ppc64"} {
-        configure.pre_args-append --build=powerpc64-apple-darwin${os.major}
-    } else {
-        configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
-    }
-
     if {[string match "*ppc*" [get_canonical_archs]]} {
         # http://trac.macports.org/ticket/33987
-        configure.args-append --with-optimize-option=-Os
         configure.optflags    -Os
     }
 
     if {${subport} eq "clang-${llvm_version}" && [vercmp $xcodeversion 5.0] < 0} {
+        # https://llvm.org/bugs/show_bug.cgi?id=13671
         patchfiles-append leopard-no-asan.patch
+        configure.args-append -DCOMPILER_RT_HAS_SANITIZER_COMMON=NO
     }
 
     if {${subport} eq "clang-${llvm_version}" && ${os.major} <= 9} {
@@ -251,7 +251,7 @@ platform darwin {
     if {${os.major} < 11} {
         # Proxy for eliminating the dependency on native TLS
         # http://trac.macports.org/ticket/46887
-        configure.args-append --disable-backtraces
+        configure.args-append -DLLVM_ENABLE_BACKTRACES=OFF
     }
 }
 
@@ -288,18 +288,18 @@ post-extract {
     }
 }
 
-post-patch {
-    if {${subport} eq "clang-${llvm_version}"} {
-        reinplace "s|@@PREFIX@@|${prefix}|g" \
-            ${worksrcpath}/projects/compiler-rt/make/platform/clang_darwin.mk \
-            ${worksrcpath}/projects/compiler-rt/make/platform/clang_macho_embedded.mk
+if {${subport} eq "clang-${llvm_version}"} {
+    destroot {
+        system "cd ${destroot.dir}/tools/clang && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/projects/compiler-rt && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/projects/libcxx && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+
+        delete ${destroot}${sub_prefix}/bin/clang
+        file rename ${destroot}${sub_prefix}/bin/clang-${llvm_version} ${destroot}${sub_prefix}/bin/clang
     }
 }
 
 post-destroot {
-    file mkdir ${destroot}${prefix}/share/doc
-    file rename ${destroot}${sub_prefix}/docs/llvm ${destroot}${prefix}/share/doc/${subport}
-
     foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
         set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-${suffix}
         set exec_path [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
@@ -314,6 +314,11 @@ post-destroot {
         #    set basename [string map "${destroot}${sub_prefix}/share/man/man1/ {}" ${man}]
         #    file rename ${man} ${destroot}${prefix}/share/man/man1/[string map ".1 -${suffix}.1" ${basename}]
         #}
+
+        # https://llvm.org/bugs/show_bug.cgi?id=19465
+        if {[variant_isset polly]} {
+            ln -s LLVMPolly.so ${destroot}${sub_prefix}/lib/LLVMPolly.dylib
+        }
     } elseif {${subport} eq "clang-${llvm_version}"} {
         system "ditto ${worksrcpath}/projects/libcxx/include ${destroot}${sub_prefix}/lib/c++/v1"
 
@@ -330,8 +335,8 @@ if {${subport} eq "llvm-${llvm_version}"} {
     variant ocaml description {Enable generation of OCaml binding} {
         depends_lib-append   port:ocaml
 
-        configure.args-delete --enable-bindings=none
-        configure.args-append --enable-bindings=ocaml
+        configure.args-delete -DLLVM_BINDINGS_LIST=none
+        configure.args-append -DLLVM_BINDINGS_LIST=ocaml
 
         destroot.args-append  OVERRIDE_libdir=${sub_prefix}/lib
     }
@@ -345,8 +350,10 @@ if {${subport} eq "llvm-${llvm_version}"} {
     }
 
     variant analyzer description {Install clang static analyzer} {
-        configure.args-delete --disable-clang-static-analyzer
-        configure.args-append --enable-clang-static-analyzer
+        configure.args-delete \
+            -DCLANG_ENABLE_STATIC_ANALYZER=OFF
+        configure.args-append \
+            -DCLANG_ENABLE_STATIC_ANALYZER=ON
 
         depends_run-append port:perl5
 
@@ -359,27 +366,11 @@ if {${subport} eq "llvm-${llvm_version}"} {
                 ${worksrcpath}/tools/clang/tools/scan-build/bin/set-xcode-analyzer \
                 ${worksrcpath}/tools/clang/tools/scan-view/bin/scan-view
         }
-
-        post-destroot {
-            file mkdir ${destroot}${sub_prefix}/libexec
-            file copy ${worksrcpath}/tools/clang/tools/scan-build ${destroot}${sub_prefix}/libexec/scan-build
-            file copy ${worksrcpath}/tools/clang/tools/scan-view ${destroot}${sub_prefix}/libexec/scan-view
-
-            ln -s ${sub_prefix}/libexec/scan-build/bin/scan-build ${destroot}${sub_prefix}/bin/scan-build
-            ln -s ${sub_prefix}/libexec/scan-view/bin/scan-view ${destroot}${sub_prefix}/bin/scan-view
-            ln -s ${sub_prefix}/bin/clang ${destroot}${sub_prefix}/libexec/scan-build/bin/clang
-
-            xinstall -m 755 "${filespath}/llvm-bin" "${destroot}${prefix}/bin/scan-build-${suffix}"
-            reinplace "s:EXEC_PATH:${sub_prefix}/bin/scan-build:" "${destroot}${prefix}/bin/scan-build-${suffix}"
-
-            xinstall -m 755 "${filespath}/llvm-bin" "${destroot}${prefix}/bin/scan-view-${suffix}"
-            reinplace "s:EXEC_PATH:${sub_prefix}/bin/scan-view:" "${destroot}${prefix}/bin/scan-view-${suffix}"
-        }
     }
 
     variant openmp description {Use MacPorts' provided libomp with -fopenmp} {
-        configure.args-append \
-            --with-clang-default-openmp-runtime=libomp
+        configure.args-append   -DCLANG_DEFAULT_OPENMP_RUNTIME=libomp
+
         depends_lib-append      port:libomp
         patchfiles-append       openmp-locations.patch
 
