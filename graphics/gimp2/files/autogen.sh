@@ -291,29 +291,14 @@ else
     gtkdocize || exit $?
 fi
 
+echo "Running intltoolize ..."
+intltoolize --automake --copy --force || exit $?
+
 # optionally feature autoheader
 ($AUTOHEADER --version)  < /dev/null > /dev/null 2>&1 && $AUTOHEADER || exit 1
 
 $AUTOMAKE --add-missing || exit $?
 $AUTOCONF || exit $?
-
-echo "Running intltoolize ..."
-intltoolize --automake --copy --force || exit $?
-
-sed -e "s|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@-libgimp|" \
-    -e "s|subdir = po|subdir = po-libgimp|" < po/Makefile.in.in > po-libgimp/Makefile.in.in 
-
-sed -e "s|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@-std-plug-ins|" \
-    -e "s|subdir = po|subdir = po-plug-ins|" < po/Makefile.in.in > po-plug-ins/Makefile.in.in 
-
-sed -e "s|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@-python|" \
-    -e "s|subdir = po|subdir = po-python|" < po/Makefile.in.in > po-python/Makefile.in.in 
-
-sed -e "s|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@-script-fu|" \
-    -e "s|subdir = po|subdir = po-script-fu|" < po/Makefile.in.in > po-script-fu/Makefile.in.in 
-
-sed -e "s|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@|GETTEXT_PACKAGE = @GETTEXT_PACKAGE@-tips|" \
-    -e "s|subdir = po|subdir = po-tips|" < po/Makefile.in.in > po-tips/Makefile.in.in 
 
 cd $ORIGDIR
 
