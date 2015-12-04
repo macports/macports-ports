@@ -30,12 +30,12 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #
-# This PortGroup implements the "cxx11" option, which lets ports
-# specify that they require C++11 support.
-# We only support C++11 with libc++.
+# This PortGroup introduces no new options. Simply including this
+# PortGroup indicates that a port requires C++11. We only support C++11
+# with libc++.
 #
-# Ideally the cxx11 option should be integrated into MacPorts base
-# instead of being a PortGroup.
+# Ideally the functionality of this PortGroup should be integrated into
+# MacPorts base as a new option.
 
 PortGroup compiler_blacklist_versions 1.0
 
