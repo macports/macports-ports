@@ -77,10 +77,15 @@ proc perl5.create_subports {branches rootname} {
 
 # Set perl variant options and defaults
 options perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant
+# The default variant derived from perl5.default_branch if not set in Portfile.
 default perl5.default_variant {[string map {. _} perl${perl5.default_branch}]}
-default perl5.variant {[string map {. _} perl${perl5.major}]}
+# The name of the selected variant or empty if there is not one.
+default perl5.variant {}
+# Control whether to set a default perl variant or not.
 default perl5.set_default_variant {true}
+# Control whether to conflict the perl variants or not. Probably almost always true.
 default perl5.conflict_variants {true}
+# Control whether a perl variant is required and if true produce an error if a perl variant is not set.
 default perl5.require_variant {false}
 # Get variant names from branches
 proc perl5.get_variant_names {branches} {
@@ -92,15 +97,15 @@ proc perl5.get_variant_names {branches} {
 }
 # Create perl variants
 proc perl5.create_variants {branches} {
-    global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant
-    set variants [perl5.get_variant_names ${branches}]
+    global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant perl5.variants
+    set perl5.variants [perl5.get_variant_names ${branches}]
     foreach branch ${branches} {
         set index [lsearch ${branches} ${branch}]
-        set variant [lindex ${variants} ${index}]
+        set variant [lindex ${perl5.variants} ${index}]
 # Add conflicts
         set conflicts {}
         if {${perl5.conflict_variants}} {
-            set conflicts "conflicts {[lreplace ${variants} ${index} ${index}]}"
+            set conflicts "conflicts {[lreplace ${perl5.variants} ${index} ${index}]}"
         }
         eval "variant ${variant} ${conflicts} description Use MacPorts perl${branch} {}"
         if {[variant_isset ${variant}]} {
@@ -108,21 +113,26 @@ proc perl5.create_variants {branches} {
         }
     }
 # Set default perl variant
-    if {${perl5.default_variant} eq ${perl5.variant} && ${perl5.set_default_variant}} {
-        default_variants-append +${perl5.variant}
-    }
-# Require perl variant
-    if {![variant_isset ${perl5.variant}] && ${perl5.require_variant}} {
-        ui_error "${name} requires one of these variants: ${variants}"
-        return -code error "absence of required perl variant"
+    if {${perl5.variant} eq {} && ${perl5.set_default_variant}} {
+        default_variants-append +${perl5.default_variant}
+        if {[variant_isset ${perl5.default_variant}]} {
+            perl5.variant ${perl5.default_variant}
+        }
     }
 # Set perl version and deps
     foreach branch ${branches} {
         set index [lsearch ${branches} ${branch}]
-        set variant [lindex ${variants} ${index}]
+        set variant [lindex ${perl5.variants} ${index}]
         if {[variant_isset ${variant}]} {
             perl5.major ${branch}
             depends_lib-append port:perl${branch}
+        }
+    }
+# Require perl variant
+    pre-fetch {
+        if {![variant_isset ${perl5.variant}] && ${perl5.require_variant}} {
+            ui_error "${name} requires one of these variants: ${perl5.variants}"
+            return -code error "absence of required perl variant"
         }
     }
 }
