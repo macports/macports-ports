@@ -127,19 +127,8 @@ proc python_set_versions {option action args} {
                                         OBJCFLAGS="${configure.universal_cflags}" \
                                         CXXFLAGS="${configure.universal_cxxflags}" \
                                         LDFLAGS="${configure.universal_ldflags}"
-                    destroot.env-append CFLAGS="${configure.universal_cflags}" \
-                                        OBJCFLAGS="${configure.universal_cflags}" \
-                                        CXXFLAGS="${configure.universal_cxxflags}" \
-                                        LDFLAGS="${configure.universal_ldflags}"
                 } else {
                     build.env-append    CFLAGS="${configure.cc_archflags}" \
-                                        OBJCFLAGS="${configure.objc_archflags}" \
-                                        CXXFLAGS="${configure.cxx_archflags}" \
-                                        FFLAGS="${configure.f77_archflags}" \
-                                        F90FLAGS="${configure.f90_archflags}" \
-                                        FCFLAGS="${configure.fc_archflags}" \
-                                        LDFLAGS="${configure.ld_archflags}"
-                    destroot.env-append CFLAGS="${configure.cc_archflags}" \
                                         OBJCFLAGS="${configure.objc_archflags}" \
                                         CXXFLAGS="${configure.cxx_archflags}" \
                                         FFLAGS="${configure.f77_archflags}" \
@@ -152,6 +141,30 @@ proc python_set_versions {option action args} {
                 foreach var {cc objc cxx fc f77 f90} {
                     if {[set configure.${var}] ne ""} {
                         build.env-append [string toupper $var]="[set configure.${var}]"
+                    }
+                }
+            }
+        }
+        pre-destroot {
+            if {${python.add_archflags}} {
+                if {[variant_exists universal] && [variant_isset universal]} {
+                    destroot.env-append CFLAGS="${configure.universal_cflags}" \
+                                        OBJCFLAGS="${configure.universal_cflags}" \
+                                        CXXFLAGS="${configure.universal_cxxflags}" \
+                                        LDFLAGS="${configure.universal_ldflags}"
+                } else {
+                    destroot.env-append CFLAGS="${configure.cc_archflags}" \
+                                        OBJCFLAGS="${configure.objc_archflags}" \
+                                        CXXFLAGS="${configure.cxx_archflags}" \
+                                        FFLAGS="${configure.f77_archflags}" \
+                                        F90FLAGS="${configure.f90_archflags}" \
+                                        FCFLAGS="${configure.fc_archflags}" \
+                                        LDFLAGS="${configure.ld_archflags}"
+                }
+            }
+            if {${python.set_compiler}} {
+                foreach var {cc objc cxx fc f77 f90} {
+                    if {[set configure.${var}] ne ""} {
                         destroot.env-append [string toupper $var]="[set configure.${var}]"
                     }
                 }
