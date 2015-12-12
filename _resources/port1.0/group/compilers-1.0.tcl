@@ -71,13 +71,16 @@
 # compilers.enforce_fortran {args}: enforce that a dependency has the same Fortran variant as is set here
 # compilers.enforce_some_fortran {args}: enforce that a dependency has some Fortran variant set
 #
+# Options:
+# compilers.clear_archflags: disable archflags ("-arch x86_64", -m64, etc.)
+#
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
 # compilers.libfortran is for use in linking Fortran code with the C or C++ compiler 
 
 PortGroup active_variants 1.1
 
-options compilers.variants compilers.gcc_variants
+options compilers.variants compilers.gcc_variants compilers.clear_archflags
 default compilers.variants {}
 default compilers.fortran_variants {}
 default compilers.gcc_variants {}
@@ -90,6 +93,7 @@ default compilers.required_f {}
 default compilers.required_some_f {}
 default compilers.variants_conflict {}
 default compilers.libfortran {}
+default compilers.clear_archflags yes
 
 # also set a default gcc version
 set compilers.gcc_default gcc5
@@ -245,6 +249,7 @@ proc compilers.setup_variants {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants compilers.list
     global compilers.variants_conflict
+    global compilers.clear_archflags
 
     foreach variant [split $args] {
         if {$cdb($variant,f77) ne ""} {
@@ -289,7 +294,7 @@ proc compilers.setup_variants {args} {
                         configure.$compiler $cdb($variant,$compiler)
 
                         # disable archflags
-                        if {"[info command configure.${compiler}_archflags]" ne ""} {
+                        if {${compilers.clear_archflags} && "[info command configure.${compiler}_archflags]" ne ""} {
                             configure.${compiler}_archflags
                             configure.ld_archflags
                         }
