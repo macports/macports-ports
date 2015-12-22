@@ -2,7 +2,7 @@
 # $Id$
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
-# Copyright (c) 2010-2014 The MacPorts Project
+# Copyright (c) 2010-2015 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -117,10 +117,17 @@ pre-configure {
         configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
                               -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
     }
+}
 
-    platform darwin {
+platform darwin {
+    set cmake._archflag_vars {cc_archflags cxx_archflags ld_archflags objc_archflags objcxx_archflags universal_cflags universal_cxxflags universal_ldflags universal_objcflags universal_objcxxflags}
+
+    pre-configure {
+        # cmake will add the correct -arch flag(s) based on the value of CMAKE_OSX_ARCHITECTURES.
         if {[variant_exists universal] && [variant_isset universal]} {
             if {[info exists universal_archs_supported]} {
+                merger_arch_compiler no
+                merger_arch_flag no
                 global merger_configure_args
                 foreach arch ${universal_archs_to_use} {
                     lappend merger_configure_args(${arch}) -DCMAKE_OSX_ARCHITECTURES=${arch}
@@ -134,12 +141,34 @@ pre-configure {
                 -DCMAKE_OSX_ARCHITECTURES="${configure.build_arch}"
         }
 
+        # Setting our own -arch flags is unnecessary (in the case of a non-universal build) or even
+        # harmful (in the case of a universal build, because it causes the compiler identification to
+        # fail; see http://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
+        # Save all archflag-containing variables before changing any of them, because some of them
+        # declare their default value based on the value of another.
+        foreach archflag_var ${cmake._archflag_vars} {
+            global cmake._saved_${archflag_var}
+            set cmake._saved_${archflag_var} [option configure.${archflag_var}]
+        }
+        foreach archflag_var ${cmake._archflag_vars} {
+            configure.${archflag_var}
+        }
+
         configure.args-append -DCMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}"
 
         if {${configure.sdkroot} != ""} {
             configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
         } else {
             configure.args-append -DCMAKE_OSX_SYSROOT="/"
+        }
+    }
+
+    post-configure {
+        # Although cmake wants us not to set -arch flags ourselves when we run cmake,
+        # ports might have need to access these variables at other times.
+        foreach archflag_var ${cmake._archflag_vars} {
+            global cmake._saved_${archflag_var}
+            configure.${archflag_var} [set cmake._saved_${archflag_var}]
         }
     }
 }
