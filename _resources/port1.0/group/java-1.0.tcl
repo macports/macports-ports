@@ -72,6 +72,6 @@ proc find_java_home {} {
 
 # Set the best value we can find for JAVA_HOME
 set java_home [find_java_home]
-configure.env   JAVA_HOME=${java_home}
-build.env       JAVA_HOME=${java_home}
-destroot.env    JAVA_HOME=${java_home}
+configure.env-append   JAVA_HOME=${java_home}
+build.env-append       JAVA_HOME=${java_home}
+destroot.env-append    JAVA_HOME=${java_home}
