@@ -323,9 +323,22 @@ variant universal {
                 }
             }
 
+            set autoconf_dir_save  ${autoconf.dir}
+            if { [string match "${worksrcpath}/*" ${autoconf.dir}] } {
+                # The autoconf directory is inside the source directory, so put in the new source directory name.
+                option autoconf.dir [string map "${worksrcpath} ${worksrcpath}-${arch}" ${autoconf.dir}]
+            } else {
+                # The autoconf directory is outside the source directory, so give it a new name by appending ${arch}.
+                option autoconf.dir ${autoconf.dir}-${arch}
+                if { ![file exists ${autoconf.dir}] } {
+                    file mkdir ${autoconf.dir}
+                }
+            }
+
             portconfigure::configure_main
 
             # Undo changes to the configure related variables
+            option autoconf.dir         ${autoconf_dir_save}
             option autoreconf.dir       ${autoreconf_dir_save}
             option configure.dir        ${configure_dir_save}
             option configure.compiler   ${configure_compiler_save}
