@@ -1,0 +1,135 @@
+--- ./src/screen.h
++++ ./src/screen.h
+@@ -201,6 +201,7 @@ struct _ScreenInfo
+ #endif /* HAVE_RANDR */
+ 
+ #endif /* HAVE_COMPOSITOR */
++    Window last_raise_sibling;
+ };
+ 
+ gboolean                 myScreenCheckWMAtom                    (ScreenInfo *,
+--- ./src/stacking.c
++++ ./src/stacking.c
+@@ -43,13 +43,13 @@
+ static guint raise_timeout = 0;
+ 
+ void
+-clientApplyStackList (ScreenInfo *screen_info)
++clientApplyStackList (ScreenInfo *screen_info, Client *client, StackingAction action )
+ {
+     Window *xwinstack;
+     guint nwindows;
+     gint i;
+ 
+-    DBG ("applying stack list");
++    DBG ("applying stack list, action=%s on window 0x%lx", (action==Raise)? "Raise" : ((action==Lower)? "Lower" : "Restack"), client->window );
+     nwindows = g_list_length (screen_info->windows_stack);
+ 
+     i = 0;
+@@ -68,11 +68,48 @@ clientApplyStackList (ScreenInfo *screen
+         {
+             c = (Client *) list->data;
+             xwinstack[i++] = c->frame;
+-            DBG ("  [%i] \"%s\" (0x%lx)", i, c->name, c->window);
++            if ( !((action==Raise || action==Lower) && c->window!=client->window) )
++            {
++                DBG ("  [%i] \"%s\" (0x%lx)", i, c->name, c->window);
++            }
+         }
+     }
+ 
+-    XRestackWindows (myScreenGetXDisplay (screen_info), xwinstack, (int) nwindows + 4);
++    switch (action)
++    {
++        case Restack:
++        default:
++            // Restack the windows. This is the preferred action if the lowering/raising has to be done with respect to
++            // a sibling window.
++            XRestackWindows (myScreenGetXDisplay (screen_info), xwinstack, (int) nwindows + 4);
++            break;
++        case Raise:
++            // Raise the windows inconditionally, working backwards (xwinstack[n-1] .. xwinstack[0]) as RestackWindows would do too.
++            // This is the preferred action when raising a window on Mac OS X or MS Windows when the X server does not
++            // manage all windows on the screen. Using Restack, the window would remain behind non X windows if it was
++            // not already in front of them.
++            for (i = nwindows ; i >= 0 ; --i)
++            {
++                if (xwinstack[i] == client->frame || i <= 3)
++                {
++                    XRaiseWindow (myScreenGetXDisplay (screen_info), xwinstack[i]);
++                }
++            }
++            break;
++        case Lower:
++            // Lower the windows inconditionally, (xwinstack[0] .. xwinstack[n-1]).
++            // This is the preferred action when lowering a window on Mac OS X or MS Windows when the X server does not
++            // manage all windows on the screen. Using Restack, the window would remain in front of non X windows if it was
++            // not already behind them.
++            for (i = 0 ; i < nwindows ; ++i)
++            {
++                if (xwinstack[i] == client->frame || i <= 3)
++                {
++                    XLowerWindow (myScreenGetXDisplay (screen_info), xwinstack[i]);
++                }
++            }
++            break;
++    }
+ 
+     g_free (xwinstack);
+ }
+@@ -297,9 +334,9 @@ clientRaise (Client * c, Window wsibling
+     transients = NULL;
+     sibling = NULL;
+ 
+-    if (c == screen_info->last_raise)
++    if (c == screen_info->last_raise && (wsibling && wsibling == screen_info->last_raise_sibling))
+     {
+-        TRACE ("client \"%s\" (0x%lx) already raised", c->name, c->window);
++        TRACE ("client \"%s\" (0x%lx) already raised w.r.t. sibling %lx", c->name, c->window, wsibling);
+         return;
+     }
+     TRACE ("raising client \"%s\" (0x%lx) over (0x%lx)", c->name, c->window, wsibling);
+@@ -429,10 +466,12 @@ clientRaise (Client * c, Window wsibling
+         }
+         /* Now, screen_info->windows_stack contains the correct window stack
+            We still need to tell the X Server to reflect the changes
++           This is done using XRestackWindows when we're restacking w.r.t. wsibling, and using XRaiseWindow otherwise.
+          */
+-        clientApplyStackList (screen_info);
++        clientApplyStackList (screen_info, c, (wsibling)? Restack : Raise);
+         clientSetNetClientList (c->screen_info, display_info->atoms[NET_CLIENT_LIST_STACKING], screen_info->windows_stack);
+         screen_info->last_raise = c;
++        screen_info->last_raise_sibling = wsibling;
+     }
+ }
+ 
+@@ -518,13 +557,15 @@ clientLower (Client * c, Window wsibling
+         }
+         /* Now, screen_info->windows_stack contains the correct window stack
+            We still need to tell the X Server to reflect the changes
++           This is done using XRestackWindows when we're restacking w.r.t. wsibling, and using XLowerWindow otherwise.
+          */
+-        clientApplyStackList (screen_info);
++        clientApplyStackList (screen_info, c, (wsibling)? Restack : Lower);
+         clientSetNetClientList (screen_info, display_info->atoms[NET_CLIENT_LIST_STACKING], screen_info->windows_stack);
+         clientPassFocus (screen_info, c, NULL);
+         if (screen_info->last_raise == c)
+         {
+             screen_info->last_raise = NULL;
++            screen_info->last_raise_sibling = 0;
+         }
+     }
+ }
+--- ./src/stacking.h
++++ ./src/stacking.h
+@@ -31,7 +31,9 @@
+ #include "screen.h"
+ #include "client.h"
+ 
+-void                     clientApplyStackList                   (ScreenInfo *);
++typedef enum StackingAction {Restack, Raise, Lower} StackingAction;
++
++void                     clientApplyStackList                   (ScreenInfo *, Client *, StackingAction);
+ Client                  *clientGetLowestTransient               (Client *);
+ Client                  *clientGetHighestTransientOrModalFor    (Client *);
+ gboolean                 clientIsTopMost                        (Client *);
