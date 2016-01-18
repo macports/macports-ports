@@ -151,7 +151,7 @@ set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 # other platforms required
 #     see http://doc.qt.io/qt-5/supported-platforms.html
 #     and http://doc.qt.io/QtSupportedPlatforms/index.html
-global qt_qmake_spe
+global qt_qmake_spec
 global qt_qmake_spec_32
 global qt_qmake_spec_64
 compiler.whitelist clang
