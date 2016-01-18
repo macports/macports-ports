@@ -180,6 +180,10 @@ set qt_uic_cmd          ${qt_bins_dir}/uic
 global qt_lrelease_cmd
 set qt_lrelease_cmd     ${qt_bins_dir}/lrelease
 
+# standard lupdate command location
+global qt_lupdate_cmd
+set qt_lupdate_cmd     ${qt_dir}/bin/lupdate
+
 # standard PKGCONFIG path
 global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
