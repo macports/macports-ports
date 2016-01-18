@@ -35,6 +35,22 @@
 # Usage:
 # PortGroup     qt5 1.0
 
+# Qt has what is calls reference configurations, which are said to be thoroughly tested
+# Qt also has configurations which are occasionally tested
+# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
+global qt5_min_tested_version
+global qt5_max_tested_version
+global qt5_min_reference_version
+global qt5_max_reference_version
+set qt5_min_tested_version     11
+set qt5_max_tested_version     14
+set qt5_min_reference_version  12
+set qt5_max_reference_version  14
+
+if {[tbool just_want_qt5_version_info]} {
+    return
+}
+
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -180,18 +196,6 @@ if { ![option universal_variant] || ![variant_isset universal] } {
 #     -DQT_QMAKESPEC=${qt_qmake_spec} \
 #     -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
 #     -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
-
-# Qt has what is calls reference configurations, which are said to be thoroughly tested
-# Qt also has configurations which are occasionally tested
-# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
-global qt5_min_tested_version
-global qt5_max_tested_version
-global qt5_min_reference_version
-global qt5_max_reference_version
-set qt5_min_tested_version     11
-set qt5_max_tested_version     14
-set qt5_min_reference_version  12
-set qt5_max_reference_version  14
 
 # do not try to install if qt5-qtbase dependency will fail to build
 # warn about non-reference configurations
