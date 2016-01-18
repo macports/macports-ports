@@ -177,6 +177,27 @@ if { ![option universal_variant] || ![variant_isset universal] } {
 #     -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
 #     -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
 
+# Qt has what is calls reference configurations, which are said to be thoroughly tested
+# Qt also has configurations which are occasionally tested
+# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
+global qt5_min_tested_version
+global qt5_max_tested_version
+global qt5_min_reference_version
+global qt5_max_reference_version
+set qt5_min_tested_version     11
+set qt5_max_tested_version     14
+set qt5_min_reference_version  12
+set qt5_max_reference_version  14
+
+# do not try to install if qt5-qtbase dependency will fail to build
+# warn about non-reference configurations
+if { ${os.major} < ${qt5_min_tested_version} } {
+    pre-fetch {
+        ui_error "Qt dependency will not build on this platform"
+        return -code error "unsupported OS"
+    }
+}
+
 if {![info exists building_qt5]} {
     depends_lib-append port:qt5-qtbase
 }
