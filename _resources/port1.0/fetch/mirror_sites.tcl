@@ -177,7 +177,9 @@ set portfetch::mirror_sites::sites(gnome) {
     http://fr2.rpmfind.net/linux/gnome.org/
     http://ftp.acc.umu.se/pub/GNOME/
     http://ftp.belnet.be/ftp.gnome.org/
-    http://ftp.df.lth.se/pub/gnome/
+    http://ftp.cse.buffalo.edu/pub/Gnome/
+    http://ftp.fau.de/gnome/
+    http://ftp.heanet.ie/mirrors/ftp.gnome.org/
     http://ftp.is.co.za/mirror/ftp.gnome.org/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
     http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
@@ -187,9 +189,11 @@ set portfetch::mirror_sites::sites(gnome) {
     http://ftp2.nluug.nl/windowing/gnome/
     http://ftp2.uk.freebsd.org/sites/ftp.gnome.org/pub/GNOME/
     http://mirror.internode.on.net/pub/gnome/
+    http://mirror.nbtelecom.com.br/gnome/
     http://mirror.oss.maxcdn.com/gnome/
     http://mirror.umd.edu/gnome/
     http://mirrors.ustc.edu.cn/gnome/
+    https://muug.ca/mirror/gnome/
     http://www.gtlib.gatech.edu/pub/gnome/
     http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
 }
