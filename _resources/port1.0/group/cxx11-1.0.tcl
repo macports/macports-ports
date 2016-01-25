@@ -43,8 +43,7 @@ PortGroup compiler_blacklist_versions 1.0
 # As we only support libc++, clang is implicitly required.
 # Blacklist all GCC compilers to not accidentally pull in libstdc++.
 # We do not know what "cc" is, so blacklist it as well.
-compiler.blacklist-append   *gcc* {clang < 500} macports-clang-2.* \
-                            {macports-clang-3.[0-2]} cc
+compiler.blacklist-append   *gcc* {clang < 500} cc
 
 pre-configure {
     if {${configure.cxx_stdlib} eq "libstdc++"} {
