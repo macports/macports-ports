@@ -4,14 +4,13 @@
 srcdir=`dirname $0`
 test -z "$srcdir" && srcdir=.
 
-PKG_NAME="control-center"
 ACLOCAL_FLAGS="-I libgd $ACLOCAL_FLAGS"
 
 (test -f $srcdir/configure.ac \
   && test -f $srcdir/autogen.sh \
   && test -d $srcdir/shell) || {
     echo -n "**Error**: Directory "\`$srcdir\'" does not look like the"
-    echo " top-level $PKG_NAME directory"
+    echo " top-level gnome-control-center directory"
     exit 1
 }
 
