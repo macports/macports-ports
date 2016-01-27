@@ -82,7 +82,9 @@ configure.args-append QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}
 #    so value of ${configure.cxx_stdlib} can always be used
 configure.args-append \
     QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++ \
-    QMAKE_LFLAGS_CXX11-=-stdlib=libc++
+    QMAKE_LFLAGS_CXX11-=-stdlib=libc++   \
+    QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib} \
+    QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
 
 # ensure ${configure.cxx_stdlib} is used for C++ stdlib
 configure.args-append \
