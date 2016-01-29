@@ -6,6 +6,7 @@ PortGroup           cmake 1.0
 
 name                qca
 version             2.1.0
+revision            1
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          devel crypto security
 maintainers         michaelld openmaintainer
@@ -24,38 +25,35 @@ master_sites        http://delta.affinix.com/download/qca/2.0/
 checksums           rmd160 30358bbd182cfeb9eaa696b5b39fa9e6d1f99b4c \
                     sha256 226dcd76138c3738cdc15863607a96b3758a4c3efd3c47295939bcea4e7a9284
 
-# (1) correct pkgconfig file for framework install, if selected.
-# (2) allow for 'debug' and 'framework' options at the same time.
-#     This change is needed to allow for +debug [+framework] --
-#     disallow just debug framework via no variants for it.
-# (3) allow simple replacement for universal arch arguments, if that
-#     variant is requested.
+# do VPATH (out of source tree) build
 
-patchfiles          patch-qca_basic_h.diff \
-                    patch-CMakeLists_txt.diff
+cmake.out_of_source yes
 
-# fix C++ inheritance for a specific class to make clang happy
-#patchfiles-append    patch-src_botantools_botan_botan_secmem.h.diff
+# temporary patch to add including QIODevice to qca_basic.h
+
+patchfiles-append patch-include_QtCrypto_qca_basic.h.diff
+
+# fix install directories for certs and cmake files
+
+patchfiles-append patch-CMakeLists.txt.diff
 
 # remove unnecessary Carbon #include, which fails on 10.8
-#patchfiles-append    patch-src_qac_systemstore_mac.cpp.diff
+
+patchfiles-append patch-src_qac_systemstore_mac.cpp.diff
+
+# Qt variants
 
 variant qt4 conflicts qt5 description "Build with qt4" {
-
-    PortGroup   qt4 1.0
-    configure.args-append   "-DQT4_BUILD=ON"
-
+    PortGroup qt4 1.0
+    configure.args-append -DQT4_BUILD=ON
 }
 
 variant qt5 conflicts qt4 description "Build with qt5" {
-
-    PortGroup               qt5 1.0
-    configure.args-append   "-DQCA_FEATURE_INSTALL_DIR=${prefix}/libexec/qt5/mkspecs"
-
+    PortGroup qt5 1.0
 }
 
 if {![variant_isset qt4] && ![variant_isset qt5]} {
-    default_variants     +qt4
+    default_variants +qt4
 }
 
 # make sure -qt4 wasn't specified alone
@@ -64,6 +62,30 @@ if {![variant_isset qt4] && ![variant_isset qt5]} {
     ui_error "\n\nYou must select either the +qt4 or +qt5 variant to build ${name}\n"
     return -code error "Invalid variant selection"
 }
+
+# set install directory for mkspec files
+
+pre-configure {
+    configure.args-append \
+        -DQCA_FEATURE_INSTALL_DIR=${qt_mkspecs_dir}
+}
+
+# build as a framework
+
+configure.args-append \
+    -DOSX_FRAMEWORK=YES
+
+# specify various configure options
+
+configure.args-append \
+    -DBUILD_PLUGINS=NO \
+    -DQCA_INSTALL_IN_QT_PREFIX=NO \
+    -DQCA_MAN_INSTALL_DIR=${prefix}/share/man \
+    -DQCA_LIBRARY_INSTALL_DIR=${frameworks_dir} \
+    -DCMAKE_MODULES_DIR=${prefix}/share/cmake \
+    -DPKGCONFIG_INSTALL_PREFIX=${prefix}/lib/pkgconfig \
+    -DQCA_PLUGINS_INSTALL_DIR=${prefix}/share/${name}/plugins \
+    -DQCA_DOC_INSTALL_DIR=${prefix}/share/${name}/doc
 
 # allow ccache, if specified by the user
 
@@ -74,50 +96,47 @@ pre-build {
 }
 
 post-destroot {
-    # alias to destroot QCA top-level directory
-    set destroot_qt ${destroot}${qt_dir}
 
     # install docs
-    xinstall -d -m 755 ${destroot_qt}/share/doc/${name}
+
+    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
     xinstall -m 644 -W ${worksrcpath} COPYING README TODO \
-        ${destroot_qt}/share/doc/${name}
+        ${destroot}${prefix}/share/doc/${name}
 
-    if {[variant_isset qt4]} {
-        # install cmake file (taken from port 'kdelibs4'). To use this
-        # file, include '-DCMAKE_MODULE_PATH=...' in configure.args during
-        # the initial 'configure' stage (which uses CMake), to the full
-        # path of where the CMake files are installed.
-        xinstall -d -m 755 ${destroot}${qt_cmake_module_dir}
-        xinstall -m 644 -W ${filespath} FindQCA2.cmake \
-            ${destroot}${qt_cmake_module_dir}
-    }
+    # get qca's version numbers
+
+    set qca_vers [split ${version} "."]
+    set qca_major [lindex ${qca_vers} 0]
+    set qca_minor [lindex ${qca_vers} 1]
+    set qca_patch [lindex ${qca_vers} 2]
+
+    # link includes and libraries for each actual installed framework
+
+    set tf_full ${frameworks_dir}/qca.framework/Versions/${version}
+
+    # link headers into ${prefix}/include, removing
+    # directories if they are already there first
+
+    set dr_inc_file ${destroot}${prefix}/include
+    ln -s ${tf_full}/Headers ${dr_inc_file}/qca
+    ln -s ${tf_full}/Headers ${dr_inc_file}/QtCrypto
+
+    # link libraries into ${dr_libs_dir}, all 4 number variants
+
+    set dr_libs_dir ${destroot}${prefix}/lib
+    ln -s ${tf_full}/qca ${dr_libs_dir}/libqca.dylib
+    ln -s ${tf_full}/qca ${dr_libs_dir}/libqca.${qca_major}.dylib
+    ln -s ${tf_full}/qca ${dr_libs_dir}/libqca.${qca_major}.${qca_minor}.dylib
+    ln -s ${tf_full}/qca ${dr_libs_dir}/libqca.${qca_major}.${qca_minor}.${qca_patch}.dylib
+
 }
 
-variant debug description \
-{Build both release and debug library} {
-    configure.args-delete --release
-    configure.args-append --debug-and-release
-}
-
-variant examples description \
-{Include examples in install} {
+variant examples description {Include examples in install} {
     post-destroot {
-        xinstall -d -m 755 ${destroot}${qt_dir}/share/examples/${name}
+        xinstall -d -m 755 ${destroot}${prefix}/share/examples/${name}
         eval file copy [glob ${worksrcpath}/examples/*] \
-            ${destroot}${qt_dir}/share/examples/${name}
+            ${destroot}${prefix}/share/examples/${name}
     }
-}
-
-platform darwin 8 {
-    # might not be necessary
-    if {[variant_exists universal] && [variant_isset universal]} {
-        configure.args-append --mac-sdk=${developer_dir}/SDKs/MacOSX10.4u.sdk
-    }
-}
-
-variant universal {
-    # Add the universal flag understood by qmake
-    configure.universal_args-append --universal
 }
 
 livecheck.type  regex
