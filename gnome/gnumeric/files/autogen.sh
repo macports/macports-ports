@@ -61,12 +61,12 @@ printbold "Creating po/Makefile.in.in and po-functions/Makefile.in.in."
 #rm -f $srcdir/po/Makefile.in.in $srcdir/po-functions/Makefile.in.in
 rm -f $srcdir/po-functions/Makefile.in.in
 #cp $srcdir/po/Makefile.in.in.own $srcdir/po/Makefile.in.in
-sed '/^\(GETTEXT_PACKAGE\|subdir\) =/s/[ 	]*$/-functions/
-s|$(srcdir)/LINGUAS|$(top_srcdir)/po/LINGUAS|g
-/^GETTEXT_PACKAGE =/a\
-XGETTEXT_KEYWORDS = --keyword --keyword=F_
-/^EXTRA_DISTFILES/s/ LINGUAS//
-' $srcdir/po/Makefile.in.in >$srcdir/po-functions/Makefile.in.in
+sed -e '/^GETTEXT_PACKAGE =/s/@GETTEXT_PACKAGE@$/@GETTEXT_PACKAGE@-functions/' \
+    -e 's|$(srcdir)/LINGUAS|$(top_srcdir)/po/LINGUAS|g' \
+    -e '/^GETTEXT_PACKAGE =/a\
+XGETTEXT_KEYWORDS = --keyword --keyword=F_' \
+    -e '/^EXTRA_DISTFILES/s/ LINGUAS//' \
+$srcdir/po/Makefile.in.in >$srcdir/po-functions/Makefile.in.in
 
 printbold "Creating po-functions/POTFILES.{in,skip}."
 rm -f $srcdir/po-functions/POTFILES.in $srcdir/po-functions/POTFILES.skip
