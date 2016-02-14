@@ -288,6 +288,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
     http://nue.de.distfiles.macports.org/macports/distfiles/:mirror
     http://osl.no.distfiles.macports.org/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
+    http://sjc.us.distfiles.macports.org/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
 }
 
