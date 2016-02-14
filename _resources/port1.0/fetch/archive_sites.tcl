@@ -12,6 +12,7 @@ set portfetch::mirror_sites::sites(macports_archives) {
     http://mse.uk.packages.macports.org/sites/packages.macports.org/:nosubdir
     http://osl.no.packages.macports.org/:nosubdir
     http://sea.us.packages.macports.org/macports/packages/:nosubdir
+    http://sjc.us.packages.macports.org/:nosubdir
     http://jog.id.packages.macports.org/macports/packages/:nosubdir
 }
 
