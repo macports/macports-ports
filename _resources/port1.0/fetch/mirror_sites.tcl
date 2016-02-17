@@ -346,60 +346,42 @@ set portfetch::mirror_sites::sites(perl_cpan) {
 # an available mirror in that country. To update this list use:
 # curl -s --compressed http://php.net/mirrors.php | sed -E -n 's,^.*http://([a-z]{2})[0-9]*(\.php\.net)/.*$,\1\2,p' | sort -u | xargs -n 1 -I % sh -c '{ curl -s --compressed --connect-timeout 30 -m 60 http://%/ | grep -iq "php group" && echo "    http://%/:nosubdir"; }' | tee /dev/tty | pbcopy
 set portfetch::mirror_sites::sites(php) {
-    http://am.php.net/:nosubdir
     http://ar.php.net/:nosubdir
     http://at.php.net/:nosubdir
     http://au.php.net/:nosubdir
-    http://bd.php.net/:nosubdir
     http://be.php.net/:nosubdir
-    http://bg.php.net/:nosubdir
+    http://br.php.net/:nosubdir
     http://ca.php.net/:nosubdir
     http://ch.php.net/:nosubdir
     http://cl.php.net/:nosubdir
+    http://cn.php.net/:nosubdir
     http://cz.php.net/:nosubdir
     http://de.php.net/:nosubdir
-    http://dk.php.net/:nosubdir
     http://ee.php.net/:nosubdir
-    http://es.php.net/:nosubdir
     http://fi.php.net/:nosubdir
-    http://fr.php.net/:nosubdir
     http://hk.php.net/:nosubdir
-    http://hu.php.net/:nosubdir
-    http://id.php.net/:nosubdir
     http://ie.php.net/:nosubdir
-    http://il.php.net/:nosubdir
     http://in.php.net/:nosubdir
     http://ir.php.net/:nosubdir
-    http://is.php.net/:nosubdir
     http://it.php.net/:nosubdir
     http://jm.php.net/:nosubdir
     http://jp.php.net/:nosubdir
     http://kr.php.net/:nosubdir
-    http://li.php.net/:nosubdir
-    http://lu.php.net/:nosubdir
-    http://lv.php.net/:nosubdir
-    http://md.php.net/:nosubdir
+    http://lt.php.net/:nosubdir
     http://mx.php.net/:nosubdir
     http://my.php.net/:nosubdir
-    http://nc.php.net/:nosubdir
     http://nl.php.net/:nosubdir
-    http://no.php.net/:nosubdir
     http://nz.php.net/:nosubdir
     http://pa.php.net/:nosubdir
-    http://pk.php.net/:nosubdir
     http://pl.php.net/:nosubdir
-    http://pt.php.net/:nosubdir
-    http://ro.php.net/:nosubdir
-    http://ru.php.net/:nosubdir
     http://se.php.net/:nosubdir
     http://sg.php.net/:nosubdir
     http://th.php.net/:nosubdir
     http://tr.php.net/:nosubdir
     http://tw.php.net/:nosubdir
-    http://tz.php.net/:nosubdir
-    http://ua.php.net/:nosubdir
     http://uk.php.net/:nosubdir
     http://us.php.net/:nosubdir
+    http://za.php.net/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
