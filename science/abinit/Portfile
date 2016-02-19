@@ -42,7 +42,7 @@ compilers.choose    cc cxx fc
 # g95 is not compatible with OpenMP, and support will be removed in the next version
 mpi.setup           default require_fortran -g95
 
-configure.args-append  --with-linalg-flavor="atlas" --enable-gw-dpc
+configure.args-append  --enable-gw-dpc
 configure.optflags  -O3
 
 use_parallel_build  yes
@@ -53,7 +53,6 @@ use_parallel_build  yes
 #build.target        multi multi_nprocs=4
 
 default_variants +etsf_io +libxc
-# Do not put +wannier90 since tests fail for wannier90 use.
 
 pre-configure {
     if {[fortran_variant_name] eq "g95"} {
@@ -94,21 +93,44 @@ pre-configure {
 #            set dft-flavor ${dft-flavor}+wannier90
 #        }
 #    }
-    if { [variant_isset bigdft] } {
-        if { ${dft-flavor} eq "none" } {
-            set dft-flavor bigdft
-        } else {
-            set dft-flavor ${dft-flavor}+bigdft
-        }
-    }
-    if { [variant_isset atompaw] } {
-        if { ${dft-flavor} eq "none" } {
-            set dft-flavor atompaw
-        } else {
-            set dft-flavor ${dft-flavor}+atompaw
-        }
-    }
+#    if { [variant_isset bigdft] } {
+#        if { ${dft-flavor} eq "none" } {
+#            set dft-flavor bigdft
+#        } else {
+#            set dft-flavor ${dft-flavor}+bigdft
+#        }
+#    }
+#    if { [variant_isset atompaw] } {
+#        if { ${dft-flavor} eq "none" } {
+#            set dft-flavor atompaw
+#        } else {
+#            set dft-flavor ${dft-flavor}+atompaw
+#        }
+#    }
     configure.args-append  --with-dft-flavor="${dft-flavor}"
+
+    set linalg-flavor "none"
+    if { [variant_isset atlas] } {
+        set linalg-flavor atlas
+        if {[variant_isset threads]} {
+            set linalg_libs    -ltatlas
+        } else {
+            set linalg_libs    -lsatlas
+        }
+    } else {
+        set linalg-flavor netlib
+        if { [variant_isset accelerate] } {
+            set linalg_libs        -lveclibfort
+        } elseif { [variant_isset openblas] } {
+            set linalg_libs        -lopenblas
+        }
+    }
+    if { [variant_isset scalapack] } {
+        set linalg-flavor ${linalg-flavor}+scalapack
+        set linalg_libs        "${linalg_libs} -lscalapack"
+    }
+    configure.args-append   --with-linalg-flavor="${linalg-flavor}"
+    configure.args-append   --with-linalg-libs="${linalg_libs}"
 }
 
 # install binaries and pkgconfig but the very large number of test files
@@ -119,14 +141,32 @@ universal_variant   no
 
 test.run            yes
 test.cmd            tests/runtests.py
-test.target         built-in fast
+# args -t0 for no timeout since it cannot be found anyway; or: set depends_build-append port:timeout
+test.target         built-in fast tutorespfn tutorial unitary
+#test.target         built-in fast tutorespfn tutorial unitary v1 v2 v3 v4 v5 v6 v67mbpt v7
 # wannier90 test will probably fail, version 2.0.x is not supported anyway
+
+# for +scalapack +atlas -libxc:
+# hang in test [v2][t79].
+# :info:test [tutorial][tspin_6][np=1]: failed: absolute error 2.7e-08 > 2.5e-08
+
+# other config options to add:
+# --enable-mpi-inplace
+# --with-atompaw-libs; --with-atompaw-incs
+
+pre-test {
+    if {[mpi_variant_isset]} {
+        test.target-append paral mpiio tutoparal
+        reinplace "s|mpirun -np|${mpi.exec} -np|" ${worksrcpath}/tests/pymods/jobrunner.py
+        test.args-append -n 1
+    } else {
+        test.target-append seq
+    }
+}
 
 pre-configure {
     configure.args-append  FCCPP="${configure.cc} -E -ansi"
     if {[mpi_variant_isset]} {
-        configure.args-append  MPI_RUNNER=${mpi.exec}
-        test.env-append        MPIEXEC=${mpi.exec}
         configure.args-append  --enable-mpi="yes" --enable-mpi-io="yes"
     } else {
         configure.args-append  --enable-mpi="no"
@@ -149,8 +189,6 @@ variant fftw3 description {Build with support for fftw-3 FFT library} {
 variant threads description {Build with support for OpenMP threads} {
     configure.args-append   --enable-openmp
     configure.fcflags-append -fopenmp
-    configure.args-append   --with-linalg-libs="-L${prefix}/lib -ltatlas"
-    configure.args-append   --with-linalg-incs="-I${prefix}/include"
 }
 
 variant netcdf description {Build with support for NetCDF transferable I/O} {
@@ -178,9 +216,42 @@ variant libxc description {Build with support for libXC exchange-correlation lib
     test.target-append      libxc
 }
 
+#3 possibilities for blas/lapack + ScaLapack
+#-------------------------------------------
+if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
+    default_variants-append +accelerate
+}
+
+variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
+    depends_lib-append      port:veclibfort
+}
+
+variant atlas conflicts accelerate openblas description {Build with linear algebra from ATLAS} {
+    depends_lib-append      port:atlas
+}
+
+variant openblas conflicts accelerate atlas description {Build with linear algebra from OpenBLAS} {
+    # allow OpenBLAS-devel too
+    depends_lib-append      path:lib/libopenblas.dylib:OpenBLAS
+    require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
+}
+
+variant scalapack description {Build with ScaLAPACK for parallel linear algebra} {
+    depends_lib-append      port:scalapack
+
+    if {![mpi_variant_isset]} {
+        ui_error "+scalapack requires an MPI variant. Choose +mpich, +mpich_devel, +openmpi, or +openmpi_devel."
+        return -code error "+scalapack requires an MPI variant."
+    }
+    
+    mpi.setup               require
+    mpi.enforce_variant     scalapack
+}
+
 # abinit does not work with Wannier90 version 2.0.x currently
 #variant wannier90 description {Build with support for Wannier90} {
 #    depends_lib-append      port:wannier90
+#    test.target-append      wannier90 tutoplugs vdwxc
 #}
 
 # FIXME: the code's build system will download BigDFT itself, which is contrary to the
