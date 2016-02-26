@@ -1,6 +1,6 @@
---- src/global/mail_params.h.orig	2015-01-18 11:06:00.000000000 +1100
-+++ src/global/mail_params.h	2015-02-12 15:50:26.000000000 +1100
-@@ -269,7 +269,7 @@ extern int var_smtp_mxsess_limit;
+--- src/global/mail_params.h.orig	2016-02-01 08:05:46.000000000 +1100
++++ src/global/mail_params.h	2016-02-27 07:10:57.000000000 +1100
+@@ -270,7 +270,7 @@ extern int var_smtp_mxsess_limit;
    */
  #define VAR_QUEUE_DIR	"queue_directory"
  #ifndef DEF_QUEUE_DIR
@@ -9,7 +9,7 @@
  #endif
  extern char *var_queue_dir;
  
-@@ -278,13 +278,13 @@ extern char *var_queue_dir;
+@@ -279,13 +279,13 @@ extern char *var_queue_dir;
    */
  #define VAR_DAEMON_DIR		"daemon_directory"
  #ifndef DEF_DAEMON_DIR
@@ -25,7 +25,7 @@
  #endif
  extern char *var_command_dir;
  
-@@ -302,7 +302,7 @@ extern char *var_pid_dir;
+@@ -303,7 +303,7 @@ extern char *var_pid_dir;
    */
  #define VAR_DATA_DIR		"data_directory"
  #ifndef DEF_DATA_DIR
@@ -34,7 +34,7 @@
  #endif
  extern char *var_data_dir;
  
-@@ -316,7 +316,7 @@ extern time_t var_starttime;
+@@ -317,7 +317,7 @@ extern time_t var_starttime;
    */
  #define VAR_CONFIG_DIR		"config_directory"
  #ifndef DEF_CONFIG_DIR
@@ -43,7 +43,7 @@
  #endif
  extern char *var_config_dir;
  
-@@ -2589,22 +2589,22 @@ extern int var_fault_inj_code;
+@@ -2595,27 +2595,27 @@ extern int var_fault_inj_code;
    */
  #define VAR_SENDMAIL_PATH		"sendmail_path"
  #ifndef DEF_SENDMAIL_PATH
@@ -63,6 +63,12 @@
 +#define DEF_NEWALIAS_PATH		"__PREFIX/bin/newaliases"
  #endif
  
+ #define VAR_OPENSSL_PATH		"openssl_path"
+ #ifndef DEF_OPENSSL_PATH
+-#define DEF_OPENSSL_PATH		"openssl"
++#define DEF_OPENSSL_PATH		"__PREFIX/bin/openssl"
+ #endif
+ 
  #define VAR_MANPAGE_DIR			"manpage_directory"
  #ifndef DEF_MANPAGE_DIR
 -#define DEF_MANPAGE_DIR			"/usr/local/man"
@@ -70,7 +76,7 @@
  #endif
  
  #define VAR_SAMPLE_DIR			"sample_directory"
-@@ -3881,7 +3881,7 @@ extern char *var_smtpd_dns_re_filter;
+@@ -3917,7 +3917,7 @@ extern char *var_smtpd_dns_re_filter;
    */
  #define VAR_SHLIB_DIR	"shlib_directory"
  #ifndef DEF_SHLIB_DIR
