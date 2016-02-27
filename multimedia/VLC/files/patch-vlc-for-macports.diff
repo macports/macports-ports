@@ -1,10 +1,10 @@
 diff --git modules/lua/vlc.c modules/lua/vlc.c
-index 14b5520..92668f1 100644
+index df235d0..b753346 100644
 --- modules/lua/vlc.c
 +++ modules/lua/vlc.c
-@@ -234,10 +234,22 @@ int vlclua_dir_list( const char *luadirname, char ***pppsz_dir_list )
+@@ -232,10 +232,22 @@ int vlclua_dir_list( const char *luadirname, char ***pppsz_dir_list )
              i++;
- 
+
  #if defined(__APPLE__)
 -        if( likely(asprintf( &ppsz_dir_list[i],
 +        if( strcasestr (psz_datapath, "/share") == NULL
@@ -27,107 +27,96 @@ index 14b5520..92668f1 100644
          free( psz_datapath );
      }
 diff --git src/darwin/dirs.c src/darwin/dirs.c
-index 83c27a4..7e8b0cb 100644
+index 381729c..9174602 100644
 --- src/darwin/dirs.c
 +++ src/darwin/dirs.c
-@@ -42,6 +42,14 @@
+@@ -43,14 +43,20 @@
  # define MAXPATHLEN 1024
  #endif
  
-+// this is set to true in config_GetLibDir() if it detects we're installed
-+// in a (linux-specific) posix way.
-+static int libDirIsPosix = FALSE;
-+
+-char *config_GetLibDir (void)
 +// 20150205: we should do case-insensitive filename comparisons. HFS is case-insensitive by default,
 +// and while it strives to preserve case there is no guarantee that case folding will never occur,
 +// especially in directory components.
 +
- static char *config_GetLibPath (void)
++// @p libDirIsPosix is set to true in if getLibDir() detects we're installed
++// in a (linux-specific) posix way, like e.g. MacPorts would do.
++char *getLibDir (bool *libDirIsPosix)
  {
++    *libDirIsPosix = FALSE;
      /* Get the full program path and name */
-@@ -49,7 +57,7 @@ static char *config_GetLibPath (void)
-     for (unsigned i = 0; i < _dyld_image_count(); i++)
-     {
+     /* First try to see if we are linked to the framework */
+-    for (unsigned i = 0; i < _dyld_image_count(); i++)
+-    {
++    for (unsigned i = 0; i < _dyld_image_count(); i++) {
          const char *psz_img_name = _dyld_get_image_name(i);
 -        const char *p = strstr( psz_img_name, "VLCKit.framework/Versions/" );
 +        const char *p = strcasestr( psz_img_name, "VLCKit.framework/Versions/" );
  
          /* Check for "VLCKit.framework/Versions/Current/VLCKit",
           * as well as "VLCKit.framework/Versions/A/VLCKit" and
-@@ -61,26 +69,26 @@ static char *config_GetLibPath (void)
+@@ -61,18 +67,18 @@ char *config_GetLibDir (void)
              p += strcspn( p, "/" );
  
-             /* If the string ends with VLC then we've found a winner */
--            if ( !strcmp( p, "/VLCKit" ) )
-+            if ( !strcasecmp( p, "/VLCKit" ) )
-                 return strdup( psz_img_name );
+             /* If the string ends with VLCKit then we've found a winner */
+-            if (!strcmp( p, "/VLCKit"))
++            if (!strcasecmp( p, "/VLCKit"))
+                 return strdup( dirname(psz_img_name) );
          }
  
 -        /* Do we end by "VLC"? If so we are the legacy VLC.app that doesn't
-+        /* Do we end in "MacOS/VLC"? If so we are the legacy (?!) VLC.app that doesn't
++        /* Do we end by "MacOS/VLC"? If so we are the legacy VLC.app that doesn't
           * link to VLCKit. */
          size_t len = strlen(psz_img_name);
--        if( len >= 3 && !strcmp( psz_img_name + len - 3, "VLC") )
-+        if( len >= 9 && !strcasecmp( psz_img_name + len - 9, "MacOS/VLC") )
-             return strdup( psz_img_name );
+-        if (len >= 3 && !strcmp( psz_img_name + len - 3, "VLC"))
++        if (len >= 9 && !strcasecmp( psz_img_name + len - 9, "MacOS/VLC"))
+             return strdup( dirname(psz_img_name) );
  
--        /* Do we end by "VLC-Plugin"? oh, we must be the NPAPI plugin */
--        if( len >= 10 && !strcmp( psz_img_name + len - 10, "VLC-Plugin") )
-+        /* Do we end in "VLC-Plugin"? oh, we must be the NPAPI plugin */
-+        if( len >= 10 && !strcasecmp( psz_img_name + len - 10, "VLC-Plugin") )
-             return strdup( psz_img_name );
+         /* Do we end by "VLC-Plugin"? oh, we must be the NPAPI plugin */
+-        if (len >= 10 && !strcmp( psz_img_name + len - 10, "VLC-Plugin"))
++        if (len >= 10 && !strcasecmp( psz_img_name + len - 10, "VLC-Plugin"))
+             return strdup( dirname(psz_img_name) );
      }
  
--    /* We are not linked to the VLC.framework, let's use dladdr to figure
--     * libvlc path */
-+    /* We are not linked to the VLC.framework, we'rebreak not VLC.app either,
-+     * so let's use dladdr to figure the libvlc path */
-     Dl_info info;
-     if( dladdr(system_Init, &info) )
--        return strdup(dirname( info.dli_fname ));
-+        return strdup(dirname( (char*)info.dli_fname ));
+@@ -84,6 +90,7 @@ char *config_GetLibDir (void)
+         char *path = NULL;
+         asprintf(&path, "%s/"PACKAGE, incompletepath);
+         free(incompletepath);
++        *libDirIsPosix = TRUE;
+         return path;
+     }
  
-     char path[MAXPATHLEN+1];
-     uint32_t path_len = sizeof(path) - 1;
-@@ -99,6 +107,19 @@ char *config_GetLibDir (void)
-         if (p != NULL)
-         {
-             *p = '\0';
-+            p = strrchr (path, '.');
-+            if (p == NULL || !strcasestr(p, ".app/Contents/MacOS"))
-+            {
-+                // we're NOT running an OS X style app bundle;
-+                // return the Linux/POSIX style LibDir.
-+                free(path);
-+                path = strdup (PKGLIBDIR);
-+                libDirIsPosix = TRUE;
-+            }
-+            else
-+            {
-+                libDirIsPosix = FALSE;
-+            }
-             return path;
-         }
-         free (path);
-@@ -115,8 +136,26 @@ char *config_GetDataDir (void)
+@@ -91,15 +98,37 @@ char *config_GetLibDir (void)
+     abort ();
+ }
+ 
++char *config_GetLibDir (void)
++{
++    bool isPosixStub;
++    return getLibDir (&isPosixStub);
++}
++
+ char *config_GetDataDir (void)
+ {
+     const char *path = getenv ("VLC_DATA_PATH");
+     if (path)
          return strdup (path);
  
-     char *vlcpath = config_GetLibDir ();
+-    char *vlcpath = config_GetLibDir ();
 -    char *datadir;
++    bool libDirIsPosix;
++    char *vlcpath = getLibDir (&libDirIsPosix);
 +    char *datadir = NULL;
  
-+    if (libDirIsPosix)
-+    {
++    if (libDirIsPosix) {
 +        // vlcpath should point to something like /opt/local/lib/vlc
 +        // if so, we can chop off the /lib/vlc bit, and then add /share
 +        // like we would otherwise.
-+        char *p = strcasestr (vlcpath, "/lib/");
-+        if (p != NULL)
-+        {
++        char *p = strcasestr(vlcpath, "/lib/");
++        if (p != NULL) {
 +            *p = '\0';
 +        }
-+        else
-+        {
++        else {
 +            // something else ... return PKGDATADIR
 +            free(vlcpath);
 +            datadir = strdup(PKGDATADIR);
@@ -137,24 +126,38 @@ index 83c27a4..7e8b0cb 100644
      if (asprintf (&datadir, "%s/share", vlcpath) == -1)
          datadir = NULL;
  
-diff --git src/interface/interface.c src/interface/interface.c
-index b1dcfaf..f31a4a5 100644
---- src/interface/interface.c
-+++ src/interface/interface.c
-@@ -113,8 +113,14 @@ int intf_Create( vlc_object_t *p_this, const char *chain )
-     char *module;
-     char *psz_tmp = config_ChainCreate( &module, &p_intf->p_cfg,
-                                         psz_parser );
--    free( psz_tmp );
--    free( psz_parser );
-+    if (psz_tmp)
-+    {
-+        free( psz_tmp );
+@@ -137,16 +166,24 @@ static char *getAppDependentDir(vlc_userdir_t type)
+     }
+ 
+     // Default fallback
+-    const char *name = "org.videolan.vlc";
+-
+-    CFBundleRef mainBundle = CFBundleGetMainBundle();
+-    if (mainBundle) {
+-        CFStringRef identifierAsNS = CFBundleGetIdentifier(mainBundle);
+-        if (identifierAsNS) {
+-            char identifier[256];
+-            Boolean ret = CFStringGetCString(identifierAsNS, identifier, sizeof(identifier), kCFStringEncodingUTF8);
+-            if (ret)
+-                name = identifier;            
++    char name[256] = "org.videolan.vlc";
++    bool libDirIsPosix;
++    char *vlcpath = getLibDir(&libDirIsPosix);
++    if (vlcpath) {
++        free(vlcpath);
 +    }
-+    if (psz_parser)
-+    {
-+        free( psz_parser );
-+    }
-     p_intf->p_module = module_need( p_intf, "interface", module, true );
-     free(module);
-     if( p_intf->p_module == NULL )
++
++    if (!libDirIsPosix) {
++        CFBundleRef mainBundle = CFBundleGetMainBundle();
++        if (mainBundle) {
++            CFStringRef identifierAsNS = CFBundleGetIdentifier(mainBundle);
++            if (identifierAsNS) {
++                char identifier[256];
++                Boolean ret = CFStringGetCString(identifierAsNS, identifier, sizeof(identifier), kCFStringEncodingUTF8);
++                // Don't use an empty identifier (= the application that links to us doesn't have a CFBundleIdentifier set).
++                if (ret && strlen(identifier))
++                    strcpy(name, identifier);
++            }
+         }
+     }
+ 
