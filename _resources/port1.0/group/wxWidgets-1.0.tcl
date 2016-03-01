@@ -99,6 +99,16 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible Mac OS X version"
             }
         }
+    } elseif {${args} eq "wxPython-3.0"} {
+        wxWidgets.name      "wxPython"
+        wxWidgets.version   "3.0"
+        wxWidgets.port      "wxPython-3.0"
+        if {${os.major} < 9} {
+            pre-fetch {
+                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
+                return -code error "incompatible Mac OS X version"
+            }
+        }
     # ugly workaround to allow some C++11-only applications to be built on < 10.9
     } elseif {${args} eq "wxWidgets-3.0-libcxx"} {
         wxWidgets.name      "wxWidgets"
@@ -110,21 +120,6 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible Mac OS X version"
             }
         }
-    } elseif {${args} eq "wxPython-3.0"} {
-        wxWidgets.name      "wxPython"
-        wxWidgets.version   "3.0"
-        wxWidgets.port      "wxPython-3.0"
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
-                return -code error "incompatible Mac OS X version"
-            }
-        }
-    # support for wxPerl was just temporary
-    } elseif {${args} eq "wxPerl-3.0"} {
-        # throw an error
-        ui_error "You shouldn't be using 'wxWidgets.use wxPerl-3.0' any longer. Switch to wxWidgets-3.0."
-        return -code error "invalid parameter for wxWidgets.use"
     # preliminary support for wxWidgets 3.1/3.2
     } elseif {${args} eq "wxWidgets-3.2"} {
         wxWidgets.name      "wxWidgets"
