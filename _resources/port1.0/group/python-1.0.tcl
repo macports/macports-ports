@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2011 The MacPorts Project
+# Copyright (c) 2011-2016 The MacPorts Project
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -105,10 +105,24 @@ proc python_set_versions {option action args} {
             subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
         }
         if {$subport eq $name || $subport eq ""} {
-            # set up py-foo as a stub port that depends on the default pyXY-foo
+            # Ensure the stub port does not do anything with distfiles—not
+            # if the port overrides distfiles, not if there's a post-extract
+            # block (e.g. the github portgroup).
+            distfiles
+            pre-fetch {
+                distfiles
+            }
             fetch {}
+            pre-checksum {
+                distfiles
+            }
             checksum {}
+            pre-extract {
+                distfiles
+            }
             extract {}
+
+            # set up py-foo as a stub port that depends on the default pyXY-foo
             supported_archs noarch
             global python.default_version python.version
             unset python.version
