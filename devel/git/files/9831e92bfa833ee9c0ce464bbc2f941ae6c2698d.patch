@@ -1,0 +1,879 @@
+From 415959387e0642842be7aad05fa5d95ea4ed350f Mon Sep 17 00:00:00 2001
+From: Jeff King <peff@peff.net>
+Date: Thu, 11 Feb 2016 17:23:48 -0500
+Subject: [PATCH 1/5] http-push: stop using name_path
+
+The graph traversal code here passes along a name_path to
+build up the pathname at which we find each blob. But we
+never actually do anything with the resulting names, making
+it a waste of code and memory.
+
+This usage came in aa1dbc9 (Update http-push functionality,
+2006-03-07), and originally the result was passed to
+"add_object" (which stored it, but didn't really use it,
+either). But we stopped using that function in 1f1e895 (Add
+"named object array" concept, 2006-06-19) in favor of
+storing just the objects themselves.
+
+Moreover, the generation of the name in process_tree() is
+buggy. It sticks "name" onto the end of the name_path linked
+list, and then passes it down again as it recurses (instead
+of "entry.path"). So it's a good thing this was unused, as
+the resulting path for "a/b/c/d" would end up as "a/a/a/a".
+
+Signed-off-by: Jeff King <peff@peff.net>
+Signed-off-by: Junio C Hamano <gitster@pobox.com>
+Upstream-Status: Backport [https://github.com/git/git/commit/9831e92bfa833ee9c0ce464bbc2f941ae6c2698d, http://seclists.org/oss-sec/2016/q1/660]
+---
+ http-push.c | 23 +++++++----------------
+ 1 file changed, 7 insertions(+), 16 deletions(-)
+
+diff --git a/http-push.c b/http-push.c
+index d857b13..bd60668 100644
+--- ./http-push.c
++++ ./http-push.c
+@@ -1277,9 +1277,7 @@ static struct object_list **add_one_object(struct object *obj, struct object_lis
+ }
+ 
+ static struct object_list **process_blob(struct blob *blob,
+-					 struct object_list **p,
+-					 struct name_path *path,
+-					 const char *name)
++					 struct object_list **p)
+ {
+ 	struct object *obj = &blob->object;
+ 
+@@ -1293,14 +1291,11 @@ static struct object_list **process_blob(struct blob *blob,
+ }
+ 
+ static struct object_list **process_tree(struct tree *tree,
+-					 struct object_list **p,
+-					 struct name_path *path,
+-					 const char *name)
++					 struct object_list **p)
+ {
+ 	struct object *obj = &tree->object;
+ 	struct tree_desc desc;
+ 	struct name_entry entry;
+-	struct name_path me;
+ 
+ 	obj->flags |= LOCAL;
+ 
+@@ -1310,21 +1305,17 @@ static struct object_list **process_tree(struct tree *tree,
+ 		die("bad tree object %s", oid_to_hex(&obj->oid));
+ 
+ 	obj->flags |= SEEN;
+-	name = xstrdup(name);
+ 	p = add_one_object(obj, p);
+-	me.up = path;
+-	me.elem = name;
+-	me.elem_len = strlen(name);
+ 
+ 	init_tree_desc(&desc, tree->buffer, tree->size);
+ 
+ 	while (tree_entry(&desc, &entry))
+ 		switch (object_type(entry.mode)) {
+ 		case OBJ_TREE:
+-			p = process_tree(lookup_tree(entry.sha1), p, &me, name);
++			p = process_tree(lookup_tree(entry.sha1), p);
+ 			break;
+ 		case OBJ_BLOB:
+-			p = process_blob(lookup_blob(entry.sha1), p, &me, name);
++			p = process_blob(lookup_blob(entry.sha1), p);
+ 			break;
+ 		default:
+ 			/* Subproject commit - not in this repository */
+@@ -1343,7 +1334,7 @@ static int get_delta(struct rev_info *revs, struct remote_lock *lock)
+ 	int count = 0;
+ 
+ 	while ((commit = get_revision(revs)) != NULL) {
+-		p = process_tree(commit->tree, p, NULL, "");
++		p = process_tree(commit->tree, p);
+ 		commit->object.flags |= LOCAL;
+ 		if (!(commit->object.flags & UNINTERESTING))
+ 			count += add_send_request(&commit->object, lock);
+@@ -1362,11 +1353,11 @@ static int get_delta(struct rev_info *revs, struct remote_lock *lock)
+ 			continue;
+ 		}
+ 		if (obj->type == OBJ_TREE) {
+-			p = process_tree((struct tree *)obj, p, NULL, name);
++			p = process_tree((struct tree *)obj, p);
+ 			continue;
+ 		}
+ 		if (obj->type == OBJ_BLOB) {
+-			p = process_blob((struct blob *)obj, p, NULL, name);
++			p = process_blob((struct blob *)obj, p);
+ 			continue;
+ 		}
+ 		die("unknown pending object %s (%s)", oid_to_hex(&obj->oid), name);
+
+From f9fb9d0e3caebe97c54c101d8235e6529d5a1273 Mon Sep 17 00:00:00 2001
+From: Jeff King <peff@peff.net>
+Date: Thu, 11 Feb 2016 17:24:18 -0500
+Subject: [PATCH 2/5] show_object_with_name: simplify by using path_name()
+
+When "git rev-list" shows an object with its associated path
+name, it does so by walking the name_path linked list and
+printing each component (stopping at any embedded NULs or
+newlines).
+
+We'd like to eventually get rid of name_path entirely in
+favor of a single buffer, and dropping this custom printing
+code is part of that. As a first step, let's use path_name()
+to format the list into a single buffer, and print that.
+This is strictly less efficient than the original, but it's
+a temporary step in the refactoring; our end game will be to
+get the fully formatted name in the first place.
+
+Signed-off-by: Jeff King <peff@peff.net>
+Signed-off-by: Junio C Hamano <gitster@pobox.com>
+---
+ revision.c | 40 ++++++----------------------------------
+ 1 file changed, 6 insertions(+), 34 deletions(-)
+
+diff --git a/revision.c b/revision.c
+index f24ead5..6387068 100644
+--- ./revision.c
++++ ./revision.c
+@@ -49,46 +49,18 @@ char *path_name(const struct name_path *path, const char *name)
+ 	return n;
+ }
+ 
+-static int show_path_component_truncated(FILE *out, const char *name, int len)
+-{
+-	int cnt;
+-	for (cnt = 0; cnt < len; cnt++) {
+-		int ch = name[cnt];
+-		if (!ch || ch == '\n')
+-			return -1;
+-		fputc(ch, out);
+-	}
+-	return len;
+-}
+-
+-static int show_path_truncated(FILE *out, const struct name_path *path)
+-{
+-	int emitted, ours;
+-
+-	if (!path)
+-		return 0;
+-	emitted = show_path_truncated(out, path->up);
+-	if (emitted < 0)
+-		return emitted;
+-	if (emitted)
+-		fputc('/', out);
+-	ours = show_path_component_truncated(out, path->elem, path->elem_len);
+-	if (ours < 0)
+-		return ours;
+-	return ours || emitted;
+-}
+-
+ void show_object_with_name(FILE *out, struct object *obj,
+ 			   const struct name_path *path, const char *component)
+ {
+-	struct name_path leaf;
+-	leaf.up = (struct name_path *)path;
+-	leaf.elem = component;
+-	leaf.elem_len = strlen(component);
++	char *name = path_name(path, component);
++	char *p;
+ 
+ 	fprintf(out, "%s ", oid_to_hex(&obj->oid));
+-	show_path_truncated(out, &leaf);
++	for (p = name; *p && *p != '\n'; p++)
++		fputc(*p, out);
+ 	fputc('\n', out);
++
++	free(name);
+ }
+ 
+ static void mark_blob_uninteresting(struct blob *blob)
+
+From 13528ab37cadb4d4f7384d0449489760912904b8 Mon Sep 17 00:00:00 2001
+From: Jeff King <peff@peff.net>
+Date: Thu, 11 Feb 2016 17:26:18 -0500
+Subject: [PATCH 3/5] list-objects: convert name_path to a strbuf
+
+The "struct name_path" data is examined in only two places:
+we generate it in process_tree(), and we convert it to a
+single string in path_name(). Everyone else just passes it
+through to those functions.
+
+We can further note that process_tree() already keeps a
+single strbuf with the leading tree path, for use with
+tree_entry_interesting().
+
+Instead of building a separate name_path linked list, let's
+just use the one we already build in "base". This reduces
+the amount of code (especially tricky code in path_name()
+which did not check for integer overflows caused by deep
+or large pathnames).
+
+It is also more efficient in some instances.  Any time we
+were using tree_entry_interesting, we were building up the
+strbuf anyway, so this is an immediate and obvious win
+there. In cases where we were not, we trade off storing
+"pathname/" in a strbuf on the heap for each level of the
+path, instead of two pointers and an int on the stack (with
+one pointer into the tree object). On a 64-bit system, the
+latter is 20 bytes; so if path components are less than that
+on average, this has lower peak memory usage.  In practice
+it probably doesn't matter either way; we are already
+holding in memory all of the tree objects leading up to each
+pathname, and for normal-depth pathnames, we are only
+talking about hundreds of bytes.
+
+This patch leaves "struct name_path" as a thin wrapper
+around the strbuf, to avoid disrupting callbacks. We should
+fix them, but leaving it out makes this diff easier to view.
+
+Signed-off-by: Jeff King <peff@peff.net>
+Signed-off-by: Junio C Hamano <gitster@pobox.com>
+---
+ list-objects.c | 22 +++++++++-------------
+ revision.c     | 25 +++++--------------------
+ revision.h     |  4 +---
+ 3 files changed, 15 insertions(+), 36 deletions(-)
+
+diff --git a/list-objects.c b/list-objects.c
+index 11732d9..4f60a3e 100644
+--- ./list-objects.c
++++ ./list-objects.c
+@@ -62,7 +62,6 @@ static void process_gitlink(struct rev_info *revs,
+ static void process_tree(struct rev_info *revs,
+ 			 struct tree *tree,
+ 			 show_object_fn show,
+-			 struct name_path *path,
+ 			 struct strbuf *base,
+ 			 const char *name,
+ 			 void *cb_data)
+@@ -86,17 +85,14 @@ static void process_tree(struct rev_info *revs,
+ 			return;
+ 		die("bad tree object %s", oid_to_hex(&obj->oid));
+ 	}
++
+ 	obj->flags |= SEEN;
+-	show(obj, path, name, cb_data);
+-	me.up = path;
+-	me.elem = name;
+-	me.elem_len = strlen(name);
+-
+-	if (!match) {
+-		strbuf_addstr(base, name);
+-		if (base->len)
+-			strbuf_addch(base, '/');
+-	}
++	me.base = base;
++	show(obj, &me, name, cb_data);
++
++	strbuf_addstr(base, name);
++	if (base->len)
++		strbuf_addch(base, '/');
+ 
+ 	init_tree_desc(&desc, tree->buffer, tree->size);
+ 
+@@ -113,7 +109,7 @@ static void process_tree(struct rev_info *revs,
+ 		if (S_ISDIR(entry.mode))
+ 			process_tree(revs,
+ 				     lookup_tree(entry.sha1),
+-				     show, &me, base, entry.path,
++				     show, base, entry.path,
+ 				     cb_data);
+ 		else if (S_ISGITLINK(entry.mode))
+ 			process_gitlink(revs, entry.sha1,
+@@ -220,7 +216,7 @@ void traverse_commit_list(struct rev_info *revs,
+ 			path = "";
+ 		if (obj->type == OBJ_TREE) {
+ 			process_tree(revs, (struct tree *)obj, show_object,
+-				     NULL, &base, path, data);
++				     &base, path, data);
+ 			continue;
+ 		}
+ 		if (obj->type == OBJ_BLOB) {
+diff --git a/revision.c b/revision.c
+index 6387068..8dd0950 100644
+--- ./revision.c
++++ ./revision.c
+@@ -27,26 +27,11 @@ static const char *term_good;
+ 
+ char *path_name(const struct name_path *path, const char *name)
+ {
+-	const struct name_path *p;
+-	char *n, *m;
+-	int nlen = strlen(name);
+-	int len = nlen + 1;
+-
+-	for (p = path; p; p = p->up) {
+-		if (p->elem_len)
+-			len += p->elem_len + 1;
+-	}
+-	n = xmalloc(len);
+-	m = n + len - (nlen + 1);
+-	memcpy(m, name, nlen + 1);
+-	for (p = path; p; p = p->up) {
+-		if (p->elem_len) {
+-			m -= p->elem_len + 1;
+-			memcpy(m, p->elem, p->elem_len);
+-			m[p->elem_len] = '/';
+-		}
+-	}
+-	return n;
++	struct strbuf ret = STRBUF_INIT;
++	if (path)
++		strbuf_addbuf(&ret, path->base);
++	strbuf_addstr(&ret, name);
++	return strbuf_detach(&ret, NULL);
+ }
+ 
+ void show_object_with_name(FILE *out, struct object *obj,
+diff --git a/revision.h b/revision.h
+index 23857c0..2a26310 100644
+--- ./revision.h
++++ ./revision.h
+@@ -258,9 +258,7 @@ extern void mark_parents_uninteresting(struct commit *commit);
+ extern void mark_tree_uninteresting(struct tree *tree);
+ 
+ struct name_path {
+-	struct name_path *up;
+-	int elem_len;
+-	const char *elem;
++	struct strbuf *base;
+ };
+ 
+ char *path_name(const struct name_path *path, const char *name);
+
+From bd64516aca4d4e22acb33c71429d293a14d355cf Mon Sep 17 00:00:00 2001
+From: Jeff King <peff@peff.net>
+Date: Thu, 11 Feb 2016 17:26:44 -0500
+Subject: [PATCH 4/5] list-objects: drop name_path entirely
+
+In the previous commit, we left name_path as a thin wrapper
+around a strbuf. This patch drops it entirely. As a result,
+every show_object_fn callback needs to be adjusted. However,
+none of their code needs to be changed at all, because the
+only use was to pass it to path_name(), which now handles
+the bare strbuf.
+
+Signed-off-by: Jeff King <peff@peff.net>
+Signed-off-by: Junio C Hamano <gitster@pobox.com>
+---
+ builtin/pack-objects.c |  4 ++--
+ builtin/rev-list.c     |  4 ++--
+ list-objects.c         | 12 +++++-------
+ list-objects.h         |  2 +-
+ pack-bitmap-write.c    |  2 +-
+ pack-bitmap.c          |  4 ++--
+ reachable.c            |  2 +-
+ revision.c             |  6 +++---
+ revision.h             |  8 ++------
+ 9 files changed, 19 insertions(+), 25 deletions(-)
+
+diff --git a/builtin/pack-objects.c b/builtin/pack-objects.c
+index 4dae5b1..8bbb9bd 100644
+--- ./builtin/pack-objects.c
++++ ./builtin/pack-objects.c
+@@ -2285,7 +2285,7 @@ static void show_commit(struct commit *commit, void *data)
+ }
+ 
+ static void show_object(struct object *obj,
+-			const struct name_path *path, const char *last,
++			struct strbuf *path, const char *last,
+ 			void *data)
+ {
+ 	char *name = path_name(path, last);
+@@ -2480,7 +2480,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
+ }
+ 
+ static void record_recent_object(struct object *obj,
+-				 const struct name_path *path,
++				 struct strbuf *path,
+ 				 const char *last,
+ 				 void *data)
+ {
+diff --git a/builtin/rev-list.c b/builtin/rev-list.c
+index 3aa89a1..a92c3ca 100644
+--- ./builtin/rev-list.c
++++ ./builtin/rev-list.c
+@@ -178,7 +178,7 @@ static void finish_commit(struct commit *commit, void *data)
+ }
+ 
+ static void finish_object(struct object *obj,
+-			  const struct name_path *path, const char *name,
++			  struct strbuf *path, const char *name,
+ 			  void *cb_data)
+ {
+ 	struct rev_list_info *info = cb_data;
+@@ -189,7 +189,7 @@ static void finish_object(struct object *obj,
+ }
+ 
+ static void show_object(struct object *obj,
+-			const struct name_path *path, const char *component,
++			struct strbuf *path, const char *component,
+ 			void *cb_data)
+ {
+ 	struct rev_list_info *info = cb_data;
+diff --git a/list-objects.c b/list-objects.c
+index 4f60a3e..4397766 100644
+--- ./list-objects.c
++++ ./list-objects.c
+@@ -11,7 +11,7 @@
+ static void process_blob(struct rev_info *revs,
+ 			 struct blob *blob,
+ 			 show_object_fn show,
+-			 struct name_path *path,
++			 struct strbuf *path,
+ 			 const char *name,
+ 			 void *cb_data)
+ {
+@@ -52,7 +52,7 @@ static void process_blob(struct rev_info *revs,
+ static void process_gitlink(struct rev_info *revs,
+ 			    const unsigned char *sha1,
+ 			    show_object_fn show,
+-			    struct name_path *path,
++			    struct strbuf *path,
+ 			    const char *name,
+ 			    void *cb_data)
+ {
+@@ -69,7 +69,6 @@ static void process_tree(struct rev_info *revs,
+ 	struct object *obj = &tree->object;
+ 	struct tree_desc desc;
+ 	struct name_entry entry;
+-	struct name_path me;
+ 	enum interesting match = revs->diffopt.pathspec.nr == 0 ?
+ 		all_entries_interesting: entry_not_interesting;
+ 	int baselen = base->len;
+@@ -87,8 +86,7 @@ static void process_tree(struct rev_info *revs,
+ 	}
+ 
+ 	obj->flags |= SEEN;
+-	me.base = base;
+-	show(obj, &me, name, cb_data);
++	show(obj, base, name, cb_data);
+ 
+ 	strbuf_addstr(base, name);
+ 	if (base->len)
+@@ -113,12 +111,12 @@ static void process_tree(struct rev_info *revs,
+ 				     cb_data);
+ 		else if (S_ISGITLINK(entry.mode))
+ 			process_gitlink(revs, entry.sha1,
+-					show, &me, entry.path,
++					show, base, entry.path,
+ 					cb_data);
+ 		else
+ 			process_blob(revs,
+ 				     lookup_blob(entry.sha1),
+-				     show, &me, entry.path,
++				     show, base, entry.path,
+ 				     cb_data);
+ 	}
+ 	strbuf_setlen(base, baselen);
+diff --git a/list-objects.h b/list-objects.h
+index 136a1da..69c4c7d 100644
+--- ./list-objects.h
++++ ./list-objects.h
+@@ -2,7 +2,7 @@
+ #define LIST_OBJECTS_H
+ 
+ typedef void (*show_commit_fn)(struct commit *, void *);
+-typedef void (*show_object_fn)(struct object *, const struct name_path *, const char *, void *);
++typedef void (*show_object_fn)(struct object *, struct strbuf *, const char *, void *);
+ void traverse_commit_list(struct rev_info *, show_commit_fn, show_object_fn, void *);
+ 
+ typedef void (*show_edge_fn)(struct commit *);
+diff --git a/pack-bitmap-write.c b/pack-bitmap-write.c
+index 6bff970..65ed342 100644
+--- ./pack-bitmap-write.c
++++ ./pack-bitmap-write.c
+@@ -148,7 +148,7 @@ static uint32_t find_object_pos(const unsigned char *sha1)
+ 	return entry->in_pack_pos;
+ }
+ 
+-static void show_object(struct object *object, const struct name_path *path,
++static void show_object(struct object *object, struct strbuf *path,
+ 			const char *last, void *data)
+ {
+ 	struct bitmap *base = data;
+diff --git a/pack-bitmap.c b/pack-bitmap.c
+index dd8dc16..51f790e 100644
+--- ./pack-bitmap.c
++++ ./pack-bitmap.c
+@@ -414,7 +414,7 @@ static int ext_index_add_object(struct object *object, const char *name)
+ 	return bitmap_pos + bitmap_git.pack->num_objects;
+ }
+ 
+-static void show_object(struct object *object, const struct name_path *path,
++static void show_object(struct object *object, struct strbuf *path,
+ 			const char *last, void *data)
+ {
+ 	struct bitmap *base = data;
+@@ -895,7 +895,7 @@ struct bitmap_test_data {
+ };
+ 
+ static void test_show_object(struct object *object,
+-			     const struct name_path *path,
++			     struct strbuf *path,
+ 			     const char *last, void *data)
+ {
+ 	struct bitmap_test_data *tdata = data;
+diff --git a/reachable.c b/reachable.c
+index 43616d4..e60f08d 100644
+--- ./reachable.c
++++ ./reachable.c
+@@ -43,7 +43,7 @@ static int add_one_ref(const char *path, const struct object_id *oid,
+  * The traversal will have already marked us as SEEN, so we
+  * only need to handle any progress reporting here.
+  */
+-static void mark_object(struct object *obj, const struct name_path *path,
++static void mark_object(struct object *obj, struct strbuf *path,
+ 			const char *name, void *data)
+ {
+ 	update_progress(data);
+diff --git a/revision.c b/revision.c
+index 8dd0950..3c84781 100644
+--- ./revision.c
++++ ./revision.c
+@@ -25,17 +25,17 @@ volatile show_early_output_fn_t show_early_output;
+ static const char *term_bad;
+ static const char *term_good;
+ 
+-char *path_name(const struct name_path *path, const char *name)
++char *path_name(struct strbuf *path, const char *name)
+ {
+ 	struct strbuf ret = STRBUF_INIT;
+ 	if (path)
+-		strbuf_addbuf(&ret, path->base);
++		strbuf_addbuf(&ret, path);
+ 	strbuf_addstr(&ret, name);
+ 	return strbuf_detach(&ret, NULL);
+ }
+ 
+ void show_object_with_name(FILE *out, struct object *obj,
+-			   const struct name_path *path, const char *component)
++			   struct strbuf *path, const char *component)
+ {
+ 	char *name = path_name(path, component);
+ 	char *p;
+diff --git a/revision.h b/revision.h
+index 2a26310..7beab15 100644
+--- ./revision.h
++++ ./revision.h
+@@ -257,14 +257,10 @@ extern void put_revision_mark(const struct rev_info *revs,
+ extern void mark_parents_uninteresting(struct commit *commit);
+ extern void mark_tree_uninteresting(struct tree *tree);
+ 
+-struct name_path {
+-	struct strbuf *base;
+-};
+-
+-char *path_name(const struct name_path *path, const char *name);
++char *path_name(struct strbuf *path, const char *name);
+ 
+ extern void show_object_with_name(FILE *, struct object *,
+-				  const struct name_path *, const char *);
++				  struct strbuf *, const char *);
+ 
+ extern void add_pending_object(struct rev_info *revs,
+ 			       struct object *obj, const char *name);
+
+From de1e67d0703894cb6ea782e36abb63976ab07e60 Mon Sep 17 00:00:00 2001
+From: Jeff King <peff@peff.net>
+Date: Thu, 11 Feb 2016 17:28:36 -0500
+Subject: [PATCH 5/5] list-objects: pass full pathname to callbacks
+
+When we find a blob at "a/b/c", we currently pass this to
+our show_object_fn callbacks as two components: "a/b/" and
+"c". Callbacks which want the full value then call
+path_name(), which concatenates the two. But this is an
+inefficient interface; the path is a strbuf, and we could
+simply append "c" to it temporarily, then roll back the
+length, without creating a new copy.
+
+So we could improve this by teaching the callsites of
+path_name() this trick (and there are only 3). But we can
+also notice that no callback actually cares about the
+broken-down representation, and simply pass each callback
+the full path "a/b/c" as a string. The callback code becomes
+even simpler, then, as we do not have to worry about freeing
+an allocated buffer, nor rolling back our modification to
+the strbuf.
+
+This is theoretically less efficient, as some callbacks
+would not bother to format the final path component. But in
+practice this is not measurable. Since we use the same
+strbuf over and over, our work to grow it is amortized, and
+we really only pay to memcpy a few bytes.
+
+Signed-off-by: Jeff King <peff@peff.net>
+Signed-off-by: Junio C Hamano <gitster@pobox.com>
+---
+ builtin/pack-objects.c | 15 ++-------------
+ builtin/rev-list.c     | 12 ++++--------
+ list-objects.c         | 14 +++++++++-----
+ list-objects.h         |  2 +-
+ pack-bitmap-write.c    |  3 +--
+ pack-bitmap.c          | 13 ++++---------
+ reachable.c            |  5 ++---
+ revision.c             | 17 ++---------------
+ revision.h             |  3 +--
+ 9 files changed, 26 insertions(+), 58 deletions(-)
+
+diff --git a/builtin/pack-objects.c b/builtin/pack-objects.c
+index 8bbb9bd..a6609f1 100644
+--- ./builtin/pack-objects.c
++++ ./builtin/pack-objects.c
+@@ -2284,21 +2284,11 @@ static void show_commit(struct commit *commit, void *data)
+ 		index_commit_for_bitmap(commit);
+ }
+ 
+-static void show_object(struct object *obj,
+-			struct strbuf *path, const char *last,
+-			void *data)
++static void show_object(struct object *obj, const char *name, void *data)
+ {
+-	char *name = path_name(path, last);
+-
+ 	add_preferred_base_object(name);
+ 	add_object_entry(obj->oid.hash, obj->type, name, 0);
+ 	obj->flags |= OBJECT_ADDED;
+-
+-	/*
+-	 * We will have generated the hash from the name,
+-	 * but not saved a pointer to it - we can free it
+-	 */
+-	free((char *)name);
+ }
+ 
+ static void show_edge(struct commit *commit)
+@@ -2480,8 +2470,7 @@ static int get_object_list_from_bitmap(struct rev_info *revs)
+ }
+ 
+ static void record_recent_object(struct object *obj,
+-				 struct strbuf *path,
+-				 const char *last,
++				 const char *name,
+ 				 void *data)
+ {
+ 	sha1_array_append(&recent_objects, obj->oid.hash);
+diff --git a/builtin/rev-list.c b/builtin/rev-list.c
+index a92c3ca..275da0d 100644
+--- ./builtin/rev-list.c
++++ ./builtin/rev-list.c
+@@ -177,9 +177,7 @@ static void finish_commit(struct commit *commit, void *data)
+ 	free_commit_buffer(commit);
+ }
+ 
+-static void finish_object(struct object *obj,
+-			  struct strbuf *path, const char *name,
+-			  void *cb_data)
++static void finish_object(struct object *obj, const char *name, void *cb_data)
+ {
+ 	struct rev_list_info *info = cb_data;
+ 	if (obj->type == OBJ_BLOB && !has_object_file(&obj->oid))
+@@ -188,15 +186,13 @@ static void finish_object(struct object *obj,
+ 		parse_object(obj->oid.hash);
+ }
+ 
+-static void show_object(struct object *obj,
+-			struct strbuf *path, const char *component,
+-			void *cb_data)
++static void show_object(struct object *obj, const char *name, void *cb_data)
+ {
+ 	struct rev_list_info *info = cb_data;
+-	finish_object(obj, path, component, cb_data);
++	finish_object(obj, name, cb_data);
+ 	if (info->flags & REV_LIST_QUIET)
+ 		return;
+-	show_object_with_name(stdout, obj, path, component);
++	show_object_with_name(stdout, obj, name);
+ }
+ 
+ static void show_edge(struct commit *commit)
+diff --git a/list-objects.c b/list-objects.c
+index 4397766..917cc5d 100644
+--- ./list-objects.c
++++ ./list-objects.c
+@@ -16,6 +16,7 @@ static void process_blob(struct rev_info *revs,
+ 			 void *cb_data)
+ {
+ 	struct object *obj = &blob->object;
++	size_t pathlen;
+ 
+ 	if (!revs->blob_objects)
+ 		return;
+@@ -24,7 +25,11 @@ static void process_blob(struct rev_info *revs,
+ 	if (obj->flags & (UNINTERESTING | SEEN))
+ 		return;
+ 	obj->flags |= SEEN;
+-	show(obj, path, name, cb_data);
++
++	pathlen = path->len;
++	strbuf_addstr(path, name);
++	show(obj, path->buf, cb_data);
++	strbuf_setlen(path, pathlen);
+ }
+ 
+ /*
+@@ -86,9 +91,8 @@ static void process_tree(struct rev_info *revs,
+ 	}
+ 
+ 	obj->flags |= SEEN;
+-	show(obj, base, name, cb_data);
+-
+ 	strbuf_addstr(base, name);
++	show(obj, base->buf, cb_data);
+ 	if (base->len)
+ 		strbuf_addch(base, '/');
+ 
+@@ -207,7 +211,7 @@ void traverse_commit_list(struct rev_info *revs,
+ 			continue;
+ 		if (obj->type == OBJ_TAG) {
+ 			obj->flags |= SEEN;
+-			show_object(obj, NULL, name, data);
++			show_object(obj, name, data);
+ 			continue;
+ 		}
+ 		if (!path)
+@@ -219,7 +223,7 @@ void traverse_commit_list(struct rev_info *revs,
+ 		}
+ 		if (obj->type == OBJ_BLOB) {
+ 			process_blob(revs, (struct blob *)obj, show_object,
+-				     NULL, path, data);
++				     &base, path, data);
+ 			continue;
+ 		}
+ 		die("unknown pending object %s (%s)",
+diff --git a/list-objects.h b/list-objects.h
+index 69c4c7d..0cebf85 100644
+--- ./list-objects.h
++++ ./list-objects.h
+@@ -2,7 +2,7 @@
+ #define LIST_OBJECTS_H
+ 
+ typedef void (*show_commit_fn)(struct commit *, void *);
+-typedef void (*show_object_fn)(struct object *, struct strbuf *, const char *, void *);
++typedef void (*show_object_fn)(struct object *, const char *, void *);
+ void traverse_commit_list(struct rev_info *, show_commit_fn, show_object_fn, void *);
+ 
+ typedef void (*show_edge_fn)(struct commit *);
+diff --git a/pack-bitmap-write.c b/pack-bitmap-write.c
+index 65ed342..c30bcd0 100644
+--- ./pack-bitmap-write.c
++++ ./pack-bitmap-write.c
+@@ -148,8 +148,7 @@ static uint32_t find_object_pos(const unsigned char *sha1)
+ 	return entry->in_pack_pos;
+ }
+ 
+-static void show_object(struct object *object, struct strbuf *path,
+-			const char *last, void *data)
++static void show_object(struct object *object, const char *name, void *data)
+ {
+ 	struct bitmap *base = data;
+ 	bitmap_set(base, find_object_pos(object->oid.hash));
+diff --git a/pack-bitmap.c b/pack-bitmap.c
+index 51f790e..b949e51 100644
+--- ./pack-bitmap.c
++++ ./pack-bitmap.c
+@@ -414,19 +414,15 @@ static int ext_index_add_object(struct object *object, const char *name)
+ 	return bitmap_pos + bitmap_git.pack->num_objects;
+ }
+ 
+-static void show_object(struct object *object, struct strbuf *path,
+-			const char *last, void *data)
++static void show_object(struct object *object, const char *name, void *data)
+ {
+ 	struct bitmap *base = data;
+ 	int bitmap_pos;
+ 
+ 	bitmap_pos = bitmap_position(object->oid.hash);
+ 
+-	if (bitmap_pos < 0) {
+-		char *name = path_name(path, last);
++	if (bitmap_pos < 0)
+ 		bitmap_pos = ext_index_add_object(object, name);
+-		free(name);
+-	}
+ 
+ 	bitmap_set(base, bitmap_pos);
+ }
+@@ -894,9 +890,8 @@ struct bitmap_test_data {
+ 	size_t seen;
+ };
+ 
+-static void test_show_object(struct object *object,
+-			     struct strbuf *path,
+-			     const char *last, void *data)
++static void test_show_object(struct object *object, const char *name,
++			     void *data)
+ {
+ 	struct bitmap_test_data *tdata = data;
+ 	int bitmap_pos;
+diff --git a/reachable.c b/reachable.c
+index e60f08d..ed35201 100644
+--- ./reachable.c
++++ ./reachable.c
+@@ -43,15 +43,14 @@ static int add_one_ref(const char *path, const struct object_id *oid,
+  * The traversal will have already marked us as SEEN, so we
+  * only need to handle any progress reporting here.
+  */
+-static void mark_object(struct object *obj, struct strbuf *path,
+-			const char *name, void *data)
++static void mark_object(struct object *obj, const char *name, void *data)
+ {
+ 	update_progress(data);
+ }
+ 
+ static void mark_commit(struct commit *c, void *data)
+ {
+-	mark_object(&c->object, NULL, NULL, data);
++	mark_object(&c->object, NULL, data);
+ }
+ 
+ struct recent_data {
+diff --git a/revision.c b/revision.c
+index 3c84781..82f3ca4 100644
+--- ./revision.c
++++ ./revision.c
+@@ -25,27 +25,14 @@ volatile show_early_output_fn_t show_early_output;
+ static const char *term_bad;
+ static const char *term_good;
+ 
+-char *path_name(struct strbuf *path, const char *name)
++void show_object_with_name(FILE *out, struct object *obj, const char *name)
+ {
+-	struct strbuf ret = STRBUF_INIT;
+-	if (path)
+-		strbuf_addbuf(&ret, path);
+-	strbuf_addstr(&ret, name);
+-	return strbuf_detach(&ret, NULL);
+-}
+-
+-void show_object_with_name(FILE *out, struct object *obj,
+-			   struct strbuf *path, const char *component)
+-{
+-	char *name = path_name(path, component);
+-	char *p;
++	const char *p;
+ 
+ 	fprintf(out, "%s ", oid_to_hex(&obj->oid));
+ 	for (p = name; *p && *p != '\n'; p++)
+ 		fputc(*p, out);
+ 	fputc('\n', out);
+-
+-	free(name);
+ }
+ 
+ static void mark_blob_uninteresting(struct blob *blob)
+diff --git a/revision.h b/revision.h
+index 7beab15..dca0d38 100644
+--- ./revision.h
++++ ./revision.h
+@@ -259,8 +259,7 @@ extern void mark_tree_uninteresting(struct tree *tree);
+ 
+ char *path_name(struct strbuf *path, const char *name);
+ 
+-extern void show_object_with_name(FILE *, struct object *,
+-				  struct strbuf *, const char *);
++extern void show_object_with_name(FILE *, struct object *, const char *);
+ 
+ extern void add_pending_object(struct rev_info *revs,
+ 			       struct object *obj, const char *name);
