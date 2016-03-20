@@ -626,6 +626,12 @@ variant universal {
                                             ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                             copy ${dir1}/${fl} ${dir}
                                         }
+                                        *.pyc {
+                                            # pyc files should be same across architectures
+                                            # the timestamp is recorded, however
+                                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
+                                            copy ${dir1}/${fl} ${dir}
+                                        }
                                         *.elc {
                                             # elc files can be different because they record when and where they were built.
                                             ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
