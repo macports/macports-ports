@@ -3,7 +3,7 @@
 namespace eval portfetch::mirror_sites { }
 
 set portfetch::mirror_sites::sites(macports_archives) {
-    http://packages.macports.org/:nosubdir
+    https://packages.macports.org/:nosubdir
     http://fco.it.packages.macports.org/mirrors/macports-packages/:nosubdidr
     http://her.gr.packages.macports.org/:nosubdir
     http://jnb.za.packages.macports.org/packages/:nosubdir
