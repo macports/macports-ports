@@ -1,5 +1,5 @@
---- openssl.c	2007/08/04 11:41:36	1.12
-+++ openssl.c	2009/05/26 21:04:15	1.13
+--- openssl.c.orig	2016-03-26 22:41:42.000000000 -0400
++++ openssl.c	2016-03-26 22:42:04.000000000 -0400
 @@ -101,12 +101,17 @@
  static int ssl_rand_init(void);
  static void ssl_init(void);
@@ -19,7 +19,7 @@
  static EVP_CIPHER *smime_cipher(const char *name);
  static int ssl_password_cb(char *buf, int size, int rwflag, void *userdata);
  static FILE *smime_sign_cert(const char *xname, const char *xname2, int warn);
-@@ -203,10 +208,10 @@
+@@ -203,17 +208,15 @@
  	return 1;
  }
  
@@ -32,7 +32,15 @@
  	char	*cp;
  
  	cp = ssl_method_string(uhp);
-@@ -308,7 +313,11 @@
+ 	if (cp != NULL) {
+-		if (equal(cp, "ssl2"))
+-			method = SSLv2_client_method();
+-		else if (equal(cp, "ssl3"))
++		if (equal(cp, "ssl3"))
+ 			method = SSLv3_client_method();
+ 		else if (equal(cp, "tls1"))
+ 			method = TLSv1_client_method();
+@@ -308,7 +311,11 @@
  	X509 *cert;
  	X509_NAME *subj;
  	char data[256];
@@ -44,7 +52,7 @@
  	GENERAL_NAME	*gen;
  	int	i;
  
-@@ -357,7 +366,8 @@
+@@ -357,7 +364,8 @@
  
  	ssl_init();
  	ssl_set_vrfy_level(uhp);
@@ -54,7 +62,7 @@
  		ssl_gen_err(catgets(catd, CATSET, 261, "SSL_CTX_new() failed"));
  		return STOP;
  	}
-@@ -496,7 +506,11 @@
+@@ -496,7 +504,11 @@
  }
  
  static int
@@ -66,7 +74,7 @@
  {
  	struct message	*x;
  	char	*cp, *sender, *to, *cc, *cnttype;
-@@ -505,7 +519,12 @@
+@@ -505,7 +517,12 @@
  	off_t	size;
  	BIO	*fb, *pb;
  	PKCS7	*pkcs7;
@@ -79,7 +87,7 @@
  	X509	*cert;
  	X509_NAME	*subj;
  	char	data[LINESIZE];
-@@ -614,7 +633,11 @@
+@@ -614,7 +631,11 @@
  {
  	int	*msgvec = vp, *ip;
  	int	ec = 0;
@@ -91,7 +99,7 @@
  	X509_STORE	*store;
  	char	*ca_dir, *ca_file;
  
-@@ -687,7 +710,11 @@
+@@ -687,7 +708,11 @@
  	X509	*cert;
  	PKCS7	*pkcs7;
  	BIO	*bb, *yb;
@@ -103,7 +111,7 @@
  	EVP_CIPHER	*cipher;
  
  	certfile = expand((char *)certfile);
-@@ -950,9 +977,14 @@
+@@ -950,9 +975,14 @@
  	off_t	size;
  	BIO	*fb, *pb;
  	PKCS7	*pkcs7;
