@@ -4,7 +4,7 @@ properly sets the directory where CB looks for plugins
 
 --- src/sdk/configmanager.cpp.orig
 +++ src/sdk/configmanager.cpp
-@@ -1504,8 +1504,10 @@ void ConfigManager::InitPaths()
+@@ -1503,8 +1503,10 @@ void ConfigManager::InitPaths()
  #ifdef CB_AUTOCONF
      if (plugin_path_global.IsEmpty())
      {
