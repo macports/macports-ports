@@ -6,13 +6,13 @@ test -z "$srcdir" && srcdir=.
 
 PKG_NAME="Gnome Top Library"
 
-#(test -f $srcdir/configure.ac \
-#  && test -f $srcdir/copyright.txt \
-#  && test -d $srcdir/sysdeps) || {
-#    echo -n "**Error**: Directory "\`$srcdir\'" does not look like the"
-#    echo " top-level gnome directory"
-#    exit 1
-#}
+(test -f $srcdir/configure.ac \
+  && test -f $srcdir/copyright.txt \
+  && test -d $srcdir/sysdeps) || {
+    echo -n "**Error**: Directory "\`$srcdir\'" does not look like the"
+    echo " top-level gnome directory"
+    exit 1
+}
 
 which gnome-autogen.sh || {
     echo "You need to install gnome-common from the GNOME CVS"
