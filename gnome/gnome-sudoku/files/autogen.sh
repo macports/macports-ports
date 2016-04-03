@@ -1,15 +1,47 @@
 #!/bin/sh
 # Run this to generate all the initial makefiles, etc.
+test -n "$srcdir" || srcdir=`dirname "$0"`
+test -n "$srcdir" || srcdir=.
 
-which gnome-autogen.sh || {
-    echo "You need to install gnome-common from GNOME git (or from"
-    echo "your OS vendor's package manager)."
-    exit 1
+olddir=`pwd`
+
+cd $srcdir
+
+(test -f configure.ac) || {
+        echo "*** ERROR: Directory "\`$srcdir\'" does not look like the top-level project directory ***"
+        exit 1
 }
 
-REQUIRED_AUTOMAKE_VERSION=1.9 
-REQUIRED_YELP_TOOLS_VERSION=3.1.1
-REQUIRED_GETTEXT_VERSION=0.12
-REQUIRED_INTLTOOL_VERSION=0.40.4
+# Use the style-checker as pre-commit and pre-applypatch hooks
+if [ -d $srcdir/.git ]; then
+        if [ ! -L $srcdir/.git/hooks/pre-commit ]; then
+            ln -s ../../../libgames-support/style-checker $srcdir/.git/hooks/pre-commit && echo "Enabled pre-commit style checker." || :
+        fi
+        if [ ! -L $srcdir/.git/hooks/pre-applypatch ]; then
+            ln -s ../../../libgames-support/style-checker $srcdir/.git/hooks/pre-applypatch && echo "Enabled pre-applypatch style checker." || :
+        fi
+fi
 
-. gnome-autogen.sh
+PKG_NAME=`autoconf --trace 'AC_INIT:$1' configure.ac`
+
+if [ "$#" = 0 -a "x$NOCONFIGURE" = "x" ]; then
+        echo "*** WARNING: I am going to run \`configure' with no arguments." >&2
+        echo "*** If you wish to pass any to it, please specify them on the" >&2
+        echo "*** \`$0\' command line." >&2
+        echo "" >&2
+fi
+
+aclocal --install || exit 1
+intltoolize --force --copy --automake || exit 1
+autoreconf --verbose --force --install -Wno-portability || exit 1
+
+cd $olddir
+if [ "$NOCONFIGURE" = "" ]; then
+        $srcdir/configure "$@" || exit 1
+
+        if [ "$1" = "--help" ]; then exit 0 else
+                echo "Now type \`make\' to compile $PKG_NAME" || exit 1
+        fi
+else
+        echo "Skipping configure process."
+fi
