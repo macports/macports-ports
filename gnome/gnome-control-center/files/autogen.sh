@@ -18,6 +18,10 @@ DIE=0
 
 rm -f .using-gnome-libs-package
 
+# Fetch submodules if needed
+# echo "+ Setting up submodules"
+# git submodule update --init --recursive
+
 if ! which gnome-autogen.sh ; then
   echo "You need to install the gnome-common module and make"
   echo "sure the gnome-autogen.sh script is in your \$PATH."
