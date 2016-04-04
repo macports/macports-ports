@@ -36,17 +36,17 @@
 #   1. use ruby.setup
 #
 #     PortGroup        ruby 1.0
-#     ruby.setup       module version type {} ruby22
+#     ruby.setup       module version type {} ruby23
 #
 #   2. use ruby.branch
 #
 #     PortGroup        ruby 1.0
-#     ruby.branch      2.2
+#     ruby.branch      2.3
 #     depends_lib      port:ruby${ruby.suffix}
 #     build.cmd        ${ruby.bin}
 
 # options:
-#   ruby.branch: select ruby version. 2.2, 2.1, 2.0, 1.9 or 1.8.
+#   ruby.branch: select ruby version. 2.3, 2.2, 2.1, 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 # values:
@@ -102,6 +102,7 @@ proc ruby_set_branch {option action args} {
     }
     #
     switch -exact ${ruby.branch} {
+        2.3 {set ruby.api_version 2.3.0}
         2.2 {set ruby.api_version 2.2.0}
         2.1 {set ruby.api_version 2.1.0}
         2.0 {set ruby.api_version 2.0.0}
@@ -161,13 +162,14 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global ruby.config_rubyprog_name
 
     switch ${implementation} {
+        ruby23 { ruby.branch 2.3 }
         ruby22 { ruby.branch 2.2 }
         ruby21 { ruby.branch 2.1 }
         ruby20 { ruby.branch 2.0 }
         ruby19 { ruby.branch 1.9 }
         ruby   { ruby.branch 1.8 }
         default {
-            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby22, ruby21, ruby20, ruby19 or ruby possible)"
+            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
             return -code error "ruby.setup failed"
         }
     }
