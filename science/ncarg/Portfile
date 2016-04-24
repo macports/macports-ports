@@ -3,15 +3,14 @@
 
 PortSystem                  1.0
 PortGroup                   active_variants 1.1
-PortGroup                   mpi 1.0
+PortGroup                   compilers 1.0
 
-compilers.choose            fc f77 f90 cc
+compilers.choose            fc f77 f90
 compilers.setup             -clang -dragonegg -gfortran -llvm
-mpi.setup
 
 name                        ncarg
 version                     6.3.0
-revision                    5
+revision                    6
 categories                  science
 platforms                   darwin
 maintainers                 takeshi openmaintainer
@@ -53,7 +52,6 @@ depends_lib                 path:lib/pkgconfig/cairo.pc:cairo \
                             port:gdal       \
                             port:udunits2   \
                             port:vis5d      \
-                            port:hdf5       \
                             port:hdfeos     \
                             port:hdfeos5    \
                             port:wgrib2     \
@@ -61,7 +59,8 @@ depends_lib                 path:lib/pkgconfig/cairo.pc:cairo \
                             port:libpng     \
                             port:libxml2    \
                             port:xorg-libXaw
-depends_build               port:triangle \
+depends_build               port:hdf5-18 \
+                            port:triangle \
                             port:flex
 depends_run                 bin:ESMF_RegridWeightGen:esmf \
                             port:rangs-gshhs-ncarg
@@ -69,34 +68,49 @@ depends_run                 bin:ESMF_RegridWeightGen:esmf \
 use_parallel_build          no
 universal_variant           no
 
-mpi.enforce_variant         hdf5
-
 set usedap y
 
+patchfiles                  patch-Configure.diff \
+                            patch-ncarg2d-src-libncarg-Iftran-yMakefile.diff \
+                            patch-ncarview-src-bin-ictrans-yMakefile.diff
 if {$build_arch eq "x86_64"} {
-    patchfiles-append           patch-config-ymake.diff
+    patchfiles-append       patch-config-ymake.diff
+}
+if {[variant_isset accelerate]} {
+    patchfiles-append       patch-config-Project-accelerate.diff \
+                            patch-external-yMakefile.diff
+} else {
+    patchfiles-append       patch-config-Project.diff 
 }
 
-configure.cflags-append     -DH5_USE_18_API
-
-post-patch {
-    reinplace "s|hdf/||" ${worksrcpath}/ni/src/ncl/FileSupport.c
-    reinplace "s| -lsz||g" ${worksrcpath}/Configure
-    reinplace "s| -lsz||g" ${worksrcpath}/config/Project
-    reinplace "s|g\\\\+\\\\+|${configure.cc}|" ${worksrcpath}/ni/src/ncl/yMakefile
+pre-configure {
+    if {[file exists ${prefix}/bin/h5pcc-18]} {
+        configure.cc        ${prefix}/bin/h5pcc-18
+    } else {
+        configure.cc        ${prefix}/bin/h5cc-18
+    }
+    # build modified g2clib
     reinplace "s|CC=cc|CC=${configure.cc}|" ${workpath}/${g2clib_worksrcdir}/makefile
     reinplace "s|INC=-I/usr/local/include|INC=${configure.cppflags} ${configure.cflags}|" ${workpath}/${g2clib_worksrcdir}/makefile
     reinplace "s|CC=gcc -fPIC|CC=${configure.cc}|" ${workpath}/${g2clib_worksrcdir}/makefile
     if {$build_arch eq "x86_64" || $build_arch eq "ppc64"} {
         reinplace "s|-DUSE_PNG$|-DUSE_PNG -D__64BIT__|" ${workpath}/${g2clib_worksrcdir}/makefile
     }
+    system -W ${workpath}/${g2clib_worksrcdir} "make all"
+    file copy ${workpath}/${g2clib_worksrcdir}/libgrib2c.a ${worksrcpath}
+
+    # edit configurations
+    reinplace "s|g\\\\+\\\\+|${configure.cc}|" ${worksrcpath}/ni/src/ncl/yMakefile
     foreach f {Darwin Darwin_Intel} {
-        if {[variant_isset g95]} {
-            reinplace "s|-lgfortran|-lf95|" ${worksrcpath}/config/${f}
+        if {[regexp clang ${configure.compiler}]} {
             reinplace "s|-fopenmp||" ${worksrcpath}/config/${f}
             reinplace "s| -lquadmath||" ${worksrcpath}/config/${f}
+        }
+        set fvar [fortran_variant_name]
+        if {[variant_isset g95]} {
+            reinplace "s|-lgfortran|-L${prefix}/lib/${fvar} -lf95|" ${worksrcpath}/config/${f}
         } else {
-            reinplace "s|-lgfortran|-lgfortran -lgomp|" ${worksrcpath}/config/${f}
+            reinplace "s|-lgfortran|-L${prefix}/lib/${fvar} -lgfortran -lgomp|" ${worksrcpath}/config/${f}
         }
         reinplace "s| gfortran$| ${configure.fc}|" ${worksrcpath}/config/${f} 
         reinplace "s|gcc$|${configure.cc}|" ${worksrcpath}/config/${f}
@@ -112,7 +126,7 @@ post-patch {
 #define FOptimizeFlag ${configure.fflags}\\
 #define ManRoot ${destroot}${prefix}/share/man\\
 #define NetCDFlib -lnetcdf\\
-#define HDFEOS5lib -lhe5_hdfeos -lGctp -lhdf5|" ${worksrcpath}/config/${f}
+#define HDFEOS5lib -lhe5_hdfeos -lGctp|" ${worksrcpath}/config/${f}
 # A workaround for XQuartz 2.7.3 on Mountain Lion known as ncl.xq.fix
         if {${os.version}>=12} {
             reinplace "s|-D__UNIXOS2__|-D__UNIXOS2__ -D__JIRA1530__|" ${worksrcpath}/config/${f}
@@ -121,45 +135,20 @@ post-patch {
     if {[variant_isset g95]} {
         reinplace "s|-fno-range-check||" ${worksrcpath}/config/Darwin_Intel
     }
-    foreach f {ni/src/ncl/NclHDF.c \
-           ni/src/ncl/NclHDFEOS.c \
-           ni/src/ncl/NclHDFEOS5.c \
-           ncarview/src/lib/libncarg_ras/hdf.c} {
-        reinplace "s|hdf\/||" ${worksrcpath}/${f}
-    }
-    reinplace "s|\$\(NCARGGKSCAIROLIB\) \$\(NCARGCLIB\)|\$(NCARGGKSCAIROLIB) \$(NCARGGKSLIB) \$(NCARGCLIB)|" ${worksrcpath}/config/Project
-    foreach exlib {sphere3.1_dp fftpack5_dp} {
-        reinplace "s|-l${exlib}|\$(EXTERNALSRC)/${exlib}/lib${exlib}.a|g" ${worksrcpath}/config/Project
-    }
-    if {[variant_isset accelerate]} {
-        reinplace "s|-llapack_ncl|-framework Accelerate|g" ${worksrcpath}/config/Project
-        reinplace "s|-lblas_ncl|-lvecLibFort|g" ${worksrcpath}/config/Project
-        foreach f {Darwin Darwin_Intel} {
-            reinplace "/LAPACKLIB/d" ${worksrcpath}/config/${f}
-            reinplace "/BLASLIB/d" ${worksrcpath}/config/${f}
-        }
-        reinplace "s|-L\$(LAPACKSRC)||" ${worksrcpath}/config/Project
-        reinplace "s|-L\$(BLASSRC)||" ${worksrcpath}/config/Project
-        reinplace "s|blas lapack ||" ${worksrcpath}/external/yMakefile
-    } else {
-        foreach exlib {lapack blas} {
-            reinplace "s|-l${exlib}_ncl|\$(EXTERNALSRC)/${exlib}/lib${exlib}_ncl.a|g" ${worksrcpath}/config/Project
-        }
-    }
-}
 
-pre-configure {
-    system -W ${workpath}/${g2clib_worksrcdir} "make all"
-    file copy ${workpath}/${g2clib_worksrcdir}/libgrib2c.a ${worksrcpath}
+    # run ymake
     system -W ${worksrcpath}/config \
         "CC=${configure.cc} \
         CFLAGS=${configure.cflags} \
         make -f Makefile.ini; \
         ./ymake -config `pwd`"
+
+    # copy triangle.[ch]
     foreach ext "c h" {
       file copy ${prefix}/share/triangle/triangle.${ext} ${worksrcpath}/ni/src/lib/hlu
     }
 }
+
 configure {
     system -W ${worksrcpath} "./Configure -v << EOF
 
@@ -181,15 +170,13 @@ y
 y
 y
 y
-${worksrcpath} ${prefix}/lib ${prefix}/lib/hdfeos5/lib ${prefix}/lib
+${worksrcpath} ${prefix}/lib/hdfeos5/lib ${prefix}/lib
 ${prefix}/include/freetype2 ${prefix}/include/udunits2 ${prefix}/lib/hdfeos5/include ${prefix}/include
 
 
 EOF"
 }
 post-configure {
-#    reinplace "s| -lsz||g" ${worksrcpath}/makefile
-#    reinplace "s| -lsz||g" ${worksrcpath}/config/Site.local
     system -W ${worksrcpath} "make Info"
     system "cat ${worksrcpath}/config/Site.local"
 }
