@@ -19,7 +19,7 @@ entry_point_pattern = re.compile(r"""
 $
 """, re.VERBOSE)
 
-__version__ = '0.2'
+__version__ = '0.2.1'
 
 class BadEntryPoint(Exception):
     """Raised when an entry point can't be parsed.
@@ -46,6 +46,10 @@ class NoSuchEntryPoint(Exception):
 
     def __str__(self):
         return "No {!r} entry point found in group {!r}".format(self.name, self.group)
+
+
+class CaseSensitiveConfigParser(configparser.ConfigParser):
+    optionxform = staticmethod(str)
 
 
 class EntryPoint(object):
@@ -125,7 +129,7 @@ def iter_files_distros(path=None, repeated_distro='first'):
             if osp.isdir(folder):
                 ep_path = osp.join(folder, 'EGG-INFO', 'entry_points.txt')
                 if osp.isfile(ep_path):
-                    cp = configparser.ConfigParser()
+                    cp = CaseSensitiveConfigParser()
                     cp.read(ep_path)
                     yield cp, distro
 
@@ -135,7 +139,7 @@ def iter_files_distros(path=None, repeated_distro='first'):
                     info = z.getinfo('EGG-INFO/entry_points.txt')
                 except KeyError:
                     continue
-                cp = configparser.ConfigParser()
+                cp = CaseSensitiveConfigParser()
                 with z.open(info) as f:
                     fu = io.TextIOWrapper(f)
                     cp.read_file(fu,
@@ -156,7 +160,7 @@ def iter_files_distros(path=None, repeated_distro='first'):
                 distro_names_seen.add(distro.name)
             else:
                 distro = None
-            cp = configparser.ConfigParser()
+            cp = CaseSensitiveConfigParser()
             cp.read(path)
             yield cp, distro
 
