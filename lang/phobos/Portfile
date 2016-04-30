@@ -3,6 +3,8 @@
 
 PortSystem          1.0
 PortGroup           github 1.0
+PortGroup           muniversal 1.0
+PortGroup           active_variants 1.1
 
 github.setup        D-Programming-Language phobos 2.069.2 v
 categories          lang
@@ -19,14 +21,43 @@ checksums           rmd160  cd61aa1c1efc8bee2047a2f83f477ba34a7d146e \
 
 depends_lib         port:druntime
 
-patchfiles          patch-gzlib.c.diff
+patchfiles          patch-gzlib.c.diff \
+                    patch-posix.diff
 
 use_configure       no
 
-if {${build_arch} eq "x86_64"} {
-    set model 64
-} else {
-    set model 32
+post-extract {
+    xinstall -m 0644 ${filespath}/makefile_macports_install ${build.dir}
+}
+
+post-patch {
+    reinplace "s|__MACPORTS_CFLAGS__|${configure.cflags}|g" \
+        ${worksrcpath}/posix.mak
+}
+
+pre-configure {
+    # dmd compiler can not handle universal files, so create thin versions of archive files from libdruntime.a
+    if { ![variant_isset universal] } {
+        set all_archs ${build_arch}
+    } else {
+        set all_archs ${universal_archs}
+    }
+    foreach arch ${all_archs} {
+        file mkdir ${workpath}/druntime/${arch}
+    }
+    if {[active_variants port:druntime universal ""]} {
+        # libdruntime.a is universal, so create a thin version
+        foreach arch ${all_archs} {
+            system \
+                -W ${workpath}/druntime/${arch} \
+                "/usr/bin/lipo -thin ${arch} ${prefix}/lib/libdruntime.a -output libdruntime.a"
+        }
+    } else {
+        # libdruntime.a is NOT universal, so just copy it
+        foreach arch ${all_archs} {
+            file copy ${prefix}/lib/libdruntime.a ${workpath}/druntime/${arch}/libdruntime.a
+        }
+    }
 }
 
 pre-build {
@@ -34,24 +65,26 @@ pre-build {
     system "echo ${version} > ${workpath}/dmd/VERSION"
 }
 build.args          -f posix.mak \
-                    DRUNTIME=${prefix}/lib/libdruntime.a \
                     DRUNTIME_PATH=${prefix}/include/druntime \
                     CC=${configure.cc} \
-                    CFLAGS="${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc]" \
-                    DMD=${prefix}/bin/dmd \
-                    DFLAGS="-w -d -m${model} -O -release" \
-                    MODEL=${model}
+                    DMD=${prefix}/bin/dmd
 build.target        ""
 
-destroot {
-    xinstall -m 755 -d ${destroot}${prefix}/lib
-    xinstall -m 644 ${worksrcpath}/generated/osx/release/${model}/lib${name}2.a \
-        ${destroot}${prefix}/lib
-    xinstall -d -m 755 ${destroot}${prefix}/include
-    xinstall -d -m 755 ${destroot}${prefix}/include/${name}
-    eval xinstall -m 644 [glob ${worksrcpath}/*.d] ${destroot}${prefix}/include/${name}
-    file copy ${worksrcpath}/etc ${destroot}${prefix}/include/${name}
-    file copy ${worksrcpath}/std ${destroot}${prefix}/include/${name}
+if { ![variant_isset universal] } {
+    if { ${build_arch} eq "x86_64" || ${build_arch} eq "ppc64" } {
+        build.args-append MODEL=64 DRUNTIME=${workpath}/druntime/${build_arch}/libdruntime.a
+    } else {
+        build.args-append MODEL=32 DRUNTIME=${workpath}/druntime/${build_arch}/libdruntime.a
+    }
+} else {
+    lappend merger_build_args(x86_64) MODEL=64 DRUNTIME=${workpath}/druntime/x86_64/libdruntime.a
+    lappend merger_build_args(i386)   MODEL=32 DRUNTIME=${workpath}/druntime/i386/libdruntime.a
+    lappend merger_build_args(ppc64)  MODEL=64 DRUNTIME=${workpath}/druntime/ppc64/libdruntime.a
+    lappend merger_build_args(ppc)    MODEL=32 DRUNTIME=${workpath}/druntime/ppc/libdruntime.a
 }
+
+destroot.args \
+    -f makefile_macports_install \
+    PREFIX=${prefix}
 
 livecheck.regex     archive/[join ${github.tag_prefix} ""](\[^"-\]+)${extract.suffix}
