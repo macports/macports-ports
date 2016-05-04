@@ -1,243 +1,320 @@
-From 2c1194b085622ee5c8484d0a9b0a310a18704132 Mon Sep 17 00:00:00 2001
-From: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
-Date: Sat, 31 May 2014 13:14:20 -0700
-Subject: [PATCH 5004/5004] fb: Revert fb changes that broke XQuartz
+From ede0b86e109653af9119013ff56e452346fef826 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston <jeremyhu@apple.com>
+Date: Fri, 12 Feb 2010 19:48:52 -0800
+Subject: [PATCH 5004/5005] fb: Revert fb changes that broke XQuartz
 
-    http://bugs.freedesktop.org/show_bug.cgi?id=26124
+http://bugs.freedesktop.org/show_bug.cgi?id=26124
 
-Revert "Use new pixman_glyph_cache_t API that will be in pixman 0.28.0"
-Revert "fb: Fix origin of source picture in fbGlyphs"
-Revert "fb: Publish fbGlyphs and fbUnrealizeGlyph"
+Revert "Fix source pictures getting random transforms after 2d6a8f668342a5190cdf43b5."
+Revert "fb: Adjust transform or composite coordinates for pixman operations"
 
-This reverts commit 9cbcb5bd6a5360a128d15b77a02d8d3351f74366.
-This reverts commit 983e30361f49a67252d0b5d82630e70724d69dbf.
-This reverts commit 3c2c59eed3c68c0e5a93c38cf01eedad015e3157.
+http://bugs.freedesktop.org/26124
+
+This reverts commit a72c65e9176c51de95db2fdbf4c5d946a4911695.
+This reverts commit a6bd5d2e482a5aa84acb3d4932e2a166d8670ef1.
+
+Signed-off-by: Jeremy Huddleston <jeremyhu@apple.com>
 ---
- fb/fb.h       |   3 --
- fb/fbpict.c   | 149 +---------------------------------------------------------
- fb/fbpict.h   |  11 +----
- fb/fbscreen.c |   1 -
- 4 files changed, 2 insertions(+), 162 deletions(-)
+ fb/fb.h     |  3 +--
+ fb/fbpict.c | 82 ++++++++++++++++++-------------------------------------------
+ fb/fbtrap.c | 43 ++++++++++++++------------------
+ 3 files changed, 43 insertions(+), 85 deletions(-)
 
 diff --git a/fb/fb.h b/fb/fb.h
-index 256a1ee..8e87498 100644
+index c687aa7..256a1ee 100644
 --- a/fb/fb.h
 +++ b/fb/fb.h
-@@ -1111,9 +1111,6 @@ extern _X_EXPORT void
- extern _X_EXPORT Bool
-  fbPictureInit(ScreenPtr pScreen, PictFormatPtr formats, int nformats);
+@@ -1321,8 +1321,7 @@ fbFillRegionSolid(DrawablePtr pDrawable,
+                   RegionPtr pRegion, FbBits and, FbBits xor);
  
--extern _X_EXPORT void
--fbDestroyGlyphCache(void);
--
- /*
-  * fbpixmap.c
-  */
+ extern _X_EXPORT pixman_image_t *image_from_pict(PicturePtr pict,
+-                                                 Bool has_clip,
+-                                                 int *xoff, int *yoff);
++                                                 Bool has_clip);
+ 
+ extern _X_EXPORT void free_pixman_pict(PicturePtr, pixman_image_t *);
+ 
 diff --git a/fb/fbpict.c b/fb/fbpict.c
-index be8274b..66dd633 100644
+index 434d890..be8274b 100644
 --- a/fb/fbpict.c
 +++ b/fb/fbpict.c
-@@ -65,152 +65,6 @@ fbComposite(CARD8 op,
-     free_pixman_pict(pDst, dest);
+@@ -46,23 +46,18 @@ fbComposite(CARD8 op,
+             INT16 yMask, INT16 xDst, INT16 yDst, CARD16 width, CARD16 height)
+ {
+     pixman_image_t *src, *mask, *dest;
+-    int src_xoff, src_yoff;
+-    int msk_xoff, msk_yoff;
+-    int dst_xoff, dst_yoff;
+-
+     miCompositeSourceValidate(pSrc);
+     if (pMask)
+         miCompositeSourceValidate(pMask);
+ 
+-    src = image_from_pict(pSrc, FALSE, &src_xoff, &src_yoff);
+-    mask = image_from_pict(pMask, FALSE, &msk_xoff, &msk_yoff);
+-    dest = image_from_pict(pDst, TRUE, &dst_xoff, &dst_yoff);
++    src = image_from_pict(pSrc, TRUE);
++    mask = image_from_pict(pMask, TRUE);
++    dest = image_from_pict(pDst, TRUE);
+ 
+     if (src && dest && !(pMask && !mask)) {
+         pixman_image_composite(op, src, mask, dest,
+-                               xSrc + src_xoff, ySrc + src_yoff,
+-                               xMask + msk_xoff, yMask + msk_yoff,
+-                               xDst + dst_xoff, yDst + dst_yoff, width, height);
++                               xSrc, ySrc, xMask, yMask, xDst, yDst,
++                               width, height);
+     }
+ 
+     free_pixman_pict(pSrc, src);
+@@ -289,20 +284,22 @@ create_conical_gradient_image(PictGradient * gradient)
  }
  
--static pixman_glyph_cache_t *glyphCache;
--
--void
--fbDestroyGlyphCache(void)
--{
--    if (glyphCache)
--    {
--	pixman_glyph_cache_destroy (glyphCache);
--	glyphCache = NULL;
--    }
--}
--
--static void
--fbUnrealizeGlyph(ScreenPtr pScreen,
--		 GlyphPtr pGlyph)
--{
--    if (glyphCache)
--	pixman_glyph_cache_remove (glyphCache, pGlyph, NULL);
--}
--
--void
--fbGlyphs(CARD8 op,
--	 PicturePtr pSrc,
--	 PicturePtr pDst,
--	 PictFormatPtr maskFormat,
--	 INT16 xSrc,
--	 INT16 ySrc, int nlist,
--	 GlyphListPtr list,
--	 GlyphPtr *glyphs)
--{
--#define N_STACK_GLYPHS 512
--    ScreenPtr pScreen = pDst->pDrawable->pScreen;
--    pixman_glyph_t stack_glyphs[N_STACK_GLYPHS];
--    pixman_glyph_t *pglyphs = stack_glyphs;
--    pixman_image_t *srcImage, *dstImage;
--    int srcXoff, srcYoff, dstXoff, dstYoff;
--    GlyphPtr glyph;
--    int n_glyphs;
--    int x, y;
--    int i, n;
--    int xDst = list->xOff, yDst = list->yOff;
--
--    miCompositeSourceValidate(pSrc);
--
--    n_glyphs = 0;
--    for (i = 0; i < nlist; ++i)
--	n_glyphs += list[i].len;
--
--    if (!glyphCache)
--	glyphCache = pixman_glyph_cache_create();
--
--    pixman_glyph_cache_freeze (glyphCache);
--
--    if (n_glyphs > N_STACK_GLYPHS) {
--	if (!(pglyphs = xallocarray(n_glyphs, sizeof(pixman_glyph_t))))
--	    goto out;
--    }
--
--    i = 0;
--    x = y = 0;
--    while (nlist--) {
--        x += list->xOff;
--        y += list->yOff;
--        n = list->len;
--        while (n--) {
--	    const void *g;
--
--            glyph = *glyphs++;
--
--	    if (!(g = pixman_glyph_cache_lookup (glyphCache, glyph, NULL))) {
--		pixman_image_t *glyphImage;
--		PicturePtr pPicture;
--		int xoff, yoff;
--
--		pPicture = GetGlyphPicture(glyph, pScreen);
--		if (!pPicture) {
--		    n_glyphs--;
--		    goto next;
--		}
--
--		if (!(glyphImage = image_from_pict(pPicture, FALSE, &xoff, &yoff)))
--		    goto out;
--
--		g = pixman_glyph_cache_insert(glyphCache, glyph, NULL,
--					      glyph->info.x,
--					      glyph->info.y,
--					      glyphImage);
--
--		free_pixman_pict(pPicture, glyphImage);
--
--		if (!g)
--		    goto out;
--	    }
--
--	    pglyphs[i].x = x;
--	    pglyphs[i].y = y;
--	    pglyphs[i].glyph = g;
--	    i++;
--
--	next:
--            x += glyph->info.xOff;
--            y += glyph->info.yOff;
--	}
--	list++;
--    }
--
--    if (!(srcImage = image_from_pict(pSrc, FALSE, &srcXoff, &srcYoff)))
--	goto out;
--
--    if (!(dstImage = image_from_pict(pDst, TRUE, &dstXoff, &dstYoff)))
--	goto out_free_src;
--
--    if (maskFormat) {
--	pixman_format_code_t format;
--	pixman_box32_t extents;
--
--	format = maskFormat->format | (maskFormat->depth << 24);
--
--	pixman_glyph_get_extents(glyphCache, n_glyphs, pglyphs, &extents);
--
--	pixman_composite_glyphs(op, srcImage, dstImage, format,
--				xSrc + srcXoff + extents.x1 - xDst, ySrc + srcYoff + extents.y1 - yDst,
--				extents.x1, extents.y1,
--				extents.x1 + dstXoff, extents.y1 + dstYoff,
--				extents.x2 - extents.x1,
--				extents.y2 - extents.y1,
--				glyphCache, n_glyphs, pglyphs);
--    }
--    else {
--	pixman_composite_glyphs_no_mask(op, srcImage, dstImage,
--					xSrc + srcXoff - xDst, ySrc + srcYoff - yDst,
--					dstXoff, dstYoff,
--					glyphCache, n_glyphs, pglyphs);
--    }
--
--    free_pixman_pict(pDst, dstImage);
--
--out_free_src:
--    free_pixman_pict(pSrc, srcImage);
--
--out:
--    pixman_glyph_cache_thaw(glyphCache);
--    if (pglyphs != stack_glyphs)
--	free(pglyphs);
--}
--
  static pixman_image_t *
- create_solid_fill_image(PicturePtr pict)
+-create_bits_picture(PicturePtr pict, Bool has_clip, int *xoff, int *yoff)
++create_bits_picture(PicturePtr pict, Bool has_clip)
  {
-@@ -470,8 +324,7 @@ fbPictureInit(ScreenPtr pScreen, PictFormatPtr formats, int nformats)
-         return FALSE;
-     ps = GetPictureScreen(pScreen);
-     ps->Composite = fbComposite;
--    ps->Glyphs = fbGlyphs;
--    ps->UnrealizeGlyph = fbUnrealizeGlyph;
-+    ps->Glyphs = miGlyphs;
-     ps->CompositeRects = miCompositeRects;
-     ps->RasterizeTrapezoid = fbRasterizeTrapezoid;
-     ps->AddTraps = fbAddTraps;
-diff --git a/fb/fbpict.h b/fb/fbpict.h
-index 5cb8663..110f32d 100644
---- a/fb/fbpict.h
-+++ b/fb/fbpict.h
-@@ -65,20 +65,11 @@ fbTrapezoids(CARD8 op,
-              INT16 xSrc, INT16 ySrc, int ntrap, xTrapezoid * traps);
+-    PixmapPtr pixmap;
+     FbBits *bits;
+     FbStride stride;
+-    int bpp;
++    int bpp, xoff, yoff;
+     pixman_image_t *image;
  
- extern _X_EXPORT void
+-    fbGetDrawablePixmap(pict->pDrawable, pixmap, *xoff, *yoff);
+-    fbGetPixmapBitsData(pixmap, bits, stride, bpp);
++    fbGetDrawable (pict->pDrawable, bits, stride, bpp, xoff, yoff);
 +
- fbTriangles(CARD8 op,
-             PicturePtr pSrc,
-             PicturePtr pDst,
-             PictFormatPtr maskFormat,
-             INT16 xSrc, INT16 ySrc, int ntris, xTriangle * tris);
++    bits = (FbBits*)((CARD8*)bits +
++                     (pict->pDrawable->y + yoff) * stride * sizeof(FbBits) +
++                     (pict->pDrawable->x + xoff) * (bpp / 8));
  
--extern _X_EXPORT void
--fbGlyphs(CARD8 op,
--	 PicturePtr pSrc,
--	 PicturePtr pDst,
--	 PictFormatPtr maskFormat,
--	 INT16 xSrc,
--	 INT16 ySrc, int nlist,
--	 GlyphListPtr list,
--	 GlyphPtr *glyphs);
+     image = pixman_image_create_bits((pixman_format_code_t) pict->format,
+-                                     pixmap->drawable.width,
+-                                     pixmap->drawable.height, (uint32_t *) bits,
++                                     pict->pDrawable->width,
++                                     pict->pDrawable->height, (uint32_t *) bits,
+                                      stride * sizeof(FbStride));
+ 
+     if (!image)
+@@ -321,28 +318,21 @@ create_bits_picture(PicturePtr pict, Bool has_clip, int *xoff, int *yoff)
+         if (pict->clientClip)
+             pixman_image_set_has_client_clip(image, TRUE);
+ 
+-        if (*xoff || *yoff)
+-            pixman_region_translate(pict->pCompositeClip, *xoff, *yoff);
++        pixman_region_translate (pict->pCompositeClip, - pict->pDrawable->x, - pict->pDrawable->y);
+ 
+         pixman_image_set_clip_region(image, pict->pCompositeClip);
+ 
+-        if (*xoff || *yoff)
+-            pixman_region_translate(pict->pCompositeClip, -*xoff, -*yoff);
++        pixman_region_translate (pict->pCompositeClip, pict->pDrawable->x, pict->pDrawable->y);
+     }
+ 
+     /* Indexed table */
+     if (pict->pFormat->index.devPrivate)
+         pixman_image_set_indexed(image, pict->pFormat->index.devPrivate);
+ 
+-    /* Add in drawable origin to position within the image */
+-    *xoff += pict->pDrawable->x;
+-    *yoff += pict->pDrawable->y;
 -
- #endif                          /* _FBPICT_H_ */
-diff --git a/fb/fbscreen.c b/fb/fbscreen.c
-index 71bcc5d..55330fc 100644
---- a/fb/fbscreen.c
-+++ b/fb/fbscreen.c
-@@ -32,7 +32,6 @@ fbCloseScreen(ScreenPtr pScreen)
-     int d;
-     DepthPtr depths = pScreen->allowedDepths;
+     return image;
+ }
  
--    fbDestroyGlyphCache();
-     for (d = 0; d < pScreen->numDepths; d++)
-         free(depths[d].vids);
-     free(depths);
+ static pixman_image_t *image_from_pict_internal(PicturePtr pict, Bool has_clip,
+-                                                int *xoff, int *yoff,
+                                                 Bool is_alpha_map);
+ 
+ static void image_destroy(pixman_image_t *image, void *data)
+@@ -351,32 +341,13 @@ static void image_destroy(pixman_image_t *image, void *data)
+ }
+ 
+ static void
+-set_image_properties(pixman_image_t * image, PicturePtr pict, Bool has_clip,
+-                     int *xoff, int *yoff, Bool is_alpha_map)
++set_image_properties(pixman_image_t * image, PicturePtr pict, Bool is_alpha_map)
+ {
+     pixman_repeat_t repeat;
+     pixman_filter_t filter;
+ 
+     if (pict->transform) {
+-        /* For source images, adjust the transform to account
+-         * for the drawable offset within the pixman image,
+-         * then set the offset to 0 as it will be used
+-         * to compute positions within the transformed image.
+-         */
+-        if (!has_clip) {
+-            struct pixman_transform adjusted;
+-
+-            adjusted = *pict->transform;
+-            pixman_transform_translate(&adjusted,
+-                                       NULL,
+-                                       pixman_int_to_fixed(*xoff),
+-                                       pixman_int_to_fixed(*yoff));
+-            pixman_image_set_transform(image, &adjusted);
+-            *xoff = 0;
+-            *yoff = 0;
+-        }
+-        else
+-            pixman_image_set_transform(image, pict->transform);
++        pixman_image_set_transform(image, pict->transform);
+     }
+ 
+     switch (pict->repeatType) {
+@@ -404,10 +375,8 @@ set_image_properties(pixman_image_t * image, PicturePtr pict, Bool has_clip,
+      * as the alpha map for this operation
+      */
+     if (pict->alphaMap && !is_alpha_map) {
+-        int alpha_xoff, alpha_yoff;
+         pixman_image_t *alpha_map =
+-            image_from_pict_internal(pict->alphaMap, FALSE, &alpha_xoff,
+-                                     &alpha_yoff, TRUE);
++            image_from_pict_internal(pict->alphaMap, TRUE, TRUE);
+ 
+         pixman_image_set_alpha_map(image, alpha_map, pict->alphaOrigin.x,
+                                    pict->alphaOrigin.y);
+@@ -445,8 +414,7 @@ set_image_properties(pixman_image_t * image, PicturePtr pict, Bool has_clip,
+ }
+ 
+ static pixman_image_t *
+-image_from_pict_internal(PicturePtr pict, Bool has_clip, int *xoff, int *yoff,
+-                         Bool is_alpha_map)
++image_from_pict_internal(PicturePtr pict, Bool has_clip, Bool is_alpha_map)
+ {
+     pixman_image_t *image = NULL;
+ 
+@@ -454,7 +422,7 @@ image_from_pict_internal(PicturePtr pict, Bool has_clip, int *xoff, int *yoff,
+         return NULL;
+ 
+     if (pict->pDrawable) {
+-        image = create_bits_picture(pict, has_clip, xoff, yoff);
++        image = create_bits_picture(pict, has_clip);
+     }
+     else if (pict->pSourcePict) {
+         SourcePict *sp = pict->pSourcePict;
+@@ -472,19 +440,17 @@ image_from_pict_internal(PicturePtr pict, Bool has_clip, int *xoff, int *yoff,
+             else if (sp->type == SourcePictTypeConical)
+                 image = create_conical_gradient_image(gradient);
+         }
+-        *xoff = *yoff = 0;
+     }
+ 
+     if (image)
+-        set_image_properties(image, pict, has_clip, xoff, yoff, is_alpha_map);
+-
++        set_image_properties (image, pict, is_alpha_map);
+     return image;
+ }
+ 
+ pixman_image_t *
+-image_from_pict(PicturePtr pict, Bool has_clip, int *xoff, int *yoff)
++image_from_pict (PicturePtr pict, Bool has_clip)
+ {
+-    return image_from_pict_internal(pict, has_clip, xoff, yoff, FALSE);
++    return image_from_pict_internal (pict, has_clip, FALSE);
+ }
+ 
+ void
+diff --git a/fb/fbtrap.c b/fb/fbtrap.c
+index bf82f8f..0145ce9 100644
+--- a/fb/fbtrap.c
++++ b/fb/fbtrap.c
+@@ -36,13 +36,12 @@ fbAddTraps(PicturePtr pPicture,
+            INT16 x_off, INT16 y_off, int ntrap, xTrap * traps)
+ {
+     pixman_image_t *image;
+-    int dst_xoff, dst_yoff;
+ 
+-    if (!(image = image_from_pict(pPicture, FALSE, &dst_xoff, &dst_yoff)))
+-        return;
+-
+-    pixman_add_traps(image, x_off + dst_xoff, y_off + dst_yoff,
+-                     ntrap, (pixman_trap_t *) traps);
++    if (!(image = image_from_pict (pPicture, FALSE)))
++	return;
++    
++    pixman_add_traps(image, x_off, y_off,
++                     ntrap, (pixman_trap_t *)traps);
+ 
+     free_pixman_pict(pPicture, image);
+ }
+@@ -52,13 +51,12 @@ fbRasterizeTrapezoid(PicturePtr pPicture,
+                      xTrapezoid * trap, int x_off, int y_off)
+ {
+     pixman_image_t *image;
+-    int dst_xoff, dst_yoff;
+ 
+-    if (!(image = image_from_pict(pPicture, FALSE, &dst_xoff, &dst_yoff)))
++    if (!(image = image_from_pict (pPicture, FALSE)))
+         return;
+ 
+-    pixman_rasterize_trapezoid(image, (pixman_trapezoid_t *) trap,
+-                               x_off + dst_xoff, y_off + dst_yoff);
++    pixman_rasterize_trapezoid(image, (pixman_trapezoid_t *)trap,
++                               x_off, y_off);
+ 
+     free_pixman_pict(pPicture, image);
+ }
+@@ -68,14 +66,12 @@ fbAddTriangles(PicturePtr pPicture,
+                INT16 x_off, INT16 y_off, int ntri, xTriangle * tris)
+ {
+     pixman_image_t *image;
+-    int dst_xoff, dst_yoff;
+ 
+-    if (!(image = image_from_pict(pPicture, FALSE, &dst_xoff, &dst_yoff)))
++    if (!(image = image_from_pict (pPicture, FALSE)))
+         return;
+-
+-    pixman_add_triangles(image,
+-                         dst_xoff + x_off, dst_yoff + y_off,
+-                         ntri, (pixman_triangle_t *) tris);
++    
++    pixman_add_triangles(image, x_off, y_off, ntri,
++                         (pixman_triangle_t *)tris);
+ 
+     free_pixman_pict(pPicture, image);
+ }
+@@ -98,13 +94,11 @@ fbShapes(CompositeShapesFunc composite,
+          int16_t ySrc, int nshapes, int shape_size, const uint8_t * shapes)
+ {
+     pixman_image_t *src, *dst;
+-    int src_xoff, src_yoff;
+-    int dst_xoff, dst_yoff;
+ 
+     miCompositeSourceValidate(pSrc);
+ 
+-    src = image_from_pict(pSrc, FALSE, &src_xoff, &src_yoff);
+-    dst = image_from_pict(pDst, TRUE, &dst_xoff, &dst_yoff);
++    src = image_from_pict(pSrc, FALSE);
++    dst = image_from_pict(pDst, TRUE);
+ 
+     if (src && dst) {
+         pixman_format_code_t format;
+@@ -121,9 +115,8 @@ fbShapes(CompositeShapesFunc composite,
+ 
+             for (i = 0; i < nshapes; ++i) {
+                 composite(op, src, dst, format,
+-                          xSrc + src_xoff,
+-                          ySrc + src_yoff,
+-                          dst_xoff, dst_yoff, 1, shapes + i * shape_size);
++                          xSrc, ySrc, 0, 0, 
++                          1, shapes + i * shape_size);
+             }
+         }
+         else {
+@@ -143,8 +136,8 @@ fbShapes(CompositeShapesFunc composite,
+             }
+ 
+             composite(op, src, dst, format,
+-                      xSrc + src_xoff,
+-                      ySrc + src_yoff, dst_xoff, dst_yoff, nshapes, shapes);
++                      xSrc, ySrc, 0, 0,
++                      nshapes, shapes);
+         }
+ 
+         DamageRegionProcessPending(pDst->pDrawable);
 -- 
-2.6.3
+2.8.1
 
