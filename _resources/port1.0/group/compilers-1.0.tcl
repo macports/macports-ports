@@ -46,7 +46,7 @@
 #   The default is all of them. Must come before compilers.setup in the Portfile to have an effect.
 # compilers.set_variants_conflict {args}
 #   Add specified variants to the conflicts list of all variants created by this PortGroup.
-#   Useful if another compiler variant is created explicitly in the Portfile.
+#   Useful if another compiler variant is created explicitly in the Portfile. Must come before compilers.setup.
 # compilers.setup {args}
 #   Possible arguments: any compiler variant name with a minus removes it from the list of variants, e.g. -llvm.
 #   -gcc, -dragonegg, -clang remove all compilers of that category. -fortran removes gfortran and g95.
@@ -100,8 +100,8 @@ set compilers.gcc_default gcc5
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
-# build database of gcc {4{4..9} 5 6} compiler attributes
-set gcc_versions {44 45 46 47 48 49 5 6}
+# build database of gcc compiler attributes
+set gcc_versions {44 45 46 47 48 49 5 6 7}
 foreach v ${gcc_versions} {
     # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
     set version $v
