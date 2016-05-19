@@ -36,6 +36,9 @@
 #
 #   PortGroup               linear_algebra 1.0
 #
+#   If only BLAS and not LAPACK is used, set:
+#   linalg.setup blas_only
+#
 #   in pre-configure, a line like this may be needed:
 #   configure.args-append --with-blas="-L${prefix}/lib ${linalglib}"
 #
@@ -49,6 +52,18 @@
 PortGroup active_variants 1.1
 
 default linalglib ""
+default blas_only 0
+
+proc linalg.setup {args} {
+    global blas_only
+
+    foreach v $args {
+        if {$v == "blas_only"} {
+            ui_msg "arg = $v"
+            set blas_only 1
+        }
+    }
+}
 
 if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
     default_variants-append +accelerate
@@ -72,6 +87,8 @@ variant atlas conflicts accelerate openblas description {Build with linear algeb
 variant openblas conflicts accelerate atlas description {Build with linear algebra from OpenBLAS} {
     # allow OpenBLAS-devel too
     depends_lib-append      path:lib/libopenblas.dylib:OpenBLAS
-    require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
+    if {$blas_only == 0} {
+        require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
+    }
     set linalglib           -lopenblas
 }
