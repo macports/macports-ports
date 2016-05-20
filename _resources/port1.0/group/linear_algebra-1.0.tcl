@@ -47,7 +47,6 @@
 
 # scalapack.
 # vecLibFort only needed if calling Accelerate from Fortran.
-# enforcing +lapack for OpenBLAS can be optional.
 
 PortGroup active_variants 1.1
 
@@ -91,4 +90,9 @@ variant openblas conflicts accelerate atlas description {Build with linear algeb
         require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
     }
     set linalglib           -lopenblas
+}
+
+if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] } {
+    ui_error "You must select either the +accelerate, +atlas, or +openblas variant for linear algebra."
+    return -code error "No linear-algebra variant selected."
 }
