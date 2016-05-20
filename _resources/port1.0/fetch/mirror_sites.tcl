@@ -401,6 +401,7 @@ set portfetch::mirror_sites::sites(postgresql) {
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
 set portfetch::mirror_sites::sites(pypi) {
+    https://files.pythonhosted.org/packages/source/:nosubdir
     https://pypi.python.org/packages/source/:nosubdir
 }
 
