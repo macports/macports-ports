@@ -58,7 +58,6 @@ proc linalg.setup {args} {
 
     foreach v $args {
         if {$v == "blas_only"} {
-            ui_msg "arg = $v"
             set blas_only 1
         }
     }
