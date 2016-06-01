@@ -1,0 +1,1295 @@
+--- CMakeLists.txt.orig
++++ CMakeLists.txt
+@@ -215,6 +215,11 @@ endif()
+ ########################################################################
+ 
+ configure_file(
++  ${CMAKE_SOURCE_DIR}/cmake/Modules/VolkConfig.cmake.in
++  ${CMAKE_BINARY_DIR}/cmake/Modules/VolkConfig.cmake
++@ONLY)
++
++configure_file(
+   ${CMAKE_SOURCE_DIR}/cmake/Modules/VolkConfigVersion.cmake.in
+   ${CMAKE_BINARY_DIR}/cmake/Modules/VolkConfigVersion.cmake
+ @ONLY)
+@@ -230,7 +235,7 @@ endif(NOT CMAKE_MODULES_DIR)
+ 
+ install(
+     FILES
+-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/VolkConfig.cmake
++    ${CMAKE_CURRENT_BINARY_DIR}/cmake/Modules/VolkConfig.cmake
+     ${CMAKE_CURRENT_BINARY_DIR}/cmake/Modules/VolkConfigVersion.cmake
+     DESTINATION ${CMAKE_MODULES_DIR}/volk
+     COMPONENT "volk_devel"
+--- apps/volk-config-info.cc.orig
++++ apps/volk-config-info.cc
+@@ -1,6 +1,6 @@
+ /* -*- c++ -*- */
+ /*
+- * Copyright 2013 Free Software Foundation, Inc.
++ * Copyright 2013, 2016 Free Software Foundation, Inc.
+  *
+  * This file is part of GNU Radio
+  *
+@@ -45,6 +45,8 @@ main(int argc, char **argv)
+     ("all-machines", "print VOLK machines built into library")
+     ("avail-machines", "print VOLK machines the current platform can use")
+     ("machine", "print the VOLK machine that will be used")
++    ("alignment", "print the alignment that will be used")
++    ("malloc", "print malloc implementation that will be used")
+     ("version,v", "print VOLK version")
+     ;
+ 
+@@ -88,5 +90,22 @@ main(int argc, char **argv)
+     std::cout << volk_get_machine() << std::endl;
+   }
+ 
++  if(vm.count("alignment")) {
++    std::cout << "Alignment in bytes: " << volk_get_alignment() << std::endl;
++  }
++
++  // You don't want to change the volk_malloc code, so just copy the if/else
++  // structure from there and give an explanation for the implementations
++  if(vm.count("malloc")) {
++    std::cout << "Used malloc implementation: ";
++#if _POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600 || HAVE_POSIX_MEMALIGN
++    std::cout << "posix_memalign" << std::endl;
++#elif _MSC_VER >= 1400
++    std::cout << "aligned_malloc" << std::endl;
++#else
++    std::cout << "No standard handler available, using own implementation." << std::endl;
++#endif
++  }
++
+   return 0;
+ }
+--- cmake/Modules/VolkConfig.cmake
++++ /dev/null
+@@ -1,26 +0,0 @@
+-INCLUDE(FindPkgConfig)
+-PKG_CHECK_MODULES(PC_VOLK volk)
+-
+-FIND_PATH(
+-    VOLK_INCLUDE_DIRS
+-    NAMES volk/volk.h
+-    HINTS $ENV{VOLK_DIR}/include
+-        ${PC_VOLK_INCLUDEDIR}
+-    PATHS /usr/local/include
+-          /usr/include
+-)
+-
+-FIND_LIBRARY(
+-    VOLK_LIBRARIES
+-    NAMES volk
+-    HINTS $ENV{VOLK_DIR}/lib
+-        ${PC_VOLK_LIBDIR}
+-    PATHS /usr/local/lib
+-          /usr/local/lib64
+-          /usr/lib
+-          /usr/lib64
+-)
+-
+-INCLUDE(FindPackageHandleStandardArgs)
+-FIND_PACKAGE_HANDLE_STANDARD_ARGS(VOLK DEFAULT_MSG VOLK_LIBRARIES VOLK_INCLUDE_DIRS)
+-MARK_AS_ADVANCED(VOLK_LIBRARIES VOLK_INCLUDE_DIRS)
+--- /dev/null
++++ cmake/Modules/VolkConfig.cmake.in
+@@ -0,0 +1,28 @@
++INCLUDE(FindPkgConfig)
++PKG_CHECK_MODULES(PC_VOLK volk)
++
++FIND_PATH(
++    VOLK_INCLUDE_DIRS
++    NAMES volk/volk.h
++    HINTS $ENV{VOLK_DIR}/include
++        ${PC_VOLK_INCLUDEDIR}
++    PATHS /usr/local/include
++          /usr/include
++          "@CMAKE_INSTALL_PREFIX@/include"
++)
++
++FIND_LIBRARY(
++    VOLK_LIBRARIES
++    NAMES volk
++    HINTS $ENV{VOLK_DIR}/lib
++        ${PC_VOLK_LIBDIR}
++    PATHS /usr/local/lib
++          /usr/local/lib64
++          /usr/lib
++          /usr/lib64
++          "@CMAKE_INSTALL_PREFIX@/lib"
++)
++
++INCLUDE(FindPackageHandleStandardArgs)
++FIND_PACKAGE_HANDLE_STANDARD_ARGS(VOLK DEFAULT_MSG VOLK_LIBRARIES VOLK_INCLUDE_DIRS)
++MARK_AS_ADVANCED(VOLK_LIBRARIES VOLK_INCLUDE_DIRS)
+--- docs/kernels.dox.orig
++++ docs/kernels.dox
+@@ -47,6 +47,7 @@
+ \li \subpage volk_32fc_deinterleave_real_32f
+ \li \subpage volk_32fc_deinterleave_real_64f
+ \li \subpage volk_32fc_index_max_16u
++\li \subpage volk_32fc_index_max_32u
+ \li \subpage volk_32fc_magnitude_32f
+ \li \subpage volk_32fc_magnitude_squared_32f
+ \li \subpage volk_32f_cos_32f
+@@ -61,6 +62,7 @@
+ \li \subpage volk_32fc_x2_square_dist_32f
+ \li \subpage volk_32f_expfast_32f
+ \li \subpage volk_32f_index_max_16u
++\li \subpage volk_32f_index_max_32u
+ \li \subpage volk_32f_invsqrt_32f
+ \li \subpage volk_32f_log2_32f
+ \li \subpage volk_32f_s32f_calc_spectral_noise_floor_32f
+--- kernels/volk/volk_32f_index_max_16u.h.orig
++++ kernels/volk/volk_32f_index_max_16u.h
+@@ -25,11 +25,18 @@
+  *
+  * \b Overview
+  *
+- * Returns Argmax_i x[i]. Finds and returns the index which contains the maximum value in the given vector.
++ * Returns Argmax_i x[i]. Finds and returns the index which contains
++ * the maximum value in the given vector.
++ *
++ * Note that num_points is a uint32_t, but the return value is
++ * uint16_t. Providing a vector larger than the max of a uint16_t
++ * (65536) would miss anything outside of this boundary. The kernel
++ * will check the length of num_points and cap it to this max value,
++ * anyways.
+  *
+  * <b>Dispatcher Prototype</b>
+  * \code
+- * void volk_32f_index_max_16u_a_sse4_1(unsigned int* target, const float* src0, unsigned int num_points)
++ * void volk_32f_index_max_16u(uint16_t* target, const float* src0, uint32_t num_points)
+  * \endcode
+  *
+  * \b Inputs
+@@ -42,11 +49,11 @@
+  * \b Example
+  * \code
+  *   int N = 10;
+- *   unsigned int alignment = volk_get_alignment();
++ *   uint32_t alignment = volk_get_alignment();
+  *   float* in = (float*)volk_malloc(sizeof(float)*N, alignment);
+- *   uint32_t* out = (uint32_t*)volk_malloc(sizeof(uint32_t), alignment);
++ *   uint16_t* out = (uint16_t*)volk_malloc(sizeof(uint16_t), alignment);
+  *
+- *   for(unsigned int ii = 0; ii < N; ++ii){
++ *   for(uint32_t ii = 0; ii < N; ++ii){
+  *       float x = (float)ii;
+  *       // a parabola with a maximum at x=4
+  *       in[ii] = -(x-4) * (x-4) + 5;
+@@ -67,64 +74,66 @@
+ #include <volk/volk_common.h>
+ #include <volk/volk_common.h>
+ #include <inttypes.h>
++#include <limits.h>
+ #include <stdio.h>
+ 
+ #ifdef LV_HAVE_SSE4_1
+-#include<smmintrin.h>
++#include <smmintrin.h>
+ 
+ static inline void
+-volk_32f_index_max_16u_a_sse4_1(unsigned int* target, const float* src0, unsigned int num_points)
++volk_32f_index_max_16u_a_sse4_1(uint16_t* target, const float* src0,
++                                uint32_t num_points)
+ {
+-  if(num_points > 0){
+-    unsigned int number = 0;
+-    const unsigned int quarterPoints = num_points / 4;
++  num_points = (num_points > USHRT_MAX) ? USHRT_MAX : num_points;
+ 
+-    float* inputPtr = (float*)src0;
++  uint32_t number = 0;
++  const uint32_t quarterPoints = num_points / 4;
+ 
+-    __m128 indexIncrementValues = _mm_set1_ps(4);
+-    __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
++  float* inputPtr = (float*)src0;
+ 
+-    float max = src0[0];
+-    float index = 0;
+-    __m128 maxValues = _mm_set1_ps(max);
+-    __m128 maxValuesIndex = _mm_setzero_ps();
+-    __m128 compareResults;
+-    __m128 currentValues;
++  __m128 indexIncrementValues = _mm_set1_ps(4);
++  __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
+ 
+-    __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
+-    __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
++  float max = src0[0];
++  float index = 0;
++  __m128 maxValues = _mm_set1_ps(max);
++  __m128 maxValuesIndex = _mm_setzero_ps();
++  __m128 compareResults;
++  __m128 currentValues;
+ 
+-    for(;number < quarterPoints; number++){
++  __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
++  __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
+ 
+-      currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
+-      currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
++  for(;number < quarterPoints; number++){
+ 
+-      compareResults = _mm_cmpgt_ps(maxValues, currentValues);
++    currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
++    currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
+ 
+-      maxValuesIndex = _mm_blendv_ps(currentIndexes, maxValuesIndex, compareResults);
+-      maxValues      = _mm_blendv_ps(currentValues, maxValues, compareResults);
+-    }
++    compareResults = _mm_cmpgt_ps(maxValues, currentValues);
+ 
+-    // Calculate the largest value from the remaining 4 points
+-    _mm_store_ps(maxValuesBuffer, maxValues);
+-    _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
++    maxValuesIndex = _mm_blendv_ps(currentIndexes, maxValuesIndex, compareResults);
++    maxValues      = _mm_blendv_ps(currentValues, maxValues, compareResults);
++  }
+ 
+-    for(number = 0; number < 4; number++){
+-      if(maxValuesBuffer[number] > max){
+-	index = maxIndexesBuffer[number];
+-	max = maxValuesBuffer[number];
+-      }
++  // Calculate the largest value from the remaining 4 points
++  _mm_store_ps(maxValuesBuffer, maxValues);
++  _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
++
++  for(number = 0; number < 4; number++){
++    if(maxValuesBuffer[number] > max){
++      index = maxIndexesBuffer[number];
++      max = maxValuesBuffer[number];
+     }
++  }
+ 
+-    number = quarterPoints * 4;
+-    for(;number < num_points; number++){
+-      if(src0[number] > max){
+-	index = number;
+-	max = src0[number];
+-      }
++  number = quarterPoints * 4;
++  for(;number < num_points; number++){
++    if(src0[number] > max){
++      index = number;
++      max = src0[number];
+     }
+-    target[0] = (unsigned int)index;
+   }
++  target[0] = (uint16_t)index;
+ }
+ 
+ #endif /*LV_HAVE_SSE4_1*/
+@@ -132,62 +141,63 @@ volk_32f_index_max_16u_a_sse4_1(unsigned int* target, const float* src0, unsigne
+ 
+ #ifdef LV_HAVE_SSE
+ 
+-#include<xmmintrin.h>
++#include <xmmintrin.h>
+ 
+ static inline void
+-volk_32f_index_max_16u_a_sse(unsigned int* target, const float* src0, unsigned int num_points)
++volk_32f_index_max_16u_a_sse(uint16_t* target, const float* src0,
++                             uint32_t num_points)
+ {
+-  if(num_points > 0){
+-    unsigned int number = 0;
+-    const unsigned int quarterPoints = num_points / 4;
++  num_points = (num_points > USHRT_MAX) ? USHRT_MAX : num_points;
+ 
+-    float* inputPtr = (float*)src0;
++  uint32_t number = 0;
++  const uint32_t quarterPoints = num_points / 4;
+ 
+-    __m128 indexIncrementValues = _mm_set1_ps(4);
+-    __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
++  float* inputPtr = (float*)src0;
+ 
+-    float max = src0[0];
+-    float index = 0;
+-    __m128 maxValues = _mm_set1_ps(max);
+-    __m128 maxValuesIndex = _mm_setzero_ps();
+-    __m128 compareResults;
+-    __m128 currentValues;
++  __m128 indexIncrementValues = _mm_set1_ps(4);
++  __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
+ 
+-    __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
+-    __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
++  float max = src0[0];
++  float index = 0;
++  __m128 maxValues = _mm_set1_ps(max);
++  __m128 maxValuesIndex = _mm_setzero_ps();
++  __m128 compareResults;
++  __m128 currentValues;
+ 
+-    for(;number < quarterPoints; number++){
++  __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
++  __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
+ 
+-      currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
+-      currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
++  for(;number < quarterPoints; number++){
+ 
+-      compareResults = _mm_cmpgt_ps(maxValues, currentValues);
++    currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
++    currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
+ 
+-      maxValuesIndex = _mm_or_ps(_mm_and_ps(compareResults, maxValuesIndex) , _mm_andnot_ps(compareResults, currentIndexes));
++    compareResults = _mm_cmpgt_ps(maxValues, currentValues);
+ 
+-      maxValues      = _mm_or_ps(_mm_and_ps(compareResults, maxValues) , _mm_andnot_ps(compareResults, currentValues));
+-    }
++    maxValuesIndex = _mm_or_ps(_mm_and_ps(compareResults, maxValuesIndex) , _mm_andnot_ps(compareResults, currentIndexes));
++
++    maxValues      = _mm_or_ps(_mm_and_ps(compareResults, maxValues) , _mm_andnot_ps(compareResults, currentValues));
++  }
+ 
+-    // Calculate the largest value from the remaining 4 points
+-    _mm_store_ps(maxValuesBuffer, maxValues);
+-    _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
++  // Calculate the largest value from the remaining 4 points
++  _mm_store_ps(maxValuesBuffer, maxValues);
++  _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
+ 
+-    for(number = 0; number < 4; number++){
+-      if(maxValuesBuffer[number] > max){
+-	index = maxIndexesBuffer[number];
+-	max = maxValuesBuffer[number];
+-      }
++  for(number = 0; number < 4; number++){
++    if(maxValuesBuffer[number] > max){
++      index = maxIndexesBuffer[number];
++      max = maxValuesBuffer[number];
+     }
++  }
+ 
+-    number = quarterPoints * 4;
+-    for(;number < num_points; number++){
+-      if(src0[number] > max){
+-	index = number;
+-	max = src0[number];
+-      }
++  number = quarterPoints * 4;
++  for(;number < num_points; number++){
++    if(src0[number] > max){
++      index = number;
++      max = src0[number];
+     }
+-    target[0] = (unsigned int)index;
+   }
++  target[0] = (uint16_t)index;
+ }
+ 
+ #endif /*LV_HAVE_SSE*/
+@@ -196,22 +206,23 @@ volk_32f_index_max_16u_a_sse(unsigned int* target, const float* src0, unsigned i
+ #ifdef LV_HAVE_GENERIC
+ 
+ static inline void
+-volk_32f_index_max_16u_generic(unsigned int* target, const float* src0, unsigned int num_points)
++volk_32f_index_max_16u_generic(uint16_t* target, const float* src0,
++                               uint32_t num_points)
+ {
+-  if(num_points > 0){
+-    float max = src0[0];
+-    unsigned int index = 0;
++  num_points = (num_points > USHRT_MAX) ? USHRT_MAX : num_points;
++
++  float max = src0[0];
++  uint16_t index = 0;
+ 
+-    unsigned int i = 1;
++  uint32_t i = 1;
+ 
+-    for(; i < num_points; ++i) {
+-      if(src0[i] > max){
+-        index = i;
+-        max = src0[i];
+-      }
++  for(; i < num_points; ++i) {
++    if(src0[i] > max) {
++      index = i;
++      max = src0[i];
+     }
+-    target[0] = index;
+   }
++  target[0] = index;
+ }
+ 
+ #endif /*LV_HAVE_GENERIC*/
+--- /dev/null
++++ kernels/volk/volk_32f_index_max_32u.h
+@@ -0,0 +1,220 @@
++/* -*- c++ -*- */
++/*
++ * Copyright 2016 Free Software Foundation, Inc.
++ *
++ * This file is part of GNU Radio
++ *
++ * GNU Radio is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * GNU Radio is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with GNU Radio; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++
++/*!
++ * \page volk_32f_index_max_32u
++ *
++ * \b Overview
++ *
++ * Returns Argmax_i x[i]. Finds and returns the index which contains the maximum value in the given vector.
++ *
++ * <b>Dispatcher Prototype</b>
++ * \code
++ * void volk_32f_index_max_32u(uint32_t* target, const float* src0, uint32_t num_points)
++ * \endcode
++ *
++ * \b Inputs
++ * \li src0: The input vector of floats.
++ * \li num_points: The number of data points.
++ *
++ * \b Outputs
++ * \li target: The index of the maximum value in the input buffer.
++ *
++ * \b Example
++ * \code
++ *   int N = 10;
++ *   uint32_t alignment = volk_get_alignment();
++ *   float* in = (float*)volk_malloc(sizeof(float)*N, alignment);
++ *   uint32_t* out = (uint32_t*)volk_malloc(sizeof(uint32_t), alignment);
++ *
++ *   for(uint32_t ii = 0; ii < N; ++ii){
++ *       float x = (float)ii;
++ *       // a parabola with a maximum at x=4
++ *       in[ii] = -(x-4) * (x-4) + 5;
++ *   }
++ *
++ *   volk_32f_index_max_32u(out, in, N);
++ *
++ *   printf("maximum is %1.2f at index %u\n", in[*out], *out);
++ *
++ *   volk_free(in);
++ *   volk_free(out);
++ * \endcode
++ */
++
++#ifndef INCLUDED_volk_32f_index_max_32u_a_H
++#define INCLUDED_volk_32f_index_max_32u_a_H
++
++#include <volk/volk_common.h>
++#include <volk/volk_common.h>
++#include <inttypes.h>
++#include <stdio.h>
++
++#ifdef LV_HAVE_SSE4_1
++#include<smmintrin.h>
++
++static inline void
++volk_32f_index_max_32u_a_sse4_1(uint32_t* target, const float* src0, uint32_t num_points)
++{
++  if(num_points > 0){
++    uint32_t number = 0;
++    const uint32_t quarterPoints = num_points / 4;
++
++    float* inputPtr = (float*)src0;
++
++    __m128 indexIncrementValues = _mm_set1_ps(4);
++    __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
++
++    float max = src0[0];
++    float index = 0;
++    __m128 maxValues = _mm_set1_ps(max);
++    __m128 maxValuesIndex = _mm_setzero_ps();
++    __m128 compareResults;
++    __m128 currentValues;
++
++    __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
++    __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
++
++    for(;number < quarterPoints; number++){
++
++      currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
++      currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
++
++      compareResults = _mm_cmpgt_ps(maxValues, currentValues);
++
++      maxValuesIndex = _mm_blendv_ps(currentIndexes, maxValuesIndex, compareResults);
++      maxValues      = _mm_blendv_ps(currentValues, maxValues, compareResults);
++    }
++
++    // Calculate the largest value from the remaining 4 points
++    _mm_store_ps(maxValuesBuffer, maxValues);
++    _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
++
++    for(number = 0; number < 4; number++){
++      if(maxValuesBuffer[number] > max){
++	index = maxIndexesBuffer[number];
++	max = maxValuesBuffer[number];
++      }
++    }
++
++    number = quarterPoints * 4;
++    for(;number < num_points; number++){
++      if(src0[number] > max){
++	index = number;
++	max = src0[number];
++      }
++    }
++    target[0] = (uint32_t)index;
++  }
++}
++
++#endif /*LV_HAVE_SSE4_1*/
++
++
++#ifdef LV_HAVE_SSE
++
++#include<xmmintrin.h>
++
++static inline void
++volk_32f_index_max_32u_a_sse(uint32_t* target, const float* src0, uint32_t num_points)
++{
++  if(num_points > 0){
++    uint32_t number = 0;
++    const uint32_t quarterPoints = num_points / 4;
++
++    float* inputPtr = (float*)src0;
++
++    __m128 indexIncrementValues = _mm_set1_ps(4);
++    __m128 currentIndexes = _mm_set_ps(-1,-2,-3,-4);
++
++    float max = src0[0];
++    float index = 0;
++    __m128 maxValues = _mm_set1_ps(max);
++    __m128 maxValuesIndex = _mm_setzero_ps();
++    __m128 compareResults;
++    __m128 currentValues;
++
++    __VOLK_ATTR_ALIGNED(16) float maxValuesBuffer[4];
++    __VOLK_ATTR_ALIGNED(16) float maxIndexesBuffer[4];
++
++    for(;number < quarterPoints; number++){
++
++      currentValues  = _mm_load_ps(inputPtr); inputPtr += 4;
++      currentIndexes = _mm_add_ps(currentIndexes, indexIncrementValues);
++
++      compareResults = _mm_cmpgt_ps(maxValues, currentValues);
++
++      maxValuesIndex = _mm_or_ps(_mm_and_ps(compareResults, maxValuesIndex) , _mm_andnot_ps(compareResults, currentIndexes));
++
++      maxValues      = _mm_or_ps(_mm_and_ps(compareResults, maxValues) , _mm_andnot_ps(compareResults, currentValues));
++    }
++
++    // Calculate the largest value from the remaining 4 points
++    _mm_store_ps(maxValuesBuffer, maxValues);
++    _mm_store_ps(maxIndexesBuffer, maxValuesIndex);
++
++    for(number = 0; number < 4; number++){
++      if(maxValuesBuffer[number] > max){
++	index = maxIndexesBuffer[number];
++	max = maxValuesBuffer[number];
++      }
++    }
++
++    number = quarterPoints * 4;
++    for(;number < num_points; number++){
++      if(src0[number] > max){
++	index = number;
++	max = src0[number];
++      }
++    }
++    target[0] = (uint32_t)index;
++  }
++}
++
++#endif /*LV_HAVE_SSE*/
++
++
++#ifdef LV_HAVE_GENERIC
++
++static inline void
++volk_32f_index_max_32u_generic(uint32_t* target, const float* src0, uint32_t num_points)
++{
++  if(num_points > 0){
++    float max = src0[0];
++    uint32_t index = 0;
++
++    uint32_t i = 1;
++
++    for(; i < num_points; ++i) {
++      if(src0[i] > max){
++        index = i;
++        max = src0[i];
++      }
++    }
++    target[0] = index;
++  }
++}
++
++#endif /*LV_HAVE_GENERIC*/
++
++
++#endif /*INCLUDED_volk_32f_index_max_32u_a_H*/
+--- kernels/volk/volk_32fc_index_max_16u.h.orig
++++ kernels/volk/volk_32fc_index_max_16u.h
+@@ -28,9 +28,15 @@
+  * Returns Argmax_i mag(x[i]). Finds and returns the index which contains the
+  * maximum magnitude for complex points in the given vector.
+  *
++ * Note that num_points is a uint32_t, but the return value is
++ * uint16_t. Providing a vector larger than the max of a uint16_t
++ * (65536) would miss anything outside of this boundary. The kernel
++ * will check the length of num_points and cap it to this max value,
++ * anyways.
++ *
+  * <b>Dispatcher Prototype</b>
+  * \code
+- * void volk_32fc_index_max_16u_a_sse3(unsigned int* target, lv_32fc_t* src0, unsigned int num_points)
++ * void volk_32fc_index_max_16u(uint16_t* target, lv_32fc_t* src0, uint32_t num_points)
+  * \endcode
+  *
+  * \b Inputs
+@@ -45,11 +51,11 @@
+  * the unit circle.
+  * \code
+  *   int N = 10;
+- *   unsigned int alignment = volk_get_alignment();
++ *   uint32_t alignment = volk_get_alignment();
+  *   lv_32fc_t* in  = (lv_32fc_t*)volk_malloc(sizeof(lv_32fc_t)*N, alignment);
+- *   uint32_t* max = (uint32_t*)volk_malloc(sizeof(uint32_t), alignment);
++ *   uint16_t* max = (uint16_t*)volk_malloc(sizeof(uint16_t), alignment);
+  *
+- *   for(unsigned int ii = 0; ii < N/2; ++ii){
++ *   for(uint32_t ii = 0; ii < N/2; ++ii){
+  *       float real = 2.f * ((float)ii / (float)N) - 1.f;
+  *       float imag = std::sqrt(1.f - real * real);
+  *       in[ii] = lv_cmake(real, imag);
+@@ -71,19 +77,24 @@
+ #define INCLUDED_volk_32fc_index_max_16u_a_H
+ 
+ #include <volk/volk_common.h>
+-#include<inttypes.h>
+-#include<stdio.h>
+-#include<volk/volk_complex.h>
++#include <inttypes.h>
++#include <stdio.h>
++#include <limits.h>
++#include <volk/volk_complex.h>
+ 
+ #ifdef LV_HAVE_SSE3
+-#include<xmmintrin.h>
+-#include<pmmintrin.h>
++#include <xmmintrin.h>
++#include <pmmintrin.h>
+ 
+ static inline void
+-volk_32fc_index_max_16u_a_sse3(unsigned int* target, lv_32fc_t* src0,
+-                               unsigned int num_points)
++volk_32fc_index_max_16u_a_sse3(uint16_t* target, lv_32fc_t* src0,
++                               uint32_t num_points)
+ {
+-  const unsigned int num_bytes = num_points*8;
++  num_points = (num_points > USHRT_MAX) ? USHRT_MAX : num_points;
++  // Branchless version, if we think it'll make a difference
++  //num_points = USHRT_MAX ^ ((num_points ^ USHRT_MAX) & -(num_points < USHRT_MAX));
++
++  const uint32_t num_bytes = num_points*8;
+ 
+   union bit128 holderf;
+   union bit128 holderi;
+@@ -206,11 +217,11 @@ volk_32fc_index_max_16u_a_sse3(unsigned int* target, lv_32fc_t* src0,
+   /*
+   float placeholder = 0.0;
+   uint32_t temp0, temp1;
+-  unsigned int g0 = (((float*)&xmm3)[0] > ((float*)&xmm3)[1]);
+-  unsigned int l0 = g0 ^ 1;
++  uint32_t g0 = (((float*)&xmm3)[0] > ((float*)&xmm3)[1]);
++  uint32_t l0 = g0 ^ 1;
+ 
+-  unsigned int g1 = (((float*)&xmm3)[1] > ((float*)&xmm3)[2]);
+-  unsigned int l1 = g1 ^ 1;
++  uint32_t g1 = (((float*)&xmm3)[1] > ((float*)&xmm3)[2]);
++  uint32_t l1 = g1 ^ 1;
+ 
+   temp0 = g0 * ((uint32_t*)&xmm9)[0] + l0 * ((uint32_t*)&xmm9)[1];
+   temp1 = g0 * ((uint32_t*)&xmm9)[2] + l0 * ((uint32_t*)&xmm9)[3];
+@@ -227,16 +238,18 @@ volk_32fc_index_max_16u_a_sse3(unsigned int* target, lv_32fc_t* src0,
+ 
+ #ifdef LV_HAVE_GENERIC
+ static inline void
+- volk_32fc_index_max_16u_generic(unsigned int* target, lv_32fc_t* src0,
+-                                 unsigned int num_points)
++ volk_32fc_index_max_16u_generic(uint16_t* target, lv_32fc_t* src0,
++                                 uint32_t num_points)
+ {
+-  const unsigned int num_bytes = num_points*8;
++  num_points = (num_points > USHRT_MAX) ? USHRT_MAX : num_points;
++
++  const uint32_t num_bytes = num_points*8;
+ 
+   float sq_dist = 0.0;
+   float max = 0.0;
+-  unsigned int index = 0;
++  uint16_t index = 0;
+ 
+-  unsigned int i = 0;
++  uint32_t i = 0;
+ 
+   for(; i < num_bytes >> 3; ++i) {
+     sq_dist = lv_creal(src0[i]) * lv_creal(src0[i]) + lv_cimag(src0[i]) * lv_cimag(src0[i]);
+--- /dev/null
++++ kernels/volk/volk_32fc_index_max_32u.h
+@@ -0,0 +1,253 @@
++/* -*- c++ -*- */
++/*
++ * Copyright 2016 Free Software Foundation, Inc.
++ *
++ * This file is part of GNU Radio
++ *
++ * GNU Radio is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * GNU Radio is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with GNU Radio; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++
++/*!
++ * \page volk_32fc_index_max_32u
++ *
++ * \b Overview
++ *
++ * Returns Argmax_i mag(x[i]). Finds and returns the index which contains the
++ * maximum magnitude for complex points in the given vector.
++ *
++ * <b>Dispatcher Prototype</b>
++ * \code
++ * void volk_32fc_index_max_32u(uint32_t* target, lv_32fc_t* src0, uint32_t num_points)
++ * \endcode
++ *
++ * \b Inputs
++ * \li src0: The complex input vector.
++ * \li num_points: The number of samples.
++ *
++ * \b Outputs
++ * \li target: The index of the point with maximum magnitude.
++ *
++ * \b Example
++ * Calculate the index of the maximum value of \f$x^2 + x\f$ for points around
++ * the unit circle.
++ * \code
++ *   int N = 10;
++ *   uint32_t alignment = volk_get_alignment();
++ *   lv_32fc_t* in  = (lv_32fc_t*)volk_malloc(sizeof(lv_32fc_t)*N, alignment);
++ *   uint32_t* max = (uint32_t*)volk_malloc(sizeof(uint32_t), alignment);
++ *
++ *   for(uint32_t ii = 0; ii < N/2; ++ii){
++ *       float real = 2.f * ((float)ii / (float)N) - 1.f;
++ *       float imag = std::sqrt(1.f - real * real);
++ *       in[ii] = lv_cmake(real, imag);
++ *       in[ii] = in[ii] * in[ii] + in[ii];
++ *       in[N-ii] = lv_cmake(real, imag);
++ *       in[N-ii] = in[N-ii] * in[N-ii] + in[N-ii];
++ *   }
++ *
++ *   volk_32fc_index_max_32u(max, in, N);
++ *
++ *   printf("index of max value = %u\n",  *max);
++ *
++ *   volk_free(in);
++ *   volk_free(max);
++ * \endcode
++ */
++
++#ifndef INCLUDED_volk_32fc_index_max_32u_a_H
++#define INCLUDED_volk_32fc_index_max_32u_a_H
++
++#include <volk/volk_common.h>
++#include<inttypes.h>
++#include<stdio.h>
++#include<volk/volk_complex.h>
++
++#ifdef LV_HAVE_SSE3
++#include<xmmintrin.h>
++#include<pmmintrin.h>
++
++static inline void
++volk_32fc_index_max_32u_a_sse3(uint32_t* target, lv_32fc_t* src0,
++                               uint32_t num_points)
++{
++  const uint32_t num_bytes = num_points*8;
++
++  union bit128 holderf;
++  union bit128 holderi;
++  float sq_dist = 0.0;
++
++  union bit128 xmm5, xmm4;
++  __m128 xmm1, xmm2, xmm3;
++  __m128i xmm8, xmm11, xmm12, xmmfive, xmmfour, xmm9, holder0, holder1, xmm10;
++
++  xmm5.int_vec = xmmfive = _mm_setzero_si128();
++  xmm4.int_vec = xmmfour = _mm_setzero_si128();
++  holderf.int_vec = holder0 = _mm_setzero_si128();
++  holderi.int_vec = holder1 = _mm_setzero_si128();
++
++  int bound = num_bytes >> 5;
++  int leftovers0 = (num_bytes >> 4) & 1;
++  int leftovers1 = (num_bytes >> 3) & 1;
++  int i = 0;
++
++  xmm8 = _mm_set_epi32(3, 2, 1, 0);//remember the crazy reverse order!
++  xmm9 = xmm8 = _mm_setzero_si128();
++  xmm10 = _mm_set_epi32(4, 4, 4, 4);
++  xmm3 = _mm_setzero_ps();
++
++  //printf("%f, %f, %f, %f\n", ((float*)&xmm10)[0], ((float*)&xmm10)[1], ((float*)&xmm10)[2], ((float*)&xmm10)[3]);
++
++  for(; i < bound; ++i) {
++    xmm1 = _mm_load_ps((float*)src0);
++    xmm2 = _mm_load_ps((float*)&src0[2]);
++
++    src0 += 4;
++
++    xmm1 = _mm_mul_ps(xmm1, xmm1);
++    xmm2 = _mm_mul_ps(xmm2, xmm2);
++
++    xmm1 = _mm_hadd_ps(xmm1, xmm2);
++
++    xmm3 = _mm_max_ps(xmm1, xmm3);
++
++    xmm4.float_vec = _mm_cmplt_ps(xmm1, xmm3);
++    xmm5.float_vec = _mm_cmpeq_ps(xmm1, xmm3);
++
++    xmm11 = _mm_and_si128(xmm8, xmm5.int_vec);
++    xmm12 = _mm_and_si128(xmm9, xmm4.int_vec);
++
++    xmm9 = _mm_add_epi32(xmm11,  xmm12);
++
++    xmm8 = _mm_add_epi32(xmm8, xmm10);
++
++    //printf("%f, %f, %f, %f\n", ((float*)&xmm3)[0], ((float*)&xmm3)[1], ((float*)&xmm3)[2], ((float*)&xmm3)[3]);
++    //printf("%u, %u, %u, %u\n", ((uint32_t*)&xmm10)[0], ((uint32_t*)&xmm10)[1], ((uint32_t*)&xmm10)[2], ((uint32_t*)&xmm10)[3]);
++  }
++
++
++  for(i = 0; i < leftovers0; ++i) {
++    xmm2 = _mm_load_ps((float*)src0);
++
++    xmm1 = _mm_movelh_ps(bit128_p(&xmm8)->float_vec, bit128_p(&xmm8)->float_vec);
++    xmm8 = bit128_p(&xmm1)->int_vec;
++
++    xmm2 = _mm_mul_ps(xmm2, xmm2);
++
++    src0 += 2;
++
++    xmm1 = _mm_hadd_ps(xmm2, xmm2);
++
++    xmm3 = _mm_max_ps(xmm1, xmm3);
++
++    xmm10 = _mm_set_epi32(2, 2, 2, 2);//load1_ps((float*)&init[2]);
++
++    xmm4.float_vec = _mm_cmplt_ps(xmm1, xmm3);
++    xmm5.float_vec = _mm_cmpeq_ps(xmm1, xmm3);
++
++    xmm11 = _mm_and_si128(xmm8, xmm5.int_vec);
++    xmm12 = _mm_and_si128(xmm9, xmm4.int_vec);
++
++    xmm9 = _mm_add_epi32(xmm11, xmm12);
++
++    xmm8 = _mm_add_epi32(xmm8, xmm10);
++    //printf("egads%u, %u, %u, %u\n", ((uint32_t*)&xmm9)[0], ((uint32_t*)&xmm9)[1], ((uint32_t*)&xmm9)[2], ((uint32_t*)&xmm9)[3]);
++  }
++
++  for(i = 0; i < leftovers1; ++i) {
++    //printf("%u, %u, %u, %u\n", ((uint32_t*)&xmm9)[0], ((uint32_t*)&xmm9)[1], ((uint32_t*)&xmm9)[2], ((uint32_t*)&xmm9)[3]);
++
++    sq_dist = lv_creal(src0[0]) * lv_creal(src0[0]) + lv_cimag(src0[0]) * lv_cimag(src0[0]);
++
++    xmm2 = _mm_load1_ps(&sq_dist);
++
++    xmm1 = xmm3;
++
++    xmm3 = _mm_max_ss(xmm3, xmm2);
++
++    xmm4.float_vec = _mm_cmplt_ps(xmm1, xmm3);
++    xmm5.float_vec = _mm_cmpeq_ps(xmm1, xmm3);
++
++    xmm8 = _mm_shuffle_epi32(xmm8, 0x00);
++
++    xmm11 = _mm_and_si128(xmm8, xmm4.int_vec);
++    xmm12 = _mm_and_si128(xmm9, xmm5.int_vec);
++
++    xmm9 = _mm_add_epi32(xmm11, xmm12);
++  }
++
++  //printf("%f, %f, %f, %f\n", ((float*)&xmm3)[0], ((float*)&xmm3)[1], ((float*)&xmm3)[2], ((float*)&xmm3)[3]);
++  //printf("%u, %u, %u, %u\n", ((uint32_t*)&xmm9)[0], ((uint32_t*)&xmm9)[1], ((uint32_t*)&xmm9)[2], ((uint32_t*)&xmm9)[3]);
++
++  _mm_store_ps((float*)&(holderf.f), xmm3);
++  _mm_store_si128(&(holderi.int_vec), xmm9);
++
++  target[0] = holderi.i[0];
++  sq_dist = holderf.f[0];
++  target[0] = (holderf.f[1] > sq_dist) ? holderi.i[1] : target[0];
++  sq_dist = (holderf.f[1] > sq_dist) ? holderf.f[1] : sq_dist;
++  target[0] = (holderf.f[2] > sq_dist) ? holderi.i[2] : target[0];
++  sq_dist = (holderf.f[2] > sq_dist) ? holderf.f[2] : sq_dist;
++  target[0] = (holderf.f[3] > sq_dist) ? holderi.i[3] : target[0];
++  sq_dist = (holderf.f[3] > sq_dist) ? holderf.f[3] : sq_dist;
++
++  /*
++  float placeholder = 0.0;
++  uint32_t temp0, temp1;
++  uint32_t g0 = (((float*)&xmm3)[0] > ((float*)&xmm3)[1]);
++  uint32_t l0 = g0 ^ 1;
++
++  uint32_t g1 = (((float*)&xmm3)[1] > ((float*)&xmm3)[2]);
++  uint32_t l1 = g1 ^ 1;
++
++  temp0 = g0 * ((uint32_t*)&xmm9)[0] + l0 * ((uint32_t*)&xmm9)[1];
++  temp1 = g0 * ((uint32_t*)&xmm9)[2] + l0 * ((uint32_t*)&xmm9)[3];
++  sq_dist = g0 * ((float*)&xmm3)[0] + l0 * ((float*)&xmm3)[1];
++  placeholder = g0 * ((float*)&xmm3)[2] + l0 * ((float*)&xmm3)[3];
++
++  g0 = (sq_dist > placeholder);
++  l0 = g0 ^ 1;
++  target[0] = g0 * temp0 + l0 * temp1;
++  */
++}
++
++#endif /*LV_HAVE_SSE3*/
++
++#ifdef LV_HAVE_GENERIC
++static inline void
++ volk_32fc_index_max_32u_generic(uint32_t* target, lv_32fc_t* src0,
++                                 uint32_t num_points)
++{
++  const uint32_t num_bytes = num_points*8;
++
++  float sq_dist = 0.0;
++  float max = 0.0;
++  uint32_t index = 0;
++
++  uint32_t i = 0;
++
++  for(; i < num_bytes >> 3; ++i) {
++    sq_dist = lv_creal(src0[i]) * lv_creal(src0[i]) + lv_cimag(src0[i]) * lv_cimag(src0[i]);
++
++    index = sq_dist > max ? i : index;
++    max = sq_dist > max ? sq_dist : max;
++  }
++  target[0] = index;
++}
++
++#endif /*LV_HAVE_GENERIC*/
++
++
++#endif /*INCLUDED_volk_32fc_index_max_32u_a_H*/
+--- /dev/null
++++ kernels/volk/volk_32fc_x2_divide_32fc.h
+@@ -0,0 +1,226 @@
++/* -*- c++ -*- */
++/*
++ * Copyright 2016 Free Software Foundation, Inc.
++ *
++ * This file is part of GNU Radio
++ *
++ * GNU Radio is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * GNU Radio is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with GNU Radio; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++
++/*!
++ * \page volk_32fc_x2_divide_32fc
++ *
++ * \b Overview
++ *
++ * Divide first vector of complexes element-wise by second.
++ *
++ * <b>Dispatcher Prototype</b>
++ * \code
++ * void volk_32fc_x2_divide_32fc(lv_32fc_t* cVector, const lv_32fc_t* numeratorVector, const lv_32fc_t* denumeratorVector, unsigned int num_points);
++ * \endcode
++ *
++ * \b Inputs
++ * \li numeratorVector: The numerator complex values.
++ * \li numeratorVector: The denumerator complex values.
++ * \li num_points: The number of data points.
++ *
++ * \b Outputs
++ * \li outputVector: The output vector complex floats.
++ *
++ * \b Example
++ * divide a complex vector by itself, demonstrating the result should be pretty close to 1+0j.
++ *
++ * \code
++ *   int N = 10;
++ *   unsigned int alignment = volk_get_alignment();
++ *   lv_32fc_t* input_vector  = (lv_32fc_t*)volk_malloc(sizeof(lv_32fc_t)*N, alignment);
++ *   lv_32fc_t* out = (lv_32fc_t*)volk_malloc(sizeof(lv_32fc_t)*N, alignment);
++ *
++ *   float delta = 2.f*M_PI / (float)N;
++ *   for(unsigned int ii = 0; ii < N; ++ii){
++ *       float real_1 = std::cos(0.3f * (float)ii);
++ *       float imag_1 = std::sin(0.3f * (float)ii);
++ *       input_vector[ii] = lv_cmake(real_1, imag_1);
++ *   }
++ *
++ *   volk_32fc_x2_divide_32fc(out, input_vector, input_vector, N);
++ *
++ *   for(unsigned int ii = 0; ii < N; ++ii){
++ *       printf("%1.4f%+1.4fj,", lv_creal(out[ii]), lv_cimag(out[ii]));
++ *   }
++ *   printf("\n");
++ *
++ *   volk_free(input_vector);
++ *   volk_free(out);
++ * \endcode
++ */
++
++#ifndef INCLUDED_volk_32fc_x2_divide_32fc_u_H
++#define INCLUDED_volk_32fc_x2_divide_32fc_u_H
++
++#include <inttypes.h>
++#include <volk/volk_complex.h>
++#include <float.h>
++
++#ifdef LV_HAVE_AVX
++#include <immintrin.h>
++#include <volk/volk_avx_intrinsics.h>
++
++static inline void
++volk_32fc_x2_divide_32fc_u_avx(lv_32fc_t* cVector, const lv_32fc_t* numeratorVector,
++                                            const lv_32fc_t* denumeratorVector, unsigned int num_points)
++{
++    /*
++     * we'll do the "classical"
++     *  a      a b*
++     * --- = -------
++     *  b     |b|^2
++     * */
++    unsigned int number = 0;
++    const unsigned int quarterPoints = num_points / 4;
++
++    __m256 num, denum, mul_conj, sq, mag_sq, mag_sq_un, div;
++    lv_32fc_t* c = cVector;
++    const lv_32fc_t* a = numeratorVector;
++    const lv_32fc_t* b = denumeratorVector;
++
++    for(; number < quarterPoints; number++){
++        num = _mm256_loadu_ps((float*) a); // Load the ar + ai, br + bi ... as ar,ai,br,bi ...
++        denum = _mm256_loadu_ps((float*) b); // Load the cr + ci, dr + di ... as cr,ci,dr,di ...
++        mul_conj = _mm256_complexconjugatemul_ps(num, denum);
++        sq = _mm256_mul_ps(denum, denum); // Square the values
++        mag_sq_un = _mm256_hadd_ps(sq,sq); // obtain the actual squared magnitude, although out of order
++        mag_sq = _mm256_permute_ps(mag_sq_un, 0xd8); // I order them
++        // best guide I found on using these functions: https://software.intel.com/sites/landingpage/IntrinsicsGuide/#expand=2738,2059,2738,2738,3875,3874,3875,2738,3870
++        div = _mm256_div_ps(mul_conj,mag_sq);
++
++        _mm256_storeu_ps((float*) c, div); // Store the results back into the C container
++
++        a += 4;
++        b += 4;
++        c += 4;
++    }
++
++    number = quarterPoints * 4;
++
++    for(; number < num_points; number++){
++        *c++ = (*a++) / (*b++);
++    }
++
++}
++#endif /* LV_HAVE_AVX */
++
++
++#ifdef LV_HAVE_GENERIC
++
++static inline void
++volk_32fc_x2_divide_32fc_generic(lv_32fc_t* cVector, const lv_32fc_t* aVector,
++                                             const lv_32fc_t* bVector, unsigned int num_points)
++{
++  lv_32fc_t* cPtr = cVector;
++  const lv_32fc_t* aPtr = aVector;
++  const lv_32fc_t* bPtr=  bVector;
++  unsigned int number = 0;
++
++  for(number = 0; number < num_points; number++){
++    *cPtr++ = (*aPtr++) / (*bPtr++);
++  }
++}
++#endif /* LV_HAVE_GENERIC */
++
++
++
++#endif /* INCLUDED_volk_32fc_x2_divide_32fc_u_H */
++
++
++#ifndef INCLUDED_volk_32fc_x2_divide_32fc_a_H
++#define INCLUDED_volk_32fc_x2_divide_32fc_a_H
++
++#include <inttypes.h>
++#include <stdio.h>
++#include <volk/volk_complex.h>
++#include <float.h>
++
++
++#ifdef LV_HAVE_AVX
++#include <immintrin.h>
++#include <volk/volk_avx_intrinsics.h>
++
++static inline void
++volk_32fc_x2_divide_32fc_a_avx(lv_32fc_t* cVector, const lv_32fc_t* numeratorVector,
++                                            const lv_32fc_t* denumeratorVector, unsigned int num_points)
++{
++    /*
++     * we'll do the "classical"
++     *  a      a b*
++     * --- = -------
++     *  b     |b|^2
++     * */
++    unsigned int number = 0;
++    const unsigned int quarterPoints = num_points / 4;
++
++    __m256 num, denum, mul_conj, sq, mag_sq, mag_sq_un, div;
++    lv_32fc_t* c = cVector;
++    const lv_32fc_t* a = numeratorVector;
++    const lv_32fc_t* b = denumeratorVector;
++
++    for(; number < quarterPoints; number++){
++        num = _mm256_load_ps((float*) a); // Load the ar + ai, br + bi ... as ar,ai,br,bi ...
++        denum = _mm256_load_ps((float*) b); // Load the cr + ci, dr + di ... as cr,ci,dr,di ...
++        mul_conj = _mm256_complexconjugatemul_ps(num, denum);
++        sq = _mm256_mul_ps(denum, denum); // Square the values
++        mag_sq_un = _mm256_hadd_ps(sq,sq); // obtain the actual squared magnitude, although out of order
++        mag_sq = _mm256_permute_ps(mag_sq_un, 0xd8); // I order them
++        // best guide I found on using these functions: https://software.intel.com/sites/landingpage/IntrinsicsGuide/#expand=2738,2059,2738,2738,3875,3874,3875,2738,3870
++        div = _mm256_div_ps(mul_conj,mag_sq);
++
++        _mm256_store_ps((float*) c, div); // Store the results back into the C container
++
++        a += 4;
++        b += 4;
++        c += 4;
++    }
++
++    number = quarterPoints * 4;
++
++    for(; number < num_points; number++){
++        *c++ = (*a++) / (*b++);
++    }
++
++
++}
++#endif /* LV_HAVE_AVX */
++
++
++#ifdef LV_HAVE_GENERIC
++
++static inline void
++volk_32fc_x2_divide_32fc_a_generic(lv_32fc_t* cVector, const lv_32fc_t* aVector,
++                                               const lv_32fc_t* bVector, unsigned int num_points)
++{
++  lv_32fc_t* cPtr = cVector;
++  const lv_32fc_t* aPtr = aVector;
++  const lv_32fc_t* bPtr=  bVector;
++  unsigned int number = 0;
++
++  for(number = 0; number < num_points; number++){
++    *cPtr++ = (*aPtr++)  / (*bPtr++);
++  }
++}
++#endif /* LV_HAVE_GENERIC */
++
++
++#endif /* INCLUDED_volk_32fc_x2_divide_32fc_a_H */
+--- lib/CMakeLists.txt.orig
++++ lib/CMakeLists.txt
+@@ -383,7 +383,7 @@ foreach(machine_name ${available_machines})
+     )
+     MESSAGE(STATUS "BUILD INFO ::: ${machine_name} ::: ${COMPILER_NAME} ::: ${CMAKE_C_FLAGS_${CBTU}} ${CMAKE_C_FLAGS} ${${machine_name}_flags}")
+     set(COMPILER_INFO "${COMPILER_INFO}${machine_name}:::${COMPILER_NAME}:::${CMAKE_C_FLAGS_${CBTU}} ${CMAKE_C_FLAGS} ${${machine_name}_flags}\n" )
+-    if(${machine_name}_flags)
++    if(${machine_name}_flags AND NOT MSVC)
+         set_source_files_properties(${machine_source} PROPERTIES COMPILE_FLAGS "${${machine_name}_flags}")
+     endif()
+ 
+--- lib/kernel_tests.h.orig
++++ lib/kernel_tests.h
+@@ -50,6 +50,7 @@ std::vector<volk_test_case_t> init_test_list(volk_test_params_t test_params)
+         (VOLK_INIT_TEST(volk_32f_accumulator_s32f,                      test_params_inacc))
+         (VOLK_INIT_TEST(volk_32f_x2_add_32f,                            test_params))
+         (VOLK_INIT_TEST(volk_32f_index_max_16u,                         test_params))
++        (VOLK_INIT_TEST(volk_32f_index_max_32u,                         test_params))
+         (VOLK_INIT_TEST(volk_32fc_32f_multiply_32fc,                    test_params))
+         (VOLK_INIT_TEST(volk_32f_log2_32f,           volk_test_params_t(3, test_params.scalar(), test_params.vlen(), test_params.iter(), test_params.benchmark_mode(), test_params.kernel_regex())))
+         (VOLK_INIT_TEST(volk_32f_expfast_32f,        volk_test_params_t(1e-1, test_params.scalar(), test_params.vlen(), test_params.iter(), test_params.benchmark_mode(), test_params.kernel_regex())))
+@@ -73,11 +74,13 @@ std::vector<volk_test_case_t> init_test_list(volk_test_params_t test_params)
+         (VOLK_INIT_TEST(volk_32fc_x2_dot_prod_32fc,                     test_params_inacc))
+         (VOLK_INIT_TEST(volk_32fc_32f_dot_prod_32fc,                    test_params_inacc))
+         (VOLK_INIT_TEST(volk_32fc_index_max_16u,      volk_test_params_t(3, test_params.scalar(), test_params.vlen(), test_params.iter(), test_params.benchmark_mode(), test_params.kernel_regex())))
++        (VOLK_INIT_TEST(volk_32fc_index_max_32u,      volk_test_params_t(3, test_params.scalar(), test_params.vlen(), test_params.iter(), test_params.benchmark_mode(), test_params.kernel_regex())))
+         (VOLK_INIT_TEST(volk_32fc_s32f_magnitude_16i,                   test_params_int1))
+         (VOLK_INIT_TEST(volk_32fc_magnitude_32f,                        test_params_inacc))
+         (VOLK_INIT_TEST(volk_32fc_magnitude_squared_32f,                test_params))
+         (VOLK_INIT_TEST(volk_32fc_x2_multiply_32fc,                     test_params))
+         (VOLK_INIT_TEST(volk_32fc_x2_multiply_conjugate_32fc,           test_params))
++        (VOLK_INIT_TEST(volk_32fc_x2_divide_32fc,                       test_params))
+         (VOLK_INIT_TEST(volk_32fc_conjugate_32fc,                       test_params))
+         (VOLK_INIT_TEST(volk_32f_s32f_convert_16i,                      test_params))
+         (VOLK_INIT_TEST(volk_32f_s32f_convert_32i,    volk_test_params_t(1, test_params.scalar(), test_params.vlen(), test_params.iter(), test_params.benchmark_mode(), test_params.kernel_regex())))
+--- lib/volk_rank_archs.c.orig
++++ lib/volk_rank_archs.c
+@@ -38,7 +38,7 @@ int volk_get_index(
+     }
+     //TODO return -1;
+     //something terrible should happen here
+-    printf("Volk warning: no arch found, returning generic impl\n");
++    fprintf(stderr, "Volk warning: no arch found, returning generic impl\n");
+     return volk_get_index(impl_names, n_impls, "generic"); //but we'll fake it for now
+ }
+ 
+--- tmpl/volk.tmpl.c.orig
++++ tmpl/volk.tmpl.c
+@@ -53,7 +53,7 @@ struct volk_machine *get_machine(void)
+       }
+     }
+     machine = max_machine;
+-    printf("Using Volk machine: %s\n", machine->name);
++    //printf("Using Volk machine: %s\n", machine->name);
+     __alignment = machine->alignment;
+     __alignment_mask = (intptr_t)(__alignment-1);
+     return machine;
