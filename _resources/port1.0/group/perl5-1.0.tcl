@@ -252,8 +252,8 @@ proc perl5.setup {module vers {cpandir ""}} {
     }
 
     livecheck.type      regexm
-    livecheck.url       http://search.cpan.org/dist/${perl5.module}/
-    livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    livecheck.url       http://api.metacpan.org/release/${perl5.module}/
+    livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"
     default livecheck.version {${perl5.moduleversion}}
 }
 
