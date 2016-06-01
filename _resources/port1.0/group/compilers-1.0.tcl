@@ -128,7 +128,7 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$version
 }
 
-set clang_versions {33 34 35 36 37 38}
+set clang_versions {33 34 35 36 37 38 39}
 foreach v ${clang_versions} {
     # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
     set version $v
@@ -712,7 +712,7 @@ proc compilers.setup {args} {
 # this might also need to be in pre-archivefetch
 pre-fetch {
     if {${compilers.require_fortran} && [fortran_variant_name] eq ""} {
-        return -code error "must set at least one Fortran variant"
+        return -code error "must set at least one Fortran variant (e.g. +gfortran, +gccX, +g95)"
     }
     eval compilers.action_enforce_c ${compilers.required_c}
     eval compilers.action_enforce_f ${compilers.required_f}
