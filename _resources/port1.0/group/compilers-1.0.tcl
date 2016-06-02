@@ -52,6 +52,7 @@
 #   -gcc, -dragonegg, -clang remove all compilers of that category. -fortran removes gfortran and g95.
 #   Blacklisted compilers are automatically removed, as are ones that do not support the compilers in compilers.choose:
 #   e.g. if choose is just f90, clang variants will not be added.
+#   List "default_fortran" to make a Fortran variant be selected by default.
 #   This procedure must be in the Portfile to create all the compiler variants and set the default.
 #   Appropriate conflicts, dependencies, etc. are created too.
 #   If a variant is declared already in the Portfile before this line, it will not be redefined.
@@ -87,6 +88,7 @@ default compilers.gcc_variants {}
 default compilers.clang_variants {}
 default compilers.dragonegg_variants {}
 default compilers.require_fortran 0
+default compilers.default_fortran 0
 default compilers.setup_done 0
 default compilers.required_c {}
 default compilers.required_f {}
@@ -591,7 +593,7 @@ proc compilers.action_enforce_some_f {args} {
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
     global compilers.dragonegg_variants compilers.fortran_variants
-    global compilers.require_fortran compilers.setup_done compilers.list
+    global compilers.require_fortran compilers.default_fortran compilers.setup_done compilers.list
     global compilers.gcc_default
     global compiler.blacklist
 
@@ -642,6 +644,10 @@ proc compilers.setup {args} {
                 require_fortran {
                     # this signals that fortran is required and not optional
                     set compilers.require_fortran 1
+                    set compilers.default_fortran 1
+                }
+                default_fortran {
+                    set compilers.default_fortran 1
                 }
                 default {
                     if {[info exists cdb($v,variant)] == 0} {
@@ -695,7 +701,7 @@ proc compilers.setup {args} {
         }
         lappend ordered_variants {g95}
 
-        if {${compilers.require_fortran} && ![fortran_variant_isset]} {
+        if {${compilers.default_fortran} && ![fortran_variant_isset]} {
             foreach fv $ordered_variants {
                 # if the variant exists, then make it default
                 if {[lsearch -exact ${compilers.variants} $fv] > -1} {
