@@ -480,8 +480,12 @@ proc add_from_list {L A} {
 }
 
 proc compilers.choose {args} {
-    global compilers.list
+    global compilers.list compilers.setup_done
 
+    if {${compilers.setup_done}} {
+        ui_warn "compilers.choose has an effect only before compilers.setup."
+    }
+    
     # zero out the variable before and append args
     set compilers.list {}
     foreach v $args {
