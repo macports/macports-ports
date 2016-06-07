@@ -6,8 +6,6 @@ PortGroup               cmake 1.0
 PortGroup               mpi 1.0
 PortGroup               github 1.0
 
-compilers.choose        cc cxx
-
 name                    apbs
 subport                 apbs-mpi {}
 # set revision separately for each subport, below.
@@ -35,13 +33,12 @@ checksums               rmd160  5c4d583e12deb3fbc2b5a8031882311cbfd22c7e \
 depends_lib             port:maloc \
                         port:readline
 
-# dependencies are not managed correctly within this code, so errors such as from Eigen or -lapbs_geoflow might occur
+# dependencies are not managed correctly within this code, so errors such as from -lapbs_geoflow might occur
+# how to solve: first 'make apbs_geoflow', then 'make all'
 use_parallel_build no
 
-# BEM needs 'gfortran', hard-coded, and configure fails without it if BEM is enabled, with a syntax error
-#CMake Error at CMakeLists.txt:217 (get_filename_component):
-#  get_filename_component called with incorrect number of arguments
-# To enable, need not only to fix that check, but also fix configure in tapipb directory to use chosen FC compiler.
+# do +debug and +universal work?
+# do we really want -g?
 configure.args-append   -DENABLE_OPENMP:BOOL=OFF \
                         -DENABLE_BEM=OFF \
                         -DCMAKE_C_COMPILER_ARG1:STRING="-I${worksrcpath}/include -O3 -ffast-math -g" \
@@ -59,6 +56,13 @@ test {
 set bins {analysis benchmark born coulomb del2dx dx2mol dx2uhbd dxmath
     mergedx mergedx2 mgmesh multivalue similarity smooth tensor2dx
     uhbd_asc2bin value}
+
+# Some cmake tests will fail with "error: unrecognized option '-arch'" from gcc 4.6 and earlier. Same with dragonegg based on it.
+# llvm-gcc-4.2 will fail to build with: error: unrecognized command line option "-std=c++0x"
+compiler.blacklist      macports-gcc-4.4 macports-gcc-4.5 macports-gcc-4.6 \
+                        macports-dragonegg-3.3 macports-dragonegg-3.4 llvm-gcc-4.2
+# g++ will just fail to link apbs_geoflow. probably about -lstdc++ stuff. So, just use Fortran.
+compilers.choose        fc
 
 switch ${subport} {
     apbs {
@@ -99,6 +103,8 @@ switch ${subport} {
                     -DCMAKE_CXX_COMPILER=${configure.cxx} \
                     -DMPI_C_COMPILER=${mpi.cc} \
                     -DMPI_CXX_COMPILER=${mpi.cxx}
+            # sometimes there will be a failure to link without this
+            reinplace -W ${worksrcpath} "s/-lmaloc/-lmaloc -lreadline/" CMakeLists.txt
         }
 
         destroot {
@@ -114,6 +120,29 @@ switch ${subport} {
                     ${worksrcpath}/doc \
                 ${destroot}${prefix}/share/${subport}
         }
+    }
+}
+
+variant bem description {Build with support for Boundary Element Method} {
+    configure.args-delete  -DENABLE_BEM=OFF
+    configure.args-append  -DENABLE_BEM=ON
+
+    if {![fortran_variant_isset]} {
+        ui_error "+bem requires a Fortran variant, e.g. +gfortran, +gccX, or +g95."
+        return -code error "+bem requires a Fortran variant."
+    }
+
+    # BEM looks for 'gfortran', hard-coded, and configure fails without it if BEM is enabled, with a syntax error
+    #CMake Error at CMakeLists.txt:217 (get_filename_component):
+    #  get_filename_component called with incorrect number of arguments
+    post-patch {
+        reinplace "s|get_filename_component(LIBGFORTRANPATH|#get_filename_component(LIBGFORTRANPATH|g" ${worksrcpath}/CMakeLists.txt 
+        reinplace "s|find_path(LIBGFORTRAN_PATH|#find_path(LIBGFORTRAN_PATH|g" ${worksrcpath}/CMakeLists.txt 
+        # -lstdc++ does not seem necessary and may cause trouble; specifying full paths avoid possible use of -ltabip from an earlier installation in ${prefix}
+        reinplace "s|-L\${LIBGFORTRAN_PATH} -lgfortran -ltabipb -lstdc\+\+|${compilers.libfortran} ${worksrcpath}/lib/libtabipb.a|" ${worksrcpath}/CMakeLists.txt
+        # provide this information to subsidiary cmake command run in tabipb directory during build phase
+        reinplace "s|CMAKE_ARGS|CMAKE_ARGS -DCMAKE_Fortran_COMPILER:STRING=${configure.fc}|" ${worksrcpath}/CMakeLists.txt
+        system -W ${worksrcpath} "echo 'include_directories(\${APBS_ROOT}/include)' >> CMakeLists.txt"
     }
 }
 
