@@ -7,8 +7,14 @@ PortGroup               mpi 1.0
 PortGroup               github 1.0
 
 name                    apbs
-subport                 apbs-mpi {}
-# set revision separately for each subport, below.
+
+# For example, now "apbs +mpich" would be equivalent to the old "apbs-mpi +mpich"
+subport apbs-mpi {
+    replaced_by         apbs
+    PortGroup           obsolete 1.0
+    revision            2
+}
+
 categories              science
 license                 BSD
 maintainers             gmail.com:howarth.at.macports openmaintainer
@@ -26,6 +32,7 @@ github.setup            Electrostatics apbs-pdb2pqr d4e78c62e6a07f92c26924318d83
 version                 1.4.1
 homepage                http://www.poissonboltzmann.org
 worksrcdir              ${worksrcdir}/apbs
+revision                2
 
 checksums               rmd160  5c4d583e12deb3fbc2b5a8031882311cbfd22c7e \
                         sha256  f98ce6a51d8f813e1b4fa626c054ddbf7a985403ca30f890733cb1abf2bd6e05
@@ -43,12 +50,29 @@ configure.args-append   -DENABLE_OPENMP:BOOL=OFF \
                         -DCMAKE_C_COMPILER_ARG1:STRING="-I${worksrcpath}/include -O3 -ffast-math" \
                         -DCMAKE_CXX_COMPILER_ARG1:STRING="-I${worksrcpath}/include -O3 -ffast-math"
 
-patchfiles              patch-CMakeLists.txt.diff patch-Eigen-include-path.diff
+# otherwise obsolete subport installation will fail on patch phase and not get to pre-configure error about replacement
+if {${subport} == ${name}} {
+    patchfiles              patch-CMakeLists.txt.diff patch-Eigen-include-path.diff
+    if {[mpi_variant_isset]} {
+        patchfiles-append   patch-tests-apbs_tester.py.diff
+    }
+}
 
 test.run  yes
 test {
     ln ${worksrcpath}/tools/manip/inputgen.py ${worksrcpath}/tests/
     ln ${worksrcpath}/tools/manip/psize.py    ${worksrcpath}/tests/
+
+    if {[mpi_variant_isset]} {
+        if {![catch {sysctl hw.ncpu} result]} {
+            set njobs $result
+        } else {
+            set njobs 1
+        }
+        reinplace "s|mpiexec|\"${mpi.exec}\", \"-n\", \"${njobs}\"|" ${worksrcpath}/tests/apbs_tester.py
+        ui_msg "Running testsuite with $njobs jobs in parallel"
+    }
+    
     system -W ${worksrcpath}/tests "python apbs_tester.py"
     system -W ${worksrcpath}/tests "cat test.log"
     system -W ${worksrcpath}/tests "if grep FAILED test.log; then echo \"FAIL\"; exit 1; fi"
@@ -61,64 +85,33 @@ set bins {analysis benchmark born coulomb del2dx dx2mol dx2uhbd dxmath
 # Some cmake tests will fail with "error: unrecognized option '-arch'" from gcc 4.6 and earlier. Same with dragonegg based on it.
 # llvm-gcc-4.2 will fail to build with: error: unrecognized command line option "-std=c++0x"
 compiler.blacklist      macports-gcc-4.4 macports-gcc-4.5 macports-gcc-4.6 \
-                        macports-dragonegg-3.3 macports-dragonegg-3.4 llvm-gcc-4.2
+                        macports-dragonegg-3.3 macports-dragonegg-3.4 *gcc-4.2
 # g++ will just fail to link apbs_geoflow. probably about -lstdc++ stuff. So, just use Fortran.
 compilers.choose        fc
+mpi.setup
 
-switch ${subport} {
-    apbs {
-        compilers.setup
+configure.args-append   -DENABLE_MPI:BOOL=OFF
 
-        revision                1
+post-destroot {
+    set tools ${destroot}${prefix}/share/${subport}/tools
+    
+    move ${tools}/manip/psize.py ${destroot}${prefix}/bin/apbs-psize.py
+    file attributes ${destroot}${prefix}/bin/apbs-psize.py \
+        -permissions 0755
 
-        configure.args-append   -DENABLE_MPI:BOOL=OFF
-
-        post-destroot {
-            set tools ${destroot}${prefix}/share/${subport}/tools
-
-            move ${tools}/manip/psize.py ${destroot}${prefix}/bin/apbs-psize.py
-            file attributes ${destroot}${prefix}/bin/apbs-psize.py \
-                -permissions 0755
-
-            foreach {bin} ${bins} {
-                move ${tools}/bin/${bin} ${destroot}${prefix}/bin/apbs-${bin}
-                file attributes ${destroot}${prefix}/bin/apbs-${bin} \
-                    -permissions 0755
-            }
-        }
+    foreach {bin} ${bins} {
+        move ${tools}/bin/${bin} ${destroot}${prefix}/bin/apbs-${bin}
+        file attributes ${destroot}${prefix}/bin/apbs-${bin} \
+            -permissions 0755
     }
-    apbs-mpi {
-        mpi.setup               require
+}
 
-        revision                1
-
-        description             ${description} (MPI version)
-
-        depends_run             port:apbs
-
-        compilers.enforce_c     apbs
-
-        pre-configure {
-            configure.args-append   -DENABLE_MPI:BOOL=ON \
-                    -DCMAKE_C_COMPILER=${configure.cc} \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx} \
-                    -DMPI_C_COMPILER=${mpi.cc} \
-                    -DMPI_CXX_COMPILER=${mpi.cxx}
-        }
-
-        destroot {
-            xinstall ${worksrcpath}/bin/apbs \
-                ${destroot}${prefix}/bin/apbs-mpi
-            foreach {bin} ${bins} {
-                xinstall ${worksrcpath}/tools/bin/${bin} \
-                    ${destroot}${prefix}/bin/apbs-mpi-${bin}
-            }
-            xinstall -d ${destroot}${prefix}/share/${subport}
-            copy ${worksrcpath}/examples \
-                    ${worksrcpath}/tools \
-                    ${worksrcpath}/doc \
-                ${destroot}${prefix}/share/${subport}
-        }
+pre-configure {
+    if {[mpi_variant_isset]} {
+        configure.args-delete   -DENABLE_MPI:BOOL=OFF
+        configure.args-append   -DENABLE_MPI:BOOL=ON \
+            -DMPI_C_COMPILER=${mpi.cc} \
+            -DMPI_CXX_COMPILER=${mpi.cxx}
     }
 }
 
