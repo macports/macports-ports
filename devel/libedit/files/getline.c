@@ -30,7 +30,7 @@ ssize_t libedit_getline(char **lineptr, size_t *n, FILE *fp) {
     }
 
     for (i=0; ; i++) {
-        ch = fgetc(stream);
+        ch = fgetc(fp);
         while (i >= (*n) - 2) {
             *n *= 2;
             p = realloc(*lineptr, sizeof(char) * (*n));
