@@ -1,10 +1,14 @@
 /* CC0, from https://github.com/digilus/getline */
 
+#include "config.h"
+
+#if !HAVE_GETLINE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #define GETLINE_MINSIZE 16
-ssize_t getline(char **lineptr, size_t *n, FILE *fp) {
+ssize_t libedit_getline(char **lineptr, size_t *n, FILE *fp) {
     int ch;
     int i = 0;
     char free_on_err = 0;
@@ -58,3 +62,5 @@ ssize_t getline(char **lineptr, size_t *n, FILE *fp) {
         (*lineptr)[i] = (char)ch;
     }
 }
+
+#endif
