@@ -186,7 +186,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     }
     version             [perl5_convert_version ${perl5.moduleversion}]
     categories          perl
-    homepage            http://search.cpan.org/dist/${perl5.module}/
+    homepage            https://metacpan.org/pod/[string map {"-" "::"} ${perl5.module}]
 
     master_sites        perl_cpan:${perl5.cpandir}
     distname            ${perl5.module}-${perl5.moduleversion}
