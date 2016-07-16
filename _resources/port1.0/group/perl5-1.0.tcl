@@ -37,8 +37,11 @@
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.branches must be set in the portfile
 # perl5.default_branch: the branch used when you request p5-foo
-options perl5.default_branch perl5.branches
+# perl5.use_search_cpan_org: if true use search.cpan.org instead of
+#    metacpan.org for livecheck and homepage. Default: false.
+options perl5.default_branch perl5.branches perl5.use_search_cpan_org
 default perl5.default_branch {[perl5_get_default_branch]}
+default perl5.use_search_cpan_org {false}
 
 proc perl5_get_default_branch {} {
     global prefix perl5.branches
@@ -163,7 +166,7 @@ set perl5.cpandir ""
 # perl5 group setup procedure
 proc perl5.setup {module vers {cpandir ""}} {
     global perl5.branches perl5.default_branch perl5.bin perl5.lib \
-           perl5.module perl5.moduleversion perl5.cpandir \
+           perl5.module perl5.moduleversion perl5.cpandir perl5.use_search_cpan_org \
            prefix subport name
 
     # define perl5.module
@@ -186,7 +189,12 @@ proc perl5.setup {module vers {cpandir ""}} {
     }
     version             [perl5_convert_version ${perl5.moduleversion}]
     categories          perl
-    homepage            https://metacpan.org/pod/[string map {"-" "::"} ${perl5.module}]
+    
+    if {${perl5.use_search_cpan_org}} {
+        homepage        http://search.cpan.org/dist/${perl5.module}/
+    } else {
+        homepage        https://metacpan.org/pod/[string map {"-" "::"} ${perl5.module}]
+    }
 
     master_sites        perl_cpan:${perl5.cpandir}
     distname            ${perl5.module}-${perl5.moduleversion}
@@ -252,8 +260,15 @@ proc perl5.setup {module vers {cpandir ""}} {
     }
 
     livecheck.type      regexm
-    livecheck.url       http://api.metacpan.org/release/${perl5.module}/
-    livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    
+    if {${perl5.use_search_cpan_org}} {
+        livecheck.url       http://search.cpan.org/dist/${perl5.module}/
+        livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    } else {
+        livecheck.url       http://api.metacpan.org/release/${perl5.module}/
+        livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    }
+
     default livecheck.version {${perl5.moduleversion}}
 }
 
