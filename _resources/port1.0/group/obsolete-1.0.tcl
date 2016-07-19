@@ -55,6 +55,7 @@ if {[info exists replaced_by]} {
 homepage        http://www.macports.org/
 
 archive_sites
+patchfiles
 distfiles
 depends_build
 depends_extract
