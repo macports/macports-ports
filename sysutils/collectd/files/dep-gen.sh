@@ -163,7 +163,7 @@ PLUGIN_DEPS=(
 	[xmms]="port:xmms"
 )
 
-# list of useless modules on OS X
+# list of useless modules on macOS
 declare -A OSX_BLACKLIST
 OSX_BLACKLIST=(
 	[aquaero]=1		# requires libaquaero5, which is not available
@@ -188,7 +188,7 @@ OSX_BLACKLIST=(
 	[oracle]=1		# requires libclntsh, which is not available
 	[perfstat]=1	# AIX only
 	[ping]=1		# requires liboping, which is not available
-	[processes]=1	# No OS X support
+	[processes]=1	# No macOS support
 	[protocols]=1	# Linux only
 	[redis]=1		# requires libcredis, which is not available
 	[routeros]=1	# requires librouteros, which is not available
@@ -205,7 +205,7 @@ OSX_BLACKLIST=(
 	[zfs_arc]=1		# Solaris only
 )
 
-# list of standard modules on OS X
+# list of standard modules on macOS
 declare -a OSX_STANDARD
 OSX_STANDARD=(
 	aggregation
@@ -286,7 +286,7 @@ echo "#######################################################"
 echo
 
 echo "# enable all matches and targets, disable all other plugins"
-echo "configure.args \\"
+echo "configure.args-append \\"
 for option in ${OPTIONS_ENABLE[@]}; do
 	echo "    --enable-$option \\"
 done
