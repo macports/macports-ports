@@ -275,7 +275,7 @@ set portfetch::mirror_sites::sites(macports) {
 }
 
 global os.platform os.major
-set distfiles_scheme [expr \${os.platform} eq \{darwin\} && \${os.major} < 10 ? \{http\} : \{https\}]
+set distfiles_scheme [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 
 set portfetch::mirror_sites::sites(macports_distfiles) "
     ${distfiles_scheme}://distfiles.macports.org/:mirror

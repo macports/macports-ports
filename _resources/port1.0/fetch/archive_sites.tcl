@@ -3,7 +3,7 @@
 namespace eval portfetch::mirror_sites { }
 
 global os.platform os.major
-set packages_scheme [expr \${os.platform} eq \{darwin\} && \${os.major} < 10 ? \{http\} : \{https\}]
+set packages_scheme [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 
 set portfetch::mirror_sites::sites(macports_archives) "
     ${packages_scheme}://packages.macports.org/:nosubdir
