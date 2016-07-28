@@ -2,8 +2,11 @@
 
 namespace eval portfetch::mirror_sites { }
 
-set portfetch::mirror_sites::sites(macports_archives) {
-    https://packages.macports.org/:nosubdir
+global os.platform os.major
+set packages_scheme [expr \${os.platform} eq \{darwin\} && \${os.major} < 10 ? \{http\} : \{https\}]
+
+set portfetch::mirror_sites::sites(macports_archives) "
+    ${packages_scheme}://packages.macports.org/:nosubdir
     http://fco.it.packages.macports.org/mirrors/macports-packages/:nosubdidr
     http://her.gr.packages.macports.org/:nosubdir
     http://jnb.za.packages.macports.org/packages/:nosubdir
@@ -14,7 +17,7 @@ set portfetch::mirror_sites::sites(macports_archives) {
     http://osl.no.packages.macports.org/:nosubdir
     http://sea.us.packages.macports.org/macports/packages/:nosubdir
     http://jog.id.packages.macports.org/macports/packages/:nosubdir
-}
+"
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2
 set portfetch::mirror_sites::archive_prefix(macports_archives) /opt/local

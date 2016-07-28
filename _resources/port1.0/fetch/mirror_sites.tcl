@@ -274,8 +274,11 @@ set portfetch::mirror_sites::sites(macports) {
     http://svn.macports.org/repository/macports/distfiles/
 }
 
-set portfetch::mirror_sites::sites(macports_distfiles) {
-    https://distfiles.macports.org/:mirror
+global os.platform os.major
+set distfiles_scheme [expr \${os.platform} eq \{darwin\} && \${os.major} < 10 ? \{http\} : \{https\}]
+
+set portfetch::mirror_sites::sites(macports_distfiles) "
+    ${distfiles_scheme}://distfiles.macports.org/:mirror
     http://aarnet.au.distfiles.macports.org/pub/macports/mpdistfiles/:mirror
     http://cjj.kr.distfiles.macports.org/:mirror
     http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
@@ -289,7 +292,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) {
     http://osl.no.distfiles.macports.org/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
-}
+"
 
 set portfetch::mirror_sites::sites(netbsd) {
     http://ftp7.de.NetBSD.org/pub/ftp.netbsd.org/pub/NetBSD/
