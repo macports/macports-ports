@@ -110,7 +110,7 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
         default livecheck.regex     {<id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>}
     } else {
         default livecheck.type      regex
-        default livecheck.url       {${bitbucket.homepage}/downloads}
+        default livecheck.url       {${bitbucket.homepage}/downloads?tab=tags}
         default livecheck.regex     {[bitbucket.livecheck_regex]}
     }
 
