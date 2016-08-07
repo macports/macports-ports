@@ -198,8 +198,8 @@ proc wxWidgets._set {option action args} {
         pre-fetch {
             # 10.8 (or later) -or- 10.7 with Xcode 4.4 (or later)
             if {${os.major} >= 12 || [vercmp $xcodeversion 4.4] >= 0} {
-                ui_error "${wxWidgets.port} cannot be built on Moc OS X >= 10.7 with Xcode >= 4.4, please use port wxWidgets-3.0 or wxgtk-2.8 instead"
-                return -code return "wxWidgets-2.8 cannot be built on Moc OS X >= 10.7 with Xcode >= 4.4, please use port wxWidgets-3.0 or wxgtk-2.8 instead"
+                ui_error "${wxWidgets.port} cannot be built on Mac OS X >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
+                return -code return "wxWidgets-2.8 cannot be built on Mac OS X >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
             } else {
                 # 10.7
                 if {${os.major} == 11} {
