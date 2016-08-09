@@ -298,14 +298,20 @@ proc perl5.use_module_build {} {
     destroot.destdir    --destdir=${destroot}
 }
 
-# Convert a floating-point version to a dotted-integer one.
+# Convert a floating-point version to an equivalent dotted decimal one.
+# If version is expressed as a perl v-string, strip the leading "v"
 proc perl5_convert_version {vers} {
+    if {[string index $vers 0] eq "v"} {
+        set start 1
+    } else {
+        set start 0
+    }
     set index [string first . $vers]
     set other_dot [string first . [string range $vers [expr {$index + 1}] end]]
     if {$index == -1 || $other_dot != -1} {
-        return $vers
+        return [string range $vers $start end]
     }
-    set ret [string range $vers 0 [expr {$index - 1}]]
+    set ret [string range $vers $start [expr {$index - 1}]]
     incr index
     set fractional [string range $vers $index end]
     set index 0
