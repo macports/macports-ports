@@ -228,12 +228,12 @@ proc python_set_default_version {option action args} {
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd
 # for pythonXY, python.branch is X.Y
-default python.branch {[string range ${python.version} 0 end-1].[string index ${python.version} end]}
-default python.prefix {[python_get_defaults prefix]}
-default python.bin  {[python_get_defaults bin]}
-default python.lib  {[python_get_defaults lib]}
-default python.pkgd {[python_get_defaults pkgd]}
-default python.libdir {${python.prefix}/lib/python${python.branch}}
+default python.branch   {[string range ${python.version} 0 end-1].[string index ${python.version} end]}
+default python.prefix   {[python_get_defaults prefix]}
+default python.bin      {[python_get_defaults bin]}
+default python.lib      {[python_get_defaults lib]}
+default python.pkgd     {[python_get_defaults pkgd]}
+default python.libdir   {${python.prefix}/lib/python${python.branch}}
 default python.include  {[python_get_defaults include]}
 
 default build.cmd       {"${python.bin} setup.py [python_get_defaults setup_args]"}
