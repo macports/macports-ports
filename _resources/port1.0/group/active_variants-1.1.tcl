@@ -92,12 +92,12 @@ proc active_variants {depspec required {forbidden {}}} {
 	# path-style dependencies. This comes from port1.0/portutil.tcl and should
 	# probably not be considered public API.
 	set port [_get_dep_port $depspec]
-	if {$port == ""} {
+	if {$port eq ""} {
 	    ui_error "active_variants: Error: invalid port depspec '${depspec}'"
 	    ui_error "  expecting either: port or (bin|lib|path):foo:port"
 	    return 0
 	}
-	if {$depspec != $port} {
+	if {$depspec ne $port} {
 	    ui_debug "Checking $port for active variants for depspec '$depspec'"
 	}
 
@@ -157,7 +157,7 @@ proc active_variants {depspec required {forbidden {}}} {
 
 proc _variant_in_variant_list {needle haystack} {
 	foreach variant $haystack {
-		if {$variant == $needle} {
+		if {$variant eq $needle} {
 			return 1
 		}
 	}
@@ -233,7 +233,7 @@ proc _check_require_active_variants {method} {
 
 		if {[catch {set result [active_variants $depspec $required $forbidden]}] != 0} {
 		    set message "${port} is required, but not active."
-		    if {$method == activate} {
+		    if {$method eq "activate"} {
 			ui_msg "Warning: $message"
 		    } else {
 			error "$message"
@@ -249,11 +249,11 @@ proc _check_require_active_variants {method} {
 				set str_forbidden "without +[join $forbidden +]"
 			}
 			set str_combine ""
-			if {$str_required != "" && $str_forbidden != ""} {
+			if {$str_required ne "" && $str_forbidden ne ""} {
 				set str_combine " and "
 			}
 		        set message "${port} must be installed ${str_required}${str_combine}${str_forbidden}."
-		        if {$method == "activate"} {
+		        if {$method eq "activate"} {
 			    ui_msg "Warning: $message"
 			} else {
 			    error "$message"
