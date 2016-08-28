@@ -98,7 +98,7 @@ default compilers.libfortran {}
 default compilers.clear_archflags yes
 
 # also set a default gcc version
-set compilers.gcc_default gcc5
+set compilers.gcc_default gcc6
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
