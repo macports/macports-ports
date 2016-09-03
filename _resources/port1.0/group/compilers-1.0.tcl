@@ -98,7 +98,12 @@ default compilers.libfortran {}
 default compilers.clear_archflags yes
 
 # also set a default gcc version
-set compilers.gcc_default gcc6
+# gcc6 fails to build currently for 10.5.8. PPC, see ticket #51388
+if {${os.platform} eq "darwin" && ${os.version} == 9 && ${os.arch} eq "powerpc"} {
+    set compilers.gcc_default gcc5 
+} else {
+    set compilers.gcc_default gcc6 
+}
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
