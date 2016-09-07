@@ -219,6 +219,9 @@ pre-fetch {
     if {[fortran_variant_isset] && [mpi_variant_isset]} {
         set gcc_name ""
         regexp (gcc\[0-9\]*) ${mpi.name} gcc_name 
+        if {$gcc_name eq ""} {
+            regexp (dragonegg\[0-9\]*) ${mpi.name} gcc_name
+        }
         if {$gcc_name ne ""} {
             if {[active_variants ${mpi.name} "fortran" ""]} {
                 set mpif $gcc_name
@@ -241,7 +244,7 @@ pre-fetch {
                 if {[fortran_variant_name] eq "gfortran"} {
                     set selectedf " (via +gfortran)"
                 } else {
-                    set selectedf " "
+                    set selectedf ""
                 }
                 ui_error "${mpi.name} has a different Fortran variant ($mpif) than the one selected, $myf$selectedf."
                 set need $myf
