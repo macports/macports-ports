@@ -321,6 +321,20 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://ftp.openbsd.org/pub/OpenBSD/
 }
 
+# https://osdn.jp/docs/Mirrors
+# They don't actually list the URLs; these were obtained by guessing.
+set portfetch::mirror_sites::sites(osdn) {
+    http://aarnet.dl.osdn.jp/
+    http://c3sl.dl.osdn.jp/
+    http://gigenet.dl.osdn.jp/
+    http://iij.dl.osdn.jp/
+    http://jaist.dl.osdn.jp/
+    http://nchc.dl.osdn.jp/
+    http://onet.dl.osdn.jp/
+    http://osdn.dl.sourceforge.jp/
+    http://rwthaachen.dl.osdn.jp/
+}
+
 set portfetch::mirror_sites::sites(perl_cpan) {
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
     http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
