@@ -6,8 +6,7 @@ PortGroup           mpi 1.0
 PortGroup           linear_algebra 1.0
 
 name                berkeleygw
-version             1.1-beta2
-revision            1
+version             1.2.0
 categories          science
 platforms           darwin
 license             BSD
@@ -21,15 +20,17 @@ long_description    BerkeleyGW is a set of computer codes that calculate the qua
 homepage            http://www.berkeleygw.org
 master_sites        ${homepage}/releases
 
-checksums           rmd160  7e1ce392da45282ef878ed1a53b34184d96c7ca2 \
-                    sha256  83deea17ccbd50e9e505f69fadf858595793f9b853ec012722659100d5cf8885
+checksums           rmd160  26933a24c10ba03457c667bc5f2d3ca21df2a436 \
+                    sha256  1305dc8587af666fe437bc2561a9106b2b0bcdbe91980b8f1ae7bbd491ce1e25
 
 distfiles           BGW-${version}.tar.gz
 # needed for case-sensitive filesystems
 worksrcdir          BerkeleyGW-${version}
 
-depends_lib         port:fftw
-# fftw port always has a Fortran variant
+depends_lib         port:fftw-3
+if {![variant_isset fftw2]} {
+    compilers.enforce_some_fortran  fftw-3
+}
 
 # May fail with +mpich +gcc5. Use +mpich +gfortran instead.
 # In file included from /opt/local/include/mpich-gcc5/mpi.h:2231:0,
@@ -38,33 +39,35 @@ depends_lib         port:fftw
 #  #  error 'Please use the same version of GCC and g++ for compiling MPICH and user MPI programs'
 #     ^
 
-# WHAT DO WE DO WHEN meaning of 'gfortran' is updated? No record... Must rename to gfortran5 etc.
+# WHAT DO WE DO WHEN meaning of 'gfortran' is updated? No record... Maybe rename to gfortran5 etc. ?
 
 # test hangs in Epsilon with OpenMPI, for unknown reason.
-# no appropriate way to set cpp for gcc5, gcc6, or clang
 # dragonegg fails to link with error
 #   Undefined symbols for architecture x86_64:
 #   "_llvm.objectsize.i64", referenced from:
 #   _spg_get_international in libsymspg.a(spglib.o)
 #   _spg_get_schoenflies in libsymspg.a(spglib.o)
 compilers.choose    fc cc cxx cpp
-mpi.setup           require_fortran -dragonegg -openmpi -openmpi_devel
+mpi.setup           require_fortran -dragonegg -openmpi -openmpi_devel -gfortran -clang -llvm
+# FIXME: +gfortran just needs smarter setting of cpp to the one from gcc;
+#clang and llvm only useful with +g95 currently (which is useless)
 
 # just for cpp
-if {[variant_isset g95] || [variant_isset gcc5] || [variant_isset gcc6] || [variant_isset gfortran]} {
+if {[variant_isset g95]} {
     depends_build-append  port:llvm-gcc42
 }
 
 # FIXME: this unnecessarily enforces scalapack also had same C compiler as we are using.
 if {[mpi_variant_isset]} {
     depends_lib-append  port:scalapack
-    mpi.enforce_variant     scalapack
+    if {![mpi_variant_isset]} {
+        ui_error "+scalapack requires an MPI variant. Choose +mpich, +mpich_devel, +openmpi, or +openmpi_devel."
+        return -code error "+scalapack requires an MPI variant."
+    }
 }
 
 # fftw is not universal
 universal_variant   no
-
-# FIXME: add options for threads
 
 configure {
     system -W ${worksrcpath} "sed 's|/opt/local|${prefix}|' < config/generic.serial.macos.mk > arch.mk"
@@ -74,6 +77,9 @@ configure {
     }
 }
 
+patchfiles          patch-Common-common-rules.mk.diff \
+                    patch-Makefile.diff
+
 build.target	    all-flavors
 use_parallel_build  yes
 
@@ -81,16 +87,19 @@ destroot.post_args  INSTDIR=${destroot}${prefix}
 
 test.run            yes
 
-# known problems to be fixed: Graphene incorrectly has kernel_k_interpolation.
-# Si2-SAPO/sapo.inp has pointer being freed was not allocated
 
+#depends_build       port:gsed
 pre-test {
+    reinplace -W ${worksrcpath}/testsuite "s|sed|gsed|" Graphene/Graphene.test Graphene/Graphene_3D.test \
+        Si-EPM/Si.test Si-EPM/Si_cplx_spin.test
+
     if {[mpi_variant_isset]} {
-        test.args-append    TESTSCRIPT="MPIEXEC=${prefix}/bin/${mpi.exec} make check-parallel" PARAFLAG=-DMPI
+        test.args-append    TESTSCRIPT="MPIEXEC=${prefix}/bin/${mpi.exec} make check-parallel"
         test.target         check-jobscript
 
+        # FIXME: what about with threads? set OMP_NUM_THREADS=2 and divide ncpus by 2.
         if {![catch {sysctl hw.ncpu} ncpus]} {
-            test.env-append OCT_TEST_NJOBS=$ncpus
+            test.env-append BGW_TEST_MPI_NPROCS=$ncpus
         }
         ui_msg "Running testsuite in parallel with $ncpus MPI tasks"       
     } else {
@@ -111,19 +120,23 @@ pre-build {
         set mathflag "${mathflag} -DHDF5"
     }
     
-    if {[variant_isset fftw3]} {
-        build.args-append  FFTWLIB="-L${prefix}/lib/ -lfftw3"
-        set mathflag "${mathflag} -DUSEFFTW3"
-    } else {
+    if {[variant_isset fftw2]} {
         build.args-append  FFTWLIB="-L${prefix}/lib/ -ldfftw"
+    } else {
+        if {[variant_isset threads]} {
+            build.args-append  FFTWLIB="-L${prefix}/lib/ -lfftw3 -lfftw3_threads"
+        } else {
+            build.args-append  FFTWLIB="-L${prefix}/lib/ -lfftw3"
+        }
+        set mathflag "${mathflag} -DUSEFFTW3"
     }
 
-    if {[variant_isset g95] || [variant_isset gcc5] || [variant_isset gcc6] || [variant_isset gfortran]} {
+    if {[variant_isset g95]} {
         set configure.cpp     llvm-cpp-4.2
     }
 
     if {[variant_isset g95]} {
-        build.args-append COMPFLAG="-DG95" FCPP="${configure.cpp} -P -ansi" \
+        build.args-append COMPFLAG="-DG95" FCPP="${configure.cpp} -P -C" \
                           F90free="${prefix}/bin/g95 -ffree-form -ffree-line-length-huge -fno-second-underscore" \
                           MOD_OPT="-fmod="
         # test, destroot args needed just to avoid trying to build in the test/openmp directory unnecessarily
@@ -131,17 +144,28 @@ pre-build {
         destroot.args-append  COMPFLAG="-DG95"
     } else {
         # gcc is default in arch.mk so most things do not need to be modified
-        build.args-append FCPP="${configure.cpp} -ansi" \
+        build.args-append FCPP="${configure.cpp} -C" \
             F90free="${configure.fc} -ffree-form -ffree-line-length-none -fno-second-underscore"
     }
 
+    if {[variant_isset threads]} {
+        set paraflag "-DOMP"
+    } else {
+        set paraflag ""
+    }
+    
     if {[mpi_variant_isset]} {
         set mathflag "${mathflag} -DUSESCALAPACK"
-        build.args-append PARAFLAG="-DMPI" C_PARAFLAG="-DPARA" SCALAPACKLIB="-L${prefix}/lib/ -lscalapack"
+        set paraflag "${paraflag} -DMPI"
+        build.args-append C_PARAFLAG="-DPARA" SCALAPACKLIB="-L${prefix}/lib/ -lscalapack"
     }
 
-    build.args-append   MATHFLAG="${mathflag}"
-    test.args-append    MATHFLAG="${mathflag}"
+    build.args-append   MATHFLAG="${mathflag}" PARAFLAG="${paraflag}"
+    test.args-append    MATHFLAG="${mathflag}" PARAFLAG="${paraflag}"
+}
+
+variant threads description {Build with OpenMP support} conflicts g95 {
+    set configure.fc "${configure.fc} -fopenmp"
 }
 
 variant debug description {Add debug flags for more checking and output, but slower runs.} {
@@ -154,9 +178,9 @@ variant hdf5 description {Build with HDF5 support for faster epsmat I/O} {
     compilers.enforce_fortran   hdf5
 }
 
-variant fftw3 description {Build with FFTW-3 rather than FFTW-2 for better performance} {
-    depends_lib-replace         port:fftw port:fftw-3
-    compilers.enforce_some_fortran  fftw-3
+variant fftw2 description {Build with FFTW-2} {
+    depends_lib-replace        port:fftw-3 port:fftw
+    # fftw port always has a Fortran variant
 }
 
 livecheck.type      none
