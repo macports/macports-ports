@@ -436,14 +436,12 @@ set portfetch::mirror_sites::sites(ruby) {
 }
 
 set portfetch::mirror_sites::sites(savannah) {
-    http://download.savannah.gnu.org/releases-noredirect/
+    http://download-mirror.savannah.gnu.org/releases/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://ftp.twaren.net/Unix/NonGNU/
     ftp://ftp.twaren.net/Unix/NonGNU/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
-    http://mirrors.openfountain.cl/savannah/
-    http://mirrors.zerg.biz/nongnu/
     http://savannah.c3sl.ufpr.br/
     ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
 }
