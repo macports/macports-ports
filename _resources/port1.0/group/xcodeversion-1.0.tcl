@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2009-2013, 2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -52,13 +52,13 @@ platform macosx {
                     ui_error "Couldn't determine your Xcode version (from '/usr/bin/xcodebuild -version')."
                     ui_error ""
                     ui_error "If you have not installed Xcode, install it now; see:"
-                    ui_error "http://guide.macports.org/chunked/installing.xcode.html"
+                    ui_error "https://guide.macports.org/chunked/installing.xcode.html"
                     ui_error ""
                     return -code error "unable to find Xcode"
                 }
                 if {[vercmp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
                     ui_error "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
-                    ui_error "See http://guide.macports.org/chunked/installing.xcode.html for download links."
+                    ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     return -code error "incompatible Xcode version"
                 }
             }

@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2009 The MacPorts Project
+# Copyright (c) 2009-2012, 2015-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -110,7 +110,7 @@ pre-configure {
                         ui_error ""
                         ui_error "Did you upgrade to a new version of Mac OS X? If so, please see"
                         ui_error ""
-                        ui_error "    http://trac.macports.org/wiki/Migration"
+                        ui_error "    https://trac.macports.org/wiki/Migration"
                         ui_error ""
                     }
                 }

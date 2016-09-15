@@ -1,6 +1,6 @@
 # $Id$
 #
-# Copyright (c) 2011-2015 The MacPorts Project
+# Copyright (c) 2011-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -180,7 +180,7 @@ proc crossgcc.setup {target version} {
             RANLIB_FOR_TARGET=${crossgcc.target}-ranlib \
             STRIP_FOR_TARGET=${crossgcc.target}-strip
 
-        # http://trac.macports.org/ticket/29104
+        # https://trac.macports.org/ticket/29104
         # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
         if {[vercmp ${xcodeversion} 4.3] < 0} {
             compiler.blacklist llvm-gcc-4.2
