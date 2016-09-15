@@ -38,7 +38,7 @@
 #   minimum_xcodeversions   {darwin_major minimum_xcodeversion}
 #
 # where darwin_major is the major version of the underlying Darwin OS (e.g. 9
-# for Mac OS X 10.5 Leopard) and minimum_xcodeversion is the minimum version
+# for macOS Leopard) and minimum_xcodeversion is the minimum version
 # of Xcode the port requires (e.g. 3.1).
 
 options minimum_xcodeversions
@@ -57,7 +57,7 @@ platform macosx {
                     return -code error "unable to find Xcode"
                 }
                 if {[vercmp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
-                    ui_error "On Mac OS X ${macosx_version}, ${name} ${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
+                    ui_error "On macOS ${macosx_version}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
                     ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     return -code error "incompatible Xcode version"
                 }

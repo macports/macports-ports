@@ -48,7 +48,7 @@
 #
 # * 'wxWidgets-3.0-libcxx'
 #   A workaround to make software written in C++11 (but without other C++
-#   dependencies) work on OS X < 10.9. This is just wxWidgets 3.0
+#   dependencies) work on macOS < 10.9. This is just wxWidgets 3.0
 #   compiled against libc++ even where libstdc++ is default. See also
 #   https://trac.macports.org/wiki/LibcxxOnOlderSystems
 #
@@ -198,8 +198,8 @@ proc wxWidgets._set {option action args} {
         pre-fetch {
             # 10.8 (or later) -or- 10.7 with Xcode 4.4 (or later)
             if {${os.major} >= 12 || [vercmp $xcodeversion 4.4] >= 0} {
-                ui_error "${wxWidgets.port} cannot be built on Mac OS X >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
-                return -code return "wxWidgets-2.8 cannot be built on Mac OS X >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
+                ui_error "${wxWidgets.port} cannot be built on macOS >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
+                return -code return "wxWidgets-2.8 cannot be built on macOS >= 10.7 with Xcode >= 4.4; please use port wxWidgets-3.0 or wxgtk-2.8 instead"
             } else {
                 # 10.7
                 if {${os.major} == 11} {
@@ -227,8 +227,8 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxWidgets-3.0"
         if {${os.major} < 9} {
             pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
-                return -code error "incompatible Mac OS X version"
+                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
+                return -code error "incompatible macOS version"
             }
         }
     } elseif {${args} eq "wxPython-3.0"} {
@@ -237,8 +237,8 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxPython-3.0"
         if {${os.major} < 9} {
             pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
-                return -code error "incompatible Mac OS X version"
+                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
+                return -code error "incompatible macOS version"
             }
         }
     # ugly workaround to allow some C++11-only applications to be built on < 10.9
@@ -248,8 +248,8 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxWidgets-3.0-libcxx"
         if {${os.major} < 9} {
             pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
-                return -code error "incompatible Mac OS X version"
+                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
+                return -code error "incompatible macOS version"
             }
         }
     # temporary development version of wxWidgets 3.0.x
@@ -259,8 +259,8 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxWidgets-3.0-devel"
         if {${os.major} < 9} {
             pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.5 or later."
-                return -code error "incompatible Mac OS X version"
+                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
+                return -code error "incompatible macOS version"
             }
         }
     # preliminary support for wxWidgets 3.1/3.2
@@ -270,8 +270,8 @@ proc wxWidgets._set {option action args} {
         wxWidgets.port      "wxWidgets-3.1"
         if {${os.major} < 11} {
             pre-fetch {
-                ui_error "${wxWidgets.port} requires Mac OS X 10.7 or later."
-                return -code error "incompatible Mac OS X version"
+                ui_error "${wxWidgets.port} requires macOS 10.7 or later."
+                return -code error "incompatible macOS version"
             }
         }
     } else {

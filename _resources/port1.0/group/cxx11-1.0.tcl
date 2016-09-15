@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id$
 #
-# Copyright (c) 2015 The MacPorts Project
+# Copyright (c) 2015-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -51,7 +51,7 @@ pre-configure {
 
         if {${os.major} < 13} {
             ui_error "Please follow the instructions on https://trac.macports.org/wiki/LibcxxOnOlderSystems."
-            ui_error "After adding the required options to macports.conf, essentially reinstall all ports like you would when switching OS X versions."
+            ui_error "After adding the required options to macports.conf, reinstall all ports like you would when switching macOS versions."
             ui_error "Follow step 3 on https://trac.macports.org/wiki/Migration in order to do this."
         }
 

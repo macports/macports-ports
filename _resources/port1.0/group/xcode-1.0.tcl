@@ -4,6 +4,7 @@
 # $Id$
 #
 # Copyright (c) 2005 Paul Guyot <pguyot@kallisys.net>,
+# Copyright (c) 2005-2012, 2014-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -194,7 +195,7 @@ proc xcode::setup_command_line {command args settings} {
     # Check that xcode is installed.
     if {[set ${command}.cmd] eq "none"} {
         return -code error "This port requires 'xcodebuild', which \
-    couldn't be found (not Mac OS X?)"
+    couldn't be found (not macOS?)"
     }
 
     set cmdstring ""

@@ -108,7 +108,7 @@ pre-configure {
                     # from Leopard to Snow Leopard and has not reinstalled all ports.
                     } elseif {${file_archs} != ${build_arch}} {
                         ui_error ""
-                        ui_error "Did you upgrade to a new version of Mac OS X? If so, please see"
+                        ui_error "Did you upgrade to a new version of macOS? If so, please see"
                         ui_error ""
                         ui_error "    https://trac.macports.org/wiki/Migration"
                         ui_error ""
