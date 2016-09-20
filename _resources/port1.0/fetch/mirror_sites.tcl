@@ -47,6 +47,9 @@ set portfetch::mirror_sites::sites(cpan) {
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
     http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
+    ftp://xyz.csail.mit.edu/pub/CPAN/modules/by-module/
+    http://mirrors.mit.edu/CPAN/modules/by-module/
+    ftp://mirrors.mit.edu/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
     ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
@@ -64,6 +67,9 @@ set portfetch::mirror_sites::sites(ctan) {
     http://mirror.internode.on.net/pub/ctan/
     ftp://ftp.kddlabs.co.jp/CTAN/
     ftp://mirror.macomnet.net/pub/CTAN/
+    ftp://xyz.csail.mit.edu/pub/CTAN/
+    http://mirrors.mit.edu/CTAN/
+    ftp://mirrors.mit.edu/CTAN/
     http://ftp.sun.ac.za/ftp/CTAN/
     ftp://ftp.tex.ac.uk/tex-archive/
     ftp://ctan.tug.org/tex-archive/
@@ -155,6 +161,8 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirrors.linuxant.fr/distfiles.gentoo.org/distfiles/:nosubdir
     http://gentoo.localhost.net.ar/distfiles/:nosubdir
     http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
+    http://mirrors.mit.edu/gentoo-distfiles/distfiles/:nosubdir
+    ftp://mirrors.mit.edu/gentoo-distfiles/distfiles/:nosubdir
     http://ftp.fi.muni.cz/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.ncnu.edu.tw/Linux/Gentoo/distfiles/:nosubdir
     http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
@@ -410,6 +418,8 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://ftp.stacken.kth.se/pub/OpenBSD/
     ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
     http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
+    http://mirrors.mit.edu/pub/OpenBSD/
+    ftp://mirrors.mit.edu/pub/OpenBSD/
     ftp://ftp.openbsd.org/pub/OpenBSD/
     http://ftp.ch.openbsd.org/pub/OpenBSD/
     ftp://ftp.jp.openbsd.org/pub/OpenBSD/
@@ -506,7 +516,7 @@ set portfetch::mirror_sites::sites(pypi) {
 set portfetch::mirror_sites::sites(ruby) {
     http://mirrors.ibiblio.org/ruby/
     http://www.mirrorservice.org/sites/ftp.ruby-lang.org/pub/ruby/
-    ftp://xyz.lcs.mit.edu/pub/ruby/
+    ftp://xyz.csail.mit.edu/pub/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
     ftp://ftp.fu-berlin.de/unix/languages/ruby/
     ftp://ftp.easynet.be/ruby/ruby/
@@ -571,6 +581,7 @@ set portfetch::mirror_sites::sites(tcltk) {
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.kddlabs.co.jp/lang/tcl/ftp.scriptics.com/
     http://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
+    ftp://xyz.csail.mit.edu/pub/tcl/
     ftp://mirror.switch.ch/mirror/tcl.tk/
     ftp://ftp.tcl.tk/pub/tcl/
     ftp://ftp.informatik.uni-hamburg.de/pub/soft/lang/tcl/
