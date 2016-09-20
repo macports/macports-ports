@@ -130,44 +130,44 @@ set portfetch::mirror_sites::sites(freebsd) {
 # curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
 set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.arcticnetwork.ca/distfiles/:nosubdir
-    http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
-    http://gentoo.localhost.net.ar/distfiles/:nosubdir
-    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
-    http://gentoo.inode.at/distfiles/:nosubdir
     http://mirror.bih.net.ba/gentoo/distfiles/:nosubdir
-    http://distfiles.gentoo.bg/distfiles/:nosubdir
-    http://ftp.fi.muni.cz/pub/linux/gentoo/distfiles/:nosubdir
-    http://ftp.klid.dk/ftp/gentoo/distfiles/:nosubdir
-    http://trumpetti.atm.tut.fi/gentoo/distfiles/:nosubdir
-    ftp://ftp.free.fr/mirrors/ftp.gentoo.org/distfiles/:nosubdir
-    http://mirrors.linuxant.fr/distfiles.gentoo.org/distfiles/:nosubdir
-    http://de-mirror.org/distro/gentoo/distfiles/:nosubdir
-    http://files.gentoo.gr/distfiles/:nosubdir
-    http://gentoo.inf.elte.hu/distfiles/:nosubdir
-    http://ftp.rhnet.is/pub/gentoo/distfiles/:nosubdir
-    http://ftp.heanet.ie/pub/gentoo/distfiles/:nosubdir
-    http://mirror.cambrium.nl/pub/os/linux/gentoo/distfiles/:nosubdir
-    http://gentoo.tiscali.nl/distfiles/:nosubdir
-    http://mirror.gentoo.no/distfiles/:nosubdir
-    http://gentoo.prz.rzeszow.pl/distfiles/:nosubdir
-    http://darkstar.ist.utl.pt/gentoo/distfiles/:nosubdir
-    http://mirrors.evolva.ro/gentoo/distfiles/:nosubdir
-    http://gentoo-euetib.upc.es/mirror/gentoo/distfiles/:nosubdir
-    http://ftp.ds.karen.hj.se/gentoo/distfiles/:nosubdir
-    http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
-    http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
     http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
-    http://gentoo.kiev.ua/ftp/distfiles/:nosubdir
-    http://ftp.swin.edu.au/gentoo/distfiles/:nosubdir
-    http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
+    http://mirror.cambrium.nl/pub/os/linux/gentoo/distfiles/:nosubdir
     http://mirror2.corbina.ru/gentoo-distfiles/distfiles/:nosubdir
-    http://ftp.kaist.ac.kr/pub/gentoo/distfiles/:nosubdir
-    http://ftp.ncnu.edu.tw/Linux/Gentoo/distfiles/:nosubdir
-    http://gentoo.in.th/distfiles/:nosubdir
-    http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
-    http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
+    http://de-mirror.org/distro/gentoo/distfiles/:nosubdir
+    http://gentoo.inf.elte.hu/distfiles/:nosubdir
+    http://mirrors.evolva.ro/gentoo/distfiles/:nosubdir
     http://mirror.facebook.net/gentoo/distfiles/:nosubdir
+    ftp://ftp.free.fr/mirrors/ftp.gentoo.org/distfiles/:nosubdir
+    http://distfiles.gentoo.bg/distfiles/:nosubdir
+    http://files.gentoo.gr/distfiles/:nosubdir
+    http://mirror.gentoo.no/distfiles/:nosubdir
+    http://ftp.heanet.ie/pub/gentoo/distfiles/:nosubdir
+    http://ftp.ds.karen.hj.se/gentoo/distfiles/:nosubdir
+    http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
+    http://gentoo.in.th/distfiles/:nosubdir
+    http://gentoo.inode.at/distfiles/:nosubdir
+    http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
+    http://ftp.kaist.ac.kr/pub/gentoo/distfiles/:nosubdir
+    http://gentoo.kiev.ua/ftp/distfiles/:nosubdir
+    http://ftp.klid.dk/ftp/gentoo/distfiles/:nosubdir
+    http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
+    http://mirrors.linuxant.fr/distfiles.gentoo.org/distfiles/:nosubdir
+    http://gentoo.localhost.net.ar/distfiles/:nosubdir
+    http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
+    http://ftp.fi.muni.cz/pub/linux/gentoo/distfiles/:nosubdir
+    http://ftp.ncnu.edu.tw/Linux/Gentoo/distfiles/:nosubdir
+    http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
+    http://ftp.rhnet.is/pub/gentoo/distfiles/:nosubdir
+    http://gentoo.prz.rzeszow.pl/distfiles/:nosubdir
+    http://ftp.swin.edu.au/gentoo/distfiles/:nosubdir
+    http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
+    http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
+    http://gentoo.tiscali.nl/distfiles/:nosubdir
+    http://trumpetti.atm.tut.fi/gentoo/distfiles/:nosubdir
+    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
+    http://gentoo-euetib.upc.es/mirror/gentoo/distfiles/:nosubdir
+    http://darkstar.ist.utl.pt/gentoo/distfiles/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(gimp) {
