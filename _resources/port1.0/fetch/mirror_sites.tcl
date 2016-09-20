@@ -262,12 +262,12 @@ set portfetch::mirror_sites::sites(gnu) {
 }
 
 set portfetch::mirror_sites::sites(gnupg) {
-    http://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
-    ftp://gd.tuwien.ac.at/privacy/gnupg/
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
-    ftp://ftp.jyu.fi/pub/crypt/gcrypt/
-    http://www.ring.gr.jp/pub/net/gnupg/
     ftp://ftp.gnupg.org/gcrypt/
+    ftp://ftp.jyu.fi/pub/crypt/gcrypt/
+    http://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
+    http://www.ring.gr.jp/pub/net/gnupg/
+    ftp://gd.tuwien.ac.at/privacy/gnupg/
 }
 
 set portfetch::mirror_sites::sites(gnustep) {
