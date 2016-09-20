@@ -89,12 +89,13 @@ set portfetch::mirror_sites::sites(ctan) {
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
 set portfetch::mirror_sites::sites(debian) {
-    http://ftp.us.debian.org/debian/pool/main/:nosubdir
     http://ftp.au.debian.org/debian/pool/main/:nosubdir
+    http://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
     http://ftp.bg.debian.org/debian/pool/main/:nosubdir
     http://ftp.cl.debian.org/debian/pool/main/:nosubdir
     http://ftp.cz.debian.org/debian/pool/main/:nosubdir
     http://ftp.de.debian.org/debian/pool/main/:nosubdir
+    http://ftp2.de.debian.org/debian/pool/main/:nosubdir
     http://ftp.ee.debian.org/debian/pool/main/:nosubdir
     http://ftp.es.debian.org/debian/pool/main/:nosubdir
     http://ftp.fi.debian.org/debian/pool/main/:nosubdir
@@ -114,8 +115,7 @@ set portfetch::mirror_sites::sites(debian) {
     http://ftp.si.debian.org/debian/pool/main/:nosubdir
     http://ftp.sk.debian.org/debian/pool/main/:nosubdir
     http://ftp.uk.debian.org/debian/pool/main/:nosubdir
-    http://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
-    http://ftp2.de.debian.org/debian/pool/main/:nosubdir
+    http://ftp.us.debian.org/debian/pool/main/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(fink) {
