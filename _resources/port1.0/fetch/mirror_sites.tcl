@@ -575,26 +575,26 @@ set portfetch::mirror_sites::sites(sourceforge) {
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {
+    http://globalbase.dl.sourceforge.jp/
     http://iij.dl.sourceforge.jp/
-    http://osdn.dl.sourceforge.jp/
     http://jaist.dl.sourceforge.jp/
     http://keihanna.dl.sourceforge.jp/
-    http://globalbase.dl.sourceforge.jp/
+    http://osdn.dl.sourceforge.jp/
 }
 
 set portfetch::mirror_sites::sites(sunsite) {
-    http://www.ibiblio.org/pub/Linux/
+    ftp://ftp.cse.cuhk.edu.hk/pub4/Linux/
     http://www.gtlib.gatech.edu/pub/Linux/
-    ftp://sunsite.unc.edu/pub/Linux/
-    ftp://ftp.unicamp.br/pub/systems/Linux/
-    ftp://ftp.tuwien.ac.at/pub/linux/ibiblio/
-    ftp://ftp.cs.tu-berlin.de/pub/linux/Mirrors/sunsite.unc.edu/
+    http://www.ibiblio.org/pub/Linux/
+    ftp://ftp.icm.edu.pl/vol/rzm1/linux-ibiblio/
+    ftp://ftp.kddlabs.co.jp/Linux/metalab.unc.edu/
     ftp://ftp.lip6.fr/pub/linux/sunsite/
     http://ftp.nluug.nl/pub/sunsite/
     ftp://ftp.nvg.ntnu.no/pub/mirrors/metalab.unc.edu/
-    ftp://ftp.icm.edu.pl/vol/rzm1/linux-ibiblio/
-    ftp://ftp.cse.cuhk.edu.hk/pub4/Linux/
-    ftp://ftp.kddlabs.co.jp/Linux/metalab.unc.edu/
+    ftp://ftp.cs.tu-berlin.de/pub/linux/Mirrors/sunsite.unc.edu/
+    ftp://ftp.tuwien.ac.at/pub/linux/ibiblio/
+    ftp://ftp.unicamp.br/pub/systems/Linux/
+    ftp://sunsite.unc.edu/pub/Linux/
 }
 
 set portfetch::mirror_sites::sites(tcltk) {
