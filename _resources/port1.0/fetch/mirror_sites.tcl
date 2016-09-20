@@ -529,19 +529,19 @@ set portfetch::mirror_sites::sites(postgresql) {
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
 set portfetch::mirror_sites::sites(pypi) {
-    https://files.pythonhosted.org/packages/source/:nosubdir
     https://pypi.python.org/packages/source/:nosubdir
+    https://files.pythonhosted.org/packages/source/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(ruby) {
+    ftp://ftp.easynet.be/ruby/ruby/
+    ftp://ftp.fu-berlin.de/unix/languages/ruby/
     http://mirrors.ibiblio.org/ruby/
+    ftp://ftp.iDaemons.org/pub/mirror/ftp.ruby-lang.org/ruby/
+    ftp://ftp.iij.ad.jp/pub/lang/ruby/
     http://www.mirrorservice.org/sites/ftp.ruby-lang.org/pub/ruby/
     ftp://xyz.csail.mit.edu/pub/ruby/
-    ftp://ftp.iij.ad.jp/pub/lang/ruby/
-    ftp://ftp.fu-berlin.de/unix/languages/ruby/
-    ftp://ftp.easynet.be/ruby/ruby/
     ftp://ftp.ntua.gr/pub/lang/ruby/
-    ftp://ftp.iDaemons.org/pub/mirror/ftp.ruby-lang.org/ruby/
     http://ftp.ruby-lang.org/pub/ruby/
     ftp://ftp.ruby-lang.org/pub/ruby/
 }
