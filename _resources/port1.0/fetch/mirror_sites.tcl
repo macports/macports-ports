@@ -32,6 +32,46 @@ set portfetch::mirror_sites::sites(apache) {
     http://archive.apache.org/dist/
 }
 
+# Equivalent to "perl_cpan"; neither name takes precedence over the other.
+set portfetch::mirror_sites::sites(cpan) {
+    http://mirrors.ibiblio.org/CPAN/modules/by-module/
+    http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
+    ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
+    ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
+    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
+    ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
+    ftp://ftp.is.co.za/programming/perl/modules/by-module/
+    http://mirror.internode.on.net/pub/cpan/modules/by-module/
+    http://cpan.mirror.euserv.net/modules/by-module/
+    http://cpan.mirrors.ilisys.com.au/modules/by-module/
+    http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
+    http://mirror.cogentco.com/pub/CPAN/modules/by-module/
+    http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
+    http://mirror.uoregon.edu/CPAN/modules/by-module/
+    http://mirror.uta.edu/CPAN/modules/by-module/
+    http://cpan.cs.utah.edu/modules/by-module/
+    http://ftp.carnet.hr/pub/CPAN/modules/by-module/
+    http://ftp.wayne.edu/CPAN/modules/by-module/
+    ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
+}
+
+# Equivalent to "tex_ctan"; neither name takes precedence over the other.
+set portfetch::mirror_sites::sites(ctan) {
+    http://mirrors.ibiblio.org/CTAN/
+    http://ctan.math.utah.edu/ctan/tex-archive/
+    ftp://ftp.funet.fi/pub/TeX/CTAN/
+    http://mirror.internode.on.net/pub/ctan/
+    ftp://ctan.unsw.edu.au/tex-archive/
+    http://mirror.aarnet.edu.au/pub/CTAN/
+    ftp://ftp.kddlabs.co.jp/CTAN/
+    ftp://mirror.macomnet.net/pub/CTAN/
+    http://ftp.sun.ac.za/ftp/CTAN/
+    http://ftp.inf.utfsm.cl/pub/tex-archive/
+    ftp://ftp.tex.ac.uk/tex-archive/
+    ftp://ftp.dante.de/tex-archive/
+    ftp://ctan.tug.org/tex-archive/
+}
+
 # Note that mirror_sites aren't intelligent enough to handle how this should
 # work automatically (which is, append first letter of port name, then
 # port name) so just use a basic form here and fake it in ports that need
@@ -394,27 +434,9 @@ set portfetch::mirror_sites::sites(osdn) {
     http://rwthaachen.dl.osdn.jp/
 }
 
-set portfetch::mirror_sites::sites(perl_cpan) {
-    http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
-    ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
-    ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
-    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
-    ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
-    ftp://ftp.is.co.za/programming/perl/modules/by-module/
-    http://mirror.internode.on.net/pub/cpan/modules/by-module/
-    http://cpan.mirror.euserv.net/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
-    http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
-    http://mirror.cogentco.com/pub/CPAN/modules/by-module/
-    http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
-    http://mirror.uoregon.edu/CPAN/modules/by-module/
-    http://mirror.uta.edu/CPAN/modules/by-module/
-    http://cpan.cs.utah.edu/modules/by-module/
-    http://ftp.carnet.hr/pub/CPAN/modules/by-module/
-    http://ftp.wayne.edu/CPAN/modules/by-module/
-    ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
-}
+# Equivalent to "cpan"; neither name takes precedence over the other.
+set portfetch::mirror_sites::sites(perl_cpan) \
+        $portfetch::mirror_sites::sites(cpan)
 
 # http://php.net/mirrors.php
 # The country code domains without number suffix are supposed to redirect to
@@ -555,21 +577,9 @@ set portfetch::mirror_sites::sites(tcltk) {
     ftp://ftp.tcl.tk/pub/tcl/
 }
 
-set portfetch::mirror_sites::sites(tex_ctan) {
-    http://mirrors.ibiblio.org/CTAN/
-    http://ctan.math.utah.edu/ctan/tex-archive/
-    ftp://ftp.funet.fi/pub/TeX/CTAN/
-    http://mirror.internode.on.net/pub/ctan/
-    ftp://ctan.unsw.edu.au/tex-archive/
-    http://mirror.aarnet.edu.au/pub/CTAN/
-    ftp://ftp.kddlabs.co.jp/CTAN/
-    ftp://mirror.macomnet.net/pub/CTAN/
-    http://ftp.sun.ac.za/ftp/CTAN/
-    http://ftp.inf.utfsm.cl/pub/tex-archive/
-    ftp://ftp.tex.ac.uk/tex-archive/
-    ftp://ftp.dante.de/tex-archive/
-    ftp://ctan.tug.org/tex-archive/
-}
+# Equivalent to "ctan"; neither name takes precedence over the other.
+set portfetch::mirror_sites::sites(tex_ctan) \
+        $portfetch::mirror_sites::sites(ctan)
 
 set portfetch::mirror_sites::sites(trolltech) {
     http://releases.qt-project.org/qt4/source/:nosubdir
