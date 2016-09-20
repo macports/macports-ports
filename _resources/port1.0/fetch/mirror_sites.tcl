@@ -17,19 +17,19 @@ set portfetch::mirror_sites::sites(afterstep) {
 }
 
 set portfetch::mirror_sites::sites(apache) {
-    http://mirrors.ibiblio.org/apache/
-    http://www.gtlib.gatech.edu/pub/apache/
-    http://apache.mirror.rafal.ca/
-    ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
-    http://apache.multidist.com/
-    http://mirror.internode.on.net/pub/apache/
-    http://www.mirrorservice.org/sites/ftp.apache.org/
     http://mirror.aarnet.edu.au/pub/apache/
-    http://apache.is.co.za/
-    http://mirror.facebook.net/apache/
-    http://apache.pesat.net.id/
-    http://www.apache.org/dist/
     http://archive.apache.org/dist/
+    http://www.apache.org/dist/
+    http://mirror.facebook.net/apache/
+    http://www.gtlib.gatech.edu/pub/apache/
+    http://mirrors.ibiblio.org/apache/
+    ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
+    http://mirror.internode.on.net/pub/apache/
+    http://apache.is.co.za/
+    http://www.mirrorservice.org/sites/ftp.apache.org/
+    http://apache.multidist.com/
+    http://apache.pesat.net.id/
+    http://apache.mirror.rafal.ca/
 }
 
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
