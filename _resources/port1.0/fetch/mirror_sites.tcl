@@ -300,19 +300,19 @@ set portfetch::mirror_sites::sites(isc) {
 }
 
 set portfetch::mirror_sites::sites(kde) {
-    http://mirrors.mit.edu/kde/
-    http://kde.mirrors.hoobly.com/
-    http://ftp.gtlib.gatech.edu/pub/kde/
-    http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
-    http://gd.tuwien.ac.at/kde/
-    http://mirrors.isc.org/pub/kde/
-    http://kde.mirrors.tds.net/pub/kde/
-    ftp://ftp.solnet.ch/mirror/KDE/
-    http://mirror.internode.on.net/pub/kde/
     http://mirror.aarnet.edu.au/pub/KDE/
+    http://mirror.facebook.net/kde/
+    http://ftp.gtlib.gatech.edu/pub/kde/
+    http://kde.mirrors.hoobly.com/
+    http://mirror.internode.on.net/pub/kde/
+    http://mirrors.isc.org/pub/kde/
     http://ftp.kddlabs.co.jp/pub/X11/kde/
     ftp://ftp.kde.org/pub/kde/
-    http://mirror.facebook.net/kde/
+    http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
+    http://mirrors.mit.edu/kde/
+    ftp://ftp.solnet.ch/mirror/KDE/
+    http://kde.mirrors.tds.net/pub/kde/
+    http://gd.tuwien.ac.at/kde/
 }
 
 set portfetch::mirror_sites::sites(macports) {
