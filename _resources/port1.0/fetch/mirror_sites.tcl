@@ -187,43 +187,43 @@ set portfetch::mirror_sites::sites(gentoo) {
 }
 
 set portfetch::mirror_sites::sites(gimp) {
-    http://ftp.gtk.org/pub/
-    http://download.gimp.org/pub/
     http://artfiles.org/gimp.org/
-    ftp://ftp.cc.uoc.gr/mirrors/gimp/
+    http://gimp.cp-dev.com/
+    http://mirrors.dominios.pt/
+    http://download.gimp.org/pub/
+    http://ftp.gtk.org/pub/
     http://ftp.gwdg.de/pub/misc/grafik/gimp/
     http://ftp.heanet.ie/mirrors/ftp.gimp.org/pub/
+    http://mirror.hessmo.com/
+    http://gimp.mirrors.hoobly.com/
+    http://mirror.ibcp.fr/pub/
+    ftp://sunsite.icm.edu.pl/pub/graphics/
     ftp://ftp.is.co.za/mirror/ftp.gimp.org/
-    http://ftp.iut-bm.univ-fcomte.fr/
+    http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
     ftp://ftp.mirrorservice.org/sites/ftp.gimp.org/pub/
+    ftp://ftp.sai.msu.su/pub/unix/graphics/gimp/mirror/
     http://ftp.nluug.nl/graphics/
     ftp://ftp.nluug.nl/pub/graphics/
+    http://gimp.parentingamerica.com/
+    http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
     ftp://ftp.piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
+    http://gimp.raffsoftware.com/
     ftp://ftp.rediris.es/mirror/
-    ftp://ftp.sai.msu.su/pub/unix/graphics/gimp/mirror/
-    http://ftp.snt.utwente.nl/pub/software/gimp/
+    http://sunsite.rediris.es/mirror/
+    http://www.ring.gr.jp/pub/graphics/
+    http://mirrors.serverhost.ro/
+    http://gimp.skazkaforyou.com/
     http://ftp.sunet.se/pub/gnu/
     ftp://ftp.tpnet.pl/pub/graphics/
     ftp://ftp.u-aizu.ac.jp/pub/graphics/tools/gimp/
-    http://gimp.cp-dev.com/
-    http://gimp.mirrors.hoobly.com/
-    http://gimp.parentingamerica.com/
-    http://gimp.raffsoftware.com/
-    http://gimp.skazkaforyou.com/
-    http://mirror.hessmo.com/
-    http://mirror.ibcp.fr/pub/
     http://mirror.umd.edu/gimp/
-    http://mirrors.dominios.pt/
-    ftp://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
+    http://ftp.iut-bm.univ-fcomte.fr/
+    ftp://ftp.cc.uoc.gr/mirrors/gimp/
     http://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
-    http://mirrors.serverhost.ro/
+    ftp://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
+    http://ftp.snt.utwente.nl/pub/software/gimp/
     http://mirrors.xmission.com/gimp/
     http://mirrors.zerg.biz/
-    http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/
-    ftp://sunsite.icm.edu.pl/pub/graphics/
-    http://sunsite.rediris.es/mirror/
-    http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
-    http://www.ring.gr.jp/pub/graphics/
 }
 
 set portfetch::mirror_sites::sites(gnome) {
