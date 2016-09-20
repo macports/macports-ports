@@ -516,12 +516,6 @@ set portfetch::mirror_sites::sites(postgresql) {
     http://www.mirrorservice.org/sites/ftp.postgresql.org/
     http://ftp.postgresql.org/pub/
     ftp://ftp.postgresql.org/pub/
-    ftp://ftp2.au.postgresql.org/pub/postgresql/
-    ftp://ftp2.ch.postgresql.org/pub/mirrors/postgresql
-    ftp://ftp.de.postgresql.org/mirror/postgresql/
-    http://ftp7.de.postgresql.org/ftp.postgresql.org/
-    ftp://ftp.fr.postgresql.org/
-    ftp://ftp.ru.postgresql.org/pub/unix/database/pgsql/
 }
 
 # Note that mirror_sites aren't intelligent enough to handle how this should
