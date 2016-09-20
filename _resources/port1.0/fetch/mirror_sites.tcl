@@ -34,25 +34,25 @@ set portfetch::mirror_sites::sites(apache) {
 
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(cpan) {
-    http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
-    ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
-    ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
-    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
-    ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
-    ftp://ftp.is.co.za/programming/perl/modules/by-module/
-    http://mirror.internode.on.net/pub/cpan/modules/by-module/
-    http://cpan.mirror.euserv.net/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
+    ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
+    http://ftp.carnet.hr/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
+    ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
+    http://cpan.mirror.euserv.net/modules/by-module/
+    ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
+    http://mirrors.ibiblio.org/CPAN/modules/by-module/
+    http://cpan.mirrors.ilisys.com.au/modules/by-module/
+    http://mirror.internode.on.net/pub/cpan/modules/by-module/
+    ftp://ftp.is.co.za/programming/perl/modules/by-module/
+    ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
+    http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
+    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
     http://mirror.uta.edu/CPAN/modules/by-module/
     http://cpan.cs.utah.edu/modules/by-module/
-    http://ftp.carnet.hr/pub/CPAN/modules/by-module/
     http://ftp.wayne.edu/CPAN/modules/by-module/
-    ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
 }
 
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
