@@ -405,19 +405,19 @@ set portfetch::mirror_sites::sites(nongnu) {
 }
 
 set portfetch::mirror_sites::sites(openbsd) {
-    http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
-    ftp://carroll.cac.psu.edu/pub/OpenBSD/
-    ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
-    ftp://gd.tuwien.ac.at/opsys/OpenBSD/
-    http://ftp.ch.openbsd.org/pub/OpenBSD/
-    ftp://ftp.stacken.kth.se/pub/OpenBSD/
-    ftp://ftp3.usa.openbsd.org/pub/OpenBSD/
-    ftp://rt.fm/pub/OpenBSD/
-    ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
-    ftp://ftp.jp.openbsd.org/pub/OpenBSD/
-    http://mirror.internode.on.net/pub/OpenBSD/
     http://mirror.aarnet.edu.au/pub/OpenBSD/
+    http://mirror.internode.on.net/pub/OpenBSD/
+    ftp://ftp.stacken.kth.se/pub/OpenBSD/
+    ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
+    http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
     ftp://ftp.openbsd.org/pub/OpenBSD/
+    http://ftp.ch.openbsd.org/pub/OpenBSD/
+    ftp://ftp.jp.openbsd.org/pub/OpenBSD/
+    ftp://ftp3.usa.openbsd.org/pub/OpenBSD/
+    ftp://carroll.cac.psu.edu/pub/OpenBSD/
+    ftp://rt.fm/pub/OpenBSD/
+    ftp://gd.tuwien.ac.at/opsys/OpenBSD/
+    ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
 }
 
 # https://osdn.jp/docs/Mirrors
