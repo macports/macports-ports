@@ -398,14 +398,14 @@ set portfetch::mirror_sites::sites(mysql) {
 }
 
 set portfetch::mirror_sites::sites(netbsd) {
+    http://ftp.NetBSD.org/pub/NetBSD/
     http://ftp7.de.NetBSD.org/pub/ftp.netbsd.org/pub/NetBSD/
     http://ftp.fr.NetBSD.org/pub/NetBSD/
-    ftp://ftp7.us.NetBSD.org/pub/NetBSD/
-    ftp://ftp.uk.NetBSD.org/pub/NetBSD/
-    ftp://ftp.tw.NetBSD.org/pub/NetBSD/
     ftp://ftp7.jp.NetBSD.org/pub/NetBSD/
     ftp://ftp.ru.NetBSD.org/pub/NetBSD/
-    http://ftp.NetBSD.org/pub/NetBSD/
+    ftp://ftp.tw.NetBSD.org/pub/NetBSD/
+    ftp://ftp.uk.NetBSD.org/pub/NetBSD/
+    ftp://ftp7.us.NetBSD.org/pub/NetBSD/
 }
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
@@ -623,10 +623,10 @@ set portfetch::mirror_sites::sites(trolltech) {
 }
 
 set portfetch::mirror_sites::sites(xcontrib) {
-    http://ftp.x.org/contrib/
     ftp://ftp.gwdg.de/pub/x11/x.org/contrib/
-    ftp://ftp2.x.org/contrib/
+    http://ftp.x.org/contrib/
     ftp://ftp.x.org/contrib/
+    ftp://ftp2.x.org/contrib/
 }
 
 set portfetch::mirror_sites::sites(xfree) {
