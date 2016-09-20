@@ -13,7 +13,6 @@ namespace eval portfetch::mirror_sites { }
 
 set portfetch::mirror_sites::sites(afterstep) {
     ftp://ftp.kddlabs.co.jp/X11/AfterStep/
-    ftp://ftp.dti.ad.jp/pub/X/AfterStep/
     ftp://ftp.afterstep.org/
 }
 
@@ -205,7 +204,6 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.funet.fi/pub/gnu/prep/
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
     ftp://ftp.kddlabs.co.jp/pub/gnu/old-gnu/
-    ftp://ftp.dti.ad.jp/pub/GNU/
     ftp://ftp.informatik.hu-berlin.de/pub/gnu/gnu/
     ftp://ftp.lip6.fr/pub/gnu/
     http://mirror.internode.on.net/pub/gnu/
@@ -243,7 +241,6 @@ set portfetch::mirror_sites::sites(isc) {
     ftp://ftp.freenet.de/pub/ftp.isc.org/isc/
     ftp://ftp.fsn.hu/pub/isc/
     ftp://ftp.iij.ad.jp/pub/network/isc/
-    ftp://ftp.dti.ad.jp/pub/net/isc/
     http://ftp.kaist.ac.kr/pub/isc/
     ftp://ftp.task.gda.pl/mirror/ftp.isc.org/isc/
     ftp://ftp.sunet.se/pub/network/isc/
