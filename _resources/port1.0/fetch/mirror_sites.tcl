@@ -57,19 +57,19 @@ set portfetch::mirror_sites::sites(cpan) {
 
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(ctan) {
-    http://mirrors.ibiblio.org/CTAN/
-    http://ctan.math.utah.edu/ctan/tex-archive/
-    ftp://ftp.funet.fi/pub/TeX/CTAN/
-    http://mirror.internode.on.net/pub/ctan/
-    ftp://ctan.unsw.edu.au/tex-archive/
     http://mirror.aarnet.edu.au/pub/CTAN/
+    ftp://ftp.dante.de/tex-archive/
+    ftp://ftp.funet.fi/pub/TeX/CTAN/
+    http://mirrors.ibiblio.org/CTAN/
+    http://mirror.internode.on.net/pub/ctan/
     ftp://ftp.kddlabs.co.jp/CTAN/
     ftp://mirror.macomnet.net/pub/CTAN/
     http://ftp.sun.ac.za/ftp/CTAN/
-    http://ftp.inf.utfsm.cl/pub/tex-archive/
     ftp://ftp.tex.ac.uk/tex-archive/
-    ftp://ftp.dante.de/tex-archive/
     ftp://ctan.tug.org/tex-archive/
+    ftp://ctan.unsw.edu.au/tex-archive/
+    http://ctan.math.utah.edu/ctan/tex-archive/
+    http://ftp.inf.utfsm.cl/pub/tex-archive/
 }
 
 # Note that mirror_sites aren't intelligent enough to handle how this should
