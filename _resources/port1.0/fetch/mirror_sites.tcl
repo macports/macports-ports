@@ -20,6 +20,8 @@ set portfetch::mirror_sites::sites(apache) {
     http://mirror.aarnet.edu.au/pub/apache/
     http://archive.apache.org/dist/
     http://www.apache.org/dist/
+    http://mirror.cc.columbia.edu/pub/software/apache/
+    ftp://mirror.cc.columbia.edu/pub/software/apache/
     http://mirror.facebook.net/apache/
     http://www.gtlib.gatech.edu/pub/apache/
     http://mirrors.ibiblio.org/apache/
@@ -38,6 +40,8 @@ set portfetch::mirror_sites::sites(cpan) {
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     http://ftp.carnet.hr/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
+    http://mirror.cc.columbia.edu/pub/software/cpan/modules/by-module/
+    ftp://mirror.cc.columbia.edu/pub/software/cpan/modules/by-module/
     ftp://ftp.cpan.org/pub/CPAN/modules/by-module/
     http://cpan.mirror.euserv.net/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
@@ -61,6 +65,8 @@ set portfetch::mirror_sites::sites(cpan) {
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(ctan) {
     http://mirror.aarnet.edu.au/pub/CTAN/
+    http://mirror.cc.columbia.edu/pub/software/ctan/
+    ftp://mirror.cc.columbia.edu/pub/software/ctan/
     ftp://ftp.dante.de/tex-archive/
     ftp://ftp.funet.fi/pub/TeX/CTAN/
     http://mirrors.ibiblio.org/CTAN/
@@ -139,6 +145,8 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.bih.net.ba/gentoo/distfiles/:nosubdir
     http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
     http://mirror.cambrium.nl/pub/os/linux/gentoo/distfiles/:nosubdir
+    http://mirror.cc.columbia.edu/pub/linux/gentoo/distro/distfiles/:nosubdir
+    ftp://mirror.cc.columbia.edu/pub/linux/gentoo/distro/distfiles/:nosubdir
     http://mirror2.corbina.ru/gentoo-distfiles/distfiles/:nosubdir
     http://de-mirror.org/distro/gentoo/distfiles/:nosubdir
     http://gentoo.inf.elte.hu/distfiles/:nosubdir
@@ -222,6 +230,8 @@ set portfetch::mirror_sites::sites(gnome) {
     http://artfiles.org/gnome.org/
     http://ftp.belnet.be/ftp.gnome.org/
     http://ftp.cse.buffalo.edu/pub/Gnome/
+    http://mirror.cc.columbia.edu/pub/software/gnome/
+    ftp://mirror.cc.columbia.edu/pub/software/gnome/
     http://ftp.fau.de/gnome/
     http://ftp2.uk.freebsd.org/sites/ftp.gnome.org/pub/GNOME/
     http://www.gtlib.gatech.edu/pub/gnome/
@@ -246,6 +256,8 @@ set portfetch::mirror_sites::sites(gnome) {
 }
 
 set portfetch::mirror_sites::sites(gnu) {
+    http://mirror.cc.columbia.edu/pub/software/gnu/
+    ftp://mirror.cc.columbia.edu/pub/software/gnu/
     http://mirror.facebook.net/gnu/
     ftp://ftp.funet.fi/pub/gnu/prep/
     http://ftp.gnu.org/gnu/
@@ -262,6 +274,8 @@ set portfetch::mirror_sites::sites(gnu) {
 }
 
 set portfetch::mirror_sites::sites(gnupg) {
+    http://mirror.cc.columbia.edu/pub/software/gnupg/
+    ftp://mirror.cc.columbia.edu/pub/software/gnupg/
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
     ftp://ftp.gnupg.org/gcrypt/
     ftp://ftp.jyu.fi/pub/crypt/gcrypt/
@@ -301,6 +315,8 @@ set portfetch::mirror_sites::sites(isc) {
 
 set portfetch::mirror_sites::sites(kde) {
     http://mirror.aarnet.edu.au/pub/KDE/
+    http://mirror.cc.columbia.edu/pub/software/kde/
+    ftp://mirror.cc.columbia.edu/pub/software/kde/
     http://mirror.facebook.net/kde/
     http://ftp.gtlib.gatech.edu/pub/kde/
     http://kde.mirrors.hoobly.com/
@@ -394,6 +410,8 @@ set portfetch::mirror_sites::sites(netbsd) {
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(nongnu) {
+    http://mirror.cc.columbia.edu/pub/software/gnu/non-gnu/
+    ftp://mirror.cc.columbia.edu/pub/software/gnu/non-gnu/
     ftp://ftp.funet.fi/pub/gnu/ftp.gnu.org/non-gnu/
     http://ftp.gnu.org/pub/gnu/non-gnu/
     ftp://ftp.gnu.org/pub/gnu/non-gnu/
@@ -414,6 +432,8 @@ set portfetch::mirror_sites::sites(nongnu) {
 
 set portfetch::mirror_sites::sites(openbsd) {
     http://mirror.aarnet.edu.au/pub/OpenBSD/
+    http://mirror.cc.columbia.edu/pub/bsd/OpenBSD/
+    ftp://mirror.cc.columbia.edu/pub/bsd/OpenBSD/
     http://mirror.internode.on.net/pub/OpenBSD/
     ftp://ftp.stacken.kth.se/pub/OpenBSD/
     ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
