@@ -119,13 +119,13 @@ set portfetch::mirror_sites::sites(debian) {
 }
 
 set portfetch::mirror_sites::sites(fink) {
-    http://distfiles.hnd.jp.asi.finkmirrors.net/:nosubdir
     http://distfiles.ber.de.eu.finkmirrors.net/:nosubdir
     http://distfiles.hel.fi.eu.finkmirrors.net/:nosubdir
     http://distfiles.dub.ie.eu.finkmirrors.net/:nosubdir
+    http://distfiles.hnd.jp.asi.finkmirrors.net/:nosubdir
+    http://distfiles.master.finkmirrors.net/:nosubdir
     http://distfiles.sjc.ca.us.finkmirrors.net/:nosubdir
     http://www.mirrorservice.org/sites/master.us.finkmirrors.net/distfiles/:nosubdir
-    http://distfiles.master.finkmirrors.net/:nosubdir
 }
 
 # FreeBSD switched to a Geo-IP-based load-balanced distcache.
