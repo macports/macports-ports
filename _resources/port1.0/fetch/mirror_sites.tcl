@@ -568,13 +568,13 @@ set portfetch::mirror_sites::sites(sunsite) {
 }
 
 set portfetch::mirror_sites::sites(tcltk) {
-    http://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
-    ftp://mirror.switch.ch/mirror/tcl.tk/
-    ftp://ftp.informatik.uni-hamburg.de/pub/soft/lang/tcl/
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.kddlabs.co.jp/lang/tcl/ftp.scriptics.com/
-    http://www.etsimo.uniovi.es/pub/mirrors/ftp.scriptics.com/
+    http://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
+    ftp://mirror.switch.ch/mirror/tcl.tk/
     ftp://ftp.tcl.tk/pub/tcl/
+    ftp://ftp.informatik.uni-hamburg.de/pub/soft/lang/tcl/
+    http://www.etsimo.uniovi.es/pub/mirrors/ftp.scriptics.com/
 }
 
 # Equivalent to "ctan"; neither name takes precedence over the other.
