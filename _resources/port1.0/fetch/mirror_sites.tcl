@@ -12,8 +12,8 @@
 namespace eval portfetch::mirror_sites { }
 
 set portfetch::mirror_sites::sites(afterstep) {
-    ftp://ftp.kddlabs.co.jp/X11/AfterStep/
     ftp://ftp.afterstep.org/
+    ftp://ftp.kddlabs.co.jp/X11/AfterStep/
 }
 
 set portfetch::mirror_sites::sites(apache) {
@@ -285,8 +285,8 @@ set portfetch::mirror_sites::sites(gnupg) {
 }
 
 set portfetch::mirror_sites::sites(gnustep) {
-    http://ftpmain.gnustep.org/pub/gnustep/
     ftp://ftp.gnustep.org/pub/gnustep/
+    http://ftpmain.gnustep.org/pub/gnustep/
 }
 
 set portfetch::mirror_sites::sites(googlecode) {
