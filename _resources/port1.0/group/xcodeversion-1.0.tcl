@@ -37,8 +37,8 @@
 #   PortGroup               xcodeversion 1.0
 #   minimum_xcodeversions   {darwin_major minimum_xcodeversion}
 #
-# where darwin_major is the major version of the underlying Darwin OS (e.g. 9
-# for macOS Leopard) and minimum_xcodeversion is the minimum version
+# where darwin_major is the major version of the underlying Darwin OS (e.g. 16
+# for macOS 10.12 Sierra) and minimum_xcodeversion is the minimum version
 # of Xcode the port requires (e.g. 3.1).
 
 options minimum_xcodeversions
