@@ -1,20 +1,15 @@
 #!/bin/sh
-# Run this to generate all the initial makefiles, etc.
-
 srcdir=`dirname $0`
-test -z "$srcdir" && srcdir=.
+[ -z "$srcdir" ] && srcdir=.
 
-REQUIRED_AUTOMAKE_VERSION=1.8
-
-(test -f $srcdir/src/main.c && test -f $srcdir/configure.ac) || {
-    echo -n "**Error**: Directory "\`$srcdir\'" does not look like the"
-    echo " top-level $PKG_NAME directory"
-    exit 1
-}
+if [ ! -f "$srcdir/configure.ac" ]; then
+ echo "$srcdir doesn't look like source directory for $PKG_NAME" >&2
+ exit 1
+fi
 
 which gnome-autogen.sh || {
-    echo "You need to install gnome-common from the GNOME CVS"
-    exit 1
+	echo "You need to install gnome-common from GNOME Git"
+	exit 1
 }
 
-. gnome-autogen.sh
+. gnome-autogen.sh "$@"
