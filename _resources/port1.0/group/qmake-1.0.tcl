@@ -44,8 +44,9 @@ pre-configure {
     configure.pre_args-append       PREFIX=${prefix} \
                                     "QMAKE_CC=${configure.cc}" \
                                     "QMAKE_CXX=${configure.cxx}" \
-                                    "QMAKE_OBJC=${configure.objc}"
-    configure.args-append           "CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\""
+                                    "QMAKE_OBJC=${configure.objc}" \
+                                    "QMAKE_CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\"" \
+                                    "QMAKE_CXXFLAGS=\"${configure.cxxflags} [get_canonical_archflags cxx]\""
     configure.universal_args-delete --disable-dependency-tracking
 
     if {[variant_exists universal] && [variant_isset universal]} {
