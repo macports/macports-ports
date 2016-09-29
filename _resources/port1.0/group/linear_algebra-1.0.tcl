@@ -38,6 +38,9 @@
 #
 #   If only BLAS and not LAPACK is used, set:
 #   linalg.setup blas_only
+#   If BLAS/LAPACK are only called from C and not Fortran, then Accelerate can be used
+#   directly and vecLibFort is not needed. Set:
+#   linalg.setup noveclibfort
 #
 #   in pre-configure, a line like this may be needed:
 #   configure.args-append --with-blas="-L${prefix}/lib ${linalglib}"
@@ -46,19 +49,24 @@
 #
 
 # scalapack.
-# vecLibFort only needed if calling Accelerate from Fortran.
 
 PortGroup active_variants 1.1
 
 default linalglib ""
 default blas_only 0
+default noveclibfort 0
 
 proc linalg.setup {args} {
-    global blas_only
+    global blas_only, noveclibfort
 
     foreach v $args {
         if {$v == "blas_only"} {
             set blas_only 1
+        } elseif {$v == "noveclibfort"} {
+            set noveclibfort 1
+        } else {
+            ui_error "Internal error: Unknown argument '$v' to linalg.setup."
+            return -code error "Internal error: Unknown argument '$v' to linalg.setup."
         }
     }
 }
@@ -69,8 +77,12 @@ if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset ope
 
 # choose one of the following for serial linear algebra
 variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
-    depends_lib-append      port:vecLibFort
-    set linalglib           -lvecLibFort
+    if {$noveclibfort == 0} {
+        depends_lib-append      port:vecLibFort
+        set linalglib           -lvecLibFort
+    } else {
+        set linalglib           "-framework Accelerate"
+    }
 }
 
 variant atlas conflicts accelerate openblas description {Build with linear algebra from ATLAS} {
