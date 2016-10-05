@@ -581,7 +581,7 @@ set portfetch::mirror_sites::sites(trolltech) {
 }
 
 set portfetch::mirror_sites::sites(xcontrib) {
-    ftp://ftp.gwdg.de/pub/x11/x.org/contrib/
+    http://ftp.gwdg.de/pub/x11/x.org/contrib/
     http://ftp.x.org/contrib/
     ftp://ftp.x.org/contrib/
     ftp://ftp2.x.org/contrib/
@@ -592,7 +592,7 @@ set portfetch::mirror_sites::sites(xfree) {
     ftp://ftp.esat.net/pub/X11/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     http://www.gtlib.gatech.edu/pub/XFree86/
-    ftp://ftp.gwdg.de/pub/xfree86/XFree86/
+    http://ftp.gwdg.de/pub/xfree86/XFree86/
     http://www.mirrorservice.org/sites/ftp.xfree86.org/pub/XFree86/
     ftp://ftp.physics.uvt.ro/pub/XFree86/
     ftp://ftp.fit.vutbr.cz/pub/XFree86/
@@ -605,7 +605,7 @@ set portfetch::mirror_sites::sites(xorg) {
     http://xorg.freedesktop.org/archive/
     http://xorg.freedesktop.org/releases/
     http://mi.mirror.garr.it/mirrors/x.org/
-    ftp://ftp.gwdg.de/pub/x11/x.org/pub/
+    http://ftp.gwdg.de/pub/x11/x.org/pub/
     ftp://ftp.is.co.za/pub/x.org/pub/
     http://www.mirrorservice.org/sites/ftp.x.org/pub/
     ftp://ftp.ntua.gr/pub/X11/X.org/
