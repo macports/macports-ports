@@ -11,6 +11,9 @@ if [ ! -f $srcdir/configure.ac ]; then
   exit 1
 fi
 
+olddir=$(pwd)
+cd "$srcdir"
+
 PKG_NAME=$(autoconf --trace 'AC_INIT:$1' "$srcdir/configure.ac")
 
 if [ "$#" = 0 ] && [ -z "$NOCONFIGURE" ]; then
@@ -25,6 +28,8 @@ glib-gettextize --force --copy || exit 1
 intltoolize --force --copy --automake || exit 1
 autoreconf --verbose --force --install -Wno-portability || exit 1
 { set +x; } 2>/dev/null
+
+cd "$olddir"
 
 if [ -z "$NOCONFIGURE" ]; then
   set -x
