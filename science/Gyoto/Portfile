@@ -4,9 +4,9 @@
 PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           active_variants 1.1
+PortGroup           compilers 1.0
 
-github.setup        gyoto Gyoto 1.0.1
-revision            4
+github.setup        gyoto Gyoto 1.1.0
 license             GPL-3+
 categories          science yorick
 platforms           darwin
@@ -19,8 +19,10 @@ long_description    Gyoto aims at providing a framework for computing orbits \
                     language. Gyoto can be extended with plug-ins.
 homepage            http://gyoto.obspm.fr
 
-checksums           rmd160  773c9fe40ea2a17b5fad0b75a0f1376d28927d94 \
-                    sha256  643c1955fdef5ec8747cd42a4fe075ddaeb822e924f9f49ba895a6f0d8832cb1
+checksums           rmd160  28458c6dc0827b2f859f8cb05906f36835775b09 \
+                    sha256  dfa04cc9ccffc2b20c51784af097b574c844837440d4563d10b3f45e5a4798bf
+
+depends_build       port:LORENE
 
 depends_lib         port:cfitsio \
                     port:xercesc3 \
@@ -33,24 +35,25 @@ depends_run         port:yorick-yutils \
 # yorick is not universal
 universal_variant   no
 
-patchfiles          patch-include-GyotoScreen.h.diff
-patch.pre_args      -p1
-
 configure.args      --with-yorick=${prefix}/bin/yorick \
-                    --without-lorene \
+                    --with-lorene=${prefix}/lib/lorene \
                     --with-xerces \
                     --disable-doc \
                     --with-cfitsio \
                     --with-udunits-inc=${prefix}/include/udunits2/ \
                     --with-udunits-lib=-L${prefix}/lib/ \
                     --enable-release \
-                    --without-mpi
+                    --without-mpi \
+                    --without-python
 
-build.args-append    Y_CFLAGS="${configure.cxxflags}" Y_CPPFLAGS="${configure.cppflags}" CC="${configure.cc}" COPT_DEFAULT="" Y_LDFLAGS="${configure.ldflags}"
+build.args-append   Y_CFLAGS="${configure.cxxflags}" Y_CPPFLAGS="${configure.cppflags}" CC="${configure.cc}" COPT_DEFAULT="" Y_LDFLAGS="${configure.ldflags}"
 
-test.target          check
-test.run             yes
 
+test.target         check check-lorene
+test.run            yes
+
+compilers.setup     -gcc -dragonegg
+compilers.enforce_c lorene
 
 if {![catch {set result [active_variants boost openmpi {}]}]} {
   if {$result} {
@@ -62,44 +65,103 @@ if {![catch {set result [active_variants boost openmpi {}]}]} {
   }
 }
 
-foreach nodot [list 27 33 34] wdot [list 2.7 3.3 3.4] {
+foreach nodot [list 27 33 34 35] wdot [list 2.7 3.3 3.4 3.5] {
     subport py${nodot}-gyoto {
         depends_build-append port:doxygen port:swig-python
         depends_lib-append   port:python${nodot} port:py${nodot}-numpy \
                              port:Gyoto
+        compilers.enforce_c  Gyoto
         categories    python science
+        configure.args-delete --without-python
         configure.args-append PYTHON=${prefix}/bin/python${wdot}
         use_parallel_build no
-        build.args    -C python
+        build.target  python plugins/python
+        destroot.cmd  PYTHONPATH=${frameworks_dir}/Python.framework/Versions/${wdot}:\$PYHTONPATH make
         destroot.args -C python INSTALL_DATA=true prefix=${frameworks_dir}/Python.framework/Versions/${wdot}
+        post-destroot {
+            xinstall -d ${destroot}${prefix}/lib/gyoto/5_0_0
+            exec -ignorestderr gmake -C ${worksrcpath}/plugins/python install \
+                DESTDIR=${destroot}
+            xinstall -d ${destroot}/${prefix}/share/doc/${subport}/examples
+            xinstall {*}[glob ${worksrcpath}/plugins/python/doc/examples/*] \
+                ${destroot}/${prefix}/share/doc/${subport}/examples/
+            xinstall {*}[glob ${worksrcpath}/python/example*.py] \
+                ${destroot}/${prefix}/share/doc/${subport}/examples/
+        }
         test.run no
     }
 }
 
 subport Gyoto {
     post-destroot {
-        xinstall -W ${worksrcpath}/python gyoto.i gyoto_std.i gyoto_lorene.i numpy.i ${destroot}/${prefix}/include/Gyoto/
+        xinstall -W ${worksrcpath}/python \
+            gyoto.i gyoto_std.i gyoto_lorene.i numpy.i \
+            ${destroot}/${prefix}/include/Gyoto/
+        xinstall -d ${destroot}/${prefix}/share/doc/${subport}/examples
+        xinstall {*}[glob ${worksrcpath}/doc/examples/*] \
+            ${destroot}/${prefix}/share/doc/${subport}/examples/
     }
 }
 
 if {[string match libc++ ${configure.cxx_stdlib}]} {
 
     depends_lib-append port:boost
-    
+    compilers.enforce_c boost
+
     variant openmpi conflicts mpich \
         description {Add MPI parallelization using OpenMPI} {
+        set c_variant [c_variant_name]
+        if {${c_variant} == ""} {
+            set mpi_port openmpi
+            set mpi_suffix mp
+        } {
+            set mpi_port openmpi-${c_variant}
+            set mpi_suffix ${c_variant}
+        }
         require_active_variants boost openmpi {}
-        depends_lib-append port:openmpi
+            depends_lib-append port:${mpi_port}
         configure.args-delete --without-mpi
-        configure.args-append --with-mpi MPICC=mpicc-openmpi-mp MPICXX=mpicxx-openmpi-mp
+        configure.args-append --with-mpi \
+            MPICC="mpicc-openmpi-${mpi_suffix}" \
+            MPICXX="mpicxx-openmpi-${mpi_suffix}" \
+            CC="mpicc-openmpi-${mpi_suffix}" \
+            CXX="mpicxx-openmpi-${mpi_suffix}"
+        build.args-delete CC="${configure.cc}"
+        build.args-append CC="mpicc-openmpi-${mpi_suffix}"
+        notes "
++-- Gyoto Usage note ------------------------------------------------------
+| For multi-processing, wrap gyoto in mpirun-openmpi-${mpi_suffix}, e.g.:
+|   $ mpirun-openmpi-${mpi_suffix} gyoto -P4 in.xml out.fits
++--------------------------------------------------------------------------
+"    
     }
 
     variant mpich conflicts openmpi \
         description {Add MPI parallelization using MPICH} {
+        set c_variant [c_variant_name]
+        if {${c_variant} == ""} {
+            set mpi_port mpich
+            set mpi_suffix mp
+        } {
+            set mpi_port mpich-${c_variant}
+            set mpi_suffix ${c_variant}
+        }
         require_active_variants boost mpich {}
-        depends_lib-append port:mpich
+        depends_lib-append port:${mpi_port}
         configure.args-delete --without-mpi
-        configure.args-append --with-mpi MPICC=mpicc-mpich-mp MPICXX=mpicxx-mpich-mp
+        configure.args-append --with-mpi \
+            MPICC="mpicc-mpich-${mpi_suffix}" \
+            MPICXX="mpicxx-mpich-${mpi_suffix}" \
+            CC="mpicc-mpich-${mpi_suffix}" \
+            CXX="mpicxx-mpich-${mpi_suffix}"
+        build.args-delete CC="${configure.cc}"
+        build.args-append CC="mpicc-mpich-${mpi_suffix}"
+        notes "
++-- Gyoto Usage note ------------------------------------------------------
+| For multi-processing, wrap gyoto in mpirun-mpich-${mpi_suffix}, e.g.:
+|   $ mpirun-mpich-${mpi_suffix} gyoto -P4 in.xml out.fits
++--------------------------------------------------------------------------
+"    
     }
 
 } else {
