@@ -7,8 +7,7 @@ PortSystem          1.0
 PortGroup           texlive 1.0
 
 name                LaTeXML
-version             0.8.1
-revision            1
+version             0.8.2
 license             public-domain
 maintainers         nist.gov:bruce.miller
 description         LaTeXML converts TeX to XML/HTML/MathML
@@ -17,7 +16,7 @@ long_description \
 
 # Written in Perl, but it is an application, not just modules
 PortGroup           perl5 1.0
-perl5.branches      5.22
+perl5.branches      5.24
 perl5.setup         ${name} ${version}
 perl5.link_binaries_suffix
 
@@ -28,11 +27,11 @@ platforms           darwin
 supported_archs     noarch
 
 master_sites        ${homepage}/releases/
-checksums           rmd160 312f0a3d74db75a9210220ab8ea4a1c3f95c6f71 \
-                    sha256 ea264e1c11210e219a46b7699a578d8632c7bbb6eaea5b06d2eb094122cbab2f
+checksums           rmd160 6dbf960277cdcf30605ce93335e3383673c1ff66 \
+                    sha256 3d41a3012760d31d721b569d8c1b430cde1df2b68fcc3c66f41ec640965caabf
 # Use:
-# openssl rmd160 LaTeXML-0.8.0.tar.gz
-# openssl sha256 LaTeXML-0.8.0.tar.gz
+# openssl rmd160 LaTeXML-0.8.2.tar.gz
+# openssl sha256 LaTeXML-0.8.2.tar.gz
 
 #============================================================
 # Dependencies
@@ -45,6 +44,7 @@ depends_lib-append \
         port:p${perl5.major}-json-xs \
         port:p${perl5.major}-libwww-perl \
         port:p${perl5.major}-parse-recdescent \
+        port:p${perl5.major}-text-unidecode \
         port:p${perl5.major}-time-hires \
         port:p${perl5.major}-uri \
         port:p${perl5.major}-xml-libxml \
@@ -60,43 +60,76 @@ depends_lib-append \
 # - it can install its own style files for use within tex/latex
 # We could simply depend on texlive, but some folks prefer MacTeX
 # and object to 2nd multi-GB download!  So we define variants.
+set latexml.found_tex no
 
-notes "${name} works best with some version of TeX installed. \
-   Please consider +texlive variant, or PRE-install MacTeX and use +mactex variant."
+# We don't want dependencies on texlive, but want to cooperate.
+# We'll install style files where texlive expects or will expect.
+configure.args-append   TEXMF=${texlive_texmfdist}
 
-# The texlive variant depends on texlive
-# and install latexml's stylefiles to texlive's texmf
-variant texlive conflicts mactex description {Build with (macports) texlive support} {
-    notes "Using texlive for TeX: will install styles to its texmf"
-    depends_lib-append      port:texlive
-    pre-configure {
-        configure.args-append   TEXMF=${texlive_texmfports}
+# But the .packlist will need cleanup
+post-destroot {
+    fs-traverse file ${destroot}${prefix}/share {
+        if {[file isfile ${file}] && [file tail ${file}] eq ".packlist"} {
+            ui_info "Fixing paths in [string map "${destroot}${prefix}/ {}" ${file}]"
+            reinplace -n "s|${destroot}||p" ${file}
+        }
     }
-    post-activate {
-        texlive.mktexlsr
+}
+
+# Note whether we've found a TeX
+post-activate {
+    if [file executable ${prefix}/bin/mktexlsr] {
+        set latexml.found_tex yes
     }
 }
 
 # The mactex variant expects MacTeX to be installed
-# and installs latexml's stylefiles to MacTeX's texmf
-variant mactex conflicts texlive description {Build with MacTeX support} {
-    # check if MacTeX actually seems to be there...
-    pre-configure {
-        if {![file executable /usr/texbin/kpsewhich]} {
-            ui_error "I cannot find MacTeX's kpswhich in /usr/texbin; aborting installation"
-            return -code error "MacTeX not installed"
-        } else {
-            configure.args-append   TEXMF=[exec /usr/texbin/kpsewhich --expand-var='\$TEXMFLOCAL']
+# and installs latexml's stylefiles to MacTeX's texmf (local)
+set latexml.mactex_bin ""
+set latexml.mactex_texmf ""
+set latexml.mactex_candidates { \
+   "/Library/TeX/texbin" \
+   "/usr/texbin" \
+}
+variant mactex description {Build with MacTeX support} {
+    # First, check if MacTeX actually seems to be there...
+    foreach dir ${latexml.mactex_candidates} {
+        if [file executable "${dir}/kpsewhich"] {
+            set latexml.mactex_bin ${dir}
+            break
         }
     }
-    notes "Using MacTeX for TeX: will install styles to MacTeX's texmf \
-        (outside macport's common directory structure)"
-    post-activate {
-        system /usr/texbin/mktexlsr
+    if { ${latexml.mactex_bin} != "" } {
+        set latexml.mactex_texmf \
+            [exec ${latexml.mactex_bin}/kpsewhich --expand-var='\$TEXMFLOCAL']
+        regsub -all {'} ${latexml.mactex_texmf} "" latexml.mactex_texmf
+        set latexml.found_tex yes
+    } else {
+        return -code error "Cannot find MacTeX installation; aborting"
     }
 
+    post-destroot {
+        xinstall -d ${destroot}${latexml.mactex_texmf}/tex/latex/latexml
+        foreach sty [glob ${worksrcpath}/lib/LaTeXML/texmf/*.sty] {
+            xinstall -m 644 ${sty} ${destroot}${latexml.mactex_texmf}/tex/latex/latexml
+        }
+    }
+    post-activate {
+        system "${latexml.mactex_bin}/mktexlsr"
+    }
+    post-deactivate {
+        system "${latexml.mactex_bin}/mktexlsr"
+    }
+    notes "Using MacTeX for TeX: will install styles to MacTeX's texmf-local
+        ${latexml.mactex_texmf} \
+        (which is outside macport's common directory structure)"
     # AND, since we're installing files outside macports' normal directories
     destroot.violate_mtree  yes
+}
+
+if {! ${latexml.found_tex}} {
+    notes "${name} works best with some version of TeX installed.
+        Please consider installing texlive, or PRE-install MacTeX and use the +mactex variant."
 }
 
 #============================================================
