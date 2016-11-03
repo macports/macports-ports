@@ -1,0 +1,163 @@
+From 515a1bffe58399b143522d03d63e34b7c42385c9 Mon Sep 17 00:00:00 2001
+From: Chris Bieneman <beanz@apple.com>
+Date: Tue, 3 May 2016 19:48:11 +0000
+Subject: [PATCH 2011/2012] [CMake] NFC. Add support for testing the compiler
+ without testing the linker
+
+Summary:
+One of the big limitations we have in the compiler-rt build system today is that we cannot bootstrap building the builtins because you need a fully functional toolchain to pass CMake's tests.
+
+This change adds support for compile only tests.
+
+It is NFC because nothing is using the compile-only tests yet.
+
+I believe this is the last separable part of D16653.
+
+Reviewers: samsonov
+
+Subscribers: llvm-commits
+
+Differential Revision: http://reviews.llvm.org/D19692
+
+git-svn-id: https://llvm.org/svn/llvm-project/compiler-rt/trunk@268427 91177308-0d34-0410-b5e6-96231b3b80d8
+(cherry picked from commit 4e4d4302a346a8619da1ea3ddf2f9fdc13f572b0)
+---
+ cmake/Modules/BuiltinTests.cmake          | 60 +++++++++++++++++++++++++++++++
+ cmake/Modules/CompilerRTDarwinUtils.cmake | 32 ++++++++++-------
+ cmake/Modules/CompilerRTUtils.cmake       |  2 ++
+ 3 files changed, 81 insertions(+), 13 deletions(-)
+ create mode 100644 cmake/Modules/BuiltinTests.cmake
+
+diff --git llvm_release_38/projects/compiler-rt/cmake/Modules/BuiltinTests.cmake macports_release_38/projects/compiler-rt/cmake/Modules/BuiltinTests.cmake
+new file mode 100644
+index 0000000..fde5f75
+--- /dev/null
++++ macports_release_38/projects/compiler-rt/cmake/Modules/BuiltinTests.cmake
+@@ -0,0 +1,60 @@
++
++# This function takes an OS and a list of architectures and identifies the
++# subset of the architectures list that the installed toolchain can target.
++function(try_compile_only output)
++  set(SIMPLE_C ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/src.c)
++  file(WRITE ${SIMPLE_C} "int foo(int x, int y) { return x + y; }\n")
++  string(REGEX MATCHALL "<[A-Za-z0-9_]*>" substitutions
++         ${CMAKE_C_COMPILE_OBJECT})
++  string(REPLACE ";" " " extra_flags "${ARGN}")
++
++  set(test_compile_command "${CMAKE_C_COMPILE_OBJECT}")
++  foreach(substitution ${substitutions})
++    if(substitution STREQUAL "<CMAKE_C_COMPILER>")
++      string(REPLACE "<CMAKE_C_COMPILER>"
++             "${CMAKE_C_COMPILER}" test_compile_command ${test_compile_command})
++    elseif(substitution STREQUAL "<OBJECT>")
++      string(REPLACE "<OBJECT>"
++             "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/test.o"
++             test_compile_command ${test_compile_command})
++    elseif(substitution STREQUAL "<SOURCE>")
++      string(REPLACE "<SOURCE>" "${SIMPLE_C}" test_compile_command
++             ${test_compile_command})
++    elseif(substitution STREQUAL "<FLAGS>")
++      string(REPLACE "<FLAGS>" "${CMAKE_C_FLAGS} ${extra_flags}"
++             test_compile_command ${test_compile_command})
++    else()
++      string(REPLACE "${substitution}" "" test_compile_command
++             ${test_compile_command})
++    endif()
++  endforeach()
++
++  string(REPLACE " " ";" test_compile_command "${test_compile_command}")
++
++  execute_process(
++    COMMAND ${test_compile_command}
++    RESULT_VARIABLE result
++    OUTPUT_VARIABLE TEST_OUTPUT
++    ERROR_VARIABLE TEST_ERROR
++  )
++  if(result EQUAL 0)
++    set(${output} True PARENT_SCOPE)
++  else()
++    file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeError.log
++        "Testing compiler for supporting " ${ARGN} ":\n"
++        "Command: ${test_compile_command}\n"
++        "${TEST_OUTPUT}\n${TEST_ERROR}\n${result}\n")
++    set(${output} False PARENT_SCOPE)
++  endif()
++endfunction()
++
++function(builtin_check_c_compiler_flag flag output)
++  message(STATUS "Performing Test ${output}")
++  try_compile_only(result ${flag})
++  set(${output} ${result} PARENT_SCOPE)
++  if(${result})
++    message(STATUS "Performing Test ${output} - Success")
++  else()
++    message(STATUS "Performing Test ${output} - Failed")
++  endif()
++endfunction()
+diff --git llvm_release_38/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake macports_release_38/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+index e8f0fe6..3e2371a 100644
+--- llvm_release_38/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
++++ macports_release_38/projects/compiler-rt/cmake/Modules/CompilerRTDarwinUtils.cmake
+@@ -45,14 +45,16 @@ function(darwin_test_archs os valid_archs)
+   endif()
+ 
+   set(archs ${ARGN})
+-  message(STATUS "Finding valid architectures for ${os}...")
+-  set(SIMPLE_CPP ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/src.cpp)
+-  file(WRITE ${SIMPLE_CPP} "#include <iostream>\nint main() { std::cout << std::endl; return 0; }\n")
+-
+-  set(os_linker_flags)
+-  foreach(flag ${DARWIN_${os}_LINKFLAGS})
+-    set(os_linker_flags "${os_linker_flags} ${flag}")
+-  endforeach()
++  if(NOT TEST_COMPILE_ONLY)
++    message(STATUS "Finding valid architectures for ${os}...")
++    set(SIMPLE_CPP ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/src.cpp)
++    file(WRITE ${SIMPLE_CPP} "#include <iostream>\nint main() { std::cout << std::endl; return 0; }\n")
++  
++    set(os_linker_flags)
++    foreach(flag ${DARWIN_${os}_LINKFLAGS})
++      set(os_linker_flags "${os_linker_flags} ${flag}")
++    endforeach()
++  endif()
+ 
+   # The simple program will build for x86_64h on the simulator because it is 
+   # compatible with x86_64 libraries (mostly), but since x86_64h isn't actually
+@@ -63,12 +65,16 @@ function(darwin_test_archs os valid_archs)
+ 
+   set(working_archs)
+   foreach(arch ${archs})
+-    
++   
+     set(arch_linker_flags "-arch ${arch} ${os_linker_flags}")
+-    try_compile(CAN_TARGET_${os}_${arch} ${CMAKE_BINARY_DIR} ${SIMPLE_CPP}
+-                COMPILE_DEFINITIONS "-v -arch ${arch}" ${DARWIN_${os}_CFLAGS}
+-                CMAKE_FLAGS "-DCMAKE_EXE_LINKER_FLAGS=${arch_linker_flags}"
+-                OUTPUT_VARIABLE TEST_OUTPUT)
++    if(TEST_COMPILE_ONLY)
++      try_compile_only(CAN_TARGET_${os}_${arch} -v -arch ${arch} ${DARWIN_${os}_CFLAGS})
++    else()
++      try_compile(CAN_TARGET_${os}_${arch} ${CMAKE_BINARY_DIR} ${SIMPLE_CPP}
++                  COMPILE_DEFINITIONS "-v -arch ${arch}" ${DARWIN_${os}_CFLAGS}
++                  CMAKE_FLAGS "-DCMAKE_EXE_LINKER_FLAGS=${arch_linker_flags}"
++                  OUTPUT_VARIABLE TEST_OUTPUT)
++    endif()
+     if(${CAN_TARGET_${os}_${arch}})
+       list(APPEND working_archs ${arch})
+     else()
+diff --git llvm_release_38/projects/compiler-rt/cmake/Modules/CompilerRTUtils.cmake macports_release_38/projects/compiler-rt/cmake/Modules/CompilerRTUtils.cmake
+index c61c874..81706a9 100644
+--- llvm_release_38/projects/compiler-rt/cmake/Modules/CompilerRTUtils.cmake
++++ macports_release_38/projects/compiler-rt/cmake/Modules/CompilerRTUtils.cmake
+@@ -109,6 +109,8 @@ macro(test_target_arch arch def)
+   check_compile_definition("${def}" "${argstring}" HAS_${arch}_DEF)
+   if(NOT HAS_${arch}_DEF)
+     set(CAN_TARGET_${arch} FALSE)
++  elseif(TEST_COMPILE_ONLY)
++    try_compile_only(CAN_TARGET_${arch} ${TARGET_${arch}_CFLAGS})
+   else()
+     set(argstring "${CMAKE_EXE_LINKER_FLAGS} ${argstring}")
+     try_compile(CAN_TARGET_${arch} ${CMAKE_BINARY_DIR} ${SIMPLE_SOURCE}
+-- 
+2.10.1
+
