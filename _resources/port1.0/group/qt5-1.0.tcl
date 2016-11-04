@@ -189,14 +189,6 @@ if { ![option universal_variant] || ![variant_isset universal] } {
     set qt_qmake_spec ""
 }
 
-# standard cmake info for Qt5
-#global qt_cmake_defines
-#set qt_cmake_defines    \
-#    "-DQT_QT_INCLUDE_DIR=${qt_includes_dir} \
-#     -DQT_QMAKESPEC=${qt_qmake_spec} \
-#     -DQT_ZLIB_LIBRARY=${prefix}/lib/libz.dylib \
-#     -DQT_PNG_LIBRARY=${prefix}/lib/libpng.dylib"
-
 # do not try to install if qt5-qtbase dependency will fail to build
 # warn about non-reference configurations
 if { ${os.major} < ${qt5_min_tested_version} } {
@@ -208,43 +200,6 @@ if { ${os.major} < ${qt5_min_tested_version} } {
 
 if {![info exists building_qt5]} {
     depends_lib-append port:qt5-qtbase
-}
-
-# standard configure environment, when not building qt5
-
-if {![info exists building_qt5]} {
-#    configure.env-append \
-#        QTDIR=${qt_dir} \
-#        QMAKE=${qt_qmake_cmd} \
-#        MOC=${qt_moc_cmd}
-
-    # make sure the Qt binaries' directory is in the path, if it is
-    # not the current prefix
-
-#    if {${qt_dir} ne ${prefix}} {
-#        configure.env-append PATH=${qt_dir}/bin:$env(PATH)
-#    }
-
-    # standard build environment, when not building qt5
-
-    #build.env-append \
-        #QTDIR=${qt_dir} \
-        #QMAKE=${qt_qmake_cmd} \
-        #MOC=${qt_moc_cmd}
-
-    #if { ![option universal_variant] || ![variant_isset universal] } {
-    #    build.env-append QMAKESPEC=${qt_qmake_spec}
-    #} else {
-    #    set merger_build_env(i386)   "QMAKESPEC=${qt_qmake_spec_32}"
-    #    set merger_build_env(x86_64) "QMAKESPEC=${qt_qmake_spec_64}"
-    #}
-
-    # make sure the Qt binaries' directory is in the path, if it is
-    # not the current prefix
-
-    #if {${qt_dir} ne ${prefix}} {
-    #    build.env-append    PATH=${qt_bins_dir}:$env(PATH)
-    #}
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
@@ -259,26 +214,3 @@ if { ![option universal_variant] || ![variant_isset universal] } {
         lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
     }
 }
-
-# standard destroot environment, when not building qt5
-
-#if {![info exists building_qt5]} {
-#    destroot.env-append \
-#        QTDIR=${qt_dir} \
-#        QMAKE=${qt_qmake_cmd} \
-#        MOC=${qt_moc_cmd}
-
-#    if { ![option universal_variant] || ![variant_isset universal] } {
-#        build.env-append QMAKESPEC=${qt_qmake_spec}
-#    } else {
-#        set destroot_build_env(i386)   "QMAKESPEC=${qt_qmake_spec_32}"
-#        set destroot_build_env(x86_64) "QMAKESPEC=${qt_qmake_spec_64}"
-#    }
-
-    # make sure the Qt binaries' directory is in the path, if it is
-    # not the current prefix
-
-#    if {${qt_dir} ne ${prefix}} {
-#        destroot.env-append PATH=${qt_dir}/bin:$env(PATH)
-#    }
-#}
