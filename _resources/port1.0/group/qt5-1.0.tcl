@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 # $Id: qt5-1.0.tcl 113952 2013-11-26 18:01:53Z michaelld@macports.org $
 
-# Copyright (c) 2014 The MacPorts Project
+# Copyright (c) 2014-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -36,7 +36,7 @@
 # PortGroup     qt5 1.0
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
-# Qt also has configurations which are occasionally tested
+# Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
 # see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
 global qt5_min_tested_version
 global qt5_max_tested_version
@@ -49,15 +49,6 @@ set qt5_max_reference_version  14
 
 if {[tbool just_want_qt5_version_info]} {
     return
-}
-
-# no universal binary support in Qt 5
-#     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
-#     and https://bugreports.qt.io/browse/QTBUG-24952
-supported_archs i386 x86_64
-if { ![exists universal_variant] || [option universal_variant] } {
-    PortGroup muniversal 1.0
-    universal_archs_supported i386 x86_64
 }
 
 # standard Qt5 name
@@ -166,6 +157,15 @@ set qt_lupdate_cmd     ${qt_dir}/bin/lupdate
 # standard PKGCONFIG path
 global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
+
+# no universal binary support in Qt 5
+#     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
+#     and https://bugreports.qt.io/browse/QTBUG-24952
+supported_archs i386 x86_64
+if { ![exists universal_variant] || [option universal_variant] } {
+    PortGroup muniversal 1.0
+    universal_archs_supported i386 x86_64
+}
 
 # standard qmake spec
 # other platforms required
