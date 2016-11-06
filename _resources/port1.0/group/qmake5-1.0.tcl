@@ -46,30 +46,33 @@ configure.cmd                   ${qt_qmake_cmd}
 configure.pre_args-replace      --prefix=${prefix} "PREFIX=${prefix}"
 configure.universal_args-delete --disable-dependency-tracking
 
-# specify build configuration (compiler, 32-bit/64-bit, etc.)
-if { ![option universal_variant] || ![variant_isset universal] } {
-    configure.args-append -spec ${qt_qmake_spec}
-} else {
-    lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
-    lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
-}
+pre-configure {
+    #
+    # set QT_ARCH and QT_TARGET_ARCH manually since they may be
+    #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
+    #     if qtbase was built universal
+    #
+    # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
+    #
+    if {[variant_exists universal] && [variant_isset universal]} {
 
-# if qtbase was build as a universal,
-#    QT_ARCH and QT_TARGET_ARCH may be set incorrectly in ${qt_mkspecs_dir}/qconfig.pri,
-#    so set them manually
-if { ![option universal_variant] || ![variant_isset universal] } {
-    pre-configure {
-        if {[active_variants qt5-qtbase universal ""]} {
-            configure.args-append \
-                QT_ARCH=${build_arch} \
-                QT_TARGET_ARCH=${build_arch}
+        global merger_configure_args
+
+        lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
+        lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+
+        foreach arch ${configure.universal_archs} {
+            lappend merger_configure_args(${arch}) \
+                QT_ARCH=${arch} \
+                QT_TARGET_ARCH=${arch}
         }
-    }
-} else {
-    foreach arch ${configure.universal_archs} {
-        lappend merger_configure_args(${arch}) \
-            QT_ARCH=${arch} \
-            QT_TARGET_ARCH=${arch}
+    } else {
+
+        configure.args-append -spec ${qt_qmake_spec}
+
+        configure.args-append \
+            QT_ARCH=${build_arch} \
+            QT_TARGET_ARCH=${build_arch}
     }
 }
 
