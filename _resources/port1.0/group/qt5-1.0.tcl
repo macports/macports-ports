@@ -161,10 +161,25 @@ set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
-supported_archs i386 x86_64
-if { ![exists universal_variant] || [option universal_variant] } {
-    PortGroup muniversal 1.0
-    universal_archs_supported i386 x86_64
+default supported_archs {"i386 x86_64"}
+# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
+# see https://trac.macports.org/ticket/51643
+proc universal_setup {args} {
+    if {[variant_exists universal]} {
+        ui_debug "universal variant already exists, so not adding the default one"
+    } elseif {[exists universal_variant] && ![option universal_variant]} {
+        ui_debug "universal_variant is false, so not adding the default universal variant"
+    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
+        ui_debug "using xmkmf, so not adding the default universal variant"
+    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
+        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
+    } elseif {[llength [option supported_archs]] == 1} {
+        ui_debug "only one arch supported, so not adding the default universal variant"
+    } else {
+        ui_debug "adding universal variant via PortGroup muniversal"
+        uplevel "PortGroup muniversal 1.0"
+        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
+    }
 }
 
 # standard qmake spec
