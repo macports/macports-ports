@@ -35,6 +35,79 @@
 # Usage:
 # PortGroup     qt5 1.0
 
+global available_qt_versions
+set available_qt_versions {
+    qt5
+}
+
+# standard Qt5 name
+global qt_name
+
+if { ![info exists qt_name] } {
+
+    if { ${os.major} <= 7 } {
+        #
+        # Qt 5 does not support ppc
+        # see http://doc.qt.io/qt-5/osx-requirements.html
+        #
+        set qt_name qt5
+        #
+    } elseif { ${os.major} <= 9 } {
+        #
+        # Mac OS X Tiger (10.4)
+        # Mac OS X Leopard (10.5)
+        #
+        # never supported by Qt 5
+        #
+        set qt_name qt5
+        #
+    } elseif { ${os.major} == 10 } {
+        #
+        # Mac OS X Snow Leopard (10.6)
+        #
+        #     Qt 5.3: Deployment only
+        # Qt 5.0-5.2: Occasionally tested
+        #
+        set qt_name qt5
+        #
+    } elseif { ${os.major} == 11 } {
+        #
+        # Mac OS X Lion (10.7)
+        #
+        # Qt 5.6: Deployment only
+        # Qt 5.5: Occasionally tested
+        # Qt 5.4: Supported
+        #
+        set qt_name qt5
+        #
+    } elseif { ${os.major} <= 12 } {
+        #
+        # OS X Mountain Lion (10.8)
+        # OS X Mavericks (10.9)
+        # OS X Yosemite (10.10)
+        # OS X El Capitan (10.11)
+        #
+        # Qt 5.7: Supported
+        # Qt 5.6: Supported
+        #
+        set qt_name qt5
+        #
+    } elseif { ${os.major} <= 16 } {
+        #
+        # macOS Sierra (10.12)
+        # as of Qt version 5.7, there is no official support
+        #
+        set qt_name qt5
+        #
+    } else {
+        #
+        # macOS ??? (???)
+        #
+        set qt_name qt5
+        #
+    }
+}
+
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
 # Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
 # see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
@@ -42,18 +115,20 @@ global qt5_min_tested_version
 global qt5_max_tested_version
 global qt5_min_reference_version
 global qt5_max_reference_version
-set qt5_min_tested_version     11
-set qt5_max_tested_version     14
-set qt5_min_reference_version  12
-set qt5_max_reference_version  14
+
+# see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+switch ${qt_name} {
+    qt5 {
+        set qt5_min_tested_version     12
+        set qt5_max_tested_version     15
+        set qt5_min_reference_version  12
+        set qt5_max_reference_version  15
+    }
+}
 
 if {[tbool just_want_qt5_version_info]} {
     return
 }
-
-# standard Qt5 name
-global qt_name
-set qt_name             qt5
 
 # standard install directory
 global qt_dir
@@ -158,6 +233,10 @@ set qt_lupdate_cmd     ${qt_dir}/bin/lupdate
 global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
+if {[tbool just_want_qt5_variables]} {
+    return
+}
+
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -213,8 +292,14 @@ if { ${os.major} < ${qt5_min_tested_version} } {
     }
 }
 
+if { ${qt_name} ne "qt5" } {
+    pre-fetch {
+        ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
+    }
+}
+
 if {![info exists building_qt5]} {
-    depends_lib-append port:qt5-qtbase
+    depends_lib-append path:lib/pkgconfig/Qt5Core.pc:${qt_name}-qtbase
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
