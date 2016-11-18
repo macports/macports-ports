@@ -287,8 +287,7 @@ if { ![option universal_variant] || ![variant_isset universal] } {
 # warn about non-reference configurations
 if { ${os.major} < ${qt5_min_tested_version} } {
     pre-fetch {
-        ui_error "Qt dependency will not build on this platform"
-        return -code error "unsupported OS"
+        ui_warn "Qt dependency is not supported on this platform and may not build"
     }
 }
 
