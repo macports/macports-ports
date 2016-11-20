@@ -38,6 +38,7 @@
 global available_qt_versions
 set available_qt_versions {
     qt5
+    qt55
 }
 
 # standard Qt5 name
@@ -123,6 +124,12 @@ switch ${qt_name} {
         set qt5_max_tested_version     15
         set qt5_min_reference_version  12
         set qt5_max_reference_version  15
+    }
+    qt55 {
+        set qt5_min_tested_version     11
+        set qt5_max_tested_version     14
+        set qt5_min_reference_version  13
+        set qt5_max_reference_version  14
     }
 }
 
