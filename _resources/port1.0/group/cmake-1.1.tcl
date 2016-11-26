@@ -1,6 +1,5 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
-# $Id$
+# $Id: cmake-1.1.tcl 154368 2016-10-28 20:12:22Z mk@macports.org $
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
 # Copyright (c) 2010-2015 The MacPorts Project
@@ -43,6 +42,7 @@ namespace eval cmake {
 
 options cmake.out_of_source cmake.build_dir cmake.set_osx_architectures
 options cmake.install_rpath
+options cmake.generator
 
 # make out-of-source builds the default (finally)
 default cmake.out_of_source         yes
@@ -57,6 +57,23 @@ default cmake.build_dir             {${workpath}/build}
 # minimal/initial value for the install rpath:
 default cmake.install_rpath         ${prefix}/lib
 
+# CMake provides several different generators corresponding to different utities
+# (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
+# and Ninja, a leaner-and-meaner alternative.
+#
+# In the Portfile, use
+#
+# cmake.generator Ninja
+# or
+# cmake.generator Unix Makefiles    # no quotes!
+#
+default cmake.generator             {"Unix Makefiles"}
+# CMake generates Unix Makefiles that contain a special "fast" install target
+# which skips the whole "let's see if there's anything left to (re)build before
+# we install" you normally get with `make install`. That check should be
+# redundant in normal destroot steps, because we just completed the build step.
+default destroot.target             install/fast
+
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
 
@@ -70,11 +87,51 @@ proc _cmake_get_build_dir {} {
     return [option worksrcpath]
 }
 
-default configure.dir {[_cmake_get_build_dir]}
-
-pre-configure {
-    file mkdir ${configure.dir}
+option_proc cmake.generator handle_generator
+proc handle_generator {option action args} {
+    global cmake.generator destroot destroot.target build.cmd build.post_args depends_build destroot.post_args
+    if {${action} eq "set"} {
+        switch -nocase ${args} {
+            "{Unix Makefiles}" {
+                ui_debug "Selecting the 'Unix Makefiles' generator"
+                cmake.generator     "Unix Makefiles"
+                depends_build-delete \
+                                    port:ninja
+                default build.cmd   make
+                default build.post_args \
+                                    {VERBOSE=ON}
+                default destroot.target \
+                                    install/fast
+                default destroot.post_args \
+                                    "DESTDIR=${destroot}"
+                # unset the DESTDIR env. variable if it has been set before
+                if {[info exists ::env(DESTDIR)]} {
+                    unset ::env(DESTDIR)
+                }
+            }
+            Ninja {
+                ui_debug "Selecting the Ninja generator"
+                cmake.generator     Ninja
+                depends_build-append \
+                                    port:ninja
+                default build.cmd  ninja
+                default build.post_args \
+                                    ""
+                default destroot.target \
+                                    install
+                # ninja needs the DESTDIR argument in the environment
+                default destroot.post_args \
+                                    ""
+                set ::env(DESTDIR)  ${destroot}
+            }
+            default {
+                return -code error "The \"${args}\" cmake generator is not currently known/supported"
+            }
+        }
+    }
 }
+
+default configure.dir {[_cmake_get_build_dir]}
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
@@ -118,6 +175,9 @@ default configure.post_args {${worksrcpath}}
 # TODO: Handle the Java-specific configure.classpath variable.
 
 pre-configure {
+    # create the build directory:
+    file mkdir ${configure.dir}
+
     # The environment variable CPPFLAGS is not considered by CMake.
     # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
     # <http://www.cmake.org/Bug/view.php?id=12928>).
@@ -194,6 +254,7 @@ pre-configure {
         ui_debug "Adding -DCMAKE_INSTALL_RPATH=[join ${cmake.install_rpath} \;] to configure.args"
         configure.args-append -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
     }
+    configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
 }
 
 post-configure {
@@ -306,4 +367,14 @@ if {[string first "--enable-debug" ${configure.args}] > -1} {
 
 default build.dir {${configure.dir}}
 
-default build.post_args {VERBOSE=ON}
+pre-build {
+    if {${cmake.generator} eq "Ninja"} {
+        if {![tbool use_parallel_build]} {
+            # ninja builds in parallel mode by default
+            build.post_args-append -j1
+        } elseif {${build.jobs} >= 1} {
+            build.post_args-append -j${build.jobs}
+        }
+    }
+}
+
