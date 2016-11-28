@@ -83,7 +83,7 @@ configure.cmd       ${prefix}/bin/cmake
 
 configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
 
-configure.args \
+default configure.args {[list \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=MacPorts \
@@ -93,7 +93,10 @@ configure.args \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                    -DCMAKE_C_COMPILER=${configure.cc} \
+                    -DCMAKE_CXX_COMPILER=${configure.cxx} \
                     -Wno-dev
+                    ]}
 
 default configure.post_args {${worksrcpath}}
 
@@ -142,17 +145,6 @@ pre-configure {
     # but why do we set -DNDEBUG?
     configure.cflags-append     -DNDEBUG
     configure.cxxflags-append   -DNDEBUG
-    # force newer CMake versions to take a change in compiler choice into account
-    # even if it is invoked in a build.dir that was configured before.
-    if {${configure.cc} ne ""} {
-        configure.args-append \
-                    -DCMAKE_C_COMPILER=${configure.cc}
-    }
-    if {${configure.cxx} ne ""} {
-        configure.args-append \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx}
-    }
-
 
     # process ${configure.cppflags} to extract include directives and other options
     if {${configure.cppflags} ne ""} {
