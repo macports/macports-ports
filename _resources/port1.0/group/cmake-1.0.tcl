@@ -65,7 +65,8 @@ configure.cmd       ${prefix}/bin/cmake
 
 configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
 
-configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
+default configure.args {[list \
+                    -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
@@ -74,7 +75,10 @@ configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
+                    -DCMAKE_C_COMPILER=${configure.cc} \
+                    -DCMAKE_CXX_COMPILER=${configure.cxx} \
                     -Wno-dev
+                    ]}
 
 default configure.post_args {${worksrcpath}}
 
