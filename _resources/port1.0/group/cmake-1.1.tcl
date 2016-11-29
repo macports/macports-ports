@@ -176,14 +176,11 @@ pre-configure {
             }
         }
         if {${configure.cppflags} ne ""} {
-            ui_debug "-DINCLUDE_DIRECTORIES=${configure.cppflags}"
-            configure.args-append   -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
+            configure.args-append -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
         }
-        ui_debug "CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
     }
 
     if {${cmake.install_rpath} ne ""} {
-        ui_debug "Adding -DCMAKE_INSTALL_RPATH=[join ${cmake.install_rpath} \;] to configure.args"
         configure.args-append -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
     }
 }
