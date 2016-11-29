@@ -75,8 +75,8 @@ default configure.args {[list \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
-                    -DCMAKE_C_COMPILER=${configure.cc} \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx} \
+                   {-DCMAKE_C_COMPILER="$CC"} \
+                   {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -Wno-dev
                     ]}
 

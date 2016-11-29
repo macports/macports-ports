@@ -93,8 +93,8 @@ default configure.args {[list \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                    -DCMAKE_C_COMPILER=${configure.cc} \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx} \
+                   {-DCMAKE_C_COMPILER="$CC"} \
+                   {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -Wno-dev
                     ]}
 
