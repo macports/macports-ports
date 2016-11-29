@@ -45,17 +45,17 @@ options cmake.out_of_source cmake.build_dir cmake.set_osx_architectures
 options cmake.install_rpath
 
 # make out-of-source builds the default (finally)
-default cmake.out_of_source         yes
+default cmake.out_of_source {yes}
 
 # set CMAKE_OSX_ARCHITECTURES when necessary.
 # This can be deactivated when (non-Apple) compilers are used
 # that don't support the corresponding -arch options.
-default cmake.set_osx_architectures yes
+default cmake.set_osx_architectures {yes}
 
 default cmake.build_dir             {${workpath}/build}
 
 # minimal/initial value for the install rpath:
-default cmake.install_rpath         ${prefix}/lib
+default cmake.install_rpath {${prefix}/lib}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
