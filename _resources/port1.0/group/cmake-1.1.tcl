@@ -36,11 +36,6 @@
 # Usage:
 # PortGroup     cmake 1.1
 
-namespace eval cmake {
-    # our directory:
-    variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
-}
-
 options cmake.out_of_source cmake.build_dir cmake.set_osx_architectures
 options cmake.install_rpath
 
