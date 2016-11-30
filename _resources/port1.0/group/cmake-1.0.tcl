@@ -66,17 +66,17 @@ configure.cmd       ${prefix}/bin/cmake
 default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
 
 default configure.args {[list \
-                    -DCMAKE_VERBOSE_MAKEFILE=ON \
-                    -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-                    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
-                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
-                    -DCMAKE_FIND_FRAMEWORK=LAST \
                    {-DCMAKE_C_COMPILER="$CC"} \
+                    -DCMAKE_COLOR_MAKEFILE=ON \
                    {-DCMAKE_CXX_COMPILER="$CXX"} \
+                    -DCMAKE_FIND_FRAMEWORK=LAST \
+                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
+                    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
+                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
+                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -Wno-dev
                     ]}
 
