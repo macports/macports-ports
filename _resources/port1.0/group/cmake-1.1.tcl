@@ -73,9 +73,8 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
-default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
-
-default configure.args {[list \
+default configure.pre_args {[list \
+                    -DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}' \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=MacPorts \
@@ -276,7 +275,8 @@ platform darwin {
 configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
-    configure.args-replace -DCMAKE_BUILD_TYPE=MacPorts -DCMAKE_BUILD_TYPE=Debug
+    configure.pre_args-replace  -DCMAKE_BUILD_TYPE=MacPorts \
+                                -DCMAKE_BUILD_TYPE=Debug
 }
 
 # cmake doesn't like --enable-debug, so in case a portfile sets
