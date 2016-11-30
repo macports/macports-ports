@@ -33,10 +33,11 @@
 # Usage:
 # PortGroup     cmake 1.0
 
-options cmake.out_of_source cmake.build_dir
+options cmake.build_dir cmake.install_prefix cmake.out_of_source
 
-default cmake.out_of_source no
-default cmake.build_dir {${workpath}/build}
+default cmake.build_dir         {${workpath}/build}
+default cmake.install_prefix    {${prefix}}
+default cmake.out_of_source     {no}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -62,7 +63,7 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
-configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
+default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
 
 default configure.args {[list \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
