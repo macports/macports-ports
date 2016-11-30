@@ -174,6 +174,9 @@ pre-configure {
     if {${cmake.install_rpath} ne ""} {
         configure.args-append -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
     }
+
+    # CMake doesn't like --enable-debug, so remove it unconditionally.
+    configure.args-delete --enable-debug
 }
 
 post-configure {
@@ -277,12 +280,6 @@ configure.universal_args-delete --disable-dependency-tracking
 variant debug description "Enable debug binaries" {
     configure.pre_args-replace  -DCMAKE_BUILD_TYPE=MacPorts \
                                 -DCMAKE_BUILD_TYPE=Debug
-}
-
-# cmake doesn't like --enable-debug, so in case a portfile sets
-# --enable-debug (regardless of variant) we remove it
-if {[string first "--enable-debug" ${configure.args}] > -1} {
-    configure.args-delete     --enable-debug
 }
 
 default build.dir {${configure.dir}}

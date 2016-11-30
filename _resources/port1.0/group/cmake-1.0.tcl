@@ -121,6 +121,9 @@ pre-configure {
         configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
                               -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
     }
+
+    # CMake doesn't like --enable-debug, so remove it unconditionally.
+    configure.args-delete --enable-debug
 }
 
 platform darwin {
@@ -181,12 +184,6 @@ configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
     configure.args-replace  -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_TYPE=Debug
-}
-
-# cmake doesn't like --enable-debug, so in case a portfile sets
-# --enable-debug (regardless of variant) we remove it
-if {[string first "--enable-debug" ${configure.args}] > -1} {
-    configure.args-delete     --enable-debug
 }
 
 default build.dir {${configure.dir}}
