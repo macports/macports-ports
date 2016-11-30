@@ -285,3 +285,7 @@ variant debug description "Enable debug binaries" {
 default build.dir {${configure.dir}}
 
 default build.post_args {VERBOSE=ON}
+
+# Generated Unix Makefiles contain a "fast" install target that begins
+# installing immediately instead of checking build dependencies again.
+default destroot.target {install/fast}
