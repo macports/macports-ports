@@ -34,6 +34,8 @@
 # Usage:
 # PortGroup     cmake 1.1
 
+namespace eval cmake {}
+
 options cmake.build_dir cmake.install_prefix cmake.install_rpath
 options cmake.out_of_source cmake.set_osx_architectures
 
@@ -48,6 +50,15 @@ default cmake.set_osx_architectures {yes}
 default cmake.build_dir         {${workpath}/build}
 default cmake.install_prefix    {${prefix}}
 default cmake.install_rpath     {${prefix}/lib}
+proc cmake::rpath_flags {} {
+    if {[llength [option cmake.install_rpath]]} {
+        return [list \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+            -DCMAKE_INSTALL_RPATH='[join [option cmake.install_rpath] \;]'
+        ]
+    }
+    return -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -78,7 +89,7 @@ default configure.pre_args {[list \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_BUILD_TYPE=MacPorts \
-                    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+                    {*}[cmake::rpath_flags] \
                     -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
@@ -169,10 +180,6 @@ pre-configure {
         if {${configure.cppflags} ne ""} {
             configure.args-append -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
         }
-    }
-
-    if {${cmake.install_rpath} ne ""} {
-        configure.args-append -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
     }
 
     # CMake doesn't like --enable-debug, so remove it unconditionally.
