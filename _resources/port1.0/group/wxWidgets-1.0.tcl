@@ -1,6 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
-
+#
 # This PortGroup is to be used with all projects that depend on wxWidgets
 # (including some that need wxPython).
 #

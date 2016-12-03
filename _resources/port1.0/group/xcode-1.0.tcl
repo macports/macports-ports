@@ -1,7 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
-# xcode.tcl
-#
-# $Id$
 #
 # Copyright (c) 2005 Paul Guyot <pguyot@kallisys.net>,
 # Copyright (c) 2005-2012, 2014-2016 The MacPorts Project

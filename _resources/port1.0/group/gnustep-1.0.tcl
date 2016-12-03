@@ -1,7 +1,4 @@
-# et:ts=4
-# gnustep.tcl
-#
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2006 Yves de Champlain <yves@opendarwin.org>,
 # All rights reserved.

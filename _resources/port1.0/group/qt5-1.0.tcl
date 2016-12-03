@@ -1,6 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id: qt5-1.0.tcl 113952 2013-11-26 18:01:53Z michaelld@macports.org $
-
+#
 # Copyright (c) 2014-2016 The MacPorts Project
 # All rights reserved.
 #

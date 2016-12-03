@@ -1,7 +1,4 @@
-# et:ts=4
-# waf-1.0.tcl
-#
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2014 The MacPorts Project
 # Copyright (c) 2014 Rainer Mueller <raimue@macports.org>
