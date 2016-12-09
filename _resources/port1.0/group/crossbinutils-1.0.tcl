@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2010 The MacPorts Project
+# Copyright (c) 2010-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -35,7 +35,7 @@
 # Usage:
 #
 #   PortGroup               crossbinutils 1.0
-#   crossbinutils.setup     spu 2.20.51.0.5
+#   crossbinutils.setup     spu 2.27
 
 options crossbinutils.target
 
