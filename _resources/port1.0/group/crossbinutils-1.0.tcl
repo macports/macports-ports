@@ -40,7 +40,7 @@
 options crossbinutils.target
 
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath extract.suffix
+    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target
 
     crossbinutils.target ${target}
 
@@ -112,7 +112,7 @@ proc crossbinutils.setup {target version} {
 
         reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
             ${worksrcpath}/libiberty/Makefile.in
-        reinplace "s|\$(MULTIOSDIR)||g" \
+        reinplace "s|/\$(MULTIOSDIR)||g" \
             ${worksrcpath}/libiberty/Makefile.in
     }
 
@@ -129,7 +129,7 @@ proc crossbinutils.setup {target version} {
     configure.args \
         --target=${target} \
         --program-prefix=${target}- \
-        --enable-install-libiberty \
+        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host  \
         --enable-install-libbfd
 
     build.dir ${workpath}/build
