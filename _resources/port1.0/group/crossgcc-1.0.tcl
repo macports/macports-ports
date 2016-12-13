@@ -109,6 +109,7 @@ proc crossgcc.setup {target version} {
                     gcc/doc/ gcc/Makefile.in gcc texi
                     gcc/doc/ gcc/Makefile.in gccint texi
                     gcc/doc/ gcc/Makefile.in gccinstall info
+                    gcc/fortran gcc/fortran/Make-lang.in gfortran texi
                     libquadmath libquadmath/Makefile.in libquadmath info
                 }
 
