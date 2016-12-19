@@ -49,7 +49,7 @@ default cmake.set_osx_architectures {yes}
 
 default cmake.build_dir         {${workpath}/build}
 default cmake.install_prefix    {${prefix}}
-default cmake.install_rpath     {${prefix}/lib}
+default cmake.install_rpath     {${cmake.install_prefix}/lib}
 proc cmake::rpath_flags {} {
     if {[llength [option cmake.install_rpath]]} {
         return [list \
@@ -91,11 +91,11 @@ default configure.pre_args {[list \
                    {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
+                    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
                     -DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}' \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     {*}[cmake::rpath_flags] \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -Wno-dev
                     ]}
