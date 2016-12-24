@@ -193,6 +193,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     version         ${vers}
     categories      ruby
 
+    # set source to rubygems by default for type "gem"
+    if {(${type} eq "gem") && (${source} eq "custom")} {
+        set source rubygems
+    }
     switch -glob ${source} {
         rubygems {
             homepage        http://www.rubygems.org/gems/${ruby.project}
