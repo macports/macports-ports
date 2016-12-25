@@ -458,7 +458,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 }
             }
 
-            extract {}
+            extract {
+                file mkdir ${worksrcpath}
+                copy ${distpath}/${distname}.gem ${worksrcpath}/${ruby.filename}.gem
+            }
             build {}
 
             pre-destroot {
@@ -469,11 +472,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.target install
             destroot.args   --local --force --install-dir ${destroot}${ruby.gemdir}
             destroot.env-append rake=${ruby.rake}
+            destroot.post_args ${worksrcpath}/${ruby.filename}.gem
 
             destroot {
-                # note: port cannot read $distpath and $distname
-                #       outside of destroot {}
-                destroot.post_args ${distpath}/${distname}.gem
                 command_exec destroot
 
                 set binDir ${destroot}${ruby.gemdir}/bin
