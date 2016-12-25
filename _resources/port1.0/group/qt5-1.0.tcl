@@ -274,7 +274,7 @@ proc universal_setup {args} {
 global qt_qmake_spec
 global qt_qmake_spec_32
 global qt_qmake_spec_64
-compiler.blacklist *gcc*
+compiler.blacklist-append *gcc*
 
 set qt_qmake_spec_32 macx-clang-32
 set qt_qmake_spec_64 macx-clang
