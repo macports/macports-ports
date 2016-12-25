@@ -40,6 +40,7 @@ namespace eval cmake {
 }
 
 options                             cmake.build_dir \
+                                    cmake.source_dir \
                                     cmake.generator \
                                     cmake.install_prefix \
                                     cmake.install_rpath \
@@ -56,7 +57,10 @@ default cmake.out_of_source         {yes}
 # that don't support the corresponding -arch options.
 default cmake.set_osx_architectures {yes}
 
+# cmake.build_dir defines where the build will take place
 default cmake.build_dir             {${workpath}/build}
+# cmake.source_dir defines where CMake will look for the toplevel CMakeLists.txt file
+default cmake.source_dir            {${worksrcpath}}
 
 # cmake-based ports may want to modify the install prefix
 default cmake.install_prefix        {${prefix}}
@@ -128,11 +132,11 @@ default destroot.target             {install/fast}
 # can use cmake or cmake-devel; default to cmake if not installed
 depends_build-append                path:bin/cmake:cmake
 
-proc _cmake_get_build_dir {} {
+proc cmake::build_dir {} {
     if {[option cmake.out_of_source]} {
         return [option cmake.build_dir]
     }
-    return [option worksrcpath]
+    return [option cmake.source_dir]
 }
 
 option_proc cmake.generator cmake::handle_generator
@@ -181,7 +185,7 @@ proc cmake::handle_generator {option action args} {
     }
 }
 
-default configure.dir {[_cmake_get_build_dir]}
+default configure.dir {[cmake::build_dir]}
 default build.dir {${configure.dir}}
 default build.post_args {VERBOSE=ON}
 
@@ -210,7 +214,7 @@ default configure.pre_args {[list \
 
 configure.args      -DCMAKE_BUILD_TYPE=MacPorts
 
-default configure.post_args {${worksrcpath}}
+default configure.post_args {[option cmake.source_dir]}
 
 # CMake honors set environment variables CFLAGS, CXXFLAGS, and LDFLAGS when it
 # is first run in a build directory to initialize CMAKE_C_FLAGS,
