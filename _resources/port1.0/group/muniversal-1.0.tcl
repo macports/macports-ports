@@ -198,7 +198,13 @@ variant universal {
 
     configure {
         # Fix inability to find nm when cross-compiling (#22224, #23431, #23687, #24477, et al)
-        configure.env-append    NM=/usr/bin/nm
+        # TODO: I suspect we should remove this.  base doesn't do this, so I don't see why muniversal should.
+        #       This also seems like a but in certain versions of autoconf, so ports should just autoreconf (or patch).
+        if {[file exists ${prefix}/bin/nm]} {
+            configure.env-append    NM=${prefix}/bin/nm
+        } else {
+            configure.env-append    NM=/usr/bin/nm
+        }
 
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] ${subport} ${arch}]"
