@@ -85,6 +85,13 @@ if {${configure.sdkroot} ne ""} {
         QMAKE_MAC_SDK=[string tolower [join [lrange [split [lindex [split ${configure.sdkroot} "/"] end] "."] 0 end-1] "."]]
 }
 
+# respect configure.compiler but still allow qmake to find correct Xcode clang based on SDK
+if { ${configure.compiler} ne "clang" } {
+    configure.args-append \
+        QMAKE_CC=${configure.cc} \
+        QMAKE_CXX=${configure.cxx}
+}
+
 # override C++11 flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
 #    so value of ${configure.cxx_stdlib} can always be used
 configure.args-append \
