@@ -53,6 +53,8 @@ pre-configure {
     #
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
     #
+    # set -arch x86_64 since macx-clang spec file assumes it is the default
+    #
     if {[variant_exists universal] && [variant_isset universal]} {
 
         global merger_configure_args
@@ -65,6 +67,12 @@ pre-configure {
                 QT_ARCH=${arch} \
                 QT_TARGET_ARCH=${arch}
         }
+
+        lappend merger_configure_args(x86_64)  \
+            QMAKE_CFLAGS+='-arch x86_64'       \
+            QMAKE_CXXFLAGS+='-arch x86_64'     \
+            QMAKE_LFLAGS+='-arch x86_64'
+
     } else {
 
         configure.args-append -spec ${qt_qmake_spec}
@@ -72,6 +80,13 @@ pre-configure {
         configure.args-append \
             QT_ARCH=${build_arch} \
             QT_TARGET_ARCH=${build_arch}
+
+        if { ${configure.build_arch} eq "x86_64" } {
+            configure.args-append               \
+                QMAKE_CFLAGS+="-arch x86_64"    \
+                QMAKE_CXXFLAGS+="-arch x86_64"  \
+                QMAKE_LFLAGS+="-arch x86_64"
+        }
     }
 }
 
