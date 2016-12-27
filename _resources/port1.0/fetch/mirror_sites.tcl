@@ -315,6 +315,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://her.gr.distfiles.macports.org/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
     http://jog.id.distfiles.macports.org/macports/distfiles/:mirror
+    http://kmq.jp.distfiles.macports.org/:mirror
     http://lil.fr.distfiles.macports.org/:mirror
     http://mse.uk.distfiles.macports.org/sites/distfiles.macports.org/:mirror
     http://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
