@@ -79,6 +79,12 @@ pre-configure {
 # see #50249
 configure.args-append QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}
 
+# respect configure.sdkroot if it exists
+if {${configure.sdkroot} ne ""} {
+    configure.args-append \
+        QMAKE_MAC_SDK=[string tolower [join [lrange [split [lindex [split ${configure.sdkroot} "/"] end] "."] 0 end-1] "."]]
+}
+
 # override C++11 flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
 #    so value of ${configure.cxx_stdlib} can always be used
 configure.args-append \
