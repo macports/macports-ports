@@ -92,18 +92,33 @@ if { ${configure.compiler} ne "clang" } {
         QMAKE_CXX=${configure.cxx}
 }
 
-# override C++11 flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
-#    so value of ${configure.cxx_stdlib} can always be used
-configure.args-append \
-    QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++ \
-    QMAKE_LFLAGS_CXX11-=-stdlib=libc++   \
-    QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib} \
-    QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
+if { ${qt_name} eq "qt55" } {
 
-# ensure ${configure.cxx_stdlib} is used for C++ stdlib
-configure.args-append \
-    QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib} \
-    QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+    # always use the same standard library
+    configure.args-append                                \
+        QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
+        QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+
+    # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
+    #    so value of ${configure.cxx_stdlib} can always be used
+    if { ${configure.cxx_stdlib} ne "libc++" } {
+        configure.args-append                                      \
+            QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++                   \
+            QMAKE_LFLAGS_CXX11-=-stdlib=libc++                     \
+            QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}  \
+            QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
+    }
+} else {
+    if { ${configure.cxx_stdlib} ne "libc++" } {
+        # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
+        #    so value of ${configure.cxx_stdlib} can always be used
+        configure.args-append                                \
+            QMAKE_CXXFLAGS-=-stdlib=libc++                   \
+            QMAKE_LFLAGS-=-stdlib=libc++                     \
+            QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
+            QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+    }
+}
 
 if {![info exists qt5_qmake_request_no_debug]} {
     variant debug description {Build both release and debug libraries} {}
