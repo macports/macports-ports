@@ -126,11 +126,21 @@ if {![info exists qt5_qmake_request_no_debug]} {
     # accommodating variant request varies depending on how qtbase was built
     pre-configure {
 
-        # determine if qmake builds debug libraries by default (set via variants)
-        if {[active_variants qt5-qtbase debug ""]} {
-            set base_debug true
-        } else {
-            set base_debug false
+        set base_debug false
+        foreach qt_test_name ${available_qt_versions} {
+            if {![catch {set result [active_variants ${qt_test_name}-qtbase debug ""]}]} {
+                if {$result} {
+                    # code to be executed if $depspec is active with at least all variants in
+                    # $required and none from $forbidden
+                    set base_debug true
+                    break
+                } else {
+                    # code to be executed if $depspec is active, but either not with all
+                    # variants in $required or any variant in $forbidden
+                }
+            } else {
+                # code to be executed if $depspec isn't active
+            }
         }
 
         # determine if the user wants to build debug libraries
