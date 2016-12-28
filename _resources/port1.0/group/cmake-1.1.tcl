@@ -403,11 +403,16 @@ variant debug description "Enable debug binaries" {
     configure.objcxxflags-replace    -O2 -O0
     configure.ldflags-replace        -O2 -O0
     # get most if not all possible debug info
-    configure.cflags-append         -g -fno-limit-debug-info -DDEBUG
-    configure.cxxflags-append       -g -fno-limit-debug-info -DDEBUG
-    configure.objcflags-append      -g -fno-limit-debug-info -DDEBUG
-    configure.objcxxflags-append    -g -fno-limit-debug-info -DDEBUG
-    configure.ldflags-append        -g -fno-limit-debug-info
+    if {[string match *clang* ${configure.cxx}]} {
+        set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+    } else {
+        set cmake::debugopts "-g -DDEBUG"
+    }
+    configure.cflags-append         ${cmake::debugopts}
+    configure.cxxflags-append       ${cmake::debugopts}
+    configure.objcflags-append      ${cmake::debugopts}
+    configure.objcxxflags-append    ${cmake::debugopts}
+    configure.ldflags-append        ${cmake::debugopts}
     # try to ensure that info won't get stripped
     configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
 }
