@@ -1,5 +1,3 @@
-# $Id$
-#
 # If the default type cannot be determined from the mirror, this file is
 # sourced.
 

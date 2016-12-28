@@ -1,5 +1,3 @@
-# $Id$
-#
 # This file contains the defaults for gnome.
 
 if {${livecheck.name} eq "default"} {

@@ -1,5 +1,3 @@
-# $Id$
-
 namespace eval portfetch::mirror_sites { }
 
 global os.platform os.major

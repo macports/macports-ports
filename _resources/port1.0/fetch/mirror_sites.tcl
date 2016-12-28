@@ -1,5 +1,3 @@
-# $Id$
-#
 # List of master site classes for use in Portfiles
 # Most of these are taken shamelessly from FreeBSD.
 #

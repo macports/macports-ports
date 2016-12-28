@@ -1,5 +1,3 @@
-# $Id$
-#
 # This file contains the livecheck defaults for using port's master_sites.
 
 set livecheck.type "regex"
