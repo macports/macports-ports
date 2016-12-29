@@ -100,6 +100,19 @@ if {${configure.sdkroot} ne ""} {
         QMAKE_MAC_SDK=[string tolower [join [lrange [split [lindex [split ${configure.sdkroot} "/"] end] "."] 0 end-1] "."]]
 }
 
+# a change in Qt 5.7.1  made it more difficult to override sdk variables
+# see https://codereview.qt-project.org/#/c/165499/
+# see https://bugreports.qt.io/browse/QTBUG-56965
+post-extract {
+    set cache [open "${worksrcpath}/.qmake.cache" w 0644]
+    puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
+    if {${configure.sdkroot} ne ""} {
+        puts ${cache} \
+            QMAKE_MAC_SDK=[string tolower [join [lrange [split [lindex [split ${configure.sdkroot} "/"] end] "."] 0 end-1] "."]]
+    }
+    close ${cache}
+}
+
 # respect configure.compiler but still allow qmake to find correct Xcode clang based on SDK
 if { ${configure.compiler} ne "clang" } {
     configure.args-append \
