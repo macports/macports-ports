@@ -111,26 +111,7 @@ if { ![info exists qt_name] } {
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
 # Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
 # see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
-global qt5_min_tested_version
-global qt5_max_tested_version
-global qt5_min_reference_version
-global qt5_max_reference_version
-
 # see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
-switch ${qt_name} {
-    qt5 {
-        set qt5_min_tested_version     12
-        set qt5_max_tested_version     15
-        set qt5_min_reference_version  12
-        set qt5_max_reference_version  15
-    }
-    qt55 {
-        set qt5_min_tested_version     11
-        set qt5_max_tested_version     14
-        set qt5_min_reference_version  13
-        set qt5_max_reference_version  14
-    }
-}
 
 if {[tbool just_want_qt5_version_info]} {
     return
@@ -291,7 +272,7 @@ if { ![option universal_variant] || ![variant_isset universal] } {
 
 # do not try to install if qt5-qtbase dependency will fail to build
 # warn about non-reference configurations
-if { ${os.major} < ${qt5_min_tested_version} } {
+if { ${os.major} < 11 } {
     pre-fetch {
         ui_warn "Qt dependency is not supported on this platform and may not build"
     }
