@@ -40,17 +40,15 @@ set available_qt_versions {
     qt55
 }
 
-# standard Qt5 name
-global qt_name
-
-if { ![info exists qt_name] } {
+proc qt5.get_default_name {} {
+    global os.major cxx_stdlib
 
     if { ${os.major} <= 7 } {
         #
         # Qt 5 does not support ppc
         # see http://doc.qt.io/qt-5/osx-requirements.html
         #
-        set qt_name qt5
+        return qt55
         #
     } elseif { ${os.major} <= 9 } {
         #
@@ -59,7 +57,7 @@ if { ![info exists qt_name] } {
         #
         # never supported by Qt 5
         #
-        set qt_name qt5
+        return qt55
         #
     } elseif { ${os.major} == 10 } {
         #
@@ -68,7 +66,7 @@ if { ![info exists qt_name] } {
         #     Qt 5.3: Deployment only
         # Qt 5.0-5.2: Occasionally tested
         #
-        set qt_name qt5
+        return qt55
         #
     } elseif { ${os.major} == 11 } {
         #
@@ -78,9 +76,9 @@ if { ![info exists qt_name] } {
         # Qt 5.5: Occasionally tested
         # Qt 5.4: Supported
         #
-        set qt_name qt5
+        return qt56
         #
-    } elseif { ${os.major} <= 12 } {
+    } elseif { ${os.major} <= 15 } {
         #
         # OS X Mountain Lion (10.8)
         # OS X Mavericks (10.9)
@@ -90,22 +88,41 @@ if { ![info exists qt_name] } {
         # Qt 5.7: Supported
         # Qt 5.6: Supported
         #
-        set qt_name qt5
+        if {${cxx_stdlib} eq "libstdc++"} {
+            return qt56
+        } else {
+            return qt5
+        }
         #
     } elseif { ${os.major} <= 16 } {
         #
         # macOS Sierra (10.12)
         # as of Qt version 5.7, there is no official support
         #
-        set qt_name qt5
+        if {${cxx_stdlib} eq "libstdc++"} {
+            return qt56
+        } else {
+            return qt5
+        }
         #
     } else {
         #
         # macOS ??? (???)
         #
-        set qt_name qt5
-        #
+        if {${cxx_stdlib} eq "libstdc++"} {
+            return qt56
+        } else {
+            return qt5
+        }
     }
+}
+
+# standard Qt5 name
+global qt_name
+
+if { [info exists qt_name] } {
+} else {
+    set qt_name [qt5.get_default_name]
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
