@@ -120,29 +120,38 @@ if { ${configure.compiler} ne "clang" } {
         QMAKE_CXX=${configure.cxx}
 }
 
-if { ${qt_name} eq "qt55" } {
+pre-configure {
+    set qt_version [exec ${prefix}/bin/pkg-config --modversion Qt5Core]
 
-    # always use the same standard library
-    configure.args-append                                \
-        QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
-        QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+    if { [vercmp ${qt_version} 5.6.0] >= 0 } {
+        if { ${configure.cxx_stdlib} ne "libc++" } {
+            # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
+            #    so value of ${configure.cxx_stdlib} can always be used
+            configure.args-append                                \
+                QMAKE_CXXFLAGS-=-stdlib=libc++                   \
+                QMAKE_LFLAGS-=-stdlib=libc++                     \
+                QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
+                QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+        }
+    } elseif { [vercmp ${qt_version} 5.5.0] == 0 } {
 
-    # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
-    #    so value of ${configure.cxx_stdlib} can always be used
-    if { ${configure.cxx_stdlib} ne "libc++" } {
-        configure.args-append                                      \
-            QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++                   \
-            QMAKE_LFLAGS_CXX11-=-stdlib=libc++                     \
-            QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}  \
-            QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
-    }
-} else {
-    if { ${configure.cxx_stdlib} ne "libc++" } {
+        # always use the same standard library
+        configure.args-append                                \
+            QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
+            QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+
         # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
         #    so value of ${configure.cxx_stdlib} can always be used
+        if { ${configure.cxx_stdlib} ne "libc++" } {
+            configure.args-append                                      \
+                QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++                   \
+                QMAKE_LFLAGS_CXX11-=-stdlib=libc++                     \
+                QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}  \
+                QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
+        }
+    } else {
+        # always use the same standard library
         configure.args-append                                \
-            QMAKE_CXXFLAGS-=-stdlib=libc++                   \
-            QMAKE_LFLAGS-=-stdlib=libc++                     \
             QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}  \
             QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
     }
