@@ -197,10 +197,6 @@ set qt_tests_dir        ${qt_dir}/tests
 global qt_host_data_dir
 set qt_host_data_dir    ${qt_dir}
 
-# standard Qt demos directory
-#global qt_demos_dir
-#set qt_demos_dir        ${qt_dir}/share/${qt_name}/demos
-
 # standard Qt mkspecs directory
 global qt_mkspecs_dir
 set qt_mkspecs_dir      ${qt_dir}/mkspecs
