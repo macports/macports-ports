@@ -1,7 +1,7 @@
---- setup.py.orig	2014-06-05 14:43:04.000000000 -0700
-+++ setup.py	2014-06-09 13:17:26.000000000 -0700
-@@ -10,9 +10,9 @@
- VERSION = '1.8'
+--- setup.py.orig	2016-11-11 10:59:29.000000000 -0800
++++ setup.py	2017-01-03 13:51:45.000000000 -0800
+@@ -11,9 +11,9 @@
+ ICU_VERSION = subprocess.check_output(('icu-config', '--version')).strip()
  
  INCLUDES = {
 -    'darwin': ['/usr/local/include'],
@@ -13,7 +13,7 @@
      'win32': ['c:/icu/include'],
      'sunos5': [],
  }
-@@ -35,9 +35,9 @@
+@@ -36,9 +36,9 @@
  }
  
  LFLAGS = {
