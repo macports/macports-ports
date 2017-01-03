@@ -203,6 +203,7 @@ default configure.pre_args {[list \
                     {*}[cmake::system_prefix_path] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
+                    -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
