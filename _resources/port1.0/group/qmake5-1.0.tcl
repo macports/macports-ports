@@ -161,7 +161,14 @@ if {![info exists qt5_qmake_request_no_debug]} {
 
         set base_debug false
         foreach qt_test_name ${available_qt_versions} {
-            if {![catch {set result [active_variants ${qt_test_name}-qtbase debug ""]}]} {
+
+            if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
+                set qt_test_port_name ${qt_test_name}
+            } else {
+                set qt_test_port_name ${qt_test_name}-qtbase
+            }
+
+            if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
                 if {$result} {
                     # code to be executed if $depspec is active with at least all variants in
                     # $required and none from $forbidden
