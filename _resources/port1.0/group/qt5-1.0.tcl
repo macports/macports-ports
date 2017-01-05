@@ -283,20 +283,6 @@ if { ![option universal_variant] || ![variant_isset universal] } {
     set qt_qmake_spec ""
 }
 
-# do not try to install if qt5-qtbase dependency will fail to build
-# warn about non-reference configurations
-if { ${os.major} < 11 } {
-    pre-fetch {
-        ui_warn "Qt dependency is not supported on this platform and may not build"
-    }
-}
-
-if { ${qt_name} ne "qt5" } {
-    pre-fetch {
-        ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
-    }
-}
-
 if {![info exists building_qt5]} {
     depends_lib-append path:lib/pkgconfig/Qt5Core.pc:${qt_name}-qtbase
 }
@@ -311,5 +297,48 @@ if { ![option universal_variant] || ![variant_isset universal] } {
 } else {
     foreach arch ${configure.universal_archs} {
         lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
+    }
+}
+
+pre-configure {
+    set qt_installed_name ""
+
+    foreach qt_test_name ${available_qt_versions} {
+
+        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
+            set qt_test_port_name ${qt_test_name}
+        } else {
+            set qt_test_port_name ${qt_test_name}-qtbase
+        }
+
+        if {![catch {set installed [lindex [registry_active ${qt_test_port_name}] 0]}]} {
+            set qt_installed_name ${qt_test_name}
+        }
+    }
+
+    if { ${qt_installed_name} eq "" } {
+        ui_error "at least one Qt must be installed"
+        return -code error "insufficient dependencies"
+    }
+
+    ui_debug "qt5 PortGroup: Qt is provided by ${qt_installed_name}"
+
+    if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
+        if { [string range ${qt_installed_name} end-3 end] ne "-kde" } {
+            ui_error "qt5 PortGroup: Qt is installed but not qt5-kde, as is required by this variant"
+            ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt_installed_name}-qtbase and try again"
+            return -code error "improper Qt installed"
+        }
+    } else {
+        if { ${qt_installed_name} ne [qt5.get_default_name] } {
+            # see https://wiki.qt.io/Qt-Version-Compatibility
+            ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt_installed_name} is installed"
+        }
+        if { ${qt_installed_name} ne "qt5" } {
+            ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
+        }
+        if { ${os.major} < 11 } {
+            ui_warn "Qt dependency is not supported on this platform and may not build"
+        }
     }
 }
