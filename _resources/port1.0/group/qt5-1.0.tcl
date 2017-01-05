@@ -307,6 +307,7 @@ namespace eval qt5pg {
 depends_build-append    port:pkgconfig
 
 # standard destroot environment
+pre-destroot {
 if { ![option universal_variant] || ![variant_isset universal] } {
     destroot.env-append \
         INSTALL_ROOT=${destroot}
@@ -314,6 +315,7 @@ if { ![option universal_variant] || ![variant_isset universal] } {
     foreach arch ${configure.universal_archs} {
         lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
     }
+}
 }
 
 pre-configure {
