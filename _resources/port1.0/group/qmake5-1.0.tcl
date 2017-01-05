@@ -37,6 +37,9 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
+options qt5.add_spec
+default qt5.add_spec yes
+
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
 configure.cmd                   ${qt_qmake_cmd}
@@ -59,8 +62,10 @@ pre-configure {
 
         global merger_configure_args
 
-        lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
-        lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+        if { [tbool qt5.add_spec] } {
+            lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
+            lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+        }
 
         foreach arch ${configure.universal_archs} {
             lappend merger_configure_args(${arch}) \
@@ -75,7 +80,9 @@ pre-configure {
 
     } else {
 
-        configure.args-append -spec ${qt_qmake_spec}
+        if { [tbool qt5.add_spec] } {
+            configure.args-append -spec ${qt_qmake_spec}
+        }
 
         configure.args-append \
             QT_ARCH=${build_arch} \
