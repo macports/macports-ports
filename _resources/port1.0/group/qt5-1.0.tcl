@@ -342,3 +342,264 @@ pre-configure {
         }
     }
 }
+
+namespace eval qt5pg {
+    ############################################################################### Component Format
+    #
+    # "Qt Component Name" {
+    #     Qt version introduced
+    #     Qt version removed
+    #     file installed by component
+    #     blank if module; "-plugin" if plugin
+    # }
+    #
+    # module info found at https://doc.qt.io/qt-5/qtmodules.html
+    #
+    ###############################################################################
+    array set qt5_component_lib {
+        qt3d {
+            5.5
+            6.0
+            lib/pkgconfig/Qt53DCore.pc
+            ""
+        }
+        qtbase {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Core.pc
+            ""
+        }
+        qtcanvas3d {
+            5.5
+            6.0
+            libexec/qt5/qml/QtCanvas3D/libqtcanvas3d.dylib
+            ""
+        }
+        qtcharts {
+            5.7
+            6.0
+            lib/pkgconfig/Qt5Charts.pc
+            ""
+        }
+        qtconnectivity {
+            5.2
+            6.0
+            lib/pkgconfig/Qt5Bluetooth.pc
+            ""
+        }
+        qtdatavis3d {
+            5.7
+            6.0
+            lib/pkgconfig/Qt5DataVisualization.pc
+            ""
+        }
+        qtdeclarative {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Qml.pc
+            ""
+        }
+        qtdeclarative-render2d {
+            5.7
+            5.8
+            lib/cmake/Qt5Quick/Qt5Quick_ContextPlugin.cmake
+            ""
+        }
+        qtdoc {
+            5.0
+            6.0
+            libexec/qt5/doc/qtdoc.qch
+            ""
+        }
+        qtgamepad {
+            5.7
+            6.0
+            lib/pkgconfig/Qt5Gamepad.pc
+            ""
+        }
+        qtenginio {
+            5.3
+            5.7
+            lib/pkgconfig/Enginio.pc
+            ""
+        }
+        qtgraphicaleffects {
+            5.0
+            6.0
+            libexec/qt5/qml/QtGraphicalEffects/libqtgraphicaleffectsplugin.dylib
+            ""
+        }
+        qtimageformats {
+            5.0
+            6.0
+            lib/cmake/Qt5Gui/Qt5Gui_QTiffPlugin.cmake
+            ""
+        }
+        qtlocation {
+            5.2
+            6.0
+            lib/pkgconfig/Qt5Location.pc
+            ""
+        }
+        qtmacextras {
+            5.2
+            6.0
+            lib/pkgconfig/Qt5MacExtras.pc
+            ""
+        }
+        qtmultimedia {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Multimedia.pc
+            ""
+        }
+        qtpurchasing {
+            5.7
+            6.0
+            lib/pkgconfig/Qt5Purchasing.pc
+            ""
+        }
+        qtquick1 {
+            5.0
+            5.6
+            lib/pkgconfig/Qt5Declarative.pc
+            ""
+        }
+        qtquickcontrols {
+            5.1
+            6.0
+            libexec/qt5/qml/QtQuick/Controls/libqtquickcontrolsplugin.dylib
+            ""
+        }
+        qtquickcontrols2 {
+            5.6
+            6.0
+            lib/pkgconfig/Qt5QuickControls2.pc
+            ""
+        }
+        qtscript {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Script.pc
+            ""
+        }
+        qtscxml {
+            5.7
+            6.0
+            lib/pkgconfig/Qt5Scxml.pc
+            ""
+        }
+        qtsensors {
+            5.1
+            6.0
+            lib/pkgconfig/Qt5Sensors.pc
+            ""
+        }
+        qtserialbus {
+            5.6
+            6.0
+            lib/pkgconfig/Qt5SerialBus.pc
+            ""
+        }
+        qtserialport {
+            5.1
+            6.0
+            lib/pkgconfig/Qt5SerialPort.pc
+            ""
+        }
+        qtsvg {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Svg.pc
+            ""
+        }
+        qttools {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5Designer.pc
+            ""
+        }
+        qttranslations {
+            5.0
+            6.0
+            libexec/qt5/translations/qt_ar.qm
+            ""
+        }
+        qtvirtualkeyboard {
+            5.7
+            6.0
+            lib/cmake/Qt5Gui/Qt5Gui_QVirtualKeyboardPlugin.cmake
+            ""
+        }
+        qtwebchannel {
+            5.4
+            6.0
+            lib/pkgconfig/Qt5WebChannel.pc
+            ""
+        }
+        qtwebengine {
+            5.4
+            6.0
+            lib/pkgconfig/Qt5WebEngine.pc
+            ""
+        }
+        qtwebkit {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5WebKit.pc
+            ""
+        }
+        qtwebkit-examples {
+            5.0
+            5.6
+            libexec/qt5/examples/webkitwidgets/webkitwidgets.pro
+            ""
+        }
+        qtwebsockets {
+            5.3
+            6.0
+            lib/pkgconfig/Qt5WebSockets.pc
+            ""
+        }
+        qtwebview {
+            5.6
+            6.0
+            lib/pkgconfig/Qt5WebView.pc
+            ""
+        }
+        qtxmlpatterns {
+            5.0
+            6.0
+            lib/pkgconfig/Qt5XmlPatterns.pc
+            ""
+        }
+        sqlite-plugin {
+            5.0
+            6.0
+            lib/cmake/Qt5Sql/Qt5Sql_QSQLiteDriverPlugin.cmake
+            "-plugin"
+        }
+        psql-plugin {
+            5.0
+            6.0
+            lib/cmake/Qt5Sql/Qt5Sql_QPSQLDriverPlugin.cmake
+            "-plugin"
+        }
+        mysql-plugin {
+            5.0
+            6.0
+            lib/cmake/Qt5Sql/Qt5Sql_QMYSQLDriverPlugin.cmake
+            "-plugin"
+        }
+    }
+    #
+    #
+    #qtjsbackend {
+    #    5.0
+    #    5.2
+    #    ""
+    #}
+    #
+    # qtwebkit: official support dropped in 5.6.0
+    #           as of 5.7, still maintained by community
+}
