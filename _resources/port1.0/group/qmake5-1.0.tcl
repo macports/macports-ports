@@ -37,8 +37,9 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
-options qt5.add_spec
+options qt5.add_spec qt5.debug_variant
 default qt5.add_spec yes
+default qt5.debug_variant yes
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -160,8 +161,16 @@ pre-configure {
     }
 }
 
-if {![info exists qt5_qmake_request_no_debug]} {
-    variant debug description {Build both release and debug libraries} {}
+# add debug variant if one does not exist and one is requested via qt5.debug_variant
+# variant is added in eval_variants so that qt5.debug_variant can be set anywhere in the Portfile
+rename ::eval_variants ::real_qmake5_eval_variants
+proc eval_variants {variations} {
+    global qt5.debug_variant
+    if { ![variant_exists debug] && [tbool qt5.debug_variant] } {
+        variant debug description {Build both release and debug libraries} {}
+    }
+    uplevel ::real_qmake5_eval_variants $variations
+}
 
     # accommodating variant request varies depending on how qtbase was built
     pre-configure {
@@ -206,4 +215,3 @@ if {![info exists qt5_qmake_request_no_debug]} {
             configure.args-append "QT_CONFIG-=\"debug_and_release build_all\" CONFIG-=\"debug\""
         }
     }
-}
