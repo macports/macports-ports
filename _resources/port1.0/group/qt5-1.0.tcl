@@ -34,6 +34,8 @@
 # Usage:
 # PortGroup     qt5 1.0
 
+options qt5.using_kde
+
 global available_qt_versions
 set available_qt_versions {
     qt5
@@ -121,8 +123,10 @@ proc qt5.get_default_name {} {
 global qt_name
 
 if { [info exists qt_name] } {
+    default qt5.using_kde no
 } else {
     set qt_name [qt5.get_default_name]
+    default qt5.using_kde no
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
@@ -341,6 +345,17 @@ pre-configure {
             ui_warn "Qt dependency is not supported on this platform and may not build"
         }
     }
+}
+
+# add qt5kde variant if one does not exist and one is requested via qt5.using_kde
+# variant is added in eval_variants so that qt5.using_kde can be set anywhere in the Portfile
+rename ::eval_variants ::real_qt5_eval_variants
+proc eval_variants {variations} {
+    global qt5.using_kde
+    if { ![variant_exists qt5kde] && [tbool qt5.using_kde] } {
+        variant qt5kde description {use Qt patched for KDE compatibility} {}
+    }
+    uplevel ::real_qt5_eval_variants $variations
 }
 
 namespace eval qt5pg {
