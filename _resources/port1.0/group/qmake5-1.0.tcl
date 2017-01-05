@@ -205,10 +205,10 @@ pre-configure {
 
     # determine of qmake's default and user requests are compatible; override qmake if necessary
     if { ${this_debug} && !${base_debug}  } {
-        configure.args-append "QT_CONFIG+=\"debug_and_release build_all\""
+        configure.args-append "QT_CONFIG+=\"debug_and_release build_all debug\" CONFIG+=\"debug\" CONFIG-=\"release\""
     }
 
     if { !${this_debug} && ${base_debug}  } {
-        configure.args-append "QT_CONFIG-=\"debug_and_release build_all\" CONFIG-=\"debug\""
+        configure.args-append "QT_CONFIG-=\"debug_and_release build_all debug\" CONFIG-=\"debug\" CONFIG+=\"release\""
     }
 }
