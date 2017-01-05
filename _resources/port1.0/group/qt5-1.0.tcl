@@ -279,22 +279,28 @@ proc universal_setup {args} {
 # other platforms required
 #     see http://doc.qt.io/qt-5/supported-platforms.html
 #     and http://doc.qt.io/QtSupportedPlatforms/index.html
-global qt_qmake_spec
+options qt_qmake_spec
 global qt_qmake_spec_32
 global qt_qmake_spec_64
 compiler.blacklist-append *gcc*
 
 set qt_qmake_spec_32 macx-clang-32
 set qt_qmake_spec_64 macx-clang
+default qt_qmake_spec {[qt5pg::get_default_spec]}
 
-if { ![option universal_variant] || ![variant_isset universal] } {
-    if { ${configure.build_arch} eq "i386" } {
-        set qt_qmake_spec ${qt_qmake_spec_32}
-    } else {
-        set qt_qmake_spec ${qt_qmake_spec_64}
+namespace eval qt5pg {
+    proc get_default_spec {} {
+        global configure.build_arch qt_qmake_spec_32 qt_qmake_spec_64
+        if { ![option universal_variant] || ![variant_isset universal] } {
+            if { ${configure.build_arch} eq "i386" } {
+                return ${qt_qmake_spec_32}
+            } else {
+                return ${qt_qmake_spec_64}
+            }
+        } else {
+            return ""
+        }
     }
-} else {
-    set qt_qmake_spec ""
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
