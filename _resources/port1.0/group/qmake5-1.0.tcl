@@ -172,46 +172,43 @@ proc eval_variants {variations} {
     uplevel ::real_qmake5_eval_variants $variations
 }
 
-    # accommodating variant request varies depending on how qtbase was built
-    pre-configure {
-
-        set base_debug false
-        foreach qt_test_name ${available_qt_versions} {
-
-            if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
-                set qt_test_port_name ${qt_test_name}
-            } else {
-                set qt_test_port_name ${qt_test_name}-qtbase
-            }
-
-            if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
-                if {$result} {
-                    # code to be executed if $depspec is active with at least all variants in
-                    # $required and none from $forbidden
-                    set base_debug true
-                    break
-                } else {
-                    # code to be executed if $depspec is active, but either not with all
-                    # variants in $required or any variant in $forbidden
-                }
-            } else {
-                # code to be executed if $depspec isn't active
-            }
-        }
-
-        # determine if the user wants to build debug libraries
-        if { [variant_exists debug] && [variant_isset debug] } {
-            set this_debug true
+# accommodating variant request varies depending on how qtbase was built
+pre-configure {
+    set base_debug false
+    foreach qt_test_name ${available_qt_versions} {
+        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
+            set qt_test_port_name ${qt_test_name}
         } else {
-            set this_debug false
+            set qt_test_port_name ${qt_test_name}-qtbase
         }
-
-        # determine of qmake's default and user requests are compatible; override qmake if necessary
-        if { ${this_debug} && !${base_debug}  } {
-            configure.args-append "QT_CONFIG+=\"debug_and_release build_all\""
-        }
-
-        if { !${this_debug} && ${base_debug}  } {
-            configure.args-append "QT_CONFIG-=\"debug_and_release build_all\" CONFIG-=\"debug\""
+        if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
+            if {$result} {
+                # code to be executed if $depspec is active with at least all variants in
+                # $required and none from $forbidden
+                set base_debug true
+                break
+            } else {
+                # code to be executed if $depspec is active, but either not with all
+                # variants in $required or any variant in $forbidden
+            }
+        } else {
+            # code to be executed if $depspec isn't active
         }
     }
+
+    # determine if the user wants to build debug libraries
+    if { [variant_exists debug] && [variant_isset debug] } {
+        set this_debug true
+    } else {
+        set this_debug false
+    }
+
+    # determine of qmake's default and user requests are compatible; override qmake if necessary
+    if { ${this_debug} && !${base_debug}  } {
+        configure.args-append "QT_CONFIG+=\"debug_and_release build_all\""
+    }
+
+    if { !${this_debug} && ${base_debug}  } {
+        configure.args-append "QT_CONFIG-=\"debug_and_release build_all\" CONFIG-=\"debug\""
+    }
+}
