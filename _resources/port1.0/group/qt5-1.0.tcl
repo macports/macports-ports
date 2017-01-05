@@ -241,6 +241,16 @@ if {[tbool just_want_qt5_variables]} {
     return
 }
 
+# a procedure for declaring dependencies on Qt5 components, which will expand them
+# into the appropriate subports for the Qt5 flavour installed
+# e.g. qt5.depends_component qtsvg qtdeclarative
+proc qt5.depends_component {args} {
+    global qt5_private_components
+    foreach comp ${args} {
+        lappend qt5_private_components ${comp}
+    }
+}
+
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -285,10 +295,6 @@ if { ![option universal_variant] || ![variant_isset universal] } {
     }
 } else {
     set qt_qmake_spec ""
-}
-
-if {![info exists building_qt5]} {
-    depends_lib-append path:lib/pkgconfig/Qt5Core.pc:${qt_name}-qtbase
 }
 
 # use PKGCONFIG for Qt discovery in configure scripts
@@ -617,4 +623,51 @@ namespace eval qt5pg {
     #
     # qtwebkit: official support dropped in 5.6.0
     #           as of 5.7, still maintained by community
+
+    proc register_dependents {} {
+        global qt5_private_components
+
+        if { ![exists qt5_private_components] || ${qt5_private_components} eq "" } {
+            # no Qt components have been requested
+            # qt5.depends_component has never been called
+            set qt5_private_components ""
+        }
+
+        if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
+            set qt_kde_name qt5-kde
+
+            depends_lib-append port:${qt_kde_name}
+
+            foreach component ${qt5_private_components} {
+                switch -exact ${component} {
+                    qtwebkit -
+                    qtwebengine -
+                    qtwebview -
+                    qtenginio {
+                        # these components are subports
+                        depends_lib-append port:${qt_kde_name}-${component}
+                    }
+                    default {
+                        # qt5-kde provides all components except those above
+                    }
+                }
+            }
+        } else {
+            # ![variant_isset qt5kde]
+            set qt_default_name [qt5.get_default_name]
+            foreach component "qtbase ${qt5_private_components}" {
+                if { ${component} eq "qt5" } {
+                    depends_lib-append path:share/doc/qt5/README.txt:${qt_default_name}
+                } elseif { [info exists qt5pg::qt5_component_lib(${component})] } {
+                    set component_info $qt5pg::qt5_component_lib(${component})
+                    set path           [lindex ${component_info} 2]
+                    depends_lib-append path:${path}:${qt_default_name}-${component}
+                } else {
+                    return -code error "unknown component ${comp}"
+                }
+            }
+        }
+    }
 }
+
+port::register_callback qt5pg::register_dependents
