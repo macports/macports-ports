@@ -250,6 +250,12 @@ proc qt5.depends_component {args} {
         lappend qt5_private_components ${comp}
     }
 }
+proc qt5.depends_build_component {args} {
+    global qt5_private_build_components
+    foreach comp ${args} {
+        lappend qt5_private_build_components ${comp}
+    }
+}
 
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
@@ -633,12 +639,16 @@ namespace eval qt5pg {
     #           as of 5.7, still maintained by community
 
     proc register_dependents {} {
-        global qt5_private_components
+        global qt5_private_components qt5_private_build_components
 
-        if { ![exists qt5_private_components] || ${qt5_private_components} eq "" } {
+        if { ![exists qt5_private_components] } {
             # no Qt components have been requested
             # qt5.depends_component has never been called
             set qt5_private_components ""
+        }
+        if { ![exists qt5_private_build_components] } {
+            # qt5.depends_build_component has never been called
+            set qt5_private_build_components ""
         }
 
         if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
@@ -660,6 +670,20 @@ namespace eval qt5pg {
                     }
                 }
             }
+            foreach component ${qt5_private_build_components} {
+                switch -exact ${component} {
+                    qtwebkit -
+                    qtwebengine -
+                    qtwebview -
+                    qtenginio {
+                        # these components are subports
+                        depends_build-append port:${qt_kde_name}-${component}
+                    }
+                    default {
+                        # qt5-kde provides all components except those above
+                    }
+                }
+            }
         } else {
             # ![variant_isset qt5kde]
             set qt_default_name [qt5.get_default_name]
@@ -670,6 +694,15 @@ namespace eval qt5pg {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     depends_lib-append path:${path}:${qt_default_name}-${component}
+                } else {
+                    return -code error "unknown component ${comp}"
+                }
+            }
+            foreach component ${qt5_private_build_components} {
+                if { [info exists qt5pg::qt5_component_lib(${component})] } {
+                    set component_info $qt5pg::qt5_component_lib(${component})
+                    set path           [lindex ${component_info} 2]
+                    depends_build-append path:${path}:${qt_default_name}-${component}
                 } else {
                     return -code error "unknown component ${comp}"
                 }
