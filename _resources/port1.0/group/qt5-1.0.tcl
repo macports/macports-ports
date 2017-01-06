@@ -314,6 +314,7 @@ depends_build-append    port:pkgconfig
 
 # standard destroot environment
 pre-destroot {
+    global merger_destroot_env
     if { ![option universal_variant] || ![variant_isset universal] } {
         destroot.env-append \
             INSTALL_ROOT=${destroot}
