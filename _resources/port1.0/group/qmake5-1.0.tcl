@@ -80,7 +80,7 @@ pre-configure {
     # 2) some ports (e.g. py-pyqt5 py-qscintilla2) call qmake indirectly and
     #    do not pass on the configure.args values
     #
-    set cache [open "${worksrcpath}/.qmake.cache" w 0644]
+    set cache [open "${configure.dir}/.qmake.cache" w 0644]
     puts ${cache} "if(${qt_qmake_spec_64}) {"
     puts ${cache} "  QT_ARCH=x86_64"
     puts ${cache} "  QT_TARGET_ARCH=x86_64"
