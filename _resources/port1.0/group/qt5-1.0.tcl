@@ -325,6 +325,7 @@ pre-destroot {
     }
 }
 
+if {![info exists building_qt5]} {
 pre-configure {
     set qt_installed_name ""
 
@@ -366,6 +367,7 @@ pre-configure {
             ui_warn "Qt dependency is not supported on this platform and may not build"
         }
     }
+}
 }
 
 # add qt5kde variant if one does not exist and one is requested via qt5.using_kde
@@ -712,4 +714,6 @@ namespace eval qt5pg {
     }
 }
 
+if {![info exists building_qt5]} {
 port::register_callback qt5pg::register_dependents
+}
