@@ -34,7 +34,7 @@
 # Usage:
 # PortGroup     qt5 1.0
 
-options qt5.using_kde
+options qt5.using_kde qt5.base_version
 
 global available_qt_versions
 set available_qt_versions {
@@ -124,9 +124,11 @@ global qt_name
 
 if { [info exists qt_name] } {
     default qt5.using_kde no
+    default qt5.base_version ${qt_name}
 } else {
     set qt_name [qt5.get_default_name]
     default qt5.using_kde no
+    default qt5.base_version {[qt5.get_default_name]}
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
@@ -642,7 +644,7 @@ namespace eval qt5pg {
     #           as of 5.7, still maintained by community
 
     proc register_dependents {} {
-        global qt5_private_components qt5_private_build_components
+        global qt5_private_components qt5_private_build_components qt5.base_version
 
         if { ![exists qt5_private_components] } {
             # no Qt components have been requested
@@ -689,7 +691,7 @@ namespace eval qt5pg {
             }
         } else {
             # ![variant_isset qt5kde]
-            set qt_default_name [qt5.get_default_name]
+            set qt_default_name ${qt5.base_version}
             foreach component "qtbase ${qt5_private_components}" {
                 if { ${component} eq "qt5" } {
                     depends_lib-append path:share/doc/qt5/README.txt:${qt_default_name}
