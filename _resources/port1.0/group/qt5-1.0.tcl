@@ -327,6 +327,9 @@ pre-destroot {
     }
 }
 
+# see https://trac.macports.org/ticket/53186
+destroot.destdir "INSTALL_ROOT=${destroot}"
+
 if {![info exists building_qt5]} {
 pre-configure {
     set qt_installed_name ""
