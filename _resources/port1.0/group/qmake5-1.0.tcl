@@ -37,9 +37,10 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
-options qt5.add_spec qt5.debug_variant
+options qt5.add_spec qt5.debug_variant qt5.top_level
 default qt5.add_spec yes
 default qt5.debug_variant yes
+default qt5.top_level {${configure.dir}}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -80,7 +81,7 @@ pre-configure {
     # 2) some ports (e.g. py-pyqt5 py-qscintilla2) call qmake indirectly and
     #    do not pass on the configure.args values
     #
-    set cache [open "${configure.dir}/.qmake.cache" w 0644]
+    set cache [open "${qt5.top_level}/.qmake.cache" w 0644]
     puts ${cache} "if(${qt_qmake_spec_64}) {"
     puts ${cache} "  QT_ARCH=x86_64"
     puts ${cache} "  QT_TARGET_ARCH=x86_64"
