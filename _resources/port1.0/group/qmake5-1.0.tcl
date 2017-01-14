@@ -180,6 +180,9 @@ pre-configure {
     close ${cache}
 }
 
+# see https://trac.macports.org/ticket/53186
+destroot.destdir "INSTALL_ROOT=${destroot}"
+
 # add debug variant if one does not exist and one is requested via qt5.debug_variant
 # variant is added in eval_variants so that qt5.debug_variant can be set anywhere in the Portfile
 rename ::eval_variants ::real_qmake5_eval_variants
