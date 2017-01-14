@@ -193,8 +193,3 @@ proc eval_variants {variations} {
     }
     uplevel ::real_qmake5_eval_variants $variations
 }
-
-
-pre-configure {
-
-}
