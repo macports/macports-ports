@@ -104,9 +104,14 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 default cmake.module_path           {}
 proc cmake::module_path {} {
     if {[llength [option cmake.module_path]]} {
-        return -DCMAKE_MODULE_PATH="[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
+        set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
+    } else {
+        set modpath [option cmake_share_module_dir]
     }
-    return -DCMAKE_MODULE_PATH=[option cmake_share_module_dir]
+    return [list \
+        -DCMAKE_MODULE_PATH="${modpath}" \
+        -DCMAKE_PREFIX_PATH="${modpath}"
+    ]
 }
 
 # CMake provides several different generators corresponding to different utilities
@@ -404,7 +409,7 @@ variant debug description "Enable debug binaries" {
     configure.objcxxflags-replace    -O2 -O0
     configure.ldflags-replace        -O2 -O0
     # get most if not all possible debug info
-    if {[string match *clang* ${configure.cxx}]} {
+    if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
         set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
     } else {
         set cmake::debugopts "-g -DDEBUG"
