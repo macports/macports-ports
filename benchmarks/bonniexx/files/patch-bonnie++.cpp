@@ -1,5 +1,5 @@
---- bonnie++.cpp.orig	2009-07-03 11:38:14.000000000 +0900
-+++ bonnie++.cpp	2011-11-22 08:42:45.000000000 +0900
+--- bonnie++.cpp	2016-12-12 21:37:51.000000000 -0500
++++ bonnie++.cpp	2017-01-14 19:35:45.000000000 -0500
 @@ -294,11 +294,7 @@
        {
          char *sbuf = _strdup(optarg);
@@ -25,8 +25,8 @@
 -    usage();
 -  }
 -#endif
-   globals.byte_io_size = __min(file_size, globals.byte_io_size);
-   globals.byte_io_size = __max(0, globals.byte_io_size);
+   globals.byte_io_size = min(file_size, globals.byte_io_size);
+   globals.byte_io_size = max(0, globals.byte_io_size);
  
 @@ -465,14 +452,6 @@
       && (directory_max_size < directory_min_size || directory_max_size < 0
