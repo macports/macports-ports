@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2009-2015 The MacPorts Project,
+# Copyright (c) 2009-2017 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -199,7 +199,7 @@ variant universal {
     configure {
         # Fix inability to find nm when cross-compiling (#22224, #23431, #23687, #24477, et al)
         # TODO: I suspect we should remove this.  base doesn't do this, so I don't see why muniversal should.
-        #       This also seems like a but in certain versions of autoconf, so ports should just autoreconf (or patch).
+        #       This also seems like a bug in certain versions of autoconf, so ports should just autoreconf (or patch).
         if {[file exists ${prefix}/bin/nm]} {
             # Fix some builds in trace mode for ports that do not simply overwrite depends_build.
             # port itself may happily check and execute files, but trace mode will prevent ${prefix}/bin/nm
