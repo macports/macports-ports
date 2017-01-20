@@ -201,6 +201,11 @@ variant universal {
         # TODO: I suspect we should remove this.  base doesn't do this, so I don't see why muniversal should.
         #       This also seems like a but in certain versions of autoconf, so ports should just autoreconf (or patch).
         if {[file exists ${prefix}/bin/nm]} {
+            # Fix some builds in trace mode for ports that do not simply overwrite depends_build.
+            # port itself may happily check and execute files, but trace mode will prevent ${prefix}/bin/nm
+            # from being used if it's not a proper build dependency. Given it's already installed, this
+            # build dependency doesn't add additional cruft.
+            depends_build-append    port:cctools
             configure.env-append    NM=${prefix}/bin/nm
         } else {
             configure.env-append    NM=/usr/bin/nm
