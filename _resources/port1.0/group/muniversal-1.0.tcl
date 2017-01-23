@@ -196,27 +196,7 @@ variant universal {
         }
     }
 
-    # Must be executed in a more general scope than the configure phase,
-    # otherwise the dependencies won't have an effect during said phase.
-    # WARNING: Keep this in sync with the nm stuff in the
-    #          configure phase override below!
-    if {[file exists ${prefix}/bin/nm]} {
-        # Fix some builds in trace mode for ports that do not simply overwrite depends_build.
-        # port itself may happily check and execute files, but trace mode will prevent ${prefix}/bin/nm
-        # from being used if it's not a proper build dependency. Given it's already installed, this
-        # build dependency doesn't add additional cruft.
-        depends_build-append    port:cctools
-    }
-
     configure {
-        # Fix inability to find nm when cross-compiling (#22224, #23431, #23687, #24477, et al)
-        # TODO: I suspect we should remove this.  base doesn't do this, so I don't see why muniversal should.
-        #       This also seems like a bug in certain versions of autoconf, so ports should just autoreconf (or patch).
-        if {[file exists ${prefix}/bin/nm]} {
-            configure.env-append    NM=${prefix}/bin/nm
-        } else {
-            configure.env-append    NM=/usr/bin/nm
-        }
 
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] ${subport} ${arch}]"
