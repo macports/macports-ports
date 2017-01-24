@@ -42,6 +42,7 @@ namespace eval cmake {
 options                             cmake.build_dir \
                                     cmake.source_dir \
                                     cmake.generator \
+                                    cmake.build_type \
                                     cmake.install_prefix \
                                     cmake.install_rpath \
                                     cmake.module_path \
@@ -62,8 +63,15 @@ default cmake.build_dir             {${workpath}/build}
 # cmake.source_dir defines where CMake will look for the toplevel CMakeLists.txt file
 default cmake.source_dir            {${worksrcpath}}
 
+# cmake.build_type defines the type of build; it defaults to "MacPorts"
+# which means only the compiler options set through configure.c*flags and configure.optflags
+# are used, plus those set in the port's CMake files. Alternative pre-defined types are
+# Release, Debug, RelWithDebInfo and MinSizeRel; "None" should work like "MacPorts".
+default cmake.build_type            {MacPorts}
+
 # cmake-based ports may want to modify the install prefix
 default cmake.install_prefix        {${prefix}}
+
 # minimal/initial value for the install rpath:
 default cmake.install_rpath         {${prefix}/lib}
 proc cmake::rpath_flags {} {
@@ -203,8 +211,9 @@ configure.cmd       ${prefix}/bin/cmake
 # variables are grouped thematically, with the more important ones
 # at the beginning or end for somewhat easier at-a-glance verification.
 default configure.pre_args {[list \
+                    -DCMAKE_BUILD_TYPE=${cmake.build_type} \
                     -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
-                    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
+                    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
                     {*}[cmake::system_prefix_path] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
@@ -218,7 +227,8 @@ default configure.pre_args {[list \
                     -Wno-dev
 ]}
 
-configure.args      -DCMAKE_BUILD_TYPE=MacPorts
+# make sure configure.args is set but don't reset it
+configure.args-append
 
 default configure.post_args {[option cmake.source_dir]}
 
@@ -256,10 +266,10 @@ pre-configure {
     # In addition, CMake provides build-type-specific flags for
     # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
     # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
-    # set (-Os by default), we have to remove the optimization flags from the
+    # set (-Os by default), we have to remove the optimisation flags from the
     # from the concerned Release build type so that configure.optflags
     # gets honored (Debug used by the +debug variant does not set
-    # optimization flags by default).
+    # optimisation flags by default).
     # NB: more recent CMake versions (>=3?) no longer take the env. variables into
     # account, and thus require explicit use of ${configure.c*flags} below:
     # Using a custom BUILD_TYPE we can simply append to the env. variables,
@@ -286,10 +296,6 @@ pre-configure {
         ui_debug "CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
     }
 
-#     if {${cmake.install_rpath} ne ""} {
-#         ui_debug "Adding -DCMAKE_INSTALL_RPATH=[join ${cmake.install_rpath} \;] to configure.args"
-#         configure.post_args-prepend -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
-#     }
     configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
     # CMake doesn't like --enable-debug, so remove it unconditionally.
     configure.args-delete --enable-debug
