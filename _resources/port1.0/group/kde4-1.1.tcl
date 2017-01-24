@@ -72,6 +72,8 @@ set kde4.include_dirs   ${prefix}/include/${kde4.include_prefix}
 set kde4.cmake_module_dir \
                         ${prefix}/lib/cmake/${kde4.include_prefix}
 
+set kde4.mirror         http://mirrors.mit.edu/kde/stable/
+
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
 if {${qt_cmake_module_dir} ne ${cmake_share_module_dir}} {
