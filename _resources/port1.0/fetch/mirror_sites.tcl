@@ -1,5 +1,3 @@
-# $Id$
-#
 # List of master site classes for use in Portfiles
 # Most of these are taken shamelessly from FreeBSD.
 #
@@ -309,17 +307,19 @@ set distfiles_scheme [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "ht
 
 set portfetch::mirror_sites::sites(macports_distfiles) "
     ${distfiles_scheme}://distfiles.macports.org/:mirror
-    http://aarnet.au.distfiles.macports.org/pub/macports/mpdistfiles/:mirror
+    http://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     http://cjj.kr.distfiles.macports.org/:mirror
     http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
     http://her.gr.distfiles.macports.org/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
     http://jog.id.distfiles.macports.org/macports/distfiles/:mirror
+    http://kmq.jp.distfiles.macports.org/:mirror
     http://lil.fr.distfiles.macports.org/:mirror
     http://mse.uk.distfiles.macports.org/sites/distfiles.macports.org/:mirror
     http://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     http://nue.de.distfiles.macports.org/:mirror
     http://osl.no.distfiles.macports.org/:mirror
+    ${distfiles_scheme}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
 "

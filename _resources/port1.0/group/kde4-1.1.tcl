@@ -1,6 +1,5 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
-
+#
 # Copyright (c) 2010-2014 The MacPorts Project
 # All rights reserved.
 #
@@ -67,14 +66,26 @@ switch ${os.platform}_${os.major} {
     }
 }
 
+# Install the kdelibs headerfiles in their own directory to prevent clashes with KF5 headers
+set kde4.include_prefix KDE4
+set kde4.include_dirs   ${prefix}/include/${kde4.include_prefix}
+set kde4.cmake_module_dir \
+                        ${prefix}/lib/cmake/${kde4.include_prefix}
+
+set kde4.mirror         http://mirrors.mit.edu/kde/stable/
+
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
 if {${qt_cmake_module_dir} ne ${cmake_share_module_dir}} {
-    set cmake_module_path ${cmake_share_module_dir}\;${qt_cmake_module_dir}
-    configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
-    configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}"
-    unset cmake_module_path
+    set cmake_module_path ${kde4.cmake_module_dir}\;${cmake_share_module_dir}\;${qt_cmake_module_dir}
+} else {
+    # prepend our own (new) install location for cmake modules:
+    set cmake_module_path ${kde4.cmake_module_dir}\;${cmake_share_module_dir}
 }
+configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
+configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}" \
+                        -DCMAKE_PREFIX_PATH="${cmake_module_path}"
+
 
 # standard configure args; virtually all KDE ports use CMake and Qt4.
 configure.args-append   -DBUILD_doc=OFF \

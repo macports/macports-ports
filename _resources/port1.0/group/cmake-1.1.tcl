@@ -1,6 +1,4 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
-# $Id$
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
 # Copyright (c) 2010-2015 The MacPorts Project
@@ -36,26 +34,31 @@
 # Usage:
 # PortGroup     cmake 1.1
 
-namespace eval cmake {
-    # our directory:
-    variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
-}
+namespace eval cmake {}
 
-options cmake.out_of_source cmake.build_dir cmake.set_osx_architectures
-options cmake.install_rpath
+options cmake.build_dir cmake.install_prefix cmake.install_rpath
+options cmake.out_of_source cmake.set_osx_architectures
 
 # make out-of-source builds the default (finally)
-default cmake.out_of_source         yes
+default cmake.out_of_source {yes}
 
 # set CMAKE_OSX_ARCHITECTURES when necessary.
 # This can be deactivated when (non-Apple) compilers are used
 # that don't support the corresponding -arch options.
-default cmake.set_osx_architectures yes
+default cmake.set_osx_architectures {yes}
 
-default cmake.build_dir             {${workpath}/build}
-
-# minimal/initial value for the install rpath:
-default cmake.install_rpath         ${prefix}/lib
+default cmake.build_dir         {${workpath}/build}
+default cmake.install_prefix    {${prefix}}
+default cmake.install_rpath     {${prefix}/lib}
+proc cmake::rpath_flags {} {
+    if {[llength [option cmake.install_rpath]]} {
+        return [list \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+            -DCMAKE_INSTALL_RPATH='[join [option cmake.install_rpath] \;]'
+        ]
+    }
+    return -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -81,19 +84,21 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
-configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
-
-configure.args \
-                    -DCMAKE_VERBOSE_MAKEFILE=ON \
-                    -DCMAKE_COLOR_MAKEFILE=ON \
+default configure.pre_args {[list \
                     -DCMAKE_BUILD_TYPE=MacPorts \
-                    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
-                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
-                    -DCMAKE_FIND_FRAMEWORK=LAST \
+                   {-DCMAKE_C_COMPILER="$CC"} \
+                    -DCMAKE_COLOR_MAKEFILE=ON \
+                   {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                    -DCMAKE_FIND_FRAMEWORK=LAST \
+                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
+                    -DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}' \
+                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
+                    {*}[cmake::rpath_flags] \
+                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -Wno-dev
+                    ]}
 
 default configure.post_args {${worksrcpath}}
 
@@ -142,17 +147,6 @@ pre-configure {
     # but why do we set -DNDEBUG?
     configure.cflags-append     -DNDEBUG
     configure.cxxflags-append   -DNDEBUG
-    # force newer CMake versions to take a change in compiler choice into account
-    # even if it is invoked in a build.dir that was configured before.
-    if {${configure.cc} ne ""} {
-        configure.args-append \
-                    -DCMAKE_C_COMPILER=${configure.cc}
-    }
-    if {${configure.cxx} ne ""} {
-        configure.args-append \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx}
-    }
-
 
     # process ${configure.cppflags} to extract include directives and other options
     if {${configure.cppflags} ne ""} {
@@ -184,16 +178,12 @@ pre-configure {
             }
         }
         if {${configure.cppflags} ne ""} {
-            ui_debug "-DINCLUDE_DIRECTORIES=${configure.cppflags}"
-            configure.args-append   -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
+            configure.args-append -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
         }
-        ui_debug "CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
     }
 
-    if {${cmake.install_rpath} ne ""} {
-        ui_debug "Adding -DCMAKE_INSTALL_RPATH=[join ${cmake.install_rpath} \;] to configure.args"
-        configure.args-append -DCMAKE_INSTALL_RPATH="[join ${cmake.install_rpath} \;]"
-    }
+    # CMake doesn't like --enable-debug, so remove it unconditionally.
+    configure.args-delete --enable-debug
 }
 
 post-configure {
@@ -295,15 +285,14 @@ platform darwin {
 configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
-    configure.args-replace  -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_TYPE=Debug
-}
-
-# cmake doesn't like --enable-debug, so in case a portfile sets
-# --enable-debug (regardless of variant) we remove it
-if {[string first "--enable-debug" ${configure.args}] > -1} {
-    configure.args-delete     --enable-debug
+    configure.pre_args-replace  -DCMAKE_BUILD_TYPE=MacPorts \
+                                -DCMAKE_BUILD_TYPE=Debug
 }
 
 default build.dir {${configure.dir}}
 
 default build.post_args {VERBOSE=ON}
+
+# Generated Unix Makefiles contain a "fast" install target that begins
+# installing immediately instead of checking build dependencies again.
+default destroot.target {install/fast}

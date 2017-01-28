@@ -1,7 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 #
-# Copyright (c) 2009-2015 The MacPorts Project,
+# Copyright (c) 2009-2017 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -198,8 +197,6 @@ variant universal {
     }
 
     configure {
-        # Fix inability to find nm when cross-compiling (#22224, #23431, #23687, #24477, et al)
-        configure.env-append    NM=/usr/bin/nm
 
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] ${subport} ${arch}]"

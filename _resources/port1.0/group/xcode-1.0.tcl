@@ -1,7 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
-# xcode.tcl
-#
-# $Id$
 #
 # Copyright (c) 2005 Paul Guyot <pguyot@kallisys.net>,
 # Copyright (c) 2005-2012, 2014-2016 The MacPorts Project
@@ -288,12 +285,14 @@ proc xcode::get_build_args {args} {
 build {
     set xcode_configuration_arg [xcode::get_configuration_arg ${xcode.configuration}]
     set xcode_project_arg [xcode::get_project_arg ${xcode.project}]
+    set xcode_install_path_setting [xcode::get_install_path_setting \
+                                        ${xcode.destroot.path} ${xcode.destroot.type}]
     set xcode_build_args [xcode::get_build_args]
 
     if {${xcode.scheme} ne ""} {
         xcode::build_one_target \
             "${xcode_project_arg} -scheme \"${xcode.scheme}\" ${xcode_configuration_arg}" \
-            "${xcode_build_args} ${xcode.build.settings}"
+            "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
     } else {
         if {${xcode.target} ne ""} {
             set xcode_targets ${xcode.target}
@@ -303,12 +302,12 @@ build {
         if {${xcode_targets} eq ""} {
             xcode::build_one_target \
                 "${xcode_project_arg} -alltargets ${xcode_configuration_arg}" \
-                "${xcode_build_args} ${xcode.build.settings}"
+                "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
         } else {
             foreach target ${xcode_targets} {
                 xcode::build_one_target \
                     "${xcode_project_arg} -target \"${target}\" ${xcode_configuration_arg}" \
-                    "${xcode_build_args} ${xcode.build.settings}"
+                    "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
             }
         }
     }

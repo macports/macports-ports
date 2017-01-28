@@ -1,5 +1,3 @@
-# $Id$
-#
 # This file contains the livecheck defaults for PyPI.
 
 if {${livecheck.name} eq "default"} {

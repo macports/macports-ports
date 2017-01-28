@@ -1,5 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 #
 # Copyright (c) 2002 Apple Computer, Inc.
 # Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
@@ -33,10 +32,13 @@
 
 # Usage:
 #
-#   1. use ruby.setup
+#   1. use ruby.setup and ruby.branches
 #
 #     PortGroup        ruby 1.0
-#     ruby.setup       module version type {} ruby23
+#     ruby.branches    2.3 2.2
+#     ruby.setup       module version type
+#     # - adds subport "rb23-module" and "rb22-module"
+#     # - sets replaced_by to rb23-moudle (apply first item of branches)
 #
 #   2. use ruby.branch
 #
@@ -46,6 +48,8 @@
 #     build.cmd        ${ruby.bin}
 
 # options:
+#   ruby.branches: the ruby versions supported by this module.
+#        this introduces subports such as rb23-, rb22-, ...
 #   ruby.branch: select ruby version. 2.3, 2.2, 2.1, 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
@@ -64,10 +68,16 @@
 # values from ruby.setup:
 #   ruby.module: port name without prefix. rb-${ruby.module}.
 #   ruby.project: project name at rubygems or sourceforge.
+#
+# note:
+#   [gem] use destroot.post_args-append begins "--" to pass options to extconf.rb
+#   > ruby.setup moudle version gem
+#   > destroot.post_args-append -- --with-any-option
 
 options ruby.default_branch
 default ruby.default_branch 1.8
-options ruby.branch
+options ruby.branch ruby.branches
+default ruby.branches {}
 options ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir ruby.suffix
 options ruby.api_version ruby.lib ruby.archlib
 # ruby.version is obsoleted. use ruby.api_version.
@@ -101,11 +111,8 @@ proc ruby_set_branch {option action args} {
         set ruby.prog_suffix     ""
     }
     #
+    set ruby.api_version ${ruby.branch}.0
     switch -exact ${ruby.branch} {
-        2.3 {set ruby.api_version 2.3.0}
-        2.2 {set ruby.api_version 2.2.0}
-        2.1 {set ruby.api_version 2.1.0}
-        2.0 {set ruby.api_version 2.0.0}
         1.9 {set ruby.api_version 1.9.1}
         1.8 {set ruby.api_version 1.8}
     }
@@ -148,6 +155,7 @@ default ruby.branch         ${ruby.default_branch}
 # ruby group setup procedure; optional for ruby 1.8 if you want only
 # basic variables, like ruby.lib and ruby.archlib.
 proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {implementation "ruby"}} {
+    global name subport ruby.branches
     global destroot prefix worksrcpath os.platform
     global ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.branch
     global ruby.api_version ruby.lib ruby.suffix ruby.bindir ruby.gemdir
@@ -160,19 +168,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global merger_configure_env merger_build_env merger_destroot_env
     # for setup.rb +universal
     global ruby.config_rubyprog_name
-
-    switch ${implementation} {
-        ruby23 { ruby.branch 2.3 }
-        ruby22 { ruby.branch 2.2 }
-        ruby21 { ruby.branch 2.1 }
-        ruby20 { ruby.branch 2.0 }
-        ruby19 { ruby.branch 1.9 }
-        ruby   { ruby.branch 1.8 }
-        default {
-            ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
-            return -code error "ruby.setup failed"
-        }
-    }
 
     # define ruby global names and lists
     # check if module is a list or string
@@ -188,12 +183,64 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         set ruby.project    ${module}
         set ruby.filename   ${module}
     }
+
+    if {${ruby.branches} ne ""} {
+        # add subports rbXX-module from ${ruby.branches}
+        if {![info exists name]} {
+            name rb-[string tolower ${ruby.module}]
+        }
+        if {[string match rb-* $name]} {
+            set rootname [string range $name 3 end]
+            foreach v ${ruby.branches} {
+                set suffix [join [split ${v} .] {}]
+                subport rb${suffix}-${rootname} {
+                    ruby.branch ${v}
+                    depends_lib port:ruby${ruby.suffix}
+                }
+            }
+            if {$subport eq $name} {
+                # set first item in ${ruby.branches} to ruby.branch
+                ruby.branch [lindex [split ${ruby.branches}] 0]
+                set suffix [join [split ${ruby.branch} .] {}]
+                distfiles
+                supported_archs noarch
+                replaced_by rb${suffix}-${rootname}
+                depends_lib-append port:rb${suffix}-${rootname}
+                use_configure no
+                build {}
+                destroot {
+                    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                    system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
+                }
+            }
+        }
+    } else {
+        switch ${implementation} {
+            ruby24 { ruby.branch 2.4 }
+            ruby23 { ruby.branch 2.3 }
+            ruby22 { ruby.branch 2.2 }
+            ruby21 { ruby.branch 2.1 }
+            ruby20 { ruby.branch 2.0 }
+            ruby19 { ruby.branch 1.9 }
+            ruby   { ruby.branch 1.8 }
+            default {
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
+                return -code error "ruby.setup failed"
+            }
+        }
+        name            rb${ruby.suffix}-[string tolower ${ruby.module}]
+        depends_lib     port:${implementation}
+    }
+
     set ruby.docs   ${docs}
 
-    name            rb${ruby.suffix}-[string tolower ${ruby.module}]
     version         ${vers}
     categories      ruby
 
+    # set source to rubygems by default for type "gem"
+    if {(${type} eq "gem") && (${source} eq "custom")} {
+        set source rubygems
+    }
     switch -glob ${source} {
         rubygems {
             homepage        http://www.rubygems.org/gems/${ruby.project}
@@ -215,8 +262,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 
     distname        ${ruby.filename}-${vers}
     dist_subdir     ruby
-
-    depends_lib     port:${implementation}
 
     post-extract {
         # Create the work directory for gem-based ruby ports.
@@ -406,14 +451,17 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             use_configure no
             extract.suffix .gem
 
-            if {${implementation} eq "ruby"} {
+            if {${ruby.branch} eq "1.8"} {
                 depends_lib-append  port:rb-rubygems
                 if {${ruby.module} ne "rake"} {
                     depends_build-append    port:rb-rake
                 }
             }
 
-            extract {}
+            extract {
+                file mkdir ${worksrcpath}
+                copy ${distpath}/${distname}.gem ${worksrcpath}/${ruby.filename}.gem
+            }
             build {}
 
             pre-destroot {
@@ -424,11 +472,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.target install
             destroot.args   --local --force --install-dir ${destroot}${ruby.gemdir}
             destroot.env-append rake=${ruby.rake}
+            destroot.post_args ${worksrcpath}/${ruby.filename}.gem
 
             destroot {
-                # note: port cannot read $distpath and $distname
-                #       outside of destroot {}
-                destroot.post_args ${distpath}/${distname}.gem
                 command_exec destroot
 
                 set binDir ${destroot}${ruby.gemdir}/bin

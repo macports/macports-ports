@@ -1,6 +1,5 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
-
+#
 # Copyright (c) 2012 Markus Weissmann <mww@macports.org>
 # Copyright (c) 2012-2013, 2015-2016 The MacPorts Project
 # All rights reserved.

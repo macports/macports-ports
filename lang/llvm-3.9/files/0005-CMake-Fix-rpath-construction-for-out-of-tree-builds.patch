@@ -1,0 +1,145 @@
+From 17b58adf673bc4339bfc910b5d2739ec11e7acdd Mon Sep 17 00:00:00 2001
+From: Chris Bieneman <beanz@apple.com>
+Date: Tue, 1 Nov 2016 17:44:58 +0000
+Subject: [PATCH 5/8] [CMake] Fix rpath construction for out-of-tree builds
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch was produced in conjunction with Michał Górny. It should resolve the issues that were trying to be solved by D25304.
+
+This moves rpath handling into `llvm_add_library` and `add_llvm_executable` so that it is available to all projects using AddLLVM whether built in-tree or out-of-tree.
+
+git-svn-id: https://llvm.org/svn/llvm-project/llvm/trunk@285714 91177308-0d34-0410-b5e6-96231b3b80d8
+(cherry picked from commit 3a876bdaec4dd8e43d21e0ce369f17db274431c0)
+
+git-svn-id: https://llvm.org/svn/llvm-project/llvm/trunk@285881 91177308-0d34-0410-b5e6-96231b3b80d8
+(cherry picked from commit 8186cc4fdc9cd8baab93701661fee48d9faf1b08)
+---
+ CMakeLists.txt              | 14 --------------
+ cmake/modules/AddLLVM.cmake | 43 +++++++++++++++++++++++++++++++++++++++++--
+ unittests/CMakeLists.txt    |  4 ----
+ 3 files changed, 41 insertions(+), 20 deletions(-)
+
+diff --git llvm_release_39/CMakeLists.txt macports_release_39/CMakeLists.txt
+index b38f45d1268..2255d585df9 100644
+--- llvm_release_39/CMakeLists.txt
++++ macports_release_39/CMakeLists.txt
+@@ -616,20 +616,6 @@ set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/bin )
+ set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
+ set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
+ 
+-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+-if (APPLE)
+-  set(CMAKE_INSTALL_NAME_DIR "@rpath")
+-  set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
+-else(UNIX)
+-  if(NOT DEFINED CMAKE_INSTALL_RPATH)
+-    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib${LLVM_LIBDIR_SUFFIX}")
+-    if(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
+-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-z,origin")
+-      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,origin")
+-    endif()
+-  endif(NOT DEFINED CMAKE_INSTALL_RPATH)
+-endif()
+-
+ if(APPLE AND DARWIN_LTO_LIBRARY)
+   set(CMAKE_EXE_LINKER_FLAGS
+     "${CMAKE_EXE_LINKER_FLAGS} -Wl,-lto_library -Wl,${DARWIN_LTO_LIBRARY}")
+diff --git llvm_release_39/cmake/modules/AddLLVM.cmake macports_release_39/cmake/modules/AddLLVM.cmake
+index 26e43960014..3b42ee53050 100644
+--- llvm_release_39/cmake/modules/AddLLVM.cmake
++++ macports_release_39/cmake/modules/AddLLVM.cmake
+@@ -407,6 +407,9 @@ function(llvm_add_library name)
+   elseif(ARG_SHARED)
+     add_windows_version_resource_file(ALL_FILES ${ALL_FILES})
+     add_library(${name} SHARED ${ALL_FILES})
++
++    llvm_setup_rpath(${name})
++
+   else()
+     add_library(${name} STATIC ${ALL_FILES})
+   endif()
+@@ -606,7 +609,7 @@ endmacro(add_llvm_loadable_module name)
+ 
+ 
+ macro(add_llvm_executable name)
+-  cmake_parse_arguments(ARG "DISABLE_LLVM_LINK_LLVM_DYLIB;IGNORE_EXTERNALIZE_DEBUGINFO" "" "" ${ARGN})
++  cmake_parse_arguments(ARG "DISABLE_LLVM_LINK_LLVM_DYLIB;IGNORE_EXTERNALIZE_DEBUGINFO;NO_INSTALL_RPATH" "" "" ${ARGN})
+   llvm_process_sources( ALL_FILES ${ARG_UNPARSED_ARGUMENTS} )
+ 
+   # Generate objlib
+@@ -636,6 +639,10 @@ macro(add_llvm_executable name)
+     add_executable(${name} ${ALL_FILES})
+   endif()
+ 
++  if(NOT ARG_NO_INSTALL_RPATH)
++    llvm_setup_rpath(${name})
++  endif()
++
+   if(DEFINED windows_resource_file)
+     set_windows_version_resource_properties(${name} ${windows_resource_file})
+   endif()
+@@ -963,7 +970,7 @@ function(add_unittest test_suite test_name)
+   set(LLVM_REQUIRES_RTTI OFF)
+ 
+   list(APPEND LLVM_LINK_COMPONENTS Support) # gtest needs it for raw_ostream
+-  add_llvm_executable(${test_name} IGNORE_EXTERNALIZE_DEBUGINFO ${ARGN})
++  add_llvm_executable(${test_name} IGNORE_EXTERNALIZE_DEBUGINFO NO_INSTALL_RPATH ${ARGN})
+   set(outdir ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR})
+   set_output_directory(${test_name} BINARY_DIR ${outdir} LIBRARY_DIR ${outdir})
+   # libpthreads overrides some standard library symbols, so main
+@@ -1289,3 +1296,35 @@ function(llvm_externalize_debuginfo name)
+     message(FATAL_ERROR "LLVM_EXTERNALIZE_DEBUGINFO isn't implemented for non-darwin platforms!")
+   endif()
+ endfunction()
++
++function(llvm_setup_rpath name)
++  if(LLVM_INSTALL_PREFIX AND NOT (LLVM_INSTALL_PREFIX STREQUAL CMAKE_INSTALL_PREFIX))
++    set(extra_libdir ${LLVM_LIBRARY_DIR})
++  elseif(LLVM_BUILD_LIBRARY_DIR)
++    set(extra_libdir ${LLVM_LIBRARY_DIR})
++  endif()
++
++  if (APPLE)
++    set(_install_name_dir INSTALL_NAME_DIR "@rpath")
++    set(_install_rpath "@loader_path/../lib" ${extra_libdir})
++  elseif(UNIX)
++    if(NOT DEFINED CMAKE_INSTALL_RPATH)
++      set(_install_rpath "\$ORIGIN/../lib${LLVM_LIBDIR_SUFFIX}" ${extra_libdir})
++      if(${CMAKE_SYSTEM_NAME} MATCHES "(FreeBSD|DragonFly)")
++        set_property(TARGET ${name} APPEND_STRING PROPERTY
++                     LINK_FLAGS " -Wl,-z,origin ")
++      elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux" AND NOT LLVM_LINKER_IS_GOLD)
++        # $ORIGIN is not interpreted at link time by ld.bfd
++        set_property(TARGET ${name} APPEND_STRING PROPERTY
++                     LINK_FLAGS " -Wl,-rpath-link,${LLVM_LIBRARY_OUTPUT_INTDIR} ")
++      endif()
++    endif()
++  else()
++    return()
++  endif()
++
++  set_target_properties(${name} PROPERTIES
++                        BUILD_WITH_INSTALL_RPATH On
++                        INSTALL_RPATH "${_install_rpath}"
++                        ${_install_name_dir})
++endfunction()
+diff --git llvm_release_39/unittests/CMakeLists.txt macports_release_39/unittests/CMakeLists.txt
+index 1758d2b2704..75de7c8f0a2 100644
+--- llvm_release_39/unittests/CMakeLists.txt
++++ macports_release_39/unittests/CMakeLists.txt
+@@ -1,10 +1,6 @@
+ add_custom_target(UnitTests)
+ set_target_properties(UnitTests PROPERTIES FOLDER "Tests")
+ 
+-# People tend to run the tests _before_ installing, so we don't want the install
+-# rpath here.
+-set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
+-
+ function(add_llvm_unittest test_dirname)
+   add_unittest(UnitTests ${test_dirname} ${ARGN})
+ endfunction()
+-- 
+2.11.0
+

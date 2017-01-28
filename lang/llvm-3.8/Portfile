@@ -1,5 +1,3 @@
-# $Id$
-
 # TODO:
 #  * Update clang subport to build against installed llvm
 
@@ -12,8 +10,8 @@ PortGroup cmake         1.0
 set llvm_version        3.8
 set llvm_version_no_dot 38
 name                    llvm-${llvm_version}
-revision                0
-subport                 clang-${llvm_version} { revision 6 }
+revision                2
+subport                 clang-${llvm_version} { revision 8 }
 set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
 dist_subdir             llvm
@@ -50,13 +48,19 @@ if {${subport} eq "llvm-${llvm_version}"} {
 
     depends_lib         port:libxml2 port:libomp port:llvm-${llvm_version} port:python27
     depends_run         port:clang_select port:ld64
-    depends_build-append port:cctools
-    depends_skip_archcheck-append cctools ld64 subversion
+    depends_skip_archcheck-append ld64
 
     # Clang doesn't actually use any of these, but the LLVM makefile
     # system overlinks its binaries. Remove (or convert to build deps?)
     # after #46040 is resolved.
     depends_lib-append  port:libedit port:libffi port:ncurses port:zlib
+
+    # Older Xcode's lipo doesn't support x86_64h slices
+    # https://trac.macports.org/ticket/53159#ticket
+    if {[vercmp $xcodeversion "6.0.0"] < 0} {
+        depends_build-append port:cctools
+        depends_skip_archcheck-append cctools
+    }
 
     default_variants    +analyzer
 }
@@ -122,6 +126,10 @@ patchfiles \
         0005-MacPorts-Only-Don-t-embed-the-deployment-target-in-t.patch \
         0006-MacPorts-Only-Skip-checking-for-python-in-configure.patch \
         0007-Remove-override-of-raise-abort-and-__assert_rtn.patch \
+        0008-CMake-Use-CMake-s-default-RPATH-for-the-unit-tests.patch \
+        0009-CMake-Fix-rpath-construction-for-out-of-tree-builds.patch \
+        0010-CMake-Make-CMAKE_INSTALL_RPATH-work-again.patch \
+        0011-CMake-Fix-llvm_setup_rpath-function.patch \
         llvm-skip-unittests.patch
 
 if {${subport} eq "clang-${llvm_version}"} {
@@ -178,11 +186,20 @@ configure.post_args         ../${worksrcdir}
 default configure.dir       {${workpath}/build}
 default build.dir           {${workpath}/build}
 
-# https://llvm.org/bugs/show_bug.cgi?id=25664
-configure.ldflags-append    -Wl,-rpath,@loader_path
+cmake.install_prefix        ${sub_prefix}
 
-# https://trac.macports.org/ticket/51542
-configure.ldflags-append    -Wl,-rpath,@loader_path/
+# Adjust this once cmake-1.0.tcl is fixed:
+#     https://github.com/macports/macports-ports/pull/103
+# Also see:
+#     https://llvm.org/bugs/show_bug.cgi?id=31425
+configure.args-delete \
+    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
+    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr"
+configure.args-append \
+    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
+    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
 
 configure.args-append \
     -DLLVM_LINK_LLVM_DYLIB=ON \
@@ -196,6 +213,17 @@ configure.args-append \
     -DFFI_INCLUDE_DIR=${prefix}/include \
     -DFFI_LIBRARY_DIR=${prefix}/lib
 
+# I'm not sure the exact version of Xcode that has a good enough libtool, but 3.2.6 seems to get past this when 3.1.4 doesn't:
+#     /Developer/usr/bin/libtool: for architecture x86_64 object: CMakeFiles/LLVMSupport.dir/PluginLoader.cpp.o malformed object (unknown load command 1)
+#     /Developer/usr/bin/libtool: for architecture: (null) file: CMakeFiles/LLVMSupport.dir/PluginLoader.cpp.o is not an object file (not allowed in a library)
+#     /Developer/usr/bin/libtool: for architecture i386 object: CMakeFiles/LLVMSupport.dir/PluginLoader.cpp.o malformed object (unknown load command 1)
+if {[vercmp $xcodeversion "3.2.6"] < 0} {
+    depends_build-append port:cctools
+    depends_skip_archcheck-append cctools
+    configure.args-append \
+        -DCMAKE_LIBTOOL=${prefix}/bin/libtool
+}
+
 if {${subport} eq "llvm-${llvm_version}"} {
     select.group        llvm
     select.file         ${filespath}/mp-${subport}
@@ -203,7 +231,9 @@ if {${subport} eq "llvm-${llvm_version}"} {
     select.group        clang
     select.file         ${filespath}/mp-${subport}
 
+    # CMAKE_LINKER is used to determine the value for HOST_LINK_VERSION
     configure.args-append \
+        -DCMAKE_LINKER=${prefix}/bin/ld \
         -DCLANG_INCLUDE_TESTS=OFF \
         -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
         -DLLVM_BUILD_RUNTIME=ON \
@@ -214,25 +244,18 @@ if {${subport} eq "llvm-${llvm_version}"} {
 # XCode 4.3's clang (318.x) fails per https://trac.macports.org/ticket/44161
 # XCode 4.5's clang (421.11.66) fails due to http://llvm.org/bugs/show_bug.cgi?id=20184
 # Xcode 4.6.3's clang (425.0.28) fails due to http://trac.macports.org/ticket/46897
-compiler.blacklist *gcc* {clang < 500}
+# Xcode 5.1's clang (clang-503.0.40) has codegen issues (resulting compiler crashes)
+# Xcode 6.2's clang (600.0.57) fails due to https://llvm.org/bugs/show_bug.cgi?id=25753
+compiler.blacklist *gcc* {clang < 602}
 
 if {${subport} eq "clang-${llvm_version}"} {
-    # Xcode 6.2's clang (600.0.57) fails due to https://llvm.org/bugs/show_bug.cgi?id=25753
     # clang older than 3.5 fail due to https://llvm.org/bugs/show_bug.cgi?id=25753
-    compiler.blacklist-append {clang < 602} macports-clang-3.3 macports-clang-3.4
- 
-    # Remove this when loosening the blacklist above or when a newer base is released
-    compiler.fallback-append macports-clang-3.7 macports-clang-3.6 macports-clang-3.5
-
-    # Don't self-host.  We may have issues if we have a slightly newer llvm version that
-    # is not binary compatible with the older clang version we're trying to use.
-
-    compiler.blacklist-append macports-clang-${llvm_version}
+    compiler.blacklist-append macports-clang-3.3 macports-clang-3.4
 }
 
 # blacklist current and future versions if they're not available in order to
 # help break potential dependency cycles.
-foreach ver {3.8 3.9 devel} {
+foreach ver {3.8 3.9 4.0 devel} {
     if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
         compiler.blacklist-append macports-clang-${ver}
     }
@@ -282,11 +305,6 @@ platform darwin {
         # https://llvm.org/bugs/show_bug.cgi?id=13671
         patchfiles-append leopard-no-asan.patch
         configure.args-append -DCOMPILER_RT_BUILD_SANITIZERS=OFF
-    }
-
-    if {${subport} eq "clang-${llvm_version}" && ${os.major} <= 10} {
-        configure.args-append -DTEST_COMPILE_ONLY=YES
-        patchfiles-append compiler_rt-ppc_fallbacks.patch
     }
 
     if {${subport} eq "clang-${llvm_version}" && ${os.major} <= 9} {

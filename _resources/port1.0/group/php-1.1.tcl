@@ -1,7 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 #
-# Copyright (c) 2009-2015 The MacPorts Project
+# Copyright (c) 2009-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -41,7 +40,7 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1
 #
 # For unified ports, setting php.branches will create the subports.
 #
@@ -131,7 +130,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 7.0
+default php.latest_stable_branch 7.1
 
 
 # php.default_branch: the branch of PHP for which the port should be installed

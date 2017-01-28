@@ -1,0 +1,187 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                qt5-qtcreator
+
+if { ${subport} eq ${name}  } {
+    PortGroup           muniversal 1.0
+}
+PortGroup           qmake5 1.0
+
+version             4.1.0
+#revision            0
+categories          devel aqua
+platforms           darwin
+# from https://blog.qt.io/blog/2016/01/13/new-agreement-with-the-kde-free-qt-foundation/
+# The GPL license comes with two exceptions that ensure that there are no license restrictions on generated code, and that bridging to 3rd party code is still possible.
+license             GPL-3
+maintainers         mcalhoun openmaintainer
+description         Cross-platform integrated development environment (IDE) tailored to the needs of Qt developers.
+long_description    Qt Creator is a cross-platform integrated development environment (IDE) tailored to the needs of Qt developers.
+
+homepage            http://qt-project.org/wiki/Category:Tools::QtCreator
+distname            qt-creator-opensource-src-${version}
+master_sites        https://download.qt.io/official_releases/qtcreator/[join [lrange [split ${version} .] 0 1] .]/${version}/
+
+checksums           rmd160  aad5f1096cf038b23969c6677cb4094515eaaa48 \
+                    sha256  412c0223dbfd86983b39e10e2c7cb42b530995cfe2f3aa3529ea3f1b00ffb403
+
+if { ${subport} eq ${name}  } {
+
+    qt5.depends_component  qtscript qtdeclarative qttools qtmacextras qtquickcontrols qtsvg
+
+    depends_lib-append     port:botan
+    configure.args-append  "USE_SYSTEM_BOTAN=1"
+
+    # do not opportunistically use QtWebkit
+    patchfiles-append      patch-no_qtwebkit.diff
+
+    # do not opportunistically use QtWebengine
+    patchfiles-append      patch-no_qtwebengine.diff
+
+    variant qtwebkit description {build with QtWebkit support} {
+        patchfiles-delete  patch-no_qtwebkit.diff
+        qt5.depends_component qtwebkit
+    }
+
+    # qtwebengine does not have a universal build
+    variant qtwebengine conflicts universal description {build with QtWebengine support} {
+        patchfiles-delete  patch-no_qtwebkit.diff
+        qt5.depends_component qtwebengine
+    }
+
+    if { ![variant_isset universal] } {
+        destroot {
+            # make install attempts to install command line tools into /bin, etc.
+            xinstall -m 755 -d ${destroot}${qt_apps_dir}
+            copy "${worksrcpath}/bin/Qt Creator.app" "${destroot}${qt_apps_dir}"
+        }
+    } else {
+        # We should really just override destroot, but the muniversal Portgroup would override our override.
+        destroot.cmd "true"
+        merger-post-destroot {
+            foreach arch ${universal_archs_to_use} {
+                xinstall -m 755 -d ${destroot}-${arch}${qt_apps_dir}
+                copy "${worksrcpath}-${arch}/bin/Qt Creator.app" "${destroot}-${arch}${qt_apps_dir}"
+            }
+        }
+    }
+
+    # put following in post-destroot so it works with universal
+    post-destroot {
+        # sdktool is a tool located in "Qt Creator.app/Contents/Resources"
+        #
+        # two necessary files that sdktool creates are:
+        #    "${qt_apps_dir}/Qt Creator.app/Contents/Resources/QtProject/qtcreator/qtversion.xml"
+        #    "${qt_apps_dir}/Qt Creator.app/Contents/Resources/QtProject/qtcreator/profiles.xml"
+        #
+        # from the installer.dat file, it seems the following are run by the binary installer of Qt Creator version 5.7.0
+        # see http://code.qt.io/cgit/qtsdk/qtsdk.git/tree/packaging-tools/configurations/pkg_templates/pkg_57/qt.57.clang_64/meta/installscript.qs
+        #    sdktool addQt --id qt.57.clang_64 --name "Qt %{Qt:Version} clang 64bit" --type Qt4ProjectManager.QtVersion.Desktop --qmake qmakeBinary
+        #    sdktool addKit --id qt.57.clang_64_kit --name "Desktop Qt %{Qt:Version} clang 64bit" --toolchain x86-macos-generic-mach_o-64bit --qt qt.57.clang_64 --debuggerengine 256 --devicetype Desktop
+        #
+        # modify for our purposes
+        #
+        # for unknown reason, using system instead of exec results in "QWidget: Cannot create a QWidget without QApplication"
+        #
+        # surround sdktool with catch since, as of 4.2.0, sdktool causes Tcl to register an error when asked to create a file
+        #
+        set sdktool ${destroot}${qt_apps_dir}/Qt\ Creator.app/Contents/Resources/sdktool
+
+        if { [catch {
+            exec                                             \
+                "${sdktool}"                                 \
+                addQt                                        \
+                --id    qt.5.macports                        \
+                --name  "Qt %{Qt:Version} from MacPorts"     \
+                --qmake "${qt_qmake_cmd}"                    \
+                --type  Qt4ProjectManager.QtVersion.Desktop
+        } msg] } {
+            if { ![file exists ${destroot}${qt_apps_dir}/Qt\ Creator.app/Contents/Resources/QtProject/qtcreator/qtversion.xml] } {
+                ui_error ${msg}
+                return -code error "sdktool failure"
+            }
+        }
+
+        if { [variant_isset universal] } {
+            foreach arch ${universal_archs_to_use} {
+                if { ${arch} eq "i386" } {
+                    set toolchain_bit      32
+                    set qt_qmake_spec_arch ${qt_qmake_spec_32}
+                } else {
+                    set toolchain_bit      64
+                    set qt_qmake_spec_arch ${qt_qmake_spec_64}
+                }
+
+                if { [catch {
+                    exec                                                                   \
+                        "${sdktool}"                                                       \
+                        addKit                                                             \
+                        --id             qt.5.macports_${arch}_kit                         \
+                        --name           "Desktop Qt %{Qt:Version} from MacPorts ${arch}"  \
+                        --toolchain      x86-macos-generic-mach_o-${toolchain_bit}bit      \
+                        --qt             qt.5.macports                                     \
+                        --debuggerengine 256                                               \
+                        --devicetype Desktop                                               \
+                        --mkspec     ${qt_qmake_spec_arch}
+                } msg] } {
+                    if { ![file exists ${destroot}${qt_apps_dir}/Qt\ Creator.app/Contents/Resources/QtProject/qtcreator/profiles.xml] } {
+                        ui_error ${msg}
+                        return -code error "sdktool failure"
+                    }
+                }
+            }
+        } else {
+            if { ${build_arch} eq "i386" } {
+                set toolchain_bit 32
+            } else {
+                set toolchain_bit 64
+            }
+
+            if { [catch {
+                exec                                                                         \
+                    "${sdktool}"                                                             \
+                    addKit                                                                   \
+                    --id             qt.5.macports_${build_arch}_kit                         \
+                    --name           "Desktop Qt %{Qt:Version} from MacPorts ${build_arch}"  \
+                    --toolchain      x86-macos-generic-mach_o-${toolchain_bit}bit            \
+                    --qt             qt.5.macports                                           \
+                    --debuggerengine 256                                                     \
+                    --devicetype     Desktop                                                 \
+                    --mkspec         ${qt_qmake_spec}
+            } msg] } {
+                if { ![file exists ${destroot}${qt_apps_dir}/Qt\ Creator.app/Contents/Resources/QtProject/qtcreator/profiles.xml] } {
+                    ui_error ${msg}
+                    return -code error "sdktool failure"
+                }
+            }
+        }
+
+        # N.B. that at some point in the future, QtCreator.ini may need to be created
+        #    to include more search locations for documentation and examples
+    }
+}
+
+subport ${name}-docs {
+
+    universal_variant no
+    supported_archs   noarch
+    qt5.debug_variant no
+
+    qt5.depends_build_component sqlite-plugin
+    depends_run-append   port:${name}
+    build.target       docs
+
+    destroot {
+        xinstall -m 755 -d ${destroot}${qt_apps_dir}
+        copy "${worksrcpath}/bin/Qt Creator.app" "${destroot}${qt_apps_dir}"
+
+        xinstall -m 755 -d ${destroot}${qt_docs_dir}
+        copy ${worksrcpath}/doc/html ${worksrcpath}/doc/html-dev ${destroot}${qt_docs_dir}
+    }
+}
+
+livecheck.type      regex
+livecheck.url       http://www.qt.io/download-open-source/
+livecheck.regex     qt-creator-opensource-src-(\[a-z0-9.\]+)${extract.suffix}

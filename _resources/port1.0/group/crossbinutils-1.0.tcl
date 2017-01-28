@@ -1,6 +1,6 @@
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2010 The MacPorts Project
+# Copyright (c) 2010-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -35,12 +35,12 @@
 # Usage:
 #
 #   PortGroup               crossbinutils 1.0
-#   crossbinutils.setup     spu 2.20.51.0.5
+#   crossbinutils.setup     spu 2.27
 
 options crossbinutils.target
 
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath extract.suffix
+    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target
 
     crossbinutils.target ${target}
 
@@ -102,18 +102,18 @@ proc crossbinutils.setup {target version} {
                 ${worksrcpath}/${dir}/configure
         }
 
-	# Install target-compatible libbfd/libiberty in the target's directory
-	reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
-		${worksrcpath}/bfd/configure                                \
-		${worksrcpath}/opcodes/configure
-	reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
-		${worksrcpath}/bfd/configure                                             \
-		${worksrcpath}/opcodes/configure
+        # Install target-compatible libbfd/libiberty in the target's directory
+        reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
+            ${worksrcpath}/bfd/configure                                \
+            ${worksrcpath}/opcodes/configure
+        reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
+            ${worksrcpath}/bfd/configure                                             \
+            ${worksrcpath}/opcodes/configure
 
-	reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
-		${worksrcpath}/libiberty/Makefile.in
-	reinplace "s|\$(MULTIOSDIR)||g" \
-		${worksrcpath}/libiberty/Makefile.in
+        reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
+            ${worksrcpath}/libiberty/Makefile.in
+        reinplace "s|/\$(MULTIOSDIR)||g" \
+            ${worksrcpath}/libiberty/Makefile.in
     }
 
     depends_lib \
@@ -129,7 +129,7 @@ proc crossbinutils.setup {target version} {
     configure.args \
         --target=${target} \
         --program-prefix=${target}- \
-        --enable-install-libiberty \
+        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host  \
         --enable-install-libbfd
 
     build.dir ${workpath}/build

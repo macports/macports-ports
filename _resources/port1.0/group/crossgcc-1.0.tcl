@@ -1,4 +1,4 @@
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2011-2016 The MacPorts Project
 # All rights reserved.
@@ -98,18 +98,20 @@ proc crossgcc.setup {target version} {
         post-patch {
                 # Fix the info pages and related stuff.
                 #
-                # path: path to the doc directory (e.g. gas/doc/)
+                # path:     path to the doc directory (e.g. gas/doc/)
                 # makefile: path to Makefile.in (e.g. gas/doc/Makefile.in)
-                # name: name of the info page (e.g. as)
-                # suffix: suffix of the source page (texinfo or texi)
-                # path makefile name suffix
+                # name:     name of the info page (e.g. as)
+                # suffix:   suffix of the source page (texinfo or texi)
+                #
+                #   path        makefile                 name         suffix
                 set infopages {
-                    gcc/doc/ gcc/Makefile.in cpp texi
-                    gcc/doc/ gcc/Makefile.in cppinternals texi
-                    gcc/doc/ gcc/Makefile.in gcc texi
-                    gcc/doc/ gcc/Makefile.in gccint texi
-                    gcc/doc/ gcc/Makefile.in gccinstall info
-                    libquadmath libquadmath/Makefile.in libquadmath info
+                    gcc/doc     gcc/Makefile.in          cpp          texi
+                    gcc/doc     gcc/Makefile.in          cppinternals texi
+                    gcc/doc     gcc/Makefile.in          gcc          texi
+                    gcc/doc     gcc/Makefile.in          gccint       texi
+                    gcc/doc     gcc/Makefile.in          gccinstall   info
+                    gcc/fortran gcc/fortran/Make-lang.in gfortran     texi
+                    libquadmath libquadmath/Makefile.in  libquadmath  info
                 }
 
                 foreach { path makefile name suffix } $infopages {

@@ -1,5 +1,4 @@
-# et:ts=4
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2009 Rainer Mueller <raimue@macports.org>
 # Copyright (c) 2009-2012, 2015 The MacPorts Project
@@ -30,9 +29,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#
-#
-# select-1.0.tcl
 #
 # This portgroup provides access to the port selection mechanism exposed
 # by the `port select` command. (Refer to the port(1) and port-select(1)

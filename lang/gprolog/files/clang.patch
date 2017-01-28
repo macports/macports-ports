@@ -1,0 +1,259 @@
+https://gist.githubusercontent.com/jacknagel/7549696/raw/6d7ae0ba54eabb8a5dd123a29c17cf88a8822cea/gprolog-clang.patch
+
+diff --git a/examples/ExamplesFD/langford.pl b/examples/ExamplesFD/langford.pl
+index 9434b9d..62198dd 100644
+--- a/examples/ExamplesFD/langford.pl
++++ b/examples/ExamplesFD/langford.pl
+@@ -29,29 +29,63 @@ q :-
+ 	nl.
+ 
+ 
+-langford(N, L) :-
++/*
++ * Find an assignment of [X1, X2, ..., Xn] (Xi is the position of the first occurrence of i).
++ * For each Xi the constraints are: 
++ *
++ *    Xi in 1..(N+N-1-i)
++ *    if each pair Xi, Xj (i < j) the following holds:
++ *    Xj != Xi
++ *    Xj != Xi + i + 1
++ *    Xj != Xi - j - 1
++ *    Xj != Xi + i - j
++ *
++ * This can be achieved using #=# in set_cstr (but slower at the end)
++ *
++ * Here we keep the list of positions Ui (resp. Vi) is the position of the first (resp. second) occurrence of i
++ * It is possible to only keep one list (i.e. Ui) but seems slower (see file LANGFORD.pl)
++ */
++
++
++langford(N, LD) :-
+ 	(   N mod 4 =:= 0
+ 	;   N mod 4 =:= 3
+ 	), !,
+ 	length(U, N),
+ 	length(V, N),
+-	append(U, V, UV),
++	append(U, V, L),
+ 	N2 is N * 2,
+ 	fd_set_vector_max(N2),
+-	fd_domain(UV, 1, N2),
+-	fd_all_different(UV),
++	fd_domain(L, 1, N2),
++	fd_all_different(L),
+ 	set_cstr(U, V, 1),
+-	symetric(N, N2, UV),
++	symetric(N, N2, L),
+ %	fd_labeling(U, [variable_method(random), value_method(random)]), % sometimes much better
+ 	fd_labeling(U, [variable_method(ff), value_method(max)]),
+-	decode(1, N, UV, L).
++	decode(U, N2, LD).
++
++
++/*
++ * Find an assignment of [X1, X2, ..., Xn] (Xi is the position of the first occurrence of i).
++ * For each Xi the constraints are: 
++ *
++ *    Xi in 1..(N+N-1-i)
++ *    if each pair Xi, Xj (i < j) the following holds:
++ *    Xi != Xj
++ *    Xj != Xi + i + 1
++ *    Xi != Xj + j + 1
++ *    Xi + i + 1 != Xj + j + 1
++ *
++ * This can be achieved using #=# in set_cstr (but slower at the end)
++ */
+ 
+ 
+ set_cstr([], [], _).
+ 
+ set_cstr([X|U], [Y|V], I) :-
+ 	I1 is I + 1,
+-	Y - X #= I1,         % also avoid some symetries since enforces X < Y
++	Y #= X + I1,         % also avoid some symetries since enforces X < Y
++%	Y #=# X + I1,         % better pruning but slower for big values
+ 	set_cstr(U, V, I1).
+ 
+ 
+@@ -62,17 +96,20 @@ symetric(N, N2, UV) :-
+ 
+ 
+ 
+-decode(I, N, _, []) :-
+-	I > N * 2, !.
+ 
+-decode(I, N, UV, [Z1|L]) :-
++decode(L, N2, LD) :-
++	length(LD, N2),
++	decode1(L, 1, LD).
++
++
++decode1([], _, _).
++
++decode1([X|L], I, LD) :-
++	nth(X, LD, I),
++	Y is X + I + 1,
++	nth(Y, LD, I),	
+ 	I1 is I + 1,
+-	nth(Z, UV, I),
+-	(   Z > N ->
+-	    Z1 is Z - N
+-	;   Z1 = Z
+-	),
+-	decode(I1, N, UV, L).
++	decode1(L, I1, LD).
+ 
+ 
+ 
+diff --git a/src/BipsPl/arith_inl_c.c b/src/BipsPl/arith_inl_c.c
+index deda82d..13f481a 100644
+--- a/src/BipsPl/arith_inl_c.c
++++ b/src/BipsPl/arith_inl_c.c
+@@ -485,10 +485,10 @@ Pl_Succ_2(WamWord x_word, WamWord y_word)
+   double d;                                      \
+   if (Tag_Is_INT(x))            /* error case */ \
+     {                                            \
+-      if (Flag_Value(strict_iso))           \
++      if (Flag_Value(strict_iso))                \
+          Pl_Err_Type(pl_type_float, x);          \
+-      else                                       \
+-         return x;                               \
++                                                 \
++      return x;                                  \
+     }						 \
+   else                                           \
+     d = Pl_Obtain_Float(UnTag_FLT(x));           \
+@@ -499,7 +499,11 @@ Pl_Succ_2(WamWord x_word, WamWord y_word)
+ #define FtoF(x, c_op)                            \
+   double d;                                      \
+   if (Tag_Is_INT(x))            /* error case */ \
+-    Pl_Err_Type(pl_type_float, x);               \
++    {                                            \
++      Pl_Err_Type(pl_type_float, x);             \
++                                                 \
++      return x; /* for clang (avoid d uninit) */ \
++    }						 \
+   else                                           \
+     d = Pl_Obtain_Float(UnTag_FLT(x));           \
+   return Make_Tagged_Float(c_op(d))
+diff --git a/src/BipsPl/scan_supp.c b/src/BipsPl/scan_supp.c
+index 1ce1897..0d8ae08 100644
+--- a/src/BipsPl/scan_supp.c
++++ b/src/BipsPl/scan_supp.c
+@@ -341,7 +341,7 @@ static void
+ Scan_Number(StmInf *pstm, Bool integer_only)
+ {
+   int lg;
+-  int radix;
++  int radix, radix_c;
+   char *p, *f;
+   int c_orig0;
+ 
+@@ -403,8 +403,14 @@ Scan_Number(StmInf *pstm, Bool integer_only)
+ 	  else
+ 	    c = '\'';
+ 	}
+-
+-      if (c < 0) 		/* \ newline   EOF   newline   tab    other error */
++      else if (c == -2)		/* \ newline */
++	{
++	  Unget_Last_Char;		/* push back \n */
++	  Pl_Stream_Ungetc('\\', pstm); /* push back \  */
++	  Pl_Stream_Ungetc('\'', pstm); /* push back '  */
++	  return;
++	}
++      else if (c < 0) 		/* \ newline   EOF   newline   tab    other error */
+ 	{
+ 	  Unget_Last_Char;
+ 
+@@ -412,12 +418,14 @@ Scan_Number(StmInf *pstm, Bool integer_only)
+ 	  pl_token.line = pstm->line_count + 1;
+ 	  pl_token.col = pstm->line_pos + 1;
+ 	  err_msg = "character expected here";
++	  return;
+ 	}
+ 
+       pl_token.int_num = c;
+       return;
+     }
+ 
++  radix_c = c;
+   radix = (c == 'b') ? (f = "01", 2) :
+     (c == 'o') ? (f = "01234567", 8)
+     : (f = "0123456789abcdefABCDEF", 16);
+@@ -430,6 +438,15 @@ Scan_Number(StmInf *pstm, Bool integer_only)
+     }
+   *p = '\0';
+ 
++  /* empty sequence after radix: maybe an operator beginnig with b or o or x:
++   * op(9,yfx,bop) then 0bop 2 is 0 bop 2 */
++  if (p == pl_token.name)
++    {
++      Unget_Last_Char;		/* push back last char */
++      Pl_Stream_Ungetc(radix_c, pstm); /* push back \  */
++      return;
++    }
++
+   pl_token.int_num = Str_To_PlLong(pl_token.name, &p, radix);
+   goto push_back;
+ 
+diff --git a/src/BipsPl/stream_c.c b/src/BipsPl/stream_c.c
+index af65cd1..b769726 100644
+--- a/src/BipsPl/stream_c.c
++++ b/src/BipsPl/stream_c.c
+@@ -208,7 +208,7 @@ Pl_Open_3(WamWord source_sink_word, WamWord mode_word, WamWord stm_word)
+ {
+   WamWord word, tag_mask;
+   int atom;
+-  int mode;
++  int mode = STREAM_MODE_READ;	/* to avoid clang warning */
+   Bool text;
+   StmProp prop;
+   char *path;
+@@ -1193,7 +1193,7 @@ Pl_Seek_4(WamWord sora_word, WamWord whence_word, WamWord offset_word,
+ {
+   int stm;
+   StmInf *pstm;
+-  int whence;
++  int whence = SEEK_SET;	/* to avoid clang warning */
+   PlLong offset;
+   int atom;
+   PlLong p[4];
+diff --git a/src/EnginePl/engine1.c b/src/EnginePl/engine1.c
+index 400dac4..d6acb33 100644
+--- a/src/EnginePl/engine1.c
++++ b/src/EnginePl/engine1.c
+@@ -65,7 +65,6 @@ WamWord *pl_ensure_reserved;
+  * global variable to ensure the stack is not removed.                     *
+  *-------------------------------------------------------------------------*/
+ 
+-static long x;
+ void
+ Pl_Call_Compiled(CodePtr codep)
+ {
+@@ -116,9 +115,12 @@ Pl_Call_Compiled(CodePtr codep)
+   pl_ensure_reserved = (WamWord *) rb; /* to avoid gcc warning */
+ 
+ #elif defined(M_x86_64_darwin)
+-
+   register WamWord *rb asm("%r12") = pl_reg_bank;
+   pl_ensure_reserved = (WamWord *) rb; /* to avoid gcc warning */
++#ifdef __llvm__		       /* the above does not assign r12 now by Apple gcc = llvm clang */
++  asm("movq _pl_reg_bank@GOTPCREL(%rip), %r12");
++  asm("movq (%r12), %r12");
++#endif
+ 
+ #endif
+ 
+diff --git a/src/Linedit/terminal.c b/src/Linedit/terminal.c
+index 89c0b21..ef5f8a8 100644
+--- a/src/Linedit/terminal.c
++++ b/src/Linedit/terminal.c
+@@ -304,6 +304,7 @@ Parse_Env_Var(void)
+         fd_out = strtol(p, NULL, 10);
+       else
+         {
++	  q = buff;
+           while(*p && isprint(*p) && !isspace(*p))
+             *q++ = *p++;
+ 

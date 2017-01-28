@@ -1,8 +1,7 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
 #
 # Copyright (c) 2009 Orville Bennett <illogical1 at gmail.com>
-# Copyright (c) 2010-2015 The MacPorts Project
+# Copyright (c) 2010-2016 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -34,10 +33,11 @@
 # Usage:
 # PortGroup     cmake 1.0
 
-options cmake.out_of_source cmake.build_dir
+options cmake.build_dir cmake.install_prefix cmake.out_of_source
 
-default cmake.out_of_source no
-default cmake.build_dir {${workpath}/build}
+default cmake.build_dir         {${workpath}/build}
+default cmake.install_prefix    {${prefix}}
+default cmake.out_of_source     {no}
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -63,18 +63,22 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
-configure.pre_args  -DCMAKE_INSTALL_PREFIX=${prefix}
+default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
 
-configure.args      -DCMAKE_VERBOSE_MAKEFILE=ON \
-                    -DCMAKE_COLOR_MAKEFILE=ON \
+default configure.args {[list \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-                    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
-                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
+                   {-DCMAKE_C_COMPILER="$CC"} \
+                    -DCMAKE_COLOR_MAKEFILE=ON \
+                   {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
+                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
+                    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
+                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
+                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -Wno-dev
+                    ]}
 
 default configure.post_args {${worksrcpath}}
 
@@ -117,6 +121,9 @@ pre-configure {
         configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
                               -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
     }
+
+    # CMake doesn't like --enable-debug, so remove it unconditionally.
+    configure.args-delete --enable-debug
 }
 
 platform darwin {
@@ -179,12 +186,10 @@ variant debug description "Enable debug binaries" {
     configure.args-replace  -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_TYPE=Debug
 }
 
-# cmake doesn't like --enable-debug, so in case a portfile sets
-# --enable-debug (regardless of variant) we remove it
-if {[string first "--enable-debug" ${configure.args}] > -1} {
-    configure.args-delete     --enable-debug
-}
-
 default build.dir {${configure.dir}}
 
 default build.post_args {VERBOSE=ON}
+
+# Generated Unix Makefiles contain a "fast" install target that begins
+# installing immediately instead of checking build dependencies again.
+default destroot.target {install/fast}

@@ -8,7 +8,7 @@ test -z "$srcdir" && srcdir=.
 
 PKG_NAME="Genius"
 
-(test -f $srcdir/configure.in \
+(test -f $srcdir/configure.ac \
   && test -d $srcdir/src \
   && test -f $srcdir/src/calc.h) || {
     echo -n "**Error**: Directory "\`$srcdir\'" does not look like the"
