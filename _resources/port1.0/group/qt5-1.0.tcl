@@ -45,6 +45,8 @@ set available_qt_versions {
 proc qt5.get_default_name {} {
     global os.major cxx_stdlib
 
+    # see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+    # for older versions, see http://web.archive.org/web/*/http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
     if { ${os.major} <= 7 } {
         #
         # Qt 5 does not support ppc
