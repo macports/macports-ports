@@ -93,10 +93,8 @@ pre-configure {
     puts ${cache} "  QT_TARGET_ARCH=i386"
     puts ${cache} "}"
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    if {${configure.sdkroot} ne ""} {
-        puts ${cache} \
-            QMAKE_MAC_SDK=[string tolower [join [lrange [split [lindex [split ${configure.sdkroot} "/"] end] "."] 0 end-1] "."]]
-    }
+    puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
+
     # respect configure.compiler but still allow qmake to find correct Xcode clang based on SDK
     if { ${configure.compiler} ne "clang" } {
         puts ${cache} "QMAKE_CC=${configure.cc}"
