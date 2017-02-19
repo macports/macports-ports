@@ -109,6 +109,10 @@ pre-configure {
     if { ${configure.compiler} ne "clang" } {
         puts ${cache} "QMAKE_CC=${configure.cc}"
         puts ${cache} "QMAKE_CXX=${configure.cxx}"
+        puts ${cache} "QMAKE_LINK_C=${configure.cc}"
+        puts ${cache} "QMAKE_LINK_C_SHLIB=${configure.cc}"
+        puts ${cache} "QMAKE_LINK=${configure.cxx}"
+        puts ${cache} "QMAKE_LINK_SHLIB=${configure.cxx}"
     }
 
     set qt_version [exec ${prefix}/bin/pkg-config --modversion Qt5Core]
