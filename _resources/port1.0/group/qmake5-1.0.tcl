@@ -70,6 +70,16 @@ pre-configure {
         }
     }
 
+    if { [vercmp ${xcodeversion} "7.0"] >= 0 } {
+        # starting with Xcode 7.0, the SDK for build OS version might not be available
+        # see https://trac.macports.org/ticket/53597
+
+        set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
+        if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
+            configure.sdk_version
+        }
+    }
+
     # set QT and QMAKE values in a cache file
     # previously, they were set using configure.args
     # a cache file is used for two reasons
