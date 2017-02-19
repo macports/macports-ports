@@ -76,48 +76,49 @@ proc qt5.get_default_name {} {
         #
         # Mac OS X Lion (10.7)
         #
-        # Qt 5.6: Deployment only
+        # Qt 5.7: Not Supported and is known not to work
+        # Qt 5.6: Deployment only but seems to work (except QtWebEngine)
         # Qt 5.5: Occasionally tested
         # Qt 5.4: Supported
         #
-        return qt56
+        return qt5
+        #
+    } elseif { ${os.major} == 12 } {
+        #
+        # OS X Mountain Lion (10.8)
+        #
+        # Qt 5.8: Not Supported
+        # Qt 5.7: Supported (except QtWebEngine)
+        # Qt 5.6: Supported
+        #
+        return qt5
         #
     } elseif { ${os.major} <= 15 } {
         #
-        # OS X Mountain Lion (10.8)
         # OS X Mavericks (10.9)
         # OS X Yosemite (10.10)
         # OS X El Capitan (10.11)
         #
+        # Qt 5.8: Supported
         # Qt 5.7: Supported
         # Qt 5.6: Supported
         #
-        if {${cxx_stdlib} eq "libstdc++"} {
-            return qt56
-        } else {
-            return qt5
-        }
+        return qt5
         #
     } elseif { ${os.major} <= 16 } {
         #
         # macOS Sierra (10.12)
-        # as of Qt version 5.7, there is no official support
         #
-        if {${cxx_stdlib} eq "libstdc++"} {
-            return qt56
-        } else {
-            return qt5
-        }
+        # Qt 5.8: Supported
+        # Qt 5.7: Not Supported but seems to work
+        #
+        return qt5
         #
     } else {
         #
         # macOS ??? (???)
         #
-        if {${cxx_stdlib} eq "libstdc++"} {
-            return qt56
-        } else {
-            return qt5
-        }
+        return qt5
     }
 }
 
