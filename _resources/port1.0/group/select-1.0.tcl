@@ -1,7 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2009 Rainer Mueller <raimue@macports.org>
-# Copyright (c) 2009-2012, 2015 The MacPorts Project
+# Copyright (c) 2009-2012, 2015-2017 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -60,10 +60,10 @@ proc select::install {group file {name ""}} {
     xinstall -m 755 -d [file dirname $selectFile]
     xinstall -m 644 $file $selectFile
 
-    reinplace s|\${prefix}|${prefix}|g $selectFile
-    reinplace s|\${frameworks_dir}|${frameworks_dir}|g $selectFile
-    reinplace s|\${applications_dir}|${applications_dir}|g $selectFile
-    reinplace s|\${developer_dir}|${developer_dir}|g $selectFile
+    reinplace -q s|\${prefix}|${prefix}|g $selectFile
+    reinplace -q s|\${frameworks_dir}|${frameworks_dir}|g $selectFile
+    reinplace -q s|\${applications_dir}|${applications_dir}|g $selectFile
+    reinplace -q s|\${developer_dir}|${developer_dir}|g $selectFile
 }
 
 post-destroot {
