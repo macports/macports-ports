@@ -39,6 +39,7 @@ options qt5.using_kde qt5.base_version
 global available_qt_versions
 set available_qt_versions {
     qt5
+    qt56
     qt55
 }
 
