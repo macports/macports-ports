@@ -243,150 +243,6 @@ set qt_lupdate_cmd     ${qt_dir}/bin/lupdate
 global qt_pkg_config_dir
 set qt_pkg_config_dir   ${qt_libs_dir}/pkgconfig
 
-if {[tbool just_want_qt5_variables]} {
-    return
-}
-
-# a procedure for declaring dependencies on Qt5 components, which will expand them
-# into the appropriate subports for the Qt5 flavour installed
-# e.g. qt5.depends_component qtsvg qtdeclarative
-proc qt5.depends_component {args} {
-    global qt5_private_components
-    foreach comp ${args} {
-        lappend qt5_private_components ${comp}
-    }
-}
-proc qt5.depends_build_component {args} {
-    global qt5_private_build_components
-    foreach comp ${args} {
-        lappend qt5_private_build_components ${comp}
-    }
-}
-
-# no universal binary support in Qt 5
-#     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
-#     and https://bugreports.qt.io/browse/QTBUG-24952
-default supported_archs {"i386 x86_64"}
-# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
-# see https://trac.macports.org/ticket/51643
-proc universal_setup {args} {
-    if {[variant_exists universal]} {
-        ui_debug "universal variant already exists, so not adding the default one"
-    } elseif {[exists universal_variant] && ![option universal_variant]} {
-        ui_debug "universal_variant is false, so not adding the default universal variant"
-    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
-        ui_debug "using xmkmf, so not adding the default universal variant"
-    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
-        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option supported_archs]] == 1} {
-        ui_debug "only one arch supported, so not adding the default universal variant"
-    } else {
-        ui_debug "adding universal variant via PortGroup muniversal"
-        uplevel "PortGroup muniversal 1.0"
-        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
-    }
-}
-
-# standard qmake spec
-# other platforms required
-#     see http://doc.qt.io/qt-5/supported-platforms.html
-#     and http://doc.qt.io/QtSupportedPlatforms/index.html
-options qt_qmake_spec
-global qt_qmake_spec_32
-global qt_qmake_spec_64
-compiler.blacklist-append *gcc*
-
-set qt_qmake_spec_32 macx-clang-32
-set qt_qmake_spec_64 macx-clang
-default qt_qmake_spec {[qt5pg::get_default_spec]}
-
-namespace eval qt5pg {
-    proc get_default_spec {} {
-        global configure.build_arch qt_qmake_spec_32 qt_qmake_spec_64
-        if { ![option universal_variant] || ![variant_isset universal] } {
-            if { ${configure.build_arch} eq "i386" } {
-                return ${qt_qmake_spec_32}
-            } else {
-                return ${qt_qmake_spec_64}
-            }
-        } else {
-            return ""
-        }
-    }
-}
-
-# use PKGCONFIG for Qt discovery in configure scripts
-depends_build-append    port:pkgconfig
-
-# standard destroot environment
-pre-destroot {
-    global merger_destroot_env
-    if { ![option universal_variant] || ![variant_isset universal] } {
-        destroot.env-append \
-            INSTALL_ROOT=${destroot}
-    } else {
-        foreach arch ${configure.universal_archs} {
-            lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
-        }
-    }
-}
-
-if {![info exists building_qt5]} {
-pre-configure {
-    set qt_installed_name ""
-
-    foreach qt_test_name ${available_qt_versions} {
-
-        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
-            set qt_test_port_name ${qt_test_name}
-        } else {
-            set qt_test_port_name ${qt_test_name}-qtbase
-        }
-
-        if {![catch {set installed [lindex [registry_active ${qt_test_port_name}] 0]}]} {
-            set qt_installed_name ${qt_test_name}
-        }
-    }
-
-    if { ${qt_installed_name} eq "" } {
-        ui_error "at least one Qt must be installed"
-        return -code error "insufficient dependencies"
-    }
-
-    ui_debug "qt5 PortGroup: Qt is provided by ${qt_installed_name}"
-
-    if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
-        if { [string range ${qt_installed_name} end-3 end] ne "-kde" } {
-            ui_error "qt5 PortGroup: Qt is installed but not qt5-kde, as is required by this variant"
-            ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt_installed_name}-qtbase and try again"
-            return -code error "improper Qt installed"
-        }
-    } else {
-        if { ${qt_installed_name} ne [qt5.get_default_name] } {
-            # see https://wiki.qt.io/Qt-Version-Compatibility
-            ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt_installed_name} is installed"
-        }
-        if { ${qt_installed_name} ne "qt5" } {
-            ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
-        }
-        if { ${os.major} < 11 } {
-            ui_warn "Qt dependency is not supported on this platform and may not build"
-        }
-    }
-}
-}
-
-# add qt5kde variant if one does not exist and one is requested via qt5.using_kde
-# variant is added in eval_variants so that qt5.using_kde can be set anywhere in the Portfile
-rename ::eval_variants ::real_qt5_eval_variants
-proc eval_variants {variations} {
-    global qt5.using_kde
-    if { ![variant_exists qt5kde] && [tbool qt5.using_kde] } {
-        variant qt5kde description {use Qt patched for KDE compatibility} {}
-    }
-    uplevel ::real_qt5_eval_variants $variations
-}
-
 namespace eval qt5pg {
     ############################################################################### Component Format
     #
@@ -646,7 +502,153 @@ namespace eval qt5pg {
     #
     # qtwebkit: official support dropped in 5.6.0
     #           as of 5.7, still maintained by community
+}
 
+if {[tbool just_want_qt5_variables]} {
+    return
+}
+
+# a procedure for declaring dependencies on Qt5 components, which will expand them
+# into the appropriate subports for the Qt5 flavour installed
+# e.g. qt5.depends_component qtsvg qtdeclarative
+proc qt5.depends_component {args} {
+    global qt5_private_components
+    foreach comp ${args} {
+        lappend qt5_private_components ${comp}
+    }
+}
+proc qt5.depends_build_component {args} {
+    global qt5_private_build_components
+    foreach comp ${args} {
+        lappend qt5_private_build_components ${comp}
+    }
+}
+
+# no universal binary support in Qt 5
+#     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
+#     and https://bugreports.qt.io/browse/QTBUG-24952
+default supported_archs {"i386 x86_64"}
+# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
+# see https://trac.macports.org/ticket/51643
+proc universal_setup {args} {
+    if {[variant_exists universal]} {
+        ui_debug "universal variant already exists, so not adding the default one"
+    } elseif {[exists universal_variant] && ![option universal_variant]} {
+        ui_debug "universal_variant is false, so not adding the default universal variant"
+    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
+        ui_debug "using xmkmf, so not adding the default universal variant"
+    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
+        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
+    } elseif {[llength [option supported_archs]] == 1} {
+        ui_debug "only one arch supported, so not adding the default universal variant"
+    } else {
+        ui_debug "adding universal variant via PortGroup muniversal"
+        uplevel "PortGroup muniversal 1.0"
+        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
+    }
+}
+
+# standard qmake spec
+# other platforms required
+#     see http://doc.qt.io/qt-5/supported-platforms.html
+#     and http://doc.qt.io/QtSupportedPlatforms/index.html
+options qt_qmake_spec
+global qt_qmake_spec_32
+global qt_qmake_spec_64
+compiler.blacklist-append *gcc*
+
+set qt_qmake_spec_32 macx-clang-32
+set qt_qmake_spec_64 macx-clang
+default qt_qmake_spec {[qt5pg::get_default_spec]}
+
+namespace eval qt5pg {
+    proc get_default_spec {} {
+        global configure.build_arch qt_qmake_spec_32 qt_qmake_spec_64
+        if { ![option universal_variant] || ![variant_isset universal] } {
+            if { ${configure.build_arch} eq "i386" } {
+                return ${qt_qmake_spec_32}
+            } else {
+                return ${qt_qmake_spec_64}
+            }
+        } else {
+            return ""
+        }
+    }
+}
+
+# use PKGCONFIG for Qt discovery in configure scripts
+depends_build-append    port:pkgconfig
+
+# standard destroot environment
+pre-destroot {
+    global merger_destroot_env
+    if { ![option universal_variant] || ![variant_isset universal] } {
+        destroot.env-append \
+            INSTALL_ROOT=${destroot}
+    } else {
+        foreach arch ${configure.universal_archs} {
+            lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
+        }
+    }
+}
+
+if {![info exists building_qt5]} {
+pre-configure {
+    set qt_installed_name ""
+
+    foreach qt_test_name ${available_qt_versions} {
+
+        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
+            set qt_test_port_name ${qt_test_name}
+        } else {
+            set qt_test_port_name ${qt_test_name}-qtbase
+        }
+
+        if {![catch {set installed [lindex [registry_active ${qt_test_port_name}] 0]}]} {
+            set qt_installed_name ${qt_test_name}
+        }
+    }
+
+    if { ${qt_installed_name} eq "" } {
+        ui_error "at least one Qt must be installed"
+        return -code error "insufficient dependencies"
+    }
+
+    ui_debug "qt5 PortGroup: Qt is provided by ${qt_installed_name}"
+
+    if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
+        if { [string range ${qt_installed_name} end-3 end] ne "-kde" } {
+            ui_error "qt5 PortGroup: Qt is installed but not qt5-kde, as is required by this variant"
+            ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt_installed_name}-qtbase and try again"
+            return -code error "improper Qt installed"
+        }
+    } else {
+        if { ${qt_installed_name} ne [qt5.get_default_name] } {
+            # see https://wiki.qt.io/Qt-Version-Compatibility
+            ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt_installed_name} is installed"
+        }
+        if { ${qt_installed_name} ne "qt5" } {
+            ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
+        }
+        if { ${os.major} < 11 } {
+            ui_warn "Qt dependency is not supported on this platform and may not build"
+        }
+    }
+}
+}
+
+# add qt5kde variant if one does not exist and one is requested via qt5.using_kde
+# variant is added in eval_variants so that qt5.using_kde can be set anywhere in the Portfile
+rename ::eval_variants ::real_qt5_eval_variants
+proc eval_variants {variations} {
+    global qt5.using_kde
+    if { ![variant_exists qt5kde] && [tbool qt5.using_kde] } {
+        variant qt5kde description {use Qt patched for KDE compatibility} {}
+    }
+    uplevel ::real_qt5_eval_variants $variations
+}
+
+namespace eval qt5pg {
     proc register_dependents {} {
         global qt5_private_components qt5_private_build_components qt5.base_version
 
