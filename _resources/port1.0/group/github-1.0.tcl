@@ -174,9 +174,13 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
                 [lsearch -exact ${master_sites} ${github.master_sites}] != -1 && \
                 [llength ${distfiles}] > 0 && \
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
-            if {[file exists [glob ${workpath}/${github.author}-${github.project}-*]] && \
-                [file isdirectory [glob ${workpath}/${github.author}-${github.project}-*]]} {
+            if {[file exists [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]] && \
+                [file isdirectory [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]]} {
                 move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${distname}
+            } else {
+                # tarball is not "${github.author}-${github.project}-*"
+                ui_error "\n\ngithub PortGroup: Error: tarball name is not as expected. This might mean that the repository name is different than set in the Portfile. Please review and try to correct.\n"
+                return -code error "Unexpected github tarball extract."
             }
         }
     }
