@@ -231,8 +231,8 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${configure.dir} {
                 if {[file isfile ${file}] && [file tail ${file}] eq "Makefile"} {
                     ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
-                    reinplace -locale C "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
-                    reinplace -locale C "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
+                    reinplace -locale C -q "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
+                    reinplace -locale C -q "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
                 }
             }
         }
@@ -245,7 +245,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${destroot}${perl5.lib} {
                 if {[file isfile ${file}] && [file tail ${file}] eq ".packlist"} {
                     ui_info "Fixing paths in [string map "${destroot}${perl5.lib}/ {}" ${file}]"
-                    reinplace -n "s|${destroot}||p" ${file}
+                    reinplace -n -q "s|${destroot}||p" ${file}
                 }
             }
             if {${perl5.link_binaries}} {
