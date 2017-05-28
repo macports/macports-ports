@@ -46,10 +46,10 @@ pre-configure {
                                     "QMAKE_CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\"" \
                                     "QMAKE_CXXFLAGS=\"${configure.cxxflags} [get_canonical_archflags cxx]\"" \
                                     "QMAKE_LFLAGS=\"${configure.ldflags}\"" \
-	                                "QMAKE_LINK_C=${configure.cc}" \
-	                                "QMAKE_LINK_C_SHLIB=${configure.cc}" \
-	                                "QMAKE_LINK=${configure.cxx}" \
-	                                "QMAKE_LINK_SHLIB=${configure.cxx}"
+                                    "QMAKE_LINK_C=${configure.cc}" \
+                                    "QMAKE_LINK_C_SHLIB=${configure.cc}" \
+                                    "QMAKE_LINK=${configure.cxx}" \
+                                    "QMAKE_LINK_SHLIB=${configure.cxx}"
     configure.universal_args-delete --disable-dependency-tracking
 
     if {[variant_exists universal] && [variant_isset universal]} {
@@ -58,5 +58,5 @@ pre-configure {
 }
 
 variant debug description "Enable debug binaries" {
-    configure.pre_args-append   "CONFIG+=debug"	
+    configure.pre_args-append   "CONFIG+=debug"
 }
