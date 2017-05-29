@@ -34,73 +34,203 @@
 # Usage:
 # PortGroup     cmake 1.1
 
-namespace eval cmake {}
+namespace eval cmake {
+    # our directory:
+    variable currentportgroupdir [file dirname [dict get [info frame 0] file]]
+}
 
-options cmake.build_dir cmake.install_prefix cmake.install_rpath
-options cmake.out_of_source cmake.set_osx_architectures
+options                             cmake.build_dir \
+                                    cmake.source_dir \
+                                    cmake.generator \
+                                    cmake.build_type \
+                                    cmake.install_prefix \
+                                    cmake.install_rpath \
+                                    cmake.module_path \
+                                    cmake_share_module_dir \
+                                    cmake.out_of_source \
+                                    cmake.set_osx_architectures
 
 # make out-of-source builds the default (finally)
-default cmake.out_of_source {yes}
+default cmake.out_of_source         {yes}
 
 # set CMAKE_OSX_ARCHITECTURES when necessary.
 # This can be deactivated when (non-Apple) compilers are used
 # that don't support the corresponding -arch options.
 default cmake.set_osx_architectures {yes}
 
-default cmake.build_dir         {${workpath}/build}
-default cmake.install_prefix    {${prefix}}
-default cmake.install_rpath     {${prefix}/lib}
+# cmake.build_dir defines where the build will take place
+default cmake.build_dir             {${workpath}/build}
+# cmake.source_dir defines where CMake will look for the toplevel CMakeLists.txt file
+default cmake.source_dir            {${worksrcpath}}
+
+# cmake.build_type defines the type of build; it defaults to "MacPorts"
+# which means only the compiler options set through configure.c*flags and configure.optflags
+# are used, plus those set in the port's CMake files. Alternative pre-defined types are
+# Release, Debug, RelWithDebInfo and MinSizeRel; "None" should work like "MacPorts".
+default cmake.build_type            {MacPorts}
+
+# cmake-based ports may want to modify the install prefix
+default cmake.install_prefix        {${prefix}}
+
+# minimal/initial value for the install rpath:
+default cmake.install_rpath         {${prefix}/lib}
 proc cmake::rpath_flags {} {
+    global prefix
     if {[llength [option cmake.install_rpath]]} {
+        # make sure a single ${cmake.install_prefix} is included in the rpath
+        # careful, we are likely to be called more than once.
+        if {[lsearch -exact [option cmake.install_rpath] [option cmake.install_prefix]/lib] == -1} {
+            cmake.install_rpath-append [option cmake.install_prefix]/lib
+        }
         return [list \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
-            -DCMAKE_INSTALL_RPATH='[join [option cmake.install_rpath] \;]'
+            -DCMAKE_INSTALL_RPATH="[join [option cmake.install_rpath] \;]"
         ]
     }
-    return -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+    # always build with full RPATH; this is the default on Mac.
+    # Let ports deactivate it explicitly if they need to.
+    return -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON
+}
+
+proc cmake::system_prefix_path {} {
+    global prefix
+    if {[option cmake.install_prefix] ne ${prefix}} {
+        return [list \
+                 -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;[option cmake.install_prefix]\;/usr"
+        ]
+    } else {
+        return [list \
+                 -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr"
+        ]
+    }
 }
 
 # standard place to install extra CMake modules
-set cmake_share_module_dir ${prefix}/share/cmake/Modules
+default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
+# extra locations to search for modules can be specified with
+# cmake.module_path; they come after ${cmake_share_module_dir}
+default cmake.module_path           {}
+proc cmake::module_path {} {
+    if {[llength [option cmake.module_path]]} {
+        set modpath "[join [concat [option cmake_share_module_dir] [option cmake.module_path]] \;]"
+    } else {
+        set modpath [option cmake_share_module_dir]
+    }
+    return [list \
+        -DCMAKE_MODULE_PATH="${modpath}" \
+        -DCMAKE_PREFIX_PATH="${modpath}"
+    ]
+}
+
+# CMake provides several different generators corresponding to different utilities
+# (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
+# and Ninja, a leaner-and-meaner alternative.
+#
+# In the Portfile, use
+#
+# cmake.generator Ninja
+# or
+# cmake.generator "Unix Makefiles"
+# or even
+# cmake.generator "Eclipse CDT4 - Ninja"
+# if maintaining the port means editing it using an IDE of choice.
+#
+default cmake.generator             {"Unix Makefiles"}
+# CMake generates Unix Makefiles that contain a special "fast" install target
+# which skips the whole "let's see if there's anything left to (re)build before
+# we install" you normally get with `make install`. That check should be
+# redundant in normal destroot steps, because we just completed the build step.
+default destroot.target             {install/fast}
 
 # can use cmake or cmake-devel; default to cmake if not installed
-depends_build-append path:bin/cmake:cmake
+depends_build-append                path:bin/cmake:cmake
 
-proc _cmake_get_build_dir {} {
+proc cmake::build_dir {} {
     if {[option cmake.out_of_source]} {
         return [option cmake.build_dir]
     }
-    return [option worksrcpath]
+    return [option cmake.source_dir]
 }
 
-default configure.dir {[_cmake_get_build_dir]}
-
-pre-configure {
-    file mkdir ${configure.dir}
+option_proc cmake.generator cmake::handle_generator
+proc cmake::handle_generator {option action args} {
+    global cmake.generator destroot destroot.target build.cmd build.post_args
+    global depends_build destroot.post_args build.jobs
+    if {${action} eq "set"} {
+        switch -glob [lindex ${args} 0] {
+            "*Unix Makefiles*" {
+                ui_debug "Selecting the 'Unix Makefiles' generator ($args)"
+                depends_build-delete \
+                                    port:ninja
+                build.cmd           make
+                build.post_args     VERBOSE=ON
+                destroot.target     install/fast
+                destroot.destdir    DESTDIR=${destroot}
+                # unset the DESTDIR env. variable if it has been set before
+                destroot.env-delete DESTDIR=${destroot}
+            }
+            "*Ninja" {
+                ui_debug "Selecting the Ninja generator ($args)"
+                depends_build-append \
+                                    port:ninja
+                build.cmd           ninja
+                # force Ninja to use the exact number of requested build jobs
+                build.post_args     -j${build.jobs} -v
+                destroot.target     install
+                # ninja needs the DESTDIR argument in the environment
+                destroot.destdir
+                destroot.env-append DESTDIR=${destroot}
+            }
+            default {
+                if {[llength $args] != 1} {
+                    set msg "cmake.generator requires a single value (not \"${args}\")"
+                } else {
+                    set msg "The \"${args}\" generator is not currently known/supported (cmake.generator is case-sensitive!)"
+                }
+                if {[file tail ${cmake::currentportgroupdir}] eq "group"} {
+                    # we're not being run from the registry so we can raise errors
+                    return -code error ${msg}
+                } else {
+                    ui_error "${msg} (ignoring)"
+                }
+            }
+        }
+    }
 }
+
+default configure.dir {[cmake::build_dir]}
+default build.dir {${configure.dir}}
+default build.post_args {VERBOSE=ON}
 
 #FIXME: ccache works with cmake on linux
 configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
+# appropriate default settings for configure.pre_args
+# variables are grouped thematically, with the more important ones
+# at the beginning or end for somewhat easier at-a-glance verification.
 default configure.pre_args {[list \
-                    -DCMAKE_BUILD_TYPE=MacPorts \
-                   {-DCMAKE_C_COMPILER="$CC"} \
-                    -DCMAKE_COLOR_MAKEFILE=ON \
-                   {-DCMAKE_CXX_COMPILER="$CXX"} \
-                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                    -DCMAKE_FIND_FRAMEWORK=LAST \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
-                    -DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}' \
-                    -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
-                    {*}[cmake::rpath_flags] \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_BUILD_TYPE=${cmake.build_type} \
+                    -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
+                    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
+                    {*}[cmake::system_prefix_path] \
+                    {-DCMAKE_C_COMPILER="$CC"} \
+                    {-DCMAKE_CXX_COMPILER="$CXX"} \
+                    -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
+                    -DCMAKE_COLOR_MAKEFILE=ON \
+                    -DCMAKE_FIND_FRAMEWORK=LAST \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                    {*}[cmake::module_path] \
+                    {*}[cmake::rpath_flags] \
                     -Wno-dev
-                    ]}
+]}
 
-default configure.post_args {${worksrcpath}}
+# make sure configure.args is set but don't reset it
+configure.args-append
+
+default configure.post_args {[option cmake.source_dir]}
 
 # CMake honors set environment variables CFLAGS, CXXFLAGS, and LDFLAGS when it
 # is first run in a build directory to initialize CMAKE_C_FLAGS,
@@ -123,6 +253,9 @@ default configure.post_args {${worksrcpath}}
 # TODO: Handle the Java-specific configure.classpath variable.
 
 pre-configure {
+    # create the build directory:
+    file mkdir ${configure.dir}
+
     # The environment variable CPPFLAGS is not considered by CMake.
     # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
     # <http://www.cmake.org/Bug/view.php?id=12928>).
@@ -133,55 +266,37 @@ pre-configure {
     # In addition, CMake provides build-type-specific flags for
     # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
     # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
-    # set (-Os by default), we have to remove the optimization flags from the
+    # set (-Os by default), we have to remove the optimisation flags from the
     # from the concerned Release build type so that configure.optflags
     # gets honored (Debug used by the +debug variant does not set
-    # optimization flags by default).
+    # optimisation flags by default).
     # NB: more recent CMake versions (>=3?) no longer take the env. variables into
     # account, and thus require explicit use of ${configure.c*flags} below:
-#     if {${configure.optflags} ne ""} {
-#         configure.args-append   -DCMAKE_C_FLAGS="-DNDEBUG ${configure.cflags}" \
-#                                 -DCMAKE_CXX_FLAGS="-DNDEBUG ${configure.cxxflags}"
-#     }
     # Using a custom BUILD_TYPE we can simply append to the env. variables,
-    # but why do we set -DNDEBUG?
-    configure.cflags-append     -DNDEBUG
-    configure.cxxflags-append   -DNDEBUG
+    if {![variant_isset debug]} {
+        configure.cflags-append     -DNDEBUG
+        configure.cxxflags-append   -DNDEBUG
+    }
 
-    # process ${configure.cppflags} to extract include directives and other options
+    # process ${configure.cppflags} because CMake ignores $CPPFLAGS
     if {${configure.cppflags} ne ""} {
         set cppflags [split ${configure.cppflags}]
         # reset configure.cppflags; we don't want options in double in CPPFLAGS and CFLAGS/CXXFLAGS
-        set configure.cppflags ""
-        set next_is_path 0
+        configure.cppflags
+        # copy the cppflags arguments one by one into cflags and family
+        # CMake does have an INCLUDE_DIRECTORIES variable but setting it from the commandline
+        # doesn't have the intended effect (any longer).
         foreach flag ${cppflags} {
-            if {${next_is_path}} {
-                # previous option was a lone -I
-                configure.cppflags-append       -I${flag}
-                set next_is_path 0
-            } else {
-                if {[string match "-I" ${flag}]} {
-                    # lone -I, store the next argument as a path
-                    # (or ignore if this is the last argument)
-                    set next_is_path 1
-                } elseif {[string match "-I*" ${flag}]} {
-                    # a -Ipath option
-                    configure.cppflags-append   ${flag}
-                } else {
-                    # everything else must go into CFLAGS and CXXFLAGS
-                    configure.cflags-append     ${flag}
-                    configure.cxxflags-append   ${flag}
-                    # append to the ObjC flags too, even if CMake ignores them:
-                    configure.objcflags-append  ${flag}
-                    configure.objcxxflags-append   ${flag}
-                }
-            }
+            configure.cflags-append     ${flag}
+            configure.cxxflags-append   ${flag}
+            # append to the ObjC flags too, even if CMake ignores them:
+            configure.objcflags-append  ${flag}
+            configure.objcxxflags-append   ${flag}
         }
-        if {${configure.cppflags} ne ""} {
-            configure.args-append -DINCLUDE_DIRECTORIES:PATH="${configure.cppflags}"
-        }
+        ui_debug "CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
     }
 
+    configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
     # CMake doesn't like --enable-debug, so remove it unconditionally.
     configure.args-delete --enable-debug
 }
@@ -196,34 +311,40 @@ post-configure {
             close ${fd}
         }
     }
-    if {![catch {set fd [open "${workpath}/.macports.${subport}.configure.cmd" "w"]} err]} {
-        foreach var [array names ::env] {
-            puts ${fd} "${var}=$::env(${var})"
+}
+
+proc cmake.save_configure_cmd {} {
+    post-configure {
+        if {![catch {set fd [open "${workpath}/.macports.${subport}.configure.cmd" "w"]} err]} {
+            foreach var [array names ::env] {
+                puts ${fd} "${var}=$::env(${var})"
+            }
+            puts ${fd} "[join [lrange [split ${configure.env} " "] 0 end] "\n"]"
+            # the following variables are no longer set in the environment at this point:
+            puts ${fd} "CPP=\"${configure.cpp}\""
+            # these are particularly relevant because referenced in the configure.pre_args:
+            puts ${fd} "CC=\"${configure.cc}\""
+            puts ${fd} "CXX=\"${configure.cxx}\""
+            if {${configure.objcxx} ne ${configure.cxx}} {
+                puts ${fd} "OBJCXX=\"${configure.objcxx}\""
+            }
+            puts ${fd} "CFLAGS=\"${configure.cflags}\""
+            puts ${fd} "CXXFLAGS=\"${configure.cxxflags}\""
+            if {${configure.objcflags} ne ${configure.cflags}} {
+                puts ${fd} "OBJCFLAGS=\"${configure.objcflags}\""
+            }
+            if {${configure.objcxxflags} ne ${configure.cxxflags}} {
+                puts ${fd} "OBJCXXFLAGS=\"${configure.objcxxflags}\""
+            }
+            puts ${fd} "LDFLAGS=\"${configure.ldflags}\""
+            if {${configure.optflags} ne ""} {
+                puts ${fd} "configure.optflags=\"${configure.optflags}\""
+            }
+            puts ${fd} "\ncd ${worksrcpath}"
+            puts ${fd} "${configure.cmd} [join ${configure.pre_args}] [join ${configure.args}] [join ${configure.post_args}]"
+            close ${fd}
+            unset fd
         }
-        puts ${fd} "[join [lrange [split ${configure.env} " "] 0 end] "\n"]"
-        # the following variables are no longer set in the environment at this point:
-        puts ${fd} "CPP=\"${configure.cpp}\""
-        puts ${fd} "CC=\"${configure.cc}\""
-        puts ${fd} "CXX=\"${configure.cxx}\""
-        if {${configure.objcxx} ne ${configure.cxx}} {
-            puts ${fd} "OBJCXX=\"${configure.objcxx}\""
-        }
-        puts ${fd} "CFLAGS=\"${configure.cflags}\""
-        puts ${fd} "CXXFLAGS=\"${configure.cxxflags}\""
-        if {${configure.objcflags} ne ${configure.cflags}} {
-            puts ${fd} "OBJCFLAGS=\"${configure.objcflags}\""
-        }
-        if {${configure.objcxxflags} ne ${configure.cxxflags}} {
-            puts ${fd} "OBJCXXFLAGS=\"${configure.objcxxflags}\""
-        }
-        puts ${fd} "LDFLAGS=\"${configure.ldflags}\""
-        if {${configure.optflags} ne ""} {
-            puts ${fd} "configure.optflags=\"${configure.optflags}\""
-        }
-        puts ${fd} "\ncd ${worksrcpath}"
-        puts ${fd} "${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}"
-        close ${fd}
-        unset fd
     }
 }
 
@@ -285,14 +406,31 @@ platform darwin {
 configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
-    configure.pre_args-replace  -DCMAKE_BUILD_TYPE=MacPorts \
-                                -DCMAKE_BUILD_TYPE=Debug
+    # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
+    # the compiler flags. We use that here: replace the default -O2 with -O0, add
+    # debugging options and do otherwise an exactly identical build.
+    configure.cflags-replace         -O2 -O0
+    configure.cxxflags-replace       -O2 -O0
+    configure.objcflags-replace      -O2 -O0
+    configure.objcxxflags-replace    -O2 -O0
+    configure.ldflags-replace        -O2 -O0
+    # get most if not all possible debug info
+    if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
+        set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+    } else {
+        set cmake::debugopts "-g -DDEBUG"
+    }
+    configure.cflags-append         ${cmake::debugopts}
+    configure.cxxflags-append       ${cmake::debugopts}
+    configure.objcflags-append      ${cmake::debugopts}
+    configure.objcxxflags-append    ${cmake::debugopts}
+    configure.ldflags-append        ${cmake::debugopts}
+    # try to ensure that info won't get stripped
+    configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
 }
 
-default build.dir {${configure.dir}}
-
-default build.post_args {VERBOSE=ON}
-
-# Generated Unix Makefiles contain a "fast" install target that begins
-# installing immediately instead of checking build dependencies again.
-default destroot.target {install/fast}
+# cmake doesn't like --enable-debug, so in case a portfile sets
+# --enable-debug (regardless of variant) we remove it
+if {[string first "--enable-debug" ${configure.args}] > -1} {
+    configure.args-delete     --enable-debug
+}
