@@ -110,13 +110,12 @@ pre-configure {
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.
 
-    # In addition, CMake provides build-type-specific flags for
-    # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
-    # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
-    # set (-Os by default), we have to remove the optimization flags from the
-    # from the concerned Release build type so that configure.optflags
-    # gets honored (Debug used by the +debug variant does not set
-    # optimization flags by default).
+    # In addition, CMake provides build-type-specific flags for Release (-O3
+    # -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and RelWithDebInfo
+    # (-O2 -g -DNDEBUG). If the configure.optflags have been set (-Os by
+    # default), we have to remove the optimization flags from the concerned
+    # Release build type so that configure.optflags gets honored (Debug used
+    # by the +debug variant does not set optimization flags by default).
     if {${configure.optflags} ne ""} {
         configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
                               -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
