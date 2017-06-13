@@ -34,22 +34,6 @@
 # Usage:
 # PortGroup     qt4 1.0
 
-# check for +debug variant of this port, and make sure Qt was
-# installed with +debug as well; if not, error out.
-platform darwin {
-    pre-extract {
-        if {[variant_exists debug] && \
-            [variant_isset debug] && \
-           ![info exists building_qt4]} {
-            if {![file exists ${qt_frameworks_dir}/QtCore.framework/QtCore_debug]} {
-                return -code error "\n\nERROR:\n\
-In order to install this port as +debug,
-Qt4 must also be installed with +debug.\n"
-            }
-        }
-    }
-}
-
 # standard Qt4 name
 global qt_name
 set qt_name             qt4
