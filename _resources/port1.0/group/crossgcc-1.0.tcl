@@ -72,7 +72,7 @@ proc crossgcc.setup {target version} {
         master_sites    gnu:gcc/gcc-${version}/:gcc
         use_bzip2       yes
 
-        dist_subdir     gcc
+        dist_subdir     gcc[lindex [split ${version} .] 0]
         distfiles       gcc-${version}.tar.bz2:gcc
 
         worksrcdir      gcc-${version}
