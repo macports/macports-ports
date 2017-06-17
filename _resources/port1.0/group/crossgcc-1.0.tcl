@@ -226,7 +226,7 @@ proc crossgcc.setup_libc {libc_name libc_version} {
             uplevel {
                 set dnewlib newlib-${crossgcc.libc_version}.tar.gz
 
-                master_sites-append ftp://sources.redhat.com/pub/newlib/:newlib
+                master_sites-append https://sourceware.org/pub/newlib/:newlib
                 distfiles-append ${dnewlib}:newlib
 
                 post-extract {
