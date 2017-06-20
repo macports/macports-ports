@@ -14,7 +14,7 @@ rsync -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_$
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 git checkout -qf macports/master
-git checkout -qf "${TRAVIS_COMMIT}"
+git checkout -qf -
 portindex
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
