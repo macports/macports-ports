@@ -56,6 +56,13 @@ if {${cxx_stdlib} eq "libstdc++" } {
 
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
+    
+    platform darwin powerpc {
+        # ports will build on powerpc with gcc6, gcc4ABI-compatible
+        puts "PowerPC C++11 ports are compiling with gcc6. EXPERIMENTAL."
+        compiler.whitelist-delete macports-clang-4.0
+        universal_variant no
+    }
 
     if { ${os.major} < 13 } {
         # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
