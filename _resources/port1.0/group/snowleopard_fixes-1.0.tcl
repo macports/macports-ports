@@ -33,9 +33,7 @@
 # This portgroup provides access to back ports for Snow Leopard
 # (Mac OS X 10.6.8).
 
-platform darwin 10 {
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
 	depends_lib-append          port:snowleopardfixes
 	configure.ldflags-append   -lsnowleopardfixes
-	configure.cxxflags-append  -include ${prefix}/include/snowleopardfixes.h
-	configure.cflags-append    -include ${prefix}/include/snowleopardfixes.h
 }
