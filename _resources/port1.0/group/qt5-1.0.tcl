@@ -93,7 +93,7 @@ proc qt5.get_default_name {} {
         # Qt 5.7: Supported (except QtWebEngine)
         # Qt 5.6: Supported
         #
-        return qt5
+        return qt57
         #
     } elseif { ${os.major} == 13 } {
         #
@@ -366,6 +366,12 @@ namespace eval qt5pg {
             lib/pkgconfig/Qt5Multimedia.pc
             ""
         }
+        qtnetworkauth {
+            5.8
+            6.0
+            lib/pkgconfig/Qt5NetworkAuth.pc
+            ""
+        }
         qtpurchasing {
             5.7
             6.0
@@ -418,6 +424,12 @@ namespace eval qt5pg {
             5.1
             6.0
             lib/pkgconfig/Qt5SerialPort.pc
+            ""
+        }
+        qtspeech {
+            5.8
+            6.0
+            lib/pkgconfig/Qt5TextToSpeech.pc
             ""
         }
         qtsvg {
