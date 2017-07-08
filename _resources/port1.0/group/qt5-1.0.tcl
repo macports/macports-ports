@@ -94,12 +94,23 @@ proc qt5.get_default_name {} {
         #
         return qt5
         #
-    } elseif { ${os.major} <= 15 } {
+    } elseif { ${os.major} == 13 } {
         #
         # OS X Mavericks (10.9)
+        #
+        # Qt 5.9: Not Supported
+        # Qt 5.8: Supported
+        # Qt 5.7: Supported
+        # Qt 5.6: Supported
+        #
+        return qt5
+        #
+    } elseif { ${os.major} <= 15 } {
+        #
         # OS X Yosemite (10.10)
         # OS X El Capitan (10.11)
         #
+        # Qt 5.9: Supported
         # Qt 5.8: Supported
         # Qt 5.7: Supported
         # Qt 5.6: Supported
@@ -110,6 +121,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Sierra (10.12)
         #
+        # Qt 5.9: Supported
         # Qt 5.8: Supported
         # Qt 5.7: Not Supported but seems to work
         #
