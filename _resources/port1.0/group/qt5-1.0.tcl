@@ -82,7 +82,7 @@ proc qt5.get_default_name {} {
         # Qt 5.5: Occasionally tested
         # Qt 5.4: Supported
         #
-        return qt5
+        return qt56
         #
     } elseif { ${os.major} == 12 } {
         #
