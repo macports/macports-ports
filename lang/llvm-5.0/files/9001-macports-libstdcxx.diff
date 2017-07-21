@@ -1,0 +1,128 @@
+diff --git llvm/tools/clang/include/clang/Driver/ToolChain.h llvm/tools/clang/include/clang/Driver/ToolChain.h
+index 105d0f338a..2e588bceb7 100644
+--- llvm/tools/clang/include/clang/Driver/ToolChain.h
++++ llvm/tools/clang/include/clang/Driver/ToolChain.h
+@@ -53,7 +53,8 @@ public:
+ 
+   enum CXXStdlibType {
+     CST_Libcxx,
+-    CST_Libstdcxx
++    CST_Libstdcxx,
++    CST_MacPortsLibstdcxx
+   };
+ 
+   enum RuntimeLibType {
+diff --git llvm/tools/clang/include/clang/Lex/HeaderSearchOptions.h llvm/tools/clang/include/clang/Lex/HeaderSearchOptions.h
+index ca3a84e75e..bcf9496d40 100644
+--- llvm/tools/clang/include/clang/Lex/HeaderSearchOptions.h
++++ llvm/tools/clang/include/clang/Lex/HeaderSearchOptions.h
+@@ -162,6 +162,9 @@ public:
+   /// Use libc++ instead of the default libstdc++.
+   unsigned UseLibcxx : 1;
+ 
++  /// Use MacPorts libstdc++ instead of default system libstdc++.
++  unsigned UseMacPortsLibstdcxx : 1;
++
+   /// Whether header search information should be output as for -v.
+   unsigned Verbose : 1;
+ 
+diff --git llvm/tools/clang/lib/Driver/ToolChain.cpp llvm/tools/clang/lib/Driver/ToolChain.cpp
+index 4f82503276..718fb7e4b2 100644
+--- llvm/tools/clang/lib/Driver/ToolChain.cpp
++++ llvm/tools/clang/lib/Driver/ToolChain.cpp
+@@ -585,6 +585,8 @@ ToolChain::CXXStdlibType ToolChain::GetCXXStdlibType(const ArgList &Args) const{
+     return ToolChain::CST_Libcxx;
+   else if (LibName == "libstdc++")
+     return ToolChain::CST_Libstdcxx;
++  else if (LibName == "macports-libstdc++")
++    return ToolChain::CST_MacPortsLibstdcxx;
+   else if (LibName == "platform")
+     return GetDefaultCXXStdlibType();
+ 
+@@ -658,6 +660,7 @@ void ToolChain::AddCXXStdlibLibArgs(const ArgList &Args,
+     break;
+ 
+   case ToolChain::CST_Libstdcxx:
++  case ToolChain::CST_MacPortsLibstdcxx:
+     CmdArgs.push_back("-lstdc++");
+     break;
+   }
+diff --git llvm/tools/clang/lib/Driver/ToolChains/Darwin.cpp llvm/tools/clang/lib/Driver/ToolChains/Darwin.cpp
+index e41b50c40b..4ae80f6218 100644
+--- llvm/tools/clang/lib/Driver/ToolChains/Darwin.cpp
++++ llvm/tools/clang/lib/Driver/ToolChains/Darwin.cpp
+@@ -1407,6 +1407,13 @@ void DarwinClang::AddCXXStdlibLibArgs(const ArgList &Args,
+     // Otherwise, let the linker search.
+     CmdArgs.push_back("-lstdc++");
+     break;
++  case ToolChain::CST_MacPortsLibstdcxx:
++    if (getVFS().exists("@@MACPORTS_libstdc++@@")) {
++      CmdArgs.push_back("@@MACPORTS_libstdc++@@");
++      return;
++    }
++    CmdArgs.push_back("-lstdc++");
++    break;
+   }
+ }
+ 
+diff --git llvm/tools/clang/lib/Frontend/CompilerInvocation.cpp llvm/tools/clang/lib/Frontend/CompilerInvocation.cpp
+index 6254b0013b..3c2fb48c4b 100644
+--- llvm/tools/clang/lib/Frontend/CompilerInvocation.cpp
++++ llvm/tools/clang/lib/Frontend/CompilerInvocation.cpp
+@@ -1486,8 +1486,10 @@ static void ParseHeaderSearchArgs(HeaderSearchOptions &Opts, ArgList &Args,
+   Opts.UseBuiltinIncludes = !Args.hasArg(OPT_nobuiltininc);
+   Opts.UseStandardSystemIncludes = !Args.hasArg(OPT_nostdsysteminc);
+   Opts.UseStandardCXXIncludes = !Args.hasArg(OPT_nostdincxx);
+-  if (const Arg *A = Args.getLastArg(OPT_stdlib_EQ))
++  if (const Arg *A = Args.getLastArg(OPT_stdlib_EQ)) {
+     Opts.UseLibcxx = (strcmp(A->getValue(), "libc++") == 0);
++    Opts.UseMacPortsLibstdcxx = (strcmp(A->getValue(), "macports-libstdc++") == 0);
++  }
+   Opts.ResourceDir = Args.getLastArgValue(OPT_resource_dir);
+ 
+   // Canonicalize -fmodules-cache-path before storing it.
+diff --git llvm/tools/clang/lib/Frontend/InitHeaderSearch.cpp llvm/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+index 94a7f09fd5..96dbb674de 100644
+--- llvm/tools/clang/lib/Frontend/InitHeaderSearch.cpp
++++ llvm/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+@@ -108,7 +108,7 @@ static bool CanPrefixSysroot(StringRef Path) {
+ #if defined(LLVM_ON_WIN32)
+   return !Path.empty() && llvm::sys::path::is_separator(Path[0]);
+ #else
+-  return llvm::sys::path::is_absolute(Path);
++  return llvm::sys::path::is_absolute(Path) && Path.find("@@MACPORTS_GCC_INCLUDE_DIR@@")!=0;
+ #endif
+ }
+ 
+@@ -363,20 +363,31 @@ AddDefaultCPlusPlusIncludePaths(const llvm::Triple &triple, const HeaderSearchOp
+ 
+     case llvm::Triple::ppc:
+     case llvm::Triple::ppc64:
++      if (HSOpts.UseMacPortsLibstdcxx) {
++        AddGnuCPlusPlusIncludePaths("@@MACPORTS_GCC_INCLUDE_DIR@@",
++                                    "@@MACPORTS_HOST_NAME@@", "", "ppc64",
++                                    triple);
++      } else {
+       AddGnuCPlusPlusIncludePaths("/usr/include/c++/4.2.1",
+                                   "powerpc-apple-darwin10", "", "ppc64",
+                                   triple);
+       AddGnuCPlusPlusIncludePaths("/usr/include/c++/4.0.0",
+                                   "powerpc-apple-darwin8", "", "ppc64",
+                                   triple);
++      }
+       break;
+ 
+     case llvm::Triple::x86:
+     case llvm::Triple::x86_64:
++      if (HSOpts.UseMacPortsLibstdcxx) {
++        AddGnuCPlusPlusIncludePaths("@@MACPORTS_GCC_INCLUDE_DIR@@",
++                                    "@@MACPORTS_HOST_NAME@@", "i386", "", triple);
++      } else {
+       AddGnuCPlusPlusIncludePaths("/usr/include/c++/4.2.1",
+                                   "i686-apple-darwin10", "", "x86_64", triple);
+       AddGnuCPlusPlusIncludePaths("/usr/include/c++/4.0.0",
+                                   "i686-apple-darwin8", "", "x86_64", triple);
++      }
+       break;
+ 
+     case llvm::Triple::arm:
