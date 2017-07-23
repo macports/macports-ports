@@ -3,6 +3,12 @@
 
 <!-- (delete all below for minor changes) -->
 
+###### Type(s)
+<!-- update (title contains ": U(u)pdate to"), submission (new Portfile) and CVE Identifiers are auto-detected, replace [ ] with [x] to select -->
+- [ ] bugfix
+- [ ] enhancement
+- [ ] security fix
+
 ###### Tested on
 macOS 10.x
 Xcode 8.x
