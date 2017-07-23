@@ -42,7 +42,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.mirror.euserv.net/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
