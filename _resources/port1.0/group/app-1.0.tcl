@@ -306,7 +306,7 @@ platform macosx {
 
                 # If app.icon is an .icns file, copy it.
                 if {[file extension ${icon}] eq ".icns"} {
-                    xinstall -m 0644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
+                    xinstall -m 0644 ${icon} "${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns"
 
                 # If app.icon is svg, rasterize and convert it.
                 } elseif {[file extension ${icon}] eq ".svg"} {
