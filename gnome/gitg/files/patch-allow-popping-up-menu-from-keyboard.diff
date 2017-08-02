@@ -1,0 +1,224 @@
+From 6a9d3d7617ee96cb20f62451d24b0271eb7d76d8 Mon Sep 17 00:00:00 2001
+From: Ernestas Kulik <ernestask@gnome.org>
+Date: Sat, 6 May 2017 22:21:19 +0300
+Subject: Allow popping menu up with keyboard
+
+Currently, the code assumes that any attempt to pop up the menu will
+come from a button press event, which is not true when using the
+keyboard, in which case the assumption causes a crash.
+
+This commit adds the ability to pop up the menu using the keyboard as
+well.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=782275
+---
+ gitg/gitg-popup-menu.vala      |  25 +++++++--
+ gitg/history/gitg-history.vala | 114 ++++++++++++++++++++++++++++++++---------
+ 2 files changed, 111 insertions(+), 28 deletions(-)
+
+diff --git a/gitg/gitg-popup-menu.vala b/gitg/gitg-popup-menu.vala
+index 26fc100..83e71c1 100644
+--- gitg/gitg-popup-menu.vala
++++ gitg/gitg-popup-menu.vala
+@@ -23,6 +23,7 @@ namespace Gitg
+ class PopupMenu : Object
+ {
+ 	public signal Gtk.Menu? populate_menu(Gdk.EventButton? event);
++	public signal Gdk.Rectangle? request_menu_position();
+ 
+ 	private Gtk.Widget? d_widget;
+ 
+@@ -54,11 +55,27 @@ class PopupMenu : Object
+ 			return false;
+ 		}
+ 
+-		var time = (event == null ? Gtk.get_current_event_time() : event.time);
+-		var button = (event == null ? 0 : event.button);
+-
+ 		menu.attach_to_widget(widget, null);
+-		menu.popup(null, null, null, button, time);
++
++		if (event == null)
++		{
++			var position = request_menu_position();
++
++			if (position == null)
++			{
++				menu.popup_at_widget(widget, Gdk.Gravity.CENTER, Gdk.Gravity.CENTER);
++			}
++			else
++			{
++				menu.popup_at_rect(widget.get_window(),
++				                   position,
++				                   Gdk.Gravity.CENTER, Gdk.Gravity.WEST);
++			}
++		}
++		else
++		{
++			menu.popup_at_pointer(event);
++		}
+ 
+ 		return true;
+ 	}
+diff --git a/gitg/history/gitg-history.vala b/gitg/history/gitg-history.vala
+index 6625956..6f091ef 100644
+--- gitg/history/gitg-history.vala
++++ gitg/history/gitg-history.vala
+@@ -592,6 +592,7 @@ namespace GitgHistory
+ 
+ 			d_commit_list_popup = new Gitg.PopupMenu(d_main.commit_list_view);
+ 			d_commit_list_popup.populate_menu.connect(on_commit_list_populate_menu);
++			d_commit_list_popup.request_menu_position.connect(on_commit_list_request_menu_position);
+ 
+ 			application.bind_property("repository", d_main.refs_list,
+ 			                          "repository",
+@@ -629,6 +630,11 @@ namespace GitgHistory
+ 			Gtk.TreePath path;
+ 			Gtk.TreeViewColumn column;
+ 
++			if (event == null)
++			{
++				return null;
++			}
++
+ 			if (!d_main.commit_list_view.get_path_at_pos((int)event.x,
+ 			                                             (int)event.y,
+ 			                                             out path,
+@@ -665,44 +671,49 @@ namespace GitgHistory
+ 				ret = popup_menu_for_commit(event);
+ 			}
+ 
+-			return ret;
+-		}
+-
+-		private void add_ref_action(Gee.LinkedList<GitgExt.RefAction> actions,
+-		                            GitgExt.RefAction?                action)
+-		{
+-			if (action != null && action.available)
++			// event is most likely null.
++			if (ret == null)
+ 			{
+-				actions.add(action);
++				ret = popup_menu_for_selection();
+ 			}
++
++			return ret;
+ 		}
+ 
+-		private Gtk.Menu? popup_menu_for_commit(Gdk.EventButton? event)
++		private Gdk.Rectangle? on_commit_list_request_menu_position()
+ 		{
+-			int cell_x;
+-			int cell_y;
+-			Gtk.TreePath path;
+-			Gtk.TreeViewColumn column;
++			var selection = d_main.commit_list_view.get_selection();
+ 
+-			if (!d_main.commit_list_view.get_path_at_pos((int)event.x,
+-			                                             (int)event.y,
+-			                                             out path,
+-			                                             out column,
+-			                                             out cell_x,
+-			                                             out cell_y))
++			Gtk.TreeModel model;
++			Gtk.TreeIter iter;
++
++			if (!selection.get_selected(out model, out iter))
+ 			{
+ 				return null;
+ 			}
+ 
+-			var commit = d_commit_list_model.commit_from_path(path);
++			var path = model.get_path(iter);
+ 
+-			if (commit == null)
++			Gdk.Rectangle rect = { 0 };
++
++			d_main.commit_list_view.get_cell_area(path, null, out rect);
++			d_main.commit_list_view.convert_bin_window_to_widget_coords(rect.x, rect.y,
++			                                                            out rect.x, out rect.y);
++
++			return rect;
++		}
++
++		private void add_ref_action(Gee.LinkedList<GitgExt.RefAction> actions,
++		                            GitgExt.RefAction?                action)
++		{
++			if (action != null && action.available)
+ 			{
+-				return null;
++				actions.add(action);
+ 			}
++		}
+ 
+-			d_main.commit_list_view.get_selection().select_path(path);
+-
++		private Gtk.Menu? populate_menu_for_commit(Gitg.Commit commit)
++		{
+ 			var af = new ActionInterface(application, d_main.refs_list);
+ 
+ 			af.updated.connect(() => {
+@@ -762,6 +773,61 @@ namespace GitgHistory
+ 			return menu;
+ 		}
+ 
++		private Gtk.Menu? popup_menu_for_selection()
++		{
++			var selection = d_main.commit_list_view.get_selection();
++
++			Gtk.TreeIter iter;
++
++			if (!selection.get_selected(null, out iter))
++			{
++				return null;
++			}
++
++			var commit = d_commit_list_model.commit_from_iter(iter);
++
++			if (commit == null)
++			{
++				return null;
++			}
++
++			return populate_menu_for_commit(commit);
++		}
++
++		private Gtk.Menu? popup_menu_for_commit(Gdk.EventButton? event)
++		{
++			int cell_x;
++			int cell_y;
++			Gtk.TreePath path;
++			Gtk.TreeViewColumn column;
++
++			if (event == null)
++			{
++				return null;
++			}
++
++			if (!d_main.commit_list_view.get_path_at_pos((int)event.x,
++			                                             (int)event.y,
++			                                             out path,
++			                                             out column,
++			                                             out cell_x,
++			                                             out cell_y))
++			{
++				return null;
++			}
++
++			var commit = d_commit_list_model.commit_from_path(path);
++
++			if (commit == null)
++			{
++				return null;
++			}
++
++			d_main.commit_list_view.get_selection().select_path(path);
++
++			return populate_menu_for_commit(commit);
++		}
++
+ 		private Gtk.Menu? popup_menu_for_ref(Gitg.Ref reference)
+ 		{
+ 			var actions = new Gee.LinkedList<GitgExt.RefAction?>();
+-- 
+cgit v0.12
