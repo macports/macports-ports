@@ -38,7 +38,6 @@
 #     ruby.branches    2.3 2.2
 #     ruby.setup       module version type
 #     # - adds subport "rb23-module" and "rb22-module"
-#     # - sets replaced_by to rb23-moudle (apply first item of branches)
 #
 #   2. use ruby.branch
 #
@@ -168,6 +167,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     # for setup.rb +universal
     global ruby.config_rubyprog_name
 
+    version         ${vers}
+    categories      ruby
+
     # define ruby global names and lists
     # check if module is a list or string
     if {[llength ${module}] > 1} {
@@ -189,6 +191,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             name rb-[string tolower ${ruby.module}]
         }
         if {[string match rb-* $name]} {
+            # stub port
             set rootname [string range $name 3 end]
             foreach v ${ruby.branches} {
                 set suffix [join [split ${v} .] {}]
@@ -198,19 +201,16 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 }
             }
             if {$subport eq $name} {
-                # set first item in ${ruby.branches} to ruby.branch
-                ruby.branch [lindex [split ${ruby.branches}] 0]
-                set suffix [join [split ${ruby.branch} .] {}]
+                ruby.link_binaries no
                 distfiles
                 supported_archs noarch
-                replaced_by rb${suffix}-${rootname}
-                depends_lib-append port:rb${suffix}-${rootname}
                 use_configure no
                 build {}
                 destroot {
                     xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
                     system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
                 }
+                return
             }
         }
     } else {
@@ -232,9 +232,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     }
 
     set ruby.docs   ${docs}
-
-    version         ${vers}
-    categories      ruby
 
     # set source to rubygems by default for type "gem"
     if {(${type} eq "gem") && (${source} eq "custom")} {
