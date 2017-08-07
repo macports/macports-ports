@@ -262,12 +262,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     distname        ${ruby.filename}-${vers}
     dist_subdir     ruby
 
-    post-extract {
-        # Create the work directory for gem-based ruby ports.
-        file mkdir ${worksrcpath}
-        system "find ${worksrcpath} -type d -name CVS | xargs rm -rf"
-    }
-
     switch -glob ${type} {
         basic_install.rb {
             post-patch {
