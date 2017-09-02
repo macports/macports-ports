@@ -1,7 +1,7 @@
-# List of master site classes for use in Portfiles
-# Most of these are taken shamelessly from FreeBSD.
+# List of master site classes for use in Portfiles.
+# Most of these were originally taken from FreeBSD.
 #
-# Appending :nosubdir as a tag to a mirror, means that
+# Appending :nosubdir as a tag to a mirror means that
 # the portfetch target will NOT append a subdirectory to
 # the mirror site.
 #
@@ -298,7 +298,7 @@ set portfetch::mirror_sites::sites(kde) {
 }
 
 set portfetch::mirror_sites::sites(macports) {
-    http://svn.macports.org/repository/macports/distfiles/
+    https://svn.macports.org/repository/macports/distfiles/
 }
 
 global os.platform os.major
