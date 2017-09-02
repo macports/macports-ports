@@ -509,7 +509,9 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
+    http://ayera.dl.sourceforge.net/
     http://cytranet.dl.sourceforge.net/
+    http://excellmedia.dl.sourceforge.net/
     http://freefr.dl.sourceforge.net/
     http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
@@ -520,10 +522,12 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://netassist.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
     http://netix.dl.sourceforge.net/
+    http://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-sea2.dl.sourceforge.net/
     http://tenet.dl.sourceforge.net/
+    http://svwh.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
 }
 
