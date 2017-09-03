@@ -377,24 +377,48 @@ set portfetch::mirror_sites::sites(netbsd) {
 }
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
+# https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
 set portfetch::mirror_sites::sites(nongnu) {
-    http://mirror.cc.columbia.edu/pub/software/gnu/non-gnu/
-    ftp://ftp.funet.fi/pub/gnu/ftp.gnu.org/non-gnu/
-    http://ftp.gnu.org/pub/gnu/non-gnu/
-    ftp://ftp.gnu.org/pub/gnu/non-gnu/
-    http://download-mirror.savannah.gnu.org/releases/
-    http://mirrors.ibiblio.org/gnu/ftp/non-gnu/
-    http://mirror.internode.on.net/pub/gnu/non-gnu/
-    ftp://ftp.kddlabs.co.jp/pub/gnu/non-gnu/
-    ftp://ftp.lip6.fr/pub/gnu/non-gnu/
-    http://ftp.twaren.net/Unix/NonGNU/
-    ftp://ftp.twaren.net/Unix/NonGNU/
-    http://savannah.c3sl.ufpr.br/
-    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
-    ftp://ftp.unicamp.br/pub/gnu/non-gnu/
-    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
+    http://babyname.tips/mirrors/nongnu/
+    http://mirror.netcologne.de/savannah/
+    ftp://mirror.netcologne.de/savannah/
+    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    ftp://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    http://mirror.infotronik.hu/mirrors/pub/gnusavannah/
+    http://mirror1.hostiran.ir/gnu/gnu-savannah/
+    http://download-mirror.savannah.gnu.org/releases/
+    http://nongnu.askapache.com/
+    http://savannah.c3sl.ufpr.br/
+    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
+    http://mirror.lihnidos.org/GNU/savannah/
+    http://mirrors.up.pt/pub/nongnu/
+    https://mirrors.up.pt/pub/nongnu/
+    ftp://mirrors.up.pt/pub/nongnu/
+    http://nongnu.uib.no/
+    ftp://nongnu.uib.no/pub/nongnu/
+    http://mirror.rackdc.com/savannah/
+    http://ftp.igh.cnrs.fr/pub/nongnu/
+    ftp://ftp.igh.cnrs.fr/pub/nongnu/
+    http://savannah.spinellicreations.com/
+    ftp://spinellicreations.com/gnu_dot_org_savannah_mirror/
+    http://gnu.mirrors.pair.com/savannah/savannah/
+    http://www.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    ftp://ftp.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    http://savannah-nongnu-org.ip-connect.vn.ua/
+    ftp://savannah-nongnu-org.ip-connect.vn.ua/mirror/savannah.nongnu.org/
+    http://mirror.cedia.org.ec/nongnu/
+    ftp://mirror.cedia.org.ec/nongnu/
+    ftp://ftp.yzu.edu.tw/nongnu/
+    http://ftp.yzu.edu.tw/nongnu/
+    http://mirror6.layerjet.com/nongnu/
+    http://mirror.easyname.at/nongnu/
+    ftp://mirror.easyname.at/nongnu/
+    http://mirror2.klaus-uwe.me/nongnu/
+    ftp://mirror2.klaus-uwe.me/nongnu/
+    http://ftp.acc.umu.se/mirror/gnu.org/savannah/
+    http://www.namesdir.com/mirrors/nongnu/
 }
 
 set portfetch::mirror_sites::sites(openbsd) {
