@@ -214,8 +214,8 @@ default build.dir {${configure.dir}}
 default build.post_args {VERBOSE=ON}
 
 # tell CMake to use ccache via the CMAKE_<LANG>_COMPILER_LAUNCHER variable
-# and unset the global configure.ccache option which is not supported
-# by CMake.
+# and unset the global configure.ccache option which is not compatible
+# with CMake.
 # See https://stackoverflow.com/questions/1815688/how-to-use-ccache-with-cmake
 proc cmake::ccaching {} {
     global cmake.ccache prefix
