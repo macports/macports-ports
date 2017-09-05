@@ -48,7 +48,8 @@ options                             cmake.build_dir \
                                     cmake.module_path \
                                     cmake_share_module_dir \
                                     cmake.out_of_source \
-                                    cmake.set_osx_architectures
+                                    cmake.set_osx_architectures \
+                                    cmake.ccache
 
 # make out-of-source builds the default (finally)
 default cmake.out_of_source         {yes}
@@ -71,6 +72,9 @@ default cmake.build_type            {MacPorts}
 
 # cmake-based ports may want to modify the install prefix
 default cmake.install_prefix        {${prefix}}
+
+# we support ccache via our own cache variable (which incompatible projects can turn off).
+default cmake.ccache                [tbool configure.ccache]
 
 # minimal/initial value for the install rpath:
 default cmake.install_rpath         {${prefix}/lib}
@@ -135,7 +139,7 @@ proc cmake::module_path {} {
 # cmake.generator "Eclipse CDT4 - Ninja"
 # if maintaining the port means editing it using an IDE of choice.
 #
-default cmake.generator             {"Unix Makefiles"}
+default cmake.generator             {"CodeBlocks - Unix Makefiles"}
 # CMake generates Unix Makefiles that contain a special "fast" install target
 # which skips the whole "let's see if there's anything left to (re)build before
 # we install" you normally get with `make install`. That check should be
@@ -168,6 +172,13 @@ proc cmake::handle_generator {option action args} {
                 destroot.destdir    DESTDIR=${destroot}
                 # unset the DESTDIR env. variable if it has been set before
                 destroot.env-delete DESTDIR=${destroot}
+#                 proc ui_progress_info {string} {
+#                     if {[scan $string "\[%d%%\] " perc] == 1} {
+#                         return $perc
+#                     } else {
+#                         return -1
+#                     }
+#                 }
             }
             "*Ninja" {
                 ui_debug "Selecting the Ninja generator ($args)"
@@ -202,7 +213,19 @@ default configure.dir {[cmake::build_dir]}
 default build.dir {${configure.dir}}
 default build.post_args {VERBOSE=ON}
 
-#FIXME: ccache works with cmake on linux
+# tell CMake to use ccache via the CMAKE_<LANG>_COMPILER_LAUNCHER variable
+# and unset the global configure.ccache option which is not supported
+# by CMake.
+# See https://stackoverflow.com/questions/1815688/how-to-use-ccache-with-cmake
+proc cmake::ccaching {} {
+    global cmake.ccache prefix
+    if {[tbool cmake.ccache] && [file exists ${prefix}/bin/ccache]} {
+        return [list \
+            -DCMAKE_C_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache]
+    }
+}
+
 configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
@@ -210,14 +233,19 @@ configure.cmd       ${prefix}/bin/cmake
 # appropriate default settings for configure.pre_args
 # variables are grouped thematically, with the more important ones
 # at the beginning or end for somewhat easier at-a-glance verification.
+# Policy 25=new: identify Apple Clang as AppleClang to ensure
+#                consistency in compiler feature determination
+# Policy 60=new: don't rewrite ${prefix}/lib/libfoo.dylib as -lfoo
 default configure.pre_args {[list \
                     -DCMAKE_BUILD_TYPE=${cmake.build_type} \
                     -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
                     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
                     {*}[cmake::system_prefix_path] \
+                    {*}[cmake::ccaching] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
+                    -DCMAKE_POLICY_DEFAULT_CMP0060=NEW \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
@@ -266,8 +294,8 @@ pre-configure {
     # In addition, CMake provides build-type-specific flags for
     # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
     # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
-    # set (-Os by default), we have to remove the optimisation flags from the
-    # from the concerned Release build type so that configure.optflags
+    # set (-Os by default), we have to remove the optimisation flags from
+    # the concerned Release build type so that configure.optflags
     # gets honored (Debug used by the +debug variant does not set
     # optimisation flags by default).
     # NB: more recent CMake versions (>=3?) no longer take the env. variables into
@@ -293,12 +321,15 @@ pre-configure {
             configure.objcflags-append  ${flag}
             configure.objcxxflags-append   ${flag}
         }
-        ui_debug "CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
+        ui_debug "CPPFLAGS=\"${cppflags}\" inserted into CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
     }
 
     configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
     # CMake doesn't like --enable-debug, so remove it unconditionally.
     configure.args-delete --enable-debug
+    if {[tbool cmake.ccache]} {
+        ui_info "        (using ccache)"
+    }
 }
 
 post-configure {
@@ -313,7 +344,15 @@ post-configure {
     }
 }
 
-proc cmake.save_configure_cmd {} {
+proc cmake.save_configure_cmd {{save_log_too ""}} {
+    if {${save_log_too} ne ""} {
+        pre-configure {
+            configure.pre_args-prepend "-cf '${configure.cmd} "
+            configure.post_args-append "|& tee ${workpath}/.macports.${subport}.configure.log'"
+            configure.cmd "/bin/csh"
+            ui_debug "configure command set to `${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}`"
+        }
+    }
     post-configure {
         if {![catch {set fd [open "${workpath}/.macports.${subport}.configure.cmd" "w"]} err]} {
             foreach var [array names ::env] {
@@ -344,6 +383,10 @@ proc cmake.save_configure_cmd {} {
             puts ${fd} "${configure.cmd} [join ${configure.pre_args}] [join ${configure.args}] [join ${configure.post_args}]"
             close ${fd}
             unset fd
+        }
+        if {[file exists ${build.dir}/CMakeCache.txt]} {
+            # keep a backup of the CMake cache file
+            file copy -force ${build.dir}/CMakeCache.txt ${build.dir}/CMakeCache-MacPorts.txt
         }
     }
 }
