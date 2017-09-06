@@ -38,21 +38,10 @@
 PortGroup compiler_blacklist_versions 1.0
 
 # Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
-# We do not know what "cc" is, so blacklist it as well.
-compiler.blacklist-append   {*gcc-3*} {*gcc-4.[0-5]} {clang < 500} cc
 
 if {${cxx_stdlib} eq "libstdc++" } {
 
-    compiler.blacklist-append   {macports-clang-3.[0-8]} clang
-
-    compiler.whitelist-append  \
-        macports-clang-4.0     \
-        macports-gcc-6         \
-        macports-gcc-5         \
-        macports-gcc-4.9       \
-        macports-gcc-4.8       \
-        macports-gcc-4.7       \
-        macports-gcc-4.6
+    compiler.whitelist          macports-clang-4.0
 
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
@@ -63,7 +52,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
         pre-configure {
             ui_msg "PowerPC C++11 ports are compiling with gcc6. EXPERIMENTAL."
         }
-        compiler.whitelist-delete macports-clang-4.0
+        compiler.whitelist      macports-gcc-6
         universal_variant no
     }
 
@@ -77,5 +66,6 @@ if {${cxx_stdlib} eq "libstdc++" } {
     }
 } else {
     # GCC compilers can not use libc++
-    compiler.blacklist-append   *gcc*
+    # We do not know what "cc" is, so blacklist it as well.
+    compiler.blacklist-append   *gcc* {clang < 500} cc
 }
