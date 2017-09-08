@@ -39,6 +39,7 @@ options qt5.using_kde qt5.base_version
 global available_qt_versions
 set available_qt_versions {
     qt5
+    qt57
     qt56
     qt55
 }
@@ -82,7 +83,7 @@ proc qt5.get_default_name {} {
         # Qt 5.5: Occasionally tested
         # Qt 5.4: Supported
         #
-        return qt5
+        return qt56
         #
     } elseif { ${os.major} == 12 } {
         #
@@ -92,14 +93,25 @@ proc qt5.get_default_name {} {
         # Qt 5.7: Supported (except QtWebEngine)
         # Qt 5.6: Supported
         #
+        return qt57
+        #
+    } elseif { ${os.major} == 13 } {
+        #
+        # OS X Mavericks (10.9)
+        #
+        # Qt 5.9: Not Supported
+        # Qt 5.8: Supported
+        # Qt 5.7: Supported
+        # Qt 5.6: Supported
+        #
         return qt5
         #
     } elseif { ${os.major} <= 15 } {
         #
-        # OS X Mavericks (10.9)
         # OS X Yosemite (10.10)
         # OS X El Capitan (10.11)
         #
+        # Qt 5.9: Supported
         # Qt 5.8: Supported
         # Qt 5.7: Supported
         # Qt 5.6: Supported
@@ -110,6 +122,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Sierra (10.12)
         #
+        # Qt 5.9: Supported
         # Qt 5.8: Supported
         # Qt 5.7: Not Supported but seems to work
         #
@@ -353,6 +366,12 @@ namespace eval qt5pg {
             lib/pkgconfig/Qt5Multimedia.pc
             ""
         }
+        qtnetworkauth {
+            5.8
+            6.0
+            lib/pkgconfig/Qt5NetworkAuth.pc
+            ""
+        }
         qtpurchasing {
             5.7
             6.0
@@ -405,6 +424,12 @@ namespace eval qt5pg {
             5.1
             6.0
             lib/pkgconfig/Qt5SerialPort.pc
+            ""
+        }
+        qtspeech {
+            5.8
+            6.0
+            lib/pkgconfig/Qt5TextToSpeech.pc
             ""
         }
         qtsvg {

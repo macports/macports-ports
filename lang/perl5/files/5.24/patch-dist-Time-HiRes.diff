@@ -1,0 +1,1415 @@
+https://github.com/macports/macports-ports/pull/607
+https://perl5.git.perl.org/perl.git/commit/c4a535af41823cc84534bf8dbecfdcc3eb7daa86
+
+--- MANIFEST
++++ MANIFEST
+@@ -3557,6 +3557,7 @@
+ dist/Time-HiRes/t/tv_interval.t		Test for Time::HiRes
+ dist/Time-HiRes/t/ualarm.t		Test for Time::HiRes
+ dist/Time-HiRes/t/usleep.t		Test for Time::HiRes
++dist/Time-HiRes/t/utime.t		Test for Time::HiRes
+ dist/Time-HiRes/t/Watchdog.pm		Test for Time::HiRes
+ dist/Time-HiRes/typemap			Time::HiRes extension
+ dist/XSLoader/Makefile.PL	Dynamic Loader makefile writer
+--- Porting/Maintainers.pl
++++ Porting/Maintainers.pl
+@@ -1374,7 +1374,7 @@
+     },
+ 
+     'Time::HiRes' => {
+-        'DISTRIBUTION' => 'RJBS/Time-HiRes-1.9728.tar.gz',
++        'DISTRIBUTION' => 'JHI/Time-HiRes-1.9739.tar.gz',
+         'FILES'        => q[dist/Time-HiRes],
+     },
+ 
+--- dist/Time-HiRes/Changes
++++ dist/Time-HiRes/Changes
+@@ -1,5 +1,55 @@
+ Revision history for the Perl extension Time::HiRes.
+ 
++1.9739 [2016-06-28]
++  - the upcoming macOS 10.12 (Sierra, the operating system formerly
++    known as OS X, or Darwin) has implemented the clock_gettime()
++    and clock_getres() interfaces but not the clock_nanosleep()
++
++1.9738 [2016-06-26]
++  - fix the dates in the Changes, it's not July yet
++    [rt.cpan.org #115553]
++  - in cygwin, drop the utime.t expected timestamp resolution
++  - documented for utime that the actual timestamp resolution depends
++    on the operating system and the filesystem, just like for stat
++  - looks like in gnukfreebsd 10.1 neither futimens or utimensat work
++    even though they exist, skipping utime tests there for now
++  - demodernize the Test::More use in utime.t (no subtest) to
++    better support older Perl installations
++  - for all the tests, drop the Test::More 0.82 requirement,
++    the only "modern" thing used is the note routine which
++    can be replaced with print("# ...\n") (or printf),
++    with this works back at least with Test::More 0.54 (perl 5.8.7) 
++
++1.9737 [2016-06-22]
++  - utime in HiRes.xs had dXSARGS which was unnecessary, leading
++    to two markstack pops, panic, and two-minute wait for the watchdog
++    (thanks to Dave Mitchell for the eagle-eye)
++  - even though 5.10.x should have the Perl_ck_warner, many CPAN
++    smokes proved otherwise, so requiring now at least 5.12 for
++    Perl_ck_warner use in IS_SAFE_PATHNAME() 
++
++1.9736 [2016-06-22]
++  - the IS_SAFE_PATHNAME() emulation was too modern for Perl 5.10
++  - make it so that only one value is set for -DTIME_HIRES_STAT
++    even on systems that support many options
++  - the 1.9734 (only released in blead, and as part of the development
++    release 5.25.2) fix for Darwin's clock_gettime was wrong under
++    threaded builds, leading into mutex panics in clock.t 
++  - the d_hires_utime determination was made more precise
++  - the utime.t was failing in platforms where only one of
++    futimens/utimensat was present (neither or both was okay)
++
++1.9735 [2016-06-20]
++  - Time::HiRes should override `utime` to allow setting hires
++    (futimens and utimensat support)
++    [rt.perl.org #114809]
++  - the utime patch used IS_SAFE_PATHNAME() which isn't available in
++    too old Perls, so emulate (in case the Devel::PPPort is too old)
++
++1.9734 [2016-06-17]
++  - fix Darwins with clock_gettime: blead 2d41a263
++    [rt.perl.org #128427]
++
+ 1.9733 [2016-04-23]
+   - C90 declaration-after-statement error with darwin threads: blead de1003b4
+     [rt.cpan.org #113856]
+--- dist/Time-HiRes/HiRes.pm
++++ dist/Time-HiRes/HiRes.pm
+@@ -23,12 +23,12 @@
+ 		 ITIMER_REAL ITIMER_VIRTUAL ITIMER_PROF ITIMER_REALPROF
+ 		 TIMER_ABSTIME
+ 		 d_usleep d_ualarm d_gettimeofday d_getitimer d_setitimer
+-		 d_nanosleep d_clock_gettime d_clock_getres
++		 d_nanosleep d_clock_gettime d_clock_getres d_hires_utime
+ 		 d_clock d_clock_nanosleep
+-		 stat lstat
++		 stat lstat utime
+ 		);
+ 
+-our $VERSION = '1.9733';
++our $VERSION = '1.9739';
+ our $XS_VERSION = $VERSION;
+ $VERSION = eval $VERSION;
+ 
+@@ -60,6 +60,7 @@
+ 	    ($i eq 'clock'           && !&d_clock)           ||
+ 	    ($i eq 'nanosleep'       && !&d_nanosleep)       ||
+ 	    ($i eq 'usleep'          && !&d_usleep)          ||
++	    ($i eq 'utime'           && !&d_hires_utime)     ||
+ 	    ($i eq 'ualarm'          && !&d_ualarm)) {
+ 	    require Carp;
+ 	    Carp::croak("Time::HiRes::$i(): unimplemented in this platform");
+@@ -92,7 +93,7 @@
+ 
+   use Time::HiRes qw( usleep ualarm gettimeofday tv_interval nanosleep
+ 		      clock_gettime clock_getres clock_nanosleep clock
+-                      stat lstat );
++                      stat lstat utime);
+ 
+   usleep ($microseconds);
+   nanosleep ($nanoseconds);
+@@ -137,6 +138,9 @@
+   my @stat = stat(FH);
+   my @stat = lstat("file");
+ 
++  use Time::HiRes qw( utime );
++  utime $floating_seconds, $floating_seconds, file...;
++
+ =head1 DESCRIPTION
+ 
+ The C<Time::HiRes> module implements a Perl interface to the
+@@ -446,6 +450,26 @@
+ the access time stamp from t2 need not be greater-than the modify
+ time stamp from t1: it may be equal or I<less>.
+ 
++=item utime LIST
++
++As L<perlfunc/utime>
++but with the ability to set the access/modify file timestamps
++in subsecond resolution, if the operating system and the filesystem
++both support such timestamps.  To override the standard utime():
++
++    use Time::HiRes qw(utime);
++
++Test for the value of &Time::HiRes::d_hires_utime to find out whether
++the operating system supports setting subsecond file timestamps.
++
++As with CORE::utime(), passing undef as both the atime and mtime will
++call the syscall with a NULL argument.
++
++The actual achievable subsecond resolution depends on the combination
++of the operating system and the filesystem.
++
++Returns the number of files successfully changed.
++
+ =back
+ 
+ =head1 EXAMPLES
+@@ -586,9 +610,13 @@
+ Some systems have APIs but not implementations: for example QNX and Haiku
+ have the interval timer APIs but not the functionality.
+ 
+-In OS X clock_getres(), clock_gettime() and clock_nanosleep() are
+-emulated using the Mach timers; as a side effect of being emulated
+-the CLOCK_REALTIME and CLOCK_MONOTONIC are the same timer.
++In pre-Sierra macOS (pre-10.12, OS X) clock_getres(), clock_gettime()
++and clock_nanosleep() are emulated using the Mach timers; as a side
++effect of being emulated the CLOCK_REALTIME and CLOCK_MONOTONIC are
++the same timer.
++
++gnukfreebsd seems to have non-functional futimens() and utimensat()
++(at least as of 10.1): therefore the hires utime() does not work.
+ 
+ =head1 SEE ALSO
+ 
+--- dist/Time-HiRes/HiRes.xs
++++ dist/Time-HiRes/HiRes.xs
+@@ -747,21 +747,33 @@
+ #endif /* !TIME_HIRES_STAT */
+ }
+ 
+-/* Until Apple implements clock_gettime() (ditto clock_getres())
+- * we will emulate it using Mach interfaces. */
+-#if defined(PERL_DARWIN) && !defined(CLOCK_REALTIME)
+-
+-#  include <mach/mach_time.h>
++/* Until Apple implements clock_gettime()
++ * (ditto clock_getres() and clock_nanosleep())
++ * we will emulate them using the Mach kernel interfaces. */
++#if defined(PERL_DARWIN) && \
++  (defined(TIME_HIRES_CLOCK_GETTIME_EMULATION)   || \
++   defined(TIME_HIRES_CLOCK_GETRES_EMULATION)    || \
++   defined(TIME_HIRES_CLOCK_NANOSLEEP_EMULATION))
+ 
++#ifndef CLOCK_REALTIME
+ #  define CLOCK_REALTIME  0x01
+ #  define CLOCK_MONOTONIC 0x02
++#endif
+ 
++#ifndef TIMER_ABSTIME
+ #  define TIMER_ABSTIME   0x01
++#endif
+ 
+ #ifdef USE_ITHREADS
++#  define PERL_DARWIN_MUTEX
++#endif
++
++#ifdef PERL_DARWIN_MUTEX
+ STATIC perl_mutex darwin_time_mutex;
+ #endif
+ 
++#include <mach/mach_time.h>
++
+ static uint64_t absolute_time_init;
+ static mach_timebase_info_data_t timebase_info;
+ static struct timespec timespec_init;
+@@ -769,7 +781,7 @@
+ static int darwin_time_init() {
+   struct timeval tv;
+   int success = 1;
+-#ifdef USE_ITHREADS
++#ifdef PERL_DARWIN_MUTEX
+   MUTEX_LOCK(&darwin_time_mutex);
+ #endif
+   if (absolute_time_init == 0) {
+@@ -784,12 +796,13 @@
+       }
+     }
+   }
+-#ifdef USE_ITHREADS
++#ifdef PERL_DARWIN_MUTEX
+   MUTEX_UNLOCK(&darwin_time_mutex);
+ #endif
+   return success;
+ }
+ 
++#ifdef TIME_HIRES_CLOCK_GETTIME_EMULATION
+ static int clock_gettime(int clock_id, struct timespec *ts) {
+   if (darwin_time_init() && timebase_info.denom) {
+     switch (clock_id) {
+@@ -821,7 +834,9 @@
+   SETERRNO(EINVAL, LIB_INVARG);
+   return -1;
+ }
++#endif /* TIME_HIRES_CLOCK_GETTIME_EMULATION */
+ 
++#ifdef TIME_HIRES_CLOCK_GETRES_EMULATION
+ static int clock_getres(int clock_id, struct timespec *ts) {
+   if (darwin_time_init() && timebase_info.denom) {
+     switch (clock_id) {
+@@ -841,7 +856,9 @@
+   SETERRNO(EINVAL, LIB_INVARG);
+   return -1;
+ }
++#endif /* TIME_HIRES_CLOCK_GETRES_EMULATION */
+ 
++#ifdef TIME_HIRES_CLOCK_NANOSLEEP_EMULATION
+ static int clock_nanosleep(int clock_id, int flags,
+ 			   const struct timespec *rqtp,
+ 			   struct timespec *rmtp) {
+@@ -879,6 +896,7 @@
+   SETERRNO(EINVAL, LIB_INVARG);
+   return -1;
+ }
++#endif /* TIME_HIRES_CLOCK_NANOSLEEP_EMULATION */
+ 
+ #endif /* PERL_DARWIN */
+ 
+@@ -921,6 +939,22 @@
+ 
+ #endif
+ 
++/* In case Perl and/or Devel::PPPort are too old, minimally emulate
++ * IS_SAFE_PATHNAME() (which looks for zero bytes in the pathname). */
++#ifndef IS_SAFE_PATHNAME
++#if PERL_VERSION >= 12 /* Perl_ck_warner is 5.10.0 -> */
++#ifdef WARN_SYSCALLS
++#define WARNEMUCAT WARN_SYSCALLS /* 5.22.0 -> */
++#else
++#define WARNEMUCAT WARN_MISC
++#endif
++#define WARNEMU(opname) Perl_ck_warner(aTHX_ packWARN(WARNEMUCAT), "Invalid \\0 character in pathname for %s",opname)
++#else
++#define WARNEMU(opname) Perl_warn(aTHX_ "Invalid \\0 character in pathname for %s",opname)
++#endif
++#define IS_SAFE_PATHNAME(pv, len, opname) (((len)>1)&&memchr((pv), 0, (len)-1)?(SETERRNO(ENOENT, LIB_INVARG),WARNEMU(opname),FALSE):(TRUE))
++#endif
++
+ MODULE = Time::HiRes            PACKAGE = Time::HiRes
+ 
+ PROTOTYPES: ENABLE
+@@ -941,7 +975,7 @@
+ #   endif
+ #endif
+ #if defined(PERL_DARWIN)
+-#  ifdef USE_ITHREADS
++#  if defined(USE_ITHREADS) && defined(PERL_DARWIN_MUTEX)
+   MUTEX_INIT(&darwin_time_mutex);
+ #  endif
+ #endif
+@@ -1317,6 +1351,82 @@
+ 
+ #endif /* #if defined(HAS_GETITIMER) && defined(HAS_SETITIMER) */
+ 
++#if defined(TIME_HIRES_UTIME)
++
++I32
++utime(accessed, modified, ...)
++PROTOTYPE: $$@
++    PREINIT:
++	SV* accessed;
++	SV* modified;
++	SV* file;
++
++	struct timespec utbuf[2];
++	struct timespec *utbufp = utbuf;
++	int tot;
++
++    CODE:
++	accessed = ST(0);
++	modified = ST(1);
++	items -= 2;
++	tot = 0;
++
++	if ( accessed == &PL_sv_undef && modified == &PL_sv_undef )
++		utbufp = NULL;
++	else {
++		if (SvNV(accessed) < 0.0 || SvNV(modified) < 0.0)
++	        	croak("Time::HiRes::utime(%"NVgf", %"NVgf"): negative time not invented yet", SvNV(accessed), SvNV(modified));
++		Zero(&utbuf, sizeof utbuf, char);
++		utbuf[0].tv_sec = (Time_t)SvNV(accessed);  /* time accessed */
++		utbuf[0].tv_nsec = (long)( ( SvNV(accessed) - utbuf[0].tv_sec ) * 1e9 );
++		utbuf[1].tv_sec = (Time_t)SvNV(modified);  /* time modified */
++		utbuf[1].tv_nsec = (long)( ( SvNV(modified) - utbuf[1].tv_sec ) * 1e9 );
++	}
++
++	while (items > 0) {
++		file = POPs; items--;
++
++		if (SvROK(file) && GvIO(SvRV(file)) && IoIFP(sv_2io(SvRV(file)))) {
++			int fd =  PerlIO_fileno(IoIFP(sv_2io(file)));
++			if (fd < 0)
++				SETERRNO(EBADF,RMS_IFI);
++			else 
++#ifdef HAS_FUTIMENS
++			if (futimens(fd, utbufp) == 0)
++				tot++;
++#else  /* HAS_FUTIMES */
++				croak("futimens unimplemented in this platform");
++#endif /* HAS_FUTIMES */
++		}
++		else {
++#ifdef HAS_UTIMENSAT
++			STRLEN len;
++			char * name = SvPV(file, len);
++			if (IS_SAFE_PATHNAME(name, len, "utime") &&
++			    utimensat(AT_FDCWD, name, utbufp, 0) == 0)
++				tot++;
++#else  /* HAS_UTIMENSAT */
++			croak("utimensat unimplemented in this platform");
++#endif /* HAS_UTIMENSAT */
++		}
++	} /* while items */
++	RETVAL = tot;
++
++    OUTPUT:
++	RETVAL
++
++#else  /* #if defined(TIME_HIRES_UTIME) */
++
++I32
++utime(accessed, modified, ...)
++    CODE:
++        croak("Time::HiRes::utime(): unimplemented in this platform");
++        RETVAL = 0;
++    OUTPUT:
++	RETVAL
++
++#endif /* #if defined(TIME_HIRES_UTIME) */
++
+ #if defined(TIME_HIRES_CLOCK_GETTIME)
+ 
+ NV
+--- dist/Time-HiRes/Makefile.PL
++++ dist/Time-HiRes/Makefile.PL
+@@ -354,6 +354,41 @@
+ EOM
+ }
+ 
++sub has_futimens {
++    return 1 if
++    try_compile_and_link(<<EOM);
++#include "EXTERN.h"
++#include "perl.h"
++#include "XSUB.h"
++#include <sys/time.h>
++int main(int argc, char** argv)
++{
++    int ret;
++    struct timespec ts[2];
++    ret = futimens(0, ts);
++    ret == 0 ? exit(0) : exit(errno ? errno : -1);
++}
++EOM
++}
++
++sub has_utimensat{
++    return 1 if
++    try_compile_and_link(<<EOM);
++#include "EXTERN.h"
++#include "perl.h"
++#include "XSUB.h"
++#include <sys/time.h>
++#include <fcntl.h>
++int main(int argc, char** argv)
++{
++    int ret;
++    struct timespec ts[2];
++    ret = utimensat(AT_FDCWD, 0, ts, 0);
++    ret == 0 ? exit(0) : exit(errno ? errno : -1);
++}
++EOM
++}
++
+ sub DEFINE {
+     my ($def, $val) = @_;
+     my $define = defined $val ? "$def=$val" : $def ;
+@@ -548,7 +583,7 @@
+     } elsif ($^O eq 'darwin') {
+        $has_clock_gettime_emulation++;
+        $has_clock_gettime++;
+-       $DEFINE .= ' -DTIME_HIRES_CLOCK_GETTIME';
++       $DEFINE .= ' -DTIME_HIRES_CLOCK_GETTIME -DTIME_HIRES_CLOCK_GETTIME_EMULATION';
+     }
+ 
+     if ($has_clock_gettime) {
+@@ -577,7 +612,7 @@
+     } elsif ($^O eq 'darwin') {
+        $has_clock_getres_emulation++;
+        $has_clock_getres++;
+-       $DEFINE .= ' -DTIME_HIRES_CLOCK_GETRES';
++       $DEFINE .= ' -DTIME_HIRES_CLOCK_GETRES -DTIME_HIRES_CLOCK_GETRES_EMULATION';
+     }
+ 
+     if ($has_clock_getres) {
+@@ -603,7 +638,7 @@
+     } elsif ($^O eq 'darwin') {
+         $has_clock_nanosleep++;
+         $has_clock_nanosleep_emulation++;
+-	$DEFINE .= ' -DTIME_HIRES_CLOCK_NANOSLEEP';
++	$DEFINE .= ' -DTIME_HIRES_CLOCK_NANOSLEEP -DTIME_HIRES_CLOCK_NANOSLEEP_EMULATION';
+     }
+ 
+     if ($has_clock_nanosleep) {
+@@ -631,6 +666,36 @@
+ 	print "NOT found.\n";
+     }
+ 
++    print "Looking for futimens()... ";
++    my $has_futimens;
++    if (has_futimens()) {
++        $has_futimens++;
++	$DEFINE .= ' -DHAS_FUTIMENS';
++    }
++
++    if ($has_futimens) {
++        print "found.\n";
++    } else {
++	print "NOT found.\n";
++    }
++
++    print "Looking for utimensat()... ";
++    my $has_utimensat;
++    if (has_utimensat()) {
++        $has_utimensat++;
++	$DEFINE .= ' -DHAS_UTIMENSAT';
++    }
++
++    if ($has_utimensat) {
++        print "found.\n";
++    } else {
++	print "NOT found.\n";
++    }
++
++    if ($has_futimens or $has_utimensat) {
++	$DEFINE .= ' -DTIME_HIRES_UTIME';
++    }
++
+     print "Looking for stat() subsecond timestamps...\n";
+ 
+     print "Trying struct stat st_atimespec.tv_nsec...";
+@@ -644,7 +709,7 @@
+ }
+ EOM
+       $has_stat_st_xtimespec++;
+-      DEFINE('TIME_HIRES_STAT', 1);
++      DEFINE('TIME_HIRES_STAT_ST_XTIMESPEC');  # 1
+     }
+ 
+     if ($has_stat_st_xtimespec) {
+@@ -664,7 +729,7 @@
+ }
+ EOM
+       $has_stat_st_xtimensec++;
+-      DEFINE('TIME_HIRES_STAT', 2);
++      DEFINE('TIME_HIRES_STAT_ST_XTIMENSEC');  # 2
+     }
+ 
+     if ($has_stat_st_xtimensec) {
+@@ -684,7 +749,7 @@
+ }
+ EOM
+       $has_stat_st_xtime_n++;
+-      DEFINE('TIME_HIRES_STAT', 3);
++      DEFINE('TIME_HIRES_STAT_ST_XTIME_N');  # 3
+     }
+ 
+     if ($has_stat_st_xtime_n) {
+@@ -704,7 +769,7 @@
+ }
+ EOM
+       $has_stat_st_xtim++;
+-      DEFINE('TIME_HIRES_STAT', 4);
++      DEFINE('TIME_HIRES_STAT_XTIM');  # 4
+     }
+ 
+     if ($has_stat_st_xtim) {
+@@ -724,7 +789,7 @@
+ }
+ EOM
+       $has_stat_st_uxtime++;
+-      DEFINE('TIME_HIRES_STAT', 5);
++      DEFINE('TIME_HIRES_STAT_ST_UXTIME');  # 5
+     }
+ 
+     if ($has_stat_st_uxtime) {
+@@ -733,6 +798,19 @@
+ 	print "NOT found.\n";
+     }
+ 
++    # See HiRes.xs hrstatns()
++    if ($has_stat_st_xtimespec) {
++        DEFINE('TIME_HIRES_STAT', 1);
++    } elsif ($has_stat_st_xtimensec) {
++        DEFINE('TIME_HIRES_STAT', 2);
++    } elsif ($has_stat_st_xtime_n) {
++        DEFINE('TIME_HIRES_STAT', 3);
++    } elsif ($has_stat_st_xtim) {
++        DEFINE('TIME_HIRES_STAT', 4);
++    } elsif ($has_stat_st_uxtime) {
++        DEFINE('TIME_HIRES_STAT', 5);
++    }    
++
+    if ($DEFINE =~ /-DTIME_HIRES_STAT=\d+/) {
+     print "You seem to have stat() subsecond timestamps.\n";
+     print "(Your struct stat has them, but the filesystems must help.)\n";
+@@ -791,7 +869,7 @@
+ 	    'DynaLoader' => 0,
+ 	    'Exporter' => 0,
+ 	    'ExtUtils::MakeMaker' => 0,
+-	    'Test::More' => "0.82",
++	    'Test::More' => 0,
+ 	    'strict' => 0,
+ 	},
+ 	'dist'      => {
+@@ -869,7 +947,8 @@
+                       );
+ 	foreach (qw (d_usleep d_ualarm d_gettimeofday d_getitimer d_setitimer
+ 		     d_nanosleep d_clock_gettime d_clock_getres
+-		     d_clock d_clock_nanosleep d_hires_stat)) {
++		     d_clock d_clock_nanosleep d_hires_stat
++                     d_futimens d_utimensat d_hires_utime)) {
+ 	    my $macro = $_;
+ 	    if ($macro =~ /^(d_nanosleep|d_clock)$/) {
+ 		$macro =~ s/^d_(.+)/TIME_HIRES_\U$1/;
+@@ -879,6 +958,13 @@
+ 		push @names, {name => $_, macro => "TIME_HIRES_STAT", value => $d_hires_stat,
+ 			      default => ["IV", "0"]};
+ 		next;
++	    } elsif ($macro =~ /^(d_hires_utime)$/) {
++		my $d_hires_utime =
++                    ($DEFINE =~ /-DHAS_FUTIMENS/ ||
++                     $DEFINE =~ /-DHAS_UTIMENSAT/) ? 1 : 0;
++		push @names, {name => $_, macro => "TIME_HIRES_UTIME", value => $d_hires_utime,
++			      default => ["IV", "0"]};
++		next;
+ 	    } elsif ($macro =~ /^(d_clock_gettime|d_clock_getres|d_clock_nanosleep)$/) {
+ 		$macro =~ s/^d_(.+)/TIME_HIRES_\U$1/;
+ 		my $val = ($DEFINE =~ /-D$macro\b/) ? 1 : 0;
+--- dist/Time-HiRes/fallback/const-c.inc
++++ dist/Time-HiRes/fallback/const-c.inc
+@@ -19,6 +19,7 @@
+ #ifndef pTHX_
+ #define pTHX_ /* 5.6 or later define this for threading support.  */
+ #endif
++
+ static int
+ constant_11 (pTHX_ const char *name, IV *iv_return) {
+   /* When generated this function returned values for the list of names given
+@@ -87,6 +88,51 @@
+ }
+ 
+ static int
++constant_13 (pTHX_ const char *name, IV *iv_return) {
++  /* When generated this function returned values for the list of names given
++     here.  However, subsequent manual editing may have added or removed some.
++     CLOCK_HIGHRES TIMER_ABSTIME d_hires_utime */
++  /* Offset 1 gives the best switch position.  */
++  switch (name[1]) {
++  case 'I':
++    if (memEQ(name, "TIMER_ABSTIME", 13)) {
++    /*                ^                  */
++#ifdef TIMER_ABSTIME
++      *iv_return = TIMER_ABSTIME;
++      return PERL_constant_ISIV;
++#else
++      return PERL_constant_NOTDEF;
++#endif
++    }
++    break;
++  case 'L':
++    if (memEQ(name, "CLOCK_HIGHRES", 13)) {
++    /*                ^                  */
++#ifdef CLOCK_HIGHRES
++      *iv_return = CLOCK_HIGHRES;
++      return PERL_constant_ISIV;
++#else
++      return PERL_constant_NOTDEF;
++#endif
++    }
++    break;
++  case '_':
++    if (memEQ(name, "d_hires_utime", 13)) {
++    /*                ^                  */
++#ifdef TIME_HIRES_UTIME
++      *iv_return = 1;
++      return PERL_constant_ISIV;
++#else
++      *iv_return = 0;
++      return PERL_constant_ISIV;
++#endif
++    }
++    break;
++  }
++  return PERL_constant_NOTFOUND;
++}
++
++static int
+ constant_14 (pTHX_ const char *name, IV *iv_return) {
+   /* When generated this function returned values for the list of names given
+      here.  However, subsequent manual editing may have added or removed some.
+@@ -250,16 +296,17 @@
+             {name=>"d_getitimer", type=>"IV", macro=>"HAS_GETITIMER", value=>"1", default=>["IV", "0"]},
+             {name=>"d_gettimeofday", type=>"IV", macro=>"HAS_GETTIMEOFDAY", value=>"1", default=>["IV", "0"]},
+             {name=>"d_hires_stat", type=>"IV", macro=>"TIME_HIRES_STAT", value=>"1", default=>["IV", "0"]},
++            {name=>"d_hires_utime", type=>"IV", macro=>"TIME_HIRES_UTIME", value=>"1", default=>["IV", "0"]},
+             {name=>"d_nanosleep", type=>"IV", macro=>"TIME_HIRES_NANOSLEEP", value=>"1", default=>["IV", "0"]},
+             {name=>"d_setitimer", type=>"IV", macro=>"HAS_SETITIMER", value=>"1", default=>["IV", "0"]},
+             {name=>"d_ualarm", type=>"IV", macro=>"HAS_UALARM", value=>"1", default=>["IV", "0"]},
+             {name=>"d_usleep", type=>"IV", macro=>"HAS_USLEEP", value=>"1", default=>["IV", "0"]});
+ 
+-print constant_types(); # macro defs
++print constant_types(), "\n"; # macro defs
+ foreach (C_constant ("Time::HiRes", 'constant', 'IV', $types, undef, 3, @names) ) {
+     print $_, "\n"; # C constant subs
+ }
+-print "#### XS Section:\n";
++print "\n#### XS Section:\n";
+ print XS_constant ("Time::HiRes", $types);
+ __END__
+    */
+@@ -322,33 +369,7 @@
+     }
+     break;
+   case 13:
+-    /* Names all of length 13.  */
+-    /* CLOCK_HIGHRES TIMER_ABSTIME */
+-    /* Offset 2 gives the best switch position.  */
+-    switch (name[2]) {
+-    case 'M':
+-      if (memEQ(name, "TIMER_ABSTIME", 13)) {
+-      /*                 ^                 */
+-#ifdef TIMER_ABSTIME
+-        *iv_return = TIMER_ABSTIME;
+-        return PERL_constant_ISIV;
+-#else
+-        return PERL_constant_NOTDEF;
+-#endif
+-      }
+-      break;
+-    case 'O':
+-      if (memEQ(name, "CLOCK_HIGHRES", 13)) {
+-      /*                 ^                 */
+-#ifdef CLOCK_HIGHRES
+-        *iv_return = CLOCK_HIGHRES;
+-        return PERL_constant_ISIV;
+-#else
+-        return PERL_constant_NOTDEF;
+-#endif
+-      }
+-      break;
+-    }
++    return constant_13 (aTHX_ name, iv_return);
+     break;
+   case 14:
+     return constant_14 (aTHX_ name, iv_return);
+--- dist/Time-HiRes/t/Watchdog.pm
++++ dist/Time-HiRes/t/Watchdog.pm
+@@ -10,44 +10,44 @@
+ my $TheEnd;
+ 
+ if ($Config{d_fork}) {
+-    note "I am the main process $$, starting the watchdog process...";
++    print("# I am the main process $$, starting the watchdog process...\n");
+     $watchdog_pid = fork();
+     if (defined $watchdog_pid) {
+ 	if ($watchdog_pid == 0) { # We are the kid, set up the watchdog.
+ 	    my $ppid = getppid();
+-	    note "I am the watchdog process $$, sleeping for $waitfor seconds...";
++	    print("# I am the watchdog process $$, sleeping for $waitfor seconds...\n");
+ 	    sleep($waitfor - 2);    # Workaround for perlbug #49073
+ 	    sleep(2);               # Wait for parent to exit
+ 	    if (kill(0, $ppid)) {   # Check if parent still exists
+ 		warn "\n$0: overall time allowed for tests (${waitfor}s) exceeded!\n";
+-		note "Terminating main process $ppid...";
++		print("Terminating main process $ppid...\n");
+ 		kill('KILL', $ppid);
+-		note "This is the watchdog process $$, over and out.";
++		print("# This is the watchdog process $$, over and out.\n");
+ 	    }
+ 	    exit(0);
+ 	} else {
+-	    note "The watchdog process $watchdog_pid launched, continuing testing...";
++	    print("# The watchdog process $watchdog_pid launched, continuing testing...\n");
+ 	    $TheEnd = time() + $waitfor;
+ 	}
+     } else {
+ 	warn "$0: fork failed: $!\n";
+     }
+ } else {
+-    note "No watchdog process (need fork)";
++    print("# No watchdog process (need fork)\n");
+ }
+ 
+ END {
+     if ($watchdog_pid) { # Only in the main process.
+ 	my $left = $TheEnd - time();
+-	note sprintf "I am the main process $$, terminating the watchdog process $watchdog_pid before it terminates me in %d seconds (testing took %d seconds).", $left, $waitfor - $left;
++	printf("# I am the main process $$, terminating the watchdog process $watchdog_pid before it terminates me in %d seconds (testing took %d seconds).\n", $left, $waitfor - $left);
+ 	if (kill(0, $watchdog_pid)) {
+ 	    local $? = 0;
+ 	    my $kill = kill('KILL', $watchdog_pid); # We are done, the watchdog can go.
+ 	    wait();
+-	    note sprintf "kill KILL $watchdog_pid = %d", $kill;
++	    printf("# kill KILL $watchdog_pid = %d\n", $kill);
+ 	}
+ 	unlink("ktrace.out"); # Used in BSD system call tracing.
+-	note "All done.";
++	print("# All done.\n");
+     }
+ }
+ 
+--- dist/Time-HiRes/t/alarm.t
++++ dist/Time-HiRes/t/alarm.t
+@@ -1,6 +1,6 @@
+ use strict;
+ 
+-use Test::More 0.82 tests => 10;
++use Test::More tests => 10;
+ use t::Watchdog;
+ 
+ BEGIN { require_ok "Time::HiRes"; }
+@@ -29,12 +29,14 @@
+ 
+     my ($r, $i, $not, $ok);
+ 
++    $not = "";
++
+     $r = [Time::HiRes::gettimeofday()];
+     $i = 5;
+     my $oldaction;
+     if ($use_sigaction) {
+ 	$oldaction = new POSIX::SigAction;
+-	note sprintf "sigaction tick, ALRM = %d", &POSIX::SIGALRM;
++	printf("# sigaction tick, ALRM = %d\n", &POSIX::SIGALRM);
+ 
+ 	# Perl's deferred signals may be too wimpy to break through
+ 	# a restartable select(), so use POSIX::sigaction if available.
+@@ -44,7 +46,7 @@
+ 			 $oldaction)
+ 	    or die "Error setting SIGALRM handler with sigaction: $!\n";
+     } else {
+-	note "SIG tick";
++	print("# SIG tick\n");
+ 	$SIG{ALRM} = "tick";
+     }
+ 
+@@ -56,8 +58,8 @@
+ 	    Time::HiRes::alarm(0.3);
+ 	    select (undef, undef, undef, 3);
+ 	    my $ival = Time::HiRes::tv_interval ($r);
+-	    note "Select returned! $i $ival";
+-	    note abs($ival/3 - 1);
++	    print("# Select returned! $i $ival\n");
++	    printf("# %s\n", abs($ival/3 - 1));
+ 	    # Whether select() gets restarted after signals is
+ 	    # implementation dependent.  If it is restarted, we
+ 	    # will get about 3.3 seconds: 3 from the select, 0.3
+@@ -86,7 +88,7 @@
+     sub tick {
+ 	$i--;
+ 	my $ival = Time::HiRes::tv_interval ($r);
+-	note "Tick! $i $ival";
++	print("# Tick! $i $ival\n");
+ 	my $exp = 0.3 * (5 - $i);
+ 	if ($exp == 0) {
+ 	    $not = "tick: divisor became zero";
+@@ -106,8 +108,8 @@
+ 	Time::HiRes::alarm(0); # can't cancel usig %SIG
+     }
+ 
++    print("# $not\n");
+     ok !$not;
+-    note $not || $ok;
+ }
+ 
+ SKIP: {
+@@ -126,7 +128,7 @@
+     # http://groups.google.com/group/perl.perl5.porters/browse_thread/thread/adaffaaf939b042e/20dafc298df737f0%2320dafc298df737f0?sa=X&oi=groupsr&start=0&num=3
+     # Perl changes [18765] and [18770], perl bug [perl #20920]
+ 
+-    note "Finding delay loop...";
++    print("# Finding delay loop...\n");
+ 
+     my $T = 0.01;
+     my $DelayN = 1024;
+@@ -137,7 +139,7 @@
+ 	 for ($i = 0; $i < $DelayN; $i++) { }
+ 	 my $t1 = Time::HiRes::time();
+ 	 my $dt = $t1 - $t0;
+-	 note "N = $DelayN, t1 = $t1, t0 = $t0, dt = $dt";
++	 print("# N = $DelayN, t1 = $t1, t0 = $t0, dt = $dt\n");
+ 	 last N if $dt > $T;
+ 	 $DelayN *= 2;
+      } while (1);
+@@ -169,7 +171,7 @@
+ 
+     $SIG{ALRM} = sub {
+ 	$a++;
+-	note "Alarm $a - ", Time::HiRes::time();
++	printf("# Alarm $a - %s\n", Time::HiRes::time());
+ 	Time::HiRes::alarm(0) if $a >= $A; # Disarm the alarm.
+ 	$Delay->(2); # Try burning CPU at least for 2T seconds.
+     }; 
+@@ -204,18 +206,18 @@
+ 	my $alrm = 0;
+ 	$SIG{ALRM} = sub { $alrm++ };
+ 	my $got = Time::HiRes::alarm(2.7);
+-	ok $got == 0 or note $got;
++	ok $got == 0 or print("# $got\n");
+ 
+ 	my $t0 = Time::HiRes::time();
+ 	1 while Time::HiRes::time() - $t0 <= 1;
+ 
+ 	$got = Time::HiRes::alarm(0);
+-	ok $got > 0 && $got < 1.8 or note $got;
++	ok $got > 0 && $got < 1.8 or print("# $got\n");
+ 
+-	ok $alrm == 0 or note $alrm;
++	ok $alrm == 0 or print("# $alrm\n");
+ 
+ 	$got = Time::HiRes::alarm(0);
+-	ok $got == 0 or note $got;
++	ok $got == 0 or print("# $got\n");
+     }
+ }
+ 
+--- dist/Time-HiRes/t/clock.t
++++ dist/Time-HiRes/t/clock.t
+@@ -1,6 +1,6 @@
+ use strict;
+ 
+-use Test::More 0.82 tests => 5;
++use Test::More tests => 5;
+ use t::Watchdog;
+ 
+ BEGIN { require_ok "Time::HiRes"; }
+@@ -13,10 +13,10 @@
+     return $@ eq '';
+ }
+ 
+-note sprintf "have_clock_gettime   = %d", &Time::HiRes::d_clock_gettime;
+-note sprintf "have_clock_getres    = %d", &Time::HiRes::d_clock_getres;
+-note sprintf "have_clock_nanosleep = %d", &Time::HiRes::d_clock_nanosleep;
+-note sprintf "have_clock           = %d", &Time::HiRes::d_clock;
++printf("# have_clock_gettime   = %d\n", &Time::HiRes::d_clock_gettime);
++printf("# have_clock_getres    = %d\n", &Time::HiRes::d_clock_getres);
++printf("# have_clock_nanosleep = %d\n", &Time::HiRes::d_clock_nanosleep);
++printf("# have_clock           = %d\n", &Time::HiRes::d_clock);
+ 
+ # Ideally, we'd like to test that the timers are rather precise.
+ # However, if the system is busy, there are no guarantees on how
+@@ -36,25 +36,25 @@
+     my $ok = 0;
+  TRY: {
+ 	for my $try (1..3) {
+-	    note "CLOCK_REALTIME: try = $try";
++	    print("# CLOCK_REALTIME: try = $try\n");
+ 	    my $t0 = Time::HiRes::clock_gettime(&CLOCK_REALTIME);
+ 	    my $T = 1.5;
+ 	    Time::HiRes::sleep($T);
+ 	    my $t1 = Time::HiRes::clock_gettime(&CLOCK_REALTIME);
+ 	    if ($t0 > 0 && $t1 > $t0) {
+-		note "t1 = $t1, t0 = $t0";
++		print("# t1 = $t1, t0 = $t0\n");
+ 		my $dt = $t1 - $t0;
+ 		my $rt = abs(1 - $dt / $T);
+-		note "dt = $dt, rt = $rt";
++		print("# dt = $dt, rt = $rt\n");
+ 		if ($rt <= 2 * $limit) {
+ 		    $ok = 1;
+ 		    last TRY;
+ 		}
+ 	    } else {
+-		note "Error: t0 = $t0, t1 = $t1";
++		print("# Error: t0 = $t0, t1 = $t1\n");
+ 	    }
+ 	    my $r = rand() + rand();
+-	    note sprintf "Sleeping for %.6f seconds...\n", $r;
++	    printf("# Sleeping for %.6f seconds...\n", $r);
+ 	    Time::HiRes::sleep($r);
+ 	}
+     }
+@@ -64,7 +64,7 @@
+ SKIP: {
+     skip "no clock_getres", 1 unless &Time::HiRes::d_clock_getres;
+     my $tr = Time::HiRes::clock_getres();
+-    ok $tr > 0 or note "tr = $tr";
++    ok $tr > 0 or print("# tr = $tr\n");
+ }
+ 
+ SKIP: {
+@@ -73,17 +73,17 @@
+     my $s = 1.5e9;
+     my $t = Time::HiRes::clock_nanosleep(&CLOCK_REALTIME, $s);
+     my $r = abs(1 - $t / $s);
+-    ok $r < 2 * $limit or note "t = $t, r = $r";
++    ok $r < 2 * $limit or print("# t = $t, r = $r\n");
+ }
+ 
+ SKIP: {
+     skip "no clock", 1 unless &Time::HiRes::d_clock;
+     my @clock = Time::HiRes::clock();
+-    note "clock = @clock";
++    print("# clock = @clock\n");
+     for my $i (1..3) {
+ 	for (my $j = 0; $j < 1e6; $j++) { }
+ 	push @clock, Time::HiRes::clock();
+-	note "clock = @clock";
++	print("# clock = @clock\n");
+     }
+     ok $clock[0] >= 0 &&
+ 	$clock[1] > $clock[0] &&
+--- dist/Time-HiRes/t/gettimeofday.t
++++ dist/Time-HiRes/t/gettimeofday.t
+@@ -8,26 +8,26 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 6;
++use Test::More tests => 6;
+ use t::Watchdog;
+ 
+ my @one = Time::HiRes::gettimeofday();
+-note 'gettimeofday returned ', 0+@one, ' args';
++printf("# gettimeofday returned %d args\n", 0+@one);
+ ok @one == 2;
+-ok $one[0] > 850_000_000 or note "@one too small";
++ok $one[0] > 850_000_000 or print("# @one too small\n");
+ 
+ sleep 1;
+ 
+ my @two = Time::HiRes::gettimeofday();
+ ok $two[0] > $one[0] || ($two[0] == $one[0] && $two[1] > $one[1])
+-	or note "@two is not greater than @one";
++	or print("# @two is not greater than @one\n");
+ 
+ my $f = Time::HiRes::time();
+-ok $f > 850_000_000 or note "$f too small";
+-ok $f - $two[0] < 2 or note "$f - $two[0] >= 2";
++ok $f > 850_000_000 or print("# $f too small\n");
++ok $f - $two[0] < 2 or print("# $f - $two[0] >= 2\n");
+ 
+ my $r = [Time::HiRes::gettimeofday()];
+ my $g = Time::HiRes::tv_interval $r;
+-ok $g < 2 or note $g;
++ok $g < 2 or print("# $g\n");
+ 
+ 1;
+--- dist/Time-HiRes/t/itimer.t
++++ dist/Time-HiRes/t/itimer.t
+@@ -25,7 +25,7 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 2;
++use Test::More tests => 2;
+ use t::Watchdog;
+ 
+ my $limit = 0.25; # 25% is acceptable slosh for testing timers
+@@ -35,11 +35,11 @@
+ 
+ $SIG{VTALRM} = sub {
+     $i ? $i-- : Time::HiRes::setitimer(&Time::HiRes::ITIMER_VIRTUAL, 0);
+-    note "Tick! $i ", Time::HiRes::tv_interval($r);
++    printf("# Tick! $i %s\n", Time::HiRes::tv_interval($r));
+ };	
+ 
+-note "setitimer: ", join(" ",
+-    Time::HiRes::setitimer(&Time::HiRes::ITIMER_VIRTUAL, 0.5, 0.4));
++printf("# setitimer: %s\n", join(" ",
++       Time::HiRes::setitimer(&Time::HiRes::ITIMER_VIRTUAL, 0.5, 0.4)));
+ 
+ # Assume interval timer granularity of $limit * 0.5 seconds.  Too bold?
+ my $virt = Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL);
+@@ -47,19 +47,19 @@
+    "ITIMER_VIRTUAL defined with sufficient granularity")
+    or diag "virt=" . (defined $virt ? $virt : 'undef');
+ 
+-note "getitimer: ", join(" ",
+-    Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL));
++printf("# getitimer: %s\n", join(" ",
++       Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL)));
+ 
+ while (Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL)) {
+     my $j;
+     for (1..1000) { $j++ } # Can't be unbreakable, must test getitimer().
+ }
+ 
+-note "getitimer: ", join(" ",
+-    Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL));
++printf("# getitimer: %s\n", join(" ",
++       Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL)));
+ 
+ $virt = Time::HiRes::getitimer(&Time::HiRes::ITIMER_VIRTUAL);
+-note "at end, i=$i";
++print("# at end, i=$i\n");
+ is($virt, 0, "time left should be zero");
+ 
+ $SIG{VTALRM} = 'DEFAULT';
+--- dist/Time-HiRes/t/nanosleep.t
++++ dist/Time-HiRes/t/nanosleep.t
+@@ -8,7 +8,7 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 3;
++use Test::More tests => 3;
+ use t::Watchdog;
+ 
+ eval { Time::HiRes::nanosleep(-5) };
+@@ -21,7 +21,7 @@
+ Time::HiRes::nanosleep(10_000_000);
+ my $three = CORE::time;
+ ok $one == $two || $two == $three
+-    or note "slept too long, $one $two $three";
++    or print("# slept too long, $one $two $three\n");
+ 
+ SKIP: {
+     skip "no gettimeofday", 1 unless &Time::HiRes::d_gettimeofday;
+@@ -29,7 +29,7 @@
+     Time::HiRes::nanosleep(500_000_000);
+     my $f2 = Time::HiRes::time();
+     my $d = $f2 - $f;
+-    ok $d > 0.4 && $d < 0.9 or note "slept $d secs $f to $f2";
++    ok $d > 0.4 && $d < 0.9 or print("# slept $d secs $f to $f2\n");
+ }
+ 
+ 1;
+--- dist/Time-HiRes/t/sleep.t
++++ dist/Time-HiRes/t/sleep.t
+@@ -1,6 +1,6 @@
+ use strict;
+ 
+-use Test::More 0.82 tests => 4;
++use Test::More tests => 4;
+ use t::Watchdog;
+ 
+ BEGIN { require_ok "Time::HiRes"; }
+@@ -26,12 +26,12 @@
+ SKIP: {
+     skip "no subsecond alarm", 2 unless $can_subsecond_alarm;
+     my $f = Time::HiRes::time; 
+-    note "time...$f";
++    print("# time...$f\n");
+     ok 1;
+ 
+     my $r = [Time::HiRes::gettimeofday()];
+     Time::HiRes::sleep (0.5);
+-    note "sleep...", Time::HiRes::tv_interval($r);
++    printf("# sleep...%s\n", Time::HiRes::tv_interval($r));
+     ok 1;
+ }
+ 
+--- dist/Time-HiRes/t/stat.t
++++ dist/Time-HiRes/t/stat.t
+@@ -13,7 +13,7 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 43;
++use Test::More tests => 43;
+ use t::Watchdog;
+ 
+ my @atime;
+@@ -42,8 +42,8 @@
+     is_deeply $lstat, $stat;
+ }
+ 1 while unlink $$;
+-note "mtime = @mtime";
+-note "atime = @atime";
++print("# mtime = @mtime\n");
++print("# atime = @atime\n");
+ my $ai = 0;
+ my $mi = 0;
+ my $ss = 0;
+@@ -63,7 +63,7 @@
+ 	$ss++;
+     }
+ }
+-note "ai = $ai, mi = $mi, ss = $ss";
++print("# ai = $ai, mi = $mi, ss = $ss\n");
+ # Need at least 75% of monotonical increase and
+ # 20% of subsecond results. Yes, this is guessing.
+ SKIP: {
+--- dist/Time-HiRes/t/time.t
++++ dist/Time-HiRes/t/time.t
+@@ -1,6 +1,6 @@
+ use strict;
+ 
+-use Test::More 0.82 tests => 2;
++use Test::More tests => 2;
+ use t::Watchdog;
+ 
+ BEGIN { require_ok "Time::HiRes"; }
+@@ -16,8 +16,8 @@
+     # (CORE::time() may be rounding down, up, or closest),
+     # but allow 10% of slop.
+     ok abs($s) / $n <= 1.10
+-	or note "Time::HiRes::time() not close to CORE::time()";
+-    note "s = $s, n = $n, s/n = ", abs($s)/$n;
++	or print("# Time::HiRes::time() not close to CORE::time()\n");
++    printf("# s = $s, n = $n, s/n = %s\n", abs($s)/$n);
+ }
+ 
+ 1;
+--- dist/Time-HiRes/t/tv_interval.t
++++ dist/Time-HiRes/t/tv_interval.t
+@@ -1,10 +1,10 @@
+ use strict;
+ 
+-use Test::More 0.82 tests => 2;
++use Test::More tests => 2;
+ 
+ BEGIN { require_ok "Time::HiRes"; }
+ 
+ my $f = Time::HiRes::tv_interval [5, 100_000], [10, 500_000];
+-ok abs($f - 5.4) < 0.001 or note $f;
++ok abs($f - 5.4) < 0.001 or print("# $f\n");
+ 
+ 1;
+--- dist/Time-HiRes/t/ualarm.t
++++ dist/Time-HiRes/t/ualarm.t
+@@ -8,7 +8,7 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 12;
++use Test::More tests => 12;
+ use t::Watchdog;
+ 
+ use Config;
+@@ -24,13 +24,13 @@
+     $tick = 0; Time::HiRes::ualarm(10_000); while ($tick == 0) { }
+     my $three = CORE::time;
+     ok $one == $two || $two == $three
+-	or note "slept too long, $one $two $three";
+-    note "tick = $tick, one = $one, two = $two, three = $three";
++	or print("# slept too long, $one $two $three\n");
++    print("# tick = $tick, one = $one, two = $two, three = $three\n");
+ 
+     $tick = 0; Time::HiRes::ualarm(10_000, 10_000); while ($tick < 3) { }
+     ok 1;
+     Time::HiRes::ualarm(0);
+-    note "tick = $tick, one = $one, two = $two, three = $three";
++    print("# tick = $tick, one = $one, two = $two, three = $three\n");
+ }
+ 
+ eval { Time::HiRes::ualarm(-4) };
+@@ -59,24 +59,24 @@
+ 	my $alarmed = 0;
+ 	local $SIG{ ALRM } = sub { $alarmed++ };
+ 	my $t0 = Time::HiRes::time();
+-	note "t0 = $t0";
+-	note "ualarm($n)";
++	print("# t0 = $t0\n");
++	print("# ualarm($n)\n");
+ 	Time::HiRes::ualarm($n); 1 while $alarmed == 0;
+ 	my $t1 = Time::HiRes::time();
+-	note "t1 = $t1";
++	print("# t1 = $t1\n");
+ 	my $dt = $t1 - $t0;
+-	note "dt = $dt";
++	print("# dt = $dt\n");
+ 	my $r = $dt / ($n/1e6);
+-	note "r = $r";
++	print("# r = $r\n");
+ 	$ok =
+ 	    ($n < 1_000_000 || # Too much noise.
+ 	     ($r >= 0.8 && $r <= 1.6));
+ 	last if $ok;
+ 	my $nap = bellish(3, 15);
+-	note sprintf "Retrying in %.1f seconds...\n", $nap;
++	printf("# Retrying in %.1f seconds...\n", $nap);
+ 	Time::HiRes::sleep($nap);
+     }
+-    ok $ok or note "ualarm($n) close enough";
++    ok $ok or print("# ualarm($n) close enough\n");
+ }
+ 
+ {
+@@ -93,12 +93,12 @@
+     } while $t1 - $t0 <= 0.3;
+     my $got1 = Time::HiRes::ualarm(0);
+ 
+-    note "t0 = $t0";
+-    note "got0 = $got0";
+-    note "t1 = $t1";
+-    note "t1 - t0 = ", ($t1 - $t0);
+-    note "got1 = $got1";
+-    ok $got0 == 0 or note $got0;
++    print("# t0 = $t0\n");
++    print("# got0 = $got0\n");
++    print("# t1 = $t1\n");
++    printf("# t1 - t0 = %s\n", ($t1 - $t0));
++    print("# got1 = $got1\n");
++    ok $got0 == 0 or print("# $got0\n");
+     SKIP: {
+ 	skip "alarm interval exceeded", 2 if $t1 - $t0 >= 0.5;
+ 	ok $got1 > 0;
+@@ -106,7 +106,7 @@
+     }
+     ok $got1 < 300_000;
+     my $got2 = Time::HiRes::ualarm(0);
+-    ok $got2 == 0 or note $got2;
++    ok $got2 == 0 or print("# $got2\n");
+ }
+ 
+ 1;
+--- dist/Time-HiRes/t/usleep.t
++++ dist/Time-HiRes/t/usleep.t
+@@ -8,7 +8,7 @@
+     }
+ }
+ 
+-use Test::More 0.82 tests => 6;
++use Test::More tests => 6;
+ use t::Watchdog;
+ 
+ eval { Time::HiRes::usleep(-2) };
+@@ -23,7 +23,7 @@
+ Time::HiRes::usleep(10_000);
+ my $three = CORE::time;
+ ok $one == $two || $two == $three
+-or note "slept too long, $one $two $three";
++or print("# slept too long, $one $two $three\n");
+ 
+ SKIP: {
+     skip "no gettimeofday", 1 unless &Time::HiRes::d_gettimeofday;
+@@ -31,7 +31,7 @@
+     Time::HiRes::usleep(500_000);
+     my $f2 = Time::HiRes::time();
+     my $d = $f2 - $f;
+-    ok $d > 0.4 && $d < 0.9 or note "slept $d secs $f to $f2";
++    ok $d > 0.4 && $d < 0.9 or print("# slept $d secs $f to $f2\n");
+ }
+ 
+ SKIP: {
+@@ -39,7 +39,7 @@
+     my $r = [ Time::HiRes::gettimeofday() ];
+     Time::HiRes::sleep( 0.5 );
+     my $f = Time::HiRes::tv_interval $r;
+-    ok $f > 0.4 && $f < 0.9 or note "slept $f instead of 0.5 secs.";
++    ok $f > 0.4 && $f < 0.9 or print("# slept $f instead of 0.5 secs.\n");
+ }
+ 
+ SKIP: {
+@@ -59,7 +59,7 @@
+ 
+     SKIP: {
+ 	skip $msg, 1 unless $td < $sleep * (1 + $limit);
+-	ok $a < $limit or note $msg;
++	ok $a < $limit or print("# $msg\n");
+     }
+ 
+     $t0 = Time::HiRes::gettimeofday();
+@@ -71,7 +71,7 @@
+ 
+     SKIP: {
+ 	skip $msg, 1 unless $td < $sleep * (1 + $limit);
+-	ok $a < $limit or note $msg;
++	ok $a < $limit or print("# $msg\n");
+     }
+ }
+ 
+--- dist/Time-HiRes/t/utime.t
++++ dist/Time-HiRes/t/utime.t
+@@ -0,0 +1,101 @@
++use strict;
++
++BEGIN {
++    require Time::HiRes;
++    require Test::More;
++    unless(&Time::HiRes::d_hires_utime) {
++	Test::More::plan(skip_all => "no hires_utime");
++    }
++    unless (&Time::HiRes::d_futimens) {
++	Test::More::plan(skip_all => "no futimens()");
++    }
++    unless (&Time::HiRes::d_utimensat) {
++	Test::More::plan(skip_all => "no utimensat()");
++    }
++    if ($^O eq 'gnukfreebsd') {
++	Test::More::plan(skip_all => "futimens() and utimensat() not working in $^O");
++    }
++}
++
++use Test::More tests => 18;
++use t::Watchdog;
++use File::Temp qw( tempfile );
++
++use Config;
++
++# Cygwin timestamps have less precision.
++my $atime = $^O eq 'cygwin' ? 1.1111111 : 1.111111111;
++my $mtime = $^O eq 'cygwin' ? 2.2222222 : 2.222222222;
++
++print "# utime \$fh\n";
++{
++	my ($fh, $filename) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++	is Time::HiRes::utime($atime, $mtime, $fh), 1, "One file changed";
++	my ($got_atime, $got_mtime) = ( Time::HiRes::stat($filename) )[8, 9];
++	is $got_atime, $atime, "atime set correctly";
++	is $got_mtime, $mtime, "mtime set correctly";
++};
++
++print "#utime \$filename\n";
++{
++	my ($fh, $filename) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++	is Time::HiRes::utime($atime, $mtime, $filename), 1, "One file changed";
++	my ($got_atime, $got_mtime) = ( Time::HiRes::stat($fh) )[8, 9];
++	is $got_atime, $atime, "atime set correctly";
++	is $got_mtime, $mtime, "mtime set correctly";
++};
++
++print "utime \$filename and \$fh\n";
++{
++	my ($fh1, $filename1) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++	my ($fh2, $filename2) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++	is Time::HiRes::utime($atime, $mtime, $filename1, $fh2), 2, "Two files changed";
++	{
++		my ($got_atime, $got_mtime) = ( Time::HiRes::stat($fh1) )[8, 9];
++		is $got_atime, $atime, "File 1 atime set correctly";
++		is $got_mtime, $mtime, "File 1 mtime set correctly";
++	}
++	{
++		my ($got_atime, $got_mtime) = ( Time::HiRes::stat($filename2) )[8, 9];
++		is $got_atime, $atime, "File 2 atime set correctly";
++		is $got_mtime, $mtime, "File 2 mtime set correctly";
++	}
++};
++
++print "# utime undef sets time to now\n";
++{
++	my ($fh1, $filename1) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++	my ($fh2, $filename2) = tempfile( "Time-HiRes-utime-XXXXXXXXX", UNLINK => 1 );
++
++	my $now = Time::HiRes::time;
++	is Time::HiRes::utime(undef, undef, $filename1, $fh2), 2, "Two files changed";
++
++	{
++		my ($got_atime, $got_mtime) = ( Time::HiRes::stat($fh1) )[8, 9];
++		cmp_ok abs( $got_atime - $now), '<', 0.1, "File 1 atime set correctly";
++		cmp_ok abs( $got_mtime - $now), '<', 0.1, "File 1 mtime set correctly";
++	}
++	{
++		my ($got_atime, $got_mtime) = ( Time::HiRes::stat($filename2) )[8, 9];
++		cmp_ok abs( $got_atime - $now), '<', 0.1, "File 2 atime set correctly";
++		cmp_ok abs( $got_mtime - $now), '<', 0.1, "File 2 mtime set correctly";
++	}
++};
++
++print "# negative atime dies\n";
++{
++	eval { Time::HiRes::utime(-4, $mtime) };
++	like $@, qr/::utime\(-4, 2\.22222\): negative time not invented yet/,
++		"negative time error";
++};
++
++print "# negative mtime dies;\n";
++{
++	eval { Time::HiRes::utime($atime, -4) };
++	like $@, qr/::utime\(1.11111, -4\): negative time not invented yet/,
++		"negative time error";
++};
++
++done_testing;
++
++1;

@@ -5,6 +5,14 @@ PortGroup               compiler_blacklist_versions 1.0
 PortGroup               active_variants 1.1
 PortGroup               conflicts_build 1.0
 
+if {[file exists ${prefix}/etc/macports/locales.tcl]} {
+    # experimental feature to cut down the NLS/locale files, which take up over 50% of
+    # the install footprint for VLC. This feature loads the locale_select PortGroup
+    # if its configuration file exist; a variant is then added which prunes all translations from
+    # ${destroot}${prefix}/share/locale except those whitelisted in etc/macports/locales.tcl .
+    PortGroup           locale_select 1.0
+}
+
 name                    VLC
 
 categories              multimedia devel
@@ -25,15 +33,19 @@ subport lib${name} {
     long_description    libVLC is the core engine and the interface to the multimedia \
                         framework on which VLC media player is based.  It allows developers \
                         to create a wide range of multimedia applications using the VLC features.
-    conflicts           ${name} VLC-devel libVLC-devel
+    conflicts           ${name} VLC-devel
     homepage            http://www.videolan.org/vlc/libvlc.html
 }
 
-subport ffmpeg-VLC {}
-set FFMPEG_VLC_PREFIX   ${prefix}/lib/vlc/ffmpeg
+set use_ffmpeg_VLC      no
+
+if {[tbool use_ffmpeg_VLC]} {
+    subport ffmpeg-VLC {}
+    set FFMPEG_VLC_PREFIX   ${prefix}/lib/vlc/ffmpeg
+}
 
 if {${subport} eq ${name}} {
-    conflicts           lib${name} libVLC-devel VLC-devel
+    conflicts           lib${name} VLC-devel
 }
 
 # VLC-2.1 and later are x86_64-only: https://trac.videolan.org/vlc/ticket/8161
@@ -44,9 +56,9 @@ supported_archs         x86_64
 ###################  ports VLC and libVLC  ###################
 ##
 if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
-    version             2.2.4
-    revision            8
-    license             GPL-2
+    version             2.2.6
+    revision            1
+    license             GPL-2+
 
     platforms           darwin
 
@@ -54,8 +66,8 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     distname            vlc-${version}
     use_xz              yes
 
-    checksums           rmd160  2fe178bb9a4b2ad5ca0294d3e52ceb992b22e8ee \
-                        sha256  1632e91d2a0087e0ef4c3fb4c95c3c2890f7715a9d1d43ffd46329f428cf53be
+    checksums           rmd160  b2727834bcbbf0d274e3a0b4a3317f3b914f9ad4 \
+                        sha256  c403d3accd9a400eb2181c958f3e7bc5524fe5738425f4253d42883b425a42a8
 
     if {[info exist ::env(MACPORTS_COMPRESS_WORKDIR)] && $::env(MACPORTS_COMPRESS_WORKDIR)} {
         # Enable HFS compression.
@@ -67,8 +79,14 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
     depends_build       port:pkgconfig
 
-    depends_lib         port:ffmpeg-VLC \
-                        port:a52dec \
+    if {[tbool use_ffmpeg_VLC]} {
+        depends_lib-append \
+                        port:ffmpeg-VLC
+    } else {
+        depends_lib-append \
+                        port:ffmpeg
+    }
+    depends_lib-append  port:a52dec \
                         port:avahi \
                         port:bzip2 \
                         port:faad2 \
@@ -189,44 +207,51 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                         static_assert.patch \
                         no-sparkle.patch \
                         patch-vlc-no-O4.diff \
-                        patch-ffmpegVLC.diff \
                         patch-soundfont-path.diff
+    if {[tbool use_ffmpeg_VLC]} {
+        patchfiles-append \
+                        patch-ffmpegVLC.diff
+    } else {
+        patchfiles-append \
+                        patch-ffmpeg3-compat.diff
+    }
 
     post-patch {
         if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} == "libc++"} {
             reinplace "s:-lstdc\+\+:-lc++:" \
-                ${worksrcpath}/configure.ac \
                 ${worksrcpath}/modules/access/Makefile.am
         }
 
         reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/modules/codec/fluidsynth.c
 
-        # patch source using ffmpeg to use the correct header file locations
-        foreach dir {libavcodec libavformat libavresample libavutil libpostproc libswresample libswscale} {
-            foreach module {access codec/avcodec demux/avformat hw/vdpau packetizer video_chroma} {
-                foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.c] {
-                    reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
+        if {[tbool use_ffmpeg_VLC]} {
+            # patch source using ffmpeg to use the correct header file locations
+            foreach dir {libavcodec libavformat libavresample libavutil libpostproc libswresample libswscale} {
+                foreach module {access codec/avcodec demux/avformat hw/vdpau packetizer video_chroma} {
+                    foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.c] {
+                        reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
+                    }
+                    foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.h] {
+                        reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
+                    }
                 }
-                foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.h] {
-                    reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
-                }
+                reinplace "s|${dir}/|${dir}-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
             }
-            reinplace "s|${dir}/|${dir}-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
+            reinplace "s|postproc/|postproc-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
+            reinplace "s|libpostproc/|libpostproc-VLC/|g" ${worksrcpath}/modules/video_filter/postproc.c
+            reinplace "s|HAVE_LIBAVUTIL_AV|HAVE_LIBAVUTIL_VLC_AV|g" \
+                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
+                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
+            reinplace "s|HAVE_LIBAVFORMAT_AV|HAVE_LIBAVFORMAT_VLC_AV|g" \
+                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
+                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
+            reinplace "s|HAVE_LIBAVCODEC_AV|HAVE_LIBAVCODEC_VLC_AV|g" \
+                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
+                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
+            reinplace "s|HAVE_LIBSWSCALE_SW|HAVE_LIBSWSCALE_VLC_SW|g" \
+                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
+                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
         }
-        reinplace "s|postproc/|postproc-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
-        reinplace "s|libpostproc/|libpostproc-VLC/|g" ${worksrcpath}/modules/video_filter/postproc.c
-        reinplace "s|HAVE_LIBAVUTIL_AV|HAVE_LIBAVUTIL_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-        reinplace "s|HAVE_LIBAVFORMAT_AV|HAVE_LIBAVFORMAT_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-        reinplace "s|HAVE_LIBAVCODEC_AV|HAVE_LIBAVCODEC_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-        reinplace "s|HAVE_LIBSWSCALE_SW|HAVE_LIBSWSCALE_VLC_SW|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
     }
     post-configure {
         system -W ${worksrcpath} "patch -Np0 -i ${filespath}/patch-static_assert.diff"
@@ -240,9 +265,11 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
     configure.env-append \
                         CXXCPP="${configure.cxx} -E"
-    # splice in ffmpeg-VLC's pkgconfig path, hoping that PKG_CONFIG_PATH hasn't been set by anyone else
-    configure.env-append \
+    if {[tbool use_ffmpeg_VLC]} {
+        # splice in ffmpeg-VLC's pkgconfig path, hoping that PKG_CONFIG_PATH hasn't been set by anyone else
+        configure.env-append \
                         PKG_CONFIG_PATH=${FFMPEG_VLC_PREFIX}/lib/pkgconfig
+    }
     build.args-append   DESTDIR=${worksrcpath}/dest_ignore V=1
 
     # gl.c:121:3: error: Platform not recognized.
@@ -439,8 +466,8 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             description {Enable all variants (except freerdp, currently)} {}
     }
 
-    # this patchfile can probably go with VLC 2.2.2, or should be reviewed then.
-    # update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
+#     # this patchfile can probably go with VLC 2.2.2, or should be reviewed then.
+#     # update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
     patchfiles-append           patch-for-lua52.diff
 
     # make 10.12 and later ignore all QTKit code in modules/gui/macosx/open.m
@@ -452,14 +479,9 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             default_variants-append +qtkit
         }
 
-        configure.args-replace  --disable-macosx-eyetv --enable-macosx-eyetv
-
-        if {${subport} ne "lib${name}"} {
-            configure.args-replace  --disable-macosx-vlc-app --enable-macosx-vlc-app
-        }
+        patchfiles-append       patch-use-NSGetEnviron.diff
 
         post-patch {
-            reinplace "s/Appkit/AppKit/" ${worksrcpath}/configure.ac
             reinplace "/Sparkle.framework/d" \
                 ${worksrcpath}/extras/package/macosx/vlc.xcodeproj/project.pbxproj
             reinplace "/SDKROOT/d" \
@@ -470,14 +492,6 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             reinplace "s:LD_LIBRARY_PATH:DYLD_LIBRARY_PATH:g" \
                 ${worksrcpath}/Makefile.am
 
-            reinplace "/argv/s/environ/*_NSGetEnviron()/" \
-                ${worksrcpath}/modules/misc/inhibit/xdg.c \
-                ${worksrcpath}/modules/stream_filter/decomp.c
-
-            reinplace "s/extern char \\*\\*environ;/#include <crt_externs.h>/" \
-                ${worksrcpath}/modules/misc/inhibit/xdg.c \
-                ${worksrcpath}/modules/stream_filter/decomp.c
-
             if {![file exists ${worksrcpath}/contrib/BGHUDAppKit.framework]} {
                 ln -s ${frameworks_dir}/BGHUDAppKit.framework ${worksrcpath}/contrib/BGHUDAppKit.framework
             }
@@ -486,8 +500,14 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             file mkdir "${worksrcpath}/contrib/lib"
         }
 
+        configure.args-replace  --disable-macosx-eyetv --enable-macosx-eyetv
+
+        if {${subport} ne "lib${name}"} {
+            configure.args-replace  --disable-macosx-vlc-app --enable-macosx-vlc-app
+        }
+
         post-destroot {
-            eval file delete [glob ${destroot}${prefix}/lib/vlc/plugins/*/*.la]
+            file delete {*}[glob ${destroot}${prefix}/lib/vlc/plugins/*/*.la]
 
             if {[variant_isset qt4] || [variant_isset qt5] || [variant_isset quartz]} {
                 if {${subport} ne "lib${name}"} {
@@ -505,10 +525,20 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                     delete ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/lua
 
                     # http://trac.macports.org/ticket/35131
-                    ln -s ${prefix}/lib ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                    xinstall -m 755 -d ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                    foreach l [glob -nocomplain ${destroot}${prefix}/lib/*] {
+                        ln -s ${prefix}/lib/[file tail ${l}] ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                    }
                     ln -s ${prefix}/lib/vlc/plugins ${destroot}${applications_dir}/VLC.app/Contents/MacOS/plugins
                     ln -s ${prefix}/lib/vlc/lua ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/lua
-                    ln -s ${prefix}/share/locale ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/locale
+                    foreach d [glob -nocomplain ${destroot}${prefix}/share/locale/*] {
+                        set locale [file tail ${d}]
+                        set ldir ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/locale/${locale}/LC_MESSAGES
+                        xinstall -m 755 -d ${ldir}
+                        foreach m [glob -nocomplain ${d}/LC_MESSAGES/*] {
+                            ln -s ${prefix}/share/locale/${locale}/LC_MESSAGES/[file tail ${m}] ${ldir}/
+                        }
+                    }
 
                     # the vlc executable needs to be started with a full path to the app bundle executable
                     # or else the Mac OS X interface will hang beyond even a ^C or ^\ :
@@ -529,179 +559,18 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             system "${prefix}/lib/vlc/vlc-cache-gen -f ${prefix}/lib/vlc"
         }
     }
-# outcomment when the port:fluid-soundfont* ports have been made available
-#     notes-append "MIDI support requires installing one or more SoundFont files,\
-#         in ${prefix}/share/sounds/sf2, for instance from one of the port:fluid-soundfont-* ports"
+    notes-append "MIDI support requires installing one or more SoundFont files,\
+        in ${prefix}/share/sounds/sf2, for instance from port:generaluser-soundfont."
 }
 
 ##
 #################  support port ffmpeg-VLC  ##################
 ##
 if {${subport} eq "ffmpeg-VLC"} {
-    PortGroup           xcodeversion 1.0
-
-    version             2.8.6
-    revision            1
-    license             LGPL-2.1+
-    categories          multimedia
-    maintainers         gmail.com:rjvbertin openmaintainer
-
-    description         Custom FFMpeg 2.8.6 build for port:VLC and port:libVLC.
-    long_description    Custom FFMpeg build for VLC and libVLC v2.2.x . It installs \
-                        a private copy of FFMpeg v2.8.6 .
-
-    platforms           darwin
-    homepage            http://www.ffmpeg.org/
-    master_sites        http://www.ffmpeg.org/releases/
-
-    use_bzip2           yes
-    distname            ffmpeg-${version}
-
-    checksums           rmd160  5b61b6b0521d39ca31dcfb7fff1dfa26d9e7667a \
-                        sha256  40611e329bc354592c6f8f1deb033c31b91f80e91f5707ca4f9afceca78d8e62
-
-    depends_build       port:pkgconfig \
-                        port:gmake
-
-    # libvpx is static only so can be considered a build dependency (#47934)
-
-    depends_build-append \
-                        port:libvpx
-
-    depends_lib         port:lame \
-                        port:libiconv \
-                        port:openjpeg15 \
-                        port:xz \
-                        port:zlib
-
-    build.cmd           ${prefix}/bin/gmake
-    build.env-append    V=1
-
-    #
-    # enable auto configure of asm optimizations
-    # requires Xcode 3.1 or better on Leopard
-    #
-    minimum_xcodeversions {9 3.1}
-
-    if {[lsearch [get_canonical_archs] i386] != -1} {
-        # clang-3.1 hits https://trac.macports.org/ticket/30137 (<rdar://problem/11542429>)
-        # clang-139 hits https://trac.macports.org/ticket/38141
-        compiler.blacklist-append {clang < 422.1.7}
+    if {[catch {source "${portpath}/Portfile.ffmpeg.tcl"} err]} {
+        puts stderr "Error reading Portfile.ffmpeg.tcl: $err"
+        return 1;
     }
-
-    configure.cflags-append -DHAVE_LRINTF ${configure.cppflags}
-    configure.args      --prefix=${FFMPEG_VLC_PREFIX} \
-                        --progs-suffix=-VLC \
-                        --build-suffix=-VLC \
-                        --disable-doc \
-                        --disable-encoder=vorbis \
-                        --enable-libopenjpeg \
-                        --disable-debug \
-                        --disable-avdevice \
-                        --disable-devices \
-                        --disable-avfilter \
-                        --disable-filters \
-                        --disable-protocol=concat \
-                        --disable-bsfs \
-                        --disable-bzlib \
-                        --enable-avresample \
-                        --enable-libmp3lame \
-                        --enable-libvpx \
-                        --disable-libbluray \
-                        --disable-sdl \
-                        --disable-libxcb --disable-libxcb-shm --disable-libxcb-xfixes --disable-libxcb-shape \
-                        --enable-shared --disable-static --enable-pthreads \
-                        --enable-rpath \
-                        --disable-stripping \
-                        --cc=${configure.cc}
-
-    # this is the old gpl2 variant. VLC is GPL2'ed, so we can just as well build ffmpeg
-    # with these components.
-    configure.args-append \
-                        --enable-gpl \
-                        --enable-postproc
-
-    configure.args-append \
-                        --arch=${configure.build_arch}
-    configure.env-append \
-                        ASFLAGS='[get_canonical_archflags]'
-    if {${build_arch} eq "x86_64"} {
-        depends_build-append \
-                        port:yasm
-        configure.args-append \
-                        --enable-yasm
-    }
-
-    platform darwin {
-        if {${os.major} < 9} {
-            configure.args-append --disable-asm
-        }
-
-        # VDA (video hardware acceleration, mostly H264) is only supported on 10.6.3+ up to (excluding) 10.11.
-        #if {(${os.major} > 10 || (${os.major} == 10 && ${os.minor} >= 3)) && (${os.major} < 15)}
-        # Due to a bug in ffmpeg(?), we have to enable VDA on 10.11 as well, even though it shouldn't be supported.
-        # More information: https://github.com/mpv-player/mpv/issues/2299
-        if {${os.major} > 10 || (${os.major} == 10 && ${os.minor} >= 3)} {
-            configure.args-delete --disable-vda
-            configure.args-append --enable-vda
-        }
-
-        # VideotoolBox, a new hardware acceleration framework, is supported on 10.8+ and "here to stay".
-        # It provides support for H264, H263, MPEG1, MPEG2 and MPEG4.
-        if {${os.major} > 11} {
-            configure.args-delete --disable-videotoolbox
-            configure.args-append --enable-videotoolbox
-        }
-
-        # Apple GCC has problems with SIMD intrinsics and -Werror=no-missing-prototypes.
-        if {${os.major} < 11} {
-            patchfiles-append patch-configure-no-error-on-missing-prototypes.diff
-        }
-
-        # kCVPixelFormatType_OneComponent8 used in avfoundation indev is only available on 10.8+
-        if {${os.major} < 12} {
-            configure.args-append --disable-indev=avfoundation
-        }
-    }
-
-    #
-    # configure isn't autoconf and they do use a dep cache
-    #
-
-    platform darwin 8 {
-        post-patch {
-            reinplace "s:,-compatibility_version,$\(LIBMAJOR\)::" ${worksrcpath}/configure
-        }
-    }
-
-    destroot.target     install-libs install-headers
-
-    post-destroot {
-        file delete -force ${destroot}${prefix}/share/examples
-        # We need to make sure that the linker will use our libraries and not one
-        # from a location like ${prefix}/lib . That's why we use --build-suffix, but
-        # that still requires us to provide pkg-config files with the standard names:
-        foreach pc [glob ${destroot}${FFMPEG_VLC_PREFIX}/lib/pkgconfig/*.pc] {
-            set standardname [strsed ${pc} "s/-VLC.pc/.pc/"]
-            ln -s [file tail ${pc}] ${standardname}
-        }
-        # oblige dependent code to include files from our own renamed header file directories, so it
-        # cannot include mismatching headers by accident (e.g. those from ffmpeg 3.x).
-        foreach dir {libavcodec libavformat libavresample libavutil libpostproc libswresample libswscale} {
-            file rename ${destroot}${FFMPEG_VLC_PREFIX}/include/${dir} ${destroot}${FFMPEG_VLC_PREFIX}/include/${dir}-VLC
-        }
-        foreach dir {libavcodec libavformat libavresample libavutil libpostproc libswresample libswscale} {
-            foreach header [glob -nocomplain ${destroot}${FFMPEG_VLC_PREFIX}/include/*/*.h] {
-                reinplace "s|${dir}/|${dir}-VLC/|g" ${header}
-            }
-        }
-        # packageable: ${destroot}${FFMPEG_VLC_PREFIX}/{include,lib/lib*VLC.dylib,lib/pkgconfig}
-    }
-
-    livecheck.type      regex
-    livecheck.url       ${master_sites}
-    livecheck.regex     "ffmpeg-(\\d+(?:\\.\\d+)*)${extract.suffix}"
-
 }
 
 # kate: backspace-indents true; indent-pasted-text true; indent-width 4; keep-extra-spaces true; remove-trailing-spaces modified; replace-tabs true; replace-tabs-save true; syntax Tcl/Tk; tab-indents true; tab-width 4;

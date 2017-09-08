@@ -493,9 +493,9 @@ variant universal {
             copy ${dir1}/${fl} ${tempfile1}
             copy ${dir2}/${fl} ${tempfile2}
 
-            reinplace -E {s:-arch +[^ ]+::g} ${tempfile1} ${tempfile2}
-            reinplace {s:-m32::g} ${tempfile1} ${tempfile2}
-            reinplace {s:-m64::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:-arch +[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
+            reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
             if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
                 # modified files are identical

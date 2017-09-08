@@ -72,7 +72,7 @@ proc crossgcc.setup {target version} {
         master_sites    gnu:gcc/gcc-${version}/:gcc
         use_bzip2       yes
 
-        dist_subdir     gcc
+        dist_subdir     gcc[lindex [split ${version} .] 0]
         distfiles       gcc-${version}.tar.bz2:gcc
 
         worksrcdir      gcc-${version}
@@ -226,7 +226,7 @@ proc crossgcc.setup_libc {libc_name libc_version} {
             uplevel {
                 set dnewlib newlib-${crossgcc.libc_version}.tar.gz
 
-                master_sites-append ftp://sources.redhat.com/pub/newlib/:newlib
+                master_sites-append https://sourceware.org/pub/newlib/:newlib
                 distfiles-append ${dnewlib}:newlib
 
                 post-extract {

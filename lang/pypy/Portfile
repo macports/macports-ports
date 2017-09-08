@@ -1,26 +1,24 @@
+
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           bitbucket 1.0
 
 name                pypy
-version             5.7.1
+bitbucket.setup     pypy pypy 5.8.0 {release-pypy${python.branch}-v}
 categories          lang python devel
 license             MIT PSF
 maintainers         {jmr @jmroot} openmaintainer
-description         implementation of Python in Python
-long_description \
-   PyPy is both a reimplementation of Python in Python, and a framework for \
-   implementing interpreters and virtual machines for programming languages, \
-   especially dynamic languages.
 
 platforms           darwin
 
 homepage            http://pypy.org/
-master_sites        https://bitbucket.org/pypy/pypy/downloads/
 use_bzip2           yes
-distname            ${name}2-v${version}-src
-checksums           rmd160 842b110389b57bcb794dde75faade5307316903f \
-                    sha256 d01bee43c6df79f7bbc1149bb3e85f489491fb2358a6a1f9a7f0d6e07715832f
+distname            pypy2-v${version}-src
+bitbucket.tarball_from \
+                    downloads
+checksums           rmd160  02d055ecabd3bc8e8dac6d43db0a170549cadfb6 \
+                    sha256  504c2d522595baf8775ae1045a217a2b120732537861d31b889d47c340b58bd5
 
 depends_build       port:pkgconfig
 depends_lib         port:libffi \
@@ -28,6 +26,7 @@ depends_lib         port:libffi \
                     port:bzip2 \
                     path:lib/libssl.dylib:openssl \
                     port:gettext \
+                    port:gdbm \
                     port:ncurses
 
 patchfiles          darwin.py.diff \
@@ -35,16 +34,50 @@ patchfiles          darwin.py.diff \
                     ffiplatform.py.diff \
                     paths.diff
 
+subport pypy3 {
+    set port_version ${version}
+    version        "${version}-beta"
+    set python.branch 3.5
+    set python.libdir 3
+
+    depends_lib-append port:xz
+    depends_build-replace port:pypy-bootstrap port:pypy
+
+    distname            pypy3-v${port_version}-src
+
+    checksums           rmd160  4d251e8d1b76f99d4d51ef6e231c3e98e2cce782 \
+                        sha256  9d090127335c3c0fd2b14c8835bf91752e62756e55ea06aad3353f24a6854223
+
+    set pypy_c_name pypy3-c
+}
+
+if {$subport == ${name}} {
+    set python.branch 2.7
+    set python.libdir 2.7
+
+
+    set pypy_c_name pypy-c
+}
+
+description         A fast interpreter for Python ${python.branch}
+long_description \
+    PyPy is a replacement for CPython ${python.branch}. The main reason to use it \
+    instead of CPython is speed, as it runs generally faster.
+
 post-patch {
     reinplace "s|__PREFIX__|${prefix}|" ${worksrcpath}/lib_pypy/cffi/ffiplatform.py \
                                         ${worksrcpath}/pypy/tool/cpyext/extbuild.py \
                                         ${worksrcpath}/rpython/translator/platform/distutils_platform.py
+
+    # delete VIM swap files accidentally included with pypy3 up to and
+    # including 5.8.0
+    exec find ${worksrcpath} -name "*.swn" -delete
 }
 
 use_configure       no
 
-# use pypy to build if it's already installed
-if {[file executable ${prefix}/lib/pypy/pypy]} {
+# use pypy to build if it's already installed, and we're not in trace mode
+if {![tbool ports_trace] && [file executable ${prefix}/lib/pypy/pypy]} {
     build.cmd       ${prefix}/lib/pypy/pypy
 } else {
     if {${os.platform} eq "darwin" && ${os.arch} eq "i386" && ![catch {sysctl hw.cpu64bit_capable} is64bit] && $is64bit == 1} {
@@ -93,6 +126,14 @@ build.args          --batch --verbose \
 build.target        ../../rpython/bin/rpython
 build.post_args     targetpypystandalone
 
+destroot.env        ${build.env}
+destroot.dir        ${worksrcpath}/pypy/tool/release
+destroot.args       --builddir ${destroot}${prefix}/lib \
+                    --archive-name ${subport} \
+                    --without-tk
+destroot.target     package.py
+destroot.post_args
+
 # JIT is not available on powerpc at present
 if {${os.arch} ne "i386"} {
     build.args-delete --opt=jit
@@ -102,23 +143,13 @@ if {${os.arch} ne "i386"} {
 post-build {
     # some modules have to be compiled in an extra step
     foreach script {_audioop_build.py _curses_build.py _pwdgrp_build.py _sqlite3_build.py _syslog_build.py} {
-        system -W ${worksrcpath}/lib_pypy "${build.dir}/pypy-c $script"
+        system -W ${worksrcpath}/lib_pypy "${build.dir}/${pypy_c_name} $script"
     }
 }
 
-destroot {
-    xinstall -d ${destroot}${prefix}/lib/${name}/lib-python
-    copy ${worksrcpath}/lib-python/2.7 ${destroot}${prefix}/lib/${name}/lib-python
-    copy ${worksrcpath}/lib_pypy ${worksrcpath}/include \
-         ${destroot}${prefix}/lib/${name}
-    # library search paths changed quite inconveniently such that the binary
-    # won't run if it's in ${prefix}/bin
-    xinstall -m 755 ${build.dir}/pypy-c ${destroot}${prefix}/lib/${name}/pypy
-    xinstall ${build.dir}/libpypy-c.dylib ${destroot}${prefix}/lib/${name}
-    ln -s ${prefix}/lib/${name}/pypy ${destroot}${prefix}/bin
-
-    xinstall -d ${destroot}${prefix}/share/doc/${name}
-    xinstall -W ${worksrcpath} -m 644 README.rst LICENSE ${destroot}${prefix}/share/doc/${name}
+post-destroot {
+    file delete ${destroot}${prefix}/lib/${subport}.tar.bz2
+    ln -s ../lib/${subport}/bin/${subport} ${destroot}${prefix}/bin
 }
 
 variant opt1 description {use optimization level 1 for faster build (but slower execution)} {
@@ -126,7 +157,3 @@ variant opt1 description {use optimization level 1 for faster build (but slower 
     build.args-delete  --opt=3 --opt=jit
     build.args-append  --opt=1
 }
-
-livecheck.type      regex
-livecheck.url       http://pypy.org/download.html
-livecheck.regex     pypy2-v(\[0-9.\]+)-src${extract.suffix}

@@ -251,6 +251,23 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible macOS version"
             }
         }
+    # ugly workaround to allow some C++11-only applications to be built on < 10.9
+    } elseif {${args} eq "wxWidgets-3.0-cxx11"} {
+        global cxx_stdlib
+        wxWidgets.name      "wxWidgets"
+        if {${cxx_stdlib} eq "libstdc++"} {
+            wxWidgets.version   "3.0-cxx11"
+            wxWidgets.port      "wxWidgets-3.0-cxx11"
+        } else {
+            wxWidgets.version   "3.0"
+            wxWidgets.port      "wxWidgets-3.0"
+        }
+        if {${os.major} < 9} {
+            pre-fetch {
+                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
+                return -code error "incompatible macOS version"
+            }
+        }
     # temporary development version of wxWidgets 3.0.x
     } elseif {${args} eq "wxWidgets-3.0-devel"} {
         wxWidgets.name      "wxWidgets"

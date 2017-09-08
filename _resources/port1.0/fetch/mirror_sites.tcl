@@ -1,7 +1,7 @@
-# List of master site classes for use in Portfiles
-# Most of these are taken shamelessly from FreeBSD.
+# List of master site classes for use in Portfiles.
+# Most of these were originally taken from FreeBSD.
 #
-# Appending :nosubdir as a tag to a mirror, means that
+# Appending :nosubdir as a tag to a mirror means that
 # the portfetch target will NOT append a subdirectory to
 # the mirror site.
 #
@@ -42,7 +42,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.mirror.euserv.net/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
@@ -299,7 +298,7 @@ set portfetch::mirror_sites::sites(kde) {
 }
 
 set portfetch::mirror_sites::sites(macports) {
-    http://svn.macports.org/repository/macports/distfiles/
+    https://svn.macports.org/repository/macports/distfiles/
 }
 
 global os.platform os.major
@@ -378,24 +377,48 @@ set portfetch::mirror_sites::sites(netbsd) {
 }
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
+# https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
 set portfetch::mirror_sites::sites(nongnu) {
-    http://mirror.cc.columbia.edu/pub/software/gnu/non-gnu/
-    ftp://ftp.funet.fi/pub/gnu/ftp.gnu.org/non-gnu/
-    http://ftp.gnu.org/pub/gnu/non-gnu/
-    ftp://ftp.gnu.org/pub/gnu/non-gnu/
-    http://download-mirror.savannah.gnu.org/releases/
-    http://mirrors.ibiblio.org/gnu/ftp/non-gnu/
-    http://mirror.internode.on.net/pub/gnu/non-gnu/
-    ftp://ftp.kddlabs.co.jp/pub/gnu/non-gnu/
-    ftp://ftp.lip6.fr/pub/gnu/non-gnu/
-    http://ftp.twaren.net/Unix/NonGNU/
-    ftp://ftp.twaren.net/Unix/NonGNU/
-    http://savannah.c3sl.ufpr.br/
-    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
-    ftp://ftp.unicamp.br/pub/gnu/non-gnu/
-    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
+    http://babyname.tips/mirrors/nongnu/
+    http://mirror.netcologne.de/savannah/
+    ftp://mirror.netcologne.de/savannah/
+    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    ftp://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    http://mirror.infotronik.hu/mirrors/pub/gnusavannah/
+    http://mirror1.hostiran.ir/gnu/gnu-savannah/
+    http://download-mirror.savannah.gnu.org/releases/
+    http://nongnu.askapache.com/
+    http://savannah.c3sl.ufpr.br/
+    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
+    http://mirror.lihnidos.org/GNU/savannah/
+    http://mirrors.up.pt/pub/nongnu/
+    https://mirrors.up.pt/pub/nongnu/
+    ftp://mirrors.up.pt/pub/nongnu/
+    http://nongnu.uib.no/
+    ftp://nongnu.uib.no/pub/nongnu/
+    http://mirror.rackdc.com/savannah/
+    http://ftp.igh.cnrs.fr/pub/nongnu/
+    ftp://ftp.igh.cnrs.fr/pub/nongnu/
+    http://savannah.spinellicreations.com/
+    ftp://spinellicreations.com/gnu_dot_org_savannah_mirror/
+    http://gnu.mirrors.pair.com/savannah/savannah/
+    http://www.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    ftp://ftp.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    http://savannah-nongnu-org.ip-connect.vn.ua/
+    ftp://savannah-nongnu-org.ip-connect.vn.ua/mirror/savannah.nongnu.org/
+    http://mirror.cedia.org.ec/nongnu/
+    ftp://mirror.cedia.org.ec/nongnu/
+    ftp://ftp.yzu.edu.tw/nongnu/
+    http://ftp.yzu.edu.tw/nongnu/
+    http://mirror6.layerjet.com/nongnu/
+    http://mirror.easyname.at/nongnu/
+    ftp://mirror.easyname.at/nongnu/
+    http://mirror2.klaus-uwe.me/nongnu/
+    ftp://mirror2.klaus-uwe.me/nongnu/
+    http://ftp.acc.umu.se/mirror/gnu.org/savannah/
+    http://www.namesdir.com/mirrors/nongnu/
 }
 
 set portfetch::mirror_sites::sites(openbsd) {
@@ -510,7 +533,9 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
+    http://ayera.dl.sourceforge.net/
     http://cytranet.dl.sourceforge.net/
+    http://excellmedia.dl.sourceforge.net/
     http://freefr.dl.sourceforge.net/
     http://iweb.dl.sourceforge.net/
     http://jaist.dl.sourceforge.net/
@@ -521,10 +546,12 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://netassist.dl.sourceforge.net/
     http://netcologne.dl.sourceforge.net/
     http://netix.dl.sourceforge.net/
+    http://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-sea2.dl.sourceforge.net/
     http://tenet.dl.sourceforge.net/
+    http://svwh.dl.sourceforge.net/
     http://ufpr.dl.sourceforge.net/
 }
 

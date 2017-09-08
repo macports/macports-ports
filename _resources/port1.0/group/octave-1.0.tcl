@@ -96,7 +96,7 @@ proc octave.setup {module version} {
     configure.env-append        OMP_NUM_THREADS=1
 
     livecheck.type              regex
-    livecheck.url               https://octave.sourceforge.io/${octave.module}
+    livecheck.url               https://octave.sourceforge.io/${octave.module}/
     livecheck.regex             "Package Version:</td><td>(\\d+(\\.\\d+)*)</td>"
 }
 

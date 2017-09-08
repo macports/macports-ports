@@ -38,7 +38,6 @@
 #     ruby.branches    2.3 2.2
 #     ruby.setup       module version type
 #     # - adds subport "rb23-module" and "rb22-module"
-#     # - sets replaced_by to rb23-moudle (apply first item of branches)
 #
 #   2. use ruby.branch
 #
@@ -53,6 +52,8 @@
 #   ruby.branch: select ruby version. 2.3, 2.2, 2.1, 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
+#   ruby.link_binaries_suffix: suffix of commands from rb-foo under
+#        ${prefix}/bin. such as "-2.2" or "-2.1".
 # values:
 #   ruby.bin, ruby.rdoc, ruby.gem ruby.rake: fullpath to commands for ${ruby.branch}.
 #   ruby.suffix: suffix of portname. port:ruby${ruby.suffix} or
@@ -60,8 +61,6 @@
 #   ruby.bindir: install location of commands without suffix from rb-foo.
 #   ruby.gemdir: install location of rubygems.
 #        such as "${prefix}/lib/ruby2.2/gems/2.2.0".
-#   ruby.link_binaries_suffix: suffix of commands from rb-foo under
-#        ${prefix}/bin. such as "-2.2" or "-2.1".
 #   (obsoleted values)
 #   ruby.prog_suffix: use ruby.branch.
 #   ruby.version: use ruby.api_version.
@@ -89,8 +88,8 @@ proc ruby_set_branch {option action args} {
     }
     global prefix ruby.branch \
            ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.bindir ruby.gemdir \
-           ruby.suffix ruby.link_binaries_suffix ruby.prog_suffix \
-           ruby.api_version ruby.lib ruby.archlib ruby.arch
+           ruby.suffix ruby.prog_suffix ruby.api_version ruby.lib \
+           ruby.archlib ruby.arch
     set ruby.bin            ${prefix}/bin/ruby${ruby.branch}
     set ruby.rdoc           ${prefix}/bin/rdoc${ruby.branch}
     set ruby.gem            ${prefix}/bin/gem${ruby.branch}
@@ -105,7 +104,6 @@ proc ruby_set_branch {option action args} {
     if {${ruby.branch} eq "1.8"} {
         set ruby.suffix     ""
     }
-    set ruby.link_binaries_suffix -${ruby.branch}
     set ruby.prog_suffix    ${ruby.branch}
     if {${ruby.branch} eq "1.8"} {
         set ruby.prog_suffix     ""
@@ -141,9 +139,6 @@ set ruby.docs           {}
 set ruby.srcdir         ""
 set ruby.prog_suffix    ""
 
-options ruby.link_binaries
-default ruby.link_binaries yes
-
 # detect setup.rb config option name of --rubyprog.
 # some setup.rb accepts this option by other name, such as --ruby-prog.
 # NOTE: set the value *before ruby.setup* to use ohter name.
@@ -151,6 +146,10 @@ options ruby.config_rubyprog_name
 default ruby.config_rubyprog_name --rubyprog
 
 default ruby.branch         ${ruby.default_branch}
+
+options ruby.link_binaries ruby.link_binaries_suffix
+default ruby.link_binaries yes
+default ruby.link_binaries_suffix {-${ruby.branch}}
 
 # ruby group setup procedure; optional for ruby 1.8 if you want only
 # basic variables, like ruby.lib and ruby.archlib.
@@ -160,7 +159,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global ruby.bin ruby.rdoc ruby.gem ruby.rake ruby.branch
     global ruby.api_version ruby.lib ruby.suffix ruby.bindir ruby.gemdir
     global ruby.module ruby.filename ruby.project ruby.docs ruby.srcdir
-    global ruby.link_binaries_suffix
     # ruby.version is obsoleted. use ruby.gemdir.
     global ruby.prog_suffix
     # from muniversal
@@ -168,6 +166,9 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     global merger_configure_env merger_build_env merger_destroot_env
     # for setup.rb +universal
     global ruby.config_rubyprog_name
+
+    version         ${vers}
+    categories      ruby
 
     # define ruby global names and lists
     # check if module is a list or string
@@ -190,6 +191,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             name rb-[string tolower ${ruby.module}]
         }
         if {[string match rb-* $name]} {
+            # stub port
             set rootname [string range $name 3 end]
             foreach v ${ruby.branches} {
                 set suffix [join [split ${v} .] {}]
@@ -199,19 +201,16 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 }
             }
             if {$subport eq $name} {
-                # set first item in ${ruby.branches} to ruby.branch
-                ruby.branch [lindex [split ${ruby.branches}] 0]
-                set suffix [join [split ${ruby.branch} .] {}]
+                ruby.link_binaries no
                 distfiles
                 supported_archs noarch
-                replaced_by rb${suffix}-${rootname}
-                depends_lib-append port:rb${suffix}-${rootname}
                 use_configure no
                 build {}
                 destroot {
                     xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
                     system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
                 }
+                return
             }
         }
     } else {
@@ -233,9 +232,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     }
 
     set ruby.docs   ${docs}
-
-    version         ${vers}
-    categories      ruby
 
     # set source to rubygems by default for type "gem"
     if {(${type} eq "gem") && (${source} eq "custom")} {
@@ -262,12 +258,6 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 
     distname        ${ruby.filename}-${vers}
     dist_subdir     ruby
-
-    post-extract {
-        # Create the work directory for gem-based ruby ports.
-        file mkdir ${worksrcpath}
-        system "find ${worksrcpath} -type d -name CVS | xargs rm -rf"
-    }
 
     switch -glob ${type} {
         basic_install.rb {

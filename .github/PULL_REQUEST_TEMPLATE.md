@@ -1,9 +1,19 @@
 ###### Description
 
 
+<!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->
 <!-- (delete all below for minor changes) -->
 
+###### Type(s)
+<!-- update (title contains ": U(u)pdate to"), submission (new Portfile) and CVE Identifiers are auto-detected, replace [ ] with [x] to select -->
+- [ ] bugfix
+- [ ] enhancement
+- [ ] security fix
+
 ###### Tested on
+<!-- Generate version information with this command in shell:
+    echo "macOS $(sw_vers -productVersion) $(sw_vers -buildVersion)"; echo "Xcode $(xcodebuild -version | awk '{print $NF}' | tr '\n' ' ')"
+-->
 macOS 10.x
 Xcode 8.x
 

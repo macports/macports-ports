@@ -234,17 +234,19 @@ test $TEST_TYPE $FILE || {
 }
 
 
-echo
-echo "I am going to run ./configure with the following arguments:"
-echo
-echo "  $AUTOGEN_CONFIGURE_ARGS $@"
-echo
-
-if test -z "$*"; then
-    echo "If you wish to pass additional arguments, please specify them "
-    echo "on the $0 command line or set the AUTOGEN_CONFIGURE_ARGS "
-    echo "environment variable."
+if test -z "$NOCONFIGURE"; then
     echo
+    echo "I am going to run ./configure with the following arguments:"
+    echo
+    echo "  $AUTOGEN_CONFIGURE_ARGS $@"
+    echo
+
+    if test -z "$*"; then
+        echo "If you wish to pass additional arguments, please specify them "
+        echo "on the $0 command line or set the AUTOGEN_CONFIGURE_ARGS "
+        echo "environment variable."
+        echo
+    fi
 fi
 
 
@@ -291,24 +293,26 @@ else
     gtkdocize || exit $?
 fi
 
-echo "Running intltoolize ..."
-intltoolize --automake --copy --force || exit $?
-
 # optionally feature autoheader
 ($AUTOHEADER --version)  < /dev/null > /dev/null 2>&1 && $AUTOHEADER || exit 1
 
 $AUTOMAKE --add-missing || exit $?
 $AUTOCONF || exit $?
 
+intltoolize --automake || exit $?
+
+
 cd $ORIGDIR
 
-$srcdir/configure $AUTOGEN_CONFIGURE_ARGS "$@"
-RC=$?
-if test $RC -ne 0; then
-  echo
-  echo "Configure failed or did not finish!"
-  exit $RC
-fi
+if test -z "$NOCONFIGURE"; then
+    $srcdir/configure $AUTOGEN_CONFIGURE_ARGS "$@"
+    RC=$?
+    if test $RC -ne 0; then
+      echo
+      echo "Configure failed or did not finish!"
+      exit $RC
+    fi
 
-echo
-echo "Now type 'make' to compile the $PROJECT."
+    echo
+    echo "Now type 'make' to compile the $PROJECT."
+fi

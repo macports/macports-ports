@@ -1,0 +1,159 @@
+--- configure.ac.orig	2017-06-22 08:15:19.000000000 -0500
++++ configure.ac	2017-06-24 06:25:26.000000000 -0500
+@@ -1702,6 +1702,31 @@
+ ])
+ AC_SUBST(XATTR_LIBS)
+ 
++dnl ***********************************************
++dnl *** Check for gappinfo implementation (GIO) ***
++dnl ***********************************************
++AC_ARG_WITH(appinfo-impl,
++           [AS_HELP_STRING([--appinfo-impl=@<:@native/generic@:>@],
++                           [use appinfo implementation [native]])],
++           [],
++           [with_appinfo_impl='native'])
++
++if test "$with_appinfo_impl" != "native" && test "$with_appinfo_impl" != "generic"; then
++  with_appinfo_impl="native"
++fi
++
++AM_CONDITIONAL(APPINFO_IMPL_NATIVE, [test "$with_appinfo_impl" = "native"])
++AM_CONDITIONAL(APPINFO_IMPL_GENERIC, [test "$with_appinfo_impl" = "generic"])
++
++case $with_appinfo_impl in
++  native)
++    AC_DEFINE(USE_APPINFO_NATIVE, 1, [Prefer the native application information implementation])
++    ;;
++  generic)
++    AC_DEFINE(USE_APPINFO_GENERIC, 1, [Prefer the generic (freedesktop-based) application information implementation])
++    ;;
++esac
++
+ dnl ************************
+ dnl *** check for libelf ***
+ dnl ************************
+--- gio/Makefile.am.orig	2017-05-31 15:16:11.000000000 -0500
++++ gio/Makefile.am	2017-06-24 05:42:18.000000000 -0500
+@@ -3,7 +3,11 @@
+ SUBDIRS = gdbus-2.0/codegen
+ 
+ if OS_UNIX
+-if !OS_COCOA
++if OS_COCOA
++if APPINFO_IMPL_GENERIC
++SUBDIRS += xdgmime
++endif
++else
+ SUBDIRS += xdgmime
+ endif
+ endif
+@@ -251,7 +255,16 @@
+ endif
+ 
+ if OS_UNIX
+-if !OS_COCOA
++if OS_COCOA
++if APPINFO_IMPL_NATIVE
++appinfo_headers += gosxappinfo.h
++else
++platform_libadd += xdgmime/libxdgmime.la
++platform_deps += xdgmime/libxdgmime.la
++
++appinfo_headers += gdesktopappinfo.h
++endif
++else
+ platform_libadd += xdgmime/libxdgmime.la
+ platform_deps += xdgmime/libxdgmime.la
+ 
+@@ -305,7 +318,7 @@
+ 	gunixinputstream.h 	\
+ 	gunixoutputstream.h 	\
+ 	gunixsocketaddress.h	\
+-	$(appinfo_headers) \
++	$(appinfo_headers)	\
+ 	$(NULL)
+ 
+ if HAVE_NETLINK
+@@ -351,7 +364,13 @@
+ 	win32/gwin32filemonitor.c
+ 
+ if OS_WIN32
+-appinfo_sources += gwin32appinfo.c gwin32appinfo.h
++if APPINFO_IMPL_NATIVE
++appinfo_headers += gwin32appinfo.h
++appinfo_sources += gwin32appinfo.c
++else
++appinfo_headers += gdesktopappinfo.h
++appinfo_sources += gdesktopappinfo.c
++endif
+ contenttype_sources += gcontenttype-win32.c
+ platform_libadd += -lshlwapi -lws2_32 -ldnsapi -liphlpapi
+ win32_sources = $(win32_actual_sources)
+@@ -360,6 +379,7 @@
+ giowin32include_HEADERS = \
+ 	gwin32inputstream.h \
+ 	gwin32outputstream.h \
++	$(appinfo_headers) \
+ 	$(NULL)
+ 
+ endif
+@@ -398,13 +418,16 @@
+ 	$(xdp_dbus_built_sources)	\
+ 	$(NULL)
+ 
++if OS_UNIX
+ if OS_COCOA
++if APPINFO_IMPL_NATIVE
+ contenttype_sources += gosxcontenttype.c
+-appinfo_sources += gosxappinfo.c gosxappinfo.h
++appinfo_sources += gosxappinfo.c
++else
++contenttype_sources += gcontenttype.c
++appinfo_sources += gdesktopappinfo.c
+ endif
+-
+-if OS_UNIX
+-if !OS_COCOA
++else
+ contenttype_sources += gcontenttype.c
+ appinfo_sources += gdesktopappinfo.c
+ endif
+--- gio/giomodule.c.orig	2017-05-31 15:16:11.000000000 -0500
++++ gio/giomodule.c	2017-06-24 05:44:54.000000000 -0500
+@@ -43,12 +43,13 @@
+ #endif
+ #include <glib/gstdio.h>
+ 
+-#if defined(G_OS_UNIX) && !defined(HAVE_COCOA)
++#if defined(G_OS_UNIX)
++#if !defined(HAVE_COCOA) || defined(USE_APPINFO_GENERIC)
+ #include "gdesktopappinfo.h"
+-#endif
+-#ifdef HAVE_COCOA
++#elif defined(HAVE_COCOA)
+ #include "gosxappinfo.h"
+ #endif
++#endif
+ 
+ #ifdef HAVE_COCOA
+ #include <AvailabilityMacros.h>
+@@ -978,7 +979,7 @@
+     {
+       registered_extensions = TRUE;
+       
+-#if defined(G_OS_UNIX) && !defined(HAVE_COCOA)
++#if defined(G_OS_UNIX) && (!defined(HAVE_COCOA) || defined(USE_APPINFO_GENERIC))
+ #if !GLIB_CHECK_VERSION (3, 0, 0)
+       ep = g_io_extension_point_register (G_DESKTOP_APP_INFO_LOOKUP_EXTENSION_POINT_NAME);
+       G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+@@ -1119,8 +1120,10 @@
+ #endif
+ #ifdef HAVE_COCOA
+       g_type_ensure (g_nextstep_settings_backend_get_type ());
++#ifndef USE_APPINFO_GENERIC
+       g_type_ensure (g_osx_app_info_get_type ());
+ #endif
++#endif
+ #ifdef G_OS_UNIX
+       g_type_ensure (_g_unix_volume_monitor_get_type ());
+       g_type_ensure (g_fdo_notification_backend_get_type ());

@@ -65,6 +65,12 @@ configure.cmd       ${prefix}/bin/cmake
 
 default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
 
+# Policy 0025=NEW : identify Apple Clang compiler as "AppleClang";
+# MacPorts Clang is then handled separately from AppleClang. This
+# setting ensures consistency in compiler feature determination and
+# use, which is especially useful for older Mac OS X installs --
+# e.g., ones that use MacPorts Clang 4.0 via the cxx11 1.1 PortGroup.
+
 default configure.args {[list \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
@@ -77,6 +83,7 @@ default configure.args {[list \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
+                    -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
                     ]}
 
@@ -110,13 +117,12 @@ pre-configure {
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.
 
-    # In addition, CMake provides build-type-specific flags for
-    # Release (-O3 -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and
-    # RelWithDebInfo (-O2 -g -DNDEBUG). If the configure.optflags have been
-    # set (-Os by default), we have to remove the optimization flags from the
-    # from the concerned Release build type so that configure.optflags
-    # gets honored (Debug used by the +debug variant does not set
-    # optimization flags by default).
+    # In addition, CMake provides build-type-specific flags for Release (-O3
+    # -DNDEBUG), Debug (-g), MinSizeRel (-Os -DNDEBUG), and RelWithDebInfo
+    # (-O2 -g -DNDEBUG). If the configure.optflags have been set (-Os by
+    # default), we have to remove the optimization flags from the concerned
+    # Release build type so that configure.optflags gets honored (Debug used
+    # by the +debug variant does not set optimization flags by default).
     if {${configure.optflags} ne ""} {
         configure.args-append -DCMAKE_C_FLAGS_RELEASE="-DNDEBUG" \
                               -DCMAKE_CXX_FLAGS_RELEASE="-DNDEBUG"
