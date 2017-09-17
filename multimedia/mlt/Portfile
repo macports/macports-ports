@@ -6,6 +6,7 @@ PortGroup           muniversal 1.0
 name                mlt
 epoch               3
 version             6.4.1
+revision            2
 categories          multimedia
 maintainers         dennedy.org:dan gmail.com:rjvbertin openmaintainer
 license             GPL-2+
@@ -39,38 +40,25 @@ if {${subport} eq "${name}"} {
 } else {
     conflicts       ${name}
     PortGroup       qt5 1.0
-    if {[info procs qt5.depends_component] eq ""} {
-        # A procedure to indicate dependencies on Qt components that are not
-        # included in the default dependency declared by the Qt5 PortGroup.
-        # It allows to specify those dependencies without having to handle
-        # the appropriate path-style declarations that work against every Qt5 port
-        # (currently port:qt5, port:qt55, "soon" port:qt5-kde too.)
-        # A complete version of this procedure will be provided by the Qt5 PG
-        # after qt5-kde is introduced. Provide a simplified version in the meantime.
-        proc qt5.depends_component {first args} {
-            global os.major
-            # join ${first} and (the optional) ${args}
-            set args [linsert $args[set list {}] 0 ${first}]
-            # select the Qt5 port prefix, depending on OS version and which Qt5 port is installed
-            if {${os.major} == 11} {
-                set qt5pprefix  "qt55"
+    if {[info procs qt5.active_version] eq ""} {
+        proc qt5.active_version {} {
+            global prefix
+            if {[file exists ${prefix}/bin/pkg-config]} {
+                set av [exec ${prefix}/bin/pkg-config --modversion Qt5Core]
+                return ${av}
             } else {
-                set qt5pprefix  "qt5"
-            }
-            foreach comp ${args} {
-                if {${comp} eq "qt5"} {
-                    # in case one needs an explicit dependency on the Qt5 main port itself:
-                    depends_lib-append port:${qt5pprefix}
-                } else {
-                    set portname "${qt5pprefix}-${comp}"
-                    depends_lib-append port:${portname}
-                }
+                return 0.0.0
             }
         }
     }
 
     qt5.depends_component \
                     qtsvg
+    if {[vercmp [qt5.active_version] 5.7.0] >= 0} {
+        configure.cxxflags-append \
+                    -stdlib=libc++ \
+                    -std=c++11
+    }
 }
 
 depends_build-append port:git \
@@ -87,6 +75,19 @@ depends_lib-append  port:atk \
                     port:libxml2 \
                     port:libexif
 
+if {[variant_isset opencv]} {
+    PortGroup       active_variants 1.1
+    if {${subport} eq "${name}"} {
+        require_active_variants opencv qt4
+    } else {
+        require_active_variants opencv qt5
+    }
+}
+
+# cherrypicked commit from the next release that fixes a crash-on-exit issue
+# in recent Kkdenlive versions.
+patchfiles-append   patch-commit-a3188e3.diff
+
 # NB: qt-includedir can and should be set to ${qt_includes_dir},
 # not ${qt_includes_dir}/Qt !!
 configure.args-append \
@@ -96,7 +97,8 @@ configure.args-append \
                     --disable-jackrack \
                     --disable-mmx \
                     --disable-gtk2 \
-                    --disable-swfdec
+                    --disable-swfdec \
+                    --disable-opencv
 
 platform darwin 10 {
     if {${build_arch} eq "x86_64"} {
@@ -107,6 +109,17 @@ platform darwin 10 {
 configure.cflags-append     "-I${prefix}/include"
 configure.cflags-append     "-I${qt_includes_dir}"
 configure.ldflags-delete    "-L${prefix}/lib"
+
+# make sure the build system actually sees our settings by amending the toplevel config.mak.
+post-configure {
+    set config.mak [open ${worksrcpath}/config.mak "a"]
+    puts ${config.mak} "CC=${configure.cc}"
+    puts ${config.mak} "CXX=${configure.cxx}"
+    puts ${config.mak} "CFLAGS+=${configure.cflags} ${configure.cppflags}"
+    puts ${config.mak} "CXXFLAGS+=${configure.cxxflags} ${configure.cppflags}"
+    puts ${config.mak} "LDLAGS+=${configure.ldflags}"
+    close ${config.mak}
+}
 
 build.args-append           CC="${configure.cc}" CXX="${configure.cxx}" CPP="${configure.cpp}"
 
@@ -125,6 +138,32 @@ if {[variant_isset universal]} {
 variant gtk2 description {include the gtk2 module (for additional image and text producers)} {
     configure.args-delete   --disable-gtk2
     depends_lib-append      port:gtk2
+}
+
+variant gpl3 description {enable GPLv3 components} {
+    configure.args-append   --enable-gpl3
+    license                 GPL-3+
+}
+
+# use an opencv variant to avoid opportunistic dependencies on this library
+# the opencv dependency must match our choice of Qt version, which is
+# another reason why opencv support is provided through a variant.
+variant opencv description {enable OpenCV support} {
+    depends_lib-append      port:opencv
+    configure.args-delete   --disable-opencv
+}
+
+# Allow building without SDL support, useful when used in dependents that themselves
+# depend on SDL2, to avoid (warnings about) runtime conflicts. It can be hoped that
+# one day MLT will support SDL2 too.
+variant disable_sdl description {disable SDL support to avoid SDL vs. SDL2 conflicts} {
+    patchfiles-append       patch-no-sdl.diff
+    configure.args-append   --disable-sdl
+    configure.cppflags-append \
+                            -DMELT_NOSDL
+    depends_lib-delete \
+                            port:libsdl \
+                            port:libsdl_image
 }
 
 livecheck.type      regex
