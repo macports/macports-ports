@@ -156,43 +156,69 @@ proc cmake::build_dir {} {
     return [option cmake.source_dir]
 }
 
+if {![info exists cmake.make_generator_incompatible]} {
+    set cmake.make_generator_incompatible  no
+}
+if {![info exists cmake.ninja_generator_incompatible]} {
+    set cmake.ninja_generator_incompatible no
+}
+
 option_proc cmake.generator cmake::handle_generator
 proc cmake::handle_generator {option action args} {
     global cmake.generator destroot destroot.target build.cmd build.post_args
-    global depends_build destroot.post_args build.jobs
-    if {${action} eq "set"} {
+    global depends_build destroot.post_args build.jobs subport
+    global cmake.make_generator_incompatible cmake.ninja_generator_incompatible
+    if {${action} eq "read"} {
+        # we need to handle the "read" action too if we want to be able to raise
+        # an error when an incompatible generator is requested.
+        set args ${cmake.generator}
+    }
+    if {${action} eq "set" || ${action} eq "read"} {
         switch -glob [lindex ${args} 0] {
             "*Unix Makefiles*" {
-                ui_debug "Selecting the 'Unix Makefiles' generator ($args)"
-                depends_build-delete \
+                if {![tbool cmake.make_generator_incompatible]} {
+                    ui_debug "Selecting the 'Unix Makefiles' generator ($args)"
+                    depends_build-delete \
                                     port:ninja
-                build.cmd           make
-                build.post_args     VERBOSE=ON
-                destroot.target     install/fast
-                destroot.destdir    DESTDIR=${destroot}
-                # unset the DESTDIR env. variable if it has been set before
-                destroot.env-delete DESTDIR=${destroot}
-#                 proc ui_progress_info {string} {
-#                     if {[scan $string "\[%d%%\] " perc] == 1} {
-#                         return $perc
-#                     } else {
-#                         return -1
+                    build.cmd       make
+                    build.post_args VERBOSE=ON
+                    destroot.target install/fast
+                    destroot.destdir \
+                                    DESTDIR=${destroot}
+                    # unset the DESTDIR env. variable if it has been set before
+                    destroot.env-delete \
+                                    DESTDIR=${destroot}
+#                     proc ui_progress_info {string} {
+#                         if {[scan $string "\[%d%%\] " perc] == 1} {
+#                             return $perc
+#                         } else {
+#                             return -1
+#                         }
 #                     }
-#                 }
+                } else {
+                    ui_error "port:${subport} doesn't support CMake's ${args} generator (don't use cmake.generator on the commandline)"
+                    return -code error "unsupported CMake generator requested (port:${subport})"
+                }
             }
             "*Ninja" {
-                ui_debug "Selecting the Ninja generator ($args)"
-                depends_build-append \
+                if {![tbool cmake.ninja_generator_incompatible]} {
+                    ui_debug "Selecting the Ninja generator ($args)"
+                    depends_build-append \
                                     port:ninja
-                build.cmd           ninja
-                # force Ninja to use the exact number of requested build jobs
-                build.post_args     -j${build.jobs} -v
-                destroot.target     install
-                # ninja needs the DESTDIR argument in the environment
-                destroot.destdir
-                destroot.env-append DESTDIR=${destroot}
+                    build.cmd       ninja
+                    # force Ninja to use the exact number of requested build jobs
+                    build.post_args -j${build.jobs} -v
+                    destroot.target install
+                    # ninja needs the DESTDIR argument in the environment
+                    destroot.destdir
+                    destroot.env-append DESTDIR=${destroot}
+                } else {
+                    ui_error "port:${subport} doesn't support CMake's ${args} generator (don't use cmake.generator on the commandline)"
+                    return -code error "unsupported CMake generator requested (port:${subport})"
+                }
             }
             default {
+                ui_msg "generator fallback"
                 if {[llength $args] != 1} {
                     set msg "cmake.generator requires a single value (not \"${args}\")"
                 } else {
@@ -227,6 +253,11 @@ proc cmake::ccaching {} {
 }
 
 configure.ccache    no
+# surprising but intended behaviour that's impossible to work around more gracefully:
+if {[tbool configure.ccache]} {
+    ui_error "Please don't use configure.ccache=yes on the commandline for port:${subport}"
+    return -code error "invalid invocation (port:${subport})"
+}
 
 configure.cmd       ${prefix}/bin/cmake
 
