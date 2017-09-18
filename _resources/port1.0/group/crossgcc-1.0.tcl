@@ -49,8 +49,19 @@ options crossgcc.target \
 
 default crossgcc.languages {{c c++}}
 
+array set crossgcc.versions_info {
+    7.1.0 {bzip2 {
+        rmd160 a228dc45a09eda91b1a201d234f9013b3009b461
+        sha256 8a8136c235f64c6fef69cac0d73a46a1a09bb250776a050aec8f9fc880bebc17
+    }}
+    7.2.0 {xz {
+        rmd160 fa8eed36c78cf135f9cc88e60845996b5cfaba52
+        sha256 1cf7adf8ff4b5aa49041c8734bbcf1ad18cc4c94d0029aae0f4e48841088479a
+    }}
+}
+
 proc crossgcc.setup {target version} {
-    global crossgcc.target crossgcc.version
+    global crossgcc.target crossgcc.version crossgcc.versions_info
 
     set crossgcc.target $target
     set crossgcc.version $version
@@ -70,10 +81,18 @@ proc crossgcc.setup {target version} {
 
         homepage        http://gcc.gnu.org/
         master_sites    gnu:gcc/gcc-${version}/:gcc
-        use_bzip2       yes
+
+        if {[info exists crossgcc.versions_info($version)]} {
+            use_[lindex [set crossgcc.versions_info($version)] 0] yes
+
+            checksums   {*}[lindex [set crossgcc.versions_info($version)] 1]
+        } else {
+            # the old default
+            use_bzip2   yes
+        }
 
         dist_subdir     gcc[lindex [split ${version} .] 0]
-        distfiles       gcc-${version}.tar.bz2:gcc
+        distfiles       gcc-${version}${extract.suffix}:gcc
 
         worksrcdir      gcc-${version}
 
@@ -88,7 +107,7 @@ proc crossgcc.setup {target version} {
 
         # Extract gcc distfiles only. libc tarball might be available as gzip only;
         # handled below in post-extract in the variant.
-        extract.only    gcc-${version}.tar.bz2
+        extract.only    gcc-${version}${extract.suffix}
 
         # Build in a different directory, as advised in the README file.
         post-extract {
