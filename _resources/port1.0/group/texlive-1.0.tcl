@@ -163,7 +163,8 @@ proc texlive.texmfport {} {
     supported_archs noarch
     installs_libs   no
 
-    master_sites    http://giraffe.cs.washington.edu/texlive/
+    master_sites    http://giraffe.cs.washington.edu/texlive/ \
+                    http://alpaca.cs.washington.edu/texlive/
     use_xz          yes
 
     global name master_sites distname extract.suffix
