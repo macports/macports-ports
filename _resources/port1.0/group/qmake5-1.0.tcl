@@ -73,7 +73,6 @@ pre-configure {
     if { [vercmp ${xcodeversion} "7.0"] >= 0 } {
         # starting with Xcode 7.0, the SDK for build OS version might not be available
         # see https://trac.macports.org/ticket/53597
-
         set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
         if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
             configure.sdk_version
@@ -177,8 +176,8 @@ pre-configure {
     # accommodating variant request varies depending on how qtbase was built
     set base_debug false
     foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
-        set qt_test_port_name [lindex ${qt_test_info} 0]
-        if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
+        set qt_test_base_port [lindex ${qt_test_info} 0]
+        if {![catch {set result [active_variants ${qt_test_base_port} debug ""]}]} {
             if {$result} {
                 # code to be executed if $depspec is active with at least all variants in
                 # $required and none from $forbidden
