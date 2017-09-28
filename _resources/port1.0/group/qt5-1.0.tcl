@@ -49,7 +49,7 @@ array set available_qt_versions {
 # see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
 
 proc qt5.get_default_name {} {
-    global os.major cxx_stdlib
+    global os.major
 
     # see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
     # for older versions, see http://web.archive.org/web/*/http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
