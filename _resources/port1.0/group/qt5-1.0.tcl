@@ -34,7 +34,7 @@
 # Usage:
 # PortGroup     qt5 1.0
 
-options qt5.using_kde qt5.base_version
+options qt5.base_version
 
 global available_qt_versions
 array set available_qt_versions {
@@ -141,11 +141,9 @@ proc qt5.get_default_name {} {
 global qt_name
 
 if { [info exists qt_name] } {
-    default qt5.using_kde no
     default qt5.base_version ${qt_name}
 } else {
     set qt_name [qt5.get_default_name]
-    default qt5.using_kde no
     default qt5.base_version {[qt5.get_default_name]}
 }
 
@@ -550,6 +548,9 @@ proc qt5.depends_build_component {args} {
     }
 }
 
+options qt5.kde_variant
+default qt5.kde_variant no
+
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -657,12 +658,12 @@ if {![info exists building_qt5]} {
     }
 }
 
-# add qt5kde variant if one does not exist and one is requested via qt5.using_kde
-# variant is added in eval_variants so that qt5.using_kde can be set anywhere in the Portfile
+# add qt5kde variant if one does not exist and one is requested via qt5.kde_variant
+# variant is added in eval_variants so that qt5.kde_variant can be set anywhere in the Portfile
 rename ::eval_variants ::real_qt5_eval_variants
 proc eval_variants {variations} {
-    global qt5.using_kde
-    if { ![variant_exists qt5kde] && [tbool qt5.using_kde] } {
+    global qt5.kde_variant
+    if { ![variant_exists qt5kde] && [tbool qt5.kde_variant] } {
         variant qt5kde description {use Qt patched for KDE compatibility} {}
     }
     uplevel ::real_qt5_eval_variants $variations
