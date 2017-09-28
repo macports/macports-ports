@@ -633,7 +633,16 @@ pre-destroot {
     }
 }
 
-if {![info exists building_qt5]} {
+set private_building_qt5 false
+# check to see if this is a Qt base port being built
+foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+    set qt_test_base_port [lindex ${qt_test_info} 0]
+    if {${qt_test_base_port} eq ${subport}} {
+        set private_building_qt5 true
+    }
+}
+
+if {!${private_building_qt5}} {
     pre-configure {
         ui_debug "qt5 PortGroup: Qt is provided by ${qt5.name}"
 
@@ -742,6 +751,8 @@ namespace eval qt5pg {
     }
 }
 
-if {![info exists building_qt5]} {
+if {!${private_building_qt5}} {
     port::register_callback qt5pg::register_dependents
 }
+
+unset private_building_qt5
