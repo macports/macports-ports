@@ -34,8 +34,6 @@
 # Usage:
 # PortGroup     qt5 1.0
 
-options qt5.base_version
-
 global available_qt_versions
 array set available_qt_versions {
     qt5  {qt5-qtbase  5.8}
@@ -137,14 +135,30 @@ proc qt5.get_default_name {} {
     }
 }
 
-# standard Qt5 name
-global qt_name
+global qt5.name qt5.base_port qt5.version
 
-if { [info exists qt_name] } {
-    default qt5.base_version ${qt_name}
-} else {
-    set qt_name [qt5.get_default_name]
-    default qt5.base_version {[qt5.get_default_name]}
+# get the latest Qt version that runs on current OS configuration
+set qt5.name       [qt5.get_default_name]
+set qt5.base_port  [lindex $available_qt_versions(${qt5.name}) 0]
+set qt5.version    [lindex $available_qt_versions(${qt5.name}) 1]
+
+# check if another version of Qt is installed
+foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+    set qt_test_base_port [lindex ${qt_test_info} 0]
+    if {![catch {set installed [lindex [registry_active ${qt_test_base_port}] 0]}]} {
+        set qt5.name       ${qt_test_name}
+        set qt5.base_port  ${qt_test_base_port}
+        set qt5.version    [lindex $installed 1]
+    }
+}
+
+# check to see if this is a Qt port being built
+foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+    if {${qt_test_name} eq ${name}} {
+        set qt5.name       ${name}
+        set qt5.base_port  [lindex $available_qt_versions(${qt5.name}) 0]
+        set qt5.version    [lindex $available_qt_versions(${qt5.name}) 1]
+    }
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
@@ -621,34 +635,20 @@ pre-destroot {
 
 if {![info exists building_qt5]} {
     pre-configure {
-        set qt_installed_name ""
-
-        foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
-            set qt_test_port_name [lindex ${qt_test_info} 0]
-            if {![catch {set installed [lindex [registry_active ${qt_test_port_name}] 0]}]} {
-                set qt_installed_name ${qt_test_name}
-            }
-        }
-
-        if { ${qt_installed_name} eq "" } {
-            ui_error "at least one Qt must be installed"
-            return -code error "insufficient dependencies"
-        }
-
-        ui_debug "qt5 PortGroup: Qt is provided by ${qt_installed_name}"
+        ui_debug "qt5 PortGroup: Qt is provided by ${qt5.name}"
 
         if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
-            if { [string range ${qt_installed_name} end-3 end] ne "-kde" } {
+            if { ${qt5.base_port} ne "qt5-kde" } {
                 ui_error "qt5 PortGroup: Qt is installed but not qt5-kde, as is required by this variant"
-                ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt_installed_name}-qtbase and try again"
+                ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt5.base_port} and try again"
                 return -code error "improper Qt installed"
             }
         } else {
-            if { ${qt_installed_name} ne [qt5.get_default_name] } {
+            if { ${qt5.name} ne [qt5.get_default_name] } {
                 # see https://wiki.qt.io/Qt-Version-Compatibility
-                ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt_installed_name} is installed"
+                ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt5.name} is installed"
             }
-            if { ${qt_installed_name} ne "qt5" } {
+            if { ${qt5.name} ne "qt5" } {
                 ui_warn "Qt dependency is not the latest version but may be the latest supported on your OS"
             }
             if { ${os.major} < 11 } {
@@ -671,7 +671,7 @@ proc eval_variants {variations} {
 
 namespace eval qt5pg {
     proc register_dependents {} {
-        global qt5_private_components qt5_private_build_components qt5.base_version
+        global qt5_private_components qt5_private_build_components qt5.name
 
         if { ![exists qt5_private_components] } {
             # no Qt components have been requested
@@ -718,14 +718,13 @@ namespace eval qt5pg {
             }
         } else {
             # ![variant_isset qt5kde]
-            set qt_default_name ${qt5.base_version}
             foreach component "qtbase ${qt5_private_components}" {
                 if { ${component} eq "qt5" } {
-                    depends_lib-append path:share/doc/qt5/README.txt:${qt_default_name}
+                    depends_lib-append path:share/doc/qt5/README.txt:${qt5.name}
                 } elseif { [info exists qt5pg::qt5_component_lib(${component})] } {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
-                    depends_lib-append path:${path}:${qt_default_name}-${component}
+                    depends_lib-append path:${path}:${qt5.name}-${component}
                 } else {
                     return -code error "unknown component ${comp}"
                 }
@@ -734,7 +733,7 @@ namespace eval qt5pg {
                 if { [info exists qt5pg::qt5_component_lib(${component})] } {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
-                    depends_build-append path:${path}:${qt_default_name}-${component}
+                    depends_build-append path:${path}:${qt5.name}-${component}
                 } else {
                     return -code error "unknown component ${comp}"
                 }
