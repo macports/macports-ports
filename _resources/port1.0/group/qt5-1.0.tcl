@@ -37,12 +37,13 @@
 options qt5.using_kde qt5.base_version
 
 global available_qt_versions
-set available_qt_versions {
-    qt5
-    qt57
-    qt56
-    qt55
+array set available_qt_versions {
+    qt5  {qt5-qtbase  5.8}
+    qt57 {qt57-qtbase 5.7}
+    qt56 {qt56-qtbase 5.6}
+    qt55 {qt55-qtbase 5.5}
 }
+#qt5-kde {qt5-kde 5.8}
 
 proc qt5.get_default_name {} {
     global os.major cxx_stdlib
@@ -621,14 +622,8 @@ if {![info exists building_qt5]} {
     pre-configure {
         set qt_installed_name ""
 
-        foreach qt_test_name ${available_qt_versions} {
-
-            if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
-                set qt_test_port_name ${qt_test_name}
-            } else {
-                set qt_test_port_name ${qt_test_name}-qtbase
-            }
-
+        foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+            set qt_test_port_name [lindex ${qt_test_info} 0]
             if {![catch {set installed [lindex [registry_active ${qt_test_port_name}] 0]}]} {
                 set qt_installed_name ${qt_test_name}
             }

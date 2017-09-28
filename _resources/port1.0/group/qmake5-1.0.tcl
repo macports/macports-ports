@@ -178,12 +178,8 @@ pre-configure {
 
     # accommodating variant request varies depending on how qtbase was built
     set base_debug false
-    foreach qt_test_name ${available_qt_versions} {
-        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
-            set qt_test_port_name ${qt_test_name}
-        } else {
-            set qt_test_port_name ${qt_test_name}-qtbase
-        }
+    foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+        set qt_test_port_name [lindex ${qt_test_info} 0]
         if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
             if {$result} {
                 # code to be executed if $depspec is active with at least all variants in
