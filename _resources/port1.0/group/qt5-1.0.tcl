@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2014-2016 The MacPorts Project
+# Copyright (c) 2014-2017 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,11 @@ array set available_qt_versions {
     qt55 {qt55-qtbase 5.5}
 }
 #qt5-kde {qt5-kde 5.8}
+
+# Qt has what is calls reference configurations, which are said to be thoroughly tested
+# Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
+# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
+# see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
 
 proc qt5.get_default_name {} {
     global os.major cxx_stdlib
@@ -160,11 +165,6 @@ foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
         set qt5.version    [lindex $available_qt_versions(${qt5.name}) 1]
     }
 }
-
-# Qt has what is calls reference configurations, which are said to be thoroughly tested
-# Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
-# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
-# see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
 
 if {[tbool just_want_qt5_version_info]} {
     return
@@ -539,7 +539,7 @@ namespace eval qt5pg {
     #}
     #
     # qtwebkit: official support dropped in 5.6.0
-    #           as of 5.7, still maintained by community
+    #           as of 5.9, still maintained by community
 }
 
 if {[tbool just_want_qt5_variables]} {
