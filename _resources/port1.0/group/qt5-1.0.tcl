@@ -726,7 +726,7 @@ namespace eval qt5pg {
                     set path           [lindex ${component_info} 2]
                     depends_lib-append path:${path}:${qt5.name}-${component}
                 } else {
-                    return -code error "unknown component ${comp}"
+                    return -code error "unknown component ${component}"
                 }
             }
             foreach component ${qt5_private_build_components} {
@@ -735,7 +735,7 @@ namespace eval qt5pg {
                     set path           [lindex ${component_info} 2]
                     depends_build-append path:${path}:${qt5.name}-${component}
                 } else {
-                    return -code error "unknown component ${comp}"
+                    return -code error "unknown component ${component}"
                 }
             }
         }
