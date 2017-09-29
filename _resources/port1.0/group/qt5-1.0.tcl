@@ -132,6 +132,14 @@ proc qt5.get_default_name {} {
         #
         return qt5
         #
+    } elseif { ${os.major} <= 17 } {
+        #
+        # macOS High Sierra (10.13)
+        #
+        # Qt 5.9: ???
+        #
+        return qt5
+        #
     } else {
         #
         # macOS ??? (???)
