@@ -58,13 +58,13 @@ pre-configure {
         if {[vercmp ${qt5.version} 5.9]>=0} {
             configure.args-append -spec ${qt_qmake_spec}
         } else {
-        if {[variant_exists universal] && [variant_isset universal]} {
-            global merger_configure_args
-            lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
-            lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
-        } else {
-            configure.args-append -spec ${qt_qmake_spec}
-        }
+            if {[variant_exists universal] && [variant_isset universal]} {
+                global merger_configure_args
+                lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
+                lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+            } else {
+                configure.args-append -spec ${qt_qmake_spec}
+            }
         }
     }
 
@@ -96,23 +96,23 @@ pre-configure {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${build_arch}"
         }
     } else {
-    #
-    # set QT_ARCH and QT_TARGET_ARCH manually since they may be
-    #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
-    #     if qtbase was built universal
-    #
-    # set -arch x86_64 since macx-clang spec file assumes it is the default
-    #
-    puts ${cache} "if(${qt_qmake_spec_64}) {"
-    puts ${cache} "  QT_ARCH=x86_64"
-    puts ${cache} "  QT_TARGET_ARCH=x86_64"
-    puts ${cache} "  QMAKE_CFLAGS+=-arch x86_64"
-    puts ${cache} "  QMAKE_CXXFLAGS+=-arch x86_64"
-    puts ${cache} "  QMAKE_LFLAGS+=-arch x86_64"
-    puts ${cache} "} else {"
-    puts ${cache} "  QT_ARCH=i386"
-    puts ${cache} "  QT_TARGET_ARCH=i386"
-    puts ${cache} "}"
+        #
+        # set QT_ARCH and QT_TARGET_ARCH manually since they may be
+        #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
+        #     if qtbase was built universal
+        #
+        # set -arch x86_64 since macx-clang spec file assumes it is the default
+        #
+        puts ${cache} "if(${qt_qmake_spec_64}) {"
+        puts ${cache} "  QT_ARCH=x86_64"
+        puts ${cache} "  QT_TARGET_ARCH=x86_64"
+        puts ${cache} "  QMAKE_CFLAGS+=-arch x86_64"
+        puts ${cache} "  QMAKE_CXXFLAGS+=-arch x86_64"
+        puts ${cache} "  QMAKE_LFLAGS+=-arch x86_64"
+        puts ${cache} "} else {"
+        puts ${cache} "  QT_ARCH=i386"
+        puts ${cache} "  QT_TARGET_ARCH=i386"
+        puts ${cache} "}"
     }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
     puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"

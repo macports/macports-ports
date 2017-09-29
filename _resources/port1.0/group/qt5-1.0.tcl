@@ -591,7 +591,7 @@ if {[vercmp ${qt5.version} 5.10]>=0} {
 } else {
     # no PPC support in Qt 5
     #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
-default supported_archs {"i386 x86_64"}
+    default supported_archs {"i386 x86_64"}
 }
 
 if {[vercmp ${qt5.version} 5.9]>=0} {
@@ -603,44 +603,44 @@ if {[vercmp ${qt5.version} 5.9]>=0} {
 
     destroot.env-append INSTALL_ROOT=${destroot}
 } else {
-# no universal binary support in Qt 5 versions < 5.9
-#     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
-#     and https://bugreports.qt.io/browse/QTBUG-24952
-# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
-# see https://trac.macports.org/ticket/51643
-proc universal_setup {args} {
-    if {[variant_exists universal]} {
-        ui_debug "universal variant already exists, so not adding the default one"
-    } elseif {[exists universal_variant] && ![option universal_variant]} {
-        ui_debug "universal_variant is false, so not adding the default universal variant"
-    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
-        ui_debug "using xmkmf, so not adding the default universal variant"
-    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
-        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option supported_archs]] == 1} {
-        ui_debug "only one arch supported, so not adding the default universal variant"
-    } else {
-        ui_debug "adding universal variant via PortGroup muniversal"
-        uplevel "PortGroup muniversal 1.0"
-        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
-    }
-}
-
-# standard destroot environment
-pre-destroot {
-    global merger_destroot_env
-    if { ![option universal_variant] || ![variant_isset universal] } {
-        destroot.env-append \
-            INSTALL_ROOT=${destroot}
-    } else {
-        foreach arch ${configure.universal_archs} {
-            lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
+    # no universal binary support in Qt 5 versions < 5.9
+    #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
+    #     and https://bugreports.qt.io/browse/QTBUG-24952
+    # override universal_setup found in portutil.tcl so it uses muniversal PortGroup
+    # see https://trac.macports.org/ticket/51643
+    proc universal_setup {args} {
+        if {[variant_exists universal]} {
+            ui_debug "universal variant already exists, so not adding the default one"
+        } elseif {[exists universal_variant] && ![option universal_variant]} {
+            ui_debug "universal_variant is false, so not adding the default universal variant"
+        } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
+            ui_debug "using xmkmf, so not adding the default universal variant"
+        } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
+            ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
+        } elseif {[llength [option supported_archs]] == 1} {
+            ui_debug "only one arch supported, so not adding the default universal variant"
+        } else {
+            ui_debug "adding universal variant via PortGroup muniversal"
+            uplevel "PortGroup muniversal 1.0"
+            uplevel "default universal_archs_supported {\"i386 x86_64\"}"
         }
     }
-}
 
-set qt_qmake_spec_32 macx-clang-32
-set qt_qmake_spec_64 macx-clang
+    # standard destroot environment
+    pre-destroot {
+        global merger_destroot_env
+        if { ![option universal_variant] || ![variant_isset universal] } {
+            destroot.env-append \
+                INSTALL_ROOT=${destroot}
+        } else {
+            foreach arch ${configure.universal_archs} {
+                lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
+            }
+        }
+    }
+
+    set qt_qmake_spec_32 macx-clang-32
+    set qt_qmake_spec_64 macx-clang
 }
 
 default qt_qmake_spec {[qt5pg::get_default_spec]}
@@ -655,7 +655,7 @@ namespace eval qt5pg {
                 return ${qt_qmake_spec_64}
             }
         } else {
-           return ${qt_qmake_spec_64}
+            return ${qt_qmake_spec_64}
         }
     }
 }
