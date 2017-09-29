@@ -565,6 +565,18 @@ proc qt5.depends_build_component {args} {
 options qt5.kde_variant
 default qt5.kde_variant no
 
+# use PKGCONFIG for Qt discovery in configure scripts
+depends_build-append    port:pkgconfig
+
+# standard qmake spec
+# other platforms required
+#     see http://doc.qt.io/qt-5/supported-platforms.html
+#     and http://doc.qt.io/QtSupportedPlatforms/index.html
+options qt_qmake_spec
+global qt_qmake_spec_32
+global qt_qmake_spec_64
+compiler.blacklist-append *gcc*
+
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -589,14 +601,18 @@ proc universal_setup {args} {
     }
 }
 
-# standard qmake spec
-# other platforms required
-#     see http://doc.qt.io/qt-5/supported-platforms.html
-#     and http://doc.qt.io/QtSupportedPlatforms/index.html
-options qt_qmake_spec
-global qt_qmake_spec_32
-global qt_qmake_spec_64
-compiler.blacklist-append *gcc*
+# standard destroot environment
+pre-destroot {
+    global merger_destroot_env
+    if { ![option universal_variant] || ![variant_isset universal] } {
+        destroot.env-append \
+            INSTALL_ROOT=${destroot}
+    } else {
+        foreach arch ${configure.universal_archs} {
+            lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
+        }
+    }
+}
 
 set qt_qmake_spec_32 macx-clang-32
 set qt_qmake_spec_64 macx-clang
@@ -613,22 +629,6 @@ namespace eval qt5pg {
             }
         } else {
             return ""
-        }
-    }
-}
-
-# use PKGCONFIG for Qt discovery in configure scripts
-depends_build-append    port:pkgconfig
-
-# standard destroot environment
-pre-destroot {
-    global merger_destroot_env
-    if { ![option universal_variant] || ![variant_isset universal] } {
-        destroot.env-append \
-            INSTALL_ROOT=${destroot}
-    } else {
-        foreach arch ${configure.universal_archs} {
-            lappend merger_destroot_env($arch) INSTALL_ROOT=${workpath}/destroot-${arch}
         }
     }
 }
