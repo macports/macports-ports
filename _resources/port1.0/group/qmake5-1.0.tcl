@@ -52,13 +52,7 @@ configure.universal_args-delete --disable-dependency-tracking
 
 pre-configure {
     #
-    # set QT_ARCH and QT_TARGET_ARCH manually since they may be
-    #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
-    #     if qtbase was built universal
-    #
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
-    #
-    # set -arch x86_64 since macx-clang spec file assumes it is the default
     #
     if { [tbool qt5.add_spec] } {
         if {[variant_exists universal] && [variant_isset universal]} {
@@ -91,6 +85,13 @@ pre-configure {
     #    do not pass on the configure.args values
     #
     set cache [open "${qt5.top_level}/.qmake.cache" w 0644]
+    #
+    # set QT_ARCH and QT_TARGET_ARCH manually since they may be
+    #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
+    #     if qtbase was built universal
+    #
+    # set -arch x86_64 since macx-clang spec file assumes it is the default
+    #
     puts ${cache} "if(${qt_qmake_spec_64}) {"
     puts ${cache} "  QT_ARCH=x86_64"
     puts ${cache} "  QT_TARGET_ARCH=x86_64"
