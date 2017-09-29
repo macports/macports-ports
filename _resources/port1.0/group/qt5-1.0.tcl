@@ -588,7 +588,16 @@ compiler.blacklist-append *gcc*
 # no universal binary support in Qt 5
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
+
+if {[vercmp ${qt5.version} 5.10]>=0} {
+    # see https://bugreports.qt.io/browse/QTBUG-58401
+    default supported_archs {"x86_64"}
+} else {
+    # no PPC support in Qt 5
+    #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 default supported_archs {"i386 x86_64"}
+}
+
 # override universal_setup found in portutil.tcl so it uses muniversal PortGroup
 # see https://trac.macports.org/ticket/51643
 proc universal_setup {args} {
