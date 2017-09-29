@@ -628,7 +628,7 @@ namespace eval qt5pg {
                 return ${qt_qmake_spec_64}
             }
         } else {
-            return ""
+           return ${qt_qmake_spec_64}
         }
     }
 }
