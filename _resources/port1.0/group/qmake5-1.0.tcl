@@ -55,12 +55,16 @@ pre-configure {
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
     #
     if { [tbool qt5.add_spec] } {
+        if {[vercmp ${qt5.version} 5.9]>=0} {
+            configure.args-append -spec ${qt_qmake_spec}
+        } else {
         if {[variant_exists universal] && [variant_isset universal]} {
             global merger_configure_args
             lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
             lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
         } else {
             configure.args-append -spec ${qt_qmake_spec}
+        }
         }
     }
 
@@ -85,6 +89,13 @@ pre-configure {
     #    do not pass on the configure.args values
     #
     set cache [open "${qt5.top_level}/.qmake.cache" w 0644]
+    if {[vercmp ${qt5.version} 5.9] >= 0} {
+        if {[variant_exists universal] && [variant_isset universal]} {
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
+        } else {
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${build_arch}"
+        }
+    } else {
     #
     # set QT_ARCH and QT_TARGET_ARCH manually since they may be
     #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
@@ -102,6 +113,7 @@ pre-configure {
     puts ${cache} "  QT_ARCH=i386"
     puts ${cache} "  QT_TARGET_ARCH=i386"
     puts ${cache} "}"
+    }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
     puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
 

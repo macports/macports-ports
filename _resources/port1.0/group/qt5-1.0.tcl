@@ -594,6 +594,15 @@ if {[vercmp ${qt5.version} 5.10]>=0} {
 default supported_archs {"i386 x86_64"}
 }
 
+if {[vercmp ${qt5.version} 5.9]>=0} {
+    # in version 5.9, QT changed how it handles multiple architectures
+    # see http://web.archive.org/web/20170621174843/http://doc.qt.io/qt-5/osx.html
+
+    set qt_qmake_spec_32 macx-clang
+    set qt_qmake_spec_64 macx-clang
+
+    destroot.env-append INSTALL_ROOT=${destroot}
+} else {
 # no universal binary support in Qt 5 versions < 5.9
 #     see http://lists.qt-project.org/pipermail/interest/2012-December/005038.html
 #     and https://bugreports.qt.io/browse/QTBUG-24952
@@ -632,6 +641,8 @@ pre-destroot {
 
 set qt_qmake_spec_32 macx-clang-32
 set qt_qmake_spec_64 macx-clang
+}
+
 default qt_qmake_spec {[qt5pg::get_default_spec]}
 
 namespace eval qt5pg {
