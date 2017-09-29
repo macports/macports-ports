@@ -497,7 +497,7 @@ namespace eval qt5pg {
         }
         qtwebkit-examples {
             5.0
-            5.6
+            6.0
             libexec/qt5/examples/webkitwidgets/webkitwidgets.pro
             ""
         }
