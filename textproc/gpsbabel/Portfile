@@ -3,10 +3,17 @@
 PortSystem          1.0
 PortGroup           github 1.0
 
-github.setup        gpsbabel gpsbabel 1_5_3 gpsbabel_
+github.setup        gpsbabel gpsbabel 1_5_4 gpsbabel_
 # some tricks because version at github is x_y_z
 version             [join [lrange [split ${version} _] 0 2] .]
-revision            1
+#revision            0
+
+if {${subport} eq ${name}} {
+    PortGroup       qt5 1.0
+} else {
+    PortGroup       qmake5 1.0
+}
+PortGroup           cxx11 1.1
 
 categories          textproc comms
 license             GPL
@@ -23,87 +30,85 @@ homepage            http://www.gpsbabel.org/
 depends_lib-append  port:expat \
                     port:libusb-compat
 
-checksums           rmd160  b64e1bbd6906a027d232e097fb182e1ed770aff7 \
-                    sha256  d8606e18a4d27a25739c443f0ced506e992fe0631c8365e3e0109f74224c6e59
+checksums           rmd160  b38b81b38cd50cc4d1c36faa962afb02edb72cd3 \
+                    sha256  fbec8cc36ff4b361e3eada286d3018d34579f919ac5398988e5e85061153fa22
 
-patchfiles          patch-delbin.cc.diff
+if {${subport} eq ${name}} {
 
-configure.universal_args-delete \
-    --disable-dependency-tracking
+    patchfiles-append  patch-delbin.cc.diff
 
-variant qt4 description {build with Qt 4} conflicts qt5 {}
+    # use MacPorts libraries
+    # see https://gitweb.gentoo.org/repo/gentoo.git/tree/sci-geosciences/gpsbabel
+    patchfiles-append  patch-macports_libs.diff
+    # see https://github.com/gpsbabel/gpsbabel/commit/15f8b8b6ec5145a56d06d509b2e90076f75dd867
+    # see https://github.com/gpsbabel/gpsbabel/commit/30a345577a644125502f6e4f8b58ea3077ec8dad
+    patchfiles-append  patch-qt5.diff
+    # avoid error: ordered comparison between pointer and zero ('const char *' and 'int')
+    patchfiles-append  patch-bushnell.cc.diff
 
-variant qt5 description {build with Qt 5} conflicts qt4 {}
+    configure.universal_args-delete \
+        --disable-dependency-tracking
 
-variant gui description {build GUI App} {
-    if { [variant_isset qt5] } {
-        depends_lib-append  port:qt5-qtwebkit
-    }
+    depends_lib-append  \
+        port:shapelib   \
+        port:minizip    \
+        port:zip
 
-    build.target-append  mac-gui
-
-    post-destroot {
-        # do not keep two copies of gpsbabel
-        delete ${destroot}${applications_dir}/GPSBabelFE.app/Contents/MacOS/gpsbabel
-        ln -s ${prefix}/bin/gpsbabel ${destroot}${applications_dir}/GPSBabelFE.app/Contents/MacOS/gpsbabel
-    }
-}
-
-set just_want_qt5_version_info yes
-PortGroup           qt5 1.0
-unset just_want_qt5_version_info
-
-if {![variant_isset qt4] && ![variant_isset qt5]} {
-    if { ${os.major} < 11 } {
-        default_variants-append +qt4
-    } else {
-        default_variants-append +qt5
-    }
-}
-
-if { [variant_isset qt4] } {
-    PortGroup           qt4 1.0
-
-    # in ${prefix}/libexec/qt4/include/QtCore/qxmlstream.h,
-    # there seems to be some class renaming using preprocessor commands
-    #    but only if Q_OS_MAC32 is defined
-    # this seems to break gpsbabel
-    supported_archs     ppc64 x86_64
-
-} elseif { [variant_isset qt5] } {
-    PortGroup           qt5 1.0
-    PortGroup           muniversal 1.0
-} else {
-    ui_error "\n\nYou must select either the +qt4 or +qt5 variant.\n"
-    return -code error "Invalid variant selection"
-}
-configure.env-append \
+    configure.args-append \
     QMAKE=${qt_qmake_cmd} \
     LRELEASE=${qt_lrelease_cmd} \
     LUPDATE=${qt_lupdate_cmd}
 
-if { ![variant_isset universal] || [variant_isset qt4]} {
+    configure.args-append  \
+        --with-zlib=system
+
     post-destroot {
-        if { [variant_isset gui] } {
-            copy ${worksrcpath}/gui/objects/GPSBabelFE.app ${destroot}${applications_dir}
-        }
         xinstall -m 755 -d ${destroot}${prefix}/share/doc/${name}
         xinstall -m 644 -W ${worksrcpath} \
             AUTHORS COPYING README.contrib README.igc \
             README.mapconverter README.xmapwpt \
             ${destroot}${prefix}/share/doc/${name}
     }
-} else {
-    merger-post-destroot {
-        foreach arch ${universal_archs_to_use} {
-            if { [variant_isset gui] } {
-                copy ${worksrcpath}-${arch}/gui/objects/GPSBabelFE.app ${destroot}-${arch}${applications_dir}
+}
+
+subport ${name}-app {
+
+    worksrcdir ${worksrcdir}/gui
+
+    # avoid requiring config.h in the parent directory
+    patchfiles-append  patch-no_config.diff
+    # allow the selection of qtwebkit
+    patchfiles-append  patch-webengine_or_webkit.diff
+    # by default, do not report statistics
+    patchfiles-append  patch-no_report.diff
+
+    depends_lib-append port:${name}
+
+    post-extract {
+        # copied from Makefile.in in ${worksrcdir}/..
+        xinstall -m 0644 ${filespath}/makefile_macports_install ${build.dir}
             }
-            xinstall -m 755 -d ${destroot}-${arch}${prefix}/share/doc/${name}
-            xinstall -m 644 -W ${worksrcpath}-${arch} \
-                AUTHORS COPYING README.contrib README.igc \
-                README.mapconverter README.xmapwpt \
-                ${destroot}-${arch}${prefix}/share/doc/${name}
+
+    variant qtwebkit description {use Webkit instead of WebEngine} {
+        configure.args-append CONFIG+=MACPORTS_USE_WEBKIT
+
+        qt5.depends_component \
+            qtwebkit
         }
+    if {![variant_isset qtwebkit]} {
+        supported_archs x86_64
+
+        qt5.depends_component  \
+            qtdeclarative      \
+            qtlocation         \
+            qtwebchannel       \
+            qtwebengine
     }
+
+    destroot.args                            \
+        -f makefile_macports_install         \
+        PREFIX=${prefix}                     \
+        APPLICATION_DIR=${applications_dir}  \
+        LRELEASE=${qt_lrelease_cmd}          \
+        LUPDATE=${qt_lupdate_cmd}
 }
