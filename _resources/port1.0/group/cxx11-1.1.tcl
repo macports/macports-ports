@@ -46,6 +46,9 @@ if {${cxx_stdlib} eq "libstdc++" } {
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
     
+    # see https://trac.macports.org/ticket/54766
+    depends_lib-append port:libgcc
+
     platform darwin powerpc {
         # ports will build on powerpc with gcc6, gcc4ABI-compatible
         
