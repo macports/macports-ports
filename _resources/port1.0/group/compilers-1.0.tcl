@@ -76,7 +76,7 @@
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
-# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler 
+# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler
 
 PortGroup active_variants 1.1
 
@@ -99,9 +99,9 @@ default compilers.clear_archflags yes
 # also set a default gcc version
 # gcc6 fails to build currently for 10.5.8. PPC, see ticket #51388
 if {${os.platform} eq "darwin" && ${os.version} == 9 && ${os.arch} eq "powerpc"} {
-    set compilers.gcc_default gcc5 
+    set compilers.gcc_default gcc5
 } else {
-    set compilers.gcc_default gcc6 
+    set compilers.gcc_default gcc6
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
@@ -294,7 +294,7 @@ proc compilers.setup_variants {args} {
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
             set comp ""
-            foreach compiler ${compilers.list} {                
+            foreach compiler ${compilers.list} {
                 if {$cdb($variant,$compiler) ne ""} {
                     append comp [subst {
                         configure.$compiler $cdb($variant,$compiler)
@@ -489,7 +489,7 @@ proc compilers.choose {args} {
     if {${compilers.setup_done}} {
         ui_warn "compilers.choose has an effect only before compilers.setup."
     }
-    
+
     # zero out the variable before and append args
     set compilers.list {}
     foreach v $args {
@@ -584,7 +584,7 @@ proc compilers.action_enforce_f {args} {
 }
 
 proc compilers.action_enforce_some_f {args} {
-    ui_debug "compilers.enforce_some_fortran list: ${args}"    
+    ui_debug "compilers.enforce_some_fortran list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             if {[fortran_active_variant_name $portname] eq ""} {
