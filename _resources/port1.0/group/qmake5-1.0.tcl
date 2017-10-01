@@ -37,10 +37,13 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
-options qt5.add_spec qt5.debug_variant qt5.top_level
+options qt5.add_spec qt5.debug_variant qt5.top_level qt5.cxxflags qt5.ldflags qt5.frameworkpaths
 default qt5.add_spec yes
 default qt5.debug_variant yes
 default qt5.top_level {${configure.dir}}
+default qt5.cxxflags {}
+default qt5.ldflags {}
+default qt5.frameworkpaths {}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -223,6 +226,18 @@ pre-configure {
         puts ${cache} "QT_CONFIG-=debug_and_release build_all debug"
         puts ${cache} "CONFIG-=debug"
         puts ${cache} "CONFIG+=release"
+    }
+
+    foreach flag ${qt5.cxxflags} {
+        puts ${cache} "QMAKE_CXXFLAGS+=${flag}"
+    }
+
+    foreach flag ${qt5.ldflags} {
+        puts ${cache} "QMAKE_LFLAGS+=${flag}"
+    }
+
+    foreach flag ${qt5.frameworkpaths} {
+        puts ${cache} "QMAKE_FRAMEWORKPATH+=${flag}"
     }
 
     close ${cache}
