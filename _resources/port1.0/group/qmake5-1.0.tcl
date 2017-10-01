@@ -228,6 +228,14 @@ pre-configure {
         puts ${cache} "CONFIG+=release"
     }
 
+    # respect configure.optflags
+    if {[vercmp ${qt5.version} 5.9] >= 0} {
+        puts ${cache} "CONFIG+=optimize_size"
+        puts ${cache} "QMAKE_CFLAGS_OPTIMIZE_SIZE=${configure.optflags}"
+    } else {
+        puts ${cache} "QMAKE_CXXFLAGS_RELEASE~=s/-O.+/${configure.optflags}/g"
+    }
+
     foreach flag ${qt5.cxxflags} {
         puts ${cache} "QMAKE_CXXFLAGS+=${flag}"
     }
