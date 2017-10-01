@@ -37,13 +37,14 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
-options qt5.add_spec qt5.debug_variant qt5.top_level qt5.cxxflags qt5.ldflags qt5.frameworkpaths
+options qt5.add_spec qt5.debug_variant qt5.top_level qt5.cxxflags qt5.ldflags qt5.frameworkpaths qt5.spec_cmd
 default qt5.add_spec yes
 default qt5.debug_variant yes
 default qt5.top_level {${configure.dir}}
 default qt5.cxxflags {}
 default qt5.ldflags {}
 default qt5.frameworkpaths {}
+default qt5.spec_cmd {"-spec "}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -59,14 +60,14 @@ pre-configure {
     #
     if { [tbool qt5.add_spec] } {
         if {[vercmp ${qt5.version} 5.9]>=0} {
-            configure.args-append -spec ${qt_qmake_spec}
+            configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
         } else {
             if {[variant_exists universal] && [variant_isset universal]} {
                 global merger_configure_args
-                lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
-                lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+                eval lappend merger_configure_args(i386)   ${qt5.spec_cmd}${qt_qmake_spec_32}
+                eval lappend merger_configure_args(x86_64) ${qt5.spec_cmd}${qt_qmake_spec_64}
             } else {
-                configure.args-append -spec ${qt_qmake_spec}
+                configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
             }
         }
     }
