@@ -166,14 +166,14 @@ foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
 }
 
 if {[info exists name]} {
-# check to see if this is a Qt port being built
-foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
-    if {${qt_test_name} eq ${name}} {
-        set qt5.name       ${name}
-        set qt5.base_port  [lindex $available_qt_versions(${qt5.name}) 0]
-        set qt5.version    [lindex $available_qt_versions(${qt5.name}) 1]
+    # check to see if this is a Qt port being built
+    foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+        if {${qt_test_name} eq ${name}} {
+            set qt5.name       ${name}
+            set qt5.base_port  [lindex $available_qt_versions(${qt5.name}) 0]
+            set qt5.version    [lindex $available_qt_versions(${qt5.name}) 1]
+        }
     }
-}
 }
 
 if {[tbool just_want_qt5_version_info]} {
