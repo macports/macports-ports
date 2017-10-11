@@ -10,12 +10,12 @@ if {${livecheck.name} eq "default"} {
     }
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
-    set livecheck.url "http://sourceforge.net/projects/${livecheck.name}/rss"
+    set livecheck.url "https://sourceforge.net/projects/${livecheck.name}/rss"
 }
 if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
 }
 if {${livecheck.regex} eq ""} {
-    set livecheck.regex [list "/[quotemeta ${livecheck.distname}]/(\[a-zA-Z0-9.\]+\\.\[a-zA-Z0-9.\]+)/"]
+    set livecheck.regex [list "/[quotemeta ${livecheck.distname}]/files/\[a-zA-Z_-\]+(\[0-9a-z.\]+)\\.\[a-zA-Z0-9\]+/download"]
 }
 set livecheck.type "regex"
