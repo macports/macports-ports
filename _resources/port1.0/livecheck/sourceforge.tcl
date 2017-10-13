@@ -16,6 +16,6 @@ if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
 }
 if {${livecheck.regex} eq ""} {
-    set livecheck.regex [list "/[quotemeta ${livecheck.distname}]/files/(?:\[0-9a-z.\]+/)?\[a-zA-Z_-\]+(\[0-9a-z.\]+)\\.\[a-zA-Z0-9\]+/download"]
+    set livecheck.regex [list "/[quotemeta ${livecheck.distname}]-(\\d+(?:\\.\\d+)*)"]
 }
 set livecheck.type "regex"
