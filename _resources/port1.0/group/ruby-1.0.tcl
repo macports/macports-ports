@@ -239,19 +239,19 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     }
     switch -glob ${source} {
         rubygems {
-            homepage        http://www.rubygems.org/gems/${ruby.project}
-            master_sites    http://www.rubygems.org/downloads/
+            homepage        https://www.rubygems.org/gems/${ruby.project}
+            master_sites    https://www.rubygems.org/downloads/
             livecheck.type  regex
-            livecheck.url   http://www.rubygems.org/gems/${ruby.project}
+            livecheck.url   https://www.rubygems.org/gems/${ruby.project}
             livecheck.regex {<i class="page__subheading">(\d|\d[0-9.]*\d)</i>}
         }
         sourceforge:* {
             set ruby.project [lindex [split ${source} {:}] 1]
-            homepage        http://sourceforge.net/projects/${ruby.project}
+            homepage        https://sourceforge.net/projects/${ruby.project}
             master_sites    sourceforge:${ruby.project}
         }
         sourceforge {
-            homepage        http://sourceforge.net/projects/${ruby.project}
+            homepage        https://sourceforge.net/projects/${ruby.project}
             master_sites    sourceforge:${ruby.project}
         }
     }
