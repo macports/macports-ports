@@ -352,6 +352,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     ${distfiles_scheme}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
+    http://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 "
 
 # To update this list use:

@@ -17,6 +17,7 @@ set portfetch::mirror_sites::sites(macports_archives) "
     ${packages_scheme}://pek.cn.packages.macports.org/macports/packages/:nosubdir
     http://sea.us.packages.macports.org/macports/packages/:nosubdir
     http://jog.id.packages.macports.org/macports/packages/:nosubdir
+    http://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
 "
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2
