@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # portfile generator for collectd plugins and their dependencies
+# vim:set noet ts=4 sw=4:
 
 # these lists are generated from collectd's ./configure output by applying the following regex:
 # s/\v\s*--enable-(\w+)\s+(.*)$/[\1]="\2"/
