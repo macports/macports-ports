@@ -287,15 +287,15 @@ echo
 
 echo "# enable all matches and targets, disable all other plugins"
 echo "configure.args-append \\"
-for option in ${OPTIONS_ENABLE[@]}; do
+for option in $(printf "%s\n" ${OPTIONS_ENABLE[@]} | sort); do
 	echo "    --enable-$option \\"
 done
-for plugin in ${!PLUGINS[@]}; do
+for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	echo "    --disable-$plugin \\"
 done
 echo
 
-for plugin in ${!PLUGINS[@]}; do
+for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	if [ -z "${OSX_BLACKLIST[$plugin]}" ]; then
 		printf "variant %s description {%s} {\n" "$plugin" "${PLUGINS[$plugin]}"
 		printf "    configure.args-delete --disable-$plugin\n"
@@ -313,7 +313,7 @@ for plugin in ${!PLUGINS[@]}; do
 done
 
 echo "default_variants \\"
-for plugin in ${OSX_STANDARD[@]}; do
+for plugin in $(printf "%s\n" ${OSX_STANDARD[@]} | sort); do
 	printf "    +%s \\\\\n" "$plugin"
 done
 echo
