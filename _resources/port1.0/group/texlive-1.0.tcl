@@ -169,7 +169,7 @@ proc texlive.texmfport {} {
 
     global name master_sites distname extract.suffix
     livecheck.type  regex
-    livecheck.url   ${master_sites}
+    livecheck.url   [lindex ${master_sites} 0]
     livecheck.regex ${name}-(\\d+)-run\\.tar
 
     depends_lib-append port:texlive-common port:texlive-bin
