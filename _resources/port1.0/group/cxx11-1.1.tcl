@@ -45,18 +45,17 @@ if {${cxx_stdlib} eq "libstdc++" } {
 
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
-    
+
     # see https://trac.macports.org/ticket/54766
     depends_lib-append port:libgcc
 
     platform darwin powerpc {
         # ports will build on powerpc with gcc6, gcc4ABI-compatible
-        
         pre-configure {
-            ui_msg "PowerPC C++11 ports are compiling with gcc6. EXPERIMENTAL."
+            ui_msg "PowerPC C++11 ports are compiling with GCC. EXPERIMENTAL."
         }
-        compiler.whitelist      macports-gcc-6
-        universal_variant no
+        compiler.whitelist  macports-gcc-6
+        universal_variant   no
     }
 
     if { ${os.major} < 13 } {
