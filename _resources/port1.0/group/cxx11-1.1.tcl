@@ -44,8 +44,13 @@ if {${cxx_stdlib} eq "libstdc++" } {
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
 
-    # see https://trac.macports.org/ticket/54766
-    depends_lib-append port:libgcc
+    proc register_gcc_dependents {} {
+        global os.major
+        # see https://trac.macports.org/ticket/54766
+        depends_lib-append port:libgcc
+    }
+    # do not force all Portfiles to switch from depends_lib to depends_lib-append
+    port::register_callback register_gcc_dependents
 
     if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
         # ports will build on powerpc with gcc6, gcc4ABI-compatible
