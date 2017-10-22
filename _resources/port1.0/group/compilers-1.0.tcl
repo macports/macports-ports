@@ -97,7 +97,7 @@ default compilers.libfortran {}
 default compilers.clear_archflags yes
 
 # also set a default gcc version
-if {${os.arch} eq "powerpc"} {
+if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
     # see https://trac.macports.org/ticket/54215#comment:36
     set compilers.gcc_default gcc6
 } else {
