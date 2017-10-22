@@ -48,6 +48,13 @@ if {${cxx_stdlib} eq "libstdc++" } {
         global os.major
         # see https://trac.macports.org/ticket/54766
         depends_lib-append port:libgcc
+        # ensure desired compiler flags are present
+        if { ${os.major} < 13 } {
+            configure.cxxflags-delete    -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.cxxflags-append    -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.objcxxflags-delete -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.objcxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
+        }
     }
     # do not force all Portfiles to switch from depends_lib to depends_lib-append
     port::register_callback register_gcc_dependents
