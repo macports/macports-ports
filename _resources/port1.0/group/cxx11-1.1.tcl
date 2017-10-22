@@ -41,21 +41,21 @@ PortGroup compiler_blacklist_versions 1.0
 
 if {${cxx_stdlib} eq "libstdc++" } {
 
-    compiler.whitelist          macports-clang-4.0
-
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
 
     # see https://trac.macports.org/ticket/54766
     depends_lib-append port:libgcc
 
-    platform darwin powerpc {
+    if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
         # ports will build on powerpc with gcc6, gcc4ABI-compatible
         pre-configure {
             ui_msg "PowerPC C++11 ports are compiling with GCC. EXPERIMENTAL."
         }
         compiler.whitelist  macports-gcc-6
         universal_variant   no
+    } else {
+        compiler.whitelist  macports-clang-4.0
     }
 
     if { ${os.major} < 13 } {
