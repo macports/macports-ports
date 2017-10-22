@@ -67,7 +67,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
         compiler.whitelist  macports-gcc-6
         universal_variant   no
     } else {
-        compiler.whitelist  macports-clang-4.0
+        compiler.whitelist  macports-clang-5.0
     }
 
     if { ${os.major} < 13 } {
