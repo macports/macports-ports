@@ -164,6 +164,8 @@ wxWidgets.macosx_version_min
 options     wxWidgets.use
 option_proc wxWidgets.use wxWidgets._set
 
+PortGroup   compiler_blacklist_versions 1.0
+
 ## TODO: it would be nice to make the changes reversible
 ##
 ## parameters:
@@ -301,4 +303,12 @@ proc wxWidgets._set {option action args} {
     wxWidgets.wxdir     ${wxWidgets.prefix}/bin
     wxWidgets.wxconfig  ${wxWidgets.wxdir}/wx-config
     wxWidgets.wxrc      ${wxWidgets.wxdir}/wxrc
+
+    if {[string match "wxWidgets-3.0*" ${args}]} {
+        # the following causes a crash on older versions of clang:
+        #    #define wx_has_cpp11_include(h) __has_include(h)
+        #    #if wx_has_cpp11_include(<unordered_map>)
+        # see https://trac.macports.org/ticket/54296
+        compiler.blacklist-append {clang < 500}
+    }
 }
