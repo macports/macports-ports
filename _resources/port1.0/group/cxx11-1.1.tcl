@@ -46,7 +46,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
 
     proc register_gcc_dependents {} {
         global os.major
-        # see https://trac.macports.org/ticket/54766
+        depends_lib-delete port:libgcc
         depends_lib-append port:libgcc
         # ensure desired compiler flags are present
         if { ${os.major} < 13 } {
@@ -69,6 +69,9 @@ if {${cxx_stdlib} eq "libstdc++" } {
     } else {
         compiler.whitelist  macports-clang-5.0
     }
+
+    # see https://trac.macports.org/ticket/54766
+    depends_lib-append port:libgcc
 
     if { ${os.major} < 13 } {
         # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
