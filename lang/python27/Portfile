@@ -6,8 +6,7 @@ PortGroup           select 1.0
 name                python27
 epoch               2
 # Remember to keep py27-tkinter and py27-gdbm's versions sync'd with this
-version             2.7.13
-revision            1
+version             2.7.14
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
@@ -15,53 +14,53 @@ categories          lang
 license             PSF
 platforms           darwin
 
-maintainers         jwa openmaintainer
+maintainers         {jmr @jmroot} openmaintainer
 
 description         An interpreted, object-oriented programming language
 long_description    Python is an interpreted, interactive, object-oriented \
                     programming language.
 
-homepage            http://www.python.org/
+homepage            https://www.python.org/
 master_sites        ${homepage}ftp/python/${version}/
 
 distname            Python-${version}
 use_xz              yes
 
-checksums           rmd160  be09518cdc335314de1c5ebe181690082ce780d7 \
-                    sha256  35d543986882f78261f97787fd3e06274bfa6df29fac9b4a94f73930ff98f731
+checksums           md5 1f6db41ad91d9eb0a6f0c769b8613c5b \
+                    rmd160 816553f988c661cfe31b6e89a513fdfbf87963d5 \
+                    sha256 71ffb26e09e78650e424929b2b457b9c912ac216576e6bd9e7d204ed03296a66
 
 patchfiles          patch-Makefile.pre.in.diff \
                     patch-setup.py.diff \
-                    patch-setup.py-disabled_modules.diff \
                     patch-Lib-cgi.py.diff \
                     patch-Lib-ctypes-macholib-dyld.py.diff \
                     patch-configure.diff \
                     patch-libedit.diff \
                     enable-loadable-sqlite-extensions.patch
 
-depends_lib         port:gettext \
-                    port:zlib \
+depends_build       port:pkgconfig
+depends_lib         port:bzip2 \
+                    port:db48 \
+                    port:expat \
+                    port:gettext \
+                    port:libedit \
+                    port:libffi \
+                    port:ncurses \
                     path:lib/libssl.dylib:openssl \
                     port:sqlite3 \
-                    port:db48 \
-                    port:ncurses \
-                    port:bzip2 \
-                    port:libedit
+                    port:zlib
 depends_run         port:python_select \
                     port:python2_select
 
-# disable-ipv6 for now, getaddrinfo-function missing
 configure.args      --enable-framework=${frameworks_dir} \
-                    --enable-ipv6
+                    --enable-ipv6 \
+                    --with-system-expat \
+                    --with-system-ffi
 
 configure.cppflags-append -I${prefix}/include/db48
 configure.ldflags-append -L${prefix}/lib/db48
 
 configure.ccache    no
-
-# signed integer overflow is normally undefined as per the C spec, but python
-# needs it to be defined as twos-complement
-configure.cflags-append -fwrapv
 
 post-patch {
     reinplace "s|@@PREFIX@@|${prefix}|g" \
@@ -69,10 +68,6 @@ post-patch {
         ${worksrcpath}/Lib/ctypes/macholib/dyld.py
     reinplace "s|@@APPLICATIONS_DIR@@|${applications_dir}|" \
         ${worksrcpath}/configure
-
-    # See https://trac.macports.org/changeset/37861
-    reinplace "s|xargs -0 rm -r|/usr/bin/xargs -0 /bin/rm -r|g" \
-        ${worksrcpath}/Mac/PythonLauncher/Makefile.in
 }
 
 post-configure {
@@ -86,10 +81,6 @@ test.target         test
 
 destroot.target     frameworkinstall maninstall
 
-# ensure that correct compiler is used
-build.args-append   MAKE="${build.cmd} CC=${configure.cc}"
-destroot.args-append MAKE="${destroot.cmd} CC=${configure.cc}"
-
 set pythonNoDot python[string map {. {}} $branch]
 select.entries      [list python python-$pythonNoDot $pythonNoDot] \
                     [list python2 python2-$pythonNoDot $pythonNoDot]
@@ -100,13 +91,6 @@ the 'python' or 'python2' commands), run one or both of:
 
     sudo port select --set python $pythonNoDot
     sudo port select --set python2 $pythonNoDot
-
-##############################################################
-# IF YOU ARE USING PYTHON FROM THE TERMINAL, PLEASE INSTALL:
-#   py[string map {. {}} $branch]-readline
-# TO AVOID A LIBEDIT / PYTHON INTERACTION ISSUE.
-# REF: https://trac.macports.org/ticket/48807
-##############################################################
 "
 
 post-destroot {
@@ -119,6 +103,14 @@ post-destroot {
 
     ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
     ln -s ${framewdir}/Python ${destroot}${prefix}/lib/libpython${branch}.dylib
+
+    # Without this, LINKFORSHARED is set to
+    # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+    # (this becomes Python.framework/Versions/2.7/Python) which doesn't
+    # quite work (see ticket #15099); instead we mirror the behavior of
+    # `python-config --ldflags` here.
+    reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION) $(LIBS) $(SYSLIBS)|} \
+        ${destroot}${framewdir}/lib/python${branch}/config/Makefile
 
     foreach unversionedFile {2to3 2to3-2 idle idle2 pydoc pydoc2 python python2 python-config python2-config pythonw pythonw2 smtpd.py smtpd2.py} {
         delete ${destroot}${prefix}/bin/${unversionedFile}
@@ -138,22 +130,14 @@ platform darwin {
     }
 }
 
-variant readline description {Use readline instead of libedit} {
-    patchfiles-delete       patch-libedit.diff
-    depends_lib-append      port:readline
-    depends_lib-delete      port:libedit
-}
-
 variant universal {
-    # This patch will need updating when 2.7.6 is released, as ARCH_RUN_32BIT
-    # will once again be used for something. See ticket #39270.
     patchfiles-append patch-configure-universal.diff
     post-patch {
         reinplace \
             "s|__UNIVERSAL_ARCHFLAGS__|${configure.universal_cflags}|" \
             ${worksrcpath}/configure
     }
-    if {${configure.sdkroot} != ""} {
+    if {${configure.sdkroot} ne ""} {
         configure.args-append   --enable-universalsdk=${configure.sdkroot}
     } else {
         configure.args-append   --enable-universalsdk=/
@@ -165,6 +149,5 @@ variant ucs4 description {Enable support for UCS4} {
 }
 
 livecheck.type          regex
-#livecheck.url           ${homepage}downloads/
 livecheck.url           ${homepage}downloads/
 livecheck.regex         Python (${branch}(?:\\.\\d+)*)

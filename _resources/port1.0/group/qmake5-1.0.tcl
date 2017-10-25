@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2013-2016 The MacPorts Project
+# Copyright (c) 2013-2017 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -37,10 +37,14 @@
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
 
-options qt5.add_spec qt5.debug_variant qt5.top_level
+options qt5.add_spec qt5.debug_variant qt5.top_level qt5.cxxflags qt5.ldflags qt5.frameworkpaths qt5.spec_cmd
 default qt5.add_spec yes
 default qt5.debug_variant yes
 default qt5.top_level {${configure.dir}}
+default qt5.cxxflags {}
+default qt5.ldflags {}
+default qt5.frameworkpaths {}
+default qt5.spec_cmd {"-spec "}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -52,28 +56,25 @@ configure.universal_args-delete --disable-dependency-tracking
 
 pre-configure {
     #
-    # set QT_ARCH and QT_TARGET_ARCH manually since they may be
-    #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
-    #     if qtbase was built universal
-    #
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
     #
-    # set -arch x86_64 since macx-clang spec file assumes it is the default
-    #
     if { [tbool qt5.add_spec] } {
-        if {[variant_exists universal] && [variant_isset universal]} {
-            global merger_configure_args
-            lappend merger_configure_args(i386)   -spec ${qt_qmake_spec_32}
-            lappend merger_configure_args(x86_64) -spec ${qt_qmake_spec_64}
+        if {[vercmp ${qt5.version} 5.9]>=0} {
+            configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
         } else {
-            configure.args-append -spec ${qt_qmake_spec}
+            if {[variant_exists universal] && [variant_isset universal]} {
+                global merger_configure_args
+                eval lappend merger_configure_args(i386)   ${qt5.spec_cmd}${qt_qmake_spec_32}
+                eval lappend merger_configure_args(x86_64) ${qt5.spec_cmd}${qt_qmake_spec_64}
+            } else {
+                configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
+            }
         }
     }
 
     if { [vercmp ${xcodeversion} "7.0"] >= 0 } {
         # starting with Xcode 7.0, the SDK for build OS version might not be available
         # see https://trac.macports.org/ticket/53597
-
         set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
         if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
             configure.sdk_version
@@ -92,16 +93,31 @@ pre-configure {
     #    do not pass on the configure.args values
     #
     set cache [open "${qt5.top_level}/.qmake.cache" w 0644]
-    puts ${cache} "if(${qt_qmake_spec_64}) {"
-    puts ${cache} "  QT_ARCH=x86_64"
-    puts ${cache} "  QT_TARGET_ARCH=x86_64"
-    puts ${cache} "  QMAKE_CFLAGS+=-arch x86_64"
-    puts ${cache} "  QMAKE_CXXFLAGS+=-arch x86_64"
-    puts ${cache} "  QMAKE_LFLAGS+=-arch x86_64"
-    puts ${cache} "} else {"
-    puts ${cache} "  QT_ARCH=i386"
-    puts ${cache} "  QT_TARGET_ARCH=i386"
-    puts ${cache} "}"
+    if {[vercmp ${qt5.version} 5.9] >= 0} {
+        if {[variant_exists universal] && [variant_isset universal]} {
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
+        } else {
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${build_arch}"
+        }
+    } else {
+        #
+        # set QT_ARCH and QT_TARGET_ARCH manually since they may be
+        #     incorrect in ${qt_mkspecs_dir}/qconfig.pri
+        #     if qtbase was built universal
+        #
+        # set -arch x86_64 since macx-clang spec file assumes it is the default
+        #
+        puts ${cache} "if(${qt_qmake_spec_64}) {"
+        puts ${cache} "  QT_ARCH=x86_64"
+        puts ${cache} "  QT_TARGET_ARCH=x86_64"
+        puts ${cache} "  QMAKE_CFLAGS+=-arch x86_64"
+        puts ${cache} "  QMAKE_CXXFLAGS+=-arch x86_64"
+        puts ${cache} "  QMAKE_LFLAGS+=-arch x86_64"
+        puts ${cache} "} else {"
+        puts ${cache} "  QT_ARCH=i386"
+        puts ${cache} "  QT_TARGET_ARCH=i386"
+        puts ${cache} "}"
+    }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
     puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
 
@@ -115,9 +131,22 @@ pre-configure {
         puts ${cache} "QMAKE_LINK_SHLIB=${configure.cxx}"
     }
 
-    set qt_version [exec ${prefix}/bin/pkg-config --modversion Qt5Core]
+    # save certain configure flags
+    set qmake5_cxx11_flags ""
+    set qmake5_cxx_flags   ""
+    set qmake5_l_flags     ""
+    foreach flag ${configure.cxxflags} {
+        if { ${flag} eq "-D_GLIBCXX_USE_CXX11_ABI=0" } {
+            lappend qmake5_cxx11_flags ${flag}
+        }
+    }
+    foreach flag ${configure.ldflags} {
+    }
+    set qmake5_cxx11_flags [join ${qmake5_cxx11_flags} " "]
+    set qmake5_cxx_flags   [join ${qmake5_cxx_flags}   " "]
+    set qmake5_l_flags     [join ${qmake5_l_flags}     " "]
 
-    if { [vercmp ${qt_version} 5.6.0] >= 0 } {
+    if { [vercmp ${qt5.version} 5.6] >= 0 } {
         if { ${configure.cxx_stdlib} ne "libc++" } {
             # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
             #    so value of ${configure.cxx_stdlib} can always be used
@@ -126,7 +155,10 @@ pre-configure {
             puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
             puts ${cache} QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
         }
-    } elseif { [vercmp ${qt_version} 5.5.0] == 0 } {
+        if {${qmake5_cxx11_flags} ne ""} {
+            puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx11_flags}"
+        }
+    } elseif { [vercmp ${qt5.version} 5.5] >= 0 } {
 
         # always use the same standard library
         puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
@@ -140,21 +172,29 @@ pre-configure {
             puts ${cache} QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
             puts ${cache} QMAKE_LFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
         }
+        if {${qmake5_cxx11_flags} ne ""} {
+            puts ${cache} QMAKE_CXXFLAGS_CXX11+="${qmake5_cxx11_flags}"
+        }
     } else {
         # always use the same standard library
         puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
         puts ${cache} QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+        if {${qmake5_cxx11_flags} ne ""} {
+            puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx11_flags}"
+        }
+    }
+    if {${qmake5_cxx_flags} ne "" } {
+        puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx_flags}"
+    }
+    if {${qmake5_l_flags} ne "" } {
+        puts ${cache} QMAKE_LFLAGS+="${qmake5_l_flags}"
     }
 
     # accommodating variant request varies depending on how qtbase was built
     set base_debug false
-    foreach qt_test_name ${available_qt_versions} {
-        if { [string range ${qt_test_name} end-3 end] eq "-kde" } {
-            set qt_test_port_name ${qt_test_name}
-        } else {
-            set qt_test_port_name ${qt_test_name}-qtbase
-        }
-        if {![catch {set result [active_variants ${qt_test_port_name} debug ""]}]} {
+    foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+        set qt_test_base_port [lindex ${qt_test_info} 0]
+        if {![catch {set result [active_variants ${qt_test_base_port} debug ""]}]} {
             if {$result} {
                 # code to be executed if $depspec is active with at least all variants in
                 # $required and none from $forbidden
@@ -187,6 +227,26 @@ pre-configure {
         puts ${cache} "QT_CONFIG-=debug_and_release build_all debug"
         puts ${cache} "CONFIG-=debug"
         puts ${cache} "CONFIG+=release"
+    }
+
+    # respect configure.optflags
+    if {[vercmp ${qt5.version} 5.9] >= 0} {
+        puts ${cache} "CONFIG+=optimize_size"
+        puts ${cache} "QMAKE_CFLAGS_OPTIMIZE_SIZE=${configure.optflags}"
+    } else {
+        puts ${cache} "QMAKE_CXXFLAGS_RELEASE~=s/-O.+/${configure.optflags}/g"
+    }
+
+    foreach flag ${qt5.cxxflags} {
+        puts ${cache} "QMAKE_CXXFLAGS+=${flag}"
+    }
+
+    foreach flag ${qt5.ldflags} {
+        puts ${cache} "QMAKE_LFLAGS+=${flag}"
+    }
+
+    foreach flag ${qt5.frameworkpaths} {
+        puts ${cache} "QMAKE_FRAMEWORKPATH+=${flag}"
     }
 
     close ${cache}

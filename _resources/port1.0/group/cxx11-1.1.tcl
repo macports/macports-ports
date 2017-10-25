@@ -38,34 +38,40 @@
 PortGroup compiler_blacklist_versions 1.0
 
 # Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
-# We do not know what "cc" is, so blacklist it as well.
-compiler.blacklist-append   {*gcc-3*} {*gcc-4.[0-5]} {clang < 500} cc
 
 if {${cxx_stdlib} eq "libstdc++" } {
 
-    compiler.blacklist-append   {macports-clang-3.[0-8]} clang
-
-    compiler.whitelist-append  \
-        macports-clang-4.0     \
-        macports-gcc-6         \
-        macports-gcc-5         \
-        macports-gcc-4.9       \
-        macports-gcc-4.8       \
-        macports-gcc-4.7       \
-        macports-gcc-4.6
-
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
-    
-    platform darwin powerpc {
-        # ports will build on powerpc with gcc6, gcc4ABI-compatible
-        
-        pre-configure {
-            ui_msg "PowerPC C++11 ports are compiling with gcc6. EXPERIMENTAL."
+
+    proc register_gcc_dependents {} {
+        global os.major
+        depends_lib-delete port:libgcc
+        depends_lib-append port:libgcc
+        # ensure desired compiler flags are present
+        if { ${os.major} < 13 } {
+            configure.cxxflags-delete    -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.cxxflags-append    -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.objcxxflags-delete -D_GLIBCXX_USE_CXX11_ABI=0
+            configure.objcxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
         }
-        compiler.whitelist-delete macports-clang-4.0
-        universal_variant no
     }
+    # do not force all Portfiles to switch from depends_lib to depends_lib-append
+    port::register_callback register_gcc_dependents
+
+    if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+        # ports will build on powerpc with gcc6, gcc4ABI-compatible
+        pre-configure {
+            ui_msg "PowerPC C++11 ports are compiling with GCC. EXPERIMENTAL."
+        }
+        compiler.whitelist  macports-gcc-6
+        universal_variant   no
+    } else {
+        compiler.whitelist  macports-clang-5.0
+    }
+
+    # see https://trac.macports.org/ticket/54766
+    depends_lib-append port:libgcc
 
     if { ${os.major} < 13 } {
         # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
@@ -77,5 +83,6 @@ if {${cxx_stdlib} eq "libstdc++" } {
     }
 } else {
     # GCC compilers can not use libc++
-    compiler.blacklist-append   *gcc*
+    # We do not know what "cc" is, so blacklist it as well.
+    compiler.blacklist-append   *gcc* {clang < 500} cc
 }

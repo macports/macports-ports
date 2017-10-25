@@ -5,7 +5,8 @@ PortGroup           active_variants 1.1
 PortGroup           github 1.0
 PortGroup           gobject_introspection 1.0
 
-github.setup        lathiat avahi 0.6.32 v
+github.setup        lathiat avahi 0.7 v
+#revision           0
 categories          net devel
 maintainers         nomaintainer
 license             LGPL-2.1+
@@ -20,8 +21,8 @@ long_description    ${description} It uses D-Bus for communication between user 
 homepage            http://avahi.org/
 github.tarball_from releases
 
-checksums           rmd160  d5ec03116938e0ce54e6ae9c2773e153d1a56523 \
-                    sha256  d54991185d514a0aba54ebeb408d7575b60f5818a772e28fa0e18b98bc1db454
+checksums           rmd160  40a58c780a01ae03a234cd52735ba8d63c93b867 \
+                    sha256  57a99b5dfe7fdae794e3d1ee7a62973a368e91e414bd0dfa5d84434de5b14804
 
 patchfiles          patch-avahi-daemon-Makefile.in.diff \
                     patch-avahi-dnsconfd-Makefile.in.diff \
@@ -30,21 +31,16 @@ patchfiles          patch-avahi-daemon-Makefile.in.diff \
                     patch-initscript-darwin-org.freedesktop.avahi-daemon.plist.in.diff \
                     patch-initscript-darwin-org.freedesktop.avahi-dnsconfd.plist.in.diff
 
-post-patch {
-# This preprocessor macro causes a lot of things to be undefined inside netinet/in.h system header.
-    reinplace "s/-D_XOPEN_SOURCE=500//" ${worksrcpath}/configure
-    reinplace "s|/System|${destroot}|g" ${worksrcpath}/initscript/darwin/Makefile.in
+# ensure MacPorts machine-id from dbus is found
+# see https://trac.macports.org/ticket/53894 for O_CLOEXEC
+patchfiles-append   patch-avahi_daemon.diff
 
-    # Let avahi build with newer gtk
-    reinplace "s|-DG_DISABLE_DEPRECATED=1||" \
-        ${worksrcpath}/avahi-ui/Makefile.am \
-        ${worksrcpath}/avahi-ui/Makefile.in
-    reinplace "s|-DGDK_DISABLE_DEPRECATED=1||" \
-        ${worksrcpath}/avahi-ui/Makefile.am \
-        ${worksrcpath}/avahi-ui/Makefile.in
-    reinplace "s|-DGTK_DISABLE_DEPRECATED=1||" \
-        ${worksrcpath}/avahi-ui/Makefile.am \
-        ${worksrcpath}/avahi-ui/Makefile.in
+post-patch {
+    # this preprocessor macro causes a lot of things to be undefined inside netinet/in.h system header.
+    reinplace "s/-D_XOPEN_SOURCE=500//" ${worksrcpath}/configure
+
+    # use correct location of dbus from patch-avahi_daemon.diff
+    reinplace "s|__MACPORTS_PREFIX__|${prefix}|g" ${worksrcpath}/avahi-daemon/main.c
 }
 
 depends_build       port:pkgconfig \
@@ -57,7 +53,21 @@ depends_lib         port:expat \
 
 gobject_introspection yes
 
-set avahiuser       avahi
+if {![variant_isset underscore]} {
+    set avahi_user  avahi
+    set avahi_group avahi
+} else {
+    set avahi_user  _avahi
+    set avahi_group _avahi
+}
+add_users ${avahi_user} group=${avahi_group} realname=Avahi\ Service
+
+# "Priviliged [sic] access group for Avahi clients"
+# defaults to netdev
+# macOS has no equivalent group
+#     see https://wiki.ubuntu.com/Security/Privileges#Connect_to_wireless_and_ethernet_networks
+#     see https://wiki.debian.org/SystemGroups
+set avahi_priv_group admin
 
 configure.args      --disable-autoipd \
                     --disable-silent-rules \
@@ -72,37 +82,41 @@ configure.args      --disable-autoipd \
                     --disable-gtk \
                     --disable-pygtk \
                     --disable-tests \
-                    --with-avahi-priv-access-group=${avahiuser}
+                    --with-avahi-priv-access-group=${avahi_priv_group} \
+                    --with-avahi-user=${avahi_user} \
+                    --with-avahi-group=${avahi_group}
 
 # __APPLE_USE_RFC_2292 should be removed once avhi is updated to support RFC 3542
 configure.cppflags-append   -L${prefix}/lib -D__APPLE_USE_RFC_2292
 
+set launch_daemons {org.freedesktop.avahi-daemon.plist org.freedesktop.avahi-dnsconfd.plist}
+
 post-destroot {
-    xinstall -d -m 0755 ${destroot}${prefix}/etc/LaunchDaemons
-    move {*}[glob ${destroot}/Library/LaunchDaemons/*] \
-        ${destroot}${prefix}/etc/LaunchDaemons/
-    # The startupitem.install keyword does not exist in MacPorts < 2.1.
-    if {![info exists startupitem.install]} {
-        set startupitem.install yes
+    xinstall -d -m 0755 ${destroot}${prefix}/Library/LaunchDaemons
+    foreach fl ${launch_daemons} {
+        file attributes ${destroot}/Library/LaunchDaemons/${fl} -permissions 0644
+        move ${destroot}/Library/LaunchDaemons/${fl} ${destroot}${prefix}/Library/LaunchDaemons
     }
-    if { ${startupitem.install} != "no" } {
-        xinstall -d -m 0755 ${destroot}/LaunchDaemons
-        ln -s ${prefix}/etc/LaunchDaemons/org.freedesktop.avahi-daemon.plist \
-            ${destroot}/Library/LaunchDaemons/
-        ln -s ${prefix}/etc/LaunchDaemons/org.freedesktop.avahi-dnsconfd.plist \
-            ${destroot}/Library/LaunchDaemons/
-            
+
+    # previous command should move all LaunchDaemons
+    foreach fl [glob -nocomplain -tails -directory ${destroot}/Library/LaunchDaemons *] {
+        ui_error "${destroot}/Library/LaunchDaemons should be empty"
+        ui_error "${fl} should not exist in ${destroot}/Library/LaunchDaemons"
+        return -code error "unaccounted for file in LaunchDaemons"
+    }
+
+    if {${startupitem.install}} {
+        foreach fl ${launch_daemons} {
+            ln -s ${prefix}/Library/LaunchDaemons/${fl} ${destroot}/Library/LaunchDaemons/${fl}
+        }
     }
 }
 
-add_users ${avahiuser} group=${avahiuser} realname=Avahi\ Service
-
 post-activate {
-    if {[file exists /System/Library/LaunchDaemons/org.freedesktop.avahi-dnsconfd.plist]} {
-        ui_debug "Removing cruft from versions prior to 0.6.17_2..."
-        delete \
-            /System/Library/LaunchDaemons/org.freedesktop.avahi-dnsconfd.plist \
-            /System/Library/LaunchDaemons/org.freedesktop.avahi-daemon.plist
+    if {${startupitem.install}} {
+        foreach fl ${launch_daemons} {
+            file attributes ${prefix}/Library/LaunchDaemons/${fl} -owner root -group wheel
+        }
     }
 }
 
@@ -132,7 +146,8 @@ variant test description {Build tests} {
 }
 
 variant gtk description {Build with GTK2} {
-    depends_lib-append      port:libglade2
+    depends_lib-append      port:gtk2 \
+                            port:libglade2
 
     configure.args-delete   --disable-gtk
 }
@@ -157,24 +172,56 @@ configure.python        ${prefix}/bin/python2.7
 depends_lib-append      port:dbus-python27 \
                         port:py27-gdbm
 
+depends_lib-append      port:py27-gobject3
+configure.pkg_config_path-append ${prefix}/Library/Frameworks/Python.framework/Versions/2.7/lib/pkgconfig
+
+# see https://trac.macports.org/ticket/55054
+pre-configure {
+    configure.env-append PKG_CONFIG_PATH=[join ${configure.pkg_config_path} ":"]
+    configure.pkg_config_path
+}
+
 if [variant_isset gtk] {
     depends_lib-append      port:py27-pygtk
     configure.args-delete   --disable-pygtk
 }
 
-variant x11 {
+variant x11 conflicts quartz {
     require_active_variants gtk2 x11 quartz
 }
 
-variant quartz {
+variant quartz conflicts x11 {
     require_active_variants gtk2 quartz x11
 }
 
-catch {
-    if {[active_variants gtk2 quartz x11]} {
-        default_variants-append +quartz
-    }
-}
 if {![variant_isset quartz]} {
     default_variants-append +x11
+}
+
+variant underscore description {Put underscore in front of Avahi daemon user} {
+    # For darwin ${os.major} > 8, daemon users have an underscore in front of the usernames and groups.
+    # This variant allows the user to follow that convention.
+}
+
+if {${startupitem.install}} {
+    notes "############################################################################
+# Startup items have been generated that will aid in
+# starting ${name} with launchd. They are disabled
+# by default. Execute the following commands to start them,
+# and to cause them to launch at startup:
+#"
+    foreach fl ${launch_daemons} {
+        notes-append "# sudo launchctl load -w /Library/LaunchDaemons/${fl}"
+    }
+    notes-append "############################################################################"
+} else {
+        notes "############################################################################
+# Startup items were not installed for ${name}
+# Some programs which depend on ${name} might not function properly.
+# To load ${name} manually, run
+#"
+    foreach fl ${launch_daemons} {
+        notes-append "# sudo launchctl load -w ${prefix}/Library/LaunchDaemons/${fl}"
+    }
+    notes-append "############################################################################"
 }
