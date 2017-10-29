@@ -30,13 +30,26 @@
 #
 # Usage:
 #
-#   PortGroup                 languages 1.0
-#   compiler.c_standard       Standard for the C programming language
-#                             Values: 1989 (Default), 1999, 2011
-#   compiler.cxx_standard     Standard for the C++ programming language
-#                             Values: 1998 (Default), 2011, 2014, 2017
-#   compiler.require_fortran  Is a Fortran compiler required?
-#                             Values: no (Default), yes
+#   PortGroup                  languages 1.0
+#
+#   compiler.c_standard        Standard for the C programming language
+#                              Values: 1989 (Default), 1999, 2011
+#
+#   compiler.cxx_standard      Standard for the C++ programming language
+#                              Values: 1998 (Default), 2011, 2014, 2017
+#
+#   compiler.require_fortran   Is a Fortran compiler required?
+#                              Values: no (Default), yes
+#
+#   compiler.fortran_fallback  If Fortran is required and is not provides by compiler,
+#                                  list of compilers to use
+#                              Devault value is the Fortran compilers in compiler.fallback
+#
+#   compiler.openmp_version   Version of OpenMP required (blank for none)
+#                             Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
+#
+#   compiler.mpi              MacPorts port that provides MPI
+#                             Values: blank (Default), mpich, openmpi
 #
 # This PortGroup sets the compiler, compiler dependencies,
 #    and the C++ standard library switches.
@@ -44,27 +57,100 @@
 # Ideally the functionality of this PortGroup should be integrated into
 # MacPorts base as a new option.
 
-options \
-    compiler.c_standard       \
-    compiler.cxx_standard     \
-    compiler.require_fortran
+options                        \
+    compiler.c_standard        \
+    compiler.cxx_standard      \
+    compiler.require_fortran   \
+    compiler.fortran_fallback  \
+    compiler.openmp_version    \
+    compiler.mpi
 
-compiler.c_standard       1989
-compiler.cxx_standard     1998
-compiler.require_fortran  no
+default compiler.c_standard        1989
+default compiler.cxx_standard      1998
+default compiler.require_fortran   no
+default compiler.fortran_fallback  {[portconfigure::get_fortran_fallback]}
+default compiler.openmp_version    {}
+default compiler.mpi               {}
 
-# internal function to determine the latest GCC version to use for Fortran
-proc portconfigure::get_gcc_fortran_version {} { return 7 }
+# replacement for portconfigure.tcl version
+proc portconfigure::configure_start {args} {
+    global UI_PREFIX
+
+    ui_notice "$UI_PREFIX [format [msgcat::mc "Configuring %s"] [option subport]]"
+
+    set compiler [option configure.compiler]
+    set valid_compilers {
+        {^apple-gcc-(4\.[02])$}             {MacPorts Apple GCC %s}
+        {^cc$}                              {System cc}
+        {^clang$}                           {Xcode Clang}
+        {^gcc$}                             {System GCC}
+        {^gcc-(3\.3|4\.[02])$}              {Xcode GCC %s}
+        {^llvm-gcc-4\.2$}                   {Xcode LLVM-GCC 4.2}
+        {^macports-clang$}                  {MacPorts Clang (port select)}
+        {^macports-clang-(\d+\.\d+)$}       {MacPorts Clang %s}
+        {^macports-dragonegg-(\d+\.\d+)$}   {MacPorts DragonEgg %s}
+        {^macports-dragonegg-(\d+\.\d+)-gcc-(\d+\.\d+)$}
+            {MacPorts DragonEgg %s with GCC %s}
+        {^macports-gcc$}                    {MacPorts GCC (port select)}
+        {^macports-gcc-(\d+(?:\.\d+)?)$}    {MacPorts GCC %s}
+        {^macports-llvm-gcc-4\.2$}          {MacPorts LLVM-GCC 4.2}
+        {^macports-g95$}                    {MacPorts G95}
+        {^macports-mpich-clang$}
+            {MacPorts MPICH Wrapper for Xcode Clang}
+        {^macports-openmpi-clang$}
+            {MacPorts Open MPI Wrapper for Xcode Clang}
+        {^macports-mpich-clang-(\d+\.\d+)$}
+            {MacPorts MPICH Wrapper for Clang %s}
+        {^macports-openmpi-clang-(\d+\.\d+)$}
+            {MacPorts Open MPI Wrapper for Clang %s}
+        {^macports-mpich-gcc-(\d+(?:\.\d+)?)$}
+            {MacPorts MPICH Wrapper for GCC %s}
+        {^macports-openmpi-gcc-(\d+(?:\.\d+)?)$}
+            {MacPorts Open MPI Wrapper for GCC %s}
+    }
+    foreach {re fmt} $valid_compilers {
+        if {[set matches [regexp -inline $re $compiler]] ne ""} {
+            set compiler_name [format $fmt {*}[lrange $matches 1 end]]
+            break
+        }
+    }
+    if {![info exists compiler_name]} {
+        return -code error "Invalid value for configure.compiler: $compiler"
+    }
+    ui_debug "Preferred compilers: [option compiler.fallback]"
+    ui_debug "Using compiler '$compiler_name'"
+
+    # Additional ccache directory setup
+    global configure.ccache ccache_dir ccache_size macportsuser
+    if {${configure.ccache}} {
+        # Create ccache directory with correct permissions with root privileges
+        elevateToRoot "configure ccache"
+        if {[catch {
+                file mkdir ${ccache_dir}
+                file attributes ${ccache_dir} -owner ${macportsuser} -permissions 0755
+            } result]} {
+            ui_warn "ccache_dir ${ccache_dir} could not be created; disabling ccache: $result"
+            set configure.ccache no
+        }
+        dropPrivileges
+
+        # Initialize ccache directory with the given maximum size
+        if {${configure.ccache}} {
+            if {[catch {
+                exec ccache -M ${ccache_size} >/dev/null
+            } result]} {
+                ui_warn "ccache_dir ${ccache_dir} could not be initialized; disabling ccache: $result"
+                set configure.ccache no
+            }
+        }
+    }
+}
 
 # replacement for portconfigure.tcl version
 proc portconfigure::get_compiler_fallback {} {
-    global                     \
-        xcodeversion           \
-        default_compilers      \
-        compiler.c_standard    \
-        compiler.cxx_standard  \
-        os.major               \
-        cxx_stdlib
+    global                       \
+        default_compilers        \
+        xcodeversion
 
     # Check our override
     if {[info exists default_compilers]} {
@@ -75,6 +161,20 @@ proc portconfigure::get_compiler_fallback {} {
     if {$xcodeversion eq "none" || $xcodeversion eq ""} {
         return {cc}
     }
+
+    return [portconfigure::get_valid_compilers]
+}
+
+# if full_list is yes, then get all possible possible compiler that might work on this configuration
+# if full_list is no, reducde the compiler list to the "best" compilers
+proc portconfigure::get_valid_compilers {{full_list no}} {
+    global                       \
+        xcodeversion             \
+        compiler.c_standard      \
+        compiler.cxx_standard    \
+        compiler.openmp_version  \
+        os.major                 \
+        cxx_stdlib
 
     # http://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
     # https://gcc.gnu.org/c99status.html
@@ -105,13 +205,24 @@ proc portconfigure::get_compiler_fallback {} {
         set default_xcode_ok [expr ${compiler.c_standard} <= 2011 && ${compiler.cxx_standard} <= 2014]
     }
 
-    # check for non-default cases
-    if {${default_xcode_ok}} {
-        if {${cxx_stdlib} eq "libstdc++"} {
-            set default_xcode_ok [expr ${os.major} <  13]
-        } else {
-            set default_xcode_ok [expr ${os.major} >= 13]
-        }
+    if {${cxx_stdlib} eq "libstdc++" && ${os.major} >= 13} {
+        # user has changed the default value of cxx_stdlib
+        # for C++11 applications, MacPorts compilers are required
+        set default_xcode_ok 0
+    }
+
+    if {${cxx_stdlib} eq "libc++" && ${os.major} < 11} {
+        # user has changed the default value of cxx_stdlib
+        # only Clang compilers use libc++
+        set default_xcode_ok 0
+    }
+
+    # for 11 <= ${os.major} && ${os.major} < 13,
+    # user has changed the default value of cxx_stdlib, but Xcode clang can still use libc++
+
+    # Xcode compilers do not support OpenMP
+    if {${compiler.openmp_version} ne ""} {
+        set default_xcode_ok 0
     }
 
     # https://developer.apple.com/library/content/releasenotes/DeveloperTools/RN-Xcode/Chapters/Introduction.html
@@ -134,7 +245,11 @@ proc portconfigure::get_compiler_fallback {} {
         if {[vercmp ${xcodeversion} 5] >= 0} {
             set compilers {clang}
         } elseif {[vercmp ${xcodeversion} 4.2] >= 0} {
-            set compilers {clang llvm-gcc-4.2}
+            if {${cxx_stdlib} eq "libstdc++"} {
+                set compilers {clang llvm-gcc-4.2}
+            } else {
+                set compilers {clang}
+            }
         } elseif {[vercmp ${xcodeversion} 4.0] >= 0} {
             set compilers {llvm-gcc-4.2 clang gcc-4.2}
         } else {
@@ -161,6 +276,16 @@ proc portconfigure::get_compiler_fallback {} {
         }
     }
 
+    # https://openmp.llvm.org
+    # https://gcc.gnu.org/wiki/openmp
+    #
+    # OpenMP Version | Clang Version | GCC Version
+    #      2.5       |      3.8      |     4.2
+    #      3.0       |      3.8      |     4.4
+    #      3.1       |      3.8      |     4.7
+    #      4.0       |    Partial    |     4.9
+    #      4.5       |    Partial    |     ???
+    #
     set gcc_compilers macports-gcc-7
     if {${compiler.cxx_standard} < 2017} {
         # allow latest GCC to be blacklisted by ports
@@ -173,7 +298,7 @@ proc portconfigure::get_compiler_fallback {} {
     # according to http://packages.macports.org/clang-5.0/,
     #    clang builds back to Mac OS X 10.6
     set clang_compilers macports-clang-5.0
-    if {${compiler.cxx_standard} < 2017} {
+    if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
         # allow latest Clang to be blacklisted by ports
         lappend clang_compilers macports-clang-4.0
         if {${os.major} < 17} {
@@ -182,11 +307,23 @@ proc portconfigure::get_compiler_fallback {} {
         }
         if {${os.major} < 16} {
             # The Sierra SDK requires a toolchain that supports class properties
-            lappend clang_compilers macports-clang-3.8 macports-clang-3.7
+            lappend clang_compilers macports-clang-3.8
+
+            if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
+                lappend clang_compilers macports-clang-3.7
+            }
         }
     }
 
-    if {${cxx_stdlib} eq "libstdc++"} {
+    if {${cxx_stdlib} eq "libc++"} {
+        # only Clang compilers recognize libc++
+        lappend compilers {*}${clang_compilers}
+
+        # Clang does not provide Fortran compiler
+        if {[option compiler.require_fortran]} {
+            lappend compilers {*}${gcc_compilers}
+        }
+    } else {
         # when building for PowerPC architectures, prefer GCC to Clang
         if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
             lappend compilers {*}${gcc_compilers}
@@ -195,30 +332,286 @@ proc portconfigure::get_compiler_fallback {} {
             lappend compilers {*}${clang_compilers}
             lappend compilers {*}${gcc_compilers}
         }
+    }
+
+    if {[option compiler.require_fortran]} {
+        lappend compilers macports-g95
+    }
+
+    # generate list of MPI wrappers of current compilers
+    set mpi_compilers {}
+    if {[option compiler.mpi] ne ""} {
+        set mpis [option compiler.mpi]
     } else {
-        # only Clang compilers recognize libc++
-        lappend compilers {*}${clang_compilers}
+        set mpis {mpich openmpi}
+    }
+    foreach mpi ${mpis} {
+        foreach c ${compilers} {
+            set parts [split ${c} -]
+            if {[lindex ${parts} 0] eq "clang"} {
+                lappend mpi_compilers macports-${mpi}-[lindex ${parts} 0]
+            } elseif {[lindex ${parts} 0] eq "macports"} {
+                if {
+                    [lindex ${parts} 1] eq "clang"
+                    &&
+                    [vercmp [lindex ${parts} 2] 3.3] >= 0
+                } {
+                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
+                } elseif {
+                          [lindex ${parts} 1] eq "gcc"
+                          &&
+                          [vercmp [lindex ${parts} 2] 4.3] >= 0
+                      } {
+                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
+                }
+            }
+        }
+    }
+
+    # if required, replace compiler with equivalent MPI wrapper
+    if {[option compiler.mpi] ne ""} {
+        # only MPI compilers are valid
+        set compilers ${mpi_compilers}
+    } elseif {${full_list}} {
+        # MPI compilers could work, so include it in the full list
+        lappend compilers {*}${mpi_compilers}
     }
 
     return $compilers
 }
 
-# extension of portconfigure.tcl version
-rename portconfigure::configure_get_compiler portconfigure::configure_get_compiler_real
-proc portconfigure::configure_get_compiler {type {compiler {}}} {
-    set ret_real [portconfigure::configure_get_compiler_real ${type} ${compiler}]
+# replacement for portconfigure.tcl version
+proc portconfigure::compiler_port_name {compiler} {
+    set valid_compiler_ports {
+        {^apple-gcc-(\d+)\.(\d+)$}                          {apple-gcc%s%s}
+        {^macports-clang-(\d+\.\d+)$}                       {clang-%s}
+        {^macports-dragonegg-(\d+\.\d+)(-gcc-\d+\.\d+)?$}   {dragonegg-%s%s}
+        {^macports-(llvm-)?gcc-(\d+)(?:\.(\d+))?$}          {%sgcc%s%s}
+        {^macports-([^-]+)-clang$}                          {%s-clang}
+        {^macports-([^-]+)-clang-(\d+)\.(\d+)$}             {%s-clang%s%s}
+        {^macports-([^-]+)-gcc-(\d+)(?:\.(\d+))?$}          {%s-gcc%s%s}
+        {^macports-g95$}                                    {g95}
+    }
+    foreach {re fmt} $valid_compiler_ports {
+        if {[set matches [regexp -inline $re $compiler]] ne ""} {
+            return [format $fmt {*}[lrange $matches 1 end]]
+        }
+    }
+    return {}
+}
 
-    global prefix
+# helper function to get the default value of compiler.fortran_fallback
+proc portconfigure::get_fortran_fallback {} {
+    set ret {}
+    foreach compiler [option compiler.fallback] {
+        if {[configure_get_compiler_real fc $compiler] ne ""} {
+            lappend ret ${compiler}
+        }
+    }
+    return $ret
+}
 
-    if {[option compiler.require_fortran]} {
-        foreach tool {f77 f90 fc} {
-            if {${type} eq ${tool} && ${ret_real} eq ""} {
-                return ${prefix}/bin/gfortran-mp-[portconfigure::get_gcc_fortran_version]
+# replacement for portconfigure.tcl version
+proc portconfigure::configure_get_default_compiler {} {
+    if {[option compiler.whitelist] ne ""} {
+        set search_list [option compiler.whitelist]
+    } else {
+        set search_list [option compiler.fallback]
+    }
+    return [portconfigure::configure_get_first_compiler cc ${search_list}]
+}
+
+# find the first working Fortran compiler in compiler.fortran_fallback
+proc portconfigure::configure_get_first_fortran_compiler {} {
+    return [portconfigure::configure_get_first_compiler fc [option compiler.fortran_fallback]]
+}
+
+# find the first working compiler in the search_list
+proc portconfigure::configure_get_first_compiler {compilerName search_list} {
+    foreach compiler $search_list {
+        set allowed yes
+        foreach pattern [option compiler.blacklist] {
+            if {[string match $pattern $compiler]} {
+                set allowed no
+                break
             }
+        }
+        if {[lsearch [portconfigure::get_valid_compilers yes] ${compiler}] < 0} {
+            set allowed no
+        }
+        if {$allowed &&
+            [configure_get_compiler_real ${compilerName} $compiler] ne "" &&
+            ([file executable [configure_get_compiler_real ${compilerName} $compiler]] ||
+             [compiler_is_port $compiler])
+        } then {
+            return $compiler
+        }
+    }
+    ui_warn "All compilers are either blacklisted or unavailable for ${compilerName}; defaulting to first fallback option"
+    return [lindex [option compiler.fallback] 0]
+}
+
+# replacemenet for portconfigure.tcl version
+proc portconfigure::configure_get_compiler_real {type compiler} {
+    global prefix
+    # Tcl 8.4's switch doesn't support -matchvar.
+    if {[regexp {^apple-gcc(-4\.[02])$} $compiler -> suffix]} {
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/gcc-apple${suffix} }
+            cxx     -
+            objcxx  {
+                if {$suffix eq "-4.2"} {
+                    return ${prefix}/bin/g++-apple${suffix}
+                }
+            }
+            cpp     { return ${prefix}/bin/cpp-apple${suffix} }
+        }
+    } elseif {[regexp {^clang$} $compiler]} {
+        switch $type {
+            cc      -
+            objc    { return [find_developer_tool clang] }
+            cxx     -
+            objcxx  {
+                set clangpp [find_developer_tool clang++]
+                if {[file executable $clangpp]} {
+                    return $clangpp
+                }
+                return [find_developer_tool llvm-g++-4.2]
+            }
+        }
+    } elseif {[regexp {^gcc(-3\.3|-4\.[02])?$} $compiler -> suffix]} {
+        switch $type {
+            cc      -
+            objc    { return [find_developer_tool "gcc${suffix}"] }
+            cxx     -
+            objcxx  { return [find_developer_tool "g++${suffix}"] }
+            cpp     { return [find_developer_tool "cpp${suffix}"] }
+        }
+    } elseif {[regexp {^llvm-gcc-4\.2$} $compiler]} {
+        switch $type {
+            cc      -
+            objc    { return [find_developer_tool llvm-gcc-4.2] }
+            cxx     -
+            objcxx  { return [find_developer_tool llvm-g++-4.2] }
+            cpp     { return [find_developer_tool llvm-cpp-4.2] }
+        }
+    } elseif {[regexp {^macports-clang(-\d+\.\d+)?$} $compiler -> suffix]} {
+        if {$suffix ne ""} {
+            set suffix "-mp${suffix}"
+        }
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/clang${suffix} }
+            cxx     -
+            objcxx  { return ${prefix}/bin/clang++${suffix} }
+            cpp     { return ${prefix}/bin/clang-cpp${suffix} }
+        }
+    } elseif {[regexp {^macports-dragonegg(-\d+\.\d+)(?:-gcc(-\d+\.\d+))?$} $compiler \
+                -> infix suffix]} {
+        if {$suffix ne ""} {
+            set suffix "-mp${suffix}"
+        }
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/dragonegg${infix}-gcc${suffix} }
+            cxx     -
+            objcxx  { return ${prefix}/bin/dragonegg${infix}-g++${suffix} }
+            cpp     { return ${prefix}/bin/dragonegg${infix}-cpp${suffix} }
+            fc      -
+            f77     -
+            f90     { return ${prefix}/bin/dragonegg${infix}-gfortran${suffix} }
+        }
+    } elseif {[regexp {^macports-gcc(-\d+(?:\.\d+)?)?$} $compiler -> suffix]} {
+        if {$suffix ne ""} {
+            set suffix "-mp${suffix}"
+        }
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/gcc${suffix} }
+            cxx     -
+            objcxx  { return ${prefix}/bin/g++${suffix} }
+            cpp     { return ${prefix}/bin/cpp${suffix} }
+            fc      -
+            f77     -
+            f90     { return ${prefix}/bin/gfortran${suffix} }
+        }
+    } elseif {[regexp {^macports-llvm-gcc-4\.2$} $compiler]} {
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/llvm-gcc-4.2 }
+            cxx     -
+            objcxx  { return ${prefix}/bin/llvm-g++-4.2 }
+            cpp     { return ${prefix}/bin/llvm-cpp-4.2 }
+        }
+    } elseif {[regexp {^macports-g95$} $compiler]} {
+        switch $type {
+            fc      -
+            f77     -
+            f90     { return ${prefix}/bin/g95 }
+        }
+    } elseif {[regexp {^macports-([^-]+)-clang$} $compiler -> mpi]} {
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/mpicc-${mpi}-clang }
+            cxx     -
+            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-clang }
+        }
+    } elseif {[regexp {^macports-([^-]+)-clang-(\d+\.\d+)$} $compiler -> mpi version]} {
+        set suffix [join [split ${version} .] ""]
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/mpicc-${mpi}-clang${suffix} }
+            cxx     -
+            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-clang${suffix} }
+            cpp     { return ${prefix}/bin/clang-cpp-mp-${version} }
+        }
+    } elseif {[regexp {^macports-([^-]+)-gcc-(\d+(?:\.\d+)?)$} $compiler -> mpi version]} {
+        set suffix [join [split ${version} .] ""]
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/mpicc-${mpi}-gcc${suffix} }
+            cxx     -
+            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-gcc${suffix} }
+            cpp     { return ${prefix}/bin/cpp-mp-${version} }
+            fc      -
+            f77     -
+            f90     { return ${prefix}/bin/mpifort-${mpi}-gcc${suffix} }
+        }
+    }
+    # Fallbacks
+    switch $type {
+        cc      -
+        objc    { return [find_developer_tool cc] }
+        cxx     -
+        objcxx  { return [find_developer_tool c++] }
+        cpp     { return [find_developer_tool cpp] }
+    }
+    return ""
+}
+
+# extension of portconfigure.tcl version
+proc portconfigure::configure_get_compiler {type {compiler {}}} {
+    global configure.compiler
+    if {$compiler eq ""} {
+        set compiler ${configure.compiler}
+    }
+    set ret [portconfigure::configure_get_compiler_real ${type} ${compiler}]
+
+    if {${ret} eq ""} {
+        set is_fortran no
+        foreach tool {f77 f90 fc} {
+            if {${type} eq ${tool}} {
+                set is_fortran yes
+            }
+        }
+        if {${is_fortran} && [option compiler.require_fortran]} {
+            set compiler [portconfigure::configure_get_first_fortran_compiler]
+            set ret [portconfigure::configure_get_compiler_real ${type} ${compiler}]
         }
     }
 
-    return ${ret_real}
+    return ${ret}
 }
 
 # replacement for portconfigure.tcl version
@@ -239,7 +632,8 @@ proc portconfigure::add_automatic_compiler_dependencies {} {
 
     if {[option compiler.require_fortran] && [portconfigure::configure_get_compiler_real fc ${compiler}] eq ""} {
         ui_debug "Adding Fortran compiler dependency"
-        portconfigure::add_compiler_port_dependencies macports-gcc-[portconfigure::get_gcc_fortran_version]
+        set fortran_compiler [portconfigure::configure_get_first_fortran_compiler]
+        portconfigure::add_compiler_port_dependencies ${fortran_compiler}
     }
 }
 
@@ -253,6 +647,16 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
         ui_debug "Adding depends_lib port:$compiler_port"
         depends_lib-delete port:$compiler_port
         depends_lib-append port:$compiler_port
+    } elseif {[regexp {^macports-([^-]+)-(clang|gcc)(?:-(\d+(?:\.\d+)?))?$} $compiler -> mpi clang_or_gcc version]} {
+        # MPI compilers link against MPI libraries
+        ui_debug "Adding depends_lib port:$compiler_port"
+        if {${mpi} eq "openmpi"} {
+            set pkgname ompi.pc
+        } else {
+            set pkgname ${mpi}.pc
+        }
+        depends_lib-delete "path:lib/$compiler_port/pgkconfig/${pkgname}:${compiler_port}"
+        depends_lib-append "path:lib/$compiler_port/pkgconfig/${pkgname}:${compiler_port}"
     } else {
         ui_debug "Adding depends_build port:$compiler_port"
         depends_build-delete port:$compiler_port
@@ -358,6 +762,16 @@ proc portconfigure::stdlib_trace {opt action args} {
     }
     if {$action eq "read" && [portconfigure::should_add_libstdlib_abi]} {
         $opt-append -D_GLIBCXX_USE_CXX11_ABI=0
+    }
+}
+
+# replacement for portconfigure.tcl version
+proc portconfigure::arch_flag_supported {compiler} {
+    # GCC prior to 4.7 does not accept -arch flag
+    if {[regexp {^macports(?:-[^-]+)?-gcc-4\.[0-6]} $compiler]} {
+        return 0
+    } else {
+        return 1
     }
 }
 
