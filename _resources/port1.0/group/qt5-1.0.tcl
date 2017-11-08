@@ -46,14 +46,14 @@ array set available_qt_versions {
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
 # Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
-# see http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
-# see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+# see https://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
+# see https://doc.qt.io/qt-5/supported-platforms-and-configurations.html
 
 proc qt5.get_default_name {} {
     global os.major
 
-    # see http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
-    # for older versions, see http://web.archive.org/web/*/http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+    # see https://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+    # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-5/supported-platforms-and-configurations.html
     if { ${os.major} <= 7 } {
         #
         # Qt 5 does not support ppc
