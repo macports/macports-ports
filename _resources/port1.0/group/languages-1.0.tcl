@@ -176,7 +176,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         os.major                 \
         cxx_stdlib
 
-    # http://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
+    # https://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
     # https://gcc.gnu.org/c99status.html
     # https://gcc.gnu.org/wiki/C11Status
     #
@@ -186,7 +186,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     #
     # https://clang.llvm.org/cxx_status.html
     # https://gcc.gnu.org/projects/cxx-status.html
-    # http://en.cppreference.com/w/cpp/compiler_support
+    # https://en.cppreference.com/w/cpp/compiler_support
     #
     # 1998 (C++98) |    -      |   -       |     -     |
     # 2011 (C++11) | Clang 3.3 | Xcode 5   | GCC 4.8.1 |
@@ -295,7 +295,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     }
 
     # does Clang work on all i386 and x86_64 systems?
-    # according to http://packages.macports.org/clang-5.0/,
+    # according to https://packages.macports.org/clang-5.0/,
     #    clang builds back to Mac OS X 10.6
     set clang_compilers macports-clang-5.0
     if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {

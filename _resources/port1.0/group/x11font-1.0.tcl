@@ -48,7 +48,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     categories       x11 x11-font graphics
     supported_archs  noarch
     installs_libs    no
-    homepage         http://www.x.org/
+    homepage         https://www.x.org/
     master_sites     xorg:individual/font/
     use_bzip2        yes
     depends_build    port:pkgconfig bin:bdftopcf:bdftopcf \
@@ -79,5 +79,5 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
 
     livecheck.type      regex
     livecheck.regex     ${name}-(\[\\d.\]+)${extract.suffix}
-    livecheck.url       http://xorg.freedesktop.org/archive/individual/font/?C=M&O=D
+    livecheck.url       https://xorg.freedesktop.org/archive/individual/font/?C=M&O=D
 }

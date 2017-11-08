@@ -79,7 +79,7 @@ proc crossgcc.setup {target version} {
             The GNU compiler collection, including front ends for C, C++, Objective-C \
             and Objective-C++ for cross development for ${crossgcc.target}.
 
-        homepage        http://gcc.gnu.org/
+        homepage        https://gcc.gnu.org/
         master_sites    gnu:gcc/gcc-${version}/:gcc
 
         if {[info exists crossgcc.versions_info($version)]} {
@@ -202,7 +202,7 @@ proc crossgcc.setup {target version} {
             STRIP_FOR_TARGET=${crossgcc.target}-strip
 
         # https://trac.macports.org/ticket/29104
-        # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
+        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
         if {[vercmp ${xcodeversion} 4.3] < 0} {
             compiler.blacklist llvm-gcc-4.2
         }
@@ -227,7 +227,7 @@ proc crossgcc.setup {target version} {
         }
 
         livecheck.type  regex
-        livecheck.url   http://ftp.gnu.org/gnu/gcc/
+        livecheck.url   https://ftp.gnu.org/gnu/gcc/
         livecheck.regex gcc-(\[0-9\]+\\.\[0-9.\]+)/
     # uplevel
     }

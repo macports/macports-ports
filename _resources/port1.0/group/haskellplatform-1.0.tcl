@@ -48,8 +48,8 @@ proc haskellplatform.setup {package version {register_scripts "yes"}} {
     name                hs-platform-[string tolower ${package}]
     version             ${version}
     categories          devel haskell
-    homepage            http://hackage.haskell.org/package/${package}
-    master_sites        http://hackage.haskell.org/packages/archive/${package}/${version}
+    homepage            https://hackage.haskell.org/package/${package}
+    master_sites        https://hackage.haskell.org/packages/archive/${package}/${version}
     distname            ${package}-${version}
     depends_lib         port:ghc
     configure.args      Setup configure \
