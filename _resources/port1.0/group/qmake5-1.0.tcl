@@ -219,13 +219,13 @@ pre-configure {
     # determine of qmake's default and user requests are compatible; override qmake if necessary
     if { ${this_debug} && !${base_debug}  } {
         puts ${cache} "QT_CONFIG+=debug_and_release build_all debug"
-        puts ${cache} "CONFIG+=debug"
+        puts ${cache} "CONFIG+=debug_and_release build_all"
         puts ${cache} "CONFIG-=release"
     }
 
     if { !${this_debug} && ${base_debug}  } {
         puts ${cache} "QT_CONFIG-=debug_and_release build_all debug"
-        puts ${cache} "CONFIG-=debug"
+        puts ${cache} "CONFIG-=debug debug_and_release build_all"
         puts ${cache} "CONFIG+=release"
     }
 
