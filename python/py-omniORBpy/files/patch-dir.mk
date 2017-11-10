@@ -1,5 +1,5 @@
---- omniidl_be/dir.mk.orig	2006-08-06 20:20:23.000000000 +0100
-+++ omniidl_be/dir.mk	2006-08-06 20:20:38.000000000 +0100
+--- python/omniidl_be/dir.mk.orig	2003-03-23 21:51:59.000000000 +0000
++++ python/omniidl_be/dir.mk	2017-11-10 11:15:00.000000000 +0000
 @@ -6,7 +6,7 @@
  PYTHON = python
  endif
