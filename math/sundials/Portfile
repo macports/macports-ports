@@ -6,7 +6,7 @@ PortGroup           mpi 1.0
 
 name                sundials
 version             2.6.2
-revision            2
+revision            3
 categories          math devel
 license             bsd
 platforms           darwin
@@ -32,20 +32,30 @@ checksums           rmd160  da6549605b45ad698dfe40a5136b64a7a408d6c6 \
 
 cmake.out_of_source yes
 
+# use default cmake behavior to find Lapack
+patchfiles-append   patch-find_lapack.diff
+
 # use dynamic libraries for SuiteSparse
 patchfiles-append   patch-find_klu.diff
 
 depends_lib-append  port:SuiteSparse
 
-mpi.setup
+if {[variant_isset examples]} {
+    mpi.setup \
+        require_fortran
+} else {
+    mpi.setup
+}
 
 configure.args-append \
+                    -DEXAMPLES_ENABLE=OFF \
                     -DCXX_ENABLE=OFF \
-                    -DLAPACK_ENABLE=ON \
+                    -DF90_ENABLE=OFF \
+                    -DLAPACK_ENABLE=OFF \
+                    -DFCMIX_ENABLE=OFF \
                     -DKLU_ENABLE=ON \
                     -DKLU_LIBRARY_DIR=${prefix}/lib \
                     -DKLU_INCLUDE_DIR=${prefix}/include \
-                    -DEXAMPLES_INSTALL_PATH=${prefix}/share/examples/${name} \
                     -DMPI_ENABLE=OFF
 
 pre-configure {
@@ -63,34 +73,77 @@ pre-configure {
 configure.args-append \
     -DCMAKE_INCLUDE_DIRECTORIES_BEFORE=ON
 
+# cmake files (e.g. config/SundialsFortran.cmake) create CMakeLists.txt files
+#    to test for functionality (e.g. a Fortran compiler).
+# CMAKE_OSX_SYSROOT is not passed to the functionality test.
+# Because CMAKE_OSX_DEPLOYMENT_TARGET is set as an environmental variable,
+#    -isysroot is added to the compiler flags.
+# Only Apple Clang compilers support tbd files.
+# See https://trac.macports.org/ticket/53151
+# See https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_SYSROOT.html
+configure.env-append SDKROOT="/"
+
 if {![mpi_variant_isset]} {
     default_variants      +mpich
 }
 
-if {![fortran_variant_isset] && ![mpi_variant_isset]} {
-    if {[variant_isset atlas]} {
-        ui_error "Atlas requires a fortran compiler"
-        return -code error "no fortran compiler selected"
-    }
+variant examples description {Install Examples} {
+    configure.args-replace \
+        -DEXAMPLES_ENABLE=OFF \
+        -DEXAMPLES_ENABLE=ON
 
-    # ensure that sundials doesn't try to find a fortran compiler in the user's
-    # path
-    pre-configure {
-        configure.f77
-        configure.f90
-        configure.fc
-    }
-} else {
-    configure.args-delete --without-blas --without-lapack
-    if {![variant_isset atlas]} {
-        configure.args-append \
-            -DLAPACK_LIBRARIES="/usr/lib/liblapack.dylib\;/usr/lib/libblas.dylib"
+    configure.args-replace \
+        -DLAPACK_ENABLE=OFF \
+        -DLAPACK_ENABLE=ON
+
+    configure.args-replace \
+        -DCXX_ENABLE=OFF \
+        -DCXX_ENABLE=ON
+
+    configure.args-replace \
+        -DF90_ENABLE=OFF \
+        -DF90_ENABLE=ON
+
+    configure.args-replace \
+        -DFCMIX_ENABLE=OFF \
+        -DFCMIX_ENABLE=ON
+
+    configure.args-append \
+        -DEXAMPLES_INSTALL_PATH=${prefix}/share/examples/${name}
+
+    pre-fetch {
+        if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] } {
+            ui_error "You must select either the +accelerate, +atlas, or +openblas variant for linear algebra."
+            return -code error "No linear-algebra variant selected."
+        }
     }
 }
 
-variant atlas description {build with atlas (requires a fortran compiler)} {
+variant accelerate requires examples conflicts atlas openblas description {Use Apple Accelerate Libraries} {
+    configure.args-append -DBLA_VENDOR=Apple
+}
+
+variant atlas requires examples conflicts accelerate openblas description {Use MacPorts ATLAS Libraries} {
     depends_lib-append port:atlas
-    configure.args-append -DLAPACK_LIBRARIES=${prefix}/lib/libtatlas.dylib
+
+    configure.args-append   \
+        -DBLA_VENDOR=ATLAS
+
+    # FindBLAS.cmake and FindLAPACK.cmake do not seem to find MacPorts Atlas properly
+    configure.args-append          \
+        -DBLAS_LIBRARIES=satlas    \
+        -DLAPACK_LIBRARIES=satlas
+}
+
+variant openblas requires examples conflicts atlas accelerate description {Use MacPorts OpenBLAS Libraries} {
+    depends_lib-append path:lib/libopenblas.dylib:openblas
+    require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
+
+    configure.args-append  -DBLA_VENDOR=OpenBLAS
+}
+
+if {[variant_isset examples] && ![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
+    default_variants-append +accelerate
 }
 
 variant doc description {install pdf documentation} {
