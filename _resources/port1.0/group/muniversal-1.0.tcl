@@ -493,7 +493,7 @@ variant universal {
             copy ${dir1}/${fl} ${tempfile1}
             copy ${dir2}/${fl} ${tempfile2}
 
-            reinplace -q -E {s:-arch +[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:-arch +[0-9a-zA-Z_]+::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
