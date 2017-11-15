@@ -53,6 +53,16 @@ universal_variant yes
 
 build.target    build
 
+post-extract {
+    # Prevent setuptool's easy_install from downloading dependents
+    set fs [open "${workpath}/.home/.pydistutils.cfg" w+]
+    puts $fs "# This file is created from MacPort's python PortGroup"
+    puts $fs "# Prevent setuptool's easy_install from downloading dependents"
+    puts $fs "\[easy_install\]"
+    puts $fs "allow_hosts = None"
+    close $fs
+}
+
 pre-destroot    {
     xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
 }
