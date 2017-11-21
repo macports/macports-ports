@@ -131,6 +131,7 @@ proc crossgcc.setup {target version} {
                     gcc/doc     gcc/Makefile.in          gccinstall   info
                     gcc/fortran gcc/fortran/Make-lang.in gfortran     texi
                     libquadmath libquadmath/Makefile.in  libquadmath  info
+                    libgomp     libgomp/Makefile.in      libgomp      info
                 }
 
                 foreach { path makefile name suffix } $infopages {
