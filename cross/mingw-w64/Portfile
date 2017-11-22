@@ -8,6 +8,7 @@ set mingw_name      w64-mingw32
 
 platforms           darwin
 license             ZPL-2.1
+categories          cross devel
 maintainers         {mojca @mojca} openmaintainer
 
 description         GCC cross-compiler for Windows 64 & 32 bits
@@ -24,16 +25,23 @@ configure.dir       ${workpath}/build
 build.dir           ${configure.dir}
 post-extract {      file mkdir "${build.dir}" }
 
-# create four subports:
+# create six subports:
 # - i686-w64-mingw32-headers
 # - i686-w64-mingw32-crt
+# - i686-w64-mingw32-winpthreads
 # - x86_64-w64-mingw32-headers
 # - x86_64-w64-mingw32-crt
+# - x86_64-w64-mingw32-winpthreads
 foreach arch {i686 x86_64} {
-    foreach component {crt headers} {
+    foreach component {crt headers winpthreads} {
         subport ${arch}-${mingw_name}-${component} {
-            set mingw_arch  ${arch}
-            set mingw_dir   ${component}
+            set mingw_arch      ${arch}
+            set mingw_comp      ${component}
+            if {${component} eq "winpthreads"} {
+                set mingw_dir   mingw-w64-libraries/${component}
+            } else {
+                set mingw_dir   mingw-w64-${component}
+            }
         }
     }
 }
@@ -41,26 +49,51 @@ foreach arch {i686 x86_64} {
 if {${subport} ne ${name}} {
     set mingw_target            ${mingw_arch}-${mingw_name}
 
-    configure.cmd               ${worksrcpath}/mingw-w64-${mingw_dir}/configure
+    configure.cmd               ${worksrcpath}/${mingw_dir}/configure
     configure.pre_args-replace  --prefix=${prefix} --prefix=${prefix}/${mingw_target}
     configure.args-append       --host=${mingw_target}
 
     # *-headers subports
-    if {${mingw_dir} eq "headers"} {
+    if {${mingw_comp} eq "headers"} {
+        revision                1
         supported_archs         noarch
-    }
 
-    # *-crt subports
-    if {${mingw_dir} eq "crt"} {
+        # winpthreads install three files which conflict with placeholders provided by "headers"
+        #
+        # a relatively ugly workaround is to copy those three files from "winpthreads" to "headers"
+        # and then delete them from "winpthreads" again
+        post-extract {
+            foreach f {signal time unistd} {
+                set f_src  ${worksrcpath}/mingw-w64-libraries/winpthreads/include/pthread_${f}.h
+                set f_dest ${worksrcpath}/${mingw_dir}/crt
+                copy -force ${f_src} ${f_dest}
+            }
+        }
+    # *-crt and *-winpthreads subports
+    } else {
         # We only need a dependency on either of the two GCC compilers:
         #   - ${mingw_target}-gcc-bootstrap
         #   - ${mingw_target}-gcc
         # to build. The rest of dependencies (*-headers, *-binutils)
-        # are pulled in by either of those two ports.
+        # are pulled in by one of those two ports.
         #
         # Runtime dependency on GCC is not added to avoid dependency cycles,
         # but in fact it's GCC that needs CRT at runtime, not the other way around.
-        depends_build-append    bin:${mingw_target}-gcc:${mingw_target}-gcc-bootstrap
+        if {${mingw_comp} eq "crt"} {
+            depends_build-append    bin:${mingw_target}-gcc:${mingw_target}-gcc-bootstrap
+        # *-winpthreads
+        } else {
+            # winpthreads needs at least stage 2 compiler (or the final one)
+            depends_build-append    path:${mingw_target}/lib/libgcc_s.a:${mingw_target}-gcc-nothreads
+
+            # see above
+            post-destroot {
+                foreach f {signal time unistd} {
+                    delete ${destroot}${prefix}/${mingw_target}/include/pthread_${f}.h
+                }
+            }
+        }
+
         #depends_run-append     bin:${mingw_target}-gcc:${mingw_target}-gcc-bootstrap
         #depends_lib-append     port:${mingw_target}-binutils
         #depends_lib-append     port:${mingw_target}-headers
