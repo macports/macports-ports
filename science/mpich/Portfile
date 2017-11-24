@@ -4,6 +4,7 @@ PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           select 1.0
 PortGroup           compilers 1.0
+PortGroup           muniversal 1.0
 
 name                mpich
 version             3.2.1
@@ -34,11 +35,6 @@ long_description    MPICH is a high-performance and widely portable\
 
 homepage            http://www.mpich.org/
 master_sites        ${homepage}static/downloads/${version}
-
-# Since mpi is just a compiler wrapper, compiling it as universal needs to be
-# supported upstream since it'd be a constantly moving target, for reference
-# see, https://trac.macports.org/ticket/20240
-universal_variant   no
 
 checksums \
     rmd160  b830ba3f5cb5401c03898ad9abf87c60d5cf1e50 \
@@ -201,9 +197,17 @@ if {${subport} != ${name}} {
 
     # remove LDFLAGS mpicc, etc. and pkgconfig files
     post-build {
+        if {[variant_isset universal]} {
+            set archs ${configure.universal_archs}
+        } else {
             set archs ${build_arch}
+        }
         foreach arch ${archs} {
+            if {[variant_isset universal]} {
+                set dir ${worksrcpath}-${arch}
+            } else {
                 set dir ${worksrcpath}
+            }
             foreach f [glob \
                            ${dir}/src/env/*.bash \
                            ${dir}/src/env/*.sh \
@@ -214,6 +218,43 @@ if {${subport} != ${name}} {
                 reinplace \
                     "s| -arch ${arch}||g" \
                     ${f}
+            }
+        }
+    }
+
+    # Fortran headers do not understand preprocessors commands like __LP64__
+    # Fortran mod files can not be merged for different architectures
+    # create a architecture specific folder for the non-build_arch architecture
+    if {[variant_isset universal]} {
+        patchfiles-append patch-universal_fortran.diff
+        post-patch {
+            if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+                set arch32 "ppc"
+                set arch64 "ppc64"
+            } else {
+                set arch32 "i386"
+                set arch64 "x86_64"
+            }
+            reinplace \
+                "s|__MACPORTS_32_BIT_ARCH__|${arch32}|g" \
+                ${worksrcpath}/src/env/mpifort.bash.in
+            reinplace \
+                "s|__MACPORTS_64_BIT_ARCH__|${arch64}|g" \
+                ${worksrcpath}/src/env/mpifort.bash.in
+            reinplace \
+                "s|__MACPORTS_BUILD_ARCH__|${build_arch}|g" \
+                ${worksrcpath}/src/env/mpifort.bash.in
+        }
+        merger-post-destroot {
+            foreach arch ${configure.universal_archs} {
+                set incdir  ${destroot}-${arch}${prefix}/include/${name}-${cname}
+                if {${arch} ne ${build_arch}} {
+                    set archinc ${incdir}/${arch}
+                    xinstall -d -m 0755 ${archinc}
+                    foreach f [glob -nocomplain -directory ${incdir} *.mod mpif.h] {
+                        move ${f} ${archinc}
+                    }
+                }
             }
         }
     }
