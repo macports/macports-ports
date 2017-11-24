@@ -4,6 +4,7 @@ PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           select 1.0
 PortGroup           compilers 1.0
+PortGroup           muniversal 1.0
 
 name                openmpi
 version             3.0.0
@@ -19,11 +20,6 @@ long_description    Open MPI is a project combining technologies and resources \
             completely new MPI-2 compliant implementation, Open MPI offers \
             advantages for system and software vendors, application developers \
             and computer science researchers.
-
-# Since mpi is just a compiler wrapper, compiling it as universal needs to be
-# supported upstream since it'd be a constantly moving target, for reference
-# see, https://trac.macports.org/ticket/20240
-universal_variant   no
 
 homepage            http://www.open-mpi.org/
 set subdir          ompi/v${branch}/downloads/
@@ -252,6 +248,81 @@ you execute 'mpicc' etc.) please run:
     variant valgrind description {enable valgrind support} {
         depends_lib-append    path:${prefix}/lib/pkgconfig/valgrind.pc:valgrind
         configure.args-append --enable-debug --enable-memchecker --with-valgrind=${prefix}
+    }
+
+    if {[variant_isset universal]} {
+        # use open-mpi's multilib support to build universal
+        # see https://github.com/open-mpi/ompi/wiki/MultiLib
+        # Fortran is the only non-trivial case
+
+        merger-post-destroot {
+            # Fortran headers do not understand preprocessors commands like __LP64__
+            # Fortran mod files can not be merged for different architectures
+            # create a architecture specific folder for the non-build_arch architecture
+            foreach arch ${configure.universal_archs} {
+                if {${arch} ne ${build_arch}} {
+                    set mod_dir ${destroot}-${arch}${prefix}/lib/${name}-${cname}
+                    xinstall -d -m 0755 ${mod_dir}/${arch}
+                    foreach f [glob -nocomplain -directory ${mod_dir} *.mod] {
+                        move ${f} ${mod_dir}/${arch}
+                    }
+
+                    set inc_dir ${destroot}-${arch}${prefix}/include/${name}-${cname}
+                    xinstall -d -m 0755 ${inc_dir}/${arch}
+                    foreach f [glob -nocomplain -directory ${inc_dir} mpif-config.h] {
+                        move ${f} ${inc_dir}/${arch}
+                    }
+
+                    # include the new directories in the search paths for header and mod files
+                    set data_dir ${destroot}-${arch}${prefix}/share/${name}-${cname}/openmpi
+                    if {[file exists ${data_dir}/mpifort-wrapper-data.txt]} {
+                        reinplace \
+                            "s|-I\${libdir}|-I\${libdir}/${arch} -I\${libdir}|g" \
+                            ${data_dir}/mpifort-wrapper-data.txt
+
+                        reinplace \
+                            "s|preprocessor_flags=|preprocessor_flags=-I\${includedir}/i386|g" \
+                            ${data_dir}/mpifort-wrapper-data.txt
+                    }
+                }
+            }
+            foreach arch ${configure.universal_archs} {
+                set data_dir ${destroot}-${arch}${prefix}/share/${name}-${cname}/openmpi
+                if {[file exists ${data_dir}/mpifort-wrapper-data.txt]} {
+                    # muniversal PortGroup will not merge this file properly
+                    # merge file in destroot phase
+                    move \
+                        ${data_dir}/mpifort-wrapper-data.txt \
+                        ${data_dir}/mpifort-wrapper-data-${arch}.txt
+                }
+            }
+        }
+
+        post-destroot {
+            # merge mpifort data file
+            # see https://github.com/open-mpi/ompi/wiki/compilerwrapper3264
+            set data_dir ${destroot}${prefix}/share/${name}-${cname}/openmpi
+            if {[file exists ${data_dir}/mpifort-wrapper-data-${build_arch}.txt]} {
+                system -W ${data_dir} "cat mpifort-wrapper-data-${build_arch}.txt >> mpifort-wrapper-data.txt"
+            }
+            foreach arch ${configure.universal_archs} {
+                if {[file exists ${data_dir}/mpifort-wrapper-data-${arch}.txt]} {
+                    if {${arch} ne ${build_arch}} {
+                        if {${arch} eq "ppc" || ${arch} eq "i386"} {
+                            set bitval 32
+                        } else {
+                            set bitval 64
+                        }
+                        system -W ${data_dir} "echo \"\">> mpifort-wrapper-data.txt"
+                        system -W ${data_dir} "echo \"compiler_args=${arch};-m${bitval}\" >> mpifort-wrapper-data.txt"
+                        system -W ${data_dir} "cat mpifort-wrapper-data-${arch}.txt >> mpifort-wrapper-data.txt"
+                    }
+                }
+            }
+            foreach arch ${configure.universal_archs} {
+                delete ${data_dir}/mpifort-wrapper-data-${arch}.txt
+            }
+        }
     }
 
 } else {
