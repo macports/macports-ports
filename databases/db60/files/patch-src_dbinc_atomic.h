@@ -1,10 +1,10 @@
 http://www.databaseusers.com/article/6047407/Bug%3A+Build+failure+on+Linux+with+clang+libc%2B%2B+(atomic+issues)
 https://gist.githubusercontent.com/LnL7/5153b251fd525fe15de69b67e63a6075/raw/7778e9364679093a32dec2908656738e16b6bdcb/clang.patch
 
-diff --git dbinc/atomic.h dbinc/atomic.h
+diff --git src/dbinc/atomic.h src/dbinc/atomic.h
 index 6a858f7..9f338dc 100644
---- dbinc/atomic.h
-+++ dbinc/atomic.h
+--- src/dbinc/atomic.h
++++ src/dbinc/atomic.h
 @@ -70,7 +70,7 @@ typedef struct {
   * These have no memory barriers; the caller must include them when necessary.
   */
@@ -14,24 +14,6 @@ index 6a858f7..9f338dc 100644
  
  #ifdef HAVE_ATOMIC_SUPPORT
  
-@@ -144,7 +144,7 @@ typedef LONG volatile *interlocked_val;
- #define	atomic_inc(env, p)	__atomic_inc(p)
- #define	atomic_dec(env, p)	__atomic_dec(p)
- #define	atomic_compare_exchange(env, p, o, n)	\
--	__atomic_compare_exchange((p), (o), (n))
-+	__atomic_compare_exchange_db((p), (o), (n))
- static inline int __atomic_inc(db_atomic_t *p)
- {
- 	int	temp;
-@@ -176,7 +176,7 @@ static inline int __atomic_dec(db_atomic_t *p)
-  * http://gcc.gnu.org/onlinedocs/gcc-4.1.0/gcc/Atomic-Builtins.html
-  * which configure could be changed to use.
-  */
--static inline int __atomic_compare_exchange(
-+static inline int __atomic_compare_exchange_db(
- 	db_atomic_t *p, atomic_value_t oldval, atomic_value_t newval)
- {
- 	atomic_value_t was;
 @@ -206,7 +206,7 @@ static inline int __atomic_compare_exchange(
  #define	atomic_dec(env, p)	(--(p)->value)
  #define	atomic_compare_exchange(env, p, oldval, newval)		\
@@ -41,10 +23,10 @@ index 6a858f7..9f338dc 100644
  #else
  #define atomic_inc(env, p)	__atomic_inc(env, p)
  #define atomic_dec(env, p)	__atomic_dec(env, p)
-diff --git mp/mp_fget.c mp/mp_fget.c
+diff --git src/mp/mp_fget.c src/mp/mp_fget.c
 index 16de695..d0dcc29 100644
---- mp/mp_fget.c
-+++ mp/mp_fget.c
+--- src/mp/mp_fget.c
++++ src/mp/mp_fget.c
 @@ -649,7 +649,7 @@ alloc:		/* Allocate a new buffer header and data space. */
  
  		/* Initialize enough so we can call __memp_bhfree. */
@@ -63,10 +45,10 @@ index 16de695..d0dcc29 100644
  		MUTEX_LOCK(env, alloc_bhp->mtx_buf);
  		alloc_bhp->priority = bhp->priority;
  		alloc_bhp->pgno = bhp->pgno;
-diff --git mp/mp_mvcc.c mp/mp_mvcc.c
+diff --git src/mp/mp_mvcc.c src/mp/mp_mvcc.c
 index 770bad8..e28cce0 100644
---- mp/mp_mvcc.c
-+++ mp/mp_mvcc.c
+--- src/mp/mp_mvcc.c
++++ src/mp/mp_mvcc.c
 @@ -276,7 +276,7 @@ __memp_bh_freeze(dbmp, infop, hp, bhp, need_frozenp)
  #else
  	memcpy(frozen_bhp, bhp, SSZA(BH, buf));
@@ -85,10 +67,10 @@ index 770bad8..e28cce0 100644
  		F_CLR(alloc_bhp, BH_FROZEN);
  	}
  
-diff --git mp/mp_region.c mp/mp_region.c
+diff --git src/mp/mp_region.c src/mp/mp_region.c
 index 4952030..47645f8 100644
---- mp/mp_region.c
-+++ mp/mp_region.c
+--- src/mp/mp_region.c
++++ src/mp/mp_region.c
 @@ -245,7 +245,7 @@ __memp_init(env, dbmp, reginfo_off, htab_buckets, max_nreg)
  			     MTX_MPOOL_FILE_BUCKET, 0, &htab[i].mtx_hash)) != 0)
  				return (ret);
@@ -107,10 +89,10 @@ index 4952030..47645f8 100644
  #ifdef HAVE_STATISTICS
  		hp->hash_io_wait = 0;
  		hp->hash_frozen = hp->hash_thawed = hp->hash_frozen_freed = 0;
-diff --git mutex/mut_method.c mutex/mut_method.c
+diff --git src/mutex/mut_method.c src/mutex/mut_method.c
 index 09353b0..177353c 100644
---- mutex/mut_method.c
-+++ mutex/mut_method.c
+--- src/mutex/mut_method.c
++++ src/mutex/mut_method.c
 @@ -474,7 +474,7 @@ atomic_compare_exchange(env, v, oldval, newval)
  	MUTEX_LOCK(env, mtx);
  	ret = atomic_read(v) == oldval;
@@ -120,10 +102,10 @@ index 09353b0..177353c 100644
  	MUTEX_UNLOCK(env, mtx);
  
  	return (ret);
-diff --git mutex/mut_tas.c mutex/mut_tas.c
+diff --git src/mutex/mut_tas.c src/mutex/mut_tas.c
 index 106b161..fc4de9d 100644
---- mutex/mut_tas.c
-+++ mutex/mut_tas.c
+--- src/mutex/mut_tas.c
++++ src/mutex/mut_tas.c
 @@ -47,7 +47,7 @@ __db_tas_mutex_init(env, mutex, flags)
  
  #ifdef HAVE_SHARED_LATCHES
