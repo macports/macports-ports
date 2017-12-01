@@ -45,7 +45,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
     configure.cxx_stdlib macports-libstdc++
 
     proc register_gcc_dependents {} {
-        global os.major
+        global os.major os.platform
         depends_lib-delete port:libgcc
         depends_lib-append port:libgcc
         # ensure desired compiler flags are present
