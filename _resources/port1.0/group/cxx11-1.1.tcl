@@ -75,8 +75,8 @@ if {${cxx_stdlib} eq "libstdc++" } {
 
     if { ${os.major} < 13 } {
         # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
-        #    assume MacPorts libstdc++ must be ABI compatable with system libstdc++
-        # for OS X Maverick and above, users must select libstdc++, so
+        #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
+        # for OS X Mavericks and above, users must select libstdc++, so
         #    assume they want default ABI compatibility
         # see https://gcc.gnu.org/onlinedocs/gcc-5.2.0/libstdc++/manual/manual/using_dual_abi.html
         configure.cxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
