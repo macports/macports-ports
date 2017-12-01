@@ -49,7 +49,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
         depends_lib-delete port:libgcc
         depends_lib-append port:libgcc
         # ensure desired compiler flags are present
-        if { ${os.major} < 13 } {
+        if {${os.platform} eq "darwin" && ${os.major} < 13} {
             configure.cxxflags-delete    -D_GLIBCXX_USE_CXX11_ABI=0
             configure.cxxflags-append    -D_GLIBCXX_USE_CXX11_ABI=0
             configure.objcxxflags-delete -D_GLIBCXX_USE_CXX11_ABI=0
@@ -73,7 +73,7 @@ if {${cxx_stdlib} eq "libstdc++" } {
     # see https://trac.macports.org/ticket/54766
     depends_lib-append port:libgcc
 
-    if { ${os.major} < 13 } {
+    if {${os.platform} eq "darwin" && ${os.major} < 13} {
         # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
         #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
         # for OS X Mavericks and above, users must select libstdc++, so
