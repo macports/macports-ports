@@ -39,7 +39,7 @@ PortGroup compiler_blacklist_versions 1.0
 
 # Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
 
-if {${cxx_stdlib} eq "libstdc++" } {
+if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
