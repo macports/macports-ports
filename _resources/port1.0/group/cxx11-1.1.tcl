@@ -59,10 +59,10 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
     # do not force all Portfiles to switch from depends_lib to depends_lib-append
     port::register_callback register_gcc_dependents
 
-    if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
-        # ports will build on powerpc with gcc6, gcc4ABI-compatible
+    if {(${os.platform} eq "darwin" && ${os.major} < 10) || ${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+        # ports will build with gcc6, gcc4ABI-compatible
         pre-configure {
-            ui_msg "PowerPC C++11 ports are compiling with GCC. EXPERIMENTAL."
+            ui_msg "C++11 ports are compiling with GCC. EXPERIMENTAL."
         }
         compiler.whitelist  macports-gcc-6
         universal_variant   no
