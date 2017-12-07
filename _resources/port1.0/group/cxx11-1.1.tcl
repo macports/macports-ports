@@ -44,7 +44,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
     # see https://trac.macports.org/ticket/53194
     configure.cxx_stdlib macports-libstdc++
 
-    proc register_gcc_dependents {} {
+    proc cxx11.add_dependencies {} {
         global os.major os.platform
         depends_lib-delete port:libgcc
         depends_lib-append port:libgcc
@@ -57,7 +57,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
         }
     }
     # do not force all Portfiles to switch from depends_lib to depends_lib-append
-    port::register_callback register_gcc_dependents
+    port::register_callback cxx11.add_dependencies
 
     if {(${os.platform} eq "darwin" && ${os.major} < 10) || ${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
         # ports will build with gcc6, gcc4ABI-compatible
