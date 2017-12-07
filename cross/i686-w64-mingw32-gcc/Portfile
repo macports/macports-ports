@@ -14,12 +14,14 @@ dist_subdir         gcc[lindex [split ${version} .] 0]
 
 maintainers         {mojca @mojca} openmaintainer
 
- # these are build + runtime dependencies
-depends_lib-append  port:${mingw_target}-binutils \
-                    port:${mingw_target}-headers
+# these are build + runtime dependencies
+# (binutils are already added by the portgroup)
+depends_lib-append  port:${mingw_target}-headers
 # not sure if useful:
 #                   port:cloog
 #                   port:ppl
+
+patchfiles-append   notparallel-install-headers.patch
 
 configure.args-replace \
                     --enable-multilib \
@@ -45,34 +47,61 @@ configure.args-append \
 #       Installs libgcc/libstdc++ and other target support libraries in such a
 #       way that multiple GCC installs can coexist simultaneously.
 #       (add once you have the default working as it needs some extra tweaking)
-#   --enable-libgomp
-#       Enable OpenMP support, it is not enabled by default on MinGW platforms.
-#       Requires pthreads-win32 (target) installed.
 
+# First bootstrapping phase
 subport ${mingw_target}-gcc-bootstrap {
     build.target    all-gcc
     destroot.target install-gcc
 }
 
-# Supporting pthread requires an additional bootstrapping phase:
-#
-# subport ${mingw_target}-libgcc {
-#   depends_lib-append      port:${mingw_target}-crt
-#   depends_build-append    bin:${mingw_target}-gcc:${mingw_target}-gcc-bootstrap
-#
-#   build.target            all-target-libgcc
-#   destroot.target         install-target-libgcc
-#   # move libgcc_*.dll to a more suitable place
-# }
+# Second bootstrapping phase
+subport ${mingw_target}-gcc-nothreads {
+    # these two are not needed since we are not yet requesting posix threads
+    # build.target          all-target-libgcc
+    # destroot.target       install-target-libgcc
 
-if {${subport} eq ${name}} {
     depends_lib-append      port:${mingw_target}-crt
     depends_build-append    bin:${mingw_target}-gcc:${mingw_target}-gcc-bootstrap
+}
 
+# Final phase
+if {${subport} eq ${name}} {
+    revision                1
+
+    depends_lib-append      port:${mingw_target}-crt \
+                            port:${mingw_target}-winpthreads
+
+    depends_build-append    path:${mingw_target}/lib/libgcc_s.a:${mingw_target}-gcc-nothreads
+
+    configure.args-append   --enable-threads=posix \
+                            --enable-libgomp
+
+    notes "
+        If you want your MinGW-generated windows binaries to work under wine out-of-the-box
+        (and they are not statically linked), you can instruct wine
+        to automatically search for dll-s by running:
+            wine regedit
+        Nagivate to:
+            \[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Session Manager\\Environment\]
+        or
+            \[HKEY_CURRENT_USER\\Environment\]
+        and add
+            Z:[string map {/ \\} ${prefix}]\\${mingw_target}\\bin
+        to the 'PATH' variable.
+    "
+}
+
+if {${subport} ne "${name}-bootstrap"} {
+    post-destroot {
+        move {*}[glob ${destroot}${prefix}/${mingw_target}/lib/*.dll] \
+            ${destroot}${prefix}/${mingw_target}/bin
+    }
     pre-activate {
-        set gcc ${mingw_target}-gcc-bootstrap
-        if {![catch {set installed [lindex [registry_active ${gcc}] 0]}]} {
-            registry_deactivate_composite ${gcc} "" [list ports_nodepcheck 1]
+        foreach flavour {gcc-bootstrap gcc-nothreads gcc} {
+            set gcc ${mingw_target}-${flavour}
+            if {![catch {set installed [lindex [registry_active ${gcc}] 0]}]} {
+                registry_deactivate_composite ${gcc} "" [list ports_nodepcheck 1]
+            }
         }
     }
 }

@@ -1,11 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; truncate-lines: t; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           wxWidgets 1.0
+
+PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           wxWidgets 1.0
 
 name                audacity
-#conflicts           audacity-gtk
 
 description         A Free, Cross-Platform Digital Audio Editor.
 long_description    Audacity is a free, easy-to-use, multi-track audio editor and recorder \
@@ -25,37 +27,33 @@ subport             audacity-devel {
 }
 
 
-# use the release tarball from github because it contains all required external libs
-# incl. those not in MacPorts.
-PortGroup           github 1.0
-
 if {${subport} eq "${name}"} {
-    version         2.1.3
-    revision        1
-    github.setup    audacity audacity ${version} Audacity-
+    # use the release tarball from github because it contains all required external libs
+    # incl. those not in MacPorts.
+    github.setup    audacity audacity 2.2.0 Audacity-
     distname        Audacity-${version}
-    checksums       rmd160  d3f9252f55a13ee1a9f4fcf1f5ffdd72eafdde6d \
-                    sha256  24469a0b8c822f4f93ce23add61cd6ffd1919fc8c1384015a05566764c870ef1
+    checksums       rmd160  1404ebe51fd7e9503081ba5f471260c68760b3f3 \
+                    sha256  921e527a8e52516f208f8cfe34fa61238c470fd16f2c96839a8d29f41dc0b4f6
+    set PPREFIX     ./
 } else {
-#     # git describe --tags : Audacity-2.1.2-1652-g0cb89a8
-#     github.setup        audacity audacity 0cb89a895a25e4f1e7ca4045d0b95e786bce7ed2
-    # git describe --tags : Audacity-2.1.3-190-g78149bc
-    github.setup    audacity audacity 78149bc3da4a7d18c0487baf7002b23759a814c3
-    version         2.1.3.190
+    # git describe --tags : Audacity-2.2.0-1-gfd3813f
+    github.setup    audacity audacity fd3813fa30e4f733ea4e1c86bb5cb986c34b5e3c
+    version         2.2.0.1
     # this port is intended to facilitate development efforts shared with "upstreams"
     # so using git instead of a tarball fetch type is more appropriate.
     fetch.type      git
     distname        audacity-git
+    set PPREFIX     devel/
+    variant wx32 description {Use wxWidgets 3.2 - experimental!} {}
 }
 
 categories          audio
-
 
 platforms           darwin
 license             GPL-2+
 # openssl is a dependency of curl in cmake
 license_noconflict  openssl
-maintainers         gmail.com:rjvbertin openmaintainer
+maintainers         {gmail.com:rjvbertin @RJVB} openmaintainer
 universal_variant   no
 use_parallel_build  yes
 
@@ -63,9 +61,27 @@ homepage            http://www.audacityteam.org/
 
 compiler.blacklist  {*gcc-[234].[0-8]}
 
-wxWidgets.use       wxWidgets-3.0
+if {[variant_exists wx32] && [variant_isset wx32]} {
+    # we want to use the wxWidgets-3.2 "bleeding edge" port!
+    wxWidgets.use   wxWidgets-3.2
+    patchfiles-append \
+                    patch-wxw-31x.diff
+} else {
+    wxWidgets.use   wxWidgets-3.0
+}
+
 depends_build-append \
                     port:${wxWidgets.port}
+
+if {![catch {set wxw_stdlib [active_variants ${wxWidgets.port} stdlib]} err]} {
+    if {${wxw_stdlib}} {
+        long_description-append "This port needs ${wxWidgets.port} without the +stdlib variant."
+        pre-fetch {
+            ui_error "This port needs ${wxWidgets.port} without the +stdlib variant."
+            return -code error "reinstall port:${wxWidgets.port} without the +stdlib variant"
+        }
+    }
+}
 
 depends_build-append \
                     port:cmake \
@@ -86,8 +102,7 @@ depends_lib-append  port:expat \
                     port:libogg \
                     port:libsndfile \
                     port:libvorbis \
-                    port:portaudio \
-                    port:soundtouch
+                    port:portaudio
 # audacity could use port:lv2 and port:lilv but would also require a port:suil for that to be possible.
 
 patch.pre_args      -Np1
@@ -111,16 +126,12 @@ platform darwin {
                     patch-libnyquist-symbol-visibility.diff \
                     patch-fix-casts.diff \
                     patch-add-MenusMac.diff \
-                    patch-skip-gcc-version-test.diff
-}
-
-if {${subport} eq "${name}"} {
+                    patch-skip-gcc-version-test.diff \
+                    patch-fix-audiounits.diff \
+                    patch-temp-fixes.diff
+    # for building against wxWidgets 3.0.3:
     patchfiles-append \
-                    patch-fix-audiounits.diff
-} else {
-    patchfiles-append \
-                    devel/patch-fix-audiounits.diff \
-                    devel/patch-temp-fixes.h
+                    patch-wxw-303.diff
 }
 
 post-patch {
@@ -192,6 +203,18 @@ configure.args-append \
                     CPPFLAGS=-I${prefix}/include \
                     WX_CONFIG=${wxWidgets.wxconfig}
 
+# The embedded portmidi is linux-only as of v2.2.0.
+# building against the system portaudio leads to missing symbols due to
+# mismatched symbol visibility which I haven't managed to address.
+configure.args-append \
+                    --with-portmidi=system \
+                    --with-portaudio=local
+configure.env-append \
+                    PORTMIDI_CFLAGS=-I${prefix}/include \
+                    PORTMIDI_LIBS=${prefix}/lib/libportmidi.dylib
+depends_lib-append \
+                    port:portmidi
+
 build.args-append   V=1 VERBOSE=1
 
 platform darwin {
@@ -235,9 +258,9 @@ platform darwin {
 }
 
 notes "
-    In case Audacity cannot find FFmpeg or Lame, please locate these libraries\
+    In case Audacity complains about finding FFmpeg or Lame, please locate these libraries\
     under ${prefix}/lib in the Libraries section of the Preferences dialog (see\
-    http://manual.audacityteam.org/man/installing_and_updating_audacity_on_mac_os_x.html#locate).
+    http://manual.audacityteam.org/man/installing_and_updating_audacity_on_mac_os_x.html#locate)
 "
 
 # kate: backspace-indents true; indent-pasted-text true; indent-width 4; keep-extra-spaces true; remove-trailing-spaces modified; replace-tabs true; replace-tabs-save true; syntax Tcl/Tk; tab-indents true; tab-width 4;

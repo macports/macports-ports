@@ -176,7 +176,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         os.major                 \
         cxx_stdlib
 
-    # http://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
+    # https://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
     # https://gcc.gnu.org/c99status.html
     # https://gcc.gnu.org/wiki/C11Status
     #
@@ -186,7 +186,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     #
     # https://clang.llvm.org/cxx_status.html
     # https://gcc.gnu.org/projects/cxx-status.html
-    # http://en.cppreference.com/w/cpp/compiler_support
+    # https://en.cppreference.com/w/cpp/compiler_support
     #
     # 1998 (C++98) |    -      |   -       |     -     |
     # 2011 (C++11) | Clang 3.3 | Xcode 5   | GCC 4.8.1 |
@@ -295,7 +295,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     }
 
     # does Clang work on all i386 and x86_64 systems?
-    # according to http://packages.macports.org/clang-5.0/,
+    # according to https://packages.macports.org/clang-5.0/,
     #    clang builds back to Mac OS X 10.6
     set clang_compilers macports-clang-5.0
     if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
@@ -731,8 +731,8 @@ proc portconfigure::configure_cxx_stdlib {} {
 proc portconfigure::should_add_libstdlib_abi {} {
     global os.major cxx_stdlib
     # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
-    #    assume MacPorts libstdc++ must be ABI compatable with system libstdc++
-    # for OS X Maverick and above, users must select libstdc++, so
+    #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
+    # for OS X Mavericks and above, users must select libstdc++, so
     #    assume they want default ABI compatibility
     # see https://gcc.gnu.org/onlinedocs/gcc-5.2.0/libstdc++/manual/manual/using_dual_abi.html
     return [expr {${cxx_stdlib} eq "libstdc++" && [option compiler.cxx_standard] >= 2011 && ${os.major} < 13}]

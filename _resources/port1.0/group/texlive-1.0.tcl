@@ -157,14 +157,15 @@ options texlive.use_mktexlsr_on_deactivate
 default texlive.use_mktexlsr_on_deactivate yes
 
 proc texlive.texmfport {} {
-    homepage        http://www.tug.org/texlive/
+    homepage        https://www.tug.org/texlive/
     platforms       darwin
 
     supported_archs noarch
     installs_libs   no
 
-    master_sites    http://giraffe.cs.washington.edu/texlive/ \
-                    http://alpaca.cs.washington.edu/texlive/
+    master_sites    https://giraffe.cs.washington.edu/texlive/ \
+                    https://alpaca.cs.washington.edu/texlive/ \
+                    https://www.ambulatoryclam.net/texlive/
     use_xz          yes
 
     global name master_sites distname extract.suffix

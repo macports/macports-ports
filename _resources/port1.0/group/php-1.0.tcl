@@ -272,10 +272,10 @@ proc php.setup {extensions version {source ""}} {
     if {"pecl" == ${source}} {
         global php.pecl_livecheck_stable
 
-        set php.homepage        http://pecl.php.net/package/${php.rootname}
+        set php.homepage        https://pecl.php.net/package/${php.rootname}
 
         homepage                ${php.homepage}
-        master_sites            http://pecl.php.net/get/
+        master_sites            https://pecl.php.net/get/
         extract.suffix          .tgz
 
         livecheck.type          regexm

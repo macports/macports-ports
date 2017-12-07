@@ -56,7 +56,7 @@ proc crossbinutils.setup {target version} {
         Free Software Foundation development toolchain ("binutils") for \
         ${target} cross development.
 
-    homepage        http://www.gnu.org/software/binutils/binutils.html
+    homepage        https://www.gnu.org/software/binutils/binutils.html
     master_sites    gnu:binutils \
                     http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
     dist_subdir     binutils

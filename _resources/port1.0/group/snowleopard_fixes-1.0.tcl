@@ -39,9 +39,9 @@ default snowleopard_fixes.addheader no
 proc add_libsnowleopardfixes {} {
     global snowleopard_fixes.addheader
     global prefix
-    
-	depends_lib-append          port:snowleopardfixes
-	configure.ldflags-append   -lsnowleopardfixes
+
+    depends_lib-append          port:snowleopardfixes
+    configure.ldflags-append   -lsnowleopardfixes
 
     if {${snowleopard_fixes.addheader} eq "yes"} {
         configure.cxxflags-append -include ${prefix}/include/snowleopardfixes.h
