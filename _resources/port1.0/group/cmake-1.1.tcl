@@ -84,6 +84,12 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
+# Policy 0025=NEW : identify Apple Clang compiler as "AppleClang";
+# MacPorts Clang is then handled separately from AppleClang. This
+# setting ensures consistency in compiler feature determination and
+# use, which is especially useful for older Mac OS X installs --
+# e.g., ones that use MacPorts Clang 4.0 via the cxx11 1.1 PortGroup.
+
 default configure.pre_args {[list \
                     -DCMAKE_BUILD_TYPE=MacPorts \
                    {-DCMAKE_C_COMPILER="$CC"} \
@@ -97,6 +103,7 @@ default configure.pre_args {[list \
                     {*}[cmake::rpath_flags] \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
+                    -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
                     ]}
 
