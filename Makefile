@@ -34,3 +34,10 @@ delete-local-ports:
 .PHONY: port-index
 port-index:
 	@(cd $(LOCAL_PORTS_DIR) ; portindex )
+
+.PHONY: livecheck
+livecheck:
+	@for i in $$(cat $(PORTS_FILE)) ; \
+	do \
+		port livecheck $${i} ; \
+	done
