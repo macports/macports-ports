@@ -36,7 +36,7 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5  {qt5-qtbase  5.9}
+    qt5  {qt5-qtbase  5.10}
     qt59 {qt59-qtbase 5.9}
     qt58 {qt58-qtbase 5.8}
     qt57 {qt57-qtbase 5.7}
@@ -510,6 +510,12 @@ namespace eval qt5pg {
             5.4
             6.0
             lib/pkgconfig/Qt5WebEngine.pc
+            ""
+        }
+        qtwebglplugin {
+            5.10
+            6.0
+            lib/cmake/Qt5Gui/Qt5Gui_QWebGLIntegrationPlugin.cmake
             ""
         }
         qtwebkit {
