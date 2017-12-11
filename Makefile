@@ -30,3 +30,7 @@ diff: $(PR_FILE) | $(LOCAL_PORTS_DIR)
 .PHONY: delete-local-ports
 delete-local-ports:
 	@$(RM) -r $(LOCAL_PORTS_DIR)/*
+
+.PHONY: port-index
+port-index:
+	@(cd $(LOCAL_PORTS_DIR) ; portindex )
