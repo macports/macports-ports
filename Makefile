@@ -1,5 +1,5 @@
-PORTS_FILE:=				ports.txt
-LOCAL_PORTS_DIR:=		~/ports
+PORTS_FILE:=        ports.txt
+LOCAL_PORTS_DIR:=   ~/ports
 
 .PHONY: list-missing-ports
 list-missing-ports:
