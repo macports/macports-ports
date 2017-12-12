@@ -41,3 +41,7 @@ livecheck:
 	do \
 		port livecheck $${i} ; \
 	done
+
+.PHONY: list-ports
+list-ports:
+	@cat $(PORTS_FILE)
