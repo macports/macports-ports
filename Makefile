@@ -1,5 +1,13 @@
-PORTS_FILE:=        ports.txt
-LOCAL_PORTS_DIR:=   ~/ports
+PORTS_FILE:=            ports.txt
+LOCAL_PORTS_DIR:=       ~/ports
+PORT_INDEX_SENTINEL:=   $(LOCAL_PORTS_DIR)/.port-index.sentinel
+
+.PHONY: all
+all: create-missing-ports $(PORT_INDEX_SENTINEL)
+
+$(PORT_INDEX_SENTINEL):
+	make port-index
+	touch $@
 
 .PHONY: list-missing-ports
 list-missing-ports:
@@ -16,9 +24,9 @@ create-missing-ports:
 		{ \
 			mkdir -p $(LOCAL_PORTS_DIR)/$${i} ; \
 			cp -r $${i} $(LOCAL_PORTS_DIR)/$$(dirname $${i}) ; \
+			$(RM) $(PORT_INDEX_SENTINEL) ; \
 		} \
 	done
-
 
 .PHONY: diff
 diff: $(PORTS_FILE) | $(LOCAL_PORTS_DIR)
