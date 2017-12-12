@@ -6,8 +6,8 @@ PORT_INDEX_SENTINEL:=   $(LOCAL_PORTS_DIR)/.port-index.sentinel
 all: create-missing-ports $(PORT_INDEX_SENTINEL)
 
 $(PORT_INDEX_SENTINEL):
-	make port-index
-	touch $@
+	@$(MAKE) port-index
+	@touch $@
 
 .PHONY: list-missing-ports
 list-missing-ports:
@@ -38,6 +38,8 @@ diff: $(PORTS_FILE) | $(LOCAL_PORTS_DIR)
 .PHONY: delete-local-ports
 delete-local-ports:
 	@$(RM) -r $(LOCAL_PORTS_DIR)/*
+	@$(RM) $(PORT_INDEX_SENTINEL)
+	@$(MAKE) $(PORT_INDEX_SENTINEL)
 
 .PHONY: port-index
 port-index:
