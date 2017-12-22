@@ -49,7 +49,7 @@ port-index:
 livecheck:
 	@for i in $$(cat $(PORTS_FILE)) ; \
 	do \
-		port livecheck $${i} ; \
+		port livecheck $${i} || true ; \
 	done
 
 .PHONY: list-ports
