@@ -59,6 +59,6 @@ list-ports:
 create-port-branch:
 	@echo "Port name:"
 	@read PORT_NAME && \
-		if [ -z ${PORT_NAME} ] ; then echo "Invalid port name." ; exit 1 ; fi && \
+		if [ -z $${PORT_NAME} ] ; then echo "Invalid port name." ; exit 1 ; fi && \
 		git checkout upstream_master && \
-		git checkout -b ${PORT_NAME}
+		git checkout -b $${PORT_NAME}
