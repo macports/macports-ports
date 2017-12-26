@@ -2,11 +2,14 @@
 
 PortSystem          1.0
 PortGroup           muniversal 1.0
-PortGroup           compiler_blacklist_versions 1.0
 
 # devel requires C++11 as of 2017-08-21
 # https://gitlab.kitware.com/cmake/cmake/commit/c1f3eb9f2d628b2911aa17f65012fab0befc4b87
 # release requires C++11 as of 3.10.0
+if {!((${os.platform} eq "darwin" && ${os.major} < 10) || ${build_arch} eq "ppc" || ${build_arch} eq "ppc64")} {
+    depends_lib-append port:libcxx
+    configure.cxx_stdlib libc++
+}
 PortGroup cxx11 1.1
 
 name                cmake
@@ -34,9 +37,9 @@ if {${subport} eq ${name}} {
 
     # release
 
-    version         ${branch}.0
-    checksums       rmd160 03a457f0e7b9752eda04d88b4d956c9df9cb31c9 \
-                    sha256 b3345c17609ea0f039960ef470aa099de9942135990930a57c14575aae884987
+    version         ${branch}.1
+    checksums       rmd160 736a185c90d7f6d94911bd7ae41e8c734219f579 \
+                    sha256 7be36ee24b0f5928251b644d29f5ff268330a916944ef4a75e23ba01e7573284
 
     master_sites    ${homepage}/files/v${branch}/
     conflicts       cmake-devel
@@ -60,12 +63,13 @@ if {${subport} eq ${name}} {
 
     # devel
 
-    version         20171126
-    set commit      b1d3fb7fba735d829c2cd655830161871827d82e
-    checksums       rmd160 3976baa714c99ddea10dcf9a6f343e52a0ca679c \
-                    sha256 b0c97fa19cefefea724c35bb01d1ef4cdbddcc9cea7b43c3e513128222ffb527
+    version         20171218
+    set commit      1eac7c6ee58e73302d2049376ff3f114a8e6826e
+    checksums       rmd160 ed764315a496388dbde5fd3eb30dfb12c9cf2b79 \
+                    sha256 ebaf7bf1cd66ebb8b6c2e00309b38fc189860cb6e281eefe3881e3cff23a3530
 
-    master_sites    https://gitlab.kitware.com/cmake/cmake/repository/archive.tar.bz2?ref=${commit}&
+    use_bzip2       yes
+    master_sites    https://gitlab.kitware.com/cmake/cmake/repository/archive${extract.suffix}?ref=${commit}&
     distname        ${name}-${commit}
 
     post-extract {
@@ -79,7 +83,6 @@ if {${subport} eq ${name}} {
     # devel-only patches
     patchfiles-append \
         patch-Modules-FindQt4.cmake.devel.diff \
-        patch-Modules-FindFreetype.cmake.devel.diff \
         patch-Modules-noArchCheck.devel.diff \
         patch-CMakeFindFrameworks.cmake.devel.diff \
         patch-Source_CMakeVersionCompute.cmake.devel.diff \
@@ -108,13 +111,14 @@ configure.env-append \
                     CMAKE_INCLUDE_PATH=${prefix}/include/ncurses \
                     CMAKE_LIBRARY_PATH=${prefix}/lib
 
-# when using libc++, require Clang 3.4 or newer; Clang 3.3 produces
-# bad stream reading code. See also MP ticket #44129:
-# < https://trac.macports.org/ticket/44129 >
-
-if {${configure.cxx_stdlib} eq "libc++"} {
-    compiler.blacklist-append *gcc* {clang < 500} macports-clang-3.3
+# On Lion, Clang 3.3 produces bad stream reading code when using libc++.
+# See https://trac.macports.org/ticket/44129
+# Clang 3.4 works. But Clang 3.7 doesn't work.
+if {${os.platform} eq "darwin" && ${os.major} == 11 && ${configure.cxx_stdlib} eq "libc++"} {
+    compiler.whitelist macports-clang-3.4
 }
+# Clang 3.8 and later require cmake; avoid circular dependency.
+compiler.blacklist-append macports-clang-3.8 macports-clang-3.9 macports-clang-4.0 macports-clang-5.0
 
 platform darwin {
     configure.env-append \
@@ -125,11 +129,22 @@ platform darwin {
     } else {
         configure.env-append CMAKE_OSX_SYSROOT="/"
     }
+
+    if {${os.arch} eq "i386" && ${os.major} <= 9} {
+        # The old system headers do some bit shifting on Intel about which
+        # newer compilers throw errors:
+        # SecKeychain.h:102:46: error: shift expression '(1853123693 << 8)' overflows [-fpermissive]
+        configure.cflags-append -fpermissive
+        configure.cxxflags-append -fpermissive
+    }
 }
 
-# CMake 3.2 changed dependency requirements to include jsoncpp.
-# jsoncpp 1.0+ requires CMake for building. catch 22. So, have CMake
-# use its internal jsoncpp until a better solution comes about.
+# jsoncpp 1.0+ requires CMake for building; circular dependencies are
+# not possible in MacPorts. In addition, jsoncpp uses C++, so it would
+# not be possible for CMake, which uses libc++ on 10.6-10.8, to link
+# with a MacPorts copy of jsoncpp, which would usually use libstdc++
+# on those systems. Fortunately CMake comes bundled with its own
+# internal copy of jsoncpp, so we use that.
 
 configure.args-append --docdir=share/doc/cmake \
                     --parallel=${build.jobs} \
@@ -168,18 +183,6 @@ platform darwin 9 {
         supported_archs ppc ppc64
     }
     set universal_archs_supported ${supported_archs}
-}
-
-platform darwin {
-    # TODO: Figure out why using libc++ fails on Lion and fix the bootstrap
-    #       script to honor CMAKE_OSX_SYSROOT and CMAKE_OSX_DEPLOYMENT_TARGET.
-    #       Since nothing links against cmake and cmake is just using the STL,
-    #       we're safe to force libstdc++
-    #
-    #       https://cmake.org/Bug/view.php?id=15039&nbn=16
-    if {${os.major} < 12} {
-        configure.cxx_stdlib libstdc++
-    }
 }
 
 build.post_args VERBOSE=ON
@@ -231,36 +234,6 @@ post-destroot {
 
 variant gui description {Build Qt-based cmake-gui} {
     configure.args-append --qt-gui
-
-    # when building the GUI with Qt, CMake uses C++11. So, make sure
-    # the compiler used is c++11 compliant.
-
-    if {${configure.cxx_stdlib} eq "libstdc++"} {
-
-        # *clang* when using libstdc++ do not seem to support C++11;
-        # C++11 support seems to need GCC 4.7+ when using libstdc++;
-        # could use C++0x support on GCC4.[56], but just ignore it since
-        # there are newer compilers already in place as defaults.
-
-        # Blacklist GCC compilers not supporting C++11 and all CLANG.
-        # This is probably not necessary, but it's good practice.
-
-        compiler.blacklist-append *clang* {*gcc-3*} {*gcc-4.[0-6]}
-
-        # and whitelist those we do want to use. wish there were a better way.
-        # these will be used in the order provided.
-
-        compiler.whitelist macports-gcc-4.9 macports-gcc-4.8 macports-gcc-4.7
-
-    } else {
-
-        # using libc++;
-        # Blacklist Clang not supporting C++11 in some form and all GCC.
-        # Just use the cxx11 PortGroup for this specific case.
-
-        PortGroup cxx11 1.0
-
-    }
 }
 
 variant qt4 conflicts qt5 requires gui description {Build Qt GUI using Qt4} {

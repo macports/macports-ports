@@ -76,14 +76,16 @@ proc bitbucket.livecheck_regex {} {
 }
 
 proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
-    global bitbucket.author bitbucket.homepage bitbucket.master_sites bitbucket.project bitbucket.tag_prefix bitbucket.version extract.suffix
+    global bitbucket.author bitbucket.homepage bitbucket.master_sites bitbucket.project bitbucket.tag_prefix bitbucket.version extract.suffix PortInfo
 
     bitbucket.author        ${bb_author}
     bitbucket.project       ${bb_project}
     bitbucket.version       ${bb_version}
     bitbucket.tag_prefix    ${bb_tag_prefix}
 
-    name                    ${bitbucket.project}
+    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${bitbucket.project}))} {
+        name                ${bitbucket.project}
+    }
     version                 ${bitbucket.version}
     homepage                ${bitbucket.homepage}
     hg.url                  ${bitbucket.homepage}
