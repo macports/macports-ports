@@ -1,0 +1,189 @@
+From 831c908f3f32c13bc3a099f0a4e1e81e75f423ed Mon Sep 17 00:00:00 2001
+From: Eric Fiselier <eric@efcs.ca>
+Date: Wed, 12 Jul 2017 01:34:21 +0000
+Subject: [PATCH 1/4] Remove dependancy on __refstring header; use local copy
+ instead.
+
+This patch removes the dependancy on libc++'s __refstring header,
+which was only a header in the first place so that libc++abi could
+build library code using it, and not because libc++ needed it in
+the headers.
+
+This patch allows libc++ to stop shipping <__refstring> publicaly
+at the cost of duplicating it across projects. Ideally libc++abi
+would always require the libc++ sources when building, but that's
+a separate discussion I plan to start on the mailing lists shortly.
+
+git-svn-id: https://llvm.org/svn/llvm-project/libcxxabi/trunk@307748 91177308-0d34-0410-b5e6-96231b3b80d8
+(cherry picked from commit 28942d3ba886b4f215ac6ddaa05c55d35d927621)
+---
+ src/include/refstring.h | 143 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/stdexcept.cpp       |   2 +-
+ 2 files changed, 144 insertions(+), 1 deletion(-)
+ create mode 100644 src/include/refstring.h
+
+diff --git libcxxabi-3.9.1.src/src/include/refstring.h libcxxabi-3.9.1.src/src/include/refstring.h
+new file mode 100644
+index 0000000..390e664
+--- /dev/null
++++ libcxxabi-3.9.1.src/src/include/refstring.h
+@@ -0,0 +1,143 @@
++//===------------------------ __refstring ---------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// FIXME: This file is copied from libcxx/src/include/refstring.h. Instead of
++// duplicating the file in libc++abi we should require that the libc++ sources
++// are available when building libc++abi.
++
++#ifndef _LIBCPP___REFSTRING
++#define _LIBCPP___REFSTRING
++
++#include <__config>
++#include <cstddef>
++#include <cstring>
++#ifdef __APPLE__
++#include <dlfcn.h>
++#include <mach-o/dyld.h>
++#endif
++
++_LIBCPP_BEGIN_NAMESPACE_STD
++
++class _LIBCPP_HIDDEN __libcpp_refstring
++{
++private:
++    const char* str_;
++
++    typedef int count_t;
++
++    struct _Rep_base
++    {
++        std::size_t len;
++        std::size_t cap;
++        count_t     count;
++    };
++
++    static
++    _Rep_base*
++    rep_from_data(const char *data_) _NOEXCEPT
++    {
++        char *data = const_cast<char *>(data_);
++        return reinterpret_cast<_Rep_base *>(data - sizeof(_Rep_base));
++    }
++    static
++    char *
++    data_from_rep(_Rep_base *rep) _NOEXCEPT
++    {
++        char *data = reinterpret_cast<char *>(rep);
++        return data + sizeof(*rep);
++    }
++
++#ifdef __APPLE__
++    static
++    const char*
++    compute_gcc_empty_string_storage() _NOEXCEPT
++    {
++        void* handle = dlopen("/usr/lib/libstdc++.6.dylib", RTLD_NOLOAD);
++        if (handle == nullptr)
++            return nullptr;
++        void* sym = dlsym(handle, "_ZNSs4_Rep20_S_empty_rep_storageE");
++        if (sym == nullptr)
++            return nullptr;
++        return data_from_rep(reinterpret_cast<_Rep_base *>(sym));
++    }
++
++    static
++    const char*
++    get_gcc_empty_string_storage() _NOEXCEPT
++    {
++        static const char* p = compute_gcc_empty_string_storage();
++        return p;
++    }
++
++    bool
++    uses_refcount() const
++    {
++        return str_ != get_gcc_empty_string_storage();
++    }
++#else
++    bool
++    uses_refcount() const
++    {
++        return true;
++    }
++#endif
++
++public:
++    explicit __libcpp_refstring(const char* msg) {
++        std::size_t len = strlen(msg);
++        _Rep_base* rep = static_cast<_Rep_base *>(::operator new(sizeof(*rep) + len + 1));
++        rep->len = len;
++        rep->cap = len;
++        rep->count = 0;
++        char *data = data_from_rep(rep);
++        std::memcpy(data, msg, len + 1);
++        str_ = data;
++    }
++
++    __libcpp_refstring(const __libcpp_refstring& s) _NOEXCEPT : str_(s.str_)
++    {
++        if (uses_refcount())
++            __sync_add_and_fetch(&rep_from_data(str_)->count, 1);
++    }
++
++    __libcpp_refstring& operator=(const __libcpp_refstring& s) _NOEXCEPT
++    {
++        bool adjust_old_count = uses_refcount();
++        struct _Rep_base *old_rep = rep_from_data(str_);
++        str_ = s.str_;
++        if (uses_refcount())
++            __sync_add_and_fetch(&rep_from_data(str_)->count, 1);
++        if (adjust_old_count)
++        {
++            if (__sync_add_and_fetch(&old_rep->count, count_t(-1)) < 0)
++            {
++                ::operator delete(old_rep);
++            }
++        }
++        return *this;
++    }
++
++    ~__libcpp_refstring()
++    {
++        if (uses_refcount())
++        {
++            _Rep_base* rep = rep_from_data(str_);
++            if (__sync_add_and_fetch(&rep->count, count_t(-1)) < 0)
++            {
++                ::operator delete(rep);
++            }
++        }
++    }
++
++    const char* c_str() const _NOEXCEPT {return str_;}
++};
++
++_LIBCPP_END_NAMESPACE_STD
++
++#endif //_LIBCPP___REFSTRING
+diff --git libcxxabi-3.9.1.src/src/stdexcept.cpp libcxxabi-3.9.1.src/src/stdexcept.cpp
+index bd6789e..e3b7cd4 100644
+--- libcxxabi-3.9.1.src/src/stdexcept.cpp
++++ libcxxabi-3.9.1.src/src/stdexcept.cpp
+@@ -7,7 +7,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
+-#include "__refstring"
++#include "include/refstring.h"
+ #include "stdexcept"
+ #include "new"
+ #include <cstdlib>
+-- 
+2.15.1
+
