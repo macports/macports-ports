@@ -2,13 +2,9 @@
 
 PortSystem              1.0
 
-if {[variant_isset qt]} {
-    PortGroup           qt4 1.0
-}
-
 name                    gpsd
-version                 3.14
-revision                4
+version                 3.17
+revision                1
 license                 BSD
 categories              net
 maintainers             {ryandesign @ryandesign} openmaintainer
@@ -16,28 +12,32 @@ platforms               darwin
 
 description             GPS service daemon
 
-long_description        GPSD is a service daemon that handles GPSes and other navigation-related sensors \
-                        reporting over USB, serial, TCP/IP, or UDP connections and presents reports in \
-                        a well-documented JSON application.
+long_description        GPSD is a service daemon that handles GPSes and other \
+                        navigation-related sensors reporting over USB, serial, \
+                        TCP/IP, or UDP connections and presents reports in \
+                        a well-documented JSON format.  The package also \
+                        includes a number of clients which can be run against \
+                        a local GPSD or a GPSD on another machine.
 
 homepage                http://www.catb.org/${name}/
 master_sites            savannah
 
-checksums               rmd160  fe0059e2b3d64af5857f9c150ef2fdd6bc6e115f \
-                        sha256  504fc812f3c1525a1a48e04bf4d77f9a8066c201448d98089df89d58ef53a8cb
+checksums               rmd160  7aeacd58b7374b392e691fc470dc9a644169ba8a \
+                        sha256  68e0dbecfb5831997f8b3d6ba48aed812eb465d8c0089420ab68f9ce4d85e77a
 
-depends_lib-append      port:ncurses port:python27
-depends_build-append    port:scons
+depends_lib-append      port:ncurses
+depends_build-append    port:scons port:pkgconfig
 
-patchfiles              patch-SConstruct.diff \
-                        patch-driver_rtcm2.c.diff \
-                        patch-libgps.pc.in.diff \
-                        patch-libgpsd.pc.in.diff \
-                        leopard-IPV6_TCLASS.patch
+# GPSD requires Python 2.6, 2.7, or 3.2+, but for now we just base it on 2.7.
+# The Python Portgroup breaks the C installs, so we can't use it until the port
+# is split up between the C/C++ and Python code.
+#
+depends_run             port:python27
+configure.python        ${prefix}/bin/python2.7
+
+patchfiles              patch-SConstruct.diff
 
 use_configure           no
-
-variant universal {}
 
 set cxx_stdlibflags {}
 if {[string match *clang* ${configure.cxx}]} {
@@ -46,40 +46,127 @@ if {[string match *clang* ${configure.cxx}]} {
 
 build.cmd               ${prefix}/bin/scons
 build.target
-build.args              prefix=${prefix} libQgpsmm=no usb=no strip=no
+build.args              prefix=${prefix} \
+                        target_python=${configure.python} \
+                        qt=no \
+                        usb=no \
+                        strip=no \
+                        dbus_export=no \
+                        xgps=no
 build.env-append        CC="${configure.cc} [get_canonical_archflags cc]" \
                         CFLAGS="${configure.cflags}" \
                         CXX="${configure.cxx} [get_canonical_archflags cxx] ${cxx_stdlibflags}" \
                         CXXFLAGS="${configure.cxxflags}" \
-                        LDFLAGS="${configure.ldflags}" \
-                        PYTHON=${prefix}/bin/python2.7
+                        LDFLAGS="${configure.ldflags}"
+
+# Allow the regression tests to be run via "port test gpsd".
+#
+# The speed of the daemon tests is highly dependent on the WRITE_PAD value.
+# Empirically, 200us seems to be adequate on a MacPro, and 500us seems to be
+# adequate on a PowerBook G4, but even 2ms is sometimes inadequate under 10.12,
+# so we use 5ms here.  If needed, this value can be overridden with
+# WRITE_PAD=XXX on the command line, but only if WRITE_PAD is included in
+# extra_env in macports.conf.  In all cases, the WRITE_PAD value in use is
+# reported by the test framework and is visible with -v.
+#
+# Note also that the MacPorts sandbox doesn't allow ptys, so the daemon tests
+# report "gpsfake: ptys not available, falling back to UDP.", but still work.
+# This can be worked around by running "scons testregress" directly in
+# ${worksrcpath}, rather than running it via "port test".
+#
+# The test phase duplicates the arguments and environment (except WRITE_PAD)
+# from the build phase, mainly to avoid gratuitous rebuilds between the phases.
+#
+# The GPSD build procedure supports parallel tests, but there's no built-in
+# MacPorts support for parallel tests, nor is there a test.jobs variable, so
+# we just augment test.cmd with build.jobs.
+#
+test.run                yes
+test.cmd                ${build.cmd} -j${build.jobs}
+test.target             testregress
+set test.args           ${build.args}
+set test.env            ${build.env}
+if { [info exists ::env(WRITE_PAD)] } {
+    test.env-append     WRITE_PAD=$::env(WRITE_PAD)
+} else {
+    test.env-append     WRITE_PAD=0.005
+}
 
 destroot.args           {*}${build.args}
 destroot.env-append     {*}${destroot.destdir} {*}${build.env}
 
 post-destroot {
-    xinstall -m 644 -W ${worksrcpath} libgps.dylib libgpsd.dylib ${destroot}${prefix}/lib
+    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+        ${destroot}${prefix}/bin/gegps
+    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+        ${destroot}${prefix}/bin/gpscat
+    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+        ${destroot}${prefix}/bin/gpsfake
+    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+        ${destroot}${prefix}/bin/gpsprof
+    if {[variant_isset xgps]} {
+        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+            ${destroot}${prefix}/bin/xgps
+        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+            ${destroot}${prefix}/bin/xgpsspeed
+    }
+    system -W ${destroot}${prefix}/lib "install_name_tool -id ${prefix}/lib/libgps.dylib libgps.dylib"
 }
 
-variant qt description {Build Qt bindings} {
-    build.args-delete       libQgpsmm=no
-    destroot.args-delete    libQgpsmm=no
+# Although GPSD has successfully been built with Qt5 at one time, that build
+# is currently broken.  Until the build issue is sorted out, Qt support is
+# limited to Qt4.
+#
+variant qt description {Build Qt4 bindings} {
+    PortGroup               qt4 1.0
+    # The following two lines are a workaround for #50347
+    build.env-append        PKG_CONFIG_PATH=${qt_pkg_config_dir}
+    test.env-append         PKG_CONFIG_PATH=${qt_pkg_config_dir}
+
+    build.args-delete       qt=no
+    build.args-append       qt=yes
+    test.args-delete        qt=no
+    test.args-append        qt=yes
+    destroot.args-delete    qt=no
+    destroot.args-append    qt=yes
 }
 
 variant libusb \
 description {Include support for better USB device discovery} {
-    depends_build-append port:pkgconfig
-    depends_lib-append   port:libusb
-    build.args-delete    usb=no
-    destroot.args-delete usb=no
+    depends_lib-append      port:libusb
+    build.args-delete       usb=no
+    build.args-append       usb=yes
+    test.args-delete        usb=no
+    test.args-append        usb=yes
+    destroot.args-delete    usb=no
+    destroot.args-append    usb=yes
 }
 
 variant dbus description {Include support for DBUS} {
     depends_lib-append      port:dbus-glib
-    build.args-append       dbus=yes dbus_export=yes
-    destroot.args-append    dbus=yes dbus_export=yes
+    build.args-delete       dbus_export=no
+    build.args-append       dbus_export=yes
+    test.args-delete        dbus_export=no
+    test.args-append        dbus_export=yes
+    destroot.args-delete    dbus_export=no
+    destroot.args-append    dbus_export=yes
+}
+
+variant xgps \
+description {Include xgps/xgpsspeed X11 clients (dependency-intensive)} {
+    depends_run-append      port:py27-cairo port:py27-gobject3 port:gtk3
+    build.args-delete       xgps=no
+    build.args-append       xgps=yes
+    test.args-delete        xgps=no
+    test.args-append        xgps=yes
+    destroot.args-delete    xgps=no
+    destroot.args-append    xgps=yes
+}
+
+if {![variant_isset xgps]} {
+    notes "The xgps variant is now needed to get the xgps and xgpsspeed programs."
 }
 
 livecheck.type          regex
-livecheck.url           http://download-mirror.savannah.gnu.org/releases/gpsd/
+livecheck.url           http://download.savannah.gnu.org/releases-noredirect/gpsd
 livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
