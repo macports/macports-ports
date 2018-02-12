@@ -58,6 +58,10 @@ array set crossgcc.versions_info {
         rmd160  fa8eed36c78cf135f9cc88e60845996b5cfaba52
         sha256  1cf7adf8ff4b5aa49041c8734bbcf1ad18cc4c94d0029aae0f4e48841088479a
     }}
+    7.3.0 {xz {
+        rmd160  31f6934a0e0c0ca84b6668110f9afdb91c1f9023 \
+        sha256  832ca6ae04636adbb430e865a1451adf6979ab44ca1c8374f61fba65645ce15c
+    }}
 }
 
 proc crossgcc.setup {target version} {
