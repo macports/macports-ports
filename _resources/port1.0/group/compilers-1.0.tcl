@@ -76,7 +76,7 @@
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
-# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler
+# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler.
 
 PortGroup active_variants 1.1
 
@@ -574,13 +574,14 @@ proc compilers.action_enforce_f {args} {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
             set myf  [fortran_variant_name]
+            set myf_compiler [fortran_compiler_name $myf]
 
             if {$otf ne "" && $myf eq ""} {
                 default_variants +$otf
-            } elseif {[fortran_compiler_name $otf] ne [fortran_compiler_name $myf]} {
+            } elseif {[fortran_compiler_name $otf] ne $myf_compiler} {
                 # what if $portname does not have that variant? e.g. maybe it has only gcc5 and we are asking for gfortran.
-                ui_error "Install $portname +$myf"
-                return -code error "$portname +$myf not installed"
+                ui_error "Install $portname +$myf_compiler"
+                return -code error "$portname +$myf_compiler not installed"
             }
         } else {
             ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."

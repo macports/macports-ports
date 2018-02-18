@@ -36,7 +36,8 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5  {qt5-qtbase  5.9}
+    qt5  {qt5-qtbase  5.10}
+    qt59 {qt59-qtbase 5.9}
     qt58 {qt58-qtbase 5.8}
     qt57 {qt57-qtbase 5.7}
     qt56 {qt56-qtbase 5.6}
@@ -83,10 +84,10 @@ proc qt5.get_default_name {} {
         #
         # Mac OS X Lion (10.7)
         #
-        # Qt 5.7: Not Supported and is known not to work
-        # Qt 5.6: Deployment only but seems to work (except QtWebEngine)
-        # Qt 5.5: Occasionally tested
-        # Qt 5.4: Supported
+        # Qt 5.7:  Not Supported and is known not to work
+        # Qt 5.6:  Deployment only but seems to work (except QtWebEngine)
+        # Qt 5.5:  Occasionally tested
+        # Qt 5.4:  Supported
         #
         return qt56
         #
@@ -94,9 +95,9 @@ proc qt5.get_default_name {} {
         #
         # OS X Mountain Lion (10.8)
         #
-        # Qt 5.8: Not Supported
-        # Qt 5.7: Supported (except QtWebEngine)
-        # Qt 5.6: Supported
+        # Qt 5.8:  Not Supported
+        # Qt 5.7:  Supported (except QtWebEngine)
+        # Qt 5.6:  Supported
         #
         return qt57
         #
@@ -104,40 +105,53 @@ proc qt5.get_default_name {} {
         #
         # OS X Mavericks (10.9)
         #
-        # Qt 5.9: Not Supported
-        # Qt 5.8: Supported
-        # Qt 5.7: Supported
-        # Qt 5.6: Supported
+        # Qt 5.9:  Not Supported
+        # Qt 5.8:  Supported
+        # Qt 5.7:  Supported
+        # Qt 5.6:  Supported
         #
         return qt58
         #
-    } elseif { ${os.major} <= 15 } {
+    } elseif { ${os.major} == 14 } {
         #
         # OS X Yosemite (10.10)
-        # OS X El Capitan (10.11)
         #
-        # Qt 5.9: Supported
-        # Qt 5.8: Supported
-        # Qt 5.7: Supported
-        # Qt 5.6: Supported
+        # Qt 5.10: Not Supported but seems to work
+        # Qt 5.9:  Supported
+        # Qt 5.8:  Supported
+        # Qt 5.7:  Supported
+        # Qt 5.6:  Supported
         #
         return qt5
         #
-    } elseif { ${os.major} <= 16 } {
+    } elseif { ${os.major} == 15 } {
+        #
+        # OS X El Capitan (10.11)
+        #
+        # Qt 5.10: Supported
+        # Qt 5.9:  Supported
+        # Qt 5.8:  Supported
+        # Qt 5.7:  Supported
+        # Qt 5.6:  Supported
+        #
+        return qt5
+        #
+    } elseif { ${os.major} == 16 } {
         #
         # macOS Sierra (10.12)
         #
-        # Qt 5.9: Supported
-        # Qt 5.8: Supported
-        # Qt 5.7: Not Supported but seems to work
+        # Qt 5.10: Supported
+        # Qt 5.9:  Supported
+        # Qt 5.8:  Supported
+        # Qt 5.7:  Not Supported but seems to work
         #
         return qt5
         #
-    } elseif { ${os.major} <= 17 } {
+    } elseif { ${os.major} == 17 } {
         #
         # macOS High Sierra (10.13)
         #
-        # Qt 5.9: ???
+        # Qt 5.10: Supported
         #
         return qt5
         #
@@ -498,6 +512,12 @@ namespace eval qt5pg {
             lib/pkgconfig/Qt5WebEngine.pc
             ""
         }
+        qtwebglplugin {
+            5.10
+            6.0
+            lib/cmake/Qt5Gui/Qt5Gui_QWebGLIntegrationPlugin.cmake
+            ""
+        }
         qtwebkit {
             5.0
             6.0
@@ -576,6 +596,12 @@ proc qt5.depends_build_component {args} {
     global qt5_private_build_components
     foreach comp ${args} {
         lappend qt5_private_build_components ${comp}
+    }
+}
+proc qt5.depends_runtime_component {args} {
+    global qt5_private_runtime_components
+    foreach comp ${args} {
+        lappend qt5_private_runtime_components ${comp}
     }
 }
 
@@ -716,7 +742,7 @@ proc eval_variants {variations} {
 
 namespace eval qt5pg {
     proc register_dependents {} {
-        global qt5_private_components qt5_private_build_components qt5.name
+        global qt5_private_components qt5_private_build_components qt5_private_runtime_components qt5.name
 
         if { ![exists qt5_private_components] } {
             # no Qt components have been requested
@@ -726,6 +752,10 @@ namespace eval qt5pg {
         if { ![exists qt5_private_build_components] } {
             # qt5.depends_build_component has never been called
             set qt5_private_build_components ""
+        }
+        if { ![exists qt5_private_runtime_components] } {
+            # qt5.depends_build_component has never been called
+            set qt5_private_runtime_components ""
         }
 
         if { [variant_exists qt5kde] && [variant_isset qt5kde] } {
@@ -748,6 +778,20 @@ namespace eval qt5pg {
                 }
             }
             foreach component ${qt5_private_build_components} {
+                switch -exact ${component} {
+                    qtwebkit -
+                    qtwebengine -
+                    qtwebview -
+                    qtenginio {
+                        # these components are subports
+                        depends_run-append port:${qt_kde_name}-${component}
+                    }
+                    default {
+                        # qt5-kde provides all components except those above
+                    }
+                }
+            }
+            foreach component ${qt5_private_runtime_components} {
                 switch -exact ${component} {
                     qtwebkit -
                     qtwebengine -
@@ -779,6 +823,15 @@ namespace eval qt5pg {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     depends_build-append path:${path}:${qt5.name}-${component}
+                } else {
+                    return -code error "unknown component ${component}"
+                }
+            }
+            foreach component ${qt5_private_runtime_components} {
+                if { [info exists qt5pg::qt5_component_lib(${component})] } {
+                    set component_info $qt5pg::qt5_component_lib(${component})
+                    set path           [lindex ${component_info} 2]
+                    depends_run-append path:${path}:${qt5.name}-${component}
                 } else {
                     return -code error "unknown component ${component}"
                 }

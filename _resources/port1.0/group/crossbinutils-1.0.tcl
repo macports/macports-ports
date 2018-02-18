@@ -39,8 +39,15 @@
 
 options crossbinutils.target
 
+array set crossbinutils.versions_info {
+    2.30 {xz {
+        rmd160  7f439bd642e514e89075a47758414ea65c50c3b3 \
+        sha256  6e46b8aeae2f727a36f0bd9505e405768a72218f1796f0d09757d45209871ae6
+    }}
+}
+
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target
+    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target crossbinutils.versions_info
 
     crossbinutils.target ${target}
 
@@ -62,7 +69,16 @@ proc crossbinutils.setup {target version} {
     dist_subdir     binutils
     distname        binutils-${version}
     worksrcdir      binutils-[string trimright ${version} {[a-zA-Z]}]
-    use_bzip2       yes
+
+    if {[info exists crossbinutils.versions_info($version)]} {
+        use_[lindex [set crossbinutils.versions_info($version)] 0] yes
+
+        checksums   {*}[lindex [set crossbinutils.versions_info($version)] 1]
+    } else {
+        # the old default
+        use_bzip2   yes
+        #use_xz yes
+    }
 
     post-extract {
         delete ${worksrcpath}/etc

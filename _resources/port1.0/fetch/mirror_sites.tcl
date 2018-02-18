@@ -641,9 +641,15 @@ set portfetch::mirror_sites::sites(postgresql) {
 # work automatically (which is, append first letter of port name, then
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
+#
+# files.pythonhosted.org has a redirector so you don't have to know the
+# hash-based subdir on pypi in order to fetch. Currently requires TLS 1.2,
+# which doesn't work on 10.8 and earlier.
+
 set portfetch::mirror_sites::sites(pypi) {
-    https://pypi.python.org/packages/source/:nosubdir
     https://files.pythonhosted.org/packages/source/:nosubdir
+    https://pypi.python.org/packages/:nosubdir
+    https://pypi.python.org/packages/source/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(ruby) {
