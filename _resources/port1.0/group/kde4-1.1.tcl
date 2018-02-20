@@ -129,6 +129,12 @@ configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
                         -DTIFF_INCLUDE_DIR=${prefix}/include \
                         -DTIFF_LIBRARY=${prefix}/lib/libtiff.dylib
 
+# see https://trac.macports.org/ticket/55104
+if { ${os.platform} eq "darwin" && ${os.major} >= 17 } {
+    configure.cxxflags-append -D__KDE_HAVE_GCC_VISIBILITY
+}
+
+
 # These two can be removed (see #46240):
 #                        -DQCA2_INCLUDE_DIR=${prefix}/include/QtCrypto \
 #                        -DQCA2_LIBRARIES=${prefix}/lib/libqca.dylib \
