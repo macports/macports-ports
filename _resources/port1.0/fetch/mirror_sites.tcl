@@ -570,7 +570,7 @@ set portfetch::mirror_sites::sites(openbsd) {
     ftp://mirror.esc7.net/pub/OpenBSD/
 }
 
-# https://osdn.jp/docs/Mirrors
+# https://osdn.net/docs/Mirrors
 # They don't actually list the URLs; these were obtained by guessing.
 set portfetch::mirror_sites::sites(osdn) {
     http://aarnet.dl.osdn.jp/
