@@ -51,12 +51,16 @@ default crossgcc.languages {{c c++}}
 
 array set crossgcc.versions_info {
     7.1.0 {bzip2 {
-        rmd160 a228dc45a09eda91b1a201d234f9013b3009b461
-        sha256 8a8136c235f64c6fef69cac0d73a46a1a09bb250776a050aec8f9fc880bebc17
+        rmd160  a228dc45a09eda91b1a201d234f9013b3009b461
+        sha256  8a8136c235f64c6fef69cac0d73a46a1a09bb250776a050aec8f9fc880bebc17
     }}
     7.2.0 {xz {
-        rmd160 fa8eed36c78cf135f9cc88e60845996b5cfaba52
-        sha256 1cf7adf8ff4b5aa49041c8734bbcf1ad18cc4c94d0029aae0f4e48841088479a
+        rmd160  fa8eed36c78cf135f9cc88e60845996b5cfaba52
+        sha256  1cf7adf8ff4b5aa49041c8734bbcf1ad18cc4c94d0029aae0f4e48841088479a
+    }}
+    7.3.0 {xz {
+        rmd160  31f6934a0e0c0ca84b6668110f9afdb91c1f9023 \
+        sha256  832ca6ae04636adbb430e865a1451adf6979ab44ca1c8374f61fba65645ce15c
     }}
 }
 
