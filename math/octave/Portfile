@@ -12,23 +12,25 @@ compiler.blacklist-append   {*gcc-4.6} {clang < 700}
 
 name                octave
 version             4.2.1
-revision            4
+revision            15
 categories          math science
 platforms           darwin
 license             GPL-3+
-maintainers         mcalhoun openmaintainer
+maintainers         {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
 description         a high-level language for numerical computations
 long_description    \
     GNU Octave is a high-level language, primarily intended for numerical \
     computations. It provides a convenient command-line interface for \
     solving linear and nonlinear problems numerically.
 
-homepage            http://www.gnu.org/software/octave
+homepage            https://www.gnu.org/software/octave
 
 master_sites        gnu:octave
 
 checksums           rmd160  7bcefebcbcb644b4527ca97501a4e05b15c04d94 \
                     sha256  80c28f6398576b50faca0e602defb9598d6f7308b0903724442c2a35a605333b
+
+conflicts-append    ${name}-devel
 
 # see http://savannah.gnu.org/bugs/?48773
 patchfiles-append patch-qscintilla2.diff
@@ -63,8 +65,13 @@ patchfiles-append patch-host_name.diff
 # see https://savannah.gnu.org/bugs/?50234
 patchfiles-append patch-file-stat.cc.diff
 
-post-patch {
+# see https://savannah.gnu.org/bugs/?50664
+patchfiles-append patch-crash_on_exit.diff
 
+# see https://savannah.gnu.org/patch/index.php?9439
+patchfiles-append patch-java.diff
+
+post-patch {
     if { ${os.arch} eq "i386" } {
         if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
             set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
@@ -78,7 +85,6 @@ post-patch {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x
         }
     }
-
     reinplace \
         "s|__MACPORTS_canonical_host_type__|${short_host_name}|g" \
         build-aux/subst-default-vals.in.sh
@@ -114,8 +120,15 @@ pre-patch {
 # avoid depends_build-append port:coreutils
 configure.env-append MKDIR_P="/bin/mkdir -p"
 
-# avoid depends_build-append port:cctools
-configure.env-append RANLIB=/usr/bin/ranlib
+if { ${os.major} > 10 } {
+    # avoid depends_build-append port:cctools
+    configure.env-append RANLIB=/usr/bin/ranlib
+} else {
+    # ranlib on older systems is too old to handle newer clang output
+    # https://trac.macports.org/ticket/54228
+    depends_build-append port:cctools
+    configure.env-append RANLIB=${prefix}/bin/ranlib
+}
 
 # main octave port lists as a depends_lib
 # configure.ac list it among the "[p]rograms used in Makefiles"
@@ -144,6 +157,12 @@ configure.env-append              \
 license_noconflict  \
     openssl         \
     libpaper
+
+# octave does not depend directly on graphviz, but it
+#    is brought in by its dependency on librsvg.
+# librsvg, in turn, is only used in the build phase to generate icons.
+license_noconflict-append \
+    graphviz
 
 # main octave port lists as a depends_lib
 # configure.ac list it among the "[p]rograms used in Makefiles"
@@ -187,11 +206,14 @@ compilers.choose    fc f77 f90 cc cxx
 #    even if configure.cxx_stdlib is libc++
 compiler.blacklist-delete *gcc*
 
+compilers.clear_archflags no
+
 # for now, limit the number of variants
 # some of these compilers may work fine
 compilers.setup     \
     require_fortran \
     -dragonegg      \
+    -gcc5           \
     -gcc49          \
     -gcc48          \
     -gcc47          \
@@ -299,15 +321,6 @@ depends_lib-append port:arpack
 configure.args-append --without-openssl
 #depends_lib-append port:openssl
 
-# fortran arch flag is not set automatically
-if {![variant_isset universal]} {
-    if {${build_arch} eq "x86_64" || ${build_arch} eq "ppc64"} {
-        configure.fflags-append -m64
-    } else {
-        configure.fflags-append -m32
-    }
-}
-
 # see etc/README.MacOS
 depends_run-append   \
     port:epstool     \
@@ -322,6 +335,13 @@ pre-configure {
 variant java description {enable Java interface} {
     PortGroup java 1.0
     configure.args-replace --disable-java --enable-java
+
+    if {${java_home} eq "/System/Library/Java/JavaVirtualMachines/1.6.0.jdk/Contents/Home"
+        ||
+        ${java_home} eq "/System/Library/Frameworks/JavaVM.framework/Versions/1.5.0/Home"} {
+        # patch is not needed (harmful?) for older Java versions
+        patchfiles-delete patch-java.diff
+    }
 }
 # java variant seems to cause problems for both users and build bots
 #    https://lists.macosforge.org/pipermail/macports-users/2016-May/thread.html#41052
@@ -330,16 +350,14 @@ variant java description {enable Java interface} {
 
 variant qt4 conflicts qt5 description {build the GUI using Qt4} {
     PortGroup qt4 1.0
-
-    depends_lib-append port:qscintilla
-
+    depends_lib-append port:qscintilla-qt4
     configure.args-replace --without-qt --with-qt=4
 }
 
 variant qt5 conflicts qt4 description {build the GUI using Qt5} {
     PortGroup qt5 1.0
-
-    depends_lib-append port:qscintilla2
+    qt5.depends_component qttools
+    depends_lib-append port:qscintilla-qt5
 
     # see https://savannah.gnu.org/bugs/?46723
     # see https://savannah.gnu.org/bugs/?49053
@@ -357,18 +375,25 @@ variant qt5 conflicts qt4 description {build the GUI using Qt5} {
     build.env-append     PATH=${qt_dir}/bin:$env(PATH)
 }
 if { ![variant_isset qt4] && ![variant_isset qt5] } {
-    default_variants-append +qt4
+    # a somewhat arbitrary cutoff for default values
+    #    Mac OS X 10.7 (Darwin 11) was the last OS supported by Qt 4
+    #       see http://doc.qt.io/qt-4.8/supported-platforms.html
+    #    Mac OS X 10.10 (Darwin 14) is the oldest OS supported by the current long-term support version of Qt 5 (Qt 5.9).
+    #       see http://web.archive.org/web/20170702143426/https://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+    if {${os.major} >= 14} {
+        default_variants-append +qt5
+    } else {
+        default_variants-append +qt4
+    }
 }
 
 variant fltk description {enable fltk as a graphics toolkit for plotting} {
     depends_lib-append path:lib/libfltk.dylib:fltk
-
     configure.args-replace --without-fltk --with-fltk
 }
 default_variants-append +fltk
 
 if {[variant_isset fltk] || [variant_isset qt4] || [variant_isset qt5]} {
-
     # native_graphics (fltk) and gui (Qt) require OpenGL and font and printing capabilities
     depends_lib-append  \
         port:fontconfig \
@@ -384,7 +409,7 @@ if { ([variant_isset fltk] && [variant_isset qt4]) || ([variant_isset fltk] && [
 
 variant jit description {enable JIT compiler (EXPERIMENTAL)} {
     # JIT requires LLVM, so select a version to use
-    set llvm_ver 3.8
+    set llvm_ver 5.0
 
     # prevent multiple versions of llvm being required
     # if clangXY compiler is requested, use llvm-X.Y
@@ -414,7 +439,7 @@ variant app description "build application bundle to launch ${subport}" {
 
     if {[vercmp ${xcodeversion} 4.5] < 0} {
         # need a way to generate icns file for XCode prior to 4.5
-        # see #51487
+        # see http://trac.macports.org/ticket/51487
         depends_build-append port:libicns
     }
 
@@ -478,9 +503,7 @@ variant app description "build application bundle to launch ${subport}" {
         set dpi    90
 
         foreach res {16 32 128 256 512} {
-
             set hres [expr 2*${res}]
-
             # see http://savannah.gnu.org/bugs/?37062
             # see http://hg.savannah.gnu.org/hgweb/octave/rev/1687269e31e4
             system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w ${res} ${svg}  > Octave.iconset/icon_${res}x${res}.png"
@@ -491,7 +514,7 @@ variant app description "build application bundle to launch ${subport}" {
             system -W ${worksrcpath} "/usr/bin/iconutil -c icns -o ${appName}/Contents/Resources/Octave.icns Octave.iconset"
         } else {
             # /usr/bin/iconutil introduced in XCode 4.5
-            # see #51487
+            # see http://trac.macports.org/ticket/51487
             system -W ${worksrcpath}/Octave.iconset \
                 "${prefix}/bin/png2icns ${worksrcpath}/${appName}/Contents/Resources/Octave.icns icon_16x16.png icon_32x32.png icon_128x128.png icon_256x256.png icon_512x512.png"
         }
@@ -515,7 +538,7 @@ variant docs description {build documentation files} {
         port:texlive-basic \
         port:texlive-latex
 
-    # see #51132
+    # see https://trac.macports.org/ticket/51132
     depends_build-append \
         port:texlive-fonts-recommended
 
@@ -528,21 +551,21 @@ default_variants-append +docs
 #    "Magick::Image::ping(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
 set magickConflict {}
 set magickDefault yes
-if {${configure.cxx_stdlib} ne "libstdc++"} {
+if {${configure.cxx_stdlib} eq "libc++"} {
     foreach gccVar ${compilers.gcc_variants} {
         if {[variant_exists ${gccVar}] } {
             lappend magickConflict ${gccVar}
-
             if {[variant_isset ${gccVar}] } {
                 set magickDefault no
             }
         }
     }
 }
-eval "variant graphicsmagick description {use GraphicsMagick for image I/O} conflicts ${magickConflict} {
+
+variant graphicsmagick description {use GraphicsMagick for image I/O} conflicts {*}${magickConflict} {
     depends_lib-append port:GraphicsMagick
     configure.args-replace --without-magick --with-magick=GraphicsMagick
-}"
+}
 if {${magickDefault}} {
     default_variants-append +graphicsmagick
 }
@@ -555,12 +578,18 @@ if { ${configure.compiler} eq "macports-gcc-6" && [vercmp 4.0 ${xcodeversion}] <
 # see https://trac.macports.org/ticket/53021
 foreach gccVar ${compilers.gcc_variants} {
     if {[variant_exists ${gccVar}] && [variant_isset ${gccVar}] } {
-
         if {[vercmp ${xcodeversion} 7.0] >= 0} {
             patchfiles-append patch-force_cxx.diff
         }
 
-        if {[vercmp ${xcodeversion} 8.0] >= 0} {
+        set gccMajor [string range ${gccVar} 3 end]
+
+        if {${gccMajor} == 6 && [vercmp 4.0 ${xcodeversion}] <= 0 && [vercmp ${xcodeversion} 5.0] < 0} {
+            # in order to use Carbon framework, -fpermissive is required on macports-gcc-6
+            configure.cxxflags-append -fpermissive
+        }
+
+        if {${gccMajor} < 7 && [vercmp ${xcodeversion} 8.0] >= 0} {
             configure.cppflags-append "-isystem ${worksrcpath}/Availability"
             post-extract {
                 if [file exists /usr/include/AvailabilityInternal.h] {
@@ -630,4 +659,78 @@ pre-activate {
     if { [file exists ${prefix}/share/octave/octave_packages] } {
         delete ${prefix}/share/octave/octave_packages
     }
+}
+
+subport ${name}-devel {
+    # http://hg.savannah.gnu.org/hgweb/octave/archive has the ability to download snapshots.
+    # This would be preferable to using mercurial.
+    # The generated files, however, are currently corrupted.
+    fetch.type          hg
+    hg.url              http://hg.savannah.gnu.org/hgweb/octave/
+    hg.tag              b8cb5a05955e
+    version             4.3.0+
+    revision            15
+
+    conflicts-replace ${name}-devel ${name}
+
+    use_autoconf         yes
+    autoconf.cmd         ./bootstrap
+    autoconf.args        --gnulib-srcdir=gnulib --no-git
+
+    # need for autoconf
+    depends_build-append \
+        port:autoconf    \
+        port:automake    \
+        port:libtool
+
+    configure.args-replace \
+        --without-OSMesa \
+        --without-osmesa
+
+    #--without-sundials_nvecserial
+    #--without-sundials_ida
+    depends_lib-append  port:sundials2
+    configure.args-append --with-sundials_ida-includedir=${prefix}/include
+    configure.args-append --with-sundials_ida-libdir=${prefix}/lib
+
+    # create links in case patch-force_cxx-devel.diff is included in the patchfiles
+    # otherwise, they do no harm
+    post-extract {
+        ln -s cdisplay.c           ${worksrcpath}/libinterp/corefcn/cdisplay.cc
+        ln -s display-available.c  ${worksrcpath}/src/display-available.cc
+    }
+
+    pre-patch {
+        # fixed
+        patchfiles-delete patch-qscintilla2.diff
+        patchfiles-delete patch-file-stat.cc.diff
+
+        # fixed? (different bug report)
+        # see https://savannah.gnu.org/bugs/?50025
+        # see https://github.com/macports/macports-ports/pull/987
+        patchfiles-replace patch-crash_on_exit.diff patch-crash_on_exit-devel.diff
+
+        # format and variable name changes
+        patchfiles-replace  patch-link.diff         patch-link-devel.diff
+        patchfiles-replace  patch-java.diff         patch-java-devel.diff
+        patchfiles-replace  patch-iconsize.diff     patch-iconsize-devel.diff
+        patchfiles-replace  patch-figures.diff      patch-figures-devel.diff
+        patchfiles-replace  patch-host_name.diff    patch-host_name-devel.diff
+        patchfiles-replace  patch-bsdtar.diff       patch-bsdtar-devel.diff
+        patchfiles-replace  patch-arch_arg.diff     patch-arch_arg-devel.diff
+        patchfiles-replace  patch-force_cxx.diff    patch-force_cxx-devel.diff
+        patchfiles-replace  clang-libcxx-fix.patch  clang-libcxx-fix-devel.patch
+    }
+
+    if {[variant_exists gcc6] && [variant_isset gcc6] } {
+        pre-fetch {
+            ui_error "GCC 6 does not currently work with the development version of Octave"
+            return -code error "invalid variant"
+        }
+    }
+
+    livecheck.type    regexm
+    livecheck.url     http://hg.savannah.gnu.org/hgweb/octave/tags
+    livecheck.version ${hg.tag}
+    livecheck.regex   "<a href=\"/hgweb/octave/rev/(\[a-zA-Z0-9.\]+)\">\ntip"
 }

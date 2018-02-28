@@ -493,7 +493,7 @@ variant universal {
             copy ${dir1}/${fl} ${tempfile1}
             copy ${dir2}/${fl} ${tempfile2}
 
-            reinplace -q -E {s:-arch +[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:-arch +[0-9a-zA-Z_]+::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
@@ -718,8 +718,8 @@ variant universal {
         }
 
         # /usr/bin/diff can merge two C/C++ files
-        # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
-        # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
+        # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
+        # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
         set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
  %<#endif
 ' \

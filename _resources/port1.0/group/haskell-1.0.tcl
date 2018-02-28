@@ -75,8 +75,8 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
     }
     version             ${version}
     categories          devel haskell
-    homepage            http://hackage.haskell.org/package/${package}
-    master_sites        http://hackage.haskell.org/package/${package}-${version}
+    homepage            https://hackage.haskell.org/package/${package}
+    master_sites        https://hackage.haskell.org/package/${package}-${version}
     distname            ${package}-${version}
     depends_lib         port:${compiler_config(port)}
     configure.cmd       runhaskell
@@ -141,7 +141,7 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
 
     if {${target} eq "standalone"} {
         livecheck.type      regex
-        livecheck.url       http://hackage.haskell.org/package/${package}
+        livecheck.url       https://hackage.haskell.org/package/${package}
         livecheck.regex     "/package/[quotemeta ${package}]-\[^/\]+/[quotemeta ${package}]-(\[^\"\]+)[quotemeta ${extract.suffix}]"
     } else {
         # Disable livecheck for haskell platform ports

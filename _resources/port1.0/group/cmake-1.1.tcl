@@ -84,6 +84,12 @@ configure.ccache    no
 
 configure.cmd       ${prefix}/bin/cmake
 
+# Policy 0025=NEW : identify Apple Clang compiler as "AppleClang";
+# MacPorts Clang is then handled separately from AppleClang. This
+# setting ensures consistency in compiler feature determination and
+# use, which is especially useful for older Mac OS X installs --
+# e.g., ones that use MacPorts Clang 4.0 via the cxx11 1.1 PortGroup.
+
 default configure.pre_args {[list \
                     -DCMAKE_BUILD_TYPE=MacPorts \
                    {-DCMAKE_C_COMPILER="$CC"} \
@@ -97,6 +103,7 @@ default configure.pre_args {[list \
                     {*}[cmake::rpath_flags] \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
+                    -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
                     ]}
 
@@ -115,7 +122,7 @@ default configure.post_args {${worksrcpath}}
 
 # TODO: Handle configure.objcflags (cf. to CMake upstream ticket #4756
 #       "CMake needs an Objective-C equivalent of CMAKE_CXX_FLAGS"
-#       <http://public.kitware.com/Bug/view.php?id=4756>)
+#       <https://public.kitware.com/Bug/view.php?id=4756>)
 
 # TODO: Handle the Fortran-specific configure.* variables:
 #       configure.fflags, configure.fcflags, configure.f90flags
@@ -125,7 +132,7 @@ default configure.post_args {${worksrcpath}}
 pre-configure {
     # The environment variable CPPFLAGS is not considered by CMake.
     # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
-    # <http://www.cmake.org/Bug/view.php?id=12928>).
+    # <https://www.cmake.org/Bug/view.php?id=12928>).
     #
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.
@@ -252,7 +259,7 @@ platform darwin {
 
         # Setting our own -arch flags is unnecessary (in the case of a non-universal build) or even
         # harmful (in the case of a universal build, because it causes the compiler identification to
-        # fail; see http://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
+        # fail; see https://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
         # Save all archflag-containing variables before changing any of them, because some of them
         # declare their default value based on the value of another.
         foreach archflag_var ${cmake._archflag_vars} {

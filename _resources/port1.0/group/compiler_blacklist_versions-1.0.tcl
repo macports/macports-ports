@@ -59,7 +59,7 @@
 # compiler.blacklist-delete clang
 #
 # This PortGroup was created following this discussion:
-# http://lists.macosforge.org/pipermail/macports-dev/2012-November/021103.html
+# https://lists.macosforge.org/pipermail/macports-dev/2012-November/021103.html
 
 option_proc compiler.blacklist compiler_blacklist_versions._set_compiler_blacklist
 

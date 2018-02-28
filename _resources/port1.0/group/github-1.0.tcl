@@ -143,7 +143,7 @@ proc handle_tarball_from {option action args} {
 }
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.homepage github.master_sites PortInfo
+    global extract.suffix os.platform os.major github.author github.project github.version github.tag_prefix github.homepage github.master_sites PortInfo
 
     github.author           ${gh_author}
     github.project          ${gh_project}
@@ -159,7 +159,9 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
     git.url                 ${github.homepage}.git
     git.branch              [join ${github.tag_prefix}]${github.version}
     distname                ${github.project}-${github.version}
-    fetch.ignore_sslcert    yes
+    if {${os.platform} eq "darwin" && ${os.major} <= 9} {
+        fetch.ignore_sslcert yes
+    }
 
     post-extract {
         # When fetching from a tag, the extracted directory name will contain a

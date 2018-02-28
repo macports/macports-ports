@@ -1,0 +1,201 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+
+name                apache22
+version             2.2.34
+categories          www
+maintainers         {ryandesign @ryandesign} openmaintainer
+license             Apache-2
+description         The extremely popular second version of the Apache http server 
+long_description \
+    Apache is an HTTP server designed as a plug-in replacement for \
+    the NCSA server version 1.3 (or 1.4). It fixes numerous bugs in \
+    the NCSA server and includes many frequently requested new \
+    features, and has an API which allows it to be extended to meet \
+    users' needs more easily.
+homepage            http://httpd.apache.org/
+platforms           darwin freebsd openbsd
+
+master_sites        apache:httpd
+distname            httpd-${version}
+dist_subdir         apache2
+use_bzip2           yes
+use_parallel_build  yes
+
+checksums           rmd160  7e913d60ac02c815edac6ab0614f5dc40618c073 \
+                    sha256  e53183d5dfac5740d768b4c9bea193b1099f4b06b57e5f28d7caaf9ea7498160 \
+                    size    5779739
+
+depends_lib         port:apr \
+                    port:apr-util \
+                    port:expat \
+                    path:lib/libssl.dylib:openssl \
+                    port:pcre \
+                    port:perl5 \
+                    port:zlib
+
+conflicts           thttpd
+
+patchfiles          patch-docs-cgi-examples-printenv.diff \
+                    libtool-tag.diff
+
+post-patch {
+    reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/docs/cgi-examples/printenv
+    reinplace -E "s/(User|Group) daemon/\\1 www/" ${worksrcpath}/docs/conf/httpd.conf.in
+}
+
+platform darwin {
+    post-patch {
+        # Customize userdir naming to match darwin
+        reinplace "s|/home/|/Users/|g" ${worksrcpath}/docs/conf/extra/httpd-userdir.conf.in
+        reinplace "s|public_html|Sites|g" ${worksrcpath}/docs/conf/extra/httpd-userdir.conf.in
+    }
+
+    # HFS can be case insensitive, so protect for this as in 
+    # http://docs.info.apple.com/article.html?artnum=300422
+    patchfiles-append   patch-httpd.conf.in-sensitive-files.diff
+}
+
+platform darwin 9 {
+    post-extract {
+        reinplace "s|-export-symbols-regex ssl_module||g" ${worksrcpath}/configure
+    }
+}
+
+configure.pre_args --prefix=${prefix}/${name}
+configure.args     --with-apr=${prefix}/bin/apr-1-config \
+                   --with-apr-util=${prefix}/bin/apu-1-config \
+                   --libdir=${prefix}/lib \
+                   --with-expat=${prefix} \
+                   --with-pcre=${prefix} \
+                   --with-z=${prefix} \
+                   --mandir=${prefix}/share/man \
+                   --enable-mods-shared=all \
+                   --enable-authn-alias=shared \
+                   --enable-ssl \
+                   --with-ssl=${prefix} \
+                   --enable-cache \
+                   --enable-disk_cache \
+                   --enable-file_cache \
+                   --enable-mem_cache \
+                   --enable-deflate \
+                   --enable-proxy \
+                   --enable-proxy-connect \
+                   --enable-proxy-http \
+                   --enable-proxy-ftp
+
+post-configure {
+    # Setting DYLD_FALLBACK_LIBRARY_PATH instead of DYLD_LIBRARY_PATH
+    # avoids issues with library collisions (bug #3013)
+    reinplace "s|DYLD_LIBRARY_PATH|DYLD_FALLBACK_LIBRARY_PATH|g" \
+        ${worksrcpath}/support/envvars-std
+}
+
+post-build {
+    reinplace -E {s| -arch [a-z0-9_]+||g} \
+        ${worksrcpath}/config.nice \
+        ${worksrcpath}/build/config_vars.mk
+    if {[tbool configure.ccache]} {
+        reinplace -E {s|ccache ||g} \
+            ${worksrcpath}/config.nice \
+            ${worksrcpath}/build/config_vars.mk
+    }
+}
+
+destroot.violate_mtree yes
+
+post-destroot {
+    set confDir ${destroot}${prefix}/${name}/conf
+    delete ${destroot}${prefix}/${name}/bin/envvars \
+                ${confDir}/httpd.conf \
+                {*}[glob -directory ${confDir}/extra *.conf]
+
+    move ${destroot}${prefix}/${name}/htdocs/index.html ${destroot}${prefix}/${name}/htdocs/index.html.sample
+
+    destroot.keepdirs ${destroot}${prefix}/${name}/logs \
+                      ${confDir}/extra
+
+    # fix libtool path
+    reinplace "s|/${name}/build/libtool|/share/apr-1/build/libtool|g" \
+        ${destroot}${prefix}/${name}/build/config_vars.mk
+
+    set docdir ${prefix}/share/doc/apache-${version}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 0644 -W ${worksrcpath} ABOUT_APACHE CHANGES LICENSE NOTICE README \
+        README.platforms ROADMAP VERSIONING ${destroot}${docdir}
+}
+
+post-activate {
+    set confDir ${prefix}/${name}/conf
+    # Copy into place sample or default versions of files user is likely to modify
+    if {![file exists ${prefix}/${name}/htdocs/index.html]} {
+        file copy ${prefix}/${name}/htdocs/index.html.sample ${prefix}/${name}/htdocs/index.html
+    }
+    if {![file exists ${prefix}/${name}/bin/envvars]} {
+        xinstall -m 755 ${prefix}/${name}/bin/envvars-std ${prefix}/${name}/bin/envvars
+    }
+    if {![file exists ${confDir}/httpd.conf]} {
+        file copy ${confDir}/original/httpd.conf ${confDir}/httpd.conf
+    }
+    foreach f [glob -tails -directory ${confDir}/original/extra *.conf] {
+        if {![file exists ${confDir}/extra/${f}]} {
+            file copy ${confDir}/original/extra/${f} ${confDir}/extra/${f}
+        }
+    }
+}
+
+platform openbsd {
+    build.env-append "LD_LIBRARY_PATH=${prefix}/lib"
+}
+
+variant openldap description {Enable LDAP support through OpenLDAP} {
+    configure.args-append --enable-ldap --enable-authnz-ldap
+    depends_lib-append port:openldap
+    require_active_variants apr-util openldap
+}
+
+variant preforkmpm conflicts workermpm eventmpm description {Use prefork MPM} {
+    configure.args-append --with-mpm=prefork
+}
+
+variant workermpm conflicts preforkmpm eventmpm description {Use worker MPM} {
+    configure.args-append --with-mpm=worker
+}
+
+variant eventmpm conflicts preforkmpm workermpm description {Use event MPM (experimental)} {
+    configure.args-append --with-mpm=event
+}
+
+if {![variant_isset workermpm] && ![variant_isset eventmpm]} {
+    default_variants +preforkmpm
+}
+
+startupitem.create    yes
+startupitem.start    \
+"\[ -x ${prefix}/${name}/bin/apachectl \] && ${prefix}/${name}/bin/apachectl start > /dev/null"
+startupitem.stop    \
+"\[ -r ${prefix}/${name}/logs/httpd.pid \] && ${prefix}/${name}/bin/apachectl stop > /dev/null"
+startupitem.restart    \
+"${prefix}/${name}/bin/apachectl restart > /dev/null"
+
+if {[info exists pkg.asroot]} {
+	pkg.asroot      yes
+}
+
+pre-pkg {
+    if {![info exists pkg.asroot]} {
+    	ui_error "Packaging ${name} ${version} requires MacPorts 2.3.5 or greater (pkg.asroot support)"
+        return -code error "Incompatible MacPorts version"
+    }
+
+    # at this point the destroot has been pruned and bin doesn't exist
+    xinstall -d -m 0755 ${destroot}${prefix}/bin
+    # apache2 needs daemondo; ram a copy into the destroot so it will be packaged
+    xinstall -m 0755 ${prefix}/bin/daemondo ${destroot}${prefix}/bin/
+}
+
+livecheck.type  regex
+livecheck.url   ${homepage}download.cgi
+livecheck.regex httpd-(2\.2\.\[0-9.\]+)${extract.suffix}

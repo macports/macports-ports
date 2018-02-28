@@ -138,6 +138,8 @@
 # If you switch to a different version of wxWidgets it would also be
 # sufficient to change one single line line with 'wxWidgets.use <name>'.
 
+PortGroup   compiler_blacklist_versions 1.0
+
 options     wxWidgets.name
 options     wxWidgets.port
 options     wxWidgets.version
@@ -163,6 +165,8 @@ wxWidgets.macosx_version_min
 
 options     wxWidgets.use
 option_proc wxWidgets.use wxWidgets._set
+
+PortGroup   compiler_blacklist_versions 1.0
 
 ## TODO: it would be nice to make the changes reversible
 ##
@@ -251,6 +255,11 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible macOS version"
             }
         }
+        platform darwin {
+            depends_lib-append          port:libcxx
+            configure.cxxflags-append   -std=c++11
+            configure.cxx_stdlib        libc++
+        }
     # ugly workaround to allow some C++11-only applications to be built on < 10.9
     } elseif {${args} eq "wxWidgets-3.0-cxx11"} {
         global cxx_stdlib
@@ -268,6 +277,8 @@ proc wxWidgets._set {option action args} {
                 return -code error "incompatible macOS version"
             }
         }
+        # this doesn't work
+        # PortGroup cxx11 1.1
     # temporary development version of wxWidgets 3.0.x
     } elseif {${args} eq "wxWidgets-3.0-devel"} {
         wxWidgets.name      "wxWidgets"
@@ -283,7 +294,7 @@ proc wxWidgets._set {option action args} {
     } elseif {${args} eq "wxWidgets-3.2"} {
         wxWidgets.name      "wxWidgets"
         wxWidgets.version   "3.1"
-        wxWidgets.port      "wxWidgets-3.1"
+        wxWidgets.port      "wxWidgets-3.2"
         if {${os.major} < 11} {
             pre-fetch {
                 ui_error "${wxWidgets.port} requires macOS 10.7 or later."
@@ -301,4 +312,12 @@ proc wxWidgets._set {option action args} {
     wxWidgets.wxdir     ${wxWidgets.prefix}/bin
     wxWidgets.wxconfig  ${wxWidgets.wxdir}/wx-config
     wxWidgets.wxrc      ${wxWidgets.wxdir}/wxrc
+
+    if {[string match "wxWidgets-3.0*" ${args}]} {
+        # the following causes a crash on older versions of clang:
+        #    #define wx_has_cpp11_include(h) __has_include(h)
+        #    #if wx_has_cpp11_include(<unordered_map>)
+        # see https://trac.macports.org/ticket/54296
+        compiler.blacklist-append {clang < 500}
+    }
 }

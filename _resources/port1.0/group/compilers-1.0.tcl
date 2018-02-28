@@ -76,7 +76,7 @@
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
-# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler 
+# compilers.libfortran is for use in linking Fortran code with the C or C++ compiler.
 
 PortGroup active_variants 1.1
 
@@ -97,11 +97,11 @@ default compilers.libfortran {}
 default compilers.clear_archflags yes
 
 # also set a default gcc version
-# gcc6 fails to build currently for 10.5.8. PPC, see ticket #51388
-if {${os.platform} eq "darwin" && ${os.version} == 9 && ${os.arch} eq "powerpc"} {
-    set compilers.gcc_default gcc5 
+if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+    # see https://trac.macports.org/ticket/54215#comment:36
+    set compilers.gcc_default gcc6
 } else {
-    set compilers.gcc_default gcc6 
+    set compilers.gcc_default gcc7
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
@@ -119,7 +119,13 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,compiler) macports-gcc-$version
     set cdb(gcc$v,descrip)  "MacPorts gcc $version"
     set cdb(gcc$v,depends)  port:gcc$v
-    set cdb(gcc$v,dependsl) path:lib/libgcc/libgcc_s.1.dylib:libgcc
+    if {[vercmp ${version} 4.6] < 0} {
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6 port:libgcc45"
+    } elseif {[vercmp ${version} 7] < 0} {
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6"
+    } else {
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
+    }
     set cdb(gcc$v,libfortran) ${prefix}/lib/gcc$v/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
     set cdb(gcc$v,dependsd) port:g95
@@ -134,7 +140,7 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$version
 }
 
-set clang_versions {33 34 35 36 37 38 39 40}
+set clang_versions {33 34 35 36 37 38 39 40 50}
 foreach v ${clang_versions} {
     # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
     set version $v
@@ -294,7 +300,7 @@ proc compilers.setup_variants {args} {
             # configure.compiler because of dragonegg and possibly other new
             # compilers that aren't in macports portconfigure.tcl
             set comp ""
-            foreach compiler ${compilers.list} {                
+            foreach compiler ${compilers.list} {
                 if {$cdb($variant,$compiler) ne ""} {
                     append comp [subst {
                         configure.$compiler $cdb($variant,$compiler)
@@ -489,7 +495,7 @@ proc compilers.choose {args} {
     if {${compilers.setup_done}} {
         ui_warn "compilers.choose has an effect only before compilers.setup."
     }
-    
+
     # zero out the variable before and append args
     set compilers.list {}
     foreach v $args {
@@ -568,13 +574,14 @@ proc compilers.action_enforce_f {args} {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otf  [fortran_active_variant_name $portname]
             set myf  [fortran_variant_name]
+            set myf_compiler [fortran_compiler_name $myf]
 
             if {$otf ne "" && $myf eq ""} {
                 default_variants +$otf
-            } elseif {[fortran_compiler_name $otf] ne [fortran_compiler_name $myf]} {
+            } elseif {[fortran_compiler_name $otf] ne $myf_compiler} {
                 # what if $portname does not have that variant? e.g. maybe it has only gcc5 and we are asking for gfortran.
-                ui_error "Install $portname +$myf"
-                return -code error "$portname +$myf not installed"
+                ui_error "Install $portname +$myf_compiler"
+                return -code error "$portname +$myf_compiler not installed"
             }
         } else {
             ui_error "Internal error: compilers.enforce_fortran: '$portname' is not an installed port."
@@ -584,7 +591,7 @@ proc compilers.action_enforce_f {args} {
 }
 
 proc compilers.action_enforce_some_f {args} {
-    ui_debug "compilers.enforce_some_fortran list: ${args}"    
+    ui_debug "compilers.enforce_some_fortran list: ${args}"
     foreach portname $args {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             if {[fortran_active_variant_name $portname] eq ""} {

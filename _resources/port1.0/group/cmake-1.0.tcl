@@ -102,7 +102,7 @@ default configure.post_args {${worksrcpath}}
 
 # TODO: Handle configure.objcflags (cf. to CMake upstream ticket #4756
 #       "CMake needs an Objective-C equivalent of CMAKE_CXX_FLAGS"
-#       <http://public.kitware.com/Bug/view.php?id=4756>)
+#       <https://public.kitware.com/Bug/view.php?id=4756>)
 
 # TODO: Handle the Fortran-specific configure.* variables:
 #       configure.fflags, configure.fcflags, configure.f90flags
@@ -112,7 +112,7 @@ default configure.post_args {${worksrcpath}}
 pre-configure {
     # The environment variable CPPFLAGS is not considered by CMake.
     # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
-    # <http://www.cmake.org/Bug/view.php?id=12928>).
+    # <https://www.cmake.org/Bug/view.php?id=12928>).
     #
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.
@@ -156,7 +156,7 @@ platform darwin {
 
         # Setting our own -arch flags is unnecessary (in the case of a non-universal build) or even
         # harmful (in the case of a universal build, because it causes the compiler identification to
-        # fail; see http://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
+        # fail; see https://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
         # Save all archflag-containing variables before changing any of them, because some of them
         # declare their default value based on the value of another.
         foreach archflag_var ${cmake._archflag_vars} {

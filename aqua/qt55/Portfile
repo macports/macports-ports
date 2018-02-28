@@ -6,7 +6,7 @@ name                qt55
 
 categories          aqua
 platforms           macosx
-maintainers         mcalhoun openmaintainer
+maintainers         {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
 
 # for OpenSSLException, see source and header files in src/network/ssl of qtbase
 license             {LGPL-2.1 LGPL-3 GPL-3 OpenSSLException}
@@ -14,8 +14,6 @@ license             {LGPL-2.1 LGPL-3 GPL-3 OpenSSLException}
 homepage            http://qt.io
 
 version             5.5.1
-
-set qt_name ${name}
 
 set just_want_qt5_variables yes
 PortGroup qt5 1.0
@@ -41,13 +39,9 @@ if { ${subport} ne ${name} && ${subport} ne "${name}-docs" } {
 
 conflicts qt3 qt3-mac
 # conflict with all other version of qt5
-foreach test_qt_name ${available_qt_versions} {
-    if { ${name} ne ${test_qt_name} } {
-        if { [string range ${test_qt_name} end-3 end] eq "-kde" } {
-            conflicts-append ${test_qt_name}
-        } else {
-            conflicts-append ${test_qt_name}-qtbase
-        }
+foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
+    if {${name} ne ${qt_test_name}} {
+        conflicts-append [lindex ${qt_test_info} 0]
     }
 }
 
@@ -137,7 +131,7 @@ array set modules {
         {"Qt 3D"}
         "technology preview modules"
         "variant overrides: "
-        "revision 1"
+        "revision 2"
         "License: "
     }
     qtbase {
@@ -148,8 +142,8 @@ array set modules {
         ""
         {"Qt Core" "Qt GUI" "Qt Network" "Qt SQL" "Qt Test" "Qt Widgets" "Qt Concurrent" "Qt D-Bus" "Qt OpenGL" "Qt Platform Headers" "Qt Print Support" "Qt XML"}
         ""
-        "variant overrides: ~docs"
-        "revision 7"
+        "variant overrides: "
+        "revision 12"
         "License: "
     }
     qtcanvas3d {
@@ -209,7 +203,7 @@ array set modules {
         {"Qt Reference Documentation"}
         "requires all documentation"
         "variant overrides: ~examples ~tests ~debug noarch ~docs"
-        "revision 1"
+        "revision 2"
         "License: "
     }
     qtgraphicaleffects {
@@ -305,7 +299,7 @@ array set modules {
         {"Qt Script" "Qt Script Tools"}
         "deprecated in favor QJS* in Qt QML"
         "variant overrides: "
-        "revision 1"
+        "revision 2"
         "License: "
     }
     qtsensors {
@@ -518,6 +512,25 @@ array set sql_plugins {
     }
 }
 
+# because CPATH is set, pkgconfig does not include ${prefix}/lib and ${prefix}/include even when requested
+# this means that files in ${prefix}/lib and ${prefix}/include are the *last* to be found
+# this causes problems when there are files in ${worksrpath} that are unintentionally found instead
+configure.env-append \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+    PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+build.env-append \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
+    PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+
+# Qt uses CFRunLoopTimerCreateWithHandler, which was not introduced until Mac OS X 10.7
+# see https://developer.apple.com/reference/corefoundation/1542555-cfrunlooptimercreatewithhandler?language=objc
+if { ${os.major} < 11 } {
+    pre-fetch {
+        ui_error "${subport} requires OS X 10.7 or later"
+        return -code error "incompatible OS version"
+    }
+}
+
 foreach {module module_info} [array get modules] {
 
     set revision_string [string trim [lindex ${module_info} 8]]
@@ -543,7 +556,7 @@ foreach {module module_info} [array get modules] {
         set license_string [string trim  ${license_string}]
 
         if { ${license_string} ne "" } {
-            eval license ${license_string}
+            license {*}${license_string}
         }
 
         foreach deps [lindex ${module_info} 2] {
@@ -575,12 +588,7 @@ foreach {module module_info} [array get modules] {
 
         if { ${module} eq "qtbase" } {
             # this subport uses configure script (NOT qmake)
-
-            # use the qt5 group; set 'building_qt5' so that the portgroup
-            # does not include certain parts
-            set building_qt5    1
             PortGroup           qt5 1.0
-            unset building_qt5
 
             if { ${os.platform} ne "darwin" } {
                 pre-fetch {
@@ -599,15 +607,6 @@ foreach {module module_info} [array get modules] {
                         ui_warn "32-bit mode is not a Reference Configuration for Qt."
                         ui_warn "See http://doc.qt.io/qt-5/supported-platforms.html#reference-configurations"
                     }
-                }
-            }
-
-            # Qt uses CFRunLoopTimerCreateWithHandler, which was not introduced until Mac OS X 10.7
-            # see https://developer.apple.com/reference/corefoundation/1542555-cfrunlooptimercreatewithhandler?language=objc
-            if { ${os.major} < 11 } {
-                pre-fetch {
-                    ui_error "${subport} requires OS X 10.7 or later"
-                    return -code error "incompatible OS version"
                 }
             }
 
@@ -661,6 +660,23 @@ foreach {module module_info} [array get modules] {
             # see https://codereview.qt-project.org/#/c/164673/
             patchfiles-append patch-xcrun.diff
 
+            # see https://bugreports.qt.io/browse/QTBUG-62266
+            patchfiles-append patch-sdk10_13.diff
+
+            # avoid non-standard C++ that Xcode Clang accepts but other compilers do not
+            # see http://lists.llvm.org/pipermail/llvm-bugs/2017-January/053481.html
+            # see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=11764
+            patchfiles-append patch-qualified_reference.diff
+
+            # find the Rez program
+            patchfiles-append patch-find_rez.diff
+            post-patch {
+                reinplace \
+                    "s|__MACPORTS_Rez__|[exec xcrun --find Rez]|g" \
+                    mkspecs/common/mac.conf \
+                    mkspecs/features/mac/rez.prf
+            }
+
             #-----------------------------------------------------------------------------
             # qtbase is used for:
             #    1) building qtbase
@@ -683,11 +699,23 @@ foreach {module module_info} [array get modules] {
                 copy ${worksrcpath}/mkspecs ${worksrcpath}/mkspecs-save
             }
 
-            # use compiler specified by configure.compiler
-            if { ${configure.compiler} ne "clang" } {
+            # respect MacPorts build variables
+            patchfiles-append patch-mkspecs.diff
 
-                patchfiles-append patch-mkspecs_compiler.diff
+            # respect configure.compiler
+            if { ${configure.compiler} eq "clang" } {
+                # let xargs find correct compiler (default behaviour)
+                post-patch {
+                    # let xargs find correct compiler
+                    reinplace \
+                        "s|__MACPORTS_CC__|clang|g" \
+                        ${worksrcpath}/mkspecs/common/clang.conf
 
+                    reinplace \
+                        "s|__MACPORTS_CXX__|clang++|g" \
+                        ${worksrcpath}/mkspecs/common/clang.conf
+                }
+            } else {
                 post-patch {
                     reinplace \
                         "s|__MACPORTS_CC__|${configure.cc}|g" \
@@ -697,45 +725,45 @@ foreach {module module_info} [array get modules] {
                         "s|__MACPORTS_CXX__|${configure.cxx}|g" \
                         ${worksrcpath}/mkspecs/common/clang.conf
                 }
+            }
 
-                if { [string match macports-clang-* ${configure.compiler}] && [vercmp ${xcodeversion} "7.0"] >= 0 } {
-                    # non-Xcode clang does not seem to be able to understand tbd files
-                    # for an explanation of tbd files, see
-                    #    http://stackoverflow.com/questions/31450690/why-xcode-7-shows-tbd-instead-of-dylib
-                    # see https://trac.macports.org/ticket/53151
-                    pre-fetch {
-                        ui_error "This configuration is known to fail"
-                        ui_error "See https://trac.macports.org/ticket/53151"
-                        ui_error "As a workaround, do not set configure.compiler manually"
-                        return -code error "incompatible configuration"
-                    }
+            if { [string match macports-clang-* ${configure.compiler}] && [vercmp ${xcodeversion} "7.0"] >= 0 } {
+                # non-Xcode clang does not seem to be able to understand tbd files
+                # for an explanation of tbd files, see
+                #    http://stackoverflow.com/questions/31450690/why-xcode-7-shows-tbd-instead-of-dylib
+                # see https://trac.macports.org/ticket/53151
+                pre-fetch {
+                    ui_error "This configuration is known to fail"
+                    ui_error "See https://trac.macports.org/ticket/53151"
+                    ui_error "As a workaround, do not set configure.compiler manually"
+                    return -code error "incompatible configuration"
                 }
             }
 
-            # change default compiler flags for the purpose of building qtbase
-            patchfiles-append patch-mkspecs.diff
             post-patch {
 
-                if {${cxx_stdlib} eq "libc++"} {
-                    set replace_cxx_stdlib ${cxx_stdlib}
+                if {${configure.cxx_stdlib} eq "macports-libstdc++" && ${os.major} < 13} {
+                    set cxx_abi " -D_GLIBCXX_USE_CXX11_ABI=0"
                 } else {
-                    # see cxx11 PortGroup
-                    if {${os.major} < 13} {
-                        set replace_cxx_stdlib "macports-libstdc++ -D_GLIBCXX_USE_CXX11_ABI=0"
-                    } else {
-                        set replace_cxx_stdlib "macports-libstdc++"
-                    }
+                    set cxx_abi ""
                 }
 
+                # respect configure.cxx_stdlib
                 reinplace \
-                    "s|__MACPORTS__CXX_STDLIB__|${replace_cxx_stdlib}|g" \
+                    "s|__MACPORTS_CXX_STDLIB__|${configure.cxx_stdlib}${cxx_abi}|g" \
                     ${worksrcpath}/mkspecs/common/clang-mac.conf
 
+                # respect macosx_deployment_target
                 foreach spec {macx-clang macx-clang-32 macx-g++ macx-g++-32 macx-g++40 macx-g++42 macx-icc macx-llvm} {
                     reinplace \
                         "s|__MACPORTS_DEPLOYMENT_TARGET__|${macosx_deployment_target}|g" \
                         ${worksrcpath}/mkspecs/${spec}/qmake.conf
                 }
+
+                #respect configure.optflags
+                reinplace \
+                    "s|__MACPORTS_OPTFLAGS__|${configure.optflags}|g" \
+                    ${worksrcpath}/mkspecs/common/gcc-base.conf
             }
 
             if { [vercmp ${xcodeversion} "7.0"] >= 0 } {
@@ -748,8 +776,7 @@ foreach {module module_info} [array get modules] {
                 }
             }
 
-            # respect configure.sdk_version value
-            patchfiles-append patch-macx.conf.diff
+            # respect configure.sdk_version
             post-patch {
                 reinplace \
                     "s|__MACPORTS_MAC_SDK__|macosx${configure.sdk_version}|g" \
@@ -760,17 +787,17 @@ foreach {module module_info} [array get modules] {
             post-build {
                 if { [variant_exists universal] && [variant_isset universal] } {
                     foreach arch ${universal_archs_to_use} {
-                        move -force ${worksrcpath}-${arch}/mkspecs-save/common/clang-mac.conf ${worksrcpath}-${arch}/mkspecs/common/clang-mac.conf
-                        move -force ${worksrcpath}-${arch}/mkspecs-save/common/macx.conf      ${worksrcpath}-${arch}/mkspecs/common/macx.conf
-
+                        foreach conf {clang.conf macx.conf clang-mac.conf gcc-base.conf} {
+                            move -force ${worksrcpath}-${arch}/mkspecs-save/common/${conf} ${worksrcpath}-${arch}/mkspecs/common/${conf}
+                        }
                         foreach spec {macx-clang macx-clang-32 macx-g++ macx-g++-32 macx-g++40 macx-g++42 macx-icc macx-llvm} {
                             move -force ${worksrcpath}-${arch}/mkspecs-save/${spec}/qmake.conf ${worksrcpath}-${arch}/mkspecs/${spec}/qmake.conf
                         }
                     }
                 } else {
-                    move -force ${worksrcpath}/mkspecs-save/common/clang-mac.conf ${worksrcpath}/mkspecs/common/clang-mac.conf
-                    move -force ${worksrcpath}/mkspecs-save/common/macx.conf      ${worksrcpath}/mkspecs/common/macx.conf
-
+                    foreach conf {clang.conf macx.conf clang-mac.conf gcc-base.conf} {
+                        move -force ${worksrcpath}/mkspecs-save/common/${conf} ${worksrcpath}/mkspecs/common/${conf}
+                    }
                     foreach spec {macx-clang macx-clang-32 macx-g++ macx-g++-32 macx-g++40 macx-g++42 macx-icc macx-llvm} {
                         move -force ${worksrcpath}/mkspecs-save/${spec}/qmake.conf ${worksrcpath}/mkspecs/${spec}/qmake.conf
                     }
@@ -897,8 +924,13 @@ foreach {module module_info} [array get modules] {
                 -framework           \
                 -securetransport
 
+            # do not use ${configure.sdk_version}
+            # SDK is recorded in ${qt_mkspecs_dir}/qdevice.pri
+            # SDK may then be removed if Xcode is updated
+            # see https://trac.macports.org/ticket/54044
+            # see https://trac.macports.org/ticket/55195
             configure.args-append \
-                -sdk macosx${configure.sdk_version}
+                -sdk macosx
 
             # configure options that don't show up in configure --help
             configure.args-append \
@@ -909,8 +941,9 @@ foreach {module module_info} [array get modules] {
             # Qt builds part of the system using environment provided my MacPorts.
             # It builds the rest using its own internal environment.
             # For consistency, clear MacPorts environment.
-
-            configure.cxx_stdlib
+            #configure.cxx_stdlib
+            proc portconfigure::should_add_stdlib {} {return false}
+            proc register_gcc_dependents {} {}
             configure.sdkroot
             configure.cc_archflags
             configure.cxx_archflags
@@ -1227,18 +1260,6 @@ foreach {module module_info} [array get modules] {
             }
 
             # special case
-            if { ${subport} eq "${name}-qtwebkit-examples" && ![variant_isset examples] } {
-                # create a dummy file so the port can be successfully activated
-                post-destroot {
-                    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
-                    set docfile [open ${destroot}${prefix}/share/doc/${subport}/README.txt "w"]
-                    puts ${docfile} "Without the examples variant, no examples are installed"
-                    puts ${docfile} "${long_description}"
-                    close ${docfile}
-                }
-            }
-
-            # special case
             if { ${module} eq "qtsensors" && [variant_isset examples] } {
                 if { [variant_isset debug] } {
                     set debug "_debug"
@@ -1260,6 +1281,32 @@ foreach {module module_info} [array get modules] {
             if { ${module} eq "qtconnectivity" } {
                 # https://codereview.qt-project.org/#/c/172619/
                 patchfiles-append patch-qtconn-for-10.12.diff
+
+                # see https://bugreports.qt.io/browse/QTBUG-62658
+                patchfiles-append patch-qtconnectivity-sdk10_13.diff
+
+                # @property UUID was removed in SDK 10.13
+                # avoid osx/osxbtcentralmanager.mm:241:34: error: call to implicitly-deleted copy constructor of 'ObjCScopedPointer<NSMutableArray>'
+                # @property isConnected was removed in SDK 10.13
+                patchfiles-append patch-qtconnectivity-uuid.diff
+            }
+
+            # special case
+            if { ${module} eq "qtwebkit-examples" && ![variant_isset examples] } {
+                # create a dummy file so the port can be successfully activated
+                post-destroot {
+                    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
+                    set docfile [open ${destroot}${prefix}/share/doc/${subport}/README.txt "w"]
+                    puts ${docfile} "Without the examples variant, no examples are installed"
+                    puts ${docfile} "${long_description}"
+                    close ${docfile}
+                }
+            }
+
+            # special case
+            if { ${module} eq "qtscript" } {
+                # see https://trac.macports.org/ticket/54453
+                patchfiles-append patch-qtscript_ceil.diff
             }
         }
     }
@@ -1545,15 +1592,15 @@ if { [variant_exists universal] && [variant_isset universal] } {
             set dir ${destroot}-${arch}
 
             foreach prlfl [glob -nocomplain ${dir}${qt_libs_dir}/*.framework/*.prl] {
-                reinplace "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
+                reinplace -q "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
             }
 
             foreach prlfl [glob -nocomplain ${dir}${qt_libs_dir}/*.prl] {
-                reinplace "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
+                reinplace -q "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
             }
 
             foreach prlfl [glob -nocomplain ${dir}${qt_examples_dir}/widgets/tools/plugandpaint/plugins/*.prl] {
-                reinplace "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
+                reinplace -q "s|${worksrcpath}-${arch}|${worksrcpath}|g" ${prlfl}
             }
 
             if { [file exists ${dir}${qt_libs_dir}/cmake/Qt5Core/Qt5CoreConfigExtrasMkspecDir.cmake] } {
@@ -1651,7 +1698,7 @@ post-destroot {
         # cmake configuration files actually installed in ${qt_cmake_module_dir}/xxx
         foreach cmakedir [glob -type d -nocomplain -tails -directory ${destroot}${qt_libs_dir}/cmake *] {
             foreach cmakefile [glob -nocomplain -directory ${destroot}${qt_libs_dir}/cmake/${cmakedir} *.cmake] {
-                reinplace "s|\\\${CMAKE_CURRENT_LIST_DIR}|${qt_cmake_module_dir}/${cmakedir}|g" ${cmakefile}
+                reinplace -q "s|\\\${CMAKE_CURRENT_LIST_DIR}|${qt_cmake_module_dir}/${cmakedir}|g" ${cmakefile}
             }
         }
     }

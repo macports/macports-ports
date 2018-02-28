@@ -66,7 +66,7 @@ proc hocbinding.setup {framework version {source ""}} {
     long_description ${description}
 
     if {${source} eq "hoc"} {
-        homepage    http://code.google.com/p/hoc/
+        homepage    https://code.google.com/p/hoc/
 
         worksrcdir  hoc/Bindings/Generated/HOC-${framework}
 

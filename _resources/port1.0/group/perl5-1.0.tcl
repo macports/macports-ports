@@ -107,7 +107,10 @@ proc perl5.create_variants {branches} {
 # Add conflicts
         set conflicts {}
         if {${perl5.conflict_variants}} {
-            set conflicts "conflicts {[lreplace ${perl5.variants} ${index} ${index}]}"
+            set filtered [lreplace ${perl5.variants} ${index} ${index}]
+            if {$filtered ne ""} {
+                set conflicts "conflicts {$filtered}"
+            }
         }
         eval "variant ${variant} ${conflicts} description Use MacPorts perl${branch} {}"
         if {[variant_isset ${variant}]} {

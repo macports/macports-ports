@@ -69,7 +69,6 @@ proc universal_setup {args} {
 }
 
 proc octave.setup {module version} {
-
     global octave.module
 
     octave.module               ${module}
@@ -101,20 +100,17 @@ proc octave.setup {module version} {
 }
 
 post-extract {
-
     # rename the effective worksrcdir to always be ${octave.module}
 
     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
+        # work-around for case-insensitive file systems when the
+        # extract directory name is the same as the octave module name
+        # except for letter case; should always work no matter if the
+        # file system is case-insensitive or case-sensitive.
 
-	# work-around for case-insensitive file systems when the
-	# extract directory name is the same as the octave module name
-	# except for letter case; should always work no matter if the
-	# file system is case-insensitive or case-sensitive.
-
-	move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
-	move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
-
+        move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
+        move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
     }
 }
 
@@ -125,30 +121,30 @@ pre-configure {
     system -W ${workpath} "/usr/bin/tar cvfz ${distname}.tar.gz ${octave.module}"
 
     if { [variant_exists universal] && [variant_isset universal] } {
-	global merger_configure_env
-	global merger_configure_args
+        global merger_configure_env
+        global merger_configure_args
 
-	foreach arch ${universal_archs_supported} {
-	    lappend merger_configure_env(${arch}) \
-		OCTAVE_ARCH=${arch}
-	}
+        foreach arch ${universal_archs_supported} {
+            lappend merger_configure_env(${arch}) \
+                OCTAVE_ARCH=${arch}
+        }
 
-	foreach arch ${universal_archs_supported} {
-	    set merger_configure_args(${arch}) \
-		"'try; pkg build -verbose -nodeps ${workpath}/tmp-build-${arch} ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
-    }
+        foreach arch ${universal_archs_supported} {
+            set merger_configure_args(${arch}) \
+                "'try; pkg build -verbose -nodeps ${workpath}/tmp-build-${arch} ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
+        }
 
     } else {
-	configure.env-append OCTAVE_ARCH=${build_arch}
-	configure.args \
-	    "'try; pkg build -verbose -nodeps ${workpath}/tmp-build ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
+        configure.env-append OCTAVE_ARCH=${build_arch}
+        configure.args \
+            "'try; pkg build -verbose -nodeps ${workpath}/tmp-build ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
 
-	# fortran arch flag is not set automatically
-	if {${build_arch} eq "x86_64" || ${build_arch} eq "ppc64"} {
-	    configure.fflags-append -m64
-	} else {
-	    configure.fflags-append -m32
-	}
+        # fortran arch flag is not set automatically
+        if {${build_arch} eq "x86_64" || ${build_arch} eq "ppc64"} {
+            configure.fflags-append -m64
+        } else {
+            configure.fflags-append -m32
+        }
     }
 
     configure.cmd /usr/bin/arch -arch \$OCTAVE_ARCH ${prefix}/bin/octave-cli
@@ -165,7 +161,6 @@ build.args
 build.post_args
 
 pre-destroot {
-
     set octave_api_version [exec "${prefix}/bin/octave-config" -p API_VERSION]
 
     destroot.cmd /usr/bin/arch -arch \$OCTAVE_ARCH ${prefix}/bin/octave-cli
@@ -186,34 +181,32 @@ pre-destroot {
     }
 
     if { [variant_exists universal] && [variant_isset universal] } {
-	global merger_destroot_env
-	global merger_destroot_args
+        global merger_destroot_env
+        global merger_destroot_args
 
-	foreach arch ${universal_archs_supported} {
+        foreach arch ${universal_archs_supported} {
+            set octave_install_share ${destroot}-${arch}${prefix}/share/octave/packages
+            set octave_install_lib   ${destroot}-${arch}${prefix}/lib/octave/packages
+            set octave_tgz_file ${workpath}/tmp-build-${arch}/[exec /bin/ls ${workpath}/tmp-build-${arch}]
 
-	    set octave_install_share ${destroot}-${arch}${prefix}/share/octave/packages
-	    set octave_install_lib   ${destroot}-${arch}${prefix}/lib/octave/packages
-	    set octave_tgz_file ${workpath}/tmp-build-${arch}/[exec /bin/ls ${workpath}/tmp-build-${arch}]
+            lappend merger_destroot_env(${arch}) \
+                OCTAVE_ARCH=${arch}
 
-	    lappend merger_destroot_env(${arch}) \
-		OCTAVE_ARCH=${arch}
+            destroot.args
 
-	    destroot.args
-
-	    set merger_destroot_args(${arch}) \
-		"'try;pkg prefix ${octave_install_share} ${octave_install_lib}; pkg install -verbose -nodeps -local ${octave_tgz_file}; delete(\"~/.octave_packages\"); catch; disp(lasterror.message); exit(1); end_try_catch;'"
-    }
+            set merger_destroot_args(${arch}) \
+                "'try;pkg prefix ${octave_install_share} ${octave_install_lib}; pkg install -verbose -nodeps -local ${octave_tgz_file}; delete(\"~/.octave_packages\"); catch; disp(lasterror.message); exit(1); end_try_catch;'"
+        }
 
     } else {
+        set octave_install_share ${destroot}${prefix}/share/octave/packages
+        set octave_install_lib   ${destroot}${prefix}/lib/octave/packages
+        set octave_tgz_file ${workpath}/tmp-build/[exec /bin/ls ${workpath}/tmp-build]
 
-	set octave_install_share ${destroot}${prefix}/share/octave/packages
-	set octave_install_lib   ${destroot}${prefix}/lib/octave/packages
-	set octave_tgz_file ${workpath}/tmp-build/[exec /bin/ls ${workpath}/tmp-build]
+        destroot.env-append OCTAVE_ARCH=${build_arch}
 
-	destroot.env-append OCTAVE_ARCH=${build_arch}
-
-	destroot.args \
-	    "'try; pkg prefix ${octave_install_share} ${octave_install_lib}; pkg install -verbose -nodeps -local ${octave_tgz_file}; catch; disp(lasterror.message); exit(1); end_try_catch;'"
+        destroot.args \
+            "'try; pkg prefix ${octave_install_share} ${octave_install_lib}; pkg install -verbose -nodeps -local ${octave_tgz_file}; catch; disp(lasterror.message); exit(1); end_try_catch;'"
     }
 
     destroot.post_args
