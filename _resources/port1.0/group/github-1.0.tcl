@@ -184,11 +184,13 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
         }
     }
 
-    # If the "version" is composed entirely of hex characters, and is at least
-    # nine characters long, and no tag_prefix is provided, then assume we are
-    # using a commit hash and livecheck commits; otherwise livecheck tags.
+    # If the version is composed entirely of hex characters, and is at least 7
+    # characters long, and is not exactly 8 decimal digits (which might be a
+    # version in YYYYMMDD format), and no tag_prefix is provided, then assume we
+    # are using a commit hash and livecheck commits; otherwise livecheck tags.
     if {[join ${github.tag_prefix}] eq "" && \
-        [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
+        [regexp "^\[0-9a-f\]{7,}\$" ${github.version}] && \
+        ![regexp "^\[0-9\]{8}\$" ${github.version}]} {
         livecheck.type      regexm
         livecheck.url       ${github.homepage}/commits/master.atom
         livecheck.regex     <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
