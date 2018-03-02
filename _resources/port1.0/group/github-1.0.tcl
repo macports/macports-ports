@@ -114,7 +114,7 @@ default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
 
 # Later code assumes that github.master_sites is a simple string, not a list.
-default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
+default github.master_sites {${github.homepage}/tarball/${git.branch}}
 
 default master_sites {${github.master_sites}}
 
