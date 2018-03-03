@@ -29,7 +29,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 #
-# This PortGroup accommodates projects hosted at github.
+# This PortGroup accommodates projects hosted at GitHub.
 #
 # Usage:
 #
@@ -41,7 +41,7 @@
 #
 #   github.setup        author project version [tag_prefix]
 #
-# The port's name will be set to the github project name. If that's not correct,
+# The port's name will be set to the GitHub project name. If that's not correct,
 # override it by setting the port name as usual, for example:
 #
 #   github.setup        someone someproject 1.2.3
@@ -49,12 +49,12 @@
 #
 # The tag_prefix is optional, and refers to any characters that may appear
 # before the actual version number when you view the list of tags for this
-# project on github. For example, if the tags are named like "v1.2.3" then
+# project on GitHub. For example, if the tags are named like "v1.2.3" then
 # tag_prefix should be specified as "v":
 #
 #   github.setup        someone someproject 1.2.3 v
 #
-# Some projects use github's "releases" service to offer distfiles:
+# Some projects use GitHub's "releases" service to offer distfiles:
 # 
 # https://github.com/blog/1547-release-your-software
 #
@@ -63,7 +63,7 @@
 #
 #   github.tarball_from releases
 #
-# Github imposes no naming convention for "release" distfiles, so you may need
+# GitHub imposes no naming convention for "release" distfiles, so you may need
 # to set distname as you would for other ports.
 #
 # Older projects use the discontinued "downloads" service. New "downloads" can
@@ -76,8 +76,8 @@
 #
 #   github.tarball_from downloads
 #
-# If neither "releases" nor "downloads" are available, github can automatically
-# generate a distfile from a git tag or commit. This is the github portgroup's
+# If neither "releases" nor "downloads" are available, GitHub can automatically
+# generate a distfile from a git tag or commit. This is the GitHub portgroup's
 # default behavior; to use this, simply don't set github.tarball_from. The
 # distname is irrelevant when fetching from a tag or commit, so don't set it
 # either.
@@ -114,7 +114,7 @@ default github.homepage {https://github.com/${github.author}/${github.project}}
 default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
 
 # Later code assumes that github.master_sites is a simple string, not a list.
-default github.master_sites {${github.homepage}/tarball/[join ${github.tag_prefix} ""]${github.version}}
+default github.master_sites {${github.homepage}/tarball/${git.branch}}
 
 default master_sites {${github.master_sites}}
 
@@ -184,11 +184,13 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""}} {
         }
     }
 
-    # If the "version" is composed entirely of hex characters, and is at least
-    # nine characters long, and no tag_prefix is provided, then assume we are
-    # using a commit hash and livecheck commits; otherwise livecheck tags.
+    # If the version is composed entirely of hex characters, and is at least 7
+    # characters long, and is not exactly 8 decimal digits (which might be a
+    # version in YYYYMMDD format), and no tag_prefix is provided, then assume we
+    # are using a commit hash and livecheck commits; otherwise livecheck tags.
     if {[join ${github.tag_prefix}] eq "" && \
-        [regexp "^\[0-9a-f\]{9,}\$" ${github.version}]} {
+        [regexp "^\[0-9a-f\]{7,}\$" ${github.version}] && \
+        ![regexp "^\[0-9\]{8}\$" ${github.version}]} {
         livecheck.type      regexm
         livecheck.url       ${github.homepage}/commits/master.atom
         livecheck.regex     <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
