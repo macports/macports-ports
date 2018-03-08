@@ -78,10 +78,10 @@ default configure.args {[list \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                    {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
-                    -DCMAKE_INSTALL_NAME_DIR=${prefix}/lib \
-                    -DCMAKE_INSTALL_RPATH=${prefix}/lib \
+                    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
+                    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
-                    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+                    -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
