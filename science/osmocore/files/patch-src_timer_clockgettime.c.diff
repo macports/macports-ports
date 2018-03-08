@@ -1,0 +1,136 @@
+diff --git a/configure.ac b/configure.ac
+index 60c177f..ef4620d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -56,6 +56,12 @@ AC_SUBST(LTLDFLAGS_OSMOCODING)
+ dnl checks for header files
+ AC_HEADER_STDC
+ AC_CHECK_HEADERS(execinfo.h sys/select.h sys/socket.h syslog.h ctype.h netinet/tcp.h)
++
++dnl check for Mach / Darwin / Mac OS X / macOS specifics
++dnl used in src/timer_clockgettime.c
++AC_CHECK_HEADERS(mach/clock.h mach/mach.h)
++AC_CHECK_TYPES([clockid_t], [], [], [[#include <time.h>]])
++
+ # for src/conv.c
+ AC_FUNC_ALLOCA
+ AC_SEARCH_LIBS([dlopen], [dl dld], [LIBRARY_DL="$LIBS";LIBS=""])
+diff --git a/src/timer_clockgettime.c b/src/timer_clockgettime.c
+index 8d9760c..c9f5de0 100644
+--- a/src/timer_clockgettime.c
++++ b/src/timer_clockgettime.c
+@@ -51,6 +51,105 @@
+ 
+ #include <osmocom/core/timer_compat.h>
+ 
++/* Hack to allow fakeclock to work on Mach / Darwin / Mac OS X */
++
++#include "config.h"
++
++#if defined(HAVE_MACH_CLOCK_H) && defined(HAVE_MACH_MACH_H)
++
++#include <errno.h>
++#include <mach/clock.h>
++#include <mach/mach.h>
++
++/*
++ * the following defines are ignored in the replacement
++ * "clock_gettime" function, but must be defined to unique values that
++ * are in the clockid_t enum from <time.h>
++ */
++
++#ifdef CLOCK_REALTIME
++#undef CLOCK_REALTIME
++#endif
++#define CLOCK_REALTIME 0
++
++#ifdef CLOCK_REALTIME_COARSE
++#undef CLOCK_REALTIME_COARSE
++#endif
++#define CLOCK_REALTIME_COARSE 9
++
++#ifdef CLOCK_MONOTONIC
++#undef CLOCK_MONOTONIC
++#endif
++#define CLOCK_MONOTONIC 6
++
++#ifdef CLOCK_MONOTONIC_COARSE
++#undef CLOCK_MONOTONIC_COARSE
++#endif
++#define CLOCK_MONOTONIC_COARSE 5
++
++#ifdef CLOCK_MONOTONIC_RAW
++#undef CLOCK_MONOTONIC_RAW
++#endif
++#define CLOCK_MONOTONIC_RAW 4
++
++#ifdef CLOCK_BOOTTIME
++#undef CLOCK_BOOTTIME
++#endif
++#define CLOCK_BOOTTIME 8
++
++#ifdef CLOCK_PROCESS_CPUTIME_ID
++#undef CLOCK_PROCESS_CPUTIME_ID
++#endif
++#define CLOCK_PROCESS_CPUTIME_ID 12
++
++#ifdef CLOCK_THREAD_CPUTIME_ID
++#undef CLOCK_THREAD_CPUTIME_ID
++#endif
++#define CLOCK_THREAD_CPUTIME_ID 16
++
++/* define this only if not already */
++
++#ifndef HAVE_CLOCKID_T
++typedef int clockid_t;
++#endif
++
++static int mach_clock_gettime (clockid_t clk_id, struct timespec* tp)
++{
++    kern_return_t ret;
++    clock_serv_t cclock;
++    mach_timespec_t mts;
++
++    ret = host_get_clock_service (mach_host_self (), CALENDAR_CLOCK, &cclock);
++    if (ret != 0) {
++        errno = EINVAL;
++        return -1;
++    }
++
++    ret = clock_get_time (cclock, &mts);
++    if (ret != 0) {
++        goto clock_gettime_out;
++    }
++
++    tp->tv_sec = mts.tv_sec;
++    tp->tv_nsec = mts.tv_nsec;
++
++clock_gettime_out:
++    if (mach_port_deallocate (mach_task_self (), cclock) != 0 || ret != 0) {
++        errno = EINVAL;
++        return -1;
++    } else {
++        return 0;
++    }
++}
++
++#define USE_CLOCK_GETTIME mach_clock_gettime
++
++#else
++
++#define USE_CLOCK_GETTIME clock_gettime
++
++#endif
++
+ /*! An internal structure to handle overriden time for each clock type. */
+ struct fakeclock {
+ 	bool override;
+@@ -99,7 +198,7 @@ int osmo_clock_gettime(clockid_t clk_id, struct timespec *tp)
+ {
+ 	struct fakeclock* c = clkid_to_fakeclock(clk_id);
+ 	if (!c || !c->override)
+-		return clock_gettime(clk_id, tp);
++		return USE_CLOCK_GETTIME(clk_id, tp);
+ 
+ 	*tp = c->time;
+ 	return 0;
