@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2009-2017 The MacPorts Project,
+# Copyright (c) 2009-2018 The MacPorts Project,
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -219,22 +219,22 @@ variant universal {
             }
 
             if { [info exists merger_configure_env(${arch})] } {
-                configure.env-append  $merger_configure_env(${arch})
+                configure.env-append        {*}$merger_configure_env(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-append  $merger_configure_cppflags(${arch})
+                configure.cppflags-append   {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-append  $merger_configure_cflags(${arch})
+                configure.cflags-append     {*}$merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-append  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-append   {*}$merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-append  $merger_configure_objcflags(${arch})
+                configure.objcflags-append  {*}$merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-append  $merger_configure_ldflags(${arch})
+                configure.ldflags-append    {*}$merger_configure_ldflags(${arch})
             }
 
             # Don't set the --host unless we have to.
@@ -262,11 +262,11 @@ variant universal {
                 }
             }
             if {$host != ""} {
-                configure.args-append  ${host}
+                configure.args-append       ${host}
             }
 
             if { [info exists merger_configure_args(${arch})] } {
-                configure.args-append  $merger_configure_args(${arch})
+                configure.args-append       {*}$merger_configure_args(${arch})
             }
 
             set configure_compiler_save ${configure.compiler}
@@ -346,26 +346,26 @@ variant universal {
             option configure.cxx        ${configure_cxx_save}
             option configure.objc       ${configure_objc_save}
             if { [info exists merger_configure_args(${arch})] } {
-                configure.args-delete  $merger_configure_args(${arch})
+                configure.args-delete       {*}$merger_configure_args(${arch})
             }
             configure.args-delete  ${host}
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-delete  $merger_configure_ldflags(${arch})
+                configure.ldflags-delete    {*}$merger_configure_ldflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-delete  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-delete   {*}$merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-delete  $merger_configure_objcflags(${arch})
+                configure.objcflags-delete  {*}$merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-delete  $merger_configure_cflags(${arch})
+                configure.cflags-delete     {*}$merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-delete  $merger_configure_cppflags(${arch})
+                configure.cppflags-delete   {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_env(${arch})] } {
-                configure.env-delete  $merger_configure_env(${arch})
+                configure.env-delete        {*}$merger_configure_env(${arch})
             }
             if { ${merger_arch_flag} != "no" } {
                 configure.ldflags-delete   ${archf}
@@ -384,10 +384,10 @@ variant universal {
             ui_info "$UI_PREFIX [format [msgcat::mc "Building %1\$s for architecture %2\$s"] ${subport} ${arch}]"
 
             if { [info exists merger_build_env(${arch})] } {
-                build.env-append  $merger_build_env(${arch})
+                build.env-append            {*}$merger_build_env(${arch})
             }
             if { [info exists merger_build_args(${arch})] } {
-                build.args-append  $merger_build_args(${arch})
+                build.args-append           {*}$merger_build_args(${arch})
             }
             set build_dir_save  ${build.dir}
             if { [string match "${worksrcpath}/*" ${build.dir}] } {
@@ -411,10 +411,10 @@ variant universal {
 
             option build.dir ${build_dir_save}
             if { [info exists merger_build_args(${arch})] } {
-                build.args-delete $merger_build_args(${arch})
+                build.args-delete           {*}$merger_build_args(${arch})
             }
             if { [info exists merger_build_env(${arch})] } {
-                build.env-delete  $merger_build_env(${arch})
+                build.env-delete            {*}$merger_build_env(${arch})
             }
         }
     }
@@ -427,10 +427,10 @@ variant universal {
             option destroot.destdir [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
 
             if { [info exists merger_destroot_env(${arch})] } {
-                destroot.env-append  $merger_destroot_env(${arch})
+                destroot.env-append         {*}$merger_destroot_env(${arch})
             }
             if { [info exists merger_destroot_args(${arch})] } {
-                destroot.args-append  $merger_destroot_args(${arch})
+                destroot.args-append        {*}$merger_destroot_args(${arch})
             }
             set destroot_dir_save ${destroot.dir}
             if { [string match "${worksrcpath}/*" ${destroot.dir}] } {
@@ -454,10 +454,10 @@ variant universal {
 
             option destroot.dir ${destroot_dir_save}
             if { [info exists merger_destroot_args(${arch})] } {
-                destroot.args-delete $merger_destroot_args(${arch})
+                destroot.args-delete        {*}$merger_destroot_args(${arch})
             }
             if { [info exists merger_destroot_env(${arch})] } {
-                destroot.env-delete  $merger_destroot_env(${arch})
+                destroot.env-delete         {*}$merger_destroot_env(${arch})
             }
             option destroot.destdir ${destdirSave}
         }
@@ -761,10 +761,10 @@ variant universal {
                 ui_info "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] ${subport} ${arch}]"
 
                 if { [info exists merger_test_env(${arch})] } {
-                    test.env-append  $merger_test_env(${arch})
+                    test.env-append         {*}$merger_test_env(${arch})
                 }
                 if { [info exists merger_test_args(${arch})] } {
-                    test.args-append  $merger_test_args(${arch})
+                    test.args-append        {*}$merger_test_args(${arch})
                 }
                 set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
@@ -788,10 +788,10 @@ variant universal {
 
                 option test.dir ${test_dir_save}
                 if { [info exists merger_test_args(${arch})] } {
-                    test.args-delete $merger_test_args(${arch})
+                    test.args-delete        {*}$merger_test_args(${arch})
                 }
                 if { [info exists merger_test_env(${arch})] } {
-                    test.env-delete  $merger_test_env(${arch})
+                    test.env-delete         {*}$merger_test_env(${arch})
                 }
             }
         }
