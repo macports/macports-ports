@@ -648,7 +648,6 @@ set portfetch::mirror_sites::sites(postgresql) {
 
 set portfetch::mirror_sites::sites(pypi) {
     https://files.pythonhosted.org/packages/source/:nosubdir
-    https://pypi.python.org/packages/:nosubdir
     https://pypi.python.org/packages/source/:nosubdir
 }
 
