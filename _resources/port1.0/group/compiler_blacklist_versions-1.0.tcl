@@ -113,7 +113,7 @@ proc compiler_blacklist_versions._version_matches {compiler comparison_operator 
 }
 
 proc compiler_blacklist_versions._get_compiler_version {compiler} {
-    global compiler_blacklist_versions._compiler_versions
+    global compiler_blacklist_versions._compiler_versions os.major xcodeversion
     if {[info exists compiler_blacklist_versions._compiler_versions(${compiler})]} {
         return [set compiler_blacklist_versions._compiler_versions(${compiler})]
     }
@@ -122,6 +122,9 @@ proc compiler_blacklist_versions._get_compiler_version {compiler} {
             set re {clang(?:_.*)?-([0-9.]+)}
         }
         llvm-gcc-4.2 {
+            if {${os.major} > 15 || [vercmp $xcodeversion 5.0] >= 0 || [vercmp $xcodeversion 3.1] < 0} {
+                return ""
+            }
             set re {LLVM build ([0-9.]+)}
         }
         gcc-4.0 -
