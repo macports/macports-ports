@@ -42,7 +42,8 @@ options crossbinutils.target
 array set crossbinutils.versions_info {
     2.30 {xz {
         rmd160  7f439bd642e514e89075a47758414ea65c50c3b3 \
-        sha256  6e46b8aeae2f727a36f0bd9505e405768a72218f1796f0d09757d45209871ae6
+        sha256  6e46b8aeae2f727a36f0bd9505e405768a72218f1796f0d09757d45209871ae6 \
+        size    20286700
     }}
 }
 
