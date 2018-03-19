@@ -279,11 +279,14 @@ proc wxWidgets._set {option action args} {
     wxWidgets.wxconfig  ${wxWidgets.wxdir}/wx-config
     wxWidgets.wxrc      ${wxWidgets.wxdir}/wxrc
 
-    if {[string match "wxWidgets-3.0*" ${args}]} {
+    if {[string match "wx*-3.0*" ${args}]} {
         # the following causes a crash on older versions of clang:
         #    #define wx_has_cpp11_include(h) __has_include(h)
         #    #if wx_has_cpp11_include(<unordered_map>)
         # see https://trac.macports.org/ticket/54296
+        #
+        # compiling wxgtk also crashes on 10.7:
+        # https://trac.macports.org/ticket/56096
         compiler.blacklist-append {clang < 500}
     }
 }
