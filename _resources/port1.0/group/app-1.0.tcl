@@ -281,7 +281,7 @@ platform macosx {
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
-    <string>1</string>"
+    <true/>"
             }
             puts ${fp} "    <key>CFBundleIdentifier</key>
     <string>${app.identifier}</string>
