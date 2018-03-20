@@ -45,16 +45,11 @@
 #   that GTK != Mac, some programs work with wxGTK, but not with wxOSX.
 #   This could help you write proper patches and submit them upstream.
 #
-# * 'wxWidgets-3.0-libcxx'
-#   A workaround to make software written in C++11 (but without other C++
-#   dependencies) work on macOS < 10.9. This is just wxWidgets 3.0
-#   compiled against libc++ even where libstdc++ is default. See also
+# * 'wxWidgets-3.0-cxx11'
+#   A workaround to make software written in C++11 work on macOS < 10.9.
+#   This is just wxWidgets 3.0 compiled against libc++ even where libstdc++
+#   is default. See also
 #   https://trac.macports.org/wiki/LibcxxOnOlderSystems
-#
-# * 'wxWidgets-3.0-devel'
-#   Tracking latest commits from the 3.0 branch for development purposes.
-#   (This variant will be removed at some point, so try not to rely on its
-#   existence.)
 #
 # * 'wxWidgets-3.2'
 #   At the moment still mainly for development purposes, for testing ports
@@ -176,8 +171,7 @@ PortGroup   compiler_blacklist_versions 1.0
 ## - wxWidgets-3.0
 ## - wxGTK-3.0
 ## - wxPython-3.0
-## - wxWidgets-3.0-libcxx
-## - wxWidgets-3.0-devel
+## - wxWidgets-3.0-cxx11
 ## - wxWidgets-3.2
 proc wxWidgets._set {option action args} {
     global prefix frameworks_dir os.major
@@ -245,25 +239,9 @@ proc wxWidgets._set {option action args} {
             }
         }
     # ugly workaround to allow some C++11-only applications to be built on < 10.9
-    } elseif {${args} eq "wxWidgets-3.0-libcxx"} {
-        wxWidgets.name      "wxWidgets"
-        wxWidgets.version   "3.0-libcxx"
-        wxWidgets.port      "wxWidgets-3.0-libcxx"
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
-                return -code error "incompatible macOS version"
-            }
-        }
-        platform darwin {
-            depends_lib-append          port:libcxx
-            configure.cxxflags-append   -std=c++11
-            configure.cxx_stdlib        libc++
-        }
-    # ugly workaround to allow some C++11-only applications to be built on < 10.9
     } elseif {${args} eq "wxWidgets-3.0-cxx11"} {
         global cxx_stdlib
-        wxWidgets.name      "wxWidgets"
+        wxWidgets.name          "wxWidgets"
         if {${cxx_stdlib} eq "libstdc++"} {
             wxWidgets.version   "3.0-cxx11"
             wxWidgets.port      "wxWidgets-3.0-cxx11"
@@ -279,17 +257,6 @@ proc wxWidgets._set {option action args} {
         }
         # this doesn't work
         # PortGroup cxx11 1.1
-    # temporary development version of wxWidgets 3.0.x
-    } elseif {${args} eq "wxWidgets-3.0-devel"} {
-        wxWidgets.name      "wxWidgets"
-        wxWidgets.version   "3.0-devel"
-        wxWidgets.port      "wxWidgets-3.0-devel"
-        if {${os.major} < 9} {
-            pre-fetch {
-                ui_error "${wxWidgets.port} requires macOS 10.5 or later."
-                return -code error "incompatible macOS version"
-            }
-        }
     # preliminary support for wxWidgets 3.1/3.2
     } elseif {${args} eq "wxWidgets-3.2"} {
         wxWidgets.name      "wxWidgets"
@@ -304,7 +271,6 @@ proc wxWidgets._set {option action args} {
     } else {
         # throw an error
         ui_error "invalid parameter for wxWidgets.use; use one of:\n\twxWidgets-2.8/wxGTK-2.8/wxWidgets-3.0/wxGTK-3.0/wxPython-3.0/wxWidgets-3.2"
-        # wxWidgets-3.0-libcxx, wxWidgets-3.0-devel
         return -code return "invalid parameter for wxWidgets.use"
     }
     wxWidgets.prefix    ${frameworks_dir}/wxWidgets.framework/Versions/${wxWidgets.name}/${wxWidgets.version}
@@ -313,11 +279,14 @@ proc wxWidgets._set {option action args} {
     wxWidgets.wxconfig  ${wxWidgets.wxdir}/wx-config
     wxWidgets.wxrc      ${wxWidgets.wxdir}/wxrc
 
-    if {[string match "wxWidgets-3.0*" ${args}]} {
+    if {[string match "wx*-3.0*" ${args}]} {
         # the following causes a crash on older versions of clang:
         #    #define wx_has_cpp11_include(h) __has_include(h)
         #    #if wx_has_cpp11_include(<unordered_map>)
         # see https://trac.macports.org/ticket/54296
+        #
+        # compiling wxgtk also crashes on 10.7:
+        # https://trac.macports.org/ticket/56096
         compiler.blacklist-append {clang < 500}
     }
 }
