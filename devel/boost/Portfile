@@ -4,11 +4,13 @@ PortSystem      1.0
 PortGroup       compiler_blacklist_versions 1.0
 PortGroup       mpi 1.0
 PortGroup       cxx11 1.1
+PortGroup       active_variants 1.1
 
 name            boost
 
 version         1.66.0
-revision        2
+# Revision is set below in the `if {$subport eq $name} { ... }` statement
+# The boost-numpy subport has its own revision number
 checksums       rmd160  ee5dafdfa49adf50a5333cef1f55dac4f70b4c14 \
                 sha256  5721818253e6a0989583192f96782c4a98eb6204965316df9f5ad75819225ca9 \
                 size    85995778
@@ -211,7 +213,7 @@ foreach s ${pythons_suffixes} {
         # The issue has been reported to both the MacPorts team and the boost team, as per:
         # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
 
-        depends_lib-append      port:${p} port:py${s}-numpy
+        depends_lib-append      port:${p}
         configure.args-delete   --without-libraries=python
         configure.args-append   --with-python=${prefix}/bin/python${v} --with-python-root=${prefix}/bin/python${v}
 
@@ -251,51 +253,97 @@ variant no_single description {Disable building single-threaded libraries} {
     build.args-append   threading=multi
 }
 
-variant regex_match_extra description \
-        "Enable access to extended capture information of submatches in Boost.Regex" {
-    notes-append "
-You enabled the +regex_match_extra variant\; see the following page for an\
-exhaustive list of the consequences of this feature:
-
-http://www.boost.org/doc/libs/${distver}/libs/regex/doc/html/boost_regex/ref/sub_match.html
-"
-
-    post-patch {
-        reinplace {/#define BOOST_REGEX_MATCH_EXTRA/s:^// ::} \
-            ${worksrcpath}/boost/regex/user.hpp
+subport boost-numpy {
+    revision 0
+    description Boost.Numpy library
+    long_description ${description}
+    depends_lib port:boost
+    foreach s ${pythons_suffixes} {
+        if {[variant_isset python${s}]} {
+            depends_lib-append port:py${s}-numpy
+            require_active_variants boost python${s}
+        }
+    }
+    if {[variant_isset no_static]} {
+        require_active_variants boost no_static
+    } else {
+        require_active_variants boost "" no_static
+    }
+    if {[variant_isset no_single]} {
+        require_active_variants boost no_single
+    } else {
+        require_active_variants boost "" no_single
     }
 }
 
-if {[mpi_variant_isset]} {
+if {$subport eq $name} {
+    revision 3
+    patchfiles-append patch-disable-numpy-extension.diff
 
-    # There is a conflict with debug support.
-    # The issue has been reported to both the MacPorts team and the boost team, as per:
-    # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
-    if {[variant_isset debug]} {
-        return -code error "+debug variant conflicts with mpi"
+    variant regex_match_extra description \
+        "Enable access to extended capture information of submatches in Boost.Regex" {
+        notes-append "
+        You enabled the +regex_match_extra variant\; see the following page for an\
+        exhaustive list of the consequences of this feature:
+
+    http://www.boost.org/doc/libs/${distver}/libs/regex/doc/html/boost_regex/ref/sub_match.html
+"
+
+        post-patch {
+            reinplace {/#define BOOST_REGEX_MATCH_EXTRA/s:^// ::} \
+                ${worksrcpath}/boost/regex/user.hpp
+        }
     }
 
-    configure.args-delete   --without-libraries=mpi
-
-    post-configure {
-        write_jam "using mpi : ${mpi.cxx} : : ${mpi.exec} ;"
+    post-destroot {
+        delete file {*}[glob ${destroot}${prefix}/include/boost/python/numpy*]
     }
 
-    if {![catch python_dir]} {
+    if {[mpi_variant_isset]} {
 
-        patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
-
-        post-destroot {
-            set site_packages [python_dir]
-            xinstall -d ${destroot}${site_packages}/boost
-            xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
-                ${destroot}${site_packages}/boost
-
-            set l ${site_packages}/boost/mpi.so
-            move ${destroot}${prefix}/lib/mpi.so ${destroot}${l}
-            system "install_name_tool -id ${l} ${destroot}${l}"
+        # There is a conflict with debug support.
+        # The issue has been reported to both the MacPorts team and the boost team, as per:
+        # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+        if {[variant_isset debug]} {
+            return -code error "+debug variant conflicts with mpi"
         }
 
+        configure.args-delete   --without-libraries=mpi
+
+        post-configure {
+            write_jam "using mpi : ${mpi.cxx} : : ${mpi.exec} ;"
+        }
+
+        if {![catch python_dir]} {
+
+            patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
+
+            post-destroot {
+                set site_packages [python_dir]
+                xinstall -d ${destroot}${site_packages}/boost
+                xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
+                    ${destroot}${site_packages}/boost
+
+                set l ${site_packages}/boost/mpi.so
+                move ${destroot}${prefix}/lib/mpi.so ${destroot}${l}
+                system "install_name_tool -id ${l} ${destroot}${l}"
+            }
+
+        }
+    }
+} else {
+    post-destroot {
+        move {*}[glob ${destroot}${prefix}/lib/libboost_numpy*] ${destroot}${prefix}
+        move {*}[glob ${destroot}${prefix}/include/boost/python/numpy*] ${destroot}${prefix}
+        # if an mpi variant *and* a python variant is selected, then a binary
+        # python module called mpi.so gets installed, so delete ${frameworks_dir}
+        delete ${destroot}${prefix}${frameworks_dir} \
+            ${destroot}${prefix}/include \
+            ${destroot}${prefix}/lib \
+            ${destroot}${prefix}/share
+        file mkdir ${destroot}${prefix}/lib ${destroot}${prefix}/include/boost/python
+        move {*}[glob ${destroot}${prefix}/libboost_numpy*] ${destroot}${prefix}/lib
+        move {*}[glob ${destroot}${prefix}/numpy*] ${destroot}${prefix}/include/boost/python
     }
 }
 
