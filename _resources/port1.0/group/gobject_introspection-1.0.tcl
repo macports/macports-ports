@@ -78,8 +78,7 @@ pre-build {
         if {[info exists universal_archs_to_use]} {
             global merger_build_args
             foreach arch ${universal_archs_to_use} {
-                lappend merger_build_args(${arch})     CC='${configure.cc} -arch ${arch}'
-                lappend merger_destroot_args(${arch})  CC='${configure.cc} -arch ${arch}'
+                lappend merger_build_args(${arch})      CC='${configure.cc} -arch ${arch}'
             }
         } else {
             # This deliberately does not use [get_canonical_archflags cc]
@@ -97,13 +96,28 @@ pre-build {
             #
             # The non-g-ir-scanner parts of the build are assumed to build with
             # the correct -arch flags as determined at configure time.
-            build.args-append      CC="${configure.cc} ${configure.cc_archflags}"
-            destroot.args-append   CC="${configure.cc} ${configure.cc_archflags}"
+            build.args-append       CC="${configure.cc} ${configure.cc_archflags}"
         }
 
         # The rules enabled by gobject-introspection require GNU make 3.81+
         platform darwin 8 {
             build.cmd-replace   [portbuild::build_getmaketype] ${prefix}/bin/gmake
+        }
+    }
+}
+
+pre-destroot {
+    if {${gobject_introspection}} {
+        # gobject-introspection uses g-ir-scanner, which uses $CC from args.
+        if {[info exists universal_archs_to_use]} {
+            global merger_destroot_args
+            foreach arch ${universal_archs_to_use} {
+                lappend merger_destroot_args(${arch})   CC='${configure.cc} -arch ${arch}'
+            }
+        } else {
+            # This deliberately does not use [get_canonical_archflags cc]. See
+            # explanation in pre-build block.
+            destroot.args-append    CC="${configure.cc} ${configure.cc_archflags}"
         }
     }
 }
