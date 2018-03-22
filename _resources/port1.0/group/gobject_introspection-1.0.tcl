@@ -74,7 +74,7 @@ pre-configure {
 
 pre-build {
     if {${gobject_introspection}} {
-        # gobject-introspection uses g-ir-scanner, which uses $CC from env
+        # gobject-introspection uses g-ir-scanner, which uses $CC from args.
         if {[info exists universal_archs_to_use]} {
             global merger_build_args
             foreach arch ${universal_archs_to_use} {
