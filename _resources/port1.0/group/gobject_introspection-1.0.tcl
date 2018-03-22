@@ -82,6 +82,21 @@ pre-build {
                 lappend merger_destroot_args(${arch})  CC='${configure.cc} -arch ${arch}'
             }
         } else {
+            # This deliberately does not use [get_canonical_archflags cc]
+            # because that would cause g-ir-scanner to report an error:
+            #
+            # clang: error: cannot use 'cpp-output' output with multiple -arch
+            # options
+            #
+            # This means that the $CC passed to make at build and destroot time
+            # does not contain the right -arch flags for universal builds that
+            # don't use the muniversal portgroup, but this is assumed not to
+            # affect the output of g-ir-scanner. It is even possible that the
+            # -arch flags aren't necessary at all for g-ir-scanner, but this has
+            # not been investigated.
+            #
+            # The non-g-ir-scanner parts of the build are assumed to build with
+            # the correct -arch flags as determined at configure time.
             build.args-append      CC="${configure.cc} ${configure.cc_archflags}"
             destroot.args-append   CC="${configure.cc} ${configure.cc_archflags}"
         }
