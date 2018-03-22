@@ -43,7 +43,7 @@ fi
 	DIE=1
 }
 
-AUTOMAKE_VERSIONS="1.15 1.14 1.13 1.12 1.11 1.10"
+AUTOMAKE_VERSIONS="1.16 1.15 1.14 1.13 1.12 1.11 1.10"
 for version in $AUTOMAKE_VERSIONS; do
 	if automake-$version --version < /dev/null > /dev/null 2>&1 ; then
 		AUTOMAKE=automake-$version
@@ -104,6 +104,12 @@ cd $ORIGDIR || exit $?
 if test -z "$NOCONFIGURE"; then
         $srcdir/configure $AUTOGEN_CONFIGURE_ARGS "$@" || exit $?
 
-        echo 
+	# Put a redirect makefile here
+	if [ ! -f $srcdir/Makefile ]; then
+	    cat $srcdir/build/Makefile.redirect > $srcdir/Makefile
+	    printf "\nREDIRECT = %s\n" "$(realpath $ORIGDIR)" >> $srcdir/Makefile
+	fi
+
+        echo
         echo "Now type 'make' to compile $PROJECT."
 fi
