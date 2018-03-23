@@ -70,3 +70,4 @@ merge-upstream:
 	git pull
 	git checkout master
 	git merge upstream_master
+	portindex
