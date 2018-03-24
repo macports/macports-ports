@@ -72,8 +72,12 @@ proc handle_tarball_from {option action args} {
     }
 }
 
+options github.livecheck.branch
+default github.livecheck.branch master
+
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
-    global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix github.homepage github.master_sites PortInfo
+    global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix
+    global github.homepage github.master_sites github.livecheck.branch PortInfo
 
     github.author           ${gh_author}
     github.project          ${gh_project}
@@ -125,7 +129,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         [regexp "^\[0-9a-f\]{7,}\$" ${github.version}] && \
         ![regexp "^\[0-9\]{8}\$" ${github.version}]} {
         livecheck.type      regexm
-        livecheck.url       ${github.homepage}/commits/master.atom
+        default livecheck.url   {${github.homepage}/commits/${github.livecheck.branch}.atom}
         livecheck.regex     <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
     } else {
         livecheck.type      regex
