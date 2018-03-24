@@ -78,7 +78,7 @@ pre-build {
         if {[info exists universal_archs_to_use]} {
             global merger_build_args
             foreach arch ${universal_archs_to_use} {
-                lappend merger_build_args(${arch})      CC='${configure.cc} -arch ${arch}'
+                lappend merger_build_args(${arch})      CC="${configure.cc} -arch ${arch}"
             }
         } else {
             # This deliberately does not use [get_canonical_archflags cc]
@@ -112,7 +112,7 @@ pre-destroot {
         if {[info exists universal_archs_to_use]} {
             global merger_destroot_args
             foreach arch ${universal_archs_to_use} {
-                lappend merger_destroot_args(${arch})   CC='${configure.cc} -arch ${arch}'
+                lappend merger_destroot_args(${arch})   CC="${configure.cc} -arch ${arch}"
             }
         } else {
             # This deliberately does not use [get_canonical_archflags cc]. See
