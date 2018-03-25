@@ -217,10 +217,7 @@ proc mpi.action_enforce_variants {args} {
 pre-fetch {
     if {[fortran_variant_isset] && [mpi_variant_isset]} {
         set gcc_name ""
-        regexp (gcc\[0-9\]*) ${mpi.name} gcc_name 
-        if {$gcc_name eq ""} {
-            regexp (dragonegg\[0-9\]*) ${mpi.name} gcc_name
-        }
+        regexp (gcc\[0-9\]*) ${mpi.name} gcc_name
         if {$gcc_name ne ""} {
             if {[active_variants ${mpi.name} "fortran" ""]} {
                 set mpif $gcc_name
@@ -230,7 +227,6 @@ pre-fetch {
         } else {
             # this is a default, clang, or llvm subport
             set mpif [fortran_active_variant_name ${mpi.name}]
-            
         }
         # mpif will definitely have a real compiler name, not gfortran.
         set myf [fortran_compiler_name [fortran_variant_name]]
@@ -293,7 +289,6 @@ proc mpi.setup {args} {
             default {
                 if {[info exists mpidb($v,variant)] == 0} {
                     if {$v eq "gcc" ||
-                        $v eq "dragonegg" ||
                         $v eq "fortran" ||
                         $v eq "clang" ||
                         $v eq "require_fortran" ||
