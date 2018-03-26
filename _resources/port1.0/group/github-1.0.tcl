@@ -73,7 +73,10 @@ proc handle_tarball_from {option action args} {
 }
 
 options github.livecheck.branch
-default github.livecheck.branch master
+default github.livecheck.branch {master}
+
+options github.livecheck.regex
+default github.livecheck.regex {{([^"]+)}}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
     global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix
@@ -134,7 +137,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     } else {
         livecheck.type      regex
         livecheck.url       ${github.homepage}/tags
-        livecheck.regex     archive/[join ${github.tag_prefix}](\[^"\]+)[join ${github.tag_suffix}]${extract.suffix}
+        default livecheck.regex {[list archive/[join ${github.tag_prefix}][join ${github.livecheck.regex}][join ${github.tag_suffix}]\\.tar\\.gz]}
     }
     livecheck.version       ${github.version}
 }
