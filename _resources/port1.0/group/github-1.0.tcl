@@ -38,16 +38,20 @@
 # https://github.com/macports/macports-guide/blob/master/guide/xml/portgroup-github.xml
 
 options github.author github.project github.version github.tag_prefix github.tag_suffix
-options github.homepage github.raw github.master_sites github.tarball_from
 
+options github.homepage
 default github.homepage {https://github.com/${github.author}/${github.project}}
+
+options github.raw
 default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
 
 # Later code assumes that github.master_sites is a simple string, not a list.
+options github.master_sites
 default github.master_sites {${github.homepage}/tarball/${git.branch}}
 
 default master_sites {${github.master_sites}}
 
+options github.tarball_from
 default github.tarball_from {tags}
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
