@@ -38,16 +38,20 @@
 # https://github.com/macports/macports-guide/blob/master/guide/xml/portgroup-github.xml
 
 options github.author github.project github.version github.tag_prefix github.tag_suffix
-options github.homepage github.raw github.master_sites github.tarball_from
 
+options github.homepage
 default github.homepage {https://github.com/${github.author}/${github.project}}
+
+options github.raw
 default github.raw {https://raw.githubusercontent.com/${github.author}/${github.project}}
 
 # Later code assumes that github.master_sites is a simple string, not a list.
+options github.master_sites
 default github.master_sites {${github.homepage}/tarball/${git.branch}}
 
 default master_sites {${github.master_sites}}
 
+options github.tarball_from
 default github.tarball_from {tags}
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
@@ -73,7 +77,10 @@ proc handle_tarball_from {option action args} {
 }
 
 options github.livecheck.branch
-default github.livecheck.branch master
+default github.livecheck.branch {master}
+
+options github.livecheck.regex
+default github.livecheck.regex {{([^"]+)}}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
     global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix
@@ -134,7 +141,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     } else {
         livecheck.type      regex
         livecheck.url       ${github.homepage}/tags
-        livecheck.regex     archive/[join ${github.tag_prefix}](\[^"\]+)[join ${github.tag_suffix}]${extract.suffix}
+        default livecheck.regex {[list archive/[join ${github.tag_prefix}][join ${github.livecheck.regex}][join ${github.tag_suffix}]\\.tar\\.gz]}
     }
     livecheck.version       ${github.version}
 }
