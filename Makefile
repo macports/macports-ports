@@ -70,5 +70,5 @@ pull-upstream:
 	git checkout upstream_master
 	git pull
 	git checkout master
-	git merge upstream_master
+	git merge --no-edit upstream_master
 	portindex
