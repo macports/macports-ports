@@ -65,8 +65,8 @@ create-port-branch:
 		git checkout upstream_master && \
 		git checkout -b $${PORT_NAME}
 
-.PHONY: merge-upstream
-merge-upstream:
+.PHONY: pull-upstream
+pull-upstream:
 	git checkout upstream_master
 	git pull
 	git checkout master
