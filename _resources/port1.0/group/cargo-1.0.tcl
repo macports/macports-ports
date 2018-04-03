@@ -69,6 +69,21 @@ proc handle_cargo_crates {option action {value ""}} {
     }
 }
 
+proc cargo._import_crate {cname cversion chksum cratefile} {
+    global cargo.home distpath
+
+    ui_debug "Adding ${cratefile} to cargo home"
+    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    system -W "${cargo.home}/macports" "$tar -xf ${distpath}/${cratefile}"
+    # although cargo will never see the .crate, it expects to find the sha256 checksum here
+    set chkfile [open "${cargo.home}/macports/${cname}-${cversion}/.cargo-checksum.json" "w"]
+    puts $chkfile "{"
+    puts $chkfile "    \"package\": \"${chksum}\","
+    puts $chkfile "    \"files\": {}"
+    puts $chkfile "}"
+    close $chkfile
+}
+
 # The distfiles of the main port will also be stored in this directory,
 # but this is the only way to allow reusing the same crates across multiple ports.
 dist_subdir             cargo-crates
@@ -94,16 +109,7 @@ pre-build {
     # import all crates
     foreach {cname cversion chksum} ${cargo.crates} {
         set cratefile ${cname}-${cversion}.crate
-        ui_debug "Adding ${cratefile} to cargo home"
-        set tar [findBinary tar ${portutil::autoconf::tar_path}]
-        system -W "${cargo.home}/macports" "$tar -xf ${distpath}/${cratefile}"
-        # although cargo will never see the .crate, it expects to find the sha256 checksum here
-        set chkfile [open "${cargo.home}/macports/${cname}-${cversion}/.cargo-checksum.json" "w"]
-        puts $chkfile "{"
-        puts $chkfile "    \"package\": \"${chksum}\","
-        puts $chkfile "    \"files\": {}"
-        puts $chkfile "}"
-        close $chkfile
+        cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
     }
 }
 
