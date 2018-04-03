@@ -141,7 +141,7 @@ default extract.only    {${distname}${extract.suffix}}
 
 depends_build           port:cargo
 
-pre-build {
+post-extract {
     file mkdir "${cargo.home}/macports"
 
     # use a replacement for crates.io
