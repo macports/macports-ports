@@ -112,7 +112,7 @@ use_configure       no
 build.cmd           cargo build
 build.target        --release
 build.args          --frozen
-build.post_args     -v
+build.post_args     -v -j${build.jobs}
 build.env           CARGO_HOME=${cargo.home} \
                     RUSTFLAGS="-C linker=${configure.cc}"
 
