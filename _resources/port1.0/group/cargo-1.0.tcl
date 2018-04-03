@@ -50,7 +50,7 @@
 
 options cargo.crates cargo.home
 
-default cargo.home      {${workpath}/cargo_home}
+default cargo.home      {${workpath}/.home/.cargo}
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
@@ -119,8 +119,7 @@ build.cmd           cargo build
 build.target
 build.pre_args      --release --frozen -v -j${build.jobs}
 build.args
-build.env           CARGO_HOME=${cargo.home} \
-                    RUSTFLAGS="-C linker=${configure.cc}"
+build.env           RUSTFLAGS="-C linker=${configure.cc}"
 
 destroot {
     ui_error "No destroot phase in the Portfile!"
