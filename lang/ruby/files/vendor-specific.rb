@@ -1,5 +1,3 @@
-# $Id$
-#
 # Custom vendor_ruby install library setting for MacPorts module
 # installation. You can force vendor installation with the following:
 #
