@@ -1,5 +1,3 @@
--- $Id$
-
 on run argv
 	tell application "Finder"
 		set the_path to item 1 of argv
