@@ -1,5 +1,3 @@
-# $Id$
-
 SUBDIRS = lpsolve55 lp_solve
 
 .PHONY: all install $(SUBDIRS)
