@@ -9,8 +9,8 @@ sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
 unset CC && source /opt/local/share/macports/setupenv.bash
 sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar|file://${PWD}|; /^file:/s/default/nosync,default/" /opt/local/etc/macports/sources.conf
-echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf
-rsync -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
+echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 git checkout -qf macports/master
