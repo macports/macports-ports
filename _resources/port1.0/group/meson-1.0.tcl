@@ -54,7 +54,7 @@ depends_skip_archcheck-append \
 
 # TODO: --buildtype=plain tells Meson not to add its own flags to the command line. This gives the packager total control on used flags.
 default configure.cmd       {${prefix}/bin/meson}
-default configure.post_args {"${configure.dir} ${build_dir}"}
+default configure.post_args {[meson::get_post_args]}
 configure.universal_args-delete \
                             --disable-dependency-tracking
 
@@ -65,3 +65,14 @@ default build.target        ""
 # remove DESTDIR= from arguments, but rather take it from environmental variable
 destroot.env-append         DESTDIR=${destroot}
 default destroot.post_args  ""
+
+namespace eval meson {
+    proc get_post_args {} {
+        global configure.dir build_dir muniversal.current_arch
+        if {[info exists muniversal.current_arch]} {
+            return "${configure.dir} ${build_dir}-${muniversal.current_arch}"
+        } else {
+            return "${configure.dir} ${build_dir}"
+        }
+    }
+}

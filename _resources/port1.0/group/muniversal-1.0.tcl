@@ -197,9 +197,11 @@ variant universal {
     }
 
     configure {
+        global muniversal.current_arch
 
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
 
             if {![file exists ${worksrcpath}-${arch}]} {
                 copy ${worksrcpath} ${worksrcpath}-${arch}
@@ -380,8 +382,11 @@ variant universal {
     }
 
     build {
+        global muniversal.current_arch
+
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Building %1\$s for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
 
             if { [info exists merger_build_env(${arch})] } {
                 build.env-append            {*}$merger_build_env(${arch})
@@ -420,11 +425,16 @@ variant universal {
     }
 
     destroot {
+        global muniversal.current_arch
+
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
+
             copy ${destroot} ${workpath}/destroot-${arch}
             set destdirSave ${destroot.destdir}
             option destroot.destdir [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+            destroot.env-replace ${destdirSave} ${destroot.destdir}
 
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-append         {*}$merger_destroot_env(${arch})
@@ -459,6 +469,7 @@ variant universal {
             if { [info exists merger_destroot_env(${arch})] } {
                 destroot.env-delete         {*}$merger_destroot_env(${arch})
             }
+            destroot.env-replace ${destroot.destdir} ${destdirSave}
             option destroot.destdir ${destdirSave}
         }
         delete ${destroot}
