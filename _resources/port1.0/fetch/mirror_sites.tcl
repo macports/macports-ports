@@ -33,6 +33,7 @@ set portfetch::mirror_sites::sites(apache) {
 
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(cpan) {
+    https://cpan.metacpan.org/modules/by-module/
     http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     http://ftp.carnet.hr/pub/CPAN/modules/by-module/

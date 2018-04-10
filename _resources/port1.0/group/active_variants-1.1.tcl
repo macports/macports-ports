@@ -267,13 +267,6 @@ pre-configure {
 	_check_require_active_variants source
 }
 
-# register pre-archivefetch handler that checks for all requested variants
-# this is required when downloading binary archives for a package, because
-# pre-configure is never run for those
-pre-archivefetch {
-	_check_require_active_variants archivefetch
-}
-
 # be sure that a required variant was not changed since this port was built or fetched
 pre-activate {
         _check_require_active_variants activate
