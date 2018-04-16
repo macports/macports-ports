@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2009-2014 The MacPorts Project
+# Copyright (c) 2009-2018 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -37,21 +37,21 @@
 #   PortGroup               pure 1.0
 #   pure.setup              module module_version
 #
-# where module is the name of the module (e.g. gsl) and module_version is its
-# version.
+# where module is the name of the module (e.g. pure-gsl) and module_version is
+# its version.
 
 
-PortGroup                       bitbucket 1.0
+PortGroup                       github 1.0
 
 proc pure.setup {module module_version} {
     global name homepage
 
-    bitbucket.setup             purelang pure-lang ${module_version}
-    name                        pure-${module}
+    github.setup                agraef pure-lang ${module_version} ${module}-
+    name                        ${module}
     categories-append           pure
-    homepage                    https://bitbucket.org/purelang/pure-lang/wiki/Addons#markdown-header-${name}
-    bitbucket.tarball_from      downloads
-    default distname            {${name}-${bitbucket.version}}
+    homepage                    https://github.com/agraef/pure-lang/wiki/Addons#${name}
+    github.tarball_from         releases
+    distname                    ${name}-${module_version}
 
     depends_lib-append          port:pure
 
