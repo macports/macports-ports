@@ -9,7 +9,7 @@ if {${livecheck.name} eq "default"} {
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     livecheck.url \
-            https://python.org/pypi/${livecheck.name}/json
+            https://pypi.org/pypi/${livecheck.name}/json
 }
 if {${livecheck.regex} eq ""} {
     livecheck.regex {"version":"([^"]+)"[,\}]}
