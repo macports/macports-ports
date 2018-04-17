@@ -313,7 +313,7 @@ proc mpi.setup {args} {
     set origvariants ${mpi.variants}
     set mpi.variants [lsort [concat $remove_list $add_list]]
     set removedvariants [remove_from_list $origvariants ${mpi.variants}]
-    if {[lsearch -exact $removedvariants $badvariant] > -1} {
+    if {$badvariant in $removedvariants} {
         ui_error "$name has disallowed +$badvariant! Please choose another mpi variant"
         return -code error "$name +$badvariant not allowed"
     }

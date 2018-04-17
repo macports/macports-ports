@@ -112,7 +112,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         # Here be dragons.
         if {![file exists ${worksrcpath}] && \
                 ${fetch.type} eq "standard" && \
-                [lsearch -exact ${master_sites} ${github.master_sites}] != -1 && \
+                ${github.master_sites} in ${master_sites} && \
                 [llength ${distfiles}] > 0 && \
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
             if {[file exists [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]] && \

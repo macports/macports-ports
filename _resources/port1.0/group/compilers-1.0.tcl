@@ -251,7 +251,7 @@ proc compilers.setup_variants {variants} {
             # only add conflicts from the compiler database (set above) if we
             # actually have the compiler in the list of allowed variants
             foreach j $cdb($variant,conflict) {
-                if {[lsearch -exact $j ${compilers.variants}] > -1} {
+                if {$j in ${compilers.variants}} {
                     lappend c $j
                 }
             }
@@ -430,7 +430,7 @@ proc fortran_variant_isset {} {
 # remove all elements in R from L
 proc remove_from_list {L R} {
     foreach e $R {
-        set idx [lsearch $L $e]
+        set idx [lsearch -exact $L $e]
         set L [lreplace $L $idx $idx]
     }
     return $L
@@ -459,7 +459,7 @@ proc compilers.is_fortran_only {} {
     global compilers.list
 
     foreach c {cc cxx cpp objc} {
-        if {[lsearch -exact ${compilers.list} $c] >= 0} {
+        if {$c in ${compilers.list}} {
             return 0
         }
     }
@@ -471,7 +471,7 @@ proc compilers.is_c_only {} {
     global compilers.list
 
     foreach c {f77 f90 fc} {
-        if {[lsearch -exact ${compilers.list} $c] >= 0} {
+        if {$c in ${compilers.list}} {
             return 0
         }
     }
@@ -634,7 +634,7 @@ proc compilers.setup {args} {
         # remove duplicates
         set duplicates {}
         foreach foo $remove_list {
-            if {[lsearch $add_list $foo] != -1} {
+            if {$foo in $add_list} {
                 lappend duplicates $foo
             }
         }
@@ -662,7 +662,7 @@ proc compilers.setup {args} {
         if {${compilers.default_fortran} && ![fortran_variant_isset]} {
             foreach fv $ordered_variants {
                 # if the variant exists, then make it default
-                if {[lsearch -exact ${compilers.variants} $fv] > -1} {
+                if {$fv in ${compilers.variants}} {
                     default_variants-append +$fv
                     break
                 }
