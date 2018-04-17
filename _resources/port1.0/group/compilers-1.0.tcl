@@ -175,7 +175,7 @@ set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
 set cdb(gfortran,libfortran) $cdb(${compilers.gcc_default},libfortran)
 set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
 set cdb(gfortran,dependsa) $cdb(${compilers.gcc_default},dependsa)
-set cdb(gfortran,conflict) $cdb(${compilers.gcc_default},conflict)
+set cdb(gfortran,conflict) g95
 set cdb(gfortran,cc)       ""
 set cdb(gfortran,cxx)      ""
 set cdb(gfortran,cpp)      ""
