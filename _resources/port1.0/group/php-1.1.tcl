@@ -140,7 +140,7 @@ default php.latest_stable_branch 7.2
 # not need to change this.
 
 options php.default_branch
-default php.default_branch      {[expr {[lsearch -exact ${php.branches} ${php.latest_stable_branch}] != -1 ? ${php.latest_stable_branch} : [lindex ${php.branches} end]}]}
+default php.default_branch      {[expr {${php.latest_stable_branch} in ${php.branches} ? ${php.latest_stable_branch} : [lindex ${php.branches} end]}]}
 option_proc php.default_branch  php._set_default_branch
 
 proc php._set_default_branch {option action args} {
@@ -458,7 +458,7 @@ proc php.add_port_code {} {
         }
 
         foreach extension [concat ${php.extensions} ${php.extensions.zend}] {
-            if {-1 == [lsearch -exact ${installed_extensions} ${extension}]} {
+            if {${extension} ni ${installed_extensions}} {
                 ui_error "Cannot list extension \"${extension}\" in ${php.extension_ini} because the port only installed the extensions \"[join ${installed_extensions} "\", \""]\""
                 return -code error "invalid extension name"
             }

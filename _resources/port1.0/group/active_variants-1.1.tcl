@@ -209,7 +209,7 @@ proc _check_require_active_variants {method} {
 				# with bin: dependencies)
 				if {$depname ne ""} {
 					# if the dependency isn't already in the list
-					if {[lsearch -exact $depends $depname] == -1} {
+					if {$depname ni $depends} {
 						# append it
 						lappend depends $depname
 					}
@@ -226,7 +226,7 @@ proc _check_require_active_variants {method} {
 		set required [lindex $_require_active_variant 1]
 		set forbidden [lindex $_require_active_variant 2]
 
-		if {[lsearch -exact $depends $port] == -1} {
+		if {$port ni $depends} {
 			ui_debug "Ignoring active_variants requirement for ${port} because ${method}-type install only considers ${deptypes} and those do not contain ${port}"
 			continue
 		}

@@ -98,7 +98,7 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
         # Here be dragons.
         if {![file exists ${worksrcpath}] && \
             ${fetch.type} eq "standard" && \
-            [lsearch -exact ${master_sites} ${bitbucket.master_sites}] != -1 && \
+            ${bitbucket.master_sites} in ${master_sites} && \
             [llength ${distfiles}] > 0 && \
             [llength [glob -nocomplain ${workpath}/*]] > 0} {
             move [glob ${workpath}/*] ${worksrcpath}
