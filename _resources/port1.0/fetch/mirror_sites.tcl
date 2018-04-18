@@ -643,12 +643,11 @@ set portfetch::mirror_sites::sites(postgresql) {
 # to use this.
 #
 # files.pythonhosted.org has a redirector so you don't have to know the
-# hash-based subdir on pypi in order to fetch. Currently requires TLS 1.2,
-# which doesn't work on 10.8 and earlier.
+# hash-based subdir in order to fetch. Requires TLS 1.2, which doesn't work
+# on 10.8 and earlier.
 
 set portfetch::mirror_sites::sites(pypi) {
     https://files.pythonhosted.org/packages/source/:nosubdir
-    https://pypi.python.org/packages/source/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(ruby) {

@@ -93,15 +93,15 @@ foreach mpiname [array names mpidb *,variant] {
     lappend mpi.variants $mpidb($mpiname)
 }
 
-proc mpi.setup_variants {args} {
+proc mpi.setup_variants {variants} {
     global mpidb mpi.cc mpi.cxx mpi.f77 mpi.f90 mpi.fc
 
-    foreach variant $args {
+    foreach variant $variants {
         if {[variant_exists $variant]} {
             ui_debug "$variant variant already exists, so not adding the default one"
         } else {
-            set i [lsearch -exact $args $variant]
-            set c [lreplace $args $i $i]
+            set i [lsearch -exact $variants $variant]
+            set c [lreplace $variants $i $i]
 
             # only add conflicts for variants that exist
             foreach j $mpidb($variant,conflict) {
@@ -110,45 +110,43 @@ proc mpi.setup_variants {args} {
                 }
             }
 
-            eval [subst {
-                variant ${variant} description {Build using the $mpidb($variant,descrip) compiler} conflicts $c {
+            variant ${variant} description "Build using the $mpidb($variant,descrip) compiler" conflicts {*}$c "
 
-                    set c_name \[c_variant_name\]
-                    set f_name \[fortran_variant_name\]
-                    set p_name \$c_name
-                    set d_name \$c_name
-                    if {"\$c_name" eq ""} {
-                        set p_name "mp"
-                        set d_name "default"
-                    }
-
-                    set path "etc/select/mpi/$variant-\$p_name"
-
-                    if {\$f_name ne ""} {
-                        set path "\$path-fortran"
-                    }
-
-                    depends_lib-append path:\$path:$mpidb($variant,name)-\$d_name
-                    set mpi.name $mpidb($variant,name)-\$d_name
-
-                    foreach compiler {cc cxx f77 f90 exec} {
-                        set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
-                    }
-                    set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
-
-                    # there is no mpicpp or mpiobj
-                    # if more compilers are added in compilers portgroup, need to be added here
-                    foreach compiler \${compilers.list} {
-                        if {\$compiler ne "fc" && \$compiler ne "cpp" && \$compiler ne "objc"} {
-                            configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
-                        }
-                    }
-                    if {[lsearch -exact \${compilers.list} fc]} {
-                        set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
-                    }
-
+                set c_name \[c_variant_name\]
+                set f_name \[fortran_variant_name\]
+                set p_name \$c_name
+                set d_name \$c_name
+                if {\$c_name eq {}} {
+                    set p_name mp
+                    set d_name default
                 }
-            }]
+
+                set path \"etc/select/mpi/${variant}-\${p_name}\"
+
+                if {\$f_name ne {}} {
+                    set path \"\$path-fortran\"
+                }
+
+                depends_lib-append path:\$path:$mpidb($variant,name)-\$d_name
+                set mpi.name $mpidb($variant,name)-\$d_name
+
+                foreach compiler {cc cxx f77 f90 exec} {
+                    set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                }
+                set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
+
+                # there is no mpicpp or mpiobj
+                # if more compilers are added in compilers portgroup, need to be added here
+                foreach compiler \${compilers.list} {
+                    if {\$compiler ne \"fc\" && \$compiler ne \"cpp\" && \$compiler ne \"objc\"} {
+                        configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                    }
+                }
+                if {\"fc\" in \${compilers.list}} {
+                    set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
+                }
+
+            "
         }
     }
 }
@@ -187,10 +185,10 @@ proc mpi.enforce_variant {args} {
     set mpi.required_variants $args
 }
 
-proc mpi.action_enforce_variants {args} {
+proc mpi.action_enforce_variants {ports} {
     global name
-    ui_debug "mpi.enforce_variant list: ${args}"
-    foreach portname $args {
+    ui_debug "mpi.enforce_variant list: ${ports}"
+    foreach portname $ports {
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
             set mympi  [mpi_variant_name]
@@ -206,7 +204,7 @@ proc mpi.action_enforce_variants {args} {
                 return -code error "$portname +$mympi not installed"
             }
 
-            eval compilers.action_enforce_c $portname
+            compilers.action_enforce_c $portname
         } else {
             ui_error "Internal error: '$portname' is not an installed port."
         }
@@ -298,7 +296,7 @@ proc mpi.setup {args} {
                         return -code error "no such mpi package: $v"
                     }
                 } else {
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] $mpidb($v,variant)]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] $mpidb($v,variant)]
                 }
             }
         }
@@ -307,7 +305,7 @@ proc mpi.setup {args} {
     # here we add all compiler variants since we can't dynamically look up
     # which variants are enabled for the mpi ports; instead we'll use active
     # variants to detect an incompatibility
-    eval compilers.setup $cl
+    compilers.setup {*}$cl
 
     # we need to check for a removed variant early so we can exit before
     # the wrong variant is passed up the dependency chain
@@ -315,12 +313,12 @@ proc mpi.setup {args} {
     set origvariants ${mpi.variants}
     set mpi.variants [lsort [concat $remove_list $add_list]]
     set removedvariants [remove_from_list $origvariants ${mpi.variants}]
-    if {[lsearch -exact $removedvariants $badvariant] > -1} {
+    if {$badvariant in $removedvariants} {
         ui_error "$name has disallowed +$badvariant! Please choose another mpi variant"
         return -code error "$name +$badvariant not allowed"
     }
 
-    eval mpi.setup_variants ${mpi.variants}
+    mpi.setup_variants ${mpi.variants}
 
     set mpi [ mpi_variant_name ]
     if {$mpi ne ""} {
@@ -347,5 +345,5 @@ pre-fetch {
     if {${mpi.require} && [mpi_variant_name] eq ""} {
         return -code error "must set at least one mpi variant"
     }
-    eval mpi.action_enforce_variants ${mpi.required_variants}
+    mpi.action_enforce_variants ${mpi.required_variants}
 }

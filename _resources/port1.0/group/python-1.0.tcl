@@ -91,7 +91,7 @@ proc python_get_version {} {
 proc python_get_default_version {} {
     global python.versions
     if {[info exists python.versions]} {
-        if {[lsearch -exact ${python.versions} 27] != -1} {
+        if {27 in ${python.versions}} {
             return 27
         } else {
             return [lindex ${python.versions} end]
