@@ -296,7 +296,7 @@ proc mpi.setup {args} {
                         return -code error "no such mpi package: $v"
                     }
                 } else {
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] $mpidb($v,variant)]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] $mpidb($v,variant)]
                 }
             }
         }

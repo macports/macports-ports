@@ -587,17 +587,17 @@ proc compilers.setup {args} {
             # handle special cases, such as 'gcc' -> all gcc variants
             switch -exact $v {
                 gcc {
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] ${compilers.gcc_variants}]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] ${compilers.gcc_variants}]
                 }
                 fortran {
                     # here we just check gfortran and g95, not every fortran
                     # compatible variant since it makes more sense to specify
                     # 'fortran' to mean add just the +gfortran and +g95 variants
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] {gfortran g95}]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] {gfortran g95}]
 
                 }
                 clang {
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] ${compilers.clang_variants}]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] ${compilers.clang_variants}]
                 }
                 require_fortran {
                     # this signals that fortran is required and not optional
@@ -611,7 +611,7 @@ proc compilers.setup {args} {
                     if {[info exists cdb($v,variant)] == 0} {
                         return -code error "no such compiler: $v"
                     }
-                    set ${mode}_list [${mode}_from_list [expr $${mode}_list] $cdb($v,variant)]
+                    set ${mode}_list [${mode}_from_list [set ${mode}_list] $cdb($v,variant)]
                 }
             }
         }
