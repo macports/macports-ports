@@ -166,7 +166,7 @@ proc portconfigure::get_compiler_fallback {} {
 
 # if full_list is yes, then get all possible compilers that might work on this configuration
 # if full_list is no, reducde the compiler list to the "best" compilers
-proc portconfigure::get_valid_compilers {{full_list no}} {
+proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
     global                       \
         xcodeversion             \
         compiler.c_standard      \
@@ -226,6 +226,11 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
 
     # Xcode compilers do not support OpenMP
     if {${compiler.openmp_version} ne ""} {
+        set default_xcode_ok 0
+    }
+
+    # Xcode compilers do no provide Fortran compilers
+    if {${just_fortran}} {
         set default_xcode_ok 0
     }
 
@@ -291,7 +296,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     #      4.5       |    Partial    |     ???
     #
     set gcc_compilers macports-gcc-7
-    if {${compiler.cxx_standard} < 2017} {
+    if {${compiler.cxx_standard} < 2017 || ${just_fortran}} {
         # allow latest GCC to be blacklisted by ports
         # see https://trac.macports.org/ticket/54215#comment:36
         lappend gcc_compilers macports-gcc-6
@@ -317,27 +322,23 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         }
     }
 
-    if {${cxx_stdlib} eq "libc++"} {
-        # only Clang compilers recognize libc++
-        lappend compilers {*}${clang_compilers}
-
-        # Clang does not provide Fortran compiler
-        if {[option compiler.require_fortran]} {
-            lappend compilers {*}${gcc_compilers}
-        }
+    if {${just_fortran}} {
+        lappend compilers {*}${gcc_compilers}
+        lappend compilers macports-g95
     } else {
-        # when building for PowerPC architectures, prefer GCC to Clang
-        if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
-            lappend compilers {*}${gcc_compilers}
+        if {${cxx_stdlib} eq "libc++"} {
+            # only Clang compilers recognize libc++
             lappend compilers {*}${clang_compilers}
         } else {
-            lappend compilers {*}${clang_compilers}
-            lappend compilers {*}${gcc_compilers}
+            # when building for PowerPC architectures, prefer GCC to Clang
+            if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
+                lappend compilers {*}${gcc_compilers}
+                lappend compilers {*}${clang_compilers}
+            } else {
+                lappend compilers {*}${clang_compilers}
+                lappend compilers {*}${gcc_compilers}
+            }
         }
-    }
-
-    if {[option compiler.require_fortran]} {
-        lappend compilers macports-g95
     }
 
     # generate list of MPI wrappers of current compilers
@@ -409,6 +410,11 @@ proc portconfigure::get_fortran_fallback {} {
             lappend ret ${compiler}
         }
     }
+    if {${ret} eq {}} {
+        # no Fortran compilers were found in compiler.fallback
+        # get list of all possible compilers with Fortran
+        return [get_valid_compilers no yes]
+    }
     return $ret
 }
 
@@ -438,7 +444,15 @@ proc portconfigure::configure_get_first_compiler {compilerName search_list} {
             }
         }
         if {[lsearch [portconfigure::get_valid_compilers yes] ${compiler}] < 0} {
-            set allowed no
+            # get_valid_compilers does not recognize ${compiler} as a valid compiler
+            if {${compilerName} eq "fc"} {
+                if {[lsearch [portconfigure::get_valid_compilers yes yes] ${compiler}] < 0} {
+                    # get_valid_compilers recognizes ${compiler} as a valid *Fortran* compiler
+                    set allowed no
+                }
+            } else {
+                set allowed no
+            }
         }
         if {$allowed &&
             [configure_get_compiler_real ${compilerName} $compiler] ne "" &&
