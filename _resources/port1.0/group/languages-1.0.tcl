@@ -726,7 +726,8 @@ proc portconfigure::configure_cxx_stdlib {} {
     }
 }
 
-proc portconfigure::should_add_libstdlib_abi {} {
+# replacement for portconfigure.tcl version
+proc portconfigure::should_add_cxx_abi {} {
     global os.major cxx_stdlib
     # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
     #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
@@ -734,17 +735,6 @@ proc portconfigure::should_add_libstdlib_abi {} {
     #    assume they want default ABI compatibility
     # see https://gcc.gnu.org/onlinedocs/gcc-5.2.0/libstdc++/manual/manual/using_dual_abi.html
     return [expr {${cxx_stdlib} eq "libstdc++" && [option compiler.cxx_standard] >= 2011 && ${os.major} < 13}]
-}
-
-# replacement for portconfigure.tcl version
-proc portconfigure::construct_cxxflags {flags} {
-    if {[portconfigure::should_add_stdlib]} {
-        lappend flags -stdlib=[option configure.cxx_stdlib]
-    }
-    if {[portconfigure::should_add_libstdlib_abi]} {
-        lappend flags -D_GLIBCXX_USE_CXX11_ABI=0
-    }
-    return $flags
 }
 
 # replacement for portconfigure.tcl version
@@ -758,7 +748,7 @@ proc portconfigure::stdlib_trace {opt action args} {
     foreach flag [lsearch -all -inline [option $opt] -D_GLIBCXX_USE_CXX11_ABI=0] {
         $opt-delete $flag
     }
-    if {$action eq "read" && [portconfigure::should_add_libstdlib_abi]} {
+    if {$action eq "read" && [portconfigure::should_add_cxx_abi]} {
         $opt-append -D_GLIBCXX_USE_CXX11_ABI=0
     }
 }
