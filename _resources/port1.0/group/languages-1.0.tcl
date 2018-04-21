@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2015-2017 The MacPorts Project
+# Copyright (c) 2015-2018 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -95,6 +95,10 @@ proc portconfigure::configure_start {args} {
         {^macports-gcc-(\d+(?:\.\d+)?)$}    {MacPorts GCC %s}
         {^macports-llvm-gcc-4\.2$}          {MacPorts LLVM-GCC 4.2}
         {^macports-g95$}                    {MacPorts G95}
+        {^macports-mpich-default$}
+            {MacPorts MPICH Wrapper for MacPorts' Default C/C++ Compiler}
+        {^macports-openmpi-default$}
+            {MacPorts Open MPI Wrapper for MacPorts' Default C/C++ Compiler}
         {^macports-mpich-clang$}
             {MacPorts MPICH Wrapper for Xcode Clang}
         {^macports-openmpi-clang$}
@@ -157,11 +161,6 @@ proc portconfigure::get_compiler_fallback {} {
         return $default_compilers
     }
 
-    # Check for platforms without Xcode
-    if {$xcodeversion eq "none" || $xcodeversion eq ""} {
-        return {cc}
-    }
-
     return [portconfigure::get_valid_compilers]
 }
 
@@ -175,6 +174,11 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         compiler.openmp_version  \
         os.major                 \
         cxx_stdlib
+
+    # Check for platforms without Xcode
+    if {$xcodeversion eq "none" || $xcodeversion eq ""} {
+        return {cc}
+    }
 
     # https://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
     # https://gcc.gnu.org/c99status.html
@@ -346,22 +350,20 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     foreach mpi ${mpis} {
         foreach c ${compilers} {
             set parts [split ${c} -]
-            if {[lindex ${parts} 0] eq "clang"} {
-                lappend mpi_compilers macports-${mpi}-[lindex ${parts} 0]
-            } elseif {[lindex ${parts} 0] eq "macports"} {
-                if {
-                    [lindex ${parts} 1] eq "clang"
-                    &&
-                    [vercmp [lindex ${parts} 2] 3.3] >= 0
-                } {
-                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
-                } elseif {
-                          [lindex ${parts} 1] eq "gcc"
-                          &&
-                          [vercmp [lindex ${parts} 2] 4.3] >= 0
-                      } {
-                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
-                }
+            if {[lindex ${parts} 0] ne "macports"} {
+                lappend mpi_compilers macports-${mpi}-default
+            } elseif {
+                      [lindex ${parts} 1] eq "clang"
+                      &&
+                      [vercmp [lindex ${parts} 2] 3.3] >= 0
+                  } {
+                lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
+            } elseif {
+                      [lindex ${parts} 1] eq "gcc"
+                      &&
+                      [vercmp [lindex ${parts} 2] 4.3] >= 0
+                  } {
+                lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
             }
         }
     }
@@ -385,6 +387,7 @@ proc portconfigure::compiler_port_name {compiler} {
         {^macports-clang-(\d+\.\d+)$}                       {clang-%s}
         {^macports-dragonegg-(\d+\.\d+)(-gcc-\d+\.\d+)?$}   {dragonegg-%s%s}
         {^macports-(llvm-)?gcc-(\d+)(?:\.(\d+))?$}          {%sgcc%s%s}
+        {^macports-([^-]+)-default$}                        {%s-default}
         {^macports-([^-]+)-clang$}                          {%s-clang}
         {^macports-([^-]+)-clang-(\d+)\.(\d+)$}             {%s-clang%s%s}
         {^macports-([^-]+)-gcc-(\d+)(?:\.(\d+))?$}          {%s-gcc%s%s}
@@ -576,6 +579,13 @@ proc portconfigure::configure_get_compiler_real {type compiler} {
             f77     -
             f90     { return ${prefix}/bin/mpifort-${mpi}-gcc${suffix} }
         }
+    } elseif {[regexp {^macports-([^-]+)-default$} $compiler -> mpi]} {
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/mpicc-${mpi}-mp }
+            cxx     -
+            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-mp }
+        }
     }
     # Fallbacks
     switch $type {
@@ -645,7 +655,7 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
         ui_debug "Adding depends_lib port:$compiler_port"
         depends_lib-delete port:$compiler_port
         depends_lib-append port:$compiler_port
-    } elseif {[regexp {^macports-([^-]+)-(clang|gcc)(?:-(\d+(?:\.\d+)?))?$} $compiler -> mpi clang_or_gcc version]} {
+    } elseif {[regexp {^macports-([^-]+)-(default|clang|gcc)(?:-(\d+(?:\.\d+)?))?$} $compiler -> mpi clang_or_gcc version]} {
         # MPI compilers link against MPI libraries
         ui_debug "Adding depends_lib port:$compiler_port"
         if {${mpi} eq "openmpi"} {
@@ -717,7 +727,15 @@ default configure.cxx_stdlib            {[portconfigure::configure_cxx_stdlib]}
 proc portconfigure::configure_cxx_stdlib {} {
     global cxx_stdlib
 
-    set is_macports_clang [string match *clang++-mp-* [option configure.cxx]]
+    if {[regexp {^clang\+\+-mp-([\d.]+)$} [file tail [option configure.cxx]] -> version]} {
+        # MacPorts Clang version 3.9 or above
+        set is_macports_clang [expr [vercmp ${version} 3.9] >= 0]
+    } elseif {[regexp {^mpicxx-[^-]+-clang([\d.]+)$} [file tail [option configure.cxx]] -> version]} {
+        # MPI wrapper for MacPorts Clang version 3.9 or above
+        set is_macports_clang [expr [vercmp ${version} 39] >= 0]
+    } else {
+        set is_macports_clang 0
+    }
 
     if {${is_macports_clang} && ${cxx_stdlib} eq "libstdc++" && [option compiler.cxx_standard] >= 2011} {
         return "macports-libstdc++"
