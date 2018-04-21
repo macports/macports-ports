@@ -73,6 +73,7 @@ default compiler.openmp_version    {}
 default compiler.mpi               {}
 
 # replacement for portconfigure.tcl version
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::configure_start {args} {
     global UI_PREFIX
 
@@ -151,6 +152,7 @@ proc portconfigure::configure_start {args} {
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure get_valid_compilers
 proc portconfigure::get_compiler_fallback {} {
     global                       \
         default_compilers        \
@@ -382,6 +384,7 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
 }
 
 # replacement for portconfigure.tcl version
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::compiler_port_name {compiler} {
     set valid_compiler_ports {
         {^apple-gcc-(\d+)\.(\d+)$}                          {apple-gcc%s%s}
@@ -419,6 +422,7 @@ proc portconfigure::get_fortran_fallback {} {
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure configure_get_first_compiler
 proc portconfigure::configure_get_default_compiler {} {
     if {[option compiler.whitelist] ne ""} {
         set search_list [option compiler.whitelist]
@@ -466,7 +470,8 @@ proc portconfigure::configure_get_first_compiler {compilerName search_list} {
     return [lindex [option compiler.fallback] 0]
 }
 
-# replacemenet for portconfigure.tcl version
+# replacemenet for portconfigure.tcl procedure configure_get_compiler
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::configure_get_compiler_real {type compiler} {
     global prefix
     # Tcl 8.4's switch doesn't support -matchvar.
@@ -613,6 +618,8 @@ proc portconfigure::configure_get_compiler_real {type compiler} {
 }
 
 # extension of portconfigure.tcl version
+# change: replace almost all code with helper procedure configure_get_compiler_real
+# change: if configure_get_compiler_real fails to find a compiler, handle Fortran case differently
 proc portconfigure::configure_get_compiler {type {compiler {}}} {
     global configure.compiler
     if {$compiler eq ""} {
@@ -637,6 +644,8 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure add_compiler_port_dependencies
+# change: Fortran compiler dependency is a special case (e.g. clang++ from Xcode and gfortran from MacPorts GCC)
 proc portconfigure::add_automatic_compiler_dependencies {} {
     global configure.compiler configure.compiler.add_deps
 
@@ -653,6 +662,7 @@ proc portconfigure::add_automatic_compiler_dependencies {} {
     }
 
     if {[option compiler.require_fortran] && [portconfigure::configure_get_compiler_real fc ${compiler}] eq ""} {
+        # Fortran is required, but compiler does not provide it
         ui_debug "Adding Fortran compiler dependency"
         set fortran_compiler [portconfigure::configure_get_first_fortran_compiler]
         portconfigure::add_compiler_port_dependencies ${fortran_compiler}
@@ -735,6 +745,7 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
 }
 
 # replacement for portconfigure.tcl version
+# change: use macports-libstdc++ for libstdc++ if C++11 is required
 default configure.cxx_stdlib            {[portconfigure::configure_cxx_stdlib]}
 
 # helper function to set configure.cxx_stdlib
@@ -759,6 +770,7 @@ proc portconfigure::configure_cxx_stdlib {} {
 }
 
 # replacement for portconfigure.tcl version
+# change: use compiler.cxx_standard
 proc portconfigure::should_add_cxx_abi {} {
     global os.major cxx_stdlib
     # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
@@ -770,6 +782,7 @@ proc portconfigure::should_add_cxx_abi {} {
 }
 
 # replacement for portconfigure.tcl version
+# change: ensure -D_GLIBCXX_USE_CXX11_ABI=0 is added if needed
 proc portconfigure::stdlib_trace {opt action args} {
     foreach flag [lsearch -all -inline [option $opt] -stdlib=*] {
         $opt-delete $flag
@@ -786,6 +799,7 @@ proc portconfigure::stdlib_trace {opt action args} {
 }
 
 # replacement for portconfigure.tcl version
+# change: add more compilers that support -arch
 proc portconfigure::arch_flag_supported {compiler} {
     # GCC prior to 4.7 does not accept -arch flag
     if {[regexp {^macports(?:-[^-]+)?-gcc-4\.[0-6]} $compiler]} {
@@ -796,6 +810,7 @@ proc portconfigure::arch_flag_supported {compiler} {
 }
 
 # replacement for portutil.tcl version
+# change: test to see if compiler supports universal builds
 proc universal_setup {args} {
     if {[variant_exists universal]} {
         ui_debug "universal variant already exists, so not adding the default one"
