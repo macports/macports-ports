@@ -307,8 +307,6 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         }
         if {${os.major} < 16} {
             # The Sierra SDK requires a toolchain that supports class properties
-            lappend clang_compilers macports-clang-3.8
-
             if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
                 lappend clang_compilers macports-clang-3.7
             }
