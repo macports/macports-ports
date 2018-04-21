@@ -43,7 +43,7 @@
 #
 #   compiler.fortran_fallback  If Fortran is required and is not provides by compiler,
 #                                  list of compilers to use
-#                              Devault value is the Fortran compilers in compiler.fallback
+#                              Default value is the Fortran compilers in compiler.fallback
 #
 #   compiler.openmp_version   Version of OpenMP required (blank for none)
 #                             Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
@@ -165,7 +165,7 @@ proc portconfigure::get_compiler_fallback {} {
     return [portconfigure::get_valid_compilers]
 }
 
-# if full_list is yes, then get all possible possible compiler that might work on this configuration
+# if full_list is yes, then get all possible compilers that might work on this configuration
 # if full_list is no, reducde the compiler list to the "best" compilers
 proc portconfigure::get_valid_compilers {{full_list no}} {
     global                       \
@@ -218,7 +218,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     }
 
     # for 11 <= ${os.major} && ${os.major} < 13,
-    # user has changed the default value of cxx_stdlib, but Xcode clang can still use libc++
+    # user has changed the default value of cxx_stdlib, but Xcode Clang can still use libc++
 
     # Xcode compilers do not support OpenMP
     if {${compiler.openmp_version} ne ""} {
@@ -373,7 +373,7 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         # only MPI compilers are valid
         set compilers ${mpi_compilers}
     } elseif {${full_list}} {
-        # MPI compilers could work, so include it in the full list
+        # MPI compilers could work, so include them in the full list
         lappend compilers {*}${mpi_compilers}
     }
 
