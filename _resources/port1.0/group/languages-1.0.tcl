@@ -30,26 +30,26 @@
 #
 # Usage:
 #
-#   PortGroup                  languages 1.0
+#   PortGroup                      languages 1.0
 #
-#   compiler.c_standard        Standard for the C programming language
-#                              Values: 1989 (Default), 1999, 2011
+#   compiler.c_standard            Standard for the C programming language
+#                                  Values: 1989 (Default), 1999, 2011
 #
-#   compiler.cxx_standard      Standard for the C++ programming language
-#                              Values: 1998 (Default), 2011, 2014, 2017
+#   compiler.cxx_standard          Standard for the C++ programming language
+#                                  Values: 1998 (Default), 2011, 2014, 2017
 #
-#   compiler.require_fortran   Is a Fortran compiler required?
-#                              Values: no (Default), yes
+#   compiler.require_fortran       Is a Fortran compiler required?
+#                                  Values: no (Default), yes
 #
-#   compiler.fortran_fallback  If Fortran is required and is not provides by compiler,
-#                                  list of compilers to use
-#                              Default value is the Fortran compilers in compiler.fallback
+#   compiler.fortran_fallback      If Fortran is required and is not provides by compiler,
+#                                      list of compilers to use
+#                                  Default value is the Fortran compilers in compiler.fallback
 #
-#   compiler.openmp_version   Version of OpenMP required (blank for none)
-#                             Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
+#   compiler.openmp_version        Version of OpenMP required (blank for none)
+#                                  Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
 #
-#   compiler.mpi              MacPorts port that provides MPI
-#                             Values: blank (Default), mpich, openmpi
+#   compiler.mpi                   MacPorts port that provides MPI
+#                                  Values: blank (Default), mpich, openmpi
 #
 #   compiler.thread_local_storage  Is thread local storage required?
 #                                  Values: no (Default), yes
@@ -60,21 +60,21 @@
 # Ideally the functionality of this PortGroup should be integrated into
 # MacPorts base as a new option.
 
-options                        \
-    compiler.c_standard        \
-    compiler.cxx_standard      \
-    compiler.require_fortran   \
-    compiler.fortran_fallback  \
-    compiler.openmp_version    \
-    compiler.mpi               \
+options                            \
+    compiler.c_standard            \
+    compiler.cxx_standard          \
+    compiler.require_fortran       \
+    compiler.fortran_fallback      \
+    compiler.openmp_version        \
+    compiler.mpi                   \
     compiler.thread_local_storage
 
-default compiler.c_standard        1989
-default compiler.cxx_standard      1998
-default compiler.require_fortran   no
-default compiler.fortran_fallback  {[portconfigure::get_fortran_fallback]}
-default compiler.openmp_version    {}
-default compiler.mpi               {}
+default compiler.c_standard            1989
+default compiler.cxx_standard          1998
+default compiler.require_fortran       no
+default compiler.fortran_fallback      {[portconfigure::get_fortran_fallback]}
+default compiler.openmp_version        {}
+default compiler.mpi                   {}
 default compiler.thread_local_storage  no
 
 # replacement for portconfigure.tcl version
@@ -174,13 +174,13 @@ proc portconfigure::get_compiler_fallback {} {
 # if full_list is yes, then get all possible compilers that might work on this configuration
 # if full_list is no, reducde the compiler list to the "best" compilers
 proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
-    global                       \
-        xcodeversion             \
-        compiler.c_standard      \
-        compiler.cxx_standard    \
-        compiler.openmp_version  \
-        os.major                 \
-        cxx_stdlib               \
+    global                             \
+        xcodeversion                   \
+        compiler.c_standard            \
+        compiler.cxx_standard          \
+        compiler.openmp_version        \
+        os.major                       \
+        cxx_stdlib                     \
         compiler.thread_local_storage
 
     # Check for platforms without Xcode
@@ -326,24 +326,24 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
 
     set clang_compilers ""
     if {!${tls_an_issue}} {
-    # does Clang work on all i386 and x86_64 systems?
-    # according to https://packages.macports.org/clang-5.0/,
-    #    clang builds back to Mac OS X 10.6
-    lappend clang_compilers macports-clang-5.0
-    if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
-        # allow latest Clang to be blacklisted by ports
-        lappend clang_compilers macports-clang-4.0
-        if {${os.major} < 17} {
-            # The High Sierra SDK requires a toolchain that can apply nullability to uuid_t
-            lappend clang_compilers macports-clang-3.9
-        }
-        if {${os.major} < 16} {
-            # The Sierra SDK requires a toolchain that supports class properties
-            if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
-                lappend clang_compilers macports-clang-3.7
+        # does Clang work on all i386 and x86_64 systems?
+        # according to https://packages.macports.org/clang-5.0/,
+        #    clang builds back to Mac OS X 10.6
+        lappend clang_compilers macports-clang-5.0
+        if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
+            # allow latest Clang to be blacklisted by ports
+            lappend clang_compilers macports-clang-4.0
+            if {${os.major} < 17} {
+                # The High Sierra SDK requires a toolchain that can apply nullability to uuid_t
+                lappend clang_compilers macports-clang-3.9
+            }
+            if {${os.major} < 16} {
+                # The Sierra SDK requires a toolchain that supports class properties
+                if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
+                    lappend clang_compilers macports-clang-3.7
+                }
             }
         }
-    }
     }
 
     if {${just_fortran}} {
