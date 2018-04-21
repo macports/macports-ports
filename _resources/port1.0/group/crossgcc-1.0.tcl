@@ -64,6 +64,13 @@ array set crossgcc.versions_info {
     }}
 }
 
+array set newlib.versions_info {
+    3.0.0 {gz {
+        rmd160  505d486c9c658d10ed3b1af13459b2f289680b1f \
+        sha256  c8566335ee74e5fcaeb8595b4ebd0400c4b043d6acb3263ecb1314f8f5501332
+    }}
+}
+
 proc crossgcc.setup {target version} {
     global crossgcc.target crossgcc.version crossgcc.versions_info
 
@@ -89,7 +96,7 @@ proc crossgcc.setup {target version} {
         if {[info exists crossgcc.versions_info($version)]} {
             use_[lindex [set crossgcc.versions_info($version)] 0] yes
 
-            checksums   {*}[lindex [set crossgcc.versions_info($version)] 1]
+            checksums   gcc-${version}${extract.suffix} {*}[lindex [set crossgcc.versions_info($version)] 1]
         } else {
             # the old default
             use_bzip2   yes
@@ -248,13 +255,21 @@ proc crossgcc.setup_libc {libc_name libc_version} {
     switch -exact $libc_name {
         newlib {
             uplevel {
-                set dnewlib newlib-${crossgcc.libc_version}.tar.gz
+                set suffix ".tar.gz"
+                if {[info exists newlib.versions_info(${crossgcc.libc_version})]} {
+                    set suffix ".tar.[lindex [set newlib.versions_info(${crossgcc.libc_version})] 0]"
+                }
+                set dnewlib newlib-${crossgcc.libc_version}${suffix}
 
                 master_sites-append https://sourceware.org/pub/newlib/:newlib
                 distfiles-append ${dnewlib}:newlib
 
+                if {[info exists newlib.versions_info(${crossgcc.libc_version})]} {
+                    checksums-append ${dnewlib} {*}[lindex [set newlib.versions_info(${crossgcc.libc_version})] 1]
+                }
+
                 post-extract {
-                    system -W ${workpath} "tar -xzf ${distpath}/newlib-${crossgcc.libc_version}.tar.gz"
+                    system -W ${workpath} "tar -xf ${distpath}/${dnewlib}"
                     ln -s ${workpath}/newlib-${crossgcc.libc_version}/newlib ${workpath}/gcc-${version}/
                 }
 
