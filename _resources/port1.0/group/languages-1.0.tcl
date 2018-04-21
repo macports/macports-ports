@@ -51,6 +51,9 @@
 #   compiler.mpi              MacPorts port that provides MPI
 #                             Values: blank (Default), mpich, openmpi
 #
+#   compiler.thread_local_storage  Is thread local storage required?
+#                                  Values: no (Default), yes
+#
 # This PortGroup sets the compiler, compiler dependencies,
 #    and the C++ standard library switches.
 #
@@ -63,7 +66,8 @@ options                        \
     compiler.require_fortran   \
     compiler.fortran_fallback  \
     compiler.openmp_version    \
-    compiler.mpi
+    compiler.mpi               \
+    compiler.thread_local_storage
 
 default compiler.c_standard        1989
 default compiler.cxx_standard      1998
@@ -71,6 +75,7 @@ default compiler.require_fortran   no
 default compiler.fortran_fallback  {[portconfigure::get_fortran_fallback]}
 default compiler.openmp_version    {}
 default compiler.mpi               {}
+default compiler.thread_local_storage  no
 
 # replacement for portconfigure.tcl version
 # change: add new compilers (G95, MPI, OpenMP)
@@ -175,7 +180,8 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
         compiler.cxx_standard    \
         compiler.openmp_version  \
         os.major                 \
-        cxx_stdlib
+        cxx_stdlib               \
+        compiler.thread_local_storage
 
     # Check for platforms without Xcode
     if {$xcodeversion eq "none" || $xcodeversion eq ""} {
@@ -233,6 +239,19 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
 
     # Xcode compilers do no provide Fortran compilers
     if {${just_fortran}} {
+        set default_xcode_ok 0
+    }
+
+    # thread-local storage (__thread) only works on Mac OS X Lion and above
+    # see https://stackoverflow.com/questions/23791060/c-thread-local-storage-clang-503-0-40-mac-osx/
+    # N.B. GCC emulates thread-local storage
+    if {${compiler.thread_local_storage} && ${os.major} < 11} {
+        set tls_an_issue 1
+    } else {
+        set tls_an_issue 0
+    }
+
+    if {${tls_an_issue}} {
         set default_xcode_ok 0
     }
 
@@ -305,10 +324,12 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
         lappend gcc_compilers macports-gcc-5
     }
 
+    set clang_compilers ""
+    if {!${tls_an_issue}} {
     # does Clang work on all i386 and x86_64 systems?
     # according to https://packages.macports.org/clang-5.0/,
     #    clang builds back to Mac OS X 10.6
-    set clang_compilers macports-clang-5.0
+    lappend clang_compilers macports-clang-5.0
     if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
         # allow latest Clang to be blacklisted by ports
         lappend clang_compilers macports-clang-4.0
@@ -322,6 +343,7 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
                 lappend clang_compilers macports-clang-3.7
             }
         }
+    }
     }
 
     if {${just_fortran}} {
