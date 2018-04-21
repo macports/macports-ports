@@ -380,6 +380,11 @@ proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
         lappend compilers {*}${mpi_compilers}
     }
 
+    if {${compilers} eq ""} {
+        ui_error "Unable to find compatible compiler."
+        return -code error "Unable to find compatible compiler."
+    }
+
     return $compilers
 }
 
