@@ -1,6 +1,6 @@
---- popper/pop_pass.c.orig	2006-03-10 07:32:38.000000000 +0900
-+++ popper/pop_pass.c	2006-09-17 17:46:00.000000000 +0900
-@@ -40,6 +40,10 @@
+--- popper/pop_pass.c.orig	2011-05-31 05:13:39.000000000 +1000
++++ popper/pop_pass.c	2018-04-21 18:47:08.000000000 +1000
+@@ -53,6 +53,10 @@
   *                <security/pam_appl.h> (otherwise build fails)
   *                (thanks to Kyle McKay for the patch)
   *
@@ -10,9 +10,9 @@
 + *
   *     01/16/03  [rcg]
   *             - Renamed PASSWD macro to QPASSWD to avoid redefining
-  *               PASSWD in shadow.h.
-@@ -1054,6 +1058,143 @@
- #    endif /* AIX */
+  *               QPASSWD in shadow.h.
+@@ -1132,6 +1136,143 @@ auth_user ( POP *p, struct passwd *pw )
+ #endif  /* CYGWIN */
  
  
 +/*----------------------------------------------- DARWIN/MacOS X  */
