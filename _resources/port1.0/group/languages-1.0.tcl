@@ -1,6 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2015-2017 The MacPorts Project
+# Copyright (c) 2015-2018 The MacPorts Project
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -30,26 +30,29 @@
 #
 # Usage:
 #
-#   PortGroup                  languages 1.0
+#   PortGroup                      languages 1.0
 #
-#   compiler.c_standard        Standard for the C programming language
-#                              Values: 1989 (Default), 1999, 2011
+#   compiler.c_standard            Standard for the C programming language
+#                                  Values: 1989 (Default), 1999, 2011
 #
-#   compiler.cxx_standard      Standard for the C++ programming language
-#                              Values: 1998 (Default), 2011, 2014, 2017
+#   compiler.cxx_standard          Standard for the C++ programming language
+#                                  Values: 1998 (Default), 2011, 2014, 2017
 #
-#   compiler.require_fortran   Is a Fortran compiler required?
-#                              Values: no (Default), yes
+#   compiler.require_fortran       Is a Fortran compiler required?
+#                                  Values: no (Default), yes
 #
-#   compiler.fortran_fallback  If Fortran is required and is not provides by compiler,
-#                                  list of compilers to use
-#                              Devault value is the Fortran compilers in compiler.fallback
+#   compiler.fortran_fallback      If Fortran is required and is not provides by compiler,
+#                                      list of compilers to use
+#                                  Default value is the Fortran compilers in compiler.fallback
 #
-#   compiler.openmp_version   Version of OpenMP required (blank for none)
-#                             Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
+#   compiler.openmp_version        Version of OpenMP required (blank for none)
+#                                  Values: blank (Default) 2.5, 3.0, 3.1, 4.0, 4.5
 #
-#   compiler.mpi              MacPorts port that provides MPI
-#                             Values: blank (Default), mpich, openmpi
+#   compiler.mpi                   MacPorts port that provides MPI
+#                                  Values: blank (Default), mpich, openmpi
+#
+#   compiler.thread_local_storage  Is thread local storage required?
+#                                  Values: no (Default), yes
 #
 # This PortGroup sets the compiler, compiler dependencies,
 #    and the C++ standard library switches.
@@ -57,22 +60,25 @@
 # Ideally the functionality of this PortGroup should be integrated into
 # MacPorts base as a new option.
 
-options                        \
-    compiler.c_standard        \
-    compiler.cxx_standard      \
-    compiler.require_fortran   \
-    compiler.fortran_fallback  \
-    compiler.openmp_version    \
-    compiler.mpi
+options                            \
+    compiler.c_standard            \
+    compiler.cxx_standard          \
+    compiler.require_fortran       \
+    compiler.fortran_fallback      \
+    compiler.openmp_version        \
+    compiler.mpi                   \
+    compiler.thread_local_storage
 
-default compiler.c_standard        1989
-default compiler.cxx_standard      1998
-default compiler.require_fortran   no
-default compiler.fortran_fallback  {[portconfigure::get_fortran_fallback]}
-default compiler.openmp_version    {}
-default compiler.mpi               {}
+default compiler.c_standard            1989
+default compiler.cxx_standard          1998
+default compiler.require_fortran       no
+default compiler.fortran_fallback      {[portconfigure::get_fortran_fallback]}
+default compiler.openmp_version        {}
+default compiler.mpi                   {}
+default compiler.thread_local_storage  no
 
 # replacement for portconfigure.tcl version
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::configure_start {args} {
     global UI_PREFIX
 
@@ -95,6 +101,10 @@ proc portconfigure::configure_start {args} {
         {^macports-gcc-(\d+(?:\.\d+)?)$}    {MacPorts GCC %s}
         {^macports-llvm-gcc-4\.2$}          {MacPorts LLVM-GCC 4.2}
         {^macports-g95$}                    {MacPorts G95}
+        {^macports-mpich-default$}
+            {MacPorts MPICH Wrapper for MacPorts' Default C/C++ Compiler}
+        {^macports-openmpi-default$}
+            {MacPorts Open MPI Wrapper for MacPorts' Default C/C++ Compiler}
         {^macports-mpich-clang$}
             {MacPorts MPICH Wrapper for Xcode Clang}
         {^macports-openmpi-clang$}
@@ -147,6 +157,7 @@ proc portconfigure::configure_start {args} {
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure get_valid_compilers
 proc portconfigure::get_compiler_fallback {} {
     global                       \
         default_compilers        \
@@ -157,24 +168,25 @@ proc portconfigure::get_compiler_fallback {} {
         return $default_compilers
     }
 
+    return [portconfigure::get_valid_compilers]
+}
+
+# if full_list is yes, then get all possible compilers that might work on this configuration
+# if full_list is no, reducde the compiler list to the "best" compilers
+proc portconfigure::get_valid_compilers {{full_list no} {just_fortran no}} {
+    global                             \
+        xcodeversion                   \
+        compiler.c_standard            \
+        compiler.cxx_standard          \
+        compiler.openmp_version        \
+        os.major                       \
+        cxx_stdlib                     \
+        compiler.thread_local_storage
+
     # Check for platforms without Xcode
     if {$xcodeversion eq "none" || $xcodeversion eq ""} {
         return {cc}
     }
-
-    return [portconfigure::get_valid_compilers]
-}
-
-# if full_list is yes, then get all possible possible compiler that might work on this configuration
-# if full_list is no, reducde the compiler list to the "best" compilers
-proc portconfigure::get_valid_compilers {{full_list no}} {
-    global                       \
-        xcodeversion             \
-        compiler.c_standard      \
-        compiler.cxx_standard    \
-        compiler.openmp_version  \
-        os.major                 \
-        cxx_stdlib
 
     # https://releases.llvm.org/3.1/docs/ClangReleaseNotes.html#cchanges
     # https://gcc.gnu.org/c99status.html
@@ -218,10 +230,28 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     }
 
     # for 11 <= ${os.major} && ${os.major} < 13,
-    # user has changed the default value of cxx_stdlib, but Xcode clang can still use libc++
+    # user has changed the default value of cxx_stdlib, but Xcode Clang can still use libc++
 
     # Xcode compilers do not support OpenMP
     if {${compiler.openmp_version} ne ""} {
+        set default_xcode_ok 0
+    }
+
+    # Xcode compilers do no provide Fortran compilers
+    if {${just_fortran}} {
+        set default_xcode_ok 0
+    }
+
+    # thread-local storage (__thread) only works on Mac OS X Lion and above
+    # see https://stackoverflow.com/questions/23791060/c-thread-local-storage-clang-503-0-40-mac-osx/
+    # N.B. GCC emulates thread-local storage
+    if {${compiler.thread_local_storage} && ${os.major} < 11} {
+        set tls_an_issue 1
+    } else {
+        set tls_an_issue 0
+    }
+
+    if {${tls_an_issue}} {
         set default_xcode_ok 0
     }
 
@@ -287,55 +317,52 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     #      4.5       |    Partial    |     ???
     #
     set gcc_compilers macports-gcc-7
-    if {${compiler.cxx_standard} < 2017} {
+    if {${compiler.cxx_standard} < 2017 || ${just_fortran}} {
         # allow latest GCC to be blacklisted by ports
         # see https://trac.macports.org/ticket/54215#comment:36
         lappend gcc_compilers macports-gcc-6
         lappend gcc_compilers macports-gcc-5
     }
 
-    # does Clang work on all i386 and x86_64 systems?
-    # according to https://packages.macports.org/clang-5.0/,
-    #    clang builds back to Mac OS X 10.6
-    set clang_compilers macports-clang-5.0
-    if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
-        # allow latest Clang to be blacklisted by ports
-        lappend clang_compilers macports-clang-4.0
-        if {${os.major} < 17} {
-            # The High Sierra SDK requires a toolchain that can apply nullability to uuid_t
-            lappend clang_compilers macports-clang-3.9
-        }
-        if {${os.major} < 16} {
-            # The Sierra SDK requires a toolchain that supports class properties
-            lappend clang_compilers macports-clang-3.8
-
-            if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
-                lappend clang_compilers macports-clang-3.7
+    set clang_compilers ""
+    if {!${tls_an_issue}} {
+        # does Clang work on all i386 and x86_64 systems?
+        # according to https://packages.macports.org/clang-5.0/,
+        #    clang builds back to Mac OS X 10.6
+        lappend clang_compilers macports-clang-5.0
+        if {${compiler.cxx_standard} < 2017 && [vercmp ${compiler.openmp_version} 4] < 0} {
+            # allow latest Clang to be blacklisted by ports
+            lappend clang_compilers macports-clang-4.0
+            if {${os.major} < 17} {
+                # The High Sierra SDK requires a toolchain that can apply nullability to uuid_t
+                lappend clang_compilers macports-clang-3.9
+            }
+            if {${os.major} < 16} {
+                # The Sierra SDK requires a toolchain that supports class properties
+                if {[expr [vercmp ${compiler.openmp_version} 0] <= 0]} {
+                    lappend clang_compilers macports-clang-3.7
+                }
             }
         }
     }
 
-    if {${cxx_stdlib} eq "libc++"} {
-        # only Clang compilers recognize libc++
-        lappend compilers {*}${clang_compilers}
-
-        # Clang does not provide Fortran compiler
-        if {[option compiler.require_fortran]} {
-            lappend compilers {*}${gcc_compilers}
-        }
+    if {${just_fortran}} {
+        lappend compilers {*}${gcc_compilers}
+        lappend compilers macports-g95
     } else {
-        # when building for PowerPC architectures, prefer GCC to Clang
-        if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
-            lappend compilers {*}${gcc_compilers}
+        if {${cxx_stdlib} eq "libc++"} {
+            # only Clang compilers recognize libc++
             lappend compilers {*}${clang_compilers}
         } else {
-            lappend compilers {*}${clang_compilers}
-            lappend compilers {*}${gcc_compilers}
+            # when building for PowerPC architectures, prefer GCC to Clang
+            if {[option configure.build_arch] eq "ppc" || [option configure.build_arch] eq "ppc64"} {
+                lappend compilers {*}${gcc_compilers}
+                lappend compilers {*}${clang_compilers}
+            } else {
+                lappend compilers {*}${clang_compilers}
+                lappend compilers {*}${gcc_compilers}
+            }
         }
-    }
-
-    if {[option compiler.require_fortran]} {
-        lappend compilers macports-g95
     }
 
     # generate list of MPI wrappers of current compilers
@@ -348,22 +375,20 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
     foreach mpi ${mpis} {
         foreach c ${compilers} {
             set parts [split ${c} -]
-            if {[lindex ${parts} 0] eq "clang"} {
-                lappend mpi_compilers macports-${mpi}-[lindex ${parts} 0]
-            } elseif {[lindex ${parts} 0] eq "macports"} {
-                if {
-                    [lindex ${parts} 1] eq "clang"
-                    &&
-                    [vercmp [lindex ${parts} 2] 3.3] >= 0
-                } {
-                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
-                } elseif {
-                          [lindex ${parts} 1] eq "gcc"
-                          &&
-                          [vercmp [lindex ${parts} 2] 4.3] >= 0
-                      } {
-                    lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
-                }
+            if {[lindex ${parts} 0] ne "macports"} {
+                lappend mpi_compilers macports-${mpi}-default
+            } elseif {
+                      [lindex ${parts} 1] eq "clang"
+                      &&
+                      [vercmp [lindex ${parts} 2] 3.3] >= 0
+                  } {
+                lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
+            } elseif {
+                      [lindex ${parts} 1] eq "gcc"
+                      &&
+                      [vercmp [lindex ${parts} 2] 4.3] >= 0
+                  } {
+                lappend mpi_compilers [lindex ${parts} 0]-${mpi}-[lindex ${parts} 1]-[lindex ${parts} 2]
             }
         }
     }
@@ -373,20 +398,27 @@ proc portconfigure::get_valid_compilers {{full_list no}} {
         # only MPI compilers are valid
         set compilers ${mpi_compilers}
     } elseif {${full_list}} {
-        # MPI compilers could work, so include it in the full list
+        # MPI compilers could work, so include them in the full list
         lappend compilers {*}${mpi_compilers}
+    }
+
+    if {${compilers} eq ""} {
+        ui_error "Unable to find compatible compiler."
+        return -code error "Unable to find compatible compiler."
     }
 
     return $compilers
 }
 
 # replacement for portconfigure.tcl version
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::compiler_port_name {compiler} {
     set valid_compiler_ports {
         {^apple-gcc-(\d+)\.(\d+)$}                          {apple-gcc%s%s}
         {^macports-clang-(\d+\.\d+)$}                       {clang-%s}
         {^macports-dragonegg-(\d+\.\d+)(-gcc-\d+\.\d+)?$}   {dragonegg-%s%s}
         {^macports-(llvm-)?gcc-(\d+)(?:\.(\d+))?$}          {%sgcc%s%s}
+        {^macports-([^-]+)-default$}                        {%s-default}
         {^macports-([^-]+)-clang$}                          {%s-clang}
         {^macports-([^-]+)-clang-(\d+)\.(\d+)$}             {%s-clang%s%s}
         {^macports-([^-]+)-gcc-(\d+)(?:\.(\d+))?$}          {%s-gcc%s%s}
@@ -408,10 +440,16 @@ proc portconfigure::get_fortran_fallback {} {
             lappend ret ${compiler}
         }
     }
+    if {${ret} eq {}} {
+        # no Fortran compilers were found in compiler.fallback
+        # get list of all possible compilers with Fortran
+        return [get_valid_compilers no yes]
+    }
     return $ret
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure configure_get_first_compiler
 proc portconfigure::configure_get_default_compiler {} {
     if {[option compiler.whitelist] ne ""} {
         set search_list [option compiler.whitelist]
@@ -437,7 +475,15 @@ proc portconfigure::configure_get_first_compiler {compilerName search_list} {
             }
         }
         if {[lsearch [portconfigure::get_valid_compilers yes] ${compiler}] < 0} {
-            set allowed no
+            # get_valid_compilers does not recognize ${compiler} as a valid compiler
+            if {${compilerName} eq "fc"} {
+                if {[lsearch [portconfigure::get_valid_compilers yes yes] ${compiler}] < 0} {
+                    # get_valid_compilers recognizes ${compiler} as a valid *Fortran* compiler
+                    set allowed no
+                }
+            } else {
+                set allowed no
+            }
         }
         if {$allowed &&
             [configure_get_compiler_real ${compilerName} $compiler] ne "" &&
@@ -451,7 +497,8 @@ proc portconfigure::configure_get_first_compiler {compilerName search_list} {
     return [lindex [option compiler.fallback] 0]
 }
 
-# replacemenet for portconfigure.tcl version
+# replacemenet for portconfigure.tcl procedure configure_get_compiler
+# change: add new compilers (G95, MPI, OpenMP)
 proc portconfigure::configure_get_compiler_real {type compiler} {
     global prefix
     # Tcl 8.4's switch doesn't support -matchvar.
@@ -578,6 +625,13 @@ proc portconfigure::configure_get_compiler_real {type compiler} {
             f77     -
             f90     { return ${prefix}/bin/mpifort-${mpi}-gcc${suffix} }
         }
+    } elseif {[regexp {^macports-([^-]+)-default$} $compiler -> mpi]} {
+        switch $type {
+            cc      -
+            objc    { return ${prefix}/bin/mpicc-${mpi}-mp }
+            cxx     -
+            objcxx  { return ${prefix}/bin/mpicxx-${mpi}-mp }
+        }
     }
     # Fallbacks
     switch $type {
@@ -591,6 +645,8 @@ proc portconfigure::configure_get_compiler_real {type compiler} {
 }
 
 # extension of portconfigure.tcl version
+# change: replace almost all code with helper procedure configure_get_compiler_real
+# change: if configure_get_compiler_real fails to find a compiler, handle Fortran case differently
 proc portconfigure::configure_get_compiler {type {compiler {}}} {
     global configure.compiler
     if {$compiler eq ""} {
@@ -615,6 +671,8 @@ proc portconfigure::configure_get_compiler {type {compiler {}}} {
 }
 
 # replacement for portconfigure.tcl version
+# change: replace almost all code with helper procedure add_compiler_port_dependencies
+# change: Fortran compiler dependency is a special case (e.g. clang++ from Xcode and gfortran from MacPorts GCC)
 proc portconfigure::add_automatic_compiler_dependencies {} {
     global configure.compiler configure.compiler.add_deps
 
@@ -631,6 +689,7 @@ proc portconfigure::add_automatic_compiler_dependencies {} {
     }
 
     if {[option compiler.require_fortran] && [portconfigure::configure_get_compiler_real fc ${compiler}] eq ""} {
+        # Fortran is required, but compiler does not provide it
         ui_debug "Adding Fortran compiler dependency"
         set fortran_compiler [portconfigure::configure_get_first_fortran_compiler]
         portconfigure::add_compiler_port_dependencies ${fortran_compiler}
@@ -647,7 +706,7 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
         ui_debug "Adding depends_lib port:$compiler_port"
         depends_lib-delete port:$compiler_port
         depends_lib-append port:$compiler_port
-    } elseif {[regexp {^macports-([^-]+)-(clang|gcc)(?:-(\d+(?:\.\d+)?))?$} $compiler -> mpi clang_or_gcc version]} {
+    } elseif {[regexp {^macports-([^-]+)-(default|clang|gcc)(?:-(\d+(?:\.\d+)?))?$} $compiler -> mpi clang_or_gcc version]} {
         # MPI compilers link against MPI libraries
         ui_debug "Adding depends_lib port:$compiler_port"
         if {${mpi} eq "openmpi"} {
@@ -713,13 +772,22 @@ proc portconfigure::add_compiler_port_dependencies {compiler} {
 }
 
 # replacement for portconfigure.tcl version
+# change: use macports-libstdc++ for libstdc++ if C++11 is required
 default configure.cxx_stdlib            {[portconfigure::configure_cxx_stdlib]}
 
 # helper function to set configure.cxx_stdlib
 proc portconfigure::configure_cxx_stdlib {} {
     global cxx_stdlib
 
-    set is_macports_clang [string match *clang++-mp-* [option configure.cxx]]
+    if {[regexp {^clang\+\+-mp-([\d.]+)$} [file tail [option configure.cxx]] -> version]} {
+        # MacPorts Clang version 3.9 or above
+        set is_macports_clang [expr [vercmp ${version} 3.9] >= 0]
+    } elseif {[regexp {^mpicxx-[^-]+-clang([\d.]+)$} [file tail [option configure.cxx]] -> version]} {
+        # MPI wrapper for MacPorts Clang version 3.9 or above
+        set is_macports_clang [expr [vercmp ${version} 39] >= 0]
+    } else {
+        set is_macports_clang 0
+    }
 
     if {${is_macports_clang} && ${cxx_stdlib} eq "libstdc++" && [option compiler.cxx_standard] >= 2011} {
         return "macports-libstdc++"
@@ -728,7 +796,9 @@ proc portconfigure::configure_cxx_stdlib {} {
     }
 }
 
-proc portconfigure::should_add_libstdlib_abi {} {
+# replacement for portconfigure.tcl version
+# change: use compiler.cxx_standard
+proc portconfigure::should_add_cxx_abi {} {
     global os.major cxx_stdlib
     # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
     #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
@@ -739,17 +809,7 @@ proc portconfigure::should_add_libstdlib_abi {} {
 }
 
 # replacement for portconfigure.tcl version
-proc portconfigure::construct_cxxflags {flags} {
-    if {[portconfigure::should_add_stdlib]} {
-        lappend flags -stdlib=[option configure.cxx_stdlib]
-    }
-    if {[portconfigure::should_add_libstdlib_abi]} {
-        lappend flags -D_GLIBCXX_USE_CXX11_ABI=0
-    }
-    return $flags
-}
-
-# replacement for portconfigure.tcl version
+# change: ensure -D_GLIBCXX_USE_CXX11_ABI=0 is added if needed
 proc portconfigure::stdlib_trace {opt action args} {
     foreach flag [lsearch -all -inline [option $opt] -stdlib=*] {
         $opt-delete $flag
@@ -760,12 +820,13 @@ proc portconfigure::stdlib_trace {opt action args} {
     foreach flag [lsearch -all -inline [option $opt] -D_GLIBCXX_USE_CXX11_ABI=0] {
         $opt-delete $flag
     }
-    if {$action eq "read" && [portconfigure::should_add_libstdlib_abi]} {
+    if {$action eq "read" && [portconfigure::should_add_cxx_abi]} {
         $opt-append -D_GLIBCXX_USE_CXX11_ABI=0
     }
 }
 
 # replacement for portconfigure.tcl version
+# change: add more compilers that support -arch
 proc portconfigure::arch_flag_supported {compiler} {
     # GCC prior to 4.7 does not accept -arch flag
     if {[regexp {^macports(?:-[^-]+)?-gcc-4\.[0-6]} $compiler]} {
@@ -776,6 +837,7 @@ proc portconfigure::arch_flag_supported {compiler} {
 }
 
 # replacement for portutil.tcl version
+# change: test to see if compiler supports universal builds
 proc universal_setup {args} {
     if {[variant_exists universal]} {
         ui_debug "universal variant already exists, so not adding the default one"
