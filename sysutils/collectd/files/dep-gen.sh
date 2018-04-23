@@ -185,7 +185,7 @@ PLUGIN_DEPS=(
 	[notify_nagios]="port:nagios"
 	[notify_email]="port:libesmtp"
 	[nut]="port:nut"
-	[perl]="port:perl5.18"
+	[perl]="port:perl5.26"
 	[pinba]="port:protobuf-c"
 	[ping]="port:liboping"
 	[postgresql]="port:postgresql96"
@@ -307,7 +307,7 @@ OSX_STANDARD=(
 
 declare -A EXTRA_CODE
 read -r -d '' PERL_EXTRA <<'EOF'
-    configure.args-append --with-perl=${prefix}/bin/perl5.18
+    configure.args-append --with-perl=${prefix}/bin/perl5.26
 EOF
 read -r -d '' POSTGRESQL_EXTRA <<'EOF'
     configure.cflags-append -I${prefix}/include/postgresql96
