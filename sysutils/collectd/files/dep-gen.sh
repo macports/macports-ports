@@ -188,7 +188,7 @@ PLUGIN_DEPS=(
 	[perl]="port:perl5.18"
 	[pinba]="port:protobuf-c"
 	[ping]="port:liboping"
-	[postgresql]="port:postgresql91"
+	[postgresql]="port:postgresql96"
 	[python]="port:python27"
 	[redis]="port:libcredis"
 	[rrdcached]="port:rrdtool"
@@ -309,6 +309,9 @@ declare -A EXTRA_CODE
 read -r -d '' PERL_EXTRA <<'EOF'
     configure.args-append --with-perl=${prefix}/bin/perl5.18
 EOF
+read -r -d '' POSTGRESQL_EXTRA <<'EOF'
+	configure.cflags-append -I${prefix}/include/postgresql96
+EOF
 read -r -d '' PYTHON_EXTRA <<'EOF'
     configure.args-append --with-python=${prefix}/bin/python2.7
 EOF
@@ -323,6 +326,7 @@ read -r -d '' NETWORK_EXTRA <<'EOF'
 EOF
 EXTRA_CODE=(
 	[perl]="$PERL_EXTRA"
+	[postgresql]="$POSTGRESQL_EXTRA"
 	[python]="$PYTHON_EXTRA"
 	[java]="$JAVA_EXTRA"
 	[network]="$NETWORK_EXTRA"
