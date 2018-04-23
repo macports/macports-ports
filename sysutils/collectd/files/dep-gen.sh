@@ -310,7 +310,7 @@ read -r -d '' PERL_EXTRA <<'EOF'
     configure.args-append --with-perl=${prefix}/bin/perl5.18
 EOF
 read -r -d '' POSTGRESQL_EXTRA <<'EOF'
-	configure.cflags-append -I${prefix}/include/postgresql96
+    configure.cflags-append -I${prefix}/include/postgresql96
 EOF
 read -r -d '' PYTHON_EXTRA <<'EOF'
     configure.args-append --with-python=${prefix}/bin/python2.7
