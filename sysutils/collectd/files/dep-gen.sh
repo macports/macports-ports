@@ -354,13 +354,16 @@ echo "#######################################################"
 echo
 
 echo "# enable all matches and targets, disable all other plugins"
-echo "configure.args-append \\"
+echo -n "configure.args-append"
 for option in $(printf "%s\n" ${OPTIONS_ENABLE[@]} | sort); do
-	echo "    --enable-$option \\"
+	echo " \\"
+	echo -n "    --enable-$option"
 done
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
-	echo "    --disable-$plugin \\"
+	echo " \\"
+	echo -n "    --disable-$plugin"
 done
+echo
 echo
 
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
@@ -380,8 +383,10 @@ for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	fi
 done
 
-echo "default_variants \\"
+echo -n "default_variants"
 for plugin in $(printf "%s\n" ${OSX_STANDARD[@]} | sort); do
-	printf "    +%s \\\\\n" "$plugin"
+	echo " \\"
+	printf "    +%s" "$plugin"
 done
+echo
 echo
