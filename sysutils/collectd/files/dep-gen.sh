@@ -5,6 +5,10 @@
 # these lists are generated from collectd's ./configure output by applying the following regex:
 # s/\v\s*--enable-(\w+)\s+(.*)$/[\1]="\2"/
 
+# After changing this script, run the following shell command to update the Portfile:
+# ( awk '/^# WARNING: This list is generated/ { exit } { print }' < Portfile | sed '$d' ; ./files/dep-gen.sh ) > Portfile.tmp; mv Portfile.tmp Portfile
+
+
 declare -a OPTIONS_ENABLE
 OPTIONS_ENABLE=(
 	match_empty_counter
