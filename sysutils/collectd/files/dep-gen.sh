@@ -211,7 +211,6 @@ PLUGIN_DEPS=(
 	[virt]="port:libvirt port:libxml2"
 	[write_http]="port:curl"
 	[write_riemann]="port:protobuf-c"
-	[xmms]="port:xmms"
 )
 
 # list of useless modules on macOS
@@ -269,6 +268,7 @@ OSX_BLACKLIST=(
 	[write_riemann]=1	# requires libriemann (?), which is not available
 	[write_kafka]=1	# requires librdkafka, which is not available
 	[xencpu]=1		# requires libxen, which is not available
+	[xmms]=1        # requires xmms, which is not available
 	[zfs_arc]=1		# Solaris only
 	[zone]=1		# Solaris only
 )
