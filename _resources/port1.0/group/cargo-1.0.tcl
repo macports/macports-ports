@@ -60,6 +60,8 @@
 options cargo.home cargo.crates cargo.crates_github
 
 default cargo.home      {${workpath}/.home/.cargo}
+default cargo.crates    {}
+default cargo.crates_github {}
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
