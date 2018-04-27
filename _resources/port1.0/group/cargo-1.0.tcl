@@ -62,12 +62,13 @@
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
 
-options cargo.home cargo.crates cargo.crates_github
+options cargo.home cargo.crates cargo.crates_github cargo.direct_call
 
 default cargo.home      {${workpath}/.home/.cargo}
 default cargo.crates    {}
 default cargo.crates_github {}
 default universal_variant   yes
+default cargo.direct_call   no
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
@@ -105,6 +106,23 @@ proc handle_cargo_crates_github {option action {value ""}} {
             master_sites-append https://github.com/${cgithub}/archive/${crevision}.tar.gz?dummy=:${cratetag}
             checksums-append    ${cratefile} sha256 ${chksum}
         }
+    }
+}
+
+option_proc cargo.direct_call handle_cargo_direct_call
+proc handle_cargo_direct_call {option action {value ""}} {
+    if {${action} eq "set" && ${value}} {
+        global build.jobs
+
+        use_configure       no
+
+        build.cmd           cargo build
+        build.target
+        build.pre_args      --release --frozen -v -j${build.jobs}
+        build.args
+
+        # restore destroot.cmd
+        default destroot.cmd {[portbuild::build_getmaketype]}
     }
 }
 
@@ -313,13 +331,4 @@ proc universal_setup {args} {
     }
 }
 
-use_configure       no
-
-build.cmd           cargo build
-build.target
-build.pre_args      --release --frozen -v -j${build.jobs}
-build.args
 build.env-append    RUSTFLAGS="-C linker=${configure.cc}"
-
-# restore destroot.cmd
-default destroot.cmd {[portbuild::build_getmaketype]}
