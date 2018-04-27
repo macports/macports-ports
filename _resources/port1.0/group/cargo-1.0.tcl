@@ -236,6 +236,18 @@ post-extract {
         set cratefile ${cname}-${crevision}.tar.gz
         cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
     }
+
+    foreach {cname cversion chksum} ${cargo.crates} {
+        # the libssh2-sys crate requires the header files from
+        #    a version of libssh2 that has not been released
+        #    (e.g. channel.c uses the error code LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
+        # make sure these header files are found properly
+        if {${cname} eq "libssh2-sys"} {
+            foreach f [glob -tail -directory ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/include/ *.h] {
+                ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
+            }
+        }
+    }
 }
 
 foreach stage {build destroot} {
