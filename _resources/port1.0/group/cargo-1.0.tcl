@@ -180,7 +180,15 @@ proc cargo._disttagclean {list} {
     return $val
 }
 
-depends_build           port:cargo
+if {${subport} ne "cargo-bootstrap" && ${subport} ne "cargo-stage1" && ${subport} ne "cargo"} {
+    depends_build-append port:cargo
+    # do not force all Portfiles to switch from depends_build to depends_build-append
+    proc cargo.add_dependencies {} {
+        depends_build-delete port:cargo
+        depends_build-append port:cargo
+    }
+    port::register_callback cargo.add_dependencies
+}
 
 post-extract {
     file mkdir "${cargo.home}/macports"
