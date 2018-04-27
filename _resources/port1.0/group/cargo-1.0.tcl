@@ -1,6 +1,7 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2018 The MacPorts Project
+# All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -11,7 +12,7 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
+# 3. Neither the name of The MacPorts Project nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
 #
@@ -27,7 +28,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-
+#
 # This PortGroup supports the cargo build system
 #
 # Usage:
@@ -38,13 +39,17 @@
 #     foo  1.0.1  abcdef123456... \
 #     bar  2.5.0  fedcba654321...
 #
-# The cargo.crates option expects a list with 4-tuples consisting of name,
+# The cargo.crates option expects a list with 3-tuples consisting of name,
 # version, and sha256 checksum. Only sha256 is supported at this time as
 # the checksum will be reused by cargo internally.
 #
 # The list of crates and their checksums can be found in the Cargo.lock file in
 # the upstream source code. The cargo2port generator can be used to automate
 # updates of this list for new releases.
+#
+# To get a list of these, run in worksrcdir:
+#     cargo update
+#     grep \"checksum Cargo.lock | perl -pe 's/"checksum (\S*) (\S*) \S* = "(\S*)"/cargo.crates $1 $2 $3/'
 #
 # https://github.com/macports/macports-contrib/tree/master/cargo2port/cargo2port.tcl
 #
@@ -72,6 +77,11 @@ proc handle_cargo_crates {option action {value ""}} {
             # a combination of crate name and checksum as unique identifier.
             # As the :disttag cannot contain dots, the version number cannot be
             # used.
+            #
+            # To download the crate file curl-0.4.11.crate, the URL is
+            #    https://crates.io/api/v1/crates/curl/0.4.11/download.
+            # Use ?dummy= to ignore ${distfile}
+            # see https://trac.macports.org/wiki/PortfileRecipes#fetchwithgetparams
             set cratetag        crate-${cname}-${chksum}
             distfiles-append    ${cratefile}:${cratetag}
             master_sites-append https://crates.io/api/v1/crates/${cname}/${cversion}/download?dummy=:${cratetag}
@@ -146,6 +156,7 @@ depends_build           port:cargo
 post-extract {
     file mkdir "${cargo.home}/macports"
 
+    # avoid downloading files from online repository during build phase
     # use a replacement for crates.io
     # https://doc.rust-lang.org/cargo/reference/source-replacement.html
     set conf [open "${cargo.home}/config" "w"]
