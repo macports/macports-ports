@@ -253,15 +253,5 @@ build.pre_args      --release --frozen -v -j${build.jobs}
 build.args
 build.env-append    RUSTFLAGS="-C linker=${configure.cc}"
 
-destroot {
-    ui_error "No destroot phase in the Portfile!"
-    ui_msg "Here is an example destroot phase:"
-    ui_msg
-    ui_msg "destroot {"
-    ui_msg {    xinstall -m 755 ${worksrcpath}/target/release/${name} ${destroot}${prefix}/bin/}
-    ui_msg {    xinstall -m 444 ${worksrcpath}/doc/${name}.1 ${destroot}${prefix}/share/man/man1/}
-    ui_msg "}"
-    ui_msg
-    ui_msg "Please check if there are additional files (configuration, documentation, etc.) that need to be installed."
-    error "destroot phase not implemented"
-}
+# restore destroot.cmd
+default destroot.cmd {[portbuild::build_getmaketype]}
