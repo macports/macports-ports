@@ -67,6 +67,7 @@ options cargo.home cargo.crates cargo.crates_github
 default cargo.home      {${workpath}/.home/.cargo}
 default cargo.crates    {}
 default cargo.crates_github {}
+default universal_variant   yes
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
@@ -105,6 +106,21 @@ proc handle_cargo_crates_github {option action {value ""}} {
             checksums-append    ${cratefile} sha256 ${chksum}
         }
     }
+}
+
+# MacPorts use the name i386 for 32-bit Intel architecture
+# Cargo and Rust use the name i686
+proc cargo.translate_arch_name {arch} {
+    if {${arch} eq "i386"} {
+        return "i686"
+    } else {
+        return ${arch}
+    }
+}
+
+proc cargo.rust_platform {arch} {
+    global os.platform
+    return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
 proc cargo._extract_crate {cratefile} {
@@ -230,6 +246,7 @@ foreach stage {build destroot} {
     #${stage}.env-append RUST_BACKTRACE=1
 }
 
+# the existence of universal variant is not known until later in the install process
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
     global configure.cc configure.cxx subport build_arch universal_archs merger_configure_env merger_build_env merger_destroot_env
@@ -242,8 +259,47 @@ proc cargo.environments {} {
         #${stage}.env-delete RUST_BACKTRACE=1
         #${stage}.env-append RUST_BACKTRACE=1
     }
+
+    # CARGO_BUILD_TARGET does not work correctly
+    # see the patchfile path-dyld.diff in cargo Portfile
+    if {${subport} ne "cargo-stage1"} {
+        if {![variant_exists universal] || ![variant_isset universal]} {
+            foreach stage {configure build destroot} {
+                ${stage}.env-delete \
+                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
+                ${stage}.env-append \
+                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
+            }
+        } else {
+            foreach stage {configure build destroot} {
+                foreach arch ${universal_archs} {
+                    lappend merger_${stage}_env(${arch}) \
+                        CARGO_BUILD_TARGET=[cargo.rust_platform ${arch}]
+                }
+            }
+        }
+    }
 }
 port::register_callback cargo.environments
+
+# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
+# see https://trac.macports.org/ticket/51643 for a similar case
+proc universal_setup {args} {
+    if {[variant_exists universal]} {
+        ui_debug "universal variant already exists, so not adding the default one"
+    } elseif {[exists universal_variant] && ![option universal_variant]} {
+        ui_debug "universal_variant is false, so not adding the default universal variant"
+    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
+        ui_debug "using xmkmf, so not adding the default universal variant"
+    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
+        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
+    } elseif {[llength [option supported_archs]] == 1} {
+        ui_debug "only one arch supported, so not adding the default universal variant"
+    } else {
+        ui_debug "adding universal variant via PortGroup muniversal"
+        uplevel "PortGroup muniversal 1.0"
+    }
+}
 
 use_configure       no
 
