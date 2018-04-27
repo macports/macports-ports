@@ -216,13 +216,31 @@ post-extract {
     }
 }
 
+foreach stage {build destroot} {
+    # see https://trac.macports.org/wiki/UsingTheRightCompiler
+    ${stage}.env-append CC=${configure.cc} \
+                        CXX=${configure.cxx}
+}
+
+# do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
+proc cargo.environments {} {
+    global configure.cc configure.cxx subport build_arch universal_archs merger_configure_env merger_build_env merger_destroot_env
+    foreach stage {build destroot} {
+        ${stage}.env-delete CC=${configure.cc} \
+                            CXX=${configure.cxx}
+        ${stage}.env-append CC=${configure.cc} \
+                            CXX=${configure.cxx}
+    }
+}
+port::register_callback cargo.environments
+
 use_configure       no
 
 build.cmd           cargo build
 build.target
 build.pre_args      --release --frozen -v -j${build.jobs}
 build.args
-build.env           RUSTFLAGS="-C linker=${configure.cc}"
+build.env-append    RUSTFLAGS="-C linker=${configure.cc}"
 
 destroot {
     ui_error "No destroot phase in the Portfile!"
