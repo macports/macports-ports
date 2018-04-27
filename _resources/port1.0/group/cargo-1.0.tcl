@@ -195,13 +195,11 @@ post-extract {
     puts $conf "\[source.crates-io\]"
     puts $conf "replace-with = \"macports\""
     puts $conf "local-registry = \"/var/empty\""
-    if {[llength ${cargo.crates_github}] > 0} {
-        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
-            puts $conf "\[source.\"https://github.com/${cgithub}\"\]"
-            puts $conf "git = \"https://github.com/${cgithub}\""
-            puts $conf "branch = \"${cbranch}\""
-            puts $conf "replace-with = \"macports\""
-        }
+    foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+        puts $conf "\[source.\"https://github.com/${cgithub}\"\]"
+        puts $conf "git = \"https://github.com/${cgithub}\""
+        puts $conf "branch = \"${cbranch}\""
+        puts $conf "replace-with = \"macports\""
     }
     close $conf
 
