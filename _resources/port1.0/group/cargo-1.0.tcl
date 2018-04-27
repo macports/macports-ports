@@ -149,7 +149,36 @@ proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
 # but this is the only way to allow reusing the same crates across multiple ports.
 dist_subdir             cargo-crates
 
-default extract.only    {${distname}${extract.suffix}}
+default extract.only    {[cargo._disttagclean $distfiles]}
+
+# based on portextract::disttagclean from portextract.tcl
+proc cargo._disttagclean {list} {
+    global cargo.crates cargo.crates_github
+    if {$list eq ""} {
+        return $list
+    }
+    foreach fname $list {
+        set name [getdistname ${fname}]
+
+        set is_crate no
+        foreach {cname cversion chksum} ${cargo.crates} {
+            set cratefile ${cname}-${cversion}.crate
+            if {${name} eq ${cratefile}} {
+                set is_crate yes
+            }
+        }
+        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+            set cratefile ${cname}-${crevision}.tar.gz
+            if {${name} eq ${cratefile}} {
+                set is_crate yes
+            }
+        }
+        if {!${is_crate}} {
+            lappend val ${name}
+        }
+    }
+    return $val
+}
 
 depends_build           port:cargo
 
