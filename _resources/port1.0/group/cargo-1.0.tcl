@@ -61,6 +61,8 @@
 # cargo.crates_github \
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
+# cargo.direct_call no (default) means that cargo is called from another program (e.g. make)
+# cargo.cargo.worksrcdir_crates no (default) means that port does NOT provide crate files
 
 options cargo.home cargo.crates cargo.crates_github cargo.direct_call cargo.worksrcdir_crates
 
