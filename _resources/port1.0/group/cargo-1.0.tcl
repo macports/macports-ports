@@ -227,47 +227,47 @@ if {${subport} ne "cargo-bootstrap" && ${subport} ne "cargo-stage1" && ${subport
 
 post-extract {
     if {!${cargo.worksrcdir_crates}} {
-    file mkdir "${cargo.home}/macports"
+        file mkdir "${cargo.home}/macports"
 
-    # avoid downloading files from online repository during build phase
-    # use a replacement for crates.io
-    # https://doc.rust-lang.org/cargo/reference/source-replacement.html
-    set conf [open "${cargo.home}/config" "w"]
-    puts $conf "\[source\]"
-    puts $conf "\[source.macports\]"
-    puts $conf "directory = \"${cargo.home}/macports\""
-    puts $conf "\[source.crates-io\]"
-    puts $conf "replace-with = \"macports\""
-    puts $conf "local-registry = \"/var/empty\""
-    foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
-        puts $conf "\[source.\"https://github.com/${cgithub}\"\]"
-        puts $conf "git = \"https://github.com/${cgithub}\""
-        puts $conf "branch = \"${cbranch}\""
+        # avoid downloading files from online repository during build phase
+        # use a replacement for crates.io
+        # https://doc.rust-lang.org/cargo/reference/source-replacement.html
+        set conf [open "${cargo.home}/config" "w"]
+        puts $conf "\[source\]"
+        puts $conf "\[source.macports\]"
+        puts $conf "directory = \"${cargo.home}/macports\""
+        puts $conf "\[source.crates-io\]"
         puts $conf "replace-with = \"macports\""
-    }
-    close $conf
+        puts $conf "local-registry = \"/var/empty\""
+        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+            puts $conf "\[source.\"https://github.com/${cgithub}\"\]"
+            puts $conf "git = \"https://github.com/${cgithub}\""
+            puts $conf "branch = \"${cbranch}\""
+            puts $conf "replace-with = \"macports\""
+        }
+        close $conf
 
-    # import all crates
-    foreach {cname cversion chksum} ${cargo.crates} {
-        set cratefile ${cname}-${cversion}.crate
-        cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
-    }
-    foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
-        set cratefile ${cname}-${crevision}.tar.gz
-        cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
-    }
+        # import all crates
+        foreach {cname cversion chksum} ${cargo.crates} {
+            set cratefile ${cname}-${cversion}.crate
+            cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
+        }
+        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+            set cratefile ${cname}-${crevision}.tar.gz
+            cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
+        }
 
-    foreach {cname cversion chksum} ${cargo.crates} {
-        # the libssh2-sys crate requires the header files from
-        #    a version of libssh2 that has not been released
-        #    (e.g. channel.c uses the error code LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
-        # make sure these header files are found properly
-        if {${cname} eq "libssh2-sys"} {
-            foreach f [glob -tail -directory ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/include/ *.h] {
-                ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
+        foreach {cname cversion chksum} ${cargo.crates} {
+            # the libssh2-sys crate requires the header files from
+            #    a version of libssh2 that has not been released
+            #    (e.g. channel.c uses the error code LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
+            # make sure these header files are found properly
+            if {${cname} eq "libssh2-sys"} {
+                foreach f [glob -tail -directory ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/include/ *.h] {
+                    ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
+                }
             }
         }
-    }
     }
 }
 
