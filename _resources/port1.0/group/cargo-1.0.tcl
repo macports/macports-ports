@@ -62,13 +62,14 @@
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
 
-options cargo.home cargo.crates cargo.crates_github cargo.direct_call
+options cargo.home cargo.crates cargo.crates_github cargo.direct_call cargo.worksrcdir_crates
 
 default cargo.home      {${workpath}/.home/.cargo}
 default cargo.crates    {}
 default cargo.crates_github {}
 default universal_variant   yes
 default cargo.direct_call   no
+default cargo.worksrcdir_crates no
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
@@ -225,6 +226,7 @@ if {${subport} ne "cargo-bootstrap" && ${subport} ne "cargo-stage1" && ${subport
 }
 
 post-extract {
+    if {!${cargo.worksrcdir_crates}} {
     file mkdir "${cargo.home}/macports"
 
     # avoid downloading files from online repository during build phase
@@ -265,6 +267,7 @@ post-extract {
                 ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
             }
         }
+    }
     }
 }
 
