@@ -220,6 +220,8 @@ foreach stage {build destroot} {
     # see https://trac.macports.org/wiki/UsingTheRightCompiler
     ${stage}.env-append CC=${configure.cc} \
                         CXX=${configure.cxx}
+
+    #${stage}.env-append RUST_BACKTRACE=1
 }
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
@@ -230,6 +232,9 @@ proc cargo.environments {} {
                             CXX=${configure.cxx}
         ${stage}.env-append CC=${configure.cc} \
                             CXX=${configure.cxx}
+
+        #${stage}.env-delete RUST_BACKTRACE=1
+        #${stage}.env-append RUST_BACKTRACE=1
     }
 }
 port::register_callback cargo.environments
