@@ -2,6 +2,7 @@
 
 PortSystem          1.0
 PortGroup           muniversal 1.0
+PortGroup           active_variants 1.1
 
 name                rust
 version             1.25.0
@@ -24,21 +25,22 @@ long_description    Rust is a curly-brace, block-structured expression \
 
 homepage            https://www.rust-lang.org/
 
+set ruststd_version 1.24.0
+set rustc_version   1.24.0
+set cargo_version   0.25.0
+set llvm_version    6.0
+
 # can use cmake or cmake-devel; default to cmake.
 depends_build       path:bin/cmake:cmake \
                     bin:python2.7:python27
 
-depends_lib         port:llvm-6.0
+depends_lib         port:llvm-${llvm_version}
 
 master_sites        https://static.rust-lang.org/dist
 
 distname            ${name}c-${version}-src
 
 patchfiles          patch-src-librustc-llvm-lib.diff
-
-set ruststd_version 1.24.0
-set rustc_version   1.24.0
-set cargo_version   0.25.0
 
 if {![variant_isset universal]} {
     if {${build_arch} eq "i386"} {
@@ -118,8 +120,53 @@ configure.args      --enable-vendor \
                     --default-linker=${configure.cc} \
                     --disable-codegen-tests \
                     --disable-docs \
-                    --llvm-root=${prefix}/libexec/llvm-6.0 \
                     --release-channel=stable
+
+# see https://trac.macports.org/ticket/56351
+# see https://github.com/rust-lang/rust/issues/50220
+if {[variant_isset universal]} {
+    # LLVM is or will need to be universal
+    set copy_llvm 1
+} else {
+    if {![catch {set result [active_variants llvm-${llvm_version} "universal" ""]}] && $result} {
+        # LLVM was installed with universal variant
+        set copy_llvm 1
+    } else {
+        set copy_llvm 0
+    }
+}
+
+if {!${copy_llvm}} {
+    # LLVM is NOT universal, so use installed version
+    configure.args-append \
+        --llvm-root=${prefix}/libexec/llvm-${llvm_version}
+} else {
+    # copy LLVM and thin static libraries
+    # see https://trac.macports.org/ticket/56351
+    # see https://github.com/rust-lang/rust/issues/50220
+    if {[variant_isset universal]} {
+        set archs ${universal_archs}
+        foreach arch ${universal_archs} {
+            lappend merger_configure_args(${arch}) \
+                --llvm-root=${workpath}/llvm-${llvm_version}-${arch}
+        }
+    } else {
+        set archs ${build_arch}
+        configure.args-append \
+            --llvm-root=${workpath}/llvm-${llvm_version}-${build_arch}
+    }
+
+    post-extract {
+        foreach arch ${archs} {
+            system -W ${workpath} "cp -R ${prefix}/libexec/llvm-${llvm_version} ${workpath}/llvm-${llvm_version}-${arch}"
+            fs-traverse f ${workpath}/llvm-${llvm_version}-${arch} {
+                if {[file isfile $f] && [file type $f]!="link" && [file extension $f]==".a"} {
+                    catch {system "lipo -thin ${arch} ${f} -o ${f}"}
+                }
+            }
+        }
+    }
+}
 
 if {![variant_isset universal]} {
     if {${build_arch} eq "i386"} {
