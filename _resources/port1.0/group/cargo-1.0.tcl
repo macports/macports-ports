@@ -1,7 +1,6 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
 #
 # Copyright (c) 2018 The MacPorts Project
-# All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -12,7 +11,7 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of The MacPorts Project nor the names of its
+# 3. Neither the name of Apple Computer, Inc. nor the names of its
 #    contributors may be used to endorse or promote products derived from
 #    this software without specific prior written permission.
 #
@@ -28,7 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-#
+
 # This PortGroup supports the cargo build system
 #
 # Usage:
@@ -39,17 +38,13 @@
 #     foo  1.0.1  abcdef123456... \
 #     bar  2.5.0  fedcba654321...
 #
-# The cargo.crates option expects a list with 3-tuples consisting of name,
+# The cargo.crates option expects a list with 4-tuples consisting of name,
 # version, and sha256 checksum. Only sha256 is supported at this time as
 # the checksum will be reused by cargo internally.
 #
 # The list of crates and their checksums can be found in the Cargo.lock file in
 # the upstream source code. The cargo2port generator can be used to automate
 # updates of this list for new releases.
-#
-# To get a list of these, run in worksrcdir:
-#     cargo update
-#     grep \"checksum Cargo.lock | perl -pe 's/"checksum (\S*) (\S*) \S* = "(\S*)"/cargo.crates $1 $2 $3/'
 #
 # https://github.com/macports/macports-contrib/tree/master/cargo2port/cargo2port.tcl
 #
@@ -61,17 +56,12 @@
 # cargo.crates_github \
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
-# cargo.direct_call no (default) means that cargo is called from another program (e.g. make)
-# cargo.cargo.worksrcdir_crates no (default) means that port does NOT provide crate files
 
-options cargo.home cargo.crates cargo.crates_github cargo.direct_call cargo.worksrcdir_crates
+options cargo.home cargo.crates cargo.crates_github
 
 default cargo.home      {${workpath}/.home/.cargo}
 default cargo.crates    {}
 default cargo.crates_github {}
-default universal_variant   yes
-default cargo.direct_call   no
-default cargo.worksrcdir_crates no
 
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
@@ -82,11 +72,6 @@ proc handle_cargo_crates {option action {value ""}} {
             # a combination of crate name and checksum as unique identifier.
             # As the :disttag cannot contain dots, the version number cannot be
             # used.
-            #
-            # To download the crate file curl-0.4.11.crate, the URL is
-            #    https://crates.io/api/v1/crates/curl/0.4.11/download.
-            # Use ?dummy= to ignore ${distfile}
-            # see https://trac.macports.org/wiki/PortfileRecipes#fetchwithgetparams
             set cratetag        crate-${cname}-${chksum}
             distfiles-append    ${cratefile}:${cratetag}
             master_sites-append https://crates.io/api/v1/crates/${cname}/${cversion}/download?dummy=:${cratetag}
@@ -110,38 +95,6 @@ proc handle_cargo_crates_github {option action {value ""}} {
             checksums-append    ${cratefile} sha256 ${chksum}
         }
     }
-}
-
-option_proc cargo.direct_call handle_cargo_direct_call
-proc handle_cargo_direct_call {option action {value ""}} {
-    if {${action} eq "set" && ${value}} {
-        global build.jobs
-
-        use_configure       no
-
-        build.cmd           cargo build
-        build.target
-        build.pre_args      --release --frozen -v -j${build.jobs}
-        build.args
-
-        # restore destroot.cmd
-        default destroot.cmd {[portbuild::build_getmaketype]}
-    }
-}
-
-# MacPorts use the name i386 for 32-bit Intel architecture
-# Cargo and Rust use the name i686
-proc cargo.translate_arch_name {arch} {
-    if {${arch} eq "i386"} {
-        return "i686"
-    } else {
-        return ${arch}
-    }
-}
-
-proc cargo.rust_platform {arch} {
-    global os.platform
-    return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
 proc cargo._extract_crate {cratefile} {
@@ -186,154 +139,60 @@ proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
 # but this is the only way to allow reusing the same crates across multiple ports.
 dist_subdir             cargo-crates
 
-default extract.only    {[cargo._disttagclean $distfiles]}
+default extract.only    {${distname}${extract.suffix}}
 
-# based on portextract::disttagclean from portextract.tcl
-proc cargo._disttagclean {list} {
-    global cargo.crates cargo.crates_github
-    if {$list eq ""} {
-        return $list
-    }
-    foreach fname $list {
-        set name [getdistname ${fname}]
-
-        set is_crate no
-        foreach {cname cversion chksum} ${cargo.crates} {
-            set cratefile ${cname}-${cversion}.crate
-            if {${name} eq ${cratefile}} {
-                set is_crate yes
-            }
-        }
-        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
-            set cratefile ${cname}-${crevision}.tar.gz
-            if {${name} eq ${cratefile}} {
-                set is_crate yes
-            }
-        }
-        if {!${is_crate}} {
-            lappend val ${name}
-        }
-    }
-    return $val
-}
-
-if {${subport} ne "cargo-bootstrap" && ${subport} ne "cargo-stage1" && ${subport} ne "cargo"} {
-    depends_build-append port:cargo
-    # do not force all Portfiles to switch from depends_build to depends_build-append
-    proc cargo.add_dependencies {} {
-        depends_build-delete port:cargo
-        depends_build-append port:cargo
-    }
-    port::register_callback cargo.add_dependencies
-}
+depends_build           port:cargo
 
 post-extract {
-    if {!${cargo.worksrcdir_crates}} {
-        file mkdir "${cargo.home}/macports"
+    file mkdir "${cargo.home}/macports"
 
-        # avoid downloading files from online repository during build phase
-        # use a replacement for crates.io
-        # https://doc.rust-lang.org/cargo/reference/source-replacement.html
-        set conf [open "${cargo.home}/config" "w"]
-        puts $conf "\[source\]"
-        puts $conf "\[source.macports\]"
-        puts $conf "directory = \"${cargo.home}/macports\""
-        puts $conf "\[source.crates-io\]"
-        puts $conf "replace-with = \"macports\""
-        puts $conf "local-registry = \"/var/empty\""
+    # use a replacement for crates.io
+    # https://doc.rust-lang.org/cargo/reference/source-replacement.html
+    set conf [open "${cargo.home}/config" "w"]
+    puts $conf "\[source\]"
+    puts $conf "\[source.macports\]"
+    puts $conf "directory = \"${cargo.home}/macports\""
+    puts $conf "\[source.crates-io\]"
+    puts $conf "replace-with = \"macports\""
+    puts $conf "local-registry = \"/var/empty\""
+    if {[llength ${cargo.crates_github}] > 0} {
         foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
             puts $conf "\[source.\"https://github.com/${cgithub}\"\]"
             puts $conf "git = \"https://github.com/${cgithub}\""
             puts $conf "branch = \"${cbranch}\""
             puts $conf "replace-with = \"macports\""
         }
-        close $conf
+    }
+    close $conf
 
-        # import all crates
-        foreach {cname cversion chksum} ${cargo.crates} {
-            set cratefile ${cname}-${cversion}.crate
-            cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
-        }
-        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
-            set cratefile ${cname}-${crevision}.tar.gz
-            cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
-        }
-
-        foreach {cname cversion chksum} ${cargo.crates} {
-            # the libssh2-sys crate requires the header files from
-            #    a version of libssh2 that has not been released
-            #    (e.g. channel.c uses the error code LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
-            # make sure these header files are found properly
-            if {${cname} eq "libssh2-sys"} {
-                foreach f [glob -tail -directory ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/include/ *.h] {
-                    ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
-                }
-            }
-        }
+    # import all crates
+    foreach {cname cversion chksum} ${cargo.crates} {
+        set cratefile ${cname}-${cversion}.crate
+        cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
+    }
+    foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+        set cratefile ${cname}-${crevision}.tar.gz
+        cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
     }
 }
 
-foreach stage {build destroot} {
-    # see https://trac.macports.org/wiki/UsingTheRightCompiler
-    ${stage}.env-append CC=${configure.cc} \
-                        CXX=${configure.cxx}
+use_configure       no
 
-    #${stage}.env-append RUST_BACKTRACE=1
+build.cmd           cargo build
+build.target
+build.pre_args      --release --frozen -v -j${build.jobs}
+build.args
+build.env           RUSTFLAGS="-C linker=${configure.cc}"
+
+destroot {
+    ui_error "No destroot phase in the Portfile!"
+    ui_msg "Here is an example destroot phase:"
+    ui_msg
+    ui_msg "destroot {"
+    ui_msg {    xinstall -m 755 ${worksrcpath}/target/release/${name} ${destroot}${prefix}/bin/}
+    ui_msg {    xinstall -m 444 ${worksrcpath}/doc/${name}.1 ${destroot}${prefix}/share/man/man1/}
+    ui_msg "}"
+    ui_msg
+    ui_msg "Please check if there are additional files (configuration, documentation, etc.) that need to be installed."
+    error "destroot phase not implemented"
 }
-
-# the existence of universal variant is not known until later in the install process
-# do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
-proc cargo.environments {} {
-    global configure.cc configure.cxx subport build_arch universal_archs merger_configure_env merger_build_env merger_destroot_env
-    foreach stage {build destroot} {
-        ${stage}.env-delete CC=${configure.cc} \
-                            CXX=${configure.cxx}
-        ${stage}.env-append CC=${configure.cc} \
-                            CXX=${configure.cxx}
-
-        #${stage}.env-delete RUST_BACKTRACE=1
-        #${stage}.env-append RUST_BACKTRACE=1
-    }
-
-    # CARGO_BUILD_TARGET does not work correctly
-    # see the patchfile path-dyld.diff in cargo Portfile
-    if {${subport} ne "cargo-stage1"} {
-        if {![variant_exists universal] || ![variant_isset universal]} {
-            foreach stage {configure build destroot} {
-                ${stage}.env-delete \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
-                ${stage}.env-append \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
-            }
-        } else {
-            foreach stage {configure build destroot} {
-                foreach arch ${universal_archs} {
-                    lappend merger_${stage}_env(${arch}) \
-                        CARGO_BUILD_TARGET=[cargo.rust_platform ${arch}]
-                }
-            }
-        }
-    }
-}
-port::register_callback cargo.environments
-
-# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
-# see https://trac.macports.org/ticket/51643 for a similar case
-proc universal_setup {args} {
-    if {[variant_exists universal]} {
-        ui_debug "universal variant already exists, so not adding the default one"
-    } elseif {[exists universal_variant] && ![option universal_variant]} {
-        ui_debug "universal_variant is false, so not adding the default universal variant"
-    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
-        ui_debug "using xmkmf, so not adding the default universal variant"
-    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
-        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option supported_archs]] == 1} {
-        ui_debug "only one arch supported, so not adding the default universal variant"
-    } else {
-        ui_debug "adding universal variant via PortGroup muniversal"
-        uplevel "PortGroup muniversal 1.0"
-    }
-}
-
-build.env-append    RUSTFLAGS="-C linker=${configure.cc}"
