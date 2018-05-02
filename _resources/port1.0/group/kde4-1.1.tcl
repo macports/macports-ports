@@ -97,7 +97,7 @@ configure.args-append   -DBUILD_doc=OFF \
 
 # explicitly define certain headers and libraries, to avoid
 # conflicts with those installed into system paths by the user.
-configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
+configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl-nons \
                         -DGETTEXT_INCLUDE_DIR=${prefix}/include \
                         -DGETTEXT_LIBRARY=${prefix}/lib/libgettextlib.dylib \
                         -DGIF_INCLUDE_DIR=${prefix}/include \
