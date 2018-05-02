@@ -378,6 +378,8 @@ variant universal {
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
             }
+
+            unset muniversal.current_arch
         }
     }
 
@@ -421,6 +423,8 @@ variant universal {
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete            {*}$merger_build_env(${arch})
             }
+
+            unset muniversal.current_arch
         }
     }
 
@@ -471,6 +475,8 @@ variant universal {
             }
             destroot.env-replace ${destroot.destdir} ${destdirSave}
             option destroot.destdir ${destdirSave}
+
+            unset muniversal.current_arch
         }
         delete ${destroot}
 
