@@ -31,35 +31,16 @@
 #
 # This PortGroup supports the cargo build system
 #
+# This PortGroup is designed to be used when cargo is the
+#    exclusive build mechanism.
+# Use the cargo_fetch PortGroup if cargo is called from other
+#    build mechanisms (e.g. configure and make).
+#
 # Usage:
 #
 # PortGroup     cargo 1.0
 #
-# cargo.crates \
-#     foo  1.0.1  abcdef123456... \
-#     bar  2.5.0  fedcba654321...
-#
-# The cargo.crates option expects a list with 3-tuples consisting of name,
-# version, and sha256 checksum. Only sha256 is supported at this time as
-# the checksum will be reused by cargo internally.
-#
-# The list of crates and their checksums can be found in the Cargo.lock file in
-# the upstream source code. The cargo2port generator can be used to automate
-# updates of this list for new releases.
-#
-# To get a list of these, run in worksrcdir:
-#     cargo update
-#     grep \"checksum Cargo.lock | perl -pe 's/"checksum (\S*) (\S*) \S* = "(\S*)"/cargo.crates $1 $2 $3/'
-#
-# https://github.com/macports/macports-contrib/tree/master/cargo2port/cargo2port.tcl
-#
-# If Cargo.lock references pre-release versions, or in general references
-# crates not published on crates.io, but available from GitHub, also use the
-# following:
-#
-# # download additional crates from github, not published on crates.io
-# cargo.crates_github \
-#    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
+# See the cargo_fetch PortGroup for more options
 #
 
 PortGroup cargo_fetch 1.0
