@@ -31,6 +31,10 @@
 #
 # This PortGroup supports the cargo build system
 #
+# This PortGroup is designed to be used when cargo is called from other
+#    build mechanisms (e.g. configure and make).
+# Use the cargo PortGroup if cargo is the exclusive build mechanism.
+#
 # Usage:
 #
 # PortGroup     cargo_fetch 1.0
