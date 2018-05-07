@@ -348,7 +348,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://mse.uk.distfiles.macports.org/sites/distfiles.macports.org/:mirror
     http://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     http://nue.de.distfiles.macports.org/:mirror
-    http://osl.no.distfiles.macports.org/:mirror
     ${distfiles_scheme}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
@@ -669,25 +668,24 @@ set portfetch::mirror_sites::sites(savannah) \
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
     http://ayera.dl.sourceforge.net/
-    http://cytranet.dl.sourceforge.net/
-    http://excellmedia.dl.sourceforge.net/
-    http://freefr.dl.sourceforge.net/
-    http://iweb.dl.sourceforge.net/
-    http://jaist.dl.sourceforge.net/
-    http://kent.dl.sourceforge.net/
+    https://cytranet.dl.sourceforge.net/
+    https://excellmedia.dl.sourceforge.net/
+    https://freefr.dl.sourceforge.net/
+    https://iweb.dl.sourceforge.net/
+    https://jaist.dl.sourceforge.net/
+    https://kent.dl.sourceforge.net/
     http://liquidtelecom.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
-    http://ncu.dl.sourceforge.net/
     http://netassist.dl.sourceforge.net/
-    http://netcologne.dl.sourceforge.net/
-    http://netix.dl.sourceforge.net/
-    http://phoenixnap.dl.sourceforge.net/
+    https://netcologne.dl.sourceforge.net/
+    https://netix.dl.sourceforge.net/
+    https://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-sea2.dl.sourceforge.net/
-    http://tenet.dl.sourceforge.net/
-    http://svwh.dl.sourceforge.net/
-    http://ufpr.dl.sourceforge.net/
+    https://tenet.dl.sourceforge.net/
+    https://svwh.dl.sourceforge.net/
+    https://ufpr.dl.sourceforge.net/
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {
