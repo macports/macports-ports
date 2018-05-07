@@ -25,3 +25,6 @@ sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 export PATH="/opt/mports/bin:$PATH" && hash -r
 curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
 chmod 0755 runner
+
+# Workaround for an Xcode issue. See https://trac.macports.org/ticket/54939
+[ "$OS_MAJOR" = 17 ] && $(cd $(xcode-select -p)/Toolchains && sudo ln -s XcodeDefault.xctoolchain OSX10.13.xctoolchain) || true
