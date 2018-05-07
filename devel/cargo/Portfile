@@ -1,9 +1,15 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=portfile:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           github 1.0
+name                cargo
+if {${subport} ne "${name}-bootstrap"} {
+    PortGroup       github 1.0
+    github.setup    rust-lang ${name} 0.26.0
+} else {
+    version         0.24.0
+}
+PortGroup           cargo 1.0
 
-github.setup        rust-lang cargo 0.25.0
 #revision            0
 categories          devel
 platforms           darwin
@@ -18,87 +24,290 @@ long_description    Cargo downloads your Rust project’s dependencies and \
 
 homepage            https://crates.io
 
-# can use cmake or cmake-devel; default to cmake.
-depends_build       path:bin/cmake:cmake \
+installs_libs       no
+
+if {${subport} ne "${name}-bootstrap"} {
+    # can use cmake or cmake-devel; default to cmake.
+    depends_build   path:bin/cmake:cmake \
                     bin:python:python27
 
-depends_lib         path:lib/libssl.dylib:openssl \
+    depends_lib     path:lib/libssl.dylib:openssl \
                     port:curl \
                     port:rust
 
-installs_libs       no
+    checksums       ${distname}${extract.suffix} \
+                    rmd160  8dd729a82761c5ed8590ae9fe2f5544aabe4536b \
+                    sha256  5a44677e56369492c8b389acfc120b7ecefd1404f491e20b04703fddcec96cc2 \
+                    size    698851
 
-universal_variant   no
+    # use DYLD_FALLBACK_LIBRARY_PATH instead of DYLD_LIBRARY_PATH
+    # without this change, --target and CARGO_BUILD_TARGET fail
+    # see https://users.rust-lang.org/t/subprocess-and-dynamic-library-linking-problem-interaction/7873
+    # see https://github.com/rust-lang/cargo/issues/2888
+    patchfiles-append   path-dyld.diff
 
-# Use an older version of cargo to build itself
-set stage0(version)  0.24.0
-set stage0(platform) ${build_arch}-apple-darwin
+    pre-configure {
+        # create Cargo.lock
+        system -W ${worksrcpath} "${cargo.bin} update"
+    }
 
-if {${build_arch} eq "i386"} {
-    set stage0(platform) i686-apple-darwin
-}
+    post-extract {
+        foreach {cname cversion chksum} ${cargo.crates} {
+            # the libssh2-sys crate requires the header files from
+            #    a version of libssh2 that has not been released
+            #    (e.g. channel.c uses the error code LIBSSH2_ERROR_CHANNEL_WINDOW_FULL)
+            # make sure these header files are found properly
+            if {${cname} eq "libssh2-sys"} {
+                foreach f [glob -tail -directory ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/include/ *.h] {
+                    ln -s ../include/${f} ${cargo.home}/macports/libssh2-sys-${cversion}/libssh2/src/
+                }
+            }
+        }
+    }
 
-set stage0(distname) ${name}-${stage0(version)}-${stage0(platform)}
-set stage0(distfile) ${stage0(distname)}${extract.suffix}
+    build.env-append OPENSSL_DIR=${prefix}
 
-master_sites-append https://static.rust-lang.org/dist/:stage0
-distfiles-append    ${stage0(distfile)}:stage0
+    if {${subport} eq ${name}} {
+        depends_build-append \
+            port:${name}-stage1
 
-checksums           ${distname}${extract.suffix} \
-                    rmd160  269eba2a358c3f690cbe5ca88776608cce26f54b \
-                    sha256  00241ec54c1c48e0ae93963174f6240f26fddbdec0b0b51478c2ee500551f3aa \
-                    size    973758
+        cargo.bin ${prefix}/libexec/${name}-stage1/bin/cargo
 
-if {${build_arch} eq "i386"} {
+        destroot {
+            xinstall ${worksrcpath}/target/[cargo.rust_platform]/release/cargo ${destroot}${prefix}/bin
+
+            xinstall -m 0644 \
+                {*}[glob ${worksrcpath}/src/etc/man/*] \
+                ${destroot}${prefix}/share/man/man1
+
+            xinstall -d ${destroot}${prefix}/share/doc/${subport}
+            xinstall -m 0644 \
+                -W ${worksrcpath} \
+                LICENSE-APACHE LICENSE-MIT LICENSE-THIRD-PARTY README.md \
+                ${destroot}${prefix}/share/doc/${subport}
+
+            xinstall -d ${destroot}${prefix}/etc/bash_completion.d
+            xinstall -m 0644 \
+                ${worksrcpath}/src/etc/cargo.bashcomp.sh \
+                ${destroot}${prefix}/etc/bash_completion.d/${subport}
+
+            xinstall -d ${destroot}${prefix}/share/zsh/site-functions
+            xinstall -m 0644 \
+                ${worksrcpath}/src/etc/_cargo \
+                ${destroot}${prefix}/share/zsh/site-functions
+        }
+    } else {
+        # --target and CARGO_BUILD_TARGET do not work correctly
+        # see the patchfile path-dyld.diff
+        universal_variant   no
+
+        depends_build-append \
+            port:${name}-bootstrap
+
+        cargo.bin ${prefix}/libexec/${name}-bootstrap/bin/cargo
+
+        destroot {
+            xinstall -d -m 0755 ${destroot}${prefix}/libexec/${subport}/bin
+            xinstall ${worksrcpath}/target/release/cargo ${destroot}${prefix}/libexec/${subport}/bin
+
+            xinstall -d ${destroot}${prefix}/share/doc/${subport}
+            xinstall -m 0644 \
+                -W ${worksrcpath} \
+                LICENSE-APACHE LICENSE-MIT LICENSE-THIRD-PARTY README.md \
+                ${destroot}${prefix}/share/doc/${subport}
+        }
+    }
+} else {
+    master_sites-append https://static.rust-lang.org/dist/:stage0
+
     checksums-append \
-                    ${stage0(distfile)} \
+        ${name}-${version}-i686-apple-darwin${extract.suffix} \
                     rmd160  17458dce93eb7e644385bd82ecb511311765e5e6 \
                     sha256  6b7a0a97e0d87cca7b7a5e090d168be6cdbb03298381bece33df493447e17e76 \
                     size    3909191
-} else {
+
     checksums-append \
-                    ${stage0(distfile)} \
+        ${name}-${version}-x86_64-apple-darwin${extract.suffix} \
                     rmd160  ac5eff8ae2489845f9761c275b03677a50309c1a \
                     sha256  b6f7c662ea75a94f5a5e41c2fee95f09a5ba168429ac8cdd41f6ba2c78d1b07f \
                     size    4215369
+
+    if {![variant_isset universal]} {
+        set rust_platform [cargo.rust_platform ${build_arch}]
+        distfiles  ${name}-${version}-${rust_platform}${extract.suffix}:stage0
+        worksrcdir ${name}-${version}-${rust_platform}
+    } else {
+        distfiles ""
+        foreach arch ${universal_archs} {
+            set rust_platform [cargo.rust_platform ${arch}]
+            distfiles-append  ${name}-${version}-${rust_platform}${extract.suffix}:stage0
+        }
+        post-extract {
+            xinstall -d -m 0755 ${workpath}/${name}-${version}
+            foreach arch ${universal_archs} {
+                set rust_platform [cargo.rust_platform ${arch}]
+                move ${workpath}/${name}-${version}-${rust_platform} ${workpath}/${name}-${version}-${arch}
+            }
+        }
+    }
+
+    build {}
+
+    destroot {
+        xinstall -d -m 0755 ${destroot}${prefix}/libexec/${subport}/bin
+        xinstall -m 0755 ${worksrcpath}/cargo/bin/cargo ${destroot}${prefix}/libexec/${subport}/bin
+
+        xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
+        xinstall -m 0644 \
+            -W ${worksrcpath} \
+            LICENSE-APACHE LICENSE-MIT LICENSE-THIRD-PARTY README.md \
+            ${destroot}${prefix}/share/doc/${subport}
+    }
 }
 
-# github.setup sets this to yes, breaking the stage0 fetch
-fetch.ignore_sslcert no
+subport ${name}-bootstrap {}
 
-# set DYLD_FALLBACK_LIBRARY_PATH instead of DYLD_LIBRARY_PATH
-# without this change, --target fails
-# see https://users.rust-lang.org/t/subprocess-and-dynamic-library-linking-problem-interaction/7873
-# see https://github.com/rust-lang/cargo/issues/2888
-patchfiles-append   path-dyld.diff
+subport ${name}-stage1 {}
 
-use_configure       no
-
-build.cmd           ${workpath}/${stage0(distname)}/${name}/bin/cargo
-build.target        build
-build.args          --release -j${build.jobs}
-build.env           OPENSSL_DIR=${prefix}
-
-# see https://trac.macports.org/wiki/UsingTheRightCompiler
-build.env-append    CC=${configure.cc} \
-                    CXX=${configure.cxx}
-
-destroot {
-    xinstall ${worksrcpath}/target/release/cargo ${destroot}${prefix}/bin
-
-    xinstall {*}[glob ${worksrcpath}/src/etc/man/*] \
-        ${destroot}${prefix}/share/man/man1
-
-    xinstall -d ${destroot}${prefix}/share/doc/${name}
-    xinstall -W ${worksrcpath} \
-        LICENSE-APACHE LICENSE-MIT LICENSE-THIRD-PARTY README.md \
-        ${destroot}${prefix}/share/doc/${name}
-
-    xinstall -d ${destroot}${prefix}/etc/bash_completion.d
-    xinstall ${worksrcpath}/src/etc/cargo.bashcomp.sh \
-        ${destroot}${prefix}/etc/bash_completion.d/${name}
-
-    xinstall -d ${destroot}${prefix}/share/zsh/site-functions
-    xinstall ${worksrcpath}/src/etc/_cargo \
-        ${destroot}${prefix}/share/zsh/site-functions
+if {${subport} ne "${name}-bootstrap"} {
+    cargo.crates \
+        aho-corasick 0.5.3 ca972c2ea5f742bfce5687b9aef75506a764f61d37f8f649047846a9686ddb66 \
+        aho-corasick 0.6.4 d6531d44de723825aa81398a6415283229725a00fa30713812ab9323faa82fc4 \
+        atty 0.2.8 af80143d6f7608d746df1520709e5d141c96f240b0e62b0aa41bdfb53374d9d4 \
+        backtrace 0.3.5 ebbbf59b1c43eefa8c3ede390fcc36820b4999f7914104015be25025e0d62af2 \
+        backtrace-sys 0.1.16 44585761d6161b0f57afc49482ab6bd067e4edef48c12a152c237eb0203f7661 \
+        bitflags 0.9.1 4efd02e230a02e18f92fc2735f44597385ed02ad8f831e7c1c1156ee5e1ab3a5 \
+        bitflags 1.0.1 b3c30d3802dfb7281680d6285f2ccdaa8c2d8fee41f93805dba5c4cf50dc23cf \
+        bufstream 0.1.3 f2f382711e76b9de6c744cc00d0497baba02fb00a787f088c879f01d09468e32 \
+        cc 1.0.9 2b4911e4bdcb4100c7680e7e854ff38e23f1b34d4d9e079efae3da2801341ffc \
+        cfg-if 0.1.2 d4c819a1287eb618df47cc647173c5c4c66ba19d888a6e50d605672aed3140de \
+        cmake 0.1.29 56d741ea7a69e577f6d06b36b7dff4738f680593dc27a701ffa8506b73ce28bb \
+        commoncrypto 0.2.0 d056a8586ba25a1e4d61cb090900e495952c7886786fc55f909ab2f819b69007 \
+        commoncrypto-sys 0.2.0 1fed34f46747aa73dfaa578069fd8279d2818ade2b55f38f22a9401c7f4083e2 \
+        core-foundation 0.5.1 286e0b41c3a20da26536c6000a280585d519fd07b3956b43aed8a79e9edce980 \
+        core-foundation-sys 0.5.1 716c271e8613ace48344f723b60b900a93150271e5be206212d052bbc0883efa \
+        crossbeam 0.2.12 bd66663db5a988098a89599d4857919b3acf7f61402e61365acfd3919857b9be \
+        crossbeam 0.3.2 24ce9782d4d5c53674646a6a4c1863a21a8fc0cb649b3c94dfc16e45071dea19 \
+        crypto-hash 0.3.1 09de9ee0fc255ace04c7fa0763c9395a945c37c8292bb554f8d48361d1dcf1b4 \
+        curl 0.4.11 b70fd6394677d3c0e239ff4be6f2b3176e171ffd1c23ffdc541e78dea2b8bb5e \
+        curl-sys 0.4.1 f46e49c7125131f5afaded06944d6888b55cbdf8eba05dae73c954019b907961 \
+        docopt 0.8.3 d8acd393692c503b168471874953a2531df0e9ab77d0b6bbc582395743300a4a \
+        dtoa 0.4.2 09c3753c3db574d215cba4ea76018483895d7bff25a31b49ba45db21c48e50ab \
+        env_logger 0.5.10 0e6e40ebb0e66918a37b38c7acab4e10d299e0463fe2af5d29b9cc86710cfd2a \
+        failure 0.1.1 934799b6c1de475a012a02dab0ace1ace43789ee4b99bcfbf1a2e3e8ced5de82 \
+        failure_derive 0.1.1 c7cdda555bb90c9bb67a3b670a0f42de8e73f5981524123ad8578aafec8ddb8b \
+        filetime 0.1.15 714653f3e34871534de23771ac7b26e999651a0a228f47beb324dfdf1dd4b10f \
+        flate2 1.0.1 9fac2277e84e5e858483756647a9d0aa8d9a2b7cba517fd84325a0aaa69a0909 \
+        fnv 1.0.6 2fad85553e09a6f881f739c29f0b00b0f01357c743266d478b68951ce23285f3 \
+        foreign-types 0.3.2 f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1 \
+        foreign-types-shared 0.1.1 00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b \
+        fs2 0.4.3 9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213 \
+        fuchsia-zircon 0.3.3 2e9763c69ebaae630ba35f74888db465e49e259ba1bc0eda7d06f4a067615d82 \
+        fuchsia-zircon-sys 0.3.3 3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7 \
+        git2 0.6.11 ee5b4bb7cd2a44e6e5ee3a26ba6a9ca10d4ce2771cdc3839bbc54b47b7d1be84 \
+        git2-curl 0.7.0 68676bc784bf0bef83278898929bf64a251e87c0340723d0b93fa096c9c5bf8e \
+        glob 0.2.11 8be18de09a56b60ed0edf84bc9df007e30040691af7acd1c41874faac5895bfb \
+        globset 0.4.0 142754da2c9b3722affd909f9e27f2a6700a7a303f362971e0a74c652005a43d \
+        hamcrest 0.1.1 bf088f042a467089e9baa4972f57f9247e42a0cc549ba264c7a04fbb8ecb89d4 \
+        hex 0.2.0 d6a22814455d41612f41161581c2883c0c6a1c41852729b17d5ed88f01e153aa \
+        hex 0.3.1 459d3cf58137bb02ad4adeef5036377ff59f066dbb82517b7192e3a5462a2abc \
+        home 0.3.2 8f94f6fbdc000a6eba0c8cf08632b2091bb59141d36ac321a2a96d6365e5e4dc \
+        humantime 1.1.1 0484fda3e7007f2a4a0d9c3a703ca38c71c54c55602ce4660c419fd32e188c9e \
+        idna 0.1.4 014b298351066f1512874135335d62a789ffe78a9974f94b43ed5621951eaf7d \
+        ignore 0.4.2 787a5940ab88e0f2f3b2cad3687060bddcf67520f3b761abc31065c9c495d088 \
+        itoa 0.4.1 c069bbec61e1ca5a596166e55dfe4773ff745c3d16b700013bcaff9a6df2c682 \
+        jobserver 0.1.11 60af5f849e1981434e4a31d3d782c4774ae9b434ce55b101a96ecfd09147e8be \
+        kernel32-sys 0.2.2 7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d \
+        lazycell 0.6.0 a6f08839bc70ef4a3fe1d566d5350f519c5912ea86be0df1740a7d247c7fc0ef \
+        lazy_static 0.2.11 76f033c7ad61445c5b347c7382dd1237847eb1bce590fe50365dcb33d546be73 \
+        lazy_static 1.0.0 c8f31047daa365f19be14b47c29df4f7c3b581832407daabe6ae77397619237d \
+        libc 0.2.40 6fd41f331ac7c5b8ac259b8bf82c75c0fb2e469bbf37d2becbba9a6a2221965b \
+        libgit2-sys 0.6.19 6eeae66e7b1c995de45cb4e65c5ab438a96a7b4077e448645d4048dc753ad357 \
+        libssh2-sys 0.2.6 0db4ec23611747ef772db1c4d650f8bd762f07b461727ec998f953c614024b75 \
+        libz-sys 1.0.18 87f737ad6cc6fd6eefe3d9dc5412f1573865bded441300904d2f42269e140f16 \
+        log 0.3.9 e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b \
+        log 0.4.1 89f010e843f2b1a31dbd316b3b8d443758bc634bed37aabade59c686d644e0a2 \
+        matches 0.1.6 100aabe6b8ff4e4a7e32c1c13523379802df0772b82466207ac25b013f193376 \
+        memchr 0.1.11 d8b629fb514376c675b98c1421e80b151d3817ac42d7c667717d282761418d20 \
+        memchr 1.0.2 148fab2e51b4f1cfc66da2a7c32981d1d3c083a803978268bb11fe4b86925e7a \
+        memchr 2.0.1 796fba70e76612589ed2ce7f45282f5af869e0fdd7cc6199fa1aa1f1d591ba9d \
+        miniz-sys 0.1.10 609ce024854aeb19a0ef7567d348aaa5a746b32fb72e336df7fcc16869d7e2b4 \
+        miow 0.3.1 9224c91f82b3c47cf53dcf78dfaa20d6888fbcc5d272d5f2fcdf8a697f3c987d \
+        net2 0.2.32 9044faf1413a1057267be51b5afba8eb1090bd2231c693664aa1db716fe1eae0 \
+        num 0.1.42 4703ad64153382334aa8db57c637364c322d3372e097840c72000dabdcf6156e \
+        num-bigint 0.1.43 81b483ea42927c463e191802e7334556b48e7875297564c0e9951bd3a0ae53e3 \
+        num-complex 0.1.43 b288631d7878aaf59442cffd36910ea604ecd7745c36054328595114001c9656 \
+        num-integer 0.1.36 f8d26da319fb45674985c78f1d1caf99aa4941f785d384a2ae36d0740bc3e2fe \
+        num-iter 0.1.35 4b226df12c5a59b63569dd57fafb926d91b385dfce33d8074a412411b689d593 \
+        num-rational 0.1.42 ee314c74bd753fc86b4780aa9475da469155f3848473a261d2d18e35245a784e \
+        num-traits 0.2.2 dee092fcdf725aee04dd7da1d21debff559237d49ef1cb3e69bcb8ece44c7364 \
+        num_cpus 1.8.0 c51a3322e4bca9d212ad9a158a02abc6934d005490c054a2778df73a70aa0a30 \
+        openssl 0.10.5 1636c9f1d78af9cbcc50e523bfff4a30274108aad5e86761afd4d31e4e184fa7 \
+        openssl-probe 0.1.2 77af24da69f9d9341038eba93a073b1fdaaa1b788221b00a69bce9e762cb32de \
+        openssl-sys 0.9.30 73ae718c3562989cd3a0a5c26610feca02f8116822f6f195e6cf4887481e57f5 \
+        percent-encoding 1.0.1 31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831 \
+        pkg-config 0.3.9 3a8b4c6b8165cd1a1cd4b9b120978131389f64bdaf456435caa41e630edba903 \
+        proc-macro2 0.2.3 cd07deb3c6d1d9ff827999c7f9b04cdfd66b1b17ae508e14fe47b620f2282ae0 \
+        psapi-sys 0.1.1 1f71c7e142c25f297077a8ebc21f10847096b5d21ad7619d7bf0c1fcecb40bb0 \
+        quick-error 1.0.0 c415e447dcced6ca7d8b290f5881050d1a2bb757967889cfba93b6f7f649ca50 \
+        quote 0.3.15 7a6e920b65c65f10b2ae65c831a81a073a89edd28c7cce89475bff467ab4167a \
+        quote 0.4.2 1eca14c727ad12702eb4b6bfb5a232287dcf8385cb8ca83a3eeaf6519c44c408 \
+        rand 0.4.2 eba5f8cb59cc50ed56be8880a5c7b496bfd9bd26394e176bc67884094145c2c5 \
+        redox_syscall 0.1.37 0d92eecebad22b767915e4d529f89f28ee96dbbf5a4810d2b844373f136417fd \
+        redox_termios 0.1.1 7e891cfe48e9100a70a3b6eb652fef28920c117d366339687bd5576160db0f76 \
+        regex 0.1.80 4fd4ace6a8cf7860714a2c2280d6c1f7e6a413486c13298bbc86fd3da019402f \
+        regex 0.2.11 9329abc99e39129fcceabd24cf5d85b4671ef7c29c50e972bc5afe32438ec384 \
+        regex 1.0.0 75ecf88252dce580404a22444fc7d626c01815debba56a7f4f536772a5ff19d3 \
+        regex-syntax 0.3.9 f9ec002c35e86791825ed294b50008eea9ddfc8def4420124fbc6b08db834957 \
+        regex-syntax 0.5.6 7d707a4fa2637f2dca2ef9fd02225ec7661fe01a53623c1e6515b6916511f7a7 \
+        regex-syntax 0.6.0 8f1ac0f60d675cc6cf13a20ec076568254472551051ad5dd050364d70671bf6b \
+        remove_dir_all 0.5.0 dfc5b3ce5d5ea144bb04ebd093a9e14e9765bcfec866aecda9b6dec43b3d1e24 \
+        rustc-demangle 0.1.7 11fb43a206a04116ffd7cfcf9bcb941f8eb6cc7ff667272246b0a1c74259a3cb \
+        rustc-serialize 0.3.24 dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda \
+        same-file 1.0.2 cfb6eded0b06a0b512c8ddbcf04089138c9b4362c2f696f3c3d76039d68f3637 \
+        schannel 0.1.11 fbaffce35eb61c5b00846e73128b0cd62717e7c0ec46abbec132370d013975b4 \
+        scoped-tls 0.1.1 8674d439c964889e2476f474a3bf198cc9e199e77499960893bac5de7e9218a4 \
+        scopeguard 0.3.3 94258f53601af11e6a49f722422f6e3425c52b06245a5cf9bc09908b174f5e27 \
+        semver 0.9.0 1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403 \
+        semver-parser 0.7.0 388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3 \
+        serde 1.0.36 c70142ae874a42c70e03c63c6a49abe2ea0079b090bf6e136e99252fc1974bd6 \
+        serde_derive 1.0.36 6fffe22d41dbddcead5b2c380c4714d44f2eb39292f7e7a0d966d2d45bf56408 \
+        serde_derive_internals 0.22.2 d2f04ed291686ce195a5c8f554aaf36e50a721fbf829ee3b6151e6f85eccf945 \
+        serde_ignored 0.0.4 190e9765dcedb56be63b6e0993a006c7e3b071a016a304736e4a315dc01fb142 \
+        serde_json 1.0.13 5c508584d9913df116b91505eec55610a2f5b16e9ed793c46e4d0152872b3e74 \
+        shell-escape 0.1.4 170a13e64f2a51b77a45702ba77287f5c6829375b04a69cf2222acd17d0cfab9 \
+        socket2 0.3.4 71ebbe82fcdd697244ba7fe6e05e63b5c45910c3927e28469a04947494ff48d8 \
+        strsim 0.6.0 b4d15c810519a91cf877e7e36e63fe068815c678181439f2f29e2562147c3694 \
+        syn 0.11.11 d3b891b9015c88c576343b9b3e41c2c11a51c219ef067b264bd9c8aa9b441dad \
+        syn 0.12.15 c97c05b8ebc34ddd6b967994d5c6e9852fa92f8b82b3858c39451f97346dcce5 \
+        synom 0.11.3 a393066ed9010ebaed60b9eafa373d4b1baac186dd7e008555b0f702b51945b6 \
+        synstructure 0.6.1 3a761d12e6d8dcb4dcf952a7a89b475e3a9d69e4a69307e01a470977642914bd \
+        tar 0.4.14 1605d3388ceb50252952ffebab4b5dc43017ead7e4481b175961c283bb951195 \
+        tempdir 0.3.7 15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8 \
+        termcolor 0.3.6 adc4587ead41bf016f11af03e55a624c06568b5a19db4e90fde573d805074f83 \
+        termion 1.5.1 689a3bdfaab439fd92bc87df5c4c78417d3cbe537487274e9b0b2dce76e92096 \
+        thread-id 2.0.0 a9539db560102d1cef46b8b78ce737ff0bb64e7e18d35b2a5688f7d097d0ff03 \
+        thread_local 0.2.7 8576dbbfcaef9641452d5cf0df9b0e7eeab7694956dd33bb61515fb8f18cfdd5 \
+        thread_local 0.3.5 279ef31c19ededf577bfd12dfae728040a21f635b06a24cd670ff510edd38963 \
+        toml 0.4.5 a7540f4ffc193e0d3c94121edb19b055670d369f77d5804db11ae053a45b6e7e \
+        ucd-util 0.1.1 fd2be2d6639d0f8fe6cdda291ad456e23629558d466e2789d2c3e9892bda285d \
+        unicode-bidi 0.3.4 49f2bd0c6468a8230e1db229cff8029217cf623c767ea5d60bfbd42729ea54d5 \
+        unicode-normalization 0.1.5 51ccda9ef9efa3f7ef5d91e8f9b83bbe6955f9bf86aec89d5cce2c874625920f \
+        unicode-xid 0.0.4 8c1f860d7d29cf02cb2f3f359fd35991af3d30bac52c57d265a3c461074cb4dc \
+        unicode-xid 0.1.0 fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc \
+        unreachable 1.0.0 382810877fe448991dfc7f0dd6e3ae5d58088fd0ea5e35189655f84e6814fa56 \
+        url 1.7.0 f808aadd8cfec6ef90e4a14eb46f24511824d1ac596b9682703c87056c8678b7 \
+        userenv-sys 0.2.0 71d28ea36bbd9192d75bd9fa9b39f96ddb986eaee824adae5d53b6e51919b2f3 \
+        utf8-ranges 0.1.3 a1ca13c08c41c9c3e04224ed9ff80461d97e121589ff27c753a16cb10830ae0f \
+        utf8-ranges 1.0.0 662fab6525a98beff2921d7f61a39e7d59e0b425ebc7d0d9e66d316e55124122 \
+        vcpkg 0.2.2 9e0a7d8bed3178a8fb112199d466eeca9ed09a14ba8ad67718179b4fd5487d0b \
+        void 1.0.2 6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d \
+        walkdir 2.1.4 63636bd0eb3d00ccb8b9036381b526efac53caf112b7783b730ab3f8e44da369 \
+        winapi 0.2.8 167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a \
+        winapi 0.3.4 04e3bd221fcbe8a271359c04f21a76db7d0c6028862d1bb5512d85e1e2eb5bb3 \
+        winapi-build 0.1.1 2d315eee3b34aca4797b2da6b13ed88266e6d612562a0c46390af8299fc699bc \
+        winapi-i686-pc-windows-gnu 0.4.0 ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6 \
+        winapi-x86_64-pc-windows-gnu 0.4.0 712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f \
+        wincolor 0.1.6 eeb06499a3a4d44302791052df005d5232b927ed1a9658146d842165c4de7767 \
+        ws2_32-sys 0.2.1 d59cefebd0c892fa2dd6de581e937301d8552cb44489cdff035c6187cb63fa5e
 }
