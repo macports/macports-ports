@@ -196,6 +196,11 @@ variant universal {
         }
     }
 
+    # if Portfile has configure {...}, save the procedure
+    if {[info procs userproc-org.macports.configure-configure-0] != ""} {
+        rename userproc-org.macports.configure-configure-0 userproc-org.macports.configure-configure-1
+    }
+
     configure {
         global muniversal.current_arch
 
@@ -334,7 +339,16 @@ variant universal {
                 }
             }
 
-            portconfigure::configure_main
+            if {[info procs userproc-org.macports.configure-configure-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+
+                userproc-org.macports.configure-configure-1
+
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portconfigure::configure_main
+            }
 
             # Undo changes to the configure related variables
             option autoconf.dir         ${autoconf_dir_save}
@@ -378,7 +392,14 @@ variant universal {
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
             }
+
+            unset muniversal.current_arch
         }
+    }
+
+    # if Portfile has build {...}, save the procedure
+    if {[info procs userproc-org.macports.build-build-0] != ""} {
+        rename userproc-org.macports.build-build-0 userproc-org.macports.build-build-1
     }
 
     build {
@@ -412,7 +433,16 @@ variant universal {
                 }
             }
 
-            portbuild::build_main
+            if {[info procs userproc-org.macports.build-build-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+
+                userproc-org.macports.build-build-1
+
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portbuild::build_main
+            }
 
             option build.dir ${build_dir_save}
             if { [info exists merger_build_args(${arch})] } {
@@ -421,7 +451,14 @@ variant universal {
             if { [info exists merger_build_env(${arch})] } {
                 build.env-delete            {*}$merger_build_env(${arch})
             }
+
+            unset muniversal.current_arch
         }
+    }
+
+    # if Portfile has destroot {...}, save the procedure
+    if {[info procs userproc-org.macports.destroot-destroot-0] != ""} {
+        rename userproc-org.macports.destroot-destroot-0 userproc-org.macports.destroot-destroot-1
     }
 
     destroot {
@@ -460,7 +497,19 @@ variant universal {
                 }
             }
 
-            portdestroot::destroot_main
+            if {[info procs userproc-org.macports.destroot-destroot-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+                set    destroot_save    ${destroot}
+                option destroot         ${workpath}/destroot-${arch}
+
+                userproc-org.macports.destroot-destroot-1
+
+                option destroot    ${destroot_save}
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portdestroot::destroot_main
+            }
 
             option destroot.dir ${destroot_dir_save}
             if { [info exists merger_destroot_args(${arch})] } {
@@ -471,6 +520,8 @@ variant universal {
             }
             destroot.env-replace ${destroot.destdir} ${destdirSave}
             option destroot.destdir ${destdirSave}
+
+            unset muniversal.current_arch
         }
         delete ${destroot}
 
