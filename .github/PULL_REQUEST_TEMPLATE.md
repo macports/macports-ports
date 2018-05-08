@@ -28,3 +28,5 @@ Have you
 - [ ] tried existing tests with `sudo port test`?
 - [ ] tried a full install with `sudo port -vst install`?
 - [ ] tested basic functionality of all binary files?
+
+<!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->
