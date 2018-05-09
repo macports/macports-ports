@@ -120,7 +120,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
                 move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${distname}
             } else {
                 # tarball is not "${github.author}-${github.project}-*"
-                ui_error "\n\ngithub PortGroup: Error: tarball name is not as expected. This might mean that the repository name is different than set in the Portfile. Please review and try to correct.\n"
+                ui_error "\n\ngithub PortGroup: Error: \${worksrcpath} does not exist after extracting distfiles. This might indicate that the repository name is different than set in the Portfile due to a rename at GitHub. Please examine the extracted directory in ${workdir} and try to correct the Portfile by either changing the repository name or add the worksrcdir option with the correct directory name.\n"
                 return -code error "Unexpected github tarball extract."
             }
         }
