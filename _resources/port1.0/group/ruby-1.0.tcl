@@ -70,7 +70,7 @@
 #
 # note:
 #   [gem] use destroot.post_args-append begins "--" to pass options to extconf.rb
-#   > ruby.setup moudle version gem
+#   > ruby.setup module version gem
 #   > destroot.post_args-append -- --with-any-option
 
 options ruby.default_branch
