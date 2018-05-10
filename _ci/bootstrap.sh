@@ -9,8 +9,8 @@ sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
 unset CC && source /opt/local/share/macports/setupenv.bash
 sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar|file://${PWD}|; /^file:/s/default/nosync,default/" /opt/local/etc/macports/sources.conf
-echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf
-rsync -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
+echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 git checkout -qf macports/master
@@ -25,3 +25,6 @@ sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 export PATH="/opt/mports/bin:$PATH" && hash -r
 curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
 chmod 0755 runner
+
+# Workaround for an Xcode issue. See https://trac.macports.org/ticket/54939
+[ "$OS_MAJOR" = 17 ] && $(cd $(xcode-select -p)/Toolchains && sudo ln -s XcodeDefault.xctoolchain OSX10.13.xctoolchain) || true

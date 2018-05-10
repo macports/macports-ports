@@ -5,6 +5,10 @@
 # these lists are generated from collectd's ./configure output by applying the following regex:
 # s/\v\s*--enable-(\w+)\s+(.*)$/[\1]="\2"/
 
+# After changing this script, run the following shell command to update the Portfile:
+# ( awk '/^# WARNING: This list is generated/ { exit } { print }' < Portfile | sed '$d' ; ./files/dep-gen.sh ) > Portfile.tmp; mv Portfile.tmp Portfile
+
+
 declare -a OPTIONS_ENABLE
 OPTIONS_ENABLE=(
 	match_empty_counter
@@ -47,7 +51,8 @@ PLUGINS=(
 	[df]="Filesystem usage statistics"
 	[disk]="Disk usage statistics"
 	[dns]="DNS traffic analysis"
-	[dpdkstat]="Stats & Status from DPDK"
+	[dpdkevents]="Events from DPDK"
+	[dpdkstat]="Stats from DPDK"
 	[drbd]="DRBD statistics"
 	[email]="EMail statistics"
 	[entropy]="Entropy statistics"
@@ -61,6 +66,7 @@ PLUGINS=(
 	[grpc]="gRPC plugin"
 	[hddtemp]="Query hddtempd"
 	[hugepages]="Hugepages statistics"
+	[intel_pmu]="Intel performance monitor plugin"
 	[intel_rdt]="Intel RDT monitor plugin"
 	[interface]="Interface traffic statistics"
 	[ipc]="IPC statistics"
@@ -77,6 +83,7 @@ PLUGINS=(
 	[lvm]="LVM statistics"
 	[madwifi]="Madwifi wireless statistics"
 	[mbmon]="Query mbmond"
+	[mcelog]="Machine Check Exceptions notifications"
 	[md]="md (Linux software RAID) devices"
 	[memcachec]="memcachec statistics"
 	[memcached]="memcached statistics"
@@ -102,6 +109,8 @@ PLUGINS=(
 	[openldap]="OpenLDAP statistics"
 	[openvpn]="OpenVPN client statistics"
 	[oracle]="Oracle plugin"
+	[ovs_events]="OVS events plugin"
+	[ovs_stats]="OVS statistics plugin"
 	[perl]="Embed a Perl interpreter"
 	[pf]="BSD packet filter (PF) statistics"
 	[pinba]="Pinba statistics"
@@ -120,8 +129,10 @@ PLUGINS=(
 	[sigrok]="sigrok acquisition sources"
 	[smart]="SMART statistics"
 	[snmp]="SNMP querying plugin"
+	[snmp_agent]="SNMP agent plugin"
 	[statsd]="StatsD plugin"
 	[swap]="Swap usage statistics"
+	[synproxy]="Synproxy stats plugin"
 	[syslog]="Syslog logging plugin"
 	[table]="Parsing of tabular data"
 	[tail]="Parsing of logfiles"
@@ -185,21 +196,21 @@ PLUGIN_DEPS=(
 	[notify_nagios]="port:nagios"
 	[notify_email]="port:libesmtp"
 	[nut]="port:nut"
-	[perl]="port:perl5.18"
+	[perl]="port:perl5.26"
 	[pinba]="port:protobuf-c"
 	[ping]="port:liboping"
-	[postgresql]="port:postgresql91"
+	[postgresql]="port:postgresql96"
 	[python]="port:python27"
 	[redis]="port:libcredis"
 	[rrdcached]="port:rrdtool"
 	[rrdtool]="port:rrdtool"
 	[snmp]="port:net-snmp"
+	[snmp_agent]="port:net-snmp"
 	[tokyotyrant]="port:tokyotyrant"
 	[varnish]="port:varnish"
 	[virt]="port:libvirt port:libxml2"
 	[write_http]="port:curl"
 	[write_riemann]="port:protobuf-c"
-	[xmms]="port:xmms"
 )
 
 # list of useless modules on macOS
@@ -209,13 +220,15 @@ OSX_BLACKLIST=(
 	[cgroups]=1		# Linux only
 	[conntrack]=1	# Linux only
 	[cpufreq]=1		# Linux only
-	[dpdkstat]=1	# requires libdpkd (?), which is not available
+	[dpdkstat]=1	# requires libdpdk, which is not available
+	[dpdkevents]=1  # requires libdpdk, which is not available
 	[drbd]=1		# Linux only
 	[entropy]=1		# Linux only
 	[fscache]=1		# Linux only
 	[fhcount]=1		# Linux only
 	[hugepages]=1	# Linux only
 	[intel_rdt]=1	# requires intel-cmt-cat, which is not available
+	[intel_pmu]=1	# requires libjevents, which is not available
 	[ipc]=1			# No macOS support
 	[ipmi]=1		# requires openipmithreads, which is not available
 	[iptables]=1	# Linux only
@@ -223,6 +236,7 @@ OSX_BLACKLIST=(
 	[irq]=1			# Linux only
 	[lvm]=1			# Linux only
 	[madwifi]=1		# Linux only
+	[mcelog]=1		# Linux only
 	[md]=1			# Linux only
 	[mic]=1			# Intel Many Integrated Core (Xeon Phi) only
 	[modbus]=1		# requires libmodbus, which is not available
@@ -232,6 +246,8 @@ OSX_BLACKLIST=(
 	[nfs]=1			# Linux only
 	[onewire]=1		# requires libowcapu, which is not available
 	[oracle]=1		# requires libclntsh, which is not available
+	[ovs_stats]=1	# Linux only
+	[ovs_events]=1	# Linux only
 	[processes]=1	# No macOS support
 	[protocols]=1	# Linux only
 	[redis]=1		# requires libcredis, which is not available
@@ -239,6 +255,7 @@ OSX_BLACKLIST=(
 	[sensors]=1		# requires libsensors, which is not available
 	[serial]=1		# Linux only
 	[sigrok]=1		# requires libsigrok, which is not available
+	[synproxy]=1	# Linux only
 	[tape]=1		# Solaris only
 	[thermal]=1		# Linux only
 	[turbostat]=1	# Linux only
@@ -251,6 +268,7 @@ OSX_BLACKLIST=(
 	[write_riemann]=1	# requires libriemann (?), which is not available
 	[write_kafka]=1	# requires librdkafka, which is not available
 	[xencpu]=1		# requires libxen, which is not available
+	[xmms]=1        # requires xmms, which is not available
 	[zfs_arc]=1		# Solaris only
 	[zone]=1		# Solaris only
 )
@@ -307,7 +325,10 @@ OSX_STANDARD=(
 
 declare -A EXTRA_CODE
 read -r -d '' PERL_EXTRA <<'EOF'
-    configure.args-append --with-perl=${prefix}/bin/perl5.18
+    configure.args-append --with-perl=${prefix}/bin/perl5.26
+EOF
+read -r -d '' POSTGRESQL_EXTRA <<'EOF'
+    configure.cflags-append -I${prefix}/include/postgresql96
 EOF
 read -r -d '' PYTHON_EXTRA <<'EOF'
     configure.args-append --with-python=${prefix}/bin/python2.7
@@ -323,6 +344,7 @@ read -r -d '' NETWORK_EXTRA <<'EOF'
 EOF
 EXTRA_CODE=(
 	[perl]="$PERL_EXTRA"
+	[postgresql]="$POSTGRESQL_EXTRA"
 	[python]="$PYTHON_EXTRA"
 	[java]="$JAVA_EXTRA"
 	[network]="$NETWORK_EXTRA"
@@ -336,13 +358,16 @@ echo "#######################################################"
 echo
 
 echo "# enable all matches and targets, disable all other plugins"
-echo "configure.args-append \\"
+echo -n "configure.args-append"
 for option in $(printf "%s\n" ${OPTIONS_ENABLE[@]} | sort); do
-	echo "    --enable-$option \\"
+	echo " \\"
+	echo -n "    --enable-$option"
 done
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
-	echo "    --disable-$plugin \\"
+	echo " \\"
+	echo -n "    --disable-$plugin"
 done
+echo
 echo
 
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
@@ -362,8 +387,10 @@ for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	fi
 done
 
-echo "default_variants \\"
+echo -n "default_variants"
 for plugin in $(printf "%s\n" ${OSX_STANDARD[@]} | sort); do
-	printf "    +%s \\\\\n" "$plugin"
+	echo " \\"
+	printf "    +%s" "$plugin"
 done
+echo
 echo

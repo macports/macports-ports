@@ -1,5 +1,3 @@
-# $Id$
-
 .PHONY: all clean
 
 all: clit/clit

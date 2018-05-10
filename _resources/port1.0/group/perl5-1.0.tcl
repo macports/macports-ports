@@ -1,35 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
-#
-# Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>,
-#                    Toby Peterson <toby@opendarwin.org>
-# Copyright (c) 2002 Apple Computer, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
 
 # portfile configuration options
 # perl5.branches: the major perl versions supported by this module. A
@@ -51,7 +20,7 @@ proc perl5_get_default_branch {} {
         set ret 5.26
     }
     # if the above default is not supported by this module, use the latest it does support
-    if {[info exists perl5.branches] && [lsearch -exact ${perl5.branches} $ret] == -1} {
+    if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
         set ret [lindex ${perl5.branches} end]
     }
     return $ret
@@ -102,17 +71,14 @@ proc perl5.create_variants {branches} {
     global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant perl5.variants
     set perl5.variants [perl5.get_variant_names ${branches}]
     foreach branch ${branches} {
-        set index [lsearch ${branches} ${branch}]
+        set index [lsearch -exact ${branches} ${branch}]
         set variant [lindex ${perl5.variants} ${index}]
 # Add conflicts
-        set conflicts {}
+        set filtered {}
         if {${perl5.conflict_variants}} {
             set filtered [lreplace ${perl5.variants} ${index} ${index}]
-            if {$filtered ne ""} {
-                set conflicts "conflicts {$filtered}"
-            }
         }
-        eval "variant ${variant} ${conflicts} description Use MacPorts perl${branch} {}"
+        variant ${variant} conflicts {*}${filtered} description "Use MacPorts perl${branch}" {}
         if {[variant_isset ${variant}]} {
             perl5.variant ${variant}
         }
@@ -126,7 +92,7 @@ proc perl5.create_variants {branches} {
     }
 # Set perl version and deps
     foreach branch ${branches} {
-        set index [lsearch ${branches} ${branch}]
+        set index [lsearch -exact ${branches} ${branch}]
         set variant [lindex ${perl5.variants} ${index}]
         if {[variant_isset ${variant}]} {
             perl5.major ${branch}
