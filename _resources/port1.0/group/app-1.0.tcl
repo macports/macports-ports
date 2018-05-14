@@ -100,6 +100,21 @@ default app.version {${version}}
 options app.identifier
 default app.identifier {[app.get_default_identifier]}
 
+proc app.get_default_identifier {} {
+    global app.name homepage
+    set identifier [split [lindex [split ${homepage} "/"] 2] .]
+    if {[lindex ${identifier} 0] == "www"} {
+        set identifier [lrange ${identifier} 1 end]
+    }
+    set identifier [lreverse ${identifier}]
+    set identifier [concat ${identifier} [lrange [split ${homepage} "/"] 3 end]]
+    if {[lindex ${identifier} end] == ""} {
+        set identifier [lrange ${identifier} 0 end-1]
+    }
+    lappend identifier [string map {"." ""} ${app.name}]
+    return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
+}
+
 
 # app.hide_dock_icon: hide the dock icon
 #
@@ -124,22 +139,6 @@ proc app.get_default_hide_dock_icon {} {
 
 options app.use_launch_script
 default app.use_launch_script  no
-
-
-proc app.get_default_identifier {} {
-    global app.name homepage
-    set identifier [split [lindex [split ${homepage} "/"] 2] .]
-    if {[lindex ${identifier} 0] == "www"} {
-        set identifier [lrange ${identifier} 1 end]
-    }
-    set identifier [lreverse ${identifier}]
-    set identifier [concat ${identifier} [lrange [split ${homepage} "/"] 3 end]]
-    if {[lindex ${identifier} end] == ""} {
-        set identifier [lrange ${identifier} 0 end-1]
-    }
-    lappend identifier [string map {"." ""} ${app.name}]
-    return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
-}
 
 
 platform macosx {
