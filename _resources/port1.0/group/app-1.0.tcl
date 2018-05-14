@@ -108,7 +108,11 @@ default app.identifier {[app.get_default_identifier]}
 # fixed, just hide the the dock icon for now
 
 options app.hide_dock_icon 
-default app.hide_dock_icon  no
+default app.hide_dock_icon  {[app.get_default_hide_dock_icon]}
+
+proc app.get_default_hide_dock_icon {} {
+    return [variant_exists x11] && [variant_isset x11]
+}
 
 
 # app.use_launch_script: use a bash launch script instead of a symlink to the executable
