@@ -100,28 +100,6 @@ default app.version {${version}}
 options app.identifier
 default app.identifier {[app.get_default_identifier]}
 
-
-# app.hide_dock_icon: hide the dock icon
-#
-# x11 apps do not receive a proper indication that application has successfully
-# launched, and so the icon keeps bouncing in the dock. Until this is properly
-# fixed, just hide the the dock icon for now
-
-options app.hide_dock_icon 
-default app.hide_dock_icon  no
-
-
-# app.use_launch_script: use a bash launch script instead of a symlink to the executable
-#
-# the default behaviour is to symlink the executable into the bundle. 
-# However, this has two issues -- it passes -psn to the executable,
-# which some ports can't handle. Also, it doesn't set up the path to ${prefix}/bin. The launch
-# script option solves both these issues.
-
-options app.use_launch_script 
-default app.use_launch_script  no
-
-
 proc app.get_default_identifier {} {
     global app.name homepage
     set identifier [split [lindex [split ${homepage} "/"] 2] .]
@@ -136,6 +114,31 @@ proc app.get_default_identifier {} {
     lappend identifier [string map {"." ""} ${app.name}]
     return [regsub -all -nocase {[^a-z0-9.-]} [join ${identifier} .] ""]
 }
+
+
+# app.hide_dock_icon: hide the dock icon
+#
+# x11 apps do not receive a proper indication that application has successfully
+# launched, and so the icon keeps bouncing in the dock. Until this is properly
+# fixed, just hide the the dock icon for now
+
+options app.hide_dock_icon
+default app.hide_dock_icon  {[app.get_default_hide_dock_icon]}
+
+proc app.get_default_hide_dock_icon {} {
+    return [variant_exists x11] && [variant_isset x11]
+}
+
+
+# app.use_launch_script: use a bash launch script instead of a symlink to the executable
+#
+# the default behaviour is to symlink the executable into the bundle.
+# However, this has two issues -- it passes -psn to the executable,
+# which some ports can't handle. Also, it doesn't set up the path to ${prefix}/bin. The launch
+# script option solves both these issues.
+
+options app.use_launch_script
+default app.use_launch_script  no
 
 
 platform macosx {
@@ -222,7 +225,7 @@ platform macosx {
                 # If app.executable starts with ${workpath} or ${filespath}, copy it.
                 if {[string first ${workpath} ${executable}] == 0 || [string first ${filespath} ${executable}] == 0} {
                     xinstall ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
-                
+
                 # app.executable refers to a file that exists but does not belong to this port.
                 # Assume it belongs to a dependency and use it as the target.
                 } else {
@@ -311,7 +314,7 @@ proc app._resolve_symlink {path destroot} {
 }
 
 
-# Write a default launch script for the executable into the bundle, 
+# Write a default launch script for the executable into the bundle,
 # setting the default PATH as would be expected by the binary
 proc app._write_launch_script  {executable app_destination} {
     global prefix

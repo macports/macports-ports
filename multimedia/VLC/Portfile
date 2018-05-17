@@ -29,13 +29,6 @@ subport lib${name} {
     homepage            http://www.videolan.org/vlc/libvlc.html
 }
 
-set use_ffmpeg_VLC      no
-
-if {[tbool use_ffmpeg_VLC]} {
-    subport ffmpeg-VLC {}
-    set FFMPEG_VLC_PREFIX   ${prefix}/lib/vlc/ffmpeg
-}
-
 if {${subport} eq ${name}} {
     conflicts           lib${name}
 }
@@ -49,7 +42,7 @@ supported_archs         x86_64
 ##
 if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     version             2.2.8
-    revision            3
+    revision            4
     license             GPL-2+
 
     platforms           darwin
@@ -61,24 +54,15 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     checksums           rmd160  4434e91384520fe1fe129a52f5d66d61e4404a9a \
                         sha256  9bf046848fb56d93518881b39099b8288ee005d5ba0ddf705b6f6643b8d562ec
 
-    if {[info exist ::env(MACPORTS_COMPRESS_WORKDIR)] && $::env(MACPORTS_COMPRESS_WORKDIR)} {
-        # Enable HFS compression.
-        if {[file exists ${prefix}/bin/bsdtar]} {
-            extract.post_args \
-                        "| ${prefix}/bin/bsdtar -x --hfsCompression"
-        }
+    # Enable HFS compression of the workdir if the compress_workdir PortGroup is installed
+    if {[file exists ${filespath}/../../../_resources/port1.0/group/compress_workdir-1.0.tcl]} {
+        PortGroup       compress_workdir 1.0
     }
 
     depends_build       port:pkgconfig
 
-    if {[tbool use_ffmpeg_VLC]} {
-        depends_lib-append \
-                        port:ffmpeg-VLC
-    } else {
-        depends_lib-append \
-                        port:ffmpeg
-    }
-    depends_lib-append  port:a52dec \
+    depends_lib-append  port:ffmpeg \
+                        port:a52dec \
                         port:avahi \
                         port:bzip2 \
                         port:faad2 \
@@ -146,6 +130,8 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                         port:vcdimager \
                         port:x264 \
                         port:x265
+    depends_run-append  port:libaacs \
+                        port:libbdplus
 
     pre-fetch {
         if {${os.platform} eq "darwin" && ${os.major} < 10} {
@@ -154,61 +140,29 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         }
     }
 
-# port:opencv depends on port:ffmpeg and thus enters in conflict with us depending on our own ffmpeg build
-# 1 viable solution as long as this is the case: drop the opencv filter.
-#     depends_lib-append  port:opencv
-#     # the +qt5 and/or +qt4 variants of port:opencv currently lead to build errors. A patch has
-#     # been submitted (but not included) that resolves the issue for qt4, not yet for qt5.
-#     # https://trac.macports.org/ticket/50709
-#     # For regular users a single check in the pre-fetch would suffice, but this maintainer
-#     # needs the check at other opportune moments too.
-#     proc check_opencv {} {
-#         global subport
-#         if {![active_variants opencv "" {qt4 qt5}]} {
-#             ui_error "${subport} cannot currently be built against port:opencv with the qt5 variant.\
-#             Install port:opencv without that variant and try again. This is only a build conflict; \
-#             after building you can reactivate your preferred opencv variant"
-#             return -code error "Install or activate port:opencv without the qt5 variant before building ${subport}"
-#         }
-#     }
-#     pre-fetch {
-#         check_opencv
-#     }
-#     pre-configure {
-#         check_opencv
-#     }
-#     pre-build {
-#         check_opencv
-#     }
-#     patchfiles-append   patch-opencv_includes.diff
-#     # The opencv example apparently builds on 10.11 but I'm having issues with it on 10.9
-#     # it doesn't appear to be indispensable, so simply skip it.
-#     patchfiles-append   patch-no-opencv_example.diff
-
-    # VLC 2.2.2 should have full Lua 5.3 compatibility, for now, depend on port:lua52
-    # That requires the patch-for-lua52.diff which is appended to patchfiles below.
-    # update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
-    depends_lib-append  port:lua52
+    depends_lib-append  port:lua
 
     # VLC doesn't currently build for me using port:clang-3.8
     compiler.blacklist-append \
                         gcc-4.2 llvm-gcc-4.2 macports-clang-3.8 {clang < 300}
 
     patchfiles          buildfix-package.mak.patch \
-                        configure.ac-no-arch.patch \
+                        patch-configure.ac.diff \
                         PR-34741-no__clang_version__.patch \
-                        static_assert.patch \
+                        patch-static_assert.diff \
                         no-sparkle.patch \
                         patch-vlc-no-O4.diff \
                         patch-soundfont-path.diff
-    if {[tbool use_ffmpeg_VLC]} {
+    # FFMpeg 3 compatibility (see attributions in the patchfile)
+    patchfiles-append \
+                        patch-ffmpeg3-compat.diff
+    platform darwin {
         patchfiles-append \
-                        patch-ffmpegVLC.diff
-    } else {
-        patchfiles-append \
-                        patch-ffmpeg3-compat.diff \
-                        patch-vda-ffmpeg34.diff
+                        patch-vda-ffmpeg34+.diff
     }
+    # FFMpeg 4 compatibility (by RJVB)
+    patchfiles-append \
+                        patch-ffmpeg4-compat.diff
 
     post-patch {
         if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} == "libc++"} {
@@ -217,41 +171,10 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         }
 
         reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/modules/codec/fluidsynth.c
-
-        if {[tbool use_ffmpeg_VLC]} {
-            # patch source using ffmpeg to use the correct header file locations
-            foreach dir {libavcodec libavformat libavresample libavutil libpostproc libswresample libswscale} {
-                foreach module {access codec/avcodec demux/avformat hw/vdpau packetizer video_chroma} {
-                    foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.c] {
-                        reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
-                    }
-                    foreach cf [glob -nocomplain ${worksrcpath}/modules/${module}/*.h] {
-                        reinplace "s|${dir}/|${dir}-VLC/|g" ${cf}
-                    }
-                }
-                reinplace "s|${dir}/|${dir}-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
-            }
-            reinplace "s|postproc/|postproc-VLC/|g" ${worksrcpath}/configure.ac ${worksrcpath}/configure
-            reinplace "s|libpostproc/|libpostproc-VLC/|g" ${worksrcpath}/modules/video_filter/postproc.c
-            reinplace "s|HAVE_LIBAVUTIL_AV|HAVE_LIBAVUTIL_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-            reinplace "s|HAVE_LIBAVFORMAT_AV|HAVE_LIBAVFORMAT_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-            reinplace "s|HAVE_LIBAVCODEC_AV|HAVE_LIBAVCODEC_VLC_AV|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-            reinplace "s|HAVE_LIBSWSCALE_SW|HAVE_LIBSWSCALE_VLC_SW|g" \
-                ${worksrcpath}/modules/codec/avcodec/avcommon.h \
-                ${worksrcpath}/modules/codec/avcodec/avcommon_compat.h
-        }
-    }
-    post-configure {
-        system -W ${worksrcpath} "patch -Np0 -i ${filespath}/patch-static_assert.diff"
     }
 
-    use_autoreconf      yes
+    # do autoreconf only the first time around
+    use_autoreconf      [expr ![file exists ${worksrcpath}/config.status]]
     autoreconf.cmd      ./bootstrap
     autoreconf.pre_args
     autoreconf.args
@@ -259,11 +182,7 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
     configure.env-append \
                         CXXCPP="${configure.cxx} -E"
-    if {[tbool use_ffmpeg_VLC]} {
-        # splice in ffmpeg-VLC's pkgconfig path, hoping that PKG_CONFIG_PATH hasn't been set by anyone else
-        configure.env-append \
-                        PKG_CONFIG_PATH=${FFMPEG_VLC_PREFIX}/lib/pkgconfig
-    }
+
     build.args-append   DESTDIR=${worksrcpath}/dest_ignore V=1
 
     # gl.c:121:3: error: Platform not recognized.
@@ -400,26 +319,6 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         configure.args-append   --with-x --enable-xvideo --enable-xcb
     }
 
-    if {${subport} ne "lib${name}"} {
-        variant qt4 conflicts qt5 description {Build using Qt4 UI. This will use qt4-mac. Experimental and probably dysfunctional} {
-            patchfiles-append       patch-vlc-no-qt5.diff \
-                                    patch-vlc-qt-configureac.diff \
-                                    patch-simplepreferences.diff
-
-            configure.args-replace  --disable-qt --enable-qt
-
-            PortGroup               qt4 1.0
-        }
-        variant qt5 conflicts qt4 description {Build using Qt5 UI. This will use qt5-mac. Experimental and probably dysfunctional} {
-            patchfiles-append       patch-vlc-qt-configureac.diff \
-                                    patch-simplepreferences.diff
-
-            configure.args-replace  --disable-qt --enable-qt
-
-            PortGroup               qt5 1.0
-        }
-    }
-
     variant quartz {
         depends_lib-delete      port:libsamplerate
         depends_lib-append      port:BGHUDAppKit
@@ -452,17 +351,15 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
     if {${subport} ne "lib${name}"} {
         variant full \
-            requires huge quartz smb x11 \
+            requires huge quartz smb \
             description {Enable all variants except x11 (and except freerdp, currently)} {}
     } else {
         variant full \
             requires huge quartz smb \
-            description {Enable all variants (except freerdp, currently)} {}
+            description {Enable all variants except x11 (and except freerdp, currently)} {}
     }
 
-#     # this patchfile can probably go with VLC 2.2.2, or should be reviewed then.
-#     # update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
-    patchfiles-append           patch-for-lua52.diff
+    patchfiles-append           patch-for-lua53.diff
 
     # make 10.12 and later ignore all QTKit code in modules/gui/macosx/open.m
     patchfiles-append           patch-really-no-qtkit.diff
@@ -503,7 +400,7 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         post-destroot {
             file delete {*}[glob ${destroot}${prefix}/lib/vlc/plugins/*/*.la]
 
-            if {[variant_isset qt4] || [variant_isset qt5] || [variant_isset quartz]} {
+            if {[variant_isset quartz]} {
                 if {${subport} ne "lib${name}"} {
                     copy ${worksrcpath}/VLC.app ${destroot}${applications_dir}/VLC.app
 
@@ -547,24 +444,11 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             }
         }
         post-activate {
-            if {[variant_isset qt4] || [variant_isset qt5]} {
-                notes-append "The Qt interface modules for VLC are currently dysfunctional. If you encounter bugs with them, please file them with VLC and not MacPorts."
-            }
             system "${prefix}/lib/vlc/vlc-cache-gen -f ${prefix}/lib/vlc"
         }
     }
     notes-append "MIDI support requires installing one or more SoundFont files,\
         in ${prefix}/share/sounds/sf2, for instance from port:generaluser-soundfont."
-}
-
-##
-#################  support port ffmpeg-VLC  ##################
-##
-if {${subport} eq "ffmpeg-VLC"} {
-    if {[catch {source "${portpath}/Portfile.ffmpeg.tcl"} err]} {
-        puts stderr "Error reading Portfile.ffmpeg.tcl: $err"
-        return 1;
-    }
 }
 
 # kate: backspace-indents true; indent-pasted-text true; indent-width 4; keep-extra-spaces true; remove-trailing-spaces modified; replace-tabs true; replace-tabs-save true; syntax Tcl/Tk; tab-indents true; tab-width 4;

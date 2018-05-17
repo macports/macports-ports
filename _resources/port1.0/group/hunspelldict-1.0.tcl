@@ -42,10 +42,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
         master_sites \
             http://archive.services.openoffice.org/pub/mirror/OpenOffice.org/contrib/dictionaries/
 
-        extract.dir ${worksrcpath}
-        pre-extract {
-            xinstall -d ${worksrcpath}
-        }
+        extract.mkdir   yes
 
         use_configure no
         build {}
