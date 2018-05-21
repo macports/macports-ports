@@ -3,8 +3,7 @@ PortGroup               compiler_blacklist_versions 1.0
 
 name                    libcxx
 epoch                   1
-version                 5.0.1
-revision                2
+version                 6.0.0
 categories              lang
 platforms               darwin
 license                 MIT NCSA
@@ -15,7 +14,9 @@ long_description        ${description} \
                         replace the host version in order to be used.  On Snow Leopard and earlier, this is done \
                         automatically because there is no existing host version of this library.  On Lion and later, \
                         users must build the port with +replacemnt_libcxx and install the root manually if they wish \
-                        to replace the existing host implementation.
+                        to replace the existing host implementation. They can also use the +runtime variant which installs \
+                        copies of the library that can be loaded via DYLD_INSERT_LIBRARIES or the optlibs script\; \
+                        applications started that way will then use a more recent libc++ than the host provides.
 
 homepage                http://libcxx.llvm.org/
 
@@ -23,6 +24,7 @@ master_sites            http://www.llvm.org/releases/${version}/
 dist_subdir             llvm
 
 use_xz                  yes
+set use_cmake           yes
 
 set libcxxabi_distname  libcxxabi-${version}.src
 set libcxx_distname     libcxx-${version}.src
@@ -30,22 +32,82 @@ set libcxx_distname     libcxx-${version}.src
 distfiles               ${libcxxabi_distname}${extract.suffix} \
                         ${libcxx_distname}${extract.suffix}
 
-checksums               libcxxabi-5.0.1.src.tar.xz \
-                        rmd160  93b74a0644c1afd565938fba5e21b200b206c72a \
-                        sha256  5a25152cb7f21e3c223ad36a1022faeb8a5ac27c9e75936a5ae2d3ac48f6e854 \
-                        libcxx-5.0.1.src.tar.xz \
-                        rmd160  1e5a22e62515382488f232039e31f0b12c08ca4f \
-                        sha256  fa8f99dd2bde109daa3276d529851a3bce5718d46ce1c5d0806f46caa3e57c00
+checksums               ${libcxxabi_distname}${extract.suffix} \
+                        rmd160  93f0cf438a5168e225e11c23a0cda6695fe3b518 \
+                        sha256  91c6d9c5426306ce28d0627d6a4448e7d164d6a3f64b01cb1d196003b16d641b \
+                        ${libcxx_distname}${extract.suffix} \
+                        rmd160  5d311ab0546181cf3084c520826786a7a9681a95 \
+                        sha256  70931a87bde9d358af6cb7869e7535ec6b015f7e6df64def6d2ecdd954040dd9
+
+if {[tbool use_cmake]} {
+    revision            [expr ${revision} + 1]
+    PortGroup           cmake 1.1
+    distfiles-append    llvm-${version}.src${extract.suffix}
+    worksrcdir          llvm-${version}.src
+    checksums-append    llvm-${version}.src${extract.suffix} \
+                        rmd160  3cffa52b8842dd5858caa4cf7a998059486e462c \
+                        sha256  1ff53c915b4e761ef400b803f07261ade637b0c269d99569f18040f3dcee4408
+
+    # these are used during the build but not linked to by the resulting libraries
+    depends_build-append \
+                        port:libedit \
+                        port:libffi \
+                        port:ncurses \
+                        port:libxml2 \
+                        port:zlib
+
+    post-extract {
+        file rename ${workpath}/${libcxxabi_distname} ${worksrcpath}/projects/libcxxabi
+        file rename ${workpath}/${libcxx_distname} ${worksrcpath}/projects/libcxx
+    }
+
+    patch.pre_args      -Np1
+    patchfiles-append   3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
+                        3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
+                        patch-accept-build_types.diff \
+                        patch-install_location_version_and_name.diff
+
+    configure.args-append \
+                        -DLLVM_PATH=${worksrcpath} \
+                        -DLIBCXX_ENABLE_ASSERTIONS=OFF
+
+    cmake.save_configure_cmd "log too"
+
+    set libcxxabi_worksrcpath \
+                        ${build.dir}
+    set libcxx_worksrcpath \
+                        ${build.dir}
+
+    build.target        cxx
+
+    test.run            yes
+    test.dir            ${build.dir}
+    test.target         check-cxx
+
+    post-build {
+        file delete -force ${libcxxabi_worksrcpath}/lib/libc++abi.dylib ${libcxxabi_worksrcpath}/lib/libc++abi.1.dylib
+        file rename ${libcxxabi_worksrcpath}/lib/libc++abi.6.0.0.dylib ${libcxxabi_worksrcpath}/lib/libc++abi.dylib
+        file delete -force ${libcxx_worksrcpath}/lib/libc++.dylib ${libcxx_worksrcpath}/lib/libc++.1.dylib
+        file rename ${libcxx_worksrcpath}/lib/libc++.6.0.0.dylib ${libcxx_worksrcpath}/lib/libc++.1.dylib
+    }
+
+} else {
+
+    ## legacy build using the buildit script
+
+    set libcxxabi_worksrcpath \
+                        [file join ${workpath} ${libcxxabi_distname}]
+    set libcxx_worksrcpath \
+                        [file join ${workpath} ${libcxx_distname}]
+
+    use_configure       no
+}
 
 variant universal {}
 default_variants +universal
-use_configure no
 
 set roots_path ${prefix}/var/system_roots/
 set root_name  ${name}-${version}-${revision}
-
-set libcxxabi_worksrcpath   [file join ${workpath} ${libcxxabi_distname}]
-set libcxx_worksrcpath      [file join ${workpath} ${libcxx_distname}]
 
 platform darwin {
     if {${os.major} < 9} {
@@ -59,7 +121,7 @@ platform darwin {
         post-activate {
             set dirs /
             if {${os.subplatform} eq "macosx"} {
-                lappend dirs ${developer_dir}/SDKs/MacOSX[join [lrange [split ${macosx_version} .] 0 1] .].sdk
+                lappend dirs ${developer_dir}/SDKs/MacOSX${macosx_version}.sdk
             }
             foreach d ${dirs} {
                 system -W ${d} "tar xzf ${roots_path}/${root_name}.tgz"
@@ -69,73 +131,97 @@ platform darwin {
 }
 
 variant replacemnt_libcxx description {EXPERTS ONLY: Build a replacement libcxxabi and libcxx even if it is already part of the base OS.} {}
-
-if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
-    compiler.blacklist *gcc* {clang < 500}
-
-    # clang 3.5 and newer are conditionally blacklisted to prevent dependency cycles
-    foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 devel} {
-        if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
-            compiler.blacklist-append macports-clang-${ver}
-        }
+variant runtime description "Install the libcxx library so that it can be used with DYLD_INSERT_LIBRARIES" {}
+if {[variant_isset runtime]} {
+    depends_build-append \
+                        port:cctools
+    notes-append "Start applications via ${prefix}/bin/optlibs to use the latest libc++, or\
+         set DYLD_INSERT_LIBRARIES as illustrated in that script."
+}
+if {[tbool use_cmake]} {
+    if {[variant_isset runtime]} {
+        configure.args-append \
+                        -DLIBCXX_INSTALL_PREFIX=${prefix}
+    } else {
+        cmake.install_prefix \
+                        /usr
     }
+}
 
-    # clang 3.8 and newer are blacklisted due to a build failure in stdlib.h that needs to ne triaged
-    foreach ver {3.8 3.9 4.0 5.0 devel} {
-        compiler.blacklist-append macports-clang-${ver}
-    }
 
+if {${os.major} < 11 || [variant_isset replacemnt_libcxx] || [variant_isset runtime]} {
     supported_archs i386 x86_64 ppc
 
-    if {[variant_isset universal] && [lsearch ${universal_archs} ppc] != -1} {
-        # http://trac.macports.org/wiki/LibcxxOnOlderSystems#Leopardppc
-        compiler.whitelist macports-clang-3.7 macports-clang-3.6
+    if {![tbool use_cmake]} {
+
+        ## legacy build using the buildit script
+
+        compiler.blacklist *gcc* {clang < 500}
+
+        # clang 3.5 and newer are conditionally blacklisted to prevent dependency cycles
+        foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 6.0 devel} {
+            if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
+                compiler.blacklist-append macports-clang-${ver}
+            }
+        }
+
+        # clang 3.8 and newer are blacklisted due to a build failure in stdlib.h that needs to ne triaged
+        foreach ver {3.8 3.9 4.0 5.0 6.0 devel} {
+            compiler.blacklist-append macports-clang-${ver}
+        }
+
+        if {[variant_isset universal] && [lsearch ${universal_archs} ppc] != -1} {
+            # http://trac.macports.org/wiki/LibcxxOnOlderSystems#Leopardppc
+            compiler.whitelist macports-clang-3.7 macports-clang-3.6
+        }
+
+        post-extract {
+            # delete cxa_noexception.cpp as we're not using the cmake build system
+            # cmake would choose either cxa_exceptions or cxa_noexceptions
+            # but the buildit script just builds every file in the src directory and you can't have both
+            delete ${libcxxabi_worksrcpath}/src/cxa_noexception.cpp
+
+            # cmake doesn't include this for darwin builds, so nuke it here as well
+            delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
+
+            file mkdir ${workpath}/build
+            file copy ${filespath}/legacy/Makefile ${workpath}/build
+        }
+
+        patch.dir ${workpath}
+        patch.pre_args -p0
+
+        patchfiles-append \
+            legacy/0001-Update-buildit-script-to-read-EXTRA_LDFLAGS-from-the.patch \
+            legacy/0002-Define-_LIBCPP_BUILDING_LIBRARY-during-build-to-supp.patch \
+            legacy/0003-buildit-Use-undefined-dynamic_lookup-when-linking.patch \
+            legacy/3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
+            legacy/3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
+            legacy/3003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
+            legacy/3004-Revert-Remove-the-buildit-and-testit-scripts-they-ha.patch \
+            legacy/3005-buildit-build-fix-for-Leopard.patch \
+            legacy/3006-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
+            legacy/3007-MacPorts-Use-LIBCXXABI_PATH-for-path-to-build-time-l.patch \
+            legacy/3008-buildit-Fix-CFLAGS-for-Leopard-and-Snow-Leopard-to-i.patch
+
+        post-patch {
+            system "chmod 755 ${libcxx_worksrcpath}/lib/buildit"
+        }
+
+        build.dir ${workpath}/build
+        build.env-append \
+            CC="${configure.cc}" \
+            CXX="${configure.cxx}" \
+            RC_XBS=1 \
+            RC_ProjectSourceVersion="${version}" \
+            RC_CFLAGS="[get_canonical_archflags] -I${libcxxabi_worksrcpath}/include -I${libcxx_worksrcpath}/include ${configure.optflags}" \
+            TRIPLE="-apple-darwin${os.major}"
+        build.args-append \
+            LIBCXXABI_PATH=${libcxxabi_worksrcpath} \
+            LIBCXX_PATH=${libcxx_worksrcpath} \
+            LIBCXXABI_DYLIB_PATH=${build.dir}/libc++abi.dylib
+
     }
-
-    post-extract {
-        # delete cxa_noexception.cpp as we're not using the cmake build system
-        # cmake would choose either cxa_exceptions or cxa_noexceptions
-        # but the buildit script just builds every file in the src directory and you can't have both
-        delete ${libcxxabi_worksrcpath}/src/cxa_noexception.cpp
-
-        # cmake doesn't include this for darwin builds, so nuke it here as well
-        delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
-
-        file mkdir ${workpath}/build
-        file copy ${filespath}/Makefile ${workpath}/build
-    }
-
-    patch.dir ${workpath}
-    patch.pre_args -p0
-    patchfiles-append \
-        0001-Update-buildit-script-to-read-EXTRA_LDFLAGS-from-the.patch \
-        0002-Define-_LIBCPP_BUILDING_LIBRARY-during-build-to-supp.patch \
-        0003-buildit-Use-undefined-dynamic_lookup-when-linking.patch \
-        3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
-        3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
-        3003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
-        3004-Revert-Remove-the-buildit-and-testit-scripts-they-ha.patch \
-        3005-buildit-build-fix-for-Leopard.patch \
-        3006-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
-        3007-MacPorts-Use-LIBCXXABI_PATH-for-path-to-build-time-l.patch \
-        3008-buildit-Fix-CFLAGS-for-Leopard-and-Snow-Leopard-to-i.patch
-
-    post-patch {
-        system "chmod 755 ${libcxx_worksrcpath}/lib/buildit"
-    }
-
-    build.dir ${workpath}/build
-    build.env-append \
-        CC="${configure.cc}" \
-        CXX="${configure.cxx}" \
-        RC_XBS=1 \
-        RC_ProjectSourceVersion="${version}" \
-        RC_CFLAGS="[get_canonical_archflags] -I${libcxxabi_worksrcpath}/include -I${libcxx_worksrcpath}/include ${configure.optflags}" \
-        TRIPLE="-apple-darwin${os.major}"
-    build.args-append \
-        LIBCXXABI_PATH=${libcxxabi_worksrcpath} \
-        LIBCXX_PATH=${libcxx_worksrcpath} \
-        LIBCXXABI_DYLIB_PATH=${build.dir}/libc++abi.dylib
 
     # We want to use the host's libc++ everywhere because we want to ensure
     # that only *ONE* copy of this library is in any process's address space.
@@ -147,22 +233,39 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
     # runtime.
 
     destroot {
-        xinstall -m 755 -d ${destroot}${roots_path}/${root_name}/usr/lib
+        if {[variant_isset replacemnt_libcxx]} {
+            xinstall -m 755 -d ${destroot}${roots_path}/${root_name}/usr/lib
 
-        xinstall -m 755 ${libcxxabi_worksrcpath}/lib/libc++abi.dylib ${destroot}${roots_path}/${root_name}/usr/lib
+            xinstall -m 755 ${libcxxabi_worksrcpath}/lib/libc++abi.dylib ${destroot}${roots_path}/${root_name}/usr/lib
 
-        xinstall -m 755 ${libcxx_worksrcpath}/lib/libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib
-        ln -s libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++.dylib
+            xinstall -m 755 ${libcxx_worksrcpath}/lib/libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib
+            ln -s libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++.dylib
 
-        xinstall -m 755 -d ${destroot}${roots_path}/${root_name}/usr/include
-        xinstall -m 755 ${libcxxabi_worksrcpath}/include/__cxxabi_config.h ${destroot}${roots_path}/${root_name}/usr/include
-        xinstall -m 755 ${libcxxabi_worksrcpath}/include/cxxabi.h ${destroot}${roots_path}/${root_name}/usr/include
+            if {[variant_isset runtime]} {
+                system "install_name_tool -id /usr/lib/libc++abi.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++abi.dylib"
+                system "install_name_tool -id /usr/lib/libc++.1.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++.1.dylib"
+                system "install_name_tool -change ${prefix}/lib/libc++abi.1.dylib /usr/lib/libc++abi.dylib ${destroot}${roots_path}/${root_name}/usr/lib/libc++.1.dylib"
+            }
 
-        system -W ${destroot}${roots_path}/${root_name} "tar czf ../${root_name}.tgz ."
-        delete ${destroot}${roots_path}/${root_name}
+            system -W ${destroot}${roots_path}/${root_name} "tar czf ../${root_name}.tgz ."
+            delete ${destroot}${roots_path}/${root_name}
+        }
+        if {[variant_isset runtime]} {
+            # install only the runtime libraries so they will not be picked up by the linker/editor!
+            xinstall -m 755 ${libcxxabi_worksrcpath}/lib/libc++abi.dylib ${destroot}${prefix}/lib/libc++abi.1.dylib
+            xinstall -m 755 ${libcxx_worksrcpath}/lib/libc++.1.dylib ${destroot}${prefix}/lib/
+            if {![tbool use_cmake]} {
+                system "install_name_tool -id ${prefix}/lib/libc++abi.1.dylib ${destroot}${prefix}/lib/libc++abi.1.dylib"
+                system "install_name_tool -id ${prefix}/lib/libc++.1.dylib ${destroot}${prefix}/lib/libc++.1.dylib"
+                system "install_name_tool -change /usr/lib/libc++abi.dylib ${prefix}/lib/libc++abi.1.dylib ${destroot}${prefix}/lib/libc++.1.dylib"
+            }
+            xinstall -m 755 ${filespath}/optlibs.sh ${destroot}${prefix}/bin/optlibs
+            reinplace "s|@PREFIX@|${prefix}|g" ${destroot}${prefix}/bin/optlibs
+        }
     }
 } else {
     distfiles
+    fetch {}
     build {}
     destroot {
         xinstall -d ${destroot}${prefix}/share/doc/${name}
