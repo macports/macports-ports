@@ -1,12 +1,12 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           mpi 1.0
+PortGroup           github 1.0
+PortGroup           cxx11 1.1
 PortGroup           muniversal 1.0
 
-name                gdal
-version             2.3.0
-revision            0
+github.setup        OSGeo gdal 4243624
+version             2.3.0.20180521
 categories          gis
 license             MIT BSD
 platforms           darwin
@@ -24,19 +24,32 @@ long_description    GDAL is a translator library for raster geospatial \
                     similar capability for simple features vector data.
 
 homepage            http://www.gdal.org/
-master_sites        http://download.osgeo.org/gdal/${version}/
 
-checksums           rmd160  26433559e74b07ff8c7c32cf59042b478e86e336 \
-                    sha256  2944bbfee009bf1ca092716e4fd547cb4ae2a1e8816186236110c22f11c7e1e9
+checksums           rmd160  eb822afdcffce6f0c1f3f059c37f29a95d40d7c4 \
+                    sha256  60325d2cfbcad85a5096172eb2ef45f3ad45b3199de1d48274606619de4f1cc7 \
+                    size    21378413
 
-compilers.choose    cc cxx
-mpi.setup
+worksrcdir          ${worksrcpath}/gdal
+patchfiles          patch-gdalwarpkernel_opencl_h.diff \
+                    patch-gdalwarpkernel_opencl_cpp.diff \
+                    patch-apps_GNUmakefile.diff \
+                    patch-ogr_p_h.diff \
+                    patch-ogr_api_cpp.diff \
+                    patch-scripts-GNUmakefile.diff
+
+# see https://trac.macports.org/ticket/55752
+platform darwin {
+    if {${os.major} < 12} {
+        patchfiles-append   MacTypes.diff
+    }
+}
 
 depends_build-append \
                     port:bash-completion \
                     port:pkgconfig
 
 depends_lib-append  port:zlib \
+                    port:zstd \
                     port:libpng \
                     port:giflib \
                     port:proj \
@@ -50,19 +63,21 @@ set OPENCLBASE      "/System/Library/Frameworks/OpenCL.framework/"
 configure.universal_args-delete --disable-dependency-tracking
 
 configure.args-append \
-                    --with-local=${prefix} \
-                    --with-libz=${prefix} \
+                    --with-local=yes \
+                    --with-libz=yes \
+                    --with-zstd=yes \
                     --without-liblzma \
-                    --with-png=${prefix} \
+                    --with-png=yes \
                     --with-libtiff=internal \
                     --with-geotiff=internal \
                     --with-jpeg=internal\
-                    --with-gif=${prefix} \
-                    --with-static-proj4=${prefix}/lib/proj5 \
+                    --with-charls=no \
+                    --with-gif=yes \
+                    --with-proj=${prefix}/lib/proj5 \
                     --with-qhull=yes \
                     --with-pam \
-                    --with-sqlite3=${prefix} \
-                    --with-spatialite=${prefix} \
+                    --with-sqlite3=yes \
+                    --with-spatialite=yes \
                     --without-pg \
                     --without-grass \
                     --without-libgrass \
@@ -101,26 +116,9 @@ configure.args-append \
 # Always choose internal libjson code (#44098)
 configure.args-append   --with-libjson-c=internal
 
-patchfiles          patch-gdalwarpkernel_opencl_h.diff \
-                    patch-gdalwarpkernel_opencl_cpp.diff \
-                    patch-apps_GNUmakefile.diff \
-                    patch-ogr_p_h.diff \
-                    patch-ogr_api_cpp.diff \
-                    patch-scripts-GNUmakefile.diff
-
-# see https://trac.macports.org/ticket/55752
-platform darwin {
-    if {${os.major} < 12} {
-        patchfiles-append   MacTypes.diff
-    }
-}
-
 # for all platforms without C++11 support
 # this is just a suboptimal approximation (doesn't hold for gcc)
-if {${configure.cxx_stdlib} ne "libc++"} {
-    configure.args-append \
-                    --without-cpp11
-} else {
+if {${configure.cxx_stdlib} eq "libc++"} {
     configure.args-append   --with-cpp14
 }
 
@@ -168,10 +166,36 @@ variant curl description {Enable curl support} {
     configure.args-append   --with-curl=${prefix}/bin/curl-config
 }
 
+variant grass description {Enable GRASS 7 GIS I/O} {
+    if {[catch {lindex [registry_active grass7] 0}]} {
+        ui_error "The grass variant requires grass 7 to be installed."
+        ui_error "Since grass7 depends on gdal, please first install gdal WITHOUT the grass variant."
+        ui_error "Then install grass7, then reinstall gdal with the grass variant."
+        return -code error "Missing GRASS 7." 
+    } 
+
+    # Workaround a missing header (trac issue #633)
+    post-configure {
+        reinplace -E "s|(^CPPFLAGS.*)|\\1 \$(PROJ_INCLUDE)|" \
+            ${worksrcpath}/frmts/grass/GNUmakefile
+        reinplace -E "s|(^CPPFLAGS.*)|\\1 \$(PROJ_INCLUDE)|" \
+            ${worksrcpath}/ogr/ogrsf_frmts/grass/GNUmakefile
+    }
+
+    configure.args-delete   --without-grass
+    configure.args-append   --with-grass=${prefix}/share/grass-7.4.0
+}
+
+variant charls description {Build with CharLS} {
+    depends_lib-append      port:charls
+    configure.args-delete   --with-charls=no
+    configure.args-append   --with-charls=yes
+}
+
 variant mrsid description {Enable MrSID file format} {
     depends_lib-append      port:geoexpress-sdk
     configure.args-delete   --without-mrsid
-    configure.args-append       --with-mrsid=${prefix}/share/Geo_DSDK/Raster_DSDK
+    configure.args-append   --with-mrsid=${prefix}/share/Geo_DSDK/Raster_DSDK
 }
 
 variant ecw description {Enable ECW file format} {
@@ -227,14 +251,14 @@ variant hdf5 description {Enable HDF5 file format} {
     depends_lib-append      port:hdf5
     configure.args-delete   --without-hdf5
     configure.args-append   --with-hdf5=${prefix}
-    mpi.enforce_variant     hdf5
+#    mpi.enforce_variant     hdf5
 }
 
 variant netcdf description {Enable NetCDF file format} {
     depends_lib-append      port:netcdf
     configure.args-delete   --without-netcdf
     configure.args-append   --with-netcdf=${prefix}
-    mpi.enforce_variant     netcdf
+#    mpi.enforce_variant     netcdf
 }
 
 variant grib description {Enable GRIB (weather) file format} {
@@ -246,7 +270,7 @@ variant jasper \
     description {Enable JasPer JPEG-2000 format support} {
     depends_lib-append      port:jasper
     configure.args-delete   --without-jasper
-    configure.args-append   --with-jasper=${prefix}
+    configure.args-append   --with-jasper=${prefix}/include
 }
 
 variant openjpeg \
