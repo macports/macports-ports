@@ -1,14 +1,36 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           github 1.0
 
 name                distcc
-version             3.2rc1
-revision            1
+subport distcc-devel {}
+
+if {${subport} eq "distcc"} {
+    conflicts-append "distcc-devel"
+    github.setup    distcc distcc 3.3 v
+    checksums       rmd160  fa7b0112200aaf14d1b300a0c9105eb96129db1c \
+                    sha256  cb35875659e44becca4c78b04ae9b64f6abb40f75f80cafac61b5f48abb0c363
+    set PPREFIX     "./"
+} else {
+    conflicts-append "distcc"
+    # fetch from RJVB's fork which contains the patches to upstream
+    github.setup    RJVB distcc 145cdb4f9630af910f96d379bbde9cd0da376c28
+    fetch.type      git
+    version         3.3.0.10
+    worksrcdir      ${name}-git
+    distname        ${name}-git
+    set PPREFIX     "devel/"
+    patch.pre_args  -Np1
+}
+
 categories          devel net
-platforms           darwin
+platforms           darwin linux
 maintainers         nomaintainer
 license             GPL-2+
+
+variant monitor description {build the GTk2 server monitor utility} {}
+variant zeroconf description {distccd can use ZeroConf to advertise itself (experimental!)} {}
 
 description         Distributed C compiler
 
@@ -20,14 +42,82 @@ long_description    distcc is a program to distribute compilation of C or \
                     compile but is often 2 to 3 times faster.
 
 homepage            http://distcc.org/
-master_sites        googlecode
-use_bzip2           yes
 
-checksums           rmd160  505447b910d90ea403a98fe0d0a3a0fa92cd7039 \
-                    sha256  311671e844625d7fdb18dd3d096cd855751cfe8de13827682bcb7beff9133b30
+if {${subport} eq "distcc"} {
+    patchfiles-append \
+                    ${PPREFIX}patch-no-fstatat.diff \
+                    ${PPREFIX}patch-no-faccessat.diff \
+                    ${PPREFIX}patch-zeroconf-reg.c.diff \
+                    ${PPREFIX}patch-allow-private-nargs.diff \
+                    ${PPREFIX}patch-whitelistdir.diff
 
-depends_lib         port:popt
+    post-patch {
+        reinplace "s|@PREFIX@|${prefix}|g" \
+                    ${worksrcpath}/src/serve.c \
+                    ${worksrcpath}/src/daemon.c
+        # maintainer convenience: configure.ac was changed so autoreconf
+        # required ... this time (= not every time a `port configure` is run).
+        file delete -force ${worksrcpath}/configure
+    }
+}
 
-configure.args      ac_cv_path_PYTHON= \
+configure.args      --disable-pump-mode \
                     --disable-Werror \
-                    --without-avahi
+                    --enable-rfc2553
+platform darwin {
+    depends_lib     port:popt
+    configure.args-append \
+                    --without-avahi \
+                    --without-libiberty
+}
+
+if {[variant_isset monitor]} {
+    platform darwin {
+        depends_lib-append \
+                    port:gtk2 \
+                    port:libglade2
+    }
+    configure.args-append \
+                    --with-gtk
+    notes-append "Monitoring the distributed build of `port build foo configuredistcc=yes`:\n\
+> env DISTCC_DIR=`port work foo`/.home/.distcc distccmon-gnome"
+}
+if {[variant_isset zeroconf]} {
+    platform darwin {
+        depends_lib-append \
+                    port:avahi
+    }
+    configure.args-replace \
+                    --without-avahi \
+                    --with-avahi
+}
+
+# run autogen.sh if configure isn't present
+use_autoreconf      [expr ![file exists ${worksrcpath}/configure]]
+autoreconf.cmd      ./autogen.sh
+autoreconf.pre_args
+autoreconf.args
+depends_build-append port:libtool port:autoconf port:automake
+
+post-destroot {
+    xinstall -m 755 -d ${destroot}${prefix}/lib/distcc
+    ln -s ../../bin/distcc ${destroot}${prefix}/lib/distcc/clang
+    ln -s ../../bin/distcc ${destroot}${prefix}/lib/distcc/clang++
+    file rename ${destroot}${prefix}/etc/distcc/hosts  ${destroot}${prefix}/etc/distcc/hosts.default
+}
+
+post-activate {
+    if {![file exists ${prefix}/etc/distcc/hosts]} {
+        ln -s hosts.default ${prefix}/etc/distcc/hosts
+        ui_warn "Please consider replacing the symlinked ${prefix}/etc/distcc/hosts with a regular file listing the available build slaves"
+    }
+}
+
+pre-deactivate {
+    if {[file type ${prefix}/etc/distcc/hosts] eq "link" && [file link ${prefix}/etc/distcc/hosts] eq "hosts.default"} {
+        file delete ${prefix}/etc/distcc/hosts
+    }
+}
+
+notes-append "A typical distcc server start command would look like this:\n\
+> distccd --daemon --allow-private --no-detach --log-level=error &"
