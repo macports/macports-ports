@@ -6,10 +6,9 @@
 # Usage:
 #
 #   PortGroup               octave 1.0
-#   octave.setup            module version
+#   octave.module           module
 #
-# where module is the name of the module (e.g. communications) and
-# version is its version.
+# where module is the name of the module (e.g. communications)
 
 options octave.module
 
@@ -41,34 +40,48 @@ proc universal_setup {args} {
 
 proc octave.setup {module version} {
     global octave.module
-
     octave.module               ${module}
-    name                        octave-${module}
     version                     ${version}
-    categories                  math science
-    homepage                    http://octave.sourceforge.net/${octave.module}/
-    master_sites                sourceforge:octave
-    distname                    ${octave.module}-${version}
-
-    depends_lib-append          path:bin/octave:octave
-
-    worksrcdir                  ${octave.module}
-
-    # do not build in parallel; many can't, and these are small builds
-    # anyway, so no major need for this.
-
-    use_parallel_build          no
-
-    # configure_make.m calls "make --jobs n ..."
-    # use environmental variable to set the number of jobs to 1
-    # parallel build is a problem for octave-optiminterp
-
-    configure.env-append        OMP_NUM_THREADS=1
-
-    livecheck.type              regex
-    livecheck.url               https://octave.sourceforge.io/${octave.module}/
-    livecheck.regex             "Package Version:</td><td>(\\d+(\\.\\d+)*)</td>"
 }
+
+option_proc octave.module octave.set_module
+proc octave.set_module {opt action args} {
+    global octave.module
+    if {$action eq "set"} {
+        name     octave-${octave.module}
+        homepage https://octave.sourceforge.io/${octave.module}/
+    }
+}
+
+default categories   {math science}
+default master_sites {sourceforge:octave}
+default distname     {${octave.module}-${version}}
+default worksrcdir   {${octave.module}}
+# do not build in parallel; many can't, and these are small builds
+# anyway, so no major need for this.
+default use_parallel_build {no}
+default livecheck.type     {regex}
+default livecheck.url      {https://octave.sourceforge.io/${octave.module}/}
+default livecheck.regex    {"Package Version:</td><td>(\\\\d+(.\\\\d+)*)</td>"}
+
+depends_lib-append   path:bin/octave:octave
+# do not force all Portfiles to switch from depends_lib to depends_lib-append
+proc octave.add_dependencies {} {
+    depends_lib-delete path:bin/octave:octave
+    depends_lib-append path:bin/octave:octave
+}
+port::register_callback octave.add_dependencies
+
+# configure_make.m calls "make --jobs n ..."
+# use environmental variable to set the number of jobs to 1
+# parallel build is a problem for octave-optiminterp
+configure.env-append OMP_NUM_THREADS=1
+# do not force all Portfiles to switch from configure.env to configure.env-append
+proc octave.add_env {} {
+    configure.env-delete OMP_NUM_THREADS=1
+    configure.env-append OMP_NUM_THREADS=1
+}
+port::register_callback octave.add_env
 
 post-extract {
     # rename the effective worksrcdir to always be ${octave.module}
