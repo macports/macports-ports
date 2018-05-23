@@ -10,7 +10,12 @@
 #
 # where module is the name of the module (e.g. communications)
 
-options octave.module
+options octave.module octave.config_h
+
+# do not use this option unless absolutely necessary
+# see comments below
+# this should eventually be removed
+default octave.config_h {no}
 
 # some header files from Octave require C++-11
 PortGroup cxx11 1.1
@@ -204,4 +209,32 @@ post-activate {
     set octave_install_share ${prefix}/share/octave/packages
     set octave_install_lib   ${prefix}/lib/octave/packages
     system "${prefix}/bin/octave-cli -q -f -H --eval 'try; pkg prefix ${octave_install_share} ${octave_install_lib}; pkg -verbose -global rebuild; disp(lasterror.message); catch; exit(1); end_try_catch;'"
+}
+
+# octave/config.h was removed from octave 4.4
+# some packages, however, still depend on it for information
+# see https://savannah.gnu.org/bugs/?41027
+# eventually, this code should be removed
+default compiler.cpath {[octave._cpath]}
+proc octave._cpath {} {
+    global prefix octave.config_h worksrcpath
+    if {${octave.config_h}} {
+        return "${prefix}/include ${worksrcpath}/macports_compat ${worksrcpath}/macports_compat/octave"
+    } else {
+        return ${prefix}/include
+    }
+}
+
+pre-configure {
+    if {${octave.config_h}} {
+        xinstall -d -m 0755 ${worksrcpath}/macports_compat/octave
+        set configf [open "${worksrcpath}/macports_compat/octave/config.h" w 0644]
+
+        puts  ${configf} "#include <octave/octave-config.h>"
+        foreach v {LOCALVERFCNFILEDIR LOCALVEROCTFILEDIR LOCALVERARCHLIBDIR CANONICAL_HOST_TYPE} {
+            set mv [exec ${prefix}/bin/octave-config -p ${v}]
+            puts  ${configf} "#define OCTAVE_${v}  \"${mv}\""
+        }
+        close ${configf}
+    }
 }
