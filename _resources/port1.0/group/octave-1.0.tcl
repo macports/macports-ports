@@ -128,10 +128,7 @@ pre-configure {
     configure.cxxflags-append -std=c++11
 }
 
-build.cmd /usr/bin/true
-build.pre_args
-build.args
-build.post_args
+build {}
 
 pre-destroot {
     set octave_api_version [exec "${prefix}/bin/octave-config" -p API_VERSION]
