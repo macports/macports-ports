@@ -90,7 +90,8 @@ configure.universal_args-delete --disable-dependency-tracking
 
 pre-configure {
 
-    system -W ${workpath} "/usr/bin/tar cvfz ${distname}.tar.gz ${octave.module}"
+    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    system -W ${workpath} "${tar} cvfz ${distname}.tar.gz ${octave.module}"
 
     if { [variant_exists universal] && [variant_isset universal] } {
         global merger_configure_env
