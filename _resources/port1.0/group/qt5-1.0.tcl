@@ -87,13 +87,13 @@ proc qt5.get_default_name {} {
         #
         # OS X Yosemite (10.10)
         #
-        # Qt 5.10: Not Supported but seems to work
+        # Qt 5.10: Not Supported and QtWebEngine fails
         # Qt 5.9:  Supported
         # Qt 5.8:  Supported
         # Qt 5.7:  Supported
         # Qt 5.6:  Supported
         #
-        return qt5
+        return qt59
         #
     } elseif { ${os.major} == 15 } {
         #
