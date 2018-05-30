@@ -15,8 +15,7 @@ git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 git checkout -qf macports/master
 git checkout -qf -
-sudo patch /opt/local/bin/portindex _ci/patch-portindex.diff
-portindex
+portindex -e
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
 export PATH="${PWD}/../mpbb:$PATH"
