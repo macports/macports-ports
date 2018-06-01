@@ -1,34 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2011-2013, 2015-2016 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of The MacPorts Project nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#
 # This PortGroup helps create an application bundle the user can open from the
 # Finder or the Dock. This is useful for ports that install a program built
 # with an SDK like SDL or Qt that, when launched, causes an icon to appear in
@@ -86,8 +57,10 @@ default app.executable {${name}}
 # The default is empty; if no icon graphic is available for this software, this
 # is fine. You can supply the path to an existing .icns file, or the path to a
 # .png or other graphic file that the makeicns program can convert. A build
-# dependency on makeicns will be automatically added if needed. Paths may
-# absolute or relative to ${worksrcpath}.
+# dependency on makeicns will be automatically added if needed. You can also
+# supply the path to a .svg file and it will be rasterized to the different icon
+# formats. A build dependency on librsvg will be automatically added if needed.
+# Paths may be absolute or relative to ${worksrcpath}.
 #
 # Relates to Info.plist key CFBundleIconFile.
 
@@ -143,6 +116,31 @@ proc app.get_default_identifier {} {
 }
 
 
+# app.hide_dock_icon: hide the dock icon
+#
+# x11 apps do not receive a proper indication that application has successfully
+# launched, and so the icon keeps bouncing in the dock. Until this is properly
+# fixed, just hide the the dock icon for now
+
+options app.hide_dock_icon
+default app.hide_dock_icon  {[app.get_default_hide_dock_icon]}
+
+proc app.get_default_hide_dock_icon {} {
+    return [variant_exists x11] && [variant_isset x11]
+}
+
+
+# app.use_launch_script: use a bash launch script instead of a symlink to the executable
+#
+# the default behaviour is to symlink the executable into the bundle.
+# However, this has two issues -- it passes -psn to the executable,
+# which some ports can't handle. Also, it doesn't set up the path to ${prefix}/bin. The launch
+# script option solves both these issues.
+
+options app.use_launch_script
+default app.use_launch_script  no
+
+
 platform macosx {
     pre-destroot {
         if {[tbool app.create]} {
@@ -183,9 +181,23 @@ platform macosx {
                 if {[file extension ${icon}] == ".icns"} {
                     xinstall -m 644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
 
+                # If app.icon is svg, rasterize and convert it.
+                } elseif {[file extension ${icon}] == ".svg"} {
+                    set makeicnsargs {}
+                    foreach w {16 32 128 256 512} {
+                        lappend makeicnsargs -$w ${worksrcpath}/${w}.png
+
+                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w ${icon} > ${worksrcpath}/$w.png" }]} {
+                            return -code error "app.icon ${app.icon} could not be converted to png: $::errorInfo"
+                        }
+                    }
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns 2>@1"}]} {
+                        return -code error "app.icns could not be created: $::errorInfo"
+                    }
+
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {exec ${prefix}/bin/makeicns -in ${icon} -out ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns 2>@1}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in ${icon} -out ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns 2>@1"}]} {
                         return -code error "app.icon ${app.icon} could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
@@ -202,18 +214,26 @@ platform macosx {
                 return -code error "app.executable ${app.executable} should not start with \${destroot}"
             }
 
-            # If app.executable is in the destroot, link to it.
+            # If app.executable is in the destroot, use it as the target.
             if {[file exists ${destroot}[app._resolve_symlink ${executable} ${destroot}]]} {
-                ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                if {[tbool app.use_launch_script]} then {
+                    app._write_launch_script ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                } else {
+                    ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                }
             } elseif {[file exists ${executable}]} {
                 # If app.executable starts with ${workpath} or ${filespath}, copy it.
                 if {[string first ${workpath} ${executable}] == 0 || [string first ${filespath} ${executable}] == 0} {
                     xinstall ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
-                
+
                 # app.executable refers to a file that exists but does not belong to this port.
-                # Assume it belongs to a dependency and symlink it.
+                # Assume it belongs to a dependency and use it as the target.
                 } else {
-                    ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                    if {[tbool app.use_launch_script]} then {
+                        app._write_launch_script ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                    } else {
+                        ln -s ${executable} ${destroot}${applications_dir}/${app.name}.app/Contents/MacOS/${app.name}
+                    }
                 }
             } else {
                 return -code error "app.executable ${app.executable} does not exist"
@@ -232,6 +252,10 @@ platform macosx {
             if {${app.icon} != ""} {
                 puts ${fp} "    <key>CFBundleIconFile</key>
     <string>${app.name}.icns</string>"
+            }
+            if {[tbool app.hide_dock_icon]} {
+                puts ${fp} "    <key>LSUIElement</key>
+    <true/>"
             }
             puts ${fp} "    <key>CFBundleIdentifier</key>
     <string>${app.identifier}</string>
@@ -266,12 +290,15 @@ trace variable app.icon w app._icon_trace
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build
     upvar ${optionName} option
-    set has_dep [expr {[info exists depends_build] ? [lsearch ${depends_build} port:makeicns] != -1 : 0}]
     set needs_dep [expr {[file extension ${option}] != ".icns"}]
-    if {${has_dep} && !${needs_dep}} {
+    if {${needs_dep}} {
         depends_build-delete port:makeicns
-    } elseif {${needs_dep} && !${has_dep}} {
         depends_build-append port:makeicns
+    }
+    set needs_dep [expr {[file extension ${option}] == ".svg"}]
+    if {${needs_dep}} {
+        depends_build-delete port:librsvg
+        depends_build-append port:librsvg
     }
 }
 
@@ -284,4 +311,19 @@ proc app._resolve_symlink {path destroot} {
     }
 #    ui_debug "In ${destroot}, ${path} is a symlink to ${resolved_path}"
     return [app._resolve_symlink ${resolved_path} ${destroot}]
+}
+
+
+# Write a default launch script for the executable into the bundle,
+# setting the default PATH as would be expected by the binary
+proc app._write_launch_script  {executable app_destination} {
+    global prefix
+    set launch_script [open ${app_destination} w]
+
+    puts ${launch_script} "#!/bin/bash
+export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
+exec ${executable}
+"
+    close ${launch_script}
+    file attributes ${app_destination} -permissions 0755
 }

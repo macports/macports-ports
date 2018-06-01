@@ -1,5 +1,3 @@
-# $Id$
-#
 # Default site_ruby install library setting for normal module
 # installation. You can force site installation with the following:
 #

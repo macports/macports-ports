@@ -5,7 +5,7 @@ PortGroup           cmake 1.0
 PortGroup           mpi 1.0
 
 name                sundials
-version             2.6.2
+version             3.1.0
 revision            1
 categories          math devel
 license             bsd
@@ -24,70 +24,141 @@ long_description    SUNDIALS consists of the following five solvers: CVODE\
                     (forward and adjoint).  KINSOL solves nonlinear algebraic\
                     systems.
 
-homepage            http://computation.llnl.gov/casc/sundials/main.html
+homepage            https://computation.llnl.gov/projects/sundials
 master_sites        http://computation.llnl.gov/projects/sundials-suite-nonlinear-differential-algebraic-equation-solvers/download/
 
-checksums           rmd160  da6549605b45ad698dfe40a5136b64a7a408d6c6 \
-                    sha256  d8ed0151509dd2b0f317b318a4175f8b95a174340fc3080b8c20617da8aa4d2f
+checksums           rmd160  f2f77ea9ff638bc5f32daeba30ebda2e0c85073a \
+                    sha256  18d52f8f329626f77b99b8bf91e05b7d16b49fde2483d3a0ea55496ce4cdd43a
 
-mpi.setup
+cmake.out_of_source yes
+
+conflicts           sundials2
+
+# use default cmake behavior to find Lapack
+patchfiles-append   patch-find_lapack.diff
+
+depends_lib-append  port:SuiteSparse
+
+mpi.setup \
+        require_fortran
 
 configure.args-append \
-                    -DCXX_ENABLE=OFF \
-                    -DLAPACK_ENABLE=ON \
+                    -DEXAMPLES_ENABLE_C=OFF \
+                    -DEXAMPLES_ENABLE_CXX=OFF \
+                    -DEXAMPLES_ENABLE_F77=OFF \
+                    -DEXAMPLES_ENABLE_F90=OFF \
+                    -DBLAS_ENABLE=OFF \
+                    -DLAPACK_ENABLE=OFF \
+                    -DFCMIX_ENABLE=ON \
+                    -DKLU_ENABLE=ON \
+                    -DKLU_LIBRARY_DIR=${prefix}/lib \
+                    -DKLU_INCLUDE_DIR=${prefix}/include \
                     -DMPI_ENABLE=OFF
-
-
-configure.post_args ..
-configure.dir       ${worksrcpath}/build
-build.dir           ${worksrcpath}/build
-
-post-patch {
-    file mkdir ${worksrcpath}/build
-}
 
 pre-configure {
     if {[mpi_variant_isset]} {
         configure.args-delete -DMPI_ENABLE=OFF
         configure.args-append -DMPI_ENABLE=ON \
                               -DMPI_MPICC=${prefix}/bin/${mpi.cc} \
+                              -DMPI_MPICXX=${prefix}/bin/${mpi.cxx} \
+                              -DMPI_MPIF77=${prefix}/bin/${mpi.f77} \
+                              -DMPI_MPIF90=${prefix}/bin/${mpi.f90} \
                               -DMPI_RUN_COMMAND=${prefix}/bin/${mpi.exec}
     }
 }
 
-post-destroot {
-    xinstall -d ${destroot}${prefix}/share/examples
-    move ${destroot}${prefix}/examples ${destroot}${prefix}/share/examples/${name}
-}
+# without this, previously installed sundials headers are found first
+# this can cause problem when upgrading
+# see https://cmake.org/cmake/help/latest/variable/CMAKE_INCLUDE_DIRECTORIES_BEFORE.html
+configure.args-append \
+    -DCMAKE_INCLUDE_DIRECTORIES_BEFORE=ON
+
+# cmake files (e.g. config/SundialsFortran.cmake) create CMakeLists.txt files
+#    to test for functionality (e.g. a Fortran compiler).
+# CMAKE_OSX_SYSROOT is not passed to the functionality test.
+# Because CMAKE_OSX_DEPLOYMENT_TARGET is set as an environmental variable,
+#    -isysroot is added to the compiler flags.
+# Only Apple Clang compilers support tbd files.
+# See https://trac.macports.org/ticket/53151
+# See https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_SYSROOT.html
+configure.env-append SDKROOT="/"
 
 if {![mpi_variant_isset]} {
     default_variants      +mpich
 }
 
-if {![fortran_variant_isset] && ![mpi_variant_isset]} {
-    if {[variant_isset atlas]} {
-        ui_error "Atlas requires a fortran compiler"
-        return -code error "no fortran compiler selected"
+variant examples description {Install Examples} {
+    # F77 examples fail with:
+    #Undefined symbols for architecture x86_64:
+    #  "_F2C_ARKODE_mass_matrix", referenced from:
+    #      _farkdlsmassinit_ in libsundials_farkode.a(farkode.c.o)
+    #      _farkfree_ in libsundials_farkode.a(farkode.c.o)
+    #  "_F2C_ARKODE_matrix", referenced from:
+    #      _farkdlsinit_ in libsundials_farkode.a(farkode.c.o)
+    #      _farkfree_ in libsundials_farkode.a(farkode.c.o)
+    set example_langs {C CXX F90}
+    foreach lang ${example_langs} {
+    configure.args-replace \
+            -DEXAMPLES_ENABLE_${lang}=OFF \
+            -DEXAMPLES_ENABLE_${lang}=ON
     }
-
-    # ensure that sundials doesn't try to find a fortran compiler in the user's
-    # path
-    pre-configure {
-        configure.f77
-        configure.f90
-        configure.fc
-    }
-} else {
-    configure.args-delete --without-blas --without-lapack
-    if {![variant_isset atlas]} {
-        configure.args-append \
-            -DLAPACK_LIBRARIES="/usr/lib/liblapack.dylib\;/usr/lib/libblas.dylib"
-    }
+    configure.args-append \
+        -DEXAMPLES_INSTALL_PATH=${prefix}/share/examples/${name}
 }
 
-variant atlas description {build with atlas (requires a fortran compiler)} {
+variant lapack conflicts fortran_klu description {Enable LAPACK support} {
+    # from CMakeLists.txt:
+    #    LAPACK is not compatible with INT64_T precision
+    configure.args-append \
+        -DSUNDIALS_INDEX_TYPE=int32_t
+
+    configure.args-replace \
+        -DLAPACK_ENABLE=OFF \
+        -DLAPACK_ENABLE=ON
+}
+
+variant fortran_klu conflicts lapack description {Build Fortran interface to KLU} {
+    # from src/sunlinsol_klu/CMakeLists.txt:
+    #    The Fortran interface to KLU is not compatible with INT32_T
+    configure.args-append \
+        -DSUNDIALS_INDEX_TYPE=int64_t
+}
+
+if {![variant_isset lapack] && ![variant_isset fortran_klu]} {
+    default_variants-append +fortran_klu
+}
+
+variant accelerate conflicts atlas openblas description {Use Apple Accelerate Libraries} {
+    configure.args-append -DBLA_VENDOR=Apple
+}
+
+variant atlas conflicts accelerate openblas description {Use MacPorts ATLAS Libraries} {
     depends_lib-append port:atlas
-    configure.args-append -DLAPACK_LIBRARIES=${prefix}/lib/libtatlas.dylib
+
+    configure.args-append   \
+        -DBLA_VENDOR=ATLAS
+
+    # FindBLAS.cmake and FindLAPACK.cmake do not seem to find MacPorts Atlas properly
+    configure.args-append          \
+        -DBLAS_LIBRARIES=satlas    \
+        -DLAPACK_LIBRARIES=satlas
+}
+
+variant openblas conflicts atlas accelerate description {Use MacPorts OpenBLAS Libraries} {
+    depends_lib-append path:lib/libopenblas.dylib:OpenBLAS
+    require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
+
+    configure.args-append  -DBLA_VENDOR=OpenBLAS
+}
+
+if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
+    default_variants-append +accelerate
+}
+pre-fetch {
+    if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] } {
+        ui_error "You must select either the +accelerate, +atlas, or +openblas variant for linear algebra."
+        return -code error "No linear-algebra variant selected."
+    }
 }
 
 variant doc description {install pdf documentation} {
@@ -98,4 +169,10 @@ variant doc description {install pdf documentation} {
     }
 }
 
-livecheck.type      none
+# LICENSE file is installed in a bad location
+post-destroot {
+    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
+    move ${destroot}${prefix}/LICENSE ${destroot}${prefix}/share/doc/${name}
+}
+
+livecheck.url       https://computation.llnl.gov/projects/sundials/sundials-software

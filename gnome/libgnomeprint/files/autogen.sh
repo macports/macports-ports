@@ -46,7 +46,7 @@ REQUIRED_AUTOMAKE_VERSION=1.7.2 NOCONFIGURE="dont" GNOME_DATADIR="$gnome_datadir
 
 ## Added experimentally to see if this fixes the tinderbox
 if test -z "$AUTOGEN_SUBDIR_MODE"; then
-   $srcdir/configure --enable-maintainer-mode --enable-gtk-doc --enable-compile-warnings "$@"
+   $srcdir/configure "$@"
    echo 
    echo "Now type 'make' to compile $PKG_NAME."
 fi

@@ -2,8 +2,15 @@
 # Run this to generate all the initial makefiles, etc.
 set -e
 
-intltoolize --force --copy --automake
-autoreconf -i -f
+srcdir=`dirname $0`
+test -z "$srcdir" && srcdir=.
+
+olddir=`pwd`
+cd $srcdir
+
+mkdir -p m4
+autoreconf --verbose --force --install || exit $?
+intltoolize --force --copy --automake || exit $?
 
 if test -z "$NOCONFIGURE"; then
     run_configure=true
@@ -20,6 +27,5 @@ else
     run_configure=false
 fi
 
-if test $run_configure = true; then
-    ./configure "$@"
-fi
+cd "$olddir"
+test -n "$NOCONFIGURE" || "$srcdir/configure" "$@"

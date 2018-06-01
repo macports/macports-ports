@@ -1,34 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2010-2016 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of The MacPorts Project nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#
 # This PortGroup automatically sets all the fields of the various cross binutils
 # ports (e.g. spu-binutils).
 #
@@ -39,8 +10,16 @@
 
 options crossbinutils.target
 
+array set crossbinutils.versions_info {
+    2.30 {xz {
+        rmd160  7f439bd642e514e89075a47758414ea65c50c3b3 \
+        sha256  6e46b8aeae2f727a36f0bd9505e405768a72218f1796f0d09757d45209871ae6 \
+        size    20286700
+    }}
+}
+
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target
+    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target crossbinutils.versions_info
 
     crossbinutils.target ${target}
 
@@ -56,13 +35,22 @@ proc crossbinutils.setup {target version} {
         Free Software Foundation development toolchain ("binutils") for \
         ${target} cross development.
 
-    homepage        http://www.gnu.org/software/binutils/binutils.html
+    homepage        https://www.gnu.org/software/binutils/binutils.html
     master_sites    gnu:binutils \
                     http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
     dist_subdir     binutils
     distname        binutils-${version}
     worksrcdir      binutils-[string trimright ${version} {[a-zA-Z]}]
-    use_bzip2       yes
+
+    if {[info exists crossbinutils.versions_info($version)]} {
+        use_[lindex [set crossbinutils.versions_info($version)] 0] yes
+
+        checksums   {*}[lindex [set crossbinutils.versions_info($version)] 1]
+    } else {
+        # the old default
+        use_bzip2   yes
+        #use_xz yes
+    }
 
     post-extract {
         delete ${worksrcpath}/etc
