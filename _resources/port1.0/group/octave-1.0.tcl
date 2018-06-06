@@ -6,19 +6,22 @@
 # Usage:
 #
 #   PortGroup               octave 1.0
-#   octave.setup            module version
+#   octave.module           module
 #
-# where module is the name of the module (e.g. communications) and
-# version is its version.
+# where module is the name of the module (e.g. communications)
 
-options octave.module
+options octave.module octave.config_h
+
+# do not use this option unless absolutely necessary
+# see comments below
+# this should eventually be removed
+default octave.config_h {no}
 
 # some header files from Octave require C++-11
-# Octave requires c++-11 but can not use cxx11 PortGroup because Octave also
-#    requires fortran from gcc
-# Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
-PortGroup compiler_blacklist_versions 1.0
-compiler.blacklist-append   {*gcc-3*} {*gcc-4.[0-5]} {clang < 500} cc
+PortGroup cxx11 1.1
+# overrule cxx11 PortGroup because octave can use GCC compilers for Fortran
+#    even if configure.cxx_stdlib is libc++
+compiler.blacklist-delete *gcc*
 
 # override universal_setup found in portutil.tcl so it uses muniversal PortGroup
 # see https://trac.macports.org/ticket/51643
@@ -42,34 +45,48 @@ proc universal_setup {args} {
 
 proc octave.setup {module version} {
     global octave.module
-
     octave.module               ${module}
-    name                        octave-${module}
     version                     ${version}
-    categories                  math science
-    homepage                    http://octave.sourceforge.net/${octave.module}/
-    master_sites                sourceforge:octave
-    distname                    ${octave.module}-${version}
-
-    depends_lib-append          path:bin/octave:octave
-
-    worksrcdir                  ${octave.module}
-
-    # do not build in parallel; many can't, and these are small builds
-    # anyway, so no major need for this.
-
-    use_parallel_build          no
-
-    # configure_make.m calls "make --jobs n ..."
-    # use environmental variable to set the number of jobs to 1
-    # parallel build is a problem for octave-optiminterp
-
-    configure.env-append        OMP_NUM_THREADS=1
-
-    livecheck.type              regex
-    livecheck.url               https://octave.sourceforge.io/${octave.module}/
-    livecheck.regex             "Package Version:</td><td>(\\d+(\\.\\d+)*)</td>"
 }
+
+option_proc octave.module octave.set_module
+proc octave.set_module {opt action args} {
+    global octave.module
+    if {$action eq "set"} {
+        name     octave-${octave.module}
+        homepage https://octave.sourceforge.io/${octave.module}/
+    }
+}
+
+default categories   {math science}
+default master_sites {sourceforge:octave}
+default distname     {${octave.module}-${version}}
+default worksrcdir   {${octave.module}}
+# do not build in parallel; many can't, and these are small builds
+# anyway, so no major need for this.
+default use_parallel_build {no}
+default livecheck.type     {regex}
+default livecheck.url      {https://octave.sourceforge.io/${octave.module}/}
+default livecheck.regex    {"Package Version:</td><td>(\\\\d+(.\\\\d+)*)</td>"}
+
+depends_lib-append   path:bin/octave:octave
+# do not force all Portfiles to switch from depends_lib to depends_lib-append
+proc octave.add_dependencies {} {
+    depends_lib-delete path:bin/octave:octave
+    depends_lib-append path:bin/octave:octave
+}
+port::register_callback octave.add_dependencies
+
+# configure_make.m calls "make --jobs n ..."
+# use environmental variable to set the number of jobs to 1
+# parallel build is a problem for octave-optiminterp
+configure.env-append OMP_NUM_THREADS=1
+# do not force all Portfiles to switch from configure.env to configure.env-append
+proc octave.add_env {} {
+    configure.env-delete OMP_NUM_THREADS=1
+    configure.env-append OMP_NUM_THREADS=1
+}
+port::register_callback octave.add_env
 
 post-extract {
     # rename the effective worksrcdir to always be ${octave.module}
@@ -90,7 +107,8 @@ configure.universal_args-delete --disable-dependency-tracking
 
 pre-configure {
 
-    system -W ${workpath} "/usr/bin/tar cvfz ${distname}.tar.gz ${octave.module}"
+    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    system -W ${workpath} "${tar} cvfz ${distname}.tar.gz ${octave.module}"
 
     if { [variant_exists universal] && [variant_isset universal] } {
         global merger_configure_env
@@ -127,10 +145,7 @@ pre-configure {
     configure.cxxflags-append -std=c++11
 }
 
-build.cmd /usr/bin/true
-build.pre_args
-build.args
-build.post_args
+build {}
 
 pre-destroot {
     set octave_api_version [exec "${prefix}/bin/octave-config" -p API_VERSION]
@@ -194,4 +209,32 @@ post-activate {
     set octave_install_share ${prefix}/share/octave/packages
     set octave_install_lib   ${prefix}/lib/octave/packages
     system "${prefix}/bin/octave-cli -q -f -H --eval 'try; pkg prefix ${octave_install_share} ${octave_install_lib}; pkg -verbose -global rebuild; disp(lasterror.message); catch; exit(1); end_try_catch;'"
+}
+
+# octave/config.h was removed from octave 4.4
+# some packages, however, still depend on it for information
+# see https://savannah.gnu.org/bugs/?41027
+# eventually, this code should be removed
+default compiler.cpath {[octave._cpath]}
+proc octave._cpath {} {
+    global prefix octave.config_h worksrcpath
+    if {${octave.config_h}} {
+        return "${prefix}/include ${worksrcpath}/macports_compat ${worksrcpath}/macports_compat/octave"
+    } else {
+        return ${prefix}/include
+    }
+}
+
+pre-configure {
+    if {${octave.config_h}} {
+        xinstall -d -m 0755 ${worksrcpath}/macports_compat/octave
+        set configf [open "${worksrcpath}/macports_compat/octave/config.h" w 0644]
+
+        puts  ${configf} "#include <octave/octave-config.h>"
+        foreach v {LOCALVERFCNFILEDIR LOCALVEROCTFILEDIR LOCALVERARCHLIBDIR CANONICAL_HOST_TYPE} {
+            set mv [exec ${prefix}/bin/octave-config -p ${v}]
+            puts  ${configf} "#define OCTAVE_${v}  \"${mv}\""
+        }
+        close ${configf}
+    }
 }
