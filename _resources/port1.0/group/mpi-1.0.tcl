@@ -90,6 +90,8 @@ proc mpi.setup_variants {variants} {
                 if {\$c_name eq {}} {
                     set p_name mp
                     set d_name default
+                } elseif {\[string match gcc* \$c_name\]} {
+                    configure.cxx_stdlib macports-libstdc++
                 }
 
                 set path \"etc/select/mpi/${variant}-\${p_name}\"
