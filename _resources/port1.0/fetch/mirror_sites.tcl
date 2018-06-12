@@ -668,7 +668,7 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
-    http://ayera.dl.sourceforge.net/
+    https://ayera.dl.sourceforge.net/
     https://cytranet.dl.sourceforge.net/
     https://excellmedia.dl.sourceforge.net/
     https://freefr.dl.sourceforge.net/
@@ -684,7 +684,7 @@ set portfetch::mirror_sites::sites(sourceforge) {
     http://pilotfiber.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-sea2.dl.sourceforge.net/
-    https://tenet.dl.sourceforge.net/
+    http://tenet.dl.sourceforge.net/
     https://svwh.dl.sourceforge.net/
     https://ufpr.dl.sourceforge.net/
 }
