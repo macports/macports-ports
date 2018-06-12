@@ -523,11 +523,9 @@ proc compilers.action_enforce_some_f {ports} {
 }
 
 proc compilers.setup {args} {
-    global cdb compilers.variants compilers.clang_variants compilers.gcc_variants
-    global compilers.fortran_variants
-    global compilers.require_fortran compilers.default_fortran compilers.setup_done compilers.list
-    global compilers.gcc_default
-    global compiler.blacklist
+    global cdb compilers.variants compilers.clang_variants compilers.gcc_variants \
+        compilers.fortran_variants compilers.require_fortran compilers.default_fortran \
+        compilers.setup_done compilers.list compilers.gcc_default compiler.blacklist
 
     if {!${compilers.setup_done}} {
         set add_list {}
@@ -611,6 +609,13 @@ proc compilers.setup {args} {
         }
 
         set compilers.variants [lsort [concat [remove_from_list $remove_list $duplicates] $add_list]]
+        # also update compilers.fortran_variants
+        set compilers.fortran_variants {}
+        foreach variant ${compilers.variants} {
+            if {$cdb($variant,f77) ne ""} {
+                lappend compilers.fortran_variants $variant
+            }
+        }
         compilers.setup_variants ${compilers.variants}
 
         # reverse the gcc list so that the higher numbered ones are default
