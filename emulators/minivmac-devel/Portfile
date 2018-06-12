@@ -129,7 +129,25 @@ if {${subport} eq ${name}} {
     set my_rom_dir              "~/Library/Preferences/Gryphel/mnvm_rom"
     set my_bootstrap_app        "Mini vMac Bootstrap.app"
     set my_rom_file             vMac.ROM
-    set my_base_options         "-ef 1 -maintainer MacPorts -homepage https://www.macports.org -cl -eol unx -sony-sum 1 -sony-tag 1"
+
+    # Options that are the same for every variation.
+    configure.pre_args          -ef 1 \
+                                -maintainer MacPorts \
+                                -homepage https://www.macports.org \
+                                -cl \
+                                -eol unx \
+                                -sony-sum 1 \
+                                -sony-tag 1
+
+    # Options set by variations.
+    configure.args
+
+    # Options set by variants.
+    configure.post_args
+
+    # The number of seconds to wait before killing the bootstrap process, in
+    # case it gets stuck.
+    set my_bootstrap_timeout    30
 
     configure.universal_archs   {*}${supported_archs}
 
@@ -213,73 +231,62 @@ if {${subport} eq ${name}} {
     }
 
     configure {
+        set my_variation_dirs {}
+
         # Copy the disk images into the data directory with sequentially-numbered
         # names so Mini vMac will find them and automatically mount them.
         copy -force "${worksrcpath}/Disk Tools.image" "${my_mnvm_dat}/disk1.dsk"
-        copy -force ${worksrcpath}/${my_autoquit}/${my_autoquit}.dsk "${my_mnvm_dat}/disk2.dsk"
         copy -force ${worksrcpath}/${my_src}/${my_src}.dsk "${my_mnvm_dat}/disk3.dsk"
 
-        # Build up the combined configure args for all variations.
-        set i 0
-        foreach my_arch [get_canonical_archs] {
-            set my_target [my_arch_to_target ${my_arch}]
-            foreach {my_machine my_variation_options} ${my_variations} {
-                set my_variation ${my_version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
-                if {${i} > 0} {
-                    lappend configure_args \;
-                }
-                lappend configure_args \
-                    ${my_base_options} \
-                    -t ${my_target} \
-                    ${my_variation_options} \
-                    -n ${my_variation}
-                incr i
-            }
-        }
-
-        # Write the configure args into the "doc" file on the AutQuit7 disk image.
-        set max_configure_args_length 8192
-        set padded_args [format "%-${max_configure_args_length}s" [join ${configure_args}]]
-        if {[string length ${padded_args}] > ${max_configure_args_length}} {
-            return -code error "configure args too long"
-        }
-        reinplace -locale C "s|@START@\[ .\]*@END@|${padded_args}|" "${my_mnvm_dat}/disk2.dsk"
-
-        # Set the number of seconds to wait before killing the bootstrap Mini vMac
-        # app, in case it gets stuck.
-        configure.pre_args [expr 10 * ${i}]
-
-        # Launch the bootstrap Mini vMac to run the configuration. When it's done
-        # it should automatically quit, but if not, we time out after awhile.
-        exec -ignorestderr ${prefix}/bin/timeout ${configure.pre_args} "${worksrcpath}/${my_bootstrap_app}/Contents/MacOS/minivmac" 2>/dev/null
-
-        # Sandbox didn't used to allow access to the ptys Expect needs.
-        # https://github.com/macports/macports-base/commit/8765c14223c2826c958cddd4e33c17801d63ddb4
-        if {[vercmp [macports_version] 2.4.99] >= 0} {
-        # Check if a configuration error occurred. This can happen if invalid
-        # configuration flags were specified.
-        delete ${my_mnvm_dat}/disk3.dmg
-        ln ${my_mnvm_dat}/disk3.dsk ${my_mnvm_dat}/disk3.dmg
-        set mountpoint [my_attach_disk_image ${my_mnvm_dat}/disk3.dmg]
-        if {[file exists ${mountpoint}/output/minivmac.err.txt]} {
-            copy ${mountpoint}/output/minivmac.err.txt ${worksrcpath}
-        }
-        my_detach_disk_image ${mountpoint}
-        if {[file exists ${worksrcpath}/minivmac.err.txt]} {
-            set fp [open ${worksrcpath}/minivmac.err.txt r]
-            set error_text [read ${fp}]
-            close ${fp}
-            return -code error ${error_text}
-        }
-        }
-
-        file mkdir ${build.dir}
-        set my_variation_dirs {}
+        # Configure all variations.
         foreach my_arch [get_canonical_archs] {
             file mkdir ${build.dir}/${my_arch}
             set my_target [my_arch_to_target ${my_arch}]
-            foreach {my_machine unused} ${my_variations} {
+            foreach {my_machine my_variation_options} ${my_variations} {
                 set my_variation ${my_version}_${revision}-[strsed [string tolower ${my_machine}] {g/[^a-z0-9_-]//}]-${my_target}
+
+                ui_debug "Configuring ${my_variation}"
+
+                configure.args  -t ${my_target} \
+                                -n ${my_variation} \
+                                @ \
+                                {*}${my_variation_options}
+
+                set max_configure_args_length 8192
+                set padded_configure_args [format "%-${max_configure_args_length}s" \
+                    [concat ${configure.pre_args} ${configure.args} ${configure.post_args}]]
+                if {[string length ${padded_configure_args}] > ${max_configure_args_length}} {
+                    return -code error "configure args too long"
+                }
+
+                # Write the configure args into the "doc" file on the AutQuit7 disk image.
+                copy -force ${worksrcpath}/${my_autoquit}/${my_autoquit}.dsk ${my_mnvm_dat}/disk2.dsk
+                reinplace -locale C "s|@START@\[ .\]*@END@|${padded_configure_args}|" ${my_mnvm_dat}/disk2.dsk
+
+                # Launch the bootstrap Mini vMac to run the configuration. When it's done
+                # it should automatically quit, but if not, we time out after awhile.
+                exec -ignorestderr ${prefix}/bin/timeout ${my_bootstrap_timeout} "${worksrcpath}/${my_bootstrap_app}/Contents/MacOS/minivmac" 2>/dev/null
+
+                # Sandbox didn't used to allow access to the ptys Expect needs.
+                # https://github.com/macports/macports-base/commit/8765c14223c2826c958cddd4e33c17801d63ddb4
+                if {[vercmp [macports_version] 2.4.99] >= 0} {
+                # Check if a configuration error occurred. This can happen if
+                # invalid configuration options were specified.
+                delete ${my_mnvm_dat}/disk3.dmg
+                ln ${my_mnvm_dat}/disk3.dsk ${my_mnvm_dat}/disk3.dmg
+                set mountpoint [my_attach_disk_image ${my_mnvm_dat}/disk3.dmg]
+                if {[file exists ${mountpoint}/output/minivmac.err.txt]} {
+                    copy ${mountpoint}/output/minivmac.err.txt ${worksrcpath}
+                }
+                my_detach_disk_image ${mountpoint}
+                if {[file exists ${worksrcpath}/minivmac.err.txt]} {
+                    set fp [open ${worksrcpath}/minivmac.err.txt r]
+                    set error_text [read ${fp}]
+                    close ${fp}
+                    return -code error ${error_text}
+                }
+                }
+
                 set my_src_tarball ${worksrcpath}/${my_variation}.tar
                 if {[file isfile ${my_src_tarball}]} {
                     set my_variation_dir ${my_arch}/${my_machine}
@@ -305,15 +312,15 @@ if {${subport} eq ${name}} {
             }
         }
 
-        # Set up the global Makefile.
-        xinstall ${filespath}/Makefile.in ${build.dir}/Makefile
-        reinplace "s|@SUBDIRS@|[join ${my_variation_dirs}]|" ${build.dir}/Makefile
-
         # If no variation directories were produced by configuration, something went
         # horribly wrong.
         if {${my_variation_dirs} eq ""} {
             return -code error "configuration failed!"
         }
+
+        # Set up the global Makefile.
+        xinstall ${filespath}/Makefile.in ${build.dir}/Makefile
+        reinplace "s|@SUBDIRS@|[join ${my_variation_dirs}]|" ${build.dir}/Makefile
     }
 
     post-build {
@@ -336,7 +343,6 @@ if {${subport} eq ${name}} {
     }
 
     destroot {
-        # Install the programs.
         foreach my_arch [get_canonical_archs] {
             if {[variant_isset universal]} {
                 set my_dest ${workpath}/pre-dest/${my_arch}
@@ -459,7 +465,8 @@ if {${subport} ni [list "${my_name}${my_suffix}" "${my_name}-bootstrap${my_suffi
                                 models.
 
     variant icon_master description {Take ownership of disk image files and ROM image files; at most one copy of Mini vMac should do this} {
-        set my_base_options "${my_base_options} -im 1"
+        configure.post_args-append \
+                                -im 1
     }
 }
 
