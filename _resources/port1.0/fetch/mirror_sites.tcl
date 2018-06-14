@@ -15,7 +15,7 @@ set portfetch::mirror_sites::sites(afterstep) {
 }
 
 set portfetch::mirror_sites::sites(apache) {
-    http://mirror.aarnet.edu.au/pub/apache/
+    https://mirror.aarnet.edu.au/pub/apache/
     http://archive.apache.org/dist/
     http://www.apache.org/dist/
     http://mirror.cc.columbia.edu/pub/software/apache/
@@ -34,7 +34,7 @@ set portfetch::mirror_sites::sites(apache) {
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(cpan) {
     https://cpan.metacpan.org/modules/by-module/
-    http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
+    https://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     http://ftp.carnet.hr/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
@@ -59,7 +59,7 @@ set portfetch::mirror_sites::sites(cpan) {
 
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(ctan) {
-    http://mirror.aarnet.edu.au/pub/CTAN/
+    https://mirror.aarnet.edu.au/pub/CTAN/
     http://mirror.cc.columbia.edu/pub/software/ctan/
     ftp://ftp.dante.de/tex-archive/
     ftp://ftp.funet.fi/pub/TeX/CTAN/
@@ -313,7 +313,6 @@ set portfetch::mirror_sites::sites(isc) {
 }
 
 set portfetch::mirror_sites::sites(kde) {
-    http://mirror.aarnet.edu.au/pub/KDE/
     http://mirror.cc.columbia.edu/pub/software/kde/
     http://mirror.facebook.net/kde/
     http://ftp.gtlib.gatech.edu/pub/kde/
@@ -632,7 +631,7 @@ set portfetch::mirror_sites::sites(php) {
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
-    http://mirror.aarnet.edu.au/pub/postgresql/
+    https://mirror.aarnet.edu.au/pub/postgresql/
     https://www.mirrorservice.org/sites/ftp.postgresql.org/
     http://ftp.postgresql.org/pub/
 }
@@ -744,7 +743,7 @@ set portfetch::mirror_sites::sites(xcontrib) {
 }
 
 set portfetch::mirror_sites::sites(xfree) {
-    http://mirror.aarnet.edu.au/pub/xfree86/
+    https://mirror.aarnet.edu.au/pub/xfree86/
     ftp://ftp.esat.net/pub/X11/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     http://www.gtlib.gatech.edu/pub/XFree86/
