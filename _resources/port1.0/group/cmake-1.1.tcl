@@ -442,7 +442,7 @@ platform darwin {
         # ports might have need to access these variables at other times.
         foreach archflag_var ${cmake._archflag_vars} {
             global cmake._saved_${archflag_var}
-            configure.${archflag_var} [set cmake._saved_${archflag_var}]
+            configure.${archflag_var} {*}[set cmake._saved_${archflag_var}]
         }
     }
 }
