@@ -180,6 +180,7 @@ foreach cname [array names cdb *,variant] {
 foreach variant ${compilers.variants} {
     if {$cdb($variant,f77) ne ""} {
         lappend compilers.all_fortran_variants $variant
+        lappend compilers.my_fortran_variants $variant
     }
 }
 
