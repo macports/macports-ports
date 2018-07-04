@@ -271,7 +271,7 @@ foreach variant ${compilers.gcc_variants} {
 }
 
 proc c_active_variant_name {depspec} {
-    global compilers.variants compilers.fortran_variants
+    global compilers.variants
     set c_list [remove_from_list ${compilers.variants} {gfortran g95}]
 
     foreach c $c_list {
@@ -288,7 +288,7 @@ proc c_active_variant_name {depspec} {
 }
 
 proc c_variant_name {} {
-    global compilers.variants compilers.fortran_variants
+    global compilers.variants
     set c_list [remove_from_list ${compilers.variants} {gfortran g95}]
 
     foreach cc $c_list {
