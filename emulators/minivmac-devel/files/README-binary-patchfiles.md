@@ -7,7 +7,7 @@
 * autquit7-1.3.1.dsk (or other version) and the latest minivmac*.src.dsk disk images from the Mini vMac web site.
 * A disk image with a copy of ResEdit 2.1.3 (optional).
 
-## Create autquit7-1.3.1.dsk.bsdiff
+## Create patch-autquit7-1.3.1.dsk.bsdiff
 
 * Boot Mini vMac with Disk Tools.image
 * Get a fresh copy of autquit7-1.3.1.dsk
@@ -23,8 +23,8 @@
 * Make the "doc" file:
   * Mount Tidbits.image in Mini vMac
   * Open TeachText on the Tidbits volume
-  * Type "@START@", 8180 spaces, "@END@"
-  * Save as "docs" on the AutQuit7 volume
+  * Type "@START@", 8180 spaces and/or periods, "@END@"
+  * Save as "doc" on the AutQuit7 volume
   * Use "Get Info" in the Finder to verify the file is exactly 8192 bytes long
 * Close all windows
 * Choose Shut Down from the Special menu
