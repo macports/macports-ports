@@ -16,7 +16,7 @@ You should not specify the target (the `-t` option); MacPorts sets it for
 you.
 
 For example, to compile a Macintosh Plus variation designed to be used in
-fullscreen mode on a 15" MacBook Pro, and also Macintosh II variation that
+fullscreen mode on a 15" MacBook Pro, and also a Macintosh II variation that
 runs at quarter resolution and can be pixel-doubled to fill the screen,
 your conf file might contain:
 
