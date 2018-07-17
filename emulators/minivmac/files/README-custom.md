@@ -2,11 +2,10 @@
 
 Mini vMac only offers limited control over its settings at runtime, and
 changes to those settings don't persist after the program quits. Instead,
-Mini vMac has a wide range of [options that can be specified at build
-time](http://www.gryphel.org/c/minivmac/options.html#in). The MacPorts Mini
-vMac ports expose a few of those options using subports and variants, but
-for complete control, you can define your own variations in the custom.conf
-file.
+Mini vMac has a wide range of [options][options] that can be specified at
+build time. The MacPorts Mini vMac ports expose a few of those options
+using subports and variants, but for complete control, you can define your
+own variations in the custom.conf file.
 
 For each variation that you want MacPorts to compile, add a line with the
 name of the variation between square brackets. Variation names should be
@@ -43,3 +42,17 @@ options = -hres 1440 -vres 900 -fullscreen 1 -var-fullscreen 0 \
 [II 720x450]
 options = -m II -hres 720 -vres 450 -gkf 0 -emm 0
 ```
+
+## Variations Service
+
+Instead of using MacPorts to compile custom variations, you can use the
+Mini vMac developer's web-based [variations service][service].
+
+## Donate
+
+Consider [donating][donate] to offset the ongoing costs of developing and
+supporting of Mini vMac.
+
+[options]: http://www.gryphel.org/c/minivmac/options.html#in
+[service]: http://www.gryphel.org/c/minivmac/var_serv.html
+[donate]: http://www.gryphel.org/c/wishlist/
