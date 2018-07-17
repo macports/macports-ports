@@ -47,7 +47,7 @@ Mini vMac developer's web-based [variations service][service].
 ## Donate
 
 Consider [donating][donate] to offset the ongoing costs of developing and
-supporting of Mini vMac.
+supporting Mini vMac.
 
 [options]: http://www.gryphel.org/c/minivmac/options.html#in
 [service]: http://www.gryphel.org/c/minivmac/var_serv.html
