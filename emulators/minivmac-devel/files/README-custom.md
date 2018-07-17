@@ -6,14 +6,25 @@ Mini vMac has a wide range of [options that can be specified at build
 time](http://www.gryphel.org/c/minivmac/options.html#in). The MacPorts Mini
 vMac ports expose a few of those options using subports and variants, but
 for complete control, you can define your own variations in the custom.conf
-file and install the minivmac-custom-devel subport.
+file.
 
 For each variation that you want MacPorts to compile, add a line with the
 name of the variation between square brackets. Variation names should be
 short and unique. Then add a line defining the options you want to use.
+Finally, install the port:
+
+    sudo port install minivmac-custom-devel
+
+When you upgrade the port in the future, your custom variations will be
+preserved. If you change the configuration file, you can rebuild the port to
+reflect those changes immediately:
+
+    sudo port -n upgrade --force minivmac-custom-devel
 
 You should not specify the target (the `-t` option); MacPorts sets it for
 you.
+
+## Example Configuration File
 
 For example, to compile a Macintosh Plus variation designed to be used in
 fullscreen mode on a 15" MacBook Pro, and also a Macintosh II variation that
@@ -28,7 +39,3 @@ options = -hres 1440 -vres 900 -fullscreen 1 -var-fullscreen 0 \
 [II 720x450]
 options = -m II -hres 720 -vres 450 -gkf 0 -emm 0
 ```
-
-To rebuild after you've made changes to the configuration file, use:
-
-    sudo port -n upgrade --force minivmac-custom-devel
