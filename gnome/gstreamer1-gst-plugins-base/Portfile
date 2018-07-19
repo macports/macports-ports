@@ -2,6 +2,7 @@
 
 PortSystem          1.0
 PortGroup           gobject_introspection 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 # https://bugzilla.gnome.org/show_bug.cgi?id=636134
 PortGroup           muniversal 1.0
@@ -10,6 +11,7 @@ name                gstreamer1-gst-plugins-base
 set my_name         gst-plugins-base
 # please only commit stable updates (even numbered releases)
 version             1.14.1
+revision            5
 description         This is gst-plugins, a set of plug-ins for GStreamer.
 long_description    ${description}
 maintainers         nomaintainer
@@ -37,6 +39,12 @@ depends_lib         port:gstreamer1 \
 
 gobject_introspection yes
 
+use_autoreconf      yes
+autoreconf.args     -fvi
+
+patchfiles          patch-allow-MESA-GL-on-macOS.diff
+
+# Embedded systems are not our primary target, so disable OpenGL|ES support.
 configure.args-append \
                     --disable-fatal-warnings \
                     --disable-silent-rules \
@@ -51,10 +59,16 @@ configure.args-append \
                     --disable-ivorbis \
                     --disable-x \
                     --disable-xvideo \
+                    --disable-cocoa \
+                    --disable-opengl \
+                    --disable-gles2 \
                     --disable-xshm
 
 #gstbasetextoverlay.c:1511: error: 'for' loop initial declaration used outside C99 mode
 configure.cflags-append -std=c99
+
+#gst-libs/gst/gl/gstgldebug.h:28: error: redefinition of typedef ‘GstGLAsyncDebug’
+compiler.blacklist-append *gcc-3.* *gcc-4.* {clang < 212}
 
 platform darwin {
     # graphene currently fails to build on 10.5 and earlier due to lack of an aligned memory alloc function
@@ -63,30 +77,68 @@ platform darwin {
     if {${os.major} < 10 } {
         depends_lib-delete port:graphene
     }
-    if {${os.major} < 13 } {
-        configure.args-append   --disable-cocoa --disable-opengl
-    }
 }
 
-variant x11 {
+variant x11 conflicts cocoa {
     depends_lib-append \
                     port:mesa \
                     port:xorg-libX11 \
                     port:xorg-libXext \
                     port:xorg-libXv
 
-    configure.args-delete \
-                    --disable-x \
-                    --disable-xshm \
-                    --disable-xvideo \
-                    --disable-glx
+    configure.args-replace  --disable-x \
+                            --enable-x \
+                            --disable-xshm \
+                            --enable-xshm \
+                            --disable-xvideo \
+                            --enable-xvideo \
+                            --disable-glx \
+                            --enable-glx \
+                            --disable-opengl \
+                            --enable-opengl
 }
 
-default_variants +x11
+variant cocoa conflicts universal x11 description {Add support for the OpenGL Cocoa backend. Only supported for pure x86_64 builds.} {
+    if {${build_arch} ne "x86_64"} {
+        ui_error "The variant cocoa is not supported on architectures other than x86_64"
+        error "Cocoa output only supported on x86_64 architecture"
+    }
+
+    if {${os.major} < 13} {
+        ui_error "The variant cocoa is not supported on platforms older than 10.9"
+        error "Platform too old to support Cocoa output"
+    }
+
+    configure.args-replace  --disable-cocoa \
+                            --enable-cocoa \
+                            --disable-opengl \
+                            --enable-opengl
+}
+
+# base has variant_set, but no variant_unset, so emulate it.
+global variations
+# Prefer x11 variant, only enable cocoa by default if supported.
+# We disable the other conflicting variant explicitly for a smooth upgrade path.
+if {${os.major} >= 13 && ![variant_isset universal] && ![variant_isset x11] && ${build_arch} eq "x86_64"} {
+    default_variants +cocoa
+
+    default_variants -x11
+    set variations(x11) -
+} else {
+    default_variants +x11
+
+    default_variants -cocoa
+    set variations(cocoa) -
+}
 
 variant ogg description {Build with support for libogg, libvorbis, libtheora} {
     depends_lib-append    port:libogg port:libvorbis port:libtheora
-    configure.args-delete --disable-ogg --disable-vorbis --disable-theora
+    configure.args-replace  --disable-ogg \
+                            --enable-ogg \
+                            --disable-vorbis \
+                            --enable-vorbis \
+                            --disable-theora \
+                            --enable-theora
 }
 
 default_variants +ogg
@@ -99,8 +151,10 @@ default_variants +ogg
 
 variant cdparanoia description {Enable (currently broken) cdparanoia plugin} {
     depends_lib-append port:cdparanoia
-    configure.args-delete --disable-cdparanoia
+    configure.args-replace  --disable-cdparanoia \
+                            --enable-cdparanoia
 }
+
 
 #-fgcse (from -O2) causes build failures, but -O2 -fno-gcse doesn't seem to work
 if {[string match "*gcc-4.2" ${configure.compiler}]} {

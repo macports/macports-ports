@@ -231,7 +231,7 @@ proc perl5.setup {module vers {cpandir ""}} {
     
     if {${perl5.use_search_cpan_org}} {
         livecheck.url       http://search.cpan.org/dist/${perl5.module}/
-        livecheck.regex     >[quotemeta ${perl5.module}]-(\[^"\]+?)<
+        livecheck.regex     >[quotemeta ${perl5.module}]-(\[^"\ \]+?)<
     } else {
         livecheck.url       https://fastapi.metacpan.org/v1/release/${perl5.module}/
         livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"

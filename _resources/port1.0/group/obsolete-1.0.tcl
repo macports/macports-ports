@@ -50,6 +50,7 @@ depends_build
 depends_extract
 depends_fetch
 depends_lib
+depends_patch
 depends_run
 depends_test
 
