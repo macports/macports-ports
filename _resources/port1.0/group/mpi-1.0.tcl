@@ -161,7 +161,8 @@ proc mpi.enforce_variant {args} {
 proc mpi.action_enforce_variants {ports} {
     global name
     ui_debug "mpi.enforce_variant list: ${ports}"
-    foreach portname $ports {
+    foreach depspec $ports {
+        set portname [_get_dep_port $depspec]
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
             set mympi  [mpi_variant_name]
@@ -179,13 +180,14 @@ proc mpi.action_enforce_variants {ports} {
 
             compilers.action_enforce_c $portname
         } else {
-            ui_error "Internal error: '$portname' is not an installed port."
+            ui_error "Internal error: '$portname' does not refer to an installed port."
         }
     }
 }
 
-# only run this if mpi is chosen
-pre-fetch {
+pre-configure {
+    # This does not needed to be done in pre-archivefetch because if the archive is already built,
+    # we will not need to use the Fortran MPI compiler, and the incompatibility only matters at compile time.
     if {[fortran_variant_isset] && [mpi_variant_isset]} {
         set gcc_name ""
         regexp (gcc\[0-9\]*) ${mpi.name} gcc_name
@@ -318,5 +320,9 @@ pre-fetch {
     if {${mpi.require} && [mpi_variant_name] eq ""} {
         return -code error "must set at least one mpi variant"
     }
+    mpi.action_enforce_variants ${mpi.required_variants}
+}
+
+pre-archivefetch {
     mpi.action_enforce_variants ${mpi.required_variants}
 }
