@@ -177,8 +177,6 @@ proc mpi.action_enforce_variants {ports} {
                 ui_error "Install $portname +$mympi"
                 return -code error "$portname +$mympi not installed"
             }
-
-            compilers.action_enforce_c $portname
         } else {
             ui_error "Internal error: '$portname' does not refer to an installed port."
         }
