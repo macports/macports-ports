@@ -196,6 +196,7 @@ proc compilers.setup_variants {variants} {
     global compilers.variants_conflict
     global compilers.clear_archflags
 
+    set compilers.my_fortran_variants {}
     foreach variant $variants {
         if {$cdb($variant,f77) ne ""} {
             lappend compilers.my_fortran_variants $variant
@@ -315,7 +316,6 @@ proc fortran_active_variant_name {depspec} {
         if {![catch {set result [active_variants $depspec $fc ""]}]} {
             if {$result} {
                 return $fc
-                ui_err "$depsec +fc"
             }
         } else {
             ui_warn "fortran_active_variant_name: \[active_variants $depspec $fc \"\"\] fails."
@@ -614,13 +614,6 @@ proc compilers.setup {args} {
         }
 
         set compilers.variants [lsort [concat [remove_from_list $remove_list $duplicates] $add_list]]
-        # also update compilers.my_fortran_variants
-        set compilers.my_fortran_variants {}
-        foreach variant ${compilers.variants} {
-            if {$cdb($variant,f77) ne ""} {
-                lappend compilers.my_fortran_variants $variant
-            }
-        }
         compilers.setup_variants ${compilers.variants}
 
         # reverse the gcc list so that the higher numbered ones are default
@@ -654,11 +647,22 @@ proc compilers.setup {args} {
     }
 }
 
-# this might also need to be in pre-archivefetch
 pre-fetch {
     if {${compilers.require_fortran} && [fortran_variant_name] eq ""} {
-        return -code error "must set at least one Fortran variant (e.g. +gfortran, +gccX, +g95)"
+        return -code error "must set at least one Fortran variant (${compilers.my_fortran_variants})"
     }
+}
+
+pre-archivefetch {
+    # this can only be flagged if the archive on the server is actually wrong
+    if {${compilers.require_fortran} && [fortran_variant_name] eq ""} {
+        return -code error "must set at least one Fortran variant (${compilers.my_fortran_variants})"
+    }
+}
+
+# at this point, dependencies are guaranteed to be present. otherwise, an error may occur.
+# enforcing these in archivefetch doesn't seem necessary, as they would matter only at compile time.
+pre-configure {
     compilers.action_enforce_c ${compilers.required_c}
     compilers.action_enforce_f ${compilers.required_f}
     compilers.action_enforce_some_f ${compilers.required_some_f}
