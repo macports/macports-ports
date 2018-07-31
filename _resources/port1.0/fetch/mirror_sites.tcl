@@ -50,7 +50,6 @@ set portfetch::mirror_sites::sites(cpan) {
     ftp://xyz.csail.mit.edu/pub/CPAN/modules/by-module/
     http://mirrors.mit.edu/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
-    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
     http://mirror.uta.edu/CPAN/modules/by-module/
     http://cpan.cs.utah.edu/modules/by-module/
