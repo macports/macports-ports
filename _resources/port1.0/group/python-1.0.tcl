@@ -55,7 +55,11 @@ default python.consistent_destroot yes
 
 proc python_get_version {} {
     if {[string match py-* [option name]]} {
-        return [string range [option subport] 2 3]
+        if {[string match pypy* [option subport]]} {
+            return [string range [option subport] 0 [string first "-" [option subport]]-1]
+        } else {
+            return [string range [option subport] 2 3]
+        }
     } else {
         return [option python.default_version]
     }
@@ -80,8 +84,11 @@ proc python_set_versions {option action args} {
     global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
-
-            subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
+            if {[string match pypy* $v]} {
+                subport ${v}[string trimleft $name py] { depends_lib-append port:$v }
+            } else {
+                subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
+            }
         }
         if {$subport eq $name || $subport eq ""} {
             # Ensure the stub port does not do anything with distfiles—not
@@ -221,7 +228,9 @@ proc python_set_default_version {option action args} {
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd
 # for pythonXY, python.branch is X.Y
-default python.branch   {[string range ${python.version} 0 end-1].[string index ${python.version} end]}
+default python.branch   {[python_get_defaults branch]}
+default python.language_version {[python_get_defaults language_version]}
+default python.group    {[python_get_defaults group]}
 default python.prefix   {[python_get_defaults prefix]}
 default python.bin      {[python_get_defaults bin]}
 default python.lib      {[python_get_defaults lib]}
@@ -236,10 +245,35 @@ default destroot.destdir {"--prefix=[python_get_defaults setup_prefix] --root=${
 proc python_get_defaults {var} {
     global python.version python.branch prefix python.prefix
     switch -- $var {
+        branch {
+            if {[string match pypy* ${python.version}]} {
+                return ${python.version}
+            } else {
+                return [string range ${python.version} 0 end-1].[string index ${python.version} end]
+            }
+        }
+        group {
+            if {[string match pypy* ${python.version}]} {
+                return ${python.version}
+            } else {
+                return py[string map {. ""} ${python.version}]
+            }
+        }
+        language_version {
+            if {${python.version} eq "pypy"} {
+                return "2.7"
+            } elseif {${python.version} eq "pypy3"} {
+                return "3.5"
+            } else {
+                return ${python.branch}
+            }
+        }
         prefix {
             global build_arch frameworks_dir
             set ret "${frameworks_dir}/Python.framework/Versions/${python.branch}"
-            if {${python.version} == 25 || (${python.version} == 24 &&
+            if {[string match py* ${python.version}]} {
+                set ret "$prefix/lib/${python.version}"
+            } elseif {${python.version} == 25 || (${python.version} == 24 &&
                 ![file isfile ${ret}/include/python${python.branch}/Python.h] &&
                 ([file isfile ${prefix}/include/python${python.branch}/Python.h]
                 || [string match *64* $build_arch]))} {
@@ -248,7 +282,9 @@ proc python_get_defaults {var} {
             return $ret
         }
         bin {
-            if {${python.version} != 24} {
+            if {[string match py* ${python.version}]} {
+                return "${python.prefix}/bin/${python.branch}"
+            } elseif {${python.version} != 24} {
                 return "${python.prefix}/bin/python${python.branch}"
             } else {
                 return "${prefix}/bin/python${python.branch}"
@@ -273,7 +309,7 @@ proc python_get_defaults {var} {
             }
         }
         lib {
-            if {${python.version} != 24 && ${python.version} != 25} {
+            if {${python.version} != 24 && ${python.version} != 25 && ![string match py* ${python.version}]} {
                 return "${python.prefix}/Python"
             } else {
                 return "${prefix}/lib/lib${python.branch}.dylib"
