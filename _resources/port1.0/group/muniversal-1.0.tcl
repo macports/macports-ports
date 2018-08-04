@@ -200,7 +200,7 @@ variant universal {
                 configure.env-append        {*}$merger_configure_env(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-append   {*}$merger_configure_cppflags(${arch})
+                configure.cppflags-prepend  {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
                 configure.cflags-append     {*}$merger_configure_cflags(${arch})
