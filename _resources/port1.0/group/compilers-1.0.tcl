@@ -78,7 +78,7 @@ if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {44 45 46 47 48 49 5 6 7}
+set gcc_versions {44 45 46 47 48 49 5 6 7 8}
 foreach v ${gcc_versions} {
     # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
     set version $v
@@ -91,9 +91,11 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,descrip)  "MacPorts gcc $version"
     set cdb(gcc$v,depends)  port:gcc$v
     if {[vercmp ${version} 4.6] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6 port:libgcc45"
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
     } elseif {[vercmp ${version} 7] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6"
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
+    } elseif {[vercmp ${version} 8] < 0} {
+        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
     } else {
         set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
     }
