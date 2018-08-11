@@ -38,6 +38,9 @@ proc gobject_introspection._set {option action args} {
 pre-configure {
     if {${gobject_introspection}} {
         configure.args-append   --enable-introspection
+        platform darwin 8 {
+            configure.env-append MAKE=${prefix}/bin/gmake
+        }
     } else {
         configure.args-append   --disable-introspection
     }
