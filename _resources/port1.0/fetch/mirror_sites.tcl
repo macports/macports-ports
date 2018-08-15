@@ -231,29 +231,28 @@ set portfetch::mirror_sites::sites(gimp) {
 
 set portfetch::mirror_sites::sites(gnome) {
     http://artfiles.org/gnome.org/
-    http://ftp.belnet.be/ftp.gnome.org/
     http://ftp.cse.buffalo.edu/pub/Gnome/
     http://mirror.cc.columbia.edu/pub/software/gnome/
-    http://ftp.fau.de/gnome/
-    http://ftp2.uk.freebsd.org/sites/ftp.gnome.org/pub/GNOME/
+    https://mirrors.dotsrc.org/gnome/
+    https://ftp.fau.de/gnome/
     http://www.gtlib.gatech.edu/pub/gnome/
+    https://download.gnome.org/
     http://ftp.gnome.org/pub/GNOME/
-    http://ftp.heanet.ie/mirrors/ftp.gnome.org/
     http://mirror.internode.on.net/pub/gnome/
+    https://ftp-stud.hs-esslingen.de/pub/Mirrors/ftp.gnome.org/
     http://ftp.is.co.za/mirror/ftp.gnome.org/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
-    http://mirror.oss.maxcdn.com/gnome/
     https://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     https://muug.ca/mirror/gnome/
     http://mirror.nbtelecom.com.br/gnome/
-    http://ftp1.nluug.nl/windowing/gnome/
-    http://ftp2.nluug.nl/windowing/gnome/
-    http://fr2.rpmfind.net/linux/gnome.org/
+    https://ftp1.nluug.nl/windowing/gnome/
+    https://ftp2.nluug.nl/windowing/gnome/
+    https://fr2.rpmfind.net/linux/gnome.org/
     http://ftp.rpmfind.net/linux/gnome.org/
-    http://ftp.sunet.se/pub/X11/GNOME/
-    http://mirror.umd.edu/gnome/
-    http://ftp.acc.umu.se/pub/GNOME/
-    http://mirrors.ustc.edu.cn/gnome/
+    http://ftp.sunet.se/pub/GNOME/
+    https://mirror.umd.edu/gnome/
+    https://ftp.acc.umu.se/pub/GNOME/
+    https://mirrors.ustc.edu.cn/gnome/
     http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
 }
 
