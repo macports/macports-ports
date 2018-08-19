@@ -7,7 +7,7 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5  {qt5-qtbase  5.10}
+    qt5  {qt5-qtbase  5.11}
     qt59 {qt59-qtbase 5.9}
     qt58 {qt58-qtbase 5.8}
     qt57 {qt57-qtbase 5.7}
