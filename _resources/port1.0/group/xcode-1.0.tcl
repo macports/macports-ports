@@ -260,9 +260,11 @@ build {
     set xcode_build_args [xcode::get_build_args]
 
     if {${xcode.scheme} ne ""} {
-        xcode::build_one_target \
-            "${xcode_project_arg} -scheme \"${xcode.scheme}\" ${xcode_configuration_arg}" \
-            "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
+        foreach scheme ${xcode.scheme} {
+            xcode::build_one_target \
+                "${xcode_project_arg} -scheme \"${scheme}\" ${xcode_configuration_arg}" \
+                "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
+        }
     } else {
         if {${xcode.target} ne ""} {
             set xcode_targets ${xcode.target}
@@ -294,9 +296,11 @@ destroot {
     set xcode_build_args [xcode::get_build_args]
 
     if {${xcode.scheme} ne ""} {
-        xcode::destroot_one_target \
-            "${xcode_project_arg} -scheme \"${xcode.scheme}\" ${xcode_configuration_arg}" \
-            "${xcode_install_path_setting} ${xcode_build_args} ${xcode.destroot.settings}"
+        foreach scheme ${xcode.scheme} {
+            xcode::destroot_one_target \
+                "${xcode_project_arg} -scheme \"${scheme}\" ${xcode_configuration_arg}" \
+                "${xcode_install_path_setting} ${xcode_build_args} ${xcode.destroot.settings}"
+        }
     } else {
         if {${xcode.target} ne ""} {
             set xcode_targets ${xcode.target}
