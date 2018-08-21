@@ -276,7 +276,7 @@ proc python_get_defaults {var} {
             if {${python.version} != 24 && ${python.version} != 25} {
                 return "${python.prefix}/Python"
             } else {
-                return "${prefix}/lib/lib${python.branch}.dylib"
+                return "${prefix}/lib/libpython${python.branch}.dylib"
             }
         }
         pkgd {
