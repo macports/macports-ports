@@ -116,6 +116,16 @@ proc app.get_default_identifier {} {
 }
 
 
+# app.retina: whether the app supports Retina display resolutions
+#
+# The default is no.
+#
+# Info.plist key NSHighResolutionCapable
+
+options app.retina
+default app.retina no
+
+
 # app.hide_dock_icon: hide the dock icon
 #
 # x11 apps do not receive a proper indication that application has successfully
@@ -252,6 +262,10 @@ platform macosx {
             if {${app.icon} != ""} {
                 puts ${fp} "    <key>CFBundleIconFile</key>
     <string>${app.name}.icns</string>"
+            }
+            if {[tbool app.retina]} {
+                puts ${fp} "    <key>NSHighResolutionCapable</key>
+    <true/>"
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
