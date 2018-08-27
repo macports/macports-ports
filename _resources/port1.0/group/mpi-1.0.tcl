@@ -257,12 +257,16 @@ proc mpi.setup {args} {
             require_fortran {
                 set cl [add_from_list $cl "require_fortran"]
             }
+            default_fortran {
+                set cl [add_from_list $cl "default_fortran"]
+            }
             default {
                 if {[info exists mpidb($v,variant)] == 0} {
                     if {$v eq "gcc" ||
                         $v eq "fortran" ||
                         $v eq "clang" ||
                         $v eq "require_fortran" ||
+                        $v eq "default_fortran" ||
                         [info exists cdb($v,variant)]} {
                         set cl [add_from_list $cl $variant]
                     } else {
