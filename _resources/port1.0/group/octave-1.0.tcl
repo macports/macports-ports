@@ -67,7 +67,7 @@ default worksrcdir   {${octave.module}}
 default use_parallel_build {no}
 default livecheck.type     {regex}
 default livecheck.url      {https://octave.sourceforge.io/${octave.module}/}
-default livecheck.regex    {"Package Version:</td><td>(\\\\d+(.\\\\d+)*)</td>"}
+default livecheck.regex    {"package=${octave.module}-(\\\\d+(.\\\\d+)*)"}
 
 depends_lib-append   path:bin/octave:octave
 # do not force all Portfiles to switch from depends_lib to depends_lib-append
