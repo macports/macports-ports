@@ -1,7 +1,7 @@
-# List of master site classes for use in Portfiles
-# Most of these are taken shamelessly from FreeBSD.
+# List of master site classes for use in Portfiles.
+# Most of these were originally taken from FreeBSD.
 #
-# Appending :nosubdir as a tag to a mirror, means that
+# Appending :nosubdir as a tag to a mirror means that
 # the portfetch target will NOT append a subdirectory to
 # the mirror site.
 #
@@ -15,7 +15,7 @@ set portfetch::mirror_sites::sites(afterstep) {
 }
 
 set portfetch::mirror_sites::sites(apache) {
-    http://mirror.aarnet.edu.au/pub/apache/
+    https://mirror.aarnet.edu.au/pub/apache/
     http://archive.apache.org/dist/
     http://www.apache.org/dist/
     http://mirror.cc.columbia.edu/pub/software/apache/
@@ -25,7 +25,7 @@ set portfetch::mirror_sites::sites(apache) {
     ftp://ftp.infoscience.co.jp/pub/net/apache/dist/
     http://mirror.internode.on.net/pub/apache/
     http://apache.is.co.za/
-    http://www.mirrorservice.org/sites/ftp.apache.org/
+    https://www.mirrorservice.org/sites/ftp.apache.org/
     http://apache.multidist.com/
     http://apache.pesat.net.id/
     http://apache.mirror.rafal.ca/
@@ -33,7 +33,8 @@ set portfetch::mirror_sites::sites(apache) {
 
 # Equivalent to "perl_cpan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(cpan) {
-    http://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
+    https://cpan.metacpan.org/modules/by-module/
+    https://mirror.aarnet.edu.au/pub/CPAN/modules/by-module/
     ftp://ftp.auckland.ac.nz/pub/perl/CPAN/modules/by-module/
     http://ftp.carnet.hr/pub/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
@@ -42,15 +43,13 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.mirror.euserv.net/modules/by-module/
     ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module/
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://cpan.mirrors.ilisys.com.au/modules/by-module/
     http://mirror.internode.on.net/pub/cpan/modules/by-module/
     ftp://ftp.is.co.za/programming/perl/modules/by-module/
     ftp://ftp.kddlabs.co.jp/lang/perl/CPAN/modules/by-module/
-    http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
+    https://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
     ftp://xyz.csail.mit.edu/pub/CPAN/modules/by-module/
     http://mirrors.mit.edu/CPAN/modules/by-module/
     http://mirror.ox.ac.uk/sites/www.cpan.org/modules/by-module/
-    ftp://ftp.sunet.se/pub/lang/perl/CPAN/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
     http://mirror.uta.edu/CPAN/modules/by-module/
     http://cpan.cs.utah.edu/modules/by-module/
@@ -59,7 +58,7 @@ set portfetch::mirror_sites::sites(cpan) {
 
 # Equivalent to "tex_ctan"; neither name takes precedence over the other.
 set portfetch::mirror_sites::sites(ctan) {
-    http://mirror.aarnet.edu.au/pub/CTAN/
+    https://mirror.aarnet.edu.au/pub/CTAN/
     http://mirror.cc.columbia.edu/pub/software/ctan/
     ftp://ftp.dante.de/tex-archive/
     ftp://ftp.funet.fi/pub/TeX/CTAN/
@@ -118,7 +117,7 @@ set portfetch::mirror_sites::sites(fink) {
     http://distfiles.hnd.jp.asi.finkmirrors.net/:nosubdir
     http://distfiles.master.finkmirrors.net/:nosubdir
     http://distfiles.sjc.ca.us.finkmirrors.net/:nosubdir
-    http://www.mirrorservice.org/sites/master.us.finkmirrors.net/distfiles/:nosubdir
+    https://www.mirrorservice.org/sites/distfiles.finkmirrors.net/:nosubdir
 }
 
 # FreeBSD switched to a Geo-IP-based load-balanced distcache.
@@ -132,49 +131,80 @@ set portfetch::mirror_sites::sites(freebsd) {
     http://distcache.FreeBSD.org/ports-distfiles/:nosubdir
 }
 
-# curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
+# https://api.gentoo.org/mirrors/distfiles.xml appears to be valid now
+# Does not work: curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
 set portfetch::mirror_sites::sites(gentoo) {
-    http://gentoo.arcticnetwork.ca/distfiles/:nosubdir
-    http://mirror.bih.net.ba/gentoo/distfiles/:nosubdir
-    http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
-    http://mirror.cambrium.nl/pub/os/linux/gentoo/distfiles/:nosubdir
-    http://mirror.cc.columbia.edu/pub/linux/gentoo/distro/distfiles/:nosubdir
-    http://mirror2.corbina.ru/gentoo-distfiles/distfiles/:nosubdir
-    http://de-mirror.org/distro/gentoo/distfiles/:nosubdir
-    http://gentoo.inf.elte.hu/distfiles/:nosubdir
-    http://mirrors.evolva.ro/gentoo/distfiles/:nosubdir
-    http://mirror.facebook.net/gentoo/distfiles/:nosubdir
-    ftp://ftp.free.fr/mirrors/ftp.gentoo.org/distfiles/:nosubdir
-    http://distfiles.gentoo.bg/distfiles/:nosubdir
+    http://cosmos.illinois.edu/pub/gentoo/distfiles/:nosubdir
     http://files.gentoo.gr/distfiles/:nosubdir
-    http://mirror.gentoo.no/distfiles/:nosubdir
-    http://ftp.heanet.ie/pub/gentoo/distfiles/:nosubdir
-    http://ftp.ds.karen.hj.se/gentoo/distfiles/:nosubdir
-    http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
-    http://gentoo.in.th/distfiles/:nosubdir
-    http://gentoo.inode.at/distfiles/:nosubdir
-    http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
-    http://ftp.kaist.ac.kr/pub/gentoo/distfiles/:nosubdir
-    http://gentoo.kiev.ua/ftp/distfiles/:nosubdir
-    http://ftp.klid.dk/ftp/gentoo/distfiles/:nosubdir
-    http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
-    http://mirrors.linuxant.fr/distfiles.gentoo.org/distfiles/:nosubdir
-    http://gentoo.localhost.net.ar/distfiles/:nosubdir
-    http://www.mirrorservice.org/sites/www.ibiblio.org/gentoo/distfiles/:nosubdir
-    http://mirrors.mit.edu/gentoo-distfiles/distfiles/:nosubdir
+    http://ftp-stud.hs-esslingen.de/pub/Mirrors/gentoo/distfiles/:nosubdir
+    http://ftp.daum.net/gentoo/distfiles/:nosubdir
+    http://ftp.dei.uc.pt/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.fi.muni.cz/pub/linux/gentoo/distfiles/:nosubdir
-    http://ftp.ncnu.edu.tw/Linux/Gentoo/distfiles/:nosubdir
-    http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
-    http://ftp.rhnet.is/pub/gentoo/distfiles/:nosubdir
-    http://gentoo.prz.rzeszow.pl/distfiles/:nosubdir
+    http://ftp.halifax.rwth-aachen.de/gentoo/distfiles/:nosubdir
+    http://ftp.heanet.ie/pub/gentoo/distfiles/:nosubdir
+    http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
+    http://ftp.jaist.ac.jp/pub/Linux/Gentoo/distfiles/:nosubdir
+    http://ftp.kaist.ac.kr/pub/gentoo/distfiles/:nosubdir
+    http://ftp.lanet.kr/pub/gentoo/distfiles/:nosubdir
+    http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
+    http://ftp.ntua.gr/pub/linux/gentoo/distfiles/:nosubdir
+    http://ftp.rnl.tecnico.ulisboa.pt/pub/gentoo/gentoo-distfiles/distfiles/:nosubdir
+    http://ftp.romnet.org/gentoo/distfiles/:nosubdir
+    http://ftp.snt.utwente.nl/pub/os/linux/gentoo/distfiles/:nosubdir
     http://ftp.swin.edu.au/gentoo/distfiles/:nosubdir
-    http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
-    http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
-    http://gentoo.tiscali.nl/distfiles/:nosubdir
-    http://trumpetti.atm.tut.fi/gentoo/distfiles/:nosubdir
-    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
+    http://ftp.twaren.net/Linux/Gentoo/distfiles/:nosubdir
+    http://ftp.uni-erlangen.de/pub/mirrors/gentoo/distfiles/:nosubdir
+    http://ftp.vectranet.pl/gentoo/distfiles/:nosubdir
+    http://gd.tuwien.ac.at/opsys/linux/gentoo/distfiles/:nosubdir
     http://gentoo-euetib.upc.es/mirror/gentoo/distfiles/:nosubdir
-    http://darkstar.ist.utl.pt/gentoo/distfiles/:nosubdir
+    http://gentoo.aditsu.net:8000/distfiles/:nosubdir
+    http://gentoo.bloodhost.ru/distfiles/:nosubdir
+    http://gentoo.c3sl.ufpr.br/distfiles/:nosubdir
+    http://gentoo.cs.uni.edu/distfiles/:nosubdir
+    http://gentoo.gossamerhost.com/distfiles/:nosubdir
+    http://gentoo.inode.at/distfiles/:nosubdir
+    http://gentoo.iteam.net.ua/distfiles/:nosubdir
+    http://gentoo.mirror.web4u.cz/distfiles/:nosubdir
+    http://gentoo.mirrors.easynews.com/linux/gentoo/distfiles/:nosubdir
+    http://gentoo.mirrors.ovh.net/gentoo-distfiles/distfiles/:nosubdir
+    http://gentoo.mirrors.pair.com/distfiles/:nosubdir
+    http://gentoo.mirrors.tds.net/gentoo/distfiles/:nosubdir
+    http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
+    http://gentoo.modulix.net/gentoo/distfiles/:nosubdir
+    http://gentoo.netnitco.net/distfiles/:nosubdir
+    http://gentoo.osuosl.org/distfiles/:nosubdir
+    http://gentoo.prz.rzeszow.pl/distfiles/:nosubdir
+    http://gentoo.supp.name/distfiles/:nosubdir
+    http://gentoo.wheel.sk/distfiles/:nosubdir
+    http://linux.rz.ruhr-uni-bochum.de/download/gentoo-mirror/distfiles/:nosubdir
+    http://lug.mtu.edu/gentoo//distfiles/:nosubdir
+    http://mirror.bytemark.co.uk/gentoo/distfiles/:nosubdir
+    http://mirror.csclub.uwaterloo.ca/gentoo-distfiles/distfiles/:nosubdir
+    http://mirror.dkm.cz/gentoo/distfiles/:nosubdir
+    http://mirror.eu.oneandone.net/linux/distributions/gentoo/gentoo/distfiles/:nosubdir
+    http://mirror.iawnet.sandia.gov/gentoo/distfiles/:nosubdir
+    http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
+    http://mirror.leaseweb.com/gentoo/distfiles/:nosubdir
+    http://mirror.lug.udel.edu/pub/gentoo/distfiles/:nosubdir
+    http://mirror.mdfnet.se/gentoo/distfiles/:nosubdir
+    http://mirror.neolabs.kz/gentoo/pub/distfiles/:nosubdir
+    http://mirror.netcologne.de/gentoo/distfiles/:nosubdir
+    http://mirror.qubenet.net/mirror/gentoo/distfiles/:nosubdir
+    http://mirror.switch.ch/ftp/mirror/gentoo/distfiles/:nosubdir
+    http://mirror.usu.edu/mirrors/gentoo/distfiles/:nosubdir
+    http://mirror.yandex.ru/gentoo-distfiles/distfiles/:nosubdir
+    http://mirrors.163.com/gentoo/distfiles/:nosubdir
+    http://mirrors.evowise.com/gentoo/distfiles/:nosubdir
+    http://mirrors.rit.edu/gentoo/distfiles/:nosubdir
+    http://mirrors.soeasyto.com/distfiles.gentoo.org/distfiles/:nosubdir
+    http://mirrors.telepoint.bg/gentoo/distfiles/:nosubdir
+    http://mirrors.xmu.edu.cn/gentoo/distfiles/:nosubdir
+    http://mirrors.xservers.ro/gentoo/distfiles/:nosubdir
+    http://trumpetti.atm.tut.fi/gentoo/distfiles/:nosubdir
+    http://tux.rainside.sk/gentoo/distfiles/:nosubdir
+    http://www.gtlib.gatech.edu/pub/gentoo/distfiles/:nosubdir
+    http://www.las.ic.unicamp.br/pub/gentoo/distfiles/:nosubdir
+    https://www.mirrorservice.org/sites/distfiles.gentoo.org/distfiles/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(gimp) {
@@ -187,7 +217,7 @@ set portfetch::mirror_sites::sites(gimp) {
     http://mirror.ibcp.fr/pub/
     ftp://sunsite.icm.edu.pl/pub/graphics/
     ftp://ftp.is.co.za/mirror/ftp.gimp.org/
-    http://www.mirrorservice.org/sites/ftp.gimp.org/pub/
+    https://www.mirrorservice.org/sites/ftp.gimp.org/pub/
     http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/gimp/pub/
     http://www.ring.gr.jp/pub/graphics/
     http://ftp.sunet.se/pub/gimp/
@@ -201,29 +231,28 @@ set portfetch::mirror_sites::sites(gimp) {
 
 set portfetch::mirror_sites::sites(gnome) {
     http://artfiles.org/gnome.org/
-    http://ftp.belnet.be/ftp.gnome.org/
     http://ftp.cse.buffalo.edu/pub/Gnome/
     http://mirror.cc.columbia.edu/pub/software/gnome/
-    http://ftp.fau.de/gnome/
-    http://ftp2.uk.freebsd.org/sites/ftp.gnome.org/pub/GNOME/
+    https://mirrors.dotsrc.org/gnome/
+    https://ftp.fau.de/gnome/
     http://www.gtlib.gatech.edu/pub/gnome/
+    https://download.gnome.org/
     http://ftp.gnome.org/pub/GNOME/
-    http://ftp.heanet.ie/mirrors/ftp.gnome.org/
     http://mirror.internode.on.net/pub/gnome/
+    https://ftp-stud.hs-esslingen.de/pub/Mirrors/ftp.gnome.org/
     http://ftp.is.co.za/mirror/ftp.gnome.org/
     ftp://ftp.kddlabs.co.jp/pub/GNOME/
-    http://mirror.oss.maxcdn.com/gnome/
-    http://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
+    https://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     https://muug.ca/mirror/gnome/
     http://mirror.nbtelecom.com.br/gnome/
-    http://ftp1.nluug.nl/windowing/gnome/
-    http://ftp2.nluug.nl/windowing/gnome/
-    http://fr2.rpmfind.net/linux/gnome.org/
+    https://ftp1.nluug.nl/windowing/gnome/
+    https://ftp2.nluug.nl/windowing/gnome/
+    https://fr2.rpmfind.net/linux/gnome.org/
     http://ftp.rpmfind.net/linux/gnome.org/
-    http://ftp.sunet.se/pub/X11/GNOME/
-    http://mirror.umd.edu/gnome/
-    http://ftp.acc.umu.se/pub/GNOME/
-    http://mirrors.ustc.edu.cn/gnome/
+    http://ftp.sunet.se/pub/GNOME/
+    https://mirror.umd.edu/gnome/
+    https://ftp.acc.umu.se/pub/GNOME/
+    https://mirrors.ustc.edu.cn/gnome/
     http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
 }
 
@@ -231,7 +260,7 @@ set portfetch::mirror_sites::sites(gnu) {
     http://mirror.cc.columbia.edu/pub/software/gnu/
     http://mirror.facebook.net/gnu/
     ftp://ftp.funet.fi/pub/gnu/prep/
-    http://ftp.gnu.org/gnu/
+    https://ftp.gnu.org/gnu/
     ftp://ftp.gnu.org/old-gnu/
     ftp://ftp.informatik.hu-berlin.de/pub/gnu/gnu/
     http://mirrors.ibiblio.org/gnu/ftp/gnu/
@@ -239,7 +268,7 @@ set portfetch::mirror_sites::sites(gnu) {
     ftp://ftp.kddlabs.co.jp/pub/gnu/gnu/
     ftp://ftp.kddlabs.co.jp/pub/gnu/old-gnu/
     ftp://ftp.lip6.fr/pub/gnu/
-    http://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
+    https://www.mirrorservice.org/sites/ftp.gnu.org/gnu/
     ftp://ftp.unicamp.br/pub/gnu/
 }
 
@@ -248,7 +277,7 @@ set portfetch::mirror_sites::sites(gnupg) {
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
     ftp://ftp.gnupg.org/gcrypt/
     ftp://ftp.jyu.fi/pub/crypt/gcrypt/
-    http://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
+    https://www.mirrorservice.org/sites/ftp.gnupg.org/gcrypt/
     http://www.ring.gr.jp/pub/net/gnupg/
     ftp://gd.tuwien.ac.at/privacy/gnupg/
 }
@@ -272,7 +301,7 @@ set portfetch::mirror_sites::sites(isc) {
     ftp://ftp.isc.org/isc/
     http://ftp.kaist.ac.kr/pub/isc/
     ftp://ftp.metu.edu.tr/pub/mirrors/ftp.isc.org/
-    http://www.mirrorservice.org/sites/ftp.isc.org/isc/
+    https://www.mirrorservice.org/sites/ftp.isc.org/isc/
     ftp://ftp.nominum.com/pub/isc/
     ftp://ftp.ntua.gr/pub/net/isc/isc/
     ftp://ftp.ripe.net/mirrors/sites/ftp.isc.org/isc/
@@ -282,7 +311,6 @@ set portfetch::mirror_sites::sites(isc) {
 }
 
 set portfetch::mirror_sites::sites(kde) {
-    http://mirror.aarnet.edu.au/pub/KDE/
     http://mirror.cc.columbia.edu/pub/software/kde/
     http://mirror.facebook.net/kde/
     http://ftp.gtlib.gatech.edu/pub/kde/
@@ -291,7 +319,7 @@ set portfetch::mirror_sites::sites(kde) {
     http://mirrors.isc.org/pub/kde/
     http://ftp.kddlabs.co.jp/pub/X11/kde/
     ftp://ftp.kde.org/pub/kde/
-    http://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
+    https://www.mirrorservice.org/sites/ftp.kde.org/pub/kde/
     http://mirrors.mit.edu/kde/
     ftp://ftp.solnet.ch/mirror/KDE/
     http://kde.mirrors.tds.net/pub/kde/
@@ -299,7 +327,7 @@ set portfetch::mirror_sites::sites(kde) {
 }
 
 set portfetch::mirror_sites::sites(macports) {
-    http://svn.macports.org/repository/macports/distfiles/
+    https://svn.macports.org/repository/macports/distfiles/
 }
 
 global os.platform os.major
@@ -310,7 +338,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     http://cjj.kr.distfiles.macports.org/:mirror
     http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
-    http://her.gr.distfiles.macports.org/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
     http://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     http://kmq.jp.distfiles.macports.org/:mirror
@@ -318,10 +345,11 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://mse.uk.distfiles.macports.org/sites/distfiles.macports.org/:mirror
     http://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     http://nue.de.distfiles.macports.org/:mirror
-    http://osl.no.distfiles.macports.org/:mirror
     ${distfiles_scheme}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
+    https://sha.cn.distfiles.macports.org/macports/distfiles/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
+    http://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 "
 
 # To update this list use:
@@ -363,7 +391,7 @@ set portfetch::mirror_sites::sites(mysql) {
     http://na.mirror.garr.it/mirrors/MySQL/Downloads/:nosubdir
     http://sunsite.icm.edu.pl/mysql/Downloads/:nosubdir
     http://www.linorg.usp.br/mysql/Downloads/:nosubdir
-    http://www.mirrorservice.org/sites/ftp.mysql.com/Downloads/:nosubdir
+    https://www.mirrorservice.org/sites/ftp.mysql.com/Downloads/:nosubdir
 }
 
 set portfetch::mirror_sites::sites(netbsd) {
@@ -378,45 +406,168 @@ set portfetch::mirror_sites::sites(netbsd) {
 }
 
 # Equivalent to "savannah"; neither name takes precedence over the other.
+# https://download-mirror.savannah.gnu.org/releases/00_MIRRORS.txt
 set portfetch::mirror_sites::sites(nongnu) {
-    http://mirror.cc.columbia.edu/pub/software/gnu/non-gnu/
-    ftp://ftp.funet.fi/pub/gnu/ftp.gnu.org/non-gnu/
-    http://ftp.gnu.org/pub/gnu/non-gnu/
-    ftp://ftp.gnu.org/pub/gnu/non-gnu/
-    http://download-mirror.savannah.gnu.org/releases/
-    http://mirrors.ibiblio.org/gnu/ftp/non-gnu/
-    http://mirror.internode.on.net/pub/gnu/non-gnu/
-    ftp://ftp.kddlabs.co.jp/pub/gnu/non-gnu/
-    ftp://ftp.lip6.fr/pub/gnu/non-gnu/
-    http://ftp.twaren.net/Unix/NonGNU/
-    ftp://ftp.twaren.net/Unix/NonGNU/
-    http://savannah.c3sl.ufpr.br/
-    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
-    ftp://ftp.unicamp.br/pub/gnu/non-gnu/
-    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
+    http://babyname.tips/mirrors/nongnu/
+    http://mirror.netcologne.de/savannah/
+    ftp://mirror.netcologne.de/savannah/
+    http://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    ftp://ftp.cc.uoc.gr/mirrors/nongnu.org/
+    http://mirror.infotronik.hu/mirrors/pub/gnusavannah/
+    http://mirror1.hostiran.ir/gnu/gnu-savannah/
+    http://download-mirror.savannah.gnu.org/releases/
+    http://nongnu.askapache.com/
+    http://savannah.c3sl.ufpr.br/
+    ftp://savannah.c3sl.ufpr.br/savannah-nongnu/
+    http://mirror.lihnidos.org/GNU/savannah/
+    http://mirrors.up.pt/pub/nongnu/
+    https://mirrors.up.pt/pub/nongnu/
+    ftp://mirrors.up.pt/pub/nongnu/
+    http://nongnu.uib.no/
+    ftp://nongnu.uib.no/pub/nongnu/
+    http://mirror.rackdc.com/savannah/
+    http://ftp.igh.cnrs.fr/pub/nongnu/
+    ftp://ftp.igh.cnrs.fr/pub/nongnu/
+    http://savannah.spinellicreations.com/
+    ftp://spinellicreations.com/gnu_dot_org_savannah_mirror/
+    http://gnu.mirrors.pair.com/savannah/savannah/
+    https://www.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    ftp://ftp.mirrorservice.org/sites/download.savannah.gnu.org/releases/
+    http://savannah-nongnu-org.ip-connect.vn.ua/
+    ftp://savannah-nongnu-org.ip-connect.vn.ua/mirror/savannah.nongnu.org/
+    http://mirror.cedia.org.ec/nongnu/
+    ftp://mirror.cedia.org.ec/nongnu/
+    ftp://ftp.yzu.edu.tw/nongnu/
+    http://ftp.yzu.edu.tw/nongnu/
+    http://mirror6.layerjet.com/nongnu/
+    http://mirror.easyname.at/nongnu/
+    ftp://mirror.easyname.at/nongnu/
+    http://mirror2.klaus-uwe.me/nongnu/
+    ftp://mirror2.klaus-uwe.me/nongnu/
+    http://ftp.acc.umu.se/mirror/gnu.org/savannah/
+    http://www.namesdir.com/mirrors/nongnu/
 }
 
+# https://www.openbsd.org/ftp.html
 set portfetch::mirror_sites::sites(openbsd) {
-    http://mirror.aarnet.edu.au/pub/OpenBSD/
-    http://mirror.cc.columbia.edu/pub/bsd/OpenBSD/
+    https://mirror.leaseweb.com/pub/OpenBSD/
+    https://mirror.aarnet.edu.au/pub/OpenBSD/
+    https://ftp2.eu.openbsd.org/pub/OpenBSD/
+    https://openbsd.c3sl.ufpr.br/pub/OpenBSD/
+    https://openbsd.ipacct.com/pub/OpenBSD/
+    https://ftp.OpenBSD.org/pub/OpenBSD/
+    https://openbsd.cs.toronto.edu/pub/OpenBSD/
+    https://openbsd.delfic.org/pub/OpenBSD/
+    https://openbsd.mirror.netelligent.ca/pub/OpenBSD/
+    https://mirrors.ucr.ac.cr/pub/OpenBSD/
+    https://mirrors.dotsrc.org/pub/OpenBSD/
+    https://mirror.one.com/pub/OpenBSD/
+    https://ftp.fr.openbsd.org/pub/OpenBSD/
+    https://mirrors.ircam.fr/pub/OpenBSD/
+    https://ftp.spline.de/pub/OpenBSD/
+    https://mirror.hs-esslingen.de/pub/OpenBSD/
+    https://ftp.halifax.rwth-aachen.de/openbsd/
+    https://ftp.hostserver.de/pub/OpenBSD/
+    https://ftp.fau.de/pub/OpenBSD/
+    https://ftp.cc.uoc.gr/pub/OpenBSD/
+    https://openbsd.hk/pub/OpenBSD/
+    https://ftp.heanet.ie/pub/OpenBSD/
+    https://openbsd.mirror.garr.it/pub/OpenBSD/
+    https://mirror.litnet.lt/pub/OpenBSD/
+    https://mirror.meerval.net/pub/OpenBSD/
+    https://ftp.nluug.nl/pub/OpenBSD/
+    https://ftp.bit.nl/pub/OpenBSD/
+    https://mirrors.dalenys.com/pub/OpenBSD/
+    https://ftp.icm.edu.pl/pub/OpenBSD/
+    https://ftp.rnl.tecnico.ulisboa.pt/pub/OpenBSD/
+    https://mirrors.pidginhost.com/pub/OpenBSD/
+    https://mirror.yandex.ru/pub/OpenBSD/
+    https://ftp.eu.openbsd.org/pub/OpenBSD/
+    https://ftp.yzu.edu.tw/pub/OpenBSD/
+    https://www.mirrorservice.org/pub/OpenBSD/
+    https://anorien.csc.warwick.ac.uk/pub/OpenBSD/
+    https://mirror.bytemark.co.uk/pub/OpenBSD/
+    https://mirrors.sonic.net/pub/OpenBSD/
+    https://ftp3.usa.openbsd.org/pub/OpenBSD/
+    https://mirrors.syringanetworks.net/pub/OpenBSD/
+    https://openbsd.mirror.constant.com/pub/OpenBSD/
+    https://ftp4.usa.openbsd.org/pub/OpenBSD/
+    https://ftp5.usa.openbsd.org/pub/OpenBSD/
+    https://mirror.esc7.net/pub/OpenBSD/
     http://mirror.internode.on.net/pub/OpenBSD/
-    ftp://ftp.stacken.kth.se/pub/OpenBSD/
-    ftp://ftp.openbsd.md5.com.ar/pub/OpenBSD/
-    http://www.mirrorservice.org/sites/ftp.openbsd.org/pub/OpenBSD/
+    http://mirrors.unb.br/pub/OpenBSD/
+    http://ftp.aso.ee/pub/OpenBSD/
+    http://ftp2.fr.openbsd.org/pub/OpenBSD/
+    http://ftp.bytemine.net/pub/OpenBSD/
+    http://artfiles.org/openbsd/
+    http://ftp.fsn.hu/pub/OpenBSD/
+    http://kartolo.sby.datautama.net.id/pub/OpenBSD/
+    http://ftp.jaist.ac.jp/pub/OpenBSD/
+    http://mirror.rise.ph/pub/OpenBSD/
+    http://piotrkosoft.net/pub/OpenBSD/
+    http://ftp.man.poznan.pl/pub/OpenBSD/
+    http://www.obsd.si/pub/OpenBSD/
+    http://mirror.switch.ch/ftp/pub/OpenBSD/
+    http://mirror.ox.ac.uk/pub/OpenBSD/
+    http://mirror.exonetric.net/pub/OpenBSD/
+    http://mirrors.gigenet.com/pub/OpenBSD/
     http://mirrors.mit.edu/pub/OpenBSD/
-    ftp://ftp.openbsd.org/pub/OpenBSD/
-    http://ftp.ch.openbsd.org/pub/OpenBSD/
-    ftp://ftp.jp.openbsd.org/pub/OpenBSD/
+    http://openbsd.mirrors.hoobly.com/
+    http://openbsd.mirrors.pair.com/
+    ftp://mirror.internode.on.net/pub/OpenBSD/
+    ftp://ftp2.eu.openbsd.org/pub/OpenBSD/
+    ftp://openbsd.c3sl.ufpr.br/pub/OpenBSD/
+    ftp://mirrors.unb.br/pub/OpenBSD/
+    ftp://openbsd.ipacct.com/pub/OpenBSD/
+    ftp://openbsd.cs.toronto.edu/pub/OpenBSD/
+    ftp://mirrors.dotsrc.org/pub/OpenBSD/
+    ftp://mirror.one.com/pub/OpenBSD/
+    ftp://ftp.aso.ee/pub/OpenBSD/
+    ftp://ftp2.fr.openbsd.org/pub/OpenBSD/
+    ftp://mirrors.ircam.fr/pub/OpenBSD/
+    ftp://ftp.irisa.fr/pub/OpenBSD/
+    ftp://ftp.spline.de/pub/OpenBSD/
+    ftp://mirror.hs-esslingen.de/pub/OpenBSD/
+    ftp://ftp.bytemine.net/pub/OpenBSD/
+    ftp://ftp.hostserver.de/pub/OpenBSD/
+    ftp://ftp.cc.uoc.gr/pub/OpenBSD/
+    ftp://ftp.fsn.hu/pub/OpenBSD/
+    ftp://ftp.heanet.ie/pub/OpenBSD/
+    ftp://openbsd.mirror.garr.it/mirrors/OpenBSD/
+    ftp://ftp.jaist.ac.jp/pub/OpenBSD/
+    ftp://ftp.kddilabs.jp/pub/OpenBSD/
+    ftp://mirror.litnet.lt/pub/OpenBSD/
+    ftp://mirror.meerval.net/pub/OpenBSD/
+    ftp://ftp.nluug.nl/pub/OpenBSD/
+    ftp://ftp.bit.nl/pub/OpenBSD/
+    ftp://mirrors.dalenys.com/pub/OpenBSD/
+    ftp://mirror.rise.ph/pub/OpenBSD/
+    ftp://ftp.piotrkosoft.net/pub/OpenBSD/
+    ftp://ftp.icm.edu.pl/pub/OpenBSD/
+    ftp://ftp.man.poznan.pl/pub/OpenBSD/
+    ftp://mirror.yandex.ru/pub/OpenBSD/
+    ftp://ftp.obsd.si/pub/OpenBSD/
+    ftp://ftp.eu.openbsd.org/pub/OpenBSD/
+    ftp://mirror.switch.ch/pub/OpenBSD/
+    ftp://ftp.yzu.edu.tw/pub/OpenBSD/
+    ftp://ftp.ulak.net.tr/pub/OpenBSD/
+    ftp://ftp.mirrorservice.org/pub/OpenBSD/
+    ftp://anorien.csc.warwick.ac.uk/pub/OpenBSD/
+    ftp://mirror.bytemark.co.uk/pub/OpenBSD/
+    ftp://mirror.ox.ac.uk/pub/OpenBSD/
+    ftp://mirror.exonetric.net/pub/OpenBSD/
+    ftp://mirrors.sonic.net/pub/OpenBSD/
     ftp://ftp3.usa.openbsd.org/pub/OpenBSD/
-    ftp://carroll.cac.psu.edu/pub/OpenBSD/
-    ftp://rt.fm/pub/OpenBSD/
-    ftp://gd.tuwien.ac.at/opsys/OpenBSD/
-    ftp://openbsd.informatik.uni-erlangen.de/pub/OpenBSD/
+    ftp://mirrors.syringanetworks.net/pub/OpenBSD/
+    ftp://mirrors.mit.edu/pub/OpenBSD/
+    ftp://ftp4.usa.openbsd.org/pub/OpenBSD/
+    ftp://ftp5.usa.openbsd.org/pub/OpenBSD/
+    ftp://mirror.esc7.net/pub/OpenBSD/
 }
 
-# https://osdn.jp/docs/Mirrors
+# https://osdn.net/docs/Mirrors
 # They don't actually list the URLs; these were obtained by guessing.
 set portfetch::mirror_sites::sites(osdn) {
     http://aarnet.dl.osdn.jp/
@@ -478,8 +629,8 @@ set portfetch::mirror_sites::sites(php) {
 }
 
 set portfetch::mirror_sites::sites(postgresql) {
-    http://mirror.aarnet.edu.au/pub/postgresql/
-    http://www.mirrorservice.org/sites/ftp.postgresql.org/
+    https://mirror.aarnet.edu.au/pub/postgresql/
+    https://www.mirrorservice.org/sites/ftp.postgresql.org/
     http://ftp.postgresql.org/pub/
 }
 
@@ -487,8 +638,12 @@ set portfetch::mirror_sites::sites(postgresql) {
 # work automatically (which is, append first letter of port name, then
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
+#
+# files.pythonhosted.org has a redirector so you don't have to know the
+# hash-based subdir in order to fetch. Requires TLS 1.2, which doesn't work
+# on 10.8 and earlier.
+
 set portfetch::mirror_sites::sites(pypi) {
-    https://pypi.python.org/packages/source/:nosubdir
     https://files.pythonhosted.org/packages/source/:nosubdir
 }
 
@@ -498,7 +653,6 @@ set portfetch::mirror_sites::sites(ruby) {
     http://mirrors.ibiblio.org/ruby/
     ftp://ftp.iDaemons.org/pub/mirror/ftp.ruby-lang.org/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
-    http://www.mirrorservice.org/sites/ftp.ruby-lang.org/pub/ruby/
     ftp://xyz.csail.mit.edu/pub/ruby/
     ftp://ftp.ntua.gr/pub/lang/ruby/
     http://ftp.ruby-lang.org/pub/ruby/
@@ -510,22 +664,25 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
-    http://cytranet.dl.sourceforge.net/
-    http://freefr.dl.sourceforge.net/
-    http://iweb.dl.sourceforge.net/
-    http://jaist.dl.sourceforge.net/
-    http://kent.dl.sourceforge.net/
+    https://ayera.dl.sourceforge.net/
+    https://cytranet.dl.sourceforge.net/
+    https://excellmedia.dl.sourceforge.net/
+    https://freefr.dl.sourceforge.net/
+    https://iweb.dl.sourceforge.net/
+    https://jaist.dl.sourceforge.net/
+    https://kent.dl.sourceforge.net/
     http://liquidtelecom.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
-    http://ncu.dl.sourceforge.net/
     http://netassist.dl.sourceforge.net/
-    http://netcologne.dl.sourceforge.net/
-    http://netix.dl.sourceforge.net/
+    https://netcologne.dl.sourceforge.net/
+    https://netix.dl.sourceforge.net/
+    https://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
     http://superb-dca2.dl.sourceforge.net/
     http://superb-sea2.dl.sourceforge.net/
     http://tenet.dl.sourceforge.net/
-    http://ufpr.dl.sourceforge.net/
+    https://svwh.dl.sourceforge.net/
+    https://ufpr.dl.sourceforge.net/
 }
 
 set portfetch::mirror_sites::sites(sourceforge_jp) {
@@ -554,7 +711,7 @@ set portfetch::mirror_sites::sites(sunsite) {
 set portfetch::mirror_sites::sites(tcltk) {
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.kddlabs.co.jp/lang/tcl/ftp.scriptics.com/
-    http://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
+    https://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
     ftp://xyz.csail.mit.edu/pub/tcl/
     ftp://mirror.switch.ch/mirror/tcl.tk/
     ftp://ftp.tcl.tk/pub/tcl/
@@ -584,12 +741,11 @@ set portfetch::mirror_sites::sites(xcontrib) {
 }
 
 set portfetch::mirror_sites::sites(xfree) {
-    http://mirror.aarnet.edu.au/pub/xfree86/
+    https://mirror.aarnet.edu.au/pub/xfree86/
     ftp://ftp.esat.net/pub/X11/XFree86/
     http://ftp-stud.fht-esslingen.de/pub/Mirrors/ftp.xfree86.org/XFree86/
     http://www.gtlib.gatech.edu/pub/XFree86/
     http://ftp.gwdg.de/pub/xfree86/XFree86/
-    http://www.mirrorservice.org/sites/ftp.xfree86.org/pub/XFree86/
     ftp://ftp.physics.uvt.ro/pub/XFree86/
     ftp://ftp.fit.vutbr.cz/pub/XFree86/
     ftp://ftp.xfree86.org/pub/XFree86/
@@ -603,7 +759,7 @@ set portfetch::mirror_sites::sites(xorg) {
     http://mi.mirror.garr.it/mirrors/x.org/
     http://ftp.gwdg.de/pub/x11/x.org/pub/
     ftp://ftp.is.co.za/pub/x.org/pub/
-    http://www.mirrorservice.org/sites/ftp.x.org/pub/
+    https://www.mirrorservice.org/sites/ftp.x.org/pub/
     ftp://ftp.ntua.gr/pub/X11/X.org/
     http://x.cs.pu.edu.tw/
     ftp://ftp.sunet.se/pub/X11/ftp.x.org/

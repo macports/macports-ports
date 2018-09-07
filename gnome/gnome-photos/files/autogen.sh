@@ -16,7 +16,7 @@ PKG_NAME=`autoconf --trace "AC_INIT:$1" "$srcdir/configure.ac"`
 ACLOCAL_FLAGS="-I libgd $ACLOCAL_FLAGS"
 
 if [ "$#" = 0 -a "x$NOCONFIGURE" = "x" ]; then
-    echo "**Warning**: I am going to run \`configure\' with no arguments." >&2
+    echo "**Warning**: I am going to run \`configure' with no arguments." >&2
     echo "If you wish to pass any to it, please specify them on the" >&2
     echo \`$0\'" command line." >&2
     echo "" >&2
