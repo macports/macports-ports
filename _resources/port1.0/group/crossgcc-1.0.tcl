@@ -18,7 +18,11 @@
 options crossgcc.target \
         crossgcc.languages
 
-default crossgcc.languages {{c c++}}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default crossgcc.languages {"c c++"}
+} else {
+    default crossgcc.languages "c c++"
+}
 
 array set crossgcc.versions_info {
     7.1.0 {bzip2 {

@@ -23,7 +23,7 @@ default github.master_sites {${github.homepage}/tarball/${git.branch}}
 default master_sites {${github.master_sites}}
 
 options github.tarball_from
-default github.tarball_from {tags}
+default github.tarball_from tags
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
     global github.author github.project github.master_sites git.branch github.homepage
@@ -48,7 +48,7 @@ proc handle_tarball_from {option action args} {
 }
 
 options github.livecheck.branch
-default github.livecheck.branch {master}
+default github.livecheck.branch master
 
 options github.livecheck.regex
 default github.livecheck.regex {{([^"]+)}}

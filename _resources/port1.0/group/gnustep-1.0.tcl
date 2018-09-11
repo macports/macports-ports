@@ -161,8 +161,8 @@ platform darwin 9 {
 
 options system_library
 options local_library
-default system_library      [set_system_library]
-default local_library       [set_local_library]
+default system_library      {[set_system_library]}
+default local_library       {[set_local_library]}
 
 #
 # Default values for this group :
