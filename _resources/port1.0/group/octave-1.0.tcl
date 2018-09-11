@@ -47,6 +47,7 @@ proc octave.setup {module version} {
     global octave.module
     octave.module               ${module}
     version                     ${version}
+    categories                  math science
 }
 
 option_proc octave.module octave.set_module
@@ -58,7 +59,6 @@ proc octave.set_module {opt action args} {
     }
 }
 
-default categories   {math science}
 default master_sites {sourceforge:octave}
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
