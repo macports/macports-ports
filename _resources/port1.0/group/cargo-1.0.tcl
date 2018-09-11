@@ -19,7 +19,11 @@ PortGroup cargo_fetch 1.0
 use_configure       no
 default universal_variant yes
 
-default build.cmd   {"${cargo.bin} build"}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default build.cmd   {"${cargo.bin} build"}
+} else {
+    default build.cmd   {${cargo.bin} build}
+}
 build.target
 build.pre_args      --release --frozen -v -j${build.jobs}
 build.args

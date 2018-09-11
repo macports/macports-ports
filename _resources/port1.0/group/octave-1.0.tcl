@@ -58,7 +58,11 @@ proc octave.set_module {opt action args} {
     }
 }
 
-default categories   {math science}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default categories   {"math science"}
+} else {
+    default categories   "math science"
+}
 default master_sites {sourceforge:octave}
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
