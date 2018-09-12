@@ -14,11 +14,11 @@
 #               example.com/dep2/bar fedcba654321...
 #
 # checksums-append \
-#               dep1-foo-${foo.version}.tar.gz \
+#               ${foo.distfile} \
 #                   rmd160 abcdef123456... \
 #                   sha256 fedcba654321... \
 #                   size   1234 \
-#               dep2-bar-${bar.version}.tar.gz \
+#               ${bar.distfile} \
 #                   rmd160 abcdef123456... \
 #                   sha256 fedcba654321... \
 #                   size   4321
