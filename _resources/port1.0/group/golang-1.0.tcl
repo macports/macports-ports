@@ -139,22 +139,27 @@ proc handle_go_vendors {option action {value ""}} {
             global ${vproject}.version
             set ${vproject}.version ${vers}
 
-            set tag ${vauthor}-${vproject}
-
             switch -exact ${vdomain} {
                 github.com {
-                    master_sites-append https://github.com/${vauthor}/${vproject}/tarball/${vers}:${tag}
-                    distfiles-append    ${vauthor}-${vproject}-${vers}.tar.gz:${tag}
+                    set distfile ${vauthor}-${vproject}-${vers}.tar.gz
+                    set master_site https://github.com/${vauthor}/${vproject}/tarball/${vers}
                 }
                 bitbucket.org {
-                    master_sites-append https://bitbucket.org/${vauthor}/${vproject}/get:${tag}
-                    distfiles-append    ${vers}.tar.gz:${tag}
+                    set distfile ${vers}.tar.gz
+                    set master_site https://bitbucket.org/${vauthor}/${vproject}/get
                 }
                 default {
                     ui_error "go.vendors can't handle dependencies from ${vdomain}"
                     error "unsupported dependency domain"
                 }
             }
+
+            global ${vproject}.distfile
+            set ${vproject}.distfile ${distfile}
+
+            set tag ${vauthor}-${vproject}
+            master_sites-append ${master_site}:${tag}
+            distfiles-append    ${distfile}:${tag}
         }
     }
 }
