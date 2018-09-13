@@ -1,8 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# This PortGroup accommodates golang projects. The github-1.0 or bitbucket-1.0
-# portgroups are automatically applied and set up for projects hosted on GitHub
-# or Bitbucket.
+# This PortGroup accommodates golang projects.
 #
 # Usage:
 #
@@ -22,6 +20,19 @@
 #                   rmd160 abcdef123456... \
 #                   sha256 fedcba654321... \
 #                   size   4321
+#
+# The github-1.0 or bitbucket-1.0 portgroups are automatically applied and set
+# up for projects hosted on GitHub or Bitbucket; in these cases it is not
+# necessary to specify the portgroups or call github.setup or bitbucket.setup,
+# i.e. the following are sufficient:
+#
+# PortGroup     golang 1.0
+# go.setup      github.com/author/project 1.0.0 v
+#
+# or
+#
+# PortGroup     golang 1.0
+# go.setup      bitbucket.com/author/project 1.0.0 v
 #
 # The go.vendors option expects a list with 2-tuples consisting of package ID
 # and git SHA1.
