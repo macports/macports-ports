@@ -220,7 +220,10 @@ proc xcode::get_build_args {args} {
     global os.major os.arch
     global developer_dir configure.sdkroot
 
-    set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
+    set xcode_project_dir [file normalize [option build.dir]/[file dirname [option xcode.project]]]
+    set xcode_build_args ""
+    append xcode_build_args " OBJROOT=\"${xcode_project_dir}/build/\""
+    append xcode_build_args " SYMROOT=\"${xcode_project_dir}/build/\""
 
     append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
 
