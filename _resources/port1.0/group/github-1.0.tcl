@@ -51,7 +51,11 @@ options github.livecheck.branch
 default github.livecheck.branch master
 
 options github.livecheck.regex
-default github.livecheck.regex {{([^"]+)}}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default github.livecheck.regex {{([^"]+)}}
+} else {
+    default github.livecheck.regex {(\[^"]+)}
+}
 
 proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_suffix ""}} {
     global extract.suffix github.author github.project github.version github.tag_prefix github.tag_suffix
