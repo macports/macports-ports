@@ -199,8 +199,10 @@ proc handle_go_vendors {option action {value ""}} {
 # Support for additional hosts not conforming to this pattern will take some
 # work.
 post-extract {
-    file mkdir ${gopath}/src/${go.domain}/${go.author}
-    move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
+    if {${fetch.type} eq "standard"} {
+        file mkdir ${gopath}/src/${go.domain}/${go.author}
+        move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
+    }
 
     foreach vlist ${go.vendors_internal} {
         set sha1_short [lindex ${vlist} 0]
