@@ -55,7 +55,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     go.domain           [lindex ${parts} 0]
     go.author           [lindex ${parts} 1]
     go.project          [lindex ${parts} 2]
-    switch -exact ${go.domain} {
+    switch ${go.domain} {
         github.com {
             uplevel "PortGroup github 1.0"
             github.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
@@ -80,7 +80,7 @@ proc go._translate_package_id {package_id} {
     set author [lindex ${parts} 1]
     set project [lindex ${parts} 2]
 
-    switch -exact ${domain} {
+    switch ${domain} {
         golang.org {
             # Use GitHub mirror
             set domain github.com
@@ -111,7 +111,15 @@ options go.bin go.vendors
 default go.bin          {${prefix}/bin/go}
 default go.vendors      {}
 
-default platforms       darwin
+platforms               darwin freebsd linux
+supported_archs         i386 x86_64
+set goos                ${os.platform}
+
+switch ${build_arch} {
+    i386    { set goarch 386 }
+    x86_64  { set goarch amd64 }
+    default { set goarch {} }
+}
 
 default use_configure   no
 default dist_subdir     go
@@ -124,7 +132,7 @@ default worksrcdir      {${gopath}/src/${go.package}}
 default build.cmd       {"${go.bin} build"}
 build.args
 build.target
-default build.env       {"GOPATH=${gopath} CC=${configure.cc}"}
+default build.env       {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
 
 # go.vendors name1 ver1 name2 ver2...
 # When a Gopkg.lock, glide.lock, etc. is present use go2port to generate values
