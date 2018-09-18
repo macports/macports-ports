@@ -151,6 +151,9 @@ proc handle_go_vendors {option action {vendors_str ""}} {
 
 proc handle_set_go_vendors {vendors_str} {
     global go.vendors_internal checksum_types
+    if {![info exists checksum_types]} {
+        set checksum_types $portchecksum::checksum_types
+    }
     set num_tokens [llength ${vendors_str}]
     for {set ix 0} {${ix} < ${num_tokens}} {incr ix} {
         # Get the Go package ID
