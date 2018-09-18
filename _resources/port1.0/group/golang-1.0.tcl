@@ -8,15 +8,13 @@
 #
 # go.setup      example.com/author/project 1.0.0 v
 #
-# go.vendors    example.com/dep1/foo abcdef123456... \
-#               example.com/dep2/bar fedcba654321...
-#
-# checksums-append \
-#               ${foo.distfile} \
-#                   rmd160 abcdef123456... \
-#                   sha256 fedcba654321... \
+# go.vendors    example.com/dep1/foo \
+#                   lock   abcdef123456... \
+#                   rmd160 fedcba654321... \
+#                   sha256 bdface246135... \
 #                   size   1234 \
-#               ${bar.distfile} \
+#               example.com/dep2/bar \
+#                   lock   fedcba654321... \
 #                   rmd160 abcdef123456... \
 #                   sha256 fedcba654321... \
 #                   size   4321
@@ -34,13 +32,18 @@
 # PortGroup     golang 1.0
 # go.setup      bitbucket.com/author/project 1.0.0 v
 #
-# The go.vendors option expects a list with 2-tuples consisting of package ID
-# and git SHA1.
+# The go.vendors option expects a list of package IDs, each followed by these
+# labeled values:
+#
+# - lock: the version of the package in git SHA-1 format. This must
+#   come before any checksums.
+#
+# - rmd160, sha256, size, etc.: checksums of the package. All checksums
+#   supported by the checksums keyword are supported.
 #
 # The list of vendors can be found in the Gopkg.lock, glide.lock, etc. file in
 # the upstream source code. The go2port tool (install via MacPorts) can be used
-# to generate a skeleton portfile with precomputed go.vendors and
-# checksums-append values.
+# to generate a skeleton portfile with precomputed go.vendors.
 
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
 
@@ -50,11 +53,8 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     go.package          ${go_package}
     go.version          ${go_version}
 
-    set parts [go._translate_package_id ${go_package}]
+    lassign [go._translate_package_id ${go_package}] go.domain go.author go.project
 
-    go.domain           [lindex ${parts} 0]
-    go.author           [lindex ${parts} 1]
-    go.project          [lindex ${parts} 2]
     switch ${go.domain} {
         github.com {
             uplevel "PortGroup github 1.0"
@@ -138,47 +138,76 @@ default build.env       {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${co
 # When a Gopkg.lock, glide.lock, etc. is present use go2port to generate values
 set go.vendors_internal {}
 option_proc go.vendors handle_go_vendors
-proc handle_go_vendors {option action {value ""}} {
-    global go.vendors_internal
+proc handle_go_vendors {option action {vendors_str ""}} {
     if {${action} eq "set"} {
-        foreach {vpackage vers} ${value} {
-            set vlist [go._translate_package_id ${vpackage}]
+        if {[catch {
+            handle_set_go_vendors ${vendors_str}
+        } error]} {
+            ui_debug ${::errorInfo}
+            ui_error "Couldn't parse go.vendors line (${vendors_str}) [${error}]"
+        }
+    }
+}
 
-            set vdomain [lindex ${vlist} 0]
-            set vauthor [lindex ${vlist} 1]
-            set vproject [lindex ${vlist} 2]
+proc handle_set_go_vendors {vendors_str} {
+    global go.vendors_internal checksum_types
+    set num_tokens [llength ${vendors_str}]
+    for {set ix 0} {${ix} < ${num_tokens}} {incr ix} {
+        # Get the Go package ID
+        set vpackage [lindex ${vendors_str} ${ix}]
 
-            # The vauthor may be wrong (the project has been renamed/changed
-            # ownership) so we need to use the SHA-1 suffix later to identify
-            # the package when moving into the GOPATH. GitHub uses 7 digits;
-            # Bitbucket uses 12. We take 7 and use globbing.
-            set sha1_short [string range ${vers} 0 6]
-            lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vers}]
+        # Split up the package ID
+        lassign [go._translate_package_id ${vpackage}] vdomain vauthor vproject
 
-            global ${vproject}.version
-            set ${vproject}.version ${vers}
+        # Handle the remaining values for this package
+        incr ix
+        while {1} {
+            set token [lindex ${vendors_str} ${ix}]
+            if {${token} eq "lock"} {
+                # Handle the package version ("lock" as in "lockfile")
+                incr ix
+                set vversion [lindex ${vendors_str} ${ix}]
+                incr ix
 
-            switch -exact ${vdomain} {
-                github.com {
-                    set distfile ${vauthor}-${vproject}-${vers}.tar.gz
-                    set master_site https://github.com/${vauthor}/${vproject}/tarball/${vers}
+                # The vauthor may be wrong (the project has been renamed/changed
+                # ownership) so we need to use the SHA-1 suffix later to identify
+                # the package when moving into the GOPATH. GitHub uses 7 digits;
+                # Bitbucket uses 12. We take 7 and use globbing.
+                set sha1_short [string range ${vversion} 0 6]
+                lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vversion}]
+
+                switch ${vdomain} {
+                    github.com {
+                        set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
+                        set master_site https://github.com/${vauthor}/${vproject}/tarball/${vversion}
+                    }
+                    bitbucket.org {
+                        set distfile ${vversion}.tar.gz
+                        set master_site https://bitbucket.org/${vauthor}/${vproject}/get
+                    }
+                    default {
+                        ui_error "go.vendors can't handle dependencies from ${vdomain}"
+                        error "unsupported dependency domain"
+                    }
                 }
-                bitbucket.org {
-                    set distfile ${vers}.tar.gz
-                    set master_site https://bitbucket.org/${vauthor}/${vproject}/get
-                }
-                default {
-                    ui_error "go.vendors can't handle dependencies from ${vdomain}"
-                    error "unsupported dependency domain"
-                }
+                set tag ${vauthor}-${vproject}
+                master_sites-append ${master_site}:${tag}
+                distfiles-append    ${distfile}:${tag}
+            } elseif {${token} in ${checksum_types}} {
+                # Handle checksum values
+                incr ix
+                set csumval [lindex ${vendors_str} ${ix}]
+                incr ix
+                checksums-append    ${distfile} ${token} ${csumval}
+            } else {
+                # This wasn't a checksum token, but rather the next vendor package
+                incr ix -1
+                break
             }
-
-            global ${vproject}.distfile
-            set ${vproject}.distfile ${distfile}
-
-            set tag ${vauthor}-${vproject}
-            master_sites-append ${master_site}:${tag}
-            distfiles-append    ${distfile}:${tag}
+            # Stop if we have consumed all the tokens
+            if {${ix} == ${num_tokens}} {
+                break
+            }
         }
     }
 }
