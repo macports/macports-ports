@@ -130,9 +130,14 @@ set gopath              ${workpath}/gopath
 default worksrcdir      {${gopath}/src/${go.package}}
 
 default build.cmd       {"${go.bin} build"}
-build.args
-build.target
+default build.args      ""
+default build.target    ""
 default build.env       {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
+
+default test.cmd        {"${go.bin} test"}
+default test.args       ""
+default test.target     ""
+default test.env        {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
 
 # go.vendors name1 ver1 name2 ver2...
 # When a Gopkg.lock, glide.lock, etc. is present use go2port to generate values
