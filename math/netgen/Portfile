@@ -2,11 +2,12 @@
 
 PortSystem          1.0
 PortGroup           compilers 1.0
+PortGroup           github    1.0
+PortGroup           cmake     1.1
+PortGroup           cxx11     1.1
+PortGroup           active_variants 1.1
 
-name                netgen
-version             5.3.1
-set branch          [join [lrange [split ${version} .] 0 1] .]
-revision            1
+github.setup        NGSolve netgen 6.2.1808 v
 platforms           darwin
 categories          math
 license             LGPL-2
@@ -18,36 +19,120 @@ long_description    ${description}. It accepts input from constructive \
                     allows the handling of IGES and STEP files. NETGEN contains \
                     modules for mesh optimization and hierarchical mesh \
                     refinement.
+homepage            https://ngsolve.org/
 
-homepage            http://www.hpfem.jku.at/netgen/
-master_sites        sourceforge:project/netgen-mesher/netgen-mesher/${branch}/
-
-checksums           rmd160  1516ded2576a1ff31bc848e3af966aa444cb84ea \
-                    sha256  cb97f79d8f4d55c00506ab334867285cde10873c8a8dc783522b47d2bc128bf9
+checksums           rmd160  ec1aabc5732a558bcf3744ea883b0b09c036ee0d \
+                    sha256  619548a62b16c635f81cfbc8611e1e65053cc41766cdd247d32bd1a4073ff1bf \
+                    size    3002932
 
 compilers.choose    cc cxx
 compilers.setup
 
-depends_lib         port:tcl port:tk port:tix port:Togl port:mesa port:libGLU
+# do not attempt to download & install tkdnd or Tcl/Tk
+patchfiles-append   patch-no-external.diff
+# do not install another version of pybind11
+patchfiles-append   patch-no-pybind.diff
+# link Tcl/Tk libraries like other systems (unnecessary?)
+patchfiles-append   patch-link-ng.diff
+# behave like other systems except use of RPATH
+patchfiles-append   patch-CMakeLists.txt.diff
+# prevent console window from appearing
+# see http://wiki.tcl.tk/26777
+patchfiles-append   patch-no-console.diff
 
-patchfiles          patch-ng-ng.tcl.diff
+set python_branch   3.7
+set python_version  [string map {. ""} ${python_branch}]
 
-configure.args      --mandir=${prefix}/share/man \
-                    --with-tcl=${prefix}/lib \
-                    --with-tk=${prefix}/lib \
-                    --disable-shared
+depends_lib-append  \
+    port:zlib \
+    port:tcl \
+    port:tk \
+    port:tkdnd \
+    port:Togl \
+    port:python${python_version} \
+    port:ffmpeg \
+    port:jpeg
 
-# there do not seem to be any tests include with this port. 'make check' does nothing.
+depends_build-append \
+    port:pybind11
 
-# Other options that could be considered here:
-#--enable-occ            compile with OpenCascade geometry kernel
-#--enable-nglib          generate shared library nglib
-#--enable-parallel       enable mpi parallelization
-#--enable-jpeglib        enable snapshots using library libjpeg
-#--enable-ffmpeg         enable video recording with FFmpeg, uses libavcodec
-#--enable-mkl            link Intel's mkl library, necessary for ngsolve and mkl 11.x
-#
-#Optional Packages:
-#--with-occ=dir          use OpenCascade installed in directory dir
-#--with-togl=dir         directory containing libTogl1.7
-#--with-metis=dir        path to metis 5.x
+depends_run-append \
+    port:py${python_version}-tkinter
+
+configure.args-append \
+    -DUSE_NATIVE_ARCH=OFF \
+    -DPYBIND_INCLUDE_DIR=${prefix}/include \
+    -DPYTHON_EXECUTABLE=${frameworks_dir}/Python.framework/Versions/${python_branch}/bin/python${python_branch} \
+    -DTCL_INCLUDE_PATH:PATH=${prefix}/include \
+    -DTK_INCLUDE_PATH:PATH=${prefix}/include \
+    -DOPENGL_glu_LIBRARY="" \
+    -DUSE_JPEG=ON \
+    -DUSE_MPEG=ON
+
+variant quartz conflicts x11 {
+    require_active_variants tk    quartz
+    require_active_variants tkdnd quartz
+    require_active_variants Togl  quartz
+    post-patch {
+        reinplace \
+            "s|MACPORTS_NO_X11|TRUE|g" \
+            ${worksrcpath}/CMakeLists.txt
+    }
+}
+
+variant x11 conflicts quartz {
+    require_active_variants tk    x11
+    require_active_variants tkdnd x11
+    require_active_variants Togl  x11
+    depends_lib-append \
+        port:xorg-libX11 \
+        port:xorg-libXmu \
+        port:mesa
+    depends_build-append \
+        port:libGLU
+    configure.args-append \
+        -DOPENGL_gl_LIBRARY=${prefix}/lib/libGL.dylib
+}
+
+if {![variant_isset quartz]} {
+    default_variants +x11
+}
+
+variant occ description {(not supported) compile with OpenCascade geometry kernel} {
+    depends_lib-append     port:oce
+    configure.args-append  -DUSE_OCC=ON \
+                           -DOCC_INCLUDE_DIR=${prefix}/include/oce \
+                           -DOCC_LIBRARY=${prefix}/lib
+}
+
+pre-configure {
+    if {![variant_isset quartz] && ![variant_isset x11]} {
+        error "Either +x11 or +quartz is required"
+    }
+}
+
+post-destroot {
+    delete ${destroot}${prefix}/bin/Netgen1
+    delete ${destroot}${prefix}/bin/startup.sh
+
+    xinstall -d -m 0755 ${destroot}${applications_dir}/Netgen.app/Contents/Resources
+    xinstall -d -m 0755 ${destroot}${applications_dir}/Netgen.app/Contents/MacOS
+
+    ln -s \
+        ${prefix}/bin/netgen \
+        ${destroot}${applications_dir}/Netgen.app/Contents/MacOS/Netgen
+
+    move \
+        ${destroot}${prefix}/Info.plist \
+        ${destroot}${applications_dir}/Netgen.app/Contents
+
+    move \
+        ${destroot}${prefix}/Netgen.icns \
+        ${destroot}${applications_dir}/Netgen.app/Contents/Resources
+
+    xinstall -d -m 0755 \
+        ${destroot}${frameworks_dir}/Python.framework/Versions/${python_branch}/lib/python${python_branch}/site-packages
+    ln -s \
+        ${prefix}/lib/python${python_branch}/site-packages/netgen \
+        ${destroot}${frameworks_dir}/Python.framework/Versions/${python_branch}/lib/python${python_branch}/site-packages/
+}
