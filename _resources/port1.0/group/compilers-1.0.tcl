@@ -65,7 +65,7 @@ default compilers.required_f {}
 default compilers.required_some_f {}
 default compilers.variants_conflict {}
 default compilers.libfortran {}
-default compilers.clear_archflags yes
+default compilers.clear_archflags no
 
 # also set a default gcc version
 if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
