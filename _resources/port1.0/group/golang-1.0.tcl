@@ -53,6 +53,14 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     go.package          ${go_package}
     go.version          ${go_version}
 
+    # go.package is split up here into go.{domain,author,project}, but a port
+    # may override just go.package when, for instance, the upstream author has
+    # decided to customize the package ID but still host on e.g. GitHub. The
+    # shfmt port is an example of this.
+    #
+    # It is assumed in this portgroup that go.{domain,author,project} will
+    # remain consistent with the distfile; this is needed when moving the source
+    # into the GOPATH in the post-extract block later on.
     lassign [go._translate_package_id ${go_package}] go.domain go.author go.project
 
     switch ${go.domain} {
@@ -129,10 +137,31 @@ default depends_build   port:go
 set gopath              ${workpath}/gopath
 default worksrcdir      {${gopath}/src/${go.package}}
 
-default build.cmd       {"${go.bin} build"}
-build.args
-build.target
-default build.env       {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default build.cmd   {"${go.bin} build"}
+} else {
+    default build.cmd   {${go.bin} build}
+}
+default build.args      ""
+default build.target    ""
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default build.env   {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
+} else {
+    default build.env   {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}}
+}
+
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default test.cmd    {"${go.bin} test"}
+} else {
+    default test.cmd    {${go.bin} test}
+}
+default test.args       ""
+default test.target     ""
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default test.env    {"GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}"}
+} else {
+    default test.env    {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}}
+}
 
 # go.vendors name1 ver1 name2 ver2...
 # When a Gopkg.lock, glide.lock, etc. is present use go2port to generate values
@@ -232,7 +261,10 @@ proc handle_set_go_vendors {vendors_str} {
 # work.
 post-extract {
     if {${fetch.type} eq "standard"} {
-        file mkdir ${gopath}/src/${go.domain}/${go.author}
+        # Don't try to create the worksrcpath using go.{domain,author,project}
+        # as the result will not be accurate when go.package has been
+        # customized.
+        file mkdir [file dirname ${worksrcpath}]
         move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
     }
 
