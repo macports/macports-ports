@@ -115,7 +115,7 @@ set ruby.prog_suffix    ""
 options ruby.config_rubyprog_name
 default ruby.config_rubyprog_name --rubyprog
 
-default ruby.branch         {${ruby.default_branch}}
+ruby.branch         ${ruby.default_branch}
 
 options ruby.link_binaries ruby.link_binaries_suffix
 default ruby.link_binaries yes
