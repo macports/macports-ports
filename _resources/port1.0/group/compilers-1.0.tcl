@@ -71,8 +71,11 @@ default compilers.clear_archflags no
 if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
     # see https://trac.macports.org/ticket/54215#comment:36
     set compilers.gcc_default gcc6
-} else {
+} elseif {${os.major} < 10} {
+    # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
+} else {
+    set compilers.gcc_default gcc8
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
