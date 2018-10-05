@@ -14,6 +14,7 @@
 
 # Args placed before the php or pear commands.
 options pear.env
+if {[vercmp [macports_version] 2.5.3] <= 0} {
 default pear.env    {
     "TZ=UTC \
     HOME=${pear.installer} \
@@ -27,12 +28,34 @@ default pear.env    {
     PHP_PEAR_TEST_DIR=${pear.installer}/pear/tests \
     PHP_PEAR_SYSCONF_DIR=${pear.installer}"
 }
+} else {
+default pear.env    {
+    TZ=UTC \
+    HOME=${pear.installer} \
+    PHP_PEAR_INSTALL_DIR=${pear.installer}/pear \
+    PHP_PEAR_BIN_DIR=${pear.installer}/bin \
+    PHP_PEAR_PHP_BIN=${pear.cmd-php} \
+    PHP_PEAR_CFG_DIR=${pear.installer}/pear/cfg \
+    PHP_PEAR_DOC_DIR=${pear.installer}/pear/docs \
+    PHP_PEAR_DATA_DIR=${pear.installer}/pear/data \
+    PHP_PEAR_WWW_DIR=${pear.installer}/pear/www \
+    PHP_PEAR_TEST_DIR=${pear.installer}/pear/tests \
+    PHP_PEAR_SYSCONF_DIR=${pear.installer}
+}
+}
 
 # Args placed after php or pear commands.
 options pear.configure.pre_args
+if {[vercmp [macports_version] 2.5.3] <= 0} {
 default pear.configure.pre_args   {
     "-c ${pear.installer}/pear.conf \
     -C ${pear.installer}/pear.conf"
+}
+} else {
+default pear.configure.pre_args   {
+    -c ${pear.installer}/pear.conf \
+    -C ${pear.installer}/pear.conf
+}
 }
 
 # Where we instruct pear to install our package.
@@ -77,7 +100,11 @@ options pear.package
 
 # Package file.
 options pear.packagefile
+if {[vercmp [macports_version] 2.5.3] <= 0} {
 default pear.packagefile    {"${distpath}/[lindex $distfiles 0]"}
+} else {
+default pear.packagefile    {${distpath}/[lindex $distfiles 0]}
+}
 
 proc pear.setup {package_name package_version {package_channel "pear.php.net"}} {
     global name extract.suffix version
