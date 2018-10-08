@@ -39,7 +39,11 @@ proc universal_setup {args} {
     } else {
         ui_debug "adding universal variant via PortGroup muniversal"
         uplevel "PortGroup muniversal 1.0"
+        if {[vercmp [macports_version] 2.5.3] <= 0} {
         uplevel "default universal_archs_supported {\"i386 x86_64\"}"
+        } else {
+        uplevel "default universal_archs_supported {i386 x86_64}"
+        }
     }
 }
 
