@@ -109,7 +109,7 @@ proc php5extension.setup {extensions version {source ""}} {
             ui_debug "Staging in [file tail ${destroot.dir}]"
             portdestroot::destroot_main
         }
-        xinstall -m 755 -d ${destroot}${php5extension.inidir}
+        xinstall -m 0755 -d ${destroot}${php5extension.inidir}
         if {"zend" == ${php5extension.type}} {
             set extension_prefix "zend_extension=${php5extension.extension_dir}/"
         } else {

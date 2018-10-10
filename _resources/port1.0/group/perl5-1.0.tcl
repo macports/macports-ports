@@ -181,7 +181,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             use_configure no
             build {}
             destroot {
-                xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
         }

@@ -34,7 +34,7 @@ post-extract {
 }
 
 pre-destroot    {
-    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}/examples
+    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}/examples
 }
 
 # python.rootname: The "proper" name of the software. For a module
