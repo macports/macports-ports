@@ -46,7 +46,7 @@ proc pure.setup {module module_version} {
         xinstall -d ${destroot}${prefix}/share/doc/${name}
         foreach f {COPYING README} {
             if {[file exists ${worksrcpath}/${f}]} {
-                xinstall -m 644 ${worksrcpath}/${f} ${destroot}${prefix}/share/doc/${name}
+                xinstall -m 0644 ${worksrcpath}/${f} ${destroot}${prefix}/share/doc/${name}
             }
         }
         if {[file exists ${worksrcpath}/examples]} {

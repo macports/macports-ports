@@ -263,7 +263,7 @@ post-activate {
     # XML catalog
     # Make the directory if it doesn't exist
     if {![file exists ${xml.confdir}]} {
-        xinstall -m 755 -d ${xml.confdir}
+        xinstall -m 0755 -d ${xml.confdir}
     }
 
     # Create the XML catalog file if it doesn't exist
@@ -274,7 +274,7 @@ post-activate {
     # SGML catalog
     # Make the directory if it doesn't exist
     if {![file exists ${sgml.confdir}]} {
-        xinstall -m 755 -d ${sgml.confdir}
+        xinstall -m 0755 -d ${sgml.confdir}
     }
 
     # Create the SGML catalog file if it doesn't exist
