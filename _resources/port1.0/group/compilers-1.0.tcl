@@ -148,7 +148,8 @@ set cdb(gfortran,variant)  gfortran
 set cdb(gfortran,compiler) gfortran
 set cdb(gfortran,descrip)  "$cdb(${compilers.gcc_default},descrip) Fortran"
 set cdb(gfortran,depends)  $cdb(${compilers.gcc_default},depends)
-set cdb(gfortran,dependsl) $cdb(${compilers.gcc_default},dependsl)
+# see https://trac.macports.org/ticket/57284 for inclusion of port:libgcc7
+set cdb(gfortran,dependsl) "$cdb(${compilers.gcc_default},dependsl) port:libgcc7"
 set cdb(gfortran,libfortran) $cdb(${compilers.gcc_default},libfortran)
 set cdb(gfortran,dependsd) $cdb(${compilers.gcc_default},dependsd)
 set cdb(gfortran,dependsa) $cdb(${compilers.gcc_default},dependsa)
