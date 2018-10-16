@@ -129,6 +129,8 @@ switch ${build_arch} {
     default { set goarch {} }
 }
 
+default universal_variant no
+
 default use_configure   no
 default dist_subdir     go
 
