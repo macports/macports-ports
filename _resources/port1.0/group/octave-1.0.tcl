@@ -91,6 +91,8 @@ port::register_callback octave.add_dependencies
 configure.env-append OMP_NUM_THREADS=1
 # do not force all Portfiles to switch from configure.env to configure.env-append
 proc octave.add_env {} {
+    global configure.cxx
+
     configure.env-delete OMP_NUM_THREADS=1
     configure.env-append OMP_NUM_THREADS=1
 
