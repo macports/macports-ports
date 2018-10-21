@@ -93,6 +93,14 @@ configure.env-append OMP_NUM_THREADS=1
 proc octave.add_env {} {
     configure.env-delete OMP_NUM_THREADS=1
     configure.env-append OMP_NUM_THREADS=1
+
+    # Octave defaults to compilers used to build it
+    # see https://trac.macports.org/ticket/57419
+    configure.env-delete LD_CXX=${configure.cxx}
+    configure.env-append LD_CXX=${configure.cxx}
+
+    configure.env-delete DL_LD=${configure.cxx}
+    configure.env-append DL_LD=${configure.cxx}
 }
 port::register_callback octave.add_env
 
