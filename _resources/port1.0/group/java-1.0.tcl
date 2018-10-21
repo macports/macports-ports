@@ -16,11 +16,20 @@
 # - Java 9 and later are "9", etc.
 # - "+" and "*" wilcards are supported
 #
-# If the required Java cannot be found, a warning will be issued.
+# If the required Java cannot be found, an error will be thrown at pre-fetch.
 
 options java.version
 
 default java.version {}
+
+set java_version_not_found no
+
+pre-fetch {
+    if { ${java_version_not_found} } {
+        ui_error "${name} requires Java ${java.version} but no such installation could be found."
+        return -code error "missing required Java version"
+    }
+}
 
 # Search for a good value for JAVA_HOME
 proc find_java_home {} {
@@ -30,8 +39,10 @@ proc find_java_home {} {
     if { ${java.version} ne "" } {
         if { [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}]}] } {
             # Don't return an error because that would prevent the port from
-            # even being indexed when the required Java is missing.
-            ui_warn "Could not find required Java version: ${java.version}"
+            # even being indexed when the required Java is missing. Instead, set
+            # a flag to be checked at pre-fetch.
+            global java_version_not_found
+            set java_version_not_found yes
         } else {
             set home_value $val
             ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
