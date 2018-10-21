@@ -4,21 +4,16 @@ PortSystem                          1.0
 PortGroup                 github    1.0
 PortGroup                 cxx11     1.1
 PortGroup                 java      1.0
-
-# Might be useful to support older systems at some point.
-#PortGroup                 compilers 1.0
-#PortGroup                 compiler_blacklist_versions 1.0
-#compiler.blacklist-append {clang < 702}
-#compilers.setup           require_fortran
-#build.env-append          CC=${configure.cc}   \
-#                          CXX=${configure.cxx} \
-#                          FC=${configure.fc}
+PortGroup                 compilers 1.0
+PortGroup                 xcodeversion 1.0
+PortGroup                 compiler_blacklist_versions 1.0
 
 github.setup              bazelbuild bazel 0.18.0
-revision                  1
+revision                  2
 github.tarball_from       releases
 categories                devel
 maintainers               {tfmnet.com:mohamed.issa @RootFunction} \
+                          {jonesc @cjones051073} \
                           openmaintainer
 description               A tool for automating builds and tests.
 long_description          ${description}
@@ -39,15 +34,55 @@ use_configure             no
 depends_build-append      bin:python:python27 \
                           bin:bash:bash \
                           bin:zip:zip
-#                          bin:git:git
 
-# https://github.com/bazelbuild/bazel/issues/6188
-if {${os.major} <= 15} {
+depends_lib-append        port:cctools
+
+patch.pre_args -p1
+
+# The oldest Xcode version to use default Xcode compiler
+# Note setting here should be in sync with that in py-tensorflow
+set bazel_min_xcode 9.0
+
+# Older OS hacks
+if {${os.major} < 16} {
+    # https://github.com/bazelbuild/bazel/issues/6188
     depends_build-append  port:unzip
+}
+post-patch {
+    if {[vercmp ${xcodeversion} 8.0] < 0} {
+        # Revert xcode-locator to an older version for Xcode 7 and older
+        # https://raw.githubusercontent.com/bazelbuild/bazel/7372c04d40d7ab45fa2649c8be002ee6909668d1/tools/osx/xcode_locator.m
+        file copy -force ${filespath}/Xcode7-Revert-xcode-locator/xcode_locator.m ${worksrcpath}/tools/osx/xcode_locator.m
+    }
+}
+
+compiler.blacklist-append {clang < 710}
+#compilers.setup           require_fortran
+build.env-append  CC=${configure.cc} \
+                 CXX=${configure.cxx} \
+              TMPDIR=${workpath}/tmp
+# Disable Xcode detection on older OSes, as we want the
+# MP provided commandline utilities to be used instead.
+if {[vercmp ${xcodeversion} ${bazel_min_xcode}] < 0} {
+    build.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
 }
 
 build {
-    system -W ${worksrcpath} "./compile.sh"
+
+    if {[vercmp ${xcodeversion} ${bazel_min_xcode}] < 0} {
+        # Patch build files to enforce correct compiler
+        foreach f { scripts/bootstrap/compile.sh tools/osx/crosstool/CROSSTOOL.tpl src/test/shell/bazel/testdata/bazel_toolchain_test_data/tools/arm_compiler/CROSSTOOL tools/cpp/unix_cc_configure.bzl tools/cpp/CROSSTOOL third_party/zlib/configure src/test/java/com/google/devtools/build/lib/analysis/mock/MOCK_CROSSTOOL } {
+            foreach cmd {ar nm strip libtool ld objdump} {
+                reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+            }
+            reinplace -q "s|/usr/bin/clang|${configure.cc}|g" ${f}
+            reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"  ${f}
+            reinplace -q "s| clang | ${configure.cc} |g"  ${f}
+        }
+    }
+
+    # Build bazel
+    system -W ${worksrcpath} "VERBOSE=yes BAZEL_WRKDIR=${workpath} ./compile.sh"
 
     # Put executable in main working folder
     xinstall -m 755 -W ${worksrcpath}/output ${name} ${worksrcpath}
@@ -55,15 +90,8 @@ build {
     # Get ready to build the bash completion script
     file delete -force /var/tmp/_${name}_root
 
-    # build fails if it does not recognize this dir as a git repo
-    # As of 0.18.0 this no longer seems neccessary, and git dependency
-    # prevents binary distribution so comment out. Eventually can be removed.
-    #system -W ${worksrcpath} "git init"
-    #system -W ${worksrcpath} "git add ."
-    #system -W ${worksrcpath} "git commit -m GitRepo"
-
     # Build the bash completion script
-    system -W ${worksrcpath} "./${name} --max_idle_secs=60 --output_user_root=${workpath} build //scripts:${name}-complete.bash"
+    system -W ${worksrcpath} "./${name} --max_idle_secs=60 --output_user_root=${workpath} build -s //scripts:${name}-complete.bash"
 }
 
 destroot {
