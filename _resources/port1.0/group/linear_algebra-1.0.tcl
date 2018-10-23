@@ -27,17 +27,17 @@ options linalglib \
         noveclibfort
 
 default linalglib ""
-default blas_only 0
-default noveclibfort 0
+default blas_only no
+default noveclibfort no
 
 proc linalg.setup {args} {
     global blas_only, noveclibfort
 
     foreach v $args {
         if {$v == "blas_only"} {
-            blas_only 1
+            blas_only yes
         } elseif {$v == "noveclibfort"} {
-            noveclibfort 1
+            noveclibfort yes
         } else {
             ui_error "Internal error: Unknown argument '$v' to linalg.setup."
             return -code error "Internal error: Unknown argument '$v' to linalg.setup."
@@ -51,7 +51,7 @@ if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset ope
 
 # choose one of the following for serial linear algebra
 variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
-    if {$noveclibfort == 0} {
+    if {!$noveclibfort} {
         depends_lib-append      port:vecLibFort
         linalglib               -lvecLibFort
     } else {
@@ -71,7 +71,7 @@ variant atlas conflicts accelerate openblas description {Build with linear algeb
 variant openblas conflicts accelerate atlas description {Build with linear algebra from OpenBLAS} {
     # allow OpenBLAS-devel too
     depends_lib-append      path:lib/libopenblas.dylib:OpenBLAS
-    if {$blas_only == 0} {
+    if {!$blas_only} {
         require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
     }
     linalglib               -lopenblas
