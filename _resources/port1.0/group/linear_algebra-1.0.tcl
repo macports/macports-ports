@@ -24,20 +24,20 @@ PortGroup active_variants 1.1
 
 options linalglib \
         blas_only \
-        noveclibfort
+        veclibfort
 
 default linalglib ""
 default blas_only no
-default noveclibfort no
+default veclibfort yes
 
 proc linalg.setup {args} {
-    global blas_only, noveclibfort
+    global blas_only, veclibfort
 
     foreach v $args {
         if {$v == "blas_only"} {
             blas_only yes
         } elseif {$v == "noveclibfort"} {
-            noveclibfort yes
+            veclibfort no
         } else {
             ui_error "Internal error: Unknown argument '$v' to linalg.setup."
             return -code error "Internal error: Unknown argument '$v' to linalg.setup."
@@ -51,7 +51,7 @@ if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset ope
 
 # choose one of the following for serial linear algebra
 variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
-    if {!$noveclibfort} {
+    if {$veclibfort} {
         depends_lib-append      port:vecLibFort
         linalglib               -lvecLibFort
     } else {
