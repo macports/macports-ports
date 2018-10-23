@@ -34,9 +34,9 @@ proc linalg.setup {args} {
     global blas_only, veclibfort
 
     foreach v $args {
-        if {$v == "blas_only"} {
+        if {$v eq "blas_only"} {
             blas_only yes
-        } elseif {$v == "noveclibfort"} {
+        } elseif {$v eq "noveclibfort"} {
             veclibfort no
         } else {
             ui_error "Internal error: Unknown argument '$v' to linalg.setup."
