@@ -22,6 +22,10 @@
 
 PortGroup active_variants 1.1
 
+options linalglib \
+        blas_only \
+        noveclibfort
+
 default linalglib ""
 default blas_only 0
 default noveclibfort 0
@@ -31,9 +35,9 @@ proc linalg.setup {args} {
 
     foreach v $args {
         if {$v == "blas_only"} {
-            set blas_only 1
+            blas_only 1
         } elseif {$v == "noveclibfort"} {
-            set noveclibfort 1
+            noveclibfort 1
         } else {
             ui_error "Internal error: Unknown argument '$v' to linalg.setup."
             return -code error "Internal error: Unknown argument '$v' to linalg.setup."
@@ -49,18 +53,18 @@ if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset ope
 variant accelerate conflicts atlas openblas description {Build with linear algebra from built-in Accelerate framework} {
     if {$noveclibfort == 0} {
         depends_lib-append      port:vecLibFort
-        set linalglib           -lvecLibFort
+        linalglib               -lvecLibFort
     } else {
-        set linalglib           "-framework Accelerate"
+        linalglib               -framework Accelerate
     }
 }
 
 variant atlas conflicts accelerate openblas description {Build with linear algebra from ATLAS} {
     depends_lib-append      port:atlas
     if {[variant_isset threads]} {
-        set linalglib       -ltatlas
+        linalglib           -ltatlas
     } else {
-        set linalglib       -lsatlas
+        linalglib           -lsatlas
     }
 }
 
@@ -70,7 +74,7 @@ variant openblas conflicts accelerate atlas description {Build with linear algeb
     if {$blas_only == 0} {
         require_active_variants path:lib/libopenblas.dylib:OpenBLAS lapack
     }
-    set linalglib           -lopenblas
+    linalglib               -lopenblas
 }
 
 if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] } {
