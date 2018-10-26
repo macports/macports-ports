@@ -22,6 +22,8 @@ options java.version
 
 default java.version {}
 
+# allow PortGroup to be used inside a variant (e.g. octave)
+global java_version_not_found
 set java_version_not_found no
 
 pre-fetch {
