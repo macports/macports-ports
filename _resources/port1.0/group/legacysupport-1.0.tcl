@@ -5,34 +5,65 @@
 
 # Newest OSX release that requires legacy support.
 # Currently OSX 10.11 (Darwin 15) due to clock_gettime
-set newest_darwin_requires_legacy 15
+options legacysupport.newest_darwin_requires_legacy
+default legacysupport.newest_darwin_requires_legacy 15
 
 proc add_legacysupport {} {
     
     global prefix
+    global os.platform os.major
+    global legacysupport.newest_darwin_requires_legacy
+
     set MPLegacyIncDir ${prefix}/include/LegacySupport
+    set AddLDFlag      -lMacportsLegacySupport
+    set AddCFlag       -I${MPLegacyIncDir}
+    set AddCIncPath       C_INCLUDE_PATH=${MPLegacyIncDir}
+    set AddCppIncPath CPLUS_INCLUDE_PATH=${MPLegacyIncDir}
 
-    depends_lib-append port:legacy-support
+    if {${os.platform} eq "darwin" && ${os.major} <= ${legacysupport.newest_darwin_requires_legacy}} {
 
-    # Add to configure options
-    configure.ldflags-append  -lMacportsLegacySupport
-    configure.cflags-append   -I${MPLegacyIncDir}
-    configure.cppflags-append -I${MPLegacyIncDir}
+        # Add Build Support
+        ui_debug "Adding legacy build support"
 
-    # Set env vars so gcc/clang add legacy include dir to default search paths
-    # Note using C_INCLUDE_PATH and CPLUS_INCLUDE_PATH to avoid conflicts
-    # eith MacPorts setting of CPATH
-    configure.env-append     C_INCLUDE_PATH=${MPLegacyIncDir} \
-                         CPLUS_INCLUDE_PATH=${MPLegacyIncDir}
-    build.env-append         C_INCLUDE_PATH=${MPLegacyIncDir} \
-                         CPLUS_INCLUDE_PATH=${MPLegacyIncDir}
+        # Depend on the support library
+        depends_lib-append port:legacy-support
+        
+        # Add to configure options
+        configure.ldflags-append  ${AddLDFlag}
+        configure.cflags-append   ${AddCFlag} 
+        configure.cppflags-append ${AddCFlag}
+        
+        # Set env vars so gcc/clang add legacy include dir to default search paths
+        # Note using C_INCLUDE_PATH and CPLUS_INCLUDE_PATH to avoid conflicts
+        # eith MacPorts setting of CPATH
+        configure.env-append ${AddCIncPath} ${AddCppIncPath}
+        build.env-append     ${AddCIncPath} ${AddCppIncPath}
+        
+    } else {
+
+        # Remove build support
+        ui_debug "Removing legacy build support"
+
+        # port dependency
+        depends_lib-delete port:legacy-support
+        
+        # configure options
+        configure.ldflags-delete  ${AddLDFlag}
+        configure.cflags-delete   ${AddCFlag} 
+        configure.cppflags-delete ${AddCFlag}
+        
+        # Include Dirs
+        configure.env-delete ${AddCIncPath} ${AddCppIncPath}
+        build.env-delete     ${AddCIncPath} ${AddCppIncPath}
+
+    }
+
 }
 
-if {${os.platform} eq "darwin" && ${os.major} <= ${newest_darwin_requires_legacy}} {
-    # Note it is intentional to both call this immediately now, and to
-    # register a callback to do it again later on. This is to handle the fact
-    # different ports do things in different ways and one or the other might
-    # work in any given case. Having both is not a problem.
-    add_legacysupport
-    port::register_callback add_legacysupport
-}
+# Note it is intentional to both call this immediately now, and to
+# register a callback to do it again later on. This is to handle the fact
+# different ports do things in different ways and one or the other might
+# work in any given case. Having both is not a problem.
+add_legacysupport
+port::register_callback add_legacysupport
+
