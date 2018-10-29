@@ -84,20 +84,20 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 set gcc_versions {44 45 46 47 48 49 5 6 7 8}
 foreach v ${gcc_versions} {
     # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
-    set version $v
+    set compiler_version $v
     if {[string length $v] > 1} {
-        set version [string index $v 0].[string index $v 1]
+        set compiler_version [string index $v 0].[string index $v 1]
     }
     lappend compilers.gcc_variants gcc$v
     set cdb(gcc$v,variant)  gcc$v
-    set cdb(gcc$v,compiler) macports-gcc-$version
-    set cdb(gcc$v,descrip)  "MacPorts gcc $version"
+    set cdb(gcc$v,compiler) macports-gcc-$compiler_version
+    set cdb(gcc$v,descrip)  "MacPorts gcc $compiler_version"
     set cdb(gcc$v,depends)  port:gcc$v
-    if {[vercmp ${version} 4.6] < 0} {
+    if {[vercmp ${compiler_version} 4.6] < 0} {
         set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
-    } elseif {[vercmp ${version} 7] < 0} {
+    } elseif {[vercmp ${compiler_version} 7] < 0} {
         set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
-    } elseif {[vercmp ${version} 8] < 0} {
+    } elseif {[vercmp ${compiler_version} 8] < 0} {
         set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
     } else {
         set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
@@ -107,35 +107,35 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,dependsd) port:g95
     set cdb(gcc$v,dependsa) gcc$v
     set cdb(gcc$v,conflict) "gfortran g95"
-    set cdb(gcc$v,cc)       ${prefix}/bin/gcc-mp-$version
-    set cdb(gcc$v,cxx)      ${prefix}/bin/g++-mp-$version
-    set cdb(gcc$v,cpp)      ${prefix}/bin/cpp-mp-$version
-    set cdb(gcc$v,objc)     ${prefix}/bin/gcc-mp-$version
-    set cdb(gcc$v,fc)       ${prefix}/bin/gfortran-mp-$version
-    set cdb(gcc$v,f77)      ${prefix}/bin/gfortran-mp-$version
-    set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$version
+    set cdb(gcc$v,cc)       ${prefix}/bin/gcc-mp-$compiler_version
+    set cdb(gcc$v,cxx)      ${prefix}/bin/g++-mp-$compiler_version
+    set cdb(gcc$v,cpp)      ${prefix}/bin/cpp-mp-$compiler_version
+    set cdb(gcc$v,objc)     ${prefix}/bin/gcc-mp-$compiler_version
+    set cdb(gcc$v,fc)       ${prefix}/bin/gfortran-mp-$compiler_version
+    set cdb(gcc$v,f77)      ${prefix}/bin/gfortran-mp-$compiler_version
+    set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$compiler_version
 }
 
 set clang_versions {33 34 37 38 39 40 50 60 70}
 foreach v ${clang_versions} {
     # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
-    set version $v
+    set compiler_version $v
     if {[string length $v] > 1} {
-        set version [string index $v 0].[string index $v 1]
+        set compiler_version [string index $v 0].[string index $v 1]
     }
     lappend compilers.clang_variants clang$v
     set cdb(clang$v,variant)  clang$v
-    set cdb(clang$v,compiler) macports-clang-$version
-    set cdb(clang$v,descrip)  "MacPorts clang $version"
-    set cdb(clang$v,depends)  port:clang-$version
+    set cdb(clang$v,compiler) macports-clang-$compiler_version
+    set cdb(clang$v,descrip)  "MacPorts clang $compiler_version"
+    set cdb(clang$v,depends)  port:clang-$compiler_version
     set cdb(clang$v,dependsl) ""
     set cdb(clang$v,libfortran) ""
     set cdb(clang$v,dependsd) ""
-    set cdb(clang$v,dependsa) clang-$version
+    set cdb(clang$v,dependsa) clang-$compiler_version
     set cdb(clang$v,conflict) ""
-    set cdb(clang$v,cc)       ${prefix}/bin/clang-mp-$version
-    set cdb(clang$v,cxx)      ${prefix}/bin/clang++-mp-$version
-    set cdb(clang$v,cpp)      "${prefix}/bin/clang-mp-$version -E"
+    set cdb(clang$v,cc)       ${prefix}/bin/clang-mp-$compiler_version
+    set cdb(clang$v,cxx)      ${prefix}/bin/clang++-mp-$compiler_version
+    set cdb(clang$v,cpp)      "${prefix}/bin/clang-mp-$compiler_version -E"
     set cdb(clang$v,objc)     ""
     set cdb(clang$v,fc)       ""
     set cdb(clang$v,f77)      ""
