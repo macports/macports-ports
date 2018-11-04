@@ -18,10 +18,11 @@
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
-options java.version java.home
+options java.version java.home java.fallback
 
-default java.version {}
-default java.home    {}
+default java.version  {}
+default java.home     {}
+default java.fallback {}
 
 # allow PortGroup to be used inside a variant (e.g. octave)
 global java_version_not_found
@@ -47,7 +48,7 @@ proc find_java_home {} {
     global java_version_not_found
     set java_version_not_found no
     
-    global java.version
+    global java.version java.fallback
     if { ${java.version} ne "" } {
         if { [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}]}] } {
             # Don't return an error because that would prevent the port from
@@ -90,6 +91,12 @@ proc find_java_home {} {
     # Warn user if we couldn't find a likely JAVA_HOME
     if { ![file isdirectory $home_value]} {
         ui_warn "No value for java JAVA_HOME was automatically discovered"
+    }
+
+    # Add dependency if required
+    if { ${java_version_not_found} && ${java.fallback} ne "" } {
+        ui_debug "Adding dependency on JDK fallback ${java.fallback}"
+        depends_lib-append port:openjdk${java.version}
     }
 
     return $home_value
