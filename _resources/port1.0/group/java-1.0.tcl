@@ -18,9 +18,10 @@
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
-options java.version
+options java.version java.home
 
 default java.version {}
+default java.home    {}
 
 # allow PortGroup to be used inside a variant (e.g. octave)
 global java_version_not_found
@@ -28,8 +29,13 @@ set java_version_not_found no
 
 pre-fetch {
     if { ${java_version_not_found} } {
-        ui_error "${name} requires Java ${java.version} but no such installation could be found."
-        return -code error "missing required Java version"
+        # Check again, incase java became available, .e.g openjdk installed as a dependency
+        java_set_env
+        # If still not present, error out
+        if { ${java_version_not_found} } {
+            ui_error "${name} requires Java ${java.version} but no such installation could be found."
+            return -code error "missing required Java version"
+        }
     }
 }
 
@@ -37,13 +43,16 @@ pre-fetch {
 proc find_java_home {} {
     set home_value ""
 
+    # Default setting to found, until proved otherwise below
+    global java_version_not_found
+    set java_version_not_found no
+    
     global java.version
     if { ${java.version} ne "" } {
         if { [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}]}] } {
             # Don't return an error because that would prevent the port from
             # even being indexed when the required Java is missing. Instead, set
             # a flag to be checked at pre-fetch.
-            global java_version_not_found
             set java_version_not_found yes
         } else {
             set home_value $val
@@ -92,5 +101,6 @@ proc java_set_env {} {
     configure.env-append   JAVA_HOME=${java_home}
     build.env-append       JAVA_HOME=${java_home}
     destroot.env-append    JAVA_HOME=${java_home}
+    java.home ${java_home}
 }
 port::register_callback java_set_env
