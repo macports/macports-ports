@@ -579,6 +579,9 @@ proc qt5.depends_runtime_component {args} {
 options qt5.kde_variant
 default qt5.kde_variant no
 
+options qt5.min_version
+default qt5.min_version 5.0
+
 # use PKGCONFIG for Qt discovery in configure scripts
 depends_build-append    port:pkgconfig
 
@@ -717,7 +720,7 @@ proc eval_variants {variations} {
 
 namespace eval qt5pg {
     proc register_dependents {} {
-        global qt5_private_components qt5_private_build_components qt5_private_runtime_components qt5.name
+        global qt5_private_components qt5_private_build_components qt5_private_runtime_components qt5.name qt5.version qt5.min_version
 
         if { ![exists qt5_private_components] } {
             # no Qt components have been requested
@@ -788,7 +791,16 @@ namespace eval qt5pg {
                 } elseif { [info exists qt5pg::qt5_component_lib(${component})] } {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
-                    depends_lib-append path:${path}:${qt5.name}-${component}
+                    set version_intro  [lindex ${component_info} 0]
+                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                        depends_lib-append path:${path}:${qt5.name}-${component}
+                    } else {
+                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                            ui_warn "${component} does not exist in Qt ${qt5.version}"
+                        } else {
+                            # port will fail during pre-fetch
+                        }
+                    }
                 } else {
                     return -code error "unknown component ${component}"
                 }
@@ -797,7 +809,16 @@ namespace eval qt5pg {
                 if { [info exists qt5pg::qt5_component_lib(${component})] } {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
-                    depends_build-append path:${path}:${qt5.name}-${component}
+                    set version_intro  [lindex ${component_info} 0]
+                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                        depends_build-append path:${path}:${qt5.name}-${component}
+                    } else {
+                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                            ui_warn "${component} does not exist in Qt ${qt5.version}"
+                        } else {
+                            # port will fail during pre-fetch
+                        }
+                    }
                 } else {
                     return -code error "unknown component ${component}"
                 }
@@ -806,7 +827,16 @@ namespace eval qt5pg {
                 if { [info exists qt5pg::qt5_component_lib(${component})] } {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
-                    depends_run-append path:${path}:${qt5.name}-${component}
+                    set version_intro  [lindex ${component_info} 0]
+                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                        depends_run-append path:${path}:${qt5.name}-${component}
+                    } else {
+                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                            ui_warn "${component} does not exist in Qt ${qt5.version}"
+                        } else {
+                            # port will fail during pre-fetch
+                        }
+                    }
                 } else {
                     return -code error "unknown component ${component}"
                 }
@@ -817,6 +847,13 @@ namespace eval qt5pg {
 
 if {!${private_building_qt5}} {
     port::register_callback qt5pg::register_dependents
+}
+
+pre-fetch {
+    if {[vercmp ${qt5.version} ${qt5.min_version}] < 0} {
+        ui_error "Qt version ${qt5.min_version} or above is required, but Qt version ${qt5.version} is installed"
+        return -code error "Qt version too old"
+    }
 }
 
 unset private_building_qt5
