@@ -96,7 +96,7 @@ proc find_java_home {} {
     # Add dependency if required
     if { ${java_version_not_found} && ${java.fallback} ne "" } {
         ui_debug "Adding dependency on JDK fallback ${java.fallback}"
-        depends_lib-append port:openjdk${java.version}
+        depends_lib-append port:${java.fallback}
     }
 
     return $home_value
