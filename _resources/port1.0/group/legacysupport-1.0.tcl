@@ -25,8 +25,8 @@ proc add_legacysupport {} {
         # Add Build Support
         ui_debug "Adding legacy build support"
 
-        # Depend on the support library
-        depends_lib-append port:legacy-support
+        # Depend on the support library or devel version if installed
+        depends_lib-append path:lib/libMacportsLegacySupport.dylib:legacy-support
         
         # Add to configure options
         configure.ldflags-append  ${AddLDFlag}
@@ -63,7 +63,8 @@ proc add_legacysupport {} {
 # Note it is intentional to both call this immediately now, and to
 # register a callback to do it again later on. This is to handle the fact
 # different ports do things in different ways and one or the other might
-# work in any given case. Having both is not a problem.
+# work in any given case. Having both is not a problem, but does lead to it
+# indicating being declared twice in port lint --nitpick
 add_legacysupport
 port::register_callback add_legacysupport
 
