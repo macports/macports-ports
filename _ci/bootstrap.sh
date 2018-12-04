@@ -22,6 +22,9 @@ echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo te
 echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server
 echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Fix bug in MacPorts 2.5.4 that makes archive_site_local not work
+# See https://trac.macports.org/ticket/57717
+sudo sed -E -i "" "s,{} ({} ARCHIVE_SITE_LOCAL),\1," /opt/local/libexec/macports/lib/package1.0/portarchivefetch.tcl
 # Update PortIndex
 rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
