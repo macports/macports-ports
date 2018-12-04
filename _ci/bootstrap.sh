@@ -19,7 +19,7 @@ echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/d
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Also try downloading archives from the private server
-echo "archive_site_local https://packages-private.macports.org/" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server
 echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Update PortIndex
