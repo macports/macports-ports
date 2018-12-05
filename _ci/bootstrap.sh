@@ -18,6 +18,10 @@ sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Also try downloading archives from the private server
+echo "archive_site_local https://packages-private.macports.org/" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Prefer to get archives from the public server instead of the private server
+echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Update PortIndex
 rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
