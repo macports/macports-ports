@@ -18,10 +18,18 @@ sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
-# Also try downloading archives from the private server
-echo "archive_site_local https://packages-private.macports.org/" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Try downloading archives from the private server after trying the public server
+echo "archive_site_local https://packages.macports.org/:tbz2 https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server
-echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# preferred_hosts has no effect on archive_site_local
+# See https://trac.macports.org/ticket/57720
+#echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Fix bug in MacPorts 2.5.4 that makes archive_site_local not work at all
+# See https://trac.macports.org/ticket/57717
+sudo sed -E -i "" "s,{} ({} ARCHIVE_SITE_LOCAL),\1," /opt/local/libexec/macports/lib/package1.0/portarchivefetch.tcl
+# Fix bug in MacPorts 2.5.4 that mishandles multiple URLs in archive_site_local
+# See https://trac.macports.org/ticket/57718
+sudo sed -E -i "" 's,\[list (\$env\(\$senv\))\],\1,' /opt/local/libexec/macports/lib/port1.0/fetch_common.tcl
 # Update PortIndex
 rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
