@@ -49,5 +49,8 @@ export PATH="/opt/mports/bin:$PATH" && hash -r
 curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
 chmod 0755 runner
 
-# Workaround for an Xcode issue. See https://trac.macports.org/ticket/54939
-[ "$OS_MAJOR" = 17 ] && $(cd $(xcode-select -p)/Toolchains && sudo ln -s XcodeDefault.xctoolchain OSX10.13.xctoolchain) || true
+# Work around broken gen_bridge_metadata / bridgesupportparser.bundle on High Sierra and Mojave
+# See https://trac.macports.org/ticket/54939
+if ! /usr/bin/gen_bridge_metadata --version >/dev/null 2>&1; then
+    sudo ln -s XcodeDefault.xctoolchain "$(xcode-select -p)"/Toolchains/OSX"$(sw_vers -productVersion | cut -d. -f1-2)".xctoolchain
+fi
