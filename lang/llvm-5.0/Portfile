@@ -12,7 +12,7 @@ set llvm_version_no_dot 50
 set clang_executable_version 5.0
 set lldb_executable_version 5.0.2
 name                    llvm-${llvm_version}
-subport                 clang-${llvm_version} { revision 2 }
+subport                 clang-${llvm_version} { revision 3 }
 subport                 lldb-${llvm_version} {}
 set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
@@ -155,7 +155,8 @@ patchfiles \
     0002-Define-EXC_MASK_CRASH-and-MACH_EXCEPTION_CODES-if-th.patch \
     0003-MacPorts-Only-Don-t-embed-the-deployment-target-in-t.patch \
     0004-Fix-build-issues-pre-Lion-due-to-missing-a-strnlen-d.patch \
-    0005-Dont-build-LibFuzzer-pre-Lion-due-to-missing-__threa.patch
+    0005-Dont-build-LibFuzzer-pre-Lion-due-to-missing-__threa.patch \
+    0005-Threading-Only-call-pthread_setname_np-on-SnowLeopar.patch
 
 if {${subport} eq "clang-${llvm_version}"} {
     patchfiles-append \
@@ -172,6 +173,7 @@ if {${subport} eq "clang-${llvm_version}"} {
         3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
         3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
         3003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
+        3004-compiler-rt-leopard-no-libdispatch.patch \
         openmp-locations.patch
 
     # https://llvm.org/bugs/show_bug.cgi?id=25681
@@ -277,6 +279,17 @@ if {${subport} eq "llvm-${llvm_version}"} {
         configure.args-append \
             -DCOMPILER_RT_BUILD_SANITIZERS=OFF
     }
+    if {${os.major} <= 11} {
+        # libfuzzer uses TLS, so disable it on Snow Leopard and earlier
+       configure.args-append \
+           -DCOMPILER_RT_BUILD_LIBFUZZER=OFF
+    }
+    if {${os.major} <= 9} {
+        # xray calls in sanitizer_common, which presently
+        # does not build on < SnowLeopard
+       configure.args-append \
+           -DCOMPILER_RT_BUILD_XRAY=OFF
+    }
 } elseif {${subport} eq "lldb-${llvm_version}"} {
     #select.group        lldb
     #select.file         ${filespath}/mp-${subport}
@@ -305,6 +318,11 @@ compiler.blacklist *gcc* {clang < 602}
 if {${subport} eq "clang-${llvm_version}"} {
     # clang older than 3.5 fail due to https://llvm.org/bugs/show_bug.cgi?id=25753
     compiler.blacklist-append macports-clang-3.3 macports-clang-3.4
+
+    # add a suitable fallback for older systems
+    if {${os.major} <= 13} {
+       compiler.fallback-append macports-clang-3.7
+    }
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
@@ -580,6 +598,29 @@ if {${subport} eq "llvm-${llvm_version}"} {
         }
     }
 
+    variant emulated_tls description { enable c11/c++11 thread support on older systems using emulated-tls } {
+        # allow clang to use emulated-tls to support thread_local on systems prior to 10.7
+        # emulated TLS works when linking against macports-libstdc++ or against
+        # libc++ / libc++abi with cxa_thread_atexit and emutls.c objects included
+        patchfiles-append \
+            9000-patch-clang-support-emulated-tls.diff
+    }
+    if {${os.major} < 11} {
+        default_variants-append +emulated_tls
+    }
+
+
+    variant defaultlibcxx description {default to -stdlib=libc++ on all systems}  {
+        #patch clang to always default to -stdlib=libc++ if not otherwise specified
+        patchfiles-append 9003-patch-clang-5.0-Toolchains-default-to-libcxx-on-all-systems.diff
+    }
+
+    # if macports.conf is configured to stdlib=libc++ then make that the default if not otherwise specified
+    # exactly matches the behaviour of newer systems
+    if { ${cxx_stdlib} eq "libc++" } {
+        default_variants-append +defaultlibcxx
+    }
+
     variant libstdcxx description {-stdlib=macports-libstdc++ searches for MacPorts libstdc++} {
 
         patchfiles-append 9001-macports-libstdcxx.diff
@@ -634,7 +675,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
                 ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
         }
     }
-    default_variants +libstdcxx
+    default_variants-append +libstdcxx
 
     post-patch {
         reinplace "s|@@PREFIX@@|${prefix}|" \
