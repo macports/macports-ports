@@ -7,12 +7,13 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5  {qt5-qtbase  5.11}
-    qt59 {qt59-qtbase 5.9}
-    qt58 {qt58-qtbase 5.8}
-    qt57 {qt57-qtbase 5.7}
-    qt56 {qt56-qtbase 5.6}
-    qt55 {qt55-qtbase 5.5}
+    qt5   {qt5-qtbase  5.12}
+    qt511 {qt59-qtbase 5.11}
+    qt59  {qt59-qtbase 5.9}
+    qt58  {qt58-qtbase 5.8}
+    qt57  {qt57-qtbase 5.7}
+    qt56  {qt56-qtbase 5.6}
+    qt55  {qt55-qtbase 5.5}
 }
 #qt5-kde {qt5-kde 5.8}
 
@@ -99,18 +100,22 @@ proc qt5.get_default_name {} {
         #
         # OS X El Capitan (10.11)
         #
+        # Qt 5.12: Not Supported
+        # Qt 5.11: Supported
         # Qt 5.10: Supported
         # Qt 5.9:  Supported
         # Qt 5.8:  Supported
         # Qt 5.7:  Supported
         # Qt 5.6:  Supported
         #
-        return qt5
+        return qt511
         #
     } elseif { ${os.major} == 16 } {
         #
         # macOS Sierra (10.12)
         #
+        # Qt 5.12: Supported
+        # Qt 5.11: Supported
         # Qt 5.10: Supported
         # Qt 5.9:  Supported
         # Qt 5.8:  Supported
@@ -122,7 +127,17 @@ proc qt5.get_default_name {} {
         #
         # macOS High Sierra (10.13)
         #
+        # Qt 5.12: Supported
+        # Qt 5.11: Supported
         # Qt 5.10: Supported
+        #
+        return qt5
+        #
+    } elseif { ${os.major} == 18 } {
+        #
+        # macOS Mojave (10.14)
+        #
+        # Qt 5.12: Supported
         #
         return qt5
         #
