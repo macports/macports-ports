@@ -4,8 +4,7 @@ PortSystem              1.0
 PortGroup               python 1.0
 
 name                    py-pyqt5
-version                 5.11.2
-revision                0
+version                 5.11.3
 categories-append       devel
 platforms               darwin
 maintainers             {mmoll @mamoll} openmaintainer
@@ -16,23 +15,31 @@ homepage                http://www.riverbankcomputing.co.uk/software/pyqt/intro
 license                 GPL-3
 master_sites            sourceforge:pyqt
 distname                PyQt5_gpl-${version}
-checksums           rmd160  efe3ecc837b7a21cd0afeaa49554de22e564cf5f \
-                    sha256  7caa581155c3433716b7e6aba71fe1378cd7d92f4155c266d60e5cffb64e9603 \
-                    size    3119615
+checksums               rmd160  01f76afac6ddc9267dda3a0510795b8d2df57247 \
+                        sha256  c9b57d15601d436faf35dacf8e0acefa220194829a653e771e80b189b3261073 \
+                        size    3121036
 
 
 python.versions 27 34 35 36 37
+subport "${name}-common" {}
 
-if {${os.major} <= 14 && ${os.platform} eq "darwin"} {
-    version         5.9.2
-    revision        1
-    distname        PyQt5_gpl-${version}
-    checksums       rmd160  744f54000240c25ce2b39dbe62f5b3d2afd83e8b \
-                    sha256  c190dac598c97b0113ca5e7a37c71c623f02d1d713088addfacac4acfa4b8394 \
-                    size    3102848
-}
-
-if {${name} ne ${subport}} {
+if {${subport} eq "${name}-common"} {
+    description-append          (.sip sourcefiles)
+    long_description-append     This port contains the .sip source files.
+    depends_lib
+    use_configure               no
+    universal_variant           no
+    build                       {}
+    destroot {
+        xinstall -m 755 -d ${destroot}${prefix}/share/sip/PyQt5
+        # copy all relevant directories from ${worksrcpath}/sip into the destination.
+        # This is exactly what the regular build system does, except that here we
+        # use the same location as used on Linux, not the one hidden in the Python
+        # framework that is apparently the default on Mac.
+        file copy {*}[glob -directory ${worksrcpath}/sip/ Q*] ${destroot}${prefix}/share/sip/PyQt5
+        file copy ${worksrcpath}/sip/Enginio ${destroot}${prefix}/share/sip/PyQt5
+    }
+} elseif {${name} ne ${subport}} {
     PortGroup           qmake5 1.0
 
     # pull in the Qt5 meta-port
@@ -47,6 +54,11 @@ if {${name} ne ${subport}} {
         depends_lib-append port:py27-enum34
     }
 
+    # declare a runtime, arch-independent dependency on ${name}-common
+    depends_run-append  port:${name}-common
+    depends_skip_archcheck-append \
+                        ${name}-common
+
     use_configure       yes
     configure.pre_args
     configure.cmd       "${python.bin} configure.py"
@@ -60,6 +72,7 @@ if {${name} ne ${subport}} {
                         --designer-plugindir=${qt_plugins_dir}/designer/Py${python.version}Qt5 \
                         --qml-plugindir=${qt_plugins_dir}/Py${python.version}Qt5 \
                         --no-qsci-api \
+                        --no-sip-files \
                         --disable=QtWebKit \
                         --disable=QtWebKitWidgets \
                         --disable=QtWebEngine \
@@ -70,56 +83,65 @@ if {${name} ne ${subport}} {
     # using --dbus means the compiler will find dbus-python.h but not
     # the DBus headers themselves
     # do not clear include directories just because --dbus is given
-    patchfiles-append patch-dbus_includes.diff
-    # only use patch on current version, not the pegged version for older versions of macOS
-    if {${os.major} > 14 || ${os.platform} ne "darwin"} {
-        # PyQt5 insists on using a private copy of sip, but the default sip seems to work just fine
-        patchfiles-append patch-use-default-sip.diff
-    }
+    patchfiles-append   patch-dbus_includes.diff
+    # PyQt5 insists on using a private copy of sip, but the default sip seems to work just fine
+    # (actually, the insistance appears to be on sip using a private module directory;
+    # see the online pyqt5 build-from-source instructions).
+    patchfiles-append   patch-use-default-sip.diff
 
     build.cmd           make
     build.target        all
     destroot.cmd        ${build.cmd}
     destroot.destdir    DESTDIR=${destroot}
 
+    post-destroot {
+        # make the .sip files accessible via the "normal" path too
+        file delete -force ${destroot}${python.prefix}/share/sip/PyQt5
+        xinstall -m 755 -d ${destroot}${python.prefix}/share/sip
+        ln -s ${prefix}/share/sip/PyQt5 ${destroot}${python.prefix}/share/sip
+        # as well as via the actual sip repository of the version we're using
+        xinstall -m 755 -d ${destroot}${prefix}/share/py${python.version}-sip
+        ln -s ../sip/PyQt5 ${destroot}${prefix}/share/py${python.version}-sip
+    }
+
     variant debug description "Build debug libraries" {
         configure.cmd-append --debug
     }
 
     variant scintilla description {Build the PyQt API for QScintilla} {
-        depends_lib-append \
-                        port:qscintilla-qt5
-        configure.args-replace \
-                        --no-qsci-api \
-                        --qsci-api
+        depends_lib-append      port:qscintilla-qt5
+        configure.args-replace  --no-qsci-api \
+                                --qsci-api
 
         post-destroot {
             # move the Qsci API file to a Python specific name
+            # it is generated during the configure step and differs only
+            # (and slightly) for python 2.x vs. python 3.x .
+            # Figure out a way to install only a single copy...
             move ${destroot}${qt_data_dir}/qsci/api/python/PyQt5.api \
                 ${destroot}${qt_data_dir}/qsci/api/python/PyQt5-Python${python.branch}.api
         }
     }
 
     variant webengine conflicts universal description {Build QtWebEngine module} {
-        qt5.depends_component qtwebengine
-        configure.args-delete --disable=QtWebEngine \
-                              --disable=QtWebEngineCore \
-                              --disable=QtWebEngineWidgets
+        qt5.depends_component   qtwebengine
+        configure.args-delete   --disable=QtWebEngine \
+                                --disable=QtWebEngineCore \
+                                --disable=QtWebEngineWidgets
     }
 
     variant webkit description {Build QtWebKit module} {
-        qt5.depends_component qtwebkit
-        configure.args-delete --disable=QtWebKit \
-                              --disable=QtWebKitWidgets
+        qt5.depends_component   qtwebkit
+        configure.args-delete   --disable=QtWebKit \
+                                --disable=QtWebKitWidgets
     }
 
     variant graceful description {Don't abort (crash) on Python errors} {
-        patchfiles-append  patch-no-abort-on-python-errors.diff
+        patchfiles-append       patch-no-abort-on-python-errors.diff
     }
 
-    livecheck.type     none
-} else {
-    livecheck.type     regex
-    livecheck.url      http://pyqt.sourceforge.net/Docs/PyQt5/introduction.html
-    livecheck.regex    PyQt5 (5.\[0-9\]+(.\[0-9\]+)?)
 }
+
+livecheck.type     regex
+livecheck.url      http://www.riverbankcomputing.co.uk/software/pyqt/download5
+livecheck.regex    >PyQt5_gpl-(\[0-9.\]*).tar.gz<
