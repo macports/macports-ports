@@ -395,7 +395,7 @@ set portfetch::mirror_sites::sites(mysql) {
 }
 
 set portfetch::mirror_sites::sites(netbsd) {
-    http://ftp.NetBSD.org/pub/NetBSD/
+    https://ftp.NetBSD.org/pub/NetBSD/
     http://ftp7.de.NetBSD.org/pub/ftp.netbsd.org/pub/NetBSD/
     http://ftp.fr.NetBSD.org/pub/NetBSD/
     ftp://ftp7.jp.NetBSD.org/pub/NetBSD/
