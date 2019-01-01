@@ -6,7 +6,7 @@ chmod 0755 uninstall && ./uninstall -fq && rm -f uninstall
 # Clean /usr/local
 /usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
-export OS_MAJOR=$(uname -r | cut -f 1 -d .)
+OS_MAJOR=$(uname -r | cut -f 1 -d .)
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/MacPorts-${OS_MAJOR}.tar.bz2"
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
@@ -41,10 +41,8 @@ portindex -e
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 # Install mpbb and its dependency getopt
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
-export PATH="${PWD}/../mpbb:$PATH"
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
-export PATH="/opt/mports/bin:$PATH" && hash -r
 # Download and run CI runner
 curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
 chmod 0755 runner
