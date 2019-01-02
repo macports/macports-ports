@@ -1,0 +1,66 @@
+<kencu@macports.org> Ken Cunningham
+
+Patches to enable emulated-tls for older darwin systems in clang.
+1) tell clang that TLS is supported on all systems
+2) tell clang to pass -femulated-tls by default on systems older than 10.7
+3) tell llvm to use cxa_thread_atexit instead of tlv_atexit on systems older than 10.7
+
+requires linking against a std c++ lib that supports TLS and contains cxa_thread_atexit
+(libgcc newer than 4.8, or libc++abi with cxa_thread_atexit added).
+
+requires emutls.c objects available at link time to supply supporting routines for emulated-tls.
+emutls is available in libgcc, and should be available in libc++abi for supporting emulated-tls
+
+ideally : llvm should call cxa_thread_atexit rather than tlv_atexit based on 
+          the -femulated-tls flag rather than based on the system version
+
+these patches were originally formatted against clang-6.0
+they can be applied to all clang builds, and will only affect systems 10.4 to 10.6 at present
+note that because the patch to ItaniumCXXABI.cpp is dependent on the system version rather than
+the -femultated-tls flag, it is not presently possible to force newer systems to use the 
+emulated-tls code path
+
+
+diff --git a/tools/clang/lib/Basic/Targets/OSTargets.h b/tools/clang/lib/Basic/Targets/OSTargets.h
+index 5af63615..54c7ca66 100644
+--- a/tools/clang/lib/Basic/Targets/OSTargets.h
++++ b/tools/clang/lib/Basic/Targets/OSTargets.h
+@@ -93,7 +93,7 @@ public:
+     this->TLSSupported = false;
+ 
+     if (Triple.isMacOSX())
+-      this->TLSSupported = !Triple.isMacOSXVersionLT(10, 7);
++      this->TLSSupported = !Triple.isMacOSXVersionLT(10, 4);
+     else if (Triple.isiOS()) {
+       // 64-bit iOS supported it from 8 onwards, 32-bit from 9 onwards.
+       if (Triple.getArch() == llvm::Triple::x86_64 ||
+diff --git a/tools/clang/lib/CodeGen/ItaniumCXXABI.cpp b/tools/clang/lib/CodeGen/ItaniumCXXABI.cpp
+index a3c2766d..d73801df 100644
+--- a/tools/clang/lib/CodeGen/ItaniumCXXABI.cpp
++++ b/tools/clang/lib/CodeGen/ItaniumCXXABI.cpp
+@@ -2186,7 +2186,8 @@ static void emitGlobalDtorWithCXAAtExit(CodeGenFunction &CGF,
+   const char *Name = "__cxa_atexit";
+   if (TLS) {
+     const llvm::Triple &T = CGF.getTarget().getTriple();
+-    Name = T.isOSDarwin() ?  "_tlv_atexit" : "__cxa_thread_atexit";
++    // Darwin 10.7+ has _tlv_atexit
++    Name = (T.isOSDarwin() && !T.isMacOSXVersionLT(10, 7)) ?  "_tlv_atexit" : "__cxa_thread_atexit";
+   }
+ 
+   // We're assuming that the destructor function is something we can
+diff --git a/tools/clang/lib/Driver/ToolChains/Clang.cpp b/tools/clang/lib/Driver/ToolChains/Clang.cpp
+index 7ee19085..7b357026 100644
+--- a/tools/clang/lib/Driver/ToolChains/Clang.cpp
++++ b/tools/clang/lib/Driver/ToolChains/Clang.cpp
+@@ -3859,9 +3859,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
+   Args.AddLastArg(CmdArgs, options::OPT_fheinous_gnu_extensions);
+   Args.AddLastArg(CmdArgs, options::OPT_fno_operator_names);
+   // Emulated TLS is enabled by default on Android and OpenBSD, and can be enabled
+-  // manually with -femulated-tls.
++  // manually with -femulated-tls. Also default on Darwin < 10.7
+   bool EmulatedTLSDefault = Triple.isAndroid() || Triple.isOSOpenBSD() ||
+-                            Triple.isWindowsCygwinEnvironment();
++     Triple.isMacOSXVersionLT(10, 7) || Triple.isWindowsCygwinEnvironment();
+   if (Args.hasFlag(options::OPT_femulated_tls, options::OPT_fno_emulated_tls,
+                    EmulatedTLSDefault))
+     CmdArgs.push_back("-femulated-tls");
