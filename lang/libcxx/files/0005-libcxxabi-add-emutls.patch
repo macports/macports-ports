@@ -1,0 +1,871 @@
+diff --git libcxxabi-5.0.1.src/src/emutls.c libcxxabi-5.0.1.src/src/emutls.c
+new file mode 100644
+index 0000000..0907edc
+--- /dev/null
++++ libcxxabi-5.0.1.src/src/emutls.c
+@@ -0,0 +1,394 @@
++/* ===---------- emutls.c - Implements __emutls_get_address ---------------===
++ *
++ *                     The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===----------------------------------------------------------------------===
++ */
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "int_lib.h"
++#include "int_util.h"
++
++#ifdef __BIONIC__
++/* There are 4 pthread key cleanup rounds on Bionic. Delay emutls deallocation
++   to round 2. We need to delay deallocation because:
++    - Android versions older than M lack __cxa_thread_atexit_impl, so apps
++      use a pthread key destructor to call C++ destructors.
++    - Apps might use __thread/thread_local variables in pthread destructors.
++   We can't wait until the final two rounds, because jemalloc needs two rounds
++   after the final malloc/free call to free its thread-specific data (see
++   https://reviews.llvm.org/D46978#1107507). */
++#define EMUTLS_SKIP_DESTRUCTOR_ROUNDS 1
++#else
++#define EMUTLS_SKIP_DESTRUCTOR_ROUNDS 0
++#endif
++
++typedef struct emutls_address_array {
++    uintptr_t skip_destructor_rounds;
++    uintptr_t size;  /* number of elements in the 'data' array */
++    void* data[];
++} emutls_address_array;
++
++static void emutls_shutdown(emutls_address_array *array);
++
++#ifndef _WIN32
++
++#include <pthread.h>
++
++static pthread_mutex_t emutls_mutex = PTHREAD_MUTEX_INITIALIZER;
++static pthread_key_t emutls_pthread_key;
++
++typedef unsigned int gcc_word __attribute__((mode(word)));
++typedef unsigned int gcc_pointer __attribute__((mode(pointer)));
++
++/* Default is not to use posix_memalign, so systems like Android
++ * can use thread local data without heavier POSIX memory allocators.
++ */
++#ifndef EMUTLS_USE_POSIX_MEMALIGN
++#define EMUTLS_USE_POSIX_MEMALIGN 0
++#endif
++
++static __inline void *emutls_memalign_alloc(size_t align, size_t size) {
++    void *base;
++#if EMUTLS_USE_POSIX_MEMALIGN
++    if (posix_memalign(&base, align, size) != 0)
++        abort();
++#else
++    #define EXTRA_ALIGN_PTR_BYTES (align - 1 + sizeof(void*))
++    char* object;
++    if ((object = (char*)malloc(EXTRA_ALIGN_PTR_BYTES + size)) == NULL)
++        abort();
++    base = (void*)(((uintptr_t)(object + EXTRA_ALIGN_PTR_BYTES))
++                    & ~(uintptr_t)(align - 1));
++
++    ((void**)base)[-1] = object;
++#endif
++    return base;
++}
++
++static __inline void emutls_memalign_free(void *base) {
++#if EMUTLS_USE_POSIX_MEMALIGN
++    free(base);
++#else
++    /* The mallocated address is in ((void**)base)[-1] */
++    free(((void**)base)[-1]);
++#endif
++}
++
++static __inline void emutls_setspecific(emutls_address_array *value) {
++    pthread_setspecific(emutls_pthread_key, (void*) value);
++}
++
++static __inline emutls_address_array* emutls_getspecific() {
++    return (emutls_address_array*) pthread_getspecific(emutls_pthread_key);
++}
++
++static void emutls_key_destructor(void* ptr) {
++    emutls_address_array *array = (emutls_address_array*)ptr;
++    if (array->skip_destructor_rounds > 0) {
++        /* emutls is deallocated using a pthread key destructor. These
++         * destructors are called in several rounds to accommodate destructor
++         * functions that (re)initialize key values with pthread_setspecific.
++         * Delay the emutls deallocation to accommodate other end-of-thread
++         * cleanup tasks like calling thread_local destructors (e.g. the
++         * __cxa_thread_atexit fallback in libc++abi).
++         */
++        array->skip_destructor_rounds--;
++        emutls_setspecific(array);
++    } else {
++        emutls_shutdown(array);
++        free(ptr);
++    }
++}
++
++static __inline void emutls_init(void) {
++    if (pthread_key_create(&emutls_pthread_key, emutls_key_destructor) != 0)
++        abort();
++}
++
++static __inline void emutls_init_once(void) {
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++    pthread_once(&once, emutls_init);
++}
++
++static __inline void emutls_lock() {
++    pthread_mutex_lock(&emutls_mutex);
++}
++
++static __inline void emutls_unlock() {
++    pthread_mutex_unlock(&emutls_mutex);
++}
++
++#else /* _WIN32 */
++
++#include <windows.h>
++#include <malloc.h>
++#include <stdio.h>
++#include <assert.h>
++
++static LPCRITICAL_SECTION emutls_mutex;
++static DWORD emutls_tls_index = TLS_OUT_OF_INDEXES;
++
++typedef uintptr_t gcc_word;
++typedef void * gcc_pointer;
++
++static void win_error(DWORD last_err, const char *hint) {
++    char *buffer = NULL;
++    if (FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
++                       FORMAT_MESSAGE_FROM_SYSTEM |
++                       FORMAT_MESSAGE_MAX_WIDTH_MASK,
++                       NULL, last_err, 0, (LPSTR)&buffer, 1, NULL)) {
++        fprintf(stderr, "Windows error: %s\n", buffer);
++    } else {
++        fprintf(stderr, "Unkown Windows error: %s\n", hint);
++    }
++    LocalFree(buffer);
++}
++
++static __inline void win_abort(DWORD last_err, const char *hint) {
++    win_error(last_err, hint);
++    abort();
++}
++
++static __inline void *emutls_memalign_alloc(size_t align, size_t size) {
++    void *base = _aligned_malloc(size, align);
++    if (!base)
++        win_abort(GetLastError(), "_aligned_malloc");
++    return base;
++}
++
++static __inline void emutls_memalign_free(void *base) {
++    _aligned_free(base);
++}
++
++static void emutls_exit(void) {
++    if (emutls_mutex) {
++        DeleteCriticalSection(emutls_mutex);
++        _aligned_free(emutls_mutex);
++        emutls_mutex = NULL;
++    }
++    if (emutls_tls_index != TLS_OUT_OF_INDEXES) {
++        emutls_shutdown((emutls_address_array*)TlsGetValue(emutls_tls_index));
++        TlsFree(emutls_tls_index);
++        emutls_tls_index = TLS_OUT_OF_INDEXES;
++    }
++}
++
++#pragma warning (push)
++#pragma warning (disable : 4100)
++static BOOL CALLBACK emutls_init(PINIT_ONCE p0, PVOID p1, PVOID *p2) {
++    emutls_mutex = (LPCRITICAL_SECTION)_aligned_malloc(sizeof(CRITICAL_SECTION), 16);
++    if (!emutls_mutex) {
++        win_error(GetLastError(), "_aligned_malloc");
++        return FALSE;
++    }
++    InitializeCriticalSection(emutls_mutex);
++
++    emutls_tls_index = TlsAlloc();
++    if (emutls_tls_index == TLS_OUT_OF_INDEXES) {
++        emutls_exit();
++        win_error(GetLastError(), "TlsAlloc");
++        return FALSE;
++    }
++    atexit(&emutls_exit);
++    return TRUE;
++}
++
++static __inline void emutls_init_once(void) {
++    static INIT_ONCE once;
++    InitOnceExecuteOnce(&once, emutls_init, NULL, NULL);
++}
++
++static __inline void emutls_lock() {
++    EnterCriticalSection(emutls_mutex);
++}
++
++static __inline void emutls_unlock() {
++    LeaveCriticalSection(emutls_mutex);
++}
++
++static __inline void emutls_setspecific(emutls_address_array *value) {
++    if (TlsSetValue(emutls_tls_index, (LPVOID) value) == 0)
++        win_abort(GetLastError(), "TlsSetValue");
++}
++
++static __inline emutls_address_array* emutls_getspecific() {
++    LPVOID value = TlsGetValue(emutls_tls_index);
++    if (value == NULL) {
++        const DWORD err = GetLastError();
++        if (err != ERROR_SUCCESS)
++            win_abort(err, "TlsGetValue");
++    }
++    return (emutls_address_array*) value;
++}
++
++/* Provide atomic load/store functions for emutls_get_index if built with MSVC.
++ */
++#if !defined(__ATOMIC_RELEASE)
++#include <intrin.h>
++
++enum { __ATOMIC_ACQUIRE = 2, __ATOMIC_RELEASE = 3 };
++
++static __inline uintptr_t __atomic_load_n(void *ptr, unsigned type) {
++    assert(type == __ATOMIC_ACQUIRE);
++    // These return the previous value - but since we do an OR with 0,
++    // it's equivalent to a plain load.
++#ifdef _WIN64
++    return InterlockedOr64(ptr, 0);
++#else
++    return InterlockedOr(ptr, 0);
++#endif
++}
++
++static __inline void __atomic_store_n(void *ptr, uintptr_t val, unsigned type) {
++    assert(type == __ATOMIC_RELEASE);
++    InterlockedExchangePointer((void *volatile *)ptr, (void *)val);
++}
++
++#endif /* __ATOMIC_RELEASE */
++
++#pragma warning (pop)
++
++#endif /* _WIN32 */
++
++static size_t emutls_num_object = 0;  /* number of allocated TLS objects */
++
++/* Free the allocated TLS data
++ */
++static void emutls_shutdown(emutls_address_array *array) {
++    if (array) {
++        uintptr_t i;
++        for (i = 0; i < array->size; ++i) {
++            if (array->data[i])
++                emutls_memalign_free(array->data[i]);
++        }
++    }
++}
++
++/* For every TLS variable xyz,
++ * there is one __emutls_control variable named __emutls_v.xyz.
++ * If xyz has non-zero initial value, __emutls_v.xyz's "value"
++ * will point to __emutls_t.xyz, which has the initial value.
++ */
++typedef struct __emutls_control {
++    /* Must use gcc_word here, instead of size_t, to match GCC.  When
++       gcc_word is larger than size_t, the upper extra bits are all
++       zeros.  We can use variables of size_t to operate on size and
++       align.  */
++    gcc_word size;  /* size of the object in bytes */
++    gcc_word align;  /* alignment of the object in bytes */
++    union {
++        uintptr_t index;  /* data[index-1] is the object address */
++        void* address;  /* object address, when in single thread env */
++    } object;
++    void* value;  /* null or non-zero initial value for the object */
++} __emutls_control;
++
++/* Emulated TLS objects are always allocated at run-time. */
++static __inline void *emutls_allocate_object(__emutls_control *control) {
++    /* Use standard C types, check with gcc's emutls.o. */
++    COMPILE_TIME_ASSERT(sizeof(uintptr_t) == sizeof(gcc_pointer));
++    COMPILE_TIME_ASSERT(sizeof(uintptr_t) == sizeof(void*));
++
++    size_t size = control->size;
++    size_t align = control->align;
++    void* base;
++    if (align < sizeof(void*))
++        align = sizeof(void*);
++    /* Make sure that align is power of 2. */
++    if ((align & (align - 1)) != 0)
++        abort();
++
++    base = emutls_memalign_alloc(align, size);
++    if (control->value)
++        memcpy(base, control->value, size);
++    else
++        memset(base, 0, size);
++    return base;
++}
++
++
++/* Returns control->object.index; set index if not allocated yet. */
++static __inline uintptr_t emutls_get_index(__emutls_control *control) {
++    uintptr_t index = __atomic_load_n(&control->object.index, __ATOMIC_ACQUIRE);
++    if (!index) {
++        emutls_init_once();
++        emutls_lock();
++        index = control->object.index;
++        if (!index) {
++            index = ++emutls_num_object;
++            __atomic_store_n(&control->object.index, index, __ATOMIC_RELEASE);
++        }
++        emutls_unlock();
++    }
++    return index;
++}
++
++/* Updates newly allocated thread local emutls_address_array. */
++static __inline void emutls_check_array_set_size(emutls_address_array *array,
++                                                 uintptr_t size) {
++    if (array == NULL)
++        abort();
++    array->size = size;
++    emutls_setspecific(array);
++}
++
++/* Returns the new 'data' array size, number of elements,
++ * which must be no smaller than the given index.
++ */
++static __inline uintptr_t emutls_new_data_array_size(uintptr_t index) {
++   /* Need to allocate emutls_address_array with extra slots
++    * to store the header.
++    * Round up the emutls_address_array size to multiple of 16.
++    */
++    uintptr_t header_words = sizeof(emutls_address_array) / sizeof(void *);
++    return ((index + header_words + 15) & ~((uintptr_t)15)) - header_words;
++}
++
++/* Returns the size in bytes required for an emutls_address_array with
++ * N number of elements for data field.
++ */
++static __inline uintptr_t emutls_asize(uintptr_t N) {
++    return N * sizeof(void *) + sizeof(emutls_address_array);
++}
++
++/* Returns the thread local emutls_address_array.
++ * Extends its size if necessary to hold address at index.
++ */
++static __inline emutls_address_array *
++emutls_get_address_array(uintptr_t index) {
++    emutls_address_array* array = emutls_getspecific();
++    if (array == NULL) {
++        uintptr_t new_size = emutls_new_data_array_size(index);
++        array = (emutls_address_array*) malloc(emutls_asize(new_size));
++        if (array) {
++            memset(array->data, 0, new_size * sizeof(void*));
++            array->skip_destructor_rounds = EMUTLS_SKIP_DESTRUCTOR_ROUNDS;
++        }
++        emutls_check_array_set_size(array, new_size);
++    } else if (index > array->size) {
++        uintptr_t orig_size = array->size;
++        uintptr_t new_size = emutls_new_data_array_size(index);
++        array = (emutls_address_array*) realloc(array, emutls_asize(new_size));
++        if (array)
++            memset(array->data + orig_size, 0,
++                   (new_size - orig_size) * sizeof(void*));
++        emutls_check_array_set_size(array, new_size);
++    }
++    return array;
++}
++#ifndef _WIN32
++__attribute__((visibility("default")))
++#endif
++void* __emutls_get_address(__emutls_control* control) {
++    uintptr_t index = emutls_get_index(control);
++    emutls_address_array* array = emutls_get_address_array(index--);
++    if (array->data[index] == NULL)
++        array->data[index] = emutls_allocate_object(control);
++    return array->data[index];
++}
+diff --git libcxxabi-5.0.1.src/include/int_lib.h libcxxabi-5.0.1.src/include/int_lib.h
+new file mode 100644
+index 0000000..9d09e2d
+--- /dev/null
++++ libcxxabi-5.0.1.src/include/int_lib.h
+@@ -0,0 +1,134 @@
++/* ===-- int_lib.h - configuration header for compiler-rt  -----------------===
++ *
++ *                     The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===----------------------------------------------------------------------===
++ *
++ * This file is a configuration header for compiler-rt.
++ * This file is not part of the interface of this library.
++ *
++ * ===----------------------------------------------------------------------===
++ */
++
++#ifndef INT_LIB_H
++#define INT_LIB_H
++
++/* Assumption: Signed integral is 2's complement. */
++/* Assumption: Right shift of signed negative is arithmetic shift. */
++/* Assumption: Endianness is little or big (not mixed). */
++
++#if defined(__ELF__)
++#define FNALIAS(alias_name, original_name) \
++  void alias_name() __attribute__((__alias__(#original_name)))
++#define COMPILER_RT_ALIAS(aliasee) __attribute__((__alias__(#aliasee)))
++#else
++#define FNALIAS(alias, name) _Pragma("GCC error(\"alias unsupported on this file format\")")
++#define COMPILER_RT_ALIAS(aliasee) _Pragma("GCC error(\"alias unsupported on this file format\")")
++#endif
++
++/* ABI macro definitions */
++
++#if __ARM_EABI__
++# ifdef COMPILER_RT_ARMHF_TARGET
++#   define COMPILER_RT_ABI
++# else
++#   define COMPILER_RT_ABI __attribute__((__pcs__("aapcs")))
++# endif
++#else
++# define COMPILER_RT_ABI
++#endif
++
++#define AEABI_RTABI __attribute__((__pcs__("aapcs")))
++
++#ifdef _MSC_VER
++#define ALWAYS_INLINE __forceinline
++#define NOINLINE __declspec(noinline)
++#define NORETURN __declspec(noreturn)
++#define UNUSED
++#else
++#define ALWAYS_INLINE __attribute__((always_inline))
++#define NOINLINE __attribute__((noinline))
++#define NORETURN __attribute__((noreturn))
++#define UNUSED __attribute__((unused))
++#endif
++
++#if defined(__NetBSD__) && (defined(_KERNEL) || defined(_STANDALONE))
++/*
++ * Kernel and boot environment can't use normal headers,
++ * so use the equivalent system headers.
++ */
++#  include <machine/limits.h>
++#  include <sys/stdint.h>
++#  include <sys/types.h>
++#else
++/* Include the standard compiler builtin headers we use functionality from. */
++#  include <limits.h>
++#  include <stdint.h>
++#  include <stdbool.h>
++#  include <float.h>
++#endif
++
++/* Include the commonly used internal type definitions. */
++#include "int_types.h"
++
++/* Include internal utility function declarations. */
++#include "int_util.h"
++
++COMPILER_RT_ABI si_int __paritysi2(si_int a);
++COMPILER_RT_ABI si_int __paritydi2(di_int a);
++
++COMPILER_RT_ABI di_int __divdi3(di_int a, di_int b);
++COMPILER_RT_ABI si_int __divsi3(si_int a, si_int b);
++COMPILER_RT_ABI su_int __udivsi3(su_int n, su_int d);
++
++COMPILER_RT_ABI su_int __udivmodsi4(su_int a, su_int b, su_int* rem);
++COMPILER_RT_ABI du_int __udivmoddi4(du_int a, du_int b, du_int* rem);
++#ifdef CRT_HAS_128BIT
++COMPILER_RT_ABI si_int __clzti2(ti_int a);
++COMPILER_RT_ABI tu_int __udivmodti4(tu_int a, tu_int b, tu_int* rem);
++#endif
++
++/* Definitions for builtins unavailable on MSVC */
++#if defined(_MSC_VER) && !defined(__clang__)
++#include <intrin.h>
++
++uint32_t __inline __builtin_ctz(uint32_t value) {
++  unsigned long trailing_zero = 0;
++  if (_BitScanForward(&trailing_zero, value))
++    return trailing_zero;
++  return 32;
++}
++
++uint32_t __inline __builtin_clz(uint32_t value) {
++  unsigned long leading_zero = 0;
++  if (_BitScanReverse(&leading_zero, value))
++    return 31 - leading_zero;
++  return 32;
++}
++
++#if defined(_M_ARM) || defined(_M_X64)
++uint32_t __inline __builtin_clzll(uint64_t value) {
++  unsigned long leading_zero = 0;
++  if (_BitScanReverse64(&leading_zero, value))
++    return 63 - leading_zero;
++  return 64;
++}
++#else
++uint32_t __inline __builtin_clzll(uint64_t value) {
++  if (value == 0)
++    return 64;
++  uint32_t msh = (uint32_t)(value >> 32);
++  uint32_t lsh = (uint32_t)(value & 0xFFFFFFFF);
++  if (msh != 0)
++    return __builtin_clz(msh);
++  return 32 + __builtin_clz(lsh);
++}
++#endif
++
++#define __builtin_clzl __builtin_clzll
++#endif /* defined(_MSC_VER) && !defined(__clang__) */
++
++#endif /* INT_LIB_H */
+diff --git libcxxabi-5.0.1.src/include/int_util.h libcxxabi-5.0.1.src/include/int_util.h
+new file mode 100644
+index 0000000..a7b20ed
+--- /dev/null
++++ libcxxabi-5.0.1.src/include/int_util.h
+@@ -0,0 +1,33 @@
++/* ===-- int_util.h - internal utility functions ----------------------------===
++ *
++ *                     The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===-----------------------------------------------------------------------===
++ *
++ * This file is not part of the interface of this library.
++ *
++ * This file defines non-inline utilities which are available for use in the
++ * library. The function definitions themselves are all contained in int_util.c
++ * which will always be compiled into any compiler-rt library.
++ *
++ * ===-----------------------------------------------------------------------===
++ */
++
++#ifndef INT_UTIL_H
++#define INT_UTIL_H
++
++/** \brief Trigger a program abort (or panic for kernel code). */
++#define compilerrt_abort() compilerrt_abort_impl(__FILE__, __LINE__, __func__)
++
++NORETURN void compilerrt_abort_impl(const char *file, int line,
++                                    const char *function);
++
++#define COMPILE_TIME_ASSERT(expr) COMPILE_TIME_ASSERT1(expr, __COUNTER__)
++#define COMPILE_TIME_ASSERT1(expr, cnt) COMPILE_TIME_ASSERT2(expr, cnt)
++#define COMPILE_TIME_ASSERT2(expr, cnt)                                        \
++  typedef char ct_assert_##cnt[(expr) ? 1 : -1] UNUSED
++
++#endif /* INT_UTIL_H */
+diff --git libcxxabi-5.0.1.src/include/int_types.h libcxxabi-5.0.1.src/include/int_types.h
+new file mode 100644
+index 0000000..f53f343
+--- /dev/null
++++ libcxxabi-5.0.1.src/include/int_types.h
+@@ -0,0 +1,164 @@
++/* ===-- int_lib.h - configuration header for compiler-rt  -----------------===
++ *
++ *                     The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===----------------------------------------------------------------------===
++ *
++ * This file is not part of the interface of this library.
++ *
++ * This file defines various standard types, most importantly a number of unions
++ * used to access parts of larger types.
++ *
++ * ===----------------------------------------------------------------------===
++ */
++
++#ifndef INT_TYPES_H
++#define INT_TYPES_H
++
++#include "int_endianness.h"
++
++/* si_int is defined in Linux sysroot's asm-generic/siginfo.h */
++#ifdef si_int
++#undef si_int
++#endif
++typedef      int si_int;
++typedef unsigned su_int;
++
++typedef          long long di_int;
++typedef unsigned long long du_int;
++
++typedef union
++{
++    di_int all;
++    struct
++    {
++#if _YUGA_LITTLE_ENDIAN
++        su_int low;
++        si_int high;
++#else
++        si_int high;
++        su_int low;
++#endif /* _YUGA_LITTLE_ENDIAN */
++    }s;
++} dwords;
++
++typedef union
++{
++    du_int all;
++    struct
++    {
++#if _YUGA_LITTLE_ENDIAN
++        su_int low;
++        su_int high;
++#else
++        su_int high;
++        su_int low;
++#endif /* _YUGA_LITTLE_ENDIAN */
++    }s;
++} udwords;
++
++#if (defined(__LP64__) || defined(__wasm__) || defined(__mips64)) || defined(__riscv)
++#define CRT_HAS_128BIT
++#endif
++
++#ifdef CRT_HAS_128BIT
++typedef int      ti_int __attribute__ ((mode (TI)));
++typedef unsigned tu_int __attribute__ ((mode (TI)));
++
++typedef union
++{
++    ti_int all;
++    struct
++    {
++#if _YUGA_LITTLE_ENDIAN
++        du_int low;
++        di_int high;
++#else
++        di_int high;
++        du_int low;
++#endif /* _YUGA_LITTLE_ENDIAN */
++    }s;
++} twords;
++
++typedef union
++{
++    tu_int all;
++    struct
++    {
++#if _YUGA_LITTLE_ENDIAN
++        du_int low;
++        du_int high;
++#else
++        du_int high;
++        du_int low;
++#endif /* _YUGA_LITTLE_ENDIAN */
++    }s;
++} utwords;
++
++static __inline ti_int make_ti(di_int h, di_int l) {
++    twords r;
++    r.s.high = h;
++    r.s.low = l;
++    return r.all;
++}
++
++static __inline tu_int make_tu(du_int h, du_int l) {
++    utwords r;
++    r.s.high = h;
++    r.s.low = l;
++    return r.all;
++}
++
++#endif /* CRT_HAS_128BIT */
++
++typedef union
++{
++    su_int u;
++    float f;
++} float_bits;
++
++typedef union
++{
++    udwords u;
++    double  f;
++} double_bits;
++
++typedef struct
++{
++#if _YUGA_LITTLE_ENDIAN
++    udwords low;
++    udwords high;
++#else
++    udwords high;
++    udwords low;
++#endif /* _YUGA_LITTLE_ENDIAN */
++} uqwords;
++
++typedef union
++{
++    uqwords     u;
++    long double f;
++} long_double_bits;
++
++#if __STDC_VERSION__ >= 199901L
++typedef float _Complex Fcomplex;
++typedef double _Complex Dcomplex;
++typedef long double _Complex Lcomplex;
++
++#define COMPLEX_REAL(x) __real__(x)
++#define COMPLEX_IMAGINARY(x) __imag__(x)
++#else
++typedef struct { float real, imaginary; } Fcomplex;
++
++typedef struct { double real, imaginary; } Dcomplex;
++
++typedef struct { long double real, imaginary; } Lcomplex;
++
++#define COMPLEX_REAL(x) (x).real
++#define COMPLEX_IMAGINARY(x) (x).imaginary
++#endif
++#endif /* INT_TYPES_H */
++
+diff --git libcxxabi-5.0.1.src/include/int_endianness.h libcxxabi-5.0.1.src/include/int_endianness.h
+new file mode 100644
+index 0000000..e2586c5
+--- /dev/null
++++ libcxxabi-5.0.1.src/include/int_endianness.h
+@@ -0,0 +1,116 @@
++/* ===-- int_endianness.h - configuration header for compiler-rt ------------===
++ *
++ *		       The LLVM Compiler Infrastructure
++ *
++ * This file is dual licensed under the MIT and the University of Illinois Open
++ * Source Licenses. See LICENSE.TXT for details.
++ *
++ * ===----------------------------------------------------------------------===
++ *
++ * This file is a configuration header for compiler-rt.
++ * This file is not part of the interface of this library.
++ *
++ * ===----------------------------------------------------------------------===
++ */
++
++#ifndef INT_ENDIANNESS_H
++#define INT_ENDIANNESS_H
++
++#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
++    defined(__ORDER_LITTLE_ENDIAN__)
++
++/* Clang and GCC provide built-in endianness definitions. */
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++#define _YUGA_LITTLE_ENDIAN 0
++#define _YUGA_BIG_ENDIAN    1
++#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++#endif /* __BYTE_ORDER__ */
++
++#else /* Compilers other than Clang or GCC. */
++
++#if defined(__SVR4) && defined(__sun)
++#include <sys/byteorder.h>
++
++#if defined(_BIG_ENDIAN)
++#define _YUGA_LITTLE_ENDIAN 0
++#define _YUGA_BIG_ENDIAN    1
++#elif defined(_LITTLE_ENDIAN)
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++#else /* !_LITTLE_ENDIAN */
++#error "unknown endianness"
++#endif /* !_LITTLE_ENDIAN */
++
++#endif /* Solaris and AuroraUX. */
++
++/* .. */
++
++#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__DragonFly__) ||   \
++    defined(__minix)
++#include <sys/endian.h>
++
++#if _BYTE_ORDER == _BIG_ENDIAN
++#define _YUGA_LITTLE_ENDIAN 0
++#define _YUGA_BIG_ENDIAN    1
++#elif _BYTE_ORDER == _LITTLE_ENDIAN
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++#endif /* _BYTE_ORDER */
++
++#endif /* *BSD */
++
++#if defined(__OpenBSD__)
++#include <machine/endian.h>
++
++#if _BYTE_ORDER == _BIG_ENDIAN
++#define _YUGA_LITTLE_ENDIAN 0
++#define _YUGA_BIG_ENDIAN    1
++#elif _BYTE_ORDER == _LITTLE_ENDIAN
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++#endif /* _BYTE_ORDER */
++
++#endif /* OpenBSD */
++
++/* .. */
++
++/* Mac OSX has __BIG_ENDIAN__ or __LITTLE_ENDIAN__ automatically set by the
++ * compiler (at least with GCC) */
++#if defined(__APPLE__) || defined(__ellcc__ )
++
++#ifdef __BIG_ENDIAN__
++#if __BIG_ENDIAN__
++#define _YUGA_LITTLE_ENDIAN 0
++#define _YUGA_BIG_ENDIAN    1
++#endif
++#endif /* __BIG_ENDIAN__ */
++
++#ifdef __LITTLE_ENDIAN__
++#if __LITTLE_ENDIAN__
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++#endif
++#endif /* __LITTLE_ENDIAN__ */
++
++#endif /* Mac OSX */
++
++/* .. */
++
++#if defined(_WIN32)
++
++#define _YUGA_LITTLE_ENDIAN 1
++#define _YUGA_BIG_ENDIAN    0
++
++#endif /* Windows */
++
++#endif /* Clang or GCC. */
++
++/* . */
++
++#if !defined(_YUGA_LITTLE_ENDIAN) || !defined(_YUGA_BIG_ENDIAN)
++#error Unable to determine endian
++#endif /* Check we found an endianness correctly. */
++
++#endif /* INT_ENDIANNESS_H */

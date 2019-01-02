@@ -4,7 +4,7 @@ PortGroup               compiler_blacklist_versions 1.0
 name                    libcxx
 epoch                   1
 version                 5.0.1
-revision                2
+revision                3
 categories              lang
 platforms               darwin
 license                 MIT NCSA
@@ -72,25 +72,31 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
     variant universal {}
     default_variants +universal
 
-    compiler.blacklist *gcc* {clang < 500}
-
-    # clang 3.5 and newer are conditionally blacklisted to prevent dependency cycles
-    foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 devel} {
-        if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
-            compiler.blacklist-append macports-clang-${ver}
+    if {${os.major} < 11} {
+        variant emulated_tls description {build libcxxabi and libcxx with support for emulated thread_local storage} {}
+    }
+    # only selected clang versions support emulated-tls
+    foreach ver {5.0} {
+        if {[file exists ${prefix}/bin/clang-mp-${ver}] && ${os.major} < 11} {
+            default_variants-append +emulated_tls
         }
     }
 
-    # clang 3.8 and newer are blacklisted due to a build failure in stdlib.h that needs to ne triaged
-    foreach ver {3.8 3.9 4.0 5.0 devel} {
-        compiler.blacklist-append macports-clang-${ver}
+    compiler.blacklist *gcc* {clang < 500}
+
+    # clang 3.5 and newer are conditionally blacklisted to prevent dependency cycles
+    foreach ver {3.5 3.6 3.7 3.8 3.9 4.0 5.0 6.0 7.0 devel} {
+        if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
+            compiler.blacklist-append macports-clang-${ver}
+        }
     }
 
     supported_archs i386 x86_64 ppc
 
     if {[variant_isset universal] && [lsearch ${universal_archs} ppc] != -1} {
         # http://trac.macports.org/wiki/LibcxxOnOlderSystems#Leopardppc
-        compiler.whitelist macports-clang-3.7 macports-clang-3.6
+        # older clang compilers produce unreliable ppc code
+        compiler.blacklist-append macports-clang-3.4 macports-clang-3.5 macports-clang-3.6
     }
 
     post-extract {
@@ -99,8 +105,11 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
         # but the buildit script just builds every file in the src directory and you can't have both
         delete ${libcxxabi_worksrcpath}/src/cxa_noexception.cpp
 
-        # cmake doesn't include this for darwin builds, so nuke it here as well
-        delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
+        if {![variant_isset emulated_tls]} {
+            # cmake doesn't include this for darwin builds, so nuke it here as well
+            # however, this file is essential for emulated-tls to function
+            delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
+        }
 
         file mkdir ${workpath}/build
         file copy ${filespath}/Makefile ${workpath}/build
@@ -108,18 +117,37 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
 
     patch.dir ${workpath}
     patch.pre_args -p0
+
+    # patches for libc++abi buildit
     patchfiles-append \
-        0001-Update-buildit-script-to-read-EXTRA_LDFLAGS-from-the.patch \
-        0002-Define-_LIBCPP_BUILDING_LIBRARY-during-build-to-supp.patch \
-        0003-buildit-Use-undefined-dynamic_lookup-when-linking.patch \
-        3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
-        3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
-        3003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
-        3004-Revert-Remove-the-buildit-and-testit-scripts-they-ha.patch \
-        3005-buildit-build-fix-for-Leopard.patch \
-        3006-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
-        3007-MacPorts-Use-LIBCXXABI_PATH-for-path-to-build-time-l.patch \
-        3008-buildit-Fix-CFLAGS-for-Leopard-and-Snow-Leopard-to-i.patch
+        0001-libcxxabi-Update-buildit-script-to-read-EXTRA_LDFLAGS-from-the.patch \
+        0002-libcxxabi-Define-_LIBCPP_BUILDING_LIBRARY-during-build-to-supp.patch \
+        0003-libcxxabi-buildit-Use-undefined-dynamic_lookup-when-linking.patch    \
+        0004-libcxxabi-buildit-add-nostdinc++.diff
+
+    if {[variant_isset emulated_tls]} {
+      # add emutls.c support for cxa_thread_atexit directly into libcxxabi
+      # these files were taken from clang-7.0's compiler-rt subproject
+      patchfiles-append \
+        0005-libcxxabi-add-emutls.patch                                           \
+        0006-libcxxabi-buildit-build-emutls.patch                                 \
+        0007-libcxxabi-include-expose-cxa-thread-atexit.patch
+    }
+
+    # restore libc++ buildit and patches for libc++ buildit
+    patchfiles-append \
+        1001-Revert-Remove-the-buildit-and-testit-scripts-they-ha.patch          \
+        1002-libcxx-buildit-build-fix-for-Leopard.patch \
+        1003-libcxx-buildit-Set-compatibility-version-to-RC_ProjectSourc.patch \
+        1004-libcxx-MacPorts-Use-LIBCXXABI_PATH-for-path-to-build-time-l.patch \
+        1005-libcxx-buildit-Fix-CFLAGS-for-Leopard-and-Snow-Leopard-to-i.patch
+
+    # patches for libc++ include files
+    patchfiles-append \
+        2001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch    \
+        2002-Fix-missing-long-long-math-prototypes-when-using-the.patch    \
+        2003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch    \
+        2004-libcxx-includes-Fix-up-thread-constexpr-for-GCC-where-the-PPC-port-cant-do-longlong-constexpr.patch
 
     post-patch {
         system "chmod 755 ${libcxx_worksrcpath}/lib/buildit"
