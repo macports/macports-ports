@@ -79,38 +79,38 @@ proc crossbinutils.setup {target version} {
         foreach {dir page} ${infopages} {
             # Fix texinfo source file
             set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
-            reinplace \
+            reinplace -q \
                 /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
-            reinplace s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
-            reinplace \
+            reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
+            reinplace -q \
                 "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
                 ${tex}
             move ${tex} \
                 ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
 
             # Fix Makefile
-            reinplace -E \
+            reinplace -q -E \
                 s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
                 ${worksrcpath}/${dir}/Makefile.in
         }
 
         # Fix packages' names.
         foreach dir {bfd binutils gas gold gprof ld opcodes} {
-            reinplace "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
+            reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
                 ${worksrcpath}/${dir}/configure
         }
 
         # Install target-compatible libbfd/libiberty in the target's directory
-        reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
+        reinplace -q "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
             ${worksrcpath}/bfd/configure                                \
             ${worksrcpath}/opcodes/configure
-        reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
+        reinplace -q "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
             ${worksrcpath}/bfd/configure                                             \
             ${worksrcpath}/opcodes/configure
 
-        reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
+        reinplace -q "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
             ${worksrcpath}/libiberty/Makefile.in
-        reinplace "s|/\$(MULTIOSDIR)||g" \
+        reinplace -q "s|/\$(MULTIOSDIR)||g" \
             ${worksrcpath}/libiberty/Makefile.in
     }
 
