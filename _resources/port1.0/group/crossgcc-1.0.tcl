@@ -104,6 +104,7 @@ proc crossgcc.setup {target version} {
         depends_lib     port:${crossgcc.target}-binutils \
                         port:gmp \
                         port:mpfr \
+                        path:lib/pkgconfig/isl.pc:isl \
                         port:libiconv \
                         port:libmpc \
                         port:zlib
