@@ -193,6 +193,9 @@ proc crossgcc.setup {target version} {
                         --enable-stage1-checking \
                         --enable-multilib
 
+        # https://trac.macports.org/ticket/57153
+        configure.args-append --disable-libcc1
+
         # The Portfile may modify crossgcc.languages, thus, evaluate the option
         # late in this pre-configure phase
         pre-configure {
