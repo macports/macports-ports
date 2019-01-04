@@ -140,24 +140,24 @@ proc crossgcc.setup {target version} {
                     if { ! [file exists ${makefile}] } {continue}
 
                     # Fix the source
-                    reinplace "s|setfilename ${name}.info|setfilename ${crossgcc.target}-${name}.info|g" ${src}
-                    reinplace "s|(${name})|(${crossgcc.target}-${name})|g" ${src}
-                    reinplace "s|@file{${name}}|@file{${crossgcc.target}-${name}}|g" ${src}
+                    reinplace -q "s|setfilename ${name}.info|setfilename ${crossgcc.target}-${name}.info|g" ${src}
+                    reinplace -q "s|(${name})|(${crossgcc.target}-${name})|g" ${src}
+                    reinplace -q "s|@file{${name}}|@file{${crossgcc.target}-${name}}|g" ${src}
 
                     # Rename the source
                     file rename ${worksrcpath}/${path}/${name}.${suffix} \
                                 ${worksrcpath}/${path}/${crossgcc.target}-${name}.${suffix}
 
                     # Fix the Makefile
-                    reinplace -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${crossgcc.target}-&:g" ${makefile}
+                    reinplace -q -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${crossgcc.target}-&:g" ${makefile}
 
                     # Fix install-info's dir.
                     # (note: this may be effectless if there was no info dir to be fixed)
-                    reinplace "s|--info-dir=\$(DESTDIR)\$(infodir)|--dir-file=\$(DESTDIR)\$(infodir)/${crossgcc.target}-gcc-dir|g" ${makefile}
+                    reinplace -q "s|--info-dir=\$(DESTDIR)\$(infodir)|--dir-file=\$(DESTDIR)\$(infodir)/${crossgcc.target}-gcc-dir|g" ${makefile}
                 }
 
                 # Do not install libiberty
-                reinplace {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
+                reinplace -q {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
         }
 
         # the generated compiler doesn't accept -arch
