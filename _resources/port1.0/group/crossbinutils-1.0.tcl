@@ -60,7 +60,7 @@ proc crossbinutils.setup {target version} {
     if {[info exists crossbinutils.versions_info($version)]} {
         use_[lindex [set crossbinutils.versions_info($version)] 0] yes
 
-        checksums   {*}[lindex [set crossbinutils.versions_info($version)] 1]
+        checksums   binutils-${version}${extract.suffix} {*}[lindex [set crossbinutils.versions_info($version)] 1]
     } else {
         # the old default
         use_bzip2   yes
