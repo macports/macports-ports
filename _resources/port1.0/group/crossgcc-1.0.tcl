@@ -40,6 +40,11 @@ array set crossgcc.versions_info {
         sha256  832ca6ae04636adbb430e865a1451adf6979ab44ca1c8374f61fba65645ce15c \
         size    62462388
     }}
+    7.4.0 {xz {
+        rmd160  77d3cdafe7df748fa484a300e9513acb3ee2c2e1 \
+        sha256  eddde28d04f334aec1604456e536416549e9b1aa137fc69204e65eb0c009fe51 \
+        size    62601888
+    }}
     8.1.0 {xz {
         rmd160  de00e96f3d70b6a08215930a6884672e56975d05 \
         sha256  1d1866f992626e61349a1ccd0b8d5253816222cdc13390dcfaa74b093aa2b153 \
@@ -55,7 +60,8 @@ array set crossgcc.versions_info {
 array set newlib.versions_info {
     3.0.0 {gz {
         rmd160  505d486c9c658d10ed3b1af13459b2f289680b1f \
-        sha256  c8566335ee74e5fcaeb8595b4ebd0400c4b043d6acb3263ecb1314f8f5501332
+        sha256  c8566335ee74e5fcaeb8595b4ebd0400c4b043d6acb3263ecb1314f8f5501332 \
+        size    18168046
     }}
 }
 
@@ -98,6 +104,7 @@ proc crossgcc.setup {target version} {
         depends_lib     port:${crossgcc.target}-binutils \
                         port:gmp \
                         port:mpfr \
+                        path:lib/pkgconfig/isl.pc:isl \
                         port:libiconv \
                         port:libmpc \
                         port:zlib
@@ -140,24 +147,24 @@ proc crossgcc.setup {target version} {
                     if { ! [file exists ${makefile}] } {continue}
 
                     # Fix the source
-                    reinplace "s|setfilename ${name}.info|setfilename ${crossgcc.target}-${name}.info|g" ${src}
-                    reinplace "s|(${name})|(${crossgcc.target}-${name})|g" ${src}
-                    reinplace "s|@file{${name}}|@file{${crossgcc.target}-${name}}|g" ${src}
+                    reinplace -q "s|setfilename ${name}.info|setfilename ${crossgcc.target}-${name}.info|g" ${src}
+                    reinplace -q "s|(${name})|(${crossgcc.target}-${name})|g" ${src}
+                    reinplace -q "s|@file{${name}}|@file{${crossgcc.target}-${name}}|g" ${src}
 
                     # Rename the source
                     file rename ${worksrcpath}/${path}/${name}.${suffix} \
                                 ${worksrcpath}/${path}/${crossgcc.target}-${name}.${suffix}
 
                     # Fix the Makefile
-                    reinplace -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${crossgcc.target}-&:g" ${makefile}
+                    reinplace -q -E "s:\[\[:<:\]\]${name}\\.(info|pod|${suffix}):${crossgcc.target}-&:g" ${makefile}
 
                     # Fix install-info's dir.
                     # (note: this may be effectless if there was no info dir to be fixed)
-                    reinplace "s|--info-dir=\$(DESTDIR)\$(infodir)|--dir-file=\$(DESTDIR)\$(infodir)/${crossgcc.target}-gcc-dir|g" ${makefile}
+                    reinplace -q "s|--info-dir=\$(DESTDIR)\$(infodir)|--dir-file=\$(DESTDIR)\$(infodir)/${crossgcc.target}-gcc-dir|g" ${makefile}
                 }
 
                 # Do not install libiberty
-                reinplace {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
+                reinplace -q {/^install:/s/ .*//} ${worksrcpath}/libiberty/Makefile.in
         }
 
         # the generated compiler doesn't accept -arch
@@ -185,6 +192,9 @@ proc crossgcc.setup {target version} {
                         --with-mpc=${prefix} \
                         --enable-stage1-checking \
                         --enable-multilib
+
+        # https://trac.macports.org/ticket/57153
+        configure.args-append --disable-libcc1
 
         # The Portfile may modify crossgcc.languages, thus, evaluate the option
         # late in this pre-configure phase
