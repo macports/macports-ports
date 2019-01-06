@@ -41,6 +41,7 @@ portindex -e
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 # Install mpbb and its dependency getopt
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
+sed -i "" "s/ -dkn install / -dkns install /" ../mpbb/mpbb-install-port
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 # Download and run CI runner
