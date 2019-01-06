@@ -10,8 +10,8 @@ OS_MAJOR=$(uname -r | cut -f 1 -d .)
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/MacPorts-${OS_MAJOR}.tar.bz2"
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
-# Prepare environment variables: clear CC and set PATH for port
-unset CC && source /opt/local/share/macports/setupenv.bash
+# Set PATH for portindex
+source /opt/local/share/macports/setupenv.bash
 # Set ports tree to $PWD
 sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar|file://${PWD}|; /^file:/s/default/nosync,default/" /opt/local/etc/macports/sources.conf
 # CI is not interactive
@@ -39,8 +39,9 @@ git checkout -qf -
 portindex -e
 # Create macports user
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
-# Install mpbb and its dependency getopt
+# Install mpbb
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
+# Install getopt required by mpbb
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 # Download and run CI runner
