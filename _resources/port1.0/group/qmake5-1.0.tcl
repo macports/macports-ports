@@ -15,7 +15,11 @@ default qt5.top_level {${configure.dir}}
 default qt5.cxxflags {}
 default qt5.ldflags {}
 default qt5.frameworkpaths {}
-default qt5.spec_cmd {"-spec "}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default qt5.spec_cmd {"-spec "}
+} else {
+    default qt5.spec_cmd "-spec "
+}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)

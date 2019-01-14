@@ -7,7 +7,7 @@ options cmake.build_dir cmake.install_prefix cmake.out_of_source
 
 default cmake.build_dir         {${workpath}/build}
 default cmake.install_prefix    {${prefix}}
-default cmake.out_of_source     {no}
+default cmake.out_of_source     no
 
 # standard place to install extra CMake modules
 set cmake_share_module_dir ${prefix}/share/cmake/Modules
@@ -151,7 +151,7 @@ platform darwin {
         # ports might have need to access these variables at other times.
         foreach archflag_var ${cmake._archflag_vars} {
             global cmake._saved_${archflag_var}
-            configure.${archflag_var} [set cmake._saved_${archflag_var}]
+            configure.${archflag_var} {*}[set cmake._saved_${archflag_var}]
         }
     }
 }
@@ -164,8 +164,8 @@ variant debug description "Enable debug binaries" {
 
 default build.dir {${configure.dir}}
 
-default build.post_args {VERBOSE=ON}
+default build.post_args VERBOSE=ON
 
 # Generated Unix Makefiles contain a "fast" install target that begins
 # installing immediately instead of checking build dependencies again.
-default destroot.target {install/fast}
+default destroot.target install/fast

@@ -3,11 +3,11 @@
 PortSystem              1.0
 
 name                    gpsd
-version                 3.17
-revision                1
+
 license                 BSD
 categories              net
-maintainers             {ryandesign @ryandesign} openmaintainer
+maintainers             {michaelld @michaelld} \
+                        {fwright.net:fw @fhgwright} openmaintainer
 platforms               darwin
 
 description             GPS service daemon
@@ -20,22 +20,110 @@ long_description        GPSD is a service daemon that handles GPSes and other \
                         a local GPSD or a GPSD on another machine.
 
 homepage                http://www.catb.org/${name}/
-master_sites            savannah
 
-checksums               rmd160  7aeacd58b7374b392e691fc470dc9a644169ba8a \
-                        sha256  68e0dbecfb5831997f8b3d6ba48aed812eb465d8c0089420ab68f9ce4d85e77a
+subport gpsd-devel {}
+
+if {${subport} eq ${name}} {
+
+    # release
+    conflicts           gpsd-devel
+
+    version             3.18.1
+    checksums           rmd160  08f95b51218f11f7b07c1a5046cead366216fdc8 \
+                        sha256  5cb1e6d880ec9a52c62492dd0e3d77451b7c7ad625895bd652f6354215aec23e \
+                        size    9031595
+    revision            0
+
+    master_sites        savannah
+
+    # NOTE: The 3.18.1 tarball doesn't quite match the release-3.18.1 sources.
+    # This due to a recurring problem clobbering the 'gps' symlinks in the
+    # contrib/ and devtools/.  Since this doesn't affect the installed port,
+    # these errors are left as is.  Note, however, that attempts to directly
+    # use Python programs in these subdirectories from the work directory
+    # may not work.
+
+    patchfiles-append   patch-SConstruct.diff
+    patchfiles-append   patch-noC99.diff
+    patchfiles-append   patch-pyserial.diff
+
+    livecheck.type          regex
+    livecheck.url           https://download.savannah.gnu.org/releases/gpsd/
+    livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
+
+} else {
+
+    # devel
+    conflicts           gpsd
+
+    revision            0
+    version             20190109
+    set commit          a0dad21d058834c87e1728e186842f640ebcafc4
+    checksums           rmd160 7a32b19a95ab399f047ca61f4f45b1230f692094 \
+                        sha256 d7a4c300add16f916a87643177987f14361fb3572846a067fd5cac1b73d9ac16 \
+                        size   10093579
+
+    master_sites        http://git.savannah.gnu.org/cgit/gpsd.git/snapshot
+    distname            ${name}-${commit}
+
+    livecheck.type          regex
+    livecheck.version       ${commit}
+    livecheck.url           http://git.savannah.gnu.org/cgit/gpsd.git
+    livecheck.regex         "id=(\[0-9a-f\]*)'>HEAD"
+}
+
+# GPSD requires Python 2.6, 2.7, or 3.2+; don't use 2.6, 3.2, or
+# 3.3, since we're weaning MP off of them.
+
+set pythons_suffixes {27 34 35 36 37}
+
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string index ${s} 1]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
+}
+
+# default to +python27
+set pyver_no_dot "27"
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+default_variants +python${pyver_no_dot}
+
+# make sure -python27 isn't specified alone
+set pyver_no_dot ""
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+if {${pyver_no_dot} eq ""} {
+    ui_error "\n\nYou must select one of the Python variants (+pythonXY).\n"
+return -code error "Invalid Python variant selection"
+}
+
+set pyver_dotted [join [split ${pyver_no_dot} ""] .]
+
+# NOTE:  All Python dependencies which are conceptually depends_run actually
+# need to be depends_lib, since the build procedure references them, usually
+# just to verify theire existence.
+
+depends_lib-append      port:python${pyver_no_dot} \
+                        port:py${pyver_no_dot}-serial
+
+configure.python        ${prefix}/bin/python${pyver_dotted}
 
 depends_lib-append      port:ncurses
 depends_build-append    port:scons port:pkgconfig
-
-# GPSD requires Python 2.6, 2.7, or 3.2+, but for now we just base it on 2.7.
-# The Python Portgroup breaks the C installs, so we can't use it until the port
-# is split up between the C/C++ and Python code.
-#
-depends_run             port:python27
-configure.python        ${prefix}/bin/python2.7
-
-patchfiles              patch-SConstruct.diff
 
 use_configure           no
 
@@ -69,11 +157,6 @@ build.env-append        CC="${configure.cc} [get_canonical_archflags cc]" \
 # extra_env in macports.conf.  In all cases, the WRITE_PAD value in use is
 # reported by the test framework and is visible with -v.
 #
-# Note also that the MacPorts sandbox doesn't allow ptys, so the daemon tests
-# report "gpsfake: ptys not available, falling back to UDP.", but still work.
-# This can be worked around by running "scons testregress" directly in
-# ${worksrcpath}, rather than running it via "port test".
-#
 # The test phase duplicates the arguments and environment (except WRITE_PAD)
 # from the build phase, mainly to avoid gratuitous rebuilds between the phases.
 #
@@ -84,8 +167,8 @@ build.env-append        CC="${configure.cc} [get_canonical_archflags cc]" \
 test.run                yes
 test.cmd                ${build.cmd} -j${build.jobs}
 test.target             testregress
-set test.args           ${build.args}
-set test.env            ${build.env}
+test.args               {*}${build.args}
+test.env-append         {*}${build.env}
 if { [info exists ::env(WRITE_PAD)] } {
     test.env-append     WRITE_PAD=$::env(WRITE_PAD)
 } else {
@@ -96,21 +179,18 @@ destroot.args           {*}${build.args}
 destroot.env-append     {*}${destroot.destdir} {*}${build.env}
 
 post-destroot {
-    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-        ${destroot}${prefix}/bin/gegps
-    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-        ${destroot}${prefix}/bin/gpscat
-    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-        ${destroot}${prefix}/bin/gpsfake
-    reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-        ${destroot}${prefix}/bin/gpsprof
+    # Rewrite shebang lines of Python programs
+    set python_progs {gegps gpscat gpsfake gpsprof ubxtool zerk}
     if {[variant_isset xgps]} {
-        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-            ${destroot}${prefix}/bin/xgps
-        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-            ${destroot}${prefix}/bin/xgpsspeed
+        lappend python_progs xgps xgpsspeed
     }
-    system -W ${destroot}${prefix}/lib "install_name_tool -id ${prefix}/lib/libgps.dylib libgps.dylib"
+    foreach pp ${python_progs} {
+        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
+            ${destroot}${prefix}/bin/${pp}
+    }
+
+    system -W ${destroot}${prefix}/lib "install_name_tool -id \
+        ${prefix}/lib/libgps.dylib libgps.dylib"
 }
 
 # Although GPSD has successfully been built with Qt5 at one time, that build
@@ -119,54 +199,45 @@ post-destroot {
 #
 variant qt description {Build Qt4 bindings} {
     PortGroup               qt4 1.0
-    # The following two lines are a workaround for #50347
+
+    # The following three lines are a workaround for #50347
     build.env-append        PKG_CONFIG_PATH=${qt_pkg_config_dir}
     test.env-append         PKG_CONFIG_PATH=${qt_pkg_config_dir}
+    destroot.env-append     PKG_CONFIG_PATH=${qt_pkg_config_dir}
 
-    build.args-delete       qt=no
-    build.args-append       qt=yes
-    test.args-delete        qt=no
-    test.args-append        qt=yes
-    destroot.args-delete    qt=no
-    destroot.args-append    qt=yes
+    build.args-replace      qt=no           qt=yes
+    test.args-replace       qt=no           qt=yes
+    destroot.args-replace   qt=no           qt=yes
 }
 
 variant libusb \
 description {Include support for better USB device discovery} {
     depends_lib-append      port:libusb
-    build.args-delete       usb=no
-    build.args-append       usb=yes
-    test.args-delete        usb=no
-    test.args-append        usb=yes
-    destroot.args-delete    usb=no
-    destroot.args-append    usb=yes
+
+    build.args-replace      usb=no          usb=yes
+    test.args-replace       usb=no          usb=yes
+    destroot.args-replace   usb=no          usb=yes
 }
 
 variant dbus description {Include support for DBUS} {
     depends_lib-append      port:dbus-glib
-    build.args-delete       dbus_export=no
-    build.args-append       dbus_export=yes
-    test.args-delete        dbus_export=no
-    test.args-append        dbus_export=yes
-    destroot.args-delete    dbus_export=no
-    destroot.args-append    dbus_export=yes
+
+    build.args-replace      dbus_export=no  dbus_export=yes
+    test.args-replace       dbus_export=no  dbus_export=yes
+    destroot.args-replace   dbus_export=no  dbus_export=yes
 }
 
 variant xgps \
 description {Include xgps/xgpsspeed X11 clients (dependency-intensive)} {
-    depends_run-append      port:py27-cairo port:py27-gobject3 port:gtk3
-    build.args-delete       xgps=no
-    build.args-append       xgps=yes
-    test.args-delete        xgps=no
-    test.args-append        xgps=yes
-    destroot.args-delete    xgps=no
-    destroot.args-append    xgps=yes
+    depends_lib-append      port:py${pyver_no_dot}-cairo \
+                            port:py${pyver_no_dot}-gobject3 \
+                            port:gtk3
+
+    build.args-replace      xgps=no         xgps=yes
+    test.args-replace       xgps=no         xgps=yes
+    destroot.args-replace   xgps=no         xgps=yes
 }
 
 if {![variant_isset xgps]} {
     notes "The xgps variant is now needed to get the xgps and xgpsspeed programs."
 }
-
-livecheck.type          regex
-livecheck.url           http://download.savannah.gnu.org/releases-noredirect/gpsd
-livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"

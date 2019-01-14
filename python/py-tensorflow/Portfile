@@ -1,75 +1,156 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem          1.0
-PortGroup           python 1.0
+PortSystem                       1.0
+PortGroup           python       1.0
+PortGroup           cxx11        1.1
+PortGroup           java         1.0
+PortGroup           github       1.0
+PortGroup           compilers    1.0
+PortGroup           xcodeversion 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 name                py-tensorflow
-version             1.4.1
+version             1.12.0
+revision            0
+github.setup        tensorflow tensorflow ${version} v
 platforms           darwin
 supported_archs     x86_64
+
 license             Apache-2
-maintainers         {emcrisostomo @emcrisostomo} openmaintainer
+maintainers         {emcrisostomo @emcrisostomo} {jonesc @cjones051073} openmaintainer
 
 description         TensorFlow helps the tensors flow
 long_description    ${description}
 
 homepage            https://www.tensorflow.org/
 
-if {${python.version} eq 27} {
-    master_sites        https://pypi.python.org/packages/eb/40/0c425a97870f0e95a9d79e4fd5c2f609ee89a7e69b4644579d3157ed5ea0
+github.livecheck.regex  {([0-9.]+)}
 
-    checksums           \
-        rmd160  69614bdbdce9a343451241e22d07b6cf1428601d \
-        sha256  f9c03acc5d26ac903e177fb904ceb797632830c5a0fae5c8b49d688a748337db
-} elseif {${python.version} eq 35} {
-    master_sites        https://pypi.python.org/packages/11/fe/2d94cfa362ddb998470e2115c24a9f8cedcfb9a3756290906c5b7bed9a6c
+checksums           rmd160  ae04551e8ec24310c0e0230ebddeb6c20a6c2e65 \
+                    sha256  fbb5b81408eb561ef18520ac628f6afef565b6cfbd53d9ee7a252238a25ed871 \
+                    size    26342848
 
-    checksums           \
-        rmd160  f78ac5b8fe1cf75942ba9a8c4aed8c6286f2085f \
-        sha256  cceb8439975ea508ffd19a312d7ff83149ab81d7e8a88685852bbea4ded98736
-} elseif {${python.version} eq 36} {
-    master_sites        https://pypi.python.org/packages/74/fd/356ae3fcb46b6189b9a066323af3a766a0a9fa1d425e76ec2b83abbfee32
+compiler.blacklist-append {clang < 840}
 
-    checksums           \
-        rmd160  4dc7f2dbbb92b05716b7f0518bb3945d1a59584d \
-        sha256  ee96a38a3ba3c53e1cdd8cc2af59d5f378b7992e63c54fba9605c963b209e814
+patch.pre_args      -p1
+
+# Required java version
+java.version        11
+# JDK port to install if required java not found
+java.fallback       openjdk11
+
+# The oldest Xcode version to use default Xcode compiler
+# Note setting here should be in sync with that in bazel
+set tf_min_xcode    9.0
+
+if {${os.major} < 16} {
+    # Work around for issues with clock_gettime(CLOCK_REALTIME, &ts);
+    # https://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
+    patchfiles-append CLOCK_REALTIME-Older-OSX.patch
 }
 
-distname            tensorflow-1.4.1-cp${python.version}-cp${python.version}m-macosx_10_11_x86_64
+variant native description {Build from source for best native platform support} { }
 
-extract.suffix      .whl
-extract.only
-
+# tensorflow does not yet support python 3.7 or newer..
 python.versions     27 35 36
 
 if {${name} ne ${subport}} {
 
     depends_build-append \
-        port:py${python.version}-pip
+        port:py${python.version}-pip \
+        port:bazel
 
     depends_lib-append \
         port:py${python.version}-wheel \
-        port:py${python.version}-tensorflow-tensorboard \
+        port:py${python.version}-tensorboard \
         port:py${python.version}-six \
         port:py${python.version}-protobuf3 \
         port:py${python.version}-numpy \
         port:py${python.version}-mock \
-        port:py${python.version}-backports.weakref
-
+        port:py${python.version}-gast \
+        port:py${python.version}-astor \
+        port:py${python.version}-termcolor \
+        port:py${python.version}-keras \
+        port:py${python.version}-absl
     if {${python.version} < 34} {
         depends_lib-append \
             port:py${python.version}-enum34
     }
-
-    build {
+    if {${python.version} < 37} {
+        depends_lib-append \
+            port:py${python.version}-backports.weakref
     }
 
-    destroot.cmd        pip-${python.branch}
-    destroot.args       \
-        --no-cache-dir \
-        --no-dependencies \
-        --root ${destroot} \
-        ${distpath}/${distfiles}
+    use_configure yes
+    # Options passed to configure script via env vars
+    configure.env-append PYTHON_LIB_PATH=${python.prefix}/lib/python${python.branch}/site-packages
+    configure.env-append PYTHON_BIN_PATH=${prefix}/bin/python${python.branch}
+    configure.env-append JAVA_HOME=${java.home}
+    build.env-append     TMPDIR=${workpath}/tmp
+    build.env-append     JAVA_HOME=${java.home}
+    if {![variant_isset native]} {
+        configure.env-append CC_OPT_FLAGS="-march=ivybridge"
+    }
+    # Disable Xcode detection on older OSes, as we want the
+    # MP provided commandline utilities to be used instead.
+    if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
+        configure.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+        build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+    }
+    # Remove all arguments
+    configure.args
+    configure.pre_args
+    # configure command
+    configure.cmd ./configure
+    # Path configuration if required
+    pre-configure {
+        if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
+            foreach f { configure.py third_party/toolchains/cpus/arm/CROSSTOOL.tpl third_party/toolchains/gpus/crosstool/CROSSTOOL third_party/gpus/crosstool/CROSSTOOL.tpl third_party/sycl/crosstool/CROSSTOOL.tpl } {
+                foreach cmd {ar nm strip libtool ld objdump} {
+                    reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+                }
+                reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g" ${f}
+                reinplace -q "s| clang | ${configure.cc} |g"  ${f}
+            }
+        }
+    }
+
+    build {
+        # Build using the wonderful bazel build system ...
+        set tf_bazel_cmd "bazel --max_idle_secs=60 --output_user_root=${workpath}"
+        set tf_bazel_build_opts "-s -c opt --config=opt"
+        # hack to try and transfer MP c, c++ and ld options to bazel...
+        foreach opt [list {*}${configure.cflags} ] {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --conlyopt '${opt}'"
+        }
+        foreach opt [list {*}${configure.cxxflags} ] {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --cxxopt '${opt}'"
+        }
+        foreach opt [list {*}${configure.ldflags} ] {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --linkopt '${opt}'"
+        }
+        if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --action_env CC=${configure.cc}"
+            set tf_bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${tf_bazel_cmd}"
+        }
+        system -W ${worksrcpath} "${tf_bazel_cmd} build ${tf_bazel_build_opts} //tensorflow/tools/pip_package:build_pip_package"
+        # Build the python wheel
+        system -W ${worksrcpath} "./bazel-bin/tensorflow/tools/pip_package/build_pip_package ${workpath}"
+        # Clean up
+        system -W ${worksrcpath} "${tf_bazel_cmd} clean"
+    }
+
+    set macos_minor_v [expr [lindex [split ${os.version} "."] 0] - 4]
+    set install_whlfile ${workpath}/tensorflow-${version}-cp${python.version}-cp${python.version}m-macosx_10_${macos_minor_v}_x86_64.whl
+
+    destroot.cmd  pip-${python.branch}
+    destroot.args           \
+        --upgrade           \
+        --force-reinstall   \
+        --no-cache-dir      \
+        --no-dependencies   \
+        --root ${destroot}  \
+        ${install_whlfile}
     destroot.post_args
 
     post-destroot {
@@ -77,5 +158,4 @@ if {${name} ne ${subport}} {
         file delete ${destroot}${prefix}/bin/tensorboard-${python.branch}
     }
 
-    livecheck.type      none
 }

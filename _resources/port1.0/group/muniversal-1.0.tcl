@@ -24,10 +24,10 @@
 
 options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
 default universal_archs_supported {${universal_archs}}
-default merger_must_run_binaries {no}
-default merger_no_3_archs {no}
-default merger_arch_flag {yes}
-default merger_arch_compiler {no}
+default merger_must_run_binaries no
+default merger_no_3_archs no
+default merger_arch_flag yes
+default merger_arch_compiler no
 
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
@@ -200,7 +200,7 @@ variant universal {
                 configure.env-append        {*}$merger_configure_env(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-append   {*}$merger_configure_cppflags(${arch})
+                configure.cppflags-prepend  {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
                 configure.cflags-append     {*}$merger_configure_cflags(${arch})

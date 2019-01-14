@@ -15,7 +15,7 @@ default bitbucket.homepage {https://bitbucket.org/${bitbucket.author}/${bitbucke
 
 # Later code assumes that bitbucket.master_sites is a simple string, not a list.
 default bitbucket.master_sites {${bitbucket.homepage}/get}
-default bitbucket.tarball_from {tags}
+default bitbucket.tarball_from tags
 
 default master_sites {${bitbucket.master_sites}}
 
@@ -28,7 +28,7 @@ proc handle_tarball_from {option action args} {
     if {[string equal ${action} "set"] && ${args} eq "downloads"} {
         bitbucket.tarball_from ${args}
         bitbucket.master_sites https://bitbucket.org/${bitbucket.author}/${bitbucket.project}/downloads
-        default livecheck.url ${bitbucket.master_sites}
+        default livecheck.url {${bitbucket.master_sites}}
         default distname {${bitbucket.project}-${bitbucket.version}}
     }
 }

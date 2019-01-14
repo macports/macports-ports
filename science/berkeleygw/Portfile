@@ -5,12 +5,12 @@ PortGroup           mpi 1.0
 PortGroup           linear_algebra 1.0
 
 name                berkeleygw
-version             1.2.0
+version             2.0.0
+revision            2
 categories          science
 platforms           darwin
 license             BSD
 maintainers         {dstrubbe @dstrubbe}
-revision            2
 
 description         GW/Bethe-Salpeter equation
 long_description    BerkeleyGW is a set of computer codes that calculate the quasiparticle properties \
@@ -19,14 +19,14 @@ long_description    BerkeleyGW is a set of computer codes that calculate the qua
                     (the GW approximation and Bethe-Salpeter equation).
 homepage            http://www.berkeleygw.org
 
-checksums           rmd160  26933a24c10ba03457c667bc5f2d3ca21df2a436 \
-                    sha256  1305dc8587af666fe437bc2561a9106b2b0bcdbe91980b8f1ae7bbd491ce1e25
+checksums           rmd160  56c3330b9f8928439b04b503f56a3df6dc3a32f0 \
+                    sha256  887146cc6598a509a6d2a7b5044d12ebc5a4a2c7b028513f247fe62cf0861563 \
+                    size    71864027
 
 master_sites        https://berkeley.box.com/shared/static
-distfiles           829s6ha4popx1g4cslpklzh5znf2v6la.gz
-#old name: BGW-${version}.tar.gz; master_sites        ${homepage}/releases
+distfiles           wkqu37wu77tll53r8t1soe6ozqja67yy.gz
 # needed for case-sensitive filesystems
-worksrcdir          BerkeleyGW-${version}
+worksrcdir          BGW-${version}
 
 depends_lib         port:fftw-3
 if {![variant_isset fftw2]} {
@@ -42,25 +42,19 @@ if {![variant_isset fftw2]} {
 
 # WHAT DO WE DO WHEN meaning of 'gfortran' is updated? No record... Maybe rename to gfortran5 etc. ?
 
-# test hangs in Epsilon with OpenMPI, for unknown reason.
 compilers.choose    fc cc cxx cpp
-# can we re-enable OpenMPI?
-mpi.setup           require_fortran -openmpi -openmpi_devel -gfortran -clang
-# FIXME: +gfortran just needs smarter setting of cpp to the one from gcc;
-#clang and llvm only useful with +g95 currently (which is useless)
+mpi.setup           require_fortran -g95
+# won't compile with g95
+#In file Common/timing.p.f:289
+#   contains
+#           1
+#Error: Unexpected CONTAINS statement at (1)
 
-# just for cpp
-if {[variant_isset g95]} {
-    depends_build-append  port:llvm-gcc42
-}
-
-# FIXME: this unnecessarily enforces scalapack also had same C compiler as we are using.
 if {[mpi_variant_isset]} {
     depends_lib-append  port:scalapack
-    if {![mpi_variant_isset]} {
-        ui_error "+scalapack requires an MPI variant. Choose +mpich, +mpich_devel, +openmpi, or +openmpi_devel."
-        return -code error "+scalapack requires an MPI variant."
-    }
+    #FIXME: this unnecessarily enforces scalapack also had same C compiler as we are using.
+    # Without this MPI consistency, a seg fault may occur.
+    mpi.enforce_variant scalapack
 }
 
 # fftw is not universal
@@ -69,32 +63,17 @@ universal_variant   no
 configure {
     system -W ${worksrcpath} "sed 's|/opt/local|${prefix}|' < config/generic.serial.macos.mk > arch.mk"
     reinplace -W ${worksrcpath} "s|MATHFLAG += -DHDF5||" arch.mk
-    if {![variant_isset hdf5]} {
-        system -W ${worksrcpath} "echo 'HDF5LIB=' >> arch.mk"
-    }
 }
 
-patchfiles          patch-Common-common-rules.mk.diff \
-                    patch-Makefile.diff
+# fix changed path, otherwise destroot would fail
+patchfiles         patch-Makefile.diff
 
 build.target	    all-flavors
 use_parallel_build  yes
 
 destroot.post_args  INSTDIR=${destroot}${prefix}
-post-extract {
-    # note: this needs to be fixed upstream
-    system "chmod -R a+rX ${worksrcpath}"
-    # Otherwise would have this:
-
-#ls -lt /opt/local/share/berkeleyGW/
-#total 744
-#drwx------   5 root  admin     170 Jan 30 11:12 examples
-#drwx------  40 root  admin    1360 Jan 30 11:12 testsuite
-#-rwxr-xr-x   1 root  admin  379415 Jan 30 11:12 manual.html
-}
-
 test.run            yes
-
+# BN.test will fail because it is written assuming h5
 
 #depends_build       port:gsed
 pre-test {
@@ -126,6 +105,7 @@ pre-build {
     set mathflag ""
     if {[variant_isset hdf5]} {
         set mathflag "${mathflag} -DHDF5"
+        reinplace -W ${worksrcpath} "s|\#HDF5|HDF5|g" arch.mk
     }
     
     if {[variant_isset fftw2]} {
@@ -140,20 +120,21 @@ pre-build {
     }
 
     if {[variant_isset g95]} {
-        set configure.cpp     llvm-cpp-4.2
-    }
-
-    if {[variant_isset g95]} {
-        build.args-append COMPFLAG="-DG95" FCPP="${configure.cpp} -P -C" \
-                          F90free="${prefix}/bin/g95 -ffree-form -ffree-line-length-huge -fno-second-underscore" \
-                          MOD_OPT="-fmod="
+        build.args-append COMPFLAG="-DG95" FCPP="${configure.cc} -E -x c -P -ansi" MOD_OPT="-fmod=" \
+                          F90free="${prefix}/bin/g95 -ffree-form -ffree-line-length-huge -fno-second-underscore"
         # test, destroot args needed just to avoid trying to build in the test/openmp directory unnecessarily
         test.args-append  COMPFLAG="-DG95"
         destroot.args-append  COMPFLAG="-DG95"
     } else {
+        if {[gcc_variant_isset]} {
+            build.args-append FCPP="${configure.cpp} -C"
+        } else {
+            # for clang. Could be wrong in odd situation where no C variant is set, and default is not clang.
+            build.args-append FCPP="${configure.cc} -E -x c -ansi"
+        }
+
         # gcc is default in arch.mk so most things do not need to be modified
-        build.args-append FCPP="${configure.cpp} -C" \
-            F90free="${configure.fc} -ffree-form -ffree-line-length-none -fno-second-underscore"
+        build.args-append F90free="${configure.fc} -ffree-form -ffree-line-length-none -fno-second-underscore"
     }
 
     if {[variant_isset threads]} {
@@ -184,6 +165,8 @@ variant hdf5 description {Build with HDF5 support for faster epsmat I/O} {
     depends_lib-append          port:hdf5
     require_active_variants     port:hdf5 hl
     compilers.enforce_fortran   hdf5
+    mpi.enforce_variant         hdf5
+    # if MPI, hdf5 must have MPI
 }
 
 variant fftw2 description {Build with FFTW-2} {
@@ -191,8 +174,6 @@ variant fftw2 description {Build with FFTW-2} {
     # fftw port always has a Fortran variant
 }
 
-livecheck.type      none
-# This is broken currently due to changes in the settings to the code's webpage.
-#livecheck.type      regex
-#livecheck.url       ${homepage}/?q=node/6
-#livecheck.regex     BGW-(\[0-9.\]+).tar.gz
+livecheck.type      regex
+livecheck.url       https://berkeleygw.org/download/
+livecheck.regex     BGW-(\[0-9.\]+).tar.gz

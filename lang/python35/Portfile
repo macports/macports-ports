@@ -7,7 +7,7 @@ name                python35
 
 epoch               20170810
 # Remember to keep py35-tkinter and py35-gdbm's versions sync'd with this
-version             3.5.5
+version             3.5.6
 revision            1
 
 set major           [lindex [split $version .] 0]
@@ -26,9 +26,9 @@ master_sites        ${homepage}ftp/python/${version}/
 
 distname            Python-${version}
 use_xz              yes
-checksums           md5 f3763edf9824d5d3a15f5f646083b6e0 \
-                    rmd160 dd0b7b9e093312b854b7ba56afbe12a655934744 \
-                    sha256 063d2c3b0402d6191b90731e0f735c64830e7522348aeb7ed382a83165d45009
+checksums           md5 f5a99f765e765336a3ebbb2a24ca2be3 \
+                    rmd160 5a02cb3664ad98d1767c79dfdd88a850b866241f \
+                    sha256 f55cde04f521f273c7cba08912921cc5642cfc15ca7b22d5829f0aff4371155f
 
 patchfiles          patch-setup.py.diff \
                     patch-Lib-cgi.py.diff \
@@ -37,7 +37,9 @@ patchfiles          patch-setup.py.diff \
                     patch-libedit.diff \
                     omit-local-site-packages.patch \
                     patch-xcode4bug.diff \
-                    Modules_posixmodule.c.diff
+                    Modules_posixmodule.c.diff \
+                    uuid-64bit.patch \
+                    libressl-2.7.patch
 
 depends_build       port:pkgconfig
 depends_lib         port:bzip2 \
@@ -91,8 +93,6 @@ set pythonNoDot python[string map {. {}} $branch]
 select.entries      [list python python-$pythonNoDot $pythonNoDot] \
                     [list python3 python3-$pythonNoDot $pythonNoDot]
 
-set confdir config-${branch}m
-
 notes "
 To make this the default Python or Python 3 (i.e., the version run by\
 the 'python' or 'python3' commands), run one or both of:
@@ -101,41 +101,62 @@ the 'python' or 'python3' commands), run one or both of:
     sudo port select --set python3 $pythonNoDot
 "
 
-post-destroot {
+platform darwin {
     set framewpath ${frameworks_dir}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
+    set confdir config-${branch}m
 
-    foreach dir { Headers Resources Python Versions/Current } {
-        file delete ${destroot}${framewpath}/${dir}
-    }
-
-    ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
-
-    # Without this, LINKFORSHARED is set to
-    # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
-    # (this becomes Python.framework/Versions/3.5/Python) which doesn't
-    # quite work (see ticket #15099); instead we mirror the behavior of
-    # `python-config --ldflags` here.
-    reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
-        ${destroot}${framewdir}/lib/python${branch}/config-3.5m/Makefile
-
-    # remove -arch flags from the config
-    reinplace -E {s|-arch [a-z0-9_]+||g} \
-      ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile \
-      ${destroot}${framewdir}/lib/python${branch}/_sysconfigdata.py
-    # also remove gettext overlinking
-    reinplace "s|-lintl||" \
-      ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile \
-      ${destroot}${framewdir}/lib/python${branch}/_sysconfigdata.py
-    foreach unversioned {2to3 idle3 pydoc3 python3 python3-config pyvenv} {
-        delete ${destroot}${prefix}/bin/${unversioned}
-    }
-}
-
-platform darwin {
     post-configure {
         # See https://trac.macports.org/ticket/18376
         system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
+    }
+    post-build {
+        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
+        # Without this, LINKFORSHARED is set to
+        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+        # (this becomes Python.framework/Versions/3.5/Python) which doesn't
+        # work for dependents that incorrectly use this variable to find out
+        # how to link against python (see ticket #15099); instead we mirror
+        # the behavior of `python-config --ldflags` here.
+        system -W ${buildlibdir} "awk -F : \
+            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/${confdir}\
+            -lpython${branch}m -ldl -framework CoreFoundation',\\n\\\", \\\$1; getline; next} {print}\"\
+            _sysconfigdata.py > _sysconfigdata.py.new"
+        file rename -force ${buildlibdir}/_sysconfigdata.py.new \
+            ${buildlibdir}/_sysconfigdata.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+           ${buildlibdir}/_sysconfigdata.py
+
+        # also remove gettext overlinking
+        reinplace "s|-lintl||" \
+           ${buildlibdir}/_sysconfigdata.py
+    }
+    post-destroot {
+        foreach dir { Headers Resources Python Versions/Current } {
+            file delete ${destroot}${framewpath}/${dir}
+        }
+
+        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/python-${branch}m.pc
+
+        # Also make the sysconfig changes in the Makefile
+        reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
+            ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace "s|-lintl||" \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+    }
+}
+
+post-destroot {
+    foreach unversioned {2to3 idle3 pydoc3 python3 python3-config pyvenv} {
+        delete ${destroot}${prefix}/bin/${unversioned}
     }
 }
 
@@ -172,6 +193,10 @@ variant universal {
             delete ${destroot}${prefix}/bin/${unversioned}
         }
     }
+}
+
+variant optimizations description {Compile with LTO and PGO. Build time greatly increased} {
+    configure.args-append   --enable-optimizations
 }
 
 livecheck.type      regex

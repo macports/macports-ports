@@ -115,7 +115,7 @@ set ruby.prog_suffix    ""
 options ruby.config_rubyprog_name
 default ruby.config_rubyprog_name --rubyprog
 
-default ruby.branch         ${ruby.default_branch}
+ruby.branch         ${ruby.default_branch}
 
 options ruby.link_binaries ruby.link_binaries_suffix
 default ruby.link_binaries yes
@@ -177,7 +177,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 use_configure no
                 build {}
                 destroot {
-                    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                     system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
                 }
                 return

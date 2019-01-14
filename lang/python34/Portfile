@@ -7,7 +7,7 @@ name                python34
 
 epoch               20170810
 # Remember to keep py34-tkinter and py34-gdbm's versions sync'd with this
-version             3.4.8
+version             3.4.9
 revision            1
 
 set major           [lindex [split $version .] 0]
@@ -26,9 +26,9 @@ master_sites        ${homepage}ftp/python/${version}/
 
 distname            Python-${version}
 use_xz              yes
-checksums           md5 15c44931f2274bfe928d53e0b675a4d8 \
-                    rmd160 dcdde1eb1917e2fb9bc021288228432b3cb2def4 \
-                    sha256 29a472fa902c7b2add152f5e1e82e0885a8d360645689c1db5d1949a7e8ac3ea
+checksums           md5 4ce46f8196bf629a889e68173234d955 \
+                    rmd160 941536bcadacd7c42c3f3fa94aa42186443ea673 \
+                    sha256 59629676ba2b01a798f5211d8f63c26ee52f1d5133cf37583e0bf1bad50c2bd9
 
 patchfiles          patch-setup.py.diff \
                     patch-Lib-cgi.py.diff \
@@ -36,7 +36,8 @@ patchfiles          patch-setup.py.diff \
                     patch-Lib-ctypes-macholib-dyld.py.diff \
                     patch-libedit.diff \
                     omit-local-site-packages.patch \
-                    patch-Include-pyport.h.diff
+                    patch-Include-pyport.h.diff \
+                    uuid-64bit.patch
 
 depends_build       port:pkgconfig
 depends_lib         port:bzip2 \
@@ -90,8 +91,6 @@ set pythonNoDot python[string map {. {}} $branch]
 select.entries      [list python python-$pythonNoDot $pythonNoDot] \
                     [list python3 python3-$pythonNoDot $pythonNoDot]
 
-set confdir config-${branch}m
-
 notes "
 To make this the default Python or Python 3 (i.e., the version run by\
 the 'python' or 'python3' commands), run one or both of:
@@ -100,41 +99,62 @@ the 'python' or 'python3' commands), run one or both of:
     sudo port select --set python3 $pythonNoDot
 "
 
-post-destroot {
+platform darwin {
     set framewpath ${frameworks_dir}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
+    set confdir config-${branch}m
 
-    foreach dir { Headers Resources Python Versions/Current } {
-        file delete ${destroot}${framewpath}/${dir}
-    }
-
-    ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
-
-    # Without this, LINKFORSHARED is set to
-    # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
-    # (this becomes Python.framework/Versions/3.4/Python) which doesn't
-    # quite work (see ticket #15099); instead we mirror the behavior of
-    # `python-config --ldflags` here.
-    reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
-        ${destroot}${framewdir}/lib/python${branch}/config-3.4m/Makefile
-
-    # remove -arch flags from the config
-    reinplace -E {s|-arch [a-z0-9_]+||g} \
-      ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile \
-      ${destroot}${framewdir}/lib/python${branch}/_sysconfigdata.py
-    # also remove gettext overlinking
-    reinplace "s|-lintl||" \
-      ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile \
-      ${destroot}${framewdir}/lib/python${branch}/_sysconfigdata.py
-    foreach unversioned {2to3 idle3 pydoc3 python3 python3-config pyvenv} {
-        delete ${destroot}${prefix}/bin/${unversioned}
-    }
-}
-
-platform darwin {
     post-configure {
         # See https://trac.macports.org/ticket/18376
         system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
+    }
+    post-build {
+        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
+        # Without this, LINKFORSHARED is set to
+        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+        # (this becomes Python.framework/Versions/3.4/Python) which doesn't
+        # work for dependents that incorrectly use this variable to find out
+        # how to link against python (see ticket #15099); instead we mirror
+        # the behavior of `python-config --ldflags` here.
+        system -W ${buildlibdir} "awk -F : \
+            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/${confdir}\
+            -lpython${branch}m -ldl -framework CoreFoundation',\\n\\\", \\\$1; getline; next} {print}\"\
+            _sysconfigdata.py > _sysconfigdata.py.new"
+        file rename -force ${buildlibdir}/_sysconfigdata.py.new \
+            ${buildlibdir}/_sysconfigdata.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+           ${buildlibdir}/_sysconfigdata.py
+
+        # also remove gettext overlinking
+        reinplace "s|-lintl||" \
+           ${buildlibdir}/_sysconfigdata.py
+    }
+    post-destroot {
+        foreach dir { Headers Resources Python Versions/Current } {
+            file delete ${destroot}${framewpath}/${dir}
+        }
+
+        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/python-${branch}m.pc
+
+        # Also make the sysconfig changes in the Makefile
+        reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
+            ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace "s|-lintl||" \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+    }
+}
+
+post-destroot {
+    foreach unversioned {2to3 idle3 pydoc3 python3 python3-config pyvenv} {
+        delete ${destroot}${prefix}/bin/${unversioned}
     }
 }
 

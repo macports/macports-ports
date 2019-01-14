@@ -90,6 +90,8 @@ proc mpi.setup_variants {variants} {
                 if {\$c_name eq {}} {
                     set p_name mp
                     set d_name default
+                } elseif {\[string match gcc* \$c_name\]} {
+                    configure.cxx_stdlib macports-libstdc++
                 }
 
                 set path \"etc/select/mpi/${variant}-\${p_name}\"
@@ -153,13 +155,14 @@ proc mpi_variant_name {} {
 
 proc mpi.enforce_variant {args} {
     global mpi.required_variants
-    set mpi.required_variants $args
+    lappend mpi.required_variants $args
 }
 
 proc mpi.action_enforce_variants {ports} {
     global name
     ui_debug "mpi.enforce_variant list: ${ports}"
-    foreach portname $ports {
+    foreach depspec $ports {
+        set portname [_get_dep_port $depspec]
         if {![catch {set result [active_variants $portname "" ""]}]} {
             set otmpi  [mpi_active_variant_name $portname]
             set mympi  [mpi_variant_name]
@@ -174,16 +177,15 @@ proc mpi.action_enforce_variants {ports} {
                 ui_error "Install $portname +$mympi"
                 return -code error "$portname +$mympi not installed"
             }
-
-            compilers.action_enforce_c $portname
         } else {
-            ui_error "Internal error: '$portname' is not an installed port."
+            ui_error "Internal error: '$portname' does not refer to an installed port."
         }
     }
 }
 
-# only run this if mpi is chosen
-pre-fetch {
+pre-configure {
+    # This does not needed to be done in pre-archivefetch because if the archive is already built,
+    # we will not need to use the Fortran MPI compiler, and the incompatibility only matters at compile time.
     if {[fortran_variant_isset] && [mpi_variant_isset]} {
         set gcc_name ""
         regexp (gcc\[0-9\]*) ${mpi.name} gcc_name
@@ -255,12 +257,16 @@ proc mpi.setup {args} {
             require_fortran {
                 set cl [add_from_list $cl "require_fortran"]
             }
+            default_fortran {
+                set cl [add_from_list $cl "default_fortran"]
+            }
             default {
                 if {[info exists mpidb($v,variant)] == 0} {
                     if {$v eq "gcc" ||
                         $v eq "fortran" ||
                         $v eq "clang" ||
                         $v eq "require_fortran" ||
+                        $v eq "default_fortran" ||
                         [info exists cdb($v,variant)]} {
                         set cl [add_from_list $cl $variant]
                     } else {
@@ -316,5 +322,9 @@ pre-fetch {
     if {${mpi.require} && [mpi_variant_name] eq ""} {
         return -code error "must set at least one mpi variant"
     }
+    mpi.action_enforce_variants ${mpi.required_variants}
+}
+
+pre-archivefetch {
     mpi.action_enforce_variants ${mpi.required_variants}
 }

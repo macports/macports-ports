@@ -23,7 +23,7 @@ options                             cmake.build_dir \
 ## Explanation of and default values for the options defined above ##
 
 # out-of-source builds are the default
-default cmake.out_of_source         {yes}
+default cmake.out_of_source         yes
 
 # cmake.build_dir defines where the build will take place
 default cmake.build_dir             {${workpath}/build}
@@ -33,13 +33,13 @@ default cmake.source_dir            {${worksrcpath}}
 # set CMAKE_OSX_ARCHITECTURES when necessary.
 # This can be deactivated when (non-Apple) compilers are used
 # that don't support the corresponding -arch options.
-default cmake.set_osx_architectures {yes}
+default cmake.set_osx_architectures yes
 
 # cmake.build_type defines the type of build; it defaults to "MacPorts"
 # which means only the compiler options set through configure.c*flags and configure.optflags
 # are used, plus those set in the port's CMake files. Alternative pre-defined types are
 # Release, Debug, RelWithDebInfo and MinSizeRel; "None" should work like "MacPorts".
-default cmake.build_type            {MacPorts}
+default cmake.build_type            MacPorts
 
 # cmake-based ports may want to modify the install prefix
 default cmake.install_prefix        {${prefix}}
@@ -72,13 +72,17 @@ default cmake.module_path           {}
 # cmake.generator_blacklist <generator-pattern>
 # (patterns are case-insensitive, e.g. "*ninja*")
 #
-default cmake.generator             {"CodeBlocks - Unix Makefiles"}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default cmake.generator             {"CodeBlocks - Unix Makefiles"}
+} else {
+    default cmake.generator             "CodeBlocks - Unix Makefiles"
+}
 default cmake.generator_blacklist   {}
 # CMake generates Unix Makefiles that contain a special "fast" install target
 # which skips the whole "let's see if there's anything left to (re)build before
 # we install" you normally get with `make install`. That check should be
 # redundant in normal destroot steps, because we just completed the build step.
-default destroot.target             {install/fast}
+default destroot.target             install/fast
 
 ## ############################################################### ##
 
@@ -187,7 +191,7 @@ proc cmake::handle_generator {option action args} {
 
 default configure.dir {[cmake::build_dir]}
 default build.dir {${configure.dir}}
-default build.post_args {VERBOSE=ON}
+default build.post_args VERBOSE=ON
 
 # cache the configure.ccache variable (it will be overridden in the pre-configure step)
 set cmake::ccache_cache ${configure.ccache}
@@ -442,7 +446,7 @@ platform darwin {
         # ports might have need to access these variables at other times.
         foreach archflag_var ${cmake._archflag_vars} {
             global cmake._saved_${archflag_var}
-            configure.${archflag_var} [set cmake._saved_${archflag_var}]
+            configure.${archflag_var} {*}[set cmake._saved_${archflag_var}]
         }
     }
 }

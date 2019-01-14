@@ -1,0 +1,448 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+PortSystem          1.0
+PortGroup           active_variants 1.1
+
+name                zabbix4
+version             4.0.3
+revision            1
+categories          net
+maintainers         {eborisch @eborisch} openmaintainer
+platforms           darwin
+
+license             GPL-2+
+license_noconflict  openssl
+
+description         An open source application and network monitor
+
+long_description    Zabbix is the ultimate open source availability and \
+                    performance monitoring solution. Zabbix offers advanced \
+                    monitoring, alerting, and visualization features today \
+                    which are missing in other monitoring systems, even some \
+                    of the best commercial ones. 
+
+distname            zabbix-${version}
+livecheck.name      zabbix
+livecheck.regex     "Stable\/(4\[0-9.\]+)\/"
+livecheck.url \
+    http://sourceforge.net/projects/zabbix/files/ZABBIX%20Latest%20Stable/
+homepage            http://www.zabbix.com/
+master_sites \
+    sourceforge:project/zabbix/ZABBIX%20Latest%20Stable/${version} \
+    sourceforge:project/zabbix/ZABBIX%20Release%20Candidates/${version}
+dist_subdir         zabbix4
+
+checksums \
+    rmd160  2cc2462c7e1cf9e109f44ef9239b92f6b71fe8de \
+    sha256  6b3d3b23c72a7af1958dc0938a566be03f0424cb44df5b2a9f487428f32d0463 \
+    size    18019170
+
+patchfiles          log_and_pid_locations.patch
+
+universal_variant   no
+
+subport             zabbix4-agent {}
+subport             zabbix4-frontend {}
+
+configure.args      --bindir=${prefix}/bin/zabbix \
+                    --sbindir=${prefix}/sbin/zabbix \
+                    --libexecdir=${prefix}/libexec/zabbix \
+                    --datadir=${prefix}/share/zabbix \
+                    --sysconfdir=${prefix}/etc/zabbix4 \
+                    --localstatedir=${prefix}/var/zabbix \
+                    --with-gnutls=${prefix} \
+                    --enable-ipv6 \
+                    --with-libevent=${prefix} \
+                    --with-libpcre=${prefix}
+
+configure.ldflags-append    -lresolv
+
+if { ${subport} ne "zabbix4-frontend" } {
+    startupitem.create      yes
+    depends_lib-append      port:libiconv \
+                            port:gnutls \
+                            port:pcre \
+                            port:libevent
+}
+
+if { ${subport} eq "zabbix4-agent" } {
+    long_description-append "This port provides the local monitoring agent."
+    conflicts               zabbix2-agent zabbix3-agent
+    startupitem.name        zabbix4-agentd
+    startupitem.executable  \
+        ${prefix}/sbin/zabbix/zabbix_agentd \
+        -c ${prefix}/etc/zabbix4/zabbix_agentd.conf
+    startupitem.pidfile     auto ${prefix}/var/run/zabbix/zabbix_agentd.pid
+    startupitem.logfile     ${prefix}/var/log/zabbix/zabbix_agentd.launch
+
+    configure.args-append   --enable-agent
+
+    destroot.keepdirs \
+        ${destroot}${prefix}/etc/zabbix4/zabbix_agentd.conf.d \
+        ${destroot}${prefix}/var/run/zabbix \
+        ${destroot}${prefix}/var/log/zabbix
+} elseif { ${subport} eq "zabbix4-frontend" } {
+    long_description-append "This port provides the web (PHP) frontend."
+    supported_archs         noarch
+    depends_run-append      port:apache2
+
+    foreach php {php56 php70 php71} {
+        variant ${php} description "Use ${php}" "
+            depends_run-append      port:${php} \
+                                    port:${php}-apache2handler \
+                                    port:${php}-gd \
+                                    port:${php}-gettext \
+                                    port:${php}-mbstring \
+                                    port:${php}-sockets
+        "
+    }
+
+    if {![variant_isset php56] && ![variant_isset php70]
+                               && ![variant_isset php71]} {
+        default_variants        +php71
+    }
+    use_configure           no
+    build {}
+    # Kept in post-destroot sections below for consistency
+    destroot {}
+} else {
+    long_description-append "This port provides the central server component."
+    conflicts               zabbix zabbix2 zabbix3
+
+    depends_lib-append      port:curl \
+                            port:libssh2 \
+                            port:net-snmp \
+                            port:OpenIPMI \
+                            port:libxml2 \
+                            port:zlib	
+
+    depends_run-append      port:fping
+
+    configure.args-append   --enable-server \
+                            --with-libcurl=${prefix}/bin/curl-config \
+                            --with-net-snmp \
+                            --with-openipmi=${prefix} \
+                            --with-ssh2=${prefix} \
+                            --with-libxml2=${prefix}/bin/xml2-config\
+                            --with-zlib=${prefix}
+
+    startupitem.name        zabbix4-server
+    startupitem.start       ${prefix}/sbin/zabbix/zabbix_server
+    set pidfile             ${prefix}/var/run/zabbix/zabbix_server.pid
+    # Gracefully wait up to two minutes for zabbix to shut down / clean up
+    startupitem.stop \
+        "let x=120; while /usr/bin/pkill -u zabbix -F ${pidfile}; \
+         do sleep 1; let x--; \[ \$x -le 0 \] && break; done"
+    startupitem.logfile     ${prefix}/var/log/zabbix/zabbix_server.launch
+    startupitem.netchange   yes
+
+    destroot.keepdirs \
+        ${destroot}${prefix}/etc/zabbix4/zabbix_server.conf.d \
+        ${destroot}${prefix}/var/run/zabbix4 \
+        ${destroot}${prefix}/var/log/zabbix
+
+    variant full_server description {
+        Dependencies for a complete server (w/DB) are installed.
+    } {}
+    
+    variant frontend description {Include frontend PHP files / deps} {
+        depends_run-append  port:zabbix4-frontend
+    }
+
+    default_variants-append +frontend
+}
+
+if { ${subport} ne "zabbix4-agent" } {
+    # Logic for database backends. Needed for -frontend and -server
+    # Items are "display name" "port name" "config arg" "php interface"
+    array set DBLIST {
+        mysql5  {"MySQL 5.x"            mysql5 \
+                 mysql=${prefix}/lib/mysql5/bin/mysql_config mysql}
+        mysql56 {"MySQL 5.6"            mysql56 \
+                 mysql=${prefix}/lib/mysql56/bin/mysql_config mysql}
+        mysql57 {"MySQL 5.7"            mysql57 \
+                 mysql=${prefix}/lib/mysql57/bin/mysql_config mysql}
+        mariadb {"MariaDB"              mariadb \
+                 mysql=${prefix}/lib/mariadb/bin/mysql_config mysql}
+        mariadb101 {"MariaDB 10.1"         mariadb-10.1 \
+                 mysql=${prefix}/lib/mariadb-10.1/bin/mysql_config mysql}
+        mariadb102 {"MariaDB 10.2"         mariadb-10.2 \
+                 mysql=${prefix}/lib/mariadb-10.2/bin/mysql_config mysql}
+        percona {"Percona"              percona \
+                 mysql=${prefix}/lib/percona/bin/mysql_config mysql}
+        pgsql84 {"PostgreSQL 8.4.x"     postgresql84 \
+                 postgresql=${prefix}/lib/postgresql84/bin/pg_config postgresql}
+        pgsql95 {"PostgreSQL 9.5.x"     postgresql95 \
+                 postgresql=${prefix}/lib/postgresql95/bin/pg_config postgresql}
+        pgsql96 {"PostgreSQL 9.6.x"     postgresql96 \
+                 postgresql=${prefix}/lib/postgresql96/bin/pg_config postgresql}
+        sqlite3 {"SQLite 3.x"           sqlite3 \
+                 sqlite3=${prefix} sqlite}
+    }
+
+    set DBLIST_KEYS [lsort [array names DBLIST]]
+    
+    foreach dbitem $DBLIST_KEYS {
+        set this_key [lsearch -exact $DBLIST_KEYS $dbitem]
+        set conf_list [lreplace $DBLIST_KEYS $this_key $this_key]
+        set prms $DBLIST($dbitem)
+        
+        variant $dbitem description \
+          "Use [lindex ${prms} 0] for server database" \
+          conflicts {*}${conf_list} "
+
+            set ::ZDB               [lindex ${prms} 1]
+            set ::DBFILES           [lindex ${prms} 3]
+            set ::MYSQL_MODE        [string equal [lindex ${prms} 3] mysql]
+            configure.args-append   --with-[lindex ${prms} 2]
+
+            if { \"${subport}\" eq {zabbix4-frontend} } {
+                if {[variant_isset php56]} {
+                    depends_run-append \
+                        port:php56-[lindex ${prms} 3]
+                }
+
+                if {[variant_isset php70]} {
+                    depends_run-append \
+                        port:php70-[lindex ${prms} 3]
+                }
+
+                if {[variant_isset php71]} {
+                    depends_run-append \
+                        port:php71-[lindex ${prms} 3]
+                }
+            } else {
+                depends_lib-append      port:[lindex ${prms} 1]
+                require_active_variants port:zabbix4-agent ${dbitem}
+            }
+
+            if {[string compare ${dbitem} sqlite3] && \
+                 [variant_isset full_server]} {
+                depends_run-append \
+                    port:[lindex ${prms} 1]-server
+            }
+        "
+    }
+
+    if {![variant_isset mysql5] &&
+        ![variant_isset mysql56] &&
+        ![variant_isset mysql57] &&
+        ![variant_isset mariadb] &&
+        ![variant_isset mariadb101] &&
+        ![variant_isset mariadb102] &&
+        ![variant_isset percona] &&
+        ![variant_isset pgsql84] &&
+        ![variant_isset pgsql95] &&
+        ![variant_isset pgsql96] &&
+        ![variant_isset sqlite3]} {
+        default_variants            +mysql57
+    }
+}
+
+post-extract {
+    if { ${name} == ${subport} } {
+        if { ${MYSQL_MODE} == 1 &&
+             [variant_isset full_server] } {
+                set repstr "s|# DBSocket=|"
+                append repstr "DBSocket=${prefix}/var/run/${ZDB}/mysqld.sock|"
+            reinplace ${repstr} ${worksrcpath}/conf/zabbix_server.conf
+        }
+    }
+    set repstr "s|# FpingLocation=/usr/sbin/fping|"
+    append repstr "FpingLocation=${prefix}/sbin/fping|"
+    reinplace ${repstr} ${worksrcpath}/conf/zabbix_server.conf
+}
+
+post-patch {
+    reinplace "s|%%PREFIX%%|${prefix}|" \
+        conf/zabbix_agentd.conf conf/zabbix_server.conf
+    reinplace "s|/usr/local/etc|${prefix}/etc/zabbix4|" \
+        conf/zabbix_agentd.conf conf/zabbix_server.conf
+}
+
+add_users zabbix group=zabbix
+
+post-destroot {
+    if { ${subport} eq "zabbix4-agent" } {
+     ####### AGENT #######
+# Copy sample agent .conf files
+        xinstall -m 755 -d \
+            ${destroot}${prefix}/etc/zabbix4/zabbix_agentd.conf.d
+        xinstall -m 755  ${worksrcpath}/conf/zabbix_agentd.conf \
+            ${destroot}${prefix}/etc/zabbix4/zabbix_agentd.conf.sample
+
+# Don't overwrite user settings on each install
+        delete ${destroot}${prefix}/etc/zabbix4/zabbix_agentd.conf
+    } elseif { ${subport} eq "zabbix4-frontend" } {
+# Copy the front end files
+        file mkdir ${destroot}${prefix}/share/zabbix/frontends/
+        file copy ${worksrcpath}/frontends/php/ \
+            ${destroot}${prefix}/share/zabbix/frontends/
+
+# Set permissions for etc (protect passwords) and the frontend
+        system "chown -R www:www ${destroot}${prefix}/share/zabbix/frontends/*"
+    } else {
+     ####### SERVER #######
+# Copy sample server and agent .conf files
+        xinstall -m 755 -d \
+            ${destroot}${prefix}/etc/zabbix4/zabbix_server.conf.d
+
+# Don't overwrite user settings on each install
+        move ${destroot}${prefix}/etc/zabbix4/zabbix_server.conf \
+            ${destroot}${prefix}/etc/zabbix4/zabbix_server.conf.sample
+
+# Copy database data and schemas
+        xinstall -m 755 -d ${destroot}${prefix}/share/zabbix/scripts
+
+        xinstall -m 755 -W ${worksrcpath}/database/${DBFILES} \
+            data.sql images.sql schema.sql \
+            ${destroot}${prefix}/share/zabbix/scripts
+
+        #file copy ${worksrcpath}/upgrades \
+        #    ${destroot}${prefix}/share/zabbix/
+
+        xinstall -d -m 755 -d \
+            ${destroot}${prefix}/share/zabbix/zabbix_agent_win32
+        xinstall -m 755 ${worksrcpath}/bin/win32/zabbix_agentd.exe \
+            ${destroot}${prefix}/share/zabbix/zabbix_agent_win32
+        # Set permissions for etc (protect passwords) 
+        system "chmod ug+rwX,o-rwx ${destroot}${prefix}/etc/zabbix4/*"
+        system "chown -R zabbix:zabbix ${destroot}${prefix}/etc/zabbix4"
+    }
+
+    foreach dname {run log} {
+        xinstall -d -m 755 ${destroot}${prefix}/var/${dname}/zabbix
+        system "chown -R zabbix:zabbix ${destroot}${prefix}/var/${dname}/zabbix"
+    }
+
+}
+
+if { ${subport} eq "zabbix4-agent" } {
+    notes "
+####                                        ####
+#### ZABBIX4 agent installation section     ####
+
+1) Edit the sample .conf file ${prefix}/etc/zabbix4/zabbix_agentd.conf.sample
+   (rename & omit .sample)
+
+   Set the following variable to the ip address of your ZABBIX server to\
+   allow it access to the agent.
+
+    Server=x.x.x.x
+
+
+2) Set zabbix_agentd to run at system boot
+
+     sudo port load zabbix4-agent
+
+#### End ZABBIX4 agent installation section ####
+####                                        ####
+"
+} elseif { ${subport} eq "zabbix4-agent" } {
+    notes "
+####                                              ####
+#### Begin ZABBIX4 frontend installastion section ####
+
+1) Set a symbolic link in your Apache document root pointing to the PHP
+   frontend files
+
+    sudo ln -s ${prefix}/share/zabbix/frontends/php <Apache-docroot>/zabbix
+
+
+2) Enable your desired php version in httpd.conf and make sure the following
+   are set in the associated php.ini:
+   
+    max_execution_time = 300
+    max_input_time = 300
+    post_max_size = 16M
+    date.timezone = < Your TZ; see http://php.net/manual/en/timezones.php >
+
+   And for php56:
+    always_populate_raw_post_data = -1
+
+
+3) Open http://localhost/zabbix/ in your browser and walk through the setup,
+   then login with default user 'Admin' and password 'zabbix'.
+
+
+4) Read the fine manual at http://www.zabbix.com/documentation/
+
+#### End ZABBIX4 frontend installation section   ####
+####                                             ####
+"
+} else {
+    notes "
+####                                                 ####
+#### Begin ZABBIX4 local server installation section ####
+
+ (Installing with +full_server will add all of the dependants; configuration
+  will still be required.)
+
+1) Setup MySQL, i.e. via MacPorts: (for local MySQL server)
+
+    sudo port install mysql5-server
+
+
+2) Setup the ZABBIX database
+
+    Follow the directions at :
+
+  https://www.zabbix.com/documentation/4.0/manual/appendix/install/db_scripts
+
+    The *.sql files it refers to are in ${prefix}/share/zabbix/scripts/
+    ** NOTE THAT THESE ARE FOR YOUR SELECTED DATABASE VARIANT!!! **
+
+
+3) Edit the sample .conf file ${prefix}/etc/zabbix4/zabbix_server.conf
+   (rename & omit .sample)
+
+   Modify these variables at the very least:
+
+    DBName=zabbix
+    DBUser=zabbix
+    DBPassword=<zabbix-mysql-password>
+    DBSocket=<location for your active mysql5\[15\] server socket>
+      Typically ${prefix}/var/run/mysql\[51|55\]/mysqld.sock
+
+
+4) Set zabbix_server to run at system boot (also starts it immediately):
+
+    sudo port load zabbix4
+
+
+5) A Win32 agent is in ${prefix}/share/zabbix/zabbix_agent_win32 for\
+   installation on Windows.
+
+
+6) Read the fine manual at http://www.zabbix.com/documentation/
+
+
+#### End ZABBIX4 local server installation section   ####
+####                                                 ####
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! ZABBIX3 -> ZABBIX4 Server Upgrade process !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!  0) Be sure to use 'sudo port unload zabbix3' to stop the background   !!
+!!     server before deactivating zabbix3.                                !!
+!!                                                                        !!
+!!  1) BACK UP YOUR DATABASE                                              !!
+!!                                                                        !!
+!!  2) Create/edit ${prefix}/etc/zabbix4/zabbix_server.conf              !!
+!!        zabbix_server.conf.sample is available for reference.           !!
+!!        There are new features to consider.                             !!
+!!        ** NOTE conf dir is etc/zabbix4 **                              !!
+!!                                                                        !!
+!!  3) 'sudo port load zabbix4' after installing.                         !!
+!!                                                                        !!
+!!  For complete upgrade directions, please see:                          !!
+!!    http://www.zabbix.com/documentation/4.0/manual/installation/upgrade !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!  ALWAYS BACK UP YOUR DATABASE BEFORE UPGRADING (between unload/load)!  !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+"
+}

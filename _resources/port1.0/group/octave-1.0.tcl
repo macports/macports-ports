@@ -39,7 +39,11 @@ proc universal_setup {args} {
     } else {
         ui_debug "adding universal variant via PortGroup muniversal"
         uplevel "PortGroup muniversal 1.0"
+        if {[vercmp [macports_version] 2.5.3] <= 0} {
         uplevel "default universal_archs_supported {\"i386 x86_64\"}"
+        } else {
+        uplevel "default universal_archs_supported {i386 x86_64}"
+        }
     }
 }
 
@@ -58,7 +62,11 @@ proc octave.set_module {opt action args} {
     }
 }
 
-default categories   {math science}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default categories   {"math science"}
+} else {
+    default categories   "math science"
+}
 default master_sites {sourceforge:octave}
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
@@ -67,7 +75,7 @@ default worksrcdir   {${octave.module}}
 default use_parallel_build {no}
 default livecheck.type     {regex}
 default livecheck.url      {https://octave.sourceforge.io/${octave.module}/}
-default livecheck.regex    {"Package Version:</td><td>(\\\\d+(.\\\\d+)*)</td>"}
+default livecheck.regex    {"package=${octave.module}-(\\\\d+(.\\\\d+)*)"}
 
 depends_lib-append   path:bin/octave:octave
 # do not force all Portfiles to switch from depends_lib to depends_lib-append
@@ -83,8 +91,18 @@ port::register_callback octave.add_dependencies
 configure.env-append OMP_NUM_THREADS=1
 # do not force all Portfiles to switch from configure.env to configure.env-append
 proc octave.add_env {} {
+    global configure.cxx
+
     configure.env-delete OMP_NUM_THREADS=1
     configure.env-append OMP_NUM_THREADS=1
+
+    # Octave defaults to compilers used to build it
+    # see https://trac.macports.org/ticket/57419
+    configure.env-delete LD_CXX=${configure.cxx}
+    configure.env-append LD_CXX=${configure.cxx}
+
+    configure.env-delete DL_LD=${configure.cxx}
+    configure.env-append DL_LD=${configure.cxx}
 }
 port::register_callback octave.add_env
 

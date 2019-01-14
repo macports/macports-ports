@@ -25,7 +25,13 @@ fi
 if [ -z "$JAVA_OPTS" ]; then
     # Ensure enough heap space is created for sbt.  These settings are
     # the default settings from Typesafe's sbt wrapper.
-    JAVA_OPTS="-XX:+CMSClassUnloadingEnabled -Xms1536m -Xmx1536m -XX:MaxPermSize=384m -XX:ReservedCodeCacheSize=192m -Dfile.encoding=UTF8"
+    JAVA_VERSION=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}')
+    if [ "$JAVA_VERSION" \< "1.8" ]; then
+        CLASS_METADATA_OPT="MaxPermSize"
+    else
+        CLASS_METADATA_OPT="MaxMetaspaceSize"
+    fi
+    JAVA_OPTS="-XX:+CMSClassUnloadingEnabled -Xms1536m -Xmx1536m -XX:$CLASS_METADATA_OPT=384m -XX:ReservedCodeCacheSize=192m -Dfile.encoding=UTF8"
 fi
 
 # Assume java is already in the shell path.

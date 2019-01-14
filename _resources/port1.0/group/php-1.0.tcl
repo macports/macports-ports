@@ -106,7 +106,7 @@ proc php._set_branches {option action args} {
             build {}
             test {}
             destroot {
-                xinstall -d -m 755 ${destroot}${prefix}/share/doc/${subport}
+                xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
                 system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
             }
         }
@@ -197,7 +197,7 @@ proc php.setup {extensions version {source ""}} {
                 ui_debug "Staging in [file tail ${destroot.dir}]"
                 portdestroot::destroot_main
             }
-            xinstall -m 755 -d ${destroot}${php.ini_dir}
+            xinstall -m 0755 -d ${destroot}${php.ini_dir}
             if {"zend" == ${php.type}} {
                 set extension_prefix "zend_extension=${php.extension_dir}/"
             } else {

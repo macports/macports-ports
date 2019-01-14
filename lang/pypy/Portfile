@@ -1,12 +1,14 @@
-
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+# Please remember to keep this file in sync with the pypy-tkinter port!
 
 PortSystem          1.0
 PortGroup           bitbucket 1.0
+PortGroup           select 1.0
 
 name                pypy
-bitbucket.setup     pypy pypy 5.10.0 {release-pypy${python.branch}-v}
-revision            0
+bitbucket.setup     pypy pypy 6.0.0 {release-pypy${python.branch}-v}
+revision            1
 categories          lang python devel
 license             MIT PSF
 maintainers         {danchr @danchr} openmaintainer
@@ -15,49 +17,92 @@ platforms           darwin
 
 homepage            http://pypy.org/
 use_bzip2           yes
-distname            pypy2-v${version}-src
 bitbucket.tarball_from \
                     downloads
-checksums           rmd160  1672fec524ccc3037069119498ef9027ebc9382a \
-                    sha256  1209f2db718e6afda17528baa5138177a14a0938588a7d3e1b7c722c483079a8
 
-depends_build       port:pkgconfig
+depends_build       port:pkgconfig \
+                    port:py27-docutils
 depends_lib         port:libffi \
                     port:sqlite3 \
                     port:bzip2 \
                     path:lib/libssl.dylib:openssl \
                     port:gettext \
                     port:gdbm \
+                    port:expat \
                     port:ncurses
+depends_run         port:python_select
+select.entries      [list python python-$subport $subport]
 
 patchfiles          darwin.py.diff \
                     make_output.diff \
-                    ffiplatform.py.diff
+                    ffiplatform.py.diff \
+                    paths.diff
+
+use_configure       no
+
+# a simple mapping from scripts to modules -- ideally, upstream
+# provided these
+array set module_scripts {
+    pydoc pydoc
+    2to3 lib2to3
+    smtpd.py smtpd
+}
 
 subport pypy3 {
-    revision       1
     set python.branch 3.5
-    set python.libdir 3
-    livecheck.regex downloads/pypy3-v(\[0-9.\]+)-src\\.tar\\.bz2
+    set pypy_c_name pypy3-c
+
+    set module_scripts(venv) venv
+    set module_scripts(idle) idlelib
 
     depends_lib-append port:xz
-    depends_build-replace port:pypy-bootstrap port:pypy
+
+    depends_run-append port:python3_select
+    select.entries-append [list python3 python3-$subport $subport]
 
     distname            pypy3-v${version}-src
 
-    checksums           rmd160  f8a8c5d290d33fb087924fcc2ed752dfafd5659f \
-                        sha256  a6e4cffde71e3f08b6e1befa5c0352a9bcc5f4e9f5cbf395001e0763a1a0d9e3
-
-    set pypy_c_name pypy3-c
-
-    destroot.args-append --no-embed-dependencies
+    checksums           rmd160  18f1511e9bcbcd6911e44aefa73e874cda09d4e4 \
+                        sha256  ed8005202b46d6fc6831df1d13a4613bc40084bfa42f275068edadf8954034a3 \
+                        size    22648140
 }
 
 if {$subport == ${name}} {
     set python.branch 2.7
-    set python.libdir 2.7
-
     set pypy_c_name pypy-c
+
+    depends_run-append port:python2_select
+    select.entries-append [list python2 python2-$subport $subport]
+
+    distname            pypy2-v${version}-src
+    checksums           rmd160  4a9568322ac0b8e1c53be81861c7474c1d1926e6 \
+                        sha256  6097ec5ee23d0d34d8cd27a1072bed041c8a080ad48731190a03a2223029212d \
+                        size    19741694
+}
+
+build.env           PYPY_USESSION_DIR=${workpath} PYPY_LOCALBASE=${prefix} \
+                    CFLAGS="${configure.cc_archflags} ${configure.cppflags}" \
+                    LDFLAGS="${configure.ld_archflags} ${configure.ldflags}"
+
+build.dir           ${worksrcpath}/pypy/goal
+build.args          --batch --verbose \
+                    --cc=${configure.cc} --opt=jit \
+                    --make-jobs=${build.jobs}
+build.target        ../../rpython/bin/rpython
+build.post_args     targetpypystandalone
+
+destroot.env        ${build.env}
+destroot.dir        ${worksrcpath}/pypy/tool/release
+destroot.args       --builddir ${destroot}${prefix}/lib \
+                    --archive-name ${subport} \
+                    --without-tk
+destroot.target     package.py
+destroot.post_args
+
+if {$subport == "pypy3"} {
+    # we need to do this after assigning to the variable above -- and
+    # since ${worksrcpath} depends on the subport, we can't do it earlier either
+    destroot.args-append --no-embedded-dependencies
 }
 
 description         A fast interpreter for Python ${python.branch}
@@ -66,33 +111,40 @@ long_description \
     instead of CPython is speed, as it runs generally faster.
 
 post-patch {
-    reinplace "s+('/sw/', '/opt/local/')+('__PREFIX__',)+g" \
-        ${worksrcpath}/pypy/tool/cpyext/extbuild.py
-
-    # sanity check, useful when upgrading
-    if { ![catch {exec grep -lwre "/sw" -e "/opt/local" ${worksrcpath}}] } {
-        return -code error "didn't catch all references to /sw or /opt/local!"
+    # sanity check, useful when upgrading, as upstream tends to move these around
+    if { ![catch {exec grep --exclude "*.orig" -lwre /sw -e ${prefix} ${worksrcpath}} result] } {
+        return -code error "didn't catch all references to /sw and ${prefix}:\n$result"
     }
 
-    reinplace "s|__PREFIX__|${prefix}|" ${worksrcpath}/lib_pypy/cffi/ffiplatform.py \
-                                        ${worksrcpath}/pypy/tool/cpyext/extbuild.py
+    reinplace "s|__PREFIX__|${prefix}|" \
+        ${worksrcpath}/pypy/module/test_lib_pypy/ctypes_tests/conftest.py \
+        ${worksrcpath}/pypy/tool/cpyext/extbuild.py \
+        ${worksrcpath}/lib_pypy/cffi/ffiplatform.py \
+        ${worksrcpath}/lib_pypy/_tkinter/tklib_build.py
 
     # sanity check, likewise
-    if { ![catch {exec grep -lwre "__PREFIX__" ${worksrcpath}}] } {
-        return -code error "didn't catch all references to __PREFIX__!"
+    if { ![catch {exec grep --exclude "*.orig" -lwre __PREFIX__ ${worksrcpath}} result] } {
+        return -code error "didn't catch all references to __PREFIX__:\n$result"
     }
 }
 
-use_configure       no
-
-# use pypy to build if it's already installed, and we're not in trace mode
-if {![tbool ports_trace] && [file executable ${prefix}/lib/pypy/pypy]} {
+# Which Python binary should we use? Building PyPy is _very_ resource
+# intensive, and one of the best cases for using PyPy itself over
+# CPython.
+if {$subport ne $name} {
+    # just use our own pypy2 for building pypy3
+    depends_build-append port:pypy
+    build.cmd       ${prefix}/lib/pypy/bin/pypy
+} elseif {![tbool ports_trace] && [file executable ${prefix}/lib/pypy/pypy]} {
+    # if we're not in trace mode, use pypy from this port if it's available
     build.cmd       ${prefix}/lib/pypy/pypy
 } else {
     if {${os.platform} eq "darwin" && ${os.arch} eq "i386" && ![catch {sysctl hw.cpu64bit_capable} is64bit] && $is64bit == 1} {
+        # use a binary distribution of pypy itself
         depends_build-append port:pypy-bootstrap
         build.cmd       ${prefix}/lib/pypy-bootstrap/bin/pypy
     } else {
+        # fall back to good old CPython...
         depends_build-append port:python27
         build.cmd       ${prefix}/bin/python2.7
     }
@@ -124,24 +176,6 @@ platform darwin {
         build.cmd arch -${build_arch} ${build.cmd}
     }
 }
-build.env           PYPY_USESSION_DIR=${workpath} PYPY_LOCALBASE=${prefix} \
-                    CFLAGS="${configure.cc_archflags} ${configure.cppflags}" \
-                    LDFLAGS="${configure.ld_archflags} ${configure.ldflags}"
-
-build.dir           ${worksrcpath}/pypy/goal
-build.args          --batch --verbose \
-                    --cc=${configure.cc} --opt=jit \
-                    --make-jobs=${build.jobs}
-build.target        ../../rpython/bin/rpython
-build.post_args     targetpypystandalone
-
-destroot.env        ${build.env}
-destroot.dir        ${worksrcpath}/pypy/tool/release
-destroot.args       --builddir ${destroot}${prefix}/lib \
-                    --archive-name ${subport} \
-                    --without-tk
-destroot.target     package.py
-destroot.post_args
 
 # JIT is not available on powerpc at present
 if {${os.arch} ne "i386"} {
@@ -149,16 +183,22 @@ if {${os.arch} ne "i386"} {
     build.args-append --opt=3
 }
 
-post-build {
-    # some modules have to be compiled in an extra step
-    foreach script {_audioop_build.py _curses_build.py _pwdgrp_build.py _sqlite3_build.py _syslog_build.py} {
-        system -W ${worksrcpath}/lib_pypy "${build.dir}/${pypy_c_name} $script"
-    }
-}
-
 post-destroot {
     file delete ${destroot}${prefix}/lib/${subport}.tar.bz2
     ln -s ../lib/${subport}/bin/${subport} ${destroot}${prefix}/bin
+
+    xinstall -d ${destroot}${prefix}/share/man/man1
+    system -W ${worksrcpath}/pypy/doc/man \
+        "rst2man-2.7.py pypy.1.rst ${destroot}${prefix}/share/man/man1/${subport}.1"
+
+    foreach script [array names module_scripts] {
+        set module $module_scripts($script)
+        set scriptpath "${destroot}/${prefix}/lib/${subport}/bin/${script}"
+
+        xinstall -m 755 ${filespath}/module-script.sh $scriptpath
+        reinplace "s+__PYPY__+${prefix}/bin/${subport}+" $scriptpath
+        reinplace "s+__MODULE__+${module}+" $scriptpath
+    }
 }
 
 variant opt1 description {use optimization level 1 for faster build (but slower execution)} {

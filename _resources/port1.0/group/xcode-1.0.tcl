@@ -220,7 +220,10 @@ proc xcode::get_build_args {args} {
     global os.major os.arch
     global developer_dir configure.sdkroot
 
-    set xcode_build_args "OBJROOT=build/ SYMROOT=build/"
+    set xcode_project_dir [file normalize [option build.dir]/[file dirname [option xcode.project]]]
+    set xcode_build_args ""
+    append xcode_build_args " OBJROOT=\"${xcode_project_dir}/build/\""
+    append xcode_build_args " SYMROOT=\"${xcode_project_dir}/build/\""
 
     append xcode_build_args " MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
 
@@ -260,9 +263,11 @@ build {
     set xcode_build_args [xcode::get_build_args]
 
     if {${xcode.scheme} ne ""} {
-        xcode::build_one_target \
-            "${xcode_project_arg} -scheme \"${xcode.scheme}\" ${xcode_configuration_arg}" \
-            "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
+        foreach scheme ${xcode.scheme} {
+            xcode::build_one_target \
+                "${xcode_project_arg} -scheme \"${scheme}\" ${xcode_configuration_arg}" \
+                "${xcode_install_path_setting} ${xcode_build_args} ${xcode.build.settings}"
+        }
     } else {
         if {${xcode.target} ne ""} {
             set xcode_targets ${xcode.target}
@@ -294,9 +299,11 @@ destroot {
     set xcode_build_args [xcode::get_build_args]
 
     if {${xcode.scheme} ne ""} {
-        xcode::destroot_one_target \
-            "${xcode_project_arg} -scheme \"${xcode.scheme}\" ${xcode_configuration_arg}" \
-            "${xcode_install_path_setting} ${xcode_build_args} ${xcode.destroot.settings}"
+        foreach scheme ${xcode.scheme} {
+            xcode::destroot_one_target \
+                "${xcode_project_arg} -scheme \"${scheme}\" ${xcode_configuration_arg}" \
+                "${xcode_install_path_setting} ${xcode_build_args} ${xcode.destroot.settings}"
+        }
     } else {
         if {${xcode.target} ne ""} {
             set xcode_targets ${xcode.target}

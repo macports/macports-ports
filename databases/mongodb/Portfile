@@ -1,6 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           conflicts_build 1.0
 PortGroup           xcodeversion 1.0
@@ -10,7 +11,12 @@ PortGroup           xcodeversion 1.0
 
 name                mongodb
 epoch               1
-version             3.6.5
+version             4.0.5
+revision            0
+checksums           rmd160  df1a655f448f3f0edb13057e4c57060de0b03523 \
+                    sha256  d967098fc91d105cdb0f400c8b837e5c2795c3638d7720392bc47afb1efe1c10 \
+                    size    49507822
+
 license             {AGPL-3 OpenSSLException}
 categories          databases
 maintainers         {ryandesign @ryandesign}
@@ -24,10 +30,6 @@ homepage            https://www.mongodb.com/community
 master_sites        https://fastdl.mongodb.org/src
 distname            ${name}-src-r${version}
 
-checksums           rmd160  8ba4b23440a0b25456097225731b81202cc48a18 \
-                    sha256  b99535800925b5c5a9a103fdad37559b6cde13e7cdce72310f32ff105ec615df \
-                    size    40310152
-
 depends_build       port:scons \
                     port:py27-yaml \
                     port:py27-typing \
@@ -35,30 +37,46 @@ depends_build       port:scons \
                     port:py27-cheetah \
                     port:py27-setuptools
 
-depends_lib         port:libpcap \
-                    path:lib/libssl.dylib:openssl
+depends_lib         port:curl \
+                    port:libpcap
 
 license_noconflict  scons
 
 use_configure       no
 
 # mongodb 3.0.5 and later requires C++11. Forcing the use of libc++ is
-# acceptable because mongodb already requires OS X 10.7 or later, so we
+# acceptable because mongodb already requires Mac OS X 10.7 or later, so we
 # know libc++ is available; mongodb doesn't provide any libraries for
 # other ports to use; and the only C++ libraries mongodb uses (boost,
 # pcre, snappy) are bundled.
 configure.cxx_stdlib libc++
 PortGroup           cxx11 1.1
 
+# This matches a version check of __apple_build_version__ in SConstruct.
 compiler.blacklist-append *gcc* {clang < 802.0.42} macports-clang-3.3 macports-clang-3.4 macports-clang-3.7
 
 # TODO: fix me
 conflicts_build     libbson mongo-c-driver mongo-cxx-driver
 
+# When targeting Mac OS X 10.7, mongodb needs at least the 10.8 SDK, which is in Xcode 4.4:
 # https://jira.mongodb.org/browse/SERVER-20320
-minimum_xcodeversions   {11 4.4}
+minimum_xcodeversions-append {11 4.4}
 if {[vercmp ${configure.sdk_version} 10.8] < 0} {
     configure.sdk_version   10.8
+}
+
+# When targeting OS X 10.11, mongodb needs at least the 10.12 SDK, which is in Xcode 8:
+# https://jira.mongodb.org/browse/SERVER-37640
+minimum_xcodeversions-append {15 8}
+if {[vercmp ${macosx_deployment_target} 10.11] >= 0 && [vercmp ${configure.sdk_version} 10.12] < 0} {
+    configure.sdk_version   10.12
+    # We don't require the ld64 port, but if it is installed, it must defer to
+    # Xcode to be new enough to understand the newer SDK, otherwise:
+    # ld: unexpected token: !tapi-tbd-v2 file
+    # See https://trac.macports.org/ticket/53784
+    # And require_active_variants doesn't work unless a dependency is declared.
+    depends_build-append    port:ld64
+    require_active_variants ld64 ld64_xcode
 }
 
 configure.cflags    {*}${configure.cc_archflags}
@@ -70,7 +88,7 @@ if {${configure.sdkroot} ne ""} {
 }
 
 build.cmd           ${prefix}/bin/scons
-build.target        all mongobridge
+build.target        core mongobridge
 build.args          CC="${configure.cc}" \
                     CCFLAGS="${configure.cflags}" \
                     CPPPATH="${prefix}/include" \
@@ -82,6 +100,16 @@ build.args          CC="${configure.cc}" \
                     --libc++ \
                     --ssl \
                     --wiredtiger=on
+
+if {${os.platform} eq "darwin" && ${os.major} >= 15} {
+    build.args-append \
+                    --ssl-provider=native
+} else {
+    depends_lib-append \
+                    path:lib/libssl.dylib:openssl
+    build.args-append \
+                    --ssl-provider=openssl
+}
 
 # Specify a short variant dir because the default variant dir is deeply nested
 # and can be very long, so long that on some systems the build will fail with
@@ -102,7 +130,7 @@ add_users           ${mongouser} group=${mongouser} realname=MongoDB\ Server
 post-destroot {
     xinstall -W ${worksrcpath} mongobridge ${destroot}${prefix}/bin
 
-    xinstall -m 755 -o ${mongouser} -g ${mongouser} -d \
+    xinstall -m 0755 -o ${mongouser} -g ${mongouser} -d \
         ${destroot}${dbdir} \
         ${destroot}${logdir}
     destroot.keepdirs-append  \
@@ -117,8 +145,15 @@ if {${os.platform} eq "darwin" && ${os.major} < 11} {
     depends_build
     depends_lib
     pre-fetch {
-        ui_error "${name} @${version} requires OS X 10.7 or greater."
-        return -code error "incompatible OS X version"
+        ui_error "${name} @${version} requires Mac OS X 10.7 or greater."
+        return -code error "incompatible Mac OS X version"
+    }
+}
+
+if {${os.platform} eq "darwin" && ${os.major} > 16} {
+    notes-append {
+        Warning: mongodb may lose data if it crashes on macOS 10.13 or greater.\
+        See https://jira.mongodb.org/browse/WT-4018.
     }
 }
 

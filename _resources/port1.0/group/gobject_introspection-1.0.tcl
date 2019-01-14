@@ -38,6 +38,9 @@ proc gobject_introspection._set {option action args} {
 pre-configure {
     if {${gobject_introspection}} {
         configure.args-append   --enable-introspection
+        platform darwin 8 {
+            configure.env-append MAKE=${prefix}/bin/gmake
+        }
     } else {
         configure.args-append   --disable-introspection
     }
@@ -67,7 +70,7 @@ pre-build {
             #
             # The non-g-ir-scanner parts of the build are assumed to build with
             # the correct -arch flags as determined at configure time.
-            build.args-append       CC="${configure.cc} ${configure.cc_archflags}"
+            build.args-append       CC="${configure.cc} [join ${configure.cc_archflags}]"
         }
 
         # The rules enabled by gobject-introspection require GNU make 3.81+
@@ -88,7 +91,7 @@ pre-destroot {
         } else {
             # This deliberately does not use [get_canonical_archflags cc]. See
             # explanation in pre-build block.
-            destroot.args-append    CC="${configure.cc} ${configure.cc_archflags}"
+            destroot.args-append    CC="${configure.cc} [join ${configure.cc_archflags}]"
         }
     }
 }

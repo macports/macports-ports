@@ -7,7 +7,7 @@
 # app bundle to easily launch it.
 
 
-# app.create: whether to create the app bundle at all.
+# app.create: whether to create the app bundle at all
 #
 # The default is yes.
 
@@ -15,7 +15,7 @@ options app.create
 default app.create yes
 
 
-# app.name: the name of the app that users will see in the Finder.
+# app.name: the name of the app that users will see in the Finder
 #
 # The default is based on ${name}: if ${name} contains any uppercase letters,
 # ${name} is used, otherwise the first character of ${name} is uppercased.
@@ -34,14 +34,14 @@ proc app.get_default_name {} {
 }
 
 
-# app.executable: the program the app will run.
+# app.executable: the program the app will run
 #
 # The default is ${name}; relative paths are relative to ${prefix}/bin. If you
 # specify a relative or absolute path to a program that exists in ${destroot},
 # the app will contain a symlink to that program. If you specify an absolute
 # path in ${workpath} or ${filespath} it will be copied into the app. This is
 # useful if you need to write a wrapper script, for example to set environment
-# variables. If your wrapper script can be used as is, leave it in ${filespath}
+# variables. If your wrapper script can be used as-is, leave it in ${filespath}
 # and let it be copied from there. If the wrapper needs placeholders to be
 # reinplaced first, copy it into ${workpath}, do your reinplacing, then let it
 # be copied from there.
@@ -52,14 +52,14 @@ options app.executable
 default app.executable {${name}}
 
 
-# app.icon: the icon the app will have.
+# app.icon: the icon the app will have
 #
 # The default is empty; if no icon graphic is available for this software, this
 # is fine. You can supply the path to an existing .icns file, or the path to a
 # .png or other graphic file that the makeicns program can convert. A build
-# dependency on makeicns will be automatically added if needed. You can also
+# dependency on makeicns will be added automatically if needed. You can also
 # supply the path to a .svg file and it will be rasterized to the different icon
-# formats. A build dependency on librsvg will be automatically added if needed.
+# formats. A build dependency on librsvg will be added automatically if needed.
 # Paths may be absolute or relative to ${worksrcpath}.
 #
 # Relates to Info.plist key CFBundleIconFile.
@@ -68,7 +68,7 @@ options app.icon
 default app.icon ""
 
 
-# app.short_version_string: the version number.
+# app.short_version_string: the version number
 #
 # The default is ${version}. This is fine for most ports, but ports that list
 # both version and build number in ${version} may wish to separate these here.
@@ -79,7 +79,7 @@ options app.short_version_string
 default app.short_version_string {${version}}
 
 
-# app.version: the build number.
+# app.version: the build number
 #
 # The default is ${version}. This is fine for most ports, but ports that list
 # both version and build number in ${version} may wish to separate these here.
@@ -90,10 +90,11 @@ options app.version
 default app.version {${version}}
 
 
-# app.identifier: the app's unique bundle identifier.
+# app.identifier: the app's unique bundle identifier
 #
-# The default is computed based on ${homepage} and ${app.name}. For almost all
-# ports this does not need to be overridden.
+# The default is computed based on ${homepage} and ${app.name}. For most ports
+# this does not need to be overridden, but for software that already has an
+# established bundle identifier outside of MacPorts, you can set it here.
 #
 # Info.plist key CFBundleIdentifier.
 
@@ -116,11 +117,27 @@ proc app.get_default_identifier {} {
 }
 
 
-# app.hide_dock_icon: hide the dock icon
+# app.retina: whether the app supports Retina display resolutions
 #
-# x11 apps do not receive a proper indication that application has successfully
-# launched, and so the icon keeps bouncing in the dock. Until this is properly
-# fixed, just hide the the dock icon for now
+# The default is no.
+#
+# Info.plist key NSHighResolutionCapable.
+
+options app.retina
+default app.retina no
+
+
+# app.hide_dock_icon: hide the Dock icon
+#
+# SDKs like SDL and Qt use the necessary macOS APIs to implement proper Dock
+# icon functionality, including stopping the icon from bounding when the app
+# has finished launching and bringing the app to the front when the icon is
+# clicked. Other SDKs like X11 don't use those macOS APIs, so Dock icons for
+# apps using those SDKs would not function correctly and should be hidden. The
+# default is based on whether the port has an x11 variant and the user has
+# enabled it.
+#
+# Info.plist key LSUIElement.
 
 options app.hide_dock_icon
 default app.hide_dock_icon  {[app.get_default_hide_dock_icon]}
@@ -130,12 +147,13 @@ proc app.get_default_hide_dock_icon {} {
 }
 
 
-# app.use_launch_script: use a bash launch script instead of a symlink to the executable
+# app.use_launch_script: use a Bash launch script instead of a symlink to the executable
 #
-# the default behaviour is to symlink the executable into the bundle.
-# However, this has two issues -- it passes -psn to the executable,
-# which some ports can't handle. Also, it doesn't set up the path to ${prefix}/bin. The launch
-# script option solves both these issues.
+# The default behaviour is to symlink the executable into the bundle. However,
+# this has two issues: OS X 10.8 and earlier pass a `-psn` argument (the process
+# serial number) to the executable, which some programs can't handle. Also, it
+# doesn't modify the PATH, e.g. to add ${prefix}/bin to it. Using a launch
+# script solves both of these issues.
 
 options app.use_launch_script
 default app.use_launch_script  no
@@ -179,7 +197,7 @@ platform macosx {
 
                 # If app.icon is an .icns file, copy it.
                 if {[file extension ${icon}] == ".icns"} {
-                    xinstall -m 644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
+                    xinstall -m 0644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
 
                 # If app.icon is svg, rasterize and convert it.
                 } elseif {[file extension ${icon}] == ".svg"} {
@@ -253,6 +271,10 @@ platform macosx {
                 puts ${fp} "    <key>CFBundleIconFile</key>
     <string>${app.name}.icns</string>"
             }
+            if {[tbool app.retina]} {
+                puts ${fp} "    <key>NSHighResolutionCapable</key>
+    <true/>"
+            }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
     <true/>"
@@ -314,8 +336,8 @@ proc app._resolve_symlink {path destroot} {
 }
 
 
-# Write a default launch script for the executable into the bundle,
-# setting the default PATH as would be expected by the binary
+# Write a launch script for the executable into the bundle, modifying PATH to
+# allow the executable to find other executables installed with MacPorts.
 proc app._write_launch_script  {executable app_destination} {
     global prefix
     set launch_script [open ${app_destination} w]

@@ -10,3 +10,9 @@
 
 ;; Info-directory-list contains ${prefix}/share/info. See #32148.
 (setq Info-default-directory-list (cons "__PREFIX__/share/info" Info-default-directory-list))
+
+;; Use the OS X Emoji font for Emoticons
+(when (fboundp 'set-fontset-font)
+  (set-fontset-font "fontset-default"
+                    'symbol
+                    (font-spec :name "Apple Color Emoji") nil 'prepend))
