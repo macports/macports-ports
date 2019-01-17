@@ -1,5 +1,16 @@
+--- ./attic/clocks.c.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./attic/clocks.c	2019-01-15 12:40:57.000000000 -0800
+@@ -5,6 +5,8 @@
+ #include <stdio.h>
+ #include <time.h>
+ 
++#include "ntp_machine.h"	/* For clock_gettime fallback */
++
+ struct table {
+   const int type;
+   const char* name;
 --- ./attic/digest-timing.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./attic/digest-timing.c	2018-08-29 15:03:46.000000000 -0700
++++ ./attic/digest-timing.c	2019-01-15 12:40:57.000000000 -0800
 @@ -34,6 +34,8 @@
  #include <openssl/rand.h>
  #include <openssl/objects.h>
@@ -9,73 +20,9 @@
  #define UNUSED_ARG(arg)         ((void)(arg))
  
  #ifndef EVP_MD_CTX_reset
-@@ -44,6 +46,23 @@
- #define EVP_MD_CTX_reset(ctx) EVP_MD_CTX_init(ctx)
- #endif
- 
-+/*
-+ * Pecking order for clock_gettime interval measurements
-+ * CLOCK_MONOTONIC_RAW is free of NTP adjustments
-+ * CLOCK_MONOTONIC is affected by NTP slewing but not step adjustments
-+ * CLOCK_REALTIME is affected by all NTP adjustments, including stepping
-+ *
-+ * Assuming this test isn't run while stepping is a possibility,
-+ * even CLOCK_REALTIME is acceptable.
-+ */
-+#if defined(CLOCK_MONOTONIC_RAW)
-+#define CLOCK_INTERVAL CLOCK_MONOTONIC_RAW
-+#elif defined(CLOCK_MONOTONIC)
-+#define CLOCK_INTERVAL CLOCK_MONOTONIC
-+#else
-+#define CLOCK_INTERVAL CLOCK_REALTIME
-+#endif
-+
- 
- /* Get timing for old slower way too.  Pre Feb 2018 */
- #define DoSLOW 1
-@@ -146,21 +165,21 @@ static void DoDigest(
- 
-   if (NULL == digest) return;
- 
--  clock_gettime(CLOCK_MONOTONIC, &start);
-+  clock_gettime(CLOCK_INTERVAL, &start);
-   for (i = 0; i < NUM; i++) {
-     digestlength = SSL_Digest(digest, key, keylength, pkt, pktlength);
-   }
--  clock_gettime(CLOCK_MONOTONIC, &stop);
-+  clock_gettime(CLOCK_INTERVAL, &stop);
-   fast = (stop.tv_sec-start.tv_sec)*1E9 + (stop.tv_nsec-start.tv_nsec);
-   printf("%10s  %2d %2d %2u %6.0f  %6.3f",
-     name, keylength, pktlength, digestlength, fast/NUM,  fast/1E9);
- 
- #ifdef DoSLOW
--  clock_gettime(CLOCK_MONOTONIC, &start);
-+  clock_gettime(CLOCK_INTERVAL, &start);
-   for (i = 0; i < NUM; i++) {
-     digestlength = SSL_DigestSlow(type, key, keylength, pkt, pktlength);
-   }
--  clock_gettime(CLOCK_MONOTONIC, &stop);
-+  clock_gettime(CLOCK_INTERVAL, &stop);
-   slow = (stop.tv_sec-start.tv_sec)*1E9 + (stop.tv_nsec-start.tv_nsec);
-   printf("   %6.0f  %2.0f %4.0f",
-     slow/NUM, (slow-fast)*100.0/slow, (slow-fast)/NUM);
-@@ -185,11 +204,11 @@ static void DoCMAC(
- 
-   if (NULL == cipher) return;
- 
--  clock_gettime(CLOCK_MONOTONIC, &start);
-+  clock_gettime(CLOCK_INTERVAL, &start);
-   for (i = 0; i < NUM; i++) {
-     digestlength = SSL_CMAC(cipher, key, keylength, pkt, pktlength);
-   }
--  clock_gettime(CLOCK_MONOTONIC, &stop);
-+  clock_gettime(CLOCK_INTERVAL, &stop);
-   fast = (stop.tv_sec-start.tv_sec)*1E9 + (stop.tv_nsec-start.tv_nsec);
-   printf("%10s  %2d %2d %2lu %6.0f  %6.3f",
-     name, keylength, pktlength, digestlength, fast/NUM,  fast/1E9);
 --- ./include/ntp_machine.h.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./include/ntp_machine.h	2018-08-29 15:03:46.000000000 -0700
-@@ -13,14 +13,53 @@
++++ ./include/ntp_machine.h	2019-01-15 12:40:57.000000000 -0800
+@@ -13,14 +13,135 @@
  
  #ifndef CLOCK_REALTIME
  /*
@@ -84,31 +31,110 @@
 + * Handle platforms that don't have a real clock_gettime(2),
 + * notably some versions of Mac OS X.
   */
+-#define CLOCK_REALTIME	0
+-#define CLOCK_MONOTONIC	1
 +
 +#include <errno.h>
 +
- #define CLOCK_REALTIME	0
--#define CLOCK_MONOTONIC	1
  typedef int clockid_t;
 -int clock_gettime(clockid_t clock_id, struct timespec *tp);
 -#endif
 +
++#define CLOCK_REALTIME	0
++
++#ifdef __APPLE__
++
++#define CLOCK_MONOTONIC 1
++#define CLOCK_MONOTONIC_RAW 2
++
++#include <mach/clock.h>
++#include <mach/mach.h>
++#include <mach/mach_time.h>
++
++#endif /* __APPLE__ */
++
 +static inline int clock_gettime(clockid_t clk_id, struct timespec *tp)
 +{
-+    struct timeval tv;
-+
 +    switch (clk_id) {
++
 +    case CLOCK_REALTIME:
-+	/*
-+	 * On OSX, it's tempting to use clock_get_time() for its apparent
-+	 * nanosecond resolution, but it really only has microsecond
-+	 * resolution, and is substantially slower than gettimeofday().
-+	 */
-+	if (gettimeofday(&tv, NULL))
-+	    return -1;
-+	tp->tv_sec = tv.tv_sec;
-+	tp->tv_nsec = tv.tv_usec * 1000;
++	{
++	    /*
++	     * On OSX, it's tempting to use clock_get_time() for its apparent
++	     * nanosecond resolution, but it really only has microsecond
++	     * resolution, and is substantially slower than gettimeofday().
++	     */
++	    struct timeval tv;
++
++	    if (gettimeofday(&tv, NULL))
++		return -1;
++	    tp->tv_sec = tv.tv_sec;
++	    tp->tv_nsec = tv.tv_usec * 1000;
++	    return 0;
++	}
++
++#ifdef __APPLE__
++    case CLOCK_MONOTONIC:
++	{
++	    mach_timespec_t mts;
++	    static clock_serv_t sclock = 0;
++
++	    /*
++	     * Obtain clock port on first call, then reuse it.
++	     * Rely on exit cleanup to free it.
++	     */
++	    if (!sclock) {
++		mach_port_t mach_host = mach_host_self();
++		host_get_clock_service(mach_host,
++		    SYSTEM_CLOCK, &sclock);
++		mach_port_deallocate(mach_task_self(), mach_host);
++	    }
++	    clock_get_time(sclock, &mts);
++	    tp->tv_sec = mts.tv_sec;
++	    tp->tv_nsec = mts.tv_nsec;
++	    return 0;
++	}
++
++    case CLOCK_MONOTONIC_RAW:
++	{
++	    static mach_timebase_info_data_t sTimebaseInfo = {0, 0};
++	    unsigned long long nanos;
++
++	    /* Obtain scale factors on first call, then reuse them. */
++	    if ( sTimebaseInfo.denom == 0 ) {
++		    (void) mach_timebase_info(&sTimebaseInfo);
++	    }
++	    nanos = mach_absolute_time()
++		    * sTimebaseInfo.numer / sTimebaseInfo.denom;
++	    tp->tv_sec = nanos / 1000000000U;
++	    tp->tv_nsec = nanos - tp->tv_sec * 1000000000U;
++	    return 0;
++	}
++#endif /* __APPLE__ */
++
++    default:
++	errno = EINVAL;
++	return -1;
++    }
++}
++
++static inline int clock_getres(clockid_t clk_id, struct timespec *res)
++{
++    switch (clk_id) {
++
++    case CLOCK_REALTIME:
++	res->tv_sec = 0;
++	res->tv_nsec = 1000;
 +	return 0;
++
++#ifdef __APPLE__
++    case CLOCK_MONOTONIC:
++    case CLOCK_MONOTONIC_RAW:
++	res->tv_sec = 0;
++	res->tv_nsec = 1;
++	return 0;
++#endif /* __APPLE__ */
++
 +    default:
 +	errno = EINVAL;
 +	return -1;
@@ -117,13 +143,17 @@
 +
 +static inline int clock_settime(clockid_t clk_id, const struct timespec *tp)
 +{
-+    struct timeval tv;
-+
 +    switch (clk_id) {
++
 +    case CLOCK_REALTIME:
-+	tv.tv_sec = tp->tv_sec;
-+	tv.tv_usec = (tp->tv_nsec + 500) / 1000;
-+	return settimeofday(&tv, NULL);
++	{
++	    struct timeval tv;
++
++	    tv.tv_sec = tp->tv_sec;
++	    tv.tv_usec = (tp->tv_nsec + 500) / 1000;
++	    return settimeofday(&tv, NULL);
++	}
++
 +    default:
 +	errno = EINVAL;
 +	return -1;
@@ -134,9 +164,9 @@
  
  int ntp_set_tod (struct timespec *tvs);
  
---- ./include/ntp_stdlib.h.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./include/ntp_stdlib.h	2018-08-29 15:03:46.000000000 -0700
-@@ -98,7 +98,9 @@ extern	const char * eventstr	(int);
+--- ./include/ntp_stdlib.h.orig	2018-09-25 23:08:35.000000000 -0700
++++ ./include/ntp_stdlib.h	2019-01-15 12:40:57.000000000 -0800
+@@ -102,7 +102,9 @@ extern	const char * eventstr	(int);
  extern	const char * ceventstr	(int);
  extern	const char * res_match_flags(unsigned short);
  extern	const char * res_access_flags(unsigned short);
@@ -147,7 +177,7 @@
  extern	sockaddr_u * netof6	(sockaddr_u *);
  extern	const char * socktoa	(const sockaddr_u *);
 --- ./include/ntp_syscall.h.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./include/ntp_syscall.h	2018-08-29 15:03:46.000000000 -0700
++++ ./include/ntp_syscall.h	2019-01-15 12:40:57.000000000 -0800
 @@ -9,9 +9,11 @@
  #ifndef GUARD_NTP_SYSCALL_H
  #define GUARD_NTP_SYSCALL_H
@@ -160,8 +190,8 @@
  
  /*
   * The units of the maxerror and esterror fields vary by platform.  If
---- ./libntp/clockwork.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./libntp/clockwork.c	2018-08-29 15:03:46.000000000 -0700
+--- ./libntp/clockwork.c.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./libntp/clockwork.c	2019-01-15 12:40:57.000000000 -0800
 @@ -5,8 +5,10 @@
  #include "config.h"
  
@@ -175,23 +205,8 @@
  
  #include "ntp.h"
  #include "ntp_machine.h"
-@@ -77,14 +79,10 @@ ntp_set_tod(
- 	int		saved_errno;
- 
- 	TPRINT(1, ("In ntp_set_tod\n"));
--#ifdef HAVE_CLOCK_SETTIME
- 	errno = 0;
- 	rc = clock_settime(CLOCK_REALTIME, tvs);
- 	saved_errno = errno;
- 	TPRINT(1, ("ntp_set_tod: clock_settime: %d %m\n", rc));
--#else
--#error POSIX clock_settime(2) is required
--#endif /* HAVE_CLOCK_SETTIME */
- 	errno = saved_errno;	/* for %m below */
- 	TPRINT(1, ("ntp_set_tod: Final result: clock_settime: %d %m\n", rc));
- 
 --- ./libntp/statestr.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./libntp/statestr.c	2018-08-29 15:03:46.000000000 -0700
++++ ./libntp/statestr.c	2019-01-15 12:40:57.000000000 -0800
 @@ -12,7 +12,9 @@
  #include "lib_strbuf.h"
  #include "ntp_refclock.h"
@@ -292,9 +307,9 @@
  
  /*
   * statustoa - return a descriptive string for a peer status
---- ./ntpd/ntp_control.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./ntpd/ntp_control.c	2018-08-29 15:03:46.000000000 -0700
-@@ -1464,6 +1464,7 @@ ctl_putsys(
+--- ./ntpd/ntp_control.c.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./ntpd/ntp_control.c	2019-01-15 12:40:57.000000000 -0800
+@@ -1478,6 +1478,7 @@ ctl_putsys(
  	char str[256];
  	double dtemp;
  	const char *ss;
@@ -302,7 +317,7 @@
  	static struct timex ntx;
  	static unsigned long ntp_adjtime_time;
  
-@@ -1478,6 +1479,7 @@ ctl_putsys(
+@@ -1492,6 +1493,7 @@ ctl_putsys(
  		else
  			ntp_adjtime_time = current_time;
  	}
@@ -310,7 +325,7 @@
  
  	switch (varid) {
  
-@@ -1866,50 +1868,93 @@ ctl_putsys(
+@@ -1880,50 +1882,93 @@ ctl_putsys(
  		break;
  
  		/*
@@ -417,7 +432,7 @@
  
  	case CS_K_PPS_FREQ:
 --- ./ntpd/ntp_loopfilter.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./ntpd/ntp_loopfilter.c	2018-08-29 15:03:46.000000000 -0700
++++ ./ntpd/ntp_loopfilter.c	2019-01-15 12:40:57.000000000 -0800
 @@ -23,8 +23,10 @@
  
  #define NTP_MAXFREQ	500e-6
@@ -674,7 +689,7 @@
 -#endif /* SIGSYS */
 +#endif /* HAVE_KERNEL_PLL && SIGSYS */
 --- ./ntpd/ntp_timer.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./ntpd/ntp_timer.c	2018-08-29 15:03:46.000000000 -0700
++++ ./ntpd/ntp_timer.c	2019-01-15 12:40:57.000000000 -0800
 @@ -13,7 +13,9 @@
  #include <signal.h>
  #include <unistd.h>
@@ -698,7 +713,7 @@
  	leap_smear.enabled = (leap_smear_intv != 0);
  #endif
 --- ./ntpd/refclock_local.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./ntpd/refclock_local.c	2018-08-29 15:03:46.000000000 -0700
++++ ./ntpd/refclock_local.c	2019-01-15 12:40:57.000000000 -0800
 @@ -131,6 +131,9 @@ local_poll(
  	struct peer *peer
  	)
@@ -733,8 +748,8 @@
  	pp->lastref = pp->lastrec;
  	refclock_receive(peer);
  }
---- ./ntpfrob/precision.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./ntpfrob/precision.c	2018-08-29 15:03:46.000000000 -0700
+--- ./ntpfrob/precision.c.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./ntpfrob/precision.c	2019-01-15 12:40:57.000000000 -0800
 @@ -11,6 +11,7 @@
  #include "ntp_types.h"
  #include "ntp_calendar.h"
@@ -744,7 +759,7 @@
  #define	DEFAULT_SYS_PRECISION	-99
  
 --- ./tests/libntp/statestr.c.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./tests/libntp/statestr.c	2018-08-29 15:03:46.000000000 -0700
++++ ./tests/libntp/statestr.c	2019-01-15 12:40:57.000000000 -0800
 @@ -4,7 +4,9 @@
  #include "unity.h"
  #include "unity_fixture.h"
@@ -765,8 +780,23 @@
  }
  
  // statustoa
+--- ./wafhelpers/bin_test.py.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./wafhelpers/bin_test.py	2019-01-15 12:40:57.000000000 -0800
+@@ -88,6 +88,12 @@ def cmd_bin_test(ctx, config):
+       for cmd in cmd_map3:
+         cmd_map2[cmd] = cmd_map3[cmd]
+ 
++    # Kludge to remove ntptime if it didn't get built
++    if not ctx.env.HEADER_SYS_TIMEX_H:
++        for cmd in list(cmd_map.keys()):
++            if 'ntptime' in cmd[0]:
++                del cmd_map[cmd]
++
+     for cmd in sorted(cmd_map):
+         if not run(cmd, cmd_map[cmd], False):
+             fails += 1
 --- ./wafhelpers/options.py.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./wafhelpers/options.py	2018-08-29 15:03:46.000000000 -0700
++++ ./wafhelpers/options.py	2019-01-15 12:40:57.000000000 -0800
 @@ -21,6 +21,8 @@ def options_cmd(ctx, config):
                     default=False, help="Enable seccomp (restricts syscalls).")
      grp.add_option('--disable-dns-lookup', action='store_true',
@@ -776,9 +806,9 @@
      grp.add_option('--disable-mdns-registration', action='store_true',
                     default=False, help="Disable MDNS registration.")
      grp.add_option(
---- ./wscript.orig	2018-08-28 22:18:48.000000000 -0700
-+++ ./wscript	2018-08-29 15:03:46.000000000 -0700
-@@ -562,13 +562,13 @@ int main(int argc, char **argv) {
+--- ./wscript.orig	2019-01-13 21:40:59.000000000 -0800
++++ ./wscript	2019-01-15 12:40:57.000000000 -0800
+@@ -559,13 +559,13 @@ int main(int argc, char **argv) {
          ctx.define("__EXTENSIONS__", "1", quote=False)
  
      structures = (
@@ -798,16 +828,7 @@
  
      # waf's SNIP_FIELD should likely include this header itself
      # This is needed on some systems to get size_t for following checks
-@@ -626,8 +626,6 @@ int main(int argc, char **argv) {
-         ('adjtimex', ["sys/time.h", "sys/timex.h"]),
-         ('backtrace_symbols_fd', ["execinfo.h"]),
-         ('closefrom', ["stdlib.h"]),
--        ('clock_gettime', ["time.h"], "RT"),
--        ('clock_settime', ["time.h"], "RT"),
-         ('ntp_adjtime', ["sys/time.h", "sys/timex.h"]),     # BSD
-         ('ntp_gettime', ["sys/time.h", "sys/timex.h"]),     # BSD
-         ('res_init', ["netinet/in.h", "arpa/nameser.h", "resolv.h"]),
-@@ -772,6 +770,21 @@ int main(int argc, char **argv) {
+@@ -765,6 +765,21 @@ int main(int argc, char **argv) {
      ctx.define("HAVE_WORKING_FORK", 1,
                 comment="Whether a working fork() exists")
  
