@@ -1,0 +1,168 @@
+Fix blanker to work when screen is suid root
+
+* Change RunBlanker to call OpenDevice so permissions on slave
+  PTY are correctly set.
+* Update handling of file descriptors after fork to be similar to
+  ForkWindow on at pty (fixes debug and leaked descriptors)
+* DEBUG now creates screen.blanker to debug blanker fork
+* Allow display of error message when display blocked by blanker
+  (because message is probably from blanker failing to start)
+
+Fixes screen bug: https://savannah.gnu.org/bugs/?55512
+
+Signed-off-by: Scott Shambarger <devel@shambarger.net>
+
+--- display.c
++++ display.c
+@@ -3958,6 +3958,7 @@ char **cmdv;
+   char *m;
+   int pid;
+   int slave = -1;
++  int ptype = 0;
+   char termname[MAXTERMLEN + 6];
+ #ifndef TIOCSWINSZ
+   char libuf[20], cobuf[20];
+@@ -3969,9 +3970,9 @@ char **cmdv;
+   termname[sizeof(termname) - 1] = 0;
+   KillBlanker();
+   D_blankerpid = -1;
+-  if ((D_blankerev.fd = OpenPTY(&m)) == -1)
++  if ((D_blankerev.fd = OpenDevice(cmdv, 0, &ptype, &m)) == -1)
+     {
+-      Msg(0, "OpenPty failed");
++      Msg(0, "OpenDevice failed");
+       return;
+     }
+ #ifdef O_NOCTTY
+@@ -3996,25 +3997,48 @@ char **cmdv;
+       return;
+     case 0:
+       displays = 0;
+-#ifdef DEBUG
+-      if (dfp && dfp != stderr)
+-	{
+-	  fclose(dfp);
+-	  dfp = 0;
+-	}
++#ifdef SIGPIPE
++      signal(SIGPIPE, SIG_DFL);
+ #endif
+       if (setgid(real_gid) || setuid(real_uid))
+         Panic(errno, "setuid/setgid");
+       brktty(D_userfd);
+       freetty();
++#ifdef DEBUG
++      if (dfp && dfp != stderr)
++	  fclose(dfp);
++#endif
++      if (slave != -1)
++	{
++	  close(0);
++	  dup(slave);
++	  close(slave);
++	  closeallfiles(D_blankerev.fd);
++	  slave = dup(0);
++	}
++      else
++        closeallfiles(D_blankerev.fd);
++#ifdef DEBUG
++      if (dfp)
++        {
++          char buf[256];
++
++	  sprintf(buf, "%s/screen.blanker", DEBUGDIR);
++	  if ((dfp = fopen(buf, "a")) == 0)
++	    dfp = stderr;
++	  else
++	    (void) chmod(buf, 0666);
++	}
++      debug1("=== RunBlanker: pid %d\n", (int)getpid());
++#endif
+       close(0);
+       close(1);
+       close(2);
+-      closeallfiles(slave);
+       if (open(m, O_RDWR))
+ 	Panic(errno, "Cannot open %s", m);
+       dup(0);
+       dup(0);
++      close(D_blankerev.fd);
+       if (slave != -1)
+ 	close(slave);
+       InitPTY(0);
+@@ -4028,17 +4052,17 @@ char **cmdv;
+       glwz.ws_row = D_height;
+       (void)ioctl(0, TIOCSWINSZ, (char *)&glwz);
+ #else
++      /* Always turn off nonblocking mode */
++      (void)fcntl(0, F_SETFL, 0);
+       sprintf(libuf, "LINES=%d", D_height);
+       sprintf(cobuf, "COLUMNS=%d", D_width);
+       *np++ = libuf;
+       *np++ = cobuf;
+ #endif
+-#ifdef SIGPIPE
+-      signal(SIGPIPE, SIG_DFL);
+-#endif
+-      display = 0;
++      debug1("calling execvpe %s\n", *cmdv);
+       execvpe(*cmdv, cmdv, NewEnv + 3);
+-      Panic(errno, "%s", *cmdv);
++      debug1("exec error: %d\n", errno);
++      Panic(errno, "Cannot exec '%s'", *cmdv);
+     default:
+       break;
+     }
+--- socket.c
++++ socket.c
+@@ -742,6 +742,7 @@ char *tty, *buf;
+   struct msg m;
+   bool is_socket;
+ 
++  debug2("SendErrorMsg: %s %s\n", tty, buf);
+   strncpy(m.m.message, buf, sizeof(m.m.message) - 1);
+   m.m.message[sizeof(m.m.message) - 1] = 0;
+   is_socket = IsSocket(SockPath);
+@@ -1237,7 +1238,13 @@ ReceiveMsg()
+           FinishAttach(&m);
+         break;
+       case MSG_ERROR:
++      {
++        int blocked=D_blocked;
++        if(D_blocked == 4) /* allow error messages while in blanker mode */
++          D_blocked=0; /* likely they're from failed blanker */
+         Msg(0, "%s", m.m.message);
++        D_blocked=blocked;
++      }
+         break;
+       case MSG_HANGUP:
+         if (!wi) /* ignore hangups from inside */
+--- window.c
++++ window.c
+@@ -102,7 +102,6 @@ static void pseu_writeev_fn __P((struct event *, char *));
+ static void win_silenceev_fn __P((struct event *, char *));
+ static void win_destroyev_fn __P((struct event *, char *));
+ 
+-static int  OpenDevice __P((char **, int, int *, char **));
+ static int  ForkWindow __P((struct win *, char **, char *));
+ #ifdef ZMODEM
+ static void zmodem_found __P((struct win *, int, char *, int));
+@@ -1091,7 +1090,7 @@ struct win *wp;
+   free((char *)wp);
+ }
+ 
+-static int
++int
+ OpenDevice(args, lflag, typep, namep)
+ char **args;
+ int lflag;
+--- window.h
++++ window.h
+@@ -351,6 +351,7 @@ struct win
+ #define Layer2Window(l) ((struct win *)(l)->l_bottom->l_data)
+ 
+ int WindowChangeNumber __P((int, int));
++int OpenDevice __P((char **, int, int *, char **));
+ 
+ #endif /* SCREEN_WINDOW_H */
+ 
