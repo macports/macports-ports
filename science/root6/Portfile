@@ -11,7 +11,7 @@ PortGroup           xcodeversion                1.0
 PortGroup           cxx11                       1.1
 PortGroup           legacysupport               1.0
 
-github.setup        root-project root 6-14-08 v
+github.setup        root-project root 6-16-00 v
 version             [string map {- .} ${github.version}]
 revision            0
 livecheck.version   ${github.version}
@@ -29,9 +29,9 @@ livecheck.regex     {v(6[-.]\d[02468][-.]\d{2}).tar.gz}
 
 set version_major   [lindex [split ${version} .] 0]
 
-checksums           rmd160  bc0244cb71e84e9f62168e1d460edda0afaebda1 \
-                    sha256  ce26979f06f7e325180cc20db27fcfef429ee7f30b6ea0c6e7ba3f6ab89787b2 \
-                    size    162495374
+checksums           rmd160  2f0a7290099087f29ca4808ad3ed6c3c04729075 \
+                    sha256  fe60cde3f3f909c6840781c4c46f3f040014bd1e65cc56634eccd820f9dbd7bf \
+                    size    164845858
 
 name                root${version_major}
 categories          science
@@ -48,6 +48,8 @@ platforms           darwin
 
 dist_subdir         root/${version}_1
 
+depends_build       port:pkgconfig
+
 depends_lib         port:expat \
                     port:gmp \
                     port:giflib \
@@ -62,13 +64,10 @@ depends_lib         port:expat \
                     port:lz4 \
                     port:vdt \
                     port:tbb \
-                    path:lib/libopenblas.dylib:OpenBLAS
+                    port:git \
+                    path:lib/libopenblas.dylib:OpenBLAS \
+                    path:lib/libssl.dylib:openssl
 # port:freetype
-
-# Not working yet with macOS 10.14
-#                    port:ocaml \
-#                    port:ocaml-ctypes \
-#                    port:ocaml-findlib \
 
 depends_run         port:root_select
 
@@ -85,6 +84,8 @@ compiler.whitelist clang macports-clang-7.0 macports-clang-6.0 macports-clang-5.
 
 # port specific location
 set install_prefix ${prefix}/libexec/root${version_major}
+
+patch.pre_args      -p1
 
 configure.args-append \
                     -Dgnuinstall=ON \
@@ -111,7 +112,7 @@ configure.args-append \
                     -Dpythia6=OFF \
                     -Dpythia8=OFF \
                     -Droofit=OFF \
-                    -Dssl=OFF \
+                    -Dssl=ON \
                     -Dxml=OFF \
                     -Dpython=OFF \
                     -Dfitsio=OFF \
@@ -128,9 +129,9 @@ configure.args-append \
                     -Dqtgsi=OFF \
                     -Dbonjour=OFF \
                     -Dgviz=OFF \
-                    -Dsoversion=OFF \
+                    -Dsoversion=ON \
                     -Dcxx11=ON \
-                    -Dcxx14=ON \
+                    -Dcxx14=OFF \
                     -Dcxx17=OFF \
                     -Dlibcxx=ON \
                     -Dxrootd=OFF \
@@ -141,7 +142,7 @@ configure.args-append \
                     -Dunuran=ON \
                     -Dtable=ON \
                     -Dgdml=ON \
-                    -Dhttp=OFF \
+                    -Dhttp=ON \
                     -Dvc=OFF \
                     -Dastiff=ON \
                     -Dgeocad=OFF \
@@ -151,63 +152,84 @@ configure.args-append \
                     -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
                     -DPNG_PNG_INCLUDE_DIR=${prefix}/include
 
-platform darwin {
+# clad cling plugin fails to build
+# https://root-forum.cern.ch/t/build-failure-with-6-16-00/32434
+configure.args-append -Dclad=OFF
 
-    # Setup the C++ runtime (not needed/working yet but kept for reference)
-    if { ${os.major} < 11 } {
-        # Use macports stdc++ on older systems
-        if       { ${configure.compiler} eq "macports-clang-3.9" } {
-            require_active_variants clang-3.9 libstdcxx
-        } elseif { ${configure.compiler} eq "macports-clang-4.0" } {
-            require_active_variants clang-4.0 libstdcxx
-        } elseif { ${configure.compiler} eq "macports-clang-5.0" } {
-            require_active_variants clang-5.0 libstdcxx
-        } 
-        configure.args-replace -Dlibcxx=ON -Dlibcxx=OFF
-        default_variants-append +libstdcxx
-        pre-configure {
-            foreach f [ exec find ${worksrcpath} -name "*.cmake" -or -name "*.in" -or -name "Makefile.*" ] {
-                reinplace "s|stdlib=libc++|stdlib=macports-libstdc++|g" $f
-                reinplace "s|std=c++11|std=c++1z|g" $f
-            }
-        }
-    } else {
-        # Note that we are forcing this choice. This means that anything linking
-        # against root6 needs to also be using libc++.  This is possibly
-        # problematic, but luckily there is just a limited set of such dependents.
-        # Another problem is that all dependencies might need to be built-in
-        # to make sure that they all use libc++.
-        if { ${configure.cxx_stdlib} ne "libc++" } {
-            configure.cxx_stdlib libc++
-            depends_lib-append port:libcxx
-        }
-    }
+# Enable C++17 on 10.12 (Darwin16)
+#        C++14 on 10.9  (Darwin13)
+if        { ${os.major} > 15 } {
+    configure.args-replace  -Dcxx17=OFF -Dcxx17=ON
+} elseif  { ${os.major} > 12 } {
+    configure.args-replace  -Dcxx14=OFF -Dcxx14=ON
+    default_variants-append +clang70
+} else {
+    default_variants-append +clang50
+    patchfiles-append G__Core_Dict_cxxheaders.patch
+}
 
-    # No longer compiles on OSX10.6, due to update to internal LLVM version.
-    # Disable build on this platform.
-    if { ${os.major} < 11 } {
-        pre-fetch {
-            ui_error "${name} is not supported on this OSX release."
-            return -code error "Unsupported OSX version"
-        }
+# Setup the C++ runtime on OSX10.8 (Darwin 12) and older
+if { ${os.major} < 13 && ${configure.cxx_stdlib} ne "libc++" } {
+    # Use macports stdc++ on older systems
+    if       { ${configure.compiler} eq "macports-clang-5.0" } {
+        require_active_variants clang-5.0 libstdcxx
+    } elseif { ${configure.compiler} eq "macports-clang-6.0" } {
+        require_active_variants clang-6.0 libstdcxx
+    } elseif { ${configure.compiler} eq "macports-clang-7.0" } {
+        require_active_variants clang-7.0 libstdcxx
     }
-
-    # Enable C++17 on 10.12 (Darwin16) and newer
-    if { ${os.major} > 15 } {
-        configure.args-replace  -Dcxx14=ON -Dcxx14=OFF
-        configure.args-replace  -Dcxx17=OFF -Dcxx17=ON
-    }
-    
+    default_variants-append +libstdcxx
     pre-configure {
-        # Force use of system python in build scripts
-        # Find command finds text files containing the string to be replaced.
-        # shtest-encoding.py intentionally includes an unreadable character, so have to skip it ...
-        set pystringtoreplace "/usr/bin/env python"
-        foreach f [ exec find ${worksrcpath} -type f -and -not -name "shtest-encoding.py" -and -name "*.py" ] {
-            reinplace -q "s|${pystringtoreplace}|/usr/bin/python|g" $f
+        foreach f [ exec find ${worksrcpath} -name "*.cmake" -or -name "*.in" -or -name "Makefile.*" ] {
+            reinplace "s|stdlib=libc++|stdlib=${configure.cxx_stdlib}|g" $f
         }
     }
+}
+#    } else {
+#        # Note that we are forcing this choice. This means that anything linking
+#        # against root6 needs to also be using libc++.  This is possibly
+#        # problematic, but luckily there is just a limited set of such dependents.
+#        # Another problem is that all dependencies might need to be built-in
+#        # to make sure that they all use libc++.
+#        if { ${configure.cxx_stdlib} ne "libc++" } {
+#            configure.cxx_stdlib libc++
+#            depends_lib-append port:libcxx
+#        }
 
+# Configure the C++ runtime to use
+if { ${configure.cxx_stdlib} ne "libc++" } {
+    configure.args-replace -Dlibcxx=ON -Dlibcxx=OFF
+}
+
+# Configure the graphics backend. cocoa on OSX10.8 and newer. X11 otherwise
+if { ${os.major} > 11 } {
+    default_variants-append +cocoa
+} else {
+    default_variants-append +x11
+}
+
+# Enable xrootd support by default
+if { ${os.major} > 11 } {
+    default_variants-append +xrootd
+}
+
+# No longer compiles on OSX10.6, due to update to internal LLVM version.
+# Disable build on this platform.
+if { ${os.major} < 11 } {
+    pre-fetch {
+        ui_error "${name} is not supported on this OSX release."
+        return -code error "Unsupported OSX version"
+    }
+}
+
+pre-configure {
+    # Force use of system python in build scripts
+    # Find command finds text files containing the string to be replaced.
+    # shtest-encoding.py intentionally includes an unreadable character, so have to skip it ...
+    set pystringtoreplace "/usr/bin/env python"
+    foreach f [ exec find ${worksrcpath} -type f -and -not -name "shtest-encoding.py" -and -name "*.py" ] {
+        reinplace -q "s|${pystringtoreplace}|/usr/bin/python|g" $f
+    }
 }
 
 post-destroot {
@@ -277,7 +299,7 @@ post-activate {
 
 universal_variant no
 
-default_variants +cocoa +ssl +xml +gsl +minuit2 +tmva +roofit +graphviz +opengl +soversion +http +xrootd
+default_variants +xml +gsl +minuit2 +tmva +roofit +graphviz +opengl
 
 variant root7 description {Enable ROOT7 preview} {
     configure.args-replace  -Droot7=OFF -Droot7=ON
@@ -296,10 +318,6 @@ variant valgrind description {Build internal LLVM library with valgrind support}
     depends_lib-append      port:valgrind
 }
 
-variant http description {Build with HTTP Server library support} {
-    configure.args-replace  -Dhttp=OFF -Dhttp=ON
-}
-
 variant vc description {Build with Vc library support} {
     depends_lib-append      port:Vc
     configure.args-replace  -Dvc=OFF -Dvc=ON
@@ -314,10 +332,6 @@ variant xrootd description {Build with XRootD support} {
 #   configure.args-append   -Dbuiltin_xrootd=ON
     configure.args-append   -DXROOTD_INCLUDE_DIR="${prefix}/include/xrootd"
     depends_lib-append      port:xrootd
-}
-
-variant soversion description {Build with soversion support} {
-    configure.args-replace  -Dsoversion=OFF -Dsoversion=ON
 }
 
 variant graphviz description {Build with graphviz support} {
@@ -503,15 +517,11 @@ variant davix description {Enable Davix support} {
     configure.args-replace  -Dbuiltin_davix=OFF  -Dbuiltin_davix=ON
 }
 
-variant ssl description {Build with ssl support} {
-    configure.args-replace  -Dssl=OFF -Dssl=ON
-    depends_lib-append      path:lib/libssl.dylib:openssl
-}
-
 variant xml description {Build with xml support} {
     configure.args-replace  -Dxml=OFF -Dxml=ON
     configure.args-append   -DLIBXML2_INCLUDE_DIR="${prefix}/include/libxml2" \
                             -DLIBXML2_LIBRARIES="${prefix}/lib/libxml2.dylib" \
+                            -DLIBXML2_LIBRARY="${prefix}/lib/libxml2.dylib" \
                             -DLIBXML2_XMLLINT_EXECUTABLE="${prefix}/bin/xmllint"
     depends_lib-append      port:libxml2
 }
