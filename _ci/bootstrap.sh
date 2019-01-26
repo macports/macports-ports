@@ -1,9 +1,7 @@
 #!/bin/bash
 set -e
 # Uninstall Homebrew
-curl -fsSLO "https://raw.githubusercontent.com/Homebrew/install/master/uninstall"
-chmod 0755 uninstall && ./uninstall -fq && rm -f uninstall
-# Clean /usr/local
+brew --version
 /usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
