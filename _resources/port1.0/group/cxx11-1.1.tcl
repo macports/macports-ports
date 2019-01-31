@@ -39,7 +39,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
         pre-configure {
             ui_msg "C++11 ports are compiling with GCC. EXPERIMENTAL."
         }
-        compiler.whitelist  macports-gcc-6
+        compiler.whitelist  macports-gcc-6 macports-gcc-7
         universal_variant   no
     } else {
         compiler.whitelist  macports-clang-5.0
