@@ -232,6 +232,7 @@ default configure.pre_args {[list \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+                    -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     {*}[cmake::module_path] \
                     {*}[cmake::rpath_flags] \
                     -Wno-dev
