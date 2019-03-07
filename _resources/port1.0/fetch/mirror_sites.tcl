@@ -508,6 +508,7 @@ set distfiles_scheme [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "ht
 set portfetch::mirror_sites::sites(macports_distfiles) "
     ${distfiles_scheme}://distfiles.macports.org/:mirror
     http://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
+    http://aus.us.distfiles.macports.org/macports/distfiles/:nosubdir
     http://cjj.kr.distfiles.macports.org/:mirror
     http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
