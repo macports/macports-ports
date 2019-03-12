@@ -1,0 +1,163 @@
+Anticipated fixes for OS X 10.10 Yosemite
+
+[Python Issue #21811] -- http://bugs.python.org/issue21811
+[MacPorts Ticket #44994] -- https://trac.macports.org/ticket/44994
+
+Fix various bits of version detection that assumed that the OS minor
+version would always be a single digit.
+
+Originally fixed in 2.7 by Ned Deily <nad@acm.org>:
+- https://hg.python.org/cpython/rev/a7ab09e00dbc
+- https://hg.python.org/cpython/rev/2672e30d9095
+
+Adapted for 2.6.
+
+Signed-off-by: Lawrence Velázquez <larryv@macports.org>
+Index: Lib/distutils/util.py
+===================================================================
+--- Lib/distutils/util.py.orig
++++ Lib/distutils/util.py
+@@ -132,7 +132,16 @@ def get_platform ():
+             release = macver
+             osname = "macosx"
+ 
+-            if (macrelease + '.') >= '10.4.' and \
++            if macrelease:
++                try:
++                    macrelease = tuple(int(i) for i in macrelease.split('.')[0:2])
++                except ValueError:
++                    macrelease = (10, 0)
++            else:
++                # assume no universal support
++                macrelease = (10, 0)
++
++            if (macrelease >= (10, 4)) and \
+                     '-arch' in get_config_vars().get('CFLAGS', '').strip():
+                 # The universal build will build fat binaries, but not on
+                 # systems before 10.4
+Index: Mac/BuildScript/build-installer.py
+===================================================================
+--- Mac/BuildScript/build-installer.py.orig
++++ Mac/BuildScript/build-installer.py
+@@ -105,14 +105,19 @@ SRCDIR = os.path.dirname(
+ # $MACOSX_DEPLOYMENT_TARGET -> minimum OS X level
+ DEPTARGET = '10.3'
+ 
+-target_cc_map = {
++def getDeptargetTuple():
++    return tuple([int(n) for n in DEPTARGET.split('.')[0:2]])
++
++def getTargetCompiler():
++    target_cc_map = {
+         '10.3': 'gcc-4.0',
+         '10.4': 'gcc-4.0',
+         '10.5': 'gcc-4.0',
+         '10.6': 'gcc-4.2',
+-}
++    }
++    return target_cc_map.get(DEPTARGET, 'clang')
+ 
+-CC = target_cc_map[DEPTARGET]
++CC = getTargetCompiler()
+ 
+ USAGE = textwrap.dedent("""\
+     Usage: build_python [options]
+@@ -136,7 +141,7 @@ USAGE = textwrap.dedent("""\
+ def library_recipes():
+     result = []
+ 
+-    if DEPTARGET < '10.5':
++    if getDeptargetTuple() < (10, 5):
+         result.extend([
+           dict(
+               name="Bzip2 1.0.5",
+@@ -307,7 +312,7 @@ def pkg_recipes():
+         ),
+     ]
+ 
+-    if DEPTARGET < '10.4':
++    if getDeptargetTuple() < (10, 4):
+         result.append(
+             dict(
+                 name="PythonSystemFixes",
+@@ -497,7 +502,7 @@ def parseOptions(args=None):
+     SDKPATH=os.path.abspath(SDKPATH)
+     DEPSRC=os.path.abspath(DEPSRC)
+ 
+-    CC=target_cc_map[DEPTARGET]
++    CC=getTargetCompiler()
+ 
+     print "Settings:"
+     print " * Source directory:", SRCDIR
+Index: configure
+===================================================================
+--- configure.orig
++++ configure
+@@ -5313,8 +5313,14 @@ $as_echo "$CC" >&6; }
+ 
+ 	    # Calculate the right deployment target for this build.
+ 	    #
+-	    cur_target=`sw_vers -productVersion | sed 's/\(10\.[0-9]*\).*/\1/'`
+-	    if test ${cur_target} '>' 10.2; then
++	    cur_target_major=`sw_vers -productVersion | \
++			    sed 's/\([0-9]*\)\.\([0-9]*\).*/\1/'`
++	    cur_target_minor=`sw_vers -productVersion | \
++			    sed 's/\([0-9]*\)\.\([0-9]*\).*/\2/'`
++	    cur_target="${cur_target_major}.${cur_target_minor}"
++	    if test ${cur_target_major} -eq 10 && \
++	       test ${cur_target_minor} -ge 3
++	    then
+ 		    cur_target=10.3
+ 		    if test ${enable_universalsdk}; then
+ 			    if test "${UNIVERSAL_ARCHS}" = "all"; then
+@@ -7366,14 +7372,14 @@ then
+ 		# Use -undefined dynamic_lookup whenever possible (10.3 and later).
+ 		# This allows an extension to be used in any Python
+ 
+-		if test ${MACOSX_DEPLOYMENT_TARGET} '>' 10.2
++		dep_target_major=`echo ${MACOSX_DEPLOYMENT_TARGET} | \
++				sed 's/\([0-9]*\)\.\([0-9]*\).*/\1/'`
++		dep_target_minor=`echo ${MACOSX_DEPLOYMENT_TARGET} | \
++				sed 's/\([0-9]*\)\.\([0-9]*\).*/\2/'`
++		if test ${dep_target_major} -eq 10 && \
++		   test ${dep_target_minor} -le 2
+ 		then
+-			if test "${enable_universalsdk}"; then
+-				LDFLAGS="${UNIVERSAL_ARCH_FLAGS} -isysroot ${UNIVERSALSDK} ${LDFLAGS}"
+-			fi
+-			LDSHARED='$(CC) $(LDFLAGS) -bundle -undefined dynamic_lookup'
+-			BLDSHARED="$LDSHARED"
+-		else
++			# building for OS X 10.0 through 10.2
+ 			LDSHARED='$(CC) $(LDFLAGS) -bundle'
+ 			if test "$enable_framework" ; then
+ 				# Link against the framework. All externals should be defined.
+@@ -7384,6 +7390,13 @@ then
+ 				BLDSHARED="$LDSHARED "'-bundle_loader $(BUILDPYTHON)'
+ 				LDSHARED="$LDSHARED "'-bundle_loader $(BINDIR)/python$(VERSION)$(EXE)'
+ 			fi
++		else
++			# building for OS X 10.3 and later
++			if test "${enable_universalsdk}"; then
++				LDFLAGS="${UNIVERSAL_ARCH_FLAGS} -isysroot ${UNIVERSALSDK} ${LDFLAGS}"
++			fi
++			LDSHARED='$(CC) $(LDFLAGS) -bundle -undefined dynamic_lookup'
++			BLDSHARED="$LDSHARED"
+ 		fi
+ 		;;
+ 	Linux*|GNU*|QNX*) LDSHARED='$(CC) -shared';;
+Index: setup.py
+===================================================================
+--- setup.py.orig
++++ setup.py
+@@ -637,7 +637,9 @@ class PyBuildExt(build_ext):
+         if platform == 'darwin':
+             os_release = int(os.uname()[2].split('.')[0])
+             dep_target = sysconfig.get_config_var('MACOSX_DEPLOYMENT_TARGET')
+-            if dep_target and dep_target.split('.') < ['10', '5']:
++            if (dep_target and
++                    (tuple(int(n) for n in dep_target.split('.')[0:2])
++                        < (10, 5) ) ):
+                 os_release = 8
+             if os_release < 9:
+                 # MacOSX 10.4 has a broken readline. Don't try to build

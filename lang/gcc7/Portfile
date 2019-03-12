@@ -5,47 +5,69 @@ PortGroup select 1.0
 PortGroup compiler_blacklist_versions 1.0
 
 name                gcc7
-subport             libgcc-devel {}
-
-epoch               1
-version             7-20161030
+epoch               2
+version             7.4.0
+revision            0
+subport             libgcc7 { revision 0 }
 platforms           darwin
 categories          lang
-maintainers         mww openmaintainer
+maintainers         nomaintainer
 # an exception in the license allows dependents to not be GPL
 license             {GPL-3+ Permissive}
-description         The GNU compiler collection, prerelease BETA
+description         The GNU compiler collection
 long_description    The GNU compiler collection, including front ends for \
-                    C, C++, Objective-C, Objective-C++, and Fortran. \
-                    This is a prerelease BETA version!
+                    C, C++, Objective-C, Objective-C++ and Fortran.
 
-homepage            http://gcc.gnu.org/
-master_sites        ftp://ftp.funet.fi/pub/mirrors/sources.redhat.com/pub/gcc/snapshots/${version}/ \
-                    ftp://gcc.gnu.org/pub/gcc/snapshots/${version}/ \
-                    http://gcc.skazkaforyou.com/snapshots/${version}/
+homepage            https://gcc.gnu.org/
+master_sites        ftp://ftp.funet.fi/pub/mirrors/sources.redhat.com/pub/gcc/releases/gcc-${version}/ \
+                    ftp://ftp.gwdg.de/pub/linux/gcc/releases/gcc-${version}/ \
+                    ftp://gcc.ftp.nluug.nl/mirror/languages/gcc/releases/gcc-${version}/ \
+                    ftp://gcc.gnu.org/pub/gcc/releases/gcc-${version}/ \
+                    gnu:gcc/gcc-${version}
 
 distname            gcc-${version}
-use_bzip2           yes
+use_xz              yes
 
-checksums           rmd160  c53ff6ed157b36b529d11c89ec3ac78e25a30ec1 \
-                    sha256  a9b5fef6b57ff96d96991b4245eb5354b9d9b9fa6e29424f91c271ec8a0e6157
+checksums           rmd160  77d3cdafe7df748fa484a300e9513acb3ee2c2e1 \
+                    sha256  eddde28d04f334aec1604456e536416549e9b1aa137fc69204e65eb0c009fe51 \
+                    size    62601888
+
+# Check if this is the last supported gcc version for this system.
+# If it is, libgcc7 installs a full runtime, otherwise it only installs
+# what is missing from newer libgccX builds.
+# NOTE : The logic here must match that in the libgcc port.
+set isLastSupported [ expr ${os.major} < 10 ]
 
 depends_lib         port:cctools \
                     port:gmp \
                     path:lib/pkgconfig/isl.pc:isl \
                     port:ld64 \
-                    port:libgcc-devel \
+                    port:zlib \
                     port:libiconv \
                     port:libmpc \
                     port:mpfr
+depends_run         port:gcc_select
+if { ${isLastSupported} } {
+    depends_run-append  path:lib/libgcc/libgcc_s.1.dylib:libgcc
+} else {
+    depends_run-append  port:libgcc7
+}
 
 depends_skip_archcheck-append gcc_select ld64 cctools
 license_noconflict  gmp mpfr ppl libmpc
+
+# Work around parallel building issue on APFS
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=81797
+patchfiles-append   notparallel-install-headers.patch
 
 set major           [lindex [split ${version} .-] 0]
 
 platform darwin {
     configure.pre_args-append --build=${build_arch}-apple-darwin${os.major}
+}
+
+platform darwin 8 i386 {
+    patchfiles-append patch-gcc7-tiger-intel.diff
 }
 
 configure.dir       ${workpath}/build
@@ -75,6 +97,12 @@ configure.args      --enable-languages=c,c++,objc,obj-c++,lto,fortran \
                     --with-ar=${prefix}/bin/ar \
                     --with-bugurl=https://trac.macports.org/newticket
 
+# see https://lists.macports.org/pipermail/macports-dev/2017-August/036209.html
+# --disable-tls does not limit functionality
+# it only determines how std::call_once works
+configure.args-append \
+                    --disable-tls
+
 configure.env-append \
                     AR_FOR_TARGET=${prefix}/bin/ar \
                     AS_FOR_TARGET=${prefix}/bin/as \
@@ -88,6 +116,23 @@ configure.env-append \
 
 pre-configure {
     configure.args-append --with-pkgversion="MacPorts ${name} ${version}_${revision}${portvariants}"
+
+    if {${configure.sdkroot} ne ""} {
+        # We should be using --with-build-sysroot here.  Using --with-sysroot
+        # changes the behavior of the installed gcc to look in that sysroot
+        # by default instead of /.  Using --with-build-sysroot is supposed
+        # to be used during the build but not impact the installed product.
+        # Unfortunately, the build fails because the value doesn't get
+        # plumbed everywhere it is supposed to.
+        #
+        # https://trac.macports.org/ticket/53726
+        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=79885
+        #
+        # Note that macports toolchains will fail to compile gcc unless
+        # the DevSDK is installed due to another gcc build system bug:
+        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80203
+        configure.args-append --with-sysroot="${configure.sdkroot}"
+    }
 
     # TODO: Remove when base automatically creates configure.dir (2.2.1?).
     file mkdir ${configure.dir}
@@ -111,8 +156,25 @@ use_parallel_build  yes
 
 destroot.target     install install-info-host
 
-if {${subport} eq "libgcc-devel"} {
-    conflicts       libgcc
+if {${subport} eq "libgcc7"} {
+
+    # If providing the primary runtime, add conflict against libgcc-devel
+    if { ${isLastSupported} } {
+        conflicts libgcc-devel
+    }
+
+    # Activate hack for new libgcc
+    # https://trac.macports.org/wiki/PortfileRecipes#deactivatehack
+    pre-activate {
+        if {![catch {set installed [lindex [registry_active libgcc] 0]}]} {
+            # Extract the epoch of the installed libgcc
+            set _epoch [lindex $installed 5]
+            # If < 3 need to deactivate
+            if {[vercmp $_epoch 3] < 0} {
+                registry_deactivate_composite libgcc "" [list ports_nodepcheck 1]
+            }
+        }
+    }
 
     # http://trac.macports.org/ticket/35770
     # http://trac.macports.org/ticket/38814
@@ -126,10 +188,29 @@ if {${subport} eq "libgcc-devel"} {
     # version should continue to provide a subport for that and older gcc
     # versions.
 
-    depends_lib-delete port:libgcc-devel
+    if { ${isLastSupported} } {
+        depends_run
+        depends_lib-delete   port:zlib
+        depends_build-append {*}${depends_lib}
+        depends_lib          port:zlib
+    } else {
+        depends_run port:libgcc8
+        depends_build-append {*}${depends_lib}
+        depends_lib
+    }
 
-    configure.args-delete --libdir=${prefix}/lib/${name}
-    configure.args-append --libdir=${prefix}/lib/libgcc
+    configure.args-replace \
+        --libdir=${prefix}/lib/${name} \
+        --libdir=${prefix}/lib/libgcc
+
+    # see https://trac.macports.org/ticket/54766
+    configure.args-replace \
+        --includedir=${prefix}/include/${name} \
+        --includedir=${prefix}/include/gcc
+
+    configure.args-replace \
+        --with-gxx-include-dir=${prefix}/include/${name}/c++/ \
+        --with-gxx-include-dir=${prefix}/include/gcc/c++/
 
     # TODO: Possibly disable bootstrap with appropriate configure flags.
     #       the problem is that libstdc++'s configure script tests for tls support
@@ -146,10 +227,16 @@ if {${subport} eq "libgcc-devel"} {
         # Note that we really don't want to include libgcc_ext.10.[45].dylib here, but install_name_tool
         # doesn't know how to change the id of stubs, and it's easier than recreating them for each
         # gcc port.
-        set dylibs {libgcc_ext.10.4.dylib libgcc_ext.10.5.dylib libgcc_s.1.dylib libgfortran.3.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.0.dylib libatomic.1.dylib}
+        if { ${isLastSupported} } {
+            # Install all
+            set dylibs {libgcc_ext.10.4.dylib libgcc_ext.10.5.dylib libgcc_s.1.dylib libgfortran.4.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.4.dylib libubsan.0.dylib libcilkrts.5.dylib libatomic.1.dylib}
+        } else {
+            # Only install those not in newer libgcc builds
+            set dylibs {libgfortran.4.dylib libquadmath.0.dylib libasan.4.dylib libubsan.0.dylib libcilkrts.5.dylib}
+        }
 
         foreach dylib ${dylibs} {
-            # Different OS versions (eg: Leopard) or architectures (eg: PPC) don't produce all the dylibs
+            # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
             # https://trac.macports.org/ticket/40098
             # https://trac.macports.org/ticket/40100
             if {! [file exists ${destroot}${prefix}/lib/libgcc/${dylib}]} {
@@ -162,7 +249,7 @@ if {${subport} eq "libgcc-devel"} {
                     set archdir_nodestroot [string map "${destroot}/ /" ${archdir}]
                     if {[file exists ${archdir}/${dylib}]} {
                         system "install_name_tool -id ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}"
-                        foreach link ${dylibs} {
+                        foreach link [glob -tails -directory ${archdir} *.dylib] {
                             system "install_name_tool -change ${archdir_nodestroot}${link} ${prefix}/lib/libgcc/${link} ${archdir}/${dylib}"
                         }
                         system "lipo -create -output ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib} ${archdir}/${dylib} && mv ${destroot}${prefix}/lib/libgcc.merged/${dylib}~ ${destroot}${prefix}/lib/libgcc.merged/${dylib}"
@@ -177,52 +264,58 @@ if {${subport} eq "libgcc-devel"} {
             }
         }
 
-        file delete -force ${destroot}${prefix}/bin              
+        file delete -force ${destroot}${prefix}/bin
         file delete -force ${destroot}${prefix}/share
-        file delete -force ${destroot}${prefix}/include
         file delete -force ${destroot}${prefix}/lib/libgcc
         file delete -force ${destroot}${prefix}/libexec
 
         move ${destroot}${prefix}/lib/libgcc.merged ${destroot}${prefix}/lib/libgcc
 
-        # For binary compatibility with binaries that linked against the old libstdcxx port
-        ln -s libgcc/libstdc++.6.dylib ${destroot}${prefix}/lib/libstdc++.6.dylib
-    }
-} else {
-depends_run-append         port:gcc_select
-
-post-destroot {
-    file delete ${destroot}${prefix}/share/info/dir
-
-    foreach file [glob ${destroot}${prefix}/share/{info,man/man7}/*] {
-        set extension [file extension ${file}]
-        set newfile [regsub "${extension}$" ${file} "-mp-${major}${extension}"]
-
-        file rename ${file} ${newfile}
-    }
-
-    foreach dylib {libgcc_ext.10.4.dylib libgcc_ext.10.5.dylib libgcc_s.1.dylib libgfortran.3.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.0.dylib libatomic.1.dylib} {
-        # Different OS versions (eg: Leopard) or architectures (eg: PPC) don't produce all the dylibs
-        # https://trac.macports.org/ticket/40098
-        # https://trac.macports.org/ticket/40100
-        if {[file exists ${destroot}${prefix}/lib/${name}/${dylib}]} {
-            delete ${destroot}${prefix}/lib/${name}/${dylib}
-            ln -s ${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/${name}/${dylib}
+        if { ${isLastSupported} } {
+            # For binary compatibility with binaries that linked against the old libstdcxx port
+            ln -s libgcc/libstdc++.6.dylib ${destroot}${prefix}/lib/libstdc++.6.dylib
+        } else {
+            # Remove includes. Provided by newer libgcc.
+            file delete -force ${destroot}${prefix}/include
+            # This is provided by the libgcc port
+            file delete -force ${destroot}${prefix}/lib/libgcc/libquadmath.0.dylib
         }
 
-        if {[variant_isset universal]} {
-            foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
-                if {[file exists ${archdir}/${dylib}]} {
-                    delete ${archdir}/${dylib}
-                    ln -s ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}
+    }
+
+} else {
+    post-destroot {
+        file delete ${destroot}${prefix}/share/info/dir
+
+        foreach file [glob ${destroot}${prefix}/share/{info,man/man7}/*] {
+            set extension [file extension ${file}]
+            set newfile [regsub "${extension}$" ${file} "-mp-${major}${extension}"]
+
+            file rename ${file} ${newfile}
+        }
+
+        foreach dylib {libgcc_ext.10.4.dylib libgcc_ext.10.5.dylib libgcc_s.1.dylib libgfortran.4.dylib libquadmath.0.dylib libstdc++.6.dylib libobjc-gnu.4.dylib libgomp.1.dylib libitm.1.dylib libssp.0.dylib libasan.4.dylib libubsan.0.dylib libcilkrts.5.dylib libatomic.1.dylib} {
+            # Different OS versions (e.g. Leopard) or architectures (e.g. PPC) don't produce all the dylibs
+            # https://trac.macports.org/ticket/40098
+            # https://trac.macports.org/ticket/40100
+            if {[file exists ${destroot}${prefix}/lib/${name}/${dylib}]} {
+                delete ${destroot}${prefix}/lib/${name}/${dylib}
+                ln -s ${prefix}/lib/libgcc/${dylib} ${destroot}${prefix}/lib/${name}/${dylib}
+            }
+
+            if {[variant_isset universal]} {
+                foreach archdir [glob ${destroot}${prefix}/lib/${name}/*/] {
+                    if {[file exists ${archdir}/${dylib}]} {
+                        delete ${archdir}/${dylib}
+                        ln -s ${prefix}/lib/libgcc/${dylib} ${archdir}/${dylib}
+                    }
                 }
             }
         }
     }
-}
 
-select.group        gcc
-select.file         ${filespath}/mp-${name}
+    select.group        gcc
+    select.file         ${filespath}/mp-${name}
 
 }
 
@@ -236,8 +329,12 @@ variant universal {
     configure.args-delete --disable-multilib
 }
 # the generated compiler doesn't accept -arch
-configure.env-append CPP="${configure.cc} -E"
-build.env-append CPP="${configure.cc} -E"
+configure.env-append \
+    CPP="${configure.cc} -E" \
+    CXXCPP="${configure.cxx} -E"
+build.env-append \
+    CPP="${configure.cc} -E" \
+    CXXCPP="${configure.cxx} -E"
 configure.cc-append [get_canonical_archflags]
 configure.cc_archflags
 configure.cxx-append ${configure.cxx_archflags}
@@ -250,5 +347,5 @@ configure.universal_ldflags
 configure.universal_args
 
 livecheck.type      regex
-livecheck.url       ftp://gcc.gnu.org/pub/gcc/snapshots/
-livecheck.regex     LATEST-${major} -> (${major}-\[0-9\]+)
+livecheck.url       https://ftp.gnu.org/gnu/gcc/
+livecheck.regex     gcc-(${major}\\.\[0-9.\]+)/

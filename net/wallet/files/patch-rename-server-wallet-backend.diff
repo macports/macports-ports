@@ -1,0 +1,1396 @@
+--- server/wallet-backend	2016-01-17 19:13:02.000000000 -0800
++++ /dev/null	2016-01-23 14:00:27.000000000 -0800
+@@ -1,695 +0,0 @@
+-#!/usr/bin/perl
+-#
+-# Wallet server for storing and retrieving secure data.
+-
+-use 5.008;
+-use strict;
+-use warnings;
+-
+-use Getopt::Long qw(GetOptions);
+-use Sys::Syslog qw(openlog syslog);
+-use Wallet::Server;
+-
+-# Set to zero to suppress syslog logging, which is used for testing and for
+-# the -q option.  Set to a reference to a string to append messages to that
+-# string instead.
+-our $SYSLOG;
+-$SYSLOG = 1 unless defined $SYSLOG;
+-
+-##############################################################################
+-# Logging
+-##############################################################################
+-
+-# Initialize logging.
+-sub log_init {
+-    if (ref $SYSLOG) {
+-        $$SYSLOG = '';
+-    } elsif ($SYSLOG) {
+-        openlog ('wallet-backend', 'pid', 'auth');
+-    }
+-}
+-
+-# Get an identity string for the user suitable for including in log messages.
+-sub identity {
+-    my $identity = '';
+-    if ($ENV{REMOTE_USER}) {
+-        $identity = $ENV{REMOTE_USER};
+-        my $host = $ENV{REMOTE_HOST} || $ENV{REMOTE_ADDR};
+-        $identity .= " ($host)" if $host;
+-    }
+-    return $identity;
+-}
+-
+-# Log an error message to both syslog and to stderr and exit with a non-zero
+-# status.
+-sub error {
+-    my $message = join ('', @_);
+-    if ($SYSLOG) {
+-        my $identity = identity;
+-        my $log;
+-        if ($identity) {
+-            $log = "error for $identity: $message";
+-        } else {
+-            $log = "error: $message";
+-        }
+-        $log =~ s/[^\x20-\x7e]/_/g;
+-        if (ref $SYSLOG) {
+-            $$SYSLOG .= "$log\n";
+-        } else {
+-            syslog ('err', "%s", $log);
+-        }
+-    }
+-    die "$message\n";
+-}
+-
+-# Log a wallet failure message for a given command to both syslog and to
+-# stderr and exit with a non-zero status.  Takes the message and the command
+-# that was being run.
+-sub failure {
+-    my ($message, @command) = @_;
+-    if ($SYSLOG) {
+-        my $log = "command @command from " . identity . " failed: $message";
+-        $log =~ s/[^\x20-\x7e]/_/g;
+-        if (ref $SYSLOG) {
+-            $$SYSLOG .= "$log\n";
+-        } else {
+-            syslog ('err', "%s", $log);
+-        }
+-    }
+-    die "$message\n";
+-}
+-
+-# Log a wallet success message for a given command.
+-sub success {
+-    my (@command) = @_;
+-    if ($SYSLOG) {
+-        my $log = "command @command from " . identity . " succeeded";
+-        $log =~ s/[^\x20-\x7e]/_/g;
+-        if (ref $SYSLOG) {
+-            $$SYSLOG .= "$log\n";
+-        } else {
+-            syslog ('info', "%s", $log);
+-        }
+-    }
+-}
+-
+-##############################################################################
+-# Parameter checking
+-##############################################################################
+-
+-# Check all arguments against a very restricted set of allowed characters and
+-# to ensure the right number of arguments are taken.  The arguments are the
+-# number of arguments expected (minimum and maximum), a reference to an array
+-# of which argument numbers shouldn't be checked, and then the arguments.
+-#
+-# This function is probably temporary and will be replaced with something that
+-# knows more about the syntax of each command and can check more things.
+-sub check_args {
+-    my ($min, $max, $exclude, @args) = @_;
+-    if (@args < $min) {
+-        error "insufficient arguments";
+-    } elsif (@args > $max and $max != -1) {
+-        error "too many arguments";
+-    }
+-    my %exclude = map { $_ => 1 } @$exclude;
+-    for (my $i = 1; $i <= @args; $i++) {
+-        next if $exclude{$i};
+-        unless ($args[$i - 1] =~ m,^[\w_/\@.-]*\z,) {
+-            error "invalid characters in argument: $args[$i - 1]";
+-        }
+-    }
+-}
+-
+-##############################################################################
+-# Implementation
+-##############################################################################
+-
+-# Parse and execute a command.  We wrap this in a subroutine call for easier
+-# testing.
+-sub command {
+-    log_init;
+-    my $user = $ENV{REMOTE_USER} or error "REMOTE_USER not set";
+-    my $host = $ENV{REMOTE_HOST} || $ENV{REMOTE_ADDR}
+-        or error "neither REMOTE_HOST nor REMOTE_ADDR set";
+-
+-    # Instantiate the server object.
+-    my $server = Wallet::Server->new ($user, $host);
+-
+-    # Parse command-line options and dispatch to the appropriate calls.
+-    my ($command, @args) = @_;
+-    if ($command eq 'acl') {
+-        my $action = shift @args;
+-        if ($action eq 'add') {
+-            check_args (3, 3, [3], @args);
+-            $server->acl_add (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'check') {
+-            check_args (1, 1, [], @args);
+-            my $status = $server->acl_check (@args);
+-            if (!defined ($status)) {
+-                failure ($server->error, @_);
+-            } else {
+-                print $status ? "yes\n" : "no\n";
+-            }
+-        } elsif ($action eq 'create') {
+-            check_args (1, 1, [], @args);
+-            $server->acl_create (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'destroy') {
+-            check_args (1, 1, [], @args);
+-            $server->acl_destroy (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'history') {
+-            check_args (1, 1, [], @args);
+-            my $output = $server->acl_history (@args);
+-            if (defined $output) {
+-                print $output;
+-            } else {
+-                failure ($server->error, @_);
+-            }
+-        } elsif ($action eq 'remove') {
+-            check_args (3, 3, [3], @args);
+-            $server->acl_remove (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'rename') {
+-            check_args (2, 2, [], @args);
+-            $server->acl_rename (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'replace') {
+-            check_args (2, 2, [], @args);
+-            $server->acl_replace (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'show') {
+-            check_args (1, 1, [], @args);
+-            my $output = $server->acl_show (@args);
+-            if (defined $output) {
+-                print $output;
+-            } else {
+-                failure ($server->error, @_);
+-            }
+-        } else {
+-            error "unknown command acl $action";
+-        }
+-    } elsif ($command eq 'autocreate') {
+-        check_args (2, 2, [], @args);
+-        $server->autocreate (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'check') {
+-        check_args (2, 2, [], @args);
+-        my $status = $server->check (@args);
+-        if (!defined ($status)) {
+-            failure ($server->error, @_);
+-        } else {
+-            print $status ? "yes\n" : "no\n";
+-        }
+-    } elsif ($command eq 'comment') {
+-        check_args (2, 3, [3], @args);
+-        if (@args > 2) {
+-            $server->comment (@args) or failure ($server->error, @_);
+-        } else {
+-            my $output = $server->comment (@args);
+-            if (defined $output) {
+-                print $output, "\n";
+-            } elsif (not $server->error) {
+-                print "No comment set\n";
+-            } else {
+-                failure ($server->error, @_);
+-            }
+-        }
+-    } elsif ($command eq 'create') {
+-        check_args (2, 2, [], @args);
+-        $server->create (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'destroy') {
+-        check_args (2, 2, [], @args);
+-        $server->destroy (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'expires') {
+-        check_args (2, 3, [], @args);
+-        if (@args > 2) {
+-            $server->expires (@args) or failure ($server->error, @_);
+-        } else {
+-            my $output = $server->expires (@args);
+-            if (defined $output) {
+-                print $output, "\n";
+-            } elsif (not $server->error) {
+-                print "No expiration set\n";
+-            } else {
+-                failure ($server->error, @_);
+-            }
+-        }
+-    } elsif ($command eq 'flag') {
+-        my $action = shift @args;
+-        check_args (3, 3, [], @args);
+-        if ($action eq 'clear') {
+-            $server->flag_clear (@args) or failure ($server->error, @_);
+-        } elsif ($action eq 'set') {
+-            $server->flag_set (@args) or failure ($server->error, @_);
+-        } else {
+-            error "unknown command flag $action";
+-        }
+-    } elsif ($command eq 'get') {
+-        check_args (2, 2, [], @args);
+-        my $output = $server->get (@args);
+-        if (defined $output) {
+-            print $output;
+-        } else {
+-            failure ($server->error, @_);
+-        }
+-    } elsif ($command eq 'getacl') {
+-        check_args (3, 3, [], @args);
+-        my $output = $server->acl (@args);
+-        if (defined $output) {
+-            print $output, "\n";
+-        } elsif (not $server->error) {
+-            print "No ACL set\n";
+-        } else {
+-            failure ($server->error, @_);
+-        }
+-    } elsif ($command eq 'getattr') {
+-        check_args (3, 3, [], @args);
+-        my @result = $server->attr (@args);
+-        if (not @result and $server->error) {
+-            failure ($server->error, @_);
+-        } elsif (@result) {
+-            print join ("\n", @result, '');
+-        }
+-    } elsif ($command eq 'history') {
+-        check_args (2, 2, [], @args);
+-        my $output = $server->history (@args);
+-        if (defined $output) {
+-            print $output;
+-        } else {
+-            failure ($server->error, @_);
+-        }
+-    } elsif ($command eq 'owner') {
+-        check_args (2, 3, [], @args);
+-        if (@args > 2) {
+-            $server->owner (@args) or failure ($server->error, @_);
+-        } else {
+-            my $output = $server->owner (@args);
+-            if (defined $output) {
+-                print $output, "\n";
+-            } elsif (not $server->error) {
+-                print "No owner set\n";
+-            } else {
+-                failure ($server->error, @_);
+-            }
+-        }
+-    } elsif ($command eq 'rename') {
+-        check_args (3, 3, [], @args);
+-        $server->rename (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'setacl') {
+-        check_args (4, 4, [], @args);
+-        $server->acl (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'setattr') {
+-        check_args (4, -1, [], @args);
+-        $server->attr (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'show') {
+-        check_args (2, 2, [], @args);
+-        my $output = $server->show (@args);
+-        if (defined $output) {
+-            print $output;
+-        } else {
+-            failure ($server->error, @_);
+-        }
+-    } elsif ($command eq 'store') {
+-        check_args (2, 3, [3], @args);
+-        if (@args == 2) {
+-            local $/;
+-            $args[2] = <STDIN>;
+-        }
+-        splice (@_, 3);
+-        $server->store (@args) or failure ($server->error, @_);
+-    } elsif ($command eq 'update') {
+-        check_args (2, 2, [], @args);
+-        my $output = $server->update (@args);
+-        if (defined $output) {
+-            print $output;
+-        } else {
+-            failure ($server->error, @_);
+-        }
+-    } else {
+-        error "unknown command $command";
+-    }
+-    success (@_);
+-}
+-
+-# Parse command-line options.
+-my ($quiet);
+-Getopt::Long::config ('require_order');
+-GetOptions ('q|quiet' => \$quiet) or exit 1;
+-$SYSLOG = 0 if $quiet;
+-
+-# Run the command.
+-command (@ARGV);
+-
+-__END__
+-
+-##############################################################################
+-# Documentation
+-##############################################################################
+-
+-# The commands section of this document is duplicated from the documentation
+-# for wallet and should be kept in sync.
+-
+-=for stopwords
+-wallet-backend backend backend-specific remctld ACL acl timestamp getacl
+-setacl metadata keytab keytabs enctypes enctype ktadd KDC Allbery
+-autocreate MERCHANTABILITY NONINFRINGEMENT sublicense
+-
+-=head1 NAME
+-
+-wallet-backend - Wallet server for storing and retrieving secure data
+-
+-=head1 SYNOPSIS
+-
+-B<wallet-backend> [B<-q>] I<command> [I<args> ...]
+-
+-=head1 DESCRIPTION
+-
+-B<wallet-backend> implements the interface between B<remctld> and the
+-wallet system.  It is written to run under B<remctld> and expects the
+-authenticated identity of the remote user in the REMOTE_USER environment
+-variable.  It uses REMOTE_HOST or REMOTE_ADDR if REMOTE_HOST isn't set for
+-additional trace information.  It accepts the command from B<remctld> on
+-the command line, creates a Wallet::Server object, and calls the
+-appropriate methods.
+-
+-This program is a fairly thin wrapper around Wallet::Server that
+-translates command strings into method calls and returns the results.  It
+-does check all arguments except for the <data> argument to the store
+-command and rejects any argument not matching C<^[\w_/.-]+\z>; in other
+-words, only alphanumerics, underscore (C<_>), slash (C</>), period (C<.>),
+-and hyphen (C<->) are permitted in arguments.  This provides some
+-additional security over and above the checking already done by the rest
+-of the wallet code.
+-
+-=head1 OPTIONS
+-
+-=over 4
+-
+-=item B<--quiet>, B<-q>
+-
+-If this option is given, B<wallet-backend> will not log its actions to
+-syslog.
+-
+-=back
+-
+-=head1 COMMANDS
+-
+-Most commands are only available to wallet administrators (users on the
+-C<ADMIN> ACL).  The exceptions are C<acl check>, C<check>, C<get>,
+-C<store>, C<show>, C<destroy>, C<flag clear>, C<flag set>, C<getattr>,
+-C<setattr>, and C<history>.  C<acl check> and C<check> can be run by
+-anyone.  All of the rest of those commands have their own ACLs except
+-C<getattr> and C<history>, which use the C<show> ACL, C<setattr>, which
+-uses the C<store> ACL, and C<comment>, which uses the owner or C<show> ACL
+-depending on whether one is setting or retrieving the comment.  If the
+-appropriate ACL is set, it alone is checked to see if the user has access.
+-Otherwise, C<destroy>, C<get>, C<store>, C<show>, C<getattr>, C<setattr>,
+-C<history>, and C<comment> access is permitted if the user is authorized
+-by the owner ACL of the object.
+-
+-Administrators can run any command on any object or ACL except for C<get>
+-and C<store>.  For C<get> and C<store>, they must still be authorized by
+-either the appropriate specific ACL or the owner ACL.
+-
+-If the locked flag is set on an object, no commands can be run on that
+-object that change data except the C<flags> commands, nor can the C<get>
+-command be used on that object.  C<show>, C<history>, C<getacl>,
+-C<getattr>, and C<owner>, C<comment>, or C<expires> without an argument
+-can still be used on that object.
+-
+-For more information on attributes, see L<ATTRIBUTES>.
+-
+-=over 4
+-
+-=item acl add <id> <scheme> <identifier>
+-
+-Add an entry with <scheme> and <identifier> to the ACL <id>.  <id> may be
+-either the name of an ACL or its numeric identifier.
+-
+-=item acl check <id>
+-
+-Check whether an ACL with the ID <id> already exists.  If it does, prints
+-C<yes>; if not, prints C<no>.
+-
+-=item acl create <name>
+-
+-Create a new, empty ACL with name <name>.  When setting an ACL on an
+-object with a set of entries that don't match an existing ACL, first
+-create a new ACL with C<acl create>, add the appropriate entries to it
+-with C<acl add>, and then set the ACL on an object with the C<owner> or
+-C<setacl> commands.
+-
+-=item acl destroy <id>
+-
+-Destroy the ACL <id>.  This ACL must no longer be referenced by any object
+-or the ACL destruction will fail.  The special ACL named C<ADMIN> cannot
+-be destroyed.
+-
+-=item acl history <id>
+-
+-Display the history of the ACL <id>.  Each change to the ACL (not
+-including changes to the name of the ACL) will be represented by two
+-lines.  The first line will have a timestamp of the change followed by a
+-description of the change, and the second line will give the user who made
+-the change and the host from which the change was made.
+-
+-=item acl remove <id> <scheme> <identifier>
+-
+-Remove the entry with <scheme> and <identifier> from the ACL <id>.  <id>
+-may be either the name of an ACL or its numeric identifier.  The last
+-entry in the special ACL C<ADMIN> cannot be removed to protect against
+-accidental lockout, but administrators can remove themselves from the
+-C<ADMIN> ACL and can leave only a non-functioning entry on the ACL.  Use
+-caution when removing entries from the C<ADMIN> ACL.
+-
+-=item acl rename <id> <name>
+-
+-Renames the ACL identified by <id> to <name>.  This changes the
+-human-readable name, not the underlying numeric ID, so the ACL's
+-associations with objects will be unchanged.  The C<ADMIN> ACL may not be
+-renamed.  <id> may be either the current name or the numeric ID.  <name>
+-must not be all-numeric.  To rename an ACL, the current user must be
+-authorized by the C<ADMIN> ACL.
+-
+-=item acl replace <id> <new-id>
+-
+-Find any objects owned by <id>, and then change their ownership to
+-<new_id> instead.  <new-id> should already exist, and may already have
+-some objects owned by it.  <id> is not deleted afterwards, though in
+-most cases that is probably your next step.  The C<ADMIN> ACL may not be
+-replaced from.  <id> and <new-id> may be either the current name or the
+-numeric ID.  To replace an ACL, the current user must be authorized by
+-the C<ADMIN> ACL.
+-
+-=item acl show <id>
+-
+-Display the name, numeric ID, and entries of the ACL <id>.
+-
+-=item autocreate <type> <name>
+-
+-Create a new object of type <type> with name <name>.  The user must be
+-listed in the default ACL for an object with that type and name, and the
+-object will be created with that default ACL set as the object owner.
+-
+-=item check <type> <name>
+-
+-Check whether an object of type <type> and name <name> already exists.  If
+-it does, prints C<yes>; if not, prints C<no>.
+-
+-=item comment <type> <name> [<comment>]
+-
+-If <comment> is not given, displays the current comment for the object
+-identified by <type> and <name>, or C<No comment set> if none is set.
+-
+-If <comment> is given, sets the comment on the object identified by
+-<type> and <name> to <comment>.  If <comment> is the empty string, clears
+-the comment.
+-
+-=item create <type> <name>
+-
+-Create a new object of type <type> with name <name>.  With some backends,
+-this will trigger creation of an entry in an external system as well.
+-The new object will have no ACLs and no owner set, so usually the
+-administrator will want to then set an owner with C<owner> so that the
+-object will be usable.
+-
+-=item destroy <type> <name>
+-
+-Destroy the object identified by <type> and <name>.  With some backends,
+-this will trigger destruction of an object in an external system as well.
+-
+-=item expires <type> <name> [<date> [<time>]]
+-
+-If <date> is not given, displays the current expiration of the object
+-identified by <type> and <name>, or C<No expiration set> if none is set.
+-The expiration will be displayed in seconds since epoch.
+-
+-If <date> is given, sets the expiration on the object identified by <type>
+-and <name> to <date> and (if given) <time>.  <date> and <time> must be in
+-some format that can be parsed by the Perl Date::Parse module.  Most
+-common formats are supported; if in doubt, use C<YYYY-MM-DD HH:MM:SS>.  If
+-<date> is the empty string, clears the expiration of the object.
+-
+-Currently, the expiration of an object is not used.
+-
+-=item flag clear <type> <name> <flag>
+-
+-Clears the flag <flag> on the object identified by <type> and <name>.
+-
+-=item flag set <type> <name> <flag>
+-
+-Sets the flag <flag> on the object identified by <type> and <name>.
+-Recognized flags are C<locked>, which prevents all further actions on that
+-object until the flag is cleared, and C<unchanging>, which tells the
+-object backend to not generate new data on get but instead return the same
+-data as previously returned.  The C<unchanging> flag is not meaningful for
+-objects that do not generate new data on the fly.
+-
+-=item get <type> <name>
+-
+-Prints to standard output the data associated with the object identified
+-by <type> and <name>.  This may trigger generation of new data and
+-invalidate old data for that object depending on the object type.
+-
+-=item getacl <type> <name> <acl>
+-
+-Prints the ACL <acl>, which must be one of C<get>, C<store>, C<show>,
+-C<destroy>, or C<flags>, for the object identified by <type> and <name>.
+-Prints C<No ACL set> if that ACL isn't set on that object.  Remember that
+-if the C<get>, C<store>, or C<show> ACLs aren't set, authorization falls
+-back to checking the owner ACL.  See the C<owner> command for displaying
+-or setting it.
+-
+-=item getattr <type> <name> <attr>
+-
+-Prints the object attribute <attr> for the object identified by <type> and
+-<name>.  Attributes are used to store backend-specific information for a
+-particular object type, and <attr> must be an attribute type known to the
+-underlying object implementation.  The attribute values, if any, are
+-printed one per line.  If the attribute is not set on this object, nothing
+-is printed.
+-
+-=item history <type> <name>
+-
+-Displays the history for the object identified by <type> and <name>.  This
+-human-readable output will have two lines for each action that changes the
+-object, plus for any get action.  The first line has the timestamp of the
+-action and the action, and the second line gives the user who performed
+-the action and the host from which they performed it.
+-
+-=item owner <type> <name> [<owner>]
+-
+-If <owner> is not given, displays the current owner ACL of the object
+-identified by <type> and <name>, or C<No owner set> if none is set.  The
+-result will be the name of an ACL.
+-
+-If <owner> is given, sets the owner of the object identified by <type> and
+-<name> to <owner>.  If <owner> is the empty string, clears the owner of
+-the object.
+-
+-=item rename <type> <name> <new-name>
+-
+-Renames an existing object.  This currently only supports file objects,
+-where it renames the object itself, then the name and location of the
+-object in the file store.
+-
+-=item setacl <type> <name> <acl> <id>
+-
+-Sets the ACL <acl>, which must be one of C<get>, C<store>, C<show>,
+-C<destroy>, or C<flags>, to <id> on the object identified by <type> and
+-<name>.  If <id> is the empty string, clears that ACL on the object.
+-
+-=item setattr <type> <name> <attr> <value> [<value> ...]
+-
+-Sets the object attribute <attr> for the object identified by <type> and
+-<name>.  Attributes are used to store backend-specific information for a
+-particular object type, and <attr> must be an attribute type known to the
+-underlying object implementation.  To clear the attribute for this object,
+-pass in a <value> of the empty string (C<''>).
+-
+-=item show <type> <name>
+-
+-Displays the current object metadata for the object identified by <type>
+-and <name>.  This human-readable output will show the object type and
+-name, the owner, any specific ACLs set on the object, the expiration if
+-any, and the user, remote host, and time when the object was created, last
+-stored, and last downloaded.
+-
+-=item store <type> <name> [<data>]
+-
+-Stores <data> for the object identified by <type> and <name> for later
+-retrieval with C<get>.  Not all object types support this.  If <data> is
+-not given as an argument, it will be read from standard input.
+-
+-=item update <type> <name>
+-
+-Prints to standard output the data associated with the object identified
+-by <type> and <name>.  If the object is one that can have changing
+-information, such as a keytab or password, then we generate new data for
+-that object regardless of whether there is current data or the unchanging
+-flag is set.
+-
+-=back
+-
+-=head1 ATTRIBUTES
+-
+-Object attributes store additional properties and configuration
+-information for objects stored in the wallet.  They are displayed as part
+-of the object data with C<show>, retrieved with C<getattr>, and set with
+-C<setattr>.
+-
+-=head2 Keytab Attributes
+-
+-Keytab objects support the following attributes:
+-
+-=over 4
+-
+-=item enctypes
+-
+-Restricts the generated keytab to a specific set of encryption types.  The
+-values of this attribute must be enctype strings recognized by Kerberos
+-(strings like C<aes256-cts-hmac-sha1-96> or C<des-cbc-crc>).  Note that
+-the salt should not be included; since the salt is irrelevant for keytab
+-keys, it will always be set to C<normal> by the wallet.
+-
+-If this attribute is set, the specified enctype list will be passed to
+-ktadd when get() is called for that keytab.  If it is not set, the default
+-set in the KDC will be used.
+-
+-This attribute is ignored if the C<unchanging> flag is set on a keytab.
+-Keytabs retrieved with C<unchanging> set will contain all keys present in
+-the KDC for that Kerberos principal and therefore may contain different
+-enctypes than those requested by this attribute.
+-
+-=back
+-
+-=head1 AUTHOR
+-
+-Russ Allbery <eagle@eyrie.org>
+-
+-=head1 COPYRIGHT AND LICENSE
+-
+-Copyright 2007, 2008, 2010, 2011, 2012, 2013 The Board of Trustees of the
+-Leland Stanford Junior University
+-
+-Permission is hereby granted, free of charge, to any person obtaining a
+-copy of this software and associated documentation files (the "Software"),
+-to deal in the Software without restriction, including without limitation
+-the rights to use, copy, modify, merge, publish, distribute, sublicense,
+-and/or sell copies of the Software, and to permit persons to whom the
+-Software is furnished to do so, subject to the following conditions:
+-
+-The above copyright notice and this permission notice shall be included in
+-all copies or substantial portions of the Software.
+-
+-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+-THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+-DEALINGS IN THE SOFTWARE.
+-
+-=head1 SEE ALSO
+-
+-Wallet::Server(3), remctld(8)
+-
+-This program is part of the wallet system.  The current version is
+-available from L<http://www.eyrie.org/~eagle/software/wallet/>.
+-
+-=cut
+--- /dev/null	2016-01-23 14:00:27.000000000 -0800
++++ server/wallet-backend.in	2016-01-17 19:13:02.000000000 -0800
+@@ -0,0 +1,695 @@
++#!@PERL@
++#
++# Wallet server for storing and retrieving secure data.
++
++use 5.008;
++use strict;
++use warnings;
++
++use Getopt::Long qw(GetOptions);
++use Sys::Syslog qw(openlog syslog);
++use Wallet::Server;
++
++# Set to zero to suppress syslog logging, which is used for testing and for
++# the -q option.  Set to a reference to a string to append messages to that
++# string instead.
++our $SYSLOG;
++$SYSLOG = 1 unless defined $SYSLOG;
++
++##############################################################################
++# Logging
++##############################################################################
++
++# Initialize logging.
++sub log_init {
++    if (ref $SYSLOG) {
++        $$SYSLOG = '';
++    } elsif ($SYSLOG) {
++        openlog ('wallet-backend', 'pid', 'auth');
++    }
++}
++
++# Get an identity string for the user suitable for including in log messages.
++sub identity {
++    my $identity = '';
++    if ($ENV{REMOTE_USER}) {
++        $identity = $ENV{REMOTE_USER};
++        my $host = $ENV{REMOTE_HOST} || $ENV{REMOTE_ADDR};
++        $identity .= " ($host)" if $host;
++    }
++    return $identity;
++}
++
++# Log an error message to both syslog and to stderr and exit with a non-zero
++# status.
++sub error {
++    my $message = join ('', @_);
++    if ($SYSLOG) {
++        my $identity = identity;
++        my $log;
++        if ($identity) {
++            $log = "error for $identity: $message";
++        } else {
++            $log = "error: $message";
++        }
++        $log =~ s/[^\x20-\x7e]/_/g;
++        if (ref $SYSLOG) {
++            $$SYSLOG .= "$log\n";
++        } else {
++            syslog ('err', "%s", $log);
++        }
++    }
++    die "$message\n";
++}
++
++# Log a wallet failure message for a given command to both syslog and to
++# stderr and exit with a non-zero status.  Takes the message and the command
++# that was being run.
++sub failure {
++    my ($message, @command) = @_;
++    if ($SYSLOG) {
++        my $log = "command @command from " . identity . " failed: $message";
++        $log =~ s/[^\x20-\x7e]/_/g;
++        if (ref $SYSLOG) {
++            $$SYSLOG .= "$log\n";
++        } else {
++            syslog ('err', "%s", $log);
++        }
++    }
++    die "$message\n";
++}
++
++# Log a wallet success message for a given command.
++sub success {
++    my (@command) = @_;
++    if ($SYSLOG) {
++        my $log = "command @command from " . identity . " succeeded";
++        $log =~ s/[^\x20-\x7e]/_/g;
++        if (ref $SYSLOG) {
++            $$SYSLOG .= "$log\n";
++        } else {
++            syslog ('info', "%s", $log);
++        }
++    }
++}
++
++##############################################################################
++# Parameter checking
++##############################################################################
++
++# Check all arguments against a very restricted set of allowed characters and
++# to ensure the right number of arguments are taken.  The arguments are the
++# number of arguments expected (minimum and maximum), a reference to an array
++# of which argument numbers shouldn't be checked, and then the arguments.
++#
++# This function is probably temporary and will be replaced with something that
++# knows more about the syntax of each command and can check more things.
++sub check_args {
++    my ($min, $max, $exclude, @args) = @_;
++    if (@args < $min) {
++        error "insufficient arguments";
++    } elsif (@args > $max and $max != -1) {
++        error "too many arguments";
++    }
++    my %exclude = map { $_ => 1 } @$exclude;
++    for (my $i = 1; $i <= @args; $i++) {
++        next if $exclude{$i};
++        unless ($args[$i - 1] =~ m,^[\w_/\@.-]*\z,) {
++            error "invalid characters in argument: $args[$i - 1]";
++        }
++    }
++}
++
++##############################################################################
++# Implementation
++##############################################################################
++
++# Parse and execute a command.  We wrap this in a subroutine call for easier
++# testing.
++sub command {
++    log_init;
++    my $user = $ENV{REMOTE_USER} or error "REMOTE_USER not set";
++    my $host = $ENV{REMOTE_HOST} || $ENV{REMOTE_ADDR}
++        or error "neither REMOTE_HOST nor REMOTE_ADDR set";
++
++    # Instantiate the server object.
++    my $server = Wallet::Server->new ($user, $host);
++
++    # Parse command-line options and dispatch to the appropriate calls.
++    my ($command, @args) = @_;
++    if ($command eq 'acl') {
++        my $action = shift @args;
++        if ($action eq 'add') {
++            check_args (3, 3, [3], @args);
++            $server->acl_add (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'check') {
++            check_args (1, 1, [], @args);
++            my $status = $server->acl_check (@args);
++            if (!defined ($status)) {
++                failure ($server->error, @_);
++            } else {
++                print $status ? "yes\n" : "no\n";
++            }
++        } elsif ($action eq 'create') {
++            check_args (1, 1, [], @args);
++            $server->acl_create (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'destroy') {
++            check_args (1, 1, [], @args);
++            $server->acl_destroy (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'history') {
++            check_args (1, 1, [], @args);
++            my $output = $server->acl_history (@args);
++            if (defined $output) {
++                print $output;
++            } else {
++                failure ($server->error, @_);
++            }
++        } elsif ($action eq 'remove') {
++            check_args (3, 3, [3], @args);
++            $server->acl_remove (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'rename') {
++            check_args (2, 2, [], @args);
++            $server->acl_rename (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'replace') {
++            check_args (2, 2, [], @args);
++            $server->acl_replace (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'show') {
++            check_args (1, 1, [], @args);
++            my $output = $server->acl_show (@args);
++            if (defined $output) {
++                print $output;
++            } else {
++                failure ($server->error, @_);
++            }
++        } else {
++            error "unknown command acl $action";
++        }
++    } elsif ($command eq 'autocreate') {
++        check_args (2, 2, [], @args);
++        $server->autocreate (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'check') {
++        check_args (2, 2, [], @args);
++        my $status = $server->check (@args);
++        if (!defined ($status)) {
++            failure ($server->error, @_);
++        } else {
++            print $status ? "yes\n" : "no\n";
++        }
++    } elsif ($command eq 'comment') {
++        check_args (2, 3, [3], @args);
++        if (@args > 2) {
++            $server->comment (@args) or failure ($server->error, @_);
++        } else {
++            my $output = $server->comment (@args);
++            if (defined $output) {
++                print $output, "\n";
++            } elsif (not $server->error) {
++                print "No comment set\n";
++            } else {
++                failure ($server->error, @_);
++            }
++        }
++    } elsif ($command eq 'create') {
++        check_args (2, 2, [], @args);
++        $server->create (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'destroy') {
++        check_args (2, 2, [], @args);
++        $server->destroy (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'expires') {
++        check_args (2, 3, [], @args);
++        if (@args > 2) {
++            $server->expires (@args) or failure ($server->error, @_);
++        } else {
++            my $output = $server->expires (@args);
++            if (defined $output) {
++                print $output, "\n";
++            } elsif (not $server->error) {
++                print "No expiration set\n";
++            } else {
++                failure ($server->error, @_);
++            }
++        }
++    } elsif ($command eq 'flag') {
++        my $action = shift @args;
++        check_args (3, 3, [], @args);
++        if ($action eq 'clear') {
++            $server->flag_clear (@args) or failure ($server->error, @_);
++        } elsif ($action eq 'set') {
++            $server->flag_set (@args) or failure ($server->error, @_);
++        } else {
++            error "unknown command flag $action";
++        }
++    } elsif ($command eq 'get') {
++        check_args (2, 2, [], @args);
++        my $output = $server->get (@args);
++        if (defined $output) {
++            print $output;
++        } else {
++            failure ($server->error, @_);
++        }
++    } elsif ($command eq 'getacl') {
++        check_args (3, 3, [], @args);
++        my $output = $server->acl (@args);
++        if (defined $output) {
++            print $output, "\n";
++        } elsif (not $server->error) {
++            print "No ACL set\n";
++        } else {
++            failure ($server->error, @_);
++        }
++    } elsif ($command eq 'getattr') {
++        check_args (3, 3, [], @args);
++        my @result = $server->attr (@args);
++        if (not @result and $server->error) {
++            failure ($server->error, @_);
++        } elsif (@result) {
++            print join ("\n", @result, '');
++        }
++    } elsif ($command eq 'history') {
++        check_args (2, 2, [], @args);
++        my $output = $server->history (@args);
++        if (defined $output) {
++            print $output;
++        } else {
++            failure ($server->error, @_);
++        }
++    } elsif ($command eq 'owner') {
++        check_args (2, 3, [], @args);
++        if (@args > 2) {
++            $server->owner (@args) or failure ($server->error, @_);
++        } else {
++            my $output = $server->owner (@args);
++            if (defined $output) {
++                print $output, "\n";
++            } elsif (not $server->error) {
++                print "No owner set\n";
++            } else {
++                failure ($server->error, @_);
++            }
++        }
++    } elsif ($command eq 'rename') {
++        check_args (3, 3, [], @args);
++        $server->rename (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'setacl') {
++        check_args (4, 4, [], @args);
++        $server->acl (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'setattr') {
++        check_args (4, -1, [], @args);
++        $server->attr (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'show') {
++        check_args (2, 2, [], @args);
++        my $output = $server->show (@args);
++        if (defined $output) {
++            print $output;
++        } else {
++            failure ($server->error, @_);
++        }
++    } elsif ($command eq 'store') {
++        check_args (2, 3, [3], @args);
++        if (@args == 2) {
++            local $/;
++            $args[2] = <STDIN>;
++        }
++        splice (@_, 3);
++        $server->store (@args) or failure ($server->error, @_);
++    } elsif ($command eq 'update') {
++        check_args (2, 2, [], @args);
++        my $output = $server->update (@args);
++        if (defined $output) {
++            print $output;
++        } else {
++            failure ($server->error, @_);
++        }
++    } else {
++        error "unknown command $command";
++    }
++    success (@_);
++}
++
++# Parse command-line options.
++my ($quiet);
++Getopt::Long::config ('require_order');
++GetOptions ('q|quiet' => \$quiet) or exit 1;
++$SYSLOG = 0 if $quiet;
++
++# Run the command.
++command (@ARGV);
++
++__END__
++
++##############################################################################
++# Documentation
++##############################################################################
++
++# The commands section of this document is duplicated from the documentation
++# for wallet and should be kept in sync.
++
++=for stopwords
++wallet-backend backend backend-specific remctld ACL acl timestamp getacl
++setacl metadata keytab keytabs enctypes enctype ktadd KDC Allbery
++autocreate MERCHANTABILITY NONINFRINGEMENT sublicense
++
++=head1 NAME
++
++wallet-backend - Wallet server for storing and retrieving secure data
++
++=head1 SYNOPSIS
++
++B<wallet-backend> [B<-q>] I<command> [I<args> ...]
++
++=head1 DESCRIPTION
++
++B<wallet-backend> implements the interface between B<remctld> and the
++wallet system.  It is written to run under B<remctld> and expects the
++authenticated identity of the remote user in the REMOTE_USER environment
++variable.  It uses REMOTE_HOST or REMOTE_ADDR if REMOTE_HOST isn't set for
++additional trace information.  It accepts the command from B<remctld> on
++the command line, creates a Wallet::Server object, and calls the
++appropriate methods.
++
++This program is a fairly thin wrapper around Wallet::Server that
++translates command strings into method calls and returns the results.  It
++does check all arguments except for the <data> argument to the store
++command and rejects any argument not matching C<^[\w_/.-]+\z>; in other
++words, only alphanumerics, underscore (C<_>), slash (C</>), period (C<.>),
++and hyphen (C<->) are permitted in arguments.  This provides some
++additional security over and above the checking already done by the rest
++of the wallet code.
++
++=head1 OPTIONS
++
++=over 4
++
++=item B<--quiet>, B<-q>
++
++If this option is given, B<wallet-backend> will not log its actions to
++syslog.
++
++=back
++
++=head1 COMMANDS
++
++Most commands are only available to wallet administrators (users on the
++C<ADMIN> ACL).  The exceptions are C<acl check>, C<check>, C<get>,
++C<store>, C<show>, C<destroy>, C<flag clear>, C<flag set>, C<getattr>,
++C<setattr>, and C<history>.  C<acl check> and C<check> can be run by
++anyone.  All of the rest of those commands have their own ACLs except
++C<getattr> and C<history>, which use the C<show> ACL, C<setattr>, which
++uses the C<store> ACL, and C<comment>, which uses the owner or C<show> ACL
++depending on whether one is setting or retrieving the comment.  If the
++appropriate ACL is set, it alone is checked to see if the user has access.
++Otherwise, C<destroy>, C<get>, C<store>, C<show>, C<getattr>, C<setattr>,
++C<history>, and C<comment> access is permitted if the user is authorized
++by the owner ACL of the object.
++
++Administrators can run any command on any object or ACL except for C<get>
++and C<store>.  For C<get> and C<store>, they must still be authorized by
++either the appropriate specific ACL or the owner ACL.
++
++If the locked flag is set on an object, no commands can be run on that
++object that change data except the C<flags> commands, nor can the C<get>
++command be used on that object.  C<show>, C<history>, C<getacl>,
++C<getattr>, and C<owner>, C<comment>, or C<expires> without an argument
++can still be used on that object.
++
++For more information on attributes, see L<ATTRIBUTES>.
++
++=over 4
++
++=item acl add <id> <scheme> <identifier>
++
++Add an entry with <scheme> and <identifier> to the ACL <id>.  <id> may be
++either the name of an ACL or its numeric identifier.
++
++=item acl check <id>
++
++Check whether an ACL with the ID <id> already exists.  If it does, prints
++C<yes>; if not, prints C<no>.
++
++=item acl create <name>
++
++Create a new, empty ACL with name <name>.  When setting an ACL on an
++object with a set of entries that don't match an existing ACL, first
++create a new ACL with C<acl create>, add the appropriate entries to it
++with C<acl add>, and then set the ACL on an object with the C<owner> or
++C<setacl> commands.
++
++=item acl destroy <id>
++
++Destroy the ACL <id>.  This ACL must no longer be referenced by any object
++or the ACL destruction will fail.  The special ACL named C<ADMIN> cannot
++be destroyed.
++
++=item acl history <id>
++
++Display the history of the ACL <id>.  Each change to the ACL (not
++including changes to the name of the ACL) will be represented by two
++lines.  The first line will have a timestamp of the change followed by a
++description of the change, and the second line will give the user who made
++the change and the host from which the change was made.
++
++=item acl remove <id> <scheme> <identifier>
++
++Remove the entry with <scheme> and <identifier> from the ACL <id>.  <id>
++may be either the name of an ACL or its numeric identifier.  The last
++entry in the special ACL C<ADMIN> cannot be removed to protect against
++accidental lockout, but administrators can remove themselves from the
++C<ADMIN> ACL and can leave only a non-functioning entry on the ACL.  Use
++caution when removing entries from the C<ADMIN> ACL.
++
++=item acl rename <id> <name>
++
++Renames the ACL identified by <id> to <name>.  This changes the
++human-readable name, not the underlying numeric ID, so the ACL's
++associations with objects will be unchanged.  The C<ADMIN> ACL may not be
++renamed.  <id> may be either the current name or the numeric ID.  <name>
++must not be all-numeric.  To rename an ACL, the current user must be
++authorized by the C<ADMIN> ACL.
++
++=item acl replace <id> <new-id>
++
++Find any objects owned by <id>, and then change their ownership to
++<new_id> instead.  <new-id> should already exist, and may already have
++some objects owned by it.  <id> is not deleted afterwards, though in
++most cases that is probably your next step.  The C<ADMIN> ACL may not be
++replaced from.  <id> and <new-id> may be either the current name or the
++numeric ID.  To replace an ACL, the current user must be authorized by
++the C<ADMIN> ACL.
++
++=item acl show <id>
++
++Display the name, numeric ID, and entries of the ACL <id>.
++
++=item autocreate <type> <name>
++
++Create a new object of type <type> with name <name>.  The user must be
++listed in the default ACL for an object with that type and name, and the
++object will be created with that default ACL set as the object owner.
++
++=item check <type> <name>
++
++Check whether an object of type <type> and name <name> already exists.  If
++it does, prints C<yes>; if not, prints C<no>.
++
++=item comment <type> <name> [<comment>]
++
++If <comment> is not given, displays the current comment for the object
++identified by <type> and <name>, or C<No comment set> if none is set.
++
++If <comment> is given, sets the comment on the object identified by
++<type> and <name> to <comment>.  If <comment> is the empty string, clears
++the comment.
++
++=item create <type> <name>
++
++Create a new object of type <type> with name <name>.  With some backends,
++this will trigger creation of an entry in an external system as well.
++The new object will have no ACLs and no owner set, so usually the
++administrator will want to then set an owner with C<owner> so that the
++object will be usable.
++
++=item destroy <type> <name>
++
++Destroy the object identified by <type> and <name>.  With some backends,
++this will trigger destruction of an object in an external system as well.
++
++=item expires <type> <name> [<date> [<time>]]
++
++If <date> is not given, displays the current expiration of the object
++identified by <type> and <name>, or C<No expiration set> if none is set.
++The expiration will be displayed in seconds since epoch.
++
++If <date> is given, sets the expiration on the object identified by <type>
++and <name> to <date> and (if given) <time>.  <date> and <time> must be in
++some format that can be parsed by the Perl Date::Parse module.  Most
++common formats are supported; if in doubt, use C<YYYY-MM-DD HH:MM:SS>.  If
++<date> is the empty string, clears the expiration of the object.
++
++Currently, the expiration of an object is not used.
++
++=item flag clear <type> <name> <flag>
++
++Clears the flag <flag> on the object identified by <type> and <name>.
++
++=item flag set <type> <name> <flag>
++
++Sets the flag <flag> on the object identified by <type> and <name>.
++Recognized flags are C<locked>, which prevents all further actions on that
++object until the flag is cleared, and C<unchanging>, which tells the
++object backend to not generate new data on get but instead return the same
++data as previously returned.  The C<unchanging> flag is not meaningful for
++objects that do not generate new data on the fly.
++
++=item get <type> <name>
++
++Prints to standard output the data associated with the object identified
++by <type> and <name>.  This may trigger generation of new data and
++invalidate old data for that object depending on the object type.
++
++=item getacl <type> <name> <acl>
++
++Prints the ACL <acl>, which must be one of C<get>, C<store>, C<show>,
++C<destroy>, or C<flags>, for the object identified by <type> and <name>.
++Prints C<No ACL set> if that ACL isn't set on that object.  Remember that
++if the C<get>, C<store>, or C<show> ACLs aren't set, authorization falls
++back to checking the owner ACL.  See the C<owner> command for displaying
++or setting it.
++
++=item getattr <type> <name> <attr>
++
++Prints the object attribute <attr> for the object identified by <type> and
++<name>.  Attributes are used to store backend-specific information for a
++particular object type, and <attr> must be an attribute type known to the
++underlying object implementation.  The attribute values, if any, are
++printed one per line.  If the attribute is not set on this object, nothing
++is printed.
++
++=item history <type> <name>
++
++Displays the history for the object identified by <type> and <name>.  This
++human-readable output will have two lines for each action that changes the
++object, plus for any get action.  The first line has the timestamp of the
++action and the action, and the second line gives the user who performed
++the action and the host from which they performed it.
++
++=item owner <type> <name> [<owner>]
++
++If <owner> is not given, displays the current owner ACL of the object
++identified by <type> and <name>, or C<No owner set> if none is set.  The
++result will be the name of an ACL.
++
++If <owner> is given, sets the owner of the object identified by <type> and
++<name> to <owner>.  If <owner> is the empty string, clears the owner of
++the object.
++
++=item rename <type> <name> <new-name>
++
++Renames an existing object.  This currently only supports file objects,
++where it renames the object itself, then the name and location of the
++object in the file store.
++
++=item setacl <type> <name> <acl> <id>
++
++Sets the ACL <acl>, which must be one of C<get>, C<store>, C<show>,
++C<destroy>, or C<flags>, to <id> on the object identified by <type> and
++<name>.  If <id> is the empty string, clears that ACL on the object.
++
++=item setattr <type> <name> <attr> <value> [<value> ...]
++
++Sets the object attribute <attr> for the object identified by <type> and
++<name>.  Attributes are used to store backend-specific information for a
++particular object type, and <attr> must be an attribute type known to the
++underlying object implementation.  To clear the attribute for this object,
++pass in a <value> of the empty string (C<''>).
++
++=item show <type> <name>
++
++Displays the current object metadata for the object identified by <type>
++and <name>.  This human-readable output will show the object type and
++name, the owner, any specific ACLs set on the object, the expiration if
++any, and the user, remote host, and time when the object was created, last
++stored, and last downloaded.
++
++=item store <type> <name> [<data>]
++
++Stores <data> for the object identified by <type> and <name> for later
++retrieval with C<get>.  Not all object types support this.  If <data> is
++not given as an argument, it will be read from standard input.
++
++=item update <type> <name>
++
++Prints to standard output the data associated with the object identified
++by <type> and <name>.  If the object is one that can have changing
++information, such as a keytab or password, then we generate new data for
++that object regardless of whether there is current data or the unchanging
++flag is set.
++
++=back
++
++=head1 ATTRIBUTES
++
++Object attributes store additional properties and configuration
++information for objects stored in the wallet.  They are displayed as part
++of the object data with C<show>, retrieved with C<getattr>, and set with
++C<setattr>.
++
++=head2 Keytab Attributes
++
++Keytab objects support the following attributes:
++
++=over 4
++
++=item enctypes
++
++Restricts the generated keytab to a specific set of encryption types.  The
++values of this attribute must be enctype strings recognized by Kerberos
++(strings like C<aes256-cts-hmac-sha1-96> or C<des-cbc-crc>).  Note that
++the salt should not be included; since the salt is irrelevant for keytab
++keys, it will always be set to C<normal> by the wallet.
++
++If this attribute is set, the specified enctype list will be passed to
++ktadd when get() is called for that keytab.  If it is not set, the default
++set in the KDC will be used.
++
++This attribute is ignored if the C<unchanging> flag is set on a keytab.
++Keytabs retrieved with C<unchanging> set will contain all keys present in
++the KDC for that Kerberos principal and therefore may contain different
++enctypes than those requested by this attribute.
++
++=back
++
++=head1 AUTHOR
++
++Russ Allbery <eagle@eyrie.org>
++
++=head1 COPYRIGHT AND LICENSE
++
++Copyright 2007, 2008, 2010, 2011, 2012, 2013 The Board of Trustees of the
++Leland Stanford Junior University
++
++Permission is hereby granted, free of charge, to any person obtaining a
++copy of this software and associated documentation files (the "Software"),
++to deal in the Software without restriction, including without limitation
++the rights to use, copy, modify, merge, publish, distribute, sublicense,
++and/or sell copies of the Software, and to permit persons to whom the
++Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE SOFTWARE.
++
++=head1 SEE ALSO
++
++Wallet::Server(3), remctld(8)
++
++This program is part of the wallet system.  The current version is
++available from L<http://www.eyrie.org/~eagle/software/wallet/>.
++
++=cut

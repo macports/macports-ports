@@ -1,5 +1,5 @@
---- BuildSupport.py.orig	2012-02-04 11:37:22.000000000 -0600
-+++ BuildSupport.py	2012-11-04 05:02:45.000000000 -0600
+--- BuildSupport.py.orig	2016-12-17 16:53:58.000000000 -0700
++++ BuildSupport.py	2016-12-17 16:53:31.000000000 -0700
 @@ -70,19 +70,15 @@
  # ------------------------------------------------------------------------------
  
@@ -24,7 +24,7 @@
      "linux2" : { arch32 : ["/usr/local/lib"],
                   arch64 : ["/usr/local64/lib"]}
  }
-@@ -214,6 +210,8 @@
+@@ -221,6 +217,8 @@
          env.Append(LIBS = [Site.boostThreadLib])
      else:
          env.Append(LIBS = ["boost_thread-mt"])
@@ -33,8 +33,8 @@
      # Compile flags
      if isDebugBuild():
          env.Append(CCFLAGS = ["-g"])
-@@ -222,13 +220,6 @@
-     env.Append(CCFLAGS = ["-Wall"])
+@@ -231,13 +229,6 @@
+     env.Append(CCFLAGS = ["-Wno-unused-local-typedef"])
      # Set number of jobs to use
      env.SetOption('num_jobs', numCPUs())
 -    # 64 bit setup

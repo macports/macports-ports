@@ -1,16 +1,16 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 
 PortSystem          1.0
 PortGroup           muniversal 1.0
-PortGroup           qt4 1.0
+PortGroup           github 1.0
+PortGroup           active_variants 1.1
 
-name                mlt
+github.setup        mltframework mlt 6.10.0 v
+github.tarball_from releases
+
 epoch               3
-version             6.0.0
-revision            1
 categories          multimedia
-maintainers         dennedy.org:dan
+maintainers         {dennedy.org:dan @ddennedy} {gmail.com:rjvbertin @RJVB} openmaintainer
 license             GPL-2+
 
 description         Open source multimedia framework - core libraries
@@ -23,12 +23,43 @@ long_description    MLT is an open source multimedia framework, designed and dev
                     \
                     This package contains the files necessary for running applications that use \
                     the MLT multimedia framework.
-homepage            http://www.mltframework.org/
-master_sites        sourceforge:project/mlt/mlt
+homepage            https://www.mltframework.org/
 platforms           darwin
 
-checksums           rmd160 e9b03671545aa5349541495bc226328f639178cf \
-                    sha256 317874cfc7fc528dddbb3a7a32fd46372aae22bdc4527be1cfb55c93fa66e3bd 
+checksums           rmd160  fcb78f4250effd63e1097cabb737adcd840da6ee \
+                    sha256  10642a80f81e12c6cc5405e60ced640b3dd325c793fe73207ae07de321ad6810 \
+                    size    1384632
+
+subport ${name}-qt5 {
+    replaced_by     ${name}
+    PortGroup obsolete 1.0
+}
+
+variant qt4 conflicts qt5 description "build Qt4 version of ${name}" {
+    PortGroup       qt4   1.0
+}
+
+variant qt5 conflicts qt4 description "build Qt5 version of ${name}" {
+    PortGroup       qt5   1.0
+    PortGroup       cxx11 1.1
+
+    qt5.min_version 5.6
+
+    qt5.depends_component \
+                    qtsvg
+
+    configure.cxxflags-append \
+                    -std=c++11
+}
+
+# somewhat arbitrary boundary for Qt versions
+if {![variant_isset qt4] && ![variant_isset qt5]} {
+    if {${os.major} >= 14} {
+        default_variants-append +qt5
+    } else {
+        default_variants-append +qt4
+    }
+}
 
 depends_build-append port:git \
                     port:doxygen
@@ -37,20 +68,35 @@ depends_lib-append  port:atk \
                     port:frei0r-plugins \
                     path:lib/libavcodec.dylib:ffmpeg \
                     port:libsamplerate \
-                    port:libsdl \
-                    port:libsdl_image \
+                    port:libsdl2 \
                     port:libvorbis \
                     port:sox \
                     port:libxml2 \
-                    port:libexif
+                    port:libexif \
+                    port:fftw-3 \
+                    port:libebur128
 
-configure.args      --enable-gpl \
-                    --qt-libdir=${qt_frameworks_dir} \
-                    --qt-includedir=${qt_includes_dir}/Qt \
+configure.args-append \
+                    --enable-gpl \
                     --disable-jackrack \
                     --disable-mmx \
                     --disable-gtk2 \
-                    --disable-swfdec
+                    --disable-swfdec \
+                    --disable-opencv \
+                    --disable-sdl \
+                    --without-kde
+
+pre-configure {
+    configure.env-append \
+                    QTDIR=${qt_dir}
+    # NB: qt-includedir can and should be set to ${qt_includes_dir},
+    # not ${qt_includes_dir}/Qt !!
+    configure.args-append \
+                    --qt-libdir=${qt_frameworks_dir} \
+                    --qt-includedir=${qt_includes_dir}
+
+    configure.cflags-append  "-I${qt_includes_dir}"
+}
 
 platform darwin 10 {
     if {${build_arch} eq "x86_64"} {
@@ -59,8 +105,18 @@ platform darwin 10 {
 }
 
 configure.cflags-append     "-I${prefix}/include"
-configure.cflags-append     "-I${qt_includes_dir}"
 configure.ldflags-delete    "-L${prefix}/lib"
+
+# make sure the build system actually sees our settings by amending the toplevel config.mak.
+post-configure {
+    set config.mak [open ${worksrcpath}/config.mak "a"]
+    puts ${config.mak} "CC=${configure.cc}"
+    puts ${config.mak} "CXX=${configure.cxx}"
+    puts ${config.mak} "CFLAGS+=${configure.cflags} ${configure.cppflags}"
+    puts ${config.mak} "CXXFLAGS+=${configure.cxxflags} ${configure.cppflags}"
+    puts ${config.mak} "LDLAGS+=${configure.ldflags}"
+    close ${config.mak}
+}
 
 build.args-append           CC="${configure.cc}" CXX="${configure.cxx}" CPP="${configure.cpp}"
 
@@ -79,8 +135,32 @@ if {[variant_isset universal]} {
 variant gtk2 description {include the gtk2 module (for additional image and text producers)} {
     configure.args-delete   --disable-gtk2
     depends_lib-append      port:gtk2
+    require_active_variants gtk2 x11
 }
 
-livecheck.type      regex
-livecheck.url       http://sourceforge.net/projects/${name}/files/
-livecheck.regex     /${name}-(\[0-9.\]+)${extract.suffix}
+variant gpl3 description {enable GPLv3 components} {
+    configure.args-append   --enable-gpl3
+    license                 GPL-3+
+}
+
+# use an opencv variant to avoid opportunistic dependencies on this library
+# the opencv dependency must match our choice of Qt version, which is
+# another reason why opencv support is provided through a variant.
+variant opencv description {enable OpenCV support} {
+    depends_lib-append      port:opencv
+    configure.args-delete   --disable-opencv
+    if {[variant_isset qt4]} {
+        require_active_variants opencv qt4
+    } elseif {[variant_isset qt5]} {
+        require_active_variants opencv qt5
+    }
+}
+
+# Allow building without SDL support, useful when used in dependents that themselves
+# depend on SDL 1.2, to avoid (warnings about) runtime conflicts.
+variant disable_sdl description {disable SDL support to avoid SDL vs. SDL2 conflicts} {
+    configure.args-append   --disable-sdl2
+    configure.cppflags-append \
+                            -DMELT_NOSDL
+    depends_lib-delete      port:libsdl2
+}

@@ -1,27 +1,19 @@
-# $Id$
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem    1.0
 
 name          lalburst
-version       1.4.2
-categories    science
-platforms     darwin
-maintainers   ram aronnax
-license       GPL-2+
+version       1.5.0
+revision      1
 
 description   LSC Algorithm Library - Burst
 long_description \
   LIGO Scientific Collaboration Algorithm Library - Burst, containing \
   routines for burst gravitational wave data analysis.
 
-homepage      https://www.lsc-group.phys.uwm.edu/daswg/projects/lalsuite.html
-master_sites  http://software.ligo.org/lscsoft/source/lalsuite
-use_xz        yes
-
-checksums     rmd160 a07161b063463f1b3ea108e80f650c95a3fd06ab \
-              sha256 0a10f43e6ea4948163484cfcd8f8c80c7de6785ce1d65e2976b99e6d720760ad
-
-depends_build port:pkgconfig
+checksums     rmd160 498a8604b115e2212166522876ad6a39fe7d67ba \
+              sha256 2918c61c8c767bfa1fc2d439e9b7ca15e0e7a186ec045a6b563f9dcb6c1a1ca2 \
+              size   865204
 
 depends_lib   port:lal \
               port:lalmetaio \
@@ -29,24 +21,66 @@ depends_lib   port:lal \
               port:gsl \
               port:metaio
 
-# Choose a compiler that supports OpenMP.
-compiler.whitelist macports-clang-3.8 macports-clang-3.7 macports-clang-3.9
-compiler.fallback  macports-clang-3.8
+# add Python dependencies for python subports
+if {[string match "py*" ${subport}]} {
+    set numbers [regexp -all -inline -- {[0-9]+} ${subport}]
+    set v [lindex ${numbers} 0]
+    # python, C-library port, and numpy are automatically added below
+    depends_lib     port:py${v}-lal port:py${v}-lalmetaio port:py${v}-lalsimulation \
+                    port:py${v}-scipy port:py${v}-lscsoft-glue
+    revision        1
+}
 
-configure.args --mandir=${prefix}/share/man \
+# add Octave dependencies for octave subports
+if {[string match "octave-*" ${subport}]} {
+    # octave, and C-library port are automatically added below
+    depends_lib     port:octave-lal port:octave-lalmetaio port:octave-lalsimulation
+    revision        2
+}
+
+###############################################################################
+### Everything below this line is common to all LALSuite ports. ###############
+###############################################################################
+
+categories    science
+platforms     darwin
+maintainers   {ram @skymoo} {aronnax @lpsinger}
+license       GPL-2+
+
+# The GPL and OpenSSL licenses conflict with each other, and our build
+# dependency on Python results in an indirect dependency on OpenSSL.
+# However, there is no real conflict in the case of LALSuite because Python
+# is used (1) as an interpreter to run part of the build and (2) as a
+# separately installed interpreter that is invoked when the user runs some of
+# our scripts.
+license_noconflict openssl
+
+homepage      https://wiki.ligo.org/Computing/DASWG/LALSuite
+master_sites  http://software.ligo.org/lscsoft/source/lalsuite
+use_xz        yes
+
+depends_build-append \
+              port:pkgconfig \
+              port:swig \
+
+# Choose a compiler that supports OpenMP.
+compiler.whitelist macports-clang-6.0 macports-clang-5.0 macports-clang-4.0 macports-clang-7.0 macports-clang-3.9
+compiler.fallback  macports-clang-6.0
+
+configure.args-append \
+               --mandir=${prefix}/share/man \
                --disable-silent-rules \
                --disable-gcc-flags \
-               --disable-debug \
-               PYTHON=false
+               --enable-swig-iface \
+               --disable-swig-octave \
+               --disable-swig-python \
+               --disable-python
 
-use_parallel_build yes
-
-livecheck.type   regex
-livecheck.url    ${master_sites}
-livecheck.regex  {lalburst-(\d+(?:\.\d+)*).tar.xz}
+test.run      yes
+test.target   check
 
 # Create subports for each supported Python version
-foreach v {27 34 35} {
+foreach v {27 35 36 37} {
   subport py${v}-${name} {
     set pythonversion     [string range ${v} 0 end-1].[string index ${v} end]
     set pythonhome \
@@ -59,13 +93,11 @@ foreach v {27 34 35} {
                           ${pythonversion} bindings, modules, and scripts.
 
     depends_build-append  port:swig-python
-    depends_lib-strsed    g/port:lal/port:py${v}-lal/
-    depends_lib-append    port:${name}
-    depends_lib-prepend   port:python${v} port:py${v}-numpy
+    depends_lib-prepend   port:python${v} port:${name} port:py${v}-numpy
 
-    configure.args-delete PYTHON=false
-    configure.args-append PYTHON=${pythonhome}/bin/python${pythonversion} --enable-swig-python
-    configure.args-append SWIG_CPPFLAGS="-I${pythonhome}/include"
+    configure.args-append     PYTHON=${pythonhome}/bin/python${pythonversion}
+    configure.args-replace    --disable-python --enable-python
+    configure.args-replace    --disable-swig-python --enable-swig-python
 
     destroot.args-append  pythondir="${pythondir}" \
                           pyexecdir="${pythondir}" \
@@ -80,13 +112,52 @@ foreach v {27 34 35} {
     }
 
     post-destroot {
+      # Remove Python include directory
+      # (duplicate of SWIG headers in ${prefix}/include)
+      file delete -force ${destroot}${pythonhome}/include
+
+      # Create symbolic links in ${prefix}/bin to Python 2.7 scripts
       if {${subport} eq "py27-${name}"} {
         foreach script [glob -tails -nocomplain -directory ${destroot}${pythonhome}/bin *] {
           file link -symbolic ${destroot}${prefix}/bin/${script} ../Library/Frameworks/Python.framework/Versions/${pythonversion}/bin/${script}
         }
       }
     }
-
-    livecheck.type        none
   }
+}
+
+subport octave-${name} {
+  set pythonversion     [string range ${v} 0 end-1].[string index ${v} end]
+  set pythonhome \
+    "${frameworks_dir}/Python.framework/Versions/${pythonversion}"
+  set pythondir "${pythonhome}/lib/python${pythonversion}/site-packages"
+
+  categories-prepend    octave
+  description           Octave ${pythonversion} bindings for ${description}
+  long_description      ${long_description} This package provides Octave \
+                        bindings, modules, and scripts.
+
+  depends_build-append  port:swig-octave
+  depends_lib-prepend   port:octave port:${name}
+
+  configure.args-replace --disable-swig-octave --enable-swig-octave
+
+  # Only install SWIG bindings, Python libraries, and Python scripts
+  destroot {
+    command_exec destroot "" "-C swig"
+  }
+
+  post-destroot {
+    # Remove Octave include directory
+    # (duplicate of SWIG headers in ${prefix}/include)
+    file delete -force ${destroot}${prefix}/include
+  }
+}
+
+if {${name} eq ${subport}} {
+  livecheck.type        regex
+  livecheck.url         ${master_sites}
+  livecheck.regex       ${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}
+} else {
+  livecheck.type        none
 }

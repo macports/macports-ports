@@ -1,34 +1,4 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
-
-# Copyright (c) 2010-2014 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
 #
 # Usage:
 # PortGroup     kde4 1.1
@@ -67,14 +37,26 @@ switch ${os.platform}_${os.major} {
     }
 }
 
+# Install the kdelibs headerfiles in their own directory to prevent clashes with KF5 headers
+set kde4.include_prefix KDE4
+set kde4.include_dirs   ${prefix}/include/${kde4.include_prefix}
+set kde4.cmake_module_dir \
+                        ${prefix}/lib/cmake/${kde4.include_prefix}
+
+set kde4.mirror         http://mirrors.mit.edu/kde/stable/
+
 # augment the CMake module lookup path, if necessary depending on
 # where Qt4 is installed.
 if {${qt_cmake_module_dir} ne ${cmake_share_module_dir}} {
-    set cmake_module_path ${cmake_share_module_dir}\;${qt_cmake_module_dir}
-    configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
-    configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}"
-    unset cmake_module_path
+    set cmake_module_path ${kde4.cmake_module_dir}\;${cmake_share_module_dir}\;${qt_cmake_module_dir}
+} else {
+    # prepend our own (new) install location for cmake modules:
+    set cmake_module_path ${kde4.cmake_module_dir}\;${cmake_share_module_dir}
 }
+configure.args-delete -DCMAKE_MODULE_PATH=${cmake_share_module_dir}
+configure.args-append -DCMAKE_MODULE_PATH="${cmake_module_path}" \
+                        -DCMAKE_PREFIX_PATH="${cmake_module_path}"
+
 
 # standard configure args; virtually all KDE ports use CMake and Qt4.
 configure.args-append   -DBUILD_doc=OFF \
@@ -86,7 +68,7 @@ configure.args-append   -DBUILD_doc=OFF \
 
 # explicitly define certain headers and libraries, to avoid
 # conflicts with those installed into system paths by the user.
-configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl \
+configure.args-append   -DDOCBOOKXSL_DIR=${prefix}/share/xsl/docbook-xsl-nons \
                         -DGETTEXT_INCLUDE_DIR=${prefix}/include \
                         -DGETTEXT_LIBRARY=${prefix}/lib/libgettextlib.dylib \
                         -DGIF_INCLUDE_DIR=${prefix}/include \

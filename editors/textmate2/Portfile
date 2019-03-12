@@ -1,15 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 
 PortSystem              1.0
+PortGroup               compiler_blacklist_versions 1.0
 PortGroup               github 1.0
-PortGroup               xcodeversion 1.0
 
 epoch                   4
-github.setup            textmate textmate 2.0-beta.9.2 v
-revision                0
+github.setup            textmate textmate 2.0-rc.10 v
 
-maintainers             cal openmaintainer
+maintainers             {cal @neverpanic} openmaintainer
 name                    textmate2
 
 categories              editors aqua
@@ -25,27 +23,25 @@ platforms               darwin
 supported_archs         x86_64
 license                 GPL-3+
 
-minimum_xcodeversions   {11 4.4}
-
 fetch.type              git
 post-fetch {
     system -W ${worksrcpath} "${git.cmd} submodule update --init"
 }
 
-patchfiles              patch-configure-versionnumber.diff \
-                        patch-target.diff \
-                        patch-frameworks_license_target.diff \
-                        patch-Applications_commit_target.diff
-
-# The build will fail with deployment target set to 10.8
-macosx_deployment_target 10.7
+patchfiles              patch-Applications_commit_target.diff \
+                        patch-configure-brew.diff \
+                        patch-configure-versionnumber.diff \
+                        patch-ninja-verbose.diff \
+                        0001-Revert-Build-with-MacOSX10.11-SDK.patch \
+                        0001-Add-missing-link-dependency-to-Preferences.patch \
+                        ae470335a234e336c3d0337f065e26b29751e668.patch
 
 post-patch {
     reinplace "s/@VERSION@/${version}/" ${worksrcpath}/configure
     fs-traverse file ${worksrcpath} {
         if {[file tail ${file}] == "target"} {
-            reinplace "/TESTS *=/d" ${file}
-            reinplace "/TEST_SOURCES *=/d" ${file}
+            reinplace -q "/TESTS *=/d" ${file}
+            reinplace -q "/TEST_SOURCES *=/d" ${file}
         }
     }
 }
@@ -53,7 +49,8 @@ post-patch {
 depends_build-append    port:ninja \
                         port:ragel \
                         port:sparsehash \
-                        port:proctools
+                        port:proctools \
+                        path:share/curl/curl-ca-bundle.crt:curl-ca-bundle
 
 depends_skip_archcheck  ninja ragel proctools
 
@@ -65,18 +62,55 @@ depends_lib-append      port:boost \
                         port:zlib \
                         port:capnproto
 
-if {${os.platform} ne "darwin" || ${os.major} < 11} {
+if {${os.platform} ne "darwin" || ${os.major} < 12} {
     depends_fetch
     depends_build
     depends_lib
     pre-fetch {
-        ui_error "${name} only works with Mac OS X 10.7 Lion or later."
+        ui_error "${name} @${version} only works with OS X Mountain Lion v10.8 or later."
         return -code error "incompatible Mac OS X version"
     }
 }
 
-configure.env-append    builddir=${worksrcpath}/build \
-                        capnp_prefix=${prefix}
+if {${os.major} < 17} {
+    # On all systems older than High Sierra, the system ruby is linked against
+    # OpenSSL 0.9.8 and cannot connect to GitHub. Depend on our own ruby
+    # instead.
+    depends_build-append port:ruby25
+    post-patch {
+        reinplace "s|^#!/System/Library/Frameworks/Ruby.framework/Versions/Current/usr/bin/ruby|#!${prefix}/bin/ruby2.5|" ${worksrcpath}/bin/gen_html
+    }
+}
+
+# Needs support for -std=c++14.
+compiler.blacklist      {clang < 602}
+
+# Needs support for Objective-C lightweight generics.
+if {[vercmp ${configure.sdk_version} 10.11] < 0} {
+    configure.sdk_version   10.11
+    if {[catch {set configure.sdkroot} sdkroot] || $sdkroot eq ""} {
+        pre-fetch {
+            ui_error "${name} @${version} requires the OS X 10.11 SDK or later."
+            return -code error "incompatible SDK version"
+        }
+    }
+}
+
+if {![catch {set configure.sdkroot} sdkroot] && $sdkroot ne ""} {
+    # The configure script only passes along CC/CXX, not *FLAGS.
+    configure.cc-append     -isysroot${sdkroot}
+    configure.cxx-append    -isysroot${sdkroot}
+}
+
+# The build system forces the use of libc++. This is ok because the port
+# doesn't provide any C++ libraries nor use any C++ libraries from deps.
+configure.cxx_stdlib    libc++
+
+configure.env-append    boostdir=${prefix}/include/boost \
+                        builddir=${worksrcpath}/build \
+                        capnp_prefix=${prefix} \
+                        libressl_prefix=${prefix} \
+                        sparsedir=${prefix}/include/sparsehash
 
 pre-configure {
     # the textmate build expects this to be present
@@ -90,7 +124,7 @@ post-configure {
 }
 
 build.cmd               ninja
-build.args              -v -j ${build.jobs}
+build.args              -v -j${build.jobs}
 build.target            TextMate mate
 
 destroot {

@@ -1,17 +1,21 @@
 # -*- Mode: Tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:et:sw=4:ts=4:sts=4
-# $Id$
 
 PortSystem      1.0
+
+PortGroup       compiler_blacklist_versions 1.0
+PortGroup       conflicts_build 1.0
 PortGroup       muniversal 1.0
+PortGroup       legacysupport 1.0
+PortGroup       active_variants 1.1
 
 name            gnutls
-version         3.4.16
+version         3.6.6
 revision        1
 set branch      [join [lrange [split ${version} .] 0 1] .]
 categories      devel security
 # yes, some of the libs are GPL only
 license         LGPL-2.1+ GPL-3+
-maintainers     mps openmaintainer
+maintainers     {mps @Schamschula} openmaintainer
 description     GNU Transport Layer Security Library
 homepage        http://www.gnutls.org/
 platforms       darwin
@@ -22,26 +26,36 @@ long_description \
     not include any patented algorithms \
     and is available under the GNU Lesser General Public License (LGPL).
 
-master_sites    ftp://ftp.gnutls.org/gcrypt/gnutls/v${branch}/ \
-                http://archive.hmug.org/src/gnutls/ \
+master_sites    https://www.gnupg.org/ftp/gcrypt/gnutls/v${branch}/ \
                 http://mirrors.dotsrc.org/gcrypt/gnutls/v${branch}/
 
-checksums       rmd160  a9ec303e93396ab8f7b0ddf57c9a19e7fd0a0322 \
-                sha256  d99abb1b320771b58c949bab85e4b654dd1e3e9d92e2572204b7dc479d923927
+checksums       rmd160  b83342901fc4d0f597d4d97e1d853431a27cc162 \
+                sha256  bb9acab8af2ac430edf45faaaa4ed2c51f86e57cb57689be6701aceef4732ca7 \
+                size    8257612
 
 use_xz          yes
 
-depends_build   port:gettext \
+# see: https://trac.macports.org/ticket/57958 for autoconf-archive
+# see: https://trac.macports.org/ticket/57893
+# and https://github.com/macports/macports-ports/pull/3379 for autogen
+conflicts_build autoconf-archive \
+                autogen
+
+depends_build-append \
+                port:gettext \
+                port:gtk-doc \
                 port:pkgconfig
 
-depends_lib     port:gmp \
-                port:libidn \
+depends_lib-append \
+                port:gmp \
+                port:libidn2 \
                 port:libtasn1 \
+                port:libunistring \
                 port:p11-kit \
                 port:nettle \
                 port:zlib
 
-patchfiles      patch-tests-pkcs11-pkcs11-mock.c.diff
+patchfiles      patch-lib-system-certs.c.diff
 
 post-patch {
     # Remove comments which confuse at least Leopard's assembler.
@@ -55,6 +69,7 @@ autoreconf.args -fvi
 configure.args  --disable-guile \
                 --disable-silent-rules \
                 --disable-libdane \
+                --disable-doc \
                 --enable-local-libopts \
                 --enable-openssl-compatibility \
                 --with-p11-kit \
@@ -84,6 +99,21 @@ if {[variant_isset dane] && ![file exists ${prefix}/var/run/unbound/root.key]} {
 "
 }
 
+variant doc description {Build documentation} {
+    configure.args-delete   --disable-doc
+
+    post-destroot {
+        move ${destroot}${prefix}/share/man/man1/certtool.1 ${destroot}${prefix}/share/man/man1/gnutls-certtool.1
+    }
+}
+
+variant guile description {Build guile bindings} {
+# there currently is a build issue with the guile variant
+# the workaround is to first install guile w/o guile and then with +guile
+    depends_lib-append      port:guile
+    configure.args-replace  --disable-guile --enable-guile
+}
+
 if {[variant_isset universal]} {
     set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
     set merger_host(i386) i686-apple-${os.platform}${os.major}
@@ -93,10 +123,12 @@ if {[variant_isset universal]} {
     configure.args-append \
         --host=i686-apple-${os.platform}${os.major} \
         --build=i686-apple-${os.platform}${os.major}
-} elseif {${build_arch} eq "x86_64"} {
+        default_variants    +doc
+} else {
     configure.args-append \
         --host=${build_arch}-apple-${os.platform}${os.major} \
         --build=${build_arch}-apple-${os.platform}${os.major}
+        default_variants    +doc
 }
 
 test.run        yes
@@ -104,11 +136,45 @@ test.target     check
 
 post-destroot {
     move ${destroot}${prefix}/bin/certtool ${destroot}${prefix}/bin/gnutls-certtool
-    move ${destroot}${prefix}/share/man/man1/certtool.1 ${destroot}${prefix}/share/man/man1/gnutls-certtool.1
 }
 
 platform darwin 8 {
     depends_build-append   port:texinfo
+    configure.cppflags-append -D__WORDSIZE=32
+}
+
+if { ${build_arch} eq "i386" || ${build_arch} eq "x86_64" } {
+    compiler.blacklist-append *gcc-4.0
+    compiler.blacklist-append *gcc-4.2
+    compiler.blacklist-append {clang < 400}
+}
+
+# needs a TLS supporting compiler on older systems
+# most of this code can disappear once the new compilers selection logic comes into base
+platform darwin powerpc {
+    compiler.whitelist macports-gcc-6
+    universal_variant no
+}
+platform darwin i386 {
+    if {${os.major} < 9} {
+        compiler.whitelist macports-gcc-6
+        universal_variant no
+    } elseif {${os.major} < 11} {
+        compiler.whitelist macports-clang-5.0
+        if {[file exists ${prefix}/bin/clang-mp-5.0]} {
+            if {[active_variants clang-5.0 emulated_tls]} {
+                # needs to use a newer NM version to handle clang-5.0's objects on leopard
+                if {${os.major} < 10} {
+                    depends_build-append port:cctools
+                    configure.env-append NM=${prefix}/bin/nm
+                    configure.args-append lt_cv_path_NM=${prefix}/bin/nm
+                }
+            } else {
+                ui_error "Please install clang-5.0 first, with the emulated_tls variant enabled."
+                error "unsupported configuration"
+            }
+        }
+    }
 }
 
 livecheck.type  regex

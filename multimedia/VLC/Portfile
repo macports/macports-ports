@@ -1,25 +1,14 @@
 # -*- coding: utf-8; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
-# $Id$
 
 PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           active_variants 1.1
-
-# TODO
-# if {[file exists ${prefix}/etc/macports/locales.tcl]} {
-#     # experimental feature to cut down the NLS/locale files, which take up over 50% of
-#     # the install footprint for VLC. This feature loads the locale_select PortGroup
-#     # if its configuration file exist; a variant is then added which prunes all translations from
-#     # ${destroot}${prefix}/share/locale except those whitelisted in etc/macports/locales.tcl .
-#     PortGroup       locale_select 1.0
-# }
+PortGroup           conflicts_build 1.0
 
 name                VLC
-version             2.2.2
-revision            4
 
 categories          multimedia devel
-maintainers         nomaintainer
+maintainers         {gmail.com:rjvbertin @RJVB} openmaintainer
 
 description         VLC is a cross-platform media player and streaming server
 long_description    VLC media player is a highly portable multimedia player for \
@@ -30,42 +19,58 @@ long_description    VLC media player is a highly portable multimedia player for 
 
 homepage            http://www.videolan.org
 
-subport             lib${name} {
-    maintainers         gmail.com:rjvbertin openmaintainer
-    description         the core engine and interface to VLC's multimedia framework
-    long_description    libVLC is the core engine and the interface to the multimedia \
-                        framework on which VLC media player is based.  It allows developers \
-                        to create a wide range of multimedia applications using the VLC features.
-    conflicts           ${name} VLC-devel libVLC-devel
-    homepage            http://www.videolan.org/vlc/libvlc.html
+subport lib${name} {
+    description     the core engine and interface to VLC's multimedia framework
+    long_description \
+                    libVLC is the core engine and the interface to the multimedia \
+                    framework on which VLC media player is based.  It allows developers \
+                    to create a wide range of multimedia applications using the VLC features.
+    conflicts       ${name} VLC2
+    homepage        http://www.videolan.org/vlc/libvlc.html
+    # libVLC builds on 10.9 (Darwin 13)
+    if {${os.major} < 13} {
+        replaced_by libVLC2
+        PortGroup   obsolete 1.0
+        patch       {}
+    }
 }
 
 if {${subport} eq ${name}} {
-    conflicts           lib${name} libVLC-devel VLC-devel
+    if {${os.major} < 14} {
+        replaced_by VLC2
+        PortGroup   obsolete 1.0
+        # given the Portfile design it's easier to shunt the entire patch phase
+        # rather than trying to keep the patchfiles list empty.
+        patch       {}
+    }
+    conflicts       lib${name} libVLC2
 }
 
+# VLC-2.1 and later are x86_64-only: https://trac.videolan.org/vlc/ticket/8161
+universal_variant   no
+supported_archs     x86_64
+
+version             3.0.6
 license             GPL-2
 
 platforms           darwin
 
 master_sites        http://download.videolan.org/pub/videolan/vlc/${version}/
+dist_subdir         VLC
 distname            vlc-${version}
 use_xz              yes
 
-checksums           rmd160  ff302536334622427e06250457c74f061d4329f8 \
-                    sha256  9ad23128be16f9b40ed772961272cb0748ed8e4aa1bc79c129e589feebea5fb5
-
-# Enable HFS compression.
-depends_extract-append      port:libarchive
-extract.post_args           "| bsdtar -x --hfsCompression"
+checksums           rmd160  717f81c5ab63d7d5cdb427a198d958e0e418609f \
+                    sha256  18c16d4be0f34861d0aa51fbd274fb87f0cab3b7119757ead93f3db3a1f27ed3 \
+                    size    25699704
 
 depends_build       port:pkgconfig
 
-depends_lib         port:a52dec \
+depends_lib-append  path:lib/libavcodec.diff:ffmpeg \
+                    port:a52dec \
                     port:avahi \
                     port:bzip2 \
                     port:faad2 \
-                    path:lib/libavcodec.dylib:ffmpeg \
                     port:flac \
                     port:fluidsynth \
                     port:fontconfig \
@@ -116,7 +121,6 @@ depends_lib         port:a52dec \
                     port:live555 \
                     port:ncurses \
                     port:nettle \
-                    port:opencv \
                     port:openjpeg15 \
                     path:lib/libssl.dylib:openssl \
                     port:orc \
@@ -130,76 +134,95 @@ depends_lib         port:a52dec \
                     port:vcdimager \
                     port:x264 \
                     port:x265
+depends_run-append  port:libaacs \
+                    port:libbdplus
 
-# the +qt5 and/or +qt4 variants of port:opencv currently lead to build errors
+platform darwin {
+    if {${os.major} < 13} {
+        pre-fetch {
+            ui_error "${name} ${version} requires Mac OS X 10.9 or greater."
+            return -code error "incompatible Mac OS X version"
+        }
+    } elseif {${os.major} == 13} {
+        macosx_deployment_target 10.10
+        configure.args-append \
+                    --with-macosx-version-min=10.9
+        if {![catch {exec xcrun --show-sdk-path -sdk macosx10.10} result]} {
+            ui_debug "Using SDK macosx10.10 : ${result}"
+            configure.args-append \
+                    --with-macosx-sdk=${result}
+        }
+        post-extract {
+            xinstall -m 755 -d ${worksrcpath}/include/os
+            xinstall -m 755 ${filespath}/lock.h ${worksrcpath}/include/os/lock.h
+        }
+        patchfiles-append \
+                    patch-build-on-darwin13.diff
+    }
+}
+
+depends_lib-append  port:lua
+
+# VLC doesn't currently build for me using port:clang-3.8
+compiler.blacklist-append \
+                    gcc-4.2 llvm-gcc-4.2 macports-clang-3.8 {clang < 300}
+
+patchfiles-append   configure.ac-no-arch.patch \
+                    patch-soundfont-path.diff
+
+if {![info exists replaced_by]} {
+    post-patch {
+        if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} == "libc++"} {
+            reinplace "s:-lstdc\+\+:-lc++:" \
+                ${worksrcpath}/modules/access/Makefile.am
+        }
+
+        reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/modules/codec/fluidsynth.c
+    }
+}
+
+configure.post_args-append "|& tee -a ${workpath}/.macports.${subport}.configure.log'"
 pre-configure {
-    if {![active_variants opencv "" {qt4 qt5}]} {
-        ui_error "${subport} cannot currently be built against port:opencv with the qt4 or qt5 variant.\
-        Install port:opencv without either qt variant and try again. This is only a build conflict; \
-        after building you can reactivate your preferred opencv variant"
-        return -code error "Install or activate port:opencv without a qt variant before building ${subport}"
-    }
+    set cmd [join "${configure.cmd} ${configure.pre_args} ${configure.args}"]
+    configure.pre_args-prepend "-cf '${configure.cmd} "
+    configure.cmd "/bin/csh"
+    ui_debug "configure command set to `${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}`"
+    system "echo '## ${cmd}' > ${workpath}/.macports.${subport}.configure.log"
 }
 
-# VLC 2.2.2 should have full Lua 5.3 compatibility, for now, depend on port:lua52
-# That requires the patch-for-lua52.diff which is appended to patchfiles below.
-# update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
-depends_lib-append  port:lua52
-# depends_lib-append  port:lua
-
-# VLC-2.1 and later are x86_64-only: https://trac.videolan.org/vlc/ticket/8161
-universal_variant   no
-supported_archs     x86_64
-
-compiler.blacklist  gcc-4.2 llvm-gcc-4.2 {clang < 300}
-
-pre-fetch {
-    if {${os.platform} eq "darwin" && ${os.major} < 10} {
-        ui_error "${name} ${version} requires Mac OS X 10.6 or greater."
-        return -code error "incompatible Mac OS X version"
-    }
-}
-
-patchfiles          buildfix-package.mak.patch \
-                    configure.ac-no-arch.patch \
-                    PR-34741-no__clang_version__.patch \
-                    static_assert.patch \
-                    no-sparkle.patch \
-                    patch-vlc-no-O4.diff \
-                    patch-opencv_includes.diff
-
-# The opencv example apparently builds on 10.11 but I'm having issues with it on 10.9
-# it doesn't appear to be indispensable, so simply skip it.
-patchfiles-append   patch-no-opencv_example.diff
-
-post-patch {
-    reinplace "s:librsvg-2/librsvg:librsvg:" \
-        ${worksrcpath}/modules/text_renderer/svg.c
-
-    if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} == "libc++"} {
-        reinplace "s:-lstdc\+\+:-lc++:" \
-            ${worksrcpath}/configure.ac \
-            ${worksrcpath}/modules/access/Makefile.am
-    }
-}
-
-use_autoreconf      yes
+# do autoreconf only the first time around
+use_autoreconf      [expr ![file exists ${worksrcpath}/config.status]]
 autoreconf.cmd      ./bootstrap
 autoreconf.pre_args
 autoreconf.args
 depends_build-append port:libtool port:autoconf port:automake
 
-configure.env-append CXXCPP="${configure.cxx} -E"
-build.args-append    DESTDIR=${worksrcpath}/dest_ignore V=1
+configure.env-append \
+                    CXXCPP="${configure.cxx} -E"
+build.args-append   DESTDIR=${worksrcpath}/dest_ignore V=1 -k
 
 # gl.c:121:3: error: Platform not recognized.
-configure.cppflags-append -D__unix__=1
+configure.cppflags-append -D__unix__=1 -Wno-unknown-pragmas
 
 # live555 is installed to a weird location
 configure.cppflags-append -I${prefix}/lib/live/liveMedia/include
 
 build.target        all
-destroot.target     install
+
+if {${subport} ne "lib${name}"} {
+    # The VLC.app target does not obey DESTDIR and tries to copy a
+    # non-existing folder.
+    destroot.destdir \
+                    prefix=${destroot}${prefix}
+    destroot.target VLC.app
+    # Don't try to install the (missing) shared/hrtfs folder.
+    # That folder is only used by the spatialaudio plugin which
+    # we don't build at the moment.
+    patchfiles-append \
+                    patch-no-hrtfs.diff
+} else {
+    destroot.target install
+}
 
 livecheck.url       http://download.videolan.org/pub/videolan/vlc/
 livecheck.regex     <a href=\"(\\d\[\\d|\.|\\w\]+).*/\">
@@ -209,36 +232,36 @@ configure.args-append \
                     --with-contrib=${worksrcpath}/contrib \
                     --disable-debug --disable-update-check --enable-gnutls \
                     --disable-notify --disable-dbus --enable-lua \
-                    --disable-gnomevfs --disable-growl --disable-macosx-vlc-app
+                    --disable-sparkle
 
 # Input Plugins
 configure.args-append \
-                    --enable-dvdnav --enable-dvdread --disable-smbclient --enable-vcdx \
-                    --disable-macosx-qtkit --disable-macosx-eyetv --disable-realrtsp \
-                    --disable-freerdp --enable-opencv --enable-sftp
+                    --enable-dvdnav --enable-dvdread --disable-smbclient \
+                    --disable-macosx-qtkit --disable-realrtsp \
+                    --disable-freerdp --disable-opencv --enable-sftp
 
 # Mux/Demux Plugins
 configure.args-append \
-                    --enable-dvbpsi --enable-ogg --enable-mux_ogg \
-                    --enable-mkv --enable-mod --enable-mpc --disable-shout
+                    --enable-dvbpsi --enable-ogg \
+                    --enable-mod --enable-mpc --disable-shout
 
 # Codec Plugins
 configure.args-append \
                     --enable-a52 --enable-faad --enable-flac --enable-live555 \
                     --enable-opus --enable-vorbis --enable-ogg --enable-mad --enable-libass \
-                    --enable-dca --enable-png --disable-quicktime --enable-twolame \
+                    --enable-dca --enable-png --enable-twolame \
                     --enable-speex --enable-theora --enable-x264 --enable-x265 --enable-postproc \
                     --disable-gst-decode --enable-avcodec --enable-avformat --enable-swscale \
-                    --disable-fluidsynth --enable-schroedinger --enable-vpx
+                    --enable-fluidsynth --enable-schroedinger --enable-vpx
 
 # Video Plugins. We do our best to deactivate X11 and disable its auto-detection by
 # claiming the headers and libs are somewhere they're not.
 configure.args-append \
-                    --disable-caca --enable-sdl --enable-sdl-image \
+                    --disable-caca --enable-sdl-image \
                     --without-x --disable-xcb --disable-xvideo \
                     --x-includes=${destroot} --x-libraries=${destroot} \
                     --enable-freetype --enable-fontconfig --enable-fribidi \
-                    --disable-svg --disable-svgdec
+                    --disable-svg --disable-svgdec --disable-wayland
 
 # Audio Plugins
 configure.args-append \
@@ -250,7 +273,6 @@ configure.args-append \
 # Interface Plugins
 configure.args-append \
                     --disable-macosx \
-                    --disable-macosx-dialog-provider \
                     --disable-qt \
                     --enable-ncurses \
                     --disable-skins2 \
@@ -262,14 +284,13 @@ configure.args-append \
 
 # Service Discovery Plugins
 configure.args-append \
-                    --enable-bonjour \
                     --enable-upnp
 
 # 20150209: Jack really would require a newer variant than what's currently in MacPorts
-variant jack description {Enable jack and fluidsynth plugins for audio output} {
-    depends_lib-append      port:jack port:fluidsynth port:portaudio
-    configure.args-delete   --disable-jack --disable-fluidsynth
-    configure.args-append   --enable-jack --enable-fluidsynth
+variant jack description {Enable jack plugin for audio output} {
+    depends_lib-append      port:jack port:portaudio
+    configure.args-delete   --disable-jack
+    configure.args-append   --enable-jack
 }
 
 variant dbus description {Enable DBus support} {
@@ -277,8 +298,11 @@ variant dbus description {Enable DBus support} {
     configure.args-replace  --disable-dbus --enable-dbus
 }
 
-variant qtkit description {Enable qtcapture and qtaudio} {
-    configure.args-replace  --disable-macosx-qtkit --enable-macosx-qtkit
+if {${os.major} <= 15} {
+    # QTKit was disabled in 10.12 "Sierra"
+    variant qtkit description {Enable qtcapture and qtaudio} {
+        configure.args-replace  --disable-macosx-qtkit --enable-macosx-qtkit
+    }
 }
 
 variant svg description {Enable SVG rendering and decoding support} {
@@ -300,7 +324,7 @@ variant smb description {Enable Samba 3 input support} {
 
 variant pulse description {Enable PulseAudio support} {
     depends_lib-append      port:pulseaudio
-    configure.args-replace  --disable-pulse --enable-pulse 
+    configure.args-replace  --disable-pulse --enable-pulse
 }
 
 variant x11 {
@@ -325,36 +349,17 @@ variant x11 {
     configure.args-append   --with-x --enable-xvideo --enable-xcb
 }
 
-if {${subport} ne "lib${name}"} {
-    variant qt4 conflicts qt5 description {Build using Qt4 UI. This will use qt4-mac. Experimental and probably dysfunctional} {
-        patchfiles-append       patch-vlc-no-qt5.diff \
-                                patch-vlc-qt-configureac.diff \
-                                patch-simplepreferences.diff
-
-        configure.args-replace  --disable-qt --enable-qt
-
-        PortGroup               qt4 1.0
-    }
-    variant qt5 conflicts qt4 description {Build using Qt5 UI. This will use qt5-mac. Experimental and probably dysfunctional} {
-        patchfiles-append       patch-vlc-qt-configureac.diff \
-                                patch-simplepreferences.diff
-
-        configure.args-replace  --disable-qt --enable-qt
-
-        PortGroup               qt5 1.0
-    }
-}
-
 variant quartz {
     depends_lib-delete      port:libsamplerate
     depends_lib-append      port:BGHUDAppKit
 
     patchfiles-append       patch-vlc-for-macports.diff
 
-    configure.args-delete   --disable-macosx \
-                            --enable-samplerate \
+    configure.args-delete   --enable-samplerate \
                             --disable-realrtsp
-    configure.args-append   --enable-macosx 
+    if {${subport} ne "lib${name}"} {
+        configure.args-replace  --disable-macosx --enable-macosx
+    }
     # taken from VLC's own configure.sh script for OS X:
     configure.args-append   --disable-samplerate \
                             --enable-merge-ffmpeg \
@@ -377,59 +382,51 @@ variant huge \
 
 if {${subport} ne "lib${name}"} {
     variant full \
-        requires huge quartz smb x11 \
+        requires huge quartz smb \
         description {Enable all variants except x11 (and except freerdp, currently)} {}
 } else {
     variant full \
         requires huge quartz smb \
-        description {Enable all variants (except freerdp, currently)} {}
+        description {Enable all variants except x11 (and except freerdp, currently)} {}
 }
 
-# this patchfile can probably go with VLC 2.2.2, or should be reviewed then.
-# update 2.2.2 : lua 5.3 gives compiler syntax errors so we stick with 5.2 for now.
-patchfiles-append           patch-for-lua52.diff
+patchfiles-append           patch-for-lua53.diff \
+                            patch-for-libvpx-1.8.0.diff
 
-platform macosx {
-    default_variants-append +quartz +qtkit
-
-    configure.args-replace  --disable-macosx-eyetv --enable-macosx-eyetv
-
-    if {${subport} ne "lib${name}"} {
-        configure.args-replace  --disable-macosx-vlc-app --enable-macosx-vlc-app
+platform darwin {
+    default_variants-append +quartz
+    if {${os.major} <= 15} {
+        default_variants-append +qtkit
     }
 
-    post-patch {
-        reinplace "s/Appkit/AppKit/" ${worksrcpath}/configure.ac
-        reinplace "/Sparkle.framework/d" \
-            ${worksrcpath}/extras/package/macosx/vlc.xcodeproj/project.pbxproj
-        reinplace "/SDKROOT/d" \
-            ${worksrcpath}/extras/package/macosx/vlc.xcodeproj/project.pbxproj
-        reinplace "/Growl.framework/d" \
-            ${worksrcpath}/extras/package/macosx/package.mak
+    patchfiles-append       patch-use-NSGetEnviron.diff \
+                            patch-no-@rpath.diff
 
-        reinplace "s:LD_LIBRARY_PATH:DYLD_LIBRARY_PATH:g" \
-            ${worksrcpath}/Makefile.am
+    if {![info exists replaced_by]} {
+        post-patch {
+            reinplace "/Sparkle.framework/d" \
+                ${worksrcpath}/extras/package/macosx/VLC.xcodeproj/project.pbxproj
+            reinplace "/SDKROOT/d" \
+                ${worksrcpath}/extras/package/macosx/VLC.xcodeproj/project.pbxproj
+            reinplace "/Growl.framework/d" \
+                ${worksrcpath}/extras/package/macosx/package.mak
 
-        reinplace "/argv/s/environ/*_NSGetEnviron()/" \
-            ${worksrcpath}/modules/misc/inhibit/xdg.c \
-            ${worksrcpath}/modules/stream_filter/decomp.c
+            reinplace "s:LD_LIBRARY_PATH:DYLD_LIBRARY_PATH:g" \
+                ${worksrcpath}/Makefile.am
 
-        reinplace "s/extern char \\*\\*environ;/#include <crt_externs.h>/" \
-            ${worksrcpath}/modules/misc/inhibit/xdg.c \
-            ${worksrcpath}/modules/stream_filter/decomp.c
+            if {![file exists ${worksrcpath}/contrib/BGHUDAppKit.framework]} {
+                ln -s ${frameworks_dir}/BGHUDAppKit.framework ${worksrcpath}/contrib/BGHUDAppKit.framework
+            }
 
-        if {![file exists ${worksrcpath}/contrib/BGHUDAppKit.framework]} {
-            ln -s ${frameworks_dir}/BGHUDAppKit.framework ${worksrcpath}/contrib/BGHUDAppKit.framework
+            # To trick configure
+            file mkdir "${worksrcpath}/contrib/lib"
         }
-
-        # To trick configure
-        file mkdir "${worksrcpath}/contrib/lib"
     }
 
     post-destroot {
-        eval file delete [glob ${destroot}${prefix}/lib/vlc/plugins/*/*.la]
+        file delete {*}[glob ${destroot}${prefix}/lib/vlc/plugins/*/*.la]
 
-        if {[variant_isset qt4] || [variant_isset qt5] || [variant_isset quartz]} {
+        if {[variant_isset quartz]} {
             if {${subport} ne "lib${name}"} {
                 copy ${worksrcpath}/VLC.app ${destroot}${applications_dir}/VLC.app
 
@@ -445,10 +442,20 @@ platform macosx {
                 delete ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/lua
 
                 # http://trac.macports.org/ticket/35131
-                ln -s ${prefix}/lib ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                xinstall -m 755 -d ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                foreach l [glob -nocomplain ${destroot}${prefix}/lib/*] {
+                    ln -s ${prefix}/lib/[file tail ${l}] ${destroot}${applications_dir}/VLC.app/Contents/MacOS/lib
+                }
                 ln -s ${prefix}/lib/vlc/plugins ${destroot}${applications_dir}/VLC.app/Contents/MacOS/plugins
                 ln -s ${prefix}/lib/vlc/lua ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/lua
-                ln -s ${prefix}/share/locale ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/locale
+                foreach d [glob -nocomplain ${destroot}${prefix}/share/locale/*] {
+                    set locale [file tail ${d}]
+                    set ldir ${destroot}${applications_dir}/VLC.app/Contents/MacOS/share/locale/${locale}/LC_MESSAGES
+                    xinstall -m 755 -d ${ldir}
+                    foreach m [glob -nocomplain ${d}/LC_MESSAGES/*] {
+                        ln -s ${prefix}/share/locale/${locale}/LC_MESSAGES/[file tail ${m}] ${ldir}/
+                    }
+                }
 
                 # the vlc executable needs to be started with a full path to the app bundle executable
                 # or else the Mac OS X interface will hang beyond even a ^C or ^\ :
@@ -463,11 +470,10 @@ platform macosx {
         }
     }
     post-activate {
-        if {[variant_isset qt4] || [variant_isset qt5]} {
-            notes-append "The Qt interface modules for VLC are currently dysfunctional. If you encounter bugs with them, please file them with VLC and not MacPorts."
-        }
-        system "${prefix}/lib/vlc/vlc-cache-gen -f ${prefix}/lib/vlc"
+        system "${prefix}/lib/vlc/vlc-cache-gen ${prefix}/lib/vlc"
     }
 }
+notes-append "MIDI support requires installing one or more SoundFont files,\
+    in ${prefix}/share/sounds/sf2, for instance from port:generaluser-soundfont."
 
 # kate: backspace-indents true; indent-pasted-text true; indent-width 4; keep-extra-spaces true; remove-trailing-spaces modified; replace-tabs true; replace-tabs-save true; syntax Tcl/Tk; tab-indents true; tab-width 4;

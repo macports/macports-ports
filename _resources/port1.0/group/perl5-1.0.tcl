@@ -1,58 +1,23 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
-# $Id$
-#
-# Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>,
-#                    Toby Peterson <toby@opendarwin.org>
-# Copyright (c) 2002 Apple Computer, Inc.
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
 
 # portfile configuration options
 # perl5.branches: the major perl versions supported by this module. A
 #   subport will be created for each. e.g. p5.12-foo, p5.10-foo, ...
 # perl5.branches must be set in the portfile
 # perl5.default_branch: the branch used when you request p5-foo
-# perl5.use_search_cpan_org: if true use search.cpan.org instead of
-#    metacpan.org for livecheck and homepage. Default: false.
-options perl5.default_branch perl5.branches perl5.use_search_cpan_org
+options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
-default perl5.use_search_cpan_org {false}
 
 proc perl5_get_default_branch {} {
     global prefix perl5.branches
-    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.24
+    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.26
     if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
         set ret [join [lrange [split $val .] 0 1] .]
     } else {
-        set ret 5.24
+        set ret 5.26
     }
     # if the above default is not supported by this module, use the latest it does support
-    if {[info exists perl5.branches] && [lsearch -exact ${perl5.branches} $ret] == -1} {
+    if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
         set ret [lindex ${perl5.branches} end]
     }
     return $ret
@@ -103,14 +68,14 @@ proc perl5.create_variants {branches} {
     global name perl5.major perl5.default_variant perl5.variant perl5.set_default_variant perl5.conflict_variants perl5.require_variant perl5.variants
     set perl5.variants [perl5.get_variant_names ${branches}]
     foreach branch ${branches} {
-        set index [lsearch ${branches} ${branch}]
+        set index [lsearch -exact ${branches} ${branch}]
         set variant [lindex ${perl5.variants} ${index}]
 # Add conflicts
-        set conflicts {}
+        set filtered {}
         if {${perl5.conflict_variants}} {
-            set conflicts "conflicts {[lreplace ${perl5.variants} ${index} ${index}]}"
+            set filtered [lreplace ${perl5.variants} ${index} ${index}]
         }
-        eval "variant ${variant} ${conflicts} description Use MacPorts perl${branch} {}"
+        variant ${variant} conflicts {*}${filtered} description "Use MacPorts perl${branch}" {}
         if {[variant_isset ${variant}]} {
             perl5.variant ${variant}
         }
@@ -124,7 +89,7 @@ proc perl5.create_variants {branches} {
     }
 # Set perl version and deps
     foreach branch ${branches} {
-        set index [lsearch ${branches} ${branch}]
+        set index [lsearch -exact ${branches} ${branch}]
         set variant [lindex ${perl5.variants} ${index}]
         if {[variant_isset ${variant}]} {
             perl5.major ${branch}
@@ -166,7 +131,7 @@ set perl5.cpandir ""
 # perl5 group setup procedure
 proc perl5.setup {module vers {cpandir ""}} {
     global perl5.branches perl5.default_branch perl5.bin perl5.lib \
-           perl5.module perl5.moduleversion perl5.cpandir perl5.use_search_cpan_org \
+           perl5.module perl5.moduleversion perl5.cpandir \
            prefix subport name
 
     # define perl5.module
@@ -190,12 +155,8 @@ proc perl5.setup {module vers {cpandir ""}} {
     version             [perl5_convert_version ${perl5.moduleversion}]
     categories          perl
     
-    if {${perl5.use_search_cpan_org}} {
-        homepage        http://search.cpan.org/dist/${perl5.module}/
-    } else {
-        homepage        https://metacpan.org/pod/[string map {"-" "::"} ${perl5.module}]
-    }
-
+    homepage            https://metacpan.org/pod/[string map {"-" "::"} ${perl5.module}]
+    
     master_sites        perl_cpan:${perl5.cpandir}
     distname            ${perl5.module}-${perl5.moduleversion}
     dist_subdir         perl5
@@ -213,7 +174,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             use_configure no
             build {}
             destroot {
-                xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
         }
@@ -224,7 +185,11 @@ proc perl5.setup {module vers {cpandir ""}} {
         configure.cmd       ${perl5.bin}
         configure.env       PERL_AUTOINSTALL=--skipdeps
         configure.pre_args  Makefile.PL
-        default configure.args {"INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\""}
+        if {[vercmp [macports_version] 2.5.3] <= 0} {
+            default configure.args {"INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\""}
+        } else {
+            default configure.args {INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\"}
+        }
 
         # CCFLAGS can be passed in to "configure" but it's not necessarily inherited.
         # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how).
@@ -232,8 +197,8 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${configure.dir} {
                 if {[file isfile ${file}] && [file tail ${file}] eq "Makefile"} {
                     ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
-                    reinplace -locale C "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
-                    reinplace -locale C "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
+                    reinplace -locale C -q "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
+                    reinplace -locale C -q "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
                 }
             }
         }
@@ -246,7 +211,7 @@ proc perl5.setup {module vers {cpandir ""}} {
             fs-traverse file ${destroot}${perl5.lib} {
                 if {[file isfile ${file}] && [file tail ${file}] eq ".packlist"} {
                     ui_info "Fixing paths in [string map "${destroot}${perl5.lib}/ {}" ${file}]"
-                    reinplace -n "s|${destroot}||p" ${file}
+                    reinplace -n -q "s|${destroot}||p" ${file}
                 }
             }
             if {${perl5.link_binaries}} {
@@ -261,14 +226,9 @@ proc perl5.setup {module vers {cpandir ""}} {
 
     livecheck.type      regexm
     
-    if {${perl5.use_search_cpan_org}} {
-        livecheck.url       http://search.cpan.org/dist/${perl5.module}/
-        livecheck.regex     _gaq.push\\(\\\["_setCustomVar",5,"Release","[quotemeta ${perl5.module}]-(\[^"\]+?)\"
-    } else {
-        livecheck.url       http://api.metacpan.org/release/${perl5.module}/
-        livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"
-    }
-
+    livecheck.url       https://fastapi.metacpan.org/v1/release/${perl5.module}/
+    livecheck.regex     \"name\" : \"[quotemeta ${perl5.module}]-(\[^"\]+?)\"
+    
     default livecheck.version {${perl5.moduleversion}}
 }
 
@@ -283,7 +243,11 @@ proc perl5.use_module_build {} {
     depends_lib-append  port:p${perl5.major}-module-build
 
     configure.pre_args  Build.PL
-    default configure.args {"--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\""}
+    if {[vercmp [macports_version] 2.5.3] <= 0} {
+        default configure.args {"--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\""}
+    } else {
+        default configure.args {--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\"}
+    }
 
     build.cmd           ${perl5.bin}
     build.pre_args      Build

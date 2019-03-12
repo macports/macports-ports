@@ -1,28 +1,31 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# $Id$
 
 PortSystem          1.0
 PortGroup           cmake 1.0
 PortGroup           github 1.0
 PortGroup           muniversal 1.0
 
+# although Volk does not technically require C++11, forcing the use of
+# modern compilers reduces build failures. Also, it will require C++11
+# in the future, so let's just get on the bandwagon early.
+PortGroup           cxx11 1.1
+
 name                volk
 categories          science comms
-maintainers         michaelld
+maintainers         {michaelld @michaelld}
 description         Vector-Optimized Library of Kernels
 long_description    VOLK is the Vector-Optimized Library of Kernels, a library that contains kernels of hand-written single-instruction multiple data (SIMD) code for different mathematical operations, providing portable SIMD code that is optimized for a variety of platforms.
 license             GPL-3
 platforms           darwin
 
-# common directory for storing downloaded tarballs
-dist_subdir         volk
-
 if {${name} eq ${subport}} {
 
-    github.setup    gnuradio volk 1.3 v
+    github.setup    gnuradio volk 1.4 v
+    revision        1
     checksums       \
-        rmd160 5f1baa8dfc8ac948e4223e4f14f0ff328afffc9f \
-        sha256 fc112c38e898b1ad1bba79debf0769fecc555143bd60e33ea571c1e9908c320e
+        rmd160 cf9e7a2a6d981871cc3321135f2f97fa872da94f \
+        sha256 369dffa2ad16c0439f72bdb6d948d91a66cc274388e3bb343e1c19348dcb0ead \
+        size   233428
 
     # bump the epoch because I moved the version from 20150707 to 1.0.1
     epoch           1
@@ -30,21 +33,41 @@ if {${name} eq ${subport}} {
 provides the release version, which is typically updated every month or so.
     conflicts       volk-devel
 
+    # fix include_directories ordering so-as to pick up project
+    # headers before external headers. allows for in-place building
+    # while a prior version is already installed.
+    patchfiles-append patch-CMakeLists.txt.diff
+
 }
 
 subport volk-devel {
 
-    github.setup    gnuradio volk d57d5cfdff8a46d1251021a1ccf713cbe72aec58
-    version         20160804
-    checksums       \
-        rmd160 c32acbaa59b7f3d797a68543d068a8ed1fe33fa9 \
-        sha256 7518da278dc97c2fcf4ad74d733d4f0e1bdb6e30b958a158fa18c7665f688364
+    github.setup gnuradio volk 285a7e77ffda2d6e64b6d0e13662318e9a7f9be4
+    version      20190307
+    checksums    rmd160 e8fc42546460466f704a41e6551ecec909450f74 \
+                 sha256 707644aa23382229cb4cb2c37940510a59873d7d1b42c596015c8659addd0b43 \
+                 size   252584
+    revision     0
 
     conflicts       volk
     long_description ${long_description} ${subport} \
 provides the Volk GIT maint or master branch, depending on which is more advanced, and is typically updated every few days to week.
 
+    # temporary patch to revert moving to "modern cmake" targets since
+    # GNU Radio hasn't been updated yet to modern cmake and thus will
+    # not find the updated Volk. remove this patch when GNU Radio has
+    # been updated.
+
+    patchfiles-append patch-revert-modern-cmake.devel.diff
+
 }
+
+# fix naming of *Clang compiler to just "Clang" for internal use
+patchfiles-append patch-fix-clang.diff
+
+# fix C++11 for internal use only
+patchfiles-append patch-fix-cxx11.diff
+patch.pre_args -p1
 
 # override githib PortGroup homepage setting
 
@@ -52,12 +75,6 @@ homepage            http://libvolk.org/
 
 depends_build-append port:pkgconfig
 depends_lib-append   port:boost
-
-# patch to add back using <cpuid.h> if found, and otherwise providing
-# a local copy of it, to make older GCC compilers happy. Does not hurt
-# when using Clang or GCC >= 4.3.
-
-# patchfiles-append patch-add-back-cpuid.diff
 
 # do VPATH (out of source tree) build
 
@@ -71,9 +88,57 @@ configure.ldflags-delete -L${prefix}/lib
 # specify the Python dependencies; these are checked for at configure,
 # then used for building, but not at runtime.
 
-depends_build-append \
-    port:python27 \
-    port:py27-cheetah
+set pythons_suffixes {27 34 35 36 37}
+
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+proc python_dir {} {
+    global pythons_suffixes
+    foreach s ${pythons_suffixes} {
+        if {[variant_isset python${s}]} {
+            set p python[string index ${s} 0].[string index ${s} 1]
+            return [file normalize [exec ${p} -c "import sys; print(sys.prefix)"]/lib/${p}/site-packages]
+        }
+    }
+    error "Python support not enabled."
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string index ${s} 1]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build Volk using Python ${v}" conflicts {*}${c} "
+
+    # required Python
+
+    depends_lib-append \
+        port:${p}
+
+    depends_build-append \
+        port:py${s}-six \
+        port:py${s}-mako
+
+    # specify the Python version to use
+
+    configure.args-append \
+        -DPYTHON_EXECUTABLE=${frameworks_dir}/Python.framework/Versions/${v}/bin/python${v} \
+        -DVOLK_PYTHON_DIR=${frameworks_dir}/Python.framework/Versions/${v}/lib/python${v}/site-packages
+    "
+}
+
+if {![variant_isset debug]} {
+    set selected_python python27
+    foreach s ${pythons_suffixes} {
+        if {[variant_isset python${s}]} {
+            set selected_python python${s}
+        }
+    }
+    default_variants +${selected_python}
+}
 
 # override default version string to be MacPorts-specific
 # git / "devel" only for now
@@ -88,12 +153,6 @@ configure.args-append \
 
 configure.args-append \
     -DCMAKE_MODULES_DIR=${prefix}/share/cmake
-
-# specify the Python version to use
-
-configure.args-append \
-    -DPYTHON_EXECUTABLE=${prefix}/Library/Frameworks/Python.framework/Versions/2.7/bin/python2.7 \
-    -DVOLK_PYTHON_DIR=${frameworks_dir}/Python.framework/Versions/2.7/lib/python2.7/site-packages
 
 default_variants +docs +orc
 
@@ -132,40 +191,6 @@ if {![variant_isset orc]} {
         -DORC_INCLUDE_DIR= \
         -DORC_LIBRARY_DIR=
 
-}
-
-variant cxx11 description "Compile Volk using C++11 compliance" {
-
-    # require C++11
-
-    configure.cxxflags-append -std=c++11
-
-    if {${configure.cxx_stdlib} eq "libstdc++"} {
-
-        # *clang* when using libstdc++ do not seem to support C++11;
-        # C++11 support seems to need GCC 4.7+ when using libstdc++;
-        # could use C++0x support on GCC4.[56], but just ignore it since
-        # there are newer compilers already in place as defaults.
-
-        # Blacklist GCC compilers not supporting C++11 and all CLANG.
-        # This is probably not necessary, but it's good practice.
-
-        compiler.blacklist-append *clang* *gcc-3.* {*gcc-4.[0-6]}
-
-        # and whitelist those we do want to use. wish there were a better way.
-        # these will be used in the order provided.
-
-        compiler.whitelist macports-gcc-4.9 macports-gcc-4.8 macports-gcc-4.7
-
-    } else {
-
-        # using libc++;
-        # Blacklist Clang not supporting C++11 in some form and all GCC.
-        # Just use the cxx11 PortGroup for this specific case.
-
-        PortGroup cxx11 1.0
-
-    }
 }
 
 pre-extract {

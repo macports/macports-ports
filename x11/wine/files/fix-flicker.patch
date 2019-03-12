@@ -1,0 +1,85 @@
+# Patch to fix flickering in full screen. Patch from
+# https://raw.githubusercontent.com/Homebrew/formula-patches/74c2566/wine/2.14.patch
+# See: https://bugs.winehq.org/show_bug.cgi?id=34166
+--- dlls/wined3d/context.c.orig	2017-09-29 13:30:17.000000000 -0500
++++ dlls/wined3d/context.c	2017-09-29 19:58:35.000000000 -0500
+@@ -1600,20 +1600,24 @@
+ }
+ 
+ /* This function takes care of wined3d pixel format selection. */
+-static int context_choose_pixel_format(const struct wined3d_device *device, HDC hdc,
+-        const struct wined3d_format *color_format, const struct wined3d_format *ds_format,
++static int context_choose_pixel_format(const struct wined3d_device *device, const struct wined3d_swapchain *swapchain,
++        HDC hdc, const struct wined3d_format *color_format, const struct wined3d_format *ds_format,
+         BOOL auxBuffers)
+ {
+     unsigned int cfg_count = device->adapter->cfg_count;
+     unsigned int current_value;
+     PIXELFORMATDESCRIPTOR pfd;
+     int iPixelFormat = 0;
++    BOOL double_buffer = TRUE;
+     unsigned int i;
+ 
+     TRACE("device %p, dc %p, color_format %s, ds_format %s, aux_buffers %#x.\n",
+             device, hdc, debug_d3dformat(color_format->id), debug_d3dformat(ds_format->id),
+             auxBuffers);
+ 
++	if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && !swapchain->desc.backbuffer_count)
++        double_buffer = FALSE;
++
+     current_value = 0;
+     for (i = 0; i < cfg_count; ++i)
+     {
+@@ -1625,7 +1629,7 @@
+         if (cfg->iPixelType != WGL_TYPE_RGBA_ARB)
+             continue;
+         /* In window mode we need a window drawable format and double buffering. */
+-        if (!(cfg->windowDrawable && cfg->doubleBuffer))
++        if (!cfg->windowDrawable || (double_buffer && !cfg->doubleBuffer))
+             continue;
+         if (cfg->redSize < color_format->red_size)
+             continue;
+@@ -1648,17 +1652,19 @@
+          * depth it is no problem to emulate 16-bit using e.g. 24-bit, so accept that. */
+         if (cfg->depthSize == ds_format->depth_size)
+             value += 1;
+-        if (cfg->stencilSize == ds_format->stencil_size)
++        if (!cfg->doubleBuffer == !double_buffer)
+             value += 2;
+-        if (cfg->alphaSize == color_format->alpha_size)
++        if (cfg->stencilSize == ds_format->stencil_size)
+             value += 4;
++        if (cfg->alphaSize == color_format->alpha_size)
++            value += 8;
+         /* We like to have aux buffers in backbuffer mode */
+         if (auxBuffers && cfg->auxBuffers)
+-            value += 8;
++            value += 16;
+         if (cfg->redSize == color_format->red_size
+                 && cfg->greenSize == color_format->green_size
+                 && cfg->blueSize == color_format->blue_size)
+-            value += 16;
++            value += 32;
+ 
+         if (value > current_value)
+         {
+@@ -1674,7 +1680,9 @@
+         memset(&pfd, 0, sizeof(pfd));
+         pfd.nSize      = sizeof(pfd);
+         pfd.nVersion   = 1;
+-        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
++        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
++        if (double_buffer)
++        	pfd.dwFlags |= PFD_DOUBLEBUFFER;
+         pfd.iPixelType = PFD_TYPE_RGBA;
+         pfd.cAlphaBits = color_format->alpha_size;
+         pfd.cColorBits = color_format->red_size + color_format->green_size
+@@ -1973,7 +1981,7 @@
+     }
+ 
+     /* Try to find a pixel format which matches our requirements. */
+-    if (!(ret->pixel_format = context_choose_pixel_format(device, ret->hdc, color_format, ds_format, auxBuffers)))
++    if (!(ret->pixel_format = context_choose_pixel_format(device, swapchain, ret->hdc, color_format, ds_format, auxBuffers)))
+         goto out;
+ 
+     ret->gl_info = gl_info;

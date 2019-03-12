@@ -1,8 +1,5 @@
-#!/bin/sh
+#!@PREFIX@/bin/port-tclsh
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-# \
-if type -fp port-tclsh >/dev/null; then exec port-tclsh "$0" "$@"; else exec /usr/bin/tclsh "$0" "$@"; fi
-# $Id$
 #
 # Copyright (c) 2011,2013 The MacPorts Project
 #
@@ -32,13 +29,6 @@ if type -fp port-tclsh >/dev/null; then exec port-tclsh "$0" "$@"; else exec /us
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 set prefix "@PREFIX@"
-
-if {[file exists ${prefix}/share/macports/Tcl/macports1.0/macports_fastload.tcl]} {
-    if {[catch {source ${prefix}/share/macports/Tcl/macports1.0/macports_fastload.tcl} result]} {
-        puts stderr "Error: $result"
-        exit 1
-    }
-}
 
 package require macports
 if {[catch {mportinit} result]} {
@@ -205,7 +195,7 @@ proc json_encode_port {port_info {indent ""}} {
     set first true
 
     set json "\{"
-    foreach name {name version variants} {
+    foreach name {name version requested variants} {
         # Skip empty strings
         if {$port($name) eq ""} {
             continue
@@ -320,8 +310,8 @@ proc split_variants {variants} {
 #        collection of inactive ports
 # @returns
 #        a list of installed ports chosen according to the \a active parameter, where each entry is
-#        the list representation of a Tcl array with the keys name, version and variants. The
-#        variants value is encoded using \c split_variants, the version entry has the form
+#        the list representation of a Tcl array with the keys name, version, requested and variants.
+#        The variants value is encoded using \c split_variants, the version entry has the form
 #        "$version_$revision".
 proc get_installed_ports {active} {
     set ilist {}
@@ -340,8 +330,18 @@ proc get_installed_ports {active} {
             set iname [lindex $i 0]
             set iversion [lindex $i 1]
             set irevision [lindex $i 2]
-            set ivariants [split_variants [lindex $i 3]]
-            lappend results [list name $iname version "${iversion}_${irevision}" variants $ivariants]
+            set ivariants [lindex $i 3]
+            set iepoch [lindex $i 5]
+
+            set regref [registry::open_entry $iname $iversion $irevision $ivariants $iepoch]
+            if {[registry::property_retrieve $regref "requested"]} {
+                set irequested "true"
+            } else {
+                set irequested ""
+            }
+            set ivariantlist [split_variants $ivariants]
+
+            lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantlist]
         }
     }
 

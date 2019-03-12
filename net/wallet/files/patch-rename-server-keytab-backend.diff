@@ -1,0 +1,496 @@
+--- server/keytab-backend	2016-01-17 19:13:02.000000000 -0800
++++ /dev/null	2016-01-23 13:57:05.000000000 -0800
+@@ -1,245 +0,0 @@
+-#!/usr/bin/perl
+-#
+-# Extract keytabs from the KDC without changing the key.
+-#
+-# This is a remctl backend that extracts existing keys from a KDC database
+-# using kadmin.local.  It requires a patched version of kadmin.local that
+-# supports the -norandkey option.  It expects a configuration file in
+-# /etc/krb5kdc/allow-extract that contains a list of regexes, one per line,
+-# matching principals that may be extracted in this fashion.  (Generally you
+-# do not want to list user principals here.)  It also expects to be able to
+-# write to a directory named /var/lib/keytabs; that's where it puts the
+-# keytabs temporarily before sending them back to via remctl.
+-#
+-# remctl should handle authorization restrictions on this script.  It doesn't
+-# do any additional authorization checks itself.
+-#
+-# The keytab for the extracted principal will be printed to standard output.
+-
+-use 5.008;
+-use strict;
+-use warnings;
+-
+-use Sys::Syslog qw(openlog syslog);
+-
+-# Path to configuration file listing principals that may be extracted.
+-our $CONFIG = '/etc/krb5kdc/allow-extract';
+-
+-# The full path to a kadmin.local that supports -norandkey.
+-our $KADMIN = '/usr/sbin/kadmin.local';
+-
+-# A temporary area into which keytabs should be written.
+-our $TMP = '/var/lib/keytabs';
+-
+-# Set to zero to suppress syslog logging, which is used only for testing.  Set
+-# to a reference to a string to append messages to that string instead.
+-our $SYSLOG;
+-$SYSLOG = 1 unless defined $SYSLOG;
+-
+-##############################################################################
+-# Logging
+-##############################################################################
+-
+-# Initialize logging.
+-sub log_init {
+-    if (ref $SYSLOG) {
+-        $$SYSLOG = '';
+-    } elsif ($SYSLOG) {
+-        openlog ('keytab-backend', 'pid', 'auth');
+-    }
+-}
+-
+-# Log a failure message to both syslog and to stderr and exit with a non-zero
+-# status.
+-sub error {
+-    my $message = join ('', @_);
+-    if (ref $SYSLOG) {
+-        $$SYSLOG .= $message . "\n";
+-    } elsif ($SYSLOG) {
+-        syslog ('err', '%s', $message);
+-    }
+-    die "keytab-backend: $message\n";
+-}
+-
+-# Log a regular message, generally for success.
+-sub info {
+-    my $message = join ('', @_);
+-    if (ref $SYSLOG) {
+-        $$SYSLOG .= $message . "\n";
+-    } elsif ($SYSLOG) {
+-        syslog ('info', '%s', $message);
+-    }
+-}
+-
+-##############################################################################
+-# Implementation
+-##############################################################################
+-
+-# Check and download the keytab.  This is in a subroutine call for easier
+-# testing.  We separately log actions unless $SYSLOG is set to 0.  remctld
+-# keeps some logs, but it won't tell us whether the download is successful or
+-# not.
+-sub download {
+-    my (@args) = @_;
+-    log_init;
+-
+-    # Set up a default identity if run from the command line.
+-    $ENV{REMOTE_USER} = getpwnam ($<) || 'UNKNOWN' unless $ENV{REMOTE_USER};
+-
+-    # Read the regexes of valid principals into memory.
+-    open (CONFIG, '<', $CONFIG) or error "cannot open $CONFIG: $!";
+-    my @valid;
+-    while (<CONFIG>) {
+-        next if /^\s*\#/;
+-        next if /^\s*$/;
+-        s/^\s+//;
+-        s/\s+$//;
+-        s/\s*\#.*//;
+-        push (@valid, qr/$_/);
+-    }
+-    close CONFIG;
+-
+-    # The first argument will be the remctl service, so skip it.
+-    if (@args == 2) {
+-        shift @args;
+-    }
+-    if (@args != 1) {
+-        error "invalid arguments: @args";
+-    }
+-    my $principal = $args[0];
+-
+-    # Ensure that we're allowed to retrieve this principal.
+-    unless ($principal =~ m%^[\w-]+(?:/[\w.-]+)?\@[\w.-]+\z%) {
+-        error "bad principal name $principal";
+-    }
+-    my $okay;
+-    for my $regex (@valid) {
+-        if ($principal =~ /$regex/) {
+-            $okay = 1;
+-            last;
+-        }
+-    }
+-    unless ($okay) {
+-        error "permission denied: $ENV{REMOTE_USER} may not retrieve"
+-            . " $principal";
+-    }
+-
+-    # Do the actual work.
+-    my $filename = "$TMP/keytab$$";
+-    my $command = "ktadd -k $filename -q -norandkey $principal";
+-    my $output = `$KADMIN -q '$command' 2>&1`;
+-    if ($? != 0) {
+-        my $status = ($? >> 8);
+-        warn $output;
+-        error "retrieve of $principal failed for $ENV{REMOTE_USER}:"
+-            . " kadmin.local exited with status $status";
+-    }
+-    open (KEYTAB, '<', $filename)
+-        or error "cannot open temporary keytab $filename: $!";
+-    print while <KEYTAB>;
+-    close KEYTAB;
+-    unlink $filename;
+-    info ("keytab $principal retrieved by $ENV{REMOTE_USER}");
+-}
+-download (@ARGV);
+-__END__
+-
+-##############################################################################
+-# Documentation
+-##############################################################################
+-
+-=for stopwords
+-keytab-backend keytabs KDC keytab kadmin.local -norandkey ktadd remctld
+-auth Allbery rekeying MERCHANTABILITY NONINFRINGEMENT sublicense
+-kadmin.local.
+-
+-=head1 NAME
+-
+-keytab-backend - Extract keytabs from the KDC without changing the key
+-
+-=head1 SYNOPSIS
+-
+-B<keytab-backend> retrieve I<principal>
+-
+-=head1 DESCRIPTION
+-
+-B<keytab-backend> retrieves a keytab for an existing principal from the
+-KDC database without changing the current key.  It allows generation of a
+-keytab for a service without rekeying that service.  It requires a
+-B<kadmin.local> patched to support the B<-norandkey> option to B<ktadd>.
+-
+-This script is intended to run under B<remctld>.  On success, it prints
+-the keytab to standard output, logs a success message to syslog (facility
+-auth, priority info), and exits with status 0.  On failure, it prints out
+-an error message, logs an error to syslog (facility auth, priority err),
+-and exits with a non-zero status.
+-
+-The principal is checked for basic sanity (only accepting alphanumerics,
+-C<_>, and C<-> with an optional instance and then only alphanumerics,
+-C<_>, C<->, and C<.> in the realm) and then checked against a
+-configuration file that lists regexes of principals that can be retrieved.
+-When deploying this software, limit as tightly as possible which
+-principals can be downloaded in this fashion.  Generally only shared
+-service principals used on multiple systems should be made available in
+-this way.
+-
+-B<keytab-backend> does not do any authorization checks.  Those should be
+-done by B<remctld> before it is called.
+-
+-=head1 FILES
+-
+-=over 4
+-
+-=item F</etc/krb5kdc/allow-extract>
+-
+-The configuration file that controls which principals can have their
+-keytabs retrieved.  Blank lines and lines starting with C<#>, as well as
+-anything after C<#> on a line, are ignored.  All other lines should be
+-Perl regular expressions, one per line, that match principals whose
+-keytabs can be retrieved by B<keytab-backend>.  Any principal that does
+-not match one of those regular expressions cannot be retrieved.
+-
+-=item F</var/lib/keytabs>
+-
+-The temporary directory used for creating keytabs.  B<keytab-backend> will
+-create the keytab in this directory, make sure that was successful, and
+-then delete the temporary file after the results have been sent to
+-standard output.
+-
+-=back
+-
+-=head1 AUTHOR
+-
+-Russ Allbery <eagle@eyrie.org>
+-
+-=head1 COPYRIGHT AND LICENSE
+-
+-Copyright 2006, 2007, 2008, 2010, 2013 The Board of Trustees of the Leland
+-Stanford Junior University
+-
+-Permission is hereby granted, free of charge, to any person obtaining a
+-copy of this software and associated documentation files (the "Software"),
+-to deal in the Software without restriction, including without limitation
+-the rights to use, copy, modify, merge, publish, distribute, sublicense,
+-and/or sell copies of the Software, and to permit persons to whom the
+-Software is furnished to do so, subject to the following conditions:
+-
+-The above copyright notice and this permission notice shall be included in
+-all copies or substantial portions of the Software.
+-
+-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+-THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+-DEALINGS IN THE SOFTWARE.
+-
+-=head1 SEE ALSO
+-
+-kadmin.local(8), remctld(8)
+-
+-This program is part of the wallet system.  The current version is
+-available from L<http://www.eyrie.org/~eagle/software/wallet/>.
+-
+-=cut
+--- /dev/null	2016-01-23 13:57:05.000000000 -0800
++++ server/keytab-backend.in	2016-01-17 19:13:02.000000000 -0800
+@@ -0,0 +1,245 @@
++#!@PERL@
++#
++# Extract keytabs from the KDC without changing the key.
++#
++# This is a remctl backend that extracts existing keys from a KDC database
++# using kadmin.local.  It requires a patched version of kadmin.local that
++# supports the -norandkey option.  It expects a configuration file in
++# /etc/krb5kdc/allow-extract that contains a list of regexes, one per line,
++# matching principals that may be extracted in this fashion.  (Generally you
++# do not want to list user principals here.)  It also expects to be able to
++# write to a directory named /var/lib/keytabs; that's where it puts the
++# keytabs temporarily before sending them back to via remctl.
++#
++# remctl should handle authorization restrictions on this script.  It doesn't
++# do any additional authorization checks itself.
++#
++# The keytab for the extracted principal will be printed to standard output.
++
++use 5.008;
++use strict;
++use warnings;
++
++use Sys::Syslog qw(openlog syslog);
++
++# Path to configuration file listing principals that may be extracted.
++our $CONFIG = '/etc/krb5kdc/allow-extract';
++
++# The full path to a kadmin.local that supports -norandkey.
++our $KADMIN = '/usr/sbin/kadmin.local';
++
++# A temporary area into which keytabs should be written.
++our $TMP = '/var/lib/keytabs';
++
++# Set to zero to suppress syslog logging, which is used only for testing.  Set
++# to a reference to a string to append messages to that string instead.
++our $SYSLOG;
++$SYSLOG = 1 unless defined $SYSLOG;
++
++##############################################################################
++# Logging
++##############################################################################
++
++# Initialize logging.
++sub log_init {
++    if (ref $SYSLOG) {
++        $$SYSLOG = '';
++    } elsif ($SYSLOG) {
++        openlog ('keytab-backend', 'pid', 'auth');
++    }
++}
++
++# Log a failure message to both syslog and to stderr and exit with a non-zero
++# status.
++sub error {
++    my $message = join ('', @_);
++    if (ref $SYSLOG) {
++        $$SYSLOG .= $message . "\n";
++    } elsif ($SYSLOG) {
++        syslog ('err', '%s', $message);
++    }
++    die "keytab-backend: $message\n";
++}
++
++# Log a regular message, generally for success.
++sub info {
++    my $message = join ('', @_);
++    if (ref $SYSLOG) {
++        $$SYSLOG .= $message . "\n";
++    } elsif ($SYSLOG) {
++        syslog ('info', '%s', $message);
++    }
++}
++
++##############################################################################
++# Implementation
++##############################################################################
++
++# Check and download the keytab.  This is in a subroutine call for easier
++# testing.  We separately log actions unless $SYSLOG is set to 0.  remctld
++# keeps some logs, but it won't tell us whether the download is successful or
++# not.
++sub download {
++    my (@args) = @_;
++    log_init;
++
++    # Set up a default identity if run from the command line.
++    $ENV{REMOTE_USER} = getpwnam ($<) || 'UNKNOWN' unless $ENV{REMOTE_USER};
++
++    # Read the regexes of valid principals into memory.
++    open (CONFIG, '<', $CONFIG) or error "cannot open $CONFIG: $!";
++    my @valid;
++    while (<CONFIG>) {
++        next if /^\s*\#/;
++        next if /^\s*$/;
++        s/^\s+//;
++        s/\s+$//;
++        s/\s*\#.*//;
++        push (@valid, qr/$_/);
++    }
++    close CONFIG;
++
++    # The first argument will be the remctl service, so skip it.
++    if (@args == 2) {
++        shift @args;
++    }
++    if (@args != 1) {
++        error "invalid arguments: @args";
++    }
++    my $principal = $args[0];
++
++    # Ensure that we're allowed to retrieve this principal.
++    unless ($principal =~ m%^[\w-]+(?:/[\w.-]+)?\@[\w.-]+\z%) {
++        error "bad principal name $principal";
++    }
++    my $okay;
++    for my $regex (@valid) {
++        if ($principal =~ /$regex/) {
++            $okay = 1;
++            last;
++        }
++    }
++    unless ($okay) {
++        error "permission denied: $ENV{REMOTE_USER} may not retrieve"
++            . " $principal";
++    }
++
++    # Do the actual work.
++    my $filename = "$TMP/keytab$$";
++    my $command = "ktadd -k $filename -q -norandkey $principal";
++    my $output = `$KADMIN -q '$command' 2>&1`;
++    if ($? != 0) {
++        my $status = ($? >> 8);
++        warn $output;
++        error "retrieve of $principal failed for $ENV{REMOTE_USER}:"
++            . " kadmin.local exited with status $status";
++    }
++    open (KEYTAB, '<', $filename)
++        or error "cannot open temporary keytab $filename: $!";
++    print while <KEYTAB>;
++    close KEYTAB;
++    unlink $filename;
++    info ("keytab $principal retrieved by $ENV{REMOTE_USER}");
++}
++download (@ARGV);
++__END__
++
++##############################################################################
++# Documentation
++##############################################################################
++
++=for stopwords
++keytab-backend keytabs KDC keytab kadmin.local -norandkey ktadd remctld
++auth Allbery rekeying MERCHANTABILITY NONINFRINGEMENT sublicense
++kadmin.local.
++
++=head1 NAME
++
++keytab-backend - Extract keytabs from the KDC without changing the key
++
++=head1 SYNOPSIS
++
++B<keytab-backend> retrieve I<principal>
++
++=head1 DESCRIPTION
++
++B<keytab-backend> retrieves a keytab for an existing principal from the
++KDC database without changing the current key.  It allows generation of a
++keytab for a service without rekeying that service.  It requires a
++B<kadmin.local> patched to support the B<-norandkey> option to B<ktadd>.
++
++This script is intended to run under B<remctld>.  On success, it prints
++the keytab to standard output, logs a success message to syslog (facility
++auth, priority info), and exits with status 0.  On failure, it prints out
++an error message, logs an error to syslog (facility auth, priority err),
++and exits with a non-zero status.
++
++The principal is checked for basic sanity (only accepting alphanumerics,
++C<_>, and C<-> with an optional instance and then only alphanumerics,
++C<_>, C<->, and C<.> in the realm) and then checked against a
++configuration file that lists regexes of principals that can be retrieved.
++When deploying this software, limit as tightly as possible which
++principals can be downloaded in this fashion.  Generally only shared
++service principals used on multiple systems should be made available in
++this way.
++
++B<keytab-backend> does not do any authorization checks.  Those should be
++done by B<remctld> before it is called.
++
++=head1 FILES
++
++=over 4
++
++=item F</etc/krb5kdc/allow-extract>
++
++The configuration file that controls which principals can have their
++keytabs retrieved.  Blank lines and lines starting with C<#>, as well as
++anything after C<#> on a line, are ignored.  All other lines should be
++Perl regular expressions, one per line, that match principals whose
++keytabs can be retrieved by B<keytab-backend>.  Any principal that does
++not match one of those regular expressions cannot be retrieved.
++
++=item F</var/lib/keytabs>
++
++The temporary directory used for creating keytabs.  B<keytab-backend> will
++create the keytab in this directory, make sure that was successful, and
++then delete the temporary file after the results have been sent to
++standard output.
++
++=back
++
++=head1 AUTHOR
++
++Russ Allbery <eagle@eyrie.org>
++
++=head1 COPYRIGHT AND LICENSE
++
++Copyright 2006, 2007, 2008, 2010, 2013 The Board of Trustees of the Leland
++Stanford Junior University
++
++Permission is hereby granted, free of charge, to any person obtaining a
++copy of this software and associated documentation files (the "Software"),
++to deal in the Software without restriction, including without limitation
++the rights to use, copy, modify, merge, publish, distribute, sublicense,
++and/or sell copies of the Software, and to permit persons to whom the
++Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE SOFTWARE.
++
++=head1 SEE ALSO
++
++kadmin.local(8), remctld(8)
++
++This program is part of the wallet system.  The current version is
++available from L<http://www.eyrie.org/~eagle/software/wallet/>.
++
++=cut

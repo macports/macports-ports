@@ -1,0 +1,1120 @@
+From 08ebdd8bde8f21872f1ba716eaf887ef1628d738 Mon Sep 17 00:00:00 2001
+From: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+Date: Sun, 18 Dec 2016 00:24:11 -0800
+Subject: [PATCH] Revert textstub_dylib_file.cpp back to ld64-264.3.102 version
+
+Signed-off-by: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+---
+ ld64.xcodeproj/project.pbxproj         |   6 -
+ src/ld/Options.cpp                     |  35 +-
+ src/ld/parsers/generic_dylib_file.hpp  |  63 +++
+ src/ld/parsers/macho_dylib_file.cpp    |  64 ---
+ src/ld/parsers/textstub_dylib_file.cpp | 717 +++++++++++++++++++++++++++------
+ 5 files changed, 658 insertions(+), 227 deletions(-)
+
+diff --git ld64.xcodeproj/project.pbxproj ld64.xcodeproj/project.pbxproj
+index 600aeac9..db20e783 100644
+--- ld64.xcodeproj/project.pbxproj
++++ ld64.xcodeproj/project.pbxproj
+@@ -1284,8 +1284,6 @@
+ 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+ 					"@$(DERIVED_FILE_DIR)/linkExtras",
+ 					"-Wl,-exported_symbol,__mh_execute_header",
+-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+-					"-ltapi",
+ 				);
+ 				PREBINDING = NO;
+ 				PRODUCT_NAME = ld;
+@@ -1358,8 +1356,6 @@
+ 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+ 					"@$(DERIVED_FILE_DIR)/linkExtras",
+ 					"-Wl,-exported_symbol,__mh_execute_header",
+-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+-					"-ltapi",
+ 				);
+ 				PREBINDING = NO;
+ 				PRODUCT_NAME = ld;
+@@ -1577,8 +1573,6 @@
+ 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+ 					"@$(DERIVED_FILE_DIR)/linkExtras",
+ 					"-Wl,-exported_symbol,__mh_execute_header",
+-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+-					"-ltapi",
+ 				);
+ 				PREBINDING = NO;
+ 				PRODUCT_NAME = ld;
+diff --git src/ld/Options.cpp src/ld/Options.cpp
+index b7e17091..227b0d84 100644
+--- src/ld/Options.cpp
++++ src/ld/Options.cpp
+@@ -34,7 +34,6 @@
+ #include <spawn.h>
+ #include <cxxabi.h>
+ #include <Availability.h>
+-#include <tapi/tapi.h>
+ 
+ #include <vector>
+ #include <map>
+@@ -832,13 +831,7 @@ bool Options::findFile(const std::string &path, const std::vector<std::string> &
+ 		bool found = tbdInfo.checkFileExists(*this, newPath.c_str());
+ 		if ( fTraceDylibSearching )
+ 			printf("[Logging for XBS]%sfound library: '%s'\n", (found ? " " : " not "), newPath.c_str());
+-		if ( found )
+-			break;
+-	}
+-
+-	// If we found a text-based stub file, check if it should be used.
+-	if ( !tbdInfo.missing() ) {
+-		if (tapi::LinkerInterfaceFile::shouldPreferTextBasedStubFile(tbdInfo.path)) {
++		if ( found ) {
+ 			result = tbdInfo;
+ 			return true;
+ 		}
+@@ -848,31 +841,10 @@ bool Options::findFile(const std::string &path, const std::vector<std::string> &
+ 		bool found = dylibInfo.checkFileExists(*this, path.c_str());
+ 		if ( fTraceDylibSearching )
+ 			printf("[Logging for XBS]%sfound library: '%s'\n", (found ? " " : " not "), path.c_str());
+-	}
+-
+-	// There is only a text-based stub file.
+-	if ( !tbdInfo.missing() && dylibInfo.missing() ) {
+-		result = tbdInfo;
+-		return true;
+-	}
+-	// There is only a dynamic library file.
+-	else if ( tbdInfo.missing() && !dylibInfo.missing() ) {
+-		result = dylibInfo;
+-		return true;
+-	}
+-	// There are both - a text-based stub file and a dynamic library file.
+-	else if ( !tbdInfo.missing() && !dylibInfo.missing() ) {
+-		// If the files are still in synv we can use and should use the text-based stub file.
+-		if (tapi::LinkerInterfaceFile::areEquivalent(tbdInfo.path, dylibInfo.path)) {
+-			result = tbdInfo;
+-		}
+-		// Otherwise issue a warning and fall-back to the dynamic library file.
+-		else {
+-			warning("text-based stub file %s and library file %s are out of sync. Falling back to library file for linking.", tbdInfo.path, dylibInfo.path);
++		if ( found ) {
+ 			result = dylibInfo;
+-
++			return true;
+ 		}
+-		return true;
+ 	}
+ 
+ 	return false;
+@@ -3959,7 +3931,6 @@ void Options::buildSearchPaths(int argc, const char* argv[])
+ 				const char* ltoVers = lto::version();
+ 				if ( ltoVers != NULL )
+ 					fprintf(stderr, "LTO support using: %s\n", ltoVers);
+-				fprintf(stderr, "TAPI support using: %s\n", tapi::Version::getFullVersionAsString().c_str());
+ 				exit(0);
+ 			}
+ 		}
+diff --git src/ld/parsers/generic_dylib_file.hpp src/ld/parsers/generic_dylib_file.hpp
+index 529e4ab6..d581ab37 100644
+--- src/ld/parsers/generic_dylib_file.hpp
++++ src/ld/parsers/generic_dylib_file.hpp
+@@ -191,6 +191,7 @@ private:
+ 
+ protected:
+ 	bool						isPublicLocation(const char* path) const;
++	void						addSymbol(const char* name, bool weak = false, bool tlv = false, pint_t address = 0);
+ 
+ private:
+ 	ld::Section							_importProxySection;
+@@ -479,6 +480,68 @@ bool File<A>::isPublicLocation(const char* path) const
+ 	return false;
+ }
+ 
++template <typename A>
++void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address)
++{
++	// symbols that start with $ld$ are meta-data to the static linker
++	// <rdar://problem/5182537> need way for ld and dyld to see different exported symbols in a dylib
++	if ( strncmp(name, "$ld$", 4) == 0 ) {
++		//    $ld$ <action> $ <condition> $ <symbol-name>
++		const char* symAction = &name[4];
++		const char* symCond = strchr(symAction, '$');
++		if ( symCond != nullptr ) {
++			char curOSVers[16];
++			sprintf(curOSVers, "$os%d.%d$", (this->_linkMinOSVersion >> 16), ((this->_linkMinOSVersion >> 8) & 0xFF));
++			if ( strncmp(symCond, curOSVers, strlen(curOSVers)) == 0 ) {
++				const char* symName = strchr(&symCond[1], '$');
++				if ( symName != nullptr ) {
++					++symName;
++					if ( strncmp(symAction, "hide$", 5) == 0 ) {
++						if ( this->_s_logHashtable )
++							fprintf(stderr, "  adding %s to ignore set for %s\n", symName, this->path());
++						this->_ignoreExports.insert(strdup(symName));
++						return;
++					}
++					else if ( strncmp(symAction, "add$", 4) == 0 ) {
++						this->addSymbol(symName, weakDef);
++						return;
++					}
++					else if ( strncmp(symAction, "weak$", 5) == 0 ) {
++						if ( !this->_allowWeakImports )
++							this->_ignoreExports.insert(strdup(symName));
++					}
++					else if ( strncmp(symAction, "install_name$", 13) == 0 ) {
++						this->_dylibInstallPath = strdup(symName);
++						this->_installPathOverride = true;
++						// <rdar://problem/14448206> CoreGraphics redirects to ApplicationServices, but with wrong compat version
++						if ( strcmp(this->_dylibInstallPath, "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices") == 0 )
++							this->_dylibCompatibilityVersion = Options::parseVersionNumber32("1.0");
++						return;
++					}
++					else if ( strncmp(symAction, "compatibility_version$", 22) == 0 ) {
++						this->_dylibCompatibilityVersion = Options::parseVersionNumber32(symName);
++						return;
++					}
++					else {
++						warning("bad symbol action: %s in dylib %s", name, this->path());
++					}
++				}
++			}
++		}
++		else {
++			warning("bad symbol condition: %s in dylib %s", name, this->path());
++		}
++	}
++
++	// add symbol as possible export if we are not supposed to ignore it
++	if ( this->_ignoreExports.count(name) == 0 ) {
++		AtomAndWeak bucket = { nullptr, weakDef, tlv, address };
++		if ( this->_s_logHashtable )
++			fprintf(stderr, "  adding %s to hash table for %s\n", name, this->path());
++		this->_atoms[strdup(name)] = bucket;
++	}
++}
++
+ // <rdar://problem/5529626> If only weak_import symbols are used, linker should use LD_LOAD_WEAK_DYLIB
+ template <typename A>
+ bool File<A>::allSymbolsAreWeakImported() const
+diff --git src/ld/parsers/macho_dylib_file.cpp src/ld/parsers/macho_dylib_file.cpp
+index 16d3f5d7..a8233055 100644
+--- src/ld/parsers/macho_dylib_file.cpp
++++ src/ld/parsers/macho_dylib_file.cpp
+@@ -70,7 +70,6 @@ public:
+ private:
+ 	using P = typename A::P;
+ 	using E = typename A::P::E;
+-	using pint_t = typename A::P::uint_t;
+ 
+ 	void				addDyldFastStub();
+ 	void				buildExportHashTableFromExportInfo(const macho_dyld_info_command<P>* dyldInfo,
+@@ -78,7 +77,6 @@ private:
+ 	void				buildExportHashTableFromSymbolTable(const macho_dysymtab_command<P>* dynamicInfo,
+ 														const macho_nlist<P>* symbolTable, const char* strings,
+ 														const uint8_t* fileContent);
+-	void				addSymbol(const char* name, bool weakDef = false, bool tlv = false, pint_t address = 0);
+ 	static const char*	objCInfoSegmentName();
+ 	static const char*	objCInfoSectionName();
+ 
+@@ -526,68 +524,6 @@ void File<A>::buildExportHashTableFromExportInfo(const macho_dyld_info_command<P
+ 	}
+ }
+ 
+-template <typename A>
+-void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address)
+-{
+-	// symbols that start with $ld$ are meta-data to the static linker
+-	// <rdar://problem/5182537> need way for ld and dyld to see different exported symbols in a dylib
+-	if ( strncmp(name, "$ld$", 4) == 0 ) {
+-		//    $ld$ <action> $ <condition> $ <symbol-name>
+-		const char* symAction = &name[4];
+-		const char* symCond = strchr(symAction, '$');
+-		if ( symCond != nullptr ) {
+-			char curOSVers[16];
+-			sprintf(curOSVers, "$os%d.%d$", (this->_linkMinOSVersion >> 16), ((this->_linkMinOSVersion >> 8) & 0xFF));
+-			if ( strncmp(symCond, curOSVers, strlen(curOSVers)) == 0 ) {
+-				const char* symName = strchr(&symCond[1], '$');
+-				if ( symName != nullptr ) {
+-					++symName;
+-					if ( strncmp(symAction, "hide$", 5) == 0 ) {
+-						if ( this->_s_logHashtable )
+-							fprintf(stderr, "  adding %s to ignore set for %s\n", symName, this->path());
+-						this->_ignoreExports.insert(strdup(symName));
+-						return;
+-					}
+-					else if ( strncmp(symAction, "add$", 4) == 0 ) {
+-						this->addSymbol(symName, weakDef);
+-						return;
+-					}
+-					else if ( strncmp(symAction, "weak$", 5) == 0 ) {
+-						if ( !this->_allowWeakImports )
+-							this->_ignoreExports.insert(strdup(symName));
+-					}
+-					else if ( strncmp(symAction, "install_name$", 13) == 0 ) {
+-						this->_dylibInstallPath = symName;
+-						this->_installPathOverride = true;
+-						// <rdar://problem/14448206> CoreGraphics redirects to ApplicationServices, but with wrong compat version
+-						if ( strcmp(this->_dylibInstallPath, "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices") == 0 )
+-							this->_dylibCompatibilityVersion = Options::parseVersionNumber32("1.0");
+-						return;
+-					}
+-					else if ( strncmp(symAction, "compatibility_version$", 22) == 0 ) {
+-						this->_dylibCompatibilityVersion = Options::parseVersionNumber32(symName);
+-						return;
+-					}
+-					else {
+-						warning("bad symbol action: %s in dylib %s", name, this->path());
+-					}
+-				}
+-			}
+-		}
+-		else {
+-			warning("bad symbol condition: %s in dylib %s", name, this->path());
+-		}
+-	}
+-
+-	// add symbol as possible export if we are not supposed to ignore it
+-	if ( this->_ignoreExports.count(name) == 0 ) {
+-		typename Base::AtomAndWeak bucket = { nullptr, weakDef, tlv, address };
+-		if ( this->_s_logHashtable )
+-			fprintf(stderr, "  adding %s to hash table for %s\n", name, this->path());
+-		this->_atoms[strdup(name)] = bucket;
+-	}
+-}
+-
+ template <>
+ void File<x86_64>::addDyldFastStub()
+ {
+diff --git src/ld/parsers/textstub_dylib_file.cpp src/ld/parsers/textstub_dylib_file.cpp
+index 58544625..74dbcd7c 100644
+--- src/ld/parsers/textstub_dylib_file.cpp
++++ src/ld/parsers/textstub_dylib_file.cpp
+@@ -25,7 +25,7 @@
+ 
+ #include <sys/param.h>
+ #include <sys/mman.h>
+-#include <tapi/tapi.h>
++
+ #include <vector>
+ 
+ #include "Architectures.hpp"
+@@ -35,6 +35,469 @@
+ #include "generic_dylib_file.hpp"
+ #include "textstub_dylib_file.hpp"
+ 
++namespace {
++
++///
++/// A token is a light-weight reference to the content of an nmap'ed file. It
++/// doesn't own the data and it doesn't make a copy of it. The referenced data
++/// is only valid as long as the file is mapped in.
++///
++class Token {
++	const char* _p;
++	size_t _size;
++
++	int compareMemory(const char* lhs, const char* rhs, size_t size) const {
++		if (size == 0)
++			return 0;
++		return ::memcmp(lhs, rhs, size);
++	}
++
++public:
++	Token() : _p(nullptr), _size(0) {}
++
++	Token(const char* p) : _p(p), _size(0) {
++		if (p)
++			_size = ::strlen(p);
++	}
++
++	Token(const char* p, size_t s) : _p(p), _size(s) {}
++
++	const char* data() const { return _p; }
++
++	size_t size() const { return _size; }
++
++	std::string str() const { return std::string(_p, _size); }
++
++	bool empty() const { return _size == 0; }
++
++	bool operator==(Token other) const {
++		if (_size != other._size)
++			return false;
++		return compareMemory(_p, other._p, _size) == 0;
++	}
++
++	bool operator!=(Token other) const {
++		return !(*this == other);
++	}
++};
++
++///
++/// Simple text-based dynamic library file tokenizer.
++///
++class Tokenizer {
++	const char* _start;
++	const char* _current;
++	const char* _end;
++	Token _currentToken;
++
++	void fetchNextToken();
++	void scanToNextToken();
++	void skip(unsigned distance) {
++		_current += distance;
++		assert(_current <= _end && "Skipped past the end");
++	}
++
++	const char* skipLineBreak(const char* pos) const;
++	bool isDelimiter(const char* pos) const;
++
++public:
++	Tokenizer(const char* data, uint64_t size) : _start(data), _current(data), _end(data + size) {}
++
++	void reset() {
++		_current = _start;
++		fetchNextToken();
++	}
++
++	Token peek() { return _currentToken; }
++	Token next() {
++		Token token = peek();
++		fetchNextToken();
++		return token;
++	}
++};
++
++const char* Tokenizer::skipLineBreak(const char* pos) const
++{
++	if ( pos == _end )
++		return pos;
++
++	// Carriage return.
++	if ( *pos == 0x0D ) {
++		// line feed.
++		if ( pos + 1 != _end && *(pos + 1) == 0x0A)
++			return pos + 2;
++		return pos + 1;
++	}
++
++	// line feed.
++	if ( *pos == 0x0A )
++		return pos + 1;
++
++	return pos;
++}
++
++void Tokenizer::scanToNextToken() {
++	while (true) {
++		while ( isDelimiter(_current) )
++			skip(1);
++
++		const char* i = skipLineBreak(_current);
++		if ( i == _current )
++			break;
++
++		_current = i;
++	}
++}
++
++
++bool Tokenizer::isDelimiter(const char* pos) const {
++	if ( pos == _end )
++		return false;
++	if ( *pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n' || *pos == ',' || *pos == ':' || *pos == '\'' || *pos == '\"' )
++		return true;
++	return false;
++}
++
++void Tokenizer::fetchNextToken() {
++	scanToNextToken();
++
++	if (_current == _end) {
++		_currentToken = Token();
++		return;
++	}
++
++	auto start = _current;
++	while ( !isDelimiter(_current) ) {
++		++_current;
++	}
++
++	_currentToken = Token(start, _current - start);
++}
++
++///
++/// Representation of a parsed text-based dynamic library file.
++///
++struct DynamicLibrary {
++	Token _installName;
++	uint32_t _currentVersion;
++	uint32_t _compatibilityVersion;
++	uint8_t _swiftVersion;
++	ld::File::ObjcConstraint _objcConstraint;
++	Options::Platform _platform;
++	std::vector<Token> _allowedClients;
++	std::vector<Token> _reexportedLibraries;
++	std::vector<Token> _symbols;
++	std::vector<Token> _classes;
++	std::vector<Token> _ivars;
++	std::vector<Token> _weakDefSymbols;
++	std::vector<Token> _tlvSymbols;
++
++	DynamicLibrary() : _currentVersion(0x10000), _compatibilityVersion(0x10000), _swiftVersion(0),
++		_objcConstraint(ld::File::objcConstraintNone)  {}
++};
++
++///
++/// A simple text-based dynamic library file parser.
++///
++class TBDFile {
++	Tokenizer _tokenizer;
++
++	Token peek() { return _tokenizer.peek(); }
++	Token next() { return _tokenizer.next(); }
++
++	void expectToken(Token str) {
++		Token token = next();
++		if (token != str)
++			throwf("unexpected token: %s", token.str().c_str());
++	}
++
++	bool hasOptionalToken(Token str) {
++		auto token = peek();
++		if ( token == str ) {
++			next();
++			return true;
++		}
++		return false;
++	}
++
++
++	void parseFlowSequence(std::function<void (Token)> func) {
++		expectToken("[");
++
++		while ( true ) {
++			auto token = peek();
++			if ( token == "]" )
++				break;
++
++			token = next();
++			func(token);
++		}
++
++		expectToken("]");
++	}
++
++	void parseAllowedClients(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("allowed-clients") )
++			return;
++		parseFlowSequence([&](Token name) {
++			lib._allowedClients.emplace_back(name);
++		});
++	}
++
++	void parseReexportedDylibs(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("re-exports") )
++			return;
++		parseFlowSequence([&](Token name) {
++			lib._reexportedLibraries.emplace_back(name);
++		});
++	}
++
++	void parseSymbols(DynamicLibrary& lib) {
++		if ( hasOptionalToken("symbols") ) {
++			parseFlowSequence([&](Token name) {
++				lib._symbols.emplace_back(name);
++			});
++		}
++
++		if ( hasOptionalToken("objc-classes") ) {
++			parseFlowSequence([&](Token name) {
++				lib._classes.emplace_back(name);
++			});
++		}
++
++		if ( hasOptionalToken("objc-ivars") ) {
++			parseFlowSequence([&](Token name) {
++				lib._ivars.emplace_back(name);
++			});
++		}
++
++		if ( hasOptionalToken("weak-def-symbols") ) {
++			parseFlowSequence([&](Token name) {
++				lib._weakDefSymbols.emplace_back(name);
++			});
++		}
++
++		if ( hasOptionalToken("thread-local-symbols") ) {
++			parseFlowSequence([&](Token name) {
++				lib._tlvSymbols.emplace_back(name);
++			});
++		}
++	}
++
++	std::vector<std::string> parseArchFlowSequence() {
++		std::vector<std::string> availabledArchitectures;
++		expectToken("archs");
++		parseFlowSequence([&](Token name) {
++			availabledArchitectures.emplace_back(name.str());
++		});
++		return availabledArchitectures;
++	}
++
++	bool parseArchFlowSequence(std::string &selectedArchName) {
++		auto availabledArchitectures = parseArchFlowSequence();
++
++		for (const auto &archName : availabledArchitectures) {
++			if (archName == selectedArchName)
++				return true;
++		}
++
++		return false;
++	}
++
++	void parsePlatform(DynamicLibrary& lib) {
++		expectToken("platform");
++
++		auto token =  next();
++		if (token == "macosx")
++			lib._platform = Options::kPlatformOSX;
++		else if (token == "ios")
++			lib._platform = Options::kPlatformiOS;
++		else if (token == "watchos")
++			lib._platform = Options::kPlatformWatchOS;
++#if SUPPORT_APPLE_TV
++		else if (token == "tvos")
++			lib._platform = Options::kPlatform_tvOS;
++#endif
++		else
++			lib._platform = Options::kPlatformUnknown;
++	}
++
++	void parseInstallName(DynamicLibrary& lib) {
++		expectToken("install-name");
++
++		lib._installName = next();
++		if ( lib._installName.empty() )
++			throwf("no install name specified");
++	}
++
++	uint32_t parseVersionNumber32(Token token) {
++		if ( token.size() >= 128 )
++			throwf("malformed version number");
++
++		// Make a null-terminated string.
++		char buffer[128];
++		::memcpy(buffer, token.data(), token.size());
++		buffer[token.size()] = '\0';
++
++		return Options::parseVersionNumber32(buffer);
++	}
++
++	void parseCurrentVersion(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("current-version") )
++			return;
++		lib._currentVersion = parseVersionNumber32(next());
++	}
++
++	void parseCompatibilityVersion(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("compatibility-version") )
++			return;
++		lib._compatibilityVersion = parseVersionNumber32(next());
++	}
++
++	void parseSwiftVersion(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("swift-version") )
++			return;
++		auto token = next();
++		if ( token == "1.0" )
++			lib._swiftVersion = 1;
++		else if ( token == "1.1" )
++			lib._swiftVersion = 2;
++		else if ( token == "2.0" )
++			lib._swiftVersion = 3;
++		else
++			throwf("unsupported Swift ABI version: %s", token.str().c_str());
++	}
++
++	void parseObjCConstraint(DynamicLibrary& lib) {
++		if ( !hasOptionalToken("objc-constraint") )
++			return;
++		auto token = next();
++		if ( token == "none" )
++			lib._objcConstraint = ld::File::objcConstraintNone;
++		else if ( token == "retain_release" )
++			lib._objcConstraint = ld::File::objcConstraintRetainRelease;
++		else if ( token == "retain_release_for_simulator" )
++			lib._objcConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
++		else if ( token == "retain_release_or_gc" )
++			lib._objcConstraint = ld::File::objcConstraintRetainReleaseOrGC;
++		else if ( token == "gc" )
++			lib._objcConstraint = ld::File::objcConstraintGC;
++		else
++			throwf("unexpected token: %s", token.str().c_str());
++	}
++	void parseExportsBlock(DynamicLibrary& lib, std::string &selectedArchName) {
++		if ( !hasOptionalToken("exports") )
++			return;
++
++		if ( !hasOptionalToken("-") )
++			return;
++
++		while ( true ) {
++			if ( !parseArchFlowSequence(selectedArchName) ) {
++				Token token;
++				while ( true ) {
++					token = peek();
++					if ( token == "archs" || token == "..." || token.empty() )
++						break;
++					next();
++				}
++				if (token == "..." || token.empty() )
++					break;
++
++				continue;
++			}
++
++			parseAllowedClients(lib);
++			parseReexportedDylibs(lib);
++			parseSymbols(lib);
++			if ( !hasOptionalToken("-") )
++				break;
++		}
++	}
++
++	std::vector<std::string> getCompatibleArchList(std::string &requestedArchName) {
++		if (requestedArchName == "i386")
++			return {"i386"};
++		else if (requestedArchName == "x86_64" || requestedArchName == "x86_64h")
++			return {"x86_64", "x86_64h"};
++		else if (requestedArchName == "armv7" || requestedArchName == "armv7s")
++			return {"armv7", "armv7s"};
++		else if (requestedArchName == "armv7k")
++			return {"armv7k"};
++		else if (requestedArchName == "arm64")
++			return {"arm64"};
++		else
++			return {};
++	}
++
++	std::string parseAndSelectArchitecture(std::string &requestedArchName) {
++		auto availabledArchitectures = parseArchFlowSequence();
++
++		// First try to find an exact match (cpu type and sub-cpu type).
++		if (std::find(availabledArchitectures.begin(), availabledArchitectures.end(), requestedArchName)
++			!= availabledArchitectures.end())
++			return requestedArchName;
++
++		// If there is no exact match, then try to find an ABI compatible slice.
++		auto compatibleArchitectures = getCompatibleArchList(requestedArchName);
++		std::vector<std::string> result;
++		std::sort(availabledArchitectures.begin(), availabledArchitectures.end());
++		std::sort(compatibleArchitectures.begin(), compatibleArchitectures.end());
++		std::set_intersection(availabledArchitectures.begin(), availabledArchitectures.end(),
++							  compatibleArchitectures.begin(), compatibleArchitectures.end(),
++							  std::back_inserter(result));
++
++		if (result.empty())
++			return std::string();
++		else
++			return result.front();
++	}
++
++	void parseDocument(DynamicLibrary& lib, std::string &requestedArchName) {
++		auto selectedArchName = parseAndSelectArchitecture(requestedArchName);
++		if (selectedArchName.empty())
++			throwf("invalid arch");
++
++		parsePlatform(lib);
++		parseInstallName(lib);
++		parseCurrentVersion(lib);
++		parseCompatibilityVersion(lib);
++		parseSwiftVersion(lib);
++		parseObjCConstraint(lib);
++		parseExportsBlock(lib, selectedArchName);
++	}
++
++public:
++	TBDFile(const char* data, uint64_t size) : _tokenizer(data, size) {}
++
++	DynamicLibrary parseFileForArch(std::string requestedArchName) {
++		_tokenizer.reset();
++		DynamicLibrary lib;
++		expectToken("---");
++		parseDocument(lib, requestedArchName);
++		expectToken("...");
++		return lib;
++	}
++
++	bool validForArch(std::string requestedArchName) {
++		_tokenizer.reset();
++		auto token = next();
++		if ( token != "---" )
++			return false;
++		return !parseAndSelectArchitecture(requestedArchName).empty();
++	}
++
++	void dumpTokens() {
++		_tokenizer.reset();
++		Token token;
++		do {
++			token = next();
++			printf("token: %s\n", token.str().c_str());
++		} while ( !token.empty() );
++	}
++};
++
++} // end anonymous namespace
+ 
+ namespace textstub {
+ namespace dylib {
+@@ -50,94 +513,51 @@ class File final : public generic::dylib::File<A>
+ 	using Base = generic::dylib::File<A>;
+ 
+ public:
+-					File(const char* path, const uint8_t* fileContent, uint64_t fileLength,
++	static bool		validFile(const uint8_t* fileContent, bool executableOrDylib);
++					File(const uint8_t* fileContent, uint64_t fileLength, const char* path,
+ 						 time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace,
+-						 bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
+-						 Options::Platform platform, uint32_t linkMinOSVersion, bool allowWeakImports,
+-						 cpu_type_t cpuType, cpu_subtype_t cpuSubType, bool enforceDylibSubtypesMatch,
+-						 bool allowSimToMacOSX, bool addVers, bool buildingForSimulator,
++						 bool hoistImplicitPublicDylibs, Options::Platform platform,
++						 cpu_type_t cpuType, const char* archName, uint32_t linkMinOSVersion,
++						 bool allowWeakImports, bool allowSimToMacOSX, bool addVers, bool buildingForSimulator,
+ 						 bool logAllFiles, const char* installPath, bool indirectDylib);
+ 	virtual			~File() noexcept {}
+ 
+ private:
+-	void			buildExportHashTable(const tapi::LinkerInterfaceFile* file);
+-};
+-
+-static ld::File::ObjcConstraint mapObjCConstraint(tapi::ObjCConstraint constraint) {
+-	switch (constraint) {
+-	case tapi::ObjCConstraint::None:
+-		return ld::File::objcConstraintNone;
+-	case tapi::ObjCConstraint::Retain_Release:
+-		return ld::File::objcConstraintRetainRelease;
+-	case tapi::ObjCConstraint::Retain_Release_For_Simulator:
+-		return ld::File::objcConstraintRetainReleaseForSimulator;
+-	case tapi::ObjCConstraint::Retain_Release_Or_GC:
+-		return ld::File::objcConstraintRetainReleaseOrGC;
+-	case tapi::ObjCConstraint::GC:
+-		return ld::File::objcConstraintGC;
+-	}
+-
+-	return ld::File::objcConstraintNone;
+-}
++	void			buildExportHashTable(const DynamicLibrary &lib);
+ 
+-static Options::Platform mapPlatform(tapi::Platform platform) {
+-	switch (platform) {
+-	case tapi::Platform::Unknown:
+-		return Options::kPlatformUnknown;
+-	case tapi::Platform::OSX:
+-		return Options::kPlatformOSX;
+-	case tapi::Platform::iOS:
+-		return Options::kPlatformiOS;
+-	case tapi::Platform::watchOS:
+-		return Options::kPlatformWatchOS;
+-	case tapi::Platform::tvOS:
+-		return Options::kPlatform_tvOS;
+-	}
+-
+-	return Options::kPlatformUnknown;
+-}
++	cpu_type_t		_cpuType;
++};
+ 
+ template <typename A>
+-	File<A>::File(const char* path, const uint8_t* fileContent, uint64_t fileLength,
+-			  time_t mTime, ld::File::Ordinal ord, bool linkingFlatNamespace,
+-			  bool linkingMainExecutable, bool hoistImplicitPublicDylibs, Options::Platform platform,
+-			  uint32_t linkMinOSVersion, bool allowWeakImports, cpu_type_t cpuType, cpu_subtype_t cpuSubType,
+-				bool enforceDylibSubtypesMatch, bool allowSimToMacOSX, bool addVers,
++File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* path, time_t mTime,
++			  ld::File::Ordinal ord, bool linkingFlatNamespace, bool hoistImplicitPublicDylibs,
++			  Options::Platform platform, cpu_type_t cpuType, const char* archName,
++			  uint32_t linkMinOSVersion, bool allowWeakImports, bool allowSimToMacOSX, bool addVers,
+ 			  bool buildingForSimulator, bool logAllFiles, const char* targetInstallPath,
+ 			  bool indirectDylib)
+ 	: Base(strdup(path), mTime, ord, platform, linkMinOSVersion, allowWeakImports, linkingFlatNamespace,
+-		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers)
++		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers),
++	  _cpuType(cpuType)
+ {
+-	auto matchingType = enforceDylibSubtypesMatch ?
+-			tapi::CpuSubTypeMatching::Exact : tapi::CpuSubTypeMatching::ABI_Compatible;
+-
+-	std::string errorMessage;
+-	auto file = std::unique_ptr<tapi::LinkerInterfaceFile>(
+-		tapi::LinkerInterfaceFile::create(path, fileContent, fileLength, cpuType,
+-										  cpuSubType, matchingType,
+-										  tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+-
+-	if (file == nullptr)
+-		throw strdup(errorMessage.c_str());
+-
+-	// unmap file - it is no longer needed.
+-	munmap((caddr_t)fileContent, fileLength);
++	this->_bitcode = std::unique_ptr<ld::Bitcode>(new ld::Bitcode(nullptr, 0));
++	// Text stubs are implicit app extension safe.
++	this->_appExtensionSafe = true;
+ 
+ 	// write out path for -t option
+ 	if ( logAllFiles )
+ 		printf("%s\n", path);
+ 
+-	this->_bitcode = std::unique_ptr<ld::Bitcode>(new ld::Bitcode(nullptr, 0));
+-	this->_noRexports = !file->hasReexportedLibraries();
+-	this->_hasWeakExports = file->hasWeakDefinedExports();
+-	this->_dylibInstallPath = strdup(file->getInstallName().c_str());
+-	this->_installPathOverride = file->isInstallNameVersionSpecific();
+-	this->_dylibCurrentVersion = file->getCurrentVersion();
+-	this->_dylibCompatibilityVersion = file->getCompatibilityVersion();
+-	this->_swiftVersion = file->getSwiftVersion();
+-	this->_objcConstraint = mapObjCConstraint(file->getObjCConstraint());
+-	this->_parentUmbrella = file->getParentFrameworkName().empty() ? nullptr : strdup(file->getParentFrameworkName().c_str());
+-	this->_appExtensionSafe = file->isApplicationExtensionSafe();
++	TBDFile stub((const char*)fileContent, fileLength);
++	auto lib = stub.parseFileForArch(archName);
++
++	this->_noRexports = lib._reexportedLibraries.empty();
++	this->_hasWeakExports = !lib._weakDefSymbols.empty();
++	this->_dylibInstallPath = strdup(lib._installName.str().c_str());
++	this->_dylibCurrentVersion = lib._currentVersion;
++	this->_dylibCompatibilityVersion = lib._compatibilityVersion;
++	this->_swiftVersion = lib._swiftVersion;
++	this->_objcConstraint = lib._objcConstraint;
++	this->_hasPublicInstallName = this->isPublicLocation(this->_dylibInstallPath);
+ 
+ 	// if framework, capture framework name
+ 	const char* lastSlash = strrchr(this->_dylibInstallPath, '/');
+@@ -151,69 +571,100 @@ template <typename A>
+ 			this->_frameworkName = leafName;
+ 	}
+ 
+-	for (auto &client : file->allowableClients())
+-		this->_allowableClients.push_back(strdup(client.c_str()));
++  // TEMPORARY HACK BEGIN: Support ancient re-export command LC_SUB_FRAMEWORK.
++	// <rdar://problem/23614899> [TAPI] Support LC_SUB_FRAMEWORK as re-export indicator.
++	auto installName = std::string(this->_dylibInstallPath);
++
++	// All sub-frameworks of ApplicationServices use LC_SUB_FRAMEWORK.
++	if (installName.find("/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/") == 0 &&
++			installName.find(".dylib") == std::string::npos) {
++		this->_parentUmbrella = "ApplicationServices";
++	} else if (installName.find("/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/") == 0) {
++		this->_parentUmbrella = "Carbon";
++	} else if (installName.find("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/") == 0 &&
++					 installName.find(".dylib") == std::string::npos) {
++		this->_parentUmbrella = "CoreServices";
++	} else if (installName.find("/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLinearAlgebra.dylib") == 0 ||
++					 installName.find("/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libQuadrature.dylib") == 0 ||
++					 installName.find("System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparseBLAS.dylib") == 0) {
++		this->_parentUmbrella = "vecLib";
++	} else if (installName.find("/System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/WebCore") == 0) {
++		this->_parentUmbrella = "WebKit";
++	} else if (installName.find("/usr/lib/system/") == 0 &&
++			   installName != "/usr/lib/system/libkxld.dylib") {
++		this->_parentUmbrella = "System";
++	}
++	// TEMPORARY HACK END
++
++	for (auto &client : lib._allowedClients) {
++		if ((this->_parentUmbrella != nullptr) && (client.str() != this->_parentUmbrella))
++			this->_allowableClients.push_back(strdup(client.str().c_str()));
++	}
+ 
+ 	// <rdar://problem/20659505> [TAPI] Don't hoist "public" (in /usr/lib/) dylibs that should not be directly linked
+-	this->_hasPublicInstallName = file->hasAllowableClients() ? false : this->isPublicLocation(file->getInstallName().c_str());
+-
+-	for (const auto &client : file->allowableClients())
+-		this->_allowableClients.emplace_back(strdup(client.c_str()));
++	if ( !this->_allowableClients.empty() )
++		this->_hasPublicInstallName = false;
+ 
+-	auto dylibPlatform = mapPlatform(file->getPlatform());
+-	if ( (dylibPlatform != platform) && (platform != Options::kPlatformUnknown) ) {
++	if ( (lib._platform != platform) && (platform != Options::kPlatformUnknown) ) {
+ 		this->_wrongOS = true;
+ 		if ( this->_addVersionLoadCommand && !indirectDylib ) {
+ 			if ( buildingForSimulator ) {
+ 				if ( !this->_allowSimToMacOSXLinking )
+ 					throwf("building for %s simulator, but linking against dylib built for %s (%s).",
+-							Options::platformName(platform), Options::platformName(dylibPlatform), path);
++							Options::platformName(platform), Options::platformName(lib._platform), path);
+ 			} else {
+ 				throwf("building for %s, but linking against dylib built for %s (%s).",
+-						Options::platformName(platform), Options::platformName(dylibPlatform), path);
++						Options::platformName(platform), Options::platformName(lib._platform), path);
+ 			}
+ 		}
+ 	}
+ 
+-	for (const auto& reexport : file->reexportedLibraries()) {
+-		const char *path = strdup(reexport.c_str());
++	this->_dependentDylibs.reserve(lib._reexportedLibraries.size());
++	for ( const auto& reexport : lib._reexportedLibraries ) {
++		const char *path = strdup(reexport.str().c_str());
+ 		if ( (targetInstallPath == nullptr) || (strcmp(targetInstallPath, path) != 0) )
+ 			this->_dependentDylibs.emplace_back(path, true);
+ 	}
+ 
+-	for (const auto& symbol : file->ignoreExports())
+-		this->_ignoreExports.insert(strdup(symbol.c_str()));
+-
+-	// if linking flat and this is a flat dylib, create one atom that references all imported symbols.
+-	if ( linkingFlatNamespace && linkingMainExecutable && (file->hasTwoLevelNamespace() == false) ) {
+-		std::vector<const char*> importNames;
+-		importNames.reserve(file->undefineds().size());
+-		// We do not need to strdup the name, because that will be done by the
+-		// ImportAtom constructor.
+-		for (const auto &sym : file->undefineds())
+-			importNames.emplace_back(sym.getName().c_str());
+-		this->_importAtom = new generic::dylib::ImportAtom<A>(*this, importNames);
+-	}
+-
+ 	// build hash table
+-	buildExportHashTable(file.get());
++	buildExportHashTable(lib);
++
++	munmap((caddr_t)fileContent, fileLength);
+ }
+ 
+ template <typename A>
+-void File<A>::buildExportHashTable(const tapi::LinkerInterfaceFile* file) {
++void File<A>::buildExportHashTable(const DynamicLibrary& lib) {
+ 	if (this->_s_logHashtable )
+ 		fprintf(stderr, "ld: building hashtable from text-stub info in %s\n", this->path());
+ 
+-	for (const auto &sym : file->exports()) {
+-		const char* name = sym.getName().c_str();
+-		bool weakDef = sym.isWeakDefined();
+-		bool tlv = sym.isThreadLocalValue();
++	for (auto &sym : lib._symbols)
++		this->addSymbol(sym.str().c_str());
+ 
+-		typename Base::AtomAndWeak bucket = { nullptr, weakDef, tlv, 0 };
+-		if ( this->_s_logHashtable )
+-			fprintf(stderr, "  adding %s to hash table for %s\n", name, this->path());
+-		this->_atoms[strdup(name)] = bucket;
++#if SUPPORT_ARCH_i386
++	if (this->_platform == Options::kPlatformOSX && _cpuType == CPU_TYPE_I386) {
++		for (auto &sym : lib._classes)
++			this->addSymbol((".objc_class_name" + sym.str()).c_str());
++	} else {
++		for (auto &sym : lib._classes) {
++			this->addSymbol(("_OBJC_CLASS_$" + sym.str()).c_str());
++			this->addSymbol(("_OBJC_METACLASS_$" + sym.str()).c_str());
++		}
+ 	}
++#else
++	for (auto &sym : lib._classes) {
++		this->addSymbol(("_OBJC_CLASS_$" + sym.str()).c_str());
++		this->addSymbol(("_OBJC_METACLASS_$" + sym.str()).c_str());
++	}
++#endif
++
++	for (auto &sym : lib._ivars)
++		this->addSymbol(("_OBJC_IVAR_$" + sym.str()).c_str());
++
++	for (auto &sym : lib._weakDefSymbols)
++		this->addSymbol(sym.str().c_str(), /*weak=*/true);
++
++	for (auto &sym : lib._tlvSymbols)
++		this->addSymbol(sym.str().c_str(), /*weak=*/false, /*tlv=*/true);
+ }
+ 
+ template <typename A>
+@@ -222,21 +673,20 @@ class Parser
+ public:
+ 	using P = typename A::P;
+ 
+-	static ld::dylib::File*	parse(const char* path, const uint8_t* fileContent,
+-								  uint64_t fileLength, time_t mTime,
+-								  ld::File::Ordinal ordinal, const Options& opts,
++	static bool				validFile(const uint8_t* fileContent, uint64_t fileLength,
++									  const std::string &path, const char* archName);
++	static ld::dylib::File*	parse(const uint8_t* fileContent, uint64_t fileLength, const char* path,
++								  time_t mTime, ld::File::Ordinal ordinal, const Options& opts,
+ 								  bool indirectDylib)
+ 	{
+-		return new File<A>(path, fileContent, fileLength,mTime, ordinal,
++		return new File<A>(fileContent, fileLength, path, mTime, ordinal,
+ 						   opts.flatNamespace(),
+-						   opts.linkingMainExecutable(),
+ 						   opts.implicitlyLinkIndirectPublicDylibs(),
+ 						   opts.platform(),
++						   opts.architecture(),
++						   opts.architectureName(),
+ 						   opts.minOSversion(),
+ 						   opts.allowWeakImports(),
+-						   opts.architecture(),
+-						   opts.subArchitecture(),
+-						   opts.enforceDylibSubtypesMatch(),
+ 						   opts.allowSimulatorToLinkWithMacOSX(),
+ 						   opts.addVersionLoadCommand(),
+ 						   opts.targetIOSSimulator(),
+@@ -246,6 +696,20 @@ public:
+ 	}
+ };
+ 
++template <typename A>
++bool Parser<A>::validFile(const uint8_t* fileContent, uint64_t fileLength, const std::string &path,
++						  const char* archName)
++{
++	if ( path.find(".tbd", path.size()-4) == std::string::npos )
++		return false;
++
++	TBDFile stub((const char*)fileContent, fileLength);
++	if ( !stub.validForArch(archName) )
++		throwf("missing required architecture %s in file %s", archName, path.c_str());
++
++	return true;
++}
++
+ //
+ // main function used by linker to instantiate ld::Files
+ //
+@@ -253,27 +717,30 @@ ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, const ch
+ 					   time_t modTime, const Options& opts, ld::File::Ordinal ordinal,
+ 					   bool bundleLoader, bool indirectDylib)
+ {
+-
+ 	switch ( opts.architecture() ) {
+ #if SUPPORT_ARCH_x86_64
+ 		case CPU_TYPE_X86_64:
+-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
+-			return Parser<x86_64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
++			if ( Parser<x86_64>::validFile(fileContent, fileLength, path, opts.architectureName()) )
++				return Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
++			break;
+ #endif
+ #if SUPPORT_ARCH_i386
+ 		case CPU_TYPE_I386:
+-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
+-			return Parser<x86>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
++			if ( Parser<x86>::validFile(fileContent, fileLength, path, opts.architectureName()) )
++				return Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
++			break;
+ #endif
+ #if SUPPORT_ARCH_arm_any
+ 		case CPU_TYPE_ARM:
+-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
+-			return Parser<arm>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
++			if ( Parser<arm>::validFile(fileContent, fileLength, path, opts.architectureName()) )
++				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
++			break;
+ #endif
+ #if SUPPORT_ARCH_arm64
+ 		case CPU_TYPE_ARM64:
+-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
+-			return Parser<arm64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
++			if ( Parser<arm64>::validFile(fileContent, fileLength, path, opts.architectureName()) )
++				return Parser<arm64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
++			break;
+ #endif
+ 	}
+ 	return nullptr;
+-- 
+2.11.0
+

@@ -1,33 +1,4 @@
-# $Id$
-#
-# Copyright (c) 2010 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of The MacPorts Project nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # This PortGroup automatically sets all the fields of the various cross binutils
 # ports (e.g. spu-binutils).
@@ -35,12 +6,35 @@
 # Usage:
 #
 #   PortGroup               crossbinutils 1.0
-#   crossbinutils.setup     spu 2.20.51.0.5
+#   crossbinutils.setup     spu 2.27
 
 options crossbinutils.target
 
+array set crossbinutils.versions_info {
+    2.30 {xz {
+        rmd160  7f439bd642e514e89075a47758414ea65c50c3b3 \
+        sha256  6e46b8aeae2f727a36f0bd9505e405768a72218f1796f0d09757d45209871ae6 \
+        size    20286700
+    }}
+    2.31 {xz {
+        rmd160  cc4eece9d281ca10511e0618fac1f6ddbd9b42df \
+        sha256  231036df7ef02049cdbff0681f4575e571f26ea8086cf70c2dcd3b6c0f4216bf \
+        size    20445772
+    }}
+    2.31.1 {xz {
+        rmd160  9eeff67d0ae96bfb1bd1db20991b90166d5b15c5 \
+        sha256  5d20086ecf5752cc7d9134246e9588fa201740d540f7eb84d795b1f7a93bca86 \
+        size    20467996
+    }}
+    2.32 {xz {
+        rmd160  cfff50aae6534512a51fbb720e30f37484f8193e \
+        sha256  0ab6c55dd86a92ed561972ba15b9b70a8b9f75557f896446c82e8b36e473ee04 \
+        size    20774880
+    }}
+}
+
 proc crossbinutils.setup {target version} {
-    global master_sites workpath worksrcpath extract.suffix
+    global master_sites workpath worksrcpath extract.suffix prefix crossbinutils.target crossbinutils.versions_info
 
     crossbinutils.target ${target}
 
@@ -56,13 +50,22 @@ proc crossbinutils.setup {target version} {
         Free Software Foundation development toolchain ("binutils") for \
         ${target} cross development.
 
-    homepage        http://www.gnu.org/software/binutils/binutils.html
+    homepage        https://www.gnu.org/software/binutils/binutils.html
     master_sites    gnu:binutils \
                     http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
     dist_subdir     binutils
     distname        binutils-${version}
     worksrcdir      binutils-[string trimright ${version} {[a-zA-Z]}]
-    use_bzip2       yes
+
+    if {[info exists crossbinutils.versions_info($version)]} {
+        use_[lindex [set crossbinutils.versions_info($version)] 0] yes
+
+        checksums   {*}[lindex [set crossbinutils.versions_info($version)] 1]
+    } else {
+        # the old default
+        use_bzip2   yes
+        #use_xz yes
+    }
 
     post-extract {
         delete ${worksrcpath}/etc
@@ -81,39 +84,39 @@ proc crossbinutils.setup {target version} {
         foreach {dir page} ${infopages} {
             # Fix texinfo source file
             set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
-            reinplace \
+            reinplace -q \
                 /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
-            reinplace s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
-            reinplace \
+            reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
+            reinplace -q \
                 "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
                 ${tex}
             move ${tex} \
                 ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
 
             # Fix Makefile
-            reinplace -E \
+            reinplace -q -E \
                 s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
                 ${worksrcpath}/${dir}/Makefile.in
         }
 
         # Fix packages' names.
         foreach dir {bfd binutils gas gold gprof ld opcodes} {
-            reinplace "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
+            reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
                 ${worksrcpath}/${dir}/configure
         }
 
-	# Install target-compatible libbfd/libiberty in the target's directory
-	reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
-		${worksrcpath}/bfd/configure                                \
-		${worksrcpath}/opcodes/configure
-	reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
-		${worksrcpath}/bfd/configure                                             \
-		${worksrcpath}/opcodes/configure
+        # Install target-compatible libbfd/libiberty in the target's directory
+        reinplace -q "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
+            ${worksrcpath}/bfd/configure                                \
+            ${worksrcpath}/opcodes/configure
+        reinplace -q "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
+            ${worksrcpath}/bfd/configure                                             \
+            ${worksrcpath}/opcodes/configure
 
-	reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
-		${worksrcpath}/libiberty/Makefile.in
-	reinplace "s|\$(MULTIOSDIR)||g" \
-		${worksrcpath}/libiberty/Makefile.in
+        reinplace -q "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
+            ${worksrcpath}/libiberty/Makefile.in
+        reinplace -q "s|/\$(MULTIOSDIR)||g" \
+            ${worksrcpath}/libiberty/Makefile.in
     }
 
     depends_lib \
@@ -129,7 +132,7 @@ proc crossbinutils.setup {target version} {
     configure.args \
         --target=${target} \
         --program-prefix=${target}- \
-        --enable-install-libiberty \
+        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host  \
         --enable-install-libbfd
 
     build.dir ${workpath}/build
@@ -139,7 +142,7 @@ proc crossbinutils.setup {target version} {
     post-destroot {
         set docdir ${prefix}/share/doc/${name}
         xinstall -d ${destroot}${docdir}
-        xinstall -m 644 \
+        xinstall -m 0644 \
             {*}[glob -type f ${worksrcpath}/{COPYING*,ChangeLog,MAINTAINERS,README*}] \
             ${destroot}${docdir}
     }
