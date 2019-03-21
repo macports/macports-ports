@@ -45,7 +45,7 @@ proc add_legacysupport {} {
         ui_debug "Removing legacy build support"
 
         # port dependency
-        depends_lib-delete port:legacy-support
+        depends_lib-delete path:lib/libMacportsLegacySupport.dylib:legacy-support
 
         # configure options
         configure.ldflags-delete  ${AddLDFlag}
