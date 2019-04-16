@@ -116,7 +116,7 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$compiler_version
 }
 
-set clang_versions {33 34 37 38 39 40 50 60 70}
+set clang_versions {33 34 37 39 40 50 60 70}
 foreach v ${clang_versions} {
     # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
     set compiler_version $v
