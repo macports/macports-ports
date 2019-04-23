@@ -1,0 +1,346 @@
+diff -Naur rtl/inc/iso7185.pp rtl-new/inc/iso7185.pp
+--- rtl/inc/iso7185.pp	2017-02-17 19:04:47.000000000 +0100
++++ rtl-new/inc/iso7185.pp	2017-02-18 10:38:58.000000000 +0100
+@@ -47,13 +47,160 @@
+ 
+   implementation
+ 
++{$IF defined(WINDOWS)}
++    type
++      isoLPWStr = PWideChar;
++      isoWinBool = LongBool;
++      TSysCharSet = set of AnsiChar;
++
++    function GetEnvironmentStringsW: isoLPWStr; stdcall; external 'kernel32' name 'GetEnvironmentStringsW';
++    function FreeEnvironmentStringsW(_para1 : isoLPWStr): isoWinBool; stdcall; external 'kernel32' name 'FreeEnvironmentStringsW';
++
++    function StrLen(p : PWideChar): sizeint; external name 'FPC_PWIDECHAR_LENGTH'; overload;
++
++    {$push}
++    {$checkpointer off}
++
++    function CharInSet(Ch : WideChar; const CSet : TSysCharSet): Boolean;
++    begin
++      CharInSet := (Ch <= #$FF) and (AnsiChar(byte(Ch)) in CSet);
++    end;
++
++    function InternalChangeCase(const S : UnicodeString; const Chars: TSysCharSet; const Adjustment: Longint): UnicodeString;
++      var
++        i : Integer;
++        p : PWideChar;
++        unique : Boolean;
++      begin
++        InternalChangeCase := S;
++        if InternalChangeCase = '' then
++          exit;
++        unique := false;
++        p := PWideChar(InternalChangeCase);
++        for i := 1 to Length(InternalChangeCase) do
++        begin
++          if CharInSet(p^, Chars) then
++          begin
++            if not unique then
++            begin
++              UniqueString(InternalChangeCase);
++              p := @InternalChangeCase[i];
++              unique := true;
++            end;
++            p^ := WideChar(Ord(p^) + Adjustment);
++          end;
++          inc(p);
++        end;
++      end;
++
++    function UpperCase(const s : UnicodeString) : UnicodeString;
++      begin
++        UpperCase := InternalChangeCase(s, ['a'..'z'], -32);
++      end;
++
++    function GetEnvironmentVariable(const EnvVar : UnicodeString) : UnicodeString;
++    var
++      s, upperenv : UnicodeString;
++      i : Longint;
++      hp, p : PWideChar;
++    begin
++      GetEnvironmentVariable := '';
++      p := GetEnvironmentStringsW;
++      hp := p;
++      upperenv := uppercase(envvar);
++      while hp^ <> #0 do
++      begin
++        s := hp;
++        i := pos('=', s);
++        if uppercase(copy(s,1,i-1)) = upperenv then
++        begin
++          GetEnvironmentVariable := copy(s, i+1, length(s)-i);
++          break;
++        end;
++        { next string entry }
++        hp := hp + strlen(hp) + 1;
++      end;
++      FreeEnvironmentStringsW(p);
++    end;
++
++    function getTempDir: String;
++    var
++      astringLength : Integer;
++    begin
++      getTempDir := GetEnvironmentVariable('TMP');
++      if getTempDir = '' then
++        getTempDir := GetEnvironmentVariable('TEMP');
++      astringlength := Length(getTempDir);
++      if (astringlength > 0) and (getTempDir[astringlength] <> DirectorySeparator) then
++        getTempDir := getTempDir + DirectorySeparator;
++    end;
++
++    {$pop}
++
++{$ELSEIF defined(UNIX)}
++
++  function getTempDir: string;
++    var
++      key: string;
++      value: string;
++      i_env, i_key, i_value: integer;
++    begin
++      value := '/tmp/';  (** default for UNIX **)
++      while (envp <> NIL) and assigned(envp^) do
++      begin
++        i_env := 0;
++        i_key := 1;
++        while not (envp^[i_env] in ['=', #0]) do
++        begin
++          key[i_key] := envp^[i_env];
++          inc(i_env);
++          inc(i_key);
++        end;
++        setlength(key, i_key - 1);
++        if (key = 'TEMP') or (key = 'TMP') or (key = 'TMPDIR') then
++        begin
++          inc(i_env);    (** skip '=' **)
++          i_value := 1;
++          while (envp^[i_env] <> #0) do
++          begin
++            value[i_value] := envp^[i_env];
++            inc(i_env);
++            inc(i_value);
++          end;
++          setlength(value, i_value - 1);
++        end;
++        inc(envp);
++      end;
++      i_value:=length(value);
++      if (i_value > 0) and (value[i_value] <> DirectorySeparator) then
++        value := value + DirectorySeparator;
++      getTempDir := value;
++    end;
++
++{$ELSE}  // neither unix nor windows
++
++  function getTempDir: string;
++  begin
++    getTempDir:='';
++  end;
++
++{$ENDIF}
++
+ {$i-}
+     procedure DoAssign(var t : Text);
++{$ifndef FPC_HAS_FEATURE_RANDOM}
++      const
++        NextIndex : Word = 1;
++{$endif FPC_HAS_FEATURE_RANDOM}
+       begin
+-        Assign(t,'fpc_'+HexStr(random(1000000000),8)+'.tmp');
++{$ifdef FPC_HAS_FEATURE_RANDOM}
++        Assign(t,getTempDir+'fpc_'+HexStr(random(1000000000),8)+'.tmp');
++{$else FPC_HAS_FEATURE_RANDOM}
++        Assign(t,getTempDir+'fpc_'+HexStr(NextIndex,4)+'.tmp');
++        Inc(NextIndex);
++{$endif FPC_HAS_FEATURE_RANDOM}
+       end;
+ 
+-
+     Procedure Rewrite(var t : Text);[IOCheck];
+       Begin
+         { create file name? }
+@@ -172,7 +319,9 @@
+ begin
+   { we shouldn't do this because it might confuse user programs, but for now it
+     is good enough to get pretty unique tmp file names }
++{$ifdef FPC_HAS_FEATURE_RANDOM}
+   Randomize;
++{$endif FPC_HAS_FEATURE_RANDOM}
+   { reset opens with read-only }
+   Filemode:=0;
+ end.
+diff -Naur rtl/inc/typefile.inc rtl-new/inc/typefile.inc
+--- rtl/inc/typefile.inc	2017-02-18 10:41:19.000000000 +0100
++++ rtl-new/inc/typefile.inc	2017-02-18 10:48:32.000000000 +0100
+@@ -68,12 +68,151 @@
+   Rewrite(UnTypedFile(f),Size);
+ End;
+ 
++{ this code is duplicated in the iso7185 unit }
++{$IF defined(WINDOWS)}
++    type
++      isoLPWStr = PWideChar;
++      isoWinBool = LongBool;
++      TSysCharSet = set of AnsiChar;
++
++    function GetEnvironmentStringsW: isoLPWStr; stdcall; external 'kernel32' name 'GetEnvironmentStringsW';
++    function FreeEnvironmentStringsW(_para1 : isoLPWStr): isoWinBool; stdcall; external 'kernel32' name 'FreeEnvironmentStringsW';
++
++    function StrLen(p : PWideChar): sizeint; external name 'FPC_PWIDECHAR_LENGTH'; overload;
++
++    {$push}
++    {$checkpointer off}
++
++    function CharInSet(Ch : WideChar; const CSet : TSysCharSet): Boolean;
++    begin
++      CharInSet := (Ch <= #$FF) and (AnsiChar(byte(Ch)) in CSet);
++    end;
++
++    function InternalChangeCase(const S : UnicodeString; const Chars: TSysCharSet; const Adjustment: Longint): UnicodeString;
++      var
++        i : Integer;
++        p : PWideChar;
++        unique : Boolean;
++      begin
++        InternalChangeCase := S;
++        if InternalChangeCase = '' then
++          exit;
++        unique := false;
++        p := PWideChar(InternalChangeCase);
++        for i := 1 to Length(InternalChangeCase) do
++        begin
++          if CharInSet(p^, Chars) then
++          begin
++            if not unique then
++            begin
++              UniqueString(InternalChangeCase);
++              p := @InternalChangeCase[i];
++              unique := true;
++            end;
++            p^ := WideChar(Ord(p^) + Adjustment);
++          end;
++          inc(p);
++        end;
++      end;
++
++    function UpperCase(const s : UnicodeString) : UnicodeString;
++      begin
++        UpperCase := InternalChangeCase(s, ['a'..'z'], -32);
++      end;
++
++    function GetEnvironmentVariable(const EnvVar : UnicodeString) : UnicodeString;
++    var
++      s, upperenv : UnicodeString;
++      i : Longint;
++      hp, p : PWideChar;
++    begin
++      GetEnvironmentVariable := '';
++      p := GetEnvironmentStringsW;
++      hp := p;
++      upperenv := uppercase(envvar);
++      while hp^ <> #0 do
++      begin
++        s := hp;
++        i := pos('=', s);
++        if uppercase(copy(s,1,i-1)) = upperenv then
++        begin
++          GetEnvironmentVariable := copy(s, i+1, length(s)-i);
++          break;
++        end;
++        { next string entry }
++        hp := hp + strlen(hp) + 1;
++      end;
++      FreeEnvironmentStringsW(p);
++    end;
++
++    function getTempDir: String;
++    var
++      astringLength : Integer;
++    begin
++      getTempDir := GetEnvironmentVariable('TMP');
++      if getTempDir = '' then
++        getTempDir := GetEnvironmentVariable('TEMP');
++      astringlength := Length(getTempDir);
++      if (astringlength > 0) and (getTempDir[astringlength] <> DirectorySeparator) then
++        getTempDir := getTempDir + DirectorySeparator;
++    end;
++
++    {$pop}
++
++{$ELSEIF defined(UNIX)}
++
++  function getTempDir: string;
++    var
++      key: string;
++      value: string;
++      i_env, i_key, i_value: integer;
++    begin
++      value := '/tmp/';  (** default for UNIX **)
++      while (envp <> NIL) and assigned(envp^) do
++      begin
++        i_env := 0;
++        i_key := 1;
++        while not (envp^[i_env] in ['=', #0]) do
++        begin
++          key[i_key] := envp^[i_env];
++          inc(i_env);
++          inc(i_key);
++        end;
++        setlength(key, i_key - 1);
++        if (key = 'TEMP') or (key = 'TMP') or (key = 'TMPDIR') then
++        begin
++          inc(i_env);    (** skip '=' **)
++          i_value := 1;
++          while (envp^[i_env] <> #0) do
++          begin
++            value[i_value] := envp^[i_env];
++            inc(i_env);
++            inc(i_value);
++          end;
++          setlength(value, i_value - 1);
++        end;
++        inc(envp);
++      end;
++      i_value:=length(value);
++      if (i_value > 0) and (value[i_value] <> DirectorySeparator) then
++        value := value + DirectorySeparator;
++      getTempDir := value;
++    end;
++
++{$ELSE}  // neither unix nor windows
++
++  function getTempDir: string;
++  begin
++    getTempDir:='';
++  end;
++
++{$ENDIF}
+ 
+ {$ifdef FPC_HAS_FEATURE_RANDOM}
+ { this code is duplicated in the iso7185 unit }
+ Procedure DoAssign(var t : TypedFile);
+ Begin
+-  Assign(t,'fpc_'+HexStr(random(1000000000),8)+'.tmp');
++  Assign(t,getTempDir+'fpc_'+HexStr(random(1000000000),8)+'.tmp');
+ End;
+ {$else FPC_HAS_FEATURE_RANDOM}
+ { this code is duplicated in the iso7185 unit }
+@@ -81,8 +220,12 @@
+ const
+   start : dword = 0;
+ Begin
+-  Assign(t,'fpc_'+HexStr(start,8)+'.tmp');
++ {$ifdef EXCLUDE_COMPLEX_PROCS}
++   runerror(219);
++ {$else EXCLUDE_COMPLEX_PROCS}
++  Assign(t,getTempDir+'fpc_'+HexStr(start,8)+'.tmp');
+   inc(start);
++ {$endif EXCLUDE_COMPLEX_PROCS}
+ End;
+ {$endif FPC_HAS_FEATURE_RANDOM}
+ 
