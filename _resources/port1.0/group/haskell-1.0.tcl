@@ -1,34 +1,5 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2009 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of The MacPorts Project nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#
 # Usage:
 # PortGroup       haskell 1.0
 # haskell.setup   haskell_package version [haskell_compiler]
@@ -75,8 +46,8 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
     }
     version             ${version}
     categories          devel haskell
-    homepage            http://hackage.haskell.org/package/${package}
-    master_sites        http://hackage.haskell.org/package/${package}-${version}
+    homepage            https://hackage.haskell.org/package/${package}
+    master_sites        https://hackage.haskell.org/package/${package}-${version}
     distname            ${package}-${version}
     depends_lib         port:${compiler_config(port)}
     configure.cmd       runhaskell
@@ -107,9 +78,9 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
             ${configure.cmd} Setup register \
             --gen-pkg-config=${package}-${version}.conf]
         set generate_pkg_config_hook [subst {
-            xinstall -d -m 755 [list ${destroot}${package_conf_d}]
+            xinstall -d -m 0755 [list ${destroot}${package_conf_d}]
             system -W [list ${worksrcpath}] [list $generate_pkg_config_cmdline]
-            xinstall -m 644 [list ${worksrcpath}/${package}-${version}.conf] \
+            xinstall -m 0644 [list ${worksrcpath}/${package}-${version}.conf] \
                 [list ${destroot}${package_conf_d}]
         }]
         post-destroot $generate_pkg_config_hook
@@ -141,7 +112,7 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
 
     if {${target} eq "standalone"} {
         livecheck.type      regex
-        livecheck.url       http://hackage.haskell.org/package/${package}
+        livecheck.url       https://hackage.haskell.org/package/${package}
         livecheck.regex     "/package/[quotemeta ${package}]-\[^/\]+/[quotemeta ${package}]-(\[^\"\]+)[quotemeta ${extract.suffix}]"
     } else {
         # Disable livecheck for haskell platform ports

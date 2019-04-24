@@ -2,12 +2,14 @@
 
 PortSystem        1.0
 PortGroup         perl5 1.0
+PortGroup         cmake 1.1
+PortGroup         cxx11 1.1
 
 name              gnucash
 conflicts         gnucash gnucash-devel
 conflicts-delete  ${subport}
-version           2.6.17
-perl5.branches    5.24
+version           3.5
+perl5.branches    5.28
 categories        gnome x11
 license           GPL-2+
 maintainers       {dports @drkp} openmaintainer
@@ -31,148 +33,98 @@ master_sites      sourceforge \
 
 use_bzip2         yes
 
-checksums           rmd160  c847025dc7f99248e015ad633e2fdf6bf6e11b28 \
-                    sha256  db965f39b6c5181810a064a1d1f5bb719722ac3b54dfce0cecf43ee7b38e593c
+distname          ${name}-${version}
+worksrcdir        ${name}-${version}
 
-# We'll install gnucash's libraries in a separate subdir of
-# ${prefix}/lib, because gnucash sets DYLD_LIBRARY_PATH at runtime in
-# order to dynamically load these directories, and including all
-# MacPorts libraries in DYLD_LIBRARY_PATH can cause problems.
-# guile18 modules are also installed in a separate subdirectory.
-# See https://trac.macports.org/ticket/52494.
-set gnclibdir     ${prefix}/lib/gnucash
-
-patchfiles        patch-configure.ac.diff \
-                  patch-src_bin_environment.in.diff \
-                  patch-src_core-utils_gnc-path.c.diff
+checksums         rmd160  54d42e8670c9169644c9383efa8eebbca65d5e78 \
+                  sha256  776d0b51b6029e25b5c7e9eb86021d5ecf1b09d8f3241b279f76dba9cc3b7745 \
+                  size    13766397
 
 post-patch {
-    reinplace "s|@@GUILEPATH@@|${prefix}/lib/guile18|" ${worksrcpath}/src/bin/environment.in
-    reinplace "s|@@LIBDIR@@|${gnclibdir}|" ${worksrcpath}/src/bin/environment.in
-    reinplace "s|@@LIBDIR@@|${gnclibdir}|" ${worksrcpath}/src/core-utils/gnc-path.c
-    
     # gnc-fq-dump needs to be patched to use MacPorts perl.
     # (autoconf takes care of the other perl scripts.)
-    reinplace "s|^#!/usr/bin/perl|#!${perl5.bin}|" ${worksrcpath}/src/quotes/gnc-fq-dump
+    reinplace "s|^#!/usr/bin/perl|#!${perl5.bin}|" ${worksrcpath}/libgnucash/quotes/gnc-fq-dump
 
-    # patch source files to include guile18 header instead of guile.
-    # (Note that gnucash's autoconf scripts prefer guile18 over guile
-    # if both are installed.)
-    fs-traverse f ${worksrcpath} {
-        if [regexp {\.[ch]$} ${f}] {
-            reinplace -q -locale C "s|<libguile\\.h>|<libguile18.h>|g" ${f}
-            reinplace -q -locale C "s|<libguile/|<libguile18/|g" ${f}
-        }
-    }
+    reinplace "s|set(HAVE_OSX_KEYCHAIN 1)||" ${worksrcpath}/CMakeLists.txt
+    
+    # Drop in a patched version of glibconfig.h via
+    # https://git.gnome.org/browse/gtk-osx/plain/patches/glib-gint64-long-long.patch
+    # because gnucash incorrectly assumes int64_t and gint64 are
+    # the same size. See https://trac.macports.org/ticket/55446
+    xinstall -d ${workpath}/glib-2.0/include
+    file copy ${prefix}/lib/glib-2.0/include/glibconfig.h ${workpath}/glib-2.0/include
+    system -W ${workpath}/glib-2.0/include "patch -p1 <${filespath}/patch-glibconfig.h.diff"
 }
 
-depends_build     port:pkgconfig \
-                  port:intltool \
-                  port:autoconf \
-                  port:automake \
-                  port:libtool
+configure.env-append PKG_CONFIG_GLIB_2_0_LIBDIR=${workpath}
 
-depends_lib       port:guile18 \
-                  port:libgnomeui \
-                  path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk \
-                  port:goffice08 \
-                  port:p${perl5.major}-datemanip \
-                  port:p${perl5.major}-finance-quote
+configure.cppflags-delete   -I${prefix}/include
+configure.cppflags-append   -isystem${prefix}/include
+configure.cppflags-append -I${worksrcpath}
 
+depends_build-append     port:pkgconfig \
+                         port:intltool \
+                         port:autoconf \
+                         port:automake \
+                         port:libtool \
+                         port:gtest
+         
+depends_lib       port:guile \
+                  port:perl${perl5.major} \
+                  port:p${perl5.major}-date-manip \
+                  port:p${perl5.major}-finance-quote \
+                  port:boost \
+                  port:gtk3 \
+                  path:${prefix}/libpkgconfig/webkitgtk-3.0.pc:webkit-gtk3 \
+                  port:libdbi \
+                  port:libdbi-drivers \
+                  port:aqbanking5-gtk3 \
+                  port:libofx \
+                  port:python36 \
+                  port:icu \
+                  port:libxml2
+
+depends_run       port:gnucash-docs
 # yelp currently requires X11 to build so disable dependency if building
 # with +quartz
 #
 # TODO: add +x11 +quartz variants to distinguish one build from the other
 # since they have different binary dependencies.  Otherwise, rev-upgrade
 # errors may occur
-
 if {![variant_isset quartz]} {
-    depends_run port:yelp
-}
-
-platform darwin {
-    if {${configure.cxx_stdlib} eq "libstdc++"} {
-       depends_lib-delete path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk
-       depends_lib-append path:lib/pkgconfig/webkit-1.0.pc:webkit-gtk-2.0
-    }
+    depends_run-append port:yelp
 }
 
 # aqbanking is not universal
 universal_variant no
 
-# reconfigure using upstream autogen.sh for intltool 0.51 compatibility
-
-post-patch {
-    xinstall -m 755 ${filespath}/autogen.sh ${worksrcpath}
-    system "cd ${worksrcpath} && ./autogen.sh"
-    if {[variant_isset python27]} {
-        # Fix python exec_prefix
-        reinplace "s|\\(PYTHON_EXEC_PREFIX=\\).*$|\\1${frameworks_dir}/Python.framework/Versions/2.7/|" \
-            ${worksrcpath}/configure
-        reinplace "s|\\(PYTHON_PREFIX=\\).*$|\\1${frameworks_dir}/Python.framework/Versions/2.7/|" \
-            ${worksrcpath}/configure
-    }
-}
-
-configure.args    --disable-dependency-tracking \
-                  --disable-aqbanking \
-                  --disable-ofx \
-                  --disable-dbi \
-                  --with-html-engine=webkit \
-                  --with-guile=1.8
-
-configure.args-append   --libdir=${gnclibdir}
-
+configure.args    -DENABLE_BINRELOC=OFF \
+                  -DCMAKE_INSTALL_SYSCONFDIR=${prefix}/etc \
+                  -DWITH_PYTHON=ON
 configure.perl    ${perl5.bin}
-configure.env \
-    GUILE=${prefix}/bin/guile18 \
-    GUILE_CONFIG=${prefix}/bin/guile18-config \
-    GUILE_TOOLS=${prefix}/bin/guile18-tools
 
-variant hbci description {AqBanking/HBCI support} {
-    depends_lib-append  path:lib/libaqbanking.dylib:aqbanking5-gtk
-    configure.args-delete   --disable-aqbanking
-    configure.args-append   --enable-aqbanking
+# force use of the requested python 3.6
+configure.args-append -DPYTHON_EXECUTABLE:FILEPATH=${prefix}/bin/python3.6
+configure.args-append -DPYTHON_INCLUDE_DIR:PATH=${frameworks_dir}/Python.framework/Versions/3.6/include/python3.6m
+configure.args-append -DPYTHON_LIBRARY:FILEPATH=${frameworks_dir}/Python.framework/Versions/3.6/lib/libpython3.6.dylib
+
+post-destroot {
+    file delete ${destroot}${prefix}/lib/libgwengui-gtk3.dylib
+    file delete ${destroot}${prefix}/share/glib-2.0/schemas/gschemas.compiled
 }
-
-variant ofx description {OFX support} {
-    depends_lib-append  port:libofx
-    configure.args-delete   --disable-ofx
-    configure.args-append   --enable-ofx
-}
-
-variant dbi description {Adds dbi backend support} {
-    depends_lib-append  port:libdbi \
-                        port:libdbi-drivers
-    configure.args-delete --disable-dbi
-    configure.args-append --enable-dbi
-    configure.args-append --with-dbi-dbd-dir=${prefix}/lib/dbd
-    notes-append "gnucash DBI backend support requires the libdbi-drivers port to be built with support for the desired databases. sqlite3 is available by default; for MySQL or PostgreSQL support, ensure that the corresponding variant is selected for libdbi-drivers."
-}
-
-default_variants +ofx +hbci
-
-variant python27 description {Install Python bindings for Python 2.7} { 
-    depends_lib-append  port:python27 
-    set python_bindir ${frameworks_dir}/Python.framework/Versions/2.7/bin/ 
-    configure.args-append --enable-python \
-                          PYTHON_EXTRA_LDFLAGS=\"\`${python_bindir}/python2.7-config --ldflags\`\" \
-                          PYTHON_CPPFLAGS=\"\`${python_bindir}/python2.7-config --cflags\`\" 
-    configure.python    ${python_bindir}/python2.7 
-} 
 
 post-activate {
     system "${prefix}/bin/gtk-update-icon-cache -f -t ${prefix}/share/icons/hicolor"
     system "${prefix}/bin/glib-compile-schemas ${prefix}/share/glib-2.0/schemas"
 }
 
-livecheck.regex "/${name} .*/(\[0-9\]+\\.\[0-9\]*\[02468\]\\.\[0-9\]+)/"
-
-
-
-subport gnucash-devel {
-    master_sites      sourceforge:${name} \
-        http://www.gnucash.org/pub/gnucash/sources/unstable/${branch}.x/
-
-    livecheck.regex "/${name} .*/(\[0-9\]+\\.\[0-9\]*\[0-9\]\\.\[0-9\]+)/"
+if {$subport == $name} {
+    livecheck.regex "/${name} .*/(\[0-9\]+\\.\[0-9\]*\[0-9\])/"
 }
+
+# There currently isn't a separate beta release.
+subport gnucash-devel {
+    livecheck.regex "/${name} .*/(\[0-9\]+\\.\[0-9\]*\[0-9\])/"
+}
+
+notes "gnucash DBI backend support requires the libdbi-drivers port to be built with support for the desired databases. sqlite3 is available by default; for MySQL or PostgreSQL support, ensure that the corresponding variant is selected for libdbi-drivers."

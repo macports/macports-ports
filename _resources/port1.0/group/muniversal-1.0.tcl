@@ -1,33 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-#
-# Copyright (c) 2009-2017 The MacPorts Project,
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
 
 # User variables:
 #         merger_configure_env: associative array of configure.env variables
@@ -53,10 +24,10 @@
 
 options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
 default universal_archs_supported {${universal_archs}}
-default merger_must_run_binaries {no}
-default merger_no_3_archs {no}
-default merger_arch_flag {yes}
-default merger_arch_compiler {no}
+default merger_must_run_binaries no
+default merger_no_3_archs no
+default merger_arch_flag yes
+default merger_arch_compiler no
 
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
@@ -196,13 +167,53 @@ variant universal {
         }
     }
 
+    # if Portfile has configure {...}, save the procedure
+    if {[info procs userproc-org.macports.configure-configure-0] != ""} {
+        rename userproc-org.macports.configure-configure-0 userproc-org.macports.configure-configure-1
+    }
+
     configure {
+        global muniversal.current_arch
 
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Configuring %1\$s for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
 
             if {![file exists ${worksrcpath}-${arch}]} {
-                copy ${worksrcpath} ${worksrcpath}-${arch}
+                switch [file type ${worksrcpath}] {
+                    directory {
+                        copy ${worksrcpath} ${worksrcpath}-${arch}
+                    }
+                    link {
+                        # We have to copy the actual directory tree instead of the verbatim symlink.
+                        set worksrcpath_work ${worksrcpath}
+                        set link_depth 0
+                        while {[file type ${worksrcpath_work}] eq "link"} {
+                            set target [file readlink ${worksrcpath_work}]
+
+                            # Canonicalize path.
+                            if {[string index ${target} 0] ne "/"} {
+                                set target [file dirname ${worksrcpath_work}]/${target}
+                            }
+
+                            if {![file exists ${target}]} {
+                                return -code error "worksrcpath symlink traversal encountered non-existent target path ${target} (dangling symlink)"
+                            }
+
+                            incr link_depth
+                            if {${link_depth} >= 50} {
+                                return -code error "worksrcpath symlink too deeply nested, giving up (loop?)"
+                            }
+
+                            set worksrcpath_work ${target}
+                        }
+
+                        copy ${worksrcpath_work} ${worksrcpath}-${arch}
+                    }
+                    default {
+                        return -code error "worksrcpath not a symlink or directory, this is unexpected"
+                    }
+                }
             }
 
             set archf [muniversal_get_arch_flag ${arch}]
@@ -219,22 +230,22 @@ variant universal {
             }
 
             if { [info exists merger_configure_env(${arch})] } {
-                configure.env-append  $merger_configure_env(${arch})
+                configure.env-append        {*}$merger_configure_env(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-append  $merger_configure_cppflags(${arch})
+                configure.cppflags-prepend  {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-append  $merger_configure_cflags(${arch})
+                configure.cflags-append     {*}$merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-append  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-append   {*}$merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-append  $merger_configure_objcflags(${arch})
+                configure.objcflags-append  {*}$merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-append  $merger_configure_ldflags(${arch})
+                configure.ldflags-append    {*}$merger_configure_ldflags(${arch})
             }
 
             # Don't set the --host unless we have to.
@@ -262,11 +273,11 @@ variant universal {
                 }
             }
             if {$host != ""} {
-                configure.args-append  ${host}
+                configure.args-append       ${host}
             }
 
             if { [info exists merger_configure_args(${arch})] } {
-                configure.args-append  $merger_configure_args(${arch})
+                configure.args-append       {*}$merger_configure_args(${arch})
             }
 
             set configure_compiler_save ${configure.compiler}
@@ -332,7 +343,16 @@ variant universal {
                 }
             }
 
-            portconfigure::configure_main
+            if {[info procs userproc-org.macports.configure-configure-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+
+                userproc-org.macports.configure-configure-1
+
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portconfigure::configure_main
+            }
 
             # Undo changes to the configure related variables
             option autoconf.dir         ${autoconf_dir_save}
@@ -346,26 +366,26 @@ variant universal {
             option configure.cxx        ${configure_cxx_save}
             option configure.objc       ${configure_objc_save}
             if { [info exists merger_configure_args(${arch})] } {
-                configure.args-delete  $merger_configure_args(${arch})
+                configure.args-delete       {*}$merger_configure_args(${arch})
             }
             configure.args-delete  ${host}
             if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-delete  $merger_configure_ldflags(${arch})
+                configure.ldflags-delete    {*}$merger_configure_ldflags(${arch})
             }
             if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-delete  $merger_configure_cxxflags(${arch})
+                configure.cxxflags-delete   {*}$merger_configure_cxxflags(${arch})
             }
             if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-delete  $merger_configure_objcflags(${arch})
+                configure.objcflags-delete  {*}$merger_configure_objcflags(${arch})
             }
             if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-delete  $merger_configure_cflags(${arch})
+                configure.cflags-delete     {*}$merger_configure_cflags(${arch})
             }
             if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-delete  $merger_configure_cppflags(${arch})
+                configure.cppflags-delete   {*}$merger_configure_cppflags(${arch})
             }
             if { [info exists merger_configure_env(${arch})] } {
-                configure.env-delete  $merger_configure_env(${arch})
+                configure.env-delete        {*}$merger_configure_env(${arch})
             }
             if { ${merger_arch_flag} != "no" } {
                 configure.ldflags-delete   ${archf}
@@ -376,18 +396,28 @@ variant universal {
                 configure.cxxflags-delete  ${archf}
                 configure.cflags-delete    ${archf}
             }
+
+            unset muniversal.current_arch
         }
     }
 
+    # if Portfile has build {...}, save the procedure
+    if {[info procs userproc-org.macports.build-build-0] != ""} {
+        rename userproc-org.macports.build-build-0 userproc-org.macports.build-build-1
+    }
+
     build {
+        global muniversal.current_arch
+
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Building %1\$s for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
 
             if { [info exists merger_build_env(${arch})] } {
-                build.env-append  $merger_build_env(${arch})
+                build.env-append            {*}$merger_build_env(${arch})
             }
             if { [info exists merger_build_args(${arch})] } {
-                build.args-append  $merger_build_args(${arch})
+                build.args-append           {*}$merger_build_args(${arch})
             }
             set build_dir_save  ${build.dir}
             if { [string match "${worksrcpath}/*" ${build.dir}] } {
@@ -407,30 +437,51 @@ variant universal {
                 }
             }
 
-            portbuild::build_main
+            if {[info procs userproc-org.macports.build-build-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+
+                userproc-org.macports.build-build-1
+
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portbuild::build_main
+            }
 
             option build.dir ${build_dir_save}
             if { [info exists merger_build_args(${arch})] } {
-                build.args-delete $merger_build_args(${arch})
+                build.args-delete           {*}$merger_build_args(${arch})
             }
             if { [info exists merger_build_env(${arch})] } {
-                build.env-delete  $merger_build_env(${arch})
+                build.env-delete            {*}$merger_build_env(${arch})
             }
+
+            unset muniversal.current_arch
         }
     }
 
+    # if Portfile has destroot {...}, save the procedure
+    if {[info procs userproc-org.macports.destroot-destroot-0] != ""} {
+        rename userproc-org.macports.destroot-destroot-0 userproc-org.macports.destroot-destroot-1
+    }
+
     destroot {
+        global muniversal.current_arch
+
         foreach arch ${universal_archs_to_use} {
             ui_info "$UI_PREFIX [format [msgcat::mc "Staging %1\$s into destroot for architecture %2\$s"] ${subport} ${arch}]"
+            set muniversal.current_arch ${arch}
+
             copy ${destroot} ${workpath}/destroot-${arch}
             set destdirSave ${destroot.destdir}
             option destroot.destdir [string map "${destroot} ${workpath}/destroot-${arch}" ${destroot.destdir}]
+            destroot.env-replace ${destdirSave} ${destroot.destdir}
 
             if { [info exists merger_destroot_env(${arch})] } {
-                destroot.env-append  $merger_destroot_env(${arch})
+                destroot.env-append         {*}$merger_destroot_env(${arch})
             }
             if { [info exists merger_destroot_args(${arch})] } {
-                destroot.args-append  $merger_destroot_args(${arch})
+                destroot.args-append        {*}$merger_destroot_args(${arch})
             }
             set destroot_dir_save ${destroot.dir}
             if { [string match "${worksrcpath}/*" ${destroot.dir}] } {
@@ -450,16 +501,31 @@ variant universal {
                 }
             }
 
-            portdestroot::destroot_main
+            if {[info procs userproc-org.macports.destroot-destroot-1] != ""} {
+                set    worksrcpath_save ${worksrcpath}
+                option worksrcpath      ${worksrcpath}-${arch}
+                set    destroot_save    ${destroot}
+                option destroot         ${workpath}/destroot-${arch}
+
+                userproc-org.macports.destroot-destroot-1
+
+                option destroot    ${destroot_save}
+                option worksrcpath ${worksrcpath_save}
+            } else {
+                portdestroot::destroot_main
+            }
 
             option destroot.dir ${destroot_dir_save}
             if { [info exists merger_destroot_args(${arch})] } {
-                destroot.args-delete $merger_destroot_args(${arch})
+                destroot.args-delete        {*}$merger_destroot_args(${arch})
             }
             if { [info exists merger_destroot_env(${arch})] } {
-                destroot.env-delete  $merger_destroot_env(${arch})
+                destroot.env-delete         {*}$merger_destroot_env(${arch})
             }
+            destroot.env-replace ${destroot.destdir} ${destdirSave}
             option destroot.destdir ${destdirSave}
+
+            unset muniversal.current_arch
         }
         delete ${destroot}
 
@@ -493,7 +559,7 @@ variant universal {
             copy ${dir1}/${fl} ${tempfile1}
             copy ${dir2}/${fl} ${tempfile2}
 
-            reinplace -q -E {s:-arch +[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:-arch +[0-9a-zA-Z_]+::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
@@ -718,8 +784,8 @@ variant universal {
         }
 
         # /usr/bin/diff can merge two C/C++ files
-        # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
-        # See http://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
+        # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
+        # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
         set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
  %<#endif
 ' \
@@ -761,10 +827,10 @@ variant universal {
                 ui_info "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] ${subport} ${arch}]"
 
                 if { [info exists merger_test_env(${arch})] } {
-                    test.env-append  $merger_test_env(${arch})
+                    test.env-append         {*}$merger_test_env(${arch})
                 }
                 if { [info exists merger_test_args(${arch})] } {
-                    test.args-append  $merger_test_args(${arch})
+                    test.args-append        {*}$merger_test_args(${arch})
                 }
                 set test_dir_save ${test.dir}
                 if { [string match "${worksrcpath}/*" ${test.dir}] } {
@@ -788,10 +854,10 @@ variant universal {
 
                 option test.dir ${test_dir_save}
                 if { [info exists merger_test_args(${arch})] } {
-                    test.args-delete $merger_test_args(${arch})
+                    test.args-delete        {*}$merger_test_args(${arch})
                 }
                 if { [info exists merger_test_env(${arch})] } {
-                    test.env-delete  $merger_test_env(${arch})
+                    test.env-delete         {*}$merger_test_env(${arch})
                 }
             }
         }

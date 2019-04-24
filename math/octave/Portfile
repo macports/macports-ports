@@ -7,31 +7,28 @@ PortGroup           compiler_blacklist_versions 1.0
 PortGroup           linear_algebra 1.0
 # see https://lists.gnu.org/archive/html/octave-maintainers/2016-05/msg00286.html
 PortGroup           cxx11 1.1
-# See https://trac.macports.org/ticket/53044 for restricting versions further than the cxx11 PortGroup
-compiler.blacklist-append   {*gcc-4.6} {clang < 700}
 
 name                octave
-version             4.2.1
-revision            4
+version             5.1.0
+set package_version 5.x.x
+revision            0
 categories          math science
 platforms           darwin
 license             GPL-3+
-maintainers         mcalhoun openmaintainer
+maintainers         {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
 description         a high-level language for numerical computations
 long_description    \
     GNU Octave is a high-level language, primarily intended for numerical \
     computations. It provides a convenient command-line interface for \
     solving linear and nonlinear problems numerically.
 
-homepage            http://www.gnu.org/software/octave
+homepage            https://www.gnu.org/software/octave
 
 master_sites        gnu:octave
 
-checksums           rmd160  7bcefebcbcb644b4527ca97501a4e05b15c04d94 \
-                    sha256  80c28f6398576b50faca0e602defb9598d6f7308b0903724442c2a35a605333b
-
-# see http://savannah.gnu.org/bugs/?48773
-patchfiles-append patch-qscintilla2.diff
+checksums           rmd160  b8b4469d70f1b67be688e12ff551e6b614c70213 \
+                    sha256  e36b1124cac27c7caa51cc57de408c31676d5f0096349b4d50b57bfe1bcd7495 \
+                    size    32034788
 
 # if there is an error bulding octave package, avoid
 #    error: structure has no member 'dir'
@@ -46,25 +43,33 @@ if { ${os.major} >= 10 } {
 # facilitate universal builds of packages
 patchfiles-append patch-configure_make.m.diff
 
-# do not link in all dependencies when building packages
-patchfiles-append patch-link.diff
-
 # allow mkoctfile to recognize and pass along -arch compiler switch
 patchfiles-append patch-arch_arg.diff
 
-# octave compiles in the hostname value
-# it is used to determine installation location
-#    of architecture-dependent package files
-# this means the build is dependent on the minor OS number
-# the following patch attempts to prevent this
-patchfiles-append patch-host_name.diff
+# see https://savannah.gnu.org/bugs/?50025
+patchfiles-append patch-crash_on_exit.diff
 
-# see http://hg.savannah.gnu.org/hgweb/octave/rev/a6e4157694ef
-# see https://savannah.gnu.org/bugs/?50234
-patchfiles-append patch-file-stat.cc.diff
+# octave compiles in the hostname value
+# it is used to determine installation locations
+#    of architecture-dependent package files
+# this means the build is dependent on the minor number of the OS
+# the following patch attempts to prevent this
+patchfiles-append patch-versions.diff
+
+# reports of `__opengl_info__` not working the first time
+patchfiles-append patch-__opengl_info__.diff
+
+# see https://trac.macports.org/ticket/57288
+patchfiles-append patch-run-octave.diff
+
+# find MacPorts Qt libraries
+patchfiles-append patch-link_location.diff
+
+# fix CXXFLAGS when testing for Qt5 properties
+# see https://trac.macports.org/ticket/58226
+patchfiles-append patch-qt5-cxxflags.diff
 
 post-patch {
-
     if { ${os.arch} eq "i386" } {
         if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
             set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
@@ -78,44 +83,81 @@ post-patch {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x
         }
     }
-
     reinplace \
         "s|__MACPORTS_canonical_host_type__|${short_host_name}|g" \
-        build-aux/subst-default-vals.in.sh
+        configure
+    reinplace \
+        "s|__MACPORTS_canonical_host_type__|${short_host_name}|g" \
+        build-aux/subst-config-vals.in.sh
 }
 
-# Block compilers: Some older versions of CLANG do not honor the CPATH
+pre-configure {
+    # see https://trac.macports.org/ticket/51707
+    set fc_full [lindex [split ${configure.fc} /] end]
+    set fc      [lindex [split ${fc_full} -] 0]
+    switch ${fc} {
+        gfortran {
+            set fcv    [lindex [split ${fc_full} -] end]
+            set gccdir gcc[join [split ${fcv} .] ""]
+            if {[file exists ${prefix}/lib/${gccdir}/libquadmath.dylib]} {
+                configure.args-append FLIBS="-L${prefix}/lib/${gccdir} -lgfortran -lquadmath -lm"
+            } else {
+                configure.args-append FLIBS="-L${prefix}/lib/${gccdir} -lgfortran -lm"
+            }
+        }
+        g95 {
+            configure.args-append FLIBS="-L${prefix}/lib -lf95 -lm"
+        }
+        default {
+            ui_warn "Unknown Fortran compiler: ${configure.fc}"
+        }
+    }
+}
+
+# Some older versions of CLANG do not honor the CPATH
 # environment variables, which is required for compiling this port
 # when using MacPorts.  The versions seem to be: MacPorts CLANG 2.9 or
 # earlier, and Apple CLANG 318.0.58 or older.
+# see https://bugs.llvm.org/show_bug.cgi?id=8971
+# see https://trac.macports.org/ticket/40250
 #
-# See also < http://llvm.org/bugs/show_bug.cgi?id=8971 >
-#          < https://trac.macports.org/ticket/40250 >.
-compiler.blacklist-append { clang <= 318.0.61 }
+# Clang must be able to use cstdint.
+# see https://trac.macports.org/ticket/53044
+#
+# Clang must be able to handle VLA extension.
+# see https://clang.llvm.org/compatibility.html#vla
+# see https://trac.macports.org/ticket/57270
+#
+compiler.blacklist-append {clang <= 802}
 
-pre-patch {
-    # code located in pre-patch because variants from PortGroup compilers must
-    #    be evaluated before it can be determined if clang is being used
+# see see https://trac.macports.org/ticket/53044
+compiler.blacklist-append {*gcc-4.6}
 
-    # see http://trac.macports.org/ticket/45011
-    # see http://savannah.gnu.org/bugs/?43298
-    set libcxxbug no
-    if { ${configure.cc} eq "/usr/bin/clang" && [lindex [split ${xcodeversion} .] 0] eq 6 } {
-        set libcxxbug yes
-    } elseif { [variant_exists clang35] && [variant_isset clang35] } {
-        set libcxxbug yes
-    }
-    if { ${libcxxbug} } {
-        patchfiles-append   \
-            clang-libcxx-fix.patch
-    }
-}
+# see https://wiki.octave.org/Building for a list of dependencies
 
+if {[vercmp [macports_version] 2.5.99] >= 0} {
+# avoid depends_build-append port:coreutils
+configure.env-append "MKDIR_P=/bin/mkdir -p"
+
+# see https://trac.macports.org/ticket/57850
+configure.env-append "INSTALL_DATA=\${INSTALL} -m 644 -p"
+} else {
 # avoid depends_build-append port:coreutils
 configure.env-append MKDIR_P="/bin/mkdir -p"
 
-# avoid depends_build-append port:cctools
-configure.env-append RANLIB=/usr/bin/ranlib
+# see https://trac.macports.org/ticket/57850
+configure.env-append INSTALL_DATA="\${INSTALL} -m 644 -p"
+}
+
+if { ${os.major} > 10 } {
+    # avoid depends_build-append port:cctools
+    configure.env-append RANLIB=/usr/bin/ranlib
+} else {
+    # ranlib on older systems is too old to handle newer clang output
+    # https://trac.macports.org/ticket/54228
+    depends_build-append port:cctools
+    configure.env-append RANLIB=${prefix}/bin/ranlib
+}
 
 # main octave port lists as a depends_lib
 # configure.ac list it among the "[p]rograms used in Makefiles"
@@ -145,12 +187,18 @@ license_noconflict  \
     openssl         \
     libpaper
 
+# octave does not depend directly on graphviz, but it
+#    is brought in by its dependency on librsvg.
+# librsvg, in turn, is only used in the build phase to generate icons.
+license_noconflict-append \
+    graphviz
+
 # main octave port lists as a depends_lib
 # configure.ac list it among the "[p]rograms used in Makefiles"
 depends_build-append port:grep
-configure.env-append  GREP=${prefix}/bin/grep
-configure.env-append EGREP=${prefix}/bin/egrep
-configure.env-append FGREP=${prefix}/bin/fgrep
+configure.env-append  GREP=${prefix}/bin/ggrep
+configure.env-append EGREP=${prefix}/bin/gegrep
+configure.env-append FGREP=${prefix}/bin/gfgrep
 
 # configure.ac list it among the "[p]rograms used in Makefiles"
 depends_build-append port:findutils
@@ -165,7 +213,11 @@ depends_build-append port:flex
 configure.env-append LEX=${prefix}/bin/flex
 
 depends_build-append port:bison
+if {[vercmp [macports_version] 2.5.99] >= 0} {
+configure.env-append "YACC=${prefix}/bin/bison -y"
+} else {
 configure.env-append YACC="${prefix}/bin/bison -y"
+}
 
 depends_build-append port:gperf
 configure.env-append GPERF=/usr/bin/gperf
@@ -187,33 +239,29 @@ compilers.choose    fc f77 f90 cc cxx
 #    even if configure.cxx_stdlib is libc++
 compiler.blacklist-delete *gcc*
 
+# GCC 6 fails in several ways
+#  in order to use the Carbon framework, -fpermissive is required
+#  GCC does not understand Xcode's use of __attribute__
+#      see https://trac.macports.org/ticket/53021
+#  as of Octave 4.4, GCC 6 also fails with
+#     error: call of overloaded 'abs(signed char)' is ambiguous
+#     see https://lists.gnu.org/archive/html/octave-maintainers/2016-02/msg00168.html
+compiler.blacklist-append macports-gcc-6
+
 # for now, limit the number of variants
 # some of these compilers may work fine
 compilers.setup     \
     require_fortran \
-    -dragonegg      \
+    -gcc6           \
+    -gcc5           \
     -gcc49          \
     -gcc48          \
     -gcc47          \
     -gcc46          \
     -gcc45          \
     -gcc44          \
-    -g95            \
-    -llvm           \
-    -clang36        \
-    -clang35        \
     -clang34        \
     -clang33
-
-# offscreen rendering with OpenGL via osmesa would be nice to have, but the following
-#    causes a segmentation fault:
-#    h = figure ("visible", "off"); fn = tempname (); sombrero (); __osmesa_print__ (h, fn, "svg");
-#
-# solution is ???
-#
-#depends_lib-append port:mesa
-configure.args-append       \
-    --without-OSMesa
 
 #configure.args-append --with-shell=???
 
@@ -235,6 +283,12 @@ configure.args-append       \
     --without-portaudio     \
     --without-magick        \
     --disable-docs
+
+# avoid
+#     Undefined symbols for architecture x86_64:
+#       "print_usage()", referenced from: ...
+configure.args-append       \
+    --enable-link-all-dependencies
 
 # in configure.ac, listed as one of "[p]rograms used when running Octave"
 depends_lib-append port:python27
@@ -262,7 +316,14 @@ depends_lib-append   port:pcre
 #--without-cholmod
 #--without-cxsparse
 #--without-umfpack
-depends_lib-append  port:SuiteSparse
+depends_lib-append  \
+    port:SuiteSparse_config \
+    port:SuiteSparse_AMD \
+    port:SuiteSparse_CAMD \
+    port:SuiteSparse_COLAMD \
+    port:SuiteSparse_CHOLMOD \
+    port:SuiteSparse_CXSparse \
+    port:SuiteSparse_UMFPACK
 foreach lib {amd camd colamd cholmod cxsparse umfpack} {
     configure.args-append \
         --with-${lib}="-l${lib} -lsuitesparseconfig"
@@ -276,6 +337,13 @@ depends_lib-append  port:zlib
 
 #--without-hdf5
 depends_lib-append  port:hdf5
+# avoid configure error
+#    fatal error: 'mpi.h' file not found
+# see https://github.com/macports/macports-ports/pull/1865
+#    for a discussion
+foreach mpi {mpich mpich_devel openmpi openmpi_devel} {
+    require_active_variants hdf5 "" ${mpi}
+}
 
 #--disable-fftw-threads
 #--without-fftw3
@@ -295,18 +363,21 @@ depends_lib-append port:qrupdate
 #--without-arpack
 depends_lib-append port:arpack
 
-# see http://lists.gnu.org/archive/html/help-octave/2016-08/msg00066.html
+# see https://lists.gnu.org/archive/html/help-octave/2016-08/msg00066.html
 configure.args-append --without-openssl
-#depends_lib-append port:openssl
+#depends_lib-append path:lib/libssl.dylib:openssl
 
-# fortran arch flag is not set automatically
-if {![variant_isset universal]} {
-    if {${build_arch} eq "x86_64" || ${build_arch} eq "ppc64"} {
-        configure.fflags-append -m64
-    } else {
-        configure.fflags-append -m32
-    }
+# see https://trac.macports.org/ticket/56989
+configure.args-append \
+    --without-sundials_nvecserial \
+    --without-sundials_ida
+variant sundials description {enable sundials support for solving ODEs} {
+    depends_lib-append  port:sundials2
+    configure.args-delete \
+        --without-sundials_nvecserial \
+        --without-sundials_ida
 }
+default_variants-append +sundials
 
 # see etc/README.MacOS
 depends_run-append   \
@@ -314,6 +385,16 @@ depends_run-append   \
     port:ghostscript \
     port:fig2dev     \
     port:pstoedit
+
+# see https://savannah.gnu.org/bugs/?53473
+depends_run-append  \
+    port:texinfo
+patchfiles-append patch-makeinfo.diff
+post-patch {
+    reinplace \
+        "s|__MACPORTS_prefix__|${prefix}|g" \
+        libinterp/corefcn/help.h
+}
 
 pre-configure {
     configure.args-append --with-blas="-L${prefix}/lib ${linalglib}" --with-lapack=""
@@ -325,27 +406,19 @@ variant java description {enable Java interface} {
 }
 # java variant seems to cause problems for both users and build bots
 #    https://lists.macosforge.org/pipermail/macports-users/2016-May/thread.html#41052
-#    #51480
+#    https://trac.macports.org/ticket/51480
 #default_variants-append +java
 
 variant qt4 conflicts qt5 description {build the GUI using Qt4} {
     PortGroup qt4 1.0
-
-    depends_lib-append port:qscintilla
-
+    depends_lib-append port:qscintilla-qt4 port:qt4-mac-sqlite3-plugin
     configure.args-replace --without-qt --with-qt=4
 }
 
 variant qt5 conflicts qt4 description {build the GUI using Qt5} {
     PortGroup qt5 1.0
-
-    depends_lib-append port:qscintilla2
-
-    # see https://savannah.gnu.org/bugs/?46723
-    # see https://savannah.gnu.org/bugs/?49053
-    patchfiles-append       \
-        patch-iconsize.diff \
-        patch-figures.diff
+    qt5.depends_component qttools sqlite-plugin
+    depends_lib-append port:qscintilla-qt5
 
     # location of libqscintilla2.dylib
     configure.ldflags-append \
@@ -355,20 +428,30 @@ variant qt5 conflicts qt4 description {build the GUI using Qt5} {
 
     configure.env-append PATH=${qt_dir}/bin:$env(PATH)
     build.env-append     PATH=${qt_dir}/bin:$env(PATH)
+    destroot.env-append  PATH=${qt_dir}/bin:$env(PATH)
+    test.env-append      PATH=${qt_dir}/bin:$env(PATH)
 }
 if { ![variant_isset qt4] && ![variant_isset qt5] } {
-    default_variants-append +qt4
+    # a somewhat arbitrary cutoff for default values
+    #    Mac OS X 10.7 (Darwin 11) was the last OS supported by Qt 4
+    #       see http://doc.qt.io/qt-4.8/supported-platforms.html
+    #    OS X 10.10 (Darwin 14) is the oldest OS supported by the current long-term support version of Qt 5 (Qt 5.9).
+    #       see http://web.archive.org/web/20170702143426/https://doc.qt.io/qt-5/supported-platforms-and-configurations.html
+    if {${os.major} >= 14} {
+        default_variants-append +qt5
+    } else {
+        default_variants-append +qt4
+    }
 }
 
 variant fltk description {enable fltk as a graphics toolkit for plotting} {
     depends_lib-append path:lib/libfltk.dylib:fltk
-
     configure.args-replace --without-fltk --with-fltk
 }
-default_variants-append +fltk
+# see https://github.com/macports/macports-ports/pull/1865 for a discussion on fltk
+#default_variants-append +fltk
 
 if {[variant_isset fltk] || [variant_isset qt4] || [variant_isset qt5]} {
-
     # native_graphics (fltk) and gui (Qt) require OpenGL and font and printing capabilities
     depends_lib-append  \
         port:fontconfig \
@@ -384,7 +467,7 @@ if { ([variant_isset fltk] && [variant_isset qt4]) || ([variant_isset fltk] && [
 
 variant jit description {enable JIT compiler (EXPERIMENTAL)} {
     # JIT requires LLVM, so select a version to use
-    set llvm_ver 3.8
+    set llvm_ver 7.0
 
     # prevent multiple versions of llvm being required
     # if clangXY compiler is requested, use llvm-X.Y
@@ -413,8 +496,8 @@ variant app description "build application bundle to launch ${subport}" {
     depends_build-append port:librsvg
 
     if {[vercmp ${xcodeversion} 4.5] < 0} {
-        # need a way to generate icns file for XCode prior to 4.5
-        # see #51487
+        # need a way to generate icns file for Xcode prior to 4.5
+        # see http://trac.macports.org/ticket/51487
         depends_build-append port:libicns
     }
 
@@ -430,7 +513,7 @@ variant app description "build application bundle to launch ${subport}" {
         if { [variant_isset qt4] || [variant_isset qt5] } {
             puts ${script} "#!/bin/sh"
             puts ${script} ""
-            puts ${script} "${prefix}/bin/octave-${version} --force-gui"
+            puts ${script} "${prefix}/bin/octave-${version} --gui \"\$@\""
         } else {
             puts ${script} "#!/usr/bin/osascript"
             puts ${script} ""
@@ -478,10 +561,8 @@ variant app description "build application bundle to launch ${subport}" {
         set dpi    90
 
         foreach res {16 32 128 256 512} {
-
             set hres [expr 2*${res}]
-
-            # see http://savannah.gnu.org/bugs/?37062
+            # see https://savannah.gnu.org/bugs/?37062
             # see http://hg.savannah.gnu.org/hgweb/octave/rev/1687269e31e4
             system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w ${res} ${svg}  > Octave.iconset/icon_${res}x${res}.png"
             system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w ${hres} ${svg} > Octave.iconset/icon_${res}x${res}@2x.png"
@@ -490,8 +571,8 @@ variant app description "build application bundle to launch ${subport}" {
         if {[vercmp ${xcodeversion} 4.5] >= 0} {
             system -W ${worksrcpath} "/usr/bin/iconutil -c icns -o ${appName}/Contents/Resources/Octave.icns Octave.iconset"
         } else {
-            # /usr/bin/iconutil introduced in XCode 4.5
-            # see #51487
+            # /usr/bin/iconutil introduced in Xcode 4.5
+            # see http://trac.macports.org/ticket/51487
             system -W ${worksrcpath}/Octave.iconset \
                 "${prefix}/bin/png2icns ${worksrcpath}/${appName}/Contents/Resources/Octave.icns icon_16x16.png icon_32x32.png icon_128x128.png icon_256x256.png icon_512x512.png"
         }
@@ -515,7 +596,7 @@ variant docs description {build documentation files} {
         port:texlive-basic \
         port:texlive-latex
 
-    # see #51132
+    # see https://trac.macports.org/ticket/51132
     depends_build-append \
         port:texlive-fonts-recommended
 
@@ -528,49 +609,31 @@ default_variants-append +docs
 #    "Magick::Image::ping(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
 set magickConflict {}
 set magickDefault yes
-if {${configure.cxx_stdlib} ne "libstdc++"} {
+if {${configure.cxx_stdlib} eq "libc++"} {
     foreach gccVar ${compilers.gcc_variants} {
         if {[variant_exists ${gccVar}] } {
             lappend magickConflict ${gccVar}
-
             if {[variant_isset ${gccVar}] } {
                 set magickDefault no
             }
         }
     }
 }
-eval "variant graphicsmagick description {use GraphicsMagick for image I/O} conflicts ${magickConflict} {
+
+variant graphicsmagick description {use GraphicsMagick for image I/O} conflicts {*}${magickConflict} {
     depends_lib-append port:GraphicsMagick
     configure.args-replace --without-magick --with-magick=GraphicsMagick
-}"
+}
 if {${magickDefault}} {
     default_variants-append +graphicsmagick
-}
-
-# in order to use Carbon framework, -fpermissive is required on macports-gcc-6
-if { ${configure.compiler} eq "macports-gcc-6" && [vercmp 4.0 ${xcodeversion}] <= 0 && [vercmp ${xcodeversion} 5.0] < 0} {
-    configure.cxxflags-append -fpermissive
 }
 
 # see https://trac.macports.org/ticket/53021
 foreach gccVar ${compilers.gcc_variants} {
     if {[variant_exists ${gccVar}] && [variant_isset ${gccVar}] } {
-
         if {[vercmp ${xcodeversion} 7.0] >= 0} {
             patchfiles-append patch-force_cxx.diff
         }
-
-        if {[vercmp ${xcodeversion} 8.0] >= 0} {
-            configure.cppflags-append "-isystem ${worksrcpath}/Availability"
-            post-extract {
-                if [file exists /usr/include/AvailabilityInternal.h] {
-                    xinstall -m 0755 -d ${worksrcpath}/Availability
-                    xinstall -m 0644 /usr/include/AvailabilityInternal.h ${worksrcpath}/Availability/
-                    system -W ${worksrcpath}/Availability "/usr/bin/sed -i -e 's|__attribute__((availability(.*)))||g' AvailabilityInternal.h"
-                }
-            }
-        }
-
         break
     }
 }
@@ -585,6 +648,13 @@ post-destroot {
         # required for projects including these headers.
         xinstall -m 644 ${worksrcpath}/liboctave/operators/libcxx-fix.h \
             ${destroot}${prefix}/include/${name}-${version}/${name}/libcxx-fix.h
+    }
+
+    # do not force upgrade of every dependency every time the version changes
+    foreach lib {liboctave.7.dylib liboctgui.5.dylib liboctinterp.7.dylib} {
+        xinstall -d -m 0755 ${destroot}${prefix}/lib/octave/${package_version}
+        ln -s ../${version}/${lib} ${destroot}${prefix}/lib/octave/${package_version}/${lib}
+        system "install_name_tool -id ${prefix}/lib/octave/${package_version}/${lib} ${destroot}${prefix}/lib/octave/${version}/${lib}"
     }
 }
 
@@ -624,10 +694,7 @@ post-activate {
 test.run    yes
 test.target check
 
-# the file octave_packages is now generated by Octave Portfile
-# the following code may be removed in December of 2017
-pre-activate {
-    if { [file exists ${prefix}/share/octave/octave_packages] } {
-        delete ${prefix}/share/octave/octave_packages
-    }
+subport ${name}-devel {
+    replaced_by ${name}
+    PortGroup   obsolete 1.0
 }

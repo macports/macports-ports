@@ -3,10 +3,18 @@
 PortSystem      1.0
 PortGroup       compiler_blacklist_versions 1.0
 PortGroup       mpi 1.0
+PortGroup       cxx11 1.1
+PortGroup       active_variants 1.1
 
 name            boost
-version         1.59.0
-revision        3
+
+version         1.66.0
+# Revision is set below in the `if {$subport eq $name} { ... }` statement
+# The boost-numpy subport has its own revision number
+checksums       rmd160  ee5dafdfa49adf50a5333cef1f55dac4f70b4c14 \
+                sha256  5721818253e6a0989583192f96782c4a98eb6204965316df9f5ad75819225ca9 \
+                size    85995778
+
 license         Boost-1
 categories      devel
 platforms       darwin
@@ -20,13 +28,10 @@ long_description \
     which work well with the C++ Standard Library.
 
 homepage        http://www.boost.org
-master_sites    sourceforge:project/boost/boost/${version}
+master_sites    https://dl.bintray.com/boostorg/release/${version}/source/
 set distver     [join [split ${version} .] _]
 distname        ${name}_${distver}
 use_bzip2       yes
-
-checksums       rmd160  a106b3cd1dbda2323e5e84c7106cedee327db03c \
-                sha256  727a932322d94287b62abb1bd2d41723eec4356a7728909e38adb65ca25241ca
 
 depends_lib     port:zlib \
                 port:expat \
@@ -44,9 +49,7 @@ post-extract {
 
 patchfiles      patch-tools-build-src-engine-build.sh.diff \
                 patch-tools-build-src-engine-build.jam.diff \
-                patch-apple-clang-no-libcxx.diff \
-                patch-libs-context-src-asm-make_ppc32_sysv_macho_gas.S.diff \
-                patch-log-setup-link.diff
+                patch-apple-clang-no-libcxx.diff
                 # patch-apple-clang-no-libcxx.diff fixes a clang configuration
                 # error that occurs on OS X 10.7 and 10.8 due to the assumption
                 # that if clang is the compiler in use it must be using libc++.
@@ -61,7 +64,7 @@ patchfiles      patch-tools-build-src-engine-build.sh.diff \
 
 # temporary patch to fix: explicit template instanciations in
 # boost::serialization don't get exported with all compilers; this fix
-# is already in the boost repo & will be part of the next release. See
+# is already in the boost repo & will be part of a future release. See
 # also the following tickets:
 # https://trac.macports.org/ticket/48717
 # https://svn.boost.org/trac/boost/ticket/11671
@@ -86,7 +89,14 @@ proc write_jam s {
 compiler.blacklist {clang < 421} *llvm-gcc-4.2 *gcc-4.0 gcc-3.3
 
 compilers.choose   cc cxx
-mpi.setup          -gcc -dragonegg
+mpi.setup          -gcc
+
+# NOTE: although technically Boost does not require C++11 compliance
+# for building, doing so allows for building on more OSs than without.
+# Further: Building Boost using C++11 compliance does not seem to then
+# require ports depending on Boost to also require C++11 compliance,
+# and requiring it does make such building easier for those ports.
+configure.cxxflags-append -std=gnu++11
 
 # It turns out that ccache and distcc can produce boost libraries that, although they
 # compile without warning, have all sorts of runtime errors especially with pointer corruption.
@@ -121,7 +131,9 @@ post-configure {
         set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
     }
 
-    write_jam "using darwin : : ${configure.cxx} : <cxxflags>\"${configure.cxxflags} ${cxx_stdlibflags}\" ${compileflags} <linkflags>\"${configure.ldflags} ${cxx_stdlibflags}\" : ;"
+    # see https://trac.macports.org/ticket/55857
+    # see https://svn.boost.org/trac10/ticket/13454
+    write_jam "using darwin : : ${configure.cxx} : <cxxflags>\"${configure.cxxflags} [get_canonical_archflags cxx] ${cxx_stdlibflags}\" ${compileflags} <linkflags>\"${configure.ldflags} ${cxx_stdlibflags}\" : ;"
 
 }
 
@@ -141,6 +153,7 @@ build.args      -d2 \
                 variant=release \
                 threading=single,multi \
                 link=static,shared \
+                runtime-link=shared \
                 -j${build.jobs}
 
 destroot.cmd            ${worksrcpath}/bjam
@@ -169,7 +182,7 @@ post-destroot {
     }
 }
 
-set pythons_suffixes {26 27 33 34 35 36}
+set pythons_suffixes {26 27 33 34 35 36 37}
 
 set pythons_ports {}
 foreach s ${pythons_suffixes} {
@@ -193,27 +206,24 @@ foreach s ${pythons_suffixes} {
     set i [lsearch -exact ${pythons_ports} ${p}]
     set c [lreplace ${pythons_ports} ${i} ${i}]
     if { ${s} > 30 } { set bppatch "patch-boost-python3.diff" } else { set bppatch "" }
-    eval [subst {
-        variant ${p} description "Build Boost.Python for Python ${v}" conflicts ${c} debug {
+    variant ${p} description "Build Boost.Python for Python ${v}" conflicts {*}${c} debug "
 
-            # There is a conflict with python and debug support, so we should really change the 'variant' line above
-            # to end with "conflicts ${c} debug" above. However, we leave it enabled for those who want to try it.
-            # The issue has been reported to both the MacPorts team and the boost team, as per:
-            # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+        # There is a conflict with python and debug support, so we should really change the 'variant' line above
+        # to end with 'conflicts ${c} debug' above. However, we leave it enabled for those who want to try it.
+        # The issue has been reported to both the MacPorts team and the boost team, as per:
+        # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
 
-            depends_lib-append      port:${p}
-            configure.args-delete   --without-libraries=python
-            configure.args-append   --with-python=${prefix}/bin/python${v} --with-python-root=${prefix}/bin/python${v}
+        depends_lib-append      port:${p}
+        configure.args-delete   --without-libraries=python
+        configure.args-append   --with-python=${prefix}/bin/python${v} --with-python-root=${prefix}/bin/python${v}
 
-            patchfiles-append   ${bppatch} patch-tools-build-src-tools-python.jam.diff \
-                                patch-tools-build-src-tools-python-2.jam.diff
+        patchfiles-append   ${bppatch} patch-tools-build-src-tools-python.jam.diff \
+                            patch-tools-build-src-tools-python-2.jam.diff
 
-            post-patch {
-                reinplace s|@FRAMEWORKS_DIR@|${frameworks_dir}| ${worksrcpath}/tools/build/src/tools/python.jam
-            }
-
+        post-patch {
+            reinplace s|@FRAMEWORKS_DIR@|${frameworks_dir}| ${worksrcpath}/tools/build/src/tools/python.jam
         }
-    }]
+    "
 }
 
 if {![variant_isset debug]} {
@@ -243,52 +253,108 @@ variant no_single description {Disable building single-threaded libraries} {
     build.args-append   threading=multi
 }
 
-variant regex_match_extra description \
-        "Enable access to extended capture information of submatches in Boost.Regex" {
-    notes-append "
-You enabled the +regex_match_extra variant\; see the following page for an\
-exhaustive list of the consequences of this feature:
-
-http://www.boost.org/doc/libs/${distver}/libs/regex/doc/html/boost_regex/ref/sub_match.html
-"
-
-    post-patch {
-        reinplace {/#define BOOST_REGEX_MATCH_EXTRA/s:^// ::} \
-            ${worksrcpath}/boost/regex/user.hpp
+subport boost-numpy {
+    revision 0
+    description Boost.Numpy library
+    long_description ${description}
+    depends_lib port:boost
+    foreach s ${pythons_suffixes} {
+        if {[variant_isset python${s}]} {
+            depends_lib-append port:py${s}-numpy
+            require_active_variants boost python${s}
+        }
+    }
+    if {[variant_isset no_static]} {
+        require_active_variants boost no_static
+    } else {
+        require_active_variants boost "" no_static
+    }
+    if {[variant_isset no_single]} {
+        require_active_variants boost no_single
+    } else {
+        require_active_variants boost "" no_single
     }
 }
 
-if {[mpi_variant_isset]} {
+if {$subport eq $name} {
+    revision 3
+    patchfiles-append patch-disable-numpy-extension.diff
 
-    # There is a conflict with debug support.
-    # The issue has been reported to both the MacPorts team and the boost team, as per:
-    # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
-    if {[variant_isset debug]} {
-        return -code error "+debug variant conflicts with mpi"
+    variant regex_match_extra description \
+        "Enable access to extended capture information of submatches in Boost.Regex" {
+        notes-append "
+        You enabled the +regex_match_extra variant\; see the following page for an\
+        exhaustive list of the consequences of this feature:
+
+    http://www.boost.org/doc/libs/${distver}/libs/regex/doc/html/boost_regex/ref/sub_match.html
+"
+
+        post-patch {
+            reinplace {/#define BOOST_REGEX_MATCH_EXTRA/s:^// ::} \
+                ${worksrcpath}/boost/regex/user.hpp
+        }
     }
 
-    configure.args-delete   --without-libraries=mpi
-
-    post-configure {
-        write_jam "using mpi : ${mpi.cxx} : : ${mpi.exec} ;"
+    post-destroot {
+        delete file {*}[glob ${destroot}${prefix}/include/boost/python/numpy*]
     }
 
-    if {![catch python_dir]} {
+    if {[mpi_variant_isset]} {
 
-        patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
+        # see https://trac.macports.org/ticket/49748
+        # see http://www.openradar.me/25313838
+        configure.ldflags-append -Lstage/lib
 
-        post-destroot {
-            set site_packages [python_dir]
-            xinstall -d ${destroot}${site_packages}/boost
-            xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
-                ${destroot}${site_packages}/boost
-
-            set l ${site_packages}/boost/mpi.so
-            move ${destroot}${prefix}/lib/mpi.so ${destroot}${l}
-            system "install_name_tool -id ${l} ${destroot}${l}"
+        # There is a conflict with debug support.
+        # The issue has been reported to both the MacPorts team and the boost team, as per:
+        # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+        if {[variant_isset debug]} {
+            return -code error "+debug variant conflicts with mpi"
         }
 
+        configure.args-delete   --without-libraries=mpi
+
+        post-configure {
+            write_jam "using mpi : ${mpi.cxx} : : ${mpi.exec} ;"
+        }
+
+        if {![catch python_dir]} {
+
+            patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
+
+            post-destroot {
+                set site_packages [python_dir]
+                xinstall -d ${destroot}${site_packages}/boost
+                xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
+                    ${destroot}${site_packages}/boost
+
+                set l ${site_packages}/boost/mpi.so
+                move ${destroot}${prefix}/lib/mpi.so ${destroot}${l}
+                system "install_name_tool -id ${l} ${destroot}${l}"
+            }
+
+        }
     }
+
+    livecheck.type  regex
+    livecheck.url   http://www.boost.org/users/download/
+    livecheck.regex Version (\\d+\\.\\d+\\.\\d+)</span>
+} else {
+    post-destroot {
+        move {*}[glob ${destroot}${prefix}/lib/libboost_numpy*] ${destroot}${prefix}
+        move {*}[glob ${destroot}${prefix}/include/boost/python/numpy*] ${destroot}${prefix}
+        # if an mpi variant *and* a python variant is selected, then a binary
+        # python module called mpi.so gets installed, so delete ${frameworks_dir}
+        delete ${destroot}${prefix}${frameworks_dir} \
+            ${destroot}${prefix}/include \
+            ${destroot}${prefix}/lib \
+            ${destroot}${prefix}/share
+        file mkdir ${destroot}${prefix}/lib ${destroot}${prefix}/include/boost/python
+        move {*}[glob ${destroot}${prefix}/libboost_numpy*] ${destroot}${prefix}/lib
+        move {*}[glob ${destroot}${prefix}/numpy*] ${destroot}${prefix}/include/boost/python
+    }
+
+    livecheck.type  none
 }
 
 if {![variant_isset universal]} {
@@ -356,7 +422,3 @@ platform darwin 8 powerpc {
         build.args-append   macosx-version=10.4
     }
 }
-
-livecheck.type  regex
-livecheck.url   http://www.boost.org/users/download/
-livecheck.regex Version (\\d+\\.\\d+\\.\\d+)</span>

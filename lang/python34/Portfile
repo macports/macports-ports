@@ -5,45 +5,50 @@ PortGroup select 1.0
 
 name                python34
 
-# Remember to keep py34-tkinter and py34-gdbm's versions sync'd with this
-version             3.4.7
-
 epoch               20170810
+# Remember to keep py34-tkinter and py34-gdbm's versions sync'd with this
+version             3.4.10
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          lang
 license             PSF
 platforms           darwin
-maintainers         jwa openmaintainer
+maintainers         {jmr @jmroot} openmaintainer
 
 description         An interpreted, object-oriented programming language
 long_description    Python is an interpreted, interactive, object-oriented \
                     programming language.
 
-homepage            http://www.python.org/
+homepage            https://www.python.org/
 master_sites        ${homepage}ftp/python/${version}/
 
 distname            Python-${version}
-
 use_xz              yes
-
-checksums           rmd160  8c4cde8603a15cd55b59b665a84efd0e8f9d7553 \
-                    sha256  8714cf2b56dd36922dec8fa184d4936e1001c22fb439798cb73dda069e129d1b
+checksums           md5 f88a98bce17a03c43a6a5f8a66ab2e62 \
+                    rmd160 050bb8f215d9b5ed8287b2a9f9faa6448d7513a5 \
+                    sha256 d46a8f6fe91679e199c671b1b0a30aaf172d2acb5bcab25beb35f16c3d195b4e
 
 patchfiles          patch-setup.py.diff \
                     patch-Lib-cgi.py.diff \
                     patch-configure.diff \
-                    patch-setup.py-disabled_modules.diff \
                     patch-Lib-ctypes-macholib-dyld.py.diff \
                     patch-libedit.diff \
                     omit-local-site-packages.patch \
-                    patch-Include-pyport.h.diff
+                    patch-Include-pyport.h.diff \
+                    uuid-64bit.patch
 
-depends_lib         port:zlib path:lib/libssl.dylib:openssl \
-                    port:sqlite3 port:ncurses \
-                    port:bzip2 port:libedit port:gettext \
-                    port:xz
+depends_build       port:pkgconfig
+depends_lib         port:bzip2 \
+                    port:expat \
+                    port:gettext \
+                    port:libedit \
+                    port:libffi \
+                    port:ncurses \
+                    path:lib/libssl.dylib:openssl \
+                    port:sqlite3 \
+                    port:xz \
+                    port:zlib
 depends_run         port:python_select \
                     port:python3_select
 
@@ -56,11 +61,11 @@ configure.args      --enable-framework=${frameworks_dir} \
                     --enable-ipv6 \
                     --enable-loadable-sqlite-extensions \
                     --with-computed-gotos \
-                    --with-ensurepip=no
+                    --with-ensurepip=no \
+                    --with-system-expat \
+                    --with-system-ffi
 
 configure.ccache    no
-
-use_parallel_build  yes
 
 post-patch {
     reinplace "s|@@PREFIX@@|${prefix}|g" \
@@ -72,31 +77,18 @@ post-patch {
     # replace /Applications with ${applications_dir}
     reinplace "s|@@APPLICATIONS_DIR@@|${applications_dir}|" \
       ${worksrcpath}/configure
-
-    # See http://trac.macports.org/changeset/37861
-    reinplace "s|xargs -0 rm -r|/usr/bin/xargs -0 /bin/rm -r|g" \
-      ${worksrcpath}/Mac/PythonLauncher/Makefile.in
 }
 
 build.target        all
 
-# test_cmd_line fails
-# see http://bugs.python.org/issue4388 and
-#     http://bugs.python.org/issue4474
 test.run            yes
 test.target         test
 
 destroot.target     frameworkinstall maninstall
 
-# ensure that correct compiler is used
-build.args-append   MAKE="${build.cmd} CC=${configure.cc}"
-destroot.args-append    MAKE="${destroot.cmd} CC=${configure.cc}"
-
 set pythonNoDot python[string map {. {}} $branch]
 select.entries      [list python python-$pythonNoDot $pythonNoDot] \
                     [list python3 python3-$pythonNoDot $pythonNoDot]
-
-set confdir config-${branch}m
 
 notes "
 To make this the default Python or Python 3 (i.e., the version run by\
@@ -104,52 +96,65 @@ the 'python' or 'python3' commands), run one or both of:
 
     sudo port select --set python $pythonNoDot
     sudo port select --set python3 $pythonNoDot
-
-##############################################################
-# IF YOU ARE USING PYTHON FROM THE TERMINAL, PLEASE INSTALL:
-#   py[string map {. {}} $branch]-readline
-# TO AVOID A LIBEDIT / PYTHON INTERACTION ISSUE.
-# REF: https://trac.macports.org/ticket/48807
-##############################################################
 "
 
-post-destroot {
+platform darwin {
     set framewpath ${frameworks_dir}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
+    set confdir config-${branch}m
 
-    foreach dir { Headers Resources Python Versions/Current } {
-        file delete ${destroot}${framewpath}/${dir}
+    post-configure {
+        # See https://trac.macports.org/ticket/18376
+        system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
     }
+    post-build {
+        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
+        # Without this, LINKFORSHARED is set to
+        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+        # (this becomes Python.framework/Versions/3.4/Python) which doesn't
+        # work for dependents that incorrectly use this variable to find out
+        # how to link against python (see ticket #15099); instead we mirror
+        # the behavior of `python-config --ldflags` here.
+        system -W ${buildlibdir} "awk -F : \
+            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/${confdir}\
+            -lpython${branch}m -ldl -framework CoreFoundation',\\n\\\", \\\$1; getline; next} {print}\"\
+            _sysconfigdata.py > _sysconfigdata.py.new"
+        file rename -force ${buildlibdir}/_sysconfigdata.py.new \
+            ${buildlibdir}/_sysconfigdata.py
 
-    ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+           ${buildlibdir}/_sysconfigdata.py
 
-    # Without this, LINKFORSHARED is set to
-    # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
-    # (this becomes Python.framework/Versions/3.2/Python) which doesn't
-    # quite work (see ticket #15099); instead specifically list the
-    # full path to the proper Python framework file (which becomes
-    # ${prefix}/Library/Frameworks/Python.framework/Versions/3.2/Python)
-    reinplace {s|^\(LINKFORSHARED=.*\)$(PYTHONFRAMEWORKDIR).*$|\1 $(PYTHONFRAMEWORKINSTALLDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)|} ${destroot}${framewdir}/lib/python${branch}/$confdir/Makefile
+        # also remove gettext overlinking
+        reinplace "s|-lintl||" \
+           ${buildlibdir}/_sysconfigdata.py
+    }
+    post-destroot {
+        foreach dir { Headers Resources Python Versions/Current } {
+            file delete ${destroot}${framewpath}/${dir}
+        }
 
-    # remove -arch flags from the config
-    reinplace -E {s|-arch [a-z0-9_]+||g} \
-      ${destroot}${framewdir}/lib/python${branch}/$confdir/Makefile
+        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/python-${branch}m.pc
+
+        # Also make the sysconfig changes in the Makefile
+        reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
+            ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+
+        reinplace "s|-lintl||" \
+          ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+    }
+}
+
+post-destroot {
     foreach unversioned {2to3 idle3 pydoc3 python3 python3-config pyvenv} {
         delete ${destroot}${prefix}/bin/${unversioned}
     }
-}
-
-platform darwin {
-    post-configure {
-        # See http://trac.macports.org/ticket/18376
-        system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
-    }
-}
-
-variant readline description {Use readline instead of libedit} {
-    patchfiles-delete       patch-libedit.diff
-    depends_lib-append      port:readline
-    depends_lib-delete      port:libedit
 }
 
 variant universal {
@@ -165,13 +170,13 @@ variant universal {
         reinplace \
           "s|UNIVERSAL_ARCH_FLAGS=\".*\"|UNIVERSAL_ARCH_FLAGS=\"${universal_arch_flags}\"|" \
           ${worksrcpath}/configure
-        if { ${arch_run_32bit} != "" } {
+        if {${arch_run_32bit} ne ""} {
             reinplace \
               "s|ARCH_RUN_32BIT=\".*\"|ARCH_RUN_32BIT=\"arch ${arch_run_32bit}\"|" \
               ${worksrcpath}/configure
         }
     }
-    if {${configure.sdkroot} != ""} {
+    if {${configure.sdkroot} ne ""} {
         configure.args-append   --enable-universalsdk=${configure.sdkroot}
     } else {
         configure.args-append   --enable-universalsdk=/
@@ -188,6 +193,5 @@ variant universal {
 }
 
 livecheck.type      regex
-#livecheck.url       ${homepage}downloads/
 livecheck.url       ${homepage}downloads/
 livecheck.regex     Python (${branch}(?:\\.\\d+)*)

@@ -3,15 +3,19 @@
 PortSystem          1.0
 PortGroup           muniversal 1.0
 PortGroup           cmake 1.0
+# this line is needed to allow use of gcc
+configure.cxx_stdlib   libstdc++
+PortGroup           cxx11 1.1
 PortGroup           mpi 1.0
 PortGroup           linear_algebra 1.0
 
 name                gromacs
+# not all versions have patches available for plumed; subport's patch will fail if not there
+version             2016.5
 revision            1
-version             5.1.4
 categories          science math
-license             GPL-2
-maintainers         dstrubbe openmaintainer
+license             LGPL-2.1
+maintainers         {dstrubbe @dstrubbe} openmaintainer
 description         The World's fastest Molecular Dynamics package
 long_description    GROMACS is a versatile package to perform molecular \
                     dynamics, i.e. simulate the Newtonian equations of motion for \
@@ -27,17 +31,17 @@ homepage            http://www.gromacs.org/
 master_sites        http://ftp.gromacs.org/pub/gromacs
 
 # md5 published at http://www.gromacs.org/Downloads
-checksums           rmd160  d14fdd219dfe3a0252fc594031b8e9ce890ef3c6 \
-                    sha256  0f3793d8f1f0be747cf9ebb0b588fb2b2b5dc5acc32c3046a7bee2d2c03437bc \
-                    md5 ba2e34d59b3982603b4935d650c08040
+checksums           rmd160  10d8808e8c5b04702d83f385f78c0d9effdfa266 \
+                    sha256  57db26c6d9af84710a1e0c47a1f5bf63a22641456448dcd2eeb556ebd14e0b7c \
+                    md5     f41807e5b2911ccb547a3fd11f105d47
 
 depends_build-append \
                     port:pkgconfig
 
-depends_lib-append  port:fftw-3-single port:libxml2
+depends_lib-append  port:fftw-3-single port:libxml2 port:zlib
 
 # FIXME: enable use of avx when appropriate, instead of just SSE
-configure.args-append  -DGMX_SIMD:STRING="SSE4.1" -DBUILD_TESTING:BOOL=ON -DGMX_X11:BOOL=OFF
+configure.args-append  -DGMX_SIMD:STRING="SSE4.1" -DBUILD_TESTING:BOOL=ON -DGMX_X11:BOOL=OFF -DGMX_HWLOC:BOOL=OFF -DGMX_OPENMP:BOOL=OFF
 # boost?
 
 variant x11 description {Enable GMX view via X11} {
@@ -45,34 +49,38 @@ variant x11 description {Enable GMX view via X11} {
     depends_lib-append      port:xorg-libX11 port:xorg-libXext
 }
 
-# FIXME: use threads.
-#:info:configure -- Could NOT find OpenMP (missing:  OpenMP_C_FLAGS OpenMP_CXX_FLAGS)
-#:info:configure CMake Warning at cmake/gmxManageOpenMP.cmake:78 (message):
-#:info:configure   The compiler you are using does not support OpenMP parallelism.  This might
-#:info:configure   hurt your performance a lot, in particular with GPUs.  Try using a more
-#:info:configure   recent version, or a different compiler.  For now, we are proceeding by
-#:info:configure   turning off OpenMP.
+variant hwloc description {Enable usage of HWLOC for hardware locality} {
+    configure.args-replace  -DGMX_HWLOC:BOOL=OFF -DGMX_HWLOC:BOOL=ON
+}
+
+variant threads description {Enable usage of OpenMP} {
+    configure.args-replace  -DGMX_OPENMP:BOOL=OFF -DGMX_OPENMP:BOOL=ON
+}
 
 compilers.choose    cc cxx
 mpi.setup
 
 test.run     yes
 test.target  check
+
+if {[mpi_variant_isset]} {
+    set suffix _mpi
+} else {
+    set suffix ""
+}
+
 pre-test {
-    if {[mpi_variant_isset]} {
-        set suffix _mpi
-    } else {
-        set suffix ""
-    }
-    system -W ${worksrcpath} "install_name_tool -change ${prefix}/lib/libgromacs${suffix}.1.dylib @executable_path/../lib/libgromacs${suffix}.1.dylib bin/gmx${suffix}"
+    system -W ${worksrcpath} "install_name_tool -change ${prefix}/lib/libgromacs${suffix}.dylib @executable_path/../lib/libgromacs${suffix}.dylib bin/gmx${suffix}"
     # reset name for new executables that will be built in this phase
-    system -W ${worksrcpath} "install_name_tool -id @executable_path/../lib/libgromacs${suffix}.1.dylib lib/libgromacs${suffix}.1.dylib"
+    system -W ${worksrcpath} "install_name_tool -id @executable_path/../lib/libgromacs${suffix}.dylib lib/libgromacs${suffix}.dylib"
 }
 post-test {
     # undo changes, in case 'install' is done afterward
-    system -W ${worksrcpath} "install_name_tool -change @executable_path/../lib/libgromacs${suffix}.1.dylib ${prefix}/lib/libgromacs.1.dylib bin/gmx${suffix}"
-    system -W ${worksrcpath} "install_name_tool -id ${prefix}/lib/libgromacs${suffix}.1.dylib lib/libgromacs${suffix}.1.dylib"
+    system -W ${worksrcpath} "install_name_tool -change @executable_path/../lib/libgromacs${suffix}.dylib ${prefix}/lib/libgromacs.dylib bin/gmx${suffix}"
+    system -W ${worksrcpath} "install_name_tool -id ${prefix}/lib/libgromacs${suffix}.dylib lib/libgromacs${suffix}.dylib"
 }
+# look into this:
+#NOTE: Regression tests have not been run. If you want to run them from the build system, get the correct version of the regression tests package and set REGRESSIONTEST_PATH in CMake to point to it, or set REGRESSIONTEST_DOWNLOAD=ON.
 
 # I encountered this problem with the last test, when using MPI:
 #Program mdrun-mpi-test, VERSION 5.1.4
@@ -81,20 +89,53 @@ post-test {
 #For more information and tips for troubleshooting, please check the GROMACS
 #website at http://www.gromacs.org/Documentation/Errors
 
+subport gromacs-plumed {
+    description    ${description}: \
+      (THIS PORT INSTALLS A VERSION OF GROMACS PATCHED WITH PLUMED)
+    long_description    ${long_description}: \
+      (THIS PORT INSTALLS A VERSION OF GROMACS PATCHED WITH PLUMED)
+    conflicts gromacs
+
+# in case gromacs is compiled with MPI, also enforce that plumed is compiled with the same MPI variant:
+    if {[mpi_variant_isset]} {
+        mpi.enforce_variant path:${prefix}/lib/libplumedKernel.dylib:plumed
+    }
+# make sure that thread MPI is disabled, since it does not work with plumed
+    configure.args-append -DGMX_THREAD_MPI=OFF
+
+    depends_build-append   path:${prefix}/bin/plumed:plumed
+    depends_lib-append     path:${prefix}/lib/libplumedKernel.dylib:plumed
+    post-patch {
+# I need to execute with full path since PATH variable is not properly set here
+# Also notice that I am patching with runtime. Notice that 
+# plumed compiled for MacPorts has the hardcoded path also in the runtime patch.
+# This allows the user to work with MacPorts plumed and possibly
+# override the choice setting the PLUMED_KERNEL environment variable.
+# Also notice that gromacs version is hardcoded here. Plumed patch is not always
+# updated when gromacs is.
+        exec ${prefix}/bin/plumed patch --mdroot=${worksrcpath} -e gromacs-2016.4 --runtime -p
+    }
+    notes "
+PLUMED is linked with runtime binding. By setting the environment variable PLUMED_KERNEL\
+to the path of libplumedKernel.dylib you can replace your own PLUMED library at runtime.\
+By default, ${prefix}/lib/libplumedKernel.dylib is linked.
+"
+}
+
 linalg.setup  noveclibfort
 pre-configure {
     if {[mpi_variant_isset]} {
         configure.args-append  -DGMX_MPI:BOOL=ON -DMPIEXEC:STRING="${mpi.exec}"
     }
-    configure.args-append      -DGMX_BLAS_USER="${linalglib}"
+    configure.args-append      -DGMX_BLAS_USER="${linalglib}" -DGMX_LAPACK_USER="${linalglib}"
 }
 
-variant double description "Build in double precision" {
+variant double description "Build in double precision (much slower, use only if you really need it)" {
     depends_lib-delete      port:fftw-3-single
     depends_lib-append      port:fftw-3
-    configure.args-append   --enable-double
+    configure.args-append   -DGMX_DOUBLE:BOOL=ON
 }
 
 livecheck.type          regex
-livecheck.url           ${homepage}Downloads
+livecheck.url           http://ftp.gromacs.org/pub/gromacs/
 livecheck.regex         ${name}-(\[0-9.\]+)${extract.suffix}

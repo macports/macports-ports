@@ -1,11 +1,10 @@
-###### Description
+#### Description
 
-
-<!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->
-<!-- (delete all below for minor changes) -->
+<!-- Note: it is best make pull requests from a branch rather than from master -->
 
 ###### Type(s)
 <!-- update (title contains ": U(u)pdate to"), submission (new Portfile) and CVE Identifiers are auto-detected, replace [ ] with [x] to select -->
+
 - [ ] bugfix
 - [ ] enhancement
 - [ ] security fix
@@ -19,7 +18,9 @@ Xcode 8.x
 
 ###### Verification <!-- (delete not applicable items) -->
 Have you
+
 - [ ] followed our [Commit Message Guidelines](https://trac.macports.org/wiki/CommitMessages)?
+- [ ] squashed and [minimized your commits](https://guide.macports.org/#project.github)?
 - [ ] checked that there aren't other open [pull requests](https://github.com/macports/macports-ports/pulls) for the same change?
 - [ ] referenced existing tickets on [Trac](https://trac.macports.org/wiki/Tickets) with full URL?
 <!-- Please don't open a new Trac ticket if you are submitting a pull request. -->
@@ -27,3 +28,5 @@ Have you
 - [ ] tried existing tests with `sudo port test`?
 - [ ] tried a full install with `sudo port -vst install`?
 - [ ] tested basic functionality of all binary files?
+
+<!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->

@@ -1,40 +1,15 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# Copyright (c) 2013 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-#
 # This portgroup defines standard settings when using qmake.
 #
 # Usage:
 # PortGroup                     qmake 1.0
 
 PortGroup                       qt4 1.0
+PortGroup                       active_variants 1.1
+
+options qt4.debug_variant
+default qt4.debug_variant yes
 
 pre-configure {
     configure.cmd                   ${qt_qmake_cmd}
@@ -57,8 +32,17 @@ pre-configure {
     }
 }
 
-variant debug description "Enable debug binaries" {
-    configure.pre_args-append   "CONFIG+=debug"
+# add debug variant if one does not exist and one is requested via qt4.debug_variant
+# variant is added in eval_variants so that qt4.debug_variant can be set anywhere in the Portfile
+rename ::eval_variants ::real_qmake_eval_variants
+proc eval_variants {variations} {
+    global qt4.debug_variant
+    if { ![variant_exists debug] && [tbool qt4.debug_variant] } {
+        variant debug description {Build both release and debug binaries and libraries} {
+            configure.pre_args-append   "CONFIG+=debug"
+        }
+    }
+    uplevel ::real_qmake_eval_variants $variations
 }
 
 # check for +debug variant of this port, and make sure Qt was
@@ -68,10 +52,22 @@ platform darwin {
         if {[variant_exists debug] && \
             [variant_isset debug] && \
            ![info exists building_qt4]} {
-            if {![file exists ${qt_frameworks_dir}/QtCore.framework/QtCore_debug]} {
+            if {![catch {set result [active_variants "qt4-mac" "debug" ""]}]} {
+                if {$result} {
+                    # code to be executed if $depspec is active with at least all variants in
+                    # $required and none from $forbidden
+                } else {
+                    # code to be executed if $depspec is active, but either not with all
+                    # variants in $required or any variant in $forbidden
+                    return -code error "\n\nERROR:\n\
+In order to install this port with variant +debug,\
+qt4-mac must also be installed with variant +debug.\n"
+                }
+            } else {
+                # code to be executed if $depspec isn't active
                 return -code error "\n\nERROR:\n\
-In order to install this port as +debug,
-Qt4 must also be installed with +debug.\n"
+Requested to install this port with variant +debug,\
+but qt4-mac is not installed or installed but not active.\n"
             }
         }
     }

@@ -2,36 +2,38 @@
 
 PortSystem          1.0
 PortGroup           gobject_introspection 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 # https://bugzilla.gnome.org/show_bug.cgi?id=636134
 PortGroup           muniversal 1.0
 
 name                gstreamer1-gst-plugins-base
 set my_name         gst-plugins-base
-# unstable versions of the gstreamer1 series are typically, well, unstable
-# typical issues are movement of plugins from one category to another (e.q. bad->good),
-# addition of new plugins and removal of others, missing files, etc
-# beginning with the 1.12 stable series please only push stable versions to git
-# and then only after addressing any possible issues discovered during the previous unstable series.
-version             1.12.2
+# please only commit stable updates (even numbered releases)
+version             1.14.4
+revision            2
 description         This is gst-plugins, a set of plug-ins for GStreamer.
 long_description    ${description}
 maintainers         nomaintainer
 categories          gnome
 platforms           darwin
 license             LGPL-2+
-homepage            http://gstreamer.freedesktop.org/modules/${my_name}.html
+homepage            https://gstreamer.freedesktop.org/modules/${my_name}.html
 
-master_sites        http://gstreamer.freedesktop.org/src/${my_name}/
+master_sites        https://gstreamer.freedesktop.org/src/${my_name}/
 distname            ${my_name}-${version}
 
 use_xz              yes
 
-checksums           rmd160  02c35832d23c551fdd5d843ffa58ecf1c6d617c7 \
-                    sha256  5067dce3afe197a9536fea0107c77213fab536dff4a213b07fc60378d5510675
+checksums           rmd160  e7bcafb7127c901f6c7040766c524ad1be618c0d \
+                    sha256  ca6139490e48863e7706d870ff4e8ac9f417b56f3b9e4b3ce490c13b09a77461 \
+                    size    3703232
 
 depends_build       port:pkgconfig
 depends_lib         port:gstreamer1 \
+                    port:graphene \
+                    port:jpeg \
+                    port:libpng \
                     port:libopus \
                     port:orc \
                     path:lib/pkgconfig/pango.pc:pango \
@@ -39,59 +41,99 @@ depends_lib         port:gstreamer1 \
 
 gobject_introspection yes
 
+use_autoreconf      yes
+autoreconf.args     -fvi
+
+patchfiles          patch-allow-MESA-GL-on-macOS.diff
+
+# Embedded systems are not our primary target, so disable OpenGL|ES support.
 configure.args-append \
                     --disable-fatal-warnings \
                     --disable-silent-rules \
-                    --enable-experimental \
                     --disable-examples \
                     --disable-libvisual \
                     --disable-alsa \
                     --disable-cdparanoia \
+                    --disable-glx \
                     --disable-ogg \
                     --disable-vorbis \
                     --disable-theora \
                     --disable-ivorbis \
-                    --without-x \
                     --disable-x \
                     --disable-xvideo \
+                    --disable-cocoa \
+                    --disable-opengl \
+                    --disable-gles2 \
                     --disable-xshm
 
-#avoid this error:
-#:info:build gstbasetextoverlay.c:1511: error: 'for' loop initial declaration used outside C99 mode
+#gstbasetextoverlay.c:1511: error: 'for' loop initial declaration used outside C99 mode
 configure.cflags-append -std=c99
 
-# in version 1.12.0 plugin rawparse moved from bad to base
-pre-activate {
-    if {![catch {set installed [lindex [registry_active gstreamer1-gst-plugins-bad] 0]}]} {
-        set _version [lindex $installed 1]
-        if {[vercmp $_version 1.12.0] < 0} {
-            registry_deactivate_composite gstreamer1-gst-plugins-bad "" [list ports_nodepcheck 1]
-        }
+#gst-libs/gst/gl/gstgldebug.h:28: error: redefinition of typedef ‘GstGLAsyncDebug’
+compiler.blacklist-append *gcc-3.* *gcc-4.* {clang < 212}
+
+platform darwin {
+    # graphene currently fails to build on 10.5 and earlier due to lack of an aligned memory alloc function
+    # the dependency on graphene is optional and is used only for the gl plugins gltransformation and glvideoflip
+    # which are disabled without it
+    if {${os.major} < 10 } {
+        depends_lib-delete port:graphene
     }
 }
 
 variant x11 {
-    depends_lib-append port:xorg-libice \
-                       port:xorg-libsm \
-                       port:xorg-libXv
+    depends_lib-append \
+                    port:mesa \
+                    port:xorg-libX11 \
+                    port:xorg-libXext \
+                    port:xorg-libXv
 
-    configure.args-delete --without-x --disable-x --disable-xvideo --disable-xshm
+    configure.args-replace  --disable-x \
+                            --enable-x \
+                            --disable-xshm \
+                            --enable-xshm \
+                            --disable-xvideo \
+                            --enable-xvideo \
+                            --disable-glx \
+                            --enable-glx \
+                            --disable-opengl \
+                            --enable-opengl
 }
 
+# Prefer X11 implementation.
 default_variants +x11
+
+# Cocoa-GL
+# Only enable on OS X 10.9 or later, if the x11 variant is not enabled.
+# Requires ARC (automatic reference counting, a clang feature enabled by
+# -fobjc-arc), which was not supported when targeting the legacy fragile
+# Objective-C runtime used on 32-bit x86 until Xcode 7.3 / clang 3.9
+# (https://llvm.org/viewvc/llvm-project?view=revision&revision=250955).
+# If building universal or for i386 then ensure that a sufficiently recent
+# version of clang is used, since the Xcode clang may be too old.
+platform macosx {
+    if {![variant_isset x11] && ${os.major} >= 13} {
+        if {[variant_isset universal] || ${build_arch} eq "i386"} {
+            compiler.blacklist-append *gcc* {macports-clang-3.[0-8]} {clang < 703}
+        }
+        configure.args-replace  --disable-cocoa \
+                                --enable-cocoa \
+                                --disable-opengl \
+                                --enable-opengl
+    }
+}
 
 variant ogg description {Build with support for libogg, libvorbis, libtheora} {
     depends_lib-append    port:libogg port:libvorbis port:libtheora
-    configure.args-delete --disable-ogg --disable-vorbis --disable-theora
+    configure.args-replace  --disable-ogg \
+                            --enable-ogg \
+                            --disable-vorbis \
+                            --enable-vorbis \
+                            --disable-theora \
+                            --enable-theora
 }
 
 default_variants +ogg
-
-variant examples description {Build example programs} {
-    PortGroup qt4 1.0
-    depends_lib-append port:gtk2
-    configure.args-delete --disable-examples
-}
 
 #
 # current cdparanoia port (cdparanoia III 10.2) appears to not be API compatible
@@ -101,8 +143,10 @@ variant examples description {Build example programs} {
 
 variant cdparanoia description {Enable (currently broken) cdparanoia plugin} {
     depends_lib-append port:cdparanoia
-    configure.args-delete --disable-cdparanoia
+    configure.args-replace  --disable-cdparanoia \
+                            --enable-cdparanoia
 }
+
 
 #-fgcse (from -O2) causes build failures, but -O2 -fno-gcse doesn't seem to work
 if {[string match "*gcc-4.2" ${configure.compiler}]} {
@@ -129,6 +173,20 @@ if {[variant_isset universal]} {
             --build=${build_arch}-apple-${os.platform}${os.major}
     }
 }
+
+# in version 1.14.0 some functionality moved here from bad
+# deactivate the old port before activating the new one
+pre-activate {
+    if {![catch {set installed [lindex [registry_active gstreamer1-gst-plugins-bad] 0]}]} {
+        set _version [lindex $installed 1]
+        if {[vercmp $_version 1.14.0] < 0} {
+            registry_deactivate_composite gstreamer1-gst-plugins-bad "" [list ports_nodepcheck 1]
+        }
+    }
+}
+
+test.run            yes
+test.target         check
 
 livecheck.type      regex
 livecheck.name      ${my_name}

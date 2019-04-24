@@ -1,34 +1,4 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-#
-# Copyright (c) 2002 Apple Computer, Inc.
-# Copyright (c) 2004 Robert Shaw <rshaw@opendarwin.org>
-# Copyright (c) 2006-2013 The MacPorts Project
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. Neither the name of Apple Computer, Inc. nor the names of its
-#    contributors may be used to endorse or promote products derived from
-#    this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Usage:
 #
@@ -49,7 +19,7 @@
 # options:
 #   ruby.branches: the ruby versions supported by this module.
 #        this introduces subports such as rb23-, rb22-, ...
-#   ruby.branch: select ruby version. 2.3, 2.2, 2.1, 2.0, 1.9 or 1.8.
+#   ruby.branch: select ruby version. 2.5, ... 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 #   ruby.link_binaries_suffix: suffix of commands from rb-foo under
@@ -70,7 +40,7 @@
 #
 # note:
 #   [gem] use destroot.post_args-append begins "--" to pass options to extconf.rb
-#   > ruby.setup moudle version gem
+#   > ruby.setup module version gem
 #   > destroot.post_args-append -- --with-any-option
 
 options ruby.default_branch
@@ -145,7 +115,7 @@ set ruby.prog_suffix    ""
 options ruby.config_rubyprog_name
 default ruby.config_rubyprog_name --rubyprog
 
-default ruby.branch         ${ruby.default_branch}
+ruby.branch         ${ruby.default_branch}
 
 options ruby.link_binaries ruby.link_binaries_suffix
 default ruby.link_binaries yes
@@ -207,7 +177,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 use_configure no
                 build {}
                 destroot {
-                    xinstall -d -m 755 ${destroot}${prefix}/share/doc/${name}
+                    xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                     system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
                 }
                 return
@@ -215,6 +185,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
+            ruby25 { ruby.branch 2.5 }
             ruby24 { ruby.branch 2.4 }
             ruby23 { ruby.branch 2.3 }
             ruby22 { ruby.branch 2.2 }
@@ -239,19 +210,19 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
     }
     switch -glob ${source} {
         rubygems {
-            homepage        http://www.rubygems.org/gems/${ruby.project}
-            master_sites    http://www.rubygems.org/downloads/
+            homepage        https://www.rubygems.org/gems/${ruby.project}
+            master_sites    https://www.rubygems.org/downloads/
             livecheck.type  regex
-            livecheck.url   http://www.rubygems.org/gems/${ruby.project}
+            livecheck.url   https://www.rubygems.org/gems/${ruby.project}
             livecheck.regex {<i class="page__subheading">(\d|\d[0-9.]*\d)</i>}
         }
         sourceforge:* {
             set ruby.project [lindex [split ${source} {:}] 1]
-            homepage        http://sourceforge.net/projects/${ruby.project}
+            homepage        https://sourceforge.net/projects/${ruby.project}
             master_sites    sourceforge:${ruby.project}
         }
         sourceforge {
-            homepage        http://sourceforge.net/projects/${ruby.project}
+            homepage        https://sourceforge.net/projects/${ruby.project}
             master_sites    sourceforge:${ruby.project}
         }
     }
@@ -448,8 +419,8 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 }
             }
 
+            extract.mkdir       yes
             extract {
-                file mkdir ${worksrcpath}
                 copy ${distpath}/${distname}.gem ${worksrcpath}/${ruby.filename}.gem
             }
             build {}
@@ -547,6 +518,6 @@ proc trimroot {root path} {
     if {[llength $acc] == 0} {
         return ""
     } else {
-        return [eval [subst -nobackslashes -nocommands {file join $acc}]]
+        return [file join {*}$acc]
     }
 }

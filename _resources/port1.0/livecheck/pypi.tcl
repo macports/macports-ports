@@ -9,9 +9,9 @@ if {${livecheck.name} eq "default"} {
 }
 if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
     livecheck.url \
-            https://pypi.python.org/pypi/${livecheck.name}/json
+            https://pypi.org/pypi/${livecheck.name}/json
 }
 if {${livecheck.regex} eq ""} {
-    livecheck.regex {"version": "(.+)",}
+    livecheck.regex {"version":"([^"]+)"[,\}]}
 }
 set livecheck.type "regex"

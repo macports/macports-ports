@@ -1,5 +1,4 @@
 # Makefile for numlua
-# $Id$
 
 CC ?= /usr/bin/clang
 CFLAGS ?= -O2 -arch x86_64

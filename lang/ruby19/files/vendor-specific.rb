@@ -1,4 +1,3 @@
-# $Id $
 # Note: This is a MacPorts-specific extension to the standard content
 # of a ruby release intended to enable switching to vendor-specific
 # install location.
