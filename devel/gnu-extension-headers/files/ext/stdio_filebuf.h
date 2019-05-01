@@ -76,7 +76,19 @@ namespace __gnu_cxx {
        *  closed when the stdio_filebuf is closed/destroyed.
       */
       stdio_filebuf(int __fd, std::ios_base::openmode __mode,
-		    size_t __size = static_cast<size_t>(BUFSIZ));
+		    size_t __size = static_cast<size_t>(BUFSIZ))
+      {
+        this->_M_file.sys_open(__fd, __mode);
+        if (this->is_open())
+	{
+	  this->_M_mode = __mode;
+	  this->_M_buf_size = __size;
+	  this->_M_allocate_internal_buffer();
+	  this->_M_reading = false;
+	  this->_M_writing = false;
+	  this->_M_set_buffer(-1);
+	}
+      }
 
       /**
        *  @param  f  An open @c FILE*.
@@ -88,15 +100,28 @@ namespace __gnu_cxx {
        *  C @c FILE*.  The @c FILE* will not be automatically closed when the
        *  stdio_filebuf is closed/destroyed.
       */
-      stdio_filebuf(FILE* __f, std::ios_base::openmode __mode,
-		    size_t __size = static_cast<size_t>(BUFSIZ));
+      template< typename _File >
+      stdio_filebuf(_File* __f, std::ios_base::openmode __mode,
+		    size_t __size = static_cast<size_t>(BUFSIZ))
+      {
+        this->_M_file.sys_open(__f, __mode);
+        if (this->is_open())
+	{
+	  this->_M_mode = __mode;
+	  this->_M_buf_size = __size;
+	  this->_M_allocate_internal_buffer();
+	  this->_M_reading = false;
+	  this->_M_writing = false;
+	  this->_M_set_buffer(-1);
+	}
+      }
 
       /**
        *  Closes the external data stream if the file descriptor constructor
        *  was used.
       */
       virtual
-      ~stdio_filebuf();
+      ~stdio_filebuf() { }
 
       /**
        *  @return  The underlying file descriptor.
@@ -119,43 +144,6 @@ namespace __gnu_cxx {
       FILE*
       file() { return this->_M_file.file(); }
     };
-
-  template<typename _CharT, typename _Traits>
-    stdio_filebuf<_CharT, _Traits>::~stdio_filebuf()
-    { }
-
-  template<typename _CharT, typename _Traits>
-    stdio_filebuf<_CharT, _Traits>::
-    stdio_filebuf(int __fd, std::ios_base::openmode __mode, size_t __size)
-    {
-      this->_M_file.sys_open(__fd, __mode);
-      if (this->is_open())
-	{
-	  this->_M_mode = __mode;
-	  this->_M_buf_size = __size;
-	  this->_M_allocate_internal_buffer();
-	  this->_M_reading = false;
-	  this->_M_writing = false;
-	  this->_M_set_buffer(-1);
-	}
-    }
-
-  template<typename _CharT, typename _Traits>
-    stdio_filebuf<_CharT, _Traits>::
-    stdio_filebuf(FILE* __f, std::ios_base::openmode __mode,
-		  size_t __size)
-    {
-      this->_M_file.sys_open(__f, __mode);
-      if (this->is_open())
-	{
-	  this->_M_mode = __mode;
-	  this->_M_buf_size = __size;
-	  this->_M_allocate_internal_buffer();
-	  this->_M_reading = false;
-	  this->_M_writing = false;
-	  this->_M_set_buffer(-1);
-	}
-    }
 
 }
 
