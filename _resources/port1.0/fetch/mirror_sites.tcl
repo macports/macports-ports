@@ -207,7 +207,6 @@ set portfetch::mirror_sites::sites(cpan) {
     https://mirrors.nic.cz/CPAN/modules/by-module/
     https://mirrors.nxthost.com/CPAN/modules/by-module/
     https://mirrors.rit.edu/CPAN/modules/by-module/
-    https://mirrors.shu.edu.cn/CPAN/modules/by-module/
     https://mirrors.sonic.net/cpan/modules/by-module/
     https://mirrors.syringanetworks.net/CPAN/modules/by-module/
     https://mirrors.ucr.ac.cr/CPAN/modules/by-module/
@@ -518,7 +517,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     http://nue.de.distfiles.macports.org/:mirror
     ${distfiles_scheme}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
-    ${distfiles_scheme}://mirrors.shu.edu.cn/macports/distfiles/:mirror
     http://sea.us.distfiles.macports.org/macports/distfiles/:mirror
     http://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
     http://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
