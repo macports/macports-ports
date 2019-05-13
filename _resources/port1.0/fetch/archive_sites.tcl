@@ -14,7 +14,6 @@ set portfetch::mirror_sites::sites(macports_archives) "
     http://nue.de.packages.macports.org/:nosubdir
     http://mse.uk.packages.macports.org/sites/packages.macports.org/:nosubdir
     ${packages_scheme}://pek.cn.packages.macports.org/macports/packages/:nosubdir
-    ${packages_scheme}://mirrors.shu.edu.cn/macports/packages/:nosubdir
     http://sea.us.packages.macports.org/macports/packages/:nosubdir
     http://jog.id.packages.macports.org/macports/packages/:nosubdir
     http://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
