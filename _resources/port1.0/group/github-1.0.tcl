@@ -37,6 +37,9 @@ proc handle_tarball_from {option action args} {
             releases {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
+            archive {
+                github.master_sites ${github.homepage}/archive/${git.branch}
+            }
             tags {
                 github.master_sites ${github.homepage}/tarball/${git.branch}
             }
