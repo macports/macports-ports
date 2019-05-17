@@ -1,38 +1,10 @@
-diff --git modules/lua/vlc.c modules/lua/vlc.c
-index df235d0..b753346 100644
---- modules/lua/vlc.c
-+++ modules/lua/vlc.c
-@@ -232,10 +232,22 @@ int vlclua_dir_list( const char *luadirname, char ***pppsz_dir_list )
-             i++;
-
- #if defined(__APPLE__)
--        if( likely(asprintf( &ppsz_dir_list[i],
-+        if( strcasestr (psz_datapath, "/share") == NULL
-+            && likely(asprintf( &ppsz_dir_list[i],
-                              "%s"DIR_SEP"share"DIR_SEP"lua"DIR_SEP"%s",
-                              psz_datapath, luadirname ) != -1) )
-             i++;
-+        // When installed through MacPorts (or Fink, or HomeBrew, or...?) we do have
-+        // meta/reader under LibDir/lua (/opt/local/lib/vlc/lua for MacPorts's standard install prefix)
-+        // so we add that location at the end.
-+        char *psz_libpath = config_GetLibDir();
-+        if( likely(psz_libpath != NULL) )
-+        {
-+            if( likely(asprintf( &ppsz_dir_list[i], "%s"DIR_SEP"lua"DIR_SEP"%s",
-+                                 psz_libpath, luadirname ) != -1) )
-+                i++;
-+            free( psz_libpath );
-+        }
- #endif
-         free( psz_datapath );
-     }
 diff --git src/darwin/dirs.c src/darwin/dirs.c
-index 381729c..9174602 100644
+index d0489fd21cbb56a0730feb68e8fdbe8066728c0a..fa701de23a3f7cbe0e1a6e8ca4276cf12d2f729d 100644
 --- src/darwin/dirs.c
 +++ src/darwin/dirs.c
-@@ -43,14 +43,20 @@
- # define MAXPATHLEN 1024
- #endif
+@@ -36,14 +36,20 @@
+ 
+ #include <CoreFoundation/CoreFoundation.h>
  
 -char *config_GetLibDir (void)
 +// 20150205: we should do case-insensitive filename comparisons. HFS is case-insensitive by default,
@@ -55,7 +27,7 @@ index 381729c..9174602 100644
  
          /* Check for "VLCKit.framework/Versions/Current/VLCKit",
           * as well as "VLCKit.framework/Versions/A/VLCKit" and
-@@ -61,18 +67,18 @@ char *config_GetLibDir (void)
+@@ -54,18 +60,18 @@ char *config_GetLibDir (void)
              p += strcspn( p, "/" );
  
              /* If the string ends with VLCKit then we've found a winner */
@@ -76,9 +48,9 @@ index 381729c..9174602 100644
 -        if (len >= 10 && !strcmp( psz_img_name + len - 10, "VLC-Plugin"))
 +        if (len >= 10 && !strcasecmp( psz_img_name + len - 10, "VLC-Plugin"))
              return strdup( dirname(psz_img_name) );
-     }
  
-@@ -84,6 +90,7 @@ char *config_GetLibDir (void)
+         /* Do we end by "VLC for iOS"? so we are the iOS app */
+@@ -85,6 +91,7 @@ char *config_GetLibDir (void)
          char *path = NULL;
          asprintf(&path, "%s/"PACKAGE, incompletepath);
          free(incompletepath);
@@ -86,7 +58,7 @@ index 381729c..9174602 100644
          return path;
      }
  
-@@ -91,15 +98,37 @@ char *config_GetLibDir (void)
+@@ -92,15 +99,37 @@ char *config_GetLibDir (void)
      abort ();
  }
  
@@ -126,21 +98,23 @@ index 381729c..9174602 100644
      if (asprintf (&datadir, "%s/share", vlcpath) == -1)
          datadir = NULL;
  
-@@ -137,16 +166,24 @@ static char *getAppDependentDir(vlc_userdir_t type)
-     }
+@@ -141,19 +170,27 @@ static char *getAppDependentDir(vlc_userdir_t type)
+     const char *fallback = "org.videolan.vlc";
+     char *name = NULL;
  
-     // Default fallback
--    const char *name = "org.videolan.vlc";
--
 -    CFBundleRef mainBundle = CFBundleGetMainBundle();
 -    if (mainBundle) {
 -        CFStringRef identifierAsNS = CFBundleGetIdentifier(mainBundle);
 -        if (identifierAsNS) {
--            char identifier[256];
--            Boolean ret = CFStringGetCString(identifierAsNS, identifier, sizeof(identifier), kCFStringEncodingUTF8);
--            if (ret)
--                name = identifier;            
-+    char name[256] = "org.videolan.vlc";
+-            CFIndex len = CFStringGetLength(identifierAsNS);
+-            CFIndex size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8);
+-            char *identifier = calloc(len + 1, sizeof(char));
+-            if (identifier != NULL) {
+-                Boolean ret = CFStringGetCString(identifierAsNS, identifier, size, kCFStringEncodingUTF8);
+-                if (ret)
+-                    name = identifier;
+-                else
+-                    free(identifier);
 +    bool libDirIsPosix;
 +    char *vlcpath = getLibDir(&libDirIsPosix);
 +    if (vlcpath) {
@@ -152,12 +126,29 @@ index 381729c..9174602 100644
 +        if (mainBundle) {
 +            CFStringRef identifierAsNS = CFBundleGetIdentifier(mainBundle);
 +            if (identifierAsNS) {
-+                char identifier[256];
-+                Boolean ret = CFStringGetCString(identifierAsNS, identifier, sizeof(identifier), kCFStringEncodingUTF8);
-+                // Don't use an empty identifier (= the application that links to us doesn't have a CFBundleIdentifier set).
-+                if (ret && strlen(identifier))
-+                    strcpy(name, identifier);
-+            }
++                CFIndex len = CFStringGetLength(identifierAsNS);
++                CFIndex size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8);
++                char *identifier = calloc(len + 1, sizeof(char));
++                if (identifier != NULL) {
++                    Boolean ret = CFStringGetCString(identifierAsNS, identifier, size, kCFStringEncodingUTF8);
++                    if (ret)
++                        name = identifier;
++                    else
++                        free(identifier);
++                }
+             }
          }
      }
+diff --git bin/Makefile.am bin/Makefile.am
+index 6033e50..ea7b544 100644
+--- bin/Makefile.am
++++ bin/Makefile.am
+@@ -132,7 +132,7 @@ MOSTLYCLEANFILES = $(noinst_DATA)
+ if HAVE_OSX
+ if BUILD_VLC
+ install-data-local:
+-	cd $(bindir); mv vlc-osx vlc
++	cd $(DESTDIR)/$(bindir); mv vlc-osx vlc
  
+ endif
+ endif

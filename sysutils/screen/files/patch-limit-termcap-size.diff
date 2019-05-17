@@ -1,0 +1,154 @@
+Create TERMCAP entries limited to 1023 bytes by default.
+
+TERMCAP_BUF defaults to 1023 to create TERMCAP entries that work on
+most systems.  To save space, TERMCAP is unwrapped, and vt220 extra
+keys are skipped (unless TERMCAP_BUF > 1023); navigation keys are
+still included.  Entries larger than TERMCAP_BUF are now truncated,
+and no longer Panic screen.
+
+Termcap entries are still wrapped when saved to a file.
+
+Fixes screen bug: https://savannah.gnu.org/bugs/?55482
+
+Signed-off-by: Scott Shambarger <devel@shambarger.net>
+
+--- extern.h
++++ extern.h
+@@ -235,6 +235,7 @@ extern int   StuffKey __P((int));
+ /* termcap.c */
+ extern int   InitTermcap __P((int, int));
+ extern char *MakeTermcap __P((int));
++extern void  DumpTermcap __P((int, FILE *));
+ extern char *gettermcapstring __P((char *));
+ #ifdef MAPKEYS
+ extern int   remap __P((int, int));
+--- fileio.c
++++ fileio.c
+@@ -479,10 +479,7 @@ void WriteFile(struct acluser *user, char *fn, int dump) {
+                 break;
+ 
+             case DUMP_TERMCAP:
+-              if ((p = index(MakeTermcap(fore->w_aflag), '=')) != NULL) {
+-                fputs(++p, f);
+-                putc('\n', f);
+-              }
++              DumpTermcap(fore->w_aflag, f);
+ 	      break;
+ 
+ #ifdef COPY_PASTE
+--- os.h
++++ os.h
+@@ -507,7 +507,7 @@ typedef struct fd_set { int fds_bits[1]; } fd_set;
+  */
+ 
+ #ifndef TERMCAP_BUFSIZE
+-# define TERMCAP_BUFSIZE 2048
++# define TERMCAP_BUFSIZE 1023
+ #endif
+ 
+ #ifndef MAXPATHLEN
+--- term.c
++++ term.c
+@@ -197,6 +197,7 @@ struct term term[T_N] =
+   { "F1", T_STR  }, KMAPDEF("\033[23~")
+   { "F2", T_STR  }, KMAPDEF("\033[24~")
+   /* extra keys for vt220 (David.Leonard@it.uq.edu.au) */
++/* define T_FEXTRA */
+   { "F3", T_STR  },
+   { "F4", T_STR  },
+   { "F5", T_STR  },
+--- termcap.c
++++ termcap.c
+@@ -75,11 +75,10 @@ char screenterm[MAXTERMLEN + 1];	/* new $TERM, usually "screen" */
+ 
+ char *extra_incap, *extra_outcap;
+ 
+-static const char TermcapConst[] = "\\\n\
+-\t:DO=\\E[%dB:LE=\\E[%dD:RI=\\E[%dC:UP=\\E[%dA:bs:bt=\\E[Z:\\\n\
+-\t:cd=\\E[J:ce=\\E[K:cl=\\E[H\\E[J:cm=\\E[%i%d;%dH:ct=\\E[3g:\\\n\
+-\t:do=^J:nd=\\E[C:pt:rc=\\E8:rs=\\Ec:sc=\\E7:st=\\EH:up=\\EM:\\\n\
+-\t:le=^H:bl=^G:cr=^M:it#8:ho=\\E[H:nw=\\EE:ta=^I:is=\\E)0:";
++static const char TermcapConst[] = "DO=\\E[%dB:LE=\\E[%dD:RI=\\E[%dC:\
++UP=\\E[%dA:bs:bt=\\E[Z:cd=\\E[J:ce=\\E[K:cl=\\E[H\\E[J:cm=\\E[%i%d;%dH:\
++ct=\\E[3g:do=^J:nd=\\E[C:pt:rc=\\E8:rs=\\Ec:sc=\\E7:st=\\EH:up=\\EM:\
++le=^H:bl=^G:cr=^M:it#8:ho=\\E[H:nw=\\EE:ta=^I:is=\\E)0:";
+ 
+ char *
+ gettermcapstring(s)
+@@ -824,21 +823,13 @@ AddCap(s)
+ char *s;
+ {
+   register int n;
+-
+-  if (tcLineLen + (n = strlen(s)) > 55 && Termcaplen < TERMCAP_BUFSIZE - 4 - 1)
+-    {
+-      strcpy(Termcap + Termcaplen, "\\\n\t:");
+-      Termcaplen += 4;
+-      tcLineLen = 0;
+-    }
++  n=strlen(s);
+   if (Termcaplen + n < TERMCAP_BUFSIZE - 1)
+     {
+       strcpy(Termcap + Termcaplen, s);
+       Termcaplen += n;
+       tcLineLen += n;
+     }
+-  else
+-    Panic(0, "TERMCAP overflow - sorry.");
+ }
+ 
+ /*
+@@ -1074,6 +1065,12 @@ int aflag;
+ 	{
+ 	  if (i >= T_KEYPAD)	/* don't put keypad codes in TERMCAP */
+ 	    continue;		/* - makes it too big */
++#if (TERMCAP_BUF < 1024)
++          if (i >= T_FEXTRA && i < T_BACKTAB) /* also skip extra vt220 keys */
++            continue;
++          if (i > T_BACKTAB && i < T_NAVIGATE) /* more vt220 keys */
++            continue;
++#endif
+ 	  if (i >= T_CURSOR && i < T_OCAPS)
+ 	    {
+ 	      act = &umtab[i - (T_CURSOR - T_OCAPS + T_CAPS)];
+@@ -1128,6 +1125,37 @@ int aflag;
+   return Termcap;
+ }
+ 
++#define TERMCAP_MAX_WIDTH 63
++void
++DumpTermcap(aflag, f)
++int aflag;
++FILE *f;
++{
++  register const char *p, *pe;
++  int n, col=0;
++
++  if ((p = index(MakeTermcap(aflag), '=')) == NULL)
++    return;
++  p++;
++  debug1("DumpTermcap: '%s'\n", p);
++  /* write termcap entry with wrapping */
++  while((pe = index(p, ':')))
++    {
++      n = pe - p + 1;
++      if((col > 8) && ((col + n) > TERMCAP_MAX_WIDTH))
++        {
++          fwrite("\\\n\t:", 1, 4, f);
++          col = 8;
++        }
++      fwrite(p, 1, n, f);
++      col += n;
++      p = ++pe;
++    }
++  if(*p)
++    fwrite(p, 1, strlen(p), f);
++  fputc('\n', f);
++}
++
+ static void
+ MakeString(cap, buf, buflen, s)
+ char *cap, *buf;
+-- 
+2.17.2 (Apple Git-113)
+

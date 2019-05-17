@@ -1,6 +1,6 @@
---- src/common/main.c.orig	Mon Jun 28 17:26:51 2004
-+++ src/common/main.c	Mon Jun 28 17:27:21 2004
-@@ -176,7 +176,7 @@
+--- src/common/main.c.orig	2015-05-20 03:52:15.000000000 -0500
++++ src/common/main.c	2018-10-06 21:05:10.000000000 -0500
+@@ -155,7 +155,7 @@
  
      init_memory ();
  

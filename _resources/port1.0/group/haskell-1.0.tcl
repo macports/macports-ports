@@ -78,9 +78,9 @@ proc haskell.setup {package version {compiler ghc} {register_scripts "yes"} {tar
             ${configure.cmd} Setup register \
             --gen-pkg-config=${package}-${version}.conf]
         set generate_pkg_config_hook [subst {
-            xinstall -d -m 755 [list ${destroot}${package_conf_d}]
+            xinstall -d -m 0755 [list ${destroot}${package_conf_d}]
             system -W [list ${worksrcpath}] [list $generate_pkg_config_cmdline]
-            xinstall -m 644 [list ${worksrcpath}/${package}-${version}.conf] \
+            xinstall -m 0644 [list ${worksrcpath}/${package}-${version}.conf] \
                 [list ${destroot}${package_conf_d}]
         }]
         post-destroot $generate_pkg_config_hook

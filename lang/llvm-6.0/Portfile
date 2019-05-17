@@ -12,7 +12,7 @@ set llvm_version_no_dot 60
 set clang_executable_version 6.0
 set lldb_executable_version 6.0.1
 name                    llvm-${llvm_version}
-subport                 clang-${llvm_version} {}
+subport                 clang-${llvm_version} { revision 2 }
 subport                 lldb-${llvm_version} {}
 set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
@@ -23,7 +23,7 @@ license                 NCSA
 maintainers             {jeremyhu @jeremyhu} {larryv @larryv}
 
 if {${subport} eq "llvm-${llvm_version}"} {
-    homepage            http://llvm.org/
+    homepage            https://llvm.org/
     description         llvm is a next generation compiler infrastructure
     long_description    The LLVM Core libraries provide a modern source- and \
                         target-independent optimizer, along with code \
@@ -35,7 +35,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
     depends_lib         port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
     depends_run         bin:perl:perl5 port:llvm_select
 } elseif {${subport} eq "clang-${llvm_version}"} {
-    homepage            http://clang.llvm.org/
+    homepage            https://clang.llvm.org/
     description         C, C++, Objective C and Objective C++ compiler
     long_description    Clang is an "LLVM native" C/C++/Objective-C compiler, \
                         which aims to deliver amazingly fast compiles (e.g. \
@@ -58,15 +58,18 @@ if {${subport} eq "llvm-${llvm_version}"} {
     depends_lib-append  port:libedit port:libffi port:ncurses port:zlib
 
     # Older Xcode's lipo doesn't support x86_64h slices
-    # https://trac.macports.org/ticket/53159#ticket
+    # https://trac.macports.org/ticket/53159
+    # Older Xcode's ranlib doesn't understand objects produced by newer clang (malformed object (unknown load command 2))
+    # https://trac.macports.org/ticket/57412
     if {[vercmp $xcodeversion "6.0.0"] < 0} {
         depends_build-append port:cctools
+        depends_run-append port:cctools
         depends_skip_archcheck-append cctools
     }
 
     default_variants    +analyzer
 } elseif {${subport} eq "lldb-${llvm_version}"} {
-    homepage            http://lldb.llvm.org/
+    homepage            https://lldb.llvm.org/
     description         the LLVM debugger
     long_description    Lldb is the "LLVM native" debugger.
 
@@ -98,7 +101,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
 
 version                 ${llvm_version}.1
 epoch                   1
-master_sites            http://llvm.org/releases/${version}
+master_sites            https://releases.llvm.org/${version}
 use_xz                  yes
 extract.suffix          .tar.xz
 distfiles               llvm-${version}.src${extract.suffix}
@@ -166,6 +169,7 @@ if {${subport} eq "clang-${llvm_version}"} {
         3001-Fix-local-and-iterator-when-building-with-Lion-and-n.patch \
         3002-Fix-missing-long-long-math-prototypes-when-using-the.patch \
         3003-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
+        3004-compiler-rt-leopard-no-libdispatch.patch \
         openmp-locations.patch
 
     # https://llvm.org/bugs/show_bug.cgi?id=25681
@@ -270,6 +274,12 @@ if {${subport} eq "llvm-${llvm_version}"} {
 	configure.args-append \
 	    -DCOMPILER_RT_BUILD_LIBFUZZER=OFF
     }
+    if {${os.major} <= 9} {
+        # xray calls in sanitizer_common, which presently
+        # does not build on < SnowLeopard
+	configure.args-append \
+	    -DCOMPILER_RT_BUILD_XRAY=OFF
+    }
 } elseif {${subport} eq "lldb-${llvm_version}"} {
     #select.group        lldb
     #select.file         ${filespath}/mp-${subport}
@@ -295,9 +305,11 @@ if {${subport} eq "llvm-${llvm_version}"} {
 # Xcode 6.2's clang (600.0.57) fails due to https://llvm.org/bugs/show_bug.cgi?id=25753
 compiler.blacklist *gcc* {clang < 602}
 
-if {${subport} eq "clang-${llvm_version}"} {
-    # clang older than 3.5 fail due to https://llvm.org/bugs/show_bug.cgi?id=25753
-    compiler.blacklist-append macports-clang-3.3 macports-clang-3.4
+# clang older than 3.5 fail due to https://llvm.org/bugs/show_bug.cgi?id=25753
+# llvm-6.0 builds with clang-3.4 but has codegen issues resulting compiler crashes
+compiler.blacklist-append macports-clang-3.3 macports-clang-3.4
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+    compiler.fallback-append macports-clang-3.7
 }
 
 if {${subport} eq "lldb-${llvm_version}"} {
@@ -307,7 +319,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
 
 # blacklist current and future versions if they're not available in order to
 # help break potential dependency cycles.
-foreach ver {6.0 devel} {
+foreach ver {6.0 7.0 8.0 devel} {
     if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
         compiler.blacklist-append macports-clang-${ver}
     }
@@ -573,6 +585,28 @@ if {${subport} eq "llvm-${llvm_version}"} {
         }
     }
 
+    variant emulated_tls description { enable c11/c++11 thread support on older systems using emulated-tls } {
+        # allow clang to use emulated-tls to support thread_local on systems prior to 10.7
+        # emulated TLS works when linking against macports-libstdc++ or against
+        # libc++ / libc++abi with cxa_thread_atexit and emutls.c objects included
+        patchfiles-append \
+            9000-patch-clang-6.0-support-emulated-tls.diff
+    }
+    if {${os.major} < 11} {
+        default_variants-append +emulated_tls
+    }
+
+    variant defaultlibcxx description {default to -stdlib=libc++ on all systems}  {
+        #patch clang to always default to -stdlib=libc++ if not otherwise specified
+        patchfiles-append 9003-patch-clang-6.0-Toolchains-Darwin-default-to-libcxx-on-all-systems.diff
+    }
+
+    # on systems older than darwin 13, if macports.conf is configured to stdlib=libc++ 
+    # then make that the default if not otherwise specified exactly matches the behaviour of newer systems
+    if { ${cxx_stdlib} eq "libc++" && ${os.major} < 13 } {
+        default_variants-append +defaultlibcxx
+    }
+
     variant libstdcxx description {-stdlib=macports-libstdc++ searches for MacPorts libstdc++} {
 
         patchfiles-append 9001-macports-libstdcxx.diff
@@ -627,7 +661,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
                 ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
         }
     }
-    default_variants +libstdcxx
+    default_variants-append +libstdcxx
 
     post-patch {
         reinplace "s|@@PREFIX@@|${prefix}|" \

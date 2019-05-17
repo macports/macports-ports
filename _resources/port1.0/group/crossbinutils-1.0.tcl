@@ -26,6 +26,11 @@ array set crossbinutils.versions_info {
         sha256  5d20086ecf5752cc7d9134246e9588fa201740d540f7eb84d795b1f7a93bca86 \
         size    20467996
     }}
+    2.32 {xz {
+        rmd160  cfff50aae6534512a51fbb720e30f37484f8193e \
+        sha256  0ab6c55dd86a92ed561972ba15b9b70a8b9f75557f896446c82e8b36e473ee04 \
+        size    20774880
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -79,38 +84,38 @@ proc crossbinutils.setup {target version} {
         foreach {dir page} ${infopages} {
             # Fix texinfo source file
             set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
-            reinplace \
+            reinplace -q \
                 /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
-            reinplace s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
-            reinplace \
+            reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
+            reinplace -q \
                 "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
                 ${tex}
             move ${tex} \
                 ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
 
             # Fix Makefile
-            reinplace -E \
+            reinplace -q -E \
                 s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
                 ${worksrcpath}/${dir}/Makefile.in
         }
 
         # Fix packages' names.
         foreach dir {bfd binutils gas gold gprof ld opcodes} {
-            reinplace "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
+            reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
                 ${worksrcpath}/${dir}/configure
         }
 
         # Install target-compatible libbfd/libiberty in the target's directory
-        reinplace "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
+        reinplace -q "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
             ${worksrcpath}/bfd/configure                                \
             ${worksrcpath}/opcodes/configure
-        reinplace "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
+        reinplace -q "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
             ${worksrcpath}/bfd/configure                                             \
             ${worksrcpath}/opcodes/configure
 
-        reinplace "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
+        reinplace -q "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
             ${worksrcpath}/libiberty/Makefile.in
-        reinplace "s|/\$(MULTIOSDIR)||g" \
+        reinplace -q "s|/\$(MULTIOSDIR)||g" \
             ${worksrcpath}/libiberty/Makefile.in
     }
 
@@ -137,7 +142,7 @@ proc crossbinutils.setup {target version} {
     post-destroot {
         set docdir ${prefix}/share/doc/${name}
         xinstall -d ${destroot}${docdir}
-        xinstall -m 644 \
+        xinstall -m 0644 \
             {*}[glob -type f ${worksrcpath}/{COPYING*,ChangeLog,MAINTAINERS,README*}] \
             ${destroot}${docdir}
     }

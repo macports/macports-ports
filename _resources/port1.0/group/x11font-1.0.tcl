@@ -24,7 +24,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     use_bzip2        yes
     depends_build    port:pkgconfig bin:bdftopcf:bdftopcf \
                      port:xorg-font-util bin:gzip:gzip
-    depends_lib      port:fontconfig port:mkfontscale port:mkfontdir
+    depends_lib      port:fontconfig port:mkfontscale
     set x11font_myfontdir    ${prefix}/share/fonts/${myfontsubdir}
     configure.args   --with-fontdir=${x11font_myfontdir}
 

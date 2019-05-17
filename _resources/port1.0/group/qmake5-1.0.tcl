@@ -15,7 +15,11 @@ default qt5.top_level {${configure.dir}}
 default qt5.cxxflags {}
 default qt5.ldflags {}
 default qt5.frameworkpaths {}
-default qt5.spec_cmd {"-spec "}
+if {[vercmp [macports_version] 2.5.3] <= 0} {
+    default qt5.spec_cmd {"-spec "}
+} else {
+    default qt5.spec_cmd "-spec "
+}
 
 # with the -r option, the examples do not install correctly (no source code)
 #     the install_sources target is not created in the Makefile(s)
@@ -159,6 +163,13 @@ pre-configure {
     }
     if {${qmake5_l_flags} ne "" } {
         puts ${cache} QMAKE_LFLAGS+="${qmake5_l_flags}"
+    }
+
+    if {${os.platform} eq "darwin" && ${os.major} < 11} {
+        # use newer cctools on older platforms to handle output from newer clang versions
+        depends_build-append port:cctools
+        puts ${cache} QMAKE_AR="${prefix}/bin/ar\ cq"
+        puts ${cache} QMAKE_RANLIB="${prefix}/bin/ranlib"
     }
 
     # accommodating variant request varies depending on how qtbase was built

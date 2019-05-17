@@ -169,7 +169,7 @@ if {![info exists building_qt4]} {
         }
 
     } else {
-        depends_lib-append      path:lib/libQtCore.so.4:qt4-x11
+        return -code error "MacPorts does not support qt4 on platforms other than darwin"
     }
 }
 
