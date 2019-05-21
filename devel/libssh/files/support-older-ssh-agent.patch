@@ -1,0 +1,216 @@
+commit 88e4a81c5f6fa930f7c343ee8db27ad880e61821
+Author: Mihai Moldovan <ionic@ionic.de>
+Date:   Sat Mar 30 13:33:29 2019 +0100
+
+    agent: fall back to SHA1-based RSA signatures.
+    
+    We automatically request a SHA2-based signature if the server supports
+    it. Older versions of ssh-agent do not honor such flags and also don't
+    fail, but instead return a legacy (SHA1-based) signature.
+    
+    Check the type of signature that was returned (first nested SSH String
+    in the response), fail if it didn't match what was expected and
+    re-execute ssh_userauth_agent_publickey() in fallback mode on signing
+    errors with RSA-based keys, disabling usage of the SHA2 extensions.
+    
+    We will also always re-enable SHA2-based signatures (both in success and
+    error cases), since the agent is only queried once for initial
+    authentication. After that, we'll be able to use the stronger SHA2-based
+    variants as usual.
+    
+    Signed-off-by: Mihai Moldovan <ionic@ionic.de>
+
+diff --git a/src/agent.c b/src/agent.c
+index 7704e8f1..bb65c5c5 100644
+--- src/agent.c
++++ src/agent.c
+@@ -492,10 +492,13 @@ ssh_string ssh_agent_sign_data(ssh_session session,
+     ssh_buffer reply;
+     ssh_string key_blob;
+     ssh_string sig_blob;
++    ssh_string sig_type;
+     unsigned int type = 0;
+     unsigned int flags = 0;
+     uint32_t dlen;
+     int rc;
++    int memcmp_result = 0;
++    const char *expected = NULL;
+ 
+     request = ssh_buffer_new();
+     if (request == NULL) {
+@@ -600,6 +603,35 @@ ssh_string ssh_agent_sign_data(ssh_session session,
+     sig_blob = ssh_buffer_get_ssh_string(reply);
+     ssh_buffer_free(reply);
+ 
++    /* Check signature type for RSA keys. */
++    if ((pubkey->type == SSH_KEYTYPE_RSA) && (sig_blob)) {
++        expected = "ssh-rsa";
++        if (session->extensions & SSH_EXT_SIG_RSA_SHA512) {
++            expected = "rsa-sha2-512";
++        } else if (session->extensions & SSH_EXT_SIG_RSA_SHA256) {
++            expected = "rsa-sha2-256";
++        }
++
++        /*
++         * Do *not* free sig_type!
++         * It's a reference to the nested ssh_string inside of sig_blob.
++         */
++        sig_type = ssh_string_data(sig_blob);
++
++        if (sig_type == NULL) {
++          SSH_STRING_FREE(sig_blob);
++          return NULL;
++        }
++
++        memcmp_result = memcmp(expected, ssh_string_data(sig_type), MIN(strlen(expected), ssh_string_len(sig_type)));
++
++        if (memcmp_result != 0) {
++          SSH_LOG(SSH_LOG_DEBUG, "expected signature type '%s', got '%s' from agent", expected, ssh_string_data(sig_type));
++          SSH_STRING_FREE(sig_blob);
++          return NULL;
++        }
++    }
++
+     return sig_blob;
+ }
+ 
+diff --git a/src/auth.c b/src/auth.c
+index 993e6dfe..9f7fc5ea 100644
+--- src/auth.c
++++ src/auth.c
+@@ -740,12 +740,15 @@ fail:
+ #ifndef _WIN32
+ static int ssh_userauth_agent_publickey(ssh_session session,
+                                         const char *username,
+-                                        ssh_key pubkey)
++                                        ssh_key pubkey,
++                                        int fallback)
+ {
+     ssh_string pubkey_s = NULL;
+     ssh_string sig_blob = NULL;
+     const char *sig_type_c = NULL;
+     int rc;
++    int disabled_flags = 0;
++    int rsa_ext_flags = 0;
+ 
+     switch(session->pending_call_state) {
+         case SSH_PENDING_CALL_NONE:
+@@ -771,6 +774,19 @@ static int ssh_userauth_agent_publickey(ssh_session session,
+     if (rc < 0) {
+         goto fail;
+     }
++    rsa_ext_flags |= session->extensions & SSH_EXT_SIG_RSA_SHA512;
++    rsa_ext_flags |= session->extensions & SSH_EXT_SIG_RSA_SHA256;
++    if (fallback) {
++      /*
++       * Agent only provides SHA1 signatures, so disable the SHA2-based variants.
++       * Keep track of the current/old state and reapply it later if needed, though.
++       *
++       * N.B.: fallback being set implicitly means that the key type must be RSA.
++       */
++      disabled_flags = rsa_ext_flags;
++      session->extensions &= ~SSH_EXT_SIG_RSA_SHA512;
++      session->extensions &= ~SSH_EXT_SIG_RSA_SHA256;
++    }
+     sig_type_c = ssh_key_get_signature_algorithm(session, pubkey->type);
+ 
+     /* Check if the given public key algorithm is allowed */
+@@ -780,6 +796,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
+                       " PUBLICKEY_ACCEPTED_TYPES configuration option",
+                       sig_type_c);
+         SSH_STRING_FREE(pubkey_s);
++        session->extensions |= disabled_flags;
+         return SSH_AUTH_DENIED;
+     }
+ 
+@@ -801,7 +818,12 @@ static int ssh_userauth_agent_publickey(ssh_session session,
+     /* sign the buffer with the private key */
+     sig_blob = ssh_pki_do_sign_agent(session, session->out_buffer, pubkey);
+     if (sig_blob == NULL) {
+-        goto fail;
++        if (!fallback) {
++          goto retry_if_rsa;
++        }
++        else {
++          goto fail;
++        }
+     }
+ 
+     rc = ssh_buffer_add_ssh_string(session->out_buffer, sig_blob);
+@@ -815,6 +837,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
+     session->pending_call_state = SSH_PENDING_CALL_AUTH_AGENT;
+     rc = ssh_packet_send(session);
+     if (rc == SSH_ERROR) {
++        session->extensions |= disabled_flags;
+         return SSH_AUTH_ERROR;
+     }
+ 
+@@ -824,11 +847,50 @@ pending:
+         session->pending_call_state = SSH_PENDING_CALL_NONE;
+     }
+ 
++    /* Reactivate SHA2-based signatures if needed.
++     *
++     * We're only ever using the agent once (for each key) while authenticating,
++     * so don't disable stronger algorithms after the initial auth is done
++     * (using a weaker, but at least supported one).
++     */
++    session->extensions |= disabled_flags;
++
+     return rc;
++
++retry_if_rsa:
++    ssh_buffer_reinit(session->out_buffer);
++    /*
++     * Double-free of pubkey_s in fall-through mode to fail, but this is not
++     * a problem, since the second free operation will just be a no-op thanks
++     * to SSH_STRING_FREE().
++     */
++    SSH_STRING_FREE(pubkey_s);
++    /*
++     * We're explicitly checking if rsa_ext_flags is non-zero because
++     * retrying doesn't make sense if there are no algos to disable in the
++     * first place.
++     *
++     * In such a case, the code will use the implicit fall-through to fail.
++     */
++    if ((pubkey->type == SSH_KEYTYPE_RSA) && (rsa_ext_flags)) {
++      if (!fallback) {
++        /*
++         * Signature request failed, it might have been due to an unexpected signature.
++         * Let's retry with SHA2-based signatures disabled.
++         */
++        return ssh_userauth_agent_publickey(session, username, pubkey, 1);
++      }
++    }
++    /*
++     * Note the implicit fall-through to fail for non-RSA key types or
++     * retry-in-fallback-mode situations.
++     */
++
+ fail:
+     ssh_set_error_oom(session);
+     ssh_buffer_reinit(session->out_buffer);
+     SSH_STRING_FREE(pubkey_s);
++    session->extensions |= disabled_flags;
+ 
+     return SSH_AUTH_ERROR;
+ }
+@@ -941,7 +1003,7 @@ int ssh_userauth_agent(ssh_session session,
+             state->state = SSH_AGENT_STATE_AUTH;
+         }
+         if (state->state == SSH_AGENT_STATE_AUTH) {
+-            rc = ssh_userauth_agent_publickey(session, username, state->pubkey);
++            rc = ssh_userauth_agent_publickey(session, username, state->pubkey, 0);
+             if (rc == SSH_AUTH_AGAIN)
+                 return rc;
+             ssh_string_free_char(state->comment);
+@@ -1313,7 +1375,7 @@ int ssh_userauth_agent_pubkey(ssh_session session,
+     key->dsa = publickey->dsa_pub;
+     key->rsa = publickey->rsa_pub;
+ 
+-    rc = ssh_userauth_agent_publickey(session, username, key);
++    rc = ssh_userauth_agent_publickey(session, username, key, 0);
+ 
+     key->dsa = NULL;
+     key->rsa = NULL;

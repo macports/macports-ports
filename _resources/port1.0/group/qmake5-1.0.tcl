@@ -165,6 +165,13 @@ pre-configure {
         puts ${cache} QMAKE_LFLAGS+="${qmake5_l_flags}"
     }
 
+    if {${os.platform} eq "darwin" && ${os.major} < 11} {
+        # use newer cctools on older platforms to handle output from newer clang versions
+        depends_build-append port:cctools
+        puts ${cache} QMAKE_AR="${prefix}/bin/ar\ cq"
+        puts ${cache} QMAKE_RANLIB="${prefix}/bin/ranlib"
+    }
+
     # accommodating variant request varies depending on how qtbase was built
     set base_debug false
     foreach {qt_test_name qt_test_info} [array get available_qt_versions] {

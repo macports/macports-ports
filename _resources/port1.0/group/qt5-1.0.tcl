@@ -14,6 +14,7 @@ array set available_qt_versions {
     qt57  {qt57-qtbase  5.7}
     qt56  {qt56-qtbase  5.6}
     qt55  {qt55-qtbase  5.5}
+    qt53  {qt53-qtbase  5.3}
 }
 #qt5-kde {qt5-kde 5.8}
 
@@ -50,7 +51,7 @@ proc qt5.get_default_name {} {
         #     Qt 5.3: Deployment only
         # Qt 5.0-5.2: Occasionally tested
         #
-        return qt55
+        return qt53
         #
     } elseif { ${os.major} == 11 } {
         #

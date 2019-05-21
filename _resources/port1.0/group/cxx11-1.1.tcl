@@ -17,8 +17,8 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     proc cxx11.add_dependencies {} {
         global os.major os.platform
-        depends_lib-delete port:libgcc
-        depends_lib-append port:libgcc
+        depends_lib-delete path:lib/libgcc/libgcc_s.1.dylib:libgcc
+        depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
         if {${os.platform} eq "darwin" && ${os.major} < 13} {
             # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
             #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
@@ -46,13 +46,17 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
     }
 
     # see https://trac.macports.org/ticket/54766
-    depends_lib-append port:libgcc
+    depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
 
-    compiler.blacklist-append   macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \
+    compiler.blacklist-append  \
+        macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \
         macports-llvm-gcc-4.2 apple-gcc-4.0 apple-gcc-4.2 gcc-3.3 gcc gcc-4.0 llvm-gcc-4.2 \
         macports-dragonegg-3.3 macports-dragonegg-3.4
+
 } else {
+
     # GCC compilers cannot use libc++
     # We do not know what "cc" is, so blacklist it as well.
     compiler.blacklist-append   *gcc* {clang < 500} cc
+
 }
