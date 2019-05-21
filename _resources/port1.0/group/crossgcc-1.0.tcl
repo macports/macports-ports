@@ -231,6 +231,9 @@ proc crossgcc.setup {target version} {
         if {[vercmp ${xcodeversion} 4.3] < 0} {
             compiler.blacklist llvm-gcc-4.2
         }
+        # Failed to build with clang from Xcode 4.5
+        # fatal error: error in backend: ran out of registers during register allocation
+        compiler.blacklist  {clang >= 421 < 422}
 
         universal_variant no
 
