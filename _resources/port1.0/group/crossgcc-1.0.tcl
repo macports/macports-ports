@@ -73,6 +73,11 @@ array set newlib.versions_info {
         sha256  c8566335ee74e5fcaeb8595b4ebd0400c4b043d6acb3263ecb1314f8f5501332 \
         size    18168046
     }}
+    3.1.0 {gz {
+        rmd160  bf4f474ef482a8ba0b2d57254051d79c48c5a633 \
+        sha256  fb4fa1cc21e9060719208300a61420e4089d6de6ef59cf533b57fe74801d102a \
+        size    17958952
+    }}
 }
 
 proc crossgcc.setup {target version} {
@@ -226,6 +231,9 @@ proc crossgcc.setup {target version} {
         if {[vercmp ${xcodeversion} 4.3] < 0} {
             compiler.blacklist llvm-gcc-4.2
         }
+        # Failed to build with clang from Xcode 4.5
+        # fatal error: error in backend: ran out of registers during register allocation
+        compiler.blacklist  {clang >= 421 < 422}
 
         universal_variant no
 

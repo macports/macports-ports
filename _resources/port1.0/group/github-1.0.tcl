@@ -23,7 +23,7 @@ default github.master_sites {${github.homepage}/tarball/${git.branch}}
 default master_sites {${github.master_sites}}
 
 options github.tarball_from
-default github.tarball_from tags
+default github.tarball_from tarball
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
     global github.author github.project github.master_sites git.branch github.homepage
@@ -37,8 +37,14 @@ proc handle_tarball_from {option action args} {
             releases {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
-            tags {
+            archive {
+                github.master_sites ${github.homepage}/archive/${git.branch}
+            }
+            tarball {
                 github.master_sites ${github.homepage}/tarball/${git.branch}
+            }
+            tags {
+                return -code error "the value \"tags\" is deprecated for github.tarball_from. Please use \"tarball\" instead."
             }
             default {
                 return -code error "invalid value \"${args}\" for github.tarball_from"
