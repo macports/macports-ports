@@ -1,0 +1,875 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               active_variants 1.1
+
+name                    mail-server
+version                 1.0
+revision                0
+categories              mail net
+platforms               darwin
+supported_archs         noarch
+maintainers             {ieee.org:s.t.smith @essandess} openmaintainer
+license                 GPL-3
+distfiles
+
+description             Mail server configuration
+long_description ${description} \
+    Mail server working configuration that provides a basic, working, \
+    easily modifiable mail server. The configuration is built using \
+    postfix for the MTA, dovecot for the MDA, solr for fast search, \
+    rspamd for a milter, and clamav for email virus scans. The \
+    configuration includes a surrogate TLS certificate and DKIM.
+
+homepage                https://www.postfix.org/
+
+set postfix_required_variants \
+                        [lsort {dovecot_sasl pcre smtputf8 tls}]
+set dovecot2_required_variants \
+                        [lsort {gssapi solr}]
+
+depends_lib-append      port:dcc \
+                        port:dovecot2 \
+                        port:dovecot2-sieve \
+                        port:openssl \
+                        port:postfix \
+                        port:rspamd \
+                        port:sf-pwgen
+
+# these dependencies are from variants that may not be active
+depends_lib-append      port:apache-solr8 \
+                        port:clucene \
+                        port:curl \
+                        port:expat \
+                        port:pcre
+
+depends_run-append      port:clamav-server \
+                        port:dns-server \
+                        port:logrotate
+
+variant initialize \
+    description {Initialize all configuration files. Existing
+        configurations files are not overwritten by default.} {}
+
+use_configure           no
+
+pre-build {
+    # require these port dependency variants
+    # MacPorts doesn't support variant dependencies, so do this this by hand
+    # See: https://trac.macports.org/ticket/126
+    # https://lists.macports.org/pipermail/macports-users/2015-September/039201.html
+
+    set required_variants_flag true
+    set required_variants_message ""
+
+    if { [catch {set result [registry_active postfix]}]
+        || [lindex [lindex ${result} 0] 3] \
+            != "+[join ${postfix_required_variants} +]" } {
+        append required_variants_message "\
+Postfix not installed with required variants. Please install:
+
+    sudo port -pN install postfix +[join ${postfix_required_variants} +]
+
+"
+        set required_variants_flag false
+    }
+    if { [catch {set result [registry_active dovecot2]}]
+        || [lindex [lindex ${result} 0] 3] \
+            != "+[join ${dovecot2_required_variants} +]" } {
+        append required_variants_message "\
+Dovecot not installed with required variants. Please install:
+
+    sudo port -pN install dovecot2 +[join ${dovecot2_required_variants} +]
+
+"
+        set required_variants_flag false
+    }
+    if {${required_variants_flag} != true} {
+        ui_error ${required_variants_message}
+        # one of these will exit with error if the ports are not installed at all
+        registry_active postfix
+        registry_active dovecot2
+    }
+}
+
+build {}
+
+set certificates_dir ${prefix}/etc/certificates
+set tls_ca_dir ${certificates_dir}/ca.macports
+
+# random 4-word-based passphrase
+proc correct_horse_battery_staple {} {
+    # ignore errors from sf-pwgen if the password is shorter than requested
+    return \
+        [join [exec sh -c "sf-pwgen \
+            --algorithm memorable --count 2 --length 16 \
+            2>/dev/null || true"] -]
+}
+
+destroot {
+    # configuration design: MacPorts file and/or directory templates installed
+    # to *.macports, then edited with local network settings, then in
+    # post-activate copied to actual configuration files if such don't exist 
+
+    # common
+    foreach d [list \
+        var/log/mail \
+        etc/certificates \
+        var/spool/postfix${prefix}/var/run/rspamd \
+        var/run/redis \
+        ] {
+        xinstall -m 0750 -o root -g mail -d ${destroot}${prefix}/${d}
+        destroot.keepdirs-append ${destroot}${prefix}/${d}
+    }
+
+    # postfix
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/postfix
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/postfix/etc/pam.d
+    xinstall -m 0750 -o root -g _postfix -d ${destroot}${prefix}/etc/postfix/sasl
+    xinstall -m 0755 -o root -g _postfix -d ${destroot}${prefix}/var/spool/postfix/etc
+    xinstall -m 0755 -o root -g mail -d \
+        ${destroot}${prefix}/etc/postfix/etc \
+        ${destroot}${prefix}/etc/postfix/etc/certificates \
+        ${destroot}${prefix}/etc/postfix/etc/pam.d
+    # *.macports templates
+    foreach f {
+        main.cf
+        master.cf
+        sasl/passwd
+        } {
+        xinstall -m 0644 \
+            ${filespath}/prefix/etc/postfix/${f} \
+            ${destroot}${prefix}/etc/postfix/${f}.macports
+    }
+    # generic templates
+    foreach f {
+        master.cf.chroot
+        master.cf.nochroot
+        smtp.keytab.README.sh
+        etc/pam.d/smtp
+        } {
+        xinstall -m 0644 \
+            ${filespath}/prefix/etc/postfix/${f} \
+            ${destroot}${prefix}/etc/postfix/${f}
+    }
+    # chroot jail necessities
+    xinstall -m 0644 /etc/hosts ${destroot}${prefix}/var/spool/postfix/etc
+    xinstall -m 0644 /etc/services ${destroot}${prefix}/var/spool/postfix/etc
+
+    # dovecot
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/dovecot
+    # *.macports templates
+    foreach d {
+        conf.d
+        } {
+        xinstall -m 0755 -d \
+            ${destroot}${prefix}/etc/dovecot/${d}.macports
+        destroot.keepdirs-append \
+            ${destroot}${prefix}/etc/dovecot/${d}.macports
+    }
+    foreach d {
+        sieve
+        sieve-before.d
+        sieve-afer.d
+        } {
+        xinstall -m 0755 -g mail -d \
+            ${destroot}${prefix}/etc/dovecot/${d}.macports
+        destroot.keepdirs-append \
+            ${destroot}${prefix}/etc/dovecot/${d}.macports
+    }
+    foreach f {
+        dovecot.conf
+        } {
+        xinstall -m 0644 \
+            ${filespath}/prefix/etc/dovecot/${f} \
+            ${destroot}${prefix}/etc/dovecot/${f}.macports
+    }
+    foreach d {
+        conf.d
+        sieve
+        sieve-before.d
+        sieve-afer.d
+        } {
+        foreach f [glob -nocomplain ${filespath}/prefix/etc/dovecot/${d}/*] {
+            if {[file isfile ${f}]} {
+                xinstall -m 0644 ${f} \
+                    ${destroot}${prefix}/etc/dovecot/${d}.macports/[file tail ${f}]
+            }
+        }
+    }
+
+    # generic templates
+    foreach d {
+        default
+        example-config
+        etc/pam.d
+        } {
+        xinstall -m 0755 -d \
+            ${destroot}${prefix}/etc/dovecot/${d}
+    }
+    foreach f {
+        etc/pam.d/imap
+        imap.keytab.README.sh
+        } {
+        xinstall -m 0644 \
+            ${filespath}/prefix/etc/dovecot/${f} \
+            ${destroot}${prefix}/etc/dovecot/${f}
+    }
+    foreach d {
+        default
+        example-config
+        } {
+        foreach f [glob -nocomplain ${filespath}/prefix/etc/dovecot/${d}/*] {
+            if {[file isfile ${f}]} {
+                xinstall -m 0644 ${f} \
+                    ${destroot}${prefix}/etc/dovecot/${d}/[file tail ${f}]
+            }
+        }
+    }
+
+    # rspamd
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/rspamd
+    foreach d {
+        local.d
+        } {
+        xinstall -m 0755 -d ${destroot}${prefix}/etc/rspamd/${d}.macports
+        foreach f [glob -nocomplain ${filespath}/prefix/etc/rspamd/${d}/*] {
+            if {[file isfile ${f}]} {
+                xinstall -m 0644 ${f} \
+                    ${destroot}${prefix}/etc/rspamd/${d}.macports/[file tail ${f}]
+            }
+        }
+    }
+    foreach f {
+        dkim_paths.map
+        dkim_selectors.map
+        } {
+        xinstall -m 0644 ${filespath}/prefix/etc/rspamd/${f} \
+            ${destroot}${prefix}/etc/rspamd/${f}.macports
+    }
+
+    # redis
+    foreach f {
+        redis.conf
+        } {
+        xinstall -m 0644 ${filespath}/prefix/etc/${f} \
+            ${destroot}${prefix}/etc/${f}.macports
+    }
+
+    # dcc
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/dcc
+    foreach f {
+        dcc_conf
+        } {
+        xinstall -m 0644 ${filespath}/prefix/etc/dcc/${f} \
+            ${destroot}${prefix}/etc/dcc/${f}.macports
+    }
+
+    # logrotate
+    foreach d {
+        logrotate.d
+        } {
+        xinstall -m 0755 -d ${destroot}${prefix}/etc/${d}.macports
+        foreach f [glob -nocomplain ${filespath}/prefix/etc/${d}/*] {
+            if {[file isfile ${f}]} {
+                xinstall -m 0644 ${f} \
+                    ${destroot}${prefix}/etc/${d}.macports/[file tail ${f}]
+            }
+        }
+    }
+    foreach f {
+        logrotate.conf
+        } {
+        xinstall -m 0644 ${filespath}/prefix/etc/${f} \
+            ${destroot}${prefix}/etc/${f}.macports
+    }
+
+    # TLS certificate surrogate
+    xinstall -m 0755 -d ${destroot}${certificates_dir}
+    xinstall -m 0700 -d ${destroot}${certificates_dir}/private
+    destroot.keepdirs-append \
+        ${destroot}${certificates_dir} \
+        ${destroot}${certificates_dir}/private
+    xinstall -m 0755 -d ${destroot}${tls_ca_dir}
+    xinstall -m 0755 -d ${destroot}${tls_ca_dir}/intermediate
+    xinstall -m 0644 \
+        ${filespath}/prefix/etc/certificates/ca/openssl.cnf \
+        ${destroot}${tls_ca_dir}
+    xinstall -m 0644 \
+        ${filespath}/prefix/etc/certificates/ca/intermediate/openssl_intermediate.cnf \
+        ${destroot}${tls_ca_dir}/intermediate
+    if { [variant_isset "initialize"]
+         && [file exists ${tls_ca_dir}]
+        } {
+        delete ${tls_ca_dir}.previous
+        move \
+            ${tls_ca_dir} \
+            ${tls_ca_dir}.previous
+    }
+}
+
+destroot.keepdirs ${destroot}${prefix}/var/log/mail
+
+# Network configuration
+# hard-coded examples
+set host                host
+set domain              domain
+set tld                 tld
+set fullhost            ${host}.${domain}.${tld}
+set domaintld           ${domain}.${tld}
+set HOST                [string toupper ${host}]
+set DOMAIN              [string toupper ${domain}]
+set TLD                 [string toupper ${tld}]
+set FULLHOST            [string toupper ${fullhost}]
+set DOMAINTLD           [string toupper ${domaintld}]
+set relayhost           mymailrelay.tld
+
+post-activate {
+    # use network settings for installed example configuration
+    set fullhost [exec /bin/hostname -f]
+    set host [lindex [split ${fullhost} .] 0]
+    set domaintld [join [lrange [split ${fullhost} .] end-1 end] .]
+    set domain [lindex [split ${domaintld} .] 0]
+    set tld [lindex [split ${domaintld} .] end]
+    set HOST            [string toupper ${host}]
+    set DOMAIN          [string toupper ${domain}]
+    set TLD             [string toupper ${tld}]
+    set FULLHOST        [string toupper ${fullhost}]
+    set DOMAINTLD       [string toupper ${domaintld}]
+    set rspamd_control_password \
+        [correct_horse_battery_staple]
+    set rspamd_control_password_hash \
+        [exec rspamadm pw --password ${rspamd_control_password}]
+
+    ui_msg "Configuring Mail Server with:
+
+        host :                         ${host}
+        domain :                       ${domain}
+        tld :                          ${tld}
+"
+
+    proc install_initial_configuration {f_or_d} {
+        if { [variant_isset "initialize"]
+             && [file exists ${f_or_d}]
+            } {
+            delete ${f_or_d}.previous
+            move \
+                ${f_or_d} \
+                ${f_or_d}.previous
+        }
+        if { [variant_isset "initialize"]
+             || ![file exists ${f_or_d}]
+            } {
+            if { [file isfile ${f_or_d}.macports] } {
+                xinstall -m 0644 \
+                    ${f_or_d}.macports \
+                    ${f_or_d}
+            } elseif { [file isdirectory ${f_or_d}.macports] } {
+                xinstall -m 0755 -d ${f_or_d}
+                foreach f [glob -nocomplain ${f_or_d}.macports/*] {
+                    xinstall -m 0644 ${f} \
+                        ${f_or_d}/[file tail ${f}]
+                }
+            }
+        }
+    }
+
+    # postfix configuration
+    foreach f_or_d {
+        main.cf
+        master.cf
+        sasl/passwd
+        } {
+        install_initial_configuration ${prefix}/etc/postfix/${f_or_d}
+    }
+    # postfix relay host and password surrogate
+    file attributes ${prefix}/etc/postfix/sasl/passwd \
+        -group _postfix -permissions 0640
+
+    # dovecot configuration
+    foreach f_or_d {
+        dovecot.conf
+        conf.d
+        sieve
+        sieve-before.d
+        sieve-afer.d
+        } {
+        install_initial_configuration ${prefix}/etc/dovecot/${f_or_d}
+    }
+    xinstall -m 0770 -g mail -d /private/var/mail/${tld}.${domain}.mail/
+    xinstall -m 0777 -g mail -d /private/var/mail/${tld}.${domain}.mail/attachments/
+
+    # solr configuration
+    if { [variant_isset "initialize"] } {
+        system "sudo -u solr -g solr sh <<SOLR_DELETE_DOVECOT
+            solr8 stop -p 8983 2>/dev/null || true
+            solr8 start -p 8983 2>/dev/null || true
+            solr8 delete -c dovecot 2>/dev/null || true
+            solr8 stop -p 8983 2>/dev/null || true
+SOLR_DELETE_DOVECOT
+"
+    }
+    # create dovecot core; wrap commands in shell to avoid non-zero
+    # return value if it already exists
+    system "sudo -u solr -g solr sh -c \
+        \"solr8 stop -p 8983 2>/dev/null || true\""
+    system "sudo -u solr -g solr sh -c \
+        \"solr8 start -p 8983 2>/dev/null || true\""
+    set solr_version [exec solr8 version]
+    system "sudo -u solr -g solr sh -c \
+        \"solr8 create -c dovecot -n dovecot 2>/dev/null || true\""
+    system "sudo -u solr -g solr sh -c \
+        \"solr8 stop -p 8983 2>/dev/null || true\""
+    if { ![file exists ${prefix}/var/solr/dovecot/conf/] } {
+        ui_error \
+            "solr directory ${prefix}/var/solr/dovecot/conf/ doesn't exist."
+        exit 1
+    }
+    # See Tips at https://wiki.dovecot.org/Plugins/FTS/Solr
+    # wget -O solrconfig.xml https://github.com/dovecot/core/raw/master/doc/solr-config-7.7.0.xml
+    xinstall -b -B.orig -g solr -m 0644 -o solr \
+        ${filespath}/prefix/var/solr/dovecot/conf/solrconfig.xml \
+        ${prefix}/var/solr/dovecot/conf/solrconfig.xml
+    # wget -O schema.xml https://github.com/dovecot/core/raw/master/doc/solr-schema-7.7.0.xml
+    xinstall -b -B.orig -g solr -m 0644 -o solr \
+        ${filespath}/prefix/var/solr/dovecot/conf/schema.xml \
+        ${prefix}/var/solr/dovecot/conf/schema.xml
+    # Note: solr will replace schema.xml with managed-schema
+    if { [file exists ${prefix}/var/solr/dovecot/conf/managed-schema.orig] } {
+        delete ${prefix}/var/solr/dovecot/conf/managed-schema.orig
+    }
+    move ${prefix}/var/solr/dovecot/conf/managed-schema \
+        ${prefix}/var/solr/dovecot/conf/managed-schema.orig
+    # Edit in the Lucene version; see lucene-spec at http://localhost:8983/solr
+    reinplace -E -q \
+        "s|(<luceneMatchVersion>)\[\[:digit:\]\]\\.\[\[:digit:\]\]\\.\[\[:digit:\]\](</luceneMatchVersion>)|\\1${solr_version}\\2|" \
+        ${prefix}/var/solr/dovecot/conf/solrconfig.xml
+    reinplace -E -q \
+        "s|<str name=\"df\">|<str name=\"hdr\">|" \
+        ${prefix}/var/solr/dovecot/conf/solrconfig.xml
+
+    # rspamd configuration
+    if { ![file exists ${prefix}/var/lib/rspamd/dkim] } {
+        xinstall -m 0750 -o _rspamd -g _rspamd -d \
+            ${prefix}/var/lib/rspamd/dkim
+    }
+    foreach f_or_d {
+        local.d
+        dkim_paths.map
+        dkim_selectors.map
+        } {
+        install_initial_configuration ${prefix}/etc/rspamd/${f_or_d}
+    }
+    foreach f [list \
+        ${prefix}/var/lib/rspamd/dkim/${domaintld}.dkim_rsa2048.key \
+        ${prefix}/var/lib/rspamd/dkim/${domaintld}.dkim_ed25519.key
+        ] {
+        if { ![file exists ${f}] } {
+            set f_txt [strsed ${f} {s|\.key$|.txt|}]
+            if { [string match "*rsa2048*" ${f}] } {
+                system -W ${prefix}/var/lib/rspamd/dkim \
+                    "sh -c \"rspamadm dkim_keygen \
+                        -k ${f} -s dkim_rsa2048 -t rsa -b 2048 \
+                        -d ${domaintld} \
+                        1>${f_txt}\""
+            } elseif { [string match "*ed25519*" ${f}] } {
+                system -W ${prefix}/var/lib/rspamd/dkim \
+                    "sh -c \"rspamadm dkim_keygen \
+                        -k ${f} -s dkim_ed25519 -t ed25519 \
+                        -d ${domaintld} \
+                        1>${f_txt}\""
+            }
+            file attributes ${f} \
+                -owner _rspamd -group _rspamd -permissions 0640
+            file attributes ${f_txt} \
+                -owner _rspamd -group _rspamd -permissions 0644
+        }
+    }
+
+    # redis configuration
+    foreach f_or_d {
+        redis.conf
+        } {
+        install_initial_configuration ${prefix}/etc/${f_or_d}
+    }
+
+    # dcc configuration
+    foreach f_or_d {
+        dcc_conf
+        } {
+        install_initial_configuration ${prefix}/etc/dcc/${f_or_d}
+    }
+
+    # logrotate configuration
+    foreach f_or_d {
+        logrotate.conf
+        logrotate.d
+        } {
+        install_initial_configuration ${prefix}/etc/${f_or_d}
+    }
+    if { ![file exists /Library/LaunchDaemons/org.macports.logrotate.plist] } {
+        xinstall -m 0644 \
+            ${prefix}/share/logrotate/org.macports.logrotate.plist.example \
+            /Library/LaunchDaemons/org.macports.logrotate.plist  
+    }
+
+    # TLS certificate surrogate -- certificate authority chain of trust
+    xinstall -m 0700 -d ${tls_ca_dir}/private
+    xinstall -m 0700 -d ${tls_ca_dir}/intermediate/private
+    foreach f { \
+        openssl.cnf \
+        intermediate/openssl_intermediate.cnf \
+        } {
+        reinplace "s|@TLS_CA_DIR@|${tls_ca_dir}|g" ${tls_ca_dir}/${f}
+    }
+    # CA and Intermediate CA encrypted key passphrases in ./private
+    # CA passphrase
+    set tls_ca_passphrase \
+        [correct_horse_battery_staple]
+    set tls_ca_passphrase_fd \
+        [open ${tls_ca_dir}/private/passphrase.txt w 0600]
+    puts ${tls_ca_passphrase_fd} \
+        ${tls_ca_passphrase}
+    close ${tls_ca_passphrase_fd}
+    # Intermediate CA passphrase
+    set tls_intermediate_ca_passphrase \
+        [correct_horse_battery_staple]
+    set tls_intermediate_ca_passphrase_fd \
+        [open ${tls_ca_dir}/intermediate/private/passphrase_intermediate.txt w 0600]
+    puts ${tls_intermediate_ca_passphrase_fd} \
+        ${tls_intermediate_ca_passphrase}
+    close ${tls_intermediate_ca_passphrase_fd}
+    # Client certificate passphrase
+    set tls_client_certificate_passphrase \
+        [correct_horse_battery_staple]
+    set tls_client_certificate_passphrase_fd \
+        [open ${tls_ca_dir}/intermediate/private/passphrase_client.txt w 0600]
+    puts ${tls_client_certificate_passphrase_fd} \
+        ${tls_client_certificate_passphrase}
+    close ${tls_client_certificate_passphrase_fd}
+    # create the chain of trust
+    system -W ${tls_ca_dir} \
+        "sh <<TLS_CERTIFICATE_SURROGATE
+            # CA encrypted key
+            openssl genrsa -aes256 -out private/ca.key.pem \\
+                -passout file:private/passphrase.txt 4096
+            chmod go-r private/ca.key.pem
+
+            # CA certificate
+            openssl req -config openssl.cnf \\
+                -new -x509 -days 1460 -sha256 \\
+                -extensions v3_ca \\
+                -out ca.cert.pem -key private/ca.key.pem \\
+                -passin file:private/passphrase.txt -batch
+
+            # CA certificate openssl self-verification
+            openssl verify -CAfile ca.cert.pem ca.cert.pem
+
+            ##################
+            # Intermediate CA
+            ##################
+
+            # Intermediate CA encrypted key
+            openssl genrsa -aes256 \\
+                -out intermediate/private/intermediate.key.pem \\
+                -passout file:intermediate/private/passphrase_intermediate.txt \\
+                4096
+            chmod go-r intermediate/private/intermediate.key.pem
+
+            # Intermediate CA CSR
+            openssl req -config intermediate/openssl_intermediate.cnf \\
+                -new -sha256 \\
+                -key intermediate/private/intermediate.key.pem \\
+                -passin file:intermediate/private/passphrase_intermediate.txt \\
+                -out intermediate/intermediate.csr.pem -batch
+
+            # CA initialize database
+            echo 01 > serial
+            touch index.txt
+
+            # Intermediate CA certificate
+            openssl ca -config openssl.cnf \\
+                -days 730 -notext -md sha256 -extensions v3_intermediate_ca \\
+                -in intermediate/intermediate.csr.pem \\
+                -out intermediate/intermediate.cert.pem \\
+                -passin file:private/passphrase.txt -batch
+
+            # Intermediate CA chain
+            cat intermediate/intermediate.cert.pem ca.cert.pem \\
+                > intermediate/ca-chain.cert.pem
+
+            # Intermediate CA chain openssl verification
+            openssl verify -CAfile ca.cert.pem intermediate/ca-chain.cert.pem
+
+            ##################
+            # Client Certs
+            ##################
+
+            # Client certificate encrypted key
+            openssl genrsa -aes256 \\
+                -out intermediate/private/${fullhost}.key.pem \\
+                -passout file:intermediate/private/passphrase_client.txt \\
+                4096
+            chmod go-r intermediate/private/${fullhost}.key.pem
+
+            # Client certificate decrypted key
+            openssl rsa -in intermediate/private/${fullhost}.key.pem \\
+                -passin file:intermediate/private/passphrase_client.txt \\
+                -out intermediate/private/${fullhost}.key.pem.decrypted
+            chmod go-r intermediate/private/${fullhost}.key.pem.decrypted
+
+            # Client certificate CSR
+            openssl req -config intermediate/openssl_intermediate.cnf \\
+                -new -sha256 \\
+                -key intermediate/private/${fullhost}.key.pem \\
+                -passin file:intermediate/private/passphrase_client.txt \\
+                -out intermediate/${fullhost}.csr.pem -batch
+
+            # Intermediate CA initialize database
+            echo 01 > intermediate/serial
+            touch intermediate/index.txt
+
+            # Client certificate
+            openssl ca -config intermediate/openssl_intermediate.cnf \\
+                -days 375 -notext -md sha256 \\
+                -in intermediate/${fullhost}.csr.pem \\
+                -out intermediate/${fullhost}.cert.pem \\
+                -passin file:intermediate/private/passphrase_intermediate.txt \\
+                -subj '/CN=${fullhost}' -batch
+
+            # Client chain openssl verification
+            openssl verify -CAfile intermediate/ca-chain.cert.pem \\
+                intermediate/${fullhost}.cert.pem
+
+            # Client chain of trust
+            cat intermediate/${fullhost}.cert.pem \\
+                intermediate/intermediate.cert.pem ca.cert.pem \\
+                > intermediate/${fullhost}.chain.pem
+
+            # Client certificate of the forms
+            # @host@.@domain@.@tld@.@CERTIFICATE_SHA1@.{cert,key,chain}.pem
+TLS_CERTIFICATE_SURROGATE
+"
+    set certificate_sha1 [exec \
+        openssl x509 -noout -fingerprint -sha1 -inform pem \
+            -in ${tls_ca_dir}/intermediate/${fullhost}.cert.pem]
+    set certificate_sha1 [strsed ${certificate_sha1} "s|^SHA1 Fingerprint=||"]
+    set certificate_sha1 [strsed ${certificate_sha1} "g|:||"]
+    xinstall -m 0600 \
+        ${tls_ca_dir}/intermediate/private/${fullhost}.key.pem.decrypted \
+        ${certificates_dir}/private/${fullhost}.${certificate_sha1}.key.pem.decrypted
+    xinstall -m 0600 \
+        ${tls_ca_dir}/intermediate/private/${fullhost}.key.pem \
+        ${certificates_dir}/private/${fullhost}.${certificate_sha1}.key.pem
+    xinstall -m 0600 \
+        ${tls_ca_dir}/intermediate/private/passphrase_client.txt \
+        ${certificates_dir}/private/${fullhost}.${certificate_sha1}.key.passphrase
+    xinstall -m 0644 \
+        ${tls_ca_dir}/intermediate/${fullhost}.cert.pem \
+        ${certificates_dir}/${fullhost}.${certificate_sha1}.cert.pem
+    xinstall -m 0644 \
+        ${tls_ca_dir}/intermediate/${fullhost}.chain.pem \
+        ${certificates_dir}/${fullhost}.${certificate_sha1}.chain.pem
+
+    # configure all template files with local settings
+    foreach d_or_f {
+        postfix
+        dovecot
+        rspamd
+        redis.conf
+        logrotate.conf
+        logrotate.d
+        } {
+        fs-traverse f ${prefix}/etc/${d_or_f} {
+            if { [file isfile ${f}]
+                 && ![string match ".macports" ${f}]
+                 && [string match "text/*" \
+                     [lindex [exec /usr/bin/file --mime-type ${f}] end]]
+            } then {
+                foreach cmd [list \
+                    "s|@PREFIX@|${prefix}|g" \
+                    "s|@host@.@domain@.@tld@|${fullhost}|g" \
+                    "s|@domain@.@tld@|${domaintld}|g" \
+                    "s|@host@|${host}|g" \
+                    "s|@domain@|${domain}|g" \
+                    "s|@tld@|${tld}|g" \
+                    "s|@HOST@.@DOMAIN@.@TLD@|${FULLHOST}|g" \
+                    "s|@DOMAIN@.@TLD@|${DOMAINTLD}|g" \
+                    "s|@HOST@|${HOST}|g" \
+                    "s|@DOMAIN@|${DOMAIN}|g" \
+                    "s|@TLD@|${TLD}|g" \
+                    "s|@RSPAMD_CONTROL_PASSWORD@|${rspamd_control_password}|g" \
+                    "s|@RSPAMD_CONTROL_PASSWORD_HASH@|${rspamd_control_password_hash}|g" \
+                    "s|@CERTIFICATE_SHA1@|${certificate_sha1}|g" \
+                    "s|@RELAYHOST@|${relayhost}|g" \
+                    ] {
+                    reinplace -q ${cmd} ${f}
+                }
+            }
+        }
+    }
+
+    # postfix relay host and password surrogate
+    system -W ${prefix}/etc/postfix/sasl "postmap passwd"
+    # postfix permissions
+    # system -W ${prefix}/etc/postfix "postfix set-permissions"
+
+    # dovecot sieve functions
+    # dovecot must be built with `--with-lucene` for sievec to work here
+    if { ![catch {set result [registry_active dovecot2]}]
+         && [string match "*solr*" [lindex [lindex ${result} 0] 3]] } {
+        foreach d {
+            sieve
+            sieve-before.d
+            sieve-afer.d
+            } {
+            foreach f [glob -nocomplain ${prefix}/etc/dovecot/${d}/*.sieve] {
+                system -W ${prefix}/etc/dovecot/${d} "sievec ${f}"
+            }
+        }
+    } else {
+        ui_msg "dovecot plugin 'fts_lucene' not installed. Please install:
+
+    sudo port -pN install dovecot2 +[join ${dovecot2_required_variants} +]
+
+and rerun `sudo port install ${name}`. Ensure that the sieve scripts
+in ${prefix}/etc/dovecot/sieve*/*.sieve are compiled with sievec.
+"
+    }
+
+    # PAM authentication
+    if ![file exists /etc/pam.d/smtp] {
+        xinstall -m 0644 ${prefix}/etc/postfix/etc/pam.d/smtp /etc/pam.d/
+    }
+    if ![file exists /etc/pam.d/imap] {
+        xinstall -m 0644 ${prefix}/etc/dovecot/etc/pam.d/imap /etc/pam.d/
+    }
+
+    # TLS PFS
+    if ![file exists ${prefix}/var/lib/postfix/dh2048.pem] {
+        system -W ${prefix}/var/lib/postfix "sudo -u _postfix openssl dhparam -out dh2048.pem 2048"
+    }
+    if ![file exists ${prefix}/etc/dovecot/dh2048.pem] {
+        # create a shorter, faster DH parameter file for the default installation
+        system -W ${prefix}/etc/dovecot "openssl dhparam -out dh2048.pem 2048"
+    }
+
+    # mail group membership
+    # dscacheutil -q group -a name mail
+    foreach u {
+        _postfix
+        _dovecot
+        _dovenull
+        _rspamd
+        } {
+        system "dseditgroup -o edit -a ${u} -t user mail"
+    }    
+}
+
+startupitem.create     yes
+
+startupitem.start      "port load dns-server
+\tport load clamav-server
+\tport load apache-solr8
+\tport load redis
+\tport load dcc
+\tport load postfix
+\tport load dovecot2
+\tport load rspamd
+\tport load logrotate"
+
+startupitem.stop      "port unload apache-solr8
+\tport unload dcc
+\tport unload postfix
+\tport unload dovecot2
+\tport unload rspamd"
+
+startupitem.restart      "port reload apache-solr8
+\tport reload redis
+\tport reload dcc
+\tport unload postfix ; \\
+\tsleep 1 ; \\
+\tport load postfix
+\tport unload dovecot2 ; \\
+\tsleep 1 ; \\
+\tport load dovecot2
+\tport reload rspamd"
+
+notes "A mail server is a complex, interdependent set of tools that must
+all be configured correctly to provide secure, reliable email.
+
+Users must reconfigure this installation for their own system, network,
+and security model specifics by editing all necessary files and checking
+file permissions. A subset of these settings are visible in the files:
+
+        port contents mail-server
+        port file mail-server
+
+Full deployment also requires a working DNS configuration on both the LAN
+and the internet, including SPF and DKIM records, trusted TLS certificates,
+port forwarding, possibly a mail replay, and more.
+
+Postfix and dovecot must be installed with these variants:
+        sudo port -pN install postfix +[join ${postfix_required_variants} +]
+        sudo port -pN install dovecot2 +[join ${dovecot2_required_variants} +]
+
+These are the locations and network settings for the default configuration:
+
+    MTA (postfix):
+        ${prefix}/etc/postfix/main.cf
+        ${prefix}/etc/postfix/master.cf
+        ports: smtp/tcp (25), submission/tcp (587)
+
+    MDA (dovecot):
+        ${prefix}/etc/dovecot/dovecot.conf
+        ${prefix}/etc/dovecot/conf.d/*
+        port: imaps/tcp (993)
+
+    FTS (solr):
+        http://localhost:8983/
+
+    Milter (rspamd):
+        ${prefix}/etc/rspamd/rspamd.conf
+        ${prefix}/etc/rspamd/local.d/*
+
+    A default Rspamd controller password and its hash appear in the files:
+        ${prefix}/etc/dovecot/sieve/train-spam.sh
+        ${prefix}/etc/dovecot/sieve/train-ham.sh
+        ${prefix}/etc/rspamd/local.d/worker-controller.inc
+
+    Rspamd controller:
+        http://localhost:11334/
+
+    Spam/Ham training (default behavior):
+        Move/Copy email to the folders Spam_train or Notspam_train.
+
+The configuration also includes a surrogate TLS certificate and DKIM settings
+that must be changed before deployment.
+
+    TLS:
+        ${prefix}/etc/certificates
+
+    DKIM:
+        ${prefix}/var/lib/rspamd/dkim
+
+The port's launch daemon controls launching for each of the dependendent
+services. These may be controlled independently, e.g.
+
+        sudo port load clamav-server
+        sudo port load apache-solr8
+        sudo port load redis
+        sudo port load dcc
+        sudo port load postfix
+        sudo port load dovecot2
+        sudo port load rspamd
+        sudo port load logrotate
+
+    References:
+        * http://www.postfix.org/documentation.html
+        * https://wiki.dovecot.org/
+        * https://www.rspamd.com/doc/index.html
+        * https://www.c0ffee.net/blog/mail-server-guide/
+        * _The Book of Postfix_, by Patrick Koetter and Ralf Hildebrandt
+"
+
+livecheck.type         none

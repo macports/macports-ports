@@ -1,12 +1,12 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem                                        1.0
-PortGroup             github                      1.0
-PortGroup             cxx11                       1.1
-PortGroup             java                        1.0
-PortGroup             compilers                   1.0
-PortGroup             xcodeversion                1.0
-PortGroup             compiler_blacklist_versions 1.0
+PortSystem                                            1.0
+PortGroup             github                          1.0
+PortGroup             cxx11                           1.1
+PortGroup             java                            1.0
+PortGroup             compilers                       1.0
+PortGroup             xcodeversion                    1.0
+PortGroup             compiler_blacklist_versions     1.0
 
 # epoch unfortunately needed to go back to 0.18.0 as 0.19.0
 # built tensorflow badily, giving runtime seg. faults...
@@ -16,18 +16,48 @@ epoch                 1
 # ports
 name                  bazel
 subport               bazel21 { }
+subport               bazel25 { }
 
 if { ${name} eq ${subport} } {
     
     # Main port
-    github.setup      bazelbuild ${name} 0.25.3
-    revision          0
+    github.setup      bazelbuild ${name} 0.28.1
+    revision          1
+
+    conflicts         bazel21 bazel25
+
+    checksums         rmd160  16aa4e271f47a425e39adc9469c670cdacde118b \
+                      sha256  2cea463d611f5255d2f3d41c8de5dcc0961adccb39cf0ac036f07070ba720314 \
+                      size    256641169
+
+    pre-fetch {
+        # https://trac.macports.org/ticket/58518
+        if { ${os.major} < 14 } {
+            ui_error "${name} ${version} requires macOS10.10 or newer."
+            return -code error "incompatible macOS version"
+        }
+    }
     
-    conflicts         bazel21
-    
-    checksums         rmd160  ad2a1e95f08ef94bfe0afdf3c02fa7700e3816d6 \
-                      sha256  23eafd3e439bc71baba9c592b52cb742dabc8640a13b9da1751fec090a2dda99 \
-                      size    275804363
+    # Required java version.
+    java.version      12
+    # JDK port to install if required java not found
+    java.fallback     openjdk12
+
+} elseif { "bazel25" eq ${subport} } {
+
+    # Note this port is the current build dependency for py-tensorflaw, and as such
+    # the version here is *specifically* the one required. Do not update....
+    github.setup      bazelbuild ${name} 0.25.2
+    revision          1
+
+    # livecheck none is correct here, see above.
+    livecheck.type    none
+
+    conflicts         bazel bazel21
+
+    checksums         rmd160  cfff49a4be85f7693ae615c293b13d0a447b80d7 \
+                      sha256  7456032199852c043e6c5b3e4c71dd8089c1158f72ec554e6ec1c77007f0ab51 \
+                      size    275804130
 
     pre-fetch {
         # https://trac.macports.org/ticket/58518
@@ -44,12 +74,13 @@ if { ${name} eq ${subport} } {
     
 } elseif { "bazel21" eq ${subport} } {
     
-    # legacy 0.21.x port
     github.setup      bazelbuild ${name} 0.21.0
-    revision          0
-    
+    revision          1
+
+    # livecheck none is correct here, do not change.
     livecheck.type    none
-    conflicts         bazel
+
+    conflicts         bazel bazel25
     
     checksums         rmd160  db49db0e036eee72451c7c83a92359c8b5b3a7ec \
                       sha256  6ccb831e683179e0cfb351cb11ea297b4db48f9eab987601c038aa0f83037db4 \
@@ -89,11 +120,30 @@ patch.pre_args        -p1
 # Note setting here should be in sync with that in py-tensorflow
 set bazel_min_xcode   9.0
 
-depends_build-append  bin:zip:zip 
+# Even though bazel can build without Xcode, mark use Xcode for now since it fails to
+# build with tracemode on latest master if both CLT and Xcode are available.
+# Better solution is to respect MacPorts environment configure.developer_dir
+if {[info exists use_xcode]} {
+    use_xcode yes
+}
+
+# python versions. Build needs both 'python2' and 'python3'
+set py3ver 3.7
+set py2ver 2.7
 
 depends_lib-append    port:cctools
 
-# Older OS hacks
+depends_build-append  bin:zip:zip \
+                      port:python[string map {. {}} ${py2ver}] \
+                      port:python[string map {. {}} ${py3ver}]
+
+post-extract {
+    # Make dir with selected MP 'python2' and 'python3' and add to PATH during build below
+    file mkdir ${workpath}/bin
+    ln -s ${prefix}/bin/python${py2ver} ${workpath}/bin/python2
+    ln -s ${prefix}/bin/python${py3ver} ${workpath}/bin/python3
+}
+
 if {${os.major} < 16} {
     # https://github.com/bazelbuild/bazel/issues/6188
     depends_build-append  port:unzip
@@ -112,6 +162,18 @@ post-patch {
         # From bazel 0.21.0
         file copy -force ${filespath}/xcode_locator_fixes/Xcode8-xcode_locator.m ${worksrcpath}/tools/osx/xcode_locator.m
     }
+
+    # Patch build files to enforce correct compiler
+    foreach f [ exec find ${worksrcpath} -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
+        foreach cmd {ar nm strip libtool ld objdump} {
+            reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+        }
+        reinplace -q "s|/usr/bin/clang|${configure.cc}|g"       ${f}
+        reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
+        reinplace -q "s| clang | ${configure.cc} |g"            ${f}
+        reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
+        reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
+    }
 }
 
 compiler.blacklist-append {clang < 710}
@@ -126,36 +188,31 @@ if {[vercmp ${xcodeversion} ${bazel_min_xcode}] < 0} {
     build.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
 }
 
-variant bash description {Enable bash completion support} {
+variant bash_completion {
     depends_build-append  bin:bash:bash 
 }
 
 build {
 
-    if {[vercmp ${xcodeversion} ${bazel_min_xcode}] < 0} {
-        # Patch build files to enforce correct compiler
-        foreach f { scripts/bootstrap/compile.sh tools/osx/crosstool/CROSSTOOL.tpl src/test/shell/bazel/testdata/bazel_toolchain_test_data/tools/arm_compiler/CROSSTOOL tools/cpp/unix_cc_configure.bzl tools/cpp/CROSSTOOL third_party/zlib/configure src/test/java/com/google/devtools/build/lib/analysis/mock/MOCK_CROSSTOOL } {
-            if {[file exists ${f}]} {
-                foreach cmd {ar nm strip libtool ld objdump} {
-                    reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
-                }
-                reinplace -q "s|/usr/bin/clang|${configure.cc}|g"       ${f}
-                reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
-                reinplace -q "s| clang | ${configure.cc} |g"            ${f}
-                reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
-                reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
-            }
-        }
+    # bazel cannot be built if gcc is 'port selected'
+    # https://trac.macports.org/ticket/58569
+    # Until it can be figured out how to stop bazel finding and using macports gcc
+    # just detect when this situation arises and error out...
+    if { [file exists ${prefix}/bin/gcc] } {
+        ui_error "${subport} cannot be built with 'port select gcc' active."
+        ui_error "Please run 'sudo port select gcc none' and try again."
+        ui_error "Once the build is complete, you can safely re-select your preferred gcc."
+        return -code error "build error"
     }
 
     # Build bazel
-    system -W ${worksrcpath} "JAVA_HOME=${java.home} VERBOSE=yes BAZEL_WRKDIR=${workpath} ./compile.sh"
+    system -W ${worksrcpath} "PATH=${workpath}/bin:\$PATH JAVA_HOME=${java.home} VERBOSE=yes BAZEL_WRKDIR=${workpath} ./compile.sh"
 
     # Put executable in main working folder
     xinstall -m 755 -W ${worksrcpath}/output ${name} ${worksrcpath}
     
     # Include bash completion support ?
-    if { [variant_isset bash]} {
+    if { [variant_isset bash_completion]} {
 
         # Get ready to build the bash completion script
         file delete -force /var/tmp/_${name}_root
@@ -172,7 +229,7 @@ destroot {
     xinstall -d ${destroot}${bindir}
     xinstall -m 755 -W ${worksrcpath}/output ${name} ${destroot}${bindir}
     # Copy bash and zsh completion scripts to designated area for on-demand usage
-    if { [variant_isset bash]} {
+    if { [variant_isset bash_completion]} {
         set bcompldir ${prefix}/share/bash-completion/completions
         xinstall -d ${destroot}${bcompldir}
         xinstall -m 755 ${worksrcpath}/${name}-bin/scripts/${name}-complete.bash ${destroot}${bcompldir}/${name}
