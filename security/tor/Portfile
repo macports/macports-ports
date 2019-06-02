@@ -5,6 +5,7 @@ PortSystem          1.0
 name                tor
 conflicts           tor-devel
 version             0.3.5.8
+revision            1
 categories          security
 platforms           darwin
 maintainers         nomaintainer
@@ -30,6 +31,10 @@ depends_lib         port:libevent \
                     path:lib/libssl.dylib:openssl \
                     port:zlib
 
+set torUser         _tor
+set torGroup        _tor
+add_users           ${torUser} group=${torGroup} home=${prefix}/var/lib/tor
+
 configure.args      --disable-silent-rules
 
 # https://gitweb.torproject.org/torspec.git/tree/proposals/278-directory-compression-scheme-negotiation.txt
@@ -38,8 +43,56 @@ configure.args-append \
                     --disable-lzma \
                     --disable-zstd
 
+post-destroot {
+    # Create a working torrc file with basic, locked-down permissions
+    xinstall -o ${torUser} -g ${torGroup} -m 0640 ${destroot}${prefix}/etc/tor/torrc.sample ${destroot}${prefix}/etc/tor/torrc
+    system -W ${destroot}${prefix}/etc/tor "cat >> torrc <<LOCAL_TOR_CONFIGURATION
+
+# Local Tor configuration
+SocksPolicy accept 127.0.0.1  # accept only localhost connections
+SocksPolicy reject *
+ExitPolicy reject *:*  # no exits allowed
+DataDirectory ${prefix}/var/lib/tor
+PidFile ${prefix}/var/run/tor/tor.pid
+# tor process uid
+User ${torUser}
+LOCAL_TOR_CONFIGURATION"
+    # save the existing config if it exists
+    if [file exists ${prefix}/etc/tor/torrc] {
+        file rename ${prefix}/etc/tor/torrc \
+                    ${prefix}/etc/tor/torrc.previous
+    }
+}
+
+post-activate {
+    # DataDirectory and PID file Ddirectory permissions
+    system "chown ${torUser}:${torGroup} ${prefix}/var/lib/tor"
+    system "chmod 0750 ${prefix}/var/lib/tor"
+    system "chown ${torUser}:${torGroup} ${prefix}/var/run/tor"
+    system "chmod 0750 ${prefix}/var/run/tor"
+}
+
 test.run            yes
 test.target         check
+
+platform darwin {
+    startupitem.create          yes
+    startupitem.name            Tor
+    startupitem.start           "\[ -f \"${prefix}/etc/tor/torrc\" \] \\"
+    startupitem.start-append    "\t&& ${prefix}/bin/tor \\"
+    startupitem.start-append    "\t\t-f ${prefix}/etc/tor/torrc 2>/dev/null"
+    startupitem.stop            "if \[ -f \"${prefix}/var/run/tor/tor.pid\" \]; then"
+    startupitem.stop-append     "\tkill `cat ${prefix}/var/run/tor/tor.pid` \\"
+    startupitem.stop-append     "\t\t&& rm -f ${prefix}/var/run/tor/tor.pid"
+    startupitem.stop-append     "else"
+    startupitem.stop-append     "\t/usr/bin/killall -SIGUSR1 tor 2>/dev/null"
+    startupitem.stop-append     "fi"
+    startupitem.pidfile         none ${prefix}/var/run/tor/tor.pid
+}
+
+destroot.keepdirs   ${destroot}${prefix}/var/lib/tor \
+                    ${destroot}${prefix}/var/run/tor \
+                    ${destroot}${prefix}/var/log/tor
 
 livecheck.type      regex
 livecheck.url       ${master_sites}?C=M\;O=D
