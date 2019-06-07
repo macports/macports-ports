@@ -42,8 +42,8 @@ proc haskellplatform.setup {package version {register_scripts "yes"}} {
 		post-destroot {
     	    system "cd ${worksrcpath} && ${configure.cmd} Setup register --gen-script"
     	    system "cd ${worksrcpath} && ${configure.cmd} Setup unregister --gen-script"
-    	    xinstall -m 755 -d ${destroot}${prefix}/libexec/${name}
-    	    xinstall -m 755 -W ${worksrcpath} register.sh unregister.sh \
+    	    xinstall -m 0755 -d ${destroot}${prefix}/libexec/${name}
+    	    xinstall -m 0755 -W ${worksrcpath} register.sh unregister.sh \
     	        ${destroot}${prefix}/libexec/${name}
     	}
     	post-activate {

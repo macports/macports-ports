@@ -1,6 +1,6 @@
---- src/common/process.c.orig	Mon Jun 28 17:26:59 2004
-+++ src/common/process.c	Mon Jun 28 17:27:12 2004
-@@ -172,13 +172,13 @@
+--- src/common/process.c.orig	2015-05-20 03:52:15.000000000 -0500
++++ src/common/process.c	2018-10-06 21:06:06.000000000 -0500
+@@ -172,15 +172,15 @@
  
  
  /*
@@ -10,9 +10,12 @@
   * Initialize process variables.
   *
   */
- 
 -void init_process (void)
 +void frotz_init_process (void)
  {
      finished = 0;
- } /* init_process */
+-} /* init_process */
++} /* frotz_init_process */
+ 
+ 
+ /*

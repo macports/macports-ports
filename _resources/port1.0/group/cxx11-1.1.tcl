@@ -17,10 +17,14 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     proc cxx11.add_dependencies {} {
         global os.major os.platform
-        depends_lib-delete port:libgcc
-        depends_lib-append port:libgcc
-        # ensure desired compiler flags are present
+        depends_lib-delete path:lib/libgcc/libgcc_s.1.dylib:libgcc
+        depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
         if {${os.platform} eq "darwin" && ${os.major} < 13} {
+            # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
+            #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
+            # for OS X Mavericks and above, users must select libstdc++, so
+            #    assume they want default ABI compatibility
+            # see https://gcc.gnu.org/onlinedocs/gcc-5.2.0/libstdc++/manual/manual/using_dual_abi.html
             configure.cxxflags-delete    -D_GLIBCXX_USE_CXX11_ABI=0
             configure.cxxflags-append    -D_GLIBCXX_USE_CXX11_ABI=0
             configure.objcxxflags-delete -D_GLIBCXX_USE_CXX11_ABI=0
@@ -35,29 +39,24 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
         pre-configure {
             ui_msg "C++11 ports are compiling with GCC. EXPERIMENTAL."
         }
-        compiler.whitelist  macports-gcc-6
+        compiler.whitelist  macports-gcc-6 macports-gcc-7
         universal_variant   no
     } else {
         compiler.whitelist  macports-clang-5.0
     }
 
     # see https://trac.macports.org/ticket/54766
-    depends_lib-append port:libgcc
+    depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
 
-    if {${os.platform} eq "darwin" && ${os.major} < 13} {
-        # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
-        #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
-        # for OS X Mavericks and above, users must select libstdc++, so
-        #    assume they want default ABI compatibility
-        # see https://gcc.gnu.org/onlinedocs/gcc-5.2.0/libstdc++/manual/manual/using_dual_abi.html
-        configure.cxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
-    }
-
-    compiler.blacklist-append   macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \
+    compiler.blacklist-append  \
+        macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \
         macports-llvm-gcc-4.2 apple-gcc-4.0 apple-gcc-4.2 gcc-3.3 gcc gcc-4.0 llvm-gcc-4.2 \
         macports-dragonegg-3.3 macports-dragonegg-3.4
+
 } else {
+
     # GCC compilers cannot use libc++
     # We do not know what "cc" is, so blacklist it as well.
     compiler.blacklist-append   *gcc* {clang < 500} cc
+
 }

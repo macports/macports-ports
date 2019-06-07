@@ -65,6 +65,6 @@ proc use_oasis_doc {option} {
 }
 
 pre-destroot {
-    xinstall -m 755 -d ${ocamlfind_destdir}/stublibs
+    xinstall -m 0755 -d ${ocamlfind_destdir}/stublibs
 }
 

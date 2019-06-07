@@ -39,7 +39,11 @@ proc universal_setup {args} {
     } else {
         ui_debug "adding universal variant via PortGroup muniversal"
         uplevel "PortGroup muniversal 1.0"
+        if {[vercmp [macports_version] 2.5.3] <= 0} {
         uplevel "default universal_archs_supported {\"i386 x86_64\"}"
+        } else {
+        uplevel "default universal_archs_supported {i386 x86_64}"
+        }
     }
 }
 
@@ -87,8 +91,18 @@ port::register_callback octave.add_dependencies
 configure.env-append OMP_NUM_THREADS=1
 # do not force all Portfiles to switch from configure.env to configure.env-append
 proc octave.add_env {} {
+    global configure.cxx
+
     configure.env-delete OMP_NUM_THREADS=1
     configure.env-append OMP_NUM_THREADS=1
+
+    # Octave defaults to compilers used to build it
+    # see https://trac.macports.org/ticket/57419
+    configure.env-delete LD_CXX=${configure.cxx}
+    configure.env-append LD_CXX=${configure.cxx}
+
+    configure.env-delete DL_LD=${configure.cxx}
+    configure.env-append DL_LD=${configure.cxx}
 }
 port::register_callback octave.add_env
 

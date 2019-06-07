@@ -1,0 +1,140 @@
+Prevent Panic causing Panic, and children removing sockets
+
+* Set eff_uid/eff_gid after setuid/setgid to prevent nested Panic in
+  MakeClientSocket which calls xseteuid(eff_uid=0) - results in nested
+  Panic and SendErrorMsg not getting sent.
+* Set ServerSocket to -1 after fork so that child Panic doesn't
+  remove socket in eexit.
+* Fix descriptor leak if fork fails
+
+Fixes screen bug: https://savannah.gnu.org/bugs/?55511
+
+Signed-off-by: Scott Shambarger <devel@shambarger.net>
+
+--- attacher.c
++++ attacher.c
+@@ -55,6 +55,8 @@ static sigret_t AttacherChld __P(SIGPROTOARG);
+ static sigret_t AttachSigCont __P(SIGPROTOARG);
+ 
+ extern int real_uid, real_gid, eff_uid, eff_gid;
++extern int ServerSocket;
++extern struct display *displays;
+ extern char *SockName, *SockMatch, SockPath[];
+ extern char HostName[];
+ extern struct passwd *ppp;
+@@ -307,9 +309,9 @@ int how;
+       xseteuid(real_uid); /* multi_uid, allow backend to send signals */
+     }
+ #endif
++  eff_uid = real_uid;
+   if (setgid(real_gid))
+     Panic(errno, "setgid");
+-  eff_uid = real_uid;
+   eff_gid = real_gid;
+ 
+   debug2("Attach: uid %d euid %d\n", (int)getuid(), (int)geteuid());
+@@ -737,6 +739,8 @@ LockTerminal()
+       if ((pid = fork()) == 0)
+         {
+           /* Child */
++          displays = 0;		/* beware of Panic() */
++          ServerSocket = -1;
+           if (setgid(real_gid))
+             Panic(errno, "setgid");
+ #ifdef MULTIUSER
+--- display.c
++++ display.c
+@@ -102,6 +102,7 @@ extern struct winsize glwz;
+ #endif
+ extern char **NewEnv;
+ extern int real_uid, real_gid;
++extern int ServerSocket, eff_uid, eff_gid;
+ #endif
+ 
+ /*
+@@ -3997,11 +3998,14 @@ char **cmdv;
+       return;
+     case 0:
+       displays = 0;
++      ServerSocket = -1;
+ #ifdef SIGPIPE
+       signal(SIGPIPE, SIG_DFL);
+ #endif
+       if (setgid(real_gid) || setuid(real_uid))
+         Panic(errno, "setuid/setgid");
++      eff_uid = real_uid;
++      eff_gid = real_gid;
+       brktty(D_userfd);
+       freetty();
+ #ifdef DEBUG
+--- fileio.c
++++ fileio.c
+@@ -42,6 +42,7 @@
+ extern struct display *display, *displays;
+ extern struct win *fore;
+ extern struct layer *flayer;
++extern int ServerSocket;
+ extern int real_uid, eff_uid;
+ extern int real_gid, eff_gid;
+ extern char *extra_incap, *extra_outcap;
+@@ -704,7 +705,7 @@ int printpipe(struct win *p, char *cmd) {
+     case 0:
+       display = p->w_pdisplay;
+       displays = 0;
+-
++      ServerSocket = -1;
+ #ifdef DEBUG
+       if (dfp && dfp != stderr)
+         fclose(dfp);
+@@ -714,6 +715,8 @@ int printpipe(struct win *p, char *cmd) {
+       closeallfiles(0);
+       if (setgid(real_gid) || setuid(real_uid))
+         Panic(errno, "printpipe setuid");
++      eff_uid = real_uid;
++      eff_gid = real_gid;
+ 
+ #ifdef SIGPIPE
+       signal(SIGPIPE, SIG_DFL);
+@@ -741,6 +744,7 @@ int readpipe(char **cmdv) {
+     return -1;
+   case 0:
+     displays = 0;
++    ServerSocket = -1;
+ #ifdef DEBUG
+     if (dfp && dfp != stderr)
+       fclose(dfp);
+@@ -756,6 +760,8 @@ int readpipe(char **cmdv) {
+       close(1);
+       Panic(errno, "setuid/setgid");
+     }
++    eff_uid = real_uid;
++    eff_gid = real_gid;
+ #ifdef SIGPIPE
+     signal(SIGPIPE, SIG_DFL);
+ #endif
+--- window.c
++++ window.c
+@@ -55,6 +55,7 @@ extern char *screenlogfile;
+ extern char HostName[];
+ extern int TtyMode;
+ extern int SilenceWait;
++extern int ServerSocket;
+ extern int real_uid, real_gid, eff_uid, eff_gid;
+ extern char Termcap[];
+ extern char **NewEnv;
+@@ -1253,6 +1254,7 @@ char **args, *ttyn;
+     {
+     case -1:
+       Msg(errno, "fork");
++      close(slave);
+       break;
+     case 0:
+       signal(SIGHUP, SIG_DFL);
+@@ -1271,6 +1273,7 @@ char **args, *ttyn;
+ #endif
+ 
+       displays = 0;		/* beware of Panic() */
++      ServerSocket = -1;
+       if (setgid(real_gid) || setuid(real_uid))
+ 	Panic(errno, "Setuid/gid");
+       eff_uid = real_uid;

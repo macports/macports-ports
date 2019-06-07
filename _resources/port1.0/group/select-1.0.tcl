@@ -27,8 +27,8 @@ proc select::install {group file {name ""}} {
 
     set selectFile ${destroot}${prefix}/etc/select/$group/$name
 
-    xinstall -m 755 -d [file dirname $selectFile]
-    xinstall -m 644 $file $selectFile
+    xinstall -m 0755 -d [file dirname $selectFile]
+    xinstall -m 0644 $file $selectFile
 
     reinplace -q s|\${prefix}|${prefix}|g $selectFile
     reinplace -q s|\${frameworks_dir}|${frameworks_dir}|g $selectFile

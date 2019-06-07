@@ -23,7 +23,7 @@ default github.master_sites {${github.homepage}/tarball/${git.branch}}
 default master_sites {${github.master_sites}}
 
 options github.tarball_from
-default github.tarball_from tags
+default github.tarball_from tarball
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
     global github.author github.project github.master_sites git.branch github.homepage
@@ -37,8 +37,14 @@ proc handle_tarball_from {option action args} {
             releases {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
-            tags {
+            archive {
+                github.master_sites ${github.homepage}/archive/${git.branch}
+            }
+            tarball {
                 github.master_sites ${github.homepage}/tarball/${git.branch}
+            }
+            tags {
+                return -code error "the value \"tags\" is deprecated for github.tarball_from. Please use \"tarball\" instead."
             }
             default {
                 return -code error "invalid value \"${args}\" for github.tarball_from"
@@ -95,7 +101,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
                 move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${distname}
             } else {
                 # tarball is not "${github.author}-${github.project}-*"
-                ui_error "\n\ngithub PortGroup: Error: \${worksrcpath} does not exist after extracting distfiles. This might indicate that the repository name is different than set in the Portfile due to a rename at GitHub. Please examine the extracted directory in ${workdir} and try to correct the Portfile by either changing the repository name or add the worksrcdir option with the correct directory name.\n"
+                ui_error "\n\ngithub PortGroup: Error: \${worksrcpath} does not exist after extracting distfiles. This might indicate that the author or project is different than set in the Portfile due to a rename at GitHub. Please examine the extracted directory in ${workpath} and try to correct the Portfile by either changing the author or project or adding the worksrcdir option with the correct directory name.\n"
                 return -code error "Unexpected github tarball extract."
             }
         }

@@ -50,6 +50,7 @@ default configure.args {[list \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
                     -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib \
+                    -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \

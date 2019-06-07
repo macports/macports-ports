@@ -2,6 +2,16 @@
 
 PortSystem          1.0
 PortGroup           muniversal 1.0
+PortGroup           xcodeversion 1.0
+
+# use legacy support if OSX <= 10.11 && Xcode < 8.
+# Xcode 8 provides "clock_gettime" while Xcode 7 doesn't.
+# legacysupport is used for 10.11 just for this specific feature.
+if {${os.platform} eq "darwin" && \
+    ${os.major} <= 15 && \
+    [vercmp ${xcodeversion} 8.0] < 0} {
+    PortGroup legacysupport 1.0
+}
 
 # devel requires C++11 as of 2017-08-21
 # https://gitlab.kitware.com/cmake/cmake/commit/c1f3eb9f2d628b2911aa17f65012fab0befc4b87
@@ -31,16 +41,17 @@ dist_subdir         cmake
 
 subport cmake-devel {}
 
-set branch          3.12
+set branch          3.14
 
 if {${subport} eq ${name}} {
 
     # release
 
-    version         ${branch}.2
-    checksums       rmd160 cc9e81815a6edfbd5e08d6a4f25bcf3488009853 \
-                    sha256 0f97485799e51a7070cc11494f3e02349b0fc3a24cc12b082e737bf67a0581a4 \
-                    size   8388114
+    version         ${branch}.5
+    checksums       rmd160 dd8c7c0aa7a64584453eec13fbc292c4d7edfd7c \
+                    sha256 505ae49ebe3c63c595fa5f814975d8b72848447ee13b6613b0f8b96ebda18c06 \
+                    size   8854929
+    revision        0
 
     master_sites    ${homepage}/files/v${branch}/
     conflicts       cmake-devel
@@ -53,8 +64,9 @@ if {${subport} eq ${name}} {
         patch-Modules-noArchCheck.release.diff \
         patch-CMakeFindFrameworks.cmake.release.diff \
         patch-Source_CMakeVersionCompute.cmake.release.diff \
-        patch-Source_CMakeLists.txt.release.diff \
-        patch-Source_Modules_FindLibUV.cmake.release.diff
+        patch-Source_Modules_FindLibUV.cmake.release.diff \
+        patch-fix_cxx14_17_checks.release.diff \
+        patch-fix-system-prefix-path.release.diff
 
     livecheck.type  regex
     livecheck.regex ${name}-(\[0-9.\]+)${extract.suffix}
@@ -64,19 +76,17 @@ if {${subport} eq ${name}} {
 
     # devel
 
-    version         20180917
-    set commit      e7fcd3b8ebe0889e47164fd5a93138570e638228
-    checksums       rmd160 33b5ff531df02552168b505f4fd726923065c069 \
-                    sha256 c9e302462b9c407cbc393aed37f934ecf1c97ae0e7dcb52b50f2b047ca36d29b \
-                    size   6440571
+    set commit      7f4a1d83790cad143dc8400cc78186dbef88e23d
+    version         20190601-[string range ${commit} 0 7]
+    checksums       rmd160 f10d2b43e6056c47dc725db67b08b65f8d2fc5ca \
+                    sha256 06a75a1cb9e285f221dac31ecb637fb3f04e1bdb48e86cce4b90802eaee80ede \
+                    size   6979550
+    revision        0
 
     use_bzip2       yes
     master_sites    https://gitlab.kitware.com/cmake/cmake/repository/archive${extract.suffix}?ref=${commit}&
     distname        ${name}-${commit}
-
-    post-extract {
-        move ${workpath}/${name}-${commit}-${commit} ${workpath}/${name}-${commit}
-    }
+    worksrcdir      ${name}-${commit}-${commit}
 
     conflicts       cmake
     long_description ${base_long_description} \
@@ -87,8 +97,9 @@ if {${subport} eq ${name}} {
         patch-Modules-noArchCheck.devel.diff \
         patch-CMakeFindFrameworks.cmake.devel.diff \
         patch-Source_CMakeVersionCompute.cmake.devel.diff \
-        patch-Source_CMakeLists.txt.devel.diff \
-        patch-Source_Modules_FindLibUV.cmake.devel.diff
+        patch-Source_Modules_FindLibUV.cmake.devel.diff \
+        patch-fix_cxx14_17_checks.devel.diff \
+        patch-fix-system-prefix-path.devel.diff
 
     livecheck.type  regex
     livecheck.regex data-clipboard-text=\"(\[0-9a-g\]+)\"
@@ -124,12 +135,12 @@ compiler.blacklist-append macports-clang-3.9 macports-clang-4.0 macports-clang-5
 
 platform darwin {
     configure.env-append \
-                    CMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}"
+                    CMAKE_OSX_DEPLOYMENT_TARGET=${macosx_deployment_target}
 
     if {${configure.sdkroot} != ""} {
-        configure.env-append CMAKE_OSX_SYSROOT="${configure.sdkroot}"
+        configure.env-append CMAKE_OSX_SYSROOT=${configure.sdkroot}
     } else {
-        configure.env-append CMAKE_OSX_SYSROOT="/"
+        configure.env-append CMAKE_OSX_SYSROOT=/
     }
 
     if {${os.arch} eq "i386" && ${os.major} <= 9} {
@@ -161,19 +172,9 @@ configure.post_args
 # CMake's configure script doesn't recognize `--host`.
 array set merger_host {i386 {} x86_64 {} ppc {} ppc64 {}}
 
-# Tiger has issues with system libraries;
-# just use the ones internal to cmake instead.
 platform darwin 8 {
-    configure.args-delete --system-libs
-    configure.args-append --no-system-libs
-    depends_lib-delete \
-        path:lib/pkgconfig/libuv.pc:libuv \
-        port:curl \
-        port:expat \
-        port:zlib \
-        port:bzip2 \
-        port:libarchive \
-        port:ncurses
+    patchfiles-append patch-cmake-3-12-libuv-tiger.diff
+    configure.ldflags-append -Wl,-framework -Wl,ApplicationServices
 }
 
 # Leopard's Rosetta has some difficulties configuring the ppc slice
@@ -194,23 +195,10 @@ post-patch {
     copy ${filespath}/macports.cmake ${worksrcpath}
 
     # patch PREFIX
-    reinplace "s|__PREFIX__|${prefix}|g" ${worksrcpath}/macports.cmake
-    reinplace "s|__PREFIX__|${prefix}|g" ${worksrcpath}/Modules/CMakeFindFrameworks.cmake
-
-    # patch Python Version; doing this is OK even when +docs is not
-    # used, because the PYTHON_EXECUTABLE is used only when building
-    # docs -- so, when not building docs its setting makes no difference.
-
-    if {[variant_isset python27]} {
-        set PYTHON_VERSION_WITH_DOT "2.7"
-    } elseif {[variant_isset python34]} {
-        set PYTHON_VERSION_WITH_DOT "3.4"
-    } elseif {[variant_isset python35]} {
-        set PYTHON_VERSION_WITH_DOT "3.5"
-    } else {
-        set PYTHON_VERSION_WITH_DOT "3.6"
-    }
-    reinplace "s|__PYTHON_VERSION_WITH_DOT__|${PYTHON_VERSION_WITH_DOT}|g" ${worksrcpath}/macports.cmake
+    reinplace "s|__PREFIX__|${prefix}|g" \
+        ${worksrcpath}/macports.cmake \
+        ${worksrcpath}/Modules/CMakeFindFrameworks.cmake \
+        ${worksrcpath}/Modules/Platform/Darwin.cmake
 }
 
 post-destroot {
@@ -272,53 +260,83 @@ if {[variant_isset gui]} {
 }
 
 variant docs description {Build documentation: HTML and manpages} {
+
     configure.args-append \
         --mandir=share/man \
         --sphinx-man \
-        --sphinx-html
+        --sphinx-html \
+        --sphinx-build=${prefix}/bin/sphinx-build-${PYTHON_VERSION_WITH_DOT}
+
+    depends_build-append \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinx
+
+    # these are required for Py3X, but not Py27
+    if {${PYTHON_VERSION_NO_DOT} ne "27"} {
+        depends_build-append \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-applehelp \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-devhelp \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-htmlhelp \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-jsmath \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-qthelp \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-serializinghtml \
+            port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-websupport
+    }
+
 }
 
 variant python27 conflicts python34 python35 python36 requires docs \
-    description {Build documentation using Sphinx from Python 2.7} {
-    depends_build-append port:py27-sphinx
-    configure.args-append \
-        --sphinx-build=${prefix}/bin/sphinx-build-2.7
-}
+    description {Build documentation using Sphinx from Python 2.7} {}
 
-variant python34 conflicts python27 python35 python36 requires docs \
-    description {Build documentation using Sphinx from Python 3.4} {
-    depends_build-append port:py34-sphinx
-    configure.args-append \
-        --sphinx-build=${prefix}/bin/sphinx-build-3.4
-}
+variant python34 conflicts python27 python35 python36 python37 requires docs \
+    description {Build documentation using Sphinx from Python 3.4} {}
 
-variant python35 conflicts python27 python34 python36 requires docs \
-    description {Build documentation using Sphinx from Python 3.5} {
-    depends_build-append port:py35-sphinx
-    configure.args-append \
-        --sphinx-build=${prefix}/bin/sphinx-build-3.5
-}
+variant python35 conflicts python27 python34 python36 python37 requires docs \
+    description {Build documentation using Sphinx from Python 3.5} {}
 
-variant python36 conflicts python27 python34 python35 requires docs \
-    description {Build documentation using Sphinx from Python 3.6} {
-    depends_build-append port:py36-sphinx
-    configure.args-append \
-        --sphinx-build=${prefix}/bin/sphinx-build-3.6
-}
+variant python36 conflicts python27 python34 python35 python37 requires docs \
+    description {Build documentation using Sphinx from Python 3.6} {}
+
+variant python37 conflicts python27 python34 python35 python36 requires docs \
+    description {Build documentation using Sphinx from Python 3.7} {}
 
 if {[variant_isset docs]} {
+
+    # default Python is 2.7
     if {![variant_isset python27] &&
         ![variant_isset python34] &&
         ![variant_isset python35] &&
-        ![variant_isset python36]} {
+        ![variant_isset python36] &&
+        ![variant_isset python37]} {
         default_variants +python27
     }
 
+    # make sure -python27 is not specified alone
     if {![variant_isset python27] &&
         ![variant_isset python34] &&
         ![variant_isset python35] &&
-        ![variant_isset python36]} {
-        ui_error "\n\nYou must select either the +python27, +python34, +python35, or +python36 variant when using variant +docs.\n"
+        ![variant_isset python36] &&
+        ![variant_isset python37]} {
+        ui_error "\n\nYou must select either the +python27, +python34, +python35, +python36, or +python37 variant when using variant +docs.\n"
         return -code error "Invalid variant selection"
     }
+
+    # determine Python-related variables
+    if {[variant_isset python27]} {
+        set PYTHON_VERSION_WITH_DOT "2.7"
+    } elseif {[variant_isset python34]} {
+        set PYTHON_VERSION_WITH_DOT "3.4"
+    } elseif {[variant_isset python35]} {
+        set PYTHON_VERSION_WITH_DOT "3.5"
+    } elseif {[variant_isset python36]} {
+        set PYTHON_VERSION_WITH_DOT "3.6"
+    } else {
+        set PYTHON_VERSION_WITH_DOT "3.7"
+    }
+    set PYTHON_VERSION_NO_DOT [join [split ${PYTHON_VERSION_WITH_DOT} "."] ""]
+
+    post-patch {
+        # patch Python Version
+        reinplace "s|__PYTHON_VERSION_WITH_DOT__|${PYTHON_VERSION_WITH_DOT}|g" ${worksrcpath}/macports.cmake
+    }
+    
 }

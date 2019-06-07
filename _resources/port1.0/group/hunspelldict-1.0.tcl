@@ -51,7 +51,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
 
             set dictdir ${prefix}/share/hunspell
             xinstall -d ${destroot}${dictdir}
-            xinstall -m 644 -W ${worksrcpath} ${locale}.aff ${locale}.dic \
+            xinstall -m 0644 -W ${worksrcpath} ${locale}.aff ${locale}.dic \
                 ${destroot}${dictdir}
         }
 
