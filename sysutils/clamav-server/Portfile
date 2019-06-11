@@ -3,115 +3,321 @@
 PortSystem              1.0
 
 name                    clamav-server
-version                 0.98.4
-homepage                http://www.clamav.net/
+version                 0.101.2
+homepage                https://www.clamav.net/
 categories              sysutils
 platforms               darwin
 supported_archs         noarch
-maintainers             nomaintainer
-license                 BSD
+maintainers             {ieee.org:s.t.smith @essandess} openmaintainer
+license                 LGPL-3 BSD
 distfiles
 
-description \
-    launchdaemons for clamav antivirus software
+description             Clamav antivirus software macOS server configuration.
 
-long_description \
-    Clam AntiVirus is a GPL anti-virus toolkit for UNIX. The \
-    main purpose of this software is the integration with mail \
-    servers (attachment scanning). This port installs launchdaemons \
-    that can be used to manage clamav.
+long_description ${description} \
+    A macOS clamAV configuration with launchdaemons for clamd, freshclam, \
+    Scan-On-Demand, Scan-on-Schedule, Scan-On-Access of specied directories, \
+    and a Finder.app contextual service for Scan-On-Demand of selected items.
 
 depends_run \
     port:clamav
 
-if {${os.platform} eq "darwin" && ${os.major} > 8} {
-    set clamavuser      _clamav
-} else {
-    set clamavuser      clamav
-}
+set clamavuser          _clamav
 add_users ${clamavuser} group=${clamavuser} realname=clamav
 
 use_configure           no
 
 build {}
 
+variant scan_schedule_access \
+    description {On-Schedule and On-Access scanning launchdaemons} {}
+
+variant sanesecurity \
+    description {Use signatures from https://sanesecurity.com/} {}
+
+default_variants +scan_schedule_access +sanesecurity
+
 set dataPath ${prefix}/var/clamav
 set logPath ${prefix}/var/log/clamav
 set runPath ${prefix}/var/run/clamav
+set sharePath ${prefix}/share/clamav
+
+startupitem.create     yes
+startupitems \
+    name               clamd \
+    executable         ${prefix}/sbin/clamd
+
+startupitems-append \
+    name               freshclam \
+    executable         ${prefix}/bin/freshclam
+
+if {[variant_isset "scan_schedule_access"]} {
+    depends_run-append \
+        port:fswatch \
+        port:pcre
+
+    startupitems-append \
+        name            ClamavScanSchedule \
+        init            "pidfile=\"\${prefix}/var/run/clamav/ClamavScanSchedule.pid\"
+
+CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS_DEFAULT=(\"/\")
+CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS=(\"\${CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS\[@\]:-\${CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS_DEFAULT\[@\]}}\")
+CLAMAV_SERVER_QUARANTINE=\${CLAMAV_SERVER_QUARANTINE:-\${prefix%/*}/Quarantine}
+CLAMAV_SERVER_SCAN_SCHEDULE_LOG=\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG:-\${prefix}/var/log/clamav/ClamavScanSchedule.log}
+DATE=(/bin/date \"+%FT%T\")" \
+        start           "\${prefix}/bin/clamdscan --reload \\
+\t&& ( /bin/test -d \"\${CLAMAV_SERVER_QUARANTINE}\" || /bin/mkdir -p \"\${CLAMAV_SERVER_QUARANTINE}\" ) \\
+\t&& ( /bin/test -d \"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG%/*}\" || /bin/mkdir -p \"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG%/*}\" ) \\
+\t&& echo \"Launchdaemon org.macports.ClamavScanSchedule started on `\${DATE\[@\]}` …\" >> \"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG}\" \\
+\t&& ( \${prefix}/bin/clamdscan --multiscan --quiet --fdpass \\
+\t\t--move=\"\${CLAMAV_SERVER_QUARANTINE}\" --log=\"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG}\" \"\${CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS\[@\]}\" \\
+\t\t&& echo \"Launchdaemon org.macports.ClamavScanSchedule completed on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG}\" \\
+\t\t|| echo \"Launchdaemon org.macports.ClamavScanSchedule exited with error code \$? on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_SCHEDULE_LOG}\" )" \
+        pidfile         none \
+        stop            "if \[ -f \"\${prefix}/var/run/clamav/ClamavScanSchedule.pid\" \]; then
+\t\t/bin/kill `/bin/cat \"\${prefix}/var/run/clamav/ClamavScanSchedule.pid\"` \\
+\t\t\t&& /bin/rm -f \"\${prefix}/var/run/clamav/ClamavScanSchedule.pid\"
+else
+\t\t/usr/bin/killall -SIGUSR1 clamdscan 2>/dev/null
+\tfi"
+
+    startupitems-append \
+        name            ClamavScanOnAccess \
+        init            "pidfile=\"\${prefix}/var/run/clamav/ClamavScanOnAccess.pid\"
+
+# Default: use clamdscan if clamd is running; otherwise:
+# clamscan with an explicit configuration imported from \${prefix}/etc/clamd.conf
+CLAMD_CONF=\"\${prefix}/etc/clamd.conf\"
+IFS=\$'\n'
+CROSS_FS=(`/usr/bin/egrep -e '^\[\[:space:\]\]*CrossFilesystems\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*CrossFilesystems\[\[:space:\]\]+/--cross-fs=/'`)
+FOLLOW_DIR_SYMLINKS=(`/usr/bin/egrep -e '^\[\[:space:\]\]*FollowDirectorySymlinks\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*FollowDirectorySymlinks\[\[:space:\]\]+/--follow-dir-symlinks=/'`)
+FOLLOW_FILE_SYMLINKS=(`/usr/bin/egrep -e '^\[\[:space:\]\]*FollowFileSymlinks\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*FollowFileSymlinks\[\[:space:\]\]+/--follow-file-symlinks=/'`)
+EXCLUDE_PATH=(`/usr/bin/egrep -e '^\[\[:space:\]\]*ExcludePath\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*ExcludePath\[\[:space:\]\]+/--exclude=/'`)
+DETECT_PUA=(`/usr/bin/egrep -e '^\[\[:space:\]\]*DetectPUA\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*DetectPUA\[\[:space:\]\]+/--detect-pua=/'`)
+EXCLUDE_PUA=(`/usr/bin/egrep -e '^\[\[:space:\]\]*ExcludePUA\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*ExcludePUA\[\[:space:\]\]+/--exclude-pua=/'`)
+INCLUDE_PUA=(`/usr/bin/egrep -e '^\[\[:space:\]\]*IncludePUA\\b' \"\${CLAMD_CONF}\" | /usr/bin/sed -E -e 's/^\[\[:space:\]\]*IncludePUA\[\[:space:\]\]+/--include-pua=/'`)
+
+CLAMAV_SERVER_QUARANTINE=\${CLAMAV_SERVER_QUARANTINE:-\${prefix%/*}/Quarantine}
+CLAMAV_SERVER_SCAN_ONACCESS_LOG=\${CLAMAV_SERVER_SCAN_ONACCESS_LOG:-\${prefix}/var/log/clamav/ClamavScanOnAccess.log}
+DATE=(/bin/date \"+%FT%T\")" \
+        start           "IFS=\$'\\n'
+\tUSER_HOMEDIRS=(`/usr/bin/dscacheutil -q user | /usr/bin/grep -A 3 -B 2 -E -e '^uid: (?:\\d*5\\d\\d|\\d{4,})' | \${prefix}/bin/pcregrep -B 5 -e '^shell: (?!/usr/bin/false).*' | \${prefix}/bin/pcregrep -A 5 -e '^name: (?!_).*' | /usr/bin/grep -e '^dir: .*/Users/' | /usr/bin/sed -e 's/^dir: //'`)
+\tUSER_DOWNLOADSDIRS=(`for d in \${USER_HOMEDIRS\[@\]}; do echo \"\${d}/Downloads\" ; done`)
+\tUSER_DESKTOPDIRS=(`for d in \${USER_HOMEDIRS\[@\]}; do echo \"\${d}/Desktop\" ; done`)
+
+\t\[ -d \"\${CLAMAV_SERVER_QUARANTINE}\" \] || /bin/mkdir -p \"\${CLAMAV_SERVER_QUARANTINE}\"
+\t\[ -d \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG%/*}\" \] || /bin/mkdir -p \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG%/*}\"
+\t( echo \"Launchdaemon org.macports.ClamavScanOnAccess started on `\${DATE\[@\]}` …\" ; echo \"Watched directories:\" ) >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\"
+\t( for d in \"\${USER_DOWNLOADSDIRS\[@\]}\"; do echo \"\\t\${d}\"; done ) >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\"
+\t( for d in \"\${USER_DESKTOPDIRS\[@\]}\"; do echo \"\\t\${d}\"; done ) >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\"
+\techo \$\$ > \"\${pidfile}\"
+\t\${prefix}/bin/fswatch -0 -l 3 -e '/.DS_Store\$' -r \"\${USER_DOWNLOADSDIRS\[@\]}\" \"\${USER_DESKTOPDIRS\[@\]}\" \\
+\t\t| while read -d \"\" event ; \\
+\t\t  do \\
+\t\t\techo \"Scanning \${event} on `\${DATE\[@\]}`…\" >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" ; \\
+\t\t\t! \[ \"`/usr/bin/pgrep -u root clamd`\" == \"\" \] \\
+\t\t\t  && ( /usr/bin/nice -n 5 \"\${prefix}/bin/clamdscan\" --multiscan --quiet --fdpass --move=\"\${CLAMAV_SERVER_QUARANTINE}\" --log=\"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" \"\${event}\" \\
+\t\t\t\t&& echo \"Done clamdscan \${event} on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" \\
+\t\t\t\t\t|| echo \"clamdscan exited with error code \$? on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" ) \\
+\t\t\t  || ( /usr/bin/nice -n 5 \"\${prefix}/bin/clamscan\" --infected --quiet --move=\"\${CLAMAV_SERVER_QUARANTINE}\" --log=\"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" \\
+\t\t\t\t\t\"\${CROSS_FS\[@\]}\" \"\${FOLLOW_DIR_SYMLINKS\[@\]}\" \"\${FOLLOW_FILE_SYMLINKS\[@\]}\" \"\${EXCLUDE_PATH\[@\]}\" \"\${DETECT_PUA\[@\]}\" \"\${EXCLUDE_PUA\[@\]}\" \"\${INCLUDE_PUA\[@\]}\" \"\${event}\" \\
+\t\t\t\t&& echo \"Done clamscan \${event} on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" \\
+\t\t\t\t\t|| echo \"clamscan exited with error code \$? on `\${DATE\[@\]}`.\" >> \"\${CLAMAV_SERVER_SCAN_ONACCESS_LOG}\" ) ; \\
+\t\t  done" \
+        pidfile         none \
+        stop            "if \[ -f \"\${pidfile}\" \]; then
+\t\t/bin/kill `/bin/cat \"\${pidfile}\"` && /bin/rm -f \"\${pidfile}\"
+\telse
+\t\t/usr/bin/kill -SIGUSR1 `/usr/bin/pgrep -u root fswatch` 2>/dev/null
+\tfi"
+}
 
 destroot {
-    set LaunchDaemonsPath ${destroot}/Library/LaunchDaemons
-    xinstall -d ${LaunchDaemonsPath}
-    xinstall -m 0644 -W ${filespath} \
-        org.macports.clamd.plist \
-        org.macports.freshclam.plist \
-        ${LaunchDaemonsPath}
-    reinplace "s|__PREFIX__|${prefix}|g" \
-        ${LaunchDaemonsPath}/org.macports.clamd.plist \
-        ${LaunchDaemonsPath}/org.macports.freshclam.plist
     xinstall -m 0755 -o ${clamavuser} -g ${clamavuser} -d \
         ${destroot}${dataPath} \
         ${destroot}${logPath} \
-        ${destroot}${runPath}
+        ${destroot}${runPath} \
+        ${destroot}${sharePath}
     touch ${destroot}${logPath}/clamav.log
     destroot.keepdirs \
         ${destroot}${dataPath} \
         ${destroot}${runPath}
+
+    # clamd.conf.macports
+    xinstall -m 0644 -o ${clamavuser} -g ${clamavuser} ${prefix}/etc/clamd.conf.sample \
+        ${destroot}${prefix}/etc/clamd.conf.macports
+    system -W ${destroot}${prefix} "patch -p1 ./etc/clamd.conf.macports ${filespath}/patch-etc-clamd-conf-macports.diff"
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${destroot}${prefix}/etc/clamd.conf.macports
+
+    # freshclam.conf.macports
+    xinstall -m 0644 -o ${clamavuser} -g ${clamavuser} ${prefix}/etc/freshclam.conf.sample \
+        ${destroot}${prefix}/etc/freshclam.conf.macports
+    system -W ${destroot}${prefix} "patch -p1 ./etc/freshclam.conf.macports ${filespath}/patch-etc-freshclam-conf-macports.diff"
+    if {[variant_isset "sanesecurity"]} {
+       # DatabaseCustomURL (append after last appearance)
+       reinplace -E "/#DatabaseCustomURL\[^#\]*/,$!b
+//{x;//p;g;};//!H;$!d;x;s//&# Sanesecurity signatures\\
+# https:\\/\\/sanesecurity.com\\/usage\\/signatures\\/\\
+# https:\\/\\/forum.netgate.com\\/topic\\/102819\\/alternate-definitions-for-clamav\\/10\\
+\\
+#!FA These comments exhibit high false alert rates on macOS\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/junk.ndb\\
+#!FA DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/phish.ndb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/rogue.hdb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/foxhole_filename.cdb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/foxhole_generic.cdb\\
+#!FA DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/foxhole_js.cdb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/badmacro.ndb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/scam.ndb\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/sanesecurity.ftm\\
+DatabaseCustomURL http:\\/\\/ftp.swin.edu.au\\/sanesecurity\\/sigwhitelist.ign2\\
+\\
+/" \
+            ${destroot}${prefix}/etc/freshclam.conf.macports
+    }
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${destroot}${prefix}/etc/freshclam.conf.macports
+
+    # ClamavScanIt.sh and ClamavScanIt.workflow Finder.app Contextual Menu item
+    xinstall -W ${filespath} -m 0755 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.sh ${destroot}${prefix}/bin/ClamavScanIt.sh
+    xinstall -W ${filespath} -m 0755 -o ${clamavuser} -g ${clamavuser} \
+        -d ./ClamavScanIt.workflow \
+        ${destroot}${sharePath}/ClamavScanIt.workflow
+    xinstall -W ${filespath} -m 0755 -o ${clamavuser} -g ${clamavuser} \
+        -d ./ClamavScanIt.workflow/Contents \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents
+    xinstall -W ${filespath} -m 0644 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.workflow/Contents/Info.plist \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/Info.plist
+    xinstall -W ${filespath} -m 0755 -o ${clamavuser} -g ${clamavuser} \
+        -d ./ClamavScanIt.workflow/Contents/QuickLook \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/QuickLook
+    xinstall -W ${filespath} -m 0755 -o ${clamavuser} -g ${clamavuser} \
+        -d ./ClamavScanIt.workflow/Contents/Resources \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/Resources
+    xinstall -W ${filespath} -m 0644 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.workflow/Contents/document.wflow \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/document.wflow
+    xinstall -W ${filespath} -m 0644 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.workflow/Contents/QuickLook/Preview.png \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/QuickLook/Preview.png
+    xinstall -W ${filespath} -m 0644 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.workflow/Contents/QuickLook/Thumbnail.png \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/QuickLook/Thumbnail.png
+    xinstall -W ${filespath} -m 0644 -o ${clamavuser} -g ${clamavuser} \
+        ./ClamavScanIt.workflow/Contents/Resources/background.color \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/Resources/background.color
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${destroot}${prefix}/bin/ClamavScanIt.sh
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${destroot}${sharePath}/ClamavScanIt.workflow/Contents/document.wflow
 }
 
 post-activate {
     if {![file exists ${prefix}/etc/clamd.conf]} {
-        copy ${prefix}/etc/clamd.conf.sample \
-            ${prefix}/etc/clamd.conf
-        reinplace "s,#Foreground,Foreground," \
+        copy ${prefix}/etc/clamd.conf.macports \
             ${prefix}/etc/clamd.conf
     }
     if {![file exists ${prefix}/etc/freshclam.conf]} {
-        copy ${prefix}/etc/freshclam.conf.sample \
-            ${prefix}/etc/freshclam.conf
-        reinplace "s,#Foreground,Foreground," \
+        copy ${prefix}/etc/freshclam.conf.macports \
             ${prefix}/etc/freshclam.conf
     }
+
+    # Add launchd.plist keys to MacPorts launchdaemons
+
+    # org.macports.clamd
+    reinplace \
+        "s|^<key>ProgramArguments</key>|<key>UserName</key><string>root</string>\\
+<key>GroupName</key><string>${clamavuser}</string>\\
+&|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.clamd/org.macports.clamd.plist
+
+    # org.macports.freshclam
+    reinplace \
+        "s|^<key>ProgramArguments</key>|<key>UserName</key><string>${clamavuser}</string>\\
+<key>GroupName</key><string>${clamavuser}</string>\\
+<key>StartInterval</key><integer>21600</integer>\\
+&|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.freshclam/org.macports.freshclam.plist
+
+    if {[variant_isset "scan_schedule_access"]} {
+        # org.macports.ClamavScanSchedule
+        reinplace \
+            "s|^<key>ProgramArguments</key>|<key>UserName</key><string>root</string>\\
+<key>GroupName</key><string>${clamavuser}</string>\\
+<key>Nice</key>\\
+<integer>15</integer>\\
+<key>StartCalendarInterval</key>\\
+<array>\\
+\t<dict>\\
+\t\t<key>Weekday</key>\\
+\t\t<integer>7</integer>\\
+\t\t<key>Hour</key>\\
+\t\t<integer>2</integer>\\
+\t\t<key>Minute</key>\\
+\t\t<integer>00</integer>\\
+\t</dict>\\
+</array>\\
+&|" \
+            ${prefix}/etc/${startupitem.location}/org.macports.ClamavScanSchedule/org.macports.ClamavScanSchedule.plist
+
+        # org.macports.ClamavScanOnAccess
+        reinplace \
+            "s|^<key>ProgramArguments</key>|<key>UserName</key><string>root</string>\\
+<key>GroupName</key><string>${clamavuser}</string>\\
+&|" \
+            ${prefix}/etc/${startupitem.location}/org.macports.ClamavScanOnAccess/org.macports.ClamavScanOnAccess.plist
+    }
+
+    # Quarantine directory one level up from MacPorts prefix location
+    # Directory has full permissions open for clamscan run by users
+    xinstall -m 0777 -o ${clamavuser} -g ${clamavuser} -d \
+        [strsed ${prefix} {g|/[^/]*$||}]/Quarantine
 }
 
 notes "
-To configure clamd and freshclam look for the following files:
-    ${prefix}/etc/clamd.conf
-    ${prefix}/etc/freshclam.conf
+clamav-server is installed to perform three types of operations.
 
-If these files do not exist you can copy the sample conf files into place:
-    sudo cp ${prefix}/etc/clamd.conf.sample ${prefix}/etc/clamd.conf
-    sudo cp ${prefix}/etc/freshclam.conf.sample ${prefix}/etc/freshclam.conf
+ 1. Basic clamd server and freshclam updates are controlled by their
+    respective launchdaemons and configuration files:
 
-Edit ${prefix}/etc/clamd.conf to your liking, example:
-# Comment out 'Example' near the top if it exists
-    #Example
-    LogFile ${logPath}/clamd.log
-    PidFile ${runPath}/clamd.pid
-    LocalSocket ${runPath}/clamd.socket
-    Foreground yes
+        ${prefix}/etc/clamd.conf
+        ${prefix}/etc/freshclam.conf
 
-Edit ${prefix}/etc/freshclam.conf to your liking, example:
-# Comment out 'Example' near the top if it exists
-    #Example
-    UpdateLogFile ${logPath}/freshclam.log
-    PidFile ${runPath}/freshclam.pid
-    NotifyClamd ${prefix}/etc/clamd.conf
+    Clamav database initialization/refresh is performed with the command:
 
-Two launchd startup items have been installed.
+        sudo freshclam
 
-To load clamd and freshclam do the following:
-    sudo launchctl load -w /Library/LaunchDaemons/org.macports.clamd.plist
-    sudo launchctl load -w /Library/LaunchDaemons/org.macports.freshclam.plist
+    Quarantined files are moved to the directory defined by the shell
+    variable \${CLAMAV_SERVER_QUARANTINE}, with default
+    [strsed ${prefix} {g|/[^/]*$||}]/Quarantine:
 
-To unload clamd and freshclam do the following:
-    sudo launchctl unload -w /Library/LaunchDaemons/org.macports.clamd.plist
-    sudo launchctl unload -w /Library/LaunchDaemons/org.macports.freshclam.plist
+        \${CLAMAV_SERVER_QUARANTINE:-[strsed ${prefix} {g|/[^/]*$||}]/Quarantine}.
 
-To try things out do
-    sudo freshclam
+ 2. Clamav Scan-On-Demand is performed with the command:
 
-If all is well you should see your clamav database being updated
+        ${prefix}/bin/ClamavScanIt.sh file1 \[directory1\] \[file2 ...\]
+
+    A Finder.app Contextual Menu applies ClamavScanIt.sh to the selected
+    items in Finder.app. Add this menu item with the command:
+
+        cp -R ${sharePath}/ClamavScanIt.workflow ~/Library/Services
+        open -a Automator ~/Library/Services/ClamavScanIt.workflow \\\n \
+            && osascript -e 'quit app \"Automator\"'
+
+    Configure this service using:
+
+        System Preferences>Keyboard>Shortcuts>Services>Files and Folders
+            >ClamavScanIt
+
+ 3. On-Schedule and On-Access scanning. On-Access scans are performed on
+    all user ~/Downloads and ~/Desktop directories. Scheduled scans are
+    performed on all targets in the bash list
+    \$CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS\[@\], whose default is:
+
+        CLAMAV_SERVER_SCAN_SCHEDULE_TARGETS=(\"/\")
 "
 
-livecheck.type    none
+livecheck.type         none
