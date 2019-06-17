@@ -49,7 +49,7 @@ proc usage {} {
 # Prints an error message (but doesn't abort) if the UUID is empty.
 proc read_config {} {
     global prefix stats_url stats_id
-    set conf_path "${prefix}/etc/macports/stats.conf"
+    set conf_path "${prefix}/etc/macports/@CONFNAME@.conf"
     if {[file isfile $conf_path]} {
         set fd [open $conf_path r]
         while {[gets $fd line] >= 0} {
@@ -273,13 +273,11 @@ proc json_encode_stats {id os_dict ports_dict} {
 
     set os_json [json_encode_dict os]
     set active_ports_json [json_encode_portlist [dict get $ports "active"]]
-    set inactive_ports_json [json_encode_portlist [dict get $ports "inactive"]]
 
     set json "\{"
     append json "\n  \"id\": \"$id\","
     append json "\n  \"os\": [json_encode_dict os "  "],"
-    append json "\n  \"active_ports\": [json_encode_portlist [dict get $ports "active"] "  "],"
-    append json "\n  \"inactive_ports\": [json_encode_portlist [dict get $ports "inactive"] "  "]"
+    append json "\n  \"active_ports\": [json_encode_portlist [dict get $ports "active"] "  "]"
     append json "\n\}"
 
     return $json
@@ -377,7 +375,6 @@ proc action_stats {subcommands} {
 
     # Build dictionary of port information
     dict set ports active   [get_installed_ports yes]
-    dict set ports inactive [get_installed_ports no]
 
     # Make sure there aren't too many subcommands
     if {[llength $subcommands] > 1} {
