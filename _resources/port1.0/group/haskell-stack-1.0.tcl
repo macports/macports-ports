@@ -21,6 +21,13 @@ post-extract {
     xinstall -m 0755 -d ${stack_root}
 }
 
+# libHSbase shipped with GHC links against system libiconv, which provides the
+# 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
+# process statically links libHSbase.a, we must have /usr/lib in the library
+# search path first :/
+compiler.library_path
+compiler.cpath
+
 configure.cmd       ${prefix}/bin/stack
 configure.pre_args
 configure.args      setup \
