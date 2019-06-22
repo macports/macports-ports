@@ -11,7 +11,7 @@ PortGroup           compiler_blacklist_versions    1.0
 
 name                py-tensorflow
 version             1.14.0
-revision            0
+revision            1
 github.setup        tensorflow tensorflow ${version} v
 platforms           darwin
 supported_archs     x86_64
@@ -58,7 +58,8 @@ if {${name} ne ${subport}} {
 
     depends_build-append \
         port:py${python.version}-pip \
-        port:bazel25
+        port:bazel25 \
+        port:cctools
 
     depends_lib-append \
         port:py${python.version}-wheel \
@@ -85,8 +86,10 @@ if {${name} ne ${subport}} {
     configure.env-append JAVA_HOME=${java.home}
     build.env-append     TMPDIR=${workpath}/tmp
     build.env-append     JAVA_HOME=${java.home}
+    set base_march "-march=ivybridge"
     if {![variant_isset native]} {
-        configure.env-append CC_OPT_FLAGS=-march=ivybridge
+        configure.env-append CC_OPT_FLAGS=${base_march}
+        build.env-append     CC_OPT_FLAGS=${base_march}
         notes "This version is built based on a base architecture for convenience, 
               which may not be optimized for your system. To build a version 
               customized for your machine, use the +native variant"
@@ -102,15 +105,23 @@ if {${name} ne ${subport}} {
     configure.pre_args
     # configure command
     configure.cmd ./configure
-    # Path configuration if required
+    # Patch configuration
     pre-configure {
-        if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
-            foreach f { configure.py third_party/toolchains/cpus/arm/CROSSTOOL.tpl third_party/toolchains/gpus/crosstool/CROSSTOOL third_party/gpus/crosstool/CROSSTOOL.tpl third_party/sycl/crosstool/CROSSTOOL.tpl } {
-                foreach cmd {ar nm strip libtool ld objdump} {
-                    reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
-                }
-                reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g" ${f}
-                reinplace -q "s| clang | ${configure.cc} |g"  ${f}
+        # enforce correct build settings
+        foreach f [ exec find ${worksrcpath} -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" ] {
+            foreach cmd {ar nm strip libtool ld objdump} {
+                reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+            }
+            reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"   ${f}
+            reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
+            reinplace -q "s| clang | ${configure.cc} |g"            ${f}
+            reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
+            reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
+        }
+        # If not native build, make sure not used...
+        if {![variant_isset native]} {
+            foreach f [ exec find ${worksrcpath} -name "configure" -or -name "configure.py" -or -name "CMakeLists.txt" -or -name "Makefile" -or -name "*.sh" ] {
+                reinplace -q "s|-march=native|${base_march}|g" ${f}
             }
         }
     }
@@ -132,6 +143,10 @@ if {${name} ne ${subport}} {
         if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
             set tf_bazel_build_opts "${tf_bazel_build_opts} --action_env CC=${configure.cc}"
             set tf_bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${tf_bazel_cmd}"
+        }
+        if {![variant_isset native]} {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --copt=${base_march}"
+            set tf_bazel_cmd "CC_OPT_FLAGS=${base_march} ${tf_bazel_cmd}"
         }
         system -W ${worksrcpath} "${tf_bazel_cmd} build ${tf_bazel_build_opts} //tensorflow/tools/pip_package:build_pip_package"
         # Build the python wheel
