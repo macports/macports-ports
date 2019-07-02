@@ -1,0 +1,367 @@
+diff --git a/host/CMakeLists.txt b/host/CMakeLists.txt
+index 916138e..7f59d44 100644
+--- a/host/CMakeLists.txt
++++ b/host/CMakeLists.txt
+@@ -279,7 +279,9 @@ endif(WIN32)
+ ########################################################################
+ message(STATUS "")
+ message(STATUS "Configuring Boost C++ Libraries...")
+-set(BOOST_REQUIRED_COMPONENTS
++# NO optional Boost components!
++# ALL required Boost components!
++set(UHD_BOOST_REQUIRED_COMPONENTS
+     chrono
+     date_time
+     filesystem
+@@ -288,45 +290,13 @@ set(BOOST_REQUIRED_COMPONENTS
+     system
+     unit_test_framework
+     serialization
++    thread
+ )
+-
+-if(MINGW)
+-    list(APPEND BOOST_REQUIRED_COMPONENTS thread_win32)
+-else()
+-    list(APPEND BOOST_REQUIRED_COMPONENTS thread)
+-endif()
+-
+-if(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
+-    list(APPEND BOOST_LIBRARYDIR "/usr/lib64") #fedora 64-bit fix
+-endif(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
+-
+-if(MSVC)
+-    set(BOOST_ALL_DYN_LINK "${BOOST_ALL_DYN_LINK}" CACHE BOOL "boost enable dynamic linking")
+-    if(BOOST_ALL_DYN_LINK)
+-        add_definitions(-DBOOST_ALL_DYN_LINK) #setup boost auto-linking in msvc
+-    else(BOOST_ALL_DYN_LINK)
+-        set(BOOST_REQUIRED_COMPONENTS) #empty components list for static link
+-    endif(BOOST_ALL_DYN_LINK)
+-endif(MSVC)
+-
+-set(Boost_ADDITIONAL_VERSIONS
+-    "1.56.0" "1.56" "1.57" "1.57" "1.58" "1.59" "1.60" "1.61" "1.62" "1.63"
+-    "1.64" "1.65" "1.66" "1.67" "1.68" "1.69"
+-)
+-
+-message(STATUS "Looking for optional Boost components...")
+-find_package(Boost ${BOOST_MIN_VERSION} OPTIONAL_COMPONENTS ${BOOST_OPTIONAL_COMPONENTS})
+-
+-message(STATUS "Looking for required Boost components...")
+-find_package(Boost ${BOOST_MIN_VERSION} COMPONENTS ${BOOST_REQUIRED_COMPONENTS})
++include(UHDBoost)
+ 
+ include_directories(${Boost_INCLUDE_DIRS})
+ link_directories(${Boost_LIBRARY_DIRS})
+ 
+-message(STATUS "Boost include directories: ${Boost_INCLUDE_DIRS}")
+-message(STATUS "Boost library directories: ${Boost_LIBRARY_DIRS}")
+-message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
+-
+ ########################################################################
+ # Additional settings for build environment
+ ########################################################################
+@@ -486,7 +456,7 @@ endif(NOT CMAKE_MODULES_DIR)
+ # UHDConfig.cmake needs UHD_LINK_LIST_STATIC set:
+ list(APPEND UHD_LINK_LIST_STATIC "dl")
+ list(APPEND UHD_LINK_LIST_STATIC "pthread")
+-foreach(Boost_Comp ${BOOST_REQUIRED_COMPONENTS})
++foreach(Boost_Comp ${UHD_BOOST_REQUIRED_COMPONENTS})
+     if(NOT ${Boost_Comp} STREQUAL "unit_test_framework")
+         list(APPEND UHD_LINK_LIST_STATIC "boost_${Boost_Comp}")
+     endif(NOT ${Boost_Comp} STREQUAL "unit_test_framework")
+diff --git a/host/examples/init_usrp/CMakeLists.txt b/host/examples/init_usrp/CMakeLists.txt
+index 3260ce5..734aeb8 100644
+--- a/host/examples/init_usrp/CMakeLists.txt
++++ b/host/examples/init_usrp/CMakeLists.txt
+@@ -14,20 +14,13 @@ cmake_minimum_required(VERSION 2.8)
+ option(UHD_USE_STATIC_LIBS OFF)
+ 
+ # This example also requires Boost:
+-set(BOOST_REQUIRED_COMPONENTS
++set(UHD_BOOST_REQUIRED_COMPONENTS
+     program_options
+     system
+     thread
+ )
+-if(MSVC)
+-    set(BOOST_ALL_DYN_LINK "${BOOST_ALL_DYN_LINK}" CACHE BOOL "boost enable dynamic linking")
+-    if(BOOST_ALL_DYN_LINK)
+-        add_definitions(-DBOOST_ALL_DYN_LINK) #setup boost auto-linking in msvc
+-    else(BOOST_ALL_DYN_LINK)
+-        set(BOOST_REQUIRED_COMPONENTS) #empty components list for static link
+-    endif(BOOST_ALL_DYN_LINK)
+-endif(MSVC)
+-find_package(Boost "1.46" REQUIRED ${BOOST_REQUIRED_COMPONENTS})
++set(BOOST_MIN_VERSION "1.46")
++include(UHDBoost)
+ 
+ # To add UHD as a dependency to this project, add a line such as this:
+ find_package(UHD "3.8.0" REQUIRED)
+diff --git a/host/cmake/Modules/UHDBoost.cmake b/host/cmake/Modules/UHDBoost.cmake
+new file mode 100644
+index 0000000..e16782f
+--- /dev/null
++++ b/host/cmake/Modules/UHDBoost.cmake
+@@ -0,0 +1,261 @@
++#
++# Copyright 2019 National Instruments Corp.
++#
++# SPDX-License-Identifier: GPL-3.0-or-later
++#
++
++# The following variables can be defined external to this script.
++#
++# ENABLE_STATIC_LIBS : whether to enable static libraries, which will
++# require static Boost libraries too. If not using static libraries,
++# shared libraries will be used. The default is to use shared
++# libraries, and this default will be used if this variable is not
++# defined or if is it NO/OFF/FALSE.
++#
++# UHD_BOOST_REQUIRED_COMPONENTS : Boost components that are required
++# for Boost_FOUND to be true. The linkage (shared or static) must be
++# correct and the library must also be found.
++#
++# UHD_BOOST_OPTIONAL_COMPONENTS : Boost components that are
++# optional. They do not impact Boost_FOUND. The linkage will still be
++# honored, and the library must still be found for the return
++# variables to be set.
++#
++# NOTE: If neither UHD_BOOST_REQUIRED_COMPONENTS and
++# UHD_BOOST_OPTIONAL_COMPONENTS are defined and/or are empty, then
++# this script just checked to see if the minimum required version of
++# Boost can be found, and sets Boost_FOUND accordingly; all of the
++# other return variables will be unset / undefined.
++#
++# Upon successful finding, the following variables will be set upon
++# return:
++#
++# Boost_FOUND : will be TRUE if all of the required Boost components
++# are found with the correct linkage (static or shared); otherwise
++# this variable will be FALSE unless there are no components specified
++# in which case this variable will be unset.
++#
++# Boost_INCLUDE_DIRS : directories to use with 'include_directories',
++# where the top-level "boost" directory is located for headers.
++#
++# Boost_LIBRARY_DIRS : directories for use in finding libraries; this
++# variable is generally not used in favor of either (1) defining
++# library names with the full path; or (2) using targets where the
++# full path is defined already. This variable is probably deprecated.
++#
++# Boost_LIBRARIES : a list of found Boost libraries, each of which can
++# be either (1) or (2) above; either will work with modern CMake.
++#
++########################################################################
++message(STATUS "")
++message(STATUS "Checking for Boost version ${BOOST_MIN_VERSION} or greater")
++
++# unset return variables
++unset(Boost_FOUND)
++unset(Boost_INCLUDE_DIRS)
++unset(Boost_LIBRARY_DIRS)
++unset(Boost_LIBRARIES)
++
++# set(Boost_DEBUG TRUE)
++
++# verify we're looking for something
++list(LENGTH UHD_BOOST_OPTIONAL_COMPONENTS UHD_BOOST_OPTIONAL_COMPONENTS_LEN)
++list(LENGTH UHD_BOOST_REQUIRED_COMPONENTS UHD_BOOST_REQUIRED_COMPONENTS_LEN)
++if(UHD_BOOST_OPTIONAL_COMPONENTS_LEN EQUAL 0 AND
++   UHD_BOOST_REQUIRED_COMPONENTS_LEN EQUAL 0)
++    # just see if Boost can be found
++    find_package(Boost ${BOOST_MIN_VERSION} QUIET)
++    if(Boost_FOUND)
++        message(STATUS "Boost version ${BOOST_MIN_VERSION} or greater - found")
++    else()
++        message(STATUS "Boost version ${BOOST_MIN_VERSION} or greater - not found")
++    endif()
++    return()
++endif()
++
++# if the OS is MINGW and if 'thread' is in the list, change its name
++if(MINGW)
++    list(FIND UHD_BOOST_REQUIRED_COMPONENTS "thread" THREAD_NDX)
++    if(NOT ${THREAD_NDX} EQUAL -1)
++        list(REMOVE_AT UHD_BOOST_REQUIRED_COMPONENTS ${THREAD_NDX})
++        list(INSERT UHD_BOOST_REQUIRED_COMPONENTS ${THREAD_NDX} thread_win32)
++    endif()
++endif()
++
++# if 'system' is in the list, make sure it comes last; sometimes this
++# linkage makes a difference
++list(FIND UHD_BOOST_REQUIRED_COMPONENTS "system" SYSTEM_NDX)
++if(NOT ${SYSTEM_NDX} EQUAL -1)
++    list(REMOVE_AT UHD_BOOST_REQUIRED_COMPONENTS ${SYSTEM_NDX})
++    list(APPEND UHD_BOOST_REQUIRED_COMPONENTS "system")
++endif()
++
++# special library directory that's used by some Linux
++if(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
++    list(APPEND BOOST_LIBRARYDIR "/usr/lib64") #fedora 64-bit fix
++endif(UNIX AND NOT BOOST_ROOT AND EXISTS "/usr/lib64")
++
++# special Microsoft Visual C handling
++if(MSVC)
++    set(BOOST_ALL_DYN_LINK "${BOOST_ALL_DYN_LINK}" CACHE BOOL "boost enable dynamic linking")
++    if(BOOST_ALL_DYN_LINK)
++        add_definitions(-DBOOST_ALL_DYN_LINK) #setup boost auto-linking in msvc
++    else(BOOST_ALL_DYN_LINK)
++        set(UHD_BOOST_REQUIRED_COMPONENTS) #empty components list for static link
++    endif(BOOST_ALL_DYN_LINK)
++endif(MSVC)
++
++# tell boost the linkage required
++set(Boost_USE_STATIC_LIBS ${ENABLE_STATIC_LIBS})
++# temporarily explicitly enable or disable shared libraries,
++# build-wise; this can be disabled on a case by case basis for each
++# library built.
++if(BUILD_SHARED_LIBS)
++    set(BUILD_SHARED_LIBS_SET TRUE)
++    set(OLD_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
++else()
++    set(BUILD_SHARED_LIBS_SET FALSE)
++endif()
++if(ENABLE_STATIC_LIBS)
++    set(BUILD_SHARED_LIBS FALSE)
++else()
++    set(BUILD_SHARED_LIBS TRUE)
++endif()
++
++if(${UHD_BOOST_OPTIONAL_COMPONENTS_LEN} GREATER 0)
++    message(STATUS "  Looking for optional Boost components...")
++    find_package(Boost ${BOOST_MIN_VERSION} QUIET
++        OPTIONAL_COMPONENTS ${UHD_BOOST_OPTIONAL_COMPONENTS})
++endif()
++
++if(${UHD_BOOST_REQUIRED_COMPONENTS_LEN} GREATER 0)
++    message(STATUS "  Looking for required Boost components...")
++    find_package(Boost ${BOOST_MIN_VERSION} QUIET
++        COMPONENTS ${UHD_BOOST_REQUIRED_COMPONENTS})
++endif()
++
++# restore BUILD_SHARED_LIBS, if set
++if(BUILD_SHARED_LIBS_SET)
++    set(BUILD_SHARED_LIBS ${OLD_BUILD_SHARED_LIBS})
++    unset(OLD_BUILD_SHARED_LIBS)
++else()
++    unset(BUILD_SHARED_LIBS)
++endif()
++
++# fix the value of "Boost_VERSION" if 1.70.0, which is X.Y.Z. Change
++# it to the expected value of XXYYZZ. This might apply to Boost >
++# 1.70.0 too; have to examine those once they are released!
++if(${Boost_VERSION} VERSION_EQUAL 1.70.0)
++    set(Boost_VERSION 107000)
++    message(STATUS "  Fixed Boost version from 1.70.0 to 107000")
++endif()
++
++# generic fix for some linking issues with Boost 1.68.0 or newer.
++if(${Boost_VERSION} VERSION_GREATER 106700)
++    message(STATUS "  Enabling Boost Error Code Header Only")
++    add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
++endif()
++
++# for Boost 1.6[6-8].0, and possibly others, disable ASIO use of
++# std::string_view entirely if it is not available for whatever
++# reason. This situation generally happens on macOS using Clang and
++# -std=c++14 or earlier ... but it can occur in other situations, so
++# just to a generic check. This issue should be fixed in Boost 1.70.0.
++# Check if std::string_view is available.
++include(CheckCXXSourceCompiles)
++# set the CheckCXXSourceCompiles C++ flags to include the c++ standard
++# required.  this looks like a bug in cmake ... if the
++# CMAKE_CXX_STANDARD is set, it should be honored when issuing
++# "check_cxx_source_compiles"!
++# store the old flags if set
++if(CMAKE_REQUIRED_FLAGS)
++  set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
++endif()
++set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
++# make this compile quite
++set(CMAKE_REQUIRED_QUIET TRUE)
++check_cxx_source_compiles(
++    "#include <boost/asio/detail/string_view.hpp>
++    int main()
++    { boost::asio::string_view sv; }"
++    HAS_STRING_VIEW
++)
++# restore old flags if set
++if(OLD_CMAKE_REQUIRED_FLAGS)
++  set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
++else()
++  unset(CMAKE_REQUIRED_FLAGS)
++endif()
++unset(OLD_CMAKE_REQUIRED_FLAGS)
++# did boost::asio succeed in compiling using std::string_view?
++if(HAS_STRING_VIEW)
++    message(STATUS "  Enabling boost::asio use of std::string_view")
++    set(HAS_STRING_VIEW 1)
++else()
++    message(STATUS "  Disabling boost::asio use of std::string_view")
++    set(HAS_STRING_VIEW 0)
++endif()
++add_definitions(-DBOOST_ASIO_HAS_STD_STRING_VIEW=${HAS_STRING_VIEW})
++unset(HAS_STRING_VIEW)
++
++# Boost 1.70.0's find cmake scripts don't always set the expected
++# return variables. Replicate the commit that fixes that issue here:
++# https://github.com/boostorg/boost_install/commit/cfa8d55250dfc2635e907e42da423e4eb540dee5
++if(Boost_FOUND AND (${Boost_VERSION} VERSION_EQUAL 107000))
++    message(STATUS "  Enabling possible Boost 1.70.0 Fixes")
++
++    # FindBoost compatibility variables: Boost_LIBRARIES, Boost_<C>_LIBRARY
++    if(NOT Boost_LIBRARIES OR "${Boost_LIBRARIES}" STREQUAL "")
++        set(Boost_LIBRARIES "")
++        foreach(dep IN LISTS UHD_BOOST_REQUIRED_COMPONENTS UHD_BOOST_OPTIONAL_COMPONENTS)
++            string(TOUPPER ${dep} _BOOST_DEP)
++            if(NOT Boost_${_BOOST_DEP}_FOUND)
++                status(WARNING "  Boost component '${dep}' should have been found but somehow isn't listed as found. Ignoring and hoping for the best!")
++            endif()
++            list(APPEND Boost_LIBRARIES Boost::${dep})
++            set(Boost_${_BOOST_DEP}_LIBRARY Boost::${dep})
++        endforeach()
++    endif(NOT Boost_LIBRARIES OR ${Boost_LIBRARIES} STREQUAL "")
++
++    # FindBoost compatibility variables: Boost_INCLUDE_DIRS
++    if(NOT Boost_INCLUDE_DIRS OR "${Boost_INCLUDE_DIRS}" STREQUAL "")
++        get_target_property(Boost_INCLUDE_DIRS Boost::headers INTERFACE_INCLUDE_DIRECTORIES)
++    endif(NOT Boost_INCLUDE_DIRS OR ${Boost_INCLUDE_DIRS} STREQUAL "")
++
++    # FindBoost compatibility variables: Boost_LIBRARY_DIRS
++    if(NOT Boost_LIBRARY_DIRS OR "${Boost_LIBRARY_DIRS}" STREQUAL "")
++        set(Boost_LIBRARY_DIRS "")
++        foreach(dep IN LISTS UHD_BOOST_REQUIRED_COMPONENTS UHD_BOOST_OPTIONAL_COMPONENTS)
++            string(TOUPPER ${dep} _BOOST_DEP)
++            if(NOT Boost_${_BOOST_DEP}_FOUND)
++                status(WARNING "  Boost component '${dep}' should have been found but somehow isn't listed as found. Ignoring and hoping for the best!")
++            endif()
++            if(Boost_USE_DEBUG_LIBS)
++                get_target_property(Boost_${dep}_LIBRARY Boost::${dep} IMPORTED_LOCATION_DEBUG)
++            else()
++                get_target_property(Boost_${dep}_LIBRARY Boost::${dep} IMPORTED_LOCATION_RELEASE)
++            endif()
++            get_filename_component(Boost_${dep}_LIBRARY_DIR ${Boost_${dep}_LIBRARY} DIRECTORY ABSOLUTE)
++            list(FIND Boost_LIBRARY_DIRS ${Boost_${dep}_LIBRARY_DIR} Boost_${dep}_LIBRARY_DIR_FOUND)
++            if(${Boost_${dep}_LIBRARY_DIR_FOUND} EQUAL -1)
++                list(APPEND Boost_LIBRARY_DIRS ${Boost_${dep}_LIBRARY_DIR})
++            endif()
++        endforeach()
++    endif(NOT Boost_LIBRARIES OR ${Boost_LIBRARIES} STREQUAL "")
++    list(SORT Boost_LIBRARY_DIRS)
++endif()
++
++message(STATUS "  Boost version: ${Boost_VERSION}")
++message(STATUS "  Boost include directories: ${Boost_INCLUDE_DIRS}")
++message(STATUS "  Boost library directories: ${Boost_LIBRARY_DIRS}")
++message(STATUS "  Boost libraries: ${Boost_LIBRARIES}")
++
++if(Boost_FOUND)
++    message(STATUS "Looking for Boost version ${BOOST_MIN_VERSION} or greater - found")
++else()
++    message(STATUS "Looking for Boost version ${BOOST_MIN_VERSION} or greater - not found")
++endif()
++
++# unset some variables, if set
++unset(Boost_LIBRARY_DIR)
++unset(Boost_INCLUDE_DIR)
