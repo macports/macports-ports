@@ -892,13 +892,6 @@ set portfetch::mirror_sites::sites(tcltk) {
 set portfetch::mirror_sites::sites(tex_ctan) \
         $portfetch::mirror_sites::sites(ctan)
 
-set portfetch::mirror_sites::sites(xcontrib) {
-    http://ftp.gwdg.de/pub/x11/x.org/contrib/
-    http://ftp.x.org/contrib/
-    ftp://ftp.x.org/contrib/
-    ftp://ftp2.x.org/contrib/
-}
-
 set portfetch::mirror_sites::sites(xorg) {
     http://ftp.cica.es/mirrors/X/pub/
     ftp://ftp.cs.cuhk.edu.hk/pub/X11/
