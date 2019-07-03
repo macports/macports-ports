@@ -902,8 +902,8 @@ set portfetch::mirror_sites::sites(xcontrib) {
 set portfetch::mirror_sites::sites(xorg) {
     http://ftp.cica.es/mirrors/X/pub/
     ftp://ftp.cs.cuhk.edu.hk/pub/X11/
-    http://xorg.freedesktop.org/archive/
-    http://xorg.freedesktop.org/releases/
+    https://xorg.freedesktop.org/archive/
+    https://xorg.freedesktop.org/releases/
     http://mi.mirror.garr.it/mirrors/x.org/
     http://ftp.gwdg.de/pub/x11/x.org/pub/
     ftp://ftp.is.co.za/pub/x.org/pub/
