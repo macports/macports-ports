@@ -937,5 +937,5 @@ set portfetch::mirror_sites::sites(xorg) {
     http://mirror.csclub.uwaterloo.ca/x.org/
     http://ftp.nara.wide.ad.jp/pub/X11/x.org/
     ftp://ftp.x.org/pub/
-    http://www.x.org/pub/
+    https://www.x.org/archive/
 }
