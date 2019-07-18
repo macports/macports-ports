@@ -50,8 +50,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     compiler.blacklist-append  \
         macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \
-        macports-llvm-gcc-4.2 apple-gcc-4.0 apple-gcc-4.2 gcc-3.3 gcc gcc-4.0 llvm-gcc-4.2 \
-        macports-dragonegg-3.3 macports-dragonegg-3.4
+        macports-llvm-gcc-4.2 apple-gcc-4.0 apple-gcc-4.2 gcc-3.3 gcc gcc-4.0 llvm-gcc-4.2
 
 } else {
 
