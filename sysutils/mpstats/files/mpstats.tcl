@@ -370,6 +370,7 @@ proc action_stats {subcommands} {
     dict set os os_arch ${macports::os_arch}
     dict set os os_platform ${macports::os_platform}
     dict set os build_arch ${macports::build_arch}
+    dict set os cxx_stdlib ${macports::cxx_stdlib}
     dict set os gcc_version [getgccinfo]
     dict set os xcode_version ${macports::xcodeversion}
 
