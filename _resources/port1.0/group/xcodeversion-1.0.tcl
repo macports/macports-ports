@@ -14,6 +14,11 @@
 options minimum_xcodeversions
 default minimum_xcodeversions {}
 
+# Xcode should be used for this port
+if {[info exists use_xcode]} {
+    use_xcode yes
+}
+
 platform macosx {
     pre-extract {
         foreach {darwin_major minimum_xcodeversion} [join ${minimum_xcodeversions}] {
