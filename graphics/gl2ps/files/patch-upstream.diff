@@ -1,0 +1,205 @@
+--- ./gl2ps.c	2017-04-03 15:48:30.000000000 -0700
++++ ./gl2ps.c	2019-07-13 15:22:45.000000000 -0700
+@@ -164,7 +164,7 @@ typedef struct {
+   GLshort type, numverts;
+   GLushort pattern;
+   char boundary, offset, culled;
+-  GLint factor, linecap, linejoin;
++  GLint factor, linecap, linejoin, sortid;
+   GLfloat width, ofactor, ounits;
+   GL2PSvertex *verts;
+   union {
+@@ -600,6 +600,15 @@ static void gl2psListSort(GL2PSlist *lis
+   qsort(list->array, list->n, list->size, fcmp);
+ }
+ 
++/* Must be a list of GL2PSprimitives. */
++static void gl2psListAssignSortIds(GL2PSlist *list)
++{
++  GLint i;
++  for(i = 0; i < gl2psListNbr(list); i++){
++    (*(GL2PSprimitive**)gl2psListPointer(list, i))->sortid = i;
++  }
++}
++
+ static void gl2psListAction(GL2PSlist *list, void (*action)(void *data))
+ {
+   GLint i;
+@@ -853,7 +862,8 @@ static void gl2psConvertPixmapToPNG(GL2P
+ 
+ static GLint gl2psAddText(GLint type, const char *str, const char *fontname,
+                           GLshort fontsize, GLint alignment, GLfloat angle,
+-                          GL2PSrgba color)
++                          GL2PSrgba color, GLboolean setblpos,
++                          GLfloat blx, GLfloat bly)
+ {
+   GLfloat pos[4];
+   GL2PSprimitive *prim;
+@@ -878,11 +888,16 @@ static GLint gl2psAddText(GLint type, co
+   prim = (GL2PSprimitive*)gl2psMalloc(sizeof(GL2PSprimitive));
+   prim->type = (GLshort)type;
+   prim->boundary = 0;
+-  prim->numverts = 1;
+-  prim->verts = (GL2PSvertex*)gl2psMalloc(sizeof(GL2PSvertex));
++  prim->numverts = setblpos ? 2 : 1;
++  prim->verts = (GL2PSvertex*)gl2psMalloc(sizeof(GL2PSvertex) * prim->numverts);
+   prim->verts[0].xyz[0] = pos[0];
+   prim->verts[0].xyz[1] = pos[1];
+   prim->verts[0].xyz[2] = pos[2];
++  if (setblpos) {
++    prim->verts[1].xyz[0] = blx;
++    prim->verts[1].xyz[1] = bly;
++    prim->verts[1].xyz[2] = 0;
++  }
+   prim->culled = 0;
+   prim->offset = 0;
+   prim->ofactor = 0.0;
+@@ -1452,7 +1467,8 @@ static int gl2psCompareDepth(const void 
+     return 1;
+   }
+   else{
+-    return 0;
++    /* Ensure that initial ordering is preserved when depths match. */
++    return q->sortid < w->sortid ? -1 : 1;
+   }
+ }
+ 
+@@ -2277,7 +2293,7 @@ static void gl2psParseFeedbackBuffer(GLi
+   GLboolean boundary;
+   GLint i, sizeoffloat, count, v, vtot, offset = 0, factor = 0, auxindex = 0;
+   GLint lcap = 0, ljoin = 0;
+-  GLfloat lwidth = 1.0F, psize = 1.0F, ofactor, ounits;
++  GLfloat lwidth = 1.0F, psize = 1.0F, ofactor = 0.0F, ounits = 0.0F;
+   GLfloat *current;
+   GL2PSvertex vertices[3];
+   GL2PSprimitive *prim;
+@@ -3559,6 +3575,43 @@ static void gl2psPutPDFText(GL2PSstring 
+   }
+ }
+ 
++/*
++  This is used for producing aligned text in PDF. (x, y) is the anchor for the
++  aligned text, (xbl, ybl) is the bottom left corner. Rotation happens
++  around (x, y).*/
++static void gl2psPutPDFTextBL(GL2PSstring *text, int cnt, GLfloat x, GLfloat y,
++                              GLfloat xbl, GLfloat ybl)
++{
++  if(text->angle == 0.0F){
++    gl2ps->streamlength += gl2psPrintf
++      ("BT\n"
++       "/F%d %d Tf\n"
++       "%f %f Td\n"
++       "(%s) Tj\n"
++       "ET\n",
++       cnt, text->fontsize, xbl, ybl, text->str);
++  }
++  else{
++    GLfloat a, ca, sa;
++    GLfloat pi = 3.141593F;
++    GLfloat i = atan2(y - ybl, x - xbl);
++    GLfloat r = sqrt((y - ybl) * (y - ybl) + (x - xbl) * (x - xbl));
++
++    a = (GLfloat)(pi * text->angle / 180.0F);
++    sa = (GLfloat)sin(a);
++    ca = (GLfloat)cos(a);
++    gl2ps->streamlength += gl2psPrintf
++      ("BT\n"
++       "/F%d %d Tf\n"
++       "%f %f %f %f %f %f Tm\n"
++       "(%s) Tj\n"
++       "ET\n",
++       cnt, text->fontsize,
++       ca, sa, -sa, ca,
++       xbl + r * (cos(i) - cos(i + a)), ybl + r * (sin(i) - sin(i+a)), text->str);
++  }
++}
++
+ static void gl2psPutPDFSpecial(int prim, int sec, GL2PSstring *text)
+ {
+   gl2ps->streamlength += gl2psPrintf("/GS%d%d gs\n", prim, sec);
+@@ -3941,9 +3994,17 @@ static void gl2psPDFgroupListWriteMainSt
+       for(j = 0; j <= lastel; ++j){
+         prim = *(GL2PSprimitive**)gl2psListPointer(gro->ptrlist, j);
+         gl2ps->streamlength += gl2psPrintPDFFillColor(prim->verts[0].rgba);
++        if (prim->numverts == 2) {
++          gl2psPutPDFTextBL(prim->data.text, gro->fontno, prim->verts[0].xyz[0],
++                            prim->verts[0].xyz[1],
++                            prim->verts[1].xyz[0],
++                            prim->verts[1].xyz[1]);
++        }
++        else {
+         gl2psPutPDFText(prim->data.text, gro->fontno, prim->verts[0].xyz[0],
+                         prim->verts[0].xyz[1]);
+       }
++      }
+       break;
+     case GL2PS_SPECIAL:
+       lastel = gl2psListNbr(gro->ptrlist) - 1;
+@@ -5834,6 +5895,7 @@ static GLint gl2psPrintPrimitives(void)
+     gl2psListReset(gl2ps->primitives);
+     break;
+   case GL2PS_SIMPLE_SORT :
++    gl2psListAssignSortIds(gl2ps->primitives);
+     gl2psListSort(gl2ps->primitives, gl2psCompareDepth);
+     if(gl2ps->options & GL2PS_OCCLUSION_CULL){
+       gl2psListActionInverse(gl2ps->primitives, gl2psAddInImageTree);
+@@ -6147,29 +6209,42 @@ GL2PSDLL_API GLint gl2psTextOptColor(con
+                                      GL2PSrgba color)
+ {
+   return gl2psAddText(GL2PS_TEXT, str, fontname, fontsize, alignment, angle,
+-                      color);
++                      color, GL_FALSE, 0, 0);
++}
++
++/**
++ * This version of gl2psTextOptColor is used to go around the
++ * fact that PDF does not support text alignment. The extra parameters
++ * (blx, bly) represent the bottom left corner of the text bounding box.
++ */
++GL2PSDLL_API GLint gl2psTextOptColorBL(const char *str, const char *fontname,
++                                       GLshort fontsize, GLint alignment, GLfloat angle,
++                                       GL2PSrgba color, GLfloat blx, GLfloat bly)
++{
++  return gl2psAddText(GL2PS_TEXT, str, fontname, fontsize, alignment, angle,
++                      color, GL_TRUE, blx, bly);
+ }
+ 
+ GL2PSDLL_API GLint gl2psTextOpt(const char *str, const char *fontname,
+                                 GLshort fontsize, GLint alignment, GLfloat angle)
+ {
+-  return gl2psAddText(GL2PS_TEXT, str, fontname, fontsize, alignment, angle, NULL);
++  return gl2psAddText(GL2PS_TEXT, str, fontname, fontsize, alignment, angle, NULL, GL_FALSE, 0, 0);
+ }
+ 
+ GL2PSDLL_API GLint gl2psText(const char *str, const char *fontname, GLshort fontsize)
+ {
+   return gl2psAddText(GL2PS_TEXT, str, fontname, fontsize, GL2PS_TEXT_BL, 0.0F,
+-                      NULL);
++                      NULL, GL_FALSE, 0, 0);
+ }
+ 
+ GL2PSDLL_API GLint gl2psSpecial(GLint format, const char *str)
+ {
+-  return gl2psAddText(GL2PS_SPECIAL, str, "", 0, format, 0.0F, NULL);
++  return gl2psAddText(GL2PS_SPECIAL, str, "", 0, format, 0.0F, NULL, GL_FALSE, 0, 0);
+ }
+ 
+ GL2PSDLL_API GLint gl2psSpecialColor(GLint format, const char *str, GL2PSrgba rgba)
+ {
+-  return gl2psAddText(GL2PS_SPECIAL, str, "", 0, format, 0.0F, rgba);
++  return gl2psAddText(GL2PS_SPECIAL, str, "", 0, format, 0.0F, rgba, GL_FALSE, 0, 0);
+ }
+ 
+ GL2PSDLL_API GLint gl2psDrawPixels(GLsizei width, GLsizei height,
+--- ./gl2ps.h	2017-04-03 15:48:26.000000000 -0700
++++ ./gl2ps.h	2019-07-13 15:19:35.000000000 -0700
+@@ -216,6 +216,9 @@ GL2PSDLL_API GLint gl2psTextOpt(const ch
+ GL2PSDLL_API GLint gl2psTextOptColor(const char *str, const char *fontname,
+                                      GLshort fontsize, GLint align, GLfloat angle,
+                                      GL2PSrgba color);
++GL2PSDLL_API GLint gl2psTextOptColorBL(const char *str, const char *fontname,
++                                       GLshort fontsize, GLint align, GLfloat angle,
++                                       GL2PSrgba color, GLfloat blx, GLfloat bly);
+ GL2PSDLL_API GLint gl2psSpecial(GLint format, const char *str);
+ GL2PSDLL_API GLint gl2psSpecialColor(GLint format, const char *str, GL2PSrgba rgba);
+ GL2PSDLL_API GLint gl2psDrawPixels(GLsizei width, GLsizei height,
