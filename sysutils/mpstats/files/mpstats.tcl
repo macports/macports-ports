@@ -102,6 +102,22 @@ proc getgccinfo {} {
     }
 }
 
+# extraction of CommandLineTools version
+proc getcltinfo {} {
+    if {[file exists /usr/lib/libxcselect.dylib]} {
+        set pkgname "CLTools_Executables"
+    } else {
+        # Mountain Lion (10.8) and below. Note that we prefer Xcode over CLT for <= 10.8
+        set pkgname "DeveloperToolsCLI"
+    }
+
+    if {![catch {exec pkgutil --pkg-info=com.apple.pkg.${pkgname}} results]} {
+        return [lindex $results 3]
+    }
+
+    return none
+}
+
 ###### JSON Encoding helper procs ######
 
 ##
@@ -373,6 +389,7 @@ proc action_stats {subcommands} {
     dict set os cxx_stdlib ${macports::cxx_stdlib}
     dict set os gcc_version [getgccinfo]
     dict set os xcode_version ${macports::xcodeversion}
+    dict set os clt_version [getcltinfo]
 
     # Build dictionary of port information
     dict set ports active   [get_installed_ports yes]
