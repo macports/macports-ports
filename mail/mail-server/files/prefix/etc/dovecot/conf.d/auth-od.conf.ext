@@ -1,0 +1,212 @@
+# Authentication using Open Directory.  Included from 10-auth.conf.
+#
+# Version 2.2.x (AR14759611)
+
+# Notes:
+# https://wiki.dovecot.org/Authentication/Kerberos
+# Kerberos authentication with `auth_gssapi_hostname = "$ALL"`
+# Local account authentication with `driver pam`
+# macOS Server `driver od` was used to provide UUIDs and GUIDs
+# It would be great to use that system to avoid namespace conflicts
+# between /Local/Default and /LDAPv3/127.0.0.1, but just use %Ln
+# (lower case username) in this setup to specify the mailbox locations.
+# Note that the mail client must support GSSAPI (Apple Mail does)
+
+# Notes for LDAP authentication on macOS Server:
+# /Applications/Server.app/Contents/ServerRoot/private/etc/dovecot/default/dovecot-ldap.conf.ext
+# https://www.c0ffee.net/blog/mail-server-guide/
+# https://trac.macports.org/wiki/howto/SetupDovecot
+
+# Apple source code for Open Directory `driver od`:
+# https://opensource.apple.com/source/dovecot/dovecot-293/dovecot/src/auth/db-od.c.auto.html
+# https://opensource.apple.com/source/dovecot/dovecot-293/dovecot/src/auth/db-passwd-file.c.auto.html
+
+# GitHub brew approach for PAM:
+# https://github.com/taniguti/Services_on_macOS/blob/master/mail/setup-scripts/setup-dovecot
+
+# GSSAPI configuration per https://wiki.dovecot.org/Authentication/Kerberos
+# Ensure `auth_gssapi_hostname = "$ALL"`, `auth_mechanisms = gssapi`
+# in 10-auth.conf
+
+# Kerberos kadmin to create a dovecot.keytab with existing macOS principals
+# References:
+# Zillions of Kerberos web pages
+# https://dovecot.org/list/dovecot/2016-July/104842.html
+
+# Configure Kerberos on macOS
+# krb5.conf
+# DNS URI, TXT, and SRV records
+
+## Create missing krb5.conf file
+# Create edu.mit.Kerberos from
+# curl -O https://wiki.ncsa.illinois.edu/download/attachments/20613205/edu.mit.Kerberos
+# sudo cp -p /etc/krb5.conf /etc/krb5.conf.orig
+# sudo cp edu.mit.Kerberos /etc/krb5.conf
+# sudo ln -s /etc/krb5.conf /Library/Preferences/edu.mit.Kerberos
+
+## Create dovecot.keytab on macOS
+# sudo /usr/sbin/kadmin -l
+# kadmin> ext_keytab -k dovecot.keytab imap/@host@.@domain@.@tld@ smtp/@host@.@domain@.@tld@
+# kadmin> exit
+# sudo @PREFIX@/bin/klist -e -k -t dovecot.keytab
+# Keytab name: FILE:dovecot.keytab
+# KVNO Timestamp           Principal
+# ---- ------------------- ------------------------------------------------------
+#    1 04/20/2019 23:22:06 imap/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (aes256-cts-hmac-sha1-96) 
+#    1 04/20/2019 23:22:06 imap/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (aes128-cts-hmac-sha1-96) 
+#    1 04/20/2019 23:22:06 imap/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (des3-cbc-sha1) 
+#    1 04/20/2019 23:22:06 smtp/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (aes256-cts-hmac-sha1-96) 
+#    1 04/20/2019 23:22:06 smtp/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (aes128-cts-hmac-sha1-96) 
+#    1 04/20/2019 23:22:06 smtp/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@ (des3-cbc-sha1) 
+## Secure the file permissions
+# sudo chown _dovecot dovecot.keytab 
+# sudo chgrp mail dovecot.keytab
+# sudo chmod go-rwx dovecot.keytab
+
+# Learning curve, barking up the wrong trees, but useful background
+# None of this will ultimately work on macOS, but it's a useful reference
+# for handling Kerberos, and led to the approach that does work
+
+# FAIL 1:
+# It is unncessary to use macOS's krbservicesetup or sso_util
+# to add kerberos principals because the ones we want already exist
+## Use krbservicesetup, without Macports kerberos binaries
+# export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Server.app/Contents/ServerRoot/usr/bin
+# sudo krbservicesetup -x -a "admin" -p "pass" -r @HOST@.@DOMAIN@.@TLD@ imap dovecot/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@
+## this principal doesn't appear in /etc/krb5.keytab, or in a kadmin get
+# sudo @PREFIX@/bin/klist -e -k -t /etc/krb5.keytab
+
+# FAIL 2:
+# Kerberos on macOS is controlled and locked down
+# It does not work the way plain kerberos does
+# For example, adding principals in kadmin -l, then
+# attempting to authenticate with these principals in e.g. kinit
+# always produces a Client expired error
+# Reference: https://discussions.apple.com/thread/7220240
+
+## Try using Directory Admin's credentials to run kerberos
+## Kerberos commands to create tickets
+# sudo /usr/bin/kinit -p diradmin@@HOST@.@DOMAIN@.@TLD@
+# sudo /usr/bin/kinit -S kadmin/admin diradmin@@HOST@.@DOMAIN@.@TLD@
+# env KRB5_TRACE=/dev/stdout sudo -E /usr/sbin/kadmin -p kadmin/admin@@HOST@.@DOMAIN@.@TLD@
+# echo $?
+
+## Try adding missing kadmin/@host@.@domain@.@tld@ and kadmin/admin principals
+## Ditto for kadmin.local, kinit, kpasswd, ktutil
+# sudo /usr/sbin/kadmin -l
+# kadmin> add kadmin/@host@.@domain@.@tld@
+# Max ticket life [unlimited]:
+# Max renewable life [unlimited]:
+# Principal expiration time [never]:
+# Password expiration time [never]:
+# Attributes []:
+# Policy [default]:
+# kadmin/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# Verify password - kadmin/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# kadmin> add kadmin/admin
+# Max ticket life [unlimited]:
+# Max renewable life [unlimited]:
+# Principal expiration time [never]:
+# Password expiration time [never]:
+# Attributes []:
+# Policy [default]:
+# kadmin/admin@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# Verify password - kadmin/admin@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# kadmin> exit
+
+## Add principal _dovecot/@host@.@domain@.@tld@, _dovecot/admin, dovecot/…
+## and merge their keytab files
+# sudo /usr/sbin/kadmin -l
+# kadmin> add _dovecot/@host@.@domain@.@tld@
+# Max ticket life [unlimited]:
+# Max renewable life [unlimited]:
+# Principal expiration time [never]:
+# Password expiration time [never]:
+# Attributes []:
+# Policy [default]:
+# _dovecot/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# Verify password - _dovecot/@host@.@domain@.@tld@@@HOST@.@DOMAIN@.@TLD@'s Password: 
+# kadmin> add dovecot/@host@.@domain@.@tld@
+# kadmin> add _dovecot/admin
+# kadmin> add dovecot/admin
+# kadmin> ext_keytab -k dovecot.keytab _dovecot/@host@.@domain@.@tld@ dovecot/@host@.@domain@.@tld@ _dovecot/admin dovecot/admin
+## unnecessary: output each principal into individual files, then merge with ktutil
+# kadmin> ext_keytab -k _dovecot-fqdn.keytab _dovecot/@host@.@domain@.@tld@
+# kadmin> ext_keytab -k dovecot-fqdn.keytab dovecot/@host@.@domain@.@tld@
+# kadmin> ext_keytab -k _dovecot-admin.keytab _dovecot/admin
+# kadmin> ext_keytab -k dovecot-admin.keytab dovecot/admin
+# kadmin> exit
+## unecessary merger with ktutil
+# sudo @PREFIX@/bin/ktutil 
+# ktutil: rkt _dovecot-fqdn.keytab
+# ktutil: rkt dovecot-fqdn.keytab
+# ktutil: rkt _dovecot-admin.keytab
+# ktutil: rkt dovecot-admin.keytab
+# ktutil: wkt dovecot.keytab
+# ktutil: exit
+## List the contents of dovecot.keytab
+# klist -e -k -t dovecot.keytab
+
+# Allow/remove diradmin permissions
+# sudo chmod +a "diradmin allow readattr,writeattr,list,search,add_file" /var/log/krb5kdc
+# sudo chmod -N /var/log/krb5kdc
+
+## Debugging:
+# env KRB5_TRACE=/dev/stdout sudo -E kadmin -p kadmin/admin@@HOST@.@DOMAIN@.@TLD@
+# sudo kdestroy -p diradmin@@HOST@.@DOMAIN@.@TLD@
+# sudo serveradmin stop dirserv ; sudo serveradmin start dirserv
+# dscacheutil -flushcache ; sudo killall -HUP mDNSResponder ; sudo port unload bind9 ; sudo port load bind9
+# sudo /usr/sbin/ktutil list
+# sudo @PREFIX@/bin/klist -e -k -t /etc/krb5.keytab 
+
+# https://trac.macports.org/wiki/howto/SetupDovecot
+# https://wiki2.dovecot.org/QuickConfiguration
+
+passdb pam {
+  driver = pam
+}
+
+userdb passwd {
+  driver = passwd
+}
+
+# No passdb {} block for kerberos authentication
+
+# Test settings
+## passdb {
+##   driver = pam
+##   # service name, imap/hostname@REALM is in macOS krb5.keytab; create /etc/pam.d/imap
+##   args = imap
+## }
+
+## userdb {
+##   driver = passwd
+## }
+
+# macOS Server v.5.7 configuration:
+# passdb {
+#  # OD cache refresh intervals.  The positive cache TTL applies to
+#  # enabled accounts.  The negative cache TTL applies to disabled
+#  # accounts.  Nonexistent accounts are not cached.
+#  # arguments: args = pos_cache_ttl=3600 neg_cache_ttl=60
+#  #                   use_getpwnam_ext=yes blocking=no
+#  # driver = od
+# }
+
+# macOS Server v.5.7 configuration:
+# userdb {
+#   # OD cache refresh intervals.  The positive cache TTL applies to
+#   # enabled accounts.  The negative cache TTL applies to disabled
+#   # accounts.  Nonexistent accounts are not cached.
+#   # Set enforce_quotas to yes to deny message delivery and message
+#   # copying when user account has exceeded their quota.
+#   # Use global_quota to enable system wide quota.  Individual
+#   # quotas override global quota.
+#   # additional args: pos_cache_ttl=3600 neg_cache_ttl=60
+#   #                  luser_relay=<userid> enforce_quotas=no
+#   #                  use_getpwnam_ext=yes blocking=no
+#   # macOS Server v.5.7 configuration
+#   # driver = od
+#   driver = ldap
+#   args = partition=@PREFIX@/etc/dovecot/partition_map.conf global_quota=8192 enforce_quotas=yes
+# }
