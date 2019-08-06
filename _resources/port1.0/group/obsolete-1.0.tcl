@@ -21,6 +21,7 @@ proc obsolete.set_descriptions {replaced_by} {
     default platforms       darwin
     default maintainers     nomaintainer
     default homepage        https://www.macports.org
+    default license         none
 
     archive_sites
     patchfiles
