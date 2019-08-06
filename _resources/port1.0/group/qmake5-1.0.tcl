@@ -29,6 +29,15 @@ configure.cmd                   ${qt_qmake_cmd}
 configure.pre_args-replace      --prefix=${prefix} "PREFIX=${prefix}"
 configure.universal_args-delete --disable-dependency-tracking
 
+platform macosx {
+    # Use Xcode on macOS <= 10.9 (os.major 13) because CLT doesn't ship with an SDK on 10.9-
+    # Better way is to just check if CLT SDK works correctly rather than hardcode OS
+    # See: https://trac.macports.org/ticket/58779
+    if { [info exists use_xcode] && ${os.major} <= 13 } {
+        use_xcode yes
+    }
+}
+
 pre-configure {
     #
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
@@ -52,6 +61,11 @@ pre-configure {
         # see https://trac.macports.org/ticket/53597
         set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
         if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
+            configure.sdk_version
+        }
+
+        # same check as before, but if macports wants to use CLT's developer_dir instead of Xcode, then we check if the build OS version is available on CLT.
+        if { [info exists configure.developer_dir] && ${developer_dir} ne ${configure.developer_dir} && ![file exists ${configure.developer_dir}/SDKs/MacOSX${configure.sdk_version}.sdk] } {
             configure.sdk_version
         }
     }
