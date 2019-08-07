@@ -1,0 +1,635 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               github 1.0
+PortGroup               active_variants 1.1
+
+github.setup            apple ccs-calendarserver 50894b7
+
+name                    calendar-contacts-server
+# version from https://github.com/apple/ccs-calendarserver/blob/master/setup.py
+# with date of git commit appended
+version                 9.3.20190916
+revision                0
+categories              net mail
+platforms               darwin
+supported_archs         noarch
+maintainers             {ieee.org:s.t.smith @essandess} openmaintainer
+license                 Apache-2
+
+description             Apple Calendar and Contacts Server configuration
+long_description ${description}. \
+    ccs-calendarserver is a standards-compliant server implementing\
+    the CalDAV and CardDAV protocols, including iMIP and APNS. It\
+    provides a shared location on the network allowing multiple users\
+    to store and edit calendaring and contact information. This port\
+    provides a basic, working, easily modifiable configuration,\
+    previously used in macOS Server.app, and an nginx reverse proxy\
+    to handle modern crypto and isolate the backend server.
+
+homepage                https://www.calendarserver.org
+
+checksums               rmd160  fd77e68c4cf6dceb543ce8cff47c5f6c23429ed6 \
+                        sha256  c97384bb26cec6a764eba3c8cd590c63e912c93f85e8fd5ce3945e6e11065dae \
+                        size    3714315
+
+# use these to specify python versions, python2 required
+set python2_version 2.7
+set python2_version_nickname \
+    [join [lrange [split ${python2_version} .] 0 1] {}]
+
+# use these to specify PostgreSQL versions, postgresql9 required
+set postgresql9_version 9.6
+set postgresql9_version_nickname \
+    [join [lrange [split ${postgresql9_version} .] 0 1] {}]
+
+depends_lib-append      port:cyrus-sasl2 \
+                        port:libffi \
+                        port:mail-server \
+                        port:memcached \
+                        port:nginx \
+                        port:openssl \
+                        port:postgresql${postgresql9_version_nickname}-server \
+                        port:python${python2_version_nickname} \
+                        port:py${python2_version_nickname}-pip \
+                        port:py${python2_version_nickname}-pyobjc-cocoa
+
+depends_run-append      port:pip_select \
+                        port:postgresql_select
+
+set calendarserverUser  calendarserver
+add_users               ${calendarserverUser} \
+                        group=_calendar \
+                        home=${prefix}/var/${calendarserverUser}
+
+set ccsname             ${github.project}
+set calendarserverdir   ${prefix}/var/${calendarserverUser}
+set calendarserverpackage \
+                        ${calendarserverdir}/Library/CalendarServer/${ccsname}
+
+# random 4-word-based passphrase
+proc correct_horse_battery_staple {} {
+    # ignore errors from sf-pwgen if the password is shorter than requested
+    return \
+        [join [exec sh -c "sf-pwgen \
+            --algorithm memorable --count 2 --length 16 \
+            2>/dev/null || true"] -]
+}
+
+# destroot approach without destroot capability in ccs-calendarserver:
+# * There does not appear to be a straighforward way to DESTDIR ccs-calendarserver
+# * Neither does creating symlinks in ${prefix} work with ./bin/package
+# * Reason: virtualenv uses actual destroot path, not symlinks, in *.pyc *.so
+# * Therefore, package in post-activate, and delete necessary directories
+#   for each install or upgrade
+# * Keep personal data **outside** of ${prefix}, but provide symlinks
+
+post-extract {
+    # Use postgresql96
+    # ccs-calendarserver's postgres code points to `PSQL = "../postgresql/_root/bin/psql"`
+    # https://github.com/apple/ccs-calendarserver/blob/master/calendarserver/tools/checkdatabaseschema.py
+    reinplace "s|\"../postgresql/_root/bin/psql\"|\"${prefix}/lib/postgresql${postgresql9_version_nickname}/bin/psql\"|g" \
+        ${worksrcpath}/calendarserver/tools/checkdatabaseschema.py
+}
+
+use_configure           no
+
+pre-build {
+    # pre-build source copy
+    xinstall -d \
+        ${destroot}${prefix}/src/${ccsname} \
+        ${workpath}/bin
+    copy ${worksrcpath} \
+        ${destroot}${prefix}/src/${ccsname}
+    # MacPorts python2 pip
+    ln -s ${prefix}/bin/pip-${python2_version} \
+        ${workpath}/bin/pip
+}
+
+# package/install calendarserver binaries
+# see https://github.com/apple/ccs-calendarserver/issues/540#issuecomment-519596004
+build.cmd               bin/develop
+build.target
+build.env               "USE_OPENSSL=1" \
+    "PATH=${workpath}/bin:$env(PATH)" \
+    "CPPFLAGS=${configure.cppflags}" \
+    "LDFLAGS=${configure.ldflags}"
+
+destroot {
+    # configuration design: MacPorts file and/or directory templates installed
+    # to *.macports, then edited with local network settings, then in
+    # post-activate copied to actual configuration files if such don't exist 
+
+    xinstall -o ${calendarserverUser} -d \
+        ${destroot}${calendarserverpackage}
+    destroot.keepdirs-append \
+        ${destroot}${calendarserverdir} \
+        ${destroot}${calendarserverdir}/Library/CalendarServer \
+        ${destroot}${calendarserverpackage}
+    foreach d {
+        Library/CalendarServer/Config
+        Library/CalendarServer/Config/Certificates
+        Library/CalendarServer/etc
+        Library/CalendarServer/etc/nginx_root
+        Library/CalendarServer/logs
+        Library/CalendarServer/memcached
+        Library/CalendarServer/postgresql
+        Library/CalendarServer/run
+        } {
+        xinstall -m 0750 -o ${calendarserverUser} -g _calendar -d \
+            ${destroot}${calendarserverdir}/${d}
+        destroot.keepdirs-append \
+            ${destroot}${calendarserverdir}/${d}
+    }
+    file attributes \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/etc/nginx_root \
+        -permissions 0755
+    # calendarserver runtime sockets
+    foreach d {
+        caldavd
+        caldavd_requests
+        } {
+        xinstall -m 0770 -o ${calendarserverUser} -g _calendar -d \
+            ${destroot}${calendarserverdir}/Library/CalendarServer/run/${d}
+        destroot.keepdirs-append \
+            ${destroot}${calendarserverdir}/Library/CalendarServer/run/${d}
+    }
+
+    # symlink to personal data outside of ${prefix}
+    ln -s /private/var/${calendarserverUser}/Library/CalendarServer/Data \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/Data
+
+    set dot_profile_fd \
+        [open ${destroot}${calendarserverdir}/.profile w 0644]
+    puts ${dot_profile_fd} \
+        "source \"${calendarserverpackage}/environment.sh\""
+    close ${dot_profile_fd}
+
+    # calenderserver configuration
+    xinstall -m 0600 -o ${calendarserverUser} -g _calendar \
+        ${filespath}/calendarserver.plist \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/Config/calendarserver.plist.macports
+
+    # nginx reverse proxy
+    xinstall -m 0640 -o ${calendarserverUser} -g _calendar \
+        ${filespath}/nginx.conf \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/etc/nginx.conf.macports
+    xinstall -m 0644 -o ${calendarserverUser} -g _calendar \
+        ${filespath}/default.html \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/etc/nginx_root
+
+    # ccs-calendarserver's postgres code points to `PSQL = "../postgresql/_root/bin/psql"`
+    # https://github.com/apple/ccs-calendarserver/blob/master/calendarserver/tools/checkdatabaseschema.py
+    ln -s ${prefix} \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/postgresql/_root
+    # https://github.com/apple/ccs-calendarserver/blob/master/conf/caldavd-test-s2s.plist
+    ln -s ${prefix} \
+        ${destroot}${calendarserverdir}/Library/CalendarServer/memcached/_root
+}
+
+# Network configuration
+# hard-coded examples
+set host                host
+set domain              example
+set tld                 com
+set fullhost            ${host}.${domain}.${tld}
+set domaintld           ${domain}.${tld}
+set tls_certificate_name \
+                        ${fullhost}
+
+startupitem.create     yes
+
+startupitems \
+    name               calendarserver \
+    executable \
+        ${calendarserverpackage}/bin/caldavd
+
+# use defaults, edit launch daemon plists in post-activate below
+# executable ${prefix}/sbin/nginx -g "daemon off;" -p ${calendarserverdir}/Library/CalendarServer/logs -c ${calendarserverdir}/Library/CalendarServer/etc/nginx.conf
+# pidfile auto ${calendarserverdir}/Library/CalendarServer/logs/nginx.pid
+startupitems-append \
+    name               calendarserver_proxy \
+    executable         ${prefix}/sbin/nginx \
+    pidfile            auto
+
+variant initialize_always \
+    description {Always initialize all configuration files. Intended\
+        for development and troubleshooting only. Working deployments\
+        must disable this variant to prevent configuration files\
+        being overwritten at the next upgrade. Existing configuration\
+        files are not overwritten by default.} {
+    ui_warn \
+        "
+\tAll configuration files will be initialized because
+\tthe variant +initialize_always is set. Please disable
+\tthis variant for working deployments.
+"
+}
+
+post-activate {
+    # personal data outside of ${prefix}
+    if { ![file exists \
+        /private/var/calendarserver/Library/CalendarServer] } {
+        xinstall -o ${calendarserverUser} -g _calendar -d \
+            /private/var/calendarserver/Library/CalendarServer
+    }
+    if { ![file exists \
+        /private/var/calendarserver/Library/CalendarServer/Data] } {
+        xinstall -m 0700 -o ${calendarserverUser} -g _calendar -d \
+            /private/var/calendarserver/Library/CalendarServer/Data
+    }
+
+    # package/install calendarserver binaries
+    system -W ${worksrcpath} \
+        "sh <<PACKAGE_CALENDARSERVER
+            # Don't use SecureTransport, prefer MacPorts Python binaries and libraries
+            export USE_OPENSSL=1
+            export CPPFLAGS='${configure.cppflags}'
+            export C_INCLUDE_PATH='${prefix}/include'
+            export LDFLAGS='${configure.ldflags}'
+            export PATH='${workpath}/bin:${prefix}/bin:/usr/bin:/bin:/usr/sbin:/sbin:$env(PATH)'
+            ./bin/package \
+                ${calendarserverpackage}
+PACKAGE_CALENDARSERVER
+"
+
+    # use network settings for installed example configuration
+    set fullhost [exec /bin/hostname -f]
+    set domaintld [join [lrange [split ${fullhost} .] 1 end] .]
+
+    # TLS certificate name from postfix
+    set tls_certificate_name_postfix \
+        [exec sh -c "egrep -m 1 \
+            -e \"^\[\[:space:\]\]*smtp_tls_CAfile\[\[:space:\]\]*=\[\[:space:\]\]*\" \
+            ${prefix}/etc/postfix/main.cf || true"]
+    if { ${tls_certificate_name_postfix} ne "" } {
+        set tls_certificate_name_postfix \
+            [strsed ${tls_certificate_name_postfix} \
+                "s|^\[\[:space:\]\]*smtp_tls_CAfile\[\[:space:\]\]*=\[\[:space:\]\]*${prefix}/etc/certificates/||"]
+        set tls_certificate_name_postfix \
+            [strsed ${tls_certificate_name_postfix} \
+                {s|\.chain\.pem[[:space:]]*$||}]
+    }
+    if { ${tls_certificate_name_postfix} ne "" } {
+        set tls_certificate_name ${tls_certificate_name_postfix}
+    }
+
+    ui_msg "Configuring Calendar and Contacts Server with:
+
+        fullhost :                     ${fullhost}
+        domain.tld :                   ${domaintld}
+        tls_certificate_name :         ${tls_certificate_name}
+"
+
+    # Add the necessary keychain item for Calendarserver
+    proc calendarserver_keychain_item {fullhost} {
+        return [string trim [exec /bin/sh -c \
+            "RV=\"\" ; \
+            /usr/bin/security find-generic-password \
+                -a calendarserver@${fullhost} \
+                -s org.calendarserver \
+                /Library/Keychains/System.keychain \
+                1>/dev/null 2>&1 \
+            && RV=org.calendarserver || /usr/bin/true ; \
+            echo \"\${RV}\""]]
+    }
+    if { [calendarserver_keychain_item ${fullhost}] eq "" } {
+        set calendarserver_password \
+            [correct_horse_battery_staple]
+        system "/usr/bin/security add-generic-password \
+            -a calendarserver@${fullhost} \
+            -s org.calendarserver \
+            -T /usr/bin/security \
+            -w \"${calendarserver_password}\" \
+            -A /Library/Keychains/System.keychain"
+        # delete command:
+        # sudo /usr/bin/security delete-generic-password -a calendarserver@${fullhost} -s org.calendarserver /Library/Keychains/System.keychain
+        if { [calendarserver_keychain_item ${fullhost}] eq "" } {
+            ui_warn \
+                "Keychain item org.calendarserver for ${ccsname} failed to be created."
+        }
+    }
+
+    proc install_initial_configuration {f_or_d} {
+        if { [variant_isset "initialize_always"]
+             && [file exists ${f_or_d}]
+            } {
+            delete ${f_or_d}.previous
+            move \
+                ${f_or_d} \
+                ${f_or_d}.previous
+        }
+        if { [variant_isset "initialize_always"]
+             || ![file exists ${f_or_d}]
+            } {
+            if { [file isfile ${f_or_d}.macports] } {
+                xinstall -m 0644 \
+                    ${f_or_d}.macports \
+                    ${f_or_d}
+            } elseif { [file isdirectory ${f_or_d}.macports] } {
+                xinstall -d ${f_or_d}
+                foreach f [glob -nocomplain ${f_or_d}.macports/*] {
+                    xinstall -m 0644 ${f} \
+                        ${f_or_d}/[file tail ${f}]
+                }
+            }
+        }
+    }
+
+    # calenderserver configuration and nginx reverse proxy
+    foreach f_or_d {
+        Config/calendarserver.plist
+        etc/nginx.conf
+    } {
+        install_initial_configuration \
+            ${calendarserverdir}/Library/CalendarServer/${f_or_d}
+    }
+
+    # configure all template files with local settings
+    foreach d_or_f {
+        Config
+        etc
+        } {
+        fs-traverse f ${calendarserverdir}/Library/CalendarServer/${d_or_f} {
+            if { [file isfile ${f}]
+                 && ![string match "*.macports" ${f}]
+                 && [string match "text/*" \
+                         [lindex [exec /usr/bin/file --mime-type ${f}] end]]
+             } then {
+                foreach cmd [list \
+                     "s|@PREFIX@|${prefix}|g" \
+                     "s|@host@.@domain@.@tld@|${fullhost}|g" \
+                     "s|@domain@.@tld@|${domaintld}|g" \
+                     "s|@CALENDARSERVERUSER@|${calendarserverUser}|g" \
+                     "s|@CALENDARSERVERDIR@|${calendarserverdir}|g" \
+                     "s|@TLS_CERTIFICATE_NAME@|${tls_certificate_name}|g" \
+                     "s|@POSTGRESQL9_VERSION_NICKNAME@|${postgresql9_version_nickname}|g" \
+                    ] {
+                    reinplace -q ${cmd} ${f}
+                }
+            }
+        }
+    }
+
+    # Add launchd.plist keys to MacPorts launchdaemons
+
+    # org.macports.calendarserver
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert EnvironmentVariables -xml \
+            \"<dict> \
+                <key>PYTHON</key> \
+                <string>${calendarserverpackage}/bin/python</string> \
+                <key>PATH</key> \
+                <string>${calendarserverpackage}/bin:${calendarserverpackage}/virtualenv/bin:${prefix}/bin:${prefix}/sbin:/usr/bin:/usr/sbin:/bin:/sbin</string> \
+            </dict>\" \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert UserName -string ${calendarserverUser} \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert GroupName -string _calendar \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert InitGroups -bool YES \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert AbandonProcessGroup -bool YES \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert ThrottleInterval -integer 60 \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert HardResourceLimits -xml \
+            \"<dict> \
+                <key>NumberOfFiles</key> \
+                <integer>12000</integer> \
+            </dict>\" \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert SoftResourceLimits -xml \
+            \"<dict> \
+                <key>NumberOfFiles</key> \
+                <integer>12000</integer> \
+            </dict>\" \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert PreventsSleep -bool YES \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert StandardOutPath -string \
+            ${calendarserverdir}/Library/CalendarServer/logs/launchd.log \
+            org.macports.calendarserver.plist"
+    system -W \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver \
+        "/usr/bin/plutil -insert StandardErrorPath -string \
+            ${calendarserverdir}/Library/CalendarServer/logs/launchd.log \
+            org.macports.calendarserver.plist"
+    reinplace \
+        "s|<string>${calendarserverpackage}/bin/caldavd</string>$|&\\
+\t\t<!--\\
+\t\t<string>-u</string> <string>calendarserver</string>\\
+\t\t<string>-g</string> <string>_calendar</string>\\
+\t\t  -->\\
+\t\t<string>-X</string>\\
+\t\t<string>-R</string>\\
+\t\t<string>kqueue</string>\\
+\t\t<!-- DEFAULT_CONFIG_FILE is hard-coded in ccs-calendarserver/twistedcaldav/stdconfig.py -->\\
+\t\t<string>-f</string>\\
+\t\t<string>${calendarserverdir}/Library/CalendarServer/Config/calendarserver.plist</string>|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver/org.macports.calendarserver.plist
+
+    # org.macports.calendarserver_proxy
+    reinplace \
+        "s|<string>${prefix}/sbin/nginx</string>$|&\\
+\t<string>-g</string>\\
+\t<string>daemon off;</string>\\
+\t<string>-p</string>\\
+\t<string>${calendarserverdir}/Library/CalendarServer/logs</string>\\
+\t<string>-c</string>\\
+\t<string>${calendarserverdir}/Library/CalendarServer/etc/nginx.conf</string>|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver_proxy/org.macports.calendarserver_proxy.plist
+    reinplace \
+        "s|<string>${prefix}/var/run/calendarserver_proxy.pid</string>$|<string>${calendarserverdir}/Library/CalendarServer/run/nginx.pid</string>|" \
+        ${prefix}/etc/${startupitem.location}/org.macports.calendarserver_proxy/org.macports.calendarserver_proxy.plist
+
+    # TLS PFS
+    if { ![file exists \
+        ${calendarserverdir}/Library/CalendarServer/etc/dhparam.pem] } {
+        # create a shorter, faster DH parameter file for the default installation
+        system -W ${calendarserverdir}/Library/CalendarServer/etc \
+            "openssl dhparam -out dhparam.pem 2048"
+    }
+
+    fs-traverse f_or_d \
+        ${calendarserverdir} {
+        if { [file type ${f_or_d}] ne "link" } {
+            file attributes ${f_or_d} \
+                 -owner ${calendarserverUser} -group _calendar
+        }
+    }
+}
+
+# ${calendarserverpackage} is not managed by destroot because the upstream
+# does not provide this capability; therefore, delete after deactivation
+# saving the previous install in .previous
+post-deactivate {
+    if { [file exists ${calendarserverpackage}] } {
+        delete ${calendarserverpackage}.previous
+        move ${calendarserverpackage} ${calendarserverpackage}.previous
+    }
+    delete ${calendarserverpackage}
+}
+
+notes "Apple Calendar and Contacts Server is a standards-compliant\
+server implementing the CalDAV and CardDAV protocols. Full\
+deployment requires a working mail server, DNS configuration on both the\
+LAN and the internet, including SPF and DKIM records, trusted TLS\
+certificates, port forwarding, possibly a mail relay, and more.
+
+Users must reconfigure this installation for their own system, network,\
+and security model specifics by editing all necessary files and checking\
+file permissions. A subset of these settings are visible in the files:
+
+        port contents calendar-contacts-server
+        port file calendar-contacts-server
+
+These are the locations and network settings for the default configuration:
+
+    Calender and Contacts Server:
+        ${prefix}/var/calendarserver/Library/CalendarServer/Config/calendarserver.plist
+
+    nginx Reverse Proxy:
+        ${prefix}/var/calendarserver/Library/CalendarServer/etc/nginx.conf
+        ports: 8008, 8443, 8800, 8843
+
+    Personal data (note, outside ${prefix}):
+        /var/calendarserver/Library/CalendarServer/Data
+
+A working Calendar and Contacts Server will allow local account\
+authentication at these web pages (ports 8008 and 8800 are\
+unencrypted):
+
+        http://${fullhost}:8008
+        https://${fullhost}:8443
+        http://${fullhost}:8800
+        https://${fullhost}:8843
+
+Known issues:
+    * All local accounts have access to calendarserver's password using
+
+          security find-generic-password -a calendarserver@${fullhost} -g
+
+      This is a hack to provide twistedcaldav authentication access. See:\
+      https://github.com/apple/ccs-calendarserver/blob/master/twistedcaldav/util.py\
+      An alternate approach must be used if non-trusted local accounts\
+      exist on the Calendar and Contacts Server.
+
+    * The CalendarServer service does not reliably start after reboot,
+      presumably due to an issue with launchd. A workaround
+      after rebooting is to issue the commands:
+
+      sudo port unload calendar-contacts-server ; sleep 5 ; \\
+      sudo port load calendar-contacts-server
+
+    * The package ccs-calendarserver is written in Python 2.7, which will\
+      reach the end of its life on January 1st, 2020. A future version of\
+      pip will drop support for Python 2.7."
+
+if { [variant_isset "initialize_always"] } {
+    if {[exists notes]} {
+        # leave a blank line after the existing notes
+        notes-append ""
+    }
+    notes-append \
+        "The variant +initialize_always is set, which initializes\
+        all configuration files. Please disable this variant for\
+        working deployments."
+}
+
+variant apns \
+    description "Use Apple Push Notification Service (APNS)" {
+    if {[exists notes]} {
+        # leave a blank line after the existing notes
+        notes-append ""
+    }
+    notes-append \
+        "Calendar and Contacts Server may be configured to use\
+     Apple Push Notification Service (APNS) with these steps:
+
+     1. Acquire APNS Mail certificates from a (virtual) macOS\
+        High Sierra 10.13 and Server.app version 5.6. Export\
+        the certificates from the Keychain into the files\
+        com.apple.servermgrd.apns.calendar.p12 and\
+        com.apple.servermgrd.apns.contact.p12. *Note*: APNS Mail\
+        certificate creation is deprecated on Server.app version 5.7\+.
+
+     2. Convert the APNS Mail certificates to cert, key, and chain PEM files:
+
+            # apns:com.apple.calendar
+            openssl pkcs12 -in com.apple.servermgrd.apns.calendar.p12 \\
+                -clcerts -nokeys | sed '/BEGIN CERTIFICATE/,\$!d'   \\
+            > com.apple.calendar.cert.pem
+            sudo install -m 0644 -o ${calendarserverUser} -g _calendar \\
+                com.apple.calendar.cert.pem \\
+                ${calendarserverdir}/Library/CalendarServer/Config/Certificates
+            openssl pkcs12 -in com.apple.servermgrd.apns.calendar.p12 \\
+                -nodes -nocerts | sed '/BEGIN PRIVATE KEY/,\$!d'    \\
+            > com.apple.calendarserver.key.pem.decrypted
+            sudo security add-generic-password -a apns:com.apple.calendar \\
+                -s 'MacPorts Calendar and Contacts Server' \\
+                -T /usr/bin/security \\
+                -w \$(openssl rand -base64 24) \\
+                -U /Library/Keychains/System.keychain
+            # encrypt the key with passphrase in this keychain account
+            openssl rsa -aes256 -in com.apple.calendar.key.pem.decrypted \\
+                -out com.apple.calendar.key.pem
+            sudo install -m 0644 -o ${calendarserverUser} -g _calendar \\
+                com.apple.calendar.key.pem \\
+                ${calendarserverdir}/Library/CalendarServer/Config/Certificates
+            curl -LO https://www.apple.com/certificateauthority/AppleAAI2CA.cer
+            openssl x509 -inform der -in AppleAAI2CA.cer \\
+                -out AppleAAI2CA.cert.pem
+            curl -LO https://www.apple.com/appleca/AppleIncRootCertificate.cer
+            openssl x509 -inform der -in AppleIncRootCertificate.cer \\
+                -out AppleIncRootCertificate.cert.pem
+            cat com.apple.calendar.cert.pem \\
+                AppleAAI2CA.cert.pem \\
+                AppleIncRootCertificate.cert.pem \\
+            > com.apple.calendar.chain.pem
+            openssl verify -CAfile com.apple.calendar.chain.pem \\
+                com.apple.contact.cert.pem
+            sudo install -m 0644 -o ${calendarserverUser} -g _calendar \\
+                com.apple.calendar.chain.pem \\
+                ${calendarserverdir}/Library/CalendarServer/Config/Certificates
+
+        Repeat these steps for apns:com.apple.contact.
+
+     3. Configure calendarserver for APNS by uncommenting this block in\
+        the file ${calendarserverdir}/Library/CalendarServer/Config/calendarserver.plist:
+
+            <key>Notifications</key>
+            <dict>
+                <key>Services</key>
+                <dict>
+                    <key>APNS</key>
+                    <dict>
+                        <key>Enabled</key>
+                        <true/>
+                    </dict>
+                </dict>
+            </dict>"
+}
+
+default_variants       +apns
+
+livecheck.type         none
