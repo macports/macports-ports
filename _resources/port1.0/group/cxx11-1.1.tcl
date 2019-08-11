@@ -56,6 +56,6 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     # GCC compilers cannot use libc++
     # We do not know what "cc" is, so blacklist it as well.
-    compiler.blacklist-append   *gcc* {clang < 500} cc
+    compiler.blacklist-append   *gcc* {clang < 700} cc
 
 }
