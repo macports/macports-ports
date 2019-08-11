@@ -56,6 +56,8 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     # GCC compilers cannot use libc++
     # We do not know what "cc" is, so blacklist it as well.
-    compiler.blacklist-append   *gcc* {clang < 700} cc
+    compiler.blacklist-append *gcc* {clang < 700} cc
+    # add macports 7 and 8 to fallbackl ist (can be removed once done by base in a public release)
+    compiler.fallback-append macports-clang-8.0 macports-clang-7.0
 
 }
