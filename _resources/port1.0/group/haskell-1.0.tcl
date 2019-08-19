@@ -24,7 +24,7 @@ set haskell.compiler_list {ghc}
 # updates.
 array set haskell.compiler_configuration {
     ghc {port       ghc
-         version    7.8.3
+         version    8.6.5
          compiler   ${prefix}/bin/ghc
          ghc-pkg    ${prefix}/bin/ghc-pkg}
 }
