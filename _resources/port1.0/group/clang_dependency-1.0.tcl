@@ -4,12 +4,6 @@
 # recent clang builds depend on, by blacklisting any clang compiler not already
 # installed
 
-foreach ver {8.0 7.0 6.0 5.0} {
-    if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
-        compiler.blacklist-append macports-clang-${ver}
-    }
-}
-
 # call this if an older clang version depends on the port
 proc clang_dependency.extra_versions {versions} {
     foreach ver $versions {
@@ -18,3 +12,5 @@ proc clang_dependency.extra_versions {versions} {
         }
     }
 }
+
+clang_dependency.extra_versions {8.0 7.0 6.0 5.0}
