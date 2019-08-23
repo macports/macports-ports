@@ -6,6 +6,7 @@
 
 # call this if an older clang version depends on the port
 proc clang_dependency.extra_versions {versions} {
+    global prefix
     foreach ver $versions {
         if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
             compiler.blacklist-append macports-clang-${ver}
