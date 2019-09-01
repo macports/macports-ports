@@ -12,6 +12,6 @@ if {${os.major} < 16} {
     lappend compilers macports-clang-3.7
     lappend compilers macports-clang-3.4
     if {${os.major} < 9} {
-	lappend compilers macports-clang-3.3
+        lappend compilers macports-clang-3.3
     }
 }
