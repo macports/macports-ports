@@ -60,19 +60,26 @@ compiler.cpath
 options haskell_stack.bin haskell_stack.default_args
 default haskell_stack.bin   ${prefix}/bin/stack
 default haskell_stack.default_args \
-    {--stack-root [option haskell_stack.stack_root] \
-         --with-gcc ${configure.cc} \
+    {--with-gcc ${configure.cc} \
          --allow-different-user \
          [haskell_stack.system_ghc_flags]}
+
+options haskell_stack.yaml
+default haskell_stack.yaml  {${worksrcpath}/stack.yaml}
+
+options haskell_stack.env
+default haskell_stack.env \
+    {STACK_ROOT=[option haskell_stack.stack_root] \
+         STACK_YAML=[option haskell_stack.yaml]}
 
 options haskell_stack.use_init
 default haskell_stack.use_init yes
 
 pre-configure {
     if {[option haskell_stack.use_init]} {
-        if {[glob -nocomplain ${worksrcpath}/stack*.yaml] == ""} {
+        if {![file exists ${haskell_stack.yaml}]} {
             system -W ${worksrcpath} \
-                "${haskell_stack.bin} init ${haskell_stack.default_args}"
+                "env ${haskell_stack.env} ${haskell_stack.bin} init ${haskell_stack.default_args}"
         }
     }
 }
@@ -80,19 +87,23 @@ pre-configure {
 default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
 default configure.args      {setup ${haskell_stack.default_args}}
+default configure.env       {${haskell_stack.env}}
 
 default build.cmd           {${haskell_stack.bin}}
 default build.target        {build}
 default build.args          {${haskell_stack.default_args}}
+default build.env           {${haskell_stack.env}}
 
 default destroot.cmd        {${haskell_stack.bin}}
 default destroot.target     {install}
 default destroot.args       {${haskell_stack.default_args} \
                                 --local-bin-path ${destroot}${prefix}/bin}
 default destroot.destdir    {}
+default destroot.env        {${haskell_stack.env}}
 
 default test.cmd            {${haskell_stack.bin}}
 default test.target         {test}
+default test.env            {${haskell_stack.env}}
 
 default livecheck.type      {regex}
 default livecheck.url       {https://hackage.haskell.org/package/${name}}
