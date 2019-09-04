@@ -57,31 +57,29 @@ post-extract {
 compiler.library_path
 compiler.cpath
 
-default configure.cmd       {${prefix}/bin/stack}
+options haskell_stack.bin haskell_stack.default_args
+default haskell_stack.bin   ${prefix}/bin/stack
+default haskell_stack.default_args \
+    {--stack-root [option haskell_stack.stack_root] \
+         --with-gcc ${configure.cc} \
+         --allow-different-user \
+         [haskell_stack.system_ghc_flags]}
+
+default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
-default configure.args      {setup \
-                                --stack-root [option haskell_stack.stack_root]\
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default configure.args      {setup ${haskell_stack.default_args}}
 
-default build.cmd           {${prefix}/bin/stack}
+default build.cmd           {${haskell_stack.bin}}
 default build.target        {build}
-default build.args          {--stack-root [option haskell_stack.stack_root] \
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default build.args          {${haskell_stack.default_args}}
 
-default destroot.cmd        {${prefix}/bin/stack}
+default destroot.cmd        {${haskell_stack.bin}}
 default destroot.target     {install}
-default destroot.args       {--stack-root [option haskell_stack.stack_root] \
-                                --local-bin-path ${destroot}${prefix}/bin \
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default destroot.args       {${haskell_stack.default_args} \
+                                --local-bin-path ${destroot}${prefix}/bin}
 default destroot.destdir    {}
 
-default test.cmd            {${prefix}/bin/stack}
+default test.cmd            {${haskell_stack.bin}}
 default test.target         {test}
 
 default livecheck.type      {regex}
