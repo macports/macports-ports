@@ -16,14 +16,31 @@
 #
 # This PortGroup offers the following options:
 #
+# haskell_stack.bin
+#   The stack binary. Defaults to ${prefix}/bin/stack.
+#
 # haskell_stack.stack_root
-#   The root directory for stack, passed as --stack-root in configure.args,
-#   build.args, destroot.args. Defaults to ${workpath}/.stack.
+#   The root directory for stack, passed as STACK_ROOT in haskell_stack.env.
+#   Defaults to ${workpath}/.stack.
+#
+# haskell_stack.yaml
+#   The location of the stack.yaml config file, passed as STACK_YAML in
+#   haskell_stack.env. Defaults to ${worksrcpath}/stack.yaml.
+#
+# haskell_stack.env
+#   Environment variables used in configure, build, destroot, and test
+#   phases. Defaults to STACK_ROOT=${haskell_stack.stack_root}
+#   STACK_YAML=${haskell_stack.yaml}
 #
 # haskell_stack.system_ghc
 #   Boolean indicating whether the system GHC should be used for port. Setting
 #   this to yes will add a dependency to ghc and pass --system-ghc in
-#   configure.args, build.args and destroot.args. Defaults to no.
+#   haskell_stack.default_args. Defaults to no.
+#
+# haskell_stack.default_args
+#   Default arguments for stack used across invocations in configure, build, and
+#   destroot phases. Defaults to --with-gcc ${configure.cc}
+#   --allow-different-user --system-ghc (if haskell_stack.system_ghc is set)
 
 options haskell_stack.system_ghc
 default haskell_stack.system_ghc {no}
