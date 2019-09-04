@@ -65,6 +65,18 @@ default haskell_stack.default_args \
          --allow-different-user \
          [haskell_stack.system_ghc_flags]}
 
+options haskell_stack.use_init
+default haskell_stack.use_init yes
+
+pre-configure {
+    if {[option haskell_stack.use_init]} {
+        if {[glob -nocomplain ${worksrcpath}/stack*.yaml] == ""} {
+            system -W ${worksrcpath} \
+                "${haskell_stack.bin} init ${haskell_stack.default_args}"
+        }
+    }
+}
+
 default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
 default configure.args      {setup ${haskell_stack.default_args}}
