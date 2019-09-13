@@ -63,13 +63,13 @@ proc python_get_version {} {
 proc python_get_default_version {} {
     global python.versions
     if {[info exists python.versions]} {
-        if {27 in ${python.versions}} {
-            return 27
+        if {37 in ${python.versions}} {
+            return 37
         } else {
             return [lindex ${python.versions} end]
         }
     } else {
-        return 27
+        return 37
     }
 }
 
