@@ -16,14 +16,31 @@
 #
 # This PortGroup offers the following options:
 #
+# haskell_stack.bin
+#   The stack binary. Defaults to ${prefix}/bin/stack.
+#
 # haskell_stack.stack_root
-#   The root directory for stack, passed as --stack-root in configure.args,
-#   build.args, destroot.args. Defaults to ${workpath}/.stack.
+#   The root directory for stack, passed as STACK_ROOT in haskell_stack.env.
+#   Defaults to ${workpath}/.stack.
+#
+# haskell_stack.yaml
+#   The location of the stack.yaml config file, passed as STACK_YAML in
+#   haskell_stack.env. Defaults to ${worksrcpath}/stack.yaml.
+#
+# haskell_stack.env
+#   Environment variables used in configure, build, destroot, and test
+#   phases. Defaults to STACK_ROOT=${haskell_stack.stack_root}
+#   STACK_YAML=${haskell_stack.yaml}
 #
 # haskell_stack.system_ghc
 #   Boolean indicating whether the system GHC should be used for port. Setting
 #   this to yes will add a dependency to ghc and pass --system-ghc in
-#   configure.args, build.args and destroot.args. Defaults to no.
+#   haskell_stack.default_args. Defaults to no.
+#
+# haskell_stack.default_args
+#   Default arguments for stack used across invocations in configure, build, and
+#   destroot phases. Defaults to --with-gcc ${configure.cc}
+#   --allow-different-user --system-ghc (if haskell_stack.system_ghc is set)
 
 options haskell_stack.system_ghc
 default haskell_stack.system_ghc {no}
@@ -57,32 +74,53 @@ post-extract {
 compiler.library_path
 compiler.cpath
 
-default configure.cmd       {${prefix}/bin/stack}
+options haskell_stack.bin haskell_stack.default_args
+default haskell_stack.bin   ${prefix}/bin/stack
+default haskell_stack.default_args \
+    {--with-gcc ${configure.cc} \
+         --allow-different-user \
+         [haskell_stack.system_ghc_flags]}
+
+options haskell_stack.yaml
+default haskell_stack.yaml  {${worksrcpath}/stack.yaml}
+
+options haskell_stack.env
+default haskell_stack.env \
+    {STACK_ROOT=[option haskell_stack.stack_root] \
+         STACK_YAML=[option haskell_stack.yaml]}
+
+options haskell_stack.use_init
+default haskell_stack.use_init yes
+
+pre-configure {
+    if {[option haskell_stack.use_init]} {
+        if {![file exists ${haskell_stack.yaml}]} {
+            system -W ${worksrcpath} \
+                "env ${haskell_stack.env} ${haskell_stack.bin} init ${haskell_stack.default_args}"
+        }
+    }
+}
+
+default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
-default configure.args      {setup \
-                                --stack-root [option haskell_stack.stack_root]\
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default configure.args      {setup ${haskell_stack.default_args}}
+default configure.env       {${haskell_stack.env}}
 
-default build.cmd           {${prefix}/bin/stack}
+default build.cmd           {${haskell_stack.bin}}
 default build.target        {build}
-default build.args          {--stack-root [option haskell_stack.stack_root] \
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default build.args          {${haskell_stack.default_args}}
+default build.env           {${haskell_stack.env}}
 
-default destroot.cmd        {${prefix}/bin/stack}
+default destroot.cmd        {${haskell_stack.bin}}
 default destroot.target     {install}
-default destroot.args       {--stack-root [option haskell_stack.stack_root] \
-                                --local-bin-path ${destroot}${prefix}/bin \
-                                --with-gcc ${configure.cc} \
-                                --allow-different-user \
-                                [haskell_stack.system_ghc_flags]}
+default destroot.args       {${haskell_stack.default_args} \
+                                --local-bin-path ${destroot}${prefix}/bin}
 default destroot.destdir    {}
+default destroot.env        {${haskell_stack.env}}
 
-default test.cmd            {${prefix}/bin/stack}
+default test.cmd            {${haskell_stack.bin}}
 default test.target         {test}
+default test.env            {${haskell_stack.env}}
 
 default livecheck.type      {regex}
 default livecheck.url       {https://hackage.haskell.org/package/${name}}
