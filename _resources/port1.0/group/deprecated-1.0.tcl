@@ -15,20 +15,25 @@
 options deprecated.maximum_xcodeversion \
         deprecated.maximum_osmajor      \
         deprecated.upstream_support     \
-        deprecated.macports_support
+        deprecated.macports_support     \
+        deprecated.eol_version
 default deprecated.maximum_xcodeversion  {}
 default deprecated.maximum_osmajor       {}
 default deprecated.upstream_support      yes
 default deprecated.macports_support      yes
+default deprecated.eol_version           no
+
 
 proc deprecated.deprecate_port {} {
     global deprecated.maximum_xcodeversion \
            deprecated.maximum_osmajor \
            deprecated.upstream_support \
+           deprecated.macports_support \
+           deprecated.eol_version \
            os.platform \
            os.major \
            xcodeversion
-    if {${os.platform} eq "darwin" && (${deprecated.maximum_xcodeversion} ne {}) && ([vercmp ${os.major} ${deprecated.maximum_osmajor}] > 0)} {
+    if {${os.platform} eq "darwin" && (${deprecated.maximum_osmajor} ne {}) && ([vercmp ${os.major} ${deprecated.maximum_osmajor}] > 0)} {
         depends_lib
         depends_run
         archive_sites
@@ -46,22 +51,23 @@ proc deprecated.deprecate_port {} {
         }
     } elseif {!${deprecated.upstream_support}} {
         notes-prepend "
----------------------------------------------------------------------------------------------------------------------------
-This port is deprecated since the project is no longer maintained upstream.
-It is likely to be removed from MacPorts at some point in the future.
-If you find this port useful and would like to see it continue, please consider posting to the macports-users mailing list.
+This port is deprecated since the project is no longer maintained upstream.\
+It is likely to be removed from MacPorts at some point in the future.\
+If you find this port useful and would like to see it continue, please consider posting to the macports-users mailing list.\
 See https://trac.macports.org/wiki/MailingLists for more details.
----------------------------------------------------------------------------------------------------------------------------
-"
+" ""
     } elseif {!${deprecated.macports_support}} {
         notes-prepend "
----------------------------------------------------------------------------------------------------------------------------
-This port is deprecated due to the difficulty of maintaining it.
-It is possible it will be removed from MacPorts at some point in the future.
-If you find this port useful and would like to see it continue, please consider contributing to the MacPort project.
+This port is deprecated due to the difficulty of maintaining it.\
+It is possible it will be removed from MacPorts at some point in the future.\
+If you find this port useful and would like to see it continue, please consider contributing to the MacPort project.\
 See https://guide.macports.org/chunked/project.contributing.html for more details.
----------------------------------------------------------------------------------------------------------------------------
-"
+" ""
+    } elseif {${deprecated.eol_version}} {
+        notes-prepend "
+This port is for a software version that is no longer receiving upstream updates. It may have security vulnerabilities\
+or other issues that will not be fixed. Newer versions are provided as separate ports.
+" ""
     }
 }
 
