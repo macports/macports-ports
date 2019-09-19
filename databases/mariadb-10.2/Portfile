@@ -6,54 +6,95 @@ legacysupport.newest_darwin_requires_legacy 10
 
 name                mariadb-10.2
 set name_mysql      ${name}
-version             10.2.25
+version             10.2.27
 set version_branch  [join [lrange [split ${version} .] 0 1] .]
 # Please set revision_client and revision_server to 0 if you bump
 # version; these can be changed independently for the 2 subports, but
 # can be changed at the same time if that's what's required.
-set revision_client 1
+set revision_client 0
 set revision_server 0
 categories          databases
 platforms           darwin
 license             GPL-2
 maintainers         {michaelld @michaelld} openmaintainer
-homepage            https://mariadb.org/
 
 if {$subport eq $name} {
 
     PortGroup           cmake 1.0
     PortGroup           select 1.0
     PortGroup           cxx11 1.1
+    PortGroup           github 1.0
+
+    github.setup        MariaDB server ${version}
+    git.branch          ${version_branch}
+    revision            ${revision_client}
 
     license             GPL-2
     description         Multithreaded SQL database server
     long_description    Mariadb is a fork of the MySQL server, a multi-threaded SQL database.
 
-    master_sites \
-        http://ftp.osuosl.org/pub/mariadb/mariadb-${version}/source/ \
-        http://mirror2.hs-esslingen.de/mariadb/mariadb-${version}/source/ \
-        http://ftp.yz.yamagata-u.ac.jp/pub/dbms/mariadb/mariadb-${version}/source/ \
-        http://mirrors.supportex.net/mariadb/mariadb-${version}/source/ \
-        http://mirrors.fe.up.pt/pub/mariadb/mariadb-${version}/source/ \
-        http://gd.tuwien.ac.at/db/mariadb/mariadb-${version}/source/ \
-        https://mirror.aarnet.edu.au/pub/MariaDB/mariadb-${version}/source/ \
-        http://ftp.heanet.ie/mirrors/mariadb/mariadb-${version}/source/ \
-        http://mirror.switch.ch/mirror/mariadb/mariadb-${version}/source/
-
-    distname            mariadb-${version}
     cmake.out_of_source yes
     use_parallel_build  yes
 
-    patch.pre_args      -p1
-    patchfiles          patch-cmake-install_layout.cmake.diff \
-                        patch-CMakeLists.txt.diff
+    # mariadb-connector-c is a submodule, but because we're not
+    # cloning into a GIT module in the first place, we can't use the
+    # git submodule feature. Have to download separately and install
+    # into the correct location to get this port to work! Which means
+    # we need a mariadb-connector-c branch and so forth ... basically
+    # replicate what the github PG does but without using it since it
+    # is not designed to be used for multiple downloads.
 
-    checksums           rmd160 8e46729b63339990e1bf665cec809739faef2d27 \
-                        sha256 face0818bb51b7dc20712ae225489c85a477d505cb6c2f6a6f6cf7d51ecfecc9 \
-                        size   71997847
-    revision            ${revision_client}
+    set submodule_github_author  MariaDB
+    set submodule_github_project mariadb-connector-c
+    set submodule_github_branch  10.2-serg
 
-    depends_lib-append  port:zlib port:tcp_wrappers port:ncurses port:judy
+    set main_distname ${distname}
+    set main_distfile ${distfiles}
+    set submodule_distname ${submodule_github_project}-${submodule_github_branch}
+    set submodule_distfile ${submodule_distname}${extract.suffix}
+
+    distfiles    ${main_distfile}:tagone \
+                 ${submodule_distfile}:tagtwo
+
+    master_sites ${github.homepage}/archive/${git.branch}:tagone \
+                 https://github.com/${submodule_github_author}/${submodule_github_project}/archive/${submodule_github_branch}:tagtwo
+
+    checksums    ${main_distfile} \
+                 rmd160 05b5395d5f461061f1662016a8f6651aca38f90f \
+                 sha256 80876d71fc1e136ec07d085e56ab922d33acfda9964e729aef8d30eb42281e95 \
+                 size   64533024 \
+                 ${submodule_distfile} \
+                 rmd160 e5f149deecbc579addeeb9a36e17aa54131c681f \
+                 sha256 72f63c54633460c6e9a087d2aaafd5719a1291c39363c071a2e352c74d44a292 \
+                 size   745069
+
+    post-extract {
+
+        # roughly replicate what's going on in the github PG post-extract
+        # for the main tarball extract directory name. It doesn't work
+        # here because we're using tags.
+        if {[file exists [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]] && \
+                [file isdirectory [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]]} {
+            ui_debug "move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${distname}"
+            move [glob ${workpath}/${github.author}-${github.project}-*] ${workpath}/${distname}
+        } else {
+            # tarball is not "${github.author}-${github.project}-*"
+            ui_error "\n\NError: \${worksrcpath} for '${name}' does not exist after extracting distfiles. This might indicate that the author or project is different than set in the Portfile due to a rename at GitHub. Please examine the extracted directory in ${workpath} and try to correct the Portfile by either changing the author or project or adding the worksrcdir option with the correct directory name.\n"
+            return -code error "Unexpected github tarball extract."
+        }
+
+        # put the submodule_github_project directory into position
+
+        # remove the original directory
+        ui_debug "delete ${worksrcpath}/libmariadb"
+        delete ${worksrcpath}/libmariadb
+        ui_debug "move ${workpath}/${submodule_distname} ${worksrcpath}/libmariadb"
+        move ${workpath}/${submodule_distname} ${worksrcpath}/libmariadb
+
+    }
+
+    depends_lib-append  port:zlib port:tcp_wrappers port:ncurses port:judy \
+                        path:lib/libssl.dylib:openssl
     depends_run-append  port:mysql_select
 
     select.group        mysql
@@ -64,13 +105,13 @@ if {$subport eq $name} {
         copy ${filespath}/macports-default.cnf \
             ${filespath}/my.cnf \
             ${cmake.build_dir}/macports/
-        foreach f {
-            storage/tokudb/PerconaFT/third_party/snappy-1.1.2/install-sh
-            storage/tokudb/PerconaFT/third_party/xz-4.999.9beta/build-aux/install-sh
-        } {
-            file attributes ${worksrcpath}/${f} -permissions a+x
-        }
     }
+
+    patch.pre_args -p1
+    patchfiles     patch-cmake-install_layout.cmake.diff \
+                   patch-CMakeLists.txt.diff \
+                   patch-libmariadb_plugins_auth_CMakeLists.txt.diff \
+                   patch-libmariadb_libmariadb_CMakeLists.txt.diff
 
     post-patch {
         reinplace "s|@NAME@|${name_mysql}|g" \
@@ -96,14 +137,19 @@ if {$subport eq $name} {
                         -DWITH_EMBEDDED_SERVER:BOOL=ON \
                         -DWITH_ZLIB:STRING=system \
                         -DWITH_UNIT_TESTS:BOOL=ON \
-                        -DWITHOUT_MROONGA_STORAGE_ENGINE:BOOL=ON \
                         -DWITHOUT_CASSANDRA_STORAGE_ENGINE:BOOL=ON \
+                        -DWITHOUT_MROONGA_STORAGE_ENGINE:BOOL=ON \
+                        -DWITHOUT_ROCKSDB_STORAGE_ENGINE:BOOL=ON \
+                        -DWITHOUT_TOKUDB_STORAGE_ENGINE:BOOL=ON \
                         -DENABLE_GCOV:BOOL=OFF \
                         -DENABLE_DTRACE:BOOL=OFF \
                         -DWITH_READLINE:BOOL=ON \
                         -DWITH_LIBWRAP:BOOL=ON \
-                        -DWITH_SSL:STRING=no \
-                        -DMYSQL_MAINTAINER_MODE:STRING=AUTO
+                        -DWITH_SSL:STRING=yes \
+                        -DWITH_SSL_PATH=${prefix} \
+                        -DMYSQL_MAINTAINER_MODE:STRING=AUTO \
+                        -DICONV_LIBRARIES=${prefix}/lib/libiconv.dylib \
+                        -DICONV_INCLUDE_DIR:PATH=${prefix}/include
 
     post-destroot {
         # proc portdestroot::destroot_finish fails to find and compress our man pages
@@ -156,13 +202,6 @@ if {$subport eq $name} {
         }
     }
 
-    variant openssl description {Enable OpenSSL support} {
-
-        depends_lib-append      path:lib/libssl.dylib:openssl
-        configure.args-delete   -DWITH_SSL:STRING=no
-        configure.args-append   -DWITH_SSL:STRING=system
-    }
-
     variant system_readline description {Use system readline instead of bundled readline} {
     
         # Add readline support.
@@ -193,9 +232,9 @@ possible to install and have running all the MacPorts mysql ports
 simultaneously.
 "
 
-    livecheck.type      regex
-    livecheck.url       https://downloads.mariadb.org
-    livecheck.regex     "btn-large\" href=\"/mariadb/(${version_branch}\[^/\]+)/\">"
+    set github_authro_lower [string tolower ${github.author}]
+    github.livecheck.regex ${github_authro_lower}-(${version_branch}.\[0-9\]+)
+
 }
 
 subport ${name_mysql}-server {
@@ -269,3 +308,5 @@ If this is a new install you might want to run:
 
     livecheck.type          none
 }
+
+homepage https://mariadb.org/
