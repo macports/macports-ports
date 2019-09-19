@@ -161,6 +161,18 @@ default app.privacy_camera ""
 options app.privacy_contacts
 default app.privacy_contacts ""
 
+
+# app.privacy_calendars: whether the app needs calendars access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# user’s calendar data.
+#
+# Info.plist key NSCalendarsUsageDescription.
+
+options app.privacy_calendars
+default app.privacy_calendars ""
+
 # app.hide_dock_icon: hide the Dock icon
 #
 # SDKs like SDL and Qt use the necessary macOS APIs to implement proper Dock
@@ -320,6 +332,10 @@ platform macosx {
             if {${app.privacy_contacts} != ""} {
                 puts ${fp} "    <key>NSContactsUsageDescription</key>
     <string>${app.privacy_contacts}</string>"
+            }
+            if {${app.privacy_calendars} != ""} {
+                puts ${fp} "    <key>NSCalendarsUsageDescription</key>
+    <string>${app.privacy_calendars}</string>"
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
