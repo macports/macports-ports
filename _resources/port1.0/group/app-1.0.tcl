@@ -137,6 +137,18 @@ default app.retina no
 options app.privacy_microphone
 default app.privacy_microphone ""
 
+
+# app.privacy_camera: whether the app needs camera access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# device’s camera.
+#
+# Info.plist key NSCameraUsageDescription.
+
+options app.privacy_camera
+default app.privacy_camera ""
+
 # app.hide_dock_icon: hide the Dock icon
 #
 # SDKs like SDL and Qt use the necessary macOS APIs to implement proper Dock
@@ -288,6 +300,10 @@ platform macosx {
             if {${app.privacy_microphone} != ""} {
                 puts ${fp} "    <key>NSMicrophoneUsageDescription</key>
     <string>${app.privacy_microphone}</string>"
+            }
+            if {${app.privacy_camera} != ""} {
+                puts ${fp} "    <key>NSCameraUsageDescription</key>
+    <string>${app.privacy_camera}</string>"
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
