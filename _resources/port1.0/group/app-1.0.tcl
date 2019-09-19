@@ -126,6 +126,17 @@ proc app.get_default_identifier {} {
 options app.retina
 default app.retina no
 
+
+# app.dark_mode: whether the app supports dark mode
+#
+# The default is yes.
+#
+# Info.plist key NSRequiresAquaSystemAppearance.
+
+options app.dark_mode
+default app.dark_mode yes
+
+
 # app.privacy_microphone: whether the app needs microphone access
 #
 # The default is empty and therefore disabled. To enable write a
@@ -332,6 +343,10 @@ platform macosx {
             }
             if {[tbool app.retina]} {
                 puts ${fp} "    <key>NSHighResolutionCapable</key>
+    <true/>"
+            }
+            if {![tbool app.dark_mode]} {
+                puts ${fp} "    <key>NSRequiresAquaSystemAppearance</key>
     <true/>"
             }
             if {${app.privacy_microphone} != ""} {
