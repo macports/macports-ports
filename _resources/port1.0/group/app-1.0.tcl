@@ -126,6 +126,16 @@ proc app.get_default_identifier {} {
 options app.retina
 default app.retina no
 
+# app.privacy_microphone: whether the app needs microphone access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# device’s microphone.
+#
+# Info.plist key NSMicrophoneUsageDescription.
+
+options app.privacy_microphone
+default app.privacy_microphone ""
 
 # app.hide_dock_icon: hide the Dock icon
 #
@@ -274,6 +284,10 @@ platform macosx {
             if {[tbool app.retina]} {
                 puts ${fp} "    <key>NSHighResolutionCapable</key>
     <true/>"
+            }
+            if {${app.privacy_microphone} != ""} {
+                puts ${fp} "    <key>NSMicrophoneUsageDescription</key>
+    <string>${app.privacy_microphone}</string>"
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
