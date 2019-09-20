@@ -6,20 +6,31 @@ PortGroup           cmake 1.1
 PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
 
-github.setup        Z3Prover z3 4.8.5 Z3-
+name                z3
 categories          math science
-maintainers         {landonf @landonf}
+maintainers         {landonf @landonf} openmaintainer
 description         Z3 Theorem Prover
 long_description    High performance SMT solver from Microsoft Research.
+
+# FStar-qualified Z3 release?
+if {${subport} eq "${name}-fstar"} {
+    github.setup        Z3Prover z3 4.8.5 Z3-
+    checksums           z3-4.8.5.tar.gz \
+                        rmd160  cb3509b35dc3a428019950df2e2f94c555a7ee94 \
+                        sha256  4e8e232887ddfa643adb6a30dcd3743cb2fa6591735fbd302b49f7028cdc0363 \
+                        size    4177051
+} else {
+    github.setup        Z3Prover z3 4.8.6 z3-
+    checksums           z3-4.8.6.tar.gz \
+                        rmd160  7e8c2bfdc4ab1e530de33ce2531e0f097ec0b6fb \
+                        sha256  37922fa5085170cad6504498d9758fb63c61d5cb5b68689c11a6c5e84f0311b3 \
+                        size    4328752 \
+}
 
 platforms           darwin freebsd
 license             MIT
 
 github.tarball_from archive
-
-checksums           rmd160  cb3509b35dc3a428019950df2e2f94c555a7ee94 \
-                    sha256  4e8e232887ddfa643adb6a30dcd3743cb2fa6591735fbd302b49f7028cdc0363 \
-                    size    4177051
 
 patchfiles          libz3-static.diff
 
@@ -38,16 +49,21 @@ variant debug description {Enable the debug build configuration} {
     cmake.build_type    Debug
 }
 
-# Options not shared with subports
-if {${name} eq ${subport}} {
+# Options not shared with our language-binding subports
+if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
     depends_build-append    port:python27 \
                             port:bash
 
     compiler.fallback       macports-clang-8.0
 
     configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python2.7 \
-                            -DENABLE_EXAMPLE_TARGETS=ON \
-                            -DUSE_OPENMP=OFF
+                            -DENABLE_EXAMPLE_TARGETS=ON
+
+    if {[vercmp ${version} "4.8.6"] >= 0} {
+        configure.args-append   -DSINGLE_THREADED=ON
+    } else {
+        configure.args-append   -DUSE_OPENMP=OFF
+    }
 
     # Optimal (hopefully) default variants selected based on benchmark results.
     # Benchmark configurations:
@@ -67,8 +83,12 @@ if {${name} eq ${subport}} {
     #
     # TODO: polly variant disabled until/if we can get it enabled by default in llvm-8.0,
     # or provided as an LLVM subport
-#   default_variants        +gmp +lto +polly +polly_late +polly_vector
-    default_variants        +gmp +lto
+    if {[vercmp ${version} "4.8.6"] >= 0}  {
+#       default_variants        +gmp +lto +threads +polly +polly_late +polly_vector
+        default_variants        +gmp +lto +threads
+    } else {
+        default_variants        +gmp +lto
+    }
 
     variant lto conflicts debug description {Enable link-time (interprocedural) optimization} {
         configure.args-append           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
@@ -76,8 +96,9 @@ if {${name} eq ${subport}} {
         # We need cmake 3.9 behavior to be able to use CMAKE_INTERPROCEDURAL_OPTIMIZATION
         # This can be removed if/when the project switches to a cmake_minimum_required >= 3.9
         configure.args-append           -DCMAKE_POLICY_DEFAULT_CMP0069=NEW
-        if {${version} ne "4.8.5"} {
-            ui_error "Please verify that -DCMAKE_POLICY_DEFAULT_CMP0069=NEW is still required"
+
+        if {[vercmp ${version} "4.8.6"] > 0} {
+            ui_error "Please verify that -DCMAKE_POLICY_DEFAULT_CMP0069=NEW is still required (e.g. cmake_minimum_required < 3.9)"
         }
 
         # Untested with gcc
@@ -102,25 +123,12 @@ if {${name} eq ${subport}} {
     variant native description {Generate code optimized for this machine's CPU. The resulting binaries may not run on other processors} {
         configure.optflags-append   -march=native
     }
-    
-    variant openmp description {Enable Z3 OpenMP parallelization and thread-safety support} {
-        configure.args-delete       -DUSE_OPENMP=OFF
-        configure.args-append       -DUSE_OPENMP=ON
-        depends_lib-append          port:libomp
 
-        if {[vercmp [macports_version] 2.5.99] >= 0} {
-            compiler.openmp_version 3.1
-        } else {
-            compiler.whitelist
-
-            foreach v {4.3 4.4 4.5 4.6 4.7 4.8 5 6 7 8} {
-                compiler.whitelist-append macports-gcc-${v}
-            }
-            foreach v {3.9 5.0 6.0 7.0 8.0} {
-                compiler.whitelist-append macports-clang-${v}                
-            }
+    if {[vercmp ${version} "4.8.6"] >= 0}  {
+        variant threads description {Enable thread-safe build} {
+            configure.args-delete       -DSINGLE_THREADED=ON
+            configure.args-append       -DSINGLE_THREADED=OFF
         }
-        compiler.fallback    macports-clang-8.0
     }
 
     variant polly conflicts debug description {Perform loop and data-locality optimization using LLVM's Polly optimizer} {
@@ -160,19 +168,15 @@ if {${name} eq ${subport}} {
     variant polly_parallel requires polly description {Enable automatic generation of OpenMP code for parallel loops using LLVM's Polly optimizer} {
         configure.optflags-append   -mllvm -polly-parallel
 
-        # Polly's parallel loop optimization generates OpenMP code, and
-        # requires libomp/libgomp; if +openmp isn't also enabled, we'll
-        # need to add the dependency and additional LDFLAGS here
-        if {![variant_isset openmp]} {
-            depends_lib-append          port:libomp
-            configure.ldflags-append    -L${prefix}/lib/libomp \
-                                        -lgomp
-        }
+        # Generated OpenMP code requires libomp/libgomp
+        depends_lib-append          port:libomp
+        configure.ldflags-append    -L${prefix}/lib/libomp \
+                                    -lgomp
     }
 
     pre-configure {
         #
-        # If we enable +lto in combination with a variant (e.g. +openmp, +polly) that
+        # If we enable +lto in combination with a variant (e.g. +polly) that
         # selects MacPorts' clang compiler, CMake fails to locate the llvm-ar and llvm-ranlib
         # binaries required for -flto.
         #
@@ -194,6 +198,19 @@ if {${name} eq ${subport}} {
     post-test {
         # This actually executes the unit tests
         system -W ${test.dir} {./test-z3 /a}
+    }
+}
+
+# F*-qualified z3 release; may trail behind the current z3 release.
+subport ${name}-fstar {
+    # Should be updated
+    description             F*-qualified release of the Z3 Theorem Prover
+    long_description        Private version of the Z3 theorem prover for use by (and qualified to work with) F*.
+    cmake.install_prefix    ${prefix}/libexec/${subport}
+
+    destroot {
+        xinstall -d 755 "${destroot}${cmake.install_prefix}/bin"
+        xinstall -m 755 "${cmake.build_dir}/z3" "${destroot}${cmake.install_prefix}/bin/z3"
     }
 }
 
