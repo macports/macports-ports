@@ -119,46 +119,63 @@ proc python_set_versions {option action args} {
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
         pre-build {
+            set pycflags ""
             set pycxxflags ""
+            set pyobjcflags ""
             if {${python.add_archflags}} {
                 if {[variant_exists universal] && [variant_isset universal]} {
                     if {[vercmp [macports_version] 2.5.99] >= 0} {
-                    build.env-append    CFLAGS=${configure.universal_cflags} \
-                                        OBJCFLAGS=${configure.universal_cflags} \
-                                        LDFLAGS=${configure.universal_ldflags}
+                    build.env-append    LDFLAGS=${configure.universal_ldflags}
                     } else {
-                    build.env-append    CFLAGS="${configure.universal_cflags}" \
-                                        OBJCFLAGS="${configure.universal_cflags}" \
-                                        LDFLAGS="${configure.universal_ldflags}"
+                    build.env-append    LDFLAGS="${configure.universal_ldflags}"
                     }
+                    set pycflags ${configure.universal_cflags}
                     set pycxxflags ${configure.universal_cxxflags}
+                    set pyobjcflags ${configure.universal_cflags}
                 } else {
                     if {[vercmp [macports_version] 2.5.99] >= 0} {
-                    build.env-append    CFLAGS=${configure.cc_archflags} \
-                                        OBJCFLAGS=${configure.objc_archflags} \
-                                        FFLAGS=${configure.f77_archflags} \
+                    build.env-append    FFLAGS=${configure.f77_archflags} \
                                         F90FLAGS=${configure.f90_archflags} \
                                         FCFLAGS=${configure.fc_archflags} \
                                         LDFLAGS=${configure.ld_archflags}
                     } else {
-                    build.env-append    CFLAGS="${configure.cc_archflags}" \
-                                        OBJCFLAGS="${configure.objc_archflags}" \
-                                        FFLAGS="${configure.f77_archflags}" \
+                    build.env-append    FFLAGS="${configure.f77_archflags}" \
                                         F90FLAGS="${configure.f90_archflags}" \
                                         FCFLAGS="${configure.fc_archflags}" \
                                         LDFLAGS="${configure.ld_archflags}"
                     }
+                    set pycflags ${configure.cc_archflags}
                     set pycxxflags ${configure.cxx_archflags}
+                    set pyobjcflags ${configure.objc_archflags}
                 }
             }
             if {${python.set_cxx_stdlib}} {
                 set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
+            }
+            if {${python.set_sdkroot}} {
+                append pycflags " -isysroot${configure.sdkroot}"
+                append pycxxflags " -isysroot${configure.sdkroot}"
+                append pyobjcflags " -isysroot${configure.sdkroot}"
+            }
+            if {$pycflags ne ""} {
+                if {[vercmp [macports_version] 2.5.99] >= 0} {
+                build.env-append        CFLAGS=$pycflags
+                } else {
+                build.env-append        CFLAGS="$pycflags"
+                }
             }
             if {$pycxxflags ne ""} {
                 if {[vercmp [macports_version] 2.5.99] >= 0} {
                 build.env-append        CXXFLAGS=$pycxxflags
                 } else {
                 build.env-append        CXXFLAGS="$pycxxflags"
+                }
+            }
+            if {$pyobjcflags ne ""} {
+                if {[vercmp [macports_version] 2.5.99] >= 0} {
+                build.env-append        OBJCFLAGS=$pyobjcflags
+                } else {
+                build.env-append        OBJCFLAGS="$pyobjcflags"
                 }
             }
             if {${python.set_compiler}} {
@@ -174,46 +191,63 @@ proc python_set_versions {option action args} {
             }
         }
         pre-destroot {
+            set pycflags ""
             set pycxxflags ""
+            set pyobjcflags ""
             if {${python.add_archflags} && ${python.consistent_destroot}} {
                 if {[variant_exists universal] && [variant_isset universal]} {
                     if {[vercmp [macports_version] 2.5.99] >= 0} {
-                    destroot.env-append CFLAGS=${configure.universal_cflags} \
-                                        OBJCFLAGS=${configure.universal_cflags} \
-                                        LDFLAGS=${configure.universal_ldflags}
+                    destroot.env-append LDFLAGS=${configure.universal_ldflags}
                     } else {
-                    destroot.env-append CFLAGS="${configure.universal_cflags}" \
-                                        OBJCFLAGS="${configure.universal_cflags}" \
-                                        LDFLAGS="${configure.universal_ldflags}"
+                    destroot.env-append LDFLAGS="${configure.universal_ldflags}"
                     }
+                    set pycflags ${configure.universal_cflags}
                     set pycxxflags ${configure.universal_cxxflags}
+                    set pyobjcflags ${configure.universal_cflags}
                 } else {
                     if {[vercmp [macports_version] 2.5.99] >= 0} {
-                    destroot.env-append CFLAGS=${configure.cc_archflags} \
-                                        OBJCFLAGS=${configure.objc_archflags} \
-                                        FFLAGS=${configure.f77_archflags} \
+                    destroot.env-append FFLAGS=${configure.f77_archflags} \
                                         F90FLAGS=${configure.f90_archflags} \
                                         FCFLAGS=${configure.fc_archflags} \
                                         LDFLAGS=${configure.ld_archflags}
                     } else {
-                    destroot.env-append CFLAGS="${configure.cc_archflags}" \
-                                        OBJCFLAGS="${configure.objc_archflags}" \
-                                        FFLAGS="${configure.f77_archflags}" \
+                    destroot.env-append FFLAGS="${configure.f77_archflags}" \
                                         F90FLAGS="${configure.f90_archflags}" \
                                         FCFLAGS="${configure.fc_archflags}" \
                                         LDFLAGS="${configure.ld_archflags}"
                     }
+                    set pycflags ${configure.cc_archflags}
                     set pycxxflags ${configure.cxx_archflags}
+                    set pyobjcflags ${configure.objc_archflags}
                 }
             }
-            if {${python.set_cxx_stdlib}} {
+            if {${python.set_cxx_stdlib} && ${python.consistent_destroot}} {
                 set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
+            }
+            if {${python.set_sdkroot} && ${python.consistent_destroot}} {
+                append pycflags " -isysroot${configure.sdkroot}"
+                append pycxxflags " -isysroot${configure.sdkroot}"
+                append pyobjcflags " -isysroot${configure.sdkroot}"
+            }
+            if {$pycflags ne ""} {
+                if {[vercmp [macports_version] 2.5.99] >= 0} {
+                destroot.env-append     CFLAGS=$pycflags
+                } else {
+                destroot.env-append     CFLAGS="$pycflags"
+                }
             }
             if {$pycxxflags ne ""} {
                 if {[vercmp [macports_version] 2.5.99] >= 0} {
                 destroot.env-append     CXXFLAGS=$pycxxflags
                 } else {
                 destroot.env-append     CXXFLAGS="$pycxxflags"
+                }
+            }
+            if {$pyobjcflags ne ""} {
+                if {[vercmp [macports_version] 2.5.99] >= 0} {
+                destroot.env-append     OBJCFLAGS=$pyobjcflags
+                } else {
+                destroot.env-append     OBJCFLAGS="$pyobjcflags"
                 }
             }
             if {${python.set_compiler} && ${python.consistent_destroot}} {
@@ -312,13 +346,15 @@ proc python_get_defaults {var} {
     }
 }
 
-options python.add_archflags python.set_compiler python.set_cxx_stdlib \
+options python.add_archflags python.set_compiler \
+        python.set_cxx_stdlib python.set_sdkroot \
         python.link_binaries python.link_binaries_suffix \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
 default python.set_compiler yes
 default python.set_cxx_stdlib yes
+default python.set_sdkroot yes
 
 default python.link_binaries yes
 default python.link_binaries_suffix {[python_get_defaults binary_suffix]}
