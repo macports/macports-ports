@@ -75,7 +75,7 @@
 # dune.packages <string...>
 #   If set to a non-empty value, restricts the set of packages
 #   visible to dune (using --only-package)
-#   Default: (empty)
+#   Default: The port ${name}, stripped of its initial "ocaml-" prefix (if any)
 #
 # dune.profile          <string>
 #   Build profile.
@@ -395,7 +395,7 @@ options dune.root \
         dune.profile
 
 default dune.root       {${worksrcpath}}
-default dune.packages   {}
+default dune.packages   {[regsub {^(?:ocaml-)?(.*)} ${subport} {\1}]}
 default dune.profile    {release}
 
 commands    dune.build \
@@ -413,6 +413,8 @@ default     dune.build.pre_args     {
     -j ${build.jobs}
     --root=${dune.root}
     --profile=${dune.profile}
+    --ignore-promoted-rules
+    --no-config
     [ocaml::dune_get_only_packages_param]
     --default-target=${dune.build.target}
 }
@@ -426,6 +428,9 @@ default     dune.destroot.pre_args  {
     install
     -j ${build.jobs}
     --root=${dune.root}
+    --profile=${dune.profile}
+    --ignore-promoted-rules
+    --no-config
     --destdir=${destroot}
     ${dune.packages}
 }
