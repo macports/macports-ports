@@ -127,6 +127,76 @@ options app.retina
 default app.retina no
 
 
+# app.dark_mode: whether the app supports dark mode
+#
+# The default is yes.
+#
+# Info.plist key NSRequiresAquaSystemAppearance.
+
+options app.dark_mode
+default app.dark_mode yes
+
+
+# app.privacy_microphone: whether the app needs microphone access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# device’s microphone.
+#
+# Info.plist key NSMicrophoneUsageDescription.
+
+options app.privacy_microphone
+default app.privacy_microphone ""
+
+
+# app.privacy_camera: whether the app needs camera access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# device’s camera.
+#
+# Info.plist key NSCameraUsageDescription.
+
+options app.privacy_camera
+default app.privacy_camera ""
+
+
+# app.privacy_contacts: whether the app needs contacts access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# user’s contacts.
+#
+# Info.plist key NSContactsUsageDescription.
+
+options app.privacy_contacts
+default app.privacy_contacts ""
+
+
+# app.privacy_calendars: whether the app needs calendars access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# user’s calendar data.
+#
+# Info.plist key NSCalendarsUsageDescription.
+
+options app.privacy_calendars
+default app.privacy_calendars ""
+
+
+# app.privacy_photo: whether the app needs photo access
+#
+# The default is empty and therefore disabled. To enable write a
+# message that tells the user why the app is requesting access to the
+# user’s photo library.
+#
+# Info.plist key NSPhotoLibraryUsageDescription.
+
+options app.privacy_photo
+default app.privacy_photo ""
+
+
 # app.hide_dock_icon: hide the Dock icon
 #
 # SDKs like SDL and Qt use the necessary macOS APIs to implement proper Dock
@@ -274,6 +344,30 @@ platform macosx {
             if {[tbool app.retina]} {
                 puts ${fp} "    <key>NSHighResolutionCapable</key>
     <true/>"
+            }
+            if {![tbool app.dark_mode]} {
+                puts ${fp} "    <key>NSRequiresAquaSystemAppearance</key>
+    <true/>"
+            }
+            if {${app.privacy_microphone} != ""} {
+                puts ${fp} "    <key>NSMicrophoneUsageDescription</key>
+    <string>${app.privacy_microphone}</string>"
+            }
+            if {${app.privacy_camera} != ""} {
+                puts ${fp} "    <key>NSCameraUsageDescription</key>
+    <string>${app.privacy_camera}</string>"
+            }
+            if {${app.privacy_contacts} != ""} {
+                puts ${fp} "    <key>NSContactsUsageDescription</key>
+    <string>${app.privacy_contacts}</string>"
+            }
+            if {${app.privacy_calendars} != ""} {
+                puts ${fp} "    <key>NSCalendarsUsageDescription</key>
+    <string>${app.privacy_calendars}</string>"
+            }
+            if {${app.privacy_photo} != ""} {
+                puts ${fp} "    <key>NSPhotoLibraryUsageDescription</key>
+    <string>${app.privacy_photo}</string>"
             }
             if {[tbool app.hide_dock_icon]} {
                 puts ${fp} "    <key>LSUIElement</key>
