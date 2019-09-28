@@ -73,6 +73,16 @@ pre-build {
             build.args-append       CC="${configure.cc} [join ${configure.cc_archflags}]"
         }
 
+        # see https://trac.macports.org/ticket/59078
+        # -isysroot cannot be empty (see _osx_support.py in python installation)
+        if {${configure.sdkroot} != ""} {
+            set sdk_root "${configure.sdkroot}"
+        } else {
+            set sdk_root "/"
+        }
+        build.args-append CFLAGS="-isysroot${sdk_root}" \
+                          LDFLAGS="-Wl,-syslibroot,${sdk_root}"
+
         # The rules enabled by gobject-introspection require GNU make 3.81+
         platform darwin 8 {
             build.cmd-replace   [portbuild::build_getmaketype] ${prefix}/bin/gmake
