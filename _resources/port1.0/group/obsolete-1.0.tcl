@@ -36,6 +36,10 @@ proc obsolete.set_descriptions {replaced_by} {
 
     supported_archs         noarch
     livecheck.type          none
+
+    if {[info commands known_fail] ne ""} {
+        known_fail yes
+    }
 }
 
 # Handle replaced_by set after portgroup inclusion.
