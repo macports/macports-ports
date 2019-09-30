@@ -1,0 +1,297 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+PortGroup           active_variants 1.1
+PortGroup           compiler_blacklist_versions 1.0
+
+github.setup        Z3Prover z3 4.8.5 Z3-
+categories          math science
+maintainers         {landonf @landonf}
+description         Z3 Theorem Prover
+long_description    High performance SMT solver from Microsoft Research.
+
+platforms           darwin freebsd
+license             MIT
+
+github.tarball_from archive
+
+checksums           rmd160  cb3509b35dc3a428019950df2e2f94c555a7ee94 \
+                    sha256  4e8e232887ddfa643adb6a30dcd3743cb2fa6591735fbd302b49f7028cdc0363 \
+                    size    4177051
+
+patchfiles          libz3-static.diff
+
+worksrcdir          ${name}-${github.tag_prefix}${version}
+
+cmake.build_type    Release
+cmake.generator     Ninja
+
+# Don't overide z3's default optimization flags 
+configure.optflags
+
+destroot.target     install
+
+# Common variants
+variant debug description {Enable the debug build configuration} {
+    cmake.build_type    Debug
+}
+
+# Options not shared with subports
+if {${name} eq ${subport}} {
+    depends_build-append    port:python27 \
+                            port:bash
+
+    compiler.fallback       macports-clang-8.0
+
+    configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python2.7 \
+                            -DENABLE_EXAMPLE_TARGETS=ON \
+                            -DUSE_OPENMP=OFF
+
+    # Optimal (hopefully) default variants selected based on benchmark results.
+    # Benchmark configurations:
+    #
+    # darwin {
+    #   ver     {4.8.5}
+    #   cc      {macports-clang-8.0}
+    #   cpu     {Intel Core i7-7700K @ 4.20GHz (4 cores/8 threads)}
+    #   os      {macOS 10.14.6 (18G95)}
+    # }
+    # freebsd {
+    #   ver     {4.8.5}
+    #   cc      {macports-clang-8.0}
+    #   cpu     {Dual Intel Xeon E5-2680 v4 @ 2.40GHz (2 x 14 cores/28 threads)}
+    #   os      {FreeBSD 12.0-RELEASE-p9}
+    # }
+    #
+    # TODO: polly variant disabled until/if we can get it enabled by default in llvm-8.0,
+    # or provided as an LLVM subport
+#   default_variants        +gmp +lto +polly +polly_late +polly_vector
+    default_variants        +gmp +lto
+
+    variant lto conflicts debug description {Enable link-time (interprocedural) optimization} {
+        configure.args-append           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+
+        # We need cmake 3.9 behavior to be able to use CMAKE_INTERPROCEDURAL_OPTIMIZATION
+        # This can be removed if/when the project switches to a cmake_minimum_required >= 3.9
+        configure.args-append           -DCMAKE_POLICY_DEFAULT_CMP0069=NEW
+        if {${version} ne "4.8.5"} {
+            ui_error "Please verify that -DCMAKE_POLICY_DEFAULT_CMP0069=NEW is still required"
+        }
+
+        # Untested with gcc
+        compiler.blacklist-append       *gcc*
+
+        # I don't believe -flto was supported by clang until Xcode 9
+        platform darwin {
+            compiler.blacklist-append   {clang < 900}
+        }
+
+        # TODO: Is this still required in 13.x+?
+        platform freebsd {
+           compiler.blacklist-append    clang
+        }
+    }
+
+    variant gmp description {Use GNU GMP library for arbitrary precision arithmetic} {
+        depends_lib-append          port:gmp
+        configure.args-append       -DUSE_LIB_GMP=ON
+    }
+
+    variant native description {Generate code optimized for this machine's CPU. The resulting binaries may not run on other processors} {
+        configure.optflags-append   -march=native
+    }
+    
+    variant openmp description {Enable Z3 OpenMP parallelization and thread-safety support} {
+        configure.args-delete       -DUSE_OPENMP=OFF
+        configure.args-append       -DUSE_OPENMP=ON
+        depends_lib-append          port:libomp
+
+        if {[vercmp [macports_version] 2.5.99] >= 0} {
+            compiler.openmp_version 3.1
+        } else {
+            compiler.whitelist
+
+            foreach v {4.3 4.4 4.5 4.6 4.7 4.8 5 6 7 8} {
+                compiler.whitelist-append macports-gcc-${v}
+            }
+            foreach v {3.9 5.0 6.0 7.0 8.0} {
+                compiler.whitelist-append macports-clang-${v}                
+            }
+        }
+        compiler.fallback    macports-clang-8.0
+    }
+
+    variant polly conflicts debug description {Perform loop and data-locality optimization using LLVM's Polly optimizer} {
+        # We need a clang+llvm pair that can be built with Polly support
+        # We've only tested this with clang-8.0, so for now, require 8.0 as the minimum version
+        compiler.blacklist-append   {macports-clang-[0-7].*} \
+                                    {*gcc*}
+
+        # Map the selected compiler to its corresponding LLVM port version
+        # TODO: Should we expose [portconfigure::compiler_port_name] as ${compiler.port} ?
+        if {![regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
+            ui_error "Unsupported compiler: ${configure.compiler}"
+        }
+
+        # LLVM must be built with Polly support
+        depends_build-append        port:llvm-${llvm_ver}
+        require_active_variants     port:llvm-${llvm_ver} polly
+
+        configure.optflags-append   -O3 \
+                                    -Xclang -load -Xclang LLVMPolly.so \
+                                    -mllvm -polly
+    }
+
+    variant polly_late requires polly description {Perform LLVM Polly optimization later in the LLVM optimization pass pipline} {
+        # See https://polly.llvm.org/docs/Architecture.html#polly-in-the-llvm-pass-pipeline
+        configure.optflags-append   -mllvm -polly-position=before-vectorizer
+    }
+
+    variant polly_two_level_tiling requires polly description {Enable second-level loop tiling using LLVM's Polly optimizer} {
+        configure.optflags-append   -mllvm -polly-2nd-level-tiling
+    }
+
+    variant polly_vector requires polly description {Enable automatic vector code generation using LLVM's Polly optimizer} {
+        configure.optflags-append   -mllvm -polly-vectorizer=stripmine 
+    }
+
+    variant polly_parallel requires polly description {Enable automatic generation of OpenMP code for parallel loops using LLVM's Polly optimizer} {
+        configure.optflags-append   -mllvm -polly-parallel
+
+        # Polly's parallel loop optimization generates OpenMP code, and
+        # requires libomp/libgomp; if +openmp isn't also enabled, we'll
+        # need to add the dependency and additional LDFLAGS here
+        if {![variant_isset openmp]} {
+            depends_lib-append          port:libomp
+            configure.ldflags-append    -L${prefix}/lib/libomp \
+                                        -lgomp
+        }
+    }
+
+    pre-configure {
+        #
+        # If we enable +lto in combination with a variant (e.g. +openmp, +polly) that
+        # selects MacPorts' clang compiler, CMake fails to locate the llvm-ar and llvm-ranlib
+        # binaries required for -flto.
+        #
+        # TODO: Investigate fixing this in upstream cmake, and/or in the cmake PortGroup
+        #
+        if {[variant_isset lto] && [regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
+            foreach lang {C CXX} {
+                foreach tool {ar ranlib} {
+                    set var     CMAKE_${lang}_COMPILER_[string toupper ${tool}]
+                    set path    ${prefix}/bin/llvm-${tool}-mp-${llvm_ver}
+                    configure.args-append -D${var}=${path}
+                }
+            }
+        }
+    }
+
+    test.run    yes
+    test.target test-z3
+    post-test {
+        # This actually executes the unit tests
+        system -W ${test.dir} {./test-z3 /a}
+    }
+}
+
+# Create a top-level Python binding metaport
+subport py-${name} {
+    PortGroup   python 1.0
+
+    categories-append   python
+
+    description         Python bindings for the Z3 theorem prover
+    long_description    Python bindings for the Z3 SMT solver library from Microsoft Research.
+
+    supported_archs     noarch
+    depends_lib         port:${name} \
+                        port:py${python.version}-${name}
+
+    distfiles
+    patch       {}
+    configure   {}
+    build       {}
+    destroot    {
+        system "echo ${subport} is a stub port > ${destroot}${prefix}/share/doc/${subport}/README"
+    }
+}
+
+# Create Python subports for each supported Python version
+foreach v {27 37} {
+    subport py${v}-${name} {
+        PortGroup  python 1.0
+
+        python.version          ${v}
+
+        categories-append       python
+
+        description             Python ${python.branch} bindings for the Z3 theorem prover
+        long_description        Python ${python.branch} bindings for the Z3 SMT solver library from Microsoft Research.
+
+        depends_lib-append      port:${name} \
+                                port:python${v}
+
+        use_configure           yes
+        configure.args-append   -DPYTHON_EXECUTABLE=${python.bin} \
+                                -DBUILD_PYTHON_BINDINGS=ON \
+                                -DINSTALL_PYTHON_BINDINGS=ON
+
+        # Avoid rebuilding libz3
+        post-patch {
+            reinplace -E {s|^[[:blank:]]*DEPENDS[[:blank:]]+libz3|DEPENDS |g} \
+                src/api/python/CMakeLists.txt
+        }
+
+        post-destroot {
+            # The python module looks for libz3 in its package path
+            ln -sf "${prefix}/lib/libz3.dylib" "${destroot}/${python.pkgd}/z3/"
+        }
+
+        build.target            src/api/python/all
+        destroot.cmd            ${build.cmd}
+        destroot.target         src/api/python/install
+    }
+}
+
+# Java bindings
+subport ${name}-java {
+    PortGroup  java 1.0
+
+    java.version            1.8+
+    java.fallback           openjdk11
+
+    categories-append       java
+
+    description             Java bindings for the Z3 theorem prover
+    long_description        Java bindings for the Z3 SMT solver library from Microsoft Research.
+
+    depends_lib-append      port:${name}
+
+    patchfiles-append       java_libpath.diff
+
+    configure.args-append   -DBUILD_JAVA_BINDINGS=ON \
+                            -DINSTALL_JAVA_BINDINGS=ON \
+                            -DZ3_JAVA_JNI_LIB_INSTALLDIR=${prefix}/lib/${name} \
+                            -DZ3_JAVA_JAR_INSTALLDIR=${prefix}/share/java/${name}
+
+    post-patch {
+        # Avoid rebuilding libz3
+        reinplace -E {s|(^[[:blank:]]*target_link_libraries[[:blank:]]*\([[:blank:]]*z3java[[:blank:]]*PRIVATE)[[:blank:]]*libz3(.*)|\1 z3 \2|g} \
+            src/api/java/CMakeLists.txt
+
+        # Fix up path to our JNI library
+        reinplace "s|@PREFIX@|${prefix}|g" \
+            scripts/update_api.py
+    }
+
+    post-destroot {
+        ln -s "com.microsoft.z3.jar" "${destroot}${prefix}/share/java/${name}/z3.jar"
+    }
+
+    build.target            src/api/java/all
+    destroot.cmd            ${build.cmd}
+    destroot.target         src/api/java/install
+}
