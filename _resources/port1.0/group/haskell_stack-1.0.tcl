@@ -53,7 +53,10 @@ proc haskell_stack.system_ghc_flags {} {
 }
 
 proc haskell_stack.add_dependencies {} {
-    depends_build-append port:stack
+    global name
+    if { ${name} ne "stack" } { 
+        depends_build-append port:stack
+    }
     if {[option haskell_stack.system_ghc]} {
         depends_build-append port:ghc
     }
