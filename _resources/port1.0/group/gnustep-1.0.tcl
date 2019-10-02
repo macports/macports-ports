@@ -194,7 +194,7 @@ variant with_docs {
     depends_build-append    bin:latex2html:latex2html \
                             bin:texi2pdf:texinfo \
                             bin:texi2html:texi2html \
-                            bin:pdftex:teTeX \
+                            bin:pdftex:texlive-basic \
                             port:gnustep-base
 
     post-destroot {
