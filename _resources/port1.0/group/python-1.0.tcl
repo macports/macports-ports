@@ -152,10 +152,16 @@ proc python_set_versions {option action args} {
             if {${python.set_cxx_stdlib}} {
                 set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
             }
-            if {${python.set_sdkroot} && ${configure.sdkroot} ne ""} {
-                append pycflags " -isysroot${configure.sdkroot}"
-                append pycxxflags " -isysroot${configure.sdkroot}"
-                append pyobjcflags " -isysroot${configure.sdkroot}"
+            if {${python.set_sdkroot}} {
+                if {${configure.sdkroot} ne ""} {
+                    append pycflags " -isysroot${configure.sdkroot}"
+                    append pycxxflags " -isysroot${configure.sdkroot}"
+                    append pyobjcflags " -isysroot${configure.sdkroot}"
+                } else {
+                    append pycflags " -isysroot/"
+                    append pycxxflags " -isysroot/"
+                    append pyobjcflags " -isysroot/"
+                }
             }
             if {$pycflags ne ""} {
                 if {[vercmp [macports_version] 2.5.99] >= 0} {
@@ -224,10 +230,16 @@ proc python_set_versions {option action args} {
             if {${python.set_cxx_stdlib} && ${python.consistent_destroot}} {
                 set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
             }
-            if {${python.set_sdkroot} && ${python.consistent_destroot} && ${configure.sdkroot} ne ""} {
-                append pycflags " -isysroot${configure.sdkroot}"
-                append pycxxflags " -isysroot${configure.sdkroot}"
-                append pyobjcflags " -isysroot${configure.sdkroot}"
+            if {${python.set_sdkroot} && ${python.consistent_destroot}} {
+                if {${configure.sdkroot} ne ""} {
+                    append pycflags " -isysroot${configure.sdkroot}"
+                    append pycxxflags " -isysroot${configure.sdkroot}"
+                    append pyobjcflags " -isysroot${configure.sdkroot}"
+                } else {
+                    append pycflags " -isysroot/"
+                    append pycxxflags " -isysroot/"
+                    append pyobjcflags " -isysroot/"
+                }
             }
             if {$pycflags ne ""} {
                 if {[vercmp [macports_version] 2.5.99] >= 0} {
