@@ -81,6 +81,13 @@ default build.cmd           {${haskell_cabal.bin}}
 default build.target        {new-build}
 default build.args          {${haskell_cabal.default_args}}
 
+# ensure /usr/bin/gcc is used; see https://github.com/haskell/cabal/issues/1325
+default build.env           {PATH=${worksrcpath}/bin:$env(PATH)}
+pre-build {
+    xinstall -d ${worksrcpath}/bin
+    ln -s /usr/bin/gcc ${worksrcpath}/bin/gcc
+}
+
 # Note: cabal new-install does *not* use the specified --prefix'ed datadir
 # Do not use new-install; rather, new-update / new-configure / new-build
 
@@ -105,12 +112,12 @@ destroot {
 
     # install documentation
     if { [file isdirectory ${cabal_build}/doc] } {
-        xinstall -m 0755 -d ${destroot}${prefix}/share/doc/${name}
+        xinstall -d ${destroot}${prefix}/share/doc/${name}
         fs-traverse f_or_d ${cabal_build}/doc {
             set subpath [strsed ${f_or_d} "s|${cabal_build}/doc||"]
             if { ${subpath} ne "" } {
                 if { [file isdirectory ${f_or_d}] } {
-                    xinstall -m 0755 -d \
+                    xinstall -d \
                         ${destroot}${prefix}/share/doc/${name}${subpath}
                 } elseif { [file isfile ${f_or_d}] } {
                     xinstall -m 0644 ${f_or_d} \
