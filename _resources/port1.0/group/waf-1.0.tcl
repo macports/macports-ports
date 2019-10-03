@@ -12,5 +12,6 @@ configure.universal_args-delete --disable-dependency-tracking
 
 build.cmd               ${waf.python} ./waf
 build.target            build
+build.post_args-append  --verbose
 
 destroot.destdir        --destdir=${destroot}
