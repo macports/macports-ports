@@ -39,7 +39,8 @@
 proc haskell_cabal.add_dependencies {} {
     global name
     if { ${name} ne "cabal" } {
-        depends_build-append port:cabal
+        depends_build-append port:cabal \
+                             port:ghc
     }
 }
 port::register_callback haskell_cabal.add_dependencies
@@ -118,7 +119,7 @@ destroot {
             }
         }
     }
-    
+
     # install cabal data-files
     if { [file exists ${worksrcpath}/data]
         && [file isdirectory ${worksrcpath}/data] } {
