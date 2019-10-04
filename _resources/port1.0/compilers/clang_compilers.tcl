@@ -6,8 +6,9 @@
 
 # does Clang work on all i386 and x86_64 systems?
 # according to https://packages.macports.org/clang-7.0/,
-#    clang builds back to Mac OS X 10.6
-lappend compilers macports-clang-8.0 \
+# clang builds back to Mac OS X 10.6
+lappend compilers macports-clang-9.0 \
+                  macports-clang-8.0 \
                   macports-clang-7.0 \
                   macports-clang-6.0 \
                   macports-clang-5.0
