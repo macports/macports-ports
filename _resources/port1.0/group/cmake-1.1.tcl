@@ -72,11 +72,7 @@ default cmake.module_path           {}
 # cmake.generator_blacklist <generator-pattern>
 # (patterns are case-insensitive, e.g. "*ninja*")
 #
-if {[vercmp [macports_version] 2.5.3] <= 0} {
-    default cmake.generator             {"CodeBlocks - Unix Makefiles"}
-} else {
-    default cmake.generator             "CodeBlocks - Unix Makefiles"
-}
+default cmake.generator             "CodeBlocks - Unix Makefiles"
 default cmake.generator_blacklist   {}
 # CMake generates Unix Makefiles that contain a special "fast" install target
 # which skips the whole "let's see if there's anything left to (re)build before

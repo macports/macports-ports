@@ -238,11 +238,7 @@ foreach stage {build destroot} {
 }
 
 foreach stage {configure build destroot} {
-    if {[vercmp [macports_version] 2.5.99] >= 0} {
     ${stage}.env-append "RUSTFLAGS=-C linker=${configure.cc}"
-    } else {
-    ${stage}.env-append RUSTFLAGS="-C linker=${configure.cc}"
-    }
 }
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
@@ -256,13 +252,8 @@ proc cargo.environments {} {
     }
 
     foreach stage {configure build destroot} {
-        if {[vercmp [macports_version] 2.5.99] >= 0} {
         ${stage}.env-delete "RUSTFLAGS=-C linker=${configure.cc}"
         ${stage}.env-append "RUSTFLAGS=-C linker=${configure.cc}"
-        } else {
-        ${stage}.env-delete RUSTFLAGS="-C linker=${configure.cc}"
-        ${stage}.env-append RUSTFLAGS="-C linker=${configure.cc}"
-        }
     }
 
     # CARGO_BUILD_TARGET does not work correctly
