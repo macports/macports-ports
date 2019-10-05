@@ -39,11 +39,7 @@ proc universal_setup {args} {
     } else {
         ui_debug "adding universal variant via PortGroup muniversal"
         uplevel "PortGroup muniversal 1.0"
-        if {[vercmp [macports_version] 2.5.3] <= 0} {
-        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
-        } else {
         uplevel "default universal_archs_supported {i386 x86_64}"
-        }
     }
 }
 
@@ -62,11 +58,7 @@ proc octave.set_module {opt action args} {
     }
 }
 
-if {[vercmp [macports_version] 2.5.3] <= 0} {
-    default categories   {"math science"}
-} else {
-    default categories   "math science"
-}
+default categories   "math science"
 default master_sites {sourceforge:octave}
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
