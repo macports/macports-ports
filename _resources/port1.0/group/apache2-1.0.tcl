@@ -57,11 +57,7 @@ default apache2.group           _www
 
 # General settings
 options apache2.listen_ports
-if {[vercmp [macports_version] 2.5.3] <= 0} {
-    default apache2.listen_ports    {"80 443"}
-} else {
-    default apache2.listen_ports    "80 443"
-}
+default apache2.listen_ports    "80 443"
 options apache2.contact
 default apache2.contact         ops@example.com
 options apache2.timeout
