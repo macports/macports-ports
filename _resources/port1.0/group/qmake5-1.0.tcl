@@ -132,7 +132,8 @@ pre-configure {
     set qmake5_l_flags     [join ${qmake5_l_flags}     " "]
 
     if { [vercmp ${qt5.version} 5.6] >= 0 } {
-        if { ${configure.cxx_stdlib} ne "libc++" } {
+        # see https://trac.macports.org/ticket/59128 for `${configure.cxx_stdlib} ne ""` test
+        if { ${configure.cxx_stdlib} ne "libc++" && ${configure.cxx_stdlib} ne "" } {
             # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
             #    so value of ${configure.cxx_stdlib} can always be used
             puts ${cache} QMAKE_CXXFLAGS-=-stdlib=libc++
@@ -151,7 +152,7 @@ pre-configure {
 
         # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
         #    so value of ${configure.cxx_stdlib} can always be used
-        if { ${configure.cxx_stdlib} ne "libc++" } {
+        if { ${configure.cxx_stdlib} ne "libc++" && ${configure.cxx_stdlib} ne "" } {
             puts ${cache} QMAKE_CXXFLAGS_CXX11-=-stdlib=libc++
             puts ${cache} QMAKE_LFLAGS_CXX11-=-stdlib=libc++
             puts ${cache} QMAKE_CXXFLAGS_CXX11+=-stdlib=${configure.cxx_stdlib}
@@ -162,8 +163,10 @@ pre-configure {
         }
     } else {
         # always use the same standard library
-        puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
-        puts ${cache} QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+        if { ${configure.cxx_stdlib} ne "" } {
+            puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
+            puts ${cache} QMAKE_LFLAGS+=-stdlib=${configure.cxx_stdlib}
+        }
         if {${qmake5_cxx11_flags} ne ""} {
             puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx11_flags}"
         }
