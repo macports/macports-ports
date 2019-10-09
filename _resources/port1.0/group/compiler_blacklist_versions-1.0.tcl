@@ -45,7 +45,7 @@ proc compiler_blacklist_versions._set_compiler_blacklist {option action args} {
             }
             set compiler [lindex ${blacklist} 0]
             set comparisons [lrange ${blacklist} 1 end]
-            set compiler_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
+            set compiler_version [compiler.command_line_tools_version ${compiler}]
             if {[compiler_blacklist_versions._matches_all_versions ${compiler} ${comparisons}]} {
                 if {${compiler_version} eq ""} {
                     ui_debug "compiler ${compiler} blacklisted because it's not installed or it doesn't work"
@@ -76,48 +76,9 @@ proc compiler_blacklist_versions._matches_all_versions {compiler comparisons} {
 }
 
 proc compiler_blacklist_versions._version_matches {compiler comparison_operator test_version} {
-    set actual_version [compiler_blacklist_versions._get_compiler_version ${compiler}]
+    set actual_version [compiler.command_line_tools_version ${compiler}]
     if {${actual_version} eq ""} {
         return 1
     }
     return [expr [vercmp ${actual_version} ${test_version}] ${comparison_operator} 0]
-}
-
-proc compiler_blacklist_versions._get_compiler_version {compiler} {
-    global compiler_blacklist_versions._compiler_versions os.major xcodeversion
-    if {[info exists compiler_blacklist_versions._compiler_versions(${compiler})]} {
-        return [set compiler_blacklist_versions._compiler_versions(${compiler})]
-    }
-    switch ${compiler} {
-        clang {
-            set re {clang(?:_.*)?-([0-9.]+)}
-        }
-        llvm-gcc-4.2 {
-            if {${os.major} > 12 || [vercmp $xcodeversion 5.0] >= 0 || [vercmp $xcodeversion 3.1] < 0} {
-                return ""
-            }
-            set re {LLVM build ([0-9.]+)}
-        }
-        gcc-4.2 {
-            if {${os.major} > 11 || [vercmp $xcodeversion 4.2] >= 0} {
-                return ""
-            }
-            set re {build ([0-9.]+)}
-        }
-        gcc-4.0 -
-        apple-gcc-4.2 {
-            set re {build ([0-9.]+)}
-        }
-        default {
-            return -code error "don't know how to determine build number of compiler \"${compiler}\""
-        }
-    }
-    set cc [portconfigure::configure_get_compiler cc ${compiler}]
-    if {![file exists ${cc}]} return
-    if {[catch {regexp ${re} [exec ${cc} -v 2>@1] -> compiler_version}]} return
-    if {![info exists compiler_version]} {
-        return -code error "couldn't determine build number of compiler \"${compiler}\""
-    }
-    set compiler_blacklist_versions._compiler_versions(${compiler}) ${compiler_version}
-    return ${compiler_version}
 }
