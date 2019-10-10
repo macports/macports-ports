@@ -102,15 +102,19 @@ post-extract {
     # rename the effective worksrcdir to always be ${octave.module}
 
     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
-    if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
-        # work-around for case-insensitive file systems when the
-        # extract directory name is the same as the octave module name
-        # except for letter case; should always work no matter if the
-        # file system is case-insensitive or case-sensitive.
-
-        move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
-        move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
+    if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
+        delete ${workpath}/${octave.module}
+        move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
     }
+#     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
+#         # work-around for case-insensitive file systems when the
+#         # extract directory name is the same as the octave module name
+#         # except for letter case; should always work no matter if the
+#         # file system is case-insensitive or case-sensitive.
+# 
+#         move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
+#         move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
+#     }
 }
 
 configure.universal_args-delete --disable-dependency-tracking
