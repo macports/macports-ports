@@ -29,7 +29,7 @@ platform macosx {
     # Use Xcode on macOS <= 10.9 (os.major 13) because CLT doesn't ship with an SDK on 10.9-
     # Better way is to just check if CLT SDK works correctly rather than hardcode OS
     # See: https://trac.macports.org/ticket/58779
-    if { [info exists use_xcode] && ${os.major} <= 13 } {
+    if {${os.major} <= 13} {
         use_xcode yes
     }
 }
