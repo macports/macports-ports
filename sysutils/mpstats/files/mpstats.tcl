@@ -287,9 +287,6 @@ proc json_encode_stats {id os_dict ports_dict} {
     upvar 1 $os_dict os
     upvar 1 $ports_dict ports
 
-    set os_json [json_encode_dict os]
-    set active_ports_json [json_encode_portlist [dict get $ports "active"]]
-
     set json "\{"
     append json "\n  \"id\": \"$id\","
     append json "\n  \"os\": [json_encode_dict os "  "],"
