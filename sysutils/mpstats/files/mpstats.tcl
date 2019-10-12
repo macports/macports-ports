@@ -353,7 +353,12 @@ proc get_installed_ports {active} {
             } else {
                 set irequested ""
             }
-            set ivariantlist [split_variants $ivariants]
+
+            set nvariants [registry::property_retrieve $regref "negated_variants"]
+            if {$nvariants == 0} {
+                set nvariants ""
+            }
+            set ivariantlist [split_variants "$ivariants$nvariants"]
 
             lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantlist]
         }
