@@ -101,11 +101,11 @@ port::register_callback octave.add_env
 post-extract {
     # rename the effective worksrcdir to always be ${octave.module}
 
-    set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
     if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
         delete ${workpath}/${octave.module}
         move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
     }
+#     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
 #     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
 #         # work-around for case-insensitive file systems when the
 #         # extract directory name is the same as the octave module name
