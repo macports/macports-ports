@@ -33,6 +33,7 @@ rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortInde
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 git checkout -qf macports/master~4
+portindex
 git checkout -qf -
 portindex -e
 # Create macports user
