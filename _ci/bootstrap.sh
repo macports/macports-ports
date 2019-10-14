@@ -32,7 +32,11 @@ sudo sed -E -i "" 's,\[list (\$env\(\$senv\))\],\1,' /opt/local/libexec/macports
 rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
-git checkout -qf macports/master~4
+## Run portindex on recent commits if PR is newer
+git checkout -qf macports/master~8
+git checkout -qf -
+git checkout -qf "$(git merge-base macports/master HEAD)"
+## Ignore portindex errors on common ancestor
 portindex
 git checkout -qf -
 portindex -e
