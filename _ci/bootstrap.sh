@@ -37,7 +37,7 @@ rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortInde
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 ## Run portindex on recent commits if PR is newer
-git checkout -qf macports/master~8
+git checkout -qf macports/master~4
 git checkout -qf -
 git checkout -qf "$(git merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
