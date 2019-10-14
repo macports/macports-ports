@@ -102,6 +102,22 @@ proc getgccinfo {} {
     }
 }
 
+# extraction of CommandLineTools version
+proc getcltinfo {} {
+    if {[file exists /usr/lib/libxcselect.dylib]} {
+        set pkgname "CLTools_Executables"
+    } else {
+        # Mountain Lion (10.8) and below. Note that we prefer Xcode over CLT for <= 10.8
+        set pkgname "DeveloperToolsCLI"
+    }
+
+    if {![catch {exec pkgutil --pkg-info=com.apple.pkg.${pkgname}} results]} {
+        return [lindex $results 3]
+    }
+
+    return none
+}
+
 ###### JSON Encoding helper procs ######
 
 ##
@@ -271,9 +287,6 @@ proc json_encode_stats {id os_dict ports_dict} {
     upvar 1 $os_dict os
     upvar 1 $ports_dict ports
 
-    set os_json [json_encode_dict os]
-    set active_ports_json [json_encode_portlist [dict get $ports "active"]]
-
     set json "\{"
     append json "\n  \"id\": \"$id\","
     append json "\n  \"os\": [json_encode_dict os "  "],"
@@ -337,7 +350,12 @@ proc get_installed_ports {active} {
             } else {
                 set irequested ""
             }
-            set ivariantlist [split_variants $ivariants]
+
+            set nvariants [registry::property_retrieve $regref "negated_variants"]
+            if {$nvariants == 0} {
+                set nvariants ""
+            }
+            set ivariantlist [split_variants "$ivariants$nvariants"]
 
             lappend results [list name $iname version "${iversion}_${irevision}" requested $irequested variants $ivariantlist]
         }
@@ -370,8 +388,10 @@ proc action_stats {subcommands} {
     dict set os os_arch ${macports::os_arch}
     dict set os os_platform ${macports::os_platform}
     dict set os build_arch ${macports::build_arch}
+    dict set os cxx_stdlib ${macports::cxx_stdlib}
     dict set os gcc_version [getgccinfo]
     dict set os xcode_version ${macports::xcodeversion}
+    dict set os clt_version [getcltinfo]
 
     # Build dictionary of port information
     dict set ports active   [get_installed_ports yes]

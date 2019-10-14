@@ -42,7 +42,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
         compiler.whitelist  macports-gcc-6 macports-gcc-7
         universal_variant   no
     } else {
-        compiler.whitelist  macports-clang-5.0
+        compiler.whitelist  macports-clang-5.0 macports-clang-6.0 macports-clang-7.0 macports-clang-8.0
     }
 
     # see https://trac.macports.org/ticket/54766
@@ -56,6 +56,8 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     # GCC compilers cannot use libc++
     # We do not know what "cc" is, so blacklist it as well.
-    compiler.blacklist-append   *gcc* {clang < 500} cc
+    compiler.blacklist-append *gcc* {clang < 700} cc
+    # add macports 7 and 8 to fallback list (can be removed once done by base in a public release)
+    compiler.fallback-append macports-clang-8.0 macports-clang-7.0 macports-clang-9.0
 
 }
