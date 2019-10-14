@@ -1,13 +1,16 @@
 #!/bin/bash
 set -e
+
 # Uninstall Homebrew
 brew --version
 /usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
+
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2"
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
+
 # Set PATH for portindex
 source /opt/local/share/macports/setupenv.bash
 # Set ports tree to $PWD
@@ -28,6 +31,7 @@ sudo sed -E -i "" "s,{} ({} ARCHIVE_SITE_LOCAL),\1," /opt/local/libexec/macports
 # Fix bug in MacPorts 2.5.4 that mishandles multiple URLs in archive_site_local
 # See https://trac.macports.org/ticket/57718
 sudo sed -E -i "" 's,\[list (\$env\(\$senv\))\],\1,' /opt/local/libexec/macports/lib/port1.0/fetch_common.tcl
+
 # Update PortIndex
 rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
@@ -40,13 +44,16 @@ git checkout -qf "$(git merge-base macports/master HEAD)"
 portindex
 git checkout -qf -
 portindex -e
+
 # Create macports user
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
+
 # Install mpbb
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
 # Install getopt required by mpbb
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
+
 # Download and run CI runner
 curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
 chmod 0755 runner
