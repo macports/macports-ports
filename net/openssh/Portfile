@@ -3,7 +3,8 @@
 PortSystem          1.0
 
 name                openssh
-version             7.9p1
+version             8.1p1
+revision            0
 categories          net
 platforms           darwin
 maintainers         nomaintainer
@@ -26,17 +27,15 @@ long_description    OpenSSH is a FREE version of the SSH protocol suite of \
 
 homepage            http://www.openbsd.org/openssh/
 
-checksums           rmd160  236617fb9c04dcca12f9d56b5975efda4e798f53 \
-                    sha256  6b4b3ba2253d84ed3771c8050728d597c91cfce898713beb7b64a305b6f11aad \
-                    size    1565384
+checksums           rmd160  0d9bcaa22b77a8e26fbe4804ea4ae017e45b1568 \
+                    sha256  02f5dbef3835d0753556f973cd57b4c19b6b1f6cd24c03445e23ac77ca1b93ff \
+                    size    1625894
 
 master_sites        openbsd:OpenSSH/portable \
                     ftp://ftp.cise.ufl.edu/pub/mirrors/openssh/portable/ \
                     http://openbsd.mirrors.pair.com/OpenSSH/portable
 
 if {${name} eq ${subport}} {
-    revision            2
-
     depends_lib         path:lib/libssl.dylib:openssl \
                         port:libedit \
                         port:ncurses \
@@ -48,7 +47,8 @@ if {${name} eq ${subport}} {
     patchfiles          launchd.patch \
                         pam.patch \
                         patch-sandbox-darwin.c-apple-sandbox-named-external.diff \
-                        patch-sshd.c-apple-sandbox-named-external.diff
+                        patch-sshd.c-apple-sandbox-named-external.diff \
+                        0002-Apple-keychain-integration-other-changes.patch \
 
     # We need a couple of patches
     # - pam.patch
@@ -60,6 +60,8 @@ if {${name} eq ${subport}} {
     #   This requires a sandbox profile (which we provide) and the sandbox_init(3)
     #   call before the chroot(2) to privsep-path (${prefix}/var/empty), or it will
     #   fail to load the sandbox description and libsandbox.1.dylib.
+    # - 0002-Apple-keychain-integration-other-changes.patch
+    #   Adds Apple Keychain integration and ssh-agent's launchd mode
 
     post-patch {
         # reinplace prefix in path to sandbox definition added by
@@ -67,13 +69,15 @@ if {${name} eq ${subport}} {
         reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/sandbox-darwin.c
     }
 
+    use_autoreconf          yes
+
     # strnvis(3) isn't actually "broken".  OpenBSD decided to be special and flip
     # the order of arguments to strnvis and considers everyone else to be broken.
     configure.cppflags-append -DBROKEN_STRNVIS=1
 
     # Use Apple's sandboxing feature
-    configure.cppflags-append -D__APPLE_SANDBOX_NAMED_EXTERNAL__ \
-                              -D__APPLE_API_STRICT_CONFORMANCE
+    configure.cppflags-append   -D__APPLE_SANDBOX_NAMED_EXTERNAL__ \
+                                -D__APPLE_API_STRICT_CONFORMANCE
     configure.ldflags-append  -Wl,-search_paths_first
     configure.args      --with-ssl-dir=${prefix} \
                         --sysconfdir=${prefix}/etc/ssh \
@@ -87,7 +91,9 @@ if {${name} eq ${subport}} {
                         --with-libedit \
                         --with-pie \
                         --without-xauth \
-                        --without-ldns
+                        --without-ldns \
+                        --with-audit=bsm \
+                        --with-keychain=apple
 
     use_parallel_build  yes
 
@@ -119,6 +125,14 @@ if {${name} eq ${subport}} {
         }
     }
 
+    notes-append "
+                    Apple's keychain integration and launchd changes are now\
+                    included by default, not just with the gsskex variant.\
+
+                    The parameters were changed from -m/-M to -A/-K in\
+                    accordance with Apple's changes, because upstream started\
+                    using the former switches themselves recently."
+
     variant xauth description {Build with support for xauth} {
         configure.args-replace  --without-xauth \
                                 --with-xauth=${prefix}/bin/xauth
@@ -126,41 +140,25 @@ if {${name} eq ${subport}} {
     }
 
     variant hpn conflicts gsskex description {Apply high performance patch} {
-        # Old location(s):
-        #   http://www.psc.edu/index.php/hpn-ssh
         # Current location(s):
+        #   https://github.com/rapier1/openssh-portable/
         #   http://www.freshports.org/security/openssh-portable/
         #     (is usually quick in updating the HPN patch for new versions,
         #      take a look there, too.)
 
-        # Source: FreeBSD /usr/ports/net/openssh-portable/files/extra-patch-hpn
-        # FreeBSD uses patch option `-p2', so first path prefix was removed
-        # from the original.
-        use_autoreconf          yes
-        patchfiles-append       ${name}-${version}-hpnssh14v15.diff
-        configure.args-append   --with-hpn --with-nonecipher
+        # Formerly taken directly from FreeBSD as a distfile, now copied over
+        # from either upstream at or FreeBSD's ports directory and rebased.
+        set hpn_patchfile       ${name}-${version}-hpnssh14v18
+        patchfiles-append       ${hpn_patchfile}.diff \
+                                ${hpn_patchfile}-openssl-1.1.diff
     }
 
     variant gsskex conflicts hpn requires kerberos5 description "Add OpenSSH GSSAPI key exchange patch" {
-        # Source: https://salsa.debian.org/ssh-team/openssh/blob/master/debian/patches/gssapi.patch
-        # TODO: Update patch 0002-Apple-keychain-integration-other-changes.patch to use OpenSSL 1.1 APIs.
-        use_autoreconf          yes
-        patchfiles-append       gssapi.patch
-        configure.cppflags-append \
-                                -F/System/Library/Frameworks/DirectoryService.framework \
-                                -F/System/Library/Frameworks/CoreFoundation.framework \
-                                -D_UTMPX_COMPAT \
-                                -D__APPLE_LAUNCHD__ \
-                                -D__APPLE_MEMBERSHIP__ \
-                                -D__APPLE_XSAN__
+        patchfiles-append       openssh-8.1p1-gsskex-all-20141021-mp-20191015.patch
         configure.ldflags-append \
-                                -Wl,-pie \
-                                -framework CoreFoundation \
-                                -framework DirectoryService
+                                -Wl,-pie
         configure.cflags-append -fPIE
         configure.args-append   --with-4in6 \
-                                --with-audit=bsm \
-                                --with-keychain=apple \
                                 --disable-utmp \
                                 --disable-wtmp \
                                 --with-privsep-user=_sshd
@@ -239,7 +237,7 @@ if {${name} eq ${subport}} {
 }
 
 subport ssh-copy-id {
-    revision            1
+    revision            0
     platforms           darwin freebsd
     supported_archs     noarch
     maintainers         {l2dy @l2dy} openmaintainer
