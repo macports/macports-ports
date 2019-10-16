@@ -1,31 +1,331 @@
---- a/Makefile.in	2017-10-02 21:34:26.000000000 +0200
-+++ b/Makefile.in	2017-10-08 09:09:59.000000000 +0200
-@@ -59,6 +59,7 @@ SED=@SED@
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ b/keychain.m	2019-10-16 10:32:49.000000000 +0200
+@@ -0,0 +1,241 @@
++/*
++ * Copyright (c) 2007-2016 Apple Inc. All rights reserved.
++ *
++ * @APPLE_BSD_LICENSE_HEADER_START@
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1.  Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ * 2.  Redistributions in binary form must reproduce the above copyright
++ *     notice, this list of conditions and the following disclaimer in the
++ *     documentation and/or other materials provided with the distribution.
++ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of its
++ *     contributors may be used to endorse or promote products derived from
++ *     this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
++ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
++ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * @APPLE_BSD_LICENSE_HEADER_END@
++ */
++
++#import <Foundation/Foundation.h>
++#import <Security/Security.h>
++#import "SecItemPriv-shim.h"
++#include <sys/stat.h>
++#include <stdio.h>
++
++#include "xmalloc.h"
++#include "sshkey.h"
++#include "ssherr.h"
++#include "authfile.h"
++#include "openbsd-compat/openbsd-compat.h"
++#include "log.h"
++
++char *keychain_read_passphrase(const char *filename)
++{
++	OSStatus	ret = errSecSuccess;
++	NSString	*accountString = [NSString stringWithUTF8String: filename];
++	NSData		*passphraseData = NULL;
++
++	if (accountString == nil) {
++		debug2("Cannot retrieve identity passphrase from the keychain since the path is not UTF8.");
++		return NULL;
++	}
++
++	NSDictionary	*searchQuery = @{
++			       (id)kSecClass: (id)kSecClassGenericPassword,
++			       (id)kSecAttrAccount: accountString,
++			       (id)kSecAttrLabel: [NSString stringWithFormat: @"SSH: %@", accountString],
++			       (id)kSecAttrService: @"OpenSSH",
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++			       (id)kSecAttrNoLegacy: @YES,
++			       (id)kSecUseAuthenticationUI: (id)kSecUseAuthenticationUIFail,
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++			       (id)kSecAttrAccessGroup: @"com.apple.ssh.passphrases",
++			       (id)kSecReturnData: @YES};
++	debug3("Search for item with query: %s", [[searchQuery description] UTF8String]);
++	ret = SecItemCopyMatching((CFDictionaryRef)searchQuery, (CFTypeRef *)&passphraseData);
++	if (ret == errSecItemNotFound) {
++		debug2("Passphrase not found in the keychain.");
++		return NULL;
++	} else if (ret != errSecSuccess) {
++		NSString *errorString = (NSString *)SecCopyErrorMessageString(ret, NULL);
++		debug2("Unexpected keychain error while searching for an item: %s", [errorString UTF8String]);
++		[errorString release];
++		[passphraseData release];
++		return NULL;
++	}
++
++	if (![passphraseData isKindOfClass: [NSData class]]) {
++		debug2("Malformed result returned from the keychain");
++		[passphraseData release];
++		return NULL;
++	}
++
++	char *passphrase = xcalloc([passphraseData length] + 1, sizeof(char));
++	[passphraseData getBytes: passphrase length: [passphraseData length]];
++	[passphraseData release];
++
++	// Try to load the key first and only return the passphrase if we know it's the right one
++	struct sshkey *private = NULL;
++	int r = sshkey_load_private_type(KEY_UNSPEC, filename, passphrase, &private, NULL);
++	if (r != SSH_ERR_SUCCESS) {
++		debug2("Could not unlock key with the passphrase retrieved from the keychain.");
++		freezero(passphrase, strlen(passphrase));
++		return NULL;
++	}
++	sshkey_free(private);
++
++	return passphrase;
++}
++
++void store_in_keychain(const char *filename, const char *passphrase)
++{
++	OSStatus	ret = errSecSuccess;
++	BOOL		updateExistingItem = NO;
++	NSString	*accountString = [NSString stringWithUTF8String: filename];
++
++	if (accountString == nil) {
++		debug2("Cannot store identity passphrase into the keychain since the path is not UTF8.");
++		return;
++	}
++
++	NSDictionary	*defaultAttributes = @{
++				(id)kSecClass: (id)kSecClassGenericPassword,
++				(id)kSecAttrAccount: accountString,
++				(id)kSecAttrLabel: [NSString stringWithFormat: @"SSH: %@", accountString],
++				(id)kSecAttrService: @"OpenSSH",
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++				(id)kSecAttrNoLegacy: @YES,
++				(id)kSecUseAuthenticationUI: (id)kSecUseAuthenticationUIFail,
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++				(id)kSecAttrAccessGroup: @"com.apple.ssh.passphrases"};
++
++	CFTypeRef searchResults = NULL;
++	NSMutableDictionary *searchQuery = [@{(id)kSecReturnRef: @YES} mutableCopy];
++	[searchQuery addEntriesFromDictionary: defaultAttributes];
++
++	debug3("Search for existing item with query: %s", [[searchQuery description] UTF8String]);
++	ret = SecItemCopyMatching((CFDictionaryRef)searchQuery, &searchResults);
++	[searchQuery release];
++	if (ret == errSecSuccess) {
++		debug3("Item already exists in the keychain, updating.");
++		updateExistingItem = YES;
++
++	} else if (ret == errSecItemNotFound) {
++		debug3("Item does not exist in the keychain, adding.");
++	} else {
++		NSString *errorString = (NSString *)SecCopyErrorMessageString(ret, NULL);
++		debug3("Unexpected keychain error while searching for an item: %s", [errorString UTF8String]);
++		[errorString release];
++	}
++
++	if (updateExistingItem) {
++		NSDictionary *updateQuery = defaultAttributes;
++		NSDictionary *changes = @{(id)kSecValueData: [NSData dataWithBytesNoCopy: (void *)passphrase length: strlen(passphrase) freeWhenDone: NO]};
++
++		ret = SecItemUpdate((CFDictionaryRef)updateQuery, (CFDictionaryRef)changes);
++		if (ret != errSecSuccess) {
++			NSString *errorString = (NSString *)SecCopyErrorMessageString(ret, NULL);
++			debug3("Unexpected keychain error while updating the item: %s", [errorString UTF8String]);
++			[errorString release];
++		}
++	} else {
++		NSMutableDictionary *addQuery = [@{(id)kSecValueData: [NSData dataWithBytesNoCopy: (void *)passphrase length: strlen(passphrase) freeWhenDone: NO]} mutableCopy];
++
++		[addQuery addEntriesFromDictionary: defaultAttributes];
++		ret = SecItemAdd((CFDictionaryRef)addQuery, NULL);
++		[addQuery release];
++		if (ret != errSecSuccess) {
++			NSString *errorString = (NSString *)SecCopyErrorMessageString(ret, NULL);
++			debug3("Unexpected keychain error while inserting the item: %s", [errorString UTF8String]);
++			[errorString release];
++		}
++	}
++}
++
++/*
++ * Remove the passphrase for a given identity from the keychain.
++ */
++void
++remove_from_keychain(const char *filename)
++{
++	OSStatus	ret = errSecSuccess;
++	NSString	*accountString = [NSString stringWithUTF8String: filename];
++
++	if (accountString == nil) {
++		debug2("Cannot delete identity passphrase from the keychain since the path is not UTF8.");
++		return;
++	}
++
++	NSDictionary	*searchQuery = @{
++			       (id)kSecClass: (id)kSecClassGenericPassword,
++			       (id)kSecAttrAccount: accountString,
++			       (id)kSecAttrService: @"OpenSSH",
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++			       (id)kSecAttrNoLegacy: @YES,
++			       (id)kSecUseAuthenticationUI: (id)kSecUseAuthenticationUIFail,
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++			       (id)kSecAttrAccessGroup: @"com.apple.ssh.passphrases"};
++
++	ret = SecItemDelete((CFDictionaryRef)searchQuery);
++	if (ret == errSecSuccess) {
++		NSString *errorString = (NSString *)SecCopyErrorMessageString(ret, NULL);
++		debug3("Unexpected keychain error while deleting the item: %s", [errorString UTF8String]);
++		[errorString release];
++	}
++}
++
++
++int
++load_identities_from_keychain(int (^add_identity)(const char *identity))
++{
++	int 		ret = 0;
++	OSStatus	err = errSecSuccess;
++
++	NSArray		*searchResults = nil;
++	NSDictionary	*searchQuery = @{
++				(id)kSecClass: (id)kSecClassGenericPassword,
++				(id)kSecAttrService: @"OpenSSH",
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++				(id)kSecAttrNoLegacy: @YES,
++				(id)kSecUseAuthenticationUI: (id)kSecUseAuthenticationUIFail,
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++				(id)kSecAttrAccessGroup: @"com.apple.ssh.passphrases",
++				(id)kSecReturnAttributes: @YES,
++				(id)kSecMatchLimit: (id)kSecMatchLimitAll};
++
++	err = SecItemCopyMatching((CFDictionaryRef)searchQuery, (CFTypeRef *)&searchResults);
++	if (err == errSecItemNotFound) {
++		fprintf(stderr, "No identity found in the keychain.\n");
++		[searchResults release];
++		return 0;
++	} else if (err != errSecSuccess || ![searchResults isKindOfClass: [NSArray class]]) {
++		return 1;
++	}
++
++	for (NSDictionary *itemAttributes in searchResults) {
++		NSString	*accountString = itemAttributes[(id)kSecAttrAccount];
++		struct stat	st;
++
++		if (stat([accountString UTF8String], &st) < 0)
++			continue;
++		if (add_identity([accountString UTF8String]))
++			ret = 1;
++	}
++	[searchResults release];
++
++	return ret;
++}
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ b/keychain.h	2019-10-16 10:32:49.000000000 +0200
+@@ -0,0 +1,36 @@
++/*
++ * Copyright (c) 2007-2016 Apple Inc. All rights reserved.
++ *
++ * @APPLE_BSD_LICENSE_HEADER_START@
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1.  Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ * 2.  Redistributions in binary form must reproduce the above copyright
++ *     notice, this list of conditions and the following disclaimer in the
++ *     documentation and/or other materials provided with the distribution.
++ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of its
++ *     contributors may be used to endorse or promote products derived from
++ *     this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
++ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
++ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * @APPLE_BSD_LICENSE_HEADER_END@
++ */
++
++void	store_in_keychain(const char *filename, const char *passphrase);
++void	remove_from_keychain(const char *filename);
++char	*keychain_read_passphrase(const char *filename);
++int 	load_identities_from_keychain(int (^add_identity)(const char *identity));
+--- a/Makefile.in	2019-10-09 02:31:03.000000000 +0200
++++ b/Makefile.in	2019-10-16 10:32:49.000000000 +0200
+@@ -41,6 +41,7 @@ PATHS= -DSSHDIR=\"$(sysconfdir)\" \
+ CC=@CC@
+ LD=@LD@
+ CFLAGS=@CFLAGS@
++OBJCFLAGS=@OBJCFLAGS@
+ CPPFLAGS=-I. -I$(srcdir) @CPPFLAGS@ $(PATHS) @DEFS@
+ LIBS=@LIBS@
+ K5LIBS=@K5LIBS@
+@@ -56,6 +57,7 @@ SED=@SED@
  ENT=@ENT@
  XAUTH_PATH=@XAUTH_PATH@
  LDFLAGS=-L. -Lopenbsd-compat/ @LDFLAGS@
 +KEYCHAIN_LDFLAGS=@KEYCHAIN_LDFLAGS@
  EXEEXT=@EXEEXT@
  MANFMT=@MANFMT@
- 
-@@ -112,6 +113,8 @@ SSHDOBJS=sshd.o auth-rhosts.o auth-passw
+ MKDIR_P=@MKDIR_P@
+@@ -121,6 +123,8 @@ SSHDOBJS=sshd.o auth-rhosts.o auth-passw
  	sandbox-seccomp-filter.o sandbox-capsicum.o sandbox-pledge.o \
- 	sandbox-solaris.o
+ 	sandbox-solaris.o uidswap.o
  
 +KEYCHAINOBJS=keychain.o
 +
  MANPAGES	= moduli.5.out scp.1.out ssh-add.1.out ssh-agent.1.out ssh-keygen.1.out ssh-keyscan.1.out ssh.1.out sshd.8.out sftp-server.8.out sftp.1.out ssh-keysign.8.out ssh-pkcs11-helper.8.out sshd_config.5.out ssh_config.5.out
  MANPAGES_IN	= moduli.5 scp.1 ssh-add.1 ssh-agent.1 ssh-keygen.1 ssh-keyscan.1 ssh.1 sshd.8 sftp-server.8 sftp.1 ssh-keysign.8 ssh-pkcs11-helper.8 sshd_config.5 ssh_config.5
  MANTYPE		= @MANTYPE@
-@@ -147,6 +150,7 @@ all: $(CONFIGFILES) $(MANPAGES) $(TARGET
+@@ -156,6 +160,7 @@ all: configure-check $(CONFIGFILES) $(MA
  $(LIBSSH_OBJS): Makefile.in config.h
  $(SSHOBJS): Makefile.in config.h
  $(SSHDOBJS): Makefile.in config.h
 +$(KEYCHAINOBJS): Makefile.in config.h
+ configure-check: $(srcdir)/configure
+ 
+ $(srcdir)/configure: configure.ac aclocal.m4
+@@ -164,6 +169,8 @@ $(srcdir)/configure: configure.ac acloca
  
  .c.o:
  	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
-@@ -160,8 +164,8 @@ libssh.a: $(LIBSSH_OBJS)
++.m.o:
++	$(CC) $(OBJCFLAGS) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+ 
+ LIBCOMPAT=openbsd-compat/libopenbsd-compat.a
+ $(LIBCOMPAT): always
+@@ -174,8 +181,8 @@ libssh.a: $(LIBSSH_OBJS)
  	$(AR) rv $@ $(LIBSSH_OBJS)
  	$(RANLIB) $@
  
@@ -36,9 +336,9 @@
  
  sshd$(EXEEXT): libssh.a	$(LIBCOMPAT) $(SSHDOBJS)
  	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS)
-@@ -169,11 +173,11 @@ sshd$(EXEEXT): libssh.a	$(LIBCOMPAT) $(S
+@@ -183,11 +190,11 @@ sshd$(EXEEXT): libssh.a	$(LIBCOMPAT) $(S
  scp$(EXEEXT): $(LIBCOMPAT) libssh.a scp.o progressmeter.o
- 	$(LD) -o $@ scp.o progressmeter.o bufaux.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+ 	$(LD) -o $@ scp.o progressmeter.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
  
 -ssh-add$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-add.o
 -	$(LD) -o $@ ssh-add.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
@@ -50,144 +350,78 @@
 +ssh-agent$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-agent.o ssh-pkcs11-client.o $(KEYCHAINOBJS)
 +	$(LD) -o $@ ssh-agent.o ssh-pkcs11-client.o $(KEYCHAINOBJS) $(LDFLAGS) $(KEYCHAIN_LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
  
- ssh-keygen$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-keygen.o
- 	$(LD) -o $@ ssh-keygen.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
-@@ -325,7 +329,7 @@ install-files:
- 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keygen$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keygen$(EXEEXT)
- 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-keyscan$(EXEEXT) $(DESTDIR)$(bindir)/ssh-keyscan$(EXEEXT)
- 	$(INSTALL) -m 0755 $(STRIP_OPT) sshd$(EXEEXT) $(DESTDIR)$(sbindir)/sshd$(EXEEXT)
--	$(INSTALL) -m 4711 $(STRIP_OPT) ssh-keysign$(EXEEXT) $(DESTDIR)$(SSH_KEYSIGN)$(EXEEXT)
-+	$(INSTALL) -m 0711 $(STRIP_OPT) ssh-keysign$(EXEEXT) $(DESTDIR)$(SSH_KEYSIGN)$(EXEEXT)
- 	$(INSTALL) -m 0755 $(STRIP_OPT) ssh-pkcs11-helper$(EXEEXT) $(DESTDIR)$(SSH_PKCS11_HELPER)$(EXEEXT)
- 	$(INSTALL) -m 0755 $(STRIP_OPT) sftp$(EXEEXT) $(DESTDIR)$(bindir)/sftp$(EXEEXT)
- 	$(INSTALL) -m 0755 $(STRIP_OPT) sftp-server$(EXEEXT) $(DESTDIR)$(SFTP_SERVER)$(EXEEXT)
---- a/audit-bsm.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/audit-bsm.c	2017-10-08 09:09:58.000000000 +0200
-@@ -261,7 +261,12 @@ bsm_audit_record(int typ, char *string, 
- 	pid_t		pid = getpid();
- 	AuditInfoTermID	tid = ssh_bsm_tid;
+ ssh-keygen$(EXEEXT): $(LIBCOMPAT) libssh.a ssh-keygen.o sshsig.o
+ 	$(LD) -o $@ ssh-keygen.o sshsig.o $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
+--- a/audit-bsm.c	2019-10-09 02:31:03.000000000 +0200
++++ b/audit-bsm.c	2019-10-16 10:32:49.000000000 +0200
+@@ -62,6 +62,15 @@
+ #include <bsm/audit_record.h>
+ #include <locale.h>
  
--	if (the_authctxt != NULL && the_authctxt->valid) {
-+	if (the_authctxt == NULL) {
-+		error("BSM audit: audit record internal error (NULL ctxt)");
-+		abort();
-+	}
++#ifdef __APPLE__
++#include <bsm/audit_session.h>
++#include "auth-options.h"
++#include "misc.h"
++#include "servconf.h"
++extern ServerOptions options;
++extern struct sshauthopt *auth_opts;
++#endif
 +
-+	if (the_authctxt->valid) {
- 		uid = the_authctxt->pw->pw_uid;
- 		gid = the_authctxt->pw->pw_gid;
+ #if defined(HAVE_GETAUDIT_ADDR)
+ #define	AuditInfoStruct		auditinfo_addr
+ #define AuditInfoTermID		au_tid_addr_t
+@@ -305,6 +314,17 @@ bsm_audit_session_setup(void)
+ 		return;
  	}
---- a/auth-pam.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/auth-pam.c	2017-10-08 09:09:58.000000000 +0200
-@@ -795,10 +795,11 @@ sshpam_query(void *ctx, char **name, cha
- 				free(msg);
- 				return (0);
- 			}
--			error("PAM: %s for %s%.100s from %.100s", msg,
-+			error("PAM: %s for %s%.100s from %.100s via %s", msg,
- 			    sshpam_authctxt->valid ? "" : "illegal user ",
- 			    sshpam_authctxt->user,
--			    auth_get_canonical_hostname(ssh, options.use_dns));
-+			    auth_get_canonical_hostname(ssh, options.use_dns),
-+			    get_local_ipaddr(ssh_packet_get_connection_in(ssh)));
- 			/* FALLTHROUGH */
- 		default:
- 			*num = 0;
---- a/auth.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/auth.c	2017-10-08 09:09:59.000000000 +0200
-@@ -223,7 +223,7 @@ allowed_user(struct passwd * pw)
- 	}
- 	if (options.num_deny_groups > 0 || options.num_allow_groups > 0) {
- 		/* Get the user's group access list (primary and supplementary) */
--		if (ga_init(pw->pw_name, pw->pw_gid) == 0) {
-+		if (ga_init(pw) == 0) {
- 			logit("User %.100s from %.100s not allowed because "
- 			    "not in any group", pw->pw_name, hostname);
- 			return 0;
---- a/authfd.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/authfd.c	2017-10-08 09:09:58.000000000 +0200
-@@ -164,6 +164,29 @@ ssh_request_reply(int sock, struct sshbu
- }
  
- /*
-+ * Adds identities using passphrases stored in the keychain.  This call is not
-+ * meant to be used by normal applications.
-+ */
-+
-+int
-+ssh_add_from_keychain(int agent_fd)
-+{
-+	Buffer msg;
-+	int type;
-+
-+	buffer_init(&msg);
-+	buffer_put_char(&msg, SSH_AGENTC_ADD_FROM_KEYCHAIN);
-+
-+	if (ssh_request_reply(agent_fd, &msg, &msg) == 0) {
-+		buffer_free(&msg);
-+		return 0;
++#ifdef __APPLE__
++	bzero(&info, sizeof (info));
++	info.ai_flags = AU_SESSION_FLAG_IS_REMOTE;
++	if (the_authctxt->valid)  {
++	    info.ai_flags |=  AU_SESSION_FLAG_HAS_AUTHENTICATED;
 +	}
-+	type = buffer_get_char(&msg);
-+	buffer_free(&msg);
-+	return decode_reply(type);
-+}
++	if (auth_opts->permit_pty_flag && options.permit_tty) {
++		info.ai_flags |=  AU_SESSION_FLAG_HAS_TTY;
++	}
++#endif
 +
-+/*
-  * Closes the agent socket if it should be closed (depends on how it was
-  * obtained).  The argument must have been returned by
-  * ssh_get_authentication_socket().
---- a/authfd.h	2017-10-02 21:34:26.000000000 +0200
-+++ b/authfd.h	2017-10-08 09:09:58.000000000 +0200
-@@ -42,6 +42,9 @@ int	ssh_agent_sign(int sock, const struc
- 	    u_char **sigp, size_t *lenp,
- 	    const u_char *data, size_t datalen, const char *alg, u_int compat);
+ 	if (the_authctxt->valid)
+ 		info.ai_auid = the_authctxt->pw->pw_uid;
+ 	else
+--- a/configure.ac	2019-10-09 02:31:03.000000000 +0200
++++ b/configure.ac	2019-10-16 10:32:49.000000000 +0200
+@@ -20,6 +20,7 @@ AC_LANG([C])
  
-+int
-+ssh_add_from_keychain(int agent_fd);
-+
- /* Messages for the authentication agent connection. */
- #define SSH_AGENTC_REQUEST_RSA_IDENTITIES	1
- #define SSH_AGENT_RSA_IDENTITIES_ANSWER		2
-@@ -75,6 +78,9 @@ int	ssh_agent_sign(int sock, const struc
- #define SSH2_AGENTC_ADD_ID_CONSTRAINED		25
- #define SSH_AGENTC_ADD_SMARTCARD_KEY_CONSTRAINED 26
+ AC_CONFIG_HEADER([config.h])
+ AC_PROG_CC([cc gcc])
++AC_PROG_OBJC([cc clang gcc])
+ AC_CANONICAL_HOST
+ AC_C_BIGENDIAN
  
-+/* keychain */
-+#define SSH_AGENTC_ADD_FROM_KEYCHAIN		27
-+
- #define	SSH_AGENT_CONSTRAIN_LIFETIME		1
- #define	SSH_AGENT_CONSTRAIN_CONFIRM		2
- 
---- a/config.h.in	2017-10-03 18:06:11.000000000 +0200
-+++ b/config.h.in	2017-10-08 09:09:59.000000000 +0200
-@@ -78,6 +78,18 @@
- /* strnvis detected broken */
- #undef BROKEN_STRNVIS
- 
-+/* platform uses an in-memory credentials cache */
-+#undef USE_CCAPI
-+
-+/* platform has a Security Authorization Session API */
-+#undef USE_SECURITY_SESSION_API
-+
-+/* Define to 1 if you have the `copyfile' function. */
-+#undef HAVE_COPYFILE
-+
-+/* Define to 1 if you have the <copyfile.h> header file. */
-+#undef HAVE_COPYFILE_H
-+
- /* tcgetattr with ICANON may hang */
- #undef BROKEN_TCGETATTR_ICANON
- 
---- a/configure.ac	2017-10-02 21:34:26.000000000 +0200
-+++ b/configure.ac	2017-10-08 09:09:59.000000000 +0200
-@@ -5042,10 +5042,40 @@ AC_CHECK_MEMBER([struct utmp.ut_line], [
+@@ -667,11 +668,11 @@ main() { if (NSVersionOfRunTimeLibrary("
+ 	AC_DEFINE([SSH_TUN_PREPEND_AF], [1],
+ 	    [Prepend the address family to IP tunnel traffic])
+ 	m4_pattern_allow([AU_IPv])
+-	AC_CHECK_DECL([AU_IPv4], [],
+-	    AC_DEFINE([AU_IPv4], [0], [System only supports IPv4 audit records])
+-	    [#include <bsm/audit.h>]
+-	AC_DEFINE([LASTLOG_WRITE_PUTUTXLINE], [1],
+-	    [Define if pututxline updates lastlog too])
++	AC_CHECK_DECL([AU_IPv4],
++	    AC_DEFINE([LASTLOG_WRITE_PUTUTXLINE], [1],
++		[Define if pututxline updates lastlog too]),
++	    AC_DEFINE([AU_IPv4], [0], [System only supports IPv4 audit records]),
++	    [[#include <bsm/audit.h>]]
+ 	)
+ 	AC_DEFINE([SPT_TYPE], [SPT_REUSEARGV],
+ 		[Define to a Set Process Title type if your system is
+@@ -5152,6 +5153,34 @@ AC_CHECK_MEMBER([struct utmp.ut_line], [
  #endif
  	])
  
 +dnl Keychain support
 +AC_ARG_WITH(keychain,
-+	[  --with-keychain=apple   Use Mac OS X Keychain],
++	[  --with-keychain=apple   Use macOS Keychain],
 +	[
 +		case "$withval" in
 +		apple|no)
@@ -203,11 +437,12 @@
 +	case "$KEYCHAIN" in
 +	apple)
 +		AC_CHECK_HEADERS(Security/Security.h, [
-+				CPPFLAGS="$CPPFLAGS -D__APPLE_KEYCHAIN__"
-+				KEYCHAIN_LDFLAGS="-framework Security -framework CoreFoundation"
++				CPPFLAGS="$CPPFLAGS -D__APPLE_KEYCHAIN__ -D__APPLE_MEMBERSHIP__ -D__APPLE_TMPDIR__ -D__APPLE_LAUNCHD__"
++				OBJCFLAGS="$OBJCFLAGS -F/System/Library/Frameworks/Security.framework -F/System/Library/Frameworks/DirectoryService.framework -F/System/Library/Frameworks/CoreFoundation.framework"
++				KEYCHAIN_LDFLAGS="-framework Security -framework CoreFoundation -framework Foundation -lobjc"
 +				AC_SUBST(KEYCHAIN_LDFLAGS)
 +				],
-+				AC_MSG_WARN([Security framework not found. Disabling Mac OS X Keychain support.]))
++				AC_MSG_WARN([Security framework not found. Disabling macOS Keychain support.]))
 +		;;
 +	esac
 +fi
@@ -215,1599 +450,304 @@
  dnl Adding -Werror to CFLAGS early prevents configure tests from running.
  dnl Add now.
  CFLAGS="$CFLAGS $werror_flags"
- 
-+AC_CHECK_FUNCS(copyfile)
-+AC_CHECK_HEADERS(copyfile.h)
-+
- if test "x$ac_cv_func_getaddrinfo" != "xyes" ; then
- 	TEST_SSH_IPV6=no
- else
---- a/groupaccess.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/groupaccess.c	2017-10-08 09:09:58.000000000 +0200
-@@ -34,38 +34,67 @@
- #include <string.h>
- #include <limits.h>
- 
-+#ifdef __APPLE_MEMBERSHIP__
-+#include <membership.h>
-+#endif
-+
- #include "xmalloc.h"
- #include "groupaccess.h"
+--- a/groupaccess.c	2019-10-09 02:31:03.000000000 +0200
++++ b/groupaccess.c	2019-10-16 10:32:49.000000000 +0200
+@@ -39,6 +39,10 @@
  #include "match.h"
  #include "log.h"
  
 +#ifdef __APPLE_MEMBERSHIP__
-+// SPI for 5235093
 +int32_t getgrouplist_2(const char *, gid_t, gid_t **);
-+int32_t getgroupcount(const char *, gid_t);
 +#endif
 +
  static int ngroups;
  static char **groups_byname;
-+#ifdef __APPLE_MEMBERSHIP__
-+uuid_t u_uuid;
-+#endif
  
- /*
-  * Initialize group access list for user with primary (base) and
-  * supplementary groups.  Return the number of groups in the list.
-  */
- int
--ga_init(const char *user, gid_t base)
-+ga_init(struct passwd *pw)
- {
--	gid_t *groups_bygid;
-+	gid_t *groups_bygid = NULL;
- 	int i, j;
- 	struct group *gr;
- 
-+#ifdef __APPLE_MEMBERSHIP__
-+	if (0 != mbr_uid_to_uuid(pw->pw_uid, u_uuid))
-+		return 0;
-+#endif
-+
+@@ -56,6 +60,18 @@ ga_init(const char *user, gid_t base)
  	if (ngroups > 0)
  		ga_free();
  
-+#ifndef __APPLE_MEMBERSHIP__
++#ifdef __APPLE_MEMBERSHIP__
++	(void)retry;
++	if ((ngroups = getgrouplist_2(user, base, &groups_bygid)) == -1) {
++		logit("getgrouplist_2 failed");
++		/*
++		 * getgrouplist_2 only fails on memory error; in which case
++		 * groups_bygid will be left NULL so no need to free.
++		 */
++		return 0;
++	}
++	groups_byname = xcalloc(ngroups, sizeof(*groups_byname));
++#else
  	ngroups = NGROUPS_MAX;
  #if defined(HAVE_SYSCONF) && defined(_SC_NGROUPS_MAX)
  	ngroups = MAX(NGROUPS_MAX, sysconf(_SC_NGROUPS_MAX));
- #endif
--
- 	groups_bygid = xcalloc(ngroups, sizeof(*groups_bygid));
-+#else
-+	if (-1 == (ngroups = getgrouplist_2(pw->pw_name, pw->pw_gid,
-+	    &groups_bygid))) {
-+		logit("getgrouplist_2 failed");
-+		return 0;
-+	}
-+#endif
+@@ -69,6 +85,7 @@ ga_init(const char *user, gid_t base)
+ 		    sizeof(*groups_bygid));
+ 	}
  	groups_byname = xcalloc(ngroups, sizeof(*groups_byname));
--
--	if (getgrouplist(user, base, groups_bygid, &ngroups) == -1)
--		logit("getgrouplist: groups list too small");
-+#ifndef __APPLE_MEMBERSHIP__
-+	if (getgrouplist(pw->pw_name, pw->pw_gid, groups_bygid, &ngroups) == -1) {
-+	    logit("getgrouplist: groups list too small");
-+		free(groups_bygid);
-+		return 0;
-+	}
-+#endif
++#endif /* __APPLE_MEMBERSHIP__ */
+ 
  	for (i = 0, j = 0; i < ngroups; i++)
  		if ((gr = getgrgid(groups_bygid[i])) != NULL)
- 			groups_byname[j++] = xstrdup(gr->gr_name);
-@@ -76,16 +105,32 @@ ga_init(const char *user, gid_t base)
- /*
-  * Return 1 if one of user's groups is contained in groups.
-  * Return 0 otherwise.  Use match_pattern() for string comparison.
-+ * Use mbr_check_membership() for membership checking on Mac OS X.
-  */
- int
- ga_match(char * const *groups, int n)
- {
-+#ifdef __APPLE_MEMBERSHIP__
-+	int i, ismember = 0;
-+	uuid_t g_uuid;
-+	struct group *grp;
-+
-+	for (i = 0; i < n; i++) {
-+		if ((grp = getgrnam(groups[i])) == NULL ||
-+		   (mbr_gid_to_uuid(grp->gr_gid, g_uuid) != 0) ||
-+		   (mbr_check_membership(u_uuid, g_uuid, &ismember) != 0))
-+			return 0;
-+		if (ismember)
-+			return 1;
-+	}
-+#else
- 	int i, j;
- 
- 	for (i = 0; i < ngroups; i++)
- 		for (j = 0; j < n; j++)
- 			if (match_pattern(groups_byname[i], groups[j]))
- 				return 1;
+--- a/readconf.c	2019-10-09 02:31:03.000000000 +0200
++++ b/readconf.c	2019-10-16 10:32:49.000000000 +0200
+@@ -167,6 +167,9 @@ typedef enum {
+ 	oHashKnownHosts,
+ 	oTunnel, oTunnelDevice,
+ 	oLocalCommand, oPermitLocalCommand, oRemoteCommand,
++#ifdef __APPLE_KEYCHAIN__
++	oUseKeychain,
 +#endif
- 	return 0;
- }
- 
---- a/groupaccess.h	2017-10-02 21:34:26.000000000 +0200
-+++ b/groupaccess.h	2017-10-08 09:09:58.000000000 +0200
-@@ -27,7 +27,7 @@
- #ifndef GROUPACCESS_H
- #define GROUPACCESS_H
- 
--int	 ga_init(const char *, gid_t);
-+int	 ga_init(struct passwd *);
- int	 ga_match(char * const *, int);
- int	 ga_match_pattern_list(const char *);
- void	 ga_free(void);
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ b/keychain.c	2017-10-08 09:09:58.000000000 +0200
-@@ -0,0 +1,697 @@
-+/*
-+ * Copyright (c) 2007 Apple Inc. All rights reserved.
-+ *
-+ * @APPLE_BSD_LICENSE_HEADER_START@
-+ *
-+ * Redistribution and use in source and binary forms, with or without
-+ * modification, are permitted provided that the following conditions
-+ * are met:
-+ *
-+ * 1.  Redistributions of source code must retain the above copyright
-+ *     notice, this list of conditions and the following disclaimer.
-+ * 2.  Redistributions in binary form must reproduce the above copyright
-+ *     notice, this list of conditions and the following disclaimer in the
-+ *     documentation and/or other materials provided with the distribution.
-+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of its
-+ *     contributors may be used to endorse or promote products derived from
-+ *     this software without specific prior written permission.
-+ *
-+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
-+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-+ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
-+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *
-+ * @APPLE_BSD_LICENSE_HEADER_END@
-+ */
-+
-+#include "includes.h"
-+
-+#include <stdio.h>
-+#include <string.h>
-+
-+#include "xmalloc.h"
-+#include "key.h"
-+#include "authfd.h"
-+#include "authfile.h"
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+#include <CoreFoundation/CoreFoundation.h>
-+#include <Security/Security.h>
-+
-+/* Our Security/SecPassword.h is not yet API, so I will define the constants that I am using here. */
-+int kSecPasswordGet     = 1<<0;  // Get password from keychain or user
-+int kSecPasswordSet     = 1<<1;  // Set password (passed in if kSecPasswordGet not set, otherwise from user)
-+int kSecPasswordFail    = 1<<2;  // Wrong password (ignore item in keychain and flag error)
-+OSStatus SecGenericPasswordCreate(SecKeychainAttributeList *searchAttrList, SecKeychainAttributeList *itemAttrList, SecPasswordRef *itemRef);
-+OSStatus SecPasswordAction(SecPasswordRef itemRef, CFTypeRef message, UInt32 flags, UInt32 *length, const void **data);
-+OSStatus SecPasswordSetInitialAccess(SecPasswordRef itemRef, SecAccessRef accessRef);
-+
-+#endif
-+
-+/*
-+ * Platform-specific helper functions.
-+ */
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+static int get_boolean_preference(const char *key, int default_value,
-+    int foreground)
-+{
-+	int value = default_value;
-+	CFStringRef keyRef = NULL;
-+	CFPropertyListRef valueRef = NULL;
-+
-+	keyRef = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
-+	if (keyRef != NULL)
-+		valueRef = CFPreferencesCopyAppValue(keyRef,
-+		    CFSTR("org.openbsd.openssh"));
-+	if (valueRef != NULL)
-+		if (CFGetTypeID(valueRef) == CFBooleanGetTypeID())
-+			value = CFBooleanGetValue(valueRef);
-+		else if (foreground)
-+			fprintf(stderr, "Ignoring nonboolean %s preference.\n", key);
-+
-+	if (keyRef)
-+		CFRelease(keyRef);
-+	if (valueRef)
-+		CFRelease(valueRef);
-+
-+	return value;
-+}
-+
-+#endif
-+
-+/*
-+ * Store the passphrase for a given identity in the keychain.
-+ */
-+void
-+store_in_keychain(const char *filename, const char *passphrase)
-+{
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+	/*
-+	 * store_in_keychain
-+	 * Mac OS X implementation
-+	 */
-+
-+	CFStringRef cfstr_relative_filename = NULL;
-+	CFURLRef cfurl_relative_filename = NULL, cfurl_filename = NULL;
-+	CFStringRef cfstr_filename = NULL;
-+	CFDataRef cfdata_filename = NULL;
-+	CFIndex filename_len;
-+	UInt8 *label = NULL;
-+	UInt8 *utf8_filename;
-+	OSStatus rv;
-+	SecKeychainItemRef itemRef = NULL;
-+	SecTrustedApplicationRef apps[] = {NULL, NULL, NULL};
-+	CFArrayRef trustedlist = NULL;
-+	SecAccessRef initialAccess = NULL;
-+
-+	/* Bail out if KeychainIntegration preference is -bool NO */
-+	if (get_boolean_preference("KeychainIntegration", 1, 1) == 0) {
-+		fprintf(stderr, "Keychain integration is disabled.\n");
-+		goto err;
-+	}
-+
-+	/* Interpret filename with the correct encoding. */
-+	if ((cfstr_relative_filename =
-+	    CFStringCreateWithFileSystemRepresentation(NULL, filename)) == NULL)
-+	    {
-+		fprintf(stderr, "CFStringCreateWithFileSystemRepresentation failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_relative_filename = CFURLCreateWithFileSystemPath(NULL,
-+	    cfstr_relative_filename, kCFURLPOSIXPathStyle, false)) == NULL) {
-+		fprintf(stderr, "CFURLCreateWithFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_filename = CFURLCopyAbsoluteURL(cfurl_relative_filename)) ==
-+	    NULL) {
-+		fprintf(stderr, "CFURLCopyAbsoluteURL failed\n");
-+		goto err;
-+	}
-+	if ((cfstr_filename = CFURLCopyFileSystemPath(cfurl_filename,
-+	    kCFURLPOSIXPathStyle)) == NULL) {
-+		fprintf(stderr, "CFURLCopyFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfdata_filename = CFStringCreateExternalRepresentation(NULL,
-+	    cfstr_filename, kCFStringEncodingUTF8, 0)) == NULL) {
-+		fprintf(stderr, "CFStringCreateExternalRepresentation failed\n");
-+		goto err;
-+	}
-+	filename_len = CFDataGetLength(cfdata_filename);
-+	if ((label = xmalloc(filename_len + 5)) == NULL) {
-+		fprintf(stderr, "xmalloc failed\n");
-+		goto err;
-+	}
-+	memcpy(label, "SSH: ", 5);
-+	utf8_filename = label + 5;
-+	CFDataGetBytes(cfdata_filename, CFRangeMake(0, filename_len),
-+	    utf8_filename);
-+
-+	/* Check if we already have this passphrase. */
-+	rv = SecKeychainFindGenericPassword(NULL, 3, "SSH", filename_len,
-+	    (char *)utf8_filename, NULL, NULL, &itemRef);
-+	if (rv == errSecItemNotFound) {
-+		/* Add a new keychain item. */
-+		SecKeychainAttribute attrs[] = {
-+			{kSecLabelItemAttr, filename_len + 5, label},
-+			{kSecServiceItemAttr, 3, "SSH"},
-+			{kSecAccountItemAttr, filename_len, utf8_filename}
-+		};
-+		SecKeychainAttributeList attrList =
-+		    {sizeof(attrs) / sizeof(attrs[0]), attrs};
-+		if (SecTrustedApplicationCreateFromPath("/usr/bin/ssh-agent",
-+		    &apps[0]) != noErr ||
-+		    SecTrustedApplicationCreateFromPath("/usr/bin/ssh-add",
-+		    &apps[1]) != noErr ||
-+		    SecTrustedApplicationCreateFromPath("/usr/bin/ssh",
-+		    &apps[2]) != noErr) {
-+			fprintf(stderr, "SecTrustedApplicationCreateFromPath failed\n");
-+			goto err;
-+		}
-+		if ((trustedlist = CFArrayCreate(NULL, (const void **)apps,
-+		    sizeof(apps) / sizeof(apps[0]), &kCFTypeArrayCallBacks)) ==
-+		    NULL) {
-+			fprintf(stderr, "CFArrayCreate failed\n");
-+			goto err;
-+		}
-+		if (SecAccessCreate(cfstr_filename, trustedlist,
-+		    &initialAccess) != noErr) {
-+			fprintf(stderr, "SecAccessCreate failed\n");
-+			goto err;
-+		}
-+		if (SecKeychainItemCreateFromContent(
-+		    kSecGenericPasswordItemClass, &attrList, strlen(passphrase),
-+		    passphrase, NULL, initialAccess, NULL) == noErr)
-+			fprintf(stderr, "Passphrase stored in keychain: %s\n", filename);
-+		else
-+			fprintf(stderr, "Could not create keychain item\n");
-+	} else if (rv == noErr) {
-+		/* Update an existing keychain item. */
-+		if (SecKeychainItemModifyAttributesAndData(itemRef, NULL,
-+		    strlen(passphrase), passphrase) == noErr)
-+			fprintf(stderr, "Passphrase updated in keychain: %s\n", filename);
-+		else
-+			fprintf(stderr, "Could not modify keychain item\n");
-+	} else
-+		fprintf(stderr, "Could not access keychain\n");
-+
-+err:	/* Clean up. */
-+	if (cfstr_relative_filename)
-+		CFRelease(cfstr_relative_filename);
-+	if (cfurl_relative_filename)
-+		CFRelease(cfurl_relative_filename);
-+	if (cfurl_filename)
-+		CFRelease(cfurl_filename);
-+	if (cfstr_filename)
-+		CFRelease(cfstr_filename);
-+	if (cfdata_filename)
-+		CFRelease(cfdata_filename);
-+	if (label)
-+		free(label);
-+	if (itemRef)
-+		CFRelease(itemRef);
-+	if (apps[0])
-+		CFRelease(apps[0]);
-+	if (apps[1])
-+		CFRelease(apps[1]);
-+	if (apps[2])
-+		CFRelease(apps[2]);
-+	if (trustedlist)
-+		CFRelease(trustedlist);
-+	if (initialAccess)
-+		CFRelease(initialAccess);
-+
-+#else
-+
-+	/*
-+	 * store_in_keychain
-+	 * no keychain implementation
-+	 */
-+
-+	fprintf(stderr, "Keychain is not available on this system\n");
-+
-+#endif
-+
-+}
-+
-+/*
-+ * Remove the passphrase for a given identity from the keychain.
-+ */
-+void
-+remove_from_keychain(const char *filename, int qflag)
-+{
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+	/*
-+	 * remove_from_keychain
-+	 * Mac OS X implementation
-+	 */
-+
-+	CFStringRef cfstr_relative_filename = NULL;
-+	CFURLRef cfurl_relative_filename = NULL, cfurl_filename = NULL;
-+	CFStringRef cfstr_filename = NULL;
-+	CFDataRef cfdata_filename = NULL;
-+	CFIndex filename_len;
-+	const UInt8 *utf8_filename;
-+	OSStatus rv;
-+	SecKeychainItemRef itemRef = NULL;
-+
-+	/* Bail out if KeychainIntegration preference is -bool NO */
-+	if (get_boolean_preference("KeychainIntegration", 1, 1) == 0) {
-+		fprintf(stderr, "Keychain integration is disabled.\n");
-+		goto err;
-+	}
-+
-+	/* Interpret filename with the correct encoding. */
-+	if ((cfstr_relative_filename =
-+	    CFStringCreateWithFileSystemRepresentation(NULL, filename)) == NULL)
-+	    {
-+		fprintf(stderr, "CFStringCreateWithFileSystemRepresentation failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_relative_filename = CFURLCreateWithFileSystemPath(NULL,
-+	    cfstr_relative_filename, kCFURLPOSIXPathStyle, false)) == NULL) {
-+		fprintf(stderr, "CFURLCreateWithFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_filename = CFURLCopyAbsoluteURL(cfurl_relative_filename)) ==
-+	    NULL) {
-+		fprintf(stderr, "CFURLCopyAbsoluteURL failed\n");
-+		goto err;
-+	}
-+	if ((cfstr_filename = CFURLCopyFileSystemPath(cfurl_filename,
-+	    kCFURLPOSIXPathStyle)) == NULL) {
-+		fprintf(stderr, "CFURLCopyFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfdata_filename = CFStringCreateExternalRepresentation(NULL,
-+	    cfstr_filename, kCFStringEncodingUTF8, 0)) == NULL) {
-+		fprintf(stderr, "CFStringCreateExternalRepresentation failed\n");
-+		goto err;
-+	}
-+	filename_len = CFDataGetLength(cfdata_filename);
-+	utf8_filename = CFDataGetBytePtr(cfdata_filename);
-+
-+	/* Check if we already have this passphrase. */
-+	rv = SecKeychainFindGenericPassword(NULL, 3, "SSH", filename_len,
-+	    (const char *)utf8_filename, NULL, NULL, &itemRef);
-+	if (rv == noErr) {
-+		/* Remove the passphrase from the keychain. */
-+		if (SecKeychainItemDelete(itemRef) == noErr) {
-+			if (!qflag) {
-+				fprintf(stderr, "Passphrase removed from keychain: %s\n", filename);
-+			}
-+		}
-+		else
-+			fprintf(stderr, "Could not remove keychain item\n");
-+	} else if (rv != errSecItemNotFound)
-+		fprintf(stderr, "Could not access keychain\n");
-+
-+err:	/* Clean up. */
-+	if (cfstr_relative_filename)
-+		CFRelease(cfstr_relative_filename);
-+	if (cfurl_relative_filename)
-+		CFRelease(cfurl_relative_filename);
-+	if (cfurl_filename)
-+		CFRelease(cfurl_filename);
-+	if (cfstr_filename)
-+		CFRelease(cfstr_filename);
-+	if (cfdata_filename)
-+		CFRelease(cfdata_filename);
-+	if (itemRef)
-+		CFRelease(itemRef);
-+
-+#else
-+
-+	/*
-+	 * remove_from_keychain
-+	 * no keychain implementation
-+	 */
-+
-+	fprintf(stderr, "Keychain is not available on this system\n");
-+
-+#endif
-+
-+}
-+
-+/*
-+ * Add identities to ssh-agent using passphrases stored in the keychain.
-+ * Returns zero on success and nonzero on failure.
-+ * add_identity is a callback into ssh-agent.  It takes a filename and a
-+ * passphrase, and attempts to add the identity to the agent.  It returns
-+ * zero on success and nonzero on failure.
-+ */
-+int
-+add_identities_using_keychain(int (*add_identity)(const char *, const char *))
-+{
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+	/*
-+	 * add_identities_using_keychain
-+	 * Mac OS X implementation
-+	 */
-+
-+	OSStatus rv;
-+	SecKeychainSearchRef searchRef;
-+	SecKeychainItemRef itemRef;
-+	UInt32 length;
-+	void *data;
-+	CFIndex maxsize;
-+
-+	/* Bail out if KeychainIntegration preference is -bool NO */
-+	if (get_boolean_preference("KeychainIntegration", 1, 0) == 0)
-+		return 0;
-+
-+	/* Search for SSH passphrases in the keychain */
-+	SecKeychainAttribute attrs[] = {
-+		{kSecServiceItemAttr, 3, "SSH"}
-+	};
-+	SecKeychainAttributeList attrList =
-+	    {sizeof(attrs) / sizeof(attrs[0]), attrs};
-+	if ((rv = SecKeychainSearchCreateFromAttributes(NULL,
-+	    kSecGenericPasswordItemClass, &attrList, &searchRef)) != noErr)
-+		return 0;
-+
-+	/* Iterate through the search results. */
-+	while ((rv = SecKeychainSearchCopyNext(searchRef, &itemRef)) == noErr) {
-+		UInt32 tag = kSecAccountItemAttr;
-+		UInt32 format = kSecFormatUnknown;
-+		SecKeychainAttributeInfo info = {1, &tag, &format};
-+		SecKeychainAttributeList *itemAttrList = NULL;
-+		CFStringRef cfstr_filename = NULL;
-+		char *filename = NULL;
-+		char *passphrase = NULL;
-+
-+		/* Retrieve filename and passphrase. */
-+		if ((rv = SecKeychainItemCopyAttributesAndData(itemRef, &info,
-+		    NULL, &itemAttrList, &length, &data)) != noErr)
-+			goto err;
-+		if (itemAttrList->count != 1)
-+			goto err;
-+		cfstr_filename = CFStringCreateWithBytes(NULL,
-+		    itemAttrList->attr->data, itemAttrList->attr->length,
-+		    kCFStringEncodingUTF8, true);
-+		maxsize = CFStringGetMaximumSizeOfFileSystemRepresentation(
-+		    cfstr_filename);
-+		if ((filename = xmalloc(maxsize)) == NULL)
-+			goto err;
-+		if (CFStringGetFileSystemRepresentation(cfstr_filename,
-+		    filename, maxsize) == false)
-+			goto err;
-+		if ((passphrase = xmalloc(length + 1)) == NULL)
-+			goto err;
-+		memcpy(passphrase, data, length);
-+		passphrase[length] = '\0';
-+
-+		/* Add the identity. */
-+		add_identity(filename, passphrase);
-+
-+err:		/* Clean up. */
-+		if (itemRef)
-+			CFRelease(itemRef);
-+		if (cfstr_filename)
-+			CFRelease(cfstr_filename);
-+		if (filename)
-+			free(filename);
-+		if (passphrase)
-+			free(passphrase);
-+		if (itemAttrList)
-+			SecKeychainItemFreeAttributesAndData(itemAttrList,
-+			    data);
-+	}
-+
-+	CFRelease(searchRef);
-+
-+	return 0;
-+
-+#else
-+
-+	/*
-+	 * add_identities_using_keychain
-+	 * no implementation
-+	 */
-+
-+	return 1;
-+
-+#endif
-+
-+}
-+
-+/*
-+ * Prompt the user for a key's passphrase.  The user will be offered the option
-+ * of storing the passphrase in their keychain.  Returns the passphrase
-+ * (which the caller is responsible for freeing), or NULL if this function
-+ * fails or is not implemented.  If this function is not implemented, ssh will
-+ * fall back on the standard read_passphrase function, and the user will need
-+ * to use ssh-add -K to add their keys to the keychain.
-+ */
-+char *
-+keychain_read_passphrase(const char *filename, int oAskPassGUI)
-+{
-+
-+#if defined(__APPLE_KEYCHAIN__)
-+
-+	/*
-+	 * keychain_read_passphrase
-+	 * Mac OS X implementation
-+	 */
-+
-+	CFStringRef cfstr_relative_filename = NULL;
-+	CFURLRef cfurl_relative_filename = NULL, cfurl_filename = NULL;
-+	CFStringRef cfstr_filename = NULL;
-+	CFDataRef cfdata_filename = NULL;
-+	CFIndex filename_len;
-+	UInt8 *label = NULL;
-+	UInt8 *utf8_filename;
-+	SecPasswordRef passRef = NULL;
-+	SecTrustedApplicationRef apps[] = {NULL, NULL, NULL};
-+	CFArrayRef trustedlist = NULL;
-+	SecAccessRef initialAccess = NULL;
-+	CFURLRef path = NULL;
-+	CFStringRef pathFinal = NULL;
-+	CFURLRef bundle_url = NULL;
-+	CFBundleRef bundle = NULL;
-+	CFStringRef promptTemplate = NULL, prompt = NULL;
-+	UInt32 length;
-+	const void *data;
-+	int sock = -1;
-+	char *result = NULL;
-+
-+	/* Bail out if KeychainIntegration preference is -bool NO */
-+	if (get_boolean_preference("KeychainIntegration", 1, 1) == 0)
-+		goto err;
-+
-+	/* Bail out if the user set AskPassGUI preference to -bool NO */
-+	if (get_boolean_preference("AskPassGUI", 1, 1) == 0 || oAskPassGUI == 0)
-+		goto err;
-+
-+	/* Bail out if we can't communicate with ssh-agent */
-+	if ((ssh_get_authentication_socket(&sock)) != 0)
-+		goto err;
-+
-+	/* Interpret filename with the correct encoding. */
-+	if ((cfstr_relative_filename =
-+	    CFStringCreateWithFileSystemRepresentation(NULL, filename)) == NULL)
-+	    {
-+		fprintf(stderr, "CFStringCreateWithFileSystemRepresentation failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_relative_filename = CFURLCreateWithFileSystemPath(NULL,
-+	    cfstr_relative_filename, kCFURLPOSIXPathStyle, false)) == NULL) {
-+		fprintf(stderr, "CFURLCreateWithFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfurl_filename = CFURLCopyAbsoluteURL(cfurl_relative_filename)) ==
-+	    NULL) {
-+		fprintf(stderr, "CFURLCopyAbsoluteURL failed\n");
-+		goto err;
-+	}
-+	if ((cfstr_filename = CFURLCopyFileSystemPath(cfurl_filename,
-+	    kCFURLPOSIXPathStyle)) == NULL) {
-+		fprintf(stderr, "CFURLCopyFileSystemPath failed\n");
-+		goto err;
-+	}
-+	if ((cfdata_filename = CFStringCreateExternalRepresentation(NULL,
-+	    cfstr_filename, kCFStringEncodingUTF8, 0)) == NULL) {
-+		fprintf(stderr, "CFStringCreateExternalRepresentation failed\n");
-+		goto err;
-+	}
-+	filename_len = CFDataGetLength(cfdata_filename);
-+	if ((label = xmalloc(filename_len + 5)) == NULL) {
-+		fprintf(stderr, "xmalloc failed\n");
-+		goto err;
-+	}
-+	memcpy(label, "SSH: ", 5);
-+	utf8_filename = label + 5;
-+	CFDataGetBytes(cfdata_filename, CFRangeMake(0, filename_len),
-+	    utf8_filename);
-+
-+	/* Build a SecPasswordRef. */
-+	SecKeychainAttribute searchAttrs[] = {
-+		{kSecServiceItemAttr, 3, "SSH"},
-+		{kSecAccountItemAttr, filename_len, utf8_filename}
-+	};
-+	SecKeychainAttributeList searchAttrList =
-+	    {sizeof(searchAttrs) / sizeof(searchAttrs[0]), searchAttrs};
-+	SecKeychainAttribute attrs[] = {
-+		{kSecLabelItemAttr, filename_len + 5, label},
-+		{kSecServiceItemAttr, 3, "SSH"},
-+		{kSecAccountItemAttr, filename_len, utf8_filename}
-+	};
-+	SecKeychainAttributeList attrList =
-+	    {sizeof(attrs) / sizeof(attrs[0]), attrs};
-+	if (SecGenericPasswordCreate(&searchAttrList, &attrList, &passRef) !=
-+	    noErr) {
-+		fprintf(stderr, "SecGenericPasswordCreate failed\n");
-+		goto err;
-+	}
-+	if (SecTrustedApplicationCreateFromPath("/usr/bin/ssh-agent", &apps[0])
-+	    != noErr ||
-+	    SecTrustedApplicationCreateFromPath("/usr/bin/ssh-add", &apps[1])
-+	    != noErr ||
-+	    SecTrustedApplicationCreateFromPath("/usr/bin/ssh", &apps[2])
-+	    != noErr) {
-+		fprintf(stderr, "SecTrustedApplicationCreateFromPath failed\n");
-+		goto err;
-+	}
-+	if ((trustedlist = CFArrayCreate(NULL, (const void **)apps,
-+	    sizeof(apps) / sizeof(apps[0]), &kCFTypeArrayCallBacks)) == NULL) {
-+		fprintf(stderr, "CFArrayCreate failed\n");
-+		goto err;
-+	}
-+	if (SecAccessCreate(cfstr_filename, trustedlist, &initialAccess)
-+	    != noErr) {
-+		fprintf(stderr, "SecAccessCreate failed\n");
-+		goto err;
-+	}
-+	if (SecPasswordSetInitialAccess(passRef, initialAccess) != noErr) {
-+		fprintf(stderr, "SecPasswordSetInitialAccess failed\n");
-+		goto err;
-+	}
-+
-+	/* Request the passphrase from the user. */
-+	if ((path = CFURLCreateFromFileSystemRepresentation(NULL,
-+	    (UInt8 *)filename, strlen(filename), false)) == NULL) {
-+		fprintf(stderr, "CFURLCreateFromFileSystemRepresentation failed\n");
-+		goto err;
-+	}
-+	if ((pathFinal = CFURLCopyLastPathComponent(path)) == NULL) {
-+		fprintf(stderr, "CFURLCopyLastPathComponent failed\n");
-+		goto err;
-+	}
-+	if (!((bundle_url = CFURLCreateWithFileSystemPath(NULL,
-+	    CFSTR("/System/Library/CoreServices/"), kCFURLPOSIXPathStyle, true))
-+	    != NULL && (bundle = CFBundleCreate(NULL, bundle_url)) != NULL &&
-+	    (promptTemplate = CFCopyLocalizedStringFromTableInBundle(
-+	    CFSTR("Enter your password for the SSH key \"%@\"."),
-+	    CFSTR("OpenSSH"), bundle, "Text of the dialog asking the user for"
-+	    "their passphrase.  The %@ will be replaced with the filename of a"
-+	    "specific key.")) != NULL) &&
-+	    (promptTemplate = CFStringCreateCopy(NULL,
-+	    CFSTR("Enter your password for the SSH key \"%@\"."))) == NULL) {
-+		fprintf(stderr, "CFStringCreateCopy failed\n");
-+		goto err;
-+	}
-+	if ((prompt = CFStringCreateWithFormat(NULL, NULL, promptTemplate,
-+	    pathFinal)) == NULL) {
-+		fprintf(stderr, "CFStringCreateWithFormat failed\n");
-+		goto err;
-+	}
-+	switch (SecPasswordAction(passRef, prompt,
-+	    kSecPasswordGet|kSecPasswordFail, &length, &data)) {
-+	case noErr:
-+		result = xmalloc(length + 1);
-+		memcpy(result, data, length);
-+		result[length] = '\0';
-+
-+		/* Save password in keychain if requested. */
-+		if (noErr != SecPasswordAction(passRef, CFSTR(""), kSecPasswordSet, &length, &data))
-+			fprintf(stderr, "Saving password to keychain failed\n");
-+
-+		/* Add password to agent. */
-+		char *comment = NULL;
-+		Key *private = key_load_private(filename, result, &comment);
-+		if (NULL == private)
-+			break;
-+		if (ssh_add_identity_constrained(sock, private, comment, 0, 0))
-+			fprintf(stderr, "Identity added: %s (%s)\n", filename, comment);
-+		else
-+			fprintf(stderr, "Could not add identity: %s\n", filename);
-+		free(comment);
-+		key_free(private);
-+		break;
-+	case errAuthorizationCanceled:
-+		result = xmalloc(1);
-+		*result = '\0';
-+		break;
-+	default:
-+		goto err;
-+	}
-+
-+err:	/* Clean up. */
-+	if (cfstr_relative_filename)
-+		CFRelease(cfstr_relative_filename);
-+	if (cfurl_relative_filename)
-+		CFRelease(cfurl_relative_filename);
-+	if (cfurl_filename)
-+		CFRelease(cfurl_filename);
-+	if (cfstr_filename)
-+		CFRelease(cfstr_filename);
-+	if (cfdata_filename)
-+		CFRelease(cfdata_filename);
-+	if (label)
-+		free(label);
-+	if (passRef)
-+		CFRelease(passRef);
-+	if (apps[0])
-+		CFRelease(apps[0]);
-+	if (apps[1])
-+		CFRelease(apps[1]);
-+	if (apps[2])
-+		CFRelease(apps[2]);
-+	if (trustedlist)
-+		CFRelease(trustedlist);
-+	if (initialAccess)
-+		CFRelease(initialAccess);
-+	if (path)
-+		CFRelease(path);
-+	if (pathFinal)
-+		CFRelease(pathFinal);
-+	if (bundle_url)
-+		CFRelease(bundle_url);
-+	if (bundle)
-+		CFRelease(bundle);
-+	if (promptTemplate)
-+		CFRelease(promptTemplate);
-+	if (prompt)
-+		CFRelease(prompt);
-+	if (sock != -1)
-+		ssh_close_authentication_socket(sock);
-+
-+	return result;
-+
-+#else
-+
-+	/*
-+	 * keychain_read_passphrase
-+	 * no implementation
-+	 */
-+
-+	return NULL;
-+
-+#endif
-+
-+}
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ b/keychain.h	2017-10-08 09:09:58.000000000 +0200
-@@ -0,0 +1,45 @@
-+/*
-+ * Copyright (c) 2007 Apple Inc. All rights reserved.
-+ *
-+ * @APPLE_BSD_LICENSE_HEADER_START@
-+ *
-+ * Redistribution and use in source and binary forms, with or without
-+ * modification, are permitted provided that the following conditions
-+ * are met:
-+ *
-+ * 1.  Redistributions of source code must retain the above copyright
-+ *     notice, this list of conditions and the following disclaimer.
-+ * 2.  Redistributions in binary form must reproduce the above copyright
-+ *     notice, this list of conditions and the following disclaimer in the
-+ *     documentation and/or other materials provided with the distribution.
-+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of its
-+ *     contributors may be used to endorse or promote products derived from
-+ *     this software without specific prior written permission.
-+ *
-+ * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
-+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-+ * DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
-+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+ *
-+ * @APPLE_BSD_LICENSE_HEADER_END@
-+ */
-+
-+/*
-+ * KEYCHAIN indicates that keychain functionality is present.
-+ * KEYCHAIN_* indicates the implementation to use, and implies KEYCHAIN.
-+ */
-+#if defined(__APPLE_KEYCHAIN__)
-+#define KEYCHAIN
-+#endif
-+
-+void	 store_in_keychain(const char *filename, const char *passphrase);
-+void	 remove_from_keychain(const char *filename, int qflag);
-+int	 add_identities_using_keychain(
-+	     int (*add_identity)(const char *, const char *));
-+char	*keychain_read_passphrase(const char *filename, int oAskPassGUI);
---- a/readconf.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/readconf.c	2017-10-08 09:09:59.000000000 +0200
-@@ -169,6 +169,9 @@ typedef enum {
+ 	oVisualHostKey,
  	oKexAlgorithms, oIPQoS, oRequestTTY, oIgnoreUnknown, oProxyUseFdpass,
  	oCanonicalDomains, oCanonicalizeHostname, oCanonicalizeMaxDots,
- 	oCanonicalizeFallbackLocal, oCanonicalizePermittedCNAMEs,
+@@ -291,6 +294,9 @@ static struct {
+ 	{ "localcommand", oLocalCommand },
+ 	{ "permitlocalcommand", oPermitLocalCommand },
+ 	{ "remotecommand", oRemoteCommand },
 +#ifdef __APPLE_KEYCHAIN__
-+	oAskPassGUI,
++	{ "usekeychain", oUseKeychain},
 +#endif
- 	oStreamLocalBindMask, oStreamLocalBindUnlink, oRevokedHostKeys,
- 	oFingerprintHash, oUpdateHostkeys, oHostbasedKeyTypes,
- 	oPubkeyAcceptedKeyTypes, oProxyJump,
-@@ -305,6 +308,9 @@ static struct {
- 	{ "pubkeyacceptedkeytypes", oPubkeyAcceptedKeyTypes },
- 	{ "ignoreunknown", oIgnoreUnknown },
- 	{ "proxyjump", oProxyJump },
-+#ifdef __APPLE_KEYCHAIN__
-+	{ "askpassgui", oAskPassGUI },
-+#endif
- 
- 	{ NULL, oBadOption }
- };
-@@ -1555,6 +1561,12 @@ parse_keytypes:
- 		charptr = &options->ignored_unknown;
- 		goto parse_string;
+ 	{ "visualhostkey", oVisualHostKey },
+ 	{ "kexalgorithms", oKexAlgorithms },
+ 	{ "ipqos", oIPQoS },
+@@ -1520,6 +1526,12 @@ parse_keytypes:
+ 		charptr = &options->remote_command;
+ 		goto parse_command;
  
 +#ifdef __APPLE_KEYCHAIN__
-+	case oAskPassGUI:
-+		intptr = &options->ask_pass_gui;
++	case oUseKeychain:
++		intptr = &options->use_keychain;
 +		goto parse_flag;
 +#endif
 +
- 	case oProxyUseFdpass:
- 		intptr = &options->proxy_use_fdpass;
+ 	case oVisualHostKey:
+ 		intptr = &options->visual_host_key;
  		goto parse_flag;
-@@ -1859,6 +1871,9 @@ initialize_options(Options * options)
- 	options->request_tty = -1;
- 	options->proxy_use_fdpass = -1;
- 	options->ignored_unknown = NULL;
+@@ -1929,6 +1941,9 @@ initialize_options(Options * options)
+ 	options->local_command = NULL;
+ 	options->permit_local_command = -1;
+ 	options->remote_command = NULL;
 +#ifdef __APPLE_KEYCHAIN__
-+	options->ask_pass_gui = -1;
++	options->use_keychain = -1;
 +#endif
- 	options->num_canonical_domains = 0;
- 	options->num_permitted_cnames = 0;
- 	options->canonicalize_max_dots = -1;
-@@ -2026,6 +2041,10 @@ fill_default_options(Options * options)
- 		options->ip_qos_bulk = IPTOS_THROUGHPUT;
- 	if (options->request_tty == -1)
- 		options->request_tty = REQUEST_TTY_AUTO;
-+#ifdef __APPLE_KEYCHAIN__
-+	if (options->ask_pass_gui == -1)
-+		options->ask_pass_gui = 1;
-+#endif
- 	if (options->proxy_use_fdpass == -1)
- 		options->proxy_use_fdpass = 0;
- 	if (options->canonicalize_max_dots == -1)
---- a/readconf.h	2017-10-02 21:34:26.000000000 +0200
-+++ b/readconf.h	2017-10-08 09:09:59.000000000 +0200
-@@ -164,6 +164,10 @@ typedef struct {
- 	char   *jump_extra;
- 
- 	char	*ignored_unknown; /* Pattern list of unknown tokens to ignore */
+ 	options->add_keys_to_agent = -1;
+ 	options->identity_agent = NULL;
+ 	options->visual_host_key = -1;
+@@ -2168,6 +2183,11 @@ fill_default_options(Options * options)
+ 	/* options->hostname will be set in the main program if appropriate */
+ 	/* options->host_key_alias should not be set by default */
+ 	/* options->preferred_authentications will be set in ssh */
 +
 +#ifdef __APPLE_KEYCHAIN__
-+	int ask_pass_gui;
++	if (options->use_keychain == -1)
++		options->use_keychain = 0;
 +#endif
- }       Options;
+ }
  
- #define SSH_CANONICALISE_NO	0
---- a/scp.1	2017-10-02 21:34:26.000000000 +0200
-+++ b/scp.1	2017-10-08 09:09:58.000000000 +0200
-@@ -19,7 +19,7 @@
- .Sh SYNOPSIS
- .Nm scp
- .Bk -words
--.Op Fl 346BCpqrv
-+.Op Fl 346BCEpqrv
- .Op Fl c Ar cipher
- .Op Fl F Ar ssh_config
- .Op Fl i Ar identity_file
-@@ -87,6 +87,8 @@ Passes the
- flag to
- .Xr ssh 1
- to enable compression.
-+.It Fl E
-+Preserves extended attributes, resource forks, and ACLs.  Requires both ends to be running Mac OS X 10.4 or later.
- .It Fl c Ar cipher
- Selects the cipher to use for encrypting the data transfer.
- This option is directly passed to
---- a/scp.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/scp.c	2017-10-08 09:09:58.000000000 +0200
-@@ -77,6 +77,9 @@
- #ifdef HAVE_SYS_STAT_H
- # include <sys/stat.h>
- #endif
-+#ifdef __APPLE_XSAN__
-+#include <sys/mount.h>
+ struct fwdarg {
+--- a/readconf.h	2019-10-09 02:31:03.000000000 +0200
++++ b/readconf.h	2019-10-16 10:32:49.000000000 +0200
+@@ -137,6 +137,9 @@ typedef struct {
+ 	char	*local_command;
+ 	int	permit_local_command;
+ 	char	*remote_command;
++#ifdef __APPLE_KEYCHAIN__
++	int	use_keychain;
 +#endif
- #ifdef HAVE_POLL_H
- #include <poll.h>
- #else
-@@ -119,6 +122,11 @@
- #include "progressmeter.h"
- #include "utf8.h"
+ 	int	visual_host_key;
  
-+#ifdef HAVE_COPYFILE_H
-+#include <libgen.h>
-+#include <copyfile.h>
-+#endif
+ 	int	request_tty;
+--- a/session.c	2019-10-09 02:31:03.000000000 +0200
++++ b/session.c	2019-10-16 10:32:49.000000000 +0200
+@@ -1185,6 +1185,21 @@ do_setup_env(struct ssh *ssh, Session *s
+ 		child_set_env(&env, &envsize, "SSH_ORIGINAL_COMMAND",
+ 		    original_command);
+ 
++#ifdef __APPLE_TMPDIR__
++	char tmpdir[MAXPATHLEN] = {0};
++	size_t len = 0;
 +
- extern char *__progname;
- 
- #define COPY_BUFLEN	16384
-@@ -155,6 +163,12 @@ char *ssh_program = _PATH_SSH_PROGRAM;
- /* This is used to store the pid of ssh_program */
- pid_t do_cmd_pid = -1;
- 
-+#ifdef HAVE_COPYFILE
-+int copy_xattr = 0;
-+int md_flag = 0;
-+#endif
++	len = confstr(_CS_DARWIN_USER_TEMP_DIR, tmpdir, sizeof(tmpdir));
++	if (len > 0) {
++		child_set_env(&env, &envsize, "TMPDIR", tmpdir);
++		debug2("%s: set TMPDIR", __func__);
++	} else {
++		// errno is set by confstr
++		errno = 0;
++		debug2("%s: unable to set TMPDIR", __func__);
++	}
++#endif /* __APPLE_TMPDIR__ */
 +
-+
- static void
- killchild(int signo)
- {
-@@ -402,7 +416,11 @@ main(int argc, char **argv)
- 	addargs(&args, "-oClearAllForwardings=yes");
- 
- 	fflag = tflag = 0;
-+#if HAVE_COPYFILE
-+	while ((ch = getopt(argc, argv, "dfl:prtvBCEc:i:P:q12346S:o:F:")) != -1)
-+#else
- 	while ((ch = getopt(argc, argv, "dfl:prtvBCc:i:P:q12346S:o:F:")) != -1)
-+#endif
- 		switch (ch) {
- 		/* User-visible flags. */
- 		case '1':
-@@ -467,6 +485,11 @@ main(int argc, char **argv)
- 			showprogress = 0;
- 			break;
- 
-+#ifdef HAVE_COPYFILE
-+		case 'E':
-+			copy_xattr = 1;
-+			break;
-+#endif
- 		/* Server options. */
- 		case 'd':
- 			targetshouldbedirectory = 1;
-@@ -526,7 +549,12 @@ main(int argc, char **argv)
- 	remin = remout = -1;
- 	do_cmd_pid = -1;
- 	/* Command to be executed on remote system using "ssh". */
-+#if HAVE_COPYFILE
-+	(void) snprintf(cmd, sizeof cmd, "scp%s%s%s%s%s",
-+	    copy_xattr ? " -E" : "",
-+#else
- 	(void) snprintf(cmd, sizeof cmd, "scp%s%s%s%s",
-+#endif
- 	    verbose_mode ? " -v" : "",
- 	    iamrecursive ? " -r" : "", pflag ? " -p" : "",
- 	    targetshouldbedirectory ? " -d" : "");
-@@ -772,6 +800,10 @@ source(int argc, char **argv)
- 	int fd = -1, haderr, indx;
- 	char *last, *name, buf[2048], encname[PATH_MAX];
- 	int len;
-+#if HAVE_COPYFILE
-+	char md_name[MAXPATHLEN];
-+	char *md_tmp;
-+#endif
- 
- 	for (indx = 0; indx < argc; ++indx) {
- 		name = argv[indx];
-@@ -779,12 +811,26 @@ source(int argc, char **argv)
- 		len = strlen(name);
- 		while (len > 1 && name[len-1] == '/')
- 			name[--len] = '\0';
-+#if HAVE_COPYFILE
-+md_next:
-+		statbytes = 0;
-+		if (md_flag) {
-+		    fd = open(md_tmp, O_RDONLY, 0);
-+		    unlink(md_tmp);
-+		    free(md_tmp);
-+		    if (fd < 0)
-+			goto syserr;
-+		} else {
-+#endif
- 		if ((fd = open(name, O_RDONLY|O_NONBLOCK, 0)) < 0)
- 			goto syserr;
- 		if (strchr(name, '\n') != NULL) {
- 			strnvis(encname, name, sizeof(encname), VIS_NL);
- 			name = encname;
- 		}
-+#if HAVE_COPYFILE
-+		}
-+#endif
- 		if (fstat(fd, &stb) < 0) {
- syserr:			run_err("%s: %s", name, strerror(errno));
- 			goto next;
-@@ -868,6 +914,36 @@ next:			if (fd != -1) {
- 		else
- 			run_err("%s: %s", name, strerror(haderr));
- 		(void) response();
-+#ifdef HAVE_COPYFILE
-+		if (copy_xattr && md_flag == 0)
-+		{
-+		    if (!copyfile(name, NULL, 0,
-+			    COPYFILE_ACL | COPYFILE_XATTR | COPYFILE_CHECK))
-+			continue;
-+
-+		    /*
-+		     * this file will hold the actual metadata
-+		     * to be transferred
-+		     */
-+		    md_tmp = strdup("/tmp/scp.md.XXXXXX");
-+		    md_tmp = mktemp(md_tmp);
-+
-+		    if(copyfile(name, md_tmp, 0,
-+				COPYFILE_ACL | COPYFILE_XATTR | COPYFILE_PACK) == 0)
-+		    {
-+			/*
-+			 * this is the fake name to display
-+			 */
-+			snprintf(md_name, sizeof md_name, "%s/._%s", dirname(name), basename(name));
-+			name = md_name;
-+			md_flag = 1;
-+			if (verbose_mode)
-+			    fprintf(stderr, "copyfile(%s, %s, PACK)\n", name, md_tmp);
-+			goto md_next;
-+		    }
-+		} else
-+		    md_flag = 0;
-+#endif
- 		if (showprogress)
- 			stop_progress_meter();
- 	}
-@@ -969,6 +1045,10 @@ sink(int argc, char **argv)
- 	if (stat(targ, &stb) == 0 && S_ISDIR(stb.st_mode))
- 		targisdir = 1;
- 	for (first = 1;; first = 0) {
-+#if HAVE_COPYFILE
-+		char md_src[MAXPATHLEN];
-+		char md_dst[MAXPATHLEN];
-+#endif
- 		cp = buf;
- 		if (atomicio(read, remin, cp, 1) != 1)
- 			return;
-@@ -1120,10 +1200,51 @@ sink(int argc, char **argv)
- 		}
- 		omode = mode;
- 		mode |= S_IWUSR;
-+
-+#if HAVE_COPYFILE
-+		if (copy_xattr && !strncmp(basename(curfile), "._", 2))
-+		{
-+			int mdfd;
-+			if (targisdir)
-+			{
-+			    snprintf(md_src, sizeof md_src, "%s.XXXXXX", np);
-+			    snprintf(md_dst, sizeof md_dst, "%s/%s",
-+				    dirname(np), basename(np) + 2);
-+			    if((mdfd = mkstemp(md_src)) < 0)
-+				continue;
-+			}
-+			else
-+			{
-+			    snprintf(md_src, sizeof md_src, "%s/._%s.XXXXXX",
-+				    dirname(np), basename(np));
-+			    snprintf(md_dst, sizeof md_dst, "%s", np);
-+			    if((mdfd = mkstemp(md_src)) < 0)
-+				continue;
-+			}
-+			if (mdfd >= 0)
-+				close(mdfd);
-+			np = md_src;
-+		}
-+#endif
- 		if ((ofd = open(np, O_WRONLY|O_CREAT, mode)) < 0) {
- bad:			run_err("%s: %s", np, strerror(errno));
- 			continue;
- 		}
-+#ifdef __APPLE_XSAN__
-+		{
-+			/*
-+			 * Pre-allocate blocks for the destination file.
-+			 */
-+			fstore_t fst;
-+
-+			fst.fst_flags = 0;
-+			fst.fst_posmode = F_PEOFPOSMODE;
-+			fst.fst_offset = 0;
-+			fst.fst_length = size;
-+
-+			(void) fcntl(ofd, F_PREALLOCATE, &fst);
-+		}
-+#endif /* __APPLE_XSAN__ */
- 		(void) atomicio(vwrite, remout, "", 1);
- 		if ((bp = allocbuf(&buffer, ofd, COPY_BUFLEN)) == NULL) {
- 			(void) close(ofd);
-@@ -1206,6 +1327,29 @@ bad:			run_err("%s: %s", np, strerror(er
- 			wrerrno = errno;
- 		}
- 		(void) response();
-+#ifdef HAVE_COPYFILE
-+		if (copy_xattr && strncmp(basename(np), "._", 2) == 0)
-+		{
-+			if (verbose_mode)
-+			    fprintf(stderr, "copyfile(%s, %s, UNPACK)\n", md_src, md_dst);
-+			if(!copyfile(md_src, md_dst, 0,
-+			    COPYFILE_ACL | COPYFILE_XATTR | COPYFILE_UNPACK) < 0)
-+			{
-+			    snprintf(md_dst, sizeof md_dst, "%s/._%s",
-+				    dirname(md_dst), basename(md_dst));
-+			    rename(md_src, md_dst);
-+			} else
-+			    unlink(md_src);
-+			if (setimes && wrerr == NO) {
-+				setimes = 0;
-+				if (utimes(md_dst, tv) < 0) {
-+					run_err("%s: set times: %s",
-+					np, strerror(errno));
-+					wrerr = DISPLAYED;
-+				}
-+			}
-+		} else
-+#endif
- 		if (showprogress)
- 			stop_progress_meter();
- 		if (setimes && wrerr == NO) {
-@@ -1274,7 +1418,11 @@ void
- usage(void)
- {
- 	(void) fprintf(stderr,
-+#if HAVE_COPYFILE
-+	    "usage: scp [-346BCEpqrv] [-c cipher] [-F ssh_config] [-i identity_file]\n"
-+#else
- 	    "usage: scp [-346BCpqrv] [-c cipher] [-F ssh_config] [-i identity_file]\n"
-+#endif
- 	    "           [-l limit] [-o ssh_option] [-P port] [-S program]\n"
- 	    "           [[user@]host1:]file1 ... [[user@]host2:]file2\n");
- 	exit(1);
---- a/servconf.c	2017-10-08 09:09:58.000000000 +0200
-+++ b/servconf.c	2017-10-08 09:09:59.000000000 +0200
-@@ -273,7 +273,7 @@ fill_default_server_options(ServerOption
- 	if (options->gss_strict_acceptor == -1)
- 		options->gss_strict_acceptor = 1;
- 	if (options->password_authentication == -1)
--		options->password_authentication = 1;
-+		options->password_authentication = 0;
- 	if (options->kbd_interactive_authentication == -1)
- 		options->kbd_interactive_authentication = 0;
- 	if (options->challenge_response_authentication == -1)
-@@ -795,7 +795,7 @@ match_cfg_line_group(const char *grps, i
- 	if ((pw = getpwnam(user)) == NULL) {
- 		debug("Can't match group at line %d because user %.100s does "
- 		    "not exist", line, user);
--	} else if (ga_init(pw->pw_name, pw->pw_gid) == 0) {
-+	} else if (ga_init(pw) == 0) {
- 		debug("Can't Match group because user %.100s not in any group "
- 		    "at line %d", user, line);
- 	} else if (ga_match_pattern_list(grps) != 1) {
---- a/session.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/session.c	2017-10-08 09:09:58.000000000 +0200
-@@ -1890,8 +1890,10 @@ session_pty_req(struct ssh *ssh, Session
- 	n_bytes = packet_remaining();
- 	tty_parse_modes(s->ttyfd, &n_bytes);
- 
-+#ifndef __APPLE_PRIVPTY__
- 	if (!use_privsep)
- 		pty_setowner(s->pw, s->tty);
-+#endif
- 
- 	/* Set window size from the packet. */
- 	pty_change_window_size(s->ptyfd, s->row, s->col, s->xpixel, s->ypixel);
-@@ -2134,9 +2136,11 @@ session_pty_cleanup2(Session *s)
- 	if (s->pid != 0)
- 		record_logout(s->pid, s->tty, s->pw->pw_name);
- 
-+#ifndef __APPLE_PRIVPTY__
- 	/* Release the pseudo-tty. */
- 	if (getuid() == 0)
- 		pty_release(s->tty);
-+#endif
- 
- 	/*
- 	 * Close the server side of the socket pairs.  We must do this after
---- a/ssh-add.0	2017-10-03 18:05:55.000000000 +0200
-+++ b/ssh-add.0	2017-10-08 09:09:58.000000000 +0200
+ 	if (debug_flag) {
+ 		/* dump the environment */
+ 		fprintf(stderr, "Environment:\n");
+--- a/ssh-add.0	2019-10-09 02:39:14.000000000 +0200
++++ b/ssh-add.0	2019-10-16 10:32:49.000000000 +0200
 @@ -4,7 +4,7 @@ NAME
       ssh-add M-bM-^@M-^S adds private key identities to the authentication agent
  
  SYNOPSIS
--     ssh-add [-cDdkLlqXx] [-E fingerprint_hash] [-t life] [file ...]
-+     ssh-add [-cDdkLlMmqXx] [-E fingerprint_hash] [-t life] [file ...]
+-     ssh-add [-cDdkLlqvXx] [-E fingerprint_hash] [-t life] [file ...]
++     ssh-add [-AcDdKkLlqvXx] [-E fingerprint_hash] [-t life] [file ...]
       ssh-add -s pkcs11
       ssh-add -e pkcs11
+      ssh-add -T pubkey ...
+@@ -28,6 +28,9 @@ DESCRIPTION
  
-@@ -62,6 +62,13 @@ DESCRIPTION
+      The options are as follows:
  
-      -q      Be quiet after a successful operation.
- 
-+     -m      Add identities to the agent using any passphrases stored in your
-+             Mac OS X keychain.
++     -A      Add identities to the agent using any passphrases stored in your
++             macOS keychain.
 +
-+	 -M      When adding identities, each passphrase will also be stored in
-+			 your Mac OS X keychain.  When removing identities with -d, each
-+			 passphrase will be removed from your Mac OS X keychain.
-+
-      -s pkcs11
-              Add keys provided by the PKCS#11 shared library pkcs11.
+      -c      Indicates that added identities should be subject to confirmation
+              before being used for authentication.  Confirmation is performed
+              by ssh-askpass(1).  Successful confirmation is signaled by a zero
+@@ -52,6 +55,10 @@ DESCRIPTION
+      -e pkcs11
+              Remove keys provided by the PKCS#11 shared library pkcs11.
  
---- a/ssh-add.1	2017-10-02 21:34:26.000000000 +0200
-+++ b/ssh-add.1	2017-10-08 09:09:58.000000000 +0200
++     -K      When adding identities, each passphrase will also be stored in
++             your macOS keychain.  When removing identities with -d, each
++             passphrase will be removed from your macOS keychain.
++
+      -k      When loading keys into or deleting keys from the agent, process
+              plain private keys only and skip certificates.
+ 
+--- a/ssh-add.1	2019-10-09 02:31:03.000000000 +0200
++++ b/ssh-add.1	2019-10-16 10:32:49.000000000 +0200
 @@ -43,7 +43,7 @@
  .Nd adds private key identities to the authentication agent
  .Sh SYNOPSIS
  .Nm ssh-add
--.Op Fl cDdkLlqXx
-+.Op Fl cDdkLlMmqXx
+-.Op Fl cDdkLlqvXx
++.Op Fl AcDdKKkLlqvXx
  .Op Fl E Ar fingerprint_hash
  .Op Fl t Ar life
  .Op Ar
-@@ -126,6 +126,13 @@ Lists public key parameters of all ident
- by the agent.
- .It Fl l
- Lists fingerprints of all identities currently represented by the agent.
-+.It Fl m
-+Add identities to the agent using any passphrases stored in your Mac OS
-+X keychain.
-+.It Fl M
-+When adding identities, each passphrase will also be stored in your Mac OS
-+Xkeychain.  When removing identities with -d, each passphrase will be removed
-+from your Mac OS X keychain.
- .It Fl q
- Be quiet after a successful operation.
- .It Fl s Ar pkcs11
---- a/ssh-add.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/ssh-add.c	2017-10-08 09:09:58.000000000 +0200
-@@ -64,6 +64,7 @@
- #include "misc.h"
+@@ -87,6 +87,9 @@ to work.
+ .Pp
+ The options are as follows:
+ .Bl -tag -width Ds
++.It Fl A
++Add identities to the agent using any passphrases stored in your macOS
++keychain.
+ .It Fl c
+ Indicates that added identities should be subject to confirmation before
+ being used for authentication.
+@@ -121,6 +124,10 @@ The default is
+ .It Fl e Ar pkcs11
+ Remove keys provided by the PKCS#11 shared library
+ .Ar pkcs11 .
++.It Fl K
++When adding identities, each passphrase will also be stored in your macOS
++keychain.  When removing identities with -d, each passphrase will be removed
++from your macOS keychain.
+ .It Fl k
+ When loading keys into or deleting keys from the agent, process plain private
+ keys only and skip certificates.
+--- a/ssh-add.c	2019-10-09 02:31:03.000000000 +0200
++++ b/ssh-add.c	2019-10-16 10:32:49.000000000 +0200
+@@ -67,6 +67,11 @@
  #include "ssherr.h"
  #include "digest.h"
-+#include "keychain.h"
  
++#ifdef __APPLE_KEYCHAIN__
++#include "keychain.h"
++static int use_keychain = 0;
++#endif
++
  /* argv0 */
  extern char *__progname;
-@@ -102,12 +103,27 @@ clear_pass(void)
- }
  
- static int
--delete_file(int agent_fd, const char *filename, int key_only, int qflag)
-+add_from_keychain(int agent_fd, int qflag)
-+{
-+	if (ssh_add_from_keychain(agent_fd) == 0)
-+		return -1;
-+
-+	if (!qflag) {
-+		fprintf(stderr, "Added keychain identities.\n");
-+	}
-+	return 0;
-+}
-+
-+static int
-+delete_file(int agent_fd, int keychain, const char *filename, int key_only, int qflag)
- {
- 	struct sshkey *public, *cert = NULL;
+@@ -115,6 +120,11 @@ delete_file(int agent_fd, const char *fi
  	char *certpath = NULL, *comment = NULL;
  	int r, ret = -1;
  
-+	if (keychain)
-+		remove_from_keychain(filename, qflag);
++#ifdef __APPLE_KEYCHAIN__
++	if (use_keychain)
++		remove_from_keychain(filename);
++#endif
 +
  	if ((r = sshkey_load_public(filename, &public,  &comment)) != 0) {
  		printf("Bad key file %s: %s\n", filename, ssh_err(r));
  		return -1;
-@@ -184,7 +200,7 @@ delete_all(int agent_fd)
- }
- 
- static int
--add_file(int agent_fd, const char *filename, int key_only, int qflag)
-+add_file(int agent_fd, int keychain, const char *filename, int key_only, int qflag)
- {
- 	struct sshkey *private, *cert;
- 	char *comment = NULL;
-@@ -228,6 +244,10 @@ add_file(int agent_fd, const char *filen
- 		    filename, ssh_err(r));
- 		goto fail_load;
- 	}
-+
-+	if (keychain && private != NULL)
-+		store_in_keychain(filename, "");
-+
- 	/* try last */
- 	if (private == NULL && pass != NULL) {
- 		if ((r = sshkey_parse_private_fileblob(keyblob, pass, &private,
-@@ -236,6 +256,8 @@ add_file(int agent_fd, const char *filen
+@@ -246,7 +256,22 @@ add_file(int agent_fd, const char *filen
  			    filename, ssh_err(r));
  			goto fail_load;
  		}
-+		if (keychain && private != NULL)
++#ifdef __APPLE_KEYCHAIN__
++		if (use_keychain && private != NULL)
 +			store_in_keychain(filename, pass);
++#endif
++	}
++
++#ifdef __APPLE_KEYCHAIN__
++	// try the keychain
++	if (private == NULL && use_keychain) {
++		clear_pass();
++		pass = keychain_read_passphrase(filename);
++		if (pass != NULL)
++			sshkey_parse_private_fileblob(keyblob, pass, &private, &comment);
  	}
++#endif
++
  	if (private == NULL) {
  		/* clear passphrase since it did not work */
-@@ -247,8 +269,13 @@ add_file(int agent_fd, const char *filen
- 			if (strcmp(pass, "") == 0)
+ 		clear_pass();
+@@ -258,7 +283,15 @@ add_file(int agent_fd, const char *filen
  				goto fail_load;
  			if ((r = sshkey_parse_private_fileblob(keyblob, pass,
--			    &private, &comment)) == 0)
-+			    &private, &comment)) == 0) {
-+				if (private != NULL) {
-+					if (keychain)
-+						store_in_keychain(filename, pass);
-+				}
+ 			    &private, &comment)) == 0)
++#ifdef __APPLE_KEYCHAIN__
++			{
++				if (use_keychain && private != NULL)
++					store_in_keychain(filename, pass);
  				break;
 +			}
++#else
++				break;
++#endif
  			else if (r != SSH_ERR_KEY_WRONG_PASSPHRASE) {
  				fprintf(stderr,
  				    "Error loading key \"%s\": %s\n",
-@@ -432,13 +459,13 @@ lock_agent(int agent_fd, int lock)
- }
- 
- static int
--do_file(int agent_fd, int deleting, int key_only, char *file, int qflag)
-+do_file(int agent_fd, int deleting, int keychain, int key_only, char *file, int qflag)
- {
- 	if (deleting) {
--		if (delete_file(agent_fd, file, key_only, qflag) == -1)
-+		if (delete_file(agent_fd, keychain, file, key_only, qflag) == -1)
- 			return -1;
- 	} else {
--		if (add_file(agent_fd, file, key_only, qflag) == -1)
-+		if (add_file(agent_fd, keychain, file, key_only, qflag) == -1)
- 			return -1;
- 	}
- 	return 0;
-@@ -462,6 +489,11 @@ usage(void)
- 	fprintf(stderr, "  -s pkcs11   Add keys from PKCS#11 provider.\n");
- 	fprintf(stderr, "  -e pkcs11   Remove keys provided by PKCS#11 provider.\n");
+@@ -563,6 +596,11 @@ usage(void)
+ 	fprintf(stderr, "  -T pubkey   Test if ssh-agent can access matching private key.\n");
  	fprintf(stderr, "  -q          Be quiet after a successful operation.\n");
-+#ifdef KEYCHAIN
-+	fprintf(stderr, "  -m          Add all identities stored in your Mac OS X keychain.\n");
-+	fprintf(stderr, "  -M          Store passphrases in your Mac OS X keychain.\n");
-+	fprintf(stderr, "              With -d, remove passphrases from your Mac OS X keychain.\n");
+ 	fprintf(stderr, "  -v          Be more verbose.\n");
++#ifdef __APPLE_KEYCHAIN__
++	fprintf(stderr, "  -A          Add all identities stored in your macOS keychain.\n");
++	fprintf(stderr, "  -K          Store passphrases in your macOS keychain.\n");
++	fprintf(stderr, "              With -d, remove passphrases from your macOS keychain.\n");
 +#endif
  }
  
  int
-@@ -473,6 +505,7 @@ main(int argc, char **argv)
- 	char *pkcs11provider = NULL;
- 	int r, i, ch, deleting = 0, ret = 0, key_only = 0;
- 	int xflag = 0, lflag = 0, Dflag = 0, qflag = 0;
-+	int keychain = 0, load_from_keychain = 0;
- 
- 	ssh_malloc_init();	/* must be called before any mallocs */
- 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
-@@ -500,7 +533,7 @@ main(int argc, char **argv)
- 		exit(2);
- 	}
- 
--	while ((ch = getopt(argc, argv, "klLcdDxXE:e:qs:t:")) != -1) {
-+	while ((ch = getopt(argc, argv, "klLcdDxXmME:e:qs:t:")) != -1) {
- 		switch (ch) {
- 		case 'E':
- 			fingerprint_hash = ssh_digest_alg_by_name(optarg);
-@@ -548,6 +581,12 @@ main(int argc, char **argv)
- 		case 'q':
- 			qflag = 1;
- 			break;
-+		case 'm':
-+			load_from_keychain = 1;
-+			break;
-+		case 'M':
-+			keychain = 1;
-+			break;
- 		default:
- 			usage();
- 			ret = 1;
-@@ -555,6 +594,12 @@ main(int argc, char **argv)
- 		}
- 	}
- 
-+	if (load_from_keychain) {
-+		if (add_from_keychain(agent_fd, qflag) == -1)
-+			ret = 1;
-+		goto done;
-+	}
-+
- 	if ((xflag != 0) + (lflag != 0) + (Dflag != 0) > 1)
- 		fatal("Invalid combination of actions");
- 	else if (xflag) {
-@@ -596,7 +641,7 @@ main(int argc, char **argv)
- 			    default_files[i]);
- 			if (stat(buf, &st) < 0)
- 				continue;
--			if (do_file(agent_fd, deleting, key_only, buf,
-+			if (do_file(agent_fd, deleting, keychain, key_only, buf,
- 			    qflag) == -1)
- 				ret = 1;
- 			else
-@@ -606,7 +651,7 @@ main(int argc, char **argv)
- 			ret = 1;
- 	} else {
- 		for (i = 0; i < argc; i++) {
--			if (do_file(agent_fd, deleting, key_only,
-+			if (do_file(agent_fd, deleting, keychain, key_only,
- 			    argv[i], qflag) == -1)
- 				ret = 1;
- 		}
---- a/ssh-agent.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/ssh-agent.c	2017-10-08 09:22:41.000000000 +0200
-@@ -73,18 +73,24 @@
+--- a/ssh-agent.c	2019-10-09 02:31:03.000000000 +0200
++++ b/ssh-agent.c	2019-10-16 10:34:45.000000000 +0200
+@@ -70,6 +70,10 @@
+ #include <time.h>
+ #include <string.h>
+ #include <unistd.h>
++#ifdef __APPLE_LAUNCHD__
++#include <launch.h>
++#include <AvailabilityMacros.h>
++#endif
  #ifdef HAVE_UTIL_H
  # include <util.h>
  #endif
-+#ifdef __APPLE_LAUNCHD__
-+#include <launch.h>
-+#endif
- 
- #include "xmalloc.h"
- #include "ssh.h"
- #include "sshbuf.h"
- #include "sshkey.h"
- #include "authfd.h"
-+#include "authfile.h"
- #include "compat.h"
- #include "log.h"
- #include "misc.h"
- #include "digest.h"
- #include "ssherr.h"
- #include "match.h"
-+#include "keychain.h"
-+#include "key.h"
- 
- #ifdef ENABLE_PKCS11
- #include "ssh-pkcs11.h"
-@@ -638,6 +644,56 @@ send:
- }
- #endif /* ENABLE_PKCS11 */
- 
-+static int
-+add_identity_callback(const char *filename, const char *passphrase)
-+{
-+	Key *k;
-+
-+	if ((k = key_load_private(filename, passphrase, NULL)) == NULL)
-+		return 1;
-+	switch (k->type) {
-+	case KEY_RSA:
-+		if (RSA_blinding_on(k->rsa, NULL) != 1) {
-+			key_free(k);
-+			return 1;
-+		}
-+		break;
-+	}
-+	if (lookup_identity(k) == NULL) {
-+		Identity *id = xmalloc(sizeof(Identity));
-+		id->key = k;
-+		id->comment = xstrdup(filename);
-+		if (id->comment == NULL) {
-+			key_free(k);
-+			return 1;
-+		}
-+		id->death = 0;
-+		id->confirm = 0;
-+		TAILQ_INSERT_TAIL(&idtab->idlist, id, next);
-+		idtab->nentries++;
-+	} else {
-+		key_free(k);
-+		return 1;
-+	}
-+
-+	return 0;
-+}
-+
-+static void
-+process_add_from_keychain(SocketEntry *e)
-+{
-+	int result;
-+
-+	result = add_identities_using_keychain(&add_identity_callback);
-+
-+	/* e will be NULL when ssh-agent adds keys on its own at startup */
-+	if (e) {
-+		buffer_put_int(e->output, 1);
-+		buffer_put_char(e->output,
-+		    result ? SSH_AGENT_FAILURE : SSH_AGENT_SUCCESS);
-+	}
-+}
-+
- /* dispatch incoming messages */
- 
- static int
-@@ -730,6 +786,9 @@ process_message(u_int socknum)
- 		process_remove_smartcard_key(e);
- 		break;
- #endif /* ENABLE_PKCS11 */
-+	case SSH_AGENTC_ADD_FROM_KEYCHAIN:
-+		process_add_from_keychain(e);
-+		break;
- 	default:
- 		/* Unknown message.  Respond with failure. */
- 		error("Unknown message %d", type);
-@@ -1016,7 +1075,11 @@ usage(void)
- int
+@@ -1088,6 +1092,9 @@ int
  main(int ac, char **av)
  {
-+#ifdef __APPLE_LAUNCHD__
-+	int c_flag = 0, d_flag = 0, D_flag = 0, k_flag = 0, s_flag = 0, l_flag = 0;
-+#else
  	int c_flag = 0, d_flag = 0, D_flag = 0, k_flag = 0, s_flag = 0;
-+#endif
++	#ifdef __APPLE_LAUNCHD__
++	int l_flag = 0;
++	#endif
  	int sock, fd, ch, result, saved_errno;
  	char *shell, *format, *pidstr, *agentsocket = NULL;
  #ifdef HAVE_SETRLIMIT
-@@ -1049,7 +1112,11 @@ main(int ac, char **av)
+@@ -1119,7 +1126,11 @@ main(int ac, char **av)
  	__progname = ssh_get_progname(av[0]);
  	seed_rng();
  
@@ -1819,7 +759,7 @@
  		switch (ch) {
  		case 'E':
  			fingerprint_hash = ssh_digest_alg_by_name(optarg);
-@@ -1069,6 +1136,11 @@ main(int ac, char **av)
+@@ -1139,6 +1150,11 @@ main(int ac, char **av)
  				fatal("-P option already specified");
  			pkcs11_whitelist = xstrdup(optarg);
  			break;
@@ -1831,24 +771,33 @@
  		case 's':
  			if (c_flag)
  				usage();
-@@ -1100,7 +1172,11 @@ main(int ac, char **av)
- 	ac -= optind;
- 	av += optind;
- 
-+#ifdef __APPPLE_LAUNCHD__
-+	if (ac > 0 && (c_flag || k_flag || s_flag || d_flag || D_flag || l_flag))
-+#else
- 	if (ac > 0 && (c_flag || k_flag || s_flag || d_flag || D_flag))
-+#endif
- 		usage();
- 
- 	if (pkcs11_whitelist == NULL)
-@@ -1159,6 +1235,53 @@ main(int ac, char **av)
+@@ -1241,6 +1257,75 @@ main(int ac, char **av)
  	 * Create socket early so it will exist before command gets run from
  	 * the parent.
  	 */
 +#ifdef __APPLE_LAUNCHD__
 +	if (l_flag) {
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++		int *fds = NULL;
++		size_t count = 0;
++		result = launch_activate_socket("Listeners", &fds, &count);
++
++		if (result != 0 || fds == NULL || count < 1) {
++			errno = result;
++			perror("launch_activate_socket()");
++			exit(1);
++		}
++
++		size_t i;
++		for (i = 0; i < count; i++) {
++			new_socket(AUTH_SOCKET, fds[i]);
++		}
++
++		if (fds)
++			free(fds);
++
++		goto skip2;
++#else /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
 +		launch_data_t resp, msg, tmp;
 +		size_t listeners_i;
 +
@@ -1892,203 +841,177 @@
 +		}
 +
 +		launch_data_free(resp);
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
 +	} else {
 +#endif
  	prev_mask = umask(0177);
  	sock = unix_listener(socket_name, SSH_LISTEN_BACKLOG, 0);
  	if (sock < 0) {
-@@ -1167,6 +1290,14 @@ main(int ac, char **av)
+@@ -1248,7 +1333,18 @@ main(int ac, char **av)
+ 		*socket_name = '\0'; /* Don't unlink any existing file */
  		cleanup_exit(1);
  	}
++
  	umask(prev_mask);
 +#ifdef __APPLE_LAUNCHD__
 +	}
 +#endif
 +
 +#ifdef __APPLE_LAUNCHD__
++#if ((!(defined (MAC_OS_X_VERSION_10_11))) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_11))
 +	if (l_flag)
 +		goto skip2;
-+#endif
++#endif /* ((!(defined (MAC_OS_X_VERSION_10_11))) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_11)) */
++#endif /* defined (__APPLE_LAUNCHD__) */
  
  	/*
  	 * Fork, and have the parent execute the command, if any, or present
-@@ -1244,6 +1375,7 @@ skip:
+@@ -1326,6 +1422,9 @@ skip:
  	pkcs11_init(0);
  #endif
  	new_socket(AUTH_SOCKET, sock);
++#ifdef __APPLE_LAUNCHD__
 +skip2:
++#endif
  	if (ac > 0)
  		parent_alive_interval = 10;
  	idtab_init();
-@@ -1256,6 +1388,10 @@ skip:
- 		fatal("%s: pledge: %s", __progname, strerror(errno));
- 	platform_pledge_agent();
- 
-+#ifdef KEYCHAIN
-+	process_add_from_keychain(NULL);
-+#endif
-+
- 	while (1) {
- 		prepare_poll(&pfd, &npfd, &timeout);
- 		result = poll(pfd, npfd, timeout);
---- a/ssh-keysign.8	2017-10-02 21:34:26.000000000 +0200
-+++ b/ssh-keysign.8	2017-10-08 09:09:58.000000000 +0200
-@@ -72,6 +72,9 @@ accessible to others.
- Since they are readable only by root,
- .Nm
- must be set-uid root if host-based authentication is used.
-+Note that
-+.Nm
-+is not set-uid by default on Mac OS X.
- .Pp
- .It Pa /etc/ssh/ssh_host_dsa_key-cert.pub
- .It Pa /etc/ssh/ssh_host_ecdsa_key-cert.pub
---- a/sshconnect2.c	2017-10-02 21:34:26.000000000 +0200
-+++ b/sshconnect2.c	2017-10-08 09:09:59.000000000 +0200
-@@ -72,6 +72,7 @@
- #include "hostfile.h"
+--- a/sshconnect2.c	2019-10-09 02:31:03.000000000 +0200
++++ b/sshconnect2.c	2019-10-16 10:32:49.000000000 +0200
+@@ -73,6 +73,11 @@
  #include "ssherr.h"
  #include "utf8.h"
-+#include "keychain.h"
  
++#ifdef __APPLE_KEYCHAIN__
++#include "keychain.h"
++int found_in_keychain = 0;
++#endif
++
  #ifdef GSSAPI
  #include "ssh-gss.h"
-@@ -1251,6 +1252,10 @@ load_identity_file(Identity *id)
+ #endif
+@@ -1415,6 +1420,12 @@ load_identity_file(Identity *id)
+ 	snprintf(prompt, sizeof prompt,
+ 	    "Enter passphrase for key '%.100s': ", id->filename);
+ 	for (i = 0; i <= options.number_of_password_prompts; i++) {
++#ifdef __APPLE_KEYCHAIN__
++		if (i == 0 && options.use_keychain && (passphrase = keychain_read_passphrase(id->filename)) != NULL) {
++			found_in_keychain = 1;
++			debug2("using passphrase from keychain");
++		} else
++#endif
  		if (i == 0)
  			passphrase = "";
  		else {
+@@ -1450,6 +1461,14 @@ load_identity_file(Identity *id)
+ 			quit = 1;
+ 			break;
+ 		}
++
 +#ifdef __APPLE_KEYCHAIN__
-+			passphrase = keychain_read_passphrase(id->filename, options.ask_pass_gui);
-+			if (passphrase == NULL)
++		if (!quit && private != NULL && !(id->key && id->isprivate) && options.use_keychain && !found_in_keychain) {
++			debug2("storing passphrase in keychain");
++			store_in_keychain(id->filename, passphrase);
++		}
 +#endif
- 			passphrase = read_passphrase(prompt, 0);
- 			if (*passphrase == '\0') {
- 				debug2("no passphrase given, try next key");
---- a/sshd.0	2017-10-03 18:05:55.000000000 +0200
-+++ b/sshd.0	2017-10-08 09:09:58.000000000 +0200
-@@ -618,8 +618,7 @@ FILES
++
+ 		if (!quit && private != NULL && id->agent_fd == -1 &&
+ 		    !(id->key && id->isprivate))
+ 			maybe_add_key_to_agent(id->filename, private, comment,
+--- a/ssh-agent.0	2019-10-09 02:39:14.000000000 +0200
++++ b/ssh-agent.0	2019-10-16 10:32:49.000000000 +0200
+@@ -7,6 +7,7 @@ SYNOPSIS
+      ssh-agent [-c | -s] [-Dd] [-a bind_address] [-E fingerprint_hash]
+                [-P pkcs11_whitelist] [-t life] [command [arg ...]]
+      ssh-agent [-c | -s] -k
++     ssh-agent -l
  
- SEE ALSO
-      scp(1), sftp(1), ssh(1), ssh-add(1), ssh-agent(1), ssh-keygen(1),
--     ssh-keyscan(1), chroot(2), login.conf(5), moduli(5), sshd_config(5),
--     inetd(8), sftp-server(8)
-+     ssh-keyscan(1), chroot(2),  sshd_config(5), sftp-server(8)
+ DESCRIPTION
+      ssh-agent is a program to hold private keys used for public key
+@@ -64,6 +65,9 @@ DESCRIPTION
+              for an identity with ssh-add(1) overrides this value.  Without
+              this option the default maximum lifetime is forever.
  
- AUTHORS
-      OpenSSH is a derivative of the original and free ssh 1.2.12 release by
---- a/sshd.8	2017-10-02 21:34:26.000000000 +0200
-+++ b/sshd.8	2017-10-08 09:09:58.000000000 +0200
-@@ -943,10 +943,7 @@ The content of this file is not sensitiv
- .Xr ssh-keygen 1 ,
- .Xr ssh-keyscan 1 ,
- .Xr chroot 2 ,
--.Xr login.conf 5 ,
--.Xr moduli 5 ,
- .Xr sshd_config 5 ,
--.Xr inetd 8 ,
- .Xr sftp-server 8
- .Sh AUTHORS
- OpenSSH is a derivative of the original and free
---- a/sshd.c	2017-10-08 09:09:58.000000000 +0200
-+++ b/sshd.c	2017-10-08 09:09:59.000000000 +0200
-@@ -2063,6 +2063,12 @@ main(int ac, char **av)
- 	audit_event(SSH_AUTH_SUCCESS);
- #endif
++     -l      Start in launchd mode.  This feature should only be used by macOS
++             itself.  It is not very useful to users.
++
+      If a command line is given, this is executed as a subprocess of the
+      agent.  When the command dies, so does the agent.
  
-+#ifdef USE_PAM
-+	if (options.use_pam) {
-+		do_pam_setcred(1);
-+		do_pam_session();
-+	}
-+#endif
- #ifdef GSSAPI
- 	if (options.gss_authentication) {
- 		temporarily_use_uid(authctxt->pw);
-@@ -2070,12 +2076,6 @@ main(int ac, char **av)
- 		restore_uid();
- 	}
- #endif
--#ifdef USE_PAM
--	if (options.use_pam) {
--		do_pam_setcred(1);
--		do_pam_session();
--	}
--#endif
- 
- 	/*
- 	 * In privilege separation, we fork another child and prepare
---- a/sshd_config	2017-10-02 21:34:26.000000000 +0200
-+++ b/sshd_config	2017-10-08 09:09:59.000000000 +0200
-@@ -24,7 +24,7 @@
- #RekeyLimit default none
- 
- # Logging
--#SyslogFacility AUTH
-+SyslogFacility AUTHPRIV
- #LogLevel INFO
- 
- # Authentication:
-@@ -54,8 +54,9 @@ AuthorizedKeysFile	.ssh/authorized_keys
- # Don't read the user's ~/.rhosts and ~/.shosts files
- #IgnoreRhosts yes
- 
--# To disable tunneled clear text passwords, change to no here!
--#PasswordAuthentication yes
-+# To disable tunneled clear text passwords, change to no here! Also,
-+# remember to set the UsePAM setting to 'no'.
-+#PasswordAuthentication no
- #PermitEmptyPasswords no
- 
- # Change to no to disable s/key passwords
-@@ -80,7 +81,10 @@ AuthorizedKeysFile	.ssh/authorized_keys
- # If you just want the PAM account and session checks to run without
- # PAM authentication, then enable this but set PasswordAuthentication
- # and ChallengeResponseAuthentication to 'no'.
--#UsePAM no
-+# Also, PAM will deny null passwords by default.  If you need to allow
-+# null passwords, add the "	nullok" option to the end of the
-+# securityserver.so line in /etc/pam.d/sshd.
-+#UsePAM yes
- 
- #AllowAgentForwarding yes
- #AllowTcpForwarding yes
---- a/sshd_config.0	2017-10-03 18:05:56.000000000 +0200
-+++ b/sshd_config.0	2017-10-08 09:09:58.000000000 +0200
-@@ -674,7 +674,7 @@ DESCRIPTION
- 
-      PasswordAuthentication
-              Specifies whether password authentication is allowed.  The
--             default is yes.
-+             default is no.
- 
-      PermitEmptyPasswords
-              When password authentication is allowed, it specifies whether the
-@@ -904,7 +904,7 @@ DESCRIPTION
-              either PasswordAuthentication or ChallengeResponseAuthentication.
- 
-              If UsePAM is enabled, you will not be able to run sshd(8) as a
--             non-root user.  The default is no.
-+             non-root user.  The default is yes.
- 
-      VersionAddendum
-              Optionally specifies additional text to append to the SSH
---- a/sshd_config.5	2017-10-02 21:34:26.000000000 +0200
-+++ b/sshd_config.5	2017-10-08 09:09:59.000000000 +0200
-@@ -1143,7 +1143,7 @@ are refused if the number of unauthentic
- .It Cm PasswordAuthentication
- Specifies whether password authentication is allowed.
- The default is
--.Cm yes .
-+.Cm no .
- .It Cm PermitEmptyPasswords
- When password authentication is allowed, it specifies whether the
- server allows login to accounts with empty password strings.
-@@ -1500,7 +1500,7 @@ is enabled, you will not be able to run
- .Xr sshd 8
- as a non-root user.
- The default is
--.Cm no .
-+.Cm yes .
- .It Cm VersionAddendum
- Optionally specifies additional text to append to the SSH protocol banner
- sent by the server upon connection.
+--- a/ssh-agent.1	2019-10-09 02:31:03.000000000 +0200
++++ b/ssh-agent.1	2019-10-16 10:32:49.000000000 +0200
+@@ -52,6 +52,8 @@
+ .Nm ssh-agent
+ .Op Fl c | s
+ .Fl k
++.Nm ssh-agent
++.Fl l
+ .Sh DESCRIPTION
+ .Nm
+ is a program to hold private keys used for public key authentication
+@@ -148,6 +150,10 @@ A lifetime specified for an identity wit
+ .Xr ssh-add 1
+ overrides this value.
+ Without this option the default maximum lifetime is forever.
++.It Fl l
++Start in launchd mode.
++This feature should only be used by macOS itself.
++It is not very useful to users.
+ .El
+ .Pp
+ If a command line is given, this is executed as a subprocess of the agent.
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ b/SecItemPriv-shim.h	2019-10-16 10:32:49.000000000 +0200
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (c) 2006-2013 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++/*
++    @header SecItemPriv
++    SecItemPriv defines private constants and SPI functions for access to
++    Security items (certificates, identities, keys, and keychain items.)
++
++    ====== MACPORTS NOTICE ======
++    Apple uses this private header file for building its OpenSSH keychain
++    integration. They are able to do this because they have either converted
++    all (or most?) upstream projects into Xcode projects and can then use
++    private headers, but our users can't.
++
++    Private header files are never installed onto user systems and there
++    aren't any SDKs that users could install to get them.
++
++    Luckily, the Security Framework *is* (currently) free software, so we do
++    have access to it via https://opensource.apple.com
++
++    We can, hence, take a look at it and copy relevant parts/declarations.
++
++    We cannot, however, make sure that the declarations in here are actually
++    defined in the Security Framework binaries/libraries themselves, so
++    building this part, especially on older systems, might still fail.
++
++    Luckily, we currently don't need anything out of that private header file,
++    so Apple using it to build their keychain integration looks more like an
++    error than actual intent.
++    ====== MACPORTS NOTICE ======
++*/
++
