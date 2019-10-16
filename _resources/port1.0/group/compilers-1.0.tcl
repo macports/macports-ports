@@ -268,8 +268,9 @@ proc compilers.setup_variants {variants} {
                 }
             }
 
-            # see https://trac.macports.org/ticket/59199
-            if {$cdb($variant,cxx_stdlib) ne ""} {
+            # see https://trac.macports.org/ticket/59199 for setting configure.cxx_stdlib
+            # see https://trac.macports.org/ticket/59329 for compilers.is_fortran_only
+            if {![compilers.is_fortran_only] && $cdb($variant,cxx_stdlib) ne ""} {
                 append body "
                     configure.cxx_stdlib $cdb($variant,cxx_stdlib)
                 "
