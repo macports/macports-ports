@@ -39,11 +39,7 @@ proc universal_setup {args} {
     } else {
         ui_debug "adding universal variant via PortGroup muniversal"
         uplevel "PortGroup muniversal 1.0"
-        if {[vercmp [macports_version] 2.5.3] <= 0} {
-        uplevel "default universal_archs_supported {\"i386 x86_64\"}"
-        } else {
         uplevel "default universal_archs_supported {i386 x86_64}"
-        }
     }
 }
 
@@ -62,11 +58,7 @@ proc octave.set_module {opt action args} {
     }
 }
 
-if {[vercmp [macports_version] 2.5.3] <= 0} {
-    default categories   {"math science"}
-} else {
-    default categories   "math science"
-}
+default categories   "math science"
 default master_sites {sourceforge:octave}
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
@@ -109,16 +101,20 @@ port::register_callback octave.add_env
 post-extract {
     # rename the effective worksrcdir to always be ${octave.module}
 
-    set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
-    if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
-        # work-around for case-insensitive file systems when the
-        # extract directory name is the same as the octave module name
-        # except for letter case; should always work no matter if the
-        # file system is case-insensitive or case-sensitive.
-
-        move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
-        move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
+    if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
+        delete ${workpath}/${octave.module}
+        move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
     }
+#     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
+#     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
+#         # work-around for case-insensitive file systems when the
+#         # extract directory name is the same as the octave module name
+#         # except for letter case; should always work no matter if the
+#         # file system is case-insensitive or case-sensitive.
+# 
+#         move ${workpath}/${worksrcdir_name} ${workpath}/tmp-${worksrcdir_name}
+#         move ${workpath}/tmp-${worksrcdir_name} ${workpath}/${octave.module}
+#     }
 }
 
 configure.universal_args-delete --disable-dependency-tracking
