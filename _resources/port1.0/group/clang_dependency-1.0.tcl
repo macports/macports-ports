@@ -14,4 +14,4 @@ proc clang_dependency.extra_versions {versions} {
     }
 }
 
-clang_dependency.extra_versions {9.0 8.0 7.0 6.0 5.0}
+clang_dependency.extra_versions {devel 9.0 8.0 7.0 6.0 5.0}
