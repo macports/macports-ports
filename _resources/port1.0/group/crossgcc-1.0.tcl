@@ -293,9 +293,10 @@ proc crossgcc.setup_libc {libc_name libc_version} {
                 post-extract {
                     system -W ${workpath} "tar -xf ${distpath}/${dnewlib}"
                     ln -s ${workpath}/newlib-${crossgcc.libc_version}/newlib ${workpath}/gcc-${version}/
+                    ln -s ${workpath}/newlib-${crossgcc.libc_version}/libgloss ${workpath}/gcc-${version}/
                 }
 
-                configure.args-append --with-newlib
+                configure.args-append --with-newlib --with-libgloss
             }
         }
         default {
