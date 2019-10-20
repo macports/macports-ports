@@ -52,18 +52,19 @@ pre-configure {
         }
     }
 
-    if { [vercmp ${xcodeversion} "7.0"] >= 0 } {
-        # starting with Xcode 7.0, the SDK for build OS version might not be available
-        # see https://trac.macports.org/ticket/53597
-        set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
-        if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
-            configure.sdk_version
+    # starting with Xcode 7.0, the SDK for build OS version might not be available
+    # see https://trac.macports.org/ticket/53597
+    if { ${use_xcode} } {
+        if {[vercmp $xcodeversion 4.3] < 0} {
+            set sdks_dir ${configure.developer_dir}/SDKs
+        } else {
+            set sdks_dir ${configure.developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
         }
-
-        # same check as before, but if macports wants to use CLT's developer_dir instead of Xcode, then we check if the build OS version is available on CLT.
-        if { [info exists configure.developer_dir] && ${developer_dir} ne ${configure.developer_dir} && ![file exists ${configure.developer_dir}/SDKs/MacOSX${configure.sdk_version}.sdk] } {
-            configure.sdk_version
-        }
+    } else {
+        set sdks_dir ${configure.developer_dir}/SDKs
+    }
+    if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
+        configure.sdk_version
     }
 
     # set QT and QMAKE values in a cache file
