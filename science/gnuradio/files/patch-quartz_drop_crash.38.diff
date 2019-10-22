@@ -1,0 +1,92 @@
+From 61be64deb0cdfc6b356d4391151b1134ddee7437 Mon Sep 17 00:00:00 2001
+From: Emmanuel Blot <emmanuel.blot@free.fr>
+Date: Thu, 15 Aug 2019 16:08:05 +0200
+Subject: [PATCH] Use an ImageSurface rather than UI back end
+
+Use an ImageSurface to test whether the cursor is on a line path.
+It avoids storing a reference of the draw context, as deferred access
+may run out of sync with the Cairo Quartz back end.
+---
+ grc/gui/canvas/connection.py | 35 ++++++++++++++++++++++++-----------
+ 1 file changed, 24 insertions(+), 11 deletions(-)
+
+diff --git a/grc/gui/canvas/connection.py b/grc/gui/canvas/connection.py
+index 2accfaf4d6..6f41dede7e 100644
+--- grc/gui/canvas/connection.py
++++ grc/gui/canvas/connection.py
+@@ -20,7 +20,9 @@
+ from __future__ import absolute_import, division
+ 
+ from argparse import Namespace
+-from math import pi
++from math import ceil, pi
++
++from cairo import Context, Format, ImageSurface
+ 
+ from . import colors
+ from .drawable import Drawable
+@@ -57,8 +59,8 @@ def __init__(self, *args, **kwargs):
+ 
+         self._rel_points = None  # connection coordinates relative to sink/source
+         self._arrow_rotation = 0.0  # rotation of the arrow in radians
+-        self._current_cr = None  # for what_is_selected() of curved line
+         self._line_path = None
++        self._line_extents = None
+ 
+     @nop_write
+     @property
+@@ -134,12 +136,12 @@ def _make_path(self, cr=None):
+             cr.curve_to(*(p2 + p3 + p4))
+             cr.line_to(*p5)
+             self._line_path = cr.copy_path()
++            self._line_extents = cr.path_extents()
+ 
+     def draw(self, cr):
+         """
+         Draw the connection.
+         """
+-        self._current_cr = cr
+         sink = self.sink_port
+         source = self.source_port
+ 
+@@ -200,21 +202,32 @@ def what_is_selected(self, coor, coor_m=None):
+         if coor_m:
+             return Drawable.what_is_selected(self, coor, coor_m)
+ 
+-        x, y = [a - b for a, b in zip(coor, self.coordinate)]
++        sx, sy = self.coordinate
++        tx, ty = coor
+ 
+-        cr = self._current_cr
++        if ((tx < sx + self._line_extents[0]) or
++            (ty < sy + self._line_extents[1]) or
++            (tx > sx + self._line_extents[2]) or
++            (ty > sy + self._line_extents[3])):
++            # outside the bounding box
++            return None
+ 
+-        if cr is None:
+-            return
+-        cr.save()
++        x, y = [a - b for a, b in zip(coor, self.coordinate)]
++        w = ceil(self._line_extents[2]-self._line_extents[0]+1)
++        h = ceil(self._line_extents[3]-self._line_extents[1]+1)
++
++        # use an image surface to avoid reusing the backend context
++        cr = Context(ImageSurface(Format.A8, w, h))
+         cr.new_path()
+         cr.append_path(self._line_path)
+         cr.set_line_width(cr.get_line_width() * LINE_SELECT_SENSITIVITY)
+         hit = cr.in_stroke(x, y)
+-        cr.restore()
+ 
+-        if hit:
+-            return self
++        if not hit:
++            # not on the line path
++            return None
++
++        return self
+ 
+ 
+ class DummyCoreConnection(object):
