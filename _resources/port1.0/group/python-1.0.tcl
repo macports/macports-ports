@@ -44,7 +44,8 @@ pre-destroot    {
 options python.rootname
 default python.rootname {[regsub ^py- [option name] ""]}
 
-options python.versions python.version python.default_version
+options python.versions python.version python.default_version \
+        python.obsolete_versions
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
 default python.version {[python_get_version]}
@@ -72,6 +73,24 @@ proc python_get_default_version {} {
         return 37
     }
 }
+
+option_proc python.obsolete_versions python_set_obsolete
+proc python_set_obsolete {option action args} {
+    if {$action ne "set"} {
+        return
+    }
+    global name subport python.rootname
+    if {[string match py-* $name]} {
+        foreach v [option $option] {
+            subport py${v}-${python.rootname} {
+                global python.default_version
+                replaced_by py${python.default_version}-${python.rootname}
+                PortGroup obsolete 1.0
+            }
+        }
+    }
+}
+
 
 proc python_set_versions {option action args} {
     if {$action ne "set"} {
