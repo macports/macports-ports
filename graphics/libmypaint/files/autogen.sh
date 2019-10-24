@@ -88,7 +88,7 @@ case $OS in
 	;;
 esac
 
-echo -n "checking for libtool >= $LIBTOOL_REQUIRED_VERSION ... "
+printf "checking for libtool >= $LIBTOOL_REQUIRED_VERSION ... "
 if ($LIBTOOLIZE --version) < /dev/null > /dev/null 2>&1; then
    LIBTOOLIZE=$LIBTOOLIZE
 elif (glibtoolize --version) < /dev/null > /dev/null 2>&1; then
@@ -108,7 +108,7 @@ if test x$LIBTOOLIZE != x; then
     check_version $VER $LIBTOOL_REQUIRED_VERSION
 fi
 
-echo -n "checking for autoconf >= $AUTOCONF_REQUIRED_VERSION ... "
+printf "checking for autoconf >= $AUTOCONF_REQUIRED_VERSION ... "
 if ($AUTOCONF --version) < /dev/null > /dev/null 2>&1; then
     VER=`$AUTOCONF --version | head -n 1 \
          | grep -iw autoconf | sed "s/.* \([0-9.]*\)[-a-z0-9]*$/\1/"`
@@ -123,7 +123,7 @@ else
 fi
 
 
-echo -n "checking for automake >= $AUTOMAKE_REQUIRED_VERSION ... "
+printf "checking for automake >= $AUTOMAKE_REQUIRED_VERSION ... "
 if ($AUTOMAKE --version) < /dev/null > /dev/null 2>&1; then
    AUTOMAKE=$AUTOMAKE
    ACLOCAL=$ACLOCAL
@@ -155,7 +155,7 @@ if test x$AUTOMAKE != x; then
 fi
 
 
-echo -n "checking for intltool >= $INTLTOOL_REQUIRED_VERSION ... "
+printf "checking for intltool >= $INTLTOOL_REQUIRED_VERSION ... "
 if (intltoolize --version) < /dev/null > /dev/null 2>&1; then
     VER=`intltoolize --version \
          | grep intltoolize | sed "s/.* \([0-9.]*\)/\1/"`
@@ -235,7 +235,7 @@ $LIBTOOLIZE --force || exit $?
 # configure script. The internal-only brushsettings-gen.h is also used
 # as the source of strings for gettext.
 
-python2 generate.py mypaint-brush-settings-gen.h brushsettings-gen.h
+# python2 generate.py mypaint-brush-settings-gen.h brushsettings-gen.h
 
 # The MyPaint code no longer needs the .json file at runtime, and it is
 # not installed as data.
