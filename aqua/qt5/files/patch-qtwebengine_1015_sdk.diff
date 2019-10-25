@@ -1,0 +1,199 @@
+From be2b74f4ab835573362a012047c76508973bd065 Mon Sep 17 00:00:00 2001
+From: Peter Varga <pvarga@inf.u-szeged.hu>
+Date: Fri, 04 Oct 2019 11:25:07 +0200
+Subject: [PATCH] [Backport][ios] Get things compiling on Xcode 11.
+
+Updates various files with to conform to iOS13 SDK headers changes:
+  Nullability and availability changes
+  Updates security types
+  Updated default values (modalPresentationStyle)
+  Updates objc_zombie with IMP changes (as well as adding the accidentally-omitted tests)
+
+Task-number: QTBUG-78997
+Change-Id: I949717fbe3823a7d867b2b854f05d52f20478ea6
+Commit-Queue: Justin Cohen <justincohen@chromium.org>
+Reviewed-by: Mark Mentovai <mark@chromium.org>
+Reviewed-by: Mark Cogan <marq@chromium.org>
+Reviewed-by: edchin <edchin@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#666142}
+Reviewed-by: Dmitriy Kuminov <coding@dmik.org>
+Reviewed-by: Allan Sandfeld Jensen <allan.jensen@qt.io>
+---
+
+diff --git a/chromium/base/mac/foundation_util.h b/chromium/base/mac/foundation_util.h
+index b2d56d8..8626046 100644
+--- src/3rdparty/chromium/base/mac/foundation_util.h
++++ src/3rdparty/chromium/base/mac/foundation_util.h
+@@ -5,6 +5,7 @@
+ #ifndef BASE_MAC_FOUNDATION_UTIL_H_
+ #define BASE_MAC_FOUNDATION_UTIL_H_
+ 
++#include <AvailabilityMacros.h>
+ #include <CoreFoundation/CoreFoundation.h>
+ 
+ #include <string>
+@@ -52,7 +53,7 @@
+ typedef unsigned int NSSearchPathDomainMask;
+ #endif
+ 
+-#if defined(OS_IOS)
++#if defined(OS_IOS) || defined(MAC_OS_X_VERSION_10_15)
+ typedef struct CF_BRIDGED_TYPE(id) __SecKey* SecKeyRef;
+ typedef struct CF_BRIDGED_TYPE(id) __SecPolicy* SecPolicyRef;
+ #else
+diff --git a/chromium/components/crash/core/common/objc_zombie.mm b/chromium/components/crash/core/common/objc_zombie.mm
+index 9af0cee..eced952 100644
+--- src/3rdparty/chromium/components/crash/core/common/objc_zombie.mm
++++ src/3rdparty/chromium/components/crash/core/common/objc_zombie.mm
+@@ -51,7 +51,17 @@
+ const size_t kBacktraceDepth = 20;
+ 
+ // The original implementation for |-[NSObject dealloc]|.
+-IMP g_originalDeallocIMP = NULL;
++#if OBJC_OLD_DISPATCH_PROTOTYPES
++using RealIMP = IMP;
++#else
++// With !OBJC_OLD_DISPATCH_PROTOTYPES the runtime hasn't changed and IMP is
++// still what it always was, but the SDK is hiding the details now outside the
++// objc runtime. It is safe to define |RealIMP| to match the older definition of
++// |IMP|.
++using RealIMP = id (*)(id, SEL, ...);
++#endif
++
++RealIMP g_originalDeallocIMP = NULL;
+ 
+ // Classes which freed objects become.  |g_fatZombieSize| is the
+ // minimum object size which can be made into a fat zombie (which can
+@@ -241,8 +251,8 @@
+     return YES;
+ 
+   Class rootClass = [NSObject class];
+-  g_originalDeallocIMP =
+-      class_getMethodImplementation(rootClass, @selector(dealloc));
++  g_originalDeallocIMP = reinterpret_cast<RealIMP>(
++      class_getMethodImplementation(rootClass, @selector(dealloc)));
+   // objc_getClass() so CrZombie doesn't need +class.
+   g_zombieClass = objc_getClass("CrZombie");
+   g_fatZombieClass = objc_getClass("CrFatZombie");
+@@ -335,9 +345,10 @@
+   if (!m)
+     return false;
+ 
+-  const IMP prevDeallocIMP = method_setImplementation(m, (IMP)ZombieDealloc);
++  const RealIMP prevDeallocIMP = reinterpret_cast<RealIMP>(
++      method_setImplementation(m, reinterpret_cast<IMP>(ZombieDealloc)));
+   DCHECK(prevDeallocIMP == g_originalDeallocIMP ||
+-         prevDeallocIMP == (IMP)ZombieDealloc);
++         prevDeallocIMP == reinterpret_cast<RealIMP>(ZombieDealloc));
+ 
+   // Grab the current set of zombies.  This is thread-safe because
+   // only the main thread can change these.
+@@ -409,7 +420,7 @@
+   // Put back the original implementation of -[NSObject dealloc].
+   Method m = class_getInstanceMethod([NSObject class], @selector(dealloc));
+   DCHECK(m);
+-  method_setImplementation(m, g_originalDeallocIMP);
++  method_setImplementation(m, reinterpret_cast<IMP>(g_originalDeallocIMP));
+ 
+   // Can safely grab this because it only happens on the main thread.
+   const size_t oldCount = g_zombieCount;
+From 3449634e50a8bc18b35aa28d06b17540cbb00ffe Mon Sep 17 00:00:00 2001
+From: Michael Brüning <michael.bruning@qt.io>
+Date: Thu, 26 Sep 2019 12:57:40 +0200
+Subject: [PATCH] Fix use of deprecated method for scanning wifi networks
+
+scanForNetworksWithParameters has ben removed in the sdk that ships
+with XCode 11. Replace its use with scanForNetworksWithName.
+
+The results should be the same.
+
+Task-number: QTBUG-78997
+Change-Id: Ifaeb6b380d02364133280b44644ae8ca1e51119a
+Reviewed-by: Peter Varga <pvarga@inf.u-szeged.hu>
+Reviewed-by: Jüri Valdmann <juri.valdmann@qt.io>
+(cherry picked from commit 1f1bd0af331476d46fe69ceb6df14b82f98cd54d)
+Reviewed-by: Dmitriy Kuminov <coding@dmik.org>
+Reviewed-by: Allan Sandfeld Jensen <allan.jensen@qt.io>
+---
+
+diff --git a/chromium/services/device/geolocation/wifi_data_provider_mac.mm b/chromium/services/device/geolocation/wifi_data_provider_mac.mm
+index 278a538..1b53ce4 100644
+--- src/3rdparty/chromium/services/device/geolocation/wifi_data_provider_mac.mm
++++ src/3rdparty/chromium/services/device/geolocation/wifi_data_provider_mac.mm
+@@ -16,10 +16,8 @@
+ #include "services/device/geolocation/wifi_data_provider_common.h"
+ #include "services/device/geolocation/wifi_data_provider_manager.h"
+ 
+-extern "C" NSString* const kCWScanKeyMerge;
+-
+ @interface CWInterface (Private)
+-- (NSArray*)scanForNetworksWithParameters:(NSDictionary*)params
++- (NSSet<CWNetwork *> *)scanForNetworksWithName:(NSString *)networkName
+                                     error:(NSError**)error;
+ @end
+ 
+@@ -40,9 +38,6 @@
+ 
+ bool CoreWlanApi::GetAccessPointData(WifiData::AccessPointDataSet* data) {
+   base::mac::ScopedNSAutoreleasePool auto_pool;
+-  // Initialize the scan parameters with scan key merging disabled, so we get
+-  // every AP listed in the scan without any SSID de-duping logic.
+-  NSDictionary* params = @{ kCWScanKeyMerge : @NO };
+ 
+   NSSet* supported_interfaces = [CWInterface interfaceNames];
+   NSUInteger interface_error_count = 0;
+@@ -58,8 +53,8 @@
+     const base::TimeTicks start_time = base::TimeTicks::Now();
+ 
+     NSError* err = nil;
+-    NSArray* scan =
+-        [corewlan_interface scanForNetworksWithParameters:params error:&err];
++    NSSet<CWNetwork *>* scan =
++        [corewlan_interface scanForNetworksWithName:nil error:&err];
+     const int error_code = [err code];
+     const int count = [scan count];
+     // We could get an error code but count != 0 if the scan was interrupted,
+From 8c785066d987b663ed7d3386151ec8144c31cdcc Mon Sep 17 00:00:00 2001
+From: Peter Varga <pvarga@inf.u-szeged.hu>
+Date: Fri, 04 Oct 2019 16:06:34 +0200
+Subject: [PATCH] Workaround presumably wrong macOS SDK detection
+
+Task-number: QTBUG-78997
+Change-Id: If2915cadda10bc29e9a5596dda0b39fa57623167
+Reviewed-by: Allan Sandfeld Jensen <allan.jensen@qt.io>
+Reviewed-by: Dmitriy Kuminov <coding@dmik.org>
+---
+
+diff --git a/chromium/base/mac/foundation_util.h b/chromium/base/mac/foundation_util.h
+index 8626046..430ab8d 100644
+--- src/3rdparty/chromium/base/mac/foundation_util.h
++++ src/3rdparty/chromium/base/mac/foundation_util.h
+@@ -53,7 +53,10 @@
+ typedef unsigned int NSSearchPathDomainMask;
+ #endif
+ 
+-#if defined(OS_IOS) || defined(MAC_OS_X_VERSION_10_15)
++// The CSSM_DEPRECATED check is a workaround for a presumably wrong MacOSX SDK detection.
++// This macro was added to the Security.framework in the 10.15 SDK:
++// http://codeworkshop.net/objc-diff/sdkdiffs/macos/10.15/Security.html at SecBase.h
++#if defined(OS_IOS) || (defined(MAC_OS_X_VERSION_10_15) && defined(CSSM_DEPRECATED))
+ typedef struct CF_BRIDGED_TYPE(id) __SecKey* SecKeyRef;
+ typedef struct CF_BRIDGED_TYPE(id) __SecPolicy* SecPolicyRef;
+ #else
+--- src/3rdparty/gn/base/mac/foundation_util.h.orig	2019-08-21 07:12:01.000000000 -0700
++++ src/3rdparty/gn/base/mac/foundation_util.h	2019-10-24 13:19:10.000000000 -0700
+@@ -52,10 +52,10 @@
+ typedef unsigned int NSSearchPathDomainMask;
+ #endif
+ 
+-typedef struct OpaqueSecTrustRef* SecACLRef;
+-typedef struct OpaqueSecTrustedApplicationRef* SecTrustedApplicationRef;
+-
+-#if defined(OS_IOS)
++// The CSSM_DEPRECATED check is a workaround for a presumably wrong MacOSX SDK detection.
++// This macro was added to the Security.framework in the 10.15 SDK:
++// http://codeworkshop.net/objc-diff/sdkdiffs/macos/10.15/Security.html at SecBase.h
++#if defined(OS_IOS) || (defined(MAC_OS_X_VERSION_10_15) && defined(CSSM_DEPRECATED))
+ typedef struct CF_BRIDGED_TYPE(id) __SecKey* SecKeyRef;
+ typedef struct CF_BRIDGED_TYPE(id) __SecPolicy* SecPolicyRef;
+ #else
