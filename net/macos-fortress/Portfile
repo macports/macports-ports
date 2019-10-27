@@ -1,0 +1,813 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                macos-fortress
+version             2019.10.27
+revision            0
+
+categories          net security
+platforms           darwin
+license             MIT
+maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
+
+if {${subport} ne "${name}-easylistpac"} {
+    master_sites
+    distfiles
+    extract.only
+}
+
+use_configure       no
+build               {}
+
+# perl5 and python3 major versions
+set perl5_major_version \
+                    5.28
+set python3_version 3.7
+set python3_version_nickname \
+    [join [lrange [split ${python3_version} .] 0 1] {}]
+
+set pf_conf         "\${prefix}/etc/${name}/pf.conf"
+set proxy_hostname  localhost
+set proxy_server    127.0.0.1
+set proxy_pac_server \
+                    ${proxy_server}
+set proxy_pac_directory \
+                    /Library/WebServer/Documents
+
+variant initialize_always \
+    description {Always initialize all configuration files. Intended\
+        for development and troubleshooting only. Working deployments\
+        must disable this variant to prevent configuration files\
+        being overwritten at the next upgrade. Existing configuration\
+        files are not overwritten by default.} {
+    ui_warn \
+        "
+\tAll configuration files will be initialized because
+\tthe variant +initialize_always is set. Please disable
+\tthis variant for working deployments.
+"
+}
+
+# Network configuration
+# hard-coded examples
+set interface       en0
+
+proc install_initial_configuration {args} {
+    foreach f_or_d ${args} {
+        if { [variant_isset "initialize_always"]
+             && [file exists ${f_or_d}]
+            } {
+            delete ${f_or_d}.previous
+            move \
+                ${f_or_d} \
+                ${f_or_d}.previous
+        }
+        if { [variant_isset "initialize_always"]
+             || ![file exists ${f_or_d}]
+            } {
+            if { [file isfile ${f_or_d}.macports] } {
+                xinstall -m 0644 \
+                    ${f_or_d}.macports \
+                    ${f_or_d}
+            } elseif { [file isdirectory ${f_or_d}.macports] } {
+                xinstall -m 0755 -d ${f_or_d}
+                foreach f [glob -nocomplain ${f_or_d}.macports/*] {
+                    xinstall -m 0644 ${f} \
+                        ${f_or_d}/[file tail ${f}]
+                }
+            }
+        }
+    }
+}
+
+proc patch_configuration {patchfile configfile configdefault} {
+    global patch.cmd patch.pre_args 
+    # save the previous configuration
+    if { [file exists ${configfile}] } {
+        delete ${configfile}.previous
+        copy \
+            ${configfile} \
+            ${configfile}.previous
+    }
+    # create or initialize the configfile
+    if { ![file exists ${configfile}] || [variant_isset "initialize_always"] } {
+        delete ${configfile}
+        if { [file exists ${configdefault}] } {
+            xinstall -m 0644 ${configdefault} ${configfile}
+        } elseif { [file exists ${configfile}.previous] } {
+            xinstall -m 0644 ${configfile}.previous ${configfile}
+        }
+    }
+    # patch the configfile if it's the default
+    if { [portchecksum::calc_rmd160 ${configfile}] 
+        eq [portchecksum::calc_rmd160 ${configdefault}] } {
+        system \
+            "${patch.cmd} ${patch.pre_args} \
+                -f -l -N -r /dev/null ${configfile} < ${patchfile}"
+    } else {
+        ui_warn "File ${configfile} is not the default
+\tand *not* being patched."
+    }
+}
+
+proc plutil_startup {plcmds label} {
+    global prefix startupitem.location
+    foreach cmd ${plcmds} {
+        system -W ${prefix}/etc/${startupitem.location}/${label} \
+            "/usr/bin/plutil ${cmd} ${label}.plist"
+    }
+}
+
+set notes_pf        "The PF configuration provides an adaptive firewall\
+    that blocks brute force attacks, and connections from IP addresses\
+    provided by the crowd-sourced lists dshield and emergingthreats. PF\
+    uses this environment variable (with default value):
+
+\t\${PF_CONF:-${pf_conf}}"
+
+set notes_proxy     "The proxy uses a chain of squid (port 3128) and\
+    privoxy (port 8118) along with a blackhole provided by nginx (port 8119).\
+    Domain names provided by hphosts and a blacklist file are blocked, excluding\
+    whitelisted domain names. These are provised in the files:
+
+\t${prefix}/etc/${name}/blacklist.txt
+\t${prefix}/etc/${name}/whitelist.txt
+
+    The proxy also provides a proxy autoconfiguration (PAC) file with\
+    blocking rules generated from easylist ad and tracker blocks. The\
+    proxy uses these environment variables (with default values):
+
+\t\${PROXY_HOSTNAME:-${proxy_hostname}}
+\t\${PROXY_PAC_SERVER:-${proxy_pac_server}}
+\t\${PROXY_PAC_DIRECTORY:-${proxy_pac_directory}}
+
+    The native macOS web server is used by default to host the PAC file.\
+    This web server must be launched independently with the command
+
+sudo apachectl start
+
+    Clients may be configured to use this proxy by either host:port or\
+    the PAC file:
+
+\t${proxy_hostname}:3128
+\thttp://${proxy_hostname}/proxy.pac"
+
+if {${name} eq ${subport}} {
+    description     Firewall, Blackhole, and Privatizing Proxy for Trackers, Attackers, Malware, Adware, and Spammers
+    long_description    \
+        Kernel-level, OS-level, and client-level security for macOS. Built\
+        to block attacks using open source databases, and block ads,\
+        malicious scripts, and conceal information used for web tracking.\
+        Uses PF, squid, privoxy, hphosts, dshield, emergingthreats,\
+        hostsfile, and a proxy autoconfiguration (PAC) file.
+
+    homepage        https://github.com/essandess/macOS-Fortress
+
+    depends_lib-append \
+                    port:${name}-pf \
+                    port:${name}-proxy
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/${name}/logrotate.d
+        xinstall -m 0755 \
+            ${filespath}/macosfortress_setup_check.sh ${destroot}${prefix}/bin
+        xinstall -m 0644 \
+            ${filespath}/logrotate.d.macos-fortress \
+            ${destroot}${prefix}/share/${name}/logrotate.d/macos-fortress
+        foreach cmd [list \
+            "s|@PREFIX@|${prefix}|g" \
+            "s|@NAME@|${name}|g" \
+            "s|@PROXY_HOSTNAME@|${proxy_hostname}|g" \
+            "s|@PROXY_SERVER@|${proxy_server}|g" \
+            "s|@PROXY_PAC_SERVER@|${proxy_pac_server}|g" \
+            "s|@PROXY_PAC_DIRECTORY@|${proxy_pac_directory}|g" \
+            ] {
+            reinplace -q ${cmd} \
+                ${destroot}${prefix}/bin/macosfortress_setup_check.sh \
+                ${destroot}${prefix}/share/${name}/logrotate.d/macos-fortress
+        }
+    }
+
+    startupitem.create \
+                    yes
+    startupitem.start \
+                    "\${prefix}/bin/port load ${name}-pf
+\t\${prefix}/bin/port load ${name}-proxy"
+    startupitem.stop \
+                    "\${prefix}/bin/port unload ${name}-pf
+\t\${prefix}/bin/port unload ${name}-proxy"
+    startupitem.restart \
+                    "\${prefix}/bin/port reload ${name}-pf
+\t\${prefix}/bin/port reload ${name}-proxy"
+
+    post-activate {
+        # modify the launch daemons
+        plutil_startup [list \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool YES" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+    }
+
+    notes   "The port ${name} is comprised of two independent.\
+        configurable components: the PF firewall and the proxy chain,\
+        provided by the ports:
+
+\t${name}-pf
+\t${name}-proxy
+
+        After initial installation, it is necessary to kickstart these\
+        launch daemons, which do not run at load:
+
+sudo port load ${name}
+sudo launchctl kickstart -k system/org.macports.${name}-dshield
+sudo launchctl kickstart -k system/org.macports.${name}-emergingthreats
+sudo launchctl kickstart -k system/org.macports.${name}-hphosts
+sudo launchctl kickstart -k system/org.macports.adblock2privoxy
+sudo launchctl kickstart -k system/org.macports.${name}-easylistpac
+
+${notes_pf}
+
+${notes_proxy}"
+}
+
+subport ${name}-pf {
+    description     PF Firewall with dhield, emergingthreats, and \
+        adaptive bruteforce blocks
+    long_description \
+                    ${description}
+
+    depends_lib-append \
+                    port:${name}-dshield \
+                    port:${name}-emergingthreats \
+                    port:pcre
+
+    destroot {
+        xinstall -d \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        destroot.keepdirs \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        xinstall -m 0644 \
+            ${filespath}/pf.conf \
+            ${destroot}${prefix}/etc/${name}/pf.conf.macports
+        xinstall -m 0644 \
+            ${filespath}/blockips.conf \
+            ${destroot}${prefix}/etc/${name}/blockips.conf.macports
+        xinstall -m 0755 \
+            ${filespath}/pf_attacks.sh \
+            ${destroot}${prefix}/bin
+    }
+
+    startupitem.create \
+                    yes
+    startupitems \
+        name        ${subport} \
+        init        "PF_CONF=\"\${PF_CONF:-${pf_conf}}\"" \
+        start       "for tt in {1..4}; do \\
+\t\tif \[\[ `/sbin/ifconfig | \${prefix}/bin/pcregrep -M -o '^\[^\\t:\]+:(\[^\\n\]|\\n\\t)*status: active' | egrep -o -m 1 '^\[^\\t:\]+'` = '' \]\]; then \\
+\t\t\tsleep 45; \\
+\t\telse \\
+\t\t\t/sbin/pfctl -Fall \\
+\t\t\t&& /sbin/pfctl -ef \${PF_CONF}; \\
+\t\t\tbreak; \\
+\t\tfi; \\
+\tdone" \
+        stop        "/sbin/pfctl -d" \
+        pidfile     none \
+        name        ${subport}.brutexpire \
+        executable  /sbin/pfctl \
+        pidfile     none \
+        name        ${subport}.subports \
+        start \
+                    "\${prefix}/bin/port load ${name}-dshield
+\t\${prefix}/bin/port load ${name}-emergingthreats" \
+        stop \
+                    "\${prefix}/bin/port unload ${name}-dshield
+\t\${prefix}/bin/port unload ${name}-emergingthreats" \
+        restart \
+                    "\${prefix}/bin/port reload ${name}-dshield
+\t\${prefix}/bin/port reload ${name}-emergingthreats" \
+        pidfile     none
+
+    post-activate {
+        # use network settings for installed example configuration
+        # route -n get default | grep 'interface:' | grep -o '[^ ]*$'
+        set interface [exec sh -c \
+            "route -n get default \
+                | grep 'interface:' \
+                | grep -o '\[^ \]*\$'"]
+
+        ui_msg "Configuring ${subport} with:
+
+interface :                ${interface}
+"
+        foreach cmd [list \
+            "s|@PREFIX@|${prefix}|g" \
+            "s|@NAME@|${name}|g" \
+            "s|@INTERFACE@|${interface}|g" \
+            ] {
+            reinplace -q ${cmd} \
+                ${prefix}/etc/${name}/pf.conf.macports
+        }
+        foreach cmd [list \
+            "s|@PREFIX@|${prefix}|g" \
+            "s|@NAME@|${name}|g" \
+            ] {
+            reinplace -q ${cmd} \
+                ${prefix}/etc/${name}/blockips.conf.macports
+        }
+        install_initial_configuration \
+            ${prefix}/etc/${name}/blockips.conf \
+            ${prefix}/etc/${name}/pf.conf
+        # modify the launch daemons
+        plutil_startup [list \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool YES" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${subport}
+        # bruteforce expiration launchd daemon
+        plutil_startup [list \
+            "-insert Program -string /sbin/pfctl" \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                      <string>/sbin/pfctl</string> \
+                      <string>-t</string> \
+                      <string>bruteforce</string> \
+                      <string>-T</string> \
+                      <string>expire</string> \
+                      <string>604800</string> \
+                    </array>'" \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool NO" \
+            "-insert StartInterval -integer 86400" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${subport}.brutexpire
+        plutil_startup [list \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool YES" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${subport}.subports
+    }
+
+    notes   ${notes_pf}
+}
+
+subport ${name}-dshield {
+    description     DShield is a community-based collaborative firewall \
+        log correlation system. 
+    long_description \
+                    ${description}
+
+    depends_run-append \
+                    port:gnupg2 \
+                    port:perl${perl5_major_version} \
+                    port:p${perl5_major_version}-data-validate-ip \
+                    port:wget
+
+    destroot {
+        xinstall -d \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        destroot.keepdirs \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        # sudo gpg --homedir /var/root/.gnupg --export --armor --output ~/Downloads/dshield_pubkey_file.txt blocklist@dshield.org
+        xinstall -m 0644 \
+            ${filespath}/dshield_pubkey_file.txt \
+            ${destroot}${prefix}/etc/${name}
+    }
+
+    startupitem.create \
+                    yes
+    startupitem.name \
+                    ${subport}
+    startupitem.init \
+                    "\${prefix}/bin/gpg --homedir /var/root/.gnupg --import \${prefix}/etc/${name}/dshield_pubkey_file.txt"
+    startupitem.start \
+                    "\${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://feeds.dshield.org/block.txt \\
+\t&& \${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://feeds.dshield.org/block.txt.asc \\
+\t&& \${prefix}/bin/gpg --verify \${prefix}/etc/${name}/block.txt.asc \${prefix}/etc/${name}/block.txt \\
+\t&& \${prefix}/bin/perl${perl5_major_version} -ane 'use Data::Validate::IP; my \$vip=Data::Validate::IP->new; if (/^\\w*#/) { print; } elsif (\$vip->is_ipv4(\$F\[0\]) & \$vip->is_ipv4(\$F\[1\]) & \$F\[2\] =~ /\[\[:digit:\]\]/ & (0<= \$F\[2\] & \$F\[2\]<=32)) { print \$F\[0\], \"/\", \$F\[2\], \"\\n\"; }' \\
+\t\t\${prefix}/etc/${name}/block.txt \\
+\t\t> /tmp/dshield_block_ip.txt \\
+\t&& install -m 644 -g admin -S /tmp/dshield_block_ip.txt \${prefix}/etc/${name}/dshield_block_ip.txt ; \\
+\trm -f /tmp/dshield_block_ip.txt ; \\
+\t/sbin/pfctl -a blockips -T load -f \${prefix}/etc/${name}/blockips.conf"
+    startupitem.pidfile \
+                    none
+
+    post-activate {
+        # modify the launch daemons
+        plutil_startup [list \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                      <string>${prefix}/etc/${startupitem.location}/org.macports.${startupitem.name}/${subport}.wrapper</string> \
+                      <string>start</string> \
+                    </array>'" \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool NO" \
+            "-insert StartInterval -integer 11250" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+    }
+
+    notes \
+        "The launch daemon org.macports.${subport} is configured with\
+    RunAtLoad false. To initialize this service at its first load, run:
+
+sudo port load ${subport}
+sudo launchctl kickstart -k system/org.macports.${subport}"
+}
+
+subport ${name}-emergingthreats {
+    description     Emerging Threats rule server.
+    long_description \
+                    ${description}
+
+    depends_run-append \
+                    port:wget
+
+    destroot {
+        xinstall -d \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        destroot.keepdirs \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+    }
+
+    startupitem.create \
+                    yes
+    startupitem.name \
+                    ${subport}
+    startupitem.start \
+                    "\${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt ; \\
+\t\${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://rules.emergingthreats.net/blockrules/compromised-ips.txt ; \\
+\t/sbin/pfctl -a blockips -T load -f \${prefix}/etc/${name}/blockips.conf"
+    startupitem.pidfile \
+                    none
+
+    post-activate {
+        # modify the launch daemons
+        plutil_startup [list \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                      <string>${prefix}/etc/${startupitem.location}/org.macports.${startupitem.name}/${subport}.wrapper</string> \
+                      <string>start</string> \
+                    </array>'" \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool NO" \
+            "-insert StartInterval -integer 47250" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+    }
+
+    notes           "The launch daemon org.macports.${subport} is configured with\
+    RunAtLoad false. To initialize this service at its first load, run:
+
+sudo port load ${subport}
+sudo launchctl kickstart -k system/org.macports.${subport}"
+}
+
+subport ${name}-proxy {
+    description     Blackhole and Privatizing Proxy.
+
+    depends_lib-append \
+                    port:${name}-easylistpac \
+                    port:${name}-hphosts \
+                    port:adblock2privoxy \
+                    port:privoxy \
+                    port:squid4
+
+    # squid patch file creation
+    # mkdir squid-orig squid-new
+    # cp ${prefix}/etc/squid.conf.documented squid-orig/squid.conf
+    # cp squid.conf.new squid-new/squid.conf
+    # sed -E -i -e 's|/opt/local|@PREFIX@|g' squid-orig/squid.conf
+    # diff -NaurdwB -I '^ *#.*' ./squid-orig/squid.conf ./squid-new/squid.conf | sed -E -e 's/\.\/squid-(orig|new)\/(squid.conf)(\.[[:alnum:]]+)*/\.\/squid.conf/' | sed -E -e 's|/opt/local|@PREFIX@|g' > ~/Downloads/squid-squid.conf.patch
+    # privoxy patch file creation
+    # diff -NaurdwB -I '^ *#.*' ./privoxy-orig/config ./privoxy-new/config | sed -E -e 's/\.\/privoxy-(orig|new)\/(config)(\.[[:alnum:]]+)*/\.\/config/' | sed -E -e 's|/opt/local|@PREFIX@|g' > ~/Downloads/privoxy-config.patch
+    destroot {
+        xinstall -m 0644 \
+            ${filespath}/squid-squid.conf.patch \
+            ${filespath}/privoxy-config.patch \
+            ${filespath}/privoxy-match-all.action.patch \
+            ${workpath}
+        foreach cmd [list \
+            "s|@PREFIX@|${prefix}|g" \
+            "s|@PROXY_HOSTNAME@|${proxy_hostname}|g" \
+            "s|@PROXY_SERVER@|${proxy_server}|g" \
+            ] {
+            reinplace -q ${cmd} \
+                ${workpath}/squid-squid.conf.patch \
+                ${workpath}/privoxy-config.patch \
+                ${workpath}/privoxy-match-all.action.patch
+        }
+    }
+
+    startupitem.create \
+                    yes
+    startupitems \
+        name        ${subport} \
+        start       "\${prefix}/bin/port load ${name}-hphosts
+\t\${prefix}/bin/port load squid4
+\t\${prefix}/bin/port load privoxy
+\t\${prefix}/bin/port load adblock2privoxy
+\t\${prefix}/bin/port load ${name}-easylistpac" \
+        stop        "\${prefix}/bin/port unload ${name}-hphosts
+\t\${prefix}/bin/port unload squid4
+\t\${prefix}/bin/port unload privoxy
+\t\${prefix}/bin/port unload adblock2privoxy
+\t\${prefix}/bin/port unload ${name}-easylistpac" \
+        restart     "\${prefix}/bin/port reload ${name}-hphosts
+\t\${prefix}/bin/port reload squid4
+\t\${prefix}/bin/port reload privoxy
+\t\${prefix}/bin/port reload adblock2privoxy
+\t\${prefix}/bin/port reload ${name}-easylistpac" \
+        pidfile     none \
+        name        ${subport}.squid-rotate \
+        executable  ${prefix}/sbin/squid \
+        pidfile     none
+
+    post-activate {
+        patch_configuration \
+            ${workpath}/squid-squid.conf.patch \
+            ${prefix}/etc/squid/squid.conf \
+            ${prefix}/etc/squid/squid.conf.documented
+        patch_configuration \
+            ${workpath}/privoxy-config.patch \
+            ${prefix}/etc/privoxy/config \
+            ${prefix}/etc/privoxy/config.new
+        patch_configuration \
+            ${workpath}/privoxy-match-all.action.patch \
+            ${prefix}/etc/privoxy/match-all.action \
+            ${prefix}/etc/privoxy/match-all.action.new
+
+        # modify the launch daemons
+        plutil_startup [list \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool YES" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+        # bruteforce expiration launchd daemon
+        plutil_startup [list \
+            "-insert Program -string ${prefix}/sbin/squid" \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                  <string>/bin/bash</string> \
+                  <string>-c</string> \
+                  <string>${prefix}/sbin/squid -k rotate ; find ${prefix}/var/squid/logs -mindepth 1 -mtime +30 -exec rm {} &apos;;&apos;</string>
+                </array>'" \
+            "-remove KeepAlive" \
+            "-insert StartCalendarInterval \
+                -xml '<dict> \
+                  <key>Hour</key> \
+                  <integer>0</integer> \
+                </dict>'" \
+            ] \
+            org.macports.${subport}.squid-rotate
+    }
+
+    notes   ${notes_proxy}
+}
+
+subport ${name}-easylistpac {
+    PortGroup       github 1.0
+
+    github.setup    essandess easylist-pac-privoxy 4db116b
+    version         2019.06.18
+    revision        0
+
+    description     EasyList Tracker and Adblocks to Proxy Auto Configuration (PAC) File
+    long_description \
+        Converts EasyList tracker and ad blocking rules to efficient \
+        network-level blocks in a proxy.pac file for automatic proxy \
+        network configurations and Privoxy proxy servers. Easily \
+        incorporates multiple blocking rulesets into both PAC and \
+        Privoxy formats, including easyprivacy.txt, easylist.txt, \
+        fanboy-annoyance.txt, fanboy-social.txt, \
+        antiadblockfilters.txt, malwaredomains_full.txt, and the \
+        anti-spamware list adblock-list.txt.
+
+    homepage        https://github.com/essandess/easylist-pac-privoxy
+
+    checksums       rmd160  0f3b2e47c2cf0c2a15b81525e42f6be7b06b7761 \
+                    sha256  ece58c6b1bb60439fded12b767f552d100f86f1272d3c3fac5477cb8c62232cf \
+                    size    81495
+
+    depends_lib-append \
+                    port:adblock2privoxy \
+                    port:python${python3_version_nickname} \
+                    port:py${python3_version_nickname}-matplotlib \
+                    port:py${python3_version_nickname}-numpy \
+                    port:py${python3_version_nickname}-scikit-learn
+
+    destroot {
+        xinstall -d ${destroot}${prefix}/etc/${name}
+        xinstall -m 0755 -W ${worksrcpath} easylist_pac.py \
+            ${destroot}${prefix}/bin
+        xinstall -m 0644 proxy.pac \
+            ${destroot}${prefix}/etc/${name}/proxy.pac.macports
+        reinplace -E \
+            "1s|env\[\[:space:\]\]+python3|env ${prefix}/bin/python${python3_version}|" \
+            ${destroot}${prefix}/bin/easylist_pac.py
+    }
+
+    startupitem.create \
+                    yes
+    startupitem.name \
+                    ${subport}
+    startupitem.init \
+                    "\
+PROXY_PAC_DIRECTORY=\"\${PROXY_PAC_DIRECTORY:-${proxy_pac_directory}}\"
+PROXY_PAC_SERVER=\"\${PROXY_PAC_SERVER:-${proxy_pac_server}}\"
+PYTHONIOENCODING=\"\${PYTHONIOENCODING:-utf_8}\"
+
+test -f \${PROXY_PAC_DIRECTORY}/proxy.pac.orig \\
+\t|| install -m 0644 -S \${PROXY_PAC_DIRECTORY}/proxy.pac \${PROXY_PAC_DIRECTORY}/proxy.pac.orig"
+   startupitem.start \
+                    "\${prefix}/bin/easylist_pac.py \\
+\t\t-p \${PROXY_PAC_SERVER}:3128 -b \${PROXY_PAC_SERVER}:8119 \\
+\t\t-d \${prefix}/etc/${name} \\
+\t\t-P \${PROXY_PAC_DIRECTORY}/proxy.pac.orig \\
+\t&& install -m 0644 -g admin -S \${prefix}/etc/${name}/proxy.pac \\
+\t\t\${PROXY_PAC_DIRECTORY}/proxy.pac"
+    startupitem.pidfile \
+                    none
+
+    post-activate {
+        install_initial_configuration \
+            ${prefix}/etc/${name}/proxy.pac
+        if { ![file isfile ${proxy_pac_directory}/proxy.pac] } {
+            xinstall -m 0644 ${prefix}/etc/${name}/proxy.pac \
+                ${proxy_pac_directory}
+        }
+        # modify the launch daemons
+        plutil_startup [list \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                      <string>${prefix}/etc/${startupitem.location}/org.macports.${startupitem.name}/${subport}.wrapper</string> \
+                      <string>start</string> \
+                    </array>'" \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool NO" \
+            "-insert StartCalendarInterval \
+                -xml '<array> \
+                    <dict> \
+                        <key>Weekday</key> \
+                        <integer>7</integer> \
+                        <key>Hour</key> \
+                        <integer>1</integer> \
+                        <key>Minute</key> \
+                        <integer>10</integer> \
+                    </dict> \
+                </array>'" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+    }
+
+    notes   "The location of the proxy autoconfiguration (PAC)\
+        file and the web server IP address are specified by the\
+        environment variables (with default values):
+
+\t\${PROXY_PAC_DIRECTORY:-${proxy_pac_directory}}
+\t\${PROXY_PAC_SERVER:-${proxy_pac_server}}
+
+        The native macOS Web Server must be started with the command:
+
+sudo apachectl start
+
+        The launch daemon org.macports.${subport} is configured with\
+        RunAtLoad false. To initialize this service at its first load, run:
+
+sudo port load ${subport}
+sudo launchctl kickstart -k system/org.macports.${subport}"
+}
+
+subport ${name}-hphosts {
+    description     A community managed and maintained hosts file.
+    long_description \
+        hpHosts is a community managed and maintained hosts file that \
+        allows an additional layer of protection against access to ad, \
+        tracking and malicious websites.
+
+    depends_run-append \
+                    port:gnupg2 \
+                    port:perl${perl5_major_version} \
+                    port:p${perl5_major_version}-data-validate-domain \
+                    port:wget
+
+    destroot {
+        xinstall -d \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        destroot.keepdirs \
+            ${destroot}${prefix}/etc/${name} \
+            ${destroot}${prefix}/var/log
+        foreach f { blacklist.txt hosts.orig whitelist.txt } {
+            xinstall -m 0644 \
+                ${filespath}/${f} \
+                ${destroot}${prefix}/etc/${name}/${f}.macports
+        }
+        # sudo gpg --homedir /var/root/.gnupg --export --armor --output ~/Downloads/hphosts_pubkey_file.txt services@it-mate.co.uk
+        xinstall -m 0644 \
+            ${filespath}/hphosts_pubkey_file.txt \
+            ${destroot}${prefix}/etc/${name}
+    }
+
+    startupitem.create \
+                    yes
+    startupitem.name \
+                    ${subport}
+    startupitem.init \
+                    "\${prefix}/bin/gpg --homedir /var/root/.gnupg --import \${prefix}/etc/${name}/hphosts_pubkey_file.txt"
+    startupitem.start \
+                    "( /bin/test -f \${prefix}/etc/${name}/hosts.orig \\
+\t\t|| install -m 0644 -S /etc/hosts \${prefix}/etc/${name}/hosts.orig ) \\
+\t&& cp \${prefix}/etc/${name}/hosts.orig /tmp/hosts \\
+\t&& \${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://hosts-file.net/download/hosts.zip \\
+\t&& \${prefix}/bin/wget -N -P \${prefix}/etc/${name} http://hosts-file.net/hphosts-partial.asp \\
+\t&& unzip -o \${prefix}/etc/${name}/hosts.zip -d /tmp/hphosts \\
+\t&& \${prefix}/bin/gpg --verify /tmp/hphosts/hosts.txt.asc /tmp/hphosts/hosts.txt \\
+\t&& ( test -f \${prefix}/etc/${name}/whitelist.txt \\
+\t\t|| printf '\\n# whitelisted hosts (FQDN and DN) will be deleted from hphost'\"'\"'s host.zip\\n#\\n' \\
+\t\t\t> \${prefix}/etc/${name}/whitelist.txt ) \\
+\t&& printf '\\n# hpHosts hosts.txt from http://hosts-file.net/download/hosts.zip:\\n' \\
+\t\t> /tmp/hosts-block.txt \\
+\t&& cat /tmp/hphosts/hosts.txt \\
+\t\t| tr -d '\\015' \\
+\t\t| \${prefix}/bin/perl${perl5_major_version} -ane 'use POSIX; use Data::Validate::Domain qw(is_domain); { if (/^127\\.0\\.0\\.1\\s*(.+)$/) { print qq#127.0.0.1\\t\$1\\n# if is_domain(\$1); } else { print; } }' \\
+\t\t\t>> /tmp/hosts-block.txt \\
+\t&& printf '\\n# hpHosts hphosts-partial.asp from http://hosts-file.net/hphosts-partial.asp:\\n' \\
+\t\t>> /tmp/hosts-block.txt \\
+\t&& cat \${prefix}/etc/${name}/hphosts-partial.asp \\
+\t\t| tr -d '\\015' \\
+\t\t| \${prefix}/bin/perl${perl5_major_version} -ane 'use POSIX; use Data::Validate::Domain qw(is_domain); { if (/^127\.0\.0\.1\\s*(.+)$/) { print qq#127.0.0.1\\t\$1\\n# if is_domain(\$1); } else { print; } }' \\
+\t\t\t>> /tmp/hosts-block.txt \\
+\t&& ( test -f \${prefix}/etc/${name}/blacklist.txt \\
+\t&& cat \${prefix}/etc/${name}/blacklist.txt \\
+\t\t\t>> /tmp/hosts ) \\
+\t&& grep -v -E \"`\${prefix}/bin/perl${perl5_major_version} -ane 'BEGIN{\$s=qw#\\\\s+(#}; { if (!/^\\w*#/&length(\$F\[0\])>0){\$s = \$s . \$F\[0\] . qw(|);}} END{\$s = substr(\$s,0,length(\$s)-1) . qw#)\\\\s*#; \$s=~s/\\\\./\\\\\\\\./g; print \$s;}' \${prefix}/etc/${name}/whitelist.txt`\" /tmp/hosts-block.txt \\
+\t\t>> /tmp/hosts \\
+    \t&& install -m 0644 -S /tmp/hosts \${prefix}/etc/${name}/hosts-hphosts ; \\
+\trm -fr /tmp/hosts /tmp/hphosts /tmp/hosts-block.txt ; \\
+\t\${prefix}/sbin/squid -k reconfigure"
+    startupitem.pidfile \
+                    none
+
+    post-activate {
+        install_initial_configuration \
+            ${prefix}/etc/${name}/blacklist.txt \
+            ${prefix}/etc/${name}/hosts.orig \
+            ${prefix}/etc/${name}/whitelist.txt
+        # modify the launch daemons
+        plutil_startup [list \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                      <string>${prefix}/etc/${startupitem.location}/org.macports.${startupitem.name}/${subport}.wrapper</string> \
+                      <string>start</string> \
+                    </array>'" \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool NO" \
+            "-insert StartInterval -integer 86850" \
+            "-insert StandardErrorPath -string ${prefix}/var/log/${name}.log" \
+            "-insert StandardOutPath -string ${prefix}/var/log/${name}.log" \
+            ] \
+            org.macports.${startupitem.name}
+    }
+
+    notes   "The launch daemon org.macports.${subport} is configured with\
+    RunAtLoad false. To initialize this service at its first load, run:
+
+    sudo port load ${subport}
+    sudo launchctl kickstart -k system/org.macports.${subport}"
+}
+
+if { [variant_isset "initialize_always"] } {
+    if {[exists notes]} {
+        # leave a blank line after the existing notes
+        notes-append ""
+    }
+    notes-append \
+        "The variant +initialize_always is set, which initializes\
+        all configuration files. Please disable this variant for\
+        working deployments."
+}
