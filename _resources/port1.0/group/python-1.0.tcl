@@ -44,6 +44,9 @@ pre-destroot    {
 options python.rootname
 default python.rootname {[regsub ^py- [option name] ""]}
 
+default master_sites    {pypi:[string index ${python.rootname} 0]/${python.rootname}}
+default distname        {${python.rootname}-${version}}
+
 options python.versions python.version python.default_version
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
