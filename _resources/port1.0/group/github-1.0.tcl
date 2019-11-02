@@ -4,7 +4,7 @@
 #
 # Documentation:
 # https://guide.macports.org/#reference.portgroup.github
-# 
+#
 # Documentation (sources):
 # https://github.com/macports/macports-guide/blob/master/guide/xml/portgroup-github.xml
 
@@ -19,8 +19,6 @@ default github.raw {https://raw.githubusercontent.com/${github.author}/${github.
 # Later code assumes that github.master_sites is a simple string, not a list.
 options github.master_sites
 default github.master_sites {${github.homepage}/tarball/${git.branch}}
-
-default master_sites {${github.master_sites}}
 
 options github.tarball_from
 default github.tarball_from tarball
@@ -77,6 +75,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     default homepage        ${github.homepage}
     git.url                 ${github.homepage}.git
     git.branch              [join ${github.tag_prefix}]${github.version}[join ${github.tag_suffix}]
+    default master_sites    {${github.master_sites}}
     distname                ${github.project}-${github.version}
 
     post-extract {
