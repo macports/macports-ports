@@ -144,7 +144,7 @@ sudo killall saslauthd
 ## ## smtpd_sasl_type = cyrus
 ## 
 ## # only allow authentication over TLS
-## # (Not set in /Library/Server_v57/Mail/Config/postfix/main.cf)
+## # (Not set in /Library/Server_v56/Mail/Config/postfix/main.cf)
 ## # smtpd_tls_auth_only = yes
 ## smtpd_tls_auth_only = no
 ## smtpd_recipient_restrictions = permit_mynetworks,
