@@ -509,6 +509,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     http://aus.us.distfiles.macports.org/macports/distfiles/:mirror
     http://cjj.kr.distfiles.macports.org/:mirror
+    http://cph.dk.distfiles.macports.org/:mirror
     http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
     http://jog.id.distfiles.macports.org/macports/distfiles/:mirror
