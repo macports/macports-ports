@@ -7,7 +7,7 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5   {qt5-qtbase   5.12}
+    qt5   {qt5-qtbase   5.13}
     qt511 {qt511-qtbase 5.11}
     qt59  {qt59-qtbase  5.9}
     qt58  {qt58-qtbase  5.8}
@@ -115,6 +115,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Sierra (10.12)
         #
+        # Qt 5.13: Supported
         # Qt 5.12: Supported
         # Qt 5.11: Supported
         # Qt 5.10: Supported
@@ -128,6 +129,7 @@ proc qt5.get_default_name {} {
         #
         # macOS High Sierra (10.13)
         #
+        # Qt 5.13: Supported
         # Qt 5.12: Supported
         # Qt 5.11: Supported
         # Qt 5.10: Supported
@@ -138,7 +140,17 @@ proc qt5.get_default_name {} {
         #
         # macOS Mojave (10.14)
         #
+        # Qt 5.13: Supported
         # Qt 5.12: Supported
+        #
+        return qt5
+        #
+    } elseif { ${os.major} == 19 } {
+        #
+        # macOS Catalina (10.15)
+        #
+        # Qt 5.13: Not Supported but seems to work
+        # Qt 5.12: Not Supported but seems to work
         #
         return qt5
         #
@@ -309,7 +321,7 @@ namespace eval qt5pg {
         }
         qtcanvas3d {
             5.5
-            6.0
+            5.13
             libexec/qt5/qml/QtCanvas3D/libqtcanvas3d.dylib
             ""
         }
@@ -377,6 +389,12 @@ namespace eval qt5pg {
             5.2
             6.0
             lib/pkgconfig/Qt5Location.pc
+            ""
+        }
+        qtlottie {
+            5.13
+            6.0
+            lib/cmake/Qt5Bodymovin/Qt5BodymovinConfig.cmake
             ""
         }
         qtmacextras {
