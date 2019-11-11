@@ -43,7 +43,13 @@ portindex -e
 sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 
 # Install mpbb
-git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
+## temporary fix for Travis CI and Azure pipelines
+## see https://trac.macports.org/ticket/59666
+##git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
+git clone --depth 10 https://github.com/macports/mpbb.git ../mpbb
+cd ../mpbb
+git reset --hard a97bf2df52c03cbb2072983002903fb48ffdb5e6
+cd -
 # Install getopt required by mpbb
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
