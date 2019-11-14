@@ -26,10 +26,9 @@ configure.pre_args-replace      --prefix=${prefix} "PREFIX=${prefix}"
 configure.universal_args-delete --disable-dependency-tracking
 
 platform macosx {
-    # Use Xcode on macOS <= 10.9 (os.major 13) because CLT doesn't ship with an SDK on 10.9-
-    # Better way is to just check if CLT SDK works correctly rather than hardcode OS
+    # Use Xcode if CLT doesn't ship with an SDK
     # See: https://trac.macports.org/ticket/58779
-    if {${os.major} <= 13} {
+    if { !${use_xcode} && ![file exists ${configure.developer_dir}/SDKs] } {
         use_xcode yes
     }
 }
