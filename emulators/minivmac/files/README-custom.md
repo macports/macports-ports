@@ -23,10 +23,6 @@ reflect those changes immediately:
 You should not specify the target (the `-t` option); MacPorts sets it for
 you.
 
-If an error occurs during configuration, the Mini vMac 3.5.x build system
-won't tell you what went wrong. This problem is fixed in Mini vMac 36.x,
-which is available in the minivmac-custom-devel port.
-
 ## Example Configuration File
 
 For example, to compile a Macintosh Plus variation designed to be used in

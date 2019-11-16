@@ -1,6 +1,6 @@
 #### Description
 
-<!-- Note: it is best make pull requests from a branch rather than from master -->
+<!-- Note: it is best to make pull requests from a branch rather than from master -->
 
 ###### Type(s)
 <!-- update (title contains ": U(u)pdate to"), submission (new Portfile) and CVE Identifiers are auto-detected, replace [ ] with [x] to select -->

@@ -1,16 +1,16 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem                                      1.0
-PortGroup           python                      1.0
-PortGroup           cxx11                       1.1
-PortGroup           java                        1.0
-PortGroup           github                      1.0
-PortGroup           compilers                   1.0
-PortGroup           xcodeversion                1.0
-PortGroup           compiler_blacklist_versions 1.0
+PortSystem                                         1.0
+PortGroup           python                         1.0
+PortGroup           java                           1.0
+PortGroup           github                         1.0
+PortGroup           compilers                      1.0
+PortGroup           xcodeversion                   1.0
+PortGroup           compiler_blacklist_versions    1.0
+PortGroup           xcode_workaround               1.0
 
 name                py-tensorflow
-version             1.13.1
+version             2.0.0
 revision            0
 github.setup        tensorflow tensorflow ${version} v
 platforms           darwin
@@ -26,18 +26,29 @@ homepage            https://www.tensorflow.org/
 
 github.livecheck.regex  {([0-9.]+)}
 
-checksums           rmd160  28599b0eb5e2dabeb74a60b9c44801e083328b23 \
-                    sha256  7c0e4ee054e357e3dffda09f667539f2b89fa444a730f3e33940010462ee6b8c \
-                    size    31615930
+checksums           rmd160  476dd5e51924d966cfed30ce5deb0f12d6d6bad8 \
+                    sha256  5c6d97f622fffdcf318b45f705368eb2d32446ca4f4ed86c8b06083559ff55cf \
+                    size    46183179
+
+if { ${os.major} < 16 } {
+    known_fail yes
+    # https://trac.macports.org/ticket/58518
+    pre-fetch {
+        ui_error "${name} ${version} requires macOS10.12 or newer."
+        return -code error "incompatible macOS version"
+    }
+}
 
 compiler.blacklist-append {clang < 840}
+# require c++11
+compiler.cxx_standard 2011
 
 patch.pre_args      -p1
 
 # Required java version
-java.version        11
+java.version        11+
 # JDK port to install if required java not found
-java.fallback       openjdk11
+java.fallback       openjdk13
 
 # The oldest Xcode version to use default Xcode compiler
 # Note setting here should be in sync with that in bazel
@@ -49,29 +60,44 @@ if {${os.major} < 16} {
     patchfiles-append CLOCK_REALTIME-Older-OSX.patch
 }
 
+variant mkl description {Enable Intel Math Kernel Library support} { }
+# Enable MKL by default on 10.12 and newer.
+if {${os.major} >= 16} {
+    default_variants-append +mkl
+}
+
 variant native description {Build from source for best native platform support} { }
 
 # Support python versions
-python.versions     27 35 36 37
+python.versions        37 38
+python.default_version 37
 
 if {${name} ne ${subport}} {
+    conflicts   py${python.version}-tensorflow1
 
     depends_build-append \
+        port:py${python.version}-future \
         port:py${python.version}-pip \
-        port:bazel21
+        port:py${python.version}-mock \
+        port:bazel26 \
+        port:cctools
 
     depends_lib-append \
-        port:py${python.version}-wheel \
-        port:py${python.version}-tensorboard \
-        port:py${python.version}-six \
-        port:py${python.version}-protobuf3 \
-        port:py${python.version}-numpy \
-        port:py${python.version}-mock \
-        port:py${python.version}-gast \
+        port:py${python.version}-absl \
         port:py${python.version}-astor \
-        port:py${python.version}-termcolor \
+        port:py${python.version}-gast \
+        port:py${python.version}-google-pasta \
+        port:py${python.version}-grpcio \
         port:py${python.version}-keras \
-        port:py${python.version}-absl
+        port:py${python.version}-numpy \
+        port:py${python.version}-protobuf3 \
+        port:py${python.version}-six \
+        port:py${python.version}-tensorboard \
+        port:py${python.version}-tensorflow_estimator \
+        port:py${python.version}-termcolor \
+        port:py${python.version}-wheel \
+        port:py${python.version}-wrapt
+
     if {${python.version} < 34} {
         depends_lib-append \
             port:py${python.version}-backports.weakref \
@@ -85,10 +111,12 @@ if {${name} ne ${subport}} {
     configure.env-append JAVA_HOME=${java.home}
     build.env-append     TMPDIR=${workpath}/tmp
     build.env-append     JAVA_HOME=${java.home}
+    set base_march "-march=x86-64"
     if {![variant_isset native]} {
-        configure.env-append CC_OPT_FLAGS=-march=ivybridge
-        notes "This version is built based on a base architecture for convenience, 
-              which may not be optimized for your system. To build a version 
+        configure.env-append CC_OPT_FLAGS=${base_march}
+        build.env-append     CC_OPT_FLAGS=${base_march}
+        notes "This version is built based on a base architecture for convenience,
+              which may not be optimized for your system. To build a version
               customized for your machine, use the +native variant"
     }
     # Disable Xcode detection on older OSes, as we want the
@@ -102,23 +130,42 @@ if {${name} ne ${subport}} {
     configure.pre_args
     # configure command
     configure.cmd ./configure
-    # Path configuration if required
+    # Patch configuration
     pre-configure {
-        if {[vercmp ${xcodeversion} ${tf_min_xcode}] < 0} {
-            foreach f { configure.py third_party/toolchains/cpus/arm/CROSSTOOL.tpl third_party/toolchains/gpus/crosstool/CROSSTOOL third_party/gpus/crosstool/CROSSTOOL.tpl third_party/sycl/crosstool/CROSSTOOL.tpl } {
-                foreach cmd {ar nm strip libtool ld objdump} {
-                    reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
-                }
-                reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g" ${f}
-                reinplace -q "s| clang | ${configure.cc} |g"  ${f}
+        # enforce correct build settings
+        foreach f [ exec find ${worksrcpath} -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" ] {
+            foreach cmd {ar nm strip libtool ld objdump} {
+                reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+            }
+            reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"   ${f}
+            reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
+            reinplace -q "s| clang | ${configure.cc} |g"            ${f}
+            reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
+            reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
+        }
+        # If not native build, make sure not used...
+        if {![variant_isset native]} {
+            foreach f [ exec find ${worksrcpath} -name "configure" -or -name "configure.py" -or -name "CMakeLists.txt" -or -name "Makefile" -or -name "*.sh" ] {
+                reinplace -q "s|-march=native|${base_march}|g" ${f}
             }
         }
     }
 
     build {
+        # tensorflow(via bazel) cannot be built if gcc is 'port selected'
+        # https://trac.macports.org/ticket/58569
+        # https://trac.macports.org/ticket/58679
+        # Until it can be figured out how to stop bazel finding and using macports gcc
+        # just detect when this situation arises and error out...
+        if { [file exists ${prefix}/bin/gcc] } {
+            ui_error "${subport} cannot be built with 'port select gcc' active."
+            ui_error "Please run 'sudo port select gcc none' and try again."
+            ui_error "Once the build is complete, you can safely re-select your preferred gcc."
+            return -code error "build error"
+        }
         # Build using the wonderful bazel build system ...
         set tf_bazel_cmd "bazel --max_idle_secs=60 --output_user_root=${workpath}"
-        set tf_bazel_build_opts "-s -c opt --config=opt"
+        set tf_bazel_build_opts "-s -c opt --verbose_failures --config=opt"
         # hack to try and transfer MP c, c++ and ld options to bazel...
         foreach opt [list {*}${configure.cflags} ] {
             set tf_bazel_build_opts "${tf_bazel_build_opts} --conlyopt '${opt}'"
@@ -133,6 +180,13 @@ if {${name} ne ${subport}} {
             set tf_bazel_build_opts "${tf_bazel_build_opts} --action_env CC=${configure.cc}"
             set tf_bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${tf_bazel_cmd}"
         }
+        if {[variant_isset mkl]} {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --config=mkl"
+        }
+        if {![variant_isset native]} {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --copt=${base_march}"
+            set tf_bazel_cmd "CC_OPT_FLAGS=${base_march} ${tf_bazel_cmd}"
+        }
         system -W ${worksrcpath} "${tf_bazel_cmd} build ${tf_bazel_build_opts} //tensorflow/tools/pip_package:build_pip_package"
         # Build the python wheel
         system -W ${worksrcpath} "./bazel-bin/tensorflow/tools/pip_package/build_pip_package ${workpath}"
@@ -145,8 +199,7 @@ if {${name} ne ${subport}} {
 
     destroot.cmd  pip-${python.branch}
     destroot.args           \
-        --upgrade           \
-        --force-reinstall   \
+        --ignore-installed  \
         --no-cache-dir      \
         --no-dependencies   \
         --root ${destroot}  \
@@ -157,5 +210,7 @@ if {${name} ne ${subport}} {
         file delete ${destroot}${python.prefix}/bin/tensorboard
         file delete ${destroot}${prefix}/bin/tensorboard-${python.branch}
     }
+
+    livecheck.type  none
 
 }

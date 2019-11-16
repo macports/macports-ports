@@ -2,12 +2,12 @@
 
 PortSystem          1.0
 PortGroup           select 1.0
+PortGroup           clang_dependency 1.0
 
 name                python27
 epoch               2
 # Remember to keep py27-tkinter and py27-gdbm's versions sync'd with this
-version             2.7.16
-revision            1
+version             2.7.17
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
@@ -27,9 +27,9 @@ master_sites        ${homepage}ftp/python/${version}/
 distname            Python-${version}
 use_xz              yes
 
-checksums           md5 30157d85a2c0479c09ea2cbe61f2aaf5 \
-                    rmd160 2e4ab325a9c9edf1687b6a5969cdafeb3cc954da \
-                    sha256 f222ef602647eecb6853681156d32de4450a2c39f4de93bd5b20235f2e660ed7
+checksums           md5 b3b6d2c92f42a60667814358ab9f0cfd \
+                    rmd160 55e05d1475d4e27873e71802529499361ba25e14 \
+                    sha256 4d43f033cdbd0aa7b7023c81b0e986fd11e653b5248dac9144d508f11812ba41
 
 patchfiles          patch-Makefile.pre.in.diff \
                     patch-setup.py.diff \
@@ -38,7 +38,7 @@ patchfiles          patch-Makefile.pre.in.diff \
                     patch-configure.diff \
                     patch-libedit.diff \
                     enable-loadable-sqlite-extensions.patch \
-                    lchmod.patch
+                    patch-_osx_support.py.diff
 
 depends_build       port:pkgconfig
 depends_lib         port:bzip2 \
@@ -54,26 +54,60 @@ depends_lib         port:bzip2 \
 depends_run         port:python_select \
                     port:python2_select
 
-configure.args      --enable-framework=${frameworks_dir} \
+set my_prefix ${prefix}
+set my_applications ${applications_dir}
+set my_frameworks   ${frameworks_dir}
+
+# This port is used by clang-3.4 to bootstrap libcxx
+subport ${name}-bootstrap {
+    set my_prefix ${prefix}/libexec/libcxx-bootstrap
+    configure.pre_args  --prefix=${my_prefix}
+    set my_frameworks      ${my_prefix}/Library/Frameworks
+    set my_applications    ${my_prefix}/Applications
+    configure.cppflags-prepend   -I${my_prefix}/include
+    configure.ldflags-prepend    -L${my_prefix}/lib
+    configure.env-append    PATH=${my_prefix}/bin:$::env(PATH)
+    configure.cxx_stdlib
+    compiler.whitelist      clang llvm-gcc-4.2 gcc-4.2 apple-gcc-4.2
+    patchfiles-delete       patch-libedit.diff
+    depends_build-replace   port:pkgconfig port:pkgconfig-bootstrap
+    depends_lib-replace     port:gettext port:gettext-bootstrap \
+                            port:ncurses port:ncurses-bootstrap
+    depends_lib-delete      port:db48 \
+                            port:libedit \
+                            port:sqlite3
+    # no need to be 'port select'able
+    depends_run
+    use_xz              no
+    depends_extract     port:xz-bootstrap
+    extract.suffix      .tar.xz
+    extract.cmd         ${my_prefix}/bin/xz
+}
+# Also needed by later clangs.
+if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
+    clang_dependency.extra_versions 3.7
+}
+
+configure.args      --enable-framework=${my_frameworks} \
                     --enable-ipv6 \
                     --with-system-expat \
                     --with-system-ffi
 
-configure.cppflags-append -I${prefix}/include/db48
-configure.ldflags-append -L${prefix}/lib/db48
+configure.cppflags-append -I${my_prefix}/include/db48
+configure.ldflags-append -L${my_prefix}/lib/db48
 
 configure.ccache    no
 
 post-patch {
-    reinplace "s|@@PREFIX@@|${prefix}|g" \
+    reinplace "s|@@PREFIX@@|${my_prefix}|g" \
         ${worksrcpath}/Lib/cgi.py \
         ${worksrcpath}/Lib/ctypes/macholib/dyld.py
-    reinplace "s|@@APPLICATIONS_DIR@@|${applications_dir}|" \
+    reinplace "s|@@APPLICATIONS_DIR@@|${my_applications}|" \
         ${worksrcpath}/configure
 }
 
 post-configure {
-    reinplace "s;/* #undef PY_FORMAT_LONG_LONG */;#define PY_FORMAT_LONG_LONG \"ll\";" pyconfig.h
+    reinplace "s;/* #undef PY_FORMAT_LONG_LONG */;#define PY_FORMAT_LONG_LONG \"ll\";" ${worksrcpath}/pyconfig.h
 }
 
 build.target        all
@@ -83,6 +117,7 @@ test.target         test
 
 destroot.target     frameworkinstall maninstall
 
+if {$subport eq $name} {
 set pythonNoDot python[string map {. {}} $branch]
 select.entries      [list python python-$pythonNoDot $pythonNoDot] \
                     [list python2 python2-$pythonNoDot $pythonNoDot]
@@ -94,9 +129,10 @@ the 'python' or 'python2' commands), run one or both of:
     sudo port select --set python $pythonNoDot
     sudo port select --set python2 $pythonNoDot
 "
+}
 
 platform darwin {
-    set framewpath ${frameworks_dir}/Python.framework
+    set framewpath ${my_frameworks}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
 
     post-patch {
@@ -125,9 +161,12 @@ platform darwin {
             file delete ${destroot}${framewpath}/${dir}
         }
 
-        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
-        ln -s ${framewdir}/Python ${destroot}${prefix}/lib/libpython${branch}.dylib
-        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
+        xinstall -d ${destroot}${my_prefix}/share/man/man1 \
+                    ${destroot}${my_prefix}/lib/pkgconfig
+        
+        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${my_prefix}/share/man/man1/
+        ln -s ${framewdir}/Python ${destroot}${my_prefix}/lib/libpython${branch}.dylib
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${my_prefix}/lib/pkgconfig/
 
         # Without this, LINKFORSHARED is set to
         # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
@@ -145,7 +184,7 @@ platform darwin {
 
 post-destroot {
     foreach unversionedFile {2to3 2to3-2 idle idle2 pydoc pydoc2 python python2 python-config python2-config pythonw pythonw2 smtpd.py smtpd2.py} {
-        delete ${destroot}${prefix}/bin/${unversionedFile}
+        delete ${destroot}${my_prefix}/bin/${unversionedFile}
     }
 }
 

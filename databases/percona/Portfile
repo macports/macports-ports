@@ -5,45 +5,69 @@ PortSystem          1.0
 name                percona
 set name_mysql      ${name}
 set name_package    ${name}-server
-set version_mysql   5.6.32
-set release         78.1
+set version_mysql   8.0.16
+set release         7
 # Please set revision_client and revision_server to 0 if you bump version_mysql or release.
-set revision_client 2
-set revision_server 2
+set revision_client 1
+set revision_server 0
+set boost_version   1.69.0
 version             ${version_mysql}-${release}
 categories          databases
 platforms           darwin
 license             GPL-2
 maintainers         nomaintainer
-homepage            http://www.percona.com/
+homepage            https://www.percona.com/
 
 if {$subport eq $name} {
 
-    PortGroup           cmake 1.0
+    PortGroup           cmake 1.1
     PortGroup           select 1.0
+    PortGroup           legacysupport 1.0
 
     set version_branch  [join [lrange [split ${version} .] 0 1] .]
+    set boost_distver   [join [split ${boost_version} .] _]
+    set boost_distname  boost_${boost_distver}
 
     revision            ${revision_client}
     license             GPL-2
     description         Multithreaded SQL database server
     long_description    Percona is a fork of the MySQL server, a multi-threaded SQL database.
 
-    master_sites \
-    http://www.percona.com/redir/downloads/Percona-Server-${version_branch}/Percona-Server-${version}/source/tarball
+    master_sites        https://www.percona.com/redir/downloads/Percona-Server-${version_branch}/Percona-Server-${version}/source/tarball:percona \
+                        sourceforge:project/boost/boost/${boost_version}:boost
 
     distname            ${name_package}-${version}
-    cmake.out_of_source yes
-    distfiles           ${distname}${extract.suffix}:src
+    distfiles           ${distname}${extract.suffix}:percona \
+                        ${boost_distname}${extract.suffix}:boost
     use_parallel_build  yes
 
-    patch.pre_args      -p1
-    patchfiles          patch-cmake-install_layout.cmake.diff
+    # Requires c++14
+    compiler.cxx_standard   2014
 
-    checksums           rmd160  f8470414a56cd59b6b846f65cde43d68a62814d2 \
-                        sha256  d94d73bf12459c57fcc8fa8018d7a08775d45ba718999a4ef0a09f543c654778
+    patchfiles          patch-cmake-install_layout.cmake.diff \
+                        patch-protobuf.diff \
+                        patch-local_boost_first.diff \
+                        patch-doc_dir.diff  \
+                        patch-so_location.diff \
+                        patch-libmysql-CMakeLists.txt.diff
 
-    depends_lib-append  port:zlib port:tcp_wrappers
+    checksums           ${distname}${extract.suffix} \
+                        rmd160  e3f9f1d6b4e4b8c171119b9c9b70499450467c0b \
+                        sha256  8f8f685c23917054f47b7b3a0f0acb6eb9157e59f46463caf112d1704495e798 \
+                        size    188873588 \
+                        ${boost_distname}${extract.suffix} \
+                        rmd160  ad6cd576a5229a11601986908ff03261582c9f81 \
+                        sha256  9a2c2819310839ea373f42d69e733c339b4e9a19deab6bfec448281554aa4dbb \
+                        size    111710205
+
+    depends_lib-append  port:cyrus-sasl2 \
+                        port:icu \
+                        port:libevent \
+                        port:lz4 \
+                        port:protobuf3-cpp \
+                        port:re2 \
+                        port:zlib \
+                        port:tcp_wrappers
     depends_run-append  port:mysql_select
 
     select.group        mysql
@@ -67,6 +91,17 @@ if {$subport eq $name} {
             ${cmake.build_dir}/macports/my.cnf
     }
 
+    # the default `cmake.build_type MacPorts` confuses Percona
+    cmake.build_type    Release
+
+    if {[variant_isset debug]} {
+        # storage/innobase/btr/btr0cur.cc:2960:18: error: use of undeclared identifier 'debug_sync_set_action'
+        # See also https://jira.mariadb.org/browse/MDEV-11148
+        pre-fetch {
+            return -code error "Building Percona with debugging enabled is currently broken"
+        }
+    }
+
     if { (![variant_isset universal] && ${build_arch} eq "i386") || ([variant_isset universal] && [lsearch ${universal_archs} i386] != -1) } {
         # switch to /usr/bin/gcc and /usr/bin/g++
         # closest to SET(CMAKE_CXX_COMPILER g++) removed in the patchfile
@@ -83,24 +118,25 @@ if {$subport eq $name} {
                         -DMYSQL_DATADIR:PATH=${prefix}/var/db/${name_mysql} \
                         -DDEFAULT_CHARSET:STRING=utf8 \
                         -DDEFAULT_COLLATION:STRING=utf8_general_ci \
+                        -DWITH_ICU:STRING=system \
+                        -DWITH_LIBEVENT:STRING=system \
+                        -DWITH_LZ4:STRING=system \
+                        -DWITH_PROTOBUF:STRING=system \
+                        -DWITH_RE2:STRING=system \
+                        -DWITH_SASL:STRING=system \
                         -DWITH_ZLIB:STRING=system \
-                        -DWITH_UNIT_TESTS:BOOL=ON \
+                        -DWITH_UNIT_TESTS:BOOL=OFF \
                         -DENABLE_GCOV:BOOL=OFF \
                         -DENABLE_DTRACE:BOOL=OFF \
                         -DWITH_EDITLINE:STRING=bundled \
                         -DWITH_LIBWRAP:BOOL=ON \
                         -DWITH_SSL:STRING=bundled \
                         -DWITH_EMBEDDED_SERVER:BOOL=ON \
-                        -DWITHOUT_TOKUDB=ON
-
-    post-build {
-        set dirs ${cmake.build_dir}
-        foreach dir ${dirs} {
-            reinplace -E {s|-arch [a-z0-9_]+||g} \
-                ${dir}/scripts/mysql_config \
-                ${dir}/scripts/mysqlbug
-        }
-    }
+                        -DWITHOUT_TOKUDB=ON \
+                        -DWITHOUT_ROCKSDB=ON \
+                        -DDOWNLOAD_BOOST=0 \
+                        -DWITH_BOOST:PATH="${worksrcpath}/../${boost_distname}" \
+                        -DINSTALL_MYSQLTESTDIR=
 
     post-destroot {
         # proc portdestroot::destroot_finish fails to find and compress our man pages
@@ -112,10 +148,6 @@ if {$subport eq $name} {
             reinplace -q "s|/etc/|${prefix}/etc/${name_mysql}/|g" ${manpage}
             # Compress all manpages with gzip
             system "$gzip -9vf ${manpage}"
-        }
-        foreach samp_conffile [glob -type f ${destroot}${prefix}/share/${name_mysql}/support-files/my-*.cnf] {
-            # Fix paths in sample configuration files
-            reinplace -q "s|/etc/my.cnf|${prefix}/etc/${name_mysql}/my.cnf|g" ${samp_conffile}
         }
         set link_dir ${destroot}${prefix}/lib/${name_mysql}/mysql
         foreach link_target [glob -directory ${link_dir} -type f -nocomplain -tails libperconaserver*.*] {
@@ -171,7 +203,6 @@ if {$subport eq $name} {
     }
 
     variant system_readline description {Use system readline instead of bundled readline} {
-    
         # Add readline support.
         # "-DWITH_READLINE:BOOL=OFF" has the peculiar meaning "do not use the bundled copy
         # of readline but use the system's (i.e. MacPorts') copy of readline"
@@ -202,7 +233,7 @@ simultaneously.
 
     livecheck.type      regex
     livecheck.url       https://github.com/percona/percona-server/releases
-    livecheck.regex     "<span class=\"tag-name\">Percona-Server-(${version_branch}\[\\d\\.-\]*)</span>"
+    livecheck.regex     "releases/tag/Percona-Server-(${version_branch}\[\\d\\.-\]*)"
 }
 
 subport ${name_mysql}-server {
@@ -242,7 +273,7 @@ subport ${name_mysql}-server {
         reinplace "s|@GROUP@|${mysqluser}|g" \
             ${workpath}/org.macports.${subport}.plist
     }
-    
+
     use_configure       no
 
     build {}

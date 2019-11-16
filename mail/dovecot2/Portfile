@@ -2,9 +2,9 @@
 
 PortSystem          1.0
 PortGroup           github                      1.0
-PortGroup           cxx11                       1.1
 
-github.setup        dovecot core 2.3.6
+github.setup        dovecot core 2.3.8
+revision            0
 
 name                dovecot2
 set base_name       dovecot
@@ -17,10 +17,17 @@ license             LGPL-2.1
 homepage            https://www.dovecot.org
 
 description         Secure, fast imap and pop3 server
-long_description    Dovecot is an IMAP and POP3 server for Linux/UNIX-like \
-                    systems, written with security primarily in mind. Although \
-                    it is written in C, it uses several coding techniques to \
+long_description    Dovecot is an IMAP and POP3 server for Linux/UNIX-like\
+                    systems, written with security primarily in mind. Although\
+                    it is written in C, it uses several coding techniques to\
                     avoid most of the common pitfalls.
+
+checksums           rmd160  3c409a319596396376d99437c6131fe7fde6d47e \
+                    sha256  d1fd0268f7c69222942c6500ae9916050a2988966bb1587e74a3730eeb7a0422 \
+                    size    3692799
+
+set perl5_major_version \
+                    5.28
 
 depends_build-append \
                     port:gettext \
@@ -42,10 +49,6 @@ add_users ${default_login_user}    group=${default_login_user}    realname=Doven
 patch.pre_args      -p1
 patchfiles          patch-doc-example-config-conf.d-10-master.conf.diff \
                     patch-src-master-master-settings.c.diff
-
-checksums           rmd160  acef61b86b6de091ba8dfaffee5d5e5dfa43e0d1 \
-                    sha256  3e2347edfafcb26ae05c3402c6a84d4ec8893e24f5488f9789c0714f67940539 \
-                    size 3599231
 
 post-patch {
     reinplace "s|@@default_internal_user@@|${default_internal_user}|g" \
@@ -103,6 +106,87 @@ variant lucene description {Enable lucene support} {
 variant libstemmer description {Use libstemmer for full-text search} {
     depends_lib-append          port:libstemmer
     configure.args-append       --with-libstemmer
+}
+
+variant apns \
+    description "Enable Apple Push Notification Service (APNS)" {
+    # diff -Naur core-2.3.7.1 core-2.3.7.1-pushnotify | sed -E -e 's/core-([[:digit:]]+\.?)+(-pushnotify)?\//.\//g' > dovecot-core-pushnotify.patch
+    patchfiles-append \
+        dovecot-core-pushnotify.patch
+    post-patch {
+        reinplace "s|@PREFIX@|${prefix}|g" \
+            ${worksrcpath}/src/imap/cmd-x-apple-push-service.c \
+            ${worksrcpath}/src/plugins/push-notify/push-notify-plugin.c
+    }
+    depends_run-append \
+                    port:perl${perl5_major_version} \
+                    port:p${perl5_major_version}-net-apns-persistent \
+                    port:p${perl5_major_version}-privileges-drop
+    pre-destroot {
+        xinstall -m 0750 -d \
+            -o ${default_internal_user} -g ${default_login_user} \
+            ${destroot}${prefix}/var/db/${base_name}-apns/devices \
+            ${destroot}${prefix}/etc/${base_name}-apns
+        destroot.keepdirs-append \
+            ${destroot}${prefix}/var/db/${base_name}-apns/devices \
+            ${destroot}${prefix}/etc/${base_name}-apns
+        xinstall -m 0755 ${filespath}/pushnotify.pl \
+            ${destroot}${prefix}/sbin
+        foreach cmd [list \
+            "s|@PREFIX@|${prefix}|g" \
+            "s|@PERL5_MAJOR_VERSION@|${perl5_major_version}|g" \
+            "s|@DEFAULT_INTERNAL_USER@|${default_internal_user}|g" \
+            ] {
+            reinplace ${cmd} \
+                ${destroot}${prefix}/sbin/pushnotify.pl
+        }
+    }
+
+    # References:
+    #   * https://github.com/matthewpowell/pushnotify
+    #   * https://www.c0ffee.net/blog/dovecot-push-notifications/
+    notes-append \
+        "Dovecot is configured with the Apple Push Notification Service (APNS)\
+plugin. APNS use requires these steps:
+
+     1. Acquire APNS Mail certificates from a (virtual) macOS\
+        High Sierra 10.13 and Server.app version 5.6. Export\
+        the certificates from the Keychain into the file\
+        com.apple.servermgrd.apns.mail.p12 . *Note*: APNS Mail\
+        certificate creation is deprecated on Server.app version 5.7+.
+
+     2. Convert the APNS Mail certificates to PEM files:
+
+            openssl pkcs12 -in com.apple.servermgrd.apns.mail.p12  \\
+                -clcerts -nokeys | sed '/BEGIN CERTIFICATE/,\$!d'   \\
+            > com.apple.mail.cert.pem
+            sudo install -m 0644 -o ${default_internal_user} -g ${default_login_user} \\
+                com.apple.mail.cert.pem ${prefix}/etc/dovecot-apns
+            openssl pkcs12 -in com.apple.servermgrd.apns.mail.p12  \\
+                -nodes -nocerts | sed '/BEGIN PRIVATE KEY/,\$!d'    \\
+            > com.apple.mail.key.pem
+            sudo install -m 0640 -o ${default_internal_user} -g ${default_login_user} \\
+                com.apple.mail.key.pem ${prefix}/etc/dovecot-apns
+
+     3. Configure dovecot for APNS:
+
+        ${prefix}/etc/${base_name}/conf.d/15-lda.conf:
+        protocol lda { mail_plugins = \$mail_plugins push_notify }
+
+        ${prefix}/etc/${base_name}/conf.d/90-apns.conf:
+        aps_topic = com.apple.mail.XServer.<UUID>
+
+        where the certificate's UUID is obtained from the command:
+
+            openssl x509 -text -noout                                   \\
+                -in ${prefix}/etc/dovecot-apns/com.apple.mail.cert.pem \\
+            | grep -E -o 'com\.apple\.mail\.XServer\.\[0-9a-f-\]+'
+
+     4. Launch the APNS daemon:
+
+            sudo launchctl load -w \\
+                /Library/LaunchDaemons/org.macports.dovecot-apns.plist
+"
 }
 
 variant postgresql96 \
@@ -252,9 +336,52 @@ variant mysql5 \
 variant no_startupitem description {Do not install a launchd plist} {}
 
 if {![variant_isset "no_startupitem"]} {
-    startupitem.create      yes
-    startupitem.executable  ${prefix}/sbin/${base_name}
-    startupitem.pidfile     auto ${prefix}/var/run/${base_name}/master.pid
+    if {![variant_isset "apns"]} {
+        startupitem.create      yes
+        startupitem.executable  ${prefix}/sbin/${base_name}
+        startupitem.pidfile     auto ${prefix}/var/run/${base_name}/master.pid
+    } else {
+        set daemon_uniquename   \
+                                org.macports.${name}
+        set pushnotify_uniquename \
+                                org.macports.${base_name}-apns
+        startupitem.type        launchd
+        startupitem.create      no
+        # Inject our own launchd plists to include pushnotify.pl
+        startupitems \
+            name                ${name} \
+            location            LaunchDaemons \
+            uniquename          ${daemon_uniquename} \
+            plist               ${daemon_uniquename}.plist \
+            name                ${base_name}-apns \
+            location            LaunchDaemons \
+            uniquename          ${pushnotify_uniquename} \
+            plist               ${pushnotify_uniquename}.plist
+
+        post-destroot {
+            xinstall -m 0755 -d \
+                ${destroot}/Library/LaunchDaemons
+            foreach uniquename "${daemon_uniquename} ${pushnotify_uniquename}" {
+                xinstall -m 644 -W ${filespath} ${uniquename}.plist \
+                    ${destroot}/Library/LaunchDaemons
+                reinplace "s|@PREFIX@|${prefix}|g" \
+                    ${destroot}/Library/LaunchDaemons/${uniquename}.plist
+                xinstall -m 0755 -d \
+                    ${destroot}${prefix}/etc/LaunchDaemons/${uniquename}
+                move ${destroot}/Library/LaunchDaemons/${uniquename}.plist \
+                    ${destroot}${prefix}/etc/LaunchDaemons/${uniquename}/
+                if {${startupitem.install} && [geteuid] == 0} {
+                    ln -s \
+                        ${prefix}/etc/LaunchDaemons/${uniquename}/${uniquename}.plist \
+                        ${destroot}/Library/LaunchDaemons/
+                } else {
+                    ln -s \
+                        ${prefix}/etc/LaunchDaemons/${uniquename}/${uniquename}.plist \
+                        ${destroot}${prefix}/etc/LaunchDaemons
+                }
+            }
+        }
+    }
 }
 
 destroot.keepdirs \

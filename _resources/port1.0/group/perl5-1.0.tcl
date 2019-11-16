@@ -185,20 +185,25 @@ proc perl5.setup {module vers {cpandir ""}} {
         configure.cmd       ${perl5.bin}
         configure.env       PERL_AUTOINSTALL=--skipdeps
         configure.pre_args  Makefile.PL
-        if {[vercmp [macports_version] 2.5.3] <= 0} {
-            default configure.args {"INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\""}
-        } else {
-            default configure.args {INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\"}
-        }
+        default configure.args {INSTALLDIRS=vendor CC=\"${configure.cc}\" LD=\"${configure.cc}\"}
 
         # CCFLAGS can be passed in to "configure" but it's not necessarily inherited.
         # LDFLAGS can't be passed in (or if it can, it's not easy to figure out how).
         post-configure {
+            set extra_cflags [get_canonical_archflags cc]
+            set extra_ldflags [get_canonical_archflags ld]
+            if {${configure.sdkroot} ne ""} {
+                append extra_cflags " -isysroot${configure.sdkroot}"
+                append extra_ldflags " -Wl,-syslibroot,${configure.sdkroot}"
+            } elseif {${os.platform} eq "darwin"} {
+                append extra_cflags " -isysroot/"
+                append extra_ldflags " -Wl,-syslibroot,/"
+            }
             fs-traverse file ${configure.dir} {
                 if {[file isfile ${file}] && [file tail ${file}] eq "Makefile"} {
                     ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
-                    reinplace -locale C -q "/^CCFLAGS *=/s/$/ [get_canonical_archflags cc]/" ${file}
-                    reinplace -locale C -q "/^OTHERLDFLAGS *=/s/$/ [get_canonical_archflags ld]/" ${file}
+                    reinplace -locale C -q "/^CCFLAGS *=/s|$| ${extra_cflags}|" ${file}
+                    reinplace -locale C -q "/^OTHERLDFLAGS *=/s|$| ${extra_ldflags}|" ${file}
                 }
             }
         }
@@ -243,11 +248,7 @@ proc perl5.use_module_build {} {
     depends_lib-append  port:p${perl5.major}-module-build
 
     configure.pre_args  Build.PL
-    if {[vercmp [macports_version] 2.5.3] <= 0} {
-        default configure.args {"--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\""}
-    } else {
-        default configure.args {--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\"}
-    }
+    default configure.args {--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\"}
 
     build.cmd           ${perl5.bin}
     build.pre_args      Build

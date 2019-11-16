@@ -7,6 +7,6 @@ if { ${os.major} >= 11 } {
 if { ${os.major} >= 10 } {
     lappend compilers macports-gcc-8
 }
-lappend compilers macports-gcc-7
-lappend compilers macports-gcc-6
-lappend compilers macports-gcc-5
+lappend compilers macports-gcc-7 \
+                  macports-gcc-6 \
+                  macports-gcc-5
