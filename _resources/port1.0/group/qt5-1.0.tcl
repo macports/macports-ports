@@ -18,6 +18,11 @@ array set available_qt_versions {
 }
 #qt5-kde {qt5-kde 5.8}
 
+global custom_qt_versions
+array set custom_qt_versions {
+    phantomjs-qt {phantomjs-qt-qtbase 5.5}
+}
+
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
 # Qt also has configurations which are "occasionally tested" or are "[d]eployment only"
 # see https://doc.qt.io/qt-5/supported-platforms.html#reference-configurations
@@ -190,6 +195,12 @@ if {[info exists name]} {
     }
 }
 
+if {[info exists qt5.custom_qt_name]} {
+    set qt5.name       ${qt5.custom_qt_name}
+    set qt5.base_port  [lindex $custom_qt_versions(${qt5.name}) 0]
+    set qt5.version    [lindex $custom_qt_versions(${qt5.name}) 1]
+}
+
 if {[tbool just_want_qt5_version_info]} {
     return
 }
@@ -197,6 +208,9 @@ if {[tbool just_want_qt5_version_info]} {
 # standard install directory
 global qt_dir
 set qt_dir               ${prefix}/libexec/qt5
+if {[info exists qt5.custom_qt_name]} {
+    set qt_dir           ${prefix}/libexec/${qt5.custom_qt_name}
+}
 
 # standard Qt non-.app executables directory
 global qt_bins_dir
@@ -711,6 +725,12 @@ foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
         set private_building_qt5 true
     }
 }
+foreach {qt_test_name qt_test_info} [array get custom_qt_versions] {
+    set qt_test_base_port [lindex ${qt_test_info} 0]
+    if {${qt_test_base_port} eq ${subport}} {
+        set private_building_qt5 true
+    }
+}
 
 if {!${private_building_qt5}} {
     pre-configure {
@@ -722,7 +742,7 @@ if {!${private_building_qt5}} {
                 ui_error "qt5 PortGroup: please run `sudo port uninstall --follow-dependents ${qt5.base_port} and try again"
                 return -code error "improper Qt installed"
             }
-        } else {
+        } elseif { ![info exists qt5.custom_qt_name] } {
             if { ${qt5.name} ne [qt5.get_default_name] } {
                 # see https://wiki.qt.io/Qt-Version-Compatibility
                 ui_warn "qt5 PortGroup: default Qt for this platform is [qt5.get_default_name] but ${qt5.name} is installed"
