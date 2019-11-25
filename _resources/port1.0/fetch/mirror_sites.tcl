@@ -222,7 +222,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://www.msg.com.mx/CPAN/modules/by-module/
     http://www.namesdir.com/mirrors/cpan/modules/by-module/
     https://www.perl.com/CPAN/modules/by-module/
-    http://www.pirbot.com/mirrors/cpan/modules/by-module/
     https://www.planet-elektronik.de/CPAN/modules/by-module/
 }
 
