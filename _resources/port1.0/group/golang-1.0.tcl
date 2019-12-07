@@ -35,15 +35,15 @@
 # The go.vendors option expects a list of package IDs, each followed by these
 # labeled values:
 #
-# - lock: the version of the package in git SHA-1 format. This must
-#   come before any checksums.
+# - lock: the version of the package in git reference format. This must come
+#   before any checksums.
 #
 # - rmd160, sha256, size, etc.: checksums of the package. All checksums
 #   supported by the checksums keyword are supported.
 #
-# The list of vendors can be found in the Gopkg.lock, glide.lock, etc. file in
-# the upstream source code. The go2port tool (install via MacPorts) can be used
-# to generate a skeleton portfile with precomputed go.vendors.
+# The list of vendors can be found in the go.sum, Gopkg.lock, glide.lock,
+# etc. file in the upstream source code. The go2port tool (install via MacPorts)
+# can be used to generate a skeleton portfile with precomputed go.vendors.
 
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
 
@@ -150,7 +150,7 @@ default test.target     ""
 default test.env    {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}}
 
 # go.vendors name1 ver1 name2 ver2...
-# When a Gopkg.lock, glide.lock, etc. is present use go2port to generate values
+# When a go.sum, Gopkg.lock, glide.lock, etc. is present use go2port to generate values
 set go.vendors_internal {}
 option_proc go.vendors handle_go_vendors
 proc handle_go_vendors {option action {vendors_str ""}} {
@@ -187,11 +187,15 @@ proc handle_set_go_vendors {vendors_str} {
                 set vversion [lindex ${vendors_str} ${ix}]
                 incr ix
 
-                # The vauthor may be wrong (the project has been renamed/changed
-                # ownership) so we need to use the SHA-1 suffix later to identify
-                # the package when moving into the GOPATH. GitHub uses 7 digits;
-                # Bitbucket uses 12. We take 7 and use globbing.
-                set sha1_short [string range ${vversion} 0 6]
+                if {[string match v* ${vversion}]} {
+                    set sha1_short {}
+                } else {
+                    # The vauthor may be wrong (the project has been renamed/changed
+                    # ownership) so we need to use the SHA-1 suffix later to identify
+                    # the package when moving into the GOPATH. GitHub uses 7 digits;
+                    # Bitbucket uses 12. We take 7 and use globbing.
+                    set sha1_short [string range ${vversion} 0 6]
+                }
                 lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vversion}]
 
                 switch ${vdomain} {
@@ -263,10 +267,14 @@ post-extract {
     }
 
     foreach vlist ${go.vendors_internal} {
-        set sha1_short [lindex ${vlist} 0]
-        set vpackage [lindex ${vlist} 1]
+        lassign ${vlist} sha1_short vpackage
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
-        move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
+        if {${sha1_short} ne ""} {
+            move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
+        } else {
+            lassign [go._translate_package_id ${vpackage}] _ vauthor vproject
+            move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
+        }
     }
 }
 
