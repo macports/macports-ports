@@ -39,7 +39,7 @@ then
     PROXY_PAC_DIRECTORY="${PROXY_PAC_DIRECTORY:-@PROXY_PAC_DIRECTORY@}"
 else
     # macOS Server for proxy.pac
-    PROXY_PAC_DIRECTORY="${PROXY_PAC_DIRECTORY:-/Library/WebServer/Sites/${PROXY_HSOTNAME}}"
+    PROXY_PAC_DIRECTORY="${PROXY_PAC_DIRECTORY:-/Library/WebServer/Sites/${PROXY_HOSTNAME}}"
 fi
 
 fname_exists () { [ -f "${FNAME}" ] && echo "[✅] ${FNAME} exists" || echo "[❌] ${FNAME} DOESN'T EXIST!"; }
