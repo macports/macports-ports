@@ -262,13 +262,23 @@ proc php._set_pecl_prerelease {option action args} {
     global php.pecl
 
     if {${php.pecl}} {
+        set re1 {[quotemeta <a\\s+href="/get/${php.pecl.name}-[join ${php.pecl.regex}][quotemeta ${extract.suffix}]">]}
         if {${args}} {
-            livecheck.regex     {>([0-9a-zA-Z.]+)</a></th>}
+            default livecheck.regex ${re1}
         } else {
-            livecheck.regex     {>([0-9a-zA-Z.]+)</a></th>\s*<[^>]+>stable<}
+            set re2 {[quotemeta <\[^>\]+>stable</\[^>\]+>\\s*<\[^>\]+>\[^<\]*</\[^>\]+>\\s*<\[^>\]+>]}
+            default livecheck.regex ${re2}${re1}
         }
     }
 }
+
+
+# php.pecl.regex: for PECL extensions, the default regular expression to use
+# when matching version numbers in livecheck. Most ports don't need to change
+# this and should instead look at php.pecl.prerelease.
+
+options php.pecl.regex
+default php.pecl.regex {(\[0-9a-zA-Z.]+)}
 
 
 # php: the name of this branch of PHP, e.g. "php53" or "php54".
