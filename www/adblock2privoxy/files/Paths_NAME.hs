@@ -13,7 +13,7 @@ See:
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE NoRebindableSyntax #-}
 {-# OPTIONS_GHC -fno-warn-missing-import-lists #-}
-module Paths_adblock2privoxy (
+module Paths_@NAME@ (
     version,
     getBinDir, getLibDir, getDynLibDir, getDataDir, getLibexecDir,
     getDataFileName, getSysconfDir
@@ -42,19 +42,19 @@ version = Version [2,0,1] []
 bindir, libdir, dynlibdir, datadir, libexecdir, sysconfdir :: FilePath
 
 bindir     = "@PREFIX@/bin"
-libdir     = "@PREFIX@/lib/adblock2privoxy"
-dynlibdir  = "@PREFIX@/lib/adblock2privoxy"
-datadir    = "@PREFIX@/share/adblock2privoxy"
-libexecdir = "@PREFIX@/lib/adblock2privoxy"
+libdir     = "@PREFIX@/lib/@NAME@"
+dynlibdir  = "@PREFIX@/lib/@NAME@"
+datadir    = "@PREFIX@/share/@NAME@"
+libexecdir = "@PREFIX@/lib/@NAME@"
 sysconfdir = "@PREFIX@/etc"
 
 getBinDir, getLibDir, getDynLibDir, getDataDir, getLibexecDir, getSysconfDir :: IO FilePath
-getBinDir = catchIO (getEnv "adblock2privoxy_bindir") (\_ -> return bindir)
-getLibDir = catchIO (getEnv "adblock2privoxy_libdir") (\_ -> return libdir)
-getDynLibDir = catchIO (getEnv "adblock2privoxy_dynlibdir") (\_ -> return dynlibdir)
-getDataDir = catchIO (getEnv "adblock2privoxy_datadir") (\_ -> return datadir)
-getLibexecDir = catchIO (getEnv "adblock2privoxy_libexecdir") (\_ -> return libexecdir)
-getSysconfDir = catchIO (getEnv "adblock2privoxy_sysconfdir") (\_ -> return sysconfdir)
+getBinDir = catchIO (getEnv "@NAME@_bindir") (\_ -> return bindir)
+getLibDir = catchIO (getEnv "@NAME@_libdir") (\_ -> return libdir)
+getDynLibDir = catchIO (getEnv "@NAME@_dynlibdir") (\_ -> return dynlibdir)
+getDataDir = catchIO (getEnv "@NAME@_datadir") (\_ -> return datadir)
+getLibexecDir = catchIO (getEnv "@NAME@_libexecdir") (\_ -> return libexecdir)
+getSysconfDir = catchIO (getEnv "@NAME@_sysconfdir") (\_ -> return sysconfdir)
 
 getDataFileName :: FilePath -> IO FilePath
 getDataFileName name = do
