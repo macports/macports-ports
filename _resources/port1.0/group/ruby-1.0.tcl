@@ -19,7 +19,7 @@
 # options:
 #   ruby.branches: the ruby versions supported by this module.
 #        this introduces subports such as rb23-, rb22-, ...
-#   ruby.branch: select ruby version. 2.6, ... 2.0, 1.9 or 1.8.
+#   ruby.branch: select ruby version. 2.7, ... 2.0, 1.9 or 1.8.
 #   ruby.link_binaries: whether generate suffixed symlink under ${prefix}/bin
 #        or not.
 #   ruby.link_binaries_suffix: suffix of commands from rb-foo under
@@ -185,6 +185,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
+            ruby27 { ruby.branch 2.7 }
             ruby26 { ruby.branch 2.6 }
             ruby25 { ruby.branch 2.5 }
             ruby24 { ruby.branch 2.4 }
@@ -195,7 +196,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             ruby19 { ruby.branch 1.9 }
             ruby   { ruby.branch 1.8 }
             default {
-                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby26 ruby25 ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby27, ruby26, ruby25, ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
                 return -code error "ruby.setup failed"
             }
         }
