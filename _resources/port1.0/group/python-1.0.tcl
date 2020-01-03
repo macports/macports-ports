@@ -26,10 +26,17 @@ universal_variant yes
 build.target    build
 
 post-extract {
-    # Prevent setuptools' easy_install from downloading dependents
+    # Prevent setuptools' easy_install from downloading dependencies
     set fs [open $env(HOME)/.pydistutils.cfg w+]
     puts $fs {[easy_install]}
     puts $fs {allow_hosts = None}
+    close $fs
+    # Same for pip
+    file mkdir $env(HOME)/.config/pip
+    set fs [open $env(HOME)/.config/pip/pip.conf w+]
+    puts $fs {[install]}
+    puts $fs {no-deps = yes}
+    puts $fs {no-index = yes}
     close $fs
 }
 
