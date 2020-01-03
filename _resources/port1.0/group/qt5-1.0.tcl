@@ -7,7 +7,7 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5   {qt5-qtbase   5.13}
+    qt5   {qt5-qtbase   5.14}
     qt511 {qt511-qtbase 5.11}
     qt59  {qt59-qtbase  5.9}
     qt58  {qt58-qtbase  5.8}
@@ -120,6 +120,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Sierra (10.12)
         #
+        # Qt 5.14: Not Supported but seems to work
         # Qt 5.13: Supported
         # Qt 5.12: Supported
         # Qt 5.11: Supported
@@ -134,6 +135,7 @@ proc qt5.get_default_name {} {
         #
         # macOS High Sierra (10.13)
         #
+        # Qt 5.14: Supported
         # Qt 5.13: Supported
         # Qt 5.12: Supported
         # Qt 5.11: Supported
@@ -145,6 +147,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Mojave (10.14)
         #
+        # Qt 5.14: Supported
         # Qt 5.13: Supported
         # Qt 5.12: Supported
         #
@@ -154,6 +157,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Catalina (10.15)
         #
+        # Qt 5.14: Supported
         # Qt 5.13: Not Supported but seems to work
         # Qt 5.12: Not Supported but seems to work
         #
@@ -441,6 +445,12 @@ namespace eval qt5pg {
             lib/pkgconfig/Qt5Declarative.pc
             ""
         }
+        qtquick3d {
+            5.14
+            6.0
+            lib/pkgconfig/Qt5Quick3D.pc
+            ""
+        }
         qtquickcontrols {
             5.1
             6.0
@@ -451,6 +461,12 @@ namespace eval qt5pg {
             5.6
             6.0
             lib/pkgconfig/Qt5QuickControls2.pc
+            ""
+        }
+        qtquicktimeline {
+            5.14
+            6.0
+            libexec/qt5/qml/QtQuick/Timeline/libqtquicktimelineplugin.dylib
             ""
         }
         qtremoteobjects {
