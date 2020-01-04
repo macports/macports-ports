@@ -30,3 +30,102 @@ Have you
 - [ ] tested basic functionality of all binary files?
 
 <!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->
+
+###### Git references
+Please refer to these pages and the commented cheat sheet below:
+* https://guide.macports.org/#project.github
+* https://trac.macports.org/wiki/WorkingWithGit
+<!-- git cheat sheet
+
+# Setup
+
+git config --global user.name 'Foo Barbaz'
+git config --global user.email 'foo.bar.baz@email.com'
+
+## Clone the MacPorts repo
+
+### HTTPS
+git clone https://github.com/macports/macports-ports.git
+### or SSH
+git clone git@github.com:macports/macports-ports.git
+
+## Add macports/macports-ports.git as the "upstream" repo
+
+cd macports-ports
+git remote add upstream https://github.com/macports/macports-ports.git
+
+# New PR; single port
+
+## Reset the local master to upstream [destructive]
+
+git checkout master
+git fetch --all
+git reset --hard upstream/master
+git push -f origin master
+
+## New branch off master, single port
+
+git checkout -b myport-branch master
+vi category/port/Portfile
+git add category/port/Portfile
+vi category/port/files/myfile
+git add category/port/files/myfile
+git commit
+git push --set-upstream origin myport-branch
+open -a Safari https://github.com/myaccount/macports-ports/pull/new/myport-branch
+
+## PR edits; single port
+
+git checkout myport-branch
+vi category/port/Portfile
+git add category/port/Portfile
+git commit --amend --no-edit
+git push -f origin myport-branch
+
+# New PR; multiple ports
+
+## Reset the local master to upstream, as above
+
+## New branch off master, multiple ports
+
+git checkout -b myport-branch master
+vi category/port1/Portfile
+git add category/port1/Portfile
+git commit
+vi category/port2/Portfile
+git add category/port2/Portfile
+git commit
+...
+git push --set-upstream origin myport-branch
+open -a Safari https://github.com/myaccount/macports-ports/pull/new/myport-branch
+
+## PR edits; multiple ports
+
+git checkout myport-branch
+### rebase to specific commit
+#### find commit hash fffffffffffffffffffffffffffffffffffffffff
+git log --graph
+#### rebase to the previous commit [note the caret at the end of hash^]
+git rebase --interactive fffffffffffffffffffffffffffffffffffffffff^
+#### change the command on the first line from 'pick' to 'edit'
+vi category/port/Portfile
+git add category/port/Portfile
+git commit --amend --no-edit
+git rebase --continue
+### edit additional specific commits as necessary
+git push -f origin myport-branch
+
+# Rebase the PR to upstream
+
+## Reset the local master to upstream, as above
+
+git checkout myport-branch
+git pull --rebase --autostash origin master
+
+# Troubleshooting
+
+## Show all files modified in the local branch
+
+git diff --name-only myport-branch $(git merge-base myport-branch master)
+
+-->
