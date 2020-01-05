@@ -341,7 +341,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.target     install
             destroot.destdir
             # extconf.rb|mkmf.rb of ruby-1.8 does not support universal binary.
-            # to build universal extentions, write "Portgrourp muniversal 1.0" in the Portfile.
+            # to build universal extensions, write "PortGroup muniversal 1.0" in the Portfile.
             if {[variant_isset universal] && (${ruby.branch} eq "1.8") && [info exists universal_archs_supported]} {
                 # generate wrapper for --rubyprog option
                 pre-configure {
@@ -381,7 +381,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             destroot.args       RUBY="${ruby.bin}"
 
             # extconf.rb|mkmf.rb of ruby-1.8 does not support universal binary.
-            # to build universal extentions, write "Portgrourp muniversal 1.0" in the Portfile.
+            # to build universal extensions, write "PortGroup muniversal 1.0" in the Portfile.
             if {[variant_isset universal] && (${ruby.branch} eq "1.8") && [info exists universal_archs_supported]} {
                 foreach arch ${universal_archs_supported} {
                     lappend merger_configure_env(${arch}) \
