@@ -119,7 +119,7 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,cxx_stdlib) libstdc++
 }
 
-set clang_versions {33 34 37 39 40 50 60 70 80 90}
+set clang_versions {33 34 37 50 60 70 80 90}
 foreach v ${clang_versions} {
     # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
     set compiler_version $v
