@@ -7,8 +7,8 @@ PortGroup           bitbucket 1.0
 PortGroup           select 1.0
 
 name                pypy
-bitbucket.setup     pypy pypy 7.2.0 {release-pypy${python.branch}-v}
-revision            1
+bitbucket.setup     pypy pypy 7.3.0 {release-pypy${python.branch}-v}
+revision            0
 categories          lang python devel
 license             MIT PSF
 maintainers         {danchr @danchr} openmaintainer
@@ -33,8 +33,7 @@ depends_lib         port:libffi \
 depends_run         port:python_select
 select.entries      [list python python-$subport $subport]
 
-patchfiles          darwin.py.diff \
-                    no-embed.diff \
+patchfiles          no-embed.diff \
                     make_output.diff \
                     ffiplatform.py.diff \
                     paths.diff
@@ -59,10 +58,14 @@ subport pypy3 {
 
     depends_run-append port:python3_select
     select.entries-append [list python3 python3-$subport $subport]
+}
 
-    checksums           rmd160  cdcc01b6235ea2598d978c84c974977d60f1be05 \
-                        sha256  0d7c707df5041f1593fe82f29c40056c21e4d6cb66554bbd66769bd80bcbfafc \
-                        size    21850076
+subport pypy-tkinter {
+    set python.branch   2.7
+}
+
+subport pypy3-tkinter {
+    set python.branch   3.6
 }
 
 if {$subport == ${name}} {
@@ -70,10 +73,21 @@ if {$subport == ${name}} {
 
     depends_run-append port:python2_select
     select.entries-append [list python2 python2-$subport $subport]
+}
 
-    checksums           rmd160  e2cd6ff78845f1b674997e99adbdcc8bd8780e7f \
-                        sha256  55cb7757784fbe3952102447f65b27d80e6c885a464a7af1a9ce264492439dcc \
-                        size    20219532
+if {${python.branch} == 2.7} {
+    patchfiles-append   pypy2-darwin.py.diff
+
+    checksums           rmd160  acb601481958888d11c7007e8d749c9035ff7d22 \
+                        sha256  b0b25c7f8938ab0fedd8dedf26b9e73c490913b002b484c1b2f19d5844a518de \
+                        size    20328540
+
+} else {
+    patchfiles-append   pypy3-darwin.py.diff
+
+    checksums           rmd160  3032a53eb9fb8d226a1a0075472407ce3e6c7734 \
+                        sha256  48d12c15fbcbcf4a32882a883195e1f922997cde78e7a16d4342b9b521eefcfa \
+                        size    21937786
 }
 
 distname            pypy${python.branch}-v${version}-src
@@ -117,8 +131,8 @@ post-patch {
         ${worksrcpath}/lib_pypy/cffi/ffiplatform.py \
         ${worksrcpath}/lib_pypy/_tkinter/tklib_build.py
 
-    if {${python.branch} == "2.7" && ${macosx_deployment_target} != "10.14"} {
-        reinplace "/MACOSX_DEPLOYMENT_TARGET/s/10.14/${macosx_deployment_target}/" \
+    if {${python.branch} == "2.7"} {
+        reinplace "/MACOSX_DEPLOYMENT_TARGET/s/10\\.\\(\[0-9\]*\\)/${macosx_deployment_target}/" \
             lib-python/2.7/distutils/sysconfig_pypy.py
     }
 
@@ -135,9 +149,6 @@ if {$subport ne $name} {
     # just use our own pypy2 for building pypy3
     depends_build-append port:pypy
     build.cmd       ${prefix}/lib/pypy/bin/pypy
-} elseif {![tbool ports_trace] && [file executable ${prefix}/lib/pypy/pypy]} {
-    # if we're not in trace mode, use pypy from this port if it's available
-    build.cmd       ${prefix}/lib/pypy/pypy
 } else {
     if {${os.platform} eq "darwin" && ${os.arch} eq "i386" && ![catch {sysctl hw.cpu64bit_capable} is64bit] && $is64bit == 1} {
         # use a binary distribution of pypy itself
@@ -183,26 +194,55 @@ if {${os.arch} ne "i386"} {
     build.args-append --opt=3
 }
 
-post-destroot {
-    file delete ${destroot}${prefix}/lib/${subport}.tar.bz2
-    ln -s ../lib/${subport}/bin/${subport} ${destroot}${prefix}/bin/${subport}
+# Install support files, but only if not in a proper subport
+if {![string match "pypy*-*" ${subport}]} {
+    post-destroot {
+        file delete ${destroot}${prefix}/lib/${subport}.tar.bz2
+        ln -s ../lib/${subport}/bin/${subport} ${destroot}${prefix}/bin/${subport}
 
-    xinstall -d ${destroot}${prefix}/share/man/man1
-    system -W ${worksrcpath}/pypy/doc/man \
-        "rst2man-2.7.py pypy.1.rst ${destroot}${prefix}/share/man/man1/${subport}.1"
+        xinstall -d ${destroot}${prefix}/share/man/man1
+        system -W ${worksrcpath}/pypy/doc/man \
+            "rst2man-2.7.py pypy.1.rst ${destroot}${prefix}/share/man/man1/${subport}.1"
 
-    foreach script [array names module_scripts] {
-        set module $module_scripts($script)
-        set scriptpath "${destroot}${prefix}/lib/${subport}/bin/${script}"
+        foreach script [array names module_scripts] {
+            set module $module_scripts($script)
+            set scriptpath "${destroot}${prefix}/lib/${subport}/bin/${script}"
 
-        xinstall -m 755 ${filespath}/module-script.sh $scriptpath
-        reinplace "s+__PYPY__+${prefix}/bin/${subport}+" $scriptpath
-        reinplace "s+__MODULE__+${module}+" $scriptpath
+            xinstall -m 755 ${filespath}/module-script.sh $scriptpath
+            reinplace "s+__PYPY__+${prefix}/bin/${subport}+" $scriptpath
+            reinplace "s+__MODULE__+${module}+" $scriptpath
+        }
     }
 }
 
-variant opt1 description {use optimization level 1 for faster build (but slower execution)} {
-    depends_lib-append port:boehmgc
-    build.args-delete  --opt=3 --opt=jit
-    build.args-append  --opt=1
+# Factor Tk into a separate subport, like CPython
+if {[string match "pypy*-tkinter" ${subport}]} {
+    set pypy_version    [string range ${subport} 0 [string first "-" ${subport}]-1]
+    set pypy_root       ${prefix}/lib/${pypy_version}
+
+    description         PyPy bindings to the Tk widget set
+    long_description    ${description}
+    categories          python graphics
+
+    depends_build       port:pkgconfig \
+                        port:tcl
+    depends_lib         port:${pypy_version} \
+                        port:tk
+
+    build.dir           ${worksrcpath}
+    build.cmd           ${prefix}/bin/${pypy_version}
+    build.args          lib_pypy/_tkinter/tklib_build.py
+    build.target
+    build.post_args
+
+    select.entries
+
+    destroot {
+        xinstall -m 755 -d ${destroot}${pypy_root}/lib_pypy/_tkinter
+        xinstall -m 755 \
+            [glob -directory ${worksrcpath}/lib_pypy/_tkinter tklib_cffi.*.so] \
+            ${destroot}${pypy_root}/lib_pypy/_tkinter
+    }
+
+    post-destroot { }
 }

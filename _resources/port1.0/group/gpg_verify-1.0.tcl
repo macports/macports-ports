@@ -45,7 +45,11 @@ options gpg_verify.gpg_homedir
 default gpg_verify.gpg_homedir {${workpath}/.gnupg}
 
 pre-checksum {
-     xinstall -o macports -m 0755 -d "[option gpg_verify.gpg_homedir]"
+    if {[geteuid] == 0} {
+        xinstall -o ${macportsuser} -d [option gpg_verify.gpg_homedir]
+    } else {
+        xinstall -d [option gpg_verify.gpg_homedir]
+    }
 }
 
 proc gpg_verify.verify_gpg_signature {pubkey_file signature_file test_file} {
@@ -60,7 +64,6 @@ proc gpg_verify.verify_gpg_signature {pubkey_file signature_file test_file} {
             --verify ${signature_file} ${test_file} 2>/dev/null; \
             then echo 'VERIFIED'; else echo 'UNVERIFIED'; fi"]
     if {[string trim ${gpg_verification}] != "VERIFIED"} {
-        ui_error "GPG signature verification failed on ${test_file} with pubkey file ${pubkey_file}."
-        exit 1
+        error "GPG signature verification failed on ${test_file} with pubkey file ${pubkey_file}."
     }
 }

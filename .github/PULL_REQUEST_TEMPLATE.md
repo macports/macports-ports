@@ -11,7 +11,7 @@
 
 ###### Tested on
 <!-- Generate version information with this command in shell:
-    echo "macOS $(sw_vers -productVersion) $(sw_vers -buildVersion)"; echo "Xcode $(xcodebuild -version | awk '{print $NF}' | tr '\n' ' ')"
+    echo "macOS $(sw_vers -productVersion) $(sw_vers -buildVersion)"; echo "Xcode $(xcodebuild -version | awk -v ORS=' ' '{print $NF}')"
 -->
 macOS 10.x
 Xcode 8.x
