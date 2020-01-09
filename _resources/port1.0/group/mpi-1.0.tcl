@@ -225,7 +225,8 @@ proc mpi_variant_isset {} {
 }
 
 proc mpi.setup {args} {
-    global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants name
+    global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants \
+        name os.major
 
     set add_list {}
     set remove_list ${mpi.variants}
@@ -279,10 +280,42 @@ proc mpi.setup {args} {
         }
     }
 
-    # here we add all compiler variants since we can't dynamically look up
-    # which variants are enabled for the mpi ports; instead we'll use active
-    # variants to detect an incompatibility
-    compilers.setup {*}$cl
+    # We can't dynamically look up which variants are enabled for the mpi
+    # ports. So we'll disable the ones we know aren't supported, try to keep
+    # that information synced, and use active variants to detect any
+    # incompatibility that may slip through.
+    set cur_variant [mpi_variant_name]
+    if {$cur_variant eq "" && ${mpi.default}} {
+        set cur_variant mpich
+    }
+    set disabled [list]
+    if {$cur_variant ne ""} {
+        set is_mpich [expr {$cur_variant in {mpich mpich_devel}}]
+        lappend disabled -gcc44 -gcc45 -gcc46 -gcc47 -gcc48
+        # gcc   4.x     not supported on macOS 10.12 (Darwin16) or newer
+        # clang 3.{3,4} not supported on macOS 10.12 (Darwin16) or newer
+        if {${os.major} >= 16} {
+            lappend disabled -gcc49
+        }
+        if {${os.major} >= 16 || $is_mpich} {
+            lappend disabled -clang33 -clang34
+        }
+        # clang 3.7,4.0 not supported on macOS 10.14 (Darwin18) or newer
+        if {${os.major} >= 18 || $is_mpich} {
+            lappend disabled -clang37
+        }
+        # gcc 9+ only available on OS X 10.7 (Darwin11) and newer
+        if {${os.major} <= 10} {
+            lappend disabled -gcc9
+        }
+
+        # this should probably be changed in mpich but we have to match it
+        if {${os.major} <= 12 && $is_mpich} {
+            lappend disabled -clang60 -clang70 -clang80 -clang90
+        }
+    }
+
+    compilers.setup {*}$cl {*}$disabled
 
     # we need to check for a removed variant early so we can exit before
     # the wrong variant is passed up the dependency chain
