@@ -451,25 +451,27 @@ platform darwin {
 configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
-    # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
-    # the compiler flags. We use that here: replace the default -O2 with -O0, add
-    # debugging options and do otherwise an exactly identical build.
-    configure.cflags-replace         -O2 -O0
-    configure.cxxflags-replace       -O2 -O0
-    configure.objcflags-replace      -O2 -O0
-    configure.objcxxflags-replace    -O2 -O0
-    configure.ldflags-replace        -O2 -O0
-    # get most if not all possible debug info
-    if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
-        set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
-    } else {
-        set cmake::debugopts "-g -DDEBUG"
+    pre-configure {
+        # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
+        # the compiler flags. We use that here: replace the default -O2 with -O0, add
+        # debugging options and do otherwise an exactly identical build.
+        configure.cflags-replace         -O2 -O0
+        configure.cxxflags-replace       -O2 -O0
+        configure.objcflags-replace      -O2 -O0
+        configure.objcxxflags-replace    -O2 -O0
+        configure.ldflags-replace        -O2 -O0
+        # get most if not all possible debug info
+        if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
+            set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+        } else {
+            set cmake::debugopts "-g -DDEBUG"
+        }
+        configure.cflags-append         ${cmake::debugopts}
+        configure.cxxflags-append       ${cmake::debugopts}
+        configure.objcflags-append      ${cmake::debugopts}
+        configure.objcxxflags-append    ${cmake::debugopts}
+        configure.ldflags-append        ${cmake::debugopts}
+        # try to ensure that info won't get stripped
+        configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
     }
-    configure.cflags-append         ${cmake::debugopts}
-    configure.cxxflags-append       ${cmake::debugopts}
-    configure.objcflags-append      ${cmake::debugopts}
-    configure.objcxxflags-append    ${cmake::debugopts}
-    configure.ldflags-append        ${cmake::debugopts}
-    # try to ensure that info won't get stripped
-    configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
 }
