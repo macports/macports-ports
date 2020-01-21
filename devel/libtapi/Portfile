@@ -2,6 +2,7 @@
 
 PortSystem              1.0
 PortGroup               cmake 1.1
+PortGroup               compiler_blacklist_versions 1.0
 
 name                    libtapi
 version                 1000.10.8
@@ -45,6 +46,53 @@ configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python2.7
 compiler.cxx_standard   2011
 configure.pre_args-replace -DCMAKE_BUILD_TYPE=MacPorts -DCMAKE_BUILD_TYPE=Release
 
+compiler.blacklist-append {clang < 602}
+
+# attempt to build with clang-3.7...
+#if {[string match {macports-clang-3.[3-7]} ${configure.compiler}]} {
+    # building with clang-3.7 and LTO fails due to:
+    # dyld: lazy symbol binding failed: Symbol not found: _lto_module_is_thinlto
+    #  Referenced from: /opt/local/libexec/llvm-3.7/bin/ld
+    #  Expected in: /opt/local/libexec/llvm-3.7/bin/../lib/libLTO.dylib
+    # compiler.blacklist-append {macports-clang-3.[3-7]}
+
+    # configure.args-append -DLLVM_ENABLE_LTO=OFF
+
+    # but then clang-3.7 errors later with:
+    # clang/include/clang/Basic/VirtualFileSystem.h:21:
+    # llvm/include/llvm/ADT/Optional.h:38:69: error: call to implicitly-deleted copy constructor of 'tapi::internal::FrontendContext'
+    # OptionalStorage(const T &y) : hasVal(true) { new (storage.buffer) T(y); }
+    #                                                                ^
+#}
+
+compiler.blacklist-append {macports-clang-3.[3-7]}
+
+# gcc5 errors building this
+compiler.blacklist-append macports-gcc-5
+
+if {[string match macports-clang-* ${configure.compiler}]} {
+    depends_build-append port:cctools port:ld64
+    depends_skip_archcheck-append cctools ld64
+    configure.args-append   -DCMAKE_LIBTOOL=${prefix}/bin/libtool
+    configure.args-append   -DCMAKE_LINKER=${prefix}/bin/ld
+
+    # libtool can choke on llvm bitcode generate by a clang newer than the libLTO.dylib being used
+    # making sure cctools is built against the newest llvm in use prevents this
+
+    # we might instead be able to set DYLD_LIBRARY_PATH to the libLTO.dylib that matches the building clang or newer
+    # that requires figuring out the building macports-clang version, and setting up that libLTO.dylib
+    # libtool will possibly just use that libLTO.dylib without error (untested, but reported to work)
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    # Proxy for eliminating the dependency on native TLS
+    # http://trac.macports.org/ticket/46887
+    configure.args-append -DLLVM_ENABLE_BACKTRACES=OFF
+
+    # https://llvm.org/bugs/show_bug.cgi?id=25680
+    configure.cxxflags-append -U__STRICT_ANSI__
+}
+
 configure.post_args     ${worksrcpath}/llvm
 
 # add the tapi directory to the clang build CMakeLists.txt
@@ -60,15 +108,44 @@ patchfiles-append       patch-0003-tapi-llvm7-build-fixes.diff
 # add support for PPC architectures
 patchfiles-append       patch-0004-tapi-add-PPC-support.diff
 
-configure.args-append   -C ${worksrcpath}/tapi/cmake/caches/apple-tapi.cmake
-build.target            distribution
-destroot.target         install-distribution
+# fixes to tests
+patchfiles-append       patch-0005-tapi-test-fixes.diff
+
+# add a missing strnlen definition if needed
+patchfiles-append       patch-0006-strnlen.diff
+
+if {[string match *clang* ${configure.compiler}]} {
+    configure.pre_args-append -C ${worksrcpath}/tapi/cmake/caches/apple-tapi.cmake
+    build.target            distribution
+    destroot.target         install-distribution
+}
+
+if {[string match *gcc* ${configure.compiler}]} {
+    # this gcc build is allowed here for possible ld64 bootstrapping purposes
+    # it links against libgcc/libstdc++.6.dylib and libgcc/libgcc_s.1.dylib
+    configure.args-append    -DLLVM_ENABLE_PROJECTS=\"clang\;tapi\"
+    build.target             libtapi tapi
+    destroot.target          install-libtapi install-tapi install-tapi-headers install-tapi-clang-headers install-tapi-docs
+}
 
 # WIP at present
-#test.run                yes
-#configure.args-append   -DLLVM_INCLUDE_TESTS=ON
-#patchfiles-append       patch-0005-tapi-test-fixes.diff
-#test.target             check-distribution
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+
+    variant test description {Enable building of test code} {
+        test.run                yes
+        configure.args-append   -DLLVM_INCLUDE_TESTS=ON
+
+        # tests error on 10.14+ due to hard-coded i386 builds
+
+        # tests work on 10.13, but there is a conflict with MacPorts' ncurses port: #59992
+        # temporarily disabled the ncurses port to run the tests works
+        # perhaps defining -DNCURSES_UNCTRL_H_incl in a CMakeLists.txt could work
+
+        # tests did not work on 10.6.8, first due to missing architecture defines, then
+        # due to other errors. Help wanted to fix these tests if possible.
+        test.target             check-tapi
+    }
+}
 
 livecheck.type          regex
 livecheck.regex         "tapi-(\[\\d.\]+)"
