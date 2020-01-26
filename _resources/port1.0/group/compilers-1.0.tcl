@@ -68,10 +68,8 @@ default compilers.libfortran {}
 default compilers.clear_archflags no
 
 # also set a default gcc version
-if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
-    # see https://trac.macports.org/ticket/54215#comment:36
-    set compilers.gcc_default gcc6
-} elseif {${os.major} < 10} {
+# should be the same as gcc_compilers.tcl
+if {${os.major} < 10} {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } elseif {${os.major} < 11} {
