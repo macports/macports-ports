@@ -8,6 +8,17 @@
 options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
 
+# blacklist compilers that depend on perl5 to avoid circular dependencies
+# applies to perl5 and subports as well as compiled perl modules and apps so they agree on compiler selection
+
+# PortGroup blacklists clang 5.0 and later
+PortGroup clang_dependency 1.0
+
+if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
+    # perl5 is also in the dependency chain for clang 3.7
+    clang_dependency.extra_versions 3.7
+}
+
 proc perl5_get_default_branch {} {
     global prefix perl5.branches
     # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.28
