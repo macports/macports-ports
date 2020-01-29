@@ -174,7 +174,7 @@ Checking @PREFIX@/etc/@NAME@/hosts-hphosts creation…
 EOF
 
 # pfctl
-if [ -f /etc/hosts-hphosts ]; then
+if [ -f @PREFIX@/etc/@NAME@/hosts-hphosts ]; then
     echo "[✅] @PREFIX@/etc/@NAME@/hosts-hphosts exists"
 else
     "${CAT}" <<EOF
