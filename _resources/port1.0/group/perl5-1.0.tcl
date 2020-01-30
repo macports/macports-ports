@@ -204,6 +204,9 @@ proc perl5.setup {module vers {cpandir ""}} {
                     ui_info "Fixing flags in [string map "${configure.dir}/ {}" ${file}]"
                     reinplace -locale C -q "/^CCFLAGS *=/s|$| ${extra_cflags}|" ${file}
                     reinplace -locale C -q "/^OTHERLDFLAGS *=/s|$| ${extra_ldflags}|" ${file}
+                    # possible ExtUtils::MakeMaker bug: CC is set correctly in top-level
+                    # Makefile but not in subdirs. LD is correct in both.
+                    reinplace -locale C -q -E "s|^(CC *=).*|\\1 ${configure.cc}|" ${file}
                 }
             }
         }
