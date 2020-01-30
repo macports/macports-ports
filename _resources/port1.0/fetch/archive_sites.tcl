@@ -3,6 +3,7 @@ namespace eval portfetch::mirror_sites { }
 global os.platform os.major
 set packages_scheme [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 
+# Servers that support http.
 set portfetch::mirror_sites::sites(macports_archives) "
     ${packages_scheme}://packages.macports.org/:nosubdir
     http://aus.us.packages.macports.org/macports/packages/:nosubdir
@@ -16,8 +17,14 @@ set portfetch::mirror_sites::sites(macports_archives) "
     http://mse.uk.packages.macports.org/sites/packages.macports.org/:nosubdir
     ${packages_scheme}://pek.cn.packages.macports.org/macports/packages/:nosubdir
     http://jog.id.packages.macports.org/macports/packages/:nosubdir
-    http://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
 "
+
+# Servers that only support https.
+if {${packages_scheme} eq "https"} {
+    append portfetch::mirror_sites::sites(macports_archives) "
+        https://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
+    "
+}
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2
 set portfetch::mirror_sites::archive_prefix(macports_archives) /opt/local
