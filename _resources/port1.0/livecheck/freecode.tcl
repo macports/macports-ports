@@ -1,8 +1,7 @@
 # This file contains the livecheck defaults for freecode.
 
 if {${livecheck.name} eq "default"} {
-    set livecheck.name ${name}
-}
+    set livecheck.name
 if {${livecheck.distname} eq "default"} {
     set livecheck.distname ${livecheck.name}
 }
