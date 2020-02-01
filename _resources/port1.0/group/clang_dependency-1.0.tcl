@@ -8,7 +8,9 @@
 proc clang_dependency.extra_versions {versions} {
     global prefix
     foreach ver $versions {
-        compiler.blacklist-append macports-clang-${ver}
+        if {![file exists ${prefix}/bin/clang-mp-${ver}]} {
+            compiler.blacklist-append macports-clang-${ver}
+        }
     }
 }
 
