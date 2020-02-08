@@ -23,7 +23,7 @@ use_configure   no
 # we want the default universal variant added despite not using configure
 universal_variant yes
 
-build.target    build
+default build.target {build[python_get_defaults jobs_arg]}
 
 post-extract {
     # Prevent setuptools' easy_install from downloading dependencies
@@ -305,6 +305,13 @@ proc python_get_defaults {var} {
         binary_suffix {
             if {[string match py-* [option name]]} {
                 return -${python.branch}
+            } else {
+                return ""
+            }
+        }
+        jobs_arg {
+            if {${python.version} >= 35 && [option use_parallel_build]} {
+                return " -j[option build.jobs]"
             } else {
                 return ""
             }
