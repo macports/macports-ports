@@ -8,6 +8,7 @@
 global available_qt_versions
 array set available_qt_versions {
     qt5   {qt5-qtbase   5.14}
+    qt513 {qt513-qtbase 5.13}
     qt511 {qt511-qtbase 5.11}
     qt59  {qt59-qtbase  5.9}
     qt58  {qt58-qtbase  5.8}
@@ -120,7 +121,7 @@ proc qt5.get_default_name {} {
         #
         # macOS Sierra (10.12)
         #
-        # Qt 5.14: Not Supported but seems to work
+        # Qt 5.14: Not Supported
         # Qt 5.13: Supported
         # Qt 5.12: Supported
         # Qt 5.11: Supported
@@ -129,7 +130,7 @@ proc qt5.get_default_name {} {
         # Qt 5.8:  Supported
         # Qt 5.7:  Not Supported but seems to work
         #
-        return qt5
+        return qt513
         #
     } elseif { ${os.major} == 17 } {
         #
