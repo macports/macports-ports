@@ -70,4 +70,5 @@ pull-upstream:
 	git fetch --all
 	git merge --no-edit origin/master
 	git merge --no-edit upstream/master
+	git push
 	portindex
