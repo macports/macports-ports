@@ -72,7 +72,7 @@ proc python_get_version {} {
 }
 proc python_get_default_version {} {
     global python.versions
-    set def_v 37
+    set def_v 38
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}
