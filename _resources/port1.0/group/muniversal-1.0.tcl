@@ -15,6 +15,10 @@
 #        merger_configure_cflags: associative array of configure.cflags
 #      merger_configure_cxxflags: associative array of configure.cxxflags
 #     merger_configure_objcflags: associative array of configure.objcflags
+#   merger_configure_objcxxflags: associative array of configure.objcxxflags
+#        merger_configure_fflags: associative array of configure.fflags
+#      merger_configure_f90flags: associative array of configure.f90flags
+#       merger_configure_fcflags: associative array of configure.fcflags
 #       merger_configure_ldflags: associative array of configure.ldflags
 #               merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
 #           merger_arch_compiler: if no, -arch xxx will not be appended to compilers
@@ -96,13 +100,13 @@ variant universal {
     global universal_archs_to_use
 
     foreach arch ${universal_archs} {
-        foreach lang {c cxx ld} {
+        foreach lang {c cxx objc objcxx cpp ld} {
             configure.universal_${lang}flags-delete -arch ${arch}
         }
     }
 
     configure.args-append      {*}${configure.universal_args}
-    foreach lang {c cxx objc cpp ld} {
+    foreach lang {c cxx objc objcxx cpp ld} {
         configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
 
@@ -225,7 +229,7 @@ variant universal {
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append        {*}$merger_configure_env(${arch})
             }
-            foreach lang {cpp c cxx objc ld} {
+            foreach lang {c f cxx objc objcxx cpp f90 fc ld} {
                 if { [info exists merger_configure_${lang}flags(${arch})] } {
                     configure.${lang}flags-prepend  {*}[set merger_configure_${lang}flags(${arch})]
                 }
@@ -352,7 +356,7 @@ variant universal {
                 configure.args-delete       {*}$merger_configure_args(${arch})
             }
             configure.args-delete  ${host}
-            foreach lang {ld cxx objc c cpp} {
+            foreach lang {ld fc f90 cpp objcxx objc cxx f c} {
                 if { [info exists merger_configure_${lang}flags(${arch})] } {
                     configure.${lang}flags-delete   {*}[set merger_configure_${lang}flags(${arch})]
                 }
