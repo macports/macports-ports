@@ -1,26 +1,26 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 # User variables:
-#         merger_configure_env: associative array of configure.env variables
-#             merger_build_env: associative array of build.env variables
-#              merger_test_env: associative array of test.env variables
-#          merger_destroot_env: associative array of destroot.env variables
-#                  merger_host: associative array of host values
-#        merger_configure_args: associative array of configure.args
-#            merger_build_args: associative array of build.args
-#             merger_test_args: associative array of test.args
-#         merger_destroot_args: associative array of destroot.args
-#    merger_configure_compiler: associative array of configure.compiler
-#    merger_configure_cppflags: associative array of configure.cppflags
-#      merger_configure_cflags: associative array of configure.cflags
-#    merger_configure_cxxflags: associative array of configure.cxxflags
-#   merger_configure_objcflags: associative array of configure.objcflags
-#     merger_configure_ldflags: associative array of configure.ldflags
-#             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
-#         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
-#             merger_dont_diff: list of file names for which diff will not work
-#     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
-#            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
+#           merger_configure_env: associative array of configure.env variables
+#               merger_build_env: associative array of build.env variables
+#                merger_test_env: associative array of test.env variables
+#            merger_destroot_env: associative array of destroot.env variables
+#                    merger_host: associative array of host values
+#          merger_configure_args: associative array of configure.args
+#              merger_build_args: associative array of build.args
+#               merger_test_args: associative array of test.args
+#           merger_destroot_args: associative array of destroot.args
+#      merger_configure_compiler: associative array of configure.compiler
+#      merger_configure_cppflags: associative array of configure.cppflags
+#        merger_configure_cflags: associative array of configure.cflags
+#      merger_configure_cxxflags: associative array of configure.cxxflags
+#     merger_configure_objcflags: associative array of configure.objcflags
+#       merger_configure_ldflags: associative array of configure.ldflags
+#               merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
+#           merger_arch_compiler: if no, -arch xxx will not be appended to compilers
+#               merger_dont_diff: list of file names for which diff will not work
+#       merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
+#              merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
 
 options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
 default universal_archs_supported {${universal_archs}}
