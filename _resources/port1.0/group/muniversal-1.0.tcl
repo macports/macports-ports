@@ -1,26 +1,30 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 # User variables:
-#         merger_configure_env: associative array of configure.env variables
-#             merger_build_env: associative array of build.env variables
-#              merger_test_env: associative array of test.env variables
-#          merger_destroot_env: associative array of destroot.env variables
-#                  merger_host: associative array of host values
-#        merger_configure_args: associative array of configure.args
-#            merger_build_args: associative array of build.args
-#             merger_test_args: associative array of test.args
-#         merger_destroot_args: associative array of destroot.args
-#    merger_configure_compiler: associative array of configure.compiler
-#    merger_configure_cppflags: associative array of configure.cppflags
-#      merger_configure_cflags: associative array of configure.cflags
-#    merger_configure_cxxflags: associative array of configure.cxxflags
-#   merger_configure_objcflags: associative array of configure.objcflags
-#     merger_configure_ldflags: associative array of configure.ldflags
-#             merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
-#         merger_arch_compiler: if no, -arch xxx will not be appended to compilers
-#             merger_dont_diff: list of file names for which diff will not work
-#     merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
-#            merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
+#           merger_configure_env: associative array of configure.env variables
+#               merger_build_env: associative array of build.env variables
+#                merger_test_env: associative array of test.env variables
+#            merger_destroot_env: associative array of destroot.env variables
+#                    merger_host: associative array of host values
+#          merger_configure_args: associative array of configure.args
+#              merger_build_args: associative array of build.args
+#               merger_test_args: associative array of test.args
+#           merger_destroot_args: associative array of destroot.args
+#      merger_configure_compiler: associative array of configure.compiler
+#      merger_configure_cppflags: associative array of configure.cppflags
+#        merger_configure_cflags: associative array of configure.cflags
+#      merger_configure_cxxflags: associative array of configure.cxxflags
+#     merger_configure_objcflags: associative array of configure.objcflags
+#   merger_configure_objcxxflags: associative array of configure.objcxxflags
+#        merger_configure_fflags: associative array of configure.fflags
+#      merger_configure_f90flags: associative array of configure.f90flags
+#       merger_configure_fcflags: associative array of configure.fcflags
+#       merger_configure_ldflags: associative array of configure.ldflags
+#               merger_arch_flag: if no, -arch xxx will not be appended configure.???flags
+#           merger_arch_compiler: if no, -arch xxx will not be appended to compilers
+#               merger_dont_diff: list of file names for which diff will not work
+#       merger_must_run_binaries: if yes, build platform must be able to run binaries for supported architectures
+#              merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
 
 options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
 default universal_archs_supported {${universal_archs}}
@@ -96,17 +100,15 @@ variant universal {
     global universal_archs_to_use
 
     foreach arch ${universal_archs} {
-        configure.universal_cflags-delete    -arch ${arch}
-        configure.universal_cxxflags-delete  -arch ${arch}
-        configure.universal_ldflags-delete   -arch ${arch}
+        foreach lang {c cxx objc objcxx cpp ld} {
+            configure.universal_${lang}flags-delete -arch ${arch}
+        }
     }
 
     configure.args-append      {*}${configure.universal_args}
-    configure.cflags-append    {*}${configure.universal_cflags}
-    configure.cxxflags-append  {*}${configure.universal_cxxflags}
-    configure.objcflags-append {*}${configure.universal_cflags}
-    configure.ldflags-append   {*}${configure.universal_ldflags}
-    configure.cppflags-append  {*}${configure.universal_cppflags}
+    foreach lang {c cxx objc objcxx cpp ld} {
+        configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
+    }
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if { ${merger_must_run_binaries}=="yes" } {
@@ -227,20 +229,10 @@ variant universal {
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-append        {*}$merger_configure_env(${arch})
             }
-            if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-prepend  {*}$merger_configure_cppflags(${arch})
-            }
-            if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-append     {*}$merger_configure_cflags(${arch})
-            }
-            if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-append   {*}$merger_configure_cxxflags(${arch})
-            }
-            if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-append  {*}$merger_configure_objcflags(${arch})
-            }
-            if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-append    {*}$merger_configure_ldflags(${arch})
+            foreach lang {c f cxx objc objcxx cpp f90 fc ld} {
+                if { [info exists merger_configure_${lang}flags(${arch})] } {
+                    configure.${lang}flags-prepend  {*}[set merger_configure_${lang}flags(${arch})]
+                }
             }
 
             # Don't set the --host unless we have to.
@@ -364,20 +356,10 @@ variant universal {
                 configure.args-delete       {*}$merger_configure_args(${arch})
             }
             configure.args-delete  ${host}
-            if { [info exists merger_configure_ldflags(${arch})] } {
-                configure.ldflags-delete    {*}$merger_configure_ldflags(${arch})
-            }
-            if { [info exists merger_configure_cxxflags(${arch})] } {
-                configure.cxxflags-delete   {*}$merger_configure_cxxflags(${arch})
-            }
-            if { [info exists merger_configure_objcflags(${arch})] } {
-                configure.objcflags-delete  {*}$merger_configure_objcflags(${arch})
-            }
-            if { [info exists merger_configure_cflags(${arch})] } {
-                configure.cflags-delete     {*}$merger_configure_cflags(${arch})
-            }
-            if { [info exists merger_configure_cppflags(${arch})] } {
-                configure.cppflags-delete   {*}$merger_configure_cppflags(${arch})
+            foreach lang {ld fc f90 cpp objcxx objc cxx f c} {
+                if { [info exists merger_configure_${lang}flags(${arch})] } {
+                    configure.${lang}flags-delete   {*}[set merger_configure_${lang}flags(${arch})]
+                }
             }
             if { [info exists merger_configure_env(${arch})] } {
                 configure.env-delete        {*}$merger_configure_env(${arch})
