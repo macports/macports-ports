@@ -2,6 +2,14 @@ PORTS_FILE:=            ports.txt
 LOCAL_PORTS_DIR:=       ~/repos/github/macports-ports
 PORT_INDEX_SENTINEL:=   $(LOCAL_PORTS_DIR)/.port-index.sentinel
 
+.PHONY: pull-upstream
+pull-upstream:
+	git fetch --all
+	git merge --no-edit origin/master
+	git merge --no-edit upstream/master
+	git push
+	portindex
+
 .PHONY: all
 all: create-missing-ports $(PORT_INDEX_SENTINEL)
 
@@ -64,11 +72,3 @@ create-port-branch:
 		if [ -z $${PORT_NAME} ] ; then echo "Invalid port name." ; exit 1 ; fi && \
 		git checkout upstream_master && \
 		git checkout -b $${PORT_NAME}
-
-.PHONY: pull-upstream
-pull-upstream:
-	git fetch --all
-	git merge --no-edit origin/master
-	git merge --no-edit upstream/master
-	git push
-	portindex
