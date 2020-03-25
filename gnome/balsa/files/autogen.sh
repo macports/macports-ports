@@ -22,7 +22,6 @@ echo "Running autoheader..."
 autoheader || exit 1
 echo "Running automake..."
 automake --gnu --add-missing --copy || exit 1
-gsed -i.orig -e "2558,2559d" configure
 
 cd $olddir
 
