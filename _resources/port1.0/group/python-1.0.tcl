@@ -70,6 +70,7 @@ proc python_get_version {} {
         return [option python.default_version]
     }
 }
+
 proc python_get_default_version {} {
     global python.versions
     set def_v 38
