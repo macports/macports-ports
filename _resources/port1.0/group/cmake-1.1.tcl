@@ -53,6 +53,9 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 # cmake.module_path; they come after ${cmake_share_module_dir}
 default cmake.module_path           {}
 
+# Set cmake.debugopts to the desired compiler debug options (or an empty string) if you want to
+# use custom options with the +debug variant.
+
 # CMake provides several different generators corresponding to different utilities
 # (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
 # and Ninja, a leaner-and-meaner alternative.
@@ -85,6 +88,7 @@ default destroot.target             install/fast
 # make sure cmake is available:
 # can use cmake or cmake-devel; default to cmake if not installed
 depends_build-append                path:bin/cmake:cmake
+depends_skip_archcheck-append       cmake
 
 
 proc cmake::rpath_flags {} {
@@ -92,7 +96,7 @@ proc cmake::rpath_flags {} {
     if {[llength [option cmake.install_rpath]]} {
         # make sure a single ${cmake.install_prefix} is included in the rpath
         # careful, we are likely to be called more than once.
-        if {"[option cmake.install_prefix]/lib" ni [option cmake.install_rpath]} {
+        if {[lsearch -exact [option cmake.install_rpath] [option cmake.install_prefix]/lib] == -1} {
             cmake.install_rpath-append [option cmake.install_prefix]/lib
         }
         return [list \
@@ -125,8 +129,8 @@ proc cmake::module_path {} {
         set modpath [option cmake_share_module_dir]
     }
     return [list \
-        -DCMAKE_MODULE_PATH="${modpath}" \
-        -DCMAKE_PREFIX_PATH="${modpath}"
+        -DCMAKE_MODULE_PATH="[lindex ${modpath} 0]" \
+        -DCMAKE_PREFIX_PATH="[lindex ${modpath} 0]"
     ]
 }
 
@@ -140,13 +144,15 @@ proc cmake::build_dir {} {
 option_proc cmake.generator cmake::handle_generator
 proc cmake::handle_generator {option action args} {
     global cmake.generator destroot destroot.target build.cmd build.post_args
-    global depends_build destroot.post_args build.jobs subport
+    global depends_build destroot.post_args build.jobs subport prefix
     if {${action} eq "set"} {
         switch -glob [lindex ${args} 0] {
             "*Unix Makefiles*" {
                 ui_debug "Selecting the 'Unix Makefiles' generator ($args)"
                 depends_build-delete \
-                                port:ninja
+                                path:bin/ninja:ninja
+                depends_skip_archcheck-delete \
+                                ninja
                 build.cmd       make
                 build.post_args VERBOSE=ON
                 destroot.target install/fast
@@ -159,10 +165,21 @@ proc cmake::handle_generator {option action args} {
             "*Ninja" {
                 ui_debug "Selecting the Ninja generator ($args)"
                 depends_build-append \
-                                port:ninja
+                                path:bin/ninja:ninja
+                depends_skip_archcheck-append \
+                                ninja
                 build.cmd       ninja
-                # force Ninja to use the exact number of requested build jobs
-                build.post_args -j${build.jobs} -v
+                if {[file exists ${prefix}/bin/samu]} {
+                    # ninja is provided by port:samu, which doesn't support `-l`
+                    # nor options given after specifying the build target
+                    build.pre_args-prepend -v
+                    build.post_args
+                } else {
+                    # force Ninja not to exceed the probably-expected CPU load by too much;
+                    # for larger projects one can reach as much as build.jobs*2 CPU load otherwise.
+                    # inspired by the old guideline as many compile jobs as you have CPUs, plus 1.
+                    build.post_args -l[expr ${build.jobs} + 1] -v
+                }
                 destroot.target install
                 # ninja needs the DESTDIR argument in the environment
                 destroot.destdir
@@ -191,10 +208,12 @@ default build.post_args VERBOSE=ON
 
 # cache the configure.ccache variable (it will be overridden in the pre-configure step)
 set cmake::ccache_cache ${configure.ccache}
+# idem for distcc
+set cmake::distcc_cache ${configure.distcc}
 
 # tell CMake to use ccache via the CMAKE_<LANG>_COMPILER_LAUNCHER variable
 # and unset the global configure.ccache option which is not compatible
-# with CMake.
+# with CMake. Ditto for distcc.
 # See https://stackoverflow.com/questions/1815688/how-to-use-ccache-with-cmake
 proc cmake::ccaching {} {
     global prefix
@@ -205,6 +224,18 @@ proc cmake::ccaching {} {
             -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache]
     }
 }
+proc cmake::distccing {} {
+    global prefix
+    namespace upvar ::cmake distcc_cache distcc
+    namespace upvar ::cmake ccache_cache cccache
+    # "base" will handle the case where ccache and distcc are both used.
+    if {${distcc} && !${cccache}} {
+        return [list \
+            -DCMAKE_C_COMPILER_LAUNCHER=distcc \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=distcc]
+    }
+}
+
 
 configure.cmd       ${prefix}/bin/cmake
 
@@ -219,7 +250,9 @@ default configure.pre_args {[list \
                     -DCMAKE_INSTALL_PREFIX="${cmake.install_prefix}" \
                     -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
                     {*}[cmake::system_prefix_path] \
+                    -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     {*}[cmake::ccaching] \
+                    {*}[cmake::distccing] \
                     {-DCMAKE_C_COMPILER="$CC"} \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
@@ -228,7 +261,6 @@ default configure.pre_args {[list \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-                    -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     {*}[cmake::module_path] \
                     {*}[cmake::rpath_flags] \
                     -Wno-dev
@@ -314,10 +346,53 @@ pre-configure {
     configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
     # undo a counterproductive action from the debug PG:
     configure.args-delete -DCMAKE_BUILD_TYPE=debugFull
+    # set matching CMAKE_AR and CMAKE_RANLIB when using a macports-clang compiler
+    # (and they're not set explicitly by the port)
+    # NB NB NB!
+    # These should be set to absolute, full paths. We may need to check if that is indeed the case.
+    # NB NB NB!
+    if {[string match *clang++-mp* ${configure.cxx}]} {
+        if {[string first "DCMAKE_AR=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_AR=[string map {"clang++" "llvm-ar"} ${configure.cxx}]
+        }
+        if {[string first "DCMAKE_NM=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_NM=[string map {"clang++" "llvm-nm"} ${configure.cxx}]
+        }
+        if {[string first "DCMAKE_RANLIB=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_RANLIB=[string map {"clang++" "llvm-ranlib"} ${configure.cxx}]
+        }
+    } elseif {[string match *clang-mp* ${configure.cc}]} {
+        if {[string first "DCMAKE_AR=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_AR=[string map {"clang" "llvm-ar"} ${configure.cc}]
+        }
+        if {[string first "DCMAKE_NM=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_NM=[string map {"clang" "llvm-nm"} ${configure.cc}]
+        }
+        if {[string first "DCMAKE_RANLIB=" ${configure.args}] eq -1} {
+            configure.args-append \
+                                -DCMAKE_RANLIB=[string map {"clang" "llvm-ranlib"} ${configure.cc}]
+        }
+    }
+    if {[info exists qt_qmake_spec]} {
+        if {([string first "-DCMAKE_MKPEC" ${configure.pre_args}] == -1)
+            && ([string first "-DCMAKE_MKPEC" ${configure.args}] == -1)
+            && ([string first "-DCMAKE_MKPEC" ${configure.post_args}] == -1)} {
+            configure.args-append \
+                                "-DCMAKE_MKSPEC=${qt_qmake_spec}"
+        } else {
+            ui_debug "CMAKE_MKSPEC already set"
+        }
+    }
 
     # The configure.ccache variable has been cached so we can restore it in the post-configure
     # (pre-configure and post-configure are always run in a single `port` invocation.)
     configure.ccache        no
+    configure.distcc        no
     # surprising but intended behaviour that's impossible to work around more gracefully:
     # overriding configure.ccache fails if the user set it directly from the commandline
     if {[tbool configure.ccache]} {
@@ -327,6 +402,13 @@ pre-configure {
     if {${cmake::ccache_cache}} {
         ui_info "        (using ccache)"
     }
+    if {[tbool configure.distcc]} {
+        ui_error "Please don't use configure.distcc=yes on the commandline for port:${subport}, use configuredistcc=yes"
+        return -code error "invalid invocation (port:${subport})"
+    }
+    if {${cmake::distcc_cache}} {
+        ui_info "        (using distcc)"
+    }
 }
 
 post-configure {
@@ -334,6 +416,10 @@ post-configure {
     if {[info exists cmake::ccache_cache]} {
         configure.ccache    ${cmake::ccache_cache}
         ui_debug "configure.ccache restored to ${cmake::ccache_cache}"
+    }
+    if {[info exists cmake::distcc_cache]} {
+        configure.distcc    ${cmake::distcc_cache}
+        ui_debug "configure.distcc restored to ${cmake::distcc_cache}"
     }
     # either compile_commands.json was created because of -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     # in which case touch'ing it won't change anything. Or else it wasn't created, in which case
@@ -347,10 +433,21 @@ post-configure {
 }
 
 proc cmake.save_configure_cmd {{save_log_too ""}} {
+    namespace upvar ::cmake configure_cmd_saved statevar
+    if {[tbool statevar]} {
+        ui_debug "cmake.save_configure_cmd already called"
+        return;
+    }
+    set statevar yes
+
     if {${save_log_too} ne ""} {
         pre-configure {
             configure.pre_args-prepend "-cf '${configure.cmd} "
-            configure.post_args-append "|& tee ${workpath}/.macports.${subport}.configure.log'"
+            if {[info exists configure.build_arch]} {
+                configure.post_args-append "|& tee ${workpath}/.macports.${subport}.configure-${configure.build_arch}.log'"
+            } else {
+                configure.post_args-append "|& tee ${workpath}/.macports.${subport}.configure.log'"
+            }
             configure.cmd "/bin/csh"
             ui_debug "configure command set to `${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}`"
         }
@@ -378,9 +475,20 @@ proc cmake.save_configure_cmd {{save_log_too ""}} {
                 puts ${fd} "OBJCXXFLAGS=\"${configure.objcxxflags}\""
             }
             puts ${fd} "LDFLAGS=\"${configure.ldflags}\""
+            puts ${fd} "# Commandline configure options:"
             if {${configure.optflags} ne ""} {
-                puts ${fd} "configure.optflags=\"${configure.optflags}\""
+                puts -nonewline ${fd} " configure.optflags=\"${configure.optflags}\""
             }
+            if {${configure.compiler} ne ""} {
+                puts -nonewline ${fd} " configure.compiler=\"${configure.compiler}\""
+            }
+            if {${configure.cxx_stdlib} ne ""} {
+                puts -nonewline ${fd} " configure.cxx_stdlib=\"${configure.cxx_stdlib}\""
+            }
+            if {${configureccache} ne ""} {
+                puts -nonewline ${fd} " configureccache=\"${configureccache}\""
+            }
+            puts ${fd} ""
             puts ${fd} "\ncd ${worksrcpath}"
             puts ${fd} "${configure.cmd} [join ${configure.pre_args}] [join ${configure.args}] [join ${configure.post_args}]"
             close ${fd}
@@ -443,6 +551,7 @@ platform darwin {
         # ports might have need to access these variables at other times.
         foreach archflag_var ${cmake._archflag_vars} {
             global cmake._saved_${archflag_var}
+            # avoid overquoting by adding each list element individually
             configure.${archflag_var} {*}[set cmake._saved_${archflag_var}]
         }
     }
@@ -452,25 +561,34 @@ configure.universal_args-delete --disable-dependency-tracking
 
 variant debug description "Enable debug binaries" {
     pre-configure {
-        # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
-        # the compiler flags. We use that here: replace the default -O2 with -O0, add
-        # debugging options and do otherwise an exactly identical build.
-        configure.cflags-replace         -O2 -O0
-        configure.cxxflags-replace       -O2 -O0
-        configure.objcflags-replace      -O2 -O0
-        configure.objcxxflags-replace    -O2 -O0
-        configure.ldflags-replace        -O2 -O0
-        # get most if not all possible debug info
-        if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
-            set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+        if {![info exists cmake.debugopts]} {
+            # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
+            # the compiler flags. We use that here: replace the default -O2 or -Os with -O0, add
+            # debugging options and do otherwise an exactly identical build.
+            configure.cflags-replace         -O2 -O0
+            configure.cxxflags-replace       -O2 -O0
+            configure.objcflags-replace      -O2 -O0
+            configure.objcxxflags-replace    -O2 -O0
+            configure.ldflags-replace        -O2 -O0
+            configure.cflags-replace         -Os -O0
+            configure.cxxflags-replace       -Os -O0
+            configure.objcflags-replace      -Os -O0
+            configure.objcxxflags-replace    -Os -O0
+            configure.ldflags-replace        -Os -O0
+            # get most if not all possible debug info
+            if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
+                set cmake.debugopts "-g -fno-limit-debug-info -fstandalone-debug -DDEBUG"
+            } else {
+                set cmake.debugopts "-g -DDEBUG"
+            }
         } else {
-            set cmake::debugopts "-g -DDEBUG"
+            ui_debug "+debug variant uses custom cmake.debugopts \"${cmake.debugopts}\""
         }
-        configure.cflags-append         ${cmake::debugopts}
-        configure.cxxflags-append       ${cmake::debugopts}
-        configure.objcflags-append      ${cmake::debugopts}
-        configure.objcxxflags-append    ${cmake::debugopts}
-        configure.ldflags-append        ${cmake::debugopts}
+        configure.cflags-append         ${cmake.debugopts}
+        configure.cxxflags-append       ${cmake.debugopts}
+        configure.objcflags-append      ${cmake.debugopts}
+        configure.objcxxflags-append    ${cmake.debugopts}
+        configure.ldflags-append        ${cmake.debugopts}
         # try to ensure that info won't get stripped
         configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
     }
