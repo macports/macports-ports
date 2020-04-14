@@ -382,6 +382,7 @@ set portfetch::mirror_sites::sites(gimp) {
     https://ftp.gwdg.de/pub/grafik/
     http://gimp.mirrors.hoobly.com/pub/
     https://mirror.ibcp.fr/pub/
+    https://ftp.icm.edu.pl/pub/graphics/
     https://sunsite.icm.edu.pl/pub/graphics/
     http://ftp.is.co.za/mirror/ftp.gimp.org/
     https://www.mirrorservice.org/sites/ftp.gimp.org/pub/
@@ -390,6 +391,12 @@ set portfetch::mirror_sites::sites(gimp) {
     https://mirror.umd.edu/gimp/
     https://ftp.cc.uoc.gr/mirrors/
     https://ftp.snt.utwente.nl/pub/software/gimp/
+    https://mirrors.ukfast.co.uk/sites/gimp.org/pub/
+    https://mirrors.dotsrc.org/gimp/
+    https://ftp.fau.de/gimp/
+    http://mirror.rise.ph/
+    https://ftp.lysator.liu.se/pub/
+    https://mirrors.syringanetworks.net/gimp/
 }
 
 set portfetch::mirror_sites::sites(gnome) {
