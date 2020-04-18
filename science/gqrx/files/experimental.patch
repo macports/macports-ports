@@ -1,0 +1,4541 @@
+diff --git gqrx.pro gqrx.pro
+index d68723f..00ad537 100644
+--- gqrx.pro
++++ gqrx.pro
+@@ -121,6 +121,7 @@ SOURCES += \
+     src/qtgui/afsk1200win.cpp \
+     src/qtgui/agc_options.cpp \
+     src/qtgui/audio_options.cpp \
++    src/qtgui/bandplan.cpp \
+     src/qtgui/bookmarks.cpp \
+     src/qtgui/bookmarkstablemodel.cpp \
+     src/qtgui/bookmarkstaglist.cpp \
+@@ -141,7 +142,9 @@ SOURCES += \
+     src/qtgui/qtcolorpicker.cpp \
+     src/receivers/nbrx.cpp \
+     src/receivers/receiver_base.cpp \
+-    src/receivers/wfmrx.cpp
++    src/receivers/wfmrx.cpp \
++    src/qtgui/dxc_spots.cpp \
++    src/qtgui/dxc_options.cpp
+ 
+ HEADERS += \
+     src/applications/gqrx/gqrx.h \
+@@ -179,6 +182,7 @@ HEADERS += \
+     src/qtgui/afsk1200win.h \
+     src/qtgui/agc_options.h \
+     src/qtgui/audio_options.h \
++    src/qtgui/bandplan.h \
+     src/qtgui/bookmarks.h \
+     src/qtgui/bookmarkstablemodel.h \
+     src/qtgui/bookmarkstaglist.h \
+@@ -200,7 +204,9 @@ HEADERS += \
+     src/qtgui/qtcolorpicker.h \
+     src/receivers/nbrx.h \
+     src/receivers/receiver_base.h \
+-    src/receivers/wfmrx.h
++    src/receivers/wfmrx.h \
++    src/qtgui/dxc_spots.h \
++    src/qtgui/dxc_options.h
+ 
+ FORMS += \
+     src/applications/gqrx/mainwindow.ui \
+@@ -217,7 +223,8 @@ FORMS += \
+     src/qtgui/iq_tool.ui \
+     src/qtgui/dockrxopt.ui \
+     src/qtgui/ioconfig.ui \
+-    src/qtgui/nb_options.ui
++    src/qtgui/nb_options.ui \
++    src/qtgui/dxc_options.ui
+ 
+ # Use pulseaudio (ps: could use equals? undocumented)
+ equals(AUDIO_BACKEND, "pulseaudio"): {
+diff --git src/applications/gqrx/mainwindow.cpp src/applications/gqrx/mainwindow.cpp
+index b6e9407..d90034c 100644
+--- src/applications/gqrx/mainwindow.cpp
++++ src/applications/gqrx/mainwindow.cpp
+@@ -48,6 +48,7 @@
+ #include <QSvgWidget>
+ #include "qtgui/ioconfig.h"
+ #include "mainwindow.h"
++#include "qtgui/dxc_spots.h"
+ 
+ /* Qt Designer files */
+ #include "ui_mainwindow.h"
+@@ -57,6 +58,7 @@
+ #include "remote_control_settings.h"
+ 
+ #include "qtgui/bookmarkstaglist.h"
++#include "qtgui/bandplan.h"
+ 
+ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     QMainWindow(parent),
+@@ -69,7 +71,9 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     dec_afsk1200(0)
+ {
+     ui->setupUi(this);
++    BandPlan::create();
+     Bookmarks::create();
++    DXCSpots::create();
+ 
+     /* Initialise default configuration directory */
+     QByteArray xdg_dir = qgetenv("XDG_CONFIG_HOME");
+@@ -122,13 +126,20 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     // create I/Q tool widget
+     iq_tool = new CIqTool(this);
+ 
++    // create DXC Objects
++    dxc_options = new DXC_Options(this);
++    dxc_timer = new QTimer(this);
++    dxc_timer->start(1000);
++
+     /* create dock widgets */
+     uiDockRxOpt = new DockRxOpt();
+     uiDockRDS = new DockRDS();
+     uiDockAudio = new DockAudio();
+     uiDockInputCtl = new DockInputCtl();
+     uiDockFft = new DockFft();
++    BandPlan::Get().setConfigDir(m_cfg_dir);
+     Bookmarks::Get().setConfigDir(m_cfg_dir);
++    BandPlan::Get().load();
+     uiDockBookmarks = new DockBookmarks(this);
+ 
+     // setup some toggle view shortcuts
+@@ -236,6 +247,7 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     connect(uiDockFft, SIGNAL(resetFftZoom()), ui->plotter, SLOT(resetHorizontalZoom()));
+     connect(uiDockFft, SIGNAL(gotoFftCenter()), ui->plotter, SLOT(moveToCenterFreq()));
+     connect(uiDockFft, SIGNAL(gotoDemodFreq()), ui->plotter, SLOT(moveToDemodFreq()));
++    connect(uiDockFft, SIGNAL(bandPlanChanged(bool)), ui->plotter, SLOT(toggleBandPlan(bool)));
+     connect(uiDockFft, SIGNAL(wfColormapChanged(const QString)), ui->plotter, SLOT(setWfColormap(const QString)));
+     connect(uiDockFft, SIGNAL(wfColormapChanged(const QString)), uiDockAudio, SLOT(setWfColormap(const QString)));
+ 
+@@ -259,6 +271,9 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     connect(uiDockBookmarks, SIGNAL(newBookmarkActivated(qint64, QString, int)), this, SLOT(onBookmarkActivated(qint64, QString, int)));
+     connect(uiDockBookmarks->actionAddBookmark, SIGNAL(triggered()), this, SLOT(on_actionAddBookmark_triggered()));
+ 
++    //DXC Spots
++    connect(&DXCSpots::Get(), SIGNAL(DXCSpotsChanged()),this , SLOT(addClusterSpot()));
++    connect(dxc_timer, SIGNAL(timeout()), this, SLOT(checkDXCSpotTimeout()));
+ 
+     // I/Q playback
+     connect(iq_tool, SIGNAL(startRecording(QString)), this, SLOT(startIqRecording(QString)));
+@@ -348,6 +363,9 @@ MainWindow::~MainWindow()
+     audio_fft_timer->stop();
+     delete audio_fft_timer;
+ 
++    dxc_timer->stop();
++    delete dxc_timer;
++
+     if (m_settings)
+     {
+         m_settings->setValue("configversion", 2);
+@@ -370,6 +388,7 @@ MainWindow::~MainWindow()
+     }
+ 
+     delete iq_tool;
++    delete dxc_options;
+     delete ui;
+     delete uiDockRxOpt;
+     delete uiDockAudio;
+@@ -591,6 +610,7 @@ bool MainWindow::loadConfig(const QString cfgfile, bool check_crash,
+     uiDockRxOpt->readSettings(m_settings);
+     uiDockFft->readSettings(m_settings);
+     uiDockAudio->readSettings(m_settings);
++    dxc_options->readSettings(m_settings);
+ 
+     {
+         int64_val = m_settings->value("input/frequency", 14236000).toLongLong(&conv_ok);
+@@ -710,6 +730,7 @@ void MainWindow::storeSession()
+ 
+         remote->saveSettings(m_settings);
+         iq_tool->saveSettings(m_settings);
++        dxc_options->saveSettings(m_settings);
+ 
+         {
+             int     flo, fhi;
+@@ -2056,6 +2077,11 @@ void MainWindow::afsk1200win_closed()
+     dec_afsk1200 = 0;
+ }
+ 
++/** Show DXC Options. */
++void MainWindow::on_actionDX_Cluster_triggered()
++{
++    dxc_options->show();
++}
+ 
+ /**
+  * Cyclic processing for acquiring samples from receiver and processing them
+@@ -2335,3 +2361,24 @@ void MainWindow::on_actionAddBookmark_triggered()
+         ui->plotter->updateOverlay();
+     }
+ }
++
++void MainWindow::keyPressEvent(QKeyEvent *event)
++{
++    switch (event->key())
++    {
++    case Qt::Key_F:
++        ui->freqCtrl->setFrequencyFocus();
++        break;
++    }
++}
++
++void MainWindow::addClusterSpot()
++{
++    ui->plotter->updateOverlay();
++}
++
++void MainWindow::checkDXCSpotTimeout()
++{
++    DXCSpots::Get().checkSpotTimeout();
++    ui->plotter->updateOverlay();
++}
+diff --git src/applications/gqrx/mainwindow.h src/applications/gqrx/mainwindow.h
+index de45c6b..c7b99d1 100644
+--- src/applications/gqrx/mainwindow.h
++++ src/applications/gqrx/mainwindow.h
+@@ -32,6 +32,7 @@
+ #include <QMessageBox>
+ #include <QFileDialog>
+ #include <QSvgWidget>
++#include <QKeyEvent>
+ 
+ #include "qtgui/dockrxopt.h"
+ #include "qtgui/dockaudio.h"
+@@ -41,6 +42,8 @@
+ #include "qtgui/dockrds.h"
+ #include "qtgui/afsk1200win.h"
+ #include "qtgui/iq_tool.h"
++#include "qtgui/dxc_options.h"
++#include "qtgui/dxc_spots.h"
+ 
+ #include "applications/gqrx/remote_control.h"
+ 
+@@ -99,6 +102,7 @@ private:
+     DockRDS        *uiDockRDS;
+ 
+     CIqTool        *iq_tool;
++    DXC_Options    *dxc_options;
+ 
+ 
+     /* data decoders */
+@@ -110,6 +114,7 @@ private:
+     QTimer   *iq_fft_timer;
+     QTimer   *audio_fft_timer;
+     QTimer   *rds_timer;
++    QTimer   *dxc_timer;
+ 
+     receiver *rx;
+ 
+@@ -120,6 +125,9 @@ private:
+     // dummy widget to enforce linking to QtSvg
+     QSvgWidget      *qsvg_dummy;
+ 
++protected:
++    void    keyPressEvent(QKeyEvent *);
++
+ private:
+     void updateHWFrequencyRange(bool ignore_limits);
+     void updateFrequencyRange();
+@@ -201,6 +209,9 @@ private slots:
+     /* Bookmarks */
+     void onBookmarkActivated(qint64 freq, QString demod, int bandwidth);
+ 
++    /* DXC Spots */
++    void addClusterSpot();
++
+     /* menu and toolbar actions */
+     void on_actionDSP_triggered(bool checked);
+     int  on_actionIoConfig_triggered();
+@@ -218,6 +229,7 @@ private slots:
+     void on_actionAbout_triggered();
+     void on_actionAboutQt_triggered();
+     void on_actionAddBookmark_triggered();
++    void on_actionDX_Cluster_triggered();
+ 
+ 
+     /* window close signals */
+@@ -230,6 +242,7 @@ private slots:
+     void iqFftTimeout();
+     void audioFftTimeout();
+     void rdsTimeout();
++    void checkDXCSpotTimeout();
+ };
+ 
+ #endif // MAINWINDOW_H
+diff --git src/applications/gqrx/mainwindow.ui src/applications/gqrx/mainwindow.ui
+index 0fb1f36..dc39a81 100644
+--- src/applications/gqrx/mainwindow.ui
++++ src/applications/gqrx/mainwindow.ui
+@@ -195,7 +195,7 @@
+      <x>0</x>
+      <y>0</y>
+      <width>521</width>
+-     <height>19</height>
++     <height>22</height>
+     </rect>
+    </property>
+    <widget class="QMenu" name="menu_File">
+@@ -242,6 +242,7 @@
+     <addaction name="separator"/>
+     <addaction name="actionAFSK1200"/>
+     <addaction name="separator"/>
++    <addaction name="actionDX_Cluster"/>
+    </widget>
+    <addaction name="menu_File"/>
+    <addaction name="menu_Tools"/>
+@@ -541,6 +542,17 @@
+     <string>Ctrl+W</string>
+    </property>
+   </action>
++  <action name="actionDX_Cluster">
++   <property name="text">
++    <string>DX Cluster</string>
++   </property>
++   <property name="toolTip">
++    <string>Open DX Cluster Dialog</string>
++   </property>
++   <property name="shortcut">
++    <string>Ctrl+C</string>
++   </property>
++  </action>
+  </widget>
+  <layoutdefault spacing="6" margin="11"/>
+  <customwidgets>
+diff --git src/applications/gqrx/receiver.cpp src/applications/gqrx/receiver.cpp
+index 4114b08..9406cba 100644
+--- src/applications/gqrx/receiver.cpp
++++ src/applications/gqrx/receiver.cpp
+@@ -50,6 +50,7 @@
+ #endif
+ 
+ #define DEFAULT_AUDIO_GAIN -6.0
++#define TARGET_QUAD_RATE 1e6
+ 
+ /**
+  * @brief Public contructor.
+@@ -103,19 +104,21 @@ receiver::receiver(const std::string input_device,
+             d_decim = 1;
+         }
+ 
+-        d_quad_rate = d_input_rate / (double)d_decim;
++        d_decim_rate = d_input_rate / (double)d_decim;
+     }
+     else
+     {
+-        d_quad_rate = d_input_rate;
++        d_decim_rate = d_input_rate;
+     }
+ 
++    d_ddc_decim = std::max(1, (int)(d_decim_rate / TARGET_QUAD_RATE));
++    d_quad_rate = d_decim_rate / d_ddc_decim;
++    ddc = make_downconverter_cc(d_ddc_decim, 0.0, d_decim_rate);
+     rx  = make_nbrx(d_quad_rate, d_audio_rate);
+-    rot = gr::blocks::rotator_cc::make(0.0);
+ 
+     iq_swap = make_iq_swap_cc(false);
+-    dc_corr = make_dc_corr_cc(d_quad_rate, 1.0);
+-    iq_fft = make_rx_fft_c(8192u, d_quad_rate, gr::filter::firdes::WIN_HANN);
++    dc_corr = make_dc_corr_cc(d_decim_rate, 1.0);
++    iq_fft = make_rx_fft_c(8192u, d_decim_rate, gr::filter::firdes::WIN_HANN);
+ 
+     audio_fft = make_rx_fft_f(8192u, gr::filter::firdes::WIN_HANN);
+     audio_gain0 = gr::blocks::multiply_const_ff::make(0);
+@@ -351,11 +354,13 @@ double receiver::set_input_rate(double rate)
+         d_input_rate = rate;
+     }
+ 
+-    d_quad_rate = d_input_rate / (double)d_decim;
+-    dc_corr->set_sample_rate(d_quad_rate);
++    d_decim_rate = d_input_rate / (double)d_decim;
++    d_ddc_decim = std::max(1, (int)(d_decim_rate / TARGET_QUAD_RATE));
++    d_quad_rate = d_decim_rate / d_ddc_decim;
++    dc_corr->set_sample_rate(d_decim_rate);
++    ddc->set_decim_and_samp_rate(d_ddc_decim, d_decim_rate);
+     rx->set_quad_rate(d_quad_rate);
+     iq_fft->set_quad_rate(d_quad_rate);
+-    update_ddc();
+     tb->unlock();
+ 
+     return d_input_rate;
+@@ -399,18 +404,20 @@ unsigned int receiver::set_input_decim(unsigned int decim)
+             d_decim = 1;
+         }
+ 
+-        d_quad_rate = d_input_rate / (double)d_decim;
++        d_decim_rate = d_input_rate / (double)d_decim;
+     }
+     else
+     {
+-        d_quad_rate = d_input_rate;
++        d_decim_rate = d_input_rate;
+     }
+ 
+     // update quadrature rate
+-    dc_corr->set_sample_rate(d_quad_rate);
++    d_ddc_decim = std::max(1, (int)(d_decim_rate / TARGET_QUAD_RATE));
++    d_quad_rate = d_decim_rate / d_ddc_decim;
++    dc_corr->set_sample_rate(d_decim_rate);
++    ddc->set_decim_and_samp_rate(d_ddc_decim, d_decim_rate);
+     rx->set_quad_rate(d_quad_rate);
+     iq_fft->set_quad_rate(d_quad_rate);
+-    update_ddc();
+ 
+     if (d_decim >= 2)
+     {
+@@ -424,7 +431,7 @@ unsigned int receiver::set_input_decim(unsigned int decim)
+ 
+ #ifdef CUSTOM_AIRSPY_KERNELS
+     if (input_devstr.find("airspy") != std::string::npos)
+-        src->set_bandwidth(d_quad_rate);
++        src->set_bandwidth(d_decim_rate);
+ #endif
+ 
+     if (d_running)
+@@ -648,7 +655,7 @@ receiver::status receiver::set_auto_gain(bool automatic)
+ receiver::status receiver::set_filter_offset(double offset_hz)
+ {
+     d_filter_offset = offset_hz;
+-    update_ddc();
++    ddc->set_center_freq(d_filter_offset - d_cw_offset);
+ 
+     return STATUS_OK;
+ }
+@@ -667,7 +674,7 @@ double receiver::get_filter_offset(void) const
+ receiver::status receiver::set_cw_offset(double offset_hz)
+ {
+     d_cw_offset = offset_hz;
+-    update_ddc();
++    ddc->set_center_freq(d_filter_offset - d_cw_offset);
+     rx->set_cw_offset(d_cw_offset);
+ 
+     return STATUS_OK;
+@@ -1329,8 +1336,8 @@ void receiver::connect_all(rx_chain type)
+     // Audio path (if there is a receiver)
+     if (type != RX_CHAIN_NONE)
+     {
+-        tb->connect(b, 0, rot, 0);
+-        tb->connect(rot, 0, rx, 0);
++        tb->connect(b, 0, ddc, 0);
++        tb->connect(ddc, 0, rx, 0);
+         tb->connect(rx, 0, audio_fft, 0);
+         tb->connect(rx, 0, audio_udp_sink, 0);
+         tb->connect(rx, 1, audio_udp_sink, 1);
+@@ -1354,12 +1361,6 @@ void receiver::connect_all(rx_chain type)
+     }
+ }
+ 
+-/** Convenience function to update all DDC related components. */
+-void receiver::update_ddc()
+-{
+-    rot->set_phase_inc(2.0 * M_PI * (-d_filter_offset + d_cw_offset) / d_quad_rate);
+-}
+-
+ void receiver::get_rds_data(std::string &outbuff, int &num)
+ {
+     rx->get_rds_data(outbuff, num);
+diff --git src/applications/gqrx/receiver.cpp.orig src/applications/gqrx/receiver.cpp.orig
+new file mode 100644
+index 0000000..4114b08
+--- /dev/null
++++ src/applications/gqrx/receiver.cpp.orig
+@@ -0,0 +1,1390 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2011-2014 Alexandru Csete OZ9AEC.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <cmath>
++#include <iostream>
++#ifndef _MSC_VER
++#include <unistd.h>
++#endif
++
++#include <iostream>
++
++#include <gnuradio/prefs.h>
++#include <gnuradio/top_block.h>
++#include <osmosdr/source.h>
++#include <osmosdr/ranges.h>
++
++#include "applications/gqrx/receiver.h"
++#include "dsp/correct_iq_cc.h"
++//#include "dsp/hbf_decim.h"
++#include "dsp/filter/fir_decim.h"
++#include "dsp/rx_fft.h"
++#include "receivers/nbrx.h"
++#include "receivers/wfmrx.h"
++
++#ifdef WITH_PULSEAUDIO
++#include "pulseaudio/pa_sink.h"
++#elif WITH_PORTAUDIO
++#include "portaudio/portaudio_sink.h"
++#else
++#include <gnuradio/audio/sink.h>
++#endif
++
++#define DEFAULT_AUDIO_GAIN -6.0
++
++/**
++ * @brief Public contructor.
++ * @param input_device Input device specifier.
++ * @param audio_device Audio output device specifier,
++ *                     e.g. hw:0 when using ALSA or Portaudio.
++ */
++receiver::receiver(const std::string input_device,
++                   const std::string audio_device,
++                   unsigned int decimation)
++    : d_running(false),
++      d_input_rate(96000.0),
++      d_audio_rate(48000),
++      d_decim(decimation),
++      d_rf_freq(144800000.0),
++      d_filter_offset(0.0),
++      d_cw_offset(0.0),
++      d_recording_iq(false),
++      d_recording_wav(false),
++      d_sniffer_active(false),
++      d_iq_rev(false),
++      d_dc_cancel(false),
++      d_iq_balance(false),
++      d_demod(RX_DEMOD_OFF)
++{
++
++    tb = gr::make_top_block("gqrx");
++
++    if (input_device.empty())
++    {
++        src = osmosdr::source::make("file="+get_random_file()+",freq=428e6,rate=96000,repeat=true,throttle=true");
++    }
++    else
++    {
++        input_devstr = input_device;
++        src = osmosdr::source::make(input_device);
++    }
++
++    // input decimator
++    if (d_decim >= 2)
++    {
++        try
++        {
++            input_decim = make_fir_decim_cc(d_decim);
++        }
++        catch (std::range_error &e)
++        {
++            std::cout << "Error creating input decimator " << d_decim
++                      << ": " << e.what() << std::endl
++                      << "Using decimation 1." << std::endl;
++            d_decim = 1;
++        }
++
++        d_quad_rate = d_input_rate / (double)d_decim;
++    }
++    else
++    {
++        d_quad_rate = d_input_rate;
++    }
++
++    rx  = make_nbrx(d_quad_rate, d_audio_rate);
++    rot = gr::blocks::rotator_cc::make(0.0);
++
++    iq_swap = make_iq_swap_cc(false);
++    dc_corr = make_dc_corr_cc(d_quad_rate, 1.0);
++    iq_fft = make_rx_fft_c(8192u, d_quad_rate, gr::filter::firdes::WIN_HANN);
++
++    audio_fft = make_rx_fft_f(8192u, gr::filter::firdes::WIN_HANN);
++    audio_gain0 = gr::blocks::multiply_const_ff::make(0);
++    audio_gain1 = gr::blocks::multiply_const_ff::make(0);
++    set_af_gain(DEFAULT_AUDIO_GAIN);
++
++    audio_udp_sink = make_udp_sink_f();
++
++#ifdef WITH_PULSEAUDIO
++    audio_snk = make_pa_sink(audio_device, d_audio_rate, "GQRX", "Audio output");
++#elif WITH_PORTAUDIO
++    audio_snk = make_portaudio_sink(audio_device, d_audio_rate, "GQRX", "Audio output");
++#else
++    audio_snk = gr::audio::sink::make(d_audio_rate, audio_device, true);
++#endif
++
++    output_devstr = audio_device;
++
++    /* wav sink and source is created when rec/play is started */
++    audio_null_sink0 = gr::blocks::null_sink::make(sizeof(float));
++    audio_null_sink1 = gr::blocks::null_sink::make(sizeof(float));
++    sniffer = make_sniffer_f();
++    /* sniffer_rr is created at each activation. */
++
++    set_demod(RX_DEMOD_NFM);
++
++#ifndef QT_NO_DEBUG_OUTPUT
++    gr::prefs pref;
++    std::cout << "Using audio backend: "
++              << pref.get_string("audio", "audio_module", "N/A")
++              << std::endl;
++#endif
++}
++
++receiver::~receiver()
++{
++    tb->stop();
++}
++
++
++/** Start the receiver. */
++void receiver::start()
++{
++    if (!d_running)
++    {
++        tb->start();
++        d_running = true;
++    }
++}
++
++/** Stop the receiver. */
++void receiver::stop()
++{
++    if (d_running)
++    {
++        tb->stop();
++        tb->wait(); // If the graph is needed to run again, wait() must be called after stop
++        d_running = false;
++    }
++}
++
++/**
++ * @brief Select new input device.
++ *
++ * @bug When using ALSA, program will crash if the new device
++ *      is the same as the previously used device:
++ *      audio_alsa_source[hw:1]: Device or resource busy
++ */
++void receiver::set_input_device(const std::string device)
++{
++    std::string error = "";
++
++    if (device.empty())
++        return;
++
++    if (input_devstr.compare(device) == 0)
++    {
++#ifndef QT_NO_DEBUG_OUTPUT
++        std::cout << "No change in input device:" << std::endl
++                  << "  old: " << input_devstr << std::endl
++                  << "  new: " << device << std::endl;
++#endif
++        return;
++    }
++
++    input_devstr = device;
++
++    // tb->lock() can hang occasionally
++    if (d_running)
++    {
++        tb->stop();
++        tb->wait();
++    }
++
++    if (d_decim >= 2)
++    {
++        tb->disconnect(src, 0, input_decim, 0);
++        tb->disconnect(input_decim, 0, iq_swap, 0);
++    }
++    else
++    {
++        tb->disconnect(src, 0, iq_swap, 0);
++    }
++
++    src.reset();
++
++    try
++    {
++        src = osmosdr::source::make(device);
++    }
++    catch (std::runtime_error &x)
++    {
++        error = x.what();
++        src = osmosdr::source::make("file="+get_random_file()+",freq=428e6,rate=96000,repeat=true,throttle=true");
++    }
++
++    if(src->get_sample_rate() != 0)
++        set_input_rate(src->get_sample_rate());
++
++    if (d_decim >= 2)
++    {
++        tb->connect(src, 0, input_decim, 0);
++        tb->connect(input_decim, 0, iq_swap, 0);
++    }
++    else
++    {
++        tb->connect(src, 0, iq_swap, 0);
++    }
++
++    if (d_running)
++        tb->start();
++
++    if (error != "")
++    {
++        throw std::runtime_error(error);
++    }
++}
++
++
++/** Select new audio output device. */
++void receiver::set_output_device(const std::string device)
++{
++    if (output_devstr.compare(device) == 0)
++    {
++#ifndef QT_NO_DEBUG_OUTPUT
++        std::cout << "No change in output device:" << std::endl
++                  << "  old: " << output_devstr << std::endl
++                  << "  new: " << device << std::endl;
++#endif
++        return;
++    }
++
++#ifndef QT_NO_DEBUG_OUTPUT
++    std::cout << "New audio output device:" << std::endl
++              << "   old: " << output_devstr << std::endl
++              << "   new: " << device << std::endl;
++#endif
++
++    output_devstr = device;
++
++    tb->lock();
++
++    if (d_demod != RX_DEMOD_OFF)
++    {
++        tb->disconnect(audio_gain0, 0, audio_snk, 0);
++        tb->disconnect(audio_gain1, 0, audio_snk, 1);
++    }
++    audio_snk.reset();
++
++#ifdef WITH_PULSEAUDIO
++    audio_snk = make_pa_sink(device, d_audio_rate, "GQRX", "Audio output");
++#elif WITH_PORTAUDIO
++    audio_snk = make_portaudio_sink(device, d_audio_rate, "GQRX", "Audio output");
++#else
++    audio_snk = gr::audio::sink::make(d_audio_rate, device, true);
++#endif
++
++    if (d_demod != RX_DEMOD_OFF)
++    {
++        tb->connect(audio_gain0, 0, audio_snk, 0);
++        tb->connect(audio_gain1, 0, audio_snk, 1);
++    }
++
++    tb->unlock();
++}
++
++/** Get a list of available antenna connectors. */
++std::vector<std::string> receiver::get_antennas(void) const
++{
++    return src->get_antennas();
++}
++
++/** Select antenna conenctor. */
++void receiver::set_antenna(const std::string &antenna)
++{
++    if (!antenna.empty())
++    {
++        src->set_antenna(antenna);
++    }
++}
++
++/**
++ * @brief Set new input sample rate.
++ * @param rate The desired input rate
++ * @return The actual sample rate set or 0 if there was an error with the
++ *         device.
++ */
++double receiver::set_input_rate(double rate)
++{
++    double  current_rate;
++    bool    rate_has_changed;
++
++    current_rate = src->get_sample_rate();
++    rate_has_changed = !(rate == current_rate ||
++            std::abs(rate - current_rate) < std::abs(std::min(rate, current_rate))
++            * std::numeric_limits<double>::epsilon());
++
++    tb->lock();
++    d_input_rate = src->set_sample_rate(rate);
++
++    if (d_input_rate == 0)
++    {
++        // This can be the case when no device is attached and gr-osmosdr
++        // puts in a null_source with rate 100 ksps or if the rate has not
++        // changed
++        if (rate_has_changed)
++        {
++            std::cerr << std::endl;
++            std::cerr << "Failed to set RX input rate to " << rate << std::endl;
++            std::cerr << "Your device may not be working properly." << std::endl;
++            std::cerr << std::endl;
++        }
++        d_input_rate = rate;
++    }
++
++    d_quad_rate = d_input_rate / (double)d_decim;
++    dc_corr->set_sample_rate(d_quad_rate);
++    rx->set_quad_rate(d_quad_rate);
++    iq_fft->set_quad_rate(d_quad_rate);
++    update_ddc();
++    tb->unlock();
++
++    return d_input_rate;
++}
++
++/** Set input decimation */
++unsigned int receiver::set_input_decim(unsigned int decim)
++{
++    if (decim == d_decim)
++        return d_decim;
++
++    if (d_running)
++    {
++        tb->stop();
++        tb->wait();
++    }
++
++    if (d_decim >= 2)
++    {
++        tb->disconnect(src, 0, input_decim, 0);
++        tb->disconnect(input_decim, 0, iq_swap, 0);
++    }
++    else
++    {
++        tb->disconnect(src, 0, iq_swap, 0);
++    }
++
++    input_decim.reset();
++    d_decim = decim;
++    if (d_decim >= 2)
++    {
++        try
++        {
++            input_decim = make_fir_decim_cc(d_decim);
++        }
++        catch (std::range_error &e)
++        {
++            std::cout << "Error opening creating input decimator " << d_decim
++                      << ": " << e.what() << std::endl
++                      << "Using decimation 1." << std::endl;
++            d_decim = 1;
++        }
++
++        d_quad_rate = d_input_rate / (double)d_decim;
++    }
++    else
++    {
++        d_quad_rate = d_input_rate;
++    }
++
++    // update quadrature rate
++    dc_corr->set_sample_rate(d_quad_rate);
++    rx->set_quad_rate(d_quad_rate);
++    iq_fft->set_quad_rate(d_quad_rate);
++    update_ddc();
++
++    if (d_decim >= 2)
++    {
++        tb->connect(src, 0, input_decim, 0);
++        tb->connect(input_decim, 0, iq_swap, 0);
++    }
++    else
++    {
++        tb->connect(src, 0, iq_swap, 0);
++    }
++
++#ifdef CUSTOM_AIRSPY_KERNELS
++    if (input_devstr.find("airspy") != std::string::npos)
++        src->set_bandwidth(d_quad_rate);
++#endif
++
++    if (d_running)
++        tb->start();
++
++    return d_decim;
++}
++
++/**
++ * @brief Set new analog bandwidth.
++ * @param bw The new bandwidth.
++ * @return The actual bandwidth.
++ */
++double receiver::set_analog_bandwidth(double bw)
++{
++    return src->set_bandwidth(bw);
++}
++
++/** Get current analog bandwidth. */
++double receiver::get_analog_bandwidth(void) const
++{
++    return src->get_bandwidth();
++}
++
++/** Set I/Q reversed. */
++void receiver::set_iq_swap(bool reversed)
++{
++    if (reversed == d_iq_rev)
++        return;
++
++    d_iq_rev = reversed;
++    iq_swap->set_enabled(d_iq_rev);
++}
++
++/**
++ * @brief Get current I/Q reversed setting.
++ * @retval true I/Q swappign is enabled.
++ * @retval false I/Q swapping is disabled.
++ */
++bool receiver::get_iq_swap(void) const
++{
++    return d_iq_rev;
++}
++
++/**
++ * @brief Enable/disable automatic DC removal in the I/Q stream.
++ * @param enable Whether DC removal should enabled or not.
++ */
++void receiver::set_dc_cancel(bool enable)
++{
++    if (enable == d_dc_cancel)
++        return;
++
++    d_dc_cancel = enable;
++
++    // until we have a way to switch on/off
++    // inside the dc_corr_cc we do a reconf
++    rx_demod demod = d_demod;
++    d_demod = RX_DEMOD_OFF;
++    set_demod(demod);
++}
++
++/**
++ * @brief Get auto DC cancel status.
++ * @retval true  Automatic DC removal is enabled.
++ * @retval false Automatic DC removal is disabled.
++ */
++bool receiver::get_dc_cancel(void) const
++{
++    return d_dc_cancel;
++}
++
++/**
++ * @brief Enable/disable automatic I/Q balance.
++ * @param enable Whether automatic I/Q balance should be enabled.
++ */
++void receiver::set_iq_balance(bool enable)
++{
++    if (enable == d_iq_balance)
++        return;
++
++    d_iq_balance = enable;
++
++    src->set_iq_balance_mode(enable ? 2 : 0);
++}
++
++/**
++ * @brief Get auto I/Q balance status.
++ * @retval true  Automatic I/Q balance is enabled.
++ * @retval false Automatic I/Q balance is disabled.
++ */
++bool receiver::get_iq_balance(void) const
++{
++    return d_iq_balance;
++}
++
++/**
++ * @brief Set RF frequency.
++ * @param freq_hz The desired frequency in Hz.
++ * @return RX_STATUS_ERROR if an error occurs, e.g. the frequency is out of range.
++ * @sa get_rf_freq()
++ */
++receiver::status receiver::set_rf_freq(double freq_hz)
++{
++    d_rf_freq = freq_hz;
++
++    src->set_center_freq(d_rf_freq);
++    // FIXME: read back frequency?
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Get RF frequency.
++ * @return The current RF frequency.
++ * @sa set_rf_freq()
++ */
++double receiver::get_rf_freq(void)
++{
++    d_rf_freq = src->get_center_freq();
++
++    return d_rf_freq;
++}
++
++/**
++ * @brief Get the RF frequency range of the current input device.
++ * @param start The lower limit of the range in Hz.
++ * @param stop  The upper limit of the range in Hz.
++ * @param step  The frequency step in Hz.
++ * @returns STATUS_OK if the range could be retrieved, STATUS_ERROR if an error has occurred.
++ */
++receiver::status receiver::get_rf_range(double *start, double *stop, double *step)
++{
++    osmosdr::freq_range_t range;
++
++    range = src->get_freq_range();
++
++    // currently range is empty for all but E4000
++    if (!range.empty())
++    {
++        if (range.start() < range.stop())
++        {
++            *start = range.start();
++            *stop  = range.stop();
++            *step  = range.step();  /** FIXME: got 0 for rtl-sdr? **/
++
++            return STATUS_OK;
++        }
++    }
++
++    return STATUS_ERROR;
++}
++
++/** Get the names of available gain stages. */
++std::vector<std::string> receiver::get_gain_names()
++{
++    return src->get_gain_names();
++}
++
++/**
++ * @brief Get gain range for a specific stage.
++ * @param[in]  name The name of the gain stage.
++ * @param[out] start Lower limit for this gain setting.
++ * @param[out] stop  Upper limit for this gain setting.
++ * @param[out] step  The resolution for this gain setting.
++ *
++ * This function retunrs the range for the requested gain stage.
++ */
++receiver::status receiver::get_gain_range(std::string &name, double *start,
++                                          double *stop, double *step) const
++{
++    osmosdr::gain_range_t range;
++
++    range = src->get_gain_range(name);
++    *start = range.start();
++    *stop  = range.stop();
++    *step  = range.step();
++
++    return STATUS_OK;
++}
++
++receiver::status receiver::set_gain(std::string name, double value)
++{
++    src->set_gain(value, name);
++
++    return STATUS_OK;
++}
++
++double receiver::get_gain(std::string name) const
++{
++    return src->get_gain(name);
++}
++
++/**
++ * @brief Set RF gain.
++ * @param gain_rel The desired relative gain between 0.0 and 1.0 (use -1 for
++ *                 AGC where supported).
++ * @return RX_STATUS_ERROR if an error occurs, e.g. the gain is out of valid range.
++ */
++receiver::status receiver::set_auto_gain(bool automatic)
++{
++    src->set_gain_mode(automatic);
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Set filter offset.
++ * @param offset_hz The desired filter offset in Hz.
++ * @return RX_STATUS_ERROR if the tuning offset is out of range.
++ *
++ * This method sets a new tuning offset for the receiver. The tuning offset is used
++ * to tune within the passband, i.e. select a specific channel within the received
++ * spectrum.
++ *
++ * The valid range for the tuning is +/- 0.5 * the bandwidth although this is just a
++ * logical limit.
++ *
++ * @sa get_filter_offset()
++ */
++receiver::status receiver::set_filter_offset(double offset_hz)
++{
++    d_filter_offset = offset_hz;
++    update_ddc();
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Get filter offset.
++ * @return The current filter offset.
++ * @sa set_filter_offset()
++ */
++double receiver::get_filter_offset(void) const
++{
++    return d_filter_offset;
++}
++
++/* CW offset can serve as a "BFO" if the GUI needs it */
++receiver::status receiver::set_cw_offset(double offset_hz)
++{
++    d_cw_offset = offset_hz;
++    update_ddc();
++    rx->set_cw_offset(d_cw_offset);
++
++    return STATUS_OK;
++}
++
++double receiver::get_cw_offset(void) const
++{
++    return d_cw_offset;
++}
++
++receiver::status receiver::set_filter(double low, double high, filter_shape shape)
++{
++    double trans_width;
++
++    if ((low >= high) || (std::abs(high-low) < RX_FILTER_MIN_WIDTH))
++        return STATUS_ERROR;
++
++    switch (shape) {
++
++    case FILTER_SHAPE_SOFT:
++        trans_width = std::abs(high - low) * 0.5;
++        break;
++
++    case FILTER_SHAPE_SHARP:
++        trans_width = std::abs(high - low) * 0.1;
++        break;
++
++    case FILTER_SHAPE_NORMAL:
++    default:
++        trans_width = std::abs(high - low) * 0.2;
++        break;
++
++    }
++
++    rx->set_filter(low, high, trans_width);
++
++    return STATUS_OK;
++}
++
++receiver::status receiver::set_freq_corr(double ppm)
++{
++    src->set_freq_corr(ppm);
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Get current signal power.
++ * @param dbfs Whether to use dbfs or absolute power.
++ * @return The current signal power.
++ *
++ * This method returns the current signal power detected by the receiver. The detector
++ * is located after the band pass filter. The full scale is 1.0
++ */
++float receiver::get_signal_pwr(bool dbfs) const
++{
++    return rx->get_signal_level(dbfs);
++}
++
++/** Set new FFT size. */
++void receiver::set_iq_fft_size(int newsize)
++{
++    iq_fft->set_fft_size(newsize);
++}
++
++void receiver::set_iq_fft_window(int window_type)
++{
++    iq_fft->set_window_type(window_type);
++}
++
++/** Get latest baseband FFT data. */
++void receiver::get_iq_fft_data(std::complex<float>* fftPoints, unsigned int &fftsize)
++{
++    iq_fft->get_fft_data(fftPoints, fftsize);
++}
++
++/** Get latest audio FFT data. */
++void receiver::get_audio_fft_data(std::complex<float>* fftPoints, unsigned int &fftsize)
++{
++    audio_fft->get_fft_data(fftPoints, fftsize);
++}
++
++receiver::status receiver::set_nb_on(int nbid, bool on)
++{
++    if (rx->has_nb())
++        rx->set_nb_on(nbid, on);
++
++    return STATUS_OK; // FIXME
++}
++
++receiver::status receiver::set_nb_threshold(int nbid, float threshold)
++{
++    if (rx->has_nb())
++        rx->set_nb_threshold(nbid, threshold);
++
++    return STATUS_OK; // FIXME
++}
++
++/**
++ * @brief Set squelch level.
++ * @param level_db The new level in dBFS.
++ */
++receiver::status receiver::set_sql_level(double level_db)
++{
++    if (rx->has_sql())
++        rx->set_sql_level(level_db);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Set squelch alpha */
++receiver::status receiver::set_sql_alpha(double alpha)
++{
++    if (rx->has_sql())
++        rx->set_sql_alpha(alpha);
++
++    return STATUS_OK; // FIXME
++}
++
++/**
++ * @brief Enable/disable receiver AGC.
++ *
++ * When AGC is disabled a fixed manual gain is used, see set_agc_manual_gain().
++ */
++receiver::status receiver::set_agc_on(bool agc_on)
++{
++    if (rx->has_agc())
++        rx->set_agc_on(agc_on);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Enable/disable AGC hang. */
++receiver::status receiver::set_agc_hang(bool use_hang)
++{
++    if (rx->has_agc())
++        rx->set_agc_hang(use_hang);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Set AGC threshold. */
++receiver::status receiver::set_agc_threshold(int threshold)
++{
++    if (rx->has_agc())
++        rx->set_agc_threshold(threshold);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Set AGC slope. */
++receiver::status receiver::set_agc_slope(int slope)
++{
++    if (rx->has_agc())
++        rx->set_agc_slope(slope);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Set AGC decay time. */
++receiver::status receiver::set_agc_decay(int decay_ms)
++{
++    if (rx->has_agc())
++        rx->set_agc_decay(decay_ms);
++
++    return STATUS_OK; // FIXME
++}
++
++/** Set fixed gain used when AGC is OFF. */
++receiver::status receiver::set_agc_manual_gain(int gain)
++{
++    if (rx->has_agc())
++        rx->set_agc_manual_gain(gain);
++
++    return STATUS_OK; // FIXME
++}
++
++receiver::status receiver::set_demod(rx_demod demod)
++{
++    status ret = STATUS_OK;
++
++    // Allow reconf using same demod to provide a workaround
++    // for the "jerky streaming" we may experience with rtl
++    // dongles (the jerkyness disappears when we run this function)
++    //if (demod == d_demod)
++    //    return ret;
++
++    // tb->lock() seems to hang occasioanlly
++    if (d_running)
++    {
++        tb->stop();
++        tb->wait();
++    }
++
++    tb->disconnect_all();
++
++    switch (demod)
++    {
++    case RX_DEMOD_OFF:
++        connect_all(RX_CHAIN_NONE);
++        break;
++
++    case RX_DEMOD_NONE:
++        connect_all(RX_CHAIN_NBRX);
++        rx->set_demod(nbrx::NBRX_DEMOD_NONE);
++        break;
++
++    case RX_DEMOD_AM:
++        connect_all(RX_CHAIN_NBRX);
++        rx->set_demod(nbrx::NBRX_DEMOD_AM);
++        break;
++
++    case RX_DEMOD_NFM:
++        connect_all(RX_CHAIN_NBRX);
++        rx->set_demod(nbrx::NBRX_DEMOD_FM);
++        break;
++
++    case RX_DEMOD_WFM_M:
++        connect_all(RX_CHAIN_WFMRX);
++        rx->set_demod(wfmrx::WFMRX_DEMOD_MONO);
++        break;
++
++    case RX_DEMOD_WFM_S:
++        connect_all(RX_CHAIN_WFMRX);
++        rx->set_demod(wfmrx::WFMRX_DEMOD_STEREO);
++        break;
++
++    case RX_DEMOD_WFM_S_OIRT:
++        connect_all(RX_CHAIN_WFMRX);
++        rx->set_demod(wfmrx::WFMRX_DEMOD_STEREO_UKW);
++        break;
++
++    case RX_DEMOD_SSB:
++        connect_all(RX_CHAIN_NBRX);
++        rx->set_demod(nbrx::NBRX_DEMOD_SSB);
++        break;
++
++    default:
++        ret = STATUS_ERROR;
++        break;
++    }
++
++    d_demod = demod;
++
++    if (d_running)
++        tb->start();
++
++    return ret;
++}
++
++/**
++ * @brief Set maximum deviation of the FM demodulator.
++ * @param maxdev_hz The new maximum deviation in Hz.
++ */
++receiver::status receiver::set_fm_maxdev(float maxdev_hz)
++{
++    if (rx->has_fm())
++        rx->set_fm_maxdev(maxdev_hz);
++
++    return STATUS_OK;
++}
++
++receiver::status receiver::set_fm_deemph(double tau)
++{
++    if (rx->has_fm())
++        rx->set_fm_deemph(tau);
++
++    return STATUS_OK;
++}
++
++receiver::status receiver::set_am_dcr(bool enabled)
++{
++    if (rx->has_am())
++        rx->set_am_dcr(enabled);
++
++    return STATUS_OK;
++}
++
++receiver::status receiver::set_af_gain(float gain_db)
++{
++    float k;
++
++    /* convert dB to factor */
++    k = pow(10.0, gain_db / 20.0);
++    //std::cout << "G:" << gain_db << "dB / K:" << k << std::endl;
++    audio_gain0->set_k(k);
++    audio_gain1->set_k(k);
++
++    return STATUS_OK;
++}
++
++
++/**
++ * @brief Start WAV file recorder.
++ * @param filename The filename where to record.
++ *
++ * A new recorder object is created every time we start recording and deleted every time
++ * we stop recording. The idea of creating one object and starting/stopping using different
++ * file names does not work with WAV files (the initial /tmp/gqrx.wav will not be stopped
++ * because the wav file can not be empty). See https://github.com/csete/gqrx/issues/36
++ */
++receiver::status receiver::start_audio_recording(const std::string filename)
++{
++    if (d_recording_wav)
++    {
++        /* error - we are already recording */
++        std::cout << "ERROR: Can not start audio recorder (already recording)" << std::endl;
++
++        return STATUS_ERROR;
++    }
++    if (!d_running)
++    {
++        /* receiver is not running */
++        std::cout << "Can not start audio recorder (receiver not running)" << std::endl;
++
++        return STATUS_ERROR;
++    }
++
++    // if this fails, we don't want to go and crash now, do we
++    try {
++        wav_sink = gr::blocks::wavfile_sink::make(filename.c_str(), 2,
++                                                  (unsigned int) d_audio_rate,
++                                                  16);
++    }
++    catch (std::runtime_error &e) {
++        std::cout << "Error opening " << filename << ": " << e.what() << std::endl;
++        return STATUS_ERROR;
++    }
++
++    tb->lock();
++    tb->connect(rx, 0, wav_sink, 0);
++    tb->connect(rx, 1, wav_sink, 1);
++    tb->unlock();
++    d_recording_wav = true;
++
++    std::cout << "Recording audio to " << filename << std::endl;
++
++    return STATUS_OK;
++}
++
++/** Stop WAV file recorder. */
++receiver::status receiver::stop_audio_recording()
++{
++    if (!d_recording_wav) {
++        /* error: we are not recording */
++        std::cout << "ERROR: Can not stop audio recorder (not recording)" << std::endl;
++
++        return STATUS_ERROR;
++    }
++    if (!d_running)
++    {
++        /* receiver is not running */
++        std::cout << "Can not stop audio recorder (receiver not running)" << std::endl;
++
++        return STATUS_ERROR;
++    }
++
++    // not strictly necessary to lock but I think it is safer
++    tb->lock();
++    wav_sink->close();
++    tb->disconnect(rx, 0, wav_sink, 0);
++    tb->disconnect(rx, 1, wav_sink, 1);
++    tb->unlock();
++    wav_sink.reset();
++    d_recording_wav = false;
++
++    std::cout << "Audio recorder stopped" << std::endl;
++
++    return STATUS_OK;
++}
++
++/** Start audio playback. */
++receiver::status receiver::start_audio_playback(const std::string filename)
++{
++    if (!d_running)
++    {
++        /* receiver is not running */
++        std::cout << "Can not start audio playback (receiver not running)" << std::endl;
++
++        return STATUS_ERROR;
++    }
++
++    try {
++        // output ports set automatically from file
++        wav_src = gr::blocks::wavfile_source::make(filename.c_str(), false);
++    }
++    catch (std::runtime_error &e) {
++        std::cout << "Error loading " << filename << ": " << e.what() << std::endl;
++        return STATUS_ERROR;
++    }
++
++    /** FIXME: We can only handle native rate (should maybe use the audio_rr)? */
++    unsigned int audio_rate = (unsigned int) d_audio_rate;
++    if (wav_src->sample_rate() != audio_rate)
++    {
++        std::cout << "BUG: Can not handle sample rate " << wav_src->sample_rate() << std::endl;
++        wav_src.reset();
++
++        return STATUS_ERROR;
++    }
++
++    /** FIXME: We can only handle stereo files */
++    if (wav_src->channels() != 2)
++    {
++        std::cout << "BUG: Can not handle other than 2 channels. File has " << wav_src->channels() << std::endl;
++        wav_src.reset();
++
++        return STATUS_ERROR;
++    }
++
++    stop();
++    /* route demodulator output to null sink */
++    tb->disconnect(rx, 0, audio_gain0, 0);
++    tb->disconnect(rx, 1, audio_gain1, 0);
++    tb->disconnect(rx, 0, audio_fft, 0);
++    tb->disconnect(rx, 0, audio_udp_sink, 0);
++    tb->disconnect(rx, 1, audio_udp_sink, 1);
++    tb->connect(rx, 0, audio_null_sink0, 0); /** FIXME: other channel? */
++    tb->connect(rx, 1, audio_null_sink1, 0); /** FIXME: other channel? */
++    tb->connect(wav_src, 0, audio_gain0, 0);
++    tb->connect(wav_src, 1, audio_gain1, 0);
++    tb->connect(wav_src, 0, audio_fft, 0);
++    tb->connect(wav_src, 0, audio_udp_sink, 0);
++    tb->connect(wav_src, 1, audio_udp_sink, 1);
++    start();
++
++    std::cout << "Playing audio from " << filename << std::endl;
++
++    return STATUS_OK;
++}
++
++/** Stop audio playback. */
++receiver::status receiver::stop_audio_playback()
++{
++    /* disconnect wav source and reconnect receiver */
++    stop();
++    tb->disconnect(wav_src, 0, audio_gain0, 0);
++    tb->disconnect(wav_src, 1, audio_gain1, 0);
++    tb->disconnect(wav_src, 0, audio_fft, 0);
++    tb->disconnect(wav_src, 0, audio_udp_sink, 0);
++    tb->disconnect(wav_src, 1, audio_udp_sink, 1);
++    tb->disconnect(rx, 0, audio_null_sink0, 0);
++    tb->disconnect(rx, 1, audio_null_sink1, 0);
++    tb->connect(rx, 0, audio_gain0, 0);
++    tb->connect(rx, 1, audio_gain1, 0);
++    tb->connect(rx, 0, audio_fft, 0);  /** FIXME: other channel? */
++    tb->connect(rx, 0, audio_udp_sink, 0);
++    tb->connect(rx, 1, audio_udp_sink, 1);
++    start();
++
++    /* delete wav_src since we can not change file name */
++    wav_src.reset();
++
++    return STATUS_OK;
++}
++
++/** Start UDP streaming of audio. */
++receiver::status receiver::start_udp_streaming(const std::string host, int port, bool stereo)
++{
++    audio_udp_sink->start_streaming(host, port, stereo);
++    return STATUS_OK;
++}
++
++/** Stop UDP streaming of audio. */
++receiver::status receiver::stop_udp_streaming()
++{
++    audio_udp_sink->stop_streaming();
++    return STATUS_OK;
++}
++
++/**
++ * @brief Start I/Q data recorder.
++ * @param filename The filename where to record.
++ */
++receiver::status receiver::start_iq_recording(const std::string filename)
++{
++    receiver::status status = STATUS_OK;
++
++    if (d_recording_iq) {
++        std::cout << __func__ << ": already recording" << std::endl;
++        return STATUS_ERROR;
++    }
++
++    try
++    {
++        iq_sink = gr::blocks::file_sink::make(sizeof(gr_complex), filename.c_str(), true);
++    }
++    catch (std::runtime_error &e)
++    {
++        std::cout << __func__ << ": couldn't open I/Q file" << std::endl;
++        return STATUS_ERROR;
++    }
++
++    tb->lock();
++    if (d_decim >= 2)
++        tb->connect(input_decim, 0, iq_sink, 0);
++    else
++        tb->connect(src, 0, iq_sink, 0);
++    d_recording_iq = true;
++    tb->unlock();
++
++    return status;
++}
++
++/** Stop I/Q data recorder. */
++receiver::status receiver::stop_iq_recording()
++{
++    if (!d_recording_iq) {
++        /* error: we are not recording */
++        return STATUS_ERROR;
++    }
++
++    tb->lock();
++    iq_sink->close();
++
++    if (d_decim >= 2)
++        tb->disconnect(input_decim, 0, iq_sink, 0);
++    else
++        tb->disconnect(src, 0, iq_sink, 0);
++
++    tb->unlock();
++    iq_sink.reset();
++    d_recording_iq = false;
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Seek to position in IQ file source.
++ * @param pos Byte offset from the beginning of the file.
++ */
++receiver::status receiver::seek_iq_file(long pos)
++{
++    receiver::status status = STATUS_OK;
++
++    tb->lock();
++
++    if (src->seek(pos, SEEK_SET))
++    {
++        status = STATUS_OK;
++    }
++    else
++    {
++        status = STATUS_ERROR;
++    }
++
++    tb->unlock();
++
++    return status;
++}
++
++/**
++ * @brief Start data sniffer.
++ * @param buffsize The buffer that should be used in the sniffer.
++ * @return STATUS_OK if the sniffer was started, STATUS_ERROR if the sniffer is already in use.
++ */
++receiver::status receiver::start_sniffer(unsigned int samprate, int buffsize)
++{
++    if (d_sniffer_active) {
++        /* sniffer already in use */
++        return STATUS_ERROR;
++    }
++
++    sniffer->set_buffer_size(buffsize);
++    sniffer_rr = make_resampler_ff((float)samprate/(float)d_audio_rate);
++    tb->lock();
++    tb->connect(rx, 0, sniffer_rr, 0);
++    tb->connect(sniffer_rr, 0, sniffer, 0);
++    tb->unlock();
++    d_sniffer_active = true;
++
++    return STATUS_OK;
++}
++
++/**
++ * @brief Stop data sniffer.
++ * @return STATUS_ERROR i the sniffer is not currently active.
++ */
++receiver::status receiver::stop_sniffer()
++{
++    if (!d_sniffer_active) {
++        return STATUS_ERROR;
++    }
++
++    tb->lock();
++    tb->disconnect(rx, 0, sniffer_rr, 0);
++    tb->disconnect(sniffer_rr, 0, sniffer, 0);
++    tb->unlock();
++    d_sniffer_active = false;
++
++    /* delete resampler */
++    sniffer_rr.reset();
++
++    return STATUS_OK;
++}
++
++/** Get sniffer data. */
++void receiver::get_sniffer_data(float * outbuff, unsigned int &num)
++{
++    sniffer->get_samples(outbuff, num);
++}
++
++/** Convenience function to connect all blocks. */
++void receiver::connect_all(rx_chain type)
++{
++    gr::basic_block_sptr b;
++
++    // Setup source
++    b = src;
++
++    // Pre-processing
++    if (d_decim >= 2)
++    {
++        tb->connect(b, 0, input_decim, 0);
++        b = input_decim;
++    }
++
++    if (d_recording_iq)
++    {
++        // We record IQ with minimal pre-processing
++        tb->connect(b, 0, iq_sink, 0);
++    }
++
++    tb->connect(b, 0, iq_swap, 0);
++    b = iq_swap;
++
++    if (d_dc_cancel)
++    {
++        tb->connect(b, 0, dc_corr, 0);
++        b = dc_corr;
++    }
++
++    // Visualization
++    tb->connect(b, 0, iq_fft, 0);
++
++    // RX demod chain
++    switch (type)
++    {
++    case RX_CHAIN_NBRX:
++        if (rx->name() != "NBRX")
++        {
++            rx.reset();
++            rx = make_nbrx(d_quad_rate, d_audio_rate);
++        }
++        break;
++
++    case RX_CHAIN_WFMRX:
++        if (rx->name() != "WFMRX")
++        {
++            rx.reset();
++            rx = make_wfmrx(d_quad_rate, d_audio_rate);
++        }
++        break;
++
++    default:
++        break;
++    }
++
++    // Audio path (if there is a receiver)
++    if (type != RX_CHAIN_NONE)
++    {
++        tb->connect(b, 0, rot, 0);
++        tb->connect(rot, 0, rx, 0);
++        tb->connect(rx, 0, audio_fft, 0);
++        tb->connect(rx, 0, audio_udp_sink, 0);
++        tb->connect(rx, 1, audio_udp_sink, 1);
++        tb->connect(rx, 0, audio_gain0, 0);
++        tb->connect(rx, 1, audio_gain1, 0);
++        tb->connect(audio_gain0, 0, audio_snk, 0);
++        tb->connect(audio_gain1, 0, audio_snk, 1);
++    }
++
++    // Recorders and sniffers
++    if (d_recording_wav)
++    {
++        tb->connect(rx, 0, wav_sink, 0);
++        tb->connect(rx, 1, wav_sink, 1);
++    }
++
++    if (d_sniffer_active)
++    {
++        tb->connect(rx, 0, sniffer_rr, 0);
++        tb->connect(sniffer_rr, 0, sniffer, 0);
++    }
++}
++
++/** Convenience function to update all DDC related components. */
++void receiver::update_ddc()
++{
++    rot->set_phase_inc(2.0 * M_PI * (-d_filter_offset + d_cw_offset) / d_quad_rate);
++}
++
++void receiver::get_rds_data(std::string &outbuff, int &num)
++{
++    rx->get_rds_data(outbuff, num);
++}
++
++void receiver::start_rds_decoder(void)
++{
++    stop();
++    rx->start_rds_decoder();
++    start();
++}
++
++void receiver::stop_rds_decoder(void)
++{
++    stop();
++    rx->stop_rds_decoder();
++    start();
++}
++
++bool receiver::is_rds_decoder_active(void) const
++{
++    return rx->is_rds_decoder_active();
++}
++
++void receiver::reset_rds_parser(void)
++{
++    rx->reset_rds_parser();
++}
+diff --git src/applications/gqrx/receiver.h src/applications/gqrx/receiver.h
+index 109a80d..b577ae9 100644
+--- src/applications/gqrx/receiver.h
++++ src/applications/gqrx/receiver.h
+@@ -31,7 +31,6 @@
+ 
+ #include <gnuradio/blocks/file_sink.h>
+ #include <gnuradio/blocks/null_sink.h>
+-#include <gnuradio/blocks/rotator_cc.h>
+ #include <gnuradio/blocks/wavfile_sink.h>
+ #include <gnuradio/blocks/wavfile_source.h>
+ #include <gnuradio/top_block.h>
+@@ -39,6 +38,7 @@
+ #include <string>
+ 
+ #include "dsp/correct_iq_cc.h"
++#include "dsp/downconverter.h"
+ #include "dsp/filter/fir_decim.h"
+ #include "dsp/rx_noise_blanker_cc.h"
+ #include "dsp/rx_filter.h"
+@@ -226,14 +226,15 @@ public:
+ 
+ private:
+     void        connect_all(rx_chain type);
+-    void        update_ddc();
+ 
+ private:
+     bool        d_running;          /*!< Whether receiver is running or not. */
+     double      d_input_rate;       /*!< Input sample rate. */
+-    double      d_quad_rate;        /*!< Quadrature rate (input_rate / decim) */
++    double      d_decim_rate;       /*!< Rate after decimation (input_rate / decim) */
++    double      d_quad_rate;        /*!< Quadrature rate (after down-conversion) */
+     double      d_audio_rate;       /*!< Audio output rate. */
+     unsigned int    d_decim;        /*!< input decimation. */
++    unsigned int    d_ddc_decim;    /*!< Down-conversion decimation. */
+     double      d_rf_freq;          /*!< Current RF frequency. */
+     double      d_filter_offset;    /*!< Current filter offset */
+     double      d_cw_offset;        /*!< CW offset */
+@@ -261,7 +262,7 @@ private:
+     rx_fft_c_sptr             iq_fft;     /*!< Baseband FFT block. */
+     rx_fft_f_sptr             audio_fft;  /*!< Audio FFT block. */
+ 
+-    gr::blocks::rotator_cc::sptr rot;     /*!< Rotator used when only shifting frequency */
++    downconverter_cc_sptr     ddc;        /*!< Digital down-converter for demod chain. */
+ 
+     gr::blocks::multiply_const_ff::sptr audio_gain0; /*!< Audio gain block. */
+     gr::blocks::multiply_const_ff::sptr audio_gain1; /*!< Audio gain block. */
+diff --git src/dsp/CMakeLists.txt src/dsp/CMakeLists.txt
+index daae9fc..3e984e1 100644
+--- src/dsp/CMakeLists.txt
++++ src/dsp/CMakeLists.txt
+@@ -22,6 +22,8 @@ add_source_files(SRCS_LIST
+ 	agc_impl.h
+ 	correct_iq_cc.cpp
+ 	correct_iq_cc.h
++	downconverter.cpp
++	downconverter.h
+ 	lpf.cpp
+ 	lpf.h
+ 	resampler_xx.cpp
+diff --git src/dsp/downconverter.cpp src/dsp/downconverter.cpp
+new file mode 100644
+index 0000000..dde591e
+--- /dev/null
++++ src/dsp/downconverter.cpp
+@@ -0,0 +1,106 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2020 Clayton Smith VE3IRR.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <math.h>
++#include <gnuradio/filter/firdes.h>
++#include <gnuradio/io_signature.h>
++
++#include "downconverter.h"
++
++#define LPF_CUTOFF 120e3
++
++downconverter_cc_sptr make_downconverter_cc(unsigned int decim, double center_freq, double samp_rate)
++{
++    return gnuradio::get_initial_sptr(new downconverter_cc(decim, center_freq, samp_rate));
++}
++
++downconverter_cc::downconverter_cc(unsigned int decim, double center_freq, double samp_rate)
++    : gr::hier_block2("downconverter_cc",
++          gr::io_signature::make(1, 1, sizeof(gr_complex)),
++          gr::io_signature::make(1, 1, sizeof(gr_complex))),
++      d_decim(decim),
++      d_center_freq(center_freq),
++      d_samp_rate(samp_rate)
++{
++    connect_all();
++    update_proto_taps();
++    update_phase_inc();
++}
++
++downconverter_cc::~downconverter_cc()
++{
++
++}
++
++void downconverter_cc::set_decim_and_samp_rate(unsigned int decim, double samp_rate)
++{
++    d_samp_rate = samp_rate;
++    if (decim != d_decim)
++    {
++        d_decim = decim;
++        lock();
++        disconnect_all();
++        connect_all();
++        unlock();
++    }
++    update_proto_taps();
++    update_phase_inc();
++}
++
++void downconverter_cc::set_center_freq(double center_freq)
++{
++    d_center_freq = center_freq;
++    update_phase_inc();
++}
++
++void downconverter_cc::connect_all()
++{
++    if (d_decim > 1)
++    {
++        filt = gr::filter::freq_xlating_fir_filter_ccf::make(d_decim, {1}, 0.0, d_samp_rate);
++        connect(self(), 0, filt, 0);
++        connect(filt, 0, self(), 0);
++    }
++    else
++    {
++        rot = gr::blocks::rotator_cc::make(0.0);
++        connect(self(), 0, rot, 0);
++        connect(rot, 0, self(), 0);
++    }
++}
++
++void downconverter_cc::update_proto_taps()
++{
++    if (d_decim > 1)
++    {
++        double out_rate = d_samp_rate / d_decim;
++        filt->set_taps(gr::filter::firdes::low_pass(1.0, d_samp_rate, LPF_CUTOFF, out_rate - 2*LPF_CUTOFF));
++    }
++}
++
++void downconverter_cc::update_phase_inc()
++{
++    if (d_decim > 1)
++        filt->set_center_freq(d_center_freq);
++    else
++        rot->set_phase_inc(-2.0 * M_PI * d_center_freq / d_samp_rate);
++}
+diff --git src/dsp/downconverter.h src/dsp/downconverter.h
+new file mode 100644
+index 0000000..9c3b55a
+--- /dev/null
++++ src/dsp/downconverter.h
+@@ -0,0 +1,61 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2020 Clayton Smith VE3IRR.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#pragma once
++
++#if GNURADIO_VERSION < 0x030800
++#include <gnuradio/filter/freq_xlating_fir_filter_ccf.h>
++#else
++#include <gnuradio/filter/freq_xlating_fir_filter.h>
++#endif
++
++#include <gnuradio/blocks/rotator_cc.h>
++#include <gnuradio/hier_block2.h>
++
++class downconverter_cc;
++
++typedef boost::shared_ptr<downconverter_cc> downconverter_cc_sptr;
++downconverter_cc_sptr make_downconverter_cc(unsigned int decim, double center_freq, double samp_rate);
++
++class downconverter_cc : public gr::hier_block2
++{
++    friend downconverter_cc_sptr make_downconverter_cc(unsigned int decim, double center_freq, double samp_rate);
++
++public:
++    downconverter_cc(unsigned int decim, double center_freq, double samp_rate);
++    ~downconverter_cc();
++    void set_decim_and_samp_rate(unsigned int decim, double samp_rate);
++    void set_center_freq(double center_freq);
++
++private:
++    unsigned int d_decim;
++    double d_center_freq;
++    double d_samp_rate;
++    std::vector<float> d_proto_taps;
++
++    void connect_all();
++    void update_proto_taps();
++    void update_phase_inc();
++
++    gr::filter::freq_xlating_fir_filter_ccf::sptr filt;
++    gr::blocks::rotator_cc::sptr rot;
++};
+diff --git src/dsp/rx_noise_blanker_cc.cpp src/dsp/rx_noise_blanker_cc.cpp
+index c8e2447..ae9fd2b 100644
+--- src/dsp/rx_noise_blanker_cc.cpp
++++ src/dsp/rx_noise_blanker_cc.cpp
+@@ -26,6 +26,14 @@
+ #include <gnuradio/gr_complex.h>
+ #include "dsp/rx_noise_blanker_cc.h"
+ 
++
++
++void rx_nb_cc::forecast (int noutput_items, gr_vector_int &ninput_items_required)
++{
++    ninput_items_required[0] = d_nb2_bsize;
++}
++
++
+ rx_nb_cc_sptr make_rx_nb_cc(double sample_rate, float thld1, float thld2)
+ {
+     return gnuradio::get_initial_sptr(new rx_nb_cc(sample_rate, thld1, thld2));
+@@ -38,8 +46,8 @@ rx_nb_cc_sptr make_rx_nb_cc(double sample_rate, float thld1, float thld2)
+  */
+ rx_nb_cc::rx_nb_cc(double sample_rate, float thld1, float thld2)
+     : gr::sync_block ("rx_nb_cc",
+-          gr::io_signature::make(1, 1, sizeof(gr_complex)),
+-          gr::io_signature::make(1, 1, sizeof(gr_complex))),
++          gr::io_signature::make(1, 1, sizeof(float)),
++          gr::io_signature::make(1, 1, sizeof(float))),
+       d_nb1_on(false),
+       d_nb2_on(false),
+       d_sample_rate(sample_rate),
+@@ -52,10 +60,293 @@ rx_nb_cc::rx_nb_cc(double sample_rate, float thld1, float thld2)
+       d_hangtime(0)
+ {
+     memset(d_delay, 0, 8 * sizeof(gr_complex));
++
++
++    // Init nb1 params
++    d_nb1_dline_size = 2048;
++    d_nb1_mask = 2048 - 1;
++    d_nb1_n_taps = 64;
++    d_nb1_delay = 16;
++    d_nb1_two_mu = 1.0e-4;
++    d_nb1_gamma = 0.1;
++    d_nb1_in_idx = 0;
++    d_nb1_lidx = 120.0;
++    d_nb1_lidx_min = 120.0;
++    d_nb1_lidx_max = 200.0;
++    d_nb1_ngamma = 0.001;
++    d_nb1_den_mult = 6.25e-10;
++    d_nb1_lincr = 1.0;
++    d_nb1_ldecr = 3.0;
++    memset (d_nb1_d, 0, sizeof(double) * 2048);
++    memset (d_nb1_w, 0, sizeof(double) * 2048);
++
++    // Init nb2 params
++
++    d_nb2_bsize = (int)1024;
++    d_nb2_fsize = (int)4096;
++    d_nb2_ovrlp = 32;
++    d_nb2_rate = (int)96000;
++    d_nb2_ogain = 0.99;
++
++
++    // nb2 - initial setup
++    int i;
++    double Dvals[18] = { 1.0, 2.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 40.0,
++        60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 220.0, 260.0, 300.0 };
++    double Mvals[18] = { 0.000, 0.260, 0.480, 0.580, 0.610, 0.668, 0.705, 0.762, 0.800,
++        0.841, 0.865, 0.890, 0.900, 0.910, 0.920, 0.930, 0.935, 0.940 };
++    double arg, sum, inv_coherent_gain;
++
++
++    d_nb2_incr = (double)d_nb2_fsize / (double)d_nb2_ovrlp;
++    d_nb2_gain = (double)d_nb2_ogain / (double)d_nb2_fsize / (double)d_nb2_ovrlp;
++    if (d_nb2_fsize > d_nb2_bsize)
++        d_nb2_iasize = d_nb2_fsize;
++    else
++        d_nb2_iasize = d_nb2_bsize + d_nb2_fsize - d_nb2_incr;
++    d_nb2_iainidx = 0;
++    d_nb2_iaoutidx = 0;
++    if (d_nb2_fsize > d_nb2_bsize)
++    {
++        if (d_nb2_bsize > d_nb2_incr)  d_nb2_oasize = d_nb2_bsize;
++        else                                     d_nb2_oasize = d_nb2_incr;
++        d_nb2_oainidx = (d_nb2_fsize - d_nb2_bsize - d_nb2_incr) % d_nb2_oasize;
++    }
++    else
++    {
++        d_nb2_oasize = d_nb2_bsize;
++        d_nb2_oainidx = d_nb2_fsize - d_nb2_incr;
++    }
++    d_nb2_init_oainidx = d_nb2_oainidx;
++    d_nb2_oaoutidx = 0;
++    d_nb2_msize = d_nb2_fsize / 2 + 1;
++    d_nb2_window = (double *)malloc(d_nb2_fsize * sizeof(double));
++    d_nb2_inaccum = (double *)malloc(d_nb2_iasize * sizeof(double));
++    d_nb2_mask = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_save = (double **)malloc(d_nb2_ovrlp * sizeof(double *));
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        d_nb2_save[i] = (double *)malloc(d_nb2_fsize * sizeof(double));
++    d_nb2_outaccum = (double *)malloc(d_nb2_oasize * sizeof(double));
++    d_nb2_nsamps = 0;
++    d_nb2_saveidx = 0;
++
++    d_nb2_fft1 = new gr::fft::fft_real_fwd(d_nb2_fsize);
++    d_nb2_fft2 = new gr::fft::fft_real_rev(d_nb2_fsize);
++
++
++    arg = 2.0 * 3.1415926 / (double)d_nb2_fsize;
++    sum = 0.0;
++    for (i = 0; i < d_nb2_fsize; i++)
++    {
++        d_nb2_window[i] = sqrt (0.54 - 0.46 * cos((double)i * arg));
++        sum += d_nb2_window[i];
++    }
++    inv_coherent_gain = (double)d_nb2_fsize / sum;
++    for (i = 0; i < d_nb2_fsize; i++)
++        d_nb2_window[i] *= inv_coherent_gain;
++
++    d_nb2_g.msize = d_nb2_msize;
++    d_nb2_g.mask = d_nb2_mask;
++    d_nb2_g.lambda_y = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.lambda_d = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.prev_gamma = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.prev_mask = (double *)malloc(d_nb2_msize * sizeof(double));
++
++
++    d_nb2_g.gf1p5 = sqrt(3.1415926) / 2.0;
++    {
++        double tau = -128.0 / 8000.0 / log(0.98);
++        d_nb2_g.alpha = exp(-d_nb2_incr / d_nb2_rate / tau);
++    }
++    d_nb2_g.eps_floor = 1.0e-300;
++    d_nb2_g.gamma_max = 1000.0;
++    d_nb2_g.q = 0.2;
++    for (i = 0; i < d_nb2_g.msize; i++)
++    {
++        d_nb2_g.prev_mask[i] = 1.0;
++        d_nb2_g.prev_gamma[i] = 1.0;
++    }
++    d_nb2_g.gmax = 10000.0;
++
++    d_nb2_np.incr = d_nb2_incr;
++    d_nb2_np.rate = d_nb2_rate;
++    d_nb2_np.msize = d_nb2_msize;
++    d_nb2_np.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_np.lambda_d = d_nb2_g.lambda_d;
++
++    {
++        double tau = -128.0 / 8000.0 / log(0.7);
++        d_nb2_np.alphaCsmooth = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.96);
++        d_nb2_np.alphaMax = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.7);
++        d_nb2_np.alphaCmin = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.3);
++        d_nb2_np.alphaMin_max_value = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    d_nb2_np.snrq = -d_nb2_np.incr / (0.064 * d_nb2_np.rate);
++    {
++        double tau = -128.0 / 8000.0 / log(0.8);
++        d_nb2_np.betamax = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    d_nb2_np.invQeqMax = 0.5;
++    d_nb2_np.av = 2.12;
++    d_nb2_np.Dtime = 8.0 * 12.0 * 128.0 / 8000.0;
++    d_nb2_np.U = 8;
++    d_nb2_np.V = (int)(0.5 + (d_nb2_np.Dtime * d_nb2_np.rate / (d_nb2_np.U * d_nb2_np.incr)));
++    if (d_nb2_np.V < 4) d_nb2_np.V = 4;
++    if ((d_nb2_np.U = (int)(0.5 + (d_nb2_np.Dtime * d_nb2_np.rate / (d_nb2_np.V * d_nb2_np.incr)))) < 1) d_nb2_np.U = 1;
++    d_nb2_np.D = d_nb2_np.U * d_nb2_np.V;
++    interpM(&d_nb2_np.MofD, d_nb2_np.D, 18, Dvals, Mvals);
++    interpM(&d_nb2_np.MofV, d_nb2_np.V, 18, Dvals, Mvals);
++    d_nb2_np.invQbar_points[0] = 0.03;
++    d_nb2_np.invQbar_points[1] = 0.05;
++    d_nb2_np.invQbar_points[2] = 0.06;
++    d_nb2_np.invQbar_points[3] = 1.0e300;
++    {
++        double db;
++        db = 10.0 * log10(8.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[0] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(4.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[1] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(2.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[2] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(1.2) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[3] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++    }
++
++    d_nb2_np.p = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.alphaOptHat = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.alphaHat = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.sigma2N = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.pbar = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.p2bar = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.Qeq = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.bmin = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.bmin_sub = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.k_mod = (int *)malloc(d_nb2_np.msize * sizeof(int));
++    d_nb2_np.actmin = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.actmin_sub = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.lmin_flag = (int *)malloc(d_nb2_np.msize * sizeof(int));
++    d_nb2_np.pmin_u = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.actminbuff = (double**)malloc(d_nb2_np.U     * sizeof(double*));
++    for (i = 0; i < d_nb2_np.U; i++)
++        d_nb2_np.actminbuff[i] = (double *)malloc(d_nb2_np.msize * sizeof(double));
++
++    {
++        int k, ku;
++        d_nb2_np.alphaC = 1.0;
++        d_nb2_np.subwc = d_nb2_np.V;
++        d_nb2_np.amb_idx = 0;
++        for (k = 0; k < d_nb2_np.msize; k++) d_nb2_np.lambda_y[k] = 0.5;
++        memcpy(d_nb2_np.p, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.sigma2N, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.pbar, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.pmin_u, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        for (k = 0; k < d_nb2_np.msize; k++)
++        {
++            d_nb2_np.p2bar[k] = d_nb2_np.lambda_y[k] * d_nb2_np.lambda_y[k];
++            d_nb2_np.actmin[k] = 1.0e300;
++            d_nb2_np.actmin_sub[k] = 1.0e300;
++            for (ku = 0; ku < d_nb2_np.U; ku++)
++                d_nb2_np.actminbuff[ku][k] = 1.0e300;
++        }
++        memset(d_nb2_np.lmin_flag, 0, d_nb2_np.msize * sizeof(int));
++    }
++
++    d_nb2_nps.incr = d_nb2_incr;
++    d_nb2_nps.rate = d_nb2_rate;
++    d_nb2_nps.msize = d_nb2_msize;
++    d_nb2_nps.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_nps.lambda_d = d_nb2_g.lambda_d;
++
++    {
++        double tau = -128.0 / 8000.0 / log(0.8);
++        d_nb2_nps.alpha_pow = exp(-d_nb2_nps.incr / d_nb2_nps.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.9);
++        d_nb2_nps.alpha_Pbar = exp(-d_nb2_nps.incr / d_nb2_nps.rate / tau);
++    }
++    d_nb2_nps.epsH1 = pow(10.0, 15.0 / 10.0);
++    d_nb2_nps.epsH1r = d_nb2_nps.epsH1 / (1.0 + d_nb2_nps.epsH1);
++
++    d_nb2_nps.sigma2N = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.PH1y = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.Pbar = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.EN2y = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++
++    for (i = 0; i < d_nb2_nps.msize; i++)
++    {
++        d_nb2_nps.sigma2N[i] = 0.5;
++        d_nb2_nps.Pbar[i] = 0.5;
++    }
++
++    d_nb2_ae.msize = d_nb2_msize;
++    d_nb2_ae.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_ae.zetaThresh = 0.75;
++    d_nb2_ae.psi = 10.0;
++    d_nb2_ae.nmask = (double *)malloc(d_nb2_ae.msize * sizeof(double));
++
++    memset (d_nb2_inaccum, 0, d_nb2_iasize * sizeof (double));
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        memset (d_nb2_save[i], 0, d_nb2_fsize * sizeof (double));
++    memset (d_nb2_outaccum, 0, d_nb2_oasize * sizeof (double));
++    d_nb2_nsamps   = 0;
++    d_nb2_iainidx  = 0;
++    d_nb2_iaoutidx = 0;
++    d_nb2_oainidx  = d_nb2_init_oainidx;
++    d_nb2_oaoutidx = 0;
++    d_nb2_saveidx  = 0;
+ }
+ 
+ rx_nb_cc::~rx_nb_cc()
+ {
++    int i;
++
++    delete d_nb2_fft1;
++    delete d_nb2_fft2;
++    free(d_nb2_ae.nmask);
++    free(d_nb2_nps.EN2y);
++    free(d_nb2_nps.Pbar);
++    free(d_nb2_nps.PH1y);
++    free(d_nb2_nps.sigma2N);
++
++    for (i = 0; i < d_nb2_np.U; i++)
++        free(d_nb2_np.actminbuff[i]);
++    free(d_nb2_np.actminbuff);
++    free(d_nb2_np.pmin_u);
++    free(d_nb2_np.lmin_flag);
++    free(d_nb2_np.actmin_sub);
++    free(d_nb2_np.actmin);
++    free(d_nb2_np.k_mod);
++    free(d_nb2_np.bmin_sub);
++    free(d_nb2_np.bmin);
++    free(d_nb2_np.Qeq);
++    free(d_nb2_np.p2bar);
++    free(d_nb2_np.pbar);
++    free(d_nb2_np.sigma2N);
++    free(d_nb2_np.alphaHat);
++    free(d_nb2_np.alphaOptHat);
++    free(d_nb2_np.p);
++
++    free(d_nb2_g.prev_mask);
++    free(d_nb2_g.prev_gamma);
++    free(d_nb2_g.lambda_d);
++    free(d_nb2_g.lambda_y);
++    free(d_nb2_outaccum);
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        free(d_nb2_save[i]);
++    free(d_nb2_save);
++    free(d_nb2_mask);
++    free(d_nb2_inaccum);
++    free(d_nb2_window);
+ 
+ }
+ 
+@@ -68,30 +359,38 @@ int rx_nb_cc::work(int noutput_items,
+                    gr_vector_const_void_star &input_items,
+                    gr_vector_void_star &output_items)
+ {
+-    const gr_complex *in = (const gr_complex *) input_items[0];
+-    gr_complex *out = (gr_complex *) output_items[0];
++    const float *in = (const float *) input_items[0];
++    float *out = (float *) output_items[0];
+     int i;
+ 
+     boost::mutex::scoped_lock lock(d_mutex);
+ 
+     // copy data into output buffer then perform the processing on that buffer
+-    for (i = 0; i < noutput_items; i++)
++    if (noutput_items < d_nb2_bsize)
++        return 0;
++    else
+     {
+-        out[i] = in[i];
+-    }
++        for (i = 0; i < d_nb2_bsize; i++)
++        {
++            out[i] = in[i];
++        }
+ 
+-    if (d_nb1_on)
+-    {
+-        process_nb1(out, noutput_items);
+-    }
+-    if (d_nb2_on)
+-    {
+-        process_nb2(out, noutput_items);
++        if (d_nb2_on)
++        {
++            process_nb2(out, d_nb2_bsize);
++        }
++
++        if (d_nb1_on)
++        {
++            process_nb1(out, d_nb2_bsize);
++        }
++        return d_nb2_bsize;
+     }
+ 
+     return noutput_items;
+ }
+ 
++
+ /*! \brief Perform noise blanker 1 processing.
+  *  \param buf The data buffer holding gr_complex samples.
+  *  \param num The number of samples in the buffer.
+@@ -101,35 +400,156 @@ int rx_nb_cc::work(int noutput_items,
+  *
+  * FIXME: Needs different constants for higher sample rates?
+  */
+-void rx_nb_cc::process_nb1(gr_complex *buf, int num)
++void rx_nb_cc::process_nb1(float *buf, int num)
+ {
+-    float cmag;
+-    gr_complex zero(0.0, 0.0);
+ 
+-    for (int i = 0; i < num; i++)
++    int i, j, idx;
++    double c0, c1;
++    double y, error, sigma, inv_sigp;
++    double nel, nev;
++    for (i = 0; i < num; i++)
+     {
+-        cmag = abs(buf[i]);
+-        d_delay[d_sigidx] = buf[i];
+-        d_avgmag_nb1 = 0.999*d_avgmag_nb1 + 0.001*cmag;
++        d_nb1_d[d_nb1_in_idx] = buf[i];
++
++        y = 0;
++        sigma = 0;
++
++        for (j = 0; j < d_nb1_n_taps; j++)
++        {
++            idx = (d_nb1_in_idx + j + d_nb1_delay) & d_nb1_mask;
++            y += d_nb1_w[j] * d_nb1_d[idx];
++            sigma += d_nb1_d[idx] * d_nb1_d[idx];
++        }
++        inv_sigp = 1.0 / (sigma + 1e-10);
++        error = d_nb1_d[d_nb1_in_idx] - y;
++
++        buf[i] = (float)(y * 1.5f); // gain
++
++        if((nel = error * (1.0 - d_nb1_two_mu * sigma * inv_sigp)) < 0.0) nel = -nel;
++        if((nev = d_nb1_d[d_nb1_in_idx] - (1.0 - d_nb1_two_mu * d_nb1_ngamma) * y - d_nb1_two_mu * error * sigma * inv_sigp) < 0.0) 
++            nev = -nev;
++        if (nev < nel)
++        {
++            if((d_nb1_lidx += d_nb1_lincr) > d_nb1_lidx_max) d_nb1_lidx = d_nb1_lidx_max;
++            else
++            if((d_nb1_lidx -= d_nb1_ldecr) < d_nb1_lidx_min) d_nb1_lidx = d_nb1_lidx_min;
++        }
++        d_nb1_ngamma = d_nb1_gamma * (d_nb1_lidx * d_nb1_lidx) * (d_nb1_lidx * d_nb1_lidx) * d_nb1_den_mult;
+ 
+-        if ((d_hangtime == 0) && (cmag > (d_thld_nb1*d_avgmag_nb1)))
+-            d_hangtime = 7;
++        c0 = 1.0 - d_nb1_two_mu * d_nb1_ngamma;
++        c1 = d_nb1_two_mu * error * inv_sigp;
+ 
+-        if (d_hangtime > 0)
++        for (j = 0; j < d_nb1_n_taps; j++)
+         {
+-            buf[i] = zero;
+-            d_hangtime--;
++            idx = (d_nb1_in_idx + j + d_nb1_delay) & d_nb1_mask;
++            d_nb1_w[j] = c0 * d_nb1_w[j] + c1 * d_nb1_d[idx];
++        }
++        d_nb1_in_idx = (d_nb1_in_idx + d_nb1_mask) & d_nb1_mask;
++    }
++}
++
++
++
++// Helper functions
++double bessI0 (double x)
++{
++    double res, p;
++    if (x == 0.0)
++        res = 1.0;
++    else
++    {
++        if (x < 0.0) x = -x;
++        if (x <= 3.75)
++        {
++            p = x / 3.75;
++            p = p * p;
++            res = ((((( 0.0045813  * p
++                      + 0.0360768) * p
++                      + 0.2659732) * p
++                      + 1.2067492) * p
++                      + 3.0899424) * p
++                      + 3.5156229) * p
++                      + 1.0;
+         }
+         else
+         {
+-            buf[i] = d_delay[d_delidx];
++            p = 3.75 / x;
++            res = exp (x) / sqrt (x)
++                  * (((((((( + 0.00392377  * p
++                             - 0.01647633) * p
++                             + 0.02635537) * p
++                             - 0.02057706) * p
++                             + 0.00916281) * p
++                             - 0.00157565) * p
++                             + 0.00225319) * p
++                             + 0.01328592) * p
++                             + 0.39894228);
+         }
++    }
++    return res;
++}
+ 
+-        d_sigidx = (d_sigidx + 7) & 7;
+-        d_delidx = (d_delidx + 7) & 7;
++
++double bessI1 (double x)
++{
++    double res, p;
++    if (x == 0.0)
++        res = 0.0;
++    else
++    {
++        if (x < 0.0) x = -x;
++        if (x <= 3.75)
++        {
++            p = x / 3.75;
++            p = p * p;
++            res = x 
++                  * (((((( 0.00032411  * p
++                         + 0.00301532) * p
++                         + 0.02658733) * p
++                         + 0.15084934) * p
++                         + 0.51498869) * p
++                         + 0.87890594) * p
++                         + 0.5);
++        }
++        else
++        {
++            p = 3.75 / x;
++            res = exp (x) / sqrt (x)
++                  * (((((((( - 0.00420059  * p
++                             + 0.01787654) * p
++                             - 0.02895312) * p
++                             + 0.02282967) * p
++                             - 0.01031555) * p
++                             + 0.00163801) * p
++                             - 0.00362018) * p
++                             - 0.03988024) * p
++                             + 0.39894228);
++        }
+     }
++    return res;
+ }
+ 
++
++void rx_nb_cc::interpM (double* res, double x, int nvals, double* xvals, double* yvals)
++{
++    if (x <= xvals[0])
++        *res = yvals[0];
++    else if (x >= xvals[nvals - 1])
++        *res = yvals[nvals - 1];
++    else
++    {
++        int idx = 0;
++        double xllow, xlhigh, frac;
++        while (x >= xvals[idx])  idx++;
++        xllow = log10 (xvals[idx - 1]);
++        xlhigh = log10(xvals[idx]);
++        frac = (log10 (x) - xllow) / (xlhigh - xllow);
++        *res = yvals[idx - 1] + frac * (yvals[idx] - yvals[idx - 1]);
++    }
++}
++
++
++
+ /*! \brief Perform noise blanker 2 processing.
+  *  \param buf The data buffer holding gr_complex samples.
+  *  \param num The number of samples in the buffer.
+@@ -139,21 +559,246 @@ void rx_nb_cc::process_nb1(gr_complex *buf, int num)
+  *
+  * FIXME: Needs different constants for higher sample rates?
+  */
+-void rx_nb_cc::process_nb2(gr_complex *buf, int num)
++void rx_nb_cc::process_nb2(float *buf, int num)
+ {
+-    float cmag;
+-    gr_complex c1(0.75);
+-    gr_complex c2(0.25);
++        int i, j, k, sbuff, sbegin;
++        double g1;
++        double f0, f1, f2, f3;
++        double sum_prev_p;
++        double sum_lambda_y;
++        double alphaCtilda;
++        double sum_prev_sigma2N;
++        double alphaMin, SNR;
++        double beta, varHat, invQeq;
++        double invQbar;
++        double bc;
++        double QeqTilda, QeqTildaSub;
++        double noise_slope_max;
++        int m;
++        int N, n;
++        double sumPre, sumPost, zeta, zetaT;
++
++
++        for (i = 0; i < num; i ++)
++        {
++            d_nb2_inaccum[d_nb2_iainidx] = (double)buf[i];
++            d_nb2_iainidx = (d_nb2_iainidx + 1) % d_nb2_iasize;
++        }
++        d_nb2_nsamps += num;
++        while (d_nb2_nsamps >= d_nb2_fsize)
++        {
++            float *in1 = d_nb2_fft1->get_inbuf();
++            for (i = 0, j = d_nb2_iaoutidx; i < d_nb2_fsize; i++, j = (j + 1) % d_nb2_iasize)
++                in1[i] = (float)d_nb2_window[i] * (float)d_nb2_inaccum[j];
++            d_nb2_iaoutidx = (d_nb2_iaoutidx + d_nb2_incr) % d_nb2_iasize;
++            d_nb2_nsamps -= d_nb2_incr;
++
++            d_nb2_fft1->execute();
++
++            // calc_gain
++            gr_complex *out1 = d_nb2_fft1->get_outbuf();
++            for (k = 0; k < d_nb2_g.msize; k++)
++            {
++                d_nb2_g.lambda_y[k] = out1[k].real()*out1[k].real();
++                d_nb2_g.lambda_y[k] += out1[k].imag()*out1[k].imag();
++            }
++
++
++            // LambdaD
++            sum_prev_p = 0.0;
++            sum_lambda_y = 0.0;
++            sum_prev_sigma2N = 0.0;
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                sum_prev_p += d_nb2_np.p[k];
++                sum_lambda_y += d_nb2_np.lambda_y[k];
++                sum_prev_sigma2N += d_nb2_np.sigma2N[k];
++            }
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                f0 = d_nb2_np.p[k] / d_nb2_np.sigma2N[k] - 1.0;
++                d_nb2_np.alphaOptHat[k] = 1.0 / (1.0 + f0 * f0);
++            }
++            SNR = sum_prev_p / sum_prev_sigma2N;
++            alphaMin = std::min(d_nb2_np.alphaMin_max_value, pow (SNR, d_nb2_np.snrq));
++            for (k = 0; k < d_nb2_np.msize; k++)
++                if (d_nb2_np.alphaOptHat[k] < alphaMin) d_nb2_np.alphaOptHat[k] = alphaMin;
++            f1 = sum_prev_p / sum_lambda_y - 1.0;
++            alphaCtilda = 1.0 / (1.0 + f1 * f1);
++            d_nb2_np.alphaC = d_nb2_np.alphaCsmooth * d_nb2_np.alphaC + (1.0 - d_nb2_np.alphaCsmooth) * std::max (alphaCtilda, d_nb2_np.alphaCmin);
++            f2 = d_nb2_np.alphaMax * d_nb2_np.alphaC;
++            for (k = 0; k < d_nb2_np.msize; k++)
++                d_nb2_np.alphaHat[k] = f2 * d_nb2_np.alphaOptHat[k];
++            for (k = 0; k < d_nb2_np.msize; k++)
++                d_nb2_np.p[k] = d_nb2_np.alphaHat[k] * d_nb2_np.p[k] + (1.0 - d_nb2_np.alphaHat[k]) * d_nb2_np.lambda_y[k];
++            invQbar = 0.0;
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                beta = std::min (d_nb2_np.betamax, d_nb2_np.alphaHat[k] * d_nb2_np.alphaHat[k]);
++                d_nb2_np.pbar[k] = beta * d_nb2_np.pbar[k] + (1.0 - beta) * d_nb2_np.p[k];
++                d_nb2_np.p2bar[k] = beta * d_nb2_np.p2bar[k] + (1.0 - beta) * d_nb2_np.p[k] * d_nb2_np.p[k];
++                varHat = d_nb2_np.p2bar[k] - d_nb2_np.pbar[k] * d_nb2_np.pbar[k];
++                invQeq = varHat / (2.0 * d_nb2_np.sigma2N[k] * d_nb2_np.sigma2N[k]);
++                if (invQeq > d_nb2_np.invQeqMax) invQeq = d_nb2_np.invQeqMax;
++                d_nb2_np.Qeq[k] = 1.0 / invQeq;
++                invQbar += invQeq;
++            }
++            invQbar /= (double)d_nb2_np.msize;
++            bc = 1.0 + d_nb2_np.av * sqrt (invQbar);
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                QeqTilda    = (d_nb2_np.Qeq[k] - 2.0 * d_nb2_np.MofD) / (1.0 - d_nb2_np.MofD);
++                QeqTildaSub = (d_nb2_np.Qeq[k] - 2.0 * d_nb2_np.MofV) / (1.0 - d_nb2_np.MofV);
++                d_nb2_np.bmin[k]     = 1.0 + 2.0 * (d_nb2_np.D - 1.0) / QeqTilda;
++                d_nb2_np.bmin_sub[k] = 1.0 + 2.0 * (d_nb2_np.V - 1.0) / QeqTildaSub;
++            }
++            memset (d_nb2_np.k_mod, 0, d_nb2_np.msize * sizeof (int));
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                f3 = d_nb2_np.p[k] * d_nb2_np.bmin[k] * bc;
++                if (f3 < d_nb2_np.actmin[k])
++                {
++                    d_nb2_np.actmin[k] = f3;
++                    d_nb2_np.actmin_sub[k] = d_nb2_np.p[k] * d_nb2_np.bmin_sub[k] * bc;
++                    d_nb2_np.k_mod[k] = 1;
++                }
++            }
++            if (d_nb2_np.subwc == d_nb2_np.V)
++            {
++                if      (invQbar < d_nb2_np.invQbar_points[0]) noise_slope_max = d_nb2_np.nsmax[0];
++                else if (invQbar < d_nb2_np.invQbar_points[1]) noise_slope_max = d_nb2_np.nsmax[1];
++                else if (invQbar < d_nb2_np.invQbar_points[2]) noise_slope_max = d_nb2_np.nsmax[2];
++                else                                        noise_slope_max = d_nb2_np.nsmax[3];
++                for (k = 0; k < d_nb2_np.msize; k++)
++                {
++                    int ku;
++                    double min;
++                    if (d_nb2_np.k_mod[k])
++                        d_nb2_np.lmin_flag[k] = 0;
++                    d_nb2_np.actminbuff[d_nb2_np.amb_idx][k] = d_nb2_np.actmin[k];
++                    min = 1.0e300;
++                    for (ku = 0; ku < d_nb2_np.U; ku++)
++                        if (d_nb2_np.actminbuff[ku][k] < min) min = d_nb2_np.actminbuff[ku][k];
++                    d_nb2_np.pmin_u[k] = min;
++                    if ((d_nb2_np.lmin_flag[k] == 1) 
++                        && (d_nb2_np.actmin_sub[k] < noise_slope_max * d_nb2_np.pmin_u[k])
++                        && (d_nb2_np.actmin_sub[k] >                   d_nb2_np.pmin_u[k]))
++                    {
++                        d_nb2_np.pmin_u[k] = d_nb2_np.actmin_sub[k];
++                        for (ku = 0; ku < d_nb2_np.U; ku++)
++                            d_nb2_np.actminbuff[ku][k] = d_nb2_np.actmin_sub[k];
++                    }
++                    d_nb2_np.lmin_flag[k] = 0;
++                    d_nb2_np.actmin[k] = 1.0e300;
++                    d_nb2_np.actmin_sub[k] = 1.0e300;
++                }
++                if (++d_nb2_np.amb_idx == d_nb2_np.U) d_nb2_np.amb_idx = 0;
++                d_nb2_np.subwc = 1;
++            }
++            else 
++            {
++                if (d_nb2_np.subwc > 1)
++                {
++                    for (k = 0; k < d_nb2_np.msize; k++)
++                    {
++                        if (d_nb2_np.k_mod[k])
++                        {
++                            d_nb2_np.lmin_flag[k] = 1;
++                            d_nb2_np.sigma2N[k] = std::min (d_nb2_np.actmin_sub[k], d_nb2_np.pmin_u[k]);
++                            d_nb2_np.pmin_u[k] = d_nb2_np.sigma2N[k];
++                        }
++                    }
++                }
++                ++d_nb2_np.subwc;
++            }
++            memcpy (d_nb2_np.lambda_d, d_nb2_np.sigma2N, d_nb2_np.msize * sizeof (double));
++
++
++            // gain mode 0 (not 2)
++            double gamma, eps_hat, v;
++            for (k = 0; k < d_nb2_msize; k++)
++            {
++                gamma = std::min (d_nb2_g.lambda_y[k] / d_nb2_g.lambda_d[k], d_nb2_g.gamma_max);
++                eps_hat = d_nb2_g.alpha * d_nb2_g.prev_mask[k] * d_nb2_g.prev_mask[k] * d_nb2_g.prev_gamma[k]
++                    + (1.0 - d_nb2_g.alpha) * std::max (gamma - 1.0, d_nb2_g.eps_floor);
++                v = (eps_hat / (1.0 + eps_hat)) * gamma;
++                d_nb2_g.mask[k] = d_nb2_g.gf1p5 * sqrt (v) / gamma * exp (- 0.5 * v)
++                    * ((1.0 + v) * bessI0 (0.5 * v) + v * bessI1 (0.5 * v));
++                {
++                    double v2 = std::min (v, 700.0);
++                    double eta = d_nb2_g.mask[k] * d_nb2_g.mask[k] * d_nb2_g.lambda_y[k] / d_nb2_g.lambda_d[k];
++                    double eps = eta / (1.0 - d_nb2_g.q);
++                    double witchHat = (1.0 - d_nb2_g.q) / d_nb2_g.q * exp (v2) / (1.0 + eps);
++                    d_nb2_g.mask[k] *= witchHat / (1.0 + witchHat);
++                }
++                if (d_nb2_g.mask[k] > d_nb2_g.gmax) d_nb2_g.mask[k] = d_nb2_g.gmax;
++                if (d_nb2_g.mask[k] != d_nb2_g.mask[k]) d_nb2_g.mask[k] = 0.01;
++                d_nb2_g.prev_gamma[k] = gamma;
++                d_nb2_g.prev_mask[k] = d_nb2_g.mask[k];
++            }
++
++
++            sumPre = 0.0;
++            sumPost = 0.0;
++            for (k = 0; k < d_nb2_ae.msize; k++)
++            {
++                sumPre += d_nb2_ae.lambda_y[k];
++                sumPost += d_nb2_mask[k] * d_nb2_mask[k] * d_nb2_ae.lambda_y[k];
++            }
++            zeta = sumPost / sumPre;
++            if (zeta >= d_nb2_ae.zetaThresh)
++                zetaT = 1.0;
++            else
++                zetaT = zeta;
++            if (zetaT == 1.0)
++                N = 1;
++            else
++                N = 1 + 2 * (int)(0.5 + d_nb2_ae.psi * (1.0 - zetaT / d_nb2_ae.zetaThresh));
++            n = N / 2;
++            for (k = n; k < (d_nb2_ae.msize - n); k++)
++            {
++                d_nb2_ae.nmask[k] = 0.0;
++                for (m = k - n; m <= (k + n); m++)
++                    d_nb2_ae.nmask[k] += d_nb2_mask[m];
++                d_nb2_ae.nmask[k] /= (double)N;
++            }
++            memcpy (d_nb2_mask + n, d_nb2_ae.nmask, (d_nb2_ae.msize - 2 * n) * sizeof (double));
++
++            // end calc_gain
++            gr_complex *in2 = d_nb2_fft2->get_inbuf();
++            for (i = 0; i < d_nb2_msize; i++)
++            {
++                g1 = d_nb2_gain * d_nb2_mask[i];
++                in2[i] = gr_complex(g1 * out1[i].real(),g1 * out1[i].imag());
++            }
++
++            d_nb2_fft2->execute();
++
++            float *out2 = d_nb2_fft2->get_outbuf();
++            for (i = 0; i < d_nb2_fsize; i++)
++                d_nb2_save[d_nb2_saveidx][i] = d_nb2_window[i] * out2[i];
++            for (i = d_nb2_ovrlp; i > 0; i--)
++            {
++                sbuff = (d_nb2_saveidx + i) % d_nb2_ovrlp;
++                sbegin = d_nb2_incr * (d_nb2_ovrlp - i);
++                for (j = sbegin, k = d_nb2_oainidx; j < d_nb2_incr + sbegin; j++, k = (k + 1) % d_nb2_oasize)
++                {
++                    if ( i == d_nb2_ovrlp)
++                        d_nb2_outaccum[k]  = d_nb2_save[sbuff][j];
++                    else
++                        d_nb2_outaccum[k] += d_nb2_save[sbuff][j];
++                }
++            }
++            d_nb2_saveidx = (d_nb2_saveidx + 1) % d_nb2_ovrlp;
++            d_nb2_oainidx = (d_nb2_oainidx + d_nb2_incr) % d_nb2_oasize;
++        }
++        for (i = 0; i < num; i++)
++        {
++            buf[i] = (float)d_nb2_outaccum[d_nb2_oaoutidx] * 1.5f;
++            d_nb2_oaoutidx = (d_nb2_oaoutidx + 1) % d_nb2_oasize;
++        }
+ 
+-    for (int i = 0; i < num; i++)
+-    {
+-        cmag = abs(buf[i]);
+-        d_avgsig = c1*d_avgsig + c2*buf[i];
+-        d_avgmag_nb2 = 0.999*d_avgmag_nb2 + 0.001*cmag;
+ 
+-        if (cmag > d_thld_nb2*d_avgmag_nb2)
+-            buf[i] = d_avgsig;
+-    }
+ }
+ 
+ void rx_nb_cc::set_threshold1(float threshold)
+diff --git src/dsp/rx_noise_blanker_cc.h src/dsp/rx_noise_blanker_cc.h
+index 8b4907e..a99924b 100644
+--- src/dsp/rx_noise_blanker_cc.h
++++ src/dsp/rx_noise_blanker_cc.h
+@@ -25,6 +25,7 @@
+ 
+ #include <gnuradio/sync_block.h>
+ #include <gnuradio/gr_complex.h>
++#include <gnuradio/fft/fft.h>
+ #include <boost/thread/mutex.hpp>
+ 
+ class rx_nb_cc;
+@@ -60,22 +61,46 @@ protected:
+ 
+ public:
+     ~rx_nb_cc();
++    void forecast (int noutput_items, gr_vector_int &ninput_items_required);
+ 
+     int work(int noutput_items,
+              gr_vector_const_void_star &input_items,
+              gr_vector_void_star &output_items);
+ 
+     void set_sample_rate(double sample_rate) { d_sample_rate = sample_rate; }
+-    void set_nb1_on(bool nb1_on) { d_nb1_on = nb1_on; }
+-    void set_nb2_on(bool nb2_on) { d_nb2_on = nb2_on; }
++    void set_nb1_on(bool nb1_on) 
++    {
++        memset (d_nb1_d, 0, sizeof(double) * 2048);
++        memset (d_nb1_w, 0, sizeof(double) * 2048);
++        d_nb1_in_idx = 0;
++        d_nb1_on = nb1_on; 
++    }
++    void set_nb2_on(bool nb2_on) 
++    {
++        memset (d_nb2_inaccum, 0, d_nb2_iasize * sizeof (double));
++        for (int i = 0; i < d_nb2_ovrlp; i++)
++            memset (d_nb2_save[i], 0, d_nb2_fsize * sizeof (double));
++        memset (d_nb2_outaccum, 0, d_nb2_oasize * sizeof (double));
++        d_nb2_nsamps   = 0;
++        d_nb2_iainidx  = 0;
++        d_nb2_iaoutidx = 0;
++        d_nb2_oainidx  = d_nb2_init_oainidx;
++        d_nb2_oaoutidx = 0;
++        d_nb2_saveidx  = 0;
++        d_nb2_on = nb2_on; 
++    }
++
+     bool get_nb1_on() { return d_nb1_on; }
+     bool get_nb2_on() { return d_nb2_on; }
+     void set_threshold1(float threshold);
+     void set_threshold2(float threshold);
+ 
+ private:
+-    void process_nb1(gr_complex *buf, int num);
+-    void process_nb2(gr_complex *buf, int num);
++    void process_nb1(float *buf, int num);
++    void process_nb2(float *buf, int num);
++    void interpM (double* res, double x, int nvals, double* xvals, double* yvals);
++
++
+ 
+ private:
+     boost::mutex  d_mutex;  /*! Used to lock internal data while processing or setting parameters. */
+@@ -89,8 +114,145 @@ private:
+     float  d_avgmag_nb2;    /*! Average magnitude. */
+     gr_complex d_avgsig, d_delay[8];
+     int    d_delidx, d_sigidx, d_hangtime;   // FIXME: need longer buffer for higher sampel rates?
++    int    d_nb1_state;
++    int    d_nb2_state;
++
++
++    // NB1 parameters
++    int d_nb1_dline_size;
++    int d_nb1_mask;
++    int d_nb1_n_taps;
++    int d_nb1_delay;
++    double d_nb1_two_mu;
++    double ed_nb1_gamma;
++    int d_nb1_in_idx;
++    double d_nb1_lidx;
++    double d_nb1_lidx_min;
++    double d_nb1_lidx_max;
++    double d_nb1_ngamma;
++    double d_nb1_gamma;
++    double d_nb1_den_mult;
++    double d_nb1_lincr;
++    double d_nb1_ldecr;
++    double d_nb1_d[2048];
++    double d_nb1_w[2048];
++
++    // NB2 parameters
++    int d_nb2_fsize;
++    int d_nb2_bsize;
++    int d_nb2_ovrlp;
++    int d_nb2_incr;
++    double* d_nb2_window;
++    int d_nb2_iasize;
++    double* d_nb2_inaccum;
++    double* d_nb2_forfftin;
++    gr_complex* d_nb2_forfftout;
++    int d_nb2_msize;
++    double* d_nb2_mask;
++    gr_complex* d_nb2_revfftin;
++    double* d_nb2_revfftout;
++    double** d_nb2_save;
++    int d_nb2_oasize;
++    double* d_nb2_outaccum;
++    double d_nb2_rate;
++    double d_nb2_ogain;
++    double d_nb2_gain;
++    int d_nb2_nsamps;
++    int d_nb2_iainidx;
++    int d_nb2_iaoutidx;
++    int d_nb2_init_oainidx;
++    int d_nb2_oainidx;
++    int d_nb2_oaoutidx;
++    int d_nb2_saveidx;
++    struct _g
++    {
++        double msize;
++        double* mask;
++        double* y;
++        double* lambda_y;
++        double* lambda_d;
++        double* prev_mask;
++        double* prev_gamma;
++        double gf1p5;
++        double alpha;
++        double eps_floor;
++        double gamma_max;
++        double q;
++        double gmax;
++    } d_nb2_g;
++    struct _npest
++    {
++        int incr;
++        double rate;
++        int msize;
++        double* lambda_y;
++        double* lambda_d;
++        double* p;
++        double* alphaOptHat;
++        double alphaC;
++        double alphaCsmooth;
++        double alphaCmin;
++        double* alphaHat;
++        double alphaMax;
++        double* sigma2N;
++        double alphaMin_max_value;
++        double snrq;
++        double betamax;
++        double* pbar;
++        double* p2bar;
++        double invQeqMax;
++        double av;
++        double* Qeq;
++        int U;
++        double Dtime;
++        int V;
++        int D;
++        double MofD;
++        double MofV;
++        double* bmin;
++        double* bmin_sub;
++        int* k_mod;
++        double* actmin;
++        double* actmin_sub;
++        int subwc;
++        int* lmin_flag;
++        double* pmin_u;
++        double invQbar_points[4];
++        double nsmax[4];
++        double** actminbuff;
++        int amb_idx;
++    } d_nb2_np;
++    struct _npests
++    {
++        int incr;
++        double rate;
++        int msize;
++        double* lambda_y;
++        double* lambda_d;
++        
++        double alpha_pow;
++        double alpha_Pbar;
++        double epsH1;
++        double epsH1r;
++
++        double* sigma2N;
++        double* PH1y;
++        double* Pbar;
++        double* EN2y;
++    } d_nb2_nps;
++    struct _ae
++    {
++        int msize;
++        double* lambda_y;
++        double zetaThresh;
++        double psi;
++        double* nmask;
++    } d_nb2_ae;
++    gr::fft::fft_real_fwd  *d_nb2_fft1;
++    gr::fft::fft_real_rev  *d_nb2_fft2;
+ 
+ };
+ 
+ 
++
+ #endif /* RX_NB_CC_H */
+diff --git src/qtgui/CMakeLists.txt src/qtgui/CMakeLists.txt
+index 38db002..677858f 100644
+--- src/qtgui/CMakeLists.txt
++++ src/qtgui/CMakeLists.txt
+@@ -7,6 +7,8 @@ add_source_files(SRCS_LIST
+ 	agc_options.h
+ 	audio_options.cpp
+ 	audio_options.h
++	bandplan.cpp
++	bandplan.h
+ 	bookmarks.cpp
+ 	bookmarks.h
+ 	bookmarkstablemodel.cpp
+@@ -44,6 +46,8 @@ add_source_files(SRCS_LIST
+ 	plotter.h
+ 	qtcolorpicker.cpp
+ 	qtcolorpicker.h
++        dxc_spots.cpp
++        dxc_options.cpp
+ )
+ 
+ #######################################################################################################################
+@@ -62,5 +66,6 @@ add_source_files(UI_SRCS_LIST
+ 	ioconfig.ui
+ 	iq_tool.ui
+ 	nb_options.ui
++        dxc_options.ui
+ )
+ 
+diff --git src/qtgui/bandplan.cpp src/qtgui/bandplan.cpp
+new file mode 100644
+index 0000000..25a9d96
+--- /dev/null
++++ src/qtgui/bandplan.cpp
+@@ -0,0 +1,112 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <Qt>
++#include <QFile>
++#include <QStringList>
++#include <QTextStream>
++#include <QString>
++#include <QSet>
++#include <algorithm>
++#include "bandplan.h"
++#include <stdio.h>
++#include <wchar.h>
++
++BandPlan* BandPlan::m_pThis = 0;
++
++BandPlan::BandPlan()
++{
++    
++}
++
++void BandPlan::create()
++{
++    m_pThis = new BandPlan;
++}
++
++BandPlan& BandPlan::Get()
++{
++    return *m_pThis;
++}
++
++void BandPlan::setConfigDir(const QString& cfg_dir)
++{
++    m_bandPlanFile = cfg_dir + "/bandplan.csv";
++    printf("BandPlanFile is %s\n", m_bandPlanFile.toStdString().c_str());
++}
++
++bool BandPlan::load()
++{
++    QFile file(m_bandPlanFile);
++    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
++    
++    m_BandInfoList.clear();
++    
++    while (!file.atEnd())
++    {
++        QString line = QString::fromUtf8(file.readLine().trimmed());
++        if(line.isEmpty() || line.startsWith("#"))
++            continue;
++
++        QStringList strings = line.split(",");
++
++        if (strings.count() < 6){
++            printf("BandPlan: Ignoring Line:\n  %s\n", line.toLatin1().data());
++        } else {
++            BandInfo info;
++            info.minFrequency = strings[0].toLongLong();
++            info.maxFrequency = strings[1].toLongLong();
++            info.modulation   = strings[2].trimmed();
++            info.step         = strings[3].toInt();
++            info.color        = QColor(strings[4].trimmed());
++            info.name         = strings[5].trimmed();
++
++            m_BandInfoList.append(info);
++        }
++    }
++    file.close();
++    
++    emit BandPlanChanged();
++    return true;
++}
++
++QList<BandInfo> BandPlan::getBandsInRange(qint64 low, qint64 high)
++{
++    QList<BandInfo> found;
++    for (int i = 0; i < m_BandInfoList.size(); i++) {
++        if(m_BandInfoList[i].maxFrequency < low) continue;
++        if(m_BandInfoList[i].minFrequency > high) continue;
++        found.append(m_BandInfoList[i]);
++    }
++    return found;
++}
++
++QList<BandInfo> BandPlan::getBandsEncompassing(qint64 freq)
++{
++    QList<BandInfo> found;
++    for (int i = 0; i < m_BandInfoList.size(); i++) {
++        if(m_BandInfoList[i].maxFrequency < freq) continue;
++        if(m_BandInfoList[i].minFrequency > freq) continue;
++        found.append(m_BandInfoList[i]);
++    }
++    return found;
++}
+\ No newline at end of file
+diff --git src/qtgui/bandplan.h src/qtgui/bandplan.h
+new file mode 100644
+index 0000000..115dcda
+--- /dev/null
++++ src/qtgui/bandplan.h
+@@ -0,0 +1,83 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#ifndef BANDPLAN_H
++#define BANDPLAN_H
++
++#include <QtGlobal>
++#include <QObject>
++#include <QString>
++#include <QMap>
++#include <QList>
++#include <QStringList>
++#include <QColor>
++
++
++
++struct BandInfo
++{
++    qint64  minFrequency;
++    qint64  maxFrequency;
++    QString name;
++    QString modulation;
++    qint64  step;
++    QColor  color;
++
++    BandInfo()
++    {
++        this->minFrequency = 0;
++        this->maxFrequency = 0;
++        this->step = 1;
++    }
++
++    bool operator<(const BandInfo &other) const
++    {
++        return minFrequency < other.minFrequency;
++    }
++};
++
++class BandPlan : public QObject
++{
++    Q_OBJECT
++public:
++    // This is a Singleton Class now because you can not send qt-signals from static functions.
++    static void create();
++    static BandPlan& Get();
++    bool load();
++    int size() { return m_BandInfoList.size(); }
++    BandInfo& getBand(int i) { return m_BandInfoList[i]; }
++    QList<BandInfo> getBandsInRange(qint64 low, qint64 high);
++    QList<BandInfo> getBandsEncompassing(qint64 freq);
++
++    void setConfigDir(const QString&);
++
++private:
++    BandPlan(); // Singleton Constructor is private.
++    QList<BandInfo>  m_BandInfoList;
++    QString          m_bandPlanFile;
++    static BandPlan* m_pThis;
++
++signals:
++    void BandPlanChanged(void);
++};
++
++#endif // BANDPLAN_H
+diff --git src/qtgui/dockaudio.cpp src/qtgui/dockaudio.cpp
+index ff920ec..c20b07e 100644
+--- src/qtgui/dockaudio.cpp
++++ src/qtgui/dockaudio.cpp
+@@ -74,6 +74,7 @@ DockAudio::DockAudio(QWidget *parent) :
+     ui->audioSpectrum->setFilterBoxEnabled(false);
+     ui->audioSpectrum->setCenterLineEnabled(false);
+     ui->audioSpectrum->setBookmarksEnabled(false);
++    ui->audioSpectrum->setBandPlanEnabled(false);
+     ui->audioSpectrum->setFftRange(-80., 0.);
+     ui->audioSpectrum->setVdivDelta(40);
+     ui->audioSpectrum->setHdivDelta(40);
+diff --git src/qtgui/dockfft.cpp src/qtgui/dockfft.cpp
+index e91cfa1..3ec577f 100644
+--- src/qtgui/dockfft.cpp
++++ src/qtgui/dockfft.cpp
+@@ -274,6 +274,12 @@ void DockFft::saveSettings(QSettings *settings)
+     else
+         settings->remove("db_ranges_locked");
+ 
++    // Band Plan
++    if (ui->bandPlanCheckbox->isChecked())
++        settings->setValue("bandplan", true);
++    else
++        settings->remove("bandplan");
++
+     if (QString::compare(ui->cmapComboBox->currentData().toString(), DEFAULT_COLORMAP))
+         settings->setValue("waterfall_colormap", ui->cmapComboBox->currentData().toString());
+     else
+@@ -346,6 +352,10 @@ void DockFft::readSettings(QSettings *settings)
+     bool_val = settings->value("db_ranges_locked", false).toBool();
+     ui->lockButton->setChecked(bool_val);
+ 
++    bool_val = settings->value("bandplan", false).toBool();
++    ui->bandPlanCheckbox->setChecked(bool_val);
++    emit bandPlanChanged(bool_val);
++
+     QString cmap = settings->value("waterfall_colormap", "gqrx").toString();
+     ui->cmapComboBox->setCurrentIndex(ui->cmapComboBox->findData(cmap));
+ 
+@@ -522,6 +532,11 @@ void DockFft::on_peakDetectionButton_toggled(bool checked)
+     emit peakDetectionToggled(checked);
+ }
+ 
++void DockFft::on_bandPlanCheckbox_stateChanged(int state)
++{
++    emit bandPlanChanged(state == 2);
++}
++
+ /** lock button toggled */
+ void DockFft::on_lockButton_toggled(bool checked)
+ {
+diff --git src/qtgui/dockfft.h src/qtgui/dockfft.h
+index 5d8fb7f..b888cd1 100644
+--- src/qtgui/dockfft.h
++++ src/qtgui/dockfft.h
+@@ -67,6 +67,7 @@ signals:
+     void fftFillToggled(bool fill);                /*! Toggle filling area under FFT plot. */
+     void fftPeakHoldToggled(bool enable);          /*! Toggle peak hold in FFT area. */
+     void peakDetectionToggled(bool enabled);       /*! Enable peak detection in FFT plot */
++    void bandPlanChanged(bool enabled);            /*! Toggle Band Plan at bottom of FFT area. */
+     void wfColormapChanged(const QString &cmap);
+ 
+ public slots:
+@@ -93,6 +94,7 @@ private slots:
+     void on_peakHoldButton_toggled(bool checked);
+     void on_peakDetectionButton_toggled(bool checked);
+     void on_lockButton_toggled(bool checked);
++    void on_bandPlanCheckbox_stateChanged(int state);
+     void on_cmapComboBox_currentIndexChanged(int index);
+ 
+ private:
+diff --git src/qtgui/dockfft.ui src/qtgui/dockfft.ui
+index 033cc19..749eaaf 100644
+--- src/qtgui/dockfft.ui
++++ src/qtgui/dockfft.ui
+@@ -851,7 +851,7 @@
+             </property>
+            </widget>
+           </item>
+-          <item row="14" column="0" colspan="4">
++          <item row="15" column="0" colspan="4">
+            <spacer name="verticalSpacer">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+@@ -939,8 +939,7 @@
+              </size>
+             </property>
+             <property name="toolTip">
+-             <string>&lt;html&gt;Number of FFT points to calculate. Higher values will require more CPU time. This will not influence the number of points on the display since that parameter is adjusted automatically according to the display size.
+-&lt;/html&gt;</string>
++             <string>&lt;html&gt;Number of FFT points to calculate. Higher values will require more CPU time. This will not influence the number of points on the display since that parameter is adjusted automatically according to the display size.&lt;/html&gt;</string>
+             </property>
+             <property name="editable">
+              <bool>false</bool>
+@@ -1107,6 +1106,16 @@
+             </property>
+            </widget>
+           </item>
++          <item row="14" column="0" colspan="4">
++            <widget class="QCheckBox" name="bandPlanCheckbox">
++              <property name="toolTip">
++                <string>Enable Band Plan on bottom of spectrum</string>
++              </property>
++              <property name="text">
++                <string>Enable Band Plan</string>
++              </property>
++            </widget>
++          </item>
+          </layout>
+         </item>
+        </layout>
+diff --git src/qtgui/dxc_options.cpp src/qtgui/dxc_options.cpp
+new file mode 100644
+index 0000000..d30e2ca
+--- /dev/null
++++ src/qtgui/dxc_options.cpp
+@@ -0,0 +1,119 @@
++#include "dxc_options.h"
++#include "ui_dxc_options.h"
++#include <QTcpSocket>
++#include <QString>
++#include <QStringList>
++#include "dxc_spots.h"
++
++DXC_Options::DXC_Options(QWidget *parent) :
++    QDialog(parent),
++    ui(new Ui::DXC_Options)
++{
++    ui->setupUi(this);
++    TCPSocket = new QTcpSocket(this);
++    connect(TCPSocket, SIGNAL(connected()),this, SLOT(connected()));
++    connect(TCPSocket, SIGNAL(disconnected()),this, SLOT(disconnected()));
++    connect(TCPSocket, SIGNAL(readyRead()),this, SLOT(readyToRead()));
++}
++
++DXC_Options::~DXC_Options()
++{
++    delete ui;
++}
++
++/*! \brief Catch window close events.
++ *
++ * This method is called when the user closes the audio options dialog
++ * window using the window close icon. We catch the event and hide the
++ * dialog but keep it around for later use.
++ */
++void DXC_Options::closeEvent(QCloseEvent *event)
++{
++    hide();
++    event->ignore();
++}
++
++/*! \brief Catch window show events. */
++void DXC_Options::showEvent(QShowEvent * event)
++{
++    Q_UNUSED(event);
++}
++
++void DXC_Options::on_pushButton_DXCConnect_clicked()
++{
++    DXCSpots::Get().setSpotTimeout(ui->lineEdit_DXCSpottimeout->text().toInt());
++    TCPSocket->connectToHost(ui->lineEdit_DXCAddress->text(),ui->lineEdit_DXCPort->text().toInt());
++    if(!TCPSocket->waitForConnected(5000))
++    {
++        ui->plainTextEdit_DXCMonitor->appendPlainText(TCPSocket->errorString());
++    }
++}
++
++void DXC_Options::on_pushButton_DXCDisconnect_clicked()
++{
++    TCPSocket->close();
++}
++
++void DXC_Options::connected()
++{
++    ui->plainTextEdit_DXCMonitor->appendPlainText("Connected");
++    ui->pushButton_DXCConnect->setDisabled(true);
++    ui->pushButton_DXCDisconnect->setEnabled(true);
++}
++void DXC_Options::disconnected()
++{
++    ui->plainTextEdit_DXCMonitor->appendPlainText("Disconnected");
++    ui->pushButton_DXCDisconnect->setDisabled(true);
++    ui->pushButton_DXCConnect->setEnabled(true);
++}
++void DXC_Options::readyToRead()
++{
++    DXCSpotInfo info;
++    QStringList Spot;
++    QString incommingMessage;
++    incommingMessage = TCPSocket->readAll();
++    ui->plainTextEdit_DXCMonitor->appendPlainText(incommingMessage);
++    if(incommingMessage.contains("enter your call", Qt::CaseInsensitive))
++    {
++        TCPSocket->write(ui->lineEdit_DXCUSername->text().append("\r\n").toUtf8());
++        ui->plainTextEdit_DXCMonitor->appendPlainText(ui->lineEdit_DXCUSername->text().append("\r\n"));
++    }
++    else if(incommingMessage.contains("DX de", Qt::CaseInsensitive) &&
++            incommingMessage.contains(ui->lineEdit_DXCFilter->text()))
++    {
++        Spot = incommingMessage.split(" ", QString::SkipEmptyParts);
++        info.name = Spot[4].trimmed();
++        info.frequency = Spot[3].toDouble() * 1000;
++        DXCSpots::Get().add(info);
++    }
++}
++void DXC_Options::saveSettings(QSettings *settings)
++{
++    if (!settings)
++        return;
++
++    settings->beginGroup("dxcluster");
++
++    settings->setValue("DXCAddress", ui->lineEdit_DXCAddress->text());
++    settings->setValue("DXCPort", ui->lineEdit_DXCPort->text());
++    settings->setValue("DXCUsername", ui->lineEdit_DXCUSername->text());
++    settings->setValue("DXCSpotTimeout", ui->lineEdit_DXCSpottimeout->text());
++    settings->setValue("DXCFilter", ui->lineEdit_DXCFilter->text());
++
++    settings->endGroup();
++}
++
++void DXC_Options::readSettings(QSettings *settings)
++{
++    if (!settings)
++        return;
++
++    settings->beginGroup("dxcluster");
++    ui->lineEdit_DXCAddress->setText(settings->value("DXCAddress", "localhost").toString());
++    ui->lineEdit_DXCPort->setText(settings->value("DXCPort", "7300").toString());
++    ui->lineEdit_DXCUSername->setText(settings->value("DXCUsername", "nocall").toString());
++    ui->lineEdit_DXCSpottimeout->setText(settings->value("DXCSpotTimeout", "10").toString());
++    ui->lineEdit_DXCFilter->setText(settings->value("DXCFilter", "").toString());
++
++    settings->endGroup();
++}
+diff --git src/qtgui/dxc_options.h src/qtgui/dxc_options.h
+new file mode 100644
+index 0000000..b026c02
+--- /dev/null
++++ src/qtgui/dxc_options.h
+@@ -0,0 +1,42 @@
++#ifndef DXC_OPTIONS_H
++#define DXC_OPTIONS_H
++
++
++#include <QCloseEvent>
++#include <QShowEvent>
++#include <QTcpSocket>
++#include <QSettings>
++
++#include <QDialog>
++
++namespace Ui {
++class DXC_Options;
++}
++
++class DXC_Options : public QDialog
++{
++    Q_OBJECT
++
++public:
++    explicit DXC_Options(QWidget *parent = 0);
++    ~DXC_Options();
++
++    void closeEvent(QCloseEvent *event);
++    void showEvent(QShowEvent * event);
++    void saveSettings(QSettings *settings);
++    void readSettings(QSettings *settings);
++
++private slots:
++
++    void on_pushButton_DXCConnect_clicked();
++    void on_pushButton_DXCDisconnect_clicked();
++    void connected();
++    void disconnected();
++    void readyToRead();
++
++private:
++    Ui::DXC_Options *ui;
++    QTcpSocket *TCPSocket;
++};
++
++#endif // DXC_OPTIONS_H
+diff --git src/qtgui/dxc_options.ui src/qtgui/dxc_options.ui
+new file mode 100644
+index 0000000..c0d7387
+--- /dev/null
++++ src/qtgui/dxc_options.ui
+@@ -0,0 +1,168 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<ui version="4.0">
++ <class>DXC_Options</class>
++ <widget class="QDialog" name="DXC_Options">
++  <property name="geometry">
++   <rect>
++    <x>0</x>
++    <y>0</y>
++    <width>500</width>
++    <height>405</height>
++   </rect>
++  </property>
++  <property name="windowTitle">
++   <string>DXC Options</string>
++  </property>
++  <layout class="QGridLayout" name="gridLayout_2">
++   <item row="0" column="0">
++    <widget class="QGroupBox" name="groupBox">
++     <property name="title">
++      <string>DX Cluster Settings</string>
++     </property>
++     <layout class="QGridLayout" name="gridLayout">
++      <item row="1" column="0" colspan="2">
++       <widget class="QLabel" name="label_DXCSpottimeout">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Spot Timeout/min:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="2" column="0" colspan="2">
++       <widget class="QLabel" name="label_DXCUsername">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Username:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="0">
++       <widget class="QLabel" name="label_DXCAddress">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Address:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="5">
++       <widget class="QLabel" name="label_DXCPort">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Port:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="6">
++       <widget class="QLineEdit" name="lineEdit_DXCPort">
++        <property name="text">
++         <string>7300</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="1" colspan="4">
++       <widget class="QLineEdit" name="lineEdit_DXCAddress">
++        <property name="text">
++         <string>127.0.0.1</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="4">
++       <widget class="QLineEdit" name="lineEdit_DXCSpottimeout">
++        <property name="text">
++         <string>10</string>
++        </property>
++       </widget>
++      </item>
++      <item row="2" column="4">
++       <widget class="QLineEdit" name="lineEdit_DXCUSername">
++        <property name="text">
++         <string>nocall</string>
++        </property>
++       </widget>
++      </item>
++      <item row="3" column="4">
++       <widget class="QPushButton" name="pushButton_DXCDisconnect">
++        <property name="enabled">
++         <bool>false</bool>
++        </property>
++        <property name="text">
++         <string>Disconnect</string>
++        </property>
++       </widget>
++      </item>
++      <item row="3" column="6">
++       <widget class="QPushButton" name="pushButton_DXCConnect">
++        <property name="text">
++         <string>Connect</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="5">
++       <widget class="QLabel" name="label_DXCFilter">
++        <property name="text">
++         <string>Filter:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="6">
++       <widget class="QLineEdit" name="lineEdit_DXCFilter">
++        <property name="placeholderText">
++         <string>ex. CW or RTTY</string>
++        </property>
++       </widget>
++      </item>
++     </layout>
++    </widget>
++   </item>
++   <item row="1" column="0">
++    <widget class="QPlainTextEdit" name="plainTextEdit_DXCMonitor">
++     <property name="font">
++      <font>
++       <pointsize>10</pointsize>
++      </font>
++     </property>
++     <property name="documentTitle">
++      <string/>
++     </property>
++     <property name="readOnly">
++      <bool>true</bool>
++     </property>
++     <property name="plainText">
++      <string/>
++     </property>
++     <property name="textInteractionFlags">
++      <set>Qt::NoTextInteraction</set>
++     </property>
++     <property name="maximumBlockCount">
++      <number>240</number>
++     </property>
++     <property name="toolTipDuration" stdset="0">
++      <number>-3</number>
++     </property>
++    </widget>
++   </item>
++  </layout>
++ </widget>
++ <resources/>
++ <connections/>
++</ui>
+diff --git src/qtgui/dxc_spots.cpp src/qtgui/dxc_spots.cpp
+new file mode 100644
+index 0000000..0932b8d
+--- /dev/null
++++ src/qtgui/dxc_spots.cpp
+@@ -0,0 +1,107 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <Qt>
++#include <QFile>
++#include <QStringList>
++#include <QTextStream>
++#include <QString>
++#include <QSet>
++#include <algorithm>
++#include "dxc_spots.h"
++#include <stdio.h>
++#include <wchar.h>
++
++DXCSpots* DXCSpots::m_pThis = 0;
++
++DXCSpots::DXCSpots()
++{
++}
++
++void DXCSpots::create()
++{
++    m_pThis = new DXCSpots;
++}
++
++DXCSpots& DXCSpots::Get()
++{
++    return *m_pThis;
++}
++
++void DXCSpots::add(DXCSpotInfo &info)
++{
++    info.time = QTime::currentTime();
++    // check only callsign, so if present remove and re-append
++    // if check also frequency we can only change the time
++    if (m_DXCSpotList.contains(info))
++        m_DXCSpotList.removeAt(m_DXCSpotList.indexOf(info));
++    m_DXCSpotList.append(info);
++    std::stable_sort(m_DXCSpotList.begin(),m_DXCSpotList.end());
++    emit( DXCSpotsChanged() );
++}
++
++void DXCSpots::checkSpotTimeout()
++{
++    for (int i = 0; i < m_DXCSpotList.size(); i++)
++    {
++        if ( m_DXCSpotTimeout < m_DXCSpotList[i].time.secsTo(QTime::currentTime() ))
++        {
++            m_DXCSpotList.removeAt(i);
++        }
++    }
++    std::stable_sort(m_DXCSpotList.begin(),m_DXCSpotList.end());
++    emit( DXCSpotsChanged() );
++}
++
++void DXCSpots::remove(int index)
++{
++    m_DXCSpotList.removeAt(index);
++    emit( DXCSpotsChanged() );
++}
++
++QList<DXCSpotInfo> DXCSpots::getDXCSpotsInRange(qint64 low, qint64 high)
++{
++    DXCSpotInfo info;
++    info.frequency=low;
++    QList<DXCSpotInfo>::const_iterator lb = std::lower_bound(m_DXCSpotList.begin(), m_DXCSpotList.end(), info);
++    info.frequency=high;
++    QList<DXCSpotInfo>::const_iterator ub = std::upper_bound(m_DXCSpotList.begin(), m_DXCSpotList.end(), info);
++
++    QList<DXCSpotInfo> found;
++
++    while (lb != ub)
++    {
++        const DXCSpotInfo& info = *lb;
++        //if(info.IsActive())
++        {
++          found.append(info);
++        }
++        lb++;
++    }
++
++    return found;
++
++}
++
++const QColor DXCSpotInfo::GetColor() const
++{
++    return DXCSpotInfo::color;
++}
++
+diff --git src/qtgui/dxc_spots.h src/qtgui/dxc_spots.h
+new file mode 100644
+index 0000000..c7b0d00
+--- /dev/null
++++ src/qtgui/dxc_spots.h
+@@ -0,0 +1,91 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#ifndef DXC_SPOTS_H
++#define DXC_SPOTS_H
++
++#include <QtGlobal>
++#include <QObject>
++#include <QString>
++#include <QMap>
++#include <QList>
++#include <QStringList>
++#include <QColor>
++#include <QTime>
++
++struct DXCSpotInfo
++{
++    qint64  frequency;
++    QString name;
++    QTime time;
++    QColor color;
++
++    DXCSpotInfo()
++    {
++        this->frequency = 0;
++        this->time = QTime::currentTime();
++        this->color=(Qt::lightGray);
++    }
++
++    bool operator<(const DXCSpotInfo &other) const
++    {
++        return frequency < other.frequency;
++    }
++
++    bool operator==(const DXCSpotInfo &other) const
++    {
++        // we check only the name because frequency can change a bit
++        // not good for multi-operator with the case callsign
++        return name == other.name;
++    }
++
++    const QColor GetColor() const;
++};
++
++class DXCSpots : public QObject
++{
++    Q_OBJECT
++public:
++    // This is a Singleton Class now because you can not send qt-signals from static functions.
++    static void create();
++    static DXCSpots& Get();
++
++    void add(DXCSpotInfo& info);
++    void checkSpotTimeout();
++    void remove(int index);
++    void setSpotTimeout(int i) {m_DXCSpotTimeout = i * 60;}
++    DXCSpotInfo& getDXCSpot(int i) { return m_DXCSpotList[i]; }
++    QList<DXCSpotInfo> getDXCSpotsInRange(qint64 low, qint64 high);
++    //int lowerBound(qint64 low);
++    //int upperBound(qint64 high);
++
++private:
++    DXCSpots(); // Singleton Constructor is private.
++    QList<DXCSpotInfo> m_DXCSpotList;
++    int m_DXCSpotTimeout;
++    static DXCSpots* m_pThis;
++
++signals:
++    void DXCSpotsChanged(void);
++};
++
++#endif // DXC_SPOTS_H
+diff --git src/qtgui/freqctrl.cpp src/qtgui/freqctrl.cpp
+index ed419ed..976cc5e 100644
+--- src/qtgui/freqctrl.cpp
++++ src/qtgui/freqctrl.cpp
+@@ -484,6 +484,7 @@ void CFreqCtrl::keyPressEvent(QKeyEvent *event)
+     // call base class if dont over ride key
+     bool      fSkipMsg = false;
+     qint64    tmp;
++    uint8_t position = 0;
+ 
+     // qDebug() <<event->key();
+ 
+@@ -849,3 +850,16 @@ void CFreqCtrl::cursorEnd()
+                                     center()));
+     }
+ }
++
++void CFreqCtrl::cursorTo(uint8_t position)
++{
++    cursor().setPos(mapToGlobal(m_DigitInfo[position].dQRect.center()));
++}
++
++void CFreqCtrl::setFrequencyFocus()
++{
++    uint8_t position = floor(log10(m_freq));
++    position = (uint8_t)fmax(position, 4);      // restrict min to 100s of kHz
++
++    cursorTo(position);
++}
+diff --git src/qtgui/freqctrl.h src/qtgui/freqctrl.h
+index 08143ab..38dc92c 100644
+--- src/qtgui/freqctrl.h
++++ src/qtgui/freqctrl.h
+@@ -56,6 +56,7 @@ signals:
+ 
+ public slots:
+     void    setFrequency(qint64 freq);
++    void    setFrequencyFocus();
+ 
+ protected:
+     void    paintEvent(QPaintEvent *);
+@@ -77,6 +78,7 @@ private:
+     void    clearFreq();
+     void    cursorHome();
+     void    cursorEnd();
++    void    cursorTo(uint8_t position);
+     void    moveCursorLeft();
+     void    moveCursorRight();
+     bool    inRect(QRect &rect, QPoint &point);
+diff --git src/qtgui/plotter.cpp src/qtgui/plotter.cpp
+index a9d9cff..aaf5950 100644
+--- src/qtgui/plotter.cpp
++++ src/qtgui/plotter.cpp
+@@ -64,7 +64,9 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
+ #include <QtGlobal>
+ #include <QToolTip>
+ #include "plotter.h"
++#include "bandplan.h"
+ #include "bookmarks.h"
++#include "dxc_spots.h"
+ 
+ // Comment out to enable plotter debug messages
+ //#define PLOTTER_DEBUG
+@@ -84,6 +86,9 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
+ #define PLOTTER_FILTER_BOX_COLOR    0xFFA0A0A4
+ // FIXME: Should cache the QColors also
+ 
++#define HOR_MARGIN 5
++#define VER_MARGIN 5
++
+ static inline bool val_is_out_of_range(float val, float min, float max)
+ {
+     return (val < min || val > max);
+@@ -146,7 +151,9 @@ CPlotter::CPlotter(QWidget *parent) : QFrame(parent)
+ 
+     m_FilterBoxEnabled = true;
+     m_CenterLineEnabled = true;
++    m_BandPlanEnabled = true;
+     m_BookmarksEnabled = true;
++    m_DXCSpotsEnabled = true;
+ 
+     m_Span = 96000;
+     m_SampleFreq = 96000;
+@@ -168,6 +175,7 @@ CPlotter::CPlotter(QWidget *parent) : QFrame(parent)
+     m_Percent2DScreen = 35;	//percent of screen used for 2D display
+     m_VdivDelta = 30;
+     m_HdivDelta = 70;
++    m_BandPlanHeight = 22;
+ 
+     m_FreqDigits = 3;
+ 
+@@ -214,17 +222,20 @@ void CPlotter::mouseMoveEvent(QMouseEvent* event)
+             bool onTag = false;
+             if(pt.y() < 15 * 10) // FIXME
+             {
+-                for(int i = 0; i < m_BookmarkTags.size() && !onTag; i++)
++                if(m_BookmarksEnabled || m_DXCSpotsEnabled)
+                 {
+-                    if (m_BookmarkTags[i].first.contains(event->pos()))
+-                        onTag = true;
++                    for(int i = 0; i < Taglist.size() && !onTag; i++)
++                    {
++                        if (Taglist[i].first.contains(event->pos()))
++                            onTag = true;
++                    }
+                 }
+             }
+             // if no mouse button monitor grab regions and change cursor icon
+             if (onTag)
+             {
+                 setCursor(QCursor(Qt::PointingHandCursor));
+-                m_CursorCaptured = BOOKMARK;
++                m_CursorCaptured = TAG;
+             }
+             else if (isPointCloseTo(pt.x(), m_DemodFreqX, m_CursorCaptureDelta))
+             {
+@@ -286,10 +297,20 @@ void CPlotter::mouseMoveEvent(QMouseEvent* event)
+                     m_CursorCaptured = NOCAP;
+                 }
+                 if (m_TooltipsEnabled)
+-                    QToolTip::showText(event->globalPos(),
+-                                       QString("F: %1 kHz")
+-                                       .arg(freqFromX(pt.x())/1.e3f, 0, 'f', 3),
+-                                       this);
++                {
++                    qint64 hoverFrequency = freqFromX(pt.x());
++                    QString toolTipText = QString("F: %1 kHz").arg(hoverFrequency/1.e3f, 0, 'f', 3);
++                    QFontMetrics metrics(m_Font);
++                    int bandTopY = m_OverlayPixmap.height() - metrics.height() - 2 * VER_MARGIN - m_BandPlanHeight;
++                    QList<BandInfo> hoverBands = BandPlan::Get().getBandsEncompassing(hoverFrequency);
++                    if(m_BandPlanEnabled && pt.y() > bandTopY && hoverBands.size() > 0)
++                    {
++                        toolTipText.append("\n");
++                        for (int i = 0; i < hoverBands.size(); i++)
++                            toolTipText.append("\n" + hoverBands[i].name);
++                    }
++                    QToolTip::showText(event->globalPos(), toolTipText, this);
++                }
+             }
+             m_GrabPosition = 0;
+         }
+@@ -687,13 +708,13 @@ void CPlotter::mousePressEvent(QMouseEvent * event)
+                 resetHorizontalZoom();
+             }
+         }
+-        else if (m_CursorCaptured == BOOKMARK)
++        else if (m_CursorCaptured == TAG)
+         {
+-            for (int i = 0; i < m_BookmarkTags.size(); i++)
++            for (int i = 0; i < Taglist.size(); i++)
+             {
+-                if (m_BookmarkTags[i].first.contains(event->pos()))
++                if (Taglist[i].first.contains(event->pos()))
+                 {
+-                    m_DemodCenterFreq = m_BookmarkTags[i].second;
++                    m_DemodCenterFreq = Taglist[i].second;
+                     emit newDemodFreq(m_DemodCenterFreq, m_DemodCenterFreq - m_CenterFreq);
+                     break;
+                 }
+@@ -1271,8 +1292,7 @@ void CPlotter::drawOverlay()
+     painter.setBrush(Qt::SolidPattern);
+     painter.fillRect(0, 0, w, h, QColor(PLOTTER_BGD_COLOR));
+ 
+-#define HOR_MARGIN 5
+-#define VER_MARGIN 5
++    QList<BookmarkInfo> tags;
+ 
+     // X and Y axis areas
+     m_YAxisWidth = metrics.width("XXXX") + 2 * HOR_MARGIN;
+@@ -1281,25 +1301,47 @@ void CPlotter::drawOverlay()
+     int xAxisTop = h - xAxisHeight;
+     int fLabelTop = xAxisTop + VER_MARGIN;
+ 
+-    if (m_BookmarksEnabled)
++    if (m_BookmarksEnabled || m_DXCSpotsEnabled)
+     {
+-        m_BookmarkTags.clear();
++        Taglist.clear();
+         static const QFontMetrics fm(painter.font());
+         static const int fontHeight = fm.ascent() + 1;
+         static const int slant = 5;
+         static const int levelHeight = fontHeight + 5;
+         const int nLevels = h / (levelHeight + slant);
+-        QList<BookmarkInfo> bookmarks = Bookmarks::Get().getBookmarksInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++        if (m_BookmarksEnabled)
++        {
++            tags = Bookmarks::Get().getBookmarksInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                         m_CenterFreq + m_FftCenter + m_Span / 2);
++        }
++        else
++        {
++            tags.clear();
++        }
++        if (m_DXCSpotsEnabled)
++        {
++            QList<DXCSpotInfo> dxcspots = DXCSpots::Get().getDXCSpotsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
+                                                                              m_CenterFreq + m_FftCenter + m_Span / 2);
++            QListIterator<DXCSpotInfo> iter(dxcspots);
++            while(iter.hasNext())
++            {
++                BookmarkInfo tempDXCSpot;
++                DXCSpotInfo IterDXCSpot = iter.next();
++                tempDXCSpot.name = IterDXCSpot.name;
++                tempDXCSpot.frequency = IterDXCSpot.frequency;
++                tags.append(tempDXCSpot);
++            }
++            std::stable_sort(tags.begin(),tags.end());
++        }
+         QVector<int> tagEnd(nLevels + 1);
+-        for (int i = 0; i < bookmarks.size(); i++)
++        for (int i = 0; i < tags.size(); i++)
+         {
+-            x = xFromFreq(bookmarks[i].frequency);
++            x = xFromFreq(tags[i].frequency);
+ 
+ #if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
+             int nameWidth = fm.width(bookmarks[i].name);
+ #else
+-            int nameWidth = fm.boundingRect(bookmarks[i].name).width();
++            int nameWidth = fm.boundingRect(tags[i].name).width();
+ #endif
+ 
+             int level = 0;
+@@ -1319,9 +1361,9 @@ void CPlotter::drawOverlay()
+             const auto levelNHeightBottom = levelNHeight + fontHeight;
+             const auto levelNHeightBottomSlant = levelNHeightBottom + slant;
+ 
+-            m_BookmarkTags.append(qMakePair<QRect, qint64>(QRect(x, levelNHeight, nameWidth + slant, fontHeight), bookmarks[i].frequency));
++            Taglist.append(qMakePair<QRect, qint64>(QRect(x, level * levelHeight, nameWidth + slant, fontHeight), tags[i].frequency));
+ 
+-            QColor color = QColor(bookmarks[i].GetColor());
++            QColor color = QColor(tags[i].GetColor());
+             color.setAlpha(0x60);
+             // Vertical line
+             painter.setPen(QPen(color, 1, Qt::DashLine));
+@@ -1340,10 +1382,85 @@ void CPlotter::drawOverlay()
+             painter.setPen(QPen(color, 2, Qt::SolidLine));
+             painter.drawText(x + slant, levelNHeight, nameWidth,
+                              fontHeight, Qt::AlignVCenter | Qt::AlignHCenter,
+-                             bookmarks[i].name);
++                             tags[i].name);
++        }
++    }
++
++    if (m_BandPlanEnabled)
++    {
++        QList<BandInfo> bands = BandPlan::Get().getBandsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                                m_CenterFreq + m_FftCenter + m_Span / 2);
++
++        for (int i = 0; i < bands.size(); i++)
++        {
++            int band_left = xFromFreq(bands[i].minFrequency);
++            int band_right = xFromFreq(bands[i].maxFrequency);
++            int band_width = band_right - band_left;
++            rect.setRect(band_left, xAxisTop - m_BandPlanHeight, band_width, m_BandPlanHeight);
++            painter.fillRect(rect, bands[i].color);
++            QString band_label = bands[i].name + " (" + bands[i].modulation + ")";
++            int textWidth = metrics.width(band_label);
++            if (band_left < w && band_width > textWidth + 20)
++            {
++                painter.setOpacity(1.0);
++                rect.setRect(band_left, xAxisTop - m_BandPlanHeight, band_width, metrics.height());
++                painter.setPen(QColor(PLOTTER_TEXT_COLOR));
++                painter.drawText(rect, Qt::AlignCenter, band_label);
++            }
+         }
+     }
+ 
++/*
++    if (m_DXCSpotsEnabled)
++    {
++        m_DXCSpotTags.clear();
++        static const QFontMetrics fm(painter.font());
++        static const int fontHeight = fm.ascent() + 1;
++        static const int slant = 5;
++        static const int levelHeight = fontHeight + 5;
++        static const int nLevels = 10;
++        QList<DXCSpotInfo> dxcspots = DXCSpots::Get().getDXCSpotsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                                         m_CenterFreq + m_FftCenter + m_Span / 2);
++        int tagEnd[nLevels] = {0};
++        for (int i = 0; i < dxcspots.size(); i++)
++        {
++            x = xFromFreq(dxcspots[i].frequency);
++
++#if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
++            int nameWidth = fm.width(dxcspots[i].name);
++#else
++            int nameWidth = fm.boundingRect(dxcspots[i].name).width();
++#endif
++            int level = 0;
++            while(level < nLevels && tagEnd[level] > x)
++                level++;
++
++            if(level == nLevels)
++                level = 0;
++            tagEnd[level] = x + nameWidth + slant - 1;
++            m_DXCSpotTags.append(qMakePair<QRect, qint64>(QRect(x, level * levelHeight, nameWidth + slant, fontHeight), dxcspots[i].frequency));
++
++            QColor color = QColor(dxcspots[i].GetColor());
++            color.setAlpha(0x60);
++            // Vertical line
++            painter.setPen(QPen(color, 1, Qt::DashLine));
++            painter.drawLine(x, level * levelHeight + fontHeight + slant, x, xAxisTop);
++            // Horizontal line
++            painter.setPen(QPen(color, 1, Qt::SolidLine));
++            painter.drawLine(x + slant, level * levelHeight + fontHeight,
++                             x + nameWidth + slant - 1,
++                             level * levelHeight + fontHeight);
++            // Diagonal line
++            painter.drawLine(x + 1, level * levelHeight + fontHeight + slant - 1,
++                             x + slant - 1, level * levelHeight + fontHeight + 1);
++            color.setAlpha(0xFF);
++            painter.setPen(QPen(color, 2, Qt::SolidLine));
++            painter.drawText(x + slant, level * levelHeight, nameWidth,
++                             fontHeight, Qt::AlignVCenter | Qt::AlignHCenter,
++                             dxcspots[i].name);
++        }
++    }
++*/
+     if (m_CenterLineEnabled)
+     {
+         x = xFromFreq(m_CenterFreq);
+@@ -1515,7 +1632,7 @@ void CPlotter::makeFrequencyStrs()
+     }
+ }
+ 
+-// Convert from screen coordinate to frequency
++// Convert from frequency to screen coordinate
+ int CPlotter::xFromFreq(qint64 freq)
+ {
+     int w = m_OverlayPixmap.width();
+@@ -1528,7 +1645,7 @@ int CPlotter::xFromFreq(qint64 freq)
+     return x;
+ }
+ 
+-// Convert from frequency to screen coordinate
++// Convert from screen coordinate to frequency
+ qint64 CPlotter::freqFromX(int x)
+ {
+     int w = m_OverlayPixmap.width();
+@@ -1674,6 +1791,12 @@ void CPlotter::setPeakDetection(bool enabled, float c)
+         m_PeakDetection = c;
+ }
+ 
++void CPlotter::toggleBandPlan(bool state)
++{
++    m_BandPlanEnabled = state;
++    updateOverlay();
++}
++
+ void CPlotter::calcDivSize (qint64 low, qint64 high, int divswanted, qint64 &adjlow, qint64 &step, int& divs)
+ {
+ #ifdef PLOTTER_DEBUG
+diff --git src/qtgui/plotter.h src/qtgui/plotter.h
+index f4cb362..aa70fad 100644
+--- src/qtgui/plotter.h
++++ src/qtgui/plotter.h
+@@ -38,6 +38,8 @@ public:
+     void setCenterLineEnabled(bool enabled) { m_CenterLineEnabled = enabled; }
+     void setTooltipsEnabled(bool enabled) { m_TooltipsEnabled = enabled; }
+     void setBookmarksEnabled(bool enabled) { m_BookmarksEnabled = enabled; }
++    void setDXCSpotsEnabled(bool enabled) { m_DXCSpotsEnabled = enabled; }
++    void setBandPlanEnabled(bool enabled) { m_BandPlanEnabled = enabled; }
+ 
+     void setNewFftData(float *fftData, int size);
+     void setNewFftData(float *fftData, float *wfData, int size);
+@@ -146,6 +148,7 @@ public slots:
+     void setPandapterRange(float min, float max);
+     void setWaterfallRange(float min, float max);
+     void setPeakDetection(bool enabled, float c);
++    void toggleBandPlan(bool state);
+     void updateOverlay();
+ 
+     void setPercent2DScreen(int percent)
+@@ -172,7 +175,7 @@ private:
+         RIGHT,
+         YAXIS,
+         XAXIS,
+-        BOOKMARK
++        TAG
+     };
+ 
+     void        drawOverlay();
+@@ -223,8 +226,10 @@ private:
+     qint64      m_FreqPerDiv;
+     bool        m_CenterLineEnabled;  /*!< Distinguish center line. */
+     bool        m_FilterBoxEnabled;   /*!< Draw filter box. */
+-    bool        m_TooltipsEnabled;     /*!< Tooltips enabled */
++    bool        m_TooltipsEnabled;    /*!< Tooltips enabled */
++    bool        m_BandPlanEnabled;    /*!< Show/hide band plan on spectrum */
+     bool        m_BookmarksEnabled;   /*!< Show/hide bookmarks on spectrum */
++    bool        m_DXCSpotsEnabled;   /*!< Show/hide DXC Spots on spectrum */
+     int         m_DemodHiCutFreq;
+     int         m_DemodLowCutFreq;
+     int         m_DemodFreqX;		//screen coordinate x position
+@@ -261,6 +266,7 @@ private:
+     QFont       m_Font;         /*!< Font used for plotter (system font) */
+     int         m_HdivDelta; /*!< Minimum distance in pixels between two horizontal grid lines (vertical division). */
+     int         m_VdivDelta; /*!< Minimum distance in pixels between two vertical grid lines (horizontal division). */
++    int         m_BandPlanHeight; /*!< Height in pixels of band plan (if enabled) */
+ 
+     quint32     m_LastSampleRate;
+ 
+@@ -270,7 +276,7 @@ private:
+     float       m_PeakDetection;
+     QMap<int,int>   m_Peaks;
+ 
+-    QList< QPair<QRect, qint64> >     m_BookmarkTags;
++    QList< QPair<QRect, qint64> >     Taglist;
+ 
+     // Waterfall averaging
+     quint64     tlast_wf_ms;        // last time waterfall has been updated
+diff --git src/receivers/nbrx.cpp src/receivers/nbrx.cpp
+index 9370c70..fa1507c 100644
+--- src/receivers/nbrx.cpp
++++ src/receivers/nbrx.cpp
+@@ -63,8 +63,7 @@ nbrx::nbrx(float quad_rate, float audio_rate)
+ 
+     demod = demod_fm;
+     connect(self(), 0, iq_resamp, 0);
+-    connect(iq_resamp, 0, nb, 0);
+-    connect(nb, 0, filter, 0);
++    connect(iq_resamp, 0, filter, 0);
+     connect(filter, 0, meter, 0);
+     connect(filter, 0, sql, 0);
+     connect(sql, 0, agc, 0);
+@@ -72,15 +71,16 @@ nbrx::nbrx(float quad_rate, float audio_rate)
+ 
+     if (audio_rr0)
+     {
+-        connect(demod, 0, audio_rr0, 0);
+-
++        connect(demod, 0, nb, 0);
++        connect(nb, 0, audio_rr0, 0);
+         connect(audio_rr0, 0, self(), 0); // left  channel
+         connect(audio_rr0, 0, self(), 1); // right channel
+     }
+     else
+     {
+-        connect(demod, 0, self(), 0);
+-        connect(demod, 0, self(), 1);
++        connect(demod, 0, nb, 0);
++        connect(nb, 0, self(), 0);
++        connect(nb, 0, self(), 1);
+     }
+ }
+ 
+@@ -211,15 +211,17 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (current_demod == NBRX_DEMOD_NONE)
+         {
+-            disconnect(demod, 0, audio_rr0, 0);
+-            disconnect(demod, 1, audio_rr1, 0);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, audio_rr0, 0);
++            disconnect(nb, 1, audio_rr1, 0);
+ 
+             disconnect(audio_rr0, 0, self(), 0);
+             disconnect(audio_rr1, 0, self(), 1);
+         }
+         else
+         {
+-            disconnect(demod, 0, audio_rr0, 0);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, audio_rr0, 0);
+ 
+             disconnect(audio_rr0, 0, self(), 0);
+             disconnect(audio_rr0, 0, self(), 1);
+@@ -229,13 +231,15 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (current_demod == NBRX_DEMOD_NONE)
+         {
+-            disconnect(demod, 0, self(), 0);
+-            disconnect(demod, 1, self(), 1);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, self(), 0);
++            disconnect(nb, 1, self(), 1);
+         }
+         else
+         {
+-            disconnect(demod, 0, self(), 0);
+-            disconnect(demod, 0, self(), 1);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, self(), 0);
++            disconnect(nb, 0, self(), 1);
+         }
+     }
+ 
+@@ -268,15 +272,17 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (d_demod == NBRX_DEMOD_NONE)
+         {
+-            connect(demod, 0, audio_rr0, 0);
+-            connect(demod, 1, audio_rr1, 0);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, audio_rr0, 0);
++            connect(nb, 1, audio_rr1, 0);
+ 
+             connect(audio_rr0, 0, self(), 0);
+             connect(audio_rr1, 0, self(), 1);
+         }
+         else
+         {
+-            connect(demod, 0, audio_rr0, 0);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, audio_rr0, 0);
+ 
+             connect(audio_rr0, 0, self(), 0);
+             connect(audio_rr0, 0, self(), 1);
+@@ -286,13 +292,15 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (d_demod == NBRX_DEMOD_NONE)
+         {
+-            connect(demod, 0, self(), 0);
+-            connect(demod, 1, self(), 1);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, self(), 0);
++            connect(nb, 1, self(), 1);
+         }
+         else
+         {
+-            connect(demod, 0, self(), 0);
+-            connect(demod, 0, self(), 1);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, self(), 0);
++            connect(nb, 0, self(), 1);
+         }
+     }
+ }
+diff --git src/receivers/nbrx.h src/receivers/nbrx.h
+index 1aa845c..a57909d 100644
+--- src/receivers/nbrx.h
++++ src/receivers/nbrx.h
+@@ -36,6 +36,7 @@
+ #include "dsp/rx_demod_am.h"
+ //#include "dsp/resampler_ff.h"
+ #include "dsp/resampler_xx.h"
++#include <gnuradio/blocks/float_to_complex.h>
+ 
+ class nbrx;
+ 
+@@ -122,6 +123,7 @@ private:
+     gr::analog::simple_squelch_cc::sptr sql;        /*!< Squelch. */
+     gr::blocks::complex_to_float::sptr  demod_raw;  /*!< Raw I/Q passthrough. */
+     gr::blocks::complex_to_real::sptr   demod_ssb;  /*!< SSB demodulator. */
++
+     rx_demod_fm_sptr          demod_fm;   /*!< FM demodulator. */
+     rx_demod_am_sptr          demod_am;   /*!< AM demodulator. */
+     resampler_ff_sptr         audio_rr0;  /*!< Audio resampler. */
