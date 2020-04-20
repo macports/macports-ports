@@ -1,19 +1,25 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           cxx11 1.1
-PortGroup           qt5 1.0
+if {${subport} eq "gmic-clib"} {
+    PortGroup       makefile        1.0
+} else {
+    PortGroup       cmake           1.1
+}
+if {${subport} ne "gmic" && ${subport} ne "gmic-clib"} {
+    PortGroup       qt5             1.0
+    PortGroup       active_variants 1.1
+}
 
 name                gmic
 version             2.9.0
-revision            0
+revision            1
 license             CeCILL
-categories          science
+categories          science graphics
 platforms           darwin
 maintainers         {mps @Schamschula} openmaintainer
 
-description         G'MIC is an interpreter of image processing macros \
-                    (stand-alone binary and GIMP plug-in).
+description         G'MIC is an interpreter of image processing macros
 
 long_description    G'MIC stands for GREYC's Magic Image Converter. It is \
                     focused on the design of possibly complex pipelines for \
@@ -24,8 +30,8 @@ long_description    G'MIC stands for GREYC's Magic Image Converter. It is \
                     has been designed with portability in mind and runs on \
                     different platforms (Windows, Unix, Mac OS X).
 
-homepage            http://gmic.eu
-master_sites        http://gmic.eu/files/source/
+homepage            https://gmic.eu
+master_sites        https://gmic.eu/files/source/
 
 use_parallel_build  no
 
@@ -38,7 +44,6 @@ checksums           rmd160  f5e250c3043f811c76a74d60513a979ed09679b0 \
 depends_lib         port:curl \
                     path:lib/libavcodec.dylib:ffmpeg \
                     port:fftw-3 \
-                    port:gimp2 \
                     port:GraphicsMagick \
                     port:ilmbase \
                     port:jpeg \
@@ -46,42 +51,119 @@ depends_lib         port:curl \
                     port:opencv \
                     port:openexr \
                     port:tiff \
-                    port:xorg-libXext \
                     port:zlib
 
-patchfiles          patch-gmic-qt-gmic_qt.pro.diff \
-                    patch-src-Makefile.diff
+patchfiles          patch-CMakeLists.txt.diff \
+                    patch-src-Makefile.diff \
+                    patch-src-gmic.cpp.diff
 
-post-configure {
-    reinplace "s|%PREFIX%|${prefix}|" \
-        ${worksrcpath}/src/Makefile
+compiler.cxx_standard           2011
 
-    #cli lib gimp krita gmic_qt libc zart
-    set gmic_targets {cli lib gimp libc}
-
-    reinplace "s|%TARGETS%|${gmic_targets}|" \
-        ${worksrcpath}/src/Makefile
+subport ${name}-qt {
+    configure.args-append       -DGMIC_QT_HOST=none
+    description-append          (GUI application)
 }
 
-post-destroot {
-    xinstall -m 0644 ${worksrcpath}/src/libgmic.a  ${destroot}${prefix}/lib
-    xinstall -m 0644 ${worksrcpath}/src/libcgmic.a ${destroot}${prefix}/lib
-    xinstall -m 0755 ${worksrcpath}/gmic-qt/gmic_gimp_qt.app/Contents/MacOS/gmic_gimp_qt \
-                         ${destroot}${prefix}/lib/gimp/2.0/plug-ins
+subport ${name}-gimp {
+    configure.args-append       -DGMIC_QT_HOST=gimp
+    depends_lib-append          port:gimp2
+    description-append          (GIMP plug-in).
 }
 
-use_configure       no
-variant universal   {}
-
-build.dir           ${worksrcpath}/src
-build.args-append   CC=${configure.cc} \
-                    CXX=${configure.cxx}
-
-#see https://trac.macports.org/ticket/59677
-#see https://trac.macports.org/ticket/58779
-if { !${use_xcode} && ![file exists ${configure.developer_dir}/SDKs] } {
-    use_xcode yes
+subport ${name}-clib {
+    description-append          (C library).
 }
 
-livecheck.url       http://gmic.eu/files/source/
-livecheck.regex     ${name}_(\[0-9.\]+)${extract.suffix}
+if {${subport} eq ${name}} {
+    description-append          (C++ library and stand-alone binary).
+
+    depends_build-append        port:pkgconfig
+
+    # CMakeLists.txt assumes variables CMAKE_CXX_FLAGS_${cmake.build_type}
+    #    (CMAKE_CXX_FLAGS_DEBUG and CMAKE_CXX_FLAGS_RELEASE)
+    if {[variant_isset debug]} {
+        cmake.build_type        Debug
+    } else {
+        cmake.build_type        Release
+    }
+
+    configure.args-append       -DCUSTOM_CFLAGS=ON \
+                                -DENABLE_OPENMP=OFF \
+                                -DENABLE_X=OFF
+
+    variant x11 {
+        configure.args-replace  -DENABLE_X=OFF \
+                                -DENABLE_X=ON
+
+        depends_lib-append      port:xorg-libX11 \
+                                port:xorg-libXext \
+                                port:xorg-libice \
+                                port:xorg-libsm
+    }
+    default_variants-append     +x11
+
+    livecheck.url               https://gmic.eu/files/source/
+    livecheck.regex             ${name}_(\[0-9.\]+)${extract.suffix}
+} elseif {${subport} eq "${name}-clib"} {
+    # see SOVERSION in ${worksrcpath}/CMakeLists.txt
+    set soversion               1
+
+    depends_build-append        port:pkgconfig
+
+    build.dir                   ${worksrcpath}/src
+    build.target                libc
+
+    makefile.override-append    PREFIX
+    makefile.prefix_name        USR
+
+    variant x11 {
+        depends_lib-append      port:xorg-libX11
+    }
+    default_variants-append     +x11
+
+    pre-build {
+        # see ${worksrcpath}/src/Makefile
+        if {[variant_isset x11]} {
+            set x11_cflags     "-Dcimg_display=1 [exec ${prefix}/bin/pkg-config --cflags x11]"
+            set x11_libs       "[exec ${prefix}/bin/pkg-config --libs x11] -lpthread"
+        } else {
+            set x11_cflags     "-Dcimg_display=0"
+            set x11_libs       "-lpthread"
+        }
+        build.args-append       X11_CFLAGS="${x11_cflags}" \
+                                X11_LIBS="${x11_libs}"
+    }
+    build.args-append           NO_STDLIB=Yes \
+                                OPT_CFLAGS="" \
+                                SOVERSION=${soversion}
+
+    destroot {
+        xinstall -m 0644 ${worksrcpath}/src/gmic_libc.h                 ${destroot}${prefix}/include
+        xinstall -m 0644 ${worksrcpath}/src/libcgmic.a                  ${destroot}${prefix}/lib
+        xinstall -m 0755 ${worksrcpath}/src/libcgmic.${soversion}.dylib ${destroot}${prefix}/lib
+        ln       -s      libcgmic.${soversion}.dylib                    ${destroot}${prefix}/lib/libcgmic.dylib
+    }
+} else {
+    # CMakeLists.txt assumes variables CMAKE_CXX_FLAGS_${cmake.build_type}
+    #    (CMAKE_CXX_FLAGS_DEBUG and CMAKE_CXX_FLAGS_RELEASE)
+    if {[variant_isset debug]} {
+        cmake.build_type        Debug
+    } else {
+        cmake.build_type        Release
+    }
+
+    depends_lib-append          port:${name}
+    require_active_variants     ${name} x11
+
+    cmake.source_dir            ${worksrcpath}/gmic-qt
+    configure.args-append       -DENABLE_DYNAMIC_LINKING=ON \
+                                -DENABLE_LTO=OFF \
+                                -DGMIC_PATH=${worksrcpath}/src
+
+    qt5.depends_build_component qttools
+
+    depends_lib-append          port:xorg-libX11 \
+                                port:xorg-libXext \
+                                port:xorg-libice \
+                                port:xorg-libsm
+}
