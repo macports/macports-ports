@@ -32,6 +32,7 @@ configure.universal_args-delete \
 
 default build.dir           {${build_dir}}
 default build.cmd           {${prefix}/bin/ninja}
+default build.post_args     {-v}
 default build.target        ""
 
 # remove DESTDIR= from arguments, but rather take it from environmental variable

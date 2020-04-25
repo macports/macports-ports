@@ -147,8 +147,7 @@ proc crossbinutils.setup {target version} {
     configure.args \
         --target=${target} \
         --program-prefix=${target}- \
-        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host  \
-        --enable-install-libbfd
+        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host
 
     build.dir ${workpath}/build
 

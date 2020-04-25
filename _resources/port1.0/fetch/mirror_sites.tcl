@@ -377,25 +377,26 @@ set portfetch::mirror_sites::sites(gentoo) {
 }
 
 set portfetch::mirror_sites::sites(gimp) {
-    http://artfiles.org/gimp.org/pub/
-    http://gimp.cp-dev.com/
-    http://download.gimp.org/pub/
-    http://ftp.gtk.org/pub/
-    http://ftp.gwdg.de/pub/grafik/
+    https://artfiles.org/gimp.org/pub/
+    https://download.gimp.org/mirror/pub/
+    https://ftp.gwdg.de/pub/grafik/
     http://gimp.mirrors.hoobly.com/pub/
-    http://mirror.ibcp.fr/pub/
-    ftp://sunsite.icm.edu.pl/pub/graphics/
-    ftp://ftp.is.co.za/mirror/ftp.gimp.org/
+    https://mirror.ibcp.fr/pub/
+    https://ftp.icm.edu.pl/pub/graphics/
+    https://sunsite.icm.edu.pl/pub/graphics/
+    http://ftp.is.co.za/mirror/ftp.gimp.org/
     https://www.mirrorservice.org/sites/ftp.gimp.org/pub/
-    http://piotrkosoft.net/pub/mirrors/ftp.gimp.org/pub/gimp/pub/
     http://www.ring.gr.jp/pub/graphics/
-    http://ftp.sunet.se/pub/gimp/
-    ftp://ftp.tpnet.pl/pub/graphics/
-    http://mirror.umd.edu/gimp/
-    http://ftp.iut-bm.univ-fcomte.fr/
-    http://ftp.cc.uoc.gr/mirrors/
-    http://mirrors.fe.up.pt/mirrors/ftp.gimp.org/pub/
-    http://ftp.snt.utwente.nl/pub/software/gimp/
+    https://ftp.sunet.se/pub/gimp/
+    https://mirror.umd.edu/gimp/
+    https://ftp.cc.uoc.gr/mirrors/
+    https://ftp.snt.utwente.nl/pub/software/gimp/
+    https://mirrors.ukfast.co.uk/sites/gimp.org/pub/
+    https://mirrors.dotsrc.org/gimp/
+    https://ftp.fau.de/gimp/
+    http://mirror.rise.ph/
+    https://ftp.lysator.liu.se/pub/
+    https://mirrors.syringanetworks.net/gimp/
 }
 
 set portfetch::mirror_sites::sites(gnome) {
@@ -510,7 +511,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) "
     http://aus.us.distfiles.macports.org/macports/distfiles/:mirror
     http://cjj.kr.distfiles.macports.org/:mirror
     http://cph.dk.distfiles.macports.org/:mirror
-    http://fco.it.distfiles.macports.org/mirrors/macports-distfiles/:mirror
+    http://fco.it.distfiles.macports.org/:mirror
     http://jnb.za.distfiles.macports.org/distfiles/:mirror
     http://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     http://kmq.jp.distfiles.macports.org/:mirror
