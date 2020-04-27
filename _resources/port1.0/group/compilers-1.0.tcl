@@ -117,12 +117,16 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,cxx_stdlib) libstdc++
 }
 
-set clang_versions {33 34 37 50 60 70 80 90}
+set clang_versions {33 34 37 50 60 70 80 90 10}
 foreach v ${clang_versions} {
-    # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
-    set compiler_version $v
     if {[string length $v] > 1} {
+        set compiler_version $v
+    } elseif {$v >= 33} {
+        # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
         set compiler_version [string index $v 0].[string index $v 1]
+    } else {
+        # starting with Clang 10, the naming scheme changed
+        set compiler_version $v
     }
     lappend compilers.clang_variants clang$v
     set cdb(clang$v,variant)  clang$v
