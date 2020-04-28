@@ -119,7 +119,7 @@ foreach v ${gcc_versions} {
 
 set clang_versions {33 34 37 50 60 70 80 90 10}
 foreach v ${clang_versions} {
-    if {[string length $v] > 1} {
+    if {[string length $v] <= 1} {
         set compiler_version $v
     } elseif {$v >= 33} {
         # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
