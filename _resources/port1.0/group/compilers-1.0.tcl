@@ -117,35 +117,28 @@ foreach v ${gcc_versions} {
     set cdb(gcc$v,cxx_stdlib) libstdc++
 }
 
-set clang_versions {33 34 37 50 60 70 80 90 10}
-foreach v ${clang_versions} {
-    if {[string length $v] <= 1} {
-        set compiler_version $v
-    } elseif {$v >= 33} {
-        # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
-        set compiler_version [string index $v 0].[string index $v 1]
-    } else {
-        # starting with Clang 10, the naming scheme changed
-        set compiler_version $v
-    }
-    lappend compilers.clang_variants clang$v
-    set cdb(clang$v,variant)  clang$v
-    set cdb(clang$v,compiler) macports-clang-$compiler_version
-    set cdb(clang$v,descrip)  "MacPorts clang $compiler_version"
-    set cdb(clang$v,depends)  port:clang-$compiler_version
-    set cdb(clang$v,dependsl) ""
-    set cdb(clang$v,libfortran) ""
-    set cdb(clang$v,dependsd) ""
-    set cdb(clang$v,dependsa) clang-$compiler_version
-    set cdb(clang$v,conflict) ""
-    set cdb(clang$v,cc)       ${prefix}/bin/clang-mp-$compiler_version
-    set cdb(clang$v,cxx)      ${prefix}/bin/clang++-mp-$compiler_version
-    set cdb(clang$v,cpp)      "${prefix}/bin/clang-mp-$compiler_version -E"
-    set cdb(clang$v,objc)     ""
-    set cdb(clang$v,fc)       ""
-    set cdb(clang$v,f77)      ""
-    set cdb(clang$v,f90)      ""
-    set cdb(clang$v,cxx_stdlib) ""
+set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10}
+foreach ver ${clang_versions} {
+    # Remove dot from version if present
+    set ver_nodot [string map {. {}} ${ver}]
+    lappend compilers.clang_variants    clang$ver_nodot
+    set cdb(clang$ver_nodot,variant)    clang$ver_nodot
+    set cdb(clang$ver_nodot,compiler)   macports-clang-$ver
+    set cdb(clang$ver_nodot,descrip)    "MacPorts clang $ver"
+    set cdb(clang$ver_nodot,depends)    port:clang-$ver
+    set cdb(clang$ver_nodot,dependsl)   ""
+    set cdb(clang$ver_nodot,libfortran) ""
+    set cdb(clang$ver_nodot,dependsd)   ""
+    set cdb(clang$ver_nodot,dependsa)   clang-$ver
+    set cdb(clang$ver_nodot,conflict)   ""
+    set cdb(clang$ver_nodot,cc)         ${prefix}/bin/clang-mp-$ver
+    set cdb(clang$ver_nodot,cxx)        ${prefix}/bin/clang++-mp-$ver
+    set cdb(clang$ver_nodot,cpp)        "${prefix}/bin/clang-mp-$ver -E"
+    set cdb(clang$ver_nodot,objc)       ""
+    set cdb(clang$ver_nodot,fc)         ""
+    set cdb(clang$ver_nodot,f77)        ""
+    set cdb(clang$ver_nodot,f90)        ""
+    set cdb(clang$ver_nodot,cxx_stdlib) ""
 }
 
 # and lastly we add a gfortran and g95 variant for use with clang*; note that
