@@ -169,7 +169,9 @@ if {![info exists building_qt4]} {
         }
 
     } else {
-        return -code error "MacPorts does not support qt4 on platforms other than darwin"
+        pre-fetch {
+            return -code error "MacPorts does not support qt4 on platforms other than darwin"
+        }
     }
 }
 
