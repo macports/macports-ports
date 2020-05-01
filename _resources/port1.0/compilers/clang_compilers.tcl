@@ -12,7 +12,7 @@
 if {${os.major} >= 10} {
     # Clang-10 can only be added once
     # https://github.com/macports/macports-base/pull/171
-    # is merged ANS available in a public release.
+    # is merged AND available in a public release.
     #lappend compilers macports-clang-10
     lappend compilers macports-clang-9.0 \
                       macports-clang-8.0

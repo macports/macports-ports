@@ -81,40 +81,37 @@ if {${os.major} < 10} {
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {44 45 46 47 48 49 5 6 7 8 9}
-foreach v ${gcc_versions} {
-    # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
-    set compiler_version $v
-    if {[string length $v] > 1} {
-        set compiler_version [string index $v 0].[string index $v 1]
-    }
-    lappend compilers.gcc_variants gcc$v
-    set cdb(gcc$v,variant)  gcc$v
-    set cdb(gcc$v,compiler) macports-gcc-$compiler_version
-    set cdb(gcc$v,descrip)  "MacPorts gcc $compiler_version"
-    set cdb(gcc$v,depends)  port:gcc$v
-    if {[vercmp ${compiler_version} 4.6] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
-    } elseif {[vercmp ${compiler_version} 7] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
-    } elseif {[vercmp ${compiler_version} 8] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9}
+foreach ver ${gcc_versions} {
+    # Remove dot from version if present
+    set ver_nodot [string map {. {}} ${ver}]
+    lappend compilers.gcc_variants gcc$ver_nodot
+    set cdb(gcc$ver_nodot,variant)  gcc$ver_nodot
+    set cdb(gcc$ver_nodot,compiler) macports-gcc-$ver
+    set cdb(gcc$ver_nodot,descrip)  "MacPorts gcc $ver"
+    set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
+    if {[vercmp ${ver} 4.6] < 0} {
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
+    } elseif {[vercmp ${ver} 7] < 0} {
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
+    } elseif {[vercmp ${ver} 8] < 0} {
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
     } else {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
     }
-    set cdb(gcc$v,libfortran) ${prefix}/lib/gcc$v/libgfortran.dylib
+    set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
-    set cdb(gcc$v,dependsd) port:g95
-    set cdb(gcc$v,dependsa) gcc$v
-    set cdb(gcc$v,conflict) "gfortran g95"
-    set cdb(gcc$v,cc)       ${prefix}/bin/gcc-mp-$compiler_version
-    set cdb(gcc$v,cxx)      ${prefix}/bin/g++-mp-$compiler_version
-    set cdb(gcc$v,cpp)      ${prefix}/bin/cpp-mp-$compiler_version
-    set cdb(gcc$v,objc)     ${prefix}/bin/gcc-mp-$compiler_version
-    set cdb(gcc$v,fc)       ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,f77)      ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,cxx_stdlib) libstdc++
+    set cdb(gcc$ver_nodot,dependsd) port:g95
+    set cdb(gcc$ver_nodot,dependsa) gcc$ver_nodot
+    set cdb(gcc$ver_nodot,conflict) "gfortran g95"
+    set cdb(gcc$ver_nodot,cc)       ${prefix}/bin/gcc-mp-$ver
+    set cdb(gcc$ver_nodot,cxx)      ${prefix}/bin/g++-mp-$ver
+    set cdb(gcc$ver_nodot,cpp)      ${prefix}/bin/cpp-mp-$ver
+    set cdb(gcc$ver_nodot,objc)     ${prefix}/bin/gcc-mp-$ver
+    set cdb(gcc$ver_nodot,fc)       ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,f77)      ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
 }
 
 set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10}
