@@ -44,6 +44,10 @@
 #
 # Options:
 # compilers.clear_archflags: disable archflags ("-arch x86_64", -m64, etc.)
+# compilers.allow_arguments_mismatch:
+#   ensure Fortran code accepts "calls to external procedures with mismatches between the calls and the procedure definition"
+#   the use of this option is "strongly discouraged" as the code should be made to be "standard-conforming"
+#   see https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
@@ -67,6 +71,9 @@ default compilers.variants_conflict {}
 default compilers.libfortran {}
 default compilers.clear_archflags no
 
+options compilers.allow_arguments_mismatch
+default compilers.allow_arguments_mismatch no
+
 # also set a default gcc version
 # should be the same as gcc_compilers.tcl
 if {${os.major} < 10} {
@@ -75,13 +82,13 @@ if {${os.major} < 10} {
 } elseif {${os.major} < 11} {
     set compilers.gcc_default gcc8
 } else {
-    set compilers.gcc_default gcc9
+    set compilers.gcc_default gcc10
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9}
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10}
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -91,13 +98,11 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,descrip)  "MacPorts gcc $ver"
     set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
     if {[vercmp ${ver} 4.6] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc45"
     } elseif {[vercmp ${ver} 7] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
-    } elseif {[vercmp ${ver} 8] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6"
     } else {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
+        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc${ver_nodot}"
     }
     set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
@@ -678,3 +683,35 @@ pre-configure {
     compilers.action_enforce_f ${compilers.required_f}
     compilers.action_enforce_some_f ${compilers.required_some_f}
 }
+
+namespace eval compilers {
+}
+
+proc compilers::add_fortran_legacy_support {} {
+    global compilers.allow_arguments_mismatch \
+           compilers.gcc_default
+    if {${compilers.allow_arguments_mismatch}} {
+        if {[fortran_variant_name] eq "gfortran"} {
+            set fortran_compiler    ${compilers.gcc_default}
+        } else {
+            set fortran_compiler    [fortran_variant_name]
+        }
+        if {${fortran_compiler} eq "gcc10"} {
+            configure.fflags-delete     -fallow-argument-mismatch
+            configure.fcflags-delete    -fallow-argument-mismatch
+            configure.f90flags-delete   -fallow-argument-mismatch
+            configure.fflags-append     -fallow-argument-mismatch
+            configure.fcflags-append    -fallow-argument-mismatch
+            configure.f90flags-append   -fallow-argument-mismatch
+        }
+    }
+}
+
+port::register_callback compilers::add_fortran_legacy_support
+
+proc compilers::fortran_legacy_support_proc {option action args} {
+    if {$action ne  "set"} return
+    compilers::add_fortran_legacy_support
+}
+
+option_proc compilers.allow_arguments_mismatch compilers::fortran_legacy_support_proc
