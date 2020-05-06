@@ -8,11 +8,11 @@
 
 PortGroup compiler_blacklist_versions 1.0
 
-# This PG is now depreciated, as support for specifying the c++ standard is
+# This PG is now deprecated, as support for specifying the c++ standard is
 # available in base. So issue a warning asking maintainers to migrate over
 pre-configure {
     ui_warn "-----------------------------------------------------------------------"
-    ui_warn "The port '${name}' uses the cxx11 PortGroup which is depreciated."
+    ui_warn "The port '${name}' uses the cxx11 PortGroup which is deprecated."
     ui_warn "Please instead specify the required c++ standard directly using"
     ui_warn "    compiler.cxx_standard  2011"
     ui_warn "replacing 2011 with newer standards (e.g. 2014, 2017) as required."
