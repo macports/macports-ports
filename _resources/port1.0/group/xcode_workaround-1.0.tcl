@@ -1,9 +1,9 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# This PortGroup attempts to work around problemtaic Xcode versions
+# This PortGroup attempts to work around problematic Xcode versions
 # See https://forums.developer.apple.com/thread/121887
 #
-# -fno-stack-check issue only applies to macOS10.15 but in general this PG
+# -fno-stack-check issue only applies to macOS 10.15 but in general this PG
 # could be used to address issues in other Xcode versions as well.
 #
 # Usage:
@@ -46,7 +46,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
         compiler.blacklist \
         use_xcode
 
-    # Xcode 11 fixes (Applicable to macOS1 0.14 and macOS 10.15)
+    # Xcode 11 fixes (applicable to macOS 10.14 and macOS 10.15)
     set apply_fix [ expr ( ${os.major} == 19 || ( ${os.major} == 18 && [vercmp $xcodeversion 11] >= 0 ) ) ]
 
     if { ${apply_fix} } {
