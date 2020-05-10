@@ -52,7 +52,7 @@ proc add_legacysupport {} {
         if {[option legacysupport.use_static]} {
             configure.ldflags-append    ${AddStaticLDFlag}
         } else {
-            configure.ldflags-append  ${AddLDFlag}
+            configure.ldflags-append    ${AddLDFlag}
         }
         configure.cflags-append   ${AddCFlag}
         configure.cppflags-append ${AddCFlag}
