@@ -16,6 +16,8 @@
 #      avoid_xcode_compiler     (blacklist broken compiler)
 #
 #   xcode_workaround.fixed_xcode_version: minimum developer version in which bug is fixed
+#
+#   xcode_workaround.os_versions: major Darwin versions to attempt to apply workarounds
 
 PortGroup cltversion 1.0
 
@@ -24,9 +26,11 @@ namespace eval xcode_workaround {
 
 options xcode_workaround.type
 options xcode_workaround.fixed_xcode_version
+options xcode_workaround.os_versions
 
 default xcode_workaround.type                {append_to_compiler_flags}
 default xcode_workaround.fixed_xcode_version {11.3}
+default xcode_workaround.os_versions         {19}
 
 proc xcode_workaround::xcode_workaround.appy_fix {} {
 
@@ -37,6 +41,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
         developerversion \
         xcode_workaround.type \
         xcode_workaround.fixed_xcode_version \
+        xcode_workaround.os_versions \
         configure.cc \
         configure.cxx \
         configure.cflags \
@@ -47,7 +52,15 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
         use_xcode
 
     # Xcode 11 fixes (applicable to macOS 10.14 and macOS 10.15)
-    set attempt_fix [ expr ( ${os.major} == 19 || ( ${os.major} == 18 && [vercmp $xcodeversion 11] >= 0 ) ) ]
+    set attempt_fix no
+    if { [lsearch -exact ${xcode_workaround.os_versions} ${os.major}] != -1 } {
+        if { ${os.major} == 19 } {
+            set attempt_fix yes
+        }
+        if { ${os.major} == 18 && [vercmp $xcodeversion 11] >= 0 } {
+            set attempt_fix yes
+        }
+    }
 
     if { ${attempt_fix} } {
 
