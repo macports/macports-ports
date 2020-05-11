@@ -47,9 +47,9 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
         use_xcode
 
     # Xcode 11 fixes (applicable to macOS 10.14 and macOS 10.15)
-    set apply_fix [ expr ( ${os.major} == 19 || ( ${os.major} == 18 && [vercmp $xcodeversion 11] >= 0 ) ) ]
+    set attempt_fix [ expr ( ${os.major} == 19 || ( ${os.major} == 18 && [vercmp $xcodeversion 11] >= 0 ) ) ]
 
-    if { ${apply_fix} } {
+    if { ${attempt_fix} } {
 
         # Check if Xcode is newer than defined fixed version
         # N.B. vercmp should properly handle none or "" for $xcodeversion or $cltversion
@@ -57,7 +57,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
 
         # Check flag from cltversion PG to see if Xcode or CLT should be used
         if {${use_xcode}} {
-            set apply_fix [expr !${xcode_is_ok}]
+            set attempt_fix [expr !${xcode_is_ok}]
         } else {
             # Check if CLT version is fixed or not
             set clt_is_ok [expr [vercmp $cltversion ${xcode_workaround.fixed_xcode_version}] >= 0]
@@ -66,16 +66,16 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
                 # MacPorts defaults to CLTs, but Xcode can easily be ahead
                 ui_debug "xcode_workaround: using Xcode since the bug is fixed there"
                 use_xcode yes
-                set apply_fix no
+                set attempt_fix no
             } else {
-                set apply_fix [expr !${clt_is_ok}]
+                set attempt_fix [expr !${clt_is_ok}]
             }
         }
 
     }
 
     # Apply the configured fix type
-    if { ${apply_fix} } {
+    if { ${attempt_fix} } {
         switch -- ${xcode_workaround.type} {
             append_to_compiler_flags  {
                 # -fno-stack-check workaround only needed on Darwin 19
