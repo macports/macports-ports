@@ -19,8 +19,9 @@
 #   legacysupport.redirect_bins: binary files that mix different versions of libstdc++
 #                                create a wrapper so that only MacPorts libstdc++ is used
 
+# default to OS X El Capitan (OS X 10.11; Darwin 15) due to clock_gettime
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy {}
+default legacysupport.newest_darwin_requires_legacy 15
 
 options legacysupport.header_search
 default legacysupport.header_search     {-isystem${prefix}/include/LegacySupport}
