@@ -14,6 +14,8 @@
 #
 #   legacysupport.library_name: linker flag used to add library
 #
+#   legacysupport.use_static: allow static linking of legacysupport if preferred (e.g. for compilers)
+#
 #   legacysupport.redirect_bins: binary files that mix different versions of libstdc++
 #                                create a wrapper so that only MacPorts libstdc++ is used
 
@@ -24,7 +26,10 @@ options legacysupport.header_search
 default legacysupport.header_search     {-isystem${prefix}/include/LegacySupport}
 
 options legacysupport.library_name
-default legacysupport.library_name      {${prefix}/lib/libMacportsLegacySupport.dylib}
+default legacysupport.library_name      {[legacysupport::get_library_name]}
+
+options legacysupport.use_static
+default legacysupport.use_static        no
 
 options legacysupport.redirect_bins
 default legacysupport.redirect_bins     {}
@@ -37,6 +42,15 @@ if {![info exists compiler.limit_flags]} {
 }
 
 namespace eval legacysupport {
+}
+
+proc legacysupport::get_library_name {} {
+    global prefix
+    if {[option legacysupport.use_static]} {
+        return ${prefix}/lib/libMacportsLegacySupport.a
+    } else {
+        return ${prefix}/lib/libMacportsLegacySupport.dylib
+    }
 }
 
 proc legacysupport::add_legacysupport {} {
