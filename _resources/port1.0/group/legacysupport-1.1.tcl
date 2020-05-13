@@ -59,8 +59,15 @@ proc legacysupport::add_legacysupport {} {
             configure.cppflags-prepend  [option legacysupport.header_search]
         }
 
-        compiler.cpath-delete      ${prefix}/include/LegacySupport
-        compiler.cpath-prepend     ${prefix}/include/LegacySupport
+        # do not use compiler.cpath since it behaves like -I, while ${lang}_INCLUDE_PATH behaves like -isystem
+        # since legacy-support uses GNU language extensions, this prevents warnings when `-pedantic` is used and error when `-pedantic-errors` is used.
+        # see, e.g., llvm-devel
+        foreach phase {configure build destroot test} {
+            foreach lang {C OBJC CPLUS OBJCPLUS} {
+                ${phase}.env-delete ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
+                ${phase}.env-append ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
+            }
+        }
     }
 
     # see https://trac.macports.org/ticket/59832
