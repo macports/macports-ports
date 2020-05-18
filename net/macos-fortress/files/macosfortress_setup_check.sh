@@ -69,7 +69,7 @@ LAUNCHD_PLISTS=( \
         org.macports.@NAME@-proxy \
         org.macports.@NAME@-proxy.squid-rotate \
         org.macports.@NAME@-easylistpac \
-        org.macports.@NAME@-hphosts \
+        org.macports.@NAME@-hosts \
         org.macports.adblock2privoxy \
         org.macports.adblock2privoxy-nginx \
         org.macports.Squid \
@@ -149,39 +149,37 @@ sudo pfctl -Fall && sudo pfctl -ef @PREFIX@/etc/@NAME@/pf.conf
 EOF
 fi
 
-# hphosts
+# hosts
 "${CAT}" <<EOF
 
-Checking hphosts files…
+Checking hosts files…
 EOF
 
-HPHOSTS_FILES=( \
-	@PREFIX@/etc/@NAME@/hosts-hphosts \
-	@PREFIX@/etc/@NAME@/hosts.zip \
-	@PREFIX@/etc/@NAME@/hphosts-partial.asp \
+HOSTS_FILES=( \
+	@PREFIX@/etc/@NAME@/@NAME@-hosts \
 	@PREFIX@/etc/@NAME@/whitelist.txt \
 	@PREFIX@/etc/@NAME@/blacklist.txt \
 )
 
-for FNAME in "${HPHOSTS_FILES[@]}" \
+for FNAME in "${HOSTS_FILES[@]}" \
 	; do \
 	fname_exists; \
 done
 
 "${CAT}" <<EOF
 
-Checking @PREFIX@/etc/@NAME@/hosts-hphosts creation…
+Checking @PREFIX@/etc/@NAME@/@NAME@-hosts creation…
 EOF
 
 # pfctl
-if [ -f @PREFIX@/etc/@NAME@/hosts-hphosts ]; then
-    echo "[✅] @PREFIX@/etc/@NAME@/hosts-hphosts exists"
+if [ -f @PREFIX@/etc/@NAME@/@NAME@-hosts ]; then
+    echo "[✅] @PREFIX@/etc/@NAME@/@NAME@-hosts exists"
 else
     "${CAT}" <<EOF
-[❌] @PREFIX@/etc/@NAME@/hosts-hphosts doesn't exist! Troubleshooting:
+[❌] @PREFIX@/etc/@NAME@/@NAME@-hosts doesn't exist! Troubleshooting:
 
-sudo @PREFIX@/bin/gpg --homedir /var/root/.gnupg --list-keys | grep -A2 -B1 -i hpHosts
-sudo port reload org.macports.@NAME@-hphosts
+sudo port reload org.macports.@NAME@-hosts
+sudo launchctl kickstart -k system/org.macports.@NAME@-hosts
 EOF
 fi
 
