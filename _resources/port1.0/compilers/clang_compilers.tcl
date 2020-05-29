@@ -10,12 +10,15 @@
 # clang 3.4 and older build on 10.4+  (darwin 8)
 
 if {${os.major} >= 10} {
-    # Clang-10 can only be added once
-    # https://github.com/macports/macports-base/pull/171
-    # is merged AND available in a public release.
-    #lappend compilers macports-clang-10
-    lappend compilers macports-clang-9.0 \
-                      macports-clang-8.0
+    # MacPorts clang 8+ cannot reliably build c++17 code on macOS10.13 and older
+    if {${os.major} >= 18 || ${compiler.cxx_standard} < 2017} {
+        # Clang-10 can only be added once
+        # https://github.com/macports/macports-base/pull/171
+        # is merged AND available in a public release.
+        #lappend compilers macports-clang-10
+        lappend compilers macports-clang-9.0 \
+            macports-clang-8.0
+    }
 }
 
 if {${os.major} >= 9} {
