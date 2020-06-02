@@ -111,12 +111,12 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         [join ${github.tag_suffix}] eq "" && \
         [regexp "^\[0-9a-f\]{7,}\$" ${github.version}] && \
         ![regexp "^\[0-9\]{8}\$" ${github.version}]} {
-        livecheck.type      regexm
+        livecheck.type          regexm
         default livecheck.url   {${github.homepage}/commits/${github.livecheck.branch}.atom}
-        livecheck.regex     <id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>
+        default livecheck.regex {<id>tag:github.com,2008:Grit::Commit/(\[0-9a-f\]{[string length ${github.version}]})\[0-9a-f\]*</id>}
     } else {
-        livecheck.type      regex
-        livecheck.url       ${github.homepage}/tags
+        livecheck.type          regex
+        default livecheck.url   {${github.homepage}/tags}
         default livecheck.regex {[list archive/[join ${github.tag_prefix}][join ${github.livecheck.regex}][join ${github.tag_suffix}]\\.tar\\.gz]}
     }
     livecheck.version       ${github.version}
