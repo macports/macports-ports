@@ -27,7 +27,7 @@ echo "archive_site_local https://packages.macports.org/:tbz2 https://packages-pr
 #echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 
 # Update PortIndex
-rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
+rsync --no-motd -zvl "rsync://rsync-origin.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 ## Run portindex on recent commits if PR is newer
