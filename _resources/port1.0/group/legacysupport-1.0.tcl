@@ -1,14 +1,14 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
 # This portgroup provides support for various missing library functions
-# on older OS releases.
+# on older macOS releases.
 
-# Newest OSX release that requires legacy support.
-# Currently OSX 10.11 (Darwin 15) due to clock_gettime
+# Newest Darwin version that requires legacy support.
+# Currently Darwin 15 (OS X 10.11) due to clock_gettime
 options legacysupport.newest_darwin_requires_legacy
 default legacysupport.newest_darwin_requires_legacy 15
 
-# allow static linking of legacysupport if preferred (eg compilers)
+# allow static linking of legacysupport if preferred (e.g. compilers)
 options legacysupport.use_static
 default legacysupport.use_static no
 
