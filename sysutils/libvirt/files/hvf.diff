@@ -1,0 +1,350 @@
+diff --git src/conf/domain_conf.c src/conf/domain_conf.c
+--- src/conf/domain_conf.c
++++ src/conf/domain_conf.c
+@@ -130,6 +130,7 @@ VIR_ENUM_IMPL(virDomainVirt,
+               "parallels",
+               "bhyve",
+               "vz",
++              "hvf",
+ );
+ 
+ VIR_ENUM_IMPL(virDomainOS,
+@@ -210,6 +211,10 @@ VIR_ENUM_IMPL(virDomainKVM,
+               "hint-dedicated",
+ );
+ 
++VIR_ENUM_IMPL(virDomainHVF,
++              VIR_DOMAIN_HVF_LAST,
++);
++
+ VIR_ENUM_IMPL(virDomainXen,
+               VIR_DOMAIN_XEN_LAST,
+               "e820_host",
+diff --git src/conf/domain_conf.h src/conf/domain_conf.h
+--- src/conf/domain_conf.h
++++ src/conf/domain_conf.h
+@@ -137,6 +137,7 @@ typedef enum {
+     VIR_DOMAIN_VIRT_PARALLELS,
+     VIR_DOMAIN_VIRT_BHYVE,
+     VIR_DOMAIN_VIRT_VZ,
++    VIR_DOMAIN_VIRT_HVF,
+ 
+     VIR_DOMAIN_VIRT_LAST
+ } virDomainVirtType;
+@@ -1856,6 +1857,10 @@ typedef enum {
+ } virDomainKVM;
+ 
+ typedef enum {
++    VIR_DOMAIN_HVF_LAST
++} virDomainHVF;
++
++typedef enum {
+     VIR_DOMAIN_MSRS_UNKNOWN = 0,
+ 
+     VIR_DOMAIN_MSRS_LAST
+@@ -3591,6 +3596,7 @@ VIR_ENUM_DECL(virDomainGraphicsSpiceMous
+ VIR_ENUM_DECL(virDomainGraphicsVNCSharePolicy);
+ VIR_ENUM_DECL(virDomainHyperv);
+ VIR_ENUM_DECL(virDomainKVM);
++VIR_ENUM_DECL(virDomainHVF);
+ VIR_ENUM_DECL(virDomainXen);
+ VIR_ENUM_DECL(virDomainXenPassthroughMode);
+ VIR_ENUM_DECL(virDomainMsrsUnknown);
+diff --git src/qemu/qemu_capabilities.c src/qemu/qemu_capabilities.c
+--- src/qemu/qemu_capabilities.c
++++ src/qemu/qemu_capabilities.c
+@@ -54,6 +54,10 @@
+ #include <unistd.h>
+ #include <stdarg.h>
+ #include <sys/utsname.h>
++#ifdef __APPLE__
++# include <sys/types.h>
++# include <sys/sysctl.h>
++#endif
+ 
+ #define VIR_FROM_THIS VIR_FROM_QEMU
+ 
+@@ -582,6 +586,9 @@ VIR_ENUM_IMPL(virQEMUCaps,
+               "tcg",
+               "virtio-blk-pci.scsi.default.disabled",
+               "pvscsi",
++
++              /* 370 */
++              "hvf",
+     );
+ 
+ 
+@@ -684,6 +691,7 @@ struct _virQEMUCaps {
+ 
+     /* Capabilities which may differ depending on the accelerator. */
+     virQEMUCapsAccel kvm;
++    virQEMUCapsAccel hvf;
+     virQEMUCapsAccel tcg;
+ };
+ 
+@@ -787,6 +795,8 @@ virQEMUCapsGetAccel(virQEMUCapsPtr qemuC
+ {
+     if (type == VIR_DOMAIN_VIRT_KVM)
+         return &qemuCaps->kvm;
++    else if (type == VIR_DOMAIN_VIRT_HVF)
++        return &qemuCaps->hvf;
+ 
+     return &qemuCaps->tcg;
+ }
+@@ -916,6 +926,8 @@ virQEMUCapsGetMachineTypesCaps(virQEMUCa
+      * take the set of machine types we probed first. */
+     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
+         accel = &qemuCaps->kvm;
++    else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF))
++        accel = &qemuCaps->hvf;
+     else
+         accel = &qemuCaps->tcg;
+ 
+@@ -1047,6 +1059,17 @@ virQEMUCapsInitGuestFromBinary(virCapsPt
+         }
+     }
+ 
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF)) {
++        if (virCapabilitiesAddGuestDomain(guest,
++                                          VIR_DOMAIN_VIRT_HVF,
++                                          NULL,
++                                          NULL,
++                                          0,
++                                          NULL) == NULL) {
++            goto cleanup;
++        }
++    }
++
+     if ((ARCH_IS_X86(guestarch) || guestarch == VIR_ARCH_AARCH64))
+         virCapabilitiesAddGuestFeatureWithToggle(guest, VIR_CAPS_GUEST_FEATURE_TYPE_ACPI,
+                                                  true, true);
+@@ -1917,6 +1940,7 @@ virQEMUCapsPtr virQEMUCapsNewCopy(virQEM
+     ret->arch = qemuCaps->arch;
+ 
+     if (virQEMUCapsAccelCopy(&ret->kvm, &qemuCaps->kvm) < 0 ||
++        virQEMUCapsAccelCopy(&ret->hvf, &qemuCaps->hvf) < 0 ||
+         virQEMUCapsAccelCopy(&ret->tcg, &qemuCaps->tcg) < 0)
+         goto error;
+ 
+@@ -1973,6 +1997,7 @@ void virQEMUCapsDispose(void *obj)
+     virSEVCapabilitiesFree(qemuCaps->sevCapabilities);
+ 
+     virQEMUCapsAccelClear(&qemuCaps->kvm);
++    virQEMUCapsAccelClear(&qemuCaps->hvf);
+     virQEMUCapsAccelClear(&qemuCaps->tcg);
+ }
+ 
+@@ -2357,6 +2382,10 @@ virQEMUCapsIsVirtTypeSupported(virQEMUCa
+         virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
+         return true;
+ 
++    if (virtType == VIR_DOMAIN_VIRT_HVF &&
++        virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF))
++        return true;
++
+     return false;
+ }
+ 
+@@ -2389,7 +2418,7 @@ virQEMUCapsIsCPUModeSupported(virQEMUCap
+ 
+     switch (mode) {
+     case VIR_CPU_MODE_HOST_PASSTHROUGH:
+-        return type == VIR_DOMAIN_VIRT_KVM &&
++        return (type == VIR_DOMAIN_VIRT_KVM || type == VIR_DOMAIN_VIRT_HVF) &&
+                virQEMUCapsGuestIsNative(hostarch, qemuCaps->arch);
+ 
+     case VIR_CPU_MODE_HOST_MODEL:
+@@ -3014,7 +3043,7 @@ virQEMUCapsProbeQMPHostCPU(virQEMUCapsPt
+                            qemuMonitorPtr mon,
+                            virDomainVirtType virtType)
+ {
+-    const char *model = virtType == VIR_DOMAIN_VIRT_KVM ? "host" : "max";
++    const char *model = virtType == VIR_DOMAIN_VIRT_KVM || virtType == VIR_DOMAIN_VIRT_HVF ? "host" : "max";
+     qemuMonitorCPUModelInfoPtr modelInfo = NULL;
+     qemuMonitorCPUModelInfoPtr nonMigratable = NULL;
+     virHashTablePtr hash = NULL;
+@@ -3240,6 +3269,33 @@ virQEMUCapsProbeQMPKVMState(virQEMUCapsP
+     return 0;
+ }
+ 
++#ifdef __APPLE__
++static int
++virQEMUCapsProbeHVF(virQEMUCapsPtr qemuCaps)
++{
++    int hv_support;
++    size_t len = sizeof(hv_support);
++    if (sysctlbyname("kern.hv_support", &hv_support, &len, NULL, 0))
++        hv_support = 0;
++
++    if (qemuCaps->version >= 2012000 &&
++        ARCH_IS_X86(qemuCaps->arch) &&
++        hv_support) {
++        virQEMUCapsSet(qemuCaps, QEMU_CAPS_HVF);
++    }
++
++    return 0;
++}
++#else
++static int
++virQEMUCapsProbeHVF(virQEMUCapsPtr qemuCaps)
++{
++  (void) qemuCaps;
++
++  return 0;
++}
++#endif
++
+ struct virQEMUCapsCommandLineProps {
+     const char *option;
+     const char *param;
+@@ -3718,7 +3774,7 @@ virQEMUCapsInitHostCPUModel(virQEMUCapsP
+                   virArchToString(qemuCaps->arch),
+                   virDomainVirtTypeToString(type));
+         goto error;
+-    } else if (type == VIR_DOMAIN_VIRT_KVM &&
++    } else if ((type == VIR_DOMAIN_VIRT_KVM || type == VIR_DOMAIN_VIRT_HVF) &&
+                virCPUGetHostIsSupported(qemuCaps->arch)) {
+         if (!(fullCPU = virQEMUCapsProbeHostCPU(qemuCaps->arch, NULL)))
+             goto error;
+@@ -4074,7 +4130,7 @@ virQEMUCapsLoadAccel(virQEMUCapsPtr qemu
+                      virDomainVirtType type)
+ {
+     virQEMUCapsAccelPtr caps = virQEMUCapsGetAccel(qemuCaps, type);
+-    const char *typeStr = type == VIR_DOMAIN_VIRT_KVM ? "kvm" : "tcg";
++    const char *typeStr = type == VIR_DOMAIN_VIRT_KVM ? "kvm" : type == VIR_DOMAIN_VIRT_HVF ? "hvf" : "tcg";
+ 
+     if (virQEMUCapsLoadHostCPUModelInfo(caps, ctxt, typeStr) < 0)
+         return -1;
+@@ -4318,6 +4374,7 @@ virQEMUCapsLoadCache(virArch hostArch,
+     VIR_FREE(str);
+ 
+     if (virQEMUCapsLoadAccel(qemuCaps, ctxt, VIR_DOMAIN_VIRT_KVM) < 0 ||
++        virQEMUCapsLoadAccel(qemuCaps, ctxt, VIR_DOMAIN_VIRT_HVF) < 0 ||
+         virQEMUCapsLoadAccel(qemuCaps, ctxt, VIR_DOMAIN_VIRT_QEMU) < 0)
+         goto cleanup;
+ 
+@@ -4390,7 +4447,10 @@ virQEMUCapsLoadCache(virArch hostArch,
+     if (virQEMUCapsParseSEVInfo(qemuCaps, ctxt) < 0)
+         goto cleanup;
+ 
+-    virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_KVM);
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
++        virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_KVM);
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF))
++        virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_HVF);
+     virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_QEMU);
+ 
+     if (virXPathBoolean("boolean(./kvmSupportsNesting)", ctxt) > 0)
+@@ -4534,7 +4594,7 @@ virQEMUCapsFormatAccel(virQEMUCapsPtr qe
+                        virDomainVirtType type)
+ {
+     virQEMUCapsAccelPtr caps = virQEMUCapsGetAccel(qemuCaps, type);
+-    const char *typeStr = type == VIR_DOMAIN_VIRT_KVM ? "kvm" : "tcg";
++    const char *typeStr = type == VIR_DOMAIN_VIRT_KVM ? "kvm" : type == VIR_DOMAIN_VIRT_HVF ?  "hvf" : "tcg";
+ 
+     virQEMUCapsFormatHostCPUModelInfo(caps, buf, typeStr);
+     virQEMUCapsFormatCPUModels(caps, buf, typeStr);
+@@ -4608,6 +4668,7 @@ virQEMUCapsFormatCache(virQEMUCapsPtr qe
+     virBufferAsprintf(&buf, "<arch>%s</arch>\n",
+                       virArchToString(qemuCaps->arch));
+ 
++    virQEMUCapsFormatAccel(qemuCaps, &buf, VIR_DOMAIN_VIRT_HVF);
+     virQEMUCapsFormatAccel(qemuCaps, &buf, VIR_DOMAIN_VIRT_KVM);
+     virQEMUCapsFormatAccel(qemuCaps, &buf, VIR_DOMAIN_VIRT_QEMU);
+ 
+@@ -5111,6 +5172,8 @@ virQEMUCapsGetVirtType(virQEMUCapsPtr qe
+     virDomainVirtType type;
+     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
+         type = VIR_DOMAIN_VIRT_KVM;
++    else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF))
++        type = VIR_DOMAIN_VIRT_HVF;
+     else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_TCG))
+         type = VIR_DOMAIN_VIRT_QEMU;
+     else
+@@ -5163,6 +5226,9 @@ virQEMUCapsInitQMPMonitor(virQEMUCapsPtr
+     if (virQEMUCapsProbeQMPKVMState(qemuCaps, mon) < 0)
+         return -1;
+ 
++    if (virQEMUCapsProbeHVF(qemuCaps) < 0)
++        return -1;
++
+     type = virQEMUCapsGetVirtType(qemuCaps);
+     accel = virQEMUCapsGetAccel(qemuCaps, type);
+ 
+@@ -5290,6 +5356,7 @@ virQEMUCapsInitQMP(virQEMUCapsPtr qemuCa
+      * off.
+      */
+     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM) &&
++        virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF) &&
+         virQEMUCapsGet(qemuCaps, QEMU_CAPS_TCG) &&
+         virQEMUCapsInitQMPSingle(qemuCaps, libDir, runUid, runGid, true) < 0)
+         return -1;
+@@ -5339,7 +5406,10 @@ virQEMUCapsNewForBinaryInternal(virArch 
+     qemuCaps->libvirtCtime = virGetSelfLastChanged();
+     qemuCaps->libvirtVersion = LIBVIR_VERSION_NUMBER;
+ 
+-    virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_KVM);
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
++        virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_KVM);
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_HVF))
++        virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_HVF);
+     virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_QEMU);
+ 
+     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM)) {
+@@ -5671,13 +5741,20 @@ virQEMUCapsCacheLookupDefault(virFileCac
+     if (virttype == VIR_DOMAIN_VIRT_NONE)
+         virttype = capsType;
+ 
+-    if (virttype == VIR_DOMAIN_VIRT_KVM && capsType == VIR_DOMAIN_VIRT_QEMU) {
++    if (virttype == VIR_DOMAIN_VIRT_KVM && capsType != VIR_DOMAIN_VIRT_KVM) {
+         virReportError(VIR_ERR_INVALID_ARG,
+                        _("KVM is not supported by '%s' on this host"),
+                        binary);
+         goto cleanup;
+     }
+ 
++    if (virttype == VIR_DOMAIN_VIRT_HVF && capsType != VIR_DOMAIN_VIRT_HVF) {
++        virReportError(VIR_ERR_INVALID_ARG,
++                       _("Hypervisor.framework is not supported by '%s' on this host"),
++                       binary);
++        goto cleanup;
++    }
++
+     if (machine) {
+         /* Turn @machine into canonical name */
+         machine = virQEMUCapsGetCanonicalMachine(qemuCaps, virttype, machine);
+@@ -6277,6 +6354,7 @@ virQEMUCapsStripMachineAliasesForVirtTyp
+ void
+ virQEMUCapsStripMachineAliases(virQEMUCapsPtr qemuCaps)
+ {
++    virQEMUCapsStripMachineAliasesForVirtType(qemuCaps, VIR_DOMAIN_VIRT_HVF);
+     virQEMUCapsStripMachineAliasesForVirtType(qemuCaps, VIR_DOMAIN_VIRT_KVM);
+     virQEMUCapsStripMachineAliasesForVirtType(qemuCaps, VIR_DOMAIN_VIRT_QEMU);
+ }
+diff --git src/qemu/qemu_capabilities.h src/qemu/qemu_capabilities.h
+--- src/qemu/qemu_capabilities.h
++++ src/qemu/qemu_capabilities.h
+@@ -564,6 +564,9 @@ typedef enum { /* virQEMUCapsFlags group
+     QEMU_CAPS_VIRTIO_BLK_SCSI_DEFAULT_DISABLED, /* virtio-blk-pci.scsi disabled by default */
+     QEMU_CAPS_SCSI_PVSCSI, /* -device pvscsi */
+ 
++    /* 370 */
++    QEMU_CAPS_HVF, /* Whether Hypervisor.framework is available */
++
+     QEMU_CAPS_LAST /* this must always be the last item */
+ } virQEMUCapsFlags;
+ 
+diff --git src/qemu/qemu_command.c src/qemu/qemu_command.c
+--- src/qemu/qemu_command.c
++++ src/qemu/qemu_command.c
+@@ -6677,6 +6677,10 @@ qemuBuildMachineCommandLine(virCommandPt
+         virBufferAddLit(&buf, ",accel=kvm");
+         break;
+ 
++    case VIR_DOMAIN_VIRT_HVF:
++        virBufferAddLit(&buf, ",accel=hvf");
++        break;
++
+     case VIR_DOMAIN_VIRT_KQEMU:
+     case VIR_DOMAIN_VIRT_XEN:
+     case VIR_DOMAIN_VIRT_LXC:
