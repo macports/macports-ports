@@ -4,36 +4,14 @@ Modified from a patch that was written by Rolf Grossmann.
 To use this patch, run these commands for a successful build:
 
     patch -p1 <patches/fileflags.diff
-    ./prepare-source
-    ./configure
+    ./configure                         (optional if already run)
     make
 
-based-on: d73762eea3f15f2c56bb3fa9394ad1883c25c949
-diff --git a/Makefile.in b/Makefile.in
---- a/Makefile.in
-+++ b/Makefile.in
-@@ -46,7 +46,7 @@ popt_OBJS=popt/findme.o  popt/popt.o  popt/poptconfig.o \
- 	popt/popthelp.o popt/poptparse.o
- OBJS=$(OBJS1) $(OBJS2) $(OBJS3) $(DAEMON_OBJ) $(LIBOBJ) @BUILD_ZLIB@ @BUILD_POPT@
- 
--TLS_OBJ = tls.o syscall.o lib/compat.o lib/snprintf.o lib/permstring.o lib/sysxattrs.o @BUILD_POPT@
-+TLS_OBJ = tls.o syscall.o t_stub.o lib/compat.o lib/snprintf.o lib/permstring.o lib/sysxattrs.o @BUILD_POPT@
- 
- # Programs we must have to run the test cases
- CHECK_PROGS = rsync$(EXEEXT) tls$(EXEEXT) getgroups$(EXEEXT) getfsdev$(EXEEXT) \
-@@ -128,7 +128,7 @@ getgroups$(EXEEXT): getgroups.o
- getfsdev$(EXEEXT): getfsdev.o
- 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ getfsdev.o $(LIBS)
- 
--TRIMSLASH_OBJ = trimslash.o syscall.o lib/compat.o lib/snprintf.o
-+TRIMSLASH_OBJ = trimslash.o syscall.o t_stub.o lib/compat.o lib/snprintf.o
- trimslash$(EXEEXT): $(TRIMSLASH_OBJ)
- 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(TRIMSLASH_OBJ) $(LIBS)
- 
+based-on: a8fc8fc2d22ba7243b96decb91c586682a05e4a1
 diff --git a/compat.c b/compat.c
 --- a/compat.c
 +++ b/compat.c
-@@ -45,9 +45,11 @@ extern int checksum_seed;
+@@ -38,12 +38,14 @@ extern int checksum_seed;
  extern int basis_dir_cnt;
  extern int prune_empty_dirs;
  extern int protocol_version;
@@ -41,20 +19,23 @@ diff --git a/compat.c b/compat.c
  extern int protect_args;
  extern int preserve_uid;
  extern int preserve_gid;
-+extern int preserve_fileflags;
+ extern int preserve_atimes;
  extern int preserve_acls;
  extern int preserve_xattrs;
++extern int preserve_fileflags;
+ extern int xfer_flags_as_varint;
  extern int need_messages_from_generator;
-@@ -65,7 +67,7 @@ extern char *iconv_opt;
- #endif
+ extern int delete_mode, delete_before, delete_during, delete_after;
+@@ -74,7 +76,7 @@ int inplace_partial = 0;
+ int do_negotiated_strings = 0;
  
  /* These index values are for the file-list's extra-attribute array. */
--int uid_ndx, gid_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
-+int uid_ndx, gid_ndx, fileflags_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
+-int pathname_ndx, depth_ndx, atimes_ndx, uid_ndx, gid_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
++int pathname_ndx, depth_ndx, atimes_ndx, uid_ndx, gid_ndx, fileflags_ndx, acls_ndx, xattrs_ndx, unsort_ndx;
  
  int receiver_symlink_times = 0; /* receiver can set the time on a symlink */
  int sender_symlink_iconv = 0;	/* sender should convert symlink content */
-@@ -144,6 +146,8 @@ void setup_protocol(int f_out,int f_in)
+@@ -468,6 +470,8 @@ void setup_protocol(int f_out,int f_in)
  		uid_ndx = ++file_extra_cnt;
  	if (preserve_gid)
  		gid_ndx = ++file_extra_cnt;
@@ -63,17 +44,17 @@ diff --git a/compat.c b/compat.c
  	if (preserve_acls && !am_sender)
  		acls_ndx = ++file_extra_cnt;
  	if (preserve_xattrs)
-diff --git a/configure.ac b/configure.ac
---- a/configure.ac
-+++ b/configure.ac
-@@ -594,6 +594,7 @@ AC_FUNC_UTIME_NULL
- AC_FUNC_ALLOCA
- AC_CHECK_FUNCS(waitpid wait4 getcwd strdup chown chmod lchmod mknod mkfifo \
-     fchmod fstat ftruncate strchr readlink link utime utimes lutimes strftime \
-+    chflags \
-     memmove lchown vsnprintf snprintf vasprintf asprintf setsid strpbrk \
-     strlcat strlcpy strtol mallinfo getgroups setgroups geteuid getegid \
-     setlocale setmode open64 lseek64 mkstemp64 mtrace va_copy __va_copy \
+@@ -623,6 +627,10 @@ void setup_protocol(int f_out,int f_in)
+ 		want_xattr_optim = protocol_version >= 31 && !(compat_flags & CF_AVOID_XATTR_OPTIM);
+ 		proper_seed_order = compat_flags & CF_CHKSUM_SEED_FIX ? 1 : 0;
+ 		xfer_flags_as_varint = compat_flags & CF_VARINT_FLIST_FLAGS ? 1 : 0;
++		if (!xfer_flags_as_varint && preserve_fileflags) {
++			fprintf(stderr, "Both rsync versions must be at least 3.2.0 for --fileflags.\n");
++			exit_cleanup(RERR_PROTOCOL);
++		}
+ 		if (am_sender) {
+ 			receiver_symlink_times = am_server
+ 			    ? strchr(client_info, 'L') != NULL
 diff --git a/delete.c b/delete.c
 --- a/delete.c
 +++ b/delete.c
@@ -130,9 +111,9 @@ diff --git a/flist.c b/flist.c
  extern int delete_during;
  extern int missing_args;
  extern int eol_nulls;
-@@ -381,6 +382,9 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -382,6 +383,9 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
  {
- 	static time_t modtime;
+ 	static time_t modtime, atime;
  	static mode_t mode;
 +#ifdef SUPPORT_FILEFLAGS
 +	static uint32 fileflags;
@@ -140,7 +121,7 @@ diff --git a/flist.c b/flist.c
  #ifdef SUPPORT_HARD_LINKS
  	static int64 dev;
  #endif
-@@ -424,6 +428,14 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -425,6 +429,14 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
  		xflags |= XMIT_SAME_MODE;
  	else
  		mode = file->mode;
@@ -155,7 +136,7 @@ diff --git a/flist.c b/flist.c
  
  	if (preserve_devices && IS_DEVICE(mode)) {
  		if (protocol_version < 28) {
-@@ -565,6 +577,10 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
+@@ -575,6 +587,10 @@ static void send_file_entry(int f, const char *fname, struct file_struct *file,
  		write_varint(f, F_MOD_NSEC(file));
  	if (!(xflags & XMIT_SAME_MODE))
  		write_int(f, to_wire_mode(mode));
@@ -163,12 +144,12 @@ diff --git a/flist.c b/flist.c
 +	if (preserve_fileflags && !(xflags & XMIT_SAME_FLAGS))
 +		write_int(f, (int)fileflags);
 +#endif
+ 	if (atimes_ndx && !S_ISDIR(mode) && !(xflags & XMIT_SAME_ATIME))
+ 		write_varlong(f, atime, 4);
  	if (preserve_uid && !(xflags & XMIT_SAME_UID)) {
- 		if (protocol_version < 30)
- 			write_int(f, uid);
-@@ -654,6 +670,9 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+@@ -666,6 +682,9 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
  {
- 	static int64 modtime;
+ 	static int64 modtime, atime;
  	static mode_t mode;
 +#ifdef SUPPORT_FILEFLAGS
 +	static uint32 fileflags;
@@ -176,10 +157,10 @@ diff --git a/flist.c b/flist.c
  #ifdef SUPPORT_HARD_LINKS
  	static int64 dev;
  #endif
-@@ -761,6 +780,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
- 			modtime = first->modtime;
- 			modtime_nsec = F_MOD_NSEC(first);
+@@ -775,6 +794,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
  			mode = first->mode;
+ 			if (atimes_ndx && !S_ISDIR(mode))
+ 				atime = F_ATIME(first);
 +#ifdef SUPPORT_FILEFLAGS
 +			if (preserve_fileflags)
 +				fileflags = F_FFLAGS(first);
@@ -187,7 +168,7 @@ diff --git a/flist.c b/flist.c
  			if (preserve_uid)
  				uid = F_OWNER(first);
  			if (preserve_gid)
-@@ -802,6 +825,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+@@ -826,6 +849,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
  
  	if (chmod_modes && !S_ISLNK(mode) && mode)
  		mode = tweak_mode(mode, chmod_modes);
@@ -198,7 +179,7 @@ diff --git a/flist.c b/flist.c
  
  	if (preserve_uid && !(xflags & XMIT_SAME_UID)) {
  		if (protocol_version < 30)
-@@ -960,6 +987,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
+@@ -984,6 +1011,10 @@ static struct file_struct *recv_file_entry(int f, struct file_list *flist, int x
  	}
  #endif
  	file->mode = mode;
@@ -209,7 +190,7 @@ diff --git a/flist.c b/flist.c
  	if (preserve_uid)
  		F_OWNER(file) = uid;
  	if (preserve_gid) {
-@@ -1357,6 +1388,10 @@ struct file_struct *make_file(const char *fname, struct file_list *flist,
+@@ -1383,6 +1414,10 @@ struct file_struct *make_file(const char *fname, struct file_list *flist,
  	}
  #endif
  	file->mode = st.st_mode;
@@ -223,7 +204,7 @@ diff --git a/flist.c b/flist.c
 diff --git a/generator.c b/generator.c
 --- a/generator.c
 +++ b/generator.c
-@@ -42,8 +42,10 @@ extern int preserve_devices;
+@@ -43,8 +43,10 @@ extern int write_devices;
  extern int preserve_specials;
  extern int preserve_hard_links;
  extern int preserve_executability;
@@ -234,7 +215,7 @@ diff --git a/generator.c b/generator.c
  extern int delete_mode;
  extern int delete_before;
  extern int delete_during;
-@@ -470,6 +472,10 @@ int unchanged_attrs(const char *fname, struct file_struct *file, stat_x *sxp)
+@@ -474,6 +476,10 @@ int unchanged_attrs(const char *fname, struct file_struct *file, stat_x *sxp)
  			return 0;
  		if (perms_differ(file, sxp))
  			return 0;
@@ -245,9 +226,9 @@ diff --git a/generator.c b/generator.c
  		if (ownership_differs(file, sxp))
  			return 0;
  #ifdef SUPPORT_ACLS
-@@ -521,6 +527,11 @@ void itemize(const char *fnamecmp, struct file_struct *file, int ndx, int statre
- 		if (gid_ndx && !(file->flags & FLAG_SKIP_GROUP)
- 		    && sxp->st.st_gid != (gid_t)F_GROUP(file))
+@@ -527,6 +533,11 @@ void itemize(const char *fnamecmp, struct file_struct *file, int ndx, int statre
+ 			iflags |= ITEM_REPORT_OWNER;
+ 		if (gid_ndx && !(file->flags & FLAG_SKIP_GROUP) && sxp->st.st_gid != (gid_t)F_GROUP(file))
  			iflags |= ITEM_REPORT_GROUP;
 +#ifdef SUPPORT_FILEFLAGS
 +		if (preserve_fileflags && !S_ISLNK(file->mode)
@@ -257,18 +238,18 @@ diff --git a/generator.c b/generator.c
  #ifdef SUPPORT_ACLS
  		if (preserve_acls && !S_ISLNK(file->mode)) {
  			if (!ACL_READY(*sxp))
-@@ -1415,6 +1426,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
- 			file->mode = dest_mode(file->mode, sx.st.st_mode,
- 					       dflt_perms, statret == 0);
+@@ -1413,6 +1424,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 		if (!preserve_perms) { /* See comment in non-dir code below. */
+ 			file->mode = dest_mode(file->mode, sx.st.st_mode, dflt_perms, statret == 0);
  		}
 +#ifdef SUPPORT_FORCE_CHANGE
 +		if (force_change && !preserve_fileflags)
 +			F_FFLAGS(file) = sx.st.st_flags;
 +#endif
  		if (statret != 0 && basis_dir[0] != NULL) {
- 			int j = try_dests_non(file, fname, ndx, fnamecmpbuf, &sx,
- 					      itemizing, code);
-@@ -1459,10 +1474,15 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 			int j = try_dests_non(file, fname, ndx, fnamecmpbuf, &sx, itemizing, code);
+ 			if (j == -2) {
+@@ -1455,10 +1470,15 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
  		 * readable and writable permissions during the time we are
  		 * putting files within them.  This is then restored to the
  		 * former permissions after the transfer is done. */
@@ -285,9 +266,9 @@ diff --git a/generator.c b/generator.c
  				rsyserr(FERROR_XFER, errno,
  					"failed to modify permissions on %s",
  					full_fname(fname));
-@@ -1498,6 +1518,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
- 		file->mode = dest_mode(file->mode, sx.st.st_mode, dflt_perms,
- 				       exists);
+@@ -1493,6 +1513,10 @@ static void recv_generator(char *fname, struct file_struct *file, int ndx,
+ 		int exists = statret == 0 && !S_ISDIR(sx.st.st_mode);
+ 		file->mode = dest_mode(file->mode, sx.st.st_mode, dflt_perms, exists);
  	}
 +#ifdef SUPPORT_FORCE_CHANGE
 +	if (force_change && !preserve_fileflags)
@@ -296,7 +277,7 @@ diff --git a/generator.c b/generator.c
  
  #ifdef SUPPORT_HARD_LINKS
  	if (preserve_hard_links && F_HLINK_NOT_FIRST(file)
-@@ -2065,12 +2089,16 @@ static void touch_up_dirs(struct file_list *flist, int ndx)
+@@ -2073,17 +2097,25 @@ static void touch_up_dirs(struct file_list *flist, int ndx)
  			continue;
  		fname = f_name(file, NULL);
  		if (fix_dir_perms)
@@ -304,9 +285,17 @@ diff --git a/generator.c b/generator.c
 +			do_chmod(fname, file->mode, 0);
  		if (need_retouch_dir_times) {
  			STRUCT_STAT st;
- 			if (link_stat(fname, &st, 0) == 0 && time_diff(&st, file))
--				set_modtime(fname, file->modtime, F_MOD_NSEC(file), file->mode);
-+				set_modtime(fname, file->modtime, F_MOD_NSEC(file), file->mode, 0);
+ 			if (link_stat(fname, &st, 0) == 0 && mtime_differs(&st, file)) {
+ 				st.st_mtime = file->modtime;
+ #ifdef ST_MTIME_NSEC
+ 				st.ST_MTIME_NSEC = F_MOD_NSEC_or_0(file);
++#endif
++#ifdef SUPPORT_FORCE_CHANGE
++				st.st_mode = file->mode;
++				st.st_flags = 0;
+ #endif
+ 				set_times(fname, &st);
+ 			}
  		}
 +#ifdef SUPPORT_FORCE_CHANGE
 +		if (force_change && F_FFLAGS(file) & force_change)
@@ -318,29 +307,30 @@ diff --git a/generator.c b/generator.c
 diff --git a/log.c b/log.c
 --- a/log.c
 +++ b/log.c
-@@ -713,7 +713,7 @@ static void log_formatted(enum logcode code, const char *format, const char *op,
- 			c[5] = !(iflags & ITEM_REPORT_PERMS) ? '.' : 'p';
- 			c[6] = !(iflags & ITEM_REPORT_OWNER) ? '.' : 'o';
- 			c[7] = !(iflags & ITEM_REPORT_GROUP) ? '.' : 'g';
--			c[8] = !(iflags & ITEM_REPORT_ATIME) ? '.' : 'u';
-+			c[8] = !(iflags & ITEM_REPORT_FFLAGS) ? '.' : 'f';
+@@ -720,7 +720,8 @@ static void log_formatted(enum logcode code, const char *format, const char *op,
+ 			     : S_ISLNK(file->mode) ? 'U' : 'u';
  			c[9] = !(iflags & ITEM_REPORT_ACL) ? '.' : 'a';
  			c[10] = !(iflags & ITEM_REPORT_XATTR) ? '.' : 'x';
- 			c[11] = '\0';
+-			c[11] = '\0';
++			c[11] = !(iflags & ITEM_REPORT_FFLAGS) ? '.' : 'f';
++			c[12] = '\0';
+ 
+ 			if (iflags & (ITEM_IS_NEW|ITEM_MISSING_DATA)) {
+ 				char ch = iflags & ITEM_IS_NEW ? '+' : '?';
 diff --git a/main.c b/main.c
 --- a/main.c
 +++ b/main.c
-@@ -26,6 +26,9 @@
- #if defined CONFIG_LOCALE && defined HAVE_LOCALE_H
+@@ -27,6 +27,9 @@
  #include <locale.h>
  #endif
+ #include <popt.h>
 +#ifdef SUPPORT_FORCE_CHANGE
 +#include <sys/sysctl.h>
 +#endif
  
  extern int dry_run;
  extern int list_only;
-@@ -51,6 +54,7 @@ extern int copy_unsafe_links;
+@@ -53,6 +56,7 @@ extern int copy_unsafe_links;
  extern int keep_dirlinks;
  extern int preserve_hard_links;
  extern int protocol_version;
@@ -348,7 +338,7 @@ diff --git a/main.c b/main.c
  extern int file_total;
  extern int recurse;
  extern int xfer_dirs;
-@@ -850,6 +854,22 @@ static int do_recv(int f_in, int f_out, char *local_name)
+@@ -951,6 +955,22 @@ static int do_recv(int f_in, int f_out, char *local_name)
  	 * points to an identical file won't be replaced by the referent. */
  	copy_links = copy_dirlinks = copy_unsafe_links = 0;
  
@@ -374,7 +364,7 @@ diff --git a/main.c b/main.c
 diff --git a/options.c b/options.c
 --- a/options.c
 +++ b/options.c
-@@ -55,6 +55,7 @@ int preserve_hard_links = 0;
+@@ -56,6 +56,7 @@ int preserve_hard_links = 0;
  int preserve_acls = 0;
  int preserve_xattrs = 0;
  int preserve_perms = 0;
@@ -382,7 +372,7 @@ diff --git a/options.c b/options.c
  int preserve_executability = 0;
  int preserve_devices = 0;
  int preserve_specials = 0;
-@@ -89,6 +90,7 @@ int numeric_ids = 0;
+@@ -92,6 +93,7 @@ int numeric_ids = 0;
  int msgs2stderr = 0;
  int allow_8bit_chars = 0;
  int force_delete = 0;
@@ -390,96 +380,66 @@ diff --git a/options.c b/options.c
  int io_timeout = 0;
  int prune_empty_dirs = 0;
  int use_qsort = 0;
-@@ -573,6 +575,7 @@ static void print_rsync_version(enum logcode f)
- 	char const *links = "no ";
- 	char const *iconv = "no ";
- 	char const *ipv6 = "no ";
-+	char const *fileflags = "no ";
- 	STRUCT_STAT *dumstat;
- 
- #if SUBPROTOCOL_VERSION != 0
-@@ -609,6 +612,9 @@ static void print_rsync_version(enum logcode f)
- #ifdef CAN_SET_SYMLINK_TIMES
- 	symtimes = "";
+@@ -657,6 +659,11 @@ static void print_capabilities(enum logcode f)
  #endif
-+#ifdef SUPPORT_FILEFLAGS
-+	fileflags = "";
-+#endif
+ 			"prealloc",
  
- 	rprintf(f, "%s  version %s  protocol version %d%s\n",
- 		RSYNC_NAME, RSYNC_VERSION, PROTOCOL_VERSION, subprotocol);
-@@ -622,8 +628,8 @@ static void print_rsync_version(enum logcode f)
- 		(int)(sizeof (int64) * 8));
- 	rprintf(f, "    %ssocketpairs, %shardlinks, %ssymlinks, %sIPv6, batchfiles, %sinplace,\n",
- 		got_socketpair, hardlinks, links, ipv6, have_inplace);
--	rprintf(f, "    %sappend, %sACLs, %sxattrs, %siconv, %ssymtimes, %sprealloc\n",
--		have_inplace, acls, xattrs, iconv, symtimes, prealloc);
-+	rprintf(f, "    %sappend, %sACLs, %sxattrs, %siconv, %ssymtimes, %sprealloc, %sfile-flags\n",
-+		have_inplace, acls, xattrs, iconv, symtimes, prealloc, fileflags);
- 
- #ifdef MAINTAINER_MODE
- 	rprintf(f, "Panic Action: \"%s\"\n", get_panic_action());
-@@ -694,6 +700,9 @@ void usage(enum logcode F)
-   rprintf(F," -K, --keep-dirlinks         treat symlinked dir on receiver as dir\n");
-   rprintf(F," -H, --hard-links            preserve hard links\n");
-   rprintf(F," -p, --perms                 preserve permissions\n");
-+#ifdef SUPPORT_FILEFLAGS
-+  rprintf(F,"     --fileflags             preserve file-flags (aka chflags)\n");
++#ifndef SUPPORT_FILEFLAGS
++		"no "
 +#endif
-   rprintf(F," -E, --executability         preserve the file's executability\n");
-   rprintf(F,"     --chmod=CHMOD           affect file and/or directory permissions\n");
- #ifdef SUPPORT_ACLS
-@@ -740,7 +749,12 @@ void usage(enum logcode F)
-   rprintf(F,"     --ignore-missing-args   ignore missing source args without error\n");
-   rprintf(F,"     --delete-missing-args   delete missing source args from destination\n");
-   rprintf(F,"     --ignore-errors         delete even if there are I/O errors\n");
--  rprintf(F,"     --force                 force deletion of directories even if not empty\n");
-+  rprintf(F,"     --force-delete          force deletion of directories even if not empty\n");
-+#ifdef SUPPORT_FORCE_CHANGE
-+  rprintf(F,"     --force-change          affect user-/system-immutable files/dirs\n");
-+  rprintf(F,"     --force-uchange         affect user-immutable files/dirs\n");
-+  rprintf(F,"     --force-schange         affect system-immutable files/dirs\n");
-+#endif
-   rprintf(F,"     --max-delete=NUM        don't delete more than NUM files\n");
-   rprintf(F,"     --max-size=SIZE         don't transfer any file larger than SIZE\n");
-   rprintf(F,"     --min-size=SIZE         don't transfer any file smaller than SIZE\n");
-@@ -857,6 +871,10 @@ static struct poptOption long_options[] = {
++			"file-flags",
++
+ 	"*" /* All options after this point are hidden w/o -V -V */
+ #ifndef HAVE_SIMD
+ 		"no "
+@@ -818,6 +825,8 @@ static struct poptOption long_options[] = {
    {"perms",           'p', POPT_ARG_VAL,    &preserve_perms, 1, 0, 0 },
    {"no-perms",         0,  POPT_ARG_VAL,    &preserve_perms, 0, 0, 0 },
    {"no-p",             0,  POPT_ARG_VAL,    &preserve_perms, 0, 0, 0 },
-+#ifdef SUPPORT_FILEFLAGS
 +  {"fileflags",        0,  POPT_ARG_VAL,    &preserve_fileflags, 1, 0, 0 },
 +  {"no-fileflags",     0,  POPT_ARG_VAL,    &preserve_fileflags, 0, 0, 0 },
-+#endif
    {"executability",   'E', POPT_ARG_NONE,   &preserve_executability, 0, 0, 0 },
    {"acls",            'A', POPT_ARG_NONE,   0, 'A', 0, 0 },
    {"no-acls",          0,  POPT_ARG_VAL,    &preserve_acls, 0, 0, 0 },
-@@ -943,6 +961,14 @@ static struct poptOption long_options[] = {
+@@ -911,6 +920,12 @@ static struct poptOption long_options[] = {
    {"remove-source-files",0,POPT_ARG_VAL,    &remove_source_files, 1, 0, 0 },
    {"force",            0,  POPT_ARG_VAL,    &force_delete, 1, 0, 0 },
    {"no-force",         0,  POPT_ARG_VAL,    &force_delete, 0, 0, 0 },
 +  {"force-delete",     0,  POPT_ARG_VAL,    &force_delete, 1, 0, 0 },
 +  {"no-force-delete",  0,  POPT_ARG_VAL,    &force_delete, 0, 0, 0 },
-+#ifdef SUPPORT_FORCE_CHANGE
 +  {"force-change",     0,  POPT_ARG_VAL,    &force_change, ALL_IMMUTABLE, 0, 0 },
 +  {"no-force-change",  0,  POPT_ARG_VAL,    &force_change, 0, 0, 0 },
 +  {"force-uchange",    0,  POPT_ARG_VAL,    &force_change, USR_IMMUTABLE, 0, 0 },
 +  {"force-schange",    0,  POPT_ARG_VAL,    &force_change, SYS_IMMUTABLE, 0, 0 },
-+#endif
    {"ignore-errors",    0,  POPT_ARG_VAL,    &ignore_errors, 1, 0, 0 },
    {"no-ignore-errors", 0,  POPT_ARG_VAL,    &ignore_errors, 0, 0, 0 },
    {"max-delete",       0,  POPT_ARG_INT,    &max_delete, 0, 0, 0 },
-@@ -2567,6 +2593,9 @@ void server_options(char **args, int *argc_p)
+@@ -1199,6 +1214,14 @@ static void set_refuse_options(void)
+ #ifndef HAVE_SETVBUF
+ 	parse_one_refuse_match(0, "outbuf", list_end);
+ #endif
++#ifndef SUPPORT_FILEFLAGS
++	parse_one_refuse_match(0, "fileflags", list_end);
++#endif
++#ifndef SUPPORT_FORCE_CHANGE
++	parse_one_refuse_match(0, "force-change", list_end);
++	parse_one_refuse_match(0, "force-uchange", list_end);
++	parse_one_refuse_match(0, "force-schange", list_end);
++#endif
+ 
+ 	/* Now we use the descrip values to actually mark the options for refusal. */
+ 	for (op = long_options; op != list_end; op++) {
+@@ -2651,6 +2674,9 @@ void server_options(char **args, int *argc_p)
  	if (xfer_dirs && !recurse && delete_mode && am_sender)
  		args[ac++] = "--no-r";
  
 +	if (preserve_fileflags)
 +		args[ac++] = "--fileflags";
 +
- 	if (do_compression && def_compress_level != Z_DEFAULT_COMPRESSION) {
- 		if (asprintf(&arg, "--compress-level=%d", def_compress_level) < 0)
+ 	if (do_compression && do_compression_level != CLVL_NOT_SPECIFIED) {
+ 		if (asprintf(&arg, "--compress-level=%d", do_compression_level) < 0)
  			goto oom;
-@@ -2660,6 +2689,16 @@ void server_options(char **args, int *argc_p)
+@@ -2754,6 +2780,16 @@ void server_options(char **args, int *argc_p)
  			args[ac++] = "--delete-excluded";
  		if (force_delete)
  			args[ac++] = "--force";
@@ -496,6 +456,116 @@ diff --git a/options.c b/options.c
  		if (write_batch < 0)
  			args[ac++] = "--only-write-batch=X";
  		if (am_root > 1)
+diff --git a/rsync.1.md b/rsync.1.md
+--- a/rsync.1.md
++++ b/rsync.1.md
+@@ -360,6 +360,7 @@ detailed description below for a complete description.
+ --keep-dirlinks, -K      treat symlinked dir on receiver as dir
+ --hard-links, -H         preserve hard links
+ --perms, -p              preserve permissions
++--fileflags              preserve file-flags (aka chflags)
+ --executability, -E      preserve executability
+ --chmod=CHMOD            affect file and/or directory permissions
+ --acls, -A               preserve ACLs (implies --perms)
+@@ -399,7 +400,10 @@ detailed description below for a complete description.
+ --ignore-missing-args    ignore missing source args without error
+ --delete-missing-args    delete missing source args from destination
+ --ignore-errors          delete even if there are I/O errors
+---force                  force deletion of dirs even if not empty
++--force-delete           force deletion of directories even if not empty
++--force-change           affect user-/system-immutable files/dirs
++--force-uchange          affect user-immutable files/dirs
++--force-schange          affect system-immutable files/dirs
+ --max-delete=NUM         don't delete more than NUM files
+ --max-size=SIZE          don't transfer any file larger than SIZE
+ --min-size=SIZE          don't transfer any file smaller than SIZE
+@@ -702,6 +706,8 @@ your home directory (remove the '=' for that).
+ 
+     Note that `-a` **does not preserve hardlinks**, because finding
+     multiply-linked files is expensive.  You must separately specify `-H`.
++    Note also that for backward compatibility, `-a` currently does **not**
++    imply the `--fileflags` option.
+ 
+ 0.  `--no-OPTION`
+ 
+@@ -1040,7 +1046,7 @@ your home directory (remove the '=' for that).
+     Without this option, if the sending side has replaced a directory with a
+     symlink to a directory, the receiving side will delete anything that is in
+     the way of the new symlink, including a directory hierarchy (as long as
+-    `--force` or `--delete` is in effect).
++    `--force-delete` or `--delete` is in effect).
+ 
+     See also `--keep-dirlinks` for an analogous option for the receiving side.
+ 
+@@ -1226,6 +1232,29 @@ your home directory (remove the '=' for that).
+     those used by `--fake-super`) unless you repeat the option (e.g. `-XX`).
+     This "copy all xattrs" mode cannot be used with `--fake-super`.
+ 
++0.  `--fileflags` This option causes rsync to update the file-flags to be the
++    same as the source files and directories (if your OS supports the
++    **chflags**(2) system call).   Some flags can only be altered by the
++    super-user and some might only be unset below a certain secure-level
++    (usually single-user mode). It will not make files alterable that are set
++    to immutable on the receiver.  To do that, see `--force-change`,
++    `--force-uchange`, and `--force-schange`.
++
++0.  `--force-change` This option causes rsync to disable both user-immutable
++    and system-immutable flags on files and directories that are being updated
++    or deleted on the receiving side.  This option overrides `--force-uchange`
++    and `--force-schange`.
++
++0.  `--force-uchange` This option causes rsync to disable user-immutable flags
++    on files and directories that are being updated or deleted on the receiving
++    side.  It does not try to affect system flags.  This option overrides
++    `--force-change` and `--force-schange`.
++
++0.  `--force-schange` This option causes rsync to disable system-immutable
++    flags on files and directories that are being updated or deleted on the
++    receiving side.  It does not try to affect user flags.  This option
++    overrides `--force-change` and `--force-uchange`.
++
+ 0.  `--chmod=CHMOD`
+ 
+     This option tells rsync to apply one or more comma-separated "chmod" modes
+@@ -1685,7 +1714,7 @@ your home directory (remove the '=' for that).
+     option a step farther: each missing arg will become a deletion request of
+     the corresponding destination file on the receiving side (should it exist).
+     If the destination file is a non-empty directory, it will only be
+-    successfully deleted if `--force` or `--delete` are in effect.  Other than
++    successfully deleted if `--force-delee` or `--delete` are in effect.  Other than
+     that, this option is independent of any other type of delete processing.
+ 
+     The missing source files are represented by special file-list entries which
+@@ -1696,15 +1725,16 @@ your home directory (remove the '=' for that).
+     Tells `--delete` to go ahead and delete files even when there are I/O
+     errors.
+ 
+-0.  `--force`
++0.  `--force-delee`
+ 
+     This option tells rsync to delete a non-empty directory when it is to be
+     replaced by a non-directory.  This is only relevant if deletions are not
+     active (see `--delete` for details).
+ 
+-    Note for older rsync versions: `--force` used to still be required when
+-    using `--delete-after`, and it used to be non-functional unless the
+-    `--recursive` option was also enabled.
++    This option can be abbreviated `--force` for backward compatibility.  Note
++    that some older rsync versions used to still require `--force` when using
++    `--delete-after`, and it used to be non-functional unless the `--recursive`
++    option was also enabled.
+ 
+ 0.  `--max-delete=NUM`
+ 
+@@ -2576,7 +2606,7 @@ your home directory (remove the '=' for that).
+     output of other verbose messages).
+ 
+     The "%i" escape has a cryptic output that is 11 letters long.  The general
+-    format is like the string `YXcstpoguax`, where **Y** is replaced by the type
++    format is like the string `YXcstpoguaxf`, where **Y** is replaced by the type
+     of update being done, **X** is replaced by the file-type, and the other
+     letters represent attributes that may be output if they are being modified.
+ 
 diff --git a/rsync.c b/rsync.c
 --- a/rsync.c
 +++ b/rsync.c
@@ -507,7 +577,7 @@ diff --git a/rsync.c b/rsync.c
  extern int preserve_executability;
  extern int preserve_times;
  extern int am_root;
-@@ -458,6 +459,39 @@ mode_t dest_mode(mode_t flist_mode, mode_t stat_mode, int dflt_perms,
+@@ -467,6 +468,39 @@ mode_t dest_mode(mode_t flist_mode, mode_t stat_mode, int dflt_perms,
  	return new_mode;
  }
  
@@ -544,10 +614,10 @@ diff --git a/rsync.c b/rsync.c
 +}
 +#endif
 +
- int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
- 		   const char *fnamecmp, int flags)
+ static int same_mtime(struct file_struct *file, STRUCT_STAT *st, int extra_accuracy)
  {
-@@ -519,7 +553,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+ #ifdef ST_MTIME_NSEC
+@@ -543,7 +577,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  		if (am_root >= 0) {
  			uid_t uid = change_uid ? (uid_t)F_OWNER(file) : sxp->st.st_uid;
  			gid_t gid = change_gid ? (gid_t)F_GROUP(file) : sxp->st.st_gid;
@@ -556,16 +626,7 @@ diff --git a/rsync.c b/rsync.c
  				/* We shouldn't have attempted to change uid
  				 * or gid unless have the privilege. */
  				rsyserr(FERROR_XFER, errno, "%s %s failed",
-@@ -559,7 +593,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
- 	  || (flags & ATTRS_SET_NANO && NSEC_BUMP(file) && (uint32)sxp->st.ST_MTIME_NSEC != F_MOD_NSEC(file))
- #endif
- 	  )) {
--		int ret = set_modtime(fname, file->modtime, F_MOD_NSEC(file), sxp->st.st_mode);
-+		int ret = set_modtime(fname, file->modtime, F_MOD_NSEC(file), sxp->st.st_mode, ST_FLAGS(sxp->st));
- 		if (ret < 0) {
- 			rsyserr(FERROR_XFER, errno, "failed to set times on %s",
- 				full_fname(fname));
-@@ -586,7 +620,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -629,7 +663,7 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  
  #ifdef HAVE_CHMOD
  	if (!BITS_EQUAL(sxp->st.st_mode, new_mode, CHMOD_BITS)) {
@@ -574,7 +635,7 @@ diff --git a/rsync.c b/rsync.c
  		if (ret < 0) {
  			rsyserr(FERROR_XFER, errno,
  				"failed to set permissions on %s",
-@@ -598,6 +632,19 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
+@@ -641,6 +675,19 @@ int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  	}
  #endif
  
@@ -594,17 +655,17 @@ diff --git a/rsync.c b/rsync.c
  	if (INFO_GTE(NAME, 2) && flags & ATTRS_REPORT) {
  		if (updated)
  			rprintf(FCLIENT, "%s\n", fname);
-@@ -672,7 +719,8 @@ int finish_transfer(const char *fname, const char *fnametmp,
+@@ -718,7 +765,8 @@ int finish_transfer(const char *fname, const char *fnametmp,
  
  	/* Change permissions before putting the file into place. */
  	set_file_attrs(fnametmp, file, NULL, fnamecmp,
--		       ok_to_set_time ? ATTRS_SET_NANO : ATTRS_SKIP_MTIME);
+-		       ok_to_set_time ? ATTRS_ACCURATE_TIME : ATTRS_SKIP_MTIME | ATTRS_SKIP_ATIME);
 +		       ATTRS_DELAY_IMMUTABLE
-+		       | (ok_to_set_time ? ATTRS_SET_NANO : ATTRS_SKIP_MTIME));
++		       | (ok_to_set_time ? ATTRS_ACCURATE_TIME : ATTRS_SKIP_MTIME | ATTRS_SKIP_ATIME));
  
  	/* move tmp file over real file */
  	if (DEBUG_GTE(RECV, 1))
-@@ -689,6 +737,10 @@ int finish_transfer(const char *fname, const char *fnametmp,
+@@ -735,6 +783,10 @@ int finish_transfer(const char *fname, const char *fnametmp,
  	}
  	if (ret == 0) {
  		/* The file was moved into place (not copied), so it's done. */
@@ -618,23 +679,24 @@ diff --git a/rsync.c b/rsync.c
 diff --git a/rsync.h b/rsync.h
 --- a/rsync.h
 +++ b/rsync.h
-@@ -62,6 +62,7 @@
- #define XMIT_HLINK_FIRST (1<<12)	/* protocols 30 - now (HLINKED files only) */
- #define XMIT_IO_ERROR_ENDLIST (1<<12)	/* protocols 31*- now (w/XMIT_EXTENDED_FLAGS) (also protocol 30 w/'f' compat flag) */
- #define XMIT_MOD_NSEC (1<<13)		/* protocols 31 - now */
-+#define XMIT_SAME_FLAGS (1<<14)		/* protocols ?? - now */
+@@ -68,7 +68,7 @@
+ 
+ /* The following XMIT flags require an rsync that uses a varint for the flag values */
+ 
+-#define XMIT_RESERVED_16 (1<<16) 	/* reserved for future fileflags use */
++#define XMIT_SAME_FLAGS (1<<16) 	/* any protocol - restricted by command-line option */
+ #define XMIT_RESERVED_17 (1<<17) 	/* reserved for future crtimes use */
  
  /* These flags are used in the live flist data. */
- 
-@@ -166,6 +167,7 @@
- #define ATTRS_REPORT		(1<<0)
+@@ -181,6 +181,7 @@
  #define ATTRS_SKIP_MTIME	(1<<1)
- #define ATTRS_SET_NANO		(1<<2)
+ #define ATTRS_ACCURATE_TIME	(1<<2)
+ #define ATTRS_SKIP_ATIME	(1<<3)
 +#define ATTRS_DELAY_IMMUTABLE	(1<<4)
  
+ #define MSG_FLUSH	2
  #define FULL_FLUSH	1
- #define NORMAL_FLUSH	0
-@@ -192,6 +194,7 @@
+@@ -208,6 +209,7 @@
  #define ITEM_REPORT_GROUP (1<<6)
  #define ITEM_REPORT_ACL (1<<7)
  #define ITEM_REPORT_XATTR (1<<8)
@@ -642,7 +704,7 @@ diff --git a/rsync.h b/rsync.h
  #define ITEM_BASIS_TYPE_FOLLOWS (1<<11)
  #define ITEM_XNAME_FOLLOWS (1<<12)
  #define ITEM_IS_NEW (1<<13)
-@@ -529,6 +532,28 @@ typedef unsigned int size_t;
+@@ -548,6 +550,31 @@ typedef unsigned int size_t;
  #endif
  #endif
  
@@ -663,23 +725,26 @@ diff --git a/rsync.h b/rsync.h
 +#define USR_IMMUTABLE (UF_IMMUTABLE|UF_NOUNLINK|UF_APPEND)
 +#define SYS_IMMUTABLE (SF_IMMUTABLE|SF_NOUNLINK|SF_APPEND)
 +#define ALL_IMMUTABLE (USR_IMMUTABLE|SYS_IMMUTABLE)
-+#define ST_FLAGS(st) (st.st_flags)
++#define ST_FLAGS(st) ((st).st_flags)
 +#else
++#define USR_IMMUTABLE 0
++#define SYS_IMMUTABLE 0
++#define ALL_IMMUTABLE 0
 +#define ST_FLAGS(st) NO_FFLAGS
 +#endif
 +
  /* Find a variable that is either exactly 32-bits or longer.
   * If some code depends on 32-bit truncation, it will need to
   * take special action in a "#if SIZEOF_INT32 > 4" section. */
-@@ -716,6 +741,7 @@ extern int file_extra_cnt;
- extern int inc_recurse;
+@@ -761,6 +788,7 @@ extern int pathname_ndx;
+ extern int depth_ndx;
  extern int uid_ndx;
  extern int gid_ndx;
 +extern int fileflags_ndx;
  extern int acls_ndx;
  extern int xattrs_ndx;
  
-@@ -757,6 +783,11 @@ extern int xattrs_ndx;
+@@ -811,6 +839,11 @@ extern int xattrs_ndx;
  /* When the associated option is on, all entries will have these present: */
  #define F_OWNER(f) REQ_EXTRA(f, uid_ndx)->unum
  #define F_GROUP(f) REQ_EXTRA(f, gid_ndx)->unum
@@ -691,113 +756,6 @@ diff --git a/rsync.h b/rsync.h
  #define F_ACL(f) REQ_EXTRA(f, acls_ndx)->num
  #define F_XATTR(f) REQ_EXTRA(f, xattrs_ndx)->num
  #define F_NDX(f) REQ_EXTRA(f, unsort_ndx)->num
-diff --git a/rsync.yo b/rsync.yo
---- a/rsync.yo
-+++ b/rsync.yo
-@@ -362,6 +362,7 @@ to the detailed description below for a complete description.  verb(
-  -K, --keep-dirlinks         treat symlinked dir on receiver as dir
-  -H, --hard-links            preserve hard links
-  -p, --perms                 preserve permissions
-+     --fileflags             preserve file-flags (aka chflags)
-  -E, --executability         preserve executability
-      --chmod=CHMOD           affect file and/or directory permissions
-  -A, --acls                  preserve ACLs (implies -p)
-@@ -398,7 +399,10 @@ to the detailed description below for a complete description.  verb(
-      --ignore-missing-args   ignore missing source args without error
-      --delete-missing-args   delete missing source args from destination
-      --ignore-errors         delete even if there are I/O errors
--     --force                 force deletion of dirs even if not empty
-+     --force-delete          force deletion of dirs even if not empty
-+     --force-change          affect user/system immutable files/dirs
-+     --force-uchange         affect user-immutable files/dirs
-+     --force-schange         affect system-immutable files/dirs
-      --max-delete=NUM        don't delete more than NUM files
-      --max-size=SIZE         don't transfer any file larger than SIZE
-      --min-size=SIZE         don't transfer any file smaller than SIZE
-@@ -658,7 +662,8 @@ specified, in which case bf(-r) is not implied.
- 
- Note that bf(-a) bf(does not preserve hardlinks), because
- finding multiply-linked files is expensive.  You must separately
--specify bf(-H).
-+specify bf(-H).  Note also that for backward compatibility, bf(-a)
-+currently does bf(not) imply the bf(--fileflags) option.
- 
- dit(--no-OPTION) You may turn off one or more implied options by prefixing
- the option name with "no-".  Not all options may be prefixed with a "no-":
-@@ -963,7 +968,7 @@ they would be using bf(--copy-links).
- Without this option, if the sending side has replaced a directory with a
- symlink to a directory, the receiving side will delete anything that is in
- the way of the new symlink, including a directory hierarchy (as long as
--bf(--force) or bf(--delete) is in effect).
-+bf(--force-delete) or bf(--delete) is in effect).
- 
- See also bf(--keep-dirlinks) for an analogous option for the receiving
- side.
-@@ -1147,6 +1152,29 @@ Note that the bf(-X) option does not copy rsync's special xattr values (e.g.
- those used by bf(--fake-super)) unless you repeat the option (e.g. -XX).
- This "copy all xattrs" mode cannot be used with bf(--fake-super).
- 
-+dit(bf(--fileflags)) This option causes rsync to update the file-flags to be
-+the same as the source files and directories (if your OS supports the
-+bf(chflags)(2) system call).   Some flags can only be altered by the super-user
-+and some might only be unset below a certain secure-level (usually single-user
-+mode). It will not make files alterable that are set to immutable on the
-+receiver.  To do that, see bf(--force-change), bf(--force-uchange), and
-+bf(--force-schange).
-+
-+dit(bf(--force-change)) This option causes rsync to disable both user-immutable
-+and system-immutable flags on files and directories that are being updated or
-+deleted on the receiving side.  This option overrides bf(--force-uchange) and
-+bf(--force-schange).
-+
-+dit(bf(--force-uchange)) This option causes rsync to disable user-immutable
-+flags on files and directories that are being updated or deleted on the
-+receiving side.  It does not try to affect system flags.  This option overrides
-+bf(--force-change) and bf(--force-schange).
-+
-+dit(bf(--force-schange)) This option causes rsync to disable system-immutable
-+flags on files and directories that are being updated or deleted on the
-+receiving side.  It does not try to affect user flags.  This option overrides
-+bf(--force-change) and bf(--force-uchange).
-+
- dit(bf(--chmod)) This option tells rsync to apply one or more
- comma-separated "chmod" modes to the permission of the files in the
- transfer.  The resulting value is treated as though it were the permissions
-@@ -1502,12 +1530,13 @@ display as a "*missing" entry in the bf(--list-only) output.
- dit(bf(--ignore-errors)) Tells bf(--delete) to go ahead and delete files
- even when there are I/O errors.
- 
--dit(bf(--force)) This option tells rsync to delete a non-empty directory
-+dit(bf(--force-delete)) This option tells rsync to delete a non-empty directory
- when it is to be replaced by a non-directory.  This is only relevant if
- deletions are not active (see bf(--delete) for details).
- 
--Note for older rsync versions: bf(--force) used to still be required when
--using bf(--delete-after), and it used to be non-functional unless the
-+This option can be abbreviated bf(--force) for backward compatibility.
-+Note that some older rsync versions used to still require bf(--force)
-+when using bf(--delete-after), and it used to be non-functional unless the
- bf(--recursive) option was also enabled.
- 
- dit(bf(--max-delete=NUM)) This tells rsync not to delete more than NUM
-@@ -2144,7 +2173,7 @@ with older versions of rsync, but that also turns on the output of other
- verbose messages).
- 
- The "%i" escape has a cryptic output that is 11 letters long.  The general
--format is like the string bf(YXcstpoguax), where bf(Y) is replaced by the
-+format is like the string bf(YXcstpogfax), where bf(Y) is replaced by the
- type of update being done, bf(X) is replaced by the file-type, and the
- other letters represent attributes that may be output if they are being
- modified.
-@@ -2200,7 +2229,7 @@ quote(itemization(
-   sender's value (requires bf(--owner) and super-user privileges).
-   it() A bf(g) means the group is different and is being updated to the
-   sender's value (requires bf(--group) and the authority to set the group).
--  it() The bf(u) slot is reserved for future use.
-+  it() The bf(f) means that the fileflags information changed.
-   it() The bf(a) means that the ACL information changed.
-   it() The bf(x) means that the extended attribute information changed.
- ))
 diff --git a/syscall.c b/syscall.c
 --- a/syscall.c
 +++ b/syscall.c
@@ -809,7 +767,7 @@ diff --git a/syscall.c b/syscall.c
  extern int inplace;
  extern int preallocate_files;
  extern int preserve_perms;
-@@ -67,7 +68,23 @@ int do_unlink(const char *fname)
+@@ -68,7 +69,23 @@ int do_unlink(const char *fname)
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
@@ -834,12 +792,12 @@ diff --git a/syscall.c b/syscall.c
  }
  
  #ifdef SUPPORT_LINKS
-@@ -128,14 +145,37 @@ int do_link(const char *fname1, const char *fname2)
+@@ -129,14 +146,35 @@ int do_link(const char *old_path, const char *new_path)
  }
  #endif
  
 -int do_lchown(const char *path, uid_t owner, gid_t group)
-+int do_lchown(const char *path, uid_t owner, gid_t group, mode_t mode, uint32 fileflags)
++int do_lchown(const char *path, uid_t owner, gid_t group, UNUSED(mode_t mode), UNUSED(uint32 fileflags))
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
@@ -867,14 +825,12 @@ diff --git a/syscall.c b/syscall.c
 +		}
 +		errno = EPERM;
 +	}
-+#else
-+	mode = fileflags = 0; /* avoid compiler warning */
 +#endif
 +	return -1;
  }
  
  int do_mknod(const char *pathname, mode_t mode, dev_t dev)
-@@ -175,7 +215,7 @@ int do_mknod(const char *pathname, mode_t mode, dev_t dev)
+@@ -176,7 +214,7 @@ int do_mknod(const char *pathname, mode_t mode, dev_t dev)
  			return -1;
  		close(sock);
  #ifdef HAVE_CHMOD
@@ -883,7 +839,7 @@ diff --git a/syscall.c b/syscall.c
  #else
  		return 0;
  #endif
-@@ -192,7 +232,22 @@ int do_rmdir(const char *pathname)
+@@ -193,7 +231,22 @@ int do_rmdir(const char *pathname)
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
@@ -907,16 +863,16 @@ diff --git a/syscall.c b/syscall.c
  }
  
  int do_open(const char *pathname, int flags, mode_t mode)
-@@ -206,7 +261,7 @@ int do_open(const char *pathname, int flags, mode_t mode)
+@@ -212,7 +265,7 @@ int do_open(const char *pathname, int flags, mode_t mode)
  }
  
  #ifdef HAVE_CHMOD
 -int do_chmod(const char *path, mode_t mode)
-+int do_chmod(const char *path, mode_t mode, uint32 fileflags)
++int do_chmod(const char *path, mode_t mode, UNUSED(uint32 fileflags))
  {
  	int code;
  	if (dry_run) return 0;
-@@ -229,17 +284,74 @@ int do_chmod(const char *path, mode_t mode)
+@@ -235,17 +288,72 @@ int do_chmod(const char *path, mode_t mode)
  	} else
  		code = chmod(path, mode & CHMOD_BITS); /* DISCOURAGED FUNCTION */
  #endif /* !HAVE_LCHMOD */
@@ -936,8 +892,6 @@ diff --git a/syscall.c b/syscall.c
 +		}
 +		errno = EPERM;
 +	}
-+#else
-+	fileflags = 0; /* avoid compiler warning */
 +#endif
  	if (code != 0 && (preserve_perms || preserve_executability))
  		return code;
@@ -954,36 +908,36 @@ diff --git a/syscall.c b/syscall.c
 +}
 +#endif
 +
- int do_rename(const char *fname1, const char *fname2)
+ int do_rename(const char *old_path, const char *new_path)
  {
  	if (dry_run) return 0;
  	RETURN_ERROR_IF_RO_OR_LO;
--	return rename(fname1, fname2);
-+	if (rename(fname1, fname2) == 0)
+-	return rename(old_path, new_path);
++	if (rename(old_path, new_path) == 0)
 +		return 0;
 +#ifdef SUPPORT_FORCE_CHANGE
 +	if (force_change && errno == EPERM) {
 +		STRUCT_STAT st1, st2;
 +		int became_mutable;
 +
-+		if (x_lstat(fname1, &st1, NULL) != 0)
++		if (x_lstat(old_path, &st1, NULL) != 0)
 +			goto failed;
-+		became_mutable = make_mutable(fname1, st1.st_mode, st1.st_flags, force_change) > 0;
-+		if (became_mutable && rename(fname1, fname2) == 0)
++		became_mutable = make_mutable(old_path, st1.st_mode, st1.st_flags, force_change) > 0;
++		if (became_mutable && rename(old_path, new_path) == 0)
 +			goto success;
-+		if (x_lstat(fname2, &st2, NULL) == 0
-+		 && make_mutable(fname2, st2.st_mode, st2.st_flags, force_change) > 0) {
-+			if (rename(fname1, fname2) == 0) {
++		if (x_lstat(new_path, &st2, NULL) == 0
++		 && make_mutable(new_path, st2.st_mode, st2.st_flags, force_change) > 0) {
++			if (rename(old_path, new_path) == 0) {
 +			  success:
-+				if (became_mutable) /* Yes, use fname2 and st1! */
-+					undo_make_mutable(fname2, st1.st_flags);
++				if (became_mutable) /* Yes, use new_path and st1! */
++					undo_make_mutable(new_path, st1.st_flags);
 +				return 0;
 +			}
-+			undo_make_mutable(fname2, st2.st_flags);
++			undo_make_mutable(new_path, st2.st_flags);
 +		}
 +		/* TODO: handle immutable directories */
 +		if (became_mutable)
-+			undo_make_mutable(fname1, st1.st_flags);
++			undo_make_mutable(old_path, st1.st_flags);
 +	  failed:
 +		errno = EPERM;
 +	}
@@ -995,17 +949,18 @@ diff --git a/syscall.c b/syscall.c
 diff --git a/t_stub.c b/t_stub.c
 --- a/t_stub.c
 +++ b/t_stub.c
-@@ -28,6 +28,7 @@ int protect_args = 0;
+@@ -28,6 +28,8 @@ int protect_args = 0;
  int module_id = -1;
  int relative_paths = 0;
  int module_dirlen = 0;
 +int force_change = 0;
- int preserve_acls = 0;
++int preserve_acls = 0;
  int preserve_times = 0;
  int preserve_xattrs = 0;
-@@ -102,3 +103,23 @@ filter_rule_list daemon_filter_list;
+ int preserve_perms = 0;
+@@ -109,3 +111,23 @@ filter_rule_list daemon_filter_list;
  {
- 	return cst || !flg ? 16 : 1;
+ 	return cst ? 0 : 0;
  }
 +
 +#if defined SUPPORT_FILEFLAGS || defined SUPPORT_FORCE_CHANGE
@@ -1027,6 +982,22 @@ diff --git a/t_stub.c b/t_stub.c
 +	return -1;
 +}
 +#endif
+diff --git a/testsuite/rsync.fns b/testsuite/rsync.fns
+--- a/testsuite/rsync.fns
++++ b/testsuite/rsync.fns
+@@ -23,9 +23,9 @@ todir="$tmpdir/to"
+ chkdir="$tmpdir/chk"
+ 
+ # For itemized output:
+-all_plus='+++++++++'
+-allspace='         '
+-dots='.....' # trailing dots after changes
++all_plus='++++++++++'
++allspace='          '
++dots='......' # trailing dots after changes
+ tab_ch='	' # a single tab character
+ 
+ # Berkley's nice.
 diff --git a/util.c b/util.c
 --- a/util.c
 +++ b/util.c
@@ -1038,24 +1009,24 @@ diff --git a/util.c b/util.c
  extern char *module_dir;
  extern unsigned int module_dirlen;
  extern char *partial_dir;
-@@ -115,9 +116,36 @@ void print_child_argv(const char *prefix, char **cmd)
+@@ -115,6 +116,33 @@ void print_child_argv(const char *prefix, char **cmd)
  	rprintf(FCLIENT, " (%d args)\n", cnt);
  }
  
 +#ifdef SUPPORT_FORCE_CHANGE
-+static int try_a_force_change(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode, uint32 fileflags)
++static int try_a_force_change(const char *fname, STRUCT_STAT *stp)
 +{
++	uint32 fileflags = ST_FLAGS(*stp);
 +	if (fileflags == NO_FFLAGS) {
 +		STRUCT_STAT st;
 +		if (x_lstat(fname, &st, NULL) == 0)
 +			fileflags = st.st_flags;
 +	}
-+
-+	if (fileflags != NO_FFLAGS && make_mutable(fname, mode, fileflags, force_change) > 0) {
++	if (fileflags != NO_FFLAGS && make_mutable(fname, stp->st_mode, fileflags, force_change) > 0) {
 +		int ret, save_force_change = force_change;
 +
 +		force_change = 0; /* Make certain we can't come back here. */
-+		ret = set_modtime(fname, modtime, mod_nsec, mode, fileflags);
++		ret = set_times(fname, stp);
 +		force_change = save_force_change;
 +
 +		undo_make_mutable(fname, fileflags);
@@ -1071,45 +1042,36 @@ diff --git a/util.c b/util.c
 +
  /* This returns 0 for success, 1 for a symlink if symlink time-setting
   * is not possible, or -1 for any other error. */
--int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode)
-+int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode, uint32 fileflags)
- {
- 	static int switch_step = 0;
- 
-@@ -142,6 +170,11 @@ int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode)
+ int set_times(const char *fname, STRUCT_STAT *stp)
+@@ -142,6 +170,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
  #include "case_N.h"
- 		if (do_utimensat(fname, modtime, mod_nsec) == 0)
+ 		if (do_utimensat(fname, stp) == 0)
  			break;
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && errno == EPERM
-+		 && try_a_force_change(fname, modtime, mod_nsec, mode, fileflags) == 0)
++		if (force_change && errno == EPERM && try_a_force_change(fname, stp) == 0)
 +			break;
 +#endif
  		if (errno != ENOSYS)
  			return -1;
  		switch_step++;
-@@ -152,6 +185,11 @@ int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode)
+@@ -151,6 +183,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
  #include "case_N.h"
- 		if (do_lutimes(fname, modtime, mod_nsec) == 0)
+ 		if (do_lutimes(fname, stp) == 0)
  			break;
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && errno == EPERM
-+		 && try_a_force_change(fname, modtime, mod_nsec, mode, fileflags) == 0)
++		if (force_change && errno == EPERM && try_a_force_change(fname, stp) == 0)
 +			break;
 +#endif
  		if (errno != ENOSYS)
  			return -1;
  		switch_step++;
-@@ -175,6 +213,13 @@ int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode)
- 		if (do_utime(fname, modtime, mod_nsec) == 0)
+@@ -172,6 +208,10 @@ int set_times(const char *fname, STRUCT_STAT *stp)
+ 		if (do_utime(fname, stp) == 0)
  			break;
  #endif
 +#ifdef SUPPORT_FORCE_CHANGE
-+		if (force_change && errno == EPERM
-+		 && try_a_force_change(fname, modtime, mod_nsec, mode, fileflags) == 0)
++		if (force_change && errno == EPERM && try_a_force_change(fname, stp) == 0)
 +			break;
-+#else
-+		fileflags = 0; /* avoid compiler warning */
 +#endif
  
  		return -1;
@@ -1117,7 +1079,7 @@ diff --git a/util.c b/util.c
 diff --git a/xattrs.c b/xattrs.c
 --- a/xattrs.c
 +++ b/xattrs.c
-@@ -1224,7 +1224,7 @@ int set_stat_xattr(const char *fname, struct file_struct *file, mode_t new_mode)
+@@ -1216,7 +1216,7 @@ int set_stat_xattr(const char *fname, struct file_struct *file, mode_t new_mode)
  	mode = (fst.st_mode & _S_IFMT) | (fmode & ACCESSPERMS)
  	     | (S_ISDIR(fst.st_mode) ? 0700 : 0600);
  	if (fst.st_mode != mode)
@@ -1126,34 +1088,10 @@ diff --git a/xattrs.c b/xattrs.c
  	if (!IS_DEVICE(fst.st_mode))
  		fst.st_rdev = 0; /* just in case */
  
-diff -Nurp a/config.h.in b/config.h.in
---- a/config.h.in
-+++ b/config.h.in
-@@ -76,6 +76,9 @@
- /* Define to 1 if vsprintf has a C99-compatible return value */
- #undef HAVE_C99_VSNPRINTF
- 
-+/* Define to 1 if you have the `chflags' function. */
-+#undef HAVE_CHFLAGS
-+
- /* Define to 1 if you have the `chmod' function. */
- #undef HAVE_CHMOD
- 
-diff -Nurp a/configure.sh b/configure.sh
---- a/configure.sh
-+++ b/configure.sh
-@@ -7706,6 +7706,7 @@ fi
- 
- for ac_func in waitpid wait4 getcwd strdup chown chmod lchmod mknod mkfifo \
-     fchmod fstat ftruncate strchr readlink link utime utimes lutimes strftime \
-+    chflags \
-     memmove lchown vsnprintf snprintf vasprintf asprintf setsid strpbrk \
-     strlcat strlcpy strtol mallinfo getgroups setgroups geteuid getegid \
-     setlocale setmode open64 lseek64 mkstemp64 mtrace va_copy __va_copy \
 diff -Nurp a/proto.h b/proto.h
 --- a/proto.h
 +++ b/proto.h
-@@ -298,6 +298,8 @@ int read_ndx_and_attrs(int f_in, int f_o
+@@ -299,6 +299,8 @@ int read_ndx_and_attrs(int f_in, int f_o
  void free_sums(struct sum_struct *s);
  mode_t dest_mode(mode_t flist_mode, mode_t stat_mode, int dflt_perms,
  		 int exists);
@@ -1162,139 +1100,237 @@ diff -Nurp a/proto.h b/proto.h
  int set_file_attrs(const char *fname, struct file_struct *file, stat_x *sxp,
  		   const char *fnamecmp, int flags);
  void sig_int(int sig_num);
-@@ -322,11 +324,12 @@ int do_unlink(const char *fname);
+@@ -321,11 +323,12 @@ int do_unlink(const char *fname);
  int do_symlink(const char *lnk, const char *fname);
  ssize_t do_readlink(const char *path, char *buf, size_t bufsiz);
- int do_link(const char *fname1, const char *fname2);
+ int do_link(const char *old_path, const char *new_path);
 -int do_lchown(const char *path, uid_t owner, gid_t group);
-+int do_lchown(const char *path, uid_t owner, gid_t group, mode_t mode, uint32 fileflags);
++int do_lchown(const char *path, uid_t owner, gid_t group, UNUSED(mode_t mode), UNUSED(uint32 fileflags));
  int do_mknod(const char *pathname, mode_t mode, dev_t dev);
  int do_rmdir(const char *pathname);
  int do_open(const char *pathname, int flags, mode_t mode);
 -int do_chmod(const char *path, mode_t mode);
-+int do_chmod(const char *path, mode_t mode, uint32 fileflags);
++int do_chmod(const char *path, mode_t mode, UNUSED(uint32 fileflags));
 +int do_chflags(const char *path, uint32 fileflags);
- int do_rename(const char *fname1, const char *fname2);
+ int do_rename(const char *old_path, const char *new_path);
  int do_ftruncate(int fd, OFF_T size);
  void trim_trailing_slashes(char *name);
-@@ -367,7 +370,7 @@ void set_nonblocking(int fd);
- void set_blocking(int fd);
- int fd_pair(int fd[2]);
- void print_child_argv(const char *prefix, char **cmd);
--int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode);
-+int set_modtime(const char *fname, time_t modtime, uint32 mod_nsec, mode_t mode, uint32 fileflags);
- int make_path(char *fname, int flags);
- int full_write(int desc, const char *ptr, size_t len);
- int copy_file(const char *source, const char *dest, int ofd, mode_t mode);
 diff -Nurp a/rsync.1 b/rsync.1
 --- a/rsync.1
 +++ b/rsync.1
-@@ -438,6 +438,7 @@ to the detailed description below for a
-  \-K, \-\-keep\-dirlinks         treat symlinked dir on receiver as dir
-  \-H, \-\-hard\-links            preserve hard links
-  \-p, \-\-perms                 preserve permissions
-+     \-\-fileflags             preserve file\-flags (aka chflags)
-  \-E, \-\-executability         preserve executability
-      \-\-chmod=CHMOD           affect file and/or directory permissions
-  \-A, \-\-acls                  preserve ACLs (implies \-p)
-@@ -474,7 +475,10 @@ to the detailed description below for a
-      \-\-ignore\-missing\-args   ignore missing source args without error
-      \-\-delete\-missing\-args   delete missing source args from destination
-      \-\-ignore\-errors         delete even if there are I/O errors
--     \-\-force                 force deletion of dirs even if not empty
-+     \-\-force\-delete          force deletion of dirs even if not empty
-+     \-\-force\-change          affect user/system immutable files/dirs
-+     \-\-force\-uchange         affect user\-immutable files/dirs
-+     \-\-force\-schange         affect system\-immutable files/dirs
-      \-\-max\-delete=NUM        don'\&t delete more than NUM files
-      \-\-max\-size=SIZE         don'\&t transfer any file larger than SIZE
-      \-\-min\-size=SIZE         don'\&t transfer any file smaller than SIZE
-@@ -761,7 +765,8 @@ specified, in which case \fB\-r\fP is no
- .IP 
- Note that \fB\-a\fP \fBdoes not preserve hardlinks\fP, because
- finding multiply\-linked files is expensive.  You must separately
--specify \fB\-H\fP.
-+specify \fB\-H\fP.  Note also that for backward compatibility, \fB\-a\fP
-+currently does \fBnot\fP imply the \fB\-\-fileflags\fP option.
- .IP 
- .IP "\-\-no\-OPTION"
- You may turn off one or more implied options by prefixing
-@@ -1101,7 +1106,7 @@ they would be using \fB\-\-copy\-links\f
+@@ -436,6 +436,7 @@ detailed description below for a complet
+ --keep-dirlinks, -K      treat symlinked dir on receiver as dir
+ --hard-links, -H         preserve hard links
+ --perms, -p              preserve permissions
++--fileflags              preserve file-flags (aka chflags)
+ --executability, -E      preserve executability
+ --chmod=CHMOD            affect file and/or directory permissions
+ --acls, -A               preserve ACLs (implies --perms)
+@@ -475,7 +476,10 @@ detailed description below for a complet
+ --ignore-missing-args    ignore missing source args without error
+ --delete-missing-args    delete missing source args from destination
+ --ignore-errors          delete even if there are I/O errors
+---force                  force deletion of dirs even if not empty
++--force-delete           force deletion of directories even if not empty
++--force-change           affect user-/system-immutable files/dirs
++--force-uchange          affect user-immutable files/dirs
++--force-schange          affect system-immutable files/dirs
+ --max-delete=NUM         don't delete more than NUM files
+ --max-size=SIZE          don't transfer any file larger than SIZE
+ --min-size=SIZE          don't transfer any file smaller than SIZE
+@@ -765,6 +769,8 @@ omission).  The only exception to the ab
+ .IP
+ Note that \fB\-a\fP \fBdoes not preserve hardlinks\fP, because finding
+ multiply-linked files is expensive.  You must separately specify \fB\-H\fP.
++Note also that for backward compatibility, \fB\-a\fP currently does \fBnot\fP
++imply the \fB\-\-fileflags\fP option.
+ .IP "\fB\-\-no-OPTION\fP"
+ You may turn off one or more implied options by prefixing the option name
+ with "no-".  Not all options may be prefixed with a "no-": only options that
+@@ -1094,7 +1100,7 @@ to non-directories to be affected, as th
  Without this option, if the sending side has replaced a directory with a
  symlink to a directory, the receiving side will delete anything that is in
  the way of the new symlink, including a directory hierarchy (as long as
 -\fB\-\-force\fP or \fB\-\-delete\fP is in effect).
-+\fB\-\-force\-delete\fP or \fB\-\-delete\fP is in effect).
- .IP 
- See also \fB\-\-keep\-dirlinks\fP for an analogous option for the receiving
- side.
-@@ -1315,6 +1320,33 @@ Note that the \fB\-X\fP option does not
- those used by \fB\-\-fake\-super\fP) unless you repeat the option (e.g. \-XX).
- This \(dq\&copy all xattrs\(dq\& mode cannot be used with \fB\-\-fake\-super\fP.
- .IP 
-+.IP "\fB\-\-fileflags\fP"
-+This option causes rsync to update the file\-flags to be
-+the same as the source files and directories (if your OS supports the
-+\fBchflags\fP(2) system call).   Some flags can only be altered by the super\-user
-+and some might only be unset below a certain secure\-level (usually single\-user
-+mode). It will not make files alterable that are set to immutable on the
-+receiver.  To do that, see \fB\-\-force\-change\fP, \fB\-\-force\-uchange\fP, and
-+\fB\-\-force\-schange\fP.
-+.IP 
-+.IP "\fB\-\-force\-change\fP"
-+This option causes rsync to disable both user\-immutable
-+and system\-immutable flags on files and directories that are being updated or
-+deleted on the receiving side.  This option overrides \fB\-\-force\-uchange\fP and
-+\fB\-\-force\-schange\fP.
-+.IP 
-+.IP "\fB\-\-force\-uchange\fP"
-+This option causes rsync to disable user\-immutable
++\fB\-\-force-delete\fP or \fB\-\-delete\fP is in effect).
+ .IP
+ See also \fB\-\-keep-dirlinks\fP for an analogous option for the receiving side.
+ .IP
+@@ -1303,6 +1309,25 @@ receiver-only rule that excludes all nam
+ Note that the \fB\-X\fP option does not copy rsync's special xattr values (e.g.
+ those used by \fB\-\-fake-super\fP) unless you repeat the option (e.g. \fB\-XX\fP).
+ This "copy all xattrs" mode cannot be used with \fB\-\-fake-super\fP.
++.IP "\fB\-\-fileflags\fP This option causes rsync to update the file-flags to be the
++same as the source files and directories (if your OS supports the
++\fBchflags\fP(2) system call).   Some flags can only be altered by the
++super-user and some might only be unset below a certain secure-level
++(usually single-user mode). It will not make files alterable that are set
++to immutable on the receiver.  To do that, see \fB\-\-force-change\fP,
++\fB\-\-force-uchange\fP, and \fB\-\-force-schange\fP."
++.IP "\fB\-\-force-change\fP This option causes rsync to disable both user-immutable
++and system-immutable flags on files and directories that are being updated
++or deleted on the receiving side.  This option overrides \fB\-\-force-uchange\fP
++and \fB\-\-force-schange\fP."
++.IP "\fB\-\-force-uchange\fP This option causes rsync to disable user-immutable flags
++on files and directories that are being updated or deleted on the receiving
++side.  It does not try to affect system flags.  This option overrides
++\fB\-\-force-change\fP and \fB\-\-force-schange\fP."
++.IP "\fB\-\-force-schange\fP This option causes rsync to disable system-immutable
 +flags on files and directories that are being updated or deleted on the
-+receiving side.  It does not try to affect system flags.  This option overrides
-+\fB\-\-force\-change\fP and \fB\-\-force\-schange\fP.
-+.IP 
-+.IP "\fB\-\-force\-schange\fP"
-+This option causes rsync to disable system\-immutable
-+flags on files and directories that are being updated or deleted on the
-+receiving side.  It does not try to affect user flags.  This option overrides
-+\fB\-\-force\-change\fP and \fB\-\-force\-uchange\fP.
-+.IP 
- .IP "\fB\-\-chmod\fP"
- This option tells rsync to apply one or more
- comma\-separated \(dq\&chmod\(dq\& modes to the permission of the files in the
-@@ -1705,13 +1737,14 @@ display as a \(dq\&*missing\(dq\& entry
- Tells \fB\-\-delete\fP to go ahead and delete files
- even when there are I/O errors.
- .IP 
++receiving side.  It does not try to affect user flags.  This option
++overrides \fB\-\-force-change\fP and \fB\-\-force-uchange\fP."
+ .IP "\fB\-\-chmod=CHMOD\fP"
+ This option tells rsync to apply one or more comma-separated "chmod" modes
+ to the permission of the files in the transfer.  The resulting value is
+@@ -1720,7 +1745,7 @@ This option takes the behavior of (the i
+ option a step farther: each missing arg will become a deletion request of
+ the corresponding destination file on the receiving side (should it exist).
+ If the destination file is a non-empty directory, it will only be
+-successfully deleted if \fB\-\-force\fP or \fB\-\-delete\fP are in effect.  Other than
++successfully deleted if \fB\-\-force-delee\fP or \fB\-\-delete\fP are in effect.  Other than
+ that, this option is independent of any other type of delete processing.
+ .IP
+ The missing source files are represented by special file-list entries which
+@@ -1728,14 +1753,15 @@ display as a "\fB*missing\fP" entry in t
+ .IP "\fB\-\-ignore-errors\fP"
+ Tells \fB\-\-delete\fP to go ahead and delete files even when there are I/O
+ errors.
 -.IP "\fB\-\-force\fP"
-+.IP "\fB\-\-force\-delete\fP"
- This option tells rsync to delete a non\-empty directory
- when it is to be replaced by a non\-directory.  This is only relevant if
- deletions are not active (see \fB\-\-delete\fP for details).
- .IP 
++.IP "\fB\-\-force-delee\fP"
+ This option tells rsync to delete a non-empty directory when it is to be
+ replaced by a non-directory.  This is only relevant if deletions are not
+ active (see \fB\-\-delete\fP for details).
+ .IP
 -Note for older rsync versions: \fB\-\-force\fP used to still be required when
--using \fB\-\-delete\-after\fP, and it used to be non\-functional unless the
-+This option can be abbreviated \fB\-\-force\fP for backward compatibility.
-+Note that some older rsync versions used to still require \fB\-\-force\fP
-+when using \fB\-\-delete\-after\fP, and it used to be non\-functional unless the
- \fB\-\-recursive\fP option was also enabled.
- .IP 
- .IP "\fB\-\-max\-delete=NUM\fP"
-@@ -2429,7 +2462,7 @@ with older versions of rsync, but that a
- verbose messages).
- .IP 
- The \(dq\&%i\(dq\& escape has a cryptic output that is 11 letters long.  The general
--format is like the string \fBYXcstpoguax\fP, where \fBY\fP is replaced by the
-+format is like the string \fBYXcstpogfax\fP, where \fBY\fP is replaced by the
- type of update being done, \fBX\fP is replaced by the file\-type, and the
- other letters represent attributes that may be output if they are being
- modified.
-@@ -2499,7 +2532,7 @@ sender\(cq\&s value (requires \fB\-\-own
- A \fBg\fP means the group is different and is being updated to the
- sender\(cq\&s value (requires \fB\-\-group\fP and the authority to set the group).
- .IP o 
--The \fBu\fP slot is reserved for future use.
-+The \fBf\fP means that the fileflags information changed.
- .IP o 
- The \fBa\fP means that the ACL information changed.
- .IP o 
+-using \fB\-\-delete-after\fP, and it used to be non-functional unless the
+-\fB\-\-recursive\fP option was also enabled.
++This option can be abbreviated \fB\-\-force\fP for backward compatibility.  Note
++that some older rsync versions used to still require \fB\-\-force\fP when using
++\fB\-\-delete-after\fP, and it used to be non-functional unless the \fB\-\-recursive\fP
++option was also enabled.
+ .IP "\fB\-\-max-delete=NUM\fP"
+ This tells rsync not to delete more than NUM files or directories.  If that
+ limit is exceeded, all further deletions are skipped through the end of the
+@@ -2604,7 +2630,7 @@ also be output, but only if the receivin
+ output of other verbose messages).
+ .IP
+ The "%i" escape has a cryptic output that is 11 letters long.  The general
+-format is like the string \fBYXcstpoguax\fP, where \fBY\fP is replaced by the type
++format is like the string \fBYXcstpoguaxf\fP, where \fBY\fP is replaced by the type
+ of update being done, \fBX\fP is replaced by the file-type, and the other
+ letters represent attributes that may be output if they are being modified.
+ .IP
+diff -Nurp a/rsync.1.html b/rsync.1.html
+--- a/rsync.1.html
++++ b/rsync.1.html
+@@ -351,6 +351,7 @@ detailed description below for a complet
+ --keep-dirlinks, -K      treat symlinked dir on receiver as dir
+ --hard-links, -H         preserve hard links
+ --perms, -p              preserve permissions
++--fileflags              preserve file-flags (aka chflags)
+ --executability, -E      preserve executability
+ --chmod=CHMOD            affect file and/or directory permissions
+ --acls, -A               preserve ACLs (implies --perms)
+@@ -390,7 +391,10 @@ detailed description below for a complet
+ --ignore-missing-args    ignore missing source args without error
+ --delete-missing-args    delete missing source args from destination
+ --ignore-errors          delete even if there are I/O errors
+---force                  force deletion of dirs even if not empty
++--force-delete           force deletion of directories even if not empty
++--force-change           affect user-/system-immutable files/dirs
++--force-uchange          affect user-immutable files/dirs
++--force-schange          affect system-immutable files/dirs
+ --max-delete=NUM         don't delete more than NUM files
+ --max-size=SIZE          don't transfer any file larger than SIZE
+ --min-size=SIZE          don't transfer any file smaller than SIZE
+@@ -673,7 +677,9 @@ recursion and want to preserve almost ev
+ omission).  The only exception to the above equivalence is when
+ <code>--files-from</code> is specified, in which case <code>-r</code> is not implied.</p>
+ <p>Note that <code>-a</code> <strong>does not preserve hardlinks</strong>, because finding
+-multiply-linked files is expensive.  You must separately specify <code>-H</code>.</p>
++multiply-linked files is expensive.  You must separately specify <code>-H</code>.
++Note also that for backward compatibility, <code>-a</code> currently does <strong>not</strong>
++imply the <code>--fileflags</code> option.</p>
+ </dd>
+ 
+ <dt><code>--no-OPTION</code></dt><dd>
+@@ -993,7 +999,7 @@ to non-directories to be affected, as th
+ <p>Without this option, if the sending side has replaced a directory with a
+ symlink to a directory, the receiving side will delete anything that is in
+ the way of the new symlink, including a directory hierarchy (as long as
+-<code>--force</code> or <code>--delete</code> is in effect).</p>
++<code>--force-delete</code> or <code>--delete</code> is in effect).</p>
+ <p>See also <code>--keep-dirlinks</code> for an analogous option for the receiving side.</p>
+ <p><code>--copy-dirlinks</code> applies to all symlinks to directories in the source.  If
+ you want to follow only a few specified symlinks, a trick you can use is to
+@@ -1173,6 +1179,33 @@ those used by <code>--fake-super</code>)
+ This &quot;copy all xattrs&quot; mode cannot be used with <code>--fake-super</code>.</p>
+ </dd>
+ 
++<dt><code>--fileflags</code> This option causes rsync to update the file-flags to be the
++same as the source files and directories (if your OS supports the
++<strong>chflags</strong>(2) system call).   Some flags can only be altered by the
++super-user and some might only be unset below a certain secure-level
++(usually single-user mode). It will not make files alterable that are set
++to immutable on the receiver.  To do that, see <code>--force-change</code>,
++<code>--force-uchange</code>, and <code>--force-schange</code>.</dt><dd>
++</dd>
++
++<dt><code>--force-change</code> This option causes rsync to disable both user-immutable
++and system-immutable flags on files and directories that are being updated
++or deleted on the receiving side.  This option overrides <code>--force-uchange</code>
++and <code>--force-schange</code>.</dt><dd>
++</dd>
++
++<dt><code>--force-uchange</code> This option causes rsync to disable user-immutable flags
++on files and directories that are being updated or deleted on the receiving
++side.  It does not try to affect system flags.  This option overrides
++<code>--force-change</code> and <code>--force-schange</code>.</dt><dd>
++</dd>
++
++<dt><code>--force-schange</code> This option causes rsync to disable system-immutable
++flags on files and directories that are being updated or deleted on the
++receiving side.  It does not try to affect user flags.  This option
++overrides <code>--force-change</code> and <code>--force-uchange</code>.</dt><dd>
++</dd>
++
+ <dt><code>--chmod=CHMOD</code></dt><dd>
+ <p>This option tells rsync to apply one or more comma-separated &quot;chmod&quot; modes
+ to the permission of the files in the transfer.  The resulting value is
+@@ -1598,7 +1631,7 @@ is no longer there.</p>
+ option a step farther: each missing arg will become a deletion request of
+ the corresponding destination file on the receiving side (should it exist).
+ If the destination file is a non-empty directory, it will only be
+-successfully deleted if <code>--force</code> or <code>--delete</code> are in effect.  Other than
++successfully deleted if <code>--force-delee</code> or <code>--delete</code> are in effect.  Other than
+ that, this option is independent of any other type of delete processing.</p>
+ <p>The missing source files are represented by special file-list entries which
+ display as a &quot;<code>*missing</code>&quot; entry in the <code>--list-only</code> output.</p>
+@@ -1609,13 +1642,14 @@ display as a &quot;<code>*missing</code>
+ errors.</p>
+ </dd>
+ 
+-<dt><code>--force</code></dt><dd>
++<dt><code>--force-delee</code></dt><dd>
+ <p>This option tells rsync to delete a non-empty directory when it is to be
+ replaced by a non-directory.  This is only relevant if deletions are not
+ active (see <code>--delete</code> for details).</p>
+-<p>Note for older rsync versions: <code>--force</code> used to still be required when
+-using <code>--delete-after</code>, and it used to be non-functional unless the
+-<code>--recursive</code> option was also enabled.</p>
++<p>This option can be abbreviated <code>--force</code> for backward compatibility.  Note
++that some older rsync versions used to still require <code>--force</code> when using
++<code>--delete-after</code>, and it used to be non-functional unless the <code>--recursive</code>
++option was also enabled.</p>
+ </dd>
+ 
+ <dt><code>--max-delete=NUM</code></dt><dd>
+@@ -2426,7 +2460,7 @@ also be output, but only if the receivin
+ (you can use <code>-vv</code> with older versions of rsync, but that also turns on the
+ output of other verbose messages).</p>
+ <p>The &quot;%i&quot; escape has a cryptic output that is 11 letters long.  The general
+-format is like the string <code>YXcstpoguax</code>, where <strong>Y</strong> is replaced by the type
++format is like the string <code>YXcstpoguaxf</code>, where <strong>Y</strong> is replaced by the type
+ of update being done, <strong>X</strong> is replaced by the file-type, and the other
+ letters represent attributes that may be output if they are being modified.</p>
+ <p>The update types that replace the <strong>Y</strong> are as follows:</p>
