@@ -7,7 +7,7 @@ brew --version
 
 # Guard against intermittent Travis CI DNS outages
 for host in distfiles.macports.org github.com packages.macports.org packages-private.macports.org; do
-    dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts
+    dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts >/dev/null
 done
 
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
