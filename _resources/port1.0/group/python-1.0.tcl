@@ -123,6 +123,11 @@ proc python_set_versions {option action args} {
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
+            notes "
+            This is a stub port and does not install any binary files!
+            You will instead need to install one its subports!
+            You can safely uninstall this port.
+            "
         } else {
             set addcode 1
         }

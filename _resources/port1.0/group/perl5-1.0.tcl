@@ -177,6 +177,11 @@ proc perl5.setup {module vers {cpandir ""}} {
                 xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
+            notes "
+            This is a stub port and does not install any binary files!
+            You will instead need to install one its subports!
+            You can safely uninstall this port.
+            "
         }
     } else {
         depends_lib-append port:perl${perl5.default_branch}
