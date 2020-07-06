@@ -70,7 +70,7 @@ proc php._set_branches {option action args} {
                 test {}
                 destroot {
                     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
-                    system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
+                    system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
                 }
                 notes "
                 This is a stub port and does not install any binary files!
