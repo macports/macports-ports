@@ -444,6 +444,7 @@ set portfetch::mirror_sites::sites(gnu) {
 
 set portfetch::mirror_sites::sites(gnupg) {
     https://gnupg.org/ftp/gcrypt/
+    http://ftp.heanet.ie/mirrors/ftp.gnupg.org/gcrypt/
     http://mirror.cc.columbia.edu/pub/software/gnupg/
     http://ftp.freenet.de/pub/ftp.gnupg.org/gcrypt/
     ftp://ftp.gnupg.org/gcrypt/
