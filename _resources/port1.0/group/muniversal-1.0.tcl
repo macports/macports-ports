@@ -105,7 +105,6 @@ variant universal {
         }
     }
 
-    configure.args-append      {*}${configure.universal_args}
     foreach lang {c cxx objc objcxx cpp ld} {
         configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
