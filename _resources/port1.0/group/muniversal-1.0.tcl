@@ -338,6 +338,11 @@ variant universal {
                 option worksrcpath ${worksrcpath_save}
             } else {
                 portconfigure::configure_main
+
+                # portconfigure::configure_main adds the universal args to
+                # configure.pre_args; clear them so base doesn't add them
+                # again the next time we call portconfigure::configure_main.
+                configure.universal_args
             }
 
             # Undo changes to the configure related variables
