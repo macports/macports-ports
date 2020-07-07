@@ -105,6 +105,10 @@ variant universal {
         }
     }
 
+    # Disabling dependency tracking is only required when building for
+    # multiple architectures simultaneously.
+    configure.universal_args-delete --disable-dependency-tracking
+
     foreach lang {c cxx objc objcxx cpp ld} {
         configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
