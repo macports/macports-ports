@@ -330,7 +330,7 @@ proc mpi.setup {args} {
 
     mpi.setup_variants ${mpi.variants}
 
-    set mpi [ mpi_variant_name ]
+    set mpi [mpi_variant_name]
     if {$mpi ne ""} {
         set fv [fortran_variant_name]
         set cv "[c_variant_name] $fv"
