@@ -105,7 +105,10 @@ variant universal {
         }
     }
 
-    configure.args-append      {*}${configure.universal_args}
+    # Disabling dependency tracking is only required when building for
+    # multiple architectures simultaneously.
+    configure.universal_args-delete --disable-dependency-tracking
+
     foreach lang {c cxx objc objcxx cpp ld} {
         configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
@@ -339,6 +342,11 @@ variant universal {
                 option worksrcpath ${worksrcpath_save}
             } else {
                 portconfigure::configure_main
+
+                # portconfigure::configure_main adds the universal args to
+                # configure.pre_args; clear them so base doesn't add them
+                # again the next time we call portconfigure::configure_main.
+                configure.universal_args
             }
 
             # Undo changes to the configure related variables
@@ -742,7 +750,7 @@ variant universal {
                                             if { ! [catch {system "test `head -c2 ${dir1}/${fl}` == '#!'"}] } {
                                                 # Shell script, hopefully striping out arch flags works...
                                                 mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
-                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
+                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                                 # diff worked
                                                 ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                             } else {
