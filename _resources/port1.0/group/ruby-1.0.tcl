@@ -171,6 +171,17 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                 }
             }
             if {$subport eq $name} {
+                # use whatever ${prefix}/bin/ruby was chosen, and if none, fall back to latest
+                if {![catch {set val [lindex [split [exec ${prefix}/bin/ruby --version] { }] 1]}]} {
+                    ruby.branch [join [lrange [split $val .] 0 1] .]
+                } else {
+                    ruby.branch 2.7
+                }
+                # if the above default is not supported by this module, use the latest it does support
+                if {[info exists ruby.branches] && ${ruby.branch} ni ${ruby.branches}} {
+                    ruby.branch [lindex [lsort -command vercmp ${ruby.branches}] end]
+                }
+                depends_run port:rb${ruby.suffix}-[string tolower ${ruby.module}]
                 ruby.link_binaries no
                 distfiles
                 supported_archs noarch
@@ -180,11 +191,10 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
                     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${name}
                     system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
                 }
-                notes "
-                This is a stub port and does not install any binary files!
-                You will instead need to install one its subports!
-                You can safely uninstall this port.
-                "
+                uplevel {
+                    description-append (stub port)
+                    long_description-append (NOTE: This is a stub port.)
+                }
                 return
             }
         }

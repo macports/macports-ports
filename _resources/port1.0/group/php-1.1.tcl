@@ -72,11 +72,10 @@ proc php._set_branches {option action args} {
                     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}
                     system "echo \"${subport} is a stub port\" > ${destroot}${prefix}/share/doc/${subport}/README"
                 }
-                notes "
-                This is a stub port and does not install any binary files!
-                You will instead need to install one its subports!
-                You can safely uninstall this port.
-                "
+                uplevel {
+                    description-append (stub port)
+                    long_description-append (NOTE: This is a stub port.)
+                }
             }
         } else {
             # Single-branch extension port; add the code to the port directly.
