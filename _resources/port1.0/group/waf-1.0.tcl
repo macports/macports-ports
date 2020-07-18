@@ -6,7 +6,6 @@ default waf.python {${prefix}/bin/python2.7}
 depends_build-append    port:python27
 
 configure.cmd           ${waf.python} ./waf configure
-configure.post_args-append  --nocache
 
 configure.universal_args-delete --disable-dependency-tracking
 
