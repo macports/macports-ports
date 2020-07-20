@@ -281,8 +281,15 @@ variant universal {
                     (${os.major} < 9 || [sysctl hw.cpu64bit_capable] == 0)} {
                     set bits_differ 1
                 }
+
+                set config_guess_bug 0
+                if {${arch} eq "arm64"} {
+                    set config_guess_bug 1
+                }
+
                 # check if building for a completely different arch
-                if {$bits_differ || (${os.arch}=="arm64" && (${arch}=="i386" || ${arch}=="x86_64" || ${arch}=="ppc" || ${arch}=="ppc64"))
+                if {$bits_differ || $config_guess_bug
+                                 || (${os.arch}=="arm64" && (${arch}=="i386" || ${arch}=="x86_64" || ${arch}=="ppc" || ${arch}=="ppc64"))
                                  || (${os.arch}=="i386" && (${arch}=="arm64" || ${arch}=="ppc" || ${arch}=="ppc64"))
                                  || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))} {
                     switch -- ${arch} {
