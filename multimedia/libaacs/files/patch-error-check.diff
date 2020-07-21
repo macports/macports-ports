@@ -1,0 +1,425 @@
+diff --git Makefile.am Makefile.am
+index 1531246..67f0a26 100644
+--- Makefile.am
++++ Makefile.am
+@@ -5,7 +5,8 @@ EXTRA_DIST=bootstrap COPYING KEYDB.cfg README.txt ChangeLog
+ SET_FEATURES = @SET_FEATURES@
+ SET_INCLUDES = -I$(top_srcdir)/src -I$(top_builddir)/src/libaacs
+ 
+-AM_CFLAGS = -std=c99 $(SET_FEATURES) $(SET_INCLUDES) $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS)
++AM_CFLAGS = -std=c99 $(LIBGCRYPT_CFLAGS) $(GPG_ERROR_CFLAGS)
++AM_CPPFLAGS = $(SET_FEATURES) $(SET_INCLUDES)
+ AM_YFLAGS = -d -p libaacs_yy
+ 
+ lib_LTLIBRARIES = libaacs.la
+@@ -96,7 +97,7 @@ noinst_PROGRAMS = parser_test
+ bin_PROGRAMS = aacs_info
+ 
+ parser_test_SOURCES = \
+-	src/examples/parser_test.c \
++	src/devtools/parser_test.c \
+ 	src/file/keydbcfg-parser.y \
+ 	src/file/keydbcfg-lexer.l \
+ 	src/util/strutl.c \
+diff --git src/examples/parser_test.c src/devtools/parser_test.c
+similarity index 100%
+rename from src/examples/parser_test.c
+rename to src/devtools/parser_test.c
+diff --git src/file/mmc_device_darwin.c src/file/mmc_device_darwin.c
+index 7a3372a..afb0389 100644
+--- src/file/mmc_device_darwin.c
++++ src/file/mmc_device_darwin.c
+@@ -371,13 +371,13 @@ static DADissenterRef iokit_mount_approval_cb(DADiskRef disk, void *context)
+ static int iokit_da_init(MMCDEV *mmc) {
+     mmc->session = DASessionCreate(kCFAllocatorDefault);
+     if (NULL == mmc->session) {
+-        BD_DEBUG(DBG_MMC, "Could not create a disc arbitration session\n");
++        BD_DEBUG(DBG_MMC | DBG_CRIT, "Could not create a disc arbitration session\n");
+         return -1;
+     }
+ 
+     mmc->disk = DADiskCreateFromBSDName(kCFAllocatorDefault, mmc->session, mmc->bsd_name);
+     if (NULL == mmc->disk) {
+-        BD_DEBUG(DBG_MMC, "Could not create a disc arbitration disc for the device\n");
++        BD_DEBUG(DBG_MMC | DBG_CRIT, "Could not create a disc arbitration disc for the device\n");
+         CFRelease(mmc->session);
+         mmc->session = NULL;
+         return -1;
+@@ -429,14 +429,14 @@ static int mmc_open_iokit(const char *path, MMCDEV *mmc) {
+     /* get the bsd name associated with this mount */
+     rc = get_mounted_device_from_path(mmc, path);
+     if (0 != rc) {
+-        BD_DEBUG(DBG_MMC, "Could not locate mounted device associated with %s\n", path);
++        BD_DEBUG(DBG_MMC | DBG_CRIT, "Could not locate mounted device associated with %s\n", path);
+         return rc;
+     }
+ 
+     /* find a matching io service (IOBDServices) */
+     rc = iokit_find_service_matching(mmc, &service);
+     if (0 != rc) {
+-        BD_DEBUG(DBG_MMC, "Could not find matching IOBDServices mounted @ %s\n", path);
++        BD_DEBUG(DBG_MMC | DBG_CRIT, "Could not find matching IOBDServices mounted @ %s\n", path);
+         return rc;
+     }
+ 
+@@ -446,6 +446,10 @@ static int mmc_open_iokit(const char *path, MMCDEV *mmc) {
+     /* done with the ioservice. release it */
+     (void) IOObjectRelease(service);
+ 
++    if (0 != rc) {
++        return rc;
++    }
++
+     /* Init DiskArbitration */
+     rc = iokit_da_init(mmc);
+     if (0 != rc) {
+@@ -463,7 +467,7 @@ static int mmc_open_iokit(const char *path, MMCDEV *mmc) {
+     /* finally, obtain exclusive access */
+     rc = (*mmc->taskInterface)->ObtainExclusiveAccess(mmc->taskInterface);
+     if (kIOReturnSuccess != rc) {
+-        BD_DEBUG(DBG_MMC, "Failed to obtain exclusive access. rc = %x\n", rc);
++        BD_DEBUG(DBG_MMC | DBG_CRIT, "Failed to obtain exclusive access. rc = %x\n", rc);
+         return -1;
+     }
+ 
+@@ -533,6 +537,12 @@ void device_close(MMCDEV **pp)
+             IODestroyPlugInInterface(mmc->plugInInterface);
+         }
+ 
++        if (!mmc->sync_sem) {
++            /* open failed before iokit_da_init() */
++            X_FREE(*pp);
++            return;
++        }
++
+         /* Wait for disc to re-appear for 20 seconds.
+          * This timeout was figured out by experimentation with
+          * a USB BD drive which sometimes can take really long to
+diff --git src/libaacs/aacs.c src/libaacs/aacs.c
+index 10c8553..ab7671c 100644
+--- src/libaacs/aacs.c
++++ src/libaacs/aacs.c
+@@ -81,6 +81,7 @@ struct aacs {
+     int       bee;        /* bus encryption enabled flag in content certificate */
+     int       bec;        /* bus encryption capable flag in drive certificate */
+     uint8_t   read_data_key[16];
++    uint8_t   drive_cert_hash[20];
+ 
+     /* content certificate */
+     CONTENT_CERT *cc;
+@@ -561,6 +562,12 @@ static int _calc_mk(AACS *aacs, uint8_t *mk, pk_list *pkl, dk_list *dkl)
+         return AACS_SUCCESS;
+     }
+ 
++    /* get cached mk */
++    if (!aacs->no_cache && keycache_find("mk", aacs->disc_id, mk, 16)) {
++        BD_DEBUG(DBG_AACS, "Using cached MK\n");
++        return AACS_SUCCESS;
++    }
++
+     BD_DEBUG(DBG_AACS, "Calculate media key...\n");
+ 
+     mkb = _mkb_open(aacs);
+@@ -585,6 +592,12 @@ static int _calc_mk(AACS *aacs, uint8_t *mk, pk_list *pkl, dk_list *dkl)
+ 
+     if (result == AACS_SUCCESS) {
+         memcpy(aacs->mk, mk, sizeof(aacs->mk));
++        /* cache mk */
++        if (!aacs->no_cache) {
++            if (memcmp(aacs->disc_id, empty_key, sizeof(aacs->disc_id))) {
++                keycache_save("mk", aacs->disc_id, mk, 16);
++            }
++        }
+     }
+ 
+     mkb_close(mkb);
+@@ -668,10 +681,33 @@ static int _read_vid(AACS *aacs, cert_list *hcl)
+ 
+ static int _read_read_data_key(AACS *aacs, cert_list *hcl)
+ {
+-    int error_code = _mmc_read_auth(aacs, hcl, MMC_READ_DATA_KEYS, aacs->read_data_key, NULL);
++    int error_code;
++    char *cache_path = NULL;
++    char str[41];
++
++    cache_path = str_printf("rdk" DIR_SEP "%s", str_print_hex(str, aacs->drive_cert_hash, 20));
++
++    error_code =_mmc_read_auth(aacs, hcl, MMC_READ_DATA_KEYS, aacs->read_data_key, NULL);
++    if (error_code == AACS_SUCCESS) {
++        /* cache read data key */
++        if (!aacs->no_cache) {
++            keycache_save(cache_path, aacs->disc_id, aacs->read_data_key, 16);
++        }
++
++    } else {
++        /* get cached read data key */
++        if (!aacs->no_cache && keycache_find(cache_path, aacs->disc_id, aacs->read_data_key, 16)) {
++            BD_DEBUG(DBG_AACS, "Using cached READ DATA KEY\n");
++            error_code = AACS_SUCCESS;
++        }
++    }
++
++    X_FREE(cache_path);
++
+     if (error_code != AACS_SUCCESS) {
+         BD_DEBUG(DBG_AACS, "Error reading data keys!\n");
+     }
++
+     return error_code;
+ }
+ 
+@@ -764,6 +800,7 @@ static void _find_config_entry(AACS *aacs, title_entry_list *ce,
+ 
+     if (ce->entry.mek) {
+         hexstring_to_hex_array(mk, 16, ce->entry.mek);
++        memcpy(aacs->mk, mk, 16);
+ 
+         BD_DEBUG(DBG_AACS, "Found media key for %s: %s\n",
+                  str_print_hex(str2, ce->entry.discid, 20), str_print_hex(str, mk, 16));
+@@ -957,10 +994,11 @@ static int _calc_title_hash(AACS *aacs)
+     size_t   size;
+     char     str[48];
+     int      result = AACS_SUCCESS;
++    int      aacs2 = aacs->cc ? aacs->cc->aacs2 : 0;
+ 
+     size = _read_file(aacs, "AACS" DIR_SEP "Unit_Key_RO.inf", &data);
+     if (size > 2048) {
+-        aacs->uk = uk_parse(data, size);
++        aacs->uk = uk_parse(data, size, aacs2);
+     }
+ 
+     /* failed, try backup */
+@@ -968,7 +1006,7 @@ static int _calc_title_hash(AACS *aacs)
+         X_FREE(data);
+         size = _read_file(aacs, "AACS" DIR_SEP "DUPLICATE" DIR_SEP "Unit_Key_RO.inf", &data);
+         if (size > 2048) {
+-            aacs->uk = uk_parse(data, size);
++            aacs->uk = uk_parse(data, size, aacs2);
+         }
+     }
+ 
+@@ -1022,7 +1060,7 @@ static int _get_bus_encryption_enabled(AACS *aacs)
+     return 0;
+ }
+ 
+-static int _get_bus_encryption_capable(const char *path)
++static int _get_bus_encryption_capable(AACS *aacs, const char *path)
+ {
+     MMC* mmc = NULL;
+     uint8_t drive_cert[92];
+@@ -1033,9 +1071,11 @@ static int _get_bus_encryption_capable(const char *path)
+     }
+ 
+     if (mmc_read_drive_cert(mmc, drive_cert) == MMC_SUCCESS) {
++        crypto_aacs_title_hash(drive_cert, 92, aacs->drive_cert_hash);
+         bec = drive_cert[1] & 1;
+         BD_DEBUG(DBG_AACS, "Bus Encryption Capable flag in drive certificate: %d\n", bec);
+     } else {
++        memset(aacs->drive_cert_hash, 0, sizeof(aacs->drive_cert_hash));
+         BD_DEBUG(DBG_AACS | DBG_CRIT, "Unable to read drive certificate\n");
+     }
+ 
+@@ -1206,6 +1246,8 @@ int aacs_open_device(AACS *aacs, const char *path, const char *configfile_path)
+ 
+     aacs->path = path ? str_dup(path) : NULL;
+ 
++    aacs->cc = _read_cc_any(aacs);
++
+     error_code = _calc_title_hash(aacs);
+     if (error_code != AACS_SUCCESS) {
+         return error_code;
+@@ -1219,10 +1261,8 @@ int aacs_open_device(AACS *aacs, const char *path, const char *configfile_path)
+         BD_DEBUG(DBG_AACS, "Failed to initialize AACS!\n");
+     }
+ 
+-    aacs->cc = _read_cc_any(aacs);
+-
+     aacs->bee = _get_bus_encryption_enabled(aacs);
+-    aacs->bec = _get_bus_encryption_capable(path);
++    aacs->bec = _get_bus_encryption_capable(aacs, path);
+ 
+     if (error_code == AACS_SUCCESS && aacs->bee && aacs->bec) {
+ 
+diff --git src/libaacs/mkb.c src/libaacs/mkb.c
+index 2342497..9bf0730 100644
+--- src/libaacs/mkb.c
++++ src/libaacs/mkb.c
+@@ -77,6 +77,7 @@ MKB *mkb_init(uint8_t *data, size_t len)
+     mkb->buf  = data;
+ 
+     BD_DEBUG(DBG_MKB, "MKB size: %u\n", (unsigned)mkb->size);
++    BD_DEBUG(DBG_MKB, "MKB type: 0x%x\n", mkb_type(mkb));
+     BD_DEBUG(DBG_MKB, "MKB version: %d\n", mkb_version(mkb));
+ 
+     return mkb;
+@@ -110,7 +111,7 @@ size_t mkb_data_size(MKB *mkb)
+ }
+ 
+ 
+-uint8_t mkb_type(MKB *mkb)
++uint32_t mkb_type(MKB *mkb)
+ {
+     const uint8_t *rec = mkb_type_and_version_record(mkb);
+ 
+@@ -207,12 +208,29 @@ const uint8_t *mkb_cvalues(MKB *mkb, size_t *len)
+ 
+ const uint8_t *mkb_mk_dv(MKB *mkb)
+ {
++    const uint8_t *rec;
++    uint8_t dv_record;
+     size_t len;
+-    const uint8_t *rec = _record(mkb, 0x81, &len);
++
++    switch (mkb_type(mkb)) {
++        case MKB_20_CATEGORY_C:
++        case MKB_21_CATEGORY_C:
++            dv_record = 0x86;
++            break;
++        case MKB_TYPE_3:
++        case MKB_TYPE_4:
++        case MKB_TYPE_10_CLASS_II:
++        default:
++            dv_record = 0x81;
++            break;
++    }
++
++    rec = _record(mkb, dv_record, &len);
+ 
+     if (len < 20) {
+         return NULL;
+     }
++
+     if (rec) {
+         rec += 4;
+     }
+diff --git src/libaacs/mkb.h src/libaacs/mkb.h
+index 6691211..f817470 100644
+--- src/libaacs/mkb.h
++++ src/libaacs/mkb.h
+@@ -29,6 +29,12 @@ typedef struct mkb MKB;
+ 
+ struct aacs_file_s;
+ 
++#define MKB_TYPE_3           0x00031003
++#define MKB_TYPE_4           0x00041003
++#define MKB_TYPE_10_CLASS_II 0x000A1003
++#define MKB_20_CATEGORY_C    0x48141003
++#define MKB_21_CATEGORY_C    0x48151003
++
+ BD_PRIVATE MKB *mkb_init(uint8_t *data, size_t len); // init MKB from data
+ BD_PRIVATE void mkb_close(MKB *mkb);           // free MKB
+ 
+@@ -36,7 +42,7 @@ BD_PRIVATE const uint8_t *mkb_data(MKB *mkb);
+ BD_PRIVATE size_t mkb_data_size(MKB *mkb);
+ 
+ // returns type
+-BD_PRIVATE uint8_t mkb_type(MKB *mkb);
++BD_PRIVATE uint32_t mkb_type(MKB *mkb);
+ // returns version
+ BD_PRIVATE uint32_t mkb_version(MKB *mkb);
+ // returns type and version record (required to verify signatures)
+diff --git src/libaacs/unit_key.c src/libaacs/unit_key.c
+index dc4382f..afb412c 100644
+--- src/libaacs/unit_key.c
++++ src/libaacs/unit_key.c
+@@ -143,8 +143,9 @@ static int _assign_titles(AACS_UK *uk, const uint8_t *p, size_t size)
+     return 0;
+ }
+ 
+-static int _parse_uks(AACS_UK *uk, const uint8_t *p, size_t size)
++static int _parse_uks(AACS_UK *uk, const uint8_t *p, size_t size, int aacs2)
+ {
++    const uint8_t empty_key[16] = {0};
+     uint32_t uk_pos;
+     unsigned int i;
+ 
+@@ -173,6 +174,17 @@ static int _parse_uks(AACS_UK *uk, const uint8_t *p, size_t size)
+         return -1;
+     }
+ 
++    if (aacs2 && uk->num_uk > 1) {
++        /* do some sanity checks ... */
++        if (!memcmp(empty_key, p + 48 + 48 + 16, 16)) {
++            BD_DEBUG(DBG_UK | DBG_CRIT, "AACS2 unit key not found from expected location ?\n");
++            aacs2 = 0;
++        } else if (size < uk_pos + 64 * uk->num_uk + 16) {
++            BD_DEBUG(DBG_UK | DBG_CRIT, "Unexpected EOF (AACS2 unit key data truncated)\n");
++            return -1;
++        }
++    }
++
+     /* alloc storage for keys */
+ 
+     uk->enc_uk = calloc(uk->num_uk, sizeof(AACS_UK));
+@@ -181,19 +193,29 @@ static int _parse_uks(AACS_UK *uk, const uint8_t *p, size_t size)
+         return -1;
+     }
+ 
+-    BD_DEBUG(DBG_UK, "%d CPS unit keys\n", uk->num_uk);
++    BD_DEBUG(DBG_UK, "%d CPS unit keys (AACS%d)\n", uk->num_uk, aacs2 ? 2 : 1);
+ 
+     /* get encrypted keys */
+ 
+     for (i = 0; i < uk->num_uk; i++) {
+         uk_pos += 48;
+         memcpy(uk->enc_uk[i].key, p + uk_pos, 16);
++
++        if (!memcmp(empty_key, uk->enc_uk[i].key, 16)) {
++            BD_DEBUG(DBG_UK | DBG_CRIT, "WARNING: Unit key %d is empty!\n", i+1);
++        }
++
++        /* XXX there seems to be nothing in this file that could be used to detect this ... */
++        if (aacs2) {
++            /* skip unknown */
++            uk_pos += 16;
++        }
+     }
+ 
+     return 0;
+ }
+ 
+-static int _parse(AACS_UK *uk, const uint8_t *data, size_t len)
++static int _parse(AACS_UK *uk, const uint8_t *data, size_t len, int aacs2)
+ {
+     int result;
+ 
+@@ -201,7 +223,7 @@ static int _parse(AACS_UK *uk, const uint8_t *data, size_t len)
+         return -1;
+     }
+ 
+-    result = _parse_uks(uk, data, len);
++    result = _parse_uks(uk, data, len, aacs2);
+ 
+     /* not fatal, just speeds up things ... */
+     _assign_titles(uk, data, len);
+@@ -209,7 +231,7 @@ static int _parse(AACS_UK *uk, const uint8_t *data, size_t len)
+     return result;
+ }
+ 
+-AACS_UK *uk_parse(const void *data, size_t len)
++AACS_UK *uk_parse(const void *data, size_t len, int aacs2)
+ {
+     AACS_UK *uk = calloc(1, sizeof(*uk));
+ 
+@@ -217,7 +239,7 @@ AACS_UK *uk_parse(const void *data, size_t len)
+         return NULL;
+     }
+ 
+-    if (_parse(uk, data, len) < 0) {
++    if (_parse(uk, data, len, aacs2) < 0) {
+         BD_DEBUG(DBG_UK | DBG_CRIT, "Corrupt unit key file (AACS/Unit_Key_RO.inf)\n");
+         X_FREE(uk);
+     }
+diff --git src/libaacs/unit_key.h src/libaacs/unit_key.h
+index 7797e2e..b722837 100644
+--- src/libaacs/unit_key.h
++++ src/libaacs/unit_key.h
+@@ -50,7 +50,7 @@ struct aacs_uk {
+     uint16_t  *title_cps_unit;  /* map title to CPS unit (key index) */
+ };
+ 
+-BD_PRIVATE AACS_UK *uk_parse(const void *data, size_t len);
++BD_PRIVATE AACS_UK *uk_parse(const void *data, size_t len, int aacs2);
+ BD_PRIVATE void     uk_free(AACS_UK **);
+ 
+ #endif /* AACS_UK_H_ */

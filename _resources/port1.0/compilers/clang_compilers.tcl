@@ -4,10 +4,16 @@
 # clang_dependency PortGroup, and add it to any new dependencies of the
 # new version.
 
-# clang 9.0 and older build on 10.6+ (darwin 10)
-# clang 7.0 and older build on 10.5+ (darwin 9)
-# clang 3.4 and older build on 10.4+ (darwin 8)
+# clang 10  and older build on 10.6+  (darwin 10)
+# clang 9.0 and older build on 10.6+  (darwin 10)
+# clang 7.0 and older build on 10.5+  (darwin 9)
+# clang 3.4 and older build on 10.4+  (darwin 8)
+
 if {${os.major} >= 10} {
+    # Clang-10 can only be added once
+    # https://github.com/macports/macports-base/pull/171
+    # is merged AND available in a public release.
+    #lappend compilers macports-clang-10
     lappend compilers macports-clang-9.0 \
                       macports-clang-8.0
 }

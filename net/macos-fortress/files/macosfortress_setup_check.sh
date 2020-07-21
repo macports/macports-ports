@@ -28,7 +28,7 @@ CURL=/usr/bin/curl
 AWK=/usr/bin/awk
 HOSTNAME=/bin/hostname
 
-JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Resources/jsc
+JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc
 
 PROXY_HOSTNAME="${PROXY_HOSTNAME:-@PROXY_HOSTNAME@}"
 LAUNCHDAEMONS=/Library/LaunchDaemons
@@ -69,7 +69,7 @@ LAUNCHD_PLISTS=( \
         org.macports.@NAME@-proxy \
         org.macports.@NAME@-proxy.squid-rotate \
         org.macports.@NAME@-easylistpac \
-        org.macports.@NAME@-hphosts \
+        org.macports.@NAME@-hosts \
         org.macports.adblock2privoxy \
         org.macports.adblock2privoxy-nginx \
         org.macports.Squid \
@@ -149,39 +149,37 @@ sudo pfctl -Fall && sudo pfctl -ef @PREFIX@/etc/@NAME@/pf.conf
 EOF
 fi
 
-# hphosts
+# hosts
 "${CAT}" <<EOF
 
-Checking hphosts files…
+Checking hosts files…
 EOF
 
-HPHOSTS_FILES=( \
-	@PREFIX@/etc/@NAME@/hosts-hphosts \
-	@PREFIX@/etc/@NAME@/hosts.zip \
-	@PREFIX@/etc/@NAME@/hphosts-partial.asp \
+HOSTS_FILES=( \
+	@PREFIX@/etc/@NAME@/@NAME@-hosts \
 	@PREFIX@/etc/@NAME@/whitelist.txt \
 	@PREFIX@/etc/@NAME@/blacklist.txt \
 )
 
-for FNAME in "${HPHOSTS_FILES[@]}" \
+for FNAME in "${HOSTS_FILES[@]}" \
 	; do \
 	fname_exists; \
 done
 
 "${CAT}" <<EOF
 
-Checking @PREFIX@/etc/@NAME@/hosts-hphosts creation…
+Checking @PREFIX@/etc/@NAME@/@NAME@-hosts creation…
 EOF
 
 # pfctl
-if [ -f @PREFIX@/etc/@NAME@/hosts-hphosts ]; then
-    echo "[✅] @PREFIX@/etc/@NAME@/hosts-hphosts exists"
+if [ -f @PREFIX@/etc/@NAME@/@NAME@-hosts ]; then
+    echo "[✅] @PREFIX@/etc/@NAME@/@NAME@-hosts exists"
 else
     "${CAT}" <<EOF
-[❌] @PREFIX@/etc/@NAME@/hosts-hphosts doesn't exist! Troubleshooting:
+[❌] @PREFIX@/etc/@NAME@/@NAME@-hosts doesn't exist! Troubleshooting:
 
-sudo @PREFIX@/bin/gpg --homedir /var/root/.gnupg --list-keys | grep -A2 -B1 -i hpHosts
-sudo port reload org.macports.@NAME@-hphosts
+sudo port reload org.macports.@NAME@-hosts
+sudo launchctl kickstart -k system/org.macports.@NAME@-hosts
 EOF
 fi
 
@@ -249,7 +247,7 @@ EOF
 fi
 
 # Privoxy configuration http://p.p/ via proxy server
-if ! [[ `( http_proxy=http://${PROXY_HOSTNAME}:3128; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
+if [[ `( http_proxy=http://${PROXY_HOSTNAME}:3128; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
     echo "[✅] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:3128 is running properly"
 else
     "${CAT}" <<EOF

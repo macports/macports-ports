@@ -2,7 +2,8 @@
 
 # see https://trac.macports.org/ticket/57135
 if { ${os.major} >= 11 } {
-    lappend compilers macports-gcc-9
+    lappend compilers macports-gcc-10 \
+                      macports-gcc-9
 }
 if { ${os.major} >= 10 } {
     lappend compilers macports-gcc-8

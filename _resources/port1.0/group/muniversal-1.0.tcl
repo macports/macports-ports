@@ -52,6 +52,8 @@ proc muniversal_get_arch_flag {arch {fortran ""}} {
             set archf -m32
         } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
             set archf -m64
+        } elseif { ${os.arch}=="arm64" && ${arch}=="arm64" } {
+            set archf -m64
         } else {
             if { ${fortran}=="" } {
                 return -code error "selected compiler can't build for ${arch}"
@@ -105,21 +107,30 @@ variant universal {
         }
     }
 
-    configure.args-append      {*}${configure.universal_args}
+    # Disabling dependency tracking is only required when building for
+    # multiple architectures simultaneously.
+    configure.universal_args-delete --disable-dependency-tracking
+
     foreach lang {c cxx objc objcxx cpp ld} {
         configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if { ${merger_must_run_binaries}=="yes" } {
-        if { ${os.arch}=="i386" } {
+        if {${os.arch}=="arm64"} {
+            set universal_archs_supported [ldelete ${universal_archs_supported} "ppc"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
+            set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
+        } elseif { ${os.arch}=="i386" } {
+            set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
+            set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
             if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             }
         } else {
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
+            set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
             if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             }
@@ -142,23 +153,45 @@ variant universal {
 
     # if merger_no_3_archs is yes, prune universal_archs_to_use until it only has two elements
     if { ${merger_no_3_archs}=="yes" } {
-        if { [llength ${universal_archs_to_use}] == 3 } {
-            # first try to remove cross-compiled 64-bit arch
-            if { ${os.arch}=="i386" } {
+        if { [llength ${universal_archs_to_use}] >= 3 } {
+            # First, try to remove ppc64 unless we're powerpc
+            if { ${os.arch} != "powerpc" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc64"]
-            } else {
+            }
+        }
+
+        if { [llength ${universal_archs_to_use}] >= 3 } {
+            # Next, delete archs that are not evolutionarilary adjacent
+            if { ${os.arch} == "powerpc" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "arm64"]
+            } else if {${os.arch} == "arm64" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc"]
+            }
+        }
+
+        if { [llength ${universal_archs_to_use}] >= 3 } {
+            # Next continue to prune architectures that are not evolutionarilary adjacent
+            if { ${os.arch} == "arm64" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "i386"]
+            } else if { ${os.arch} == "powerpc" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "x86_64"]
             }
         }
-        if { [llength ${universal_archs_to_use}] == 3 } {
-            # next try to remove cross-compiled 32-bit arch
-            if { ${os.arch}=="i386" } {
-                set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc"]
-            } else {
+
+        # arm64 hosts should be down to arm64 + x86_64 at this point
+        # i386 hosts should be down to ppc + i386 + x86_64 at this point
+        # powerpc hosts should be down to ppc + ppc64 + i386 at this point
+
+        if { [llength ${universal_archs_to_use}] >= 3 } {
+            # Lastly, remove remaining cross-compiled arch
+            if { ${os.arch} == "powerpc" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "i386"]
+            } else if { ${os.arch} == "i386" } {
+                set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc"]
             }
         }
-        if { [llength ${universal_archs_to_use}] == 3 } {
+
+        if { [llength ${universal_archs_to_use}] >= 3 } {
             # at least one arch should have been removed from universal_archs_to_use
             error "Should Not Happen"
         }
@@ -248,10 +281,19 @@ variant universal {
                     (${os.major} < 9 || [sysctl hw.cpu64bit_capable] == 0)} {
                     set bits_differ 1
                 }
+
+                set config_guess_bug 0
+                if {${arch} eq "arm64"} {
+                    set config_guess_bug 1
+                }
+
                 # check if building for a completely different arch
-                if {$bits_differ || (${os.arch}=="i386" && (${arch}=="ppc" || ${arch}=="ppc64"))
-                        || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))} {
+                if {$bits_differ || $config_guess_bug
+                                 || (${os.arch}=="arm64" && (${arch}=="i386" || ${arch}=="x86_64" || ${arch}=="ppc" || ${arch}=="ppc64"))
+                                 || (${os.arch}=="i386" && (${arch}=="arm64" || ${arch}=="ppc" || ${arch}=="ppc64"))
+                                 || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))} {
                     switch -- ${arch} {
+                        arm64   {set host "--host=aarch64-apple-${os.platform}${os.version}"}
                         x86_64  {set host "--host=x86_64-apple-${os.platform}${os.version}"}
                         i386    {set host "--host=i686-apple-${os.platform}${os.version}"}
                         ppc     {set host "--host=powerpc-apple-${os.platform}${os.version}"}
@@ -339,6 +381,11 @@ variant universal {
                 option worksrcpath ${worksrcpath_save}
             } else {
                 portconfigure::configure_main
+
+                # portconfigure::configure_main adds the universal args to
+                # configure.pre_args; clear them so base doesn't add them
+                # again the next time we call portconfigure::configure_main.
+                configure.universal_args
             }
 
             # Undo changes to the configure related variables
@@ -742,7 +789,7 @@ variant universal {
                                             if { ! [catch {system "test `head -c2 ${dir1}/${fl}` == '#!'"}] } {
                                                 # Shell script, hopefully striping out arch flags works...
                                                 mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
-                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"} ] } {
+                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                                 # diff worked
                                                 ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                             } else {
@@ -787,13 +834,26 @@ variant universal {
 %>#endif
 '}
 
+        set diffFormatArmElse {--old-group-format='#ifdef __arm64__
+%<#endif
+' \
+--new-group-format='#ifndef __arm64__
+%>#endif
+' \
+--unchanged-group-format='%=' \
+--changed-group-format='#ifdef __arm64__
+%<#else
+%>#endif
+'}
+
         if { ![info exists merger_dont_diff] } {
             set merger_dont_diff {}
         }
 
-        merge2Dir  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64 ${workpath}/destroot-powerpc  ""  ppc ppc64    ${merger_dont_diff}  ${diffFormatM}
-        merge2Dir  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64 ${workpath}/destroot-intel   ""  i386 x86_64  ${merger_dont_diff}  ${diffFormatM}
-        merge2Dir  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel ${workpath}/destroot          ""  powerpc x86  ${merger_dont_diff}  ${diffFormatProc}
+        merge2Dir  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${merger_dont_diff}  ${diffFormatM}
+        merge2Dir  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${merger_dont_diff}  ${diffFormatM}
+        merge2Dir  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${merger_dont_diff}  ${diffFormatProc}
+        merge2Dir  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${merger_dont_diff}  ${diffFormatArmElse}
     }
 
     test {
