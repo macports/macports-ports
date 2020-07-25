@@ -5,13 +5,13 @@
 # new version.
 
 # clang 10  and older build on 10.6+  (darwin 10)
-# clang 9.0 and older build on 10.6+  (darwin 10)
 # clang 7.0 and older build on 10.5+  (darwin 9)
 # clang 3.4 and older build on 10.4+  (darwin 8)
 
 if {${os.major} >= 10} {
-    lappend compilers macports-clang-10 \
-                      macports-clang-9.0 \
+    # TODO: evaluate compatibility of clang-10
+    #lappend compilers macports-clang-10
+    lappend compilers macports-clang-9.0 \
                       macports-clang-8.0
 }
 
