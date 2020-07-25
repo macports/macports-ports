@@ -1,0 +1,137 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           java 1.0
+PortGroup           python 1.0
+
+github.setup        tensorflow metadata 0.28.0 v
+revision            0
+name                py-${github.author}-${github.project}
+
+platforms           darwin
+license             Apache-2
+maintainers         nomaintainer
+
+description         Library and standards for schema and statistics.
+long_description    TensorFlow Metadata provides standard representations \
+                    for metadata that are useful when training machine \
+                    learning models with TensorFlow.
+
+homepage            https://github.com/tensorflow/metadata
+
+checksums           rmd160  ad8357a3c917ed00ed211c62eefda02da6a51981 \
+                    sha256  06ce0decf556f98f1a32d38e2a26545ff6ccac57afeb64969f913b75a9a2eda0 \
+                    size    36000
+
+# Required java version
+java.version        11+
+# LTS JDK port to install if required java not found
+java.fallback       openjdk11
+# JDK only needed at build time, but java PG sets lib dependency so
+# declare no conflict to allow redistribution of binaries.
+license_noconflict  ${java.fallback}
+
+python.versions     37 38 39
+
+proc python_listify {tcl_list} {
+    set python_list {}
+    foreach item [lreverse ${tcl_list}] {
+        set python_list "'${item}', ${python_list}"
+    }
+    return ${python_list}
+}
+
+if {${name} ne ${subport}} {
+    depends_build-append \
+                    port:bazel-3.7 \
+                    port:py${python.version}-pip \
+                    port:py${python.version}-pkginfo \
+                    port:py${python.version}-setuptools
+
+    depends_run-append \
+                    port:py${python.version}-google-api \
+                    port:py${python.version}-protobuf3
+
+    # Limit the number of parallel jobs to the number of physical, not logical, cpus.
+    # First current setting to ensure we would be reducing the current setting.
+    set physicalcpus [sysctl hw.physicalcpu]
+    if { ${build.jobs} > ${physicalcpus} } {
+        build.jobs ${physicalcpus}
+    }
+
+    # Build using the wonderful bazel build system ...
+    set bazel_output_user_root ${workpath}/bazel_build
+    set bazel_cmd_opts "--max_idle_secs=15 --output_user_root=${bazel_output_user_root}"
+    set bazel_build_opts "--subcommands --verbose_failures"
+    # Limit bazel resource utilisation
+    set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs} --local_ram_resources=HOST_RAM*0.75 --local_cpu_resources=HOST_CPUS*.75"
+    # Explicitly pass SDK https://github.com/bazelbuild/rules_go/issues/1554
+    # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
+    if {[string first ${configure.sdk_version} ${configure.sdkroot}] != -1} {
+        set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
+    } else {
+        ui_warn "configure.sdkroot='${configure.sdkroot}' does not match configure.sdk_version='${configure.sdk_version}'"
+    }
+    # hack to try and transfer MP c, c++ and ld options to bazel...
+    foreach opt [list {*}${configure.cflags} ] {
+        set bazel_build_opts "${bazel_build_opts} --conlyopt \"${opt}\""
+    }
+    foreach opt [list {*}${configure.cxxflags} ] {
+        set bazel_build_opts "${bazel_build_opts} --cxxopt \"${opt}\""
+    }
+    foreach opt [list {*}${configure.ldflags} ] {
+        set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
+    }
+    ui_debug "Bazel command options: ${bazel_cmd_opts}"
+    ui_debug "Bazel build options: ${bazel_build_opts}"
+
+    # see ${worksrcpath}/bazel-bin/tensorflow_metadata/move_generated_files
+    set bazel_build_workspace_path \
+                    ${workpath}/build
+    set bazel_build_proto_path \
+                    ${bazel_build_workspace_path}/tensorflow_metadata/proto/v0
+    
+    post-extract {
+        xinstall -d \
+                    ${workpath}/bin \
+                    ${bazel_build_proto_path}
+        ln -s ${python.bin} ${workpath}/bin/python
+    }
+
+    # replace with patch files after this repo is a little more stable
+    post-patch {
+        reinplace -E "s|\\\[(self\\._bazel_cmd), ('run'),|\[\\1, [python_listify ${bazel_cmd_opts}] 'build',|" \
+                    ${worksrcpath}/setup.py
+        reinplace -E "s|(self\\._additional_build_options = )\\\[\\\]|\\1\[[python_listify ${bazel_build_opts}]]|" \
+                    ${worksrcpath}/setup.py
+    }
+
+    # turn off -j option in build; bazel will use its own parallelism
+    use_parallel_build no
+
+    build.env-append \
+                    JAVA_HOME=${java.home} \
+                    "PATH=${workpath}/bin:$env(PATH)"
+
+    build.asroot    yes
+    
+    destroot.env-append \
+                    JAVA_HOME=${java.home} \
+                    "PATH=${workpath}/bin:$env(PATH)"
+    destroot.asroot yes
+
+    test.run        yes
+    test.cmd        python${python.branch}
+    test.target     ${github.author}_${github.project}/python/proto_test.py
+    test.env-append \
+                    PYTHONPATH=${worksrcpath}/build/lib
+
+    post-destroot {
+        set docdir ${prefix}/share/doc/${subport}
+        xinstall -d ${destroot}${docdir}
+        xinstall -m 0644 -W ${worksrcpath} LICENSE README.md \
+            ${destroot}${docdir}
+    }
+
+    livecheck.type  none
+}
