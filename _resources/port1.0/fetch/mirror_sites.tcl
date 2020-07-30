@@ -553,6 +553,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
     ${lil.fr}://lil.fr.distfiles.macports.org/:mirror
     ${mse.uk}://mse.uk.distfiles.macports.org/sites/distfiles.macports.org/:mirror
+    ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
     ${nou.nc}://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     ${nue.de}://nue.de.distfiles.macports.org/:mirror
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
