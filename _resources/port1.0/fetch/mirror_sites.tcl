@@ -516,9 +516,7 @@ set stackpath   [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" :
 #set aarnet.au   [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set aarnet.au   http
 set aus.us      http
-# cert doesn't have macports.org SANs; admin notified
-#set cph.dk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
-set cph.dk      http
+set cph.dk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
 #set fco.it      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
