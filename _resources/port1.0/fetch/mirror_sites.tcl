@@ -614,7 +614,6 @@ set portfetch::mirror_sites::sites(netbsd) {
 set portfetch::mirror_sites::sites(nongnu) {
     http://mirror.csclub.uwaterloo.ca/nongnu/
     ftp://mirror.csclub.uwaterloo.ca/nongnu/
-    http://babyname.tips/mirrors/nongnu/
     http://mirror.netcologne.de/savannah/
     ftp://mirror.netcologne.de/savannah/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
