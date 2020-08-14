@@ -52,7 +52,7 @@ proc muniversal_get_arch_flag {arch {fortran ""}} {
             set archf -m32
         } elseif { ${os.arch}=="powerpc" && ${arch}=="ppc64" } {
             set archf -m64
-        } elseif { ${os.arch}=="arm64" && ${arch}=="arm64" } {
+        } elseif { ${os.arch}=="arm" && ${arch}=="arm64" } {
             set archf -m64
         } else {
             if { ${fortran}=="" } {
@@ -117,7 +117,7 @@ variant universal {
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if { ${merger_must_run_binaries}=="yes" } {
-        if {${os.arch}=="arm64"} {
+        if {${os.arch}=="arm"} {
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
@@ -164,14 +164,14 @@ variant universal {
             # Next, delete archs that are not evolutionarilary adjacent
             if { ${os.arch} == "powerpc" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "arm64"]
-            } else if {${os.arch} == "arm64" } {
+            } else if {${os.arch} == "arm" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "ppc"]
             }
         }
 
         if { [llength ${universal_archs_to_use}] >= 3 } {
             # Next continue to prune architectures that are not evolutionarilary adjacent
-            if { ${os.arch} == "arm64" } {
+            if { ${os.arch} == "arm" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "i386"]
             } else if { ${os.arch} == "powerpc" } {
                 set universal_archs_to_use [ldelete ${universal_archs_to_use} "x86_64"]
@@ -289,7 +289,7 @@ variant universal {
 
                 # check if building for a completely different arch
                 if {$bits_differ || $config_guess_bug
-                                 || (${os.arch}=="arm64" && (${arch}=="i386" || ${arch}=="x86_64" || ${arch}=="ppc" || ${arch}=="ppc64"))
+                                 || (${os.arch}=="arm" && (${arch}=="i386" || ${arch}=="x86_64" || ${arch}=="ppc" || ${arch}=="ppc64"))
                                  || (${os.arch}=="i386" && (${arch}=="arm64" || ${arch}=="ppc" || ${arch}=="ppc64"))
                                  || (${os.arch}=="powerpc" && (${arch}=="i386" || ${arch}=="x86_64"))} {
                     switch -- ${arch} {
