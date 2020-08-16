@@ -1,0 +1,104 @@
+From bca808b6e43c34287219442b3f401885657a4f95 Mon Sep 17 00:00:00 2001
+From: c vw <dl1ycf@darc.de>
+Date: Fri, 14 Aug 2020 11:04:14 +0200
+Subject: [PATCH 2/3] report errors encountered during sem_init, and close
+ no-longer-used semaphores on MacOS.
+
+---
+ linux_port.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/linux_port.c b/linux_port.c
+index 6459b4c..e08bc02 100644
+--- linux_port.c
++++ linux_port.c
+@@ -108,6 +108,9 @@ sem_t *LinuxCreateSemaphore(int attributes,int initial_count,int maximum_count,c
+         sem=malloc(sizeof(sem_t));
+ 	int result;
+ 	result=sem_init(sem, 0, 0);
++        if (result < 0) {
++	  perror("WDSP:CreateSemaphore");
++        }
+ #endif
+ 	return sem;
+ }
+@@ -182,6 +185,22 @@ void SetThreadPriority(HANDLE thread, int priority)  {
+ }
+
+ int CloseHandle(HANDLE hObject) {
++#ifdef __APPLE__
++//
++// Note a new Semaphore is allocated at each RX/TX transition, so after
++// about 200 RX/TX transitions, MacOS runs out of file descriptors (no
++// new semaphores can be allocated, and rigctl cannot make any new
++// connections).
++//
++if (sem_close(hObject) < 0) {
++  perror("CloseHandle");
++}
++#else
++// possibly it would also be a good idea to do sem_destroy() here
++#endif
++
++// this is actually a void function (return value never used).
++return 0;
+ }
+
+ #endif
+
+From c37b82b17ce5e0ea093771c57ae26b6dabb90f01 Mon Sep 17 00:00:00 2001
+From: c vw <dl1ycf@darc.de>
+Date: Fri, 14 Aug 2020 11:44:16 +0200
+Subject: [PATCH 3/3] Release semaphore also in LINUX case
+
+---
+ linux_port.c | 31 ++++++++++++++++++++++++-------
+ 1 file changed, 24 insertions(+), 7 deletions(-)
+
+diff --git a/linux_port.c b/linux_port.c
+index e08bc02..14a2864 100644
+--- linux_port.c
++++ linux_port.c
+@@ -185,18 +185,35 @@ void SetThreadPriority(HANDLE thread, int priority)  {
+ }
+
+ int CloseHandle(HANDLE hObject) {
++//
++// This routine is *ONLY* called to release semaphores
++//
+ #ifdef __APPLE__
+ //
+-// Note a new Semaphore is allocated at each RX/TX transition, so after
+-// about 200 RX/TX transitions, MacOS runs out of file descriptors (no
+-// new semaphores can be allocated, and rigctl cannot make any new
+-// connections).
++// A semaphore is closed and re-allocated on each RX->TX transition.
++// After about 200 RX/TX transitions, MacOS runs out of file descriptors
++// since MacOS only has named semaphores. As a consequence,
++// no new semaphores can be allocated, and other parts of the program cannot
++// open new files ore make new connections.
++// Therefore we should close the semaphore.
+ //
+-if (sem_close(hObject) < 0) {
+-  perror("CloseHandle");
++if (sem_close((sem_t *)hObject) < 0) {
++  perror("WDSP:CloseHandle:SemCLose");
+ }
+ #else
+-// possibly it would also be a good idea to do sem_destroy() here
++//
++// Although the number of semaphores seems "unlimited" on RapianOS,
++// this is nevertheless a memory leak (a sem_t is allocated before
++// sem_init is called, see above).
++// So destroy the semaphore and (if this was successful) release the memory.
++//
++
++if (sem_destroy((sem_t *)hObject) < 0) {
++  perror("WDSP:CloseHandle:SemDestroy");
++} else {
++  // if sem_destroy failed, do not release storage
++  free(hObject);
++}
+ #endif
+
+ // this is actually a void function (return value never used).
