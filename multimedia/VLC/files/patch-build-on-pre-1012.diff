@@ -1,39 +1,3 @@
-diff --git modules/access/qtsound.m modules/access/qtsound.m
-index af190d1..3f0fc4f 100644
---- modules/access/orig.qtsound.m	2018-10-28 12:11:19.000000000 +0100
-+++ modules/access/qtsound.m	2019-02-18 00:41:40.000000000 +0100
-@@ -45,6 +45,7 @@
- #import <QTKit/QTKit.h>
- #import <AVFoundation/AVFoundation.h>
- 
-+#ifdef MAC_OS_X_VERSION_10_13
- #ifndef MAC_OS_X_VERSION_10_14
- @interface AVCaptureDevice (AVCaptureDeviceAuthorizationSince10_14)
- 
-@@ -52,6 +53,7 @@
- 
- @end
- #endif
-+#endif
- 
- /*****************************************************************************
-  * Local prototypes.
-@@ -318,6 +320,7 @@
-             goto error;
-         }
- 
-+#ifdef MAC_OS_X_VERSION_10_13
-         if (@available(macOS 10.14, *)) {
-             msg_Dbg(p_demux, "Check user consent for access to the audio device");
- 
-@@ -334,6 +337,7 @@
-                 goto error;
-             }
-         }
-+#endif
- 
-         audioInput = [[QTCaptureDeviceInput alloc] initWithDevice: p_sys->audiodevice];
-         if(!audioInput) {
 diff --git modules/access/avcapture.m modules/access/avcapture.m
 index 38777226cfe56211aa0bd1efc9623ac7ca4cf650..d31f2168885b9b2d68d7dc562ea7a4849edbfb6e 100644
 --- modules/access/avcapture.m
@@ -73,6 +37,112 @@ index 38777226cfe56211aa0bd1efc9623ac7ca4cf650..d31f2168885b9b2d68d7dc562ea7a484
  
          input = [AVCaptureDeviceInput deviceInputWithDevice:(__bridge AVCaptureDevice *)p_sys->device error:&o_returnedError];
  
+diff --git a/modules/access/avaudiocapture.m b/modules/access/avaudiocapture.m
+index e20d8aadf382ee493f2cdfe0cf91a7d9bf951b51..4d6587314c390055836bfe5e9f375aaa08fd3874 100644
+--- a/modules/access/avaudiocapture.m
++++ b/modules/access/avaudiocapture.m
+@@ -45,14 +45,6 @@
+ #import <CoreMedia/CoreMedia.h>
+ 
+ 
+-#ifndef MAC_OS_X_VERSION_10_14
+-@interface AVCaptureDevice (AVCaptureDeviceAuthorizationSince10_14)
+-
+-+ (void)requestAccessForMediaType:(AVMediaType)mediaType completionHandler:(void (^)(BOOL granted))handler API_AVAILABLE(macos(10.14), ios(7.0));
+-
+-@end
+-#endif
+-
+ /*****************************************************************************
+  * Struct
+  *****************************************************************************/
+@@ -221,6 +213,11 @@ static int Open(vlc_object_t *p_this)
+             return VLC_EGENERIC;
+         }
+ 
++// only compile this block if the requestAccessForMediaType method is supported;
++// the code inside `if (@available(foo)) {}` is only *executed* when foo is true but
++// it is always parsed at compile time; @available is not an #ifdef that protects against
++// undefined types or functions.
++#ifdef MAC_OS_X_VERSION_10_14
+         if (@available(macOS 10.14, *)) {
+             msg_Dbg(p_demux, "Check user consent for access to the audio device");
+ 
+@@ -240,6 +237,7 @@ static int Open(vlc_object_t *p_this)
+                 return VLC_EGENERIC;
+             }
+         }
++#endif
+ 
+         NSError *error = nil;
+         AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:device error:&error];
+diff --git a/modules/audio_output/coreaudio_common.c b/modules/audio_output/coreaudio_common.c
+index 69fd47137050a1d21ac7eadfbfaafe6f557b8ee9..4a58744104a945d1d11014f9b9948f3dd28dde34 100644
+--- a/modules/audio_output/coreaudio_common.c
++++ b/modules/audio_output/coreaudio_common.c
+@@ -25,6 +25,28 @@
+ #import "coreaudio_common.h"
+ #import <CoreAudio/CoreAudioTypes.h>
+ 
++#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101200
++#include <dlfcn.h>
++static struct
++{
++    void (*lock)(os_unfair_lock *lock);
++    void (*unlock)(os_unfair_lock *lock);
++} unfair_lock;
++
++static void
++ca_init_once(void)
++{
++    unfair_lock.lock = dlsym(RTLD_DEFAULT, "os_unfair_lock_lock");
++    if (!unfair_lock.lock)
++        return;
++    unfair_lock.unlock = dlsym(RTLD_DEFAULT, "os_unfair_lock_unlock");
++    if (!unfair_lock.unlock)
++        unfair_lock.lock = NULL;
++}
++#define os_unfair_lock_lock unfair_lock.lock
++#define os_unfair_lock_unlock unfair_lock.unlock
++#endif
++
+ static inline uint64_t
+ BytesToFrames(struct aout_sys_common *p_sys, size_t i_bytes)
+ {
+@@ -114,6 +136,10 @@ ca_Open(audio_output_t *p_aout)
+ 
+     if (mach_timebase_info(&p_sys->tinfo) != KERN_SUCCESS)
+         return VLC_EGENERIC;
++#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101200
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++    pthread_once(&once, ca_init_once);
++#endif
+ 
+     assert(p_sys->tinfo.denom != 0 && p_sys->tinfo.numer != 0);
+ 
+diff --git a/modules/video_output/caopengllayer.m b/modules/video_output/caopengllayer.m
+index bff225525d9eb68dace1d5839857fd61e3fd83cf..ce11bdfbc182632592c5e0ba19058187d22b8d20 100644
+--- a/modules/video_output/caopengllayer.m
++++ b/modules/video_output/caopengllayer.m
+@@ -40,6 +40,18 @@
+ #include <vlc_atomic.h>
+ 
+ #import <QuartzCore/QuartzCore.h>
++
++// no idea really what version check is needed here
++#if __MAC_OS_X_VERSION_MAX_ALLOWED < 101200
++#import <QuartzCore/CALayer.h>
++@protocol CALayerDelegate <NSObject>
++- (id < CAAction >)actionForLayer:(CALayer *)layer forKey:(NSString *)key;
++- (void)displayLayer:(CALayer *)layer;
++- (void)drawLayer:(CALayer *)layer inContext:(CGContextRef)ctx;
++- (void)layoutSublayersOfLayer:(CALayer *)layer;
++@end
++
++#endif
+ #import <Cocoa/Cocoa.h>
+ #import <OpenGL/OpenGL.h>
+ #import <dlfcn.h>
 diff --git modules/video_output/macosx.m modules/video_output/macosx.m
 index 20aedfc63e440cbb16ec3d0078d7d433434b8131..26ca20e4b449a52b7650a3ef7f2c1337f824bc1e 100644
 --- modules/video_output/macosx.m
