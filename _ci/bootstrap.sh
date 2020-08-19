@@ -12,13 +12,13 @@ done
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 
-# Force NTP sync: VM clock might be behind
+# Force NTP sync: VM clock might be ahead
 # https://trac.macports.org/ticket/58800
 if [ ${OS_MAJOR} -ge 18 ]
     then
-        sudo sntp -sS 0.us.pool.ntp.org
+        sudo sntp -sS 0.us.pool.ntp.org || true
     else
-        sudo ntpdate -vu 0.us.pool.ntp.org
+        sudo ntpdate -vu 0.us.pool.ntp.org || true
 fi
 
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
