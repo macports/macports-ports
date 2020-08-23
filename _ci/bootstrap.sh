@@ -6,7 +6,7 @@ brew --version
 /usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
 
 # Guard against intermittent Travis CI DNS outages
-for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org 0.us.pool.ntp.org; do
+for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org 0.us.pool.ntp.org github-production-release-asset-2e65be.s3.amazonaws.com; do
     dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts >/dev/null
 done
 
