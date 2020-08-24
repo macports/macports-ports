@@ -9,11 +9,12 @@
 # tools and you shouldn't use this script.  Just call ./configure
 # directly.
 
-ACLOCAL=${ACLOCAL-aclocal-1.13}
+ACLOCAL=${ACLOCAL-aclocal-1.16}
 AUTOCONF=${AUTOCONF-autoconf}
 AUTOHEADER=${AUTOHEADER-autoheader}
-AUTOMAKE=${AUTOMAKE-automake-1.13}
+AUTOMAKE=${AUTOMAKE-automake-1.16}
 LIBTOOLIZE=${LIBTOOLIZE-libtoolize}
+PYTHON=${PYTHON-python}
 
 AUTOCONF_REQUIRED_VERSION=2.62
 AUTOMAKE_REQUIRED_VERSION=1.13
@@ -169,6 +170,29 @@ else
     DIE=1
 fi
 
+printf "checking for python ... "
+if ($PYTHON --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=$PYTHON
+elif (python3 --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=python3
+elif (python3.8 --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=python3.8
+elif (python3.7 --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=python3.7
+elif (python2 --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=python2
+elif (python2.7 --version) < /dev/null > /dev/null 2>&1; then
+   PYTHON=python2.7
+else
+    echo
+    echo "  You must have python (any version) installed to compile $PROJECT."
+    echo "  Download the appropriate package for your distribution,"
+    echo "  or get the source tarball at https://www.python.org/"
+    echo
+    DIE=1;
+fi
+echo "yes ($PYTHON)"
+
 if test "$DIE" -eq 1; then
     echo
     echo "Please install/upgrade the missing tools and call me again."
@@ -235,7 +259,7 @@ $LIBTOOLIZE --force || exit $?
 # configure script. The internal-only brushsettings-gen.h is also used
 # as the source of strings for gettext.
 
-python generate.py mypaint-brush-settings-gen.h brushsettings-gen.h
+$PYTHON generate.py mypaint-brush-settings-gen.h brushsettings-gen.h || exit $?
 
 # The MyPaint code no longer needs the .json file at runtime, and it is
 # not installed as data.

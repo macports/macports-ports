@@ -5,8 +5,23 @@ set -e
 brew --version
 /usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
 
-# Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
+# Guard against intermittent Travis CI DNS outages
+for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org 0.us.pool.ntp.org; do
+    dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts >/dev/null
+done
+
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
+
+# Force NTP sync: VM clock might be ahead
+# https://trac.macports.org/ticket/58800
+if [ ${OS_MAJOR} -ge 18 ]
+    then
+        sudo sntp -sS 0.us.pool.ntp.org || true
+    else
+        sudo ntpdate -vu 0.us.pool.ntp.org || true
+fi
+
+# Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2"
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
@@ -27,7 +42,7 @@ echo "archive_site_local https://packages.macports.org/:tbz2 https://packages-pr
 #echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 
 # Update PortIndex
-rsync --no-motd -zvl "rsync://rsync.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex*" .
+rsync --no-motd -zvl "rsync://rsync-origin.macports.org/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_i386/PortIndex" .
 git remote add macports https://github.com/macports/macports-ports.git
 git fetch macports master
 ## Run portindex on recent commits if PR is newer
