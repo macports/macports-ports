@@ -1,10 +1,6 @@
 #!/bin/bash
 set -e
 
-# Uninstall Homebrew
-brew --version
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
-
 # Guard against intermittent Travis CI DNS outages
 for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org 0.us.pool.ntp.org github-production-release-asset-2e65be.s3.amazonaws.com; do
     dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts >/dev/null
@@ -21,8 +17,20 @@ if [ ${OS_MAJOR} -ge 18 ]
         sudo ntpdate -vu 0.us.pool.ntp.org || true
 fi
 
+# Download resources in background ASAP but use later
+curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2" &
+curl_mpbase_pid=$!
+curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2" &
+curl_getopt_pid=$!
+curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner" &
+curl_runner_pid=$!
+
+# Uninstall Homebrew
+brew --version
+/usr/bin/sudo /usr/bin/find /usr/local -mindepth 2 -delete && hash -r
+
 # Download and install MacPorts built by https://github.com/macports/macports-base/blob/travis-ci/.travis.yml
-curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2"
+wait $curl_mpbase_pid
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
 
@@ -60,9 +68,9 @@ sudo /opt/local/postflight && sudo rm -f /opt/local/postflight
 # Install mpbb
 git clone --depth 1 https://github.com/macports/mpbb.git ../mpbb
 # Install getopt required by mpbb
-curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2"
+wait $curl_getopt_pid
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 
-# Download and run CI runner
-curl -fsSLO "https://github.com/macports/mpbot-github/releases/download/v0.0.1/runner"
+# Run CI runner
+wait $curl_runner_pid
 chmod 0755 runner
