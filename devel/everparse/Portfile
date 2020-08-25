@@ -4,9 +4,9 @@ PortSystem          1.0
 PortGroup github    1.0
 
 name                everparse
-github.setup        project-everest everparse 76b4cbb473b001e26a88b729df61362779905bb9
-version             20200803-[string range ${github.version} 0 6]
-revision            6
+github.setup        project-everest everparse 70f75165e1df9f86a3d24fba2f0bd4ddc624884e
+version             20200825-[string range ${github.version} 0 6]
+revision            0
 
 categories          devel
 platforms           darwin
@@ -17,9 +17,9 @@ long_description    EverParse provides LowParse, verified-secure F*/Low* parser 
                     QuackyDucky, an untrusted compiler for generating verified secure parsers from a \
                     message format specification.
 
-checksums           rmd160  bfd380063f2fe4b30cbbf60ade22fb95e0a41fc4 \
-                    sha256  2794efbee63563b78f308fc866fc90554cebebe1765b86dfee2cb12a20567cc5 \
-                    size    658983
+checksums           rmd160  3aeee23e5a12a71cf9ed14bee6c18f3e30630555 \
+                    sha256  b5e8190b6223cc6384004481a66267ce47063094774ccab6772b171e8d9d76bd \
+                    size    796939
 
 depends_lib         port:fstar-devel \
                     port:kremlin-devel
@@ -29,44 +29,96 @@ depends_build       port:ocaml \
                     port:ocaml-batteries \
                     port:ocaml-hex
 
+patchfiles          patch-add_FStar_Getopt.ml \
+                    patch-fix-tests-mkdir \
+                    patch-batch-driver-toolchain-paths
+
+options             lowparse.home \
+                    fstar.home \
+                    kremlin.home
+
+default fstar.home      {${prefix}/libexec/fstar-devel}
+default kremlin.home    {${prefix}/libexec/kremlin-devel}
+default lowparse.home   {${prefix}/libexec/${subport}}
+
+pre-patch {
+    # Fix CRLF newlines before trying to patch
+    reinplace "s|\r||g" src/3d/ocaml/Makefile
+}
+
+post-patch {
+    foreach {key path_var} {
+        @FSTAR_HOME@        fstar.home
+        @KREMLIN_HOME@      kremlin.home
+        @QD_HOME@           lowparse.home
+    } {
+        reinplace "s|${key}|[set ${path_var}]/home|g" \
+            src/3d/ocaml/Batch.ml
+    }
+}
+
 # z3 hints significantly decrease build time; can be updated after a successful build+test run via:
-#   tar -Jcf files/everparse-hints.tar.xz -C work lowparse.hints lowparse-tests.hints
+#   tar -Jcf files/everparse-hints.tar.xz -C work lowparse.hints
 distfiles-append    everparse-hints.tar.xz
 
 use_configure       no
 
 build.type          gnu
-build.env-append    "FSTAR_OPTIONS=--hint_dir .hints --record_hints"
-build.args          FSTAR_HOME=${prefix}/libexec/fstar-devel/home \
-                    KREMLIN_HOME=${prefix}/libexec/kremlin-devel/home
+build.env-append    "OTHERFLAGS=--hint_dir .hints --record_hints"
+build.args          FSTAR_HOME=${fstar.home}/home \
+                    KREMLIN_HOME=${kremlin.home}/home
 
 pre-build {
-    # Link lowparse's .hint directories to the top-level ${workpath} directories
+    # Link lowparse's .hint directories to the top-level ${workpath} directory
     # we actually package up in everparse-hints.tar.xz
-    foreach {eph_src eph_dst} {
-        lowparse.hints          src/lowparse
-        lowparse-tests.hints    tests/lowparse
+    set eph_hints ${workpath}/lowparse.hints
+    file mkdir ${eph_hints}
+    foreach {eph_src} {
+        src/lowparse
+        src/3d
+        src/3d/prelude
+        tests/lowparse
+        tests/sample
+        tests/bitfields
+        tests/unit
     } {
-        file mkdir ${workpath}/${eph_src}
-        ln -sf ${workpath}/${eph_src} ${worksrcpath}/${eph_dst}/.hints
+        file mkdir ${eph_hints}/${eph_src}
+        ln -sf ${eph_hints}/${eph_src} ${worksrcpath}/${eph_src}/.hints
     }
 }
 
 destroot {
-    # Install parser/serializer generator binary
+    # Create QD_HOME layout compatible with src/package/package.sh
+    set everparse_root      ${prefix}/libexec/everparse
+    set everparse_bin       ${everparse_root}/bin
+    set everparse_home      ${everparse_root}/src
+    set everparse_home_3d   ${everparse_home}/3d
+
+    xinstall -d \
+        ${destroot}${everparse_home} \
+        ${destroot}${everparse_home_3d} \
+        ${destroot}${everparse_bin}
+
     xinstall \
         ${worksrcpath}/_build/src/quackyducky.native \
-        ${destroot}${prefix}/bin/quackyducky
+        ${destroot}${everparse_bin}/qd
 
-    ln -sf quackyducky ${destroot}${prefix}/bin/qd
+    xinstall \
+        ${worksrcpath}/src/3d/3d \
+        ${destroot}${everparse_bin}/3d
 
-    # Install our F* library
-    set lowparse_lib_dir ${prefix}/libexec/fstar-devel/lib
+    foreach {ep_src ep_dst} [list \
+        lowparse                    ${everparse_home}       \
+        3d/prelude                  ${everparse_home_3d}    \
+        3d/.clang-format            ${everparse_home_3d}    \
+        3d/copyright.txt            ${everparse_home_3d}    \
+        3d/EverParseEndianness.h    ${everparse_home_3d}    \
+        3d/noheader.txt             ${everparse_home_3d}    \
+    ] {
+        copy ${worksrcpath}/src/${ep_src} ${destroot}${ep_dst}
+    }
 
-    xinstall -d ${destroot}${lowparse_lib_dir}
-    copy ${worksrcpath}/src/lowparse ${destroot}${lowparse_lib_dir}
-
-    fs-traverse {f} ${destroot}${lowparse_lib_dir}/lowparse {
+    fs-traverse {f} ${destroot}${everparse_home} {
         switch -glob -- "[file tail $f] [file type $f]" {
             {.hints link}       -
             {.gitignore file}   -
@@ -74,6 +126,11 @@ destroot {
             {Makefile file}     { delete $f }
         }
     }
+
+    # Symlink the binaries into ${prefix}/bin
+    ln -sf ${everparse_bin}/qd  ${destroot}${prefix}/bin/quackyducky
+    ln -sf quackyducky          ${destroot}${prefix}/bin/qd
+    ln -sf ${everparse_bin}/3d  ${destroot}${prefix}/bin/quackyducky-3d
 }
 
 test.run            yes
