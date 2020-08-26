@@ -1,0 +1,274 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+
+name                blender
+version             2.82a
+revision            0
+categories          graphics multimedia
+platforms           darwin
+license             GPL-2+
+maintainers         @jasonliu--
+
+homepage            https://www.blender.org
+description         3-D computer graphics creation suite
+long_description    Blender is a ${description}. It contains a set of \
+                    tools that can be used for all phases of the 3-D \
+                    computer graphics pipeline, including modeling, \
+                    sculpting, texturing, rigging, animation, \
+                    simulation, rendering, compositing, motion \
+                    tracking, and video editing. It can be used for \
+                    creating animated films, visual effects, art, 3-D \
+                    printing, motion graphics, interactive 3-D \
+                    applications, and computer games.
+
+master_sites        https://download.blender.org/source/
+use_xz              yes
+checksums           rmd160  477b18c4d51ed6e5214158f1438c2c9a4317b2e7 \
+                    sha256  4de00030201d14e98cce3d3ed61b3c72267fb07dbd46ba779dc261a3d56beba3 \
+                    size    39890216
+
+compiler.cxx_standard 2011
+# We need to blacklist Xcode Clang/LLVM, because Blender needs to
+# use tools such as llvm-config, which are not included in Xcode.
+# (llvm-config is needed because Blender links to libLLVM. libLLVM is
+# also not included in Xcode.)
+# (Reference: https://stackoverflow.com/questions/32959627/where-is-the-system-llvm-config-on-macos)
+compiler.blacklist clang
+# Even though we need to blacklist Xcode Clang/LLVM, we still need to
+# make the rest of Xcode available to the build system. If we don't set
+# use_xcode to yes, then the build will fail, because Blender's CMake
+# scripts still need to use other parts of Xcode (e.g., the xcodebuild
+# command) besides just Xcode Clang.
+use_xcode yes
+cmake.install_prefix ${applications_dir}
+
+set py_ver          3.8
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_lib-append  port:python${py_ver_nodot} \
+                    port:openal-soft \
+                    port:alembic \
+                    port:opensubdiv \
+                    port:jack \
+                    port:libsndfile \
+                    port:fftw-3 \
+                    port:zlib \
+                    port:freetype \
+                    port:openexr \
+                    port:ffmpeg \
+                    port:opencollada \
+                    port:pcre \
+                    port:libsdl2 \
+                    port:libpng \
+                    port:openjpeg \
+                    port:tiff \
+                    port:boost \
+                    port:openimageio \
+                    port:opencolorio \
+                    port:openvdb \
+                    port:osl \
+                    port:embree \
+                    port:oidn \
+                    port:tbb \
+                    port:libomp \
+                    port:glew \
+                    port:eigen3 \
+                    port:lzo2 \
+                    port:gflags
+
+# Get the version number of Clang that the MacPorts build system is
+# using. We will be telling CMake to use the same version of LLVM.
+regexp {clang-mp-([0-9]+(?:\.[0-9]+)*)} \
+    ${configure.cc} result llvm_version
+# Blender links to libLLVM, so we need to add port:llvm as a dependency
+depends_lib-append  port:llvm-$llvm_version
+
+patchfiles          patch-macports-libs-creator.diff \
+                    patch-macports-libs-platform_apple.diff \
+                    patch-unix-or-apple.diff
+
+post-patch {
+    # Don't really know why Blender does things this way, but if
+    # these directories don't exist ahead of time, MacPorts'
+    # configure phase will fail.
+    xinstall -d ${workpath}/lib/tests/render/shader
+    xinstall -d ${workpath}/build/bin
+    copy ${worksrcpath}/release/darwin/Blender.app \
+         ${workpath}/build/bin/
+
+    # Make it so that Blender is able to build Ceres Solver using the
+    # MacPorts eigen3 library.
+    #
+    # Note: Even though Ceres Solver is available through MacPorts, we
+    # probably can't use it when building Blender. Unlike the other
+    # third-party libraries that Blender uses, where Blender provides a
+    # relatively convenient way in its various CMake files to specify a
+    # path pointing to where those libraries live (thus making them
+    # re-targetable), one very noticeable absence is Ceres Solver.
+    # Examining the compilation options specified by the
+    # add_definitions() in the file 'extern/ceres/CMakeLists.txt', it's
+    # possible that Blender's own libmv library requires a Ceres Solver
+    # that has been compiled using a very specific set of options.
+    fs-traverse f ${worksrcpath}/extern/ceres {
+        if {[file isfile $f]} {
+            reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
+        }
+    }
+
+    # Use dynamic linking instead of static linking
+    foreach f [list \
+        ${worksrcpath}/intern/cycles/CMakeLists.txt \
+        ${worksrcpath}/source/blender/compositor/CMakeLists.txt \
+    ] {
+        reinplace "/_STATIC_/s/^/#/g" $f
+    }
+
+    # Make it so that Blender is able to see the MacPorts libraries
+    reinplace -E {s|(include <SD)L.h|\1L2/SDL.h|} \
+        ${worksrcpath}/extern/audaspace/plugins/sdl/SDLDevice.h
+    reinplace -E {s|(include )"(SDL2.*)"|\1<\2>|} \
+        ${worksrcpath}/extern/sdlew/src/sdlew.c
+    reinplace -E {s|(include )"(SDL.h)"|\1<SDL2/\2>|} \
+        ${worksrcpath}/source/blender/python/intern/bpy_app_sdl.c
+    reinplace -E {s|(include )"(openjpeg.h)"|\1<openjpeg-2.3/\2>|} \
+        ${worksrcpath}/source/blender/imbuf/intern/jp2.c
+
+    # We already patch 'llvm-config' to be 'llvm-config-mp' using our
+    # patchfiles. Here we are just adding a version number on the end.
+    foreach re [list \
+        "s|\(llvm-config-mp\)|\\1-$llvm_version|g" \
+        "s|\(-lLLVM-\).*\"|\\1$llvm_version\"|" \
+    ] {
+        reinplace -E $re \
+            ${worksrcpath}/build_files/cmake/platform/platform_apple.cmake
+    }
+
+    set platform_apple_xcode.cmake \
+        ${worksrcpath}/build_files/cmake/platform/platform_apple_xcode.cmake
+
+    # Prevent Blender's CMake scripts from attempting to find the Xcode
+    # version number using the xcodebuild command, since we are passing
+    # the Xcode version number to CMake using XCODE_VERSION below.
+    reinplace {/unix makefile/,/unset.XCODE_VERS_BUILD_NR/s/^/#/g} \
+        ${platform_apple_xcode.cmake}
+
+    # Prevent Blender's CMake scripts from attempting to set the
+    # MACOSX_DEPLOYMENT_TARGET. MacPorts base already sets this.
+    reinplace {/if.CMAKE_OSX_DEPLOYMENT_TARGET/,$s/^/#/g} \
+        ${platform_apple_xcode.cmake}
+
+    if {${os.major} >= 18} {
+        # Prevent Blender's CMake scripts from setting a value for
+        # CMAKE_OSX_SYSROOT. The MacPorts build system already sets a
+        # value for CMAKE_OSX_SYSROOT based on the value of
+        # ${configure.sdkroot}. Prior to macOS 10.14, MacPorts base
+        # leaves the value of ${configure.sdkroot} empty, which results
+        # in MacPorts setting CMAKE_OSX_SYSROOT to have a value of '/'.
+        # Starting in macOS 10.14, Apple removed many headers from '/'.
+        # This meant that MacPorts base had to generate a non-empty
+        # value for ${configure.sdkroot}, because a CMAKE_OSX_SYSROOT
+        # pointing to '/' would now be an error.
+        #
+        # Because MacPorts already sets a value for CMAKE_OSX_SYSROOT
+        # based on the value of ${configure.sdkroot}, and Blender's
+        # CMake scripts are also setting a value for CMAKE_OSX_SYSROOT,
+        # this is causing the build phase to have compile commands with
+        # two '-isysroot' flags. Even worse, the paths for the SDKs will
+        # likely be different; e.g., MacPorts uses a path pointing to
+        # the Command Line Tools with an SDK version of 10.14, while
+        # Blender's CMake scripts use a path pointing to Xcode.app with
+        # an SDK version of 10.15. This will cause the build to fail,
+        # because it's quite common to have a situation where the SDK
+        # version of the Command Line Tools is different than the SDK
+        # version in Xcode.app. Using one set of tools or the other for
+        # the entirety of a build is fine, but trying to use pieces from
+        # both will virtually guarantee a build to fail.
+        reinplace {/set.CMAKE_OSX_SYSROOT.*OSX_SYSROOT_PREFIX/s/^/#/} \
+            ${platform_apple_xcode.cmake}
+    }
+}
+
+if {${os.major} < 16} {
+    # Add AppKit wrapper header to compiler library paths
+    configure.cflags-prepend        -isystem ${filespath}/old_appkit_compat
+    configure.cxxflags-prepend      -isystem ${filespath}/old_appkit_compat
+    configure.objcflags-prepend     -isystem ${filespath}/old_appkit_compat
+    configure.objcxxflags-prepend   -isystem ${filespath}/old_appkit_compat
+}
+
+# Use of the name LIBDIR in the Blender source is not a very good one,
+# since it doesn't actually point to the lib directory.
+#                         vvvvvv
+configure.args-append   -DLIBDIR=${prefix} \
+                        -DFRAMEWORK_SEARCH_PATHS=${frameworks_dir} \
+                        -DXCODE_VERSION=${xcodeversion}
+
+# Tell CMake to generate more verbose output during the build
+configure.args-append   -DCMAKE_VERBOSE_MAKEFILE=ON
+
+# Don't copy system Python into the blender install folder
+configure.args-append   -DWITH_PYTHON_INSTALL=OFF
+
+# Build Blender using the "system" (or in our case,
+# MacPorts) Python framework
+configure.args-append   -DWITH_PYTHON_FRAMEWORK=ON
+
+# Build Blender with support for runtime dynamic JACK libraries loading
+# (Note: We currently can't use this, because the port:jack port doesn't
+# generate a framework bundle, and in order to use runtime loading,
+# Blender needs to be compiled using -weak_framework or -weak_library.)
+#configure.args-append   -DWITH_JACK_DYNLOAD=ON
+
+# Build Blender with support for runtime dynamic SDL libraries loading
+# (Note: This option apparently has a different meaning than the
+# JACK_DYNLOAD option above, and has nothing to do with framework
+# bundles. Instead, it appears to enable an internal piece of Blender
+# that's referred to as the SDL extension wrangler (sdlew).)
+configure.args-append   -DWITH_SDL_DYNLOAD=ON
+
+# Tell Blender to use these "system" (in our case, MacPorts) libraries
+configure.args-append   -DWITH_SYSTEM_GLEW=ON \
+                        -DWITH_SYSTEM_EIGEN3=ON \
+                        -DWITH_SYSTEM_LZO=ON \
+                        -DWITH_SYSTEM_GFLAGS=ON
+
+post-destroot {
+    # Make sure that an addons_contrib folder makes it into the final
+    # distribution, even if it is empty.
+    set version.major [lindex [split ${version} .] 0]
+    regexp {[0-9]+} [lindex [split ${version} .] 1] version.minor
+    set addons_contrib_dir \
+        ${destroot}${applications_dir}/Blender.app/Contents/Resources/${version.major}.${version.minor}/scripts/addons_contrib
+    if {![file exists $addons_contrib_dir]} {
+        xinstall -d $addons_contrib_dir
+    }
+    destroot.keepdirs-append $addons_contrib_dir
+
+    # Create a symlink for command line use
+    set blender_cli ${destroot}${prefix}/bin/blender
+    if {![file exists $blender_cli]} {
+        ln -s ${applications_dir}/Blender.app/Contents/MacOS/Blender \
+              $blender_cli
+    }
+}
+
+livecheck.type      regex
+livecheck.url       https://www.blender.org/download/
+livecheck.regex     Download Blender (\\d+.\\d+(?:\[a-z\]+)*)
+
+variant manpage description {Build manpage} {
+    patchfiles-append       patch-manpage-for-apple.diff
+
+    post-patch {
+        reinplace "s|@@PREFIX@@|${prefix}|" \
+            ${worksrcpath}/source/creator/CMakeLists.txt
+        reinplace -E "s/\(env python\)3/\\1${py_ver}/" \
+            ${worksrcpath}/doc/manpage/blender.1.py
+    }
+
+    configure.args-append   -DWITH_DOC_MANPAGE=ON
+}
+
+default_variants    +manpage
