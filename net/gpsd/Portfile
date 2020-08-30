@@ -4,7 +4,7 @@ PortSystem              1.0
 
 name                    gpsd
 version                 3.21
-revision                0
+revision                1
 categories              net
 license                 BSD
 maintainers             {michaelld @michaelld} \
@@ -32,9 +32,8 @@ livecheck.url           https://download.savannah.gnu.org/releases/gpsd/
 livecheck.regex         "${name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
 
 
-# GPSD requires Python 2.6, 2.7, or 3.2+; don't use 2.6, 3.2, or
-# 3.3, since we're weaning MP off of them.
-# Some programs currently have issues with Python 3.8, so omit that for now.
+# GPSD requires Python 2.6, 2.7, or 3.2+; don't use 2.6, 3.2, 3.3, or 3.4,
+# since we're weaning MP off of them.
 
 set pythons_suffixes {27 35 36 37 38}
 
@@ -74,43 +73,13 @@ return -code error "Invalid Python variant selection"
 
 set pyver_dotted [join [split ${pyver_no_dot} ""] .]
 
-# KLUDGE: GPSD currently expects the Python extensions to build with the same
-# C compiler as was used to build Python itself.  This causes build failures
-# when the "Python C compiler" and the compiler chosen for GPSD have
-# configuration incompatibilities (or if the "Python C compiler" is absent).
-# Until this is fixed in GPSD upstream, some fiddling with compiler selection
-# is needed here.  This is especially kludgy since it requires knowledge of
-# how the Python port chooses the compiler.
-#
-# At the moment, the known failing case is when building with +python27
-# (the default) on 10.6, but here we just copy the condition from the python27
-# Portfile.  However, unlike the latter, we don't include the clang_dependency
-# portgroup outside the conditional, since it's not known to be needed in such
-# cases, and its mere presence alters the compiler selection.
-
-if {[variant_isset python27]} {
-    # Code copied (approximately) from python27 Portfile
-    if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
-        PortGroup           clang_dependency 1.0
-
-        clang_dependency.extra_versions 3.7
-    }
-}
-
-# KLUDGE: Another problem is that the hack to avoid the daemon() deprecation
-# warning causes clang-9.0++ to choke when targeting 10.6.  The relevant code
-# shouldn't really be built as C++ at all, but until that's fixed, we avoid
-# the problem by blacklisting clang-9.0 with +qt on OSX <10.7.
-
-if {[variant_isset qt]} {
-    if {${os.platform} eq "darwin" && ${os.major} < 11} {
-        compiler.blacklist-append macports-clang-9.0
-    }
-}
-
 # NOTE:  All Python dependencies which are conceptually depends_run actually
 # need to be depends_lib, since the build procedure references them, usually
 # just to verify their existence.
+#
+# The py-serial dependency is a "soft" dependency in that the programs that
+# use it can still operate with reduced functionality without it, but it's
+# a sufficiently lightweight dependency that it's not worth making optional.
 
 depends_lib-append      port:python${pyver_no_dot} \
                         port:py${pyver_no_dot}-serial
@@ -132,6 +101,7 @@ build.cmd               ${prefix}/bin/scons
 build.target
 build.args              prefix=${prefix} \
                         target_python=${configure.python} \
+                        python_shebang=${configure.python} \
                         qt=no \
                         usb=no \
                         strip=no \
@@ -145,10 +115,10 @@ build.env-append        "CC=${configure.cc} [get_canonical_archflags cc]" \
 
 # Allow the regression tests to be run via "port test gpsd".
 #
-# The speed of the daemon tests is highly dependent on the WRITE_PAD value.
-# Empirically, 200us seems to be adequate on a MacPro, and 500us seems to be
-# adequate on a PowerBook G4, but even 2ms is sometimes inadequate under 10.12,
-# so we use 5ms here.  If needed, this value can be overridden with
+# The speed of the daemon tests is highly dependent on the WRITE_PAD value,
+# but values that are too low may cause spurious test failures. Due to some
+# recent improvements, 1ms is now believed to be adequate on the Mac, and is
+# the current upstream default.  If needed, this value can be overridden with
 # WRITE_PAD=XXX on the command line, but only if WRITE_PAD is included in
 # extra_env in macports.conf.  In all cases, the WRITE_PAD value in use is
 # reported by the test framework and is visible with -v.
@@ -167,27 +137,10 @@ test.args               {*}${build.args}
 test.env-append         {*}${build.env}
 if { [info exists ::env(WRITE_PAD)] } {
     test.env-append     WRITE_PAD=$::env(WRITE_PAD)
-} else {
-    test.env-append     WRITE_PAD=0.005
 }
 
 destroot.args           {*}${build.args}
 destroot.env-append     {*}${destroot.destdir} {*}${build.env}
-
-post-destroot {
-    # Rewrite shebang lines of Python programs
-    set python_progs {gegps gpscat gpsfake gpsprof ubxtool zerk}
-    if {[variant_isset xgps]} {
-        lappend python_progs xgps xgpsspeed
-    }
-    foreach pp ${python_progs} {
-        reinplace "s|#!/usr/bin/env python|#!${configure.python}|" \
-            ${destroot}${prefix}/bin/${pp}
-    }
-
-    system -W ${destroot}${prefix}/lib "install_name_tool -id \
-        ${prefix}/lib/libgps.dylib libgps.dylib"
-}
 
 # Although GPSD has successfully been built with Qt5 at one time, that build
 # is currently broken.  Until the build issue is sorted out, Qt support is
