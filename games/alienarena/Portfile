@@ -3,7 +3,11 @@
 PortSystem          1.0
 
 name                alienarena
-version             7.66-20130827
+version             7.70.0-20180721
+checksums           rmd160  f2e081eb64324c0e3576bb2b796c46ecb9c2a079 \
+                    sha256  100fee4494aa11cfc3fc846e9b3a0cb64e5eb134d1afaf802024d0fc7309c27b \
+                    size    913540088
+
 set version_number  [lindex [split ${version} -] 0]
 set version_date    [lindex [split ${version} -] 1]
 categories          games
@@ -27,14 +31,11 @@ long_description    Alien Arena combines some of the very best aspects of \
                     game experience.
 
 homepage            http://red.planetarena.org/
-master_sites        http://icculus.org/alienarena/Files/ \
-                    ${homepage}files/
-
-worksrcdir          alienarena-${version_number}
-distname            ${worksrcdir}-linux${version_date}
-
-checksums           rmd160  f3183b9ce90b52d7e01379cfcf004ce3249384a5 \
-                    sha256  29086098eacb18319e6dcc9156355c44db4b1aa8a4f7b0bb63e6856d8128b012
+master_sites        ${homepage}files/
+dist_subdir         ${name}/${version}
+use_zip             yes
+distname            AlienArena
+worksrcdir          Alien Arena
 
 platform darwin {
     if {${os.major} < 9} {
@@ -52,61 +53,75 @@ platform darwin {
 
 if {${name} eq ${subport}} {
     revision                    0
+
+    PortGroup                   muniversal 1.0
     
-    depends_build               port:pkgconfig
+    depends_build               port:autoconf-archive \
+                                port:pkgconfig
     
     depends_lib                 port:curl \
                                 port:freetype \
                                 port:jpeg \
+                                port:libogg \
                                 port:libvorbis \
-                                port:openal-soft \
                                 port:mesa \
+                                port:ode \
+                                port:openal-soft \
                                 port:xorg-libX11 \
-                                port:xorg-libXext \
                                 port:xorg-libXxf86dga \
-                                port:xorg-libXxf86vm
+                                port:xorg-libXxf86vm \
+                                port:zlib
     
     depends_run                 port:alienarena-data
     
-    pre-extract {
-        # Create list of data files we want to exclude.
-if {[vercmp [macports_version] 2.6.99] >= 0} {
-        system -W ${workpath} "${extract.cmd} ${extract.pre_args} [shellescape ${distpath}/${distfiles}] | tar -tf - --exclude '*.cfg' [shellescape ${worksrcdir}/data1] | grep -v /$ > datafiles.txt"
-} else {
-        system -W ${workpath} "${extract.cmd} ${extract.pre_args} '${distpath}/${distfiles}' | tar -tf - --exclude '*.cfg' '${worksrcdir}/data1' | grep -v /$ > datafiles.txt"
-}
+    extract {
+        # Extract only the files we need: exclude Windows DLLs, EXEs, icons and
+        # source; Linux executables; the configure script that we'll regenerate
+        # anyway; and the game data that the alienarena-data subport installs.
+        # MacPorts base doesn't let us change unzip args so we have to override.
+        # TODO: Use shellescape once MacPorts 2.7.0 is out.
+        system -W ${workpath} "unzip -q '${distpath}/${distfiles}' -x '${worksrcdir}/*.dll' '${worksrcdir}/*.exe' '${worksrcdir}/*.ico' '${worksrcdir}/alienarena-linux64*' '${worksrcdir}/configure' '${worksrcdir}/data1/*' '${worksrcdir}/source/win32/*'"
+
+        # autoreconf complains if this directory doesn't exist.
+        file mkdir ${worksrcpath}/data1
+
+        # Make sure the port's version number is correct, since it's an
+        # unversioned distfile.
+        set fp [open ${worksrcpath}/configure.ac r]
+        set file_data [read ${fp}]
+        close ${fp}
+        if {![regexp {AC_INIT\(\[alienarena\],\[([^]]+)\],} ${file_data} -> configure_version]} {
+            ui_error "version not found in configure.ac
+            return -code error "version not found"
+        }
+        if {${configure_version} ne ${version_number}} {
+            ui_error "port version ${version_number} doesn't match version in configure.ac ${configure_version}"
+            return -code error "version mismatch"
+        }
     }
     
-    # Avoid extracting data files.
-    extract.post_args-append    -X datafiles.txt
-    
-    configure.args              --disable-silent-rules \
-                                --x-includes=${prefix}/include \
-                                --x-libraries=${prefix}/lib \
-                                --without-system-libode \
-                                --with-xf86dga \
-                                --with-xf86vm
-    
-    pre-configure {
-        configure.cflags-append -std=gnu89
-    }
-    
-    patchfiles                  patch-Makefile.am.diff \
-                                patch-configure.ac.diff
+    patchfiles                  patch-configure.ac.diff
     
     post-patch {
+        # The @PREFIX@ placeholder is present in configure.ac as shipped by the
+        # developers. They mistakenly applied a MacPorts patch (that added that
+        # placeholder to use MacPorts openal-soft instead of Apple's OpenAL
+        # framework) that was never meant for upstream consumption.
         reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/configure.ac
     }
     
+    # The zip file contains a configure script but it's missing the execute bit
+    # and none of the supporting files are present. Also, we patch configure.ac.
     use_autoreconf              yes
+    autoreconf.args             -fvi
     
-    # Prevent finding an installed version of ode which would cause a build error.
-    configure.cppflags-replace  -I${prefix}/include -isystem${prefix}/include
-    
-    post-destroot {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        copy ${worksrcpath}/arena ${worksrcpath}/botinfo ${worksrcpath}/data1 ${destroot}${prefix}/share/${name}
-    }
+    configure.args              --disable-silent-rules \
+                                --with-xf86dga \
+                                --with-xf86vm \
+                                --with-zlib \
+                                --without-data1pkg \
+                                --x-includes=${prefix}/include \
+                                --x-libraries=${prefix}/lib
     
     variant debug description {Enable debugging symbols} {
         configure.args-append   --enable-debugging-symbols
@@ -123,10 +138,10 @@ To run your own dedicated Alien Arena server, use:
 ${name}-ded
 "
     
-    livecheck.version           ${version_number}
+    livecheck.version           [regsub {(....)(..)(..)} ${version_date} {\1-\2-\3}]
     livecheck.type              regex
-    livecheck.url               ${homepage}aquire.html
-    livecheck.regex             ${name}-(\[0-9.\]+)-linux\[0-9\]+${extract.suffix}
+    livecheck.url               [lindex ${master_sites} 0]
+    livecheck.regex             {>AlienArena\.zip</a>[[:space:]]*</td><td[^>]*>([0-9-]+)}
 } else {
     livecheck.type              none
 }
@@ -138,18 +153,17 @@ subport alienarena-data {
     
     description                 Assets for the Alien Arena game
     
-    long_description            ${description}
+    long_description            {*}${description}
     
-    # Extract only the data1 directory, minus its .cfg files.
-    extract.post_args-append    --exclude '*.cfg' ${worksrcdir}/data1
+    worksrcdir                  {*}${worksrcdir}/data1
     
-    use_configure               no
-    
-    build {}
-    
-    destroot {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        copy ${worksrcpath}/data1 ${destroot}${prefix}/share/${name}
+    extract {
+        # Extract only the data1 directory.
+        # MacPorts base doesn't let us change unzip args so we have to override.
+        # TODO: Use shellescape once MacPorts 2.7.0 is out.
+        system -W ${workpath} "unzip -q '${distpath}/${distfiles}' '${worksrcdir}/*'"
+
+        # The configure script doesn't have the execute bit.
+        file attributes ${worksrcpath}/configure -permissions a+x
     }
 }
-
