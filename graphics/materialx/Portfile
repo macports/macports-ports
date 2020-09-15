@@ -1,0 +1,200 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+
+github.setup        materialx MaterialX 1.37.1 v
+name                materialx
+categories          graphics
+platforms           darwin
+license             Apache-2
+maintainers         @jasonliu-- openmaintainer
+
+homepage            https://www.materialx.org
+description         library for describing materials and textures in \
+                    computer graphics applications
+long_description    MaterialX is an open standard specification and \
+                    library API, developed at Lucasfilm and Industrial \
+                    Light & Magic, for describing and transferring \
+                    rich material and look-development content between \
+                    applications and renderers. MaterialX addresses \
+                    the need for a common, open standard to represent \
+                    the data values and relationships required to \
+                    transfer the complete look of a computer graphics \
+                    model from one application or rendering platform \
+                    to another, including shading networks, patterns \
+                    and texturing, complex nested materials, and \
+                    geometric assignments.
+
+checksums           rmd160  d5660800fbdaf4ad39ba3fd6f8d25bcbe5697512 \
+                    sha256  8f4b46e74759006963fd54ee31da40e3444ae941272df798c157bc654688297c \
+                    size    62615005
+
+compiler.cxx_standard 2011
+
+if {${os.major} < 16} {
+    # Add AppKit wrapper header to compiler library paths
+    configure.cflags-prepend        -isystem ${filespath}/old_appkit_compat
+    configure.cxxflags-prepend      -isystem ${filespath}/old_appkit_compat
+    configure.objcflags-prepend     -isystem ${filespath}/old_appkit_compat
+    configure.objcxxflags-prepend   -isystem ${filespath}/old_appkit_compat
+}
+
+configure.args-append   -DMATERIALX_BUILD_TESTS=OFF
+
+post-destroot {
+    # MaterialX's build files puts files into a ${prefix}/cmake folder
+    # during the build, and doesn't provide an easy way to re-target
+    # the location. So we manually move the folder to a location that
+    # actually makes sense.
+    xinstall -d ${destroot}${prefix}/share/cmake
+    move ${destroot}${prefix}/cmake \
+         ${destroot}${prefix}/share/cmake/MaterialX
+    xinstall -d ${destroot}${prefix}/share/cmake/Modules
+    xinstall -m 644 {*}[glob ${worksrcpath}/cmake/modules/*] \
+        ${destroot}${prefix}/share/cmake/Modules
+
+    # MaterialX puts many output files into the resources/ and
+    # libraries/ directories, which MaterialX's build files assume are
+    # located in ${CMAKE_INSTALL_PREFIX}. Since leaving these
+    # directories as ${prefix}/resources and ${prefix}/libraries
+    # violates MacPorts' mtree layout, we move them to a location that
+    # actually makes sense.
+    set mtlx_share_path ${destroot}${prefix}/share/MaterialX
+    if {![file exists $mtlx_share_path]} {
+        xinstall -d $mtlx_share_path
+    }
+    set dirs [list resources libraries]
+    foreach dir $dirs {
+        if {[file exists ${destroot}${prefix}/$dir]} {
+            move ${destroot}${prefix}/$dir $mtlx_share_path
+        }
+    }
+}
+
+variant viewer description {Build the MaterialX viewer} {
+    depends_lib-append      port:nanogui-wjakob
+
+    patchfiles-append       patch-use-macports-nanogui.diff
+    post-patch {
+        reinplace "/Add default search paths/a\\
+\\    mx::FilePath macportsSharePath = mx::FilePath(\"${prefix}/share/MaterialX\");\\
+\\    searchPath.append(macportsSharePath);\\
+" \
+            ${worksrcpath}/source/MaterialXView/Main.cpp
+    }
+
+    configure.args-append   -DMATERIALX_BUILD_VIEWER=ON
+}
+
+variant oiio requires viewer \
+    description {Enable support for additional image formats in the MaterialX viewer} \
+{
+    depends_lib-append      port:openimageio
+
+    post-patch {
+        reinplace {/External/s/^/#/} \
+            ${worksrcpath}/source/MaterialXRender/CMakeLists.txt
+    }
+
+    configure.args-append   -DMATERIALX_BUILD_OIIO=ON
+}
+
+variant docs description {Build documentation} {
+    depends_build-append    port:doxygen
+
+    post-patch {
+        # The CMake script that is supposed to generate the
+        # doxymentation is missing an 'ALL' argument in its
+        # add_custom_target() command, which means that it never gets
+        # executed during the MacPorts build process. So we add it here.
+        # Reference:
+        # https://stackoverflow.com/questions/34878276/build-doxygen-from-cmake-script
+        reinplace -E {s|(add_custom_target.MaterialXDocs)|\1 ALL|} \
+            ${worksrcpath}/documents/CMakeLists.txt
+
+        # By default, MaterialX puts its generated doxymentation into
+        # ${CMAKE_INSTALL_PREFIX}/documents. We change it so that
+        # MaterialX places the doxymentation into a location that
+        # conforms with MacPorts' mtree layout.
+        reinplace -E {s|(CMAKE_INSTALL_PREFIX.*)documents|\1share/doc|} \
+            ${worksrcpath}/documents/CMakeLists.txt
+    }
+
+    configure.args-append   -DMATERIALX_BUILD_DOCS=ON
+
+    post-destroot {
+        if {[file exists ${destroot}${prefix}/share/doc/MaterialXDocs]} {
+            move ${destroot}${prefix}/share/doc/MaterialXDocs \
+                 ${destroot}${prefix}/share/doc/MaterialX
+        }
+    }
+}
+
+variant tests description {Build unit tests} {
+    # MaterialX unit tests need to be able to call the Open Shading
+    # Language (OSL) compiler, which is an executable binary. However,
+    # OSL is not needed to build the unit tests, and MaterialX doesn't
+    # link to any libs from OSL; hence the reason for using depends_run.
+    depends_run-append      bin:oslc:osl
+
+    patchfiles-append       patch-MaterialXTest-reference_impl.diff
+
+    configure.args-replace  -DMATERIALX_BUILD_TESTS=OFF \
+                            -DMATERIALX_BUILD_TESTS=ON
+    configure.args-append   -DMATERIALX_OSLC_EXECUTABLE=${prefix}/bin/oslc \
+                            -DMATERIALX_TESTRENDER_EXECUTABLE=${prefix}/bin/testrender \
+                            -DMATERIALX_OSL_INCLUDE_PATH=${prefix}/share/OSL/shaders
+}
+
+default_variants    +viewer +oiio +docs +tests
+
+### The following code was adapted from the portfiles
+### of ports such as openvdb and openimageio
+
+set pythons_suffixes    {36 37 38}
+
+set pythons_ports       {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
+
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string index ${s} 1]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} conflicts {*}${c} \
+        description "Build the Python ${v} bindings (PyMaterialX)" {}
+    if {[variant_isset ${p}]} {
+        # Note: We basically need to import the value of ${v}, otherwise
+        # all foreach iterations will end up with the same value of
+        # ${v}! This appears to be related to how Tcl does scoping.
+        set selected_v          ${v}
+        depends_lib-append      port:${p} \
+                                port:pybind11
+        patchfiles-append       patch-python-paths.diff
+        configure.args-append   -DMATERIALX_BUILD_PYTHON=ON \
+                                -DMATERIALX_PYTHON_VERSION=$selected_v \
+                                -DPYTHON_INSTALL_PREFIX=${destroot}${frameworks_dir}/Python.framework/Versions/$selected_v/
+
+        post-destroot {
+            # MaterialX insists on outputting all Python-related
+            # products into the ${CMAKE_INSTALL_PREFIX}/python
+            # directory. Since leaving this directory as
+            # ${prefix}/python violates MacPorts' mtree layout, we move
+            # its contents to a location that actually makes sense.
+            if {[file exists ${destroot}${prefix}/python/MaterialX]} {
+                foreach so [glob ${destroot}${prefix}/python/MaterialX/*.so] {
+                    move $so ${destroot}${prefix}/lib/
+                }
+                set remaining_files \
+                    [glob -nocomplain ${destroot}${prefix}/python/MaterialX/*]
+                if {[llength $remaining_files] == 0} {
+                    delete ${destroot}${prefix}/python
+                }
+            }
+        }
+    }
+}
