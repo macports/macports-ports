@@ -527,9 +527,7 @@ set lil.fr      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" :
 set mse.uk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 # server is (temporarily?) offline
 set nou.nc      ""
-# cert doesn't have macports.org SANs; admin notified
-#set nue.de      [expr {${os.platform} eq "darwin" && ${os.major} < 11 ? "http" : "https"}]
-set nue.de      http
+set nue.de      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 set pek.cn      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
