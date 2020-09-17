@@ -137,7 +137,7 @@ default dist_subdir     go
 default depends_build   port:go
 
 set gopath              ${workpath}/gopath
-default worksrcdir      {${gopath}/src/${go.package}}
+default worksrcdir      {gopath/src/${go.package}}
 
 default build.cmd   {${go.bin} build}
 default build.args      ""
