@@ -76,7 +76,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.noris.de/modules/by-module/
     https://cpan.pair.com/modules/by-module/
     http://cpan.panu.it/modules/by-module/
-    http://cpan.perl-hackers.net/modules/by-module/
     http://cpan.perl.pt/modules/by-module/
     http://cpan.pesat.net.id/modules/by-module/
     http://cpan.rinet.ru/modules/by-module/
