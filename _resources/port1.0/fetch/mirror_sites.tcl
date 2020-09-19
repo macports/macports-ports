@@ -19,7 +19,6 @@ set portfetch::mirror_sites::sites(afterstep) {
 set portfetch::mirror_sites::sites(apache) {
     https://archive.apache.org/dist/
     http://apache.is.co.za/
-    http://apache.mirror.rafal.ca/
     http://apache.mirrors.spacedump.net/
     https://mirror.aarnet.edu.au/pub/apache/
     http://mirror.cc.columbia.edu/pub/software/apache/
