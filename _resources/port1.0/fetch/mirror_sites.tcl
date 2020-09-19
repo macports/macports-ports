@@ -36,14 +36,12 @@ set portfetch::mirror_sites::sites(cpan) {
     https://cpan.metacpan.org/modules/by-module/
     https://www.cpan.org/modules/by-module/
     http://artfiles.org/cpan.org/modules/by-module/
-    http://bo.mirror.garr.it/mirrors/CPAN/modules/by-module/
     http://cpan-mirror.rbc.ru/pub/CPAN/modules/by-module/
     http://cpan.catalyst.net.nz/CPAN/modules/by-module/
     http://cpan.cpantesters.org/modules/by-module/
     http://cpan.cs.utah.edu/modules/by-module/
     http://cpan.cs.uu.nl/modules/by-module/
     http://cpan.dcc.uchile.cl/modules/by-module/
-    http://cpan.develooper.com/modules/by-module/
     http://cpan.etla.org/modules/by-module/
     http://cpan.excellmedia.net/modules/by-module/
     http://cpan.hoovism-http.com/modules/by-module/
@@ -52,7 +50,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.ip-connect.vn.ua/modules/by-module/
     http://cpan.llarian.net/modules/by-module/
     http://cpan.lnx.sk/modules/by-module/
-    http://cpan.melbourneitmirror.net/modules/by-module/
     http://cpan.mines-albi.fr/modules/by-module/
     http://cpan.mirror.ac.za/modules/by-module/
     http://cpan.mirror.anlx.net/modules/by-module/
@@ -86,7 +83,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.webdesk.ru/modules/by-module/
     http://cpan.zbr.pt/modules/by-module/
     http://download.xs4all.nl/CPAN/modules/by-module/
-    http://espejito.fder.edu.uy/cpan/modules/by-module/
     http://httpupdate118.cpanel.net/CPAN/modules/by-module/
     http://httpupdate127.cpanel.net/CPAN/modules/by-module/
     http://kartolo.sby.datautama.net.id/CPAN/modules/by-module/
@@ -106,7 +102,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.checkdomain.de/CPAN/modules/by-module/
     http://mirror.cogentco.com/pub/CPAN/modules/by-module/
     http://mirror.csclub.uwaterloo.ca/CPAN/modules/by-module/
-    http://mirror.datacenter.by/pub/CPAN/modules/by-module/
     http://mirror.datapipe.net/CPAN/modules/by-module/
     http://mirror.de.leaseweb.net/CPAN/modules/by-module/
     http://mirror.dkm.cz/cpan/modules/by-module/
@@ -176,12 +171,10 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirrors.up.pt/CPAN/modules/by-module/
     http://mirrors.xservers.ro/CPAN/modules/by-module/
     https://osl.ugr.es/CPAN/modules/by-module/
-    http://searchcpan.org/CPAN/modules/by-module/
     http://sunsite.icm.edu.pl/pub/CPAN/modules/by-module/
     http://tux.rainside.sk/CPAN/modules/by-module/
     http://www.cpan.org.ua/modules/by-module/
     http://www.mirrorservice.org/sites/cpan.perl.org/CPAN/modules/by-module/
-    http://www.namesdir.com/mirrors/cpan/modules/by-module/
     http://www.planet-elektronik.de/CPAN/modules/by-module/
 }
 
@@ -542,7 +535,6 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://savannah-nongnu-org.ip-connect.vn.ua/
     http://savannah.c3sl.ufpr.br/
     http://www.mirrorservice.org/sites/download.savannah.gnu.org/releases/
-    http://www.namesdir.com/mirrors/nongnu/
 }
 
 
