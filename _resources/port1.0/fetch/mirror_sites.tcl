@@ -511,7 +511,7 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
-    http://mirror.freedif.org/GNU-Sa/
+    https://mirror.freedif.org/GNU-Sa/
     http://mirror.kumi.systems/nongnu
     http://mirror.lihnidos.org/GNU/savannah/
     http://mirror.marwan.ma/savannah/
@@ -523,7 +523,7 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://mirrors.up.pt/pub/nongnu/
     http://nongnu.askapache.com/
     http://nongnu.freemirror.org/nongnu/
-    http://nongnu.uib.no/
+    https://nongnu.uib.no/
     http://quantum-mirror.hu/mirrors/pub/gnusavannah/
     http://savannah-nongnu-org.ip-connect.vn.ua/
     http://savannah.c3sl.ufpr.br/
