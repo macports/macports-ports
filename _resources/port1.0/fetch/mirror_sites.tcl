@@ -658,23 +658,31 @@ set portfetch::mirror_sites::sites(savannah) \
 
 # https://sourceforge.net/p/forge/documentation/Mirrors/
 set portfetch::mirror_sites::sites(sourceforge) {
-    https://astuteinternet.dl.sourceforge.net/
-    https://ayera.dl.sourceforge.net/
-    https://cfhcable.dl.sourceforge.net/
-    https://excellmedia.dl.sourceforge.net/
-    https://freefr.dl.sourceforge.net/
-    https://gigenet.dl.sourceforge.net/
-    https://iweb.dl.sourceforge.net/
-    https://jaist.dl.sourceforge.net/
+    http://astuteinternet.dl.sourceforge.net/
+    http://cfhcable.dl.sourceforge.net/
+    http://deac-ams.dl.sourceforge.net/
+    http://deac-fra.dl.sourceforge.net/
+    http://deac-riga.dl.sourceforge.net/
+    http://excellmedia.dl.sourceforge.net/
+    http://freefr.dl.sourceforge.net/
+    http://gigenet.dl.sourceforge.net/
+    http://iweb.dl.sourceforge.net/
+    http://jaist.dl.sourceforge.net/
+    http://jztkft.dl.sourceforge.net/
+    http://kumisystems.dl.sourceforge.net/
     http://liquidtelecom.dl.sourceforge.net/
-    https://managedway.dl.sourceforge.net/
+    http://managedway.dl.sourceforge.net/
     http://nchc.dl.sourceforge.net/
-    https://netcologne.dl.sourceforge.net/
-    https://netix.dl.sourceforge.net/
-    https://newcontinuum.dl.sourceforge.net/
-    https://phoenixnap.dl.sourceforge.net/
+    http://netactuate.dl.sourceforge.net/
+    http://netcologne.dl.sourceforge.net/
+    http://netix.dl.sourceforge.net/
+    http://newcontinuum.dl.sourceforge.net/
+    http://phoenixnap.dl.sourceforge.net/
     http://pilotfiber.dl.sourceforge.net/
+    http://razaoinfo.dl.sourceforge.net/
+    http://tenet.dl.sourceforge.net/
     http://svwh.dl.sourceforge.net/
+    http://ufpr.dl.sourceforge.net/
     http://versaweb.dl.sourceforge.net/
 }
 
