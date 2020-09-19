@@ -212,7 +212,7 @@ proc handle_set_go_vendors {vendors_str} {
                         error "unsupported dependency domain"
                     }
                 }
-                set tag ${vauthor}-${vproject}
+                set tag [regsub -all {[^[:alpha:][:digit:]]} ${vpackage} -]
                 master_sites-append ${master_site}:${tag}
                 distfiles-append    ${distfile}:${tag}
             } elseif {${token} in ${checksum_types}} {
