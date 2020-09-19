@@ -36,7 +36,7 @@ set portfetch::mirror_sites::sites(apache) {
 set portfetch::mirror_sites::sites(cpan) {
     https://cpan.metacpan.org/modules/by-module/
     https://www.cpan.org/modules/by-module/
-    http://artfiles.org/cpan.org/modules/by-module/modules/by-module/
+    http://artfiles.org/cpan.org/modules/by-module/
     http://bo.mirror.garr.it/mirrors/CPAN/modules/by-module/
     http://cpan-mirror.rbc.ru/pub/CPAN/modules/by-module/
     http://cpan.catalyst.net.nz/CPAN/modules/by-module/
@@ -56,7 +56,7 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.melbourneitmirror.net/modules/by-module/
     http://cpan.mines-albi.fr/modules/by-module/
     http://cpan.mirror.ac.za/modules/by-module/
-    http://cpan.mirror.anlx.net/modules/by-module/modules/by-module/
+    http://cpan.mirror.anlx.net/modules/by-module/
     http://cpan.mirror.ba/modules/by-module/
     http://cpan.mirror.cdnetworks.com/modules/by-module/
     http://cpan.mirror.choon.net/modules/by-module/
@@ -95,8 +95,8 @@ set portfetch::mirror_sites::sites(cpan) {
     http://linorg.usp.br/CPAN/modules/by-module/
     http://mirror-hk.koddos.net/CPAN/modules/by-module/
     http://mirror.0x.sg/CPAN/modules/by-module/
-    http://mirror.23media.de/cpan/modules/by-module/modules/by-module/
-    http://mirror.amberit.com.bd/CPAN/modules/by-module/modules/by-module/
+    http://mirror.23media.de/cpan/modules/by-module/
+    http://mirror.amberit.com.bd/CPAN/modules/by-module/
     http://mirror.as43289.net/pub/CPAN/modules/by-module/
     http://mirror.bhoovd.com/CPAN/modules/by-module/
     http://mirror.bibleonline.ru/cpan/modules/by-module/
