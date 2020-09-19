@@ -717,13 +717,10 @@ set portfetch::mirror_sites::sites(xorg) {
     https://xorg.freedesktop.org/archive/
     https://xorg.freedesktop.org/releases/
     https://www.mirrorservice.org/sites/ftp.x.org/pub/
-    http://ftp.cica.es/mirrors/X/pub/
     http://ftp.gwdg.de/pub/x11/x.org/pub/
     http://ftp.nara.wide.ad.jp/pub/X11/x.org/
     http://mi.mirror.garr.it/mirrors/x.org/
     http://mirror.csclub.uwaterloo.ca/x.org/
-    http://mirror.switch.ch/ftp/mirror/X11/pub/
-    http://x.cs.pu.edu.tw/
     ftp://ftp.ntua.gr/pub/X11/X.org/
     ftp://ftp.x.org/pub/
     ftp://sunsite.uio.no/pub/X11/
