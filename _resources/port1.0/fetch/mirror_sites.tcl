@@ -331,7 +331,6 @@ set portfetch::mirror_sites::sites(gimp) {
 }
 
 set portfetch::mirror_sites::sites(gnome) {
-    https://download.gnome.org/
     http://ftp.gnome.org/pub/GNOME/
     https://www.mirrorservice.org/sites/ftp.gnome.org/pub/GNOME/
     https://fr2.rpmfind.net/linux/gnome.org/
