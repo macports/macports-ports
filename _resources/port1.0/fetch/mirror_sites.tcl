@@ -205,7 +205,6 @@ set portfetch::mirror_sites::sites(ctan) {
 # port name) so just use a basic form here and fake it in ports that need
 # to use this.
 set portfetch::mirror_sites::sites(debian) {
-    http://ftp.debian.org/debian/pool/main/:nosubdir
     http://ftp.au.debian.org/debian/pool/main/:nosubdir
     http://ftp.wa.au.debian.org/debian/pool/main/:nosubdir
     http://ftp.bg.debian.org/debian/pool/main/:nosubdir
