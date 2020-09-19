@@ -482,7 +482,6 @@ set portfetch::mirror_sites::sites(netbsd) {
     http://netbsd.mirrors.hoobly.com/
     ftp://ftp.de.NetBSD.org/pub/NetBSD/
     ftp://ftp.dk.NetBSD.org/pub/NetBSD/
-    ftp://ftp.ee.NetBSD.org/pub/NetBSD/
     ftp://ftp.hu.NetBSD.org/pub/NetBSD/
     ftp://ftp.kaist.ac.kr/NetBSD/
     ftp://ftp.nl.NetBSD.org/pub/NetBSD/
