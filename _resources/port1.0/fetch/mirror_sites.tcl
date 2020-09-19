@@ -535,7 +535,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     https://cloudflare.cdn.openbsd.org/pub/OpenBSD/
     https://artfiles.org/openbsd/
     https://ftp.bit.nl/pub/OpenBSD/
-    https://ftp.bytemine.net/pub/OpenBSD/
     https://ftp.cc.uoc.gr/pub/OpenBSD/
     https://ftp.eenet.ee/pub/OpenBSD/
     https://ftp.eu.openbsd.org/pub/OpenBSD/
@@ -583,7 +582,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     https://mirrors.dotsrc.org/pub/OpenBSD/
     https://mirrors.gigenet.com/pub/OpenBSD/
     https://mirrors.mit.edu/pub/OpenBSD/
-    https://mirrors.nav.ro/pub/OpenBSD/
     https://mirrors.pidginhost.com/pub/OpenBSD/
     https://mirrors.sonic.net/pub/OpenBSD/
     http://mirrors.syringanetworks.net/pub/OpenBSD/
@@ -595,7 +593,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     https://openbsd.mirror.constant.com/pub/OpenBSD/
     https://openbsd.mirror.garr.it/pub/OpenBSD/
     https://openbsd.mirror.netelligent.ca/pub/OpenBSD/
-    http://openbsd.mirrors.pair.com/pub/OpenBSD/
     https://plug-mirror.rcac.purdue.edu/pub/OpenBSD/
     http://www.ftp.ne.jp/pub/OpenBSD/
     https://www.mirrorservice.org/pub/OpenBSD/
