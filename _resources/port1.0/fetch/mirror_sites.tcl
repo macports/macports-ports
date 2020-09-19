@@ -44,23 +44,22 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.dcc.uchile.cl/modules/by-module/
     http://cpan.etla.org/modules/by-module/
     http://cpan.excellmedia.net/modules/by-module/
-    http://cpan.hoovism-http.com/modules/by-module/
     http://cpan.inode.at/modules/by-module/
     http://cpan.inspire.net.nz/modules/by-module/
     http://cpan.ip-connect.vn.ua/modules/by-module/
     http://cpan.llarian.net/modules/by-module/
     http://cpan.lnx.sk/modules/by-module/
     http://cpan.mines-albi.fr/modules/by-module/
-    http://cpan.mirror.ac.za/modules/by-module/
+    https://cpan.mirror.ac.za/modules/by-module/
     http://cpan.mirror.anlx.net/modules/by-module/
     http://cpan.mirror.ba/modules/by-module/
     http://cpan.mirror.cdnetworks.com/modules/by-module/
     http://cpan.mirror.choon.net/modules/by-module/
-    http://cpan.mirror.colo-serv.net/modules/by-module/
+    https://cpan.mirror.colo-serv.net/modules/by-module/
     http://cpan.mirror.constant.com/modules/by-module/
     http://cpan.mirror.digitalpacific.com.au/modules/by-module/
     http://cpan.mirror.iphh.net/modules/by-module/
-    http://CPAN.mirror.rafal.ca/modules/by-module/
+    http://cpan.mirror.rafal.ca/modules/by-module/
     http://cpan.mirror.serversaustralia.com.au/modules/by-module/
     http://cpan.mirror.triple-it.nl/modules/by-module/
     http://cpan.mirrors.hoobly.com/modules/by-module/
@@ -72,21 +71,21 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.noris.de/modules/by-module/
     http://cpan.pair.com/modules/by-module/
     http://cpan.panu.it/modules/by-module/
-    http://cpan.perl.pt/modules/by-module/
+    https://cpan.perl.pt/modules/by-module/
     http://cpan.pesat.net.id/modules/by-module/
     http://cpan.rinet.ru/modules/by-module/
     http://cpan.saix.net/modules/by-module/
     http://cpan.stu.edu.tw/modules/by-module/
-    http://cpan.uib.no/modules/by-module/
+    https://cpan.uib.no/modules/by-module/
     http://cpan.ulak.net.tr/modules/by-module/
     http://cpan.uni-altai.ru/modules/by-module/
     http://cpan.webdesk.ru/modules/by-module/
-    http://cpan.zbr.pt/modules/by-module/
+    https://cpan.zbr.pt/modules/by-module/
     http://download.xs4all.nl/CPAN/modules/by-module/
     http://httpupdate118.cpanel.net/CPAN/modules/by-module/
     http://httpupdate127.cpanel.net/CPAN/modules/by-module/
     http://kartolo.sby.datautama.net.id/CPAN/modules/by-module/
-    http://lib.ugent.be/CPAN/modules/by-module/
+    https://lib.ugent.be/CPAN/modules/by-module/
     http://linorg.usp.br/CPAN/modules/by-module/
     http://mirror-hk.koddos.net/CPAN/modules/by-module/
     http://mirror.0x.sg/CPAN/modules/by-module/
@@ -113,7 +112,7 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.intergrid.com.au/cpan/modules/by-module/
     http://mirror.is.co.za/pub/cpan/modules/by-module/
     http://mirror.its.dal.ca/cpan/modules/by-module/
-    http://mirror.jre655.com/CPAN/modules/by-module/
+    https://mirror.jre655.com/CPAN/modules/by-module/
     http://mirror.koddos.net/CPAN/modules/by-module/
     http://mirror.kumi.systems/cpan/modules/by-module/
     http://mirror.liquidtelecom.com/CPAN/modules/by-module/
@@ -142,7 +141,7 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.transip.net/CPAN/modules/by-module/
     http://mirror.truenetwork.ru/CPAN/modules/by-module/
     http://mirror.ucu.ac.ug/cpan/modules/by-module/
-    http://mirror.uic.edu/CPAN/modules/by-module/
+    https://mirror.uic.edu/CPAN/modules/by-module/
     http://mirror.uoregon.edu/CPAN/modules/by-module/
     http://mirror.waia.asn.au/pub/cpan/modules/by-module/
     http://mirror.webtastix.net/CPAN/modules/by-module/
@@ -152,10 +151,10 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirrors.coreix.net/CPAN/modules/by-module/
     http://mirrors.dotsrc.org/cpan/modules/by-module/
     http://mirrors.evowise.com/CPAN/modules/by-module/
-    http://mirrors.gossamer-threads.com/CPAN/modules/by-module/
+    https://mirrors.gossamer-threads.com/CPAN/modules/by-module/
     http://mirrors.hostingromania.ro/cpan.org/modules/by-module/
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
-    http://mirrors.linux-bulgaria.org/cpan/modules/by-module/
+    https://mirrors.linux-bulgaria.org/cpan/modules/by-module/
     http://mirrors.m247.ro/CPAN/modules/by-module/
     http://mirrors.namecheap.com/CPAN/modules/by-module/
     http://mirrors.nav.ro/CPAN/modules/by-module/
