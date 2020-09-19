@@ -310,6 +310,7 @@ set portfetch::mirror_sites::sites(gentoo) {
 set portfetch::mirror_sites::sites(gimp) {
     https://artfiles.org/gimp.org/pub/
     https://download.gimp.org/pub/
+    https://ftp.acc.umu.se/pub/gimp/
     https://ftp.cc.uoc.gr/mirrors/
     https://ftp.fau.de/gimp/
     https://ftp.gwdg.de/pub/grafik/
@@ -317,7 +318,6 @@ set portfetch::mirror_sites::sites(gimp) {
     http://ftp.is.co.za/mirror/ftp.gimp.org/
     https://ftp.lysator.liu.se/pub/
     https://ftp.snt.utwente.nl/pub/software/gimp/
-    https://ftp.sunet.se/pub/gimp/
     http://gimp.mirrors.hoobly.com/pub/
     https://mirror.ibcp.fr/pub/
     http://mirror.rise.ph/
@@ -341,7 +341,6 @@ set portfetch::mirror_sites::sites(gnome) {
     http://ftp.is.co.za/mirror/ftp.gnome.org/
     http://ftp.nara.wide.ad.jp/pub/X11/GNOME/
     http://ftp.rpmfind.net/linux/gnome.org/
-    https://ftp.sunet.se/pub/GNOME/
     https://ftp1.nluug.nl/windowing/gnome/
     https://ftp2.nluug.nl/windowing/gnome/
     http://mirror.cc.columbia.edu/pub/software/gnome/
