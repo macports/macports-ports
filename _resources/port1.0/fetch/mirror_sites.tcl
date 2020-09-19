@@ -506,14 +506,12 @@ set portfetch::mirror_sites::sites(nongnu) {
     http://ftp.acc.umu.se/mirror/gnu.org/savannah/
     http://ftp.cc.uoc.gr/mirrors/nongnu.org/
     http://ftp.igh.cnrs.fr/pub/nongnu/
-    http://ftp.yzu.edu.tw/pub/nongnu/
     http://mirror.cedia.org.ec/nongnu/
     http://mirror.csclub.uwaterloo.ca/nongnu/
     http://mirror.downloadvn.com/nongnu/
     http://mirror.easyname.at/nongnu/
     https://mirror.freedif.org/GNU-Sa/
-    http://mirror.kumi.systems/nongnu
-    http://mirror.lihnidos.org/GNU/savannah/
+    http://mirror.kumi.systems/nongnu/
     http://mirror.marwan.ma/savannah/
     http://mirror.netcologne.de/savannah/
     http://mirror.ossplanet.net/nongnu/
@@ -558,7 +556,6 @@ set portfetch::mirror_sites::sites(openbsd) {
     http://ftp.uio.no/pub/OpenBSD/
     http://ftp.ulak.net.tr/OpenBSD/
     https://ftp.usa.openbsd.org/pub/OpenBSD/
-    https://ftp.yzu.edu.tw/pub/OpenBSD/
     https://ftp2.eu.openbsd.org/pub/OpenBSD/
     http://ftp2.fr.openbsd.org/pub/OpenBSD/
     https://ftp4.usa.openbsd.org/pub/OpenBSD/
