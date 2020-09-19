@@ -276,7 +276,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://gentoo.mirror.web4u.cz/distfiles/:nosubdir
     http://gentoo.mirrors.easynews.com/linux/gentoo/distfiles/:nosubdir
     http://gentoo.mirrors.ovh.net/gentoo-distfiles/distfiles/:nosubdir
-    http://gentoo.mirrors.pair.com/distfiles/:nosubdir
     http://gentoo.mirrors.tds.net/gentoo/distfiles/:nosubdir
     http://gentoo.mirrors.tera-byte.com/distfiles/:nosubdir
     http://gentoo.modulix.net/gentoo/distfiles/:nosubdir
