@@ -250,7 +250,6 @@ set portfetch::mirror_sites::sites(freebsd) {
 # Does not work: curl -s http://www.gentoo.org/main/en/mirrors2.xml | sed -n '/(http)\|(ftp)/s/.*"\([^"]*\)".*/    \1\/distfiles\/:nosubdir/p' | sed s@//distfiles@/distfiles@g
 set portfetch::mirror_sites::sites(gentoo) {
     http://ftp-stud.hs-esslingen.de/pub/Mirrors/gentoo/distfiles/:nosubdir
-    http://ftp.daum.net/gentoo/distfiles/:nosubdir
     http://ftp.dei.uc.pt/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.fau.de/gentoo/distfiles/:nosubdir
     http://ftp.fi.muni.cz/pub/linux/gentoo/distfiles/:nosubdir
@@ -258,7 +257,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://ftp.halifax.rwth-aachen.de/gentoo/distfiles/:nosubdir
     http://ftp.iij.ad.jp/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.jaist.ac.jp/pub/Linux/Gentoo/distfiles/:nosubdir
-    http://ftp.kaist.ac.kr/pub/gentoo/distfiles/:nosubdir
+    http://ftp.kaist.ac.kr/gentoo/distfiles/:nosubdir
     http://ftp.lanet.kr/pub/gentoo/distfiles/:nosubdir
     https://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
     http://ftp.ntua.gr/pub/linux/gentoo/distfiles/:nosubdir
@@ -290,6 +289,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.dkm.cz/gentoo/distfiles/:nosubdir
     http://mirror.eu.oneandone.net/linux/distributions/gentoo/gentoo/distfiles/:nosubdir
     http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
+    http://mirror.kakao.com/gentoo/distfiles/:nosubdir
     http://mirror.leaseweb.com/gentoo/distfiles/:nosubdir
     https://mirror.mdfnet.se/gentoo/distfiles/:nosubdir
     http://mirror.netcologne.de/gentoo/distfiles/:nosubdir
@@ -391,7 +391,7 @@ set portfetch::mirror_sites::sites(googlecode) {
 
 set portfetch::mirror_sites::sites(isc) {
     https://www.mirrorservice.org/sites/ftp.isc.org/isc/
-    http://ftp.kaist.ac.kr/pub/isc/
+    http://ftp.kaist.ac.kr/isc/
     http://mirror.internode.on.net/pub/isc/
     ftp://ftp.fsn.hu/pub/isc/
     ftp://ftp.funet.fi/pub/mirrors/ftp.isc.org/isc/
