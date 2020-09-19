@@ -259,7 +259,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://ftp.jaist.ac.jp/pub/Linux/Gentoo/distfiles/:nosubdir
     http://ftp.kaist.ac.kr/gentoo/distfiles/:nosubdir
     http://ftp.lanet.kr/pub/gentoo/distfiles/:nosubdir
-    https://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
+    http://ftp.linux.org.tr/gentoo/distfiles/:nosubdir
     http://ftp.ntua.gr/pub/linux/gentoo/distfiles/:nosubdir
     http://ftp.rnl.tecnico.ulisboa.pt/pub/gentoo/gentoo-distfiles/distfiles/:nosubdir
     http://ftp.romnet.org/gentoo/distfiles/:nosubdir
@@ -290,7 +290,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.isoc.org.il/pub/gentoo/distfiles/:nosubdir
     http://mirror.kakao.com/gentoo/distfiles/:nosubdir
     http://mirror.leaseweb.com/gentoo/distfiles/:nosubdir
-    https://mirror.mdfnet.se/gentoo/distfiles/:nosubdir
+    http://mirror.mdfnet.se/gentoo/distfiles/:nosubdir
     http://mirror.netcologne.de/gentoo/distfiles/:nosubdir
     http://mirror.ps.kz/gentoo/pub/distfiles/:nosubdir
     http://mirror.rise.ph/gentoo/distfiles/:nosubdir
@@ -300,7 +300,7 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirrors.evowise.com/gentoo/distfiles/:nosubdir
     http://mirrors.rit.edu/gentoo/distfiles/:nosubdir
     http://mirrors.soeasyto.com/distfiles.gentoo.org/distfiles/:nosubdir
-    https://mirrors.tuna.tsinghua.edu.cn/gentoo/distfiles/:nosubdir
+    http://mirrors.tuna.tsinghua.edu.cn/gentoo/distfiles/:nosubdir
     http://mirrors.xservers.ro/gentoo/distfiles/:nosubdir
     http://tux.rainside.sk/gentoo/distfiles/:nosubdir
     http://www.gtlib.gatech.edu/pub/gentoo/distfiles/:nosubdir
