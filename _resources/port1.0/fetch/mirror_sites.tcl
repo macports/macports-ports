@@ -702,11 +702,9 @@ set portfetch::mirror_sites::sites(sunsite) {
 
 set portfetch::mirror_sites::sites(tcltk) {
     https://www.mirrorservice.org/sites/ftp.tcl.tk/pub/tcl/
-    http://www.etsimo.uniovi.es/pub/mirrors/ftp.scriptics.com/
     ftp://ftp.funet.fi/pub/languages/tcl/tcl/
     ftp://ftp.kddlabs.co.jp/lang/tcl/ftp.scriptics.com/
     ftp://ftp.tcl.tk/pub/tcl/
-    ftp://mirror.switch.ch/mirror/tcl.tk/
     ftp://xyz.csail.mit.edu/pub/tcl/
 }
 
