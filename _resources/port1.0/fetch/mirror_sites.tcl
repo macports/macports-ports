@@ -689,7 +689,6 @@ set portfetch::mirror_sites::sites(sourceforge) {
 set portfetch::mirror_sites::sites(sourceforge_jp) {
     http://iij.dl.sourceforge.jp/
     http://jaist.dl.sourceforge.jp/
-    http://keihanna.dl.sourceforge.jp/
     http://osdn.dl.sourceforge.jp/
 }
 
