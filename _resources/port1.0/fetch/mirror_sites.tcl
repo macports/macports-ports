@@ -569,7 +569,7 @@ set portfetch::mirror_sites::sites(openbsd) {
     https://mirror.hs-esslingen.de/pub/OpenBSD/
     https://mirror.labkom.id/pub/OpenBSD/
     https://mirror.leaseweb.com/pub/OpenBSD/
-    https://mirror.linux.pizza/pub/OpenBSD/
+    https://mirror.linux.pizza/pub/openbsd/
     https://mirror.litnet.lt/pub/OpenBSD/
     https://mirror.one.com/pub/OpenBSD/
     http://mirror.ox.ac.uk/pub/OpenBSD/
@@ -591,7 +591,7 @@ set portfetch::mirror_sites::sites(openbsd) {
     https://openbsd.hk/pub/OpenBSD/
     https://openbsd.ipacct.com/pub/OpenBSD/
     https://openbsd.mirror.constant.com/pub/OpenBSD/
-    https://openbsd.mirror.garr.it/pub/OpenBSD/
+    https://openbsd.mirror.garr.it/OpenBSD/
     https://openbsd.mirror.netelligent.ca/pub/OpenBSD/
     https://plug-mirror.rcac.purdue.edu/pub/OpenBSD/
     http://www.ftp.ne.jp/pub/OpenBSD/
