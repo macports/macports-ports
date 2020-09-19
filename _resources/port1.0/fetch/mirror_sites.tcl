@@ -345,7 +345,6 @@ set portfetch::mirror_sites::sites(gnome) {
     https://ftp2.nluug.nl/windowing/gnome/
     http://mirror.cc.columbia.edu/pub/software/gnome/
     http://mirror.internode.on.net/pub/gnome/
-    http://mirror.nbtelecom.com.br/gnome/
     https://mirror.umd.edu/gnome/
     https://mirrors.dotsrc.org/gnome/
     https://mirrors.ustc.edu.cn/gnome/
