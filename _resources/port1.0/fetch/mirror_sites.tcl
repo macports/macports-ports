@@ -695,11 +695,9 @@ set portfetch::mirror_sites::sites(sourceforge_jp) {
 set portfetch::mirror_sites::sites(sunsite) {
     http://www.gtlib.gatech.edu/pub/Linux/
     http://www.ibiblio.org/pub/Linux/
-    ftp://ftp.icm.edu.pl/vol/rzm1/linux-ibiblio/
-    ftp://ftp.kddlabs.co.jp/Linux/metalab.unc.edu/
+    ftp://ftp.icm.edu.pl/vol/rzm5/linux-ibiblio/
     ftp://ftp.lip6.fr/pub/linux/sunsite/
     ftp://ftp.nvg.ntnu.no/pub/mirrors/metalab.unc.edu/
-    ftp://ftp.unicamp.br/pub/systems/Linux/
 }
 
 set portfetch::mirror_sites::sites(tcltk) {
