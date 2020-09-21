@@ -4,11 +4,11 @@ PortSystem          1.0
 PortGroup           mpi 1.0
 
 name                feast
-version             3.0
-revision            2
+version             4.0
+revision            0
 categories          science
 platforms           darwin
-maintainers         {dstrubbe @dstrubbe}
+maintainers         {dstrubbe @dstrubbe} openmaintainer
 license             BSD
 
 description         A free high-performance numerical library for solving Hermitian and non-Hermitian eigenvalue problems
@@ -23,16 +23,19 @@ long_description    The FEAST eigensolver package is a free high-performance num
     computation consisting of solving independent linear systems along a complex contour, each with multiple right-hand \
     sides. A Rayleigh-Ritz procedure is then used to generate a reduced dense eigenvalue problem orders of magnitude \
     smaller than the original one. The FEAST eigensolver combines simplicity and efficiency and it offers many important \
-    capabilities for achieving high performance, robustness, accuracy, and scalability on parallel architectures.
+    capabilities for achieving high performance, robustness, accuracy, and scalability on parallel architectures. \
+    NOTE: Without an MPI variant, builds libfeast.a. With MPI, builds libpfeast.a.
 
 homepage            http://www.feast-solver.org
 # note: below will have to be updated for a new version
-master_sites        http://www.ecs.umass.edu/~polizzi/feast/m3-0/
+master_sites        http://www.ecs.umass.edu/~polizzi/feast/m4-0/
 extract.suffix      .tgz
 distname            ${name}_${version}
 
-checksums           rmd160  f2b271569cb22fc8897485394339e545c0d9518a \
-                    sha1    d7f6f350c275bb36bbea43882f0a7079083cc53d
+checksums           rmd160  f06d7a9e7646451533dfc1398564c0c6eaef8cdf \
+                    sha1    1da96e25f57cfffe9a2d510a971df194f9621ddb \
+                    sha256  2b084e785df658d3146cee51f29dc325babf3da1ac7a0cc248c3dd64a666943d \
+                    size    29601256
 
 use_configure       no
 worksrcdir          FEAST/${version}/src
@@ -41,46 +44,30 @@ compilers.choose    cc fc
 # g95 does not support OpenMP
 mpi.setup           default require_fortran -g95
 configure.optflags  -O3
+# avoid gcc10 compilation type mismatch errors in /src/kernel/dzfeast.f90 and src/kernel/libnum.f90
+compilers.allow_arguments_mismatch yes
 
 use_parallel_build  yes
 
-# only for tests
-# also openblas or atlas. Use vecLibFort since it is quickest to install.
-depends_lib-append  port:vecLibFort
+# also could be openblas or atlas. Use vecLibFort since it is quickest to install.
+depends_test-append  port:vecLibFort
 # needed for clang or llvm, only for tests in fact, but very quick to install
 if {![gcc_variant_isset]} {
-    depends_lib-append port:libomp
+    depends_test-append port:libomp
 }
 
-post-extract {
-    # allow user or developer to inspect working directory!
-    system -W ${worksrcpath}/../.. "chmod -R a+rX ."
-    # remove unwisely distributed binary libs, which get in the way
-    delete file ${worksrcpath}/../lib/x64
-}
-
-build.target        all
 pre-build {
-    if {[mpi_variant_isset]} {
-        build.args-append LIBNAME=pfeast MPI=${mpi.fc}
-    } else {
-        build.args-append LIBNAME=feast
-    }
-
     configure.fcflags-append  -ffree-line-length-none -ffixed-line-length-none -fopenmp -cpp
     # they say option 2 only works with ifort. compiles and links fine with gcc5, but segfaults in tests
     build.args-append  OPTION=1 CC=${configure.cc} CFLAGS="${configure.cflags}" F90=${configure.fc} \
-        F90FLAGS="${configure.fcflags}" FFLAGS="${configure.fcflags}"
+        F90FLAGS="${configure.fcflags}" MKL=no
 
-    # LIB is reused with different incompatible meaning in example directory???
-    reinplace -W ${worksrcpath} "s/LIB/LIBNAME/g" Makefile
-
-    #banded/spike-smp/zspike_smp.f90:1078:16: Error: !$OMP PARALLEL DO iteration variable present on clause other than PRIVATE or LASTPRIVATE at (1)
-    # patch to fix this error in OpenMP usage.
-    reinplace -W ${worksrcpath} "s/\!\$omp parallel do firstprivate(t1,t2,i/\!\$omp parallel do private(i) firstprivate(t1,t2/g" banded/spike-smp/dspike_smp.f90
-    reinplace -W ${worksrcpath} "s/\!\$omp parallel do firstprivate(t1,t2,i/\!\$omp parallel do private(i) firstprivate(t1,t2/g" banded/spike-smp/zspike_smp.f90
-    reinplace -W ${worksrcpath} "s/\!\$omp parallel do firstprivate(t1,t2,i/\!\$omp parallel do private(i) firstprivate(t1,t2/g" banded/spike-smp/cspike_smp.f90
-    reinplace -W ${worksrcpath} "s/\!\$omp parallel do firstprivate(t1,t2,i/\!\$omp parallel do private(i) firstprivate(t1,t2/g" banded/spike-smp/sspike_smp.f90
+    if {[mpi_variant_isset]} {
+        build.args-append PF90=${mpi.fc} PF90FLAGS="${configure.fcflags} -DMPI"
+        build.target-append pfeast
+    } else {
+        build.target        feast
+    }
 }
 
 # OPTION 1, +mpich or +openmpi: all sbev(x) C/F, serial/MPI (8 total) hang, no segfaults
@@ -90,11 +77,7 @@ pre-build {
 #  +gfortran +mpich +clang37 serial sbev's hang.
 
 test.run            yes
-# '-k' means keep going, so one failure does not stop the whole process
-test.target         -k rall-nosparse
-# why is this needlessly different from src dir?
-# you don't use CFLAGS in linking in example??
-# 'rall' target uselessly repeats 'all' target
+test.dir            ${worksrcpath}/../example
 pre-test {
     set libblas "-lvecLibFort"
     if {[gcc_variant_isset]} {
@@ -109,37 +92,38 @@ pre-test {
         } else {
             set mpiflib  "-lmpi_mpifh ${compilers.libfortran}"
         }
-        test.target-append   rallMPI-nosparse
-        test.args-append     PCC=${mpi.cc} PFORT=${mpi.f90}
     } else {
         set mpiflib "${compilers.libfortran}"
     }
+
+    set libs_general "${libblas} ${libomp}"
     
-    test.args-append  CC=${configure.cc} CFLAGS="${configure.cflags}" \
+    test.args-append  C=${configure.cc} CFLAGS="${configure.cflags}" \
         F90=${configure.fc} F90FLAGS="${configure.fcflags}" \
-        FORT=${configure.fc} FFLAGS="${configure.fcflags}" \
-        FLIBS="${libblas} ${libomp}" CLIBS="${libblas} ${libomp} ${mpiflib}"
+        FORT=${configure.fc} FFLAGS="${configure.fcflags}"
 
-    worksrcdir      ${worksrcdir}/../example
-    # scripitize this
-    # why no targets provided for MPI tests? shouldn't MPI by executed with ${mpi.exec} -n .. ?
-    # call it 'make test' or 'make check'
-    # must exclude pardiso (required for sparse). This is not distributable software. http://www.pardiso-project.org/
+    if {[mpi_variant_isset]} {
+        test.args-append FLIBS="${libs_general} ../../lib/x64/libpfeast.a" \
+            CLIBS="${libs_general} ../../lib/x64/libpfeast.a ${mpiflib}" \
+            MPIRUN=${mpi.exec} PC=${mpi.cc} PF90=${mpi.f90}
+        system -W ${test.dir} "echo 'test:\n\tulimit -t 200 && cd PFEAST-L1L2L3 && make N=${build.jobs} rall\n\tulimit -t 200 && cd PFEAST-L2 && make N=${build.jobs} rall\n\tulimit -t 200 && cd PFEAST-L2L3 && make N=${build.jobs} rall\n' >> Makefile"
+    } else {
+        test.args-append FLIBS="${libs_general} ../../lib/x64/libfeast.a" CLIBS="${libs_general} ../../lib/x64/libfeast.a ${mpiflib}"
+        system -W ${test.dir} "echo 'test:\n\tulimit -t 200 && cd FEAST && make rall\n' >> Makefile"
+    }
+    # note: ulimit is to handle jobs that hang, and make them just fail.
 
-    system -W ${worksrcpath} "echo 'rallC-nosparse:\n\tcd ./Hermitian/C/1_dense && make myrall; cd ../2_banded && make myrall; cd ../../../Non-Hermitian/C/1_dense && make myrall; cd ../2_banded && make myrall\nrallF-nosparse:\n\tcd ./Hermitian/Fortran/1_dense && make myrall; cd ../2_banded && make myrall; cd ../../../Non-Hermitian/Fortran/1_dense && make myrall; cd ../2_banded && make myrall\nrall-nosparse: rallF-nosparse rallC-nosparse' >> Makefile"
-    system -W ${worksrcpath} "echo 'rallCMPI-nosparse:\n\tcd ./Hermitian/C-MPI/1_dense && make myrall; cd ../2_banded && make myrall; cd ../../../Non-Hermitian/C-MPI/1_dense && make myrall; cd ../2_banded && make myrall\nrallFMPI-nosparse:\n\tcd ./Hermitian/Fortran-MPI/1_dense && make myrall; cd ../2_banded && make myrall; cd ../../../Non-Hermitian/Fortran-MPI/1_dense && make myrall; cd ../2_banded && make myrall\nrallMPI-nosparse: rallFMPI-nosparse rallCMPI-nosparse' >> Makefile"
-
-    system -W ${worksrcpath} "echo 'allC-nosparse:\n\tcd ./Hermitian/C/1_dense && make all; cd ../2_banded && make all; cd ../../../Non-Hermitian/C/1_dense && make all; cd ../2_banded && make all\nallF-nosparse:\n\tcd ./Hermitian/Fortran/1_dense && make all; cd ../2_banded && make all; cd ../../../Non-Hermitian/Fortran/1_dense && make all; cd ../2_banded && make all\nall-nosparse: allF-nosparse allC-nosparse' >> Makefile"
-    system -W ${worksrcpath} "echo 'allCMPI-nosparse:\n\tcd ./Hermitian/C-MPI/1_dense && make all; cd ../2_banded && make all; cd ../../../Non-Hermitian/C-MPI/1_dense && make all; cd ../2_banded && make all\nallFMPI-nosparse:\n\tcd ./Hermitian/Fortran-MPI/1_dense && make all; cd ../2_banded && make all; cd ../../../Non-Hermitian/Fortran-MPI/1_dense && make all; cd ../2_banded && make all\nallMPI-nosparse: allFMPI-nosparse allCMPI-nosparse' >> Makefile"
-
-    # Fortran-MPI examples lack 'rall' target...
-    # can add MPI this way too.
-    # kill a test if it hangs, so the testsuite can proceed
-    system -W ${worksrcpath} "echo 'myrall:   examples\n\t ulimit -t 200 && for file in \$(EXAMPLES); do echo; echo; echo Running \$\$file; ./\$\$file; echo Ran \$\$file in \$\$PWD; done' >> make.inc"
+    # in serial: all pass except F90sparse_dfeast_scsrpev-- failed.
+    
+    # results with default variants (mpich): 31 pass, 4 fail:
+    # PF90sparse_dfeast_scsrpev -- failed
+    # PCsparse_dfeast_scsrpev  -- failed
+    # PF90sparse_pdfeast_scsrpev -- failed
+    # PCsparse_pdfeast_scsrpev  -- failed
 }
 
 post-test {
-    ui_notice "Examine log file for test results."
+    ui_notice "Examine log files (examples/*/*.log) for test results."
 }
 
 destroot {
