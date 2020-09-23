@@ -1,21 +1,16 @@
 #!/bin/bash
 set -e
 
+# Disable NTP clock sync: VM clock might be ahead
+# https://trac.macports.org/ticket/58800
+/usr/bin/sudo /bin/launchctl unload /System/Library/LaunchDaemons/com.apple.timed.plist &
+
 # Guard against intermittent Travis CI DNS outages
-for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org 0.us.pool.ntp.org github-production-release-asset-2e65be.s3.amazonaws.com; do
+for host in distfiles.macports.org dl.bintray.com github.com packages.macports.org packages-private.macports.org rsync-origin.macports.org github-production-release-asset-2e65be.s3.amazonaws.com; do
     dig +short "$host" | sed -n '$s/$/ '"$host/p" | sudo tee -a /etc/hosts >/dev/null
 done
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
-
-# Force NTP sync: VM clock might be ahead
-# https://trac.macports.org/ticket/58800
-if [ ${OS_MAJOR} -ge 18 ]
-    then
-        sudo sntp -sS 0.us.pool.ntp.org || true
-    else
-        sudo ntpdate -vu 0.us.pool.ntp.org || true
-fi
 
 # Download resources in background ASAP but use later
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2" &
