@@ -13,7 +13,8 @@
 #                   rmd160 fedcba654321... \
 #                   sha256 bdface246135... \
 #                   size   1234 \
-#               example.com/dep2/bar \
+#               vanity_domain.com/dep2_bar \
+#                   repo   example.com/dep2/bar \
 #                   lock   fedcba654321... \
 #                   rmd160 abcdef123456... \
 #                   sha256 fedcba654321... \
@@ -34,6 +35,11 @@
 #
 # The go.vendors option expects a list of package IDs, each followed by these
 # labeled values:
+#
+# - repo: Packages are sometimes hosted on domains that merely redirect to
+#   well-known hosts such as GitHub. In that case, specify the resolved package
+#   name with the `repo` keyword. Example: coolbiz.io/coolpackage might resolve
+#   to github.com/coolbiz/package. This must come before the `lock` keyword.
 #
 # - lock: the version of the package in git reference format. This must come
 #   before any checksums.
@@ -174,18 +180,28 @@ proc handle_set_go_vendors {vendors_str} {
         # Get the Go package ID
         set vpackage [lindex ${vendors_str} ${ix}]
 
-        # Split up the package ID
-        lassign [go._translate_package_id ${vpackage}] vdomain vauthor vproject
+        # Package resolves to itself by default; only overridden in case of
+        # redirects, etc.
+        set vresolved ${vpackage}
 
         # Handle the remaining values for this package
         incr ix
         while {1} {
             set token [lindex ${vendors_str} ${ix}]
-            if {${token} eq "lock"} {
+            if {${token} eq "repo"} {
+                # Handle the package's resolved name. See discussion of this in
+                # header comments.
+                incr ix
+                set vresolved [lindex ${vendors_str} ${ix}]
+                incr ix
+            } elseif {${token} eq "lock"} {
                 # Handle the package version ("lock" as in "lockfile")
                 incr ix
                 set vversion [lindex ${vendors_str} ${ix}]
                 incr ix
+
+                # Split up the package ID
+                lassign [go._translate_package_id ${vresolved}] vdomain vauthor vproject
 
                 if {[string match v* ${vversion}]} {
                     set sha1_short {}
@@ -196,7 +212,7 @@ proc handle_set_go_vendors {vendors_str} {
                     # Bitbucket uses 12. We take 7 and use globbing.
                     set sha1_short [string range ${vversion} 0 6]
                 }
-                lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vversion}]
+                lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vresolved} ${vversion}]
 
                 switch ${vdomain} {
                     github.com {
@@ -267,12 +283,13 @@ post-extract {
     }
 
     foreach vlist ${go.vendors_internal} {
-        lassign ${vlist} sha1_short vpackage
+        lassign ${vlist} sha1_short vpackage vresolved
+
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
         if {${sha1_short} ne ""} {
             move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
         } else {
-            lassign [go._translate_package_id ${vpackage}] _ vauthor vproject
+            lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
             move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
         }
     }
