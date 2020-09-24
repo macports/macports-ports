@@ -1,0 +1,288 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                  1.0
+PortGroup                   app 1.0
+PortGroup                   cmake 1.1
+PortGroup                   conflicts_build 1.0
+PortGroup                   github 1.0
+
+name                        Aseprite
+categories                  graphics
+platforms                   darwin
+maintainers                 {ryandesign @ryandesign} openmaintainer
+# We are allowed to redistribute the source code but not binaries.
+# https://github.com/aseprite/aseprite/blob/master/EULA.txt
+# https://github.com/aseprite/aseprite/issues/2266#issuecomment-586600478
+license                     Restrictive
+
+github.setup                aseprite aseprite 1.2.25 v
+revision                    0
+
+# Aseprite doesn't specify which commit of depot_tools we should use, so I'm
+# using the latest commit at the time this version of Aseprite was released.
+set depot_tools_commit      5664586374b9a80af397354523e93b9ef9333f16
+
+# Latest commit in skia's aseprite-m81 branch at the time this version of
+# Aseprite was released (see INSTALL.md).
+set skia_commit             3043aa83d14f2251f22c068816ceb6759ea3fb61
+
+homepage                    https://aseprite.org
+github.tarball_from         releases
+distname                    ${name}-v${version}-Source
+use_zip                     yes
+
+checksums                   ${distfiles} \
+                    rmd160  c9f0501d7358e8205b58bc4d7b38ff0fdb531848 \
+                    sha256  c5496ad159454b44e9b6c0f872553a192a7d20feeb6337a799c3f7009cdda558 \
+                    size    24487484 \
+                            skia-3043aa83d14f2251f22c068816ceb6759ea3fb61.tar.gz \
+                    rmd160  6b896f8f0fc374256a22713c9b244fbc01dc3c9f \
+                    sha256  368813ce058806a267a3bf157f4b0133fb58ae531c2c38247d6e6a191f3280ff \
+                    size    47137258
+
+set main_distfile           [lindex ${distfiles} 0]
+set skia_distfile           skia-${skia_commit}.tar.gz
+
+distfiles                   ${main_distfile}:main \
+                            ${skia_distfile}:skia
+
+extract.only                ${main_distfile}
+
+master_sites                [lindex ${master_sites} 0]:main \
+                            https://github.com/aseprite/skia/archive/${skia_commit}:skia
+
+description                 animated sprite editor & pixel art tool
+
+long_description            ${name} is an image editor for creating animated \
+                            sprites and other pixel art.
+
+# TODO: Don't use git to fetch depot_tools or skia's dependencies.
+if {${os.platform} eq "darwin" && ${os.major} < 13} {
+    depends_fetch-append    port:git
+    depends_extract-append  port:git
+} else {
+    depends_fetch-append    bin:git:git
+    depends_extract-append  bin:git:git
+}
+
+depends_build-append        port:pkgconfig
+
+depends_lib-append          port:bzip2 \
+                            port:cmark \
+                            port:curl \
+                            port:expat \
+                            port:freetype \
+                            port:giflib \
+                            port:harfbuzz \
+                            port:harfbuzz-icu \
+                            port:icu \
+                            path:lib/pkgconfig/pixman-1.pc:libpixman \
+                            port:libpng \
+                            port:libxml2 \
+                            port:lz4 \
+                            port:mesa \
+                            port:tiff \
+                            port:tinyxml \
+                            port:webp \
+                            port:xz \
+                            port:zlib \
+                            port:zstd
+
+# TODO: Use MacPorts libarchive
+# https://github.com/aseprite/aseprite/issues/1681
+
+# TODO: Use MacPorts lua, after updating it to 5.4
+# or figure out how to prevent this build from seeing it.
+conflicts_build             lua lua50
+
+# Invoke a procedure on each item in a list.
+# You'd think this would be in Tcl or MacPorts base already.
+# http://wiki.tcl.tk/4884
+proc map {prefix list} {
+    set result {}
+    foreach item ${list} {
+        lappend result [{*}${prefix} ${item}]
+    }
+    return ${result}
+}
+
+# shellescape will be in MacPorts 2.7.0.
+if {[vercmp [macports_version] 2.6.99] < 0} {
+    proc shellescape {arg} {
+        return [regsub -all -- {[^A-Za-z0-9.:@%/+=_-]} $arg {\\&}]
+    }
+}
+
+proc quoted_shellescape {arg} {
+    return "\"[shellescape ${arg}]\""
+}
+
+worksrcdir                  ${github.project}
+extract.mkdir               yes
+
+post-fetch {
+    # depot_tools is hosted on googlesource.com which doesn't generate
+    # deterministic tarballs. https://github.com/google/gitiles/issues/84
+    system -W ${workpath} "git clone --config advice.detachedHead=false --depth 300\
+        --no-checkout https://chromium.googlesource.com/chromium/tools/depot_tools"
+    system -W ${workpath}/depot_tools "git checkout ${depot_tools_commit}"
+}
+
+post-extract {
+    system -W ${workpath} \
+        "tar -xzf [shellescape ${distpath}/${skia_distfile}]"
+
+    foreach submodule {../skia} {
+        delete ${worksrcpath}/${submodule}
+        move {*}[glob ${workpath}/[file tail ${submodule}]-*] ${worksrcpath}/${submodule}
+    }
+
+    # Fetch skia's dependencies.
+    # TODO: Fetch these as distfiles instead, maybe using a strategy similar
+    # to the one used by the MoltenVK port. Many of them aren't even needed
+    # since we're using MacPorts deps rather than bundled versions.
+    system -W ${workpath}/skia "python tools/git-sync-deps"
+}
+
+patch.dir                   ${workpath}
+patchfiles                  prefix.patch \
+                            stdlib.patch \
+                            USE_SHARED_LIBWEBP.patch
+
+post-patch {
+    reinplace -W ${workpath}/skia/third_party "s|@PREFIX@|${prefix}|g" \
+        freetype2/BUILD.gn harfbuzz/BUILD.gn
+}
+
+compiler.cxx_standard       2011
+
+cmake.build_type            Release
+cmake.generator             Ninja
+
+universal_variant           no
+
+# The cmake portgroup clears configure.*_archflags at pre-configure time
+# so we have to save it before then.
+set archflags               [get_canonical_archflags]
+
+configure.cppflags-replace  -I${prefix}/include -isystem${prefix}/include
+
+pre-configure {
+    # Claiming to be an official build and using -frtti because it is
+    # suggested here:
+    # https://github.com/aseprite/skia#skia-on-macos
+    # Not using system libjpeg-turbo because MacPorts defaults to jpeg, not
+    # libjpeg-turbo, and they conflict, and skia requires libjpeg-turbo.
+    lappend skia_cflags     {*}${configure.cflags} \
+                            {*}${archflags}
+    lappend skia_cxxflags   {*}${configure.cxxflags} \
+                            -frtti \
+                            {*}${archflags}
+    lappend skia_ldflags    {*}${configure.ldflags} \
+                            {*}${archflags}
+    lappend skia_configure_args \
+                            cc="${configure.cc}" \
+                            cxx="${configure.cxx}" \
+                            extra_cflags_c=\[[join [map quoted_shellescape ${skia_cflags}] ,]\] \
+                            extra_cflags_cc=\[[join [map quoted_shellescape ${skia_cxxflags}] ,]\] \
+                            extra_ldflags=\[[join [map quoted_shellescape ${skia_ldflags}] ,]\] \
+                            is_debug=false \
+                            is_official_build=true \
+                            skia_pdf_subset_harfbuzz=true \
+                            skia_use_freetype=true \
+                            skia_use_harfbuzz=true \
+                            skia_use_system_libjpeg_turbo=false
+    if {${configure.ccache}} {
+        lappend skia_configure_args \
+                            cc_wrapper="${prefix}/bin/ccache"
+    }
+    system -W ${workpath}/skia "\
+        PATH=${workpath}/depot_tools:$env(PATH) &&\
+        export PATH &&\
+        gn gen out/Release --args=[shellescape [join ${skia_configure_args}]] &&\
+        ${prefix}/bin/ninja -vC out/Release skia modules\
+        "
+}
+
+# Unknown why we have to manually specify the libraries that libskia.a uses.
+lappend skia_libraries      ${workpath}/skia/out/Release/libskia.a \
+                            ${prefix}/lib/libpng.dylib \
+                            ${prefix}/lib/libwebp.dylib \
+                            ${prefix}/lib/libwebpdemux.dylib \
+                            ${prefix}/lib/libwebpmux.dylib \
+                            ${prefix}/lib/libz.dylib
+
+# Don't use shared jpeg because MacPorts jpeg is library version 90 which
+# conflicts with jpeg-turbo library version 62 that skia uses.
+configure.args              -DENABLE_BZip2=ON \
+                            -DENABLE_LIBXML2=ON \
+                            -DENABLE_LZMA=ON \
+                            -DENABLE_UPDATER=OFF \
+                            -DLAF_BACKEND=skia \
+                            -DPNG_SHARED=ON \
+                            -DSKIA_DIR=${workpath}/skia \
+                            -DSKIA_LIBRARY=[join ${skia_libraries} {\;}] \
+                            -DSKIA_LIBRARY_DIR=${workpath}/skia/out/Release \
+                            -DUSE_SHARED_CMARK=YES \
+                            -DUSE_SHARED_CURL=YES \
+                            -DUSE_SHARED_FREETYPE=YES \
+                            -DUSE_SHARED_GIFLIB=YES \
+                            -DUSE_SHARED_HARFBUZZ=YES \
+                            -DUSE_SHARED_LIBPNG=YES \
+                            -DUSE_SHARED_LIBWEBP=YES \
+                            -DUSE_SHARED_PIXMAN=YES \
+                            -DUSE_SHARED_TINYXML=YES \
+                            -DUSE_SHARED_ZLIB=YES \
+                            -DWITH_BZip2=ON \
+                            -DWITH_WEBP_SUPPORT=ON
+
+app.executable              ${build.dir}/bin/aseprite
+app.retina                  yes
+app.icon                    data/icons/ase256.png
+set document_icon           data/icons/doc256.png
+set extension_icon          data/icons/ext256.png
+
+# The program is coded to look for its data in a relative path that assumes
+# an app bundle layout, so we can't use the install target because it doesn't
+# create an app bundle. https://github.com/aseprite/aseprite/issues/1366
+destroot {
+    copy ${worksrcpath}/data ${destroot}${applications_dir}/${app.name}.app/Contents/Resources
+
+    # Remove unneeded files installed by the bundled copies of libarchive
+    # and json11. https://github.com/aseprite/aseprite/issues/1602
+    foreach f {
+        bin/bsdcat
+        bin/bsdcpio
+        bin/bsdtar
+        include/json11.hpp
+        lib/libjson11.a
+        lib/pkgconfig/json11.pc
+        lib/pkgconfig/libarchive.pc
+        share/man/man1/bsdcat.1
+        share/man/man1/bsdcpio.1
+        share/man/man1/bsdtar.1
+    } {
+        delete ${destroot}${prefix}/${f}
+    }
+}
+
+post-destroot {
+    # Add extra keys, like document types, to Info.plist.
+    set merge "Merge [shellescape ${filespath}/extra-Info.plist]"
+    system -W ${destroot}${applications_dir}/${app.name}.app/Contents \
+        "/usr/libexec/PlistBuddy Info.plist -c [shellescape ${merge}]"
+
+    system -W ${destroot}${applications_dir}/${app.name}.app/Contents/Resources \
+        "${prefix}/bin/makeicns -in [shellescape ${worksrcpath}/${document_icon}] -out Document.icns"
+    system -W ${destroot}${applications_dir}/${app.name}.app/Contents/Resources \
+        "${prefix}/bin/makeicns -in [shellescape ${worksrcpath}/${extension_icon}] -out Extension.icns"
+}
+
+# https://aseprite.org/faq/#if-aseprite-source-code-is-available-how-is-that-you-are-selling-it
+notes "
+${name} is free for personal use. If you enjoy ${name}, or for commercial use,\
+please purchase a license at ${homepage}/#buy
+
+Please read and agree to the end user license agreement:\
+${github.raw}/${github.tag_prefix}${github.version}/EULA.txt
+"
