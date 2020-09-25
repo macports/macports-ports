@@ -4,16 +4,18 @@ PortSystem          1.0
 PortGroup           gitlab 1.0
 PortGroup           select 1.0
 
-name                pypy
-version             7.3.1
-revision            2
+gitlab.instance     https://foss.heptapod.net
+gitlab.setup        pypy pypy 7.3.2
+revision            0
+
 categories          lang python devel
 license             MIT PSF
 maintainers         {danchr @danchr} openmaintainer
 
 platforms           darwin
 
-homepage            http://pypy.org/
+homepage            https://www.pypy.org/
+master_sites        https://downloads.python.org/${name}
 
 depends_build       port:pkgconfig \
                     port:py27-docutils
@@ -28,8 +30,7 @@ depends_lib         port:libffi \
 depends_run         port:python_select
 select.entries      [list python python-$subport $subport]
 
-patchfiles          no-embed.diff \
-                    fix-build.diff \
+patchfiles          ncurses-build.diff \
                     make_output.diff \
                     ffiplatform.py.diff \
                     paths.diff
@@ -45,6 +46,14 @@ array set module_scripts {
 }
 
 subport pypy3 {
+    # remove after 20210925
+    PortGroup      obsolete 1.0
+    replaced_by    pypy36
+
+    set python.branch 3.6
+}
+
+subport pypy36 {
     set python.branch 3.6
 
     set module_scripts(venv) venv
@@ -56,12 +65,37 @@ subport pypy3 {
     select.entries-append [list python3 python3-$subport $subport]
 }
 
+subport pypy37 {
+    set python.branch 3.7
+
+    set module_scripts(venv) venv
+    set module_scripts(idle) idlelib
+
+    depends_lib-append port:xz
+
+    depends_run-append port:python3_select
+    select.entries-append [list python3 python3-$subport $subport]
+}
+
+
 subport pypy-tkinter {
     set python.branch   2.7
 }
 
 subport pypy3-tkinter {
+    # remove after 20210925
+    PortGroup           obsolete 1.0
+    replaced_by         pypy36-tkinter
+
+    set python.branch 3.6
+}
+
+subport pypy36-tkinter {
     set python.branch   3.6
+}
+
+subport pypy37-tkinter {
+    set python.branch   3.7
 }
 
 if {$subport == ${name}} {
@@ -72,23 +106,27 @@ if {$subport == ${name}} {
 }
 
 # delayed until ${python.branch} is set
-gitlab.instance     https://foss.heptapod.net
-gitlab.setup        pypy pypy 7.3.1 release-pypy${python.branch}-v
-
-distname            pypy${python.branch}-${version}
+set gitlab.tag_prefix   release-pypy${python.branch}-v
+distname                ${name}${python.branch}-v${version}-src
 
 if {${python.branch} == 2.7} {
     patchfiles-append   pypy2-darwin.py.diff
 
-    checksums           rmd160  a9b587b014ac64ec4499fd93b0be2171dab5c501 \
-                        sha256  fc4fcf1007f91acec4b832f16a25862e42b06dbdd9b0ea72bc3313c8b975969a \
-                        size    20725620
-} else {
+    checksums           rmd160  58d9a5a69d39fa993c459bfa1753465e6759f143 \
+                        sha256  8189480d8350ad6364d05c2b39fd7d832644d4b1cd018f785126389df45928d1 \
+                        size    21142873
+} elseif {${python.branch} == 3.6} {
     patchfiles-append   pypy3-darwin.py.diff
 
-    checksums           rmd160  c2ea7aaf5d64d805fa76dc7fa604e7e2648195ec \
-                        sha256  437abe7575827be2f5e519e7f77fe634d4c9f5d3c9f5b7a269ac4c8c8aa7f0e9 \
-                        size    22347476
+    checksums           rmd160  184f4c59a8fbe2cab6d523ed3b583b3d92850755 \
+                        sha256  fd6175fed63ff9fccd7886068078853078948d98afae9bd4f5554c6f7873c10d \
+                        size    22736022
+} elseif {${python.branch} == 3.7} {
+    patchfiles-append   pypy3-darwin.py.diff
+
+    checksums           rmd160  11dcea71d8ffec789a306533eac297be24499a29 \
+                        sha256  9274186eb0c28716a8c6134803b1df857bc3f496e25e50e605c4d95201c8817d \
+                        size    25060911
 }
 
 description         A fast interpreter for Python ${python.branch}
@@ -103,7 +141,7 @@ build.env           PYPY_USESSION_DIR=${workpath} PYPY_LOCALBASE=${prefix} \
 
 build.dir           ${worksrcpath}/pypy/goal
 build.args          --batch --verbose \
-                    --cc=${configure.cc} --opt=jit \
+                    --cc=${configure.cc} --opt=jit --lto \
                     --make-jobs=${build.jobs}
 build.target        ../../rpython/bin/rpython
 build.post_args     targetpypystandalone
@@ -118,11 +156,6 @@ destroot.args       --builddir ${destroot}${prefix}/lib \
                     --without-_tkinter --no-embedded-dependencies
 destroot.target     package.py
 destroot.post_args
-
-post-extract {
-    # work around oddness caused by late invocation of gitlab.setup
-    file link ${workpath}/${name}-${version} ${worksrcpath}
-}
 
 post-patch {
     # sanity check, useful when upgrading, as upstream tends to move these around
@@ -201,13 +234,27 @@ if {${os.arch} ne "i386"} {
 
 # Install support files, but only if not in a proper subport
 if {![string match "pypy*-*" ${subport}]} {
+    pre-destroot {
+        # PyPy invariably builds the CFFI modules during its main
+        # build, but we may only want some of them -- in particular,
+        # we don't want it to pick up Tk from the system on systems
+        # where this is available
+        # https://trac.macports.org/ticket/61136
+        foreach f [glob -nocomplain -directory "${worksrcpath}/lib_pypy" *.so */*.so] {
+            delete $f
+        }
+    }
+
     post-destroot {
         file delete ${destroot}${prefix}/lib/${subport}.tar.bz2
-        ln -s ../lib/${subport}/bin/${subport} ${destroot}${prefix}/bin/${subport}
+        ln -s ../lib/${subport}/bin/${name} ${destroot}${prefix}/bin/${subport}
+        ln -s ../lib/${subport}/bin/${name} ${destroot}${prefix}/bin/${name}-${python.branch}
 
         xinstall -d ${destroot}${prefix}/share/man/man1
         system -W ${worksrcpath}/pypy/doc/man \
             "rst2man-2.7.py pypy.1.rst ${destroot}${prefix}/share/man/man1/${subport}.1"
+        system -W ${worksrcpath}/pypy/doc/man \
+            "rst2man-2.7.py pypy.1.rst ${destroot}${prefix}/share/man/man1/${name}-${python.branch}.1"
 
         foreach script [array names module_scripts] {
             set module $module_scripts($script)
