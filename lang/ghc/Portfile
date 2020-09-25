@@ -5,7 +5,7 @@ PortGroup           gpg_verify 1.0
 
 name                ghc
 version             8.10.2
-revision            0
+revision            1
 categories          lang haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             BSD
@@ -13,18 +13,18 @@ platforms           darwin
 supported_archs     x86_64
 
 description         The Glorious Glasgow Haskell Compilation System
-long_description    The Glasgow Haskell Compiler is a robust,\
-                    fully-featured, optimising compiler and\
-                    interactive environment for Haskell 98, GHC\
-                    compiles Haskell to either native code or C.  It\
-                    implements numerous experimental language\
-                    extensions to Haskell 98, for example:\
-                    concurrency, a foreign language interface,\
-                    multi-parameter type classes, scoped type\
-                    variables, existential and universal\
-                    quantification, unboxed types, exceptions, weak\
-                    pointers, and so on.  GHC comes with a\
-                    generational garbage collector, and a space and\
+long_description    The Glasgow Haskell Compiler is a robust, \
+                    fully-featured, optimising compiler and \
+                    interactive environment for Haskell 98, GHC \
+                    compiles Haskell to either native code or C.  It \
+                    implements numerous experimental language \
+                    extensions to Haskell 98, for example: \
+                    concurrency, a foreign language interface, \
+                    multi-parameter type classes, scoped type \
+                    variables, existential and universal \
+                    quantification, unboxed types, exceptions, weak \
+                    pointers, and so on.  GHC comes with a \
+                    generational garbage collector, and a space and \
                     time profiler.
 
 homepage            http://haskell.org/${name}
@@ -94,6 +94,14 @@ set srcpath ${workpath}/src
 
 if { [variant_isset "prebuilt"] } {
     set bootstrap_dir ${destroot}${prefix}
+
+    # install the initial bootstrap compiler to destroot
+    configure.pre_args \
+                    --prefix=${bootstrap_dir}
+
+    # the PATH environment must provide the bootstrap path
+    build.env-append \
+                    "PATH=$env(PATH):${bootstrap_dir}/bin"
 } else {
     set bootstrap_dir ${workpath}/bootstrap
 
@@ -118,25 +126,51 @@ if { [variant_isset "prebuilt"] } {
                     port:texlive-fonts-recommended \
                     port:texlive-latex-extra
 
-    pre-configure {
-        xinstall -m 0755 -d ${bootstrap_dir}
+    # Add these MacPorts dependencies after this issue is fixed:
+    # https://gitlab.haskell.org/ghc/ghc/-/issues/18752
+    # depends_lib-append \
+    #                 port:gmp \
+    #                 port:libffi \
+    #                 port:libiconv
+
+    post-extract {
+        # test: move extracted testsuite directory to src
+        xinstall -m 0755 -d ${srcpath}/${distname}
+        move        ${worksrcpath}/testsuite ${srcpath}/${distname}/testsuite
     }
+
+    # libHSbase shipped with GHC links against system libiconv, which provides the
+    # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
+    # process statically links libHSbase.a, we must have /usr/lib in the library
+    # search path first :/
+    compiler.library_path
+    compiler.cpath
+
+    # install the initial bootstrap compiler to destroot
+    configure.pre_args \
+                    --prefix=${bootstrap_dir}
+
+    # Add these MacPorts dependencies after this issue is fixed:
+    # https://gitlab.haskell.org/ghc/ghc/-/issues/18752
+    #                 --with-ffi-includes=${prefix}/include \
+    #                 --with-ffi-libraries=${prefix}/lib \
+    #                 --with-gmp-includes=${prefix}/include \
+    #                 --with-gmp-libraries=${prefix}/lib \
+    #                 --with-iconv-includes=${prefix}/include \
+    #                 --with-iconv-libraries=${prefix}/lib
 
     # add the bootstrap binary and the sphinx-build binary to PATH
     configure.env-append \
         GHC=${bootstrap_dir}/bin/ghc \
         "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
 
-    # overwrite `build.env`
+    pre-configure {
+        xinstall -m 0755 -d ${bootstrap_dir}
+    }
+
+    # the PATH environment must provide the bootstrap path
     build.env \
         "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
-
-    pre-build {
-        # test: move extracted testsuite directory to src
-        xinstall -m 0755 -d ${srcpath}/${distname}
-        move        ${test.dir} ${srcpath}/${distname}/testsuite
-        test.dir    ${srcpath}/${distname}/testsuite
-    }
 
     post-build {
         # bootstrap build/destroot from ${distname}-src${extract.suffix}
@@ -177,14 +211,15 @@ if { [variant_isset "prebuilt"] } {
         system -W ${srcpath}/${distname} "patch -p0 < ${filespath}/patch-gmp-ghc.mk.diff"
 
         system -W ${srcpath}/${distname} \
-            "export PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin ;\
+            "export ${configure.env} ;\
             ./boot"
 
         # configure
         # install the final compiler to destroot
-        configure.pre_args \
-            --prefix=${destroot}${prefix}
-        configure.dir ${srcpath}/${distname}
+        configure.pre_args-replace \
+                    --prefix=${bootstrap_dir} \
+                    --prefix=${destroot}${prefix}
+        configure.dir   ${srcpath}/${distname}
         system -W ${srcpath}/${distname} \
             "export ${configure.env};\
             ${configure.cmd} ${configure.pre_args}"
@@ -198,15 +233,6 @@ if { [variant_isset "prebuilt"] } {
            ${build.cmd} ${destroot.pre_args}"
     }
 }
-
-# install the initial bootstrap compiler to destroot
-configure.pre_args  --prefix=${bootstrap_dir}
-
-# the PATH environment must provide the bootstrap path
-# note: this command does not change the destroot PATH environment, so export
-# PATH explicitly in the necessary system command below
-build.env-append \
-    "PATH=$env(PATH):${bootstrap_dir}/bin"
 
 # Note: `make install` in bootstrap build cannot use a parallel build
 use_parallel_build  no
@@ -232,9 +258,13 @@ post-activate {
     system "${prefix}/bin/ghc-pkg recache"
 }
 
+pre-test {
+    test.env-append \
+        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
+}
+
 test.run            yes
-test.env-append     "PATH=$env(PATH):${bootstrap_dir}/bin"
-test.dir            ${worksrcpath}/testsuite
+test.dir            ${srcpath}/${distname}/testsuite
 test.target         test
 
 notes "The GHC User Manual is available at:
