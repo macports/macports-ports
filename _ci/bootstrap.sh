@@ -1,4 +1,7 @@
 #!/bin/bash
+
+mdutil -sa
+
 set -e
 
 # Disable NTP clock sync: VM clock might be ahead
