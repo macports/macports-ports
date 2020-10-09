@@ -24,7 +24,7 @@
 #
 # To get a list of these, run in worksrcdir:
 #     cargo update
-#     grep \"checksum Cargo.lock | perl -pe 's/"checksum (\S*) (\S*) \S* = "(\S*)"/cargo.crates $1 $2 $3/'
+#     egrep -e '^(name|version|checksum) = ' Cargo.lock | perl -pe 's/^(?:name|version|checksum) = "(.+)"/$1/'
 #
 # https://github.com/macports/macports-contrib/tree/master/cargo2port/cargo2port.tcl
 #
