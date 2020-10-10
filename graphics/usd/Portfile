@@ -1,0 +1,221 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           cmake 1.1
+PortGroup           active_variants 1.1
+
+github.setup        PixarAnimationStudios USD 19.11 v
+github.tarball_from archive
+name                usd
+categories          graphics
+platforms           darwin
+license             Apache-2
+maintainers         @jasonliu--
+homepage            http://www.openusd.org
+description         universal scene description
+long_description    Universal Scene Description (USD) is a software \
+                    library, developed by Pixar Animation Studios, \
+                    that provides a system for authoring, reading, and \
+                    streaming time-sampled scene description for \
+                    interchange between computer graphics \
+                    applications. It organizes data into hierarchical \
+                    namespaces of primitives and their properties. \
+                    This provides a set of schemas upon which common \
+                    3-D computer graphics concepts such as geometry, \
+                    shading, models, and assets can be organized and \
+                    manipulated.
+
+checksums           rmd160  26c4c38b45e9254395b5e673a15ed95fb9465a44 \
+                    sha256  84f3bb123f7950b277aace096d678c8876737add0ed0b6ccb77cabb4f32dbcb0 \
+                    size    37563211
+
+set py_ver          2.7
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_lib-append  port:boost \
+                    port:tbb
+
+compiler.cxx_standard 2011
+# USD fails to compile for Clang older than 8.1.0
+# (Note: Clang 8.1.0 == clang-802 in Xcode)
+compiler.blacklist-append {clang < 802}
+
+# This patch adds modifications that allow Blender to use USD. The patch
+# file 'patch-add-blender-mods.diff' was extracted from the file in
+# Blender's source code named
+# 'build_files/build_environment/patches/usd.diff'. (No further
+# modifications to the patch itself were needed, since Blender 2.83 was
+# written to be compatible with USD version 19.11.) These modifications
+# essentially add a hook for Blender to use, and shouldn't otherwise
+# affect the functioning of USD.
+patchfiles-append   patch-add-blender-mods.diff
+
+# By default, USD places plugins in a ${prefix}/plugin directory. This
+# patch changes it so that the plugins get placed in a location that
+# conforms with MacPorts' mtree layout: ${prefix}/share/usd/plugins
+patchfiles-append   patch-plugins-output-paths.diff
+
+post-patch {
+    # USD puts its CMake package config files in the wrong place
+    reinplace {s|cmake/||} ${worksrcpath}/pxr/pxrConfig.cmake.in
+    reinplace -E "s|\(set.PXR_INCLUDE_DIRS \).*|\\1\"${prefix}/include\")|" \
+        ${worksrcpath}/pxr/pxrConfig.cmake.in
+    foreach re [list \
+        {s|(PROJECT_BINARY_DIR.*)(pxrConfig)|\1lib/cmake/usd/\2|} \
+        {/DESTINATION.*CMAKE_INSTALL_PREFIX/s|(DESTINATION ")(.*)"|\1\2/lib/cmake/usd"|} \
+        {/DESTINATION.*cmake/s|(DESTINATION ")cmake|\1lib/cmake/usd|} \
+    ] {
+        reinplace -E $re ${worksrcpath}/pxr/CMakeLists.txt
+    }
+}
+
+# Turn off all of USD's default build options. We will allow users to
+# directly control these options using port variants.
+configure.args      -DPXR_BUILD_TESTS=OFF \
+                    -DPXR_BUILD_IMAGING=OFF \
+                    -DPXR_BUILD_USD_IMAGING=OFF \
+                    -DPXR_BUILD_USDVIEW=OFF \
+                    -DPXR_ENABLE_GL_SUPPORT=OFF \
+                    -DPXR_ENABLE_PYTHON_SUPPORT=OFF \
+                    -DPXR_ENABLE_HDF5_SUPPORT=OFF \
+                    -DPXR_ENABLE_PTEX_SUPPORT=OFF
+
+############################# Variants ##############################
+
+variant docs description {Build documentation} {
+    depends_build-append    port:doxygen \
+                            path:bin/dot:graphviz
+
+    post-patch {
+        reinplace {s|docs|share/doc/usd|g} ${worksrcpath}/CMakeLists.txt
+        reinplace {/installPath = os/s|docs|share/doc/usd|} \
+            ${worksrcpath}/cmake/macros/generateDocs.py
+        reinplace {/os.mkdir.installPath/s/mkdir/makedirs/} \
+            ${worksrcpath}/cmake/macros/generateDocs.py
+        reinplace {/PROJECT_NAME.*=/s/$/"Universal Scene Description"/} \
+            ${worksrcpath}/pxr/usd/lib/usd/Doxyfile.in
+        reinplace "/PROJECT_NUMBER.*=/s/$/${version}/" \
+            ${worksrcpath}/pxr/usd/lib/usd/Doxyfile.in
+    }
+
+    configure.args-append   -DPXR_BUILD_DOCUMENTATION=ON
+}
+
+variant tests description {Build unit tests} {
+    patchfiles-append       patch-tests-output-paths.diff
+    configure.args-replace  -DPXR_BUILD_TESTS=OFF \
+                            -DPXR_BUILD_TESTS=ON
+}
+
+variant imaging description {Build imaging components} {
+    depends_lib-append      port:openexr \
+                            port:opensubdiv
+    configure.args-replace  -DPXR_BUILD_IMAGING=OFF \
+                            -DPXR_BUILD_IMAGING=ON
+}
+
+variant usd_imaging requires imaging \
+    description {Build USD imaging components} \
+{
+    configure.args-replace  -DPXR_USD_IMAGING=OFF \
+                            -DPXR_USD_IMAGING=ON
+}
+
+variant opengl description {Enable OpenGL-based components} {
+    if {[variant_isset imaging]} {
+        depends_lib-append  port:glew
+    }
+    configure.args-replace  -DPXR_ENABLE_GL_SUPPORT=OFF \
+                            -DPXR_ENABLE_GL_SUPPORT=ON
+}
+
+variant python description {Enable Python-based components} {
+    require_active_variants boost python${py_ver_nodot}
+    depends_lib-append      port:python${py_ver_nodot} \
+                            port:py${py_ver_nodot}-jinja2
+
+    post-patch {
+        # According to 'cmake --help-module FindBoost': "Note that Boost
+        # Python components require a Python version suffix (Boost 1.67
+        # and later), e.g. 'python36' or 'python27' for the versions
+        # built against Python 3.6 and 2.7, respectively."
+        reinplace -E "/--Boost/,/--Jinja2/s/\(python\)/\\1${py_ver_nodot}/" \
+            ${worksrcpath}/cmake/defaults/Packages.cmake
+    }
+
+    configure.args-replace  -DPXR_ENABLE_PYTHON_SUPPORT=OFF \
+                            -DPXR_ENABLE_PYTHON_SUPPORT=ON
+}
+
+variant viewer \
+    requires usd_imaging python opengl \
+    description {Build USD viewer} \
+{
+    depends_lib-append      port:py${py_ver_nodot}-pyside \
+                            port:py${py_ver_nodot}-opengl
+    configure.args-replace  -DPXR_BUILD_USDVIEW=OFF \
+                            -DPXR_BUILD_USDVIEW=ON
+}
+
+variant ptex description {Enable Ptex support} {
+    depends_lib-append      port:ptex
+    configure.args-replace  -DPXR_ENABLE_PTEX_SUPPORT=OFF \
+                            -DPXR_ENABLE_PTEX_SUPPORT=ON
+}
+
+variant monolithic \
+    description {Build the USD libraries as a single archive library, instead of modular individual libraries} \
+{
+    configure.args-append   -DPXR_BUILD_MONOLITHIC=ON
+}
+
+### Imaging Plugins
+
+variant oiio description {Build OpenImageIO plugin} {
+    depends_lib-append      port:openimageio
+    configure.args-append   -DPXR_BUILD_OPENIMAGEIO_PLUGIN=ON
+}
+
+variant ocio description {Build OpenColorIO plugin} {
+    depends_lib-append      port:opencolorio
+    configure.args-append   -DPXR_BUILD_OPENCOLORIO_PLUGIN=ON
+}
+
+variant alembic description {Build the Alembic plugin for USD} {
+    depends_lib-append      port:alembic
+    configure.args-append   -DPXR_BUILD_ALEMBIC_PLUGIN=ON
+}
+
+variant hdf5 requires alembic \
+    description {Enable HDF5 support in the Alembic plugin} \
+{
+    require_active_variants alembic hdf5
+    configure.args-replace  -DPXR_ENABLE_HDF5_SUPPORT=OFF \
+                            -DPXR_ENABLE_HDF5_SUPPORT_ON
+}
+
+variant materialx description {Build MaterialX plugin} {
+    depends_lib-append      port:materialx
+
+    post-patch {
+        foreach re [list \
+            "/find_package.MaterialX/i\\
+\\    set(CMAKE_MODULE_PATH_ORIG \${CMAKE_MODULE_PATH})\\
+\\    list(PREPEND CMAKE_MODULE_PATH \"\${CMAKE_SOURCE_DIR}/cmake/modules\")\\
+" \
+            "/find_package.MaterialX/a\\
+\\    set(CMAKE_MODULE_PATH \${CMAKE_MODULE_PATH_ORIG})\\
+" \
+        ] {
+            reinplace $re ${worksrcpath}/cmake/defaults/Packages.cmake
+        }
+        reinplace -E {s|(stdlib_defs.mtlx)|share/MaterialX/libraries/stdlib/\1|} \
+            ${worksrcpath}/cmake/modules/FindMaterialX.cmake
+    }
+
+    configure.args-append   -DPXR_BUILD_MATERIALX_PLUGIN=ON
+}
+
+default_variants    +docs +tests +ptex +oiio +ocio +alembic
