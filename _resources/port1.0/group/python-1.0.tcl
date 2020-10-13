@@ -9,7 +9,7 @@
 # you can change that in variants if you want
 
 # options:
-# python.versions: which versions this module supports, e.g. "26 27 31"
+# python.versions: which versions this module supports, e.g. "27 38 39 pypy37"
 #   always set this (even if you have your own subport blocks)
 # python.default_version: which version will be installed if the user asks
 #   for py-foo rather than pyXY-foo
@@ -65,7 +65,13 @@ default python.consistent_destroot yes
 
 proc python_get_version {} {
     if {[string match py-* [option name]]} {
-        return [string range [option subport] 2 3]
+        set v [lindex [split [option subport] -] 0]
+
+        if {[regexp {^py\d+$} ${v}]} {
+            return [string range $v 2 end]
+        } else {
+            return ${v}
+        }
     } else {
         return [option python.default_version]
     }
@@ -91,10 +97,18 @@ proc python_set_versions {option action args} {
     }
     global name subport python._addedcode
     if {[string match py-* $name]} {
+        set rootname [join [lindex [split $name -] 1 end] -]
         foreach v [option $option] {
-
-            subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
+            # special handling of regular CPython versions
+            if {[regexp {^\d+$} ${v}]} {
+                set v py${v}
+            }
+            subport ${v}-${rootname} {
+                global python.port
+                depends_lib-append port:${python.port}
+            }
         }
+
         if {$subport eq $name || $subport eq ""} {
             # Ensure the stub port does not do anything with distfiles—not
             # if the port overrides distfiles, not if there's a post-extract
@@ -117,7 +131,11 @@ proc python_set_versions {option action args} {
             supported_archs noarch
             global python.default_version python.version
             unset python.version
-            depends_lib port:py${python.default_version}[string trimleft $name py]
+            if {[string match {[0-9]*} ${python.default_version}]} {
+                depends_lib port:py${python.default_version}-${rootname}
+            } else {
+                depends_lib port:${python.default_version}-${rootname}
+            }
             patch {}
             build {}
             destroot {
@@ -256,36 +274,138 @@ proc python_set_default_version {option action args} {
     if {$action ne "set"} {
         return
     }
-    global name subport python.default_version
+    global name subport python.default_version python.rootname python.port
     if {[string match py-* $name]} {
         if {$subport eq $name || $subport eq ""} {
-            depends_lib port:py${python.default_version}[string trimleft $name py]
+            if {[string match {[0-9]*} ${python.default_version}]} {
+                set v py${python.default_version}
+            } else {
+                set v ${python.default_version}
+            }
+            depends_lib port:${v}-${python.rootname}
         }
     } else {
         python.versions ${python.default_version}
-        depends_lib-append port:python[option python.default_version]
+        depends_lib-append port:${python.port}
     }
 }
 
 
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd
-# for pythonXY, python.branch is X.Y
-default python.branch   {[string range ${python.version} 0 end-1].[string index ${python.version} end]}
-default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
-default python.bin      {${python.prefix}/bin/python${python.branch}}
-default python.lib      {${python.prefix}/Python}
-default python.pkgd     {${python.prefix}/lib/python${python.branch}/site-packages}
-default python.libdir   {${python.prefix}/lib/python${python.branch}}
+# "CPython" or "PyPy"
+default python.impl     {[python_get_defaults impl]}
+# for pythonXYZ or pypyXYZ, python.branch is X.YZ
+default python.branch   {[python_get_defaults branch]}
+# for pythonXYZ or pypyXYZ, python.language_version is XYZ
+default python.language_version \
+                        {[string map {. {}} [python_get_defaults branch]]}
+default python.prefix   {[python_get_defaults prefix]}
+# e.g. py37 or pypy37, for dependencies, etc.
+default python.headname {[python_get_defaults headname]}
+default python.port     {[python_get_defaults port]}
+default python.bin      {[python_get_defaults bin]}
+default python.lib      {[python_get_defaults lib]}
+default python.pkgd     {[python_get_defaults pkgd]}
+default python.libdir   {[python_get_defaults libdir]}
 default python.include  {[python_get_defaults include]}
 default build.cmd       {${python.bin} setup.py --no-user-cfg}
 default destroot.cmd    {${python.bin} setup.py --no-user-cfg}
 default destroot.destdir {--prefix=${python.prefix} --root=${destroot}}
 
+
 proc python_get_defaults {var} {
-    global python.version python.branch python.prefix
+    global frameworks_dir prefix \
+        python.impl python.version python.branch python.prefix
+
     switch -- $var {
+        branch {
+            set vs [regexp -inline {^[[:alpha:]]*(\d)(\d+)$} ${python.version}]
+            return [join [lrange ${vs} 1 end] .]
+        }
+        impl {
+            if {[string match py-* [option name]]} {
+                set v [regexp -inline {^py(?:py)?\d+} [option subport]]
+            } else {
+                set v ${python.version}
+            }
+
+            if {[string match pypy* ${v}]} {
+                return "PyPy"
+            } else {
+                return "CPython"
+            }
+        }
+        prefix {
+            if {${python.impl} eq "PyPy" && ${python.branch} == 2.7} {
+                return ${prefix}/lib/pypy
+            } elseif {${python.impl} eq "PyPy"} {
+                return ${prefix}/lib/${python.version}
+            } else {
+                return ${frameworks_dir}/Python.framework/Versions/${python.branch}
+            }
+        }
+        headname {
+            if {${python.impl} eq "CPython"} {
+                return py${python.version}
+            } else {
+                return ${python.version}
+            }
+        }
+        port {
+            if {${python.impl} eq "CPython"} {
+                return python${python.version}
+            } elseif {${python.impl} eq "PyPy" && ${python.branch} == 2.7} {
+                return pypy
+            } else {
+                return ${python.version}
+            }
+        }
+        bin {
+            if {${python.impl} eq "PyPy"} {
+                if {${python.branch} == 2.7} {
+                    return ${python.prefix}/bin/pypy
+                } else {
+                    return ${python.prefix}/bin/pypy3
+                }
+            } elseif {${python.impl} eq "CPython"} {
+                return ${python.prefix}/bin/python${python.branch}
+            }
+        }
+        lib {
+            if {${python.impl} eq "PyPy"} {
+                if {${python.branch} == 2.7} {
+                    return ${python.prefix}/bin/libpypy-c.dylib
+                } else {
+                    return ${python.prefix}/bin/libpypy3-c.dylib
+                }
+            } elseif {${python.impl} eq "CPython"} {
+                return ${python.prefix}/Python
+            }
+        }
+        pkgd {
+            if {${python.impl} eq "PyPy"} {
+                return ${python.prefix}/site-packages
+            } elseif {${python.impl} eq "CPython"} {
+                return ${python.prefix}/lib/python${python.branch}/site-packages
+            }
+        }
+        libdir {
+            if {${python.impl} eq "PyPy"} {
+                if {${python.version} eq 27} {
+                    return ${python.prefix}/lib-python/${python.branch}
+                } else {
+                    return ${python.prefix}/lib-python/[string index ${python.version} 0]
+                }
+            } elseif {${python.impl} eq "CPython"} {
+                return ${python.prefix}/lib/python${python.branch}
+            }
+        }
         include {
+            if {${python.impl} eq "PyPy"} {
+                return ${python.prefix}/include
+            }
+
             set inc_dir "${python.prefix}/include/python${python.branch}"
             if {[file exists ${inc_dir}]} {
                 return ${inc_dir}
@@ -306,14 +426,14 @@ proc python_get_defaults {var} {
             }
         }
         binary_suffix {
-            if {[string match py-* [option name]]} {
+            if {${python.impl} eq "PyPy"} {
+                return -pypy${python.branch}
+            } elseif {${python.impl} eq "CPython"} {
                 return -${python.branch}
-            } else {
-                return ""
             }
         }
         jobs_arg {
-            if {${python.version} >= 35 && [option use_parallel_build]} {
+            if {[vercmp ${python.branch} 3.5] >= 0 && [option use_parallel_build]} {
                 return " -j[option build.jobs]"
             } else {
                 return ""
