@@ -223,9 +223,10 @@ proc handle_set_go_vendors {vendors_str} {
                         set distfile ${vversion}.tar.gz
                         set master_site https://bitbucket.org/${vauthor}/${vproject}/get
                     }
-                    gitlab.com {
+                    gitlab.com -
+                    salsa.debian.org {
                         set distfile ${vproject}-${vversion}.tar.gz
-                        set master_site https://gitlab.com/${vauthor}/${vproject}/-/archive/${vversion}
+                        set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
