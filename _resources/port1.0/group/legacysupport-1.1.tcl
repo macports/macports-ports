@@ -50,7 +50,7 @@ proc legacysupport::get_library_name {} {
     if {[option legacysupport.use_static]} {
         return ${prefix}/lib/libMacportsLegacySupport.a
     } else {
-        return ${prefix}/lib/libMacportsLegacySupport.dylib
+        return -lMacportsLegacySupport
     }
 }
 
