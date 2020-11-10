@@ -860,7 +860,9 @@ variant universal {
         foreach arch ${universal_archs_to_use} {
             # Rosetta does not translate G5 instructions
             # PowerPC systems can't translate Intel instructions
-            if {(${os.arch} eq "i386" && ${arch} ne "ppc64") || (${os.arch} eq "powerpc" && ${arch} ni [list i386 x86_64])} {
+            if {(${os.arch} eq "arm" && ${arch} in [list arm64 x86_64])
+                || (${os.arch} eq "i386" && ${arch} in [list i386 ppc x86_64])
+                || (${os.arch} eq "powerpc" && ${arch} in [list ppc ppc64])} {
                 ui_info "$UI_PREFIX [format [msgcat::mc "Testing %1\$s for architecture %2\$s"] ${subport} ${arch}]"
 
                 if { [info exists merger_test_env(${arch})] } {
