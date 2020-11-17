@@ -1,0 +1,2773 @@
+diff --git gqrx.pro gqrx.pro
+index bb8cfc9..1414e2d 100644
+--- gqrx.pro
++++ gqrx.pro
+@@ -123,6 +123,7 @@ SOURCES += \
+     src/qtgui/afsk1200win.cpp \
+     src/qtgui/agc_options.cpp \
+     src/qtgui/audio_options.cpp \
++    src/qtgui/bandplan.cpp \
+     src/qtgui/bookmarks.cpp \
+     src/qtgui/bookmarkstablemodel.cpp \
+     src/qtgui/bookmarkstaglist.cpp \
+@@ -143,7 +144,9 @@ SOURCES += \
+     src/qtgui/qtcolorpicker.cpp \
+     src/receivers/nbrx.cpp \
+     src/receivers/receiver_base.cpp \
+-    src/receivers/wfmrx.cpp
++    src/receivers/wfmrx.cpp \
++    src/qtgui/dxc_spots.cpp \
++    src/qtgui/dxc_options.cpp
+ 
+ HEADERS += \
+     src/applications/gqrx/gqrx.h \
+@@ -183,6 +186,7 @@ HEADERS += \
+     src/qtgui/afsk1200win.h \
+     src/qtgui/agc_options.h \
+     src/qtgui/audio_options.h \
++    src/qtgui/bandplan.h \
+     src/qtgui/bookmarks.h \
+     src/qtgui/bookmarkstablemodel.h \
+     src/qtgui/bookmarkstaglist.h \
+@@ -204,7 +208,9 @@ HEADERS += \
+     src/qtgui/qtcolorpicker.h \
+     src/receivers/nbrx.h \
+     src/receivers/receiver_base.h \
+-    src/receivers/wfmrx.h
++    src/receivers/wfmrx.h \
++    src/qtgui/dxc_spots.h \
++    src/qtgui/dxc_options.h
+ 
+ FORMS += \
+     src/applications/gqrx/mainwindow.ui \
+@@ -221,7 +227,8 @@ FORMS += \
+     src/qtgui/iq_tool.ui \
+     src/qtgui/dockrxopt.ui \
+     src/qtgui/ioconfig.ui \
+-    src/qtgui/nb_options.ui
++    src/qtgui/nb_options.ui \
++    src/qtgui/dxc_options.ui
+ 
+ # Use pulseaudio (ps: could use equals? undocumented)
+ equals(AUDIO_BACKEND, "pulseaudio"): {
+diff --git src/applications/gqrx/mainwindow.cpp src/applications/gqrx/mainwindow.cpp
+index 4dda559..3f07580 100644
+--- src/applications/gqrx/mainwindow.cpp
++++ src/applications/gqrx/mainwindow.cpp
+@@ -48,6 +48,7 @@
+ #include <QSvgWidget>
+ #include "qtgui/ioconfig.h"
+ #include "mainwindow.h"
++#include "qtgui/dxc_spots.h"
+ 
+ /* Qt Designer files */
+ #include "ui_mainwindow.h"
+@@ -57,6 +58,7 @@
+ #include "remote_control_settings.h"
+ 
+ #include "qtgui/bookmarkstaglist.h"
++#include "qtgui/bandplan.h"
+ 
+ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     QMainWindow(parent),
+@@ -69,7 +71,9 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     dec_afsk1200(0)
+ {
+     ui->setupUi(this);
++    BandPlan::create();
+     Bookmarks::create();
++    DXCSpots::create();
+ 
+     /* Initialise default configuration directory */
+     QByteArray xdg_dir = qgetenv("XDG_CONFIG_HOME");
+@@ -122,13 +126,20 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     // create I/Q tool widget
+     iq_tool = new CIqTool(this);
+ 
++    // create DXC Objects
++    dxc_options = new DXC_Options(this);
++    dxc_timer = new QTimer(this);
++    dxc_timer->start(1000);
++
+     /* create dock widgets */
+     uiDockRxOpt = new DockRxOpt();
+     uiDockRDS = new DockRDS();
+     uiDockAudio = new DockAudio();
+     uiDockInputCtl = new DockInputCtl();
+     uiDockFft = new DockFft();
++    BandPlan::Get().setConfigDir(m_cfg_dir);
+     Bookmarks::Get().setConfigDir(m_cfg_dir);
++    BandPlan::Get().load();
+     uiDockBookmarks = new DockBookmarks(this);
+ 
+     // setup some toggle view shortcuts
+@@ -139,6 +150,10 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     uiDockBookmarks->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_B));
+     ui->mainToolBar->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_T));
+ 
++    /* frequency setting shortcut */
++    QShortcut *freq_shortcut = new QShortcut(QKeySequence(Qt::Key_F), this);
++    QObject::connect(freq_shortcut, &QShortcut::activated, this, &MainWindow::frequencyFocusShortcut);
++
+     setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+     setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+     setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea);
+@@ -237,6 +252,7 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     connect(uiDockFft, SIGNAL(resetFftZoom()), ui->plotter, SLOT(resetHorizontalZoom()));
+     connect(uiDockFft, SIGNAL(gotoFftCenter()), ui->plotter, SLOT(moveToCenterFreq()));
+     connect(uiDockFft, SIGNAL(gotoDemodFreq()), ui->plotter, SLOT(moveToDemodFreq()));
++    connect(uiDockFft, SIGNAL(bandPlanChanged(bool)), ui->plotter, SLOT(toggleBandPlan(bool)));
+     connect(uiDockFft, SIGNAL(wfColormapChanged(const QString)), ui->plotter, SLOT(setWfColormap(const QString)));
+     connect(uiDockFft, SIGNAL(wfColormapChanged(const QString)), uiDockAudio, SLOT(setWfColormap(const QString)));
+ 
+@@ -260,6 +276,9 @@ MainWindow::MainWindow(const QString cfgfile, bool edit_conf, QWidget *parent) :
+     connect(uiDockBookmarks, SIGNAL(newBookmarkActivated(qint64, QString, int)), this, SLOT(onBookmarkActivated(qint64, QString, int)));
+     connect(uiDockBookmarks->actionAddBookmark, SIGNAL(triggered()), this, SLOT(on_actionAddBookmark_triggered()));
+ 
++    //DXC Spots
++    connect(&DXCSpots::Get(), SIGNAL(DXCSpotsChanged()),this , SLOT(addClusterSpot()));
++    connect(dxc_timer, SIGNAL(timeout()), this, SLOT(checkDXCSpotTimeout()));
+ 
+     // I/Q playback
+     connect(iq_tool, SIGNAL(startRecording(QString)), this, SLOT(startIqRecording(QString)));
+@@ -349,6 +368,9 @@ MainWindow::~MainWindow()
+     audio_fft_timer->stop();
+     delete audio_fft_timer;
+ 
++    dxc_timer->stop();
++    delete dxc_timer;
++
+     if (m_settings)
+     {
+         m_settings->setValue("configversion", 2);
+@@ -371,6 +393,7 @@ MainWindow::~MainWindow()
+     }
+ 
+     delete iq_tool;
++    delete dxc_options;
+     delete ui;
+     delete uiDockRxOpt;
+     delete uiDockAudio;
+@@ -592,6 +615,7 @@ bool MainWindow::loadConfig(const QString cfgfile, bool check_crash,
+     uiDockRxOpt->readSettings(m_settings);
+     uiDockFft->readSettings(m_settings);
+     uiDockAudio->readSettings(m_settings);
++    dxc_options->readSettings(m_settings);
+ 
+     {
+         int64_val = m_settings->value("input/frequency", 14236000).toLongLong(&conv_ok);
+@@ -711,6 +735,7 @@ void MainWindow::storeSession()
+ 
+         remote->saveSettings(m_settings);
+         iq_tool->saveSettings(m_settings);
++        dxc_options->saveSettings(m_settings);
+ 
+         {
+             int     flo, fhi;
+@@ -2066,6 +2091,11 @@ void MainWindow::afsk1200win_closed()
+     dec_afsk1200 = 0;
+ }
+ 
++/** Show DXC Options. */
++void MainWindow::on_actionDX_Cluster_triggered()
++{
++    dxc_options->show();
++}
+ 
+ /**
+  * Cyclic processing for acquiring samples from receiver and processing them
+@@ -2345,3 +2375,19 @@ void MainWindow::on_actionAddBookmark_triggered()
+         ui->plotter->updateOverlay();
+     }
+ }
++
++void MainWindow::addClusterSpot()
++{
++    ui->plotter->updateOverlay();
++}
++
++void MainWindow::checkDXCSpotTimeout()
++{
++    DXCSpots::Get().checkSpotTimeout();
++    ui->plotter->updateOverlay();
++}
++
++void MainWindow::frequencyFocusShortcut()
++{
++    ui->freqCtrl->setFrequencyFocus();
++}
+diff --git src/applications/gqrx/mainwindow.h src/applications/gqrx/mainwindow.h
+index 91e8d37..80f4fda 100644
+--- src/applications/gqrx/mainwindow.h
++++ src/applications/gqrx/mainwindow.h
+@@ -32,6 +32,7 @@
+ #include <QMessageBox>
+ #include <QFileDialog>
+ #include <QSvgWidget>
++#include <QShortcut>
+ 
+ #include "qtgui/dockrxopt.h"
+ #include "qtgui/dockaudio.h"
+@@ -41,6 +42,8 @@
+ #include "qtgui/dockrds.h"
+ #include "qtgui/afsk1200win.h"
+ #include "qtgui/iq_tool.h"
++#include "qtgui/dxc_options.h"
++#include "qtgui/dxc_spots.h"
+ 
+ #include "applications/gqrx/remote_control.h"
+ 
+@@ -99,6 +102,7 @@ private:
+     DockRDS        *uiDockRDS;
+ 
+     CIqTool        *iq_tool;
++    DXC_Options    *dxc_options;
+ 
+ 
+     /* data decoders */
+@@ -110,6 +114,7 @@ private:
+     QTimer   *iq_fft_timer;
+     QTimer   *audio_fft_timer;
+     QTimer   *rds_timer;
++    QTimer   *dxc_timer;
+ 
+     receiver *rx;
+ 
+@@ -126,6 +131,8 @@ private:
+     void updateGainStages(bool read_from_device);
+     void showSimpleTextFile(const QString &resource_path,
+                             const QString &window_title);
++    /* key shortcut */
++    void frequencyFocusShortcut();
+ 
+ private slots:
+     /* rf */
+@@ -202,6 +209,9 @@ private slots:
+     /* Bookmarks */
+     void onBookmarkActivated(qint64 freq, QString demod, int bandwidth);
+ 
++    /* DXC Spots */
++    void addClusterSpot();
++
+     /* menu and toolbar actions */
+     void on_actionDSP_triggered(bool checked);
+     int  on_actionIoConfig_triggered();
+@@ -219,6 +229,7 @@ private slots:
+     void on_actionAbout_triggered();
+     void on_actionAboutQt_triggered();
+     void on_actionAddBookmark_triggered();
++    void on_actionDX_Cluster_triggered();
+ 
+ 
+     /* window close signals */
+@@ -231,6 +242,7 @@ private slots:
+     void iqFftTimeout();
+     void audioFftTimeout();
+     void rdsTimeout();
++    void checkDXCSpotTimeout();
+ };
+ 
+ #endif // MAINWINDOW_H
+diff --git src/applications/gqrx/mainwindow.ui src/applications/gqrx/mainwindow.ui
+index 0fb1f36..dc39a81 100644
+--- src/applications/gqrx/mainwindow.ui
++++ src/applications/gqrx/mainwindow.ui
+@@ -195,7 +195,7 @@
+      <x>0</x>
+      <y>0</y>
+      <width>521</width>
+-     <height>19</height>
++     <height>22</height>
+     </rect>
+    </property>
+    <widget class="QMenu" name="menu_File">
+@@ -242,6 +242,7 @@
+     <addaction name="separator"/>
+     <addaction name="actionAFSK1200"/>
+     <addaction name="separator"/>
++    <addaction name="actionDX_Cluster"/>
+    </widget>
+    <addaction name="menu_File"/>
+    <addaction name="menu_Tools"/>
+@@ -541,6 +542,17 @@
+     <string>Ctrl+W</string>
+    </property>
+   </action>
++  <action name="actionDX_Cluster">
++   <property name="text">
++    <string>DX Cluster</string>
++   </property>
++   <property name="toolTip">
++    <string>Open DX Cluster Dialog</string>
++   </property>
++   <property name="shortcut">
++    <string>Ctrl+C</string>
++   </property>
++  </action>
+  </widget>
+  <layoutdefault spacing="6" margin="11"/>
+  <customwidgets>
+diff --git src/dsp/rx_noise_blanker_cc.cpp src/dsp/rx_noise_blanker_cc.cpp
+index c8e2447..ae9fd2b 100644
+--- src/dsp/rx_noise_blanker_cc.cpp
++++ src/dsp/rx_noise_blanker_cc.cpp
+@@ -26,6 +26,14 @@
+ #include <gnuradio/gr_complex.h>
+ #include "dsp/rx_noise_blanker_cc.h"
+ 
++
++
++void rx_nb_cc::forecast (int noutput_items, gr_vector_int &ninput_items_required)
++{
++    ninput_items_required[0] = d_nb2_bsize;
++}
++
++
+ rx_nb_cc_sptr make_rx_nb_cc(double sample_rate, float thld1, float thld2)
+ {
+     return gnuradio::get_initial_sptr(new rx_nb_cc(sample_rate, thld1, thld2));
+@@ -38,8 +46,8 @@ rx_nb_cc_sptr make_rx_nb_cc(double sample_rate, float thld1, float thld2)
+  */
+ rx_nb_cc::rx_nb_cc(double sample_rate, float thld1, float thld2)
+     : gr::sync_block ("rx_nb_cc",
+-          gr::io_signature::make(1, 1, sizeof(gr_complex)),
+-          gr::io_signature::make(1, 1, sizeof(gr_complex))),
++          gr::io_signature::make(1, 1, sizeof(float)),
++          gr::io_signature::make(1, 1, sizeof(float))),
+       d_nb1_on(false),
+       d_nb2_on(false),
+       d_sample_rate(sample_rate),
+@@ -52,10 +60,293 @@ rx_nb_cc::rx_nb_cc(double sample_rate, float thld1, float thld2)
+       d_hangtime(0)
+ {
+     memset(d_delay, 0, 8 * sizeof(gr_complex));
++
++
++    // Init nb1 params
++    d_nb1_dline_size = 2048;
++    d_nb1_mask = 2048 - 1;
++    d_nb1_n_taps = 64;
++    d_nb1_delay = 16;
++    d_nb1_two_mu = 1.0e-4;
++    d_nb1_gamma = 0.1;
++    d_nb1_in_idx = 0;
++    d_nb1_lidx = 120.0;
++    d_nb1_lidx_min = 120.0;
++    d_nb1_lidx_max = 200.0;
++    d_nb1_ngamma = 0.001;
++    d_nb1_den_mult = 6.25e-10;
++    d_nb1_lincr = 1.0;
++    d_nb1_ldecr = 3.0;
++    memset (d_nb1_d, 0, sizeof(double) * 2048);
++    memset (d_nb1_w, 0, sizeof(double) * 2048);
++
++    // Init nb2 params
++
++    d_nb2_bsize = (int)1024;
++    d_nb2_fsize = (int)4096;
++    d_nb2_ovrlp = 32;
++    d_nb2_rate = (int)96000;
++    d_nb2_ogain = 0.99;
++
++
++    // nb2 - initial setup
++    int i;
++    double Dvals[18] = { 1.0, 2.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 40.0,
++        60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 220.0, 260.0, 300.0 };
++    double Mvals[18] = { 0.000, 0.260, 0.480, 0.580, 0.610, 0.668, 0.705, 0.762, 0.800,
++        0.841, 0.865, 0.890, 0.900, 0.910, 0.920, 0.930, 0.935, 0.940 };
++    double arg, sum, inv_coherent_gain;
++
++
++    d_nb2_incr = (double)d_nb2_fsize / (double)d_nb2_ovrlp;
++    d_nb2_gain = (double)d_nb2_ogain / (double)d_nb2_fsize / (double)d_nb2_ovrlp;
++    if (d_nb2_fsize > d_nb2_bsize)
++        d_nb2_iasize = d_nb2_fsize;
++    else
++        d_nb2_iasize = d_nb2_bsize + d_nb2_fsize - d_nb2_incr;
++    d_nb2_iainidx = 0;
++    d_nb2_iaoutidx = 0;
++    if (d_nb2_fsize > d_nb2_bsize)
++    {
++        if (d_nb2_bsize > d_nb2_incr)  d_nb2_oasize = d_nb2_bsize;
++        else                                     d_nb2_oasize = d_nb2_incr;
++        d_nb2_oainidx = (d_nb2_fsize - d_nb2_bsize - d_nb2_incr) % d_nb2_oasize;
++    }
++    else
++    {
++        d_nb2_oasize = d_nb2_bsize;
++        d_nb2_oainidx = d_nb2_fsize - d_nb2_incr;
++    }
++    d_nb2_init_oainidx = d_nb2_oainidx;
++    d_nb2_oaoutidx = 0;
++    d_nb2_msize = d_nb2_fsize / 2 + 1;
++    d_nb2_window = (double *)malloc(d_nb2_fsize * sizeof(double));
++    d_nb2_inaccum = (double *)malloc(d_nb2_iasize * sizeof(double));
++    d_nb2_mask = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_save = (double **)malloc(d_nb2_ovrlp * sizeof(double *));
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        d_nb2_save[i] = (double *)malloc(d_nb2_fsize * sizeof(double));
++    d_nb2_outaccum = (double *)malloc(d_nb2_oasize * sizeof(double));
++    d_nb2_nsamps = 0;
++    d_nb2_saveidx = 0;
++
++    d_nb2_fft1 = new gr::fft::fft_real_fwd(d_nb2_fsize);
++    d_nb2_fft2 = new gr::fft::fft_real_rev(d_nb2_fsize);
++
++
++    arg = 2.0 * 3.1415926 / (double)d_nb2_fsize;
++    sum = 0.0;
++    for (i = 0; i < d_nb2_fsize; i++)
++    {
++        d_nb2_window[i] = sqrt (0.54 - 0.46 * cos((double)i * arg));
++        sum += d_nb2_window[i];
++    }
++    inv_coherent_gain = (double)d_nb2_fsize / sum;
++    for (i = 0; i < d_nb2_fsize; i++)
++        d_nb2_window[i] *= inv_coherent_gain;
++
++    d_nb2_g.msize = d_nb2_msize;
++    d_nb2_g.mask = d_nb2_mask;
++    d_nb2_g.lambda_y = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.lambda_d = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.prev_gamma = (double *)malloc(d_nb2_msize * sizeof(double));
++    d_nb2_g.prev_mask = (double *)malloc(d_nb2_msize * sizeof(double));
++
++
++    d_nb2_g.gf1p5 = sqrt(3.1415926) / 2.0;
++    {
++        double tau = -128.0 / 8000.0 / log(0.98);
++        d_nb2_g.alpha = exp(-d_nb2_incr / d_nb2_rate / tau);
++    }
++    d_nb2_g.eps_floor = 1.0e-300;
++    d_nb2_g.gamma_max = 1000.0;
++    d_nb2_g.q = 0.2;
++    for (i = 0; i < d_nb2_g.msize; i++)
++    {
++        d_nb2_g.prev_mask[i] = 1.0;
++        d_nb2_g.prev_gamma[i] = 1.0;
++    }
++    d_nb2_g.gmax = 10000.0;
++
++    d_nb2_np.incr = d_nb2_incr;
++    d_nb2_np.rate = d_nb2_rate;
++    d_nb2_np.msize = d_nb2_msize;
++    d_nb2_np.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_np.lambda_d = d_nb2_g.lambda_d;
++
++    {
++        double tau = -128.0 / 8000.0 / log(0.7);
++        d_nb2_np.alphaCsmooth = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.96);
++        d_nb2_np.alphaMax = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.7);
++        d_nb2_np.alphaCmin = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.3);
++        d_nb2_np.alphaMin_max_value = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    d_nb2_np.snrq = -d_nb2_np.incr / (0.064 * d_nb2_np.rate);
++    {
++        double tau = -128.0 / 8000.0 / log(0.8);
++        d_nb2_np.betamax = exp(-d_nb2_np.incr / d_nb2_np.rate / tau);
++    }
++    d_nb2_np.invQeqMax = 0.5;
++    d_nb2_np.av = 2.12;
++    d_nb2_np.Dtime = 8.0 * 12.0 * 128.0 / 8000.0;
++    d_nb2_np.U = 8;
++    d_nb2_np.V = (int)(0.5 + (d_nb2_np.Dtime * d_nb2_np.rate / (d_nb2_np.U * d_nb2_np.incr)));
++    if (d_nb2_np.V < 4) d_nb2_np.V = 4;
++    if ((d_nb2_np.U = (int)(0.5 + (d_nb2_np.Dtime * d_nb2_np.rate / (d_nb2_np.V * d_nb2_np.incr)))) < 1) d_nb2_np.U = 1;
++    d_nb2_np.D = d_nb2_np.U * d_nb2_np.V;
++    interpM(&d_nb2_np.MofD, d_nb2_np.D, 18, Dvals, Mvals);
++    interpM(&d_nb2_np.MofV, d_nb2_np.V, 18, Dvals, Mvals);
++    d_nb2_np.invQbar_points[0] = 0.03;
++    d_nb2_np.invQbar_points[1] = 0.05;
++    d_nb2_np.invQbar_points[2] = 0.06;
++    d_nb2_np.invQbar_points[3] = 1.0e300;
++    {
++        double db;
++        db = 10.0 * log10(8.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[0] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(4.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[1] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(2.0) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[2] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++        db = 10.0 * log10(1.2) / (12.0 * 128 / 8000);
++        d_nb2_np.nsmax[3] = pow(10.0, db / 10.0 * d_nb2_np.V * d_nb2_np.incr / d_nb2_np.rate);
++    }
++
++    d_nb2_np.p = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.alphaOptHat = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.alphaHat = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.sigma2N = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.pbar = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.p2bar = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.Qeq = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.bmin = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.bmin_sub = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.k_mod = (int *)malloc(d_nb2_np.msize * sizeof(int));
++    d_nb2_np.actmin = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.actmin_sub = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.lmin_flag = (int *)malloc(d_nb2_np.msize * sizeof(int));
++    d_nb2_np.pmin_u = (double *)malloc(d_nb2_np.msize * sizeof(double));
++    d_nb2_np.actminbuff = (double**)malloc(d_nb2_np.U     * sizeof(double*));
++    for (i = 0; i < d_nb2_np.U; i++)
++        d_nb2_np.actminbuff[i] = (double *)malloc(d_nb2_np.msize * sizeof(double));
++
++    {
++        int k, ku;
++        d_nb2_np.alphaC = 1.0;
++        d_nb2_np.subwc = d_nb2_np.V;
++        d_nb2_np.amb_idx = 0;
++        for (k = 0; k < d_nb2_np.msize; k++) d_nb2_np.lambda_y[k] = 0.5;
++        memcpy(d_nb2_np.p, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.sigma2N, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.pbar, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        memcpy(d_nb2_np.pmin_u, d_nb2_np.lambda_y, d_nb2_np.msize * sizeof(double));
++        for (k = 0; k < d_nb2_np.msize; k++)
++        {
++            d_nb2_np.p2bar[k] = d_nb2_np.lambda_y[k] * d_nb2_np.lambda_y[k];
++            d_nb2_np.actmin[k] = 1.0e300;
++            d_nb2_np.actmin_sub[k] = 1.0e300;
++            for (ku = 0; ku < d_nb2_np.U; ku++)
++                d_nb2_np.actminbuff[ku][k] = 1.0e300;
++        }
++        memset(d_nb2_np.lmin_flag, 0, d_nb2_np.msize * sizeof(int));
++    }
++
++    d_nb2_nps.incr = d_nb2_incr;
++    d_nb2_nps.rate = d_nb2_rate;
++    d_nb2_nps.msize = d_nb2_msize;
++    d_nb2_nps.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_nps.lambda_d = d_nb2_g.lambda_d;
++
++    {
++        double tau = -128.0 / 8000.0 / log(0.8);
++        d_nb2_nps.alpha_pow = exp(-d_nb2_nps.incr / d_nb2_nps.rate / tau);
++    }
++    {
++        double tau = -128.0 / 8000.0 / log(0.9);
++        d_nb2_nps.alpha_Pbar = exp(-d_nb2_nps.incr / d_nb2_nps.rate / tau);
++    }
++    d_nb2_nps.epsH1 = pow(10.0, 15.0 / 10.0);
++    d_nb2_nps.epsH1r = d_nb2_nps.epsH1 / (1.0 + d_nb2_nps.epsH1);
++
++    d_nb2_nps.sigma2N = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.PH1y = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.Pbar = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++    d_nb2_nps.EN2y = (double *)malloc(d_nb2_nps.msize * sizeof(double));
++
++    for (i = 0; i < d_nb2_nps.msize; i++)
++    {
++        d_nb2_nps.sigma2N[i] = 0.5;
++        d_nb2_nps.Pbar[i] = 0.5;
++    }
++
++    d_nb2_ae.msize = d_nb2_msize;
++    d_nb2_ae.lambda_y = d_nb2_g.lambda_y;
++    d_nb2_ae.zetaThresh = 0.75;
++    d_nb2_ae.psi = 10.0;
++    d_nb2_ae.nmask = (double *)malloc(d_nb2_ae.msize * sizeof(double));
++
++    memset (d_nb2_inaccum, 0, d_nb2_iasize * sizeof (double));
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        memset (d_nb2_save[i], 0, d_nb2_fsize * sizeof (double));
++    memset (d_nb2_outaccum, 0, d_nb2_oasize * sizeof (double));
++    d_nb2_nsamps   = 0;
++    d_nb2_iainidx  = 0;
++    d_nb2_iaoutidx = 0;
++    d_nb2_oainidx  = d_nb2_init_oainidx;
++    d_nb2_oaoutidx = 0;
++    d_nb2_saveidx  = 0;
+ }
+ 
+ rx_nb_cc::~rx_nb_cc()
+ {
++    int i;
++
++    delete d_nb2_fft1;
++    delete d_nb2_fft2;
++    free(d_nb2_ae.nmask);
++    free(d_nb2_nps.EN2y);
++    free(d_nb2_nps.Pbar);
++    free(d_nb2_nps.PH1y);
++    free(d_nb2_nps.sigma2N);
++
++    for (i = 0; i < d_nb2_np.U; i++)
++        free(d_nb2_np.actminbuff[i]);
++    free(d_nb2_np.actminbuff);
++    free(d_nb2_np.pmin_u);
++    free(d_nb2_np.lmin_flag);
++    free(d_nb2_np.actmin_sub);
++    free(d_nb2_np.actmin);
++    free(d_nb2_np.k_mod);
++    free(d_nb2_np.bmin_sub);
++    free(d_nb2_np.bmin);
++    free(d_nb2_np.Qeq);
++    free(d_nb2_np.p2bar);
++    free(d_nb2_np.pbar);
++    free(d_nb2_np.sigma2N);
++    free(d_nb2_np.alphaHat);
++    free(d_nb2_np.alphaOptHat);
++    free(d_nb2_np.p);
++
++    free(d_nb2_g.prev_mask);
++    free(d_nb2_g.prev_gamma);
++    free(d_nb2_g.lambda_d);
++    free(d_nb2_g.lambda_y);
++    free(d_nb2_outaccum);
++    for (i = 0; i < d_nb2_ovrlp; i++)
++        free(d_nb2_save[i]);
++    free(d_nb2_save);
++    free(d_nb2_mask);
++    free(d_nb2_inaccum);
++    free(d_nb2_window);
+ 
+ }
+ 
+@@ -68,30 +359,38 @@ int rx_nb_cc::work(int noutput_items,
+                    gr_vector_const_void_star &input_items,
+                    gr_vector_void_star &output_items)
+ {
+-    const gr_complex *in = (const gr_complex *) input_items[0];
+-    gr_complex *out = (gr_complex *) output_items[0];
++    const float *in = (const float *) input_items[0];
++    float *out = (float *) output_items[0];
+     int i;
+ 
+     boost::mutex::scoped_lock lock(d_mutex);
+ 
+     // copy data into output buffer then perform the processing on that buffer
+-    for (i = 0; i < noutput_items; i++)
++    if (noutput_items < d_nb2_bsize)
++        return 0;
++    else
+     {
+-        out[i] = in[i];
+-    }
++        for (i = 0; i < d_nb2_bsize; i++)
++        {
++            out[i] = in[i];
++        }
+ 
+-    if (d_nb1_on)
+-    {
+-        process_nb1(out, noutput_items);
+-    }
+-    if (d_nb2_on)
+-    {
+-        process_nb2(out, noutput_items);
++        if (d_nb2_on)
++        {
++            process_nb2(out, d_nb2_bsize);
++        }
++
++        if (d_nb1_on)
++        {
++            process_nb1(out, d_nb2_bsize);
++        }
++        return d_nb2_bsize;
+     }
+ 
+     return noutput_items;
+ }
+ 
++
+ /*! \brief Perform noise blanker 1 processing.
+  *  \param buf The data buffer holding gr_complex samples.
+  *  \param num The number of samples in the buffer.
+@@ -101,35 +400,156 @@ int rx_nb_cc::work(int noutput_items,
+  *
+  * FIXME: Needs different constants for higher sample rates?
+  */
+-void rx_nb_cc::process_nb1(gr_complex *buf, int num)
++void rx_nb_cc::process_nb1(float *buf, int num)
+ {
+-    float cmag;
+-    gr_complex zero(0.0, 0.0);
+ 
+-    for (int i = 0; i < num; i++)
++    int i, j, idx;
++    double c0, c1;
++    double y, error, sigma, inv_sigp;
++    double nel, nev;
++    for (i = 0; i < num; i++)
+     {
+-        cmag = abs(buf[i]);
+-        d_delay[d_sigidx] = buf[i];
+-        d_avgmag_nb1 = 0.999*d_avgmag_nb1 + 0.001*cmag;
++        d_nb1_d[d_nb1_in_idx] = buf[i];
++
++        y = 0;
++        sigma = 0;
++
++        for (j = 0; j < d_nb1_n_taps; j++)
++        {
++            idx = (d_nb1_in_idx + j + d_nb1_delay) & d_nb1_mask;
++            y += d_nb1_w[j] * d_nb1_d[idx];
++            sigma += d_nb1_d[idx] * d_nb1_d[idx];
++        }
++        inv_sigp = 1.0 / (sigma + 1e-10);
++        error = d_nb1_d[d_nb1_in_idx] - y;
++
++        buf[i] = (float)(y * 1.5f); // gain
++
++        if((nel = error * (1.0 - d_nb1_two_mu * sigma * inv_sigp)) < 0.0) nel = -nel;
++        if((nev = d_nb1_d[d_nb1_in_idx] - (1.0 - d_nb1_two_mu * d_nb1_ngamma) * y - d_nb1_two_mu * error * sigma * inv_sigp) < 0.0) 
++            nev = -nev;
++        if (nev < nel)
++        {
++            if((d_nb1_lidx += d_nb1_lincr) > d_nb1_lidx_max) d_nb1_lidx = d_nb1_lidx_max;
++            else
++            if((d_nb1_lidx -= d_nb1_ldecr) < d_nb1_lidx_min) d_nb1_lidx = d_nb1_lidx_min;
++        }
++        d_nb1_ngamma = d_nb1_gamma * (d_nb1_lidx * d_nb1_lidx) * (d_nb1_lidx * d_nb1_lidx) * d_nb1_den_mult;
+ 
+-        if ((d_hangtime == 0) && (cmag > (d_thld_nb1*d_avgmag_nb1)))
+-            d_hangtime = 7;
++        c0 = 1.0 - d_nb1_two_mu * d_nb1_ngamma;
++        c1 = d_nb1_two_mu * error * inv_sigp;
+ 
+-        if (d_hangtime > 0)
++        for (j = 0; j < d_nb1_n_taps; j++)
+         {
+-            buf[i] = zero;
+-            d_hangtime--;
++            idx = (d_nb1_in_idx + j + d_nb1_delay) & d_nb1_mask;
++            d_nb1_w[j] = c0 * d_nb1_w[j] + c1 * d_nb1_d[idx];
++        }
++        d_nb1_in_idx = (d_nb1_in_idx + d_nb1_mask) & d_nb1_mask;
++    }
++}
++
++
++
++// Helper functions
++double bessI0 (double x)
++{
++    double res, p;
++    if (x == 0.0)
++        res = 1.0;
++    else
++    {
++        if (x < 0.0) x = -x;
++        if (x <= 3.75)
++        {
++            p = x / 3.75;
++            p = p * p;
++            res = ((((( 0.0045813  * p
++                      + 0.0360768) * p
++                      + 0.2659732) * p
++                      + 1.2067492) * p
++                      + 3.0899424) * p
++                      + 3.5156229) * p
++                      + 1.0;
+         }
+         else
+         {
+-            buf[i] = d_delay[d_delidx];
++            p = 3.75 / x;
++            res = exp (x) / sqrt (x)
++                  * (((((((( + 0.00392377  * p
++                             - 0.01647633) * p
++                             + 0.02635537) * p
++                             - 0.02057706) * p
++                             + 0.00916281) * p
++                             - 0.00157565) * p
++                             + 0.00225319) * p
++                             + 0.01328592) * p
++                             + 0.39894228);
+         }
++    }
++    return res;
++}
+ 
+-        d_sigidx = (d_sigidx + 7) & 7;
+-        d_delidx = (d_delidx + 7) & 7;
++
++double bessI1 (double x)
++{
++    double res, p;
++    if (x == 0.0)
++        res = 0.0;
++    else
++    {
++        if (x < 0.0) x = -x;
++        if (x <= 3.75)
++        {
++            p = x / 3.75;
++            p = p * p;
++            res = x 
++                  * (((((( 0.00032411  * p
++                         + 0.00301532) * p
++                         + 0.02658733) * p
++                         + 0.15084934) * p
++                         + 0.51498869) * p
++                         + 0.87890594) * p
++                         + 0.5);
++        }
++        else
++        {
++            p = 3.75 / x;
++            res = exp (x) / sqrt (x)
++                  * (((((((( - 0.00420059  * p
++                             + 0.01787654) * p
++                             - 0.02895312) * p
++                             + 0.02282967) * p
++                             - 0.01031555) * p
++                             + 0.00163801) * p
++                             - 0.00362018) * p
++                             - 0.03988024) * p
++                             + 0.39894228);
++        }
+     }
++    return res;
+ }
+ 
++
++void rx_nb_cc::interpM (double* res, double x, int nvals, double* xvals, double* yvals)
++{
++    if (x <= xvals[0])
++        *res = yvals[0];
++    else if (x >= xvals[nvals - 1])
++        *res = yvals[nvals - 1];
++    else
++    {
++        int idx = 0;
++        double xllow, xlhigh, frac;
++        while (x >= xvals[idx])  idx++;
++        xllow = log10 (xvals[idx - 1]);
++        xlhigh = log10(xvals[idx]);
++        frac = (log10 (x) - xllow) / (xlhigh - xllow);
++        *res = yvals[idx - 1] + frac * (yvals[idx] - yvals[idx - 1]);
++    }
++}
++
++
++
+ /*! \brief Perform noise blanker 2 processing.
+  *  \param buf The data buffer holding gr_complex samples.
+  *  \param num The number of samples in the buffer.
+@@ -139,21 +559,246 @@ void rx_nb_cc::process_nb1(gr_complex *buf, int num)
+  *
+  * FIXME: Needs different constants for higher sample rates?
+  */
+-void rx_nb_cc::process_nb2(gr_complex *buf, int num)
++void rx_nb_cc::process_nb2(float *buf, int num)
+ {
+-    float cmag;
+-    gr_complex c1(0.75);
+-    gr_complex c2(0.25);
++        int i, j, k, sbuff, sbegin;
++        double g1;
++        double f0, f1, f2, f3;
++        double sum_prev_p;
++        double sum_lambda_y;
++        double alphaCtilda;
++        double sum_prev_sigma2N;
++        double alphaMin, SNR;
++        double beta, varHat, invQeq;
++        double invQbar;
++        double bc;
++        double QeqTilda, QeqTildaSub;
++        double noise_slope_max;
++        int m;
++        int N, n;
++        double sumPre, sumPost, zeta, zetaT;
++
++
++        for (i = 0; i < num; i ++)
++        {
++            d_nb2_inaccum[d_nb2_iainidx] = (double)buf[i];
++            d_nb2_iainidx = (d_nb2_iainidx + 1) % d_nb2_iasize;
++        }
++        d_nb2_nsamps += num;
++        while (d_nb2_nsamps >= d_nb2_fsize)
++        {
++            float *in1 = d_nb2_fft1->get_inbuf();
++            for (i = 0, j = d_nb2_iaoutidx; i < d_nb2_fsize; i++, j = (j + 1) % d_nb2_iasize)
++                in1[i] = (float)d_nb2_window[i] * (float)d_nb2_inaccum[j];
++            d_nb2_iaoutidx = (d_nb2_iaoutidx + d_nb2_incr) % d_nb2_iasize;
++            d_nb2_nsamps -= d_nb2_incr;
++
++            d_nb2_fft1->execute();
++
++            // calc_gain
++            gr_complex *out1 = d_nb2_fft1->get_outbuf();
++            for (k = 0; k < d_nb2_g.msize; k++)
++            {
++                d_nb2_g.lambda_y[k] = out1[k].real()*out1[k].real();
++                d_nb2_g.lambda_y[k] += out1[k].imag()*out1[k].imag();
++            }
++
++
++            // LambdaD
++            sum_prev_p = 0.0;
++            sum_lambda_y = 0.0;
++            sum_prev_sigma2N = 0.0;
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                sum_prev_p += d_nb2_np.p[k];
++                sum_lambda_y += d_nb2_np.lambda_y[k];
++                sum_prev_sigma2N += d_nb2_np.sigma2N[k];
++            }
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                f0 = d_nb2_np.p[k] / d_nb2_np.sigma2N[k] - 1.0;
++                d_nb2_np.alphaOptHat[k] = 1.0 / (1.0 + f0 * f0);
++            }
++            SNR = sum_prev_p / sum_prev_sigma2N;
++            alphaMin = std::min(d_nb2_np.alphaMin_max_value, pow (SNR, d_nb2_np.snrq));
++            for (k = 0; k < d_nb2_np.msize; k++)
++                if (d_nb2_np.alphaOptHat[k] < alphaMin) d_nb2_np.alphaOptHat[k] = alphaMin;
++            f1 = sum_prev_p / sum_lambda_y - 1.0;
++            alphaCtilda = 1.0 / (1.0 + f1 * f1);
++            d_nb2_np.alphaC = d_nb2_np.alphaCsmooth * d_nb2_np.alphaC + (1.0 - d_nb2_np.alphaCsmooth) * std::max (alphaCtilda, d_nb2_np.alphaCmin);
++            f2 = d_nb2_np.alphaMax * d_nb2_np.alphaC;
++            for (k = 0; k < d_nb2_np.msize; k++)
++                d_nb2_np.alphaHat[k] = f2 * d_nb2_np.alphaOptHat[k];
++            for (k = 0; k < d_nb2_np.msize; k++)
++                d_nb2_np.p[k] = d_nb2_np.alphaHat[k] * d_nb2_np.p[k] + (1.0 - d_nb2_np.alphaHat[k]) * d_nb2_np.lambda_y[k];
++            invQbar = 0.0;
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                beta = std::min (d_nb2_np.betamax, d_nb2_np.alphaHat[k] * d_nb2_np.alphaHat[k]);
++                d_nb2_np.pbar[k] = beta * d_nb2_np.pbar[k] + (1.0 - beta) * d_nb2_np.p[k];
++                d_nb2_np.p2bar[k] = beta * d_nb2_np.p2bar[k] + (1.0 - beta) * d_nb2_np.p[k] * d_nb2_np.p[k];
++                varHat = d_nb2_np.p2bar[k] - d_nb2_np.pbar[k] * d_nb2_np.pbar[k];
++                invQeq = varHat / (2.0 * d_nb2_np.sigma2N[k] * d_nb2_np.sigma2N[k]);
++                if (invQeq > d_nb2_np.invQeqMax) invQeq = d_nb2_np.invQeqMax;
++                d_nb2_np.Qeq[k] = 1.0 / invQeq;
++                invQbar += invQeq;
++            }
++            invQbar /= (double)d_nb2_np.msize;
++            bc = 1.0 + d_nb2_np.av * sqrt (invQbar);
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                QeqTilda    = (d_nb2_np.Qeq[k] - 2.0 * d_nb2_np.MofD) / (1.0 - d_nb2_np.MofD);
++                QeqTildaSub = (d_nb2_np.Qeq[k] - 2.0 * d_nb2_np.MofV) / (1.0 - d_nb2_np.MofV);
++                d_nb2_np.bmin[k]     = 1.0 + 2.0 * (d_nb2_np.D - 1.0) / QeqTilda;
++                d_nb2_np.bmin_sub[k] = 1.0 + 2.0 * (d_nb2_np.V - 1.0) / QeqTildaSub;
++            }
++            memset (d_nb2_np.k_mod, 0, d_nb2_np.msize * sizeof (int));
++            for (k = 0; k < d_nb2_np.msize; k++)
++            {
++                f3 = d_nb2_np.p[k] * d_nb2_np.bmin[k] * bc;
++                if (f3 < d_nb2_np.actmin[k])
++                {
++                    d_nb2_np.actmin[k] = f3;
++                    d_nb2_np.actmin_sub[k] = d_nb2_np.p[k] * d_nb2_np.bmin_sub[k] * bc;
++                    d_nb2_np.k_mod[k] = 1;
++                }
++            }
++            if (d_nb2_np.subwc == d_nb2_np.V)
++            {
++                if      (invQbar < d_nb2_np.invQbar_points[0]) noise_slope_max = d_nb2_np.nsmax[0];
++                else if (invQbar < d_nb2_np.invQbar_points[1]) noise_slope_max = d_nb2_np.nsmax[1];
++                else if (invQbar < d_nb2_np.invQbar_points[2]) noise_slope_max = d_nb2_np.nsmax[2];
++                else                                        noise_slope_max = d_nb2_np.nsmax[3];
++                for (k = 0; k < d_nb2_np.msize; k++)
++                {
++                    int ku;
++                    double min;
++                    if (d_nb2_np.k_mod[k])
++                        d_nb2_np.lmin_flag[k] = 0;
++                    d_nb2_np.actminbuff[d_nb2_np.amb_idx][k] = d_nb2_np.actmin[k];
++                    min = 1.0e300;
++                    for (ku = 0; ku < d_nb2_np.U; ku++)
++                        if (d_nb2_np.actminbuff[ku][k] < min) min = d_nb2_np.actminbuff[ku][k];
++                    d_nb2_np.pmin_u[k] = min;
++                    if ((d_nb2_np.lmin_flag[k] == 1) 
++                        && (d_nb2_np.actmin_sub[k] < noise_slope_max * d_nb2_np.pmin_u[k])
++                        && (d_nb2_np.actmin_sub[k] >                   d_nb2_np.pmin_u[k]))
++                    {
++                        d_nb2_np.pmin_u[k] = d_nb2_np.actmin_sub[k];
++                        for (ku = 0; ku < d_nb2_np.U; ku++)
++                            d_nb2_np.actminbuff[ku][k] = d_nb2_np.actmin_sub[k];
++                    }
++                    d_nb2_np.lmin_flag[k] = 0;
++                    d_nb2_np.actmin[k] = 1.0e300;
++                    d_nb2_np.actmin_sub[k] = 1.0e300;
++                }
++                if (++d_nb2_np.amb_idx == d_nb2_np.U) d_nb2_np.amb_idx = 0;
++                d_nb2_np.subwc = 1;
++            }
++            else 
++            {
++                if (d_nb2_np.subwc > 1)
++                {
++                    for (k = 0; k < d_nb2_np.msize; k++)
++                    {
++                        if (d_nb2_np.k_mod[k])
++                        {
++                            d_nb2_np.lmin_flag[k] = 1;
++                            d_nb2_np.sigma2N[k] = std::min (d_nb2_np.actmin_sub[k], d_nb2_np.pmin_u[k]);
++                            d_nb2_np.pmin_u[k] = d_nb2_np.sigma2N[k];
++                        }
++                    }
++                }
++                ++d_nb2_np.subwc;
++            }
++            memcpy (d_nb2_np.lambda_d, d_nb2_np.sigma2N, d_nb2_np.msize * sizeof (double));
++
++
++            // gain mode 0 (not 2)
++            double gamma, eps_hat, v;
++            for (k = 0; k < d_nb2_msize; k++)
++            {
++                gamma = std::min (d_nb2_g.lambda_y[k] / d_nb2_g.lambda_d[k], d_nb2_g.gamma_max);
++                eps_hat = d_nb2_g.alpha * d_nb2_g.prev_mask[k] * d_nb2_g.prev_mask[k] * d_nb2_g.prev_gamma[k]
++                    + (1.0 - d_nb2_g.alpha) * std::max (gamma - 1.0, d_nb2_g.eps_floor);
++                v = (eps_hat / (1.0 + eps_hat)) * gamma;
++                d_nb2_g.mask[k] = d_nb2_g.gf1p5 * sqrt (v) / gamma * exp (- 0.5 * v)
++                    * ((1.0 + v) * bessI0 (0.5 * v) + v * bessI1 (0.5 * v));
++                {
++                    double v2 = std::min (v, 700.0);
++                    double eta = d_nb2_g.mask[k] * d_nb2_g.mask[k] * d_nb2_g.lambda_y[k] / d_nb2_g.lambda_d[k];
++                    double eps = eta / (1.0 - d_nb2_g.q);
++                    double witchHat = (1.0 - d_nb2_g.q) / d_nb2_g.q * exp (v2) / (1.0 + eps);
++                    d_nb2_g.mask[k] *= witchHat / (1.0 + witchHat);
++                }
++                if (d_nb2_g.mask[k] > d_nb2_g.gmax) d_nb2_g.mask[k] = d_nb2_g.gmax;
++                if (d_nb2_g.mask[k] != d_nb2_g.mask[k]) d_nb2_g.mask[k] = 0.01;
++                d_nb2_g.prev_gamma[k] = gamma;
++                d_nb2_g.prev_mask[k] = d_nb2_g.mask[k];
++            }
++
++
++            sumPre = 0.0;
++            sumPost = 0.0;
++            for (k = 0; k < d_nb2_ae.msize; k++)
++            {
++                sumPre += d_nb2_ae.lambda_y[k];
++                sumPost += d_nb2_mask[k] * d_nb2_mask[k] * d_nb2_ae.lambda_y[k];
++            }
++            zeta = sumPost / sumPre;
++            if (zeta >= d_nb2_ae.zetaThresh)
++                zetaT = 1.0;
++            else
++                zetaT = zeta;
++            if (zetaT == 1.0)
++                N = 1;
++            else
++                N = 1 + 2 * (int)(0.5 + d_nb2_ae.psi * (1.0 - zetaT / d_nb2_ae.zetaThresh));
++            n = N / 2;
++            for (k = n; k < (d_nb2_ae.msize - n); k++)
++            {
++                d_nb2_ae.nmask[k] = 0.0;
++                for (m = k - n; m <= (k + n); m++)
++                    d_nb2_ae.nmask[k] += d_nb2_mask[m];
++                d_nb2_ae.nmask[k] /= (double)N;
++            }
++            memcpy (d_nb2_mask + n, d_nb2_ae.nmask, (d_nb2_ae.msize - 2 * n) * sizeof (double));
++
++            // end calc_gain
++            gr_complex *in2 = d_nb2_fft2->get_inbuf();
++            for (i = 0; i < d_nb2_msize; i++)
++            {
++                g1 = d_nb2_gain * d_nb2_mask[i];
++                in2[i] = gr_complex(g1 * out1[i].real(),g1 * out1[i].imag());
++            }
++
++            d_nb2_fft2->execute();
++
++            float *out2 = d_nb2_fft2->get_outbuf();
++            for (i = 0; i < d_nb2_fsize; i++)
++                d_nb2_save[d_nb2_saveidx][i] = d_nb2_window[i] * out2[i];
++            for (i = d_nb2_ovrlp; i > 0; i--)
++            {
++                sbuff = (d_nb2_saveidx + i) % d_nb2_ovrlp;
++                sbegin = d_nb2_incr * (d_nb2_ovrlp - i);
++                for (j = sbegin, k = d_nb2_oainidx; j < d_nb2_incr + sbegin; j++, k = (k + 1) % d_nb2_oasize)
++                {
++                    if ( i == d_nb2_ovrlp)
++                        d_nb2_outaccum[k]  = d_nb2_save[sbuff][j];
++                    else
++                        d_nb2_outaccum[k] += d_nb2_save[sbuff][j];
++                }
++            }
++            d_nb2_saveidx = (d_nb2_saveidx + 1) % d_nb2_ovrlp;
++            d_nb2_oainidx = (d_nb2_oainidx + d_nb2_incr) % d_nb2_oasize;
++        }
++        for (i = 0; i < num; i++)
++        {
++            buf[i] = (float)d_nb2_outaccum[d_nb2_oaoutidx] * 1.5f;
++            d_nb2_oaoutidx = (d_nb2_oaoutidx + 1) % d_nb2_oasize;
++        }
+ 
+-    for (int i = 0; i < num; i++)
+-    {
+-        cmag = abs(buf[i]);
+-        d_avgsig = c1*d_avgsig + c2*buf[i];
+-        d_avgmag_nb2 = 0.999*d_avgmag_nb2 + 0.001*cmag;
+ 
+-        if (cmag > d_thld_nb2*d_avgmag_nb2)
+-            buf[i] = d_avgsig;
+-    }
+ }
+ 
+ void rx_nb_cc::set_threshold1(float threshold)
+diff --git src/dsp/rx_noise_blanker_cc.h src/dsp/rx_noise_blanker_cc.h
+index 8b4907e..a99924b 100644
+--- src/dsp/rx_noise_blanker_cc.h
++++ src/dsp/rx_noise_blanker_cc.h
+@@ -25,6 +25,7 @@
+ 
+ #include <gnuradio/sync_block.h>
+ #include <gnuradio/gr_complex.h>
++#include <gnuradio/fft/fft.h>
+ #include <boost/thread/mutex.hpp>
+ 
+ class rx_nb_cc;
+@@ -60,22 +61,46 @@ protected:
+ 
+ public:
+     ~rx_nb_cc();
++    void forecast (int noutput_items, gr_vector_int &ninput_items_required);
+ 
+     int work(int noutput_items,
+              gr_vector_const_void_star &input_items,
+              gr_vector_void_star &output_items);
+ 
+     void set_sample_rate(double sample_rate) { d_sample_rate = sample_rate; }
+-    void set_nb1_on(bool nb1_on) { d_nb1_on = nb1_on; }
+-    void set_nb2_on(bool nb2_on) { d_nb2_on = nb2_on; }
++    void set_nb1_on(bool nb1_on) 
++    {
++        memset (d_nb1_d, 0, sizeof(double) * 2048);
++        memset (d_nb1_w, 0, sizeof(double) * 2048);
++        d_nb1_in_idx = 0;
++        d_nb1_on = nb1_on; 
++    }
++    void set_nb2_on(bool nb2_on) 
++    {
++        memset (d_nb2_inaccum, 0, d_nb2_iasize * sizeof (double));
++        for (int i = 0; i < d_nb2_ovrlp; i++)
++            memset (d_nb2_save[i], 0, d_nb2_fsize * sizeof (double));
++        memset (d_nb2_outaccum, 0, d_nb2_oasize * sizeof (double));
++        d_nb2_nsamps   = 0;
++        d_nb2_iainidx  = 0;
++        d_nb2_iaoutidx = 0;
++        d_nb2_oainidx  = d_nb2_init_oainidx;
++        d_nb2_oaoutidx = 0;
++        d_nb2_saveidx  = 0;
++        d_nb2_on = nb2_on; 
++    }
++
+     bool get_nb1_on() { return d_nb1_on; }
+     bool get_nb2_on() { return d_nb2_on; }
+     void set_threshold1(float threshold);
+     void set_threshold2(float threshold);
+ 
+ private:
+-    void process_nb1(gr_complex *buf, int num);
+-    void process_nb2(gr_complex *buf, int num);
++    void process_nb1(float *buf, int num);
++    void process_nb2(float *buf, int num);
++    void interpM (double* res, double x, int nvals, double* xvals, double* yvals);
++
++
+ 
+ private:
+     boost::mutex  d_mutex;  /*! Used to lock internal data while processing or setting parameters. */
+@@ -89,8 +114,145 @@ private:
+     float  d_avgmag_nb2;    /*! Average magnitude. */
+     gr_complex d_avgsig, d_delay[8];
+     int    d_delidx, d_sigidx, d_hangtime;   // FIXME: need longer buffer for higher sampel rates?
++    int    d_nb1_state;
++    int    d_nb2_state;
++
++
++    // NB1 parameters
++    int d_nb1_dline_size;
++    int d_nb1_mask;
++    int d_nb1_n_taps;
++    int d_nb1_delay;
++    double d_nb1_two_mu;
++    double ed_nb1_gamma;
++    int d_nb1_in_idx;
++    double d_nb1_lidx;
++    double d_nb1_lidx_min;
++    double d_nb1_lidx_max;
++    double d_nb1_ngamma;
++    double d_nb1_gamma;
++    double d_nb1_den_mult;
++    double d_nb1_lincr;
++    double d_nb1_ldecr;
++    double d_nb1_d[2048];
++    double d_nb1_w[2048];
++
++    // NB2 parameters
++    int d_nb2_fsize;
++    int d_nb2_bsize;
++    int d_nb2_ovrlp;
++    int d_nb2_incr;
++    double* d_nb2_window;
++    int d_nb2_iasize;
++    double* d_nb2_inaccum;
++    double* d_nb2_forfftin;
++    gr_complex* d_nb2_forfftout;
++    int d_nb2_msize;
++    double* d_nb2_mask;
++    gr_complex* d_nb2_revfftin;
++    double* d_nb2_revfftout;
++    double** d_nb2_save;
++    int d_nb2_oasize;
++    double* d_nb2_outaccum;
++    double d_nb2_rate;
++    double d_nb2_ogain;
++    double d_nb2_gain;
++    int d_nb2_nsamps;
++    int d_nb2_iainidx;
++    int d_nb2_iaoutidx;
++    int d_nb2_init_oainidx;
++    int d_nb2_oainidx;
++    int d_nb2_oaoutidx;
++    int d_nb2_saveidx;
++    struct _g
++    {
++        double msize;
++        double* mask;
++        double* y;
++        double* lambda_y;
++        double* lambda_d;
++        double* prev_mask;
++        double* prev_gamma;
++        double gf1p5;
++        double alpha;
++        double eps_floor;
++        double gamma_max;
++        double q;
++        double gmax;
++    } d_nb2_g;
++    struct _npest
++    {
++        int incr;
++        double rate;
++        int msize;
++        double* lambda_y;
++        double* lambda_d;
++        double* p;
++        double* alphaOptHat;
++        double alphaC;
++        double alphaCsmooth;
++        double alphaCmin;
++        double* alphaHat;
++        double alphaMax;
++        double* sigma2N;
++        double alphaMin_max_value;
++        double snrq;
++        double betamax;
++        double* pbar;
++        double* p2bar;
++        double invQeqMax;
++        double av;
++        double* Qeq;
++        int U;
++        double Dtime;
++        int V;
++        int D;
++        double MofD;
++        double MofV;
++        double* bmin;
++        double* bmin_sub;
++        int* k_mod;
++        double* actmin;
++        double* actmin_sub;
++        int subwc;
++        int* lmin_flag;
++        double* pmin_u;
++        double invQbar_points[4];
++        double nsmax[4];
++        double** actminbuff;
++        int amb_idx;
++    } d_nb2_np;
++    struct _npests
++    {
++        int incr;
++        double rate;
++        int msize;
++        double* lambda_y;
++        double* lambda_d;
++        
++        double alpha_pow;
++        double alpha_Pbar;
++        double epsH1;
++        double epsH1r;
++
++        double* sigma2N;
++        double* PH1y;
++        double* Pbar;
++        double* EN2y;
++    } d_nb2_nps;
++    struct _ae
++    {
++        int msize;
++        double* lambda_y;
++        double zetaThresh;
++        double psi;
++        double* nmask;
++    } d_nb2_ae;
++    gr::fft::fft_real_fwd  *d_nb2_fft1;
++    gr::fft::fft_real_rev  *d_nb2_fft2;
+ 
+ };
+ 
+ 
++
+ #endif /* RX_NB_CC_H */
+diff --git src/qtgui/CMakeLists.txt src/qtgui/CMakeLists.txt
+index 38db002..677858f 100644
+--- src/qtgui/CMakeLists.txt
++++ src/qtgui/CMakeLists.txt
+@@ -7,6 +7,8 @@ add_source_files(SRCS_LIST
+ 	agc_options.h
+ 	audio_options.cpp
+ 	audio_options.h
++	bandplan.cpp
++	bandplan.h
+ 	bookmarks.cpp
+ 	bookmarks.h
+ 	bookmarkstablemodel.cpp
+@@ -44,6 +46,8 @@ add_source_files(SRCS_LIST
+ 	plotter.h
+ 	qtcolorpicker.cpp
+ 	qtcolorpicker.h
++        dxc_spots.cpp
++        dxc_options.cpp
+ )
+ 
+ #######################################################################################################################
+@@ -62,5 +66,6 @@ add_source_files(UI_SRCS_LIST
+ 	ioconfig.ui
+ 	iq_tool.ui
+ 	nb_options.ui
++        dxc_options.ui
+ )
+ 
+diff --git src/qtgui/bandplan.cpp src/qtgui/bandplan.cpp
+new file mode 100644
+index 0000000..25a9d96
+--- /dev/null
++++ src/qtgui/bandplan.cpp
+@@ -0,0 +1,112 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <Qt>
++#include <QFile>
++#include <QStringList>
++#include <QTextStream>
++#include <QString>
++#include <QSet>
++#include <algorithm>
++#include "bandplan.h"
++#include <stdio.h>
++#include <wchar.h>
++
++BandPlan* BandPlan::m_pThis = 0;
++
++BandPlan::BandPlan()
++{
++    
++}
++
++void BandPlan::create()
++{
++    m_pThis = new BandPlan;
++}
++
++BandPlan& BandPlan::Get()
++{
++    return *m_pThis;
++}
++
++void BandPlan::setConfigDir(const QString& cfg_dir)
++{
++    m_bandPlanFile = cfg_dir + "/bandplan.csv";
++    printf("BandPlanFile is %s\n", m_bandPlanFile.toStdString().c_str());
++}
++
++bool BandPlan::load()
++{
++    QFile file(m_bandPlanFile);
++    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
++    
++    m_BandInfoList.clear();
++    
++    while (!file.atEnd())
++    {
++        QString line = QString::fromUtf8(file.readLine().trimmed());
++        if(line.isEmpty() || line.startsWith("#"))
++            continue;
++
++        QStringList strings = line.split(",");
++
++        if (strings.count() < 6){
++            printf("BandPlan: Ignoring Line:\n  %s\n", line.toLatin1().data());
++        } else {
++            BandInfo info;
++            info.minFrequency = strings[0].toLongLong();
++            info.maxFrequency = strings[1].toLongLong();
++            info.modulation   = strings[2].trimmed();
++            info.step         = strings[3].toInt();
++            info.color        = QColor(strings[4].trimmed());
++            info.name         = strings[5].trimmed();
++
++            m_BandInfoList.append(info);
++        }
++    }
++    file.close();
++    
++    emit BandPlanChanged();
++    return true;
++}
++
++QList<BandInfo> BandPlan::getBandsInRange(qint64 low, qint64 high)
++{
++    QList<BandInfo> found;
++    for (int i = 0; i < m_BandInfoList.size(); i++) {
++        if(m_BandInfoList[i].maxFrequency < low) continue;
++        if(m_BandInfoList[i].minFrequency > high) continue;
++        found.append(m_BandInfoList[i]);
++    }
++    return found;
++}
++
++QList<BandInfo> BandPlan::getBandsEncompassing(qint64 freq)
++{
++    QList<BandInfo> found;
++    for (int i = 0; i < m_BandInfoList.size(); i++) {
++        if(m_BandInfoList[i].maxFrequency < freq) continue;
++        if(m_BandInfoList[i].minFrequency > freq) continue;
++        found.append(m_BandInfoList[i]);
++    }
++    return found;
++}
+\ No newline at end of file
+diff --git src/qtgui/bandplan.h src/qtgui/bandplan.h
+new file mode 100644
+index 0000000..115dcda
+--- /dev/null
++++ src/qtgui/bandplan.h
+@@ -0,0 +1,83 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#ifndef BANDPLAN_H
++#define BANDPLAN_H
++
++#include <QtGlobal>
++#include <QObject>
++#include <QString>
++#include <QMap>
++#include <QList>
++#include <QStringList>
++#include <QColor>
++
++
++
++struct BandInfo
++{
++    qint64  minFrequency;
++    qint64  maxFrequency;
++    QString name;
++    QString modulation;
++    qint64  step;
++    QColor  color;
++
++    BandInfo()
++    {
++        this->minFrequency = 0;
++        this->maxFrequency = 0;
++        this->step = 1;
++    }
++
++    bool operator<(const BandInfo &other) const
++    {
++        return minFrequency < other.minFrequency;
++    }
++};
++
++class BandPlan : public QObject
++{
++    Q_OBJECT
++public:
++    // This is a Singleton Class now because you can not send qt-signals from static functions.
++    static void create();
++    static BandPlan& Get();
++    bool load();
++    int size() { return m_BandInfoList.size(); }
++    BandInfo& getBand(int i) { return m_BandInfoList[i]; }
++    QList<BandInfo> getBandsInRange(qint64 low, qint64 high);
++    QList<BandInfo> getBandsEncompassing(qint64 freq);
++
++    void setConfigDir(const QString&);
++
++private:
++    BandPlan(); // Singleton Constructor is private.
++    QList<BandInfo>  m_BandInfoList;
++    QString          m_bandPlanFile;
++    static BandPlan* m_pThis;
++
++signals:
++    void BandPlanChanged(void);
++};
++
++#endif // BANDPLAN_H
+diff --git src/qtgui/dockaudio.cpp src/qtgui/dockaudio.cpp
+index ff920ec..c20b07e 100644
+--- src/qtgui/dockaudio.cpp
++++ src/qtgui/dockaudio.cpp
+@@ -74,6 +74,7 @@ DockAudio::DockAudio(QWidget *parent) :
+     ui->audioSpectrum->setFilterBoxEnabled(false);
+     ui->audioSpectrum->setCenterLineEnabled(false);
+     ui->audioSpectrum->setBookmarksEnabled(false);
++    ui->audioSpectrum->setBandPlanEnabled(false);
+     ui->audioSpectrum->setFftRange(-80., 0.);
+     ui->audioSpectrum->setVdivDelta(40);
+     ui->audioSpectrum->setHdivDelta(40);
+diff --git src/qtgui/dockfft.cpp src/qtgui/dockfft.cpp
+index e91cfa1..3ec577f 100644
+--- src/qtgui/dockfft.cpp
++++ src/qtgui/dockfft.cpp
+@@ -274,6 +274,12 @@ void DockFft::saveSettings(QSettings *settings)
+     else
+         settings->remove("db_ranges_locked");
+ 
++    // Band Plan
++    if (ui->bandPlanCheckbox->isChecked())
++        settings->setValue("bandplan", true);
++    else
++        settings->remove("bandplan");
++
+     if (QString::compare(ui->cmapComboBox->currentData().toString(), DEFAULT_COLORMAP))
+         settings->setValue("waterfall_colormap", ui->cmapComboBox->currentData().toString());
+     else
+@@ -346,6 +352,10 @@ void DockFft::readSettings(QSettings *settings)
+     bool_val = settings->value("db_ranges_locked", false).toBool();
+     ui->lockButton->setChecked(bool_val);
+ 
++    bool_val = settings->value("bandplan", false).toBool();
++    ui->bandPlanCheckbox->setChecked(bool_val);
++    emit bandPlanChanged(bool_val);
++
+     QString cmap = settings->value("waterfall_colormap", "gqrx").toString();
+     ui->cmapComboBox->setCurrentIndex(ui->cmapComboBox->findData(cmap));
+ 
+@@ -522,6 +532,11 @@ void DockFft::on_peakDetectionButton_toggled(bool checked)
+     emit peakDetectionToggled(checked);
+ }
+ 
++void DockFft::on_bandPlanCheckbox_stateChanged(int state)
++{
++    emit bandPlanChanged(state == 2);
++}
++
+ /** lock button toggled */
+ void DockFft::on_lockButton_toggled(bool checked)
+ {
+diff --git src/qtgui/dockfft.h src/qtgui/dockfft.h
+index 5d8fb7f..b888cd1 100644
+--- src/qtgui/dockfft.h
++++ src/qtgui/dockfft.h
+@@ -67,6 +67,7 @@ signals:
+     void fftFillToggled(bool fill);                /*! Toggle filling area under FFT plot. */
+     void fftPeakHoldToggled(bool enable);          /*! Toggle peak hold in FFT area. */
+     void peakDetectionToggled(bool enabled);       /*! Enable peak detection in FFT plot */
++    void bandPlanChanged(bool enabled);            /*! Toggle Band Plan at bottom of FFT area. */
+     void wfColormapChanged(const QString &cmap);
+ 
+ public slots:
+@@ -93,6 +94,7 @@ private slots:
+     void on_peakHoldButton_toggled(bool checked);
+     void on_peakDetectionButton_toggled(bool checked);
+     void on_lockButton_toggled(bool checked);
++    void on_bandPlanCheckbox_stateChanged(int state);
+     void on_cmapComboBox_currentIndexChanged(int index);
+ 
+ private:
+diff --git src/qtgui/dockfft.ui src/qtgui/dockfft.ui
+index d353b66..795f4d7 100644
+--- src/qtgui/dockfft.ui
++++ src/qtgui/dockfft.ui
+@@ -851,7 +851,7 @@
+             </property>
+            </widget>
+           </item>
+-          <item row="14" column="0" colspan="4">
++          <item row="15" column="0" colspan="4">
+            <spacer name="verticalSpacer">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+@@ -939,8 +939,7 @@
+              </size>
+             </property>
+             <property name="toolTip">
+-             <string>&lt;html&gt;Number of FFT points to calculate. Higher values will require more CPU time. This will not influence the number of points on the display since that parameter is adjusted automatically according to the display size.
+-&lt;/html&gt;</string>
++             <string>&lt;html&gt;Number of FFT points to calculate. Higher values will require more CPU time. This will not influence the number of points on the display since that parameter is adjusted automatically according to the display size.&lt;/html&gt;</string>
+             </property>
+             <property name="editable">
+              <bool>false</bool>
+@@ -1107,6 +1106,16 @@
+             </property>
+            </widget>
+           </item>
++          <item row="14" column="0" colspan="4">
++            <widget class="QCheckBox" name="bandPlanCheckbox">
++              <property name="toolTip">
++                <string>Enable Band Plan on bottom of spectrum</string>
++              </property>
++              <property name="text">
++                <string>Enable Band Plan</string>
++              </property>
++            </widget>
++          </item>
+          </layout>
+         </item>
+        </layout>
+diff --git src/qtgui/dxc_options.cpp src/qtgui/dxc_options.cpp
+new file mode 100644
+index 0000000..d30e2ca
+--- /dev/null
++++ src/qtgui/dxc_options.cpp
+@@ -0,0 +1,119 @@
++#include "dxc_options.h"
++#include "ui_dxc_options.h"
++#include <QTcpSocket>
++#include <QString>
++#include <QStringList>
++#include "dxc_spots.h"
++
++DXC_Options::DXC_Options(QWidget *parent) :
++    QDialog(parent),
++    ui(new Ui::DXC_Options)
++{
++    ui->setupUi(this);
++    TCPSocket = new QTcpSocket(this);
++    connect(TCPSocket, SIGNAL(connected()),this, SLOT(connected()));
++    connect(TCPSocket, SIGNAL(disconnected()),this, SLOT(disconnected()));
++    connect(TCPSocket, SIGNAL(readyRead()),this, SLOT(readyToRead()));
++}
++
++DXC_Options::~DXC_Options()
++{
++    delete ui;
++}
++
++/*! \brief Catch window close events.
++ *
++ * This method is called when the user closes the audio options dialog
++ * window using the window close icon. We catch the event and hide the
++ * dialog but keep it around for later use.
++ */
++void DXC_Options::closeEvent(QCloseEvent *event)
++{
++    hide();
++    event->ignore();
++}
++
++/*! \brief Catch window show events. */
++void DXC_Options::showEvent(QShowEvent * event)
++{
++    Q_UNUSED(event);
++}
++
++void DXC_Options::on_pushButton_DXCConnect_clicked()
++{
++    DXCSpots::Get().setSpotTimeout(ui->lineEdit_DXCSpottimeout->text().toInt());
++    TCPSocket->connectToHost(ui->lineEdit_DXCAddress->text(),ui->lineEdit_DXCPort->text().toInt());
++    if(!TCPSocket->waitForConnected(5000))
++    {
++        ui->plainTextEdit_DXCMonitor->appendPlainText(TCPSocket->errorString());
++    }
++}
++
++void DXC_Options::on_pushButton_DXCDisconnect_clicked()
++{
++    TCPSocket->close();
++}
++
++void DXC_Options::connected()
++{
++    ui->plainTextEdit_DXCMonitor->appendPlainText("Connected");
++    ui->pushButton_DXCConnect->setDisabled(true);
++    ui->pushButton_DXCDisconnect->setEnabled(true);
++}
++void DXC_Options::disconnected()
++{
++    ui->plainTextEdit_DXCMonitor->appendPlainText("Disconnected");
++    ui->pushButton_DXCDisconnect->setDisabled(true);
++    ui->pushButton_DXCConnect->setEnabled(true);
++}
++void DXC_Options::readyToRead()
++{
++    DXCSpotInfo info;
++    QStringList Spot;
++    QString incommingMessage;
++    incommingMessage = TCPSocket->readAll();
++    ui->plainTextEdit_DXCMonitor->appendPlainText(incommingMessage);
++    if(incommingMessage.contains("enter your call", Qt::CaseInsensitive))
++    {
++        TCPSocket->write(ui->lineEdit_DXCUSername->text().append("\r\n").toUtf8());
++        ui->plainTextEdit_DXCMonitor->appendPlainText(ui->lineEdit_DXCUSername->text().append("\r\n"));
++    }
++    else if(incommingMessage.contains("DX de", Qt::CaseInsensitive) &&
++            incommingMessage.contains(ui->lineEdit_DXCFilter->text()))
++    {
++        Spot = incommingMessage.split(" ", QString::SkipEmptyParts);
++        info.name = Spot[4].trimmed();
++        info.frequency = Spot[3].toDouble() * 1000;
++        DXCSpots::Get().add(info);
++    }
++}
++void DXC_Options::saveSettings(QSettings *settings)
++{
++    if (!settings)
++        return;
++
++    settings->beginGroup("dxcluster");
++
++    settings->setValue("DXCAddress", ui->lineEdit_DXCAddress->text());
++    settings->setValue("DXCPort", ui->lineEdit_DXCPort->text());
++    settings->setValue("DXCUsername", ui->lineEdit_DXCUSername->text());
++    settings->setValue("DXCSpotTimeout", ui->lineEdit_DXCSpottimeout->text());
++    settings->setValue("DXCFilter", ui->lineEdit_DXCFilter->text());
++
++    settings->endGroup();
++}
++
++void DXC_Options::readSettings(QSettings *settings)
++{
++    if (!settings)
++        return;
++
++    settings->beginGroup("dxcluster");
++    ui->lineEdit_DXCAddress->setText(settings->value("DXCAddress", "localhost").toString());
++    ui->lineEdit_DXCPort->setText(settings->value("DXCPort", "7300").toString());
++    ui->lineEdit_DXCUSername->setText(settings->value("DXCUsername", "nocall").toString());
++    ui->lineEdit_DXCSpottimeout->setText(settings->value("DXCSpotTimeout", "10").toString());
++    ui->lineEdit_DXCFilter->setText(settings->value("DXCFilter", "").toString());
++
++    settings->endGroup();
++}
+diff --git src/qtgui/dxc_options.h src/qtgui/dxc_options.h
+new file mode 100644
+index 0000000..b026c02
+--- /dev/null
++++ src/qtgui/dxc_options.h
+@@ -0,0 +1,42 @@
++#ifndef DXC_OPTIONS_H
++#define DXC_OPTIONS_H
++
++
++#include <QCloseEvent>
++#include <QShowEvent>
++#include <QTcpSocket>
++#include <QSettings>
++
++#include <QDialog>
++
++namespace Ui {
++class DXC_Options;
++}
++
++class DXC_Options : public QDialog
++{
++    Q_OBJECT
++
++public:
++    explicit DXC_Options(QWidget *parent = 0);
++    ~DXC_Options();
++
++    void closeEvent(QCloseEvent *event);
++    void showEvent(QShowEvent * event);
++    void saveSettings(QSettings *settings);
++    void readSettings(QSettings *settings);
++
++private slots:
++
++    void on_pushButton_DXCConnect_clicked();
++    void on_pushButton_DXCDisconnect_clicked();
++    void connected();
++    void disconnected();
++    void readyToRead();
++
++private:
++    Ui::DXC_Options *ui;
++    QTcpSocket *TCPSocket;
++};
++
++#endif // DXC_OPTIONS_H
+diff --git src/qtgui/dxc_options.ui src/qtgui/dxc_options.ui
+new file mode 100644
+index 0000000..c0d7387
+--- /dev/null
++++ src/qtgui/dxc_options.ui
+@@ -0,0 +1,168 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<ui version="4.0">
++ <class>DXC_Options</class>
++ <widget class="QDialog" name="DXC_Options">
++  <property name="geometry">
++   <rect>
++    <x>0</x>
++    <y>0</y>
++    <width>500</width>
++    <height>405</height>
++   </rect>
++  </property>
++  <property name="windowTitle">
++   <string>DXC Options</string>
++  </property>
++  <layout class="QGridLayout" name="gridLayout_2">
++   <item row="0" column="0">
++    <widget class="QGroupBox" name="groupBox">
++     <property name="title">
++      <string>DX Cluster Settings</string>
++     </property>
++     <layout class="QGridLayout" name="gridLayout">
++      <item row="1" column="0" colspan="2">
++       <widget class="QLabel" name="label_DXCSpottimeout">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Spot Timeout/min:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="2" column="0" colspan="2">
++       <widget class="QLabel" name="label_DXCUsername">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Username:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="0">
++       <widget class="QLabel" name="label_DXCAddress">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Address:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="5">
++       <widget class="QLabel" name="label_DXCPort">
++        <property name="sizePolicy">
++         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
++          <horstretch>0</horstretch>
++          <verstretch>0</verstretch>
++         </sizepolicy>
++        </property>
++        <property name="text">
++         <string>Port:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="6">
++       <widget class="QLineEdit" name="lineEdit_DXCPort">
++        <property name="text">
++         <string>7300</string>
++        </property>
++       </widget>
++      </item>
++      <item row="0" column="1" colspan="4">
++       <widget class="QLineEdit" name="lineEdit_DXCAddress">
++        <property name="text">
++         <string>127.0.0.1</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="4">
++       <widget class="QLineEdit" name="lineEdit_DXCSpottimeout">
++        <property name="text">
++         <string>10</string>
++        </property>
++       </widget>
++      </item>
++      <item row="2" column="4">
++       <widget class="QLineEdit" name="lineEdit_DXCUSername">
++        <property name="text">
++         <string>nocall</string>
++        </property>
++       </widget>
++      </item>
++      <item row="3" column="4">
++       <widget class="QPushButton" name="pushButton_DXCDisconnect">
++        <property name="enabled">
++         <bool>false</bool>
++        </property>
++        <property name="text">
++         <string>Disconnect</string>
++        </property>
++       </widget>
++      </item>
++      <item row="3" column="6">
++       <widget class="QPushButton" name="pushButton_DXCConnect">
++        <property name="text">
++         <string>Connect</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="5">
++       <widget class="QLabel" name="label_DXCFilter">
++        <property name="text">
++         <string>Filter:</string>
++        </property>
++       </widget>
++      </item>
++      <item row="1" column="6">
++       <widget class="QLineEdit" name="lineEdit_DXCFilter">
++        <property name="placeholderText">
++         <string>ex. CW or RTTY</string>
++        </property>
++       </widget>
++      </item>
++     </layout>
++    </widget>
++   </item>
++   <item row="1" column="0">
++    <widget class="QPlainTextEdit" name="plainTextEdit_DXCMonitor">
++     <property name="font">
++      <font>
++       <pointsize>10</pointsize>
++      </font>
++     </property>
++     <property name="documentTitle">
++      <string/>
++     </property>
++     <property name="readOnly">
++      <bool>true</bool>
++     </property>
++     <property name="plainText">
++      <string/>
++     </property>
++     <property name="textInteractionFlags">
++      <set>Qt::NoTextInteraction</set>
++     </property>
++     <property name="maximumBlockCount">
++      <number>240</number>
++     </property>
++     <property name="toolTipDuration" stdset="0">
++      <number>-3</number>
++     </property>
++    </widget>
++   </item>
++  </layout>
++ </widget>
++ <resources/>
++ <connections/>
++</ui>
+diff --git src/qtgui/dxc_spots.cpp src/qtgui/dxc_spots.cpp
+new file mode 100644
+index 0000000..0932b8d
+--- /dev/null
++++ src/qtgui/dxc_spots.cpp
+@@ -0,0 +1,107 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#include <Qt>
++#include <QFile>
++#include <QStringList>
++#include <QTextStream>
++#include <QString>
++#include <QSet>
++#include <algorithm>
++#include "dxc_spots.h"
++#include <stdio.h>
++#include <wchar.h>
++
++DXCSpots* DXCSpots::m_pThis = 0;
++
++DXCSpots::DXCSpots()
++{
++}
++
++void DXCSpots::create()
++{
++    m_pThis = new DXCSpots;
++}
++
++DXCSpots& DXCSpots::Get()
++{
++    return *m_pThis;
++}
++
++void DXCSpots::add(DXCSpotInfo &info)
++{
++    info.time = QTime::currentTime();
++    // check only callsign, so if present remove and re-append
++    // if check also frequency we can only change the time
++    if (m_DXCSpotList.contains(info))
++        m_DXCSpotList.removeAt(m_DXCSpotList.indexOf(info));
++    m_DXCSpotList.append(info);
++    std::stable_sort(m_DXCSpotList.begin(),m_DXCSpotList.end());
++    emit( DXCSpotsChanged() );
++}
++
++void DXCSpots::checkSpotTimeout()
++{
++    for (int i = 0; i < m_DXCSpotList.size(); i++)
++    {
++        if ( m_DXCSpotTimeout < m_DXCSpotList[i].time.secsTo(QTime::currentTime() ))
++        {
++            m_DXCSpotList.removeAt(i);
++        }
++    }
++    std::stable_sort(m_DXCSpotList.begin(),m_DXCSpotList.end());
++    emit( DXCSpotsChanged() );
++}
++
++void DXCSpots::remove(int index)
++{
++    m_DXCSpotList.removeAt(index);
++    emit( DXCSpotsChanged() );
++}
++
++QList<DXCSpotInfo> DXCSpots::getDXCSpotsInRange(qint64 low, qint64 high)
++{
++    DXCSpotInfo info;
++    info.frequency=low;
++    QList<DXCSpotInfo>::const_iterator lb = std::lower_bound(m_DXCSpotList.begin(), m_DXCSpotList.end(), info);
++    info.frequency=high;
++    QList<DXCSpotInfo>::const_iterator ub = std::upper_bound(m_DXCSpotList.begin(), m_DXCSpotList.end(), info);
++
++    QList<DXCSpotInfo> found;
++
++    while (lb != ub)
++    {
++        const DXCSpotInfo& info = *lb;
++        //if(info.IsActive())
++        {
++          found.append(info);
++        }
++        lb++;
++    }
++
++    return found;
++
++}
++
++const QColor DXCSpotInfo::GetColor() const
++{
++    return DXCSpotInfo::color;
++}
++
+diff --git src/qtgui/dxc_spots.h src/qtgui/dxc_spots.h
+new file mode 100644
+index 0000000..c7b0d00
+--- /dev/null
++++ src/qtgui/dxc_spots.h
+@@ -0,0 +1,91 @@
++/* -*- c++ -*- */
++/*
++ * Gqrx SDR: Software defined radio receiver powered by GNU Radio and Qt
++ *           http://gqrx.dk/
++ *
++ * Copyright 2013 Christian Lindner DL2VCL, Stefano Leucci.
++ *
++ * Gqrx is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3, or (at your option)
++ * any later version.
++ *
++ * Gqrx is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with Gqrx; see the file COPYING.  If not, write to
++ * the Free Software Foundation, Inc., 51 Franklin Street,
++ * Boston, MA 02110-1301, USA.
++ */
++#ifndef DXC_SPOTS_H
++#define DXC_SPOTS_H
++
++#include <QtGlobal>
++#include <QObject>
++#include <QString>
++#include <QMap>
++#include <QList>
++#include <QStringList>
++#include <QColor>
++#include <QTime>
++
++struct DXCSpotInfo
++{
++    qint64  frequency;
++    QString name;
++    QTime time;
++    QColor color;
++
++    DXCSpotInfo()
++    {
++        this->frequency = 0;
++        this->time = QTime::currentTime();
++        this->color=(Qt::lightGray);
++    }
++
++    bool operator<(const DXCSpotInfo &other) const
++    {
++        return frequency < other.frequency;
++    }
++
++    bool operator==(const DXCSpotInfo &other) const
++    {
++        // we check only the name because frequency can change a bit
++        // not good for multi-operator with the case callsign
++        return name == other.name;
++    }
++
++    const QColor GetColor() const;
++};
++
++class DXCSpots : public QObject
++{
++    Q_OBJECT
++public:
++    // This is a Singleton Class now because you can not send qt-signals from static functions.
++    static void create();
++    static DXCSpots& Get();
++
++    void add(DXCSpotInfo& info);
++    void checkSpotTimeout();
++    void remove(int index);
++    void setSpotTimeout(int i) {m_DXCSpotTimeout = i * 60;}
++    DXCSpotInfo& getDXCSpot(int i) { return m_DXCSpotList[i]; }
++    QList<DXCSpotInfo> getDXCSpotsInRange(qint64 low, qint64 high);
++    //int lowerBound(qint64 low);
++    //int upperBound(qint64 high);
++
++private:
++    DXCSpots(); // Singleton Constructor is private.
++    QList<DXCSpotInfo> m_DXCSpotList;
++    int m_DXCSpotTimeout;
++    static DXCSpots* m_pThis;
++
++signals:
++    void DXCSpotsChanged(void);
++};
++
++#endif // DXC_SPOTS_H
+diff --git src/qtgui/freqctrl.cpp src/qtgui/freqctrl.cpp
+index fde84e0..f1ad3e7 100644
+--- src/qtgui/freqctrl.cpp
++++ src/qtgui/freqctrl.cpp
+@@ -486,6 +486,7 @@ void CFreqCtrl::keyPressEvent(QKeyEvent *event)
+     // call base class if dont over ride key
+     bool      fSkipMsg = false;
+     qint64    tmp;
++    uint8_t position = 0;
+ 
+     // qDebug() <<event->key();
+ 
+@@ -851,3 +852,16 @@ void CFreqCtrl::cursorEnd()
+                                     center()));
+     }
+ }
++
++void CFreqCtrl::setFrequencyFocus()
++{
++    uint8_t position = floor(log10(m_freq));
++    position = (uint8_t)fmax(position, 4);      // restrict min to 100s of kHz
++
++    QMouseEvent *mouseEvent = new QMouseEvent(QEvent::MouseMove,
++                                              m_DigitInfo[position].dQRect.center(),
++                                              Qt::NoButton,
++                                              Qt::NoButton,
++                                              Qt::NoModifier);
++    mouseMoveEvent(mouseEvent);
++}
+diff --git src/qtgui/freqctrl.h src/qtgui/freqctrl.h
+index 71240eb..ff30397 100644
+--- src/qtgui/freqctrl.h
++++ src/qtgui/freqctrl.h
+@@ -61,6 +61,7 @@ signals:
+ 
+ public slots:
+     void    setFrequency(qint64 freq);
++    void    setFrequencyFocus();
+ 
+ protected:
+     void    paintEvent(QPaintEvent *);
+diff --git src/qtgui/plotter.cpp src/qtgui/plotter.cpp
+index 30e2e9a..5a96516 100644
+--- src/qtgui/plotter.cpp
++++ src/qtgui/plotter.cpp
+@@ -64,7 +64,9 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
+ #include <QtGlobal>
+ #include <QToolTip>
+ #include "plotter.h"
++#include "bandplan.h"
+ #include "bookmarks.h"
++#include "dxc_spots.h"
+ 
+ // Comment out to enable plotter debug messages
+ //#define PLOTTER_DEBUG
+@@ -86,6 +88,9 @@ int gettimeofday(struct timeval * tp, struct timezone * tzp)
+ #define PLOTTER_FILTER_BOX_COLOR    0xFFA0A0A4
+ // FIXME: Should cache the QColors also
+ 
++#define HOR_MARGIN 5
++#define VER_MARGIN 5
++
+ static inline bool val_is_out_of_range(float val, float min, float max)
+ {
+     return (val < min || val > max);
+@@ -148,8 +153,10 @@ CPlotter::CPlotter(QWidget *parent) : QFrame(parent)
+ 
+     m_FilterBoxEnabled = true;
+     m_CenterLineEnabled = true;
++    m_BandPlanEnabled = true;
+     m_BookmarksEnabled = true;
+     m_InvertScrolling = false;
++    m_DXCSpotsEnabled = true;
+ 
+     m_Span = 96000;
+     m_SampleFreq = 96000;
+@@ -171,6 +178,7 @@ CPlotter::CPlotter(QWidget *parent) : QFrame(parent)
+     m_Percent2DScreen = 35;	//percent of screen used for 2D display
+     m_VdivDelta = 30;
+     m_HdivDelta = 70;
++    m_BandPlanHeight = 22;
+ 
+     m_FreqDigits = 3;
+ 
+@@ -217,17 +225,20 @@ void CPlotter::mouseMoveEvent(QMouseEvent* event)
+             bool onTag = false;
+             if(pt.y() < 15 * 10) // FIXME
+             {
+-                for(int i = 0; i < m_BookmarkTags.size() && !onTag; i++)
++                if(m_BookmarksEnabled || m_DXCSpotsEnabled)
+                 {
+-                    if (m_BookmarkTags[i].first.contains(event->pos()))
+-                        onTag = true;
++                    for(int i = 0; i < Taglist.size() && !onTag; i++)
++                    {
++                        if (Taglist[i].first.contains(event->pos()))
++                            onTag = true;
++                    }
+                 }
+             }
+             // if no mouse button monitor grab regions and change cursor icon
+             if (onTag)
+             {
+                 setCursor(QCursor(Qt::PointingHandCursor));
+-                m_CursorCaptured = BOOKMARK;
++                m_CursorCaptured = TAG;
+             }
+             else if (isPointCloseTo(pt.x(), m_DemodFreqX, m_CursorCaptureDelta))
+             {
+@@ -289,10 +300,20 @@ void CPlotter::mouseMoveEvent(QMouseEvent* event)
+                     m_CursorCaptured = NOCAP;
+                 }
+                 if (m_TooltipsEnabled)
+-                    QToolTip::showText(event->globalPos(),
+-                                       QString("F: %1 kHz")
+-                                       .arg(freqFromX(pt.x())/1.e3f, 0, 'f', 3),
+-                                       this);
++                {
++                    qint64 hoverFrequency = freqFromX(pt.x());
++                    QString toolTipText = QString("F: %1 kHz").arg(hoverFrequency/1.e3f, 0, 'f', 3);
++                    QFontMetrics metrics(m_Font);
++                    int bandTopY = m_OverlayPixmap.height() - metrics.height() - 2 * VER_MARGIN - m_BandPlanHeight;
++                    QList<BandInfo> hoverBands = BandPlan::Get().getBandsEncompassing(hoverFrequency);
++                    if(m_BandPlanEnabled && pt.y() > bandTopY && hoverBands.size() > 0)
++                    {
++                        toolTipText.append("\n");
++                        for (int i = 0; i < hoverBands.size(); i++)
++                            toolTipText.append("\n" + hoverBands[i].name);
++                    }
++                    QToolTip::showText(event->globalPos(), toolTipText, this);
++                }
+             }
+             m_GrabPosition = 0;
+         }
+@@ -692,13 +713,13 @@ void CPlotter::mousePressEvent(QMouseEvent * event)
+                 resetHorizontalZoom();
+             }
+         }
+-        else if (m_CursorCaptured == BOOKMARK)
++        else if (m_CursorCaptured == TAG)
+         {
+-            for (int i = 0; i < m_BookmarkTags.size(); i++)
++            for (int i = 0; i < Taglist.size(); i++)
+             {
+-                if (m_BookmarkTags[i].first.contains(event->pos()))
++                if (Taglist[i].first.contains(event->pos()))
+                 {
+-                    m_DemodCenterFreq = m_BookmarkTags[i].second;
++                    m_DemodCenterFreq = Taglist[i].second;
+                     emit newDemodFreq(m_DemodCenterFreq, m_DemodCenterFreq - m_CenterFreq);
+                     break;
+                 }
+@@ -1277,8 +1298,7 @@ void CPlotter::drawOverlay()
+     painter.setBrush(Qt::SolidPattern);
+     painter.fillRect(0, 0, w, h, QColor(PLOTTER_BGD_COLOR));
+ 
+-#define HOR_MARGIN 5
+-#define VER_MARGIN 5
++    QList<BookmarkInfo> tags;
+ 
+     // X and Y axis areas
+     m_YAxisWidth = metrics.boundingRect("XXXX").width() + 2 * HOR_MARGIN;
+@@ -1287,25 +1307,47 @@ void CPlotter::drawOverlay()
+     int xAxisTop = h - xAxisHeight;
+     int fLabelTop = xAxisTop + VER_MARGIN;
+ 
+-    if (m_BookmarksEnabled)
++    if (m_BookmarksEnabled || m_DXCSpotsEnabled)
+     {
+-        m_BookmarkTags.clear();
++        Taglist.clear();
+         static const QFontMetrics fm(painter.font());
+         static const int fontHeight = fm.ascent() + 1;
+         static const int slant = 5;
+         static const int levelHeight = fontHeight + 5;
+         const int nLevels = h / (levelHeight + slant);
+-        QList<BookmarkInfo> bookmarks = Bookmarks::Get().getBookmarksInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++        if (m_BookmarksEnabled)
++        {
++            tags = Bookmarks::Get().getBookmarksInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                         m_CenterFreq + m_FftCenter + m_Span / 2);
++        }
++        else
++        {
++            tags.clear();
++        }
++        if (m_DXCSpotsEnabled)
++        {
++            QList<DXCSpotInfo> dxcspots = DXCSpots::Get().getDXCSpotsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
+                                                                              m_CenterFreq + m_FftCenter + m_Span / 2);
++            QListIterator<DXCSpotInfo> iter(dxcspots);
++            while(iter.hasNext())
++            {
++                BookmarkInfo tempDXCSpot;
++                DXCSpotInfo IterDXCSpot = iter.next();
++                tempDXCSpot.name = IterDXCSpot.name;
++                tempDXCSpot.frequency = IterDXCSpot.frequency;
++                tags.append(tempDXCSpot);
++            }
++            std::stable_sort(tags.begin(),tags.end());
++        }
+         QVector<int> tagEnd(nLevels + 1);
+-        for (int i = 0; i < bookmarks.size(); i++)
++        for (int i = 0; i < tags.size(); i++)
+         {
+-            x = xFromFreq(bookmarks[i].frequency);
++            x = xFromFreq(tags[i].frequency);
+ 
+ #if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
+             int nameWidth = fm.width(bookmarks[i].name);
+ #else
+-            int nameWidth = fm.boundingRect(bookmarks[i].name).width();
++            int nameWidth = fm.boundingRect(tags[i].name).width();
+ #endif
+ 
+             int level = 0;
+@@ -1325,9 +1367,9 @@ void CPlotter::drawOverlay()
+             const auto levelNHeightBottom = levelNHeight + fontHeight;
+             const auto levelNHeightBottomSlant = levelNHeightBottom + slant;
+ 
+-            m_BookmarkTags.append(qMakePair<QRect, qint64>(QRect(x, levelNHeight, nameWidth + slant, fontHeight), bookmarks[i].frequency));
++            Taglist.append(qMakePair<QRect, qint64>(QRect(x, level * levelHeight, nameWidth + slant, fontHeight), tags[i].frequency));
+ 
+-            QColor color = QColor(bookmarks[i].GetColor());
++            QColor color = QColor(tags[i].GetColor());
+             color.setAlpha(0x60);
+             // Vertical line
+             painter.setPen(QPen(color, 1, Qt::DashLine));
+@@ -1346,10 +1388,85 @@ void CPlotter::drawOverlay()
+             painter.setPen(QPen(color, 2, Qt::SolidLine));
+             painter.drawText(x + slant, levelNHeight, nameWidth,
+                              fontHeight, Qt::AlignVCenter | Qt::AlignHCenter,
+-                             bookmarks[i].name);
++                             tags[i].name);
++        }
++    }
++
++    if (m_BandPlanEnabled)
++    {
++        QList<BandInfo> bands = BandPlan::Get().getBandsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                                m_CenterFreq + m_FftCenter + m_Span / 2);
++
++        for (int i = 0; i < bands.size(); i++)
++        {
++            int band_left = xFromFreq(bands[i].minFrequency);
++            int band_right = xFromFreq(bands[i].maxFrequency);
++            int band_width = band_right - band_left;
++            rect.setRect(band_left, xAxisTop - m_BandPlanHeight, band_width, m_BandPlanHeight);
++            painter.fillRect(rect, bands[i].color);
++            QString band_label = bands[i].name + " (" + bands[i].modulation + ")";
++            int textWidth = metrics.width(band_label);
++            if (band_left < w && band_width > textWidth + 20)
++            {
++                painter.setOpacity(1.0);
++                rect.setRect(band_left, xAxisTop - m_BandPlanHeight, band_width, metrics.height());
++                painter.setPen(QColor(PLOTTER_TEXT_COLOR));
++                painter.drawText(rect, Qt::AlignCenter, band_label);
++            }
+         }
+     }
+ 
++/*
++    if (m_DXCSpotsEnabled)
++    {
++        m_DXCSpotTags.clear();
++        static const QFontMetrics fm(painter.font());
++        static const int fontHeight = fm.ascent() + 1;
++        static const int slant = 5;
++        static const int levelHeight = fontHeight + 5;
++        static const int nLevels = 10;
++        QList<DXCSpotInfo> dxcspots = DXCSpots::Get().getDXCSpotsInRange(m_CenterFreq + m_FftCenter - m_Span / 2,
++                                                                         m_CenterFreq + m_FftCenter + m_Span / 2);
++        int tagEnd[nLevels] = {0};
++        for (int i = 0; i < dxcspots.size(); i++)
++        {
++            x = xFromFreq(dxcspots[i].frequency);
++
++#if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
++            int nameWidth = fm.width(dxcspots[i].name);
++#else
++            int nameWidth = fm.boundingRect(dxcspots[i].name).width();
++#endif
++            int level = 0;
++            while(level < nLevels && tagEnd[level] > x)
++                level++;
++
++            if(level == nLevels)
++                level = 0;
++            tagEnd[level] = x + nameWidth + slant - 1;
++            m_DXCSpotTags.append(qMakePair<QRect, qint64>(QRect(x, level * levelHeight, nameWidth + slant, fontHeight), dxcspots[i].frequency));
++
++            QColor color = QColor(dxcspots[i].GetColor());
++            color.setAlpha(0x60);
++            // Vertical line
++            painter.setPen(QPen(color, 1, Qt::DashLine));
++            painter.drawLine(x, level * levelHeight + fontHeight + slant, x, xAxisTop);
++            // Horizontal line
++            painter.setPen(QPen(color, 1, Qt::SolidLine));
++            painter.drawLine(x + slant, level * levelHeight + fontHeight,
++                             x + nameWidth + slant - 1,
++                             level * levelHeight + fontHeight);
++            // Diagonal line
++            painter.drawLine(x + 1, level * levelHeight + fontHeight + slant - 1,
++                             x + slant - 1, level * levelHeight + fontHeight + 1);
++            color.setAlpha(0xFF);
++            painter.setPen(QPen(color, 2, Qt::SolidLine));
++            painter.drawText(x + slant, level * levelHeight, nameWidth,
++                             fontHeight, Qt::AlignVCenter | Qt::AlignHCenter,
++                             dxcspots[i].name);
++        }
++    }
++*/
+     if (m_CenterLineEnabled)
+     {
+         x = xFromFreq(m_CenterFreq);
+@@ -1521,7 +1638,7 @@ void CPlotter::makeFrequencyStrs()
+     }
+ }
+ 
+-// Convert from screen coordinate to frequency
++// Convert from frequency to screen coordinate
+ int CPlotter::xFromFreq(qint64 freq)
+ {
+     int w = m_OverlayPixmap.width();
+@@ -1534,7 +1651,7 @@ int CPlotter::xFromFreq(qint64 freq)
+     return x;
+ }
+ 
+-// Convert from frequency to screen coordinate
++// Convert from screen coordinate to frequency
+ qint64 CPlotter::freqFromX(int x)
+ {
+     int w = m_OverlayPixmap.width();
+@@ -1680,6 +1797,12 @@ void CPlotter::setPeakDetection(bool enabled, float c)
+         m_PeakDetection = c;
+ }
+ 
++void CPlotter::toggleBandPlan(bool state)
++{
++    m_BandPlanEnabled = state;
++    updateOverlay();
++}
++
+ void CPlotter::calcDivSize (qint64 low, qint64 high, int divswanted, qint64 &adjlow, qint64 &step, int& divs)
+ {
+ #ifdef PLOTTER_DEBUG
+diff --git src/qtgui/plotter.h src/qtgui/plotter.h
+index bb765be..db17811 100644
+--- src/qtgui/plotter.h
++++ src/qtgui/plotter.h
+@@ -39,6 +39,8 @@ public:
+     void setTooltipsEnabled(bool enabled) { m_TooltipsEnabled = enabled; }
+     void setBookmarksEnabled(bool enabled) { m_BookmarksEnabled = enabled; }
+     void setInvertScrolling(bool enabled) { m_InvertScrolling = enabled; }
++    void setDXCSpotsEnabled(bool enabled) { m_DXCSpotsEnabled = enabled; }
++    void setBandPlanEnabled(bool enabled) { m_BandPlanEnabled = enabled; }
+ 
+     void setNewFftData(float *fftData, int size);
+     void setNewFftData(float *fftData, float *wfData, int size);
+@@ -147,6 +149,7 @@ public slots:
+     void setPandapterRange(float min, float max);
+     void setWaterfallRange(float min, float max);
+     void setPeakDetection(bool enabled, float c);
++    void toggleBandPlan(bool state);
+     void updateOverlay();
+ 
+     void setPercent2DScreen(int percent)
+@@ -173,7 +176,7 @@ private:
+         RIGHT,
+         YAXIS,
+         XAXIS,
+-        BOOKMARK
++        TAG
+     };
+ 
+     void        drawOverlay();
+@@ -224,9 +227,11 @@ private:
+     qint64      m_FreqPerDiv;
+     bool        m_CenterLineEnabled;  /*!< Distinguish center line. */
+     bool        m_FilterBoxEnabled;   /*!< Draw filter box. */
+-    bool        m_TooltipsEnabled;     /*!< Tooltips enabled */
++    bool        m_TooltipsEnabled;    /*!< Tooltips enabled */
++    bool        m_BandPlanEnabled;    /*!< Show/hide band plan on spectrum */
+     bool        m_BookmarksEnabled;   /*!< Show/hide bookmarks on spectrum */
+     bool        m_InvertScrolling;
++    bool        m_DXCSpotsEnabled;   /*!< Show/hide DXC Spots on spectrum */
+     int         m_DemodHiCutFreq;
+     int         m_DemodLowCutFreq;
+     int         m_DemodFreqX;		//screen coordinate x position
+@@ -263,6 +268,7 @@ private:
+     QFont       m_Font;         /*!< Font used for plotter (system font) */
+     int         m_HdivDelta; /*!< Minimum distance in pixels between two horizontal grid lines (vertical division). */
+     int         m_VdivDelta; /*!< Minimum distance in pixels between two vertical grid lines (horizontal division). */
++    int         m_BandPlanHeight; /*!< Height in pixels of band plan (if enabled) */
+ 
+     quint32     m_LastSampleRate;
+ 
+@@ -272,7 +278,7 @@ private:
+     float       m_PeakDetection;
+     QMap<int,int>   m_Peaks;
+ 
+-    QList< QPair<QRect, qint64> >     m_BookmarkTags;
++    QList< QPair<QRect, qint64> >     Taglist;
+ 
+     // Waterfall averaging
+     quint64     tlast_wf_ms;        // last time waterfall has been updated
+diff --git src/receivers/nbrx.cpp src/receivers/nbrx.cpp
+index 9370c70..fa1507c 100644
+--- src/receivers/nbrx.cpp
++++ src/receivers/nbrx.cpp
+@@ -63,8 +63,7 @@ nbrx::nbrx(float quad_rate, float audio_rate)
+ 
+     demod = demod_fm;
+     connect(self(), 0, iq_resamp, 0);
+-    connect(iq_resamp, 0, nb, 0);
+-    connect(nb, 0, filter, 0);
++    connect(iq_resamp, 0, filter, 0);
+     connect(filter, 0, meter, 0);
+     connect(filter, 0, sql, 0);
+     connect(sql, 0, agc, 0);
+@@ -72,15 +71,16 @@ nbrx::nbrx(float quad_rate, float audio_rate)
+ 
+     if (audio_rr0)
+     {
+-        connect(demod, 0, audio_rr0, 0);
+-
++        connect(demod, 0, nb, 0);
++        connect(nb, 0, audio_rr0, 0);
+         connect(audio_rr0, 0, self(), 0); // left  channel
+         connect(audio_rr0, 0, self(), 1); // right channel
+     }
+     else
+     {
+-        connect(demod, 0, self(), 0);
+-        connect(demod, 0, self(), 1);
++        connect(demod, 0, nb, 0);
++        connect(nb, 0, self(), 0);
++        connect(nb, 0, self(), 1);
+     }
+ }
+ 
+@@ -211,15 +211,17 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (current_demod == NBRX_DEMOD_NONE)
+         {
+-            disconnect(demod, 0, audio_rr0, 0);
+-            disconnect(demod, 1, audio_rr1, 0);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, audio_rr0, 0);
++            disconnect(nb, 1, audio_rr1, 0);
+ 
+             disconnect(audio_rr0, 0, self(), 0);
+             disconnect(audio_rr1, 0, self(), 1);
+         }
+         else
+         {
+-            disconnect(demod, 0, audio_rr0, 0);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, audio_rr0, 0);
+ 
+             disconnect(audio_rr0, 0, self(), 0);
+             disconnect(audio_rr0, 0, self(), 1);
+@@ -229,13 +231,15 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (current_demod == NBRX_DEMOD_NONE)
+         {
+-            disconnect(demod, 0, self(), 0);
+-            disconnect(demod, 1, self(), 1);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, self(), 0);
++            disconnect(nb, 1, self(), 1);
+         }
+         else
+         {
+-            disconnect(demod, 0, self(), 0);
+-            disconnect(demod, 0, self(), 1);
++            disconnect(demod, 0, nb, 0);
++            disconnect(nb, 0, self(), 0);
++            disconnect(nb, 0, self(), 1);
+         }
+     }
+ 
+@@ -268,15 +272,17 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (d_demod == NBRX_DEMOD_NONE)
+         {
+-            connect(demod, 0, audio_rr0, 0);
+-            connect(demod, 1, audio_rr1, 0);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, audio_rr0, 0);
++            connect(nb, 1, audio_rr1, 0);
+ 
+             connect(audio_rr0, 0, self(), 0);
+             connect(audio_rr1, 0, self(), 1);
+         }
+         else
+         {
+-            connect(demod, 0, audio_rr0, 0);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, audio_rr0, 0);
+ 
+             connect(audio_rr0, 0, self(), 0);
+             connect(audio_rr0, 0, self(), 1);
+@@ -286,13 +292,15 @@ void nbrx::set_demod(int rx_demod)
+     {
+         if (d_demod == NBRX_DEMOD_NONE)
+         {
+-            connect(demod, 0, self(), 0);
+-            connect(demod, 1, self(), 1);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, self(), 0);
++            connect(nb, 1, self(), 1);
+         }
+         else
+         {
+-            connect(demod, 0, self(), 0);
+-            connect(demod, 0, self(), 1);
++            connect(demod, 0, nb, 0);
++            connect(nb, 0, self(), 0);
++            connect(nb, 0, self(), 1);
+         }
+     }
+ }
+diff --git src/receivers/nbrx.h src/receivers/nbrx.h
+index 1aa845c..a57909d 100644
+--- src/receivers/nbrx.h
++++ src/receivers/nbrx.h
+@@ -36,6 +36,7 @@
+ #include "dsp/rx_demod_am.h"
+ //#include "dsp/resampler_ff.h"
+ #include "dsp/resampler_xx.h"
++#include <gnuradio/blocks/float_to_complex.h>
+ 
+ class nbrx;
+ 
+@@ -122,6 +123,7 @@ private:
+     gr::analog::simple_squelch_cc::sptr sql;        /*!< Squelch. */
+     gr::blocks::complex_to_float::sptr  demod_raw;  /*!< Raw I/Q passthrough. */
+     gr::blocks::complex_to_real::sptr   demod_ssb;  /*!< SSB demodulator. */
++
+     rx_demod_fm_sptr          demod_fm;   /*!< FM demodulator. */
+     rx_demod_am_sptr          demod_am;   /*!< AM demodulator. */
+     resampler_ff_sptr         audio_rr0;  /*!< Audio resampler. */

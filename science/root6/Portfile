@@ -11,9 +11,9 @@ PortGroup           xcodeversion                  1.0
 PortGroup           legacysupport                 1.0
 
 # Please also check if Gate needs a revbump after root6 update
-github.setup        root-project root 6-22-00 v
+github.setup        root-project root 6-22-04 v
 version             [string map {- .} ${github.version}]
-revision            1
+revision            0
 livecheck.version   ${github.version}
 
 # Use git commit
@@ -32,9 +32,9 @@ livecheck.url       ${github.homepage}/tags
 # Also, skip anything with trailing rcX etc.
 livecheck.regex     {v(6[-.]\d[02468][-.]\d{2}).tar.gz}
 
-checksums           rmd160  1424255d508ac109a3cf3fabd8d3211917dbea1c \
-                    sha256  131a5328dbe33933673a28464411ef7c4c02251168f9a35a33ff8c3a6b77a06d \
-                    size    173033036
+checksums           rmd160  40b3f503b756c97a897a8956d88f376cff332cb5 \
+                    sha256  79a3264121e36b7b4eea5b4b8c58399db0e1261afea2712a06e124b32b47e651 \
+                    size    173080530
 
 name                root${version_major}
 categories          science
@@ -84,6 +84,7 @@ depends_lib-append  port:expat \
                     port:tbb \
                     port:git \
                     port:xxhashlib \
+                    port:zstd \
                     path:lib/libopenblas.dylib:OpenBLAS \
                     path:lib/libssl.dylib:openssl
 
@@ -94,6 +95,7 @@ depends_lib-append  port:expat \
 depends_run-append  port:root_select
 
 cmake.out_of_source yes
+cmake.generator     Ninja
 
 # TODO: the file ${filespath}/${name} would have to be generated on the fly instead
 select.group        root
@@ -163,28 +165,27 @@ configure.args-append \
                     -Dgeocad=OFF \
                     -Dr=OFF \
                     -Droot7=ON \
+                    -Dwebgui=ON \
                     -Dbuiltin_veccore=OFF \
                     -DPNG_LIBRARY=${prefix}/lib/libpng.dylib \
                     -DPNG_PNG_INCLUDE_DIR=${prefix}/include
 
+# Work-around until ROOT supports building for macOS 11.X as deployment target.
+if { ${os.major} == 20 } {
+    macosx_deployment_target 10.15
+}
+
 # https://root-forum.cern.ch/t/v6-22-00-build-error-on-macos/40239
 configure.args-append -Druntime_cxxmodules=OFF
 
-# Enable C++17 on 10.14 (Darwin18+)
-#        C++14 on 10.9  (Darwin13+)
-#        C++11 otherwise
+# Enable C++17 on 10.14 and newer (Darwin18+)
+#        C++14 otherwise
 if        { ${os.major} >= 18 } {
     compiler.cxx_standard 2017
     configure.args-replace  -Dcxx17=OFF -Dcxx17=ON
-    compiler.blacklist-append macports-clang-5.0
-} elseif  { ${os.major} >= 13 } {
+} else {
     compiler.cxx_standard 2014
     configure.args-replace  -Dcxx14=OFF -Dcxx14=ON
-    compiler.blacklist-append macports-clang-5.0
-} else {
-    # force use of MP clang 5.0
-    compiler.blacklist-append clang {macports-clang-[7-9].0}
-    compiler.cxx_standard 2011
 }
 
 # Configure the C++ runtime to use
@@ -192,8 +193,8 @@ if { ${configure.cxx_stdlib} ne "libc++" } {
     configure.args-replace -Dlibcxx=ON -Dlibcxx=OFF
 }
 
-# Configure the graphics backend. cocoa on OSX10.8 and newer. X11 otherwise
-if { ${os.major} >= 12 } {
+# Configure the graphics backend. cocoa on OSX10.12 and newer. X11 otherwise
+if { ${os.major} >= 16 } {
     if {![variant_isset x11]} {
         default_variants-append +cocoa
     }
@@ -208,12 +209,11 @@ if { ${os.major} >= 12 } {
     default_variants-append +xrootd
 }
 
-# No longer compiles on OSX10.6, due to update to internal LLVM version.
-# Disable build on this platform.
+# No longer compiles on OSX10.6 or older.
 if { ${os.major} <= 10 } {
     known_fail yes
     pre-fetch {
-        ui_error "${name} is not supported on this OSX release."
+        ui_error "${name} is not supported on this OSX release (Darwin ${os.major})."
         return -code error "Unsupported OSX version"
     }
 }
@@ -387,7 +387,7 @@ variant opengl description {Build with opengl support} {
 # ========================================================================================
 
 # List of possible python versions
-set python_versions { 2.7 3.5 3.6 3.7 3.8 }
+set python_versions { 2.7 3.5 3.6 3.7 3.8 3.9 }
 # Enable python variant by default on OSX 10.9 and newer.
 # Disabled on older systems due to an issue fetching the source for
 # the various python dependencies due to these systems having out of
@@ -456,9 +456,10 @@ foreach py_ver ${python_versions} {
                                 port:py${py_ver_no_dot}-jupyter \
                                 port:py${py_ver_no_dot}-gnureadline \
                                 port:py${py_ver_no_dot}-metakernel
-        
+
         post-destroot {
-            # Install PyROOT lib in the correct place
+            # Install PyROOT in the correct place
+            set mypyincdir  ${frameworks_dir}/Python.framework/Versions/${active_python_version}/include
             set mypylibdir  ${frameworks_dir}/Python.framework/Versions/${active_python_version}/lib/python${active_python_version}
             set mypysitedir ${mypylibdir}/site-packages/
             file mkdir ${destroot}${mypysitedir}
@@ -478,6 +479,14 @@ foreach py_ver ${python_versions} {
             foreach fname [ glob -tails -directory ${destroot}${install_prefix}/lib/root/ lib* ] {
                 ln -s ${install_prefix}/lib/root/${fname} ${destroot}${mypysitedir}/
             }
+            # Fix cppyy loader imports...
+            set cppyy_lib_dir ${install_prefix}/lib/root/cppyy_backend/lib
+            file mkdir ${destroot}${cppyy_lib_dir}
+            foreach fname [ glob -tails -directory ${destroot}${install_prefix}/lib/root/ libcppyy* ] {
+                ln -s ${install_prefix}/lib/root/${fname} ${destroot}${cppyy_lib_dir}/
+            }
+            file mkdir ${destroot}${mypyincdir}
+            ln -s ${install_prefix}/include/root/CPyCppyy ${destroot}${mypyincdir}/
             # Fix python version in scripts
             set pystringtoreplace "/usr/bin/python"
             foreach f [ exec find ${destroot}${install_prefix} -type f -and -name "*.py" ] {

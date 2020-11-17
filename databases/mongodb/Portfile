@@ -2,23 +2,24 @@
 
 PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           muniversal 1.0
+
+epoch               1
+github.setup        mongodb mongo 4.4.1 r
+revision            0
+checksums           rmd160  d6d595b0bd80e30aaaddf48e754aeed6bfe91295 \
+                    sha256  5a2ee786c75f18545f62cd21bcb7a47dee5cd71bb357e066654283f199cd8751 \
+                    size    49644743
 
 name                mongodb
-epoch               1
-version             4.2.8
-revision            0
-checksums           rmd160  5c08e590bcd9f0155d81891cf41bc624d80ad976 \
-                    sha256  e8880277e3910afd82c71ed61861d518f2040cbc062e00a26d53a3224284db8f \
-                    size    61730247
-
 license             SSPL
 categories          databases
+platforms           darwin
 maintainers         {ryandesign @ryandesign}
 
 description         High-performance, schema-free document-oriented database
 long_description    ${description}
-
-platforms           darwin
 
 homepage            https://www.mongodb.com/community
 master_sites        https://fastdl.mongodb.org/src
@@ -37,15 +38,13 @@ depends_lib         port:curl \
                     port:libstemmer \
                     port:pcre \
                     port:snappy \
-                    port:sqlite3 \
                     port:yaml-cpp \
                     port:zlib \
                     port:zstd
 
 use_configure       no
 
-# mongodb 4.2 and later requires C++17.
-configure.cxx_stdlib libc++
+compiler.c_standard 2011
 compiler.cxx_standard 2017
 
 # This matches a version check of __apple_build_version__ in SConstruct.
@@ -58,17 +57,16 @@ configure.optflags
 configure.ldflags-delete -L${prefix}/lib
 
 build.cmd           ${prefix}/bin/python3.8 buildscripts/scons.py
-build.target        core mongobridge
+build.target        install-core
 build.args          CC="${configure.cc}" \
-                    CCFLAGS="${configure.cflags} [get_canonical_archflags cc]" \
                     CPPPATH="${prefix}/include" \
                     CXX="${configure.cxx}" \
-                    CXXFLAGS="${configure.cxxflags} [get_canonical_archflags cxx]" \
+                    DESTDIR="${destroot}" \
                     LIBPATH="${prefix}/lib" \
-                    LINKFLAGS="${configure.ldflags} [get_canonical_archflags ld]" \
-                    TARGET_ARCH=${build_arch} \
+                    PREFIX="${prefix}" \
                     --disable-warnings-as-errors \
                     --enable-http-client=on \
+                    --install-action=hardlink \
                     --libc++ \
                     --opt=size \
                     --release \
@@ -76,7 +74,6 @@ build.args          CC="${configure.cc}" \
                     --use-sasl-client \
                     --use-system-pcre \
                     --use-system-snappy \
-                    --use-system-sqlite \
                     --use-system-stemmer \
                     --use-system-yaml \
                     --use-system-zlib \
@@ -93,34 +90,43 @@ build.args          CC="${configure.cc}" \
 # See https://jira.mongodb.org/browse/SERVER-44592
 build.args-append   --use-system-mongo-c=off
 
-if {${os.platform} eq "darwin" && ${os.major} >= 15} {
-    build.args-append \
-                    --ssl-provider=native
-} else {
-    depends_lib-append \
-                    path:lib/libssl.dylib:openssl
-    build.args-append \
-                    --ssl-provider=openssl
-}
-
 # Specify a short variant dir because the default variant dir is deeply nested
 # and can be very long, so long that on some systems the build will fail with
 # "Argument list too long"; see https://jira.mongodb.org/browse/SERVER-13829
 build.args-append   VARIANT_DIR=MP
 
-# https://jira.mongodb.org/browse/SERVER-22810
+# i386 was never supported on macOS.
+# See https://jira.mongodb.org/browse/SERVER-22810
 supported_archs     arm64 x86_64
 
-destroot.args       {*}${build.args}
-destroot.destdir    --prefix=${destroot}${prefix}
+array set merger_build_args {arm64 "TARGET_ARCH=aarch64" x86_64 "TARGET_ARCH=x86_64"}
+foreach a ${supported_archs} {
+    lappend merger_build_args($a) \
+                    CCFLAGS="${configure.cflags} -arch ${a}" \
+                    CXXFLAGS="${configure.cxxflags} -arch ${a}" \
+                    LINKFLAGS="${configure.ldflags} -arch ${a}" \
+}
+if {![variant_isset universal] && [info exists merger_build_args(${build_arch})]} {
+    build.args-append {*}$merger_build_args(${build_arch})
+}
 
 set dbdir           ${prefix}/var/db/mongodb
 set logdir          ${prefix}/var/log/mongodb
+set docdir          ${prefix}/share/doc/mongodb
 set mongouser       _mongo
 add_users           ${mongouser} group=${mongouser} realname=MongoDB\ Server
 
-post-destroot {
-    xinstall -W ${worksrcpath} mongobridge ${destroot}${prefix}/bin
+destroot {
+    # The programs have already been installed into the destroot during
+    # the build phase because I don't know how to prevent it from doing
+    # that. Documentation files have also already been installed to an
+    # unreasonable location so move them.
+    xinstall -d ${destroot}${docdir}
+    foreach f [glob ${destroot}${prefix}/*] {
+        if {[file isfile ${f}]} {
+            move ${f} ${destroot}${docdir}
+        }
+    }
 
     xinstall -m 0755 -o ${mongouser} -g ${mongouser} -d \
         ${destroot}${dbdir} \
@@ -153,5 +159,4 @@ if {${os.platform} eq "darwin" && ${os.major} >= 16 && [vercmp ${os.version} 18.
     }
 }
 
-livecheck.url       https://www.mongodb.org/downloads
-livecheck.regex     {mongodb-src-r(\d+\.\d*[02468]\.\d+)\.}
+github.livecheck.regex  {([0-9.]+)}
