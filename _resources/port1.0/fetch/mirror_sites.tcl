@@ -426,6 +426,7 @@ set stackpath   [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" :
 # cert doesn't have macports.org SANs; admin notified
 #set aarnet.au   [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set aarnet.au   http
+set atl.us      http
 set cph.dk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
@@ -448,6 +449,7 @@ set ywg.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" :
 set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
     ${stackpath}://distfiles.macports.org/:mirror
     ${aarnet.au}://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
+    ${atl.us}://atl.us.distfiles.macports.org/:mirror
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
     ${cph.dk}://cph.dk.distfiles.macports.org/:mirror
     ${fco.it}://fco.it.distfiles.macports.org/:mirror

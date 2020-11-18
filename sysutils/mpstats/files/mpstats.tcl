@@ -104,7 +104,7 @@ proc getgccinfo {} {
 
 # extraction of CommandLineTools version
 proc getcltinfo {} {
-    if {[file exists /usr/lib/libxcselect.dylib]} {
+    if {[file exists /usr/lib/libxcselect.dylib] || ${macports::os_major} >= 20} {
         set pkgname "CLTools_Executables"
     } else {
         # Mountain Lion (10.8) and below. Note that we prefer Xcode over CLT for <= 10.8
