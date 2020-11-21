@@ -34,7 +34,7 @@ proc openssl.configure {method} {
 
     switch ${method} {
         pkgconfig {
-            configure.env-append PKG_CONFIG_PATH=${prefix}/lib/openssl-${openssl.branch}/pkgconfig
+            configure.pkg_config_path-prepend ${prefix}/lib/openssl-${openssl.branch}/pkgconfig
             depends_build-delete port:pkgconfig
             depends_build-append port:pkgconfig
         }
