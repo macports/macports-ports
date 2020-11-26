@@ -98,11 +98,11 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,descrip)  "MacPorts gcc $ver"
     set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
     if {[vercmp ${ver} 4.6] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc45"
+        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
     } elseif {[vercmp ${ver} 7] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc6"
+        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
     } else {
-        set cdb(gcc$ver_nodot,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc${ver_nodot}"
+        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
     }
     set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
