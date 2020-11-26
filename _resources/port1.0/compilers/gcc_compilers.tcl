@@ -1,6 +1,8 @@
 # add all working GCC compilers to the variable compilers based on ${os.major}
 
-# see https://trac.macports.org/ticket/57135
+# https://trac.macports.org/ticket/57135
+# https://trac.macports.org/ticket/61636
+
 if { ${os.major} >= 11 } {
     lappend compilers macports-gcc-10 \
                       macports-gcc-9

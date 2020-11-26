@@ -82,13 +82,18 @@ if {${os.major} < 10} {
 } elseif {${os.major} < 11} {
     set compilers.gcc_default gcc8
 } else {
-    set compilers.gcc_default gcc10
+    # Currently only gcc-devel works on arm machines
+    if { ${os.major} >= 20 && ${os.arch} eq "arm" } {
+        set compilers.gcc_default gcc-devel
+    } else {
+        set compilers.gcc_default gcc10
+    }
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10}
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 devel}
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -96,13 +101,18 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,variant)  gcc$ver_nodot
     set cdb(gcc$ver_nodot,compiler) macports-gcc-$ver
     set cdb(gcc$ver_nodot,descrip)  "MacPorts gcc $ver"
-    set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
-    if {[vercmp ${ver} 4.6] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
-    } elseif {[vercmp ${ver} 7] < 0} {
-        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
+    if { $ver eq "devel" } {
+        set cdb(gcc$ver_nodot,depends)  port:gcc-devel
+        set cdb(gcc$ver_nodot,dependsl) "port:libgcc-devel"
     } else {
-        set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
+        set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
+        if {[vercmp ${ver} 4.6] < 0} {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
+        } elseif {[vercmp ${ver} 7] < 0} {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
+        } else {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
+        }
     }
     set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
