@@ -84,7 +84,7 @@ if {${os.major} < 10} {
 } else {
     # Currently only gcc-devel works on arm machines
     if { ${os.major} >= 20 && ${os.arch} eq "arm" } {
-        set compilers.gcc_default gcc-devel
+        set compilers.gcc_default gccdevel
     } else {
         set compilers.gcc_default gcc10
     }
