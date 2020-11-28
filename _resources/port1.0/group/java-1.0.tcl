@@ -32,19 +32,8 @@ pre-fetch {
     if { ${java_version_not_found} } {
         # Check again, incase java became available, .e.g openjdk installed as a dependency
         java_set_env
-        # If still not present, error out
-        if { ${java_version_not_found} } {
-            global os.platform os.major
-            if {${os.platform} eq "darwin" && ${os.major} == 20} {
-                # The following check is broken on macOS 11 Big Sur so we
-                # temporarily give up on ensuring an exact Java version. See
-                # https://trac.macports.org/ticket/61445
-                ui_warn "Failed to confirm that required Java was installed; see https://trac.macports.org/ticket/61445"
-            } else {
-                ui_error "${name} requires Java ${java.version} but no such installation could be found."
-                return -code error "missing required Java version"
-            }
-        }
+        ui_error "${name} requires Java ${java.version} but no such installation could be found."
+        return -code error "missing required Java version"
     }
 }
 
@@ -58,14 +47,19 @@ proc find_java_home {} {
 
     global java.version java.fallback
     if { ${java.version} ne "" } {
-        if { [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}]}] } {
+        set f_param "-f"
+        global os.platform os.major
+        if {${os.platform} eq "darwin" && ${os.major} == 20} {
+            set f_param ""
+        }
+        if { [catch {set val [exec "/usr/libexec/java_home" ${f_param} "-v" ${java.version}]}] } {
             # Don't return an error because that would prevent the port from
             # even being indexed when the required Java is missing. Instead, set
             # a flag to be checked at pre-fetch.
             set java_version_not_found yes
         } else {
             set home_value $val
-            ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home -f -v: $home_value"
+            ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home $f_param -v $home_value"
         }
     }
 
