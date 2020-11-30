@@ -1,36 +1,86 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim: fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           cmake 1.0
+PortGroup           cmake 1.1
 PortGroup           github 1.0
 
 github.setup        Andersbakken rtags 2.38 v
-revision            0
+revision            2
 github.tarball_from releases
 categories          devel
 platforms           darwin
 license             GPL-3+
+maintainers         nomaintainer
+
+description         A client/server indexer for c/c++/objc\[++\] with \
+                    integration for Emacs based on clang
+long_description    {*}${description}
 
 checksums           rmd160  07fca52377eb5d8c412caa14e2cec29f1b53854f \
                     sha256  e19d9cf5823cccc43266ca57c19ae0bb879cbe138511cb3f0343958860481a5d \
                     size    1573155
 
-maintainers         nomaintainer
+# just pick the newest version of clang
+set clang_version   9.0
 
-description         A c/c++ client/server indexer for c/c++/objc\[++\] with \
-                    integration for Emacs based on clang
-long_description    {*}${description}
-
-# just pick the newest version of clang (make sure to update below)
-depends_lib         port:clang-8.0 \
+depends_lib-append  port:clang-${clang_version} \
                     port:zlib
 
-cmake.out_of_source yes
+# We provide our own launchd plist to allow the use of Sockets
+set rdm.launchd.socket      ${prefix}/var/run/rdm.socket
+set rdm.launchd.plist_in    ${filespath}/rdm.plist.in
+set rdm.launchd.plist       ${workpath}/rdm.plist
 
-# this seems to confuse rtags custom path for cmake modules
-configure.args-delete \
-                    -DCMAKE_MODULE_PATH=${prefix}/share/cmake/Modules
+startupitem.name    ${name}.rdm
+startupitem.create  no
+startupitem.type    launchd
+startupitem.location LaunchAgents
+startupitem.autostart no
+
+post-patch {
+    copy -- ${rdm.launchd.plist_in} ${rdm.launchd.plist}
+
+    foreach {rdm_key rdm_var} {
+        @PREFIX@            prefix
+        @LABEL@             startupitem.uniquename
+        @RDM_SOCKET_PATH@   rdm.launchd.socket
+    } {
+        reinplace "s|${rdm_key}|[set ${rdm_var}]|g" \
+            ${rdm.launchd.plist}
+    }
+}
+
+# this is needed to find rtags custom path for cmake modules
+configure.args-append \
+                    -DCMAKE_MODULE_PATH=""
 
 configure.args-append \
                     -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=1 \
-                    -DLIBCLANG_LLVM_CONFIG_EXECUTABLE=${prefix}/bin/llvm-config-mp-8.0
+                    -DLIBCLANG_LLVM_CONFIG_EXECUTABLE=${prefix}/bin/llvm-config-mp-${clang_version}
+
+post-destroot {
+    # Install our custom plist
+    set launchd_dir "${prefix}/etc/${startupitem.location}/${startupitem.uniquename}"
+    xinstall -m 755 -d ${destroot}/${launchd_dir}
+    xinstall -m 644 \
+        ${rdm.launchd.plist} \
+        ${destroot}/${launchd_dir}/${startupitem.plist}
+
+    if {[getuid] == 0 && ${startupitem.install} != "no"} {
+        file mkdir "${destroot}/Library/${startupitem.location}"
+        ln -sf "${launchd_dir}/${startupitem.plist}" "${destroot}/Library/${startupitem.location}"
+    } else {
+        ln -sf ${launchd_dir}/${startupitem.plist} ${destroot}${prefix}/etc/${startupitem.location}
+    }
+}
+
+notes "
+    The optional included startup item registers a per-user rdm socket
+    via launchd at ${rdm.launchd.socket}.
+
+    To verify that rdm(1) is accessible after loading the startup item,
+    run:
+
+      rc --socket-file ${rdm.launchd.socket} --status
+
+"

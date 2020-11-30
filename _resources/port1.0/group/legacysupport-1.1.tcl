@@ -1,30 +1,36 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# This portgroup provides support older OS releases by:
+# This portgroup provides support for older macOS releases by:
 #    * providing a library for various missing library functions
-#    * ameliorate the mixing of libstdc++ libraries
+#    * ameliorating the mixing of libstdc++ libraries
 
 # Usage:
 #
 #   PortGroup legacysupport 1.1
 #
-#   legacysupport.newest_darwin_requires_legacy: newest macOS release that requires legacy support
+#   legacysupport.newest_darwin_requires_legacy: newest Darwin version that requires legacy support
 #
 #   legacysupport.header_search: preprocessor flag used to locate header directory
 #
 #   legacysupport.library_name: linker flag used to add library
 #
+#   legacysupport.use_static: allow static linking of legacysupport if preferred (e.g. for compilers)
+#
 #   legacysupport.redirect_bins: binary files that mix different versions of libstdc++
 #                                create a wrapper so that only MacPorts libstdc++ is used
 
+# default to OS X El Capitan (OS X 10.11; Darwin 15) due to clock_gettime
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy {}
+default legacysupport.newest_darwin_requires_legacy 15
 
 options legacysupport.header_search
 default legacysupport.header_search     {-isystem${prefix}/include/LegacySupport}
 
 options legacysupport.library_name
-default legacysupport.library_name      {${prefix}/lib/libMacportsLegacySupport.dylib}
+default legacysupport.library_name      {[legacysupport::get_library_name]}
+
+options legacysupport.use_static
+default legacysupport.use_static        no
 
 options legacysupport.redirect_bins
 default legacysupport.redirect_bins     {}
@@ -37,6 +43,15 @@ if {![info exists compiler.limit_flags]} {
 }
 
 namespace eval legacysupport {
+}
+
+proc legacysupport::get_library_name {} {
+    global prefix
+    if {[option legacysupport.use_static]} {
+        return ${prefix}/lib/libMacportsLegacySupport.a
+    } else {
+        return -lMacportsLegacySupport
+    }
 }
 
 proc legacysupport::add_legacysupport {} {
@@ -59,8 +74,15 @@ proc legacysupport::add_legacysupport {} {
             configure.cppflags-prepend  [option legacysupport.header_search]
         }
 
-        compiler.cpath-delete      ${prefix}/include/LegacySupport
-        compiler.cpath-prepend     ${prefix}/include/LegacySupport
+        # do not use compiler.cpath since it behaves like -I, while ${lang}_INCLUDE_PATH behaves like -isystem
+        # since legacy-support uses GNU language extensions, this prevents warnings when `-pedantic` is used and error when `-pedantic-errors` is used.
+        # see, e.g., llvm-devel
+        foreach phase {configure build destroot test} {
+            foreach lang {C OBJC CPLUS OBJCPLUS} {
+                ${phase}.env-delete ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
+                ${phase}.env-append ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
+            }
+        }
     }
 
     # see https://trac.macports.org/ticket/59832

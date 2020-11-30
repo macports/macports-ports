@@ -8,6 +8,18 @@
 
 PortGroup compiler_blacklist_versions 1.0
 
+# This PG is now deprecated, as support for specifying the c++ standard is
+# available in base. So issue a warning asking maintainers to migrate over
+pre-configure {
+    ui_warn "-----------------------------------------------------------------------"
+    ui_warn "The port '${name}' uses the cxx11 PortGroup which is deprecated."
+    ui_warn "Please instead specify the required c++ standard directly using"
+    ui_warn "    compiler.cxx_standard  2011"
+    ui_warn "replacing 2011 with newer standards (e.g. 2014, 2017) as required."
+    ui_warn "For more details see https://trac.macports.org/wiki/CompilerSelection"
+    ui_warn "-----------------------------------------------------------------------"
+}
+
 # Compilers supporting C++11 are GCC >= 4.6 and clang >= 3.3.
 
 if {${configure.cxx_stdlib} eq "libstdc++"} {
@@ -17,8 +29,8 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
 
     proc cxx11.add_dependencies {} {
         global os.major os.platform
-        depends_lib-delete path:lib/libgcc/libgcc_s.1.dylib:libgcc
-        depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
+        depends_lib-delete path:share/doc/libgcc/README:libgcc
+        depends_lib-append path:share/doc/libgcc/README:libgcc
         if {${os.platform} eq "darwin" && ${os.major} < 13} {
             # prior to OS X Mavericks, libstdc++ was the default C++ runtime, so
             #    assume MacPorts libstdc++ must be ABI compatible with system libstdc++
@@ -46,7 +58,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
     }
 
     # see https://trac.macports.org/ticket/54766
-    depends_lib-append path:lib/libgcc/libgcc_s.1.dylib:libgcc
+    depends_lib-append path:share/doc/libgcc/README:libgcc
 
     compiler.blacklist-append  \
         macports-gcc-4.3 macports-gcc-4.4 macports-gcc-4.5 macports-gcc \

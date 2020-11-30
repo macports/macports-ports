@@ -7,7 +7,8 @@ PortGroup           clang_dependency 1.0
 name                python27
 epoch               2
 # Remember to keep py27-tkinter and py27-gdbm's versions sync'd with this
-version             2.7.17
+version             2.7.18
+revision            2
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
@@ -27,9 +28,10 @@ master_sites        ${homepage}ftp/python/${version}/
 distname            Python-${version}
 use_xz              yes
 
-checksums           md5 b3b6d2c92f42a60667814358ab9f0cfd \
-                    rmd160 55e05d1475d4e27873e71802529499361ba25e14 \
-                    sha256 4d43f033cdbd0aa7b7023c81b0e986fd11e653b5248dac9144d508f11812ba41
+checksums           md5     fd6cc8ec0a78c44036f825e739f36e5a \
+                    rmd160  40a514bb05c9e631454ea8466e28f5bb229428ad \
+                    sha256  b62c0e7937551d0cc02b8fd5cb0f544f9405bafc9a54d3808ed4594812edef43 \
+                    size    12854736
 
 patchfiles          patch-Makefile.pre.in.diff \
                     patch-setup.py.diff \
@@ -38,7 +40,9 @@ patchfiles          patch-Makefile.pre.in.diff \
                     patch-configure.diff \
                     patch-libedit.diff \
                     enable-loadable-sqlite-extensions.patch \
-                    patch-_osx_support.py.diff
+                    patch-_osx_support.py.diff \
+                    darwin20.diff \
+                    arm.patch
 
 depends_build       port:pkgconfig
 depends_lib         port:bzip2 \
@@ -54,19 +58,15 @@ depends_lib         port:bzip2 \
 depends_run         port:python_select \
                     port:python2_select
 
-set my_prefix ${prefix}
-set my_applications ${applications_dir}
-set my_frameworks   ${frameworks_dir}
-
 # This port is used by clang-3.4 to bootstrap libcxx
 subport ${name}-bootstrap {
-    set my_prefix ${prefix}/libexec/libcxx-bootstrap
-    configure.pre_args  --prefix=${my_prefix}
-    set my_frameworks      ${my_prefix}/Library/Frameworks
-    set my_applications    ${my_prefix}/Applications
-    configure.cppflags-prepend   -I${my_prefix}/include
-    configure.ldflags-prepend    -L${my_prefix}/lib
-    configure.env-append    PATH=${my_prefix}/bin:$::env(PATH)
+    set stdprefix ${prefix}
+    prefix ${prefix}/libexec/libcxx-bootstrap
+    set frameworks_dir      ${prefix}/Library/Frameworks
+    set applications_dir    ${prefix}/Applications
+    configure.cppflags-append   -I${stdprefix}/include
+    configure.ldflags-append    -L${stdprefix}/lib
+    configure.env-append    PATH=${prefix}/bin:$::env(PATH)
     configure.cxx_stdlib
     compiler.whitelist      clang llvm-gcc-4.2 gcc-4.2 apple-gcc-4.2
     patchfiles-delete       patch-libedit.diff
@@ -81,28 +81,32 @@ subport ${name}-bootstrap {
     use_xz              no
     depends_extract     port:xz-bootstrap
     extract.suffix      .tar.xz
-    extract.cmd         ${my_prefix}/bin/xz
+    extract.cmd         ${prefix}/bin/xz
+    if {${os.platform} eq "darwin" && ${os.major} >= 18} {
+        # libstdc++ can't be used on Mojave and later
+        known_fail          yes
+    }
 }
 # Also needed by later clangs.
 if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
     clang_dependency.extra_versions 3.7
 }
 
-configure.args      --enable-framework=${my_frameworks} \
+configure.args      --enable-framework=${frameworks_dir} \
                     --enable-ipv6 \
                     --with-system-expat \
                     --with-system-ffi
 
-configure.cppflags-append -I${my_prefix}/include/db48
-configure.ldflags-append -L${my_prefix}/lib/db48
+configure.cppflags-append -I${prefix}/include/db48
+configure.ldflags-append -L${prefix}/lib/db48
 
 configure.ccache    no
 
 post-patch {
-    reinplace "s|@@PREFIX@@|${my_prefix}|g" \
+    reinplace "s|@@PREFIX@@|${prefix}|g" \
         ${worksrcpath}/Lib/cgi.py \
         ${worksrcpath}/Lib/ctypes/macholib/dyld.py
-    reinplace "s|@@APPLICATIONS_DIR@@|${my_applications}|" \
+    reinplace "s|@@APPLICATIONS_DIR@@|${applications_dir}|" \
         ${worksrcpath}/configure
 }
 
@@ -132,7 +136,7 @@ the 'python' or 'python2' commands), run one or both of:
 }
 
 platform darwin {
-    set framewpath ${my_frameworks}/Python.framework
+    set framewpath ${frameworks_dir}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
 
     post-patch {
@@ -141,8 +145,19 @@ platform darwin {
         }
     }
 
+    post-configure {
+        # poll() misbehaves on 10.8 and older
+        # See https://trac.macports.org/ticket/18376
+        if {${os.major} <= 12} {
+            system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
+        }
+    }
+
     post-build {
         set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
+        # preserve mtime of _sysconfigdata.py to avoid rebuilding things after changing it
+        set oldmtime [file mtime ${buildlibdir}/_sysconfigdata.py]
+
         # change LINKFORSHARED to support dependents that incorrectly use it
         system -W ${buildlibdir} "awk -F : \
             \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/config\
@@ -154,6 +169,8 @@ platform darwin {
         # remove -arch flags from the config
         reinplace -E {s|-arch [a-z0-9_]+||g} \
             ${buildlibdir}/_sysconfigdata.py
+
+        file mtime ${buildlibdir}/_sysconfigdata.py $oldmtime
     }
 
     post-destroot {
@@ -161,12 +178,9 @@ platform darwin {
             file delete ${destroot}${framewpath}/${dir}
         }
 
-        xinstall -d ${destroot}${my_prefix}/share/man/man1 \
-                    ${destroot}${my_prefix}/lib/pkgconfig
-        
-        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${my_prefix}/share/man/man1/
-        ln -s ${framewdir}/Python ${destroot}${my_prefix}/lib/libpython${branch}.dylib
-        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${my_prefix}/lib/pkgconfig/
+        ln -s ${framewdir}/share/man/man1/python${branch}.1 ${destroot}${prefix}/share/man/man1/
+        ln -s ${framewdir}/Python ${destroot}${prefix}/lib/libpython${branch}.dylib
+        ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
 
         # Without this, LINKFORSHARED is set to
         # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
@@ -184,7 +198,7 @@ platform darwin {
 
 post-destroot {
     foreach unversionedFile {2to3 2to3-2 idle idle2 pydoc pydoc2 python python2 python-config python2-config pythonw pythonw2 smtpd.py smtpd2.py} {
-        delete ${destroot}${my_prefix}/bin/${unversionedFile}
+        delete ${destroot}${prefix}/bin/${unversionedFile}
     }
 }
 

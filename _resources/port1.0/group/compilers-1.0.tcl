@@ -44,6 +44,10 @@
 #
 # Options:
 # compilers.clear_archflags: disable archflags ("-arch x86_64", -m64, etc.)
+# compilers.allow_arguments_mismatch:
+#   ensure Fortran code accepts "calls to external procedures with mismatches between the calls and the procedure definition"
+#   the use of this option is "strongly discouraged" as the code should be made to be "standard-conforming"
+#   see https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
@@ -67,6 +71,9 @@ default compilers.variants_conflict {}
 default compilers.libfortran {}
 default compilers.clear_archflags no
 
+options compilers.allow_arguments_mismatch
+default compilers.allow_arguments_mismatch no
+
 # also set a default gcc version
 # should be the same as gcc_compilers.tcl
 if {${os.major} < 10} {
@@ -75,73 +82,75 @@ if {${os.major} < 10} {
 } elseif {${os.major} < 11} {
     set compilers.gcc_default gcc8
 } else {
-    set compilers.gcc_default gcc9
+    # Currently only gcc-devel works on arm machines
+    if { ${os.major} >= 20 && ${os.arch} eq "arm" } {
+        set compilers.gcc_default gccdevel
+    } else {
+        set compilers.gcc_default gcc10
+    }
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {44 45 46 47 48 49 5 6 7 8 9}
-foreach v ${gcc_versions} {
-    # if the string is more than one character insert a '.' into it: e.g 49 -> 4.9
-    set compiler_version $v
-    if {[string length $v] > 1} {
-        set compiler_version [string index $v 0].[string index $v 1]
-    }
-    lappend compilers.gcc_variants gcc$v
-    set cdb(gcc$v,variant)  gcc$v
-    set cdb(gcc$v,compiler) macports-gcc-$compiler_version
-    set cdb(gcc$v,descrip)  "MacPorts gcc $compiler_version"
-    set cdb(gcc$v,depends)  port:gcc$v
-    if {[vercmp ${compiler_version} 4.6] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6 port:libgcc45"
-    } elseif {[vercmp ${compiler_version} 7] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7 port:libgcc6"
-    } elseif {[vercmp ${compiler_version} 8] < 0} {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc port:libgcc7"
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 devel}
+foreach ver ${gcc_versions} {
+    # Remove dot from version if present
+    set ver_nodot [string map {. {}} ${ver}]
+    lappend compilers.gcc_variants gcc$ver_nodot
+    set cdb(gcc$ver_nodot,variant)  gcc$ver_nodot
+    set cdb(gcc$ver_nodot,compiler) macports-gcc-$ver
+    set cdb(gcc$ver_nodot,descrip)  "MacPorts gcc $ver"
+    if { $ver eq "devel" } {
+        set cdb(gcc$ver_nodot,depends)  port:gcc-devel
+        set cdb(gcc$ver_nodot,dependsl) "port:libgcc-devel"
     } else {
-        set cdb(gcc$v,dependsl) "path:lib/libgcc/libgcc_s.1.dylib:libgcc"
+        set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
+        if {[vercmp ${ver} 4.6] < 0} {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
+        } elseif {[vercmp ${ver} 7] < 0} {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
+        } else {
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
+        }
     }
-    set cdb(gcc$v,libfortran) ${prefix}/lib/gcc$v/libgfortran.dylib
+    set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
-    set cdb(gcc$v,dependsd) port:g95
-    set cdb(gcc$v,dependsa) gcc$v
-    set cdb(gcc$v,conflict) "gfortran g95"
-    set cdb(gcc$v,cc)       ${prefix}/bin/gcc-mp-$compiler_version
-    set cdb(gcc$v,cxx)      ${prefix}/bin/g++-mp-$compiler_version
-    set cdb(gcc$v,cpp)      ${prefix}/bin/cpp-mp-$compiler_version
-    set cdb(gcc$v,objc)     ${prefix}/bin/gcc-mp-$compiler_version
-    set cdb(gcc$v,fc)       ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,f77)      ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,f90)      ${prefix}/bin/gfortran-mp-$compiler_version
-    set cdb(gcc$v,cxx_stdlib) libstdc++
+    set cdb(gcc$ver_nodot,dependsd) port:g95
+    set cdb(gcc$ver_nodot,dependsa) gcc$ver_nodot
+    set cdb(gcc$ver_nodot,conflict) "gfortran g95"
+    set cdb(gcc$ver_nodot,cc)       ${prefix}/bin/gcc-mp-$ver
+    set cdb(gcc$ver_nodot,cxx)      ${prefix}/bin/g++-mp-$ver
+    set cdb(gcc$ver_nodot,cpp)      ${prefix}/bin/cpp-mp-$ver
+    set cdb(gcc$ver_nodot,objc)     ${prefix}/bin/gcc-mp-$ver
+    set cdb(gcc$ver_nodot,fc)       ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,f77)      ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
+    set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
 }
 
-set clang_versions {33 34 37 50 60 70 80 90}
-foreach v ${clang_versions} {
-    # if the string is more than one character insert a '.' into it: e.g 33 -> 3.3
-    set compiler_version $v
-    if {[string length $v] > 1} {
-        set compiler_version [string index $v 0].[string index $v 1]
-    }
-    lappend compilers.clang_variants clang$v
-    set cdb(clang$v,variant)  clang$v
-    set cdb(clang$v,compiler) macports-clang-$compiler_version
-    set cdb(clang$v,descrip)  "MacPorts clang $compiler_version"
-    set cdb(clang$v,depends)  port:clang-$compiler_version
-    set cdb(clang$v,dependsl) ""
-    set cdb(clang$v,libfortran) ""
-    set cdb(clang$v,dependsd) ""
-    set cdb(clang$v,dependsa) clang-$compiler_version
-    set cdb(clang$v,conflict) ""
-    set cdb(clang$v,cc)       ${prefix}/bin/clang-mp-$compiler_version
-    set cdb(clang$v,cxx)      ${prefix}/bin/clang++-mp-$compiler_version
-    set cdb(clang$v,cpp)      "${prefix}/bin/clang-mp-$compiler_version -E"
-    set cdb(clang$v,objc)     ""
-    set cdb(clang$v,fc)       ""
-    set cdb(clang$v,f77)      ""
-    set cdb(clang$v,f90)      ""
-    set cdb(clang$v,cxx_stdlib) ""
+set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10}
+foreach ver ${clang_versions} {
+    # Remove dot from version if present
+    set ver_nodot [string map {. {}} ${ver}]
+    lappend compilers.clang_variants    clang$ver_nodot
+    set cdb(clang$ver_nodot,variant)    clang$ver_nodot
+    set cdb(clang$ver_nodot,compiler)   macports-clang-$ver
+    set cdb(clang$ver_nodot,descrip)    "MacPorts clang $ver"
+    set cdb(clang$ver_nodot,depends)    port:clang-$ver
+    set cdb(clang$ver_nodot,dependsl)   ""
+    set cdb(clang$ver_nodot,libfortran) ""
+    set cdb(clang$ver_nodot,dependsd)   ""
+    set cdb(clang$ver_nodot,dependsa)   clang-$ver
+    set cdb(clang$ver_nodot,conflict)   ""
+    set cdb(clang$ver_nodot,cc)         ${prefix}/bin/clang-mp-$ver
+    set cdb(clang$ver_nodot,cxx)        ${prefix}/bin/clang++-mp-$ver
+    set cdb(clang$ver_nodot,cpp)        "${prefix}/bin/clang-mp-$ver -E"
+    set cdb(clang$ver_nodot,objc)       ""
+    set cdb(clang$ver_nodot,fc)         ""
+    set cdb(clang$ver_nodot,f77)        ""
+    set cdb(clang$ver_nodot,f90)        ""
+    set cdb(clang$ver_nodot,cxx_stdlib) ""
 }
 
 # and lastly we add a gfortran and g95 variant for use with clang*; note that
@@ -684,3 +693,35 @@ pre-configure {
     compilers.action_enforce_f ${compilers.required_f}
     compilers.action_enforce_some_f ${compilers.required_some_f}
 }
+
+namespace eval compilers {
+}
+
+proc compilers::add_fortran_legacy_support {} {
+    global compilers.allow_arguments_mismatch \
+           compilers.gcc_default
+    if {${compilers.allow_arguments_mismatch}} {
+        if {[fortran_variant_name] eq "gfortran"} {
+            set fortran_compiler    ${compilers.gcc_default}
+        } else {
+            set fortran_compiler    [fortran_variant_name]
+        }
+        if {${fortran_compiler} eq "gcc10"} {
+            configure.fflags-delete     -fallow-argument-mismatch
+            configure.fcflags-delete    -fallow-argument-mismatch
+            configure.f90flags-delete   -fallow-argument-mismatch
+            configure.fflags-append     -fallow-argument-mismatch
+            configure.fcflags-append    -fallow-argument-mismatch
+            configure.f90flags-append   -fallow-argument-mismatch
+        }
+    }
+}
+
+port::register_callback compilers::add_fortran_legacy_support
+
+proc compilers::fortran_legacy_support_proc {option action args} {
+    if {$action ne  "set"} return
+    compilers::add_fortran_legacy_support
+}
+
+option_proc compilers.allow_arguments_mismatch compilers::fortran_legacy_support_proc

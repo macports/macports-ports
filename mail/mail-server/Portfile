@@ -4,8 +4,8 @@ PortSystem              1.0
 PortGroup               active_variants 1.1
 
 name                    mail-server
-version                 1.1
-revision                0
+version                 1.2
+revision                1
 categories              mail net
 platforms               darwin
 supported_archs         noarch
@@ -27,12 +27,11 @@ homepage                https://www.postfix.org/
 set postfix_required_variants \
                         [lsort {dovecot_sasl pcre smtputf8 tls}]
 set dovecot_required_variants \
-                        [lsort {gssapi solr}]
+                        [lsort {solr}]
 
 depends_lib-append      port:dcc \
                         port:dovecot \
                         port:dovecot-sieve \
-                        port:logrotate \
                         path:lib/libssl.dylib:openssl \
                         port:postfix \
                         port:rspamd \
@@ -59,6 +58,11 @@ variant initialize_always \
 \tthe variant +initialize_always is set. Please disable
 \tthis variant for working deployments.
 "
+}
+
+variant logrotate \
+    description {Use mail-server logrotate configuration.} {
+    depends_lib-append      port:logrotate
 }
 
 use_configure           no
@@ -276,22 +280,24 @@ destroot {
     }
 
     # logrotate
-    foreach d {
-        logrotate.d
-        } {
-        xinstall -m 0755 -d ${destroot}${prefix}/etc/${d}.macports
-        foreach f [glob -nocomplain ${filespath}/prefix/etc/${d}/*] {
-            if {[file isfile ${f}]} {
-                xinstall -m 0644 ${f} \
-                    ${destroot}${prefix}/etc/${d}.macports/[file tail ${f}]
+    if { [variant_isset "logrotate"] } {
+        foreach d {
+            logrotate.d
+            } {
+            xinstall -m 0755 -d ${destroot}${prefix}/etc/${d}.macports
+            foreach f [glob -nocomplain ${filespath}/prefix/etc/${d}/*] {
+                if {[file isfile ${f}]} {
+                    xinstall -m 0644 ${f} \
+                        ${destroot}${prefix}/etc/${d}.macports/[file tail ${f}]
+                }
             }
         }
-    }
-    foreach f {
-        logrotate.conf
-        } {
-        xinstall -m 0644 ${filespath}/prefix/etc/${f} \
-            ${destroot}${prefix}/etc/${f}.macports
+        foreach f {
+            logrotate.conf
+            } {
+            xinstall -m 0644 ${filespath}/prefix/etc/${f} \
+                ${destroot}${prefix}/etc/${f}.macports
+        }
     }
 
     # TLS certificate surrogate
@@ -320,6 +326,14 @@ destroot {
 
 destroot.keepdirs ${destroot}${prefix}/var/log/mail
 
+proc plutil_startup {plcmds label} {
+    global prefix startupitem.location
+    foreach cmd ${plcmds} {
+        system -W ${prefix}/etc/${startupitem.location}/${label} \
+            "/usr/bin/plutil ${cmd} ${label}.plist"
+    }
+}
+
 # Network configuration
 # hard-coded examples
 set host                host
@@ -335,12 +349,41 @@ set DOMAINTLD           [string toupper ${domaintld}]
 set relayhost           mymailrelay.tld
 
 post-activate {
+    # modify the launch daemons
+    plutil_startup [list \
+        "-remove KeepAlive" \
+        "-insert RunAtLoad -bool YES" \
+        ] \
+        org.macports.${name}
+    # Cf. port logrotate's ${prefix}/share/logrotate/org.macports.logrotate.plist.example
+    if { [variant_isset "logrotate"] } {
+        plutil_startup [list \
+            "-remove KeepAlive" \
+            "-insert RunAtLoad -bool YES" \
+            "-replace ProgramArguments \
+                -xml '<array> \
+                        <string>${prefix}/sbin/logrotate</string> \
+                        <string>${prefix}/etc/logrotate.conf</string> \
+                      </array>'" \
+            "-insert StartCalendarInterval \
+                -xml '<dict> \
+                        <key>Hour</key> \
+                        <integer>5</integer> \
+                        <key>Minute</key> \
+                        <integer>30</integer> \
+                      </dict>'" \
+            ] \
+            org.macports.${name}.logrotate
+    }
+
     # use network settings for installed example configuration
     set fullhost [exec /bin/hostname -f]
-    set host [lindex [split ${fullhost} .] 0]
-    set domaintld [join [lrange [split ${fullhost} .] 1 end] .]
-    set domain [lindex [split ${domaintld} .] 0]
-    set tld [lindex [split ${domaintld} .] end]
+    if { [llength [split ${fullhost} .]] >= 3 } {
+        set host [lindex [split ${fullhost} .] 0]
+        set domaintld [join [lrange [split ${fullhost} .] 1 end] .]
+        set domain [lindex [split ${domaintld} .] 0]
+        set tld [lindex [split ${domaintld} .] end]
+    }
     set HOST            [string toupper ${host}]
     set DOMAIN          [string toupper ${domain}]
     set TLD             [string toupper ${tld}]
@@ -511,16 +554,13 @@ SOLR_DELETE_DOVECOT
     }
 
     # logrotate configuration
-    foreach f_or_d {
-        logrotate.conf
-        logrotate.d
-        } {
-        install_initial_configuration ${prefix}/etc/${f_or_d}
-    }
-    if { ![file exists /Library/LaunchDaemons/org.macports.logrotate.plist] } {
-        xinstall -m 0644 \
-            ${prefix}/share/logrotate/org.macports.logrotate.plist.example \
-            /Library/LaunchDaemons/org.macports.logrotate.plist  
+    if { [variant_isset "logrotate"] } {
+        foreach f_or_d {
+            logrotate.conf
+            logrotate.d
+            } {
+            install_initial_configuration ${prefix}/etc/${f_or_d}
+        }
     }
 
     # TLS certificate surrogate -- certificate authority chain of trust
@@ -682,14 +722,19 @@ TLS_CERTIFICATE_SURROGATE
         ${certificates_dir}/${fullhost}.${certificate_sha1}.chain.pem
 
     # configure all template files with local settings
-    foreach d_or_f {
-        postfix
-        dovecot
-        rspamd
-        redis.conf
-        logrotate.conf
-        logrotate.d
-        } {
+    set d_or_f_templates { \
+        postfix \
+        dovecot \
+        rspamd \
+        redis.conf \
+    }
+    if { [variant_isset "logrotate"] } {
+        append d_or_f_templates { \
+            logrotate.conf \
+            logrotate.d \
+        }
+    }
+    foreach d_or_f ${d_or_f_templates} {
         fs-traverse f ${prefix}/etc/${d_or_f} {
             if { [file isfile ${f}]
                  && ![string match ".macports" ${f}]
@@ -773,12 +818,40 @@ in ${prefix}/etc/dovecot/sieve*/*.sieve are compiled with sievec.
         _rspamd
         } {
         system "dseditgroup -o edit -a ${u} -t user mail"
-    }    
+    }
 }
 
-startupitem.create     yes
+startupitem.create      yes
 
-startupitem.start      "port load clamav-server
+if { [variant_isset "logrotate"] } {
+    startupitems \
+            name        ${name} \
+            start       "port load clamav-server
+\tport load apache-solr8
+\tport load redis
+\tport load dcc
+\tport load postfix
+\tport load dovecot
+\tport load rspamd" \
+            stop        "port unload apache-solr8
+\tport unload dcc
+\tport unload postfix
+\tport unload dovecot
+\tport unload rspamd" \
+            restart     "port reload apache-solr8
+\tport reload redis
+\tport reload dcc
+\tport unload postfix ; \\
+\tsleep 1 ; \\
+\tport load postfix
+\tport unload dovecot ; \\
+\tsleep 1 ; \\
+\tport load dovecot
+\tport reload rspamd" \
+            name        ${name}.logrotate \
+            executable  ${prefix}/sbin/logrotate
+} else {
+    startupitem.start   "port load clamav-server
 \tport load apache-solr8
 \tport load redis
 \tport load dcc
@@ -786,13 +859,13 @@ startupitem.start      "port load clamav-server
 \tport load dovecot
 \tport load rspamd"
 
-startupitem.stop      "port unload apache-solr8
+    startupitem.stop    "port unload apache-solr8
 \tport unload dcc
 \tport unload postfix
 \tport unload dovecot
 \tport unload rspamd"
 
-startupitem.restart      "port reload apache-solr8
+    startupitem.restart "port reload apache-solr8
 \tport reload redis
 \tport reload dcc
 \tport unload postfix ; \\
@@ -802,22 +875,6 @@ startupitem.restart      "port reload apache-solr8
 \tsleep 1 ; \\
 \tport load dovecot
 \tport reload rspamd"
-
-proc plutil_startup {plcmds label} {
-    global prefix startupitem.location
-    foreach cmd ${plcmds} {
-        system -W ${prefix}/etc/${startupitem.location}/${label} \
-            "/usr/bin/plutil ${cmd} ${label}.plist"
-    }
-}
-
-post-activate {
-    # modify the launch daemons
-    plutil_startup [list \
-        "-remove KeepAlive" \
-        "-insert RunAtLoad -bool YES" \
-        ] \
-        org.macports.${startupitem.name}
 }
 
 notes "A mail server is a complex, interdependent set of tools that must\
@@ -877,13 +934,15 @@ that must be changed before deployment.
     DKIM:
         ${prefix}/var/lib/rspamd/dkim
 
-The ports dns-server and logrotate provide necessary DNS service on the LAN\
-and log rotation capabilities:
+The ports dns-server provide necessary DNS service on the LAN; variant\
++logrotate provides log rotation capabilities:
 
-        sudo port install dns-server logrotate
+        sudo port install dns-server
+        sudo port install mail-server +logrotate
 
 This port assume indepedent installation and management of DNS and\
-log rotation; mail-server includes example logrotate configuration files.
+log rotation; mail-server includes example logrotate configuration files\
+and a logroate launchdaemon.
 
 The port's launch daemon controls launching for each of the dependendent\
 services. These may be controlled independently, e.g.

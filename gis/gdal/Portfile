@@ -8,10 +8,15 @@ PortGroup           active_variants   1.1
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.0
 PortGroup           conflicts_build 1.0
+PortGroup           debug 1.0
 mpi.setup
 
-github.setup        OSGeo gdal 3.0.3 v
-revision            3
+github.setup        OSGeo gdal 3.2.0 v
+revision            0
+checksums           rmd160  d3ed67e5b01ed3adc6492851d54048444fc68339 \
+                    sha256  b051f852600ffdf07e337a7f15673da23f9201a9dbb482bd513756a3e5a196a6 \
+                    size    12169064
+
 categories          gis
 license             MIT BSD
 platforms           darwin
@@ -29,29 +34,11 @@ long_description    GDAL is a translator library for raster geospatial \
                     similar capability for simple features vector data.
 
 homepage            https://www.gdal.org/
+master_sites        https://download.osgeo.org/gdal/${version}/
+use_xz              yes
 
-checksums           rmd160  6ea83500ec05f5e1637fe41ae0154d0dafcc8320 \
-                    sha256  5438eb229f4b81b2f79fb33bbbf595d69d93ab012209a56f0d89d3c8e5d8558f \
-                    size    22458176
-
-worksrcdir          ${worksrcpath}/gdal
-
-platform darwin {
-    # see https://trac.macports.org/ticket/56517
-    if {[string match *clang* ${configure.cxx}]} {
-        configure.ldflags-append -stdlib=${configure.cxx_stdlib}
-    }
-}
-
-# see https://trac.macports.org/ticket/58948
-patchfiles-append   patch-bash-completion-location.diff
-
-# see https://github.com/OSGeo/gdal/commit/d587c2b056cd37a9bf51bf8afa1b740e16c7ba2b
-patchfiles-append   patch-poppler.diff
-
-# this can be removed in a future version of MacPorts
-# see https://github.com/macports/macports-base/pull/161
-compiler.blacklist-append {clang < 800}
+# error: call to 'abs' is ambiguous
+compiler.blacklist-append {clang < 900}
 
 compiler.cxx_standard     2014
 # See https://trac.macports.org/ticket/56908
@@ -64,8 +51,10 @@ depends_build-append \
 depends_lib-append  port:zlib \
                     port:zstd \
                     port:libpng \
+                    port:expat \
+                    port:libxml2 \
+                    port:webp \
                     port:giflib \
-                    port:proj6 \
                     port:qhull \
                     port:sqlite3 \
                     port:spatialite \
@@ -89,7 +78,6 @@ configure.args-append \
                     --with-jpeg=internal\
                     --with-charls=yes \
                     --with-gif=yes \
-                    --with-proj=${prefix}/lib/proj6 \
                     --with-qhull=yes \
                     --with-pam \
                     --with-sqlite3=${prefix} \
@@ -97,12 +85,17 @@ configure.args-append \
                     --with-curl=${prefix}/bin/curl-config \
                     --with-geos=${prefix}/bin/geos-config \
                     --with-expat=${prefix} \
+                    --with-webp=${prefix} \
+                    --with-xml2=yes \
                     --without-pg \
                     --without-grass \
                     --without-libgrass \
                     --without-cfitsio \
                     --without-netcdf \
                     --without-ogdi \
+                    --without-exr \
+                    --without-mongocxx \
+                    --without-mongocxxv3 \
                     --without-fme \
                     --without-hdf4 \
                     --without-hdf5 \
@@ -138,6 +131,11 @@ if {${configure.cxx_stdlib} eq "libc++"} {
 }
 
 pre-configure {
+    # see https://trac.macports.org/ticket/56517
+    if {[string match *clang* ${configure.cxx}]} {
+        configure.ldflags-append -stdlib=${configure.cxx_stdlib}
+    }
+
     global worksrcpath_dirs
     if { ![variant_isset universal] } {
         set worksrcpath_dirs ${worksrcpath}
@@ -333,9 +331,16 @@ variant xerces description {Enable xerces XML support for GML file format} {
 set postgresql_suffixes {95 96 10 11 12}
 
 set portsgresql_variants {}
+set postgresql_default_variant "if {"
+
 foreach s ${postgresql_suffixes} {
     lappend portsgresql_variants postgresql${s}
+    set postgresql_default_variant "${postgresql_default_variant}!\[variant_isset postgresql${s}] && "
 }
+
+set postgresql_default_variant [string range ${postgresql_default_variant} 0 end-4]
+set postgresql_default_variant "${postgresql_default_variant}} {default_variants +postgresql${s}}"
+eval $postgresql_default_variant
 
 foreach s ${postgresql_suffixes} {
     set p postgresql${s}
@@ -346,7 +351,9 @@ foreach s ${postgresql_suffixes} {
         depends_lib-append      port:${p}
         configure.args-delete   --without-pg
         configure.args-append   --with-pg=yes
-        configure.env-append    PKG_CONFIG_PATH=${prefix}/lib/postgresql${s}/pkgconfig:${prefix}/lib/pkgconfig
+        configure.pkg_config_path-append \
+                                ${prefix}/lib/postgresql${s}/pkgconfig \
+                                ${prefix}/lib/pkgconfig
     "
 }
 
@@ -389,20 +396,23 @@ variant cfitsio description {Enable fits support} {
 configure.optflags  -DGDAL_COMPILATION
 
 # Proj version
-variant proj4 description {Use Proj4 4.9 instead of Proj 6+} {
-
-    depends_lib-delete      port:proj6
-    depends_lib-append      port:proj4
-    configure.args-delete   --with-proj=${prefix}/lib/proj6
-    configure.args-append   --with-static-proj4=${prefix}/lib/proj49
+variant proj6 conflicts proj7 description {Use proj 6} {
+    depends_lib-append      port:proj6
+    configure.args-append   --with-proj=${prefix}/lib/proj6
 }
 
-# Perf variant to optimize code
-variant perf description {Optimize for speed} {
-    configure.optflags      -O3 -pipe -march=native -DGDAL_COMPILATION
+variant proj7 conflicts proj6 description {Use proj 7} {
+    depends_lib-append      port:proj7
+    configure.args-append   --with-proj=${prefix}/lib/proj7
 }
 
-# Same, but with "native" option. See #59063
+if {![variant_isset proj6] && ![variant_isset proj7]} {
+    default_variants +proj7
+}
+
+# Can be removed after June 2021.
+variant perf requires native description {Legacy compatibility variant} {}
+
 variant native description {Optimize for speed} {
     configure.optflags      -O3 -pipe -march=native -DGDAL_COMPILATION
 }
@@ -458,7 +468,7 @@ post-destroot {
             bin/ogrlineref \
             bin/ogrtindex \
             bin/testepsg \
-            lib/libgdal.26.dylib] \
+            lib/libgdal.27.dylib] \
             {
                 if {${configure.cxx_stdlib} eq "libc++"} {
                     system "install_name_tool -change \

@@ -37,6 +37,7 @@ proc deprecated.deprecate_port {} {
         depends_lib
         depends_run
         archive_sites
+        known_fail yes
         pre-fetch {
             ui_error "building ${name} is not supported on OS version greater than ${deprecated.maximum_osmajor}"
             return -code error {unsupported platform}
@@ -45,6 +46,7 @@ proc deprecated.deprecate_port {} {
         depends_lib
         depends_run
         archive_sites
+        known_fail yes
         pre-fetch {
             ui_error "building ${name} is not supported with Xcode greater than ${deprecated.maximum_xcodeversion}"
             return -code error {unsupported platform}

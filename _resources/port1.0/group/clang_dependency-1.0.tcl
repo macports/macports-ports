@@ -1,8 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 # This portgroup is to help prevent circular dependencies for ports that
-# recent clang builds depend on, by blacklisting any clang compiler not already
-# installed
+# recent clang builds depend on, by blacklisting all 5+ clang compilers.
 
 # call this if an older clang version depends on the port
 proc clang_dependency.extra_versions {versions} {
@@ -12,4 +11,4 @@ proc clang_dependency.extra_versions {versions} {
     }
 }
 
-clang_dependency.extra_versions {devel 9.0 8.0 7.0 6.0 5.0}
+clang_dependency.extra_versions {devel 10 9.0 8.0 7.0 6.0 5.0}

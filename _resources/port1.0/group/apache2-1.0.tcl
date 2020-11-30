@@ -127,14 +127,14 @@ proc apxsInstall { moduleName activate dylibs } {
     mods-available  mods-enabled
 
     # strip pre-/suffix from moduleName
-    set moduleName [regsub {_module} ${moduleName} "" ]
-    set moduleName [regsub {mod_}    ${moduleName} "" ]
+    set moduleName [regsub {_module} ${moduleName} ""]
+    set moduleName [regsub {mod_}    ${moduleName} ""]
 
     set  loadFileName   ${apache2.sysconfdir}/mods-available/${moduleName}.load
     set  loadFile       [open ${loadFileName} w 644]
 
     foreach libName ${dylibs}  {
-        set  dylibFile   [ exec find ${prefix}/lib -type f -iname "lib${libName}*.dylib" ]
+        set  dylibFile   [exec find ${prefix}/lib -type f -iname "lib${libName}*.dylib"]
         puts ${loadFile} "LoadFile ${dylibFile}"
     }
 

@@ -3,9 +3,10 @@
 PortSystem          1.0
 PortGroup           muniversal 1.0
 PortGroup           xcode_workaround 1.0
+PortGroup           makefile 1.0
 
 name                redis
-version             5.0.8
+version             6.0.9
 categories          databases
 platforms           darwin
 license             BSD
@@ -18,9 +19,9 @@ long_description    {*}${description}
 homepage            https://redis.io/
 master_sites        http://download.redis.io/releases/
 
-checksums           rmd160  91bb5a283b0a040aeb67dcab954a7c1b85490e3b \
-                    sha256  f3c7eac42f433326a8d981b50dba0169fdfaf46abb23fcda2f933a7552ee4ed7 \
-                    size    1985757
+checksums           rmd160  685cc12eb7d2b14f42dd5fcdabcd18e625e5e4d1 \
+                    sha256  dc2bdcf81c620e9f09cfd12e85d3bc631c897b2db7a55218fd8a65eaa37f86dd \
+                    size    2261418
 
 patchfiles          patch-redis.conf.diff
 
@@ -28,60 +29,73 @@ post-patch {
     reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/redis.conf
 }
 
-use_configure       no
-
 # see ${worksrcpath}/deps/jemalloc/Makefile
 compiler.cxx_standard   2014
-configure.cxx-append    -std=c++14
+configure.cxxflags-append   -std=c++14
 
 # https://trac.macports.org/ticket/59245
 xcode_workaround.fixed_xcode_version 11.2
-xcode_workaround.type append_to_compiler_name
 
-if {[string match *clang* ${configure.cxx}]} {
-    configure.cxx-append -stdlib=${configure.cxx_stdlib}
-}
+# redis and dep makefiles have their own optflags
+configure.optflags
 
-if {${configure.sdkroot} ne ""} {
-    configure.cc-append     -isysroot${configure.sdkroot}
-    configure.cxx-append    -isysroot${configure.sdkroot}
-}
+# avoid build conflict with lua
+configure.cppflags-replace \
+                    -I${prefix}/include \
+                    -isystem${prefix}/include
 
-if {![variant_isset universal]} {
-    build.args-append \
-        CC="${configure.cc} [get_canonical_archflags cc]" \
-        CXX="${configure.cxx} [get_canonical_archflags cxx]"
-} else {
-    foreach arch ${configure.universal_archs} {
-        lappend merger_build_args(${arch}) CC='${configure.cc} -arch ${arch}' \
-                                           CXX='${configure.cxx} -arch ${arch}'
-    }
-}
+# redis doesn't know about CPPFLAGS so pass it this way
+build.args-append   REDIS_CFLAGS=${configure.cppflags}
 
 # disable silent rules
 build.args-append   V=1
 
-# use jemalloc
-build.args-append   MALLOC=jemalloc
+# https://github.com/antirez/redis/issues/7254
+# We have to define environment variables in both
+# build and destroot to work around bugs in the Makefile
+# that would cause the destroot's make install to compile
+# redis twice.
+
+foreach mp_phase {build destroot} {
+    # use jemalloc
+    ${mp_phase}.args-append   MALLOC=jemalloc
+
+    # enable TLS.
+    ${mp_phase}.args-append   BUILD_TLS=yes
+
+    # default values use /usr/local
+    # OpenSSL found with CPATH and LIBRARY_PATH
+    ${mp_phase}.args-append   OPENSSL_CFLAGS= \
+                              OPENSSL_LDFLAGS=
+}
+
+# more TLS
+depends_lib         path:lib/libssl.dylib:openssl
 
 destroot.keepdirs   ${destroot}${prefix}/var/db/redis
 
-if {![variant_isset universal]} {
-    destroot.args-append PREFIX=${destroot}${prefix}
-} else {
-    foreach arch ${configure.universal_archs} {
-        lappend merger_destroot_args(${arch}) PREFIX=${destroot}-${arch}${prefix}
+installs_libs       no
+
+makefile.has_destdir    no
+
+post-destroot {
+    foreach conffile {redis.conf sentinel.conf} {
+        xinstall -m 0644 ${worksrcpath}/${conffile} \
+            ${destroot}${prefix}/etc/${conffile}.sample
+    }
+
+    # https://github.com/antirez/redis/pull/3494
+    foreach dup_binary {redis-check-aof redis-check-rdb} {
+        delete ${destroot}${prefix}/bin/${dup_binary}
+        ln -s redis-server ${destroot}${prefix}/bin/${dup_binary}
     }
 }
 
-post-destroot {
-    xinstall -m 0644 ${worksrcpath}/redis.conf \
-        ${destroot}${prefix}/etc/redis.conf.sample
-}
-
 post-activate {
-    if {![file exists ${prefix}/etc/redis.conf]} {
-        file copy ${prefix}/etc/redis.conf.sample ${prefix}/etc/redis.conf
+    foreach conffile {redis.conf sentinel.conf} {
+        if {![file exists ${prefix}/etc/${conffile}]} {
+            file copy ${prefix}/etc/${conffile}.sample ${prefix}/etc/${conffile}
+        }
     }
     xinstall -d ${prefix}/var/log
     touch ${prefix}/var/log/redis.log

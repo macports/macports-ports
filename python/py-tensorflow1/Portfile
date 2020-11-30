@@ -2,17 +2,16 @@
 
 PortSystem                                         1.0
 PortGroup           python                         1.0
-PortGroup           cxx11                          1.1
 PortGroup           java                           1.0
 PortGroup           github                         1.0
 PortGroup           compilers                      1.0
-PortGroup           xcodeversion                   1.0
 PortGroup           compiler_blacklist_versions    1.0
 PortGroup           xcode_workaround               1.0
 
 name                py-tensorflow1
-version             1.15.2
-revision            1
+version             1.15.4
+# If updating, uncomment revision here and delete separate revisions below
+#revision            0
 github.setup        tensorflow tensorflow ${version} v
 platforms           darwin
 supported_archs     x86_64
@@ -27,30 +26,32 @@ homepage            https://www.tensorflow.org/
 
 github.livecheck.regex  {(1\.[0-9.]+)}
 
-checksums           rmd160  272ac64c4a4b43e1dbbf3e33950fedb3cdb4a6ee \
-                    sha256  3cb4c8bfcda02b09266d19c907023fb40f12991fb975b9737cbb242ddb8a66c5 \
-                    size    46199279
+checksums           rmd160  ecb498f9ccf3298a8fad69ed8ab3df5b0bd68c2b \
+                    sha256  261c287cdd319add2578885b5178cec2832f096befd372e8d42b455b36a648ac \
+                    size    46209507
 
-if { ${os.major} < 14 } {
+set min_darwin 14
+if { ${os.major} < ${min_darwin} } {
     known_fail yes
     # https://trac.macports.org/ticket/58518
     pre-fetch {
-        ui_error "${name} ${version} requires macOS10.10 or newer."
+        ui_error "${name} ${version} requires Darwin ${min_darwin} or newer."
         return -code error "incompatible macOS version"
     }
 }
 
 compiler.blacklist-append {clang < 840}
+compiler.cxx_standard 2014
 
 patch.pre_args      -p1
 
 # Required java version
 java.version        11+
-# JDK port to install if required java not found
-java.fallback       openjdk12
+# LTS JDK port to install if required java not found
+java.fallback       openjdk11
 # JDK only needed at build time, but java PG sets lib dependency so
 # declare no conflict to allow redistribution of binaries.
-license_noconflict  openjdk12
+license_noconflict  ${java.fallback}
 
 # The oldest Xcode version to use default Xcode compiler
 # Note setting here should be in sync with that in bazel
@@ -60,7 +61,22 @@ patchfiles-append Fix-build-failures-for-python-3.8.patch
 if {${os.major} < 16} {
     # Work around for issues with clock_gettime(CLOCK_REALTIME, &ts);
     # https://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
+    # Note bazel does not play nice with legacysupport, so this IS needed instead..
     patchfiles-append CLOCK_REALTIME-Older-OSX.patch
+}
+
+# Patch needed only for Python 3.x (py27-numpy is pinned at 1.16.x)
+# https://github.com/tensorflow/tensorflow/pull/40654
+# https://github.com/tensorflow/tensorflow/issues/40688
+if {${python.version} != 27} {
+    patchfiles-append patch-numpy-1.19-fix.diff
+}
+
+# Delete if updating from 1.15.4
+if {${os.major} < 16 && ${python.version} == 27} {
+    revision        1
+} else {
+    revision        0
 }
 
 variant mkl description {Enable Intel Math Kernel Library support} { }
@@ -69,20 +85,25 @@ if {${os.major} >= 16} {
     default_variants-append +mkl
 }
 
-variant native description {Build from source for best native platform support} { }
+variant native description {Build from source for best native platform support} {
+    # Prevent precompiled binaries to let compilation optimise the library for the user processor
+    archive_sites
+}
 
 # Support python versions
 python.versions        27 36 37 38
-python.default_version 37
+python.default_version 38
 
 if {${name} ne ${subport}} {
-    conflicts   py${python.version}-tensorflow
+
+    # TF versions 1 and 2 cannot be installed at once
+    conflicts py${python.version}-tensorflow
 
     depends_build-append \
         port:py${python.version}-future \
         port:py${python.version}-pip \
         port:py${python.version}-mock \
-        port:bazel25 \
+        port:bazel-0.25 \
         port:cctools
 
     depends_lib-append \
@@ -157,6 +178,14 @@ if {${name} ne ${subport}} {
     }
 
     build {
+        
+        # Limit the number of parallel jobs to the number of physical, not logical, cpus.
+        # First current setting to ensure we would be reducing the current setting.
+        set physicalcpus [sysctl hw.physicalcpu]
+        if { ${build.jobs} > ${physicalcpus} } {
+            build.jobs ${physicalcpus}
+        }
+
         # tensorflow(via bazel) cannot be built if gcc is 'port selected'
         # https://trac.macports.org/ticket/58569
         # https://trac.macports.org/ticket/58679
@@ -171,6 +200,15 @@ if {${name} ne ${subport}} {
         # Build using the wonderful bazel build system ...
         set tf_bazel_cmd "bazel --max_idle_secs=60 --output_user_root=${workpath}"
         set tf_bazel_build_opts "-s -c opt --config=opt"
+        # Limit bazel resource utilisation
+        set tf_bazel_build_opts "${tf_bazel_build_opts} --jobs ${build.jobs} --local_ram_resources=HOST_RAM*0.5 --local_cpu_resources=HOST_CPUS*.5"
+        # Explicitly pass SDK https://github.com/bazelbuild/rules_go/issues/1554
+        # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
+        if {[string first ${configure.sdk_version} ${configure.sdkroot}] != -1} {
+            set tf_bazel_build_opts "${tf_bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
+        } else {
+            ui_warn "configure.sdkroot='${configure.sdkroot}' does not match configure.sdk_version='${configure.sdk_version}'"
+        }
         # hack to try and transfer MP c, c++ and ld options to bazel...
         foreach opt [list {*}${configure.cflags} ] {
             set tf_bazel_build_opts "${tf_bazel_build_opts} --conlyopt '${opt}'"
@@ -192,6 +230,9 @@ if {${name} ne ${subport}} {
             set tf_bazel_build_opts "${tf_bazel_build_opts} --copt=${base_march}"
             set tf_bazel_cmd "CC_OPT_FLAGS=${base_march} ${tf_bazel_cmd}"
         }
+        ui_debug "Bazel build command : ${tf_bazel_cmd}"
+        ui_debug "Bazel build options : ${tf_bazel_build_opts}"
+        # Run the build
         system -W ${worksrcpath} "${tf_bazel_cmd} build ${tf_bazel_build_opts} //tensorflow/tools/pip_package:build_pip_package"
         # Build the python wheel
         system -W ${worksrcpath} "./bazel-bin/tensorflow/tools/pip_package/build_pip_package ${workpath}"
@@ -199,16 +240,13 @@ if {${name} ne ${subport}} {
         system -W ${worksrcpath} "${tf_bazel_cmd} clean"
     }
 
-    set macos_minor_v [expr [lindex [split ${os.version} "."] 0] - 4]
-    set install_whlfile ${workpath}/tensorflow-${version}-cp${python.version}-cp${python.version}m-macosx_10_${macos_minor_v}_x86_64.whl
-
     destroot.cmd  pip-${python.branch}
     destroot.args           \
         --ignore-installed  \
         --no-cache-dir      \
         --no-dependencies   \
         --root ${destroot}  \
-        ${install_whlfile}
+        ${workpath}/tensorflow-*.whl
     destroot.post_args
 
     post-destroot {

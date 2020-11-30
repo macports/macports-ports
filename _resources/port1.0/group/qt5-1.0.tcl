@@ -648,6 +648,7 @@ options qt5.min_version
 default qt5.min_version 5.0
 
 # use PKGCONFIG for Qt discovery in configure scripts
+depends_build-delete    port:pkgconfig
 depends_build-append    port:pkgconfig
 
 # standard qmake spec

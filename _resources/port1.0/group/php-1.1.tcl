@@ -367,7 +367,7 @@ pre-livecheck {
 
 proc php.add_port_code {} {
     global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname
-    global destroot name subport version
+    global destroot macosx_deployment_target name os.major subport version
 
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
@@ -375,6 +375,14 @@ proc php.add_port_code {} {
     depends_build-append    port:autoconf
 
     depends_lib-append      port:${php}
+
+    platform darwin {
+        # PHP's libtool.m4 has the macOS 11+ bug; use the compatibility
+        # deployment target for now.
+        if {[vercmp ${macosx_deployment_target} 11] >= 0} {
+            macosx_deployment_target 10.[expr {${os.major} - 4}]
+        }
+    }
 
     configure.pre_args-append --with-php-config=${php.config}
 
