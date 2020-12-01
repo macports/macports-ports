@@ -422,7 +422,6 @@ set portfetch::mirror_sites::sites(macports) {
 # to their SSL certificate as Subject Alternative Names so we can't use
 # https with them yet.
 global os.platform os.major
-set stackpath   [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 # cert doesn't have macports.org SANs; admin notified
 #set aarnet.au   [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set aarnet.au   http
@@ -447,7 +446,6 @@ set ykf.ca      http
 set ywg.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 
 set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
-    ${stackpath}://distfiles.macports.org/:mirror
     ${aarnet.au}://aarnet.au.distfiles.macports.org/pub/macports/distfiles/:mirror
     ${atl.us}://atl.us.distfiles.macports.org/:mirror
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
