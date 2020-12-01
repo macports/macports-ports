@@ -32,7 +32,9 @@ set pek.cn      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" :
 set ykf.ca      http
 set ywg.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 
+# Keep the primary packages server first in the list
 set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inline -not "
+    ${nue.de}://packages.macports.org/:nosubdir
     ${atl.us}://atl.us.packages.macports.org/:nosubdir
     ${cph.dk}://cph.dk.packages.macports.org/:nosubdir
     ${fco.it}://fco.it.packages.macports.org/:nosubdir
@@ -42,7 +44,6 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${lil.fr}://lil.fr.packages.macports.org/:nosubdir
     ${mse.uk}://mse.uk.packages.macports.org/:nosubdir
     ${nou.nc}://nou.nc.packages.macports.org/pub/macports/packages.macports.org/:nosubdir
-    ${nue.de}://packages.macports.org/:nosubdir
     ${pek.cn}://pek.cn.packages.macports.org/macports/packages/:nosubdir
     ${ywg.ca}://ywg.ca.packages.macports.org/mirror/macports/packages/:mirror
 " {:*}]
