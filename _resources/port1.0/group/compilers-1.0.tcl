@@ -93,7 +93,7 @@ if {${os.major} < 10} {
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 devel}
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 11 devel}
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
