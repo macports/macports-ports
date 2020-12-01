@@ -292,12 +292,10 @@ proc python_set_pep517 {option action args} {
     if {$subport ne $name} {
         if {[string is true -strict ${python.pep517}]} {
             depends_build-append    port:py${python.version}-pep517 \
-                                    port:py${python.version}-python-install \
-                                    port:py${python.version}-wheel
+                                    port:py${python.version}-python-install
         } else {
             depends_build-delete    port:py${python.version}-pep517 \
-                                    port:py${python.version}-python-install \
-                                    port:py${python.version}-wheel
+                                    port:py${python.version}-python-install
         }  
     }
 }
