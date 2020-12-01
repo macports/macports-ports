@@ -93,7 +93,7 @@ if {${os.major} < 10} {
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
-set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 11 devel}
+set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 devel}
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -129,7 +129,7 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
 }
 
-set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10}
+set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10 11}
 foreach ver ${clang_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
