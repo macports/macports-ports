@@ -374,6 +374,16 @@ proc fortran_variant_name {} {
     return ""
 }
 
+proc fortran_variant_depends_port_name {} {
+    global cdb
+    set var_name [fortran_variant_name]
+    if { ${var_name} ne "" } {
+        return $cdb(${var_name},depends)
+    } else {
+        return ""
+    }
+}
+
 proc clang_variant_name {} {
     global compilers.clang_variants variations
 
