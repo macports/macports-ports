@@ -129,7 +129,7 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
 }
 
-set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10}
+set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10 11}
 foreach ver ${clang_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -372,6 +372,16 @@ proc fortran_variant_name {} {
     }
 
     return ""
+}
+
+proc fortran_variant_depends_port_name {} {
+    global cdb
+    set var_name [fortran_variant_name]
+    if { ${var_name} ne "" } {
+        return $cdb(${var_name},depends)
+    } else {
+        return ""
+    }
 }
 
 proc clang_variant_name {} {
