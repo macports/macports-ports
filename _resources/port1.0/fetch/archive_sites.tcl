@@ -45,7 +45,7 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${mse.uk}://mse.uk.packages.macports.org/:nosubdir
     ${nou.nc}://nou.nc.packages.macports.org/pub/macports/packages.macports.org/:nosubdir
     ${pek.cn}://pek.cn.packages.macports.org/macports/packages/:nosubdir
-    ${ywg.ca}://ywg.ca.packages.macports.org/mirror/macports/packages/:mirror
+    ${ywg.ca}://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
 " {:*}]
 
 set portfetch::mirror_sites::archive_type(macports_archives) tbz2
