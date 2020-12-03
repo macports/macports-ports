@@ -367,7 +367,7 @@ pre-livecheck {
 
 proc php.add_port_code {} {
     global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname
-    global destroot macosx_deployment_target name os.major subport version
+    global destroot macosx_deployment_target name os.major subport version xcodeversion
 
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
@@ -381,6 +381,17 @@ proc php.add_port_code {} {
         # deployment target for now.
         if {[vercmp ${macosx_deployment_target} 11] >= 0} {
             macosx_deployment_target 10.[expr {${os.major} - 4}]
+        }
+
+        if {[vercmp ${php.branch} 7.3] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
+            # Implicit function declarations. Need to backport upstream fixes from php73+.
+            # https://bugs.php.net/80176
+            # https://trac.macports.org/ticket/60988
+            known_fail          yes
+            pre-fetch {
+                ui_error "${subport} @${version} cannot currently be compiled with Xcode 12 or later"
+                return -code error "incompatible Xcode version"
+            }
         }
     }
 
