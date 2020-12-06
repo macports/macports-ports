@@ -3,6 +3,7 @@
 PortSystem          1.0
 PortGroup           cmake 1.1
 PortGroup           xcodeversion 1.0
+PortGroup           active_variants 1.1
 
 name                blender
 version             2.83.0
@@ -60,6 +61,7 @@ set py_ver_nodot    [string map {. {}} ${py_ver}]
 depends_lib-append  port:python${py_ver_nodot} \
                     port:openal-soft \
                     port:alembic \
+                    port:usd \
                     port:opensubdiv \
                     port:jack \
                     port:libsndfile \
@@ -84,7 +86,6 @@ depends_lib-append  port:python${py_ver_nodot} \
                     port:tbb \
                     port:libomp \
                     port:glew \
-                    port:eigen3 \
                     port:lzo2 \
                     port:gflags
 
@@ -122,11 +123,16 @@ post-patch {
     # add_definitions() in the file 'extern/ceres/CMakeLists.txt', it's
     # possible that Blender's own libmv library requires a Ceres Solver
     # that has been compiled using a very specific set of options.
-    fs-traverse f ${worksrcpath}/extern/ceres {
-        if {[file isfile $f]} {
-            reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
-        }
-    }
+# The eigen3 port was recently updated to version 3.3.8, which is
+# incompatible with the version of Ceres Solver that is included with
+# Blender 2.83. Temporarily disable using the eigen3 port until the
+# Blender port catches up to using a compatible combination of Ceres
+# Solver and eigen3.
+#   fs-traverse f ${worksrcpath}/extern/ceres {
+#       if {[file isfile $f]} {
+#           reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
+#       }
+#   }
 
     # Use dynamic linking instead of static linking
     foreach f [list \
@@ -145,6 +151,51 @@ post-patch {
         ${worksrcpath}/source/blender/python/intern/bpy_app_sdl.c
     reinplace -E {s|(include )"(openjpeg.h)"|\1<openjpeg-2.3/\2>|} \
         ${worksrcpath}/source/blender/imbuf/intern/jp2.c
+
+    # Make it so that CMake is able to find the MacPorts USD library
+    if {![catch {set result [active_variants usd monolithic]}] && \
+        !$result} {
+        # When Blender is configured to build USD as an internal
+        # dependency, Blender sets USD's compile options so that it
+        # builds as a single monolithic library. However, the default
+        # variant of the MacPorts USD port builds the USD libraries as
+        # modular individual libraries, so in that case we make it so
+        # that Blender is able to see the individual USD modules.
+        reinplace -E {s/(usd_m usd_ms)/usd \1/} \
+            ${worksrcpath}/build_files/cmake/Modules/FindUSD.cmake
+        reinplace "/blender_add_lib/i\\
+list(APPEND USD_LIBRARIES\\
+\\  gf plug sdf tf vt\\
+\\  usdGeom usdLux usdShade usdUtils\\
+)\\
+\\
+" \
+            ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
+    }
+    foreach f [list \
+        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt \
+        ${worksrcpath}/tests/gtests/usd/CMakeLists.txt \
+    ] {
+        reinplace {/add_definitions.*DPXR_STATIC/s/^/#/g} $f
+    }
+
+    if {![catch {set result [active_variants embree static]}] && \
+        !$result} {
+        # Remove these items from the list of Embree components that
+        # Blender's FindEmbree.cmake script will try to find. The
+        # default variant of the MacPorts Embree port does not generate
+        # individual libraries with these names, because Embree's
+        # default compile options build it as a dynamic library. The
+        # individual libraries only get generated when building Embree
+        # as a static library.
+        foreach re [list \
+            {/^[[:space:]]*embree_(avx|sse4)2?[[:space:]]*$/d} \
+            {/^[[:space:]]*lexers|math|simd|sys|tasking[[:space:]]*$/d} \
+        ] {
+            reinplace -E $re \
+                ${worksrcpath}/build_files/cmake/Modules/FindEmbree.cmake
+        }
+    }
 
     # We already patch 'llvm-config' to be 'llvm-config-mp' using our
     # patchfiles. Here we are just adding a version number on the end.
@@ -241,9 +292,13 @@ configure.args-append   -DWITH_SDL_DYNLOAD=ON
 
 # Tell Blender to use these "system" (in our case, MacPorts) libraries
 configure.args-append   -DWITH_SYSTEM_GLEW=ON \
-                        -DWITH_SYSTEM_EIGEN3=ON \
                         -DWITH_SYSTEM_LZO=ON \
                         -DWITH_SYSTEM_GFLAGS=ON
+# Temporarily disable using MacPorts eigen3 port
+#                       -DWITH_SYSTEM_EIGEN3=ON
+
+# Build Cycles with Embree support
+configure.args-append   -DWITH_CYCLES_EMBREE=ON
 
 post-destroot {
     # Make sure that an addons_contrib folder makes it into the final
