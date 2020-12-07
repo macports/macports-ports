@@ -279,13 +279,13 @@ platform macosx {
                             return -code error "app.icon ${app.icon} could not be converted to png: $::errorInfo"
                         }
                     }
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>@1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
                         return -code error "app.icns could not be created: $::errorInfo"
                     }
 
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in ${icon} -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>@1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in ${icon} -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
                         return -code error "app.icon ${app.icon} could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
