@@ -104,6 +104,7 @@ foreach ver ${gcc_versions} {
     if { $ver eq "devel" } {
         set cdb(gcc$ver_nodot,depends)  port:gcc-devel
         set cdb(gcc$ver_nodot,dependsl) "port:libgcc-devel"
+        set cdb(gcc$ver_nodot,dependsa) gcc-devel
     } else {
         set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
         if {[vercmp ${ver} 4.6] < 0} {
@@ -113,11 +114,11 @@ foreach ver ${gcc_versions} {
         } else {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
         }
+        set cdb(gcc$ver_nodot,dependsa) gcc$ver_nodot
     }
     set cdb(gcc$ver_nodot,libfortran) ${prefix}/lib/gcc$ver_nodot/libgfortran.dylib
     # note: above is ultimately a symlink to ${prefix}/lib/libgcc/libgfortran.3.dylib
     set cdb(gcc$ver_nodot,dependsd) port:g95
-    set cdb(gcc$ver_nodot,dependsa) gcc$ver_nodot
     set cdb(gcc$ver_nodot,conflict) "gfortran g95"
     set cdb(gcc$ver_nodot,cc)       ${prefix}/bin/gcc-mp-$ver
     set cdb(gcc$ver_nodot,cxx)      ${prefix}/bin/g++-mp-$ver
@@ -372,6 +373,15 @@ proc fortran_variant_name {} {
     }
 
     return ""
+}
+
+proc fortran_depends_port_name {var} {
+    global cdb
+    if { ${var} ne "" } {
+        return $cdb(${var},dependsa)
+    } else {
+        return ""
+    }
 }
 
 proc fortran_variant_depends_port_name {} {
