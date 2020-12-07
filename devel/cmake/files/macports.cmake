@@ -1,4 +1,7 @@
-# patch __PREFIX__ in the Portfile post-patch stage
+# NOTE: have patch in the Portfile post-patch stage once this file is installed!!
+
+# Where to install CMake.app
+set(CMAKE_BUNDLE_LOCATION "__APPLICATIONS_DIR__" CACHE PATH "Where to install CMake.app bundle" FORCE)
 
 # Coerge CMake to use MacPorts' BZIP2
 set(BZIP2_INCLUDE_DIR "__PREFIX__/include" CACHE PATH "The BZIP2 include directory" FORCE)
