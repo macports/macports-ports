@@ -16,7 +16,7 @@ done
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 
 # Download resources in background ASAP but use later
-curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6r0/MacPorts-${OS_MAJOR}.tar.bz2" &
+curl -fsSLO "https://dl.bintray.com/macports-ci-bot/macports-base/2.6.4/MacPorts-${OS_MAJOR}.tar.bz2" &
 curl_mpbase_pid=$!
 curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
