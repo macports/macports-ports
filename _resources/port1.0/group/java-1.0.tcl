@@ -74,7 +74,7 @@ proc find_java_home {} {
             set java.version [string map {+ "" * ""} ${java.version}]
             if {[info exists ::env(JAVA_HOME)]} {
                 set env_java_home $::env(JAVA_HOME)
-                unset $::env(JAVA_HOME)
+                unset ::env(JAVA_HOME)
             }
         }
 
@@ -90,7 +90,7 @@ proc find_java_home {} {
 
         # Restore original JAVA_HOME value stashed above
         if {${big_sur_workaround} && [info exists env_java_home]} {
-            set $::env(JAVA_HOME) ${env_java_home}
+            set ::env(JAVA_HOME) ${env_java_home}
         }
     }
 
