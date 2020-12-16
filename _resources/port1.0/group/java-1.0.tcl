@@ -57,12 +57,17 @@ proc find_java_home {} {
         #
         # Temporarily unset and stash the value here.
         #
+        # Also it seems that wildcard syntax does not work, so we remove them.
+        #
         # See https://trac.macports.org/ticket/61445
         global os.platform os.major
-        set big_sur_workaround [expr {${os.platform} eq "darwin" && ${os.major} == 20 && [info exists ::env(JAVA_HOME)]}]
+        set big_sur_workaround [expr {${os.platform} eq "darwin" && ${os.major} == 20}]
         if {${big_sur_workaround}} {
-            set env_java_home $::env(JAVA_HOME)
-            unset $::env(JAVA_HOME)
+            set java.version [string map {+ "" * ""} ${java.version}]
+            if {[info exists ::env(JAVA_HOME)]} {
+                set env_java_home $::env(JAVA_HOME)
+                unset $::env(JAVA_HOME)
+            }
         }
 
         if { [catch {set val [exec "/usr/libexec/java_home" "-f" "-v" ${java.version}]}] } {
@@ -76,7 +81,7 @@ proc find_java_home {} {
         }
 
         # Restore original JAVA_HOME value stashed above
-        if {${big_sur_workaround}} {
+        if {${big_sur_workaround} && [info exists env_java_home]} {
             set $::env(JAVA_HOME) ${env_java_home}
         }
     }
