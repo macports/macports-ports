@@ -34,8 +34,16 @@ pre-fetch {
         java_set_env
         # If still not present, error out
         if { ${java_version_not_found} } {
-            ui_error "${name} requires Java ${java.version} but no such installation could be found."
-            return -code error "missing required Java version"
+            global os.platform os.major
+            if {${os.platform} eq "darwin" && ${os.major} == 20} {
+                # The following check is broken on macOS 11 Big Sur so we
+                # temporarily give up on ensuring an exact Java version. See
+                # https://trac.macports.org/ticket/61445
+                ui_warn "Failed to confirm that required Java was installed; see https://trac.macports.org/ticket/61445"
+            } else {
+                ui_error "${name} requires Java ${java.version} but no such installation could be found."
+                return -code error "missing required Java version"
+            }
         }
     }
 }
@@ -66,7 +74,7 @@ proc find_java_home {} {
             set java.version [string map {+ "" * ""} ${java.version}]
             if {[info exists ::env(JAVA_HOME)]} {
                 set env_java_home $::env(JAVA_HOME)
-                unset $::env(JAVA_HOME)
+                unset ::env(JAVA_HOME)
             }
         }
 
@@ -82,7 +90,7 @@ proc find_java_home {} {
 
         # Restore original JAVA_HOME value stashed above
         if {${big_sur_workaround} && [info exists env_java_home]} {
-            set $::env(JAVA_HOME) ${env_java_home}
+            set ::env(JAVA_HOME) ${env_java_home}
         }
     }
 
