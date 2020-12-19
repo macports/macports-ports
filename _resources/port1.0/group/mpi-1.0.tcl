@@ -313,6 +313,11 @@ proc mpi.setup {args} {
         if {${os.major} <= 12 && $is_mpich} {
             lappend disabled -clang60 -clang70 -clang80 -clang90
         }
+        if {$is_mpich} {
+            lappend disabled -clang10
+        }
+        # not yet supported by any mpi port
+        lappend disabled -clang11 -gccdevel
     }
 
     compilers.setup {*}$cl {*}$disabled
