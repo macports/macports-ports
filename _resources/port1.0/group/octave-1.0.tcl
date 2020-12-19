@@ -19,10 +19,6 @@ default octave.config_h {no}
 
 # some header files from Octave require C++-11
 compiler.cxx_standard  2011
-# overrule cxx11 PortGroup because octave can use GCC compilers for Fortran
-#    even if configure.cxx_stdlib is libc++
-PortGroup compiler_blacklist_versions 1.0
-compiler.blacklist-delete *gcc*
 
 # override universal_setup found in portutil.tcl so it uses muniversal PortGroup
 # see https://trac.macports.org/ticket/51643
