@@ -18,10 +18,7 @@ options octave.module octave.config_h
 default octave.config_h {no}
 
 # some header files from Octave require C++-11
-PortGroup cxx11 1.1
-# overrule cxx11 PortGroup because octave can use GCC compilers for Fortran
-#    even if configure.cxx_stdlib is libc++
-compiler.blacklist-delete *gcc*
+compiler.cxx_standard  2011
 
 # override universal_setup found in portutil.tcl so it uses muniversal PortGroup
 # see https://trac.macports.org/ticket/51643
@@ -105,6 +102,7 @@ post-extract {
         delete ${workpath}/${octave.module}
         move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
     }
+
 #     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
 #     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
 #         # work-around for case-insensitive file systems when the
