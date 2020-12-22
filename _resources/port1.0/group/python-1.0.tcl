@@ -64,7 +64,7 @@ default python.consistent_destroot yes
 
 proc python_get_version {} {
     if {[string match py-* [option name]]} {
-        return [string range [option subport] 2 3]
+        return [string range [option subport] 2 [string first "-" [option subport]]-1]
     } else {
         return [option python.default_version]
     }
@@ -269,8 +269,8 @@ proc python_set_default_version {option action args} {
 
 options python.branch python.prefix python.bin python.lib python.libdir \
         python.include python.pkgd python.pep517
-# for pythonXY, python.branch is X.Y
-default python.branch   {[string range ${python.version} 0 end-1].[string index ${python.version} end]}
+# for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
+default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
 default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
 default python.bin      {${python.prefix}/bin/python${python.branch}}
 default python.lib      {${python.prefix}/Python}
