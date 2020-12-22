@@ -27,7 +27,8 @@ post-extract {
     # Prevent setuptools' easy_install from downloading dependencies
     set fs [open $env(HOME)/.pydistutils.cfg w+]
     puts $fs {[easy_install]}
-    puts $fs {allow_hosts = None}
+    puts $fs {index_url = ''}
+    puts $fs {find_links = ''}
     close $fs
     # Same for pip
     file mkdir $env(HOME)/.config/pip
