@@ -645,8 +645,8 @@ set portfetch::mirror_sites::sites(pypi) {
 }
 
 set portfetch::mirror_sites::sites(ruby) {
-    http://ftp.ruby-lang.org/pub/ruby/
-    http://mirrors.ibiblio.org/ruby/
+    https://cache.ruby-lang.org/pub/ruby/
+    https://mirror.cyberbits.eu/ruby/
     ftp://ftp.fu-berlin.de/unix/languages/ruby/
     ftp://ftp.iij.ad.jp/pub/lang/ruby/
     ftp://ftp.ntua.gr/pub/lang/ruby/
