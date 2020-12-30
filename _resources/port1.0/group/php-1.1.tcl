@@ -383,7 +383,7 @@ proc php.add_port_code {} {
             macosx_deployment_target 10.[expr {${os.major} - 4}]
         }
 
-        if {[vercmp ${php.branch} 7.3] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
+        if {[vercmp ${php.branch} 7.0] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
             # Implicit function declarations. Need to backport upstream fixes from php73+.
             # https://bugs.php.net/80176
             # https://trac.macports.org/ticket/60988
