@@ -5,7 +5,7 @@ SUBDIRS = lpsolve55 lp_solve
 all: $(SUBDIRS)
 
 $(SUBDIRS):
-	cd "$@" && c="$(CC)" prefix="$(PREFIX)" sh -x ./ccc.osx
+	cd "$@" && prefix="$(PREFIX)" sh -x ./ccc.osx
 
 install:
 	install -m 755 -d $(DESTDIR)$(PREFIX)/bin
