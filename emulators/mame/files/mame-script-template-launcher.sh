@@ -9,7 +9,19 @@
 script_file=$(grealpath "${0}")
 script_dir=$(dirname "${script_file}")
 
-cd "${script_dir}"
+cmd="${script_dir}/@@MACPORTS_MAME_EXECUTABLE@@"
+bgfx_path="${script_dir}/bgfx"
+languagepath="${script_dir}/language"
 
-./@@MACPORTS_MAME_EXECUTABLE@@ "${@}"
+cmdline=()
+cmdline+=( "${cmd}" )
+cmdline+=( -bgfx_path "${bgfx_path}" )
+cmdline+=( -languagepath "${languagepath}" )
+
+# Note that Mame handles duplicate arguments, using the last one found.
+# Net-Net, there's no need to check whether the user specified the same
+# parameters, as theirs will take precedence.
+
+"${cmdline[@]}" \
+"${@}"
 
