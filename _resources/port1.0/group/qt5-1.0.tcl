@@ -7,7 +7,7 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt5   {qt5-qtbase   5.14}
+    qt5   {qt5-qtbase   5.15}
     qt513 {qt513-qtbase 5.13}
     qt511 {qt511-qtbase 5.11}
     qt59  {qt59-qtbase  5.9}
@@ -660,7 +660,10 @@ global qt_qmake_spec_32
 global qt_qmake_spec_64
 compiler.blacklist-append *gcc*
 
-if {[vercmp ${qt5.version} 5.10]>=0} {
+if {[vercmp ${qt5.version} 5.15]>=0} {
+    # only qt5 5.15.x has so far been built as arm64 on MacPorts
+    default supported_archs "x86_64 arm64"
+} elseif {[vercmp ${qt5.version} 5.10]>=0} {
     # see https://bugreports.qt.io/browse/QTBUG-58401
     default supported_archs x86_64
 } else {
