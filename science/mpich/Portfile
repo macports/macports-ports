@@ -1,7 +1,6 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           select 1.0
 PortGroup           compilers 1.0
 PortGroup           muniversal 1.0
@@ -46,31 +45,21 @@ livecheck.regex     {href=.([0-9.p]+)/}
 livecheck.url       ${homepage}/static/downloads/
 
 if {[string first "-devel" $subport] > 0} {
-    name                mpich-devel
     version             3.4a2
-    revision            0
+    revision            1
     # To see 3.* as newer than 3.*(rc|b|etc.)
     epoch               3
-
-    ## Nightly versions. Disabled when alpha / beta / rc versions available.
-    #set tag             g658ff0d9
-    #distname            mpich-master-v${version}-${tag}
-    #master_sites        ${homepage}static/downloads/nightly/master/mpich
-    #livecheck.regex \
-    mpich-master-v(\[0-9.\]+-\[0-9\]+)-\[0-9a-z\]+${extract.suffix}
-    #livecheck.url       ${master_sites}
 
     ## Alpha / rc versions (When available)
     distname            mpich-${version}
     master_sites        ${homepage}static/downloads/${version}
-    # nightly snapshots have not been updated for a while so let's manually
-    # check them for now
-    livecheck.type      none
-    # livecheck.regex     {href=.([0-9.abrcp]+)/}
+
     checksums \
         rmd160  73bc0fd6cb00ced9f15118decb8610758db8503e \
         sha256  ca9b9a6d4d858f3f94d2ea1ed0b851fccbc6f2976eb08dfc3379be8c6278aa12 \
         size    27708244
+
+    livecheck.regex     {href=.([0-9.a-z]+)/}
 }
 
 # As MPICH creates compiler wrappers, there are lots of
@@ -113,9 +102,55 @@ subport ${name}-default {}
 subport ${name}-devel {}
 subport ${name}-devel-default {}
 
-# Linker for Apple clang version 421.11.66 segfaults
-# See https://trac.macports.org/ticket/36654#comment:9
-compiler.blacklist-append   {clang >= 421.11.66 < 425.0.24}
+if {${name} ne ${subport} && "${name}-devel" ne ${subport}} {
+    set key                  [lindex [split ${subport} -] end]
+    if {${key} eq "default" || ${key} eq "devel"} {
+        # make every attempt to avoid MacPorts compilers
+        if {${os.major} == 10} {
+            configure.cxx_stdlib libstdc++
+        }
+        set compiler         "default"
+        set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
+    } else {
+        set compiler         [lindex [split $clist($key) -] 1]
+        set compiler_version [lindex [split $clist($key) -] 2]
+    }
+    set fail no
+    if {${compiler} eq "gcc"} {
+        if { ${os.major} >= 16 && [vercmp ${compiler_version} 5] < 0 } {
+            # gcc 4.x not supported on mac OS 10.12 (Darwin16) or newer
+            set fail yes
+        }
+        if { ${os.major} < 11 && [vercmp ${compiler_version} 9] >= 0 } {
+            set fail yes
+        }
+        if { ${os.major} < 10 && [vercmp ${compiler_version} 8] >= 0 } {
+            set fail yes
+        }
+    }
+    if {${compiler} eq "clang"} {
+        if { ${os.major} < 10 && [vercmp ${compiler_version} 8] >= 0 } {
+            set fail yes
+        }
+        if { ${os.major} <  9 && [vercmp ${compiler_version} 5] >= 0 } {
+            set fail yes
+        }
+    }
+    if {${compiler} eq "default" && ${configure.compiler} eq "clang"} {
+        if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
+            # Linker for Apple clang version 421.11.66 segfaults
+            # See https://trac.macports.org/ticket/36654#comment:9
+            set fail yes
+        }
+    }
+    if {${fail}} {
+        known_fail yes
+        pre-fetch {
+            ui_error "${subport} fails on OS ${os.major} with compiler ${compiler}, version ${compiler_version}"
+            return -code error "incompatible macOS version"
+        }
+    }
+}
 
 configure.args      --disable-dependency-tracking    \
                     --disable-fortran                \
@@ -144,7 +179,7 @@ platform darwin {
         configure.args-append --enable-opencl=no
     }
 
-    if {${name} ne ${subport}} {
+    if {${name} ne ${subport} && "${name}-devel" ne ${subport}} {
         patchfiles-append       patch-no_qmkshrobj.diff
     }
 }
@@ -155,10 +190,17 @@ configure.optflags-delete   -O2 -Os
 configure.cppflags-delete   -I${prefix}/include
 configure.ldflags-delete    -L${prefix}/lib
 
-if {${subport} != ${name}} {
+if {${name} ne ${subport} && "${name}-devel" ne ${subport}} {
     set cname                   [lindex [split ${subport} -] end]
     if {${cname} == "default"} {
         set cname                   mp
+    }
+
+    set all_name [split ${subport} -]
+    if {[lindex ${all_name} 1] eq "devel"} {
+        conflicts-append mpich-[join [lrange ${all_name} 2 end] -]
+    } else {
+        conflicts-append mpich-devel-[join [lrange ${all_name} 1 end] -]
     }
 
     # As we are making wrappers, we depend on the compilers to exist. The
@@ -177,9 +219,14 @@ if {${subport} != ${name}} {
 
     depends_build-append        port:pkgconfig
     depends_lib-append          port:libxml2
-    depends_run-append          port:mpi_select port:mpi-doc
+    depends_run-append          port:mpi_select
     select.group                mpi
     select.file                 ${filespath}/${name}-${cname}
+    if {[string first "-devel" $subport] > 0} {
+        depends_run-append      port:mpi-doc-devel
+    } else {
+        depends_run-append      port:mpi-doc
+    }
 
     # Prevent "ccache" and "distcc" from being baked into the wrapper scripts.
     configure.ccache            no
@@ -279,29 +326,17 @@ if {${subport} != ${name}} {
     }
 
     post-destroot {
-        if {[string first "-devel" $subport] > 0} {
-            # Supply our own -devel manpages (might be materially different /
-            # new)
-            move ${destroot}${prefix}/share/man \
-                ${destroot}${prefix}/share/doc/mpich/
-            move ${destroot}${prefix}/share/doc/mpich \
-                ${destroot}${prefix}/share/doc/${name}-${cname}
-            system -W ${destroot}${prefix}/share/doc/${name}-${cname}/man \
-                "/usr/bin/find . -type f -print0 | /usr/bin/xargs -0 -P ${build.jobs} /usr/bin/gzip -v"
-        } else {
-            # This version doesn't supply doc/manpages
-            if {[file isdirectory ${destroot}${prefix}/share/man]} {
-                delete ${destroot}${prefix}/share/man
-            }
-            if {[file isdirectory ${destroot}${prefix}/share/doc]} {
-                delete ${destroot}${prefix}/share/doc
-            }
+        # This version doesn't supply doc/manpages
+        if {[file isdirectory ${destroot}${prefix}/share/man]} {
+            delete ${destroot}${prefix}/share/man
+        }
+        if {[file isdirectory ${destroot}${prefix}/share/doc]} {
+            delete ${destroot}${prefix}/share/doc
         }
     }
 
     if { [string first gcc $cname] == 0 } {
         append long_description " AND FORTRAN COMPILERS"
-        revision                0
         configure.args-replace  --disable-fortran \
                                 --enable-fortran
         select.file             ${filespath}/${name}-${cname}-fortran
@@ -317,31 +352,11 @@ if {${subport} != ${name}} {
             configure.fflags-append -fallow-argument-mismatch
         }
 
-        if {[ variant_isset tuned ] && ${os.major} >= 14} {
-            if {![ file exists ${prefix}/bin/clang ]} {
-                pre-configure {
-                    error "
-
-    **********************************************
-    A MacPorts-provided clang must be installed
-    and 'select'-ed to compile mpich-*gcc* +tuned!
-    (Such that ${prefix}/bin/clang exists.)
-    **********************************************
-"
-                }
-
-            }
-            # Use clang assembler
-            configure.cflags-append     -Wa,-q
-            configure.cxxflags-append   -Wa,-q
-        }
-
         # GCC C++ always uses libstdc++
         # see https://trac.macports.org/ticket/59185
         configure.cxx_stdlib libstdc++
     } else {
         append long_description " (AND THE FORTRAN COMPILER SELECTED BY THE VARIANT, IF ANY)"
-        revision                0
 
         compilers.choose   fc f77 f90
         compilers.setup    default_fortran
@@ -367,16 +382,6 @@ if {${subport} != ${name}} {
         }
     }
 
-    set devnotes ""
-
-    if {[string first "-devel" $subport] > 0} {
-        set devnotes "
-|
-| To see the -devel MAN pages, add:
-|   ${prefix}/share/doc/${name}-${cname}/man
-| to the start of your MANPATH environment variable."
-    }
-
 notes "
 
 +--- MPICH Usage note ----
@@ -387,7 +392,7 @@ notes "
 | To make ${subport}'s wrappers the default (what you get when
 | you execute 'mpicc' etc.) please run:
 |
-|   sudo port select --set mpi [file tail ${select.file}]${devnotes}
+|   sudo port select --set mpi [file tail ${select.file}]
 +-------------------------
 
 "
@@ -426,7 +431,13 @@ pre-built packages for ${subport} by running:
         configure.args-append   MPICHLIB_CFLAGS='-fomit-frame-pointer -O2'
     }
 } else {
-    depends_lib-append      port:$name-default
+    if {${subport} eq ${name}} {
+        depends_lib-append  port:${name}-default
+        conflicts-append    mpich-devel
+    } else {
+        depends_lib-append  port:${name}-devel-default
+        conflicts-append    mpich
+    }
     distfiles
     patchfiles
     supported_archs         noarch

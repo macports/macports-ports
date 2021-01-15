@@ -21,9 +21,9 @@
 #   Available arguments: "require" means an MPI variant must be set.
 #   All of the arguments for compilers.setup are available too and will be passed to that procedure.
 #   "default" means an MPI variant (mpich) will be set as a default variant.
-#   You can either list which MPI's can be used (e.g. mpich mpich-devel),
+#   You can either list which MPI's can be used (e.g. mpich openmpi),
 #   which cannot be used (e.g. -mpich -openmpi-devel).
-#   There are four MPI variants: mpich, mpich-devel, openmpi, openmpi-devel.
+#   There are two MPI variants: mpich and openmpi.
 
 PortGroup compilers 1.0
 
@@ -45,20 +45,10 @@ set mpidb(mpich,descrip)  "MPICH"
 set mpidb(mpich,name)     mpich
 set mpidb(mpich,conflict) ""
 
-set mpidb(mpich_devel,variant)  mpich_devel
-set mpidb(mpich_devel,descrip)  "MPICH-devel"
-set mpidb(mpich_devel,name)     mpich-devel
-set mpidb(mpich_devel,conflict) ""
-
 set mpidb(openmpi,variant)  openmpi
 set mpidb(openmpi,descrip)  "OpenMPI"
 set mpidb(openmpi,name)     openmpi
 set mpidb(openmpi,conflict) ""
-
-set mpidb(openmpi_devel,variant)  openmpi_devel
-set mpidb(openmpi_devel,descrip)  "OpenMPI-devel"
-set mpidb(openmpi_devel,name)     openmpi-devel
-set mpidb(openmpi_devel,conflict) ""
 
 foreach mpiname [array names mpidb *,variant] {
     lappend mpi.variants $mpidb($mpiname)
@@ -290,7 +280,7 @@ proc mpi.setup {args} {
     }
     set disabled [list]
     if {$cur_variant ne ""} {
-        set is_mpich [expr {$cur_variant in {mpich mpich_devel}}]
+        set is_mpich [expr {$cur_variant in {mpich}}]
         lappend disabled -gcc44 -gcc45 -gcc46 -gcc47 -gcc48
         # gcc   4.x     not supported on macOS 10.12 (Darwin16) or newer
         # clang 3.{3,4} not supported on macOS 10.12 (Darwin16) or newer
