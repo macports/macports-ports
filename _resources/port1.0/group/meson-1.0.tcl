@@ -7,13 +7,6 @@
 # PortGroup meson 1.0
 #
 
-#---------
-# WARNING:
-#---------
-#
-# Meson's install_name currently seems to be broken, so workarounds might be needed to make ports actually work.
-# See: https://github.com/mesonbuild/meson/issues/2121
-
 
 # meson builds need to be done out-of-source
 default build_dir           {${workpath}/build}
