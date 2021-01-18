@@ -23,7 +23,7 @@
 #   "default" means an MPI variant (mpich) will be set as a default variant.
 #   You can either list which MPI's can be used (e.g. mpich openmpi),
 #   which cannot be used (e.g. -mpich -openmpi-devel).
-#   There are two MPI variants: mpich and openmpi.
+#   There are three MPI variants: mpich and openmpi openmpi-devel.
 
 PortGroup compilers 1.0
 
@@ -49,6 +49,11 @@ set mpidb(openmpi,variant)  openmpi
 set mpidb(openmpi,descrip)  "OpenMPI"
 set mpidb(openmpi,name)     openmpi
 set mpidb(openmpi,conflict) ""
+
+set mpidb(openmpi_devel,variant)  openmpi_devel
+set mpidb(openmpi_devel,descrip)  "OpenMPI-devel"
+set mpidb(openmpi_devel,name)     openmpi-devel
+set mpidb(openmpi_devel,conflict) ""
 
 foreach mpiname [array names mpidb *,variant] {
     lappend mpi.variants $mpidb($mpiname)
