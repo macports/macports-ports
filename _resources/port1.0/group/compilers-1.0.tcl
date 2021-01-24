@@ -31,6 +31,8 @@
 # c_variant_isset {}: is a C variant set
 # fortran_active_variant_name {depspec}: which Fortran variant a dependency has set
 # fortran_variant_name {}: which Fortran variant is set
+# fortran_depends_port_name {arg}: gets the compiler port name for the given fortran variant
+# fortran_variant_depends {}: gets the depspec to use to depend on the compiler for the active fortran variant
 # fortran_compiler_name {arg}:  converts gfortran into the actual Fortran compiler name; otherwise returns arg
 # clang_variant_isset {}: is a clang variant set
 # clang_variant_name {}: which clang variant is set
@@ -384,7 +386,7 @@ proc fortran_depends_port_name {var} {
     }
 }
 
-proc fortran_variant_depends_port_name {} {
+proc fortran_variant_depends {} {
     global cdb
     set var_name [fortran_variant_name]
     if { ${var_name} ne "" } {
