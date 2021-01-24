@@ -384,7 +384,7 @@ proc fortran_depends_port_name {var} {
     }
 }
 
-proc fortran_variant_depends_port_name {} {
+proc fortran_variant_depends {} {
     global cdb
     set var_name [fortran_variant_name]
     if { ${var_name} ne "" } {
