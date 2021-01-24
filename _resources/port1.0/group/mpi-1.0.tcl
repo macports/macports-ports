@@ -50,10 +50,11 @@ set mpidb(openmpi,descrip)  "OpenMPI"
 set mpidb(openmpi,name)     openmpi
 set mpidb(openmpi,conflict) ""
 
-set mpidb(openmpi_devel,variant)  openmpi_devel
-set mpidb(openmpi_devel,descrip)  "OpenMPI-devel"
-set mpidb(openmpi_devel,name)     openmpi-devel
-set mpidb(openmpi_devel,conflict) ""
+# NOTE: Uncomment these if/when we re-enable openmpi-devel-* subports
+#set mpidb(openmpi_devel,variant)  openmpi_devel
+#set mpidb(openmpi_devel,descrip)  "OpenMPI-devel"
+#set mpidb(openmpi_devel,name)     openmpi-devel
+#set mpidb(openmpi_devel,conflict) ""
 
 foreach mpiname [array names mpidb *,variant] {
     lappend mpi.variants $mpidb($mpiname)
