@@ -1,53 +1,284 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem                                     1.0
-PortGroup       github                         1.0
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
 
-github.setup    grpc grpc 1.22.0 v
-revision        3
-categories      devel
-maintainers     nomaintainer
-license         Apache-2
-description     A high performance, open-source universal RPC framework.
-homepage        https://grpc.io
-platforms       darwin
+github.setup        grpc grpc 1.36.2 v
+revision            0
+categories          devel
+maintainers         nomaintainer
+license             Apache-2
+fetch.type          git
+
+description         A high performance, open-source universal RPC framework.
+long_description    gRPC is a modern, open source, high-performance \
+                    remote procedure call (RPC) framework that can run \
+                    anywhere. gRPC enables client and server \
+                    applications to communicate transparently, and \
+                    simplifies the building of connected systems.
+
+homepage            https://grpc.io/
+platforms           darwin
 
 # ignore pre releases
-github.livecheck.regex {([0-9.]+)}
+github.livecheck.regex  {([0-9.]+)}
 
-long_description \
-    Remote Procedure Calls (RPCs) provide a useful abstraction \
-    for building distributed applications and services. The \
-    libraries in this repository provide a concrete \
-    implementation of the gRPC protocol, layered over HTTP/2. \
-    These libraries enable communication between clients and \
-    servers using any combination of the supported languages.
-
-checksums       rmd160  d1a5675ca59564385e93cbadabd159b508a9be99 \
-                sha256  812ab0caa6474b8a7efcaa77f48f5f35c865ab72fa8eac3ed52d050733cf4e8e \
-                size    15081393
+set name_io         ${name}io
 
 compiler.cxx_standard   2011
 
-patchfiles  patch-Makefile.diff \
-            grpc_if_nametoindex_posix.cc.diff
-
 depends_lib-append \
-    port:zlib \
-    port:protobuf3-cpp \
-    port:c-ares \
-    path:lib/libssl.dylib:openssl
+                    path:lib/libssl.dylib:openssl \
+                    port:abseil \
+                    port:c-ares \
+                    port:gperftools \
+                    port:lbzip2 \
+                    port:libuv \
+                    port:protobuf3-cpp \
+                    port:re2 \
+                    port:zlib
 
-depends_build-append port:pkgconfig
+proc git_submodule_update_init {dir args} {
+    foreach arg {*}${args} {
+        system -W ${dir} "git submodule update --init ${arg}"
+    }
+}
 
-use_configure no
+set grpc_submodules [list \
+    benchmark \
+    bloaty \
+    envoy-api \
+    googleapis \
+    googletest \
+    protoc-gen-validate \
+    udpa \
+]
 
-build.args-append \
-    DEFAULT_CC="${configure.cc}" CC="${configure.cc}" \
-    DEFAULT_CXX="${configure.cxx}" CXX="${configure.cxx}" \
-    prefix="${prefix}" V=1
+post-fetch {
+    git_submodule_update_init ${worksrcpath}/third_party ${grpc_submodules}
+}
 
-destroot.args-append \
-    DEFAULT_CC="${configure.cc}" CC="${configure.cc}" \
-    DEFAULT_CXX="${configure.cxx}" CXX="${configure.cxx}" \
-    prefix=${destroot}${prefix}
+configure.args-append \
+                    -DBUILD_SHARED_LIBS:BOOL=ON \
+                    -DCMAKE_CXX_STANDARD=11 \
+                    -DgRPC_ABSL_PROVIDER=package \
+                    -DgRPC_CARES_PROVIDER=package \
+                    -DgRPC_PROTOBUF_PROVIDER=package \
+                    -DgRPC_RE2_PROVIDER=package \
+                    -DgRPC_SSL_PROVIDER=package \
+                    -DgRPC_ZLIB_PROVIDER=package
+
+# the build must link against its own libraries
+cmake.install_rpath
+configure.pre_args-replace \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+# Remove incorrect cmake dependency on SDK that cmake adds on some systems
+# See https://github.com/grpc/grpc/issues/24902
+set macos_sdk [file tail ${configure.sdkroot}]
+set macos_sdk_dir [file dirname ${configure.sdkroot}]
+set xcode_sdk_dir /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
+
+if {[info exists cmake.build_dir]
+    && ${macos_sdk_dir} ne ${xcode_sdk_dir}
+    && ![file isdirectory ${xcode_sdk_dir}/${macos_sdk}]} {
+    post-configure {
+        set cmakefiles_dirs {}
+        fs-traverse f ${cmake.build_dir} {
+            if { [file isdirectory ${f}]
+                 && [string match "CMakeFiles" [file tail ${f}]] } {
+                append cmakefiles_dirs " " ${f}
+            }
+        }
+        foreach d ${cmakefiles_dirs} {
+            foreach f [glob -nocomplain -type f ${d}/*.dir/*.make] {
+                # delete incorrect Makefile targets to Xcode SDKs
+                reinplace -q -E "/:\[\[:space:]]+\\/\[^\[:space:]]+\\/${macos_sdk}\\/\[^\[:space:]]+\\/CoreFoundation\\.framework/d" ${f}
+                # correct incorrect build flags
+                reinplace -q -E "s|(\[\[:space:]]+-F)${xcode_sdk_dir}(/${macos_sdk}/System/Library/Frameworks\[\[:space:]]+)|\\1${macos_sdk_dir}\\2|g" ${f}
+            }
+            foreach f [glob -nocomplain -type f ${d}/*.dir/link.txt] {
+                # correct incorrect build flags
+                reinplace -q -E "s|(\[\[:space:]]+)/\[^\[:space:]]+/${macos_sdk}/\[^\[:space:]]+/CoreFoundation\.framework\[\[:space:]]*| |g" ${f}
+                # correct incorrect build flags
+                reinplace -q -E "s|(\[\[:space:]]+-F)${xcode_sdk_dir}(/${macos_sdk}/System/Library/Frameworks\[\[:space:]]+)|\\1${macos_sdk_dir}\\2|g" ${f}
+            }
+        }
+    }
+}
+
+build.target
+
+if {${name} eq ${subport}} {
+    test.run         yes
+
+    test {
+        system -W ${workpath} \
+            "${configure.cc} ${filespath}/test.cc -I${worksrcpath}/include -L${cmake.build_dir} -lgrpc -o test"
+        set libgrpc [file tail [lindex [glob -type f ${cmake.build_dir}/libgrpc.*.dylib] 0]]
+        system -W ${workpath} \
+            "install_name_tool -change @rpath/${libgrpc} ${cmake.build_dir}/${libgrpc} ./test"
+        system -W ${workpath} \
+            "./test"
+    }
+}
+
+# create Python subports
+set python_versions {37 38 39}
+
+# Python modules grpcio and grpcio-tools
+foreach v ${python_versions} {
+    subport py${v}-${name_io} {
+        PortGroup   python 1.0
+
+        maintainers {emcrisostomo @emcrisostomo} openmaintainer
+        platforms   darwin
+
+        description Python bindings for gRPC HTTP/2-based RPC framework
+        long_description \
+                    {*}${description}
+
+        homepage    https://github.com/grpc/grpc
+        
+        python.default_version  ${v}
+    }
+
+    subport py${v}-${name_io}-tools {
+        PortGroup   python 1.0
+
+        maintainers nomaintainer
+        platforms   darwin
+
+        description Protobuf code generator for gRPC
+        long_description \
+                    {*}${description}
+
+        homepage    https://github.com/grpc/grpc
+
+        python.default_version  ${v}
+    }
+}
+
+# common settings for all Python ports
+if {[string match "py*" ${subport}]} {
+    patch {
+        reinplace "s|/usr|${prefix}|g" ${worksrcpath}/setup.py
+    }
+
+    # See https://github.com/grpc/grpc/blob/master/setup.py for supported system packages
+    lappend grpc_submodules \
+                    abseil-cpp
+
+    depends_lib-delete \
+                    port:abseil
+
+    use_configure   yes
+
+    configure.pre_args-delete \
+                    --prefix=${prefix}
+    configure.pre_args-replace \
+                    {-DCMAKE_C_COMPILER="$CC"} \
+                    -DCMAKE_C_COMPILER=${configure.cc}
+    configure.pre_args-replace \
+                    {-DCMAKE_CXX_COMPILER="$CXX"} \
+                    -DCMAKE_CXX_COMPILER=${configure.cxx}
+    configure.pre_args-replace \
+                    "-DCMAKE_MAKE_PROGRAM=${python.bin} setup.py --no-user-cfg" \
+                    -DCMAKE_MAKE_PROGRAM=[portbuild::build_getmaketype]
+
+    configure.args-replace \
+                    -DgRPC_ABSL_PROVIDER=package \
+                    -DgRPC_ABSL_PROVIDER=module
+    configure.args-append \
+                    -DPython_EXECUTABLE=${python.bin}
+
+    build.env-append \
+                    GRPC_PYTHON_BUILD_SYSTEM_CARES=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_RE2=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
+                    GRPC_PYTHON_BUILD_WITH_CYTHON=1
+
+    destroot.env-append \
+                    GRPC_PYTHON_BUILD_SYSTEM_CARES=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_RE2=1 \
+                    GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
+                    GRPC_PYTHON_BUILD_WITH_CYTHON=1
+
+    # Build instructions:
+    # https://github.com/grpc/grpc/tree/master/src/python/grpcio#installing-from-source
+
+    build.dir       ${worksrcpath}
+    build.target    build
+    build.post_args-delete \
+                    VERBOSE=ON
+
+    destroot.dir    ${build.dir}
+    destroot.target install
+
+    pre-test {
+        test.env-append \
+            PYTHONPATH=[glob -nocomplain ${worksrcpath}/python_build/lib*]
+    }
+
+    test.run        yes
+    test.cmd        py.test-${python.branch}
+}
+
+# Python bindings for grpcio
+if {[string match "py*${name_io}" ${subport}]} {
+    depends_build-append \
+                    port:pkgconfig \
+                    port:py${python.version}-coverage \
+                    port:py${python.version}-cython \
+                    port:py${python.version}-setuptools
+
+    depends_lib-append \
+                    port:py${python.version}-cython \
+                    port:py${python.version}-protobuf3 \
+                    port:py${python.version}-six
+
+    depends_test-append \
+                    port:py${python.version}-pytest \
+                    port:py${python.version}-twisted
+}
+
+# Python bindings for grpcio-tools
+if {[string match "py*-${name_io}-tools" ${subport}]} {
+    set grpc_submodules \
+                    protobuf
+
+    depends_build-append \
+                    port:py${python.version}-setuptools
+
+    depends_lib-append \
+                    port:py${python.version}-${name_io} \
+                    port:py${python.version}-protobuf3
+
+    depends_test-append \
+                    port:py${python.version}-pytest
+
+    # Build instructions:
+    # https://github.com/grpc/grpc/tree/master/tools/distrib/python/grpcio_tools
+
+    use_configure   no
+
+    pre-build {
+        system -W ${build.dir} "${python.bin} ../make_grpcio_tools.py"
+    }
+
+    build.dir       ${worksrcpath}/tools/distrib/python/grpcio_tools
+    build.target    build
+    build.post_args-delete \
+                    VERBOSE=ON
+
+    destroot.dir    ${build.dir}
+    destroot.target install
+
+    test.run        yes
+    test.dir        ${build.dir}/grpc_tools
+    test.cmd        py.test-${python.branch}
+}
