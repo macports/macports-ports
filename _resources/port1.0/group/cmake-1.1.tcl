@@ -85,7 +85,7 @@ default destroot.target             install/fast
 # make sure cmake is available:
 # can use cmake or cmake-devel; default to cmake if not installed
 depends_build-append                path:bin/cmake:cmake
-
+depends_skip_archcheck-append       cmake
 
 proc cmake::rpath_flags {} {
     global prefix
