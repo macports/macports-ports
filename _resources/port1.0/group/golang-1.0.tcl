@@ -277,7 +277,7 @@ post-extract {
         # as the result will not be accurate when go.package has been
         # customized.
         file mkdir [file dirname ${worksrcpath}]
-        if [file exists [glob -nocomplain ${workpath}/${go.author}-${go.project}-*]] {
+        if {[file exists [glob -nocomplain ${workpath}/${go.author}-${go.project}-*]]} {
             # GitHub and Bitbucket follow this path
             move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
         } else {
