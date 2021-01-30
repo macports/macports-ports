@@ -243,7 +243,7 @@ foreach stage {configure build destroot} {
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
-    global configure.cc configure.cxx subport build_arch universal_archs merger_configure_env merger_build_env merger_destroot_env worksrcpath
+    global configure.cc configure.cxx subport build_arch configure.universal_archs merger_configure_env merger_build_env merger_destroot_env worksrcpath
     foreach stage {build destroot} {
         ${stage}.env-delete CC=${configure.cc} \
                             CXX=${configure.cxx}
@@ -268,7 +268,7 @@ proc cargo.environments {} {
             }
         } else {
             foreach stage {configure build destroot} {
-                foreach arch ${universal_archs} {
+                foreach arch ${configure.universal_archs} {
                     lappend merger_${stage}_env(${arch}) \
                         CARGO_BUILD_TARGET=[cargo.rust_platform ${arch}]
                 }
@@ -278,21 +278,5 @@ proc cargo.environments {} {
 }
 port::register_callback cargo.environments
 
-# override universal_setup found in portutil.tcl so it uses muniversal PortGroup
 # see https://trac.macports.org/ticket/51643 for a similar case
-proc universal_setup {args} {
-    if {[variant_exists universal]} {
-        ui_debug "universal variant already exists, so not adding the default one"
-    } elseif {[exists universal_variant] && ![option universal_variant]} {
-        ui_debug "universal_variant is false, so not adding the default universal variant"
-    } elseif {[exists use_xmkmf] && [option use_xmkmf]} {
-        ui_debug "using xmkmf, so not adding the default universal variant"
-    } elseif {![exists os.universal_supported] || ![option os.universal_supported]} {
-        ui_debug "OS doesn't support universal builds, so not adding the default universal variant"
-    } elseif {[llength [option supported_archs]] == 1} {
-        ui_debug "only one arch supported, so not adding the default universal variant"
-    } else {
-        ui_debug "adding universal variant via PortGroup muniversal"
-        uplevel "PortGroup muniversal 1.0"
-    }
-}
+PortGroup muniversal 1.0
