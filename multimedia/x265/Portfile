@@ -33,6 +33,8 @@ homepage            https://www.videolan.org/developers/x265.html
 github.tarball_from archive
 worksrcdir          ${name}-${version}/source
 
+# nasm is only needed to compile Intel code I believe, so investigate
+# whether this dep can be restricted to Intel builds
 depends_build-append \
                     port:gmake \
                     port:nasm
@@ -54,11 +56,61 @@ if {${universal_possible} && [variant_isset universal]} {
     configure.ldflags-append -Wl,-read_only_relocs,suppress
 }
 
-variant main10 description {Enable 10-bit encoding} {
-    configure.args-append -DHIGH_BIT_DEPTH=ON
+if {!${universal_possible} || ![variant_isset universal]} {
+    # TODO: explore how this variant is supported on other archs
+    if {${configure.build_arch} eq "x86_64"} {
+        default_variants +highdepth
+    }
 }
 
-variant main12 description {Cannot be used with 10-bit} {
-    configure.args-append -DHIGH_BIT_DEPTH=ON \
-                          -DMAIN12=ON
+variant highdepth conflicts universal description {Enable 10-bit and 12-bit encoding} {
+
+    # this builds the recommended multi-library interface
+    # https://x265.readthedocs.io/en/master/api.html#multi-library-interface
+    # with the default ABI being the standard 8bit ABI as always
+
+    # we need to explore how to use the method below with the muniversal PG.
+    universal_variant no
+
+    depends_build-append    port:libtool
+
+    pre-configure {
+        system "mkdir ${workpath}/10bit"
+        system "mkdir ${workpath}/12bit"
+    }
+
+    configure {
+
+        set configure.dir ${workpath}/10bit
+        configure.args -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF -DENABLE_SHARED=OFF -DENABLE_CLI=OFF
+        portconfigure::configure_main
+
+        set configure.dir ${workpath}/12bit
+        configure.args -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF -DENABLE_SHARED=OFF -DENABLE_CLI=OFF -DMAIN12=ON
+        portconfigure::configure_main
+
+        set configure.dir ${workpath}/build
+        configure.args -DEXTRA_LIB="x265_main10.a\;x265_main12.a" -DEXTRA_LINK_FLAGS=-L. -DLINKED_10BIT=ON -DLINKED_12BIT=ON
+        portconfigure::configure_main
+
+    }
+
+    build {
+
+        set build.dir ${workpath}/10bit
+        portbuild::build_main
+
+        set build.dir ${workpath}/12bit
+        portbuild::build_main
+
+        ln ${workpath}/10bit/libx265.a ${workpath}/build/libx265_main10.a
+        ln ${workpath}/12bit/libx265.a ${workpath}/build/libx265_main12.a
+
+        set build.dir ${workpath}/build
+        portbuild::build_main
+
+        system -W ${workpath}/build "mv libx265.a libx265_main.a"
+        system -W ${workpath}/build "libtool -static -o libx265.a libx265_main.a libx265_main10.a libx265_main12.a"
+
+    }
 }
