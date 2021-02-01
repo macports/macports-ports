@@ -80,7 +80,7 @@ proc texlive.mktexlsr {} {
 
     # If mtxrun is available (i.e. ConTeXt is installed), update its
     # cache too. If it's not installed, that's OK.
-    if [file exists "${prefix}/bin/mtxrun"] {
+    if {[file exists "${prefix}/bin/mtxrun"]} {
         system "${prefix}/bin/mtxrun --generate"
     }
 }
@@ -90,7 +90,7 @@ proc texlive.mktexlsr {} {
 proc texlive.removedocdepends {} {
     global depends_lib
     foreach dep $depends_lib {
-        if [regexp {^port:texlive-documentation-} $dep] {
+        if {[regexp {^port:texlive-documentation-} $dep]} {
             depends_lib-delete $dep
         }
     }
@@ -205,13 +205,13 @@ proc texlive.texmfport {} {
                 set srcfile ${worksrcpath}/${indexname}/$line
 
                 # check for manpages and treat specially
-                if [regexp {^texmf/doc/man/man(\d)/([^/]+)} $line -> section filename] {
-                    if [string match "*.$section" $filename] {
+                if {[regexp {^texmf/doc/man/man(\d)/([^/]+)} $line -> section filename]} {
+                    if {[string match "*.$section" $filename]} {
                         # actually a manpage; install it.  If
                         # texlive-bin installed a manpage with the
                         # same name, use it instead to make sure the
                         # documentation matches the binary.
-                        if [file exists ${texlive_bindir}/man${section}/$filename.gz] {
+                        if {[file exists ${texlive_bindir}/man${section}/$filename.gz]} {
                             ln -s ${texlive_bindir}/man${section}/$filename.gz \
                                 ${destroot}${prefix}/share/man/man$section/
                         } else {

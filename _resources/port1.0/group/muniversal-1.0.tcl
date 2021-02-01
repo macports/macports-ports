@@ -27,7 +27,7 @@
 #              merger_no_3_archs: if yes, merger will not work correctly if there are three supported architectures
 
 options universal_archs_supported merger_must_run_binaries merger_no_3_archs merger_arch_flag merger_arch_compiler
-default universal_archs_supported {${universal_archs}}
+default universal_archs_supported {${configure.universal_archs}}
 default merger_must_run_binaries no
 default merger_no_3_archs no
 default merger_arch_flag yes
@@ -98,22 +98,16 @@ proc merger_target_provides {ditem args} {
 
 merger_target_provides ${org.macports.destroot} destroot
 
-variant universal {
-    global universal_archs_to_use
-
-    foreach arch ${universal_archs} {
-        foreach lang {c cxx objc objcxx cpp ld} {
-            configure.universal_${lang}flags-delete -arch ${arch}
-        }
+# add the universal variant if appropriate
+# (replaces the proc of the same name in portutil.tcl)
+proc universal_setup {args} {
+    if {![exists os.universal_supported] || ![option os.universal_supported]} {
+        ui_debug "OS doesn't support universal builds, so not adding the universal variant"
+        return
     }
 
-    # Disabling dependency tracking is only required when building for
-    # multiple architectures simultaneously.
-    configure.universal_args-delete --disable-dependency-tracking
-
-    foreach lang {c cxx objc objcxx cpp ld} {
-        configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
-    }
+    global merger_must_run_binaries merger_no_3_archs universal_archs_to_use \
+        universal_archs_supported configure.universal_archs os.arch os.major
 
     # user has specified that build platform must be able to run binaries for supported architectures
     if {${merger_must_run_binaries} eq "yes"} {
@@ -139,14 +133,8 @@ variant universal {
 
     # set universal_archs_to_use as the intersection of universal_archs and universal_archs_supported
     set universal_archs_to_use {}
-    foreach arch ${universal_archs} {
-        set arch_ok no
-        foreach archt ${universal_archs_supported} {
-            if {${arch} eq ${archt}} {
-                set arch_ok yes
-            }
-        }
-        if {${arch_ok} eq "yes"} {
+    foreach arch ${configure.universal_archs} {
+        if {${arch} in ${universal_archs_supported}} {
             lappend universal_archs_to_use ${arch}
         }
     }
@@ -195,6 +183,30 @@ variant universal {
             # at least one arch should have been removed from universal_archs_to_use
             error "Should Not Happen"
         }
+    }
+
+    # ensure correct archs are recorded in the registry, archive name, etc
+    configure.universal_archs {*}${universal_archs_to_use}
+
+    if {[llength ${configure.universal_archs}] < 2} {
+        ui_debug "muniversal: < 2 archs supported, not adding universal variant"
+    } else {
+
+ui_debug "muniversal: adding universal variant"
+
+variant universal {
+    foreach arch ${configure.universal_archs} {
+        foreach lang {c cxx objc objcxx cpp ld} {
+            configure.universal_${lang}flags-delete -arch ${arch}
+        }
+    }
+
+    # Disabling dependency tracking is only required when building for
+    # multiple architectures simultaneously.
+    configure.universal_args-delete --disable-dependency-tracking
+
+    foreach lang {c cxx objc objcxx cpp ld} {
+        configure.${lang}flags-append   {*}[option configure.universal_${lang}flags]
     }
 
     # if Portfile has configure {...}, save the procedure
@@ -901,6 +913,8 @@ variant universal {
             }
         }
     }
+}
+}
 }
 
 # [muniversal_file_or_symlink_exists ${f}] tells you if ${f} exists. And unlike
