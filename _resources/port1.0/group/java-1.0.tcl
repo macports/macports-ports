@@ -123,7 +123,7 @@ proc find_java_home {} {
 
     # Warn user if we couldn't find a likely JAVA_HOME
     if { ![file isdirectory $home_value]} {
-        ui_warn "No value for java JAVA_HOME was automatically discovered"
+        ui_debug "No value for java JAVA_HOME was automatically discovered"
     }
 
     # Add dependency if required
