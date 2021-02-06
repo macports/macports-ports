@@ -84,7 +84,7 @@ post-extract {
 
     if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
         delete ${workpath}/${octave.module}
-        move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
+        move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
 
 #     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
