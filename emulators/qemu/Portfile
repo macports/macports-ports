@@ -8,7 +8,7 @@ PortGroup legacysupport 1.0
 
 name                    qemu
 version                 5.2.0
-revision                0
+revision                1
 categories              emulators
 license                 GPL-2+
 platforms               darwin
@@ -57,8 +57,13 @@ if {${os.platform} eq "darwin" && ${os.major} < 11} {
     configure.cflags-append     -femulated-tls
 }
 
+set arch ${configure.build_arch}
+if {${configure.build_arch} eq "arm64"} {
+    set arch "aarch64"
+}
+
 # Select compiler
-configure.args          --cpu=${configure.build_arch} \
+configure.args          --cpu=${arch} \
                         --cc=${configure.cc} \
                         --objcc=${configure.objc} \
                         --host-cc=${configure.cc} \
@@ -114,6 +119,24 @@ pre-configure {
     configure.args-append --extra-ldflags="${configure.ldflags}"
 }
 
+# out of tree hvf support for Apple Silicon
+# https://patchwork.kernel.org/project/qemu-devel/list/?series=418581
+patchfiles-append       patch-hvf-Add-hypervisor-entitlement-to-output-binaries.diff \
+                        patch-hvf-x86-Remove-unused-definitions.diff \
+                        patch-hvf-Move-common-code-out.diff \
+                        patch-hvf-Introduce-hvf-vcpu-struct.diff \
+                        patch-arm-Set-PSCI-to-0.2-for-HVF.diff \
+                        patch-hvf-Simplify-post-reset-init-loadvm-hooks.diff \
+                        patch-hvf-Add-Apple-Silicon-support.diff \
+                        patch-arm-Add-Hypervisor.framework-build-target.diff \
+                        patch-arm-hvf-Add-a-WFI-handler.diff \
+                        patch-hvf-arm-Add-support-for-GICv3.diff \
+                        patch-hvf-arm-Implement--cpu-host.diff
+
+post-configure {
+    system "chmod +x ${worksrcpath}/scripts/entitlement.sh"
+}
+
 # The qemu build system bugs out when using in-source-tree builds.
 # During builds, files are generated in directories such as pc-bios, which are
 # prerequites to the config-host.mak file. The latter gets generated during a
@@ -142,7 +165,14 @@ foreach t {i386 x86_64 alpha {arm aarch64} cris hppa lm32 m68k {microblaze micro
            nios2 moxie or1k {ppc ppc64} riscv32 riscv64 rx s390x {sh4 sh4eb} {sparc sparc64} tricore unicore32 {xtensa xtensaeb}} {
     variant target_[lindex $t 0] description "Add target support for [join $t {, }]" "append target_list \",[join $t -softmmu,]-softmmu\""
 }
-default_variants-append +target_i386 +target_x86_64
+
+if {${configure.build_arch} eq "x86_64"} {
+    default_variants-append +target_i386 +target_x86_64
+} elseif {${configure.build_arch} eq "arm64"} {
+    default_variants-append +target_arm
+} elseif {${configure.build_arch} eq "ppc" || ${configure.build_arch} eq "ppc64"} {
+    default_variants-append +target_ppc
+}
 
 if {![variant_isset curses]} {
     default_variants-append +cocoa
@@ -248,6 +278,27 @@ universal_variant       no
 platform darwin 8 {
     depends_build-append port:gmake
     build.cmd ${prefix}/bin/gmake
+}
+
+platform darwin 20 {
+    post-destroot {
+        # meson modify binary during install which broke codesign for hvf-enabled binaries
+        # we need to re-sign it again
+        set codesign_targets {}
+
+        if {${configure.build_arch} eq "x86_64"} {
+            lappend codesign_targets ${destroot}${prefix}/bin/qemu-system-x86_64
+            lappend codesign_targets ${destroot}${prefix}/bin/qemu-system-i386
+        } elseif {${configure.build_arch} eq "arm64"} {
+            lappend codesign_targets ${destroot}${prefix}/bin/qemu-system-aarch64
+        }
+
+        foreach target ${codesign_targets} {
+            if {[file exists ${target}]} {
+                system "/usr/bin/codesign --entitlements ${worksrcpath}/accel/hvf/entitlements.plist --force -s - ${target}"
+            }
+        }
+    }
 }
 
 platform darwin {
