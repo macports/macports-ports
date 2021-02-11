@@ -6,7 +6,7 @@ PortGroup           compiler_blacklist_versions 1.0
 PortGroup           cmake 1.1
 PortGroup           active_variants 1.1
 
-github.setup        PixarAnimationStudios USD 20.02 v
+github.setup        PixarAnimationStudios USD 20.05 v
 name                usd
 categories          graphics
 platforms           darwin
@@ -27,17 +27,19 @@ long_description    Universal Scene Description (USD) is a software \
                     shading, models, and assets can be organized and \
                     manipulated.
 
-checksums           rmd160  342d266a0be0774e22aa5653a9d22fa4e21f8e16 \
-                    sha256  a0eb6eacefbbfa88393021c63a51ca8c528c9607ad56968c177992b27bb45f7d \
-                    size    30156908
+checksums           rmd160  8ec6dda307f9804ce4b3a562c3df2dbd14a64390 \
+                    sha256  ad167b438401848fdd4133f4470a6288ccf37949b4ccc9abf52b50438380ec59 \
+                    size    24800580
 
-set py_ver          2.7
+set py_ver          3.8
 set py_ver_nodot    [string map {. {}} ${py_ver}]
+set py_ver_major    [lindex [split $py_ver .] 0]
+set py_ver_minor    [lindex [split $py_ver .] 1]
 
 depends_lib-append  port:boost \
                     port:tbb
 
-compiler.cxx_standard 2011
+compiler.cxx_standard 2014
 # USD fails to compile for Clang older than 8.1.0
 # (Note: Clang 8.1.0 == clang-802 in Xcode)
 compiler.blacklist-append {clang < 802}
@@ -46,8 +48,8 @@ compiler.blacklist-append {clang < 802}
 # file 'patch-add-blender-mods.diff' was extracted from the file in
 # Blender's source code named
 # 'build_files/build_environment/patches/usd.diff'. (No further
-# modifications to the patch itself were needed, since Blender 2.83 was
-# written to be compatible with USD version 19.11.) These modifications
+# modifications to the patch itself were needed, since Blender 2.90 was
+# written to be compatible with USD version 20.05.) These modifications
 # essentially add a hook for Blender to use, and shouldn't otherwise
 # affect the functioning of USD.
 patchfiles-append   patch-add-blender-mods.diff
@@ -74,6 +76,8 @@ post-patch {
 # Turn off all of USD's default build options. We will allow users to
 # directly control these options using port variants.
 configure.args      -DPXR_BUILD_TESTS=OFF \
+                    -DPXR_BUILD_EXAMPLES=OFF \
+                    -DPXR_BUILD_TUTORIALS=OFF \
                     -DPXR_BUILD_IMAGING=OFF \
                     -DPXR_BUILD_USD_IMAGING=OFF \
                     -DPXR_BUILD_USDVIEW=OFF \
@@ -82,14 +86,56 @@ configure.args      -DPXR_BUILD_TESTS=OFF \
                     -DPXR_ENABLE_HDF5_SUPPORT=OFF \
                     -DPXR_ENABLE_PTEX_SUPPORT=OFF
 
+pre-test {
+    if {![variant_isset tests]} {
+        ui_error "'tests' variant must be activated to enable test support"
+        error "Please enable the 'tests' variant and try again"
+    }
+}
+
+# Certain Python script files are not getting their shebang lines
+# replaced by the 'cmake/macros/shebang.py' script during the build,
+# so we do it for them.
+proc shebang dir {
+    global prefix py_ver
+    if {![file exists $dir] || ![file isdirectory $dir]} {
+        return -code error "$dir: No such directory"
+    }
+    fs-traverse f $dir {
+        if {[file isfile $f]} {
+            # Look for the string we want to replace inside the contents
+            # of the file before we actually do the substitution. This
+            # prevents errors being thrown by reinplace in the case
+            # where the file in question is a binary file.
+            set fp [open $f r]
+            set count [regexp -all -- {pxrpythonsubst} [read $fp]]
+            close $fp
+            if {$count > 0} {
+                reinplace -q \
+                    "s|/pxrpythonsubst|${prefix}/bin/python$py_ver|" $f
+            }
+        }
+    }
+}
+
+post-destroot {
+    shebang ${destroot}${prefix}/share/usd
+}
+
 ############################# Variants ##############################
+
+# Note: The various variant dependencies and package dependencies
+# specified in the variants below were obtained by looking at the
+# 'cmake/defaults/Packages.cmake' file in the USD source code.
+
+set py_libs_dir ${frameworks_dir}/Python.framework/Versions/$py_ver/lib
 
 variant docs description {Build documentation} {
     depends_build-append    port:doxygen \
                             path:bin/dot:graphviz
-
     post-patch {
-        reinplace {s|docs|share/doc/usd|g} ${worksrcpath}/CMakeLists.txt
+        reinplace {s|docs|share/doc/usd|g} \
+            ${worksrcpath}/cmake/macros/Public.cmake
         reinplace {/installPath = os/s|docs|share/doc/usd|} \
             ${worksrcpath}/cmake/macros/generateDocs.py
         reinplace {/os.mkdir.installPath/s/mkdir/makedirs/} \
@@ -99,19 +145,64 @@ variant docs description {Build documentation} {
         reinplace "/PROJECT_NUMBER.*=/s/$/${version}/" \
             ${worksrcpath}/pxr/usd/usd/Doxyfile.in
     }
-
     configure.args-append   -DPXR_BUILD_DOCUMENTATION=ON
+    post-destroot {
+        foreach f [list \
+            CHANGELOG.md \
+            CONTRIBUTING.md \
+            LICENSE.txt \
+            NOTICE.txt \
+            USD_CLA_Corporate.pdf \
+            USD_CLA_Individual.pdf \
+        ] {
+            copy ${worksrcpath}/$f ${destroot}${prefix}/share/doc/usd/
+        }
+    }
 }
 
 variant tests description {Build unit tests} {
-    patchfiles-append       patch-tests-output-paths.diff
     configure.args-replace  -DPXR_BUILD_TESTS=OFF \
                             -DPXR_BUILD_TESTS=ON
+    post-build {
+        shebang ${worksrcpath}/pxr
+    }
+    test.run yes
+}
+
+variant examples description {Build examples} {
+    configure.args-replace  -DPXR_BUILD_EXAMPLES=OFF \
+                            -DPXR_BUILD_EXAMPLES=ON
+    post-destroot {
+        # One of the examples' object file is getting compiled assuming
+        # that its associated library is located in ${prefix}/lib,
+        # instead of inside the examples directory. I haven't been able
+        # to find where this is getting set in the source code, so we
+        # fix the path after it gets compiled.
+        set usdSchemaExamples_so \
+            $py_libs_dir/python${py_ver}/site-packages/pxr/UsdSchemaExamples/_usdSchemaExamples.so
+        if {[file exists ${destroot}$usdSchemaExamples_so]} {
+            system [join [list \
+                "install_name_tool -change" \
+                ${prefix}/lib/usdSchemaExamples.dylib \
+                ${prefix}/share/usd/examples/share/usd/plugins/usdSchemaExamples.dylib \
+                ${destroot}$usdSchemaExamples_so \
+            ] " "]
+            system [join [list \
+                "install_name_tool -id" \
+                $usdSchemaExamples_so \
+                ${destroot}$usdSchemaExamples_so \
+            ] " "]
+        }
+    }
+}
+
+variant tutorials requires python description {Build tutorials} {
+    configure.args-replace  -DPXR_BUILD_TUTORIALS=OFF \
+                            -DPXR_BUILD_TUTORIALS=ON
 }
 
 variant imaging description {Build imaging components} {
-    depends_lib-append      port:openexr \
-                            port:opensubdiv
+    depends_lib-append      port:opensubdiv
     configure.args-replace  -DPXR_BUILD_IMAGING=OFF \
                             -DPXR_BUILD_IMAGING=ON
 }
@@ -119,14 +210,12 @@ variant imaging description {Build imaging components} {
 variant usd_imaging requires imaging \
     description {Build USD imaging components} \
 {
-    configure.args-replace  -DPXR_USD_IMAGING=OFF \
-                            -DPXR_USD_IMAGING=ON
+    configure.args-replace  -DPXR_BUILD_USD_IMAGING=OFF \
+                            -DPXR_BUILD_USD_IMAGING=ON
 }
 
 variant opengl description {Enable OpenGL-based components} {
-    if {[variant_isset imaging]} {
-        depends_lib-append  port:glew
-    }
+    depends_lib-append      port:glew
     configure.args-replace  -DPXR_ENABLE_GL_SUPPORT=OFF \
                             -DPXR_ENABLE_GL_SUPPORT=ON
 }
@@ -135,25 +224,55 @@ variant python description {Enable Python-based components} {
     require_active_variants boost python${py_ver_nodot}
     depends_lib-append      port:python${py_ver_nodot} \
                             port:py${py_ver_nodot}-jinja2
-
     post-patch {
-        # According to 'cmake --help-module FindBoost': "Note that Boost
-        # Python components require a Python version suffix (Boost 1.67
-        # and later), e.g. 'python36' or 'python27' for the versions
-        # built against Python 3.6 and 2.7, respectively."
-        reinplace -E "/--Boost/,/--Jinja2/s/\(python\)/\\1${py_ver_nodot}/" \
-            ${worksrcpath}/cmake/defaults/Packages.cmake
-    }
+        if {![active_variants boost cmake_scripts]} {
+            reinplace "/set.boost_version_string/a\\
+\\    set(Boost_NO_BOOST_CMAKE TRUE)\\
+\\    if(NOT PYTHON_VERSION_MAJOR)\\
+\\        set(PYTHON_VERSION_MAJOR $py_ver_major)\\
+\\    endif()\\
+\\    if(NOT PYTHON_VERSION_MINOR)\\
+\\        set(PYTHON_VERSION_MINOR $py_ver_minor)\\
+\\    endif()\\
+" \
+                ${worksrcpath}/cmake/defaults/Packages.cmake
+        } else {
+            reinplace "/find_package(Boost/,/)/s|python$|python$py_ver_nodot|" \
+                ${worksrcpath}/cmake/defaults/Packages.cmake
+        }
 
+        set pypath_regex \
+            "s|\(lib/python\)|Library/Frameworks/Python.framework/Versions/$py_ver/\\1$py_ver/site-packages|"
+        foreach f [list \
+            ${worksrcpath}/cmake/macros/Private.cmake \
+            ${worksrcpath}/pxr/usdImaging/usdviewq/CMakeLists.txt \
+        ] {
+            reinplace -E $pypath_regex $f
+        }
+        foreach search_regex [list \
+            "/_get_install_dir/" \
+            "/set._testPythonPath/" \
+        ] {
+            reinplace -E [join [list $search_regex $pypath_regex] ""] \
+                ${worksrcpath}/cmake/macros/Public.cmake
+        }
+    }
     configure.args-replace  -DPXR_ENABLE_PYTHON_SUPPORT=OFF \
                             -DPXR_ENABLE_PYTHON_SUPPORT=ON
+    configure.args-append   -DPXR_USE_PYTHON_3=ON \
+                            -DPYTHON_EXECUTABLE=${prefix}/bin/python$py_ver \
+                            -DPythonLibs_DIR=$py_libs_dir
 }
 
 variant viewer requires usd_imaging python opengl \
     description {Build USD viewer} \
 {
-    depends_lib-append      port:py${py_ver_nodot}-pyside \
+    depends_lib-append      port:py${py_ver_nodot}-pyside-tools \
                             port:py${py_ver_nodot}-opengl
+    post-patch {
+        reinplace -E "s/\(pyside-uic-\)2.7/\\1${py_ver}/" \
+            ${worksrcpath}/cmake/modules/FindPySide.cmake
+    }
     configure.args-replace  -DPXR_BUILD_USDVIEW=OFF \
                             -DPXR_BUILD_USDVIEW=ON
 }
@@ -162,6 +281,11 @@ variant ptex description {Enable Ptex support} {
     depends_lib-append      port:ptex
     configure.args-replace  -DPXR_ENABLE_PTEX_SUPPORT=OFF \
                             -DPXR_ENABLE_PTEX_SUPPORT=ON
+}
+
+variant openvdb description {Enable OpenVDB support} {
+    depends_lib-append      port:openvdb
+    configure.args-append   -DPXR_ENABLE_OPENVDB_SUPPORT=ON
 }
 
 variant monolithic \
@@ -197,7 +321,6 @@ variant hdf5 requires alembic \
 
 variant materialx description {Build MaterialX plugin} {
     depends_lib-append      port:materialx
-
     post-patch {
         foreach re [list \
             "/find_package.MaterialX/i\\
@@ -213,8 +336,7 @@ variant materialx description {Build MaterialX plugin} {
         reinplace -E {s|(stdlib_defs.mtlx)|share/MaterialX/libraries/stdlib/\1|} \
             ${worksrcpath}/cmake/modules/FindMaterialX.cmake
     }
-
     configure.args-append   -DPXR_BUILD_MATERIALX_PLUGIN=ON
 }
 
-default_variants    +docs +tests +ptex +oiio +ocio +alembic
+default_variants    +docs +examples +tutorials +ptex
