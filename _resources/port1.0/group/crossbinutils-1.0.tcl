@@ -56,6 +56,16 @@ array set crossbinutils.versions_info {
         sha256  3ced91db9bf01182b7e420eab68039f2083aed0a214c0424e257eae3ddee8607 \
         size    22031720
     }}
+    2.36 {xz {
+        rmd160  3b9c7a8546771796e405645ed713008e79243868 \
+        sha256  5788292cc5bbcca0848545af05986f6b17058b105be59e99ba7d0f9eb5336fb8 \
+        size    22760136
+    }}
+    2.36.1 {xz {
+        rmd160  65047a9edd726380fa1e117514513c86b77cf3a0 \
+        sha256  e81d9edf373f193af428a0f256674aea62a9d74dfe93f65192d4eae030b0f3b0 \
+        size    22772248
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -137,6 +147,9 @@ proc crossbinutils.setup {target version} {
         reinplace -q "s|bfdincludedir=.*|bfdincludedir='${prefix}/${crossbinutils.target}/host/include'|g"  \
             ${worksrcpath}/bfd/configure                                             \
             ${worksrcpath}/opcodes/configure
+
+        reinplace -q "s|\$(libdir)/bfd-plugins|\"${prefix}/${crossbinutils.target}/host/lib/bfd-plugins\"|g" \
+            ${worksrcpath}/ld/Makefile.in
 
         reinplace -q "s|\$(libdir)|\"${prefix}/${crossbinutils.target}/host/lib\"|g" \
             ${worksrcpath}/libiberty/Makefile.in
