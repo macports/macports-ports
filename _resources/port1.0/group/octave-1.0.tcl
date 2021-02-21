@@ -40,7 +40,8 @@ proc octave.set_module {opt action args} {
 }
 
 default categories   "math science"
-default master_sites {sourceforge:octave}
+default master_sites [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
+                        sourceforge:octave]
 default distname     {${octave.module}-${version}}
 default worksrcdir   {${octave.module}}
 # do not build in parallel; many can't, and these are small builds
@@ -84,7 +85,7 @@ post-extract {
 
     if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
         delete ${workpath}/${octave.module}
-        move [glob ${workpath}/*-${version}] ${workpath}/${octave.module}
+        move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
 
 #     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
