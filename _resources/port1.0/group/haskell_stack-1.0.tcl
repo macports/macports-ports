@@ -21,7 +21,7 @@
 #
 # haskell_stack.stack_root
 #   The root directory for stack, passed as STACK_ROOT in haskell_stack.env.
-#   Defaults to ${workpath}/.stack.
+#   Defaults to ${workpath}/.home/.stack.
 #
 # haskell_stack.yaml
 #   The location of the stack.yaml config file, passed as STACK_YAML in
@@ -64,7 +64,7 @@ proc haskell_stack.add_dependencies {} {
 port::register_callback haskell_stack.add_dependencies
 
 options haskell_stack.stack_root
-default haskell_stack.stack_root {${workpath}/.stack}
+default haskell_stack.stack_root {${workpath}/.home/.stack}
 
 post-extract {
     xinstall -m 0755 -d "[option haskell_stack.stack_root]"
