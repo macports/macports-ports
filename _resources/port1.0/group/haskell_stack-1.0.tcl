@@ -21,7 +21,7 @@
 #
 # haskell_stack.stack_root
 #   The root directory for stack, passed as STACK_ROOT in haskell_stack.env.
-#   Defaults to ${workpath}/.stack.
+#   Defaults to ${workpath}/.home/.stack.
 #
 # haskell_stack.yaml
 #   The location of the stack.yaml config file, passed as STACK_YAML in
@@ -64,7 +64,7 @@ proc haskell_stack.add_dependencies {} {
 port::register_callback haskell_stack.add_dependencies
 
 options haskell_stack.stack_root
-default haskell_stack.stack_root {${workpath}/.stack}
+default haskell_stack.stack_root {${workpath}/.home/.stack}
 
 post-extract {
     xinstall -m 0755 -d "[option haskell_stack.stack_root]"
@@ -91,6 +91,19 @@ options haskell_stack.env
 default haskell_stack.env \
     {STACK_ROOT=[option haskell_stack.stack_root] \
          STACK_YAML=[option haskell_stack.yaml]}
+
+# workaround for stack/ghc issue on macOS 11
+# https://github.com/commercialhaskell/stack/issues/5456
+# https://github.com/yairchu/macos11-haskell-workaround
+# remove after this issue is resolved
+platform darwin {
+    if {${os.major} >= 20} {
+        depends_build-append \
+            port:macos11ghcwa
+        haskell_stack.env-append \
+            {DYLD_INSERT_LIBRARIES=${prefix}/lib/macos11ghcwa.dylib}
+    }
+}
 
 options haskell_stack.use_init
 default haskell_stack.use_init yes
