@@ -58,7 +58,7 @@ depends_lib-append port:xmlcatmgr
 proc xml._set_catalog {option action args} {
     global xml.catalog_list
     global xml.rootcatalog
-    if {$action != "set"} return
+    if {$action ne "set"} return
     foreach catalog [option ${option}] {
         ui_debug "add catalog ${catalog} to ${xml.rootcatalog}"
         lappend xml.catalog_list [subst {${xml.rootcatalog} ${catalog}}]
@@ -68,7 +68,7 @@ proc xml._set_catalog {option action args} {
 proc xml._set_catalog_entry {option action args} {
     global xml.catalog_list
     global xml.rootcatalog
-    if {$action != "set"} return
+    if {$action ne "set"} return
     set clist [option ${option}]
     if {[llength ${clist}] >= 2} {
         set c [lindex $clist 0]
@@ -81,7 +81,7 @@ proc xml._set_catalog_entry {option action args} {
 
 proc xml._set_entity {option action args} {
     global xml.entity_list
-    if {$action != "set"} return
+    if {$action ne "set"} return
     set entity [option ${option}]
     ui_debug "add entity ${entity}"
     lappend xml.entity_list ${entity}
@@ -89,7 +89,7 @@ proc xml._set_entity {option action args} {
 
 proc xml._set_rewrite {option action args} {
     global xml.rewrite_list
-    if {$action != "set"} return
+    if {$action ne "set"} return
     set rewrite [option ${option}]
     ui_debug "add rewrite ${rewrite}"
     lappend xml.rewrite_list ${rewrite}
@@ -194,7 +194,7 @@ proc xml._uninstall_catalogs {} {
 proc sgml._set_catalog {option action args} {
     global sgml.catalog_list
     global sgml.rootcatalog
-    if {$action != "set"} return
+    if {$action ne "set"} return
     foreach catalog [option ${option}] {
         ui_debug "add catalog ${catalog} to ${sgml.rootcatalog}"
         lappend sgml.catalog_list [subst {${sgml.rootcatalog} ${catalog}}]
@@ -204,7 +204,7 @@ proc sgml._set_catalog {option action args} {
 proc sgml._set_catalog_entry {option action args} {
     global sgml.catalog_list
     global sgml.rootcatalog
-    if {$action != "set"} return
+    if {$action ne "set"} return
     set clist [option ${option}]
     if {[llength ${clist}] >= 2} {
         set c [lindex $clist 0]

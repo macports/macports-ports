@@ -104,12 +104,12 @@ default app.identifier {[app.get_default_identifier]}
 proc app.get_default_identifier {} {
     global app.name homepage
     set identifier [split [lindex [split ${homepage} "/"] 2] .]
-    if {[lindex ${identifier} 0] == "www"} {
+    if {[lindex ${identifier} 0] eq "www"} {
         set identifier [lrange ${identifier} 1 end]
     }
     set identifier [lreverse ${identifier}]
     set identifier [concat ${identifier} [lrange [split ${homepage} "/"] 3 end]]
-    if {[lindex ${identifier} end] == ""} {
+    if {[lindex ${identifier} end] eq ""} {
         set identifier [lrange ${identifier} 0 end-1]
     }
     lappend identifier [string map {"." ""} ${app.name}]
@@ -253,10 +253,10 @@ platform macosx {
                 return -code error "app.identifier ${app.identifier} does not look like a valid CFBundleIdentifier"
             }
 
-            if {${app.icon} != ""} {
+            if {${app.icon} ne ""} {
                 # Turn relative app.icon paths into absolute ones.
                 set icon ${app.icon}
-                if {[string index ${icon} 0] != "/"} {
+                if {[string index ${icon} 0] ne "/"} {
                     set icon ${worksrcpath}/${icon}
                 }
 
@@ -266,11 +266,11 @@ platform macosx {
                 }
 
                 # If app.icon is an .icns file, copy it.
-                if {[file extension ${icon}] == ".icns"} {
+                if {[file extension ${icon}] eq ".icns"} {
                     xinstall -m 0644 ${icon} ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns
 
                 # If app.icon is svg, rasterize and convert it.
-                } elseif {[file extension ${icon}] == ".svg"} {
+                } elseif {[file extension ${icon}] eq ".svg"} {
                     set makeicnsargs {}
                     foreach w {16 32 128 256 512} {
                         lappend makeicnsargs -$w ${worksrcpath}/${w}.png
@@ -293,7 +293,7 @@ platform macosx {
 
             # Turn relative app.executable paths into absolute ones.
             set executable ${app.executable}
-            if {[string index ${executable} 0] != "/"} {
+            if {[string index ${executable} 0] ne "/"} {
                 set executable ${prefix}/bin/${executable}
             }
 
@@ -337,7 +337,7 @@ platform macosx {
     <string>English</string>
     <key>CFBundleExecutable</key>
     <string>${app.name}</string>"
-            if {${app.icon} != ""} {
+            if {${app.icon} ne ""} {
                 puts ${fp} "    <key>CFBundleIconFile</key>
     <string>${app.name}.icns</string>"
             }
@@ -349,23 +349,23 @@ platform macosx {
                 puts ${fp} "    <key>NSRequiresAquaSystemAppearance</key>
     <true/>"
             }
-            if {${app.privacy_microphone} != ""} {
+            if {${app.privacy_microphone} ne ""} {
                 puts ${fp} "    <key>NSMicrophoneUsageDescription</key>
     <string>${app.privacy_microphone}</string>"
             }
-            if {${app.privacy_camera} != ""} {
+            if {${app.privacy_camera} ne ""} {
                 puts ${fp} "    <key>NSCameraUsageDescription</key>
     <string>${app.privacy_camera}</string>"
             }
-            if {${app.privacy_contacts} != ""} {
+            if {${app.privacy_contacts} ne ""} {
                 puts ${fp} "    <key>NSContactsUsageDescription</key>
     <string>${app.privacy_contacts}</string>"
             }
-            if {${app.privacy_calendars} != ""} {
+            if {${app.privacy_calendars} ne ""} {
                 puts ${fp} "    <key>NSCalendarsUsageDescription</key>
     <string>${app.privacy_calendars}</string>"
             }
-            if {${app.privacy_photo} != ""} {
+            if {${app.privacy_photo} ne ""} {
                 puts ${fp} "    <key>NSPhotoLibraryUsageDescription</key>
     <string>${app.privacy_photo}</string>"
             }
@@ -406,12 +406,12 @@ trace variable app.icon w app._icon_trace
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build
     upvar ${optionName} option
-    set needs_dep [expr {[file extension ${option}] != ".icns"}]
+    set needs_dep [expr {[file extension ${option}] ne ".icns"}]
     if {${needs_dep}} {
         depends_build-delete port:makeicns
         depends_build-append port:makeicns
     }
-    set needs_dep [expr {[file extension ${option}] == ".svg"}]
+    set needs_dep [expr {[file extension ${option}] eq ".svg"}]
     if {${needs_dep}} {
         depends_build-delete port:librsvg
         depends_build-append port:librsvg

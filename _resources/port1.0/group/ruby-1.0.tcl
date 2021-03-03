@@ -53,7 +53,7 @@ options ruby.api_version ruby.lib ruby.archlib
 options ruby.version
 option_proc ruby.branch ruby_set_branch
 proc ruby_set_branch {option action args} {
-    if {$action != "set"} {
+    if {$action ne "set"} {
         return
     }
     global prefix ruby.branch \
@@ -459,7 +459,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     }
 
-    if {$type != "gnu"} {
+    if {$type ne "gnu"} {
         configure.universal_args-delete  --disable-dependency-tracking
     }
 

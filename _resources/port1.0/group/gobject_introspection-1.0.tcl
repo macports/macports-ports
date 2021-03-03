@@ -75,7 +75,7 @@ pre-build {
 
         # see https://trac.macports.org/ticket/59078
         # -isysroot cannot be empty (see _osx_support.py in python installation)
-        if {${configure.sdkroot} != ""} {
+        if {${configure.sdkroot} ne ""} {
             set sdk_root "${configure.sdkroot}"
         } else {
             set sdk_root "/"

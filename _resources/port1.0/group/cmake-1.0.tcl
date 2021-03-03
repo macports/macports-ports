@@ -140,7 +140,7 @@ platform darwin {
 
         configure.args-append -DCMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}"
 
-        if {${configure.sdkroot} != ""} {
+        if {${configure.sdkroot} ne ""} {
             configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
         } else {
             configure.args-append -DCMAKE_OSX_SYSROOT="/"
