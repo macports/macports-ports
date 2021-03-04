@@ -142,7 +142,7 @@ proc apxsInstall { moduleName activate dylibs } {
 
     close ${loadFile}
 
-    if { ${activate} == "yes" } {
+    if {${activate}} {
         exec "${apache2.sbindir}/a2enmod" ${moduleName}
     }
 }

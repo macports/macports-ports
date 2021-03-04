@@ -70,7 +70,7 @@ proc gpg_verify.verify_gpg_signature {pubkey_file signature_file test_file} {
             --verify [gpg_verify.shellescape ${signature_file}] \
             [gpg_verify.shellescape ${test_file}] 2>/dev/null; \
             then echo 'VERIFIED'; else echo 'UNVERIFIED'; fi"]
-    if {[string trim ${gpg_verification}] != "VERIFIED"} {
+    if {[string trim ${gpg_verification}] ne "VERIFIED"} {
         error "GPG signature verification failed on ${test_file} with pubkey file ${pubkey_file}."
     }
 }

@@ -82,7 +82,7 @@ pre-configure {
         if {[variant_exists universal] && [variant_isset universal]} {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
         } else {
-            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${build_arch}"
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.build_arch}"
         }
     } else {
         #

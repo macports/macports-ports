@@ -20,7 +20,7 @@ proc conflicts_build._check_for_conflicting_ports {} {
     global conflicts_build subport
     foreach badport ${conflicts_build} {
         if {![catch "registry_active ${badport}"]} {
-            if {${subport} == ${badport}} {
+            if {${subport} eq ${badport}} {
                 ui_error "${subport} cannot be built while another version of ${badport} is active."
                 ui_error "Please forcibly deactivate the existing copy of ${badport}, e.g. by running:"
                 ui_error ""

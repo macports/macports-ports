@@ -129,7 +129,7 @@ platforms               darwin freebsd linux
 supported_archs         i386 x86_64
 set goos                ${os.platform}
 
-switch ${build_arch} {
+switch ${configure.build_arch} {
     i386    { set goarch 386 }
     x86_64  { set goarch amd64 }
     default { set goarch {} }

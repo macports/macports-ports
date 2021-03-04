@@ -122,12 +122,12 @@ pre-configure {
         }
 
     } else {
-        configure.env-append OCTAVE_ARCH=${build_arch}
+        configure.env-append OCTAVE_ARCH=${configure.build_arch}
         configure.args \
             "'try; pkg build -verbose -nodeps ${workpath}/tmp-build ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
 
         # fortran arch flag is not set automatically
-        if {${build_arch} eq "x86_64" || ${build_arch} eq "ppc64"} {
+        if {${configure.build_arch} eq "x86_64" || ${configure.build_arch} eq "ppc64"} {
             configure.fflags-append -m64
         } else {
             configure.fflags-append -m32
@@ -187,7 +187,7 @@ pre-destroot {
         set octave_install_lib   ${destroot}${prefix}/lib/octave/packages
         set octave_tgz_file ${workpath}/tmp-build/[exec /bin/ls ${workpath}/tmp-build]
 
-        destroot.env-append OCTAVE_ARCH=${build_arch}
+        destroot.env-append OCTAVE_ARCH=${configure.build_arch}
 
         destroot.args \
             "'try; pkg prefix ${octave_install_share} ${octave_install_lib}; pkg install -verbose -nodeps -local ${octave_tgz_file}; catch; disp(lasterror.message); exit(1); end_try_catch;'"

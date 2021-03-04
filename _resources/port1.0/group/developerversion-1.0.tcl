@@ -20,7 +20,7 @@ platform macosx {
     pre-extract {
         foreach {darwin_major minimum_developerversion} [join ${minimum_developerversions}] {
             if {${darwin_major} == ${os.major}} {
-                if {![info exists developerversion] || $developerversion == "none" || $developerversion == ""} {
+                if {![info exists developerversion] || $developerversion eq "none" || $developerversion eq ""} {
                     ui_error "Couldn't determine your Developer Tools version."
                     ui_error ""
                     ui_error "On macOS ${macosx_version}, ${name} @${version} requires Developer Tools ${developerversion} or later but you have none installed."

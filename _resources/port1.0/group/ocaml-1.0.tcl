@@ -40,7 +40,7 @@ post-extract {
 # if this is an oasis/setup.ml based installation
 proc use_oasis {option} {
     depends_build-append port:ocaml-findlib
-    if {${option} == "yes"} {
+    if {${option}} {
         global ocaml prefix ocamlfind_wrapper
         global configure.cmd configure.pre_args
         configure.cmd ${ocaml}
@@ -56,7 +56,7 @@ proc use_oasis {option} {
 }
 
 proc use_oasis_doc {option} {
-    if {${option} == "yes"} {
+    if {${option}} {
         global ocaml worksrcpath
         post-build {
             system -W ${worksrcpath} "${ocaml} setup.ml -doc"

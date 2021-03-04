@@ -220,12 +220,12 @@ proc cargo.translate_arch_name {arch} {
 }
 
 proc cargo.rust_platform {{arch ""}} {
-    global os.platform build_arch muniversal.current_arch
+    global os.platform configure.build_arch muniversal.current_arch
     if {${arch} eq ""} {
         if {[info exists muniversal.current_arch]} {
             set arch ${muniversal.current_arch}
         } else {
-            set arch ${build_arch}
+            set arch ${configure.build_arch}
         }
     }
     return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
@@ -243,7 +243,7 @@ foreach stage {configure build destroot} {
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
-    global configure.cc configure.cxx subport build_arch configure.universal_archs merger_configure_env merger_build_env merger_destroot_env worksrcpath
+    global configure.cc configure.cxx subport configure.build_arch configure.universal_archs merger_configure_env merger_build_env merger_destroot_env worksrcpath
     foreach stage {build destroot} {
         ${stage}.env-delete CC=${configure.cc} \
                             CXX=${configure.cxx}
@@ -262,9 +262,9 @@ proc cargo.environments {} {
         if {![variant_exists universal] || ![variant_isset universal]} {
             foreach stage {configure build destroot} {
                 ${stage}.env-delete \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
+                    CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}]
                 ${stage}.env-append \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${build_arch}]
+                    CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}]
             }
         } else {
             foreach stage {configure build destroot} {

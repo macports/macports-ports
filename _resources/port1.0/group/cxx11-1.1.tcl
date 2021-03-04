@@ -46,7 +46,7 @@ if {${configure.cxx_stdlib} eq "libstdc++"} {
     # do not force all Portfiles to switch from depends_lib to depends_lib-append
     port::register_callback cxx11.add_dependencies
 
-    if {(${os.platform} eq "darwin" && ${os.major} < 10) || ${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+    if {(${os.platform} eq "darwin" && ${os.major} < 10) || ${configure.build_arch} eq "ppc" || ${configure.build_arch} eq "ppc64"} {
         # ports will build with gcc6, gcc4ABI-compatible
         pre-configure {
             ui_msg "C++11 ports are compiling with GCC. EXPERIMENTAL."

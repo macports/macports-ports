@@ -24,7 +24,7 @@ pre-configure {
     }
     foreach file ${archcheck.files} {
         # Prepend prefix if necessary.
-        if {"/" != [string index ${file} 0]} {
+        if {"/" ne [string index ${file} 0]} {
             set file [file join ${prefix} ${file}]
         }
 
@@ -67,7 +67,7 @@ pre-configure {
                 # Dependency is not universal?
                 if {1 == [llength ${file_archs}]} {
                     # Trying to install this port either universal or for non-default arch?
-                    if {([variant_exists universal] && [variant_isset universal]) || (${build_arch} != ${configure.build_arch})} {
+                    if {([variant_exists universal] && [variant_isset universal]) || (${build_arch} ne ${configure.build_arch})} {
                         ui_error ""
                         ui_error "Try rebuilding ${dependency} (and all its dependencies) with"
                         ui_error "the +universal variant by running"
@@ -76,7 +76,7 @@ pre-configure {
                         ui_error ""
                     # Dependency's arch is not the default arch? User has likely upgraded
                     # from Leopard to Snow Leopard and has not reinstalled all ports.
-                    } elseif {${file_archs} != ${build_arch}} {
+                    } elseif {${file_archs} ne ${build_arch}} {
                         ui_error ""
                         ui_error "Did you upgrade to a new version of macOS? If so, please see"
                         ui_error ""
