@@ -302,18 +302,20 @@ proc mpi.setup {args} {
         }
         # gcc 9+ only available on OS X 10.7 (Darwin11) and newer
         if {${os.major} <= 10} {
-            lappend disabled -gcc9
+            lappend disabled -gcc9 -gcc10
+        }
+        if {${os.major} <= 10 || !$is_mpich} {
+            lappend disabled -gccdevel
         }
 
         # this should probably be changed in mpich but we have to match it
         if {${os.major} <= 12 && $is_mpich} {
-            lappend disabled -clang60 -clang70 -clang80 -clang90
+            lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10
         }
-        #if {$is_mpich} {
-        #    lappend disabled -clang10
-        #}
-        # not yet supported by any mpi port
-        lappend disabled -clang11 -gccdevel
+
+        if {$is_mpich} {
+            lappend disabled -clang11
+        }
     }
 
     compilers.setup {*}$cl {*}$disabled

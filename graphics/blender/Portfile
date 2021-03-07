@@ -6,7 +6,7 @@ PortGroup           xcodeversion 1.0
 PortGroup           active_variants 1.1
 
 name                blender
-version             2.83.5
+version             2.90.0
 categories          graphics multimedia
 platforms           darwin
 license             GPL-2+
@@ -26,9 +26,9 @@ long_description    Blender is a ${description}. It contains a set of \
 
 master_sites        https://download.blender.org/source/
 use_xz              yes
-checksums           rmd160  52957a68afd8e8c019fc0c1499ec2cb26bfd0b79 \
-                    sha256  835ca58f4ff12f21f43ea77ddbabd80cba320952fb2cb39a83a928003ce5ca77 \
-                    size    38551588
+checksums           rmd160  747c96c2453d8203c7df6d80ef246e4834d43984 \
+                    sha256  04f19e7984ad8d9f0432f873db89664eb710e75ac4d4c2b1a404e2ecdadb1323 \
+                    size    38831704
 
 minimum_xcodeversions-append {15 8.2 16 8.2}
 if {${os.platform} eq "darwin" && ${os.major} < 15} {
@@ -85,6 +85,7 @@ depends_lib-append  port:python${py_ver_nodot} \
                     port:tbb \
                     port:libomp \
                     port:glew \
+                    port:eigen3 \
                     port:lzo2 \
                     port:gflags
 
@@ -101,13 +102,19 @@ patchfiles          patch-macports-libs-creator.diff \
                     patch-unix-or-apple.diff
 
 post-patch {
-    # Don't really know why Blender does things this way, but if
-    # these directories don't exist ahead of time, MacPorts'
-    # configure phase will fail.
-    xinstall -d ${workpath}/lib/tests/render/shader
-    xinstall -d ${workpath}/build/bin
-    copy ${worksrcpath}/release/darwin/Blender.app \
-         ${workpath}/build/bin/
+    set platform_apple.cmake \
+        ${worksrcpath}/build_files/cmake/platform/platform_apple.cmake
+    set platform_apple_xcode.cmake \
+        ${worksrcpath}/build_files/cmake/platform/platform_apple_xcode.cmake
+
+    if {${os.platform} eq "darwin" && ${os.major} < 17} {
+        reinplace -E {s/(MACOSX_DEPLOYMENT_TARGET) 10.13/\1 10.11/} \
+            ${platform_apple.cmake}
+        reinplace {/VERSION_LESS 10.0/,/FATAL_ERROR/s/10.0/8.2/g} \
+            ${platform_apple_xcode.cmake}
+        reinplace -E {s/(OSX_MIN_DEPLOYMENT_TARGET) 10.13/\1 10.11/} \
+            ${platform_apple_xcode.cmake}
+    }
 
     # Make it so that Blender is able to build Ceres Solver using the
     # MacPorts eigen3 library.
@@ -122,16 +129,11 @@ post-patch {
     # add_definitions() in the file 'extern/ceres/CMakeLists.txt', it's
     # possible that Blender's own libmv library requires a Ceres Solver
     # that has been compiled using a very specific set of options.
-# The eigen3 port was recently updated to version 3.3.8, which is
-# incompatible with the version of Ceres Solver that is included with
-# Blender 2.83. Temporarily disable using the eigen3 port until the
-# Blender port catches up to using a compatible combination of Ceres
-# Solver and eigen3.
-#   fs-traverse f ${worksrcpath}/extern/ceres {
-#       if {[file isfile $f]} {
-#           reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
-#       }
-#   }
+    fs-traverse f ${worksrcpath}/extern/ceres {
+        if {[file isfile $f]} {
+            reinplace -q -E {s|(#include )"(Eigen/.*)"|\1<\2>|} $f
+        }
+    }
 
     # Use dynamic linking instead of static linking
     foreach f [list \
@@ -148,12 +150,13 @@ post-patch {
         ${worksrcpath}/extern/sdlew/src/sdlew.c
     reinplace -E {s|(include )"(SDL.h)"|\1<SDL2/\2>|} \
         ${worksrcpath}/source/blender/python/intern/bpy_app_sdl.c
-    reinplace -E {s|(include )"(openjpeg.h)"|\1<openjpeg-2.3/\2>|} \
+    reinplace -E {s|(include )"(openjpeg.h)"|\1<openjpeg-2.4/\2>|} \
         ${worksrcpath}/source/blender/imbuf/intern/jp2.c
 
     # Make it so that CMake is able to find the MacPorts USD library
     if {![catch {set result [active_variants usd monolithic]}] && \
-        !$result} {
+        !$result} \
+    {
         # When Blender is configured to build USD as an internal
         # dependency, Blender sets USD's compile options so that it
         # builds as a single monolithic library. However, the default
@@ -171,15 +174,16 @@ list(APPEND USD_LIBRARIES\\
 " \
             ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
     }
-    foreach f [list \
-        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt \
-        ${worksrcpath}/tests/gtests/usd/CMakeLists.txt \
-    ] {
-        reinplace {/add_definitions.*DPXR_STATIC/s/^/#/g} $f
-    }
+    reinplace {/add_definitions.*DPXR_STATIC/s/^/#/g} \
+        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
+    reinplace "/BOOST_INCLUDE_DIR/a\\
+\\  \\$\\{PYTHON_INCLUDE_DIRS\\}\\
+" \
+        ${worksrcpath}/source/blender/io/usd/CMakeLists.txt
 
     if {![catch {set result [active_variants embree static]}] && \
-        !$result} {
+        !$result} \
+    {
         # Remove these items from the list of Embree components that
         # Blender's FindEmbree.cmake script will try to find. The
         # default variant of the MacPorts Embree port does not generate
@@ -199,21 +203,15 @@ list(APPEND USD_LIBRARIES\\
     # We already patch 'llvm-config' to be 'llvm-config-mp' using our
     # patchfiles. Here we are just adding a version number on the end.
     foreach re [list \
+        "s|@@py_ver@@|$py_ver|" \
+        "s|@@py_ver_nodot@@|$py_ver_nodot|" \
         "s|\(llvm-config-mp\)|\\1-$llvm_version|g" \
-        "s|\(-lLLVM-\).*\"|\\1$llvm_version\"|" \
+        {s|(-lLLVM)-.*\"|\1\"|} \
     ] {
-        reinplace -E $re \
-            ${worksrcpath}/build_files/cmake/platform/platform_apple.cmake
+        reinplace -E $re ${platform_apple.cmake}
     }
-
-    set platform_apple_xcode.cmake \
-        ${worksrcpath}/build_files/cmake/platform/platform_apple_xcode.cmake
-
-    # Prevent Blender's CMake scripts from attempting to find the Xcode
-    # version number using the xcodebuild command, since we are passing
-    # the Xcode version number to CMake using XCODE_VERSION below.
-    reinplace {/unix makefile/,/unset.XCODE_VERS_BUILD_NR/s/^/#/g} \
-        ${platform_apple_xcode.cmake}
+    reinplace "s/@@llvm_version@@/$llvm_version/g" \
+        ${worksrcpath}/source/creator/CMakeLists.txt
 
     # Prevent Blender's CMake scripts from attempting to set the
     # MACOSX_DEPLOYMENT_TARGET. MacPorts base already sets this.
@@ -246,7 +244,7 @@ list(APPEND USD_LIBRARIES\\
         # version in Xcode.app. Using one set of tools or the other for
         # the entirety of a build is fine, but trying to use pieces from
         # both will virtually guarantee a build to fail.
-        reinplace {/set.CMAKE_OSX_SYSROOT.*OSX_SYSROOT_PREFIX/s/^/#/} \
+        reinplace {/set.CMAKE_OSX_SYSROOT /s/^/#/} \
             ${platform_apple_xcode.cmake}
     }
 }
@@ -291,13 +289,22 @@ configure.args-append   -DWITH_SDL_DYNLOAD=ON
 
 # Tell Blender to use these "system" (in our case, MacPorts) libraries
 configure.args-append   -DWITH_SYSTEM_GLEW=ON \
+                        -DWITH_SYSTEM_EIGEN3=ON \
                         -DWITH_SYSTEM_LZO=ON \
                         -DWITH_SYSTEM_GFLAGS=ON
-# Temporarily disable using MacPorts eigen3 port
-#                       -DWITH_SYSTEM_EIGEN3=ON
 
-# Build Cycles with Embree support
-configure.args-append   -DWITH_CYCLES_EMBREE=ON
+# TODO: There's currently a linking error when building Cycles with
+# OSL support, so we need to disable it until a fix can be found
+# XXX
+if {${os.platform} eq "darwin" && ${os.major} < 17} {
+    configure.args-append   -DWITH_CYCLES_OSL=OFF
+}
+
+# By default, Blender prefers static llvm build on Apple, but they state
+# that dynamic builds are also possible
+configure.args-append   -DLLVM_STATIC=OFF
+configure.ldflags-append -L${prefix}/libexec/llvm-${llvm_version}/lib
+cmake.install_rpath-append ${prefix}/libexec/llvm-${llvm_version}/lib
 
 post-destroot {
     # Make sure that an addons_contrib folder makes it into the final
