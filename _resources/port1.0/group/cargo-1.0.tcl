@@ -24,6 +24,10 @@ build.target
 build.pre_args      --release --frozen -v -j${build.jobs}
 build.args
 
+if {${configure.build_arch} eq "arm64" && ${os.platform} eq "darwin"} {
+    build.pre_args-append   --target="aarch64-apple-darwin"
+}
+
 destroot {
     ui_error "No destroot phase in the Portfile!"
     ui_msg "Here is an example destroot phase:"
