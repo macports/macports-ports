@@ -214,6 +214,8 @@ post-extract {
 proc cargo.translate_arch_name {arch} {
     if {${arch} eq "i386"} {
         return "i686"
+    } elseif {${arch} eq "arm64"} {
+        return "aarch64"
     } else {
         return ${arch}
     }
