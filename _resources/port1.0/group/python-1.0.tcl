@@ -56,7 +56,8 @@ default python.rootname {[regsub ^py- [option name] ""]}
 default master_sites    {pypi:[string index ${python.rootname} 0]/${python.rootname}}
 default distname        {${python.rootname}-${version}}
 
-options python.versions python.version python.default_version
+options python.versions python.version python.default_version \
+        python.obsolete_versions
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
 default python.version         {[python_get_version]}
@@ -91,6 +92,23 @@ proc python_set_env_compilers {phase} {
     foreach tag [option compwrap.compilers_to_wrap] {
         if {[option configure.${tag}] ne ""} {
             ${phase}.env-append [string toupper $tag]=[compwrap::wrap_compiler ${tag}]
+        }
+    }
+}
+
+option_proc python.obsolete_versions python_set_obsolete
+proc python_set_obsolete {option action args} {
+    if {$action ne "set"} {
+        return
+    }
+    global name subport python.rootname
+    if {[string match py-* $name]} {
+        foreach v [option $option] {
+            subport py${v}-${python.rootname} {
+                global python.default_version
+                replaced_by py${python.default_version}-${python.rootname}
+                PortGroup obsolete 1.0
+            }
         }
     }
 }
