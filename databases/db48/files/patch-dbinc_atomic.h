@@ -45,7 +45,7 @@ diff --git mp/mp_fget.c mp/mp_fget.c
 index 16de695..d0dcc29 100644
 --- mp/mp_fget.c
 +++ mp/mp_fget.c
-@@ -649,7 +649,7 @@ alloc:		/* Allocate a new buffer header and data space. */
+@@ -617,7 +617,7 @@
  
  		/* Initialize enough so we can call __memp_bhfree. */
  		alloc_bhp->flags = 0;
@@ -53,9 +53,9 @@ index 16de695..d0dcc29 100644
 +		atomic_init_db(&alloc_bhp->ref, 1);
  #ifdef DIAGNOSTIC
  		if ((uintptr_t)alloc_bhp->buf & (sizeof(size_t) - 1)) {
- 			__db_errx(env, DB_STR("3025",
-@@ -955,7 +955,7 @@ alloc:		/* Allocate a new buffer header and data space. */
- 			MVCC_MPROTECT(bhp->buf, mfp->pagesize,
+ 			__db_errx(env,
+@@ -911,7 +911,7 @@
+ 			MVCC_MPROTECT(bhp->buf, mfp->stat.st_pagesize,
  			    PROT_READ);
  
 -		atomic_init(&alloc_bhp->ref, 1);
@@ -89,7 +89,7 @@ diff --git mp/mp_region.c mp/mp_region.c
 index 4952030..47645f8 100644
 --- mp/mp_region.c
 +++ mp/mp_region.c
-@@ -245,7 +245,7 @@ __memp_init(env, dbmp, reginfo_off, htab_buckets, max_nreg)
+@@ -224,7 +224,7 @@
  			     MTX_MPOOL_FILE_BUCKET, 0, &htab[i].mtx_hash)) != 0)
  				return (ret);
  			SH_TAILQ_INIT(&htab[i].hash_bucket);
@@ -98,9 +98,9 @@ index 4952030..47645f8 100644
  		}
  
  		/*
-@@ -302,7 +302,7 @@ no_prealloc:
- 		} else
- 			hp->mtx_hash = mtx_base + (i % dbenv->mp_mtxcount);
+@@ -269,7 +269,7 @@
+ 		hp->mtx_hash = (mtx_base == MUTEX_INVALID) ? MUTEX_INVALID :
+ 		    mtx_base + i;
  		SH_TAILQ_INIT(&hp->hash_bucket);
 -		atomic_init(&hp->hash_page_dirty, 0);
 +		atomic_init_db(&hp->hash_page_dirty, 0);
@@ -111,7 +111,7 @@ diff --git mutex/mut_method.c mutex/mut_method.c
 index 09353b0..177353c 100644
 --- mutex/mut_method.c
 +++ mutex/mut_method.c
-@@ -474,7 +474,7 @@ atomic_compare_exchange(env, v, oldval, newval)
+@@ -426,7 +426,7 @@
  	MUTEX_LOCK(env, mtx);
  	ret = atomic_read(v) == oldval;
  	if (ret)
@@ -124,7 +124,7 @@ diff --git mutex/mut_tas.c mutex/mut_tas.c
 index 106b161..fc4de9d 100644
 --- mutex/mut_tas.c
 +++ mutex/mut_tas.c
-@@ -47,7 +47,7 @@ __db_tas_mutex_init(env, mutex, flags)
+@@ -46,7 +46,7 @@
  
  #ifdef HAVE_SHARED_LATCHES
  	if (F_ISSET(mutexp, DB_MUTEX_SHARED))
@@ -133,7 +133,7 @@ index 106b161..fc4de9d 100644
  	else
  #endif
  	if (MUTEX_INIT(&mutexp->tas)) {
-@@ -536,7 +536,7 @@ __db_tas_mutex_unlock(env, mutex)
+@@ -486,7 +486,7 @@
  			F_CLR(mutexp, DB_MUTEX_LOCKED);
  			/* Flush flag update before zeroing count */
  			MEMBAR_EXIT();
