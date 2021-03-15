@@ -222,7 +222,7 @@ proc mpi_variant_isset {} {
 
 proc mpi.setup {args} {
     global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants \
-        name os.major
+        name os.major os.arch
 
     set add_list {}
     set remove_list ${mpi.variants}
@@ -311,6 +311,11 @@ proc mpi.setup {args} {
         # this should probably be changed in mpich but we have to match it
         if {${os.major} <= 12 && $is_mpich} {
             lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10 -clang11
+        }
+        # Disable compilers not support on arm
+        if {${os.arch} eq "arm" || !$is_mpich} {
+            lappend disabled -gcc5 -gcc6 -gcc7 -gcc8 -gcc9 -gcc10
+            lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10
         }
     }
 
