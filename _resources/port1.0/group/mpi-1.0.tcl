@@ -310,11 +310,7 @@ proc mpi.setup {args} {
 
         # this should probably be changed in mpich but we have to match it
         if {${os.major} <= 12 && $is_mpich} {
-            lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10
-        }
-
-        if {$is_mpich} {
-            lappend disabled -clang11
+            lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10 -clang11
         }
     }
 
