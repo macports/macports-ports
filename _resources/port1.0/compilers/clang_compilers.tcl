@@ -7,25 +7,34 @@
 # clang 11  and older build on 10.6+  (darwin 10)
 # clang 7.0 and older build on 10.5+  (darwin 9)
 # clang 3.4 and older build on 10.4+  (darwin 8)
+# Clang 11 and newer only on Apple Silicon
 
-if {${os.major} >= 10} {
+global os.major os.arch
+
+#if { $${os.major} >= 10 } {
     # TODO: evaluate compatibility of clang-{10,11} as defaults instead of 9.0
     #lappend compilers macports-clang-11
+#}
+
+if { ${os.arch} ne "arm" && ${os.major} >= 10 } {
+    # TODO: evaluate compatibility of clang-{10,11} as defaults instead of 9.0
     #lappend compilers macports-clang-10
     lappend compilers macports-clang-9.0 \
                       macports-clang-8.0
 }
 
-if {${os.major} >= 9} {
+if { ${os.arch} ne "arm" && ${os.major} >= 9 } {
     lappend compilers macports-clang-7.0 \
                       macports-clang-6.0 \
                       macports-clang-5.0
 }
 
 # Add 10 and 11 as defaults *after* 9.0 - 5.0
-if {${os.major} >= 10} {
-    lappend compilers macports-clang-11 \
-                      macports-clang-10
+if { ${os.major} >= 10} {
+    lappend compilers macports-clang-11 
+    if { ${os.arch} ne "arm" } {
+        lappend compilers macports-clang-10
+    }
 }
 
 if {${os.major} < 16} {
