@@ -12,7 +12,9 @@ if { ${os.arch} ne "arm" } {
     if { ${os.major} >= 10 } {
         lappend compilers macports-gcc-8
     }
-    lappend compilers macports-gcc-7 macports-gcc-6 macports-gcc-5
+    if { ${os.major} < 20 } {
+        lappend compilers macports-gcc-7 macports-gcc-6 macports-gcc-5
+    }
 }
 
 lappend compilers macports-gcc-devel
