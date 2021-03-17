@@ -151,7 +151,12 @@ build {}
 pre-destroot {
     set octave_api_version [exec "${prefix}/bin/octave-config" -p API_VERSION]
 
-    destroot.cmd ${configure.cmd}
+    if { ${supported_archs} eq "noarch" } {
+        destroot.cmd ${prefix}/bin/octave-cli
+    } else {
+        destroot.cmd /usr/bin/arch -arch \$OCTAVE_ARCH ${prefix}/bin/octave-cli
+    }
+
     destroot.pre_args -q -f -H --eval
 
     if { ${os.arch} eq "i386" } {
