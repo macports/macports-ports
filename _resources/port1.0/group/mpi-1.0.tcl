@@ -267,7 +267,12 @@ proc mpi.setup {args} {
                         [info exists cdb($v,variant)]} {
                         set cl [add_from_list $cl $variant]
                     } else {
-                        return -code error "no such mpi package: $v"
+                        # If removing an already not available compiler just warn, otherwise hard error
+                        if { ${mode} eq "add" } {
+                            return -code error "MPI package ${v} not available for Darwin${os.major} ${os.arch}"
+                        } else {
+                            ui_warn "MPI package ${v} not available for Darwin${os.major} ${os.arch}"
+                        }
                     }
                 } else {
                     set ${mode}_list [${mode}_from_list [set ${mode}_list] $mpidb($v,variant)]
