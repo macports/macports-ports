@@ -586,7 +586,8 @@ proc compilers.action_enforce_some_f {ports} {
 proc compilers.setup {args} {
     global cdb compilers.variants compilers.clang_variants compilers.gcc_variants \
         compilers.my_fortran_variants compilers.require_fortran compilers.default_fortran \
-        compilers.setup_done compilers.list compilers.gcc_default compiler.blacklist
+        compilers.setup_done compilers.list compilers.gcc_default compiler.blacklist \
+        os.major os.arch
 
     if {!${compilers.setup_done}} {
         set add_list {}
@@ -639,9 +640,15 @@ proc compilers.setup {args} {
                 }
                 default {
                     if {[info exists cdb($v,variant)] == 0} {
-                        return -code error "no such compiler: $v"
+                        # If removing an already not available compiler just warn, otherwise hard error
+                        if { ${mode} eq "add" } {
+                            return -code error "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
+                        } else {
+                            ui_warn "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
+                        }
+                    } else {
+                        set ${mode}_list [${mode}_from_list [set ${mode}_list] $cdb($v,variant)]
                     }
-                    set ${mode}_list [${mode}_from_list [set ${mode}_list] $cdb($v,variant)]
                 }
             }
         }
