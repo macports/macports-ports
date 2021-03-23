@@ -26,13 +26,16 @@ options bazel.version
 default bazel.version "latest"
 
 options bazel.max_idle_secs
-default bazel.max_idle_secs 60
+default bazel.max_idle_secs 30
 
 options bazel.max_cpu_fraction
 default bazel.max_cpu_fraction 0.75
 
 options bazel.max_ram_fraction
-default bazel.max_ram_fraction 0.5
+default bazel.max_ram_fraction 0.75
+
+options bazel.limit_build_jobs
+default bazel.limit_build_jobs yes
 
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
@@ -112,17 +115,18 @@ configure.cmd ./configure
 pre-configure {
     # enforce correct build settings
     # note final / is because ${worksrcpath} is a sym-link
-    foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
+    foreach f [ exec find ${worksrcpath}/ -name ".bazelrc" -or -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
         foreach cmd {ar nm strip libtool ld objdump} {
-            reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
+            reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g"    ${f}
         }
-        reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"   ${f}
-        reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
-        reinplace -q "s| clang | ${configure.cc} |g"            ${f}
-        reinplace -q "s|/usr/local/include|${prefix}/include|g" ${f}
-        reinplace -q "s|std=c++0x|std=c++11|g"                  ${f}
-        reinplace -q "s|std=c++1y|std=c++14|g"                  ${f}
-        reinplace -q "s|std=c++1z|std=c++17|g"                  ${f}
+        reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"          ${f}
+        reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"               ${f}
+        reinplace -q "s| clang | ${configure.cc} |g"                   ${f}
+        reinplace -q "s|/usr/local/include|${prefix}/include|g"        ${f}
+        reinplace -q "s|std=c++0x|std=c++11|g"                         ${f}
+        reinplace -q "s|std=c++1y|std=c++14|g"                         ${f}
+        reinplace -q "s|std=c++1z|std=c++17|g"                         ${f}
+        reinplace -q "s|define=PREFIX=/usr|define=PREFIX=${prefix}|g"  ${f}
     }
     # If not native build, make sure not used...
     if {![variant_isset native]} {
@@ -147,12 +151,6 @@ pre-build {
     }
 }
 
-# Limit the number of parallel jobs to the number of physical, not logical, cpus.
-# First current setting to ensure we would be reducing the current setting.
-set physicalcpus [sysctl hw.physicalcpu]
-if { ${build.jobs} > ${physicalcpus} } {
-    build.jobs ${physicalcpus}
-}
 # Bazel handles parallel builds its own way..
 use_parallel_build no
 
@@ -174,9 +172,23 @@ proc bazel::get_cmd {} {
 proc bazel::get_opts {} {
     global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
     # Bazel build options
-    set bazel_build_opts "-s -c opt --verbose_failures --config=opt"
+    set bazel_build_opts "-s -c opt --verbose_failures --config=opt --nouse_action_cache"
     # Limit bazel resource utilisation
-    set bazel_build_opts "${bazel_build_opts} --nouse_action_cache --jobs ${build.jobs} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction] --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
+    if { [option bazel.limit_build_jobs] } {
+        # Limit the number of parallel jobs to the number of physical, not logical, cpus.
+        # First current setting to ensure we would be reducing the current setting.
+        set physicalcpus [sysctl hw.physicalcpu]
+        if { ${build.jobs} > ${physicalcpus} } {
+            build.jobs ${physicalcpus}
+        }
+        set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs}"
+    }
+    if { [option bazel.max_ram_fraction] > 0 } {
+        set bazel_build_opts "${bazel_build_opts} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction]"
+    }
+    if { [option bazel.max_cpu_fraction] > 0 } {
+        set bazel_build_opts "${bazel_build_opts} --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
+    }
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # hack to try and transfer MP c, c++ and ld options to bazel...
