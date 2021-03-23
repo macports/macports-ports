@@ -176,7 +176,7 @@ proc bazel::get_opts {} {
     # Bazel build options
     set bazel_build_opts "-s -c opt --verbose_failures --config=opt"
     # Limit bazel resource utilisation
-    set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction] --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
+    set bazel_build_opts "${bazel_build_opts} --nouse_action_cache --jobs ${build.jobs} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction] --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # hack to try and transfer MP c, c++ and ld options to bazel...
