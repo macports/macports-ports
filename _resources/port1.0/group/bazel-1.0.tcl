@@ -95,6 +95,7 @@ if {![variant_isset native]} {
     set base_march [bazel::get_base_arch]
     configure.env-append CC_OPT_FLAGS=${base_march}
     build.env-append     CC_OPT_FLAGS=${base_march}
+    destroot.env-append  CC_OPT_FLAGS=${base_march}
     notes "This version is built based on a base architecture for convenience,
            which may not be optimized for your system. To build a version
            customized for your machine, use the +native variant"
@@ -105,6 +106,7 @@ proc bazel::set_env {} {
     if { [bazel::use_mp_clang] } {
         configure.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
         build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+        destroot.env-append  BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
     }
 }
 port::register_callback bazel::set_env
