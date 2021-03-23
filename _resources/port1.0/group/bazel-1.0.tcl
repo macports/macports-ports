@@ -181,12 +181,12 @@ proc bazel::get_build_opts {} {
             build.jobs ${physicalcpus}
         }
         set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs}"
-    }
-    if { [option bazel.max_ram_fraction] > 0 } {
-        set bazel_build_opts "${bazel_build_opts} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction]"
-    }
-    if { [option bazel.max_cpu_fraction] > 0 } {
-        set bazel_build_opts "${bazel_build_opts} --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
+        if { [option bazel.max_ram_fraction] > 0 } {
+            set bazel_build_opts "${bazel_build_opts} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction]"
+        }
+        if { [option bazel.max_cpu_fraction] > 0 } {
+            set bazel_build_opts "${bazel_build_opts} --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
+        }
     }
     # hack to try and transfer MP c, c++ and ld options to bazel...
     foreach opt [list {*}${configure.cflags} ] {
