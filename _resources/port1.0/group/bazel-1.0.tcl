@@ -10,11 +10,11 @@ namespace eval bazel { }
 options bazel.min_xcode
 default bazel.min_xcode 10.2
 
-options bazel.build_cmd
-default bazel.build_cmd {[bazel::get_cmd]}
+options bazel.cmd_opts
+default bazel.cmd_opts {[bazel::get_cmd_opts]}
 
 options bazel.build_opts
-default bazel.build_opts {[bazel::get_opts]}
+default bazel.build_opts {[bazel::get_build_opts]}
 
 options bazel.build_target
 default bazel.build_target ""
@@ -40,6 +40,9 @@ default bazel.limit_build_jobs yes
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
+options bazel.define_build_phase
+default bazel.define_build_phase yes
+
 proc bazel::use_mp_clang {} {
     global configure.compiler xcodeversion
     return [ expr ( [ string match macports-clang-* ${configure.compiler} ] || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 ) ]
@@ -55,6 +58,7 @@ license_noconflict  ${java.fallback}
 # append to envs
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
+destroot.env-append  JAVA_HOME=${java.home}
 
 proc bazel::set_dep { } {
     ui_debug "Defining bazel port dependency"
@@ -154,25 +158,20 @@ pre-build {
 # Bazel handles parallel builds its own way..
 use_parallel_build no
 
-proc bazel::get_cmd {} {
+proc bazel::get_cmd_opts {} {
     global bazel.max_idle_secs workpath
     # Generate the bazel build command
-    set bazel_cmd "bazel --max_idle_secs=${bazel.max_idle_secs} --output_user_root=${workpath}"
-    if { [bazel::use_mp_clang] } {
-        set bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_cmd}"
-    }
-    if {![variant_isset native]} {
-        set base_march [bazel::get_base_arch]
-        set bazel_cmd "CC_OPT_FLAGS=${base_march} ${bazel_cmd}"
-    }
-    ui_debug "Defined Bazel build command ${bazel_cmd}"
-    return ${bazel_cmd}
+    set bazel_cmd_opts "--max_idle_secs=${bazel.max_idle_secs} --output_user_root=${workpath}/bazel_build"
+    ui_debug "Defined Bazel build command options ${bazel_cmd_opts}"
+    return ${bazel_cmd_opts}
 }
 
-proc bazel::get_opts {} {
+proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
     # Bazel build options
-    set bazel_build_opts "-s -c opt --verbose_failures --config=opt --nouse_action_cache"
+    set bazel_build_opts "-s --verbose_failures --nouse_action_cache"
+    # Extra user defined build options
+    set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Limit bazel resource utilisation
     if { [option bazel.limit_build_jobs] } {
         # Limit the number of parallel jobs to the number of physical, not logical, cpus.
@@ -189,17 +188,15 @@ proc bazel::get_opts {} {
     if { [option bazel.max_cpu_fraction] > 0 } {
         set bazel_build_opts "${bazel_build_opts} --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
     }
-    # Extra user defined build options
-    set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # hack to try and transfer MP c, c++ and ld options to bazel...
     foreach opt [list {*}${configure.cflags} ] {
-        set bazel_build_opts "${bazel_build_opts} --conlyopt '${opt}'"
+        set bazel_build_opts "${bazel_build_opts} --conlyopt \"${opt}\""
     }
     foreach opt [list {*}${configure.cxxflags} ] {
-        set bazel_build_opts "${bazel_build_opts} --cxxopt '${opt}'"
+        set bazel_build_opts "${bazel_build_opts} --cxxopt \"${opt}\""
     }
     foreach opt [list {*}${configure.ldflags} ] {
-        set bazel_build_opts "${bazel_build_opts} --linkopt '${opt}'"
+        set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
     if { [bazel::use_mp_clang] } {
         set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc}"
@@ -216,19 +213,32 @@ proc bazel::get_opts {} {
 }
 
 proc bazel::configure_build {} {
-    global bazel.build_cmd bazel.build_opts bazel.build_target
-    global build.jobs build.cmd build.args build.post_args
-    
-    ui_debug "Configuring bazel build command and arguments"
-    
-    build.cmd       "[option bazel.build_cmd]"
-    build.args      "[option bazel.build_opts]"
-    build.post_args "[option bazel.build_target]"
-    
-    ui_debug "Bazel build command  : ${build.cmd}"
-    ui_debug "Bazel build options  : ${build.args}"
-    ui_debug "Bazel build target   : [option bazel.build_target]"
-    ui_debug "Bazel post-build cmd : [option bazel.post_build_cmd]"
+    if { [option bazel.define_build_phase] } {
+
+        global bazel.build_cmd bazel.build_opts bazel.build_target
+        global build.jobs build.cmd build.args build.post_args
+
+        ui_debug "Configuring bazel build command and arguments"
+
+        set bazel_build_env ""
+        if { [bazel::use_mp_clang] } {
+            set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
+        }
+        if {![variant_isset native]} {
+            set base_march [bazel::get_base_arch]
+            set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
+        }
+
+        build.cmd       "${bazel_build_env} bazel [option bazel.cmd_opts]"
+        build.args      "[option bazel.build_opts]"
+        build.post_args "[option bazel.build_target]"
+
+        ui_debug "Bazel build command  : ${build.cmd}"
+        ui_debug "Bazel build options  : ${build.args}"
+        ui_debug "Bazel build target   : [option bazel.build_target]"
+        ui_debug "Bazel post-build cmd : [option bazel.post_build_cmd]"
+
+    }
 }
 port::register_callback bazel::configure_build
 
