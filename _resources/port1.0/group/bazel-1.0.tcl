@@ -28,6 +28,12 @@ default bazel.version "latest"
 options bazel.max_idle_secs
 default bazel.max_idle_secs 60
 
+options bazel.max_cpu_fraction
+default bazel.max_cpu_fraction 0.5
+
+options bazel.max_ram_fraction
+default bazel.max_ram_fraction 0.5
+
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
@@ -170,7 +176,7 @@ proc bazel::get_opts {} {
     # Bazel build options
     set bazel_build_opts "-s -c opt --verbose_failures --config=opt"
     # Limit bazel resource utilisation
-    set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs} --local_ram_resources=HOST_RAM*0.5 --local_cpu_resources=HOST_CPUS*.5"
+    set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction] --local_cpu_resources=HOST_CPUS[option bazel.max_cpu_fraction]"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # hack to try and transfer MP c, c++ and ld options to bazel...
