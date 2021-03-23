@@ -66,7 +66,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     #
     # It is assumed in this portgroup that go.{domain,author,project} will
     # remain consistent with the distfile; this is needed when moving the source
-    # into the GOPATH in the post-extract block later on.
+    # into the vendor directory in the post-extract block later on.
     lassign [go._translate_package_id ${go_package}] go.domain go.author go.project
 
     switch ${go.domain} {
@@ -144,17 +144,16 @@ default dist_subdir     go
 default depends_build   port:go
 
 set gopath              ${workpath}/gopath
-default worksrcdir      {gopath/src/${go.package}}
 
-default build.cmd   {${go.bin} build}
+default build.cmd       {${go.bin} build}
 default build.args      ""
 default build.target    ""
-default build.env   {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+default build.env       {GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}}
 
-default test.cmd    {${go.bin} test}
+default test.cmd        {${go.bin} test}
 default test.args       ""
 default test.target     ""
-default test.env    {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+default test.env        {GOARCH=${goarch} GOOS=${goos} CC=${configure.cc}}
 
 # go.vendors name1 ver1 name2 ver2...
 # When a go.sum, Gopkg.lock, glide.lock, etc. is present use go2port to generate values
@@ -209,8 +208,8 @@ proc handle_set_go_vendors {vendors_str} {
                 } else {
                     # The vauthor may be wrong (the project has been renamed/changed
                     # ownership) so we need to use the SHA-1 suffix later to identify
-                    # the package when moving into the GOPATH. GitHub uses 7 digits;
-                    # Bitbucket uses 12. We take 7 and use globbing.
+                    # the package when moving into the vendor directory. GitHub uses
+                    # 7 digits; Bitbucket uses 12. We take 7 and use globbing.
                     set sha1_short [string range ${vversion} 0 6]
                 }
                 lappend go.vendors_internal [list ${sha1_short} ${vpackage} ${vresolved} ${vversion}]
@@ -256,12 +255,13 @@ proc handle_set_go_vendors {vendors_str} {
     }
 }
 
-# Setup build sources in GOPATH style:
-#   workpath/
-#       gopath/src/example.com/
-#           author1/project1/
-#           author2/project2/
-#             :
+# Setup build sources in vendor directory:
+#   worksrcpath/
+#       vendor/
+#           example.com/
+#              author1/project1/
+#              author2/project2/
+#              ...
 #
 # Danger! These manipulations depend heavily on the filenames resulting from
 # expanding the distfiles. GitHub and Bitbucket are known to work:
@@ -288,16 +288,31 @@ post-extract {
         # If the above fails then something went wrong and we should error out.
     }
 
+    set vendor_dir ${worksrcpath}/vendor
+
     foreach vlist ${go.vendors_internal} {
         lassign ${vlist} sha1_short vpackage vresolved
 
-        file mkdir ${gopath}/src/[file dirname ${vpackage}]
+        file mkdir ${vendor_dir}/[file dirname ${vpackage}]
         if {${sha1_short} ne ""} {
-            move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
+            move [glob ${workpath}/*-${sha1_short}*] ${vendor_dir}/${vpackage}
         } else {
             lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
-            move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
+            move [glob ${workpath}/${vauthor}-${vproject}-*] ${vendor_dir}/${vpackage}
         }
+    }
+}
+
+pre-build {
+    if {[file exists ${worksrcpath}/go.mod]} {
+        # Generate modules.txt file
+        system -W ${worksrcpath} "${go.bin} mod vendor"
+    } else {
+        # If this is a non-module package, then just rename the 'vendor'
+        # directory to $GOPATH/src and set the GOPATH environment variable
+        file mkdir ${gopath}
+        move ${worksrcpath}/vendor ${gopath}/src
+        build.env-append GOPATH=${gopath}
     }
 }
 
