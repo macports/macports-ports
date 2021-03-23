@@ -29,7 +29,7 @@ options bazel.max_idle_secs
 default bazel.max_idle_secs 60
 
 options bazel.max_cpu_fraction
-default bazel.max_cpu_fraction 0.5
+default bazel.max_cpu_fraction 0.75
 
 options bazel.max_ram_fraction
 default bazel.max_ram_fraction 0.5
