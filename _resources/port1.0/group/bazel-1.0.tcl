@@ -233,8 +233,9 @@ proc bazel::configure_build {} {
 port::register_callback bazel::configure_build
 
 post-build {
+    global build.cmd
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
     # Clean up
-    system -W ${worksrcpath} "${bazel_cmd} clean"
+    system -W ${worksrcpath} "${build.cmd} clean"
 }
