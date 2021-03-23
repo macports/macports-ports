@@ -46,7 +46,6 @@ license_noconflict  ${java.fallback}
 # append to envs
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
-build.env-append     TMPDIR=${workpath}/tmp
 
 proc bazel::set_dep { } {
     ui_debug "Defining bazel port dependency"
