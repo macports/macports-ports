@@ -273,7 +273,7 @@ proc handle_set_go_vendors {vendors_str} {
 # Support for additional hosts not conforming to this pattern will take some
 # work.
 post-extract {
-    if {${fetch.type} eq "standard"} {
+    if {${fetch.type} eq "standard" && ![file exists ${worksrcpath}]} {
         # Don't try to create the worksrcpath using go.{domain,author,project}
         # as the result will not be accurate when go.package has been
         # customized.
