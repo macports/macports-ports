@@ -175,9 +175,6 @@ pre-build {
     }
 }
 
-# Bazel handles parallel builds its own way..
-use_parallel_build no
-
 proc bazel::get_cmd_opts {} {
     global bazel.max_idle_secs workpath
     # Generate the bazel build command
@@ -188,10 +185,18 @@ proc bazel::get_cmd_opts {} {
 
 proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
+    global use_parallel_build bazel.limit_build_jobs
     # Bazel build options
     set bazel_build_opts "-s --verbose_failures --nouse_action_cache"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
+    # Bazel handles parallel builds its own way..
+    if { ![option use_parallel_build] } {
+        bazel.limit_build_jobs yes
+        build.jobs 1
+    }
+    # Always disable as bazel sets build jobs differently
+    use_parallel_build no
     # Limit bazel resource utilisation
     if { [option bazel.limit_build_jobs] } {
         # Limit the number of parallel jobs to the number of physical, not logical, cpus.
