@@ -190,11 +190,6 @@ proc bazel::get_build_opts {} {
     set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
-    # Bazel handles parallel builds its own way..
-    if { ![option use_parallel_build] } {
-        bazel.limit_build_jobs yes
-        build.jobs 1
-    }
     # Always disable as bazel sets build jobs differently
     use_parallel_build no
     # Limit bazel resource utilisation
