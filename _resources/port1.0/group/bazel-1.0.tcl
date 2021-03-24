@@ -43,6 +43,9 @@ default bazel.extra_build_opts ""
 options bazel.define_build_phase
 default bazel.define_build_phase yes
 
+options bazel.clean_post_build
+default bazel.clean_post_build yes
+
 proc bazel::use_mp_clang {} {
     global configure.compiler xcodeversion
     return [ expr ( [ string match macports-clang-* ${configure.compiler} ] || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 ) ]
@@ -249,5 +252,7 @@ post-build {
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
     # Clean up
-    system -W ${worksrcpath} "${build.cmd} clean"
+    if { [option bazel.clean_post_build] } {
+        system -W ${worksrcpath} "${build.cmd} clean"
+    }
 }
