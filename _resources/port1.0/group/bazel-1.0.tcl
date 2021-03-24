@@ -232,6 +232,8 @@ proc bazel::get_build_opts {} {
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
         set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
+    } else {
+        set bazel_build_opts "${bazel_build_opts} --copt=-march=native"
     }
     ui_debug "Defined Bazel build options ${bazel_build_opts}"
     return ${bazel_build_opts}
