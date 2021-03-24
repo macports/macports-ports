@@ -187,7 +187,7 @@ proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
     global use_parallel_build bazel.limit_build_jobs
     # Bazel build options
-    set bazel_build_opts "-s --verbose_failures --nouse_action_cache"
+    set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Bazel handles parallel builds its own way..
@@ -260,8 +260,8 @@ proc bazel::configure_build {} {
         build.args      "[option bazel.build_opts]"
         build.post_args "[option bazel.build_target]"
 
-        ui_debug "Bazel build command  : ${build.cmd}"
-        ui_debug "Bazel build options  : [option bazel.build_opts]"
+        ui_debug "Bazel build command  : [option bazel.build_cmd]"
+        ui_debug "Bazel build options  : [option bazel.build_cmd_opts] [option bazel.build_opts]"
         ui_debug "Bazel build target   : [option bazel.build_target]"
         ui_debug "Bazel post-build cmd : [option bazel.post_build_cmd]"
 
@@ -270,11 +270,10 @@ proc bazel::configure_build {} {
 port::register_callback bazel::configure_build
 
 post-build {
-    global build.cmd
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
     # Clean up
     if { [option bazel.clean_post_build] } {
-        system -W ${worksrcpath} "${build.cmd} clean"
+        system -W ${worksrcpath} "[option bazel.build_cmd] clean"
     }
 }
