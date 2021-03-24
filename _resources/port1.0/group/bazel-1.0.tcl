@@ -10,8 +10,11 @@ namespace eval bazel { }
 options bazel.min_xcode
 default bazel.min_xcode 10.2
 
-options bazel.cmd_opts
-default bazel.cmd_opts {[bazel::get_cmd_opts]}
+options bazel.build_cmd
+default bazel.build_cmd bazel
+
+options bazel.build_cmd_opts
+default bazel.build_cmd_opts {[bazel::get_cmd_opts]}
 
 options bazel.build_opts
 default bazel.build_opts {[bazel::get_build_opts]}
@@ -40,11 +43,17 @@ default bazel.limit_build_jobs yes
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
-options bazel.define_build_phase
-default bazel.define_build_phase yes
-
 options bazel.clean_post_build
 default bazel.clean_post_build yes
+
+options bazel.configure_cmd
+default bazel.configure_cmd ./configure
+
+options bazel.configure_args
+default bazel.configure_args ""
+
+options bazel.configure_pre_args
+default bazel.configure_pre_args ""
 
 proc bazel::use_mp_clang {} {
     global configure.compiler xcodeversion
@@ -115,11 +124,17 @@ proc bazel::set_env {} {
 port::register_callback bazel::set_env
 
 # Configure phase
-# Remove all arguments
-configure.args
-configure.pre_args
-# configure command
-configure.cmd ./configure
+proc bazel::set_configure {} {
+    global configure.args configure.pre_args configure.cmd
+    # Set arguments
+    configure.args     [option bazel.configure_args]
+    configure.pre_args [option bazel.configure_pre_args]
+    # configure command
+    configure.cmd [option bazel.configure_cmd]
+    ui_debug "Defined Bazel configure command ${configure.cmd} ${configure.args} ${configure.pre_args}"
+}
+port::register_callback bazel::set_configure
+
 # Patch configuration
 pre-configure {
     # enforce correct build settings
@@ -218,7 +233,7 @@ proc bazel::get_build_opts {} {
 }
 
 proc bazel::configure_build {} {
-    if { [option bazel.define_build_phase] } {
+    if { [option bazel.build_cmd] ne "" } {
 
         global bazel.build_cmd bazel.build_opts bazel.build_target
         global build.jobs build.cmd build.args build.post_args
@@ -234,12 +249,12 @@ proc bazel::configure_build {} {
             set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
         }
 
-        build.cmd       "${bazel_build_env} bazel [option bazel.cmd_opts]"
+        build.cmd       "${bazel_build_env} [option bazel.build_cmd] [option bazel.build_cmd_opts]"
         build.args      "[option bazel.build_opts]"
         build.post_args "[option bazel.build_target]"
 
         ui_debug "Bazel build command  : ${build.cmd}"
-        ui_debug "Bazel build options  : ${build.args}"
+        ui_debug "Bazel build options  : [option bazel.build_opts]"
         ui_debug "Bazel build target   : [option bazel.build_target]"
         ui_debug "Bazel post-build cmd : [option bazel.post_build_cmd]"
 
