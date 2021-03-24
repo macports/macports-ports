@@ -307,7 +307,7 @@ pre-build {
     if {[file exists ${worksrcpath}/go.mod]} {
         # Generate modules.txt file
         system -W ${worksrcpath} "${go.bin} mod vendor"
-    } else {
+    } elseif {[file exists ${worksrcpath}/vendor]} {
         # If this is a non-module package, then just rename the 'vendor'
         # directory to $GOPATH/src and set the GOPATH environment variable
         file mkdir ${gopath}
