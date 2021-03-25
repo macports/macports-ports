@@ -151,7 +151,7 @@ proc mpi_variant_name {} {
 
 proc mpi.enforce_variant {args} {
     global mpi.required_variants
-    lappend mpi.required_variants $args
+    append mpi.required_variants " $args"
 }
 
 proc mpi.action_enforce_variants {ports} {
