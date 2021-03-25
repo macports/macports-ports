@@ -32,10 +32,10 @@ options bazel.max_idle_secs
 default bazel.max_idle_secs 30
 
 options bazel.max_cpu_fraction
-default bazel.max_cpu_fraction 0.75
+default bazel.max_cpu_fraction 0.5
 
 options bazel.max_ram_fraction
-default bazel.max_ram_fraction 0.75
+default bazel.max_ram_fraction 0.5
 
 options bazel.limit_build_jobs
 default bazel.limit_build_jobs yes
@@ -269,6 +269,6 @@ post-build {
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
     # Clean up
     if { [option bazel.clean_post_build] } {
-        system -W ${worksrcpath} "[option bazel.build_cmd] clean"
+        system -W ${worksrcpath} "[option bazel.build_cmd] [option bazel.build_cmd_opts] clean"
     }
 }
