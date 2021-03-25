@@ -187,7 +187,8 @@ proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
     global use_parallel_build bazel.limit_build_jobs
     # Bazel build options
-    set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache"
+    # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
+    set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
