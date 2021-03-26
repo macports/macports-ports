@@ -184,7 +184,7 @@ proc bazel::get_cmd_opts {} {
 }
 
 proc bazel::get_build_opts {} {
-    global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
+    global build.jobs configure.cc configure.cxx configure.cflags configure.cxxflags configure.ldflags
     global use_parallel_build bazel.limit_build_jobs
     # Bazel build options
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
@@ -220,7 +220,7 @@ proc bazel::get_build_opts {} {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
     if { [bazel::use_mp_clang] } {
-        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc}"
+        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
     }
     if {[variant_isset mkl]} {
         set bazel_build_opts "${bazel_build_opts} --config=mkl"
