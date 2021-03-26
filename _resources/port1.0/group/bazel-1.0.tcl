@@ -4,6 +4,7 @@
 # PortGroup     bazel 1.0
 
 PortGroup java 1.0
+PortGroup compiler_blacklist_versions 1.0
 
 namespace eval bazel { }
 
@@ -71,6 +72,14 @@ license_noconflict  ${java.fallback}
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
 destroot.env-append  JAVA_HOME=${java.home}
+
+proc bazel::check_compiler {} {
+    # Xcode blacklist
+    if { [bazel::use_mp_clang] } {
+        compiler.blacklist-append {clang}
+    }
+}
+port::register_callback bazel::check_compiler
 
 proc bazel::set_dep { } {
     ui_debug "Defining bazel port dependency"
