@@ -169,10 +169,7 @@ if { ${os.arch} eq "arm" } {
         if { ${os.major} < 20 } {
             lappend clang_versions 8.0
         }
-        lappend clang_versions 9.0
-    }
-    if { ${os.major} >= 10} {
-        lappend clang_versions 10 11 devel
+        lappend clang_versions 9.0 10 11 devel
     }
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
