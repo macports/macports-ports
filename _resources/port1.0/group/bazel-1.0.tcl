@@ -44,9 +44,6 @@ default bazel.limit_build_jobs yes
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
-options bazel.clean_post_build
-default bazel.clean_post_build yes
-
 options bazel.configure_cmd
 default bazel.configure_cmd ./configure
 
@@ -284,8 +281,4 @@ port::register_callback bazel::configure_build
 post-build {
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
-    # Clean up
-    if { [option bazel.clean_post_build] } {
-        system -W ${worksrcpath} "[option bazel.build_cmd] [option bazel.build_cmd_opts] clean"
-    }
 }
