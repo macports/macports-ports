@@ -5,103 +5,110 @@
 #
 # gobject_introspection: whether to use gobject introspection. The default
 # is no. Possible values are yes and no.
-#
-# It is imperative to either set this option *after* you set the port's
-# dependencies, not before, or alternately, ensure you always append to
-# dependencies rather than overwriting them. Otherwise you'll overwrite
-# the dependencies the portgroup sets.
 
 options gobject_introspection
 default gobject_introspection   no
-option_proc gobject_introspection gobject_introspection._set
 
-proc gobject_introspection._set {option action args} {
-    if {"set" ne ${action}} {
-        return
-    }
+namespace eval gobject_introspection_pg {
+}
 
-    if {${args}} {
-        depends_lib-append      port:gobject-introspection
-
-        platform darwin 8 {
-            depends_build-append port:gmake
+# utility procedure to map tool name to appropriate variable name
+proc gobject_introspection_pg::map_tool_to_environment_variable {tool} {
+    switch -- ${tool} {
+        cc {
+            return CFLAGS
         }
-    } else {
-        depends_lib-delete      port:gobject-introspection
-
-        platform darwin 8 {
-            depends_build-delete port:gmake
+        f77 {
+            return FFLAGS
+        }
+        default {
+            return [string toupper $tool]FLAGS
         }
     }
 }
 
-pre-configure {
-    if {${gobject_introspection}} {
-        configure.args-append   --enable-introspection
-        platform darwin 8 {
-            configure.env-append MAKE=${prefix}/bin/gmake
-        }
+proc gobject_introspection_pg::gobject_introspection_setup {} {
+    if {![option gobject_introspection]} {
+        configure.args-append       --disable-introspection
     } else {
-        configure.args-append   --disable-introspection
-    }
-}
-
-pre-build {
-    if {${gobject_introspection}} {
-        # gobject-introspection uses g-ir-scanner, which uses $CC from args.
-        if {[info exists universal_archs_to_use]} {
-            global merger_build_args
-            foreach arch ${universal_archs_to_use} {
-                lappend merger_build_args(${arch})      CC="${configure.cc} -arch ${arch}"
-            }
-        } else {
-            # This deliberately does not use [get_canonical_archflags cc]
-            # because that would cause g-ir-scanner to report an error:
-            #
-            # clang: error: cannot use 'cpp-output' output with multiple -arch
-            # options
-            #
-            # This means that the $CC passed to make at build and destroot time
-            # does not contain the right -arch flags for universal builds that
-            # don't use the muniversal portgroup, but this is assumed not to
-            # affect the output of g-ir-scanner. It is even possible that the
-            # -arch flags aren't necessary at all for g-ir-scanner, but this has
-            # not been investigated.
-            #
-            # The non-g-ir-scanner parts of the build are assumed to build with
-            # the correct -arch flags as determined at configure time.
-            build.args-append       CC="${configure.cc} [join ${configure.cc_archflags}]"
+        depends_lib-append          port:gobject-introspection
+        platform darwin 8 {
+            # The rules enabled by gobject-introspection require GNU make 3.81+
+            depends_build-append    port:gmake
+            configure.env-append    MAKE=${prefix}/bin/gmake
+            build.cmd-replace       [portbuild::build_getmaketype] ${prefix}/bin/gmake
         }
 
-        # see https://trac.macports.org/ticket/59078
+        configure.args-append       --enable-introspection
+
+        #########################################################################################
+        # In order to get the GObject Introspection system to respect MacPorts settings,
+        #     CC, CFLAGS, and LDFLAGS must be set as build command arguments.
+        # This can override other parts of the build system.
+        # Some parts of some build systems still respect the values set during configure phase.
+        # Attempt to compromise by ensuring that the command arguments are consistent with the
+        #     values set during the configure phase.
+        #
+        # See https://trac.macports.org/ticket/59078
+        # See https://trac.macports.org/ticket/62410
+        #########################################################################################
+
+        build.args-append           CC=[option configure.cc]
+        destroot.args-append        CC=[option configure.cc]
+
+        # replicate behavior in procedure portconfigure::configure_main
+        # see https://github.com/macports/macports-base/blob/master/src/port1.0/portconfigure.tcl
+        options gobject_introspection.build.cflags \
+                gobject_introspection.build.ldflags
+
+        if {[option configure.pipe]} {
+            gobject_introspection.build.cflags-append -pipe
+        }
+
+        # this is the major deviation from configure_main
         # -isysroot cannot be empty (see _osx_support.py in python installation)
-        if {${configure.sdkroot} ne ""} {
-            set sdk_root "${configure.sdkroot}"
+        if {[option configure.sdkroot] ne ""} {
+            set sdk_root "[option configure.sdkroot]"
         } else {
             set sdk_root "/"
         }
-        build.args-append CFLAGS="-isysroot${sdk_root}" \
-                          LDFLAGS="-Wl,-syslibroot,${sdk_root}"
+        gobject_introspection.build.cflags-append   "-isysroot${sdk_root}"
+        gobject_introspection.build.ldflags-append  "-Wl,-syslibroot,${sdk_root}"
 
-        # The rules enabled by gobject-introspection require GNU make 3.81+
-        platform darwin 8 {
-            build.cmd-replace   [portbuild::build_getmaketype] ${prefix}/bin/gmake
-        }
-    }
-}
-
-pre-destroot {
-    if {${gobject_introspection}} {
-        # gobject-introspection uses g-ir-scanner, which uses $CC from args.
-        if {[info exists universal_archs_to_use]} {
-            global merger_destroot_args
-            foreach arch ${universal_archs_to_use} {
-                lappend merger_destroot_args(${arch})   CC="${configure.cc} -arch ${arch}"
+        if {![exists universal_archs_supported] || ![variant_exists universal] || ![variant_isset universal]} {
+            # muniversal PG is *not* being used
+            foreach tool {cc ld} {
+                if {[catch {get_canonical_archflags $tool} flags]} {
+                    continue
+                }
+                set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
+                gobject_introspection.build.[string tolower ${env_var}]-append {*}${flags}
             }
         } else {
-            # This deliberately does not use [get_canonical_archflags cc]. See
-            # explanation in pre-build block.
-            destroot.args-append    CC="${configure.cc} [join ${configure.cc_archflags}]"
+            # muniversal PG is being used
+            global merger_build_args
+            foreach arch [option configure.universal_archs] {
+                foreach tool {cc ld} {
+                    set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
+                    lappend merger_build_args(${arch}) ${env_var}+="[muniversal_get_arch_flag ${arch}]"
+                }
+            }
         }
+
+        if {![variant_exists universal] || ![variant_isset universal]} {
+            foreach env_var {CFLAGS LDFLAGS} {
+                if {[option configure.march] ne ""} {
+                    gobject_introspection.build.[string tolower ${env_var}]-append -march=[option configure.march]
+                }
+                if {[option configure.mtune] ne ""} {
+                    gobject_introspection.build.[string tolower ${env_var}]-append -mtune=[option configure.mtune]
+                }
+            }
+        }
+
+        build.args-append    CFLAGS="[option configure.cflags]  [option gobject_introspection.build.cflags]" \
+                            LDFLAGS="[option configure.ldflags] [option gobject_introspection.build.ldflags]"
     }
 }
+
+port::register_callback gobject_introspection_pg::gobject_introspection_setup
