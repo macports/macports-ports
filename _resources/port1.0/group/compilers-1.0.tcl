@@ -162,20 +162,17 @@ if { ${os.arch} eq "arm" } {
             lappend clang_versions 3.7
         }
     }
-    if { ${os.arch} ne "arm" && ${os.major} >= 9 && ${os.major} < 20 } {
+    if { ${os.major} >= 9 && ${os.major} < 20 } {
         lappend clang_versions 5.0 6.0 7.0
     }
-    if { ${os.arch} ne "arm" && ${os.major} >= 10 } {
+    if { ${os.major} >= 10 } {
         if { ${os.major} < 20 } {
             lappend clang_versions 8.0
         }
         lappend clang_versions 9.0
     }
     if { ${os.major} >= 10} {
-        if { ${os.arch} ne "arm" } {
-            lappend clang_versions 10
-        }
-        lappend clang_versions 11 devel
+        lappend clang_versions 10 11 devel
     }
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
