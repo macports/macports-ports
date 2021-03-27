@@ -676,7 +676,7 @@ proc compilers.setup {args} {
                         if { ${mode} eq "add" } {
                             return -code error "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
                         } else {
-                            ui_warn "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
+                            ui_debug "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
                         }
                     } else {
                         set ${mode}_list [${mode}_from_list [set ${mode}_list] $cdb($v,variant)]

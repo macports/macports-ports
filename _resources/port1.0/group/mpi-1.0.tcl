@@ -271,7 +271,7 @@ proc mpi.setup {args} {
                         if { ${mode} eq "add" } {
                             return -code error "MPI package ${v} not available for Darwin${os.major} ${os.arch}"
                         } else {
-                            ui_warn "MPI package ${v} not available for Darwin${os.major} ${os.arch}"
+                            ui_debug "MPI package ${v} not available for Darwin${os.major} ${os.arch}"
                         }
                     }
                 } else {
