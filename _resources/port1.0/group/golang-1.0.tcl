@@ -51,6 +51,8 @@
 # etc. file in the upstream source code. The go2port tool (install via MacPorts)
 # can be used to generate a skeleton portfile with precomputed go.vendors.
 
+PortGroup  legacysupport 1.1
+
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
 
 proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
@@ -146,15 +148,30 @@ default depends_build   port:go
 set gopath              ${workpath}/gopath
 default worksrcdir      {gopath/src/${go.package}}
 
+set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+
 default build.cmd   {${go.bin} build}
 default build.args      ""
 default build.target    ""
-default build.env   {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+default build.env   ${go_env}
 
 default test.cmd    {${go.bin} test}
 default test.args       ""
 default test.target     ""
-default test.env    {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+default test.env    ${go_env}
+
+proc go.append_env {} {
+    global os.major configure.ldflags configure.cflags build.env
+    # Following options make sure link options, including those for
+    # legacy macOS support, are correctly passed.
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        build.env-append   "GO_EXTLINK_ENABLED=1" \
+                           "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
+                           "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
+    }
+    ui_debug "Set Build Env ${build.env}"
+}
+port::register_callback go.append_env
 
 # go.vendors name1 ver1 name2 ver2...
 # When a go.sum, Gopkg.lock, glide.lock, etc. is present use go2port to generate values
