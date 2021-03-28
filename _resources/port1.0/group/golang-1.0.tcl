@@ -168,8 +168,11 @@ proc go.append_env {} {
         build.env-append   "GO_EXTLINK_ENABLED=1" \
                            "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
                            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
+        test.env-append    "GO_EXTLINK_ENABLED=1" \
+                           "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
+                           "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
     }
-    ui_debug "Set Build Env ${build.env}"
+    ui_debug "Set Build/Test Env ${build.env}"
 }
 port::register_callback go.append_env
 
