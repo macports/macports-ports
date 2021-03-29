@@ -148,7 +148,7 @@ default depends_build   port:go
 set gopath              ${workpath}/gopath
 default worksrcdir      {gopath/src/${go.package}}
 
-set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} GOPROXY=off GO111MODULE=off}
+set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} CXX=${configure.cxx} GOPROXY=off GO111MODULE=off}
 
 default build.cmd   {${go.bin} build}
 default build.args      ""
