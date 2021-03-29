@@ -28,6 +28,9 @@ if {${configure.build_arch} eq "arm64" && ${os.platform} eq "darwin"} {
     build.pre_args-append   --target="aarch64-apple-darwin"
 }
 
+# Enforce same compiler settings as used by rust
+compiler.cxx_standard   2017
+
 destroot {
     ui_error "No destroot phase in the Portfile!"
     ui_msg "Here is an example destroot phase:"
