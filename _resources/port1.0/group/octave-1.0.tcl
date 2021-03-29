@@ -19,6 +19,9 @@ default octave.config_h {no}
 
 # some header files from Octave require C++-11
 compiler.cxx_standard  2011
+# error: field has incomplete type 'const octave::cdef_class'
+PortGroup compiler_blacklist_versions 1.0
+compiler.blacklist-append {clang < 700}
 
 # see https://trac.macports.org/ticket/51643
 PortGroup muniversal 1.0
