@@ -166,10 +166,12 @@ proc go.append_env {} {
     # legacy macOS support, are correctly passed.
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
         build.env-append   "GO_EXTLINK_ENABLED=1" \
-                           "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
+                           "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+                           "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
                            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
         test.env-append    "GO_EXTLINK_ENABLED=1" \
-                           "GO_LDFLAGS=\"-extldflags=${configure.ldflags}\"" \
+                           "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+                           "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
                            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
     }
     ui_debug "Set Build/Test Env ${build.env}"
