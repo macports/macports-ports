@@ -53,12 +53,8 @@ default bazel.configure_args ""
 options bazel.configure_pre_args
 default bazel.configure_pre_args ""
 
-proc bazel::use_mp_clang {} {
-    global configure.compiler xcodeversion
-    set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
-    set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 } ]
-    return ${is_mp_clang} || ${xcode_not_ok}
-}
+options bazel.cxx_standard
+default bazel.cxx_standard 2014
 
 # Required java version
 java.version         11+
@@ -71,6 +67,20 @@ license_noconflict   ${java.fallback}
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
 destroot.env-append  JAVA_HOME=${java.home}
+
+# Require c++ standard
+proc bazel::set_standards {} {
+    global compiler.cxx_standard
+    compiler.cxx_standard [option bazel.cxx_standard]
+}
+port::register_callback bazel::set_standards
+
+proc bazel::use_mp_clang {} {
+    global configure.compiler xcodeversion
+    set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
+    set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 } ]
+    return ${is_mp_clang} || ${xcode_not_ok}
+}
 
 # Xcode blacklist
 if { [bazel::use_mp_clang] } {
