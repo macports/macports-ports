@@ -4,6 +4,7 @@
 # PortGroup     bazel 1.0
 
 PortGroup java 1.0
+PortGroup compiler_blacklist_versions 1.0
 
 namespace eval bazel { }
 
@@ -43,9 +44,6 @@ default bazel.limit_build_jobs yes
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
-options bazel.clean_post_build
-default bazel.clean_post_build yes
-
 options bazel.configure_cmd
 default bazel.configure_cmd ./configure
 
@@ -55,22 +53,39 @@ default bazel.configure_args ""
 options bazel.configure_pre_args
 default bazel.configure_pre_args ""
 
-proc bazel::use_mp_clang {} {
-    global configure.compiler xcodeversion
-    return [ expr ( [ string match macports-clang-* ${configure.compiler} ] || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 ) ]
-}
+options bazel.cxx_standard
+default bazel.cxx_standard 2014
 
 # Required java version
-java.version        11+
+java.version         11+
 # LTS JDK port to install if required java not found
-java.fallback       openjdk11
+java.fallback        openjdk11
 # JDK only needed at build time, but java PG sets lib dependency so
 # declare no conflict to allow redistribution of binaries.
-license_noconflict  ${java.fallback}
+license_noconflict   ${java.fallback}
 # append to envs
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
 destroot.env-append  JAVA_HOME=${java.home}
+
+# Require c++ standard
+proc bazel::set_standards {} {
+    global compiler.cxx_standard
+    compiler.cxx_standard [option bazel.cxx_standard]
+}
+port::register_callback bazel::set_standards
+
+proc bazel::use_mp_clang {} {
+    global configure.compiler xcodeversion
+    set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
+    set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 } ]
+    return ${is_mp_clang} || ${xcode_not_ok}
+}
+
+# Xcode blacklist
+if { [bazel::use_mp_clang] } {
+    compiler.blacklist-append {clang}
+}
 
 proc bazel::set_dep { } {
     ui_debug "Defining bazel port dependency"
@@ -184,10 +199,11 @@ proc bazel::get_cmd_opts {} {
 }
 
 proc bazel::get_build_opts {} {
-    global build.jobs configure.cc configure.cflags configure.cxxflags configure.ldflags
-    global use_parallel_build bazel.limit_build_jobs
+    global build.jobs configure.cc configure.cxx configure.cflags configure.cxxflags configure.ldflags
+    global configure.sdk_version use_parallel_build bazel.limit_build_jobs
     # Bazel build options
-    set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache"
+    # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
+    set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
@@ -219,7 +235,12 @@ proc bazel::get_build_opts {} {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
     if { [bazel::use_mp_clang] } {
-        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc}"
+        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
+    } else {
+        # Explicitly pass SDK                    https://github.com/bazelbuild/rules_go/issues/1554
+        # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
+        # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
+        # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
     }
     if {[variant_isset mkl]} {
         set bazel_build_opts "${bazel_build_opts} --config=mkl"
@@ -237,6 +258,7 @@ proc bazel::get_build_opts {} {
 proc bazel::configure_build {} {
     if { [option bazel.build_cmd] ne "" } {
 
+        global configure.sdkroot
         global bazel.build_cmd bazel.build_opts bazel.build_target
         global build.jobs build.cmd build.args build.post_args
 
@@ -245,6 +267,8 @@ proc bazel::configure_build {} {
         set bazel_build_env ""
         if { [bazel::use_mp_clang] } {
             set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
+        } else {
+            #set bazel_build_env "SDKROOT=${configure.sdkroot} ${bazel_build_env}"
         }
         if {![variant_isset native]} {
             set base_march [bazel::get_base_arch]
@@ -267,8 +291,4 @@ port::register_callback bazel::configure_build
 post-build {
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
-    # Clean up
-    if { [option bazel.clean_post_build] } {
-        system -W ${worksrcpath} "[option bazel.build_cmd] [option bazel.build_cmd_opts] clean"
-    }
 }

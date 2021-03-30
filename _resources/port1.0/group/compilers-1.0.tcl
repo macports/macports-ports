@@ -95,11 +95,22 @@ if {${os.major} < 10} {
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
+# Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" } {
     set gcc_versions {devel}
 } else {
-    set gcc_versions {4.4 4.5 4.6 4.7 4.8 4.9 5 6 7 8 9 10 devel}
+    set gcc_versions {}
+    if { ${os.major} < 20 } {
+        lappend gcc_versions 5 6 7
+    }
+    if { ${os.major} >= 10 } {
+        lappend gcc_versions 8
+    }
+    if { ${os.major} >= 11 } {
+        lappend gcc_versions 9 10 devel
+    }
 }
+ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -136,11 +147,32 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
 }
 
+# build database of clang compiler attributes
+# Should match those in compilers/clang_compilers.tcl
 if { ${os.arch} eq "arm" } {
-    set clang_versions {10 11 devel}
+    set clang_versions {11 devel}
 } else {
-    set clang_versions {3.3 3.4 3.7 5.0 6.0 7.0 8.0 9.0 10 11 devel}
+    set clang_versions {}
+    if {${os.major} < 16} {
+        if {${os.major} < 9} {
+            lappend clang_versions 3.3
+        }
+        lappend clang_versions 3.4
+        if {${os.major} >= 9} {
+            lappend clang_versions 3.7
+        }
+    }
+    if { ${os.major} >= 9 && ${os.major} < 20 } {
+        lappend clang_versions 5.0 6.0 7.0
+    }
+    if { ${os.major} >= 10 } {
+        if { ${os.major} < 20 } {
+            lappend clang_versions 8.0
+        }
+        lappend clang_versions 9.0 10 11 devel
+    }
 }
+ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
     # Remove dot from version if present
     set ver_nodot [string map {. {}} ${ver}]
@@ -644,7 +676,7 @@ proc compilers.setup {args} {
                         if { ${mode} eq "add" } {
                             return -code error "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
                         } else {
-                            ui_warn "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
+                            ui_debug "Compiler ${v} not available for Darwin${os.major} ${os.arch}"
                         }
                     } else {
                         set ${mode}_list [${mode}_from_list [set ${mode}_list] $cdb($v,variant)]

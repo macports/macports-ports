@@ -17,4 +17,6 @@ if { ${os.arch} ne "arm" } {
     }
 }
 
-lappend compilers macports-gcc-devel
+if { ${os.major} >= 11 } {
+    lappend compilers macports-gcc-devel
+}
