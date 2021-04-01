@@ -6,7 +6,7 @@ PortGroup           xcodeversion 1.0
 PortGroup           active_variants 1.1
 
 name                blender
-version             2.90.1
+version             2.91.0
 categories          graphics multimedia
 platforms           darwin
 license             GPL-2+
@@ -26,9 +26,9 @@ long_description    Blender is a ${description}. It contains a set of \
 
 master_sites        https://download.blender.org/source/
 use_xz              yes
-checksums           rmd160  63e2f9de4d48e0d0fac12d1fbc12313dc3d2c750 \
-                    sha256  e78dcc946c823ad1bd89bcc6938fc6b375540ec3eff58649586acf1f6a653d99 \
-                    size    38836408
+checksums           rmd160  536d839a3b054bc6f25c4b160adfc2e12bde27f9 \
+                    sha256  557a4afd09fe086ebcb0256b904896f577fe913683655f4248b881591f356974 \
+                    size    41528920
 
 minimum_xcodeversions-append {15 8.2 16 8.2}
 if {${os.platform} eq "darwin" && ${os.major} < 15} {
@@ -39,13 +39,13 @@ if {${os.platform} eq "darwin" && ${os.major} < 15} {
     }
 }
 
-compiler.cxx_standard 2011
+compiler.cxx_standard 2017
 # We need to blacklist Xcode Clang/LLVM, because Blender needs to
 # use tools such as llvm-config, which are not included in Xcode.
 # (llvm-config is needed because Blender links to libLLVM. libLLVM is
 # also not included in Xcode.)
 # (Reference: https://stackoverflow.com/questions/32959627/where-is-the-system-llvm-config-on-macos)
-compiler.blacklist clang
+compiler.blacklist clang {macports-clang-[5-8].0}
 # Even though we need to blacklist Xcode Clang/LLVM, we still need to
 # make the rest of Xcode available to the build system. If we don't set
 # use_xcode to yes, then the build will fail, because Blender's CMake
@@ -83,7 +83,9 @@ depends_lib-append  port:python${py_ver_nodot} \
                     port:embree \
                     port:oidn \
                     port:tbb \
+                    port:potrace \
                     port:libomp \
+                    port:gmp \
                     port:glew \
                     port:eigen3 \
                     port:lzo2 \
@@ -114,6 +116,46 @@ post-patch {
             ${platform_apple_xcode.cmake}
         reinplace -E {s/(OSX_MIN_DEPLOYMENT_TARGET) 10.13/\1 10.11/} \
             ${platform_apple_xcode.cmake}
+
+        # Starting in Blender 2.90, the devs moved to using C++17 to
+        # compile Cycles. However, on older versions of macOS, this
+        # causes the build to fail with the error 'Undefined
+        # symbols for architecture x86_64: "operator delete(void*,
+        # std::align_val_t)", referenced from:
+        # ccl::OSLRenderServices::~OSLRenderServices() in
+        # libcycles_kernel_osl.a(osl_services.cpp.o)'. The first few
+        # references below seemed to point towards something related to
+        # needing to disable -falign-new by using
+        # -DCOMPILER_HAS_F_ALIGNED_NEW=OFF, but it turns out that the
+        # error is actually being caused by the fact that the devs are
+        # adding -faligned-allocation in the file
+        # 'intern/cycles/kernel/osl/CMakeLists.txt'. It seems that the
+        # real problem is that Clang on older macOSes do not have
+        # aligned allocation when compiling using C++17. Thus, we need
+        # use -fno-aligned-allocation. However, we also cannot simply
+        # remove the section of code from 'CMakeLists.txt' that adds
+        # -faligned-allocation, because if we do, the build will fail
+        # with the warning/error: "aligned deallocation function of type
+        # 'void (void *, std::align_val_t) noexcept' is only available
+        # on macOS 10.14 or newer"; "note: if you supply your own
+        # aligned allocation functions, use -faligned-allocation to
+        # silence this diagnostic". Thus, in order to build
+        # successfully, we need to explicitly use
+        # -fno-aligned-allocation on older macOSes, and explicitly use
+        # -faligned-allocation on newer macOSes.
+        #
+        # References:
+        # * https://github.com/facebook/folly/issues/864
+        # * https://www.veripool.org/issues/1231
+        # * https://trac.macports.org/ticket/47191
+        # * https://bugs.llvm.org/show_bug.cgi?id=22951
+        # * https://stackoverflow.com/questions/31686508/why-is-delete-operator-required-for-virtual-destructors
+        # * https://bugs.freedesktop.org/show_bug.cgi?id=54948
+        # * https://github.com/pybind/python_example/issues/48
+        # * https://github.com/llvm-mirror/clang/blob/master/test/SemaCXX/unavailable_aligned_allocation.cpp
+        # * See also the Portfile for port:folly.
+        reinplace -E {s/(-f)(aligned-allocation)/\1no-\2/} \
+            ${worksrcpath}/intern/cycles/kernel/osl/CMakeLists.txt
     }
 
     # Make it so that Blender is able to build Ceres Solver using the
@@ -143,15 +185,13 @@ post-patch {
         reinplace "/_STATIC_/s/^/#/g" $f
     }
 
-    # Make it so that Blender is able to see the MacPorts libraries
-    reinplace -E {s|(include <SD)L.h|\1L2/SDL.h|} \
-        ${worksrcpath}/extern/audaspace/plugins/sdl/SDLDevice.h
-    reinplace -E {s|(include )"(SDL2.*)"|\1<\2>|} \
-        ${worksrcpath}/extern/sdlew/src/sdlew.c
-    reinplace -E {s|(include )"(SDL.h)"|\1<SDL2/\2>|} \
-        ${worksrcpath}/source/blender/python/intern/bpy_app_sdl.c
-    reinplace -E {s|(include )"(openjpeg.h)"|\1<openjpeg-2.4/\2>|} \
-        ${worksrcpath}/source/blender/imbuf/intern/jp2.c
+    # Inexplicably, BOOST_LIBPATH is being set in the
+    # platform_unix.cmake script, but not in the
+    # platform_apple.cmake script. So we need to add it ourselves.
+    reinplace "/set.BOOST_DEFINITIONS/i\\
+\\  set(BOOST_LIBPATH \\$\\{Boost_LIBRARY_DIRS\\})\\
+" \
+        ${platform_apple.cmake}
 
     # Make it so that CMake is able to find the MacPorts USD library
     if {![catch {set result [active_variants usd monolithic]}] && \
@@ -203,18 +243,23 @@ list(APPEND USD_LIBRARIES\\
             ${platform_apple.cmake}
     }
 
-    # We already patch 'llvm-config' to be 'llvm-config-mp' using our
-    # patchfiles. Here we are just adding a version number on the end.
     foreach re [list \
-        "s|@@py_ver@@|$py_ver|" \
-        "s|@@py_ver_nodot@@|$py_ver_nodot|" \
-        "s|\(llvm-config-mp\)|\\1-$llvm_version|g" \
-        {s|(-lLLVM)-.*\"|\1\"|} \
+        "s/@@py_ver@@/$py_ver/g" \
+        "s/@@py_ver_nodot@@/$py_ver_nodot/g" \
     ] {
-        reinplace -E $re ${platform_apple.cmake}
+        reinplace $re ${platform_apple.cmake}
+    }
+    if {$py_ver > 3.7} {
+        reinplace -E {s/(PYTHON_VERSION.)m/\1/} ${platform_apple.cmake}
     }
     reinplace "s/@@llvm_version@@/$llvm_version/g" \
         ${worksrcpath}/source/creator/CMakeLists.txt
+    reinplace -E {s/(llvm-config-)/\1mp-/} \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E {s|(llvm-config HINTS.*)bin|\1libexec/llvm-$\{LLVM_VERSION\}/bin|} \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E "/find_program.LLVM_CONFIG llvm-config.$/s|(llvm-config)|\\1 HINTS ${prefix}/libexec/llvm-\${LLVM_VERSION}/bin|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
 
     # Prevent Blender's CMake scripts from attempting to set the
     # MACOSX_DEPLOYMENT_TARGET. MacPorts base already sets this.
@@ -265,7 +310,8 @@ if {${os.major} < 16} {
 #                         vvvvvv
 configure.args-append   -DLIBDIR=${prefix} \
                         -DFRAMEWORK_SEARCH_PATHS=${frameworks_dir} \
-                        -DXCODE_VERSION=${xcodeversion}
+                        -DXCODE_VERSION=${xcodeversion} \
+                        -DLLVM_VERSION=$llvm_version
 
 # Tell CMake to generate more verbose output during the build
 configure.args-append   -DCMAKE_VERBOSE_MAKEFILE=ON
@@ -296,18 +342,9 @@ configure.args-append   -DWITH_SYSTEM_GLEW=ON \
                         -DWITH_SYSTEM_LZO=ON \
                         -DWITH_SYSTEM_GFLAGS=ON
 
-# TODO: There's currently a linking error when building Cycles with
-# OSL support, so we need to disable it until a fix can be found
-# XXX
-if {${os.platform} eq "darwin" && ${os.major} < 17} {
-    configure.args-append   -DWITH_CYCLES_OSL=OFF
-}
-
 # By default, Blender prefers static llvm build on Apple, but they state
 # that dynamic builds are also possible
 configure.args-append   -DLLVM_STATIC=OFF
-configure.ldflags-append -L${prefix}/libexec/llvm-${llvm_version}/lib
-cmake.install_rpath-append ${prefix}/libexec/llvm-${llvm_version}/lib
 
 post-destroot {
     # Make sure that an addons_contrib folder makes it into the final
@@ -335,7 +372,7 @@ variant manpage description {Build manpage} {
     patchfiles-append       patch-manpage-for-apple.diff
 
     post-patch {
-        reinplace "s|@@PREFIX@@|${prefix}|" \
+        reinplace "s|@@prefix@@|${prefix}|" \
             ${worksrcpath}/source/creator/CMakeLists.txt
         reinplace -E "s/\(env python\)3/\\1${py_ver}/" \
             ${worksrcpath}/doc/manpage/blender.1.py
