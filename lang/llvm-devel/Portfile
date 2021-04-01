@@ -8,20 +8,17 @@ PortGroup legacysupport 1.0
 
 # link legacysupport statically for compilers
 legacysupport.use_static yes
-
-# limit legacysupport to 10.9 for now
-# test on 10.10 to see what happens there
-# on 10.11 there is a collision with getattrlistat (that has been fixed in legacysupportdevel)
 legacysupport.newest_darwin_requires_legacy 13
 
 # for devel
 PortGroup github        1.0
-set llvm-commit         1c5f08312874717caf5d94729d825c32845773ec
-set date                20210305
+
+set llvm-commit         d1828937ed8d79a772ec60a8f3c7f4a873f581d4
+set date                20210401
 set llvm_version        devel
 
 # for release
-# set llvm_version 12
+# set llvm_version 13
 
 set llvm_version_no_dot 13
 set clang_executable_version 13
@@ -29,9 +26,9 @@ set lldb_executable_version 13
 
 github.setup            llvm llvm-project ${llvm-commit}
 
-checksums               rmd160  0e49b6e6f6a4d92c0711c96cb63f410d8f6499be \
-                        sha256  e54ae4728298a38c35283cec49b157b957e92ba96d4e374f3a6891a529a93135 \
-                        size    134911797
+checksums               rmd160  816af0c825b8af6da990dec07d0d7135549234cf \
+                        sha256  d6be47a4fac26dde97a65394c9ae8cd08b6f65962386a0ed6dd373170570135f \
+                        size    136291756
 
 # for release, use      ${llvm_version}
 # version                 ${llvm_version}
@@ -87,7 +84,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
 
     # avoid:
     #    CMake Error: failed to create symbolic link '___': file already exists
-    use_parallel_build  no
+    #use_parallel_build  no
 
 } elseif {${subport} eq "lldb-${llvm_version}"} {
     homepage            https://lldb.llvm.org/
@@ -100,9 +97,6 @@ if {${subport} eq "llvm-${llvm_version}"} {
 
 # for devel version only
 default_variants-append +assertions
-
-# the backtik pkgconfig setting in the ffi config line requires pkg-config
-depends_build-append    port:pkgconfig
 
 worksrcdir              llvm-project/llvm
 patch.dir               ${workpath}/llvm-project/llvm
@@ -121,6 +115,8 @@ post-extract {
         ln -s ${workpath}/llvm-project/libcxxabi                        ${worksrcpath}/projects/libcxxabi
         ln -s ${workpath}/llvm-project/lld                              ${worksrcpath}/projects/lld
         ln -s ${workpath}/llvm-project/clang-tools-extra                ${worksrcpath}/tools/clang/tools/extra
+        ln -s ${workpath}/llvm-project/mlir                             ${worksrcpath}/tools/mlir
+        ln -s ${workpath}/llvm-project/flang                            ${worksrcpath}/tools/flang
     } elseif {${subport} eq "lldb-${llvm_version}"} {
         ln -s ${workpath}/llvm-project/clang                            ${worksrcpath}/tools/clang
         ln -s ${workpath}/llvm-project/lldb                             ${worksrcpath}/tools/lldb
@@ -150,7 +146,8 @@ if {${subport} eq "clang-${llvm_version}"} {
         openmp-locations.patch \
         leopard-no-asan.patch \
         5000-patch-compilerrtdarwinutils-find-macosxsdkversion.diff \
-        5002-patch-toolchains-darwin-add-back-pre-10.6-link-libs.diff
+        5002-patch-toolchains-darwin-add-back-pre-10.6-link-libs.diff \
+        5006-patch-clang-tools-extra-LLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR.diff
 
 # these don't apply at present
 #         1003-Default-to-ppc7400-for-OSX-10.5.patch \
@@ -200,7 +197,7 @@ configure.args-append \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_BINDINGS_LIST=none \
     -DLLVM_ENABLE_FFI=ON \
-    -DFFI_INCLUDE_DIR=`pkg-config --cflags-only-I libffi | sed 's/-I//'` \
+    -DFFI_INCLUDE_DIR=${prefix}/include \
     -DFFI_LIBRARY_DIR=${prefix}/lib
 
 if {${subport} eq "llvm-${llvm_version}"} {
@@ -219,8 +216,11 @@ if {${subport} eq "llvm-${llvm_version}"} {
         -DCLANG_ENABLE_ARCMT=OFF \
         -DDARWIN_PREFER_PUBLIC_SDK=ON \
         -DLLVM_BUILD_RUNTIME=ON \
-        -DLIBCXX_ENABLE_SHARED=OFF \
-        -DLIBCXX_INSTALL_LIBRARY=OFF
+        -DLIBCXX_ENABLE_SHARED=ON \
+        -DLIBCXX_INSTALL_LIBRARY=ON
+
+    # we are going to use the new driver for flang now
+    configure.args-append -DFLANG_BUILD_NEW_DRIVER=ON
 
 } elseif {${subport} eq "lldb-${llvm_version}"} {
     #select.group        lldb
@@ -242,7 +242,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
 #                 ,typename enable_if<is_convertible<const _U1&, _T1>::value &&
 #                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # clang-1000.11.45.5 gives missing symbols for ZTIDu and others during libcxxabi build
-compiler.blacklist *gcc* {clang < 1001} macports-clang-3.*
+compiler.blacklist *gcc* {clang < 1001} {macports-clang-[3-8].*}
 
 # Override the normal compiler fallback list entirely since we have
 # such specific requirements.
@@ -250,12 +250,20 @@ compiler.fallback   clang
 
 # fall back to clang-9.0 when system clang is too old
 # clang-9.0 was that last one that built with clang-3.7
-compiler.fallback-append macports-clang-9.0
+compiler.fallback-append macports-clang-11 macports-clang-10 macports-clang-9.0
 
 # cctools is needed to handle objects from newer clang toolchains
 if {[string match macports-clang-* ${configure.compiler}]} {
     depends_build-append port:cctools
     depends_skip_archcheck-append cctools
+}
+
+if {${os.major} <= 14} {
+    # compiler-rt does a broad search for an SDK it likes, but this
+    # search fails on older systems that don't have a MacOSX.sdk
+    # TODO: apply this always to all systems?
+    if {${configure.sdkroot} eq ""} {set configure.sdkroot "/"}
+    configure.args-append -DDARWIN_osx_SYSROOT="${configure.sdkroot}"
 }
 
 # Set CMAKE_LIBTOOL if we're using MacPorts-provided cctools
@@ -266,7 +274,7 @@ if {[lsearch -exact $PortInfo(depends_build) port:cctools] != -1} {
 
 depends_lib-append      port:python39
 set pythonfullpath      ${prefix}/bin/python3.9
-configure.args-append   -D_Python3_EXECUTABLE=${pythonfullpath}
+configure.args-append   -DPython3_EXECUTABLE=${pythonfullpath}
 
 platform darwin {
     # Note that we are forcing this choice.  This means that anything linking
@@ -298,6 +306,15 @@ platform darwin {
 
     if {${subport} eq "clang-${llvm_version}"} {
 
+        if {${os.major} < 19} {
+            # on systems that might build i386, we need atomic builtins
+            # https://trac.macports.org/ticket/58712
+            # this system restriction means that on Catalina+ building i386 will not have these
+            # we can consider applying this to all clang builds
+            # once proven to have no detrimental effects on newer systems
+            configure.args-append    -DCOMPILER_RT_EXCLUDE_ATOMIC_BUILTIN=OFF
+        }
+
         if {${os.major} == 14} {
             # Building Xray forces build of sanitizer_common, even if
             # COMPILER_RT_BUILD_SANITIZERS=OFF, and this fails on 10.10
@@ -311,11 +328,6 @@ platform darwin {
             configure.args-append    -DCOMPILER_RT_BUILD_SANITIZERS=OFF
         }
 
-        if {${os.major} <= 10} {
-            # needs thread_local_storage enabled
-            require_active_variants port:libcxx emulated_tls
-        }
-
         if {${os.major} <= 11} {
             # xpc.h available 10.7 but doesn't support nullable features
             # xpc.h works currently on 10.8+
@@ -324,8 +336,20 @@ platform darwin {
         }
 
         if {${os.major} <= 10} {
+            # needs thread_local_storage enabled
+            #require_active_variants port:libcxx emulated_tls
+
+            # Proxy for eliminating the dependency on native TLS
+            # http://trac.macports.org/ticket/46887
+            configure.args-append -DLLVM_ENABLE_BACKTRACES=OFF
+        }
+
+        if {${os.major} <= 10} {
             # the directorywatcher code is currently 10.7+
             patchfiles-append 5003-patch-no-directory-watcher-on-snowleopard.diff
+
+            # reexported_symbols_list is available on 10.7+ only, used by libcxx
+            patchfiles-append 5004-patch-libcxx-reexport-symbols-lionorgreater-only.diff
 
             # the libcxx installed by MacPorts on darwin 10 and less does not correspond to Apple's builtin libcxx
             patchfiles-append 5005-MacPorts-only-patch-libcxx-includes-disable-availability-tests.diff
@@ -360,6 +384,10 @@ if {${subport} eq "clang-${llvm_version}"} {
         system "cd ${destroot.dir}/projects/libcxx && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
         system "cd ${destroot.dir}/projects/libcxxabi && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
         system "cd ${destroot.dir}/projects/lld && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/tools/mlir && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/tools/flang && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+
+        system "chmod 755 ${destroot}${sub_prefix}/bin/flang"
 
         delete ${destroot}${sub_prefix}/bin/clang
         file rename ${destroot}${sub_prefix}/bin/clang-${clang_executable_version} ${destroot}${sub_prefix}/bin/clang
