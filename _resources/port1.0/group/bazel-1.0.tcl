@@ -41,6 +41,9 @@ default bazel.max_ram_fraction 0.5
 options bazel.limit_build_jobs
 default bazel.limit_build_jobs yes
 
+options bazel.extra_build_cmd_opts
+default bazel.extra_build_cmd_opts ""
+
 options bazel.extra_build_opts
 default bazel.extra_build_opts ""
 
@@ -194,6 +197,8 @@ proc bazel::get_cmd_opts {} {
     global bazel.max_idle_secs workpath
     # Generate the bazel build command
     set bazel_cmd_opts "--max_idle_secs=${bazel.max_idle_secs} --output_user_root=${workpath}/bazel_build"
+    # Extra user defined options
+    set bazel_cmd_opts "${bazel_cmd_opts} [option bazel.extra_build_cmd_opts]"
     ui_debug "Defined Bazel build command options ${bazel_cmd_opts}"
     return ${bazel_cmd_opts}
 }
