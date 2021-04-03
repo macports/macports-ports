@@ -56,6 +56,14 @@ if {![info exists compiler.limit_flags]} {
     default compiler.limit_flags        no
 }
 
+# please remove when 8a088c3 has been in a released MacPorts version for at least two weeks
+# see https://github.com/macports/macports-base/commit/8a088c30d80c7c3eca10848f28835e1c180229b1
+if {"shellescape" ni [info commands shellescape]} {
+    proc shellescape {arg} {
+        return [regsub -all -- {[^A-Za-z0-9.:@%/+=_-]} $arg {\\&}]
+    }
+}
+
 namespace eval makefile_pg {
 }
 
@@ -120,7 +128,7 @@ proc makefile_pg::makefile_setup {} {
             set makefile_prefix         \$(DESTDIR)${prefix}
         }
         if {[lsearch -exact ${makefile.override} PREFIX] != -1} {
-            ${phase}.args-append        [option makefile.prefix_name]=${makefile_prefix}
+            ${phase}.args-append        [option makefile.prefix_name]=[shellescape ${makefile_prefix}]
         }
         ${phase}.env-append             [option makefile.prefix_name]=${makefile_prefix}
 
