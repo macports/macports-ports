@@ -4,9 +4,10 @@ PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           haskell_stack 1.0
 
-github.setup        gibiansky IHaskell e07b198f07d7dc7a12863f8507439ae3834947e4
+github.setup        gibiansky IHaskell 0f1262d3e710518fd734fbda6f2eba33e476836b
 name                [string tolower ${github.project}]
-version             2021.01.28
+# current version in https://github.com/gibiansky/IHaskell/blob/master/ihaskell.cabal
+version             20210228
 revision            0
 
 categories          devel haskell
@@ -26,14 +27,14 @@ long_description    IHaskell is a kernel for the Jupyter project, \
                     wiki also has more extensive documentation of \
                     IHaskell features.
 
-checksums           rmd160  c0301fb9a4caafc57ac8c81246418b570b4b6fb1 \
-                    sha256  0a00e452a9b9ce0dc18c8ef899b849069633d1498cfcdf78c89666f0006a2c96 \
-                    size    760166
+checksums           rmd160  734c015d8220dfed4ee8d7555c8d78d06f6a7e2d \
+                    sha256  c4c49cddb3befef47dd3c8b4b786445f8dbc2ad44c1fa12194876b29f9e4aade \
+                    size    760265
 
-# use these to specify python versions, python3 required 
-set python3_version 3.8
-set python3_version_nickname \
-    [join [lrange [split ${python3_version} .] 0 1] {}]
+# use these to specify python versions, python3 required
+# use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+set python3_version 39
+set python3_branch [string index ${python3_version} 0].[string range ${python3_version} 1 end]
 
 # See https://github.com/gibiansky/IHaskell#mac,
 # https://github.com/gibiansky/IHaskell/blob/master/requirements.txt
@@ -41,32 +42,33 @@ depends_lib-append  \
                     path:lib/pkgconfig/pango.pc:pango \
                     port:ghc \
                     port:libmagic \
-                    port:python${python3_version_nickname} \
-                    port:py${python3_version_nickname}-cairo \
-                    port:py${python3_version_nickname}-ipykernel \
-                    port:py${python3_version_nickname}-ipywidgets \
-                    port:py${python3_version_nickname}-jupyter \
-                    port:py${python3_version_nickname}-jupyter_client \
-                    port:py${python3_version_nickname}-jupyter_core \
-                    port:py${python3_version_nickname}-magic \
-                    port:py${python3_version_nickname}-nbformat \
-                    port:py${python3_version_nickname}-pkgconfig \
-                    port:py${python3_version_nickname}-widgetsnbextension \
+                    port:python${python3_version} \
+                    port:py${python3_version}-cairo \
+                    port:py${python3_version}-ipykernel \
+                    port:py${python3_version}-ipywidgets \
+                    port:py${python3_version}-jupyter \
+                    port:py${python3_version}-jupyter_client \
+                    port:py${python3_version}-jupyter_core \
+                    port:py${python3_version}-magic \
+                    port:py${python3_version}-nbformat \
+                    port:py${python3_version}-pkgconfig \
+                    port:py${python3_version}-widgetsnbextension \
                     port:zmq
 
 haskell_stack.system_ghc \
                     yes
 
 # relative paths to ${prefix}
+set ihaskell_libdir ${prefix}/lib/${name}
 set ihaskell_datadir \
                     share/${name}
 set jupyter_dir     share/jupyter
-set hlint_datadir \
-                    share/hlint
+set hlint_datadir   share/hlint
 
 post-extract {
     xinstall -m 0755 -d \
         "[option haskell_stack.stack_root]" \
+        ${destroot}${ihaskell_libdir} \
         ${destroot}${prefix}/${ihaskell_datadir}/html \
         ${destroot}${prefix}/${jupyter_dir}
 
@@ -100,17 +102,56 @@ extra-include-dirs:\\
         ${worksrcpath}/src/Paths_${name}.hs
 }
 
-# no jupyter_select yet, so hack PATH to find `which jupyter`: 
+# no jupyter_select yet, so hack PATH to find `which jupyter`:
 # https://trac.macports.org/ticket/50608
 # note: this command does not change the destroot PATH environment, so export
 # PATH explicitly in the necessary system command below
 destroot.env-append \
-    "PATH=$env(PATH):${frameworks_dir}/Python.framework/Versions/${python3_version}/bin" \
+    "PATH=$env(PATH):${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin" \
     ${name}_datadir=${destroot}${prefix}/${ihaskell_datadir}
+
+# get the objdump rpath names that match ${workpath} in the binary
+proc get_workpath_list { binname } {
+    global workpath
+    return [exec bash -c "otool -l \"${binname}\" 2>/dev/null \
+        | grep -E -A 2 -e '\[\[:space:]]+cmd\[\[:space:]]+LC_RPATH' \
+        | grep -E -e '\[\[:space:]]+path\[\[:space:]]+' \
+        | grep -E -o -e '(${workpath}\[^ ]+)' || true"]
+}
+
+# install the DAG of shared libraries into ${libdir}, delete ${workpath} dirs
+proc shared_library_chase { binname libdir rpath_re } {
+    global destroot
+    set workpath_list [get_workpath_list ${binname}]
+    foreach path [lreverse ${workpath_list}] {
+        system "install_name_tool -delete_rpath \"${path}\" \"${binname}\""
+    }
+    system "install_name_tool -add_rpath \"${libdir}\" \"${binname}\""
+    foreach rpath [exec bash -c \
+        "otool -L \"${binname}\" | grep -E -o -e '${rpath_re}' || true"] {
+        set libname [strsed ${rpath} "s|^@rpath/||"]
+        set libpath ${libdir}/${libname}
+        set builtlib {}
+        foreach path ${workpath_list} {
+            if { [file exists ${path}/${libname}]
+                && [file isfile ${path}/${libname}] } {
+                set builtlib ${path}/${libname}
+                break
+            }
+        }
+        if { ${builtlib} ne ""
+            && ![file exists ${destroot}${libpath}] } {
+            xinstall -m 0644 ${builtlib} ${destroot}${libpath}
+            shared_library_chase \
+                    ${destroot}${libpath} \
+                    ${libdir} ${rpath_re}
+        }
+    }
+}
 
 post-destroot {
     # install the data-files into destroot (see ${name}.cabal)
-    fs-traverse f ${worksrcpath}/.stack-work {
+    fs-traverse f ${worksrcpath}/.stack-work/install {
         if { [file isfile ${f}] } {
             foreach datafile {
                 html/kernel.js
@@ -123,17 +164,25 @@ post-destroot {
             }
         }
     }
-    
+
     # run ihaskell to install the IPython files into destroot
     system -W ${worksrcpath} \
-        "export ${destroot.env} ; \
+        "env ${destroot.env} \
         ${destroot}${prefix}/bin/ihaskell install \
             --prefix=${destroot}${prefix}"
 
-    # delete any destroot path appearing in text files
+    shared_library_chase \
+                    ${destroot}${prefix}/bin/ihaskell \
+                    ${ihaskell_libdir} \
+                    {@rpath/libHS.+\.dylib}
+
+    # delete any destroot path appearing in text or json files
     fs-traverse f ${destroot}${prefix} {
         if {[file isfile ${f}]} {
-            if {[string match "text/*" [lindex [exec /usr/bin/file --mime-type ${f}] end]]} {
+            set file_mime_type \
+                [lindex [exec /usr/bin/file --mime-type ${f}] end]
+            if {[string match "text/*" ${file_mime_type}]
+                || [string match "application/json" ${file_mime_type}]} {
                 reinplace -q "s|${destroot}||g" ${f}
             }
         }
@@ -148,5 +197,5 @@ The environment variable `hlint_datadir` must be set before running the
 Jupyter notebook (due to a Cabal path issue):
 
         export hlint_datadir=${prefix}/${hlint_datadir}
-        jupyter-${python3_version} notebook-${python3_version}
+        jupyter-${python3_branch} notebook-${python3_branch}
 "
