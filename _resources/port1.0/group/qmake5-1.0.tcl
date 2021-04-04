@@ -81,8 +81,13 @@ pre-configure {
     if {[vercmp ${qt5.version} 5.9] >= 0} {
         if {[variant_exists universal] && [variant_isset universal]} {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
-        } else {
+        } elseif { ${configure.build_arch} ne "" } {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.build_arch}"
+        } else {
+            # If `supported_archs` is `noarch`, `configure.build_arch` can be empty (see e.g. qt5-qtbase-docs).
+            # Having an empty QMAKE_APPLE_DEVICE_ARCHS can cause an error.
+            # Even if it is not really needed, not having a QMAKE_APPLE_DEVICE_ARCHS at all can also cause an error.
+            puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${build_arch}"
         }
     } else {
         #
