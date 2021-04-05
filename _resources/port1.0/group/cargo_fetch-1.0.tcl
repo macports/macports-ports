@@ -44,6 +44,14 @@ default cargo.home          {${workpath}/.home/.cargo}
 default cargo.crates        {}
 default cargo.crates_github {}
 
+# please remove when 8a088c3 has been in a released MacPorts version for at least two weeks
+# see https://github.com/macports/macports-base/commit/8a088c30d80c7c3eca10848f28835e1c180229b1
+if {"shellescape" ni [info commands shellescape]} {
+    proc shellescape {arg} {
+        return [regsub -all -- {[^A-Za-z0-9.:@%/+=_-]} $arg {\\&}]
+    }
+}
+
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
     if {${action} eq "set"} {
@@ -87,7 +95,7 @@ proc cargo._extract_crate {cratefile} {
     global cargo.home distpath
 
     set tar [findBinary tar ${portutil::autoconf::tar_path}]
-    system -W "${cargo.home}/macports" "$tar -xf ${distpath}/${cratefile}"
+    system -W "${cargo.home}/macports" "$tar -xf [shellescape ${distpath}/${cratefile}]"
 }
 
 proc cargo._write_cargo_checksum {cdirname chksum} {

@@ -33,10 +33,11 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
     } else {
         depends_lib-append          port:gobject-introspection
         platform darwin 8 {
+            global prefix_frozen
             # The rules enabled by gobject-introspection require GNU make 3.81+
             depends_build-append    port:gmake
-            configure.env-append    MAKE=${prefix}/bin/gmake
-            build.cmd-replace       [portbuild::build_getmaketype] ${prefix}/bin/gmake
+            configure.env-append    MAKE=${prefix_frozen}/bin/gmake
+            build.cmd-replace       [portbuild::build_getmaketype] ${prefix_frozen}/bin/gmake
         }
 
         configure.args-append       --enable-introspection
