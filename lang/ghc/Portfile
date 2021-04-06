@@ -5,7 +5,7 @@ PortGroup           gpg_verify 1.0
 
 name                ghc
 version             8.10.4
-revision            0
+revision            1
 categories          lang haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             BSD
@@ -31,7 +31,10 @@ homepage            http://haskell.org/${name}
 
 # Bootstrapped ghc is the default build
 variant prebuilt \
-    description {Do not bootstrap ghc; install the pre-built binary.} {}
+    description {Do not bootstrap ghc; install the pre-built binary.} {
+    # https://gitlab.haskell.org/ghc/ghc/-/issues/19646
+    set workpath_destdir_pattern /Users/builder/Desktop/builds
+}
 
 # https://www.haskell.org/ghcup/
 # https://gitlab.haskell.org/haskell/ghcup/blob/master/README.md#manual-install
@@ -81,12 +84,42 @@ if {[option gpg_verify.use_gpg_verification]} {
 extract.only        ${distname}-x86_64-apple-darwin${extract.suffix} \
                     ${distname}-testsuite${extract.suffix}
 
+
+
 # use these to specify python versions, python3 required
-set python3_version 3.8
-set python3_version_nickname \
-                    [join [lrange [split ${python3_version} .] 0 1] {}]
+# use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+set python3_version 39
+set python3_branch [string index ${python3_version} 0].[string range ${python3_version} 1 end]
 
 set srcpath ${workpath}/src
+
+# get the objdump rpath names that match ${workpath} in the binary
+proc get_workpath_list { binname workpath_destdir_pattern } {
+    return [exec bash -c "otool -l \"${binname}\" 2>/dev/null \
+        | grep -E -A 2 -e '\[\[:space:]]+cmd\[\[:space:]]+LC_RPATH' \
+        | grep -E -e '\[\[:space:]]+path\[\[:space:]]+' \
+        | grep -E -o -e '(${workpath_destdir_pattern}\[^ ]+)' || true"]
+}
+
+# fix ${workpath} rpath dirs
+proc fix_workpath_rpath { binname workpath_destdir_pattern libdir_glob rpath_re } {
+    global destroot
+    set workpath_list \
+        [get_workpath_list ${binname} ${workpath_destdir_pattern}]
+    foreach path [lreverse ${workpath_list}] {
+        system "install_name_tool -delete_rpath \"${path}\" \"${binname}\" || true"
+    }
+    foreach rpath [exec bash -c \
+        "otool -L \"${binname}\" | grep -E -o -e '${rpath_re}' || true"] {
+        set libname [strsed ${rpath} "s|^@rpath/||"]
+        set libpath [glob -nocomplain "${destroot}${libdir_glob}/${libname}"]
+        if { ${libpath} ne "" } {
+            set libprefixpath \
+                [strsed [file dirname ${libpath}] "s|${destroot}||"]
+            system "install_name_tool -add_rpath \"${libprefixpath}\" \"${binname}\" || true"
+        }
+    }
+}
 
 # Note: ghc has DESTDIR; however, specifying --prefix=${prefix} installs
 # binaries into ${prefix}, not DESTDIR.  Work around this by setting
@@ -117,10 +150,12 @@ if { [variant_isset "prebuilt"] } {
                     port:alex \
                     port:autoconf \
                     port:automake \
+                    port:bash \
+                    port:cctools \
                     port:happy \
                     port:HsColour \
-                    port:python${python3_version_nickname} \
-                    port:py${python3_version_nickname}-sphinx \
+                    port:python${python3_version} \
+                    port:py${python3_version}-sphinx \
                     port:texlive \
                     port:texlive-fonts-extra \
                     port:texlive-fonts-recommended \
@@ -162,7 +197,7 @@ if { [variant_isset "prebuilt"] } {
     # add the bootstrap binary and the sphinx-build binary to PATH
     configure.env-append \
         GHC=${bootstrap_dir}/bin/ghc \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
+        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
 
     pre-configure {
         xinstall -m 0755 -d ${bootstrap_dir}
@@ -170,7 +205,7 @@ if { [variant_isset "prebuilt"] } {
 
     # the PATH environment must provide the bootstrap path
     build.env \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
+        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
 
     post-build {
         # bootstrap build/destroot from ${distname}-src${extract.suffix}
@@ -178,8 +213,8 @@ if { [variant_isset "prebuilt"] } {
         use_parallel_build yes
 
         # extract
-        extract.dir  ${srcpath}
-        extract.only ${distname}-src${extract.suffix}
+        extract.dir     ${srcpath}
+        extract.only    ${distname}-src${extract.suffix}
         portextract::extract_main
 
         # fix DejaVu texlive fonts names, e.g. "\setmonofont{DejaVu Sans Mono}"
@@ -199,20 +234,23 @@ if { [variant_isset "prebuilt"] } {
             ${srcpath}/${distname}/boot \
             ${srcpath}/${distname}/utils/checkUniques/check-uniques.py \
             " {
-            reinplace -E "s|^(#!/usr/bin/env python)3|\\1${python3_version}|" \
+            reinplace -E "s|^(#!/usr/bin/env python)3|\\1${python3_branch}|" \
                 ${f}
         }
 
         # see https://trac.macports.org/wiki/UsingTheRightCompiler
-        configure.env-append CC=${configure.cc}
-        build.env-append     CC=${configure.cc} \
-                             CXX=${configure.cxx}
+        configure.env-append    CC=${configure.cc}
+        build.env-append        CC=${configure.cc} \
+                                CXX=${configure.cxx}
         # diff -Naur ghc ghc-patched | sed -E -e 's/ghc(-patched)?\//.\//g' > patch-gmp-ghc.mk.diff
         system -W ${srcpath}/${distname} "patch -p0 < ${filespath}/patch-gmp-ghc.mk.diff"
+        # https://gitlab.haskell.org/ghc/ghc/-/issues/19655
+        # diff -Naur aclocal.m4 aclocal.m4.macports | sed -E -e 's|.macports||' > patch-aclocal.m4.diff
+        system -W ${srcpath}/${distname} "patch -p0 < ${filespath}/patch-aclocal.m4.diff"
 
         system -W ${srcpath}/${distname} \
-            "export ${configure.env} ;\
-            ./boot"
+                    "export ${configure.env} ;\
+                    ./boot"
 
         # configure
         # install the final compiler to destroot
@@ -243,6 +281,23 @@ destroot {
     xinstall -W ${filespath} -m 0644 ./ghci.conf ${destroot}${prefix}/etc
 }
 
+# https://gitlab.haskell.org/ghc/ghc/-/issues/19646
+set workpath_destdir_pattern ${workpath}
+post-destroot {
+    # fix rpath searches
+    foreach f [concat \
+        [glob -type f ${destroot}${prefix}/lib/${name}-${version}/bin/*] \
+        [glob -type f ${destroot}${prefix}/lib/${name}-${version}/*/*.dylib]] {
+        if {[file executable ${f}]
+            || [string match *.dylib ${f}]} {
+            fix_workpath_rpath ${f} \
+                ${workpath_destdir_pattern} \
+                ${prefix}/lib/${name}-${version}/* \
+                {@rpath/lib.+\.dylib}
+        }
+    }
+}
+
 post-destroot {
     # delete any destroot path appearing in text files
     fs-traverse f ${destroot}${prefix} {
@@ -260,7 +315,7 @@ post-activate {
 
 pre-test {
     test.env-append \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_version}/bin"
+        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
 }
 
 test.run            yes
