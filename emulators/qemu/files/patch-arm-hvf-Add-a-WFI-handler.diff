@@ -1,0 +1,129 @@
+diff --git a/accel/hvf/hvf-cpus.c b/accel/hvf/hvf-cpus.c
+index 6d70ee742e..abef6a58f7 100644
+--- a/accel/hvf/hvf-cpus.c
++++ b/accel/hvf/hvf-cpus.c
+@@ -322,15 +322,14 @@ static int hvf_init_vcpu(CPUState *cpu)
+     cpu->hvf = g_malloc0(sizeof(*cpu->hvf));
+ 
+     /* init cpu signals */
+-    sigset_t set;
+     struct sigaction sigact;
+ 
+     memset(&sigact, 0, sizeof(sigact));
+     sigact.sa_handler = dummy_signal;
+     sigaction(SIG_IPI, &sigact, NULL);
+ 
+-    pthread_sigmask(SIG_BLOCK, NULL, &set);
+-    sigdelset(&set, SIG_IPI);
++    pthread_sigmask(SIG_BLOCK, NULL, &cpu->hvf->unblock_ipi_mask);
++    sigdelset(&cpu->hvf->unblock_ipi_mask, SIG_IPI);
+ 
+ #ifdef __aarch64__
+     r = hv_vcpu_create(&cpu->hvf->fd, (hv_vcpu_exit_t **)&cpu->hvf->exit, NULL);
+diff --git a/include/sysemu/hvf_int.h b/include/sysemu/hvf_int.h
+index c2ac6c8f97..7a397fe85a 100644
+--- a/include/sysemu/hvf_int.h
++++ b/include/sysemu/hvf_int.h
+@@ -51,6 +51,7 @@ extern HVFState *hvf_state;
+ struct hvf_vcpu_state {
+     uint64_t fd;
+     void *exit;
++    sigset_t unblock_ipi_mask;
+ };
+ 
+ void assert_hvf_ok(hv_return_t ret);
+diff --git a/target/arm/hvf/hvf.c b/target/arm/hvf/hvf.c
+index 8f18efe856..f0850ab14a 100644
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -2,6 +2,7 @@
+  * QEMU Hypervisor.framework support for Apple Silicon
+ 
+  * Copyright 2020 Alexander Graf <agraf@csgraf.de>
++ * Copyright 2020 Google LLC
+  *
+  * This work is licensed under the terms of the GNU GPL, version 2 or later.
+  * See the COPYING file in the top-level directory.
+@@ -17,6 +18,8 @@
+ #include "sysemu/hvf_int.h"
+ #include "sysemu/hw_accel.h"
+ 
++#include <mach/mach_time.h>
++
+ #include "exec/address-spaces.h"
+ #include "hw/irq.h"
+ #include "qemu/main-loop.h"
+@@ -411,6 +414,7 @@ int hvf_arch_init_vcpu(CPUState *cpu)
+ 
+ void hvf_kick_vcpu_thread(CPUState *cpu)
+ {
++    cpus_kick_thread(cpu);
+     hv_vcpus_exit(&cpu->hvf->fd, 1);
+ }
+ 
+@@ -466,6 +470,18 @@ static int hvf_inject_interrupts(CPUState *cpu)
+     return 0;
+ }
+ 
++static void hvf_wait_for_ipi(CPUState *cpu, struct timespec *ts)
++{
++    /*
++     * Use pselect to sleep so that other threads can IPI us while we're
++     * sleeping.
++     */
++    qatomic_mb_set(&cpu->thread_kicked, false);
++    qemu_mutex_unlock_iothread();
++    pselect(0, 0, 0, 0, ts, &cpu->hvf->unblock_ipi_mask);
++    qemu_mutex_lock_iothread();
++}
++
+ int hvf_vcpu_exec(CPUState *cpu)
+ {
+     ARMCPU *arm_cpu = ARM_CPU(cpu);
+@@ -577,6 +593,46 @@ int hvf_vcpu_exec(CPUState *cpu)
+         }
+         case EC_WFX_TRAP:
+             advance_pc = true;
++            if (!(syndrome & WFX_IS_WFE) && !(cpu->interrupt_request &
++                (CPU_INTERRUPT_HARD | CPU_INTERRUPT_FIQ))) {
++
++                uint64_t ctl;
++                r = hv_vcpu_get_sys_reg(cpu->hvf->fd, HV_SYS_REG_CNTV_CTL_EL0,
++                                        &ctl);
++                assert_hvf_ok(r);
++
++                if (!(ctl & 1) || (ctl & 2)) {
++                    /* Timer disabled or masked, just wait for an IPI. */
++                    hvf_wait_for_ipi(cpu, NULL);
++                    break;
++                }
++
++                uint64_t cval;
++                r = hv_vcpu_get_sys_reg(cpu->hvf->fd, HV_SYS_REG_CNTV_CVAL_EL0,
++                                        &cval);
++                assert_hvf_ok(r);
++
++                int64_t ticks_to_sleep = cval - mach_absolute_time();
++                if (ticks_to_sleep < 0) {
++                    break;
++                }
++
++                uint64_t seconds = ticks_to_sleep / arm_cpu->gt_cntfrq_hz;
++                uint64_t nanos =
++                    (ticks_to_sleep - arm_cpu->gt_cntfrq_hz * seconds) *
++                    1000000000 / arm_cpu->gt_cntfrq_hz;
++
++                /*
++                 * Don't sleep for less than 2ms. This is believed to improve
++                 * latency of message passing workloads.
++                 */
++                if (!seconds && nanos < 2000000) {
++                    break;
++                }
++
++                struct timespec ts = { seconds, nanos };
++                hvf_wait_for_ipi(cpu, &ts);
++            }
+             break;
+         case EC_AA64_HVC:
+             cpu_synchronize_state(cpu);
