@@ -100,12 +100,6 @@ proc bazel::set_dep { } {
 }
 port::register_callback bazel::set_dep
 
-variant mkl description {Enable Intel Math Kernel Library support} { }
-# Enable MKL by default on 10.12 and newer.
-#if {${os.major} >= 16} {
-#    default_variants-append +mkl
-#}
-
 variant native description {Build from source for best native platform support} {
     # Prevent precompiled binaries to let compilation optimise the library for the user processor
     archive_sites
@@ -247,9 +241,6 @@ proc bazel::get_build_opts {} {
         # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
         # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
     }
-    if {[variant_isset mkl]} {
-        set bazel_build_opts "${bazel_build_opts} --config=mkl"
-    }
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
         set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
@@ -278,6 +269,8 @@ proc bazel::configure_build {} {
         if {![variant_isset native]} {
             set base_march [bazel::get_base_arch]
             set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
+        } else {
+            set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
         }
 
         build.cmd       "${bazel_build_env} [option bazel.build_cmd] [option bazel.build_cmd_opts]"
