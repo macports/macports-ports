@@ -60,6 +60,20 @@ foreach mpiname [array names mpidb *,variant] {
     lappend mpi.variants $mpidb($mpiname)
 }
 
+proc mpi.get_default_mpi_compiler {} {
+    # No MPI variant has been selected.
+    # Attempt to select the MPI port that is consistent with the compiler being used.
+    lassign [split [option configure.compiler] "-"] ismacports type ver
+    if {${ismacports} ne "macports"} {
+        # system compiler is being used, so use {mpich,openmpi}-default
+        return {mp default}
+    } else {
+        # macports compiler is being used, so use the corresponding MPI port
+        set mpiver [join [split ${ver} "."] ""]
+        return "${type}${mpiver} ${type}${mpiver}"
+    }
+}
+
 proc mpi.setup_variants {variants} {
     global mpidb mpi.cc mpi.cxx mpi.f77 mpi.f90 mpi.fc
 
@@ -84,8 +98,7 @@ proc mpi.setup_variants {variants} {
                 set p_name \$c_name
                 set d_name \$c_name
                 if {\$c_name eq {}} {
-                    set p_name mp
-                    set d_name default
+                    lassign \[mpi.get_default_mpi_compiler\] p_name d_name
                 } elseif {\[string match gcc* \$c_name\]} {
                     configure.cxx_stdlib macports-libstdc++
                 }
