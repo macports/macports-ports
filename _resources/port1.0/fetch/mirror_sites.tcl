@@ -92,7 +92,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirror.23media.de/cpan/modules/by-module/
     http://mirror.amberit.com.bd/CPAN/modules/by-module/
     http://mirror.as43289.net/pub/CPAN/modules/by-module/
-    http://mirror.bhoovd.com/CPAN/modules/by-module/
     http://mirror.bibleonline.ru/cpan/modules/by-module/
     http://mirror.biznetgio.com/cpan/modules/by-module/
     http://mirror.bytemark.co.uk/CPAN/modules/by-module/
