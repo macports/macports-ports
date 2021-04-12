@@ -277,6 +277,8 @@ proc bazel::configure_build {} {
             set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
         }
 
+        set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
+
         build.cmd       "${bazel_build_env} [option bazel.build_cmd] [option bazel.build_cmd_opts]"
         build.args      "[option bazel.build_opts]"
         build.post_args "[option bazel.build_target]"
