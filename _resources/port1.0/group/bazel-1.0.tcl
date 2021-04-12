@@ -9,7 +9,7 @@ PortGroup compiler_blacklist_versions 1.0
 namespace eval bazel { }
 
 options bazel.min_xcode
-default bazel.min_xcode 10.2
+default bazel.min_xcode 12.2
 
 options bazel.build_cmd
 default bazel.build_cmd bazel
