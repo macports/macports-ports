@@ -132,6 +132,10 @@ proc bazel::set_env {} {
         build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
         destroot.env-append  BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
     }
+    # https://github.com/bazelbuild/bazel/issues/2852
+    configure.env-append BAZEL_SH=/bin/bash
+    build.env-append     BAZEL_SH=/bin/bash
+    destroot.env-append  BAZEL_SH=/bin/bash
 }
 port::register_callback bazel::set_env
 
