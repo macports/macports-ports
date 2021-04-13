@@ -132,6 +132,10 @@ proc bazel::set_env {} {
         build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
         destroot.env-append  BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
     }
+    # https://github.com/bazelbuild/bazel/issues/2852
+    configure.env-append BAZEL_SH=/bin/bash
+    build.env-append     BAZEL_SH=/bin/bash
+    destroot.env-append  BAZEL_SH=/bin/bash
 }
 port::register_callback bazel::set_env
 
@@ -272,6 +276,8 @@ proc bazel::configure_build {} {
         } else {
             set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
         }
+
+        set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
 
         build.cmd       "${bazel_build_env} [option bazel.build_cmd] [option bazel.build_cmd_opts]"
         build.args      "[option bazel.build_opts]"
