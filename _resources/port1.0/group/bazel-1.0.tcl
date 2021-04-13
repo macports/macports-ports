@@ -142,12 +142,11 @@ proc bazel::set_env {} {
     destroot.env-append  BAZEL_SH=/bin/bash
     # patch PATH to find correct 'bazel' version
     post-extract {
-        global workpath prefix
-        xinstall -d ${workpath}/bazel_bin
-        ln -s ${prefix}/bin/[option bazel.build_cmd] ${workpath}/bazel_bin/bazel
-        configure.env-append "PATH=${workpath}/bazel_bin:$env(PATH)"
-        build.env-append     "PATH=${workpath}/bazel_bin:$env(PATH)"
-        destroot.env-append  "PATH=${workpath}/bazel_bin:$env(PATH)"
+        global prefix
+        set newpath "PATH=${prefix}/libexec/[option bazel.build_cmd]/bin:$env(PATH)"
+        configure.env-append ${newpath}
+        build.env-append     ${newpath}
+        destroot.env-append  ${newpath}
     }
 }
 port::register_callback bazel::set_env
