@@ -8,11 +8,14 @@ PortGroup compiler_blacklist_versions 1.0
 
 namespace eval bazel { }
 
+options bazel.version
+default bazel.version "latest"
+
 options bazel.min_xcode
 default bazel.min_xcode 12.2
 
 options bazel.build_cmd
-default bazel.build_cmd bazel
+default bazel.build_cmd {[bazel::get_build_cmd]}
 
 options bazel.build_cmd_opts
 default bazel.build_cmd_opts {[bazel::get_cmd_opts]}
@@ -25,9 +28,6 @@ default bazel.build_target ""
 
 options bazel.post_build_cmd
 default bazel.post_build_cmd ""
-
-options bazel.version
-default bazel.version "latest"
 
 options bazel.max_idle_secs
 default bazel.max_idle_secs 30
@@ -90,12 +90,19 @@ if { [bazel::use_mp_clang] } {
     compiler.blacklist-append {clang}
 }
 
-proc bazel::set_dep { } {
-    ui_debug "Defining bazel port dependency"
+proc bazel::get_build_cmd { } {
     if { [option bazel.version] eq "latest" } {
-        depends_build-append port:bazel
+        return bazel
     } else {
-        depends_build-append port:bazel-[option bazel.version]
+        return bazel-[option bazel.version]
+    }
+}
+
+proc bazel::set_dep { } {
+    set bz_dep [option bazel.build_cmd]
+    if { ${bz_dep} ne "" } {
+        ui_debug "Defining bazel dependency port:${bz_dep}"
+        depends_build-append port:${bz_dep}
     }
 }
 port::register_callback bazel::set_dep
@@ -126,6 +133,7 @@ if {![variant_isset native]} {
 }
 
 proc bazel::set_env {} {
+    global prefix env
     ui_debug "Setting Bazel Env"
     if { [bazel::use_mp_clang] } {
         configure.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
@@ -136,6 +144,14 @@ proc bazel::set_env {} {
     configure.env-append BAZEL_SH=/bin/bash
     build.env-append     BAZEL_SH=/bin/bash
     destroot.env-append  BAZEL_SH=/bin/bash
+    # patch PATH to find correct 'bazel' version
+    if { [option bazel.build_cmd] ne "" } {
+        set newpath "PATH=${prefix}/libexec/[option bazel.build_cmd]/bin:$env(PATH)"
+        configure.env-append ${newpath}
+        build.env-append     ${newpath}
+        destroot.env-append  ${newpath}
+        ui_debug "Prepended ${newpath}"
+    }
 }
 port::register_callback bazel::set_env
 
