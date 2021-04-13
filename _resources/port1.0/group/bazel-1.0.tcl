@@ -8,11 +8,14 @@ PortGroup compiler_blacklist_versions 1.0
 
 namespace eval bazel { }
 
+options bazel.version
+default bazel.version "latest"
+
 options bazel.min_xcode
 default bazel.min_xcode 12.2
 
 options bazel.build_cmd
-default bazel.build_cmd bazel
+default bazel.build_cmd {[bazel::get_build_cmd]}
 
 options bazel.build_cmd_opts
 default bazel.build_cmd_opts {[bazel::get_cmd_opts]}
@@ -25,9 +28,6 @@ default bazel.build_target ""
 
 options bazel.post_build_cmd
 default bazel.post_build_cmd ""
-
-options bazel.version
-default bazel.version "latest"
 
 options bazel.max_idle_secs
 default bazel.max_idle_secs 30
@@ -90,13 +90,17 @@ if { [bazel::use_mp_clang] } {
     compiler.blacklist-append {clang}
 }
 
+proc bazel::get_build_cmd { } {
+    if { [option bazel.version] eq "latest" } {
+        return bazel
+    } else {
+        return bazel-[option bazel.version]
+    }
+}
+
 proc bazel::set_dep { } {
     ui_debug "Defining bazel port dependency"
-    if { [option bazel.version] eq "latest" } {
-        depends_build-append port:bazel
-    } else {
-        depends_build-append port:bazel-[option bazel.version]
-    }
+    depends_build-append port:[option bazel.build_cmd]
 }
 port::register_callback bazel::set_dep
 
@@ -136,6 +140,15 @@ proc bazel::set_env {} {
     configure.env-append BAZEL_SH=/bin/bash
     build.env-append     BAZEL_SH=/bin/bash
     destroot.env-append  BAZEL_SH=/bin/bash
+    # patch PATH to find correct 'bazel' version
+    post-extract {
+        global workpath prefix
+        xinstall -d ${workpath}/bazel_bin
+        ln -s ${prefix}/bin/[option bazel.build_cmd] ${workpath}/bazel_bin/bazel
+        configure.env-append "PATH=${workpath}/bazel_bin:$env(PATH)"
+        build.env-append     "PATH=${workpath}/bazel_bin:$env(PATH)"
+        destroot.env-append  "PATH=${workpath}/bazel_bin:$env(PATH)"
+    }
 }
 port::register_callback bazel::set_env
 
