@@ -5,7 +5,7 @@ PortGroup           cmake 1.1
 PortGroup           github 1.0
 
 github.setup        apache arrow 3.0.0 apache-arrow-
-revision            6
+revision            7
 name                ${github.author}-${github.project}
 
 categories          devel
@@ -29,8 +29,11 @@ compiler.cxx_standard 2017
 universal_variant   no
 
 # Build instructions: https://github.com/apache/arrow/blob/master/docs/source/developers/python.rst#build-and-test
+cmake.generator     Ninja
 cmake.source_dir    ${worksrcpath}/cpp
 cmake.build_type    Release
+set cmake_build_type \
+                    [string tolower ${cmake.build_type}]
 
 set llvm_version    11
 set llvm_prefix     ${prefix}/libexec/llvm-${llvm_version}
@@ -45,7 +48,28 @@ depends_build-append \
 
 depends_lib-append \
                     port:abseil \
-                    port:llvm-${llvm_version}
+                    path:lib/libssl.dylib:openssl \
+                    port:boost \
+                    port:brotli \
+                    port:bzip2 \
+                    port:c-ares \
+                    port:gmake \
+                    port:grpc \
+                    port:google-glog \
+                    port:jemalloc \
+                    port:libutf8proc \
+                    port:libunwind \
+                    port:llvm-${llvm_version} \
+                    port:lz4 \
+                    port:ninja \
+                    port:protobuf3-cpp \
+                    port:rapidjson \
+                    port:re2 \
+                    port:snappy \
+                    port:thrift \
+                    port:wget \
+                    port:zlib \
+                    port:zstd
 
 if { ${os.platform} eq "darwin" && ${os.major} < 17 } {
     known_fail      yes
@@ -77,6 +101,8 @@ post-configure {
     }
 }
 
+# used for both apache-arrow and py*-pyarrow
+
 # macOS wheel:
 # https://github.com/apache/arrow/blob/master/ci/scripts/python_wheel_macos_build.sh
 configure.args-append \
@@ -86,13 +112,15 @@ configure.args-append \
                     -DARROW_DEPENDENCY_USE_SHARED:BOOL=ON \
                     -DARROW_FLIGHT:BOOL=ON \
                     -DARROW_HDFS:BOOL=ON \
+                    -DARROW_JSON:BOOL=ON \
                     -DARROW_JEMALLOC:BOOL=ON \
                     -DARROW_ORC:BOOL=ON \
                     -DARROW_PARQUET:BOOL=ON \
                     -DARROW_PLASMA:BOOL=ON \
                     -DARROW_PROTOBUF_USE_SHARED:BOOL=ON \
-                    -DARROW_PYTHON:BOOL=ON \
-                    -DARROW_S3:BOOL=ON \
+                    -DARROW_PYTHON:BOOL=OFF \
+                    -DARROW_RPATH_ORIGIN:BOOL=OFF \
+                    -DARROW_S3:BOOL=OFF \
                     -DARROW_USE_CCACHE:BOOL=OFF \
                     -DARROW_TENSORFLOW:BOOL=ON \
                     -DARROW_UTF8PROC_USE_SHARED:BOOL=ON \
@@ -102,69 +130,30 @@ configure.args-append \
                     -DARROW_WITH_SNAPPY:BOOL=ON \
                     -DARROW_WITH_ZLIB:BOOL=ON \
                     -DARROW_WITH_ZSTD:BOOL=ON \
-                    -DARROW_INSTALL_NAME_RPATH:BOOL=OFF \
-                    -Dc-ares_INCLUDE_DIR=${prefix}/include \
-                    -DgRPC_ROOT=${prefix} \
-                    -DLLVM_ROOT=${llvm_prefix} \
-                    -DRE2_INCLUDE_DIRS=${prefix}/include \
-                    -DRE2_SOURCE=SYSTEM
-
-# used for both apache-arrow and py*-pyarrow
-
-set arrow_build_type release
-build.env-append    ARROW_BUILD_TYPE=${arrow_build_type}
+                    -Dc-ares_INCLUDE_DIR:PATH=${prefix}/include \
+                    -DgRPC_ROOT:PATH=${prefix} \
+                    -DLLVM_ROOT:PATH=${llvm_prefix} \
+                    -DRE2_SOURCE:STRING=SYSTEM
 
 destroot.target     install
 
-if {${name} eq ${subport}} {
-    # Apache Arrow requires a python3 version to build; use this
-    set python_branch   3.9
-    set python_version  [join [split ${python_branch} .] ""]
-    set python_prefix   ${frameworks_dir}/Python.framework/Versions/${python_branch}
-    set python_bin      ${python_prefix}/bin/python${python_branch}
-
-    depends_build-append \
-                    port:python${python_version} \
-                    port:py${python_version}-cython \
-                    port:py${python_version}-numpy
-
-    depends_lib-append \
-                    path:lib/libssl.dylib:openssl \
-                    port:boost \
-                    port:brotli \
-                    port:bzip2 \
-                    port:c-ares \
-                    port:gmake \
-                    port:grpc \
-                    port:google-glog \
-                    port:jemalloc \
-                    port:libutf8proc \
-                    port:libunwind \
-                    port:lz4 \
-                    port:ninja \
-                    port:protobuf3-cpp \
-                    port:rapidjson \
-                    port:re2 \
-                    port:snappy \
-                    port:thrift \
-                    port:wget \
-                    port:zlib \
-                    port:zstd
-
+if {${name} eq ${subport}} { 
     configure.args-append \
-                    -DPython3_EXECUTABLE=${python_bin}
+                    -DARROW_BUILD_UTILITIES:BOOL=ON
+}
 
-    configure.env-append \
-                    "PATH=${llvm_bin}:$env(PATH)"
-
-    build.env-append \
-                    "PATH=${llvm_bin}:$env(PATH)"
-    build.target
-
-    destroot.env-append \
-                    "PATH=${llvm_bin}:$env(PATH)"
-    destroot.cmd    ${build.cmd}
-    destroot.destdir    DESTDIR=${destroot}
+# lib[^[:space:]]+
+proc change_arrow_rpath { binname libname_re } {
+    global prefix python.pkgd
+    foreach path [exec bash -c \
+        "otool -L \"${binname}\" | grep -E -o -e '@rpath/${libname_re}' || true"] {
+        set newpath [strsed ${path} "s|@rpath|${python.pkgd}/pyarrow|"]
+        if {[file tail ${binname}] eq [file tail ${path}]} {
+            system "install_name_tool -id \"${newpath}\" \"${binname}\""
+        } else {
+            system "install_name_tool -change \"${path}\" \"${newpath}\" \"${binname}\""
+        }
+    }
 }
 
 # create Python subports
@@ -172,6 +161,8 @@ set python_versions {37 38 39}
 foreach v ${python_versions} {
     subport py${v}-py${github.project} {
         PortGroup   python 1.0
+
+        categories-append   python
 
         python.default_version  ${v}
     }
@@ -183,15 +174,16 @@ if {[string match "py*" ${subport}]} {
     fetch.type      git
 
     depends_build-append \
-                    port:py${python.version}-cython \
+                    port:bash \
+                    port:cctools \
                     port:py${python.version}-pip \
                     port:py${python.version}-setuptools \
                     port:py${python.version}-setuptools_scm \
                     port:py${python.version}-wheel
 
     depends_lib-append \
-                    port:apache-arrow \
                     port:py${python.version}-brotli \
+                    port:py${python.version}-cython \
                     port:py${python.version}-pycares \
                     port:py${python.version}-numpy \
                     path:${python.pkgd}/tensorflow:py${python.version}-tensorflow
@@ -208,56 +200,117 @@ if {[string match "py*" ${subport}]} {
         system -W ${worksrcpath} "git submodule update --init --recursive"
     }
 
-    cmake.module_path-append \
-                    ${prefix}/lib/cmake/arrow
+    # the build must link against its own libraries
+    cmake.install_rpath
+
+    use_configure   yes
+
+    # install apache-arrow for this ${python.branch} in ${configure_destdir}
+    set configure_destdir ${workpath}/${name}-DESTDIR
+    post-extract {
+        # see portdestroot::destroot_start
+        set mtree [findBinary mtree ${portutil::autoconf::mtree_path}]
+        file mkdir "${configure_destdir}"
+        if { ${os.platform} eq "darwin" } {
+            system -W ${configure_destdir} "${mtree} -e -U -f [file join ${portsharepath} install macosx.mtree]"
+            file mkdir "${configure_destdir}${applications_dir}"
+            file mkdir "${configure_destdir}${frameworks_dir}"
+        }
+        file mkdir "${configure_destdir}${prefix}"
+        system -W ${configure_destdir}${prefix} "${mtree} -e -U -f [file join ${portsharepath} install prefix.mtree]"
+    }
+    post-configure {
+        system -W ${configure.dir} \
+                    "ninja all -j${build.jobs} -v"
+        system -W ${configure.dir} \
+                    "export DESTDIR=${configure_destdir}; \
+                    ninja install"
+    }
+
+    cmake.module_path-prepend \
+                    ${configure_destdir}${prefix}/lib/cmake/arrow
+
+    compiler.library_path \
+                    "${configure_destdir}${prefix}/lib:${prefix}/lib"
+    configure.ldflags-prepend \
+                    -L${configure_destdir}${prefix}/lib
 
     configure.pre_args-delete \
                     --prefix=${prefix}
     configure.pre_args-replace \
                     {-DCMAKE_C_COMPILER="$CC"} \
-                    -DCMAKE_C_COMPILER=${configure.cc}
+                    -DCMAKE_C_COMPILER:FILEPATH=${configure.cc}
     configure.pre_args-replace \
                     {-DCMAKE_CXX_COMPILER="$CXX"} \
-                    -DCMAKE_CXX_COMPILER=${configure.cxx}
-    configure.pre_args-replace \
+                    -DCMAKE_CXX_COMPILER:FILEPATH=${configure.cxx}
+    if {${cmake.generator} ne {Ninja}} {
+        configure.pre_args-replace \
                     "-DCMAKE_MAKE_PROGRAM=${python.bin} setup.py --no-user-cfg" \
-                    -DCMAKE_MAKE_PROGRAM=[portbuild::build_getmaketype]
-
-    configure.args-append \
-                    -DPython3_EXECUTABLE=${python.bin} \
-                    -Dre2_DIR=${prefix}/lib/cmake/grpc/modules
+                    -DCMAKE_MAKE_PROGRAM:STRING=[portbuild::build_getmaketype]
+    }
 
     # macOS wheel:
     # https://github.com/apache/arrow/blob/master/ci/scripts/python_wheel_macos_build.sh
+    configure.args-replace \
+                    -DARROW_PYTHON:BOOL=OFF \
+                    -DARROW_PYTHON:BOOL=ON
+    configure.args-replace \
+                    -DARROW_RPATH_ORIGIN:BOOL=OFF \
+                    -DARROW_RPATH_ORIGIN:BOOL=ON
+    configure.args-append \
+                    -DPython3_EXECUTABLE:FILEPATH=${python.bin} \
+                    -Dre2_DIR:PATH=${prefix}/lib/cmake/grpc/modules
+
+    pre-build {
+        reinplace -E -q "s|^(set\\(PLASMA_STORE_SERVER\[\[:space:]]+\")(${prefix}/bin/plasma-store-server\"\\))|\\1${configure_destdir}\\2|" \
+            ${configure_destdir}${prefix}/lib/cmake/arrow/PlasmaConfig.cmake
+    }
+
     build.env-append \
-                    "PATH=${llvm_bin}:$env(PATH)" \
-                    "PYARROW_CMAKE_OPTIONS=[concat {*}${configure.pre_args} {*}${configure.args}]" \
+                    CCACHE_DIR=${workpath}/.ccache \
+                    "PKG_CONFIG_PATH=/usr/lib/pkgconfig:${build.dir}/install/lib/pkgconfig" \
+                    PYARROW_BOOST_USE_SHARED=1 \
+                    PYARROW_BUILD_TYPE=${cmake_build_type} \
+                    PYARROW_BUNDLE_ARROW_CPP=1 \
+                    PYARROW_CMAKE_OPTIONS=[exec echo {*}${configure.pre_args}] \
                     PYARROW_INSTALL_TESTS=1 \
+                    PYARROW_CMAKE_GENERATOR=${cmake.generator} \
                     PYARROW_WITH_DATASET=1 \
                     PYARROW_WITH_FLIGHT=1 \
                     PYARROW_WITH_HDFS=1 \
                     PYARROW_WITH_ORC=1 \
                     PYARROW_WITH_PARQUET=1 \
                     PYARROW_WITH_PLASMA=1 \
-                    PYARROW_WITH_S3=1 \
-                    PYARROW_WITH_TENSORFLOW=1 \
-                    CCACHE_DIR=${workpath}/.ccache
+                    PYARROW_WITH_S3=0 \
+                    PYARROW_WITH_TENSORFLOW=1
 
     build.dir       ${worksrcpath}/python
-    build.target    build_ext
-    build.post_args \
-                    --with-dataset \
-                    --with-flight \
-                    --with-parquet \
-                    --with-plasma \
-                    --with-tensorflow \
-                    --build-type=${arrow_build_type} \
-                    --bundle-arrow-cpp bdist_wheel
+    build.cmd       ${python.bin} setup.py --no-user-cfg
+    build.target    bdist_wheel
+    build.post_args
 
     destroot.env-append \
-                    "PATH=${python.prefix}/bin:${llvm_bin}:$env(PATH)" \
                     CCACHE_DIR=${workpath}/.ccache
     destroot.dir    ${build.dir}
+    destroot.destdir    [python_get_defaults destroot_destdir]
+
+    post-destroot {
+        fs-traverse f ${destroot}${python.pkgd}/pyarrow {
+            if {[file isfile ${f}]
+                && [regexp {\.(so|dylib)$} ${f}]} {
+                change_arrow_rpath ${f} {lib[^[:space:]]+}
+            }
+        }
+    }
+
+    post-destroot {
+        set docdir ${prefix}/share/doc/${subport}
+        xinstall -d ${destroot}${docdir}
+        xinstall -m 0644 -W ${worksrcpath} LICENSE.txt README.md ${destroot}${docdir}
+        foreach f [glob ${destroot}${prefix}/bin/*] {
+            move ${f} ${f}-${python.branch}
+        }
+    }
 
     pre-test {
         test.env-append \
@@ -270,15 +323,6 @@ if {[string match "py*" ${subport}]} {
                     PARQUET_TEST_DATA=${worksrcpath}/cpp/submodules/parquet-testing/data
     test.cmd        py.test-${python.branch}
     test.target
-
-    post-destroot {
-        set docdir ${prefix}/share/doc/${subport}
-        xinstall -d ${destroot}${docdir}
-        xinstall -m 0644 -W ${worksrcpath} LICENSE.txt README.md ${destroot}${docdir}
-        foreach f [glob ${destroot}${prefix}/bin/*] {
-            move ${f} ${f}-${python.branch}
-        }
-    }
 
     livecheck.type      none
 } else {
