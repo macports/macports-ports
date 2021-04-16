@@ -169,12 +169,16 @@ proc go.append_env {} {
     # legacy macOS support, are correctly passed.
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
         # Create a wrapper script around CC,CXX command to enforce use of flags required for legacy support
+        # Note, go annoying uses CC for both building and linking, and thus in order to get it to correctly
+        # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
+        # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         post-extract {
-            system "echo '#!/bin/bash'                                                                >  ${workpath}/go_cc_wrap"
-            system "echo 'exec ${configure.cc} ${configure.cflags} ${configure.ldflags} \"\$\{\@\}\"' >> ${workpath}/go_cc_wrap"
+            set l_lib [legacysupport::get_library_name]
+            system "echo '#!/bin/bash'                                                                           >  ${workpath}/go_cc_wrap"
+            system "echo 'exec ${configure.cc} ${configure.cflags} ${configure.ldflags} \"\$\{\@\}\"' -Wno-error >> ${workpath}/go_cc_wrap"
             system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                                                   >  ${workpath}/go_cxx_wrap"
-            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${configure.ldflags} \"\$\{\@\}\"' >> ${workpath}/go_cxx_wrap"
+            system "echo '#!/bin/bash'                                                                              >  ${workpath}/go_cxx_wrap"
+            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${configure.ldflags} \"\$\{\@\}\"' -Wno-error >> ${workpath}/go_cxx_wrap"
             system "chmod +x ${workpath}/go_cxx_wrap"
         }
         build.env-append     "GO_EXTLINK_ENABLED=1" \
