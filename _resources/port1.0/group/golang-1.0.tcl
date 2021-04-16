@@ -150,29 +150,41 @@ default worksrcdir      {gopath/src/${go.package}}
 
 set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} CXX=${configure.cxx} GOPROXY=off GO111MODULE=off}
 
-default build.cmd   {${go.bin} build}
+default build.cmd     {${go.bin} build}
 default build.args      ""
 default build.target    ""
-default build.env   ${go_env}
+default build.env     ${go_env}
 
-default test.cmd    {${go.bin} test}
+default test.cmd      {${go.bin} test}
 default test.args       ""
 default test.target     ""
-default test.env    ${go_env}
+default test.env      ${go_env}
+
+default configure.env ${go_env}
 
 proc go.append_env {} {
-    global os.major configure.ldflags configure.cflags build.env
+    global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags
+    global os.major build.env workpath
     # Following options make sure link options, including those for
     # legacy macOS support, are correctly passed.
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-        build.env-append   "GO_EXTLINK_ENABLED=1" \
-                           "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                           "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                           "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
-        test.env-append    "GO_EXTLINK_ENABLED=1" \
-                           "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                           "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                           "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}"
+        # Create a wrapper script around CC,CXX command to enforce use of flags required for legacy support
+        post-extract {
+            system "echo '#!/bin/bash'                                                                >  ${workpath}/go_cc_wrap"
+            system "echo 'exec ${configure.cc} ${configure.cflags} ${configure.ldflags} \"\$\{\@\}\"' >> ${workpath}/go_cc_wrap"
+            system "chmod +x ${workpath}/go_cc_wrap"
+            system "echo '#!/bin/bash'                                                                   >  ${workpath}/go_cxx_wrap"
+            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${configure.ldflags} \"\$\{\@\}\"' >> ${workpath}/go_cxx_wrap"
+            system "chmod +x ${workpath}/go_cxx_wrap"
+        }
+        build.env-append     "GO_EXTLINK_ENABLED=1" \
+                             "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+                             "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+                             "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}" \
+                             "CC=${workpath}/go_cc_wrap" \
+                             "CXX=${workpath}/go_cxx_wrap"
+        configure.env-append ${build.env}
+        test.env-append      ${build.env}
     }
     ui_debug "Set Build/Test Env ${build.env}"
 }
