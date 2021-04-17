@@ -1,4 +1,4 @@
-# modified version of https://src.fedoraproject.org/rpms/alglib/raw/master/f/CMakeLists.txt
+# modified version of https://src.fedoraproject.org/rpms/alglib/raw/rawhide/f/CMakeLists.txt
 
 # Set  the minimum  required version  of cmake  for a  project.
 cmake_minimum_required(VERSION 2.6)
