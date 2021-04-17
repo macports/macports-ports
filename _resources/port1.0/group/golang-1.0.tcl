@@ -148,7 +148,12 @@ default depends_build   port:go
 set gopath              ${workpath}/gopath
 default worksrcdir      {gopath/src/${go.package}}
 
-set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} CC=${configure.cc} CXX=${configure.cxx} GOPROXY=off GO111MODULE=off}
+set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} GOPROXY=off GO111MODULE=off \
+            CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} \
+            "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
+            "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
+            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
+            "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'" }
 
 default build.cmd     {${go.bin} build}
 default build.args      ""
@@ -174,19 +179,15 @@ proc go.append_env {} {
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         post-extract {
             set flags "${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
-            system "echo '#!/bin/bash'                                       >  ${workpath}/go_cc_wrap"
-            system "echo 'exec ${configure.cc} ${configure.cflags} ${flags}' >> ${workpath}/go_cc_wrap"
+            system "echo '#!/bin/bash'                                                                    >  ${workpath}/go_cc_wrap"
+            system "echo 'exec ${configure.cc} ${configure.cflags} [get_canonical_archflags cc] ${flags}' >> ${workpath}/go_cc_wrap"
             system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                          >  ${workpath}/go_cxx_wrap"
-            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${flags}' >> ${workpath}/go_cxx_wrap"
+            system "echo '#!/bin/bash'                                                                        >  ${workpath}/go_cxx_wrap"
+            system "echo 'exec ${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx] ${flags}' >> ${workpath}/go_cxx_wrap"
             system "chmod +x ${workpath}/go_cxx_wrap"
         }
         build.env-append     "GO_EXTLINK_ENABLED=1" \
-                             "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
                              "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                             "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}" \
-                             "CGO_CFLAGS=${configure.cflags}" \
-                             "CGO_CXXFLAGS=${configure.cxxflags}" \
                              "CC=${workpath}/go_cc_wrap" \
                              "CXX=${workpath}/go_cxx_wrap"
         configure.env-append ${build.env}
