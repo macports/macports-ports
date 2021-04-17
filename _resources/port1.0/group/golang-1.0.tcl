@@ -173,17 +173,20 @@ proc go.append_env {} {
         # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         post-extract {
-            system "echo '#!/bin/bash'                                                                                      >  ${workpath}/go_cc_wrap"
-            system "echo 'exec ${configure.cc} ${configure.cflags} ${configure.ldflags} \"\$\{\@\//-static/\}\"' -Wno-error >> ${workpath}/go_cc_wrap"
+            set flags "${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
+            system "echo '#!/bin/bash'                                       >  ${workpath}/go_cc_wrap"
+            system "echo 'exec ${configure.cc} ${configure.cflags} ${flags}' >> ${workpath}/go_cc_wrap"
             system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                                                                         >  ${workpath}/go_cxx_wrap"
-            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${configure.ldflags} \"\$\{\@\//-static/\}\"' -Wno-error >> ${workpath}/go_cxx_wrap"
+            system "echo '#!/bin/bash'                                          >  ${workpath}/go_cxx_wrap"
+            system "echo 'exec ${configure.cxx} ${configure.cxxflags} ${flags}' >> ${workpath}/go_cxx_wrap"
             system "chmod +x ${workpath}/go_cxx_wrap"
         }
         build.env-append     "GO_EXTLINK_ENABLED=1" \
                              "GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
                              "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
                              "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags}" \
+                             "CGO_CFLAGS=${configure.cflags}" \
+                             "CGO_CXXFLAGS=${configure.cxxflags}" \
                              "CC=${workpath}/go_cc_wrap" \
                              "CXX=${workpath}/go_cxx_wrap"
         configure.env-append ${build.env}
