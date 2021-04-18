@@ -168,8 +168,8 @@ proc go.append_env {} {
     global os.major build.env workpath
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
-    post-extract {
-        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        post-extract {
             # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
             # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
             # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
@@ -191,20 +191,20 @@ proc go.append_env {} {
             system "echo 'CMD=\"${configure.objcxx} ${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}\"' >> ${workpath}/go_objcxx_wrap"
             system "echo 'echo \${CMD} ; exec \${CMD}'                                                                    >> ${workpath}/go_objcxx_wrap"
             system "chmod +x ${workpath}/go_cxx_wrap"
-            build.env-append \
-                "CC=${workpath}/go_cc_wrap" \
-                "CXX=${workpath}/go_cxx_wrap" \
-                "OBJC=${workpath}/go_objc_wrap" \
-                "OBJCXX=${workpath}/go_objcxx_wrap" \
-                "GO_EXTLINK_ENABLED=1" \
-                "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
-                "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
-                "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
-                "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'"
-            configure.env-append ${build.env}
-            test.env-append      ${build.env}
         }
+        build.env-append \
+            "CC=${workpath}/go_cc_wrap" \
+            "CXX=${workpath}/go_cxx_wrap" \
+            "OBJC=${workpath}/go_objc_wrap" \
+            "OBJCXX=${workpath}/go_objcxx_wrap" \
+            "GO_EXTLINK_ENABLED=1" \
+            "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+            "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
+            "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
+            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
+            "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'"
+        configure.env-append ${build.env}
+        test.env-append      ${build.env}
     }
 }
 port::register_callback go.append_env
