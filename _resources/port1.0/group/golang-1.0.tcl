@@ -149,11 +149,11 @@ set gopath              ${workpath}/gopath
 default worksrcdir      {gopath/src/${go.package}}
 
 set go_env {GOPATH=${gopath} GOARCH=${goarch} GOOS=${goos} GOPROXY=off GO111MODULE=off \
-            CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} \
-            "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
-            "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
-            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
-            "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'" }
+            CC=${configure.cc} CXX=${configure.cxx} FC=${configure.fc} OBJC=${configure.objc} OBJCXX=${configure.objcxx} \
+           "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
+           "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
+           "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
+           "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'" }
 
 default build.cmd     {${go.bin} build}
 default build.args      ""
@@ -170,30 +170,44 @@ default configure.env ${go_env}
 proc go.append_env {} {
     global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags
     global os.major build.env workpath
-    # Following options make sure link options, including those for
-    # legacy macOS support, are correctly passed.
-    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-        # Create a wrapper script around CC,CXX command to enforce use of flags required for legacy support
-        # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
-        # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
-        # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
-        post-extract {
-            set flags "${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
-            system "echo '#!/bin/bash'                                                                    >  ${workpath}/go_cc_wrap"
-            system "echo 'exec ${configure.cc} ${configure.cflags} [get_canonical_archflags cc] ${flags}' >> ${workpath}/go_cc_wrap"
-            system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                                                        >  ${workpath}/go_cxx_wrap"
-            system "echo 'exec ${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx] ${flags}' >> ${workpath}/go_cxx_wrap"
-            system "chmod +x ${workpath}/go_cxx_wrap"
+    # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
+    # and to aid use of MacPorts legacysupport library as required.
+    post-extract {
+        # Remove '-static' from compilation options
+        set flags "\$\{\@\//-static/\}"
+        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+            # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
+            # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
+            # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
+            set flags "${configure.ldflags} ${flags} -Wno-error"
         }
-        build.env-append     "GO_EXTLINK_ENABLED=1" \
-                             "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-                             "CC=${workpath}/go_cc_wrap" \
-                             "CXX=${workpath}/go_cxx_wrap"
-        configure.env-append ${build.env}
-        test.env-append      ${build.env}
-        ui_debug "Set Build/Test Env ${build.env}"
+        system "echo '#!/bin/bash'                                                                       >  ${workpath}/go_cc_wrap"
+        system "echo 'CMD=\"${configure.cc} ${configure.cflags} [get_canonical_archflags cc] ${flags}\"' >> ${workpath}/go_cc_wrap"
+        system "echo 'echo \${CMD} ; exec \${CMD}'                                                       >> ${workpath}/go_cc_wrap"
+        system "chmod +x ${workpath}/go_cc_wrap"
+        system "echo '#!/bin/bash'                                                                           >  ${workpath}/go_cxx_wrap"
+        system "echo 'CMD=\"${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx] ${flags}\"' >> ${workpath}/go_cxx_wrap"
+        system "echo 'echo \${CMD} ; exec \${CMD}'                                                           >> ${workpath}/go_cxx_wrap"
+        system "chmod +x ${workpath}/go_cxx_wrap"
+        system "echo '#!/bin/bash'                                                                              >  ${workpath}/go_objc_wrap"
+        system "echo 'CMD=\"${configure.objc} ${configure.objcflags} [get_canonical_archflags objc] ${flags}\"' >> ${workpath}/go_objc_wrap"
+        system "echo 'echo \${CMD} ; exec \${CMD}'                                                              >> ${workpath}/go_objc_wrap"
+        system "chmod +x ${workpath}/go_cc_wrap"
+        system "echo '#!/bin/bash'                                                                                    >  ${workpath}/go_objcxx_wrap"
+        system "echo 'CMD=\"${configure.objcxx} ${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}\"' >> ${workpath}/go_objcxx_wrap"
+        system "echo 'echo \${CMD} ; exec \${CMD}'                                                                    >> ${workpath}/go_objcxx_wrap"
+        system "chmod +x ${workpath}/go_cxx_wrap"
     }
+    build.env-append      "CC=${workpath}/go_cc_wrap" \
+                          "CXX=${workpath}/go_cxx_wrap" \
+                          "OBJC=${workpath}/go_objc_wrap" \
+                          "OBJCXX=${workpath}/go_objcxx_wrap"
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        build.env-append  "GO_EXTLINK_ENABLED=1" \
+                          "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'"
+    }
+    configure.env-append ${build.env}
+    test.env-append      ${build.env}
 }
 port::register_callback go.append_env
 
