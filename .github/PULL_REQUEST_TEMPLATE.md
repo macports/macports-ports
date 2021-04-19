@@ -11,7 +11,7 @@
 
 ###### Tested on
 <!-- Triple-click and copy the next line and paste it into your shell. It will copy your OS and Xcode version to the clipboard. Paste it here replacing this section.
-printf "%s\n" "macOS $(sw_vers -productVersion) $(sw_vers -buildVersion)" "$(xcodebuild -version|awk 'NR==1{x=$0}END{print x" "$NF}')"|tee /dev/tty|pbcopy
+printf "%s\n" "macOS $(sw_vers -productVersion) $(sw_vers -buildVersion) on $(uname -m)" "$(xcodebuild -version|awk 'NR==1{x=$0}END{print x" "$NF}')"|tee /dev/tty|pbcopy
 -->
 macOS x.y
 Xcode x.y
