@@ -164,7 +164,7 @@ default test.env      ${go_env}
 default configure.env ${go_env}
 
 proc go.append_env {} {
-    global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags
+    global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags configure.cppflags
     global os.major build.env workpath
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
@@ -174,7 +174,7 @@ proc go.append_env {} {
             # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
             # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
             # Also remove '-static' from compilation options as this is not supported on older systems.
-            set flags "${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
+            set flags "${configure.cppflags} ${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
             system "echo '#!/bin/bash'                                                                       >  ${workpath}/go_cc_wrap"
             system "echo 'CMD=\"${configure.cc} ${configure.cflags} [get_canonical_archflags cc] ${flags}\"' >> ${workpath}/go_cc_wrap"
             system "echo 'echo \${CMD} ; exec \${CMD}'                                                       >> ${workpath}/go_cc_wrap"
