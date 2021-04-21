@@ -18,9 +18,9 @@ pre-configure {
                                     "QMAKE_CC=${configure.cc}" \
                                     "QMAKE_CXX=${configure.cxx}" \
                                     "QMAKE_OBJC=${configure.objc}" \
-                                    "QMAKE_CFLAGS=\"${configure.cflags} [get_canonical_archflags cc]\"" \
-                                    "QMAKE_CXXFLAGS=\"${configure.cxxflags} [get_canonical_archflags cxx]\"" \
-                                    "QMAKE_LFLAGS=\"${configure.ldflags}\"" \
+                                    "QMAKE_CFLAGS=\"${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc]\"" \
+                                    "QMAKE_CXXFLAGS=\"${configure.cppflags} ${configure.cxxflags} [get_canonical_archflags cxx]\"" \
+                                    "QMAKE_LFLAGS=\"${configure.cppflags} ${configure.ldflags}\"" \
                                     "QMAKE_LINK_C=${configure.cc}" \
                                     "QMAKE_LINK_C_SHLIB=${configure.cc}" \
                                     "QMAKE_LINK=${configure.cxx}" \
