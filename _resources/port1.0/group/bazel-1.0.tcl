@@ -15,7 +15,7 @@ options bazel.min_xcode
 default bazel.min_xcode 12.2
 
 options bazel.build_cmd
-default bazel.build_cmd {[bazel::get_build_cmd]}
+default bazel.build_cmd {[bazel::get_bazel_executable_name]}
 
 options bazel.build_cmd_opts
 default bazel.build_cmd_opts {[bazel::get_cmd_opts]}
@@ -90,7 +90,7 @@ if { [bazel::use_mp_clang] } {
     compiler.blacklist-append {clang}
 }
 
-proc bazel::get_build_cmd { } {
+proc bazel::get_bazel_executable_name { } {
     if { [option bazel.version] eq "latest" } {
         return bazel
     } else {
@@ -99,11 +99,9 @@ proc bazel::get_build_cmd { } {
 }
 
 proc bazel::set_dep { } {
-    set bz_dep [option bazel.build_cmd]
-    if { ${bz_dep} ne "" } {
-        ui_debug "Defining bazel dependency port:${bz_dep}"
-        depends_build-append port:${bz_dep}
-    }
+    set bz_dep [bazel::get_bazel_executable_name]
+    ui_debug "Defining bazel dependency port:${bz_dep}"
+    depends_build-append port:${bz_dep}
 }
 port::register_callback bazel::set_dep
 
@@ -145,13 +143,11 @@ proc bazel::set_env {} {
     build.env-append     BAZEL_SH=/bin/bash
     destroot.env-append  BAZEL_SH=/bin/bash
     # patch PATH to find correct 'bazel' version
-    if { [option bazel.build_cmd] ne "" } {
-        set newpath "PATH=${prefix}/libexec/[option bazel.build_cmd]/bin:$env(PATH)"
-        configure.env-append ${newpath}
-        build.env-append     ${newpath}
-        destroot.env-append  ${newpath}
-        ui_debug "Prepended ${newpath}"
-    }
+    set newpath "PATH=${prefix}/libexec/[bazel::get_bazel_executable_name]/bin:$env(PATH)"
+    configure.env-append ${newpath}
+    build.env-append     ${newpath}
+    destroot.env-append  ${newpath}
+    ui_debug "Prepended ${newpath}"
 }
 port::register_callback bazel::set_env
 
