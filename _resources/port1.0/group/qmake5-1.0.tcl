@@ -7,6 +7,7 @@
 
 PortGroup                       qt5 1.0
 PortGroup                       active_variants 1.1
+PortGroup                       legacysupport 1.1
 
 options qt5.add_spec qt5.debug_variant qt5.top_level qt5.cxxflags qt5.ldflags qt5.frameworkpaths qt5.spec_cmd
 default qt5.add_spec yes
@@ -77,7 +78,9 @@ pre-configure {
     # 2) some ports (e.g. py-pyqt5 py-qscintilla2) call qmake indirectly and
     #    do not pass on the configure.args values
     #
-    set cache [open "${qt5.top_level}/.qmake.cache" w 0644]
+    set cache_file "${qt5.top_level}/.qmake.cache"
+    set cache [open ${cache_file} w 0644]
+    ui_debug "QT5 Qmake Cache ${cache_file}"
     if {[vercmp ${qt5.version} 5.9] >= 0} {
         if {[variant_exists universal] && [variant_isset universal]} {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
@@ -130,7 +133,9 @@ pre-configure {
             lappend qmake5_cxx11_flags ${flag}
         }
     }
+    # Need to respect ldflags as needed for legacysupport linking
     foreach flag ${configure.ldflags} {
+        lappend qmake5_l_flags ${flag}
     }
     set qmake5_cxx11_flags [join ${qmake5_cxx11_flags} " "]
     set qmake5_cxx_flags   [join ${qmake5_cxx_flags}   " "]
