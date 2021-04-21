@@ -54,6 +54,23 @@ proc legacysupport::get_library_name {} {
     }
 }
 
+proc legacysupport::get_depends_type {} {
+    if {[option legacysupport.use_static]} {
+        return depends_build
+    } else {
+        return depends_lib
+    }
+}
+
+proc legacysupport::get_dependency {} {
+    return path:lib/libMacportsLegacySupport.dylib:legacy-support
+}
+
+proc legacysupport::set_depends {} {
+    [legacysupport::get_depends_type]-delete [legacysupport::get_dependency]
+    [legacysupport::get_depends_type]-append [legacysupport::get_dependency]
+}
+
 proc legacysupport::add_legacysupport {} {
     global prefix \
            os.platform \
@@ -63,8 +80,7 @@ proc legacysupport::add_legacysupport {} {
         ui_debug "Adding legacy build support"
 
         # depend on the support library or devel version if installed
-        depends_lib-delete path:lib/libMacportsLegacySupport.dylib:legacy-support
-        depends_lib-append path:lib/libMacportsLegacySupport.dylib:legacy-support
+        legacysupport::set_depends
 
         configure.ldflags-delete    [option legacysupport.library_name]
         configure.ldflags-append    [option legacysupport.library_name]
