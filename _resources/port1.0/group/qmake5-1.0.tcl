@@ -54,16 +54,7 @@ pre-configure {
 
     # starting with Xcode 7.0, the SDK for build OS version might not be available
     # see https://trac.macports.org/ticket/53597
-    if { ${use_xcode} } {
-        if {[vercmp $xcodeversion 4.3] < 0} {
-            set sdks_dir ${configure.developer_dir}/SDKs
-        } else {
-            set sdks_dir ${configure.developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
-        }
-    } else {
-        set sdks_dir ${configure.developer_dir}/SDKs
-    }
-    if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
+    if {[catch {exec /usr/bin/xcrun --sdk macosx${configure.sdk_version} --show-sdk-path} result]} {
         configure.sdk_version
     }
 
