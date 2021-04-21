@@ -127,11 +127,16 @@ pre-configure {
     # save certain configure flags
     set qmake5_cxx11_flags ""
     set qmake5_cxx_flags   ""
+    set qmake5_c_flags     ""
     set qmake5_l_flags     ""
     foreach flag ${configure.cxxflags} {
         if { ${flag} eq "-D_GLIBCXX_USE_CXX11_ABI=0" } {
             lappend qmake5_cxx11_flags ${flag}
         }
+    }
+    foreach flag ${configure.cppflags} {
+        lappend qmake5_c_flags   ${flag}
+        lappend qmake5_cxx_flags ${flag}
     }
     # Need to respect ldflags as needed for legacysupport linking
     foreach flag ${configure.ldflags} {
@@ -139,6 +144,7 @@ pre-configure {
     }
     set qmake5_cxx11_flags [join ${qmake5_cxx11_flags} " "]
     set qmake5_cxx_flags   [join ${qmake5_cxx_flags}   " "]
+    set qmake5_c_flags     [join ${qmake5_c_flags}     " "]
     set qmake5_l_flags     [join ${qmake5_l_flags}     " "]
 
     if { [vercmp ${qt5.version} 5.6] >= 0 } {
@@ -183,6 +189,9 @@ pre-configure {
     }
     if {${qmake5_cxx_flags} ne "" } {
         puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx_flags}"
+    }
+    if {${qmake5_c_flags} ne "" } {
+        puts ${cache} QMAKE_CFLAGS+="${qmake5_c_flags}"
     }
     if {${qmake5_l_flags} ne "" } {
         puts ${cache} QMAKE_LFLAGS+="${qmake5_l_flags}"
