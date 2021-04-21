@@ -904,7 +904,7 @@ if {!${private_building_qt5}} {
     port::register_callback qt5pg::register_dependents
 }
 
-proc qt5.check_min_version {} {
+proc qt5pg::check_min_version {} {
     global qt5.version qt5.min_version
     if {[vercmp ${qt5.version} ${qt5.min_version}] < 0} {
         known_fail yes
@@ -914,6 +914,6 @@ proc qt5.check_min_version {} {
         }
     }
 }
-port::register_callback qt5.check_min_version
+port::register_callback qt5pg::check_min_version
 
 unset private_building_qt5
