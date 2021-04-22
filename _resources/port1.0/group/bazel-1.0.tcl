@@ -74,7 +74,9 @@ destroot.env-append  JAVA_HOME=${java.home}
 # Require c++ standard
 proc bazel::set_standards {} {
     global compiler.cxx_standard
-    compiler.cxx_standard [option bazel.cxx_standard]
+    if { ${compiler.cxx_standard} < [option bazel.cxx_standard] } {
+        compiler.cxx_standard [option bazel.cxx_standard]
+    }
 }
 port::register_callback bazel::set_standards
 
