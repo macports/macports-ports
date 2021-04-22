@@ -66,9 +66,10 @@ proc legacysupport::get_dependency {} {
     return path:lib/libMacportsLegacySupport.dylib:legacy-support
 }
 
-proc legacysupport::set_depends {} {
-    [legacysupport::get_depends_type]-delete [legacysupport::get_dependency]
-    [legacysupport::get_depends_type]-append [legacysupport::get_dependency]
+proc legacysupport::add_once { opt where value } {
+    ui_debug "Will $where $value to $opt"
+    ${opt}-delete   ${value}
+    ${opt}-${where} ${value}
 }
 
 proc legacysupport::add_legacysupport {} {
@@ -80,14 +81,13 @@ proc legacysupport::add_legacysupport {} {
         ui_debug "Adding legacy build support"
 
         # depend on the support library or devel version if installed
-        legacysupport::set_depends
+        legacysupport::add_once [legacysupport::get_depends_type] append [legacysupport::get_dependency]
 
-        configure.ldflags-delete    [option legacysupport.library_name]
-        configure.ldflags-append    [option legacysupport.library_name]
+        # Add the library link flags
+        legacysupport::add_once configure.ldflags append [option legacysupport.library_name]
 
         if {![option compiler.limit_flags]} {
-            configure.cppflags-delete   [option legacysupport.header_search]
-            configure.cppflags-prepend  [option legacysupport.header_search]
+            legacysupport::add_once configure.cppflags prepend [option legacysupport.header_search]
         }
 
         # do not use compiler.cpath since it behaves like -I, while ${lang}_INCLUDE_PATH behaves like -isystem
@@ -95,8 +95,7 @@ proc legacysupport::add_legacysupport {} {
         # see, e.g., llvm-devel
         foreach phase {configure build destroot test} {
             foreach lang {C OBJC CPLUS OBJCPLUS} {
-                ${phase}.env-delete ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
-                ${phase}.env-append ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
+                legacysupport::add_once ${phase}.env append ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
             }
         }
     }
@@ -104,8 +103,7 @@ proc legacysupport::add_legacysupport {} {
     # see https://trac.macports.org/ticket/59832
     if {${os.platform} eq "darwin" && [option configure.cxx_stdlib] eq "macports-libstdc++"} {
         foreach phase {configure build destroot test} {
-            ${phase}.env-delete    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
-            ${phase}.env-append    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
+            legacysupport::add_once ${phase}.env append DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
         }
     }
 }
