@@ -54,7 +54,10 @@ pre-configure {
 
     # starting with Xcode 7.0, the SDK for build OS version might not be available
     # see https://trac.macports.org/ticket/53597
-    if {[catch {exec /usr/bin/xcrun --sdk macosx${configure.sdk_version} --show-sdk-path} result]} {
+    #
+    # avoid --show-sdk-path since it is not available on all platforms
+    # see https://github.com/macports/macports-ports/commit/9887e90d69f4265f9056cddc45e41551d7400235#commitcomment-49824261
+    if {[catch {exec /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld} result]} {
         configure.sdk_version
     }
 
