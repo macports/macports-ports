@@ -19,9 +19,12 @@
 #   legacysupport.redirect_bins: binary files that mix different versions of libstdc++
 #                                create a wrapper so that only MacPorts libstdc++ is used
 
+namespace eval legacysupport {
+}
+
 # default to OS X El Capitan (OS X 10.11; Darwin 15) due to clock_gettime
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy {[legacysupport::get_newest_darwin_with_missing_symbols]}
+default legacysupport.newest_darwin_requires_legacy 15
 
 options legacysupport.header_search
 default legacysupport.header_search     {-isystem${prefix}/include/LegacySupport}
@@ -35,24 +38,6 @@ default legacysupport.use_static        no
 options legacysupport.redirect_bins
 default legacysupport.redirect_bins     {}
 
-# please remove when a86f95c has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
-if {![info exists compiler.limit_flags]} {
-    options compiler.limit_flags
-    default compiler.limit_flags        no
-}
-
-namespace eval legacysupport {
-}
-
-proc legacysupport::get_newest_darwin_with_missing_symbols {} {
-    # Returns the newest Darwin version for which the legacy support
-    # library generates missing symbols.
-    # https://github.com/macports/macports-legacy-support
-    # Current Darwin 15 for clock_gettime
-    return 15
-}
-
 proc legacysupport::get_library_name {} {
     global prefix
     if {[option legacysupport.use_static]} {
@@ -60,6 +45,21 @@ proc legacysupport::get_library_name {} {
     } else {
         return -lMacportsLegacySupport
     }
+}
+
+# Returns the newest Darwin version for which the legacy support
+# library generates missing symbols.
+# https://github.com/macports/macports-legacy-support
+# Current Darwin 15 for clock_gettime
+proc legacysupport::get_newest_darwin_with_missing_symbols {} {
+    return 15
+}
+
+# please remove when a86f95c has been in a released MacPorts version for at least two weeks
+# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
+if {![info exists compiler.limit_flags]} {
+    options compiler.limit_flags
+    default compiler.limit_flags        no
 }
 
 proc legacysupport::get_depends_type {} {
