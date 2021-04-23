@@ -47,6 +47,16 @@ proc legacysupport::get_library_name {} {
     }
 }
 
+proc legacysupport::get_library_link_flags {} {
+    global prefix
+    set lib [legacysupport::get_library_name]
+    if {[option legacysupport.use_static]} {
+        return ${lib}
+    } else {
+        return -L${prefix}/lib\ ${lib}
+    }
+}
+
 # Returns the newest Darwin version for which the legacy support
 # library generates missing symbols.
 # https://github.com/macports/macports-legacy-support
@@ -106,7 +116,7 @@ proc legacysupport::add_legacysupport {} {
 
         # Add the library link flags
         legacysupport::add_once configure.ldflags append [option legacysupport.library_name]
-        legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_LDFLAGS=-L${prefix}/lib\ [option legacysupport.library_name]
+        legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_LDFLAGS=[legacysupport::get_library_link_flags]
 
         if {![option compiler.limit_flags]} {
             legacysupport::add_once configure.cppflags prepend [option legacysupport.header_search]
