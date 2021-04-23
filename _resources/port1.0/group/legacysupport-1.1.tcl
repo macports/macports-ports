@@ -72,6 +72,17 @@ proc legacysupport::add_once { opt where value } {
     ${opt}-${where} ${value}
 }
 
+proc legacysupport::set_label_environment_vars { } {
+    global os.platform os.major
+    set env_name MACPORTS_LEGACY_SUPPORT_DISABLED
+    if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
+        set env_name MACPORTS_LEGACY_SUPPORT_ENABLED
+    }
+    foreach phase { extract configure build destroot } {
+        ${phase}.env-append "${env_name}=1"
+    }
+}
+
 proc legacysupport::add_legacysupport {} {
     global prefix \
            os.platform \
@@ -83,7 +94,7 @@ proc legacysupport::add_legacysupport {} {
         # depend on the support library or devel version if installed
         legacysupport::add_once [legacysupport::get_depends_type] append [legacysupport::get_dependency]
 
-        # Add the library link flags
+        # Add the library link flags
         legacysupport::add_once configure.ldflags append [option legacysupport.library_name]
 
         if {![option compiler.limit_flags]} {
@@ -99,6 +110,10 @@ proc legacysupport::add_legacysupport {} {
             }
         }
     }
+
+    # Sets some indicator env vars to see if support is ENABLED or DISABLED.
+    # Useful if scripts downstream need to check legacy support status.
+    legacysupport::set_label_environment_vars
 
     # see https://trac.macports.org/ticket/59832
     if {${os.platform} eq "darwin" && [option configure.cxx_stdlib] eq "macports-libstdc++"} {
