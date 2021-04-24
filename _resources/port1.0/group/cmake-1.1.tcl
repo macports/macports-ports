@@ -18,7 +18,8 @@ options                             cmake.build_dir \
                                     cmake.module_path \
                                     cmake_share_module_dir \
                                     cmake.out_of_source \
-                                    cmake.set_osx_architectures
+                                    cmake.set_osx_architectures \
+                                    cmake.debugopts
 
 ## Explanation of and default values for the options defined above ##
 
@@ -53,6 +54,12 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 # cmake.module_path; they come after ${cmake_share_module_dir}
 default cmake.module_path           {}
 
+# Set cmake.debugopts to the desired compiler debug options (or an empty string) if you want to
+# use custom options with the +debug variant.
+# Example: `cmake.debugopts-delete -DDEBUG` .
+# See: https://trac.macports.org/ticket/62642
+default cmake.debugopts             {[cmake::debugopts]}
+
 # CMake provides several different generators corresponding to different utilities
 # (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
 # and Ninja, a leaner-and-meaner alternative.
@@ -85,6 +92,7 @@ default destroot.target             install/fast
 # make sure cmake is available:
 # can use cmake or cmake-devel; default to cmake if not installed
 depends_build-append                path:bin/cmake:cmake
+depends_skip_archcheck-append       cmake
 
 
 proc cmake::rpath_flags {} {
@@ -146,7 +154,9 @@ proc cmake::handle_generator {option action args} {
             "*Unix Makefiles*" {
                 ui_debug "Selecting the 'Unix Makefiles' generator ($args)"
                 depends_build-delete \
-                                port:ninja
+                                path:bin/ninja:ninja
+                depends_skip_archcheck-delete \
+                                ninja
                 build.cmd       make
                 build.post_args VERBOSE=ON
                 destroot.target install/fast
@@ -159,10 +169,21 @@ proc cmake::handle_generator {option action args} {
             "*Ninja" {
                 ui_debug "Selecting the Ninja generator ($args)"
                 depends_build-append \
-                                port:ninja
+                                path:bin/ninja:ninja
+                depends_skip_archcheck-append \
+                                ninja
                 build.cmd       ninja
-                # force Ninja to use the exact number of requested build jobs
-                build.post_args -j${build.jobs} -v
+                if {[file exists ${prefix}/bin/samu]} {
+                    # ninja is provided by port:samu, which doesn't support `-l`
+                    # nor options given after specifying the build target
+                    build.pre_args-prepend -v
+                    build.post_args
+                } else {
+                    # force Ninja not to exceed the probably-expected CPU load by too much;
+                    # for larger projects one can reach as much as build.jobs*2 CPU load otherwise.
+                    # inspired by the old guideline as many compile jobs as you have CPUs, plus 1.
+                    build.post_args -l[expr ${build.jobs} + 1] -v
+                }
                 destroot.target install
                 # ninja needs the DESTDIR argument in the environment
                 destroot.destdir
@@ -182,6 +203,16 @@ proc cmake::handle_generator {option action args} {
                 }
             }
         }
+    }
+}
+
+proc cmake::debugopts {} {
+    global configure.cxx configure.cc
+    # get most if not all possible debug info
+    if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
+        return "-g -fno-limit-debug-info -fstandalone-debug -DDEBUG"
+    } else {
+        return "-g -DDEBUG"
     }
 }
 
@@ -455,24 +486,29 @@ configure.universal_args-delete --disable-dependency-tracking
 variant debug description "Enable debug binaries" {
     pre-configure {
         # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
-        # the compiler flags. We use that here: replace the default -O2 with -O0, add
+        # the compiler flags. We use that here: replace the default -O2 or -Os with -O0, add
         # debugging options and do otherwise an exactly identical build.
         configure.cflags-replace         -O2 -O0
         configure.cxxflags-replace       -O2 -O0
         configure.objcflags-replace      -O2 -O0
         configure.objcxxflags-replace    -O2 -O0
         configure.ldflags-replace        -O2 -O0
-        # get most if not all possible debug info
-        if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
-            set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+        configure.cflags-replace         -Os -O0
+        configure.cxxflags-replace       -Os -O0
+        configure.objcflags-replace      -Os -O0
+        configure.objcxxflags-replace    -Os -O0
+        configure.ldflags-replace        -Os -O0
+
+        if {${cmake.debugopts} ne [cmake::debugopts]} {
+            ui_debug "+debug variant uses custom cmake.debugopts=\"${cmake.debugopts}\""
         } else {
-            set cmake::debugopts "-g -DDEBUG"
+            ui_debug "+debug variant uses default cmake.debugopts=\"${cmake.debugopts}\""
         }
-        configure.cflags-append         ${cmake::debugopts}
-        configure.cxxflags-append       ${cmake::debugopts}
-        configure.objcflags-append      ${cmake::debugopts}
-        configure.objcxxflags-append    ${cmake::debugopts}
-        configure.ldflags-append        ${cmake::debugopts}
+        configure.cflags-append         ${cmake.debugopts}
+        configure.cxxflags-append       ${cmake.debugopts}
+        configure.objcflags-append      ${cmake.debugopts}
+        configure.objcxxflags-append    ${cmake.debugopts}
+        configure.ldflags-append        ${cmake.debugopts}
         # try to ensure that info won't get stripped
         configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
     }
