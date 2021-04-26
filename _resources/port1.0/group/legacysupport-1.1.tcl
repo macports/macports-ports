@@ -19,6 +19,9 @@
 #   legacysupport.redirect_bins: binary files that mix different versions of libstdc++
 #                                create a wrapper so that only MacPorts libstdc++ is used
 
+namespace eval legacysupport {
+}
+
 # default to OS X El Capitan (OS X 10.11; Darwin 15) due to clock_gettime
 options legacysupport.newest_darwin_requires_legacy
 default legacysupport.newest_darwin_requires_legacy 15
@@ -35,16 +38,6 @@ default legacysupport.use_static        no
 options legacysupport.redirect_bins
 default legacysupport.redirect_bins     {}
 
-# please remove when a86f95c has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
-if {![info exists compiler.limit_flags]} {
-    options compiler.limit_flags
-    default compiler.limit_flags        no
-}
-
-namespace eval legacysupport {
-}
-
 proc legacysupport::get_library_name {} {
     global prefix
     if {[option legacysupport.use_static]} {
@@ -54,42 +47,98 @@ proc legacysupport::get_library_name {} {
     }
 }
 
+proc legacysupport::get_library_link_flags {} {
+    global prefix
+    set lib [legacysupport::get_library_name]
+    if {[option legacysupport.use_static]} {
+        return ${lib}
+    } else {
+        return -L${prefix}/lib\ ${lib}
+    }
+}
+
+# Returns the newest Darwin version for which the legacy support
+# library generates missing symbols.
+# https://github.com/macports/macports-legacy-support
+# Current Darwin 15 for clock_gettime
+proc legacysupport::get_newest_darwin_with_missing_symbols {} {
+    return 15
+}
+
+# please remove when a86f95c has been in a released MacPorts version for at least two weeks
+# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
+if {![info exists compiler.limit_flags]} {
+    options compiler.limit_flags
+    default compiler.limit_flags        no
+}
+
+proc legacysupport::get_depends_type {} {
+    if {[option legacysupport.use_static]} {
+        return depends_build
+    } else {
+        return depends_lib
+    }
+}
+
+proc legacysupport::get_dependency {} {
+    return path:lib/libMacportsLegacySupport.dylib:legacy-support
+}
+
+proc legacysupport::add_once { opt where value } {
+    ui_debug "Will $where $value to $opt"
+    ${opt}-delete   ${value}
+    ${opt}-${where} ${value}
+}
+
+proc legacysupport::set_phase_env_var { var } {
+    foreach phase { extract configure build destroot test } {
+        legacysupport::add_once ${phase}.env append ${var}
+    }
+}
+
+proc legacysupport::set_label_environment_vars { } {
+    global os.platform os.major
+    set env_name MACPORTS_LEGACY_SUPPORT_DISABLED
+    if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
+        set env_name MACPORTS_LEGACY_SUPPORT_ENABLED
+    }
+    legacysupport::set_phase_env_var ${env_name}=1
+}
+
 proc legacysupport::add_legacysupport {} {
-    global prefix \
-           os.platform \
-           os.major
+    global prefix os.platform os.major
 
     if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
         ui_debug "Adding legacy build support"
 
         # depend on the support library or devel version if installed
-        depends_lib-delete path:lib/libMacportsLegacySupport.dylib:legacy-support
-        depends_lib-append path:lib/libMacportsLegacySupport.dylib:legacy-support
+        legacysupport::add_once [legacysupport::get_depends_type] append [legacysupport::get_dependency]
 
-        configure.ldflags-delete    [option legacysupport.library_name]
-        configure.ldflags-append    [option legacysupport.library_name]
+        # Add the library link flags
+        legacysupport::add_once configure.ldflags append [option legacysupport.library_name]
+        legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_LDFLAGS=[legacysupport::get_library_link_flags]
 
         if {![option compiler.limit_flags]} {
-            configure.cppflags-delete   [option legacysupport.header_search]
-            configure.cppflags-prepend  [option legacysupport.header_search]
+            legacysupport::add_once configure.cppflags prepend [option legacysupport.header_search]
+            legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_CPPFLAGS=[option legacysupport.header_search]
         }
 
         # do not use compiler.cpath since it behaves like -I, while ${lang}_INCLUDE_PATH behaves like -isystem
-        # since legacy-support uses GNU language extensions, this prevents warnings when `-pedantic` is used and error when `-pedantic-errors` is used.
-        # see, e.g., llvm-devel
-        foreach phase {configure build destroot test} {
-            foreach lang {C OBJC CPLUS OBJCPLUS} {
-                ${phase}.env-delete ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
-                ${phase}.env-append ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
-            }
+        # since legacy-support uses GNU language extensions, this prevents warnings when `-pedantic` is
+        # used and error when `-pedantic-errors` is used. see, e.g., llvm-devel
+        foreach lang {C OBJC CPLUS OBJCPLUS} {
+            legacysupport::set_phase_env_var ${lang}_INCLUDE_PATH=${prefix}/include/LegacySupport
         }
     }
+
+    # Sets some indicator env vars to see if support is ENABLED or DISABLED.
+    # Useful if scripts downstream need to check legacy support status.
+    legacysupport::set_label_environment_vars
 
     # see https://trac.macports.org/ticket/59832
     if {${os.platform} eq "darwin" && [option configure.cxx_stdlib] eq "macports-libstdc++"} {
         foreach phase {configure build destroot test} {
-            ${phase}.env-delete    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
-            ${phase}.env-append    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
+            legacysupport::add_once ${phase}.env append DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
         }
     }
 }

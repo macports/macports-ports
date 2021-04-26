@@ -904,11 +904,16 @@ if {!${private_building_qt5}} {
     port::register_callback qt5pg::register_dependents
 }
 
-pre-fetch {
+proc qt5pg::check_min_version {} {
+    global qt5.version qt5.min_version
     if {[vercmp ${qt5.version} ${qt5.min_version}] < 0} {
-        ui_error "Qt version ${qt5.min_version} or above is required, but Qt version ${qt5.version} is installed"
-        return -code error "Qt version too old"
+        known_fail yes
+        pre-fetch {
+            ui_error "Qt version ${qt5.min_version} or above is required, but Qt version ${qt5.version} is installed"
+            return -code error "Qt version too old"
+        }
     }
 }
+port::register_callback qt5pg::check_min_version
 
 unset private_building_qt5

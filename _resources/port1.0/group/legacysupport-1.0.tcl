@@ -12,6 +12,14 @@ default legacysupport.newest_darwin_requires_legacy 15
 options legacysupport.use_static
 default legacysupport.use_static no
 
+proc get_legacysupport_depends_type {} {
+    if {[option legacysupport.use_static]} {
+        return depends_build
+    } else {
+        return depends_lib
+    }
+}
+
 proc add_legacysupport {} {
 
     global prefix \
@@ -28,7 +36,8 @@ proc add_legacysupport {} {
     # Delete everything first to avoid duplicate values
 
     # port dependency
-    depends_lib-delete path:lib/libMacportsLegacySupport.dylib:legacy-support
+    set legacy_dep path:lib/libMacportsLegacySupport.dylib:legacy-support
+    [get_legacysupport_depends_type]-delete ${legacy_dep}
 
     # configure options
     configure.ldflags-delete  ${AddLDFlag}
@@ -46,7 +55,7 @@ proc add_legacysupport {} {
         ui_debug "Adding legacy build support"
 
         # Depend on the support library or devel version if installed
-        depends_lib-append path:lib/libMacportsLegacySupport.dylib:legacy-support
+        [get_legacysupport_depends_type]-append ${legacy_dep}
 
         # Add to configure options
         if {[option legacysupport.use_static]} {
