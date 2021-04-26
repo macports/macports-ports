@@ -218,7 +218,6 @@ proc bazel::get_cmd_opts {} {
 proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cxx configure.cflags configure.cxxflags configure.ldflags
     global configure.sdk_version use_parallel_build bazel.limit_build_jobs
-    global os.platform
     # Bazel build options
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
@@ -230,8 +229,7 @@ proc bazel::get_build_opts {} {
     if { [option bazel.limit_build_jobs] } {
         # Limit the number of parallel jobs to the number of physical, not logical, cpus.
         # First current setting to ensure we would be reducing the current setting.
-        if { ${os.platform} eq "darwin" } {
-            set physicalcpus [sysctl hw.physicalcpu]
+        if { ![catch {sysctl hw.physicalcpu} physicalcpus] } {
             if { ${build.jobs} > ${physicalcpus} } {
                 build.jobs ${physicalcpus}
             }
