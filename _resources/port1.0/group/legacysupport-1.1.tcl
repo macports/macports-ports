@@ -38,6 +38,14 @@ default legacysupport.use_static        no
 options legacysupport.redirect_bins
 default legacysupport.redirect_bins     {}
 
+if {[info exists makefile.override]} {
+    pre-configure {
+        ui_error "The legacysupport PG must be included *before* the makefile PG"
+        ui_error "otherwise the later fails to pick up the updated compiler flags."
+        return -code error "configuration error"
+    }
+}
+
 proc legacysupport::get_library_name {} {
     global prefix
     if {[option legacysupport.use_static]} {
