@@ -431,10 +431,10 @@ set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
 #set fco.it      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set fco.it      http
+set fra.de      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set jnb.za      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "" : "https"}]
 set jog.id      http
 set kmq.jp      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
-set lil.fr      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set mse.uk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 # server is (temporarily?) offline
 set nou.nc      ""
@@ -452,10 +452,10 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${cjj.kr}://cjj.kr.distfiles.macports.org/:mirror
     ${cph.dk}://cph.dk.distfiles.macports.org/:mirror
     ${fco.it}://fco.it.distfiles.macports.org/:mirror
+    ${fra.de}://fra.de.distfiles.macports.org/:mirror
     ${jnb.za}://jnb.za.distfiles.macports.org/distfiles/:mirror
     ${jog.id}://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
-    ${lil.fr}://lil.fr.distfiles.macports.org/:mirror
     ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
     ${nou.nc}://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     ${nue.de}://nue.de.distfiles.macports.org/:mirror
