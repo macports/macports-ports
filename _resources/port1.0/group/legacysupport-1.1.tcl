@@ -41,7 +41,7 @@ default legacysupport.redirect_bins     {}
 if {[info exists makefile.override]} {
     pre-configure {
         ui_error "The legacysupport PG must be included *before* the makefile PG"
-        ui_error "otherwise the later fails to pick up the updated compiler flags."
+        ui_error "otherwise the latter fails to pick up the updated compiler flags."
         return -code error "configuration error"
     }
 }
