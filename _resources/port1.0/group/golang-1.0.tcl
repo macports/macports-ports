@@ -168,42 +168,40 @@ proc go.append_env {} {
     global os.major build.env workpath
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
-    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-        post-extract {
-            # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
-            # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
-            # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
-            # Also remove '-static' from compilation options as this is not supported on older systems.
-            proc create_wrap { wrap comp flags } {
-                set f [ open ${wrap} w 0755 ]
-                puts  ${f} "#!/bin/bash"
-                puts  ${f} "CMD=\"${comp} ${flags}\""
-                puts  ${f} "echo \${CMD}"
-                puts  ${f} "exec \${CMD}"
-                close ${f}
-            }
-            set flags "${configure.cppflags} ${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
-            set wrapdir ${workpath}/gowrap
-            xinstall -m 755 -d ${wrapdir}
-            create_wrap ${wrapdir}/cc     ${configure.cc}     "${configure.cflags}      [get_canonical_archflags cc]     ${flags}"
-            create_wrap ${wrapdir}/c++    ${configure.cxx}    "${configure.cxxflags}    [get_canonical_archflags cxx]    ${flags}"
-            create_wrap ${wrapdir}/objc   ${configure.objc}   "${configure.objcflags}   [get_canonical_archflags objc]   ${flags}"
-            create_wrap ${wrapdir}/objc++ ${configure.objcxx} "${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}"
+    post-extract {
+        # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
+        # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
+        # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
+        # Also remove '-static' from compilation options as this is not supported on older systems.
+        proc create_wrap { wrap comp flags } {
+            set f [ open ${wrap} w 0755 ]
+            puts  ${f} "#!/bin/bash"
+            puts  ${f} "CMD=\"${comp} ${flags}\""
+            puts  ${f} "echo \${CMD}"
+            puts  ${f} "exec \${CMD}"
+            close ${f}
         }
-        build.env-append \
-            "CC=${workpath}/gowrap/cc" \
-            "CXX=${workpath}/gowrap/c++" \
-            "OBJC=${workpath}/gowrap/objc" \
-            "OBJCXX=${workpath}/gowrap/objc++" \
-            "GO_EXTLINK_ENABLED=1" \
-            "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
-            "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
-            "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
-            "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
-            "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'"
-        configure.env-append ${build.env}
-        test.env-append      ${build.env}
+        set flags "${configure.cppflags} ${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
+        set wrapdir ${workpath}/gowrap
+        xinstall -m 755 -d ${wrapdir}
+        create_wrap ${wrapdir}/cc     ${configure.cc}     "${configure.cflags}      [get_canonical_archflags cc]     ${flags}"
+        create_wrap ${wrapdir}/c++    ${configure.cxx}    "${configure.cxxflags}    [get_canonical_archflags cxx]    ${flags}"
+        create_wrap ${wrapdir}/objc   ${configure.objc}   "${configure.objcflags}   [get_canonical_archflags objc]   ${flags}"
+        create_wrap ${wrapdir}/objc++ ${configure.objcxx} "${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}"
     }
+    build.env-append \
+        "CC=${workpath}/gowrap/cc" \
+        "CXX=${workpath}/gowrap/c++" \
+        "OBJC=${workpath}/gowrap/objc" \
+        "OBJCXX=${workpath}/gowrap/objc++" \
+        "GO_EXTLINK_ENABLED=1" \
+        "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
+        "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
+        "CGO_CXXFLAGS=${configure.cxxflags} [get_canonical_archflags cxx]" \
+        "CGO_LDFLAGS=${configure.cflags} ${configure.ldflags} [get_canonical_archflags ld]" \
+        "GO_LDFLAGS=-extldflags='${configure.ldflags} [get_canonical_archflags ld]'"
+    configure.env-append ${build.env}
+    test.env-append      ${build.env}
 }
 port::register_callback go.append_env
 
