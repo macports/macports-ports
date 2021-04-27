@@ -77,8 +77,8 @@ sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
-# Try downloading archives from the private server after trying the public server
-echo "archive_site_local https://packages.macports.org/:tbz2 https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Also try downloading archives from the private server
+echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server
 # preferred_hosts has no effect on archive_site_local
 # See https://trac.macports.org/ticket/57720
