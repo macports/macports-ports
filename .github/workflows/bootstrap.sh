@@ -20,12 +20,12 @@ echo "::endgroup::"
 echo "::group::Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
-echo "Fetching MacPorts..."
-/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
-curl_mpbase_pid=$!
 echo "Fetching getopt..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
+echo "Fetching MacPorts..."
+/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
+curl_mpbase_pid=$!
 echo "::endgroup::"
 
 
@@ -47,6 +47,15 @@ echo "Removing files..."
 
 # Rehash to forget about the deleted files
 hash -r
+echo "::endgroup::"
+
+
+echo "::group::Installing getopt"
+# Install getopt required by mpbb
+wait $curl_getopt_pid
+echo "Extracting..."
+sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
+rm -f "getopt-v1.1.6.tar.bz2"
 echo "::endgroup::"
 
 
@@ -97,12 +106,4 @@ echo "::group::Running postflight"
 # Create macports user
 echo "Postflight..."
 sudo /opt/local/libexec/macports/postflight/postflight
-echo "::endgroup::"
-
-
-echo "::group::Installing getopt"
-# Install getopt required by mpbb
-wait $curl_getopt_pid
-echo "Extracting..."
-sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 echo "::endgroup::"
