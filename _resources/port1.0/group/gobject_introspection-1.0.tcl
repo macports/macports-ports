@@ -27,6 +27,11 @@ proc gobject_introspection_pg::map_tool_to_environment_variable {tool} {
     }
 }
 
+proc gobject_introspection_pg::append_env { phase var } {
+    ${phase}.env-delete ${var}
+    ${phase}.env-append ${var}
+}
+
 proc gobject_introspection_pg::gobject_introspection_setup {} {
     if {![option gobject_introspection]} {
         configure.args-append       --disable-introspection
@@ -54,8 +59,8 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         # See https://trac.macports.org/ticket/62410
         #########################################################################################
 
-        build.args-append           CC=[option configure.cc]
-        destroot.args-append        CC=[option configure.cc]
+        gobject_introspection_pg::append_env build    CC=[option configure.cc]
+        gobject_introspection_pg::append_env destroot CC=[option configure.cc]
 
         # replicate behavior in procedure portconfigure::configure_main
         # see https://github.com/macports/macports-base/blob/master/src/port1.0/portconfigure.tcl
