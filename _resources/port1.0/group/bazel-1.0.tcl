@@ -229,9 +229,10 @@ proc bazel::get_build_opts {} {
     if { [option bazel.limit_build_jobs] } {
         # Limit the number of parallel jobs to the number of physical, not logical, cpus.
         # First current setting to ensure we would be reducing the current setting.
-        set physicalcpus [sysctl hw.physicalcpu]
-        if { ${build.jobs} > ${physicalcpus} } {
-            build.jobs ${physicalcpus}
+        if { ![catch {sysctl hw.physicalcpu} physicalcpus] } {
+            if { ${build.jobs} > ${physicalcpus} } {
+                build.jobs ${physicalcpus}
+            }
         }
         set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs}"
         if { [option bazel.max_ram_fraction] > 0 } {

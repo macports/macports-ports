@@ -2,9 +2,15 @@
 
 PortSystem          1.0
 
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
+
+legacysupport.use_static                    yes
+legacysupport.newest_darwin_requires_legacy 15
+
 name                rust
 version             1.51.0
-revision            1
+revision            2
 categories          lang devel
 platforms           darwin
 supported_archs     x86_64 arm64
@@ -33,8 +39,56 @@ set rustc_version   1.50.0
 set py_ver          3.9
 set py_ver_nodot    [string map {. {}} ${py_ver}]
 
-# can use cmake or cmake-devel; default to cmake.
-depends_build-append \
+# Make sure the chosen python is found via PATH
+post-extract {
+    xinstall -d ${workpath}/bin
+    ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python
+    ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python3
+}
+
+set arch ${configure.build_arch}
+if {${configure.build_arch} eq "arm64"} {
+    set arch "aarch64"
+}
+set binTag ${rustc_version}-${arch}-apple-${os.platform}
+
+# Rust 1.49.0 and newer has issues on macOS 10.9 and older.
+# See  https://trac.macports.org/ticket/62656
+#      https://github.com/rust-lang/rust/issues/80804
+# If upstream eventually address the issue these workarounds can be removed.
+# For now patch the bootstrap binaries and compiler commands to use legacysupport library
+set ccwrap ${name}-compiler-wrap
+if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] && ${subport} ne ${ccwrap} } {
+    # Force use of MP clang
+    compiler.blacklist-append clang
+    post-extract {
+        ui_debug "Relinking rust/cargo bootstrap binaries"
+        # Re-link binaries to force loading of MacPorts LegacySupport lib instead of libSystem
+        proc relink_binary { exe } {
+            global prefix
+            if {[string match "application/*" [lindex [exec /usr/bin/file --mime-type ${exe}] end]]} {
+                set sLib /usr/lib/libSystem.B.dylib
+                set lLib ${prefix}/lib/libMacportsLegacySystem.B.dylib
+                system "install_name_tool -change ${sLib} ${lLib} ${exe} > /dev/null 2>&1 ; true"
+            }
+        }
+        proc relink_binaries { binaries } {
+            foreach binary $binaries {
+                relink_binary ${binary}
+            }
+        }
+        proc search_dirs_relink { dirs } {
+            foreach dir $dirs {
+                relink_binaries [ glob -nocomplain ${dir}/* ]
+            }
+        }
+        relink_binaries    [ exec find ${workpath}/ -name "*.dylib" ]
+        search_dirs_relink [ exec find ${workpath}/ -type d -and -name bin -or -name libexec ]
+    }
+}
+
+if { ${subport} ne ${ccwrap} } {
+    depends_build-append \
                     bin:git:git \
                     path:bin/cmake:cmake \
                     port:cctools \
@@ -43,22 +97,18 @@ depends_build-append \
                     port:pkgconfig \
                     port:ninja \
                     port:gmake
-
-depends_lib-append  port:libffi \
+    depends_lib-append \
+                    port:libffi \
                     path:lib/libssl.dylib:openssl
-
-set arch ${configure.build_arch}
-if {${configure.build_arch} eq "arm64"} {
-    set arch "aarch64"
 }
 
 master_sites        https://static.rust-lang.org/dist
 
 distname            ${name}c-${version}-src
 
-distfiles-append    rust-std-${rustc_version}-${arch}-apple-${os.platform}${extract.suffix} \
-                    rustc-${rustc_version}-${arch}-apple-${os.platform}${extract.suffix} \
-                    cargo-${rustc_version}-${arch}-apple-${os.platform}${extract.suffix}
+distfiles-append    rust-std-${binTag}${extract.suffix} \
+                    rustc-${binTag}${extract.suffix} \
+                    cargo-${binTag}${extract.suffix}
 
 checksums           ${distname}${extract.suffix} \
                     rmd160  86012fa02e52e4a06e5c76aaa482face78b38ef5 \
@@ -90,10 +140,11 @@ checksums-append    rust-std-${rustc_version}-x86_64-apple-${os.platform}${extra
                     sha256  19d526ef3518fb0322f809deddbd4208a27d08efa41d2188348f1be8d3bcfe5e \
                     size    5820420
 
-if {${os.platform} eq "darwin" && ${os.major} < 14} {
+set min_darwin 13
+if {${os.platform} eq "darwin" && ${os.major} < ${min_darwin}} {
     known_fail yes
     pre-fetch {
-        ui_error "${name} is only supported on macOS 10.10 or later."
+        ui_error "${name} is only supported on macOS 10.[expr ${min_darwin} - 4] or later."
         return -code error "unsupported platform version"
     }
 }
@@ -101,37 +152,130 @@ if {${os.platform} eq "darwin" && ${os.major} < 14} {
 set rust_platform       ${arch}-apple-${os.platform}
 set rust_root           ${worksrcpath}/build/stage0-${arch}
 
-post-extract {
-    file mkdir ${rust_root}
-    system "cp -r ${workpath}/rust-std-${rustc_version}-${rust_platform}/rust-std-${rust_platform}/* ${rust_root}"
-    system "cp -r ${workpath}/rustc-${rustc_version}-${rust_platform}/rustc/* ${rust_root}"
-    system "cp -r ${workpath}/cargo-${rustc_version}-${rust_platform}/cargo/* ${rust_root}"
+if { ${subport} ne ${ccwrap} } {
+    post-extract {
+        file mkdir ${rust_root}
+        system "cp -r ${workpath}/rust-std-${rustc_version}-${rust_platform}/rust-std-${rust_platform}/* ${rust_root}"
+        system "cp -r ${workpath}/rustc-${rustc_version}-${rust_platform}/rustc/* ${rust_root}"
+        system "cp -r ${workpath}/cargo-${rustc_version}-${rust_platform}/cargo/* ${rust_root}"
+    }
 }
 
 # Rust claims to only need c++14 but uses some c++17 features relating to std::unique_ptr
-compiler.cxx_standard   2017
+compiler.cxx_standard  2017
+# Use recent macports clang
+compiler.blacklist-append {macports-clang-[4-9].0}
 
 # Compiler used needed at runtime with rust, so if a MacPorts clang compiler used needs to be a dep
 if { [string match macports-clang-* ${configure.compiler}] } {
     depends_lib-append port:[string map {"macports-" ""} ${configure.compiler}]
 }
 
-configure.args          --enable-vendor \
-                        --default-linker=${configure.cc} \
-                        --disable-codegen-tests \
-                        --disable-docs \
-                        --release-channel=stable \
-                        --build=${rust_platform} \
-                        --local-rust-root=${rust_root} \
-                        --set=target.${rust_platform}.cc=${configure.cc} \
-                        --set=target.${rust_platform}.cxx=${configure.cxx} \
-                        --set=target.${rust_platform}.linker=${configure.cc} \
-                        --enable-extended \
-                        --tools=rustfmt,clippy,rls \
-                        --llvm-cflags="${configure.cflags}" \
-                        --llvm-cxxflags="${configure.cxxflags}" \
-                        --llvm-ldflags="${configure.ldflags}" \
-                        --python=${prefix}/bin/python${py_ver}
+# Max Darwin version to create wrapper scripts. Should be equal to the highest
+# Darwin version that downstream ports could possible need legacy support for.
+set max_wrap_darwin [legacysupport::get_newest_darwin_with_missing_symbols]
+
+# Adds given entry to the environment of various phases
+proc envs_append { value } {
+    foreach stage {extract configure build destroot} {
+        ${stage}.env-delete ${value}
+        ${stage}.env-append ${value}
+    }
+}
+
+# In order to enforce use of legacy support, both when building rust and subsequently
+# when using it, the underlying compiler commands need to be wrapped to make sure
+# they use the correct flags. Do this in a sub-port which then is added as a dep
+# to rust to ensure they are available when rust is both built and installed.
+set wrapdir ${prefix}/libexec/${ccwrap}/bin
+subport ${ccwrap} {
+    # Enable support in scripts for all neccessary versions
+    legacysupport.newest_darwin_requires_legacy ${max_wrap_darwin}
+    description      Wrapped compiler commands for ${name}
+    long_description {*}${description}
+    license          BSD
+    supported_archs  noarch
+    patchfiles
+    distfiles
+    depends_build
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        depends_lib-append [legacysupport::get_dependency]
+    }
+    use_configure    no
+    build            {}
+    depends_lib-append port:cctools
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/doc/${ccwrap}
+        system "echo '${description}' > ${destroot}${prefix}/share/doc/${ccwrap}/README"
+        if { ${os.major} <= ${max_wrap_darwin} } {
+            # Deduce MP clang version
+            if {![regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
+                ui_error "Unsupported compiler: ${configure.compiler}"
+            }
+            xinstall -m 755 -d ${destroot}${wrapdir}
+            proc create_wrapper { fname comp flags } {
+                set f [ open ${fname} w 0755 ]
+                puts ${f} "#!/bin/bash"
+                puts ${f} "exec ${comp} ${flags} \$\{\@\}"
+                close ${f}
+            }
+            set llvm_dir ${prefix}/libexec/llvm-${llvm_ver}/bin
+            create_wrapper ${destroot}${wrapdir}/clang   \
+                "\$\{MACPORTS_RUST_CC\:\-${llvm_dir}/clang\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
+            create_wrapper ${destroot}${wrapdir}/clang++ \
+                "\$\{MACPORTS_RUST_CXX\:\-${llvm_dir}/clang++\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
+            create_wrapper ${destroot}${wrapdir}/ld-rust \
+                "\$\{MACPORTS_RUST_CC\:\-${llvm_dir}/clang\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \$\{MACPORTS_LEGACY_SUPPORT_LDFLAGS\}"
+            create_wrapper ${destroot}${wrapdir}/ld \
+                "\$\{MACPORTS_RUST_LD\:\-${llvm_dir}/ld\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_LDFLAGS\}"
+            foreach cmd { ar as nm nm-classic libtool lipo objdump otool ranlib size size-classic strip strings bitcode-strip segedit } {
+                ln -s ${prefix}/bin/${cmd} ${destroot}${wrapdir}/${cmd}
+            }
+        }
+    }
+}
+set ld ${configure.cc}
+if { ${subport} ne ${ccwrap} } {
+    if { ${os.major} <= ${max_wrap_darwin} } {
+        depends_lib-append port:${ccwrap}
+        configure.cc     ${wrapdir}/clang
+        configure.cxx    ${wrapdir}/clang++
+        configure.objc   ${wrapdir}/clang
+        configure.objcxx ${wrapdir}/clang++
+        set ld           ${wrapdir}/ld-rust
+        envs_append      "PATH=${wrapdir}:${workpath}/bin:$env(PATH)"
+    } else {
+        envs_append      "PATH=${workpath}/bin:$env(PATH)"
+    }
+}
+envs_append       LD=${ld}
+
+configure.args    --enable-vendor \
+                  --default-linker=${ld} \
+                  --disable-codegen-tests \
+                  --disable-docs \
+                  --release-channel=stable \
+                  --build=${rust_platform} \
+                  --local-rust-root=${rust_root} \
+                  --set=target.${rust_platform}.cc=${configure.cc} \
+                  --set=target.${rust_platform}.cxx=${configure.cxx} \
+                  --set=target.${rust_platform}.linker=${ld} \
+                  --enable-extended \
+                  --tools=rustfmt,clippy,rls \
+                  --llvm-cflags="${configure.cflags}" \
+                  --llvm-cxxflags="${configure.cxxflags}" \
+                  --llvm-ldflags="${configure.ldflags}" \
+                  --python=${prefix}/bin/python${py_ver}
+
+# Cache support
+if {[tbool configure.ccache]} {
+    depends_build-append   port:ccache
+    configure.args-append  --enable-ccache
+}
 
 post-configure {
     # the bootstrap call to rustc uses cc for the linker
@@ -141,13 +285,15 @@ post-configure {
     set config [open ${workpath}/.home/.cargo/config w]
 
     puts ${config} "\[target.${rust_platform}\]"
-    puts ${config} "linker = \"${configure.cc}\""
+    puts ${config} "linker = \"${ld}\""
 
     close ${config}
 }
 
-build.args          VERBOSE=1 BOOTSTRAP_ARGS="-v -j${build.jobs}"
-build.env-append    OPENSSL_DIR=${prefix}
+build.args          VERBOSE=1 BOOTSTRAP_ARGS="-vv -j${build.jobs}"
+
+envs_append         OPENSSL_DIR=${prefix}
+envs_append         RUST_BACKTRACE=1
 
 test.run            yes
 test.target         check
@@ -156,7 +302,6 @@ test.args           VERBOSE=1
 destroot.args       VERBOSE=1
 
 if {${subport} eq ${name}} {
-
     post-destroot {
         delete ${destroot}${prefix}/lib/rustlib/install.log
         delete ${destroot}${prefix}/lib/rustlib/uninstall.sh
@@ -164,7 +309,6 @@ if {${subport} eq ${name}} {
         xinstall -m 644 ${worksrcpath}/src/etc/ctags.rust \
             ${destroot}${prefix}/share/${name}
     }
-
 }
 
 livecheck.type      regex
@@ -179,7 +323,7 @@ subport rust-src {
     set rust_source_dir ${destroot}${prefix}/lib/rustlib/src/rust
 
     description     Source code for the rust programming language
-    long_description ${description}
+    long_description {*}${description}
 
     use_configure no
 

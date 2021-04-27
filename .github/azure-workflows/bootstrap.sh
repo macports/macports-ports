@@ -10,6 +10,25 @@ case "$OS_ARCH" in
         ;;
 esac
 
+
+echo "##[group]Info"
+echo "macOS version: $(sw_vers -productVersion)"
+echo "IP address: $(/usr/bin/curl -fsS https://www.macports.org/ip.php)"
+echo "##[endgroup]"
+
+
+echo "##[group]Fetching files"
+# Download resources in background ASAP but use later.
+# Use /usr/bin/curl so that we don't use Homebrew curl.
+echo "Fetching getopt..."
+/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
+curl_getopt_pid=$!
+echo "Fetching MacPorts..."
+/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
+curl_mpbase_pid=$!
+echo "##[endgroup]"
+
+
 echo "##[group]Disabling Spotlight"
 # Disable Spotlight indexing. We don't need it, and it might cost performance
 sudo mdutil -a -i off
@@ -17,7 +36,6 @@ echo "##[endgroup]"
 
 
 echo "##[group]Uninstalling Homebrew"
-
 # Move directories to /opt/off
 echo "Moving directories..."
 sudo mkdir /opt/off
@@ -31,18 +49,19 @@ echo "Removing files..."
 hash -r
 echo "##[endgroup]"
 
+
+echo "##[group]Installing getopt"
+# Install getopt required by mpbb
+wait $curl_getopt_pid
+echo "Extracting..."
+sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
+rm -f "getopt-v1.1.6.tar.bz2"
+echo "##[endgroup]"
+
+
 echo "##[group]Installing MacPorts"
-echo "Fetching..."
-# Download resources in background ASAP but use later; do this after cleaning
-# up Homebrew so that we don't end up using their curl!
-curl -fsSLO "https://dl.bintray.com/macports-ci-env/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
-curl_mpbase_pid=$!
-curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2" &
-curl_getopt_pid=$!
-
-# Download and install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
+# Install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
 wait $curl_mpbase_pid
-
 echo "Extracting..."
 sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
 rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
@@ -58,13 +77,14 @@ sudo sed -i "" "s|rsync://rsync.macports.org/macports/release/tarballs/ports.tar
 echo "ui_interactive no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Only download from the CDN, not the mirrors
 echo "host_blacklist *.distfiles.macports.org *.packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
-# Try downloading archives from the private server after trying the public server
-echo "archive_site_local https://packages.macports.org/:tbz2 https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+# Also try downloading archives from the private server
+echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 # Prefer to get archives from the public server instead of the private server
 # preferred_hosts has no effect on archive_site_local
 # See https://trac.macports.org/ticket/57720
 #echo "preferred_hosts packages.macports.org" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
 echo "##[endgroup]"
+
 
 echo "##[group]Generating PortIndex"
 # Update PortIndex
@@ -81,15 +101,9 @@ git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
 echo "##[endgroup]"
 
+
 echo "##[group]Running postflight"
 # Create macports user
 echo "Postflight..."
 sudo /opt/local/libexec/macports/postflight/postflight
-echo "##[endgroup]"
-
-echo "##[group]Installing getopt"
-# Install getopt required by mpbb
-wait $curl_getopt_pid
-echo "Extracting..."
-sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 echo "##[endgroup]"

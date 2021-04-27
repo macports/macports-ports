@@ -37,12 +37,20 @@
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
 
+PortGroup compiler_blacklist_versions 1.0
+PortGroup legacysupport 1.1
+
 options cargo.bin cargo.home cargo.crates cargo.crates_github
 
 default cargo.bin           {${prefix}/bin/cargo}
 default cargo.home          {${workpath}/.home/.cargo}
 default cargo.crates        {}
 default cargo.crates_github {}
+
+# As building with rust uses the same underlying compiler as used to build it
+# replicate the same compiler selection options here
+compiler.cxx_standard       2017
+compiler.blacklist-append   {macports-clang-[4-9].0}
 
 # please remove when 8a088c3 has been in a released MacPorts version for at least two weeks
 # see https://github.com/macports/macports-base/commit/8a088c30d80c7c3eca10848f28835e1c180229b1
@@ -241,41 +249,57 @@ proc cargo.rust_platform {{arch ""}} {
     return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
-foreach stage {build destroot} {
-    # see https://trac.macports.org/wiki/UsingTheRightCompiler
-    ${stage}.env-append CC=${configure.cc} \
-                        CXX=${configure.cxx}
+proc cargo.append_envs { var phases } {
+    foreach phase ${phases} {
+        ${phase}.env-delete ${var}
+        ${phase}.env-append ${var}
+    }
 }
 
-foreach stage {configure build destroot} {
-    ${stage}.env-append "RUSTFLAGS=-C linker=${configure.cc}"
-}
+# see https://trac.macports.org/wiki/UsingTheRightCompiler
+cargo.append_envs CC=${configure.cc}   {build destroot}
+cargo.append_envs CXX=${configure.cxx} {build destroot}
+
+cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}" {configure build destroot}
+
+# Is build caching enabled ?
+# WIP for now ...
+#if {[tbool configure.ccache]} {
+#    # Enable sccache for rust caching
+#    depends_build-append port:sccache
+#    cargo.append_envs    RUSTC_WRAPPER=${prefix}/bin/sccache
+#    cargo.append_envs    SCCACHE_CACHE_SIZE=2G
+#    cargo.append_envs    SCCACHE_DIR=${workpath}/.sccache
+#}
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
-    global configure.cc configure.cxx subport configure.build_arch configure.universal_archs merger_configure_env merger_build_env merger_destroot_env worksrcpath
-    foreach stage {build destroot} {
-        ${stage}.env-delete CC=${configure.cc} \
-                            CXX=${configure.cxx}
-        ${stage}.env-append CC=${configure.cc} \
-                            CXX=${configure.cxx}
+    global os.major prefix
+    global configure.cc configure.cxx subport configure.build_arch configure.universal_archs
+    global merger_configure_env merger_build_env merger_destroot_env worksrcpath
+
+    set cargo_ld ${configure.cc}
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        # Use wrapped rust compilers
+        depends_build-append port:rust-compiler-wrap
+        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
+        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
+        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld
     }
 
-    foreach stage {configure build destroot} {
-        ${stage}.env-delete "RUSTFLAGS=-C linker=${configure.cc}"
-        ${stage}.env-append "RUSTFLAGS=-C linker=${configure.cc}"
-    }
+    cargo.append_envs     CC=${configure.cc}  {build destroot}
+    cargo.append_envs     CXX=${configure.cxx} {build destroot}
+
+    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}" {configure build destroot}
+    cargo.append_envs     "RUST_BACKTRACE=1"                {configure build destroot}
 
     # CARGO_BUILD_TARGET does not work correctly
     # see the patchfile path-dyld.diff in cargo Portfile
     if {${subport} ne "cargo-stage1"} {
         if {![variant_exists universal] || ![variant_isset universal]} {
-            foreach stage {configure build destroot} {
-                ${stage}.env-delete \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}]
-                ${stage}.env-append \
-                    CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}]
-            }
+            cargo.append_envs CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}] {configure build destroot}
         } else {
             foreach stage {configure build destroot} {
                 foreach arch ${configure.universal_archs} {
