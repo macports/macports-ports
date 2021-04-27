@@ -174,29 +174,28 @@ proc go.append_env {} {
             # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
             # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
             # Also remove '-static' from compilation options as this is not supported on older systems.
+            proc create_wrap { wrap comp flags } {
+                global workpath
+                set f [ open ${wrap} w 0755 ]
+                puts  ${f} "#!/bin/bash"
+                puts  ${f} "CMD=\"${comp} ${flags}\""
+                puts  ${f} "echo \${CMD}"
+                puts  ${f} "exec \${CMD}"
+                close ${f}
+            }
             set flags "${configure.cppflags} ${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
-            system "echo '#!/bin/bash'                                                                       >  ${workpath}/go_cc_wrap"
-            system "echo 'CMD=\"${configure.cc} ${configure.cflags} [get_canonical_archflags cc] ${flags}\"' >> ${workpath}/go_cc_wrap"
-            system "echo 'echo \${CMD} ; exec \${CMD}'                                                       >> ${workpath}/go_cc_wrap"
-            system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                                                           >  ${workpath}/go_cxx_wrap"
-            system "echo 'CMD=\"${configure.cxx} ${configure.cxxflags} [get_canonical_archflags cxx] ${flags}\"' >> ${workpath}/go_cxx_wrap"
-            system "echo 'echo \${CMD} ; exec \${CMD}'                                                           >> ${workpath}/go_cxx_wrap"
-            system "chmod +x ${workpath}/go_cxx_wrap"
-            system "echo '#!/bin/bash'                                                                              >  ${workpath}/go_objc_wrap"
-            system "echo 'CMD=\"${configure.objc} ${configure.objcflags} [get_canonical_archflags objc] ${flags}\"' >> ${workpath}/go_objc_wrap"
-            system "echo 'echo \${CMD} ; exec \${CMD}'                                                              >> ${workpath}/go_objc_wrap"
-            system "chmod +x ${workpath}/go_cc_wrap"
-            system "echo '#!/bin/bash'                                                                                    >  ${workpath}/go_objcxx_wrap"
-            system "echo 'CMD=\"${configure.objcxx} ${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}\"' >> ${workpath}/go_objcxx_wrap"
-            system "echo 'echo \${CMD} ; exec \${CMD}'                                                                    >> ${workpath}/go_objcxx_wrap"
-            system "chmod +x ${workpath}/go_cxx_wrap"
+            set wrapdir ${workpath}/gowrap
+            xinstall -m 755 -d ${wrapdir}
+            create_wrap ${wrapdir}/cc     ${configure.cc}     "${configure.cflags}      [get_canonical_archflags cc]     ${flags}"
+            create_wrap ${wrapdir}/c++    ${configure.cxx}    "${configure.cxxflags}    [get_canonical_archflags cxx]    ${flags}"
+            create_wrap ${wrapdir}/objc   ${configure.objc}   "${configure.objcflags}   [get_canonical_archflags objc]   ${flags}"
+            create_wrap ${wrapdir}/objc++ ${configure.objcxx} "${configure.objcxxflags} [get_canonical_archflags objcxx] ${flags}"
         }
         build.env-append \
-            "CC=${workpath}/go_cc_wrap" \
-            "CXX=${workpath}/go_cxx_wrap" \
-            "OBJC=${workpath}/go_objc_wrap" \
-            "OBJCXX=${workpath}/go_objcxx_wrap" \
+            "CC=${workpath}/gowrap/cc" \
+            "CXX=${workpath}/gowrap/c++" \
+            "OBJC=${workpath}/gowrap/objc" \
+            "OBJCXX=${workpath}/gowrap/objc++" \
             "GO_EXTLINK_ENABLED=1" \
             "BOOT_GO_LDFLAGS=-extldflags='${configure.ldflags}'" \
             "CGO_CFLAGS=${configure.cflags} [get_canonical_archflags cc]" \
