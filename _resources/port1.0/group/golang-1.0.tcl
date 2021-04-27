@@ -175,7 +175,6 @@ proc go.append_env {} {
             # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
             # Also remove '-static' from compilation options as this is not supported on older systems.
             proc create_wrap { wrap comp flags } {
-                global workpath
                 set f [ open ${wrap} w 0755 ]
                 puts  ${f} "#!/bin/bash"
                 puts  ${f} "CMD=\"${comp} ${flags}\""
