@@ -11,6 +11,12 @@ case "$OS_ARCH" in
 esac
 
 
+echo "##[group]Info"
+echo "macOS version: $(sw_vers -productVersion)"
+echo "IP address: $(/usr/bin/curl -fsS https://www.macports.org/ip.php)"
+echo "##[endgroup]"
+
+
 echo "##[group]Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
@@ -30,7 +36,6 @@ echo "##[endgroup]"
 
 
 echo "##[group]Uninstalling Homebrew"
-
 # Move directories to /opt/off
 echo "Moving directories..."
 sudo mkdir /opt/off
