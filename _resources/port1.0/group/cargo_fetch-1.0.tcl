@@ -249,18 +249,18 @@ proc cargo.rust_platform {{arch ""}} {
     return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
-proc cargo.append_envs { value } {
-    foreach stage {extract configure build destroot} {
-        ${stage}.env-delete ${value}
-        ${stage}.env-append ${value}
+proc cargo.append_envs { var phases } {
+    foreach phase ${phases} {
+        ${phase}.env-delete ${var}
+        ${phase}.env-append ${var}
     }
 }
 
 # see https://trac.macports.org/wiki/UsingTheRightCompiler
-cargo.append_envs CC=${configure.cc}
-cargo.append_envs CXX=${configure.cxx}
+cargo.append_envs CC=${configure.cc}   {build destroot}
+cargo.append_envs CXX=${configure.cxx} {build destroot}
 
-cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
+cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}" {configure build destroot}
 
 # Is build caching enabled ?
 # WIP for now ...
@@ -289,17 +289,17 @@ proc cargo.environments {} {
         set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld
     }
 
-    cargo.append_envs     CC=${configure.cc}
-    cargo.append_envs     CXX=${configure.cxx}
+    cargo.append_envs     CC=${configure.cc}  {build destroot}
+    cargo.append_envs     CXX=${configure.cxx} {build destroot}
 
-    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}"
-    cargo.append_envs     "RUST_BACKTRACE=1"
+    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}" {configure build destroot}
+    cargo.append_envs     "RUST_BACKTRACE=1"                {configure build destroot}
 
     # CARGO_BUILD_TARGET does not work correctly
     # see the patchfile path-dyld.diff in cargo Portfile
     if {${subport} ne "cargo-stage1"} {
         if {![variant_exists universal] || ![variant_isset universal]} {
-            cargo.append_envs CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}]
+            cargo.append_envs CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}] {configure build destroot}
         } else {
             foreach stage {configure build destroot} {
                 foreach arch ${configure.universal_archs} {
