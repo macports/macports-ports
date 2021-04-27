@@ -35,9 +35,9 @@ echo "##[group]Installing MacPorts"
 echo "Fetching..."
 # Download resources in background ASAP but use later; do this after cleaning
 # up Homebrew so that we don't end up using their curl!
-curl -fsSLO "https://dl.bintray.com/macports-ci-env/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
+curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
 curl_mpbase_pid=$!
-curl -fsSLO "https://dl.bintray.com/macports-ci-bot/getopt/getopt-v1.1.6.tar.bz2" &
+curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 
 # Download and install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
