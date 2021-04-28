@@ -182,7 +182,7 @@ proc go.append_env {} {
                 puts  ${f} "exec \${CMD}"
                 close ${f}
             }
-            set flags "${configure.cppflags} ${configure.ldflags} \$\{\@\//-static/\} -Wno-error"
+            set flags "${configure.cppflags} ${configure.ldflags} \"\$\{\@\//-static/\}\" -Wno-error"
             set wrapdir ${workpath}/gowrap
             xinstall -m 755 -d ${wrapdir}
             create_wrap ${wrapdir}/cc     ${configure.cc}     "${configure.cflags}      [get_canonical_archflags cc]     ${flags}"
