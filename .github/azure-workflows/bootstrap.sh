@@ -11,12 +11,6 @@ case "$OS_ARCH" in
 esac
 
 
-echo "##[group]Info"
-echo "macOS version: $(sw_vers -productVersion)"
-echo "IP address: $(/usr/bin/curl -fsS https://www.macports.org/ip.php)"
-echo "##[endgroup]"
-
-
 echo "##[group]Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
@@ -26,6 +20,12 @@ curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
 curl_mpbase_pid=$!
+echo "##[endgroup]"
+
+
+echo "##[group]Info"
+echo "macOS version: $(sw_vers -productVersion)"
+echo "IP address: $(/usr/bin/curl -fsS https://www.macports.org/ip.php)"
 echo "##[endgroup]"
 
 
