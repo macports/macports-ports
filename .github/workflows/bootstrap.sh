@@ -25,7 +25,7 @@ echo "::endgroup::"
 
 echo "::group::Info"
 echo "macOS version: $(sw_vers -productVersion)"
-echo "IP address: $(/usr/bin/curl -fsS https://www.macports.org/ip.php)"
+echo "IP address: $(/usr/bin/curl -fsS https://www-origin.macports.org/ip.php)"
 echo "::endgroup::"
 
 
