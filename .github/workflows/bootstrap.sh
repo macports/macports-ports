@@ -20,6 +20,9 @@ curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
 curl_mpbase_pid=$!
+echo "Fetching PortIndex..."
+/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+curl_portindex_pid=$!
 echo "::endgroup::"
 
 
@@ -86,9 +89,7 @@ echo "archive_site_local https://packages-private.macports.org/:tbz2" | sudo tee
 echo "::endgroup::"
 
 
-echo "::group::Generating PortIndex"
-# Update PortIndex
-curl -L "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" -o ports/PortIndex
+echo "::group::Updating PortIndex"
 ## Run portindex on recent commits if PR is newer
 git -C ports/ remote add macports https://github.com/macports/macports-ports.git
 git -C ports/ fetch macports master
@@ -96,6 +97,7 @@ git -C ports/ checkout -qf macports/master~10
 git -C ports/ checkout -qf -
 git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
+wait $curl_portindex_pid
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
@@ -104,6 +106,5 @@ echo "::endgroup::"
 
 echo "::group::Running postflight"
 # Create macports user
-echo "Postflight..."
 sudo /opt/local/libexec/macports/postflight/postflight
 echo "::endgroup::"
