@@ -84,12 +84,7 @@ if {${os.major} < 10} {
 } elseif {${os.major} < 11} {
     set compilers.gcc_default gcc8
 } else {
-    # Currently only gcc-devel works on arm machines
-    if { ${os.major} >= 20 && ${os.arch} eq "arm" } {
-        set compilers.gcc_default gccdevel
-    } else {
-        set compilers.gcc_default gcc10
-    }
+    set compilers.gcc_default gcc10
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
@@ -97,7 +92,7 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" } {
-    set gcc_versions {devel}
+    set gcc_versions {10 devel}
 } else {
     set gcc_versions {}
     if { ${os.major} < 20 } {
