@@ -22,9 +22,10 @@
 namespace eval legacysupport {
 }
 
-# default to OS X El Capitan (OS X 10.11; Darwin 15) due to clock_gettime
+# Newest Darwin version that requires legacy support.
+# Currently OS X 10.12 ( Sierra, Darwin 16) due to utimensat, fsgetpath, setattrlistat
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy 15
+default legacysupport.newest_darwin_requires_legacy 16
 
 options legacysupport.header_search
 default legacysupport.header_search     {-isystem${prefix}/include/LegacySupport}
