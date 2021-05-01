@@ -84,6 +84,15 @@ proc python_get_default_version {} {
     }
 }
 
+proc python_get_compiler_command { var } {
+    global configure.${var} configure.ccache
+    if { [option configure.ccache] } {
+        return "ccache [set configure.${var}]"
+    } else {
+        return [set configure.${var}]
+    }
+}
+
 proc python_set_versions {option action args} {
     if {$action ne "set"} {
         return
@@ -91,7 +100,6 @@ proc python_set_versions {option action args} {
     global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
-
             subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
         }
         if {$subport eq $name || $subport eq ""} {
@@ -175,7 +183,7 @@ proc python_set_versions {option action args} {
             if {${python.set_compiler}} {
                 foreach var {cc objc cxx fc f77 f90} {
                     if {[set configure.${var}] ne ""} {
-                        build.env-append [string toupper $var]=[set configure.${var}]
+                        build.env-append [string toupper $var]=[python_get_compiler_command ${var}]
                     }
                 }
             }
@@ -226,7 +234,7 @@ proc python_set_versions {option action args} {
             if {${python.set_compiler} && ${python.consistent_destroot}} {
                 foreach var {cc objc cxx fc f77 f90} {
                     if {[set configure.${var}] ne ""} {
-                        destroot.env-append [string toupper $var]=[set configure.${var}]
+                        destroot.env-append [string toupper $var]=[python_get_compiler_command ${var}]
                     }
                 }
             }
