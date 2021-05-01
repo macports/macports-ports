@@ -84,6 +84,8 @@ proc python_get_default_version {} {
     }
 }
 
+# Supporting ccache is WIP for now as some build systems have issues with it ...
+configure.ccache  no
 proc python_get_compiler_command { var } {
     global configure.${var} configure.ccache
     if { [option configure.ccache] } {
