@@ -208,7 +208,11 @@ proc cmake::ccaching {} {
     if {${cccache} && [file exists ${prefix}/bin/ccache]} {
         return [list \
             -DCMAKE_C_COMPILER_LAUNCHER=${prefix}/bin/ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache]
+            -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_Fortran_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_OBJC_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_ISPC_COMPILER_LAUNCHER=${prefix}/bin/ccache ]
     }
 }
 
