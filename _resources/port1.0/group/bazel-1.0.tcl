@@ -5,6 +5,7 @@
 
 PortGroup java 1.0
 PortGroup compiler_blacklist_versions 1.0
+PortGroup legacysupport 1.1
 
 namespace eval bazel { }
 
@@ -226,11 +227,15 @@ pre-build {
             set f [ open ${wrapdir}/${comp} w 0755 ]
             puts ${f} "#!/bin/bash"
             puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
+            set bzflags "\"\$\{\@\}\""
+            set bzcomp  "[set configure.${comp}]"
             if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
-                puts ${f} "exec ${prefix}/bin/ccache [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
-            } else {
-                puts ${f} "exec [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
+                set bzcomp "${prefix}/bin/ccache ${bzcomp}"
             }
+            if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+                set bzflags "[option legacysupport.header_search] ${bzflags}"
+            }
+            puts ${f} "exec ${bzcomp} ${bzflags}"
             close ${f}
         }
         # Run fetch
