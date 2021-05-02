@@ -219,25 +219,27 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        # Create ccache wrapper with CCACHE_DIR enforced...
+        # Create compiler wrappers 
         set wrapdir ${workpath}/bazelwrap
         xinstall -m 755 -d ${wrapdir}
-        set f [ open ${wrapdir}/ccache w 0755 ]
-        puts  ${f} "#!/bin/bash"
-        puts  ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
-        puts  ${f} "exec ${prefix}/bin/ccache \"\$\{\@\}\""
-        close ${f}
+        foreach comp {cc cxx} {
+            set f [ open ${wrapdir}/${comp} w 0755 ]
+            puts ${f} "#!/bin/bash"
+            puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
+            if { [option configure.ccache] } {
+                puts ${f} "exec ${prefix}/bin/ccache [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
+            } else {
+                puts ${f} "exec [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
+            }
+            close ${f}
+        }
         # Run fetch
         system -W ${worksrcpath} "[bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
         # Patch the bazel clang wrapper script for use MacPorts selection and support ccache
         foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
             # Switch to selected compiler
-            reinplace -q "s|\"clang++\"|\"${configure.cxx}\"|g"     ${f}
-            reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"        ${f}
-            # If required use ccache
-            if { [option configure.ccache] } {
-                reinplace -q "s|\"/usr/bin/xcrun\"\, tool_name|\"/usr/bin/xcrun\"\, \"${wrapdir}/ccache\"\, tool_name|g"  ${f}
-            }
+            reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"     ${f}
+            reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"        ${f}
             # Bazel **really** doesn't want you changing stuff ;)
             # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
             system "touch -m -t 210012120101 ${f}"
