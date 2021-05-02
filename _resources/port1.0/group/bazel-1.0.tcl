@@ -70,6 +70,8 @@ license_noconflict   ${java.fallback}
 configure.env-append JAVA_HOME=${java.home}
 build.env-append     JAVA_HOME=${java.home}
 destroot.env-append  JAVA_HOME=${java.home}
+# Bazel PG plays badily with ccache
+configure.ccache     no
 
 # Require c++ standard
 proc bazel::set_standards {} {
