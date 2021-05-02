@@ -84,7 +84,7 @@ proc bazel::use_mp_clang {} {
     global configure.compiler xcodeversion
     set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
     set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 } ]
-    return ${is_mp_clang} || ${xcode_not_ok}
+    return [ expr ${is_mp_clang} || ${xcode_not_ok} ]
 }
 
 # Xcode blacklist
@@ -219,7 +219,7 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        # Create compiler wrappers 
+        # Create compiler wrappers
         set wrapdir ${workpath}/bazelwrap
         xinstall -m 755 -d ${wrapdir}
         foreach comp {cc cxx} {
@@ -259,7 +259,7 @@ proc bazel::get_cmd_opts {} {
 
 proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cxx configure.cflags configure.cxxflags configure.ldflags
-    global configure.sdk_version use_parallel_build bazel.limit_build_jobs
+    global configure.sdk_version use_parallel_build bazel.limit_build_jobs workpath
     # Bazel build options
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
@@ -296,14 +296,19 @@ proc bazel::get_build_opts {} {
     foreach opt [list {*}${configure.ldflags} ] {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
-    if { [bazel::use_mp_clang] } {
-        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
-    } else {
-        # Explicitly pass SDK                    https://github.com/bazelbuild/rules_go/issues/1554
-        # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
-        # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
-        # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
-    }
+    # if { [bazel::use_mp_clang] } {
+    #     if { [option bazel.build_cmd] ne "" } {
+    #         set wrapdir ${workpath}/bazelwrap
+    #         set bazel_build_opts "${bazel_build_opts} --action_env CC=${wrapdir}/cc --action_env CXX=${wrapdir}/cxx"
+    #     } else {
+    #         set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
+    #     }
+    # } else {
+    #     # Explicitly pass SDK                    https://github.com/bazelbuild/rules_go/issues/1554
+    #     # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
+    #     # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
+    #     # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
+    # }
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
         set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
@@ -319,11 +324,11 @@ proc bazel::get_build_opts {} {
 
 proc bazel::get_build_env { } {
     set bazel_build_env ""
-    #if { [bazel::use_mp_clang] } {
-    #    set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
-    #} else {
-    #    #set bazel_build_env "SDKROOT=${configure.sdkroot} ${bazel_build_env}"
-    #}
+    # if { [bazel::use_mp_clang] } {
+    #     set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
+    # } else {
+    #     #set bazel_build_env "SDKROOT=${configure.sdkroot} ${bazel_build_env}"
+    # }
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
         set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
