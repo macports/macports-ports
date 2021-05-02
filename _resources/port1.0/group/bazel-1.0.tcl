@@ -226,7 +226,7 @@ pre-build {
             set f [ open ${wrapdir}/${comp} w 0755 ]
             puts ${f} "#!/bin/bash"
             puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
-            if { [option configure.ccache] } {
+            if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
                 puts ${f} "exec ${prefix}/bin/ccache [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
             } else {
                 puts ${f} "exec [set configure.${comp}] $\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \"\$\{\@\}\""
@@ -235,7 +235,7 @@ pre-build {
         }
         # Run fetch
         system -W ${worksrcpath} "[bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
-        # Patch the bazel clang wrapper script for use MacPorts selection and support ccache
+        # Patch the bazel clang wrapper script to use MacPorts compiler selection and support ccache
         foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
             # Switch to selected compiler
             reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"     ${f}
