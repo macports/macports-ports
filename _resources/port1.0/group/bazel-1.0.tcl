@@ -275,7 +275,7 @@ proc bazel::get_build_opts {} {
                 set cache_n_jobs ${physicalcpus}
             }
         }
-        set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs}"
+        set bazel_build_opts "${bazel_build_opts} --jobs ${cache_n_jobs}"
         if { [option bazel.max_ram_fraction] > 0 } {
             set bazel_build_opts "${bazel_build_opts} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction]"
         }
