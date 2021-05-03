@@ -40,7 +40,7 @@ post-extract {
     close $fs
 }
 
-pre-destroot    {
+pre-destroot {
     xinstall -d -m 0755 ${destroot}${prefix}/share/doc/${subport}/examples
 }
 
@@ -86,25 +86,19 @@ proc python_get_default_version {} {
 }
 
 proc python_get_compiler_tags {} {
-    return {cc objc cxx objcxx fc f77 f90}
+    return [list cc objc cxx objcxx fc f77 f90]
 }
 
-proc python_set_env_compilers { phase } {
+proc python_set_env_compilers {phase} {
     foreach tag [python_get_compiler_tags] {
-        global configure.${tag}
-        if {[set configure.${tag}] ne ""} {
+        if {[option configure.${tag}] ne ""} {
             ${phase}.env-append [string toupper $tag]=[python_get_compiler_command ${tag}]
         }
     }
 }
 
-proc python_compilerwrap_dir { } {
-    global workpath
-    return ${workpath}/compilerwrap/bin
-}
-
 # Configure support for ccache
-proc python_configure_ccache { } {
+proc python_configure_ccache {} {
     global prefix
     if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
         # Set some cmake env vars incase build uses cmake
@@ -123,7 +117,7 @@ proc python_configure_ccache { } {
                     set ctag [string toupper $tag]
                 }
             }
-            foreach phase {configure build destroot} {
+            foreach phase [list configure build destroot] {
                 ${phase}.env-append CMAKE_${ctag}_COMPILER_LAUNCHER=${prefix}/bin/ccache
             }
         }
@@ -131,21 +125,19 @@ proc python_configure_ccache { } {
 }
 port::register_callback python_configure_ccache
 
-proc python_create_compiler_wrap { tag } {
-    global prefix configure.${tag}
-    set comp [set configure.${tag}]
-    if { ${comp} ne "" && [file exists ${prefix}/bin/ccache] } {
-        set wrapdir [python_compilerwrap_dir]
-        if { ![file exists ${wrapdir}] } {
-            xinstall -m 755 -d ${wrapdir}
+proc python_create_compiler_wrap {tag} {
+    global prefix
+    set comp [option configure.${tag}]
+    if {${comp} ne "" && [file exists ${prefix}/bin/ccache]} {
+        set wrapdir [option workpath]/compilerwrap/bin
+        if {![file exists ${wrapdir}]} {
+            xinstall -d ${wrapdir}
         }
         set fname ${wrapdir}/[file tail ${comp}]
-        if { [file exists ${fname}] } {
-            # Recreate in case underlying compiler has changed
-            file delete ${fname}
-        }
+        # Recreate in case underlying compiler has changed
+        file delete -force ${fname}
         ui_debug "Creating compiler wrapper ${fname}"
-        set f [ open ${fname} w 0755 ]
+        set f [open ${fname} w 0755]
         puts  ${f} "#!/bin/bash"
         puts  ${f} "exec ${prefix}/bin/ccache ${comp} \"\$\{\@\}\""
         close ${f}
@@ -154,13 +146,11 @@ proc python_create_compiler_wrap { tag } {
     return ${comp}
 }
 
-proc python_get_compiler_command { tag } {
-    global configure.${tag} configure.ccache
-    set comp [set configure.${tag}]
-    if { [option configure.ccache] } {
-        set comp [ python_create_compiler_wrap ${tag} ]
+proc python_get_compiler_command {tag} {
+    set comp [option configure.${tag}]
+    if {[option configure.ccache]} {
+        set comp [python_create_compiler_wrap ${tag}]
     }
-    ui_debug "For compiler tag=${tag} using ${comp}"
     return ${comp}
 }
 
@@ -368,7 +358,7 @@ proc python_set_pep517 {option action args} {
         } else {
             depends_build-delete    port:py${python.version}-pep517 \
                                     port:py${python.version}-python-install
-        }  
+        }
     }
 }
 
@@ -426,7 +416,7 @@ proc python_get_defaults {var} {
             } else {
                 # look for "${inc_dir}*" and pick the first one found;
                 # make assumptions if none are found
-                if {[catch {set inc_dirs [glob ${inc_dir}*]}]} {
+                if {[catch {glob ${inc_dir}*} inc_dirs]} {
                     # append 'm' suffix if 30 <= PyVer <= 37
                     # Py27- and Py38+ do not use this suffix
                     if {${python.version} < 30 || ${python.version} > 37} {
