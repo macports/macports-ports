@@ -66,6 +66,12 @@ default bazel.cxx_standard 2014
 options bazel.path
 default bazel.path {}
 
+proc bazel::add_to_envs { var } {
+    foreach phase {configure build destroot} {
+        ${phase}.env-append ${var}
+    }
+}
+
 # Required java version
 java.version         11+
 # LTS JDK port to install if required java not found
@@ -74,9 +80,7 @@ java.fallback        openjdk11
 # declare no conflict to allow redistribution of binaries.
 license_noconflict   ${java.fallback}
 # append to envs
-configure.env-append JAVA_HOME=${java.home}
-build.env-append     JAVA_HOME=${java.home}
-destroot.env-append  JAVA_HOME=${java.home}
+bazel::add_to_envs   JAVA_HOME=${java.home}
 
 # Always force the use of the un-versioned SDK
 configure.sdk_version
@@ -161,12 +165,6 @@ if {![variant_isset native]} {
            customized for your machine, use the +native variant"
 }
 
-proc bazel::add_to_envs { var } {
-    foreach phase {configure build destroot} {
-        ${phase}.env-append ${var}
-    }
-}
-
 proc bazel::set_env {} {
     global prefix env
     ui_debug "Setting Bazel Env"
@@ -194,19 +192,51 @@ proc bazel::set_configure {} {
 }
 port::register_callback bazel::set_configure
 
+proc bazel::compiler_wrap_dir { } {
+    global workpath
+    set wrapdir ${workpath}/bazelwrap
+    if {![file exists ${wrapdir}]} {
+        xinstall -m 755 -d ${wrapdir}
+    }
+    return ${wrapdir}
+}
+
 # Patch configuration
 pre-configure {
     # enforce correct build settings
+    # Create compiler wrappers
+    set wrapdir [bazel::compiler_wrap_dir]
+    foreach comp {cc cxx} {
+        set f [ open ${wrapdir}/${comp} w 0755 ]
+        puts ${f} "#!/bin/bash"
+        puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
+        set bzflags "\"\$\{\@\}\""
+        set bzcomp  "[set configure.${comp}]"
+        if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
+            set bzcomp "${prefix}/bin/ccache ${bzcomp}"
+        }
+        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+            set bzflags "[option legacysupport.header_search] ${bzflags}"
+        }
+        puts ${f} "exec ${bzcomp} ${bzflags}"
+        close ${f}
+    }
+    configure.cc  ${wrapdir}/cc
+    configure.cxx ${wrapdir}/cxx
+    # Patch the checked out source
     # note final / is because ${worksrcpath} is a sym-link
-    foreach f [ exec find ${worksrcpath}/ -name ".bazelrc" -or -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
+    foreach f [ exec find ${worksrcpath}/ -name ".bazelrc" -or -name "configure" -or -name "configure.py" \
+                    -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" \
+                    -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
         foreach cmd {ar nm strip libtool ld objdump} {
             reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g"    ${f}
         }
-        reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"          ${f}
-        reinplace -q "s|\"clang++\"|\"${configure.cxx}\"|g"            ${f}
-        reinplace -q "s| clang++ | ${configure.cxx} |g"                ${f}
-        reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"               ${f}
-        reinplace -q "s| clang | ${configure.cc} |g"                   ${f}
+        reinplace -q "s|/usr/bin/clang++|\"${wrapdir}/cxx\"|g"         ${f}
+        reinplace -q "s|/usr/bin/clang|\"${wrapdir}/cc\"|g"            ${f}
+        reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"              ${f}
+        reinplace -q "s| clang++ | ${wrapdir}/cxx |g"                  ${f}
+        reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"                 ${f}
+        reinplace -q "s| clang | ${wrapdir}/cc |g"                     ${f}
         reinplace -q "s|/usr/local/include|${prefix}/include|g"        ${f}
         reinplace -q "s|std=c++0x|std=c++11|g"                         ${f}
         reinplace -q "s|std=c++1y|std=c++14|g"                         ${f}
@@ -216,7 +246,8 @@ pre-configure {
     # If not native build, make sure not used...
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
-        foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" -or -name "CMakeLists.txt" -or -name "Makefile" -or -name "*.sh" ] {
+        foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" \
+                        -or -name "CMakeLists.txt" -or -name "Makefile" -or -name "*.sh" ] {
             reinplace -q "s|-march=native|${base_march}|g" ${f}
         }
     }
@@ -235,32 +266,15 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.run_bazel_fetch] && [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        # Create compiler wrappers
-        set wrapdir ${workpath}/bazelwrap
-        xinstall -m 755 -d ${wrapdir}
-        foreach comp {cc cxx} {
-            set f [ open ${wrapdir}/${comp} w 0755 ]
-            puts ${f} "#!/bin/bash"
-            puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
-            set bzflags "\"\$\{\@\}\""
-            set bzcomp  "[set configure.${comp}]"
-            if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
-                set bzcomp "${prefix}/bin/ccache ${bzcomp}"
-            }
-            if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-                set bzflags "[option legacysupport.header_search] ${bzflags}"
-            }
-            puts ${f} "exec ${bzcomp} ${bzflags}"
-            close ${f}
-        }
+        set wrapdir [bazel::compiler_wrap_dir]
         # Run fetch
         set addpath [string map {" " ":"} [option bazel.path]]
         system -W ${worksrcpath} "PATH=${addpath}:$env(PATH) [bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
         # Patch the bazel clang wrapper script to use MacPorts compiler selection and support ccache
         foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
             # Switch to selected compiler
-            reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"     ${f}
-            reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"        ${f}
+            reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"  ${f}
+            reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"     ${f}
             # Bazel **really** doesn't want you changing stuff ;)
             # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
             system "touch -m -t 210012120101 ${f}"
