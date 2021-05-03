@@ -142,8 +142,12 @@ proc bazel::get_base_arch {} {
 }
 
 proc bazel::get_ccache_dir {} {
-    global portdbpath
-    return [file join $portdbpath build .ccache]
+    global portdbpath ccache_dir
+    if {[info exists ccache_dir]} {
+        return ${ccache_dir}
+    } else {
+        return [file join $portdbpath build .ccache]
+    }
 }
 
 supported_archs  x86_64
