@@ -20,6 +20,7 @@
 categories      python
 
 use_configure   no
+
 # we want the default universal variant added despite not using configure
 universal_variant yes
 
@@ -56,9 +57,9 @@ default distname        {${python.rootname}-${version}}
 options python.versions python.version python.default_version
 option_proc python.versions python_set_versions
 default python.default_version {[python_get_default_version]}
-default python.version {[python_get_version]}
+default python.version         {[python_get_version]}
 
-# see #34562
+# see https://trac.macports.org/ticket/34562
 options python.consistent_destroot
 default python.consistent_destroot yes
 
@@ -84,6 +85,85 @@ proc python_get_default_version {} {
     }
 }
 
+proc python_get_compiler_tags {} {
+    return {cc objc cxx objcxx fc f77 f90}
+}
+
+proc python_set_env_compilers { phase } {
+    foreach tag [python_get_compiler_tags] {
+        global configure.${tag}
+        if {[set configure.${tag}] ne ""} {
+            ${phase}.env-append [string toupper $tag]=[python_get_compiler_command ${tag}]
+        }
+    }
+}
+
+proc python_compilerwrap_dir { } {
+    global workpath
+    return ${workpath}/compilerwrap/bin
+}
+
+# Configure support for ccache
+proc python_configure_ccache { } {
+    global prefix
+    if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
+        # Set some cmake env vars incase build uses cmake
+        foreach tag [python_get_compiler_tags] {
+            switch ${tag} {
+                fc {
+                    set ctag Fortran
+                }
+                f77 {
+                    set ctag Fortran
+                }
+                f90 {
+                    set ctag Fortran
+                }
+                default {
+                    set ctag [string toupper $tag]
+                }
+            }
+            foreach phase {configure build destroot} {
+                ${phase}.env-append CMAKE_${ctag}_COMPILER_LAUNCHER=${prefix}/bin/ccache
+            }
+        }
+    }
+}
+port::register_callback python_configure_ccache
+
+proc python_create_compiler_wrap { tag } {
+    global prefix configure.${tag}
+    set comp [set configure.${tag}]
+    if { ${comp} ne "" && [file exists ${prefix}/bin/ccache] } {
+        set wrapdir [python_compilerwrap_dir]
+        if { ![file exists ${wrapdir}] } {
+            xinstall -m 755 -d ${wrapdir}
+        }
+        set fname ${wrapdir}/[file tail ${comp}]
+        if { [file exists ${fname}] } {
+            # Recreate in case underlying compiler has changed
+            file delete ${fname}
+        }
+        ui_debug "Creating compiler wrapper ${fname}"
+        set f [ open ${fname} w 0755 ]
+        puts  ${f} "#!/bin/bash"
+        puts  ${f} "exec ${prefix}/bin/ccache ${comp} \"\$\{\@\}\""
+        close ${f}
+        return ${fname}
+    }
+    return ${comp}
+}
+
+proc python_get_compiler_command { tag } {
+    global configure.${tag} configure.ccache
+    set comp [set configure.${tag}]
+    if { [option configure.ccache] } {
+        set comp [ python_create_compiler_wrap ${tag} ]
+    }
+    ui_debug "For compiler tag=${tag} using ${comp}"
+    return ${comp}
+}
+
 proc python_set_versions {option action args} {
     if {$action ne "set"} {
         return
@@ -91,7 +171,6 @@ proc python_set_versions {option action args} {
     global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
-
             subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
         }
         if {$subport eq $name || $subport eq ""} {
@@ -173,11 +252,7 @@ proc python_set_versions {option action args} {
                 build.env-append        OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler}} {
-                foreach var {cc objc cxx fc f77 f90} {
-                    if {[set configure.${var}] ne ""} {
-                        build.env-append [string toupper $var]=[set configure.${var}]
-                    }
-                }
+                python_set_env_compilers build
             }
         }
         pre-destroot {
@@ -224,11 +299,7 @@ proc python_set_versions {option action args} {
                 destroot.env-append     OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler} && ${python.consistent_destroot}} {
-                foreach var {cc objc cxx fc f77 f90} {
-                    if {[set configure.${var}] ne ""} {
-                        destroot.env-append [string toupper $var]=[set configure.${var}]
-                    }
-                }
+                python_set_env_compilers destroot
             }
         }
         post-destroot {

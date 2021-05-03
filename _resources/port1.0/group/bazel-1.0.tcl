@@ -5,6 +5,7 @@
 
 PortGroup java 1.0
 PortGroup compiler_blacklist_versions 1.0
+PortGroup legacysupport 1.1
 
 namespace eval bazel { }
 
@@ -30,7 +31,7 @@ options bazel.post_build_cmd
 default bazel.post_build_cmd ""
 
 options bazel.max_idle_secs
-default bazel.max_idle_secs 30
+default bazel.max_idle_secs 10
 
 options bazel.max_cpu_fraction
 default bazel.max_cpu_fraction 0.5
@@ -84,7 +85,7 @@ proc bazel::use_mp_clang {} {
     global configure.compiler xcodeversion
     set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
     set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} [option bazel.min_xcode] ] < 0 } ]
-    return ${is_mp_clang} || ${xcode_not_ok}
+    return [ expr ${is_mp_clang} || ${xcode_not_ok} ]
 }
 
 # Xcode blacklist
@@ -98,6 +99,11 @@ proc bazel::get_bazel_executable_name { } {
     } else {
         return bazel-[option bazel.version]
     }
+}
+
+proc bazel::get_bazel_build_area { } {
+    global workpath
+    return ${workpath}/bazel_build
 }
 
 proc bazel::set_dep { } {
@@ -121,6 +127,11 @@ proc bazel::get_base_arch {} {
     return ""
 }
 
+proc bazel::get_ccache_dir {} {
+    global portdbpath
+    return [file join $portdbpath build .ccache]
+}
+
 supported_archs  x86_64
 if {![variant_isset native]} {
     set base_march [bazel::get_base_arch]
@@ -135,21 +146,24 @@ if {![variant_isset native]} {
 proc bazel::set_env {} {
     global prefix env
     ui_debug "Setting Bazel Env"
-    if { [bazel::use_mp_clang] } {
-        configure.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
-        build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
-        destroot.env-append  BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+    # if { [bazel::use_mp_clang] } {
+    #     configure.env-append BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+    #     build.env-append     BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+    #     destroot.env-append  BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
+    # }
+    proc add_to_envs { var } {
+        foreach phase {configure build destroot} {
+            ${phase}.env-append ${var}
+        }
     }
     # https://github.com/bazelbuild/bazel/issues/2852
-    configure.env-append BAZEL_SH=/bin/bash
-    build.env-append     BAZEL_SH=/bin/bash
-    destroot.env-append  BAZEL_SH=/bin/bash
+    add_to_envs  BAZEL_SH=/bin/bash
     # patch PATH to find correct 'bazel' version
-    set newpath "PATH=${prefix}/libexec/[bazel::get_bazel_executable_name]/bin:$env(PATH)"
-    configure.env-append ${newpath}
-    build.env-append     ${newpath}
-    destroot.env-append  ${newpath}
-    ui_debug "Prepended ${newpath}"
+    add_to_envs "PATH=${prefix}/libexec/[bazel::get_bazel_executable_name]/bin:$env(PATH)"
+     # ccache dir
+    if { [option configure.ccache] } {
+        add_to_envs CCACHE_DIR=[bazel::get_ccache_dir]
+    }
 }
 port::register_callback bazel::set_env
 
@@ -174,6 +188,8 @@ pre-configure {
             reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g"    ${f}
         }
         reinplace -q "s|/usr/bin/clang|\"${configure.cc}\"|g"          ${f}
+        reinplace -q "s|\"clang++\"|\"${configure.cxx}\"|g"            ${f}
+        reinplace -q "s| clang++ | ${configure.cxx} |g"                ${f}
         reinplace -q "s|\"clang\"|\"${configure.cc}\"|g"               ${f}
         reinplace -q "s| clang | ${configure.cc} |g"                   ${f}
         reinplace -q "s|/usr/local/include|${prefix}/include|g"        ${f}
@@ -203,12 +219,43 @@ pre-build {
         ui_error "Once the build is complete, you can safely re-select your preferred gcc."
         return -code error "build error"
     }
+    if { [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
+        # Create compiler wrappers
+        set wrapdir ${workpath}/bazelwrap
+        xinstall -m 755 -d ${wrapdir}
+        foreach comp {cc cxx} {
+            set f [ open ${wrapdir}/${comp} w 0755 ]
+            puts ${f} "#!/bin/bash"
+            puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
+            set bzflags "\"\$\{\@\}\""
+            set bzcomp  "[set configure.${comp}]"
+            if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
+                set bzcomp "${prefix}/bin/ccache ${bzcomp}"
+            }
+            if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+                set bzflags "[option legacysupport.header_search] ${bzflags}"
+            }
+            puts ${f} "exec ${bzcomp} ${bzflags}"
+            close ${f}
+        }
+        # Run fetch
+        system -W ${worksrcpath} "[bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
+        # Patch the bazel clang wrapper script to use MacPorts compiler selection and support ccache
+        foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
+            # Switch to selected compiler
+            reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"     ${f}
+            reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"        ${f}
+            # Bazel **really** doesn't want you changing stuff ;)
+            # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
+            system "touch -m -t 210012120101 ${f}"
+        }
+    }
 }
 
 proc bazel::get_cmd_opts {} {
-    global bazel.max_idle_secs workpath
+    global bazel.max_idle_secs
     # Generate the bazel build command
-    set bazel_cmd_opts "--max_idle_secs=${bazel.max_idle_secs} --output_user_root=${workpath}/bazel_build"
+    set bazel_cmd_opts "--max_idle_secs=${bazel.max_idle_secs} --output_user_root=[bazel::get_bazel_build_area]"
     # Extra user defined options
     set bazel_cmd_opts "${bazel_cmd_opts} [option bazel.extra_build_cmd_opts]"
     ui_debug "Defined Bazel build command options ${bazel_cmd_opts}"
@@ -217,24 +264,25 @@ proc bazel::get_cmd_opts {} {
 
 proc bazel::get_build_opts {} {
     global build.jobs configure.cc configure.cxx configure.cflags configure.cxxflags configure.ldflags
-    global configure.sdk_version use_parallel_build bazel.limit_build_jobs
+    global configure.sdk_version use_parallel_build bazel.limit_build_jobs workpath
     # Bazel build options
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--subcommands --compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
+    set cache_n_jobs ${build.jobs}
     use_parallel_build no
     # Limit bazel resource utilisation
     if { [option bazel.limit_build_jobs] } {
         # Limit the number of parallel jobs to the number of physical, not logical, cpus.
         # First current setting to ensure we would be reducing the current setting.
         if { ![catch {sysctl hw.physicalcpu} physicalcpus] } {
-            if { ${build.jobs} > ${physicalcpus} } {
-                build.jobs ${physicalcpus}
+            if { ${cache_n_jobs} > ${physicalcpus} } {
+                set cache_n_jobs ${physicalcpus}
             }
         }
-        set bazel_build_opts "${bazel_build_opts} --jobs ${build.jobs}"
+        set bazel_build_opts "${bazel_build_opts} --jobs ${cache_n_jobs}"
         if { [option bazel.max_ram_fraction] > 0 } {
             set bazel_build_opts "${bazel_build_opts} --local_ram_resources=HOST_RAM*[option bazel.max_ram_fraction]"
         }
@@ -242,6 +290,7 @@ proc bazel::get_build_opts {} {
             set bazel_build_opts "${bazel_build_opts} --local_cpu_resources=HOST_CPUS*[option bazel.max_cpu_fraction]"
         }
     }
+    build.jobs ${cache_n_jobs}
     # hack to try and transfer MP c, c++ and ld options to bazel...
     foreach opt [list {*}${configure.cflags} ] {
         set bazel_build_opts "${bazel_build_opts} --conlyopt \"${opt}\""
@@ -252,52 +301,66 @@ proc bazel::get_build_opts {} {
     foreach opt [list {*}${configure.ldflags} ] {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
-    if { [bazel::use_mp_clang] } {
-        set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
-    } else {
-        # Explicitly pass SDK                    https://github.com/bazelbuild/rules_go/issues/1554
-        # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
-        # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
-        # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
-    }
+    # if { [bazel::use_mp_clang] } {
+    #     if { [option bazel.build_cmd] ne "" } {
+    #         set wrapdir ${workpath}/bazelwrap
+    #         set bazel_build_opts "${bazel_build_opts} --action_env CC=${wrapdir}/cc --action_env CXX=${wrapdir}/cxx"
+    #     } else {
+    #         set bazel_build_opts "${bazel_build_opts} --action_env CC=${configure.cc} --action_env CXX=${configure.cxx}"
+    #     }
+    # } else {
+    #     # Explicitly pass SDK                    https://github.com/bazelbuild/rules_go/issues/1554
+    #     # Check versioned SDK actually exists... https://trac.macports.org/ticket/60317
+    #     # Incorrect SDK choice                   https://trac.macports.org/ticket/62570
+    #     # set bazel_build_opts "${bazel_build_opts} --macos_sdk_version=${configure.sdk_version}"
+    # }
     if {![variant_isset native]} {
         set base_march [bazel::get_base_arch]
         set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
     } else {
         set bazel_build_opts "${bazel_build_opts} --copt=-march=native"
     }
+    if { [option configure.ccache] } {
+        set bazel_build_opts "${bazel_build_opts} --action_env CCACHE_DIR=[bazel::get_ccache_dir]"
+    }
     ui_debug "Defined Bazel build options ${bazel_build_opts}"
     return ${bazel_build_opts}
+}
+
+proc bazel::get_build_env { } {
+    set bazel_build_env ""
+    # if { [bazel::use_mp_clang] } {
+    #     set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
+    # } else {
+    #     #set bazel_build_env "SDKROOT=${configure.sdkroot} ${bazel_build_env}"
+    # }
+    if {![variant_isset native]} {
+        set base_march [bazel::get_base_arch]
+        set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
+    } else {
+        set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
+    }
+    set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
+    if { [option configure.ccache] } {
+        set bazel_build_env "CCACHE_DIR=[bazel::get_ccache_dir] ${bazel_build_env}"
+    }
+    return ${bazel_build_env}
 }
 
 proc bazel::configure_build {} {
     if { [option bazel.build_cmd] ne "" } {
 
-        global configure.sdkroot
+        global configure.sdkroot worksrcpath
         global bazel.build_cmd bazel.build_opts bazel.build_target
         global build.jobs build.cmd build.args build.post_args
 
-        ui_debug "Configuring bazel build command and arguments"
-
-        set bazel_build_env ""
-        if { [bazel::use_mp_clang] } {
-            set bazel_build_env "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_build_env}"
-        } else {
-            #set bazel_build_env "SDKROOT=${configure.sdkroot} ${bazel_build_env}"
-        }
-        if {![variant_isset native]} {
-            set base_march [bazel::get_base_arch]
-            set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
-        } else {
-            set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
-        }
-
-        set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
-
+        set bazel_build_env [bazel::get_build_env]
+        
         build.cmd       "${bazel_build_env} [option bazel.build_cmd] [option bazel.build_cmd_opts]"
         build.args      "[option bazel.build_opts]"
         build.post_args "[option bazel.build_target]"
 
+        ui_debug "Bazel build environ  : ${bazel_build_env}"
         ui_debug "Bazel build command  : [option bazel.build_cmd]"
         ui_debug "Bazel build options  : [option bazel.build_cmd_opts] [option bazel.build_opts]"
         ui_debug "Bazel build target   : [option bazel.build_target]"
