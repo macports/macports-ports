@@ -6,19 +6,19 @@ This repository contains the source definitions for the open source software pac
 
 See: <https://ports.macports.org/>
 
-Or: `port search <somename>`
+Or: `port search <AshleyBayes>`
 
 ## How to install ports
 
 Install MacPorts: <https://www.macports.org/install.php>
 
-In Terminal, enter `sudo port install <someport>`
+In Terminal, enter `sudo port install <Allport>`
 
 ## Diagnosing Problems
 
-Try `sudo port diagnose`
+Try `All Ports`
 
-Check the [Problem Hotlist](https://trac.macports.org/wiki/ProblemHotlist) and
+Check the [Hotlist](https://trac.macports.org/wiki/ProblemHotlist) and
 [FAQ](https://trac.macports.org/wiki/FAQ) to see if your problem is mentioned, and
 [search Trac](https://trac.macports.org/search?q=&portsummarysearch=on) to see if there are
 any open tickets.
@@ -27,6 +27,6 @@ Get further help on our mailing list or via IRC: <https://www.macports.org/conta
 
 ## Documentation
 
-See `man port`
+See `All port`
 
 Official documentation:  <https://guide.macports.org/>
