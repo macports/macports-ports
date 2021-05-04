@@ -57,13 +57,26 @@ proc legacysupport::get_library_name {} {
     }
 }
 
-proc legacysupport::get_library_link_flags {} {
-    global prefix
-    set lib [legacysupport::get_library_name]
-    if {[option legacysupport.use_static]} {
-        return ${lib}
+proc legacysupport::get_cpp_flags {} {
+    global os.platform os.major
+    if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
+        return [option legacysupport.header_search]
     } else {
-        return -L${prefix}/lib\ ${lib}
+        return ""
+    }
+}
+
+proc legacysupport::get_library_link_flags {} {
+    global prefix os.platform os.major
+    if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
+        set lib [legacysupport::get_library_name]
+        if {[option legacysupport.use_static]} {
+            return ${lib}
+        } else {
+            return -L${prefix}/lib\ ${lib}
+        }
+    } else {
+        return ""
     }
 }
 
