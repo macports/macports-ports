@@ -85,7 +85,6 @@ proc compwrap::create_wrapper {tag} {
 
     # Basic option, to pass on all command line arguments
     set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
-    ui_msg ${comp_opts}
     # Add MacPorts compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
         set comp_opts "[option configure.${ftag}flags] [get_canonical_archflags ${tag}] ${comp_opts}"
