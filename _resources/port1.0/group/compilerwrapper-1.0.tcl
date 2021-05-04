@@ -17,13 +17,13 @@ options compwrap.print_compiler_command
 default compwrap.print_compiler_command no
 
 options compwrap.compiler_pre_flags
-default compwrap.compiler_pre_flags ""
+default compwrap.compiler_pre_flags {{}}
 
 options compwrap.compiler_post_flags
-default compwrap.compiler_post_flags ""
+default compwrap.compiler_post_flags {{}}
 
 options compwrap.compiler_args_forward
-default compwrap.compiler_args_forward {\$\{\@\}}
+default compwrap.compiler_args_forward {{\$\{\@\}}}
 
 proc compwrap::use_ccache {tag} {
     global prefix
@@ -47,6 +47,14 @@ proc compwrap::known_compiler_tags {} {
 
 proc compwrap::known_fortran_compiler_tags {} {
     return [list fc f77 f90]
+}
+
+proc compwrap::trim {c} {
+    if { [string range [option $c] 0 0] eq "\{" } {
+        return [string range [option $c] 1 end-1 ]
+    } else {
+        return [option $c]
+    }
 }
 
 proc compwrap::create_wrapper {tag} {
@@ -76,7 +84,8 @@ proc compwrap::create_wrapper {tag} {
     file delete -force ${fname}
 
     # Basic option, to pass on all command line arguments
-    set comp_opts "[option compwrap.compiler_pre_flags] [option compwrap.compiler_args_forward] [option compwrap.compiler_post_flags]"
+    set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
+    ui_msg ${comp_opts}
     # Add MacPorts compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
         set comp_opts "[option configure.${ftag}flags] [get_canonical_archflags ${tag}] ${comp_opts}"

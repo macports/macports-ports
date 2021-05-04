@@ -177,9 +177,9 @@ proc go.append_env {} {
         # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         # Also remove '-static' from compilation options as this is not supported on older systems.
-        #compwrap.compiler_args_forward {\$\{\@\//-static/\}}
-        #compwrap.compiler_pre_flags    " ${configure.ldflags} "
-        #compwrap.compiler_post_flags   { -Wno-error }
+        compwrap.compiler_args_forward \$\{\@\//-static/\}
+        compwrap.compiler_pre_flags    ${configure.ldflags}
+        compwrap.compiler_post_flags   -Wno-error
     #}
     post-extract {
         build.env-append \
