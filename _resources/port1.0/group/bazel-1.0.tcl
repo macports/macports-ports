@@ -266,7 +266,7 @@ proc bazel::get_build_opts {} {
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # For very (very) verbose logging
-    set bazel_build_opts "--subcommands ${bazel_build_opts}"
+    #set bazel_build_opts "--subcommands ${bazel_build_opts}"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
