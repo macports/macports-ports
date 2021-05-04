@@ -27,6 +27,8 @@
 #     -arch flags set by the muniversal PG
 #
 
+PortGroup compilerwrapper       1.0
+
 options makefile.override
 default makefile.override       {CC CXX OBJC OBJCXX FC F77 F90 JAVAC PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG}
 
@@ -216,7 +218,7 @@ proc makefile_pg::makefile_setup {} {
                               FFLAGS F90FLAGS FCFLAGS LDFLAGS LIBS CLASSPATH \
                               PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG \
                           } {
-            set value [option configure.[string tolower $env_var]]
+            set value [compwrap::create_wrapper [string tolower $env_var]]
             if {$value ne ""} {
                 ${phase}.env-append         "$env_var=$value"
                 if {[lsearch -exact ${makefile.override} ${env_var}] != -1} {

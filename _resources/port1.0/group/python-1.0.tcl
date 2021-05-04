@@ -17,6 +17,8 @@
 #
 # Note: setting these options requires name to be set beforehand
 
+PortGroup       compilerwrapper 1.0
+
 categories      python
 
 use_configure   no
@@ -90,68 +92,12 @@ proc python_get_compiler_tags {} {
 }
 
 proc python_set_env_compilers {phase} {
+    ui_msg "MOOO ${phase}"
     foreach tag [python_get_compiler_tags] {
         if {[option configure.${tag}] ne ""} {
-            ${phase}.env-append [string toupper $tag]=[python_get_compiler_command ${tag}]
+            ${phase}.env-append [string toupper $tag]=[compwrap::get_compiler ${tag}]
         }
     }
-}
-
-# Configure support for ccache
-proc python_configure_ccache {} {
-    global prefix
-    if {[option configure.ccache] && [file exists ${prefix}/bin/ccache]} {
-        # Set some cmake env vars incase build uses cmake
-        foreach tag [python_get_compiler_tags] {
-            switch ${tag} {
-                fc {
-                    set ctag Fortran
-                }
-                f77 {
-                    set ctag Fortran
-                }
-                f90 {
-                    set ctag Fortran
-                }
-                default {
-                    set ctag [string toupper $tag]
-                }
-            }
-            foreach phase [list configure build destroot] {
-                ${phase}.env-append CMAKE_${ctag}_COMPILER_LAUNCHER=${prefix}/bin/ccache
-            }
-        }
-    }
-}
-port::register_callback python_configure_ccache
-
-proc python_create_compiler_wrap {tag} {
-    global prefix
-    set comp [option configure.${tag}]
-    if {${comp} ne "" && [file exists ${prefix}/bin/ccache]} {
-        set wrapdir [option workpath]/compilerwrap/bin
-        if {![file exists ${wrapdir}]} {
-            xinstall -d ${wrapdir}
-        }
-        set fname ${wrapdir}/[file tail ${comp}]
-        # Recreate in case underlying compiler has changed
-        file delete -force ${fname}
-        ui_debug "Creating compiler wrapper ${fname}"
-        set f [open ${fname} w 0755]
-        puts  ${f} "#!/bin/bash"
-        puts  ${f} "exec ${prefix}/bin/ccache ${comp} \"\$\{\@\}\""
-        close ${f}
-        return ${fname}
-    }
-    return ${comp}
-}
-
-proc python_get_compiler_command {tag} {
-    set comp [option configure.${tag}]
-    if {[option configure.ccache]} {
-        set comp [python_create_compiler_wrap ${tag}]
-    }
-    return ${comp}
 }
 
 proc python_set_versions {option action args} {

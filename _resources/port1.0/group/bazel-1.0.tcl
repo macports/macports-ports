@@ -6,6 +6,7 @@
 PortGroup java 1.0
 PortGroup compiler_blacklist_versions 1.0
 PortGroup legacysupport 1.1
+PortGroup compilerwrapper 1.0
 
 namespace eval bazel { }
 
@@ -145,15 +146,6 @@ proc bazel::get_base_arch {} {
     return ""
 }
 
-proc bazel::get_ccache_dir {} {
-    global portdbpath ccache_dir
-    if {[info exists ccache_dir]} {
-        return ${ccache_dir}
-    } else {
-        return [file join $portdbpath build .ccache]
-    }
-}
-
 supported_archs  x86_64
 if {![variant_isset native]} {
     set base_march [bazel::get_base_arch]
@@ -175,7 +167,7 @@ proc bazel::set_env {} {
     bazel::add_to_envs PATH=[string map {" " ":"} [option bazel.path]]:$env(PATH)
      # ccache dir
     if { [option configure.ccache] } {
-        bazel::add_to_envs CCACHE_DIR=[bazel::get_ccache_dir]
+        bazel::add_to_envs CCACHE_DIR=[compwrap::get_ccache_dir]
     }
 }
 port::register_callback bazel::set_env
@@ -192,37 +184,11 @@ proc bazel::set_configure {} {
 }
 port::register_callback bazel::set_configure
 
-proc bazel::compiler_wrap_dir { } {
-    global workpath
-    set wrapdir ${workpath}/bazelwrap
-    if {![file exists ${wrapdir}]} {
-        xinstall -m 755 -d ${wrapdir}
-    }
-    return ${wrapdir}
-}
-
 # Patch configuration
 pre-configure {
     # enforce correct build settings
-    # Create compiler wrappers
-    set wrapdir [bazel::compiler_wrap_dir]
-    foreach comp {cc cxx} {
-        set f [ open ${wrapdir}/${comp} w 0755 ]
-        puts ${f} "#!/bin/bash"
-        puts ${f} "export CCACHE_DIR=[bazel::get_ccache_dir]"
-        set bzflags "\"\$\{\@\}\""
-        set bzcomp  "[set configure.${comp}]"
-        if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
-            set bzcomp "${prefix}/bin/ccache ${bzcomp}"
-        }
-        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-            set bzflags "[option legacysupport.header_search] ${bzflags}"
-        }
-        puts ${f} "exec ${bzcomp} ${bzflags}"
-        close ${f}
-    }
-    configure.cc  ${wrapdir}/cc
-    configure.cxx ${wrapdir}/cxx
+    set cc  [compwrap::create_wrapper cc]
+    set cxx [compwrap::create_wrapper cxx]
     # Patch the checked out source
     # note final / is because ${worksrcpath} is a sym-link
     foreach f [ exec find ${worksrcpath}/ -name ".bazelrc" -or -name "configure" -or -name "configure.py" \
@@ -231,12 +197,12 @@ pre-configure {
         foreach cmd {ar nm strip libtool ld objdump} {
             reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g"    ${f}
         }
-        reinplace -q "s|/usr/bin/clang++|\"${wrapdir}/cxx\"|g"         ${f}
-        reinplace -q "s|/usr/bin/clang|\"${wrapdir}/cc\"|g"            ${f}
-        reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"              ${f}
-        reinplace -q "s| clang++ | ${wrapdir}/cxx |g"                  ${f}
-        reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"                 ${f}
-        reinplace -q "s| clang | ${wrapdir}/cc |g"                     ${f}
+        reinplace -q "s|/usr/bin/clang++|\"${cc}\"|g"                  ${f}
+        reinplace -q "s|/usr/bin/clang|\"${cc}\"|g"                    ${f}
+        reinplace -q "s|\"clang++\"|\"${cxx}\"|g"                      ${f}
+        reinplace -q "s| clang++ | ${cxx} |g"                          ${f}
+        reinplace -q "s|\"clang\"|\"${cc}\"|g"                         ${f}
+        reinplace -q "s| clang | ${cc} |g"                             ${f}
         reinplace -q "s|/usr/local/include|${prefix}/include|g"        ${f}
         reinplace -q "s|std=c++0x|std=c++11|g"                         ${f}
         reinplace -q "s|std=c++1y|std=c++14|g"                         ${f}
@@ -266,15 +232,16 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.run_bazel_fetch] && [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        set wrapdir [bazel::compiler_wrap_dir]
+        set cc  [compwrap::create_wrapper cc]
+        set cxx [compwrap::create_wrapper cxx]
         # Run fetch
         set addpath [string map {" " ":"} [option bazel.path]]
         system -W ${worksrcpath} "PATH=${addpath}:$env(PATH) [bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
         # Patch the bazel clang wrapper script to use MacPorts compiler selection and support ccache
         foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
             # Switch to selected compiler
-            reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"  ${f}
-            reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"     ${f}
+            reinplace -q "s|\"clang++\"|\"${cxx}\"|g"  ${f}
+            reinplace -q "s|\"clang\"|\"${cc}\"|g"     ${f}
             # Bazel **really** doesn't want you changing stuff ;)
             # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
             system "touch -m -t 210012120101 ${f}"
@@ -299,7 +266,7 @@ proc bazel::get_build_opts {} {
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # For very (very) verbose logging
-    #set bazel_build_opts "--subcommands ${bazel_build_opts}"
+    set bazel_build_opts "--subcommands ${bazel_build_opts}"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
@@ -340,7 +307,7 @@ proc bazel::get_build_opts {} {
         set bazel_build_opts "${bazel_build_opts} --copt=-march=native"
     }
     if { [option configure.ccache] } {
-        set bazel_build_opts "${bazel_build_opts} --action_env CCACHE_DIR=[bazel::get_ccache_dir]"
+        set bazel_build_opts "${bazel_build_opts} --action_env CCACHE_DIR=[compwrap::get_ccache_dir]"
     }
     ui_debug "Defined Bazel build options ${bazel_build_opts}"
     return ${bazel_build_opts}
@@ -356,7 +323,7 @@ proc bazel::get_build_env { } {
     }
     set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
     if { [option configure.ccache] } {
-        set bazel_build_env "CCACHE_DIR=[bazel::get_ccache_dir] ${bazel_build_env}"
+        set bazel_build_env "CCACHE_DIR=[compwrap::get_ccache_dir] ${bazel_build_env}"
     }
     return ${bazel_build_env}
 }
