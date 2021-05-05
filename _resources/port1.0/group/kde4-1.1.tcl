@@ -4,7 +4,7 @@
 # PortGroup     kde4 1.1
 
 # Use CMake and Qt4 port groups
-PortGroup               cmake 1.0
+PortGroup               cmake 1.1
 PortGroup               qt4 1.0
 
 # Make sure to not use any already installed headers and libraries;
@@ -13,7 +13,7 @@ configure.ldflags-delete  -L${prefix}/lib
 configure.cppflags-delete -I${prefix}/include
 
 # setup all KDE4 ports to build in a separate directory from the source:
-cmake.out_of_source         yes
+cmake.out_of_source     yes
 
 # Automoc added as build dependency here as most, if not all kde
 # programs currently need it. The automoc port, which includes this
