@@ -28,8 +28,26 @@ pre-configure {
     file mkdir ${configure.dir}
 }
 
-#FIXME: ccache works with cmake on linux
-configure.ccache    no
+# cache the configure.ccache variable (it will be overridden in the pre-configure step)
+set cmake_ccache    ${configure.ccache}
+
+# tell CMake to use ccache via the CMAKE_<LANG>_COMPILER_LAUNCHER variable
+# and unset the global configure.ccache option which is not compatible
+# with CMake.
+# See https://stackoverflow.com/questions/1815688/how-to-use-ccache-with-cmake
+proc cmake_ccaching_flags {} {
+    global prefix
+    upvar cmake_ccache ccache
+    if {${ccache} && [file exists ${prefix}/bin/ccache]} {
+        return [list \
+            -DCMAKE_C_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_Fortran_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_OBJC_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+            -DCMAKE_ISPC_COMPILER_LAUNCHER=${prefix}/bin/ccache ]
+    }
+}
 
 configure.cmd       ${prefix}/bin/cmake
 
@@ -44,6 +62,7 @@ default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
 default configure.args {[list \
                     -DCMAKE_BUILD_TYPE=Release \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+                   {*}[cmake_ccaching_flags] \
                    {-DCMAKE_C_COMPILER="$CC"} \
                     -DCMAKE_COLOR_MAKEFILE=ON \
                    {-DCMAKE_CXX_COMPILER="$CXX"} \
@@ -145,9 +164,27 @@ platform darwin {
         } else {
             configure.args-append -DCMAKE_OSX_SYSROOT="/"
         }
+
+        # The configure.ccache variable has been cached so we can restore it in the post-configure
+        # (pre-configure and post-configure are always run in a single `port` invocation.)
+        configure.ccache        no
+        # surprising but intended behaviour that's impossible to work around more gracefully:
+        # overriding configure.ccache fails if the user set it directly from the commandline
+        if {[tbool configure.ccache]} {
+            ui_error "Please don't use configure.ccache=yes on the commandline for port:${subport}, use configureccache=yes"
+            return -code error "invalid invocation (port:${subport})"
+        }
+        if {${cmake_ccache}} {
+            ui_info "        (using ccache)"
+        }
     }
 
     post-configure {
+        # restore configure.ccache:
+        if {[info exists cmake_ccache]} {
+            configure.ccache    ${cmake_ccache}
+            ui_debug "configure.ccache restored to ${cmake_ccache}"
+        }
         # Although cmake wants us not to set -arch flags ourselves when we run cmake,
         # ports might have need to access these variables at other times.
         foreach archflag_var ${cmake._archflag_vars} {
