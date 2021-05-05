@@ -25,11 +25,17 @@ default compwrap.compiler_post_flags {{}}
 options compwrap.compiler_args_forward
 default compwrap.compiler_args_forward {{\$\{\@\}}}
 
+options compwrap.compilers_to_wrap
+default compwrap.compilers_to_wrap [list cc objc cxx objcxx fc f77 f90]
+
+options compwrap.ccache_supported_compilers
+default compwrap.ccache_supported_compilers [list cc objc cxx objcxx]
+
 proc compwrap::use_ccache {tag} {
     global prefix
     return [ expr [option configure.ccache] && \
                  [file exists ${prefix}/bin/ccache] && \
-                 [lsearch -exact [compwrap::known_fortran_compiler_tags] ${tag}] < 0 ]
+                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 ]
 }
 
 proc compwrap::get_ccache_dir {} {
@@ -39,14 +45,6 @@ proc compwrap::get_ccache_dir {} {
     } else {
         return [file join $portdbpath build .ccache]
     }
-}
-
-proc compwrap::known_compiler_tags {} {
-    return [list cc objc cxx objcxx fc f77 f90]
-}
-
-proc compwrap::known_fortran_compiler_tags {} {
-    return [list fc f77 f90]
 }
 
 proc compwrap::trim {c} {
@@ -63,7 +61,7 @@ proc compwrap::create_wrapper {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
     # If not defined, or tag not in list of known compilers to wrap, just return
-    if {${comp} eq "" || [lsearch -exact [compwrap::known_compiler_tags] ${tag}] < 0} {
+    if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
         return ${comp}
     }
     
@@ -115,36 +113,15 @@ proc compwrap::create_wrapper {tag} {
     return ${fname}
 }
 
-proc compwrap::get_compiler {tag} {
-    set comp [option configure.${tag}]
-    if {[option configure.ccache]} {
-        set comp [compwrap::create_wrapper ${tag}]
-    }
-    return ${comp}
-}
-
 # Set various env vars
 proc compwrap::configure_envs {} {
     global prefix
     # Set some cmake env vars incase build uses cmake
-    foreach tag [compwrap::known_compiler_tags] {
+    foreach tag [option compwrap.compilers_to_wrap] {
+        # Check for compilers supported by ccache
         if {[compwrap::use_ccache ${tag}]} {
-            switch ${tag} {
-                fc {
-                    set ctag Fortran
-                }
-                f77 {
-                    set ctag Fortran
-                }
-                f90 {
-                    set ctag Fortran
-                }
-                default {
-                    set ctag [string toupper $tag]
-                }
-            }
             foreach phase [list configure build destroot] {
-                ${phase}.env-append CMAKE_${ctag}_COMPILER_LAUNCHER=${prefix}/bin/ccache
+                ${phase}.env-append CMAKE_[string toupper $tag]_COMPILER_LAUNCHER=${prefix}/bin/ccache
             }
         }
     }
