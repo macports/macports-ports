@@ -108,6 +108,12 @@ pre-configure {
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
     puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
 
+    # https://github.com/qt/qtbase/commit/d64940891dffcb951f4b76426490cbc94fb4aba7
+    # Enable ccache support if active and available in given qt5 version
+    if { [option configure.ccache] && [vercmp ${qt5.version} 5.9.2] >= 0 } {
+        puts ${cache} "CONFIG+=ccache"
+    }
+
     # respect configure.compiler but still allow qmake to find correct Xcode clang based on SDK
     if { ${configure.compiler} ne "clang" } {
         puts ${cache} "QMAKE_CC=${configure.cc}"

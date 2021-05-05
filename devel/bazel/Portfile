@@ -4,6 +4,10 @@ PortSystem                                            1.0
 PortGroup             github                          1.0
 PortGroup             java                            1.0
 PortGroup             compiler_blacklist_versions     1.0
+PortGroup             legacysupport                   1.1
+
+legacysupport.use_static                              yes
+legacysupport.newest_darwin_requires_legacy           13
 
 epoch                 1
 
@@ -16,14 +20,14 @@ lappend all_bazels bazel
 name bazel
 foreach b ${bazel_subports} { subport $b {} }
 
-# Min supported Darwin version
-set min_darwin 16
-
 # The oldest Xcode version to use default Xcode compiler
 set bazel_min_xcode 9.0
 
 # Extra args for bazel command
 set extra_args ""
+
+# Note bazel-3.{1,5,7} build on OSX10.11 but fail at runtime with
+# dyld: lazy symbol binding failed: Symbol not found: _os_log_create
 
 if { ${name} eq ${subport} } {
 
@@ -38,6 +42,7 @@ if { ${name} eq ${subport} } {
     set bazel_min_xcode 12.0
     compiler.blacklist-append {clang < 1200}
     compiler.blacklist-append {macports-clang-[5-9].0}
+    set min_darwin    16
 
 } elseif { "bazel-3.7" eq ${subport} } {
 
@@ -54,6 +59,7 @@ if { ${name} eq ${subport} } {
 
     compiler.blacklist-append {clang < 710}
     compiler.blacklist-append {macports-clang-[7-9].0}
+    set min_darwin    16
 
 } elseif { "bazel-3.5" eq ${subport} } {
 
@@ -70,6 +76,10 @@ if { ${name} eq ${subport} } {
 
     compiler.blacklist-append {clang < 710}
     compiler.blacklist-append {macports-clang-[7-9].0}
+    set min_darwin    16
+
+    # https://trac.macports.org/ticket/62551
+    set extra_args "--host_javabase=@local_jdk//:jdk"
 
 } elseif { "bazel-3.1" eq ${subport} } {
 
@@ -86,6 +96,7 @@ if { ${name} eq ${subport} } {
 
     compiler.blacklist-append {clang < 710}
     compiler.blacklist-append {macports-clang-[7-9].0}
+    set min_darwin    16
 
     # https://trac.macports.org/ticket/62551
     set extra_args "--host_javabase=@local_jdk//:jdk"
@@ -105,6 +116,7 @@ if { ${name} eq ${subport} } {
 
     compiler.blacklist-append {clang < 710}
     compiler.blacklist-append {macports-clang-[7-9].0}
+    set min_darwin    16
 
 } elseif { "bazel-0.25" eq ${subport} } {
 
@@ -119,10 +131,9 @@ if { ${name} eq ${subport} } {
                       sha256  7456032199852c043e6c5b3e4c71dd8089c1158f72ec554e6ec1c77007f0ab51 \
                       size    275804130
 
-    # min OS
-    set min_darwin 14
     compiler.blacklist-append {clang < 710}
     compiler.blacklist-append {macports-clang-[7-9].0}
+    set min_darwin    14
 
 }
 
@@ -131,7 +142,7 @@ if { ${os.platform} eq "darwin" && ${os.major} < ${min_darwin} } {
     known_fail yes
     # https://trac.macports.org/ticket/58518
     pre-fetch {
-        ui_error "${subport} ${version} requires Darwin ${min_darwin} or newer"
+        ui_error "${subport} ${version} requires macOS 10.[expr ${min_darwin} - 4] (Darwin${min_darwin}) or newer"
         return -code error "incompatible macOS version"
     }
 }
@@ -174,6 +185,9 @@ use_xcode             yes
 
 compiler.cxx_standard 2011
 
+# Always force the use of the un-versioned SDK
+configure.sdk_version
+
 # python versions. Build needs both 'python2' and 'python3'
 set py3ver 3.8
 set py2ver 2.7
@@ -195,6 +209,17 @@ if {${os.platform} eq "darwin" && ${os.major} < 16} {
     # https://github.com/bazelbuild/bazel/issues/6188
     depends_build-append  port:unzip
 }
+
+proc bazel_get_ccache_dir {} {
+    global portdbpath
+    return [file join $portdbpath build .ccache]
+}
+
+proc bazel_wrap_dir {} {
+    global workpath
+    return ${workpath}/bazelwrap
+}
+
 post-patch {
     if       {[vercmp ${xcodeversion} 7.0] < 0} {
         # Use hacked version that does not find anything.
@@ -211,7 +236,8 @@ post-patch {
     }
 
     # Patch build files to enforce correct compiler
-    foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
+    foreach f [ exec find ${worksrcpath}/ -name "configure" -or -name "configure.py" -or -name "compile.sh" -or -name "*.tpl" \
+                    -or -name "*.bzl" -or -name "CROSSTOOL" -or -name "configure.py" -or -name "MOCK_CROSSTOOL" ] {
         foreach cmd {ar nm strip libtool ld objdump} {
             reinplace -q "s|/usr/bin/${cmd}|${prefix}/bin/${cmd}|g" ${f}
         }
@@ -223,21 +249,59 @@ post-patch {
         reinplace -q "s|std=c++1y|std=c++14|g"                  ${f}
         reinplace -q "s|std=c++1z|std=c++17|g"                  ${f}
     }
+
+    # Patch the wrapped clang code to use MP's compiler selection
+    set wrapdir [bazel_wrap_dir]
+    xinstall -m 755 -d ${wrapdir}
+    foreach comp {cc cxx} {
+        set f [ open ${wrapdir}/${comp} w 0755 ]
+        puts ${f} "#!/bin/bash"
+        puts ${f} "export CCACHE_DIR=[bazel_get_ccache_dir]"
+        set bzflags "\"\$\{\@\}\""
+        set bzcomp  "[set configure.${comp}]"
+        if { [option configure.ccache] && [file exists ${prefix}/bin/ccache] } {
+            set bzcomp "${prefix}/bin/ccache ${bzcomp}"
+        }
+        if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+            set bzflags "[option legacysupport.header_search] ${bzflags}"
+        }
+        puts ${f} "exec ${bzcomp} ${bzflags}"
+        close ${f}
+    }
+    foreach f [ exec find ${workpath}/ -name "wrapped_clang.cc" ] {
+        # Switch to selected compiler
+        reinplace -q "s|\"clang++\"|\"${wrapdir}/cxx\"|g"     ${f}
+        reinplace -q "s|\"clang\"|\"${wrapdir}/cc\"|g"        ${f}
+        # Bazel **really** doesn't want you changing stuff ;)
+        # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
+        system "touch -m -t 210012120101 ${f}"
+    }
 }
 
-build.env-append  CC=${configure.cc} \
-                 CXX=${configure.cxx} \
+set wrapdir [bazel_wrap_dir]
+
+build.env-append  CC=${wrapdir}/cc \
+                 CXX=${wrapdir}/cxx \
               TMPDIR=${workpath}/tmp \
            JAVA_HOME=${java.home}
 
-# Work out if we should be using macports clang
-set use_mp_clang [ expr ( [ string match macports-clang-* ${configure.compiler} ] || [ vercmp ${xcodeversion} ${bazel_min_xcode} ] < 0 ) ]
+proc use_external_toolchain {} {
+    # global configure.compiler xcodeversion bazel_min_xcode os.major
+    # set is_mp_clang  [ expr { [ string match macports-clang-* ${configure.compiler} ] } ]
+    # set xcode_not_ok [ expr { ${xcodeversion} eq "none" || [ vercmp ${xcodeversion} ${bazel_min_xcode} ] < 0 } ]
+    # set use_legacy_s [ expr ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] ]
+    # return [ expr ${is_mp_clang} || ${xcode_not_ok} || ${use_legacy_s} ]
+    # Do not use above as seems to cause compilation failures. To be investigated.
+    #   src/main/native/unix_jni_darwin.cc:22:10: fatal error: 'os/log.h' file not found
+    #   #include <os/log.h>
+    return no
+}
 
 # Disable Xcode detection on older OSes, as we want the
 # MP provided commandline utilities to be used instead.
-if { ${use_mp_clang} } {
+if { [use_external_toolchain] } {
     compiler.blacklist-append {clang}
-    set extra_args "--action_env=CC=${configure.cc} --action_env=CXX=${configure.cxx} ${extra_args}"
+    set extra_args "--action_env=CC=${wrapdir}/cc --action_env=CXX=${wrapdir}/cxx ${extra_args}"
     build.env-append     "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1"
     configure.env-append "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1"
 }
@@ -266,7 +330,7 @@ build {
     # Build bazel
     set bazel_cmd "PATH=${workpath}/bin:\$PATH JAVA_HOME=${java.home} VERBOSE=yes BAZEL_WRKDIR=${workpath} ./compile.sh"
     # If using MP toolchain pass options to enforce this
-    if { ${use_mp_clang} } {
+    if { [use_external_toolchain] } {
         set bazel_cmd "BAZEL_USE_CPP_ONLY_TOOLCHAIN=1 ${bazel_cmd}"
     }
     if { ${extra_args} ne "" } {
