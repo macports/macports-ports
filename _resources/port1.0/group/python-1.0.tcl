@@ -94,7 +94,7 @@ proc python_get_compiler_tags {} {
 proc python_set_env_compilers {phase} {
     foreach tag [python_get_compiler_tags] {
         if {[option configure.${tag}] ne ""} {
-            ${phase}.env-append [string toupper $tag]=[compwrap::get_compiler ${tag}]
+            ${phase}.env-append [string toupper $tag]=[compwrap::create_wrapper ${tag}]
         }
     }
 }
