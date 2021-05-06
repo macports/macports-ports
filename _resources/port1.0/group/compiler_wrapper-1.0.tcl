@@ -64,28 +64,39 @@ proc compwrap::comp_flags {tag} {
     return "[option configure.${ftag}flags] [get_canonical_archflags ${tag}]"
 }
 
-proc compwrap::create_wrapper {tag} {
+proc compwrap::wrapper_path {tag} {
     global prefix
-
     # Get the underlying compiler
     set comp [option configure.${tag}]
-
     # If not defined, or tag not in list of known compilers to wrap, just return
     if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
         return ${comp}
     }
-
-    # Create the directory for the wrapper. Format is
+    # Return the path to the wrapper. Format is :-
     # <port workpath>/<compiler tag>/<path to underlying compiler>
-    set wrapdir [option workpath]/compwrap/${tag}[file dirname ${comp}]
+    set comp [option workpath]/compwrap/${tag}${comp}
+}
+
+proc compwrap::create_wrapper {tag} {
+    global prefix env
+
+    # Get the underlying compiler
+    set comp [option configure.${tag}]
+
+    # Get the wrapper
+    set wrapcomp [compwrap::wrapper_path ${tag}]
+    if { ${wrapcomp} eq ${comp} } {
+        return ${comp}
+    }
+
+    # Create the directory for the wrapper.
+    set wrapdir [file dirname ${wrapcomp}]
     if {![file exists ${wrapdir}]} {
         xinstall -d ${wrapdir}
     }
-    # Wrapper name, same as underlying compiler.
-    set fname ${wrapdir}/[file tail ${comp}]
 
     # Force recreate in case underlying compiler has changed
-    file delete -force ${fname}
+    file delete -force ${wrapcomp}
 
     # Basic option, to pass on all command line arguments
     set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
@@ -100,14 +111,26 @@ proc compwrap::create_wrapper {tag} {
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
     }
 
+    # isysroot
+    if {[option configure.sdkroot] ne "" && \
+            ![option compiler.limit_flags] && \
+            [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+                set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
+    }
+
+    # pipe
+    if { [option configure.pipe] } {
+        set comp_opts "-pipe ${comp_opts}"
+    }
+
     # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
         set comp "${prefix}/bin/ccache ${comp}"
     }
 
     # Finally create the wrapper script
-    ui_debug "Creating compiler wrapper ${fname}"
-    set f [open ${fname} w 0755]
+    ui_debug "Creating compiler wrapper ${wrapcomp}"
+    set f [open ${wrapcomp} w 0755]
     puts ${f} "#!/bin/bash"
     # If ccache active make sure correct CCACHE_DIR is used as not all build systems
     # (looking at you Bazel) propagate this flag.
@@ -121,7 +144,7 @@ proc compwrap::create_wrapper {tag} {
     puts  ${f} "exec \${CMD}"
     close ${f}
     
-    return ${fname}
+    return ${wrapcomp}
 }
 
 # Set various env vars
