@@ -67,9 +67,14 @@ proc compwrap::trim {c} {
 proc compwrap::comp_flags {tag} {
     switch ${tag} {
         cc      { set ftag "c" }
+        f77     { set ftag "f" }
         default { set ftag ${tag} }
     }
-    return "[option configure.${ftag}flags] [get_canonical_archflags ${tag}]"
+    set flags "[get_canonical_archflags ${tag}]"
+    if { [info exists configure.${ftag}flags] } {
+        set flags "[option configure.${ftag}flags] ${flags}"
+    } 
+    return ${flags}
 }
 
 proc compwrap::wrapper_path {tag} {
