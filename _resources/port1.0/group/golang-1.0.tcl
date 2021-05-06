@@ -52,7 +52,7 @@
 # can be used to generate a skeleton portfile with precomputed go.vendors.
 
 PortGroup legacysupport 1.1
-PortGroup compilerwrapper 1.0
+PortGroup compiler_wrapper 1.0
 
 compwrap.print_compiler_command yes
 

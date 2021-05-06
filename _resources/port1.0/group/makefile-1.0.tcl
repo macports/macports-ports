@@ -27,7 +27,7 @@
 #     -arch flags set by the muniversal PG
 #
 
-PortGroup compilerwrapper       1.0
+PortGroup compiler_wrapper      1.0
 
 options makefile.override
 default makefile.override       {CC CXX OBJC OBJCXX FC F77 F90 JAVAC PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG}

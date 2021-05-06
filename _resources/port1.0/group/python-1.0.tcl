@@ -17,7 +17,7 @@
 #
 # Note: setting these options requires name to be set beforehand
 
-PortGroup       compilerwrapper 1.0
+PortGroup       compiler_wrapper 1.0
 
 categories      python
 
