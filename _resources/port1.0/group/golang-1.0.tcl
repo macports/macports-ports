@@ -172,7 +172,7 @@ proc go.append_env {} {
     global os.major build.env workpath
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
-    #if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
         # Note, go annoyingly uses CC for both building and linking, and thus in order to get it to correctly
         # link to the legacy support library, the ldflags need to be added to the cc and ccx wrappers.
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
@@ -180,7 +180,7 @@ proc go.append_env {} {
         compwrap.compiler_args_forward \$\{\@\//-static/\}
         compwrap.compiler_pre_flags    ${configure.ldflags}
         compwrap.compiler_post_flags   -Wno-error
-    #}
+    }
     post-extract {
         build.env-append \
             "CC=[compwrap::create_wrapper cc]" \
