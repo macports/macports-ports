@@ -48,6 +48,7 @@ proc compwrap::get_ccache_dir {} {
 }
 
 proc compwrap::trim {c} {
+    # Remove any enclosing "{....}" braces if present
     if { [string range [option $c] 0 0] eq "\{" } {
         return [string range [option $c] 1 end-1 ]
     } else {
@@ -55,46 +56,56 @@ proc compwrap::trim {c} {
     }
 }
 
+proc compwrap::comp_flags {tag} {
+    switch ${tag} {
+        cc      { set ftag "c" }
+        default { set ftag ${tag} }
+    }
+    return "[option configure.${ftag}flags] [get_canonical_archflags ${tag}]"
+}
+
 proc compwrap::create_wrapper {tag} {
     global prefix
 
     # Get the underlying compiler
     set comp [option configure.${tag}]
+
     # If not defined, or tag not in list of known compilers to wrap, just return
     if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
         return ${comp}
     }
-    
+
+    # Create the directory for the wrapper. Format is
+    # <port workpath>/<compiler tag>/<path to underlying compiler>
     set wrapdir [option workpath]/compwrap/${tag}[file dirname ${comp}]
     if {![file exists ${wrapdir}]} {
         xinstall -d ${wrapdir}
     }
-
-    switch ${tag} {
-        cc      { set ftag "c" }
-        default { set ftag ${tag} }
-    }
-    
-    # Wrapper name, based on original
+    # Wrapper name, same as underlying compiler.
     set fname ${wrapdir}/[file tail ${comp}]
-    
+
     # Force recreate in case underlying compiler has changed
     file delete -force ${fname}
 
     # Basic option, to pass on all command line arguments
     set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
+
     # Add MacPorts compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
-        set comp_opts "[option configure.${ftag}flags] [get_canonical_archflags ${tag}] ${comp_opts}"
+        set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
     }
+
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
     }
-    # Append ccache if active
+
+    # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
         set comp "${prefix}/bin/ccache ${comp}"
     }
+
+    # Finally create the wrapper script
     ui_debug "Creating compiler wrapper ${fname}"
     set f [open ${fname} w 0755]
     puts ${f} "#!/bin/bash"
