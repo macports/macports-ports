@@ -56,7 +56,8 @@ proc compwrap::get_ccache_dir {} {
 
 proc compwrap::trim {c} {
     # Remove any enclosing "{....}" braces if present
-    if { [string range [option $c] 0 0] eq "\{" } {
+    if { [string range [option $c] 0   0  ] eq "\{" &&
+         [string range [option $c] end end] eq "\}" } {
         return [string range [option $c] 1 end-1 ]
     } else {
         return [option $c]
