@@ -17,13 +17,13 @@ options compwrap.print_compiler_command
 default compwrap.print_compiler_command no
 
 options compwrap.compiler_pre_flags
-default compwrap.compiler_pre_flags {{}}
+default compwrap.compiler_pre_flags [list]
 
 options compwrap.compiler_post_flags
-default compwrap.compiler_post_flags {{}}
+default compwrap.compiler_post_flags [list]
 
 options compwrap.compiler_args_forward
-default compwrap.compiler_args_forward {{\$\{\@\}}}
+default compwrap.compiler_args_forward [list {\${@}}]
 
 options compwrap.compilers_to_wrap
 default compwrap.compilers_to_wrap [list cc objc cxx objcxx fc f77 f90]
@@ -51,16 +51,6 @@ proc compwrap::get_ccache_dir {} {
         return ${ccache_dir}
     } else {
         return [file join $portdbpath build .ccache]
-    }
-}
-
-proc compwrap::trim {c} {
-    # Remove any enclosing "{....}" braces if present
-    if { [string range [option $c] 0   0  ] eq "\{" &&
-         [string range [option $c] end end] eq "\}" } {
-        return [string range [option $c] 1 end-1 ]
-    } else {
-        return [option $c]
     }
 }
 
@@ -112,7 +102,9 @@ proc compwrap::create_wrapper {tag} {
     file delete -force ${wrapcomp}
 
     # Basic option, to pass on all command line arguments
-    set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
+    set comp_opts [join [option compwrap.compiler_pre_flags]]
+    append comp_opts " [join [option compwrap.compiler_args_forward]]"
+    append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
     # Add MacPorts compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
