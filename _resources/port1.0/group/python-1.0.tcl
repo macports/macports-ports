@@ -87,12 +87,8 @@ proc python_get_default_version {} {
     }
 }
 
-proc python_get_compiler_tags {} {
-    return [list cc objc cxx objcxx fc f77 f90]
-}
-
 proc python_set_env_compilers {phase} {
-    foreach tag [python_get_compiler_tags] {
+    foreach tag [option compwrap.compilers_to_wrap] {
         if {[option configure.${tag}] ne ""} {
             ${phase}.env-append [string toupper $tag]=[compwrap::create_wrapper ${tag}]
         }
