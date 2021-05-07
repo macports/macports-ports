@@ -106,26 +106,25 @@ proc compwrap::create_wrapper {tag} {
     append comp_opts " [join [option compwrap.compiler_args_forward]]"
     append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
-    # Add MacPorts compiler flags ?
+    # Add MP compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
+        # standard options
         set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
+        # isysroot
+        if {[option configure.sdkroot] ne "" && \
+                ![option compiler.limit_flags] && \
+                [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+            set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
+        }
+        # pipe
+        if { [option configure.pipe] } {
+            set comp_opts "-pipe ${comp_opts}"
+        }
     }
 
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
-    }
-
-    # isysroot
-    if {[option configure.sdkroot] ne "" && \
-            ![option compiler.limit_flags] && \
-            [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
-                set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
-    }
-
-    # pipe
-    if { [option configure.pipe] } {
-        set comp_opts "-pipe ${comp_opts}"
     }
 
     # Prepend ccache launcher if active
