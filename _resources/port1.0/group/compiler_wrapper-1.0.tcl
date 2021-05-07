@@ -17,19 +17,26 @@ options compwrap.print_compiler_command
 default compwrap.print_compiler_command no
 
 options compwrap.compiler_pre_flags
-default compwrap.compiler_pre_flags {{}}
+default compwrap.compiler_pre_flags [list]
 
 options compwrap.compiler_post_flags
-default compwrap.compiler_post_flags {{}}
+default compwrap.compiler_post_flags [list]
 
 options compwrap.compiler_args_forward
-default compwrap.compiler_args_forward {{\$\{\@\}}}
+default compwrap.compiler_args_forward [list {\${@}}]
 
 options compwrap.compilers_to_wrap
 default compwrap.compilers_to_wrap [list cc objc cxx objcxx fc f77 f90]
 
 options compwrap.ccache_supported_compilers
 default compwrap.ccache_supported_compilers [list cc objc cxx objcxx]
+
+# please remove when a86f95c has been in a released MacPorts version for at least two weeks
+# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
+if {![info exists compiler.limit_flags]} {
+    options compiler.limit_flags
+    default compiler.limit_flags        no
+}
 
 proc compwrap::use_ccache {tag} {
     global prefix
@@ -47,56 +54,88 @@ proc compwrap::get_ccache_dir {} {
     }
 }
 
-proc compwrap::trim {c} {
-    if { [string range [option $c] 0 0] eq "\{" } {
-        return [string range [option $c] 1 end-1 ]
-    } else {
-        return [option $c]
+proc compwrap::comp_flags {tag} {
+    switch ${tag} {
+        cc      { set ftag "c" }
+        f77     { set ftag "f" }
+        default { set ftag ${tag} }
     }
+    set flags "[get_canonical_archflags ${tag}]"
+    if { [info exists configure.${ftag}flags] } {
+        set flags "[option configure.${ftag}flags] ${flags}"
+    } 
+    return ${flags}
 }
 
-proc compwrap::create_wrapper {tag} {
+proc compwrap::wrapper_path {tag} {
     global prefix
-
     # Get the underlying compiler
     set comp [option configure.${tag}]
     # If not defined, or tag not in list of known compilers to wrap, just return
     if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
         return ${comp}
     }
-    
-    set wrapdir [option workpath]/compwrap/${tag}[file dirname ${comp}]
+    # Return the path to the wrapper. Format is :-
+    # <port workpath>/<compiler tag>/<path to underlying compiler>
+    set comp [option workpath]/compwrap/${tag}${comp}
+}
+
+proc compwrap::create_wrapper {tag} {
+    global prefix env
+
+    # Get the underlying compiler
+    set comp [option configure.${tag}]
+
+    # Get the wrapper
+    set wrapcomp [compwrap::wrapper_path ${tag}]
+    if { ${wrapcomp} eq ${comp} } {
+        return ${comp}
+    }
+
+    # Create the directory for the wrapper.
+    set wrapdir [file dirname ${wrapcomp}]
     if {![file exists ${wrapdir}]} {
         xinstall -d ${wrapdir}
     }
 
-    switch ${tag} {
-        cc      { set ftag "c" }
-        default { set ftag ${tag} }
-    }
-    
-    # Wrapper name, based on original
-    set fname ${wrapdir}/[file tail ${comp}]
-    
     # Force recreate in case underlying compiler has changed
-    file delete -force ${fname}
+    file delete -force ${wrapcomp}
 
     # Basic option, to pass on all command line arguments
-    set comp_opts "[trim compwrap.compiler_pre_flags] [trim compwrap.compiler_args_forward] [trim compwrap.compiler_post_flags]"
+    set comp_opts [join [option compwrap.compiler_pre_flags]]
+    append comp_opts " [join [option compwrap.compiler_args_forward]]"
+    append comp_opts " [join [option compwrap.compiler_post_flags]]"
+
     # Add MacPorts compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
-        set comp_opts "[option configure.${ftag}flags] [get_canonical_archflags ${tag}] ${comp_opts}"
+        set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
     }
+
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
     }
-    # Append ccache if active
+
+    # isysroot
+    if {[option configure.sdkroot] ne "" && \
+            ![option compiler.limit_flags] && \
+            [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+                set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
+    }
+
+    # pipe
+    if { [option configure.pipe] } {
+        set comp_opts "-pipe ${comp_opts}"
+    }
+
+    # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
         set comp "${prefix}/bin/ccache ${comp}"
     }
-    ui_debug "Creating compiler wrapper ${fname}"
-    set f [open ${fname} w 0755]
+
+    # Finally create the wrapper script
+    ui_debug "Creating compiler wrapper ${wrapcomp}"
+    set f [open ${wrapcomp} w 0755]
     puts ${f} "#!/bin/bash"
     # If ccache active make sure correct CCACHE_DIR is used as not all build systems
     # (looking at you Bazel) propagate this flag.
@@ -110,7 +149,7 @@ proc compwrap::create_wrapper {tag} {
     puts  ${f} "exec \${CMD}"
     close ${f}
     
-    return ${fname}
+    return ${wrapcomp}
 }
 
 # Set various env vars
