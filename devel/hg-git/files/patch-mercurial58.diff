@@ -1,0 +1,130 @@
+# HG changeset patch
+# User Dan Villiom Podlaski Christiansen <danchr@gmail.com>
+# Date 1620205158 -7200
+#      Wed May 05 10:59:18 2021 +0200
+# Branch 0.10.x
+# Node ID bedf9b77f0bec57e0bdb9cb6344c8cb2df954c0e
+# Parent  cc4f3340afc9b6cb859b9737b4b782fff08f9d56
+# EXP-Topic hg58-0.10.x
+compat: add support for mercurial 5.8
+
+diff --git a/hggit/__init__.py b/hggit/__init__.py
+--- a/hggit/__init__.py
++++ b/hggit/__init__.py
+@@ -127,7 +127,6 @@ from mercurial import (
+     exchange,
+     extensions,
+     hg,
+-    ui as hgui,
+     util as hgutil,
+     localrepo,
+     manifest,
+@@ -200,7 +199,7 @@ def _isgitdir(path):
+ 
+ 
+ def _local(path):
+-    p = hgutil.url(path).localpath()
++    p = compat.url(path).localpath()
+     if _isgitdir(p):
+         return gitrepo
+     # detect git ssh urls (which mercurial thinks is a file-like path)
+@@ -520,9 +519,15 @@ def isvalidlocalpath(orig, self, path):
+     return orig(self, path) or _isgitdir(path)
+ 
+ 
+-if (hgutil.safehasattr(hgui, b'path') and
+-    hgutil.safehasattr(hgui.path, b'_isvalidlocalpath')):
+-    extensions.wrapfunction(hgui.path, b'_isvalidlocalpath', isvalidlocalpath)
++extensions.wrapfunction(compat.path, b'_isvalidlocalpath', isvalidlocalpath)
++
++
++def isurllocal(orig, path):
++    # recognise git scp-style paths when cloning
++    return orig(path) and not util.isgitsshuri(path._origpath)
++
++
++extensions.wrapfunction(compat.url, b'islocal', isurllocal)
+ 
+ 
+ def islocal(orig, path):
+@@ -538,7 +543,7 @@ def hasscheme(orig, path):
+     return orig(path) or util.isgitsshuri(path)
+ 
+ 
+-extensions.wrapfunction(hgutil, b'hasscheme', hasscheme)
++extensions.wrapfunction(compat.urlutil, b'hasscheme', hasscheme)
+ 
+ 
+ @util.transform_notgit
+diff --git a/hggit/compat.py b/hggit/compat.py
+--- a/hggit/compat.py
++++ b/hggit/compat.py
+@@ -49,6 +49,17 @@ except ImportError:
+     itervalues = lambda x: x.itervalues()
+ 
+ try:
++    # added in 5.8
++    from mercurial.utils import urlutil
++
++    url = urlutil.url
++    path = urlutil.path
++except ImportError:
++    urlutil = hgutil
++    url = hgutil.url
++    path = ui.path
++
++try:
+     from mercurial.cmdutil import check_at_most_one_arg
+ except (ImportError, AttributeError):
+     # added in 5.3
+diff --git a/hggit/git_handler.py b/hggit/git_handler.py
+--- a/hggit/git_handler.py
++++ b/hggit/git_handler.py
+@@ -1860,7 +1860,7 @@ class GitHandler(object):
+ 
+             # not available in dulwich 0.19, used on Python 2.7
+             if hasattr(client, 'get_credentials_from_store'):
+-                urlobj = hgutil.url(uri)
++                urlobj = compat.url(uri)
+                 auth = client.get_credentials_from_store(
+                     urlobj.scheme,
+                     urlobj.host,
+@@ -1894,7 +1894,7 @@ class GitHandler(object):
+             )
+ 
+         if uri.startswith(b'file://'):
+-            return client.LocalGitClient(), hgutil.url(uri).path
++            return client.LocalGitClient(), compat.url(uri).path
+ 
+         # if its not git or git+ssh, try a local url..
+         return client.SubprocessGitClient(), uri
+diff --git a/hggit/gitrepo.py b/hggit/gitrepo.py
+--- a/hggit/gitrepo.py
++++ b/hggit/gitrepo.py
+@@ -3,7 +3,6 @@ from __future__ import absolute_import, 
+ from .util import isgitsshuri
+ from mercurial import (
+     error,
+-    util
+ )
+ 
+ from . import compat
+@@ -158,5 +157,5 @@ def islocal(path):
+     if isgitsshuri(path):
+         return True
+ 
+-    u = util.url(path)
++    u = compat.url(path)
+     return not u.scheme or u.scheme == b'file'
+diff --git a/tests/test-networking.t b/tests/test-networking.t
+--- a/tests/test-networking.t
++++ b/tests/test-networking.t
+@@ -88,6 +88,8 @@ So, that went well; now push...
+   $ hg add thefile
+   $ fn_hg_commit -m 'add the file'
+   $ hg book -r tip master
++  $ hg path default
++  git@git-server:/srv/repo.git
+   $ hg push
+   Warning: Permanently added * (glob) (?)
+   pushing to git@git-server:/srv/repo.git
