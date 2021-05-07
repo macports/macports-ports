@@ -105,6 +105,17 @@ if { ${os.arch} eq "arm" } {
         lappend gcc_versions 9 10 devel
     }
 }
+# GCC version providing the primary runtime
+# Note settings here *must* match those in the lang/libgcc port.
+if { ${os.major} < 10 } {
+    set gcc_main_version 7
+} else {
+    if { ${os.major} < 11 } {
+        set gcc_main_version 8
+    } else {
+        set gcc_main_version 10
+    }
+}
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
     # Remove dot from version if present
@@ -123,8 +134,12 @@ foreach ver ${gcc_versions} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
         } elseif {[vercmp ${ver} 7] < 0} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
-        } else {
+        } elseif {[vercmp ${ver} ${gcc_main_version}] < 0}  {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
+        } else {
+            # Do not depend directly on primary runtime port, as implied by libgcc
+            # and doing so prevents libgcc-devel being used as an alternative.
+            set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc"
         }
         set cdb(gcc$ver_nodot,dependsa) gcc$ver_nodot
     }
