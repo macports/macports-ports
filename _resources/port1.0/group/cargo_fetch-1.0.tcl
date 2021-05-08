@@ -249,7 +249,7 @@ proc cargo.rust_platform {{arch ""}} {
     return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
-proc cargo.append_envs { var phases } {
+proc cargo.append_envs { var {phases {configure build destroot}} } {
     foreach phase ${phases} {
         ${phase}.env-delete ${var}
         ${phase}.env-append ${var}
@@ -260,7 +260,7 @@ proc cargo.append_envs { var phases } {
 cargo.append_envs CC=${configure.cc}   {build destroot}
 cargo.append_envs CXX=${configure.cxx} {build destroot}
 
-cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}" {configure build destroot}
+cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
 
 # Is build caching enabled ?
 # WIP for now ...
@@ -289,11 +289,12 @@ proc cargo.environments {} {
         set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld
     }
 
-    cargo.append_envs     CC=${configure.cc}  {build destroot}
+    cargo.append_envs     CC=${configure.cc}   {build destroot}
     cargo.append_envs     CXX=${configure.cxx} {build destroot}
 
-    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}" {configure build destroot}
-    cargo.append_envs     "RUST_BACKTRACE=1"                {configure build destroot}
+    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}"
+    cargo.append_envs     "RUST_BACKTRACE=1"
+    cargo.append_envs     "CARGO_BUILD_RUSTC=${prefix}/bin/rustc"
 
     # CARGO_BUILD_TARGET does not work correctly
     # see the patchfile path-dyld.diff in cargo Portfile

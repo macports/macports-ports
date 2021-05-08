@@ -90,7 +90,7 @@ proc python_get_default_version {} {
 proc python_set_env_compilers {phase} {
     foreach tag [option compwrap.compilers_to_wrap] {
         if {[option configure.${tag}] ne ""} {
-            ${phase}.env-append [string toupper $tag]=[compwrap::create_wrapper ${tag}]
+            ${phase}.env-append [string toupper $tag]=[compwrap::wrap_compiler ${tag}]
         }
     }
 }

@@ -183,13 +183,13 @@ proc go.append_env {} {
     }
     post-extract {
         build.env-append \
-            "CC=[compwrap::create_wrapper cc]" \
-            "CXX=[compwrap::create_wrapper cxx]" \
-            "OBJC=[compwrap::create_wrapper objc]" \
-            "OBJCXX=[compwrap::create_wrapper objcxx]" \
-            "FC=[compwrap::create_wrapper fc]" \
-            "F90=[compwrap::create_wrapper f90]" \
-            "F77=[compwrap::create_wrapper f77]" 
+            "CC=[compwrap::wrap_compiler cc]" \
+            "CXX=[compwrap::wrap_compiler cxx]" \
+            "OBJC=[compwrap::wrap_compiler objc]" \
+            "OBJCXX=[compwrap::wrap_compiler objcxx]" \
+            "FC=[compwrap::wrap_compiler fc]" \
+            "F90=[compwrap::wrap_compiler f90]" \
+            "F77=[compwrap::wrap_compiler f77]" 
         if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
             build.env-append \
                 "GO_EXTLINK_ENABLED=1" \

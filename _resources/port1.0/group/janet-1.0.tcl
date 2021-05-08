@@ -33,7 +33,7 @@ use_configure                   no
 pre-build {
     # Generate the wrappers
     foreach bin {cc cxx} {
-        compwrap::create_wrapper ${bin}
+        compwrap::wrap_compiler ${bin}
     }
 }
 

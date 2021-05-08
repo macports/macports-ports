@@ -86,7 +86,7 @@ proc compwrap::wrapper_path {tag} {
     return [option workpath]/compwrap/${tag}${comp}
 }
 
-proc compwrap::create_wrapper {tag} {
+proc compwrap::wrap_compiler {tag} {
     global prefix env
 
     # Get the underlying compiler
