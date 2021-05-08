@@ -330,10 +330,11 @@ proc mpi.setup {args} {
         if {${os.major} <= 10 && $is_mpich} {
             lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10 -clang11
         }
-        # Disable compilers not support on arm
+        # Disable compilers not well supported on arm
+        # Note clang 9.0 and 10 might build on arm but are not reliable so skip, use clang 11 instead
         if {${os.arch} eq "arm" && !$is_mpich} {
             lappend disabled -gcc5 -gcc6 -gcc7 -gcc8 -gcc9
-            lappend disabled -clang60 -clang70 -clang80
+            lappend disabled -clang60 -clang70 -clang80 -clang90 -clang10
         }
     }
 
