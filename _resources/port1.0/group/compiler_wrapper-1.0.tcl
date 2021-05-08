@@ -16,6 +16,9 @@ default compwrap.add_legacysupport_flags yes
 options compwrap.print_compiler_command
 default compwrap.print_compiler_command no
 
+options compwrap.append_arch_flags
+default compwrap.append_arch_flags no
+
 options compwrap.compiler_pre_flags
 default compwrap.compiler_pre_flags [list]
 
@@ -60,9 +63,12 @@ proc compwrap::comp_flags {tag} {
         f77     { set ftag "f" }
         default { set ftag ${tag} }
     }
-    set flags "[get_canonical_archflags ${tag}]"
+    if { ![option compwrap.append_arch_flags] ||
+         [catch {get_canonical_archflags ${tag}} flags] } {
+        set flags [join ""]
+    }
     if { [info exists configure.${ftag}flags] } {
-        set flags "[option configure.${ftag}flags] ${flags}"
+        append flags " [join [option configure.${ftag}flags]]"
     } 
     return ${flags}
 }
