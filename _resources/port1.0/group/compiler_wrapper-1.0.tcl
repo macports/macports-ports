@@ -83,7 +83,7 @@ proc compwrap::wrapper_path {tag} {
     }
     # Return the path to the wrapper. Format is :-
     # <port workpath>/<compiler tag>/<path to underlying compiler>
-    set comp [option workpath]/compwrap/${tag}${comp}
+    return [option workpath]/compwrap/${tag}${comp}
 }
 
 proc compwrap::create_wrapper {tag} {
