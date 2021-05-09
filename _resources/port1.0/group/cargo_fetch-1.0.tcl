@@ -286,7 +286,7 @@ proc cargo.environments {} {
         configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
         configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
         configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/clang-ld
+        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
     }
 
     cargo.append_envs     CC=${configure.cc}   {build destroot}
