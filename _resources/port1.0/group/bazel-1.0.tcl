@@ -187,8 +187,8 @@ port::register_callback bazel::set_configure
 # Patch configuration
 pre-configure {
     # enforce correct build settings
-    set cc  [compwrap::create_wrapper cc]
-    set cxx [compwrap::create_wrapper cxx]
+    set cc  [compwrap::wrap_compiler cc]
+    set cxx [compwrap::wrap_compiler cxx]
     # Patch the checked out source
     # note final / is because ${worksrcpath} is a sym-link
     foreach f [ exec find ${worksrcpath}/ -name ".bazelrc" -or -name "configure" -or -name "configure.py" \
@@ -232,8 +232,8 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.run_bazel_fetch] && [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        set cc  [compwrap::create_wrapper cc]
-        set cxx [compwrap::create_wrapper cxx]
+        set cc  [compwrap::wrap_compiler cc]
+        set cxx [compwrap::wrap_compiler cxx]
         # Run fetch
         set addpath [string map {" " ":"} [option bazel.path]]
         system -W ${worksrcpath} "PATH=${addpath}:$env(PATH) [bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"

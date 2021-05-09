@@ -212,7 +212,7 @@ proc makefile_pg::setup_phase {phase} {
                           FFLAGS F90FLAGS FCFLAGS LDFLAGS LIBS CLASSPATH \
                           PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG \
                       } {
-        set value [compwrap::create_wrapper [string tolower $env_var]]
+        set value [compwrap::wrap_compiler [string tolower $env_var]]
         if {$value ne ""} {
             ${phase}.env-append         "$env_var=$value"
             if {[lsearch -exact ${makefile.override} ${env_var}] != -1} {

@@ -16,6 +16,9 @@ default compwrap.add_legacysupport_flags yes
 options compwrap.print_compiler_command
 default compwrap.print_compiler_command no
 
+options compwrap.append_arch_flags
+default compwrap.append_arch_flags no
+
 options compwrap.compiler_pre_flags
 default compwrap.compiler_pre_flags [list]
 
@@ -60,9 +63,12 @@ proc compwrap::comp_flags {tag} {
         f77     { set ftag "f" }
         default { set ftag ${tag} }
     }
-    set flags "[get_canonical_archflags ${tag}]"
+    if { ![option compwrap.append_arch_flags] ||
+         [catch {get_canonical_archflags ${tag}} flags] } {
+        set flags [join ""]
+    }
     if { [info exists configure.${ftag}flags] } {
-        set flags "[option configure.${ftag}flags] ${flags}"
+        append flags " [join [option configure.${ftag}flags]]"
     } 
     return ${flags}
 }
@@ -77,10 +83,10 @@ proc compwrap::wrapper_path {tag} {
     }
     # Return the path to the wrapper. Format is :-
     # <port workpath>/<compiler tag>/<path to underlying compiler>
-    set comp [option workpath]/compwrap/${tag}${comp}
+    return [option workpath]/compwrap/${tag}${comp}
 }
 
-proc compwrap::create_wrapper {tag} {
+proc compwrap::wrap_compiler {tag} {
     global prefix env
 
     # Get the underlying compiler
@@ -106,26 +112,25 @@ proc compwrap::create_wrapper {tag} {
     append comp_opts " [join [option compwrap.compiler_args_forward]]"
     append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
-    # Add MacPorts compiler flags ?
+    # Add MP compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
+        # standard options
         set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
+        # isysroot
+        if {[option configure.sdkroot] ne "" && \
+                ![option compiler.limit_flags] && \
+                [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+            set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
+        }
+        # pipe
+        if { [option configure.pipe] } {
+            set comp_opts "-pipe ${comp_opts}"
+        }
     }
 
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
-    }
-
-    # isysroot
-    if {[option configure.sdkroot] ne "" && \
-            ![option compiler.limit_flags] && \
-            [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
-                set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
-    }
-
-    # pipe
-    if { [option configure.pipe] } {
-        set comp_opts "-pipe ${comp_opts}"
     }
 
     # Prepend ccache launcher if active
