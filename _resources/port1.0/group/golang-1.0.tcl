@@ -83,6 +83,10 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup bitbucket 1.0"
             bitbucket.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix}
         }
+        git.sr.ht {
+            uplevel "PortGroup sourcehut 1.0"
+            sourcehut.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         default {
             if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${go.project}))} {
                 name    ${go.project}
@@ -116,6 +120,10 @@ proc go._translate_package_id {package_id} {
                 # Long format: gopkg.in/foo/bar.v1 -> github.com/foo/bar
                 set project [go._strip_gopkg_version ${project}]
             }
+        }
+        git.sr.ht {
+            # Strip leading ~ from author name
+            set author [string trim ${author} ~]
         }
     }
     return [list ${domain} ${author} ${project}]
