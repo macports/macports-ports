@@ -73,17 +73,20 @@ proc compwrap::comp_flags {tag} {
     return ${flags}
 }
 
-proc compwrap::wrapper_path {tag} {
-    global prefix
+proc compwrap::wrapped_command_path {tag origpath} {
+    # Return the path to the wrapper. Format is :-
+    # <port workpath>/<compiler tag>/<path to underlying compiler>
+    return [option workpath]/compwrap/${tag}${origpath}
+}
+
+proc compwrap::wrapped_compiler_path {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
     # If not defined, or tag not in list of known compilers to wrap, just return
     if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
         return ${comp}
     }
-    # Return the path to the wrapper. Format is :-
-    # <port workpath>/<compiler tag>/<path to underlying compiler>
-    return [option workpath]/compwrap/${tag}${comp}
+    return [compwrap::wrapped_command_path ${tag} ${comp}]
 }
 
 proc compwrap::wrap_compiler {tag} {
@@ -93,7 +96,7 @@ proc compwrap::wrap_compiler {tag} {
     set comp [option configure.${tag}]
 
     # Get the wrapper
-    set wrapcomp [compwrap::wrapper_path ${tag}]
+    set wrapcomp [compwrap::wrapped_compiler_path ${tag}]
     if { ${wrapcomp} eq ${comp} } {
         return ${comp}
     }

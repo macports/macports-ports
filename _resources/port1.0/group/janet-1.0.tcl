@@ -41,8 +41,8 @@ pre-build {
 default build.cmd               {${prefix}/bin/jpm}
 default build.args              {--verbose
                                  --offline
-                                 --compiler=[compwrap::wrapper_path cc]
-                                 --cpp-compiler=[compwrap::wrapper_path cxx]
+                                 --compiler=[compwrap::wrapped_compiler_path cc]
+                                 --cpp-compiler=[compwrap::wrapped_compiler_path cxx]
                                  --archiver=[janetpg::get_default_ar]
                                  build
                                 }
