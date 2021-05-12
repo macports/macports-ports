@@ -1,5 +1,5 @@
 --- /dev/null	2020-08-03 16:34:50.831886000 -0600
-+++ src/3d/ocaml/FStar_Getopt.ml	2020-08-03 16:33:20.493842000 -0600
++++ src/3d/ocaml/generated/FStar_Getopt.ml	2020-08-03 16:33:20.493842000 -0600
 @@ -0,0 +1,102 @@
 +let noshort = 0
 +type 'a opt_variant =
@@ -103,15 +103,15 @@
 +
 +let cmdline () =
 +   Array.to_list (Sys.argv)
---- src/3d/ocaml/Makefile.orig	2020-08-18 00:07:51.000000000 -0600
-+++ src/3d/ocaml/Makefile	2020-08-25 17:08:26.000000000 -0600
-@@ -4,9 +4,6 @@
- 	rm -f Main.native
- 	OCAMLPATH="$(FSTAR_HOME)/bin" ocamlbuild -tag debug -use-menhir -tag thread -use-ocamlfind -quiet -pkg batteries -pkg menhirLib -pkg fstarlib -pkg process -cflags -w,-8 Main.native
+--- src/3d/ocaml/Makefile.orig	2021-05-11 15:12:47.000000000 -0600
++++ src/3d/ocaml/Makefile	2021-05-11 15:13:07.000000000 -0600
+@@ -12,9 +12,6 @@
+ 	ocamlbuild -I generated -tag debug -use-menhir -tag thread -use-ocamlfind -quiet -pkg batteries -pkg menhirLib -pkg fstarlib -pkg process -pkg hacl-star -pkg yojson -cflags -w,-8 Main.native
+ 	touch $@
  
--FStar_Getopt.ml: $(FSTAR_HOME)/src/basic/ml/FStar_Getopt.ml
+-generated/FStar_Getopt.ml: $(FSTAR_HOME)/src/basic/ml/FStar_Getopt.ml
 -	cp $^ $@
 -
  clean:
- 	rm -rf _build Main.native *~
+ 	rm -rf _build generated *~
  

@@ -9,8 +9,8 @@ legacysupport.use_static                    yes
 legacysupport.newest_darwin_requires_legacy 15
 
 name                rust
-version             1.52.0
-revision            1
+version             1.52.1
+revision            0
 categories          lang devel
 platforms           darwin
 supported_archs     x86_64 arm64
@@ -100,7 +100,7 @@ if { ${subport} ne ${ccwrap} } {
                     path:bin/cmake:cmake \
                     port:cctools \
                     port:python${py_ver_nodot} \
-                    port:openssl \
+                    path:lib/libssl.dylib:openssl \
                     port:pkgconfig \
                     port:ninja \
                     port:gmake
@@ -118,9 +118,9 @@ distfiles-append    rust-std-${binTag}${extract.suffix} \
                     cargo-${binTag}${extract.suffix}
 
 checksums           ${distname}${extract.suffix} \
-                    rmd160  d0774d079b133311d1573d9fbd45cd3dfb8d5054 \
-                    sha256  33bec45b11a24fae2178cdd76794c3dc3c23c24ade7dfaedc09a74c278379a63 \
-                    size    168168177
+                    rmd160  03ee0639d7436d8f5ddb6229c5e112662f10015b \
+                    sha256  3a6f23a26d0e8f87abbfbf32c5cd7daa0c0b71d0986abefc56b9a5fbfbd0bf98 \
+                    size    168175645
 
 checksums-append    rust-std-${rustc_version}-x86_64-apple-${os.platform}${extract.suffix} \
                     rmd160  a9d257313926f32a06e916e1eb90e1e245e79bc7 \
@@ -190,18 +190,12 @@ proc envs_append { value } {
     }
 }
 
-# Remove sub-port revision bumps on next update
-if { ${version} ne "1.52.0" } {
-    return -code error "Remove subport revision bumps"
-}
-
 # In order to enforce use of legacy support, both when building rust and subsequently
 # when using it, the underlying compiler commands need to be wrapped to make sure
 # they use the correct flags. Do this in a sub-port which then is added as a dep
 # to rust to ensure they are available when rust is both built and installed.
 set wrapdir ${prefix}/libexec/${ccwrap}/bin
 subport ${ccwrap} {
-    revision [expr ${revision} +1]
     # Enable support in scripts for all neccessary versions
     legacysupport.newest_darwin_requires_legacy ${max_wrap_darwin}
     description      Wrapped compiler commands for ${name}
@@ -213,8 +207,6 @@ subport ${ccwrap} {
     depends_build
     # Always build from source to ensure we use user's compiler selection
     archive_sites
-    # Always depend on legacy support as flags need to be baked into wrapper scripts
-    # as rust doesn't allow information to be passed by arbitrary environment vars.
     depends_lib-append [legacysupport::get_dependency]
     use_configure    no
     build            {}
@@ -228,10 +220,12 @@ subport ${ccwrap} {
             # If this fails just use exact settings for cc and cxx
             set sel_cc  ${configure.cc}
             set sel_cxx ${configure.cxx}
+            set sel_ld  ld
             if {[regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
                 set llvm_path ${prefix}/libexec/llvm-${llvm_ver}
                 set sel_cc    ${llvm_path}/bin/clang
                 set sel_cxx   ${llvm_path}/bin/clang++
+                set sel_ld    ${llvm_path}/bin/ld
             }
             xinstall -m 755 -d ${destroot}${wrapdir}
             proc create_wrapper { fname comp flags } {
@@ -254,11 +248,17 @@ subport ${ccwrap} {
                 close ${f}
             }
             create_wrapper ${destroot}${wrapdir}/clang   \
-                "${sel_cc}" "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
+                "\$\{MACPORTS_RUST_CC\:\-${sel_cc}\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
             create_wrapper ${destroot}${wrapdir}/clang++ \
-                "${sel_cxx}" "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
-            create_wrapper ${destroot}${wrapdir}/clang-ld \
-                "${sel_cc}" "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \$\{MACPORTS_LEGACY_SUPPORT_LDFLAGS\}"
+                "\$\{MACPORTS_RUST_CXX\:\-${sel_cxx}\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
+            create_wrapper ${destroot}${wrapdir}/ld-rust \
+                "\$\{MACPORTS_RUST_CC\:\-${sel_cc}\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} \$\{MACPORTS_LEGACY_SUPPORT_LDFLAGS\}"
+            create_wrapper ${destroot}${wrapdir}/ld \
+                "\$\{MACPORTS_RUST_LD\:\-${sel_ld}\}" \
+                "\$\{MACPORTS_LEGACY_SUPPORT_LDFLAGS\}"
             foreach cmd { ar as nm nm-classic libtool lipo objdump otool ranlib \
                           size size-classic strip strings bitcode-strip segedit } {
                 ln -s ${prefix}/bin/${cmd} ${destroot}${wrapdir}/${cmd}
@@ -274,7 +274,7 @@ if { ${subport} ne ${ccwrap} } {
         configure.cxx    ${wrapdir}/clang++
         configure.objc   ${wrapdir}/clang
         configure.objcxx ${wrapdir}/clang++
-        set ld           ${wrapdir}/clang-ld
+        set ld           ${wrapdir}/ld-rust
         set NewPath     "${wrapdir}:${NewPath}"
     }
     envs_append   "PATH=${NewPath}"
@@ -300,7 +300,7 @@ configure.args    --enable-vendor \
 
 # Cache support
 if { ${subport} ne ${ccwrap} } {
-    if {[tbool configure.ccache]} {
+    if { [tbool configure.ccache] } {
         depends_build-append   port:ccache
         configure.args-append  --enable-ccache
     }
