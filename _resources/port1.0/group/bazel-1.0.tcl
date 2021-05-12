@@ -67,6 +67,9 @@ default bazel.cxx_standard 2014
 options bazel.path
 default bazel.path {}
 
+options bazel.python_version
+default bazel.python_version ""
+
 proc bazel::add_to_envs { var } {
     foreach phase {configure build destroot} {
         ${phase}.env-append ${var}
@@ -184,6 +187,20 @@ proc bazel::set_configure {} {
 }
 port::register_callback bazel::set_configure
 
+post-extract {
+    if { [option bazel.python_version] ne "" } {
+        # Make sure selected python version is found via PATH as python and python3
+        global workpath prefix
+        set py_ver       [option bazel.python_version]
+        set py_ver_nodot [string map {. {}} ${py_ver}]
+        depends_build-append port:python${py_ver_nodot}
+        xinstall -d ${workpath}/bin
+        ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python
+        ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python3
+        bazel.path-append ${workpath}/bin
+    }
+}
+
 # Patch configuration
 pre-configure {
     # enforce correct build settings
@@ -247,6 +264,11 @@ pre-build {
             system "touch -m -t 210012120101 ${f}"
         }
     }
+}
+
+post-build {
+    # Post build command
+    system -W ${worksrcpath} "[option bazel.post_build_cmd]"
 }
 
 proc bazel::get_cmd_opts {} {
@@ -349,8 +371,3 @@ proc bazel::configure_build {} {
     }
 }
 port::register_callback bazel::configure_build
-
-post-build {
-    # Post build command
-    system -W ${worksrcpath} "[option bazel.post_build_cmd]"
-}
