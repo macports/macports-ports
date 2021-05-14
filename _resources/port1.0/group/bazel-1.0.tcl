@@ -142,14 +142,14 @@ variant native description {Build from source for best native platform support} 
 
 proc bazel::get_base_arch {} {
     global configure.build_arch
-    # Currently only supports intel
     if { ${configure.build_arch} eq "x86_64" } {
         return "-march=x86-64"
+    } elseif { ${configure.build_arch} eq "arm64" } {
+        return "-march=native"
     }
     return ""
 }
 
-supported_archs  x86_64
 if {![variant_isset native]} {
     set base_march [bazel::get_base_arch]
     configure.env-append CC_OPT_FLAGS=${base_march}
