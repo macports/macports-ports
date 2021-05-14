@@ -107,6 +107,8 @@ proc compwrap::wrap_compiler {tag} {
         xinstall -d ${wrapdir}
     }
 
+    ui_debug "compiler_wrapper: Creating ${wrapcomp}"
+
     # Force recreate in case underlying compiler has changed
     file delete -force ${wrapcomp}
 
@@ -118,31 +120,35 @@ proc compwrap::wrap_compiler {tag} {
     # Add MP compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
         # standard options
+        ui_debug "compiler_wrapper:  -> Will embed standard compiler flags in ${tag} wrapper script"
         set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
         # isysroot
         if {[option configure.sdkroot] ne "" && \
                 ![option compiler.limit_flags] && \
                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+            ui_debug "compiler_wrapper:  -> Will embed SDK isysroot in ${tag} wrapper script"
             set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
         }
         # pipe
         if { [option configure.pipe] } {
+            ui_debug "compiler_wrapper:  -> Will embed -pipe in ${tag} wrapper script"
             set comp_opts "-pipe ${comp_opts}"
         }
     }
 
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
+        ui_debug "compiler_wrapper:  -> Will embed legacysupport flags in ${tag} wrapper script"
         set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
     }
 
     # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
+        ui_debug "compiler_wrapper:  -> Will use ccache compiler launcher in ${tag} wrapper script"
         set comp "${prefix}/bin/ccache ${comp}"
     }
 
     # Finally create the wrapper script
-    ui_debug "Creating compiler wrapper ${wrapcomp}"
     set f [open ${wrapcomp} w 0755]
     puts ${f} "#!/bin/bash"
     # If ccache active make sure correct CCACHE_DIR is used as not all build systems
