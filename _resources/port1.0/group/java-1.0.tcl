@@ -59,6 +59,17 @@ proc find_java_home {} {
     global java.version java.fallback
     if { ${java.version} ne "" } {
 
+        # If on arm automatically adjust to the *-zulu fallback versions
+        # as required, as currently these are the only ones supporting arm.
+        # To be reviewed as support for arm comes for the other versions.
+        # Following regex matches openjdk<version> only.
+        if { [option configure.build_arch] eq "arm64" &&
+             [regexp {openjdk(\d{1,2}$)} ${java.fallback}] } {
+            set newjdk ${java.fallback}-zulu
+            ui_debug "Redefining java fallback ${java.fallback} to ${newjdk} for arm compatibility"
+            java.fallback ${newjdk}
+        }
+        
         # /usr/libexec/java_home on Big Sur appears to have a bug where it won't
         # honor the -f flag if the JAVA_HOME envar is set. See
         # https://stackoverflow.com/a/64917842/448068
