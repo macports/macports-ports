@@ -145,7 +145,7 @@ proc bazel::get_base_arch {} {
     if { ${configure.build_arch} eq "x86_64" } {
         return "-march=x86-64"
     } elseif { ${configure.build_arch} eq "arm64" } {
-        return "-march=native"
+        return "-march=armv8-a"
     }
     return ""
 }
