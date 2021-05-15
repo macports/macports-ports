@@ -89,6 +89,9 @@ bazel::add_to_envs   JAVA_HOME=${java.home}
 # Always force the use of the un-versioned SDK
 configure.sdk_version
 
+# arm support needs a number of deps like java before enabling again
+supported_archs      x86_64
+
 # Require c++ standard
 proc bazel::set_standards {} {
     global compiler.cxx_standard
