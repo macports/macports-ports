@@ -70,6 +70,9 @@ default bazel.path {}
 options bazel.python_version
 default bazel.python_version ""
 
+options bazel.fix_wheel_deployment_target
+default bazel.fix_wheel_deployment_target yes
+
 proc bazel::add_to_envs { var } {
     foreach phase {configure build destroot} {
         ${phase}.env-append ${var}
@@ -273,6 +276,27 @@ pre-build {
 post-build {
     # Post build command
     system -W ${worksrcpath} "[option bazel.post_build_cmd]"
+}
+
+pre-destroot {
+    if { [option bazel.fix_wheel_deployment_target] } {
+        # https://trac.macports.org/ticket/60834
+        # bazel sets the deployment target to the SDK version, which then causes
+        # issues on systems where the SDK version is newer than the OS version, as pip
+        # then refuses to install the wheel with (e.g. on macOS 10.12 with a 10.13 SDK)
+        # ERROR: tensorflow-2.5.0-cp39-cp39-macosx_10_13_x86_64.whl is not a supported wheel on this platform.
+        # The following renames the whl file the OS requirement set to the correct deployment target
+        foreach f [ exec find ${workpath}/ -name "*.whl" ] {
+            if { [regexp {(1[0-9]_\d{1,2})} ${f} -> whlver]} {
+                set newver [string map {. _} $macosx_deployment_target]
+                set newf   [string map "$whlver $newver" ${f}]
+                if { ${f} ne ${newf} } {
+                    ui_debug "Renaming ${f} -> ${newf}"
+                    file rename ${f} ${newf}
+                }
+            }
+        }
+    }
 }
 
 proc bazel::get_cmd_opts {} {
