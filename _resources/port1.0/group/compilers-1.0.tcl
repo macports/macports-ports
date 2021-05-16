@@ -785,7 +785,7 @@ proc compilers::add_fortran_legacy_support {} {
         } else {
             set fortran_compiler    [fortran_variant_name]
         }
-        if {${fortran_compiler} in "gcc10 gccdevel"} {
+        if {${fortran_compiler} in "gcc11 gcc10 gccdevel"} {
             configure.fflags-delete     -fallow-argument-mismatch
             configure.fcflags-delete    -fallow-argument-mismatch
             configure.f90flags-delete   -fallow-argument-mismatch

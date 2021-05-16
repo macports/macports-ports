@@ -319,8 +319,10 @@ proc mpi.setup {args} {
             lappend disabled -clang37
         }
         # gcc 9+ only available on OS X 10.7 (Darwin11) and newer
-        if {${os.major} <= 10} {
-            lappend disabled -gcc9 -gcc10
+        # However, gcc9+ subports fail to build on 10.7, for both openmpi and mpich.
+        # So only enable for 10.8+.
+        if {${os.major} <= 11} {
+            lappend disabled -gcc9 -gcc10 -gcc11
         }
         if {${os.major} <= 10 || !$is_mpich} {
             lappend disabled -gccdevel

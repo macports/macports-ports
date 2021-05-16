@@ -67,6 +67,12 @@ default bazel.cxx_standard 2014
 options bazel.path
 default bazel.path {}
 
+options bazel.python_version
+default bazel.python_version ""
+
+options bazel.fix_wheel_deployment_target
+default bazel.fix_wheel_deployment_target yes
+
 proc bazel::add_to_envs { var } {
     foreach phase {configure build destroot} {
         ${phase}.env-append ${var}
@@ -139,14 +145,18 @@ variant native description {Build from source for best native platform support} 
 
 proc bazel::get_base_arch {} {
     global configure.build_arch
-    # Currently only supports intel
-    if { ${configure.build_arch} eq "x86_64" } {
-        return "-march=x86-64"
+    if { [variant_isset native] } {
+        return "-march=native"
+    } else {
+        if { ${configure.build_arch} eq "x86_64" } {
+            return "-march=x86-64"
+        } elseif { ${configure.build_arch} eq "arm64" } {
+            return "-march=armv8-a"
+        }
     }
     return ""
 }
 
-supported_archs  x86_64
 if {![variant_isset native]} {
     set base_march [bazel::get_base_arch]
     configure.env-append CC_OPT_FLAGS=${base_march}
@@ -183,6 +193,20 @@ proc bazel::set_configure {} {
     ui_debug "Defined Bazel configure command ${configure.cmd} ${configure.args} ${configure.pre_args}"
 }
 port::register_callback bazel::set_configure
+
+post-extract {
+    if { [option bazel.python_version] ne "" } {
+        # Make sure selected python version is found via PATH as python and python3
+        global workpath prefix
+        set py_ver       [option bazel.python_version]
+        set py_ver_nodot [string map {. {}} ${py_ver}]
+        depends_build-append port:python${py_ver_nodot}
+        xinstall -d ${workpath}/bin
+        ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python
+        ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python3
+        bazel.path-append ${workpath}/bin
+    }
+}
 
 # Patch configuration
 pre-configure {
@@ -249,6 +273,32 @@ pre-build {
     }
 }
 
+post-build {
+    # Post build command
+    system -W ${worksrcpath} "[option bazel.post_build_cmd]"
+}
+
+pre-destroot {
+    if { [option bazel.fix_wheel_deployment_target] } {
+        # https://trac.macports.org/ticket/60834
+        # bazel sets the deployment target to the SDK version, which then causes
+        # issues on systems where the SDK version is newer than the OS version, as pip
+        # then refuses to install the wheel with (e.g. on macOS 10.12 with a 10.13 SDK)
+        # ERROR: tensorflow-2.5.0-cp39-cp39-macosx_10_13_x86_64.whl is not a supported wheel on this platform.
+        # The following renames the whl file the OS requirement set to the correct deployment target
+        foreach f [ exec find ${workpath}/ -name "*.whl" ] {
+            if { [regexp {(1[0-9]_\d{1,2})} ${f} -> whlver]} {
+                set newver [string map {. _} $macosx_deployment_target]
+                set newf   [string map "$whlver $newver" ${f}]
+                if { ${f} ne ${newf} } {
+                    ui_debug "Renaming ${f} -> ${newf}"
+                    file rename ${f} ${newf}
+                }
+            }
+        }
+    }
+}
+
 proc bazel::get_cmd_opts {} {
     global bazel.max_idle_secs
     # Generate the bazel build command
@@ -266,7 +316,7 @@ proc bazel::get_build_opts {} {
     # See https://docs.bazel.build/versions/master/memory-saving-mode.html 
     set bazel_build_opts "--compilation_mode=opt --verbose_failures --nouse_action_cache --discard_analysis_cache --notrack_incremental_state --nokeep_state_after_build "
     # For very (very) verbose logging
-    #set bazel_build_opts "--subcommands ${bazel_build_opts}"
+    set bazel_build_opts "--subcommands ${bazel_build_opts}"
     # Extra user defined build options
     set bazel_build_opts "${bazel_build_opts} [option bazel.extra_build_opts]"
     # Always disable as bazel sets build jobs differently
@@ -300,12 +350,7 @@ proc bazel::get_build_opts {} {
     foreach opt [list {*}${configure.ldflags} ] {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
-    if {![variant_isset native]} {
-        set base_march [bazel::get_base_arch]
-        set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
-    } else {
-        set bazel_build_opts "${bazel_build_opts} --copt=-march=native"
-    }
+    set bazel_build_opts "${bazel_build_opts} --copt=[bazel::get_base_arch]"
     if { [option configure.ccache] } {
         set bazel_build_opts "${bazel_build_opts} --action_env CCACHE_DIR=[compwrap::get_ccache_dir]"
     }
@@ -314,14 +359,7 @@ proc bazel::get_build_opts {} {
 }
 
 proc bazel::get_build_env { } {
-    set bazel_build_env ""
-    if {![variant_isset native]} {
-        set base_march [bazel::get_base_arch]
-        set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
-    } else {
-        set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
-    }
-    set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
+    set bazel_build_env "BAZEL_SH=/bin/bash CC_OPT_FLAGS=[bazel::get_base_arch]"
     if { [option configure.ccache] } {
         set bazel_build_env "CCACHE_DIR=[compwrap::get_ccache_dir] ${bazel_build_env}"
     }
@@ -349,8 +387,3 @@ proc bazel::configure_build {} {
     }
 }
 port::register_callback bazel::configure_build
-
-post-build {
-    # Post build command
-    system -W ${worksrcpath} "[option bazel.post_build_cmd]"
-}
