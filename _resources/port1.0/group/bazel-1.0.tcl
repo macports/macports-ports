@@ -142,10 +142,14 @@ variant native description {Build from source for best native platform support} 
 
 proc bazel::get_base_arch {} {
     global configure.build_arch
-    if { ${configure.build_arch} eq "x86_64" } {
-        return "-march=x86-64"
-    } elseif { ${configure.build_arch} eq "arm64" } {
-        return "-march=armv8-a"
+    if { [variant_isset native] } {
+        return "-march=native"
+    } else {
+        if { ${configure.build_arch} eq "x86_64" } {
+            return "-march=x86-64"
+        } elseif { ${configure.build_arch} eq "arm64" } {
+            return "-march=armv8-a"
+        }
     }
     return ""
 }
@@ -322,12 +326,7 @@ proc bazel::get_build_opts {} {
     foreach opt [list {*}${configure.ldflags} ] {
         set bazel_build_opts "${bazel_build_opts} --linkopt \"${opt}\""
     }
-    if {![variant_isset native]} {
-        set base_march [bazel::get_base_arch]
-        set bazel_build_opts "${bazel_build_opts} --copt=${base_march}"
-    } else {
-        set bazel_build_opts "${bazel_build_opts} --copt=-march=native"
-    }
+    set bazel_build_opts "${bazel_build_opts} --copt=[bazel::get_base_arch]"
     if { [option configure.ccache] } {
         set bazel_build_opts "${bazel_build_opts} --action_env CCACHE_DIR=[compwrap::get_ccache_dir]"
     }
@@ -336,14 +335,7 @@ proc bazel::get_build_opts {} {
 }
 
 proc bazel::get_build_env { } {
-    set bazel_build_env ""
-    if {![variant_isset native]} {
-        set base_march [bazel::get_base_arch]
-        set bazel_build_env "CC_OPT_FLAGS=${base_march} ${bazel_build_env}"
-    } else {
-        set bazel_build_env "CC_OPT_FLAGS=-march=native ${bazel_build_env}"
-    }
-    set bazel_build_env "BAZEL_SH=/bin/bash ${bazel_build_env}"
+    set bazel_build_env "BAZEL_SH=/bin/bash CC_OPT_FLAGS=[bazel::get_base_arch]"
     if { [option configure.ccache] } {
         set bazel_build_env "CCACHE_DIR=[compwrap::get_ccache_dir] ${bazel_build_env}"
     }
