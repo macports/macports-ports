@@ -4,6 +4,21 @@
 # This PortGroup provides shared logic, and helpers, for our MPI ports.
 #==============================================================================
 
+proc mpiutil_add_subport {name subport key} {
+    subport ${name}-${key} {}
+    # TODO: Remove all traces of -devel on or after Janurary 2022
+    subport ${name}-devel-${key} {
+        PortGroup       obsolete 1.0
+
+        known_fail      yes
+        distfiles
+        pre-fetch {
+            error "${subport} is currently broken"
+        }
+        replaced_by ${name}-${key}
+    }
+}
+
 proc mpiutil_add_compiler_depends_lib {cname} {
     set cport_name ""
 
