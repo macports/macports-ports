@@ -60,13 +60,6 @@ livecheck.type      regex
 livecheck.regex     {href=.([0-9.p]+)/}
 livecheck.url       ${homepage}/static/downloads/
 
-if {[string first "-devel" $subport] > 0} {
-    # Delete all traces of -devel Janurary 2022
-    PortGroup       obsolete 1.0
-
-    replaced_by     [regsub -- "-devel" $subport ""]
-}
-
 # As MPICH creates compiler wrappers, there are lots of
 # variants for what compiler the user would like to wrap.
 
@@ -75,109 +68,119 @@ if {[string first "-devel" $subport] > 0} {
 # Sub-ports names and corresponding configure.compiler value
 array set clist {
     clang   {clang}
-    clang50 {macports-clang-5.0}
-    gcc5    {macports-gcc-5}
-    gcc6    {macports-gcc-6}
     gcc7    {macports-gcc-7}
-    gcc8    {macports-gcc-8}
+}
+set clist_unsupported [list]
+set clist_obsolete [list]
+
+# TODO: Remove these obsolete subports on or after January 2022, along with all
+# traces of -devel. For the latter, also remember to update proc
+# 'mpiutil_add_subport', in portgroup 'mpiutil'.
+lappend clist_obsolete \
+    clang50 \
+    clang60 \
+    clang70 \
+    clang80 \
+    gcc49 \
+    gcc5 \
+    gcc6 \
+    gcc8 \
+    gccdevel
+
+# mpich only compiles with clang90+ on MacOS 10.7 and later
+if { ${os.major} >= 11 } {
+    set clist(clang90) {macports-clang-9.0}
+    set clist(clang10) {macports-clang-10}
+    set clist(clang11) {macports-clang-11}
+} else {
+    lappend clist_unsupported \
+        clang90 clang10 clang11
 }
 
-# gcc 4.x not supported on mac OS 10.12 (Darwin16) or newer
-# Only provide gcc 4.9, as older versions do not build.
-set clist(gcc49)     {macports-gcc-4.9}
 # gcc 9+ only available on macOS10.7 (Darwin11) and newer
 # However, gcc9+ builds fail on MacOS 10.7, so only enable for MacOS 10.8+.
-set clist(gcc9)      {macports-gcc-9}
-set clist(gcc10)     {macports-gcc-10}
-# Disable gcc11 for now, as builds fail across-the-board
-#set clist(gcc11)     {macports-gcc-11}
-set clist(gccdevel)  {macports-gcc-devel}
-# clang 6+ only available on macOS10.9 (Darwin13) and newer
-set clist(clang60)   {macports-clang-6.0}
-set clist(clang70)   {macports-clang-7.0}
-set clist(clang80)   {macports-clang-8.0}
-set clist(clang90)   {macports-clang-9.0}
-set clist(clang10)   {macports-clang-10}
-set clist(clang11)   {macports-clang-11}
-
-foreach key [array name clist] {
-    subport ${name}-${key} {}
-    subport ${name}-devel-${key} {}
+if { ${os.arch} eq "arm" } {
+    set clist(gcc11)   {macports-gcc-11}
+    lappend clist_unsupported \
+        gcc10 gcc11
+} elseif { ${os.major} >= 12 } {
+    set clist(gcc9)    {macports-gcc-9}
+    set clist(gcc10)   {macports-gcc-10}
+    set clist(gcc11)   {macports-gcc-11}
+} else {
+    lappend clist_unsupported \
+        gcc9 gcc10 gcc11
 }
-subport ${name}-default {}
-subport ${name}-devel {}
-subport ${name}-devel-default {}
 
-if {${name} ne ${subport} && [string first "-devel" $subport] < 0} {
-    set key                  [lindex [split ${subport} -] end]
-    if {${key} eq "default"} {
+foreach key [array names clist] {
+    mpiutil_add_subport \
+        ${name} ${subport} ${key}
+}
+foreach key ${clist_unsupported} {
+    mpiutil_add_subport \
+        ${name} ${subport} ${key}
+}
+foreach key ${clist_obsolete} {
+    mpiutil_add_subport \
+        ${name} ${subport} ${key}
+}
+unset key
+mpiutil_add_subport \
+    ${name} ${subport} "default"
+
+set subport_enabled no
+set cname           [lindex [split ${subport} -] end]
+if {${cname} in ${clist_unsupported}} {
+    known_fail  yes
+    pre-fetch {
+        error "${subport} is not supported on ${os.platform} ${os.major}"
+    }
+    append long_description " Note: ${cname} not supported on ${os.platform} ${os.major}."
+} elseif {${cname} in ${clist_obsolete}} {
+    PortGroup   obsolete 1.0
+
+    known_fail  yes
+    pre-fetch {
+        error "${subport} is obsolete"
+    }
+
+    if {[string match "clang*" ${cname}]} {
+        replaced_by ${name}-clang90
+    } else {
+        replaced_by ${name}-gcc7
+    }
+
+    append long_description " Note: ${subport} is obsolete."
+} elseif {(${subport} ne ${name}) && (${subport} ne "${name}-devel")} {
+    if {${cname} eq "default"} {
+        set cname "mp"
+    }
+
+    set subport_enabled yes
+
+    if {${cname} eq "mp"} {
         # make every attempt to avoid MacPorts compilers
         if {${os.major} == 10} {
             configure.cxx_stdlib libstdc++
         }
-        set compiler         "default"
-        set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
-    } else {
-        set compiler         [lindex [split $clist($key) -] 1]
-        set compiler_version [lindex [split $clist($key) -] 2]
-    }
-    set fail no
-    if {${compiler} eq "gcc"} {
-        if { ${os.major} >= 16 && [vercmp ${compiler_version} 5] < 0 } {
-            # gcc 4.x not supported on mac OS 10.12 (Darwin16) or newer
-            set fail yes
-        }
-        if { ${os.major} < 12 && [vercmp ${compiler_version} 9] >= 0 } {
-            set fail yes
-        }
-        if { ${os.major} < 10 && [vercmp ${compiler_version} 8] >= 0 } {
-            set fail yes
-        }
-        if { ${os.major} < 11 && ${compiler_version} eq "devel" } {
-            set fail yes
-        }
-        if { ${os.major} > 19 && [vercmp ${compiler_version} 8] < 0 } {
-            set fail yes
-        }
-        # Assume gcc11+ will support arm. To be seen.
-        if { ${configure.build_arch} eq "arm64" && [vercmp ${compiler_version} 11] < 0 } {
-            set fail yes
-        }
-    }
-    if {${compiler} eq "clang"} {
-        if { ${os.major} < 10 && [vercmp ${compiler_version} 8] >= 0 } {
-            set fail yes
-        }
-        if { ${os.major} <  9 && [vercmp ${compiler_version} 5] >= 0 } {
-            set fail yes
-        }
-        if { ${os.major} < 11 && [vercmp ${compiler_version} 6] >= 0 } {
-            set fail yes
-        }
-        if { ${os.major} > 19 && [vercmp ${compiler_version} 9]  < 0 } {
-            set fail yes
-        }
-        if { ${configure.build_arch} eq "arm64" && [vercmp ${compiler_version} 11] < 0 } {
-            set fail yes
-        }
-    }
-    if {${compiler} eq "default" && ${configure.compiler} eq "clang"} {
-        if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
-            # Linker for Apple clang version 421.11.66 segfaults
-            # See https://trac.macports.org/ticket/36654#comment:9
-            set fail yes
-        }
-    }
-    if {${fail}} {
-        known_fail yes
-        pre-fetch {
-            ui_error "${subport} fails on OS ${os.major} with compiler ${compiler}, version ${compiler_version}"
-            return -code error "incompatible macOS version"
+        if {${configure.compiler} eq "clang"} {
+            set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
+            if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
+                # Linker for Apple clang version 421.11.66 segfaults
+                # See https://trac.macports.org/ticket/36654#comment:9
+                known_fail yes
+                pre-fetch {
+                    ui_error "${subport} fails on OS ${os.major} with compiler ${compiler}, version ${compiler_version}"
+                    return -code error "incompatible macOS version"
+                }
+                set subport_enabled no
+            }
         }
     }
 }
 
-configure.args      --disable-dependency-tracking    \
+if {${subport_enabled}} {
+    configure.args  --disable-dependency-tracking    \
                     --disable-fortran                \
                     --disable-silent-rules           \
                     --enable-base-cache              \
@@ -191,38 +194,29 @@ configure.args      --disable-dependency-tracking    \
                     --with-hwloc-prefix=${prefix}    \
                     "F90FLAGS='' F90=''"
 
-variant threads description {Build with full thread support} {
-    configure.args-append   --enable-threads=multiple
-}
-
-platform darwin {
-    configure.args-append   --enable-timer-type=mach_absolute_time
-
-    if {${os.major} < 12} {
-        # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
-        configure.args-append --enable-opencl=no
+    variant threads description {Build with full thread support} {
+        configure.args-append   --enable-threads=multiple
     }
 
-    if {${name} ne ${subport}} {
-        patchfiles-append       patch-no_qmkshrobj.diff \
+    platform darwin {
+        configure.args-append   --enable-timer-type=mach_absolute_time
+
+        if {${os.major} < 12} {
+            # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
+            configure.args-append --enable-opencl=no
+        }
+
+        if {${name} ne ${subport}} {
+            patchfiles-append   patch-no_qmkshrobj.diff \
                                 patch-ch4-ipv6.diff
-    }
-}
-
-# We're making compiler wrappers here... don't default to -O2 for wrappers.
-# Actual library code is compiled with -O2 via --enable-fast=O2 configure arg
-configure.optflags-delete   -O2 -Os
-configure.cppflags-delete   -I${prefix}/include
-configure.ldflags-delete    -L${prefix}/lib
-
-if {${name} ne ${subport} && [string first "-devel" $subport] < 0} {
-    set cname                   [lindex [split ${subport} -] end]
-    if {${cname} == "default"} {
-        set cname                   mp
+        }
     }
 
-    set all_name [split ${subport} -]
-    conflicts-append mpich-devel-[join [lrange ${all_name} 1 end] -]
+    # We're making compiler wrappers here... don't default to -O2 for wrappers.
+    # Actual library code is compiled with -O2 via --enable-fast=O2 configure arg
+    configure.optflags-delete   -O2 -Os
+    configure.cppflags-delete   -I${prefix}/include
+    configure.ldflags-delete    -L${prefix}/lib
 
     # As we are making wrappers, we depend on the compilers to exist.
     # Add them to depends_lib, not just depends_build.
@@ -248,10 +242,11 @@ if {${name} ne ${subport} && [string first "-devel" $subport] < 0} {
 
     if {[string first "-default" $subport] < 0} {
         configure.compiler      [lindex $clist($cname) 0]
-        append long_description "\\n\\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
+        append long_description \
+            "\\n\\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
     } else {
         append long_description \
-"\\n\\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
+            "\\n\\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
     }
 
     configure.args-append   \
