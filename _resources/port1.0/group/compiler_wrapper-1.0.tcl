@@ -74,9 +74,13 @@ proc compwrap::comp_flags {tag} {
 }
 
 proc compwrap::wrapped_command_path {tag origpath} {
+    # Some ports append compiler flags to the compiler 'commands'
+    # Remove this here to only use the first argument, the compiler path
+    set csplit [split ${origpath} { }]
+    set strippath [lindex ${csplit} 0]
     # Return the path to the wrapper. Format is :-
     # <port workpath>/<compiler tag>/<path to underlying compiler>
-    return [option workpath]/compwrap/${tag}${origpath}
+    return [option workpath]/compwrap/${tag}${strippath}
 }
 
 proc compwrap::wrapped_compiler_path {tag} {
@@ -95,7 +99,7 @@ proc compwrap::wrap_compiler {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
 
-    # Get the wrapper
+    # Get the wrapper path
     set wrapcomp [compwrap::wrapped_compiler_path ${tag}]
     if { ${wrapcomp} eq ${comp} } {
         return ${comp}
@@ -107,40 +111,42 @@ proc compwrap::wrap_compiler {tag} {
         xinstall -d ${wrapdir}
     }
 
-    ui_debug "compiler_wrapper: Creating ${wrapcomp}"
-
     # Force recreate in case underlying compiler has changed
     file delete -force ${wrapcomp}
+    ui_debug "compiler_wrapper: Creating ${wrapcomp}"
 
-    # Basic option, to pass on all command line arguments
-    set comp_opts [join [option compwrap.compiler_pre_flags]]
-    append comp_opts " [join [option compwrap.compiler_args_forward]]"
-    append comp_opts " [join [option compwrap.compiler_post_flags]]"
+    # The list of compiler flags to construct
+    set comp_opts [list]
 
     # Add MP compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
         # standard options
         ui_debug "compiler_wrapper:  -> Will embed standard compiler flags in ${tag} wrapper script"
-        set comp_opts "[compwrap::comp_flags ${tag}] ${comp_opts}"
+        append comp_opts " [compwrap::comp_flags ${tag}]"
         # isysroot
         if {[option configure.sdkroot] ne "" && \
                 ![option compiler.limit_flags] && \
                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
             ui_debug "compiler_wrapper:  -> Will embed SDK isysroot in ${tag} wrapper script"
-            set comp_opts "-isysroot[option configure.sdkroot] ${comp_opts}"
+            append comp_opts " -isysroot[option configure.sdkroot]"
         }
         # pipe
         if { [option configure.pipe] } {
             ui_debug "compiler_wrapper:  -> Will embed -pipe in ${tag} wrapper script"
-            set comp_opts "-pipe ${comp_opts}"
+            append comp_opts " -pipe"
         }
     }
 
     # Add legacy support env vars
     if { [option compwrap.add_legacysupport_flags] } {
         ui_debug "compiler_wrapper:  -> Will embed legacysupport flags in ${tag} wrapper script"
-        set comp_opts "\$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\} ${comp_opts}"
+        append comp_opts " \$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
     }
+
+    # Basic option, to pass on all command line arguments
+    append comp_opts " [join [option compwrap.compiler_pre_flags]]"
+    append comp_opts " [join [option compwrap.compiler_args_forward]]"
+    append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
     # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
