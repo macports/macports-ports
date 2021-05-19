@@ -90,7 +90,22 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     return ${subport_enabled}
 }
 
-proc mpiutil_add_compiler_depends_lib {cname} {
+proc mpiutil_add_depends_build {subport cname} {
+    global os.major
+
+    if {${os.major} <= 12} {
+        # For gcc builds on MacOS 10.8 and earlier, add clang-90 as a build
+        # dependency. This provides a modern version of 'as', allowing the port
+        # to build successfully.
+        if {[string match "gcc*" ${cname}]} {
+            ui_debug "mpiutil_add_depends_build: adding clang90 build dependency for gcc build"
+            depends_build-append \
+                port:clang-9.0
+        }
+    }
+}
+
+proc mpiutil_add_compiler_depends_lib {subport cname} {
     set cport_name ""
 
     # As we are making wrappers, we depend on the compilers to exist.
