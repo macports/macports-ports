@@ -74,9 +74,13 @@ proc compwrap::comp_flags {tag} {
 }
 
 proc compwrap::wrapped_command_path {tag origpath} {
+    # Some ports append compiler flags to the compiler 'commands'
+    # Remove this here to only use the first argument, the compiler path
+    set csplit [split ${origpath} { }]
+    set strippath [lindex ${csplit} 0]
     # Return the path to the wrapper. Format is :-
     # <port workpath>/<compiler tag>/<path to underlying compiler>
-    return [option workpath]/compwrap/${tag}${origpath}
+    return [option workpath]/compwrap/${tag}${strippath}
 }
 
 proc compwrap::wrapped_compiler_path {tag} {
@@ -95,7 +99,7 @@ proc compwrap::wrap_compiler {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
 
-    # Get the wrapper
+    # Get the wrapper path
     set wrapcomp [compwrap::wrapped_compiler_path ${tag}]
     if { ${wrapcomp} eq ${comp} } {
         return ${comp}
@@ -109,11 +113,21 @@ proc compwrap::wrap_compiler {tag} {
 
     ui_debug "compiler_wrapper: Creating ${wrapcomp}"
 
+    set comp_opts [list]
+
+    # Some ports append to the compiler path flags, as a hacky means to pass
+    # these to the build. Handle these by manually adding them to the wrapper script.
+    set csplit [split ${comp} { }]
+    if { [llength ${csplit}] > 1 } {
+        ui_debug "Found compiler flags appended to configure.${tag} : [lrange ${csplit} 1 end]"
+        append comp_opts " [join [lrange ${csplit} 1 end]]"
+    }
+
     # Force recreate in case underlying compiler has changed
     file delete -force ${wrapcomp}
 
     # Basic option, to pass on all command line arguments
-    set comp_opts [join [option compwrap.compiler_pre_flags]]
+    append comp_opts " [join [option compwrap.compiler_pre_flags]]"
     append comp_opts " [join [option compwrap.compiler_args_forward]]"
     append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
