@@ -10,8 +10,10 @@ namespace eval portfetch::mirror_sites { }
 # https with them yet.
 global os.platform os.major
 set fastly      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
-# Temporarily limit CDN access to Big Sur until end of month.
-set fastly      [expr {${os.platform} eq "darwin" && ${os.major} < 20 ? "" : "https"}]
+# Temporarily limit CDN access until end of month to save bandwidth.
+if {${os.platform} ne "darwin" || ${os.major} < 20} {
+    set fastly  ""
+}
 # cert doesn't have macports.org SANs; admin notified
 #set aarnet.au   [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set aarnet.au   http
