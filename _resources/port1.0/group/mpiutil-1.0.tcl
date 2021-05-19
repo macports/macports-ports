@@ -4,6 +4,26 @@
 # This PortGroup provides shared logic, and helpers, for our MPI ports.
 #==============================================================================
 
+proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} {
+    foreach key [dict keys ${clist}] {
+        mpiutil_add_subport \
+            ${name} ${subport} ${key}
+    }
+
+    foreach key ${clist_unsupported} {
+        mpiutil_add_subport \
+            ${name} ${subport} ${key}
+    }
+
+    foreach key ${clist_obsolete} {
+        mpiutil_add_subport \
+            ${name} ${subport} ${key}
+    }
+
+    mpiutil_add_subport \
+        ${name} ${subport} "default"
+}
+
 proc mpiutil_add_subport {name subport key} {
     subport ${name}-${key} {}
     # TODO: Remove all traces of -devel on or after Janurary 2022
@@ -17,6 +37,57 @@ proc mpiutil_add_subport {name subport key} {
         }
         replaced_by ${name}-${key}
     }
+}
+
+proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_obsolete} {
+    global os.platform os.major
+    global configure.compiler compiler.command_line_tools_version
+
+    set subport_enabled no
+    if {${cname} in ${clist_unsupported}} {
+        known_fail  yes
+        pre-fetch {
+            error "${subport} is not supported on ${os.platform} ${os.major}"
+        }
+        append long_description " Note: ${cname} not supported on ${os.platform} ${os.major}."
+    } elseif {${cname} in ${clist_obsolete}} {
+        PortGroup   obsolete 1.0
+
+        known_fail  yes
+        pre-fetch {
+            error "${subport} is obsolete"
+        }
+
+        if {[string match "clang*" ${cname}]} {
+            replaced_by ${name}-clang90
+        } else {
+            replaced_by ${name}-gcc7
+        }
+
+        append long_description " Note: ${subport} is obsolete."
+    } elseif {(${subport} ne ${name}) && (${subport} ne "${name}-devel")} {
+        set subport_enabled yes
+
+        if {${cname} eq "default"} {
+            if {${configure.compiler} eq "clang"} {
+                set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
+                if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
+                    # Linker for Apple clang version 421.11.66 segfaults
+                    # See https://trac.macports.org/ticket/36654#comment:9
+                    known_fail yes
+                    pre-fetch {
+                        ui_error "${subport} fails on OS ${os.major} with compiler\
+                            ${configure.compiler}, version ${compiler_version}"
+                        return -code error "incompatible macOS version"
+                    }
+
+                    set subport_enabled no
+                }
+            }
+        }
+    }
+
+    return ${subport_enabled}
 }
 
 proc mpiutil_add_compiler_depends_lib {cname} {
