@@ -19,9 +19,6 @@ proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} 
         mpiutil_add_subport \
             ${name} ${subport} ${key}
     }
-
-    mpiutil_add_subport \
-        ${name} ${subport} "default"
 }
 
 proc mpiutil_add_subport {name subport key} {
@@ -49,7 +46,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
         pre-fetch {
             error "${subport} is not supported on ${os.platform} ${os.major}"
         }
-        append long_description " Note: ${cname} not supported on ${os.platform} ${os.major}."
+        append long_description " Note: ${subport} not supported on ${os.platform} ${os.major}."
     } elseif {${cname} in ${clist_obsolete}} {
         PortGroup   obsolete 1.0
 
@@ -65,7 +62,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
         }
 
         append long_description " Note: ${subport} is obsolete."
-    } elseif {(${subport} ne ${name}) && (${subport} ne "${name}-devel")} {
+    } elseif {${subport} ne ${name}} {
         set subport_enabled yes
 
         if {${cname} eq "default"} {
@@ -90,7 +87,22 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     return ${subport_enabled}
 }
 
-proc mpiutil_add_compiler_depends_lib {cname} {
+proc mpiutil_add_depends_build {subport cname} {
+    global os.major
+
+    if {${os.major} <= 12} {
+        # For gcc builds on MacOS 10.8 and earlier, add clang-90 as a build
+        # dependency. This provides a modern version of 'as', allowing the port
+        # to build successfully.
+        if {[string match "gcc*" ${cname}]} {
+            ui_debug "mpiutil_add_depends_build: adding clang90 build dependency for gcc build"
+            depends_build-append \
+                port:clang-9.0
+        }
+    }
+}
+
+proc mpiutil_add_compiler_depends_lib {subport cname} {
     set cport_name ""
 
     # As we are making wrappers, we depend on the compilers to exist.

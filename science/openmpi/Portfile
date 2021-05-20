@@ -54,6 +54,10 @@ livecheck.type      regex
 livecheck.url       https://www.open-mpi.org/
 livecheck.regex     Open MPI v(\[0-9\.\]+) released
 
+#-------------------------------------------------------------------------------
+# Target Compiler Logic - START
+#-------------------------------------------------------------------------------
+
 # As OpenMPI creates compiler wrappers, there are lots of
 # variants for what compiler the user would like to wrap.
 
@@ -62,8 +66,8 @@ livecheck.regex     Open MPI v(\[0-9\.\]+) released
 # Sub-ports names and corresponding configure.compiler value
 set clist \
     [dict create \
-        clang {clang} \
-        gcc7  {macports-gcc-7} \
+        default {} \
+        gcc7    {macports-gcc-7} \
     ]
 set clist_unsupported \
     [list]
@@ -77,6 +81,14 @@ lappend clist_obsolete \
     clang33 clang34 clang37 \
     clang50 clang60 clang70 clang80 \
     gcc49 gcc5 gcc6 gcc8
+
+# Only enable Xcode clang builds for MacOS 10.7 and later
+if { ${os.major} >= 11 } {
+    dict set clist clang   {clang}
+} else {
+    lappend clist_unsupported \
+        clang
+}
 
 if { ${os.arch} eq "arm" } {
     # disable unreliable clang versions for ARM
@@ -92,7 +104,7 @@ if { ${os.arch} eq "arm" } {
 # gcc 9+ only available on macOS10.7 (Darwin11) and newer
 # However, gcc9+ builds fail on MacOS 10.7, so only enable for MacOS 10.8+.
 if { ${os.arch} eq "arm" } {
-    dict set clist(gcc11)   {macports-gcc-11}
+    dict set clist gcc11 {macports-gcc-11}
     lappend clist_unsupported \
         gcc9 gcc10
 } elseif { ${os.major} >= 12 } {
@@ -113,8 +125,12 @@ set cname \
 set subport_enabled \
     [mpiutil_validate_subport \
         ${name} ${subport} ${cname} \
-        ${clist} ${clist_unsupported} ${clist_obsolete}
+        ${clist} ${clist_unsupported} ${clist_obsolete} \
     ]
+
+#-------------------------------------------------------------------------------
+# Target Compiler Logic - END
+#-------------------------------------------------------------------------------
 
 if {${subport_enabled}} {
     if {${cname} == "default"} {
@@ -158,12 +174,18 @@ if {${subport_enabled}} {
     build.dir           ${configure.dir}
     destroot.dir        ${build.dir}
 
+    # Add any additional build dependencies, if necessary, for platform
+    mpiutil_add_depends_build \
+        ${subport} ${cname}
+
     # As we are making wrappers, we depend on the compilers to exist.
     # Add them to depends_lib, not just depends_build.
-    mpiutil_add_compiler_depends_lib ${cname}
+    mpiutil_add_compiler_depends_lib \
+        ${subport} ${cname}
 
     # Determine whether buildbot binaries should be used, and disable if necessary
-    mpiutil_set_binary_eligibility ${subport} ${cname}
+    mpiutil_set_binary_eligibility \
+        ${subport} ${cname}
 
     depends_build-append        port:pkgconfig
     depends_lib-append          port:hwloc \
@@ -177,9 +199,10 @@ if {${subport_enabled}} {
     if {${cname} ne "mp"} {
         set compiler            [dict get ${clist} ${cname}]
         configure.compiler      [lindex ${compiler} 0]
+        unset compiler
+
         append long_description \
             "\\n\\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
-        unset compiler
     } else {
         append long_description \
             "\\n\\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
@@ -197,34 +220,13 @@ if {${subport_enabled}} {
         --with-libevent=${prefix} \
         --with-zlib=${prefix}
 
-    # For MacOS 10.8 and earlier, disable use of AVX instruction set. Necessary as
-    # system-provided assembler doesn't support AVX on those releases. And it's not
-    # straightforward to fix.
-    if {${os.major} <= 12} {
-        ui_debug "Disabling use of AVX instructions for this MacOS release"
-        configure.args-append \
-            --enable-mca-no-build=op-avx
-    }
-
     post-destroot {
-        if {[string first "-devel" $subport] > 0} {
-            # Supply our own -devel manpages (might be materially different / new)
-            file mkdir ${destroot}${prefix}/share/doc
-            file mkdir ${destroot}${prefix}/share/docdelete
-            move ${destroot}${prefix}/share/mandelete \
-                ${destroot}${prefix}/share/docdelete/man
-            move ${destroot}${prefix}/share/docdelete \
-                ${destroot}${prefix}/share/doc/${name}-${cname}
-            system -W ${destroot}${prefix}/share/doc/${name}-${cname}/man \
-                "/usr/bin/find . -type f -print0 | /usr/bin/xargs -0 -P ${build.jobs} /usr/bin/gzip -v"
-        } else {
-            # This version doesn't supply manpages
-            if {[file isdirectory ${destroot}${prefix}/share/mandelete]} {
-                delete ${destroot}${prefix}/share/mandelete
-            }
-            if {[file isdirectory ${destroot}${prefix}/share/docdelete]} {
-                delete ${destroot}${prefix}/share/docdelete
-            }
+        # This version doesn't supply manpages
+        if {[file isdirectory ${destroot}${prefix}/share/mandelete]} {
+            delete ${destroot}${prefix}/share/mandelete
+        }
+        if {[file isdirectory ${destroot}${prefix}/share/docdelete]} {
+            delete ${destroot}${prefix}/share/docdelete
         }
 
         set vampirlog ${destroot}${prefix}/share/${name}-${cname}/vampirtrace/config.log
@@ -244,10 +246,8 @@ if {${subport_enabled}} {
         append long_description " AND FORTRAN COMPILERS"
         configure.args-replace  --disable-mpi-fortran \
                                 --enable-mpi-fortran
-        select.file             ${filespath}/${name}-${cname}-fortran
-        variant fortran description {
-            Stub : fortran always enabled for gcc-based version
-        } {}
+        select.file             ${filespath}/portselect/${name}-${cname}-fortran
+        variant fortran description {Stub : fortran always enabled for gcc-based version} {}
         default_variants-append     +fortran
 
         # GCC C++ always uses libstdc++
@@ -262,44 +262,11 @@ if {${subport_enabled}} {
         if {[fortran_variant_isset]} {
             configure.args-replace  --disable-mpi-fortran \
                                     --enable-mpi-fortran
-            select.file             ${filespath}/${name}-${cname}-fortran
+            select.file             ${filespath}/portselect/${name}-${cname}-fortran
 
             # Get the dependent port for the active fortran variant
             depends_lib-append      [fortran_variant_depends]
         }
-    }
-    set devnotes ""
-
-    if {[string first "-devel" $subport] > 0} {
-        set devnotes "
-
-To see the -devel MAN pages, add:
-  ${prefix}/share/doc/${name}-${cname}/man
-to the start of your MANPATH environment variable."
-    }
-
-notes "
-The mpicc wrapper (and friends) are installed as:
-
-  ${prefix}/bin/mpicc-${name}-${cname} (likewise mpicxx, ...)
-
-To make ${subport}'s wrappers the default (what you get when
-you execute 'mpicc' etc.) please run:
-
-  sudo port select --set mpi [file tail ${select.file}]${devnotes}
-"
-
-    variant valgrind description {enable valgrind support} {
-        depends_lib-append    path:${prefix}/lib/pkgconfig/valgrind.pc:valgrind
-        configure.args-append --enable-debug --enable-memchecker --with-valgrind=${prefix}
-    }
-
-    variant heterogeneous description {enable heterogeneous support} {
-        configure.args-append --enable-heterogeneous
-    }
-
-    variant mpi1 description {enable legacy mpi1 compatibility} {
-        configure.args-append --enable-mpi1-compatibility
     }
 
     if {![info exists universal_possible]} {
@@ -379,6 +346,27 @@ you execute 'mpicc' etc.) please run:
             }
         }
     }
+
+    variant valgrind description {enable valgrind support} {
+        depends_lib-append    path:${prefix}/lib/pkgconfig/valgrind.pc:valgrind
+        configure.args-append --enable-debug --enable-memchecker --with-valgrind=${prefix}
+    }
+
+    variant heterogeneous description {enable heterogeneous support} {
+        configure.args-append --enable-heterogeneous
+    }
+
+    variant mpi1 description {enable legacy mpi1 compatibility} {
+        configure.args-append --enable-mpi1-compatibility
+    }
+
+notes "
+The mpicc wrapper (and friends) are installed as:
+  ${prefix}/bin/mpicc-${name}-${cname} (likewise mpicxx, ...)
+
+To make ${subport}'s wrappers the default (what you get when you execute 'mpicc' etc.) please run:
+  sudo port select --set mpi [file tail ${select.file}]
+"
 
 } else {
     depends_lib-append      port:${name}-default

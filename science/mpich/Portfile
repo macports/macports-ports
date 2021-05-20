@@ -60,6 +60,10 @@ livecheck.type      regex
 livecheck.regex     {href=.([0-9.p]+)/}
 livecheck.url       ${homepage}/static/downloads/
 
+#-------------------------------------------------------------------------------
+# Target Compiler Logic - START
+#-------------------------------------------------------------------------------
+
 # As MPICH creates compiler wrappers, there are lots of
 # variants for what compiler the user would like to wrap.
 
@@ -68,7 +72,6 @@ livecheck.url       ${homepage}/static/downloads/
 # Sub-ports names and corresponding configure.compiler value
 set clist \
     [dict create \
-        clang {clang} \
         gcc7  {macports-gcc-7} \
     ]
 set clist_unsupported [list]
@@ -81,6 +84,15 @@ lappend clist_obsolete \
     clang50 clang60 clang70 clang80 \
     gcc49 gcc5 gcc6 gcc8 \
     gccdevel
+
+# Only enable default (gcc), and Xcode clang, for MacOS 10.7 and later
+if { ${os.major} >= 11 } {
+    dict set clist default {}
+    dict set clist clang   {clang}
+} else {
+    lappend clist_unsupported \
+        default clang
+}
 
 if { ${os.arch} eq "arm" } {
     # disable unreliable clang versions for ARM
@@ -119,8 +131,12 @@ set cname \
 set subport_enabled \
     [mpiutil_validate_subport \
         ${name} ${subport} ${cname} \
-        ${clist} ${clist_unsupported} ${clist_obsolete}
+        ${clist} ${clist_unsupported} ${clist_obsolete} \
     ]
+
+#-------------------------------------------------------------------------------
+# Target Compiler Logic - END
+#-------------------------------------------------------------------------------
 
 if {${subport_enabled}} {
     if {${cname} eq "default"} {
@@ -128,8 +144,8 @@ if {${subport_enabled}} {
     }
 
     if {${cname} eq "mp"} {
-        # make every attempt to avoid MacPorts compilers
         if {${os.major} == 10} {
+            # Make every attempt to avoid MacPorts compilers on 10.6
             configure.cxx_stdlib libstdc++
         }
     }
@@ -148,16 +164,13 @@ if {${subport_enabled}} {
                     --with-hwloc-prefix=${prefix}    \
                     "F90FLAGS='' F90=''"
 
-    variant threads description {Build with full thread support} {
-        configure.args-append   --enable-threads=multiple
-    }
-
     platform darwin {
         configure.args-append   --enable-timer-type=mach_absolute_time
 
         if {${os.major} < 12} {
             # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
-            configure.args-append --enable-opencl=no
+            configure.args-append \
+                                --enable-opencl=no
         }
 
         if {${name} ne ${subport}} {
@@ -172,12 +185,18 @@ if {${subport_enabled}} {
     configure.cppflags-delete   -I${prefix}/include
     configure.ldflags-delete    -L${prefix}/lib
 
+    # Add any additional build dependencies, if necessary, for platform
+    mpiutil_add_depends_build \
+        ${subport} ${cname}
+
     # As we are making wrappers, we depend on the compilers to exist.
     # Add them to depends_lib, not just depends_build.
-    mpiutil_add_compiler_depends_lib ${cname}
+    mpiutil_add_compiler_depends_lib \
+        ${subport} ${cname}
 
     # Determine whether buildbot binaries should be used, and disable if necessary
-    mpiutil_set_binary_eligibility ${subport} ${cname}
+    mpiutil_set_binary_eligibility \
+        ${subport} ${cname}
 
     depends_build-append        port:pkgconfig
     depends_lib-append          port:libxml2 \
@@ -185,7 +204,7 @@ if {${subport_enabled}} {
     depends_run-append          port:mpi_select
     select.group                mpi
     select.file                 ${filespath}/portselect/${name}-${cname}
-    depends_run-append      port:mpi-doc
+    depends_run-append          port:mpi-doc
 
     # Prevent "ccache" and "distcc" from being baked into the wrapper scripts.
     configure.ccache            no
@@ -194,12 +213,13 @@ if {${subport_enabled}} {
     # don't need to livecheck all the subports, just the port
     livecheck.type              none
 
-    if {[string first "-default" $subport] < 0} {
+    if {${cname} ne "mp"} {
         set compiler            [dict get ${clist} ${cname}]
         configure.compiler      [lindex ${compiler} 0]
+        unset compiler
+
         append long_description \
             "\\n\\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
-        unset compiler
     } else {
         append long_description \
             "\\n\\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
@@ -214,18 +234,6 @@ if {${subport_enabled}} {
     # avoid dependency on port:bash
     configure.env-append \
         BASH_SHELL=/bin/bash
-
-    # Renamed to standardaized 'native' name; remove 2022/02
-    variant tuned requires native description {Build with more optimizations} {
-    }
-
-    variant native description {Build for local machine} {
-        configure.args-replace      --enable-fast=O2 \
-                                    --enable-fast=all
-        # Note these need to be above the following foreach
-        configure.cflags-append     -march=native
-        configure.cxxflags-append   -march=native
-    }
 
     # setting xFLAGS resulting in mpicc, etc. always using these flags
     # setting MPICHLIB_xFLAGS only uses them for building the library
@@ -311,15 +319,12 @@ if {${subport_enabled}} {
         append long_description " AND FORTRAN COMPILERS"
         configure.args-replace  --disable-fortran \
                                 --enable-fortran
-        select.file             ${filespath}/${name}-${cname}-fortran
-        variant fortran description {
-            Stub : fortran always enabled for gcc-based version
-        } {}
+        select.file             ${filespath}/portselect/${name}-${cname}-fortran
+        variant fortran description {Stub : fortran always enabled for gcc-based version} {}
         default_variants-append     +fortran
 
         if {${cname} eq "gcc10" ||
-            ${cname} eq "gcc11" ||
-            ${cname} eq "gccdevel"} {
+            ${cname} eq "gcc11"} {
             # see https://lists.mpich.org/pipermail/discuss/2020-January/005862.html
             # see https://github.com/pmodels/mpich/issues/4300
             # see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=91556
@@ -339,7 +344,7 @@ if {${subport_enabled}} {
         if {[fortran_variant_isset]} {
             configure.args-replace  --disable-fortran \
                                     --enable-fortran
-            select.file             ${filespath}/${name}-${cname}-fortran
+            select.file             ${filespath}/portselect/${name}-${cname}-fortran
 
             # Ask the portgroup for the correct dependency - the Fortran
             # variants gccX and g95 match the name of the ports but
@@ -352,19 +357,33 @@ if {${subport_enabled}} {
         }
     }
 
+    variant threads description {Build with full thread support} {
+        configure.args-append   --enable-threads=multiple
+    }
+
+    variant gforker description {Use gforker process manager instead of the default hydra} {
+        configure.args-replace  --with-pm=hydra \
+                                --with-pm=gforker
+    }
+
+    # Renamed to standardaized 'native' name; remove 2022/02
+    variant tuned requires native description {Build with more optimizations} {
+    }
+
+    variant native description {Build for local machine} {
+        configure.args-replace      --enable-fast=O2 \
+                                    --enable-fast=all
+        # Note these need to be above the following foreach
+        configure.cflags-append     -march=native
+        configure.cxxflags-append   -march=native
+    }
+
 notes "
+The mpicc wrapper (and friends) are installed as:
+  ${prefix}/bin/mpicc-${name}-${cname} (likewise mpicxx, ...)
 
-+--- MPICH Usage note ----
-| The mpicc wrapper (and friends) are installed as:
-|
-|   ${prefix}/bin/mpicc-${name}-${cname} (likewise mpicxx, ...)
-|
-| To make ${subport}'s wrappers the default (what you get when
-| you execute 'mpicc' etc.) please run:
-|
-|   sudo port select --set mpi [file tail ${select.file}]
-+-------------------------
-
+To make ${subport}'s wrappers the default (what you get when you execute 'mpicc' etc.) please run:
+  sudo port select --set mpi [file tail ${select.file}]
 "
 
     if {[variant_isset gcc48] ||
@@ -375,24 +394,12 @@ notes "
         [variant_isset gcc8] ||
         [variant_isset gcc9] } {
         set DEFAULT_MSG "
-NOTE: Default fortran changed to +gcc10; consider switching variants to enable
+----------------------------------------
+NOTE: Default fortran changed to +gcc10; consider switching variants to enable\
 pre-built packages for ${subport} by running:
-\"sudo port clean ${subport} && sudo port upgrade ${subport} +gcc10 -[gcc_variant_name]\"
+  sudo port clean ${subport} && sudo port upgrade ${subport} +gcc10 -[gcc_variant_name]
 "
         notes-append    ${DEFAULT_MSG}
-
-        pre-fetch {
-            ui_msg ${DEFAULT_MSG}
-            system "sleep 3"
-            ui_msg "Continuing with local build."
-        }
-    }
-
-    variant gforker description {
-        Use gforker process manager instead of the default hydra
-    } {
-        configure.args-replace  --with-pm=hydra \
-                                --with-pm=gforker
     }
 
 } else {
