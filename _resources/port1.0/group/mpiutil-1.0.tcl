@@ -26,12 +26,13 @@ proc mpiutil_add_subport {name subport key} {
 
     # TODO: Remove all traces of -devel on or after Janurary 2022
     subport ${name}-devel-${key} {
-        PortGroup       obsolete 1.0
+        PortGroup  obsolete 1.0
 
-        known_fail      yes
+        set msg    "Devel subports no longer supported"
+        known_fail yes
         distfiles
         pre-fetch {
-            error "${subport} is currently broken"
+            error  ${msg}
         }
         replaced_by ${name}-${key}
     }
@@ -43,17 +44,19 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
 
     set subport_enabled no
     if {${cname} in ${clist_unsupported}} {
-        known_fail  yes
+        set msg    "${subport} is not supported on ${os.platform} ${os.major}"
+        known_fail yes
         pre-fetch {
-            error "${subport} is not supported on ${os.platform} ${os.major}"
+            error  ${msg}
         }
-        append long_description " Note: ${subport} not supported on ${os.platform} ${os.major}."
+        long_description-append "\nNOTE: ${msg}"
     } elseif {${cname} in ${clist_obsolete}} {
-        PortGroup   obsolete 1.0
+        PortGroup  obsolete 1.0
 
-        known_fail  yes
+        set msg    "${subport} is obsolete"
+        known_fail yes
         pre-fetch {
-            error "${subport} is obsolete"
+            error  ${msg}
         }
 
         if {[string match "clang*" ${cname}]} {
@@ -62,7 +65,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
             replaced_by ${name}-gcc7
         }
 
-        append long_description " Note: ${subport} is obsolete."
+        long_description-append "\nNOTE: ${msg}"
     } elseif {${subport} ne ${name}} {
         set subport_enabled yes
 
