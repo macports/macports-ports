@@ -23,6 +23,7 @@ proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} 
 
 proc mpiutil_add_subport {name subport key} {
     subport ${name}-${key} {}
+
     # TODO: Remove all traces of -devel on or after Janurary 2022
     subport ${name}-devel-${key} {
         PortGroup       obsolete 1.0
@@ -139,5 +140,17 @@ proc mpiutil_set_binary_eligibility {subport cname} {
     }
 
     return 0
+}
+
+proc mpiutil_add_notes {name subport cname select_file} {
+    global prefix
+
+    notes-append "
+The mpicc wrapper (and friends) are installed as:
+  ${prefix}/bin/mpicc-${name}-${cname} (likewise mpicxx, ...)
+
+To make ${subport}'s wrappers the default (what you get when you execute 'mpicc' etc.) please run:
+  sudo port select --set mpi [file tail ${select_file}]
+"
 }
 
