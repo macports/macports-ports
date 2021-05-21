@@ -302,11 +302,11 @@ proc mpi.setup {args} {
         set is_mpich [expr {$cur_variant in {mpich}}]
 
         lappend disabled \
-            -gcc44 -gcc45 -gcc46 -gcc47 -gcc48
+            -gcc43 -gcc44 -gcc45 -gcc46 -gcc47 -gcc48
 
         # All of the following are now obsolete for openmpi/mpich
         lappend disabled \
-            -clang33 -clang34 -clang37 \
+            -clang33 -clang34 -clang35 -clang37 \
             -clang50 -clang60 -clang70 -clang80 \
             -clangdevel \
             -gcc49 -gcc5 -gcc6 -gcc8 \
@@ -328,9 +328,6 @@ proc mpi.setup {args} {
             lappend disabled \
                 -gcc7 -gcc9 \
                 -clang90 -clang10
-        } elseif {${os.major} < 11 && $is_mpich} {
-            # mpich: clang90+ subports only available on MacOS 10.7 and later
-            lappend disabled -clang90 -clang10 -clang11
         }
     }
 
