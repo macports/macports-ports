@@ -61,7 +61,7 @@ livecheck.regex     {href=.([0-9.p]+)/}
 livecheck.url       ${homepage}/static/downloads/
 
 #-------------------------------------------------------------------------------
-# Target Compiler Logic - START
+# Target Compiler Logic
 #-------------------------------------------------------------------------------
 
 # As MPICH creates compiler wrappers, there are lots of
@@ -70,10 +70,7 @@ livecheck.url       ${homepage}/static/downloads/
 # Please update the mpi portgroup whenever clist is changed.
 
 # Sub-ports names and corresponding configure.compiler value
-set clist \
-    [dict create \
-        gcc7  {macports-gcc-7} \
-    ]
+set clist [dict create]
 set clist_unsupported [list]
 set clist_obsolete [list]
 
@@ -84,6 +81,9 @@ lappend clist_obsolete \
     clang50 clang60 clang70 clang80 \
     gcc49 gcc5 gcc6 gcc8 \
     gccdevel
+
+# Compilers supported across-the-board
+dict set clist gcc7 {macports-gcc-7}
 
 # Only enable default (gcc), and Xcode clang, for MacOS 10.7 and later
 if { ${os.major} >= 11 } {
@@ -131,13 +131,24 @@ set subport_enabled \
     ]
 
 #-------------------------------------------------------------------------------
-# Target Compiler Logic - END
+# General Subport Logic
 #-------------------------------------------------------------------------------
 
 if {${subport_enabled}} {
     if {${cname} eq "default"} {
         set cname "mp"
     }
+
+    # Add various dependencies: build, lib, and run
+    mpiutil_add_depends \
+        ${subport} ${cname}
+
+    # Determine whether buildbot binaries should be used, and disable if necessary
+    mpiutil_set_binary_eligibility \
+        ${subport} ${cname}
+
+    depends_build-append        port:pkgconfig
+    depends_lib-append          port:libxml2
 
     if {${cname} eq "mp"} {
         if {${os.major} == 10} {
@@ -155,25 +166,21 @@ if {${subport_enabled}} {
                     --enable-fast=O2                 \
                     --enable-shared                  \
                     --enable-versioning              \
+                    --enable-timer-type=mach_absolute_time \
                     --with-pm=hydra                  \
                     --with-thread-package=posix      \
                     --with-hwloc-prefix=${prefix}    \
                     "F90FLAGS='' F90=''"
 
-    platform darwin {
-        configure.args-append   --enable-timer-type=mach_absolute_time
-
-        if {${os.major} < 12} {
-            # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
-            configure.args-append \
-                                --enable-opencl=no
-        }
-
-        if {${name} ne ${subport}} {
-            patchfiles-append   patch-no_qmkshrobj.diff \
-                                patch-ch4-ipv6.diff
-        }
+    if {${os.major} < 12} {
+        # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
+        configure.args-append \
+                    --enable-opencl=no
     }
+
+    patchfiles-append \
+                    patch-no_qmkshrobj.diff \
+                    patch-ch4-ipv6.diff
 
     # We're making compiler wrappers here... don't default to -O2 for wrappers.
     # Actual library code is compiled with -O2 via --enable-fast=O2 configure arg
@@ -181,26 +188,8 @@ if {${subport_enabled}} {
     configure.cppflags-delete   -I${prefix}/include
     configure.ldflags-delete    -L${prefix}/lib
 
-    # Add any additional build dependencies, if necessary, for platform
-    mpiutil_add_depends_build \
-        ${subport} ${cname}
-
-    # As we are making wrappers, we depend on the compilers to exist.
-    # Add them to depends_lib, not just depends_build.
-    mpiutil_add_compiler_depends_lib \
-        ${subport} ${cname}
-
-    # Determine whether buildbot binaries should be used, and disable if necessary
-    mpiutil_set_binary_eligibility \
-        ${subport} ${cname}
-
-    depends_build-append        port:pkgconfig
-    depends_lib-append          port:libxml2 \
-                                port:hwloc
-    depends_run-append          port:mpi_select
     select.group                mpi
     select.file                 ${filespath}/portselect/${name}-${cname}
-    depends_run-append          port:mpi-doc
 
     # Prevent "ccache" and "distcc" from being baked into the wrapper scripts.
     configure.ccache            no
@@ -214,11 +203,11 @@ if {${subport_enabled}} {
         configure.compiler      [lindex ${compiler} 0]
         unset compiler
 
-        append long_description \
-            "\\n\\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
+        long_description-append \
+            "\n\nTHIS SUBPORT WRAPS ${cname}'s C/C++"
     } else {
-        append long_description \
-            "\\n\\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
+        long_description-append \
+            "\n\nTHIS SUBPORT WRAPS MACPORTS' DEFAULT COMPILER FOR C/C++"
     }
 
     configure.args-append   \
@@ -271,11 +260,17 @@ if {${subport_enabled}} {
         }
     }
 
+    #---------------------------------------------------------------------------
+    # Fortran Support
+    #---------------------------------------------------------------------------
+
+    set fortran_enabled no
+
     if { [string first gcc $cname] == 0 } {
-        append long_description " AND FORTRAN COMPILERS"
-        configure.args-replace  --disable-fortran \
-                                --enable-fortran
-        select.file             ${filespath}/portselect/${name}-${cname}-fortran
+        set fortran_enabled yes
+
+        long_description-append "AND FORTRAN COMPILERS"
+
         variant fortran description {Stub : fortran always enabled for gcc-based version} {}
         default_variants-append     +fortran
 
@@ -291,16 +286,14 @@ if {${subport_enabled}} {
         # see https://trac.macports.org/ticket/59185
         configure.cxx_stdlib libstdc++
     } else {
-        append long_description " (AND THE FORTRAN COMPILER SELECTED BY THE VARIANT, IF ANY)"
+        long_description-append "(AND THE FORTRAN COMPILER SELECTED BY THE VARIANT, IF ANY)"
 
         compilers.allow_arguments_mismatch yes
         compilers.choose   fc f77 f90
         compilers.setup    default_fortran
 
         if {[fortran_variant_isset]} {
-            configure.args-replace  --disable-fortran \
-                                    --enable-fortran
-            select.file             ${filespath}/portselect/${name}-${cname}-fortran
+            set fortran_enabled yes
 
             # Ask the portgroup for the correct dependency - the Fortran
             # variants gccX and g95 match the name of the ports but
@@ -313,8 +306,17 @@ if {${subport_enabled}} {
         }
     }
 
+    if {${fortran_enabled}} {
+        configure.args-replace  --disable-fortran \
+                                --enable-fortran
+
+        select.file             ${filespath}/portselect/${name}-${cname}-fortran
+    }
+
+    unset fortran_enabled
+
     #---------------------------------------------------------------------------
-    # Universal Build Support - START
+    # Universal Build Support
     #---------------------------------------------------------------------------
 
     if {![info exists universal_possible]} {
@@ -358,7 +360,7 @@ if {${subport_enabled}} {
     }
 
     #---------------------------------------------------------------------------
-    # Universal Build Support - END
+    # Variants
     #---------------------------------------------------------------------------
 
     variant threads description {Build with full thread support} {
@@ -371,8 +373,7 @@ if {${subport_enabled}} {
     }
 
     # Renamed to standardaized 'native' name; remove 2022/02
-    variant tuned requires native description {Build with more optimizations} {
-    }
+    variant tuned requires native description {Build with more optimizations} {}
 
     variant native description {Build for local machine} {
         configure.args-replace      --enable-fast=O2 \
@@ -381,6 +382,10 @@ if {${subport_enabled}} {
         configure.cflags-append     -march=native
         configure.cxxflags-append   -march=native
     }
+
+    #---------------------------------------------------------------------------
+    # Notes
+    #---------------------------------------------------------------------------
 
     mpiutil_add_notes \
         ${name} ${subport} ${cname} ${select.file}
