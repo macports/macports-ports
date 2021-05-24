@@ -145,7 +145,7 @@ proc compwrap::wrap_compiler {tag} {
 
     # Basic option, to pass on all command line arguments
     append comp_opts " [join [option compwrap.compiler_pre_flags]]"
-    append comp_opts " [join [option compwrap.compiler_args_forward]]"
+    append comp_opts " \"[join [option compwrap.compiler_args_forward]]\""
     append comp_opts " [join [option compwrap.compiler_post_flags]]"
 
     # Prepend ccache launcher if active
@@ -162,11 +162,10 @@ proc compwrap::wrap_compiler {tag} {
     if { [compwrap::use_ccache ${tag}] } {
         puts ${f} "export CCACHE_DIR=[compwrap::get_ccache_dir]"
     }
-    puts ${f} "CMD=\"${comp} ${comp_opts}\""
     if {[option compwrap.print_compiler_command]} {
-        puts ${f} "echo \${CMD}"
+        puts ${f} "echo ${comp} ${comp_opts}"
     }
-    puts  ${f} "exec \${CMD}"
+    puts ${f} "exec ${comp} ${comp_opts}"
     close ${f}
     
     return ${wrapcomp}
