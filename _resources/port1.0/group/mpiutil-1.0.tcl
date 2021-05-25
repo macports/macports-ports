@@ -43,7 +43,11 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     global configure.compiler compiler.command_line_tools_version
 
     set subport_enabled no
-    if {${cname} in ${clist_unsupported}} {
+    if {[string match "${name}-devel-*" ${subport}]} {
+        ui_debug "mpiutil_validate_subport: disable devel-related subport: ${subport}"
+        # Note: Nothing else needed, as subport obsoleted, etc, when defined earlier
+    } elseif {${cname} in ${clist_unsupported}} {
+        ui_debug "mpiutil_validate_subport: disable unsupported subport: ${subport}"
         set msg    "${subport} is not supported on ${os.platform} ${os.major}"
         known_fail yes
         pre-fetch {
@@ -51,6 +55,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
         }
         long_description-append "\nNOTE: ${msg}"
     } elseif {${cname} in ${clist_obsolete}} {
+        ui_debug "mpiutil_validate_subport: disable obsolete subport: ${subport}"
         PortGroup  obsolete 1.0
 
         set msg    "${subport} is obsolete"
@@ -73,6 +78,8 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
             if {${configure.compiler} eq "clang"} {
                 set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
                 if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
+                    ui_debug "mpiutil_validate_subport: apple clang segfault potential; disable subport: ${subport}"
+
                     # Linker for Apple clang version 421.11.66 segfaults
                     # See https://trac.macports.org/ticket/36654#comment:9
                     known_fail yes
@@ -86,6 +93,10 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
                 }
             }
         }
+    }
+
+    if {${subport_enabled}} {
+        ui_debug "mpiutil_validate_subport: enabling subport: ${subport}"
     }
 
     return ${subport_enabled}
