@@ -27,12 +27,12 @@ proc mpiutil_add_subport {name subport cname} {
     # TODO: Remove all traces of -devel on or after Janurary 2022
     subport ${name}-devel-${cname} {
         set msg "${subport}: Devel subports no longer supported"
-        mpiutil_set_subport_disabled \
+        mpiutil_set_subport_obsolete \
             ${name} ${subport} ${cname} ${msg}
     }
 }
 
-proc mpiutil_set_subport_disabled {name subport cname msg} {
+proc mpiutil_set_subport_obsolete {name subport cname msg} {
     PortGroup  obsolete 1.0
 
     known_fail yes
@@ -54,6 +54,7 @@ proc mpiutil_set_subport_disabled {name subport cname msg} {
 
 proc mpiutil_set_subport_fail {name subport cname msg} {
     known_fail yes
+    distfiles
     pre-fetch "
         error \"${msg}\"
     "
@@ -82,7 +83,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
         ui_debug "mpiutil_validate_subport: disable obsolete subport: ${subport}"
 
         set msg "${subport}: This subport is obsolete"
-        mpiutil_set_subport_disabled \
+        mpiutil_set_subport_obsolete \
             ${name} ${subport} ${cname} ${msg}
 
     } elseif {${subport} ne ${name}} {
