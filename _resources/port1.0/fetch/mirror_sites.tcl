@@ -380,7 +380,7 @@ set portfetch::mirror_sites::sites(gnustep) {
 }
 
 set portfetch::mirror_sites::sites(googlecode) {
-    https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/${name}/
+    https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/
 }
 
 set portfetch::mirror_sites::sites(isc) {
