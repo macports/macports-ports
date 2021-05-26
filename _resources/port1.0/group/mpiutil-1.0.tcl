@@ -21,11 +21,11 @@ proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} 
     }
 }
 
-proc mpiutil_add_subport {name subport key} {
-    subport ${name}-${key} {}
+proc mpiutil_add_subport {name subport cname} {
+    subport ${name}-${cname} {}
 
     # TODO: Remove all traces of -devel on or after Janurary 2022
-    subport ${name}-devel-${key} {
+    subport ${name}-devel-${cname} {
         PortGroup  obsolete 1.0
 
         set msg    "${subport}: Devel subports no longer supported"
@@ -34,7 +34,16 @@ proc mpiutil_add_subport {name subport key} {
         pre-fetch {
             error  ${msg}
         }
-        replaced_by ${name}-${key}
+
+        if {[string match "clang*" ${cname}]} {
+            replaced_by ${name}-clang90
+        } elseif {[string match "gcc*" ${cname}]} {
+            replaced_by ${name}-gcc7
+        } else {
+            replaced_by ${name}-${cname}
+        }
+
+        long_description-append "\nNOTE: ${msg}"
     }
 }
 
