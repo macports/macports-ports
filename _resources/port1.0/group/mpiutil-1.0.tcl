@@ -37,9 +37,9 @@ proc mpiutil_set_subport_disabled {name subport cname msg} {
 
     known_fail yes
     distfiles
-    pre-fetch {
-        error ${msg}
-    }
+    pre-fetch "
+        error \"${msg}\"
+    "
 
     if {[string match "clang*" ${cname}]} {
         replaced_by ${name}-clang90
@@ -54,9 +54,9 @@ proc mpiutil_set_subport_disabled {name subport cname msg} {
 
 proc mpiutil_set_subport_fail {name subport cname msg} {
     known_fail yes
-    pre-fetch {
-        error ${msg}
-    }
+    pre-fetch "
+        error \"${msg}\"
+    "
 
     long_description-append "\nNOTE: ${msg}"
 }
