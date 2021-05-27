@@ -51,10 +51,8 @@
 # etc. file in the upstream source code. The go2port tool (install via MacPorts)
 # can be used to generate a skeleton portfile with precomputed go.vendors.
 
-PortGroup legacysupport 1.1
+PortGroup legacysupport    1.1
 PortGroup compiler_wrapper 1.0
-
-compwrap.print_compiler_command yes
 
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
 
