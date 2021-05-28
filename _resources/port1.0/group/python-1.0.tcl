@@ -14,6 +14,8 @@
 # python.default_version: which version will be installed if the user asks
 #   for py-foo rather than pyXY-foo
 # python.consistent_destroot: set consistent environment values in build and destroot phases
+# python.obsolete_versions: Versions which are no longer available.
+#   These will be set replaced_by py${python.default_version}-foo
 #
 # Note: setting these options requires name to be set beforehand
 
