@@ -69,9 +69,6 @@ proc luarocks_set_branch {option action args} {
     if {${luarocks.branch} eq ${luarocks.latest_branch}} {
         set luarocks.suffix     ""
     }
-#   if {${luarocks.branch} eq ${luarocks.latest_branch}} {
-#       set luarocks.branch     ""
-#   }
 }
 
 set luarocks.module     ""
@@ -127,6 +124,9 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 subport lua${suffix}-${rootname} {
                     luarocks.branch ${v}
                     depends_lib port:lua${luarocks.suffix}
+                    if {${luarocks.branch} eq "5.1"} {
+                        depends_lib-replace port:lua${luarocks.suffix} path:lib/libluajit-5.1.2.dylib:luajit
+                    }
                 }
             }
             if {$subport eq $name} {
@@ -211,6 +211,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 if {[file isdirectory $binDir]} {
                     foreach file [readdir $binDir] {
                         move [file join $binDir $file] ${destroot}${luarocks.bindir}
+                        reinplace "s|${destroot}||g" ${destroot}${luarocks.bindir}/${file}
                     }
                 }
             }
@@ -240,6 +241,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 if {[file isdirectory $binDir]} {
                     foreach file [readdir $binDir] {
                         move [file join $binDir $file] ${destroot}${luarocks.bindir}
+                        reinplace "s|${destroot}||g" ${destroot}${luarocks.bindir}/${file}
                     }
                 }
             }
@@ -270,6 +272,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 if {[file isdirectory $binDir]} {
                     foreach file [readdir $binDir] {
                         move [file join $binDir $file] ${destroot}${luarocks.bindir}
+                        reinplace "s|${destroot}||g" ${destroot}${luarocks.bindir}/${file}
                     }
                 }
             }
