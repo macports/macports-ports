@@ -46,12 +46,12 @@ proc kde4::configure_build {} {
     # programs currently need it. The automoc port, which includes this
     # PortGroup overrides depends_build, removing "port:automoc" to
     # prevent a cyclic dependency
+    depends_build-delete    port:automoc
     depends_build-append    port:automoc
 
     # Phonon added as library dependency here as most, if not all KDE
-    # programs current need it.  The phonon port, which includes this
-    # PortGroup overrides depends_lib, removing "port:phonon" to prevent a
-    # cyclic dependency
+    # programs current need it.
+    depends_lib-delete      port:phonon
     depends_lib-append      port:phonon
 
     # augment the CMake module lookup path, if necessary depending on
