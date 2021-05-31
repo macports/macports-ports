@@ -44,7 +44,7 @@ proc boost::configure {} {
     depends_[option boost.depends_type]-append port:boost[boost::version_nodot]
 
     # Append to the build flags to find the isolated headers/libs
-    configure.cppflags-prepend -isystem[boost::include_dir]
+    configure.cxxflags-prepend -isystem[boost::include_dir]
     configure.ldflags-prepend  -L[boost::lib_dir]
 
     # are we using cmake ?
