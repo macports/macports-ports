@@ -18,6 +18,7 @@ set boost_last_depends       ""
 set boost_last_cxxflags      ""
 set boost_last_ldflags       ""
 set boost_last_cmake_flags   ""
+set boost_last_cmake         0
 
 proc boost::version {} {
     return [option boost.version]
@@ -43,10 +44,11 @@ proc boost::lib_dir {} {
 proc boost::configure_build {} {
     global cmake.build_dir
     global boost_last_version_nodot boost_last_depends boost_last_cxxflags
-    global boost_last_ldflags boost_last_cmake_flags
+    global boost_last_ldflags boost_last_cmake_flags boost_last_cmake
 
     if { ${boost_last_version_nodot} eq [boost::version_nodot] &&
-         ${boost_last_depends} eq [option boost.depends_type] } return
+         ${boost_last_depends} eq [option boost.depends_type] &&
+         ${boost_last_cmake} eq [info exists cmake.build_dir] } return
 
     ui_debug "Configure build [boost::version]"
 
@@ -73,6 +75,7 @@ proc boost::configure_build {} {
     # are we using cmake ?
     if { [info exists cmake.build_dir] } {
         ui_debug "Detected Cmake PG in use"
+        set boost_last_cmake 1
         if { ${boost_last_cmake_flags} ne "" } {
             foreach flag ${boost_last_cmake_flags} {
                 configure.args-delete ${flag}
