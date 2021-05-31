@@ -8,7 +8,7 @@
 namespace eval boost { }
 
 options boost.version
-default boost.version 1.71
+default boost.version 1.76
 
 options boost.depends_type
 default boost.depends_type lib
