@@ -13,9 +13,6 @@ default boost.version 1.71
 options boost.depends_type
 default boost.depends_type lib
 
-options boost.cmake_option_name
-default boost.cmake_option_name Boost_INCLUDE_DIR
-
 proc boost::version {} {
     return [option boost.version]
 }
@@ -50,7 +47,8 @@ proc boost::configure {} {
     # are we using cmake ?
     if { [info exists cmake.build_dir] } {
         ui_debug "Detected Cmake PG in use"
-        configure.args-append -D[option boost.cmake_option_name]=[boost::include_dir]
+        configure.args-append -DBoost_INCLUDE_DIR=[boost::include_dir] \
+                              -DBoost_DIR=[boost::install_area]
     }
 
 }
