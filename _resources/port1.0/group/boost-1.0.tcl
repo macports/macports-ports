@@ -30,7 +30,7 @@ proc boost::version_nodot {} {
 
 proc boost::install_area {} {
     global prefix
-    return ${prefix}/libexec/boost[boost::version_nodot]
+    return ${prefix}/libexec/boost/boost[boost::version_nodot]
 }
 
 proc boost::include_dir {} {
