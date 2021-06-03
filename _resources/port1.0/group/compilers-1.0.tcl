@@ -159,8 +159,8 @@ foreach ver ${gcc_versions} {
 
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
+set clang_versions {}
 if { ${os.arch} ne "arm" } {
-    set clang_versions {}
     if {${os.major} < 16} {
         if {${os.major} < 9} {
             lappend clang_versions 3.3
