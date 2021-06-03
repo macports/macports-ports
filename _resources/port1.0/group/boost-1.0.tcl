@@ -50,7 +50,7 @@ proc boost::configure_build {} {
          ${boost_last_depends} eq [option boost.depends_type] &&
          ${boost_last_cmake} eq [info exists cmake.build_dir] } return
 
-    ui_debug "Configure build [boost::version]"
+    ui_debug "boost PG: Configure build for boost [boost::version]"
 
     # Set the requested boost dependency
     if { ${boost_last_version_nodot} ne "" && ${boost_last_depends} ne "" } {
@@ -74,7 +74,6 @@ proc boost::configure_build {} {
 
     # are we using cmake ?
     if { [info exists cmake.build_dir] } {
-        ui_debug "Detected Cmake PG in use"
         set boost_last_cmake 1
         if { ${boost_last_cmake_flags} ne "" } {
             foreach flag ${boost_last_cmake_flags} {
