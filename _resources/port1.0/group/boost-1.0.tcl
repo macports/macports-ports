@@ -80,7 +80,17 @@ proc boost::configure_build {} {
                 configure.args-delete ${flag}
             }
         }
-        set boost_last_cmake_flags [list -DBoost_INCLUDE_DIR=[boost::include_dir] -DBoost_DIR=[boost::install_area]]
+        # Try and cover all bases here and set all possible variables ...
+        # See https://cmake.org/cmake/help/latest/module/FindBoost.html
+        set boost_last_cmake_flags [list \
+                                        -DBOOST_ROOT=[boost::install_area] \
+                                        -DBOOSTROOT=[boost::install_area] \
+                                        -DBOOST_INCLUDEDIR=[boost::include_dir] \
+                                        -DBOOST_LIBRARYDIR=[boost::lib_dir] \
+                                        -DBoost_NO_SYSTEM_PATHS=ON \
+                                        -DBoost_INCLUDE_DIR=[boost::include_dir] \
+                                        -DBoost_DIR=[boost::install_area] \
+                                       ]
         foreach flag ${boost_last_cmake_flags} {
             configure.args-append ${flag}
         }
