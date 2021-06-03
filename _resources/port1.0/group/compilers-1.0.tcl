@@ -159,9 +159,7 @@ foreach ver ${gcc_versions} {
 
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
-if { ${os.arch} eq "arm" } {
-    set clang_versions {11 devel}
-} else {
+if { ${os.arch} ne "arm" } {
     set clang_versions {}
     if {${os.major} < 16} {
         if {${os.major} < 9} {
@@ -179,9 +177,10 @@ if { ${os.arch} eq "arm" } {
         if { ${os.major} < 20 } {
             lappend clang_versions 8.0
         }
-        lappend clang_versions 9.0 10 11 devel
+        lappend clang_versions 9.0 10
     }
 }
+lappend clang_versions 11 12 devel
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
     # Remove dot from version if present
