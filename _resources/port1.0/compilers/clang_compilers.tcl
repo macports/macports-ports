@@ -32,7 +32,10 @@ if { ${os.arch} ne "arm" && ${os.major} >= 9 && ${os.major} < 20 } {
                       macports-clang-5.0
 }
 
-# Add 10 and 11 as defaults *after* 9.0 - 5.0
+# Add 10+ as defaults *after* 9.0 - 5.0
+if { ${os.major} >= 18} {
+    lappend compilers macports-clang-12
+}
 if { ${os.major} >= 10} {
     lappend compilers macports-clang-11 
     if { ${os.arch} ne "arm" } {
