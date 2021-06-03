@@ -46,10 +46,6 @@ proc boost::configure_build {} {
     global boost_last_version_nodot boost_last_depends boost_last_cxxflags
     global boost_last_ldflags boost_last_cmake_flags boost_last_cmake
 
-    if { ${boost_last_version_nodot} eq [boost::version_nodot] &&
-         ${boost_last_depends} eq [option boost.depends_type] &&
-         ${boost_last_cmake} eq [info exists cmake.build_dir] } return
-
     ui_debug "boost PG: Configure build for boost [boost::version]"
 
     # Set the requested boost dependency
@@ -95,7 +91,6 @@ proc boost::configure_build {} {
             configure.args-append ${flag}
         }
     }
-
 }
 
 port::register_callback boost::configure_build
