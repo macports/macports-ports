@@ -70,7 +70,7 @@ proc boost::configure_build {} {
     configure.cxxflags-prepend ${boost_cache_cxxflags}
     configure.ldflags-prepend  ${boost_cache_ldflags}
 
-    # Some build systems (meson) need configure/build env vars to be set.
+    # Some build systems (meson,makefile) need configure/build env vars to be set.
     # Do this unconditionally, as setting env vars shouldn't harm builds
     # that do not use them.
     if { ${boost_cache_env_vars} ne "" } {
@@ -81,6 +81,7 @@ proc boost::configure_build {} {
         }
     }
     set boost_cache_env_vars [list \
+                                  BOOSTDIR=[boost::install_area] \
                                   BOOST_ROOT=[boost::install_area] \
                                   BOOST_LIBRARYDIR=[boost::lib_dir] \
                                   BOOST_INCLUDEDIR=[boost::include_dir] \
