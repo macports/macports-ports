@@ -312,6 +312,10 @@ proc mpi.setup {args} {
             -gcc49 -gcc5 -gcc6 -gcc8 \
             -gccdevel
 
+        # Disable clang-12 unconditionally, as not yet supported for openmpi/mpich
+        lappend disabled \
+            -clang12
+
         # gcc 9+ only available on OS X 10.7 (Darwin11) and newer
         # However, gcc9+ subports fail to build on 10.7, for both openmpi and mpich.
         # So only enable for 10.8+.
