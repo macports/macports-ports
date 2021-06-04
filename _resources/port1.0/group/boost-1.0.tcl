@@ -13,12 +13,13 @@ default boost.version 1.76
 options boost.depends_type
 default boost.depends_type lib
 
-set boost_last_version_nodot ""
-set boost_last_depends       ""
-set boost_last_cxxflags      ""
-set boost_last_ldflags       ""
-set boost_last_cmake_flags   ""
-set boost_last_cmake         0
+set boost_cache_version_nodot ""
+set boost_cache_depends       ""
+set boost_cache_cpath         ""
+set boost_cache_cxxflags      ""
+set boost_cache_ldflags       ""
+set boost_cache_cmake_flags   ""
+set boost_cache_env_vars      ""
 
 proc boost::version {} {
     return [option boost.version]
@@ -42,43 +43,77 @@ proc boost::lib_dir {} {
 }
 
 proc boost::configure_build {} {
-    global cmake.build_dir
-    global boost_last_version_nodot boost_last_depends boost_last_cxxflags
-    global boost_last_ldflags boost_last_cmake_flags boost_last_cmake
+    global cmake.build_dir meson.build_type
+    global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
+    global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake
+    global boost_cache_env_vars boost_cache_cpath
 
     ui_debug "boost PG: Configure build for boost [boost::version]"
 
     # Set the requested boost dependency
-    if { ${boost_last_version_nodot} ne "" && ${boost_last_depends} ne "" } {
-        depends_${boost_last_depends}-delete port:boost${boost_last_version_nodot} 
+    if { ${boost_cache_version_nodot} ne "" && ${boost_cache_depends} ne "" } {
+        depends_${boost_cache_depends}-delete port:boost${boost_cache_version_nodot} 
     }
-    set boost_last_depends       [option boost.depends_type]
-    set boost_last_version_nodot [boost::version_nodot]
+    set boost_cache_depends       [option boost.depends_type]
+    set boost_cache_version_nodot [boost::version_nodot]
     depends_[option boost.depends_type]-append port:boost[boost::version_nodot]
 
     # Append to the build flags to find the isolated headers/libs
-    if { ${boost_last_cxxflags} ne "" } {
-        configure.cxxflags-delete ${boost_last_cxxflags}
+    if { ${boost_cache_cxxflags} ne "" } {
+        configure.cxxflags-delete ${boost_cache_cxxflags}
     }
-    if { ${boost_last_ldflags} ne "" } {
-        configure.ldflags-delete ${boost_last_ldflags}
+    if { ${boost_cache_ldflags} ne "" } {
+        configure.ldflags-delete ${boost_cache_ldflags}
     }
-    set boost_last_cxxflags -isystem[boost::include_dir]
-    set boost_last_ldflags  -L[boost::lib_dir]
-    configure.cxxflags-prepend ${boost_last_cxxflags}
-    configure.ldflags-prepend  ${boost_last_ldflags}
+    set boost_cache_cxxflags -isystem[boost::include_dir]
+    set boost_cache_ldflags  -L[boost::lib_dir]
+    configure.cxxflags-prepend ${boost_cache_cxxflags}
+    configure.ldflags-prepend  ${boost_cache_ldflags}
 
-    # are we using cmake ?
+    # Some build systems (meson) need configure/build env vars to be set.
+    # Do this unconditionally, as setting env vars shouldn't harm builds
+    # that do not use them.
+    if { ${boost_cache_env_vars} ne "" } {
+        foreach var ${boost_cache_env_vars} {
+            foreach phase {configure build} {
+                ${phase}.env-delete ${var}
+            }
+        }
+    }
+    set boost_cache_env_vars [list \
+                                  BOOST_ROOT=[boost::install_area] \
+                                  BOOST_LIBRARYDIR=[boost::lib_dir] \
+                                  BOOST_INCLUDEDIR=[boost::include_dir] \
+                                 ]
+    foreach var ${boost_cache_env_vars} {
+        foreach phase {configure build} {
+            ${phase}.env-append ${var}
+        }
+    }
+
+    # For meson, add to compiler.cpath. See discussion at
+    # https://github.com/macports/macports-ports/commit/f55147262b22ec1f81831cd58295bd0bdfc25f01
+    # limit this to meson, for now, incase appending to compiler.cpath hurts other builds
+    if { [info exists meson.build_type] } {
+        if { ${boost_cache_cpath} ne "" } {
+            compiler.cpath-delete ${boost_cache_cpath}
+        }
+        set boost_cache_cpath [boost::include_dir]
+        compiler.cpath-prepend ${boost_cache_cpath}
+    }
+
+    # Are we using cmake ?
+    # As we are appending to configure flags, need to check if cmake is in use
+    # before appending the cmake specific flags
     if { [info exists cmake.build_dir] } {
-        set boost_last_cmake 1
-        if { ${boost_last_cmake_flags} ne "" } {
-            foreach flag ${boost_last_cmake_flags} {
+        if { ${boost_cache_cmake_flags} ne "" } {
+            foreach flag ${boost_cache_cmake_flags} {
                 configure.args-delete ${flag}
             }
         }
         # Try and cover all bases here and set all possible variables ...
         # See https://cmake.org/cmake/help/latest/module/FindBoost.html
-        set boost_last_cmake_flags [list \
+        set boost_cache_cmake_flags [list \
                                         -DBOOST_ROOT=[boost::install_area] \
                                         -DBOOSTROOT=[boost::install_area] \
                                         -DBOOST_INCLUDEDIR=[boost::include_dir] \
@@ -87,7 +122,7 @@ proc boost::configure_build {} {
                                         -DBoost_INCLUDE_DIR=[boost::include_dir] \
                                         -DBoost_DIR=[boost::install_area] \
                                        ]
-        foreach flag ${boost_last_cmake_flags} {
+        foreach flag ${boost_cache_cmake_flags} {
             configure.args-append ${flag}
         }
     }
