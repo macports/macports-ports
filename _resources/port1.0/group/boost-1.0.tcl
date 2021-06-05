@@ -13,6 +13,9 @@ default boost.version 1.76
 options boost.depends_type
 default boost.depends_type lib
 
+options boost.require_numpy
+default boost.require_numpy no
+
 set boost_cache_version_nodot ""
 set boost_cache_depends       ""
 set boost_cache_cpath         ""
@@ -42,6 +45,10 @@ proc boost::lib_dir {} {
     return [boost::install_area]/lib
 }
 
+proc boost::depends_portname {} {
+    return boost[boost::version_nodot]
+}
+
 proc boost::configure_build {} {
     global cmake.build_dir meson.build_type
     global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
@@ -52,12 +59,18 @@ proc boost::configure_build {} {
 
     # Set the requested boost dependency
     if { ${boost_cache_version_nodot} ne "" && ${boost_cache_depends} ne "" } {
-        depends_${boost_cache_depends}-delete port:boost${boost_cache_version_nodot} 
+        depends_${boost_cache_depends}-delete port:boost${boost_cache_version_nodot}
+        if { [option boost.require_numpy] } {
+            depends_${boost_cache_depends}-delete port:boost${boost_cache_version_nodot}-numpy
+        }
     }
     set boost_cache_depends       [option boost.depends_type]
     set boost_cache_version_nodot [boost::version_nodot]
     depends_[option boost.depends_type]-append port:boost[boost::version_nodot]
-
+    if { [option boost.require_numpy] } {
+        depends_[option boost.depends_type]-append port:boost[boost::version_nodot]-numpy
+    }
+    
     # Append to the build flags to find the isolated headers/libs
     if { ${boost_cache_cxxflags} ne "" } {
         configure.cxxflags-delete ${boost_cache_cxxflags}
@@ -127,6 +140,7 @@ proc boost::configure_build {} {
             configure.args-append ${flag}
         }
     }
+    
 }
 
 port::register_callback boost::configure_build
@@ -137,5 +151,6 @@ proc boost::set_boost_parameters {option action args} {
     if {$action ne  "set"} return
     boost::configure_build
 }
-option_proc boost.version      boost::set_boost_parameters
-option_proc boost.depends_type boost::set_boost_parameters
+option_proc boost.version       boost::set_boost_parameters
+option_proc boost.depends_type  boost::set_boost_parameters
+option_proc boost.require_numpy boost::set_boost_parameters
