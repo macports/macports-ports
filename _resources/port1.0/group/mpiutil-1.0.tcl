@@ -23,13 +23,6 @@ proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} 
 
 proc mpiutil_add_subport {name subport cname} {
     subport ${name}-${cname} {}
-
-    # TODO: Remove all traces of -devel on or after Janurary 2022
-    subport ${name}-devel-${cname} {
-        set msg "${subport}: Devel subports no longer supported"
-        mpiutil_set_subport_obsolete \
-            ${name} ${subport} ${cname} ${msg}
-    }
 }
 
 proc mpiutil_set_subport_obsolete {name subport cname msg} {
@@ -67,12 +60,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     global configure.compiler compiler.command_line_tools_version
 
     set subport_enabled no
-    if {[string match "${name}-devel-*" ${subport}]} {
-        ui_debug "mpiutil_validate_subport: disable devel-related subport: ${subport}"
-
-        # Note: Nothing else needed, as subport obsoleted, etc, when defined earlier
-
-    } elseif {${cname} in ${clist_unsupported}} {
+    if {${cname} in ${clist_unsupported}} {
         ui_debug "mpiutil_validate_subport: fail unsupported subport: ${subport}"
 
         set msg "${subport} is not supported on ${os.platform} ${os.major}"
