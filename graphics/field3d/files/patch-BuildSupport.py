@@ -8,8 +8,8 @@
 -                           "/opt/local/include"],
 -                 arch64 : ["/usr/local/include",
 -                           "/opt/local/include"]},
-+    "darwin" : { arch32 : ["@PREFIX@/include"],
-+                 arch64 : ["@PREFIX@/include"]},
++    "darwin" : { arch32 : ["@PREFIX@/include","@BOOSTDIR@/include"],
++                 arch64 : ["@PREFIX@/include","@BOOSTDIR@/include"]},
      "linux2" : { arch32 : ["/usr/local/include"],
                   arch64 : ["/usr/local64/include"]}
  }
@@ -19,8 +19,8 @@
 -                           "/opt/local/lib"],
 -                 arch64 : ["/usr/local/lib",
 -                           "/opt/local/lib"]},
-+    "darwin" : { arch32 : ["@PREFIX@/lib"],
-+                 arch64 : ["@PREFIX@/lib"]},
++    "darwin" : { arch32 : ["@PREFIX@/lib","@BOOSTDIR@/lib"],
++                 arch64 : ["@PREFIX@/lib","@BOOSTDIR@/lib"]},
      "linux2" : { arch32 : ["/usr/local/lib"],
                   arch64 : ["/usr/local64/lib"]}
  }
