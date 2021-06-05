@@ -284,6 +284,10 @@ proc handle_set_go_vendors {vendors_str} {
                         set distfile ${vproject}-${vversion}.tar.gz
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
+                    git.sr.ht {
+                        set distfile ${vversion}.tar.gz
+                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
+                    }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
                         error "unsupported dependency domain"
