@@ -174,7 +174,8 @@ proc mpiutil_add_depends_lib_compilers {subport cname} {
     if {${cport_name} ne ""} {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Adding compiler to depends_lib: ${cport_name}"
 
-        depends_lib-append      port:${cport_name}
+        depends_lib-append \
+            port:${cport_name}
 
     } else {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Not adding compiler to depends_lib; cname: ${cname}"
