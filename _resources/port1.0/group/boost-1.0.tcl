@@ -108,7 +108,7 @@ proc boost::configure_build {} {
     # For meson, add to compiler.cpath. See discussion at
     # https://github.com/macports/macports-ports/commit/f55147262b22ec1f81831cd58295bd0bdfc25f01
     # limit this to meson, for now, incase appending to compiler.cpath hurts other builds
-    if { [info exists meson.build_type] } {
+    if { [string match *meson* [option configure.cmd] ] } {
         if { ${boost_cache_cpath} ne "" } {
             compiler.cpath-delete ${boost_cache_cpath}
         }
@@ -119,7 +119,7 @@ proc boost::configure_build {} {
     # Are we using cmake ?
     # As we are appending to configure flags, need to check if cmake is in use
     # before appending the cmake specific flags
-    if { [info exists cmake.build_dir] } {
+    if { [string match *cmake* [option configure.cmd] ] } {
         if { ${boost_cache_cmake_flags} ne "" } {
             foreach flag ${boost_cache_cmake_flags} {
                 configure.args-delete ${flag}

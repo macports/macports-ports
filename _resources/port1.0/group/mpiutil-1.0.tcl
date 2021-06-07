@@ -131,8 +131,10 @@ proc mpiutil_add_depends_build {subport cname} {
 
     if {${add_clang90}} {
         ui_debug "mpiutil_add_depends_build: ${subport}: adding clang90 build dependency for gcc build"
+
         depends_build-append \
             port:clang-9.0
+
     } else {
         ui_debug "mpiutil_add_depends_build: ${subport}: non-gcc build, nothing to do"
     }
@@ -171,7 +173,10 @@ proc mpiutil_add_depends_lib_compilers {subport cname} {
 
     if {${cport_name} ne ""} {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Adding compiler to depends_lib: ${cport_name}"
-        depends_lib-append      port:${cport_name}
+
+        depends_lib-append \
+            port:${cport_name}
+
     } else {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Not adding compiler to depends_lib; cname: ${cname}"
     }
@@ -190,7 +195,9 @@ proc mpiutil_set_binary_eligibility {subport cname} {
         # Force local builds with Xcode-provided compilers (avoid issues with
         # different Xcode versions on buildbot and user machines)
         ui_debug "mpiutil_set_binary_eligibility: ${subport}: Disabling binary use"
+
         archive_sites
+
     } else {
         ui_debug "mpiutil_set_binary_eligibility: ${subport}: Not disabling binary use"
     }

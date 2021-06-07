@@ -30,10 +30,6 @@ default build.target        ""
 destroot.env-append         DESTDIR=${destroot}
 default destroot.post_args  ""
 
-# This (dummy) option is needed by other PGs (boost) to detect when meson is being used
-options meson.build_type
-default meson.build_type    yes
-
 namespace eval meson { }
 
 proc meson::get_post_args {} {
