@@ -263,6 +263,13 @@ pre-configure {
         puts ${cache} "QMAKE_FRAMEWORKPATH+=${flag}"
     }
 
+    # Boost PG support
+    if { [info exists boost.version] } {
+        puts ${cache} "QMAKE_CXXFLAGS+=[boost::cxx_flags]"
+        puts ${cache} "QMAKE_LFLAGS+=[boost::ld_flags]"
+        puts ${cache} "BOOST_DIR=[boost::install_area]"
+    }
+
     close ${cache}
 }
 
