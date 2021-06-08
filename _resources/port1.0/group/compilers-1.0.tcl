@@ -180,11 +180,13 @@ if { ${os.arch} ne "arm" } {
         lappend clang_versions 9.0 10
     }
 }
-lappend clang_versions 11
-if { ${os.major} >= 15 } {
-    lappend clang_versions 12
+if { ${os.major} >= 10 } {
+    lappend clang_versions 11
+    if { ${os.major} >= 11 } {
+        lappend clang_versions 12
+    }
+    lappend clang_versions devel
 }
-lappend clang_versions devel
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
     # Remove dot from version if present
