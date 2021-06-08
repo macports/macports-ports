@@ -49,6 +49,14 @@ proc boost::depends_portname {} {
     return boost[boost::version_nodot]
 }
 
+proc boost::cxx_flags {} {
+    return -isystem[boost::include_dir]
+}
+
+proc boost::ld_flags {} {
+    return -L[boost::lib_dir]
+}
+
 proc boost::configure_build {} {
     global cmake.build_dir meson.build_type
     global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
@@ -78,8 +86,8 @@ proc boost::configure_build {} {
     if { ${boost_cache_ldflags} ne "" } {
         configure.ldflags-delete ${boost_cache_ldflags}
     }
-    set boost_cache_cxxflags -isystem[boost::include_dir]
-    set boost_cache_ldflags  -L[boost::lib_dir]
+    set boost_cache_cxxflags [boost::cxx_flags]
+    set boost_cache_ldflags  [boost::ld_flags]
     configure.cxxflags-prepend ${boost_cache_cxxflags}
     configure.ldflags-prepend  ${boost_cache_ldflags}
 
@@ -95,6 +103,8 @@ proc boost::configure_build {} {
     }
     set boost_cache_env_vars [list \
                                   BOOSTDIR=[boost::install_area] \
+                                  BOOST_DIR=[boost::install_area] \
+                                  BOOSTROOT=[boost::install_area] \
                                   BOOST_ROOT=[boost::install_area] \
                                   BOOST_LIBRARYDIR=[boost::lib_dir] \
                                   BOOST_INCLUDEDIR=[boost::include_dir] \
