@@ -142,6 +142,9 @@ proc boost::configure_build {} {
                                         -DBOOSTROOT=[boost::install_area] \
                                         -DBOOST_INCLUDEDIR=[boost::include_dir] \
                                         -DBOOST_LIBRARYDIR=[boost::lib_dir] \
+                                        -DBOOST_INCLUDE_DIR=[boost::include_dir] \
+                                        -DBOOST_LIBRARY_DIR=[boost::lib_dir] \
+                                        -DBOOST_LIB_DIR=[boost::lib_dir] \
                                         -DBoost_NO_SYSTEM_PATHS=ON \
                                         -DBoost_INCLUDE_DIR=[boost::include_dir] \
                                         -DBoost_DIR=[boost::install_area] \
