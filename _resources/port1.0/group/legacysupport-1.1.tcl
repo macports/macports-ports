@@ -3,7 +3,7 @@
 # This portgroup provides support for older macOS releases by:
 #    * providing a library for various missing library functions
 #    * ameliorating the mixing of libstdc++ libraries
-
+#
 # Usage:
 #
 #   PortGroup legacysupport 1.1
@@ -169,10 +169,10 @@ proc legacysupport::add_legacysupport {} {
 
         # Add the flags
         foreach f ${ls_cache_ldflags} { legacysupport::add_once configure.ldflags append ${f} }
-        legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_LDFLAGS=${ls_cache_ldflags}
+        legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_LDFLAGS=[join ${ls_cache_ldflags}]
         if {![option compiler.limit_flags]} {
             foreach f ${ls_cache_cppflags} { legacysupport::add_once configure.cppflags prepend ${f} }
-            legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_CPPFLAGS=${ls_cache_cppflags}
+            legacysupport::set_phase_env_var MACPORTS_LEGACY_SUPPORT_CPPFLAGS=[join ${ls_cache_cppflags}]
         }
 
         # do not use compiler.cpath since it behaves like -I, while ${lang}_INCLUDE_PATH behaves like -isystem
