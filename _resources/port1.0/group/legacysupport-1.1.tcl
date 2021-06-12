@@ -197,9 +197,7 @@ proc legacysupport::add_legacysupport {} {
 
 }
 
-# Call first as soon as PG is included
-legacysupport::add_legacysupport
-# and again as callback after port is parsed
+# callback after port is parsed
 port::register_callback legacysupport::add_legacysupport
 
 proc legacysupport::legacysupport_proc {option action args} {
