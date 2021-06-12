@@ -140,8 +140,6 @@ proc legacysupport::add_legacysupport {} {
 
     if { ${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
 
-        ui_debug "Adding legacy build support"
-
         # depend on the support library or devel version if installed
         legacysupport::add_once [legacysupport::get_depends_type] append [legacysupport::get_dependency]
 
@@ -155,9 +153,9 @@ proc legacysupport::add_legacysupport {} {
         }
 
         # Add flags for legacy-support library
-        set ls_cache_incpath  [list "${prefix}/include/LegacySupport"]
-        set ls_cache_ldflags  [list "[legacysupport::get_library_link_flags]"]
-        set ls_cache_cppflags [list "[legacysupport::get_cpp_flags]"]
+        set ls_cache_incpath  "${prefix}/include/LegacySupport"
+        set ls_cache_ldflags  "[join [legacysupport::get_library_link_flags]]"
+        set ls_cache_cppflags "[legacysupport::get_cpp_flags]"
 
         # Flags for using MP libcxx
         if { [option legacysupport.use_mp_libcxx] } {
@@ -166,6 +164,10 @@ proc legacysupport::add_legacysupport {} {
             append ls_cache_ldflags  " -L${prefix}/lib/libcxx"
             append ls_cache_cppflags " -isystem${prefix}/include/libcxx"
         }
+
+        ui_debug "legacysupport: ldflags  ${ls_cache_ldflags}"
+        ui_debug "legacysupport: cppflags ${ls_cache_cppflags}"
+        ui_debug "legacysupport: incpath  ${ls_cache_incpath}"
 
         # Add the flags
         foreach f ${ls_cache_ldflags} { legacysupport::add_once configure.ldflags append ${f} }
@@ -197,9 +199,7 @@ proc legacysupport::add_legacysupport {} {
 
 }
 
-# Call first as soon as PG is included
-legacysupport::add_legacysupport
-# and again as callback after port is parsed
+# callback after port is parsed
 port::register_callback legacysupport::add_legacysupport
 
 proc legacysupport::legacysupport_proc {option action args} {

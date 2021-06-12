@@ -16,13 +16,14 @@ default boost.depends_type lib
 options boost.require_numpy
 default boost.require_numpy no
 
-set boost_cache_version_nodot ""
-set boost_cache_depends       ""
-set boost_cache_cpath         ""
-set boost_cache_cxxflags      ""
-set boost_cache_ldflags       ""
-set boost_cache_cmake_flags   ""
-set boost_cache_env_vars      ""
+# cache variables storing current configuration state
+default boost_cache_version_nodot ""
+default boost_cache_depends       ""
+default boost_cache_cpath         ""
+default boost_cache_cxxflags      ""
+default boost_cache_ldflags       ""
+default boost_cache_cmake_flags   ""
+default boost_cache_env_vars      ""
 
 proc boost::version {} {
     return [option boost.version]
