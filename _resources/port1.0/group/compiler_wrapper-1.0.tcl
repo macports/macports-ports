@@ -67,9 +67,10 @@ proc compwrap::comp_flags {tag} {
          [catch {get_canonical_archflags ${tag}} flags] } {
         set flags [join ""]
     }
+    global configure.${ftag}flags
     if { [info exists configure.${ftag}flags] } {
         append flags " [join [option configure.${ftag}flags]]"
-    } 
+    }
     return ${flags}
 }
 
@@ -121,14 +122,16 @@ proc compwrap::wrap_compiler {tag} {
     # Add MP compiler flags ?
     if { [option compwrap.add_compiler_flags] } {
         # standard options
-        ui_debug "compiler_wrapper:  -> Will embed standard compiler flags in ${tag} wrapper script"
-        append comp_opts " [compwrap::comp_flags ${tag}]"
+        set flag [compwrap::comp_flags ${tag}]
+        ui_debug "compiler_wrapper:  -> Will embed '${flag}' in ${tag} wrapper script"
+        append comp_opts " ${flag}"
         # isysroot
         if {[option configure.sdkroot] ne "" && \
                 ![option compiler.limit_flags] && \
                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
-            ui_debug "compiler_wrapper:  -> Will embed SDK isysroot in ${tag} wrapper script"
-            append comp_opts " -isysroot[option configure.sdkroot]"
+            set sdk -isysroot[option configure.sdkroot]
+            ui_debug "compiler_wrapper:  -> Will embed '${sdk}' in ${tag} wrapper script"
+            append comp_opts " ${sdk}"
         }
         # pipe
         if { [option configure.pipe] } {
