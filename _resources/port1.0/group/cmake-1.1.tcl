@@ -429,6 +429,14 @@ platform darwin {
                 -DCMAKE_OSX_ARCHITECTURES="${configure.build_arch}"
         }
 
+        # C/C++ standard
+        if {${compiler.cxx_standard} ne ""} {
+            configure.args-append -DCMAKE_CXX_STANDARD=[string range ${compiler.cxx_standard} end-1 end]
+        }
+        if {${compiler.c_standard} ne ""} {
+            configure.args-append -DCMAKE_C_STANDARD=[string range ${compiler.c_standard} end-1 end]
+        }
+
         # Setting our own -arch flags is unnecessary (in the case of a non-universal build) or even
         # harmful (in the case of a universal build, because it causes the compiler identification to
         # fail; see https://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
