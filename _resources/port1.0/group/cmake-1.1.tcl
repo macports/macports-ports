@@ -432,8 +432,8 @@ platform darwin {
         # C/C++ standard
         if {${compiler.cxx_standard} ne ""} {
             # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
-            if {${compiler.c_standard} < 1998} {
-                compiler.c_standard 1990
+            if {${compiler.cxx_standard} < 1998} {
+                compiler.cxx_standard 1998
             }
             configure.args-append -DCMAKE_CXX_STANDARD=[string range ${compiler.cxx_standard} end-1 end]
         }
