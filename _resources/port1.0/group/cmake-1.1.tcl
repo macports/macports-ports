@@ -431,9 +431,19 @@ platform darwin {
 
         # C/C++ standard
         if {${compiler.cxx_standard} ne ""} {
+            # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
+            if {${compiler.c_standard} < 1998} {
+                compiler.c_standard 1990
+            }
             configure.args-append -DCMAKE_CXX_STANDARD=[string range ${compiler.cxx_standard} end-1 end]
         }
         if {${compiler.c_standard} ne ""} {
+            # Base defaults to 1989 which is not valid as a C standard
+            # (at least as far as CMake is concerned)
+            # https://cmake.org/cmake/help/latest/prop_tgt/C_STANDARD.html#prop_tgt:C_STANDARD
+            if {${compiler.c_standard} < 1990} {
+                compiler.c_standard 1990
+            }
             configure.args-append -DCMAKE_C_STANDARD=[string range ${compiler.c_standard} end-1 end]
         }
 
