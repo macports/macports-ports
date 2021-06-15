@@ -120,8 +120,8 @@ proc mpiutil_add_depends_build {subport cname} {
 
     set add_clang90 no
 
-    if {${os.major} <= 12} {
-        # For gcc builds on MacOS 10.8 and earlier, add clang-90 as a build
+    if {(${os.major} >= 10) && (${os.major} <= 12)} {
+        # For gcc builds on MacOS 10.6 through 10.8, add clang-90 as a build
         # dependency. This provides a modern version of 'as', allowing the port
         # to build successfully.
         if {[string match "gcc*" ${cname}]} {
