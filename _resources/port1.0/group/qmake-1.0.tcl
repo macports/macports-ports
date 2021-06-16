@@ -7,24 +7,27 @@
 
 PortGroup                       qt4 1.0
 PortGroup                       active_variants 1.1
+PortGroup                       compiler_wrapper 1.0
 
 options qt4.debug_variant
 default qt4.debug_variant yes
 
 pre-configure {
+    set cc  [compwrap::wrap_compiler cc]
+    set cxx [compwrap::wrap_compiler cxx]
     configure.cmd                   ${qt_qmake_cmd}
     configure.pre_args-delete       --prefix=${prefix}
     configure.pre_args-append       PREFIX=${prefix} \
-                                    "QMAKE_CC=${configure.cc}" \
-                                    "QMAKE_CXX=${configure.cxx}" \
-                                    "QMAKE_OBJC=${configure.objc}" \
+                                    "QMAKE_CC=${cc}" \
+                                    "QMAKE_CXX=${cxx}" \
+                                    "QMAKE_OBJC=[compwrap::wrap_compiler objc]" \
                                     "QMAKE_CFLAGS=\"${configure.cppflags} ${configure.cflags} [get_canonical_archflags cc]\"" \
                                     "QMAKE_CXXFLAGS=\"${configure.cppflags} ${configure.cxxflags} [get_canonical_archflags cxx]\"" \
                                     "QMAKE_LFLAGS=\"${configure.cppflags} ${configure.ldflags}\"" \
-                                    "QMAKE_LINK_C=${configure.cc}" \
-                                    "QMAKE_LINK_C_SHLIB=${configure.cc}" \
-                                    "QMAKE_LINK=${configure.cxx}" \
-                                    "QMAKE_LINK_SHLIB=${configure.cxx}"
+                                    "QMAKE_LINK_C=${cc}" \
+                                    "QMAKE_LINK_C_SHLIB=${cc}" \
+                                    "QMAKE_LINK=${cxx}" \
+                                    "QMAKE_LINK_SHLIB=${cxx}"
     configure.universal_args-delete --disable-dependency-tracking
 
     if {[variant_exists universal] && [variant_isset universal]} {
