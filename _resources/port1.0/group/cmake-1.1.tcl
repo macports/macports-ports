@@ -56,8 +56,8 @@ default cmake_share_module_dir      {${prefix}/share/cmake/Modules}
 default cmake.module_path           {}
 
 # Propagate c/c++ standards to the build
-default cmake.set_c_standard        yes
-default cmake.set_cxx_standard      yes
+default cmake.set_c_standard        no
+default cmake.set_cxx_standard      no
 
 # CMake provides several different generators corresponding to different utilities
 # (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
