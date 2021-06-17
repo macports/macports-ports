@@ -20,6 +20,7 @@ default boost.require_numpy no
 default boost_cache_version_nodot ""
 default boost_cache_depends       ""
 default boost_cache_cpath         ""
+default boost_cache_cppflags      ""
 default boost_cache_cxxflags      ""
 default boost_cache_ldflags       ""
 default boost_cache_cmake_flags   ""
@@ -51,18 +52,22 @@ proc boost::depends_portname {} {
 }
 
 proc boost::cxx_flags {} {
-    return -isystem[boost::include_dir]
+    return -I[boost::include_dir]
 }
 
 proc boost::ld_flags {} {
     return -L[boost::lib_dir]
 }
 
+proc boost::cpp_flags {} {
+    return -I[boost::include_dir]
+}
+
 proc boost::configure_build {} {
     global cmake.build_dir meson.build_type
     global boost_cache_version_nodot boost_cache_depends boost_cache_cxxflags
     global boost_cache_ldflags boost_cache_cmake_flags boost_cache_cmake
-    global boost_cache_env_vars boost_cache_cpath
+    global boost_cache_env_vars boost_cache_cpath boost_cache_cppflags
 
     ui_debug "boost PG: Configure build for boost [boost::version]"
 
@@ -81,14 +86,19 @@ proc boost::configure_build {} {
     }
     
     # Append to the build flags to find the isolated headers/libs
+    if { ${boost_cache_cppflags} ne "" } {
+        configure.cppflags-delete ${boost_cache_cppflags}
+    }
     if { ${boost_cache_cxxflags} ne "" } {
         configure.cxxflags-delete ${boost_cache_cxxflags}
     }
     if { ${boost_cache_ldflags} ne "" } {
         configure.ldflags-delete ${boost_cache_ldflags}
     }
+    set boost_cache_cppflags [boost::cpp_flags]
     set boost_cache_cxxflags [boost::cxx_flags]
     set boost_cache_ldflags  [boost::ld_flags]
+    configure.cppflags-prepend ${boost_cache_cppflags}
     configure.cxxflags-prepend ${boost_cache_cxxflags}
     configure.ldflags-prepend  ${boost_cache_ldflags}
 
