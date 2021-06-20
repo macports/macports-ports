@@ -81,8 +81,6 @@ default compilers.allow_arguments_mismatch no
 if {${os.major} < 10} {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
-} elseif {${os.major} < 11} {
-    set compilers.gcc_default gcc8
 } else {
     set compilers.gcc_default gcc11
 }
@@ -99,10 +97,7 @@ if { ${os.arch} eq "arm" } {
         lappend gcc_versions 5 6 7
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 8
-    }
-    if { ${os.major} >= 11 } {
-        lappend gcc_versions 9 10 11 devel
+        lappend gcc_versions 8 9 10 11 devel
     }
 }
 # GCC version providing the primary runtime
@@ -110,11 +105,7 @@ if { ${os.arch} eq "arm" } {
 if { ${os.major} < 10 } {
     set gcc_main_version 7
 } else {
-    if { ${os.major} < 11 } {
-        set gcc_main_version 8
-    } else {
-        set gcc_main_version 10
-    }
+    set gcc_main_version 11
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
