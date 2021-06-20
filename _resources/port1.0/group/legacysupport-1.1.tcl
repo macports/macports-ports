@@ -135,7 +135,7 @@ proc legacysupport::relink_libSystem { exe } {
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
         set         sLib /usr/lib/libSystem.B.dylib
         set         lLib ${prefix}/lib/libMacportsLegacySystem.B.dylib
-        ui_msg "legacysupport: Relinking ${exe} against ${lLib}"
+        ui_debug "legacysupport: Relinking ${exe} against ${lLib}"
         system "install_name_tool -change ${sLib} ${lLib} ${exe}"
     }
 }
