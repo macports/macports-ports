@@ -104,7 +104,7 @@ proc legacysupport::get_dependency {} {
 }
 
 proc legacysupport::add_once { opt where value } {
-    ui_debug "Will $where $value to $opt"
+    ui_debug "legacysupport: Will $where $value to $opt"
     ${opt}-delete   ${value}
     ${opt}-${where} ${value}
 }
@@ -128,6 +128,16 @@ proc legacysupport::set_label_environment_vars { } {
         set env_name MACPORTS_LEGACY_SUPPORT_ENABLED
     }
     legacysupport::set_phase_env_var ${env_name}=1
+}
+
+proc legacysupport::relink_libSystem { exe } {
+    global os.major prefix
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        set         sLib /usr/lib/libSystem.B.dylib
+        set         lLib ${prefix}/lib/libMacportsLegacySystem.B.dylib
+        ui_debug "legacysupport: Relinking ${exe} against ${lLib}"
+        system "install_name_tool -change ${sLib} ${lLib} ${exe}"
+    }
 }
 
 set ls_cache_incpath  [list]
