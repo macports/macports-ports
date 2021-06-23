@@ -8,7 +8,7 @@
 namespace eval boost { }
 
 options boost.version
-default boost.version 1.76
+default boost.version {[boost::default_version]}
 
 options boost.depends_type
 default boost.depends_type lib
@@ -25,6 +25,16 @@ default boost_cache_cxxflags      ""
 default boost_cache_ldflags       ""
 default boost_cache_cmake_flags   ""
 default boost_cache_env_vars      ""
+
+proc boost::default_version {} {
+    global os.platform os.major
+    # Pin version on Darwin9 and older to pre-c++11 version (1.71)
+    if { ${os.platform} eq "darwin" && ${os.major} <= 9 } {
+        return 1.71
+    } else {
+        return 1.76
+    }
+}
 
 proc boost::version {} {
     return [option boost.version]
