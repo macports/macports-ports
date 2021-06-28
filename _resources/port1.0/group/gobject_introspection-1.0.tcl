@@ -34,7 +34,11 @@ proc gobject_introspection_pg::append_env { phase var } {
 
 proc gobject_introspection_pg::gobject_introspection_setup {} {
     if {![option gobject_introspection]} {
-        configure.args-append       --disable-introspection
+        if { [string match *cmake* [option configure.cmd] ] } {
+            configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=OFF
+        } else {
+            configure.args-append   --disable-introspection
+        }
     } else {
         depends_lib-append          port:gobject-introspection
         platform darwin 8 {
@@ -45,7 +49,11 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
             build.cmd-replace       [portbuild::build_getmaketype] ${prefix_frozen}/bin/gmake
         }
 
-        configure.args-append       --enable-introspection
+        if { [string match *cmake* [option configure.cmd] ] } {
+            configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON            
+        } else {
+            configure.args-append   --enable-introspection
+        }
 
         #########################################################################################
         # In order to get the GObject Introspection system to respect MacPorts settings,
