@@ -1,0 +1,148 @@
+--- pam_oath/configure.ac.orig	2021-05-01 15:10:52.000000000 +0000
++++ pam_oath/configure.ac	2021-06-17 00:32:24.000000000 +0000
+@@ -29,8 +29,7 @@
+ 
+ AC_CHECK_HEADERS([security/pam_appl.h], [],
+   [AC_MSG_ERROR([[PAM header files not found, install libpam-dev.]])])
+-AC_CHECK_HEADERS([security/pam_modutil.h], [],
+-  [AC_MSG_ERROR([[PAM header files not found, install libpam-dev.]])])
++AC_CHECK_HEADERS([security/pam_modutil.h], [], [])
+ AC_CHECK_HEADERS([security/pam_modules.h security/_pam_macros.h], [], [],
+   [#include <security/pam_appl.h>])
+ 
+--- pam_oath/Makefile.am.orig	2021-01-20 17:16:09.000000000 +0000
++++ pam_oath/Makefile.am	2021-06-17 00:43:04.000000000 +0000
+@@ -24,7 +24,7 @@
+ pammoddir = $(PAMDIR)
+ pammod_LTLIBRARIES = pam_oath.la
+ 
+-pam_oath_la_SOURCES = pam_oath.c
++pam_oath_la_SOURCES = pam_oath.c pam_modutil.c pam_modutil.h
+ # XXX add -Wl,-x too?  PAM documentation suggests it.
+ pam_oath_la_LIBADD = ../liboath/liboath.la
+ pam_oath_la_LDFLAGS = -module -avoid-version
+--- pam_oath/pam_oath.c.orig	2021-05-01 15:08:27.000000000 +0000
++++ pam_oath/pam_oath.c	2021-06-17 00:55:11.000000000 +0000
+@@ -21,6 +21,7 @@
+ #include <config.h>
+ 
+ #include "oath.h"
++#include "pam_modutil.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -43,9 +44,6 @@
+ #ifdef HAVE_SECURITY_PAM_APPL_H
+ #include <security/pam_appl.h>
+ #endif
+-#ifdef HAVE_SECURITY_PAM_MODUTIL_H
+-#include <security/pam_modutil.h>
+-#endif
+ #ifdef HAVE_SECURITY_PAM_MODULES_H
+ #include <security/pam_modules.h>
+ #endif
+--- /dev/null	2021-06-17 00:57:01.000000000 +0000
++++ pam_oath/pam_modutil.h	2021-06-17 00:35:45.000000000 +0000
+@@ -0,0 +1,17 @@
++#ifndef PAM_MODUTIL_H
++#define PAM_MODUTIL_H
++
++#ifdef HAVE_SECURITY_PAM_MODUTIL_H
++#include <security/pam_modutil.h>
++#else
++
++#ifdef HAVE_SECURITY_PAM_MODULES_H
++#include <security/pam_modules.h>
++#endif
++
++#include <pwd.h>
++
++struct passwd *pam_modutil_getpwnam(pam_handle_t *pamh, const char *user);
++
++#endif
++#endif
+--- /dev/null	2021-06-17 00:57:01.000000000 +0000
++++ pam_oath/pam_modutil.c	2021-06-17 00:42:06.000000000 +0000
+@@ -0,0 +1,82 @@
++#include <config.h>
++
++#ifndef HAVE_SECURITY_PAM_MODUTIL_H
++
++#include "pam_modutil.h"
++
++#ifdef HAVE_SECURITY_PAM_APPL_H
++#include <security/pam_appl.h>
++#endif
++#ifdef HAVE_SECURITY_PAM_MODULES_H
++#include <security/pam_modules.h>
++#endif
++
++#include <errno.h>
++#include <pwd.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#define PWD_INITIAL_LENGTH      0x400
++#define PWD_ABSURD_PWD_LENGTH   0x4000
++
++void _pam_modutil_cleanup(pam_handle_t *pamh, void *data, int error_status) {
++    if (data) {
++        (void) free(data);
++    }
++}
++
++struct passwd *pam_modutil_getpwnam(pam_handle_t *pamh, const char *user) {
++    void *buffer = NULL;
++    size_t length = PWD_INITIAL_LENGTH;
++    long sc_init_length = sysconf(_SC_GETPW_R_SIZE_MAX);
++
++    if (sc_init_length != -1 && sc_init_length < PWD_ABSURD_PWD_LENGTH) {
++        length = (size_t) sc_init_length;
++    }
++
++    do {
++        int status;
++        void *new_buffer;
++        struct passwd *result = NULL;
++
++        new_buffer = realloc(buffer, sizeof(struct passwd) + length);
++        if (new_buffer == NULL) {
++            // out of memory
++            if (buffer) {
++                free(buffer);
++            }
++            return NULL;
++        }
++        buffer = new_buffer;
++
++        status = getpwnam_r(user, buffer,
++                            sizeof(struct passwd) + (char *) buffer,
++                            length, &result);
++        if (!status && result) {
++            status = pam_set_data(pamh, "_pammodutil_getpwnam", result,
++                                  _pam_modutil_cleanup);
++            if (status == PAM_SUCCESS) {
++                return result;
++            }
++            // unable to set data item
++            free(buffer);
++            return NULL;
++        }
++        if (status != ERANGE) {
++            // no matching record found (if status == 0)
++            // or getpwnam_r encountered an error
++            free(buffer);
++            return NULL;
++        }
++
++        length <<= 1;
++    } while (length < PWD_ABSURD_PWD_LENGTH);
++
++    // exceeded maximum buffer size
++    free(buffer);
++    return NULL;
++}
++#else
++typedef int make_iso_compilers_happy;
++#endif  /* HAVE_SECURITY_PAM_MODUTIL_H */
