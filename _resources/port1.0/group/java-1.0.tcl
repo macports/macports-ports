@@ -35,7 +35,7 @@ pre-fetch {
         # If still not present, error out
         if { ${java_version_not_found} } {
             global os.platform os.major
-            if {${os.platform} eq "darwin" && ${os.major} == 20} {
+            if {${os.platform} eq "darwin" && ${os.major} >= 20} {
                 # The following check is broken on macOS 11 Big Sur so we
                 # temporarily give up on ensuring an exact Java version. See
                 # https://trac.macports.org/ticket/61445
