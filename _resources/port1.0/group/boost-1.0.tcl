@@ -131,7 +131,7 @@ proc boost::configure_build {} {
                                   BOOST_INCLUDEDIR=[boost::include_dir] \
                                  ]
     foreach var ${boost_cache_env_vars} {
-        foreach phase {configure build} {
+        foreach phase {configure build destroot} {
             ${phase}.env-append ${var}
         }
     }
