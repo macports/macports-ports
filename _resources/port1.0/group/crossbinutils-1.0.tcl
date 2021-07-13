@@ -86,8 +86,7 @@ proc crossbinutils.setup {target version} {
         ${target} cross development.
 
     homepage        https://www.gnu.org/software/binutils/binutils.html
-    master_sites    gnu:binutils \
-                    http://mirrors.ibiblio.org/gnu/ftp/gnu/binutils/
+    master_sites    gnu:binutils
     dist_subdir     binutils
     distname        binutils-${version}
     worksrcdir      binutils-[string trimright ${version} {[a-zA-Z]}]
@@ -185,8 +184,4 @@ proc crossbinutils.setup {target version} {
     }
 
     universal_variant no
-
-    livecheck.type  regex
-    livecheck.url   [lindex ${master_sites} 1]
-    livecheck.regex "binutils-((?!.*binutils.*|\\${extract.suffix}).*)\\${extract.suffix}"
 }
