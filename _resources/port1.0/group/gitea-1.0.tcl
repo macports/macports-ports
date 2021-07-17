@@ -52,6 +52,9 @@ proc gitea.setup {gitea_author gitea_project gitea_version {gitea_tag_prefix ""}
 
     if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${gitea.project}))} {
         name                ${gitea.project}
+        dist_subdir         ${gitea.project}
+    } elseif {[info exists PortInfo(name)]} {
+        dist_subdir         ${PortInfo(name)}
     }
 
     version                 ${gitea.version}
