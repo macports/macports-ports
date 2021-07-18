@@ -85,6 +85,10 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup sourcehut 1.0"
             sourcehut.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
+        gitea.com {
+            uplevel "PortGroup gitea 1.0"
+            gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         default {
             if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${go.project}))} {
                 name    ${go.project}
@@ -340,6 +344,8 @@ post-extract {
         if {[file exists [glob -nocomplain ${workpath}/${go.author}-${go.project}-*]]} {
             # GitHub and Bitbucket follow this path
             move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
+        } elseif  {[file exists ${workpath}/${go.project}]} {
+            move ${workpath}/${go.project} ${worksrcpath}
         } else {
             # GitLab follows this path
             move [glob ${workpath}/${go.project}-*] ${worksrcpath}
