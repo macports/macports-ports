@@ -436,8 +436,6 @@ set jnb.za      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "" : "ht
 set jog.id      http
 set kmq.jp      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 set mse.uk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
-# server is (temporarily?) offline
-set nou.nc      ""
 set nue.de      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 set pek.cn      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
 # cert doesn't have macports.org SANs; admin notified
@@ -457,7 +455,6 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${jog.id}://jog.id.distfiles.macports.org/macports/distfiles/:mirror
     ${kmq.jp}://kmq.jp.distfiles.macports.org/:mirror
     ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
-    ${nou.nc}://nou.nc.distfiles.macports.org/pub/macports/distfiles.macports.org/:mirror
     ${nue.de}://nue.de.distfiles.macports.org/:mirror
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
