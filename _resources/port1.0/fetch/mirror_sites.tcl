@@ -149,7 +149,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://mirrors.163.com/cpan/modules/by-module/
     http://mirrors.coreix.net/CPAN/modules/by-module/
     http://mirrors.dotsrc.org/cpan/modules/by-module/
-    http://mirrors.evowise.com/CPAN/modules/by-module/
     https://mirrors.gossamer-threads.com/CPAN/modules/by-module/
     http://mirrors.hostingromania.ro/cpan.org/modules/by-module/
     http://mirrors.ibiblio.org/CPAN/modules/by-module/
@@ -296,7 +295,6 @@ set portfetch::mirror_sites::sites(gentoo) {
     http://mirror.sjc02.svwh.net/gentoo/distfiles/:nosubdir
     http://mirror.yandex.ru/gentoo-distfiles/distfiles/:nosubdir
     http://mirrors.163.com/gentoo/distfiles/:nosubdir
-    http://mirrors.evowise.com/gentoo/distfiles/:nosubdir
     http://mirrors.rit.edu/gentoo/distfiles/:nosubdir
     http://mirrors.soeasyto.com/distfiles.gentoo.org/distfiles/:nosubdir
     http://mirrors.tuna.tsinghua.edu.cn/gentoo/distfiles/:nosubdir
