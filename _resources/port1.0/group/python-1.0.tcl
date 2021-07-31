@@ -295,7 +295,7 @@ proc python_set_pep517 {option action args} {
         return
     }
     global python.pep517 python.version subport name
-    if {$subport ne $name} {
+    if {[info exists python.version]} {
         if {[string is true -strict ${python.pep517}]} {
             depends_build-append    port:py${python.version}-pep517 \
                                     port:py${python.version}-python-install
