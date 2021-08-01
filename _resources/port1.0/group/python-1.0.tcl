@@ -105,7 +105,7 @@ proc python_set_versions {option action args} {
     global name subport python._addedcode
     if {[string match py-* $name]} {
         foreach v [option $option] {
-            subport py${v}[string trimleft $name py] { depends_lib-append port:python${v} }
+            subport py${v}[string trimleft $name py] {}
         }
         if {$subport eq $name || $subport eq ""} {
             # Ensure the stub port does not do anything with distfiles—not
@@ -125,11 +125,10 @@ proc python_set_versions {option action args} {
             }
             extract {}
 
-            # set up py-foo as a stub port that depends on the default pyXY-foo
+            # set up py-foo as a stub port
             supported_archs noarch
-            global python.default_version python.version
+            global python.version
             unset python.version
-            depends_lib port:py${python.default_version}[string trimleft $name py]
             patch {}
             build {}
             destroot {
@@ -260,20 +259,14 @@ proc python_set_default_version {option action args} {
     if {$action ne "set"} {
         return
     }
-    global name subport python.default_version
-    if {[string match py-* $name]} {
-        if {$subport eq $name || $subport eq ""} {
-            depends_lib port:py${python.default_version}[string trimleft $name py]
-        }
-    } else {
-        python.versions ${python.default_version}
-        depends_lib-append port:python[option python.default_version]
+    if {![string match py-* [option name]]} {
+        python.versions [option python.default_version]
     }
 }
 
 
 options python.branch python.prefix python.bin python.lib python.libdir \
-        python.include python.pkgd python.pep517
+        python.include python.pkgd python.pep517 python.add_dependencies
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
 default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
 default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
@@ -289,22 +282,29 @@ default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
 default python.pep517   no
-option_proc python.pep517 python_set_pep517
-proc python_set_pep517 {option action args} {
-    if {$action ne "set"} {
-        return
-    }
-    global python.pep517 python.version subport name
-    if {$subport ne $name} {
-        if {[string is true -strict ${python.pep517}]} {
-            depends_build-append    port:py${python.version}-pep517 \
-                                    port:py${python.version}-python-install
+
+default python.add_dependencies yes
+proc python_add_dependencies {} {
+    if {[option python.add_dependencies]} {
+        global subport python.version python.default_version
+        if {[string match py-* $subport]} {
+            # set up py-foo as a stub port that depends on the default pyXY-foo
+            depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
+            depends_lib-append port:py${python.default_version}[string trimleft $subport py]
         } else {
-            depends_build-delete    port:py${python.version}-pep517 \
-                                    port:py${python.version}-python-install
+            depends_lib-delete port:python${python.version}
+            depends_lib-append port:python${python.version}
+            if {[option python.pep517]} {
+                depends_build-delete    port:py${python.version}-pep517 \
+                                        port:py${python.version}-python-install
+                depends_build-append    port:py${python.version}-pep517 \
+                                        port:py${python.version}-python-install
+            }
         }
     }
 }
+port::register_callback python_add_dependencies
+
 
 proc python_get_defaults {var} {
     global python.version python.branch python.prefix python.bin python.pep517 workpath
