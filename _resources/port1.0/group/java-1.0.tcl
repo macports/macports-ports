@@ -50,6 +50,7 @@ proc find_java_home {} {
 
     global java.version java.fallback
     if { ${java.version} ne "" } {
+        ui_debug "java-portgroup: Trying to find JVM version: ${java.version}"
 
         # If on arm automatically adjust to the *-zulu fallback versions
         # as required, as currently these are the only ones supporting arm.
@@ -80,7 +81,7 @@ proc find_java_home {} {
             set java_version_not_found yes
         } else {
             set home_value $val
-            ui_debug "Discovered JAVA_HOME via /usr/libexec/java_home: $home_value"
+            ui_debug "java-portgroup: Discovered matching JAVA_HOME: $home_value"
         }
     }
 
@@ -141,7 +142,7 @@ proc get_jvm_bigsur { version_requested } {
     set version_requested [regsub {^1\.} $version_requested ""]
     # Sort the JVMs we found on the system descending
     set versions_found [sort_dict [find_jvm_versions]]
-    ui_debug "Big Sur Workaround - Detected JVMs: $versions_found"
+    ui_debug "java-portgroup: Detected JVMs: $versions_found"
     # Match the systems JVMs with the one requested by MacPorts
     # Higher JVM Versions win
     return [match_jvm_version $version_requested $versions_found]
