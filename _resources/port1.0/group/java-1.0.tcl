@@ -148,7 +148,9 @@ proc get_jvm_bigsur { version_requested } {
 }
 
 # Find JVM versions by using /usr/libexec/java_home -V (not -v!)
-# Returns a dict of unique(!) major versions [major_version path]
+# Returns a dict with unique major versions as key and the corresponding
+# java_home as value:
+#  dict[major_version]=java_home
 proc find_jvm_versions {} {
     if {[catch {exec /usr/libexec/java_home -V} result options]} {
         # Extract JVM versions and corresponding JAVA_HOMEs
@@ -183,33 +185,51 @@ proc match_jvm_version { version_requested versions_found } {
     }
 }
 
-proc match_equal { version version_list } {
-    foreach vl_item [dict keys $version_list] {
-        if {$version == $vl_item} {
-            set java_home [dict get $version_list $vl_item]
-            return $java_home
+# Returns the value of the first dictionary entry
+# whose key is equal to search_key.
+#
+# @param search_key The key that is to be found in the dictionary
+# @param target_dict The dictionary which should be searched for search_key
+# @return The value of the first entry that matched.
+# Returns an error, if no such entry is found.
+proc match_equal { search_key target_dict } {
+    foreach td_key [dict keys $target_dict] {
+        if {$search_key == $td_key} {
+            set ret_value [dict get $target_dict $td_key]
+            return $ret_value
         }
     }
     return -code error
 }
 
-proc match_less_equal { version version_list } {
-    foreach vl_item [dict keys $version_list] {
-        if {$version <= $vl_item} {
-            set java_home [dict get $version_list $vl_item]
-            return $java_home
+# Returns the value of the first dictionary entry
+# whose key is less or equal to search_key.
+#
+# @param search_key The key that is to be found in the dictionary
+# @param target_dict The dictionary which should be searched for search_key
+# @return The value of the first entry that matched.
+# Returns an error, if no such entry is found.
+proc match_less_equal { search_key target_dict } {
+    foreach td_key [dict keys $target_dict] {
+        if {$search_key <= $td_key} {
+            set ret_value [dict get $target_dict $td_key]
+            return $ret_value
         }
     }
     return -code error
 }
 
+# Sorts a dictionary decreasing by its keys
+#
+# @param The dictionary that is to be sorted decreasing by its keys
+# @return A sorted dictionary
 proc sort_dict { unsorted_dict } {
-    set dkeys [dict keys $unsorted_dict]
-    set dkeys_sorted [lsort -decreasing $dkeys]
+    set keys_unsorted [dict keys $unsorted_dict]
+    set keys_sorted [lsort -decreasing $keys_unsorted]
 
-    foreach place $dkeys_sorted {
-        set jvm_path [dict get $unsorted_dict $place]
-        dict append version_path_dict $place $jvm_path
+    foreach key $keys_sorted {
+        set value [dict get $unsorted_dict $key]
+        dict append sorted_dict $key $value
     }
-    return $version_path_dict
+    return $sorted_dict
 }
