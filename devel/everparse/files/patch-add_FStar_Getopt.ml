@@ -103,15 +103,16 @@
 +
 +let cmdline () =
 +   Array.to_list (Sys.argv)
---- src/3d/ocaml/Makefile.orig	2021-05-11 15:12:47.000000000 -0600
-+++ src/3d/ocaml/Makefile	2021-05-11 15:13:07.000000000 -0600
-@@ -12,9 +12,6 @@
- 	ocamlbuild -I generated -tag debug -use-menhir -tag thread -use-ocamlfind -quiet -pkg batteries -pkg menhirLib -pkg fstarlib -pkg process -pkg hacl-star -pkg yojson -cflags -w,-8 Main.native
- 	touch $@
+--- src/3d/ocaml/Makefile.orig	2021-08-24 12:06:57.000000000 -0600
++++ src/3d/ocaml/Makefile	2021-08-24 12:08:30.000000000 -0600
+@@ -10,10 +10,6 @@
+ all: generated/FStar_Getopt.ml $(filter-out %~,$(wildcard *.ml*)) dune
+ 	dune build
  
 -generated/FStar_Getopt.ml: $(FSTAR_HOME)/src/basic/ml/FStar_Getopt.ml
+-	mkdir -p $(dir $@)
 -	cp $^ $@
 -
- clean:
- 	rm -rf _build generated *~
+ clean-local:
+ 	rm -rf _build *~ dune dune.tmp
  
