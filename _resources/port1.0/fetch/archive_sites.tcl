@@ -16,6 +16,7 @@ set aarnet.au   http
 set atl.us      http
 set cph.dk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set cjj.kr      http
+set ema.uk      https
 # cert doesn't have macports.org SANs; admin notified
 #set fco.it      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
 set fco.it      http
@@ -37,6 +38,7 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${nue.de}://nue.de.packages.macports.org/:nosubdir
     ${atl.us}://atl.us.packages.macports.org/:nosubdir
     ${cph.dk}://cph.dk.packages.macports.org/:nosubdir
+    ${ema.uk}://ema.uk.packages.macports.org/:nosubdir
     ${fco.it}://fco.it.packages.macports.org/:nosubdir
     ${fra.de}://fra.de.packages.macports.org/:nosubdir
     ${jnb.za}://jnb.za.packages.macports.org/packages/:nosubdir
