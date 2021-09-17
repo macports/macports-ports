@@ -127,6 +127,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                     if {${luarocks.branch} eq "5.1"} {
                         depends_lib-replace port:lua${luarocks.suffix} path:lib/libluajit-5.1.2.dylib:luajit
                     }
+                    livecheck.type none
                 }
             }
             if {$subport eq $name} {
