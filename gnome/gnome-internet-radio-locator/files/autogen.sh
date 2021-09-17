@@ -13,7 +13,8 @@ PKG_NAME="gnome-internet-radio-locator"
 }
 
 which gnome-autogen.sh || {
-    echo "You need to install gnome-common from the GNOME CVS"
+    echo "You need to install gnome-common from GNOME Git"
+    echo "https://gitlab.gnome.org/GNOME/gnome-common.git"
     exit 1
 }
 
