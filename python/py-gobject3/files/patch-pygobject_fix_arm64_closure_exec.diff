@@ -1,0 +1,620 @@
+From 01013b1003bac67061e595cd857be9cf7b69d7fd Mon Sep 17 00:00:00 2001
+From: Su Yue <l@damenly.su>
+Date: Fri, 3 Sep 2021 20:38:20 +0800
+Subject: [PATCH] Hack for segmentation faults on Apple Silicon(Macos arm64)
+
+There are bugs in pyobject and gobject-introspection.
+The API g_callable_info_prepare_closure() only returns the address
+of exec not closure.
+On linux arm64 and x86_64 platforms, exec address is same as
+closure. However, on Macos arm64, it is not true. Then segmentation
+fault happens while calling g_callable_info_free_closure() on exec ptr.
+
+Try the C code:
+
+========================================================================
+
+void puts_binding(ffi_cif *cif, void *ret, void* args[],
+                  void *stream)
+{
+  *(ffi_arg *)ret = fputs(*(char **)args[0], (FILE *)stream);
+}
+
+typedef int (*puts_t)(char *);
+
+int main()
+{
+  ffi_cif cif;
+  ffi_type *args[1];
+  ffi_closure *closure;
+
+  void *bound_puts;
+  int rc;
+
+  /* Allocate closure and bound_puts */
+  closure = ffi_closure_alloc(sizeof(ffi_closure), &bound_puts);
+
+  if (closure)
+    {
+      /* Initialize the argument info vectors */
+      args[0] = &ffi_type_pointer;
+
+      /* Initialize the cif */
+      if (ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 1,
+                       &ffi_type_sint, args) == FFI_OK)
+        {
+          /* Initialize the closure, setting stream to stdout */
+          if (ffi_prep_closure_loc(closure, &cif, puts_binding,
+                                   stdout, bound_puts) == FFI_OK)
+            {
+              rc = ((puts_t)bound_puts)("");
+              /* rc now holds the result of the call to fputs */
+            }
+        }
+
+  printf("closure:%p exec: %p\n", closure, bound_puts);
+  /* Deallocate both closure, and bound_puts */
+  ffi_closure_free(closure);
+
+  return 0;
+}
+========================================================================
+
+I tried to fix it but there are some bugs in pyobject which also cause
+segmentation faults.
+
+I'm not a pundit in these messy code so just do hacks in pyobject to
+fix it.
+
+Link: https://gitlab.gnome.org/GNOME/pygobject/-/issues/455
+Link: https://github.com/jeffreywildman/homebrew-virt-manager/pull/166#issuecomment-911881113
+Signed-off-by: Su Yue <l@damenly.su>
+---
+ gi/girffi_alter.h | 485 ++++++++++++++++++++++++++++++++++++++++++++++
+ gi/pygi-closure.c |  12 +-
+ gi/pygi-closure.h |   3 +
+ 3 files changed, 496 insertions(+), 4 deletions(-)
+ create mode 100644 gi/girffi_alter.h
+
+diff --git a/gi/girffi_alter.h b/gi/girffi_alter.h
+new file mode 100644
+index 00000000..b8b7f2f0
+--- /dev/null
++++ b/gi/girffi_alter.h
+@@ -0,0 +1,485 @@
++/* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*-
++ * GObject introspection: Helper functions for ffi integration
++ *
++ * Copyright (C) 2008 Red Hat, Inc
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the
++ * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
++ * Boston, MA 02111-1307, USA.
++ */
++
++#ifndef __GIRFFI_ALTER_H__
++#define __GIRFFI_ALTER_H__
++
++#include <ffi.h>
++#include <girffi.h>
++#include <gitypes.h>
++
++#define INVALID_REFCOUNT 0x7FFFFFFF
++
++struct _GITypelib {
++  /* <private> */
++  guchar *data;
++  gsize len;
++  gboolean owns_memory;
++  GMappedFile *mfile;
++  GList *modules;
++  gboolean open_attempted;
++};
++
++typedef struct {
++  ffi_closure ffi_closure;
++  gpointer writable_self;
++} GIClosureWrapper;
++
++typedef void (*GIFFIClosureCallback) (ffi_cif *,
++                                      void *,
++                                      void **,
++                                      void *);
++
++struct _GIRealInfo
++{
++  /* Keep this part in sync with GIUnresolvedInfo below */
++  gint32 type;
++  volatile gint ref_count;
++  GIRepository *repository;
++  GIBaseInfo *container;
++
++  /* Resolved specific */
++
++  GITypelib *typelib;
++  guint32 offset;
++
++  guint32 type_is_embedded : 1; /* Used by GITypeInfo */
++  guint32 reserved : 31;
++
++  gpointer reserved2[4];
++};
++
++typedef struct {
++  gchar   magic[16];
++  guint8  major_version;
++  guint8  minor_version;
++  guint16 reserved;
++  guint16 n_entries;
++  guint16 n_local_entries;
++  guint32 directory;
++  guint32 n_attributes;
++  guint32 attributes;
++
++  guint32 dependencies;
++
++  guint32 size;
++  guint32 namespace;
++  guint32 nsversion;
++  guint32 shared_library;
++  guint32 c_prefix;
++
++  guint16 entry_blob_size;
++  guint16 function_blob_size;
++  guint16 callback_blob_size;
++  guint16 signal_blob_size;
++  guint16 vfunc_blob_size;
++  guint16 arg_blob_size;
++  guint16 property_blob_size;
++  guint16 field_blob_size;
++  guint16 value_blob_size;
++  guint16 attribute_blob_size;
++  guint16 constant_blob_size;
++  guint16 error_domain_blob_size;
++
++  guint16 signature_blob_size;
++  guint16 enum_blob_size;
++  guint16 struct_blob_size;
++  guint16 object_blob_size;
++  guint16 interface_blob_size;
++  guint16 union_blob_size;
++
++  guint32 sections;
++
++  guint16 padding[6];
++} Header;
++
++typedef struct _GIRealInfo GIRealInfo;
++/**
++ * FunctionBlob:
++ * @blob_type: #BLOB_TYPE_FUNCTION
++ * @deprecated: The function is deprecated.
++ * @setter: The function is a setter for a property. Language bindings may
++ *   prefer to not bind individual setters and rely on the generic
++ *   g_object_set().
++ * @getter: The function is a getter for a property. Language bindings may
++ *   prefer to not bind individual getters and rely on the generic
++ *   g_object_get().
++ * @constructor: The function acts as a constructor for the object it is
++ *   contained in.
++ * @wraps_vfunc: The function is a simple wrapper for a virtual function.
++ * @throws: This is now additionally stored in the #SignatureBlob. (deprecated)
++ * @index: Index of the property that this function is a setter or getter of
++ *   in the array of properties of the containing interface, or index
++ *   of the virtual function that this function wraps.
++ * @name: TODO
++ * @symbol: The symbol which can be used to obtain the function pointer with
++ *   dlsym().
++ * @signature: Offset of the SignatureBlob describing the parameter types and the
++ *   return value type.
++ * @is_static: The function is a "static method"; in other words it's a pure
++ *   function whose name is conceptually scoped to the object.
++ * @reserved: Reserved for future use.
++ * @reserved2: Reserved for future use.
++ *
++ * TODO
++ */
++typedef struct {
++  guint16 blob_type;  /* 1 */
++
++  guint16 deprecated  : 1;
++  guint16 setter      : 1;
++  guint16 getter      : 1;
++  guint16 constructor : 1;
++  guint16 wraps_vfunc : 1;
++  guint16 throws      : 1;
++  guint16 index       :10;
++  /* Note the bits above need to match CommonBlob
++   * and are thus exhausted, extend things using
++   * the reserved block below. */
++
++  guint32 name;
++  guint32 symbol;
++  guint32 signature;
++
++  guint16 is_static   : 1;
++  guint16 reserved    : 15;
++  guint16 reserved2   : 16;
++} FunctionBlob;
++
++typedef struct {
++  guint32 name;
++
++  guint16 must_chain_up           : 1;
++  guint16 must_be_implemented     : 1;
++  guint16 must_not_be_implemented : 1;
++  guint16 class_closure           : 1;
++  guint16 throws                  : 1;
++  guint16 reserved                :11;
++  guint16 signal;
++
++  guint16 struct_offset;
++  guint16 invoker : 10; /* Number of bits matches @index in FunctionBlob */
++  guint16 reserved2 : 6;
++
++  guint32 reserved3;
++  guint32 signature;
++} VFuncBlob;
++
++typedef struct {
++  guint16 blob_type;  /* 2 */
++
++  guint16 deprecated : 1;
++  guint16 reserved   :15;
++  guint32 name;
++  guint32 signature;
++} CallbackBlob;
++
++/**
++ * SignalBlob:
++ * @deprecated: TODO
++ * @run_first: TODO
++ * @run_last: TODO
++ * @run_cleanup: TODO
++ * @no_recurse: TODO
++ * @detailed: TODO
++ * @action: TODO
++ * @no_hooks: The flags used when registering the signal.
++ * @has_class_closure: Set if the signal has a class closure.
++ * @true_stops_emit: Whether the signal has true-stops-emit semantics
++ * @reserved: Reserved for future use.
++ * @class_closure: The index of the class closure in the list of virtual
++ *   functions of the object or interface on which the signal is defined.
++ * @name: The name of the signal.
++ * @reserved2: Reserved for future use.
++ * @signature: Offset of the SignatureBlob describing the parameter types
++ *   and the return value type.
++ *
++ * TODO
++ */
++typedef struct {
++  guint16 deprecated        : 1;
++  guint16 run_first         : 1;
++  guint16 run_last          : 1;
++  guint16 run_cleanup       : 1;
++  guint16 no_recurse        : 1;
++  guint16 detailed          : 1;
++  guint16 action            : 1;
++  guint16 no_hooks          : 1;
++  guint16 has_class_closure : 1;
++  guint16 true_stops_emit   : 1;
++  guint16 reserved          : 6;
++
++  guint16 class_closure;
++
++  guint32 name;
++
++  guint32 reserved2;
++
++  guint32 signature;
++} SignalBlob;
++
++static guint32
++signature_offset (GICallableInfo *info)
++{
++  GIRealInfo *rinfo = (GIRealInfo*)info;
++  int sigoff = -1;
++
++  switch (rinfo->type)
++    {
++    case GI_INFO_TYPE_FUNCTION:
++      sigoff = G_STRUCT_OFFSET (FunctionBlob, signature);
++      break;
++    case GI_INFO_TYPE_VFUNC:
++      sigoff = G_STRUCT_OFFSET (VFuncBlob, signature);
++      break;
++    case GI_INFO_TYPE_CALLBACK:
++      sigoff = G_STRUCT_OFFSET (CallbackBlob, signature);
++      break;
++    case GI_INFO_TYPE_SIGNAL:
++      sigoff = G_STRUCT_OFFSET (SignalBlob, signature);
++      break;
++    default:
++      g_assert_not_reached ();
++    }
++  if (sigoff >= 0)
++    return *(guint32 *)&rinfo->typelib->data[rinfo->offset + sigoff];
++  return 0;
++}
++
++void
++_g_info_init (GIRealInfo     *info,
++              GIInfoType      type,
++              GIRepository   *repository,
++              GIBaseInfo     *container,
++              GITypelib       *typelib,
++              guint32         offset)
++{
++  memset (info, 0, sizeof (GIRealInfo));
++
++  /* Invalid refcount used to flag stack-allocated infos */
++  info->ref_count = INVALID_REFCOUNT;
++  info->type = type;
++
++  info->typelib = typelib;
++  info->offset = offset;
++
++  if (container)
++    info->container = container;
++
++  g_assert (G_IS_IREPOSITORY (repository));
++  info->repository = repository;
++}
++
++/**
++ * g_callable_info_load_arg:
++ * @info: a #GICallableInfo
++ * @n: the argument index to fetch
++ * @arg: (out caller-allocates): Initialize with argument number @n
++ *
++ * Obtain information about a particular argument of this callable; this
++ * function is a variant of g_callable_info_get_arg() designed for stack
++ * allocation.
++ *
++ * The initialized @arg must not be referenced after @info is deallocated.
++ */
++void
++g_callable_info_load_arg (GICallableInfo *info,
++                          gint            n,
++                          GIArgInfo      *arg)
++{
++  GIRealInfo *rinfo = (GIRealInfo *)info;
++  Header *header;
++  gint offset;
++
++  g_return_if_fail (info != NULL);
++  g_return_if_fail (GI_IS_CALLABLE_INFO (info));
++
++  offset = signature_offset (info);
++  header = (Header *)rinfo->typelib->data;
++
++  _g_info_init ((GIRealInfo*)arg, GI_INFO_TYPE_ARG, rinfo->repository, (GIBaseInfo*)info, rinfo->typelib,
++                offset + header->signature_blob_size + n * header->arg_blob_size);
++}
++
++/**
++ * g_callable_info_get_ffi_arg_types:
++ * @callable_info: a callable info from a typelib
++ * @n_args_p: (out): The number of arguments
++ *
++ * TODO
++ *
++ * Returns: an array of ffi_type*. The array itself
++ * should be freed using g_free() after use.
++ */
++static ffi_type **
++g_callable_info_get_ffi_arg_types (GICallableInfo *callable_info,
++                                   int            *n_args_p)
++{
++    ffi_type **arg_types;
++    gboolean is_method, throws;
++    gint n_args, n_invoke_args, i, offset;
++
++    g_return_val_if_fail (callable_info != NULL, NULL);
++
++    n_args = g_callable_info_get_n_args (callable_info);
++    is_method = g_callable_info_is_method (callable_info);
++    throws = g_callable_info_can_throw_gerror (callable_info);
++    offset = is_method ? 1 : 0;
++
++    n_invoke_args = n_args;
++
++    if (is_method)
++      n_invoke_args++;
++    if (throws)
++      n_invoke_args++;
++
++    if (n_args_p)
++      *n_args_p = n_invoke_args;
++
++    arg_types = (ffi_type **) g_new0 (ffi_type *, n_invoke_args + 1);
++
++    if (is_method)
++      arg_types[0] = &ffi_type_pointer;
++    if (throws)
++      arg_types[n_invoke_args - 1] = &ffi_type_pointer;
++
++    for (i = 0; i < n_args; ++i)
++      {
++        GIArgInfo arg_info;
++        GITypeInfo arg_type;
++
++        g_callable_info_load_arg (callable_info, i, &arg_info);
++        g_arg_info_load_type (&arg_info, &arg_type);
++        switch (g_arg_info_get_direction (&arg_info))
++          {
++            case GI_DIRECTION_IN:
++              arg_types[i + offset] = g_type_info_get_ffi_type (&arg_type);
++              break;
++            case GI_DIRECTION_OUT:
++            case GI_DIRECTION_INOUT:
++              arg_types[i + offset] = &ffi_type_pointer;
++              break;
++            default:
++              g_assert_not_reached ();
++          }
++      }
++
++    arg_types[n_invoke_args] = NULL;
++
++    return arg_types;
++}
++
++/**
++ * g_callable_info_get_ffi_return_type:
++ * @callable_info: a callable info from a typelib
++ *
++ * Fetches the ffi_type for a corresponding return value of
++ * a #GICallableInfo
++ *
++ * Returns: the ffi_type for the return value
++ */
++static ffi_type *
++g_callable_info_get_ffi_return_type (GICallableInfo *callable_info)
++{
++  GITypeInfo *return_type;
++  ffi_type *return_ffi_type;
++
++  g_return_val_if_fail (callable_info != NULL, NULL);
++
++  return_type = g_callable_info_get_return_type (callable_info);
++  return_ffi_type = g_type_info_get_ffi_type (return_type);
++  g_base_info_unref((GIBaseInfo*)return_type);
++
++  return return_ffi_type;
++}
++
++/**
++ * g_callable_info_prepare_closure:
++ * @callable_info: a callable info from a typelib
++ * @cif: a ffi_cif structure
++ * @callback: the ffi callback
++ * @user_data: data to be passed into the callback
++ * @exec_ret: if no NULL, return with exec address
++ *
++ * Prepares a callback for ffi invocation.
++ * Used for arm64(Apple Silicon).
++ *
++ * Returns: the ffi_closure or NULL on error. The return value
++ *     should be freed by calling g_callable_info_free_closure().
++ */
++ffi_closure *
++g_callable_info_prepare_closure_v2 (GICallableInfo       *callable_info,
++				    ffi_cif              *cif,
++				    GIFFIClosureCallback  callback,
++				    gpointer              user_data,
++				    gpointer              *exec_ret)
++{
++  gpointer exec_ptr;
++  int n_args;
++  ffi_type **atypes;
++  GIClosureWrapper *closure;
++  ffi_status status;
++
++  if (callable_info == NULL)
++	  return NULL;
++  if (cif == NULL)
++	  return NULL;
++  if (callback == NULL)
++	  return NULL;
++
++  closure = ffi_closure_alloc (sizeof (GIClosureWrapper), &exec_ptr);
++  if (!closure)
++    {
++      g_warning ("could not allocate closure\n");
++      return NULL;
++    }
++
++  closure->writable_self = closure;
++
++  atypes = g_callable_info_get_ffi_arg_types (callable_info, &n_args);
++  status = ffi_prep_cif (cif, FFI_DEFAULT_ABI, n_args,
++                         g_callable_info_get_ffi_return_type (callable_info),
++                         atypes);
++  if (status != FFI_OK)
++    {
++      g_warning ("ffi_prep_cif failed: %d\n", status);
++      ffi_closure_free (closure);
++      return NULL;
++    }
++
++  status = ffi_prep_closure_loc (&closure->ffi_closure, cif, callback, user_data, exec_ptr);
++  if (status != FFI_OK)
++    {
++      g_warning ("ffi_prep_closure failed: %d\n", status);
++      ffi_closure_free (closure);
++      return NULL;
++    }
++
++  if (exec_ret)
++	  *exec_ret = exec_ptr;
++  /* For Macos arm64, the underlying memory is no sam as closure,
++   * calling g_callable_info_free_closure() on it will cause a
++   * segmentation fault.
++   */
++  return (ffi_closure *)closure;
++}
++
++#endif /* __GIRFFI_ALTER_H__ */
+diff --git a/gi/pygi-closure.c b/gi/pygi-closure.c
+index 136eec64..49c425ae 100644
+--- a/gi/pygi-closure.c
++++ b/gi/pygi-closure.c
+@@ -23,6 +23,7 @@
+ #include "pygi-invoke.h"
+ #include "pygi-ccallback.h"
+ #include "pygi-info.h"
++#include "girffi_alter.h"
+ 
+ extern PyObject *_PyGIDefaultArgPlaceholder;
+ 
+@@ -633,7 +634,7 @@ void _pygi_invoke_closure_free (gpointer data)
+     PyGICClosure* invoke_closure = (PyGICClosure *) data;
+ 
+     g_callable_info_free_closure (invoke_closure->info,
+-                                  invoke_closure->closure);
++                                  invoke_closure->func);
+ 
+     if (invoke_closure->info)
+         g_base_info_unref ( (GIBaseInfo*) invoke_closure->info);
+@@ -671,9 +672,12 @@ _pygi_make_native_closure (GICallableInfo* info,
+     Py_XINCREF (closure->user_data);
+ 
+     fficlosure =
+-        g_callable_info_prepare_closure (info, &closure->cif, _pygi_closure_handle,
+-                                         closure);
+-    closure->closure = fficlosure;
++        g_callable_info_prepare_closure_v2 (info, &closure->cif, _pygi_closure_handle,
++                                         closure, &closure->func);
++
++    /* temp fix */
++    closure->closure = closure->func;
++    closure->func = fficlosure;
+ 
+     /* Give the closure the information it needs to determine when
+        to free itself later */
+diff --git a/gi/pygi-closure.h b/gi/pygi-closure.h
+index 30da2cf7..99173ca0 100644
+--- a/gi/pygi-closure.h
++++ b/gi/pygi-closure.h
+@@ -35,6 +35,9 @@ typedef struct _PyGICClosure
+     PyObject *function;
+ 
+     ffi_closure *closure;
++
++    void *func;
++
+     ffi_cif cif;
+ 
+     GIScopeType scope;
