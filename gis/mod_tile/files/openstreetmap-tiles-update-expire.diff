@@ -1,0 +1,159 @@
+--- openstreetmap-tiles-update-expire.orig	2021-09-16 18:07:30.000000000 +0100
++++ openstreetmap-tiles-update-expire	2021-09-22 19:07:57.000000000 +0100
+@@ -4,13 +4,33 @@
+ 
+ #*************************************************************************
+ #*************************************************************************
+-OSMOSIS_BIN=osmosis
+-OSM2PGSQL_BIN=osm2pgsql
+-OSM2PGSQL_OPTIONS=
+-#OSM2PGSQL_OPTIONS="--flat-nodes /path/to/flatnodes --hstore"
++PREFIX="${PREFIX:-/usr/local}"
++if [ -r ${PREFIX}/etc/mod_tile/osm-tiles-update.conf ]; then
++    source ${PREFIX}/etc/mod_tile/osm-tiles-update.conf
++fi
++
++# **Note:** Changes merged in from git commit
++# `dd3c843697cfef8100c05312237d1d63ee44ffde` on the `switch2osm`
++# branch, of <https://github.com/SomeoneElseOSM/mod_tile.git>.
++
++#------------------------------------------------------------------------------
++# AJT - change directory to mod_tile directory so that we can run replag
++# and other things directly from this script when run from cron.
++# Change the actual location to wherever installed locally.
++#------------------------------------------------------------------------------
++ACCOUNT="${GIS_USER:-nobody}"
++OSMOSIS_BIN=${PREFIX}/bin/osmosis
++OSM2PGSQL_BIN=${PREFIX}/bin/osm2pgsql
++OSM2PGSQL_RAM="${OSM2PGSQL_RAM:-4096}"
++OSM2PGSQL_CPUS="${OSM2PGSQL_CPUS:-4}"
++DBNAME="${GIS_DB:-gis}"
++OSM2PGSQL_OPTIONS="-d $DBNAME -G --hstore --tag-transform-script ${PREFIX}/share/openstreetmap-carto/openstreetmap-carto.lua --number-processes $OSM2PGSQL_CPUS -S ${PREFIX}/share/openstreetmap-carto/openstreetmap-carto.style -C $OSM2PGSQL_RAM"
++TRIM_BIN=${PREFIX}/share/trim_osc/trim_osc.py
++TRIM_OPTIONS="-d $DBNAME --user $ACCOUNT"
++TRIM_REGION_OPTIONS="${TRIM_REGION_OPTIONS:--p region.poly}"
+ 
+-BASE_DIR=/var/lib/mod_tile
+-LOG_DIR=/var/log/tiles/
++BASE_DIR=${PREFIX}/var/lib/mod_tile
++LOG_DIR=${PREFIX}/var/log/renderd
+ WORKOSM_DIR=$BASE_DIR/.osmosis
+ 
+ LOCK_FILE=/tmp/openstreetmap-update-expire-lock.txt
+@@ -21,14 +41,26 @@
+ OSMOSISLOG=$LOG_DIR/osmosis.log
+ PGSQLLOG=$LOG_DIR/osm2pgsql.log
+ EXPIRYLOG=$LOG_DIR/expiry.log
+-RUNLOG=$LOG_DIR/run.log
++RUNLOG=$LOG_DIR/tile-update.log
+ 
+-EXPIRY_MINZOOM=10
+-EXPIRY_MAXZOOM=18
++#------------------------------------------------------------------------------
++# The tile expiry section below can re-render, delete or dirty expired tiles.
++# By default, tiles between EXPIRY_MINZOOM and EXPIRY_MAXZOOM are rerendered.
++# "render_expired" can optionally delete (and/or dirty) tiles above a certail
++# threshold rather than rendering them.
++# Here we expire (but don't immediately rerender) tiles between zoom levels 
++# 13 and 18 and delete between 19 and 20.
++#------------------------------------------------------------------------------
++EXPIRY_MINZOOM=13
++EXPIRY_TOUCHFROM=13
++EXPIRY_DELETEFROM=19
++EXPIRY_MAXZOOM=20
+ 
+ #*************************************************************************
+ #*************************************************************************
+ 
++cd "$BASE_DIR"
++
+ m_info()
+ {
+         echo "[`date +"%Y-%m-%d %H:%M:%S"`] $$ $1" >> "$RUNLOG"
+@@ -76,6 +108,8 @@
+     mkdir $WORKOSM_DIR
+     $OSMOSIS_BIN --read-replication-interval-init workingDirectory=$WORKOSM_DIR 1>&2 2> "$OSMOSISLOG"
+     wget "https://replicate-sequences.osm.mazdermind.de/?"$1"T00:00:00Z" -O $WORKOSM_DIR/state.txt
++    mv $WORKOSM_DIR/configuration.txt $WORKOSM_DIR/configuration_orig.txt
++    sed "s!baseUrl=http://planet.openstreetmap.org/replication/minute!baseUrl=https://planet.openstreetmap.org/replication/minute!" $WORKOSM_DIR/configuration_orig.txt > $WORKOSM_DIR/configuration.txt
+ else
+ # make sure the lockfile is removed when we exit and then claim it
+ 
+@@ -89,9 +123,13 @@
+         exit 2
+     fi
+ 
++    if [ ! -r $WORKOSM_DIR/state.txt ];then
++        m_error "The Osmosis replication system has not yet been initialised"
++    fi
++
+     seq=`cat $WORKOSM_DIR/state.txt | grep sequenceNumber | cut -d= -f2`
+ 
+-    m_ok "start import from seq-nr $seq, replag is `osmosis-db_replag -h`"
++    m_ok "start import from seq-nr $seq, replag is `${PREFIX}/share/mod_tile/osmosis-db_replag -h`"
+ 
+     /bin/cp $WORKOSM_DIR/state.txt $WORKOSM_DIR/last.state.txt
+     m_ok "downloading diff"
+@@ -99,22 +137,56 @@
+     if ! $OSMOSIS_BIN --read-replication-interval workingDirectory=$WORKOSM_DIR --simplify-change --write-xml-change $CHANGE_FILE 1>&2 2> "$OSMOSISLOG"; then
+         m_error "Osmosis error"
+     fi
+-    
++
++    if [ -x "$TRIM_BIN" ] && [ -n "$TRIM_REGION_OPTIONS" ] ; then
++	m_ok "filtering diff"
++	if ! $TRIM_BIN $TRIM_OPTIONS $TRIM_REGION_OPTIONS  -z $CHANGE_FILE $CHANGE_FILE 1>&2 2>> "$RUNLOG"; then
++	    m_ok "Trim_osc error but continue anyway"
++	fi
++    fi
++
+     m_ok "importing diff"
+-    EXPIRY_METAZOOM=`expr $EXPIRY_MAXZOOM - 3`
+-    if ! $OSM2PGSQL_BIN -a --slim -e$EXPIRY_METAZOOM:$EXPIRY_METAZOOM $OSM2PGSQL_OPTIONS -o "$EXPIRY_FILE.$$" $CHANGE_FILE 1>&2 2> "$PGSQLLOG"; then
++#------------------------------------------------------------------------------
++# Previously openstreetmap-tiles-update-expire tried to dirty layer
++# "$EXPIRY_MAXZOOM - 3" (which was 15) only.  Instead we write all expired
++# tiles in range to the list (note the "-" rather than ":" in the "-e"
++# parameter).
++#------------------------------------------------------------------------------
++    if ! $OSM2PGSQL_BIN -a --slim -e$EXPIRY_MINZOOM-$EXPIRY_MAXZOOM $OSM2PGSQL_OPTIONS -o "$EXPIRY_FILE.$$" $CHANGE_FILE 1>&2 2> "$PGSQLLOG"; then
+         m_error "osm2pgsql error"
+     fi
+ 
+-    freelock "$LOCK_FILE"
++#------------------------------------------------------------------------------
++# The lockfile is normally removed before we expire tiles because that is 
++# something that can be done in parallel with further processing.  In order to
++# avoid rework, if actually rerendering is done rather than just deleting or
++# dirtying, it makes sense to move it lower down.
++#------------------------------------------------------------------------------
++#    m_ok "Import complete; removing lock file"
++#    freelock "$LOCK_FILE"
+ 
+     m_ok "expiring tiles"
+-    if ! render_expired --min-zoom=$EXPIRY_MINZOOM --max-zoom=$EXPIRY_MAXZOOM --touch-from=$EXPIRY_MINZOOM -s /run/renderd.sock < "$EXPIRY_FILE.$$" 2>&1 | tail -8 >> "$EXPIRYLOG"; then
++#------------------------------------------------------------------------------
++# When expiring tiles we need to define the style sheet if it's not "default".
++# In this case it's "ajt".
++# Previously all tiles on the "dirty" list between $EXPIRY_MINZOOM and 
++# $EXPIRY_MAXZOOM were dirtied.  We currently re-render 
++# tiles >= $EXPIRY_MINZOOM and < $EXPIRY_DELETEFROM, expiry from 14 and 
++# delete >= $EXPIRY_DELETEFROM and <= $EXPIRY_MAXZOOM.
++# The default path to renderd.sock is fixed.
++#------------------------------------------------------------------------------
++    if ! render_expired --map=ajt --min-zoom=$EXPIRY_MINZOOM --touch-from=$EXPIRY_TOUCHFROM --delete-from=$EXPIRY_DELETEFROM --max-zoom=$EXPIRY_MAXZOOM --tile-dir=${PREFIX}/var/lib/mod_tile -s ${PREFIX}/var/run/renderd/renderd.sock < "$EXPIRY_FILE.$$" 2>&1 | tail -8 >> "$EXPIRYLOG"; then
+         m_info "Expiry failed"
+     fi
+ 
+     rm "$EXPIRY_FILE.$$"
+-    
++
++#------------------------------------------------------------------------------
++# Only remove the lock file after expiry (if system is slow we want to delay
++# the next import, not have multiple render_expired processes running)    
++#------------------------------------------------------------------------------
++    freelock "$LOCK_FILE"
++
+     m_ok "Done with import"
+     
+ 
