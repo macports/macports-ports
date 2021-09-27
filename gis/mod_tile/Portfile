@@ -1,0 +1,244 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           active_variants 1.1
+PortGroup           github 1.0
+
+github.setup        openstreetmap mod_tile 0.5
+github.tarball_from archive
+revision            0
+
+categories-append   gis
+platforms           darwin
+maintainers         {@frankdean fdsd.co.uk:frank.dean} openmaintainer
+
+license             GPL-2+ Boost-1 BSD Permissive MIT
+
+description         Renders map tiles with mapnik and serves them using Apache and mod_tile
+
+long_description    mod_tile is a system to serve raster tiles for example to use within \
+                    a slippy map. It provides a dynamic combination of efficient caching \
+                    and on the fly rendering. Due to its dynamic rendering, only a small \
+                    fraction of overall tiles need to be kept on disk, reducing the \
+                    resources required. At the same time, its caching strategy allows for \
+                    a high performance serving and can support several thousand requests \
+                    per second.
+
+checksums           rmd160  e6c2224c6500f695e4a17addc7d05086ce5bebd5 \
+                    sha256  d730ec04f9dc01ac7e4f863130480451be849b5d14a632225b23957fe5da0aef \
+                    size    182209
+
+depends_build       port:apache2 \
+                    port:iniparser
+
+depends_lib         port:curl \
+                    port:freetype \
+                    port:harfbuzz \
+                    port:icu \
+                    port:libjpeg-turbo \
+                    port:libpng \
+                    port:mapnik \
+                    port:proj4 \
+                    port:tiff \
+                    port:webp \
+                    port:zlib
+
+depends_run         port:gsed \
+                    port:openstreetmap-carto \
+                    port:osm2pgsql-lua \
+                    port:postgis3 \
+                    port:wget
+
+set agent_name      fetch-osm-db-updates
+set agent_uniquename    org.macports.${agent_name}
+set apache_name     apache2
+set apxs            ${prefix}/bin/apxs
+set docdir          ${prefix}/share/doc/${name}
+set mdir            ${prefix}/lib/apache2/modules/
+set renderd_user    nobody
+
+startupitem.type    launchd
+startupitem.create  yes
+startupitem.debug   yes
+startupitem.name    renderd
+startupitem.install yes
+startupitem.logfile ${prefix}/var/log/renderd/renderd.log
+startupitem.logevents   yes
+startupitem.user    ${renderd_user}
+startupitem.executable  ${prefix}/bin/renderd -f -c ${prefix}/etc/renderd/renderd.conf
+
+patchfiles          configure-ac.diff \
+                    makefile-am.diff \
+                    openstreetmap-tiles-update-expire.diff \
+                    osmosis-db_replag.diff \
+                    src-daemon-c.diff \
+                    src-mod_tile-c.diff \
+                    src-render_submit_queue-c.diff
+
+use_autoreconf      yes
+
+configure.args      --with-apxs=${apxs}
+
+use_parallel_build  no
+
+test.run            yes
+
+require_active_variants mapnik postgis
+
+variant postgresql12 conflicts postgresql13 description {Use with PostgreSQL 12} {
+    depends_lib-append port:postgresql12
+}
+
+variant postgresql13 conflicts postgresql12 description {Use with PostgreSQL 13} {
+    depends_lib-append port:postgresql13
+}
+
+variant osmosis description {Perform incremental OSM updates} {
+    depends_run-append \
+        port:osmium-tool \
+        port:osmosis \
+        port:trim_osc
+}
+
+variant logrotate description {Logrotate configuration} {
+    depends_run-append port:logrotate
+}
+
+default_variants +osmosis +logrotate
+
+if {![variant_isset postgresql12] && ![variant_isset postgresql13]} {
+    default_variants-append +postgresql13
+}
+
+post-extract {
+    file rename ${worksrcpath}/renderd.conf ${worksrcpath}/renderd.conf.orig
+}
+
+post-patch {
+    xinstall -m 0644 -W ${filespath} \
+        renderd.conf.dist \
+        osm-tiles-update.conf.dist \
+        ${worksrcpath}
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/renderd.conf.dist \
+        ${worksrcpath}/osmosis-db_replag
+}
+
+post-destroot {
+    system -W ${worksrcpath} "make install-mod_tile DESTDIR=${destroot} PREFIX=${prefix}"
+    if {[variant_isset osmosis]} {
+        xinstall -m 0755 -d ${destroot}${prefix}/etc/LaunchAgents/${agent_uniquename}
+        set minutes 20; # Run every ${minutes} minutes
+        set plist [open "${destroot}${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist" w 0644]
+        puts ${plist} {<?xml version="1.0" encoding="UTF-8"?>}
+        puts ${plist} {<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN"}
+        puts ${plist} {"http://www.apple.com/DTDs/PropertyList-1.0.dtd">}
+        puts ${plist} {<plist version="1.0">}
+        puts ${plist} {  <dict>}
+        puts ${plist} {    <key>Disabled</key>}
+        puts ${plist} {    <false/>}
+        puts ${plist} {    <key>UserName</key>}
+        puts ${plist} "    <string>${renderd_user}</string>"
+        puts ${plist} {    <key>Label</key>}
+        puts ${plist} "    <string>${agent_uniquename}</string>"
+        puts ${plist} {    <key>Program</key>}
+        puts ${plist} "    <string>${prefix}/share/mod_tile/openstreetmap-tiles-update-expire</string>"
+        puts ${plist} {    <!-- See man launchd.plist -->}
+        puts ${plist} {    <key>StartCalendarInterval</key>}
+        puts ${plist} {    <array>}
+        for {set i [expr int(rand() * $minutes)]} {$i < 60} {incr i $minutes} {
+            puts ${plist} {        <dict>}
+            puts ${plist} {            <key>Minute</key>}
+            puts ${plist} "            <integer>${i}</integer>"
+            puts ${plist} {        </dict>}
+        }
+        puts ${plist} {    </array>}
+        puts ${plist} {    <key>ProcessType</key>}
+        puts ${plist} {    <string>Background</string>}
+        puts ${plist} {  </dict>}
+        puts ${plist} {</plist>}
+        close ${plist}
+
+        # install the plist
+        if {[getuid] == 0  && ${startupitem.install}} {
+            xinstall -m 0755 -d ${destroot}/Library/LaunchAgents
+            ln -sf ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}/Library/LaunchAgents
+        } else {
+            ln -sf ${prefix}/etc/LaunchAgents/${agent_uniquename}/${agent_uniquename}.plist ${destroot}${prefix}/etc/LaunchAgents
+        }
+    }
+
+    xinstall -m 0755 -d ${destroot}${docdir}
+    file copy {*}[glob -directory ${worksrcpath} COPYING readme.txt] \
+        ${filespath}/README_MacPorts.md \
+        ${destroot}${docdir}
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/renderd
+    file rename ${destroot}${prefix}/etc/renderd.conf.orig ${destroot}${prefix}/etc/renderd/renderd.conf.orig
+    xinstall -o root -m 0644 ${worksrcpath}/renderd.conf.dist \
+        ${destroot}${prefix}/etc/renderd/renderd.conf.dist
+    xinstall -m 0755 -d ${destroot}${prefix}/etc/${name}
+    xinstall -o root -m 0644 ${worksrcpath}/osm-tiles-update.conf.dist \
+        ${destroot}${prefix}/etc/${name}/osm-tiles-update.conf.dist
+    xinstall -m 0755 -d \
+        ${destroot}${prefix}/share/${name}
+    xinstall -m 0755 \
+        ${filespath}/osm_setup_db.sh \
+        ${worksrcpath}/openstreetmap-tiles-update-expire \
+        ${worksrcpath}/osmosis-db_replag \
+        ${destroot}${prefix}/share/${name}
+    xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/run/${name}
+    xinstall -o ${renderd_user} -m 0755 -d ${destroot}${prefix}/var/lib/${name}
+
+    if {[variant_isset logrotate]} {
+        xinstall -m 0755 -d ${destroot}${prefix}/etc/logrotate.d
+    }
+
+    reinplace "s|PREFIX:-/usr/local|PREFIX:-${prefix}|g" \
+        ${destroot}${prefix}/share/${name}/osm_setup_db.sh \
+        ${destroot}${prefix}/share/${name}/openstreetmap-tiles-update-expire
+
+    destroot.keepdirs \
+        ${destroot}${prefix}/var/run/${name} \
+        ${destroot}${prefix}/var/lib/${name}
+}
+
+post-activate {
+    if {![file exists ${prefix}/etc/renderd/renderd.conf]} {
+        file copy ${prefix}/etc/renderd/renderd.conf.dist ${prefix}/etc/renderd/renderd.conf
+    }
+    if {![file exists ${prefix}/etc/${name}/osm-tiles-update.conf]} {
+        file copy ${prefix}/etc/${name}/osm-tiles-update.conf.dist ${prefix}/etc/${name}/osm-tiles-update.conf
+    }
+    if {![file exists ${prefix}/etc/logrotate.d/renderd] && [variant_isset logrotate]} {
+        file copy ${filespath}/logrotate.conf ${prefix}/etc/logrotate.d/renderd
+        reinplace "s|@PREFIX@|${prefix}|g" ${prefix}/etc/logrotate.d/renderd
+    }
+    # renderd actually logs to stderr
+    reinplace "s|StandardOutPath|StandardErrorPath|g" \
+        ${prefix}/etc/LaunchDaemons/${startupitem.uniquename}/${startupitem.uniquename}.plist
+}
+
+pre-deactivate {
+    if {[variant_isset osmosis]} {
+        system "launchctl unload /Library/LaunchAgents/${agent_uniquename}.plist"
+    }
+}
+
+notes "If this is your first install, you might want to view the notes
+at ${docdir}/README_MacPorts.md.
+
+To enable mod_tile in Apache:
+
+    cd ${mdir}
+    sudo ${apxs} -a -e -n \"tile\" mod_tile.so
+
+And then relaunch Apache:
+
+    sudo port reload apache2
+"
+if {[variant_isset osmosis]} {
+    notes-append "To load ${agent_name}:
+
+    sudo launchctl load -w /Library/LaunchAgents/${agent_uniquename}.plist
+"
+}
