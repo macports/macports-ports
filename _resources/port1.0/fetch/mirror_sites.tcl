@@ -413,34 +413,37 @@ set portfetch::mirror_sites::sites(macports) {
 # Keep these in sync between archive_sites.tcl and mirror_sites.tcl.
 # Some servers only support http; others support https while allowing
 # http as a fallback; still others only allow https.
-# The servers that support https have varying sets of cipher suites
-# enabled, which gives them varying minimum macOS version requirements.
+# As of the September 30, 2021 expiration of DST Root CA X3, the set of
+# macOS versions able to use the bundled libcurl to access our servers
+# that use Let's Encrypt certificates is drastically reduced.
 # Some servers that support https haven't added the MacPorts hostnames
 # to their SSL certificate as Subject Alternative Names so we can't use
 # https with them yet.
 global os.platform os.major
-set fastly      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
+set letsencrypt_https_or_http   [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : "http"}]
+set letsencrypt_https_only      [expr {${os.platform} ne "darwin" || ${os.major} == 16 || ${os.major} > 18 ? "https" : ""}]
+set fastly      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
-#set aarnet.au   [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
+#set aarnet.au   ${letsencrypt_https_or_http}
 set aarnet.au   http
 set atl.us      http
-set cph.dk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
+set cph.dk      ${letsencrypt_https_or_http}
 set cjj.kr      http
-set ema.uk      https
+set ema.uk      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
-#set fco.it      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
+#set fco.it      ${letsencrypt_https_or_http}
 set fco.it      http
-set fra.de      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
-set jnb.za      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "" : "https"}]
+set fra.de      ${letsencrypt_https_or_http}
+set jnb.za      ${letsencrypt_https_only}
 set jog.id      http
-set kmq.jp      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
-set mse.uk      [expr {${os.platform} eq "darwin" && ${os.major} < 13 ? "http" : "https"}]
-set nue.de      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
-set pek.cn      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
+set kmq.jp      ${letsencrypt_https_or_http}
+set mse.uk      ${letsencrypt_https_or_http}
+set nue.de      ${letsencrypt_https_or_http}
+set pek.cn      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
-#set ykf.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
+#set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
-set ywg.ca      [expr {${os.platform} eq "darwin" && ${os.major} < 10 ? "http" : "https"}]
+set ywg.ca      ${letsencrypt_https_or_http}
 
 set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
     ${fastly}://distfiles.macports.org/:mirror
