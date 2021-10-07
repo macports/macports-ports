@@ -1,13 +1,16 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           gpg_verify 1.0
+PortGroup           perl5 1.0
 
 name                privoxy
 version             3.0.32
+revision            1
 categories          www security net
 platforms           darwin
 license             GPL-2
-maintainers         nomaintainer
+maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 
 description         Advanced filtering web proxy
 
@@ -21,21 +24,56 @@ long_description    Privoxy is a web proxy with advanced filtering \
                     multi-user networks.
 
 homepage            http://www.privoxy.org/
-master_sites        sourceforge:project/ijbswa/Sources/${version}%20%28stable%29
+master_sites        ${homepage}/sf-download-mirror/Sources/${version}%20%28stable%29
 distname            ${name}-${version}-stable-src
+distfiles           ${distname}${extract.suffix}
 
-checksums           rmd160  e6fa3d638af4054d97be87df64d156bdbcb4057a \
+extract.only        ${distname}${extract.suffix}
+
+checksums           ${distname}${extract.suffix} \
+                    rmd160  e6fa3d638af4054d97be87df64d156bdbcb4057a \
                     sha256  c61de4008c62445ec18f1f270407cbf2372eaba93beaccdc9e3238bb2defeed7 \
                     size    1834528
 
+gpg_verify.use_gpg_verification \
+                    yes
+
+if {[option gpg_verify.use_gpg_verification]} {
+    distfiles-append \
+                    ${distname}${extract.suffix}.asc
+    checksums-append \
+                    ${distname}${extract.suffix}.asc \
+                    size    833
+
+    post-checksum {
+        gpg_verify.verify_gpg_signature \
+                    ${filespath}/keyid-691822918BA2371C.txt \
+                    ${distpath}/${distname}${extract.suffix}.asc \
+                    ${distpath}/${distname}${extract.suffix}
+    }
+}
+
 worksrcdir          ${name}-${version}-stable
 
-depends_lib         port:pcre \
+depends_build-append \
+                    port:p5-sgmlspm
+
+depends_lib-append \
+                    port:brotli \
+                    port:pcre \
                     port:zlib
 
 set privoxyGroup    privoxy
 set privoxyUser     privoxy
 add_users           ${privoxyUser} group=${privoxyGroup}
+
+# diff -Naur privoxy-orig/config privoxy-new/config | sed -E -e 's/privoxy-(orig|new)/./g'
+patchfiles-append   patch-config.diff
+
+post-patch {
+    reinplace "s|@@PREFIX@@|${prefix}|g" \
+        ${worksrcpath}/config
+}
 
 pre-configure {
     if {[existsuser ${privoxyUser}] != 0 && [existsgroup ${privoxyGroup}] != 0} {
@@ -48,25 +86,32 @@ pre-configure {
 use_autoconf        yes
 configure.args      --sysconfdir=${prefix}/etc/${name} \
                     --mandir=${prefix}/share/man \
+                    --enable-compression \
                     --enable-dynamic-pcre \
-                    --enable-zlib
+                    --enable-zlib \
+                    --with-brotli
 
 # work around bug 30345
 post-configure {
     file delete ${workpath}/.CC_PRINT_OPTIONS
 }
 
+# man page
+post-build {
+    system -W ${worksrcpath} "${build.cmd} dok-release"
+}
+
 destroot.keepdirs   ${destroot}${prefix}/var/log/privoxy \
                     ${destroot}${prefix}/var/run
 
 post-destroot {
-    xinstall -m 755 -d ${destroot}${prefix}/var/run
+    xinstall -d ${destroot}${prefix}/var/run
     # Install and fixup startup script (if non-Darwin)
     if {${os.platform} ne "darwin"} {
-        xinstall -m 755 -d ${destroot}${prefix}/etc/rc.d
-        xinstall -m 755 -W ${worksrcpath} privoxy-generic.init \
+        xinstall -d ${destroot}${prefix}/etc/rc.d
+        xinstall -m 0755 -W ${worksrcpath} privoxy-generic.init \
             ${destroot}${prefix}/etc/rc.d/privoxy.sh
-        
+
         system -W ${destroot}${prefix}/etc/rc.d "patch -p0 < ${filespath}/patch-privoxy.sh.diff"
         reinplace "s|@@PREFIX@@|${prefix}|g" \
             ${destroot}${prefix}/etc/rc.d/privoxy.sh
@@ -81,16 +126,16 @@ post-destroot {
     # Rename these so local modifications are not removed on uninstall.
     # NOTE: Always overwrite default.action and default.filter.
     foreach privoxyConf {config match-all.action trust user.action user.filter} {
-            if {[file exists ${destroot}${prefix}/etc/privoxy/${privoxyConf}]} {
-        file rename ${destroot}${prefix}/etc/privoxy/${privoxyConf} \
-            ${destroot}${prefix}/etc/privoxy/${privoxyConf}.new
-            }
+        if {[file exists ${destroot}${prefix}/etc/privoxy/${privoxyConf}]} {
+            file rename ${destroot}${prefix}/etc/privoxy/${privoxyConf} \
+                ${destroot}${prefix}/etc/privoxy/${privoxyConf}.new
+        }
         # backup config files before fix #23970
-            if {[file exists ${prefix}/etc/privoxy/${privoxyConf}] \
-        && ![file exists ${prefix}/etc/privoxy/${privoxyConf}.new]} {
-        file copy ${prefix}/etc/privoxy/${privoxyConf} \
-            ${destroot}${prefix}/etc/privoxy/${privoxyConf}.mp_backup
-            }
+        if {[file exists ${prefix}/etc/privoxy/${privoxyConf}] \
+                && ![file exists ${prefix}/etc/privoxy/${privoxyConf}.new]} {
+            file copy ${prefix}/etc/privoxy/${privoxyConf} \
+                ${destroot}${prefix}/etc/privoxy/${privoxyConf}.mp_backup
+        }
     }
     # Remove the preinstalled log files as, otherwise, a rotation script
     # will fail when trying to rename and compress due to gzip not liking
@@ -133,6 +178,185 @@ post-activate {
     }
 }
 
+set tls_ca_dir      ${prefix}/etc/privoxy/ca.macports
+
+variant https_inspection \
+    description {Use Privoxy HTTPS inspection.} {
+    depends_build-append \
+                    port:sf-pwgen
+
+    depends_lib-append \
+                    path:share/apple-pki-bundle/apple-pki-bundle.pem:apple-pki-bundle \
+                    path:share/curl/curl-ca-bundle.crt:curl-ca-bundle \
+                    path:lib/libssl.dylib:openssl
+
+    # diff -Naur privoxy-orig/match-all.action privoxy-new/match-all.action | sed -E -e 's/privoxy-(orig|new)/./g' > patch-match-all.action.diff
+    patchfiles-append \
+                    patch-match-all.action.diff
+
+    post-patch {
+        reinplace -E "s|^#(ca-directory )|\\1|" \
+            ${worksrcpath}/config
+        reinplace -E "s|^#(certificate-directory )|\\1|" \
+            ${worksrcpath}/config
+    }
+
+    # random 4-word-based passphrase
+    proc correct_horse_battery_staple {} {
+        # ignore errors from sf-pwgen if the password is shorter than requested
+        return \
+            [join [exec sh -c "sf-pwgen \
+                  --algorithm memorable --count 2 --length 16 \
+                              2>/dev/null || true"] -]
+    }
+
+    configure.args-append \
+                    --with-openssl
+
+    destroot.keepdirs-append \
+                    ${destroot}${prefix}/etc/privoxy/CA \
+                    ${destroot}${prefix}/var/privoxy \
+                    ${destroot}${prefix}/var/privoxy/certs
+
+    post-destroot {
+        xinstall -m 770 -d \
+                    ${destroot}${prefix}/etc/privoxy/CA \
+                    ${destroot}${prefix}/var/privoxy \
+                    ${destroot}${prefix}/var/privoxy/certs
+
+        if {[existsuser ${privoxyUser}] != 0 && [existsgroup ${privoxyGroup}] != 0} {
+            file attributes ${destroot}${prefix}/etc/privoxy/CA \
+                    -group ${privoxyGroup} -owner ${privoxyUser}
+            file attributes ${destroot}${prefix}/var/privoxy \
+                    -group ${privoxyGroup} -owner ${privoxyUser}
+            file attributes ${destroot}${prefix}/var/privoxy/certs \
+                    -group ${privoxyGroup} -owner ${privoxyUser}
+        }
+
+        # TLS Root CA configuration
+        xinstall -d ${destroot}${tls_ca_dir}
+        xinstall -m 0700 -d ${destroot}${tls_ca_dir}/private
+        destroot.keepdirs-append \
+                    ${destroot}${tls_ca_dir} \
+                    ${destroot}${tls_ca_dir}/private
+        foreach d {certs crl newcerts} {
+            xinstall -d \
+                    ${destroot}${tls_ca_dir}/${d}
+            destroot.keepdirs-append \
+                    ${destroot}${tls_ca_dir}/${d} \
+        }
+        xinstall -m 0644 \
+                    ${filespath}/openssl.cnf \
+                    ${destroot}${tls_ca_dir}
+        # cat all trusted PKI bundles to a single file
+        set outfile [open ${destroot}${tls_ca_dir}/trustedCAs.pem w]
+        foreach f [list \
+                       ${prefix}/share/curl/curl-ca-bundle.crt \
+                       ${prefix}/share/apple-pki-bundle/apple-pki-bundle.pem] {
+            set sourcefile [open ${f} r]
+            chan copy ${sourcefile} ${outfile}
+            close ${sourcefile}
+        }
+        close ${outfile}
+    }
+
+    pre-activate {
+        if { [file exists ${tls_ca_dir}] } {
+            delete  ${tls_ca_dir}.previous
+            move    ${tls_ca_dir} \
+                    ${tls_ca_dir}.previous
+        }
+    }
+
+    post-activate {
+        # CA passphrase
+        set tls_ca_passphrase \
+            [correct_horse_battery_staple]
+        set tls_ca_passphrase_fd \
+            [open ${tls_ca_dir}/private/passphrase.txt w 0600]
+        puts ${tls_ca_passphrase_fd} \
+            ${tls_ca_passphrase}
+        close ${tls_ca_passphrase_fd}
+        # create the root CA
+        system -W ${tls_ca_dir} \
+            "sh <<TLS_PRIVOXY_ROOT_CA
+            # initialize
+            touch index.txt
+            echo 1000 > serial
+
+            # CA encrypted key
+            openssl genrsa -aes256 -out private/ca.key.pem \\
+                -passout file:private/passphrase.txt
+            chmod go-rw private/ca.key.pem
+
+            # CA certificate
+            openssl req -config openssl.cnf \\
+                -new -x509 -days 1460 -sha256 \\
+                -extensions v3_ca \\
+                -out certs/ca.cert.pem -key private/ca.key.pem \\
+                -passin file:private/passphrase.txt -batch
+
+            # CA certificate openssl self-verification
+            openssl verify -CAfile certs/ca.cert.pem certs/ca.cert.pem
+
+            # Convert to .cer DER and .p12 for other uses
+            openssl x509 -outform der -in certs/ca.cert.pem -out certs/ca.cer
+
+            openssl pkcs12 -export -out certs/ca.p12 \\
+                -inkey private/ca.key.pem -in certs/ca.cert.pem \\
+                -passin file:private/passphrase.txt \\
+                -passout pass:\$'${tls_ca_passphrase}'
+TLS_PRIVOXY_ROOT_CA
+"
+
+        if { ![file exists ${prefix}/etc/privoxy/CA/ca.cert.pem]
+             || ![file exists ${prefix}/etc/privoxy/CA/ca.key.pem] } {
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/certs/ca.cert.pem \
+                    ${prefix}/etc/privoxy/CA
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/private/ca.key.pem \
+                    ${prefix}/etc/privoxy/CA
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/certs/ca.cer \
+                    ${prefix}/etc/privoxy/CA
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/certs/ca.p12 \
+                    ${prefix}/etc/privoxy/CA
+            if {[existsuser ${privoxyUser}] != 0 && [existsgroup ${privoxyGroup}] != 0} {
+                file attributes ${prefix}/etc/privoxy/CA/ca.cert.pem \
+                    -group ${privoxyGroup} -owner ${privoxyUser} \
+                    -permissions 0664
+                file attributes ${prefix}/etc/privoxy/CA/ca.key.pem \
+                    -group ${privoxyGroup} -owner ${privoxyUser} \
+                    -permissions 0664
+                file attributes ${prefix}/etc/privoxy/CA/ca.cer \
+                    -group ${privoxyGroup} -owner ${privoxyUser} \
+                    -permissions 0664
+                file attributes ${prefix}/etc/privoxy/CA/ca.p12 \
+                    -group ${privoxyGroup} -owner ${privoxyUser} \
+                    -permissions 0664
+            }
+        }
+        # Do not overwrite ca-password, but this is where it goes
+        # reinplace -E -q "s|^#(ca-password\[\[:space:]]+)\[^\[:space:]]*)|\\1${tls_ca_passphrase}|" \
+        #    ${prefix}/etc/privoxy/config
+        if { ![file exists ${prefix}/etc/privoxy/CA/trustedCAs.pem] } {
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/trustedCAs.pem \
+                    ${prefix}/etc/privoxy/CA
+            if {[existsuser ${privoxyUser}] != 0 && [existsgroup ${privoxyGroup}] != 0} {
+                file attributes ${prefix}/etc/privoxy/CA/trustedCAs.pem \
+                    -group ${privoxyGroup} -owner ${privoxyUser} \
+                    -permissions 0664
+            }
+        }
+    }
+}
+
+default_variants-append \
+                    +https_inspection
+
 platform darwin {
     startupitem.create          yes
     startupitem.name            Privoxy
@@ -147,6 +371,7 @@ platform darwin {
     startupitem.stop-append     "else"
     startupitem.stop-append     "\t/usr/bin/killall -SIGUSR1 privoxy 2>/dev/null"
     startupitem.stop-append     "fi"
+    startupitem.pidfile         auto ${prefix}/var/run/privoxy.pid
 }
 
 livecheck.type      regex
