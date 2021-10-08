@@ -57,24 +57,29 @@ proc openssl::depends_portname {} {
     return openssl[openssl::branch_nodot]
 }
 
-proc openssl::configure_build {} {
+proc openssl::set_openssl_dependency {} {
     global openssl_cache_branch_nodot openssl_cache_depends
+    
+    # Just incase, remove this dep
+    depends_lib-delete path:lib/libssl.dylib:openssl
+    
+    # Set the requested opensslX dependency
+    if { ${openssl_cache_branch_nodot} ne "" && ${openssl_cache_depends} ne "" } {
+        depends_${openssl_cache_depends}-delete port:openssl${openssl_cache_branch_nodot}
+    }
+    set openssl_cache_depends      [option openssl.depends_type]
+    set openssl_cache_branch_nodot [openssl::branch_nodot]
+    depends_[option openssl.depends_type]-append port:openssl[openssl::branch_nodot]
+}
+
+proc openssl::configure_build {} {
 
     ui_debug "Configure Types '[option openssl.configure]'"
     
     # If no configure method(s) given do nothing
     if { [option openssl.configure] ne "" } {
 
-        # Just incase, remove this dep
-        depends_lib-delete path:lib/libssl.dylib:openssl
-        
-        # Set the requested opensslX dependency
-        if { ${openssl_cache_branch_nodot} ne "" && ${openssl_cache_depends} ne "" } {
-            depends_${openssl_cache_depends}-delete port:openssl${openssl_cache_branch_nodot}
-        }
-        set openssl_cache_depends      [option openssl.depends_type]
-        set openssl_cache_branch_nodot [openssl::branch_nodot]
-        depends_[option openssl.depends_type]-append port:openssl[openssl::branch_nodot]
+        openssl::set_openssl_dependency
         
         foreach meth [option openssl.configure] {
             switch ${meth} {
