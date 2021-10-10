@@ -177,9 +177,9 @@ git -C ports/ checkout -qf -
 git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
 wait $curl_portindex_pid
-(cd ports/ && portindex)
+(cd ports/ && sudo portindex)
 git -C ports/ checkout -qf -
-(cd ports/ && portindex -e)
+(cd ports/ && sudo portindex -e)
 endgroup
 
 
