@@ -19,6 +19,8 @@ default openssl.configure {}
 # cache variables storing current configuration state
 default openssl_cache_branch_nodot ""
 default openssl_cache_depends      ""
+default openssl_cache_incdir       ""
+default openssl_cache_libdir       ""
 
 proc openssl::default_branch {} {
     return 1.1
@@ -73,6 +75,7 @@ proc openssl::set_openssl_dependency {} {
 }
 
 proc openssl::configure_build {} {
+    global openssl_cache_incdir openssl_cache_libdir
 
     ui_debug "Configure Types '[option openssl.configure]'"
     
@@ -91,9 +94,18 @@ proc openssl::configure_build {} {
                 }
                 build_flags {
                     ui_debug " -> Setting openssl build flags configuration"
-                    configure.cppflags-prepend -I[openssl::include_dir]
-                    configure.cflags-prepend   -I[openssl::include_dir]
-                    configure.ldflags-prepend  -L[openssl::lib_dir]
+                    if { ${openssl_cache_incdir} ne "" } {
+                        configure.cppflags-delete -I${openssl_cache_incdir}
+                        configure.cflags-delete   -I${openssl_cache_incdir}
+                    }
+                    if { ${openssl_cache_libdir} ne "" } {
+                        configure.ldflags-prepend  -L${openssl_cache_libdir}
+                    }
+                    set openssl_cache_incdir [openssl::include_dir]
+                    set openssl_cache_libdir [openssl::lib_dir]
+                    configure.cppflags-prepend -I${openssl_cache_incdir}
+                    configure.cflags-prepend   -I${openssl_cache_incdir}
+                    configure.ldflags-prepend  -L${openssl_cache_libdir}
                 }
                 default {
                     return -code error "invalid method \"${meth}\" for openssl.configure"
@@ -104,6 +116,13 @@ proc openssl::configure_build {} {
     }
 
 }
+
+proc openssl::branch_proc {option action args} {
+    if {$action ne "set"} return
+    openssl::set_openssl_dependency
+}
+
+option_proc openssl.branch openssl::branch_proc
 
 proc openssl::configure_proc {option action args} {
     if {$action ne "set"} return
