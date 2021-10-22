@@ -64,7 +64,7 @@ proc openssl::depends_portname {} {
 proc openssl::set_openssl_dependency {} {
     global openssl_cache_branch_nodot openssl_cache_depends
     
-    # Just incase, remove this dep
+    # Just in case, remove this dep
     depends_lib-delete path:lib/libssl.dylib:openssl
     
     # Set the requested opensslX dependency
@@ -75,6 +75,7 @@ proc openssl::set_openssl_dependency {} {
     set openssl_cache_branch_nodot [openssl::branch_nodot]
     depends_[option openssl.depends_type]-append port:openssl[openssl::branch_nodot]
 }
+port::register_callback openssl::set_openssl_dependency
 
 # Detect if cmake is being used
 proc openssl::check_for_cmake {} {
@@ -101,8 +102,6 @@ proc openssl::configure_build {} {
         # If no configure method(s) given do nothing
         set openssl_cache_configure [option openssl.configure]
         if { [option openssl.configure] ne "" } {
-
-            openssl::set_openssl_dependency
 
             foreach meth [option openssl.configure] {
                 switch ${meth} {
