@@ -70,6 +70,9 @@ post-extract {
     xinstall -m 0755 -d "[option haskell_stack.stack_root]"
 }
 
+# stack builds x86_64 binaries
+supported_archs     x86_64
+
 # libHSbase shipped with GHC links against system libiconv, which provides the
 # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
 # process statically links libHSbase.a, we must have /usr/lib in the library

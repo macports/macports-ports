@@ -174,7 +174,7 @@ if { ${os.arch} ne "arm" } {
 if { ${os.major} >= 10 } {
     lappend clang_versions 11
     if { ${os.major} >= 11 } {
-        lappend clang_versions 12
+        lappend clang_versions 12 13
     }
     lappend clang_versions devel
 }
