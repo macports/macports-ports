@@ -94,7 +94,7 @@ proc boost::configure_build {} {
     if { [option boost.require_numpy] } {
         depends_[option boost.depends_type]-append port:boost[boost::version_nodot]-numpy
     }
-    
+
     # Append to the build flags to find the isolated headers/libs
     if { ${boost_cache_cppflags} ne "" } {
         configure.cppflags-delete ${boost_cache_cppflags}
@@ -174,7 +174,7 @@ proc boost::configure_build {} {
             configure.args-append ${flag}
         }
     }
-    
+
 }
 
 port::register_callback boost::configure_build
