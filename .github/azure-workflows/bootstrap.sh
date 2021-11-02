@@ -30,7 +30,7 @@ begingroup "Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
 echo "Fetching getopt..."
-/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
+/usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/getopt-1.1.6/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/MacPorts-${OS_MAJOR}.tar.bz2" &
