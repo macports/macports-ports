@@ -295,9 +295,9 @@ proc python_add_dependencies {} {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
             if {[option python.pep517]} {
-                depends_build-delete    port:py${python.version}-pep517 \
+                depends_build-delete    port:py${python.version}-build \
                                         port:py${python.version}-python-install
-                depends_build-append    port:py${python.version}-pep517 \
+                depends_build-append    port:py${python.version}-build \
                                         port:py${python.version}-python-install
             }
         }
@@ -318,15 +318,14 @@ proc python_get_defaults {var} {
         }
         build_cmd {
             if {${python.pep517}} {
-                return "${python.bin} -m pep517.build --no-deps --binary --out-dir ${workpath}"
+                return "${python.bin} -m build --wheel --no-isolation --outdir ${workpath}"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
             }
         }
         build_target {
-            global worksrcpath
             if {${python.pep517}} {
-                return ${worksrcpath}
+                return ""
             } else {
                 return build[python_get_defaults jobs_arg]
             }
