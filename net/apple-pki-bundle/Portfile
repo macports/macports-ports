@@ -4,7 +4,7 @@ PortSystem          1.0
 
 name                apple-pki-bundle
 version             2018-09-27
-revision            0
+revision            1
 categories          net www security
 license             OpenSSL
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
@@ -133,6 +133,21 @@ checksums           AppleIncRootCertificate.cer \
 # non-Apple CAs in the bundle
 # for f in ${worksrcpath}/*.pem; do openssl x509 -inform pem -text -noout -in ${f}; done | grep 'CN = ' | grep -v Apple
 
+set system_roots_keychain \
+                    "${worksrcpath}/macOS System Roots.pem"
+set system_roots_keychain_default \
+                    "${filespath}/macOS System Roots 20211101.pem"
+
+set pki_dir         ${prefix}/share/${name}
+set pki_bundle      ${name}.pem
+set pki_bundle_downloaded   ${name}_downloaded.pem
+
+variant system_roots_keychain \
+    description {Use /System/Library/Keychains/SystemRootCertificates.keychain.} {
+        set system_roots_keychain_default \
+                    "${worksrcpath}/macOS System Roots native.pem"
+}
+
 variant additional_pki_bundle \
     description {Add PKI bundle used by GitHub assets, possibly others.} {
     # openssl s_client -showcerts github.githubassets.com:443 | sed -E '1,/^---$/d' | sed '/^---$/,$d' 1> cert.pem
@@ -164,10 +179,7 @@ variant additional_pki_bundle \
                     size    1218
 }
 
-default_variants    +additional_pki_bundle
-
-set pki_dir         ${prefix}/share/${name}
-set pki_bundle      ${name}.pem
+default_variants    +system_roots_keychain +additional_pki_bundle
 
 proc url_to_pem {url pem} {
     global worksrcpath
@@ -176,6 +188,7 @@ proc url_to_pem {url pem} {
 }
 
 depends_build-append \
+                    port:coreutils \
                     port:coreutils-uutils \
                     port:file \
                     path:bin/openssl:openssl
@@ -194,6 +207,25 @@ post-extract {
     } {
         url_to_pem ${url} ${pem}
     }
+
+    xinstall -d     ${workpath}/bin \
+                    ${worksrcpath}/pemfiles
+
+    if { [variant_isset "system_roots_keychain"] } {
+        system -W ${worksrcpath} \
+            "security find-certificate -a -p \
+                /System/Library/Keychains/SystemRootCertificates.keychain \
+                    > '${system_roots_keychain_default}'"
+    }
+
+    xinstall        ${system_roots_keychain_default} \
+                    "${system_roots_keychain}"
+
+    xinstall -m 0755 \
+                    ${filespath}/pems_not_in_pemfile.sh \
+                    ${filespath}/pems_that_wont_expire_soon.sh \
+                    ${filespath}/pems_add_to_macOS_System_Keychain.sh \
+                    ${workpath}/bin
 }
 
 use_configure       no
@@ -205,21 +237,17 @@ build {
             set file_type [exec /bin/sh -c \
                 "file ${f} | sed -E 's|^.+: ||' 2>/dev/null || true"]
             if {[regexp {^(PEM certificate|ASCII text)$} ${file_type}]} {
-                file copy ${f} ${worksrcpath}/${pem}
+                file copy ${f} ${worksrcpath}/pemfiles/${pem}
             } else {
-                system -W ${worksrcpath} \
+                system -W ${worksrcpath}/pemfiles \
                     "openssl x509 -inform der -outform pem -text -in ${f} -out ${pem}"
             }
         }
     }
-}
-
-destroot {
-    xinstall -d ${destroot}${pki_dir}
 
     # cat all pem files to a single file
-    set outfile [open ${destroot}${pki_dir}/${pki_bundle} w]
-    foreach f [glob ${worksrcpath}/*.pem] {
+    set outfile [open ${worksrcpath}/${pki_bundle_downloaded} w]
+    foreach f [glob ${worksrcpath}/pemfiles/*.pem] {
         set file_type [exec /bin/sh -c \
                            "file ${f} | sed -E 's|^.+: ||' 2>/dev/null || true"]
         if {[regexp {^(PEM certificate|ASCII text)$} ${file_type}]} {
@@ -231,4 +259,31 @@ destroot {
         }
     }
     close ${outfile}
+
+    set outfile [open ${worksrcpath}/${pki_bundle}-temp w]
+    close ${outfile}
+    system -W ${worksrcpath} \
+        "${workpath}/bin/pems_that_wont_expire_soon.sh \
+                    '${system_roots_keychain}' \
+                        >> ${pki_bundle}-temp"
+    copy ${worksrcpath}/${pki_bundle}-temp ${worksrcpath}/${pki_bundle}
+    system -W ${worksrcpath} \
+        "${workpath}/bin/pems_not_in_pemfile.sh \
+                    ${pki_bundle_downloaded} ${pki_bundle}-temp \
+                        >> ${pki_bundle}"
 }
+
+destroot {
+    xinstall -d ${destroot}${pki_dir}/bin
+    xinstall ${worksrcpath}/${pki_bundle} ${destroot}${pki_dir}
+    foreach f [glob ${workpath}/bin/*.sh] {
+        xinstall -m 0755 ${f} ${destroot}${pki_dir}/bin
+    }
+}
+
+notes \
+    "To add trusted certificates to the macOS System Keychain \
+    /Library/Keychains/System.keychain, please see the script \
+    ${prefix}/${pki_bundle}/bin/pems_add_to_macOS_System_Keychain.sh, \
+    and make sure that you have a reliable backup of the keychain \
+    before running the script."
