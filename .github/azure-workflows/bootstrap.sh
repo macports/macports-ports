@@ -15,6 +15,8 @@ endgroup() {
     printtag "endgroup"
 }
 
+MACPORTS_VERSION=2.7.1
+
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
 case "$OS_ARCH" in
@@ -31,7 +33,7 @@ echo "Fetching getopt..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 echo "Fetching MacPorts..."
-/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/macports-base/MacPorts-${OS_MAJOR}.tar.bz2" &
+/usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/MacPorts-${OS_MAJOR}.tar.bz2" &
 curl_mpbase_pid=$!
 echo "Fetching PortIndex..."
 /usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
