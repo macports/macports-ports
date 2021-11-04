@@ -25,6 +25,8 @@ default openssl_cache_cmake_flags  ""
 default openssl_cache_configure    ""
 
 proc openssl::default_branch {} {
+    # NOTE - Whenever the default branch is bumped, the revision
+    # in the openssl shim port should be reset back to 0.
     return 1.1
 }
 
