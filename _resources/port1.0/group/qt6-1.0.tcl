@@ -152,13 +152,13 @@ set qt_cmake_module_dir ${qt_libs_dir}/cmake
 global qt_cmake_cmd
 set qt_cmake_cmd        ${qt_dir}/bin/qt-cmake
 
+# standard qt-configure-module command location
+global qt_cmake_cmd
+set qt_configure_module_cmd        ${qt_dir}/bin/qt-configure-module
+
 # standard qmake command location
 global qt_qmake_cmd
 set qt_qmake_cmd        ${qt_dir}/bin/qmake
-
-# standard qt-configure-module command location
-global qt_configure_module_cmd
-set qt_configure_module_cmd        ${qt_dir}/bin/qt-configure-module
 
 # standard moc command location
 global qt_moc_cmd
