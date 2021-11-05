@@ -28,6 +28,9 @@ set qt_major        [lindex [split ${version} .] 0]
 # see https://www.qt.io/blog/qt-6.0-released
 #compiler.cxx_standard 17
 
+# Save off the actual macports prefix for use late
+set mp_prefix       ${prefix}
+
 master_sites        https://download.qt.io/official_releases/qt/${branch}/${version}/submodules
 # file sizes are significantly smaller using xz
 if { ${subport} ne ${name} && ${subport} ne "${name}-docs" } {
@@ -864,19 +867,28 @@ foreach {module module_info} [array get modules] {
             default_variants-append +openssl
 
         } else {
+
             # these subports use qt-cmake
-            PortGroup                    cmake 1.1
+            PortGroup                    qt6 1.0
             PortGroup                    active_variants 1.1
 
             # We need to use qt-cmake to configure the build
+            configure.cmd                ${qt_configure_module_cmd}
+
+            # Attempting to match module configure instructions from here: https://www.qt.io/blog/qt-6-build-system
+            # --prefix is not recognized.
+            configure.pre_args-delete    --prefix=${prefix}
+            configure.pre_args-append    ${worksrcpath}
             configure.dir                ${workpath}/build
-            configure.cmd                ${qt_cmake_cmd}
 
-            prefix ${qt_dir}
+            # QT suggests using Nina to build
+            build.cmd                    ninja
+            build.dir                    ${workpath}/build
 
-            # --prefix is not recognized by qt-configure-module
-            # need to specify ninja for the build environment
-            cmake.generator         Ninja
+            destroot.target install
+            # ninja needs the DESTDIR argument in the environment
+            destroot.destdir
+            destroot.env-append DESTDIR=${destroot}
 
             # detremine which variants are to be turned off
             set request_examples true
@@ -1063,9 +1075,6 @@ foreach {sql_names sql_info} [array get sql_plugins] {
                     [subst -DCMAKE_LIBRARY_PATH=\"[lindex ${variant_info} 3]\"]
             }
         }
-        # Need to update the prefix after the INCLUDE and LIB variables are set
-        prefix ${qt_dir}
-
         # Specify the actual location of the sqldrivers
         cmake.source_dir        ${cmake.source_dir}/src/plugins/sqldrivers/
     }
@@ -1164,29 +1173,37 @@ post-destroot {
     }
 
     # put configuration files in places they will be found automatically
-    if { ${qt_libs_dir} ne "${prefix}/lib" } {
-
+    if { ${qt_libs_dir} ne "${mp_prefix}/lib" } {
         # put link to pkgconfig files in place where pkgconfig will find it
         # most Qt 6 pkgconfig files begin with Qt6, so link should not conflict with any other Qt installations
-        xinstall -d -m 0755 ${destroot}${prefix}/lib/pkgconfig
+        xinstall -d -m 0755 ${destroot}${mp_prefix}/lib/pkgconfig
         foreach pcfile [glob -nocomplain -tails -directory ${destroot}${qt_libs_dir}/pkgconfig *.pc] {
-            ln -s ${qt_libs_dir}/pkgconfig/${pcfile} ${destroot}${prefix}/lib/pkgconfig
+            ln -s ${qt_libs_dir}/pkgconfig/${pcfile} ${destroot}${mp_prefix}/lib/pkgconfig
         }
 
         # put link to cmake files in place where cmake will find it
         # most Qt 6 cmake directories begin with Qt6, so link should not conflict with any other Qt installations
-        xinstall -d -m 0755 ${destroot}${prefix}/lib/cmake
+        xinstall -d -m 0755 ${destroot}${mp_prefix}/lib/cmake
         foreach cmakedir [glob -type d -nocomplain -tails -directory ${destroot}${qt_libs_dir}/cmake *] {
-            xinstall -d -m 0755 ${destroot}${prefix}/lib/cmake/${cmakedir}
-            foreach cmakefile [glob -tails -directory ${destroot}${qt_libs_dir}/cmake/${cmakedir} *.cmake] {
-                ln -s ${qt_libs_dir}/cmake/${cmakedir}/${cmakefile} ${destroot}${prefix}/lib/cmake/${cmakedir}/
+            # only symlink the top folder, checking to see if the symlink already exists
+            if { ![ file exists ${mp_prefix}/lib/cmake/${cmakedir} ] } {
+                ln -s ${qt_libs_dir}/cmake/${cmakedir} ${destroot}${mp_prefix}/lib/cmake/${cmakedir}
+            }
+        }
+        # grab the cmake files in qt_bins_dir too
+        foreach cmakefile [glob -type f -nocomplain -tails -directory ${destroot}${qt_bins_dir}/ *.cmake] {
+            if { ![ file exists ${mp_prefix}/lib/cmake/${cmakefile} ] } {
+                ln -s ${qt_bins_dir}/${cmakefile} ${destroot}${mp_prefix}/lib/cmake/${cmakefile}
             }
         }
 
-        # if cmake finds configuration files in ${prefix}/lib/cmake, CMAKE_CURRENT_LIST_DIR expands to ${prefix}/lib/cmake/xxx
+        # if cmake finds configuration files in ${mp_prefix}/lib/cmake, CMAKE_CURRENT_LIST_DIR expands to ${mp_prefix}/lib/cmake/xxx
         # cmake configuration files actually installed in ${qt_cmake_module_dir}/xxx
-        foreach cmakedir [glob -type d -nocomplain -tails -directory ${destroot}${qt_libs_dir}/cmake *] {
-            foreach cmakefile [glob -nocomplain -directory ${destroot}${qt_libs_dir}/cmake/${cmakedir} *.cmake] {
+        set cmakepath ${destroot}${qt_libs_dir}/cmake/
+        foreach cmakefile [ rglob ${cmakepath} *.cmake ] {
+            if { ![file isdirectory ${cmakefile} ] } {
+                set cmakedir [file dirname ${cmakefile}]
+                set cmakedir [string replace $cmakedir 0 [string length $cmakepath]-1]
                 reinplace -q "s|\\\${CMAKE_CURRENT_LIST_DIR}|${qt_cmake_module_dir}/${cmakedir}|g" ${cmakefile}
             }
         }
@@ -1215,4 +1232,15 @@ foreach {component component_info} [array get qt6pg::qt6_component_lib] {
 
         }
     }
+}
+
+proc rglob { dirpath patterns } {
+    set rlist {}
+    foreach fpath [glob -nocomplain -types f -directory ${dirpath} {*}${patterns}] {
+        lappend rlist ${fpath}
+    }
+    foreach dir [glob -nocomplain -types d -directory ${dirpath} *] {
+        lappend rlist {*}[rglob ${dir} ${patterns}]
+    }
+    return ${rlist}
 }
