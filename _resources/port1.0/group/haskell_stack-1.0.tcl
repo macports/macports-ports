@@ -80,6 +80,9 @@ supported_archs     x86_64
 compiler.library_path
 compiler.cpath
 
+# Builds (sometimes) fail if ccache is enabled in MacPorts
+configure.ccache    no
+
 options haskell_stack.bin haskell_stack.default_args
 default haskell_stack.bin   ${prefix}/bin/stack
 default haskell_stack.default_args \
