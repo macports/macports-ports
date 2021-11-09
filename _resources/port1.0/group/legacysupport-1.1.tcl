@@ -177,9 +177,9 @@ proc legacysupport::add_legacysupport {} {
         # Flags for using MP libcxx
         if { [option legacysupport.use_mp_libcxx] } {
             legacysupport::add_once depends_lib append port:macports-libcxx
-            append ls_cache_incpath  " ${prefix}/include/libcxx"
+            append ls_cache_incpath  " ${prefix}/include/libcxx/v1"
             append ls_cache_ldflags  " -L${prefix}/lib/libcxx"
-            append ls_cache_cppflags " -isystem${prefix}/include/libcxx"
+            append ls_cache_cppflags " -nostdinc++ -isystem${prefix}/include/libcxx/v1"
         }
 
         ui_debug "legacysupport: ldflags  ${ls_cache_ldflags}"
