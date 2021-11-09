@@ -63,10 +63,16 @@ proc openssl::depends_portname {} {
     return openssl[openssl::branch_nodot]
 }
 
+proc openssl::known_branches {} {
+    return [list no_version 1.0 1.1 3]
+}
+
 proc openssl::check_branch {} {
-    set branch_ok [ expr { [option openssl.branch] in [list no_version 1.0 1.1 3] } ]
+    set branch_ok [ expr { [option openssl.branch] in [openssl::known_branches] } ]
     if { !${branch_ok} } {
-        ui_error "Invalid OpenSSL branch [option openssl.branch]"
+        ui_error "Invalid OpenSSL branch '[option openssl.branch]'"
+        ui_error "Valid branches are '[openssl::known_branches]'"
+        return -code error "Invalid OpenSSL branch"
     }
     return ${branch_ok}
 }
