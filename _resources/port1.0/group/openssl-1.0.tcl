@@ -14,7 +14,7 @@ options openssl.depends_type
 default openssl.depends_type lib
 
 options openssl.configure
-default openssl.configure {pkgconfig}
+default openssl.configure {pkgconfig build_flags}
 
 # cache variables storing current configuration state
 default openssl_cache_branch_nodot ""
