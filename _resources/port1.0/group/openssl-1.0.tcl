@@ -165,7 +165,8 @@ proc openssl::configure_build {} {
                             # See https://cmake.org/cmake/help/latest/module/FindOpenSSL.html
                             set openssl_cache_cmake_flags [list \
                                                                -DOPENSSL_ROOT_DIR=[openssl::install_area] \
-                                                               -DOPENSSL_INCLUDE_DIR=[openssl::include_dir]
+                                                               -DOPENSSL_INCLUDE_DIR=[openssl::include_dir] \
+                                                               -DWITH_SSL=[openssl::install_area]
                                                           ]
                             foreach flag ${openssl_cache_cmake_flags} {
                                 configure.args-append ${flag}
