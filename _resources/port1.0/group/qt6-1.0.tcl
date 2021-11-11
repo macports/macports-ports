@@ -21,12 +21,8 @@ proc qt6.get_default_name {} {
     # see https://doc.qt.io/qt-6/supported-platforms-and-configurations.html
     # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-6/supported-platforms-and-configurations.html
     if { ${os.major} < 18 } {
-        known_fail yes
-        pre-fetch {
-            ui_error "Qt 6 only supports macOS Mojave (10.14) and later"
-            return -code error "incompatible configuration"
-        }
-        #
+        ui_error "${subport} requires macOS 10.14 or later"
+        return -code error "incompatible OS version"
     } else {
         #
         # macOS Mojave (10.14) and later
