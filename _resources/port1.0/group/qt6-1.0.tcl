@@ -1,13 +1,13 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 #
-# This portgroup defines standard settings when using qt6.
+# This portgroup defines standard settings when using Qt 6.
 #
 # Usage:
 # PortGroup     qt6 1.0
 
 global available_qt_versions
 array set available_qt_versions {
-    qt6   {qt6-qtbase   6.2}
+    qt6 {qt6-qtbase 6.2}
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
@@ -20,13 +20,18 @@ proc qt6.get_default_name {} {
 
     # see https://doc.qt.io/qt-6/supported-platforms-and-configurations.html
     # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-6/supported-platforms-and-configurations.html
-    if { ${os.major} <= 13 } {
-        ui_error "Qt6 only supports macOS Mojave (10.14) and later"
-        return -code error "incompatible configuration"
+    if { ${os.major} < 18 } {
+        known_fail yes
+        pre-fetch {
+            ui_error "Qt 6 only supports macOS Mojave (10.14) and later"
+            return -code error "incompatible configuration"
+        }
         #
     } else {
         #
         # macOS Mojave (10.14) and later
+        #
+        # # Qt 6.0 - 6.2: Supported
         #
         return qt6
     }
@@ -35,17 +40,17 @@ proc qt6.get_default_name {} {
 global qt6.name qt6.base_port qt6.version
 
 # get the latest Qt version that runs on current OS configuration
-set qt6.name       [qt6.get_default_name]
-set qt6.base_port  [lindex $available_qt_versions(${qt6.name}) 0]
-set qt6.version    [lindex $available_qt_versions(${qt6.name}) 1]
+set qt6.name        [qt6.get_default_name]
+set qt6.base_port   [lindex $available_qt_versions(${qt6.name}) 0]
+set qt6.version     [lindex $available_qt_versions(${qt6.name}) 1]
 
 # check if another version of Qt is installed
 foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
     set qt_test_base_port [lindex ${qt_test_info} 0]
     if {![catch {set installed [lindex [registry_active ${qt_test_base_port}] 0]}]} {
-        set qt6.name       ${qt_test_name}
-        set qt6.base_port  ${qt_test_base_port}
-        set qt6.version    [lindex $installed 1]
+        set qt6.name        ${qt_test_name}
+        set qt6.base_port   ${qt_test_base_port}
+        set qt6.version     [lindex $installed 1]
     }
 }
 
@@ -61,9 +66,9 @@ if {[info exists name]} {
 }
 
 if {[info exists qt6.custom_qt_name]} {
-    set qt6.name       ${qt6.custom_qt_name}
-    set qt6.base_port  [lindex $custom_qt_versions(${qt6.name}) 0]
-    set qt6.version    [lindex $custom_qt_versions(${qt6.name}) 1]
+    set qt6.name        ${qt6.custom_qt_name}
+    set qt6.base_port   [lindex $custom_qt_versions(${qt6.name}) 0]
+    set qt6.version     [lindex $custom_qt_versions(${qt6.name}) 1]
 }
 
 if {[tbool just_want_qt6_version_info]} {
@@ -72,9 +77,9 @@ if {[tbool just_want_qt6_version_info]} {
 
 # standard install directory
 global qt_dir
-set qt_dir               ${prefix}/libexec/qt6
+set qt_dir              ${prefix}/libexec/qt6
 if {[info exists qt6.custom_qt_name]} {
-    set qt_dir           ${prefix}/libexec/${qt6.custom_qt_name}
+    set qt_dir          ${prefix}/libexec/${qt6.custom_qt_name}
 }
 
 # standard Qt non-.app executables directory
@@ -89,12 +94,12 @@ set qt_includes_dir     ${qt_dir}/include
 global qt_libs_dir
 set qt_libs_dir         ${qt_dir}/lib
 
-# standard Qt libraries directory
+# standard Qt frameworks directory
 global qt_frameworks_dir
 set qt_frameworks_dir   ${qt_libs_dir}
 
 global qt_archdata_dir
-set qt_archdata_dir  ${qt_dir}
+set qt_archdata_dir     ${qt_dir}
 
 # standard Qt plugins directory
 global qt_plugins_dir
@@ -145,7 +150,7 @@ global qt_apps_dir
 set qt_apps_dir         ${applications_dir}/Qt6
 
 # standard CMake module directory for Qt-related files
-#global qt_cmake_module_dir
+global qt_cmake_module_dir
 set qt_cmake_module_dir ${qt_libs_dir}/cmake
 
 # standard qt-cmake command location
@@ -153,8 +158,8 @@ global qt_cmake_cmd
 set qt_cmake_cmd        ${qt_dir}/bin/qt-cmake
 
 # standard qt-configure-module command location
-global qt_cmake_cmd
-set qt_configure_module_cmd        ${qt_dir}/bin/qt-configure-module
+global qt_configure_module_cmd
+set qt_configure_module_cmd ${qt_dir}/bin/qt-configure-module
 
 # standard qmake command location
 global qt_qmake_cmd
@@ -169,7 +174,8 @@ global qt_uic_cmd
 set qt_uic_cmd          ${qt_dir}/uic
 
 namespace eval qt6pg {
-    ############################################################################### Component Format
+    ###############################################################################
+    # Component Format
     #
     # "Qt Component Name" {
     #     Qt version introduced
@@ -178,7 +184,7 @@ namespace eval qt6pg {
     #     blank if module; "-plugin" if plugin
     # }
     #
-    # module info found at https://doc.qt.io/qt-5/qtmodules.html
+    # module info found at https://doc.qt.io/qt-6/qtmodules.html
     #
     ###############################################################################
     array set qt6_component_lib {
@@ -213,9 +219,9 @@ if {[tbool just_want_qt6_variables]} {
     return
 }
 
-# a procedure for declaring dependencies on qt6 components, which will expand them
-# into the appropriate subports for the qt6 flavour installed
-# e.g. qt6.depends_component qtsvg qtdeclarative
+# a procedure for declaring dependencies on Qt6 components, which will
+# expand them into the appropriate subports for the Qt6 flavour installed
+# (e.g., qt6.depends_component qtsvg qtdeclarative)
 proc qt6.depends_component {args} {
     global qt6_private_components
     foreach comp ${args} {
@@ -244,7 +250,7 @@ depends_build-append    port:pkgconfig
 
 # standard qmake spec
 # other platforms required
-#     see http://doc.qt.io/qt-5/supported-platforms.html
+#     see http://doc.qt.io/qt-6/supported-platforms.html
 #     and http://doc.qt.io/QtSupportedPlatforms/index.html
 options qt_qmake_spec
 global qt_qmake_spec_32
