@@ -20,17 +20,12 @@ proc qt6.get_default_name {} {
 
     # see https://doc.qt.io/qt-6/supported-platforms-and-configurations.html
     # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-6/supported-platforms-and-configurations.html
-    if { ${os.major} < 18 } {
-        ui_error "${subport} requires macOS 10.14 or later"
-        return -code error "incompatible OS version"
-    } else {
-        #
-        # macOS Mojave (10.14) and later
-        #
-        # # Qt 6.0 - 6.2: Supported
-        #
-        return qt6
-    }
+    #
+    # macOS Mojave (10.14) and later
+    #
+    # # Qt 6.0 - 6.2: Supported
+    #
+    return qt6
 }
 
 global qt6.name qt6.base_port qt6.version
