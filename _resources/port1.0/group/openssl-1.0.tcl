@@ -161,7 +161,10 @@ proc openssl::configure_build {} {
                                 openssl::remove_phase_env_var ${var}
                             }
                             # Set various env vars. that may help ports locate the correct openssl installation
-                            set openssl_cache_env_vars [list OPENSSL_DIR=[openssl::install_area]]
+                            set openssl_cache_env_vars [list \
+                                                            OPENSSLDIR=[openssl::install_area] \
+                                                            OPENSSL_DIR=[openssl::install_area]
+                                                       ]
                             foreach var ${openssl_cache_env_vars} {
                                 openssl::set_phase_env_var ${var}
                             }
