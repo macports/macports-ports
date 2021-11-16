@@ -257,10 +257,13 @@ proc cargo.append_envs { var {phases {configure build destroot}} } {
 }
 
 # see https://trac.macports.org/wiki/UsingTheRightCompiler
-cargo.append_envs CC=${configure.cc}   {build destroot}
-cargo.append_envs CXX=${configure.cxx} {build destroot}
-
-cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
+proc cargo.set_compiler_envs {} {
+    global configure.cc configure.cxx
+    cargo.append_envs CC=${configure.cc}   {build destroot}
+    cargo.append_envs CXX=${configure.cxx} {build destroot}
+    cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
+}
+port::register_callback cargo.set_compiler_envs
 
 # Is build caching enabled ?
 # WIP for now ...
@@ -274,7 +277,7 @@ cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
-    global os.major prefix
+    global os.major prefix configure.pkg_config_path
     global configure.cc configure.cxx subport configure.build_arch configure.universal_archs
     global merger_configure_env merger_build_env merger_destroot_env worksrcpath
 
@@ -295,6 +298,12 @@ proc cargo.environments {} {
     cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}"
     cargo.append_envs     "RUST_BACKTRACE=1"
     cargo.append_envs     "CARGO_BUILD_RUSTC=${prefix}/bin/rustc"
+
+    # Propagate pkgconfig path to build and destroot phases as well
+    # Needed to work with openssl PG
+    if { ${configure.pkg_config_path} ne "" } {
+        cargo.append_envs "PKG_CONFIG_PATH=${configure.pkg_config_path}" {build destroot}
+    }
 
     # CARGO_BUILD_TARGET does not work correctly
     # see the patchfile path-dyld.diff in cargo Portfile
