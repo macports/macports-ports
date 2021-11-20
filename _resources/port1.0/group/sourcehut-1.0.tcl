@@ -31,7 +31,7 @@ proc sourcehut.setup {srht_author srht_project srht_version {srht_tag_prefix ""}
     sourcehut.tag_prefix       ${srht_tag_prefix}
     sourcehut.tag_suffix       ${srht_tag_suffix}
 
-    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${sourcehut.project}))} {
+    if {![info exists PortInfo(name)]} {
         name                ${sourcehut.project}
     }
 
