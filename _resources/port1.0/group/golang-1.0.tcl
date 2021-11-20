@@ -90,7 +90,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
         default {
-            if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${go.project}))} {
+            if {![info exists PortInfo(name)]} {
                 name    ${go.project}
             }
             version     ${go.version}

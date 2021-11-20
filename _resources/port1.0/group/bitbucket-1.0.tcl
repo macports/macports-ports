@@ -54,7 +54,7 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
     bitbucket.version       ${bb_version}
     bitbucket.tag_prefix    ${bb_tag_prefix}
 
-    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${bitbucket.project}))} {
+    if {![info exists PortInfo(name)]} {
         name                ${bitbucket.project}
     }
     version                 ${bitbucket.version}

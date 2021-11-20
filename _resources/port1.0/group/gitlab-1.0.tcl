@@ -37,7 +37,7 @@ proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_su
     gitlab.tag_prefix       ${gl_tag_prefix}
     gitlab.tag_suffix       ${gl_tag_suffix}
 
-    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${gitlab.project}))} {
+    if {![info exists PortInfo(name)]} {
         name                ${gitlab.project}
     }
 
