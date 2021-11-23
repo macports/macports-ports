@@ -144,6 +144,13 @@ platform darwin {
                 -DCMAKE_OSX_ARCHITECTURES="${configure.build_arch}"
         }
 
+        # TODO: set values for GCC, set OpenMP_Fortran_INCLUDE_DIR
+        if {[option compiler.openmp_version] ne "" && [string match *clang* ${configure.compiler}]} {
+            configure.args-append \
+                -DOpenMP_C_INCLUDE_DIR=${prefix}/include/libomp \
+                -DOpenMP_CXX_INCLUDE_DIR=${prefix}/include/libomp
+        }
+
         # Setting our own -arch flags is unnecessary (in the case of a non-universal build) or even
         # harmful (in the case of a universal build, because it causes the compiler identification to
         # fail; see https://public.kitware.com/pipermail/cmake-developers/2015-September/026586.html).
