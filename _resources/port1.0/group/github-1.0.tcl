@@ -18,13 +18,13 @@ default github.raw {https://raw.githubusercontent.com/${github.author}/${github.
 
 # Later code assumes that github.master_sites is a simple string, not a list.
 options github.master_sites
-default github.master_sites {${github.homepage}/tarball/${git.branch}}
+default github.master_sites {https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=}
 
 options github.tarball_from
 default github.tarball_from tarball
 option_proc github.tarball_from handle_tarball_from
 proc handle_tarball_from {option action args} {
-    global github.author github.project github.master_sites git.branch github.homepage
+    global extract.suffix git.branch github.author github.homepage github.master_sites github.project
 
     if {${action} eq "set"} {
         github.tarball_from ${args}
@@ -36,10 +36,10 @@ proc handle_tarball_from {option action args} {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
             archive {
-                github.master_sites ${github.homepage}/archive/${git.branch}
+                github.master_sites https://codeload.github.com/${github.author}/${github.project}/tar.gz/refs/tags/${git.branch}?dummy=
             }
             tarball {
-                github.master_sites ${github.homepage}/tarball/${git.branch}
+                github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
             }
             tags {
                 return -code error "the value \"tags\" is deprecated for github.tarball_from. Please use \"tarball\" instead."
