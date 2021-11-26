@@ -21,6 +21,7 @@ default openssl_cache_branch_nodot ""
 default openssl_cache_depends      ""
 default openssl_cache_incdir       ""
 default openssl_cache_libdir       ""
+default openssl_cache_cpath        ""
 default openssl_cache_cmake_flags  ""
 default openssl_cache_configure    ""
 default openssl_cache_env_vars     [list ]
@@ -137,8 +138,10 @@ proc openssl::remove_phase_env_var { var } {
 }
 
 proc openssl::configure_build {} {
+    global prefix
     global openssl_cache_branch_nodot openssl_cache_depends openssl_cache_env_vars
-    global openssl_cache_incdir openssl_cache_libdir openssl_cache_cmake_flags openssl_cache_configure
+    global openssl_cache_incdir openssl_cache_libdir openssl_cache_cmake_flags
+    global openssl_cache_configure openssl_cache_cpath
 
     if { [openssl::is_enabled] } {
 
@@ -189,6 +192,14 @@ proc openssl::configure_build {} {
                             configure.cppflags-prepend -I${openssl_cache_incdir}
                             configure.cflags-prepend   -I${openssl_cache_incdir}
                             configure.ldflags-prepend  -L${openssl_cache_libdir}
+                            # Look in specific install areas before the main prefix
+                            configure.cppflags-replace -I${prefix}/include -isystem${prefix}/include
+                            # prepend to CPATH
+                            if { ${openssl_cache_cpath} ne "" } {
+                                compiler.cpath-delete ${openssl_cache_cpath}
+                            }
+                            set openssl_cache_cpath [openssl::include_dir]
+                            compiler.cpath-prepend ${openssl_cache_cpath}
                         }
                         cmake {
                             ui_debug "openssl: -> Setting openssl cmake configuration"
