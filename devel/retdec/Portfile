@@ -4,9 +4,10 @@ PortSystem          1.0
 PortGroup           cmake 1.0
 PortGroup           github 1.0
 PortGroup           openssl 1.0
+PortGroup           compiler_blacklist_versions 1.0
 
 github.setup        avast retdec 4.0 v
-revision            3
+revision            4
 conflicts           ${name}-devel
 
 categories          devel
@@ -26,35 +27,29 @@ post-patch {
     reinplace "s|\${CMAKE_INSTALL_PREFIX}|${destroot}\${CMAKE_INSTALL_PREFIX}|" ${worksrcpath}/CMakeLists.txt
     reinplace "s|\${CMAKE_INSTALL_PREFIX}|${destroot}\${CMAKE_INSTALL_PREFIX}|" ${worksrcpath}/support/CMakeLists.txt
     reinplace "s|DESTINATION \${SUPPORT_TARGET_DIR}/|DESTINATION \${RETDEC_INSTALL_SUPPORT_DIR}|" ${worksrcpath}/support/CMakeLists.txt
-
-    if {${name} eq ${subport}} {
-        # v4.0 requires stricly to use AppleClang
-        # anyway, it can be build by macports clang at old system
-        reinplace "s|\"AppleClang\"|\"AppleClang\" AND NOT \"\${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"Clang\"|" ${worksrcpath}/deps/openssl/CMakeLists.txt
-    }
 }
 
 if {${name} eq ${subport}} {
-    # v4.0 includes OpenSSL 1.1.1l => use the same version.
-    # See https://github.com/avast/retdec/pull/807
-    openssl.branch  1.1
-
     patch.pre_args  -p1
-    patchfiles      patch-openssl-v40.diff \
+    patchfiles      patch-hardcoded-make-v40.diff \
                     patch-python3.diff \
+                    patch-system-openssl.diff \
                     patch-yara-syntax-error.diff
 
-    if {${os.platform} eq "darwin" && ${os.major} < 18} {
-        known_fail  yes
-        pre-fetch {
-            ui_error "${subport} requires macOS 10.14 or later."
-            return -code error "incompatible macOS version"
-        }
+    # 4.0's yara uses std::variant<>, which is broken on macOS <= 10.12
+    if {${os.platform} eq "darwin" && ${os.major} <= 16} {
+        depends_lib-append          port:macports-libcxx
+        configure.cxxflags-append   -nostdinc++ -I${prefix}/include/libcxx/v1
+        configure.ldflags-append    -L${prefix}/lib/libcxx
     }
 }
 
 compiler.cxx_standard \
                     2017
+
+# Extend blacklist to cover macOS10.13
+compiler.blacklist-append \
+                    {clang < 1100} {macports-clang-[4-9].0}
 
 build.args-append   CC=${configure.cc} \
                     CXX=${configure.cxx}
@@ -75,12 +70,22 @@ depends_lib-append  port:python39 \
 depends_run-append  path:bin/dot:graphviz \
                     port:upx
 
+# error: /usr/bin/ranlib: unknown option character `n' in: -no_warning_for_no_symbols
+if {${os.platform} eq "darwin" && ${os.major} < 13} {
+    depends_build-append \
+                    port:cctools
+    configure.args-append \
+                    -DCMAKE_RANLIB=${prefix}/bin/ranlib
+}
+
 # NOTE: Force use of gmake; otherwise, macOS' make will be used for top-level
 # subprocesses, while gmake will be used for lower-level ones. And jobserver
 # coordination doesn't work between them, preventing proper limiting of parallel
 # jobs!
 # See: https://trac.macports.org/ticket/63999
 build.cmd           ${prefix}/bin/gmake
+build.args-append   MAKE=${prefix}/bin/gmake
+build.env-append    MAKE=${prefix}/bin/gmake
 
 subport retdec-devel {
     conflicts       $name
@@ -94,19 +99,14 @@ subport retdec-devel {
                     sha256  a0db993d9f41a0ae5a6ab649271f913105e618781452fa5ef9f4ff5fe80cca8a \
                     size    12133669
 
+    patch.pre_args  -p1
+    patchfiles      patch-hardcoded-make-devel.diff
+
     # Before Catalina it also requires macports-libcxx
     if {${os.platform} eq "darwin" && ${os.major} < 19} {
         depends_lib-append          port:macports-libcxx
         configure.cxxflags-append   -nostdinc++ -I${prefix}/include/libcxx/v1
         configure.ldflags-append    -L${prefix}/lib/libcxx
-    }
-
-    if {${os.platform} eq "darwin" && ${os.major} < 17} {
-        known_fail  yes
-        pre-fetch {
-            ui_error "${subport} requires macOS 10.13 or later."
-            return -code error "incompatible macOS version"
-        }
     }
 }
 
