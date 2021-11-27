@@ -277,7 +277,7 @@ proc handle_set_go_vendors {vendors_str} {
                 switch ${vdomain} {
                     github.com {
                         set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
-                        set master_site https://github.com/${vauthor}/${vproject}/tarball/${vversion}
+                        set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
                     }
                     bitbucket.org {
                         set distfile ${vversion}.tar.gz
