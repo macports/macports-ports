@@ -123,14 +123,14 @@ proc compwrap::wrap_compiler {tag} {
     if { [option compwrap.add_compiler_flags] } {
         # standard options
         set flag [compwrap::comp_flags ${tag}]
-        ui_debug "compiler_wrapper:  -> Will embed '${flag}' in ${tag} wrapper script"
+        ui_debug "compiler_wrapper:  -> Comp Flags: Will embed '${flag}' in ${tag} wrapper script"
         append comp_opts " ${flag}"
         # isysroot
         if {[option configure.sdkroot] ne "" && \
                 ![option compiler.limit_flags] && \
                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
             set sdk -isysroot[option configure.sdkroot]
-            ui_debug "compiler_wrapper:  -> Will embed '${sdk}' in ${tag} wrapper script"
+            ui_debug "compiler_wrapper:  -> SDK: Will embed '${sdk}' in ${tag} wrapper script"
             append comp_opts " ${sdk}"
         }
         # pipe
@@ -147,9 +147,15 @@ proc compwrap::wrap_compiler {tag} {
     }
 
     # Basic option, to pass on all command line arguments
-    append comp_opts " [join [option compwrap.compiler_pre_flags]]"
+    if { [llength [option compwrap.compiler_pre_flags]] > 0 } {
+        ui_debug "compiler_wrapper:  -> Pre Flags: Will embed '[option compwrap.compiler_pre_flags]' in ${tag} wrapper script"
+        append comp_opts " [join [option compwrap.compiler_pre_flags]]"
+    }
     append comp_opts " \"[join [option compwrap.compiler_args_forward]]\""
-    append comp_opts " [join [option compwrap.compiler_post_flags]]"
+    if { [llength [option compwrap.compiler_post_flags]] > 0 } {
+        ui_debug "compiler_wrapper:  -> Post Flags: Will embed '[option compwrap.compiler_post_flags]' in ${tag} wrapper script"
+        append comp_opts " [join [option compwrap.compiler_post_flags]]"
+    }
 
     # Prepend ccache launcher if active
     if { [compwrap::use_ccache ${tag}] } {
