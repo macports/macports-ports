@@ -5,6 +5,8 @@
 #
 # This port group handles setting ports up to build against specific openssl versions
 
+PortGroup compiler_wrapper 1.0
+
 namespace eval openssl { }
 
 options openssl.branch
@@ -25,6 +27,8 @@ default openssl_cache_cpath        ""
 default openssl_cache_cmake_flags  ""
 default openssl_cache_configure    ""
 default openssl_cache_env_vars     [list ]
+default openssl_cache_orig_cc      ""
+default openssl_cache_orig_cxx     ""
 
 proc openssl::default_branch {} {
     # NOTE - Whenever the default branch is bumped, the revision
@@ -142,6 +146,7 @@ proc openssl::configure_build {} {
     global openssl_cache_branch_nodot openssl_cache_depends openssl_cache_env_vars
     global openssl_cache_incdir openssl_cache_libdir openssl_cache_cmake_flags
     global openssl_cache_configure openssl_cache_cpath
+    global openssl_cache_orig_cc openssl_cache_orig_cxx
 
     if { [openssl::is_enabled] } {
 
@@ -217,6 +222,18 @@ proc openssl::configure_build {} {
                                                           ]
                             foreach flag ${openssl_cache_cmake_flags} {
                                 configure.args-append ${flag}
+                            }
+                        }
+                        compiler_wrap {
+                            ui_debug "openssl: -> Setting openssl compiler wrap configuration"
+                            if { ${openssl_cache_orig_cc} eq "" && ${openssl_cache_orig_cxx} eq "" } {
+                                set openssl_cache_orig_cc  [compwrap::wrap_compiler cc]
+                                set openssl_cache_orig_cxx [compwrap::wrap_compiler cxx]
+                                pre-configure {
+                                    compwrap.compiler_pre_flags -I[openssl::include_dir]
+                                    configure.cc  [compwrap::wrap_compiler cc]
+                                    configure.cxx [compwrap::wrap_compiler cxx]
+                                }
                             }
                         }
                         default {
