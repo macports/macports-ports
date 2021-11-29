@@ -229,8 +229,8 @@ proc openssl::configure_build {} {
                             if { ${openssl_cache_orig_cc} eq "" && ${openssl_cache_orig_cxx} eq "" } {
                                 set openssl_cache_orig_cc  [compwrap::wrap_compiler cc]
                                 set openssl_cache_orig_cxx [compwrap::wrap_compiler cxx]
+                                compwrap.compiler_pre_flags -I[openssl::include_dir]
                                 pre-configure {
-                                    compwrap.compiler_pre_flags -I[openssl::include_dir]
                                     configure.cc  [compwrap::wrap_compiler cc]
                                     configure.cxx [compwrap::wrap_compiler cxx]
                                 }
