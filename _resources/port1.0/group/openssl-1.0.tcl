@@ -227,8 +227,8 @@ proc openssl::configure_build {} {
                             ui_debug "openssl: -> Setting openssl compiler wrap configuration"
                             if { ${openssl_cache_compwrap} eq "" } {
                                 set openssl_cache_compwrap "done"
-                                compwrap.compiler_pre_flags -I[openssl::include_dir]
                                 pre-configure {
+                                    compwrap.compiler_pre_flags -I[openssl::include_dir]
                                     configure.cc  [compwrap::wrap_compiler cc]
                                     configure.cxx [compwrap::wrap_compiler cxx]
                                 }
