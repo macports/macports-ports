@@ -187,6 +187,7 @@ proc openssl::configure_build {} {
                             if { ${openssl_cache_incdir} ne "" } {
                                 configure.cppflags-delete -I${openssl_cache_incdir}
                                 configure.cflags-delete   -I${openssl_cache_incdir}
+                                configure.cxxflags-delete -I${openssl_cache_incdir}
                             }
                             if { ${openssl_cache_libdir} ne "" } {
                                 configure.ldflags-prepend  -L${openssl_cache_libdir}
@@ -195,6 +196,7 @@ proc openssl::configure_build {} {
                             set openssl_cache_libdir [openssl::lib_dir]
                             configure.cppflags-prepend -I${openssl_cache_incdir}
                             configure.cflags-prepend   -I${openssl_cache_incdir}
+                            configure.cxxflags-prepend -I${openssl_cache_incdir}
                             configure.ldflags-prepend  -L${openssl_cache_libdir}
                             # Look in specific install areas before the main prefix
                             configure.cppflags-replace -I${prefix}/include -isystem${prefix}/include
@@ -228,7 +230,7 @@ proc openssl::configure_build {} {
                             if { ${openssl_cache_compwrap} eq "" } {
                                 set openssl_cache_compwrap "done"
                                 pre-configure {
-                                    compwrap.compiler_pre_flags -I[openssl::include_dir]
+                                    compwrap.compiler_pre_flags-append -I[openssl::include_dir]
                                     configure.cc  [compwrap::wrap_compiler cc]
                                     configure.cxx [compwrap::wrap_compiler cxx]
                                 }
