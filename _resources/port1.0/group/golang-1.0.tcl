@@ -188,8 +188,8 @@ proc go.append_env {} {
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         # Also remove '-static' from compilation options as this is not supported on older systems.
         compwrap.compiler_args_forward \$\{\@\//-static/\}
-        compwrap.compiler_pre_flags    ${configure.ldflags}
-        compwrap.compiler_post_flags   -Wno-error
+        compwrap.compiler_pre_flags-append    ${configure.ldflags}
+        compwrap.compiler_post_flags-append   -Wno-error
     }
     post-extract {
         build.env-append \
