@@ -30,6 +30,7 @@ if {${configure.build_arch} eq "arm64" && ${os.platform} eq "darwin"} {
 
 # Enforce same compiler settings as used by rust
 compiler.cxx_standard   2017
+compiler.thread_local_storage yes
 
 destroot {
     ui_error "No destroot phase in the Portfile!"
