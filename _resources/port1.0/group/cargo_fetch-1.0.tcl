@@ -118,12 +118,39 @@ proc cargo._write_cargo_checksum {cdirname chksum} {
     close $chkfile
 }
 
+proc cargo._old_macos_compatibility {cname cversion} {
+    global os.platform os.major cargo.home
+    if {${os.platform} ne "darwin" && ${os.major} >= 12} {
+        return;
+    }
+
+    switch ${cname} {
+        "crypto-hash" {
+            # switch crypto-hash to use openssl instead of commoncrypto
+            # See: https://github.com/malept/crypto-hash/issues/23
+            reinplace "s|target_os = \"macos\"|target_os = \"macos_disabled\"|g" \
+                ${cargo.home}/macports/crypto-hash-${cversion}/src/lib.rs
+            reinplace "s|macos|macos_disabled|g" \
+                ${cargo.home}/macports/crypto-hash-${cversion}/Cargo.toml
+        }
+        "curl-sys" {
+            # curl-sys requires CCDigestGetOutputSizeFromRef which is available since macOS 10.8
+            # disable USE_SECTRANSP to avoid calling of CCDigestGetOutputSizeFromRef
+            # See: https://github.com/alexcrichton/curl-rust/issues/429
+            reinplace "s|USE_SECTRANSP|USE_SECTRANSP_DISABLED|g" \
+                ${cargo.home}/macports/curl-sys-${cversion}/build.rs
+        }
+    }
+
+}
+
 proc cargo._import_crate {cname cversion chksum cratefile} {
     global cargo.home
 
     ui_info "Adding ${cratefile} to cargo home"
     cargo._extract_crate ${cratefile}
     cargo._write_cargo_checksum "${cname}-${cversion}" "\"${chksum}\""
+    cargo._old_macos_compatibility ${cname} ${cversion}
 }
 
 proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
@@ -135,6 +162,7 @@ proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
     ui_info "Adding ${cratefile} from github to cargo home"
     cargo._extract_crate ${cratefile}
     cargo._write_cargo_checksum ${cdirname} "null"
+    cargo._old_macos_compatibility ${cname} ${cversion}
 }
 
 # The distfiles of the main port will also be stored in this directory,
