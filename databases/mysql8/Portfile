@@ -3,14 +3,12 @@
 PortSystem              1.0
 
 name                    mysql8
-version                 8.0.26
-# When updating to 8.0.27, set compiler.cxx_standard to 2017
+version                 8.0.27
 
 set boost_version       1.73.0
 
 categories              databases
 platforms               darwin
-license                 GPL-2
 
 homepage                https://dev.mysql.com
 
@@ -18,25 +16,41 @@ maintainers             {gmail.com:herby.gillot @herbygillot} \
                         openmaintainer
 
 # Set revision_client and revision_server to 0 on version bump.
-set revision_client 1
-set revision_server 0
+set revision_client     4
+set revision_server     0
 
 set name_mysql          ${name}
 set version_branch      [join [lrange [split ${version} .] 0 1] .]
 set boost_distver       [join [split ${boost_version} .] _]
 set boost_distname      boost_${boost_distver}
 
+# Undefined symbols for architecture x86_64:
+#   "std::bad_optional_access::~bad_optional_access()", referenced from:
+platform darwin {
+    if {${os.major} < 17} {
+        known_fail yes
+        pre-fetch {
+            ui_error "${name} @${version} requires macOS 10.13 or newer."
+            return -code error "incompatible macOS version"
+        }
+    }
+}
 
 if {$subport eq $name} {
     PortGroup           muniversal 1.0
     PortGroup           cmake 1.1
     PortGroup           select 1.0
     PortGroup           compiler_blacklist_versions 1.0
-    PortGroup           legacysupport 1.0
+    PortGroup           openssl 1.0
+
+    # Seemingly not yet ready for openssl 3
+    # https://trac.macports.org/ticket/63909
+    openssl.branch      1.1
 
     description         Multithreaded SQL database server
     long_description    MySQL is an open-source, multi-threaded SQL database.
-    license             GPL-2
+    # https://downloads.mysql.com/docs/licenses/mysqld-8.0-gpl-en.pdf
+    license             {GPL-2 OpenSSLException}
 
     revision            ${revision_client}
 
@@ -49,17 +63,18 @@ if {$subport eq $name} {
                         ${boost_distname}${extract.suffix}:boost
 
     checksums           ${distname}${extract.suffix} \
-                        rmd160  e659d2506fb06fd49e82571a6957f72e89c3acbc \
-                        sha256  dbddcdc772f806c711a3731363a50f3d359eaac9c5d1480084728a1c2ce5da4d \
-                        size    284626983 \
+                        rmd160  45e8048e46faa363597ace59f8cc66c7163150c9 \
+                        sha256  4a7e72f899e6f24bcd479d378edd2f32f583e687f93a26291774815d5a549b97 \
+                        size    285550905 \
                         ${boost_distname}${extract.suffix} \
                         rmd160  47f3dad1ddb5e1e9f367f05a4019d5fac48a2e3b \
                         sha256  9995e192e68528793755692917f9eb6422f3052a53c5e13ba278a228af6c7acf \
                         size    128699082
 
-    depends_lib-append  path:lib/libssl.dylib:openssl \
-                        port:cyrus-sasl2 \
+    depends_lib-append  port:cyrus-sasl2 \
                         port:icu \
+                        port:libedit \
+                        port:libevent \
                         port:zlib \
                         port:zstd
 
@@ -70,11 +85,10 @@ if {$subport eq $name} {
 
     use_parallel_build  yes
 
-    # Will require C++17 as of 8.0.27
-    compiler.cxx_standard 2014
+    compiler.cxx_standard 2017
 
-    # TODO: explain why these compilers are blacklisted
-    compiler.blacklist-append *gcc-5 {clang < 900}
+    # /usr/include/c++/v1/optional:960:34: note: candidate function not viable: no known conversion from 'optional<...>' to 'const optional<...>' for object argument
+    compiler.blacklist-append {clang < 1100}
 
     # clang 8.0+ are too strict to build this port
     # version:1:1: error: C++ requires a type specifier for all declarations
@@ -87,7 +101,6 @@ if {$subport eq $name} {
 
         configure.args-append \
             -DWITH_DEBUG:BOOL=ON \
-            -DWITH_DTRACE:BOOL= ON \
             -DINSTALL_MYSQLTESTDIR:PATH="share/${name_mysql}/mysql-test" \
             -DWITH_UNIT_TESTS=ON
     } else {
@@ -95,7 +108,6 @@ if {$subport eq $name} {
 
         configure.args-append \
             -DWITH_DEBUG=OFF \
-            -DWITH_DTRACE:BOOL=OFF \
             -DWITH_UNIT_TESTS=OFF
     }
 
@@ -119,17 +131,19 @@ if {$subport eq $name} {
     configure.args-append \
         -DFORCE_UNSUPPORTED_COMPILER=ON \
         -DDOWNLOAD_BOOST=0 \
-        -DENABLE_DOWNLOADS:BOOL=OFF \
         -DINSTALL_LAYOUT:STRING=MACPORTS \
         -DMYSQL_DATADIR:PATH="${prefix}/var/db/${name_mysql}" \
         -DMYSQL_UNIX_ADDR:PATH="${prefix}/var/run/${name_mysql}/mysqld.sock" \
         -DSYSCONFDIR:PATH="${prefix}/etc/${name_mysql}" \
         -DWITH_BOOST:PATH="${worksrcpath}/../${boost_distname}" \
+        -DWITH_EDITLINE=system \
         -DWITH_ICU:PATH="${prefix}" \
         -DWITH_INNODB_MEMCACHED=1 \
+        -DWITH_LIBEVENT=system \
+        -DLIBEVENT_INCLUDE_PATH:PATH="${prefix}/include" \
+        -DLIBEVENT_LIB_PATHS:PATH="${prefix}/lib" \
         -DWITH_PROTOBUF=bundled \
         -DWITH_SASL:PATH="${prefix}" \
-        -DWITH_SSL:PATH="${prefix}" \
         -DWITH_ZLIB:PATH=system \
         -DWITH_ZSTD=system
 
@@ -139,11 +153,15 @@ if {$subport eq $name} {
 #       -DROUTER_INSTALL_LIBDIR="lib/${name_mysql}" \
 #       -DROUTER_INSTALL_PLUGINDIR="lib/${name_mysql}/mysqlrouter"
 
+    # setns() is a Linux system call
+    configure.checks.implicit_function_declaration.whitelist-append setns
+
     patch.pre_args  -p1
     patchfiles      patch-cmake-install_macros-protobuf-path.cmake.diff \
                     patch-cmake-install_layout.cmake.diff \
                     patch-cmake-sasl-disable-platform-check.diff \
-                    patch-mysql8-workaround-no-SC_PHYS_PAGES.diff \
+                    patch-package_name.cmake.diff \
+                    patch-rpcgen.cmake.diff \
                     patch-scripts-cmakelists.diff \
                     patch-sql-local-boost.diff \
                     patch-mysql8-ffsll-apple.diff
@@ -258,7 +276,7 @@ as follows:
 
 subport ${name_mysql}-server {
     revision            ${revision_server}
-    license             GPL-2
+    license             BSD
     description         Run ${name_mysql} as server
     long_description    {*}${description}
 

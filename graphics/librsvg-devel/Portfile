@@ -1,0 +1,184 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           gobject_introspection 1.0
+
+name                librsvg-devel
+set my_name         librsvg
+conflicts           librsvg
+
+license             {GPL-2+ LGPL-2+}
+
+categories          graphics gnome
+platforms           darwin
+
+homepage            https://wiki.gnome.org/Projects/LibRsvg
+
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         GNOME implementation of rsvg.
+long_description    {*}${description}
+
+depends_build-append port:pkgconfig
+
+depends_lib-append  path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    port:gdk-pixbuf2 \
+                    port:libxml2 \
+                    port:vala
+
+license_noconflict  gobject-introspection \
+                    rust \
+                    vala
+
+# cargo does not build on 10.7 or earlier
+# https://trac.macports.org/ticket/55794
+
+# cargo build also fails on 10.8 due to known SSL/TLS issues with github.com
+# Updating registry `https://github.com/rust-lang/crates.io-index`
+# Downloading shell-escape v0.1.4
+# error: unable to get packages from source
+# Caused by:[35] SSL connect error (error:14077410:SSL routines:SSL23_GET_SERVER_HELLO:sslv3 alert handshake failure)
+# https://trac.macports.org/ticket/56195
+
+# rust @1.30.1 fails to build on 10.10 and earlier
+# https://trac.macports.org/ticket/57768
+# Update - As of rust 1.51.0 it now builds on 10.9 and newer.
+
+# rust does not yet support Apple Silicon
+# https://github.com/rust-lang/rust/issues/73908
+
+set max_darwin_for_rust 13
+
+#----------------------------------------------------------------------------------------
+# Developer-only override, allowing easy testing of desired behavior:
+# - librsvg.override.fallback=yes - Force use of fallback release
+# - librsvg.override.fallback=no  - Force use of latest release
+#----------------------------------------------------------------------------------------
+if {[info exists librsvg.override.fallback]} {
+    if {[string is boolean -strict ${librsvg.override.fallback}]} {
+        ui_msg "librsvg.override.fallback specified: ${librsvg.override.fallback}"
+        set librsvg_fallback \
+            [string is true -strict ${librsvg.override.fallback}]
+    } else {
+        error "librsvg.override.fallback must be specified as a valid boolean value"
+    }
+} else {
+    if {${os.platform} eq "darwin" && (
+            ${os.major} < ${max_darwin_for_rust}
+            || ${build_arch} eq "arm64"
+            || ${universal_possible} && [variant_isset universal] && "arm64" in ${configure.universal_archs}
+            || ${build_arch} eq "i386"
+            || ${universal_possible} && [variant_isset universal] && "i386" in ${configure.universal_archs}
+        )} {
+        set librsvg_fallback yes
+    } else {
+        set librsvg_fallback no
+    }
+}
+
+if {${librsvg_fallback}} {
+    # revert to latest pre-cargo version
+    version         2.40.20
+    revision        4
+    epoch           1
+
+    checksums       rmd160  e697e1220779f77e81a890718ef5cda5b5e6b740 \
+                    sha256  cff4dd3c3b78bfe99d8fcfad3b8ba1eee3289a0823c0e118d78106be6b84c92b \
+                    size    1796376
+
+    # pre-cargo versions still use libcroco
+    depends_lib-append \
+                    port:libcroco
+
+    # variant viewer disabled by default in an attempt to avoid loading
+    # gtk3 by those who are using it strictly as a library outside of GTK+/GNOME.
+    # https://trac.macports.org/ticket/43328
+    # https://trac.macports.org/ticket/47443
+    # https://trac.macports.org/ticket/47596
+    variant viewer description "Build the rsvg-view-3 viewer utility." {
+        depends_lib-append  path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+        depends_run-append  port:adwaita-icon-theme
+    }
+    if {![variant_isset viewer]} {
+        patchfiles-append   patch-disable-viewer-pre-cargo.diff
+    }
+} else {
+    PortGroup       cargo_fetch 1.0
+
+    version         2.52.4
+    revision        0
+    epoch           2
+    
+    checksums       rmd160  543cd5c1d33b137b64babfed66230ed1595d9d51 \
+                    sha256  660ec8836a3a91587bc9384920132d4c38d1d1718c67fe160c5213fe4dec2928 \
+                    size    23287420
+
+    # Only needed for linkat on macOS 10.9
+    legacysupport.newest_darwin_requires_legacy 13
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        build.env-append LDFLAGS="${configure.ldflags} [legacysupport::get_library_link_flags]"
+    }
+
+    # cargo_fetch appends cargo build dependency
+    depends_build-append \
+                    port:rust
+
+    # when CARGO_BUILD_TARGET is set, directory structure changes
+    patchfiles-append \
+                    patch-configure-rust_target_subdir.diff
+
+}
+
+set branch          [join [lrange [split ${version} .] 0 1] .]
+master_sites        gnome:sources/${my_name}/${branch}/
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+use_xz              yes
+
+gobject_introspection yes
+
+configure.args      --enable-vala=yes \
+                    --disable-silent-rules \
+                    --disable-Bsymbolic
+
+configure.ldflags-append    -lobjc
+
+test.run            yes
+test.dir            ${worksrcpath}/tests
+test.target         check
+
+post-destroot {
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING.LIB NEWS \
+        ${destroot}${docdir}
+
+    if {${librsvg_fallback}} {
+        xinstall -m 644 -W ${worksrcpath} COPYING \
+            ${destroot}${docdir}
+    }
+
+    xinstall -m 755 -W ${filespath} svg2pdf \
+        ${destroot}${prefix}/bin
+
+    set badfile ${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.a
+    if {[file exists ${destroot}${badfile}]} {
+        file delete ${destroot}${badfile}
+    }
+}
+
+post-activate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+post-deactivate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+variant x11 conflicts quartz {}
+variant quartz conflicts x11 {}
+
+livecheck.type      gnome
+livecheck.name      ${my_name}

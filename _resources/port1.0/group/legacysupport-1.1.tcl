@@ -35,6 +35,9 @@ default legacysupport.redirect_bins     {}
 options legacysupport.use_mp_libcxx
 default legacysupport.use_mp_libcxx     no
 
+options legacysupport.disable_function_wrap
+default legacysupport.disable_function_wrap no
+
 if {[info exists makefile.override]} {
     pre-configure {
         ui_error "The legacysupport PG must be included *before* the makefile PG"
@@ -55,7 +58,11 @@ proc legacysupport::get_library_name {} {
 proc legacysupport::get_cpp_flags {} {
     global os.platform os.major prefix
     if {${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy]} {
-        return -isystem${prefix}/include/LegacySupport
+        if { [option legacysupport.disable_function_wrap] } {
+            return "-isystem${prefix}/include/LegacySupport -D__DISABLE_MP_LEGACY_SUPPORT_REALPATH_WRAP__=1 -D__DISABLE_MP_LEGACY_SUPPORT_SYSCONF_WRAP__=1"
+        } else {
+            return  -isystem${prefix}/include/LegacySupport
+        }
     } else {
         return ""
     }
@@ -170,9 +177,9 @@ proc legacysupport::add_legacysupport {} {
         # Flags for using MP libcxx
         if { [option legacysupport.use_mp_libcxx] } {
             legacysupport::add_once depends_lib append port:macports-libcxx
-            append ls_cache_incpath  " ${prefix}/include/libcxx"
+            append ls_cache_incpath  " ${prefix}/include/libcxx/v1"
             append ls_cache_ldflags  " -L${prefix}/lib/libcxx"
-            append ls_cache_cppflags " -isystem${prefix}/include/libcxx"
+            append ls_cache_cppflags " -nostdinc++ -isystem${prefix}/include/libcxx/v1"
         }
 
         ui_debug "legacysupport: ldflags  ${ls_cache_ldflags}"

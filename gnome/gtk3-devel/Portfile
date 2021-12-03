@@ -1,0 +1,295 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           xcodeversion 1.0
+PortGroup           active_variants 1.1
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
+
+name                gtk3-devel
+conflicts           gtk3
+set my_name         gtk3
+version             3.24.30
+revision            1
+epoch               0
+
+set proj_name       gtk+
+set branch          [join [lrange [split ${version} .] 0 1] .]
+categories          gnome x11
+license             LGPL-2.1+
+maintainers         {mascguy @mascguy} openmaintainer
+platforms           darwin
+
+description         GTK+ widget toolkit
+
+long_description    GTK+ is a highly usable, feature-rich toolkit for creating graphical user \
+                    interfaces, which boasts cross-platform compatibility and an easy-to-use \
+                    API. GTK+ is written in C, but has bindings to many other popular \
+                    programming languages, such as C++, Python and C#, among others.
+
+homepage            http://www.gtk.org/
+distname            ${proj_name}-${version}
+dist_subdir         ${my_name}
+use_xz              yes
+master_sites        gnome:sources/${proj_name}/${branch}/
+
+checksums           rmd160  fed62b16b1a0b533ff42df78a34394f1b68af212 \
+                    sha256  ba75bfff320ad1f4cfbee92ba813ec336322cc3c660d406aad014b07087a3ba9 \
+                    size    22407016
+
+minimum_xcodeversions {9 3.1}
+
+depends_build       port:gtk-doc \
+                    path:bin/pkg-config:pkgconfig
+
+depends_lib         port:atk \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    port:gdk-pixbuf2 \
+                    path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    port:gobject-introspection \
+                    port:libepoxy
+
+# mesa required to configure both +x11, +quartz (not just +x11) due to their dependency on libepoxy
+depends_lib-append  port:mesa
+                    
+depends_run         port:shared-mime-info \
+                    port:hicolor-icon-theme
+
+# darwin 10 and earlier requires legacy support for O_CLOEXEC
+legacysupport.newest_darwin_requires_legacy 10
+
+# use autoreconf to deal with dependency tracking issues in configure
+use_autoreconf      yes
+autoreconf.args     -fvi
+
+# gtk3 +quartz uses instancetype which is not available
+# before approximately Xcode 4.6 (#49391)
+# if building +x11 blacklist comilers that do not support C11
+# (redefinition of typedef ‘GdkX11Monitor’ at gdkscreen-x11.h:33)
+
+if {[variant_isset quartz]} {
+    compiler.blacklist  *gcc-3.* *gcc-4.* {clang < 425}
+} else {
+    compiler.blacklist  *gcc-3.* *gcc-4.* {clang < 300}
+}
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+
+# gobject-introspection uses g-ir-scanner, which uses $CC from env
+
+if {${universal_possible} && [variant_isset universal]} {
+    foreach arch ${configure.universal_archs} {
+        lappend merger_build_args(${arch})  CC='${configure.cc} -arch ${arch}'
+        lappend merger_build_args(${arch})  CC_FOR_BUILD='${configure.cc} -arch ${arch}'
+        lappend merger_destroot_args(${arch})  CC='${configure.cc} -arch ${arch}'
+        lappend merger_destroot_args(${arch})  CC_FOR_BUILD='${configure.cc} -arch ${arch}'
+    }
+} else {
+    build.args-append       CC="${configure.cc} ${configure.cc_archflags}" \
+                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
+    destroot.args-append    CC="${configure.cc} ${configure.cc_archflags}" \
+                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
+}
+
+pre-configure {
+    if {![variant_isset quartz] && ![variant_isset x11]} {
+        error "Either +x11 or +quartz is required"
+    }
+}
+
+configure.ccache    no
+
+configure.cppflags-append \
+                    -DX_LOCALE
+
+configure.cflags-append \
+                    -fstrict-aliasing
+
+# cloudprint backend requires rest, json-glib
+# but this causes a circular dependency on libsoup
+# explicitly disable cloudprint for now
+
+configure.args      --enable-static \
+                    --disable-glibtest \
+                    --enable-introspection \
+                    --disable-cloudprint \
+                    --disable-wayland-backend \
+                    --disable-schemas-compile \
+                    gio_can_sniff=yes
+
+build.args-append   V=1 \
+                    CPP_FOR_BUILD="${configure.cpp}"
+
+test.run            yes
+test.target         check
+
+post-destroot {
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING HACKING NEWS README \
+        ${destroot}${docdir}
+
+    # avoid conflict with the gtk-update-icon-cache installed by gtk2
+    move ${destroot}${prefix}/bin/gtk-update-icon-cache \
+         ${destroot}${prefix}/bin/gtk-update-icon-cache-3.0
+    
+    ui_debug "Creating gtk.immodules..."
+    system "DYLD_LIBRARY_PATH=${destroot}${prefix}/lib \
+        ${destroot}${prefix}/bin/gtk-query-immodules-3.0 \
+        ${destroot}${prefix}/lib/gtk-3.0/3.0.0/immodules/*.so \
+        >${destroot}${prefix}/etc/gtk-3.0/gtk.immodules"
+    reinplace "s|${destroot}||" ${destroot}${prefix}/etc/gtk-3.0/gtk.immodules
+}
+
+platform darwin {
+    if {${os.major} <= 8} {
+        # The rules enabled by gobject-introspection require GNU make 3.81+
+        depends_build-append    port:gmake
+        build.cmd               ${prefix}/bin/gmake
+
+        if {[variant_isset quartz] || ![variant_isset x11]} {
+            configure.ldflags-append  -framework Cocoa -framework Carbon
+        }
+
+        # https://trac.macports.org/ticket/63151
+        configure.args-append --disable-dependency-tracking
+    }
+
+    if {${os.major} <= 10} {
+        # OS X 10.6 and earlier do not supply all cursors specified by gtk3 +quartz (#49391)
+        if {[variant_isset quartz]} {
+            patchfiles-append   patch-gdk_quartz_gdkcursor-quartz-10_6_compat.diff
+        }
+    }
+    if {${os.major} <= 12} {
+        # requires cups 1.7
+        configure.args-append --disable-cups
+    }
+    if {${os.major} >= 21} {
+        patchfiles-append patch-gdk_quartz-12_compat.diff
+    }
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    set cups /usr/bin/cups-config
+    if {[info exists universal_sysroot]} {
+        set cups ${universal_sysroot}${cups}
+    }
+    configure.env-append CUPS_CONFIG=${cups}
+
+    # Find architectures which will not run on build platform.
+    set cpu64bit_capable [sysctl hw.cpu64bit_capable]
+    if {${os.arch} eq "i386"} {
+        set cross_archs ppc64
+        if {${os.major} >= 10} {
+            lappend cross_archs ppc
+        }
+        set host_archs "ppc ppc64"
+        set run_archs i386
+        if {${cpu64bit_capable}} {
+            set run_archs "x86_64 ${run_archs}"
+        }
+    } else {
+        set cross_archs "i386 x86_64"
+        set host_archs "i386 x86_64"
+        set run_archs ppc
+        if {${cpu64bit_capable}} {
+            set run_archs "ppc64 ${run_archs}"
+        }
+    }
+
+    pre-configure {
+        set run_arch ""
+        foreach arch ${run_archs} {
+            if {[lsearch ${universal_archs_to_use} ${arch}] != -1} {
+                set run_arch ${arch}
+                break
+            }
+        }
+
+        if {${run_arch} eq ""} {
+            ui_error ""
+            ui_error "${name} requires at least one architecture runnable on this"
+            ui_error "machine to be able to build universally. Please add at least"
+            ui_error "one of the following architectures to `universal_archs` in"
+            ui_error "\"${prefix}/etc/macports/macports.conf\":"
+            ui_error ""
+            ui_error "\t${run_archs}"
+            ui_error ""
+        }
+
+        foreach arch ${host_archs} {
+            lappend merger_configure_env(${arch}) \
+                NM='/usr/bin/nm -p'
+        }
+
+        foreach arch ${cross_archs} {
+            lappend merger_configure_env(${arch}) \
+                GTK_UPDATE_ICON_CACHE=${worksrcpath}-${run_arch}/gtk/gtk-update-icon-cache \
+                GDK_PIXBUF_CSOURCE=${worksrcpath}-${run_arch}/gdk-pixbuf/gdk-pixbuf-csource
+            lappend merger_build_env(${arch}) \
+                GDK_PIXBUF_MODULE_FILE=${worksrcpath}-${run_arch}/gdk-pixbuf/gdk-pixbuf.loaders
+        }
+
+        # Let gtk_host in .pc files be the same on all architectures
+        set host powerpc
+        if {${os.arch} eq "i386"} {
+            set host i686
+        }
+        reinplace s/@host@/${host}-apple-darwin${os.version}/ \
+            {*}[glob -directory ${worksrcpath} *.pc.in]
+    }
+    
+    merger_arch_compiler yes
+} else {
+    configure.cc "${configure.cc} ${configure.cc_archflags}"
+}
+
+variant quartz conflicts x11 {
+    require_active_variants path:lib/pkgconfig/cairo.pc:cairo quartz
+    require_active_variants path:lib/pkgconfig/pango.pc:pango quartz
+
+    patchfiles-append       patch-gdkwindow-quartz-performance.diff
+
+    configure.args-append   --enable-quartz-backend
+}
+
+variant x11 conflicts quartz {
+    require_active_variants path:lib/pkgconfig/cairo.pc:cairo x11
+    require_active_variants path:lib/pkgconfig/pango.pc:pango x11
+    require_active_variants port:gdk-pixbuf2 x11
+
+    depends_lib-append      port:xorg-libXi \
+                            port:xorg-libXrandr \
+                            port:xorg-libXcursor \
+                            port:xorg-libXinerama \
+                            port:xorg-libXdamage \
+                            port:xorg-libXcomposite \
+                            port:xorg-libXfixes \
+                            port:at-spi2-atk
+
+    configure.args-append   --enable-xinerama \
+                            --x-include=${prefix}/include \
+                            --x-lib=${prefix}/lib \
+                            --enable-x11-backend
+}
+
+if {![variant_isset quartz]} {
+    default_variants +x11
+}
+
+post-activate {
+    ui_debug "Updating gdk-pixbuf.loaders..."
+    system "${prefix}/bin/gdk-pixbuf-query-loaders >${prefix}/etc/gtk-3.0/gdk-pixbuf.loaders"
+    ui_debug "Updating GLib schemas..."
+    system "${prefix}/bin/glib-compile-schemas ${prefix}/share/glib-2.0/schemas"
+}
+
+livecheck.type      gnome
+livecheck.name      gtk+
+# versions 3.89.1+ are snapshots of unstable development leading to GTK+ 4
+# and are not compatible with gtk3
+livecheck.regex     "LATEST-IS-(\\d+\\.\[0-7\]\[02468\](?:\\.\\d+)*)"

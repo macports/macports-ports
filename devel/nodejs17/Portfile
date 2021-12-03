@@ -1,0 +1,208 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               compiler_blacklist_versions 1.0
+PortGroup               legacysupport 1.1
+
+# on macOS nodejs only builds against libc++
+# this force is OK as node does not link against any other c++ libs
+depends_lib-append      port:libcxx
+configure.cxx_stdlib    libc++
+compiler.cxx_standard   2014
+
+name                    nodejs17
+version                 17.2.0
+revision                0
+
+categories              devel net
+platforms               darwin
+license                 {MIT BSD}
+maintainers             {ciserlohn @ci42} openmaintainer
+
+description             Evented I/O for V8 JavaScript
+
+long_description        Node's goal is to provide an easy way to build scalable network programs in JavaScript. \
+                        Node is similar in design to and influenced by systems like Ruby's Event \
+                        Machine or Python's Twisted. Node takes the event model a bit further-it \
+                        presents the event loop as a language construct instead of as a library.
+
+conflicts               nodejs8 nodejs10 nodejs12 nodejs13 nodejs14 nodejs15 nodejs16
+
+homepage                https://nodejs.org/
+master_sites            ${homepage}dist/v${version}
+use_xz                  yes
+
+checksums               rmd160  46d9528f090159c7c69ae1f7c279ff0cfbe92ed2 \
+                        sha256  2b47cc7b5ec189d7b637454732f36f8d3c2c0ef81bec3c278b566f67159e659a \
+                        size    35457836
+
+distname                node-v${version}
+
+depends_build-append    port:pkgconfig
+
+set py_ver              3.9
+set py_ver_nodot        [string map {. {}} ${py_ver}]
+
+depends_lib-append      port:python${py_ver_nodot} \
+                        port:zlib
+
+# TODO: when icu is upgraded to v68.x, use MacPorts'.
+#depends_lib-append             port:icu
+
+# error: 'atomic_load<v8::internal::OwnedVector<const unsigned char> >' is unavailable: introduced in macOS 10.9
+set min_darwin 13
+if { ${os.major} < ${min_darwin} } {
+    known_fail yes
+    pre-fetch {
+        ui_error "${name} requires OSX 10.[expr ${min_darwin} - 4] or newer."
+        return -code error "Unsupported OSX version"
+    }
+}
+
+proc rec_glob {basedir pattern} {
+    set files [glob -directory $basedir -nocomplain -type f $pattern]
+    foreach dir [glob -directory $basedir -nocomplain -type d *] {
+        lappend files {*}[rec_glob $dir $pattern]
+    }
+    return $files
+}
+
+configure.python        ${prefix}/bin/python${py_ver}
+
+patchfiles              patch-common.gypi.diff
+
+post-patch {
+    foreach f [concat ${worksrcpath}/configure \
+                   ${worksrcpath}/tools/gyp/gyp \
+                   ${worksrcpath}/deps/v8/tools/objdump-v8 \
+                   [rec_glob ${worksrcpath} *.py]] {
+        reinplace -q "s|/usr/bin/env python3|${configure.python}|" ${f}
+        reinplace -q "s|/usr/bin/env python|${configure.python}|" ${f}
+    }
+    foreach gypfile [rec_glob ${worksrcpath} *.gyp*] {
+        reinplace -q "s|'python3'|'${configure.python}'|" ${gypfile}
+        reinplace -q "s|'python'|'${configure.python}'|" ${gypfile}
+    }
+    if { ${os.platform} eq "darwin" && ${os.major} <= 17 } {
+        # Officially nodejs requires Xcode 11 to compile, however, the
+        # only item that Xcode 11 has that Xcode 10.1 doesn't is
+        # os/signpost.h, so disable system instrumentation which uses
+        # it. This provides support for macOS 10.13 which can only use
+        # Xcode 10.1.
+        reinplace -q "s|'v8_enable_system_instrumentation': 1|'v8_enable_system_instrumentation': 0|" ${worksrcpath}/tools/v8_gypfiles/features.gypi
+    }
+}
+
+pre-configure {
+    # Copy zlib headers here because we do not want to prepend the entire
+    # ${prefix}/include to the include path (the build will then attempt to use
+    # ICU 67 headers)
+    file mkdir ${workpath}/zlib-inc
+    file copy ${prefix}/include/zconf.h ${prefix}/include/zlib.h \
+        ${workpath}/zlib-inc/
+}
+
+configure.args-append   --without-npm
+# TODO: when icu is upgraded to v68.x, use MacPorts'.
+# configure.args-append   --with-intl=system-icu
+configure.args-append   --shared-zlib
+configure.args-append   --shared-zlib-includes=${workpath}/zlib-inc
+configure.args-append   --shared-zlib-libpath=${prefix}/lib
+
+# V8 only supports ARM and IA-32 processors
+supported_archs         i386 x86_64 arm64
+
+universal_variant       no
+
+# https://github.com/nodejs/node/blob/master/doc/changelogs/CHANGELOG_V17.md#openssl-30
+variant no_openssl3_with_quic description {use MacPort's OpenSSL rather than Node.js' provided OpenSSL 3.0 extended with QUIC} {
+    depends_lib-append      port:openssl3
+    configure.args-append   --shared-openssl
+    configure.args-append   --shared-openssl-includes=${prefix}/libexec/openssl3/include/openssl
+    configure.args-append   --shared-openssl-libpath=${prefix}/libexec/openssl3/lib
+}
+
+# "V8 doesn't like cache."
+configure.ccache        no
+
+test.run                yes
+test.cmd                ${build.cmd} -j${build.jobs}
+
+switch $build_arch {
+    i386 {
+        configure.args-append   --dest-cpu=ia32
+    }
+    x86_64 {
+        configure.args-append   --dest-cpu=x64
+    }
+   arm64 {
+        configure.args-append   --dest-cpu=arm64
+    }
+}
+
+# Node.js 17.x requires Xcode >= 11 (Apple LLVM >= 11)
+# https://github.com/nodejs/node/blob/v17.x/BUILDING.md#supported-toolchains
+compiler.blacklist-append {clang < 1100}
+
+build.args-append   CC=${configure.cc} \
+                    CXX=${configure.cxx} \
+                    CXX.host=${configure.cxx} \
+                    CPP=${configure.cpp} \
+                    CPPFLAGS="${configure.cppflags}" \
+                    CFLAGS="${configure.cflags} ${configure.cppflags}" \
+                    CXXFLAGS="${configure.cxxflags} ${configure.cppflags}" \
+                    LDFLAGS="${configure.ldflags} [legacysupport::get_library_link_flags]" \
+                    PYTHON=${configure.python} \
+                    V=1
+
+destroot {
+    set bindir ${destroot}${prefix}/bin
+    set libdir ${destroot}${prefix}/lib
+    set libndir ${libdir}/node
+    set libddir ${libdir}/dtrace
+    set incdir ${destroot}${prefix}/include/node
+    set docdir ${destroot}${prefix}/share/doc/${name}
+
+    xinstall -d ${bindir}
+    xinstall -d ${libdir}
+    xinstall -d ${libndir}
+    xinstall -d ${libddir}
+    xinstall -d ${incdir}
+    xinstall -d ${docdir}
+
+    # install binaries
+    xinstall -m 755 -W ${worksrcpath} \
+        out/Release/node \
+        ${bindir}
+
+    # install headers
+    xinstall -m 644 {*}[glob ${worksrcpath}/src/*.h]                ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/v8/include/*.h]    ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/uv/include/*.h]    ${incdir}
+    xinstall -m 644 {*}[glob ${worksrcpath}/deps/cares/include/*.h] ${incdir}
+
+    # install dtrace script
+    xinstall -m 644 -W ${worksrcpath} \
+        src/node.d \
+        ${libddir}
+
+    # install manpage
+    xinstall -m 644 -W ${worksrcpath} \
+        doc/node.1 \
+        ${destroot}${prefix}/share/man/man1
+
+    # install docs
+    xinstall -m 644 -W ${worksrcpath} \
+        AUTHORS \
+        CHANGELOG.md \
+        CONTRIBUTING.md \
+        GOVERNANCE.md \
+        LICENSE \
+        README.md \
+        SECURITY.md \
+        ${docdir}
+}
+
+livecheck.url       ${homepage}dist/
+livecheck.type      regex
+livecheck.regex     {v(\d+\.\d+\.\d+)}

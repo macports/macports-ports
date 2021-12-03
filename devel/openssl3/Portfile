@@ -1,12 +1,17 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           compiler_blacklist_versions 1.0
 PortGroup           muniversal 1.0
+PortGroup           legacysupport 1.1
+
+# Availability.h
+legacysupport.newest_darwin_requires_legacy 8
 
 set major_v         3
 name                openssl$major_v
 version             ${major_v}.0.0
-revision            0
+revision            6
 
 # Please revbump these ports when updating OpenSSL.
 #  - freeradius (#43461)
@@ -54,11 +59,52 @@ if {${os.platform} eq "darwin" && ${os.major} < 11} {
 #   https://github.com/openssl/openssl/commit/96ac8f13f4d0ee96baf5724d9f96c44c34b8606c
 #   https://github.com/openssl/openssl/commit/2f3b120401533db82e99ed28de5fc8aab1b76b33
 #   Patches updated to fix 10.4 build
-#   To be seen if needed with 3.0.0, and if dodes needs updating.
+#   To be seen if needed with 3.0.0, and if it needs updating.
 #patchfiles-append   patch-pre-Sierra.diff
+
+# https://github.com/openssl/openssl/pull/16584
+# https://github.com/openssl/openssl/issues/16551
+# Fixes "Undefined symbols for architecture i386: ___atomic_is_lock_free"
+if {(${configure.build_arch} eq "i386") || (${universal_possible} && [variant_isset universal] && "i386" in ${configure.universal_archs})} {
+    patchfiles-append   patch-fix-i386-atomics.diff
+}
 
 set my_name         openssl-${major_v}
 set my_prefix       ${prefix}/libexec/${name}
+
+#-----------------------------------------------------------------------------------------
+# Fix compilation errors related to AVX-512 instruction set, occurring with Xcode Clang.
+# Ticket: https://trac.macports.org/ticket/63622
+#
+#   crypto/bn/libcrypto-lib-rsaz-avx512.o crypto/bn/rsaz-avx512.s
+#   crypto/bn/rsaz-avx512.s:36:2: error: instruction requires: AVX-512 ISA AVX-512 VL ISA
+#    vpxord %ymm0,%ymm0,%ymm0
+#    ^
+#   crypto/bn/rsaz-avx512.s:37:2: error: instruction requires: AVX-512 ISA AVX-512 VL ISA
+#    vmovdqa64 %ymm0,%ymm1
+#    ^
+#   crypto/bn/rsaz-avx512.s:38:2: error: instruction requires: AVX-512 ISA AVX-512 VL ISA
+#    vmovdqa64 %ymm0,%ymm16
+#    ^
+#   crypto/bn/rsaz-avx512.s:39:2: error: instruction requires: AVX-512 ISA AVX-512 VL ISA
+#    vmovdqa64 %ymm0,%ymm17
+#    ^
+#-----------------------------------------------------------------------------------------
+if {${os.platform} eq "darwin" && ${os.major} < 19} {
+    patchfiles-append patch-disable-avx512.diff
+}
+
+# https://trac.macports.org/ticket/64008
+# https://github.com/openssl/openssl/commit/24cdb1bfecbd765e829b9932a5a60ff63a7dff4b
+patchfiles-append   0001-MacOS-prior-to-10.12-does-not-support-random-API-cor.patch
+
+# Copy in the previous version of ppc-xlate.pl because the current one is broken
+# https://trac.macports.org/ticket/63847
+platform darwin powerpc {
+    post-patch {
+        copy -force ${portpath}/${filesdir}/ppc-xlate.pl ${worksrcpath}/crypto/perlasm
+    }
+}
 
 configure.ccache    no
 configure.perl      /usr/bin/perl
@@ -110,9 +156,6 @@ if {(!${universal_possible} || ![variant_isset universal])
 }
 configure.universal_args-delete --disable-dependency-tracking
 
-# Parallel builds don't quite work (#46719).
-use_parallel_build  no
-
 test.run            yes
 
 pre-destroot {
@@ -137,6 +180,8 @@ post-destroot {
     }
     # shared/man dir seems to still end up in ${prefix} and not libexec...
     move ${destroot}${prefix}/share/man ${destroot}/${my_prefix}/share/
+    # Create link to certs from curl-ca-bundle in install prefix
+    ln -s ${prefix}/share/curl/curl-ca-bundle.crt ${destroot}${my_prefix}/etc/openssl/cert.pem
 }
 
 destroot.args       MANDIR=${prefix}/share/man MANSUFFIX=ssl
@@ -145,6 +190,30 @@ variant rfc3779 description {enable RFC 3779: X.509 Extensions for IP Addresses 
     configure.args-append   enable-rfc3779
 }
 
+variant fips description {enable FIPS} {
+    configure.args-append   enable-fips
+}
+
+variant legacy description {enable legacy providers by default} {
+    # See https://trac.macports.org/ticket/63857 for context
+    post-destroot {
+        set     cnf [open ${destroot}${my_prefix}/etc/openssl/openssl.cnf a]
+        puts  ${cnf} ""
+        puts  ${cnf} "# MacPorts additions to enable legacy providers by default"
+        puts  ${cnf} "\[openssl_init\]"
+        puts  ${cnf} "providers = provider_sect"
+        puts  ${cnf} "\[provider_sect\]"
+        puts  ${cnf} "default = default_sect"
+        puts  ${cnf} "legacy = legacy_sect"
+        puts  ${cnf} "\[default_sect\]"
+        puts  ${cnf} "activate = 1"
+        puts  ${cnf} "\[legacy_sect\]"
+        puts  ${cnf} "activate = 1"
+        close ${cnf}
+    }
+}
+default_variants-append +legacy
+
 livecheck.type      regex
 livecheck.url       [lindex ${master_sites} 0]
-livecheck.regex     openssl-(\[0-9.\]+\[a-z\]?)\\.tar\\.gz
+livecheck.regex     openssl-(${major_v}.\[0-9.\]+\[a-z\]?)\\.tar\\.gz

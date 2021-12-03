@@ -1,0 +1,541 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem                            1.0
+PortGroup select                      1.0
+PortGroup compiler_blacklist_versions 1.0
+PortGroup active_variants             1.1
+PortGroup cmake                       1.1
+PortGroup legacysupport               1.1
+
+# Do not propagate c/c++ standards as set by base
+cmake.set_c_standard     no
+cmake.set_cxx_standard   no
+
+# link legacysupport statically for compilers
+legacysupport.use_static              yes
+# Sysconf wrapping causes issues so disable
+legacysupport.disable_function_wrap   yes
+
+categories              lang
+platforms               darwin
+license                 NCSA
+maintainers             nomaintainer
+
+set llvm_version        13
+version                 ${llvm_version}.0.0
+
+name                    llvm-${llvm_version}
+revision                0
+subport                 mlir-${llvm_version}  { revision 0 }
+subport                 clang-${llvm_version} { revision 0 }
+subport                 lldb-${llvm_version}  { revision 0 }
+subport                 flang-${llvm_version} { revision 0 }
+
+checksums               rmd160  fe2d7751c55f3e99edb72655368c2178c8b84771 \
+                        sha256  6075ad30f1ac0e15f07c1bf062c1e1268c241d674f11bd32cdf0e040c71f2bf3 \
+                        size    97577404
+
+master_sites            https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}
+distname                llvm-project-${version}.src
+use_xz                  yes
+
+dist_subdir             llvm
+set suffix              mp-${llvm_version}
+set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
+worksrcdir              ${worksrcdir}/llvm
+
+# hand-tweaked, approximately c++ standard 2017
+compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
+# clang-13/work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
+#     _LIBCPP_CONSTEXPR_AFTER_CXX17 ~__optional_destruct_base()
+compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0}
+compiler.fallback       clang macports-clang-11 macports-clang-10
+
+# We can't use Ninja with our custom destrooting plan for llvm
+#cmake.generator         Ninja
+cmake.install_prefix    ${sub_prefix}
+cmake.build_type        Release
+
+# clean up some cmake-PG added values we don't want to use, because we want @rpaths
+cmake.install_rpath
+
+configure.pre_args-delete \
+    -DCMAKE_INSTALL_NAME_DIR=${cmake.install_prefix}/lib \
+    -DCMAKE_INSTALL_RPATH=${cmake.install_prefix}/lib
+
+configure.pre_args-replace \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+configure.pre_args-replace \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${prefix}\;/usr" \
+    -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr"
+
+configure.args-append \
+    -DLLVM_LINK_LLVM_DYLIB=ON \
+    -DLLVM_ENABLE_RTTI=ON \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_EXAMPLES=OFF \
+    -DLLVM_ENABLE_FFI=ON \
+    -DFFI_INCLUDE_DIR=${prefix}/include \
+    -DFFI_LIBRARY_DIR=${prefix}/lib
+
+# cctools is needed to handle objects from newer clang toolchains
+if {[string match macports-clang-* ${configure.compiler}]} {
+    depends_build-append            port:cctools
+    depends_skip_archcheck-append   cctools
+    configure.args-append           -DCMAKE_LIBTOOL=${prefix}/bin/libtool
+}
+
+set py_ver              3.10
+set py_ver_nodot        [string map {. {}} ${py_ver}]
+depends_build-append    port:python${py_ver_nodot} \
+                        port:py${py_ver_nodot}-pygments \
+                        port:py${py_ver_nodot}-yaml
+set pythonfullpath      ${prefix}/bin/python${py_ver}
+configure.args-append   -DPython3_EXECUTABLE=${pythonfullpath}
+
+platform darwin {
+    configure.cxx_stdlib libc++
+    depends_lib-append port:libcxx
+    pre-fetch {
+        if {${os.major} < 11} {
+           supported_archs i386 x86_64
+            if {![file exists /usr/lib/libc++.dylib]} {
+                ui_error "$name requires a C++11 runtime, which your configuration does not allow"
+                error "unsupported configuration"
+            }
+        }
+    }
+}
+
+patch.dir ${workpath}/${distname}
+patch.pre_args  -p1
+
+patchfiles-append \
+    0001-MacPorts-only-clang-use-MP-omp-locations.patch \
+    0002-MacPorts-Only-Don-t-embed-the-deployment-target-in-t.patch \
+    0003-MacPorts-Only-Prepare-clang-format-for-replacement-w.patch \
+    0004-MacPorts-Only-Fix-name-of-scan-view-executable-insid.patch \
+    0006-Define-EXC_MASK_CRASH-and-MACH_EXCEPTION_CODES-if-th.patch \
+    0007-Threading-Only-call-pthread_setname_np-if-we-have-it.patch \
+    0008-Threading-Only-call-setpriority-PRIO_DARWIN_THREAD-0.patch \
+    0009-lib-Support-Unix-Path.inc-define-COPYFILE_CLONE-if-n.patch \
+    0010-compiler-rt-cmake-config-ix.cmake-was-Leopard-No-ASA.patch \
+    0011-Fix-missing-long-long-math-prototypes-when-using-the.patch \
+    0012-compiler-rt-add-some-defs-missing-in-older-SDKs.patch \
+    0013-clang-add-back-runtime-libraries-used-on-10.4-and-10.patch \
+    0014-Fix-float.h-to-work-on-Snow-Leopard-and-earlier.patch \
+    0015-Fixup-libstdc-header-search-paths-for-older-versions.patch \
+    0025-lldb-add-defines-needed-for-older-SDKs.patch
+
+if {${os.platform} eq "darwin" && ${os.major} < 14} {
+    patchfiles-append \
+        0016-10.10-and-less-compiler-rt-find-macosx-sdk.patch
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    patchfiles-append \
+        0017-10.6-and-less-libcxx-work-around-no-reexported_symbo.patch \
+        0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
+        0020-10.6-and-less-work-around-no-directory-watcher-befor.patch \
+        0021-10.6-and-less-libcxx-disable-Availability-tests.patch
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    patchfiles-append \
+        0022-10.5-and-less-default-to-fno-blocks.patch \
+        0023-10.5-and-less-use-older-cfname-and-fix-uuid-on-leopa.patch \
+        0024-10.5-and-less-compiler-rt-work-around-no-libdispatch.patch
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    # error: 'TARGET_OS_OSX' is not defined, evaluates to 0 [-Werror,-Wundef-prefix=TARGET_OS_]
+    patchfiles-append  0100-define-target-os-osx.patch
+}
+
+post-patch {
+    reinplace "s|@@PREFIX@@|${prefix}|" \
+        ${patch.dir}/clang/lib/Driver/ToolChains/Clang.cpp \
+        ${patch.dir}/clang/lib/Driver/ToolChains/CommonArgs.cpp
+
+    reinplace "s|@CLANG_FORMAT_PATH@|${prefix}/bin/clang-format-${suffix}|g" \
+        ${patch.dir}/clang/tools/clang-format/clang-format-bbedit.applescript \
+        ${patch.dir}/clang/tools/clang-format/clang-format-diff.py            \
+        ${patch.dir}/clang/tools/clang-format/clang-format-sublime.py         \
+        ${patch.dir}/clang/tools/clang-format/clang-format.el                 \
+        ${patch.dir}/clang/tools/clang-format/clang-format.py
+}
+
+if {${subport} eq "llvm-${llvm_version}"} {
+
+    homepage            https://llvm.org/
+    description         llvm is a next generation compiler infrastructure
+    long_description    The LLVM Core libraries provide a modern source- and \
+                        target-independent optimizer, along with code \
+                        generation support for many popular CPUs (as well as \
+                        some less common ones!) These libraries are built \
+                        around a well specified code representation known as \
+                        the LLVM intermediate representation ("LLVM IR").
+
+    depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
+    depends_run-append  port:llvm_select
+
+    select.group        llvm
+    select.file         ${filespath}/mp-${subport}
+
+    configure.args-append \
+                        -DLLVM_ENABLE_PROJECTS="polly"
+}
+
+if {${subport} eq "mlir-${llvm_version}"} {
+    homepage            https://mlir.llvm.org
+    
+    description         The MLIR project is a novel approach to building reusable \
+                        and extensible compiler infrastructure. 
+    long_description    {*}${description} MLIR aims to address software fragmentation, \
+                        improve compilation for heterogeneous hardware, significantly \
+                        reduce the cost of building domain specific compilers, and aid \
+                        in connecting existing compilers together.
+
+    depends_lib-append  port:llvm-${llvm_version}
+
+    configure.args-append \
+                        -DLLVM_ENABLE_PROJECTS="mlir"
+
+    destroot {
+        # we have to run the destroot like this, because individual targets for each of the
+        # components we want to install are not available; we want "everything but llvm"
+        system "cd ${destroot.dir}/tools/mlir && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+    }
+}
+
+if { ${subport} eq "clang-${llvm_version}" } {
+    homepage            https://clang.llvm.org/
+
+    description         C, C++, Objective C and Objective C++ compiler
+    long_description    Clang is an "LLVM native" C/C++/Objective-C compiler, \
+                        which aims to deliver amazingly fast compiles (e.g. \
+                        about 3x faster than GCC when compiling Objective-C \
+                        code in a debug configuration), extremely useful error \
+                        and warning messages and to provide a platform for \
+                        building great source level tools. The included Clang \
+                        Static Analyzer is a tool that automatically finds bugs in \
+                        your code, and is a great example of the sort of tool \
+                        that can be built using the Clang frontend as a \
+                        library to parse C/C++ code.
+
+    depends_run-append  port:clang_select
+    select.group        clang
+    select.file         ${filespath}/mp-${subport}
+
+    configure.args-append   \
+        -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;libcxx\;libcxxabi\;lld\;mlir" \
+        -DLIBCXX_ENABLE_SHARED=ON    \
+        -DLIBCXX_INSTALL_LIBRARY=ON
+
+    destroot {
+        # we have to run the destroot like this, because individual targets for each of the
+        # components we want to install are not available; we want "everything but llvm"
+        system "cd ${destroot.dir}/tools/clang          && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/tools/lld            && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/projects/compiler-rt && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/projects/libcxx      && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+        system "cd ${destroot.dir}/projects/libcxxabi   && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+    }
+}
+
+if { ${subport} eq "flang-${llvm_version}" } {
+    homepage            https://flang.llvm.org/
+
+    description         LLVM Fortran compiler
+    long_description    {*}${description}
+
+    configure.args-append \
+        -DLLVM_ENABLE_PROJECTS="clang\;flang\;compiler-rt\;mlir" \
+        -DLIBCXX_ENABLE_SHARED=OFF          \
+        -DLIBCXX_INSTALL_LIBRARY=OFF
+
+    depends_lib-append  port:clang-${llvm_version}
+
+    destroot {
+        # we have to run the destroot like this, because individual targets for each of the
+        # components we want to install are not available; we want "everything but llvm"
+        system "cd ${destroot.dir}/tools/flang && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
+    }
+
+    notes-append {
+        This version of flang passes off to another fortran compiler to do the actual compiling.
+        At present, you may need to set the desired fortran compiler with an ENV VAR if\
+        the default gfortran is not found on PATH.
+        For example: F18_FC=gfortran-mp-11 flang-mp-13 hello.f90 -o hello.bin
+        See https://github.com/llvm/llvm-project/blob/master/flang/docs/ReleaseNotes.md
+    }
+}
+
+if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "mlir-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
+    # temporarily restrict to newer systems until older systems can be rigorously vetted
+    if {${os.platform} eq "darwin" && ${os.major} <= 10} {
+        depends_build
+        depends_lib
+        depends_run
+        archive_sites
+        known_fail yes
+        pre-fetch {
+            ui_error "${subport} is not supported on this os version at present."
+            return -code error {unsupported platform}
+        }
+    }
+}
+
+if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
+
+    depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version} port:mlir-${llvm_version}
+    depends_run-append  port:ld64
+    depends_skip_archcheck-append ld64
+
+    # CMAKE_LINKER is used to determine the value for HOST_LINK_VERSION
+    configure.args-append \
+        -DCMAKE_LINKER=${prefix}/bin/ld    \
+        -DCLANG_INCLUDE_TESTS=OFF          \
+        -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+        -DCLANG_ENABLE_ARCMT=OFF           \
+        -DDARWIN_PREFER_PUBLIC_SDK=ON      \
+        -DLLVM_BUILD_RUNTIME=ON     
+
+    if {${os.major} <= 18} {
+        # on systems that might build i386, we need atomic builtins
+        # https://trac.macports.org/ticket/58712
+        configure.args-append    -DCOMPILER_RT_EXCLUDE_ATOMIC_BUILTIN=OFF
+    }
+
+    if {${os.major} <= 14} {
+        # compiler-rt does a broad search for an SDK it likes, but this
+        # search fails on older systems that don't have a MacOSX.sdk
+        # TODO: apply this always to all systems?
+        if {${configure.sdkroot} eq ""} {set configure.sdkroot "/"}
+        configure.args-append    -DDARWIN_osx_SYSROOT="${configure.sdkroot}"
+
+        # sanitizers in compiler_rt fail to build on older systems
+        # might be fixable with the use of newer SDK and/or effort if motivated
+        # all three toggles are needed to force them off
+        configure.args-append    -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
+                                 -DCOMPILER_RT_BUILD_XRAY=OFF \
+                                 -DCOMPILER_RT_BUILD_MEMPROF=OFF
+    }
+
+    if {${os.major} <= 11} {
+        # xpc.h available 10.7 but doesn't support nullable features
+        configure.args-append    -DCLANGD_BUILD_XPC=OFF
+    }
+
+    if {${os.major} <= 10} {
+        # avoid need for thread_local_storage
+        configure.args-append    -DCLANG_ENABLE_CLANGD=OFF \
+                                 -DLLVM_ENABLE_BACKTRACES=OFF
+    }
+}
+
+if {${subport} eq "lldb-${llvm_version}"} {
+
+    homepage            https://lldb.llvm.org/
+    description         the LLVM debugger
+    long_description    lldb is the "LLVM native" debugger.
+
+    depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
+    depends_lib-append  port:llvm-${llvm_version} port:clang-${llvm_version}
+    depends_build-append port:swig-python port:doxygen
+
+    # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
+    if {${os.platform} eq "darwin" && ${os.major} <= 17} {
+    # see Note 1 below
+        depends_build
+        depends_lib
+        depends_run
+        archive_sites
+        known_fail yes
+        pre-fetch {
+            ui_error "${subport} is not supported on Darwin ${os.major} at present."
+            return -code error {unsupported platform}
+        }
+    }
+
+    configure.args-append \
+        -DLLDB_CODESIGN_IDENTITY=- \
+        -DLLDB_ENABLE_LUA=OFF
+
+    set worksrcpath ${workpath}/${distname}/lldb
+
+    post-activate {
+        ui_msg "Please follow the instructions at  https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:"
+        if {${os.major} >= 13} {
+            ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/lldb-server"
+        } else {
+           ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/lldb-server"
+        }
+    }
+}
+
+variant tests description {Enable building of test code} {
+    depends_test-append     port:py39-psutil
+    test.run                yes
+    configure.args-append   -DLLVM_INCLUDE_TESTS=ON
+    test.target             check
+
+   if {${subport} eq "clang-${llvm_version}"} {
+       test.target    check-all
+   }
+
+   if {${subport} eq "lldb-${llvm_version}"} {
+        pre-fetch {
+            ui_error "running the test suite on ${subport} is not supported on this os version at present."
+            return -code error {unsupported platform}
+        }
+   }
+}
+
+post-destroot {
+
+    if {${subport} eq "clang-${llvm_version}"} {
+        # remove the clang symlink and replace it with the actual binary
+        delete      ${destroot}${sub_prefix}/bin/clang
+        file rename ${destroot}${sub_prefix}/bin/clang-${llvm_version} ${destroot}${sub_prefix}/bin/clang
+    }
+
+    # generate a versioned wrapper script for each file in the bin directory
+    foreach bin [glob ${destroot}${sub_prefix}/bin/*] {
+        set bin_filename [string map "${sub_prefix} ${prefix}" ${bin}]-${suffix}
+        set exec_path    [string map "${destroot}${sub_prefix} ${sub_prefix}" ${bin}]
+
+        # see https://trac.macports.org/ticket/54985
+        if {${os.platform} eq "darwin" && [vercmp ${xcodeversion} 4.6] < 0} {
+             xinstall -m 755 "${filespath}/llvm-bin-compat" "${bin_filename}"
+        } else {
+             xinstall -m 755 "${filespath}/llvm-bin" "${bin_filename}"
+        }
+
+        reinplace "s:EXEC_PATH:${exec_path}:" "${bin_filename}"
+    }
+
+    if {${subport} eq "llvm-${llvm_version}"} {
+        # https://llvm.org/bugs/show_bug.cgi?id=19465
+        ln -s LLVMPolly.so ${destroot}${sub_prefix}/lib/LLVMPolly.dylib
+    }
+
+    if {${subport} eq "flang-${llvm_version}"} {
+        # fix errant permissions on the flang binary
+        system "chmod 755 ${destroot}${sub_prefix}/bin/flang"
+    }
+    
+    if {${subport} eq "clang-${llvm_version}"} {
+        # fix the cmake scripts to point to the versioned files
+        reinplace "s|/bin/clang-${llvm_version}|/bin/clang|g" \
+                  "${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake"
+
+        # http://trac.macports.org/ticket/33207
+        ln -s ${prefix}/libexec/ld64/ld ${destroot}${sub_prefix}/bin/ld
+    }
+    
+    if {${subport} eq "lldb-${llvm_version}"} {
+        delete ${destroot}${prefix}/bin/debugserver-${suffix}
+    }
+}
+
+if {${subport} eq "clang-${llvm_version}"} {
+
+    variant analyzer description {Install clang static analyzer} {
+        # these have to be switched on or off together
+        configure.args-replace -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+                               -DCLANG_ENABLE_STATIC_ANALYZER=ON
+        configure.args-replace -DCLANG_ENABLE_ARCMT=OFF \
+                               -DCLANG_ENABLE_ARCMT=ON
+
+        depends_run-append port:perl5
+
+        post-patch {
+            reinplace "s|/usr/bin/env perl|${prefix}/bin/perl5|g" \
+                ${patch.dir}/clang/tools/scan-build/libexec/ccc-analyzer \
+                ${patch.dir}/clang/tools/scan-build/libexec/c++-analyzer \
+                ${patch.dir}/clang/tools/scan-build/bin/scan-build
+       }
+    }
+
+    # Avoid requiring a bootstrap version of perl5 on 10.6.
+    if {${os.major} >= 11} {
+        default_variants    +analyzer
+    }
+
+
+    if { ${cxx_stdlib} eq "libc++" && ${os.major} < 13 } {
+        variant defaultlibcxx description {default to -stdlib=libc++ if not otherwise specified}  {
+            # on systems older than darwin 13, if macports.conf is configured to stdlib=libc++
+            # then make that the default if not otherwise specified. This matches the behaviour of newer systems.
+            patchfiles-append 0018-10.6-and-less-clang-default-to-libc-on-all-darwin-sy.patch
+        }
+        default_variants-append +defaultlibcxx
+    }
+
+    variant libstdcxx description {-stdlib=macports-libstdc++ searches for MacPorts libstdc++} {
+
+        patchfiles-append 0005-clang-support-macports-libstdcxx.patch
+
+        post-patch {
+            reinplace "s|@@MACPORTS_GCC_INCLUDE_DIR@@|${prefix}/include/gcc/c++|g" \
+                ${patch.dir}/clang/lib/Frontend/InitHeaderSearch.cpp \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+            reinplace "s|@@MACPORTS_HOST_NAME@@|${build_arch}-apple-darwin${os.major}|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+            reinplace "s|@@MACPORTS_libstdc++@@|${prefix}/lib/libgcc/libstdc++.6.dylib|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+
+            # GCC was built for ${build_arch}-apple-darwin${os.major}
+            # if GCC was also built universal, it has an extra include directory
+            # if ${build_arch} is 32-bit, there is an extra 64-bit subdirectory
+            # if ${build_arch} is 64-bit, there is an extra 32-bit subdirectory
+            # MacPorts GCC can not compile across platforms
+            switch ${build_arch} {
+                x86_64 {
+                    set gcc_subdirectory_ppc    ""
+                    set gcc_subdirectory_ppc64  "ppc64"
+                    set gcc_subdirectory_i386   "i386"
+                    set gcc_subdirectory_x86_64 ""
+                }
+                i386 {
+                    set gcc_subdirectory_ppc    ""
+                    set gcc_subdirectory_ppc64  "ppc64"
+                    set gcc_subdirectory_i386   ""
+                    set gcc_subdirectory_x86_64 "x86_64"
+                }
+                ppc64 {
+                    set gcc_subdirectory_ppc    "ppc"
+                    set gcc_subdirectory_ppc64  ""
+                    set gcc_subdirectory_i386   ""
+                    set gcc_subdirectory_x86_64 "x86_64"
+                }
+                ppc {
+                    set gcc_subdirectory_ppc    ""
+                    set gcc_subdirectory_ppc64  "ppc64"
+                    set gcc_subdirectory_i386   ""
+                    set gcc_subdirectory_x86_64 "x86_64"
+                }
+            }
+
+            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_x86_64@@|${gcc_subdirectory_x86_64}|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_i386@@|${gcc_subdirectory_i386}|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc64@@|${gcc_subdirectory_ppc64}|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc@@|${gcc_subdirectory_ppc}|g" \
+                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+        }
+    }
+    # at present, only the non-arm archs can use this variant
+    if {${build_arch} in "x86_64 i386 ppc64 ppc"} {
+        default_variants-append +libstdcxx
+    }
+}
+
+livecheck.type      regex
+livecheck.url       https://github.com/llvm/llvm-project/tags
+livecheck.regex     llvmorg-(${llvm_version}.\[\\d.\]+).tar.gz

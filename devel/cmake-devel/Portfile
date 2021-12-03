@@ -1,0 +1,375 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+# cmake does not build universal on BigSur Intel
+if { ${os.platform} eq "darwin" && ${os.major} >= 20 && ${build_arch} eq "x86_64"} {
+    universal_variant no
+} else {
+    PortGroup       muniversal 1.0
+}
+
+PortGroup           xcodeversion 1.0
+PortGroup           gitlab 1.0
+PortGroup           legacysupport 1.1
+
+# CMake is a dependency of clang
+PortGroup           clang_dependency 1.0
+
+name                cmake-devel
+conflicts           cmake
+set my_name         cmake
+
+categories          devel
+license             BSD
+installs_libs       no
+maintainers         {michaelld @michaelld} {mascguy @mascguy}
+
+description         Cross-platform make
+set base_long_description \
+    "An extensible, open-source system that manages the build\
+    process in an operating system and compiler independent manner.\
+    Unlike many cross-platform systems, CMake is designed to be\
+    used in conjunction with the native build environment."
+
+# Devel-specific additions
+set base_long_description \
+    "*** IMPORTANT NOTE: Unlike most Devel ports, this one is NOT\
+    intended to be a drop-in replacement. (At least not at this\
+    point in time.) AS SUCH, DON'T ATTEMPT TO USE THIS PORT! ***\
+    ${base_long_description}"
+
+homepage            https://cmake.org
+platforms           darwin freebsd
+gitlab.instance     https://gitlab.kitware.com
+
+gitlab.setup        cmake   cmake 3.21.4 v
+checksums           rmd160  bd08dd00a6a8ffff6d3d21b80f39d4afe6dd4e70 \
+                    sha256  069cfdbb57d9f22dc8706f1fb71ae79249ab37f2c1d2afc3fdf6232073840748 \
+                    size    7418791
+revision            0
+
+dist_subdir         ${my_name}
+
+gitlab.livecheck.regex \
+                    {([0-9.]+)}
+
+compiler.cxx_standard \
+                    2011
+
+platform darwin {
+    if {!((${os.major} < 9) || ${build_arch} eq "ppc" ||
+          ${build_arch} eq "ppc64")} {
+        depends_lib-append port:libcxx
+        configure.cxx_stdlib libc++
+    }
+}
+
+# OSX <= 10.11 does not provide "clock_gettime"
+legacysupport.newest_darwin_requires_legacy 15
+
+# see https://trac.macports.org/ticket/59832
+# see https://trac.macports.org/ticket/60885
+legacysupport.redirect_bins cmake ccmake cpack ctest
+
+long_description ${base_long_description} \
+    The ${subport} release port is updated roughly every few months.
+
+patchfiles-append \
+    patch-Modules-noArchCheck.diff \
+    patch-CMakeFindFrameworks.cmake.diff \
+    patch-Source_Modules_FindLibUV.cmake.diff \
+    patch-fix_cxx14_17_checks.diff \
+    patch-fix-system-prefix-path.diff \
+    patch-cmake-leopard-tiger.diff \
+    patch-fix-clock_gettime-test.diff \
+    patch-qt5gui.diff \
+    patch-cmake-cmInstallRuntime-initializer-fix.diff
+
+depends_lib-append \
+    port:curl \
+    port:expat \
+    port:zlib \
+    port:bzip2 \
+    port:libarchive \
+    port:ncurses \
+    port:libuv
+
+# configure is just a shell script that passes directly to bootstrap
+configure.cmd ./bootstrap
+
+# bootstrap takes cmake-style args for the build of the cmake to
+# be installed.  the args are passed as usual for cmake, after
+# "--", so we pass them as post_args
+configure.post_args --
+
+configure.env-append \
+    CMAKE_PREFIX_PATH=${prefix} \
+    CMAKE_INCLUDE_PATH=${prefix}/include/ncurses \
+    CMAKE_LIBRARY_PATH=${prefix}/lib
+
+# On Lion, Clang 3.3 produces bad stream reading code when using
+# libc++.  See https://trac.macports.org/ticket/44129 . Clang 3.4
+# works. But Clang 3.7 doesn't work.
+if {${os.platform} eq "darwin" && ${os.major} == 11 &&
+    ${configure.cxx_stdlib} eq "libc++"} {
+    compiler.whitelist \
+        macports-clang-3.4
+}
+
+# clang 3.4 can't build certain parts of the
+# cmake self-testing infrastructure
+# https://trac.macports.org/ticket/59782
+if {${configure.compiler} eq "macports-clang-3.4"} {
+    configure.post_args-append \
+        -DBUILD_TESTING=OFF
+}
+
+platform darwin {
+    configure.env-append \
+        CMAKE_OSX_DEPLOYMENT_TARGET=${macosx_deployment_target}
+
+    if {${configure.sdkroot} eq ""} {
+        configure.env-append \
+            SDKROOT=/
+    }
+
+    if {${os.arch} eq "i386" && ${os.major} <= 9} {
+        # The old system headers do some bit shifting on Intel about which
+        # newer compilers throw errors:
+        # SecKeychain.h:102:46: error: shift expression '(1853123693 << 8)' overflows [-fpermissive]
+        configure.cflags-append \
+            -fpermissive
+        configure.cxxflags-append \
+            -fpermissive
+    }
+
+    if {${os.major} >= 11 && ${os.major} <= 12} {
+        # some functions in xlocale.h are hidden without this define
+        # https://trac.macports.org/ticket/60885
+        configure.cxxflags-append \
+            -D_DARWIN_C_SOURCE
+    }
+}
+
+# jsoncpp 1.0+ requires CMake for building; circular dependencies
+# are not possible in MacPorts. In addition, jsoncpp uses C++, so
+# it would not be possible for CMake, which uses libc++ on
+# 10.6-10.8, to link with a MacPorts copy of jsoncpp, which would
+# usually use libstdc++ on those systems. Fortunately CMake comes
+# bundled with its own internal copy of jsoncpp, so we use that.
+
+configure.args-append \
+    --docdir=share/doc/cmake \
+    --parallel=${build.jobs} \
+    --init=${worksrcpath}/macports.cmake \
+    --system-libs \
+    --no-qt-gui \
+    --no-system-jsoncpp \
+    --no-system-librhash
+
+configure.universal_args
+
+# CMake's configure script doesn't recognize `--host`.
+array set merger_host {i386 {} x86_64 {} ppc {} ppc64 {} arm64 {}}
+
+platform darwin 8 {
+    configure.ldflags-append \
+        -Wl,-framework -Wl,ApplicationServices
+}
+
+# Leopard's Rosetta has some difficulties configuring the ppc slice
+platform darwin 9 {
+    global universal_archs_supported
+    if {${build_arch} eq "i386" || ${build_arch} eq "x86_64"} {
+        supported_archs i386 x86_64
+    } elseif {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+        supported_archs ppc ppc64
+    }
+    set universal_archs_supported ${supported_archs}
+}
+
+build.post_args VERBOSE=ON
+
+post-patch {
+    # copy cmake init file, ready to be patched below
+    copy ${filespath}/macports.cmake ${worksrcpath}
+
+    # patch PREFIX
+    reinplace "s|__PREFIX__|${prefix}|g" \
+        ${worksrcpath}/macports.cmake \
+        ${worksrcpath}/Modules/Platform/Darwin.cmake
+
+    # patch FRAMEWORKS
+    reinplace "s|__FRAMEWORKS_DIR__|${frameworks_dir}|g" \
+        ${worksrcpath}/Modules/CMakeFindFrameworks.cmake
+
+    # patch APPLICATIONS_DIR
+    reinplace "s|__APPLICATIONS_DIR__|${applications_dir}|g" \
+        ${worksrcpath}/macports.cmake
+}
+
+post-destroot {
+    xinstall -d -m 0755 ${destroot}${prefix}/share/emacs/site-lisp
+    xinstall -m 0644 ${worksrcpath}/Auxiliary/cmake-mode.el \
+        ${destroot}${prefix}/share/emacs/site-lisp
+    foreach type {syntax indent} {
+        xinstall -d -m 0755 ${destroot}${prefix}/share/vim/vimfiles/${type}
+        xinstall -m 0644 -W ${worksrcpath}/Auxiliary/vim/${type} cmake.vim \
+            ${destroot}${prefix}/share/vim/vimfiles/${type}
+    }
+}
+
+proc remove_parent_contents {p_subport p_parent} {
+    global destroot
+
+    ui_debug "${p_subport}: removing files unrelated to parent ${p_parent}"
+    foreach f [exec port contents ${p_parent}] {
+        delete ${destroot}${f}
+    }
+}
+
+set subport_gui \
+    ${name}-gui
+set subport_docs \
+    ${name}-docs
+
+subport ${subport_gui} {
+    PortGroup qt5 1.0
+
+    # TODO: This subport is still a work-in-progress, and not yet functional
+    known_fail yes
+    pre-fetch {
+        ui_error "${subport} is not yet functional"
+        return -code error "subport not functional"
+    }
+
+    description \
+        CMake QT-based GUI
+    long_description \
+        "${description}"
+
+    depends_lib-append \
+        port:${name}
+
+    configure.args-replace \
+        --no-qt-gui \
+        --qt-gui
+
+    configure.args-append \
+        --qt-qmake=${qt_qmake_cmd}
+
+    post-destroot {
+        # Deconflict with parent port contents
+        remove_parent_contents \
+            ${subport} \
+            ${name}
+    }
+}
+
+subport ${subport_docs} {
+    # TODO: This subport is still a work-in-progress, and not yet functional
+    known_fail yes
+    pre-fetch {
+        ui_error "${subport} is not yet functional"
+        return -code error "subport not functional"
+    }
+
+    description \
+        CMake Documentation
+    long_description \
+        "${description}"
+
+    post-patch {
+        reinplace "s|__PYTHON_VERSION_WITH_DOT__|${PYTHON_VERSION_WITH_DOT}|g" ${worksrcpath}/macports.cmake
+    }
+
+    # Supported pythons
+    set python_versions {27 35 36 37 38 39}
+
+    # declare all +python* variants, with conflicts
+    foreach pyver ${python_versions} {
+        # Conflicting python versions
+        set other_python_versions {}
+        foreach other_pyver ${python_versions} {
+            if {${other_pyver} ne ${pyver}} {
+                if {${other_pyver} ni ${other_python_versions}} {
+                    lappend other_python_versions python${other_pyver}
+                }
+            }
+        }
+
+        set python_branch "[string index ${pyver} 0].[string range ${pyver} 1 end]"
+
+        variant python${pyver} conflicts {*}${other_python_versions} description "Build documentation using ${python_branch} sphinx" {}
+    }
+
+    # Docs requires one +python* variant
+    set python_isset false
+    foreach pyver ${python_versions} {
+        if {!${python_isset}} {
+            set python_isset [variant_isset python${pyver}]
+            set python_isset_ver_no_dot ${pyver}
+        } elseif {[variant_isset python${pyver}]} {
+            ui_error "\n\nDetected multiple +python* variants: +python${python_isset_ver_no_dot} and +python${pyver}.\nCannot have multiple +python* variants set.\n"
+            return -code error "Invalid variant selection"
+        }
+    }
+
+    # set default +python* variant if none were already selected
+    if {!${python_isset}} {
+        set python_isset true
+        default_variants +python39
+    }
+
+    # make sure one of the +python* variants is set
+    set python_isset false
+    foreach pyver ${python_versions} {
+        if {!${python_isset}} {
+            set python_isset  [variant_isset python${pyver}]
+            set python_branch "[string index ${pyver} 0].[string range ${pyver} 1 end]"
+        }
+    }
+
+    if {!${python_isset}} {
+        ui_error "\n\nYou must select one of the python variants when building ${subport}\n"
+        return -code error "Invalid variant selection"
+    }
+
+    set PYTHON_VERSION_WITH_DOT \
+        ${python_branch}
+    set PYTHON_VERSION_NO_DOT \
+        ${pyver}
+
+    depends_lib-append \
+        port:${name}
+
+    configure.args-append \
+        --mandir=share/man \
+        --sphinx-man \
+        --sphinx-html \
+        --sphinx-build=${prefix}/bin/sphinx-build-${PYTHON_VERSION_WITH_DOT}
+
+    depends_build-append \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinx \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-applehelp \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-devhelp \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-htmlhelp \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-jsmath \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-qthelp \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-serializinghtml \
+        port:py${PYTHON_VERSION_NO_DOT}-sphinxcontrib-websupport
+
+    post-destroot {
+        # Deconflict with parent port contents
+        remove_parent_contents \
+            ${subport} \
+            ${name}
+    }
+}
+
+if {${subport} eq ${name}} {
+    notes "\
+        The CMake Gui and Docs are now provided as subports '${subport_gui}' and '${subport_docs}', respectively.
+    "
+}

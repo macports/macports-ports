@@ -94,7 +94,7 @@ proc boost::configure_build {} {
     if { [option boost.require_numpy] } {
         depends_[option boost.depends_type]-append port:boost[boost::version_nodot]-numpy
     }
-    
+
     # Append to the build flags to find the isolated headers/libs
     if { ${boost_cache_cppflags} ne "" } {
         configure.cppflags-delete ${boost_cache_cppflags}
@@ -136,16 +136,13 @@ proc boost::configure_build {} {
         }
     }
 
-    # For meson, add to compiler.cpath. See discussion at
+    # Add to compiler.cpath. Helps with e.g. meson builds. See discussion at
     # https://github.com/macports/macports-ports/commit/f55147262b22ec1f81831cd58295bd0bdfc25f01
-    # limit this to meson, for now, incase appending to compiler.cpath hurts other builds
-    if { [string match *meson* [option configure.cmd] ] } {
-        if { ${boost_cache_cpath} ne "" } {
-            compiler.cpath-delete ${boost_cache_cpath}
-        }
-        set boost_cache_cpath [boost::include_dir]
-        compiler.cpath-prepend ${boost_cache_cpath}
+    if { ${boost_cache_cpath} ne "" } {
+        compiler.cpath-delete ${boost_cache_cpath}
     }
+    set boost_cache_cpath [boost::include_dir]
+    compiler.cpath-prepend ${boost_cache_cpath}
 
     # Are we using cmake ?
     # As we are appending to configure flags, need to check if cmake is in use
@@ -174,7 +171,7 @@ proc boost::configure_build {} {
             configure.args-append ${flag}
         }
     }
-    
+
 }
 
 port::register_callback boost::configure_build

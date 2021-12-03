@@ -3,10 +3,12 @@
 PortSystem              1.0
 PortGroup               cmake 1.1
 PortGroup               compiler_blacklist_versions 1.0
+PortGroup               github 1.0
 
+github.setup            tpoechtrager apple-libtapi 664b84
 name                    libtapi
-version                 1000.10.8
-revision                1
+version                 1100.0.11
+revision                0
 categories              devel
 platforms               darwin
 maintainers             nomaintainer
@@ -17,28 +19,9 @@ long_description        ${description} Newer MacOS SDKs contain only these TAPI 
 
 homepage                http://opensource.apple.com/source/tapi/
 
-master_sites            http://opensource.apple.com/tarballs/tapi:tapi
-distfiles               tapi-${version}.tar.gz:tapi
-checksums               tapi-${version}.tar.gz \
-                        rmd160  f5aad7f6ed579ce83d1206910ea8885043b4ebdb \
-                        sha256  827e996529974305ef7933f3fa790f7ed068caa29db8f8c30b8a83c6826503f7 \
-                        size    205606
-
-set llvm_version        7.1.0
-master_sites-append     https://github.com/llvm/llvm-project/archive/:llvm
-distfiles-append        llvmorg-${llvm_version}.tar.gz:llvm
-checksums-append        llvmorg-${llvm_version}.tar.gz \
-                        rmd160  abdbeaa08cb1c5e9ce4008e47263eb10597f5aed \
-                        sha256  71c93979f20e01f1a1cc839a247945f556fa5e63abf2084e8468b238080fd839 \
-                        size    105306132
-
-worksrcdir              tapi_build
-
-post-extract {
-    move ${workpath}/llvm-project-llvmorg-${llvm_version} ${workpath}/${worksrcdir}
-    move ${workpath}/tapi-${version} ${worksrcpath}/tapi
-    ln -s ../../tapi ${worksrcpath}/clang/tools/tapi
-}
+checksums               rmd160  cbd3719ff2a33d4f5d738e0c89c5c194b05e0dee \
+                        sha256  f2c3b3e467814b45d4afc768e4eb94b591dbfb24e086724f6b9a9c4c05793861 \
+                        size    32204487
 
 platform darwin {
     # pick a suitable python to build with
@@ -48,10 +31,8 @@ platform darwin {
         configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/libexec/libcxx-bootstrap/bin/python2.7
         depends_skip_archcheck-append python27-bootstrap
     } elseif {${os.major} > 19} {
-        # no idea about python on this system yet so use python38
-        depends_build-append    port:python38
-        configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python3.8
-        depends_skip_archcheck-append python38
+        # Use system python 3.x
+        configure.args-append   -DPYTHON_EXECUTABLE=/usr/bin/python3
     } else {
         # use the system python, which is known to be fine for darwin 11 to 19
         configure.args-append   -DPYTHON_EXECUTABLE=/usr/bin/python2.7
@@ -61,15 +42,23 @@ platform darwin {
 # remove need for port:libxml2 dependency
 configure.args-append -DLIBXML2_LIBRARIES=IGNORE
 
+# avoid opportunistic linking zlib
+configure.args-append -DLLVM_ENABLE_ZLIB=OFF
+
+# avoid opportunistic linking ncuses
+configure.args-append -DLLVM_ENABLE_TERMINFO=OFF
+
 compiler.cxx_standard   2011
-configure.pre_args-replace -DCMAKE_BUILD_TYPE=MacPorts -DCMAKE_BUILD_TYPE=Release
+
+cmake.build_type        Release
 
 # needs support for llvm::Expect, which requires c++17 inline variables (clang 3.9+)
-compiler.blacklist-append {clang < 801}
-compiler.blacklist-append {macports-clang-3.[3-8]}
+compiler.blacklist-append {clang < 801} {macports-clang-3.[3-8]}
 
-# gcc5 errors building this
-compiler.blacklist-append macports-gcc-5
+# needs gcc8 or later to compile
+# $SRC_DIR/src/llvm/projects/libtapi/lib/Core/APIJSONSerializer.cpp:1202:10: error: could not convert
+# 'result' from 'tapi::internal::API' to 'llvm::Expected<tapi::internal::API>'    return result;
+compiler.blacklist-append *gcc-3.* *gcc-4.* *gcc-5.* *gcc-6.* *gcc-7.*
 
 if {[string match macports-clang-* ${configure.compiler}]} {
 
@@ -110,73 +99,25 @@ if {${os.platform} eq "darwin" && ${os.major} < 11} {
     configure.cxxflags-append -U__STRICT_ANSI__
 }
 
-configure.post_args     ${worksrcpath}/llvm
-
-# add the tapi directory to the clang build CMakeLists.txt
-patchfiles-append       patch-0001-clang-tools-add-tapi.diff
-
-# patches from https://github.com/iains/tapi
-# and from https://github.com/tpoechtrager/apple-libtapi
-# add zippered support for MacOSX10.14.sdk and above
-patchfiles-append       patch-0002-tapi-zippered-support-poechtrager.diff
-
-# fix tapi build for llvm version 7 (and newer?)
-patchfiles-append       patch-0003-tapi-llvm7-build-fixes.diff
-
 # add support for PPC architectures
 patchfiles-append       patch-0004-tapi-add-PPC-support.diff
-
-# fixes to tests
-patchfiles-append       patch-0005-tapi-test-fixes.diff
 
 # add a missing strnlen definition if needed
 patchfiles-append       patch-0006-strnlen.diff
 
-if {[string match *clang* ${configure.compiler}]} {
-    configure.pre_args-append -C ${worksrcpath}/tapi/cmake/caches/apple-tapi.cmake
-    build.target            distribution
-    destroot.target         install-distribution
-}
+# build manpages for tapi
+patchfiles-append       patch-0007-build-manpages-for-tapi.diff
 
-if {[string match *gcc* ${configure.compiler}]} {
-    # this gcc build is allowed here for possible ld64 bootstrapping purposes
-    # it links against libgcc/libstdc++.6.dylib and libgcc/libgcc_s.1.dylib
-    configure.args-append    -DLLVM_ENABLE_PROJECTS=\"clang\;tapi\"
-    build.target             libtapi tapi
-    destroot.target          install-libtapi install-tapi install-tapi-headers install-tapi-clang-headers install-tapi-docs
-}
+configure.post_args     ${worksrcpath}/src/llvm
 
-variant tests description {Enable building of test code} {
-    test.run                yes
-    configure.args-append   -DLLVM_INCLUDE_TESTS=ON
+# needed for libtapi to find some required files
+configure.args-append   -DCMAKE_CXX_FLAGS="-I ${worksrcpath}/src/llvm/projects/clang/include -I ${workpath}/build/projects/clang/include"
 
-    # tests work on 10.13 - not tested 10.10 - 10.12 as yet
+configure.args-append   -DLLVM_INCLUDE_TESTS=OFF \
+                        -DTAPI_INCLUDE_DOCS=ON
 
-    # there is a conflict between modules and MacPorts' ncurses port: #59992
-    # temporarily disabling the ncurses port to run the tests works
-    # removing the test that includes modules also works and requires no intervention
-    post-patch {
-        reinplace "s|add_subdirectory(Mod)||g" ${worksrcpath}/tapi/test/Inputs/CMakeLists.txt
-    }
-
-    # tests error on 10.14+ due to hard-coded i386 builds - this fixes most of them
-    # there are a few tests that fail due to i386-related errors still
-    if {${os.platform} eq "darwin" && ${os.major} >= 18} {
-        post-patch {
-            foreach dir {test unittests} {
-                fs-traverse path ${worksrcpath}/tapi/${dir} {
-                    if {[file isfile ${path}] && [string match {*CMakeLists.txt} ${path}]} {
-                        reinplace "s|-arch i386||g" ${path}
-                    }
-                }
-            }
-        }
-    }
-
-    # tests did not work on 10.6.8, first due to missing architecture defines, then
-    # due to other errors. Help wanted to fix these tests if possible.
-    test.target             check-tapi
-}
+build.target            libtapi tapi
+destroot.target         install-libtapi install-tapi install-tapi-headers install-tapi-clang-headers install-tapi-docs
 
 livecheck.type          regex
 livecheck.regex         "tapi-(\[\\d.\]+)"

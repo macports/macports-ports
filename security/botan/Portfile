@@ -2,12 +2,14 @@
 
 PortSystem          1.0
 PortGroup           muniversal 1.0
-PortGroup           legacysupport 1.0
-# for arc4random_buf(), which is missing on 10.6 (Darwin 10)
-legacysupport.newest_darwin_requires_legacy 10
+PortGroup           openssl 1.0
+PortGroup           legacysupport 1.1
+
+# botan needs clock_gettime & getentropy which are missing until osx 10.11 (=darwin 15)
+legacysupport.newest_darwin_requires_legacy 15
 
 name                botan
-version             2.10.0
+version             2.18.2
 revision            1
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          security devel
@@ -23,20 +25,23 @@ long_description    Botan is a C++ library implementing a variety of \
 homepage            https://botan.randombit.net
 master_sites        ${homepage}/releases/
 distname            Botan-${version}
-extract.suffix      .tgz
+use_xz              yes
 
-checksums           rmd160  f3a4c1b963b47d543430f8705d7db87c64e013b9 \
-                    sha256  88481997578c27924724fea76610d43d9f59c99edfe561d41803bbc98871ad31 \
-                    size    7240021
+checksums           rmd160  d4c98a021d8519660538269c5713550bbabd2cd5 \
+                    sha256  541a3b13f1b9d30f977c6c1ae4c7bfdfda763cda6e44de807369dce79f42307e \
+                    size    5996928
 
-depends_build       port:python27
-depends_lib         path:lib/libssl.dylib:openssl port:zlib port:bzip2
+depends_build       port:python39
+depends_lib         port:bzip2 \
+                    port:lzma \
+                    port:sqlite3 \
+                    port:zlib
 
 # respect MacPorts configure values
 patchfiles-append   patch-compiler_flags.diff \
-                    patch-fix-install-with-destdir.diff \
-                    patch-python_exe.diff \
-                    patch-map_anon.diff
+                    patch-add-missing-header-cstdlib.diff \
+                    patch-fix-missing-sys-types.h.diff \
+                    patch-fix-ldflags-order.diff
 
 post-patch {
     reinplace -W ${worksrcpath}/src/build-data/cc \
@@ -54,8 +59,36 @@ if {[tbool configure.ccache]} {
     configure.args-append   --cc-bin=${configure.cxx}
 }
 
-configure.cmd       ${prefix}/bin/python2.7 ./configure.py
-configure.args-append --docdir=share/doc --with-openssl --with-zlib --with-bzip2
+configure.cmd       ${prefix}/bin/python3.9 ./configure.py
+configure.args-append --docdir=share/doc \
+                      --system-cert-bundle=${prefix}/share/curl/curl-ca-bundle.crt \
+                      --with-bzip2 \
+                      --with-lzma \
+                      --with-openssl \
+                      --with-sqlite3 \
+                      --with-zlib
+
+# List of all intrisics that can be disabled
+set intrinsics {}
+lappend intrinsics sse2
+lappend intrinsics ssse3
+lappend intrinsics sse4.1
+lappend intrinsics sse4.2
+lappend intrinsics avx2
+lappend intrinsics bmi2
+lappend intrinsics rdrand
+lappend intrinsics rdseed
+lappend intrinsics aes-ni
+lappend intrinsics sha-ni
+lappend intrinsics altivec
+lappend intrinsics neon
+lappend intrinsics armv8crypto
+lappend intrinsics powercrypto
+
+# Disable all the intrinsics
+foreach elem $intrinsics {
+    configure.args-append --disable-$elem
+}
 
 if {[string match *clang* ${configure.compiler}]} {
     configure.args-append --cc=clang
@@ -63,22 +96,22 @@ if {[string match *clang* ${configure.compiler}]} {
     configure.args-append --cc=gcc
 }
 
-if {${os.major} < 16} {
-    # getentropy() appeared in OSX 10.12
-    configure.args-append --without-os-features=getentropy
-}
-
 # no matching constructor for initialization of 'std::vector<CFStringRef>'
 if {${os.major} <= 14} {
-    depends_lib-append    port:sqlite3
-    configure.args-append --disable-modules=certstor_system_macos \
-                          --with-sqlite3
+    configure.args-append --disable-modules=certstor_system_macos
 }
 
 # Upstream default for both GCC and Clang
 configure.optflags  -O3
 
 platform darwin { configure.args-append --os=darwin }
+
+# Variant to re-enable use of intrinsics
+variant native description {Enable all intrinsics} {
+    foreach elem $intrinsics {
+        configure.args-delete --disable-$elem
+    }
+}
 
 # botan way of setting cpu type in build phase
 array set merger_configure_args {
