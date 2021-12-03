@@ -121,7 +121,7 @@ proc cargo._write_cargo_checksum {cdirname chksum} {
 proc cargo._old_macos_compatibility {cname cversion} {
     global os.platform os.major cargo.home
     if {${os.platform} ne "darwin" && ${os.major} >= 12} {
-        return;
+        return
     }
 
     switch ${cname} {
