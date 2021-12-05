@@ -36,7 +36,7 @@ proc handle_tarball_from {option action args} {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
             archive {
-                github.master_sites https://codeload.github.com/${github.author}/${github.project}/tar.gz/refs/tags/${git.branch}?dummy=
+                github.master_sites ${github.homepage}/archive/${git.branch}
             }
             tarball {
                 github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
