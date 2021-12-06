@@ -23,8 +23,10 @@ long_description    Godot Engine is a cross-platform game engine for \
                     (Android, iOS) and web-based (HTML5) platforms.
 
 if {$subport eq ${name}} {
+    if {${os.major} <= 15} { PortGroup legacysupport 1.1 }
+
     github.setup    godotengine ${name} 3.3.2 "" -stable
-    revision        1
+    revision        2
 
     checksums       rmd160  6a0d77597ed84308d030c243118e01b79a87f88c \
                     sha256  dde0c91b2aaa7db21bd1e1ca82f6c20491e8548c20511bdcf506160f4b852bd8 \
@@ -59,15 +61,18 @@ if {${os.platform} eq "darwin" && ${os.major} <= 11} {
 depends_build       port:scons \
                     port:yasm
 
-if {${os.platform} eq "darwin" && ${os.major} <= 15} {
+if {$subport eq "${name}-3.2" && \
+    ${os.platform} eq "darwin" && ${os.major} <= 15} \
+{
     patchfiles      legacy-osx-defines.diff
 }
 
 if {$subport eq ${name} && \
-    ${os.platform} eq "darwin" && ${os.major} <  15} {
-    # On old versions of macOS, the build seems to think that the value
-    # of the preprocessor macro MAC_OS_X_VERSION_MAX_ALLOWED is
-    # >= 101200, which is supposed to correspond to macOS 10.12 Sierra.
+    ${os.platform} eq "darwin" && ${os.major} <  15} \
+{
+    # On old versions of macOS <= 10.10, the build seems to think that
+    # the value of the preprocessor macro MAC_OS_X_VERSION_MAX_ALLOWED
+    # is >= 101200, which is supposed to correspond to macOS 10.12.
     # As discussed in GitHub PR #12269
     # (https://github.com/macports/macports-ports/pull/12269),
     # something is causing the preprocessor to think that values such as
@@ -90,12 +95,69 @@ post-patch {
         ${worksrcpath}/modules/webm/libvpx/SCsub
 }
 
+if {$subport eq ${name} && \
+    ${os.platform} eq "darwin" && ${os.major} <= 15} \
+{
+    # Using macports-libcxx is needed in order to lower the minimum
+    # macOS version specified in -mmacosx-version-min. Otherwise the
+    # compile will fail, complaining that 'shared_time_mutex' was
+    # introduced in macOS 10.12.
+    legacysupport.use_mp_libcxx yes
+
+    post-patch {
+        # Tell the build to use macports-libcxx
+        reinplace "/LINKFLAGS.*isysroot.*MACOS_SDK_PATH/a\\
+\\
+\\        env.Append(CXXFLAGS=\[\"-nostdinc++\", \"-I${prefix}/include/libcxx/v1\"\])\\
+\\        env.Append(LINKFLAGS=\[\"-L${prefix}/lib/libcxx\"\])\\
+" \
+            ${worksrcpath}/platform/osx/detect.py
+
+        # Lower the minimum macOS version allowed to launch the app
+        reinplace \
+            "/mmacosx-version-min=10\.12/s/10\.12/${macosx_deployment_target}/" \
+            ${worksrcpath}/platform/osx/detect.py
+        foreach f [list "osx_tools" "osx_template"] {
+            reinplace "s/10\.12/${macosx_deployment_target}/" \
+                ${worksrcpath}/misc/dist/${f}.app/Contents/Info.plist
+        }
+
+        # The following tests for the case where the macOS 10.12 SDK is
+        # installed on a macOS 10.11 machine. If so, then we don't add
+        # the AppKit wrapper header.
+        set sdks_dir ${developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
+        set add_appkit_wrapper yes
+        if {![catch {file lstat $sdks_dir/MacOSX10.12.sdk finfo}]} {
+            set add_appkit_wrapper no
+        }
+
+        if {$add_appkit_wrapper} {
+            # Remove the existing AppKit redefines from Godot's source
+            # code, so that we can use our AppKit wrapper file instead.
+            reinplace "/define NSEventMaskAny/i\\
+#define APPKIT_REDEFINES_HAVE_BEEN_REMOVED_BY_MACPORTS\\
+" \
+                ${worksrcpath}/platform/osx/os_osx.mm
+            reinplace {/define NSEventMaskAny/,/define NSWindowStyleMaskBorderless/d} \
+                ${worksrcpath}/platform/osx/os_osx.mm
+
+            # Add AppKit wrapper header to compiler library paths
+            reinplace "/CCFLAGS.*error=return-type/a\\
+\\
+\\    env.Prepend(CCFLAGS=\[\"-isystem\", \"${filespath}/old_appkit_compat\"\])\\
+" \
+                ${worksrcpath}/SConstruct
+        }
+    }
+}
+
 use_configure       no
 use_xcode           yes
 
 build.cmd           ${prefix}/bin/scons
 build.env-append    BUILD_NAME=macports_build
-build.target        platform=osx arch=${build_arch} target=release_debug
+build.target        platform=osx arch=${build_arch} \
+                    target=release_debug verbose=yes warnings=extra
 
 destroot {
     if {$subport eq "${name}-3.2"} {
