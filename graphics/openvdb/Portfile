@@ -8,39 +8,35 @@ PortGroup               compiler_blacklist_versions 1.0
 PortGroup               boost 1.0
 
 github.setup            AcademySoftwareFoundation openvdb 8.0.0 v
-revision                0
-
+revision                1
 categories              graphics
 platforms               darwin
 license                 {MPL-2 LGPL-2.1+}
-maintainers             {mcalhoun @MarcusCalhoun-Lopez} {@jasonliu--} openmaintainer
-
-description             sparse volumetric data structure and tools
-long_description        OpenVDB is an open source C++ library comprising a novel hierarchical data structure \
-                        and a large suite of tools for the efficient storage and manipulation of \
-                        sparse volumetric data discretized on three-dimensional grids.
+maintainers             {mcalhoun @MarcusCalhoun-Lopez} \
+                        @jasonliu-- openmaintainer
 
 homepage                https://www.openvdb.org/
+description             sparse volumetric data structure and tools
+long_description        OpenVDB is an open source C++ library \
+                        comprising a novel hierarchical data structure \
+                        and a large suite of tools for the efficient \
+                        storage and manipulation of sparse volumetric \
+                        data discretized on three-dimensional grids. \
+                        It was developed by DreamWorks Animation for \
+                        use in volumetric applications typically \
+                        encountered in computer-generated graphics and \
+                        animation.
 
 checksums               rmd160  68e677f58b7fea6dc4bd8e6d55c531205195625c \
                         sha256  28a811bae32b62a2080aad4776c91d4453a7d52e2edbe1ab4a21783ec4aaa6bb \
                         size    2287123
 
 compiler.cxx_standard   2014
-# error: cannot refer to variable template 'Contains' without a template argument list
+# error: cannot refer to variable template 'Contains' without a template
+# argument list
 #     static_assert(NodeChainType::template Contains<NonConstNodeType>,
 #                   ~~~~~~~~~~~~~~~         ^
 compiler.blacklist-append {clang < 800}
-
-# Find correct Python version
-patchfiles-append       patch-python_version.diff
-
-configure.env-append    BLOSC_ROOT=${prefix} \
-                        TBB_ROOT=${prefix} \
-                        GLFW3_ROOT=${prefix} \
-                        ILMBASE_ROOT=${prefix} \
-                        OPENEXR_ROOT=${prefix} \
-                        ZLIB_ROOT=${prefix}
 
 depends_build-append    port:pkgconfig
 
@@ -51,56 +47,104 @@ depends_lib-append      port:zlib \
                         port:ilmbase \
                         port:openexr
 
+# OpenVDB Core: binary command-line tools
+configure.args-append   -DOPENVDB_BUILD_VDB_LOD=ON \
+                        -DOPENVDB_BUILD_VDB_RENDER=ON \
+                        -DOPENVDB_BUILD_VDB_VIEW=ON \
+                        -DUSE_EXR=ON
+
 # avoid
 #     ccache: error: Failed to create directory
 #     ${prefix}/var/macports/build/.ccache/tmp: Operation not permitted
 # use latest ABI version (default is 3)
 configure.args-append   -DUSE_CCACHE=OFF \
-                        -DOPENVDB_ABI_VERSION_NUMBER=[lindex [split ${version} .] 0] \
-                        -DOPENVDB_BUILD_VDB_LOD=ON \
-                        -DOPENVDB_BUILD_VDB_RENDER=ON \
-                        -DOPENVDB_BUILD_VDB_VIEW=ON
+                        -DOPENVDB_ABI_VERSION_NUMBER=[lindex [split ${version} .] 0]
 
-# do not "Build the OpenVDB unit tests" (avoid dependency on GoogleTest)
-configure.args-append   -DOPENVDB_BUILD_UNITTESTS=OFF
+# Enable SIMD compiler flags
+configure.args-append   -DOPENVDB_SIMD=AVX
 
-set pythons_suffixes    {27 36 37 38 39}
-
-set pythons_ports       {}
-foreach s ${pythons_suffixes} {
-    lappend pythons_ports python${s}
+pre-test {
+    if {![variant_isset tests]} {
+        ui_error "'tests' variant must be activated to enable test support"
+        error "Please enable the 'tests' variant and try again"
+    }
 }
 
-foreach s ${pythons_suffixes} {
-    set p python${s}
-    set v [string index ${s} 0].[string index ${s} 1]
-    set i [lsearch -exact ${pythons_ports} ${p}]
-    set c [lreplace ${pythons_ports} ${i} ${i}]
-    variant ${p} description "Build the Python ${v} bindings" conflicts {*}${c} "
+variant tests description {Build unit tests} {
+    depends_lib-append      port:gtest
+    configure.args-append   -DOPENVDB_BUILD_UNITTESTS=ON
+    test.run yes
+}
+
+variant docs description {Build documentation} {
+    depends_build-append    port:doxygen
+    post-patch {
+        reinplace "s|doc/html|share/doc/${name}/html|" \
+            ${worksrcpath}/doc/CMakeLists.txt
+        reinplace -E \
+            "s|(DESTINATION )doc( MESSAGE_NEVER)|\\1share/doc/${name}\\2|" \
+            ${worksrcpath}/doc/CMakeLists.txt
+    }
+    configure.args-append   -DOPENVDB_BUILD_DOCS=ON \
+                            -DOPENVDB_DOXYGEN_HOUDINI=OFF \
+                            -DOPENVDB_DOXYGEN_AX=OFF
+}
+
+variant jemalloc \
+    description {Use jemalloc as the concurrent memory allocator} \
+{
+    depends_lib-append      port:jemalloc
+    configure.args-append   -DCONCURRENT_MALLOC=Jemalloc
+}
+
+variant logging description {Build and enable logging support} {
+    depends_lib-append      port:log4cplus
+    configure.args-append   -DUSE_LOG4CPLUS=ON
+}
+
+default_variants        +docs +jemalloc
+
+set python_suffixes     {27 36 37 38 39}
+set python_ports        {}
+foreach s $python_suffixes {
+    lappend python_ports python$s
+}
+
+foreach s $python_suffixes {
+    set p python$s
+    set v [string index $s 0].[string index $s 1]
+    set i [lsearch -exact $python_ports $p]
+    set c [lreplace $python_ports $i $i]
+    variant $p conflicts {*}${c} \
+        description "Build the pyopenvdb Python ${v} module" \
+    "
         depends_lib-append      port:${p} \
                                 port:py${s}-numpy
-        boost.require_numpy yes
+        boost.require_numpy     yes
+        require_active_variants [boost::depends_portname]       ${p}
+        require_active_variants [boost::depends_portname]-numpy ${p}
 
-        configure.args-append   -DOPENVDB_BUILD_PYTHON_MODULE=ON \
-                                -DUSE_NUMPY=ON
+        # Find correct Python version
+        patchfiles-append       patch-python_version.diff
 
         post-patch {
             reinplace s|__MACPORTS_PYTHON_VERSION__|${v}|g \
                 ${worksrcpath}/openvdb/openvdb/python/CMakeLists.txt
         }
 
-        require_active_variants [boost::depends_portname]       ${p}
-        require_active_variants [boost::depends_portname]-numpy ${p}
+        configure.args-append   -DOPENVDB_BUILD_PYTHON_MODULE=ON \
+                                -DUSE_NUMPY=ON
     "
 }
 
 set set_python_default  yes
-foreach s ${pythons_suffixes} {
-    if {[variant_isset python${s}]} {
-        set set_python_default  no
+foreach s $python_suffixes {
+    if {[variant_isset python$s]} {
+        set set_python_default no
     }
 }
-# this default version should stay synchronized with default boost python variant
-if {${set_python_default}} {
-    default_variants        +python39
+# this default version should stay synchronized with default
+# boost python variant
+if {$set_python_default} {
+    default_variants-append +python39
 }
