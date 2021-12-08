@@ -30,6 +30,7 @@ if {${configure.build_arch} eq "arm64" && ${os.platform} eq "darwin"} {
 
 # Enforce same compiler settings as used by rust
 compiler.cxx_standard   2017
+compiler.thread_local_storage yes
 
 destroot {
     ui_error "No destroot phase in the Portfile!"
@@ -42,4 +43,17 @@ destroot {
     ui_msg
     ui_msg "Please check if there are additional files (configuration, documentation, etc.) that need to be installed."
     error "destroot phase not implemented"
+}
+
+# https://trac.macports.org/ticket/64088
+# rust/cargo builds are often a pain to get them to use the correct
+# compiler as per MacPorts' selection. So use prepending to PATH
+# trick to ensure 'clang' and 'clang++' point to the correct compilers.
+pre-configure {
+    set TmpCompPath ${worksrcpath}/cargo_pg/bin
+    xinstall -d -m 0755 ${TmpCompPath}
+    configure.env-append  PATH=${TmpCompPath}:$env(PATH)
+    build.env-append      PATH=${TmpCompPath}:$env(PATH)
+    ln -s ${configure.cxx} ${TmpCompPath}/clang++
+    ln -s ${configure.cc}  ${TmpCompPath}/clang
 }

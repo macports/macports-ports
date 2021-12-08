@@ -36,7 +36,7 @@ proc handle_tarball_from {option action args} {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
             archive {
-                github.master_sites https://codeload.github.com/${github.author}/${github.project}/tar.gz/refs/tags/${git.branch}?dummy=
+                github.master_sites ${github.homepage}/archive/${git.branch}
             }
             tarball {
                 github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
@@ -117,7 +117,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     } else {
         livecheck.type          regex
         default livecheck.url   {${github.homepage}/tags}
-        default livecheck.regex {[list archive/refs/tags/[join ${github.tag_prefix}][join ${github.livecheck.regex}][join ${github.tag_suffix}]\\.tar\\.gz]}
+        default livecheck.regex {[list archive/refs/tags/[quotemeta [join ${github.tag_prefix}]][join ${github.livecheck.regex}][quotemeta [join ${github.tag_suffix}]]\\.tar\\.gz]}
     }
     livecheck.version       ${github.version}
 }
