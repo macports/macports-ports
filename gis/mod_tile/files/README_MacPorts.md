@@ -8,10 +8,7 @@ This port primarily contains two applications, a daemon, `renderd`, which
 renders map tiles from the database; and an Apache module, `mod_tile`, which
 serves those tiles.
 
-These notes assume the port has been installed with the prefix `/opt/local`.
-Replace with the appropriate prefix if you have installed it elsewhere.
-
-The port includes a shell script, `/opt/local/share/mod_tile/osm_setup_db.sh`
+The port includes a shell script, `@PREFIX@/share/mod_tile/osm_setup_db.sh`
 which largely automates the process of downloading and importing OpenStreetMap
 data into a PostgreSQL database.  There are some notes at the beginning of the
 script on how to use it.  Note the section that requires a small modification
@@ -26,13 +23,13 @@ areas can take considerable time and resources.  Generally, SSD disks are
 recommended to reduce processing times.
 
 The script sources variables from
-`/opt/local/etc/mod_tile/osm-tiles-update.conf`.  Update that configuration
+`@PREFIX@/etc/mod_tile/osm-tiles-update.conf`.  Update that configuration
 file appropriately.
 
 To enable the `mod_tile` module in Apache, install it with:
 
-	$ cd /opt/local/lib/apache2/modules/
-	$ sudo /opt/local/bin/apxs -a -e -n "tile" mod_tile.so
+	$ cd @PREFIX@/lib/apache2/modules/
+	$ sudo @PREFIX@/bin/apxs -a -e -n "tile" mod_tile.so
 	$ sudo port reload apache2
 
 You should complete the import process before starting the `renderd` daemon
@@ -54,8 +51,8 @@ on your requirements, it may be better not to run this process at all and just
 refresh the entire region every few months or so.
 
 The output of the various scripts and utilities are written to log files under
-`/opt/local/var/log/renderd`.  A configuration file for `logrotate` is
-deployed to `/opt/local/etc/logrotate.d/renderd`.  Please see the `logrotate`
+`@PREFIX@/var/log/renderd`.  A configuration file for `logrotate` is
+deployed to `@PREFIX@/etc/logrotate.d/renderd`.  Please see the `logrotate`
 man pages for further information.
 
 ## Cleanup and Starting Afresh
@@ -69,16 +66,16 @@ As a PostgreSQL super user, drop the database (default `gis`):
 
 Remove the tile cache with:
 
-	$ sudo rm -rf /opt/local/var/lib/mod_tile/*
+	$ sudo rm -rf @PREFIX@/var/lib/mod_tile/*
 
 Remove the state files for incremental updates with:
 
-	$ sudo rm -rf /opt/local/var/lib/mod_tile/.osmosis
+	$ sudo rm -rf @PREFIX@/var/lib/mod_tile/.osmosis
 
 ## Noto Fonts
 
 The `mapnik.xml` configuration file attempts to use Google Noto Fonts if they
-are available under `/opt/local/lib/mapnik/fonts`.  Download the fonts and
+are available under `@PREFIX@/lib/mapnik/fonts`.  Download the fonts and
 create a symbolic to their installed location:
 
 1.	Download a zip containing the fonts from
@@ -89,9 +86,9 @@ create a symbolic to their installed location:
 		$ cd /usr/local/share/fonts/noto
 		$ unzip ~/Downloads/Noto-unhinted.zip
 		$ chmod +r *.?tf
-		$ sudo ln -s /usr/local/share/fonts/noto /opt/local/lib/mapnik/fonts
+		$ sudo ln -s /usr/local/share/fonts/noto @PREFIX@/lib/mapnik/fonts
 
-The debug information written to `/opt/local/var/lib/renderd/renderd.log`
+The debug information written to `@PREFIX@/var/lib/renderd/renderd.log`
 during the daemon startup reports whether fonts are loaded successfully or
 not.  The configuration is fundamentally a priority preference for normal,
 bold and oblique fonts.  It is expected some font varieties will not be found.
@@ -101,22 +98,22 @@ bold and oblique fonts.  It is expected some font varieties will not be found.
 To use a different database name, it is necessary to modify a number of
 configuration files:
 
-- `/opt/local/etc/mod_tile/osm-tiles-update.conf`
-- `/opt/local/etc/openstreetmap-carto/external-data.yml`
-- `/opt/local/etc/openstreetmap-carto/mapnik.xml`
+- `@PREFIX@/etc/mod_tile/osm-tiles-update.conf`
+- `@PREFIX@/etc/openstreetmap-carto/external-data.yml`
+- `@PREFIX@/etc/openstreetmap-carto/mapnik.xml`
 
 The `mapnik.xml` configuration file repeatedly defines the database name for
 every style.  It may be easier to re-create the entire configuration file from
 its original source file as follows:
 
-1.  Make a copy of `/opt/local/share/openstreetmap-carto/project.mml` and edit
+1.  Make a copy of `@PREFIX@/share/openstreetmap-carto/project.mml` and edit
     the `dbname` attribute appropriately in the copy.
 
 1.  Use `carto` to re-create `mapnik.xml` using the copy of the `project.mml`
     source file:
 
 		$ sudo port install carto
-		$ carto project.mml | sudo tee /opt/local/etc/openstreetmap-carto/mapnik.xml
+		$ carto project.mml | sudo tee @PREFIX@/etc/openstreetmap-carto/mapnik.xml
 
 ## Useful Resources
 
