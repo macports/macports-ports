@@ -1,0 +1,191 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           muniversal 1.0
+
+# Please keep the mongodb and mongodb-devel ports as similar as possible.
+
+epoch               0
+github.setup        mongodb mongo 5.1.1 r
+revision            0
+checksums           rmd160  a4943b37ac73905bfb1978880e8910533155249b \
+                    sha256  0af3dd6e3c5d12691d7c25e0bbab6a3066c7a42339860480c802435160ce0dab \
+                    size    55930695
+
+name                mongodb-devel
+conflicts           mongodb
+license             SSPL
+categories          databases
+platforms           darwin
+maintainers         {ryandesign @ryandesign}
+
+description         high-performance, schema-free, document-oriented (\"NoSQL\") database
+
+long_description    MongoDB is a {*}${description}. The ${name} port \
+                    tracks the rapid release cycle which makes new \
+                    features available faster but is not supported.
+
+homepage            https://www.mongodb.com/community
+master_sites        https://fastdl.mongodb.org/src
+distname            mongodb-src-r${version}
+dist_subdir         mongodb
+
+set python_branch   3.9
+set python_version  [string map {. {}} ${python_branch}]
+
+depends_build       port:python${python_version} \
+                    port:py${python_version}-cheetah \
+                    port:py${python_version}-packaging \
+                    port:py${python_version}-psutil \
+                    port:py${python_version}-pymongo \
+                    port:py${python_version}-regex \
+                    port:py${python_version}-requests \
+                    port:py${python_version}-requirements-parser \
+                    port:py${python_version}-setuptools \
+                    port:py${python_version}-yaml
+
+depends_lib         port:curl \
+                    port:cyrus-sasl2 \
+                    port:libpcap \
+                    port:libstemmer \
+                    port:pcre \
+                    port:snappy \
+                    port:yaml-cpp \
+                    port:zlib \
+                    port:zstd
+
+use_configure       no
+
+compiler.c_standard 2011
+compiler.cxx_standard 2017
+
+# This matches a version check of __apple_build_version__ in SConstruct.
+compiler.blacklist-append {clang < 1001.0.46}
+
+# It sets its own optimization flags via the --opt flag.
+configure.optflags
+
+# -L flags are handled via LIBPATH.
+configure.ldflags-delete -L${prefix}/lib
+
+build.cmd           ${prefix}/bin/python${python_branch} buildscripts/scons.py
+build.target        install-core
+build.args          CC="${configure.cc}" \
+                    CFLAGS="${configure.cflags}" \
+                    CPPPATH="${prefix}/include" \
+                    CXX="${configure.cxx}" \
+                    CXXFLAGS="${configure.cxxflags}" \
+                    DESTDIR="${destroot}" \
+                    LIBPATH="${prefix}/lib" \
+                    PREFIX="${prefix}" \
+                    --disable-warnings-as-errors \
+                    --enable-http-client=on \
+                    --install-action=hardlink \
+                    --libc++ \
+                    --opt=size \
+                    --release \
+                    --ssl=on \
+                    --use-sasl-client \
+                    --use-system-pcre \
+                    --use-system-snappy \
+                    --use-system-stemmer \
+                    --use-system-yaml \
+                    --use-system-zlib \
+                    --use-system-zstd \
+                    --wiredtiger=on
+
+# It should build with --use-system-asio, but doesn't:
+# TODO: Report bug and put link here
+
+# It should build with --use-system-icu, but doesn't:
+# TODO: Report bug and put link here
+
+# Do not build mongoc_embedded.
+# See https://jira.mongodb.org/browse/SERVER-44592
+build.args-append   --use-system-mongo-c=off
+
+# Specify a short variant dir because the default variant dir is deeply nested
+# and can be very long, so long that on some systems the build will fail with
+# "Argument list too long"; see https://jira.mongodb.org/browse/SERVER-13829
+build.args-append   VARIANT_DIR=MP
+
+# i386 was never supported on macOS.
+# See https://jira.mongodb.org/browse/SERVER-22810
+supported_archs     arm64 x86_64
+
+array set merger_build_args {arm64 "TARGET_ARCH=aarch64" x86_64 "TARGET_ARCH=x86_64"}
+foreach a ${supported_archs} {
+    lappend merger_build_args($a) \
+                    CCFLAGS="-arch ${a}" \
+                    LINKFLAGS="${configure.ldflags} -arch ${a}" \
+}
+
+# JavaScript engine support for arm64 is blocked pending the integration
+# of MozJS/Spidermonkey ESR 91 into MongoDB.
+# https://jira.mongodb.org/browse/SERVER-50115?focusedCommentId=3948549&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-3948549
+# https://jira.mongodb.org/browse/SERVER-42427
+if {[vercmp ${version} 6.0.0] < 0} {
+    lappend merger_build_args(arm64) --js-engine=none
+}
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+if {(!${universal_possible} || ![variant_isset universal]) && [info exists merger_build_args(${build_arch})]} {
+    build.args-append {*}$merger_build_args(${build_arch})
+}
+
+set dbdir           ${prefix}/var/db/mongodb
+set logdir          ${prefix}/var/log/mongodb
+set docdir          ${prefix}/share/doc/mongodb
+set mongouser       _mongo
+add_users           ${mongouser} group=${mongouser} realname=MongoDB\ Server
+
+destroot {
+    # The programs have already been installed into the destroot during
+    # the build phase because I don't know how to prevent it from doing
+    # that. Documentation files have also already been installed to an
+    # unreasonable location so move them.
+    xinstall -d ${destroot}${docdir}
+    foreach f [glob ${destroot}${prefix}/*] {
+        if {[file isfile ${f}]} {
+            move ${f} ${destroot}${docdir}
+        }
+    }
+
+    xinstall -m 0755 -o ${mongouser} -g ${mongouser} -d \
+        ${destroot}${dbdir} \
+        ${destroot}${logdir}
+    destroot.keepdirs-append  \
+        ${destroot}${dbdir} \
+        ${destroot}${logdir}
+}
+
+startupitem.create      yes
+startupitem.executable  sudo -u ${mongouser} ${prefix}/bin/mongod --dbpath ${dbdir} --logpath ${logdir}/mongodb.log --logappend
+
+# mongodb 5.1 and later requires macOS 10.14 or later to build.
+# https://jira.mongodb.org/browse/SERVER-58746
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+    known_fail          yes
+    depends_build
+    depends_lib
+    pre-fetch {
+        ui_error "${name} @${version} requires macOS 10.14 or greater"
+        return -code error "incompatible macOS version"
+    }
+}
+
+if {${os.platform} eq "darwin" && ${os.major} >= 16 && [vercmp ${os.version} 18.2.0] < 0} {
+    notes-append {
+        Warning: MONGODB MAY LOSE DATA if it crashes on macOS 10.14.0 or\
+        earlier and the database is on an APFS volume. This problem is fixed\
+        in macOS 10.14.1 and later so please update your operating system or\
+        make sure your database is on a Mac OS Extended (Journaled) volume.\
+        See https://jira.mongodb.org/browse/WT-4112 for more information.
+    }
+}
+
+github.livecheck.regex  {([0-9.]+)}
