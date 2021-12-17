@@ -131,8 +131,12 @@ proc crossgdb.setup {target version} {
 
         build.dir ${configure.dir}
 
-        # this port installs files to ${prefix}/${crossgdb.target}
+        # All cross ports violate the mtree layout and installs files to
+        # ${prefix}/${crossgdb.target}
         destroot.violate_mtree yes
+
+        # All *-binutils cross ports is not universal
+        universal_variant no
 
         post-destroot {
             # Avoid conflicts with ${crossgdb.target}-binutils port
