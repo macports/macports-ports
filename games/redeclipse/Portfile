@@ -1,0 +1,174 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+
+
+name                redeclipse
+set pretty_name     "Red Eclipse"
+version             1.6.0
+categories          games
+license             zlib CC-BY-SA-3
+maintainers         @jasonliu--
+
+homepage            https://www.${name}.net
+description         first-person arena shooter game
+long_description    $pretty_name is a fun-filled new take on the \
+                    first-person arena shooter, built on the Cube 2 \
+                    game engine. Game modes include Capture the Flag, \
+                    Defend and Control, Bomber Ball, and Race, as well \
+                    as online cooperative map editing. Unlike the \
+                    original Cube 2: Sauerbraten, $pretty_name \
+                    features parkour movement, such as vaulting and \
+                    running along walls, as well as impulse boosts, \
+                    dashing, and other tricks.
+subport ${name}-data { description      game data for $pretty_name }
+
+set gamedata_path   ${prefix}/share/${name}
+
+if {$subport eq ${name}} {
+    PortGroup       cmake 1.1
+    PortGroup       app 1.0
+
+    github.setup    ${name} base ${version} v
+
+    checksums       rmd160  2a36e97ebe3e151c835cffdfee12515d83d4d8c8 \
+                    sha256  56106b819f32f4d82709ebb3bfc6e8648e88c7fc191f6f0a287a31f3f7612aad \
+                    size    13847298
+
+    depends_build-append    port:pkgconfig
+    depends_lib-append      port:zlib \
+                            port:libsdl2 \
+                            port:libsdl2_image \
+                            port:libsdl2_mixer
+    depends_run-append      port:${name}-data
+
+    worksrcdir      ${distname}/src
+
+    post-patch {
+        foreach re [list \
+            {s|xcode/main.m||} \
+            {/set.BIN_SUFFIX.*_osx/s/_osx//} \
+            {/set.targets.*genkey/s/ genkey.*)/)/} \
+            {s|(DESTINATION ).*$|\1${CMAKE_INSTALL_PREFIX}/bin/|} \
+        ] {
+            reinplace -E $re ${worksrcpath}/CMakeLists.txt
+        }
+
+        # If this port is being built on a system that also has the
+        # mesa port installed, there's a high likelihood of the build
+        # finding mesa's OpenGL implementation instead of the built-in
+        # macOS framework, which will cause the game to fail to load.
+        # So we make modifications to help ensure that the build finds
+        # the macOS framework.
+        foreach re [list \
+            {/set.client_deps/s/ gl//} \
+            "/find_library.COCOA_LIBRARY/a\\
+\\    find_library(OPENGL_LIBRARY OpenGL)\\
+" \
+            {/target_link_lib.*COCOA_LIB/s/)/ $\{OPENGL_LIBRARY\})/} \
+        ] {
+            reinplace $re ${worksrcpath}/CMakeLists.txt
+        }
+    }
+
+    app.name                ${name}
+    app.icon                xcode/${name}.icns
+    app.retina              yes
+    app.use_launch_script   yes
+
+    post-destroot {
+        move ${destroot}${applications_dir}/${name}.app \
+             ${destroot}${applications_dir}/${pretty_name}.app
+        set app_contents ${applications_dir}/${pretty_name}.app/Contents
+        xinstall -m 644 \
+            ${worksrcpath}/../bin/${name}.app/Contents/Info.plist \
+            ${destroot}$app_contents/
+        reinplace -E \
+            "/IconFile/,/DictionaryVersion/s/\(${name}\)/\\1.icns/" \
+            ${destroot}$app_contents/Info.plist
+        foreach d [list config data doc] {
+            ln -s $gamedata_path/$d ${destroot}$app_contents/Resources/
+        }
+
+        foreach bin_name [list ${name} ${name}_server] {
+            # The actual binary executables will live inside the
+            # application bundle's Resources directory
+            xinstall ${build.dir}/$bin_name \
+                ${destroot}$app_contents/Resources/
+
+            # Instead of using the launch script that comes with the
+            # source code (which, inexplicably, is a (ba)sh script that
+            # calls osascript to 'tell application Terminal to do
+            # script' to call the binary executable), we write our own.
+            # The following script is adapted from the launch script
+            # used by the Debian package of redeclipse.
+            foreach path [list \
+                ${destroot}$app_contents/MacOS \
+                ${destroot}${prefix}/bin \
+            ] {
+                set fp [open $path/$bin_name w]
+                puts $fp "#!/bin/sh"
+                puts $fp "executable_name=`basename \"\$0\"`"
+                puts $fp "for arg; do"
+                puts $fp "\tif \[ \"\$arg\" = --help \]; then"
+                if {$bin_name eq "${name}_server"} {
+                    puts $fp "\t\texec man ${name}-server"
+                } else {
+                    puts $fp "\t\texec man \"\$executable_name\""
+                }
+                puts $fp "\tfi"
+                puts $fp "done"
+                puts $fp "cd \"$app_contents/Resources/\" || exit 1"
+                puts $fp "exec \"./\$executable_name\" \"\$@\""
+                close $fp
+                file attributes $path/$bin_name -permissions +x
+            }
+        }
+    }
+}
+
+if {$subport eq "${name}-data"} {
+    github.setup        ${name} base ${version} v
+    github.tarball_from releases
+    use_bzip2           yes
+    distfiles           ${name}_${version}_combined${extract.suffix}
+    distname            ${name}-${version}
+
+    checksums           rmd160  290f3d40c38e8c8b21f7261ab90cecbe99ba73e9 \
+                        sha256  5a14ffd5297e8471cbbe5fe77297945c756361e0fd0f3febf94c1d17004b4aa9 \
+                        size    906217329
+
+    use_configure no
+    build {}
+    destroot {
+        xinstall -d ${destroot}$gamedata_path
+        foreach d [list config data doc readme.txt branch.txt] {
+            copy ${worksrcpath}/$d ${destroot}$gamedata_path/
+        }
+
+        set cap_appname [string toupper ${name}]
+        foreach bin_name [list ${name} ${name}-server] {
+            move ${destroot}$gamedata_path/doc/man/${bin_name}.6.am \
+                 ${destroot}$gamedata_path/doc/man/${bin_name}.6
+            # Make substitutions for the man pages. Adapted from the
+            # 'system-install-docs' target in the
+            # ${worksrcpath}/src/system-install.mk makefile.
+            foreach re [list \
+                "s|@LIBEXECDIR@/@APPNAME@|${applications_dir}/${pretty_name}.app/Contents/Resources|g" \
+                "s|@DATADIR@|${prefix}/share|g" \
+                "s|@DOCDIR@/@APPNAME@|$gamedata_path/doc|g" \
+                "s|@APPNAME@|${name}|g" \
+                "s|@CAPPNAME@|$cap_appname|g" \
+            ] {
+                reinplace -q $re \
+                    ${destroot}$gamedata_path/doc/man/${bin_name}.6
+            }
+            system -W ${destroot}$gamedata_path/doc/man \
+                "gzip -9 ${bin_name}.6"
+            move ${destroot}$gamedata_path/doc/man/${bin_name}.6.gz \
+                 ${destroot}${prefix}/share/man/man6/
+        }
+        delete ${destroot}$gamedata_path/doc/man
+    }
+}
