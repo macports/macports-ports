@@ -96,6 +96,9 @@ post-extract {
     close ${cabal_config_fd}
 }
 
+# cabal builds x86_64 binaries on both arm64 and x86_64 architectures
+supported_archs     arm64 x86_64
+
 # libHSbase shipped with GHC links against system libiconv, which provides the
 # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
 # process statically links libHSbase.a, we must have /usr/lib in the library
