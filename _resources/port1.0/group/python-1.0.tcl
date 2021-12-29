@@ -266,7 +266,8 @@ proc python_set_default_version {option action args} {
 
 
 options python.branch python.prefix python.bin python.lib python.libdir \
-        python.include python.pkgd python.pep517 python.add_dependencies
+        python.include python.pkgd python.pep517 python.pep517_backend \
+        python.add_dependencies
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
 default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
 default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
@@ -282,6 +283,7 @@ default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
 default python.pep517   no
+default python.pep517_backend   setuptools
 
 default python.add_dependencies yes
 proc python_add_dependencies {} {
@@ -299,6 +301,23 @@ proc python_add_dependencies {} {
                                         port:py${python.version}-python-install
                 depends_build-append    port:py${python.version}-build \
                                         port:py${python.version}-python-install
+                switch -- [option python.pep517_backend] {
+                    setuptools {
+                        depends_build-delete    port:py${python.version}-setuptools \
+                                                port:py${python.version}-wheel
+                        depends_build-append    port:py${python.version}-setuptools \
+                                                port:py${python.version}-wheel
+                    }
+                    flit {
+                        depends_build-delete    port:py${python.version}-flit_core
+                        depends_build-append    port:py${python.version}-flit_core
+                    }
+                    poetry {
+                        depends_build-delete    port:py${python.version}-poetry-core
+                        depends_build-append    port:py${python.version}-poetry-core
+                    }
+                    default {}
+                }
             }
         }
     }
