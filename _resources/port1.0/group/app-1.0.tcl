@@ -262,7 +262,7 @@ platform macosx {
 
                 # Ensure app.icon exists.
                 if {![file exists ${icon}]} {
-                    return -code error "app.icon '${icon}' does not exist"
+                    return -code error "app.icon '[join ${app.icon}]' does not exist"
                 }
 
                 # If app.icon is an .icns file, copy it.
@@ -275,8 +275,8 @@ platform macosx {
                     foreach w {16 32 128 256 512} {
                         lappend makeicnsargs -$w ${worksrcpath}/${w}.png
 
-                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w '${icon}' > ${worksrcpath}/$w.png" }]} {
-                            return -code error "app.icon '${icon}' could not be converted to png: $::errorInfo"
+                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w [shellescape ${icon}] > ${worksrcpath}/$w.png" }]} {
+                            return -code error "app.icon '[join ${app.icon}]' could not be converted to png: $::errorInfo"
                         }
                     }
                     if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
@@ -285,8 +285,8 @@ platform macosx {
 
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in '${icon}' -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
-                        return -code error "app.icon '${icon}' could not be converted to ${app.name}.icns: $::errorInfo"
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in [shellescape ${icon}] -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
+                        return -code error "app.icon '[join ${app.icon}]' could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
             }
