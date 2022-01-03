@@ -279,13 +279,13 @@ platform macosx {
                             return -code error "app.icon '[join ${app.icon}]' could not be converted to png: $::errorInfo"
                         }
                     }
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
                         return -code error "app.icns could not be created: $::errorInfo"
                     }
 
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in [shellescape ${icon}] -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in [shellescape ${icon}] -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
                         return -code error "app.icon '[join ${app.icon}]' could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
@@ -438,7 +438,7 @@ proc app._write_launch_script  {executable app_destination} {
 
     puts ${launch_script} "#!/bin/bash
 export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
-exec ${executable}
+exec [shellescape ${executable}]
 "
     close ${launch_script}
     file attributes ${app_destination} -permissions 0755
