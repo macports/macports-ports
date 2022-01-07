@@ -65,7 +65,11 @@ proc mpi.get_default_mpi_compiler {} {
     } else {
         # macports compiler is being used, so use the corresponding MPI port
         set mpiver [join [split ${ver} "."] ""]
-        return "${type}${mpiver} ${type}${mpiver}"
+        if {"-${type}${mpiver}" ni ${::mpi.disabled_compilers}} {
+            return "${type}${mpiver} ${type}${mpiver}"
+        } else {
+            return ""
+        }
     }
 }
 
@@ -98,29 +102,35 @@ proc mpi.setup_variants {variants} {
                     configure.cxx_stdlib macports-libstdc++
                 }
 
-                set path \"etc/select/mpi/${variant}-\${p_name}\"
-
-                if {\$f_name ne {}} {
-                    set path \"\$path-fortran\"
-                }
-
-                depends_lib-append path:\$path:$mpidb($variant,name)-\$d_name
-                set mpi.name $mpidb($variant,name)-\$d_name
-
-                foreach compiler {cc cxx f77 f90 exec} {
-                    set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
-                }
-                set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
-
-                # there is no mpicpp or mpiobj
-                # if more compilers are added in compilers portgroup, need to be added here
-                foreach compiler \${compilers.list} {
-                    if {\$compiler ne \"fc\" && \$compiler ne \"cpp\" && \$compiler ne \"objc\"} {
-                        configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                if {\$p_name eq {}} {
+                    pre-configure {
+                        error \"No supported MPI compiler\"
                     }
-                }
-                if {\"fc\" in \${compilers.list}} {
-                    set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
+                } else {
+                    set path \"etc/select/mpi/${variant}-\${p_name}\"
+
+                    if {\$f_name ne {}} {
+                        set path \"\$path-fortran\"
+                    }
+
+                    depends_lib-append path:\$path:$mpidb($variant,name)-\$d_name
+                    set mpi.name $mpidb($variant,name)-\$d_name
+
+                    foreach compiler {cc cxx f77 f90 exec} {
+                        set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                    }
+                    set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
+
+                    # there is no mpicpp or mpiobj
+                    # if more compilers are added in compilers portgroup, need to be added here
+                    foreach compiler \${compilers.list} {
+                        if {\$compiler ne \"fc\" && \$compiler ne \"cpp\" && \$compiler ne \"objc\"} {
+                            configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                        }
+                    }
+                    if {\"fc\" in \${compilers.list}} {
+                        set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
+                    }
                 }
 
             "
@@ -297,15 +307,15 @@ proc mpi.setup {args} {
     if {$cur_variant eq "" && ${mpi.default}} {
         set cur_variant mpich
     }
-    set disabled [list]
+    set ::mpi.disabled_compilers [list]
     if {$cur_variant ne ""} {
         set is_mpich [expr {$cur_variant in {mpich}}]
 
-        lappend disabled \
+        lappend ::mpi.disabled_compilers \
             -gcc43 -gcc44 -gcc45 -gcc46 -gcc47 -gcc48
 
         # All of the following are now obsolete for openmpi/mpich
-        lappend disabled \
+        lappend ::mpi.disabled_compilers \
             -clang33 -clang34 -clang35 -clang37 \
             -clang50 -clang60 -clang70 -clang80 \
             -clangdevel \
@@ -313,7 +323,7 @@ proc mpi.setup {args} {
             -gccdevel
 
         # Disable clang 12/13 unconditionally, as not yet supported for openmpi/mpich
-        lappend disabled \
+        lappend ::mpi.disabled_compilers \
             -clang12 \
             -clang13
 
@@ -321,22 +331,22 @@ proc mpi.setup {args} {
         # However, gcc9+ subports fail to build on 10.7, for both openmpi and mpich.
         # So only enable for 10.8+.
         if {${os.major} < 12} {
-            lappend disabled -gcc9 -gcc10 -gcc11
+            lappend ::mpi.disabled_compilers -gcc9 -gcc10 -gcc11
         } elseif {$is_mpich} {
             # mpich: gcc11 subport currently disabled across-the-board
-            lappend disabled -gcc11
+            lappend ::mpi.disabled_compilers -gcc11
         }
 
         if {${os.arch} eq "arm"} {
             # Disable compilers not well supported on arm. Note: clang 9 and 10
             # build on arm, but are not reliable so skip; use clang 11 instead.
-            lappend disabled \
+            lappend ::mpi.disabled_compilers \
                 -gcc7 -gcc9 \
                 -clang90 -clang10
         }
     }
 
-    compilers.setup {*}$cl {*}$disabled
+    compilers.setup {*}$cl {*}${::mpi.disabled_compilers}
 
     # we need to check for a removed variant early so we can exit before
     # the wrong variant is passed up the dependency chain
