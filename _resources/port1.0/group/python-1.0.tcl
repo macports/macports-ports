@@ -419,3 +419,27 @@ default python.link_binaries_suffix {[python_get_defaults binary_suffix]}
 
 default python.move_binaries no
 default python.move_binaries_suffix {[python_get_defaults binary_suffix]}
+
+# python._first_version: keep track of the first version line in the port.
+global python._first_version
+option_proc version python._set_version
+
+proc python._set_version {option action args} {
+    if {"set" ne ${action}} {
+        return
+    }
+
+    global python._first_version
+
+    if {![info exists python._first_version]} {
+        set python._first_version [option ${option}]
+    }
+}
+
+# If a subport has not changed the version, disable livecheck.
+pre-livecheck {
+    global name subport version python._first_version
+    if {${name} ne ${subport} && ${version} eq ${python._first_version}} {
+        livecheck.type  none
+    }
+}
