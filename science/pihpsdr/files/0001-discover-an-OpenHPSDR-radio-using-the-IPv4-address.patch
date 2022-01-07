@@ -1,0 +1,551 @@
+From a1f1eae33b5948784c38946f0604107dcc348c8b Mon Sep 17 00:00:00 2001
+From: Davide Gerhard <rainbow@irh.it>
+Date: Mon, 27 Dec 2021 12:57:18 +0100
+Subject: [PATCH] discover an OpenHPSDR radio using the IPv4 address
+
+Use a pre-declared IPv4 address to find the radio and connect to it
+without broadcast discovery. The user can input the IPv4 in the
+discovery window. If the user declared IPv4 address is empty the
+discovery is disabled. Moreover, if the IP is already discovered by the
+broadcast procedure the static IP is not used.
+
+This is very useful when you use a VPN or you computer is connected to
+another network (therefore is leveraging the routing mechanism).
+On both cases, you need to pay attention to the firewall rules.
+
+To maintain the interface easy to use, the TCP (aka red pitaya)
+and UDP static IP input boxes are merged in a single input.
+---
+ discovered.h        |   1 +
+ discovery.c         |  92 ++++++++++++++++-----------------
+ discovery.h         |   4 +-
+ new_discovery.c     | 123 +++++++++++++++++++++++++++++++-------------
+ old_discovery.c     |  57 ++++++++++++++++----
+ stemlab_discovery.c |  12 ++---
+ 6 files changed, 187 insertions(+), 102 deletions(-)
+
+diff --git discovered.h discovered.h
+index 91e7b0b..26ec95a 100644
+--- discovered.h
++++ discovered.h
+@@ -92,6 +92,7 @@ struct _DISCOVERED {
+     int protocol;
+     int device;
+     int use_tcp;    // use TCP rather than UDP to connect to radio
++    uint8_t use_routing;  // use routing to connect to radio (no local IP)
+     char name[64];
+     int software_version;
+     int status;
+diff --git discovery.c discovery.c
+index e2edd70..6d43813 100644
+--- discovery.c
++++ discovery.c
+@@ -61,10 +61,10 @@ static DISCOVERED *d;
+ static GtkWidget *apps_combobox[MAX_DEVICES];
+ #endif
+ 
+-GtkWidget *tcpaddr;
+ #define IPADDR_LEN 20
+-static char ipaddr_tcp_buf[IPADDR_LEN] = "10.10.10.10";
+-char *ipaddr_tcp = &ipaddr_tcp_buf[0];
++GtkWidget *radioaddr;
++static char ipaddr_radio_buf[IPADDR_LEN] = "";
++char *ipaddr_radio = &ipaddr_radio_buf[0];
+ 
+ #ifdef CLIENT_SERVER
+ GtkWidget *host_addr_entry;
+@@ -148,26 +148,33 @@ static gboolean exit_cb (GtkWidget *widget, GdkEventButton *event, gpointer data
+   return TRUE;
+ }
+ 
+-static gboolean tcp_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
+-    strncpy(ipaddr_tcp, gtk_entry_get_text(GTK_ENTRY(tcpaddr)), IPADDR_LEN);
+-    ipaddr_tcp[IPADDR_LEN-1]=0;
+-    // remove possible trailing newline chars in ipaddr_tcp
+-	    int len=strnlen(ipaddr_tcp,IPADDR_LEN);
+-	    while (--len >= 0) {
+-	      if (ipaddr_tcp[len] != '\n') break;
+-	      ipaddr_tcp[len]=0;
+-	    }
+-	    //fprintf(stderr,"New TCP addr = %s.\n", ipaddr_tcp);
+-	    // save this value to config file
+-	    FILE *fp = fopen("ip.addr", "w");
+-	    if (fp) {
+-		fprintf(fp,"%s\n",ipaddr_tcp);
+-		fclose(fp);
+-	    }
+-	    gtk_widget_destroy(discovery_dialog);
+-	    g_idle_add(ext_discovery,NULL);
+-	    return TRUE;
+-	}
++static gboolean is_valid_IPv4_address(char *ipAddress)
++{
++    struct sockaddr_in sa;
++    int result = inet_pton(AF_INET, ipAddress, &(sa.sin_addr));
++    return result != 0;
++}
++
++static gboolean radio_addr_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
++  strncpy(ipaddr_radio, gtk_entry_get_text(GTK_ENTRY(radioaddr)), IPADDR_LEN);
++
++  // at the moment we check only IPv4 notation and avoid IPv6 and hostname strings
++  if (strlen(ipaddr_radio) && !is_valid_IPv4_address(ipaddr_radio)) {
++    gtk_entry_set_text(GTK_ENTRY(radioaddr), "wrong IPv4");
++    fprintf(stderr,"discover: Radio address %s is invalid!\n", ipaddr_radio);
++    return FALSE;
++  }
++
++  char value[80];
++  clearProperties();
++  snprintf(value, IPADDR_LEN, "%s", ipaddr_radio);
++  setProperty("ipaddr_radio",value);
++  saveProperties("protocols.props");
++
++  gtk_widget_destroy(discovery_dialog);
++  g_idle_add(ext_discovery,NULL);
++  return TRUE;
++}
+ 
+ #ifdef CLIENT_SERVER
+ static gboolean connect_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
+@@ -199,25 +206,17 @@ g_print("connect_cb: %s:%d\n",host_addr,host_port);
+ 
+ void discovery() {
+ //fprintf(stderr,"discovery\n");
++  char *value;
+ 
+   protocols_restore_state();
+ 
+   selected_device=0;
+   devices=0;
+ 
+-  // Try to locate IP addr
+-  FILE *fp=fopen("ip.addr","r");
+-  if (fp) {
+-    char *c=fgets(ipaddr_tcp, IPADDR_LEN,fp);
+-    fclose(fp);
+-    ipaddr_tcp[IPADDR_LEN-1]=0;
+-    // remove possible trailing newline char in ipaddr_tcp
+-    int len=strnlen(ipaddr_tcp,IPADDR_LEN);
+-    while (--len >= 0) {
+-      if (ipaddr_tcp[len] != '\n') break;
+-      ipaddr_tcp[len]=0;
+-    }
+-  }
++  loadProperties("protocols.props");
++  value=getProperty("ipaddr_radio");
++  if(value!=NULL) strncpy(ipaddr_radio,value, IPADDR_LEN);
++
+ #ifdef USBOZY
+ //
+ // first: look on USB for an Ozy
+@@ -390,7 +389,8 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
+           // leads to a radio address outside the netmask and can be ignored. So if either the radio
+           // or the interface address starts with 169.254., suppress "Subnet!" complaint.
+           //
+-          if (strncmp(inet_ntoa(d->info.network.address.sin_addr),"169.254.",8) &&
++          // NOTE: probably at this point we can disable this or check if we are connecting remotelly
++          if (!d->use_routing && strncmp(inet_ntoa(d->info.network.address.sin_addr),"169.254.",8) &&
+               strncmp(inet_ntoa(d->info.network.interface_address.sin_addr),"169.254.",8)) {
+             if((d->info.network.interface_address.sin_addr.s_addr&d->info.network.interface_netmask.sin_addr.s_addr) != (d->info.network.address.sin_addr.s_addr&d->info.network.interface_netmask.sin_addr.s_addr)) {
+               gtk_button_set_label(GTK_BUTTON(start_button),"Subnet!");
+@@ -450,7 +450,6 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
+ #ifdef CLIENT_SERVER
+ 
+     loadProperties("remote.props");
+-    char *value;
+     value=getProperty("host");
+     if(value!=NULL) strcpy(host_addr_buffer,value);
+     value=getProperty("port");
+@@ -511,14 +510,15 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
+     gtk_grid_attach(GTK_GRID(grid),gpio_b,0,row,1,1);
+ #endif
+ 
+-    GtkWidget *tcp_b=gtk_button_new_with_label("Use new TCP Addr:");
+-    g_signal_connect (tcp_b, "button-press-event", G_CALLBACK(tcp_cb), NULL);
+-    gtk_grid_attach(GTK_GRID(grid),tcp_b,1,row,1,1);
++    GtkWidget *radio_addr_b=gtk_button_new_with_label("Use Radio addr:");
++    g_signal_connect (radio_addr_b, "button-press-event", G_CALLBACK(radio_addr_cb), NULL);
++    gtk_grid_attach(GTK_GRID(grid),radio_addr_b,1,row,1,1);
+ 
+-    tcpaddr=gtk_entry_new();
+-    gtk_entry_set_max_length(GTK_ENTRY(tcpaddr), 20);
+-    gtk_grid_attach(GTK_GRID(grid),tcpaddr,2,row,1,1);
+-    gtk_entry_set_text(GTK_ENTRY(tcpaddr), ipaddr_tcp);
++    radioaddr=gtk_entry_new();
++    gtk_entry_set_max_length(GTK_ENTRY(radioaddr), 20);
++    gtk_grid_attach(GTK_GRID(grid),radioaddr,2,row,1,1);
++    gtk_entry_set_max_length(GTK_ENTRY(radioaddr), IPADDR_LEN);
++    gtk_entry_set_text(GTK_ENTRY(radioaddr), ipaddr_radio);
+ 
+     GtkWidget *exit_b=gtk_button_new_with_label("Exit");
+     g_signal_connect (exit_b, "button-press-event", G_CALLBACK(exit_cb), NULL);
+@@ -526,7 +526,7 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
+ 
+     gtk_container_add (GTK_CONTAINER (content), grid);
+     gtk_widget_show_all(discovery_dialog);
+-fprintf(stderr,"showing device dialog\n");
++    fprintf(stderr,"showing device dialog\n");
+ 
+     // autostart if one device and autostart enabled
+     g_print("%s: devices=%d autostart=%d\n",__FUNCTION__,devices,autostart);
+diff --git discovery.h discovery.h
+index fb540e1..20ab464 100644
+--- discovery.h
++++ discovery.h
+@@ -17,5 +17,5 @@
+ *
+ */
+ 
+-extern void discovery(void);
+-extern char *ipaddr_tcp;
++extern void discovery();
++extern char *ipaddr_radio;
+diff --git new_discovery.c new_discovery.c
+index 6039d34..c530558 100644
+--- new_discovery.c
++++ new_discovery.c
+@@ -34,7 +34,7 @@
+ #include <errno.h>
+ 
+ #include "discovered.h"
+-//#include "discovery.h"
++#include "discovery.h"
+ 
+ 
+ static char interface_name[64];
+@@ -69,6 +69,8 @@ void print_device(int i) {
+ 
+ void new_discovery() {
+     struct ifaddrs *addrs,*ifa;
++    int i;
++
+     getifaddrs(&addrs);
+     ifa = addrs;
+     while (ifa) {
+@@ -84,10 +86,20 @@ void new_discovery() {
+     }
+     freeifaddrs(addrs);
+ 
+-    
++    // Do one additional "discover" for fixed address
++    if (strlen(ipaddr_radio)) {
++      // check if the IP address is already discovered
++      for (i = 0; i < devices; i++) {
++        if (strcmp(inet_ntoa(discovered[i].info.network.address.sin_addr),
++                   ipaddr_radio) == 0)
++          break;
++      }
++      if (i == devices)
++        new_discover((void *)-1);
++    }
++
+     fprintf(stderr, "new_discovery found %d devices\n",devices);
+-    
+-    int i;
++
+     for(i=0;i<devices;i++) {
+         print_device(i);
+     }
+@@ -99,53 +111,79 @@ void new_discover(struct ifaddrs* iface) {
+     struct sockaddr_in *mask;
+     char addr[16];
+     char net_mask[16];
++    struct sockaddr_in to_addr = {0};
++
++    if (iface == (void *)-1) {
++      fprintf(stderr, "discover: looking for HPSDR device with IP %s\n",
++              ipaddr_radio);
+ 
+-    strcpy(interface_name,iface->ifa_name);
+-    fprintf(stderr,"new_discover: looking for HPSDR devices on %s\n",interface_name);
++      // send a broadcast to locate hpsdr boards on the network
++      discovery_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
++      if (discovery_socket < 0) {
++        perror("discover: create socket failed for discovery_socket:");
++        exit(-1);
++      }
+ 
+-    // send a broadcast to locate metis boards on the network
+-    discovery_socket=socket(PF_INET,SOCK_DGRAM,IPPROTO_UDP);
+-    if(discovery_socket<0) {
++      // setup to address
++      to_addr.sin_family = AF_INET;
++      to_addr.sin_port = htons(DISCOVERY_PORT);
++      if (inet_aton(ipaddr_radio, &to_addr.sin_addr) == 0) {
++        fprintf(stderr, "discover: Radio UDP addr %s is invalid!\n", ipaddr_radio);
++        return;
++      }
++    } else {
++      strcpy(interface_name, iface->ifa_name);
++      fprintf(stderr, "new_discover: looking for HPSDR devices on %s\n",
++              interface_name);
++
++      // send a broadcast to locate metis boards on the network
++      discovery_socket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
++      if (discovery_socket < 0) {
+         perror("new_discover: create socket failed for discovery_socket\n");
+         exit(-1);
+-    }
++      }
+ 
+-    int optval = 1;
+-    setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+-    setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
++      int optval = 1;
++      setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEADDR, &optval,
++                 sizeof(optval));
++      setsockopt(discovery_socket, SOL_SOCKET, SO_REUSEPORT, &optval,
++                 sizeof(optval));
+ 
+-    sa = (struct sockaddr_in *) iface->ifa_addr;
+-    mask = (struct sockaddr_in *) iface->ifa_netmask;
++      sa = (struct sockaddr_in *)iface->ifa_addr;
++      mask = (struct sockaddr_in *)iface->ifa_netmask;
+ 
+-    interface_netmask.sin_addr.s_addr = mask->sin_addr.s_addr;
++      interface_netmask.sin_addr.s_addr = mask->sin_addr.s_addr;
+ 
+-    // bind to this interface and the discovery port
+-    interface_addr.sin_family = AF_INET;
+-    interface_addr.sin_addr.s_addr = sa->sin_addr.s_addr;
+-    interface_addr.sin_port = htons(0);
+-    if(bind(discovery_socket,(struct sockaddr*)&interface_addr,sizeof(interface_addr))<0) {
++      // bind to this interface and the discovery port
++      interface_addr.sin_family = AF_INET;
++      interface_addr.sin_addr.s_addr = sa->sin_addr.s_addr;
++      interface_addr.sin_port = htons(0);
++      if (bind(discovery_socket, (struct sockaddr *)&interface_addr,
++               sizeof(interface_addr)) < 0) {
+         perror("new_discover: bind socket failed for discovery_socket\n");
+         exit(-1);
+-    }
++      }
+ 
+-    strcpy(addr,inet_ntoa(sa->sin_addr));
+-    strcpy(net_mask,inet_ntoa(mask->sin_addr));
++      strcpy(addr, inet_ntoa(sa->sin_addr));
++      strcpy(net_mask, inet_ntoa(mask->sin_addr));
+ 
+-    fprintf(stderr,"new_discover: bound to %s %s %s\n",interface_name,addr,net_mask);
++      fprintf(stderr, "new_discover: bound to %s %s %s\n", interface_name, addr,
++              net_mask);
+ 
+-    // allow broadcast on the socket
+-    int on=1;
+-    rc=setsockopt(discovery_socket, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+-    if(rc != 0) {
+-        fprintf(stderr,"new_discover: cannot set SO_BROADCAST: rc=%d\n", rc);
++      // allow broadcast on the socket
++      int on = 1;
++      rc = setsockopt(discovery_socket, SOL_SOCKET, SO_BROADCAST, &on,
++                      sizeof(on));
++      if (rc != 0) {
++        fprintf(stderr, "new_discover: cannot set SO_BROADCAST: rc=%d\n", rc);
+         exit(-1);
+-    }
++      }
+ 
+-    // setup to address
+-    struct sockaddr_in to_addr={0};
+-    to_addr.sin_family=AF_INET;
+-    to_addr.sin_port=htons(DISCOVERY_PORT);
+-    to_addr.sin_addr.s_addr=htonl(INADDR_BROADCAST);
++      // setup to address
++      to_addr.sin_family = AF_INET;
++      to_addr.sin_port = htons(DISCOVERY_PORT);
++      to_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
++    }
+ 
+     // start a receive thread to collect discovery response packets
+     discover_thread_id = g_thread_new( "new discover receive", new_discover_receive_thread, NULL);
+@@ -179,7 +217,17 @@ void new_discover(struct ifaddrs* iface) {
+ 
+     close(discovery_socket);
+ 
+-    fprintf(stderr,"new_discover: exiting discover for %s\n",iface->ifa_name);
++    if (iface == (void *)-1) {
++      fprintf(stderr, "discover: exiting Radio UDP discover for %s\n",
++              ipaddr_radio);
++      memcpy((void *)&discovered[rc].info.network.address, (void *)&to_addr,
++             sizeof(to_addr));
++      discovered[rc].info.network.address_length = sizeof(to_addr);
++      discovered[rc].use_routing = 1;
++    } else {
++      fprintf(stderr, "new_discover: exiting discover for %s\n",
++              iface->ifa_name);
++    }
+ }
+ 
+ //void* new_discover_receive_thread(void* arg) {
+@@ -276,6 +324,7 @@ gpointer new_discover_receive_thread(gpointer data) {
+                     discovered[devices].info.network.interface_length=sizeof(interface_addr);
+                     strcpy(discovered[devices].info.network.interface_name,interface_name);
+                     discovered[devices].supported_receivers=2;
++                    discovered[devices].use_routing=0;
+                     fprintf(stderr,"new_discover: found %d protocol=%d device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) on %s\n", 
+                             devices,
+                             discovered[devices].protocol,
+diff --git old_discovery.c old_discovery.c
+index 9b48c6c..438ef40 100644
+--- old_discovery.c
++++ old_discovery.c
+@@ -63,7 +63,24 @@ static void discover(struct ifaddrs* iface) {
+     unsigned char buffer[1032];
+     int i, len;
+ 
+-    if (iface == NULL) {
++    if (iface == (void *) -1) {
++        fprintf(stderr,"discover: looking for HPSDR device with IP %s\n", ipaddr_radio);
++
++        // send a broadcast to locate hpsdr boards on the network
++        discovery_socket=socket(PF_INET,SOCK_DGRAM,IPPROTO_UDP);
++        if(discovery_socket<0) {
++            perror("discover: create socket failed for discovery_socket:");
++            exit(-1);
++        }
++
++        // setup to address
++        to_addr.sin_family=AF_INET;
++        to_addr.sin_port=htons(DISCOVERY_PORT);
++        if (inet_aton(ipaddr_radio, &to_addr.sin_addr) == 0) {
++          fprintf(stderr, "discover: Radio UDP addr %s is invalid!\n", ipaddr_radio);
++          return;
++        }
++    } else if (iface == NULL) {
+ 	//
+ 	// This indicates that we want to connect to an SDR which
+ 	// cannot be reached by (UDP) broadcast packets, but that
+@@ -71,11 +88,11 @@ static void discover(struct ifaddrs* iface) {
+ 	// Therefore we try to send a METIS detection packet via TCP 
+ 	// to a "fixed" ip address.
+ 	//
+-        fprintf(stderr,"Trying to detect at TCP addr %s\n", ipaddr_tcp);
++        fprintf(stderr,"Trying to detect at TCP addr %s\n", ipaddr_radio);
+ 	memset(&to_addr, 0, sizeof(to_addr));
+ 	to_addr.sin_family = AF_INET;
+-	if (inet_aton(ipaddr_tcp, &to_addr.sin_addr) == 0) {
+-	    fprintf(stderr,"discover: TCP addr %s is invalid!\n",ipaddr_tcp);
++	if (inet_aton(ipaddr_radio, &to_addr.sin_addr) == 0) {
++	    fprintf(stderr,"discover: TCP addr %s is invalid!\n",ipaddr_radio);
+ 	    return;
+ 	}
+ 	to_addr.sin_port=htons(DISCOVERY_PORT);
+@@ -216,8 +233,14 @@ static void discover(struct ifaddrs* iface) {
+ 
+     close(discovery_socket);
+ 
+-    if (iface == NULL) {
+-      fprintf(stderr,"discover: exiting TCP discover for %s\n",ipaddr_tcp);
++    if (iface == (void *)-1) {
++      fprintf(stderr,"discover: exiting Radio UDP discover for %s\n",ipaddr_radio);
++      memcpy((void *)&discovered[rc].info.network.address, (void *)&to_addr,
++             sizeof(to_addr));
++      discovered[rc].info.network.address_length = sizeof(to_addr);
++      discovered[rc].use_routing = 1;
++    } else if (iface == NULL) {
++      fprintf(stderr,"discover: exiting TCP discover for %s\n",ipaddr_radio);
+       if (devices == rc+1) {
+ 	//
+ 	// We have exactly found one TCP device
+@@ -235,7 +258,6 @@ static void discover(struct ifaddrs* iface) {
+     } else {
+       fprintf(stderr,"discover: exiting discover for %s\n",iface->ifa_name);
+     }
+-
+ }
+ 
+ //static void *discover_receive_thread(void* arg) {
+@@ -349,7 +371,8 @@ g_print("old_discovery: name=%s min=%f max=%f\n",discovered[devices].name, disco
+                     memcpy((void*)&discovered[devices].info.network.interface_netmask,(void*)&interface_netmask,sizeof(interface_netmask));
+                     discovered[devices].info.network.interface_length=sizeof(interface_addr);
+                     strcpy(discovered[devices].info.network.interface_name,interface_name);
+-		    discovered[devices].use_tcp=0;
++                    discovered[devices].use_tcp=0;
++                    discovered[devices].use_routing=0;
+                     discovered[devices].supported_receivers=2;
+ 		    fprintf(stderr,"old_discovery: found device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) on %s min=%f max=%f\n",
+                             discovered[devices].device,
+@@ -378,6 +401,7 @@ g_print("old_discovery: name=%s min=%f max=%f\n",discovered[devices].name, disco
+ 
+ void old_discovery() {
+     struct ifaddrs *addrs,*ifa;
++    int i;
+ 
+ fprintf(stderr,"old_discovery\n");
+     getifaddrs(&addrs);
+@@ -395,12 +419,23 @@ fprintf(stderr,"old_discovery\n");
+     }
+     freeifaddrs(addrs);
+ 
+-    // Do one additional "discover" for a fixed TCP address
+-    discover(NULL);
++    // Do one additional "discover" for fixed address
++    if (strlen(ipaddr_radio)) {
++        // call the TCP version
++        discover(NULL);
++
++        // check if the IP address is already discovered
++        for (i = 0; i < devices; i++) {
++          if (strcmp(inet_ntoa(discovered[i].info.network.address.sin_addr),
++                     ipaddr_radio) == 0)
++            break;
++        }
++        if (i == devices)
++          discover((void *)-1);
++    }
+ 
+     fprintf(stderr, "discovery found %d devices\n",devices);
+ 
+-    int i;
+     for(i=0;i<devices;i++) {
+                     fprintf(stderr,"discovery: found device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) on %s\n",
+                             discovered[i].device,
+diff --git stemlab_discovery.c stemlab_discovery.c
+index df9c45c..865eb8e 100644
+--- stemlab_discovery.c
++++ stemlab_discovery.c
+@@ -522,10 +522,10 @@ void stemlab_discovery() {
+   struct sockaddr_in netmask;
+ 
+    fprintf(stderr,"Stripped-down STEMLAB/HAMLAB discovery...\n");
+-   fprintf(stderr,"STEMLAB: using inet addr %s\n", ipaddr_tcp);
++   fprintf(stderr,"STEMLAB: using inet addr %s\n", ipaddr_radio);
+    ip_address.sin_family = AF_INET;
+-   if (inet_aton(ipaddr_tcp, &ip_address.sin_addr) == 0) {
+-	fprintf(stderr,"StemlabDiscovery: TCP %s is invalid!\n", ipaddr_tcp);
++   if (inet_aton(ipaddr_radio, &ip_address.sin_addr) == 0) {
++	fprintf(stderr,"StemlabDiscovery: TCP %s is invalid!\n", ipaddr_radio);
+ 	return;
+    }
+ 
+@@ -543,7 +543,7 @@ void stemlab_discovery() {
+     return;
+   }
+   app_list=0;
+-  sprintf(txt,"http://%s",ipaddr_tcp);
++  sprintf(txt,"http://%s",ipaddr_radio);
+   curl_easy_setopt(curl_handle, CURLOPT_URL, txt);
+   curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, (long) 5);
+   curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, get_list_cb);
+@@ -551,7 +551,7 @@ void stemlab_discovery() {
+   curl_error = curl_easy_perform(curl_handle);
+   curl_easy_cleanup(curl_handle);
+   if (curl_error ==  CURLE_OPERATION_TIMEDOUT) {
+-    sprintf(txt,"No response from web server at %s", ipaddr_tcp);
++    sprintf(txt,"No response from web server at %s", ipaddr_radio);
+     status_text(txt);
+     fprintf(stderr,"%s\n",txt);
+   }
+@@ -569,7 +569,7 @@ void stemlab_discovery() {
+       fprintf(stderr, "stemlab_start: Failed to create cURL handle\n");
+       return;
+     }
+-    sprintf(txt,"http://%s/bazaar?apps=", ipaddr_tcp);
++    sprintf(txt,"http://%s/bazaar?apps=", ipaddr_radio);
+     curl_easy_setopt(curl_handle, CURLOPT_URL, txt);
+     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, (long) 20);
+     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, app_list_cb);
+-- 
+2.34.1
+
