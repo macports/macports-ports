@@ -149,7 +149,13 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,fc)       ${prefix}/bin/gfortran-mp-$ver
     set cdb(gcc$ver_nodot,f77)      ${prefix}/bin/gfortran-mp-$ver
     set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
-    set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+    # The devel port, and starting with version 12, GCC will support using -stdlib=libc++,
+    # so use it for improved compatibility with clang builds
+    if { $ver eq "devel" || [vercmp ${ver} 12] >= 0 } {
+        set cdb(gcc$ver_nodot,cxx_stdlib) libc++
+    } else {
+        set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+    }
 }
 
 # build database of clang compiler attributes
