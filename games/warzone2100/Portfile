@@ -1,0 +1,310 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                warzone2100
+set pretty_name     "Warzone 2100"
+categories          games
+license             GPL-2+
+maintainers         @jasonliu--
+
+homepage            https://wz2100.net
+if {$subport eq ${name}} {
+    description     3-D real-time strategy game
+}
+subport ${name}-music  {
+    description     music soundtrack files for $pretty_name
+}
+subport ${name}-videos {
+    description     in-game cinematic sequences for $pretty_name
+}
+long_description    In $pretty_name, you take on the role of a member \
+                    of a group named \"The Project\", in a battle to \
+                    rebuild the world after mankind has nearly been \
+                    destroyed by nuclear missiles. \
+                    \
+                    \n\nThe game offers campaign, tutorial, and \
+                    single- and multi-player skirmish modes. An \
+                    extensive tech tree with over 400 different \
+                    technologies, combined with the unit design \
+                    system, allows for a wide variety of possible \
+                    units and tactics.
+
+if {$subport eq ${name} || $subport eq "${name}-music"} {
+    PortGroup           github 1.0
+
+}
+if {$subport eq ${name}} {
+    PortGroup           cmake 1.1
+
+    github.setup        Warzone2100 ${name} 4.2.3
+    github.tarball_from releases
+    distname            ${name}_src
+    use_xz              yes
+    dist_subdir         ${name}/${version}
+
+    checksums           rmd160  d7da2987f506b6d01acac759c7e286eb8fee9945 \
+                        sha256  9e61e5fd093c2a7724f640c5f1cb8f533394c4d371d1593f835356fc7f36be8d \
+                        size    338584212
+
+    depends_build-append    port:pkgconfig \
+                            port:gettext \
+                            port:asciidoctor
+    depends_lib-append      port:miniupnpc \
+                            port:gettext-runtime \
+                            port:curl \
+                            port:sqlite3 \
+                            port:sqlitecpp \
+                            port:re2 \
+                            port:libfmt \
+                            port:libpng \
+                            port:libsdl2 \
+                            port:openal-soft \
+                            port:libogg \
+                            port:libvorbis \
+                            port:libtheora \
+                            port:libsodium \
+                            port:libutf8proc \
+                            port:physfs \
+                            port:freetype \
+                            port:glm \
+                            port:harfbuzz \
+                            port:zlib
+    depends_run-append      port:${name}-music \
+                            port:${name}-videos
+
+    compiler.cxx_standard   2011
+
+    post-patch {
+        # Prevent the upstream source from trying to compile these as
+        # internal libraries, since we have made them available as
+        # dependencies through MacPorts.
+        foreach dep [list utf8proc fmt SQLiteCpp] {
+            reinplace -E \
+                "/add_subdirectory.$dep/,/set_property.*$dep/d" \
+                ${worksrcpath}/3rdparty/CMakeLists.txt
+        }
+        reinplace "/target_link_lib.*fmt/i\\
+            target_link_libraries(${name} utf8proc)\\
+            find_package(fmt REQUIRED)\\
+        " \
+            ${worksrcpath}/src/CMakeLists.txt
+
+        reinplace -E {s|(#include.*)utf8proc/utf8proc|\1utf8proc|} \
+            ${worksrcpath}/lib/framework/wzstring.cpp
+
+        reinplace \
+            {/SET.RE2_BUILD_TESTING/,/set_property.*re2.*XCODE_ATTRIBUTE_WARNING_CFLAGS/d} \
+            ${worksrcpath}/3rdparty/CMakeLists.txt
+        reinplace {s/re2::re2/re2/} \
+            ${worksrcpath}/src/CMakeLists.txt \
+            ${worksrcpath}/lib/netplay/CMakeLists.txt
+
+        reinplace {/include_directories.*glm/d} \
+            ${worksrcpath}/CMakeLists.txt
+
+        # The following method to create a conditional to test for an
+        # Apple Clang version number was taken from the mpiutil 1.0
+        # PortGroup.
+        if {${configure.compiler} eq "clang"} {
+            set compiler_version \
+                [compiler.command_line_tools_version \
+                 ${configure.compiler}]
+            if {[vercmp $compiler_version 900.0.37] < 0} {
+                # The '-Wunguarded-availability' flag was introduced in
+                # Xcode 9, so if we are compiling using an older Xcode,
+                # we need to remove this #pragma line.
+                reinplace {/Wunguarded-availability/d} \
+                    ${worksrcpath}/lib/framework/cocoa_wrapper.mm
+            }
+        }
+        if {${os.platform} eq "darwin" && ${os.major} <= 13} {
+            reinplace {/pragma.*push/,/pragma.*pop/d} \
+                ${worksrcpath}/lib/framework/cocoa_wrapper.mm
+        }
+
+        # Compile Objective-C files with
+        # Automatic Reference Counting turned on
+        reinplace "/cocoa_wrapper.mm/i\\
+            \\        add_compile_options(\"-fobjc-arc\")\\
+        " \
+            ${worksrcpath}/lib/framework/CMakeLists.txt
+        reinplace "/cocoa_wz_menus.mm/i\\
+            \\        add_compile_options(\"-fobjc-arc\")\\
+        " \
+            ${worksrcpath}/lib/sdl/CMakeLists.txt
+
+        # Remove the "Check for a newer version" button
+        reinplace {/Check for a newer version/d} \
+            ${worksrcpath}/src/frontend.cpp
+    }
+
+    configure.args-append   -DWZ_DISTRIBUTOR=MacPorts \
+                            -DWZ_ENABLE_WARNINGS=ON \
+                            -DWZ_ENABLE_WARNINGS_AS_ERRORS=OFF \
+                            -DWZ_ENABLE_BACKEND_VULKAN=OFF
+    #                                                 ^
+    # Unfortunately, we have to disable compiling with Vulkan support,
+    # because currently the vulkan ports are only at version 1.1.112,
+    # and warzone requires one that is newer.
+
+    post-build {
+        if {![catch {exec grep MACOSX_BUNDLE_BUNDLE_NAME \
+            ${worksrcpath}/src/CMakeLists.txt} result]} \
+        {
+            regexp {MACOSX_BUNDLE_BUNDLE_NAME "(.*)"} $result match \
+                executable_name
+        }
+        if {![catch {exec grep MACOSX_BUNDLE_GUI_IDENTIFIER \
+            ${worksrcpath}/src/CMakeLists.txt} result]} \
+        {
+            regexp {MACOSX_BUNDLE_GUI_IDENTIFIER "(.*)"} $result match \
+                bundle_identifier
+        }
+        foreach re [list \
+            "s/\$(EXECUTABLE_NAME)/$executable_name/" \
+            "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$bundle_identifier/" \
+            "s/\$(MACOSX_DEPLOYMENT_TARGET)/${macosx_deployment_target}/" \
+        ] {
+            reinplace $re ${build.dir}/src/Warzone-Info.plist
+        }
+    }
+
+    post-destroot {
+        move "${destroot}${prefix}/$pretty_name.app" \
+             ${destroot}${applications_dir}/
+        set app_contents "${applications_dir}/$pretty_name.app/Contents"
+        delete -force ${destroot}$app_contents/Resources/data
+        ln -s ${prefix}/share/${name} \
+              ${destroot}$app_contents/Resources/data
+        delete -force ${destroot}$app_contents/Resources/docs
+        ln -s ${prefix}/share/doc/${name} \
+              ${destroot}$app_contents/Resources/docs
+        move ${destroot}${prefix}/.portable \
+             ${destroot}$app_contents/MacOS/
+        ln -s "$app_contents/MacOS/$pretty_name" \
+              ${destroot}${prefix}/bin/${name}
+        delete -force ${destroot}${prefix}/share/${name}/music
+
+        # For whatever unknown reason, the upstream source code doesn't
+        # overwrite the CMake-generated Info.plist file, after going to
+        # the trouble of generating one themselves. So we do it manually
+        # here.
+        xinstall -m 644 ${build.dir}/src/Warzone-Info.plist \
+            ${destroot}$app_contents/Info.plist
+    }
+}
+
+if {$subport eq "${name}-music"} {
+    github.setup        Warzone2100 data-music \
+                        68e157c79f6db989120aad9e0b7ad6251c0bf721
+    version             0.0.0
+
+    long_description-append \
+                        \n\nThis package ($subport) contains the music \
+                        soundtrack files.
+
+    checksums           rmd160  1c76033dc721c8e049d6effe02d95d823d9ab212 \
+                        sha256  40cb829187464f361bdb2c0a9e36207b2e7bd19507454be60c89054f3e3b47b9 \
+                        size    141931427
+
+    use_configure no
+    build {}
+    destroot {
+        set music_dir ${prefix}/share/${name}/music
+        xinstall -d ${destroot}$music_dir
+        xinstall -m 644 ${worksrcpath}/menu.ogg ${destroot}$music_dir/
+        copy ${worksrcpath}/albums ${destroot}$music_dir/
+    }
+}
+
+if {$subport eq "${name}-videos"} {
+    version             0.0.0
+
+    long_description-append \
+                        \n\nThis package ($subport) contains the \
+                        in-game video sequences. All videos were made \
+                        from the original 320x160 source material. \
+                        \n* The high quality videos are just upscaled \
+                        and filtered. Do not expect miracles. \
+                        \n* The standard quality videos are pretty \
+                        close to the original videos, plus some \
+                        filtering. \
+                        \n* The low quality videos use a much lower \
+                        bitrate.
+
+    distname            sequences
+    # Note: A .wz file is just a .zip with a custom file extension
+    extract.suffix      .wz
+
+    set sf_vids_subdir  project/${name}/${name}/Videos
+    variant high conflicts standard low \
+        description {Install high quality videos} \
+    {
+        set vidquality  high-quality
+        set vidlang     en
+        master_sites    sourceforge:$sf_vids_subdir/$vidquality-$vidlang
+        dist_subdir     ${name}/$vidquality-$vidlang
+    }
+    variant standard conflicts high low \
+        description {Install standard quality videos} \
+    {
+        set vidquality  standard-quality
+        if {[variant_isset de]} {
+            set vidlang de
+        } else {
+            set vidlang en
+        }
+        master_sites    sourceforge:$sf_vids_subdir/$vidquality-$vidlang
+        dist_subdir     ${name}/$vidquality-$vidlang
+    }
+    variant low conflicts high standard \
+        description {Install low quality videos} \
+    {
+        set vidquality  low-quality
+        set vidlang     en
+        master_sites    sourceforge:$sf_vids_subdir/$vidquality-$vidlang
+        dist_subdir     ${name}/$vidquality-$vidlang
+    }
+    variant de requires standard conflicts high low \
+        description {Installieren Sie die Videosequenzen mit den deutschsprachigen Audiodaten} {}
+
+    default_variants    +high
+
+    if {[variant_isset high]} {
+        checksums       rmd160  ac26f1e00849b84cc5b761a3e5471e733d8d3ef1 \
+                        sha256  90ff552ca4a70e2537e027e22c5098ea4ed1bc11bb7fc94138c6c941a73d29fa \
+                        size    964260204
+    } elseif {[variant_isset standard]} {
+        if {[variant_isset de]} {
+            checksums   rmd160  1a5e557507b057dde28859da628cffe8317b6768 \
+                        sha256  d285c85ffa57a5663ac11073ef954afb97097089306877860e8e9d9119116fd8 \
+                        size    499187492
+        } else {
+            checksums   rmd160  7350fa47b0dc0db631ad22763039e29bf420a847 \
+                        sha256  142ae905be288cca33357a49f42b884c190e828fc0b1b1773ded5dff774f41a3 \
+                        size    571937134
+        }
+    } elseif {[variant_isset low]} {
+        checksums       rmd160  88ea130925e4a886f0063dc923c794aef068519a \
+                        sha256  4a1939a1e401f3b0f68736ff19689abed5e1e9d3dfe4fc07b04953c0dfaf7ad6 \
+                        size    169607304
+    }
+
+    pre-fetch {
+        if {![variant_isset high] && ![variant_isset standard] && \
+            ![variant_isset low]} \
+        {
+            ui_error "You must install this port with one of the video quality variants selected!"
+            return -code error "No video quality variant selected"
+        }
+    }
+    extract {}
+    use_configure no
+    build {}
+    destroot {
+        xinstall -d ${destroot}${prefix}/share/${name}
+        xinstall -m 644 ${distpath}/${distfiles} \
+            ${destroot}${prefix}/share/${name}/
+    }
+}
