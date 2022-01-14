@@ -1,11 +1,327 @@
-# -*- coding: utf-8; mode: tcl; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=2:ts=2:sts=2
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           wxWidgets 1.0
+PortGroup           github 1.0
+PortGroup           debug 1.0
+PortGroup           compilers 1.0
 
+github.setup        OSGeo grass 8.0.1
 name                grass
 epoch               1
-version             6.4.6
-revision            5
-replaced_by         grass7
-PortGroup           obsolete 1.0
+set main_version    [join [lrange [split ${version} "."] 0 1] ""]
+revision            0
+set realVersion     ${version}
+distname            grass-${realVersion}
+maintainers         nomaintainer
+categories          gis
+license             GPL-2+
+platforms           darwin
 
+description         GRASS
+long_description    GRASS is a Geographic Information System (GIS) used for \
+                    geospatial data management and analysis.
+
+homepage            http://grass.osgeo.org/
+master_sites        ${homepage}grass[join [lrange [split ${realVersion} .] 0 1] {}]/source/
+
+checksums           rmd160  b2ee2f92fc546d9632b139d2366d6be9558c4e26 \
+                    sha256  e925bf8c44e1809459974457f2ab3c61dd5a24c0655ed026de665d1494f68a96 \
+                    size    64928098
+
+depends_build       port:pkgconfig
+depends_lib         port:bzip2 \
+                    port:freetype \
+                    port:fftw-3 \
+                    port:gdal \
+                    port:pdal \
+                    port:geos \
+                    port:tiff \
+                    port:libpng \
+                    port:liblas\
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    port:zlib \
+                    port:readline
+
+patchfiles          patch-dyld-link.diff \
+                    patch-r-in-pdal.diff
+
+configure.cflags-append  -DGL_SILENCE_DEPRECATION
+
+configure.pre_args \
+    --prefix=${prefix}/lib
+configure.args-append \
+    --exec-prefix=${prefix} \
+    --with-opengl=no \
+    --with-opencl=no \
+    --with-openmp=no \
+    --without-x \
+    --with-bzlib \
+    --with-bzlib-includes=${prefix}/include \
+    --with-bzlib-libs=${prefix}/lib \
+    --with-fftw-includes=${prefix}/include \
+    --with-fftw-libs=${prefix}/lib \
+    --with-freetype \
+    --with-freetype-includes=${prefix}/include/freetype2 \
+    --with-freetype-libs=${prefix}/lib \
+    --with-gdal=${prefix}/bin/gdal-config \
+    --with-pdal=${prefix}/bin/pdal-config \
+    --with-tiff-includes=${prefix}/include \
+    --with-tiff-libs=${prefix}/lib \
+    --with-png-includes=${prefix}/include \
+    --with-png-libs=${prefix}/lib \
+    --with-geos=${prefix}/bin/geos-config \
+    --with-liblas=${prefix}/bin/liblas-config \
+    --without-postgres \
+    --without-mysql \
+    --with-pthread \
+    --with-cairo \
+    --with-cairo-includes=${prefix}/include/cairo \
+    --with-cairo-libs=${prefix}/lib \
+    --with-blas=no \
+    --with-lapack=no \
+    --with-readline \
+    --with-zstd \
+    --with-zstd-includes=${prefix}/include \
+    --with-zstd-libs=${prefix}/lib \
+    --with-readline-includes=${prefix}/include/readline \
+    --with-readline-libs=${prefix}/lib
+
+build.target            default
+
+# Python 3 variants
+set python_suffixes {36 37 38 39}
+set python_variants {}
+
+foreach pyver ${python_suffixes} {
+    lappend python_variants python${pyver}
+}
+
+foreach pyver ${python_suffixes} {
+    set index [lsearch -exact ${python_variants} python${pyver}]
+    set conf [lreplace ${python_variants} ${index} ${index}]
+
+        variant python${pyver} description "Use python${pyver}" conflicts {*}${conf} "
+            depends_lib-append      port:python${pyver} \
+                                    port:py${pyver}-Pillow \
+                                    port:py${pyver}-numpy \
+                                    port:py${pyver}-six
+
+            depends_run-append      port:py${pyver}-psycopg2
+        "
+}
+
+# Patches scripts to launch the selected Python version (fixes #59954)
+post-patch {
+    foreach pyver ${python_suffixes} {
+        if {[variant_isset python${pyver}]} {
+            set pyversion   [string index ${pyver} 0].[string range ${pyver} 1 end]
+            set pybin       ${prefix}/bin/python${pyversion}
+            fs-traverse f ${worksrcpath} {
+                if {[file extension ${f}] eq ".py"} {
+                    reinplace -q "s|/usr/bin/env python3|${pybin}|" ${f}
+                }
+            }
+            reinplace "s|PYVER.*|PYVER = ${pyversion}|" ${worksrcpath}/macosx/Makefile
+            reinplace "s|^PYTHON.*|PYTHON = ${pybin}|" ${worksrcpath}/include/Make/Platform.make.in
+        }
+    }
+    reinplace "s|MACOS = sys.platform.startswith(\"darwin\")|&\\nos.environ\[\"GRASS_PYTHON\"\] = \"${pybin}\"|" \
+        ${worksrcpath}/lib/init/grass.py
+    # Use LD_RUN_PATH instead of DYLD_LIBRARY_PATH to pass lib path to ctypesgen
+    reinplace "s|LD_LIBRARY_PATH_VAR = \".*|LD_LIBRARY_PATH_VAR = \"LD_RUN_PATH\"|" \
+        ${worksrcpath}/lib/init/grass.py
+}
+
+# Python default
+set pydefault "if {"
+
+foreach suffix ${python_suffixes} {
+    set pydefault "${pydefault}!\[variant_isset python${suffix}\] && "
+}
+
+set pydefault [string range ${pydefault} 0 end-4]
+set pydefault "${pydefault}} { default_variants +python${suffix} }"
+
+eval ${pydefault}
+
+set proj_versions {6 7 8}
+set proj_variants {}
+foreach pjver ${proj_versions} {
+    lappend proj_variants proj${pjver}
+}
+foreach proj_ver ${proj_versions} {
+
+    set index [lsearch -exact ${proj_variants} proj${proj_ver}]
+    set cflcts [lreplace ${proj_variants} ${index} ${index}]
+
+        variant proj${proj_ver} description "Use Proj${proj_ver}" conflicts {*}${cflcts} "
+
+            depends_lib-append      port:proj${proj_ver}
+            configure.env           PATH=$::env(PATH):${prefix}/lib/proj${proj_ver}/bin
+            build.env               PATH=$::env(PATH):${prefix}/lib/proj${proj_ver}/bin
+            configure.args-append   --with-proj-includes=${prefix}/lib/proj${proj_ver}/include \
+                                    --with-proj-libs=${prefix}/lib/proj${proj_ver}/lib \
+                                    --with-proj-share=${prefix}/lib/proj${proj_ver}/share/proj
+        "
+}
+
+set projdf "if {"
+foreach pv ${proj_versions} {
+    set projdf "${projdf}!\[variant_isset proj${pv}\] && "
+}
+set projdf [string range ${projdf} 0 end-4]
+set projdf "${projdf}} { default_variants +proj${pv} }"
+eval ${projdf}
+
+variant gui description {Build with wxPython GUI and application bundle} {
+    wxWidgets.use           wxWidgets-3.2
+
+    depends_lib-append      port:${wxWidgets.port}
+
+    foreach pyver ${python_suffixes} {
+        if {[variant_isset python${pyver}]} {
+            depends_lib-append  port:py${pyver}-wxpython-4.0
+        }
+    }
+
+    configure.args-append   --with-wxwidgets=${wxWidgets.wxconfig}
+    configure.args-delete   --with-opengl=no
+    configure.args-append   --with-opengl=osx
+
+    # Create app bundle
+    global app_name
+    set app_name_version [join [lrange [split ${version} "."] 0 1] "."]
+    set app_name GRASS-${app_name_version}.app
+
+    post-build {
+        xinstall -d -m 0755 ${worksrcpath}/${app_name}/Contents
+        xinstall -d -m 0755 ${worksrcpath}/${app_name}/Contents/Resources
+        xinstall -d -m 0755 ${worksrcpath}/${app_name}/Contents/MacOS
+
+        set script [open "${worksrcpath}/${app_name}/Contents/MacOS/GRASS" w 0755]
+        puts ${script} "#!/usr/bin/osascript"
+        puts ${script} ""
+        puts ${script} "tell application \"Terminal\" to do script \"${prefix}/bin/grass${main_version} --gui; exit\""
+        close ${script}
+
+        copy ${worksrcpath}/macosx/app/AppIcon.icns \
+            ${worksrcpath}/${app_name}/Contents/Resources/AppIcon.icns
+        copy ${worksrcpath}/macosx/app/GRASSDocument_gxw.icns \
+            ${worksrcpath}/${app_name}/Contents/Resources/GRASSDocument_gxw.icns
+
+        set info_plist ${worksrcpath}/${app_name}/Contents/Info.plist
+        copy ${worksrcpath}/macosx/app/Info.plist.in ${info_plist}
+
+        set version_file        [open ${worksrcpath}/include/VERSION]
+        set version_data        [split [read ${version_file}] "\n"]
+        close ${version_file}
+        set grass_version_major [lindex ${version_data} 0]
+        set grass_version_minor [lindex ${version_data} 1]
+        set grass_version_date  [lindex ${version_data} 3]
+        set bundle_version      [join [lrange ${version_data} 0 2] "."]
+
+        reinplace "s|@GRASS_VERSION_MAJOR@|${grass_version_major}|" ${info_plist}
+        reinplace "s|@GRASS_VERSION_MINOR@|${grass_version_minor}|" ${info_plist}
+        reinplace "s|@GRASS_VERSION_DATE@|${grass_version_date}|" ${info_plist}
+        reinplace "s|@BUNDLE_VERSION@|${bundle_version}|" ${info_plist}
+        reinplace "s|@DEPLOYMENT_TARGET@|${macosx_deployment_target}|" ${info_plist}
+    }
+
+    post-destroot {
+        copy ${worksrcpath}/${app_name} ${destroot}${applications_dir}
+    }
+}
+
+# OpenMPI
+variant openmpi description {Add OpenMPI support} {
+    configure.args-delete       --with-openmp=no
+    configure.args-append       --with-openmp=yes
+    configure.args-append       --with-openmp-includes=${prefix}/include/libomp
+    configure.args-append       --with-openmp-libs=${prefix}/lib/libomp
+    compilers.choose            cc
+    compilers.setup             clang13
+    configure.compiler          macports-clang-13
+    configure.ldflags-append    -L${prefix}/lib/libomp
+}
+
+variant mysql57 conflicts mysql8 description {Add MySQL 5.7 support} {
+    depends_lib-append      port:mysql57
+    configure.args-replace  --without-mysql \
+                            --with-mysql-includes=${prefix}/include/mysql57/mysql \
+                            --with-mysql-libs=${prefix}/lib/mysql57/mysql
+    configure.env-append    MYSQLD_CONFIG=${prefix}/lib/mysql57/bin/mysql_config
+}
+
+variant mysql8 conflicts mysql57 description {Add MySQL 8 support} {
+    depends_lib-append      port:mysql8
+    configure.args-replace  --without-mysql \
+                            --with-mysql-includes=${prefix}/include/mysql8/mysql \
+                            --with-mysql-libs=${prefix}/lib/mysql8/mysql
+    configure.env-append    MYSQLD_CONFIG=${prefix}/lib/mysql8/bin/mysql_config
+}
+
+# PostGreSQL variants (from the GDAL port)
+set postgresql_suffixes {10 11 12 13 14}
+
+set postgresql_variants {}
+foreach suffix ${postgresql_suffixes} {
+    lappend postgresql_variants postgresql${suffix}
+}
+
+foreach suffix ${postgresql_suffixes} {
+    set vrt postgresql${suffix}
+    set pgversion [string index ${suffix} 0].[string index ${suffix} 1]
+    set index [lsearch -exact ${postgresql_variants} ${vrt}]
+    set conf [lreplace ${postgresql_variants} ${index} ${index}]
+
+    variant ${vrt} description "Use PostgreSQL ${pgversion}" conflicts {*}${conf} "
+        depends_lib-append      port:${vrt}
+        configure.args-append   --with-postgres-includes=${prefix}/include/${vrt}
+        configure.args-append   --with-postgres-libs=${prefix}/lib/${vrt}
+        configure.args-delete   --with-postgres=no
+        configure.args-append   --with-postgres=yes
+    "
+}
+
+# PostGreSQL default
+set pgdefault "if {"
+
+foreach suffix ${postgresql_suffixes} {
+    set pgdefault "${pgdefault}!\[variant_isset postgresql${suffix}\] && "
+}
+
+set pgdefault [string range ${pgdefault} 0 end-4]
+set pgdefault "${pgdefault}} { default_variants +postgresql${suffix} }"
+
+eval ${pgdefault}
+
+variant sqlite description {Add SQLite 3 support} {
+    depends_lib-append    port:sqlite3
+    configure.args-append --with-sqlite
+    configure.args-append --with-sqlite-includes=${prefix}/include
+    configure.args-append --with-sqlite-libs=${prefix}/lib
+}
+
+variant openblas description {Use OpenBLAS for BLAS/LAPACK} {
+    depends_lib-append      port:openblas
+
+    configure.args-delete   --with-blas=no
+    configure.args-delete   --with-lapack=no
+    configure.args-append   --with-blas=yes
+    configure.args-append   --with-lapack=yes
+    configure.args-append   --with-liblas=${prefix}/bin/liblas-config
+    configure.args-append   --with-lapack-includes=${prefix}/include
+    configure.args-append   --with-lapack-libs=${prefix}/lib
+}
+
+post-configure {
+    reinplace -E "s|\\\$\\\(CPPFLAGS)| \$(CPPFLAGS) \
+        \\\\\"-Drestrict=\\\\\" \\\\\"-D__attribute__(x)=\\\\\" \\\\\"-D_Nonnull=\\\\\" \
+        \\\\\"-Dint8_t=char\\\\\" \\\\\"-DCF_INLINE=\\\\\" \\\\\"-D_Null_unspecified=\\\\\" \
+        \\\\\"-D__DARWIN_OS_INLINE=\\\\\"|" ${worksrcpath}/python/libgrass_interface_generator/Makefile
+}
+
+livecheck.type      regex
+livecheck.url       ${master_sites}
+livecheck.regex     grass-(\[0-9.\]+)[quotemeta ${extract.suffix}]
