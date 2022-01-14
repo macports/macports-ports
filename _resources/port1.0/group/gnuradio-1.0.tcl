@@ -138,9 +138,10 @@ configure.args-append \
     -DPYTHON_EXECUTABLE=${python_framework_dir}/bin/python${active_python_version} \
     -DPYTHON_INCLUDE_DIR=${python_framework_dir}/Headers \
     -DPYTHON_LIBRARY=${python_framework_dir}/Python \
+    -DENABLE_PYTHON=ON \
     -DGR_PYTHON_DIR=${python_framework_dir}/lib/python${active_python_version}/site-packages \
-    -DDOXYGEN_DOT_EXECUTABLE=${prefix}/bin/dot \
-    -DDOXYGEN_EXECUTABLE=${prefix}/bin/doxygen \
+    -DDOXYGEN_DOT_EXECUTABLE= \
+    -DDOXYGEN_EXECUTABLE= \
     -DCMAKE_MODULES_DIR=${prefix}/share/cmake \
     -DGMP_INCLUDE_DIR= \
     -DGMP_LIBRARY= \
@@ -149,7 +150,8 @@ configure.args-append \
     -DMPIR_LIBRARY=${prefix}/lib/libmpir.dylib \
     -DMPIRXX_LIBRARY=${prefix}/lib/libmpirxx.dylib \
     -DENABLE_DOXYGEN=OFF \
-    -DENABLE_SPHINX=OFF
+    -DENABLE_SPHINX=OFF \
+    -DSPHINX_EXECUTABLE=
 
 # remove top-level library and include paths, such that internal ones
 # are searched before any already-installed ones.
@@ -175,11 +177,15 @@ variant docs description "Install documentation" {
 
     configure.args-delete \
         -DENABLE_DOXYGEN=OFF \
+        -DDOXYGEN_DOT_EXECUTABLE= \
+        -DDOXYGEN_EXECUTABLE= \
         -DENABLE_SPHINX=OFF \
         -DSPHINX_EXECUTABLE=
 
     configure.args-append \
         -DENABLE_DOXYGEN=ON \
+        -DDOXYGEN_DOT_EXECUTABLE=${prefix}/bin/dot \
+        -DDOXYGEN_EXECUTABLE=${prefix}/bin/doxygen \
         -DENABLE_SPHINX=ON \
         -DSPHINX_EXECUTABLE=${python_framework_dir}/bin/sphinx-build
 }
