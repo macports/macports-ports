@@ -15,7 +15,7 @@
 PortGroup                       github 1.0
 
 proc pure.setup {module module_version} {
-    global name homepage
+    global homepage name github.livecheck.regex github.raw
 
     github.setup                agraef pure-lang ${module_version} ${module}-
     name                        ${module}
@@ -54,4 +54,7 @@ proc pure.setup {module module_version} {
             copy ${worksrcpath}/examples ${destroot}${prefix}/share/examples/${name}
         }
     }
+
+    livecheck.url               ${github.raw}/master/${module}/Makefile
+    livecheck.regex             ^version\\s*=\\s*[join ${github.livecheck.regex}]$
 }
