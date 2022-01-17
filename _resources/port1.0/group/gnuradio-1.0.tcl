@@ -83,15 +83,15 @@ depends_lib-append \
     path:lib/libmpir.dylib:mpir \
     path:lib/libvolk.dylib:volk \
     port:gmp \
-    port:python${active_python_version_no_dot}
+    port:python${active_python_version_no_dot} \
+    port:py${active_python_version_no_dot}-numpy \
+    port:py${active_python_version_no_dot}-cheetah
 
 # need matplotlib for polar encoder/decoder, runtime only
 depends_run-append \
     port:py${active_python_version_no_dot}-matplotlib \
     port:py${active_python_version_no_dot}-opengl \
-    port:py${active_python_version_no_dot}-scipy \
-    port:py${active_python_version_no_dot}-numpy \
-    port:py${active_python_version_no_dot}-cheetah
+    port:py${active_python_version_no_dot}-scipy
 
 if {[string first "37" $subport] > 1} {
     # still require cppunit for testing; NOTE: cppunit is checked for
