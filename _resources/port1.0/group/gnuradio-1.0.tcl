@@ -138,7 +138,6 @@ configure.args-append \
     -DPYTHON_EXECUTABLE=${python_framework_dir}/bin/python${active_python_version} \
     -DPYTHON_INCLUDE_DIR=${python_framework_dir}/Headers \
     -DPYTHON_LIBRARY=${python_framework_dir}/Python \
-    -DENABLE_PYTHON=ON \
     -DGR_PYTHON_DIR=${python_framework_dir}/lib/python${active_python_version}/site-packages \
     -DDOXYGEN_DOT_EXECUTABLE= \
     -DDOXYGEN_EXECUTABLE= \
