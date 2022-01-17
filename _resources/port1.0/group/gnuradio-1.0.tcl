@@ -36,10 +36,10 @@ compiler.cxx_standard 2011
 boost.version 1.71
 
 # see https://github.com/macports/macports-ports/pull/7805
-license_noconflict-append openssl
-
-# see https://github.com/macports/macports-ports/pull/7805
-license_noconflict-append graphviz
+license_noconflict-append \
+    openssl \
+    openssl11 \
+    graphviz
 
 # Define the available variants
 foreach py_ver ${gnuradio.python_versions} {
