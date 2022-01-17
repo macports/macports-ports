@@ -99,29 +99,26 @@ if {[string first "37" $subport] > 1} {
     # depends_build to be used correctly. Choose the latter since it's
     # not required for runtime; just for build/test.
     depends_build-append \
-        port:cppunit
+        port:cppunit \
+        port:swig3-python
+
+    configure.args-append \
+        -DSWIG_EXECUTABLE=${prefix}/bin/swig3
 } else {
     # add dependencies for gnuradio >= 3.8
+     depends_build-append \
+        port:swig-python
+
+    configure.args-append \
+        -DSWIG_EXECUTABLE=${prefix}/bin/swig
 }
 
 if {[string first "gr37-" $subport] >= 0} {
     depends_lib-append \
         port:gnuradio37
-
-    depends_build-append \
-        port:swig3-python
-
-    configure.args-append \
-        -DSWIG_EXECUTABLE=${prefix}/bin/swig3
 } elseif {[string first "gr-" $subport] >= 0} {
     depends_lib-append \
         path:lib/libgnuradio-runtime.dylib:gnuradio
-
-    depends_build-append \
-        port:swig-python
-
-    configure.args-append \
-        -DSWIG_EXECUTABLE=${prefix}/bin/swig
 }
 
 # set build type to release or debug, not "MacPorts" since the GR
