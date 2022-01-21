@@ -36,10 +36,10 @@ compiler.cxx_standard 2011
 boost.version 1.71
 
 # see https://github.com/macports/macports-ports/pull/7805
-license_noconflict-append \
-    openssl \
-    openssl11 \
-    graphviz
+license_noconflict-append openssl
+
+# see https://github.com/macports/macports-ports/pull/7805
+license_noconflict-append graphviz
 
 # Define the available variants
 foreach py_ver ${gnuradio.python_versions} {
@@ -83,15 +83,15 @@ depends_lib-append \
     path:lib/libmpir.dylib:mpir \
     path:lib/libvolk.dylib:volk \
     port:gmp \
-    port:python${active_python_version_no_dot} \
-    port:py${active_python_version_no_dot}-numpy \
-    port:py${active_python_version_no_dot}-cheetah
+    port:python${active_python_version_no_dot}
 
 # need matplotlib for polar encoder/decoder, runtime only
 depends_run-append \
     port:py${active_python_version_no_dot}-matplotlib \
     port:py${active_python_version_no_dot}-opengl \
-    port:py${active_python_version_no_dot}-scipy
+    port:py${active_python_version_no_dot}-scipy \
+    port:py${active_python_version_no_dot}-numpy \
+    port:py${active_python_version_no_dot}-cheetah
 
 if {[string first "37" $subport] > 1} {
     # still require cppunit for testing; NOTE: cppunit is checked for
@@ -99,26 +99,29 @@ if {[string first "37" $subport] > 1} {
     # depends_build to be used correctly. Choose the latter since it's
     # not required for runtime; just for build/test.
     depends_build-append \
-        port:cppunit \
-        port:swig3-python
-
-    configure.args-append \
-        -DSWIG_EXECUTABLE=${prefix}/bin/swig3
+        port:cppunit
 } else {
     # add dependencies for gnuradio >= 3.8
-     depends_build-append \
-        port:swig-python
-
-    configure.args-append \
-        -DSWIG_EXECUTABLE=${prefix}/bin/swig
 }
 
 if {[string first "gr37-" $subport] >= 0} {
     depends_lib-append \
         port:gnuradio37
+
+    depends_build-append \
+        port:swig3-python
+
+    configure.args-append \
+        -DSWIG_EXECUTABLE=${prefix}/bin/swig3
 } elseif {[string first "gr-" $subport] >= 0} {
     depends_lib-append \
         path:lib/libgnuradio-runtime.dylib:gnuradio
+
+    depends_build-append \
+        port:swig-python
+
+    configure.args-append \
+        -DSWIG_EXECUTABLE=${prefix}/bin/swig
 }
 
 # set build type to release or debug, not "MacPorts" since the GR
@@ -135,6 +138,7 @@ configure.args-append \
     -DPYTHON_EXECUTABLE=${python_framework_dir}/bin/python${active_python_version} \
     -DPYTHON_INCLUDE_DIR=${python_framework_dir}/Headers \
     -DPYTHON_LIBRARY=${python_framework_dir}/Python \
+    -DENABLE_PYTHON=ON \
     -DGR_PYTHON_DIR=${python_framework_dir}/lib/python${active_python_version}/site-packages \
     -DDOXYGEN_DOT_EXECUTABLE= \
     -DDOXYGEN_EXECUTABLE= \
