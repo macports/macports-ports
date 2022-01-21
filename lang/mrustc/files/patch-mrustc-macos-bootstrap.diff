@@ -1,0 +1,185 @@
+https://github.com/thepowersgang/mrustc/pull/192
+
+--- run_rustc/Makefile.orig
++++ run_rustc/Makefile
+@@ -27,13 +27,13 @@ endif
+ ifeq ($(shell uname -s || echo not),Darwin)
+   DYLIB_EXT := dylib
+   PLATFORM := macos
++  RUSTC_TARGET ?= x86_64-apple-darwin
+ else
+   DYLIB_EXT := so
+   PLATFORM := linux
++  RUSTC_TARGET ?= x86_64-unknown-linux-gnu
+ endif
+ 
+-RUSTC_TARGET ?= x86_64-unknown-linux-gnu
+-
+ TARGETVER_LEAST_1_29 := $(shell test "$(RUSTC_VERSION)" ">" "1.29" && echo yes)
+ TARGETVER_LEAST_1_39 := $(shell test "$(RUSTC_VERSION)" ">" "1.39" && echo yes)
+ TARGETVER_LEAST_1_54 := $(shell test "$(RUSTC_VERSION)" ">" "1.54" && echo yes)
+--- rustc-1.39.0-src.patch.orig
++++ rustc-1.39.0-src.patch
+@@ -64,8 +64,6 @@
+  use self::generic as arch;
+ 
+ 
+-diff --git a/llvm/include/llvm/Demangle/MicrosoftDemangleNodes.h b/llvm/include/llvm/Demangle/MicrosoftDemangleNodes.h
+-index da9d9d5bfdc0..3d47471f0ef0 100644
+ --- src/llvm-project/llvm/include/llvm/Demangle/MicrosoftDemangleNodes.h
+ +++ src/llvm-project/llvm/include/llvm/Demangle/MicrosoftDemangleNodes.h
+ @@ -16,6 +16,8 @@
+@@ -80,18 +78,69 @@ index da9d9d5bfdc0..3d47471f0ef0 100644
+ ##
+ ## gcc (used by mrustc) has 16-byte uint128_t alignment, while rustc uses 8
+ ##
+-#--- src/libsyntax/ast.rs
+-#+++ src/libsyntax/ast.rs
+-#@@ -986,2 +986,2 @@
+-#-#[cfg(target_arch = "x86_64")]
+-#-static_assert_size!(Expr, 96);
+-#+//#[cfg(target_arch = "x86_64")]
+-#+//static_assert_size!(Expr, 96);
+-#--- src/librustc/ty/sty.rs
+-#+++ src/librustc/ty/sty.rs
+-#@@ -2258,2 +2258,2 @@
+-#-#[cfg(target_arch = "x86_64")]
+-#-static_assert_size!(Const<'_>, 40);
+-#+//#[cfg(target_arch = "x86_64")]
+-#+//static_assert_size!(Const<'_>, 40);
++--- src/libsyntax/ast.rs
+++++ src/libsyntax/ast.rs
++@@ -985,3 +985,3 @@ pub struct Expr {
++ // `Expr` is used a lot. Make sure it doesn't unintentionally get bigger.
++-#[cfg(target_arch = "x86_64")]
+++#[cfg(all(target_arch = "x86_64", not(rust_compiler="mrustc")))]
++ static_assert_size!(Expr, 96);
+ 
++--- src/librustc/ty/sty.rs
+++++ src/librustc/ty/sty.rs
++@@ -2257,3 +2257,3 @@ pub struct Const<'tcx> {
++
++-#[cfg(target_arch = "x86_64")]
+++#[cfg(all(target_arch = "x86_64", not(rust_compiler="mrustc")))]
++ static_assert_size!(Const<'_>, 40);
++
++--- src/librustc/hir/mod.rs
+++++ src/librustc/hir/mod.rs
++@@ -1412,8 +1412,8 @@ pub struct Expr {
++ }
++ 
++ // `Expr` is used a lot. Make sure it doesn't unintentionally get bigger.
++-#[cfg(target_arch = "x86_64")]
++-static_assert_size!(Expr, 72);
+++#[cfg(all(target_arch = "x86_64", not(rust_compiler="mrustc")))]
+++static_assert_size!(Expr, 72);
++ 
++ impl Expr {
++     pub fn precedence(&self) -> ExprPrecedence {
++
++--- src/librustc/mir/interpret/value.rs
+++++ src/librustc/mir/interpret/value.rs
++@@ -106,8 +106,8 @@ pub enum Scalar<Tag = (), Id = AllocId> {
++     Ptr(Pointer<Tag, Id>),
++ }
++ 
++-#[cfg(target_arch = "x86_64")]
++-static_assert_size!(Scalar, 24);
+++#[cfg(all(target_arch = "x86_64", not(rust_compiler="mrustc")))]
+++static_assert_size!(Scalar, 24);
++ 
++ impl<Tag: fmt::Debug, Id: fmt::Debug> fmt::Debug for Scalar<Tag, Id> {
++     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++
++# Workaround linker error attempting to find symbol CFMutableAttributedStringGetTypeID on macOS.
++# See details at https://github.com/servo/core-foundation-rs/pull/357
++--- vendor/core-foundation/src/attributed_string.rs
+++++ vendor/core-foundation/src/attributed_string.rs
++@@ -41,7 +41,7 @@ impl CFAttributedString {
++ declare_TCFType!{
++     CFMutableAttributedString, CFMutableAttributedStringRef
++ }
++-impl_TCFType!(CFMutableAttributedString, CFMutableAttributedStringRef, CFMutableAttributedStringGetTypeID);
+++impl_TCFType!(CFMutableAttributedString, CFMutableAttributedStringRef, CFAttributedStringGetTypeID);
++ 
++ impl CFMutableAttributedString {
++     #[inline]
++--- vendor/core-foundation-sys/src/attributed_string.rs
+++++ vendor/core-foundation-sys/src/attributed_string.rs
++@@ -51,6 +51,4 @@ extern {
++         attr_name: CFStringRef,
++         value: CFTypeRef,
++     );
++-
++-    pub fn CFMutableAttributedStringGetTypeID() -> CFTypeID;
++ }
+--- src/trans/codegen_c.cpp.orig
++++ src/trans/codegen_c.cpp
+@@ -1210,7 +1210,9 @@ namespace {
+                     {
+                         args.push_back(c);
+                     }
++#if !defined(__APPLE__)
+                     args.push_back("-Wl,--start-group");    // Group to avoid linking ordering
++#endif
+                     //args.push_back("-Wl,--push-state");
+                     for(auto l_d : libraries_and_dirs)
+                     {
+@@ -1240,7 +1242,9 @@ namespace {
+                         }
+                     }
+                     //args.push_back("-Wl,--pop-state");
++#if !defined(__APPLE__)
+                     args.push_back("-Wl,--end-group");    // Group to avoid linking ordering
++#endif
+                     for( const auto& a : Target_GetCurSpec().m_backend_c.m_linker_opts )
+                     {
+                         args.push_back( a.c_str() );
+@@ -2478,10 +2482,10 @@ namespace {
+                     m_of << "\tif(arg0) rv._0 |= __builtin_add_overflow" << msvc_suffix_u32 << "(rv._1, 1, &rv._1);\n";
+                     m_of << "\treturn rv;\n";
+                 }
+-                // `fn llvm_addcarryx_u32(a: u8, b: u32, c: u32, d: *mut u8) -> u32`
++                // `fn llvm_addcarryx_u32(a: u8, b: u32, c: u32, d: *mut u8) -> u8`
+                 else if( item.m_linkage.name == "llvm.x86.addcarryx.u32") {
+-                    m_of << "\t*arg3 = __builtin_add_overflow" << msvc_suffix_u32 << "(arg1, arg2, &rv);\n";
+-                    m_of << "\tif(*arg3) *arg3 |= __builtin_add_overflow" << msvc_suffix_u32 << "(rv, 1, &rv);\n";
++                    m_of << "\trv = __builtin_add_overflow" << msvc_suffix_u32 << "(arg1, arg2, arg3);\n";
++                    m_of << "\tif(arg0) rv |= __builtin_add_overflow" << msvc_suffix_u32 << "(*arg3, 1, arg3);\n";
+                     m_of << "\treturn rv;\n";
+                 }
+                 // `fn llvm_subborrow" << msvc_suffix_u32 << "(a: u8, b: u32, c: u32) -> (u8, u32);`
+--- src/trans/target.cpp.orig
++++ src/trans/target.cpp
+@@ -532,7 +532,7 @@ namespace
+                 ARCH_X86_64
+                 };
+         }
+-        else if(target_name == "x86_64-apple-macosx")
++        else if(target_name == "x86_64-apple-darwin")
+         {
+             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
+             return TargetSpec {
+@@ -540,7 +540,7 @@ namespace
+                 ARCH_X86_64
+                 };
+         }
+-        else if(target_name == "aarch64-apple-macosx")
++        else if(target_name == "aarch64-apple-darwin")
+         {
+             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
+             return TargetSpec {
+--- tools/common/target_detect.h.orig
++++ tools/common/target_detect.h
+@@ -86,9 +86,9 @@
+ // - Apple devices
+ #elif defined(__APPLE__)
+ # if defined(__aarch64__)
+-#  define DEFAULT_TARGET_NAME "aarch64-apple-macosx"
++#  define DEFAULT_TARGET_NAME "aarch64-apple-darwin"
+ # else
+-#  define DEFAULT_TARGET_NAME "x86_64-apple-macosx"
++#  define DEFAULT_TARGET_NAME "x86_64-apple-darwin"
+ #endif
+ // - Haiku
+ #elif defined(__HAIKU__)
