@@ -36,21 +36,27 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
     if {![option gobject_introspection]} {
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=OFF
+        } elseif { [string match *meson* [option configure.cmd] ] } {
+            configure.args-append   -Dintrospection=false
         } else {
             configure.args-append   --disable-introspection
         }
     } else {
         depends_lib-append          port:gobject-introspection
-        platform darwin 8 {
-            global prefix_frozen
-            # The rules enabled by gobject-introspection require GNU make 3.81+
-            depends_build-append    port:gmake
-            configure.env-append    MAKE=${prefix_frozen}/bin/gmake
-            build.cmd-replace       [portbuild::build_getmaketype] ${prefix_frozen}/bin/gmake
+        if {![string match *meson* [option configure.cmd]]} {
+            platform darwin 8 {
+                global prefix_frozen
+                # The rules enabled by gobject-introspection require GNU make 3.81+
+                depends_build-append    port:gmake
+                configure.env-append    MAKE=${prefix_frozen}/bin/gmake
+                build.cmd-replace       [portbuild::build_getmaketype] ${prefix_frozen}/bin/gmake
+            }
         }
 
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON            
+        } elseif { [string match *meson* [option configure.cmd] ] } {
+            configure.args-append   -Dintrospection=true
         } else {
             configure.args-append   --enable-introspection
         }
@@ -120,8 +126,10 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
             }
         }
 
-        build.args-append    CFLAGS="[option configure.cflags]  [option gobject_introspection.build.cflags]" \
-                            LDFLAGS="[option configure.ldflags] [option gobject_introspection.build.ldflags]"
+        if {![string match *meson* [option configure.cmd]]} {
+            build.args-append    CFLAGS="[option configure.cflags]  [option gobject_introspection.build.cflags]" \
+                                LDFLAGS="[option configure.ldflags] [option gobject_introspection.build.ldflags]"
+        }
     }
 }
 
