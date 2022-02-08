@@ -355,13 +355,27 @@ post-extract {
 
     foreach vlist ${go.vendors_internal} {
         lassign ${vlist} sha1_short vpackage vresolved
+        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved})"
 
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
         if {${sha1_short} ne ""} {
             move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
         } else {
             lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
-            move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
+            # In some cases, this can match multiple folders, e.g.,
+            # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
+            # We want the one that does not have any dashes in the wildcard of
+            # our glob expression, so use regex to identify that.
+            set candidates [glob ${workpath}/${vauthor}-${vproject}-*]
+            foreach candidate $candidates {
+                if {[regexp -nocase "^[quotemeta $workpath]/[quotemeta $vauthor]-[quotemeta $vproject]-\[^-\]*$" $candidate]} {
+                    ui_debug "Choosing $candidate for ${workpath}/${vauthor}-${vproject}-*"
+                    move $candidate ${gopath}/src/${vpackage}
+                    break
+                } else {
+                    ui_debug "Rejecting $candidate for ${workpath}/${vauthor}-${vproject}-* because it contains dashes in the wildcard match"
+                }
+            }
         }
     }
 }
