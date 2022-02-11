@@ -24,16 +24,20 @@ options gnuradio.default_python_variant
 if {[string first "37" $subport] > 1} {
     default gnuradio.python_versions { 2.7 }
     default gnuradio.default_python_variant +python27
+    # use C/C++11
+    compiler.c_standard   2011
+    compiler.cxx_standard 2011
+    boost.version 1.71
 } else {
     # the following versions use all the same python
     default gnuradio.python_versions { 3.8 3.9 3.10 }
     default gnuradio.default_python_variant +python39
+    # use C/C++17
+    compiler.c_standard   2011
+    compiler.cxx_standard 2017
+    boost.version 1.76
 }
 
-# use C/C++11
-compiler.c_standard   2011
-compiler.cxx_standard 2011
-boost.version 1.71
 
 # see https://github.com/macports/macports-ports/pull/7805
 license_noconflict-append \
@@ -93,6 +97,9 @@ depends_run-append \
     port:py${active_python_version_no_dot}-opengl \
     port:py${active_python_version_no_dot}-scipy
 
+# specify the Python version to use
+set python_framework_dir ${frameworks_dir}/Python.framework/Versions/${active_python_version}
+
 if {[string first "37" $subport] > 1} {
     # still require cppunit for testing; NOTE: cppunit is checked for
     # during configure, so we need it to be in depends_lib or
@@ -105,12 +112,12 @@ if {[string first "37" $subport] > 1} {
     configure.args-append \
         -DSWIG_EXECUTABLE=${prefix}/bin/swig3
 } else {
-    # add dependencies for gnuradio >= 3.8
-     depends_build-append \
-        port:swig-python
+    # add dependencies for gnuradio >= 3.10
+    depends_build-append \
+        port:py${active_python_version_no_dot}-pybind11
 
     configure.args-append \
-        -DSWIG_EXECUTABLE=${prefix}/bin/swig
+        -Dpybind11_DIR=${python_framework_dir}/lib/python${active_python_version}/site-packages/pybind11/share/cmake/pybind11
 }
 
 if {[string first "gr37-" $subport] >= 0} {
@@ -129,9 +136,8 @@ if {[variant_isset debug]} {
     cmake.build_type Release
 }
 
-# specify the Python version to use
-set python_framework_dir ${frameworks_dir}/Python.framework/Versions/${active_python_version}
 configure.args-append \
+    -DENABLE_PYTHON=ON \
     -DPYTHON_EXECUTABLE=${python_framework_dir}/bin/python${active_python_version} \
     -DPYTHON_INCLUDE_DIR=${python_framework_dir}/Headers \
     -DPYTHON_LIBRARY=${python_framework_dir}/Python \
@@ -147,7 +153,8 @@ configure.args-append \
     -DMPIRXX_LIBRARY=${prefix}/lib/libmpirxx.dylib \
     -DENABLE_DOXYGEN=OFF \
     -DENABLE_SPHINX=OFF \
-    -DSPHINX_EXECUTABLE=
+    -DSPHINX_EXECUTABLE= \
+    -DENABLE_MANPAGES=OFF
 
 # remove top-level library and include paths, such that internal ones
 # are searched before any already-installed ones.
@@ -164,14 +171,24 @@ configure.args-append \
     -DCMAKE_C_EXTENSIONS=OFF
 
 variant docs description "Install documentation" {
-    # texlive-latex not needed from 3.9.0.0
     depends_build-append \
         path:bin/doxygen:doxygen \
         path:bin/dot:graphviz \
-        port:py${active_python_version_no_dot}-sphinx \
-        port:texlive-latex
+        port:py${active_python_version_no_dot}-sphinx
+
+    # texlive-latex not needed from 3.9.0.0
+    if {[string first "37" $subport] > 1} {
+        depends_build-append \
+            port:texlive-latex
+    } else {
+        depends_lib-append \
+            port:mathjax2
+        configure.args-append \
+            -DMATHJAX2_USE_ROOT=${prefix}/share/mathjax2
+    }
 
     configure.args-delete \
+        -DENABLE_MANPAGES=OFF \
         -DENABLE_DOXYGEN=OFF \
         -DDOXYGEN_DOT_EXECUTABLE= \
         -DDOXYGEN_EXECUTABLE= \
@@ -179,6 +196,7 @@ variant docs description "Install documentation" {
         -DSPHINX_EXECUTABLE=
 
     configure.args-append \
+        -DENABLE_MANPAGES=ON \
         -DENABLE_DOXYGEN=ON \
         -DDOXYGEN_DOT_EXECUTABLE=${prefix}/bin/dot \
         -DDOXYGEN_EXECUTABLE=${prefix}/bin/doxygen \
