@@ -71,6 +71,11 @@ array set crossbinutils.versions_info {
         sha256  820d9724f020a3e69cb337893a0b63c2db161dadcb0e06fc11dc29eb1e84a32c \
         size    22916924
     }}
+    2.38 {xz {
+        rmd160  e6d37fd602fefa25560937efb57ed3b126d7578b \
+        sha256  e316477a914f567eccc34d5d29785b8b0f5a10208d36bbacedcc39048ecfe024 \
+        size    23651408
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -118,6 +123,7 @@ proc crossbinutils.setup {target version} {
             binutils/doc    binutils
             gprof           gprof
             ld              ld
+            libctf/doc      ctf-spec
         }
 
         foreach {dir page} ${infopages} {
@@ -132,19 +138,30 @@ proc crossbinutils.setup {target version} {
             move ${tex} \
                 ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
 
-            # Fix Makefile
-            reinplace -q -E \
-                s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
-                ${worksrcpath}/${dir}/Makefile.in
+            # Fix Makefile(s)
+            if { [ file exists "${worksrcpath}/${dir}/Makefile.in" ] } {
+                reinplace -q -E \
+                    s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
+                    ${worksrcpath}/${dir}/Makefile.in
+            }
+            foreach dir2 {binutils gas libctf} {
+                if { [ file exists "${worksrcpath}/${dir2}/configure" ] } {
+                        reinplace -q -E \
+                        s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
+                        ${worksrcpath}/${dir2}/Makefile.in
+                }
+            }
         }
 
         # Fix packages' names.
-        foreach dir {bfd binutils gas gold gprof ld opcodes} {
-            reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
-                ${worksrcpath}/${dir}/configure
+        foreach dir {bfd binutils gas gold gprof ld opcodes libctf} {
+            if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
+                reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
+                    ${worksrcpath}/${dir}/configure
+            }
         }
 
-        # Install target-compatible libbfd/libiberty in the target's directory
+        # Install target-compatible libbfd/bfd-plugins/libiberty in the target's directory
         reinplace -q "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
             ${worksrcpath}/bfd/configure                                \
             ${worksrcpath}/opcodes/configure
@@ -174,7 +191,11 @@ proc crossbinutils.setup {target version} {
     configure.args \
         --target=${target} \
         --program-prefix=${target}- \
-        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host
+        --enable-install-libiberty=${prefix}/${crossbinutils.target}/host \
+        --infodir=${prefix}/share/info \
+        --mandir=${prefix}/share/man \
+        --datarootdir=${prefix}/share/${crossbinutils.target} \
+        
 
     build.dir ${workpath}/build
 
