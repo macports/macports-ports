@@ -77,6 +77,10 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup github 1.0"
             github.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
+        gitlab.com {
+            uplevel "PortGroup gitlab 1.0"
+            gitlab.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         bitbucket.org {
             uplevel "PortGroup bitbucket 1.0"
             bitbucket.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix}
