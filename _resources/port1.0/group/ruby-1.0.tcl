@@ -185,6 +185,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
+            ruby31 { ruby.branch 3.1 }
             ruby30 { ruby.branch 3.0 }
             ruby27 { ruby.branch 2.7 }
             ruby26 { ruby.branch 2.6 }
@@ -197,7 +198,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             ruby19 { ruby.branch 1.9 }
             ruby   { ruby.branch 1.8 }
             default {
-                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby30, ruby27, ruby26, ruby25, ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby31, ruby30, ruby27, ruby26, ruby25, ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
                 return -code error "ruby.setup failed"
             }
         }

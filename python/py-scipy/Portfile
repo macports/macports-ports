@@ -7,10 +7,10 @@ PortGroup               github 1.0
 PortGroup               compilers 1.0
 PortGroup               compiler_blacklist_versions 1.0
 
-github.setup            scipy scipy 1.7.2 v
-checksums               rmd160  ab4147bbff83509078ddc3408abd2472ad70a8e3 \
-                        sha256  fa2dbabaaecdb502641b0b3c00dec05fb475ae48655c66da16c9ed24eda1e711 \
-                        size    36104529
+github.setup            scipy   scipy 1.8.0 v
+checksums               rmd160  6305a22277c5732a98c7f544d42c48a3513eb520 \
+                        sha256  31d4f2d6b724bc9a98e527b5849b8a7e589bf1ea630c33aa563eda912c9ff0bd \
+                        size    38313602
 revision                0
 
 name                    py-scipy
@@ -85,7 +85,8 @@ if {${name} ne ${subport}} {
 
     } else {
 
-        PortGroup           legacysupport 1.1
+        # Python 3.7 and newer
+        PortGroup          legacysupport 1.1
 
         # __sincos https://trac.macports.org/ticket/63233
         legacysupport.newest_darwin_requires_legacy 12
@@ -93,14 +94,8 @@ if {${name} ne ${subport}} {
         # current release, which uses Boost
         PortGroup           boost 1.0
         boost.version       1.71
-        patchfiles-append   patch-allow-MP-boost.diff
 
-        # force disable STDC THREADS from <threads.h> and instead just use __thread
-        # https://trac.macports.org/ticket/62488
-        patchfiles-append   patch-use__STDC_NO_THREADS__.diff
-
-        depends_build-append \
-                            port:py${python.version}-pythran
+        depends_build-append port:py${python.version}-pythran
         depends_lib-append  port:py${python.version}-mypy
 
         compiler.c_standard 2011
@@ -110,9 +105,31 @@ if {${name} ne ${subport}} {
         # https://build.macports.org/builders/ports-10.11_x86_64-builder/builds/136856/steps/install-port/logs/stdio
         compiler.blacklist-append {clang < 900}
 
-        # add this next release
         github.tarball_from releases
 
+        if {${python.version} == 37} {
+
+            github.setup scipy scipy 1.7.3 v
+            checksums   rmd160  fed96617a5baeaa41571fd0ea39b68091d897bab \
+                        sha256  ab5875facfdef77e0a47d5fd39ea178b58e60e454a4c85aa1e52fcb80db7babf \
+                     size    36102562
+            revision    0
+
+            patchfiles-append   patch-allow-MP-boost.37.diff
+
+            # force disable STDC THREADS from <threads.h> and instead just use __thread
+            # https://trac.macports.org/ticket/62488
+            patchfiles-append   patch-use__STDC_NO_THREADS__.37.diff
+
+        } else {
+
+            patchfiles-append   patch-allow-MP-boost.diff
+
+            # force disable STDC THREADS from <threads.h> and instead just use __thread
+            # https://trac.macports.org/ticket/62488
+            patchfiles-append   patch-use__STDC_NO_THREADS__.diff
+
+        }
     }
 
     depends_lib-append      port:py${python.version}-numpy \
@@ -149,12 +166,17 @@ if {${name} ne ${subport}} {
         system "chmod -R a+r ${destroot}${prefix}"
     }
 
-    variant atlas conflicts openblas description "Use MacPorts ATLAS libraries" {
+    variant atlas conflicts openblas mkl description "Use MacPorts ATLAS libraries" {
         depends_lib-append  port:atlas
     }
 
-    variant openblas conflicts atlas description "Use MacPorts OpenBLAS Libraries" {
+    variant openblas conflicts atlas mkl description "Use MacPorts OpenBLAS Libraries" {
         depends_lib-append  path:lib/libopenblas.dylib:OpenBLAS
+    }
+
+    variant mkl conflicts atlas openblas description "Use MacPorts MKL Libraries" {
+        depends_lib-append  port:py${python.version}-mkl \
+                            port:py${python.version}-mkl-include
     }
 
     # Make +openblas a default variant, at least temporarily, to
@@ -162,17 +184,20 @@ if {${name} ne ${subport}} {
     # /usr/lib/liblapack.* missing a symbol. see also:
     # https://trac.macports.org/ticket/57829
     if {![variant_isset atlas] &&
-        ![variant_isset openblas]} {
+        ![variant_isset openblas] &&
+        ![variant_isset mkl]} {
         default_variants +openblas
     }
 
     if {[variant_isset atlas]} {
         # use MacPorts atlas
         build.env-append    OPENBLAS=None \
+                            MKLROOT=None \
                             ATLAS=${prefix}/lib \
                             LAPACK=${prefix}/lib \
                             BLAS=${prefix}/lib
         destroot.env-append OPENBLAS=None \
+                            MKLROOT=None \
                             ATLAS=${prefix}/lib \
                             LAPACK=${prefix}/lib \
                             BLAS=${prefix}/lib
@@ -204,9 +229,41 @@ have the +atlas variant active. Please ensure that numpy is activated with the\
     } elseif {[variant_isset openblas]} {
         # use MacPorts OpenBLAS
         build.env-append    OPENBLAS=${prefix}/lib \
-                            ATLAS=None
+                            ATLAS=None \
+                            MKLROOT=None
         destroot.env-append OPENBLAS=${prefix}/lib \
-                            ATLAS=None
+                            ATLAS=None \
+                            MKLROOT=None
+
+    } elseif {[variant_isset mkl]} {
+        # use MacPorts MKL
+        build.env-append    OPENBLAS=None \
+                            ATLAS=None \
+                            MKLROOT=${python.prefix}
+        destroot.env-append OPENBLAS=None \
+                            ATLAS=None \
+                            MKLROOT=${python.prefix}
+
+        pre-fetch {
+            # check that numpy has the mkl variant active
+            if {![catch {set result [active_variants py${python.version}-numpy mkl ""]}]} {
+                if {!$result} {
+
+                    return -code error \
+"You have selected the +mkl variant but py${python.version}-numpy does not\
+have the +mkl variant active. Please ensure that numpy is activated with the\
++mkl variant."
+                }
+            }
+        }
+
+        # set absolute path to remove references to @rpath/libmkl_rt.2.dylib
+        post-destroot {
+            foreach soname [exec find ${destroot}${python.pkgd}/scipy -name "*.so"] {
+                system "install_name_tool -change @rpath/libmkl_rt.2.dylib ${python.prefix}/lib/libmkl_rt.2.dylib ${soname}"
+                }
+        }
+
     } else {
         # use Accelerate BLAS
         build.env-append    OPENBLAS=None \

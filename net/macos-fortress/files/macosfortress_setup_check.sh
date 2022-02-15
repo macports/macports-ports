@@ -272,11 +272,11 @@ EOF
 fi
 
 # blackhole on proxy server
-if [[ `"${CURL}" -s --head "http://${PROXY_HOSTNAME}:8119/" | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.[01] [23]\d\d"` ]]; then
-    echo "[✅] Blackhole server for http://${PROXY_HOSTNAME}:8119/ is running properly"
+if [[ `"${CURL}" -s --head "https://${PROXY_HOSTNAME}:8119/" | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.[01] [23]\d\d"` ]]; then
+    echo "[✅] Blackhole server for https://${PROXY_HOSTNAME}:8119/ is running properly"
 else
     "${CAT}" <<EOF
-[❌] Blackhole server for http://${PROXY_HOSTNAME}:8119/ isn't running properly! Troubleshooting:
+[❌] Blackhole server for https://${PROXY_HOSTNAME}:8119/ isn't running properly! Troubleshooting:
 
 sudo ps -f \`cat @PREFIX@/var/run/nginx/nginx-adblock2privoxy.pid\`
 sudo port reload org.macports.adblock2privoxy-nginx

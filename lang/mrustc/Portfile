@@ -1,0 +1,294 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           compiler_blacklist_versions 1.0
+
+github.setup        thepowersgang mrustc 15a5cb1f066bd148bd2959c63adb649e7a06e5ce
+
+version             20220210
+revision            0
+categories          lang devel
+license             MIT
+maintainers         {@catap korins.ky:kirill} openmaintainer
+description         Alternative implementation of Rust
+
+long_description    In-progress alternative rust compiler. Capable of building a \
+                    fully-working copy of rustc, but not suitable for everyday use \
+                    (due to inadequate error messages).
+
+master_sites-append https://static.rust-lang.org/dist/:rust
+
+set rust_version    1.54.0
+set rust_version_major [join [lrange [split ${rust_version} .-] 0 1] .]
+set rust_version_major_underscore [join [lrange [split ${rust_version} .-] 0 1] _]
+
+distfiles-append    rustc-${rust_version}-src.tar.gz:rust
+
+checksums           mrustc-${github.version}.tar.gz \
+                    rmd160  f54d1fd8e9b2493e9a81f31d53da0236cefbd786 \
+                    sha256  ef0f9f9fefe7e2e1b6798af9077cb01936131a0d493ccf6919d8b4d6fd6f9c63 \
+                    size    1180689  \
+                    rustc-${rust_version}-src.tar.gz \
+                    rmd160  be2de16e2deaf91aee723e631a36f6de52636ddd \
+                    sha256  ac8511633e9b5a65ad030a1a2e5bdaa841fdfe3132f2baaa52cc04e71c6c6976 \
+                    size    170480637
+
+# arm64 and i386 requires future patches
+supported_archs     x86_64
+
+use_configure       no
+
+compiler.cxx_standard 2014
+compiler.c_standard 2011
+compiler.thread_local_storage yes
+
+# GCC can't be used as a run-time compiler, see
+# https://github.com/thepowersgang/mrustc/issues/214
+compiler.blacklist *gcc*
+
+compiler.blacklist-append {clang < 900} {macports-clang-3.[0-9]} macports-clang-4.0
+
+# A C compiler is needed at run-time; it doesn't have to be the same version as
+# the C++ compiler used to compile mrustc, but we'll use that one as the
+# default, and declare the dependency here
+if { [string match macports-clang-* ${configure.compiler}] } {
+    depends_run-append \
+                    port:[string map {"macports-" ""} ${configure.compiler}]
+}
+
+# Uncomment the lines below and delete the line above when GCC support is fixed
+# if { [string match macports-gcc-* ${configure.compiler}] } {
+#   depends_run-append \
+#                    port:[string map {"macports-gcc-" "gcc"} ${configure.compiler}]
+# }
+
+depends_build-append \
+                    port:rust-legacy-bootstrap
+
+post-patch {
+    # Patch the Rust source code with the patch included with mrustc
+    system -W ${workpath}/rustc-${rust_version}-src "patch -p0 < ${worksrcpath}/rustc-${rust_version}-src.patch"
+
+    # Patch the Rust with legacy bootsrap patch
+    system -W ${workpath}/rustc-${rust_version}-src "patch -p1 < ${prefix}/share/rust-legacy-bootstrap/rustc-${rust_version}-src.patch"
+
+    file rename ${workpath}/rustc-${rust_version}-src ${worksrcpath}
+
+    # prevent it from re-download src
+    touch ${worksrcpath}/rustc-${rust_version}-src/dl-version
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    PortGroup       active_variants 1.1
+
+    # __cxa_thread_atexit is part of libc++
+    depends_lib-append \
+                    port:libcxx
+
+    require_active_variants \
+                    port:libcxx emulated_tls
+
+    post-patch {
+        # when script-overrides is used it never calls build.rs => help it to setup desire feature
+        set script [open "${worksrcpath}/script-overrides/stable-${rust_version}-macos/build_std.txt" a]
+        puts ${script} "cargo:rustc-cfg=feature=\"macos_before_10_7\""
+        close ${script}
+    }
+}
+
+build.env-append    CC=${configure.cc} \
+                    CXX=${configure.cxx} \
+                    CFG_DEFAULT_LINKER=${configure.cxx} \
+                    "CXXFLAGS_EXTRA=${configure.cxxflags} ${configure.universal_cxxflags}" \
+                    "LINKFLAGS_EXTRA=${configure.ldflags} ${configure.universal_ldflags}" \
+                    RUSTC_VERSION=${rust_version} \
+                    MRUSTC_TARGET_VER=${rust_version_major}
+
+# legacysupport PG adds a lot of ENV like CPLUS_INCLUDE_PATH that brokes LLVM build
+# integrate it by hand because I need it only for linkat before macOS 10.10
+if {${os.platform} eq "darwin" && ${os.major} < 14} {
+    depends_lib-append \
+                    path:lib/libMacportsLegacySupport.a:legacy-support
+
+    set legacy_lib_name MacportsLegacySupport
+    set legacy_lib_path ${prefix}/lib
+
+    build.env-append \
+                    RUST_LEGACY_LIBRARY_NAME=${legacy_lib_name} \
+                    RUST_LEGACY_LIBRARY_PATH=${legacy_lib_path}
+
+    post-patch {
+        # when script-overrides is used it never calls build.rs => help it to setup desire feature
+        set script [open "${worksrcpath}/script-overrides/stable-${rust_version}-macos/build_std.txt" a]
+        puts ${script} "cargo:rustc-link-lib=${legacy_lib_name}"
+        puts ${script} "cargo:rustc-link-search=${legacy_lib_path}"
+        close ${script}
+    }
+}
+
+# Step 1: building mrustc, its libs and minicargo
+if {${subport} eq ${name}} {
+    depends_lib-append \
+                    port:zlib
+
+    build.env-append \
+                    PARLEVEL=${build.jobs}
+
+    # Parallel building of libs may cause random failure
+    # See: https://github.com/thepowersgang/mrustc/issues/225
+    build.target    -f minicargo.mk bin/mrustc bin/minicargo && \
+                    ${build.cmd} -C tools/dump_hirfile && \
+                    ${build.cmd} -j1 -f minicargo.mk LIBS
+
+    destroot {
+        xinstall -d ${destroot}${prefix}/libexec/mrustc/bin
+
+        xinstall -m 0755 -W ${worksrcpath}/bin mrustc minicargo dump_hirfile \
+            ${destroot}${prefix}/libexec/mrustc/bin
+
+        # install all .rlib, .rlib.hir and .rlib.o to lib/
+        xinstall -d ${destroot}${prefix}/libexec/mrustc/lib
+        foreach f [glob -directory ${worksrcpath}/output-${rust_version} lib*.rlib lib*.rlib.hir lib*.rlib.o] {
+            xinstall -m 0644 $f ${destroot}${prefix}/libexec/mrustc/lib
+        }
+
+        # create a wrapper to run mrustc without setup any ENV
+        set mrustc [open "${destroot}${prefix}/bin/mrustc" w 0755]
+        puts ${mrustc} "#!/bin/sh"
+        puts ${mrustc} "export CC=\"\$\{CC:-${configure.cc}\}\""
+        puts ${mrustc} "export MRUSTC_TARGET_VER=\"\$\{MRUSTC_TARGET_VER:-${rust_version_major}\}\""
+        puts ${mrustc} "export MRUSTC_LIBDIR=\"\$\{MRUSTC_LIBDIR:-${prefix}/libexec/mrustc/lib\}\""
+        puts ${mrustc} "${prefix}/libexec/mrustc/bin/mrustc \$@"
+        close ${mrustc}
+
+    }
+}
+
+# Step 2: build a rustc and cargo by mrustc
+subport mrustc-rust {
+    PortGroup       openssl 1.0
+
+    description     Rust and cargo which was compiled by mrustc.
+    long_description {*}${description}
+
+    # cargo is too old to be used with 3.0
+    openssl.branch  1.1
+
+    # mrustc produces huge C file with size near of 1Gb
+    # and run a few clang to compile it in parallel requires significant amount of RAM.
+    # build.env-append \
+    #                 PARLEVEL=${build.jobs}
+
+    depends_build-append \
+                    bin:git:git \
+                    path:bin/cmake:cmake \
+                    port:cctools \
+                    port:gmake \
+                    port:mrustc \
+                    port:ninja
+
+    depends_lib-append \
+                    port:curl
+
+    set cmake_opts ""
+
+    if {${os.platform} eq "darwin" && ${os.major} < 11} {
+        depends_build-append \
+                    port:libtool
+
+        set cmake_opts "CMAKE_LIBTOOL=${prefix}/bin/libtool"
+    }
+
+    if { [string match macports-clang-* ${configure.compiler}] } {
+        # See: https://github.com/rust-lang/rust/pull/93640
+        set cmake_opts "${cmake_opts} LLVM_ENABLE_RTTI=ON"
+    }
+
+    # use the system python27 if present
+    if {${os.platform} eq "darwin" && ${os.major} >= 11 && ${os.major} <= 21} {
+        set pythonfullpath   /usr/bin/python2.7
+    } else {
+        set pythonfullpath   ${prefix}/bin/python2.7
+        depends_build-append port:python27
+    }
+
+    build.env-append \
+                    OPENSSL_DIR=[openssl::install_area] \
+                    OPENSSL_INCLUDE_DIR=[openssl::include_dir] \
+                    OPENSSL_LIB_DIR=[openssl::lib_dir] \
+                    "LLVM_CMAKE_OPTS_EXTRA=PYTHON_EXECUTABLE=${pythonfullpath} ${cmake_opts}" \
+                    MINICARGO=${prefix}/libexec/mrustc/bin/minicargo \
+                    "MINICARGO_FLAGS=--features curl-sys/force-system-lib-on-osx" \
+                    MRUSTC=${prefix}/libexec/mrustc/bin/mrustc
+
+    # Parallel building on some stages may cause random failure
+    # See: https://github.com/thepowersgang/mrustc/issues/225
+    # So, it is:
+    #  - Builds LLVM in parallel mode
+    #  - Bootstrap everything in single mode
+    build.target    -f minicargo.mk rustc-${rust_version}-src/build/bin/llvm-config && \
+                    ${build.cmd} -j1 -C run_rustc all
+
+    destroot {
+        xinstall -d ${destroot}${prefix}/libexec/${subport}/bin
+
+        xinstall -m 0755 ${worksrcpath}/output-${rust_version}/cargo \
+            ${destroot}${prefix}/libexec/${subport}/bin
+
+        xinstall -m 0755 ${worksrcpath}/run_rustc/output-${rust_version}/prefix/bin/rustc_binary \
+            ${destroot}${prefix}/libexec/${subport}/bin/rustc_binary
+
+        set rustc [open "${destroot}${prefix}/libexec/${subport}/bin/rustc" w 0755]
+        puts ${rustc} "#!/bin/sh"
+        puts ${rustc} "# macOS never uses LD_LIBRARY_PATH, but rust uses it to find the path to its driver"
+        puts ${rustc} "LD_LIBRARY_PATH=\"${prefix}/libexec/${subport}/lib\" ${prefix}/libexec/${subport}/bin/rustc_binary \$@"
+        close ${rustc}
+
+        ln -sf ${prefix}/libexec/${subport}/bin/rustc ${prefix}/bin/${subport}
+
+        xinstall -d ${destroot}${prefix}/libexec/${subport}/lib
+        file copy ${worksrcpath}/run_rustc/output-${rust_version}/prefix/lib/rustlib \
+            ${destroot}${prefix}/libexec/${subport}/lib
+
+        system -W ${destroot}${prefix}/libexec/${subport}/bin \
+            "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-rustc/${build_arch}-apple-darwin/release/deps/librustc_driver.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/librustc_driver.dylib ./rustc_binary"
+
+        system -W ${destroot}${prefix}/libexec/${subport}/bin \
+            "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std2/${build_arch}-apple-darwin/release/deps/libtest.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libtest.dylib ./rustc_binary"
+
+        system -W ${destroot}${prefix}/libexec/${subport}/bin \
+            "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std2/${build_arch}-apple-darwin/release/deps/libstd.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libstd.dylib ./rustc_binary"
+
+        system -W ${destroot}${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib \
+            "install_name_tool -id ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/librustc_driver.dylib ./librustc_driver.dylib"
+
+        system -W ${destroot}${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib \
+            "install_name_tool -id ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libstd.dylib ./libstd.dylib"
+
+        system -W ${destroot}${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib \
+            "install_name_tool -id ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libtest.dylib ./libtest.dylib"
+
+        foreach f [ exec find ${destroot}${prefix}/libexec/${subport}/lib -name "*.dylib" ] {
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-rustc/${build_arch}-apple-darwin/release/deps/librustc_driver.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/librustc_driver.dylib $f"
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-rustc/${build_arch}-apple-darwin/release/deps/librustc_codegen_llvm.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/librustc_codegen_llvm.dylib $f"
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-rustc/${build_arch}-apple-darwin/release/deps/libtest.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libtest.dylib $f"
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-rustc/${build_arch}-apple-darwin/release/deps/libstd.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libstd.dylib $f"
+
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std/${build_arch}-apple-darwin/release/deps/libtest.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libtest.dylib $f"
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std/${build_arch}-apple-darwin/release/deps/libstd.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libstd.dylib $f"
+
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std2/${build_arch}-apple-darwin/release/deps/libtest.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libtest.dylib $f"
+            system "install_name_tool -change ${worksrcpath}/run_rustc/output-${rust_version}/build-std2/${build_arch}-apple-darwin/release/deps/libstd.dylib ${prefix}/libexec/${subport}/lib/rustlib/${build_arch}-apple-darwin/lib/libstd.dylib $f"
+        }
+    }
+
+    livecheck.type  none
+}
+
+# Let add some basic tests for mrustc port
+if {${subport} eq ${name}} {
+    test.env        {*}${build.env} MRUSTC_LIBDIR=output-${rust_version}
+    test.run        yes
+    test.target     test
+}

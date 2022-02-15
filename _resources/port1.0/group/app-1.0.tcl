@@ -255,14 +255,14 @@ platform macosx {
 
             if {${app.icon} ne ""} {
                 # Turn relative app.icon paths into absolute ones.
-                set icon ${app.icon}
+                set icon [join ${app.icon}]
                 if {[string index ${icon} 0] ne "/"} {
                     set icon ${worksrcpath}/${icon}
                 }
 
                 # Ensure app.icon exists.
                 if {![file exists ${icon}]} {
-                    return -code error "app.icon ${app.icon} does not exist"
+                    return -code error "app.icon '[join ${app.icon}]' does not exist"
                 }
 
                 # If app.icon is an .icns file, copy it.
@@ -275,18 +275,18 @@ platform macosx {
                     foreach w {16 32 128 256 512} {
                         lappend makeicnsargs -$w ${worksrcpath}/${w}.png
 
-                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w ${icon} > ${worksrcpath}/$w.png" }]} {
-                            return -code error "app.icon ${app.icon} could not be converted to png: $::errorInfo"
+                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w [shellescape ${icon}] > ${worksrcpath}/$w.png" }]} {
+                            return -code error "app.icon '[join ${app.icon}]' could not be converted to png: $::errorInfo"
                         }
                     }
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
                         return -code error "app.icns could not be created: $::errorInfo"
                     }
 
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in ${icon} -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
-                        return -code error "app.icon ${app.icon} could not be converted to ${app.name}.icns: $::errorInfo"
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in [shellescape ${icon}] -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
+                        return -code error "app.icon '[join ${app.icon}]' could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
             }
@@ -406,12 +406,12 @@ trace variable app.icon w app._icon_trace
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build
     upvar ${optionName} option
-    set needs_dep [expr {[file extension ${option}] ne ".icns"}]
+    set needs_dep [expr {[file extension [join ${option}]] ne ".icns"}]
     if {${needs_dep}} {
         depends_build-delete port:makeicns
         depends_build-append port:makeicns
     }
-    set needs_dep [expr {[file extension ${option}] eq ".svg"}]
+    set needs_dep [expr {[file extension [join ${option}]] eq ".svg"}]
     if {${needs_dep}} {
         depends_build-delete port:librsvg
         depends_build-append port:librsvg
@@ -438,7 +438,7 @@ proc app._write_launch_script  {executable app_destination} {
 
     puts ${launch_script} "#!/bin/bash
 export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
-exec ${executable}
+exec [shellescape ${executable}]
 "
     close ${launch_script}
     file attributes ${app_destination} -permissions 0755

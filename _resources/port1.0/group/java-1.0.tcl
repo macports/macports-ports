@@ -14,7 +14,7 @@
 #
 # - Java 8 and earlier are "1.8", etc.
 # - Java 9 and later are "9", etc.
-# - "+" and "*" wilcards are supported
+# - "+" and "*" wildcards are supported
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
@@ -30,7 +30,7 @@ set java_version_not_found no
 
 pre-fetch {
     if { ${java_version_not_found} } {
-        # Check again, incase java became available, .e.g openjdk installed as a dependency
+        # Check again in case java became available e.g. openjdk installed as a dependency
         java::java_set_env
         # If still not present, error out
         if { ${java_version_not_found} } {
@@ -205,7 +205,7 @@ namespace eval java {
     }
 
     # Returns the value of the first dictionary entry
-    # whose key is less or equal to search_key.
+    # whose key is less than or equal to search_key.
     #
     # @param search_key The key that is to be found in the dictionary
     # @param target_dict The dictionary which should be searched for search_key

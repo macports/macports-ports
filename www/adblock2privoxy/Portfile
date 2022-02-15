@@ -4,13 +4,11 @@ PortSystem          1.0
 PortGroup           haskell_stack 1.0
 
 name                adblock2privoxy
-version             2.0.2
+version             2.1.0
 revision            0
 categories          www haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             GPL-3
-platforms           macosx
-homepage            https://github.com/essandess/adblock2privoxy
 
 description         Convert adblock config files to privoxy format
 long_description    {*}${description}. \
@@ -33,11 +31,13 @@ long_description    {*}${description}. \
                     elemhide, other, popup, third-party, domain=..., \
                     match-case, donottrack.
 
+homepage            https://github.com/essandess/adblock2privoxy
+
 master_sites        https://hackage.haskell.org/package/${name}-${version}
 
-checksums           rmd160  cd58a6b4603dcdce6b5e4014c4fcdd3d6c32753d \
-                    sha256  c3f90360945df6e2e1fd86b491f980b4621b114020ecfc2220e295db57069c4e \
-                    size    42133
+checksums           rmd160  da82eb5ece0f97b9ebf3ec97f6631f45d4bb30c5 \
+                    sha256  1c5ac2cb54cc9fd336a5ece50a8acbfaee13281ffe8c3a9d8c8b8b44f5859e70 \
+                    size    42526
 
 depends_run-append \
                     port:nginx \
@@ -45,31 +45,25 @@ depends_run-append \
                     port:wget
 
 variant initialize_always \
-    description {Always initialize all configuration files. Intended \
-        for development and troubleshooting only. Working deployments \
-        must disable this variant to prevent configuration files \
-        being overwritten at the next upgrade. Existing configuration \
+    description {Always initialize all configuration files. Intended\
+        for development and troubleshooting only. Working deployments\
+        must disable this variant to prevent configuration files\
+        being overwritten at the next upgrade. Existing configuration\
         files are not overwritten by default.} {
-    ui_warn \
-        "
-\tAll configuration files will be initialized because
-\tthe variant +initialize_always is set. Please disable
-\tthis variant for working deployments.
-"
+    pre-fetch {
+        ui_warn \
+            "All configuration files will be initialized because\
+            the variant +initialize_always is set. Please disable\
+            this variant for working deployments."
+    }
 }
+
+# use domain or ip with port, e.g. 127.0.0.1:8119
+set adblock2privoxy_css_server \
+                    127.0.0.1:8119
 
 # relative paths to ${prefix}
 set ab2p_datadir    share/${name}
-
-pre-fetch {
-    # The way that startupitems values are quoted was changed in 2.6.3.
-    # This port now relies on those changes. See:
-    # https://github.com/macports/macports-base/pull/191
-    if {[vercmp [macports_version] 2.6.3] < 0} {
-        ui_error "${name} @${version} requires MacPorts 2.6.3 or later"
-        return -code error "incompatible MacPorts version"
-    }
-}
 
 post-extract {
     # Fix for cabal data-files hardcoded path in binary
@@ -90,7 +84,7 @@ post-extract {
 }
 
 post-destroot {
-    xinstall -m 0755 -d \
+    xinstall -d \
         ${destroot}${prefix}/share/${name}/templates \
         ${destroot}${prefix}/etc/${name} \
         ${destroot}${prefix}/etc/${name}/privoxy \
@@ -115,37 +109,331 @@ post-destroot {
         ${destroot}${prefix}/etc/${name}/css/default.html.macports
     reinplace "s|@PREFIX@|${prefix}|g" \
         ${destroot}${prefix}/etc/${name}/nginx.conf.macports
+
+    xinstall -m 0644 -W ${filespath} \
+        private.myserver.launchctl-setenv.plist \
+        ${destroot}${prefix}/share/${name}
+}
+
+set tls_ca_dir      ${prefix}/etc/${name}/ca.macports
+set tls_cert_dir    ${prefix}/etc/${name}/certs
+
+variant https_inspection \
+    description {HTTPS CSS Server for use with 'privoxy +https_inspection'.} {
+    depends_build-append \
+                    port:sf-pwgen
+
+    depends_lib-append \
+                    path:bin/openssl:openssl
+
+    # random 4-word-based passphrase
+    proc correct_horse_battery_staple {} {
+        # ignore errors from sf-pwgen if the password is shorter than requested
+        set passphrase \
+            [join [exec sh -c "sf-pwgen \
+                --algorithm memorable --count 2 --length 16 \
+                    2>/dev/null || true"] -]
+        # set random passphrase if sf-pwgen's is too short for some reason
+        if {[string length ${passphrase}] < 20} {
+            set passphrase \
+                [exec sh -c "openssl rand -base64 23 2>/dev/null \
+                    | sed 's|=*\$||' || true"]
+        }
+        return ${passphrase}
+    }
+
+    post-destroot {
+        # TLS Root CA configuration
+        xinstall -m 0770 -d ${destroot}${tls_cert_dir}
+        xinstall -m 0700 -d ${destroot}${tls_ca_dir}
+        destroot.keepdirs-append \
+                    ${destroot}${tls_cert_dir}
+        xinstall -m 0644 -W ${filespath} \
+                    openssl.cnf \
+                    ${destroot}${tls_ca_dir}/openssl.cnf.macports
+    }
+
+    pre-activate {
+        if { [file exists ${tls_ca_dir}] } {
+            delete  ${tls_ca_dir}.previous
+            move    ${tls_ca_dir} \
+                    ${tls_ca_dir}.previous
+        }
+    }
+
+    post-activate {
+        foreach f [list \
+            ${tls_ca_dir}/openssl.cnf \
+            ] {
+            if { [variant_isset "initialize_always"]
+                 && [file exists ${f}]
+                } {
+                delete ${f}.previous
+                move \
+                    ${f} \
+                    ${f}.previous
+            }
+            if { [variant_isset "initialize_always"]
+                || ![file exists ${f}]
+                } {
+                if { [file isfile ${f}.macports] } {
+                    xinstall -m 0644 \
+                        ${f}.macports \
+                        ${f}
+                }
+            }
+        }
+
+        # CA passphrase
+        # generate a strong password, use for openssl -passin and -passout
+        set tls_ca_passphrase \
+            [correct_horse_battery_staple]
+        set tls_ca_passphrase_fd \
+            [open ${tls_ca_dir}/passphrase.txt w 0600]
+        # -passin or -passout
+        puts ${tls_ca_passphrase_fd} \
+            ${tls_ca_passphrase}
+        # -passout
+        puts ${tls_ca_passphrase_fd} \
+            ${tls_ca_passphrase}
+        close ${tls_ca_passphrase_fd}
+        # create the root CA
+        system -W ${tls_ca_dir} \
+            "sh <<ADBLOCK2PRIVOXY_PKI
+            # initialize
+            touch index.txt
+            echo 1000 > serial
+
+            # CA encrypted key
+            # EC
+            openssl genpkey -out ca.key.pem -algorithm EC \\
+                -pkeyopt ec_paramgen_curve:P-384 -aes256 \\
+                -pass file:passphrase.txt
+
+            # RSA
+            # openssl genpkey -out ca.key.pem -algorithm RSA \\
+            #     -pkeyopt rsa_keygen_bits:2048 -aes256 \\
+            #     -passout file:passphrase.txt
+
+            chmod go-rw ca.key.pem
+
+            # CA certificate
+            openssl req -config openssl.cnf \\
+                -new -x509 -days 1460 -sha256 \\
+                -extensions v3_ca \\
+                -out ca.cert.pem -key ca.key.pem \\
+                -passin file:passphrase.txt -batch
+
+            # CA certificate openssl self-verification
+            openssl verify -CAfile ca.cert.pem ca.cert.pem
+
+            # Convert to .cer DER and .p12 for other uses
+            openssl x509 -outform der -in ca.cert.pem -out ca.cer
+
+            openssl pkcs12 -export -out ca.p12 \\
+                -inkey ca.key.pem -in ca.cert.pem \\
+                -passin file:passphrase.txt \\
+                -passout file:passphrase.txt
+            # verify .p12 passphrase
+            openssl pkcs12 -noout -in ca.p12 -passin file:passphrase.txt
+
+            # Server certificates
+
+            # Server certificate encrypted key and decrypted key
+            openssl genpkey -out adblock2privoxy-nginx.key.pem \
+                -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -aes256 \
+                -pass file:passphrase.txt
+            openssl ec -in adblock2privoxy-nginx.key.pem \
+               -passin file:passphrase.txt \
+               -out adblock2privoxy-nginx.key.pem.decrypted
+            chmod go-rwx adblock2privoxy-nginx.key.pem.decrypted
+
+            # Server certificate CSR
+            openssl req -config openssl.cnf -new -sha256 \
+                 -extensions server_cert -key adblock2privoxy-nginx.key.pem \
+                 -passin file:passphrase.txt \
+                 -out adblock2privoxy-nginx.csr.pem -batch
+
+            # Server certificate (825 days maximum validity)
+            # https://support.apple.com/en-us/HT210176
+            openssl ca -config openssl.cnf -days 825 -notext -md sha256 \
+                -extensions server_cert -in adblock2privoxy-nginx.csr.pem \
+                -out adblock2privoxy-nginx.cert.pem \
+                -passin file:passphrase.txt \
+                -subj '/CN=adblock2privoxy-nginx' -batch
+
+            # Server certificate chain of trust
+            cat adblock2privoxy-nginx.cert.pem ca.cert.pem \
+                > adblock2privoxy-nginx.chain.pem
+
+            # Server certificate and chain validity
+            openssl verify -CAfile ca.cert.pem adblock2privoxy-nginx.cert.pem
+            openssl verify -CAfile ca.cert.pem adblock2privoxy-nginx.chain.pem
+ADBLOCK2PRIVOXY_PKI
+"
+
+        if { ![file exists ${tls_cert_dir}/adblock2privoxy-nginx.cert.pem]
+            || ![file exists ${tls_cert_dir}/adblock2privoxy-nginx.key.pem.decrypted]
+            } {
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/ca.cert.pem \
+                    ${tls_cert_dir}
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/ca.key.pem \
+                    ${tls_cert_dir}
+            xinstall -m 0600 \
+                    ${tls_ca_dir}/passphrase.txt \
+                    ${tls_cert_dir}
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/adblock2privoxy-nginx.cert.pem \
+                    ${tls_cert_dir}
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/adblock2privoxy-nginx.chain.pem \
+                    ${tls_cert_dir}
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/adblock2privoxy-nginx.key.pem \
+                    ${tls_cert_dir}
+            xinstall -m 0600 \
+                    ${tls_ca_dir}/adblock2privoxy-nginx.key.pem.decrypted \
+                    ${tls_cert_dir}
+        }
+
+        if { ![file exists ${tls_cert_dir}/dhparam.pem]
+            } {
+            system -W ${tls_ca_dir} \
+                "sh <<ADBLOCK2PRIVOXY_DH
+                # DH params
+                openssl dhparam -out dhparam.pem 2048
+ADBLOCK2PRIVOXY_DH
+"
+
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/dhparam.pem \
+                    ${tls_cert_dir}
+        }
+
+        if { ![file exists ${tls_cert_dir}/openssl.cnf]
+            } {
+            xinstall -m 0664 \
+                    ${tls_ca_dir}/openssl.cnf \
+                    ${tls_cert_dir}
+        }
+    }
+
+    # check adblock2privoxy-nginx certificate validity
+    # 30 days = 2592000 seconds
+    post-activate {
+        set ab2p_cert_valid [exec /bin/sh -c \
+            "if openssl x509 -checkend 2592000 -noout \
+                -in \"${tls_cert_dir}/adblock2privoxy-nginx.cert.pem\" \
+                1>/dev/null 2>&1; \
+                    then echo 'WONT_EXPIRE'; \
+                    else echo 'WILL_EXPIRE'; fi"]
+        if {[string trim ${ab2p_cert_valid}] ne {WONT_EXPIRE}} {
+            ui_warn "Certificate ${tls_cert_dir}/adblock2privoxy-nginx.cert.pem expired or will expire within 30 days."
+        }
+    }
+
+    notes-append \
+       "Configure adblock2privoxy PKI by creating a\
+        certificate from e.g. Privoxy's certificate authority (CA). As sudo:
+
+        # Example, more likely use ${prefix}/etc/privoxy/CA
+        cp -R ${prefix}/etc/privoxy/ca.macports ca.adblock2privoxy \\
+          && cd ca.adblock2privoxy
+        cp ${tls_cert_dir}/openssl.cnf .
+        # edit openssl.cnf for your local organizationName, commonName, etc.
+
+        # initialize
+        touch index.txt
+        echo 1000 > serial
+
+        # Server certificates
+
+        # Server certificate encrypted key and decrypted key
+        openssl genpkey -out adblock2privoxy-nginx.key.pem \\
+            -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -aes256 \\
+            -pass file:passphrase.txt
+        openssl ec -in adblock2privoxy-nginx.key.pem \\
+           -passin file:passphrase.txt \\
+           -out adblock2privoxy-nginx.key.pem.decrypted
+        chmod go-rwx adblock2privoxy-nginx.key.pem.decrypted
+
+        # Server certificate CSR
+        openssl req -config openssl.cnf -new -sha256 \\
+             -extensions server_cert -key adblock2privoxy-nginx.key.pem \\
+             -passin file:passphrase.txt \\
+             -out adblock2privoxy-nginx.csr.pem -batch
+
+        # Server certificate (825 days maximum validity)
+        # https://support.apple.com/en-us/HT210176
+        openssl ca -config openssl.cnf -days 825 -notext -md sha256 \\
+            -extensions server_cert -in adblock2privoxy-nginx.csr.pem \\
+            -out adblock2privoxy-nginx.cert.pem \\
+            -passin file:passphrase.txt \\
+            -subj '/CN=adblock2privoxy-nginx' -batch
+
+        # Server certificate chain of trust
+        cat adblock2privoxy-nginx.cert.pem ca.cert.pem \\
+            > adblock2privoxy-nginx.chain.pem
+
+        # Server certificate and chain validity
+        openssl verify -CAfile ca.cert.pem adblock2privoxy-nginx.cert.pem
+        openssl verify -CAfile ca.cert.pem adblock2privoxy-nginx.chain.pem
+
+        # Install the adblock2privoxy PKI
+        cp -p ca.key.pem ca.cert.pem passphrase.txt \\
+            adblock2privoxy-nginx.cert.pem adblock2privoxy-nginx.chain.pem \\
+            adblock2privoxy-nginx.key.pem \\
+            adblock2privoxy-nginx.key.pem.decrypted \\
+            ${tls_cert_dir}
+"
+}
+
+default_variants-append \
+                    +https_inspection
+
+# default: empty flag
+set ab2p_use_http_flag \
+                    {}
+
+if { ![variant_isset "https_inspection"] } {
+    set ab2p_use_http_flag \
+                    {-u}
 }
 
 startupitem.create  yes
 startupitems \
     name            ${name} \
-    start           "\"( IFS=\$'\\\\n' ADBLOCK2PRIVOXY_BLOCKLIST=(\$(grep -v -e '^ *#' < \${prefix}/etc/${name}/adblock2privoxy_blocklist.txt \\\\
-\t\t| while read -r t; do if wget --max-redirect=0 -S --spider \$t 2>&1 | grep -q 'HTTP/1.1 200 OK'; then echo \$t; fi done)); \\\\
-\t/bin/test -f \\\"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\\\" \\\\
-\t&& \\\"\${prefix}/bin/adblock2privoxy\\\" -t \\\"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\\\" \\\\
-\t|| \\\"\${prefix}/bin/adblock2privoxy\\\" -p \\\"\${prefix}/etc/adblock2privoxy/privoxy\\\" \\\\
-\t\t-w \\\"\${prefix}/etc/adblock2privoxy/css\\\" \\\\
-\t\t-d 127.0.0.1:8119 \\\\
-\t\t\\\"\${ADBLOCK2PRIVOXY_BLOCKLIST\[@]}\\\" \\\\
-\t) && \\\"\${prefix}/bin/port\\\" reload privoxy\"" \
+    init            "ADBLOCK2PRIVOXY_CSS_SERVER=\"\${ADBLOCK2PRIVOXY_CSS_SERVER:-${adblock2privoxy_css_server}}\"" \
+    start [list     "( IFS=\$'\\n' ADBLOCK2PRIVOXY_BLOCKLIST=(\$(grep -v -e '^ *#' < \${prefix}/etc/${name}/adblock2privoxy_blocklist.txt \\" \
+                    "\t| while read -r t; do if \"\${prefix}/bin/wget\" --max-redirect=0 -S --spider \"\${t}\" 2>&1 | grep -q 'HTTP/1.1 200 OK'; then echo \"\${t}\"; fi done)); \\" \
+                    "/bin/test -f \"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\" \\" \
+                    "&& \"\${prefix}/bin/adblock2privoxy\" -t \"\${prefix}/etc/adblock2privoxy/privoxy/ab2p.task\" \\" \
+                    "|| \"\${prefix}/bin/adblock2privoxy\" -p \"\${prefix}/etc/adblock2privoxy/privoxy\" \\" \
+                    "\t-w \"\${prefix}/etc/adblock2privoxy/css\" \\" \
+                    "\t-d \${ADBLOCK2PRIVOXY_CSS_SERVER} ${ab2p_use_http_flag} \\" \
+                    "\t\"\${ADBLOCK2PRIVOXY_BLOCKLIST\[@]}\" \\" \
+                    ") && \"\${prefix}/bin/port\" reload privoxy" \
+    ] \
     stop            "\"/usr/bin/kill -SIGUSR1 \\\"\$(/usr/bin/pgrep -u root ${name})\\\" 2>/dev/null\"" \
     pidfile         none
 
 startupitems-append \
     name            ${name}-nginx \
-    init            "\"pidfile=\\\"\${prefix}/var/run/nginx/nginx-adblock2privoxy.pid\\\"\"" \
-    start           "\"\\\"\${prefix}/sbin/nginx\\\" \\\\
-\t\t-c \\\\
-\t\t\\\"\${prefix}/etc/${name}/nginx.conf\\\" \\\\
-\t\t-g \\\\
-\t\t\\\"daemon off;\\\"\"" \
-    stop            "\"if \[ -f \${pidfile} \]; then
-\t\t/usr/bin/kill \\\"\$(cat \${pidfile})\\\" \\\\
-\t\t\t&& /bin/rm -f \${pidfile} ;
-\telse
-\t\t/usr/bin/kill -SIGUSR1 \\\"\$(/usr/bin/pgrep -u root nginx)\\\" 2>/dev/null ;
-\tfi\""
+    init            "pidfile=\"\${prefix}/var/run/nginx/nginx-adblock2privoxy.pid\"" \
+    start [list     "\"\${prefix}/sbin/nginx\" \\" \
+                    "\t-c \\" \
+                    "\t\"\${prefix}/etc/${name}/nginx.conf\" \\" \
+                    "\t-g \"daemon off;\"" \
+    ] \
+    stop [list      "if \[ -f \"\${pidfile}\" \]; then" \
+                    "\t/usr/bin/kill \"\$(cat \"\${pidfile}\")\" \\" \
+                    "\t\t&& /bin/rm -f \"\${pidfile}\" ;" \
+                    "else" \
+                    "\t/usr/bin/kill -SIGUSR1 \"\$(/usr/bin/pgrep -u root nginx)\" 2>/dev/null ;" \
+                    "fi" \
+    ]
 
 post-activate {
     # org.macports.adblock2privoxy
@@ -161,6 +449,10 @@ post-activate {
 			<integer>30</integer>\\
 		</dict>\\
 	</array>\\
+	<key>StandardErrorPath</key>\\
+	<string>${prefix}/var/log/${name}.log</string>\\
+	<key>StandardOutPath</key>\\
+	<string>${prefix}/var/log/${name}.log</string>\\
 &|" \
         ${prefix}/etc/${startupitem.location}/org.macports.${name}/org.macports.${name}.plist
 
@@ -189,22 +481,36 @@ post-activate {
     }
 }
 
-notes "After initial installation, it is necessary to kickstart this launch daemon, \
+notes "\
+After initial installation, it is necessary to kickstart this launch daemon,\
 which does not run at load:
 
-sudo launchctl kickstart -k system/org.macports.adblock2privoxy
+  sudo launchctl kickstart -k system/org.macports.adblock2privoxy
 
-The blocklist URLs are specified in the file
+The blocklist URLs are specified in the file\
 ${prefix}/etc/${name}/adblock2privoxy_blocklist.txt.
 
 Example production run:
 
-adblock2privoxy -p ${prefix}/etc/adblock2privoxy/privoxy -w ${prefix}/etc/adblock2privoxy/css -d 127.0.0.1:8119 \\
-  \$(< ${prefix}/etc/${name}/adblock2privoxy_blocklist.txt)
+  adblock2privoxy -p ${prefix}/etc/adblock2privoxy/privoxy \\
+    -w ${prefix}/etc/adblock2privoxy/css -d ${adblock2privoxy_css_server} \\
+    \$(< ${prefix}/etc/${name}/adblock2privoxy_blocklist.txt)
 
 Update run:
 
-adblock2privoxy -t ${prefix}/etc/adblock2privoxy/privoxy/ab2p.task"
+  adblock2privoxy -t ${prefix}/etc/adblock2privoxy/privoxy/ab2p.task
+
+The CSS web server domain name or IP address is specified by the\
+environment variables (with default values):
+
+  \${ADBLOCK2PRIVOXY_CSS_SERVER:-${adblock2privoxy_css_server}}
+
+To change site-specific launchd environment variables,\
+use the launchd plist:
+
+  ${prefix}/share/${name}/private.myserver.launchctl-setenv.plist
+
+"
 
 if { [variant_isset "initialize_always"] } {
     if {[exists notes]} {
@@ -212,7 +518,7 @@ if { [variant_isset "initialize_always"] } {
         notes-append ""
     }
     notes-append \
-        "The variant +initialize_always is set, which initializes \
-        all configuration files. Please disable this variant for \
+        "The variant +initialize_always is set, which initializes\
+        all configuration files. Please disable this variant for\
         working deployments."
 }

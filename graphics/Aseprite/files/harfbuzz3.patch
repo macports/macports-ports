@@ -1,0 +1,137 @@
+Add support for harfbuzz 3's subsetting API. Combination of:
+https://github.com/aseprite/skia/commit/66684b17b382fdfe6cc3d18bbbe46658115e8628
+https://github.com/aseprite/skia/commit/51d83abcd24aae1b2e8e653f26af531c58b59a45
+--- skia/gn/skia.gni.orig	2020-03-11 07:02:08.000000000 -0500
++++ skia/gn/skia.gni	2021-12-31 02:18:10.000000000 -0600
+@@ -31,7 +31,6 @@
+   skia_include_multiframe_procs = false
+   skia_lex = false
+   skia_libgifcodec_path = "third_party/externals/libgifcodec"
+-  skia_pdf_subset_harfbuzz = false  # TODO: set skia_pdf_subset_harfbuzz to skia_use_harfbuzz.
+   skia_qt_path = getenv("QT_PATH")
+   skia_skqp_global_error_tolerance = 0
+   skia_tools_require_resources = false
+@@ -85,6 +84,10 @@
+ }
+ 
+ declare_args() {
++  skia_pdf_subset_harfbuzz = skia_use_harfbuzz
++}
++
++declare_args() {
+   skia_enable_atlas_text = is_skia_dev_build && skia_enable_gpu
+   skia_enable_fontmgr_android = skia_use_expat && skia_use_freetype
+   skia_enable_fontmgr_custom =
+--- skia/src/pdf/SkPDFSubsetFont.cpp.orig	2020-03-11 07:02:08.000000000 -0500
++++ skia/src/pdf/SkPDFSubsetFont.cpp	2021-12-31 02:18:10.000000000 -0600
+@@ -49,6 +49,37 @@
+                                 blob.release());
+ }
+ 
++template<typename...> using void_t = void;
++template<typename T, typename = void>
++struct SkPDFHarfBuzzSubset {
++    // This is the HarfBuzz 3.0 interface.
++    // hb_subset_flags_t does not exist in 2.0. It isn't dependent on T, so inline the value of
++    // HB_SUBSET_FLAGS_RETAIN_GIDS until 2.0 is no longer supported.
++    static HBFace Make(T input, hb_face_t* face) {
++        // TODO: When possible, check if a font is 'tricky' with FT_IS_TRICKY.
++        // If it isn't known if a font is 'tricky', retain the hints.
++        hb_subset_input_set_flags(input, 2/*HB_SUBSET_FLAGS_RETAIN_GIDS*/);
++        return HBFace(hb_subset_or_fail(face, input));
++    }
++};
++template<typename T>
++struct SkPDFHarfBuzzSubset<T, void_t<
++    decltype(hb_subset_input_set_retain_gids(std::declval<T>(), std::declval<bool>())),
++    decltype(hb_subset_input_set_drop_hints(std::declval<T>(), std::declval<bool>())),
++    decltype(hb_subset(std::declval<hb_face_t*>(), std::declval<T>()))
++    >>
++{
++    // This is the HarfBuzz 2.0 (non-public) interface, used if it exists.
++    // This code should be removed as soon as all users are migrated to the newer API.
++    static HBFace Make(T input, hb_face_t* face) {
++        hb_subset_input_set_retain_gids(input, true);
++        // TODO: When possible, check if a font is 'tricky' with FT_IS_TRICKY.
++        // If it isn't known if a font is 'tricky', retain the hints.
++        hb_subset_input_set_drop_hints(input, false);
++        return HBFace(hb_subset(face, input));
++    }
++};
++
+ static sk_sp<SkData> subset_harfbuzz(sk_sp<SkData> fontData,
+                                      const SkPDFGlyphUse& glyphUsage,
+                                      int ttcIndex) {
+@@ -71,11 +102,10 @@
+     hb_set_t* glyphs = hb_subset_input_glyph_set(input.get());
+     glyphUsage.getSetValues([&glyphs](unsigned gid) { hb_set_add(glyphs, gid);});
+ 
+-    hb_subset_input_set_retain_gids(input.get(), true);
+-    // TODO: When possible, check if a font is 'tricky' with FT_IS_TRICKY.
+-    // If it isn't known if a font is 'tricky', retain the hints.
+-    hb_subset_input_set_drop_hints(input.get(), false);
+-    HBFace subset(hb_subset(face.get(), input.get()));
++    HBFace subset = SkPDFHarfBuzzSubset<hb_subset_input_t*>::Make(input.get(), face.get());
++    if (!subset) {
++        return nullptr;
++    }
+     HBBlob result(hb_face_reference_blob(subset.get()));
+     return to_data(std::move(result));
+ }
+--- skia/third_party/harfbuzz/BUILD.gn.orig	2021-12-30 14:01:57.000000000 -0600
++++ skia/third_party/harfbuzz/BUILD.gn	2021-12-31 02:14:56.000000000 -0600
+@@ -14,6 +14,9 @@
+   system("harfbuzz") {
+     include_dirs = [ "/opt/local/include/harfbuzz" ]
+     libs = [ "harfbuzz" ]
++    if (skia_pdf_subset_harfbuzz) {
++      libs += [ "harfbuzz-subset" ]
++    }
+   }
+ } else {
+   third_party("harfbuzz") {
+@@ -26,9 +29,9 @@
+     defines = [
+       "HAVE_ICU",
+       "HAVE_ICU_BUILTIN",
+-      "HAVE_INTEL_ATOMIC_PRIMITIVES",
+       "HAVE_OT",
+       "HAVE_FREETYPE",
++      "HAVE_CONFIG_OVERRIDE_H",
+     ]
+     deps = [
+       "//third_party/icu",
+@@ -188,9 +191,10 @@
+       "$_src/hb-ot-shape-complex-myanmar-machine.hh",
+       "$_src/hb-ot-shape-complex-myanmar.cc",
+       "$_src/hb-ot-shape-complex-myanmar.hh",
++      "$_src/hb-ot-shape-complex-syllabic.cc",
++      "$_src/hb-ot-shape-complex-syllabic.hh",
+       "$_src/hb-ot-shape-complex-thai.cc",
+       "$_src/hb-ot-shape-complex-use-machine.hh",
+-      "$_src/hb-ot-shape-complex-use-table.cc",
+       "$_src/hb-ot-shape-complex-use.cc",
+       "$_src/hb-ot-shape-complex-use.hh",
+       "$_src/hb-ot-shape-complex-vowel-constraints.cc",
+@@ -248,6 +252,7 @@
+       "$_src/hb-utf.hh",
+       "$_src/hb-vector.hh",
+       "$_src/hb.hh",
++      "config-override.h",
+     ]
+   }
+ }
+--- /dev/null
++++ skia/third_party/harfbuzz/config-override.h	2021-12-31 02:18:10.000000000 -0600
+@@ -0,0 +1,11 @@
++/*
++ * Adds a mutex implementation based on c++ mutex to harfbuzz.
++ */
++#include <mutex>
++
++using hb_mutex_impl_t = std::mutex;
++#define HB_MUTEX_IMPL_INIT      UNUSED
++#define hb_mutex_impl_init(M)   HB_STMT_START { new (M) hb_mutex_impl_t;  } HB_STMT_END
++#define hb_mutex_impl_lock(M)   (M)->lock ()
++#define hb_mutex_impl_unlock(M) (M)->unlock ()
++#define hb_mutex_impl_finish(M) HB_STMT_START { (M)->~hb_mutex_impl_t(); } HB_STMT_END

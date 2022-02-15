@@ -109,6 +109,11 @@ array set newlib.versions_info {
         sha256  fb4fa1cc21e9060719208300a61420e4089d6de6ef59cf533b57fe74801d102a \
         size    17958952
     }}
+    4.1.0 {gz {
+        rmd160  9fa5c18bad59e99e6e98062e223c2dd9a065072a \
+        sha256  f296e372f51324224d387cc116dc37a6bd397198756746f93a2b02e9a5d40154 \
+        size    18648429
+    }}
 }
 
 proc crossgcc.setup {target version} {

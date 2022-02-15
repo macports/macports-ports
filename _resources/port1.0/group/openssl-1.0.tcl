@@ -5,6 +5,8 @@
 #
 # This port group handles setting ports up to build against specific openssl versions
 
+PortGroup compiler_wrapper 1.0
+
 namespace eval openssl { }
 
 options openssl.branch
@@ -21,9 +23,11 @@ default openssl_cache_branch_nodot ""
 default openssl_cache_depends      ""
 default openssl_cache_incdir       ""
 default openssl_cache_libdir       ""
+default openssl_cache_cpath        ""
 default openssl_cache_cmake_flags  ""
 default openssl_cache_configure    ""
 default openssl_cache_env_vars     [list ]
+default openssl_cache_compwrap     ""
 
 proc openssl::default_branch {} {
     # NOTE - Whenever the default branch is bumped, the revision
@@ -137,8 +141,11 @@ proc openssl::remove_phase_env_var { var } {
 }
 
 proc openssl::configure_build {} {
+    global prefix
     global openssl_cache_branch_nodot openssl_cache_depends openssl_cache_env_vars
-    global openssl_cache_incdir openssl_cache_libdir openssl_cache_cmake_flags openssl_cache_configure
+    global openssl_cache_incdir openssl_cache_libdir openssl_cache_cmake_flags
+    global openssl_cache_configure openssl_cache_cpath
+    global openssl_cache_compwrap
 
     if { [openssl::is_enabled] } {
 
@@ -180,6 +187,7 @@ proc openssl::configure_build {} {
                             if { ${openssl_cache_incdir} ne "" } {
                                 configure.cppflags-delete -I${openssl_cache_incdir}
                                 configure.cflags-delete   -I${openssl_cache_incdir}
+                                configure.cxxflags-delete -I${openssl_cache_incdir}
                             }
                             if { ${openssl_cache_libdir} ne "" } {
                                 configure.ldflags-prepend  -L${openssl_cache_libdir}
@@ -188,7 +196,16 @@ proc openssl::configure_build {} {
                             set openssl_cache_libdir [openssl::lib_dir]
                             configure.cppflags-prepend -I${openssl_cache_incdir}
                             configure.cflags-prepend   -I${openssl_cache_incdir}
+                            configure.cxxflags-prepend -I${openssl_cache_incdir}
                             configure.ldflags-prepend  -L${openssl_cache_libdir}
+                            # Look in specific install areas before the main prefix
+                            configure.cppflags-replace -I${prefix}/include -isystem${prefix}/include
+                            # prepend to CPATH
+                            if { ${openssl_cache_cpath} ne "" } {
+                                compiler.cpath-delete ${openssl_cache_cpath}
+                            }
+                            set openssl_cache_cpath [openssl::include_dir]
+                            compiler.cpath-prepend ${openssl_cache_cpath}
                         }
                         cmake {
                             ui_debug "openssl: -> Setting openssl cmake configuration"
@@ -206,6 +223,17 @@ proc openssl::configure_build {} {
                                                           ]
                             foreach flag ${openssl_cache_cmake_flags} {
                                 configure.args-append ${flag}
+                            }
+                        }
+                        compiler_wrap {
+                            ui_debug "openssl: -> Setting openssl compiler wrap configuration"
+                            if { ${openssl_cache_compwrap} eq "" } {
+                                set openssl_cache_compwrap "done"
+                                pre-configure {
+                                    compwrap.compiler_pre_flags-append -I[openssl::include_dir]
+                                    configure.cc  [compwrap::wrap_compiler cc]
+                                    configure.cxx [compwrap::wrap_compiler cxx]
+                                }
                             }
                         }
                         default {

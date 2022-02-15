@@ -116,7 +116,7 @@ proc mpiutil_add_depends {subport cname} {
 }
 
 proc mpiutil_add_depends_build {subport cname} {
-    global os.major
+    global os.major os.arch
 
     set add_clang90 no
 
@@ -125,7 +125,10 @@ proc mpiutil_add_depends_build {subport cname} {
         # dependency. This provides a modern version of 'as', allowing the port
         # to build successfully.
         if {[string match "gcc*" ${cname}]} {
-            set add_clang90 yes
+            # Exclude PPC builds, however
+            if {${os.arch} ne "powerpc"} {
+                set add_clang90 yes
+            }
         }
     }
 
