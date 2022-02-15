@@ -1,0 +1,2233 @@
+From 57165fad01329eebbc255ba61bc33bb56af5ce6a Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sat, 18 Sep 2021 17:08:42 +0100
+Subject: [PATCH 01/15] Darwin, crts: Build Darwin10 unwinder shim as a
+ library.
+
+We have a small unwinder shim that is only used for Darwin10
+(and only then in quite specific cases).  To avoid linking
+this code for every executable or DSO, we can present the crt
+as a convenience library (rather than a .o file).
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+gcc/ChangeLog:
+
+	* config/darwin.h (LINK_COMMAND_SPEC_A): Use Darwin10
+	unwinder shim as a convenience library.
+
+libgcc/ChangeLog:
+
+	* config.host: Use convenience library for Darwin10
+	unwinder shim.
+	* config/t-darwin: Build Darwin10 unwinder shim as a
+	convenience library.
+
+(cherry picked from commit 873854387865d18484bd0d39324773cd1e76df85)
+---
+ gcc/config/darwin.h    | 2 +-
+ libgcc/config.host     | 2 +-
+ libgcc/config/t-darwin | 6 ++++++
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index 02b04c8457b..e610469bbe5 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -230,7 +230,7 @@ extern GTY(()) int darwin_ms_struct;
+       %{%:sanitize(address): -lasan } \
+       %{%:sanitize(undefined): -lubsan } \
+       %(link_ssp) \
+-      %:version-compare(>< 10.6 10.7 mmacosx-version-min= -ld10-uwfef.o) \
++      %:version-compare(>< 10.6 10.7 mmacosx-version-min= -ld10-uwfef) \
+       %(link_gcc_c_sequence) \
+     }}}\
+     %{!nostdlib:%{!r:%{!nostartfiles:%E}}} %{T*} %{F*} "\
+diff --git libgcc/config.host libgcc/config.host
+index c529cc40f0c..05a002cf21d 100644
+--- libgcc/config.host
++++ libgcc/config.host
+@@ -218,7 +218,7 @@ case ${host} in
+ *-*-darwin*)
+   asm_hidden_op=.private_extern
+   tmake_file="$tmake_file t-darwin ${cpu_type}/t-darwin t-libgcc-pic t-slibgcc-darwin"
+-  extra_parts="crt3.o d10-uwfef.o crttms.o crttme.o"
++  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o"
+   ;;
+ *-*-dragonfly*)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip"
+diff --git libgcc/config/t-darwin libgcc/config/t-darwin
+index 3b5e3428958..4b6317b5d85 100644
+--- libgcc/config/t-darwin
++++ libgcc/config/t-darwin
+@@ -18,3 +18,9 @@ LIB2ADDEH = $(srcdir)/unwind-dw2.c $(srcdir)/config/unwind-dw2-fde-darwin.c \
+ # Patch to __Unwind_Find_Enclosing_Function for Darwin10.
+ d10-uwfef.o: $(srcdir)/config/darwin10-unwind-find-enc-func.c
+ 	$(crt_compile) -mmacosx-version-min=10.6 -c $<
++
++# Using this crt as a library means that it will not be added to an exe
++# (or module) unless needed.
++libd10-uwfef.a: d10-uwfef.o
++	$(AR_CREATE_FOR_TARGET) $@ d10-uwfef.o
++	$(RANLIB_FOR_TARGET) $@
+-- 
+2.35.1
+
+
+From 48985ecedbc6b5278aa320c4ffab6f23855a0d26 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Fri, 11 Dec 2020 00:29:42 +0000
+Subject: [PATCH 02/15] Darwin, PPC : Fix R13 for PPC64.
+
+We have a somewhat unusual situation in that for PPC64, R13 is
+both reserved and callee-saved (it is used internally by the
+pthreads implementation to contain pthread_self).
+
+So add R13 to the fixed regs, but also keep it in the callee-
+saved set.
+
+gcc/ChangeLog:
+
+	* config/rs6000/darwin.h (FIXED_R13): Add for PPC64.
+	(FIRST_SAVED_GP_REGNO): Save from R13 even when it is one
+	of the fixed regs.
+
+(cherry picked from commit b12d6e79899fd27833c53ffc3c973538244f62e1)
+---
+ gcc/config/rs6000/darwin.h | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git gcc/config/rs6000/darwin.h gcc/config/rs6000/darwin.h
+index ce27508afcb..627ca805498 100644
+--- gcc/config/rs6000/darwin.h
++++ gcc/config/rs6000/darwin.h
+@@ -203,7 +203,7 @@
+ 
+ /* Make both r2 and r13 available for allocation.  */
+ #define FIXED_R2 0
+-#define FIXED_R13 0
++#define FIXED_R13 TARGET_64BIT
+ 
+ /* Base register for access to local variables of the function.  */
+ 
+@@ -213,6 +213,9 @@
+ #undef  RS6000_PIC_OFFSET_TABLE_REGNUM
+ #define RS6000_PIC_OFFSET_TABLE_REGNUM 31
+ 
++#undef FIRST_SAVED_GP_REGNO
++#define FIRST_SAVED_GP_REGNO 13
++
+ /* Darwin's stack must remain 16-byte aligned for both 32 and 64 bit
+    ABIs.  */
+ 
+-- 
+2.35.1
+
+
+From 0e5643fd150df594c29f628cd79f805dc6faa557 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sat, 25 Aug 2018 13:58:02 +0100
+Subject: [PATCH 03/15] configury : Fix LEB128 support for non-GNU assemblers.
+
+The current configuration test for LEB128 support in the assembler is
+(a) specific to GNU assemblers and (b) only checks that the directives
+are accepted, not that they give correct output.
+
+The patch extends the asm test to cover one failure case present in
+assemblers based off an older version of GAS (where a 64 bit value with
+the MSB set presented to a .uleb128 directive causes a fail).
+
+The test is now generalized such that it does not make use of any
+specific test for assembler source/version, but checks that the output
+is as expected.  We cater for scanning the object with objdump (either
+binutils or LLVM) or Darwin otool.
+
+gcc/ChangeLog:
+
+	* configure.ac (check leb128 support): Check that assemblers both
+	accept the LEB128 directives and also give the expected output.
+	Add a test for uleb128 with the MSB set for a 64 bit value.
+	* configure: Regenerated.
+---
+ gcc/configure    | 36 ++++++++++++++++++++----------------
+ gcc/configure.ac | 48 ++++++++++++++++++++++++++----------------------
+ 2 files changed, 46 insertions(+), 38 deletions(-)
+
+diff --git gcc/configure gcc/configure
+index 8fe9c91fd7c..a26613f1703 100755
+--- gcc/configure
++++ gcc/configure
+@@ -23760,6 +23760,8 @@ _ACEOF
+ 
+ 
+ # Check if we have .[us]leb128, and support symbol arithmetic with it.
++# Older versions of GAS and some non-GNU assemblers, have a bugs handling
++# these directives, even when they appear to accept them.
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking assembler for .sleb128 and .uleb128" >&5
+ $as_echo_n "checking assembler for .sleb128 and .uleb128... " >&6; }
+ if ${gcc_cv_as_leb128+:} false; then :
+@@ -23777,7 +23779,9 @@ fi
+ L1:
+ 	.uleb128 1280
+ 	.sleb128 -1010
+-L2:' > conftest.s
++L2:
++	.uleb128 0x8000000000000000
++' > conftest.s
+     if { ac_try='$gcc_cv_as $gcc_cv_as_flags  -o conftest.o conftest.s >&5'
+   { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+   (eval $ac_try) 2>&5
+@@ -23785,22 +23789,22 @@ L2:' > conftest.s
+   $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+   test $ac_status = 0; }; }
+     then
+-	# GAS versions before 2.11 do not support uleb128,
+-  # despite appearing to.
+-  # ??? There exists an elf-specific test that will crash
+-  # the assembler.  Perhaps it's better to figure out whether
+-  # arbitrary sections are supported and try the test.
+-  as_ver=`$gcc_cv_as --version 2>/dev/null | sed 1q`
+-  if echo "$as_ver" | grep GNU > /dev/null; then
+-    as_vers=`echo $as_ver | sed -n \
+-	-e 's,^.*[	 ]\([0-9][0-9]*\.[0-9][0-9]*.*\)$,\1,p'`
+-    as_major=`expr "$as_vers" : '\([0-9]*\)'`
+-    as_minor=`expr "$as_vers" : '[0-9]*\.\([0-9]*\)'`
+-    if test $as_major -eq 2 && test $as_minor -lt 11
+-    then :
+-    else gcc_cv_as_leb128=yes
+-    fi
++
++if test "x$gcc_cv_objdump" != x; then
++  if $gcc_cv_objdump -s conftest.o 2>/dev/null \
++     | grep '04800a8e 78808080 80808080 808001' >/dev/null; then
++    gcc_cv_as_leb128=yes
++  fi
++elif test "x$gcc_cv_otool" != x; then
++  if $gcc_cv_otool -d conftest.o 2>/dev/null \
++     | grep '04 80 0a 8e 78 80 80 80 80 80 80 80 80 80 01' >/dev/null; then
++    gcc_cv_as_leb128=yes
+   fi
++else
++  # play safe, assume the assembler is broken.
++  :
++fi
++
+     else
+       echo "configure: failed program was" >&5
+       cat conftest.s >&5
+diff --git gcc/configure.ac gcc/configure.ac
+index 84dceb8074a..35d549607cc 100644
+--- gcc/configure.ac
++++ gcc/configure.ac
+@@ -2974,34 +2974,38 @@ AC_MSG_RESULT($gcc_cv_ld_ro_rw_mix)
+ gcc_AC_INITFINI_ARRAY
+ 
+ # Check if we have .[us]leb128, and support symbol arithmetic with it.
++# Older versions of GAS and some non-GNU assemblers, have a bugs handling
++# these directives, even when they appear to accept them.
+ gcc_GAS_CHECK_FEATURE([.sleb128 and .uleb128], gcc_cv_as_leb128,
+-  [elf,2,11,0],,
++ [elf,2,11,0],,
+ [	.data
+ 	.uleb128 L2 - L1
+ L1:
+ 	.uleb128 1280
+ 	.sleb128 -1010
+-L2:],
+-[[# GAS versions before 2.11 do not support uleb128,
+-  # despite appearing to.
+-  # ??? There exists an elf-specific test that will crash
+-  # the assembler.  Perhaps it's better to figure out whether
+-  # arbitrary sections are supported and try the test.
+-  as_ver=`$gcc_cv_as --version 2>/dev/null | sed 1q`
+-  if echo "$as_ver" | grep GNU > /dev/null; then
+-    as_vers=`echo $as_ver | sed -n \
+-	-e 's,^.*[	 ]\([0-9][0-9]*\.[0-9][0-9]*.*\)$,\1,p'`
+-    as_major=`expr "$as_vers" : '\([0-9]*\)'`
+-    as_minor=`expr "$as_vers" : '[0-9]*\.\([0-9]*\)'`
+-    if test $as_major -eq 2 && test $as_minor -lt 11
+-    then :
+-    else gcc_cv_as_leb128=yes
+-    fi
+-  fi]],
+-  [AC_DEFINE(HAVE_AS_LEB128, 1,
+-    [Define if your assembler supports .sleb128 and .uleb128.])],
+-  [AC_DEFINE(HAVE_AS_LEB128, 0,
+-    [Define if your assembler supports .sleb128 and .uleb128.])])
++L2:
++	.uleb128 0x8000000000000000
++],
++[[
++if test "x$gcc_cv_objdump" != x; then
++  if $gcc_cv_objdump -s conftest.o 2>/dev/null \
++     | grep '04800a8e 78808080 80808080 808001' >/dev/null; then
++    gcc_cv_as_leb128=yes
++  fi
++elif test "x$gcc_cv_otool" != x; then
++  if $gcc_cv_otool -d conftest.o 2>/dev/null \
++     | grep '04 80 0a 8e 78 80 80 80 80 80 80 80 80 80 01' >/dev/null; then
++    gcc_cv_as_leb128=yes
++  fi
++else
++  # play safe, assume the assembler is broken.
++  :
++fi
++]],
++ [AC_DEFINE(HAVE_AS_LEB128, 1,
++   [Define if your assembler supports .sleb128 and .uleb128.])],
++ [AC_DEFINE(HAVE_AS_LEB128, 0,
++   [Define if your assembler supports .sleb128 and .uleb128.])])
+ 
+ # Determine if an .eh_frame section is read-only.
+ gcc_fn_eh_frame_ro () {
+-- 
+2.35.1
+
+
+From d5ac788a63a3a93475baede021584cc696810b37 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 4 Jul 2021 17:56:05 +0100
+Subject: [PATCH 04/15] Darwin, libcc1: Handle hosts with mdynamic-no-pic
+ support.
+
+The default for building host-side binaries for mdynamic-no-pic
+hosts is to enable this.  However, it is not compatible with
+dynamic libraries, so must be switched off for libcc1.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+libcc1/ChangeLog:
+
+	* Makefile.am: Switch mdynamic-no-pic to fPIC.
+	* Makefile.in: Regenerated.
+
+(cherry picked from commit b240450b630da511fadda98bba4862033ff56950)
+---
+ libcc1/Makefile.am | 1 +
+ libcc1/Makefile.in | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git libcc1/Makefile.am libcc1/Makefile.am
+index fe7b64cbc6f..3d3230e2ebb 100644
+--- libcc1/Makefile.am
++++ libcc1/Makefile.am
+@@ -28,6 +28,7 @@ AM_CXXFLAGS = $(WARN_FLAGS) $(WERROR) $(visibility)
+ if DARWIN_DYNAMIC_LOOKUP
+ AM_CXXFLAGS += -Wl,-undefined,dynamic_lookup
+ endif
++override CXXFLAGS := $(subst -mdynamic-no-pic,-fPIC,$(CXXFLAGS))
+ override CXXFLAGS := $(filter-out -fsanitize=address,$(CXXFLAGS))
+ override LDFLAGS := $(filter-out -fsanitize=address,$(LDFLAGS))
+ # Can be simplified when libiberty becomes a normal convenience library.
+diff --git libcc1/Makefile.in libcc1/Makefile.in
+index 2def836cb06..4276894062d 100644
+--- libcc1/Makefile.in
++++ libcc1/Makefile.in
+@@ -802,6 +802,7 @@ uninstall-am: uninstall-cc1libLTLIBRARIES uninstall-pluginLTLIBRARIES
+ 
+ .PRECIOUS: Makefile
+ 
++override CXXFLAGS := $(subst -mdynamic-no-pic,-fPIC,$(CXXFLAGS))
+ override CXXFLAGS := $(filter-out -fsanitize=address,$(CXXFLAGS))
+ override LDFLAGS := $(filter-out -fsanitize=address,$(LDFLAGS))
+ 
+-- 
+2.35.1
+
+
+From 8189ebced722c98263d5d7e94ddf22f1018bdebf Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Wed, 6 Oct 2021 14:58:33 +0100
+Subject: [PATCH 05/15] collect2: Fix missing cleanups.
+
+The code that checks to see if objects have LTO content via
+simple-object was not releasing resources, fixed thus.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+gcc/ChangeLog:
+
+	* collect2.c (is_lto_object_file): Release simple-object
+	resources, close files.
+
+(cherry picked from commit 43ae43f654749d291d871ca6ef7c96ea16580fad)
+---
+ gcc/collect2.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git gcc/collect2.c gcc/collect2.c
+index f8a5ce45994..f71016807ea 100644
+--- gcc/collect2.c
++++ gcc/collect2.c
+@@ -2301,10 +2301,15 @@ is_lto_object_file (const char *prog_name)
+ 							LTO_SEGMENT_NAME,
+ 							&errmsg, &err);
+   if (!inobj)
+-    return false;
++    {
++      close (infd);
++      return false;
++    }
+ 
+   errmsg = simple_object_find_sections (inobj, has_lto_section,
+ 					(void *) &found, &err);
++  simple_object_release_read (inobj);
++  close (infd);
+   if (! errmsg && found)
+     return true;
+ 
+-- 
+2.35.1
+
+
+From 01ce6d8e1569defda1b8d8382bcfe90256e4adb9 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Thu, 4 Nov 2021 09:37:14 +0000
+Subject: [PATCH 06/15] IPA: Provide a mechanism to register static DTORs via
+ cxa_atexit.
+
+For at least one target (Darwin) the platform convention is to
+register static destructors (i.e. __attribute__((destructor)))
+with __cxa_atexit rather than placing them into a list that is
+run by some other mechanism.
+
+This patch provides a target hook that allows a target to opt
+into this and handling for the process in ipa_cdtor_merge ().
+
+When the mode is enabled (dtors_from_cxa_atexit is set) we:
+
+ * Generate new CTORs to register static destructors with
+   __cxa_atexit and add them to the existing list of CTORs;
+   we then process the revised CTORs list.
+
+ * We sort the DTORs into priority and then TU order, this
+   means that they are registered in that order with
+   __cxa_atexit () and therefore will be run in the reverse
+   order.
+
+ * Likewise, CTORs are sorted into priority and then TU order,
+   which means that they will run in that order.
+
+This matches the behavior of using init/fini (or
+mod_init_func/mod_term_func) sections.
+
+This also fixes a bug where Fortran needs a DTOR to be run to
+close IO.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+	PR fortran/102992
+
+gcc/ChangeLog:
+
+	* config/darwin.h (TARGET_DTORS_FROM_CXA_ATEXIT): New.
+	* doc/tm.texi: Regenerated.
+	* doc/tm.texi.in: Add TARGET_DTORS_FROM_CXA_ATEXIT hook.
+	* ipa.c (cgraph_build_static_cdtor_1): Return the built
+	function decl.
+	(build_cxa_atexit_decl): New.
+	(build_dso_handle_decl): New.
+	(build_cxa_dtor_registrations): New.
+	(compare_cdtor_tu_order): New.
+	(build_cxa_atexit_fns): New.
+	(ipa_cdtor_merge): If dtors_from_cxa_atexit is set,
+	process the DTORs/CTORs accordingly.
+	(pass_ipa_cdtor_merge::gate): Also run if
+	dtors_from_cxa_atexit is set.
+	* target.def (dtors_from_cxa_atexit): New hook.
+
+(cherry picked from commit fabe8cc41e9b01913e2016861237d1d99d7567bf)
+---
+ gcc/config/darwin.h |   5 ++
+ gcc/doc/tm.texi     |   8 ++
+ gcc/doc/tm.texi.in  |   2 +
+ gcc/ipa.c           | 200 +++++++++++++++++++++++++++++++++++++++++++-
+ gcc/target.def      |  10 +++
+ 5 files changed, 221 insertions(+), 4 deletions(-)
+
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index e610469bbe5..6256c33bbd0 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -54,6 +54,11 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ 
+ #define DO_GLOBAL_DTORS_BODY
+ 
++/* Register static destructors to run from __cxa_atexit instead of putting
++   them into a .mod_term_funcs section.  */
++
++#define TARGET_DTORS_FROM_CXA_ATEXIT true
++
+ /* The string value for __SIZE_TYPE__.  */
+ 
+ #ifndef SIZE_TYPE
+diff --git gcc/doc/tm.texi gcc/doc/tm.texi
+index fcb7245e95c..0adf4722188 100644
+--- gcc/doc/tm.texi
++++ gcc/doc/tm.texi
+@@ -9122,6 +9122,14 @@ collecting constructors and destructors to be run at startup and exit.
+ It is false if we must use @command{collect2}.
+ @end deftypevr
+ 
++@deftypevr {Target Hook} bool TARGET_DTORS_FROM_CXA_ATEXIT
++This value is true if the target wants destructors to be queued to be
++run from __cxa_atexit.  If this is the case then, for each priority level,
++a new constructor will be entered that registers the destructors for that
++level with __cxa_atexit (and there will be no destructors emitted).
++It is false the method implied by @code{have_ctors_dtors} is used.
++@end deftypevr
++
+ @deftypefn {Target Hook} void TARGET_ASM_CONSTRUCTOR (rtx @var{symbol}, int @var{priority})
+ If defined, a function that outputs assembler code to arrange to call
+ the function referenced by @var{symbol} at initialization time.
+diff --git gcc/doc/tm.texi.in gcc/doc/tm.texi.in
+index c17209daa51..ff4de7e1fa5 100644
+--- gcc/doc/tm.texi.in
++++ gcc/doc/tm.texi.in
+@@ -6085,6 +6085,8 @@ encountering an @code{init_priority} attribute.
+ 
+ @hook TARGET_HAVE_CTORS_DTORS
+ 
++@hook TARGET_DTORS_FROM_CXA_ATEXIT
++
+ @hook TARGET_ASM_CONSTRUCTOR
+ 
+ @hook TARGET_ASM_DESTRUCTOR
+diff --git gcc/ipa.c gcc/ipa.c
+index 55481931668..dd4e3531281 100644
+--- gcc/ipa.c
++++ gcc/ipa.c
+@@ -834,7 +834,7 @@ ipa_discover_variable_flags (void)
+    FINAL specify whether the externally visible name for collect2 should
+    be produced. */
+ 
+-static void
++static tree
+ cgraph_build_static_cdtor_1 (char which, tree body, int priority, bool final,
+ 			     tree optimization,
+ 			     tree target)
+@@ -913,6 +913,7 @@ cgraph_build_static_cdtor_1 (char which, tree body, int priority, bool final,
+ 
+   set_cfun (NULL);
+   current_function_decl = NULL;
++  return decl;
+ }
+ 
+ /* Generate and emit a static constructor or destructor.  WHICH must
+@@ -1019,6 +1020,124 @@ build_cdtor (bool ctor_p, const vec<tree> &cdtors)
+     }
+ }
+ 
++/* Helper functions for build_cxa_dtor_registrations ().
++   Build a decl for __cxa_atexit ().  */
++
++static tree
++build_cxa_atexit_decl ()
++{
++  /* The parameter to "__cxa_atexit" is "void (*)(void *)".  */
++  tree fn_type = build_function_type_list (void_type_node,
++					   ptr_type_node, NULL_TREE);
++  tree fn_ptr_type = build_pointer_type (fn_type);
++  /* The declaration for `__cxa_atexit' is:
++     int __cxa_atexit (void (*)(void *), void *, void *).  */
++  const char *name = "__cxa_atexit";
++  tree cxa_name = get_identifier (name);
++  fn_type = build_function_type_list (integer_type_node, fn_ptr_type,
++				      ptr_type_node, ptr_type_node, NULL_TREE);
++  tree atexit_fndecl = build_decl (BUILTINS_LOCATION, FUNCTION_DECL,
++				   cxa_name, fn_type);
++  SET_DECL_ASSEMBLER_NAME (atexit_fndecl, cxa_name);
++  DECL_VISIBILITY (atexit_fndecl) = VISIBILITY_DEFAULT;
++  DECL_VISIBILITY_SPECIFIED (atexit_fndecl) = true;
++  set_call_expr_flags (atexit_fndecl, ECF_LEAF | ECF_NOTHROW);
++  TREE_PUBLIC (atexit_fndecl) = true;
++  DECL_EXTERNAL (atexit_fndecl) = true;
++  DECL_ARTIFICIAL (atexit_fndecl) = true;
++  return atexit_fndecl;
++}
++
++/* Build a decl for __dso_handle.  */
++
++static tree
++build_dso_handle_decl ()
++{
++  /* Declare the __dso_handle variable.  */
++  tree dso_handle_decl = build_decl (UNKNOWN_LOCATION, VAR_DECL,
++				     get_identifier ("__dso_handle"),
++				     ptr_type_node);
++  TREE_PUBLIC (dso_handle_decl) = true;
++  DECL_EXTERNAL (dso_handle_decl) = true;
++  DECL_ARTIFICIAL (dso_handle_decl) = true;
++#ifdef HAVE_GAS_HIDDEN
++  if (dso_handle_decl != error_mark_node)
++    {
++      DECL_VISIBILITY (dso_handle_decl) = VISIBILITY_HIDDEN;
++      DECL_VISIBILITY_SPECIFIED (dso_handle_decl) = true;
++    }
++#endif
++  return dso_handle_decl;
++}
++
++/*  This builds one or more constructor functions that register DTORs with
++    __cxa_atexit ().  Within a priority level, DTORs are registered in TU
++    order - which means that they will run in reverse TU order from cxa_atexit.
++    This is the same behavior as using a .fini / .mod_term_funcs section.
++    As the functions are built, they are appended to the CTORs vector.  */
++
++static void
++build_cxa_dtor_registrations (const vec<tree> &dtors, vec<tree> *ctors)
++{
++  size_t i,j;
++  size_t len = dtors.length ();
++
++  location_t sav_loc = input_location;
++  input_location = UNKNOWN_LOCATION;
++
++  tree atexit_fndecl = build_cxa_atexit_decl ();
++  tree dso_handle_decl = build_dso_handle_decl ();
++
++  /* We want &__dso_handle.  */
++  tree dso_ptr = build1_loc (UNKNOWN_LOCATION, ADDR_EXPR,
++			     ptr_type_node, dso_handle_decl);
++
++  i = 0;
++  while (i < len)
++    {
++      priority_type priority = 0;
++      tree body = NULL_TREE;
++      j = i;
++      do
++	{
++	  priority_type p;
++	  tree fn = dtors[j];
++	  p = DECL_FINI_PRIORITY (fn);
++	  if (j == i)
++	    priority = p;
++	  else if (p != priority)
++	    break;
++	  j++;
++	}
++      while (j < len);
++
++      /* Find the next batch of destructors with the same initialization
++	 priority.  */
++      for (;i < j; i++)
++	{
++	  tree fn = dtors[i];
++	  DECL_STATIC_DESTRUCTOR (fn) = 0;
++	  tree dtor_ptr = build1_loc (UNKNOWN_LOCATION, ADDR_EXPR,
++				      ptr_type_node, fn);
++	  tree call_cxa_atexit
++	    = build_call_expr_loc (UNKNOWN_LOCATION, atexit_fndecl, 3,
++				   dtor_ptr, null_pointer_node, dso_ptr);
++	  TREE_SIDE_EFFECTS (call_cxa_atexit) = 1;
++	  append_to_statement_list (call_cxa_atexit, &body);
++	}
++
++      gcc_assert (body != NULL_TREE);
++      /* Generate a function to register the DTORs at this priority.  */
++      tree new_ctor
++	= cgraph_build_static_cdtor_1 ('I', body, priority, true,
++				       DECL_FUNCTION_SPECIFIC_OPTIMIZATION (dtors[0]),
++				       DECL_FUNCTION_SPECIFIC_TARGET (dtors[0]));
++      /* Add this to the list of ctors.  */
++      ctors->safe_push (new_ctor);
++    }
++  input_location = sav_loc;
++}
++
+ /* Comparison function for qsort.  P1 and P2 are actually of type
+    "tree *" and point to static constructors.  DECL_INIT_PRIORITY is
+    used to determine the sort order.  */
+@@ -1068,7 +1187,46 @@ compare_dtor (const void *p1, const void *p2)
+   else if (priority1 > priority2)
+     return 1;
+   else
+-    /* Ensure a stable sort.  */
++    /* Ensure a stable sort - into TU order.  */
++    return DECL_UID (f1) - DECL_UID (f2);
++}
++
++/* Comparison function for qsort.  P1 and P2 are of type "tree *" and point to
++   a pair of static constructors or destructors.  We first sort on the basis of
++   priority and then into TU order (on the strict assumption that DECL_UIDs are
++   ordered in the same way as the original functions).  ???: this seems quite
++   fragile. */
++
++static int
++compare_cdtor_tu_order (const void *p1, const void *p2)
++{
++  tree f1;
++  tree f2;
++  int priority1;
++  int priority2;
++
++  f1 = *(const tree *)p1;
++  f2 = *(const tree *)p2;
++  /* We process the DTORs first, and then remove their flag, so this order
++     allows for functions that are declared as both CTOR and DTOR.  */
++  if (DECL_STATIC_DESTRUCTOR (f1))
++    {
++      gcc_checking_assert (DECL_STATIC_DESTRUCTOR (f2));
++      priority1 = DECL_FINI_PRIORITY (f1);
++      priority2 = DECL_FINI_PRIORITY (f2);
++    }
++  else
++    {
++      priority1 = DECL_INIT_PRIORITY (f1);
++      priority2 = DECL_INIT_PRIORITY (f2);
++    }
++
++  if (priority1 < priority2)
++    return -1;
++  else if (priority1 > priority2)
++    return 1;
++  else
++    /* For equal priority, sort into the order of definition in the TU.  */
+     return DECL_UID (f1) - DECL_UID (f2);
+ }
+ 
+@@ -1094,6 +1252,37 @@ build_cdtor_fns (vec<tree> *ctors, vec<tree> *dtors)
+     }
+ }
+ 
++/* Generate new CTORs to register static destructors with __cxa_atexit and add
++   them to the existing list of CTORs; we then process the revised CTORs list.
++
++   We sort the DTORs into priority and then TU order, this means that they are
++   registered in that order with __cxa_atexit () and therefore will be run in
++   the reverse order.
++
++   Likewise, CTORs are sorted into priority and then TU order, which means that
++   they will run in that order.
++
++   This matches the behavior of using init/fini or mod_init_func/mod_term_func
++   sections.  */
++
++static void
++build_cxa_atexit_fns (vec<tree> *ctors, vec<tree> *dtors)
++{
++  if (!dtors->is_empty ())
++    {
++      gcc_assert (targetm.dtors_from_cxa_atexit);
++      dtors->qsort (compare_cdtor_tu_order);
++      build_cxa_dtor_registrations (*dtors, ctors);
++    }
++
++  if (!ctors->is_empty ())
++    {
++      gcc_assert (targetm.dtors_from_cxa_atexit);
++      ctors->qsort (compare_cdtor_tu_order);
++      build_cdtor (/*ctor_p=*/true, *ctors);
++    }
++}
++
+ /* Look for constructors and destructors and produce function calling them.
+    This is needed for targets not supporting ctors or dtors, but we perform the
+    transformation also at linktime to merge possibly numerous
+@@ -1112,7 +1301,10 @@ ipa_cdtor_merge (void)
+     if (DECL_STATIC_CONSTRUCTOR (node->decl)
+ 	|| DECL_STATIC_DESTRUCTOR (node->decl))
+        record_cdtor_fn (node, &ctors, &dtors);
+-  build_cdtor_fns (&ctors, &dtors);
++  if (targetm.dtors_from_cxa_atexit)
++    build_cxa_atexit_fns (&ctors, &dtors);
++  else
++    build_cdtor_fns (&ctors, &dtors);
+   return 0;
+ }
+ 
+@@ -1159,7 +1351,7 @@ pass_ipa_cdtor_merge::gate (function *)
+   /* Perform the pass when we have no ctors/dtors support
+      or at LTO time to merge multiple constructors into single
+      function.  */
+-  return !targetm.have_ctors_dtors || in_lto_p;
++  return !targetm.have_ctors_dtors || in_lto_p || targetm.dtors_from_cxa_atexit;
+ }
+ 
+ } // anon namespace
+diff --git gcc/target.def gcc/target.def
+index f5a6d507e91..6b2c3e17346 100644
+--- gcc/target.def
++++ gcc/target.def
+@@ -6702,6 +6702,16 @@ collecting constructors and destructors to be run at startup and exit.\n\
+ It is false if we must use @command{collect2}.",
+  bool, false)
+ 
++/* True if the target wants DTORs to be run from cxa_atexit.  */
++DEFHOOKPOD
++(dtors_from_cxa_atexit,
++ "This value is true if the target wants destructors to be queued to be\n\
++run from __cxa_atexit.  If this is the case then, for each priority level,\n\
++a new constructor will be entered that registers the destructors for that\n\
++level with __cxa_atexit (and there will be no destructors emitted).\n\
++It is false the method implied by @code{have_ctors_dtors} is used.",
++ bool, false)
++
+ /* True if thread-local storage is supported.  */
+ DEFHOOKPOD
+ (have_tls,
+-- 
+2.35.1
+
+
+From 62d450fd3f42bde26c4139e9806f5020e5cb1023 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 19 Sep 2021 12:35:46 +0100
+Subject: [PATCH 07/15] libgcc, emutls: Allow building weak definitions of the
+ emutls functions.
+
+In order to better support use of the emulated TLS between objects with
+DSO dependencies and static-linked libgcc, allow a target to make weak
+definitions.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+libgcc/ChangeLog:
+
+	* config/t-darwin: Build weak-defined emutls objects.
+	* emutls.c (__emutls_get_address): Add optional attributes.
+	(__emutls_register_common): Likewise.
+	(EMUTLS_ATTR): New.
+
+(cherry picked from commit b9873b4e2c9a9955789318f4d550147ef9405b07)
+---
+ libgcc/config/t-darwin | 13 +++++++++++++
+ libgcc/emutls.c        | 17 +++++++++++++++--
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git libgcc/config/t-darwin libgcc/config/t-darwin
+index 4b6317b5d85..7e791b29f7a 100644
+--- libgcc/config/t-darwin
++++ libgcc/config/t-darwin
+@@ -15,6 +15,19 @@ crttme.o: $(srcdir)/config/darwin-crt-tm.c
+ LIB2ADDEH = $(srcdir)/unwind-dw2.c $(srcdir)/config/unwind-dw2-fde-darwin.c \
+   $(srcdir)/unwind-sjlj.c $(srcdir)/unwind-c.c
+ 
++# Make emutls weak so that we can deal with -static-libgcc, override the
++# hidden visibility when this is present in libgcc_eh.
++emutls.o: HOST_LIBGCC2_CFLAGS += \
++  -DEMUTLS_ATTR='__attribute__((__weak__,__visibility__("default")))'
++emutls_s.o: HOST_LIBGCC2_CFLAGS += \
++  -DEMUTLS_ATTR='__attribute__((__weak__,__visibility__("default")))'
++
++# Make the emutls crt as a convenience lib so that it can be linked
++# optionally, use the shared version so that we can link with DSO.
++libemutls_w.a: emutls_s.o
++	$(AR_CREATE_FOR_TARGET) $@ $<
++	$(RANLIB_FOR_TARGET) $@
++
+ # Patch to __Unwind_Find_Enclosing_Function for Darwin10.
+ d10-uwfef.o: $(srcdir)/config/darwin10-unwind-find-enc-func.c
+ 	$(crt_compile) -mmacosx-version-min=10.6 -c $<
+diff --git libgcc/emutls.c libgcc/emutls.c
+index f8012f6d8d5..a8ebe237d31 100644
+--- libgcc/emutls.c
++++ libgcc/emutls.c
+@@ -50,7 +50,16 @@ struct __emutls_array
+   void **data[];
+ };
+ 
++/* EMUTLS_ATTR is provided to allow targets to build the emulated tls
++   routines as weak definitions, for example.
++   If there is no definition, fall back to the default.  */
++#ifndef EMUTLS_ATTR
++#  define EMUTLS_ATTR
++#endif
++
++EMUTLS_ATTR
+ void *__emutls_get_address (struct __emutls_object *);
++EMUTLS_ATTR
+ void __emutls_register_common (struct __emutls_object *, word, word, void *);
+ 
+ #ifdef __GTHREADS
+@@ -123,7 +132,11 @@ emutls_alloc (struct __emutls_object *obj)
+   return ret;
+ }
+ 
+-void *
++/* Despite applying the attribute to the declaration, in this case the mis-
++   match between the builtin's declaration [void * (*)(void *)] and the
++   implementation here, causes the decl. attributes to be discarded.  */
++
++EMUTLS_ATTR void *
+ __emutls_get_address (struct __emutls_object *obj)
+ {
+   if (! __gthread_active_p ())
+@@ -187,7 +200,7 @@ __emutls_get_address (struct __emutls_object *obj)
+ #endif
+ }
+ 
+-void
++EMUTLS_ATTR void
+ __emutls_register_common (struct __emutls_object *obj,
+ 			  word size, word align, void *templ)
+ {
+-- 
+2.35.1
+
+
+From 731e16284ddaf0b90ccad2ea0e37209e5142e65f Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Mon, 1 Nov 2021 16:58:20 +0000
+Subject: [PATCH 08/15] Darwin, crts: Fix a build warning.
+
+We have a shim crt for Darwin10 that implements functionality
+missing in libSystem. Provide this with a prototype to silence the
+warning about this.
+
+libgcc/ChangeLog:
+
+	* config/darwin10-unwind-find-enc-func.c: Include libgcc_tm.h.
+	* config/i386/darwin-lib.h: Declare Darwin10 crt function.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+(cherry picked from commit 7a300b413a62e1989bd89064fd5594aabe371d3a)
+---
+ libgcc/config/darwin10-unwind-find-enc-func.c | 1 +
+ libgcc/config/i386/darwin-lib.h               | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git libgcc/config/darwin10-unwind-find-enc-func.c libgcc/config/darwin10-unwind-find-enc-func.c
+index 67c43757e50..882ec3a2372 100644
+--- libgcc/config/darwin10-unwind-find-enc-func.c
++++ libgcc/config/darwin10-unwind-find-enc-func.c
+@@ -1,6 +1,7 @@
+ #include "tconfig.h"
+ #include "tsystem.h"
+ #include "unwind-dw2-fde.h"
++#include "libgcc_tm.h"
+ 
+ void *
+ _darwin10_Unwind_FindEnclosingFunction (void *pc)
+diff --git libgcc/config/i386/darwin-lib.h libgcc/config/i386/darwin-lib.h
+index 68616136a9e..0013762a936 100644
+--- libgcc/config/i386/darwin-lib.h
++++ libgcc/config/i386/darwin-lib.h
+@@ -30,3 +30,5 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ #define DECLARE_LIBRARY_RENAMES \
+   asm(".text; ___divdc3: jmp ___ieee_divdc3 ; .globl ___divdc3");
+ #endif
++
++extern void * _darwin10_Unwind_FindEnclosingFunction (void *);
+-- 
+2.35.1
+
+
+From 26fd32b65c95b68b9fe516d6a74611029f90537d Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Mon, 20 Sep 2021 18:41:56 +0100
+Subject: [PATCH 09/15] Darwin: Rework handling for unwinder code in libgcc_s
+ and specs [PR80556].
+
+This addresses a long-standing problem where a work-around for an unwinder
+issue (also a regression) regresses other functionality.  The patch replaces
+several work-arounds with a fix for PR80556 and a work-around for PR88590.
+
+* The fix for PR80556 requires a bump to the SO name for libgcc_s, since we
+need to remove the unwinder symbols from it.  This would trigger PR88590
+hence the work-around for that.
+
+* We weaken the symbols for emulated TLS support so that it is possible
+for a DSO linked with static-libgcc to interoperate with a DSO linked with
+libgcc_s.  Likewise main exes.
+
+* We remove all the gcc-4.2.1 era stubs machinery and workarounds.
+
+* libgcc is always now linked ahead of libc, which avoids fails where the
+libc (libSystem) builtins implementations are not up to date.
+
+* The unwinder now always comes from the system
+ - for Darwin9 from /usr/lib/libgcc_s.1.dylib
+ - for Darwin10 from /usr/lib/libSystem.dylib
+ - for Darwin11+ from /usr/lib/system/libunwind.dylib.
+
+ We still insert a shim on Darwin10 to fix an omitted unwind function, but
+ the underlying unwinder remains the system one.
+
+* The work-around for PR88590 has two parts (1) we always link libgcc from
+its convenience lib on affected system versions (avoiding the need to find
+the DSO path); (2) we add and export the emutls functions from DSOs - this
+makes a relatively small (20k) addition to a DSO.  These can be backed out
+when a proper fix for PR88590 is committed.
+
+For distributions that wish to install a libgcc_s.1.dylib to satisfy linkage
+from exes that linked against the stubs can use a reexported libgcc_s.1.1
+(since that contains all the symbols that were previously exported via the
+ stubs).
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+gcc/ChangeLog:
+
+	PR target/80556
+	* config/darwin-driver.c (darwin_driver_init): Handle exported
+	symbols and symbol lists (suppress automatic export of the TLS
+	symbols).
+	* config/darwin.c (darwin_rename_builtins): Remove workaround.
+	* config/darwin.h (LINK_GCC_C_SEQUENCE_SPEC): Likewise.
+	(REAL_LIBGCC_SPEC): Handle revised library uses.
+	* config/darwin.opt (nodefaultexport): New.
+	* config/i386/darwin.h (PR80556_WORKAROUND): Remove.
+	* config/i386/darwin32-biarch.h (PR80556_WORKAROUND): Likewise.
+	* config/i386/darwin64-biarch.h (PR80556_WORKAROUND): Likewise.
+
+libgcc/ChangeLog:
+
+	* config.host: Add weak emutls crt to the extra_parts.
+	* config/i386/darwin-lib.h (DECLARE_LIBRARY_RENAMES): Remove
+	workaround.
+	* config/libgcc-libsystem.ver: Add exclude list for the system-
+	provided unwinder.
+	* config/t-slibgcc-darwin: Bump SO version, remove stubs code.
+	* config/i386/libgcc-darwin.10.4.ver: Removed.
+	* config/i386/libgcc-darwin.10.5.ver: Removed.
+	* config/rs6000/libgcc-darwin.10.4.ver: Removed.
+	* config/rs6000/libgcc-darwin.10.5.ver: Removed.
+	* config/t-darwin-noeh: New file.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.dg/torture/fp-int-convert-timode-3.c: Remove XFAIL.
+	* gcc.dg/torture/fp-int-convert-timode-4.c: Likewise.
+
+(cherry picked from commit d4943ce939d9654932624b9ece24c3a474ae4157)
+---
+ gcc/config/darwin-driver.c                    | 18 ++++
+ gcc/config/darwin.c                           | 24 -----
+ gcc/config/darwin.h                           | 98 ++++++++++++-------
+ gcc/config/darwin.opt                         |  4 +
+ gcc/config/i386/darwin.h                      | 27 -----
+ gcc/config/i386/darwin32-biarch.h             | 26 -----
+ gcc/config/i386/darwin64-biarch.h             | 26 -----
+ .../gcc.dg/torture/fp-int-convert-timode-3.c  |  1 -
+ .../gcc.dg/torture/fp-int-convert-timode-4.c  |  1 -
+ libgcc/config.host                            |  7 +-
+ libgcc/config/i386/darwin-lib.h               |  9 --
+ libgcc/config/libgcc-libsystem.ver            | 38 ++++++-
+ libgcc/config/t-darwin-noeh                   |  4 +
+ libgcc/config/t-slibgcc-darwin                | 75 ++++----------
+ 14 files changed, 153 insertions(+), 205 deletions(-)
+ create mode 100644 libgcc/config/t-darwin-noeh
+
+diff --git gcc/config/darwin-driver.c gcc/config/darwin-driver.c
+index f00d5a02d1d..291d2ec9056 100644
+--- gcc/config/darwin-driver.c
++++ gcc/config/darwin-driver.c
+@@ -284,6 +284,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+   const char *vers_string = NULL;
+   bool seen_version_min = false;
+   bool seen_sysroot_p = false;
++  bool noexport_p = true;
+ 
+   for (i = 1; i < *decoded_options_count; i++)
+     {
+@@ -369,6 +370,13 @@ darwin_driver_init (unsigned int *decoded_options_count,
+ 	  seen_sysroot_p = true;
+ 	  break;
+ 
++	case OPT_Xlinker:
++	case OPT_Wl_:
++	  gcc_checking_assert ((*decoded_options)[i].arg);
++	  if (startswith ((*decoded_options)[i].arg, "-exported_symbol"))
++	    noexport_p = false;
++	  break;
++
+ 	default:
+ 	  break;
+ 	}
+@@ -486,4 +494,14 @@ darwin_driver_init (unsigned int *decoded_options_count,
+ 			  &(*decoded_options)[*decoded_options_count - 1]);
+         }
+     }
++
++  if (noexport_p)
++    {
++      ++*decoded_options_count;
++      *decoded_options = XRESIZEVEC (struct cl_decoded_option,
++				     *decoded_options,
++				     *decoded_options_count);
++      generate_option (OPT_nodefaultexport, NULL, 1, CL_DRIVER,
++		       &(*decoded_options)[*decoded_options_count - 1]);
++    }
+ }
+diff --git gcc/config/darwin.c gcc/config/darwin.c
+index 89513c0d145..f064fbd1588 100644
+--- gcc/config/darwin.c
++++ gcc/config/darwin.c
+@@ -3595,30 +3595,6 @@ darwin_fold_builtin (tree fndecl, int n_args, tree *argp,
+ void
+ darwin_rename_builtins (void)
+ {
+-  /* The system ___divdc3 routine in libSystem on darwin10 is not
+-     accurate to 1ulp, ours is, so we avoid ever using the system name
+-     for this routine and instead install a non-conflicting name that
+-     is accurate.
+-
+-     When -ffast-math or -funsafe-math-optimizations is given, we can
+-     use the faster version.  */
+-  if (!flag_unsafe_math_optimizations)
+-    {
+-      enum built_in_function dcode
+-	= (enum built_in_function)(BUILT_IN_COMPLEX_DIV_MIN
+-				   + DCmode - MIN_MODE_COMPLEX_FLOAT);
+-      tree fn = builtin_decl_explicit (dcode);
+-      /* Fortran and c call TARGET_INIT_BUILTINS and
+-	 TARGET_INIT_LIBFUNCS at different times, so we have to put a
+-	 call into each to ensure that at least one of them is called
+-	 after build_common_builtin_nodes.  A better fix is to add a
+-	 new hook to run after build_common_builtin_nodes runs.  */
+-      if (fn)
+-	set_user_assembler_name (fn, "___ieee_divdc3");
+-      fn = builtin_decl_implicit (dcode);
+-      if (fn)
+-	set_user_assembler_name (fn, "___ieee_divdc3");
+-    }
+ }
+ 
+ bool
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index 6256c33bbd0..fa3b48e9199 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -237,6 +237,16 @@ extern GTY(()) int darwin_ms_struct;
+       %(link_ssp) \
+       %:version-compare(>< 10.6 10.7 mmacosx-version-min= -ld10-uwfef) \
+       %(link_gcc_c_sequence) \
++      %{!nodefaultexport:%{dylib|dynamiclib|bundle: \
++	%:version-compare(>= 10.11 asm_macosx_version_min= -U) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= ___emutls_get_address) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= -exported_symbol) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= ___emutls_get_address) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= -U) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= ___emutls_register_common) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= -exported_symbol) \
++	%:version-compare(>= 10.11 asm_macosx_version_min= ___emutls_register_common) \
++      }} \
+     }}}\
+     %{!nostdlib:%{!r:%{!nostartfiles:%E}}} %{T*} %{F*} "\
+     DARWIN_PIE_SPEC \
+@@ -265,14 +275,11 @@ extern GTY(()) int darwin_ms_struct;
+ /* Tell collect2 to run dsymutil for us as necessary.  */
+ #define COLLECT_RUN_DSYMUTIL 1
+ 
+-/* Fix PR47558 by linking against libSystem ahead of libgcc. See also
+-   PR 80556 and the fallout from this.  */
+-
++/* We only want one instance of %G, since libSystem (Darwin's -lc) does not
++   depend on libgcc. */
+ #undef  LINK_GCC_C_SEQUENCE_SPEC
+ #define LINK_GCC_C_SEQUENCE_SPEC \
+-"%{!static:%{!static-libgcc: \
+-    %:version-compare(>= 10.6 mmacosx-version-min= -lSystem) } } \
+-  %G %{!nolibc:%L}"
++ "%G %{!nolibc:%L} "
+ 
+ /* ld64 supports a sysroot, it just has a different name and there's no easy
+    way to check for it at config time.  */
+@@ -380,37 +387,62 @@ extern GTY(()) int darwin_ms_struct;
+ 
+ #define LIB_SPEC "%{!static:-lSystem}"
+ 
+-/* Support -mmacosx-version-min by supplying different (stub) libgcc_s.dylib
+-   libraries to link against, and by not linking against libgcc_s on
+-   earlier-than-10.3.9.  If we need exceptions, prior to 10.3.9, then we have
+-   to link the static eh lib, since there's no shared version on the system.
+-
+-   Note that by default, except as above, -lgcc_eh is not linked against.
++/*
++   Note that by default, -lgcc_eh is not linked against.
+    This is because,in general, we need to unwind through system libraries that
+    are linked with the shared unwinder in libunwind (or libgcc_s for 10.4/5).
+ 
+-   The static version of the current libgcc unwinder (which differs from the
+-   implementation in libunwind.dylib on systems Darwin10 [10.6]+) can be used
+-   by specifying -static-libgcc.
+-
+-   If libgcc_eh is linked against, it has to be before -lgcc, because it might
+-   need symbols from -lgcc.  */
+-
++   For -static-libgcc: < 10.6, use the unwinder in libgcc_eh (and find
++   the emultls impl. there too).
++
++   For -static-libgcc: >= 10.6, the unwinder *still* comes from libSystem and
++   we find the emutls impl from lemutls_w. In either case, the builtins etc.
++   are linked from -lgcc.
++
++   When we have specified shared-libgcc or any case that might require
++   exceptions, we pull the libgcc content (including emulated tls) from
++   -lgcc_s.1 in GCC and the unwinder from /usr/lib/libgcc_s.1 for < 10.6 and
++   libSystem for >= 10.6 respectively.
++   Otherwise, we just link the emutls/builtins from convenience libs.
++
++   If we need exceptions, prior to 10.3.9, then we have to link the static
++   eh lib, since there's no shared version on the system.
++
++   In all cases, libgcc_s.1 will be installed with the compiler, or any app
++   built using it, so we can link the builtins and emutls shared on all.
++
++   We have to work around that DYLD_XXXX are disabled in macOS 10.11+ which
++   means that any bootstrap trying to use a shared libgcc with a bumped SO-
++   name will fail.  This means that we do not accept shared libgcc for these
++   versions.
++
++   For -static-libgcc: >= 10.6, the unwinder *still* comes from libSystem and
++   we find the emutls impl from lemutls_w. In either case, the builtins etc.
++   are linked from -lgcc.
++>
++   Otherwise, we just link the shared version of gcc_s.1.1 and pick up
++   exceptions:
++     * Prior to 10.3.9, then we have to link the static eh lib, since there
++       is no shared version on the system.
++     * from 10.3.9 to 10.5, from /usr/lib/libgcc_s.1.dylib
++     * from 10.6 onwards, from libSystem.dylib
++
++   In all cases, libgcc_s.1.1 will be installed with the compiler, or any app
++   built using it, so we can link the builtins and emutls shared on all.
++*/
+ #undef REAL_LIBGCC_SPEC
+-#define REAL_LIBGCC_SPEC						   \
+-   "%{static-libgcc|static: -lgcc_eh -lgcc;				   \
+-      shared-libgcc|fexceptions|fobjc-exceptions|fgnu-runtime:		   \
+-       %:version-compare(!> 10.3.9 mmacosx-version-min= -lgcc_eh)	   \
+-       %:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4) \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_ext.10.4) \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc ;								   \
+-      :%:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4) \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_ext.10.4) \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc }"
++#define REAL_LIBGCC_SPEC \
++"%{static-libgcc|static:						  \
++    %:version-compare(!> 10.6 mmacosx-version-min= -lgcc_eh)		  \
++    %:version-compare(>= 10.6 mmacosx-version-min= -lemutls_w);		  \
++   shared-libgcc|fexceptions|fobjc-exceptions|fgnu-runtime:		  \
++    %:version-compare(!> 10.11 mmacosx-version-min= -lgcc_s.1.1)	  \
++    %:version-compare(>= 10.11 mmacosx-version-min= -lemutls_w)		  \
++    %:version-compare(!> 10.3.9 mmacosx-version-min= -lgcc_eh)		  \
++    %:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4)   \
++    %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5);	  \
++   : -lemutls_w								  \
++  } -lgcc "
+ 
+ /* We specify crt0.o as -lcrt0.o so that ld will search the library path.  */
+ 
+diff --git gcc/config/darwin.opt gcc/config/darwin.opt
+index 5b75536378d..46347da0846 100644
+--- gcc/config/darwin.opt
++++ gcc/config/darwin.opt
+@@ -232,6 +232,10 @@ no_dead_strip_inits_and_terms
+ Driver RejectNegative Alias(Zno_dead_strip_inits_and_terms)
+ (Obsolete) Current linkers never dead-strip these items, so the option is not needed.
+ 
++nodefaultexport
++Driver RejectNegative
++Do not add a default symbol exports to modules or dynamic libraries.
++
+ nofixprebinding
+ Driver RejectNegative
+ (Obsolete after 10.3.9) Set MH_NOPREFIXBINDING, in an executable.
+diff --git gcc/config/i386/darwin.h gcc/config/i386/darwin.h
+index 5faa1f40089..8458342c099 100644
+--- gcc/config/i386/darwin.h
++++ gcc/config/i386/darwin.h
+@@ -39,33 +39,6 @@ along with GCC; see the file COPYING3.  If not see
+ #endif
+ #endif
+ 
+-/* WORKAROUND pr80556:
+-   For x86_64 Darwin10 and later, the unwinder is in libunwind (redirected
+-   from libSystem).  This doesn't use the keymgr (see keymgr.c) and therefore
+-   the calls that libgcc makes to obtain the KEYMGR_GCC3_DW2_OBJ_LIST are not
+-   updated to include new images, and might not even be valid for a single
+-   image.
+-   Therefore, for 64b exes at least, we must use the libunwind implementation,
+-   even when static-libgcc is specified.  We put libSystem first so that
+-   unwinder symbols are satisfied from there.
+-   We default to 64b for single-arch builds, so apply this unconditionally. */
+-#undef REAL_LIBGCC_SPEC
+-#define REAL_LIBGCC_SPEC						   \
+-   "%{static-libgcc|static: 						   \
+-       %:version-compare(>= 10.6 mmacosx-version-min= -lSystem)		   \
+-       -lgcc_eh -lgcc;							   \
+-      shared-libgcc|fexceptions|fgnu-runtime:				   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_s.10.4)	   \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc ;								   \
+-      :%:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4) \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc }"
+-
+ /* Size of the Obj-C jump buffer.  */
+ #define OBJC_JBLEN ((TARGET_64BIT) ? ((9 * 2) + 3 + 16) : (18))
+ 
+diff --git gcc/config/i386/darwin32-biarch.h gcc/config/i386/darwin32-biarch.h
+index 2a9070960e7..6e0bbf18ce9 100644
+--- gcc/config/i386/darwin32-biarch.h
++++ gcc/config/i386/darwin32-biarch.h
+@@ -21,32 +21,6 @@ along with GCC; see the file COPYING3.  If not see
+ #undef DARWIN_ARCH_SPEC
+ #define DARWIN_ARCH_SPEC "%{m64:x86_64;:i386}"
+ 
+-/* WORKAROUND pr80556:
+-   For x86_64 Darwin10 and later, the unwinder is in libunwind (redirected
+-   from libSystem).  This doesn't use the keymgr (see keymgr.c) and therefore
+-   the calls that libgcc makes to obtain the KEYMGR_GCC3_DW2_OBJ_LIST are not
+-   updated to include new images, and might not even be valid for a single
+-   image.
+-   Therefore, for 64b exes at least, we must use the libunwind implementation,
+-   even when static-libgcc is specified.  We put libSystem first so that
+-   unwinder symbols are satisfied from there. */
+-#undef REAL_LIBGCC_SPEC
+-#define REAL_LIBGCC_SPEC						   \
+-   "%{static-libgcc|static: 						   \
+-      %{m64:%:version-compare(>= 10.6 mmacosx-version-min= -lSystem)}	   \
+-        -lgcc_eh -lgcc;							   \
+-      shared-libgcc|fexceptions|fgnu-runtime:				   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_s.10.4)	   \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc ;								   \
+-      :%:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4) \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc }"
+-
+ #undef  DARWIN_SUBARCH_SPEC
+ #define DARWIN_SUBARCH_SPEC DARWIN_ARCH_SPEC
+ 
+diff --git gcc/config/i386/darwin64-biarch.h gcc/config/i386/darwin64-biarch.h
+index f20fa83c9b0..b2ca708075b 100644
+--- gcc/config/i386/darwin64-biarch.h
++++ gcc/config/i386/darwin64-biarch.h
+@@ -22,32 +22,6 @@ along with GCC; see the file COPYING3.  If not see
+ #undef  DARWIN_ARCH_SPEC
+ #define DARWIN_ARCH_SPEC "%{m32:i386;:x86_64}"
+ 
+-/* WORKAROUND pr80556:
+-   For x86_64 Darwin10 and later, the unwinder is in libunwind (redirected
+-   from libSystem).  This doesn't use the keymgr (see keymgr.c) and therefore
+-   the calls that libgcc makes to obtain the KEYMGR_GCC3_DW2_OBJ_LIST are not
+-   updated to include new images, and might not even be valid for a single
+-   image.
+-   Therefore, for 64b exes at least, we must use the libunwind implementation,
+-   even when static-libgcc is specified.  We put libSystem first so that
+-   unwinder symbols are satisfied from there. */
+-#undef REAL_LIBGCC_SPEC
+-#define REAL_LIBGCC_SPEC						   \
+-   "%{static-libgcc|static: 						   \
+-      %{!m32:%:version-compare(>= 10.6 mmacosx-version-min= -lSystem)}	   \
+-        -lgcc_eh -lgcc;							   \
+-      shared-libgcc|fexceptions|fgnu-runtime:				   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_s.10.4)	   \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc ;								   \
+-      :%:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4) \
+-       %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5)   \
+-       %:version-compare(!> 10.5 mmacosx-version-min= -lgcc_ext.10.4)	   \
+-       %:version-compare(>= 10.5 mmacosx-version-min= -lgcc_ext.10.5)	   \
+-       -lgcc }"
+-
+ #undef  DARWIN_SUBARCH_SPEC
+ #define DARWIN_SUBARCH_SPEC DARWIN_ARCH_SPEC
+ 
+diff --git gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-3.c gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-3.c
+index 10702302bf8..707d539335f 100644
+--- gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-3.c
++++ gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-3.c
+@@ -4,7 +4,6 @@
+ /* { dg-require-effective-target int128 } */
+ /* { dg-require-effective-target fenv } */
+ /* { dg-options "-frounding-math" } */
+-/* { dg-xfail-run-if "see PR80556 c63" { x86_64-*-darwin* i68?-*-darwin* } { "*" } { "" } } */
+ 
+ #include <fenv.h>
+ #include <stdlib.h>
+diff --git gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-4.c gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-4.c
+index 3facf32fb8b..09600f90903 100644
+--- gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-4.c
++++ gcc/testsuite/gcc.dg/torture/fp-int-convert-timode-4.c
+@@ -4,7 +4,6 @@
+ /* { dg-require-effective-target int128 } */
+ /* { dg-require-effective-target fenv } */
+ /* { dg-options "-frounding-math" } */
+-/* { dg-xfail-run-if "see PR80556 c63" { x86_64-*-darwin* i68?-*-darwin* } { "*" } { "" } } */
+ 
+ #include <fenv.h>
+ #include <stdlib.h>
+diff --git libgcc/config.host libgcc/config.host
+index 05a002cf21d..fb589230aa3 100644
+--- libgcc/config.host
++++ libgcc/config.host
+@@ -217,8 +217,11 @@ esac
+ case ${host} in
+ *-*-darwin*)
+   asm_hidden_op=.private_extern
+-  tmake_file="$tmake_file t-darwin ${cpu_type}/t-darwin t-libgcc-pic t-slibgcc-darwin"
+-  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o"
++  tmake_file="$tmake_file t-darwin ${cpu_type}/t-darwin t-libgcc-pic"
++  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o libemutls_w.a"
++  # The unwinder is provided by the system shared libraries, do not add one
++  # to the shared libgcc.
++  tmake_file="$tmake_file t-darwin-noeh t-slibgcc-darwin"
+   ;;
+ *-*-dragonfly*)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip"
+diff --git libgcc/config/i386/darwin-lib.h libgcc/config/i386/darwin-lib.h
+index 0013762a936..433a20fde31 100644
+--- libgcc/config/i386/darwin-lib.h
++++ libgcc/config/i386/darwin-lib.h
+@@ -22,13 +22,4 @@ a copy of the GCC Runtime Library Exception along with this program;
+ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ <http://www.gnu.org/licenses/>.  */
+ 
+-/* The system ___divdc3 routine in libSystem on darwin10 is not
+-   accurate to 1ulp, ours is, so we avoid ever using the system name
+-   for this routine and instead install a non-conflicting name that is
+-   accurate.  See darwin_rename_builtins.  */
+-#ifdef L_divdc3
+-#define DECLARE_LIBRARY_RENAMES \
+-  asm(".text; ___divdc3: jmp ___ieee_divdc3 ; .globl ___divdc3");
+-#endif
+-
+ extern void * _darwin10_Unwind_FindEnclosingFunction (void *);
+diff --git libgcc/config/libgcc-libsystem.ver libgcc/config/libgcc-libsystem.ver
+index 47631749dc2..697a245869e 100644
+--- libgcc/config/libgcc-libsystem.ver
++++ libgcc/config/libgcc-libsystem.ver
+@@ -1 +1,37 @@
+-_darwin10_Unwind_FindEnclosingFunction
++# We must use the unwinder provided by the OS, even if that has
++# limitations or bug, so exclude the libgcc_s symbols.
++
++%exclude {
++ _Unwind_DeleteException
++ _Unwind_Find_FDE
++ _Unwind_ForcedUnwind
++ _Unwind_GetGR
++ _Unwind_GetIP
++ _Unwind_GetLanguageSpecificData
++ _Unwind_GetRegionStart
++ _Unwind_GetTextRelBase
++ _Unwind_GetDataRelBase
++ _Unwind_RaiseException
++ _Unwind_Resume
++ _Unwind_SetGR
++ _Unwind_SetIP
++ _Unwind_SjLj_Register
++ _Unwind_SjLj_Unregister
++ _Unwind_SjLj_RaiseException
++ _Unwind_SjLj_ForcedUnwind
++ _Unwind_SjLj_Resume
++ _Unwind_FindEnclosingFunction
++ _Unwind_GetCFA
++ _Unwind_Backtrace
++ _Unwind_Resume_or_Rethrow
++ _Unwind_SjLj_Resume_or_Rethrow
++ _Unwind_GetIPInfo
++
++  __register_frame
++  __register_frame_table
++  __deregister_frame
++  __register_frame_info
++  __deregister_frame_info
++  __frame_state_for
++  __register_frame_info_table
++}
+diff --git libgcc/config/t-darwin-noeh libgcc/config/t-darwin-noeh
+new file mode 100644
+index 00000000000..08d9c1affd3
+--- /dev/null
++++ libgcc/config/t-darwin-noeh
+@@ -0,0 +1,4 @@
++# Most Darwin versions get their unwinder from libSystem.
++# so remove the unwinder from the shared lib.
++# We still need it in the _eh.a for Darwin8/9.
++LIB2ADDEHSHARED =
+diff --git libgcc/config/t-slibgcc-darwin libgcc/config/t-slibgcc-darwin
+index 9970d003436..72647c0f173 100644
+--- libgcc/config/t-slibgcc-darwin
++++ libgcc/config/t-slibgcc-darwin
+@@ -1,44 +1,34 @@
+ # Build a shared libgcc library with the darwin linker.
+-SHLIB_SOVERSION = 1
+-SHLIB_VERSTRING = -compatibility_version $(SHLIB_SOVERSION) -current_version $(SHLIB_SOVERSION).0
++
++SHLIB_SOVERSION = 1.1
++SHLIB_SO_MINVERSION = 1
++SHLIB_VERSTRING = -compatibility_version $(SHLIB_SO_MINVERSION) -current_version $(SHLIB_SOVERSION)
+ SHLIB_EXT = .dylib
++SHLIB_LC = -lSystem
++
++# Shorthand expressions for the LINK below.
+ SHLIB_INSTALL_NAME = @shlib_base_name@.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+-SHLIB_SONAME = @shlib_base_name@$(SHLIB_EXT)
+-SHLIB_SOLINK = @shlib_base_name@.so
+ SHLIB_MAP = @shlib_map_file@
+-SHLIB_OBJS = @shlib_objs@
+ SHLIB_DIR = @multilib_dir@
+-SHLIB_LC = -lc
++SHLIB_SONAME = @shlib_base_name@$(SHLIB_EXT)
+ 
+-# Darwin only searches in /usr/lib for shared libraries, not in subdirectories,
+-# so the libgcc variants have different names not different locations.
+-# Note that this version is used for the loader, not the linker; the linker
+-# uses the stub versions named by the versioned members of $(INSTALL_FILES).
++# Darwin only searches in shlib_slibdir for shared libraries, not in
++# subdirectories.  The link builds one architecture slice in its designated
++# subdir.  The code under MULTIBUILDTOP combines these into a single FAT
++# library, that is what we eventually install.
+ 
+ SHLIB_LINK = $(CC) $(LIBGCC2_CFLAGS) -dynamiclib -nodefaultlibs \
+ 	-install_name @shlib_slibdir@/$(SHLIB_INSTALL_NAME) \
+ 	-single_module -o $(SHLIB_DIR)/$(SHLIB_SONAME) \
+ 	-Wl,-exported_symbols_list,$(SHLIB_MAP) \
+ 	$(SHLIB_VERSTRING) \
+-	@multilib_flags@ $(SHLIB_OBJS) $(SHLIB_LC)
++	@multilib_flags@ @shlib_objs@ $(SHLIB_LC)
+ 
+ SHLIB_MKMAP = $(srcdir)/mkmap-flat.awk
+ SHLIB_MKMAP_OPTS = -v leading_underscore=1
+-SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/libgcc-libsystem.ver
+-SHLIB_VERPFX = $(srcdir)/config/$(cpu_type)/libgcc-darwin
+-
+-# we're only going to build the stubs if the target slib is /usr/lib
+-# there is no other case in which they're useful in a live system.
+-ifeq (/usr/lib,$(shlib_slibdir))
+-LGCC_STUBS = libgcc_s.10.4.dylib libgcc_s.10.5.dylib
+-else
+-LGCC_STUBS =
+-endif
+ 
+ LGCC_FILES = libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+-LGCC_FILES += $(LGCC_STUBS)
+-LEXT_STUBS = libgcc_ext.10.4$(SHLIB_EXT) libgcc_ext.10.5$(SHLIB_EXT)
+-LGCC_FILES += $(LEXT_STUBS)
++
+ INSTALL_FILES=$(LGCC_FILES)
+ 
+ # we do our own thing
+@@ -52,33 +42,6 @@ all: $(INSTALL_FILES)
+ install-leaf: install-darwin-libgcc-stubs
+ endif
+ 
+-# In order to support -mmacosx-version-min, you need to have multiple
+-# different libgcc_s libraries that actually get linked against, one for
+-# each system version supported.  They are 'stub' libraries that
+-# contain no code, just a list of exported symbols.
+-# The actual use of the libraries is controlled by REAL_LIBGCC_SPEC.
+-#
+-# This assumes each multilib corresponds to a different architecture.
+-libgcc_s.%.dylib : all-multi $(SHLIB_VERPFX).%.ver libgcc_s$(SHLIB_EXT)
+-	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
+-	for mlib in $$MLIBS ; do \
+-	  $(STRIP) -o $(@)_T$${mlib} \
+-	    -s $(SHLIB_VERPFX).$(*).ver -c -u \
+-	    ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  || exit 1 ; \
+-	done
+-	$(LIPO) -output $@ -create $(@)_T*
+-	rm $(@)_T*
+-
+-libgcc_ext.%.dylib : all-multi $(SHLIB_VERPFX).%.ver libgcc_s$(SHLIB_EXT) 
+-	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
+-	for mlib in $$MLIBS ; do \
+-	  $(STRIP) -o $(@)_T$${mlib} \
+-	    -R $(SHLIB_VERPFX).$(*).ver -c -urx \
+-	    ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT) || exit 1 ; \
+-	done
+-	$(LIPO) -output $@ -create $(@)_T*
+-	rm $(@)_T*
+-
+ libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT): all-multi libgcc_s$(SHLIB_EXT)
+ 	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
+ 	for mlib in $$MLIBS ; do \
+@@ -89,6 +52,8 @@ libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT): all-multi libgcc_s$(SHLIB_EXT)
+ 	  -create libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
+ 	rm libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
+ 
++# Install the shared library.
++
+ install-darwin-libgcc-stubs :
+ 	$(mkinstalldirs) $(DESTDIR)$(slibdir)
+ 	for d in $(INSTALL_FILES) ; do \
+@@ -107,10 +72,10 @@ install-darwin-libgcc-stubs :
+ 
+ else
+ 
+-# Do not install shared libraries for any other multilibs.  Unless
+-# we're putting them in the gcc directory during a build, for
+-# compatibility with the pre-top-level layout.  In that case we
+-# need symlinks.
++# Do not install shared libraries for any other multilibs.  Unless we are
++# putting them in the gcc directory during a build, for compatibility with
++# the pre-top-level layout.  In that case we provide symlinks to the FAT lib
++# from the sub-directories.
+ 
+ ifeq ($(enable_shared),yes)
+ all: install-darwin-libgcc-links
+-- 
+2.35.1
+
+
+From 31ffad5f3b83b485d1f93b5d9e3bfbda0f67fbbb Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Tue, 23 Nov 2021 17:52:22 +0000
+Subject: [PATCH 10/15] libgcc, Darwin: Partial backport of symbol file regorg.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+libgcc/ChangeLog:
+
+	* config/t-darwin:
+---
+ libgcc/config/t-darwin | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git libgcc/config/t-darwin libgcc/config/t-darwin
+index 7e791b29f7a..d6f688d66d5 100644
+--- libgcc/config/t-darwin
++++ libgcc/config/t-darwin
+@@ -37,3 +37,6 @@ d10-uwfef.o: $(srcdir)/config/darwin10-unwind-find-enc-func.c
+ libd10-uwfef.a: d10-uwfef.o
+ 	$(AR_CREATE_FOR_TARGET) $@ d10-uwfef.o
+ 	$(RANLIB_FOR_TARGET) $@
++
++# Symbols for all the sub-ports.
++SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/libgcc-libsystem.ver
+-- 
+2.35.1
+
+
+From e7c4916422e573031c5b8b5e261f32660ecd0ef1 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Mon, 6 Dec 2021 13:17:10 +0000
+Subject: [PATCH 11/15] Darwin: Amend pie options when linking mdynamic-no-pic.
+
+On i686 Darwin from macOS 10.7 onwards the default is to
+link executables as PIE, which conflicts with code generated
+using mdynamic-no-pic.  Rather than warn about this and then
+get the user to add -Wl,-no_pie, we can inject this in the
+link specs.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+gcc/ChangeLog:
+
+	* config/darwin.h (DARWIN_PIE_SPEC): Add -no_pie when
+	linking mdynamic-no-pic code on macOS > 10.7.
+
+(cherry picked from commit 1c1563fb8ff227590eb5ab0fc3d22f3b0a57c241)
+---
+ gcc/config/darwin.h | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index fa3b48e9199..b148fb47b96 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -148,13 +148,17 @@ extern GTY(()) int darwin_ms_struct;
+ #define DARWIN_RDYNAMIC "%{rdynamic:%nrdynamic is not supported}"
+ #endif
+ 
+-/* FIXME: we should check that the linker supports the -pie and -no_pie.
++/* Code built with mdynamic-no-pic does not support PIE/PIC, so  we disallow
++   these combinations; we also ensure that the no_pie option is passed to
++   ld64 on system versions that default to PIE when mdynamic-no-pic is given.
++   FIXME: we should check that the linker supports the -pie and -no_pie.
+    options.  */
+ #define DARWIN_PIE_SPEC \
+ "%{pie|fpie|fPIE:\
+    %{mdynamic-no-pic: \
+      %n'-mdynamic-no-pic' overrides '-pie', '-fpie' or '-fPIE'; \
+-     :%:version-compare(>= 10.5 mmacosx-version-min= -pie) }} "
++     :%:version-compare(>= 10.5 mmacosx-version-min= -pie) }; \
++   mdynamic-no-pic:%:version-compare(>= 10.7 mmacosx-version-min= -no_pie) } "
+ 
+ #define DARWIN_NOPIE_SPEC \
+ "%{no-pie|fno-pie|fno-PIE: \
+-- 
+2.35.1
+
+
+From aa422470d69696240a1e01e1c9489e48b5d39599 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 21 Nov 2021 17:19:24 +0000
+Subject: [PATCH 12/15] libgcc, Darwin: Build a libgcc_s.1 for backwards
+ compatibility.
+
+In order to reslve a long-standing issue with inter-operation
+with libSystem, we have bumped the SO name for libgcc_s.
+
+Distributions might wish to install this new version into a
+structure where exisiting code is already linked with the
+compiler-local libgcc_s.1 (providing symbols exported by the
+now-retired libgcc_ext.10.x shims).
+
+The replacement libgcc_s.1 forwards the symbols from the new SO.
+In order to support DYLD_LIBRARY_PATH on systems (where it works)
+we forward the libSystem unwinder symbols from 10.7+ and a
+compiler-local version of the libgcc unwinder on earlier.
+
+For macOS 10.4 to 10.6 this is 'bug-compatible' with existing uses.
+For 10.7+ the behaviour will now actually be correct.
+
+This should be squashed with the initial libgcc changes for PR80556
+in any backport (r12-5418-gd4943ce939d)
+
+libgcc/ChangeLog:
+
+	* config.host (*-*-darwin*): Add logic to build a shared
+	unwinder library for Darwin8-10.
+	* config/i386/t-darwin: Build legacy libgcc_s.1.
+	* config/rs6000/t-darwin: Likewise.
+	* config/t-darwin: Reorganise the EH fragments to place
+	them for inclusion in a shared EH lib.
+	* config/t-slibgcc-darwin: Build a legacy libgcc_s.1 and
+	the supporting pieces (all FAT libs).
+	* config/t-darwin-noeh: Removed.
+	* config/darwin-unwind.ver: New file.
+	* config/rs6000/t-darwin-ehs: New file.
+	* config/t-darwin-ehs: New file.
+
+(cherry picked from commit 7add7f7bb3d35726a0c45322ffdbbab2bbf6a348)
+---
+ libgcc/config.host                |  13 ++-
+ libgcc/config/darwin-unwind.ver   |  30 +++++++
+ libgcc/config/i386/t-darwin       |   6 ++
+ libgcc/config/rs6000/t-darwin     |   3 +
+ libgcc/config/rs6000/t-darwin-ehs |   5 ++
+ libgcc/config/t-darwin            |  19 ++++-
+ libgcc/config/t-darwin-ehs        |   4 +
+ libgcc/config/t-darwin-noeh       |   4 -
+ libgcc/config/t-slibgcc-darwin    | 132 ++++++++++++++++++++++++++----
+ 9 files changed, 190 insertions(+), 26 deletions(-)
+ create mode 100644 libgcc/config/darwin-unwind.ver
+ create mode 100644 libgcc/config/rs6000/t-darwin-ehs
+ create mode 100644 libgcc/config/t-darwin-ehs
+ delete mode 100644 libgcc/config/t-darwin-noeh
+
+diff --git libgcc/config.host libgcc/config.host
+index fb589230aa3..3aceb614b4d 100644
+--- libgcc/config.host
++++ libgcc/config.host
+@@ -218,10 +218,17 @@ case ${host} in
+ *-*-darwin*)
+   asm_hidden_op=.private_extern
+   tmake_file="$tmake_file t-darwin ${cpu_type}/t-darwin t-libgcc-pic"
+-  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o libemutls_w.a"
+   # The unwinder is provided by the system shared libraries, do not add one
+-  # to the shared libgcc.
+-  tmake_file="$tmake_file t-darwin-noeh t-slibgcc-darwin"
++  # to the shared libgcc but, for older systems, we build a shared unwinder
++  # separately so that we can construct a libgcc_s.1 to use for binaries
++  # linked against the old libgcc_ext.10.x stubs.
++  case ${host} in
++    *-*-darwin[89]* | *-*-darwin10*)
++      tmake_file="$tmake_file t-darwin-ehs ${cpu_type}/t-darwin-ehs"
++      ;;
++  esac
++  tmake_file="$tmake_file t-slibgcc-darwin"
++  extra_parts="crt3.o libd10-uwfef.a crttms.o crttme.o libemutls_w.a"
+   ;;
+ *-*-dragonfly*)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip"
+diff --git libgcc/config/darwin-unwind.ver libgcc/config/darwin-unwind.ver
+new file mode 100644
+index 00000000000..fb74cb2c5d2
+--- /dev/null
++++ libgcc/config/darwin-unwind.ver
+@@ -0,0 +1,30 @@
++# unwinder
++__Unwind_DeleteException
++__Unwind_Find_FDE
++__Unwind_ForcedUnwind
++__Unwind_GetGR
++__Unwind_GetIP
++__Unwind_GetLanguageSpecificData
++__Unwind_GetRegionStart
++__Unwind_GetTextRelBase
++__Unwind_GetDataRelBase
++__Unwind_RaiseException
++__Unwind_Resume
++__Unwind_SetGR
++__Unwind_SetIP
++__Unwind_FindEnclosingFunction
++__Unwind_GetCFA
++__Unwind_Backtrace
++__Unwind_Resume_or_Rethrow
++__Unwind_GetIPInfo
++
++___register_frame
++___register_frame_table
++___register_frame_info
++___register_frame_info_bases
++___register_frame_info_table
++___register_frame_info_table_bases
++
++___deregister_frame
++___deregister_frame_info
++___deregister_frame_info_bases
+diff --git libgcc/config/i386/t-darwin libgcc/config/i386/t-darwin
+index 5f2c69725d0..4c18da1efbf 100644
+--- libgcc/config/i386/t-darwin
++++ libgcc/config/i386/t-darwin
+@@ -1,3 +1,9 @@
+ LIB2_SIDITI_CONV_FUNCS = yes
+ LIB2ADD = $(srcdir)/config/darwin-64.c
+ LIB2FUNCS_EXCLUDE = _fixtfdi _fixunstfdi _floatditf _floatunditf
++
++# Extra symbols for this port.
++SHLIB_MAPFILES += $(srcdir)/config/i386/libgcc-darwin.ver
++
++# Build a legacy libgcc_s.1
++BUILD_LIBGCCS1 = YES
+diff --git libgcc/config/rs6000/t-darwin libgcc/config/rs6000/t-darwin
+index 8b513bdb1d7..183d0df92ce 100644
+--- libgcc/config/rs6000/t-darwin
++++ libgcc/config/rs6000/t-darwin
+@@ -56,3 +56,6 @@ unwind-dw2_s.o: HOST_LIBGCC2_CFLAGS += -maltivec
+ unwind-dw2.o: HOST_LIBGCC2_CFLAGS += -maltivec
+ 
+ LIB2ADDEH += $(srcdir)/config/rs6000/darwin-fallback.c
++
++# Build a legacy libgcc_s.1
++BUILD_LIBGCCS1 = YES
+diff --git libgcc/config/rs6000/t-darwin-ehs libgcc/config/rs6000/t-darwin-ehs
+new file mode 100644
+index 00000000000..3047f53cb70
+--- /dev/null
++++ libgcc/config/rs6000/t-darwin-ehs
+@@ -0,0 +1,5 @@
++# We need the save_world code for the EH library.
++
++LIBEHSOBJS +=  darwin-world_s.o
++
++$(LIBEHSOBJS): libef_ppc.a
+diff --git libgcc/config/t-darwin libgcc/config/t-darwin
+index d6f688d66d5..a855ecfd526 100644
+--- libgcc/config/t-darwin
++++ libgcc/config/t-darwin
+@@ -11,10 +11,6 @@ crttms.o: $(srcdir)/config/darwin-crt-tm.c
+ crttme.o: $(srcdir)/config/darwin-crt-tm.c
+ 	$(crt_compile) -mmacosx-version-min=10.4 -DEND -c $<
+ 
+-# Use unwind-dw2-fde-darwin
+-LIB2ADDEH = $(srcdir)/unwind-dw2.c $(srcdir)/config/unwind-dw2-fde-darwin.c \
+-  $(srcdir)/unwind-sjlj.c $(srcdir)/unwind-c.c
+-
+ # Make emutls weak so that we can deal with -static-libgcc, override the
+ # hidden visibility when this is present in libgcc_eh.
+ emutls.o: HOST_LIBGCC2_CFLAGS += \
+@@ -38,5 +34,20 @@ libd10-uwfef.a: d10-uwfef.o
+ 	$(AR_CREATE_FOR_TARGET) $@ d10-uwfef.o
+ 	$(RANLIB_FOR_TARGET) $@
+ 
++###### Unwinder #######
++# Most Darwin versions get their unwinder from libSystem; older versions
++# have an installed /usr/lib/libgcc_s.1.dylib.
++# So do not add the unwinder to the shared libgcc.
++LIB2ADDEHSHARED =
++
++# We still need it in the _eh.a for earlier platform versions.
++# Use unwind-dw2-fde-darwin
++LIB2ADDEH = $(srcdir)/unwind-dw2.c \
++	    $(srcdir)/config/unwind-dw2-fde-darwin.c \
++	    $(srcdir)/unwind-c.c
++
++# Do not build a shared unwind lib by default.
++LIBEHSOBJS=
++
+ # Symbols for all the sub-ports.
+ SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/libgcc-libsystem.ver
+diff --git libgcc/config/t-darwin-ehs libgcc/config/t-darwin-ehs
+new file mode 100644
+index 00000000000..8481898d98a
+--- /dev/null
++++ libgcc/config/t-darwin-ehs
+@@ -0,0 +1,4 @@
++# Build the unwinder separately so that we can construct a replacement for
++# libgcc_s.1 on systems that used the unwinder in libgcc_s.
++
++LIBEHSOBJS = unwind-dw2_s.o unwind-dw2-fde-darwin_s.o unwind-c_s.o
+diff --git libgcc/config/t-darwin-noeh libgcc/config/t-darwin-noeh
+deleted file mode 100644
+index 08d9c1affd3..00000000000
+--- libgcc/config/t-darwin-noeh
++++ /dev/null
+@@ -1,4 +0,0 @@
+-# Most Darwin versions get their unwinder from libSystem.
+-# so remove the unwinder from the shared lib.
+-# We still need it in the _eh.a for Darwin8/9.
+-LIB2ADDEHSHARED =
+diff --git libgcc/config/t-slibgcc-darwin libgcc/config/t-slibgcc-darwin
+index 72647c0f173..8f62a29aef3 100644
+--- libgcc/config/t-slibgcc-darwin
++++ libgcc/config/t-slibgcc-darwin
+@@ -2,11 +2,17 @@
+ 
+ SHLIB_SOVERSION = 1.1
+ SHLIB_SO_MINVERSION = 1
+-SHLIB_VERSTRING = -compatibility_version $(SHLIB_SO_MINVERSION) -current_version $(SHLIB_SOVERSION)
++SHLIB_VERSTRING = -compatibility_version $(SHLIB_SO_MINVERSION) \
++		  -current_version $(SHLIB_SOVERSION)
+ SHLIB_EXT = .dylib
+ SHLIB_LC = -lSystem
++SHLIB_INSTALL_DIR = $(slibdir)
+ 
+-# Shorthand expressions for the LINK below.
++SHLIB_MKMAP = $(srcdir)/mkmap-flat.awk
++SHLIB_MKMAP_OPTS = -v leading_underscore=1
++
++# Shorthand expressions for the LINK below, these are substituted in the
++# link expression.
+ SHLIB_INSTALL_NAME = @shlib_base_name@.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+ SHLIB_MAP = @shlib_map_file@
+ SHLIB_DIR = @multilib_dir@
+@@ -17,24 +23,65 @@ SHLIB_SONAME = @shlib_base_name@$(SHLIB_EXT)
+ # subdir.  The code under MULTIBUILDTOP combines these into a single FAT
+ # library, that is what we eventually install.
+ 
+-SHLIB_LINK = $(CC) $(LIBGCC2_CFLAGS) -dynamiclib -nodefaultlibs \
+-	-install_name @shlib_slibdir@/$(SHLIB_INSTALL_NAME) \
++SHLIB_LINK = $(CC) $(LIBGCC2_CFLAGS) $(LDFLAGS) -dynamiclib -nodefaultlibs \
++	-install_name $(SHLIB_INSTALL_DIR)/$(SHLIB_INSTALL_NAME) \
+ 	-single_module -o $(SHLIB_DIR)/$(SHLIB_SONAME) \
+ 	-Wl,-exported_symbols_list,$(SHLIB_MAP) \
+ 	$(SHLIB_VERSTRING) \
+ 	@multilib_flags@ @shlib_objs@ $(SHLIB_LC)
+ 
+-SHLIB_MKMAP = $(srcdir)/mkmap-flat.awk
+-SHLIB_MKMAP_OPTS = -v leading_underscore=1
++# we do our own thing
++SHLIB_INSTALL =
+ 
+ LGCC_FILES = libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+ 
+-INSTALL_FILES=$(LGCC_FILES)
++ifeq ($(BUILD_LIBGCCS1),YES)
+ 
+-# we do our own thing
+-SHLIB_INSTALL =
++# We are going to build a libgcc_s.1.dylib so that distributions can
++# install it for compatibility with binaries linked against the old
++# libgcc_ext.10.x.dylib stubs.
++
++# For systems after macOS 10.7 we can forward the correct unwinder symbols
++# from libSystem.
++
++# For older systems we have to forward an entire library (since they cannot
++# selectively forward symbols, which means that we cannot forward the unwinder
++# in /usr/lib/libgcc_s.1.dylib).  We also cannot forward the entire library
++# since that creates a self-referencing loop when DYLD_LIBRARY_PATH is used.
++# To provide the unwinder symbols in this case, we build the unwinder into a
++# separate shared lib (libgcc_ehs) and forward that.
++
++# These targets are local to this make fragment, which means that they do not
++# get the substitutions seen in SHLIB_LINK.
++
++ifneq ($(LIBEHSOBJS),)
++
++EHS_INSTNAME = libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++
++# multilib build for a shared EH lib.
++$(LIBEHSOBJS): libgcc_tm.h
++
++libgcc_ehs$(SHLIB_EXT): $(LIBEHSOBJS)
++	mkdir -p $(MULTIDIR)
++	$(CC) $(LIBGCC2_CFLAGS) $(LDFLAGS) -dynamiclib -nodefaultlibs \
++	-install_name $(SHLIB_INSTALL_DIR)/$(EHS_INSTNAME) \
++	-o $(MULTIDIR)/libgcc_ehs$(SHLIB_EXT) $(SHLIB_VERSTRING) \
++	$(LIBEHSOBJS) $(SHLIB_LC)
++
++all: libgcc_ehs$(SHLIB_EXT)
++
++LGCC_FILES += libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++
++endif
++
++# Provide libgcc_s.1 for backwards compatibility.
++LGCC_FILES += libgcc_s.1.dylib
++
++endif
++
++INSTALL_FILES=$(LGCC_FILES)
+ 
+-# For the toplevel multilib, build a fat archive including all the multilibs.
++# For the toplevel multilib, build FAT dylibs including all the multilibs.
+ ifeq ($(MULTIBUILDTOP),)
+ 
+ ifeq ($(enable_shared),yes)
+@@ -52,7 +99,62 @@ libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT): all-multi libgcc_s$(SHLIB_EXT)
+ 	  -create libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
+ 	rm libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
+ 
+-# Install the shared library.
++ifeq ($(BUILD_LIBGCCS1),YES)
++ifneq ($(LIBEHSOBJS),)
++
++libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT): all-multi libgcc_ehs$(SHLIB_EXT)
++	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
++	for mlib in $$MLIBS ; do \
++	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_ehs$(SHLIB_EXT)  \
++	    ./libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
++	done
++	$(LIPO) -output libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT) \
++	  -create libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
++	rm libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
++
++
++libgcc_s.1.dylib: libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
++	for mlib in $$MLIBS ; do \
++	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  \
++	    ./libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
++	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_ehs$(SHLIB_EXT)  \
++	    ./libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
++	  arch=`$(LIPO) -info libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} | sed -e 's/.*:\ //'` ; \
++	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib \
++	    -o libgcc_s.1$(SHLIB_EXT)_T_$${mlib} \
++	    -Wl,-reexport_library,libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
++	    -Wl,-reexport_library,libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
++	    -install_name $(SHLIB_INSTALL_DIR)/libgcc_s.1.dylib \
++	    -compatibility_version 1 -current_version 1 ; \
++	done
++	$(LIPO) -output libgcc_s.1$(SHLIB_EXT) -create libgcc_s.1$(SHLIB_EXT)_T*
++	rm libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
++	rm libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
++
++else
++
++libgcc_s.1.dylib: libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
++	for mlib in $$MLIBS ; do \
++	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  \
++	    ./libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
++	  arch=`$(LIPO) -info libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} | sed -e 's/.*:\ //'` ; \
++	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib \
++	    -o libgcc_s.1$(SHLIB_EXT)_T_$${mlib} \
++	    -Wl,-reexport_library,libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
++	    -lSystem \
++	    -Wl,-reexported_symbols_list,$(srcdir)/config/darwin-unwind.ver \
++	    -install_name $(SHLIB_INSTALL_DIR)/libgcc_s.1.dylib \
++	    -compatibility_version 1 -current_version 1 ; \
++	done
++	$(LIPO) -output libgcc_s.1$(SHLIB_EXT) -create libgcc_s.1$(SHLIB_EXT)_T*
++	rm libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
++
++endif
++endif
++
++# Install the shared libraries.
+ 
+ install-darwin-libgcc-stubs :
+ 	$(mkinstalldirs) $(DESTDIR)$(slibdir)
+@@ -72,10 +174,10 @@ install-darwin-libgcc-stubs :
+ 
+ else
+ 
+-# Do not install shared libraries for any other multilibs.  Unless we are
+-# putting them in the gcc directory during a build, for compatibility with
+-# the pre-top-level layout.  In that case we provide symlinks to the FAT lib
+-# from the sub-directories.
++# Do not install shared libraries for multilibs.  Unless we are putting them
++# in the gcc directory during a build, for compatibility with the pre-top-
++# level layout.  In that case we provide symlinks to the FAT lib from the
++# multilib sub-directories.
+ 
+ ifeq ($(enable_shared),yes)
+ all: install-darwin-libgcc-links
+-- 
+2.35.1
+
+
+From 0f1566a476ef9bb47904484a6af42d285987772d Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Fri, 10 Dec 2021 21:20:38 +0000
+Subject: [PATCH 13/15] libgcc, Darwin: Update darwin10 unwinder shim
+ dependencies.
+
+We include libgcc_tm.h to provide a prototype for this shim
+so add that to the make dependencies.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+libgcc/ChangeLog:
+
+	* config/t-darwin: Add libgcc_tm.h to the dependencies
+	for darwin10-unwind-find-enc-func.
+
+(cherry picked from commit b504917e43b9a559c9ac779e08784ad412125f2e)
+---
+ libgcc/config/t-darwin | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git libgcc/config/t-darwin libgcc/config/t-darwin
+index a855ecfd526..299d26c2c96 100644
+--- libgcc/config/t-darwin
++++ libgcc/config/t-darwin
+@@ -25,7 +25,7 @@ libemutls_w.a: emutls_s.o
+ 	$(RANLIB_FOR_TARGET) $@
+ 
+ # Patch to __Unwind_Find_Enclosing_Function for Darwin10.
+-d10-uwfef.o: $(srcdir)/config/darwin10-unwind-find-enc-func.c
++d10-uwfef.o: $(srcdir)/config/darwin10-unwind-find-enc-func.c libgcc_tm.h
+ 	$(crt_compile) -mmacosx-version-min=10.6 -c $<
+ 
+ # Using this crt as a library means that it will not be added to an exe
+-- 
+2.35.1
+
+
+From 97a7110d12d62b700fea4ed6a0e152f833a9d4db Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Wed, 15 Dec 2021 14:11:58 +0000
+Subject: [PATCH 14/15] libgcc, Darwin: Add missing build dependencies.
+
+There was a race condition where the link for the new shared EH library
+(only used on earlier Darwin) could fail because the new crts had not been
+copied to the gcc directory.  This can cause a build failure (although
+currently only seen on powerpc-darwin).
+
+Fixed by adding specific dependency on the crts and on the multi target.
+We also add the declaration header for the Darwin10 unwinder shim to the
+powerpc cases, since we build that there for Rosetta use.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+
+libgcc/ChangeLog:
+
+	* config.host: Add shim declaration header to powerpc*-darwin builds.
+	* config/rs6000/t-darwin-ehs: Remove dependency on the powerpc end
+	file.
+	* config/t-darwin-ehs: Add dependencies to the shared unwinder
+	objects.
+	* config/t-slibgcc-darwin: Add extra_parts to the dependencies for
+	the shared EH lib.  Add all-multi to the dependencies for the
+	libgcc_s.1.dylib redirections.
+
+(cherry picked from commit 574c09da48a5a0ff4c32dd4577eaf65bac8c94a0)
+---
+ libgcc/config.host                | 4 ++++
+ libgcc/config/rs6000/t-darwin-ehs | 4 +---
+ libgcc/config/t-darwin-ehs        | 3 +++
+ libgcc/config/t-slibgcc-darwin    | 8 ++++----
+ 4 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git libgcc/config.host libgcc/config.host
+index 3aceb614b4d..bed5ad4f350 100644
+--- libgcc/config.host
++++ libgcc/config.host
+@@ -1158,10 +1158,14 @@ powerpc-*-darwin*)
+ 	  md_unwind_header=rs6000/darwin-unwind.h
+ 	  ;;
+ 	esac
++	# We build the darwin10 EH shim for Rosetta (running on x86 machines).
++	tm_file="$tm_file i386/darwin-lib.h"
+ 	tmake_file="$tmake_file rs6000/t-ppc64-fp rs6000/t-ibm-ldouble"
+ 	extra_parts="$extra_parts crt2.o crt3_2.o libef_ppc.a dw_ppc.o"
+ 	;;
+ powerpc64-*-darwin*)
++	# We build the darwin10 EH shim for Rosetta (running on x86 machines).
++	tm_file="$tm_file i386/darwin-lib.h"
+ 	tmake_file="$tmake_file rs6000/t-darwin64 rs6000/t-ibm-ldouble"
+ 	extra_parts="$extra_parts crt2.o crt3_2.o libef_ppc.a dw_ppc.o"
+ 	;;
+diff --git libgcc/config/rs6000/t-darwin-ehs libgcc/config/rs6000/t-darwin-ehs
+index 3047f53cb70..42f521411af 100644
+--- libgcc/config/rs6000/t-darwin-ehs
++++ libgcc/config/rs6000/t-darwin-ehs
+@@ -1,5 +1,3 @@
+ # We need the save_world code for the EH library.
+ 
+-LIBEHSOBJS +=  darwin-world_s.o
+-
+-$(LIBEHSOBJS): libef_ppc.a
++LIBEHSOBJS += darwin-world_s.o
+diff --git libgcc/config/t-darwin-ehs libgcc/config/t-darwin-ehs
+index 8481898d98a..95275023dac 100644
+--- libgcc/config/t-darwin-ehs
++++ libgcc/config/t-darwin-ehs
+@@ -2,3 +2,6 @@
+ # libgcc_s.1 on systems that used the unwinder in libgcc_s.
+ 
+ LIBEHSOBJS = unwind-dw2_s.o unwind-dw2-fde-darwin_s.o unwind-c_s.o
++
++unwind-dw2_s.o: gthr-default.h md-unwind-support.h
++$(LIBEHSOBJS): libgcc_tm.h
+diff --git libgcc/config/t-slibgcc-darwin libgcc/config/t-slibgcc-darwin
+index 8f62a29aef3..b3d4aeddd95 100644
+--- libgcc/config/t-slibgcc-darwin
++++ libgcc/config/t-slibgcc-darwin
+@@ -59,9 +59,8 @@ ifneq ($(LIBEHSOBJS),)
+ EHS_INSTNAME = libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+ 
+ # multilib build for a shared EH lib.
+-$(LIBEHSOBJS): libgcc_tm.h
+ 
+-libgcc_ehs$(SHLIB_EXT): $(LIBEHSOBJS)
++libgcc_ehs$(SHLIB_EXT): $(LIBEHSOBJS) $(extra-parts)
+ 	mkdir -p $(MULTIDIR)
+ 	$(CC) $(LIBGCC2_CFLAGS) $(LDFLAGS) -dynamiclib -nodefaultlibs \
+ 	-install_name $(SHLIB_INSTALL_DIR)/$(EHS_INSTNAME) \
+@@ -113,7 +112,8 @@ libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT): all-multi libgcc_ehs$(SHLIB_EXT)
+ 	rm libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
+ 
+ 
+-libgcc_s.1.dylib: libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) \
++		  libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+ 	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
+ 	for mlib in $$MLIBS ; do \
+ 	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  \
+@@ -134,7 +134,7 @@ libgcc_s.1.dylib: libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) libgcc_ehs.$(SHLIB_SOV
+ 
+ else
+ 
+-libgcc_s.1.dylib: libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
++libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+ 	MLIBS=`$(CC) --print-multi-lib | sed -e 's/;.*$$//'` ; \
+ 	for mlib in $$MLIBS ; do \
+ 	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  \
+-- 
+2.35.1
+
+
+From 88d872abe4f9022e38ef34a63184a51f93748f8e Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sat, 1 Jan 2022 17:13:52 +0000
+Subject: [PATCH 15/15] Darwin: We do not have startswith() on GCC-10 branch.
+
+Use strncmp instead.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+---
+ gcc/config/darwin-driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git gcc/config/darwin-driver.c gcc/config/darwin-driver.c
+index 291d2ec9056..f7c683cd234 100644
+--- gcc/config/darwin-driver.c
++++ gcc/config/darwin-driver.c
+@@ -373,7 +373,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+ 	case OPT_Xlinker:
+ 	case OPT_Wl_:
+ 	  gcc_checking_assert ((*decoded_options)[i].arg);
+-	  if (startswith ((*decoded_options)[i].arg, "-exported_symbol"))
++	  if (strncmp ((*decoded_options)[i].arg, "-exported_symbol", 16) == 0)
+ 	    noexport_p = false;
+ 	  break;
+ 
+-- 
+2.35.1
+
