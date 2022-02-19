@@ -1,6 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           muniversal 1.0
 
 # ideally for this bootstrap port we want no deps on any MacPorts port. This port
 # should build cleanly from system roots and use and/or link to nothing in MacPorts.
@@ -9,7 +10,7 @@ name                gcc10-bootstrap
 
 # Note, this is the last version of gcc which haven't required c++11 for bootstrap
 version             10.3.0
-revision            0
+revision            1
 epoch               0
 
 platforms           darwin
@@ -118,7 +119,7 @@ if { ${os.platform} eq "darwin" && ${os.major} > 20} {
 }
 
 if { ${os.platform} eq "darwin" && ${os.major} > 19} {
-    # replace std=gnu++98 to std=c++ on macOS 11 and 12 fixes linking error
+    # replace std=gnu++98 to std=c++11 on macOS 11 and 12 fixes linking error
     # See: https://trac.macports.org/ticket/64316
     patchfiles-append patch-darwin21-cxx11.diff
 }
@@ -128,34 +129,25 @@ compiler.cpath
 compiler.library_path
 
 configure.cxx_stdlib
-configure.cxxflags
+
 configure.cflags
+configure.cxxflags
 configure.cppflags
 configure.optflags
-
-configure.cc_archflags
-configure.cxx_archflags
-configure.objc_archflags
-configure.ld_archflags
+configure.ldflags
 
 configure.universal_cflags
 configure.universal_cxxflags
+configure.universal_cppflags
 configure.universal_ldflags
 configure.universal_args
 
 configure.ccache    no
 configure.distcc    no
 
-pre-configure {
-    file mkdir ${workpath}/bins
-    ln -s /usr/bin/ld ${workpath}/bins/ld
-    ln -s /usr/bin/as ${workpath}/bins/as
-    ln -s /usr/bin/cpp ${workpath}/bins/cpp
-}
-
-# add our bins directory to the front of the PATH
-configure.env-append    PATH=${workpath}/bins:/usr/bin:/bin:/usr/sbin:/sbin
-build.env-append        PATH=${workpath}/bins:/usr/bin:/bin:/usr/sbin:/sbin
+# sterilize PATH
+configure.env-append    PATH=/usr/bin:/bin:/usr/sbin:/sbin
+build.env-append        PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 platform darwin 8 {
     # Tiger comes with make 3.80 and we need 3.81
@@ -169,61 +161,123 @@ platform darwin 8 {
                         size    1564560
 
     pre-configure {
+        file mkdir ${workpath}/bins
         system -W ${workpath}/${MAKE_V} "CC=/usr/bin/cc ./configure && make"
         ln -s ${workpath}/${MAKE_V}/make   ${workpath}/bins/make
     }
 
     configure.env-append    MAKE=${workpath}/bins/make
     build.env-append        MAKE=${workpath}/bins/make
-}
 
-set prefix          ${prefix}/libexec/${name}
+    configure.env-replace   PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+                            PATH=${workpath}/bins:/usr/bin:/bin:/usr/sbin:/sbin
+
+    build.env-replace       PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+                            PATH=${workpath}/bins:/usr/bin:/bin:/usr/sbin:/sbin
+}
 
 configure.cmd       ${worksrcpath}/configure
 configure.dir       ${workpath}/build
+configure.pre_args  --prefix=${prefix}/libexec/${name}
 configure.args      --enable-languages=c,c++,objc,obj-c++ \
                     --enable-bootstrap \
                     --with-system-zlib \
                     --disable-nls \
                     --disable-tls \
+                    --disable-multilib \
+                    --disable-multiarch \
                     --with-bugurl=https://trac.macports.org/newticket
 
 if {${os.major} >= 18 && ${configure.sdkroot} ne ""} {
     configure.args-append --with-sysroot="[regsub {MacOSX1[0-9]\.[0-9]+\.sdk} ${configure.sdkroot} {MacOSX.sdk}]"
 }
 
-if {${os.major} < 18} {
-    universal_variant yes
-    default_variants +universal
-} else {
-    universal_variant no
-    configure.args-append --disable-multilib
+set universal_targets ""
+foreach arch ${configure.universal_archs} {
+    switch -- ${arch} {
+        arm64   {set universal_targets "${universal_targets},aarch64-apple-${os.platform}${os.version}"}
+        x86_64  {set universal_targets "${universal_targets},x86_64-apple-${os.platform}${os.version}"}
+        i386    {set universal_targets "${universal_targets},i686-apple-${os.platform}${os.version}"}
+        ppc     {set universal_targets "${universal_targets},powerpc-apple-${os.platform}${os.version}"}
+        ppc64   {set universal_targets "${universal_targets},powerpc64-apple-${os.platform}${os.version}"}
+    }
 }
 
-platform powerpc {
-    configure.universal_archs ppc ppc64
+variant universal {
+    configure.args-replace \
+                    --disable-multilib \
+                    --enable-multilib
+
+    configure.args-replace \
+                    --disable-multiarch \
+                    --enable-multiarch
+
+    if { [string length ${universal_targets}] > 0 } {
+        configure.args-append \
+            --enable-targets=[string replace ${universal_targets} 0 0]
+    }
 }
-platform i386 {
-    configure.universal_archs i386 x86_64
-}
-platform arm {
-    configure.universal_archs x86_64 arm64
-}
+
+default_variants    +universal
 
 platform darwin 8 {
-    configure.args-append --with-dwarf2
+    configure.args-append \
+                    --with-dwarf2
+}
+
+merger_arch_flag            yes
+merger_arch_compiler        yes
+merger_must_run_binaries    yes
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+if {${universal_possible} && [variant_isset universal]} {
+    set merger_host(arm64)  aarch64-apple-${os.platform}${os.major}
+    set merger_host(i386)   i386-apple-${os.platform}${os.major}
+    set merger_host(ppc)    powerpc-apple-${os.platform}${os.major}
+    set merger_host(ppc64)  powerpc64-apple-${os.platform}${os.major}
+    set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
+
+    set merger_configure_args(arm64)  --build=aarch64-apple-${os.platform}${os.major}
+    set merger_configure_args(i386)   --build=i386-apple-${os.platform}${os.major}
+    set merger_configure_args(ppc)    --build=powerpc-apple-${os.platform}${os.major}
+    set merger_configure_args(ppc64)  --build=powerpc64-apple-${os.platform}${os.major}
+    set merger_configure_args(x86_64) --build=x86_64-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "arm64"} {
+    configure.args-append \
+                    --host=aarch64-apple-${os.platform}${os.major} \
+                    --build=aarch64-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "ppc"} {
+    configure.args-append \
+                    --host=powerpc-apple-${os.platform}${os.major} \
+                    --build=powerpc-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "ppc64"} {
+    configure.args-append \
+                    --host=powerpc64-apple-${os.platform}${os.major} \
+                    --build=powerpc64-apple-${os.platform}${os.major}
+} else {
+    configure.args-append \
+                    --host=${build_arch}-apple-${os.platform}${os.major} \
+                    --build=${build_arch}-apple-${os.platform}${os.major}
 }
 
 build.dir           ${configure.dir}
 build.target        bootstrap-lean
+
+# They differ when universal due to gcc multilib being messy non-universal
+destroot.delete_la_files yes
 
 notes "
 To use this bootstrap version of gcc instead of the default compiler, add the\
 following lines to the Portfile:
 
 depends_lib-append      port:${name}
-configure.cc            ${prefix}/bin/gcc
-configure.cxx           ${prefix}/bin/gcc++
+configure.cc            \$\{prefix\}/libexec/${name}/bin/gcc
+configure.cxx           \$\{prefix\}/libexec/${name}/bin/g++
+
+If you would like to build universal port with this compiler,\
+see clang-11-bootstrap port as example.
 "
 
 livecheck.type      none
