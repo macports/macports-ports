@@ -13,7 +13,7 @@
 global os.major
 
 if {${os.major} >= 11} {
-    lappend compilers macports-clang-12
+    lappend compilers compilers macports-clang-13 macports-clang-12
 }
 if {${os.major} >= 10} {
     lappend compilers macports-clang-11
@@ -29,13 +29,6 @@ if {${os.major} >= 9 && ${os.major} < 20} {
     lappend compilers macports-clang-7.0 \
                       macports-clang-6.0 \
                       macports-clang-5.0
-}
-
-# 13 is still pretty new, so add *after* 12 - 5.0 but before versions
-# that should only be used for bootstrapping. Will only be used if the
-# versions listed earlier don't meet the requirements.
-if {${os.major} >= 11} {
-    lappend compilers macports-clang-13
 }
 
 if {${os.major} < 16} {
