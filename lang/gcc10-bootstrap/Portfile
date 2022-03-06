@@ -1,6 +1,7 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           cltversion 1.0
 PortGroup           muniversal 1.0
 
 # ideally for this bootstrap port we want no deps on any MacPorts port. This port
@@ -10,7 +11,7 @@ name                gcc10-bootstrap
 
 # Note, this is the last version of gcc which haven't required c++11 for bootstrap
 version             10.3.0
-revision            3
+revision            4
 epoch               0
 
 platforms           darwin
@@ -157,9 +158,10 @@ platform darwin 8 {
                             PATH=${workpath}/bins:/usr/bin:/bin:/usr/sbin:/sbin
 }
 
+prefix              ${prefix}/libexec/${name}
+
 configure.cmd       ${worksrcpath}/configure
 configure.dir       ${workpath}/build
-configure.pre_args  --prefix=${prefix}/libexec/${name}
 configure.args      --enable-languages=c,c++,objc,obj-c++ \
                     --enable-bootstrap \
                     --with-system-zlib \
@@ -174,30 +176,17 @@ if {${os.major} >= 18 && ${configure.sdkroot} ne ""} {
     configure.args-append --with-sysroot="[regsub {MacOSX1[0-9]\.[0-9]+\.sdk} ${configure.sdkroot} {MacOSX.sdk}]"
 }
 
-set universal_targets ""
-foreach arch ${configure.universal_archs} {
-    switch -- ${arch} {
-        arm64   {set universal_targets "${universal_targets},aarch64-apple-${os.platform}${os.version}"}
-        x86_64  {set universal_targets "${universal_targets},x86_64-apple-${os.platform}${os.version}"}
-        i386    {set universal_targets "${universal_targets},i686-apple-${os.platform}${os.version}"}
-        ppc     {set universal_targets "${universal_targets},powerpc-apple-${os.platform}${os.version}"}
-        ppc64   {set universal_targets "${universal_targets},powerpc64-apple-${os.platform}${os.version}"}
+# clang (as) from Xcode 12.5 has various problems with gcc build
+if { ${os.platform} eq "darwin" && \
+         ( [ vercmp ${xcodeversion} 12.5 ] >= 0 || [ vercmp ${cltversion} 12.5 ] >= 0 ) } {
+    pre-configure {
+        ui_warn "Applying '--without-build-config' workaround to Xcode ${xcodeversion} / CLT ${cltversion}"
+        ui_warn "If versions > 12.5 please check if it is still required"
     }
-}
-
-variant universal {
-    configure.args-replace \
-                    --disable-multilib \
-                    --enable-multilib
-
-    configure.args-replace \
-                    --disable-multiarch \
-                    --enable-multiarch
-
-    if { [string length ${universal_targets}] > 0 } {
-        configure.args-append \
-            --enable-targets=[string replace ${universal_targets} 0 0]
-    }
+    # gcc has build issues on macOS 11.3 with the use of Xcode clang as 'as'
+    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=100340
+    # https://trac.macports.org/ticket/62775
+    configure.args-append  --without-build-config
 }
 
 default_variants    +universal
@@ -214,34 +203,42 @@ merger_must_run_binaries    yes
 if {![info exists universal_possible]} {
     set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
 }
-if {${universal_possible} && [variant_isset universal]} {
-    set merger_host(arm64)  aarch64-apple-${os.platform}${os.major}
-    set merger_host(i386)   i386-apple-${os.platform}${os.major}
-    set merger_host(ppc)    powerpc-apple-${os.platform}${os.major}
-    set merger_host(ppc64)  powerpc64-apple-${os.platform}${os.major}
-    set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
 
-    set merger_configure_args(arm64)  --build=aarch64-apple-${os.platform}${os.major}
-    set merger_configure_args(i386)   --build=i386-apple-${os.platform}${os.major}
-    set merger_configure_args(ppc)    --build=powerpc-apple-${os.platform}${os.major}
-    set merger_configure_args(ppc64)  --build=powerpc64-apple-${os.platform}${os.major}
-    set merger_configure_args(x86_64) --build=x86_64-apple-${os.platform}${os.major}
-} elseif {${build_arch} eq "arm64"} {
-    configure.args-append \
-                    --host=aarch64-apple-${os.platform}${os.major} \
-                    --build=aarch64-apple-${os.platform}${os.major}
-} elseif {${build_arch} eq "ppc"} {
-    configure.args-append \
-                    --host=powerpc-apple-${os.platform}${os.major} \
-                    --build=powerpc-apple-${os.platform}${os.major}
-} elseif {${build_arch} eq "ppc64"} {
-    configure.args-append \
-                    --host=powerpc64-apple-${os.platform}${os.major} \
-                    --build=powerpc64-apple-${os.platform}${os.major}
+set merger_host(arm64)  aarch64-apple-${os.platform}${os.major}
+set merger_host(i386)   i386-apple-${os.platform}${os.major}
+set merger_host(ppc)    powerpc-apple-${os.platform}${os.major}
+set merger_host(ppc64)  powerpc64-apple-${os.platform}${os.major}
+set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
+
+foreach {arch target} [array get merger_host] {
+    lappend merger_configure_args(${arch}) --build=${target}
+    lappend merger_configure_args(${arch}) --target=${target}
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    configure.args-replace \
+                     --disable-multilib \
+                     --enable-multilib
+
+    configure.args-replace \
+                     --disable-multiarch \
+                     --enable-multiarch
+
+    set universal_targets ""
+    foreach arch ${configure.universal_archs} {
+        set universal_targets "${universal_targets},$merger_host(${arch})"
+    }
+
+    if { [string length ${universal_targets}] > 0 } {
+        configure.args-append \
+            --enable-targets=[string replace ${universal_targets} 0 0]
+    }
 } else {
     configure.args-append \
-                    --host=${build_arch}-apple-${os.platform}${os.major} \
-                    --build=${build_arch}-apple-${os.platform}${os.major}
+                    --host=$merger_host(${build_arch}) \
+                    --build=$merger_host(${build_arch}) \
+                    --target=$merger_host(${build_arch}) \
+                    --enable-targets=$merger_host(${build_arch})
 }
 
 build.dir           ${configure.dir}
@@ -255,11 +252,35 @@ To use this bootstrap version of gcc instead of the default compiler, add the\
 following lines to the Portfile:
 
 depends_lib-append      port:${name}
+
 configure.cc            \$\{prefix\}/libexec/${name}/bin/gcc
 configure.cxx           \$\{prefix\}/libexec/${name}/bin/g++
 
 If you would like to build universal port with this compiler,\
-see clang-11-bootstrap port as example.
+you must use per target compiler. The easy way is using muniversal PG:
+
+PortGroup               muniversal 1.0
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+
+if {${universal_possible} && [variant_isset universal]} {
+    array set cpu_arch_map {arm64 aarch64 i386 x86 ppc powerpc ppc64  powerpc64 x86_64 x86_64}
+
+    configure.cc        {}
+    configure.cxx       {}
+
+    foreach {arch target} [array get cpu_arch_map] {
+        lappend merger_configure_env(${arch}) \
+                        CC=${prefix}/libexec/gcc10-bootstrap/bin/${target}-apple-${os.platform}${os.major}-gcc
+        lappend merger_configure_env(${arch}) \
+                        CXX=${prefix}/libexec/gcc10-bootstrap/bin/${target}-apple-${os.platform}${os.major}-g++
+    }
+} else {
+    configure.cc        \$\{prefix\}/libexec/${name}/bin/gcc
+    configure.cxx       \$\{prefix\}/libexec/${name}/bin/g++
+}
 "
 
 livecheck.type      none
