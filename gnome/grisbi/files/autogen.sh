@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # autogen.sh glue for Grisbi
 # $Id: autogen.sh,v 1.15 2009/08/23 07:27:46 pbiava Exp $
@@ -29,6 +29,9 @@ then
 	echo "Error: directory $PATH_AUTOMAKE does not exist"
 fi
 
+# fail on error
+set -e
+
 # Refresh GNU autotools toolchain.
 for i in config.guess config.sub missing install-sh mkinstalldirs ; do
 	test -r $PATH_AUTOMAKE/${i} && {
@@ -48,12 +51,12 @@ done
 # Check for "glibtool" first.
 # Borrowed from ethereal
 #
-LTVER=`glibtool --version 2>/dev/null | grep ' libtool)' | \
-    sed 's/.*libtool) \([0-9][0-9.]*\)[^ ]* .*/\1/'`
+LTVER=$(glibtool --version 2>/dev/null | grep ' libtool)' | \
+    sed 's/.*libtool) \([0-9][0-9.]*\)[^ ]* .*/\1/')
 if test -z "$LTVER"
 then
-	LTVER=`libtool --version | grep ' libtool)' | \
-	    sed 's/.*) \([0-9][0-9.]*\)[^ ]* .*/\1/' `
+	LTVER=$(libtoolize --version | grep ' libtool)' | \
+	    sed 's/.*) \([0-9][0-9.]*\)[^ ]* .*/\1/' )
 	LIBTOOLIZE=libtoolize
 else
 	LIBTOOLIZE=glibtoolize
