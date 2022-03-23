@@ -327,9 +327,6 @@ proc mpi.setup {args} {
         # So only enable for 10.8+.
         if {${os.major} < 12} {
             lappend ::mpi.disabled_compilers -gcc9 -gcc10 -gcc11
-        } elseif {$is_mpich} {
-            # mpich: gcc11 subport currently disabled across-the-board
-            lappend ::mpi.disabled_compilers -gcc11
         }
 
         if {${os.arch} eq "arm"} {
