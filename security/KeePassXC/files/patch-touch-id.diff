@@ -1,43 +1,189 @@
+commit 1e927a3ae50211f9bcff54858d04fc4474bfe13d
+Author: tenzap <fabstz-it@yahoo.fr>
+Date:   Sat Mar 26 10:44:33 2022 +0100
+
+    restore WITH_XC_TOUCHID configure option
+    
+    To be able to compile on macOS versions that don't support TouchID and related APIs
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index baa399d..a685ff0 100644
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -59,6 +59,9 @@ option(WITH_XC_UPDATECHECK "Include automatic update checks; disable for control
+ if(UNIX AND NOT APPLE)
+     option(WITH_XC_FDOSECRETS "Implement freedesktop.org Secret Storage Spec server side API." OFF)
+ endif()
++if(APPLE)
++    option(WITH_XC_TOUCHID "Include TouchID support for macOS." ON)
++endif()
+ option(WITH_XC_DOCS "Enable building of documentation" ON)
+ 
+ if(WITH_CCACHE)
+@@ -82,6 +85,9 @@ if(WITH_XC_ALL)
+     if(UNIX AND NOT APPLE)
+         set(WITH_XC_FDOSECRETS ON)
+     endif()
++    if(APPLE)
++        set(WITH_XC_TOUCHID ON)
++    endif()
+ endif()
+ 
+ # Prefer WITH_XC_NETWORKING setting over WITH_XC_UPDATECHECK
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 38d162e..d46a163 100644
+--- src/CMakeLists.txt
++++ src/CMakeLists.txt
+@@ -240,6 +240,9 @@ add_feature_info(UpdateCheck WITH_XC_UPDATECHECK "Automatic update checking")
+ if(UNIX AND NOT APPLE)
+     add_feature_info(FdoSecrets WITH_XC_FDOSECRETS "Implement freedesktop.org Secret Storage Spec server side API.")
+ endif()
++if(APPLE)
++    add_feature_info(TouchID WITH_XC_TOUCHID "TouchID integration")
++endif()
+ 
+ add_subdirectory(browser)
+ add_subdirectory(proxy)
+@@ -351,10 +354,13 @@ if(WITH_XC_KEESHARE)
+ endif()
+ 
+ if(APPLE)
+-    target_link_libraries(keepassx_core "-framework Foundation -framework AppKit -framework Carbon -framework Security -framework LocalAuthentication")
++    target_link_libraries(keepassx_core "-framework Foundation -framework AppKit -framework Carbon")
+     if(Qt5MacExtras_FOUND)
+         target_link_libraries(keepassx_core Qt5::MacExtras)
+     endif()
++    if(WITH_XC_TOUCHID)
++        target_link_libraries(keepassx_core "-framework Security -framework LocalAuthentication")
++    endif()
+ endif()
+ if(HAIKU)
+     target_link_libraries(keepassx_core network)
+diff --git a/src/config-keepassx.h.cmake b/src/config-keepassx.h.cmake
+index 6b855c6..da94bba 100644
+--- src/config-keepassx.h.cmake
++++ src/config-keepassx.h.cmake
+@@ -19,6 +19,7 @@
+ #cmakedefine WITH_XC_SSHAGENT
+ #cmakedefine WITH_XC_KEESHARE
+ #cmakedefine WITH_XC_UPDATECHECK
++#cmakedefine WITH_XC_TOUCHID
+ #cmakedefine WITH_XC_FDOSECRETS
+ #cmakedefine WITH_XC_DOCS
+ 
+diff --git a/src/gui/DatabaseOpenWidget.cpp b/src/gui/DatabaseOpenWidget.cpp
+index bfa4af1..2e7ebf4 100644
+--- src/gui/DatabaseOpenWidget.cpp
++++ src/gui/DatabaseOpenWidget.cpp
+@@ -59,7 +59,7 @@ namespace
+         if (isQuickUnlockAvailable()) {
+ #if defined(Q_CC_MSVC)
+             return getWindowsHello()->hasKey(filename);
+-#elif defined(Q_OS_MACOS)
++#elif defined(Q_OS_MACOS) && defined (WITH_XC_TOUCHID)
+             return TouchID::getInstance().containsKey(filename);
+ #endif
+         }
+@@ -279,7 +279,7 @@ void DatabaseOpenWidget::openDatabase()
+ #if defined(Q_CC_MSVC)
+             // Store the password using Windows Hello
+             getWindowsHello()->storeKey(m_filename, keyData);
+-#elif defined(Q_OS_MACOS)
++#elif defined(Q_OS_MACOS) && defined(WITH_XC_TOUCHID)
+             // Store the password using TouchID
+             TouchID::getInstance().storeKey(m_filename, keyData);
+ #endif
+@@ -336,7 +336,7 @@ QSharedPointer<CompositeKey> DatabaseOpenWidget::buildDatabaseKey()
+             m_ui->messageWidget->showMessage(tr("Failed to authenticate with Windows Hello"), MessageWidget::Error);
+             return {};
+         }
+-#elif defined(Q_OS_MACOS)
++#elif defined(Q_OS_MACOS) && defined(WITH_XC_TOUCHID)
+         if (!TouchID::getInstance().getKey(m_filename, keyData)) {
+             // Failed to retrieve Quick Unlock data
+             m_ui->messageWidget->showMessage(tr("Failed to authenticate with Touch ID"), MessageWidget::Error);
+@@ -532,7 +532,7 @@ void DatabaseOpenWidget::resetQuickUnlock()
+ {
+ #if defined(Q_CC_MSVC)
+     getWindowsHello()->reset(m_filename);
+-#elif defined(Q_OS_MACOS)
++#elif defined(Q_OS_MACOS) && defined(WITH_XC_TOUCHID)
+     TouchID::getInstance().reset(m_filename);
+ #endif
+     load(m_filename);
+diff --git a/src/gui/dbsettings/DatabaseSettingsWidgetDatabaseKey.cpp b/src/gui/dbsettings/DatabaseSettingsWidgetDatabaseKey.cpp
+index 2dae5cb..e5c5cff 100644
+--- src/gui/dbsettings/DatabaseSettingsWidgetDatabaseKey.cpp
++++ src/gui/dbsettings/DatabaseSettingsWidgetDatabaseKey.cpp
+@@ -200,7 +200,7 @@ bool DatabaseSettingsWidgetDatabaseKey::save()
+ 
+     m_db->setKey(newKey, true, false, false);
+ 
+-#if defined(Q_OS_MACOS)
++#if defined(Q_OS_MACOS) && defined(WITH_XC_TOUCHID)
+     TouchID::getInstance().reset(m_db->filePath());
+ #elif defined(Q_CC_MSVC)
+     getWindowsHello()->reset(m_db->filePath());
+diff --git a/src/touchid/TouchID.mm b/src/touchid/TouchID.mm
+index 236711e..668a41b 100644
 --- src/touchid/TouchID.mm
 +++ src/touchid/TouchID.mm
-@@ -105,10 +105,12 @@
-                                                     &error);
-     } else {
- #endif
-+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101201
-         sacObject = SecAccessControlCreateWithFlags(kCFAllocatorDefault,
-                                                     kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-                                                     kSecAccessControlTouchIDCurrentSet, // depr: kSecAccessControlBiometryCurrentSet,
-                                                     &error);
-+#endif
- #if __clang_major__ >= 9 && MAC_OS_X_VERSION_MIN_REQUIRED >= 101500
-     }
- #endif
-@@ -236,6 +238,9 @@
+@@ -1,7 +1,9 @@
+ #define SECURITY_ACCOUNT_PREFIX QString("KeepassXC_TouchID_Keys_")
+ 
+ #include "touchid/TouchID.h"
++#include "config-keepassx.h"
+ 
++#ifdef WITH_XC_TOUCHID
+ #include "crypto/Random.h"
+ #include "crypto/SymmetricCipher.h"
+ #include "crypto/CryptoHash.h"
+@@ -24,6 +26,7 @@ inline QString hash(const QString& value)
+     QByteArray result = CryptoHash::hash(value.toUtf8(), CryptoHash::Sha256).toHex();
+     return QString(result);
+ }
++#endif //defined(WITH_XC_TOUCHID)
+ 
+ /**
+  * Singleton
+@@ -35,6 +38,7 @@ inline QString hash(const QString& value)
+     return instance;
+ }
+ 
++#ifdef WITH_XC_TOUCHID
+ /**
+  * Generates a random AES 256bit key and uses it to encrypt the PasswordKey that
+  * protects the database. The encrypted PasswordKey is kept in memory while the
+@@ -230,12 +234,16 @@ inline QString hash(const QString& value)
+ {
+     return m_encryptedMasterKeys.contains(dbPath);
+ }
++#endif //defined(WITH_XC_TOUCHID)
+ 
+ /**
+  * Dynamic check if TouchID is available on the current machine.
   */
  bool TouchID::isAvailable()
  {
-+#if MAC_OS_X_VERSION_MIN_REQUIRED < 101201
++#ifndef WITH_XC_TOUCHID
 +	return false;
 +#else
      // cache result
      if (this->m_available != TOUCHID_UNDEFINED) {
          return (this->m_available == TOUCHID_AVAILABLE);
-@@ -264,6 +269,7 @@
+@@ -264,8 +272,10 @@ inline QString hash(const QString& value)
          this->m_available = TOUCHID_NOT_AVAILABLE;
          return false;
      }
-+#endif
++#endif //defined(WITH_XC_TOUCHID)
  }
  
++#ifdef WITH_XC_TOUCHID
  typedef enum
-@@ -294,7 +300,9 @@
-             policyCode = LAPolicyDeviceOwnerAuthenticationWithBiometricsOrWatch;
-         } else {
- #endif
-+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 101201
-             policyCode = LAPolicyDeviceOwnerAuthenticationWithBiometrics;
-+#endif
- #if __clang_major__ >= 9 && MAC_OS_X_VERSION_MIN_REQUIRED >= 101500
-         }
- #endif
+ {
+     kTouchIDResultNone,
+@@ -329,3 +339,4 @@ inline QString hash(const QString& value)
+ 
+     this->m_encryptedMasterKeys.remove(databasePath);
+ }
++#endif //defined(WITH_XC_TOUCHID)
