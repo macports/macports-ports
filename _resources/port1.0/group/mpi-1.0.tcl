@@ -322,10 +322,8 @@ proc mpi.setup {args} {
             -gcc49 -gcc5 -gcc6 -gcc8 \
             -gccdevel
 
-        # gcc 9+ only available on OS X 10.7 (Darwin11) and newer
-        # However, gcc9+ subports fail to build on 10.7, for both openmpi and mpich.
-        # So only enable for 10.8+.
-        if {${os.major} < 12} {
+        # gcc 9+ only available on OS X 10.6 (Darwin 10) and newer
+        if {${os.major} < 10} {
             lappend ::mpi.disabled_compilers -gcc9 -gcc10 -gcc11
         }
 
