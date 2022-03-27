@@ -33,7 +33,7 @@
 #------------------------------------------------------------------------------
 #
 # Options:
-# * stub.subport_name - override subport name, for README location
+#   * stub.subport_name - override subport name, for README location
 #
 #==============================================================================
 
@@ -53,14 +53,10 @@ use_configure       no
 
 build {}
 
-proc stub::subport_name {} {
-    return [option stub.subport_name]
-}
-
 proc stub::destroot {} {
     global destroot prefix
 
-    set subport_name [stub::subport_name]
+    set subport_name [option stub.subport_name]
     set docdir ${destroot}${prefix}/share/doc/${subport_name}
     xinstall -d ${docdir}
     system "echo ${subport_name} is a stub port > ${docdir}/README"
