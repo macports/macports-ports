@@ -2,24 +2,34 @@
 
 PortSystem          1.0
 PortGroup           github 1.0
+PortGroup           legacysupport 1.0
 
-github.setup        vlang v 0.2.4
-name                vlang
+# clock_gettime
+legacysupport.newest_darwin_requires_legacy 15
+
+github.setup        vlang v weekly.2022.13
 github.tarball_from archive
 revision            0
 
+name                vlang
+# Remove weekly from version number
+version             [string range ${version} 7 end]
+
 description         Simple, fast, safe, compiled language for developing maintainable software
-long_description    {*}${description}. Compiles itself in <1s with zero library dependencies.
+long_description    {*}${description}. Compiles itself in <1s with zero library dependencies. This port \
+                    provides weekly builds of Vlang.
 
 license             MIT
 categories          lang
 maintainers         {harens @harens} openmaintainer
 
-set main_distfile   ${distfiles}
+# Fix location of temporary directory
+patchfiles          patch-tmp-location.diff
 
-# Install the compiler for vlang as a separate distfile.
+# Install the V compiler as a separate distfile.
 # Based on https://github.com/macports/macports-ports/blob/master/games/minetest/Portfile
-set vc_commit       fd5f57740ff6d7a8566b774318df54c2fa460f92
+set vc_commit       de63146da0a0f93628f8a65e70267e2c8d4c7ce1
+set main_distfile   ${distfiles}
 set vc_distfile     ${vc_commit}${extract.suffix}
 set vc_mastersite   https://github.com/vlang/vc/archive
 
@@ -30,23 +40,34 @@ master_sites        ${github.master_sites}:main \
                     ${vc_mastersite}:vc
 
 checksums           ${main_distfile} \
-                    rmd160  36c9549425ebec8cd11fc22617e1453fd618053c \
-                    sha256  8cdbc32fb928051ce7959dd943af3efee26bddc4ed3700a1cb365be73a306bf9 \
-                    size    3502493 \
+                    rmd160  22933b810c1445643d18430c99803a0210be2e19 \
+                    sha256  5df66008b01de13d02da9f8f0ed47438e1ce01e82543738a33a7dcc65240aa37 \
+                    size    4078460 \
                     ${vc_distfile} \
-                    rmd160  abb6cba7c973bae25328b3faefa77075967aec00 \
-                    sha256  f6896513cec7e065ae438fd098b8b13c08ee73eb3915578f703116ce98f72b3a \
-                    size    1284143
+                    rmd160  2dc5fc11de6b9b265095d26e6cc08f4a5b5c5c73 \
+                    sha256  db89d158a721ef1f37be2865f273e9a017e5f1c69be0ed60830a4c625e73b0b2 \
+                    size    1353099
 
 compiler.c_standard 2011
 use_configure       no
 
-build {
+post-patch {
     # Disable vlang self update feature.
+    set updating_path ${worksrcpath}/cmd/tools
     copy -force ${filespath}/vup.v ${worksrcpath}/cmd/tools
 
-    system -W ${worksrcpath} "${configure.cc} ${configure.cflags} -v -o v ../vc-${vc_commit}/v.c -lm ${configure.ldflags}"
-    system -W ${worksrcpath} "./v -cflags ${configure.cflags} -cc ${configure.cc} -prod self"
+    # Patch tmp directory, which is required during buildtime and runtime
+    reinplace "s|@@WORKPATH@@|${workpath}|g" ${worksrcpath}/vlib/v/util/util.v
+    reinplace "s|@@PREFIX@@|${prefix}|g" ${worksrcpath}/vlib/v/util/util.v
+}
+
+# Build process based on https://github.com/vlang/v/blob/master/Makefile
+build {
+    set VFLAGS "-cc ${configure.cc} -cflags ${configure.cflags}"
+
+    system -W ${worksrcpath} "${configure.cc} ${configure.cflags} -I ./thirdparty/stdatomic/nix -o v1 ../vc-${vc_commit}/v.c -lm -lpthread ${configure.ldflags}"
+    system -W ${worksrcpath} "./v1 -no-parallel -o v2 ${VFLAGS} cmd/v"
+    system -W ${worksrcpath} "./v2 -o v ${VFLAGS} cmd/v"
 }
 
 destroot {
@@ -67,37 +88,25 @@ destroot {
     # Allow running Vlang to those in the _developer group, rather than running sudo each time.
     # See https://github.com/vlang/v/issues/10324
 
-    system "
-        chgrp -R _developer ${library_path}/cmd/tools;
-        chmod -R g+w ${library_path}/cmd/tools;
-    "
-}
+    # Majority of subcommands only require ${library_path}/cmd/tools to be writable but v self requires
+    # all of ${library_path}
 
-# If /tmp/v exists, build fails if it isn't writable. Also fails at runtime if it isn't writable.
-# Assume MacPorts creates /tmp/v, and so make it writable to the _developer group
-# See https://github.com/vlang/v/issues/7713 and https://github.com/vlang/v/discussions/11796
-post-activate {
-    if {![file exists /tmp/v]} {
-        file mkdir /tmp/v
+    fs-traverse item ${library_path} {
+        file attributes ${item} -group _developer -permissions g+w
     }
-    system "
-        chgrp -R _developer /tmp/v;
-        chmod -R g+w /tmp/v;
-    "
+
+    # Manually create a tmp directory, and set writable permissions
+    # See https://github.com/vlang/v/issues/7713 and https://github.com/vlang/v/discussions/11796
+    set tmp_dir ${prefix}/var/run/vlang
+    file mkdir ${tmp_dir}
+    file attributes ${tmp_dir} -group _developer -permissions g+w
 }
 
 # Based on various Android ports - don't make files world-writable.
 # e.g. https://github.com/macports/macports-ports/blob/master/java/android/Portfile
 notes "
-The Vlang tools and cache directory are group _developer writable. You need to be a member of the
+The Vlang library and cache directories are group _developer writable. You need to be a member of the
 _developer group to use Vlang. If you are not, run:
 
 sudo dscl . append /Groups/_developer GroupMembership <username>
 "
-
-# GitHub releases and tags are filled up with weekly releases
-# Stable release is many pages later, so MacPorts can't find it.
-# Fetch directly from version file.
-livecheck.url       https://raw.githubusercontent.com/vlang/v/master/v.mod
-# Ignore dots just by themselves - and remove apostraphes from version number
-livecheck.regex {([0-9]+.[0-9.]+)}
