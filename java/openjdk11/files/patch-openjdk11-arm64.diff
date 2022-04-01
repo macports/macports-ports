@@ -1,0 +1,4647 @@
+This patch adds arm64 support using OpenJDK's AArch64 port
+--- make/autoconf/build-aux/config.guess.orig
++++ make/autoconf/build-aux/config.guess
+@@ -1,6 +1,7 @@
+ #!/bin/sh
+ #
+-# Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+ # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ #
+ # This code is free software; you can redistribute it and/or modify it
+@@ -106,6 +107,14 @@ if [ "x$OUT" = x ]; then
+   fi
+ fi
+ 
++# Test and fix cpu on macos-aarch64, uname -p reports arm, buildsys expects aarch64
++echo $OUT | grep arm-apple-darwin > /dev/null 2> /dev/null
++if test $? = 0; then
++  if [ `uname -m` = arm64 ]; then
++    OUT=aarch64`echo $OUT | sed -e 's/[^-]*//'`
++  fi
++fi
++
+ # Test and fix cpu on Macosx when C preprocessor is not on the path
+ echo $OUT | grep i386-apple-darwin > /dev/null 2> /dev/null
+ if test $? = 0; then
+
+--- make/autoconf/flags.m4.orig
++++ make/autoconf/flags.m4
+@@ -111,19 +111,25 @@ AC_DEFUN([FLAGS_SETUP_MACOSX_VERSION],
+ [
+   # Additional macosx handling
+   if test "x$OPENJDK_TARGET_OS" = xmacosx; then
++    # The expected format for <version> is either nn.n.n or nn.nn.nn. See
++    # /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/AvailabilityVersions.h
++
+     # MACOSX_VERSION_MIN specifies the lowest version of Macosx that the built
+     # binaries should be compatible with, even if compiled on a newer version
+     # of the OS. It currently has a hard coded value. Setting this also limits
+     # exposure to API changes in header files. Bumping this is likely to
+     # require code changes to build.
+-    MACOSX_VERSION_MIN=10.9.0
++    if test "x$OPENJDK_TARGET_CPU_ARCH" = xaarch64; then
++      MACOSX_VERSION_MIN=11.00.00
++    else
++      MACOSX_VERSION_MIN=10.9.0
++    fi
+     MACOSX_VERSION_MIN_NODOTS=${MACOSX_VERSION_MIN//\./}
+ 
+     AC_SUBST(MACOSX_VERSION_MIN)
+ 
+     # Setting --with-macosx-version-max=<version> makes it an error to build or
+-    # link to macosx APIs that are newer than the given OS version. The expected
+-    # format for <version> is either nn.n.n or nn.nn.nn. See /usr/include/AvailabilityMacros.h.
++    # link to macosx APIs that are newer than the given OS version.
+     AC_ARG_WITH([macosx-version-max], [AS_HELP_STRING([--with-macosx-version-max],
+         [error on use of newer functionality. @<:@macosx@:>@])],
+         [
+
+--- make/autoconf/hotspot.m4.orig
++++ make/autoconf/hotspot.m4
+@@ -1,5 +1,5 @@
+ #
+-# Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ #
+ # This code is free software; you can redistribute it and/or modify it
+@@ -274,6 +274,14 @@ AC_DEFUN_ONCE([HOTSPOT_ENABLE_DISABLE_CDS],
+     fi
+   fi
+ 
++  # Disable CDS on macos-aarch64
++  if test "x$OPENJDK_TARGET_OS" = "xmacosx" && test "x$OPENJDK_TARGET_CPU" = "xaarch64"; then
++    ENABLE_CDS="false"
++    if test "x$enable_cds" = "xyes"; then
++      AC_MSG_ERROR([CDS is currently not supported on macOS/aarch64. Remove --enable-cds.])
++    fi
++  fi
++
+   AC_SUBST(ENABLE_CDS)
+ ])
+ 
+
+--- make/common/NativeCompilation.gmk.orig
++++ make/common/NativeCompilation.gmk
+@@ -1213,7 +1213,7 @@ define SetupNativeCompilationBody
+                 # This only works if the openjdk_codesign identity is present on the system. Let
+                 # silently fail otherwise.
+                 ifneq ($(CODESIGN), )
+-		  $(CODESIGN) -s "$(MACOSX_CODESIGN_IDENTITY)" --timestamp --options runtime \
++		  $(CODESIGN) -f -s "$(MACOSX_CODESIGN_IDENTITY)" --timestamp --options runtime \
+ 		      --entitlements $$(call GetEntitlementsFile, $$@) $$@
+                 endif
+   endif
+
+--- make/hotspot/gensrc/GensrcAdlc.gmk.orig
++++ make/hotspot/gensrc/GensrcAdlc.gmk
+@@ -1,5 +1,5 @@
+ #
+-# Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ #
+ # This code is free software; you can redistribute it and/or modify it
+@@ -99,6 +99,9 @@ ifeq ($(call check-jvm-feature, compiler2), true)
+     ADLCFLAGS += -DAIX=1
+   else ifeq ($(OPENJDK_TARGET_OS), macosx)
+     ADLCFLAGS += -D_ALLBSD_SOURCE=1 -D_GNU_SOURCE=1
++    ifeq ($(HOTSPOT_TARGET_CPU_ARCH), aarch64)
++      ADLCFLAGS += -DR18_RESERVED
++    endif
+   else ifeq ($(OPENJDK_TARGET_OS), windows)
+     ifeq ($(call isTargetCpuBits, 64), true)
+       ADLCFLAGS += -D_WIN64=1
+
+--- make/lib/Awt2dLibraries.gmk.orig
++++ make/lib/Awt2dLibraries.gmk
+@@ -562,7 +562,7 @@ else
+        maybe-uninitialized class-memaccess
+   HARFBUZZ_DISABLED_WARNINGS_clang := unused-value incompatible-pointer-types \
+        tautological-constant-out-of-range-compare int-to-pointer-cast \
+-       undef missing-field-initializers
++       undef missing-field-initializers deprecated-declarations c++11-narrowing
+   HARFBUZZ_DISABLED_WARNINGS_microsoft := 4267 4244 4090 4146 4334 4819 4101 4068 4805 4138
+   HARFBUZZ_DISABLED_WARNINGS_C_solstudio := \
+         E_INTEGER_OVERFLOW_DETECTED \
+
+--- make/lib/Lib-jdk.hotspot.agent.gmk.orig
++++ make/lib/Lib-jdk.hotspot.agent.gmk
+@@ -36,7 +36,7 @@ else ifeq ($(OPENJDK_TARGET_OS), solaris)
+   SA_LDFLAGS := -mt
+ 
+ else ifeq ($(OPENJDK_TARGET_OS), macosx)
+-  SA_CFLAGS := -Damd64 -D_GNU_SOURCE -mno-omit-leaf-frame-pointer \
++  SA_CFLAGS := -D_GNU_SOURCE -mno-omit-leaf-frame-pointer \
+       -mstack-alignment=16 -fPIC
+   LIBSA_EXTRA_SRC := $(SUPPORT_OUTPUTDIR)/gensrc/jdk.hotspot.agent
+ else ifeq ($(OPENJDK_TARGET_OS), windows)
+
+--- src/hotspot/cpu/aarch64/globalDefinitions_aarch64.hpp.orig
++++ src/hotspot/cpu/aarch64/globalDefinitions_aarch64.hpp
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 1999, 2015, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2015, Red Hat Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+@@ -53,7 +53,7 @@ const bool CCallingConventionRequiresIntsAsLongs = false;
+ 
+ #define THREAD_LOCAL_POLL
+ 
+-#if defined(_WIN64)
++#if defined(__APPLE__) || defined(_WIN64)
+ #define R18_RESERVED
+ #define R18_RESERVED_ONLY(code) code
+ #define NOT_R18_RESERVED(code)
+
+--- src/hotspot/cpu/aarch64/interpreterRT_aarch64.cpp.orig
++++ src/hotspot/cpu/aarch64/interpreterRT_aarch64.cpp
+@@ -1,6 +1,7 @@
+ /*
+- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -58,9 +59,14 @@ FloatRegister InterpreterRuntime::SignatureHandlerGenerator::next_fpr() {
+   return fnoreg;
+ }
+ 
+-int InterpreterRuntime::SignatureHandlerGenerator::next_stack_offset() {
++// On macos/aarch64 native stack is packed, int/float are using only 4 bytes
++// on stack. Natural alignment for types are still in place,
++// for example double/long should be 8 bytes aligned.
++
++int InterpreterRuntime::SignatureHandlerGenerator::next_stack_offset(unsigned elem_size) {
++  MACOS_ONLY(_stack_offset = align_up(_stack_offset, elem_size));
+   int ret = _stack_offset;
+-  _stack_offset += wordSize;
++  _stack_offset += NOT_MACOS(wordSize) MACOS_ONLY(elem_size);
+   return ret;
+ }
+ 
+@@ -72,6 +78,30 @@ InterpreterRuntime::SignatureHandlerGenerator::SignatureHandlerGenerator(
+   _stack_offset = 0;
+ }
+ 
++void InterpreterRuntime::SignatureHandlerGenerator::pass_byte() {
++  const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
++
++  Register reg = next_gpr();
++  if (reg != noreg) {
++    __ ldr(reg, src);
++  } else {
++    __ ldrb(r0, src);
++    __ strb(r0, Address(to(), next_stack_offset(sizeof(jbyte))));
++  }
++}
++
++void InterpreterRuntime::SignatureHandlerGenerator::pass_short() {
++  const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
++
++  Register reg = next_gpr();
++  if (reg != noreg) {
++    __ ldr(reg, src);
++  } else {
++    __ ldrh(r0, src);
++    __ strh(r0, Address(to(), next_stack_offset(sizeof(jshort))));
++  }
++}
++
+ void InterpreterRuntime::SignatureHandlerGenerator::pass_int() {
+   const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
+ 
+@@ -80,7 +110,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_int() {
+     __ ldr(reg, src);
+   } else {
+     __ ldrw(r0, src);
+-    __ strw(r0, Address(to(), next_stack_offset()));
++    __ strw(r0, Address(to(), next_stack_offset(sizeof(jint))));
+   }
+ }
+ 
+@@ -92,7 +122,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_long() {
+     __ ldr(reg, src);
+   } else {
+     __ ldr(r0, src);
+-    __ str(r0, Address(to(), next_stack_offset()));
++    __ str(r0, Address(to(), next_stack_offset(sizeof(jlong))));
+   }
+ }
+ 
+@@ -104,7 +134,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_float() {
+     __ ldrs(reg, src);
+   } else {
+     __ ldrw(r0, src);
+-    __ strw(r0, Address(to(), next_stack_offset()));
++    __ strw(r0, Address(to(), next_stack_offset(sizeof(jfloat))));
+   }
+ }
+ 
+@@ -116,7 +146,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_double() {
+     __ ldrd(reg, src);
+   } else {
+     __ ldr(r0, src);
+-    __ str(r0, Address(to(), next_stack_offset()));
++    __ str(r0, Address(to(), next_stack_offset(sizeof(jdouble))));
+   }
+ }
+ 
+@@ -140,7 +170,8 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_object() {
+     __ cbnz(temp(), L);
+     __ mov(r0, zr);
+     __ bind(L);
+-    __ str(r0, Address(to(), next_stack_offset()));
++    STATIC_ASSERT(sizeof(jobject) == wordSize);
++    __ str(r0, Address(to(), next_stack_offset(sizeof(jobject))));
+   }
+ }
+ 
+@@ -165,7 +196,7 @@ class SlowSignatureHandler
+   : public NativeSignatureIterator {
+  private:
+   address   _from;
+-  intptr_t* _to;
++  char*     _to;
+   intptr_t* _int_args;
+   intptr_t* _fp_args;
+   intptr_t* _fp_identifiers;
+@@ -200,21 +231,38 @@ class SlowSignatureHandler
+     return -1;
+   }
+ 
+-  void pass_stack(intptr_t value) {
+-    *_to++ = value;
++  template<typename T>
++  void pass_stack(T value) {
++    MACOS_ONLY(_to = align_up(_to, sizeof(value)));
++    *(T *)_to = value;
++    _to += NOT_MACOS(wordSize) MACOS_ONLY(sizeof(value));
++  }
++
++  virtual void pass_byte() {
++    jbyte value = *(jbyte*)single_slot_addr();
++    if (pass_gpr(value) < 0) {
++      pass_stack<>(value);
++    }
++  }
++
++  virtual void pass_short() {
++    jshort value = *(jshort*)single_slot_addr();
++    if (pass_gpr(value) < 0) {
++      pass_stack<>(value);
++    }
+   }
+ 
+   virtual void pass_int() {
+     jint value = *(jint*)single_slot_addr();
+     if (pass_gpr(value) < 0) {
+-      pass_stack(value);
++      pass_stack<>(value);
+     }
+   }
+ 
+   virtual void pass_long() {
+     intptr_t value = *double_slot_addr();
+     if (pass_gpr(value) < 0) {
+-      pass_stack(value);
++      pass_stack<>(value);
+     }
+   }
+ 
+@@ -222,14 +270,14 @@ class SlowSignatureHandler
+     intptr_t* addr = single_slot_addr();
+     intptr_t value = *addr == 0 ? NULL : (intptr_t)addr;
+     if (pass_gpr(value) < 0) {
+-      pass_stack(value);
++      pass_stack<>(value);
+     }
+   }
+ 
+   virtual void pass_float() {
+     jint value = *(jint*)single_slot_addr();
+     if (pass_fpr(value) < 0) {
+-      pass_stack(value);
++      pass_stack<>(value);
+     }
+   }
+ 
+@@ -239,7 +287,7 @@ class SlowSignatureHandler
+     if (0 <= arg) {
+       *_fp_identifiers |= (1ull << arg); // mark as double
+     } else {
+-      pass_stack(value);
++      pass_stack<>(value);
+     }
+   }
+ 
+@@ -248,7 +296,7 @@ class SlowSignatureHandler
+     : NativeSignatureIterator(method)
+   {
+     _from = from;
+-    _to   = to;
++    _to   = (char *)to;
+ 
+     _int_args = to - (method->is_static() ? 16 : 17);
+     _fp_args =  to - 8;
+
+--- src/hotspot/cpu/aarch64/interpreterRT_aarch64.hpp.orig
++++ src/hotspot/cpu/aarch64/interpreterRT_aarch64.hpp
+@@ -1,6 +1,7 @@
+ /*
+- * Copyright (c) 1998, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 1998, 2021, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -38,6 +39,8 @@ class SignatureHandlerGenerator: public NativeSignatureIterator {
+   unsigned int _num_reg_int_args;
+   int _stack_offset;
+ 
++  void pass_byte();
++  void pass_short();
+   void pass_int();
+   void pass_long();
+   void pass_float();
+@@ -46,7 +49,7 @@ class SignatureHandlerGenerator: public NativeSignatureIterator {
+ 
+   Register next_gpr();
+   FloatRegister next_fpr();
+-  int next_stack_offset();
++  int next_stack_offset(unsigned elem_size);
+ 
+  public:
+   // Creation
+
+--- src/hotspot/cpu/aarch64/jniFastGetField_aarch64.cpp.orig
++++ src/hotspot/cpu/aarch64/jniFastGetField_aarch64.cpp
+@@ -31,6 +31,7 @@
+ #include "prims/jniFastGetField.hpp"
+ #include "prims/jvm_misc.hpp"
+ #include "runtime/safepoint.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ 
+ #define __ masm->
+ 
+@@ -51,6 +52,48 @@ static const Register roffset       = r5;
+ static const Register rcounter_addr = r6;
+ static const Register result        = r7;
+ 
++// On macos/aarch64 we need to ensure WXExec mode when running generated
++// FastGetXXXField, as these functions can be called from WXWrite context
++// (8262896).  So each FastGetXXXField is wrapped into a C++ statically
++// compiled template function that optionally switches to WXExec if necessary.
++
++#ifdef __APPLE__
++
++static address generated_fast_get_field[T_LONG + 1 - T_BOOLEAN];
++
++template<int BType> struct BasicTypeToJni {};
++template<> struct BasicTypeToJni<T_BOOLEAN> { static const jboolean jni_type; };
++template<> struct BasicTypeToJni<T_BYTE>    { static const jbyte    jni_type; };
++template<> struct BasicTypeToJni<T_CHAR>    { static const jchar    jni_type; };
++template<> struct BasicTypeToJni<T_SHORT>   { static const jshort   jni_type; };
++template<> struct BasicTypeToJni<T_INT>     { static const jint     jni_type; };
++template<> struct BasicTypeToJni<T_LONG>    { static const jlong    jni_type; };
++template<> struct BasicTypeToJni<T_FLOAT>   { static const jfloat   jni_type; };
++template<> struct BasicTypeToJni<T_DOUBLE>  { static const jdouble  jni_type; };
++
++template<int BType>
++decltype(BasicTypeToJni<BType>::jni_type) static_fast_get_field_wrapper(JNIEnv *env, jobject obj, jfieldID fieldID) {
++  JavaThread* thread = JavaThread::thread_from_jni_environment(env);
++  ThreadWXEnable wx(WXExec, thread);
++  address get_field_addr = generated_fast_get_field[BType - T_BOOLEAN];
++  return ((decltype(BasicTypeToJni<BType>::jni_type)(*)(JNIEnv *env, jobject obj, jfieldID fieldID))get_field_addr)(env, obj, fieldID);
++}
++
++template<int BType>
++address JNI_FastGetField::generate_fast_get_int_field1() {
++  generated_fast_get_field[BType - T_BOOLEAN] = generate_fast_get_int_field0((BasicType)BType);
++  return (address)static_fast_get_field_wrapper<BType>;
++}
++
++#else // __APPLE__
++
++template<int BType>
++address JNI_FastGetField::generate_fast_get_int_field1() {
++  return generate_fast_get_int_field0((BasicType)BType);
++}
++
++#endif // __APPLE__
++
+ address JNI_FastGetField::generate_fast_get_int_field0(BasicType type) {
+   const char *name;
+   switch (type) {
+@@ -147,33 +190,33 @@ address JNI_FastGetField::generate_fast_get_int_field0(BasicType type) {
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_boolean_field() {
+-  return generate_fast_get_int_field0(T_BOOLEAN);
++  return generate_fast_get_int_field1<T_BOOLEAN>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_byte_field() {
+-  return generate_fast_get_int_field0(T_BYTE);
++  return generate_fast_get_int_field1<T_BYTE>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_char_field() {
+-  return generate_fast_get_int_field0(T_CHAR);
++  return generate_fast_get_int_field1<T_CHAR>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_short_field() {
+-  return generate_fast_get_int_field0(T_SHORT);
++  return generate_fast_get_int_field1<T_SHORT>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_int_field() {
+-  return generate_fast_get_int_field0(T_INT);
++  return generate_fast_get_int_field1<T_INT>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_long_field() {
+-  return generate_fast_get_int_field0(T_LONG);
++  return generate_fast_get_int_field1<T_LONG>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_float_field() {
+-  return generate_fast_get_int_field0(T_FLOAT);
++  return generate_fast_get_int_field1<T_FLOAT>();
+ }
+ 
+ address JNI_FastGetField::generate_fast_get_double_field() {
+-  return generate_fast_get_int_field0(T_DOUBLE);
++  return generate_fast_get_int_field1<T_DOUBLE>();
+ }
+
+--- src/hotspot/cpu/aarch64/macroAssembler_aarch64.cpp.orig
++++ src/hotspot/cpu/aarch64/macroAssembler_aarch64.cpp
+@@ -1492,7 +1492,7 @@ void MacroAssembler::movptr(Register r, uintptr_t imm64) {
+ #ifndef PRODUCT
+   {
+     char buffer[64];
+-    snprintf(buffer, sizeof(buffer), PTR64_FORMAT, imm64);
++    snprintf(buffer, sizeof(buffer), "0x%"PRIX64, (uint64_t)imm64);
+     block_comment(buffer);
+   }
+ #endif
+@@ -1555,7 +1555,7 @@ void MacroAssembler::mov_immediate64(Register dst, uint64_t imm64)
+ #ifndef PRODUCT
+   {
+     char buffer[64];
+-    snprintf(buffer, sizeof(buffer), PTR64_FORMAT, imm64);
++    snprintf(buffer, sizeof(buffer), "0x%"PRIX64, imm64);
+     block_comment(buffer);
+   }
+ #endif
+@@ -1668,7 +1668,7 @@ void MacroAssembler::mov_immediate32(Register dst, uint32_t imm32)
+ #ifndef PRODUCT
+     {
+       char buffer[64];
+-      snprintf(buffer, sizeof(buffer), PTR32_FORMAT, imm32);
++      snprintf(buffer, sizeof(buffer), "0x%"PRIX32, imm32);
+       block_comment(buffer);
+     }
+ #endif
+
+--- src/hotspot/cpu/aarch64/macroAssembler_aarch64.hpp.orig
++++ src/hotspot/cpu/aarch64/macroAssembler_aarch64.hpp
+@@ -27,6 +27,7 @@
+ #define CPU_AARCH64_VM_MACROASSEMBLER_AARCH64_HPP
+ 
+ #include "asm/assembler.inline.hpp"
++#include "runtime/vm_version.hpp"
+ 
+ // MacroAssembler extends Assembler by frequently used macros.
+ //
+@@ -88,7 +89,7 @@ class MacroAssembler: public Assembler {
+       = (operand_valid_for_logical_immediate(false /*is32*/,
+                                              (uint64_t)Universe::narrow_klass_base())
+          && ((uint64_t)Universe::narrow_klass_base()
+-             > (1UL << log2_intptr(Universe::narrow_klass_range()))));
++             > (1UL << log2_intptr((uintptr_t)Universe::narrow_klass_range()))));
+   }
+ 
+  // These routines should emit JVMTI PopFrame and ForceEarlyReturn handling code.
+
+--- src/hotspot/cpu/aarch64/sharedRuntime_aarch64.cpp.orig
++++ src/hotspot/cpu/aarch64/sharedRuntime_aarch64.cpp
+@@ -1,6 +1,7 @@
+ /*
+  * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -715,7 +716,7 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
+   return AdapterHandlerLibrary::new_entry(fingerprint, i2c_entry, c2i_entry, c2i_unverified_entry);
+ }
+ 
+-int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
++static int c_calling_convention_priv(const BasicType *sig_bt,
+                                          VMRegPair *regs,
+                                          VMRegPair *regs2,
+                                          int total_args_passed) {
+@@ -746,6 +747,11 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
+         if (int_args < Argument::n_int_register_parameters_c) {
+           regs[i].set1(INT_ArgReg[int_args++]->as_VMReg());
+         } else {
++#ifdef __APPLE__
++          // Less-than word types are stored one after another.
++          // The code is unable to handle this so bailout.
++          return -1;
++#endif
+           regs[i].set1(VMRegImpl::stack2reg(stk_args));
+           stk_args += 2;
+         }
+@@ -768,6 +774,11 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
+         if (fp_args < Argument::n_float_register_parameters_c) {
+           regs[i].set1(FP_ArgReg[fp_args++]->as_VMReg());
+         } else {
++#ifdef __APPLE__
++          // Less-than word types are stored one after another.
++          // The code is unable to handle this so bailout.
++          return -1;
++#endif
+           regs[i].set1(VMRegImpl::stack2reg(stk_args));
+           stk_args += 2;
+         }
+@@ -794,6 +805,16 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
+   return stk_args;
+ }
+ 
++int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
++                                         VMRegPair *regs,
++                                         VMRegPair *regs2,
++                                         int total_args_passed)
++{
++  int result = c_calling_convention_priv(sig_bt, regs, regs2, total_args_passed);
++  guarantee(result >= 0, "Unsupported arguments configuration");
++  return result;
++}
++
+ // On 64 bit we will store integer like items to the stack as
+ // 64 bits items (sparc abi) even though java would only store
+ // 32bits for a parameter. On 32bit it will simply be 32 bits
+@@ -1340,7 +1361,11 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
+   // Now figure out where the args must be stored and how much stack space
+   // they require.
+   int out_arg_slots;
+-  out_arg_slots = c_calling_convention(out_sig_bt, out_regs, NULL, total_c_args);
++  out_arg_slots = c_calling_convention_priv(out_sig_bt, out_regs, NULL, total_c_args);
++
++  if (out_arg_slots < 0) {
++    return NULL;
++  }
+ 
+   // Compute framesize for the wrapper.  We need to handlize all oops in
+   // incoming registers
+
+--- src/hotspot/cpu/aarch64/templateTable_aarch64.cpp.orig
++++ src/hotspot/cpu/aarch64/templateTable_aarch64.cpp
+@@ -94,10 +94,6 @@ static inline Address aaddress(Register r) {
+   return iaddress(r);
+ }
+ 
+-static inline Address at_rsp() {
+-  return Address(esp, 0);
+-}
+-
+ // At top of Java expression stack which may be different than esp().  It
+ // isn't for category 1 objects.
+ static inline Address at_tos   () {
+
+--- src/hotspot/cpu/aarch64/vm_version_aarch64.hpp.orig
++++ src/hotspot/cpu/aarch64/vm_version_aarch64.hpp
+@@ -67,6 +67,9 @@ class VM_Version : public Abstract_VM_Version {
+     return false;
+   }
+ 
++  // Arm can assign codes that are not published in the manual.
++  // Apple's code is defined in
++  // https://github.com/apple/darwin-xnu/blob/33eb983/osfmk/arm/cpuid.h#L62
+   enum Family {
+     CPU_ARM       = 'A',
+     CPU_BROADCOM  = 'B',
+@@ -79,6 +82,7 @@ class VM_Version : public Abstract_VM_Version {
+     CPU_QUALCOM   = 'Q',
+     CPU_MARVELL   = 'V',
+     CPU_INTEL     = 'i',
++    CPU_APPLE     = 'a',
+   };
+ 
+   enum Feature_Flag {
+@@ -111,6 +115,11 @@ class VM_Version : public Abstract_VM_Version {
+ 
+   static int icache_line_size() { return _icache_line_size; }
+   static int dcache_line_size() { return _dcache_line_size; }
++
++#ifdef __APPLE__
++  // Is the CPU running emulated (for example macOS Rosetta running x86_64 code on M1 ARM (aarch64)
++  static bool is_cpu_emulated();
++#endif
+ };
+ 
+ #endif // CPU_AARCH64_VM_VM_VERSION_AARCH64_HPP
+
+--- src/hotspot/os/bsd/os_bsd.cpp.orig
++++ src/hotspot/os/bsd/os_bsd.cpp
+@@ -239,6 +239,8 @@ static char cpu_arch[] = "i386";
+ static char cpu_arch[] = "amd64";
+ #elif defined(ARM)
+ static char cpu_arch[] = "arm";
++#elif defined(AARCH64)
++static char cpu_arch[] = "aarch64";
+ #elif defined(PPC32)
+ static char cpu_arch[] = "ppc";
+ #elif defined(SPARC)
+@@ -3069,20 +3071,17 @@ void os::Bsd::install_signal_handlers() {
+     set_signal_handler(SIGXFSZ, true);
+ 
+ #if defined(__APPLE__)
+-    // In Mac OS X 10.4, CrashReporter will write a crash log for all 'fatal' signals, including
+-    // signals caught and handled by the JVM. To work around this, we reset the mach task
+-    // signal handler that's placed on our process by CrashReporter. This disables
+-    // CrashReporter-based reporting.
+-    //
+-    // This work-around is not necessary for 10.5+, as CrashReporter no longer intercedes
+-    // on caught fatal signals.
+-    //
+-    // Additionally, gdb installs both standard BSD signal handlers, and mach exception
+-    // handlers. By replacing the existing task exception handler, we disable gdb's mach
++    // lldb (gdb) installs both standard BSD signal handlers, and mach exception
++    // handlers. By replacing the existing task exception handler, we disable lldb's mach
+     // exception handling, while leaving the standard BSD signal handlers functional.
++    //
++    // EXC_MASK_BAD_ACCESS needed by all architectures for NULL ptr checking
++    // EXC_MASK_ARITHMETIC needed by all architectures for div by 0 checking
++    // EXC_MASK_BAD_INSTRUCTION needed by aarch64 to initiate deoptimization
+     kern_return_t kr;
+     kr = task_set_exception_ports(mach_task_self(),
+-                                  EXC_MASK_BAD_ACCESS | EXC_MASK_ARITHMETIC,
++                                  EXC_MASK_BAD_ACCESS | EXC_MASK_ARITHMETIC
++                                    AARCH64_ONLY(| EXC_MASK_BAD_INSTRUCTION),
+                                   MACH_PORT_NULL,
+                                   EXCEPTION_STATE_IDENTITY,
+                                   MACHINE_THREAD_STATE);
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/atomic_bsd_aarch64.hpp
+@@ -0,0 +1,82 @@
++/*
++ * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_ATOMIC_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_ATOMIC_BSD_AARCH64_HPP
++
++// Implementation of class atomic
++// Note that memory_order_conservative requires a full barrier after atomic stores.
++// See https://patchwork.kernel.org/patch/3575821/
++
++#define FULL_MEM_BARRIER  __sync_synchronize()
++#define READ_MEM_BARRIER  __atomic_thread_fence(__ATOMIC_ACQUIRE);
++#define WRITE_MEM_BARRIER __atomic_thread_fence(__ATOMIC_RELEASE);
++
++template<size_t byte_size>
++struct Atomic::PlatformAdd
++  : Atomic::AddAndFetch<Atomic::PlatformAdd<byte_size> >
++{
++  template<typename I, typename D>
++  D add_and_fetch(I add_value, D volatile* dest, atomic_memory_order order) const {
++    D res = __atomic_add_fetch(dest, add_value, __ATOMIC_RELEASE);
++    FULL_MEM_BARRIER;
++    return res;
++  }
++};
++
++template<size_t byte_size>
++template<typename T>
++inline T Atomic::PlatformXchg<byte_size>::operator()(T exchange_value,
++                                                     T volatile* dest,
++                                                     atomic_memory_order order) const {
++  STATIC_ASSERT(byte_size == sizeof(T));
++  T res = __atomic_exchange_n(dest, exchange_value, __ATOMIC_RELEASE);
++  FULL_MEM_BARRIER;
++  return res;
++}
++
++template<size_t byte_size>
++template<typename T>
++inline T Atomic::PlatformCmpxchg<byte_size>::operator()(T exchange_value,
++                                                        T volatile* dest,
++                                                        T compare_value,
++                                                        atomic_memory_order order) const {
++  STATIC_ASSERT(byte_size == sizeof(T));
++  if (order == memory_order_relaxed) {
++    T value = compare_value;
++    __atomic_compare_exchange(dest, &value, &exchange_value, /*weak*/false,
++                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
++    return value;
++  } else {
++    T value = compare_value;
++    FULL_MEM_BARRIER;
++    __atomic_compare_exchange(dest, &value, &exchange_value, /*weak*/false,
++                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
++    FULL_MEM_BARRIER;
++    return value;
++  }
++}
++
++#endif // OS_CPU_BSD_AARCH64_VM_ATOMIC_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/bytes_bsd_aarch64.inline.hpp
+@@ -0,0 +1,55 @@
++/*
++ * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_BYTES_BSD_AARCH64_INLINE_HPP
++#define OS_CPU_BSD_AARCH64_VM_BYTES_BSD_AARCH64_INLINE_HPP
++
++#ifdef __APPLE__
++#include <libkern/OSByteOrder.h>
++#endif
++
++#if defined(__APPLE__)
++#  define bswap_16(x) OSSwapInt16(x)
++#  define bswap_32(x) OSSwapInt32(x)
++#  define bswap_64(x) OSSwapInt64(x)
++#else
++#  error "Unimplemented"
++#endif
++
++// Efficient swapping of data bytes from Java byte
++// ordering to native byte ordering and vice versa.
++inline u2   Bytes::swap_u2(u2 x) {
++  return bswap_16(x);
++}
++
++inline u4   Bytes::swap_u4(u4 x) {
++  return bswap_32(x);
++}
++
++inline u8 Bytes::swap_u8(u8 x) {
++  return bswap_64(x);
++}
++
++#endif // OS_CPU_BSD_AARCH64_VM_BYTES_BSD_AARCH64_INLINE_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/copy_bsd_aarch64.inline.hpp
+@@ -0,0 +1,188 @@
++/*
++ * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_COPY_BSD_AARCH64_INLINE_HPP
++#define OS_CPU_BSD_AARCH64_VM_COPY_BSD_AARCH64_INLINE_HPP
++
++#define COPY_SMALL(from, to, count)                                     \
++{                                                                       \
++        long tmp0, tmp1, tmp2, tmp3;                                    \
++        long tmp4, tmp5, tmp6, tmp7;                                    \
++  __asm volatile(                                                       \
++"       adr     %[t0], 0f;\n"                                           \
++"       add     %[t0], %[t0], %[cnt], lsl #5;\n"                        \
++"       br      %[t0];\n"                                               \
++"       .align  5;\n"                                                   \
++"0:"                                                                    \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldr     %[t0], [%[s], #0];\n"                                   \
++"       str     %[t0], [%[d], #0];\n"                                   \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       ldr     %[t2], [%[s], #16];\n"                                  \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       str     %[t2], [%[d], #16];\n"                                  \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       ldp     %[t2], %[t3], [%[s], #16];\n"                           \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       stp     %[t2], %[t3], [%[d], #16];\n"                           \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       ldp     %[t2], %[t3], [%[s], #16];\n"                           \
++"       ldr     %[t4], [%[s], #32];\n"                                  \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       stp     %[t2], %[t3], [%[d], #16];\n"                           \
++"       str     %[t4], [%[d], #32];\n"                                  \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       ldp     %[t2], %[t3], [%[s], #16];\n"                           \
++"       ldp     %[t4], %[t5], [%[s], #32];\n"                           \
++"2:"                                                                    \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       stp     %[t2], %[t3], [%[d], #16];\n"                           \
++"       stp     %[t4], %[t5], [%[d], #32];\n"                           \
++"       b       1f;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldr     %[t6], [%[s], #0];\n"                                   \
++"       ldp     %[t0], %[t1], [%[s], #8];\n"                            \
++"       ldp     %[t2], %[t3], [%[s], #24];\n"                           \
++"       ldp     %[t4], %[t5], [%[s], #40];\n"                           \
++"       str     %[t6], [%[d]], #8;\n"                                   \
++"       b       2b;\n"                                                  \
++"       .align  5;\n"                                                   \
++"       ldp     %[t0], %[t1], [%[s], #0];\n"                            \
++"       ldp     %[t2], %[t3], [%[s], #16];\n"                           \
++"       ldp     %[t4], %[t5], [%[s], #32];\n"                           \
++"       ldp     %[t6], %[t7], [%[s], #48];\n"                           \
++"       stp     %[t0], %[t1], [%[d], #0];\n"                            \
++"       stp     %[t2], %[t3], [%[d], #16];\n"                           \
++"       stp     %[t4], %[t5], [%[d], #32];\n"                           \
++"       stp     %[t6], %[t7], [%[d], #48];\n"                           \
++"1:"                                                                    \
++                                                                        \
++  : [s]"+r"(from), [d]"+r"(to), [cnt]"+r"(count),                       \
++    [t0]"=&r"(tmp0), [t1]"=&r"(tmp1), [t2]"=&r"(tmp2), [t3]"=&r"(tmp3), \
++    [t4]"=&r"(tmp4), [t5]"=&r"(tmp5), [t6]"=&r"(tmp6), [t7]"=&r"(tmp7)  \
++  :                                                                     \
++  : "memory", "cc");                                                    \
++}
++
++static void pd_conjoint_words(const HeapWord* from, HeapWord* to, size_t count) {
++  __asm volatile( "prfm pldl1strm, [%[s], #0];" :: [s]"r"(from) : "memory");
++  if (__builtin_expect(count <= 8, 1)) {
++    COPY_SMALL(from, to, count);
++    return;
++  }
++  _Copy_conjoint_words(from, to, count);
++}
++
++static void pd_disjoint_words(const HeapWord* from, HeapWord* to, size_t count) {
++  if (__builtin_constant_p(count)) {
++    memcpy(to, from, count * sizeof(HeapWord));
++    return;
++  }
++  __asm volatile( "prfm pldl1strm, [%[s], #0];" :: [s]"r"(from) : "memory");
++  if (__builtin_expect(count <= 8, 1)) {
++    COPY_SMALL(from, to, count);
++    return;
++  }
++  _Copy_disjoint_words(from, to, count);
++}
++
++static void pd_disjoint_words_atomic(const HeapWord* from, HeapWord* to, size_t count) {
++  __asm volatile( "prfm pldl1strm, [%[s], #0];" :: [s]"r"(from) : "memory");
++  if (__builtin_expect(count <= 8, 1)) {
++    COPY_SMALL(from, to, count);
++    return;
++  }
++  _Copy_disjoint_words(from, to, count);
++}
++
++static void pd_aligned_conjoint_words(const HeapWord* from, HeapWord* to, size_t count) {
++  pd_conjoint_words(from, to, count);
++}
++
++static void pd_aligned_disjoint_words(const HeapWord* from, HeapWord* to, size_t count) {
++  pd_disjoint_words(from, to, count);
++}
++
++static void pd_conjoint_bytes(const void* from, void* to, size_t count) {
++  (void)memmove(to, from, count);
++}
++
++static void pd_conjoint_bytes_atomic(const void* from, void* to, size_t count) {
++  pd_conjoint_bytes(from, to, count);
++}
++
++static void pd_conjoint_jshorts_atomic(const jshort* from, jshort* to, size_t count) {
++  _Copy_conjoint_jshorts_atomic(from, to, count);
++}
++
++static void pd_conjoint_jints_atomic(const jint* from, jint* to, size_t count) {
++  _Copy_conjoint_jints_atomic(from, to, count);
++}
++
++static void pd_conjoint_jlongs_atomic(const jlong* from, jlong* to, size_t count) {
++  _Copy_conjoint_jlongs_atomic(from, to, count);
++}
++
++static void pd_conjoint_oops_atomic(const oop* from, oop* to, size_t count) {
++  assert(BytesPerLong == BytesPerOop, "jlongs and oops must be the same size");
++  _Copy_conjoint_jlongs_atomic((const jlong*)from, (jlong*)to, count);
++}
++
++static void pd_arrayof_conjoint_bytes(const HeapWord* from, HeapWord* to, size_t count) {
++  _Copy_arrayof_conjoint_bytes(from, to, count);
++}
++
++static void pd_arrayof_conjoint_jshorts(const HeapWord* from, HeapWord* to, size_t count) {
++  _Copy_arrayof_conjoint_jshorts(from, to, count);
++}
++
++static void pd_arrayof_conjoint_jints(const HeapWord* from, HeapWord* to, size_t count) {
++   _Copy_arrayof_conjoint_jints(from, to, count);
++}
++
++static void pd_arrayof_conjoint_jlongs(const HeapWord* from, HeapWord* to, size_t count) {
++  _Copy_arrayof_conjoint_jlongs(from, to, count);
++}
++
++static void pd_arrayof_conjoint_oops(const HeapWord* from, HeapWord* to, size_t count) {
++  assert(!UseCompressedOops, "foo!");
++  assert(BytesPerLong == BytesPerOop, "jlongs and oops must be the same size");
++  _Copy_arrayof_conjoint_jlongs(from, to, count);
++}
++
++#endif // OS_CPU_BSD_AARCH64_VM_COPY_BSD_AARCH64_INLINE_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/copy_bsd_aarch64.s
+@@ -0,0 +1,239 @@
++/*
++ * Copyright (c) 2016, Linaro Ltd. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#define CFUNC(x) _##x
++
++        .global CFUNC(_Copy_conjoint_words)
++        .global CFUNC(_Copy_disjoint_words)
++
++s       .req    x0
++d       .req    x1
++count   .req    x2
++t0      .req    x3
++t1      .req    x4
++t2      .req    x5
++t3      .req    x6
++t4      .req    x7
++t5      .req    x8
++t6      .req    x9
++t7      .req    x10
++
++        .align  6
++CFUNC(_Copy_disjoint_words):
++        // Ensure 2 word aligned
++        tbz     s, #3, fwd_copy_aligned
++        ldr     t0, [s], #8
++        str     t0, [d], #8
++        sub     count, count, #1
++
++fwd_copy_aligned:
++        // Bias s & d so we only pre index on the last copy
++        sub     s, s, #16
++        sub     d, d, #16
++
++        ldp     t0, t1, [s, #16]
++        ldp     t2, t3, [s, #32]
++        ldp     t4, t5, [s, #48]
++        ldp     t6, t7, [s, #64]!
++
++        subs    count, count, #16
++        blo     fwd_copy_drain
++
++fwd_copy_again:
++        prfm    pldl1keep, [s, #256]
++        stp     t0, t1, [d, #16]
++        ldp     t0, t1, [s, #16]
++        stp     t2, t3, [d, #32]
++        ldp     t2, t3, [s, #32]
++        stp     t4, t5, [d, #48]
++        ldp     t4, t5, [s, #48]
++        stp     t6, t7, [d, #64]!
++        ldp     t6, t7, [s, #64]!
++        subs    count, count, #8
++        bhs     fwd_copy_again
++
++fwd_copy_drain:
++        stp     t0, t1, [d, #16]
++        stp     t2, t3, [d, #32]
++        stp     t4, t5, [d, #48]
++        stp     t6, t7, [d, #64]!
++
++        // count is now -8..-1 for 0..7 words to copy
++        adr     t0, 0f
++        add     t0, t0, count, lsl #5
++        br      t0
++
++        .align  5
++        ret                             // -8 == 0 words
++        .align  5
++        ldr     t0, [s, #16]            // -7 == 1 word
++        str     t0, [d, #16]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -6 = 2 words
++        stp     t0, t1, [d, #16]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -5 = 3 words
++        ldr     t2, [s, #32]
++        stp     t0, t1, [d, #16]
++        str     t2, [d, #32]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -4 = 4 words
++        ldp     t2, t3, [s, #32]
++        stp     t0, t1, [d, #16]
++        stp     t2, t3, [d, #32]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -3 = 5 words
++        ldp     t2, t3, [s, #32]
++        ldr     t4, [s, #48]
++        stp     t0, t1, [d, #16]
++        stp     t2, t3, [d, #32]
++        str     t4, [d, #48]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -2 = 6 words
++        ldp     t2, t3, [s, #32]
++        ldp     t4, t5, [s, #48]
++        stp     t0, t1, [d, #16]
++        stp     t2, t3, [d, #32]
++        stp     t4, t5, [d, #48]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #16]        // -1 = 7 words
++        ldp     t2, t3, [s, #32]
++        ldp     t4, t5, [s, #48]
++        ldr     t6, [s, #64]
++        stp     t0, t1, [d, #16]
++        stp     t2, t3, [d, #32]
++        stp     t4, t5, [d, #48]
++        str     t6, [d, #64]
++        // Is always aligned here, code for 7 words is one instruction
++        // too large so it just falls through.
++        .align  5
++0:
++        ret
++
++        .align  6
++CFUNC(_Copy_conjoint_words):
++        sub     t0, d, s
++        cmp     t0, count, lsl #3
++        bhs     CFUNC(_Copy_disjoint_words)
++
++        add     s, s, count, lsl #3
++        add     d, d, count, lsl #3
++
++        // Ensure 2 word aligned
++        tbz     s, #3, bwd_copy_aligned
++        ldr     t0, [s, #-8]!
++        str     t0, [d, #-8]!
++        sub     count, count, #1
++
++bwd_copy_aligned:
++        ldp     t0, t1, [s, #-16]
++        ldp     t2, t3, [s, #-32]
++        ldp     t4, t5, [s, #-48]
++        ldp     t6, t7, [s, #-64]!
++
++        subs    count, count, #16
++        blo     bwd_copy_drain
++
++bwd_copy_again:
++        prfum   pldl1keep, [s, #-256]
++        stp     t0, t1, [d, #-16]
++        ldp     t0, t1, [s, #-16]
++        stp     t2, t3, [d, #-32]
++        ldp     t2, t3, [s, #-32]
++        stp     t4, t5, [d, #-48]
++        ldp     t4, t5, [s, #-48]
++        stp     t6, t7, [d, #-64]!
++        ldp     t6, t7, [s, #-64]!
++        subs    count, count, #8
++        bhs     bwd_copy_again
++
++bwd_copy_drain:
++        stp     t0, t1, [d, #-16]
++        stp     t2, t3, [d, #-32]
++        stp     t4, t5, [d, #-48]
++        stp     t6, t7, [d, #-64]!
++
++        // count is now -8..-1 for 0..7 words to copy
++        adr     t0, 0f
++        add     t0, t0, count, lsl #5
++        br      t0
++
++        .align  5
++        ret                             // -8 == 0 words
++        .align  5
++        ldr     t0, [s, #-8]            // -7 == 1 word
++        str     t0, [d, #-8]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -6 = 2 words
++        stp     t0, t1, [d, #-16]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -5 = 3 words
++        ldr     t2, [s, #-24]
++        stp     t0, t1, [d, #-16]
++        str     t2, [d, #-24]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -4 = 4 words
++        ldp     t2, t3, [s, #-32]
++        stp     t0, t1, [d, #-16]
++        stp     t2, t3, [d, #-32]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -3 = 5 words
++        ldp     t2, t3, [s, #-32]
++        ldr     t4, [s, #-40]
++        stp     t0, t1, [d, #-16]
++        stp     t2, t3, [d, #-32]
++        str     t4, [d, #-40]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -2 = 6 words
++        ldp     t2, t3, [s, #-32]
++        ldp     t4, t5, [s, #-48]
++        stp     t0, t1, [d, #-16]
++        stp     t2, t3, [d, #-32]
++        stp     t4, t5, [d, #-48]
++        ret
++        .align  5
++        ldp     t0, t1, [s, #-16]       // -1 = 7 words
++        ldp     t2, t3, [s, #-32]
++        ldp     t4, t5, [s, #-48]
++        ldr     t6, [s, #-56]
++        stp     t0, t1, [d, #-16]
++        stp     t2, t3, [d, #-32]
++        stp     t4, t5, [d, #-48]
++        str     t6, [d, #-56]
++        // Is always aligned here, code for 7 words is one instruction
++        // too large so it just falls through.
++        .align  5
++0:
++        ret
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/globals_bsd_aarch64.hpp
+@@ -0,0 +1,43 @@
++/*
++ * Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_GLOBALS_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_GLOBALS_BSD_AARCH64_HPP
++
++// Sets the default values for platform dependent flags used by the runtime system.
++// (see globals.hpp)
++
++define_pd_global(bool, DontYieldALot,            false);
++define_pd_global(intx, ThreadStackSize,          2048); // 0 => use system default
++define_pd_global(intx, VMThreadStackSize,        2048);
++
++define_pd_global(intx, CompilerThreadStackSize,  2048);
++
++define_pd_global(uintx,JVMInvokeMethodSlack,     8192);
++
++// Used on 64 bit platforms for UseCompressedOops base address
++define_pd_global(uintx,HeapBaseMinAddress,       2*G);
++
++#endif // OS_CPU_BSD_AARCH64_VM_GLOBALS_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/icache_bsd_aarch64.hpp
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_ICACHE_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_ICACHE_AARCH64_HPP
++
++// Interface for updating the instruction cache.  Whenever the VM
++// modifies code, part of the processor instruction cache potentially
++// has to be flushed.
++
++class ICache : public AbstractICache {
++ public:
++  static void initialize();
++  static void invalidate_word(address addr) {
++    __clear_cache((char *)addr, (char *)(addr + 4));
++  }
++  static void invalidate_range(address start, int nbytes) {
++    __clear_cache((char *)start, (char *)(start + nbytes));
++  }
++};
++
++#endif // OS_CPU_BSD_AARCH64_ICACHE_AARCH64_HPP
+\ No newline at end of file
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/orderAccess_bsd_aarch64.hpp
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_ORDERACCESS_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_ORDERACCESS_BSD_AARCH64_HPP
++
++// Included in orderAccess.hpp header file.
++
++// Implementation of class OrderAccess.
++
++inline void OrderAccess::loadload()   { acquire(); }
++inline void OrderAccess::storestore() { release(); }
++inline void OrderAccess::loadstore()  { acquire(); }
++inline void OrderAccess::storeload()  { fence(); }
++
++#define FULL_MEM_BARRIER  __sync_synchronize()
++#define READ_MEM_BARRIER  __atomic_thread_fence(__ATOMIC_ACQUIRE);
++#define WRITE_MEM_BARRIER __atomic_thread_fence(__ATOMIC_RELEASE);
++
++inline void OrderAccess::acquire() {
++  READ_MEM_BARRIER;
++}
++
++inline void OrderAccess::release() {
++  WRITE_MEM_BARRIER;
++}
++
++inline void OrderAccess::fence() {
++  FULL_MEM_BARRIER;
++}
++
++#endif // OS_CPU_BSD_AARCH64_VM_ORDERACCESS_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/os_bsd_aarch64.cpp
+@@ -0,0 +1,753 @@
++/*
++ * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++// no precompiled headers
++#include "jvm.h"
++#include "asm/macroAssembler.hpp"
++#include "classfile/classLoader.hpp"
++#include "classfile/systemDictionary.hpp"
++#include "classfile/vmSymbols.hpp"
++#include "code/codeCache.hpp"
++#include "code/icBuffer.hpp"
++#include "code/vtableStubs.hpp"
++#include "interpreter/interpreter.hpp"
++#include "logging/log.hpp"
++#include "memory/allocation.inline.hpp"
++#include "os_share_bsd.hpp"
++#include "prims/jniFastGetField.hpp"
++#include "prims/jvm_misc.hpp"
++#include "runtime/arguments.hpp"
++#include "runtime/extendedPC.hpp"
++#include "runtime/frame.inline.hpp"
++#include "runtime/interfaceSupport.inline.hpp"
++#include "runtime/java.hpp"
++#include "runtime/javaCalls.hpp"
++#include "runtime/mutexLocker.hpp"
++#include "runtime/osThread.hpp"
++#include "runtime/sharedRuntime.hpp"
++#include "runtime/stubRoutines.hpp"
++#include "runtime/thread.inline.hpp"
++#include "runtime/timer.hpp"
++#include "utilities/align.hpp"
++#include "utilities/events.hpp"
++#include "utilities/vmError.hpp"
++
++// put OS-includes here
++# include <sys/types.h>
++# include <sys/mman.h>
++# include <pthread.h>
++# include <signal.h>
++# include <errno.h>
++# include <dlfcn.h>
++# include <stdlib.h>
++# include <stdio.h>
++# include <unistd.h>
++# include <sys/resource.h>
++# include <sys/stat.h>
++# include <sys/time.h>
++# include <sys/utsname.h>
++# include <sys/socket.h>
++# include <sys/wait.h>
++# include <pwd.h>
++# include <poll.h>
++#ifndef __OpenBSD__
++ # include <ucontext.h>
++#endif
++
++#if !defined(__APPLE__) && !defined(__NetBSD__)
++# include <pthread_np.h>
++#endif
++
++#define SPELL_REG_SP "sp"
++#define SPELL_REG_FP "fp"
++
++#ifdef __APPLE__
++// see darwin-xnu/osfmk/mach/arm/_structs.h
++
++// 10.5 UNIX03 member name prefixes
++#define DU3_PREFIX(s, m) __ ## s.__ ## m
++#endif
++
++#define context_x    uc_mcontext->DU3_PREFIX(ss,x)
++#define context_fp   uc_mcontext->DU3_PREFIX(ss,fp)
++#define context_lr   uc_mcontext->DU3_PREFIX(ss,lr)
++#define context_sp   uc_mcontext->DU3_PREFIX(ss,sp)
++#define context_pc   uc_mcontext->DU3_PREFIX(ss,pc)
++#define context_cpsr uc_mcontext->DU3_PREFIX(ss,cpsr)
++#define context_esr  uc_mcontext->DU3_PREFIX(es,esr)
++
++address os::current_stack_pointer() {
++#if defined(__clang__) || defined(__llvm__)
++  void *sp;
++  __asm__("mov %0, " SPELL_REG_SP : "=r"(sp));
++  return (address) sp;
++#else
++  register void *sp __asm__ (SPELL_REG_SP);
++  return (address) sp;
++#endif
++}
++
++char* os::non_memory_address_word() {
++  // Must never look like an address returned by reserve_memory,
++  // even in its subfields (as defined by the CPU immediate fields,
++  // if the CPU splits constants across multiple instructions).
++
++  // the return value used in computation of Universe::non_oop_word(), which
++  // is loaded by cpu/aarch64 by MacroAssembler::movptr(Register, uintptr_t)
++  return (char*) 0xffffffffffff;
++}
++
++address os::Bsd::ucontext_get_pc(const ucontext_t * uc) {
++  return (address)uc->context_pc;
++}
++
++void os::Bsd::ucontext_set_pc(ucontext_t * uc, address pc) {
++  uc->context_pc = (intptr_t)pc;
++}
++
++intptr_t* os::Bsd::ucontext_get_sp(const ucontext_t * uc) {
++  return (intptr_t*)uc->context_sp;
++}
++
++intptr_t* os::Bsd::ucontext_get_fp(const ucontext_t * uc) {
++  return (intptr_t*)uc->context_fp;
++}
++
++// For Forte Analyzer AsyncGetCallTrace profiling support - thread
++// is currently interrupted by SIGPROF.
++// os::Solaris::fetch_frame_from_ucontext() tries to skip nested signal
++// frames. Currently we don't do that on Linux, so it's the same as
++// os::fetch_frame_from_context().
++ExtendedPC os::Bsd::fetch_frame_from_ucontext(Thread* thread,
++  const ucontext_t* uc, intptr_t** ret_sp, intptr_t** ret_fp) {
++
++  assert(thread != NULL, "just checking");
++  assert(ret_sp != NULL, "just checking");
++  assert(ret_fp != NULL, "just checking");
++
++  return os::fetch_frame_from_context(uc, ret_sp, ret_fp);
++}
++
++ExtendedPC os::fetch_frame_from_context(const void* ucVoid,
++                    intptr_t** ret_sp, intptr_t** ret_fp) {
++
++  ExtendedPC  epc;
++  const ucontext_t* uc = (const ucontext_t*)ucVoid;
++
++  if (uc != NULL) {
++    epc = ExtendedPC(os::Bsd::ucontext_get_pc(uc));
++    if (ret_sp) *ret_sp = os::Bsd::ucontext_get_sp(uc);
++    if (ret_fp) *ret_fp = os::Bsd::ucontext_get_fp(uc);
++  } else {
++    // construct empty ExtendedPC for return value checking
++    epc = ExtendedPC(NULL);
++    if (ret_sp) *ret_sp = (intptr_t *)NULL;
++    if (ret_fp) *ret_fp = (intptr_t *)NULL;
++  }
++
++  return epc;
++}
++
++frame os::fetch_frame_from_context(const void* ucVoid) {
++  intptr_t* sp;
++  intptr_t* fp;
++  ExtendedPC epc = fetch_frame_from_context(ucVoid, &sp, &fp);
++  return frame(sp, fp, epc.pc());
++}
++
++bool os::Bsd::get_frame_at_stack_banging_point(JavaThread* thread, ucontext_t* uc, frame* fr) {
++  address pc = (address) os::Bsd::ucontext_get_pc(uc);
++  if (Interpreter::contains(pc)) {
++    // interpreter performs stack banging after the fixed frame header has
++    // been generated while the compilers perform it before. To maintain
++    // semantic consistency between interpreted and compiled frames, the
++    // method returns the Java sender of the current frame.
++    *fr = os::fetch_frame_from_context(uc);
++    if (!fr->is_first_java_frame()) {
++      assert(fr->safe_for_sender(thread), "Safety check");
++      *fr = fr->java_sender();
++    }
++  } else {
++    // more complex code with compiled code
++    assert(!Interpreter::contains(pc), "Interpreted methods should have been handled above");
++    CodeBlob* cb = CodeCache::find_blob(pc);
++    if (cb == NULL || !cb->is_nmethod() || cb->is_frame_complete_at(pc)) {
++      // Not sure where the pc points to, fallback to default
++      // stack overflow handling
++      return false;
++    } else {
++      // In compiled code, the stack banging is performed before LR
++      // has been saved in the frame.  LR is live, and SP and FP
++      // belong to the caller.
++      intptr_t* fp = os::Bsd::ucontext_get_fp(uc);
++      intptr_t* sp = os::Bsd::ucontext_get_sp(uc);
++      address pc = (address)(uc->context_lr
++                         - NativeInstruction::instruction_size);
++      *fr = frame(sp, fp, pc);
++      if (!fr->is_java_frame()) {
++        assert(fr->safe_for_sender(thread), "Safety check");
++        assert(!fr->is_first_frame(), "Safety check");
++        *fr = fr->java_sender();
++      }
++    }
++  }
++  assert(fr->is_java_frame(), "Safety check");
++  return true;
++}
++
++// JVM compiled with -fno-omit-frame-pointer, so RFP is saved on the stack.
++frame os::get_sender_for_C_frame(frame* fr) {
++  return frame(fr->link(), fr->link(), fr->sender_pc());
++}
++
++NOINLINE frame os::current_frame() {
++  intptr_t *fp = *(intptr_t **)__builtin_frame_address(0);
++  frame myframe((intptr_t*)os::current_stack_pointer(),
++                (intptr_t*)fp,
++                CAST_FROM_FN_PTR(address, os::current_frame));
++  if (os::is_first_C_frame(&myframe)) {
++    // stack is not walkable
++    return frame();
++  } else {
++    return os::get_sender_for_C_frame(&myframe);
++  }
++}
++
++// Utility functions
++extern "C" JNIEXPORT int
++JVM_handle_bsd_signal(int sig,
++                        siginfo_t* info,
++                        void* ucVoid,
++                        int abort_if_unrecognized) {
++  ucontext_t* uc = (ucontext_t*) ucVoid;
++
++  Thread* t = Thread::current_or_null_safe();
++
++  // Must do this before SignalHandlerMark, if crash protection installed we will longjmp away
++  // (no destructors can be run)
++  os::ThreadCrashProtection::check_crash_protection(sig, t);
++
++  SignalHandlerMark shm(t);
++
++  // Note: it's not uncommon that JNI code uses signal/sigset to install
++  // then restore certain signal handler (e.g. to temporarily block SIGPIPE,
++  // or have a SIGILL handler when detecting CPU type). When that happens,
++  // JVM_handle_bsd_signal() might be invoked with junk info/ucVoid. To
++  // avoid unnecessary crash when libjsig is not preloaded, try handle signals
++  // that do not require siginfo/ucontext first.
++
++  if (sig == SIGPIPE || sig == SIGXFSZ) {
++    // allow chained handler to go first
++    if (os::Bsd::chained_handler(sig, info, ucVoid)) {
++      return true;
++    } else {
++      // Ignoring SIGPIPE/SIGXFSZ - see bugs 4229104 or 6499219
++      return true;
++    }
++  }
++
++#ifdef CAN_SHOW_REGISTERS_ON_ASSERT
++  if ((sig == SIGSEGV || sig == SIGBUS) && info != NULL && info->si_addr == g_assert_poison) {
++    if (handle_assert_poison_fault(ucVoid, info->si_addr)) {
++      return 1;
++    }
++  }
++#endif
++
++  JavaThread* thread = NULL;
++  VMThread* vmthread = NULL;
++  if (os::Bsd::signal_handlers_are_installed) {
++    if (t != NULL ){
++      if(t->is_Java_thread()) {
++        thread = (JavaThread*)t;
++      }
++      else if(t->is_VM_thread()){
++        vmthread = (VMThread *)t;
++      }
++    }
++  }
++
++  // Handle SafeFetch faults:
++  if (uc != NULL) {
++    address const pc = (address) os::Bsd::ucontext_get_pc(uc);
++    if (pc && StubRoutines::is_safefetch_fault(pc)) {
++      os::Bsd::ucontext_set_pc(uc, StubRoutines::continuation_for_safefetch_fault(pc));
++      return 1;
++    }
++  }
++
++  // decide if this trap can be handled by a stub
++  address stub = NULL;
++
++  address pc          = NULL;
++
++  //%note os_trap_1
++  if (info != NULL && uc != NULL && thread != NULL) {
++    pc = (address) os::Bsd::ucontext_get_pc(uc);
++
++    // Handle ALL stack overflow variations here
++    if (sig == SIGSEGV || sig == SIGBUS) {
++      address addr = (address) info->si_addr;
++
++      // check if fault address is within thread stack
++      if (thread->on_local_stack(addr)) {
++        ThreadWXEnable wx(WXWrite, thread);
++        // stack overflow
++        if (thread->in_stack_yellow_reserved_zone(addr)) {
++          if (thread->thread_state() == _thread_in_Java) {
++            if (thread->in_stack_reserved_zone(addr)) {
++              frame fr;
++              if (os::Bsd::get_frame_at_stack_banging_point(thread, uc, &fr)) {
++                assert(fr.is_java_frame(), "Must be a Java frame");
++                frame activation =
++                  SharedRuntime::look_for_reserved_stack_annotated_method(thread, fr);
++                if (activation.sp() != NULL) {
++                  thread->disable_stack_reserved_zone();
++                  if (activation.is_interpreted_frame()) {
++                    thread->set_reserved_stack_activation((address)(
++                      activation.fp() + frame::interpreter_frame_initial_sp_offset));
++                  } else {
++                    thread->set_reserved_stack_activation((address)activation.unextended_sp());
++                  }
++                  return 1;
++                }
++              }
++            }
++            // Throw a stack overflow exception.  Guard pages will be reenabled
++            // while unwinding the stack.
++            thread->disable_stack_yellow_reserved_zone();
++            stub = SharedRuntime::continuation_for_implicit_exception(thread, pc, SharedRuntime::STACK_OVERFLOW);
++          } else {
++            // Thread was in the vm or native code.  Return and try to finish.
++            thread->disable_stack_yellow_reserved_zone();
++            return 1;
++          }
++        } else if (thread->in_stack_red_zone(addr)) {
++          // Fatal red zone violation.  Disable the guard pages and fall through
++          // to handle_unexpected_exception way down below.
++          thread->disable_stack_red_zone();
++          tty->print_raw_cr("An irrecoverable stack overflow has occurred.");
++        }
++      }
++    }
++
++    // We test if stub is already set (by the stack overflow code
++    // above) so it is not overwritten by the code that follows. This
++    // check is not required on other platforms, because on other
++    // platforms we check for SIGSEGV only or SIGBUS only, where here
++    // we have to check for both SIGSEGV and SIGBUS.
++    if (thread->thread_state() == _thread_in_Java && stub == NULL) {
++      // Java thread running in Java code => find exception handler if any
++      // a fault inside compiled code, the interpreter, or a stub
++      ThreadWXEnable wx(WXWrite, thread);
++      // Handle signal from NativeJump::patch_verified_entry().
++      if ((sig == SIGILL)
++          && nativeInstruction_at(pc)->is_sigill_zombie_not_entrant()) {
++        if (TraceTraps) {
++          tty->print_cr("trap: zombie_not_entrant");
++        }
++        stub = SharedRuntime::get_handle_wrong_method_stub();
++      } else if ((sig == SIGSEGV || sig == SIGBUS) && os::is_poll_address((address)info->si_addr)) {
++        stub = SharedRuntime::get_poll_stub(pc);
++#if defined(__APPLE__)
++      // 32-bit Darwin reports a SIGBUS for nearly all memory access exceptions.
++      // 64-bit Darwin may also use a SIGBUS (seen with compressed oops).
++      // Catching SIGBUS here prevents the implicit SIGBUS NULL check below from
++      // being called, so only do so if the implicit NULL check is not necessary.
++      } else if (sig == SIGBUS && MacroAssembler::needs_explicit_null_check((intptr_t)info->si_addr)) {
++#else
++      } else if (sig == SIGBUS /* && info->si_code == BUS_OBJERR */) {
++#endif
++        // BugId 4454115: A read from a MappedByteBuffer can fault
++        // here if the underlying file has been truncated.
++        // Do not crash the VM in such a case.
++        CodeBlob* cb = CodeCache::find_blob_unsafe(pc);
++        CompiledMethod* nm = (cb != NULL) ? cb->as_compiled_method_or_null() : NULL;
++        if ((nm != NULL && nm->has_unsafe_access())) {
++          address next_pc = pc + NativeCall::instruction_size;
++          stub = SharedRuntime::handle_unsafe_access(thread, next_pc);
++        }
++      }
++      else
++
++      if (sig == SIGFPE  &&
++          (info->si_code == FPE_INTDIV || info->si_code == FPE_FLTDIV)) {
++        stub =
++          SharedRuntime::
++          continuation_for_implicit_exception(thread,
++                                              pc,
++                                              SharedRuntime::
++                                              IMPLICIT_DIVIDE_BY_ZERO);
++#ifdef __APPLE__
++      } else if (sig == SIGFPE && info->si_code == FPE_NOOP) {
++        Unimplemented();
++#endif /* __APPLE__ */
++
++      } else if ((sig == SIGSEGV || sig == SIGBUS) &&
++                 !MacroAssembler::needs_explicit_null_check((intptr_t)info->si_addr)) {
++          // Determination of interpreter/vtable stub/compiled code null exception
++          stub = SharedRuntime::continuation_for_implicit_exception(thread, pc, SharedRuntime::IMPLICIT_NULL);
++      }
++    } else if ((thread->thread_state() == _thread_in_vm ||
++                 thread->thread_state() == _thread_in_native) &&
++               sig == SIGBUS && /* info->si_code == BUS_OBJERR && */
++               thread->doing_unsafe_access()) {
++      address next_pc = pc + NativeCall::instruction_size;
++      stub = SharedRuntime::handle_unsafe_access(thread, next_pc);
++    }
++
++    // jni_fast_Get<Primitive>Field can trap at certain pc's if a GC kicks in
++    // and the heap gets shrunk before the field access.
++    if ((sig == SIGSEGV) || (sig == SIGBUS)) {
++      address addr = JNI_FastGetField::find_slowcase_pc(pc);
++      if (addr != (address)-1) {
++        stub = addr;
++      }
++    }
++
++    // Check to see if we caught the safepoint code in the
++    // process of write protecting the memory serialization page.
++    // It write enables the page immediately after protecting it
++    // so we can just return to retry the write.
++    if ((sig == SIGSEGV) &&
++        os::is_memory_serialize_page(thread, (address) info->si_addr)) {
++      // Block current thread until the memory serialize page permission restored.
++      os::block_on_serialize_page_trap();
++      return true;
++    }
++  }
++
++  if (stub != NULL) {
++    // save all thread context in case we need to restore it
++    if (thread != NULL) thread->set_saved_exception_pc(pc);
++
++    os::Bsd::ucontext_set_pc(uc, stub);
++    return true;
++  }
++
++  // signal-chaining
++  if (os::Bsd::chained_handler(sig, info, ucVoid)) {
++     return true;
++  }
++
++  if (!abort_if_unrecognized) {
++    // caller wants another chance, so give it to him
++    return false;
++  }
++
++  if (pc == NULL && uc != NULL) {
++    pc = os::Bsd::ucontext_get_pc(uc);
++  }
++
++  // unmask current signal
++  sigset_t newset;
++  sigemptyset(&newset);
++  sigaddset(&newset, sig);
++  sigprocmask(SIG_UNBLOCK, &newset, NULL);
++
++  VMError::report_and_die(t, sig, pc, info, ucVoid);
++
++  ShouldNotReachHere();
++  return true; // Mute compiler
++}
++
++void os::Bsd::init_thread_fpu_state(void) {
++}
++
++bool os::is_allocatable(size_t bytes) {
++  return true;
++}
++
++////////////////////////////////////////////////////////////////////////////////
++// thread stack
++
++// Minimum usable stack sizes required to get to user code. Space for
++// HotSpot guard pages is added later.
++size_t os::Posix::_compiler_thread_min_stack_allowed = 72 * K;
++size_t os::Posix::_java_thread_min_stack_allowed = 72 * K;
++size_t os::Posix::_vm_internal_thread_min_stack_allowed = 72 * K;
++
++// return default stack size for thr_type
++size_t os::Posix::default_stack_size(os::ThreadType thr_type) {
++  // default stack size (compiler thread needs larger stack)
++  size_t s = (thr_type == os::compiler_thread ? 4 * M : 1 * M);
++  return s;
++}
++
++static void current_stack_region(address * bottom, size_t * size) {
++#ifdef __APPLE__
++  pthread_t self = pthread_self();
++  void *stacktop = pthread_get_stackaddr_np(self);
++  *size = pthread_get_stacksize_np(self);
++  *bottom = (address) stacktop - *size;
++#elif defined(__OpenBSD__)
++  stack_t ss;
++  int rslt = pthread_stackseg_np(pthread_self(), &ss);
++
++  if (rslt != 0)
++    fatal("pthread_stackseg_np failed with error = %d", rslt);
++
++  *bottom = (address)((char *)ss.ss_sp - ss.ss_size);
++  *size   = ss.ss_size;
++#else
++  pthread_attr_t attr;
++
++  int rslt = pthread_attr_init(&attr);
++
++  // JVM needs to know exact stack location, abort if it fails
++  if (rslt != 0)
++    fatal("pthread_attr_init failed with error = %d", rslt);
++
++  rslt = pthread_attr_get_np(pthread_self(), &attr);
++
++  if (rslt != 0)
++    fatal("pthread_attr_get_np failed with error = %d", rslt);
++
++  if (pthread_attr_getstackaddr(&attr, (void **)bottom) != 0 ||
++    pthread_attr_getstacksize(&attr, size) != 0) {
++    fatal("Can not locate current stack attributes!");
++  }
++
++  pthread_attr_destroy(&attr);
++#endif
++  assert(os::current_stack_pointer() >= *bottom &&
++         os::current_stack_pointer() < *bottom + *size, "just checking");
++}
++
++address os::current_stack_base() {
++  address bottom;
++  size_t size;
++  current_stack_region(&bottom, &size);
++  return (bottom + size);
++}
++
++size_t os::current_stack_size() {
++  // stack size includes normal stack and HotSpot guard pages
++  address bottom;
++  size_t size;
++  current_stack_region(&bottom, &size);
++  return size;
++}
++
++/////////////////////////////////////////////////////////////////////////////
++// helper functions for fatal error handler
++
++void os::print_context(outputStream *st, const void *context) {
++  if (context == NULL) return;
++
++  const ucontext_t *uc = (const ucontext_t*)context;
++  st->print_cr("Registers:");
++  st->print( " x0=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 0]);
++  st->print("  x1=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 1]);
++  st->print("  x2=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 2]);
++  st->print("  x3=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 3]);
++  st->cr();
++  st->print( " x4=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 4]);
++  st->print("  x5=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 5]);
++  st->print("  x6=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 6]);
++  st->print("  x7=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 7]);
++  st->cr();
++  st->print( " x8=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 8]);
++  st->print("  x9=" INTPTR_FORMAT, (intptr_t)uc->context_x[ 9]);
++  st->print(" x10=" INTPTR_FORMAT, (intptr_t)uc->context_x[10]);
++  st->print(" x11=" INTPTR_FORMAT, (intptr_t)uc->context_x[11]);
++  st->cr();
++  st->print( "x12=" INTPTR_FORMAT, (intptr_t)uc->context_x[12]);
++  st->print(" x13=" INTPTR_FORMAT, (intptr_t)uc->context_x[13]);
++  st->print(" x14=" INTPTR_FORMAT, (intptr_t)uc->context_x[14]);
++  st->print(" x15=" INTPTR_FORMAT, (intptr_t)uc->context_x[15]);
++  st->cr();
++  st->print( "x16=" INTPTR_FORMAT, (intptr_t)uc->context_x[16]);
++  st->print(" x17=" INTPTR_FORMAT, (intptr_t)uc->context_x[17]);
++  st->print(" x18=" INTPTR_FORMAT, (intptr_t)uc->context_x[18]);
++  st->print(" x19=" INTPTR_FORMAT, (intptr_t)uc->context_x[19]);
++  st->cr();
++  st->print( "x20=" INTPTR_FORMAT, (intptr_t)uc->context_x[20]);
++  st->print(" x21=" INTPTR_FORMAT, (intptr_t)uc->context_x[21]);
++  st->print(" x22=" INTPTR_FORMAT, (intptr_t)uc->context_x[22]);
++  st->print(" x23=" INTPTR_FORMAT, (intptr_t)uc->context_x[23]);
++  st->cr();
++  st->print( "x24=" INTPTR_FORMAT, (intptr_t)uc->context_x[24]);
++  st->print(" x25=" INTPTR_FORMAT, (intptr_t)uc->context_x[25]);
++  st->print(" x26=" INTPTR_FORMAT, (intptr_t)uc->context_x[26]);
++  st->print(" x27=" INTPTR_FORMAT, (intptr_t)uc->context_x[27]);
++  st->cr();
++  st->print( "x28=" INTPTR_FORMAT, (intptr_t)uc->context_x[28]);
++  st->print("  fp=" INTPTR_FORMAT, (intptr_t)uc->context_fp);
++  st->print("  lr=" INTPTR_FORMAT, (intptr_t)uc->context_lr);
++  st->print("  sp=" INTPTR_FORMAT, (intptr_t)uc->context_sp);
++  st->cr();
++  st->print(  "pc=" INTPTR_FORMAT,  (intptr_t)uc->context_pc);
++  st->print(" cpsr=" INTPTR_FORMAT, (intptr_t)uc->context_cpsr);
++  st->cr();
++
++  intptr_t *sp = (intptr_t *)os::Bsd::ucontext_get_sp(uc);
++  st->print_cr("Top of Stack: (sp=" INTPTR_FORMAT ")", (intptr_t)sp);
++  print_hex_dump(st, (address)sp, (address)(sp + 8*sizeof(intptr_t)), sizeof(intptr_t));
++  st->cr();
++
++  // Note: it may be unsafe to inspect memory near pc. For example, pc may
++  // point to garbage if entry point in an nmethod is corrupted. Leave
++  // this at the end, and hope for the best.
++  address pc = os::Bsd::ucontext_get_pc(uc);
++  print_instructions(st, pc, sizeof(char));
++  st->cr();
++}
++
++void os::print_register_info(outputStream *st, const void *context) {
++  if (context == NULL) return;
++
++  const ucontext_t *uc = (const ucontext_t*)context;
++
++  st->print_cr("Register to memory mapping:");
++  st->cr();
++
++  // this is horrendously verbose but the layout of the registers in the
++  // context does not match how we defined our abstract Register set, so
++  // we can't just iterate through the gregs area
++
++  // this is only for the "general purpose" registers
++
++  st->print(" x0="); print_location(st, uc->context_x[ 0]);
++  st->print(" x1="); print_location(st, uc->context_x[ 1]);
++  st->print(" x2="); print_location(st, uc->context_x[ 2]);
++  st->print(" x3="); print_location(st, uc->context_x[ 3]);
++  st->print(" x4="); print_location(st, uc->context_x[ 4]);
++  st->print(" x5="); print_location(st, uc->context_x[ 5]);
++  st->print(" x6="); print_location(st, uc->context_x[ 6]);
++  st->print(" x7="); print_location(st, uc->context_x[ 7]);
++  st->print(" x8="); print_location(st, uc->context_x[ 8]);
++  st->print(" x9="); print_location(st, uc->context_x[ 9]);
++  st->print("x10="); print_location(st, uc->context_x[10]);
++  st->print("x11="); print_location(st, uc->context_x[11]);
++  st->print("x12="); print_location(st, uc->context_x[12]);
++  st->print("x13="); print_location(st, uc->context_x[13]);
++  st->print("x14="); print_location(st, uc->context_x[14]);
++  st->print("x15="); print_location(st, uc->context_x[15]);
++  st->print("x16="); print_location(st, uc->context_x[16]);
++  st->print("x17="); print_location(st, uc->context_x[17]);
++  st->print("x18="); print_location(st, uc->context_x[18]);
++  st->print("x19="); print_location(st, uc->context_x[19]);
++  st->print("x20="); print_location(st, uc->context_x[20]);
++  st->print("x21="); print_location(st, uc->context_x[21]);
++  st->print("x22="); print_location(st, uc->context_x[22]);
++  st->print("x23="); print_location(st, uc->context_x[23]);
++  st->print("x24="); print_location(st, uc->context_x[24]);
++  st->print("x25="); print_location(st, uc->context_x[25]);
++  st->print("x26="); print_location(st, uc->context_x[26]);
++  st->print("x27="); print_location(st, uc->context_x[27]);
++  st->print("x28="); print_location(st, uc->context_x[28]);
++
++  st->cr();
++}
++
++void os::setup_fpu() {
++}
++
++#ifndef PRODUCT
++void os::verify_stack_alignment() {
++  assert(((intptr_t)os::current_stack_pointer() & (StackAlignmentInBytes-1)) == 0, "incorrect stack alignment");
++}
++#endif
++
++int os::extra_bang_size_in_bytes() {
++  // AArch64 does not require the additional stack bang.
++  return 0;
++}
++
++void os::current_thread_enable_wx(WXMode mode) {
++  pthread_jit_write_protect_np(mode == WXExec);
++}
++
++extern "C" {
++  int SpinPause() {
++    return 0;
++  }
++
++  void _Copy_conjoint_jshorts_atomic(const jshort* from, jshort* to, size_t count) {
++    if (from > to) {
++      const jshort *end = from + count;
++      while (from < end)
++        *(to++) = *(from++);
++    }
++    else if (from < to) {
++      const jshort *end = from;
++      from += count - 1;
++      to   += count - 1;
++      while (from >= end)
++        *(to--) = *(from--);
++    }
++  }
++  void _Copy_conjoint_jints_atomic(const jint* from, jint* to, size_t count) {
++    if (from > to) {
++      const jint *end = from + count;
++      while (from < end)
++        *(to++) = *(from++);
++    }
++    else if (from < to) {
++      const jint *end = from;
++      from += count - 1;
++      to   += count - 1;
++      while (from >= end)
++        *(to--) = *(from--);
++    }
++  }
++  void _Copy_conjoint_jlongs_atomic(const jlong* from, jlong* to, size_t count) {
++    if (from > to) {
++      const jlong *end = from + count;
++      while (from < end)
++        os::atomic_copy64(from++, to++);
++    }
++    else if (from < to) {
++      const jlong *end = from;
++      from += count - 1;
++      to   += count - 1;
++      while (from >= end)
++        os::atomic_copy64(from--, to--);
++    }
++  }
++
++  void _Copy_arrayof_conjoint_bytes(const HeapWord* from,
++                                    HeapWord* to,
++                                    size_t    count) {
++    memmove(to, from, count);
++  }
++  void _Copy_arrayof_conjoint_jshorts(const HeapWord* from,
++                                      HeapWord* to,
++                                      size_t    count) {
++    memmove(to, from, count * 2);
++  }
++  void _Copy_arrayof_conjoint_jints(const HeapWord* from,
++                                    HeapWord* to,
++                                    size_t    count) {
++    memmove(to, from, count * 4);
++  }
++  void _Copy_arrayof_conjoint_jlongs(const HeapWord* from,
++                                     HeapWord* to,
++                                     size_t    count) {
++    memmove(to, from, count * 8);
++  }
++};
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/os_bsd_aarch64.hpp
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_OS_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_OS_BSD_AARCH64_HPP
++
++  static void setup_fpu();
++
++  static bool is_allocatable(size_t bytes);
++
++  // Used to register dynamic code cache area with the OS
++  // Note: Currently only used in 64 bit Windows implementations
++  static bool register_code_area(char *low, char *high) { return true; }
++
++  // Atomically copy 64 bits of data
++  static void atomic_copy64(const volatile void *src, volatile void *dst) {
++    *(jlong *) dst = *(const jlong *) src;
++  }
++
++#endif // OS_CPU_BSD_AARCH64_VM_OS_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/pauth_bsd_aarch64.inline.hpp
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) 2021, Arm Limited. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_PAUTH_BSD_AARCH64_INLINE_HPP
++#define OS_CPU_BSD_AARCH64_VM_PAUTH_BSD_AARCH64_INLINE_HPP
++
++#ifdef __APPLE__
++#include <ptrauth.h>
++#endif
++
++// Only the PAC instructions in the NOP space can be used. This ensures the
++// binaries work on systems without PAC. Write these instructions using their
++// alternate "hint" instructions to ensure older compilers can still be used.
++// For Apple, use the provided interface as this may provide additional
++// optimization.
++
++#define XPACLRI "hint #0x7;"
++
++inline address pauth_strip_pointer(address ptr) {
++#ifdef __APPLE__
++  return ptrauth_strip(ptr, ptrauth_key_asib);
++#else
++  register address result __asm__("x30") = ptr;
++  asm (XPACLRI : "+r"(result));
++  return result;
++#endif
++}
++
++#undef XPACLRI
++
++#endif // OS_CPU_BSD_AARCH64_VM_PAUTH_BSD_AARCH64_INLINE_HPP
++
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/prefetch_bsd_aarch64.inline.hpp
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_PREFETCH_BSD_AARCH64_INLINE_HPP
++#define OS_CPU_BSD_AARCH64_VM_PREFETCH_BSD_AARCH64_INLINE_HPP
++
++#include "runtime/prefetch.hpp"
++
++
++inline void Prefetch::read (void *loc, intx interval) {
++  if (interval >= 0)
++    asm("prfm PLDL1KEEP, [%0, %1]" : : "r"(loc), "r"(interval));
++}
++
++inline void Prefetch::write(void *loc, intx interval) {
++  if (interval >= 0)
++    asm("prfm PSTL1KEEP, [%0, %1]" : : "r"(loc), "r"(interval));
++}
++
++#endif // OS_CPU_BSD_AARCH64_VM_PREFETCH_BSD_AARCH64_INLINE_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/thread_bsd_aarch64.cpp
+@@ -0,0 +1,104 @@
++/*
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#include "precompiled.hpp"
++#include "memory/metaspaceShared.hpp"
++#include "runtime/frame.inline.hpp"
++#include "runtime/thread.inline.hpp"
++
++frame JavaThread::pd_last_frame() {
++  assert(has_last_Java_frame(), "must have last_Java_sp() when suspended");
++  vmassert(_anchor.last_Java_pc() != NULL, "not walkable");
++  return frame(_anchor.last_Java_sp(), _anchor.last_Java_fp(), _anchor.last_Java_pc());
++}
++
++// For Forte Analyzer AsyncGetCallTrace profiling support - thread is
++// currently interrupted by SIGPROF
++bool JavaThread::pd_get_top_frame_for_signal_handler(frame* fr_addr,
++  void* ucontext, bool isInJava) {
++
++  assert(Thread::current() == this, "caller must be current thread");
++  return pd_get_top_frame(fr_addr, ucontext, isInJava);
++}
++
++bool JavaThread::pd_get_top_frame_for_profiling(frame* fr_addr, void* ucontext, bool isInJava) {
++  return pd_get_top_frame(fr_addr, ucontext, isInJava);
++}
++
++bool JavaThread::pd_get_top_frame(frame* fr_addr, void* ucontext, bool isInJava) {
++  assert(this->is_Java_thread(), "must be JavaThread");
++  JavaThread* jt = (JavaThread *)this;
++
++  // If we have a last_Java_frame, then we should use it even if
++  // isInJava == true.  It should be more reliable than ucontext info.
++  if (jt->has_last_Java_frame() && jt->frame_anchor()->walkable()) {
++    *fr_addr = jt->pd_last_frame();
++    return true;
++  }
++
++  // At this point, we don't have a last_Java_frame, so
++  // we try to glean some information out of the ucontext
++  // if we were running Java code when SIGPROF came in.
++  if (isInJava) {
++    ucontext_t* uc = (ucontext_t*) ucontext;
++
++    intptr_t* ret_fp;
++    intptr_t* ret_sp;
++    ExtendedPC addr = os::fetch_frame_from_context(uc, &ret_sp, &ret_fp);
++    if (addr.pc() == NULL || ret_sp == NULL ) {
++      // ucontext wasn't useful
++      return false;
++    }
++
++    if (MetaspaceShared::is_in_trampoline_frame(addr.pc())) {
++      // In the middle of a trampoline call. Bail out for safety.
++      // This happens rarely so shouldn't affect profiling.
++      return false;
++    }
++
++    frame ret_frame(ret_sp, ret_fp, addr.pc());
++    if (!ret_frame.safe_for_sender(jt)) {
++#ifdef COMPILER2
++      frame ret_frame2(ret_sp, NULL, addr.pc());
++      if (!ret_frame2.safe_for_sender(jt)) {
++        // nothing else to try if the frame isn't good
++        return false;
++      }
++      ret_frame = ret_frame2;
++#else
++      // nothing else to try if the frame isn't good
++      return false;
++#endif /* COMPILER2 */
++    }
++    *fr_addr = ret_frame;
++    return true;
++  }
++
++  // nothing else to try
++  return false;
++}
++
++void JavaThread::cache_global_variables() { }
++
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/thread_bsd_aarch64.hpp
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_THREAD_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_THREAD_BSD_AARCH64_HPP
++
++ private:
++
++  void pd_initialize() {
++    _anchor.clear();
++  }
++
++  frame pd_last_frame();
++
++ public:
++  // Mutators are highly dangerous....
++  intptr_t* last_Java_fp()                       { return _anchor.last_Java_fp(); }
++  void  set_last_Java_fp(intptr_t* fp)           { _anchor.set_last_Java_fp(fp);   }
++
++  void set_base_of_stack_pointer(intptr_t* base_sp) {
++  }
++
++  static ByteSize last_Java_fp_offset()          {
++    return byte_offset_of(JavaThread, _anchor) + JavaFrameAnchor::last_Java_fp_offset();
++  }
++
++  intptr_t* base_of_stack_pointer() {
++    return NULL;
++  }
++  void record_base_of_stack_pointer() {
++  }
++
++  bool pd_get_top_frame_for_signal_handler(frame* fr_addr, void* ucontext,
++    bool isInJava);
++
++  bool pd_get_top_frame_for_profiling(frame* fr_addr, void* ucontext, bool isInJava);
++private:
++  bool pd_get_top_frame(frame* fr_addr, void* ucontext, bool isInJava);
++public:
++
++  static Thread *aarch64_get_thread_helper() {
++    return Thread::current();
++  }
++
++  // These routines are only used on cpu architectures that
++  // have separate register stacks (Itanium).
++  static bool register_stack_overflow() { return false; }
++  static void enable_register_stack_guard() {}
++  static void disable_register_stack_guard() {}
++
++#endif // OS_CPU_BSD_AARCH64_VM_THREAD_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/vmStructs_bsd_aarch64.hpp
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, Red Hat Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef OS_CPU_BSD_AARCH64_VM_VMSTRUCTS_BSD_AARCH64_HPP
++#define OS_CPU_BSD_AARCH64_VM_VMSTRUCTS_BSD_AARCH64_HPP
++
++// These are the OS and CPU-specific fields, types and integer
++// constants required by the Serviceability Agent. This file is
++// referenced by vmStructs.cpp.
++
++#define VM_STRUCTS_OS_CPU(nonstatic_field, static_field, unchecked_nonstatic_field, volatile_nonstatic_field, nonproduct_nonstatic_field, c2_nonstatic_field, unchecked_c1_static_field, unchecked_c2_static_field) \
++                                                                                                                                     \
++  /******************************/                                                                                                   \
++  /* Threads (NOTE: incomplete) */                                                                                                   \
++  /******************************/                                                                                                   \
++  nonstatic_field(OSThread,                      _thread_id,                                      OSThread::thread_id_t)             \
++  nonstatic_field(OSThread,                      _unique_thread_id,                               uint64_t)
++
++
++#define VM_TYPES_OS_CPU(declare_type, declare_toplevel_type, declare_oop_type, declare_integer_type, declare_unsigned_integer_type, declare_c1_toplevel_type, declare_c2_type, declare_c2_toplevel_type) \
++                                                                          \
++  /**********************/                                                \
++  /* Thread IDs         */                                                \
++  /**********************/                                                \
++                                                                          \
++  declare_unsigned_integer_type(OSThread::thread_id_t)
++
++#define VM_INT_CONSTANTS_OS_CPU(declare_constant, declare_preprocessor_constant, declare_c1_constant, declare_c2_constant, declare_c2_preprocessor_constant)
++
++#define VM_LONG_CONSTANTS_OS_CPU(declare_constant, declare_preprocessor_constant, declare_c1_constant, declare_c2_constant, declare_c2_preprocessor_constant)
++
++#endif // OS_CPU_BSD_AARCH64_VM_VMSTRUCTS_BSD_AARCH64_HPP
+
+--- /dev/null
++++ src/hotspot/os_cpu/bsd_aarch64/vm_version_bsd_aarch64.cpp
+@@ -0,0 +1,89 @@
++/*
++ * Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#include "precompiled.hpp"
++#include "runtime/java.hpp"
++#include "runtime/os.hpp"
++#include "runtime/vm_version.hpp"
++#include <sys/sysctl.h>
++
++static bool cpu_has(const char* optional) {
++  uint32_t val;
++  size_t len = sizeof(val);
++  if (sysctlbyname(optional, &val, &len, NULL, 0)) {
++    return false;
++  }
++  return val;
++}
++
++void VM_Version::get_os_cpu_info() {
++  size_t sysctllen;
++
++  // hw.optional.floatingpoint always returns 1, see
++  // https://github.com/apple/darwin-xnu/blob/master/bsd/kern/kern_mib.c#L416.
++  // ID_AA64PFR0_EL1 describes AdvSIMD always equals to FP field.
++  assert(cpu_has("hw.optional.floatingpoint"), "should be");
++  assert(cpu_has("hw.optional.neon"), "should be");
++  _features = CPU_FP | CPU_ASIMD;
++
++  // Only few features are available via sysctl, see line 614
++  // https://opensource.apple.com/source/xnu/xnu-6153.141.1/bsd/kern/kern_mib.c.auto.html
++  if (cpu_has("hw.optional.armv8_crc32"))     _features |= CPU_CRC32;
++  if (cpu_has("hw.optional.armv8_1_atomics")) _features |= CPU_LSE;
++
++  int cache_line_size;
++  int hw_conf_cache_line[] = { CTL_HW, HW_CACHELINE };
++  sysctllen = sizeof(cache_line_size);
++  if (sysctl(hw_conf_cache_line, 2, &cache_line_size, &sysctllen, NULL, 0)) {
++    cache_line_size = 16;
++  }
++  _icache_line_size = 16; // minimal line lenght CCSIDR_EL1 can hold
++  _dcache_line_size = cache_line_size;
++
++  uint64_t dczid_el0;
++  __asm__ (
++    "mrs %0, DCZID_EL0\n"
++    : "=r"(dczid_el0)
++  );
++  if (!(dczid_el0 & 0x10)) {
++    _zva_length = 4 << (dczid_el0 & 0xf);
++  }
++  int family;
++  sysctllen = sizeof(family);
++  if (sysctlbyname("hw.cpufamily", &family, &sysctllen, NULL, 0)) {
++    family = 0;
++   }
++  _model = family;
++  _cpu = CPU_APPLE;
++}
++
++#ifdef __APPLE__
++
++bool VM_Version::is_cpu_emulated() {
++  return false;
++}
++
++#endif
+\ No newline at end of file
+
+--- src/hotspot/share/c1/c1_Runtime1.cpp.orig
++++ src/hotspot/share/c1/c1_Runtime1.cpp
+@@ -834,6 +834,10 @@ static Klass* resolve_field_return_klass(const methodHandle& caller, int bci, TR
+ JRT_ENTRY(void, Runtime1::patch_code(JavaThread* thread, Runtime1::StubID stub_id ))
+   NOT_PRODUCT(_patch_code_slowcase_cnt++;)
+ 
++  // Enable WXWrite: the function is called by c1 stub as a runtime function
++  // (see another implementation above).
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+   ResourceMark rm(thread);
+   RegisterMap reg_map(thread, false);
+   frame runtime_frame = thread->last_frame();
+
+--- src/hotspot/share/interpreter/interpreterRuntime.cpp.orig
++++ src/hotspot/share/interpreter/interpreterRuntime.cpp
+@@ -1015,6 +1015,9 @@ IRT_END
+ 
+ 
+ nmethod* InterpreterRuntime::frequency_counter_overflow(JavaThread* thread, address branch_bcp) {
++  // Enable WXWrite: the function is called directly by interpreter.
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+   nmethod* nm = frequency_counter_overflow_inner(thread, branch_bcp);
+   assert(branch_bcp != NULL || nm == NULL, "always returns null for non OSR requests");
+   if (branch_bcp != NULL && nm != NULL) {
+
+--- src/hotspot/share/interpreter/oopMapCache.cpp.orig
++++ src/hotspot/share/interpreter/oopMapCache.cpp
+@@ -241,6 +241,8 @@ class MaskFillerForNative: public NativeSignatureIterator {
+   }
+ 
+  public:
++  void pass_byte()                               { /* ignore */ }
++  void pass_short()                              { /* ignore */ }
+   void pass_int()                                { /* ignore */ }
+   void pass_long()                               { /* ignore */ }
+   void pass_float()                              { /* ignore */ }
+
+--- src/hotspot/share/jvmci/jvmciEnv.hpp.orig
++++ src/hotspot/share/jvmci/jvmciEnv.hpp
+@@ -37,6 +37,7 @@ class CompileTask;
+ // Bring the JVMCI compiler thread into the VM state.
+ #define JVMCI_VM_ENTRY_MARK                       \
+   JavaThread* thread = JavaThread::current(); \
++  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread)); \
+   ThreadInVMfromNative __tiv(thread);       \
+   ResetNoHandleMark rnhm;                   \
+   HandleMarkCleaner __hm(thread);           \
+
+--- src/hotspot/share/opto/runtime.cpp.orig
++++ src/hotspot/share/opto/runtime.cpp
+@@ -68,6 +68,7 @@
+ #include "runtime/sharedRuntime.hpp"
+ #include "runtime/signature.hpp"
+ #include "runtime/threadCritical.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ #include "runtime/vframe.hpp"
+ #include "runtime/vframeArray.hpp"
+ #include "runtime/vframe_hp.hpp"
+@@ -1444,6 +1445,10 @@ address OptoRuntime::handle_exception_C(JavaThread* thread) {
+ // *THIS IS NOT RECOMMENDED PROGRAMMING STYLE*
+ //
+ address OptoRuntime::rethrow_C(oopDesc* exception, JavaThread* thread, address ret_pc) {
++
++  // Enable WXWrite: the function called directly by compiled code.
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+ #ifndef PRODUCT
+   SharedRuntime::_rethrow_ctr++;               // count rethrows
+ #endif
+
+--- src/hotspot/share/prims/jni.cpp.orig
++++ src/hotspot/share/prims/jni.cpp
+@@ -1,6 +1,7 @@
+ /*
+  * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+  * Copyright (c) 2012 Red Hat, Inc.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -4055,6 +4056,7 @@ static jint JNI_CreateJavaVM_inner(JavaVM **vm, void **penv, void *args) {
+ 
+     // Since this is not a JVM_ENTRY we have to set the thread state manually before leaving.
+     ThreadStateTransition::transition_and_fence(thread, _thread_in_vm, _thread_in_native);
++    MACOS_AARCH64_ONLY(thread->enable_wx(WXExec));
+   } else {
+     // If create_vm exits because of a pending exception, exit with that
+     // exception.  In the future when we figure out how to reclaim memory,
+@@ -4210,6 +4212,7 @@ static jint attach_current_thread(JavaVM *vm, void **penv, void *_args, bool dae
+   thread->record_stack_base_and_size();
+   thread->register_thread_stack_with_NMT();
+   thread->initialize_thread_current();
++  MACOS_AARCH64_ONLY(thread->init_wx());
+ 
+   if (!os::create_attached_thread(thread)) {
+     thread->smr_delete();
+@@ -4284,6 +4287,7 @@ static jint attach_current_thread(JavaVM *vm, void **penv, void *_args, bool dae
+   // needed.
+ 
+   ThreadStateTransition::transition_and_fence(thread, _thread_in_vm, _thread_in_native);
++  MACOS_AARCH64_ONLY(thread->enable_wx(WXExec));
+ 
+   // Perform any platform dependent FPU setup
+   os::setup_fpu();
+@@ -4354,6 +4358,10 @@ jint JNICALL jni_DetachCurrentThread(JavaVM *vm)  {
+   thread->exit(false, JavaThread::jni_detach);
+   thread->smr_delete();
+ 
++  // Go to the execute mode, the initial state of the thread on creation.
++  // Use os interface as the thread is not a JavaThread anymore.
++  MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXExec));
++
+   HOTSPOT_JNI_DETACHCURRENTTHREAD_RETURN(JNI_OK);
+   return JNI_OK;
+ }
+
+--- src/hotspot/share/prims/jniCheck.cpp.orig
++++ src/hotspot/share/prims/jniCheck.cpp
+@@ -100,6 +100,7 @@ extern "C" {                                                             \
+     if (env != xenv) {                                                   \
+       NativeReportJNIFatalError(thr, warn_wrong_jnienv);                 \
+     }                                                                    \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thr));         \
+     VM_ENTRY_BASE(result_type, header, thr)
+ 
+ 
+
+--- src/hotspot/share/prims/jniFastGetField.hpp.orig
++++ src/hotspot/share/prims/jniFastGetField.hpp
+@@ -65,6 +65,11 @@ class JNI_FastGetField : AllStatic {
+   static address generate_fast_get_int_field0(BasicType type);
+   static address generate_fast_get_float_field0(BasicType type);
+ 
++#ifdef AARCH64
++  template<int BType>
++  static address generate_fast_get_int_field1();
++#endif // AARCH64
++
+  public:
+ #if defined(_WINDOWS) && !defined(_WIN64)
+   static GetBooleanField_t jni_fast_GetBooleanField_fp;
+
+--- src/hotspot/share/prims/jvmtiEnter.xsl.orig
++++ src/hotspot/share/prims/jvmtiEnter.xsl
+@@ -432,6 +432,8 @@ struct jvmtiInterface_1_ jvmti</xsl:text>
+   <xsl:if test="count(@impl)=0 or not(contains(@impl,'innative'))">
+     <xsl:text>JavaThread* current_thread = (JavaThread*)this_thread;</xsl:text>   
+     <xsl:value-of select="$space"/>
++    <xsl:text>MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current_thread));</xsl:text>
++    <xsl:value-of select="$space"/>
+     <xsl:text>ThreadInVMfromNative __tiv(current_thread);</xsl:text>
+     <xsl:value-of select="$space"/>
+     <xsl:text>VM_ENTRY_BASE(jvmtiError, </xsl:text>
+
+--- src/hotspot/share/prims/jvmtiEnv.cpp.orig
++++ src/hotspot/share/prims/jvmtiEnv.cpp
+@@ -172,6 +172,7 @@ JvmtiEnv::GetThreadLocalStorage(jthread thread, void** data_ptr) {
+     // other than the current thread is required we need to transition
+     // from native so as to resolve the jthread.
+ 
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current_thread));
+     ThreadInVMfromNative __tiv(current_thread);
+     VM_ENTRY_BASE(jvmtiError, JvmtiEnv::GetThreadLocalStorage , current_thread)
+     debug_only(VMNativeEntryWrapper __vew;)
+
+--- src/hotspot/share/prims/whitebox.inline.hpp.orig
++++ src/hotspot/share/prims/whitebox.inline.hpp
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -31,7 +31,8 @@
+ // Entry macro to transition from JNI to VM state.
+ 
+ #define WB_ENTRY(result_type, header) JNI_ENTRY(result_type, header) \
+-  ClearPendingJniExcCheck _clearCheck(env);
++  ClearPendingJniExcCheck _clearCheck(env); \
++  MACOS_AARCH64_ONLY(ThreadWXEnable _wx(WXWrite, thread));
+ 
+ #define WB_END JNI_END
+ 
+
+--- src/hotspot/share/runtime/deoptimization.cpp.orig
++++ src/hotspot/share/runtime/deoptimization.cpp
+@@ -54,6 +54,7 @@
+ #include "runtime/stubRoutines.hpp"
+ #include "runtime/thread.hpp"
+ #include "runtime/threadSMR.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ #include "runtime/vframe.hpp"
+ #include "runtime/vframeArray.hpp"
+ #include "runtime/vframe_hp.hpp"
+@@ -2079,6 +2080,9 @@ Deoptimization::update_method_data_from_interpreter(MethodData* trap_mdo, int tr
+ }
+ 
+ Deoptimization::UnrollBlock* Deoptimization::uncommon_trap(JavaThread* thread, jint trap_request, jint exec_mode) {
++  // Enable WXWrite: current function is called from methods compiled by C2 directly
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+   if (TraceDeoptimization) {
+     tty->print("Uncommon trap ");
+   }
+
+--- src/hotspot/share/runtime/interfaceSupport.inline.hpp.orig
++++ src/hotspot/share/runtime/interfaceSupport.inline.hpp
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -32,6 +33,7 @@
+ #include "runtime/safepointMechanism.inline.hpp"
+ #include "runtime/safepointVerifiers.hpp"
+ #include "runtime/thread.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ #include "runtime/vmOperations.hpp"
+ #include "utilities/globalDefinitions.hpp"
+ #include "utilities/macros.hpp"
+@@ -403,6 +405,8 @@ class RuntimeHistogramElement : public HistogramElement {
+ #define VM_LEAF_BASE(result_type, header)                            \
+   TRACE_CALL(result_type, header)                                    \
+   debug_only(NoHandleMark __hm;)                                     \
++  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite,                    \
++                                         Thread::current()));        \
+   os::verify_stack_alignment();                                      \
+   /* begin of body */
+ 
+@@ -440,6 +444,7 @@ class RuntimeHistogramElement : public HistogramElement {
+ 
+ #define IRT_ENTRY(result_type, header)                               \
+   result_type header {                                               \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromJava __tiv(thread);                                \
+     VM_ENTRY_BASE(result_type, header, thread)                       \
+     debug_only(VMEntryWrapper __vew;)
+@@ -453,6 +458,7 @@ class RuntimeHistogramElement : public HistogramElement {
+ 
+ #define IRT_ENTRY_NO_ASYNC(result_type, header)                      \
+   result_type header {                                               \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromJavaNoAsyncException __tiv(thread);                \
+     VM_ENTRY_BASE(result_type, header, thread)                       \
+     debug_only(VMEntryWrapper __vew;)
+@@ -461,6 +467,7 @@ class RuntimeHistogramElement : public HistogramElement {
+ 
+ #define JRT_ENTRY(result_type, header)                               \
+   result_type header {                                               \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromJava __tiv(thread);                                \
+     VM_ENTRY_BASE(result_type, header, thread)                       \
+     debug_only(VMEntryWrapper __vew;)
+@@ -474,7 +481,8 @@ class RuntimeHistogramElement : public HistogramElement {
+ 
+ #define JRT_ENTRY_NO_ASYNC(result_type, header)                      \
+   result_type header {                                               \
+-    ThreadInVMfromJavaNoAsyncException __tiv(thread);                \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
++    ThreadInVMfromJava __tiv(thread);                                \
+     VM_ENTRY_BASE(result_type, header, thread)                       \
+     debug_only(VMEntryWrapper __vew;)
+ 
+@@ -482,6 +490,7 @@ class RuntimeHistogramElement : public HistogramElement {
+ // to get back into Java from the VM
+ #define JRT_BLOCK_ENTRY(result_type, header)                         \
+   result_type header {                                               \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     TRACE_CALL(result_type, header)                                  \
+     HandleMarkCleaner __hm(thread);
+ 
+@@ -512,6 +521,7 @@ extern "C" {                                                         \
+   result_type JNICALL header {                                       \
+     JavaThread* thread=JavaThread::thread_from_jni_environment(env); \
+     assert( !VerifyJNIEnvThread || (thread == Thread::current()), "JNIEnv is only valid in same thread"); \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromNative __tiv(thread);                              \
+     debug_only(VMNativeEntryWrapper __vew;)                          \
+     VM_ENTRY_BASE(result_type, header, thread)
+@@ -524,6 +534,7 @@ extern "C" {                                                         \
+   result_type JNICALL header {                                       \
+     JavaThread* thread=JavaThread::thread_from_jni_environment(env); \
+     assert( !VerifyJNIEnvThread || (thread == Thread::current()), "JNIEnv is only valid in same thread"); \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromNative __tiv(thread);                              \
+     debug_only(VMNativeEntryWrapper __vew;)                          \
+     VM_QUICK_ENTRY_BASE(result_type, header, thread)
+@@ -548,6 +559,7 @@ extern "C" {                                                         \
+ extern "C" {                                                         \
+   result_type JNICALL header {                                       \
+     JavaThread* thread=JavaThread::thread_from_jni_environment(env); \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromNative __tiv(thread);                              \
+     debug_only(VMNativeEntryWrapper __vew;)                          \
+     VM_ENTRY_BASE(result_type, header, thread)
+@@ -557,6 +569,7 @@ extern "C" {                                                         \
+ extern "C" {                                                         \
+   result_type JNICALL header {                                       \
+     JavaThread* thread = JavaThread::current();                      \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromNative __tiv(thread);                              \
+     debug_only(VMNativeEntryWrapper __vew;)                          \
+     VM_ENTRY_BASE(result_type, header, thread)
+@@ -566,6 +579,7 @@ extern "C" {                                                         \
+ extern "C" {                                                         \
+   result_type JNICALL header {                                       \
+     JavaThread* thread=JavaThread::thread_from_jni_environment(env); \
++    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, thread));        \
+     ThreadInVMfromNative __tiv(thread);                              \
+     debug_only(VMNativeEntryWrapper __vew;)                          \
+     VM_QUICK_ENTRY_BASE(result_type, header, thread)
+
+--- src/hotspot/share/runtime/javaCalls.cpp.orig
++++ src/hotspot/share/runtime/javaCalls.cpp
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -79,7 +80,6 @@ JavaCallWrapper::JavaCallWrapper(const methodHandle& callee_method, Handle recei
+     }
+   }
+ 
+-
+   // Make sure to set the oop's after the thread transition - since we can block there. No one is GC'ing
+   // the JavaCallWrapper before the entry frame is on the stack.
+   _callee_method = callee_method();
+@@ -113,12 +113,16 @@ JavaCallWrapper::JavaCallWrapper(const methodHandle& callee_method, Handle recei
+   if (_anchor.last_Java_sp() == NULL) {
+     _thread->record_base_of_stack_pointer();
+   }
++
++  MACOS_AARCH64_ONLY(_thread->enable_wx(WXExec));
+ }
+ 
+ 
+ JavaCallWrapper::~JavaCallWrapper() {
+   assert(_thread == JavaThread::current(), "must still be the same thread");
+ 
++  MACOS_AARCH64_ONLY(_thread->enable_wx(WXWrite));
++
+   // restore previous handle block & Java frame linkage
+   JNIHandleBlock *_old_handles = _thread->active_handles();
+   _thread->set_active_handles(_handles);
+
+--- src/hotspot/share/runtime/os.hpp.orig
++++ src/hotspot/share/runtime/os.hpp
+@@ -81,6 +81,11 @@ enum ThreadPriority {        // JLS 20.20.1-3
+   CriticalPriority = 11      // Critical thread priority
+ };
+ 
++enum WXMode {
++  WXWrite,
++  WXExec
++};
++
+ // Executable parameter flag for os::commit_memory() and
+ // os::commit_memory_or_exit().
+ const bool ExecMem = true;
+@@ -964,6 +969,11 @@ class os: AllStatic {
+     bool _done;
+   };
+ 
++#if defined(__APPLE__) && defined(AARCH64)
++  // Enables write or execute access to writeable and executable pages.
++  static void current_thread_enable_wx(WXMode mode);
++#endif // __APPLE__ && AARCH64
++
+ #ifndef _WINDOWS
+   // Suspend/resume support
+   // Protocol:
+
+--- src/hotspot/share/runtime/safefetch.inline.hpp.orig
++++ src/hotspot/share/runtime/safefetch.inline.hpp
+@@ -26,16 +26,27 @@
+ #define SHARE_RUNTIME_SAFEFETCH_INLINE_HPP
+ 
+ #include "runtime/stubRoutines.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ 
+ // Safefetch allows to load a value from a location that's not known
+ // to be valid. If the load causes a fault, the error value is returned.
+ inline int SafeFetch32(int* adr, int errValue) {
+   assert(StubRoutines::SafeFetch32_stub(), "stub not yet generated");
++#if defined(__APPLE__) && defined(AARCH64)
++  Thread* thread = Thread::current_or_null_safe();
++  assert(thread != NULL, "required for W^X management");
++  ThreadWXEnable wx(WXExec, thread);
++#endif // __APPLE__ && AARCH64
+   return StubRoutines::SafeFetch32_stub()(adr, errValue);
+ }
+ 
+ inline intptr_t SafeFetchN(intptr_t* adr, intptr_t errValue) {
+   assert(StubRoutines::SafeFetchN_stub(), "stub not yet generated");
++#if defined(__APPLE__) && defined(AARCH64)
++  Thread* thread = Thread::current_or_null_safe();
++  assert(thread != NULL, "required for W^X management");
++  ThreadWXEnable wx(WXExec, thread);
++#endif // __APPLE__ && AARCH64
+   return StubRoutines::SafeFetchN_stub()(adr, errValue);
+ }
+ 
+
+--- src/hotspot/share/runtime/safepoint.cpp.orig
++++ src/hotspot/share/runtime/safepoint.cpp
+@@ -61,6 +61,7 @@
+ #include "runtime/synchronizer.hpp"
+ #include "runtime/thread.inline.hpp"
+ #include "runtime/threadSMR.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ #include "runtime/timerTrace.hpp"
+ #include "services/runtimeService.hpp"
+ #include "utilities/events.hpp"
+@@ -954,6 +955,9 @@ void SafepointSynchronize::handle_polling_page_exception(JavaThread *thread) {
+     assert(SafepointSynchronize::is_synchronizing(), "polling encountered outside safepoint synchronization");
+   }
+ 
++  // Enable WXWrite: the function is called implicitly from java code.
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+   if (PrintSafepointStatistics) {
+     inc_page_trap_count();
+   }
+
+--- src/hotspot/share/runtime/signature.hpp.orig
++++ src/hotspot/share/runtime/signature.hpp
+@@ -1,5 +1,6 @@
+ /*
+- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -282,16 +283,16 @@ class NativeSignatureIterator: public SignatureIterator {
+   int          _prepended;             // number of prepended JNI parameters (1 JNIEnv, plus 1 mirror if static)
+   int          _jni_offset;            // the current parameter offset, starting with 0
+ 
+-  void do_bool  ()                     { pass_int();    _jni_offset++; _offset++;       }
+-  void do_char  ()                     { pass_int();    _jni_offset++; _offset++;       }
++  void do_bool  ()                     { pass_byte();   _jni_offset++; _offset++;       }
++  void do_char  ()                     { pass_short();  _jni_offset++; _offset++;       }
+   void do_float ()                     { pass_float();  _jni_offset++; _offset++;       }
+ #ifdef _LP64
+   void do_double()                     { pass_double(); _jni_offset++; _offset += 2;    }
+ #else
+   void do_double()                     { pass_double(); _jni_offset += 2; _offset += 2; }
+ #endif
+-  void do_byte  ()                     { pass_int();    _jni_offset++; _offset++;       }
+-  void do_short ()                     { pass_int();    _jni_offset++; _offset++;       }
++  void do_byte  ()                     { pass_byte();   _jni_offset++; _offset++;       }
++  void do_short ()                     { pass_short();  _jni_offset++; _offset++;       }
+   void do_int   ()                     { pass_int();    _jni_offset++; _offset++;       }
+ #ifdef _LP64
+   void do_long  ()                     { pass_long();   _jni_offset++; _offset += 2;    }
+@@ -312,6 +313,8 @@ class NativeSignatureIterator: public SignatureIterator {
+   virtual void pass_long()             = 0;
+   virtual void pass_object()           = 0;
+   virtual void pass_float()            = 0;
++  virtual void pass_byte()             { pass_int(); };
++  virtual void pass_short()            { pass_int(); };
+ #ifdef _LP64
+   virtual void pass_double()           = 0;
+ #else
+
+--- src/hotspot/share/runtime/stubRoutines.cpp.orig
++++ src/hotspot/share/runtime/stubRoutines.cpp
+@@ -289,6 +289,8 @@ void StubRoutines::initialize2() {
+ 
+ #ifdef ASSERT
+ 
++  MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXExec));
++
+ #define TEST_ARRAYCOPY(type)                                                    \
+   test_arraycopy_func(          type##_arraycopy(),          sizeof(type));     \
+   test_arraycopy_func(          type##_disjoint_arraycopy(), sizeof(type));     \
+@@ -369,6 +371,8 @@ void StubRoutines::initialize2() {
+   test_safefetchN();
+ #endif
+ 
++  MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXWrite));
++
+ #endif
+ }
+ 
+
+--- src/hotspot/share/runtime/thread.cpp.orig
++++ src/hotspot/share/runtime/thread.cpp
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -97,6 +98,7 @@
+ #include "runtime/threadCritical.hpp"
+ #include "runtime/threadSMR.inline.hpp"
+ #include "runtime/threadStatisticalInfo.hpp"
++#include "runtime/threadWXSetters.inline.hpp"
+ #include "runtime/timer.hpp"
+ #include "runtime/timerTrace.hpp"
+ #include "runtime/vframe.inline.hpp"
+@@ -317,6 +319,8 @@ Thread::Thread() {
+   if (barrier_set != NULL) {
+     barrier_set->on_thread_create(this);
+   }
++
++  MACOS_AARCH64_ONLY(DEBUG_ONLY(_wx_init = false));
+ }
+ 
+ void Thread::initialize_thread_current() {
+@@ -370,6 +374,8 @@ void Thread::call_run() {
+ 
+   register_thread_stack_with_NMT();
+ 
++  MACOS_AARCH64_ONLY(this->init_wx());
++
+   JFR_ONLY(Jfr::on_thread_start(this);)
+ 
+   log_debug(os, thread)("Thread " UINTX_FORMAT " stack dimensions: "
+@@ -2538,6 +2544,9 @@ void JavaThread::check_safepoint_and_suspend_for_native_trans(JavaThread *thread
+ // Note only the native==>VM/Java barriers can call this function and when
+ // thread state is _thread_in_native_trans.
+ void JavaThread::check_special_condition_for_native_trans(JavaThread *thread) {
++  // Enable WXWrite: called directly from interpreter native wrapper.
++  MACOS_AARCH64_ONLY(ThreadWXEnable wx(WXWrite, thread));
++
+   check_safepoint_and_suspend_for_native_trans(thread);
+ 
+   if (thread->has_async_exception()) {
+@@ -3682,6 +3691,8 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
+   // Initialize the os module
+   os::init();
+ 
++  MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXWrite));
++
+   // Record VM creation timing statistics
+   TraceVmCreationTime create_vm_timer;
+   create_vm_timer.start();
+@@ -3785,6 +3796,7 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
+   main_thread->record_stack_base_and_size();
+   main_thread->register_thread_stack_with_NMT();
+   main_thread->set_active_handles(JNIHandleBlock::allocate_block());
++  MACOS_AARCH64_ONLY(main_thread->init_wx());
+ 
+   if (!main_thread->set_as_starting_thread()) {
+     vm_shutdown_during_initialization(
+
+--- src/hotspot/share/runtime/thread.hpp.orig
++++ src/hotspot/share/runtime/thread.hpp
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -752,6 +753,15 @@ class Thread: public ThreadShadow {
+   static void muxAcquire(volatile intptr_t * Lock, const char * Name);
+   static void muxAcquireW(volatile intptr_t * Lock, ParkEvent * ev);
+   static void muxRelease(volatile intptr_t * Lock);
++
++#if defined(__APPLE__) && defined(AARCH64)
++ private:
++  DEBUG_ONLY(bool _wx_init);
++  WXMode _wx_state;
++ public:
++  void init_wx();
++  WXMode enable_wx(WXMode new_state);
++#endif // __APPLE__ && AARCH64
+ };
+ 
+ // Inline implementation of Thread::current()
+
+--- src/hotspot/share/runtime/thread.inline.hpp.orig
++++ src/hotspot/share/runtime/thread.inline.hpp
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -93,6 +94,27 @@ inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
+   OrderAccess::release_store_fence(&_threads_hazard_ptr, new_list);
+ }
+ 
++#if defined(__APPLE__) && defined(AARCH64)
++inline void Thread::init_wx() {
++  assert(this == Thread::current(), "should only be called for current thread");
++  assert(!_wx_init, "second init");
++  _wx_state = WXWrite;
++  os::current_thread_enable_wx(_wx_state);
++  DEBUG_ONLY(_wx_init = true);
++}
++
++inline WXMode Thread::enable_wx(WXMode new_state) {
++  assert(this == Thread::current(), "should only be called for current thread");
++  assert(_wx_init, "should be inited");
++  WXMode old = _wx_state;
++  if (_wx_state != new_state) {
++    _wx_state = new_state;
++    os::current_thread_enable_wx(new_state);
++  }
++  return old;
++}
++#endif // __APPLE__ && AARCH64
++
+ inline void JavaThread::set_ext_suspended() {
+   set_suspend_flag (_ext_suspended);
+ }
+
+--- /dev/null
++++ src/hotspot/share/runtime/threadWXSetters.inline.hpp
+@@ -0,0 +1,49 @@
++/*
++ * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++#ifndef SHARE_RUNTIME_THREADWXSETTERS_INLINE_HPP
++#define SHARE_RUNTIME_THREADWXSETTERS_INLINE_HPP
++
++#include "runtime/thread.inline.hpp"
++
++#if defined(__APPLE__) && defined(AARCH64)
++class ThreadWXEnable  {
++  Thread* _thread;
++  WXMode _old_mode;
++public:
++  ThreadWXEnable(WXMode new_mode, Thread* thread) :
++    _thread(thread),
++    _old_mode(_thread ? _thread->enable_wx(new_mode) : WXWrite)
++  { }
++  ~ThreadWXEnable() {
++    if (_thread) {
++      _thread->enable_wx(_old_mode);
++    }
++  }
++};
++#endif // __APPLE__ && AARCH64
++
++#endif // SHARE_RUNTIME_THREADWXSETTERS_INLINE_HPP
++
+
+--- src/hotspot/share/utilities/macros.hpp.orig
++++ src/hotspot/share/utilities/macros.hpp
+@@ -595,6 +595,8 @@
+ #define NOT_AARCH64(code) code
+ #endif
+ 
++#define MACOS_AARCH64_ONLY(x) MACOS_ONLY(AARCH64_ONLY(x))
++
+ #ifdef VM_LITTLE_ENDIAN
+ #define LITTLE_ENDIAN_ONLY(code) code
+ #define BIG_ENDIAN_ONLY(code)
+
+--- src/hotspot/share/utilities/nativeCallStack.cpp.orig
++++ src/hotspot/share/utilities/nativeCallStack.cpp
+@@ -38,7 +38,7 @@ NativeCallStack::NativeCallStack(int toSkip, bool fillStack) :
+     // to call os::get_native_stack. A tail call is used if _NMT_NOINLINE_ is not defined
+     // (which means this is not a slowdebug build), and we are on 64-bit (except Windows).
+     // This is not necessarily a rule, but what has been obvserved to date.
+-#if (defined(_NMT_NOINLINE_) || defined(_WINDOWS) || !defined(_LP64))
++#if (defined(_NMT_NOINLINE_) || defined(_WINDOWS) || !defined(_LP64) || (defined(BSD) && defined (__aarch64__)))
+     // Not a tail call.
+     toSkip++;
+ #if (defined(_NMT_NOINLINE_) && defined(BSD) && defined(_LP64))
+
+--- src/java.base/macosx/native/libjli/java_md_macosx.c.orig
++++ src/java.base/macosx/native/libjli/java_md_macosx.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2012, 2020, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -210,6 +210,8 @@ static InvocationFunctions *GetExportedJNIFunctions() {
+         preferredJVM = "client";
+ #elif defined(__x86_64__)
+         preferredJVM = "server";
++#elif defined(__aarch64__)
++        preferredJVM = "server";
+ #else
+ #error "Unknown architecture - needs definition"
+ #endif
+
+--- src/java.security.jgss/share/native/libj2gss/gssapi.h.orig
++++ src/java.security.jgss/share/native/libj2gss/gssapi.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -43,7 +43,9 @@
+ extern "C" {
+ #endif /* __cplusplus */
+ 
+-#if TARGET_OS_MAC
++// Condition was copied from
++// Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/gssapi/gssapi.h
++#if TARGET_OS_MAC && (defined(__ppc__) || defined(__ppc64__) || defined(__i386__) || defined(__x86_64__))
+ #    pragma pack(push,2)
+ #endif
+ 
+@@ -695,7 +697,7 @@ GSS_DLLIMP OM_uint32 gss_canonicalize_name(
+         gss_name_t *            /* output_name */
+ );
+ 
+-#if TARGET_OS_MAC
++#if TARGET_OS_MAC && (defined(__ppc__) || defined(__ppc64__) || defined(__i386__) || defined(__x86_64__))
+ #    pragma pack(pop)
+ #endif
+ 
+
+--- src/jdk.hotspot.agent/macosx/native/libsaproc/MacosxDebuggerLocal.m.orig
++++ src/jdk.hotspot.agent/macosx/native/libsaproc/MacosxDebuggerLocal.m
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -42,14 +43,10 @@
+ #import <sys/ptrace.h>
+ #include "libproc_impl.h"
+ 
+-#define UNSUPPORTED_ARCH "Unsupported architecture!"
+-
+-#if defined(x86_64) && !defined(amd64)
+-#define amd64 1
+-#endif
+-
+-#if amd64
++#if defined(amd64)
+ #include "sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext.h"
++#elif defined(aarch64)
++#include "sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext.h"
+ #else
+ #error UNSUPPORTED_ARCH
+ #endif
+@@ -162,20 +159,20 @@ static void throw_new_debugger_exception(JNIEnv* env, const char* errMsg) {
+   return (struct ps_prochandle*)(intptr_t)ptr;
+ }
+ 
+-#if defined(__i386__)
+-    #define hsdb_thread_state_t     x86_thread_state32_t
+-    #define hsdb_float_state_t      x86_float_state32_t
+-    #define HSDB_THREAD_STATE       x86_THREAD_STATE32
+-    #define HSDB_FLOAT_STATE        x86_FLOAT_STATE32
+-    #define HSDB_THREAD_STATE_COUNT x86_THREAD_STATE32_COUNT
+-    #define HSDB_FLOAT_STATE_COUNT  x86_FLOAT_STATE32_COUNT
+-#elif defined(__x86_64__)
++#if defined(amd64)
+     #define hsdb_thread_state_t     x86_thread_state64_t
+     #define hsdb_float_state_t      x86_float_state64_t
+     #define HSDB_THREAD_STATE       x86_THREAD_STATE64
+     #define HSDB_FLOAT_STATE        x86_FLOAT_STATE64
+     #define HSDB_THREAD_STATE_COUNT x86_THREAD_STATE64_COUNT
+     #define HSDB_FLOAT_STATE_COUNT  x86_FLOAT_STATE64_COUNT
++#elif defined(aarch64)
++    #define hsdb_thread_state_t     arm_thread_state64_t
++    #define hsdb_float_state_t      arm_neon_state64_t
++    #define HSDB_THREAD_STATE       ARM_THREAD_STATE64
++    #define HSDB_FLOAT_STATE        ARM_NEON_STATE64
++    #define HSDB_THREAD_STATE_COUNT ARM_THREAD_STATE64_COUNT
++    #define HSDB_FLOAT_STATE_COUNT  ARM_NEON_STATE64_COUNT
+ #else
+     #error UNSUPPORTED_ARCH
+ #endif
+@@ -493,11 +490,21 @@ bool fill_java_threads(JNIEnv* env, jobject this_obj, struct ps_prochandle* ph)
+       lwpid_t  uid = cinfos[j];
+       uint64_t beg = cinfos[j + 1];
+       uint64_t end = cinfos[j + 2];
++#if defined(amd64)
+       if ((regs.r_rsp < end && regs.r_rsp >= beg) ||
+           (regs.r_rbp < end && regs.r_rbp >= beg)) {
+         set_lwp_id(ph, i, uid);
+         break;
+       }
++#elif defined(aarch64)
++      if ((regs.r_sp < end && regs.r_sp >= beg) ||
++          (regs.r_fp < end && regs.r_fp >= beg)) {
++        set_lwp_id(ph, i, uid);
++        break;
++      }
++#else
++#error UNSUPPORTED_ARCH
++#endif
+     }
+   }
+   (*env)->ReleaseLongArrayElements(env, thrinfos, (jlong*)cinfos, 0);
+@@ -529,14 +536,22 @@ jlongArray getThreadIntegerRegisterSetFromCore(JNIEnv *env, jobject this_obj, lo
+ 
+ #undef NPRGREG
+ #undef REG_INDEX
+-#if amd64
++#if defined(amd64)
+ #define NPRGREG sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_NPRGREG
+ #define REG_INDEX(reg) sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_##reg
++#elif defined(aarch64)
++#define NPRGREG sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext_NPRGREG
++#define REG_INDEX(reg) sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext_##reg
++#else
++#error UNSUPPORTED_ARCH
++#endif
+ 
+   array = (*env)->NewLongArray(env, NPRGREG);
+   CHECK_EXCEPTION_(0);
+   regs = (*env)->GetLongArrayElements(env, array, &isCopy);
+ 
++#if defined(amd64)
++
+   regs[REG_INDEX(R15)] = gregs.r_r15;
+   regs[REG_INDEX(R14)] = gregs.r_r14;
+   regs[REG_INDEX(R13)] = gregs.r_r13;
+@@ -565,7 +580,46 @@ jlongArray getThreadIntegerRegisterSetFromCore(JNIEnv *env, jobject this_obj, lo
+   regs[REG_INDEX(TRAPNO)] = gregs.r_trapno;
+   regs[REG_INDEX(RFL)]    = gregs.r_rflags;
+ 
+-#endif /* amd64 */
++#elif defined(aarch64)
++
++  regs[REG_INDEX(R0)] = gregs.r_r0;
++  regs[REG_INDEX(R1)] = gregs.r_r1;
++  regs[REG_INDEX(R2)] = gregs.r_r2;
++  regs[REG_INDEX(R3)] = gregs.r_r3;
++  regs[REG_INDEX(R4)] = gregs.r_r4;
++  regs[REG_INDEX(R5)] = gregs.r_r5;
++  regs[REG_INDEX(R6)] = gregs.r_r6;
++  regs[REG_INDEX(R7)] = gregs.r_r7;
++  regs[REG_INDEX(R8)] = gregs.r_r8;
++  regs[REG_INDEX(R9)] = gregs.r_r9;
++  regs[REG_INDEX(R10)] = gregs.r_r10;
++  regs[REG_INDEX(R11)] = gregs.r_r11;
++  regs[REG_INDEX(R12)] = gregs.r_r12;
++  regs[REG_INDEX(R13)] = gregs.r_r13;
++  regs[REG_INDEX(R14)] = gregs.r_r14;
++  regs[REG_INDEX(R15)] = gregs.r_r15;
++  regs[REG_INDEX(R16)] = gregs.r_r16;
++  regs[REG_INDEX(R17)] = gregs.r_r17;
++  regs[REG_INDEX(R18)] = gregs.r_r18;
++  regs[REG_INDEX(R19)] = gregs.r_r19;
++  regs[REG_INDEX(R20)] = gregs.r_r20;
++  regs[REG_INDEX(R21)] = gregs.r_r21;
++  regs[REG_INDEX(R22)] = gregs.r_r22;
++  regs[REG_INDEX(R23)] = gregs.r_r23;
++  regs[REG_INDEX(R24)] = gregs.r_r24;
++  regs[REG_INDEX(R25)] = gregs.r_r25;
++  regs[REG_INDEX(R26)] = gregs.r_r26;
++  regs[REG_INDEX(R27)] = gregs.r_r27;
++  regs[REG_INDEX(R28)] = gregs.r_r28;
++  regs[REG_INDEX(FP)] = gregs.r_fp;
++  regs[REG_INDEX(LR)] = gregs.r_lr;
++  regs[REG_INDEX(SP)] = gregs.r_sp;
++  regs[REG_INDEX(PC)] = gregs.r_pc;
++
++#else
++#error UNSUPPORTED_ARCH
++#endif
++
+   (*env)->ReleaseLongArrayElements(env, array, regs, JNI_COMMIT);
+   return array;
+ }
+@@ -655,10 +709,14 @@ jlongArray getThreadIntegerRegisterSetFromCore(JNIEnv *env, jobject this_obj, lo
+     return NULL;
+   }
+ 
+-#if amd64
++#undef NPRGREG
++#if defined(amd64)
+ #define NPRGREG sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_NPRGREG
+-#undef REG_INDEX
+-#define REG_INDEX(reg) sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext_##reg
++#elif defined(aarch64)
++#define NPRGREG sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext_NPRGREG
++#else
++#error UNSUPPORTED_ARCH
++#endif
+ 
+   // 64 bit
+   print_debug("Getting threads for a 64-bit process\n");
+@@ -666,6 +724,8 @@ jlongArray getThreadIntegerRegisterSetFromCore(JNIEnv *env, jobject this_obj, lo
+   CHECK_EXCEPTION_(0);
+   primitiveArray = (*env)->GetLongArrayElements(env, registerArray, NULL);
+ 
++#if defined(amd64)
++
+   primitiveArray[REG_INDEX(R15)] = state.__r15;
+   primitiveArray[REG_INDEX(R14)] = state.__r14;
+   primitiveArray[REG_INDEX(R13)] = state.__r13;
+@@ -694,14 +754,50 @@ jlongArray getThreadIntegerRegisterSetFromCore(JNIEnv *env, jobject this_obj, lo
+   primitiveArray[REG_INDEX(DS)] = 0;
+   primitiveArray[REG_INDEX(FSBASE)] = 0;
+   primitiveArray[REG_INDEX(GSBASE)] = 0;
+-  print_debug("set registers\n");
+ 
+-  (*env)->ReleaseLongArrayElements(env, registerArray, primitiveArray, 0);
++#elif defined(aarch64)
++
++  primitiveArray[REG_INDEX(R0)] = state.__x[0];
++  primitiveArray[REG_INDEX(R1)] = state.__x[1];
++  primitiveArray[REG_INDEX(R2)] = state.__x[2];
++  primitiveArray[REG_INDEX(R3)] = state.__x[3];
++  primitiveArray[REG_INDEX(R4)] = state.__x[4];
++  primitiveArray[REG_INDEX(R5)] = state.__x[5];
++  primitiveArray[REG_INDEX(R6)] = state.__x[6];
++  primitiveArray[REG_INDEX(R7)] = state.__x[7];
++  primitiveArray[REG_INDEX(R8)] = state.__x[8];
++  primitiveArray[REG_INDEX(R9)] = state.__x[9];
++  primitiveArray[REG_INDEX(R10)] = state.__x[10];
++  primitiveArray[REG_INDEX(R11)] = state.__x[11];
++  primitiveArray[REG_INDEX(R12)] = state.__x[12];
++  primitiveArray[REG_INDEX(R13)] = state.__x[13];
++  primitiveArray[REG_INDEX(R14)] = state.__x[14];
++  primitiveArray[REG_INDEX(R15)] = state.__x[15];
++  primitiveArray[REG_INDEX(R16)] = state.__x[16];
++  primitiveArray[REG_INDEX(R17)] = state.__x[17];
++  primitiveArray[REG_INDEX(R18)] = state.__x[18];
++  primitiveArray[REG_INDEX(R19)] = state.__x[19];
++  primitiveArray[REG_INDEX(R20)] = state.__x[20];
++  primitiveArray[REG_INDEX(R21)] = state.__x[21];
++  primitiveArray[REG_INDEX(R22)] = state.__x[22];
++  primitiveArray[REG_INDEX(R23)] = state.__x[23];
++  primitiveArray[REG_INDEX(R24)] = state.__x[24];
++  primitiveArray[REG_INDEX(R25)] = state.__x[25];
++  primitiveArray[REG_INDEX(R26)] = state.__x[26];
++  primitiveArray[REG_INDEX(R27)] = state.__x[27];
++  primitiveArray[REG_INDEX(R28)] = state.__x[28];
++  primitiveArray[REG_INDEX(FP)] = state.__fp;
++  primitiveArray[REG_INDEX(LR)] = state.__lr;
++  primitiveArray[REG_INDEX(SP)] = state.__sp;
++  primitiveArray[REG_INDEX(PC)] = state.__pc;
+ 
+ #else
+ #error UNSUPPORTED_ARCH
+-#endif /* amd64 */
++#endif
++
++  print_debug("set registers\n");
+ 
++  (*env)->ReleaseLongArrayElements(env, registerArray, primitiveArray, 0);
+   return registerArray;
+ }
+ 
+
+--- src/jdk.hotspot.agent/macosx/native/libsaproc/libproc_impl.h.orig
++++ src/jdk.hotspot.agent/macosx/native/libsaproc/libproc_impl.h
+@@ -1,5 +1,6 @@
+ /*
+- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -30,6 +31,16 @@
+ #include "libproc.h"
+ #include "symtab.h"
+ 
++#define UNSUPPORTED_ARCH "Unsupported architecture!"
++
++#if defined(__x86_64__) && !defined(amd64)
++#define amd64 1
++#endif
++
++#if defined(__arm64__) && !defined(aarch64)
++#define aarch64 1
++#endif
++
+ #ifdef __APPLE__
+ #include <inttypes.h>     // for PRIx64, 32, ...
+ #include <pthread.h>
+@@ -41,6 +52,7 @@
+ #define register_t uint64_t
+ #endif
+ 
++#if defined(amd64)
+ /*** registers copied from bsd/amd64 */
+ typedef struct reg {
+   register_t      r_r15;
+@@ -71,6 +83,48 @@ typedef struct reg {
+   register_t      r_ss;          // not used
+ } reg;
+ 
++#elif defined(aarch64)
++/*** registers copied from bsd/arm64 */
++typedef struct reg {
++  register_t      r_r0;
++  register_t      r_r1;
++  register_t      r_r2;
++  register_t      r_r3;
++  register_t      r_r4;
++  register_t      r_r5;
++  register_t      r_r6;
++  register_t      r_r7;
++  register_t      r_r8;
++  register_t      r_r9;
++  register_t      r_r10;
++  register_t      r_r11;
++  register_t      r_r12;
++  register_t      r_r13;
++  register_t      r_r14;
++  register_t      r_r15;
++  register_t      r_r16;
++  register_t      r_r17;
++  register_t      r_r18;
++  register_t      r_r19;
++  register_t      r_r20;
++  register_t      r_r21;
++  register_t      r_r22;
++  register_t      r_r23;
++  register_t      r_r24;
++  register_t      r_r25;
++  register_t      r_r26;
++  register_t      r_r27;
++  register_t      r_r28;
++  register_t      r_fp;
++  register_t      r_lr;
++  register_t      r_sp;
++  register_t      r_pc;
++} reg;
++
++#else
++#error UNSUPPORTED_ARCH
++#endif
++
+ // convenient defs
+ typedef struct mach_header_64 mach_header_64;
+ typedef struct load_command load_command;
+
+--- src/jdk.hotspot.agent/macosx/native/libsaproc/ps_core.c.orig
++++ src/jdk.hotspot.agent/macosx/native/libsaproc/ps_core.c
+@@ -1,5 +1,6 @@
+ /*
+- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -32,8 +33,14 @@
+ #include "cds.h"
+ 
+ #ifdef __APPLE__
++#if defined(amd64)
+ #include "sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext.h"
++#elif defined(aarch64)
++#include "sun_jvm_hotspot_debugger_aarch64_AARCH64ThreadContext.h"
++#else
++#error UNSUPPORTED_ARCH
+ #endif
++#endif /* __APPLE__ */
+ 
+ // This file has the libproc implementation to read core files.
+ // For live processes, refer to ps_proc.c. Portions of this is adapted
+@@ -520,6 +527,8 @@ static ps_prochandle_ops core_ops = {
+ void print_thread(sa_thread_info *threadinfo) {
+   print_debug("thread added: %d\n", threadinfo->lwp_id);
+   print_debug("registers:\n");
++
++#if defined(amd64)
+   print_debug("  r_r15: 0x%" PRIx64 "\n", threadinfo->regs.r_r15);
+   print_debug("  r_r14: 0x%" PRIx64 "\n", threadinfo->regs.r_r14);
+   print_debug("  r_r13: 0x%" PRIx64 "\n", threadinfo->regs.r_r13);
+@@ -541,6 +550,45 @@ void print_thread(sa_thread_info *threadinfo) {
+   print_debug("  r_cs:  0x%" PRIx64 "\n", threadinfo->regs.r_cs);
+   print_debug("  r_rsp: 0x%" PRIx64 "\n", threadinfo->regs.r_rsp);
+   print_debug("  r_rflags: 0x%" PRIx64 "\n", threadinfo->regs.r_rflags);
++
++#elif defined(aarch64)
++  print_debug(" r_r0:  0x%" PRIx64 "\n", threadinfo->regs.r_r0);
++  print_debug(" r_r1:  0x%" PRIx64 "\n", threadinfo->regs.r_r1);
++  print_debug(" r_r2:  0x%" PRIx64 "\n", threadinfo->regs.r_r2);
++  print_debug(" r_r3:  0x%" PRIx64 "\n", threadinfo->regs.r_r3);
++  print_debug(" r_r4:  0x%" PRIx64 "\n", threadinfo->regs.r_r4);
++  print_debug(" r_r5:  0x%" PRIx64 "\n", threadinfo->regs.r_r5);
++  print_debug(" r_r6:  0x%" PRIx64 "\n", threadinfo->regs.r_r6);
++  print_debug(" r_r7:  0x%" PRIx64 "\n", threadinfo->regs.r_r7);
++  print_debug(" r_r8:  0x%" PRIx64 "\n", threadinfo->regs.r_r8);
++  print_debug(" r_r9:  0x%" PRIx64 "\n", threadinfo->regs.r_r9);
++  print_debug(" r_r10: 0x%" PRIx64 "\n", threadinfo->regs.r_r10);
++  print_debug(" r_r11: 0x%" PRIx64 "\n", threadinfo->regs.r_r11);
++  print_debug(" r_r12: 0x%" PRIx64 "\n", threadinfo->regs.r_r12);
++  print_debug(" r_r13: 0x%" PRIx64 "\n", threadinfo->regs.r_r13);
++  print_debug(" r_r14: 0x%" PRIx64 "\n", threadinfo->regs.r_r14);
++  print_debug(" r_r15: 0x%" PRIx64 "\n", threadinfo->regs.r_r15);
++  print_debug(" r_r16: 0x%" PRIx64 "\n", threadinfo->regs.r_r16);
++  print_debug(" r_r17: 0x%" PRIx64 "\n", threadinfo->regs.r_r17);
++  print_debug(" r_r18: 0x%" PRIx64 "\n", threadinfo->regs.r_r18);
++  print_debug(" r_r19: 0x%" PRIx64 "\n", threadinfo->regs.r_r19);
++  print_debug(" r_r20: 0x%" PRIx64 "\n", threadinfo->regs.r_r20);
++  print_debug(" r_r21: 0x%" PRIx64 "\n", threadinfo->regs.r_r21);
++  print_debug(" r_r22: 0x%" PRIx64 "\n", threadinfo->regs.r_r22);
++  print_debug(" r_r23: 0x%" PRIx64 "\n", threadinfo->regs.r_r23);
++  print_debug(" r_r24: 0x%" PRIx64 "\n", threadinfo->regs.r_r24);
++  print_debug(" r_r25: 0x%" PRIx64 "\n", threadinfo->regs.r_r25);
++  print_debug(" r_r26: 0x%" PRIx64 "\n", threadinfo->regs.r_r26);
++  print_debug(" r_r27: 0x%" PRIx64 "\n", threadinfo->regs.r_r27);
++  print_debug(" r_r28: 0x%" PRIx64 "\n", threadinfo->regs.r_r28);
++  print_debug(" r_fp:  0x%" PRIx64 "\n", threadinfo->regs.r_fp);
++  print_debug(" r_lr:  0x%" PRIx64 "\n", threadinfo->regs.r_lr);
++  print_debug(" r_sp:  0x%" PRIx64 "\n", threadinfo->regs.r_sp);
++  print_debug(" r_pc:  0x%" PRIx64 "\n", threadinfo->regs.r_pc);
++
++#else
++#error UNSUPPORTED_ARCH
++#endif
+ }
+ 
+ // read all segments64 commands from core file
+@@ -592,6 +640,7 @@ static bool read_core_segments(struct ps_prochandle* ph) {
+           goto err;
+         }
+         size += sizeof(thread_fc);
++#if defined(amd64)
+         if (fc.flavor == x86_THREAD_STATE) {
+           x86_thread_state_t thrstate;
+           if (read(fd, (void *)&thrstate, sizeof(x86_thread_state_t)) != sizeof(x86_thread_state_t)) {
+@@ -651,6 +700,90 @@ static bool read_core_segments(struct ps_prochandle* ph) {
+           }
+           size += sizeof(x86_exception_state_t);
+         }
++
++#elif defined(aarch64)
++        if (fc.flavor == ARM_THREAD_STATE64) {
++          arm_thread_state64_t thrstate;
++          if (read(fd, (void *)&thrstate, sizeof(arm_thread_state64_t)) != sizeof(arm_thread_state64_t)) {
++            printf("Reading flavor, count failed.\n");
++            goto err;
++          }
++          size += sizeof(arm_thread_state64_t);
++          // create thread info list, update lwp_id later
++          sa_thread_info* newthr = add_thread_info(ph, (pthread_t) -1, (lwpid_t) num_threads++);
++          if (newthr == NULL) {
++            printf("create thread_info failed\n");
++            goto err;
++          }
++
++          // note __DARWIN_UNIX03 depengs on other definitions
++#if __DARWIN_UNIX03
++#define get_register_v(regst, regname) \
++  regst.__##regname
++#else
++#define get_register_v(regst, regname) \
++  regst.##regname
++#endif // __DARWIN_UNIX03
++          newthr->regs.r_r0  = get_register_v(thrstate, x[0]);
++          newthr->regs.r_r1  = get_register_v(thrstate, x[1]);
++          newthr->regs.r_r2  = get_register_v(thrstate, x[2]);
++          newthr->regs.r_r3  = get_register_v(thrstate, x[3]);
++          newthr->regs.r_r4  = get_register_v(thrstate, x[4]);
++          newthr->regs.r_r5  = get_register_v(thrstate, x[5]);
++          newthr->regs.r_r6  = get_register_v(thrstate, x[6]);
++          newthr->regs.r_r7  = get_register_v(thrstate, x[7]);
++          newthr->regs.r_r8  = get_register_v(thrstate, x[8]);
++          newthr->regs.r_r9  = get_register_v(thrstate, x[9]);
++          newthr->regs.r_r10 = get_register_v(thrstate, x[10]);
++          newthr->regs.r_r11 = get_register_v(thrstate, x[11]);
++          newthr->regs.r_r12 = get_register_v(thrstate, x[12]);
++          newthr->regs.r_r13 = get_register_v(thrstate, x[13]);
++          newthr->regs.r_r14 = get_register_v(thrstate, x[14]);
++          newthr->regs.r_r15 = get_register_v(thrstate, x[15]);
++          newthr->regs.r_r16 = get_register_v(thrstate, x[16]);
++          newthr->regs.r_r17 = get_register_v(thrstate, x[17]);
++          newthr->regs.r_r18 = get_register_v(thrstate, x[18]);
++          newthr->regs.r_r19 = get_register_v(thrstate, x[19]);
++          newthr->regs.r_r20 = get_register_v(thrstate, x[20]);
++          newthr->regs.r_r21 = get_register_v(thrstate, x[21]);
++          newthr->regs.r_r22 = get_register_v(thrstate, x[22]);
++          newthr->regs.r_r23 = get_register_v(thrstate, x[23]);
++          newthr->regs.r_r24 = get_register_v(thrstate, x[24]);
++          newthr->regs.r_r25 = get_register_v(thrstate, x[25]);
++          newthr->regs.r_r26 = get_register_v(thrstate, x[26]);
++          newthr->regs.r_r27 = get_register_v(thrstate, x[27]);
++          newthr->regs.r_r28 = get_register_v(thrstate, x[28]);
++          newthr->regs.r_fp  = get_register_v(thrstate, fp);
++          newthr->regs.r_lr  = get_register_v(thrstate, lr);
++          newthr->regs.r_sp  = get_register_v(thrstate, sp);
++          newthr->regs.r_pc  = get_register_v(thrstate, pc);
++          print_thread(newthr);
++        } else if (fc.flavor == ARM_NEON_STATE64) {
++          arm_neon_state64_t flstate;
++          if (read(fd, (void *)&flstate, sizeof(arm_neon_state64_t)) != sizeof(arm_neon_state64_t)) {
++            printf("Reading flavor, count failed.\n");
++            goto err;
++          }
++          size += sizeof(arm_neon_state64_t);
++        } else if (fc.flavor == ARM_EXCEPTION_STATE64) {
++          arm_exception_state64_t excpstate;
++          if (read(fd, (void *)&excpstate, sizeof(arm_exception_state64_t)) != sizeof(arm_exception_state64_t)) {
++            printf("Reading flavor, count failed.\n");
++            goto err;
++          }
++          size += sizeof(arm_exception_state64_t);
++        } else if (fc.flavor == ARM_DEBUG_STATE64) {
++          arm_debug_state64_t dbgstate;
++          if (read(fd, (void *)&dbgstate, sizeof(arm_debug_state64_t)) != sizeof(arm_debug_state64_t)) {
++            printf("Reading flavor, count failed.\n");
++            goto err;
++          }
++          size += sizeof(arm_debug_state64_t);
++        }
++
++#else
++#error UNSUPPORTED_ARCH
++#endif
+       }
+     }
+   }
+
+--- src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/HotSpotAgent.java
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/HotSpotAgent.java
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -652,8 +653,10 @@ private void setupDebuggerDarwin() {
+ 
+         if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+             machDesc = new MachineDescriptionAMD64();
++        } else if (cpu.equals("aarch64")) {
++            machDesc = new MachineDescriptionAArch64();
+         } else {
+-            throw new DebuggerException("Darwin only supported on x86_64. Current arch: " + cpu);
++            throw new DebuggerException("Darwin only supported on x86_64/aarch64. Current arch: " + cpu);
+         }
+ 
+         BsdDebuggerLocal dbg = new BsdDebuggerLocal(machDesc, !isServer);
+
+--- src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/BsdCDebugger.java.orig
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/BsdCDebugger.java
+@@ -1,5 +1,6 @@
+ /*
+- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -30,8 +31,10 @@
+ import sun.jvm.hotspot.debugger.cdbg.*;
+ import sun.jvm.hotspot.debugger.x86.*;
+ import sun.jvm.hotspot.debugger.amd64.*;
++import sun.jvm.hotspot.debugger.aarch64.*;
+ import sun.jvm.hotspot.debugger.bsd.x86.*;
+ import sun.jvm.hotspot.debugger.bsd.amd64.*;
++import sun.jvm.hotspot.debugger.bsd.aarch64.*;
+ import sun.jvm.hotspot.utilities.*;
+ 
+ class BsdCDebugger implements CDebugger {
+@@ -97,6 +100,13 @@ public CFrame topFrameForThread(ThreadProxy thread) throws DebuggerException {
+        Address pc  = context.getRegisterAsAddress(AMD64ThreadContext.RIP);
+        if (pc == null) return null;
+        return new BsdAMD64CFrame(dbg, rbp, pc);
++    } else if (cpu.equals("aarch64")) {
++       AARCH64ThreadContext context = (AARCH64ThreadContext) thread.getContext();
++       Address fp = context.getRegisterAsAddress(AARCH64ThreadContext.FP);
++       if (fp == null) return null;
++       Address pc  = context.getRegisterAsAddress(AARCH64ThreadContext.PC);
++       if (pc == null) return null;
++       return new BsdAARCH64CFrame(dbg, fp, pc);
+     } else {
+        throw new DebuggerException(cpu + " is not yet supported");
+     }
+
+--- src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/BsdThreadContextFactory.java.orig
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/BsdThreadContextFactory.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -25,6 +25,7 @@
+ package sun.jvm.hotspot.debugger.bsd;
+ 
+ import sun.jvm.hotspot.debugger.*;
++import sun.jvm.hotspot.debugger.bsd.aarch64.*;
+ import sun.jvm.hotspot.debugger.bsd.amd64.*;
+ import sun.jvm.hotspot.debugger.bsd.x86.*;
+ 
+@@ -35,6 +36,8 @@ static ThreadContext createThreadContext(BsdDebugger dbg) {
+          return new BsdX86ThreadContext(dbg);
+       } else if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+          return new BsdAMD64ThreadContext(dbg);
++      } else if (cpu.equals("aarch64")) {
++         return new BsdAARCH64ThreadContext(dbg);
+       } else {
+          throw new RuntimeException("cpu " + cpu + " is not yet supported");
+       }
+
+--- /dev/null
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/aarch64/BsdAARCH64CFrame.java
+@@ -0,0 +1,87 @@
++/*
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2015, Red Hat Inc.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++package sun.jvm.hotspot.debugger.bsd.aarch64;
++
++import sun.jvm.hotspot.debugger.*;
++import sun.jvm.hotspot.debugger.aarch64.*;
++import sun.jvm.hotspot.debugger.bsd.*;
++import sun.jvm.hotspot.debugger.cdbg.*;
++import sun.jvm.hotspot.debugger.cdbg.basic.*;
++
++final public class BsdAARCH64CFrame extends BasicCFrame {
++   public BsdAARCH64CFrame(BsdDebugger dbg, Address fp, Address pc) {
++      super(dbg.getCDebugger());
++      this.fp = fp;
++      this.pc = pc;
++      this.dbg = dbg;
++   }
++
++   // override base class impl to avoid ELF parsing
++   public ClosestSymbol closestSymbolToPC() {
++      // try native lookup in debugger.
++      return dbg.lookup(dbg.getAddressValue(pc()));
++   }
++
++   public Address pc() {
++      return pc;
++   }
++
++   public Address localVariableBase() {
++      return fp;
++   }
++
++   public CFrame sender(ThreadProxy thread) {
++      AARCH64ThreadContext context = (AARCH64ThreadContext) thread.getContext();
++      Address rsp = context.getRegisterAsAddress(AARCH64ThreadContext.SP);
++
++      if ((fp == null) || fp.lessThan(rsp)) {
++        return null;
++      }
++
++      // Check alignment of fp
++      if (dbg.getAddressValue(fp) % (2 * ADDRESS_SIZE) != 0) {
++        return null;
++      }
++
++      Address nextFP = fp.getAddressAt(0 * ADDRESS_SIZE);
++      if (nextFP == null || nextFP.lessThanOrEqual(fp)) {
++        return null;
++      }
++      Address nextPC  = fp.getAddressAt(1 * ADDRESS_SIZE);
++      if (nextPC == null) {
++        return null;
++      }
++      return new BsdAARCH64CFrame(dbg, nextFP, nextPC);
++   }
++
++   // package/class internals only
++   private static final int ADDRESS_SIZE = 8;
++   private Address pc;
++   private Address sp;
++   private Address fp;
++   private BsdDebugger dbg;
++}
+
+--- /dev/null
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/debugger/bsd/aarch64/BsdAARCH64ThreadContext.java
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++package sun.jvm.hotspot.debugger.bsd.aarch64;
++
++import sun.jvm.hotspot.debugger.*;
++import sun.jvm.hotspot.debugger.aarch64.*;
++import sun.jvm.hotspot.debugger.bsd.*;
++
++public class BsdAARCH64ThreadContext extends AARCH64ThreadContext {
++  private BsdDebugger debugger;
++
++  public BsdAARCH64ThreadContext(BsdDebugger debugger) {
++    super();
++    this.debugger = debugger;
++  }
++
++  public void setRegisterAsAddress(int index, Address value) {
++    setRegister(index, debugger.getAddressValue(value));
++  }
++
++  public Address getRegisterAsAddress(int index) {
++    return debugger.newAddress(getRegister(index));
++  }
++}
+
+--- src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/runtime/Threads.java.orig
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/runtime/Threads.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2000, 2016, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -42,6 +42,7 @@
+ import sun.jvm.hotspot.runtime.linux_sparc.LinuxSPARCJavaThreadPDAccess;
+ import sun.jvm.hotspot.runtime.bsd_x86.BsdX86JavaThreadPDAccess;
+ import sun.jvm.hotspot.runtime.bsd_amd64.BsdAMD64JavaThreadPDAccess;
++import sun.jvm.hotspot.runtime.bsd_aarch64.BsdAARCH64JavaThreadPDAccess;
+ import sun.jvm.hotspot.utilities.*;
+ 
+ public class Threads {
+@@ -118,6 +119,8 @@ private static synchronized void initialize(TypeDataBase db) {
+         } else if (os.equals("darwin")) {
+             if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+                 access = new BsdAMD64JavaThreadPDAccess();
++            } else if (cpu.equals("aarch64")) {
++                access = new BsdAARCH64JavaThreadPDAccess();
+             }
+         }
+ 
+
+--- /dev/null
++++ src/jdk.hotspot.agent/share/classes/sun/jvm/hotspot/runtime/bsd_aarch64/BsdAARCH64JavaThreadPDAccess.java
+@@ -0,0 +1,137 @@
++/*
++ * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ *
++ */
++
++package sun.jvm.hotspot.runtime.bsd_aarch64;
++
++import java.io.*;
++import java.util.*;
++import sun.jvm.hotspot.debugger.*;
++import sun.jvm.hotspot.debugger.aarch64.*;
++import sun.jvm.hotspot.debugger.bsd.BsdDebugger;
++import sun.jvm.hotspot.debugger.bsd.BsdDebuggerLocal;
++import sun.jvm.hotspot.runtime.*;
++import sun.jvm.hotspot.runtime.aarch64.*;
++import sun.jvm.hotspot.types.*;
++import sun.jvm.hotspot.utilities.*;
++
++public class BsdAARCH64JavaThreadPDAccess implements JavaThreadPDAccess {
++  private static AddressField  lastJavaFPField;
++  private static AddressField  osThreadField;
++
++  // Field from OSThread
++  private static CIntegerField osThreadThreadIDField;
++  private static CIntegerField osThreadUniqueThreadIDField;
++
++  // This is currently unneeded but is being kept in case we change
++  // the currentFrameGuess algorithm
++  private static final long GUESS_SCAN_RANGE = 128 * 1024;
++
++  static {
++    VM.registerVMInitializedObserver(new Observer() {
++        public void update(Observable o, Object data) {
++          initialize(VM.getVM().getTypeDataBase());
++        }
++      });
++  }
++
++  private static synchronized void initialize(TypeDataBase db) {
++    Type type = db.lookupType("JavaThread");
++    osThreadField           = type.getAddressField("_osthread");
++
++    Type anchorType = db.lookupType("JavaFrameAnchor");
++    lastJavaFPField         = anchorType.getAddressField("_last_Java_fp");
++
++    Type osThreadType = db.lookupType("OSThread");
++    osThreadThreadIDField   = osThreadType.getCIntegerField("_thread_id");
++    osThreadUniqueThreadIDField = osThreadType.getCIntegerField("_unique_thread_id");
++  }
++
++  public Address getLastJavaFP(Address addr) {
++    return lastJavaFPField.getValue(addr.addOffsetTo(sun.jvm.hotspot.runtime.JavaThread.getAnchorField().getOffset()));
++  }
++
++  public Address getLastJavaPC(Address addr) {
++    return null;
++  }
++
++  public Address getBaseOfStackPointer(Address addr) {
++    return null;
++  }
++
++  public Frame getLastFramePD(JavaThread thread, Address addr) {
++    Address fp = thread.getLastJavaFP();
++    if (fp == null) {
++      return null; // no information
++    }
++    return new AARCH64Frame(thread.getLastJavaSP(), fp);
++  }
++
++  public RegisterMap newRegisterMap(JavaThread thread, boolean updateMap) {
++    return new AARCH64RegisterMap(thread, updateMap);
++  }
++
++  public Frame getCurrentFrameGuess(JavaThread thread, Address addr) {
++    ThreadProxy t = getThreadProxy(addr);
++    AARCH64ThreadContext context = (AARCH64ThreadContext) t.getContext();
++    AARCH64CurrentFrameGuess guesser = new AARCH64CurrentFrameGuess(context, thread);
++    if (!guesser.run(GUESS_SCAN_RANGE)) {
++      return null;
++    }
++    if (guesser.getPC() == null) {
++      return new AARCH64Frame(guesser.getSP(), guesser.getFP());
++    } else {
++      return new AARCH64Frame(guesser.getSP(), guesser.getFP(), guesser.getPC());
++    }
++  }
++
++  public void printThreadIDOn(Address addr, PrintStream tty) {
++    tty.print(getThreadProxy(addr));
++  }
++
++  public void printInfoOn(Address threadAddr, PrintStream tty) {
++    tty.print("Thread id: ");
++    printThreadIDOn(threadAddr, tty);
++//    tty.println("\nPostJavaState: " + getPostJavaState(threadAddr));
++  }
++
++  public Address getLastSP(Address addr) {
++    ThreadProxy t = getThreadProxy(addr);
++    AARCH64ThreadContext context = (AARCH64ThreadContext) t.getContext();
++    return context.getRegisterAsAddress(AARCH64ThreadContext.SP);
++  }
++
++  public ThreadProxy getThreadProxy(Address addr) {
++    // Addr is the address of the JavaThread.
++    // Fetch the OSThread (for now and for simplicity, not making a
++    // separate "OSThread" class in this package)
++    Address osThreadAddr = osThreadField.getValue(addr);
++    // Get the address of the _thread_id from the OSThread
++    Address threadIdAddr = osThreadAddr.addOffsetTo(osThreadThreadIDField.getOffset());
++    Address uniqueThreadIdAddr = osThreadAddr.addOffsetTo(osThreadUniqueThreadIDField.getOffset());
++
++    BsdDebuggerLocal debugger = (BsdDebuggerLocal) VM.getVM().getDebugger();
++    return debugger.getThreadForIdentifierAddress(threadIdAddr, uniqueThreadIdAddr);
++  }
++}
+
+--- src/utils/hsdis/Makefile.orig
++++ src/utils/hsdis/Makefile
+@@ -1,5 +1,6 @@
+ #
+-# Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
+ # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ #
+ # This code is free software; you can redistribute it and/or modify it
+@@ -112,15 +113,21 @@ else
+ ifeq ($(OS),Darwin)
+ CPU             = $(shell uname -m)
+ ARCH1=$(CPU:x86_64=amd64)
+-ARCH=$(ARCH1:i686=i386)
++ARCH2=$(ARCH1:arm64=aarch64)
++ARCH=$(ARCH2:i686=i386)
++CONFIGURE_ARGS/aarch64= --enable-targets=aarch64-darwin
++CONFIGURE_ARGS = $(CONFIGURE_ARGS/$(ARCH))
+ ifdef LP64
+ CFLAGS/sparcv9  += -m64
+ CFLAGS/amd64    += -m64
+ else
+-ARCH=$(ARCH1:amd64=i386)
++ARCH=$(ARCH2:amd64=i386)
+ CFLAGS/i386     += -m32
+ CFLAGS/sparc    += -m32
+ endif # LP64
++ifeq ($(CPU), arm64)
++CFLAGS/aarch64  += -m64
++endif # arm64
+ CFLAGS          += $(CFLAGS/$(ARCH))
+ CFLAGS          += -fPIC
+ OS              = macosx
+
+--- test/hotspot/gtest/gtestMain.cpp.orig
++++ test/hotspot/gtest/gtestMain.cpp
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -38,6 +38,8 @@
+ #include "jni.h"
+ #include "unittest.hpp"
+ 
++#include "runtime/thread.inline.hpp"
++
+ // Default value for -new-thread option: true on AIX because we run into
+ // problems when attempting to initialize the JVM on the primordial thread.
+ #ifdef _AIX
+@@ -91,7 +93,14 @@ static int init_jvm(int argc, char **argv, bool disable_error_handling) {
+   JavaVM* jvm;
+   JNIEnv* env;
+ 
+-  return JNI_CreateJavaVM(&jvm, (void**)&env, &args);
++  int ret = JNI_CreateJavaVM(&jvm, (void**)&env, &args);
++  if (ret == JNI_OK) {
++    // CreateJavaVM leaves WXExec context, while gtests
++    // calls internal functions assuming running in WXWwrite.
++    // Switch to WXWrite once for all test cases.
++    MACOS_AARCH64_ONLY(Thread::current()->enable_wx(WXWrite));
++  }
++  return ret;
+ }
+ 
+ class JVMInitializerListener : public ::testing::EmptyTestEventListener {
+
+--- test/hotspot/jtreg/runtime/CompressedOops/CompressedClassPointers.java.orig
++++ test/hotspot/jtreg/runtime/CompressedOops/CompressedClassPointers.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -25,7 +25,7 @@
+  * @test
+  * @bug 8024927
+  * @summary Testing address of compressed class pointer space as best as possible.
+- * @requires vm.bits == 64 & vm.opt.final.UseCompressedOops == true & os.family != "windows"
++ * @requires vm.bits == 64 & vm.opt.final.UseCompressedOops == true & os.family != "windows" & !(os.family == "mac" & os.arch=="aarch64")
+  * @library /test/lib
+  * @modules java.base/jdk.internal.misc
+  *          java.management
+
+--- test/hotspot/jtreg/runtime/ErrorHandling/TestOnError.java.orig
++++ test/hotspot/jtreg/runtime/ErrorHandling/TestOnError.java
+@@ -25,9 +25,12 @@
+  * @test TestOnError
+  * @bug 8078470
+  * @summary Test using -XX:OnError=<cmd>
++ * COMMENTS
++ *     Macos_aarch64 (unlike macos_intel) doesn't let the java to create
++ *     core file with ErrorHandlerTest=12. so need to ignore this test there.
+  * @modules java.base/jdk.internal.misc
+  * @library /test/lib
+- * @requires vm.debug
++ * @requires vm.debug & !(os.arch == "aarch64" & os.family == "mac")
+  * @run main TestOnError
+  */
+ 
+
+--- /dev/null
++++ test/hotspot/jtreg/runtime/jni/codegenAttachThread/TestCodegenAttach.java
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++/*
++ * @test
++ * @requires os.arch == "aarch64" & os.family == "mac"
++ * @run main/othervm/native TestCodegenAttach
++ */
++
++public class TestCodegenAttach {
++
++    static native void testCodegenAttach();
++
++    static {
++        System.loadLibrary("codegenAttach");
++    }
++
++    public static void main(String[] args) throws Throwable {
++        testCodegenAttach();
++    }
++}
+
+--- /dev/null
++++ test/hotspot/jtreg/runtime/jni/codegenAttachThread/libcodegenAttach.c
+@@ -0,0 +1,124 @@
++/*
++ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2021, Azul Systems, Inc. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdbool.h>
++
++#include <string.h>
++
++#include "jni.h"
++
++#if defined(__APPLE__) && defined(__aarch64__)
++
++#include <pthread.h>
++#include <sys/mman.h>
++
++JavaVM* jvm;
++
++static void* codegen;
++
++static int thread_start2(int val) {
++  JNIEnv *env;
++  jclass class_id;
++  jmethodID method_id;
++  int res;
++
++  printf("Native thread is running and attaching ...\n");
++
++  res = (*jvm)->AttachCurrentThread(jvm, (void **)&env, NULL);
++  if (res != JNI_OK) {
++    fprintf(stderr, "Test ERROR. Can't attach current thread: %d\n", res);
++    exit(1);
++  }
++
++  res = (*jvm)->DetachCurrentThread(jvm);
++  if (res != JNI_OK) {
++    fprintf(stderr, "Test ERROR. Can't detach current thread: %d\n", res);
++    exit(1);
++  }
++
++  printf("Native thread is about to finish\n");
++  return 1 + val;
++}
++
++static int trampoline(int(*fn)(int), int arg) {
++  int val = fn(arg);
++  // ensure code in MAP_JIT area after target function returns
++  return 1 + val;
++}
++
++static void * thread_start(void* unused) {
++  int val = ((int(*)(int(*)(int),int))codegen)(thread_start2, 10);
++  printf("return val = %d\n", val);
++  return NULL;
++}
++
++JNIEXPORT void JNICALL
++Java_TestCodegenAttach_testCodegenAttach
++(JNIEnv *env, jclass cls) {
++
++  codegen = mmap(NULL, 0x1000,
++      PROT_READ | PROT_WRITE | PROT_EXEC,
++      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
++  if (codegen == MAP_FAILED) {
++    perror("mmap");
++    exit(1);
++  }
++
++  pthread_jit_write_protect_np(false);
++
++  memcpy(codegen, trampoline, 128);
++
++  pthread_jit_write_protect_np(true);
++
++  pthread_t thread;
++  int res = (*env)->GetJavaVM(env, &jvm);
++  if (res != JNI_OK) {
++    fprintf(stderr, "Test ERROR. Can't extract JavaVM: %d\n", res);
++    exit(1);
++  }
++
++  if ((res = pthread_create(&thread, NULL, thread_start, NULL)) != 0) {
++    fprintf(stderr, "TEST ERROR: pthread_create failed: %s (%d)\n", strerror(res), res);
++    exit(1);
++  }
++
++  if ((res = pthread_join(thread, NULL)) != 0) {
++    fprintf(stderr, "TEST ERROR: pthread_join failed: %s (%d)\n", strerror(res), res);
++    exit(1);
++  }
++}
++
++#else
++
++JNIEXPORT void JNICALL
++Java_TestCodegenAttach_testCodegenAttach
++(JNIEnv *env, jclass cls) {
++  printf("should not reach here\n");
++  exit(1);
++}
++
++#endif // __APPLE__ && __aarch64__
+
+--- test/hotspot/jtreg/vmTestbase/nsk/share/jdi/ArgumentHandler.java.orig
++++ test/hotspot/jtreg/vmTestbase/nsk/share/jdi/ArgumentHandler.java
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2001, 2021, Oracle and/or its affiliates. All rights reserved.
+  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+  *
+  * This code is free software; you can redistribute it and/or modify it
+@@ -538,6 +538,8 @@ protected void checkOptions() {
+         {"linux-s390x",     "com.sun.jdi.SharedMemoryAttach"},
+         {"macosx-amd64",    "com.sun.jdi.SharedMemoryAttach"},
+         {"mac-x64",         "com.sun.jdi.SharedMemoryAttach"},
++        {"macosx-aarch64",  "com.sun.jdi.SharedMemoryAttach"},
++        {"mac-aarch64",     "com.sun.jdi.SharedMemoryAttach"},
+         {"aix-ppc64",       "com.sun.jdi.SharedMemoryAttach"},
+ 
+             // listening connectors
+@@ -568,6 +570,8 @@ protected void checkOptions() {
+         {"linux-s390x",     "com.sun.jdi.SharedMemoryListen"},
+         {"macosx-amd64",    "com.sun.jdi.SharedMemoryListen"},
+         {"mac-x64",         "com.sun.jdi.SharedMemoryListen"},
++        {"macosx-aarch64",  "com.sun.jdi.SharedMemoryListen"},
++        {"mac-aarch64",     "com.sun.jdi.SharedMemoryListen"},
+         {"aix-ppc64",       "com.sun.jdi.SharedMemoryListen"},
+ 
+             // launching connectors
+@@ -647,8 +651,14 @@ protected void checkOptions() {
+         {"macosx-amd64",     "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
+         {"macosx-amd64",     "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
+ 
+-        {"mac-x64",         "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
+-        {"mac-x64",         "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
++        {"mac-x64",          "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
++        {"mac-x64",          "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
++
++        {"macosx-aarch64",   "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
++        {"macosx-aarch64",   "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
++
++        {"mac-aarch64",      "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
++        {"mac-aarch64",      "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
+ 
+         {"aix-ppc64",       "com.sun.jdi.CommandLineLaunch", "dt_shmem"},
+         {"aix-ppc64",       "com.sun.jdi.RawCommandLineLaunch", "dt_shmem"},
+@@ -672,6 +682,8 @@ protected void checkOptions() {
+         {"linux-s390x",     "dt_shmem"},
+         {"macosx-amd64",    "dt_shmem"},
+         {"mac-x64",         "dt_shmem"},
++        {"macosx-aarch64",  "dt_shmem"},
++        {"mac-aarch64",     "dt_shmem"},
+         {"aix-ppc64",       "dt_shmem"},
+     };
+ }

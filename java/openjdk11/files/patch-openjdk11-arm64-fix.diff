@@ -1,0 +1,249 @@
+--- src/hotspot/os/bsd/os_bsd.cpp.orig
++++ src/hotspot/os/bsd/os_bsd.cpp
+@@ -22,6 +22,16 @@
+  *
+  */
+
++/*
++ * On macOS MAP_JIT cannot be used in conjunction with MAP_FIXED when mapping
++ * a page for codecache. Therefore our traditional technique of doing commit
++ * and uncommit - replacing a mapping with another one at the same address
++ * range but swapped MAP_NORESERVE - does not work.
++ * The "exec" flag basically means "its code cache" and it should be used
++ * consistently for the same mapping (reserve-commit-uncommit etc)
++ * This affects pd_reserve_memory, pd_commit_memory, pd_uncommit_memory functions
++ */
++
+ // no precompiled headers
+ #include "jvm.h"
+ #include "classfile/classLoader.hpp"
+@@ -2007,12 +2017,25 @@ static void warn_fail_commit_memory(char* addr, size_t size, bool exec,
+ //       problem.
+ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
+   int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
+-#ifdef __OpenBSD__
++#if defined(__OpenBSD__)
+   // XXX: Work-around mmap/MAP_FIXED bug temporarily on OpenBSD
+   Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+size), prot);
+   if (::mprotect(addr, size, prot) == 0) {
+     return true;
+   }
++#elif defined(__APPLE__)
++  if (exec) {
++    // Do not replace MAP_JIT mappings, see JDK-8234930
++    if (::mprotect(addr, size, prot) == 0) {
++      return true;
++    }
++  } else {
++    uintptr_t res = (uintptr_t) ::mmap(addr, size, prot,
++                                       MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0);
++    if (res != (uintptr_t) MAP_FAILED) {
++      return true;
++    }
++  }
+ #else
+   uintptr_t res = (uintptr_t) ::mmap(addr, size, prot,
+                                      MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0);
+@@ -2091,11 +2114,23 @@ char *os::scan_pages(char *start, char* end, page_info* page_expected, page_info
+ }
+
+
+-bool os::pd_uncommit_memory(char* addr, size_t size) {
+-#ifdef __OpenBSD__
++MACOS_ONLY(bool os::pd_uncommit_memory(char* addr, size_t size, bool executable))
++NOT_MACOS(bool os::pd_uncommit_memory(char* addr, size_t size)) {
++#if defined(__OpenBSD__)
+   // XXX: Work-around mmap/MAP_FIXED bug temporarily on OpenBSD
+   Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with PROT_NONE", p2i(addr), p2i(addr+size));
+   return ::mprotect(addr, size, PROT_NONE) == 0;
++#elif defined(__APPLE__)
++  if (executable) {
++    if (::madvise(addr, size, MADV_FREE) != 0) {
++      return false;
++    }
++    return ::mprotect(addr, size, PROT_NONE) == 0;
++  } else {
++    uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
++        MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
++    return res  != (uintptr_t) MAP_FAILED;
++  }
+ #else
+   uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
+                                      MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
+@@ -2119,11 +2154,17 @@ bool os::remove_stack_guard_pages(char* addr, size_t size) {
+ // 'requested_addr' is only treated as a hint, the return value may or
+ // may not start from the requested address. Unlike Bsd mmap(), this
+ // function returns NULL to indicate failure.
+-static char* anon_mmap(char* requested_addr, size_t bytes, bool fixed) {
++static char* anon_mmap(char* requested_addr, size_t bytes, bool fixed, bool executable = false) {
+   char * addr;
+   int flags;
+
+   flags = MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS;
++#ifdef __APPLE__
++  if (executable) {
++    guarantee(!fixed, "MAP_JIT (for execute) is incompatible with MAP_FIXED");
++    flags |= MAP_JIT;
++  }
++#endif
+   if (fixed) {
+     assert((uintptr_t)requested_addr % os::Bsd::page_size() == 0, "unaligned address");
+     flags |= MAP_FIXED;
+@@ -2142,10 +2183,18 @@ static int anon_munmap(char * addr, size_t size) {
+   return ::munmap(addr, size) == 0;
+ }
+
++#if defined(__APPLE__)
++char* os::pd_reserve_memory(size_t bytes, char* requested_addr,
++                            size_t alignment_hint,
++                            bool executable) {
++  return anon_mmap(requested_addr, bytes, (requested_addr != NULL), executable);
++}
++#else
+ char* os::pd_reserve_memory(size_t bytes, char* requested_addr,
+                             size_t alignment_hint) {
+   return anon_mmap(requested_addr, bytes, (requested_addr != NULL));
+ }
++#endif
+
+ bool os::pd_release_memory(char* addr, size_t size) {
+   return anon_munmap(addr, size);
+--- src/hotspot/share/memory/virtualspace.cpp.orig
++++ src/hotspot/share/memory/virtualspace.cpp
+@@ -196,7 +196,8 @@ void ReservedSpace::initialize(size_t size, size_t alignment, bool large,
+         base = NULL;
+       }
+     } else {
+-      base = os::reserve_memory(size, NULL, alignment, _fd_for_heap);
++      base = MACOS_ONLY(os::reserve_memory(size, NULL, alignment, _fd_for_heap, _executable))
++             NOT_MACOS(os::reserve_memory(size, NULL, alignment, _fd_for_heap));
+     }
+
+     if (base == NULL) return;
+@@ -990,7 +991,8 @@ void VirtualSpace::shrink_by(size_t size) {
+     assert(middle_high_boundary() <= aligned_upper_new_high &&
+            aligned_upper_new_high + upper_needs <= upper_high_boundary(),
+            "must not shrink beyond region");
+-    if (!os::uncommit_memory(aligned_upper_new_high, upper_needs)) {
++    if (MACOS_ONLY(!os::uncommit_memory(aligned_upper_new_high, upper_needs, _executable))
++        NOT_MACOS(!os::uncommit_memory(aligned_upper_new_high, upper_needs))) {
+       debug_only(warning("os::uncommit_memory failed"));
+       return;
+     } else {
+@@ -1001,7 +1003,8 @@ void VirtualSpace::shrink_by(size_t size) {
+     assert(lower_high_boundary() <= aligned_middle_new_high &&
+            aligned_middle_new_high + middle_needs <= middle_high_boundary(),
+            "must not shrink beyond region");
+-    if (!os::uncommit_memory(aligned_middle_new_high, middle_needs)) {
++    if (MACOS_ONLY(!os::uncommit_memory(aligned_middle_new_high, middle_needs, _executable))
++        NOT_MACOS(!os::uncommit_memory(aligned_middle_new_high, middle_needs))) {
+       debug_only(warning("os::uncommit_memory failed"));
+       return;
+     } else {
+@@ -1012,7 +1015,8 @@ void VirtualSpace::shrink_by(size_t size) {
+     assert(low_boundary() <= aligned_lower_new_high &&
+            aligned_lower_new_high + lower_needs <= lower_high_boundary(),
+            "must not shrink beyond region");
+-    if (!os::uncommit_memory(aligned_lower_new_high, lower_needs)) {
++    if (MACOS_ONLY(!os::uncommit_memory(aligned_lower_new_high, lower_needs, _executable))
++        NOT_MACOS(!os::uncommit_memory(aligned_lower_new_high, lower_needs))) {
+       debug_only(warning("os::uncommit_memory failed"));
+       return;
+     } else {
+--- src/hotspot/share/runtime/os.cpp.orig
++++ src/hotspot/share/runtime/os.cpp
+@@ -1737,7 +1737,8 @@ bool os::create_stack_guard_pages(char* addr, size_t bytes) {
+   return os::pd_create_stack_guard_pages(addr, bytes);
+ }
+
+-char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint, int file_desc) {
++MACOS_ONLY(char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint, int file_desc, bool executable))
++NOT_MACOS(char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint, int file_desc)) {
+   char* result = NULL;
+
+   if (file_desc != -1) {
+@@ -1748,7 +1749,8 @@ char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint, int fi
+       MemTracker::record_virtual_memory_reserve_and_commit((address)result, bytes, CALLER_PC);
+     }
+   } else {
+-    result = pd_reserve_memory(bytes, addr, alignment_hint);
++    result = MACOS_ONLY(pd_reserve_memory(bytes, addr, alignment_hint, executable))
++             NOT_MACOS(pd_reserve_memory(bytes, addr, alignment_hint));
+     if (result != NULL) {
+       MemTracker::record_virtual_memory_reserve((address)result, bytes, CALLER_PC);
+     }
+@@ -1818,16 +1820,19 @@ void os::commit_memory_or_exit(char* addr, size_t size, size_t alignment_hint,
+   MemTracker::record_virtual_memory_commit((address)addr, size, CALLER_PC);
+ }
+
+-bool os::uncommit_memory(char* addr, size_t bytes) {
++MACOS_ONLY(bool os::uncommit_memory(char* addr, size_t bytes, bool executable))
++NOT_MACOS(bool os::uncommit_memory(char* addr, size_t bytes)) {
+   bool res;
+   if (MemTracker::tracking_level() > NMT_minimal) {
+     Tracker tkr(Tracker::uncommit);
+-    res = pd_uncommit_memory(addr, bytes);
++    res = MACOS_ONLY(pd_uncommit_memory(addr, bytes, executable))
++          NOT_MACOS(pd_uncommit_memory(addr, bytes));
+     if (res) {
+       tkr.record((address)addr, bytes);
+     }
+   } else {
+-    res = pd_uncommit_memory(addr, bytes);
++    res = MACOS_ONLY(pd_uncommit_memory(addr, bytes, executable))
++          NOT_MACOS(pd_uncommit_memory(addr, bytes));
+   }
+   return res;
+ }
+--- src/hotspot/share/runtime/os.hpp.orig
++++ src/hotspot/share/runtime/os.hpp
+@@ -116,8 +116,12 @@ class os: AllStatic {
+     _page_sizes[1] = 0; // sentinel
+   }
+
+-  static char*  pd_reserve_memory(size_t bytes, char* addr = 0,
+-                                  size_t alignment_hint = 0);
++
++  MACOS_ONLY(static char*  pd_reserve_memory(size_t bytes, char* addr = 0,
++                                             size_t alignment_hint = 0,
++                                             bool executable = false);)
++  NOT_MACOS(static char*  pd_reserve_memory(size_t bytes, char* addr = 0,
++                                            size_t alignment_hint = 0);)
+   static char*  pd_attempt_reserve_memory_at(size_t bytes, char* addr);
+   static char*  pd_attempt_reserve_memory_at(size_t bytes, char* addr, int file_desc);
+   static void   pd_split_reserved_memory(char *base, size_t size,
+@@ -132,7 +136,9 @@ class os: AllStatic {
+   static void   pd_commit_memory_or_exit(char* addr, size_t size,
+                                          size_t alignment_hint,
+                                          bool executable, const char* mesg);
+-  static bool   pd_uncommit_memory(char* addr, size_t bytes);
++  MACOS_ONLY(static bool   pd_uncommit_memory(char* addr, size_t bytes,
++                                              bool executable = false);)
++  NOT_MACOS(static bool   pd_uncommit_memory(char* addr, size_t bytes);)
+   static bool   pd_release_memory(char* addr, size_t bytes);
+
+   static char*  pd_map_memory(int fd, const char* file_name, size_t file_offset,
+@@ -330,8 +336,11 @@ class os: AllStatic {
+                                                   const size_t size);
+
+   static int    vm_allocation_granularity();
+-  static char*  reserve_memory(size_t bytes, char* addr = 0,
+-                               size_t alignment_hint = 0, int file_desc = -1);
++  MACOS_ONLY(static char*  reserve_memory(size_t bytes, char* addr = 0,
++                                          size_t alignment_hint = 0, int file_desc = -1,
++                                          bool executable = false);)
++  NOT_MACOS(static char*  reserve_memory(size_t bytes, char* addr = 0,
++                                         size_t alignment_hint = 0, int file_desc = -1);)
+   static char*  reserve_memory(size_t bytes, char* addr,
+                                size_t alignment_hint, MEMFLAGS flags);
+   static char*  reserve_memory_aligned(size_t size, size_t alignment, int file_desc = -1);
+@@ -348,7 +357,8 @@ class os: AllStatic {
+   static void   commit_memory_or_exit(char* addr, size_t size,
+                                       size_t alignment_hint,
+                                       bool executable, const char* mesg);
+-  static bool   uncommit_memory(char* addr, size_t bytes);
++  MACOS_ONLY(static bool   uncommit_memory(char* addr, size_t bytes, bool executable = false);)
++  NOT_MACOS(static bool   uncommit_memory(char* addr, size_t bytes);)
+   static bool   release_memory(char* addr, size_t bytes);
+
+   // Touch memory pages that cover the memory range from start to end (exclusive)
