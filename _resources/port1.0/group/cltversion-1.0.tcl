@@ -19,7 +19,7 @@ default cltversion       {[cltversion::get_default_cltversion]}
 default developerversion {[cltversion::get_default_developerversion]}
 
 proc cltversion::get_default_cltversion {} {
-    global cltversion._cltversion_version_cache
+    global cltversion._cltversion_version_cache os.major
 
     if {[info exists cltversion._cltversion_version_cache]} {
         return [set cltversion._cltversion_version_cache]
@@ -49,8 +49,14 @@ proc cltversion::get_default_cltversion {} {
 
         # On OS X 10.9, running `xcode-select --install` seems to reinstall the command line tools.
         # For later OS versions, however, if `/Library/Developer/CommandLineTools/usr/lib/libxcrun.dylib` exists, then `xcode-select --install` refuses to reinstall.
+        #
+        # /usr/lib/libxcselect.dylib will not exist as a file on disk on macOS
+        # 11 or later (Darwin 20 or later) because individual system dylibs are
+        # only shipped in the dyld shared cache. Rest assured that if the OS is
+        # that new, it's always appropriate to look for a Command Line Tools
+        # installation at the path given here.
 
-        if {[file exists /usr/lib/libxcselect.dylib]} {
+        if {[file exists /usr/lib/libxcselect.dylib] || ${os.major} >= 20} {
             set test_file /Library/Developer/CommandLineTools/usr/lib/libxcrun.dylib
         } else {
             set test_file /usr/bin/make
