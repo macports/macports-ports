@@ -55,17 +55,6 @@ namespace eval java {
         if { ${java.version} ne "" } {
             ui_debug "java-portgroup: Trying to find JVM version: ${java.version}"
 
-            # If on arm automatically adjust to the *-zulu fallback versions
-            # as required, as currently these are the only ones supporting arm.
-            # To be reviewed as support for arm comes for the other versions.
-            # Following regex matches openjdk<version> only.
-            if { [option configure.build_arch] eq "arm64" &&
-                 [regexp {openjdk(\d{1,2}$)} ${java.fallback}] } {
-                set newjdk ${java.fallback}-zulu
-                ui_debug "Redefining java fallback ${java.fallback} to ${newjdk} for arm compatibility"
-                java.fallback ${newjdk}
-            }
-
             # For macOS >= Big Sur, the JDK discovery was re-implemented because
             # the previous approach relied on '/usr/libexec/java_home -v' whose
             # behaviour changed with Big Sur. The new implementation can
