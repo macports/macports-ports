@@ -264,7 +264,7 @@ proc muniversal::map_phase {dir_save dir phase_cmd} {
 proc muniversal::get_archflag {tool arch} {
     global configure.compiler
 
-    if { [portconfigure::arch_flag_supported ${configure.compiler}] && ${tool} in {cc cxx objc objcxx ld } } {
+    if { [portconfigure::arch_flag_supported ${configure.compiler}] && ${tool} in {cc cxx objc objcxx ld} } {
         return "-arch ${arch}"
     } elseif { ${arch} in {arm64 ppc64 x86_64} } {
         return "-m64"
