@@ -637,11 +637,26 @@ proc parse_environment {command} {
     global ${command}.env.${arch} \
            ${command}.env_array
 
-    if { ${command} eq "configure" && [option muniversal.arch_compiler] && [option muniversal.is_cross.${arch}] } {
-        set ${command}.env_array(CPP_FOR_BUILD)     "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CXXCPP_FOR_BUILD)  "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CC_FOR_BUILD)      "[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
-        set ${command}.env_array(CXX_FOR_BUILD)     "[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+    if { ${command} eq "configure" } {
+        set ${command}.env_array(CPP_FOR_BUILD)             "[portconfigure::configure_get_compiler cpp]"
+        set ${command}.env_array(CXXCPP_FOR_BUILD)          "[portconfigure::configure_get_compiler cpp]"
+        set ${command}.env_array(CPPFLAGS_FOR_BUILD)        [option configure.cppflags]
+
+        if { [option muniversal.arch_compiler] } {
+            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
+            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+
+            set ${command}.env_array(CFLAGS_FOR_BUILD)      [option configure.cflags]
+            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    [option configure.cxxflags]
+            set ${command}.env_array(LDFLAGS_FOR_BUILD)     [option configure.ldflags]
+        } else {
+            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]"
+            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx]"
+
+            set ${command}.env_array(CFLAGS_FOR_BUILD)      "[option configure.cflags] [portconfigure::configure_get_archflags cc]"
+            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    "[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
+            set ${command}.env_array(LDFLAGS_FOR_BUILD)     "[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
+        }
     }
 
     if { [info exists ${command}.env.${arch}] } {
