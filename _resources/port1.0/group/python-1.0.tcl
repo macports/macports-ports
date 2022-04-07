@@ -312,6 +312,10 @@ proc python_add_dependencies {} {
                         depends_build-delete    port:py${python.version}-flit_core
                         depends_build-append    port:py${python.version}-flit_core
                     }
+                    hatch {
+                        depends_build-delete    port:py${python.version}-hatchling
+                        depends_build-append    port:py${python.version}-hatchling
+                    }
                     poetry {
                         depends_build-delete    port:py${python.version}-poetry-core
                         depends_build-append    port:py${python.version}-poetry-core
