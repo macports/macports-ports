@@ -25,9 +25,9 @@ set llvm_version        14
 version                 ${llvm_version}.0.1
 
 name                    llvm-${llvm_version}
-revision                0
+revision                1
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 0 }
+subport                 clang-${llvm_version} { revision 1 }
 subport                 lldb-${llvm_version}  { revision 0 }
 subport                 flang-${llvm_version} { revision 0 }
 
@@ -133,6 +133,7 @@ patchfiles-append \
     0013-clang-add-back-runtime-libraries-used-on-10.4-and-10.patch \
     0014-Fix-float.h-to-work-on-Snow-Leopard-and-earlier.patch \
     0015-Fixup-libstdc-header-search-paths-for-older-versions.patch \
+    0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
     0025-lldb-add-defines-needed-for-older-SDKs.patch
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
@@ -143,7 +144,6 @@ if {${os.platform} eq "darwin" && ${os.major} < 14} {
 if {${os.platform} eq "darwin" && ${os.major} < 11} {
     patchfiles-append \
         0017-10.6-and-less-libcxx-work-around-no-reexported_symbo.patch \
-        0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
         0020-10.6-and-less-work-around-no-directory-watcher-befor.patch \
         0021-10.6-and-less-libcxx-disable-Availability-tests.patch
 }
@@ -492,65 +492,56 @@ if {${subport} eq "clang-${llvm_version}"} {
         default_variants-append +defaultlibcxx
     }
 
-    variant libstdcxx description {-stdlib=macports-libstdc++ searches for MacPorts libstdc++} {
+    variant libstdcxx description {-stdlib=libstdc++_macports searches for MacPorts libstdc++} {
 
         patchfiles-append 0005-clang-support-macports-libstdcxx.patch
 
         post-patch {
+            if { ${configure.build_arch} eq "arm64" } {
+                # see https://github.com/macports/macports-ports/commit/be1e11a368f672d927a7bdb381f2fa71a79ba483
+                set gcc_arch    aarch64
+            } else {
+                set gcc_arch    ${configure.build_arch}
+            }
+
             reinplace "s|@@MACPORTS_GCC_INCLUDE_DIR@@|${prefix}/include/gcc/c++|g" \
                 ${patch.dir}/clang/lib/Lex/InitHeaderSearch.cpp \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
-            reinplace "s|@@MACPORTS_HOST_NAME@@|${build_arch}-apple-darwin${os.major}|g" \
+            reinplace "s|@@MACPORTS_HOST_NAME@@|${gcc_arch}-apple-darwin${os.major}|g" \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
             reinplace "s|@@MACPORTS_libstdc++@@|${prefix}/lib/libgcc/libstdc++.6.dylib|g" \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
 
-            # GCC was built for ${build_arch}-apple-darwin${os.major}
+            # GCC was built for ${configure.build_arch}-apple-darwin${os.major}
             # if GCC was also built universal, it has an extra include directory
-            # if ${build_arch} is 32-bit, there is an extra 64-bit subdirectory
-            # if ${build_arch} is 64-bit, there is an extra 32-bit subdirectory
-            # MacPorts GCC can not compile across platforms
-            switch ${build_arch} {
+            # if ${configure.build_arch} is 32-bit, there is an extra 64-bit subdirectory
+            # if ${configure.build_arch} is 64-bit, there is an extra 32-bit subdirectory
+            # MacPorts GCC cannot compile across platforms
+            switch ${configure.build_arch} {
                 x86_64 {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   "i386"
-                    set gcc_subdirectory_x86_64 ""
+                    reinplace {s|@@MACPORTS_TEST_32_64@@|getTriple().getArch() == llvm::Triple::x86_64 ? "" : "i386"|g} \
+                        ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
                 }
                 i386 {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_TEST_32_64@@|getTriple().getArch() == llvm::Triple::x86_64 ? "x86_64" : ""|g} \
+                        ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
                 }
                 ppc64 {
-                    set gcc_subdirectory_ppc    "ppc"
-                    set gcc_subdirectory_ppc64  ""
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_TEST_32_64@@|getTriple().getArch() == llvm::Triple::ppc64 ? "" : "ppc"|g} \
+                        ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
                 }
                 ppc {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_TEST_32_64@@|getTriple().getArch() == llvm::Triple::ppc64 ? "ppc64" : ""|g} \
+                        ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
+                }
+                arm64 {
+                    reinplace {s|@@MACPORTS_TEST_32_64@@|""|g} \
+                        ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
                 }
             }
-
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_x86_64@@|${gcc_subdirectory_x86_64}|g" \
-                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_i386@@|${gcc_subdirectory_i386}|g" \
-                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc64@@|${gcc_subdirectory_ppc64}|g" \
-                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc@@|${gcc_subdirectory_ppc}|g" \
-                ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
         }
     }
-    # at present, only the non-arm archs can use this variant
-    if {${build_arch} in "x86_64 i386 ppc64 ppc"} {
-        default_variants-append +libstdcxx
-    }
+    default_variants-append +libstdcxx
 }
 
 livecheck.type      regex
