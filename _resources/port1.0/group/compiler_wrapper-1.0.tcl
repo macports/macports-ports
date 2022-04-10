@@ -106,6 +106,21 @@ proc compwrap::wrap_compiler {tag} {
         return ${comp}
     }
 
+    return ${wrapcomp}
+}
+
+post-extract {
+    foreach tag [option compwrap.compilers_to_wrap] {
+
+        # Get the underlying compiler
+        set comp [option configure.${tag}]
+
+        # Get the wrapper path
+        set wrapcomp [compwrap::wrapped_compiler_path ${tag}]
+        if { ${wrapcomp} eq ${comp} } {
+            continue
+        }
+
         # Create the directory for the wrapper.
         set wrapdir [file dirname ${wrapcomp}]
         if {![file exists ${wrapdir}]} {
@@ -176,8 +191,7 @@ proc compwrap::wrap_compiler {tag} {
         }
         puts ${f} "exec ${comp} ${comp_opts}"
         close ${f}
-
-    return ${wrapcomp}
+    }
 }
 
 # Set various env vars
