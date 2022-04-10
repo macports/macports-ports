@@ -88,7 +88,7 @@ proc compwrap::wrapped_compiler_path {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
     # If not defined, or tag not in list of known compilers to wrap, just return
-    if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
+    if {${comp} eq "" || ${tag} ni [option compwrap.compilers_to_wrap]} {
         return ${comp}
     }
     return [compwrap::wrapped_command_path ${tag} ${comp}]
