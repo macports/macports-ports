@@ -4,9 +4,6 @@
 # Note settings here *must* match those in the lang/libgcc port and compilers PG
 if { ${os.major} < 10 } {
     set gcc_main_version 7
-} elseif {${os.major} == 11} {
-    # https://trac.macports.org/ticket/65042
-    set gcc_main_version 10
 } else {
     set gcc_main_version 11
 }

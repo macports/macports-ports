@@ -85,12 +85,7 @@ if {${os.major} < 10} {
         # GCC 11 still problematic on arm
         set compilers.gcc_default gccdevel
     } else {
-        # https://trac.macports.org/ticket/65042
-        if {${os.major} == 11} {
-            set compilers.gcc_default gcc10
-        } else {
-            set compilers.gcc_default gcc11
-        }
+        set compilers.gcc_default gcc11
     }
 }
 
@@ -114,12 +109,7 @@ if { ${os.arch} eq "arm" } {
 if { ${os.major} < 10 } {
     set gcc_main_version 7
 } else {
-    # https://trac.macports.org/ticket/65042
-    if {${os.major} == 11} {
-        set gcc_main_version 10
-    } else {
-        set gcc_main_version 11
-    }
+    set gcc_main_version 11
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {

@@ -6,11 +6,7 @@
 global os.major os.arch
 
 if { ${os.major} >= 10 } {
-    # https://trac.macports.org/ticket/65042
-    if {${os.major} != 11} {
-        lappend compilers macports-gcc-11
-    }
-    lappend compilers macports-gcc-10
+    lappend compilers macports-gcc-11 macports-gcc-10
 }
 
 if { ${os.arch} ne "arm" } {
