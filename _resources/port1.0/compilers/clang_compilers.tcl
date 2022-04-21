@@ -13,10 +13,9 @@
 global os.major
 
 if {${os.major} >= 11} {
-    lappend compilers macports-clang-13 macports-clang-12
-    # For now, as it is new, add clang-14 after 12 and 13.
-    # Eventually should be promoted to be the main fallback
-    lappend compilers macports-clang-14
+    lappend compilers macports-clang-14 \
+                      macports-clang-13 \
+                      macports-clang-12
 }
 
 if {${os.major} >= 10} {
