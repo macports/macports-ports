@@ -1,0 +1,101 @@
+--- runtime/signals_osdep.h.orig	2022-03-28 20:27:36.000000000 +0800
++++ runtime/signals_osdep.h	2022-04-27 22:49:45.000000000 +0800
+@@ -332,8 +332,7 @@
+     #define CONTEXT_MCONTEXT (((ucontext_t *)context)->uc_mcontext)
+   #endif
+ 
+-  #if !defined(MAC_OS_X_VERSION_10_5) \
+-      || MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5
++  #if !defined(MAC_OS_X_VERSION_10_5) || MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5
+     #define CONTEXT_REG(r) r
+   #else
+     #define CONTEXT_REG(r) __##r
+@@ -342,6 +341,7 @@
+   #define CONTEXT_STATE (CONTEXT_MCONTEXT->CONTEXT_REG(ss))
+   #define CONTEXT_PC (CONTEXT_STATE.CONTEXT_REG(srr0))
+   #define CONTEXT_EXCEPTION_POINTER (CONTEXT_STATE.CONTEXT_REG(r29))
++  #define CONTEXT_YOUNG_LIMIT (CONTEXT_STATE.CONTEXT_REG(r30))
+   #define CONTEXT_YOUNG_PTR (CONTEXT_STATE.CONTEXT_REG(r31))
+   #define CONTEXT_SP (CONTEXT_STATE.CONTEXT_REG(r1))
+   #define CONTEXT_FAULTING_ADDRESS ((char *) info->si_addr)
+
+
+--- runtime/signals_nat.c.orig	2022-03-28 20:27:36.000000000 +0800
++++ runtime/signals_nat.c	2022-04-27 23:06:52.000000000 +0800
+@@ -107,7 +107,19 @@
+   signal(sig, handle_signal);
+ #endif
+   if (sig < 0 || sig >= NSIG) return;
+-  caml_record_signal(sig);
++  if (caml_try_leave_blocking_section_hook ()) {
++    caml_execute_signal(sig, 1);
++    caml_enter_blocking_section_hook();
++  } else {
++    caml_record_signal(sig);
++  /* Some ports cache [caml_young_limit] in a register.
++     Use the signal context to modify that register too, but only if
++     we are inside OCaml code (not inside C code). */
++#if defined(CONTEXT_PC) && defined(CONTEXT_YOUNG_LIMIT)
++    if (Is_in_code_area(CONTEXT_PC))
++      CONTEXT_YOUNG_LIMIT = (context_reg) caml_young_limit;
++#endif
++  }
+   errno = saved_errno;
+ }
+ 
+@@ -156,8 +168,7 @@
+ 
+ /* Machine- and OS-dependent handling of bound check trap */
+ 
+-#if defined(TARGET_power) \
+-  || defined(TARGET_s390x)
++#if defined(TARGET_power) || defined(TARGET_s390x)
+ DECLARE_SIGNAL_HANDLER(trap_handler)
+ {
+ #if defined(SYS_rhapsody)
+@@ -192,8 +203,8 @@
+ #endif
+ 
+ /* Address sanitizer is confused when running the stack overflow
+-   handler in an alternate stack. We deactivate it for all the
+-   functions used by the stack overflow handler. */
++   handler in an alternate stack. We deactivate it for all
++   the functions used by the stack overflow handler. */
+ CAMLno_asan
+ DECLARE_SIGNAL_HANDLER(segv_handler)
+ {
+
+
+--- runtime/caml/stack.h.orig	2022-03-28 20:27:36.000000000 +0800
++++ runtime/caml/stack.h	2022-04-27 23:12:24.000000000 +0800
+@@ -32,21 +32,16 @@
+ #endif
+ 
+ #ifdef TARGET_power
+-#if defined(MODEL_ppc)
+-#define Saved_return_address(sp) *((intnat *)((sp) - 4))
+-#define Callback_link(sp) ((struct caml_context *)((sp) + 16))
+-#elif defined(MODEL_ppc64)
+-#define Saved_return_address(sp) *((intnat *)((sp) + 16))
+-#define Callback_link(sp) ((struct caml_context *)((sp) + (48 + 32)))
+-#elif defined(MODEL_ppc64le)
+-#define Saved_return_address(sp) *((intnat *)((sp) + 16))
+-#define Callback_link(sp) ((struct caml_context *)((sp) + (32 + 32)))
+-#else
+-#error "TARGET_power: wrong MODEL"
+-#endif
++#define Saved_return_address(sp) *((intnat *)((sp) - SIZEOF_PTR))
+ #define Already_scanned(sp, retaddr) ((retaddr) & 1)
++#define Mark_scanned(sp, retaddr) (*((intnat *)((sp) - SIZEOF_PTR)) = (retaddr) | 1)
+ #define Mask_already_scanned(retaddr) ((retaddr) & ~1)
+-#define Mark_scanned(sp, retaddr) Saved_return_address(sp) = (retaddr) | 1
++#ifdef SYS_aix
++#define Trap_frame_size 32
++#else
++#define Trap_frame_size 16
++#endif
++#define Callback_link(sp) ((struct caml_context *)((sp) + Trap_frame_size))
+ #endif
+ 
+ #ifdef TARGET_s390x
+
