@@ -51,7 +51,7 @@ options muniversal.build_arch
 if {[option universal_possible] && [variant_isset universal]} {
     default muniversal.build_arch {}
 } else {
-    default muniversal.build_arch {${configure.build_arch}}
+    default muniversal.build_arch {[expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}
 }
 
 # if yes, system can run 64-bit binaries
