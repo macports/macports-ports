@@ -124,6 +124,10 @@ proc crossgdb.setup {target version} {
         # Apple GCC versions and the like?
         compiler.cxx_standard 2011
 
+        # Tell MacPorts to pick a TLS-compatible compiler
+        # See https://trac.macports.org/ticket/65105
+        configure.thread_local_storage yes
+
         configure.dir       ${workpath}/build
         configure.cmd       ${worksrcpath}/configure
         configure.args      --target=${crossgdb.target} \
