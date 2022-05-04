@@ -66,9 +66,9 @@
  {
 
 
---- runtime/caml/stack.h.orig	2022-03-28 20:27:36.000000000 +0800
-+++ runtime/caml/stack.h	2022-04-27 23:12:24.000000000 +0800
-@@ -32,21 +32,16 @@
+--- runtime/caml/stack.h.orig	2022-03-28 21:51:09.000000000 +0800
++++ runtime/caml/stack.h	2022-05-04 06:55:04.000000000 +0800
+@@ -32,18 +32,13 @@
  #endif
  
  #ifdef TARGET_power
@@ -81,28 +81,41 @@
 -#elif defined(MODEL_ppc64le)
 -#define Saved_return_address(sp) *((intnat *)((sp) + 16))
 -#define Callback_link(sp) ((struct caml_context *)((sp) + (32 + 32)))
--#else
--#error "TARGET_power: wrong MODEL"
--#endif
 +#define Saved_return_address(sp) *((intnat *)((sp) - SIZEOF_PTR))
- #define Already_scanned(sp, retaddr) ((retaddr) & 1)
-+#define Mark_scanned(sp, retaddr) (*((intnat *)((sp) - SIZEOF_PTR)) = (retaddr) | 1)
- #define Mask_already_scanned(retaddr) ((retaddr) & ~1)
--#define Mark_scanned(sp, retaddr) Saved_return_address(sp) = (retaddr) | 1
 +#ifdef SYS_aix
 +#define Trap_frame_size 32
-+#else
+ #else
+-#error "TARGET_power: wrong MODEL"
 +#define Trap_frame_size 16
-+#endif
-+#define Callback_link(sp) ((struct caml_context *)((sp) + Trap_frame_size))
  #endif
++#define Callback_link(sp) ((struct caml_context *)((sp) + Trap_frame_size))
+ #define Already_scanned(sp, retaddr) ((retaddr) & 1)
+ #define Mask_already_scanned(retaddr) ((retaddr) & ~1)
+ #define Mark_scanned(sp, retaddr) Saved_return_address(sp) = (retaddr) | 1
+@@ -133,12 +128,12 @@
+ extern intnat caml_globals_inited;
+ extern intnat * caml_frametable[];
  
- #ifdef TARGET_s390x
+-/* Global variables moved to Caml_state in 4.10 */
+-#define caml_top_of_stack (Caml_state_field(top_of_stack))
+-#define caml_bottom_of_stack (Caml_state_field(bottom_of_stack))
+-#define caml_last_return_address (Caml_state_field(last_return_address))
+-#define caml_gc_regs (Caml_state_field(gc_regs))
+-#define caml_exception_pointer (Caml_state_field(exception_pointer))
++/* Global variables moved to Caml_state in 4.10, but letʼs bring them back for PPC */
++extern char * caml_top_of_stack;
++extern char * caml_bottom_of_stack;
++extern uintnat caml_last_return_address;
++extern value * caml_gc_regs;
++extern char * caml_exception_pointer;
+ 
+ CAMLextern frame_descr * caml_next_frame_descriptor(uintnat * pc, char ** sp);
+ 
 
 
 --- runtime/power.S.orig	2022-03-28 20:27:36.000000000 +0800
-+++ runtime/power.S	2022-04-30 02:25:52.000000000 +0800
-@@ -13,21 +13,17 @@
++++ runtime/power.S	2022-05-04 03:04:40.000000000 +0800
+@@ -13,19 +13,15 @@
  /*                                                                        */
  /**************************************************************************/
  
@@ -128,12 +141,20 @@
 +#define DOMAIN_STATE_PTR r30
 +#define ALLOC_PTR r31
  
--#if defined(MODEL_ppc64) || defined(MODEL_ppc64le)
-+#ifdef __ppc64__
+ #if defined(MODEL_ppc64) || defined(MODEL_ppc64le)
  #define EITHER(a,b) b
- #else
+@@ -33,6 +29,10 @@
  #define EITHER(a,b) a
-@@ -42,630 +38,502 @@
+ #endif
+ 
++#if defined(MODEL_ppc64le)
++        .abiversion 2
++#endif
++
+ #define WORD EITHER(4,8)
+ #define lg EITHER(lwz,ld)
+ #define lgu EITHER(lwzu,ldu)
+@@ -42,8 +42,7 @@
  #define wordalign EITHER(2,3)
  
  /* Stack layout */
@@ -141,10 +162,10 @@
 -#define RESERVED_STACK 16
 +#define RESERVED_STACK 32
  #define PARAM_SAVE_AREA 0
--#define LR_SAVE 4
+ #define LR_SAVE 4
  #define TRAP_SIZE 16
- #define TRAP_HANDLER_OFFSET 0
--#define TRAP_PREVIOUS_OFFSET 4
+@@ -51,621 +50,496 @@
+ #define TRAP_PREVIOUS_OFFSET 4
  #define CALLBACK_LINK_SIZE 16
  #define CALLBACK_LINK_OFFSET 0
 -#endif
@@ -228,30 +249,9 @@
 -        addis   reg, 0, glob@ha; \
 -        addi    reg, reg, glob@l
 -#endif
-+.macro Addrglobal       /* reg, glob */
-+        addis   $0, 0, ha16($1)
-+        addi    $0, $0, lo16($1)
-+.endmacro
-+.macro Loadglobal       /* reg,glob,tmp */
-+        addis   $2, 0, ha16($1)
-+        lg      $0, lo16($1)($2)
-+.endmacro
-+.macro Storeglobal      /* reg,glob,tmp */
-+        addis   $2, 0, ha16($1)
-+        stg     $0, lo16($1)($2)
-+.endmacro
-+.macro Loadglobal32       /* reg,glob,tmp */
-+        addis   $2, 0, ha16($1)
-+        lwz     $0, lo16($1)($2)
-+.endmacro
-+.macro Storeglobal32      /* reg,glob,tmp */
-+        addis   $2, 0, ha16($1)
-+        stw     $0, lo16($1)($2)
-+.endmacro
- 
+-
 -#if defined(MODEL_ppc64) || defined(MODEL_ppc64le)
-+        .text
- 
+-
 -#define LSYMB(glob) .L##glob
 -
 -#define Addrglobal(reg,glob) \
@@ -264,9 +264,30 @@
 -        .set    domain_curr_field, domain_curr_field + 1
 -#include "../runtime/caml/domain_state.tbl"
 -#undef DOMAIN_STATE
--
++.macro Addrglobal       /* reg, glob */
++        addis   $0, 0, ha16($1)
++        addi    $0, $0, lo16($1)
++.endmacro
++.macro Loadglobal       /* reg,glob,tmp */
++        addis   $2, 0, ha16($1)
++        lg      $0, lo16($1)($2)
++.endmacro
++.macro Storeglobal      /* reg,glob,tmp */
++        addis   $2, 0, ha16($1)
++        stg     $0, lo16($1)($2)
++.endmacro
++.macro Loadglobal32     /* reg,glob,tmp */
++        addis   $2, 0, ha16($1)
++        lwz     $0, lo16($1)($2)
++.endmacro
++.macro Storeglobal32    /* reg,glob,tmp */
++        addis   $2, 0, ha16($1)
++        stw     $0, lo16($1)($2)
++.endmacro
+ 
 -#define Caml_state(var) 8*domain_field_caml_##var(DOMAIN_STATE_PTR)
--
++        .text
+ 
 -#if defined(MODEL_ppc64)
 -        .section ".opd","aw"
 -#else
@@ -601,16 +622,16 @@
 -        mr      C_CALL_TOC, 2   /* save current TOC in a callee-save register */
 -        mtctr   0
 -        ld      2, 8(C_CALL_FUN)
-+        Storeglobal ALLOC_PTR, _caml_young_ptr, r11
-+        Storeglobal TRAP_PTR, _caml_exception_pointer, r11
-+    /* Call the function (address in link register) */
-         bctrl
+-        bctrl
 -        mr      2, C_CALL_TOC   /* restore current TOC */
 -#elif defined(MODEL_ppc64le)
 -        mtctr   C_CALL_FUN
 -        mr      12, C_CALL_FUN
 -        mr      C_CALL_TOC, 2   /* save current TOC in a callee-save register */
--        bctrl
++        Storeglobal ALLOC_PTR, _caml_young_ptr, r11
++        Storeglobal TRAP_PTR, _caml_exception_pointer, r11
++    /* Call the function (address in link register) */
+         bctrl
 -        mr      2, C_CALL_TOC   /* restore current TOC */
 -#else
 -#error "wrong MODEL"
@@ -1102,6 +1123,12 @@
 -        Addrglobal(START_PRG_ARG, caml_apply3)
 -        b       .L102
 -ENDFUNCTION(caml_callback3_asm)
+-
+-#if defined(MODEL_ppc64)
+-        .section ".opd","aw"
+-#else
+-        .section ".text"
+-#endif
 +        mr      START_PRG_DOMAIN_STATE_PTR, r3
 +        lg      r3, 0(r5)             /* r3 = Argument */
 +                                      /* r4 = Closure */
@@ -1130,12 +1157,6 @@
 +        Addrglobal START_PRG_ARG, _caml_apply3
 +        b       L102
  
--#if defined(MODEL_ppc64)
--        .section ".opd","aw"
--#else
--        .section ".text"
--#endif
--
 -        .globl  caml_system__code_end
 -caml_system__code_end:
 +        .globl  _caml_system__code_end
