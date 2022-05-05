@@ -91,6 +91,11 @@ array set crossgcc.versions_info {
         sha256  d08edc536b54c372a1010ff6619dd274c0f1603aa49212ba20f7aa2cda36fa8b \
         size    80888824
     }}
+    11.3.0 {xz {
+        rmd160  0c54f3971b4afbd78954d46852f733ff3fae266c \
+        sha256  b47cf2818691f5b1e21df2bb38c795fac2cfbd640ede2d0a5e1c89e338a3ac39 \
+        size    81141364
+    }}
 }
 
 array set newlib.versions_info {
@@ -273,12 +278,12 @@ proc crossgcc.setup {target version} {
         compiler.blacklist  {clang >= 421 < 422}
 
         # Opportunistic links zstd for LTO byte code compression
-        if { ${version} >= 10.0 } {
+        if {[vercmp ${version} "10.0"] >= 0} {
             depends_lib-append  port:zstd
         }
 
         # Section taken from gcc11 Portfile
-        if { ${version} >= 11.0 } {
+        if {[vercmp ${version} "11.0"] >= 0} {
             # https://trac.macports.org/ticket/29067
             # https://trac.macports.org/ticket/29104
             # https://trac.macports.org/ticket/47996
