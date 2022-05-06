@@ -1,0 +1,531 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+PortGroup       compiler_blacklist_versions 1.0
+PortGroup       mpi 1.0
+PortGroup       active_variants 1.1
+
+version         1.79.0
+
+set branch      [join [lrange [split ${version} .] 0 1] .]
+set tag         [string map {. {}} ${branch}]
+
+name            boost${tag}
+
+# Revision is set below in the `if {$subport eq $name} { ... }` statement
+# The boost-numpy subport has its own revision number
+
+checksums       rmd160  9b2a3b4d7a0f197323717d367bb59e5d0018169e \
+                sha256  475d589d51a7f8b3ba2ba4eda022b170e562ca3b760ee922c146b6c65856ef39 \
+                size    113456811
+
+license         Boost-1
+categories      devel
+platforms       darwin
+maintainers     {michaelld @michaelld} \
+                {mascguy @mascguy} \
+                openmaintainer
+
+description     Collection of portable C++ source libraries
+
+long_description \
+    Boost provides free portable peer-reviewed C++ \
+    libraries. The emphasis is on portable libraries \
+    which work well with the C++ Standard Library.
+
+homepage        http://www.boost.org
+master_sites    https://boostorg.jfrog.io/artifactory/main/release/${version}/source/
+set distver     [join [split ${version} .] _]
+distname        boost_${distver}
+use_bzip2       yes
+
+compiler.cxx_standard     2011
+compiler.blacklist-append {clang < 1000}
+
+depends_lib-append \
+                port:bzip2 \
+                port:expat \
+                port:icu \
+                port:libiconv \
+                port:lzma \
+                port:zlib \
+                port:zstd
+
+post-extract {
+    fs-traverse dir ${workpath} {
+        if {[file isdirectory ${dir}]} {
+            file attributes ${dir} -permissions a+rx
+        }
+    }
+    # Enforce correct compiler and flags are used to build b2
+    xinstall -m 755 -d ${workpath}/bin
+    ln -s ${configure.cxx} ${workpath}/bin/clang++
+    ln -s ${configure.cc}  ${workpath}/bin/clang
+    # Also link gcc/g++ for older systems
+    # https://trac.macports.org/ticket/63120
+    ln -s ${configure.cxx} ${workpath}/bin/g++
+    ln -s ${configure.cc}  ${workpath}/bin/gcc
+}
+configure.env-append  PATH=${workpath}/bin:$env(PATH)
+build.env-append      PATH=${workpath}/bin:$env(PATH)
+
+# Install prefix for this port
+set bprefix ${prefix}/libexec/boost/${branch}
+
+# patch-apple-clang-no-libcxx.diff fixes a clang configuration error
+# that occurs on OS X 10.7 and 10.8 due to the assumption that if
+# clang is the compiler in use it must be using libc++.  Apple Clang
+# uses libstdc++ by default on these OS versions.  The patch adds an
+# additional BOOST_* configuration flag that is set if Apple clang is
+# being used but libc++ is not.  This flag is then used to prevent
+# boost or a dependent package from using functions such as
+# std::forward that are only available in libc++.  Fixes build of
+# libcdr on these OS versions without affecting build on 10.6 and less
+# (where clang is not the default compiler) or 10.9 and up (where
+# libc++ is the default).
+patchfiles-append patch-apple-clang-no-libcxx.diff
+
+# libcxxabi installed by the libcxx port on the buildbot does not
+# have the cxa_thread_atexit support, so until this is fixed
+# we have to force thread_local off on < 10.7 when using libc++
+patchfiles-append patch-boost-libcpp-force-thread-local-off.diff
+
+# temporary patch to fix: explicit template instanciations in
+# boost::serialization don't get exported with all compilers; this fix
+# is already in the boost repo & will be part of a future release. See
+# also the following tickets:
+# https://trac.macports.org/ticket/48717
+# https://svn.boost.org/trac/boost/ticket/11671
+patchfiles-append patch-export_serialization_explicit_template_instantiations.diff
+
+# revert the default tagged library name changes in 1.69.0 <
+# libboost_<component>-<threading>-<arch>.dylib > back to 1.68.0
+# format: libboost_<component>-<threading>.dylib; where <component> is
+# the component name (e.g., system, thread), <threading> is either mt
+# or st (multi or single), and <arch> is the build arch (x86, x64,
+# p64, p32).
+patchfiles-append patch-revert-lib-name-tagged.diff
+
+# Availability.h -> AvailabilityMacros.h on Tiger
+# The attempted fix:
+# https://github.com/boostorg/core/commit/128d9314d6f814930400c46c9afd34399d19132b
+# is insufficient because GCC 6/7 still defines __cpp_lib_uncaught_exceptions
+# in the absence of __STRICT_ANSI__
+platform darwin 8 {
+    patchfiles-append patch-tiger-availability.diff
+}
+
+# see https://trac.macports.org/wiki/UsingTheRightCompiler
+patchfiles-append patch-compiler.diff
+post-patch {
+    reinplace "s|__MACPORTS_CXX__|${configure.cxx}|g" ${worksrcpath}/tools/build/src/tools/clang-darwin.jam
+}
+
+# Build issue on some older systems
+# ld: warning: option -s is obsolete and being ignored
+# ld: internal error: atom not found in symbolIndex(__ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EERKS9_SB_) for architecture x86_64
+patchfiles-append patch-b2-build-older-OSes.diff
+
+proc write_jam s {
+    global worksrcpath
+    set config [open ${worksrcpath}/user-config.jam a]
+    puts ${config} ${s}
+    close ${config}
+}
+
+compilers.choose   cc cxx
+mpi.setup          -gcc
+
+# NOTE: although technically Boost does not require C++11 compliance
+# for building, doing so allows for building on more OSs than without.
+# Further: Building Boost using C++11 compliance does not seem to then
+# require ports depending on Boost to also require C++11 compliance,
+# and requiring it does make such building easier for those ports.
+configure.cxxflags-append -std=gnu++11
+compiler.cxx_standard   2011
+
+# This flag fixes the return type of unsetenv(3)
+# See: https://trac.macports.org/ticket/63121
+platform darwin 8 {
+    configure.cxxflags-append -D__DARWIN_UNIX03=1
+}
+
+# It turns out that ccache and distcc can produce boost libraries that, although they
+# compile without warning, have all sorts of runtime errors especially with pointer corruption.
+# Since most people will now use MacPorts' pre-compiled boost, this should not be a problem.
+configure.ccache    no
+configure.distcc    no
+
+configure.cmd       ./bootstrap.sh
+configure.args      --without-libraries=python \
+                    --without-libraries=mpi \
+                    --with-icu=${prefix}
+
+# boost build scripts default to clang on darwin
+if {[string match *gcc* ${configure.compiler}]} {
+    configure.args-append --with-toolset=gcc
+}
+
+# makecontext/swapcontext introduced in 10.6
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    configure.args-append   --without-libraries=context \
+                            --without-libraries=coroutine
+}
+
+configure.universal_args
+
+post-configure {
+
+    reinplace -E "s|-install_name \"|&${bprefix}/lib/|" \
+        ${worksrcpath}/tools/build/src/tools/darwin.jam
+
+    set compileflags ""
+    if {[string length ${configure.sdkroot}] != 0} {
+        set compileflags "<compileflags>\"-isysroot ${configure.sdkroot}\""
+    }
+
+    set cxx_stdlibflags {}
+    if {[string match *clang* ${configure.cxx}]} {
+        set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+    }
+
+    # see https://trac.macports.org/ticket/55857
+    # see https://svn.boost.org/trac10/ticket/13454
+    write_jam "using darwin : : ${configure.cxx} : <asmflags>\"${configure.cflags} [get_canonical_archflags cc]\" <cflags>\"${configure.cflags} [get_canonical_archflags cc]\" <cxxflags>\"${configure.cxxflags} [get_canonical_archflags cxx] ${cxx_stdlibflags}\" ${compileflags} <linkflags>\"${configure.ldflags} ${cxx_stdlibflags}\" : ;"
+
+}
+
+build.cmd       ${worksrcpath}/b2
+build.target
+build.args      -d2 \
+                --layout=tagged \
+                --debug-configuration \
+                --user-config=user-config.jam \
+                -sBZIP2_INCLUDE=${prefix}/include \
+                -sBZIP2_LIBPATH=${prefix}/lib \
+                -sEXPAT_INCLUDE=${prefix}/include \
+                -sEXPAT_LIBPATH=${prefix}/lib \
+                -sZLIB_INCLUDE=${prefix}/include \
+                -sZLIB_LIBPATH=${prefix}/lib \
+                -sICU_PATH=${prefix} \
+                variant=release \
+                threading=single,multi \
+                link=static,shared \
+                runtime-link=shared \
+                -j${build.jobs} \
+                --no-cmake-config
+
+destroot.cmd    ${worksrcpath}/b2
+destroot.post_args
+
+pre-destroot {
+    destroot.args {*}${build.args} --prefix=${destroot}${bprefix}
+    system "find ${worksrcpath} -type f -name '*.gch' -exec rm {} \\;"
+}
+
+proc boost_docs_install {} {
+    global bprefix destroot worksrcpath name
+
+    set docdir ${bprefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    set l [expr [string length ${worksrcpath}] + 1]
+    fs-traverse f [glob -directory ${worksrcpath} *] {
+        set dest ${destroot}${docdir}/[string range ${f} ${l} end]
+        if {[file isdirectory ${f}]} {
+            if {[file tail ${f}] eq "example"} {
+                copy ${f} ${dest}
+                continue
+            }
+            xinstall -d ${dest}
+        } elseif {[lsearch -exact {css htm html png svg} [string range [file extension ${f}] 1 end]] != -1} {
+            xinstall -m 644 ${f} ${dest}
+        }
+    }
+}
+
+post-destroot {
+    if {[variant_isset docs]} {
+        boost_docs_install
+    }
+}
+
+set pythons_versions {2.7 3.5 3.6 3.7 3.8 3.9 3.10}
+
+set pythons_ports {}
+foreach v ${pythons_versions} {
+    lappend pythons_ports python[string map {. {}} ${v}]
+}
+
+proc python_dir {} {
+    global pythons_versions
+    foreach p ${pythons_versions} {
+        set s [string map {. {}} ${p}]
+        if {[variant_isset python${s}]} {
+            return [file normalize [exec ${p} -c "import sys; print(sys.prefix)"]/lib/${p}/site-packages]
+        }
+    }
+    error "Python support not enabled."
+}
+
+foreach v ${pythons_versions} {
+    set s [string map {. {}} ${v}]
+    set p python${s}
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    if { ${s} > 30 } { set bppatch "patch-boost-python3.diff" } else { set bppatch "" }
+    variant ${p} description "Build Boost.Python for Python ${v}" conflicts {*}${c} debug "
+
+        # There is a conflict with python and debug support, so we should really change the 'variant' line above
+        # to end with 'conflicts ${c} debug' above. However, we leave it enabled for those who want to try it.
+        # The issue has been reported to both the MacPorts team and the boost team, as per:
+        # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+
+        depends_lib-append      port:${p}
+        configure.args-delete   --without-libraries=python
+        configure.args-append   --with-python=${prefix}/bin/python${v} --with-python-root=${prefix}/bin/python${v}
+
+        patchfiles-append   ${bppatch} patch-tools-build-src-tools-python.jam.diff \
+                            patch-tools-build-src-tools-python-2.jam.diff
+
+        post-patch {
+            reinplace s|@FRAMEWORKS_DIR@|${frameworks_dir}| ${worksrcpath}/tools/build/src/tools/python.jam
+        }
+    "
+}
+
+if {![variant_isset debug]} {
+    set selected_python python310
+    foreach v ${pythons_versions} {
+        set s [string map {. {}} ${v}]
+        if {[variant_isset python${s}]} {
+            set selected_python python${s}
+        }
+    }
+    default_variants +${selected_python}
+}
+
+post-destroot {
+    # To avoid checking for all Python variants, don't fail if no libs exist
+    foreach f [glob -nocomplain ${destroot}${bprefix}/lib/*python*.dylib] {
+        set tf [file tail ${f}]
+        ln -s ${tf} ${destroot}${bprefix}/lib/[string map "${selected_python} python3" ${tf}]
+        ln -s ${tf} ${destroot}${bprefix}/lib/[string map "${selected_python} python"  ${tf}]
+    }
+}
+
+default_variants +no_single +no_static
+
+variant debug description {Builds debug versions of the libraries as well} {
+    build.args-delete   variant=release
+    build.args-append   variant=debug,release
+}
+
+variant no_static description {Disable building static libraries} {
+    build.args-delete   link=static,shared
+    build.args-append   link=shared
+}
+
+variant no_single description {Disable building single-threaded libraries} {
+    build.args-delete   threading=single,multi
+    build.args-append   threading=multi
+}
+
+subport ${name}-numpy {
+    revision 0
+    description Boost.Numpy library
+    long_description {*}${description}
+    depends_lib port:boost${tag}
+    foreach v ${pythons_versions} {
+        set s [string map {. {}} ${v}]
+        if {[variant_isset python${s}]} {
+            depends_lib-append port:py${s}-numpy
+            require_active_variants boost python${s}
+        }
+    }
+    if {[variant_isset no_static]} {
+        require_active_variants boost no_static
+    } else {
+        require_active_variants boost "" no_static
+    }
+    if {[variant_isset no_single]} {
+        require_active_variants boost no_single
+    } else {
+        require_active_variants boost "" no_single
+    }
+}
+
+if {$subport eq $name} {
+
+    revision 1
+
+    patchfiles-append patch-disable-numpy-extension.diff
+
+    variant regex_match_extra description \
+        "Enable access to extended capture information of submatches in Boost.Regex" {
+        notes-append "
+        You enabled the +regex_match_extra variant\; see the following page for an\
+        exhaustive list of the consequences of this feature:
+
+    http://www.boost.org/doc/libs/${distver}/libs/regex/doc/html/boost_regex/ref/sub_match.html
+"
+
+        post-patch {
+            reinplace {/#define BOOST_REGEX_MATCH_EXTRA/s:^// ::} \
+                ${worksrcpath}/boost/regex/user.hpp
+        }
+    }
+
+    variant docs description {Enable building documentation} {
+        # No configure changes, etc; we simply check 'variant_isset' elsewhere
+    }
+
+    post-destroot {
+        delete file {*}[glob ${destroot}${bprefix}/include/boost/python/numpy*]
+    }
+
+    if {[mpi_variant_isset]} {
+
+        # see https://trac.macports.org/ticket/49748
+        # see http://www.openradar.me/25313838
+        configure.ldflags-append -Lstage/lib
+
+        # There is a conflict with debug support.
+        # The issue has been reported to both the MacPorts team and the boost team, as per:
+        # <http://trac.macports.org/ticket/23667> and <https://svn.boost.org/trac/boost/ticket/4461>
+        if {[variant_isset debug]} {
+            return -code error "+debug variant conflicts with mpi"
+        }
+
+        configure.args-delete   --without-libraries=mpi
+
+        post-configure {
+            write_jam "using mpi : ${mpi.cxx} : : ${mpi.exec} ;"
+        }
+
+        if {![catch python_dir]} {
+
+            patchfiles-append patch-libs-mpi-build-Jamfile.v2.diff
+
+            post-destroot {
+                set site_packages [python_dir]
+                xinstall -d ${destroot}${site_packages}/boost
+                xinstall -m 644 ${worksrcpath}/libs/mpi/build/__init__.py \
+                    ${destroot}${site_packages}/boost
+
+                set f ${destroot}${bprefix}/lib/mpi.so
+                if {[info exists ${f}]} {
+                    set l ${site_packages}/boost/mpi.so
+                    move ${f} ${destroot}${l}
+                    system "install_name_tool -id ${l} ${destroot}${l}"
+                }
+            }
+
+        }
+    }
+
+    livecheck.type  regex
+    livecheck.url   http://www.boost.org/users/download/
+    livecheck.regex Version (\\d+\\.\\d+\\.\\d+)</span>
+} else {
+    post-destroot {
+        move {*}[glob ${destroot}${bprefix}/lib/libboost_numpy*] ${destroot}${bprefix}
+        move {*}[glob ${destroot}${bprefix}/include/boost/python/numpy*] ${destroot}${bprefix}
+        # if an mpi variant *and* a python variant is selected, then a binary
+        # python module called mpi.so gets installed, so delete ${frameworks_dir}
+        delete ${destroot}${bprefix}${frameworks_dir} \
+            ${destroot}${bprefix}/include \
+            ${destroot}${bprefix}/lib \
+            ${destroot}${bprefix}/share
+        file mkdir ${destroot}${bprefix}/lib ${destroot}${bprefix}/include/boost/python
+        move {*}[glob ${destroot}${bprefix}/libboost_numpy*] ${destroot}${bprefix}/lib
+        move {*}[glob ${destroot}${bprefix}/numpy*] ${destroot}${bprefix}/include/boost/python
+    }
+
+    livecheck.type  none
+}
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+if {!${universal_possible} || ![variant_isset universal]} {
+    if {[lsearch ${build_arch} arm*] != -1} {
+        build.args-append address-model=64 architecture=arm
+    } else {
+        if {[lsearch ${build_arch} ppc*] != -1} {
+            build.args-append architecture=power
+            if {${os.arch} ne "powerpc"} {
+                build.args-append --disable-long-double
+            }
+        } else {
+            if {[lsearch ${build_arch} *86*] != -1} {
+                build.args-append architecture=x86
+            } else {
+                pre-fetch {
+                    error "Current value of 'build_arch' (${build_arch}) is not supported."
+                }
+            }
+            if {[lsearch ${build_arch} *64] != -1} {
+                build.args-append address-model=64
+            } else {
+                build.args-append address-model=32
+            }
+        }
+    }
+}
+
+variant universal {
+    build.args-append   pch=off
+
+    if {[lsearch ${configure.universal_archs} arm*] != -1} {
+        build.args-append address-model=64 architecture=combined
+    } else {
+        if {[lsearch ${configure.universal_archs} ppc*] != -1} {
+            if {[lsearch ${configure.universal_archs} *86*] != -1} {
+                build.args-append architecture=combined
+            } else {
+                build.args-append architecture=power
+            }
+            if {${os.arch} ne "powerpc"} {
+                build.args-append --disable-long-double
+            }
+        } else {
+            build.args-append architecture=x86
+        }
+        if {[lsearch ${configure.universal_archs} *64] != -1} {
+            if {[lsearch ${configure.universal_archs} i386] != -1 || [lsearch ${configure.universal_archs} ppc] != -1} {
+                build.args-append address-model=32_64
+                if {[lsearch ${configure.universal_archs} ppc64] == -1} {
+                    post-patch {
+                        reinplace "/local support-ppc64 =/s/= 1/= /" ${worksrcpath}/tools/build/src/tools/darwin.jam
+                    }
+                }
+            } else {
+                build.args-append address-model=64
+            }
+        } else {
+            build.args-append address-model=32
+        }
+    }
+}
+
+platform powerpc {
+    build.args-append   --disable-long-double
+}
+
+platform darwin 8 powerpc {
+    if {[variant_isset universal]} {
+        build.args-append   macosx-version=10.4
+    }
+}
+
+# As of Boost 1.70.0, Boost provides CMake find scripts for itself
+# that are installed by default. Those provided in 1.70.0 were broken
+# in multiple ways; many fixed were added before 1.71.0. That said,
+# we're not installing them by default at this time, but instead
+# providing an option to install them for testing / evaluation
+# purposes. We will likely enable these scripts in the future since it
+# is likely that CMake will stop providing them once the
+# Boost-provided version is stable.
+variant cmake_scripts description {Install Boost CMake find scripts} {
+    build.args-delete --no-cmake-config
+}

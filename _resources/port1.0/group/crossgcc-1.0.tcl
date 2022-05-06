@@ -272,6 +272,11 @@ proc crossgcc.setup {target version} {
         # fatal error: error in backend: ran out of registers during register allocation
         compiler.blacklist  {clang >= 421 < 422}
 
+        # Opportunistic links zstd for LTO byte code compression
+        if { ${version} >= 10.0 } {
+            depends_lib-append  port:zstd
+        }
+
         # Section taken from gcc11 Portfile
         if { ${version} >= 11.0 } {
             # https://trac.macports.org/ticket/29067
