@@ -153,13 +153,16 @@ proc crossgdb.setup {target version} {
         universal_variant no
 
         post-destroot {
-            # Avoid conflicts with ${crossgdb.target}-binutils port
+            # Avoid conflicts with ${crossgdb.target}-binutils and another
+            # ${crossgdb.target} ports
             file delete ${destroot}${prefix}/share/info/${crossgdb.target}-bfd.info
+            file delete ${destroot}${prefix}/share/info/ctf-spec.info
 
             # Avoid conflicts with gdb, also see
             # https://trac.macports.org/ticket/43098
             file delete -force ${destroot}${prefix}/share/locale
             file delete -force ${destroot}${prefix}/include/gdb
+            file delete ${destroot}${prefix}/share/info/bfd.info
 
             # Avoid conflicts with another crossgdb ports
             move ${destroot}${prefix}/include/sim \
