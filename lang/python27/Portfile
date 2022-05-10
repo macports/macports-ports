@@ -8,7 +8,7 @@ name                python27
 epoch               2
 # Remember to keep py27-tkinter and py27-gdbm's versions sync'd with this
 version             2.7.18
-revision            8
+revision            10
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
@@ -74,8 +74,6 @@ if {${subport} eq ${name}} {
 
 # This port is used by clang-3.4 to bootstrap libcxx
 subport ${name}-bootstrap {
-    revision                9
-
     depends_extract         port:xz-bootstrap
     depends_skip_archcheck-append \
                             xz-bootstrap
@@ -178,26 +176,6 @@ platform darwin {
         }
     }
 
-    post-build {
-        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
-        # preserve mtime of _sysconfigdata.py to avoid rebuilding things after changing it
-        set oldmtime [file mtime ${buildlibdir}/_sysconfigdata.py]
-
-        # change LINKFORSHARED to support dependents that incorrectly use it
-        system -W ${buildlibdir} "awk -F : \
-            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/config\
-            -lpython${branch} -ldl -framework CoreFoundation',\\n\\\", \\\$1; next} {print}\"\
-            _sysconfigdata.py > _sysconfigdata.py.new"
-        file rename -force ${buildlibdir}/_sysconfigdata.py.new \
-            ${buildlibdir}/_sysconfigdata.py
-
-        # remove -arch flags from the config
-        reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${buildlibdir}/_sysconfigdata.py
-
-        file mtime ${buildlibdir}/_sysconfigdata.py $oldmtime
-    }
-
     post-destroot {
         foreach dir { Headers Resources Python Versions/Current } {
             file delete ${destroot}${framewpath}/${dir}
@@ -207,17 +185,39 @@ platform darwin {
         ln -s ${framewdir}/Python ${destroot}${prefix}/lib/libpython${branch}.dylib
         ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
 
+        set libdir ${destroot}${framewdir}/lib/python${branch}
+        # change LINKFORSHARED to support dependents that incorrectly use it
+        system -W ${libdir} "awk -F : \
+            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/config\
+            -lpython${branch} -ldl -framework CoreFoundation',\\n\\\", \\\$1; next} {print}\"\
+            _sysconfigdata.py > _sysconfigdata.py.new"
+        file rename -force ${libdir}/_sysconfigdata.py.new \
+            ${libdir}/_sysconfigdata.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+            ${libdir}/_sysconfigdata.py
+
+        # recompile the modified file
+        set python_for_build python.exe
+        # executable differs depending on filesystem case sensitivity
+        if {![file exists ${worksrcpath}/${python_for_build}]} {
+            set python_for_build python
+        }
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata.py]"
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -O -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata.py]"
+
         # Without this, LINKFORSHARED is set to
         # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
         # (this becomes Python.framework/Versions/2.7/Python) which doesn't
         # quite work (see ticket #15099); instead we mirror the behavior of
         # `python-config --ldflags` here.
         reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION) $(LIBS) $(SYSLIBS)|} \
-            ${destroot}${framewdir}/lib/python${branch}/config/Makefile
+            ${libdir}/config/Makefile
 
         # remove -arch flags from the config
         reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${destroot}${framewdir}/lib/python${branch}/config/Makefile
+            ${libdir}/config/Makefile
     }
 }
 

@@ -10,7 +10,7 @@ name                python36
 epoch               20170717
 # Remember to keep py36-tkinter and py36-gdbm's versions sync'd with this
 version             3.6.15
-revision            2
+revision            3
 
 deprecated.eol_version  yes
 
@@ -43,7 +43,8 @@ patchfiles          patch-setup.py.diff \
                     patch-_osx_support.py.diff \
                     darwin20.diff \
                     implicit.patch \
-                    sysconfig.py.diff
+                    sysconfig.py.diff \
+                    multiarch.patch
 
 depends_build       port:pkgconfig
 depends_lib         port:bzip2 \
@@ -86,6 +87,8 @@ configure.args      --enable-framework=${frameworks_dir} \
                     --with-system-ffi
 
 configure.ccache    no
+# pkg-config removes -I flags for paths in CPATH, which confuses python.
+configure.env       PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 
 post-patch {
     reinplace "s|@@PREFIX@@|${prefix}|g" \
@@ -114,6 +117,7 @@ platform darwin {
     set framewpath ${frameworks_dir}/Python.framework
     set framewdir  ${framewpath}/Versions/${branch}
     set confdir    config-${branch}m-darwin
+
     post-configure {
         # poll() misbehaves on 10.8 and older
         # See https://trac.macports.org/ticket/18376
@@ -123,32 +127,7 @@ platform darwin {
             file mtime ${worksrcpath}/pyconfig.h $oldmtime
         }
     }
-    post-build {
-        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
-        # preserve mtime of sysconfig data file to avoid rebuilding things after changing it
-        set oldmtime [file mtime ${buildlibdir}/_sysconfigdata_m_darwin_darwin.py]
 
-        # Without this, LINKFORSHARED is set to
-        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
-        # (this becomes Python.framework/Versions/3.6/Python) which doesn't
-        # work for dependents that incorrectly use this variable to find out
-        # how to link against python (see ticket #15099); instead we mirror
-        # the behavior of `python-config --ldflags` here.
-        set lfs_pattern {^([[:space:]]*'LINKFORSHARED':).*}
-        set lfs_replacement "\\1 '-L${framewdir}/lib/python${branch}/${confdir} -lpython${branch}m -ldl -framework CoreFoundation',"
-        reinplace -E s|${lfs_pattern}|${lfs_replacement}| \
-            ${buildlibdir}/_sysconfigdata_m_darwin_darwin.py
-
-        # remove -arch flags from the config
-        reinplace -E {s|-arch [a-z0-9_]+||g} \
-           ${buildlibdir}/_sysconfigdata_m_darwin_darwin.py
-
-        # also remove gettext overlinking
-        reinplace "s|-lintl||" \
-           ${buildlibdir}/_sysconfigdata_m_darwin_darwin.py
-
-        file mtime ${buildlibdir}/_sysconfigdata_m_darwin_darwin.py $oldmtime
-    }
     post-destroot {
         foreach dir { Headers Resources Python Versions/Current } {
             file delete ${destroot}${framewpath}/${dir}
@@ -158,15 +137,45 @@ platform darwin {
         ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
         ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/python-${branch}m.pc
 
+        set libdir ${destroot}${framewdir}/lib/python${branch}
+        # Without this, LINKFORSHARED is set to
+        # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
+        # (this becomes Python.framework/Versions/3.6/Python) which doesn't
+        # work for dependents that incorrectly use this variable to find out
+        # how to link against python (see ticket #15099); instead we mirror
+        # the behavior of `python-config --ldflags` here.
+        set lfs_pattern {^([[:space:]]*'LINKFORSHARED':).*}
+        set lfs_replacement "\\1 '-L${framewdir}/lib/python${branch}/${confdir} -lpython${branch}m -ldl -framework CoreFoundation',"
+        reinplace -E s|${lfs_pattern}|${lfs_replacement}| \
+            ${libdir}/_sysconfigdata_m_darwin_darwin.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+           ${libdir}/_sysconfigdata_m_darwin_darwin.py
+
+        # also remove gettext overlinking
+        reinplace "s|-lintl||" \
+           ${libdir}/_sysconfigdata_m_darwin_darwin.py
+
+        # recompile the modified file
+        set python_for_build python.exe
+        # executable differs depending on filesystem case sensitivity
+        if {![file exists ${worksrcpath}/${python_for_build}]} {
+            set python_for_build python
+        }
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata_m_darwin_darwin.py]"
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -O -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata_m_darwin_darwin.py]"
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -OO -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata_m_darwin_darwin.py]"
+
         # Also make the sysconfig changes in the Makefile
         reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION)$(ABIFLAGS) $(LIBS) $(SYSLIBS)|} \
-            ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+            ${libdir}/${confdir}/Makefile
 
         reinplace -E {s|-arch [a-z0-9_]+||g} \
-           ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+           ${libdir}/${confdir}/Makefile
 
         reinplace "s|-lintl||" \
-           ${destroot}${framewdir}/lib/python${branch}/${confdir}/Makefile
+           ${libdir}/${confdir}/Makefile
     }
 }
 
