@@ -440,10 +440,10 @@ proc python._set_version {option action args} {
     }
 }
 
-# If a subport has not changed the version, disable livecheck.
+# if no subport of a py-* port has not changed the version, disable livecheck.
 pre-livecheck {
     global name subport version python._first_version
-    if {${name} ne ${subport} && ${version} eq ${python._first_version}} {
+    if {[string match py-* [option name]] && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
         livecheck.type  none
     }
 }
