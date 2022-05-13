@@ -96,6 +96,11 @@ array set crossgcc.versions_info {
         sha256  b47cf2818691f5b1e21df2bb38c795fac2cfbd640ede2d0a5e1c89e338a3ac39 \
         size    81141364
     }}
+    12.1.0 {xz {
+        rmd160  6cdb114103541230492bbc6093585cb10e5e5ea6 \
+        sha256  62fd634889f31c02b64af2c468f064b47ad1ca78411c45abe6ac4b5f8dd19c7b \
+        size    82701928
+    }}
 }
 
 array set newlib.versions_info {
