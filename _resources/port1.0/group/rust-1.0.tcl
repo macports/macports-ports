@@ -146,6 +146,7 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
         set is_bootstrap        no
     }
 
+    set rustc_version           ${version_m1}; # ensure value is always set (see https://trac.macports.org/ticket/65183)
     foreach arch ${architectures} {
         # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
         if { ${arch} in [option rust.upstream_archs] && [vercmp [option macosx_deployment_target] [option rust.upstream_deployment_target]] >= 0 } {
