@@ -729,10 +729,9 @@ proc rust::rust_pg_callback {} {
         depends_lib-append              port:openssl${openssl_ver}
     }
 
-    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] == 10 } {
+    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
         # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
-        # Rust fails to build when ${os.major} >= 10 and ld64 uses ld64-127
-        # ld64-274 does not seem to build when ${os.major} < 10
+        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
         depends_build-delete            port:ld64-274
         depends_build-append            port:ld64-274
         depends_skip_archcheck-delete   ld64-274
