@@ -1,0 +1,175 @@
+# -*- Mode: Tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:et:sw=4:ts=4:sts=4
+
+PortSystem      1.0
+
+PortGroup       active_variants 1.1
+PortGroup       compiler_blacklist_versions 1.0
+PortGroup       conflicts_build 1.0
+PortGroup       legacysupport 1.0
+PortGroup       muniversal 1.0
+
+name            gnutls-devel
+conflicts       gnutls
+set my_name     gnutls
+version         3.7.5
+revision        0
+set branch      [join [lrange [split ${version} .] 0 1] .]
+set major       [join [lrange [split ${version} .] 0 2] .]
+categories      devel security
+# yes, some of the libs are GPL only
+license         LGPL-2.1+ GPL-3+
+maintainers     {mps @Schamschula} openmaintainer
+description     GNU Transport Layer Security Library
+long_description \
+                GnuTLS is a portable ANSI C based library which implements the TLS 1.2, \
+                TLS 1.1, TLS 1.0, SSL 3.0, and Datagram TLS protocols. The library does \
+                not include any patented algorithms and is available under the GNU \
+                Lesser General Public License (LGPL).
+homepage        http://www.gnutls.org/
+master_sites    https://www.gnupg.org/ftp/gcrypt/gnutls/v${branch}/ \
+                https://mirrors.dotsrc.org/gcrypt/gnutls/v${branch}/
+
+checksums       rmd160  4be3aae4df103b5fd6835f6abf6f6b98d6424699 \
+                sha256  1f85028475b4f255cc5b480af0c37e61eab43024c1507c8b75d6be506c0553ad \
+                size    6321392
+
+use_xz          yes
+
+# deal with minor updates that extract to major version number
+worksrcdir      ${my_name}-${major}
+
+# see: https://trac.macports.org/ticket/57893
+# and https://github.com/macports/macports-ports/pull/3379 for autogen
+conflicts_build autogen
+
+depends_build-append \
+                port:gettext \
+                port:gtk-doc \
+                port:pkgconfig
+
+depends_lib-append \
+                port:gettext-runtime \
+                port:gmp \
+                port:libidn2 \
+                port:libtasn1 \
+                port:libunistring \
+                port:p11-kit \
+                port:nettle \
+                port:zlib \
+                port:zstd
+
+patchfiles      patch-lib-system-certs.c.diff \
+                implicit.patch
+
+post-patch {
+    # Remove comments which confuse at least Leopard’s assembler.
+    reinplace {/^#/d} {*}[glob ${worksrcpath}/lib/accelerated/x86/macosx/*.s]
+}
+
+configure.args  --disable-guile \
+                --disable-silent-rules \
+                --disable-libdane \
+                --enable-local-libopts \
+                --enable-openssl-compatibility \
+                --with-p11-kit \
+                --with-system-priority-file="${prefix}/etc/gnutls/default-priorities" \
+                --with-default-trust-store-pkcs11=pkcs11: \
+                ac_cv_prog_AWK=/usr/bin/awk
+
+compiler.thread_local_storage yes
+
+# Undefined symbols for architecture x86_64: "___get_cpuid_count"
+compiler.blacklist-append {clang < 1000} {macports-clang-3.[0-9]} {macports-clang-[4-6].0}
+
+if {${os.platform} eq "darwin" && ${os.major} < 10 && [string match *clang* ${configure.compiler}] } {
+    depends_build-append    port:cctools
+    configure.env-append    NM=${prefix}/bin/nm
+    configure.args-append   lt_cv_path_NM=${prefix}/bin/nm
+}
+
+platform darwin 8 {
+    depends_build-append    port:texinfo
+    configure.cppflags-append -D__WORDSIZE=32
+}
+
+variant dane description {Build libdane using unbound libraries} {
+    depends_lib-append      port:unbound
+    configure.args-append   --with-unbound-root-key-file="${prefix}/var/run/unbound/root.key"
+    configure.args-delete   --disable-libdane
+}
+
+if {${os.platform} eq "darwin" && ${os.major} > 19 && ${os.arch} eq "arm"} {
+    depends_build-append    port:libtool
+
+    use_autoreconf          yes
+    autoreconf.args         --install --verbose --force
+
+    pre-configure {
+        xinstall -m 644 -W ${prefix}/share/libtool/build-aux config.guess config.sub ${worksrcpath}
+    }
+}
+
+# as of r120660 (#43881) unbound installs its root key file at ${prefix}/var/run/unbound/root.key
+# the following may be superfluous
+
+if {[variant_isset dane] && ![file exists ${prefix}/var/run/unbound/root.key]} {
+    notes "
+***
+*** WARNING:
+***
+*** The DNSSEC root key file in ${prefix}/var/run/unbound/root.key was not found.
+*** This file is needed for the verification of DNSSEC responses.
+*** Use the command: sudo unbound-anchor -a \"${prefix}/var/run/unbound/root.key\"
+*** to generate or update it.
+***
+"
+}
+
+variant guile description {Build guile bindings} {
+# there currently is a build issue with the guile variant
+# the workaround is to first install guile w/o guile and then with +guile
+    depends_lib-append      port:guile
+    configure.args-replace  --disable-guile --enable-guile
+}
+
+if {![info exists universal_possible]} {
+    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
+}
+if {${universal_possible} && [variant_isset universal]} {
+    set merger_host(x86_64) x86_64-apple-${os.platform}${os.major}
+    set merger_host(i386) i686-apple-${os.platform}${os.major}
+    set merger_configure_args(x86_64) --build=x86_64-apple-${os.platform}${os.major}
+    set merger_configure_args(i386) --build=i686-apple-${os.platform}${os.major}
+    set merger_host(ppc) powerpc-apple-${os.platform}${os.major}
+    set merger_host(ppc64) powerpc64-apple-${os.platform}${os.major}
+    set merger_configure_args(ppc) --build=powerpc-apple-${os.platform}${os.major}
+    set merger_configure_args(ppc64) --build=powerpc64-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "i386"} {
+    configure.args-append \
+        --host=i686-apple-${os.platform}${os.major} \
+        --build=i686-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "ppc"} {
+    configure.args-append \
+        --host=powerpc-apple-${os.platform}${os.major} \
+        --build=powerpc-apple-${os.platform}${os.major}
+} elseif {${build_arch} eq "ppc64"} {
+    configure.args-append \
+        --host=powerpc64-apple-${os.platform}${os.major} \
+        --build=powerpc64-apple-${os.platform}${os.major}
+} else {
+    configure.args-append \
+        --host=${build_arch}-apple-${os.platform}${os.major} \
+        --build=${build_arch}-apple-${os.platform}${os.major}
+}
+
+test.run        yes
+test.target     check
+
+post-destroot {
+    move ${destroot}${prefix}/bin/certtool ${destroot}${prefix}/bin/gnutls-certtool
+    move ${destroot}${prefix}/share/man/man1/certtool.1 ${destroot}${prefix}/share/man/man1/gnutls-certtool.1
+}
+
+livecheck.type  regex
+livecheck.url   [lindex ${master_sites} 0]
+livecheck.regex "${my_name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"
