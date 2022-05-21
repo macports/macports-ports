@@ -7,7 +7,7 @@
 #------------------------------------------------------------------------------
 #
 # Usage:
-#   PortGroup stub 1.0
+#   PortGroup           stub 1.0
 #
 #   name                my_name
 #   version             my_version
@@ -18,6 +18,10 @@
 #
 # Optional Declarations:
 #   * maintainers - defaults to 'none'
+#   * homepage    - default is empty
+#
+# Options:
+#   * stub.subport_name - override subport name, for README location
 #
 #------------------------------------------------------------------------------
 #
@@ -25,15 +29,6 @@
 # dependency for that:
 #
 #   depends_lib-append  port:default_port_to_install
-# 
-# Similarly, the homepage can also be specified, if desired:
-#
-#   homepage            https://my-homepage-here
-#
-#------------------------------------------------------------------------------
-#
-# Options:
-#   * stub.subport_name - override subport name, for README location
 #
 #==============================================================================
 
