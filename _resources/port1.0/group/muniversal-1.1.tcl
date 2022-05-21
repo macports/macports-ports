@@ -792,7 +792,7 @@ foreach phase {patch configure build destroot test} {
             }
             rename ${proc_name} ${proc_name}_orig
             proc ${proc_name} {{args ""}} "
-                global worksrcpath UI_PREFIX subport
+                global worksrcpath UI_PREFIX subport muniversal.current_arch
 
                 foreach arch \"\[option configure.universal_archs\]\" {
 
@@ -801,6 +801,7 @@ foreach phase {patch configure build destroot test} {
                     ui_info \"\$UI_PREFIX \[format \[msgcat::mc \"Running ${part} ${phase} %1\\\$s for architecture %2\\\$s\"\] \${subport} \${arch}\]\"
 
                     muniversal.build_arch \${arch}
+                    set muniversal.current_arch \${arch}
 
                     foreach dir {test.dir destroot.dir destroot build.dir autoreconf.dir autoconf.dir configure.dir} {
                         set     save-\${dir}    \[option \${dir}\]
@@ -838,6 +839,7 @@ foreach phase {patch configure build destroot test} {
                         option  \${phase_map}.cmd   \[set save-\${phase_map}.cmd\]
                     }
                 }
+                unset muniversal.current_arch
                 muniversal.build_arch
             "
         }
