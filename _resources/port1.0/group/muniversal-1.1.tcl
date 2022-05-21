@@ -659,6 +659,11 @@ proc parse_environment {command} {
         }
     }
 
+    if { [option universal_possible] && [variant_isset universal] && ${command} eq "destroot" && [info exists ${command}.env_array(DESTDIR)] } {
+        # some PortGroups (e.g. meson) set the environment variable DESTDIR
+        # map to correct universal directory
+        set ${command}.env_array(DESTDIR)                   [muniversal::get_arch_dir [set ${command}.env_array(DESTDIR)] ${arch}]
+    }
     # allow /usr/bin/arch to work without `-arch` flag
     set ${command}.env_array(ARCHPREFERENCE)                ${arch}
 
