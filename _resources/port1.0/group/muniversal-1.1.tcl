@@ -659,6 +659,9 @@ proc parse_environment {command} {
         }
     }
 
+    # allow /usr/bin/arch to work without `-arch` flag
+    set ${command}.env_array(ARCHPREFERENCE)                ${arch}
+
     if { [info exists ${command}.env.${arch}] } {
         foreach assignment [set ${command}.env.${arch}] {
             set equals_pos [string first = $assignment]
