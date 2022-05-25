@@ -15,6 +15,10 @@
 #   for py-foo rather than pyXY-foo
 # python.consistent_destroot: set consistent environment values in build and destroot phases
 #
+# python.pep517: build using PEP517 (default is "no")
+# python.pep517_backend: specify the backend to use; one of "setuptools" (default),
+#   "flit", "hatch", or "poetry"
+#
 # Note: setting these options requires name to be set beforehand
 
 PortGroup       compiler_wrapper 1.0
