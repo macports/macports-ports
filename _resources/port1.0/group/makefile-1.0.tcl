@@ -120,8 +120,50 @@ proc makefile_pg::setup_phase {phase} {
         configure.ldflags-append "-Wl,-syslibroot,[option configure.sdkroot]"
     }
 
-    if {![exists universal_archs_supported] || ![variant_exists universal] || ![variant_isset universal]} {
-        # muniversal PG is *not* being used
+    if {[exists muniversal.architectures]} {
+        # muniversal 1.1 PG is being used
+        foreach arch [option muniversal.architectures] {
+            foreach tool {cc cxx objc objcxx ld} {
+                set env_var [makefile_pg::map_tool_to_environment_variable $tool]
+                if {[lsearch -exact ${makefile.override} ${env_var}] == -1} {
+                    # Portfile requests that variable be set in the environment
+                    # append arch flag to compiler name instead
+                    set env_var [string toupper ${tool}]
+                }
+                ${phase}.args.${arch}-append    ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+            }
+            foreach tool {f77 f90 fc} {
+                set env_var [makefile_pg::map_tool_to_environment_variable $tool]
+                if {[lsearch -exact ${makefile.override} ${env_var}] == -1} {
+                    # Portfile requests that variable be set in the environment
+                    # append arch flag to compiler name instead
+                    set env_var [string toupper ${tool}]
+                }
+                ${phase}.args.${arch}-append    ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+            }
+            foreach tool [option muniversal.arch_tools] {
+                if {[regexp {f90|F90|f77|F77|fort|FORT} ${tool}]} {
+                    set arch_tool   fc
+                } else {
+                    set arch_tool   cc
+                }
+                ${phase}.args.${arch}-append    ${tool}+="[muniversal::get_archflag ${arch_tool} ${arch}]"
+            }
+            foreach tool {cc f77 cxx objc objcxx cpp f90 fc ld} {
+                set env_var  [makefile_pg::map_tool_to_environment_variable $tool]
+                set lenv_var [string tolower ${env_var}]
+                if {[lsearch -exact ${makefile.override} ${env_var}] == -1} {
+                    # Portfile requests that variable be set in the environment
+                    # append flag to compiler name instead
+                    set env_var [string toupper ${tool}]
+                }
+                if {[option configure.${lenv_var}.${arch}] ne ""} {
+                    ${phase}.args.${arch}-append    ${env_var}+="[option configure.${lenv_var}.${arch}]"
+                }
+            }
+        }
+    } elseif {![exists universal_archs_supported] || ![variant_exists universal] || ![variant_isset universal]} {
+        # muniversal PG 1.x is *not* being used
         foreach tool {cc f77 cxx objc objcxx cpp f90 fc ld} {
             if {[catch {get_canonical_archflags $tool} flags]} {
                 continue
@@ -130,7 +172,7 @@ proc makefile_pg::setup_phase {phase} {
             configure.[string tolower ${env_var}]-append {*}${flags}
         }
     } else {
-        # muniversal PG is being used
+        # muniversal PG 1.0 is being used
         global merger_${phase}_args
         foreach arch [option configure.universal_archs] {
             foreach tool {cc cxx objc objcxx ld} {
