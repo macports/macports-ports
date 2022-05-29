@@ -666,6 +666,7 @@ proc rust::set_environment {} {
         rust::append_envs                   OPENSSL_DIR=${prefix}/libexec/openssl${openssl_ver}
         compiler.cpath-prepend              ${prefix}/libexec/openssl${openssl_ver}/include
         compiler.library_path-prepend       ${prefix}/libexec/openssl${openssl_ver}/lib
+        configure.pkg_config_path-prepend   ${prefix}/libexec/openssl${openssl_ver}/lib/pkgconfig
     }
 
     # Propagate pkgconfig path to build and destroot phases as well.
