@@ -222,11 +222,10 @@ proc makefile_pg::setup_phase {phase} {
 }
 
 proc makefile_pg::makefile_setup {} {
-    if { [option use_configure] } {
-        pre-configure {
-            makefile_pg::setup_phase configure
-        }
-    }
+    # `makefile_pg::setup_phase configure` intentionally not run.
+    # makefile_pg::setup_phase essentially duplicates base code run during the configure phase.
+    # Therefore, there is no reason to run it during the configure phase.
+    # The duplicate code can even corrupt the environment variable PKG_CONFIG_PATH.
     pre-build {
         makefile_pg::setup_phase build
     }
