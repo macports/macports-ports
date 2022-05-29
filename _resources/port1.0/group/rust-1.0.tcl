@@ -658,20 +658,20 @@ proc rust::set_environment {} {
 
     rust::append_envs     "RUST_BACKTRACE=1"
 
-    # Propagate pkgconfig path to build and destroot phases as well.
-    # Needed to work with openssl PG.
-    if { ${configure.pkg_config_path} ne "" } {
-        rust::append_envs "PKG_CONFIG_PATH=[join ${configure.pkg_config_path} :]" {build destroot}
-    }
-
     rust::append_envs     CC=[compwrap::wrap_compiler cc]   {build destroot}
     rust::append_envs     CXX=[compwrap::wrap_compiler cxx] {build destroot}
 
     if { [option openssl.branch] ne "" } {
-        set openssl_ver                 [string map {. {}} [option openssl.branch]]
-        rust::append_envs               OPENSSL_DIR=${prefix}/libexec/openssl${openssl_ver}
-        compiler.cpath-prepend          ${prefix}/libexec/openssl${openssl_ver}/include
-        compiler.library_path-prepend   ${prefix}/libexec/openssl${openssl_ver}/lib
+        set openssl_ver                     [string map {. {}} [option openssl.branch]]
+        rust::append_envs                   OPENSSL_DIR=${prefix}/libexec/openssl${openssl_ver}
+        compiler.cpath-prepend              ${prefix}/libexec/openssl${openssl_ver}/include
+        compiler.library_path-prepend       ${prefix}/libexec/openssl${openssl_ver}/lib
+    }
+
+    # Propagate pkgconfig path to build and destroot phases as well.
+    # Needed to work with openssl PG.
+    if { ${configure.pkg_config_path} ne "" } {
+        rust::append_envs "PKG_CONFIG_PATH=[join ${configure.pkg_config_path} :]" {build destroot}
     }
 
     if {${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap"} {
