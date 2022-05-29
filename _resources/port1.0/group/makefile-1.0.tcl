@@ -93,7 +93,7 @@ proc makefile_pg::setup_phase {phase} {
     if {[lsearch -exact ${makefile.override} SDKROOT] != -1 && [option configure.sdkroot] ne ""} {
         ${phase}.args-append        SDKROOT=[option configure.sdkroot]
     }
-    
+
     #########################################################################################
     # attempt to set PREFIX variable
     #########################################################################################
@@ -107,7 +107,7 @@ proc makefile_pg::setup_phase {phase} {
         ${phase}.args-append        [option makefile.prefix_name]=[shellescape ${makefile_prefix}]
     }
     ${phase}.env-append             [option makefile.prefix_name]=${makefile_prefix}
-            
+
     #########################################################################################
     # replicate behavior in procedure portconfigure::configure_main
     # see https://github.com/macports/macports-base/blob/master/src/port1.0/portconfigure.tcl
@@ -119,7 +119,7 @@ proc makefile_pg::setup_phase {phase} {
         }
         configure.ldflags-append "-Wl,-syslibroot,[option configure.sdkroot]"
     }
-    
+
     if {![exists universal_archs_supported] || ![variant_exists universal] || ![variant_isset universal]} {
         # muniversal PG is *not* being used
         foreach tool {cc f77 cxx objc objcxx cpp f90 fc ld} {
@@ -174,7 +174,7 @@ proc makefile_pg::setup_phase {phase} {
             }
         }
     }
-    
+
     if {![variant_exists universal] || ![variant_isset universal]} {
         foreach env_var {CFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS FFLAGS F90FLAGS FCFLAGS LDFLAGS} {
             if {[option configure.march] ne ""} {
@@ -185,7 +185,7 @@ proc makefile_pg::setup_phase {phase} {
             }
         }
     }
-    
+
     foreach env_var { \
                           CC CXX OBJC OBJCXX FC F77 F90 JAVAC \
                           CFLAGS CPPFLAGS CXXFLAGS OBJCFLAGS OBJCXXFLAGS \
@@ -200,7 +200,7 @@ proc makefile_pg::setup_phase {phase} {
             }
         }
     }
-    
+
     foreach env_var { \
                           PKG_CONFIG_PATH \
                       } {
@@ -212,7 +212,7 @@ proc makefile_pg::setup_phase {phase} {
             }
         }
     }
-    
+
     if {${os.platform} eq "darwin" && ${os.major} == 12} {
         ${phase}.env-append         __CFPREFERENCES_AVOID_DAEMON=1
         if {[lsearch -exact ${makefile.override} __CFPREFERENCES_AVOID_DAEMON] != -1} {
