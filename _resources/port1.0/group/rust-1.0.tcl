@@ -580,7 +580,7 @@ proc rust::import_crate_github {cname cgithub crevision chksum cratefile} {
     ui_info "Adding ${cratefile} from github to cargo home"
     rust::extract_crate ${cratefile}
     rust::write_cargo_checksum ${cdirname} "null"
-    rust::old_macos_compatibility ${cname} ${cversion}
+    rust::old_macos_compatibility ${cname} ${crevision}
 }
 
 post-extract {
