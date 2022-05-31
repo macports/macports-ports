@@ -179,6 +179,10 @@ namespace eval muniversal {}
 # a version of `sysctl hw.cpu64bit_capable` that works on older systems
 # see https://trac.macports.org/ticket/25873
 proc muniversal::cpu64bit_capable {} {
+    if {[option os.platform] ne "darwin"} {
+        # Doesn't really matter what we return here.
+        return 1
+    }
     if {[option os.major] >= 9} {
         return [sysctl hw.cpu64bit_capable]
     } elseif {(![catch {sysctl hw.optional.x86_64} is_x86_64] && ${is_x86_64})
