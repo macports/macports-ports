@@ -478,7 +478,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
         # Install documentation files (if specified)
         if {[llength ${ruby.docs}] > 0} {
-            set docPath ${prefix}/share/doc/${name}
+            if {$subport ne ""} {
+                set docPath ${prefix}/share/doc/${subport}
+            } else {
+                set docPath ${prefix}/share/doc/${name}
+            }
             xinstall -d -m 0755 ${destroot}${docPath}
             foreach docitem ${ruby.docs} {
                 set docitem [file join ${worksrcpath} ${docitem}]
