@@ -310,15 +310,15 @@ proc cargo.environments {} {
     global merger_configure_env merger_build_env merger_destroot_env worksrcpath
 
     set cargo_ld ${configure.cc}
-    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-        # Use wrapped rust compilers
-        depends_build-append port:rust-compiler-wrap
-        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
-        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
-        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
-    }
+#    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+#        # Use wrapped rust compilers
+#        depends_build-append port:rust-compiler-wrap
+#        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
+#        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+#        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
+#        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+#        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
+#    }
 
     cargo.append_envs     CC=${configure.cc}   {build destroot}
     cargo.append_envs     CXX=${configure.cxx} {build destroot}
