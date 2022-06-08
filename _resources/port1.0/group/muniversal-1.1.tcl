@@ -419,7 +419,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                 }
                                 *.pc -
                                 *-config {
-                                    mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
+                                    muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
                                 }
                                 *.la {
                                     if {[option destroot.delete_la_files]} {
@@ -498,7 +498,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                 default {
                                     if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                         # shell script, hopefully striping out arch flags works...
-                                        mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
+                                        muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
                                     } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                         # diff worked
                                         ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
