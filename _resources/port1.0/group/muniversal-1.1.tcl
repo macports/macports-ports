@@ -316,6 +316,30 @@ proc muniversal::strip_arch_flags {dir1 dir2 dir fl} {
     }
 }
 
+# merge two files (${dir1}/${fl} and ${dir2}/${fl}) to ${dir}/${fl}
+# by stripping out -${arch} (e.g. from a directory name)
+proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
+    set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+    set tempfile1 "${tempdir}/1-${fl}"
+    set tempfile2 "${tempdir}/2-${fl}"
+
+    copy ${dir1}/${fl} ${tempfile1}
+    copy ${dir2}/${fl} ${tempfile2}
+
+    reinplace -q -E "s:-${arch1}::g" ${tempfile1}
+    reinplace -q -E "s:-${arch2}::g" ${tempfile2}
+
+    if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
+        # modified files are identical
+        ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -${arch1} and ${arch2}"
+        copy ${tempfile1} ${dir}/${fl}
+        delete ${tempfile1} ${tempfile2} ${tempdir}
+    } else {
+        delete ${tempfile1} ${tempfile2} ${tempdir}
+        return -code error "${fl} differs in ${dir1} and ${dir2} and cannot be merged"
+    }
+}
+
 # merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
 #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
 #    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
@@ -440,6 +464,9 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                     # the timestamp is recorded, however
                                     ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                     copy ${dir1}/${fl} ${dir}
+                                }
+                                *.gir {
+                                    muniversal::strip_dir_arch ${arch1} ${arch2} ${dir1} ${dir2} ${dir} ${fl}
                                 }
                                 *.elc {
                                     # elc files can be different because they record when and where they were built.
