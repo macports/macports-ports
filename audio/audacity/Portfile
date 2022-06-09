@@ -92,7 +92,7 @@ if {${subport} eq "${name}-legacy"} {
     conflicts       "${name}-legacy"
     ## 576b7e66 looks like possibly the last commit before the takeover by the new project owner:
     github.setup    audacity audacity 576b7e66d2b96c39241d3d992259fc2bfa7855b0
-    version         3.0.2.129
+    version         3.0.2.129 ; revision 1
     # this port is intended to facilitate development efforts shared with "upstreams"
     # so using git instead of a tarball fetch type is more appropriate for the current maintainer
     # fetch.type      git
@@ -185,7 +185,8 @@ if {[variant_isset wxsystem]} {
 
 depends_build-append \
                     port:pkgconfig \
-                    port:python37
+                    port:python37 \
+                    port:cctools
 set python_bin      ${prefix}/bin/python3.7
 
 depends_lib-append  port:freetype \
@@ -271,8 +272,30 @@ configure.cxxflags-append \
                     -Wno-inconsistent-missing-override \
                     -Wno-overloaded-virtual
 
+platform darwin {
+    # set the install_rpath first
+    cmake.install_rpath-append \
+                    ${prefix}/lib/audacity \
+                    ${aud_app_path}/Contents/Frameworks
+    if {[variant_isset wxsystem]} {
+        cmake.install_rpath-append \
+                    ${wxWidgets.prefix}/lib
+    } else {
+        configure.ldflags-append \
+                    -Wl,-rpath,${prefix}/lib/audacity \
+                    -Wl,-rpath,${aud_app_path}/Contents/Frameworks
+    }
+    if {${subport} eq "${name}"} {
+        # now change the prefix
+        cmake.install_prefix ${applications_dir}
+    }
+    configure.pre_args-replace \
+                    -DCMAKE_INSTALL_NAME_DIR="${cmake.install_prefix}/lib" \
+                    -DCMAKE_INSTALL_NAME_DIR="${aud_app_path}/Contents/Frameworks"
+}
 set _OPT "audacity_"
 configure.args-append \
+                    -DCMAKE_MACOSX_RPATH=ON \
                     -D${_OPT}lib_preference=system \
                     -D${_OPT}use_audio_units=on \
                     -D${_OPT}use_pa_jack=off \
@@ -289,7 +312,7 @@ configure.args-append \
                     -D${_OPT}use_soundtouch=system \
                     -D${_OPT}use_twolame=system \
                     -D${_OPT}use_midi=local \
-                    -D${_OPT}use_pch=on
+                    -D${_OPT}use_pch=off
 if {${os.arch} ne "arm"} {
     configure.args-append \
                     -D${_OPT}use_mad=system \
@@ -425,15 +448,45 @@ pre-build {
 }
 
 platform darwin {
+    proc fixup_wx_libraries {} {
+        global destroot aud_app_path wxWidgets.prefix
+        if {[variant_isset wxsystem]} {
+            # replace the embedded libraries with symlinks, so they're found via
+            # the @executable_path rpath.
+            foreach lwx [glob ${destroot}${aud_app_path}/Contents/Frameworks/libwx*] {
+                file delete ${lwx}
+                ln -s "${wxWidgets.prefix}/lib/[file tail ${lwx}]" ${lwx}
+            }
+        }
+    }
 
+    if {${subport} eq "${name}" && ![variant_isset wxsystem]} {
+        destroot {
+            # replace the destroot'ed app bundle with the one in ${build.dir}/bin that contains
+            # the right install_name settings in most of the wxWidgets libraries
+            file delete -force ${destroot}${aud_app_path}
+            system "ditto --rsrc ${build.dir}/bin/Audacity.app ${destroot}${aud_app_path}"
+            # this one is skipped
+            system "install_name_tool -id ${aud_app_path}/Contents/Frameworks/libwx_baseu-3.1.dylib \
+                ${destroot}${aud_app_path}/Contents/Frameworks/libwx_baseu-3.1.dylib"
+            foreach lwx {osx_cocoau_adv osx_cocoau_html baseu_net osx_cocoau_qa osx_cocoau_core baseu_xml baseu} {
+                # update the references where necessary:
+                system "install_name_tool -change ${build.dir}/lib/libwx_${lwx}-3.1.dylib \
+                    ${aud_app_path}/Contents/Frameworks/libwx_${lwx}-3.1.dylib \
+                    ${destroot}${aud_app_path}/Contents/modules/mod-script-pipe.so"
+            }
+        }
+    }
     post-destroot {
         if {${subport} eq "${name}-legacy"} {
             file rename ${destroot}${prefix}/Audacity.app ${destroot}${aud_app_path}
             file delete -force ${destroot}${prefix}/share/audacity/plug-ins
             file delete -force ${destroot}${prefix}/share/audacity/nyquist
             file delete -force ${destroot}${prefix}/share/audacity/modules
+            xinstall -m 755 -d ${destroot}${prefix}/share/audacity
             ln -s ${aud_app_path}/Contents/plug-ins ${destroot}${prefix}/share/audacity/
             file delete -force ${destroot}/Resources
+            fixup_wx_libraries
             if {[variant_isset suil]} {
                 xinstall -m 755 -d ${destroot}${aud_app_path}/Contents/Frameworks
                 file rename ${build.dir}/bin/MacPorts/lib/audacity/suil_qt5_in_cocoa.so \
@@ -441,12 +494,7 @@ platform darwin {
                 ln -s suil_qt5_in_cocoa.dylib ${destroot}${aud_app_path}/Contents/Frameworks/suil_qt5_in_cocoa.so
             }
         } else {
-            file rename ${destroot}${prefix}/Audacity.app ${destroot}${aud_app_path}
-            if {[variant_isset wxsystem]} {
-                # I haven't yet figured out how to disable the copying of wx libraries into the bundle
-                # but they can be pruned because CopyLibs.cmake is not invoked.
-                file delete -force ${destroot}${aud_app_path}/Contents/Frameworks
-            }
+            fixup_wx_libraries
             xinstall -m 755 -d ${destroot}${prefix}/share/audacity
             ln -s ${aud_app_path}/Contents/plug-ins ${destroot}${prefix}/share/audacity/
             xinstall -m 755 -d ${destroot}${prefix}/share/mime/packages
