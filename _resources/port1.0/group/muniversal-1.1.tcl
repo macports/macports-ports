@@ -669,24 +669,24 @@ proc parse_environment {command} {
            ${command}.env_array
 
     if { ${command} eq "configure" } {
-        set ${command}.env_array(CPP_FOR_BUILD)             "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CXXCPP_FOR_BUILD)          "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CPPFLAGS_FOR_BUILD)        [option configure.cppflags]
+        append_to_environment_value     ${command}  CPP_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cpp]"
+        append_to_environment_value     ${command}  CXXCPP_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cpp]"
+        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags]
 
         if { [option muniversal.arch_compiler] } {
-            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
-            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  CC_FOR_BUILD        {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
 
-            set ${command}.env_array(CFLAGS_FOR_BUILD)      [option configure.cflags]
-            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    [option configure.cxxflags]
-            set ${command}.env_array(LDFLAGS_FOR_BUILD)     [option configure.ldflags]
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}[option configure.cflags]
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags]
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags]
         } else {
-            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]"
-            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx]"
+            append_to_environment_value ${command}  CC_FOR_BUILD        {*}[portconfigure::configure_get_compiler cc]
+            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}[portconfigure::configure_get_compiler cxx]
 
-            set ${command}.env_array(CFLAGS_FOR_BUILD)      "[option configure.cflags] [portconfigure::configure_get_archflags cc]"
-            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    "[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
-            set ${command}.env_array(LDFLAGS_FOR_BUILD)     "[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags] [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
         }
     }
 
