@@ -766,8 +766,8 @@ proc rust::rust_pg_callback {} {
         # Rust: _posix_memalign, extended _realpath, _pthread_setname_np, _copyfile_state_get
         depends_${dep_type}-delete      path:lib/${legacyLib}:legacy-support
         depends_${dep_type}-append      path:lib/${legacyLib}:legacy-support
-        configure.ldflags-delete        ${prefix}/lib/${legacyLib}
-        configure.ldflags-append        ${prefix}/lib/${legacyLib}
+        configure.ldflags-delete        -Wl,${prefix}/lib/${legacyLib}
+        configure.ldflags-append        -Wl,${prefix}/lib/${legacyLib}
     }
 
     # sometimes Cargo.lock does not exist
