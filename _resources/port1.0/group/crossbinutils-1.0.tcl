@@ -123,6 +123,8 @@ proc crossbinutils.setup {target version} {
             binutils/doc    binutils
             gprof           gprof
             ld              ld
+        }
+        set infopages2 {
             libctf/doc      ctf-spec
         }
 
@@ -137,6 +139,20 @@ proc crossbinutils.setup {target version} {
                 ${tex}
             move ${tex} \
                 ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
+
+            foreach {dir page} ${infopages2} {
+                if { [ file exists "${worksrcpath}/${dir}" ] } {
+                    set tex [glob -directory ${worksrcpath}/${dir}]
+                    reinplace -q \
+                        /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
+                    reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
+                    reinplace -q \
+                        "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
+                        ${tex}
+                    move ${tex} \
+                        ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
+                }
+            }
 
             # Fix Makefile(s)
             if { [ file exists "${worksrcpath}/${dir}/Makefile.in" ] } {
