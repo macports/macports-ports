@@ -123,11 +123,10 @@ proc crossbinutils.setup {target version} {
             binutils/doc    binutils
             gprof           gprof
             ld              ld
-            libctf/doc      ctf-spec
         }
 
         foreach {dir page} ${infopages} {
-            # Fix texinfo source file
+            # Fix texi|info source file(s)
             set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
             reinplace -q \
                 /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
@@ -144,17 +143,17 @@ proc crossbinutils.setup {target version} {
                     s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
                     ${worksrcpath}/${dir}/Makefile.in
             }
-            foreach dir2 {binutils gas libctf} {
-                if { [ file exists "${worksrcpath}/${dir2}/configure" ] } {
+            foreach dir {binutils gas} {
+                if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
                         reinplace -q -E \
                         s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
-                        ${worksrcpath}/${dir2}/Makefile.in
+                        ${worksrcpath}/${dir}/Makefile.in
                 }
             }
         }
 
-        # Fix packages' names.
-        foreach dir {bfd binutils gas gold gprof ld opcodes libctf} {
+        # Fix packages names
+        foreach dir {bfd binutils gas gold gprof ld opcodes} {
             if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
                 reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
                     ${worksrcpath}/${dir}/configure
@@ -176,6 +175,53 @@ proc crossbinutils.setup {target version} {
             ${worksrcpath}/libiberty/Makefile.in
         reinplace -q "s|/\$(MULTIOSDIR)||g" \
             ${worksrcpath}/libiberty/Makefile.in
+
+        if {[vercmp ${version} "2.38"] >= 0} {
+            set infopages {
+                libctf/doc      ctf-spec
+            }
+
+            foreach {dir page} ${infopages} {
+                # Fix texi|info source file(s)
+                if { [ file exists "${worksrcpath}/${dir}" ] } {
+                    set info [glob -directory ${worksrcpath}/${dir} ${page}.info*]
+                    reinplace -q \
+                        /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${info}
+                    reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${info}
+                    reinplace -q \
+                        "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
+                        ${info}
+                    move ${info} \
+                        ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${info}]
+                }
+                if { [ file exists "${worksrcpath}/${dir}" ] } {
+                    set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
+                    reinplace -q \
+                        /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
+                    reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
+                    reinplace -q \
+                        "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
+                        ${tex}
+                    move ${tex} \
+                        ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
+                }
+                foreach dir {libctf} {
+                    if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
+                        reinplace -q -E \
+                        s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
+                        ${worksrcpath}/${dir}/Makefile.in
+                    }
+                }
+            }
+
+            # Fix packages names
+            foreach dir {libctf} {
+                if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
+                        reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
+                        ${worksrcpath}/${dir}/configure
+                }
+            }
+        }
     }
 
     depends_lib \
