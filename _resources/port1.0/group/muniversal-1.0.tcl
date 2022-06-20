@@ -599,6 +599,11 @@ variant universal {
             reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
+            # also strip out host information and stray space runs
+            reinplace -q -E {s:--host=[^ ]+::g}     ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:host_alias=[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:  +: :g}             ${tempfile1} ${tempfile2}
+
             if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
                 # modified files are identical
                 ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -m32, -m64, and -arch XXX"
