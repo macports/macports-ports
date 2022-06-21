@@ -24,8 +24,6 @@
 #
 # Note: setting these options requires name to be set beforehand
 
-PortGroup       compiler_wrapper 1.0
-
 categories      python
 
 use_configure   no
@@ -91,17 +89,6 @@ proc python_get_default_version {} {
         }
     } else {
         return ${def_v}
-    }
-}
-
-proc python_set_env_compilers {phase} {
-    if {[option supported_archs] eq "noarch"} {
-        return
-    }
-    foreach tag [option compwrap.compilers_to_wrap] {
-        if {[option configure.${tag}] ne ""} {
-            ${phase}.env-append [string toupper $tag]=[compwrap::wrap_compiler ${tag}]
-        }
     }
 }
 
@@ -193,7 +180,20 @@ proc python_set_versions {option action args} {
                 build.env-append        OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler}} {
-                python_set_env_compilers build
+                # compiler_wrapper portgroup support
+                if {[exists compwrap.compilers_to_wrap]} {
+                    foreach var [option compwrap.compilers_to_wrap] {
+                        if {[set configure.${var}] ne ""} {
+                            build.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
+                        }
+                    }
+                } else {
+                    foreach var [list cc objc cxx fc f77 f90] {
+                        if {[set configure.${var}] ne ""} {
+                            build.env-append [string toupper $var]=[set configure.${var}]
+                        }
+                    }
+                }
             }
         }
         pre-destroot {
@@ -240,7 +240,20 @@ proc python_set_versions {option action args} {
                 destroot.env-append     OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler} && ${python.consistent_destroot}} {
-                python_set_env_compilers destroot
+                # compiler_wrapper portgroup support
+                if {[exists compwrap.compilers_to_wrap]} {
+                    foreach var [option compwrap.compilers_to_wrap] {
+                        if {[set configure.${var}] ne ""} {
+                            destroot.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
+                        }
+                    }
+                } else {
+                    foreach var [list cc objc cxx fc f77 f90] {
+                        if {[set configure.${var}] ne ""} {
+                            destroot.env-append [string toupper $var]=[set configure.${var}]
+                        }
+                    }
+                }
             }
         }
         post-destroot {
