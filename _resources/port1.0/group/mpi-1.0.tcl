@@ -334,9 +334,6 @@ proc mpi.setup {args} {
                 -gcc7 -gcc9 \
                 -clang90 -clang10
         }
-
-        # {mpich,openmpi}-clang14 do not yet exist
-        lappend ::mpi.disabled_compilers -clang14
     }
 
     compilers.setup {*}$cl {*}${::mpi.disabled_compilers}
