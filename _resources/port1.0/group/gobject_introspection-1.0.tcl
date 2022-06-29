@@ -37,7 +37,7 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=OFF
         } elseif { [string match *meson* [option configure.cmd] ] } {
-            configure.args-append   -Dintrospection=false
+            configure.args-append   -Dintrospection=disabled
         } else {
             configure.args-append   --disable-introspection
         }
@@ -56,7 +56,7 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON
         } elseif { [string match *meson* [option configure.cmd] ] } {
-            configure.args-append   -Dintrospection=true
+            configure.args-append   -Dintrospection=enabled
         } else {
             configure.args-append   --enable-introspection
         }
