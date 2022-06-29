@@ -248,7 +248,7 @@ proc perl5.use_module_build {} {
         return
     }
 
-    depends_lib-append  port:p${perl5.major}-module-build
+    depends_build-append  port:p${perl5.major}-module-build
 
     configure.pre_args  Build.PL
     default configure.args {--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\"}
