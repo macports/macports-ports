@@ -85,7 +85,7 @@ if {${os.major} < 10} {
         # GCC 11 still problematic on arm
         set compilers.gcc_default gccdevel
     } else {
-        set compilers.gcc_default gcc11
+        set compilers.gcc_default gcc12
     }
 }
 
@@ -94,14 +94,14 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" } {
-    set gcc_versions {10 11 devel}
+    set gcc_versions {10 11 12 devel}
 } else {
     set gcc_versions {}
     if { ${os.major} < 20 } {
         lappend gcc_versions 5 6 7
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 8 9 10 11 devel
+        lappend gcc_versions 8 9 10 11 12 devel
     }
 }
 # GCC version providing the primary runtime
