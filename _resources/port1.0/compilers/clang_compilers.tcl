@@ -13,8 +13,10 @@
 global os.major
 
 if {${os.major} >= 11} {
-    lappend compilers macports-clang-14 \
-                      macports-clang-13 \
+    # Note, clang-14 is proving a little problematic, so for now we place it
+    # behind clang-13 in the fallback list
+    lappend compilers macports-clang-13 \
+                      macports-clang-14 \
                       macports-clang-12
 }
 
