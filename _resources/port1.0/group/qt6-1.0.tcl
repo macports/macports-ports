@@ -185,6 +185,18 @@ namespace eval qt6pg {
             lib/pkgconfig/Qt6Core.pc
             ""
         }
+        qttools {
+            6.2
+            7.0
+            lib/cmake/Qt6Designer
+            ""
+        }
+        qttranslations {
+            6.2
+            7.0
+            libexec/qt6/translations/qt_ar.qm
+            ""
+        }
         sqlite-plugin {
             6.2
             7.0
