@@ -94,6 +94,11 @@ configure.args-append \
     -DFFI_INCLUDE_DIR=${prefix}/include \
     -DFFI_LIBRARY_DIR=${prefix}/lib
 
+# Disable iOS support on older systems
+if {${os.platform} eq "darwin" && ${os.major} <= 12} {
+    configure.args-append    -DCOMPILER_RT_ENABLE_IOS=OFF
+}
+
 # cctools is needed to handle objects from newer clang toolchains
 if {[string match macports-clang-* ${configure.compiler}]} {
     depends_build-append            port:cctools
@@ -116,7 +121,6 @@ platform darwin {
     configure.cxx_stdlib libc++
     depends_lib-append port:libcxx
     if {${os.major} < 11} {
-        #supported_archs i386 x86_64
         pre-fetch {
             if {![file exists /usr/lib/libc++.dylib]} {
                 ui_error "$name requires a C++11 runtime, which your configuration does not allow"
@@ -174,7 +178,11 @@ if {${os.platform} eq "darwin" && ${os.major} < 10} {
 if {${os.platform} eq "darwin" && ${os.major} < 16} {
     # error: 'TARGET_OS_OSX' is not defined, evaluates to 0 [-Werror,-Wundef-prefix=TARGET_OS_]
     patchfiles-append  0100-define-target-os-osx.patch
-    # error: use of undeclared identifier 'clonefile'
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    # Avoid attempts to use 'clonefile'
+    # llvm/lib/Support/Unix/Path.inc:1476:10: error: use of undeclared identifier 'clonefile'
     patchfiles-append  0200-remove-use-of-clonefile.patch
 }
 
@@ -329,13 +337,13 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
         -DDARWIN_PREFER_PUBLIC_SDK=ON      \
         -DLLVM_BUILD_RUNTIME=ON
 
-    if {${os.major} <= 18} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 18} {
         # on systems that might build i386, we need atomic builtins
         # https://trac.macports.org/ticket/58712
         configure.args-append    -DCOMPILER_RT_EXCLUDE_ATOMIC_BUILTIN=OFF
     }
 
-    if {${os.major} <= 14} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 14} {
         # compiler-rt does a broad search for an SDK it likes, but this
         # search fails on older systems that don't have a MacOSX.sdk
         # TODO: apply this always to all systems?
@@ -350,20 +358,15 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
                                  -DCOMPILER_RT_BUILD_MEMPROF=OFF
     }
 
-    if {${os.major} <= 11} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 11} {
         # xpc.h available 10.7 but doesn't support nullable features
         configure.args-append    -DCLANGD_BUILD_XPC=OFF
     }
 
-    if {${os.major} <= 10} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 10} {
         # avoid need for thread_local_storage
         configure.args-append    -DCLANG_ENABLE_CLANGD=OFF \
                                  -DLLVM_ENABLE_BACKTRACES=OFF
-    }
-
-    if {${os.major} <= 12} {
-        # Make sure iOS support is disabled ...
-        configure.args-append    -DCOMPILER_RT_ENABLE_IOS=OFF
     }
 
 }
@@ -398,18 +401,17 @@ if {${subport} eq "lldb-${llvm_version}"} {
 
     set worksrcpath ${workpath}/${distname}/lldb
 
-    post-activate {
-        ui_msg "Please follow the instructions at  https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:"
-        if {${os.major} >= 13} {
-            ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/lldb-server"
-        } else {
-           ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/lldb-server"
-        }
+    notes "Please follow the instructions at https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:\n--------------------\n"
+    notes-append "sudo ${sub_prefix}/scripts/lldb/macos-setup-codesign.sh"
+    if {${os.major} >= 13} {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
+    } else {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
     }
 }
 
 variant tests description {Enable building of test code} {
-    depends_test-append     port:py39-psutil
+    depends_test-append     port:py${py_ver_nodot}-psutil
     test.run                yes
     configure.args-append   -DLLVM_INCLUDE_TESTS=ON
     test.target             check
@@ -470,6 +472,13 @@ post-destroot {
 
     if {${subport} eq "lldb-${llvm_version}"} {
         delete ${destroot}${prefix}/bin/debugserver-${suffix}
+
+        set lldb_scripts_srcdir ${worksrcpath}/scripts
+        set lldb_scripts_destdir ${destroot}${sub_prefix}/scripts/lldb
+        xinstall -d ${lldb_scripts_destdir}
+        xinstall -m 755 -W ${lldb_scripts_srcdir} \
+            macos-setup-codesign.sh \
+            ${lldb_scripts_destdir}
     }
 }
 
