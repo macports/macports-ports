@@ -92,11 +92,11 @@ if { ${os.arch} eq "arm" } {
     set gcc_versions {10 11 12 devel}
 } else {
     set gcc_versions {}
-    if { ${os.major} < 20 } {
-        lappend gcc_versions 5 6 7
+    if { ${os.major} < 15 } {
+        lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 8 9 10 11 12 devel
+        lappend gcc_versions 10 11 12 devel
     }
 }
 # GCC version providing the primary runtime
@@ -104,7 +104,7 @@ if { ${os.arch} eq "arm" } {
 if { ${os.major} < 10 } {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 11
+    set gcc_main_version 12
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
