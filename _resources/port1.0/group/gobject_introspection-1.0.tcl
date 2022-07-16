@@ -37,7 +37,7 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         if { [string match *cmake* [option configure.cmd] ] } {
             configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=OFF
         } elseif { [string match *meson* [option configure.cmd] ] } {
-            configure.args-append   -Dintrospection=false
+            configure.args-append   -Dintrospection=disabled
         } else {
             configure.args-append   --disable-introspection
         }
@@ -54,9 +54,9 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         }
 
         if { [string match *cmake* [option configure.cmd] ] } {
-            configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON            
+            configure.args-append   -DENABLE_GOBJECT_INTROSPECTION=ON
         } elseif { [string match *meson* [option configure.cmd] ] } {
-            configure.args-append   -Dintrospection=true
+            configure.args-append   -Dintrospection=enabled
         } else {
             configure.args-append   --enable-introspection
         }
@@ -95,7 +95,7 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
         gobject_introspection.build.cflags-append   "-isysroot${sdk_root}"
         gobject_introspection.build.ldflags-append  "-Wl,-syslibroot,${sdk_root}"
 
-        if {![exists universal_archs_supported] || ![variant_exists universal] || ![variant_isset universal]} {
+        if {(![exists muniversal.architectures] && ![exists universal_archs_supported]) || ![variant_exists universal] || ![variant_isset universal]} {
             # muniversal PG is *not* being used
             foreach tool {cc ld} {
                 if {[catch {get_canonical_archflags $tool} flags]} {
@@ -104,8 +104,16 @@ proc gobject_introspection_pg::gobject_introspection_setup {} {
                 set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
                 gobject_introspection.build.[string tolower ${env_var}]-append {*}${flags}
             }
+        } elseif {[exists muniversal.architectures]} {
+            # muniversal PG 1.1 is being used
+            foreach arch [option muniversal.architectures] {
+                foreach tool {cc ld} {
+                    set env_var [gobject_introspection_pg::map_tool_to_environment_variable $tool]
+                    build.args.${arch}-append ${env_var}+="[muniversal::get_archflag ${tool} ${arch}]"
+                }
+            }
         } else {
-            # muniversal PG is being used
+            # muniversal PG 1.0 is being used
             global merger_build_args
             foreach arch [option configure.universal_archs] {
                 foreach tool {cc ld} {

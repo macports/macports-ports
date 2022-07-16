@@ -1,15 +1,37 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup               compiler_blacklist_versions 1.0
+PortGroup               github 1.0
+PortGroup               legacysupport 1.1
+PortGroup               makefile 1.0
 
-name                edbrowse
-version             3.4.10
-revision            5
+# clock_gettime
+legacysupport.newest_darwin_requires_legacy 15
+
+github.setup            CMB edbrowse 3.8.2.1 v
+set quickjs_version     2021-03-27
+revision                1
+set main_distfile       ${distfiles}
+set quickjs_distname    quickjs-${quickjs_version}
+set quickjs_distfile    ${quickjs_distname}.tar.xz
+checksums               ${main_distfile} \
+                        rmd160  b9d224a50bf084b4ec5dd05ae7b3a822e0e6147e \
+                        sha256  a9c1d1fd0665796b81f18b0556f80237c13594033062f9312a49aa9159086e7a \
+                        size    909574 \
+                        ${quickjs_distfile} \
+                        rmd160  0d59b21acc50db254d1087baed8c625e6390c113 \
+                        sha256  a45bface4c3379538dea8533878d694e289330488ea7028b105f72572fe7fe1a \
+                        size    753556
+
 categories          www
-license             GPL
-maintainers         nomaintainer
+maintainers             {ryandesign @ryandesign} openmaintainer
+# edbrowse: GPL-2; quickjs: MIT
+license                 GPL-2 MIT
+
 description         A combination editor, browser, and mail client that is \
                     100% text based.
+
 long_description    Edbrowse is a combination editor, browser, and mail client \
                     that is 100% text based.  The interface is similar to \
                     /bin/ed, though there are many more features, such as \
@@ -23,40 +45,84 @@ long_description    Edbrowse is a combination editor, browser, and mail client \
                     into databases through odbc.
 
 homepage            http://edbrowse.org/
+set quickjs_homepage    https://bellard.org/quickjs/
+
+github.tarball_from     archive
+master_sites            ${github.master_sites}:main \
+                        ${quickjs_homepage}:quickjs
+
+extract.only            ${main_distfile}
+distfiles               ${main_distfile}:main \
+                        ${quickjs_distfile}:quickjs
 
 platforms           darwin freebsd
 installs_libs       no
-depends_lib         port:pcre \
-                    port:spidermonkey185 \
-                    port:curl \
-                    port:readline \
-                    path:lib/libssl.dylib:openssl
 
-master_sites        ${homepage}
-use_zip             yes
-dist_subdir			${name}-1
+depends_extract-append  port:xz
 
-checksums           rmd160  42503f7f851b987f10a21d068b0f324d1fcac738 \
-                    sha256  58089879c31b571792f76fc53c41374fcbe8386ea82fe451737ae72e8a78e826
+depends_build-append    path:bin/pkg-config:pkgconfig
 
-patchfiles          patch-makefile.diff
-post-patch {
-    reinplace       "s|@@PREFIX@@|${prefix}|g" ${worksrcpath}/src/makefile
+depends_lib             port:curl \
+                        port:pcre2 \
+                        port:readline \
+                        port:tidy \
+                        port:unixODBC
+
+set quickjs_worksrcpath ${workpath}/${quickjs_distname}
+set docdir              ${prefix}/share/doc/${subport}
+
+post-extract {
+    system -W ${workpath} "xz -dc [shellescape ${distpath}/${quickjs_distfile}] | ${portutil::autoconf::tar_command} -xf -"
+    ln -s ${distname} ${workpath}/${name}
+    ln -s ${quickjs_distname} ${workpath}/quickjs
 }
 
-use_configure       no
+patch.dir               ${workpath}
+patchfiles              build-quickjs.patch \
+                        docdir.patch \
+                        use-CFLAGS-LDFLAGS.patch
 
-variant universal {}
+post-patch {
+    reinplace "s|@DOCDIR@|${docdir}|g" ${worksrcpath}/doc/man-${name}-freebsd.1
+}
 
-configure.cppflags-append -I${prefix}/include/mozjs185
-build.env-append    "CC=${configure.cc} [get_canonical_archflags cc]" \
-                    CFLAGS=${configure.cflags} \
-                    "CPPFLAGS=${configure.cppflags} -DSYSBSD -DXP_UNIX -DX86_LINUX"
+# quickjs uses stdatomic
+compiler.c_standard     2011
+compiler.blacklist-append \
+                        {clang < 700}
+
+build.env               QUICKJS_DIR=${quickjs_worksrcpath}
 build.args          STRIP=''
 
 destroot {
     xinstall ${worksrcpath}/src/${name} ${destroot}${prefix}/bin
+    xinstall -m 0444 ${worksrcpath}/doc/man-${name}-freebsd.1 \
+        ${destroot}${prefix}/share/man/man1/${name}.1
+    copy ${worksrcpath}/doc ${destroot}${docdir}
+    delete {*}[glob ${destroot}${docdir}/man-${name}-*.1]
+    xinstall -m 0644 -W ${worksrcpath} \
+        CHANGES \
+        COPYING \
+        README \
+        ${destroot}${docdir}
 }
 
-livecheck.regex     {(3.[0-9].[0-9]+)}
-livecheck.type      regex
+# Create a launchd plist that creates the temporary directory with
+# secure permissions. See README. This only needs to happen at load so
+# set startupitem.executable (to a dummy value) to avoid creating the
+# unnecessary wrapper script and overwrite the plist MacPorts creates
+# with our own to avoid the unnecessary use of daemondo.
+startupitem.create      yes
+startupitem.autostart   yes
+startupitem.executable  /bin/true
+
+if {${startupitem.type} eq "launchd"} {
+    post-destroot {
+        xinstall -m 0644 ${filespath}/${startupitem.uniquename}.plist \
+            ${destroot}${prefix}/etc/${startupitem.location}/${startupitem.uniquename}/${startupitem.plist}
+    }
+    notes-append "
+The startup item only creates a secure temporary directory for\
+${subport}; it does not start ${subport}.
+"
+}

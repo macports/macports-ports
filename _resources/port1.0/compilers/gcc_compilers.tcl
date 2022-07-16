@@ -6,7 +6,7 @@
 global os.major os.arch
 
 if { ${os.major} >= 10 } {
-    lappend compilers macports-gcc-11 macports-gcc-10
+    lappend compilers macports-gcc-12 macports-gcc-11 macports-gcc-10
 }
 
 if { ${os.arch} ne "arm" } {

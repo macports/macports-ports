@@ -10,11 +10,11 @@ default perl5.default_branch {[perl5_get_default_branch]}
 
 proc perl5_get_default_branch {} {
     global prefix perl5.branches
-    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.28
+    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.34
     if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
         set ret [join [lrange [split $val .] 0 1] .]
     } else {
-        set ret 5.28
+        set ret 5.34
     }
     # if the above default is not supported by this module, use the latest it does support
     if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
@@ -248,7 +248,7 @@ proc perl5.use_module_build {} {
         return
     }
 
-    depends_lib-append  port:p${perl5.major}-module-build
+    depends_build-append  port:p${perl5.major}-module-build
 
     configure.pre_args  Build.PL
     default configure.args {--installdirs=vendor --config cc=\"${configure.cc}\" --config ld=\"${configure.cc}\"}

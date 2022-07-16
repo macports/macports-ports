@@ -34,13 +34,6 @@ default compwrap.compilers_to_wrap [list cc objc cxx objcxx fc f77 f90]
 options compwrap.ccache_supported_compilers
 default compwrap.ccache_supported_compilers [list cc objc cxx objcxx]
 
-# please remove when a86f95c has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
-if {![info exists compiler.limit_flags]} {
-    options compiler.limit_flags
-    default compiler.limit_flags        no
-}
-
 proc compwrap::use_ccache {tag} {
     global prefix
     return [ expr [option configure.ccache] && \

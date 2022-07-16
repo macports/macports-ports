@@ -191,6 +191,18 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
             depends_skip_archcheck-delete   rust-bootstrap-transition
             depends_skip_archcheck-append   rust-bootstrap-transition
 
+            if {[option muniversal.is_cross.[option configure.build_arch]]} {
+                # if os.arch is arm and subport is rust-bootstrap-10.6, avoid
+                #     Error: Cannot install rust-bootstrap-10.6 for the arch 'x86_64' because
+                #     Error: its dependency rust-bootstrap-transition does not build for the required arch by default
+                #     Error: and does not have a universal variant.
+                known_fail                  yes
+                pre-fetch {
+                    ui_error "${subport} does not support cross-compilation"
+                    return -code error "incompatible OS configuration"
+                }
+            }
+
             foreach component ${components} {
                 set binTag          ${rustc_version}+0-[option triplet.cpu.${arch}]-${build_vendor}-[option triplet.os]${build_major}
                 set distfile        [option prefix]/libexec/rust-bootstrap/${component}-${binTag}${extract.suffix}
@@ -509,6 +521,20 @@ proc rust::old_macos_compatibility {cname cversion} {
                 cargo.offline_cmd-replace --frozen --offline
             }
         }
+        "curl-sys" {
+            # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
+            # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
+            # see https://trac.macports.org/ticket/64146#comment:16
+            #
+            # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
+            # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
+            # see https://github.com/alexcrichton/curl-rust/issues/279
+            #
+            # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
+            #
+            reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/build.rs
+        }
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
@@ -754,6 +780,20 @@ proc rust::rust_pg_callback {} {
             # Use libMacportsLegacySystem.B.dylib since it is able to use the `__asm("$ld$add$os10.5$...")` trick for symbols that are part of legacy-support *only* on older systems.
             set legacyLib               libMacportsLegacySystem.B.dylib
             set dep_type                lib
+
+            # code should mimic legacy-support
+            # see https://github.com/macports/macports-ports/blob/master/devel/legacy-support/Portfile
+            set max_darwin_reexport 19
+            set max_darwin_optool   20
+            if { !( [option configure.build_arch] ne "arm64" && [option os.major] > ${max_darwin_reexport} && [option os.major] <= ${max_darwin_optool} ) } {
+                # ${prefix}/lib/libMacportsLegacySystem.B.dylib does not exist
+                # see https://trac.macports.org/ticket/65255
+                known_fail              yes
+                pre-fetch {
+                    ui_error "${subport} requires libMacportsLegacySystem.B.dylib, which is provided by legacy-support"
+                    return -code error "incompatible system configuration"
+                }
+            }
         } else {
             # Use the static library since the Rust compiler looks up certain symbols at *runtime* (e.g. `openat`).
             # Normally, we would want the additional functionality provided by MacPorts.
@@ -766,8 +806,8 @@ proc rust::rust_pg_callback {} {
         # Rust: _posix_memalign, extended _realpath, _pthread_setname_np, _copyfile_state_get
         depends_${dep_type}-delete      path:lib/${legacyLib}:legacy-support
         depends_${dep_type}-append      path:lib/${legacyLib}:legacy-support
-        configure.ldflags-delete        ${prefix}/lib/${legacyLib}
-        configure.ldflags-append        ${prefix}/lib/${legacyLib}
+        configure.ldflags-delete        -Wl,${prefix}/lib/${legacyLib}
+        configure.ldflags-append        -Wl,${prefix}/lib/${legacyLib}
     }
 
     # sometimes Cargo.lock does not exist

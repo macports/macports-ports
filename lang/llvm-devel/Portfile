@@ -24,13 +24,17 @@ maintainers             {jeremyhu @jeremyhu} {jonesc @cjones051073} openmaintain
 # for devel
 PortGroup github        1.0
 
-set llvm-commit         329fda39c507e8740978d10458451dcdb21563be
-set date                20220314
+set llvm-commit         4334cbd49b69ea036e7c9551c6177cd29b02c312
+set date                20220708
 set llvm_version        devel
-set clang_exe_version   14
+set clang_exe_version   15
 github.setup            llvm llvm-project ${llvm-commit}
 version                 ${date}-[string range ${llvm-commit} 0 7]
 default_variants-append +assertions
+
+checksums               rmd160  2218a34325d070d8400f219cb5ac6f818c4b3b69 \
+                        sha256  c5c5fb436bb2b917b2f815b7dd6e0d225383a655a9964374bbc3871bf68802bc \
+                        size    165259661
 
 # For release
 #set llvm_version        14
@@ -38,16 +42,12 @@ default_variants-append +assertions
 #set clang_exe_version   ${llvm_version}
 #master_sites            https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}
 #distname                llvm-project-${version}.src
-#use_xz                  yes
-
-checksums               rmd160  ee02192e14f7ccfe04c0af7e0aac8633587dafdc \
-                        sha256  e3d6cdc98373aebf0d50869ba9660f72661738eb4fd5a8a132b39231963f90c7 \
-                        size    158064059
+#use_xz                 yes
 
 name                    llvm-${llvm_version}
-revision                1
+revision                0
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 1 }
+subport                 clang-${llvm_version} { revision 0 }
 subport                 lldb-${llvm_version}  { revision 0 }
 subport                 flang-${llvm_version} { revision 0 }
 
@@ -94,6 +94,11 @@ configure.args-append \
     -DFFI_INCLUDE_DIR=${prefix}/include \
     -DFFI_LIBRARY_DIR=${prefix}/lib
 
+# Disable iOS support on older systems
+if {${os.platform} eq "darwin" && ${os.major} <= 12} {
+    configure.args-append    -DCOMPILER_RT_ENABLE_IOS=OFF
+}
+
 # cctools is needed to handle objects from newer clang toolchains
 if {[string match macports-clang-* ${configure.compiler}]} {
     depends_build-append            port:cctools
@@ -109,11 +114,13 @@ depends_build-append    port:python${py_ver_nodot} \
 set pythonfullpath      ${prefix}/bin/python${py_ver}
 configure.args-append   -DPython3_EXECUTABLE=${pythonfullpath}
 
+# https://trac.macports.org/ticket/65463
+use_xcode               yes
+
 platform darwin {
     configure.cxx_stdlib libc++
     depends_lib-append port:libcxx
     if {${os.major} < 11} {
-        #supported_archs i386 x86_64
         pre-fetch {
             if {![file exists /usr/lib/libc++.dylib]} {
                 ui_error "$name requires a C++11 runtime, which your configuration does not allow"
@@ -171,7 +178,11 @@ if {${os.platform} eq "darwin" && ${os.major} < 10} {
 if {${os.platform} eq "darwin" && ${os.major} < 16} {
     # error: 'TARGET_OS_OSX' is not defined, evaluates to 0 [-Werror,-Wundef-prefix=TARGET_OS_]
     patchfiles-append  0100-define-target-os-osx.patch
-    # error: use of undeclared identifier 'clonefile'
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    # Avoid attempts to use 'clonefile'
+    # llvm/lib/Support/Unix/Path.inc:1476:10: error: use of undeclared identifier 'clonefile'
     patchfiles-append  0200-remove-use-of-clonefile.patch
 }
 
@@ -251,7 +262,7 @@ if { ${subport} eq "clang-${llvm_version}" } {
     select.file         ${filespath}/mp-${subport}
 
     configure.args-append   \
-        -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;libcxx\;libcxxabi\;lld\;mlir" \
+        -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;libcxx\;libcxxabi\;lld" \
         -DLIBCXX_ENABLE_SHARED=ON    \
         -DLIBCXX_INSTALL_LIBRARY=ON
 
@@ -277,7 +288,7 @@ if { ${subport} eq "flang-${llvm_version}" } {
         -DLIBCXX_ENABLE_SHARED=OFF          \
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
-    depends_lib-append  port:clang-${llvm_version}
+    depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -313,7 +324,7 @@ if { ${subport} eq "clang-${llvm_version}" ||
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
 
-    depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version} port:mlir-${llvm_version}
+    depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version}
     depends_run-append  port:ld64
     depends_skip_archcheck-append ld64
 
@@ -326,13 +337,13 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
         -DDARWIN_PREFER_PUBLIC_SDK=ON      \
         -DLLVM_BUILD_RUNTIME=ON
 
-    if {${os.major} <= 18} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 18} {
         # on systems that might build i386, we need atomic builtins
         # https://trac.macports.org/ticket/58712
         configure.args-append    -DCOMPILER_RT_EXCLUDE_ATOMIC_BUILTIN=OFF
     }
 
-    if {${os.major} <= 14} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 14} {
         # compiler-rt does a broad search for an SDK it likes, but this
         # search fails on older systems that don't have a MacOSX.sdk
         # TODO: apply this always to all systems?
@@ -347,20 +358,15 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
                                  -DCOMPILER_RT_BUILD_MEMPROF=OFF
     }
 
-    if {${os.major} <= 11} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 11} {
         # xpc.h available 10.7 but doesn't support nullable features
         configure.args-append    -DCLANGD_BUILD_XPC=OFF
     }
 
-    if {${os.major} <= 10} {
+    if {${os.platform} eq "darwin" && ${os.major} <= 10} {
         # avoid need for thread_local_storage
         configure.args-append    -DCLANG_ENABLE_CLANGD=OFF \
                                  -DLLVM_ENABLE_BACKTRACES=OFF
-    }
-
-    if {${os.major} <= 12} {
-        # Make sure iOS support is disabled ...
-        configure.args-append    -DCOMPILER_RT_ENABLE_IOS=OFF
     }
 
 }
@@ -373,7 +379,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
 
     depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
     depends_lib-append  port:llvm-${llvm_version} port:clang-${llvm_version}
-    depends_build-append port:swig-python port:doxygen
+    depends_build-append port:swig-python path:bin/doxygen:doxygen
 
     # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
     if {${os.platform} eq "darwin" && ${os.major} <= 17} {
@@ -395,18 +401,17 @@ if {${subport} eq "lldb-${llvm_version}"} {
 
     set worksrcpath ${workpath}/${distname}/lldb
 
-    post-activate {
-        ui_msg "Please follow the instructions at  https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:"
-        if {${os.major} >= 13} {
-            ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/lldb-server"
-        } else {
-           ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/lldb-server"
-        }
+    notes "Please follow the instructions at https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:\n--------------------\n"
+    notes-append "${sub_prefix}/scripts/lldb/macos-setup-codesign.sh"
+    if {${os.major} >= 13} {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
+    } else {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
     }
 }
 
 variant tests description {Enable building of test code} {
-    depends_test-append     port:py39-psutil
+    depends_test-append     port:py${py_ver_nodot}-psutil
     test.run                yes
     configure.args-append   -DLLVM_INCLUDE_TESTS=ON
     test.target             check
@@ -467,6 +472,13 @@ post-destroot {
 
     if {${subport} eq "lldb-${llvm_version}"} {
         delete ${destroot}${prefix}/bin/debugserver-${suffix}
+
+        set lldb_scripts_srcdir ${worksrcpath}/scripts
+        set lldb_scripts_destdir ${destroot}${sub_prefix}/scripts/lldb
+        xinstall -d ${lldb_scripts_destdir}
+        xinstall -m 755 -W ${lldb_scripts_srcdir} \
+            macos-setup-codesign.sh \
+            ${lldb_scripts_destdir}
     }
 }
 

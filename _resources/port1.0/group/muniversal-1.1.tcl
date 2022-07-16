@@ -305,9 +305,38 @@ proc muniversal::strip_arch_flags {dir1 dir2 dir fl} {
     reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
     reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
 
+    # also strip out host information and stray space runs
+    reinplace -q -E {s:--host=[^ ]+::g}     ${tempfile1} ${tempfile2}
+    reinplace -q -E {s:host_alias=[^ ]+::g} ${tempfile1} ${tempfile2}
+    reinplace -q -E {s:  +: :g}             ${tempfile1} ${tempfile2}
+
     if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
         # modified files are identical
         ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -m32, -m64, and -arch XXX"
+        copy ${tempfile1} ${dir}/${fl}
+        delete ${tempfile1} ${tempfile2} ${tempdir}
+    } else {
+        delete ${tempfile1} ${tempfile2} ${tempdir}
+        return -code error "${fl} differs in ${dir1} and ${dir2} and cannot be merged"
+    }
+}
+
+# merge two files (${dir1}/${fl} and ${dir2}/${fl}) to ${dir}/${fl}
+# by stripping out -${arch} (e.g. from a directory name)
+proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
+    set tempdir [mkdtemp "/tmp/muniversal.XXXXXXXX"]
+    set tempfile1 "${tempdir}/1-${fl}"
+    set tempfile2 "${tempdir}/2-${fl}"
+
+    copy ${dir1}/${fl} ${tempfile1}
+    copy ${dir2}/${fl} ${tempfile2}
+
+    reinplace -q -E "s:-${arch1}::g" ${tempfile1}
+    reinplace -q -E "s:-${arch2}::g" ${tempfile2}
+
+    if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
+        # modified files are identical
+        ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -${arch1} and ${arch2}"
         copy ${tempfile1} ${dir}/${fl}
         delete ${tempfile1} ${tempfile2} ${tempdir}
     } else {
@@ -419,7 +448,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                 }
                                 *.pc -
                                 *-config {
-                                    mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
+                                    muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
                                 }
                                 *.la {
                                     if {[option destroot.delete_la_files]} {
@@ -440,6 +469,9 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                     # the timestamp is recorded, however
                                     ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2}; assume trivial difference"
                                     copy ${dir1}/${fl} ${dir}
+                                }
+                                *.gir {
+                                    muniversal::strip_dir_arch ${arch1} ${arch2} ${dir1} ${dir2} ${dir} ${fl}
                                 }
                                 *.elc {
                                     # elc files can be different because they record when and where they were built.
@@ -498,7 +530,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                 default {
                                     if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                         # shell script, hopefully striping out arch flags works...
-                                        mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
+                                        muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
                                     } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                         # diff worked
                                         ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
@@ -642,24 +674,24 @@ proc parse_environment {command} {
            ${command}.env_array
 
     if { ${command} eq "configure" } {
-        set ${command}.env_array(CPP_FOR_BUILD)             "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CXXCPP_FOR_BUILD)          "[portconfigure::configure_get_compiler cpp]"
-        set ${command}.env_array(CPPFLAGS_FOR_BUILD)        [option configure.cppflags]
+        append_to_environment_value     ${command}  CPP_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cpp]"
+        append_to_environment_value     ${command}  CXXCPP_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cpp]"
+        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags]
 
         if { [option muniversal.arch_compiler] } {
-            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
-            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  CC_FOR_BUILD        {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
 
-            set ${command}.env_array(CFLAGS_FOR_BUILD)      [option configure.cflags]
-            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    [option configure.cxxflags]
-            set ${command}.env_array(LDFLAGS_FOR_BUILD)     [option configure.ldflags]
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}[option configure.cflags]
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags]
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags]
         } else {
-            set ${command}.env_array(CC_FOR_BUILD)          "[portconfigure::configure_get_compiler cc]"
-            set ${command}.env_array(CXX_FOR_BUILD)         "[portconfigure::configure_get_compiler cxx]"
+            append_to_environment_value ${command}  CC_FOR_BUILD        {*}[portconfigure::configure_get_compiler cc]
+            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}[portconfigure::configure_get_compiler cxx]
 
-            set ${command}.env_array(CFLAGS_FOR_BUILD)      "[option configure.cflags] [portconfigure::configure_get_archflags cc]"
-            set ${command}.env_array(CXXFLAGS_FOR_BUILD)    "[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
-            set ${command}.env_array(LDFLAGS_FOR_BUILD)     "[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags] [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
         }
     }
 

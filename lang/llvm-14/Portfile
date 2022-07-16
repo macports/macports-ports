@@ -22,7 +22,8 @@ license                 NCSA
 maintainers             nomaintainer
 
 set llvm_version        14
-version                 ${llvm_version}.0.4
+set clang_exe_version   ${llvm_version}
+version                 ${llvm_version}.0.6
 
 name                    llvm-${llvm_version}
 revision                0
@@ -31,9 +32,9 @@ subport                 clang-${llvm_version} { revision 0 }
 subport                 lldb-${llvm_version}  { revision 0 }
 subport                 flang-${llvm_version} { revision 0 }
 
-checksums               rmd160  a30c42740692bb57f7ccf67711094c3c23b80c9c \
-                        sha256  f40c77ceff02ae3873d273a51b0f93cd8e6409576f771d860d75835335522052 \
-                        size    105611808
+checksums               rmd160  2b8b71bbb9fa5718c85f78924a0aa7e700cbd2ee \
+                        sha256  8b3cfd7bc695bd6cea0f37f53f0981f34f87496e79e2529874fd03a2f9dd3a8a \
+                        size    105618228
 
 master_sites            https://github.com/llvm/llvm-project/releases/download/llvmorg-${version}
 distname                llvm-project-${version}.src
@@ -46,7 +47,7 @@ worksrcdir              ${worksrcdir}/llvm
 
 # hand-tweaked, approximately c++ standard 2017
 compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
-# clang-13/work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
+# work/build/include/c++/v1/optional:224:5: error: destructor cannot be marked constexpr
 #     _LIBCPP_CONSTEXPR_AFTER_CXX17 ~__optional_destruct_base()
 compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0}
 compiler.fallback       clang macports-clang-11 macports-clang-10
@@ -103,9 +104,8 @@ configure.args-append   -DPython3_EXECUTABLE=${pythonfullpath}
 platform darwin {
     configure.cxx_stdlib libc++
     depends_lib-append port:libcxx
-    pre-fetch {
-        if {${os.major} < 11} {
-           supported_archs i386 x86_64
+    if {${os.major} < 11} {
+        pre-fetch {
             if {![file exists /usr/lib/libc++.dylib]} {
                 ui_error "$name requires a C++11 runtime, which your configuration does not allow"
                 error "unsupported configuration"
@@ -133,7 +133,9 @@ patchfiles-append \
     0014-Fix-float.h-to-work-on-Snow-Leopard-and-earlier.patch \
     0015-Fixup-libstdc-header-search-paths-for-older-versions.patch \
     0019-10.6-and-less-use-emulated-TLS-before-10.7.patch \
-    0025-lldb-add-defines-needed-for-older-SDKs.patch
+    0025-lldb-add-defines-needed-for-older-SDKs.patch \
+    MachOWriter.cpp-types.patch \
+    SyntheticSections.cpp-types.patch
 
 if {${os.platform} eq "darwin" && ${os.major} < 14} {
     patchfiles-append \
@@ -241,11 +243,9 @@ if { ${subport} eq "clang-${llvm_version}" } {
     select.file         ${filespath}/mp-${subport}
 
     configure.args-append   \
-        -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;libcxx\;libcxxabi\;lld\;mlir" \
+        -DLLVM_ENABLE_PROJECTS="clang\;clang-tools-extra\;compiler-rt\;libcxx\;libcxxabi\;lld" \
         -DLIBCXX_ENABLE_SHARED=ON    \
         -DLIBCXX_INSTALL_LIBRARY=ON
-
-    #-DLLVM_ENABLE_RUNTIMES="libcxx\;libcxxabi"
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -269,7 +269,7 @@ if { ${subport} eq "flang-${llvm_version}" } {
         -DLIBCXX_ENABLE_SHARED=OFF          \
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
-    depends_lib-append  port:clang-${llvm_version}
+    depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
 
     destroot {
         # we have to run the destroot like this, because individual targets for each of the
@@ -305,7 +305,7 @@ if { ${subport} eq "clang-${llvm_version}" ||
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
 
-    depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version} port:mlir-${llvm_version}
+    depends_lib-append  port:libxml2 port:libomp port:llvm-${llvm_version}
     depends_run-append  port:ld64
     depends_skip_archcheck-append ld64
 
@@ -360,7 +360,7 @@ if {${subport} eq "lldb-${llvm_version}"} {
 
     depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
     depends_lib-append  port:llvm-${llvm_version} port:clang-${llvm_version}
-    depends_build-append port:swig-python port:doxygen
+    depends_build-append port:swig-python path:bin/doxygen:doxygen
 
     # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
     if {${os.platform} eq "darwin" && ${os.major} <= 17} {
@@ -383,15 +383,16 @@ if {${subport} eq "lldb-${llvm_version}"} {
     set worksrcpath ${workpath}/${distname}/lldb
 
     notes "Please follow the instructions at https://lldb.llvm.org/resources/build.html#code-signing-on-macos and then codesign lldb-server with:\n--------------------\n"
+    notes-append "${sub_prefix}/scripts/lldb/macos-setup-codesign.sh"
     if {${os.major} >= 13} {
-        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/lldb-server"
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
     } else {
-        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/lldb-server"
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign lldb_codesign ${sub_prefix}/bin/lldb-server"
     }
 }
 
 variant tests description {Enable building of test code} {
-    depends_test-append     port:py39-psutil
+    depends_test-append     port:py${py_ver_nodot}-psutil
     test.run                yes
     configure.args-append   -DLLVM_INCLUDE_TESTS=ON
     test.target             check
@@ -413,7 +414,7 @@ post-destroot {
     if {${subport} eq "clang-${llvm_version}"} {
         # remove the clang symlink and replace it with the actual binary
         delete      ${destroot}${sub_prefix}/bin/clang
-        file rename ${destroot}${sub_prefix}/bin/clang-${llvm_version} ${destroot}${sub_prefix}/bin/clang
+        file rename ${destroot}${sub_prefix}/bin/clang-${clang_exe_version} ${destroot}${sub_prefix}/bin/clang
     }
 
     # generate a versioned wrapper script for each file in the bin directory
@@ -443,7 +444,7 @@ post-destroot {
 
     if {${subport} eq "clang-${llvm_version}"} {
         # fix the cmake scripts to point to the versioned files
-        reinplace "s|/bin/clang-${llvm_version}|/bin/clang|g" \
+        reinplace "s|/bin/clang-${clang_exe_version}|/bin/clang|g" \
                   "${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake"
 
         # http://trac.macports.org/ticket/33207
@@ -452,6 +453,13 @@ post-destroot {
 
     if {${subport} eq "lldb-${llvm_version}"} {
         delete ${destroot}${prefix}/bin/debugserver-${suffix}
+
+        set lldb_scripts_srcdir ${worksrcpath}/scripts
+        set lldb_scripts_destdir ${destroot}${sub_prefix}/scripts/lldb
+        xinstall -d ${lldb_scripts_destdir}
+        xinstall -m 755 -W ${lldb_scripts_srcdir} \
+            macos-setup-codesign.sh \
+            ${lldb_scripts_destdir}
     }
 }
 
