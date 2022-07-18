@@ -175,7 +175,7 @@ proc bazel::set_env {} {
     # patch PATH
     bazel.path-append [option prefix]/libexec/[bazel::get_bazel_name]/bin
     bazel::add_to_envs PATH=[string map {" " ":"} [option bazel.path]]:$env(PATH)
-     # ccache dir
+    # ccache dir
     if { [option configure.ccache] } {
         bazel::add_to_envs CCACHE_DIR=[compwrap::get_ccache_dir]
     }
@@ -206,6 +206,13 @@ post-extract {
         ln -s ${prefix}/bin/python${py_ver} ${workpath}/bin/python3
         bazel.path-append ${workpath}/bin
     }
+}
+
+# Mirror cc_bazelwrap and cxx_bazelwrap compilers hardcoded in bazel binary
+# see devel/bazel/Portfile
+proc bazel::bazel_wrap_dir {} {
+    global workpath
+    return ${workpath}/bazelwrap
 }
 
 # Patch configuration
@@ -241,7 +248,18 @@ pre-configure {
             reinplace -q "s|-march=native|${base_march}|g" ${f}
         }
     }
+
+    # Patch the wrapped clang code to use MP's compiler selection
+    set wrapdir [bazel::bazel_wrap_dir]
+    xinstall -m 755 -d ${wrapdir}
+    ln -s ${cc}          ${wrapdir}/cc_bazelwrap
+    ln -s ${cxx}         ${wrapdir}/cxx_bazelwrap
+    bazel.path-prepend   ${wrapdir}
+    build.env-append     PATH=${wrapdir}:$env(PATH)
 }
+
+set cc      [compwrap::wrap_compiler cc]
+set cxx     [compwrap::wrap_compiler cxx]
 
 pre-build {
     # bazel cannot build if gcc is 'port selected'
@@ -256,8 +274,6 @@ pre-build {
         return -code error "build error"
     }
     if { [option bazel.run_bazel_fetch] && [option bazel.build_cmd] ne "" && [file exists ${worksrcpath}] } {
-        set cc  [compwrap::wrap_compiler cc]
-        set cxx [compwrap::wrap_compiler cxx]
         # Run fetch
         set addpath [string map {" " ":"} [option bazel.path]]
         system -W ${worksrcpath} "PATH=${addpath}:$env(PATH) [bazel::get_build_env] [option bazel.build_cmd] [option bazel.build_cmd_opts] fetch [option bazel.build_target]"
@@ -265,7 +281,7 @@ pre-build {
         foreach f [ exec find [bazel::get_bazel_build_area] -name "wrapped_clang.cc" ] {
             # Switch to selected compiler
             reinplace -q "s|\"clang++\"|\"${cxx}\"|g"  ${f}
-            reinplace -q "s|\"clang\"|\"${cc}\"|g"     ${f}
+            reinplace -q "s|\"clang\"|\"${cc}\"|g"  ${f}
             # Bazel **really** doesn't want you changing stuff ;)
             # https://stackoverflow.com/questions/47775668/bazel-how-to-skip-corrupt-installation-on-centos6
             system "touch -m -t 210012120101 ${f}"
