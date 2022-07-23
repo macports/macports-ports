@@ -23,7 +23,6 @@ proc aspelldict.setup {locale version lang {aspell-version {}}} {
     name                 aspell-dict-${locale}
     version              ${version}
     categories           textproc
-    platforms            darwin
     supported_archs      noarch
 
     description         "{*}${lang} dictionary for aspell"
