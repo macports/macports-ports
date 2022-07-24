@@ -176,7 +176,7 @@ array set modules {
             5aeb841a5665f79672a302569754ea7d541c69102c551707e43489e797213c71
             29764804
         }
-        "port:ninja port:python39"
+        "port:python310"
         ""
         "qtbase qtsvg qtimageformats"
         {"Qt QML" "Qt Quick" "Qt Quick Layouts" "Qt Quick Widgets"}
@@ -191,7 +191,7 @@ array set modules {
             df61dc1a517988bfa123117c78a7dbeda859cbb6d9cbd080ce60058277bca3df
             1845284
         }
-        "port:ninja"
+        ""
         "path:lib/pkgconfig/jasper.pc:jasper port:libmng port:tiff port:webp"
         "qtbase"
         {"Qt Image Formats"}
@@ -296,7 +296,7 @@ array set modules {
             86e27e005c2421052ca90e619c8d13f1bd19c6bf1a7b84dd4e0f7855fc884fd7
             1717684
         }
-        "port:ninja"
+        ""
         ""
         "qtbase"
         {"Qt SVG"}
@@ -311,7 +311,7 @@ array set modules {
             5a856d3d3d5fe6e15dc3f1af707a0ef1df2e687850403fc94af635edb9312bfb
             8668512
         }
-        "port:ninja"
+        ""
         "port:clang-${llvm_version}"
         "qtbase qtdeclarative"
         {"Qt Designer" "Qt Help" "Qt UI Tools"}
@@ -326,7 +326,7 @@ array set modules {
             3f680b520da585697fc725697a52c7d2074a6a728f6830366b491a6f8b9183c7
             1444712
         }
-        "port:ninja"
+        ""
         ""
         "qttools"
         {"translation files"}
@@ -465,14 +465,6 @@ array set sql_plugins {
             "libmysqlclient.dylib"
             ""
         }
-        {
-            "mysql57"
-            "port:mysql57"
-            "${prefix}/include/mysql57/mysql"
-            "${prefix}/lib/mysql57/mysql"
-            "libmysqlclient_r.dylib"
-            ""
-        }
     }
 }
 
@@ -555,6 +547,7 @@ foreach {module module_info} [array get modules] {
 
             # use ninja for the build/installation
             build.cmd               "ninja"
+            build.post_args-append  -v
             destroot.target         install
             # ninja needs the DESTDIR argument in the environment
             destroot.destdir
@@ -752,6 +745,26 @@ foreach {module module_info} [array get modules] {
             # use -Os instead of -O2
             configure.args-append -optimize-size
 
+            # Set CMake variables (similar to what cmake portgroup does)
+            # to allow using ccache (and possibly compiler selection
+            # if .tbd file support was not an issue; see comment above)
+            configure.post_args --
+            configure.post_args-append \
+                -DCMAKE_C_COMPILER=[option configure.cc] \
+                -DCMAKE_CXX_COMPILER=[option configure.cxx] \
+                -DCMAKE_OBJC_COMPILER=[option configure.objc] \
+                -DCMAKE_OBJCXX_COMPILER=[option configure.objcxx]
+            if {[option configure.ccache]} {
+                # Do not use `configure.args-append -ccache`
+                # or `configure.post_args-append -DQT_USE_CCACHE=1`
+                # since that affects installed files.
+                configure.post_args-append \
+                    -DCMAKE_C_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+                    -DCMAKE_CXX_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+                    -DCMAKE_OBJC_COMPILER_LAUNCHER=${prefix}/bin/ccache \
+                    -DCMAKE_OBJCXX_COMPILER_LAUNCHER=${prefix}/bin/ccache
+            }
+
             configure.args-append \
                 -no-testcocoon    \
                 -force-pkg-config
@@ -886,13 +899,34 @@ foreach {module module_info} [array get modules] {
             configure.dir                ${workpath}/build
 
             # Qt suggests using Ninja to build
+            depends_build-append         port:ninja
             build.cmd                    ninja
+            build.post_args-append       -v
             build.dir                    ${workpath}/build
 
             destroot.target install
             # ninja needs the DESTDIR argument in the environment
             destroot.destdir
             destroot.env-append DESTDIR=${destroot}
+
+            # special case (needs to go before compiler options are read from)
+            if { ${module} eq "qtdeclarative" } {
+                PortGroup compiler_blacklist_versions 1.0
+                # Xcode 10.3 compiler segfaults
+                compiler.blacklist-append {clang < 1100}
+            }
+
+            # Set CMake variables (similar to what cmake portgroup does)
+            # to allow using ccache and controlling compiler selection
+            configure.post_args --
+            configure.post_args-append \
+                -DCMAKE_C_COMPILER=[option configure.cc] \
+                -DCMAKE_CXX_COMPILER=[option configure.cxx] \
+                -DCMAKE_OBJC_COMPILER=[option configure.objc] \
+                -DCMAKE_OBJCXX_COMPILER=[option configure.objcxx]
+            if {[option configure.ccache]} {
+                configure.post_args-append -DQT_USE_CCACHE=1
+            }
 
             # determine which variants are to be turned off
             set request_examples true
@@ -990,12 +1024,6 @@ foreach {module module_info} [array get modules] {
             # Special Cases
             ###############################################################################
             
-            # special case
-            if { ${module} eq "qtdeclarative" } {
-                PortGroup compiler_blacklist_versions 1.0
-                # Xcode 10.3 compiler segfaults
-                compiler.blacklist-append {clang < 1100}
-            }
         }
     }
 }
@@ -1084,7 +1112,7 @@ foreach {sql_names sql_info} [array get sql_plugins] {
                 configure.args-append                                              \
                     [subst -D${dbms}_INCLUDE_DIR=\"[lindex ${variant_info} 2]\"]   \
                     [subst -DCMAKE_INCLUDE_PATH=\"[lindex ${variant_info} 2]\"]    \
-                    [subst -D${dbms}_LIBRARY=\"[lindex ${variant_info} 3]/[lindex ${variant_info} 4]"] \
+                    [subst -D${dbms}_LIBRARY=\"[lindex ${variant_info} 3]/[lindex ${variant_info} 4]\"] \
                     [subst -DCMAKE_LIBRARY_PATH=\"[lindex ${variant_info} 3]\"]
             }
         }
@@ -1154,9 +1182,9 @@ if { [info exists depends_lib] } {
 }
 
 foreach deps ${depends_check} {
-    if { [string first ":python39" ${deps}] >= 0 } {
-        # If Qt components use Python, ensure that MacPorts python39 is used
-        set python_framework ${frameworks_dir}/Python.framework/Versions/3.9
+    if { [string first ":python310" ${deps}] >= 0 } {
+        # If Qt components use Python, ensure that MacPorts python310 is used
+        set python_framework ${frameworks_dir}/Python.framework/Versions/3.10
     }
 }
 if { ${python_framework} ne "" } {
