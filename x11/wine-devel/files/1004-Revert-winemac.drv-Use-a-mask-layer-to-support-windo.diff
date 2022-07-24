@@ -1,0 +1,198 @@
+--- dlls/winemac.drv/cocoa_window.h
++++ dlls/winemac.drv/cocoa_window.h
+@@ -52,6 +52,8 @@ @interface WineWindow : NSPanel <NSWindowDelegate>
+     NSRect wineFrame;
+     NSRect roundedWineFrame;
+ 
++    NSBezierPath* shape;
++    NSData* shapeData;
+     BOOL shapeChangedSinceLastDraw;
+ 
+     BOOL colorKeyed;
+--- dlls/winemac.drv/cocoa_window.m
++++ dlls/winemac.drv/cocoa_window.m
+@@ -307,22 +307,6 @@ - (BOOL) layer:(CALayer*)layer shouldInheritContentsScale:(CGFloat)newScale from
+ #endif
+ 
+ 
+-@interface CAShapeLayer (WineShapeMaskExtensions)
+-
+-@property(readonly, nonatomic, getter=isEmptyShaped) BOOL emptyShaped;
+-
+-@end
+-
+-@implementation CAShapeLayer (WineShapeMaskExtensions)
+-
+-    - (BOOL) isEmptyShaped
+-    {
+-        return CGRectEqualToRect(CGPathGetBoundingBox(self.path), CGRectZero);
+-    }
+-
+-@end
+-
+-
+ @interface WineBaseView : NSView
+ @end
+ 
+@@ -391,6 +375,8 @@ @interface WineWindow ()
+ @property (nonatomic) void* surface;
+ @property (nonatomic) pthread_mutex_t* surface_mutex;
+ 
++@property (copy, nonatomic) NSBezierPath* shape;
++@property (copy, nonatomic) NSData* shapeData;
+ @property (nonatomic) BOOL shapeChangedSinceLastDraw;
+ @property (readonly, nonatomic) BOOL needsTransparency;
+ 
+@@ -403,8 +389,6 @@ @interface WineWindow ()
+ 
+ @property (readonly, copy, nonatomic) NSArray* childWineWindows;
+ 
+-    - (void) setShape:(CGPathRef)newShape;
+-
+     - (void) updateForGLSubviews;
+ 
+     - (BOOL) becameEligibleParentOrChild;
+@@ -497,6 +481,17 @@ - (void) drawRect:(NSRect)rect
+         if ([window contentView] != self)
+             return;
+ 
++        if (window.drawnSinceShown && window.shapeChangedSinceLastDraw && window.shape && !window.colorKeyed && !window.usePerPixelAlpha)
++        {
++            [[NSColor clearColor] setFill];
++            NSRectFill(rect);
++
++            [window.shape addClip];
++
++            [[NSColor windowBackgroundColor] setFill];
++            NSRectFill(rect);
++        }
++
+         if (window.surface && window.surface_mutex &&
+             !pthread_mutex_lock(window.surface_mutex))
+         {
+@@ -509,6 +504,8 @@ - (void) drawRect:(NSRect)rect
+                 CGContextRef context;
+                 int i;
+ 
++                [window.shape addClip];
++
+                 context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
+                 CGContextSetBlendMode(context, kCGBlendModeCopy);
+                 CGContextSetInterpolationQuality(context, retina_on ? kCGInterpolationHigh : kCGInterpolationNone);
+@@ -958,7 +955,7 @@ @implementation WineWindow
+     @synthesize disabled, noActivate, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
+     @synthesize drawnSinceShown;
+     @synthesize surface, surface_mutex;
+-    @synthesize shapeChangedSinceLastDraw;
++    @synthesize shape, shapeData, shapeChangedSinceLastDraw;
+     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
+     @synthesize usePerPixelAlpha;
+     @synthesize imeData, commandDone;
+@@ -1059,6 +1056,8 @@ - (void) dealloc
+         [queue release];
+         [latentChildWindows release];
+         [latentParentWindow release];
++        [shape release];
++        [shapeData release];
+         [super dealloc];
+     }
+ 
+@@ -1993,7 +1992,7 @@ - (void) setDisabled:(BOOL)newValue
+ 
+     - (BOOL) needsTransparency
+     {
+-        return self.contentView.layer.mask || self.colorKeyed || self.usePerPixelAlpha ||
++        return self.shape || self.colorKeyed || self.usePerPixelAlpha ||
+                 (gl_surface_mode == GL_SURFACE_BEHIND && [(WineContentView*)self.contentView hasGLDescendant]);
+     }
+ 
+@@ -2015,27 +2014,22 @@ - (void) checkTransparency
+         }
+     }
+ 
+-    - (void) setShape:(CGPathRef)newShape
++    - (void) setShape:(NSBezierPath*)newShape
+     {
+-        CALayer* layer = [[self contentView] layer];
+-        CAShapeLayer* mask = (CAShapeLayer*)layer.mask;
+-        if (CGPathEqualToPath(newShape, mask.path)) return;
+-
+-        if (newShape && !layer.mask)
+-            layer.mask = mask = [CAShapeLayer layer];
+-        else if (!newShape)
+-            layer.mask = mask = nil;
++        if (shape == newShape) return;
+ 
+-        if (mask.path)
+-            [[self contentView] setNeedsDisplayInRect:NSRectFromCGRect(CGPathGetBoundingBox(mask.path))];
++        if (shape)
++        {
++            [[self contentView] setNeedsDisplayInRect:[shape bounds]];
++            [shape release];
++        }
+         if (newShape)
+-            [[self contentView] setNeedsDisplayInRect:NSRectFromCGRect(CGPathGetBoundingBox(newShape))];
++            [[self contentView] setNeedsDisplayInRect:[newShape bounds]];
+ 
+-        mask.path = newShape;
++        shape = [newShape copy];
+         self.shapeChangedSinceLastDraw = TRUE;
+ 
+         [self checkTransparency];
+-        [self checkEmptyShaped];
+     }
+ 
+     - (void) makeFocused:(BOOL)activate
+@@ -2233,8 +2227,7 @@ - (void) checkWineDisplayLink
+ 
+     - (BOOL) isEmptyShaped
+     {
+-        CAShapeLayer* mask = (CAShapeLayer*)[[self contentView] layer].mask;
+-        return ([mask isEmptyShaped]);
++        return (self.shapeData.length == sizeof(CGRectZero) && !memcmp(self.shapeData.bytes, &CGRectZero, sizeof(CGRectZero)));
+     }
+ 
+     - (BOOL) canProvideSnapshot
+@@ -2636,7 +2629,8 @@ - (void) setRetinaMode:(int)mode
+ 
+         [transform scaleBy:scale];
+ 
+-        [[self contentView] layer].mask.contentsScale = mode ? 2.0 : 1.0;
++        if (shape)
++            [shape transformUsingAffineTransform:transform];
+ 
+         for (WineBaseView* subview in [self.contentView subviews])
+         {
+@@ -3454,19 +3448,25 @@ void macdrv_set_window_shape(macdrv_window w, const CGRect *rects, int count)
+     OnMainThread(^{
+         if (!rects || !count)
+         {
+-            [window setShape:NULL];
++            window.shape = nil;
++            window.shapeData = nil;
+             [window checkEmptyShaped];
+         }
+         else
+         {
+-            CGMutablePathRef path;
+-            unsigned int i;
++            size_t length = sizeof(*rects) * count;
++            if (window.shapeData.length != length || memcmp(window.shapeData.bytes, rects, length))
++            {
++                NSBezierPath* path;
++                unsigned int i;
+ 
+-            path = CGPathCreateMutable();
+-            for (i = 0; i < count; i++)
+-                CGPathAddRect(path, NULL, cgrect_mac_from_win(rects[i]));
+-            [window setShape:path];
+-            CGPathRelease(path);
++                path = [NSBezierPath bezierPath];
++                for (i = 0; i < count; i++)
++                    [path appendBezierPathWithRect:NSRectFromCGRect(cgrect_mac_from_win(rects[i]))];
++                window.shape = path;
++                window.shapeData = [NSData dataWithBytes:rects length:length];
++                [window checkEmptyShaped];
++            }
+         }
+     });
