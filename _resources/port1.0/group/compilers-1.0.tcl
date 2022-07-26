@@ -806,8 +806,8 @@ proc compilers::add_gcc_rpath_support {} {
         set fortran_compiler    [fortran_variant_name]
     }
     if {${fortran_compiler} in "gcc12 gcc11 gcc10 gccdevel"} {
-        configure.ldflags-delete  -Wl,-rpath ${prefix}/lib/libgcc
-        configure.ldflags-append  -Wl,-rpath ${prefix}/lib/libgcc
+        configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
+        configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
     }
 }
 
