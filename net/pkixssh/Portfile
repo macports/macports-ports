@@ -1,0 +1,205 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+PortGroup           compiler_blacklist_versions 1.0
+
+name                pkixssh
+version             13.4.1
+revision            1
+categories          net
+platforms           darwin
+maintainers         {@sstallion gmail.com:sstallion} openmaintainer
+license             BSD
+installs_libs       no
+conflicts           lsh openssh ssh-copy-id
+
+description         PKIX-SSH - an advanced secure shell implementation
+
+long_description    Implementation includes some of functionality provided by OpenSSH. OpenSSH \
+                    itself is derivative of the original and free ssh 1.2.12 release by Tatu Ylonen. \
+                    Aaron Campbell, Bob Beck, Markus Friedl, Niels Provos, Theo de Raadt, and Dug \
+                    Song removed many bugs, re-added newer features and created OpenSSH. Roumen \
+                    Petrov adds X.509 certificate support, modernize use of cryptography library \
+                    including FIPS mode and creates PKIX-SSH.
+
+homepage            https://roumenpetrov.info/secsh/
+
+checksums           rmd160  1a5d09524567912f15877859d5e3885425e4851c \
+                    sha256  ff76f3c467512c6e83b908386beaffb6472fdfc0f877d1653404b8f13cdca8d8 \
+                    size    1711233
+
+master_sites        https://roumenpetrov.info/secsh/src/
+
+depends_lib         path:lib/libssl.dylib:openssl \
+                    port:libedit \
+                    port:ncurses \
+                    port:zlib
+
+platform darwin 10 {
+    # /usr/bin/ranlib: object: libopenbsd-compat.a(base64.o) malformed object (unknown load command 2)
+    depends_build-append port:cctools
+}
+
+patch.args          -p1
+patchfiles          launchd.patch \
+                    agent.patch \
+                    pam.patch \
+                    patch-sandbox-darwin.c-apple-sandbox-named-external.diff \
+                    patch-sshd.c-apple-sandbox-named-external.diff \
+                    macports-config.patch
+
+# We need a couple of patches
+# - pam.patch
+#   getpwnam(3) on OS X always returns "*********" in the pw_passwd field even
+#   when run as root, so it can't be used for authentication. This patch just
+#   forces the use of PAM regardless of the configuration.
+# - patch-*-apple-sandbox-named-external.diff
+#   Use Apple's sandbox_init(3) in addition to standard privilege separation.
+#   This requires a sandbox profile (which we provide) and the sandbox_init(3)
+#   call before the chroot(2) to privsep-path (${prefix}/var/empty), or it will
+#   fail to load the sandbox description and libsandbox.1.dylib.
+# - macports-config.patch
+#   Changes the default configuration from the upstream-provided one by popular
+#   request.
+# - agent.patch
+#   Adds -l flag to ssh-agent to work with launchd.
+
+post-patch {
+    # reinplace prefix in path to sandbox definition added by
+    # patch-sandbox-darwin.c-apple-sandbox-named-external.diff
+    reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/sandbox-darwin.c
+}
+
+use_autoreconf      yes
+
+# strnvis(3) isn't actually "broken".  OpenBSD decided to be special and flip
+# the order of arguments to strnvis and considers everyone else to be broken.
+configure.cppflags-append   -DBROKEN_STRNVIS=1
+
+# Use Apple's sandboxing feature
+configure.cppflags-append   -D__APPLE_SANDBOX_NAMED_EXTERNAL__ \
+                            -D__APPLE_API_STRICT_CONFORMANCE
+
+# Support Apple's launchd in ssh-agent
+configure.cppflags-append   -D__APPLE_LAUNCHD__
+
+configure.ldflags-append  -Wl,-search_paths_first
+configure.args      --with-ssl-dir=${prefix} \
+                    --sysconfdir=${prefix}/etc/ssh \
+                    --with-privsep-path=/var/empty \
+                    --with-md5-passwords \
+                    --with-pid-dir=${prefix}/var/run \
+                    --with-pam \
+                    --mandir=${prefix}/share/man \
+                    --with-zlib=${prefix} \
+                    --without-kerberos5 \
+                    --with-libedit \
+                    --with-pie \
+                    --without-xauth \
+                    --without-ldns \
+                    --with-audit=bsm \
+                    --with-keychain=apple
+
+use_parallel_build  yes
+
+platform macosx {
+    if {${os.major} < 10} {
+        # See: https://trac.macports.org/ticket/60385
+        configure.args-delete   --with-keychain=apple
+    } elseif {${os.major} <= 11} {
+        # clang is required to build the new Apple Keychain integration due
+        # to it using the Object Subscripting feature, c.f. #59397.
+        # We'll keep it simple and just blacklist any gcc version, cc
+        # (which could be anything), system clang versions prior to those
+        # shipped with Xcode 4.4.
+        # Regarding the macports-clang versions, any version in the
+        # MacPorts tree should suit our needs, since the clang
+        # documentation lists FOSS clang/llvm 3.1 as the first version to
+        # support Object Subscripting and the oldest version in our tree is
+        # now 3.3.
+        compiler.blacklist-append   *gcc* cc {clang < 421}
+    }
+}
+
+destroot.target     install-nokeys
+
+test.run            yes
+test.target         tests
+
+post-destroot {
+    destroot.keepdirs ${destroot}${prefix}/var/run
+
+    # switch default port to avoid conflict with system sshd
+    reinplace "s|#Port 22|Port 2222|g" ${destroot}${prefix}/etc/ssh/sshd_config
+
+    # install sandbox definition
+    xinstall -m 755 -d ${destroot}${prefix}/share/${name}
+    xinstall -m 644 ${filespath}/info.roumenpetrov.sshd.sb ${destroot}${prefix}/share/${name}
+
+    file rename "${destroot}${prefix}/etc/ssh/sshd_config" "${destroot}${prefix}/etc/ssh/sshd_config.example"
+    file rename "${destroot}${prefix}/etc/ssh/ssh_config" "${destroot}${prefix}/etc/ssh/ssh_config.example"
+
+    # install ssh-copy-id
+    xinstall -m 755 ${worksrcpath}/contrib/ssh-copy-id ${destroot}${prefix}/bin
+    xinstall -m 644 ${worksrcpath}/contrib/ssh-copy-id.1 ${destroot}${prefix}/share/man/man1
+}
+
+post-activate {
+    if {![file exists "${prefix}/etc/ssh/sshd_config"]} {
+        copy "${prefix}/etc/ssh/sshd_config.example" "${prefix}/etc/ssh/sshd_config"
+    }
+    if {![file exists "${prefix}/etc/ssh/ssh_config"]} {
+        copy "${prefix}/etc/ssh/ssh_config.example" "${prefix}/etc/ssh/ssh_config"
+    }
+}
+
+platform darwin {
+    # create link to /usr/include/pam because 'security' was renamed to 'pam'
+    # in OS X.
+    # And then again back to security in 10.6.
+    if {${os.major} < 10} {
+        pre-configure {
+            xinstall -d ${workpath}/include
+            file delete ${workpath}/include/security
+            ln -s /usr/include/pam ${workpath}/include/security
+            configure.cppflags-append "-I${workpath}/include"
+        }
+    }
+}
+
+platform darwin 9 {
+    # 10.5/ppc doesn't like the sandbox file we supply
+    configure.cppflags-delete -D__APPLE_SANDBOX_NAMED_EXTERNAL__
+}
+
+startupitem.create  yes
+startupitem.name    OpenSSH
+startupitem.start   \
+    "if \[ -x ${prefix}/sbin/sshd \]; then
+        if \[ ! -f ${prefix}/etc/ssh/ssh_host_dsa_key \]; then
+            ${prefix}/bin/ssh-keygen -t dsa -f \\
+            ${prefix}/etc/ssh/ssh_host_dsa_key -N \"\" -C `hostname`
+        fi
+        if \[ ! -f ${prefix}/etc/ssh/ssh_host_rsa_key \]; then
+            ${prefix}/bin/ssh-keygen -t rsa -f \\
+            ${prefix}/etc/ssh/ssh_host_rsa_key -N \"\" -C `hostname`
+        fi
+        if \[ ! -f ${prefix}/etc/ssh/ssh_host_ecdsa_key \]; then
+            ${prefix}/bin/ssh-keygen -t ecdsa -f \\
+            ${prefix}/etc/ssh/ssh_host_ecdsa_key -N \"\" -C `hostname`
+        fi
+        if \[ ! -f ${prefix}/etc/ssh/ssh_host_ed25519_key \]; then
+            ${prefix}/bin/ssh-keygen -t ed25519 -f \\
+            ${prefix}/etc/ssh/ssh_host_ed25519_key -N \"\" -C `hostname`
+        fi
+        ${prefix}/sbin/sshd
+    fi"
+startupitem.stop    \
+    "if \[ -r ${prefix}/var/run/sshd.pid \]; then
+        kill `cat ${prefix}/var/run/sshd.pid`
+    fi"
+
+livecheck.type      regex
+livecheck.url       ${homepage}
+livecheck.regex     "Official version x509-(\\d+(?:\\.\\d+)*)"
