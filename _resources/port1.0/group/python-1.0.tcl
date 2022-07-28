@@ -327,6 +327,13 @@ proc python_add_dependencies {} {
                                         port:py${python.version}-python-install
                 depends_build-append    port:py${python.version}-build \
                                         port:py${python.version}-python-install
+                if {${python.version} >= 37} {
+                    depends_build-delete    port:py${python.version}-installer
+                    depends_build-append    port:py${python.version}-installer
+                } else {
+                    depends_build-delete    port:py${python.version}-python-install
+                    depends_build-append    port:py${python.version}-python-install
+                }
                 switch -- [option python.pep517_backend] {
                     setuptools {
                         depends_build-delete    port:py${python.version}-setuptools \
@@ -394,7 +401,12 @@ proc python_get_defaults {var} {
         }
         destroot_cmd {
             if {${python.pep517}} {
-                return "${python.bin} -m install --verbose"
+                if {${python.version} >= 37} {
+                    set args installer
+                } else {
+                    set args "install --verbose"
+                }
+                return "${python.bin} -m ${args}"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
             }
