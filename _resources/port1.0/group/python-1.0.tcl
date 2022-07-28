@@ -323,10 +323,8 @@ proc python_add_dependencies {} {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
             if {[option python.pep517]} {
-                depends_build-delete    port:py${python.version}-build \
-                                        port:py${python.version}-python-install
-                depends_build-append    port:py${python.version}-build \
-                                        port:py${python.version}-python-install
+                depends_build-delete    port:py${python.version}-build
+                depends_build-append    port:py${python.version}-build
                 if {${python.version} >= 37} {
                     depends_build-delete    port:py${python.version}-installer
                     depends_build-append    port:py${python.version}-installer
