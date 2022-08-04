@@ -776,16 +776,24 @@ pre-configure {
 namespace eval compilers {
 }
 
+proc compilers::get_current_gcc_version {} {
+    global compilers.gcc_default
+    if {[fortran_variant_name] eq "gfortran"} {
+        set fortran_compiler    ${compilers.gcc_default}
+    } else {
+        set fortran_compiler    [fortran_variant_name]
+    }
+    if { [regexp {gcc(.*)} ${fortran_compiler} -> gcc_v] } {
+        return ${gcc_v}
+    }
+    return UNKNOWN
+}
+
 proc compilers::add_fortran_legacy_support {} {
-    global compilers.allow_arguments_mismatch \
-           compilers.gcc_default
+    global compilers.allow_arguments_mismatch
     if {${compilers.allow_arguments_mismatch}} {
-        if {[fortran_variant_name] eq "gfortran"} {
-            set fortran_compiler    ${compilers.gcc_default}
-        } else {
-            set fortran_compiler    [fortran_variant_name]
-        }
-        if {${fortran_compiler} in "gcc12 gcc11 gcc10 gccdevel"} {
+        set gcc_v [compilers::get_current_gcc_version]
+        if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
             configure.fflags-delete     -fallow-argument-mismatch
             configure.fcflags-delete    -fallow-argument-mismatch
             configure.f90flags-delete   -fallow-argument-mismatch
@@ -799,13 +807,9 @@ proc compilers::add_fortran_legacy_support {} {
 port::register_callback compilers::add_fortran_legacy_support
 
 proc compilers::add_gcc_rpath_support {} {
-    global compilers.gcc_default prefix
-    if {[fortran_variant_name] eq "gfortran"} {
-        set fortran_compiler    ${compilers.gcc_default}
-    } else {
-        set fortran_compiler    [fortran_variant_name]
-    }
-    if {${fortran_compiler} in "gcc12 gcc11 gcc10 gccdevel"} {
+    global prefix  
+    set gcc_v [compilers::get_current_gcc_version]
+    if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
         configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
         configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
     }
