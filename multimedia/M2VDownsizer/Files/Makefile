@@ -78,7 +78,7 @@ LIBDIRS := -Lobj
 #
 LIBS := -lmpeg2
 
-# Define any MacOS Frameworks to link into executable:
+# Define any macOS frameworks to link into executable:
 #   Statement Format: FWORKS := -framework framework_name
 #   E.g. FWORKS := -framework CoreServices
 #
