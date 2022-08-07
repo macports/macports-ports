@@ -118,7 +118,7 @@ OBJDIR := obj
 # Define object sub-directories
 #
 # Do not change the following directories!!
-# The name of the last directory  MUST match the name of the corresponding 
+# The name of the last directory MUST match the name of the corresponding 
 # source directory in order for makedepend to work!! 
 # (unless the -p option is used with makedepend)
 # 
