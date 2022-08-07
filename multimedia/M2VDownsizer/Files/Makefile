@@ -34,7 +34,7 @@ CFLAGS += -Xarch_ppc64 -faltivec
 
 # Alternative code for appending additional architecture dependent compile-time flags
 # Note: Use as last resort
-#       It is better to use "-Xarch_ppc" etc as these CFLAGS will work 
+#       It is better to use "-Xarch_ppc" etc. as these CFLAGS will work 
 #       when cross-compiling
 #
 #UNAME_P := $(shell uname -p)
