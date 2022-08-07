@@ -157,7 +157,7 @@ macports: depend all
 # Define $(PRODUCT) real target
 #
 # Note:  Do not add phony targets to the $(PRODUCT) REAL target. 
-# Phony targets should not be a prerequisite  of a real target file!
+# Phony targets should not be a prerequisite of a real target file!
 # If a phony target is a prerequisite, the recipe for the phony target will run every 
 # single time the REAL target is run!
 #
