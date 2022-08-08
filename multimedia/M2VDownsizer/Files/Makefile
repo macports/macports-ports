@@ -65,7 +65,7 @@ INCLUDES := -I./ -Iutils -Iutils/altivec -Impeg2dec -Impeg2enc \
 #
 LIBDIRS := -Lobj  
 
-# Define any MacOS Framework directories other than the system Framework directory
+# Define any macOS frameworks directories other than the system Frameworks directory
 #   Statement Format: FFLAGS:= -Fframework_path
 #   E.g. FWORKDIRS = -F./ -F/System/Library/Frameworks/
 #
