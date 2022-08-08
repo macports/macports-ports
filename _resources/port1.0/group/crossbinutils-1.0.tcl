@@ -76,6 +76,11 @@ array set crossbinutils.versions_info {
         sha256  e316477a914f567eccc34d5d29785b8b0f5a10208d36bbacedcc39048ecfe024 \
         size    23651408
     }}
+    2.39 {xz {
+        rmd160  eb5d638227d0543d3055fc7e6d8d8c28534f55c9 \
+        sha256  645c25f563b8adc0a81dbd6a41cffbf4d37083a382e02d5d3df4f65c09516d00 \
+        size    25167756
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -117,49 +122,6 @@ proc crossbinutils.setup {target version} {
     }
 
     post-patch {
-        set infopages {
-            gas/doc         as
-            bfd/doc         bfd
-            binutils/doc    binutils
-            gprof           gprof
-            ld              ld
-        }
-
-        foreach {dir page} ${infopages} {
-            # Fix texi|info source file(s)
-            set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
-            reinplace -q \
-                /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
-            reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
-            reinplace -q \
-                "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
-                ${tex}
-            move ${tex} \
-                ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
-
-            # Fix Makefile(s)
-            if { [ file exists "${worksrcpath}/${dir}/Makefile.in" ] } {
-                reinplace -q -E \
-                    s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
-                    ${worksrcpath}/${dir}/Makefile.in
-            }
-            foreach dir {binutils gas} {
-                if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
-                        reinplace -q -E \
-                        s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
-                        ${worksrcpath}/${dir}/Makefile.in
-                }
-            }
-        }
-
-        # Fix packages names
-        foreach dir {bfd binutils gas gold gprof ld opcodes} {
-            if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
-                reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
-                    ${worksrcpath}/${dir}/configure
-            }
-        }
-
         # Install target-compatible libbfd/bfd-plugins/libiberty in the target's directory
         reinplace -q "s|bfdlibdir=.*|bfdlibdir='${prefix}/${crossbinutils.target}/host/lib'|g" \
             ${worksrcpath}/bfd/configure                                \
@@ -175,53 +137,6 @@ proc crossbinutils.setup {target version} {
             ${worksrcpath}/libiberty/Makefile.in
         reinplace -q "s|/\$(MULTIOSDIR)||g" \
             ${worksrcpath}/libiberty/Makefile.in
-
-        if {[vercmp ${version} "2.38"] >= 0} {
-            set infopages {
-                libctf/doc      ctf-spec
-            }
-
-            foreach {dir page} ${infopages} {
-                # Fix texi|info source file(s)
-                if { [ file exists "${worksrcpath}/${dir}" ] } {
-                    set info [glob -directory ${worksrcpath}/${dir} ${page}.info*]
-                    reinplace -q \
-                        /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${info}
-                    reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${info}
-                    reinplace -q \
-                        "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
-                        ${info}
-                    move ${info} \
-                        ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${info}]
-                }
-                if { [ file exists "${worksrcpath}/${dir}" ] } {
-                    set tex [glob -directory ${worksrcpath}/${dir} ${page}.texi*]
-                    reinplace -q \
-                        /setfilename/s/${page}/${crossbinutils.target}-${page}/ ${tex}
-                    reinplace -q s/(${page})/(${crossbinutils.target}-${page})/g ${tex}
-                    reinplace -q \
-                        "s/@file{${page}}/@file{${crossbinutils.target}-${page}}/g" \
-                        ${tex}
-                    move ${tex} \
-                        ${worksrcpath}/${dir}/${crossbinutils.target}-${page}[file extension ${tex}]
-                }
-                foreach dir {libctf} {
-                    if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
-                        reinplace -q -E \
-                        s/\[\[:<:\]\]${page}\\.(info|texi)/${crossbinutils.target}-&/g \
-                        ${worksrcpath}/${dir}/Makefile.in
-                    }
-                }
-            }
-
-            # Fix packages names
-            foreach dir {libctf} {
-                if { [ file exists "${worksrcpath}/${dir}/configure" ] } {
-                        reinplace -q "/^ PACKAGE=/s/=.*/=${crossbinutils.target}-${dir}/" \
-                        ${worksrcpath}/${dir}/configure
-                }
-            }
-        }
     }
 
     depends_lib \
@@ -238,7 +153,7 @@ proc crossbinutils.setup {target version} {
         --target=${target} \
         --program-prefix=${target}- \
         --enable-install-libiberty=${prefix}/${crossbinutils.target}/host \
-        --infodir=${prefix}/share/info \
+        --infodir=${prefix}/share/info/${target} \
         --mandir=${prefix}/share/man \
         --datarootdir=${prefix}/share/${crossbinutils.target} \
         
