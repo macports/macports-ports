@@ -1,0 +1,523 @@
+From 3927b7950b3fddda810353a547142f9e53854ca9 Mon Sep 17 00:00:00 2001
+From: Fabian Groffen <grobian@gentoo.org>
+Date: Tue, 29 Dec 2020 13:48:16 +0100
+Subject: [PATCH] [tapilite] bunch of fixes and changes
+
+- support multiple (inlined) documents
+- simplify strategy of preferring real dylibs over text stubs
+- parsing and interpretation fixes
+
+Signed-off-by: Fabian Groffen <grobian@gentoo.org>
+---
+ tapilite/src/LinkerInterfaceFile.cpp | 214 +++++++++++++++------------
+ 1 file changed, 122 insertions(+), 92 deletions(-)
+
+diff --git tapilite/src/LinkerInterfaceFile.cpp tapilite/src/LinkerInterfaceFile.cpp
+index ad6407f..d579a12 100644
+--- tapilite/src/LinkerInterfaceFile.cpp
++++ tapilite/src/LinkerInterfaceFile.cpp
+@@ -101,6 +101,8 @@ public:
+   std::vector<std::string> _arches;
+   std::string _selectedArch;
+ 
++  LinkerInterfaceFile::ImplData *next;
++
+   ImplData() noexcept = default;
+ 
+   static LinkerInterfaceFile::ImplData *
+@@ -250,13 +252,14 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+     const std::string &path, const uint8_t *data, size_t size,
+     cpu_type_t cpuType, cpu_subtype_t cpuSubType,
+     std::string &errorMessage) {
+-  auto          ret = new LinkerInterfaceFile::ImplData;
+   yaml_parser_t parser;
+   yaml_event_t  event;
+   yaml_char_t  *p;
+   bool          selectSection = false;
++  bool          inList        = false;
+ 
+-  ret->_path = path;
++  LinkerInterfaceFile::ImplData *ret = nullptr;
++  LinkerInterfaceFile::ImplData *cur = nullptr;
+ 
+   /* Because platform isn't passed onto us by ld, we cannot know what to
+    * select -- this is probably the problem meant to be solved by TAPIv4
+@@ -315,6 +318,11 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+   errorMessage = errbuf; \
+   return nullptr; \
+ }
++#ifdef tapilite_debug
++# define dprintf(...) printf(__VA_ARGS)
++#else
++# define dprintf(...)
++#endif
+   /* syntax:
+    * https://github.com/apple/llvm-project/blob/apple/main/llvm/lib/TextAPI/MachO/TextStub.cpp */
+   while (state != TAPILITE_DONE) {
+@@ -326,10 +334,20 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+     if (!yaml_parser_parse(&parser, &event))
+       break;
+ 
++    dprintf("yaml: %d\n", event.type);
+ #define ymlcmp(X, Y) strcmp((char *)X, Y)
+ #define ymlncmp(X, Y, Z) strncmp((char *)X, Y, Z)
+     /* process */
+     switch (event.type) {
++      case YAML_DOCUMENT_START_EVENT:
++        if (cur == nullptr) {
++          ret = cur = new LinkerInterfaceFile::ImplData;
++        } else {
++          cur = cur->next = new LinkerInterfaceFile::ImplData;
++        }
++        cur->_path = path;
++        cur->next = nullptr;
++        break;
+       case YAML_STREAM_END_EVENT:
+         state = TAPILITE_DONE;
+         break;
+@@ -338,6 +356,7 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+         if (yamlscalar.value != NULL && substate == TAPILITE_FINDKEY) {
+           switch (state) {
+             case TAPILITE_HEADER:
++              dprintf("header| key: %s\n", yamlscalar.value);
+               if (ymlcmp(yamlscalar.value, "archs") == 0)
+                 substate = TAPILITE_ARCHS;
+               if (ymlcmp(yamlscalar.value, "targets") == 0)
+@@ -368,11 +387,14 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                 substate = TAPILITE_VERSION;
+               else if (ymlcmp(yamlscalar.value, "exports") == 0)
+                 state = TAPILITE_EXPORTS;
++              else if (ymlcmp(yamlscalar.value, "reexported-libraries") == 0)
++                state = TAPILITE_REEXPORTS;
+               else if (ymlcmp(yamlscalar.value, "undefineds") == 0)
+                 state = TAPILITE_UNDEFINEDS;
+               break;
+             case TAPILITE_EXPORTS:
+             case TAPILITE_REEXPORTS:
++              dprintf("exports| key: %s\n", yamlscalar.value);
+               if (ymlcmp(yamlscalar.value, "archs") == 0)
+                 substate = TAPILITE_ARCHS;
+               if (ymlcmp(yamlscalar.value, "targets") == 0)
+@@ -381,6 +403,8 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                 substate = TAPILITE_ALLOWED_CLNTS;
+               else if (ymlcmp(yamlscalar.value, "re-exports") == 0)
+                 substate = TAPILITE_RE_EXPORTS;
++              else if (ymlcmp(yamlscalar.value, "libraries") == 0)
++                substate = TAPILITE_RE_EXPORTS;
+               else if (ymlcmp(yamlscalar.value, "symbols") == 0)
+                 substate = TAPILITE_SYMBOLS;
+               else if (ymlcmp(yamlscalar.value, "objc-classes") == 0)
+@@ -424,6 +448,7 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+            * currently the open thing we're writing for */
+           switch (state) {
+             case TAPILITE_HEADER:
++              dprintf("header|%d val: %s\n", substate, yamlscalar.value);
+               switch (substate) {
+                 case TAPILITE_VERSION:
+                   if (version == TAPILITE_V4_OR_LATER) {
+@@ -441,39 +466,39 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                       version == TAPILITE_V_INVALID)
+                     error("unknown tbd file, unknown version specified");
+ 
+-                  if (ret->_fileType == FileType::Unsupported) {
++                  if (cur->_fileType == FileType::Unsupported) {
+                     /* apply defaults for various settings based on the
+                      * TAPI version */
+                     switch (version) {
+                       case TAPILITE_V1:
+-                        ret->_currentVersion = parseVersion32("1.0");
+-                        ret->_compatibilityVersion = parseVersion32("1.0");
+-                        ret->_swiftABIVersion = 0;
+-                        ret->_objcConstraint = ObjCConstraint::None;
++                        cur->_currentVersion = parseVersion32("1.0");
++                        cur->_compatibilityVersion = parseVersion32("1.0");
++                        cur->_swiftABIVersion = 0;
++                        cur->_objcConstraint = ObjCConstraint::None;
+                         break;
+                       case TAPILITE_V2:
+                       case TAPILITE_V3:
+                       case TAPILITE_V4:
+-                        ret->_currentVersion = parseVersion32("1.0");
+-                        ret->_compatibilityVersion = parseVersion32("1.0");
+-                        ret->_swiftABIVersion = 0;
+-                        ret->_objcConstraint = ObjCConstraint::Retain_Release;
++                        cur->_currentVersion = parseVersion32("1.0");
++                        cur->_compatibilityVersion = parseVersion32("1.0");
++                        cur->_swiftABIVersion = 0;
++                        cur->_objcConstraint = ObjCConstraint::Retain_Release;
+                         break;
+                     }
+ 
+                     if (version == TAPILITE_V1)
+-                      ret->_fileType == FileType::TBD_V1;
++                      cur->_fileType = FileType::TBD_V1;
+                     else if (version == TAPILITE_V2)
+-                      ret->_fileType == FileType::TBD_V2;
++                      cur->_fileType = FileType::TBD_V2;
+                     else if (version == TAPILITE_V3)
+-                      ret->_fileType == FileType::TBD_V3;
++                      cur->_fileType = FileType::TBD_V3;
+                     else if (version == TAPILITE_V4)
+-                      ret->_fileType == FileType::TBD_V4;
++                      cur->_fileType = FileType::TBD_V4;
+                   }
+ 
+-                  ret->_arches.emplace_back(
++                  cur->_arches.emplace_back(
+                       std::string((const char *)yamlscalar.value));
+-                  if (!ret->_selectedArch.empty())
++                  if (!cur->_selectedArch.empty())
+                     break;  /* take first matching arch */
+ 
+                   switch (version) {
+@@ -483,69 +508,77 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                          * platform if arch matches */
+                         size_t len = myarch.length();
+                         if (ymlncmp(yamlscalar.value, myarch.c_str(), len) == 0
+-                            && yamlscalar.value[len] == '-')
++                            && (len == 0 || yamlscalar.value[len] == '-'))
+                         {
+-                          ret->_selectedArch =
+-                            std::string((const char *)yamlscalar.value);
+-                          /* this is a copy of the PLATFORM case below */
+-                          if (ymlcmp(yamlscalar.value + len + 1, "macosx") == 0)
+-                            ret->_platform = Platform::OSX;
+-                          else if (ymlcmp(yamlscalar.value + len + 1,
+-                                "ios") == 0)
+-                            ret->_platform = Platform::iOS;
++                          const char *p = (const char *)yamlscalar.value;
++                          cur->_selectedArch = std::string(p);
++                          if (len == 0)
++                            len = cur->_selectedArch.find_first_of('-');
++                          /* this almost is a copy of the PLATFORM case below */
++                          if (cur->_selectedArch.
++                              substr(len + 1).compare("macos") == 0)
++                            cur->_platform = Platform::OSX;
++                          else if (cur->_selectedArch.
++                              substr(len + 1).compare("ios") == 0)
++                            cur->_platform = Platform::iOS;
+                           /* TODO: see below */
+                         }
+                       }
+                       break;
+                     default:
+-                      /* see if arch matches */
+-                      if (ymlcmp(yamlscalar.value, myarch.c_str()))
+-                        ret->_selectedArch = myarch;
++                      if (myarch.empty()) {
++                        cur->_selectedArch =
++                          std::string((const char *)yamlscalar.value);
++                      } else {
++                        /* see if arch matches */
++                        if (ymlcmp(yamlscalar.value, myarch.c_str()))
++                          cur->_selectedArch = myarch;
++                      }
+                       break;
+                   }
+                   break;
+                 case TAPILITE_PLATFORM:
+                   if (ymlcmp(yamlscalar.value, "macosx") == 0)
+-                    ret->_platform = Platform::OSX;
++                    cur->_platform = Platform::OSX;
+                   else if (ymlcmp(yamlscalar.value, "ios") == 0)
+-                    ret->_platform = Platform::iOS;
++                    cur->_platform = Platform::iOS;
+                   /* TODO: does it really make a difference to check for
+                    * the rest? */
+                   break;
+                 case TAPILITE_INSTALLNAME:
+-                  ret->_installName =
++                  cur->_installName =
+                     std::string((const char *)yamlscalar.value);
+                   break;
+                 case TAPILITE_CURVERSION:
+-                  ret->_currentVersion =
++                  cur->_currentVersion =
+                     parseVersion32((const char *)yamlscalar.value);
+                   break;
+                 case TAPILITE_COMPATVERSION:
+-                  ret->_compatibilityVersion =
++                  cur->_compatibilityVersion =
+                     parseVersion32((const char *)yamlscalar.value);
+                   break;
+                 case TAPILITE_SWIFTVERSION:
+-                  ret->_swiftABIVersion =
++                  cur->_swiftABIVersion =
+                     std::stoull((const char *)yamlscalar.value, NULL, 10);
+                   break;
+                 case TAPILITE_OBJCCONSTR:
+                   if (ymlcmp(yamlscalar.value, "none") == 0)
+-                    ret->_objcConstraint = ObjCConstraint::None;
++                    cur->_objcConstraint = ObjCConstraint::None;
+                   else if (ymlcmp(yamlscalar.value, "retain_release") == 0)
+-                    ret->_objcConstraint = ObjCConstraint::Retain_Release;
++                    cur->_objcConstraint = ObjCConstraint::Retain_Release;
+                   else if (ymlcmp(yamlscalar.value,
+                         "retain_release_for_simulator") == 0)
+-                    ret->_objcConstraint =
++                    cur->_objcConstraint =
+                       ObjCConstraint::Retain_Release_For_Simulator;
+                   else if (ymlcmp(yamlscalar.value,
+                         "retain_release_or_gc") == 0)
+-                    ret->_objcConstraint =
++                    cur->_objcConstraint =
+                       ObjCConstraint::Retain_Release_Or_GC;
+                   else if (ymlcmp(yamlscalar.value, "gc") == 0)
+-                    ret->_objcConstraint = ObjCConstraint::GC;
++                    cur->_objcConstraint = ObjCConstraint::GC;
+                   break;
+                 case TAPILITE_ALLOWED_CLNTS:
+-                  ret->_allowableClients.emplace_back(
++                  cur->_allowableClients.emplace_back(
+                       std::string((const char *)yamlscalar.value));
+                   break;
+                 case TAPILITE_UUIDS:
+@@ -558,41 +591,47 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+               break;
+             case TAPILITE_EXPORTS:
+             case TAPILITE_REEXPORTS:
++              dprintf("exports|%d val: %s\n", substate, yamlscalar.value);
+               switch (substate) {
+                 case TAPILITE_ARCHS:
+                   /* remember: for V4, we store target in selectedArch */
+-                  if (ymlcmp(yamlscalar.value, ret->_selectedArch.c_str()) == 0)
++                  if (ymlcmp(yamlscalar.value, cur->_selectedArch.c_str()) == 0)
+                     selectSection = true;
+                   break;
+                 case TAPILITE_ALLOWED_CLNTS:
+                   /* should respect this, but for now we just ignore it */
+                   break;
+                 case TAPILITE_RE_EXPORTS:
++                  if (!selectSection)
++                    break;
++                  cur->_reexportedLibraries.emplace_back(
++                      std::string((const char *)yamlscalar.value));
++                  break;
+                 case TAPILITE_SYMBOLS:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::GlobalSymbol));
+                   break;
+                 case TAPILITE_OBJCCLASSES:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::ObjectiveCClass));
+                   break;
+                 case TAPILITE_OBJCEHTYPES:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::ObjectiveCClassEHType));
+                   break;
+                 case TAPILITE_OBJCIVARS:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None,
+                       SymbolKind::ObjectiveCInstanceVariable));
+@@ -600,14 +639,14 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                 case TAPILITE_WEAKDEFSYMS:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::WeakDefined, SymbolKind::GlobalSymbol));
+                   break;
+                 case TAPILITE_THRLOCSYMS:
+                   if (!selectSection)
+                     break;
+-                  ret->_exports.emplace_back(new Symbol(
++                  cur->_exports.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::ThreadLocalValue, SymbolKind::GlobalSymbol));
+                   break;
+@@ -617,34 +656,34 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+               switch (substate) {
+                 case TAPILITE_ARCHS:
+                   /* remember: for V4, we store target in selectedArch */
+-                  if (ymlcmp(yamlscalar.value, ret->_selectedArch.c_str()) == 0)
++                  if (ymlcmp(yamlscalar.value, cur->_selectedArch.c_str()) == 0)
+                     selectSection = true;
+                   break;
+                 case TAPILITE_SYMBOLS:
+                   if (!selectSection)
+                     break;
+-                  ret->_undefineds.emplace_back(new Symbol(
++                  cur->_undefineds.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::GlobalSymbol));
+                   break;
+                 case TAPILITE_OBJCCLASSES:
+                   if (!selectSection)
+                     break;
+-                  ret->_undefineds.emplace_back(new Symbol(
++                  cur->_undefineds.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::ObjectiveCClass));
+                   break;
+                 case TAPILITE_OBJCEHTYPES:
+                   if (!selectSection)
+                     break;
+-                  ret->_undefineds.emplace_back(new Symbol(
++                  cur->_undefineds.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None, SymbolKind::ObjectiveCClassEHType));
+                   break;
+                 case TAPILITE_OBJCIVARS:
+                   if (!selectSection)
+                     break;
+-                  ret->_undefineds.emplace_back(new Symbol(
++                  cur->_undefineds.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::None,
+                       SymbolKind::ObjectiveCInstanceVariable));
+@@ -652,19 +691,23 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+                 case TAPILITE_WEAKDEFSYMS:
+                   if (!selectSection)
+                     break;
+-                  ret->_undefineds.emplace_back(new Symbol(
++                  cur->_undefineds.emplace_back(new Symbol(
+                       std::string((const char *)yamlscalar.value),
+                       SymbolFlags::WeakReferenced, SymbolKind::GlobalSymbol));
+                   break;
+               }
+               break;
+           }
++          if (!inList)
++            substate = TAPILITE_FINDKEY;
+         }
+         break;
+       case YAML_SEQUENCE_START_EVENT:
++        inList = true;
+         break;
+       case YAML_SEQUENCE_END_EVENT:
+         substate = TAPILITE_FINDKEY;
++        inList = false;
+         break;
+       case YAML_MAPPING_START_EVENT:
+ #define yamlms event.data.mapping_start
+@@ -675,7 +718,7 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+             if (ymlncmp(yamlms.tag, "!tapi-tbd",
+                   sizeof("!tapi-tbd") - 1) != 0)
+               break;
+-            p = yamlms.tag += sizeof("!tapi-tbd") - 1;
++            p = yamlms.tag + sizeof("!tapi-tbd") - 1;
+             if (*p == '\0') {
+               /* this could be version 4 or later, in which case we
+                * expect a tbd-version key */
+@@ -704,9 +747,12 @@ LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
+             break;
+         }
+         substate = TAPILITE_FINDKEY;
++        inList = false;
+         break;
+       case YAML_MAPPING_END_EVENT:
+-      /* TODO: could use this to close list pointers or something */
++        inList = false;
++        /* TODO: could use this to close list pointers or something */
++        break;
+       default:
+         break;
+     }
+@@ -731,15 +777,9 @@ bool LinkerInterfaceFile::isSupported(const std::string &path,
+ 
+ bool LinkerInterfaceFile::shouldPreferTextBasedStubFile(
+     const std::string &path) noexcept {
+-  std::string err;
+-  std::ifstream ifs;
+-  ifs.open(path, std::ifstream::in);
+-  auto data = std::string(std::istreambuf_iterator<char>{ifs}, {});
+-  auto file = LinkerInterfaceFile::ImplData::loadFile(
+-      path, (const uint8_t *)data.c_str(), data.length(),
+-	  CPU_TYPE_ANY, CPU_SUBTYPE_MULTIPLE, err);
+-
+-  return file && file->_platform != Platform::Unknown;
++  // Never prefer this, if a dylib exists, take it because it will be
++  // more reliable than this "lite" stub, see also below
++  return false;
+ }
+ 
+ bool LinkerInterfaceFile::areEquivalent(const std::string &tbdPath,
+@@ -772,6 +812,7 @@ bool LinkerInterfaceFile::Impl::init(
+   }
+ 
+   _compatibilityVersion = data->_compatibilityVersion;
++  _installName = data->_installName;
+ 
+   // Remove the patch level.
+   minOSVersion =
+@@ -849,13 +890,8 @@ bool LinkerInterfaceFile::Impl::init(
+     }
+   }
+ 
+-  /* TODO we don't handle multiple documents, vague how it works/what it is
+-  for (auto &file : interface->_documents) {
+-    auto framework = std::static_pointer_cast<const InterfaceFile>(file);
+-    _inlinedFrameworkNames.emplace_back(framework->getInstallName());
+-    _inlinedFrameworks.emplace_back(framework);
+-  }
+-  */
++  for (auto *file = data->next; file != nullptr; file = file->next)
++    _inlinedFrameworkNames.emplace_back(file->_installName);
+ 
+   return true;
+ }
+@@ -1025,30 +1061,24 @@ LinkerInterfaceFile *LinkerInterfaceFile::getInlinedFramework(
+     cpu_subtype_t cpuSubType, ParsingFlags flags, PackedVersion32 minOSVersion,
+     std::string &errorMessage) const noexcept {
+ 
+-  /*
+-  auto it = std::find_if(_pImpl->_inlinedFrameworksNames.begin(),
+-                         _pImpl->_inlinedFrameworks.end(),
+-                         [&](const std::shared_ptr<const InterfaceFile> &it) {
+-                           return it->getInstallName() == installName;
+-                         });
++  for (auto *it = _pImpl->_data->next; it != nullptr; it = it->next) {
++    if (it->_installName.compare(installName) != 0)
++      continue;
+ 
+-  if (it == _pImpl->_inlinedFrameworks.end()) {
+-    errorMessage = "no such inlined framework";
+-    return nullptr;
+-  }
++    auto file = new LinkerInterfaceFile;
++    if (file == nullptr) {
++      errorMessage = "could not allocate memory";
++      return nullptr;
++    }
+ 
+-  auto file = new LinkerInterfaceFile;
+-  if (file == nullptr) {
+-    errorMessage = "could not allocate memory";
+-    return nullptr;
++    if (file->_pImpl->init(
++          std::shared_ptr<LinkerInterfaceFile::ImplData>(it),
++          cpuType, cpuSubType, flags, minOSVersion, errorMessage)) {
++      return file;
++    }
+   }
+ 
+-  if (file->_pImpl->init(*it, cpuType, cpuSubType, flags, minOSVersion,
+-                         errorMessage))
+-    return file;
+-
+-  delete file;
+-  */
++  errorMessage = "no such inlined framework";
+   return nullptr;
+ }
+ 
+-- 
+2.38.1
+
