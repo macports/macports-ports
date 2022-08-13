@@ -46,7 +46,7 @@ if {![info exists PortInfo(homepage)]} {
     homepage
 }
 
-if {[info exists PortInfo(license)] && ${PortInfo(license)} eq "unknown"} {
+if {![info exists PortInfo(license)] || ${PortInfo(license)} eq "unknown"} {
     license         none
 }
 
