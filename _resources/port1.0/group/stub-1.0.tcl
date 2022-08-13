@@ -17,6 +17,7 @@
 #   long_description    my_long_description
 #
 # Optional Declarations:
+#   * license     - default: none
 #   * maintainers - default: nomaintainer
 #   * homepage    - default: empty
 #
@@ -37,16 +38,16 @@ namespace eval stub {}
 options stub.subport_name
 default stub.subport_name ${subport}
 
-license             none
-
-# For maintainers and homepage, don't overwrite if already set
-
 if {![info exists PortInfo(maintainers)]} {
     maintainers     nomaintainer
 }
 
 if {![info exists PortInfo(homepage)]} {
     homepage
+}
+
+if {[info exists PortInfo(license)] && ${PortInfo(license)} eq "unknown"} {
+    license         none
 }
 
 supported_archs     noarch
