@@ -9,7 +9,11 @@ PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.1
 
 legacysupport.newest_darwin_requires_legacy 19
-legacysupport.use_mp_libcxx                 yes
+
+if {[string match *clang* ${configure.compiler}]} {
+    # Don’t use libcxx with gcc.
+    legacysupport.use_mp_libcxx yes
+}
 
 github.setup        facebook folly 2022.08.08.00 v
 revision            0
@@ -39,16 +43,6 @@ github.tarball_from releases
 distname            ${name}-v${version}
 extract.mkdir       yes
 
-platform darwin {
-    if {${os.major} < 16} {
-        known_fail      yes
-        pre-fetch {
-            ui_error "${subport} requires macOS 10.12 or later"
-            return -code error "incompatible macOS version"
-        }
-    }
-}
-
 set port_libfmt     libfmt9
 cmake.module_path-append \
                     ${prefix}/lib/${port_libfmt}/cmake
@@ -70,6 +64,16 @@ depends_lib-append  port:bzip2 \
 
 cmake.generator     Ninja
 
+patchfiles          patch-cmakelists.diff
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    patchfiles-append patch-older-systems.diff
+}
+
+if {${build_arch} in [list ppc ppc64]} {
+    patchfiles-append patch-darwin-ppc.diff
+}
+
 configure.args-append -DBUILD_SHARED_LIBS=ON -DFOLLY_USE_JEMALLOC=0
 
 compiler.cxx_standard   2017
@@ -84,13 +88,26 @@ platform darwin {
     # https://github.com/facebook/folly/issues/864
     if {${os.major} <= 16} {
         configure.args-append     -DCOMPILER_HAS_F_ALIGNED_NEW=OFF
-        configure.cxxflags-append -fno-aligned-allocation
+        # gcc does not recognize -fno-aligned-allocation
+        if {[string match *clang* ${configure.compiler}]} {
+            configure.cxxflags-append \
+                                  -fno-aligned-allocation
+        }
+    }
+    # https://kumasento.github.io/2020-06-12-glog-gflags-and-c-abi/
+    if {${os.major} < 16} {
+        configure.cxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
     }
     # Support for TCP fast-open was only added to macOS 10.11+
     if {${os.major} < 15} {
         configure.cxxflags-append -DFOLLY_ALLOW_TFO=0
     }
-    configure.cxxflags-append -DFOLLY_MOBILE=0
+    if {[string match *gcc* ${configure.compiler}]} {
+        # ___atomic_fetch_sub_8, ___atomic_load_8, ___atomic_exchange_8, ___atomic_store_8, ___atomic_compare_exchange_8, ___atomic_fetch_add_8
+        configure.ldflags-append  -latomic
+        # https://github.com/macports/macports-ports/pull/15689#issuecomment-1212969969
+        configure.ldflags-append  -L${prefix}/lib -lgflags
+    }
 }
 
 variant jemalloc description {Use je_malloc} {
@@ -101,5 +118,14 @@ variant jemalloc description {Use je_malloc} {
 }
 
 variant native description {Build with best native support for local CPU capabilities} {
-    configure.cxxflags-append -march=native
+    if {${build_arch} ni [list ppc ppc64]} {
+        # This flag is unsupported for PPC:
+        configure.cxxflags-append -march=native
+    }
+    if {${build_arch} eq "ppc"} {
+        configure.cxxflags-append -mtune=G4
+    }
+    if {${build_arch} eq "ppc64"} {
+        configure.cxxflags-append -mtune=G5
+    }
 }
