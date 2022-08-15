@@ -65,15 +65,15 @@ proc stub::setup_stub {} {
     }
 
     if {![info exists PortInfo(license)] || ${PortInfo(license)} eq "unknown"} {
-        license         none
+        license         Permissive
     }
 
     if {[option stub.lib_dep]} {
         ui_debug "stub::setup_stub: lib_dep: yes"
     } else {
         ui_debug "stub::setup_stub: lib_dep: no; mark noarch; set installs_libs no"
-        supported_archs     noarch
-        installs_libs       no
+        supported_archs noarch
+        installs_libs   no
     }
 
     distfiles
