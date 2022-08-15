@@ -23,7 +23,7 @@
 #
 # Options:
 #   * stub.subport_name - override subport name, for README location
-#   * stub.lib_dep      - allow subport to be used as lib dep; default: false
+#   * stub.lib_dep      - allow subport to be used as lib dep; default: true
 #
 #------------------------------------------------------------------------------
 #
@@ -42,7 +42,7 @@ default stub.subport_name ${subport}
 # Designate whether stub is intended to be used as a lib dep.
 # If not, set 'supported_archs noarch' and 'installs_libs no'.
 options stub.lib_dep
-default stub.lib_dep false
+default stub.lib_dep true
 
 proc stub::destroot {} {
     global destroot prefix
