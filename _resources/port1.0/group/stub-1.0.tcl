@@ -17,7 +17,7 @@
 #   long_description    my_long_description
 #
 # Optional Declarations:
-#   * license     - default: none
+#   * license     - default: Permissive
 #   * maintainers - default: nomaintainer
 #   * homepage    - default: empty
 #
