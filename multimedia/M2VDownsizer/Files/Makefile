@@ -5,27 +5,39 @@
 #
 # License for Makefile:  GPL-2
 #
-# 'make depend' uses makedepend to automatically generate dependencies 
-#               (dependencies are added to end of Makefile)
-# 'make'        build executable file 'M2VDownsizer'
-# 'make clean'  removes all .o and executable files
+# 'make depend'     uses makedepend to automatically generate dependencies
+#                   (dependencies are added to end of Makefile)
+# 'make'            build executable file 'M2VDownsizer'
+# 'make install'    installs M2VDownsizer into $(DESTDIR)$(PREFIX)/bin
+# 'make uninstall'  uninstalls M2VDownsizer from $(DESTDIR)$(PREFIX)/bin
+# 'make clean'      removes all .o and executable files
+# 'make status'     displays status of build and installation
+# 'make print-'     prints the value of a variable used in the Makefile
 #
-#  Note:    There is NO "make install"
-#           After running "make", just copy M2VDownsizer into the desired directory
-#           e.g.    sudo chmod +x ./M2VDownsizer
-#                   sudo cp M2VDownsizer /usr/local/bin
-#               
+
+# Define installation Prefix
+#
+PREFIX := /usr/local
 
 # Define the C compiler to use
 #
-CC := clang
+CC := cc
 
 # Define any compile-time flags
 #
-CFLAGS += -Wall -g
-#CFLAGS += -Wall -g -Wno-unused
-#CFLAGS += -g -w
-#CFLAGS ?= -mmacosx-version-min=10.7 -isysroot /Developer/SDKs/MacOSX10.7.sdk
+CFLAGS += -Wall -g -Wno-unused-command-line-argument
+#CFLAGS += -mmacosx-version-min=10.7 -isysroot /Developer/SDKs/MacOSX10.7.sdk
+
+# Not necessary for most Macs
+# But will eliminate some linker warning messages especially on High Sierra and Mojave
+#
+# Multi-line comment!  Remove ifeq and corresponding endif to uncomment
+ifeq ("x","y")
+MAJOR_MACOS_VERSION := $(shell osv="$(shell sw_vers -productVersion | cut -d '.' -f 1,2)"; echo "$${osv%}")
+SDK_PATH := $(shell v="$(shell xcrun --show-sdk-path)"; echo "$${v%}")
+CFLAGS += -mmacosx-version-min=$(MAJOR_MACOS_VERSION) \
+-isysroot $(SDK_PATH)
+endif
 
 # Append additional architecture dependent compile-time flags
 #
@@ -34,13 +46,12 @@ CFLAGS += -Xarch_ppc64 -faltivec
 
 # Alternative code for appending additional architecture dependent compile-time flags
 # Note: Use as last resort
-#       It is better to use "-Xarch_ppc" etc. as these CFLAGS will work 
+#       It is better to use "-Xarch_ppc" etc. as these CFLAGS will work
 #       when cross-compiling
 #
-#UNAME_P := $(shell uname -p)
-
-#Multi-line comment!  Remove first ifeq and corresponding endif to uncomment
+# Multi-line comment!  Remove first ifeq and corresponding endif to uncomment
 ifeq ("x","y")
+UNAME_P := $(shell uname -p)
 ifeq ($(findstring ppc, $(UNAME_P)), ppc)
 	CFLAGS += -faltivec
 	CXXFLAGS += -flativec
@@ -49,27 +60,28 @@ endif
 
 # Define any additional linker flags
 #
-LDFLAGS += 
+LDFLAGS +=
 
-# Define any directories containing header files other than directory containing 
+# Define any directories containing header files other than directory containing
 # the system header files, typically /usr/include
 #   Statement Format: INCLUDES := -Iinclude_path
 #   E.g. INCLUDES := -I./  -I/opt/local/include
 #
-INCLUDES := -I./ -Iutils -Iutils/altivec -Impeg2dec -Impeg2enc \
--I/System/Library/Frameworks/CoreServices.framework/Headers 
+INCLUDES := -I./ -Iutils -Iutils/altivec -Impeg2dec -Impeg2enc
+#-I/System/Library/Frameworks/CoreServices.framework/Headers
 
 # Define library directories other than the system library directory, typically /usr/lib
 #   Statement Format:  LFLAGS := -Llibrary_path
 #   E.g. LIBDIRS := -L/opt/local/lib
 #
-LIBDIRS := -Lobj  
+LIBDIRS :=
 
 # Define any macOS frameworks directories other than the system Frameworks directory
 #   Statement Format: FFLAGS:= -Fframework_path
 #   E.g. FWORKDIRS = -F./ -F/System/Library/Frameworks/
 #
-#FWORKDIRS = -F./ -F/System/Library/Frameworks/
+#FWORKDIRS := -F./ -F/System/Library/Frameworks
+FWORKDIRS :=
 
 # Define any libraries to link into executable:
 #   Statement Format: LIBS := -llibname
@@ -97,7 +109,7 @@ SRCDIR-ALTIVEC := utils/altivec
 SRCDIR-MPEG2ENC := mpeg2enc
 SRCDIR-MAIN := ./
 
-# Define the C object files 
+# Define the C object files
 #
 # This uses Suffix Replacement within a macro:
 #   $(name:string1=string2)
@@ -118,8 +130,8 @@ OBJDIR := obj
 # Define object sub-directories
 #
 # Do not change the following directories!!
-# The name of the last directory MUST match the name of the corresponding 
-# source directory in order for makedepend to work!! 
+# The name of the last directory MUST match the name of the corresponding
+# source directory in order for makedepend to work!!
 # (unless the -p option is used with makedepend)
 # 
 OBJDIR-UTILS := $(OBJDIR)/utils
@@ -133,7 +145,8 @@ PRODUCT := M2VDownsizer
 
 # Define the PHONY targets
 #
-.PHONY: all depend clean utils altivec mpeg2enc main objects macports print-
+.PHONY: all depend clean utils altivec mpeg2enc main objects install uninstall \
+print- status
 
 # define the default target
 # The default target is typically the "all" PHONY target
@@ -144,21 +157,17 @@ default: all
 #
 all: utils altivec mpeg2enc main $(PRODUCT)
 
-# The following also works for the "all" PHONY target but will not display messages 
+# The following also works for the "all" PHONY target but will not display messages
 # after each subdirectory has been processed (e.g. compiled).
 #
 # all: $(PRODUCT)
 #
 
-# Define the "macports" PHONY target
-#
-macports: depend all
-
 # Define $(PRODUCT) real target
 #
-# Note:  Do not add phony targets to the $(PRODUCT) REAL target. 
+# Note:  Do not add phony targets to the $(PRODUCT) REAL target.
 # Phony targets should not be a prerequisite of a real target file!
-# If a phony target is a prerequisite, the recipe for the phony target will run every 
+# If a phony target is a prerequisite, the recipe for the phony target will run every
 # single time the REAL target is run!
 #
 $(PRODUCT): $(patsubst %,$(OBJDIR-UTILS)/%,$(OBJS-UTILS)) \
@@ -181,7 +190,7 @@ $(LIBDIRS) $(FWORKDIRS) $(LIBS) $(FWORKS)
 # One must use @echo here and NOT $(info ) because $(info ) will not print shell variables!
 # @echo uses the shell.  One must escape special characters like * ' " \ etc
 # OR place text with special characters in single quotes (')like was done above.
-# $(info ) is a Make command and does NOT use the shell. 
+# $(info ) is a Make command and does NOT use the shell.
 # Note: @echo must be used within a recipe.  $(info ) can be used anywhere in a Makefile.
 #
 utils: $(patsubst %,$(OBJDIR-UTILS)/%,$(OBJS-UTILS))
@@ -204,7 +213,7 @@ objects: utils altivec mpeg2enc main
 # Suffix replacement rules for building .o's from .c's
 #
 # it uses automatic variables $<: the name of the prerequisite of
-# the rule(a .c file) and $@: the name of the target of the rule (a .o file) 
+# the rule(a .c file) and $@: the name of the target of the rule (a .o file)
 # (see the gnu make manual section about automatic variables)
 #.c.o:
 #	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
@@ -227,8 +236,10 @@ $(OBJDIR-MAIN)/%.o: $(SRCDIR-MAIN)/%.c
 # Define the "clean" PHONY target
 #
 clean:
+	@echo "*** Removing any built object files and binaries! ***"
 	$(RM) $(OBJDIR-UTILS)/*.o $(OBJDIR-ALTIVEC)/*.o \
 $(OBJDIR-MPEG2ENC)/*.o $(OBJDIR-MAIN)/*.o *.o *~ $(PRODUCT)
+	@echo "*** All done! ***"
 
 # Define the "depend" PHONY target
 #
@@ -243,15 +254,49 @@ depend:
 	makedepend $(INCLUDES) -a -p$(OBJDIR)/  $(patsubst %,$(SRCDIR-MPEG2ENC)/%,$(SRCS-MPEG2ENC))
 	makedepend $(INCLUDES) -a -p$(OBJDIR-MAIN)/ $(SRCS-MAIN)
 
+# Define the "install" PHONY target
+#
+install:
+ifneq ("$(wildcard ./$(PRODUCT))","")
+	@echo "*** Installing $(PRODUCT) ***"
+	install -m 0755 $(PRODUCT) $(DESTDIR)$(PREFIX)/bin
+	@echo "*** $(PRODUCT) has been installed into the $(DESTDIR)$(PREFIX)/bin directory ***"
+else
+	@echo "*** Nothing to install.  $(PRODUCT) does not exist!  Run \"make\" first ***"
+endif
+
+# Define the "uninstall" PHONY target
+#
+uninstall:
+ifneq ("$(wildcard $(DESTDIR)$(PREFIX)/bin/$(PRODUCT))","")
+	@echo "*** Uninstalling $(PRODUCT) ***"
+	rm -f $(DESTDIR)$(PREFIX)/bin/M2VDownsizer
+	@echo "*** $(PRODUCT) has been removed from the $(DESTDIR)$(PREFIX)/bin directory ***"
+else
+	@echo "*** Nothing happened! $(PRODUCT) is not installed! ***"
+endif
+
 # Define the "print-" PHONY target
 # Use the "print-" PHONY target to print the value of a variable used in the Makefile
 # E.g.  make print-CFLAGS
-#       will print the value(s) contained in $CFLAGS
+#       will print the value(s) contained in CFLAGS
 #
 print-%:
 	@echo $*=$($*)
 
-# obj/obj-main/main.o: /System/Library/Frameworks/CoreServices.framework/Versions/A/Headers/CoreServices.h
+# Define the "status" PHONY target
+#
+status:
+ifneq ("$(wildcard ./$(PRODUCT))","")
+	@echo "$(PRODUCT) has been built."
+else
+	@echo "$(PRODUCT) has not been built. Run \"make\" to build."
+endif
+ifneq ("$(wildcard $(DESTDIR)$(PREFIX)/bin/$(PRODUCT))","")
+	@echo "$(PRODUCT) has been installed into the $(DESTDIR)$(PREFIX)/bin directory."
+else
+	@echo "$(PRODUCT) has not been installed! Run \"sudo make install\" to install."
+endif
 
 # DO NOT DELETE THIS LINE -- make depend needs it
 
