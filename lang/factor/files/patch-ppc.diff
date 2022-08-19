@@ -1,0 +1,342 @@
+--- GNUmakefile.orig	2018-07-31 10:25:27.000000000 +0800
++++ GNUmakefile	2022-08-19 22:28:12.000000000 +0800
+@@ -12,12 +12,12 @@
+ 		-DFACTOR_GIT_LABEL="$(GIT_LABEL)" \
+ 		$(SITE_CFLAGS)
+ 
+-	CXXFLAGS += -std=c++11
++	CXXFLAGS += -std=c++11 $(SITE_CXXFLAGS)
+ 
+ 	ifdef DEBUG
+ 		CFLAGS += -g -DFACTOR_DEBUG
+ 	else
+-		CFLAGS += -O3
++		CFLAGS += -O1
+ 	endif
+ 
+ 	ENGINE = $(DLL_PREFIX)factor$(DLL_SUFFIX)$(DLL_EXTENSION)
+@@ -142,6 +142,9 @@
+ 	@echo "macosx-x86-32"
+ 	@echo "macosx-x86-64"
+ 	@echo "macosx-x86-fat"
++	@echo "macosx-ppc-32"
++	@echo "macosx-ppc-64"
++	@echo "macosx-ppc-fat"
+ 	@echo "windows-x86-32"
+ 	@echo "windows-x86-64"
+ 	@echo ""
+@@ -162,6 +165,15 @@
+ macosx-x86-fat:
+ 	$(MAKE) $(ALL) macosx.app CONFIG=vm/Config.macosx.x86.fat
+ 
++macosx-ppc-32:
++	$(MAKE) $(ALL) macosx.app CONFIG=vm/Config.macosx.ppc.32
++
++macosx-ppc-64:
++	$(MAKE) $(ALL) macosx.app CONFIG=vm/Config.macosx.ppc.64
++
++macosx-ppc-fat:
++	$(MAKE) $(ALL) macosx.app CONFIG=vm/Config.macosx.ppc.fat
++
+ linux-x86-32:
+ 	$(MAKE) $(ALL) CONFIG=vm/Config.linux.x86.32
+ 
+
+--- vm/platform.hpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/platform.hpp	2022-08-20 02:03:41.000000000 +0800
+@@ -20,6 +20,10 @@
+ 
+     #ifdef FACTOR_X86
+       #include "os-macosx-x86.32.hpp"
++      #elif defined(FACTOR_PPC64)
++        #include "os-macosx-ppc.64.hpp"
++      #elif defined(FACTOR_PPC32)
++        #include "os-macosx-ppc.32.hpp"
+     #elif defined(FACTOR_AMD64)
+       #include "os-macosx-x86.64.hpp"
+     #else
+
+
+--- vm/cpu-ppc.hpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/cpu-ppc.hpp	2022-08-19 23:02:22.000000000 +0800
+@@ -48,7 +48,7 @@
+   *(uint32_t*)return_address = insn;
+ 
+   // Flush the cache line containing the call we just patched
+-  __asm__ __volatile__("icbi 0, %0\n"
++  __asm__ volatile("icbi 0, %0\n"
+                        "sync\n" ::"r"(return_address)
+                        :);
+ }
+@@ -79,4 +79,8 @@
+ // Defined in assembly
+ VM_C_API void flush_icache(cell start, cell len);
+ 
++// Borrow definitions, may not work:
++static const unsigned SIGNAL_HANDLER_STACK_FRAME_SIZE = 64;
++static const unsigned JIT_FRAME_SIZE = 32;
++
+ }
+
+
+--- vm/master.hpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/master.hpp	2022-08-19 05:38:24.000000000 +0800
+@@ -63,12 +63,11 @@
+ #define FACTOR_64
+ #elif defined(i386) || defined(__i386) || defined(__i386__) || defined(_M_IX86)
+ #define FACTOR_X86
+-#elif(defined(__POWERPC__) || defined(__ppc__) || defined(_ARCH_PPC)) && \
+-    (defined(__PPC64__) || defined(__64BIT__))
++#elif(defined(__POWERPC__) || defined(_ARCH_PPC)) && (defined(__PPC64__) || defined(__ppc64__) || defined(__64BIT__))
+ #define FACTOR_PPC64
+ #define FACTOR_PPC
+ #define FACTOR_64
+-#elif defined(__POWERPC__) || defined(__ppc__) || defined(_ARCH_PPC)
++#elif (defined(__POWERPC__) || defined(_ARCH_PPC)) && defined(__ppc__) 
+ #define FACTOR_PPC32
+ #define FACTOR_PPC
+ #else
+
+
+--- vm/Config.macosx.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/Config.macosx	2022-08-19 22:20:07.000000000 +0800
+@@ -1,6 +1,6 @@
+ include vm/Config.unix
+ #SITE_CFLAGS +=
+-SITE_CFLAGS += -mmacosx-version-min=10.9
++SITE_CFLAGS += -mmacosx-version-min=10.5
+ 
+ PLAF_DLL_OBJS += vm/os-macosx.o vm/mach_signal.o vm/mvm-unix.o
+ PLAF_MASTER_HEADERS += vm/os-macosx.hpp vm/mach_signal.hpp
+
+
+
+--- vm/cpu-ppc.S.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/cpu-ppc.S	2022-08-19 23:23:29.000000000 +0800
+@@ -1,46 +1,42 @@
+-    .file "cpu-ppc.linux.S"
+-    .section ".text"
++    .text
+     .align 2
+-    .globl flush_icache
+-    .type flush_icache, @function
+-flush_icache:
+-    add 4,4,3     # end += ptr
++    .globl _flush_icache
++
++_flush_icache:
++    add r4,r4,r3     ; end += ptr
+ #ifdef _ARCH_PPC64
+-    clrrdi 3,3,5  # ptr &= ~0x1f
++    clrrdi r3,r3,5   ; ptr &= ~0x1f
+ #else
+-    clrrwi 3,3,5  # ptr &= ~0x1f
++    clrrwi r3,r3,5   ; ptr &= ~0x1f
+ #endif
+-    sub 4,4,3     # end -= aligned_ptr
+-    addi 4,4,0x1f # end += 0x1f
++    sub r4,r4,r3     ; end -= aligned_ptr
++    addi r4,r4,0x1f  ; end += 0x1f
+ #ifdef _ARCH_PPC64
+-    srdi. 4,4,5   # end >>= 5, set cr
++    srdi. r4,r4,5    ; end >>= 5, set cr
+ #else
+-    srwi. 4,4,5   # end >>= 5, set cr
++    srwi. r4,r4,5    ; end >>= 5, set cr
+ #endif
+     beqlr
+ 
+-    # Loop over the buffer by cache line and flush the data cache.
+-    mr 5,3
+-    mtctr 4
++    ; Loop over the buffer by cache line and flush the data cache.
++    mr r5,r3
++    mtctr r4
+ loop1:
+-    dcbst 0,5
+-    addi 5,5,0x20
++    dcbst 0,r5
++    addi r5,r5,0x20
+     bdnz loop1
+ 
+-    # Synchronize to ensure the cache line flushes are complete.
++    ; Synchronize to ensure the cache line flushes are complete.
+     sync
+ 
+-    # Loop over the buffer by cache line and flush the instruction cache.
+-    mr 5,3
+-    mtctr 4
++    ; Loop over the buffer by cache line and flush the instruction cache.
++    mr r5,r3
++    mtctr r4
+ loop2:
+-    icbi 0,5
+-    addi 5,5,0x20
++    icbi 0,r5
++    addi r5,r5,0x20
+     bdnz loop2
+ 
+-    # Clear instruction pipeline to force reloading of instructions.
++    ; Clear instruction pipeline to force reloading of instructions.
+     isync
+     blr
+-
+-    .size flush_icache,.-flush_icache
+-    .section .note.GNU-stack,"",@progbits
+
+
+--- vm/Config.macosx.ppc.64.orig	2010-04-17 06:29:57.000000000 +0800
++++ vm/Config.macosx.ppc.64	2022-08-19 23:13:51.000000000 +0800
+@@ -1,3 +1,3 @@
+ include vm/Config.macosx
+ include vm/Config.ppc
+-CFLAGS += -arch ppc -force_cpusubtype_ALL
++CFLAGS += -arch ppc64 -force_cpusubtype_ALL
+
+
+--- vm/os-macosx.hpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/os-macosx.hpp	2022-08-19 23:50:44.000000000 +0800
+@@ -15,4 +15,5 @@
+ #define FUNCTION_CODE_POINTER(ptr) ptr
+ #define FUNCTION_TOC_POINTER(ptr) ptr
+ 
++#define UAP_STACK_POINTER_TYPE void*
+ }
+
+
+
+--- vm/vm.hpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/vm.hpp	2022-08-20 01:32:09.000000000 +0800
+@@ -80,6 +80,7 @@
+   cell signal_fault_addr;
+   cell signal_fault_pc;
+   unsigned int signal_fpu_status;
++  cell signal_callstack_top;
+ 
+   // Pipe used to notify Factor multiplexer of signals
+   int signal_pipe_input, signal_pipe_output;
+@@ -597,7 +598,9 @@
+   template <typename Iterator>
+   void iterate_callstack_object(callstack* stack_, Iterator& iterator);
+ 
++  // callstack
+   callstack* allot_callstack(cell size);
++  cell fix_callstack_top(cell* top);
+   cell second_from_top_stack_frame(context* ctx);
+   cell capture_callstack(context* ctx);
+   void primitive_callstack_for();
+@@ -606,6 +609,7 @@
+   void primitive_innermost_stack_frame_scan();
+   void primitive_set_innermost_stack_frame_quotation();
+   void primitive_callstack_bounds();
++  cell frame_successor(cell* frame);
+ 
+   template <typename Iterator, typename Fixup>
+   void iterate_callstack(context* ctx, Iterator& iterator, Fixup& fixup);
+@@ -613,6 +617,7 @@
+   void iterate_callstack(context* ctx, Iterator& iterator);
+ 
+   // cpu-*
++#if !defined(__POWERPC__)
+   void dispatch_signal_handler(cell* sp, cell* pc, cell newpc);
+ #if defined(FACTOR_X86) || defined(FACTOR_64)
+   void dispatch_non_resumable_signal(cell* sp, cell* pc,
+@@ -620,6 +625,7 @@
+                                      cell limit);
+   void dispatch_resumable_signal(cell* sp, cell* pc, cell handler);
+ #endif
++#endif
+ 
+   // alien
+   char* pinned_alien_offset(cell obj);
+
+
+--- vm/os-unix.cpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/os-unix.cpp	2022-08-20 00:15:28.000000000 +0800
+@@ -119,11 +119,19 @@
+   setitimer(ITIMER_REAL, &timer, NULL);
+ }
+ 
++#if defined(__POWERPC__)
++void factor_vm::dispatch_signal(void* uap, void(handler)()) {
++	UAP_STACK_POINTER(uap) = (UAP_STACK_POINTER_TYPE)fix_callstack_top(UAP_STACK_POINTER(uap));
++	UAP_PROGRAM_COUNTER(uap) = (cell)handler;
++	signal_callstack_top = UAP_STACK_POINTER(uap);
++}
++#else
+ void factor_vm::dispatch_signal(void* uap, void(handler)()) {
+   dispatch_signal_handler((cell*)&UAP_STACK_POINTER(uap),
+                           (cell*)&UAP_PROGRAM_COUNTER(uap),
+                           (cell)FUNCTION_CODE_POINTER(handler));
+ }
++#endif
+ 
+ void memory_signal_handler(int signal, siginfo_t* siginfo, void* uap) {
+ 
+
+--- vm/mach_signal.cpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/mach_signal.cpp	2022-08-20 00:10:07.000000000 +0800
+@@ -33,16 +33,18 @@
+                                    MACH_EXC_STATE_TYPE* exc_state,
+                                    MACH_THREAD_STATE_TYPE* thread_state,
+                                    MACH_FLOAT_STATE_TYPE* float_state) {
+-  cell handler = 0;
++	MACH_STACK_POINTER(thread_state) = (cell)fix_callstack_top(MACH_STACK_POINTER(thread_state));
++
++	signal_callstack_top = MACH_STACK_POINTER(thread_state);
+ 
+   if (exception == EXC_BAD_ACCESS) {
+     set_memory_protection_error(MACH_EXC_STATE_FAULT(exc_state),
+                                 (cell)MACH_PROGRAM_COUNTER(thread_state));
+-    handler = (cell)factor::memory_signal_handler_impl;
++    MACH_PROGRAM_COUNTER(thread_state) = (cell)factor::memory_signal_handler_impl;
+   } else if (exception == EXC_ARITHMETIC && code != MACH_EXC_INTEGER_DIV) {
+     signal_fpu_status = fpu_status(mach_fpu_status(float_state));
+     mach_clear_fpu_status(float_state);
+-    handler = (cell)factor::fp_signal_handler_impl;
++    MACH_PROGRAM_COUNTER(thread_state) = (cell)factor::fp_signal_handler_impl;
+   } else {
+     switch (exception) {
+       case EXC_ARITHMETIC:
+@@ -56,14 +58,8 @@
+         break;
+     }
+ 
+-    handler = (cell)factor::synchronous_signal_handler_impl;
++    MACH_PROGRAM_COUNTER(thread_state) = (cell)factor::synchronous_signal_handler_impl;
+   }
+-
+-  FACTOR_ASSERT(handler != 0);
+-
+-  dispatch_signal_handler((cell*)&MACH_STACK_POINTER(thread_state),
+-                          (cell*)&MACH_PROGRAM_COUNTER(thread_state),
+-                          (cell)handler);
+ }
+ 
+ static void call_fault_handler(mach_port_t thread, exception_type_t exception,
+
+
+--- vm/callstack.cpp.orig	2018-07-31 10:25:29.000000000 +0800
++++ vm/callstack.cpp	2022-08-20 02:18:03.000000000 +0800
+@@ -9,6 +9,21 @@
+   return stack;
+ }
+ 
++/* If 'stack' points into the middle of the frame, find the nearest valid stack
++pointer where we can resume execution and hope to capture the call trace without
++crashing. Also, make sure we have at least 'stack_reserved' bytes available
++so that we don’t run out of callstack space while handling the error. */
++cell factor_vm::fix_callstack_top(cell* stack)
++{
++	cell* frame = ctx->callstack_bottom - 1;
++
++	while(frame >= stack
++		&& frame >= ctx->callstack_top
++		&& (cell)frame >= ctx->callstack_seg->start + stack_reserved);
++
++	return frame + 1;
++}
++
+ // We ignore the two topmost frames, the 'callstack' primitive
+ // frame itself, and the frame calling the 'callstack' primitive,
+ // so that set-callstack doesn't get stuck in an infinite loop.
