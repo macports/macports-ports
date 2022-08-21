@@ -96,6 +96,9 @@ post-extract {
     close ${cabal_config_fd}
 }
 
+# cabal builds arm64 and x86_64 binaries
+supported_archs     arm64 x86_64
+
 # libHSbase shipped with GHC links against system libiconv, which provides the
 # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
 # process statically links libHSbase.a, we must have /usr/lib in the library
@@ -103,34 +106,37 @@ post-extract {
 compiler.library_path
 compiler.cpath
 
-options haskell_cabal.bin haskell_cabal.env
+options haskell_cabal.bin haskell_cabal.env haskell_cabal.global_flags
 
 default haskell_cabal.bin ${prefix}/bin/cabal
 
 default haskell_cabal.env \
     {CABAL_CONFIG=[option haskell_cabal.cabal_root]/config}
 
+default haskell_cabal.global_flags \
+    {--store-dir=[option haskell_cabal.cabal_root]/store --logs-dir=[option haskell_cabal.cabal_root]/logs}
+
 pre-configure {
     system -W ${worksrcpath} \
-        "env ${haskell_cabal.env} ${haskell_cabal.bin} new-update"
+        "env ${haskell_cabal.env} ${haskell_cabal.bin} ${haskell_cabal.global_flags} update"
 }
 
-default configure.cmd       {${haskell_cabal.bin}}
+default configure.cmd       {${haskell_cabal.bin} ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
-default configure.args      {new-configure}
+default configure.args      {configure}
 default configure.env       {${haskell_cabal.env}}
 
-default build.cmd           {${haskell_cabal.bin}}
-default build.target        {new-build}
+default build.cmd           {${haskell_cabal.bin} ${haskell_cabal.global_flags}}
+default build.target        {build}
 default build.env           {${haskell_cabal.env}}
 
 default destroot.env        {${haskell_cabal.env}}
 
-default test.cmd            {${haskell_cabal.bin}}
-default test.target         {new-test}
+default test.cmd            {${haskell_cabal.bin} ${haskell_cabal.global_flags}}
+default test.target         {test}
 default test.env            {${haskell_cabal.env}}
 
-# destroot: Avoid recompilation with a call to new-install
+# destroot: Avoid recompilation with a call to install
 
 destroot {
     # install binary
