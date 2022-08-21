@@ -31,7 +31,7 @@ namespace eval stub {}
 options stub.subport_name
 default stub.subport_name ${subport}
 
-proc stub::destroot {} {
+proc stub::post_destroot {} {
     global destroot prefix
 
     set subport_name [option stub.subport_name]
@@ -59,10 +59,11 @@ proc stub::setup_stub {} {
     patchfiles
     use_configure       no
     build {}
-}
+    destroot {}
 
-destroot {
-    stub::destroot
+    post-destroot {
+        stub::post_destroot
+    }
 }
 
 # callback after port is parsed
