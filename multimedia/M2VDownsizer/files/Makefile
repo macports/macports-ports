@@ -17,11 +17,11 @@
 
 # Define installation Prefix
 #
-PREFIX := /usr/local
+PREFIX ?= /usr/local
 
 # Define the C compiler to use
 #
-CC := cc
+CC ?= cc
 
 # Define any compile-time flags
 #
