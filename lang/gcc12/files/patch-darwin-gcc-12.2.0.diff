@@ -141,10 +141,10 @@ index ef58fac..925da10 100644
  # This is set by the configure script to the arguments to use when configuring
 diff --git README.md README.md
 new file mode 100644
-index 0000000..9c867cc
+index 0000000..9fbe018
 --- /dev/null
 +++ README.md
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,44 @@
 +# This is a branch of GCC 12-1 with experimental support for AArch64 (Arm64) on Darwin.
 +
 +The branch is recommended for (and has been tested on) powerpc, i686, x86_64 and aarch64 Darwin from Darwin9 (Mac OSX 10.5) through Darwin21 (macOS 12) (for architectures relevant to each version).  The branch has also been tested to build cross-compilers between x86_64 and aarch64 and on aarch64-linux-gnu without regressions.
@@ -160,7 +160,15 @@ index 0000000..9c867cc
 +**Please report issues for this branch to:
 +https://github.com/iains/gcc-12-branch/issues**
 +
-+**_The current release is GCC-12.1-darwin-r1. (June 2022)_**
++**_The current release is GCC-12.2-darwin-r0. (August 2022)_**
++
++This release includes:
++ * All upstream fixes since 12.1.
++ * Improves the build to omit runpaths from the runtime libraries.
++ * A fix for PR106435 which improves the handling of cross-TU global initializers for thread-local variables.
++ * Fixes for builds and testing (include Ada) on Darwin8 (MacOSX 10.4, Tiger).
++
++**_GCC-12.1-darwin-r1. (June 2022)_**
 +
 +This release:
 + * Fixes a critical bug in the Arm64 port (related to Issue #3, which is unfixed in Xcode toolchains in common use).
@@ -355,6 +363,33 @@ index 8597748..72bd20f 100644
  
  # By default, C and C++ are the only stage 1 languages.
  stage1_languages=,c,
+diff --git contrib/compare-debug contrib/compare-debug
+index cf80ae3..678a897 100755
+--- contrib/compare-debug
++++ contrib/compare-debug
+@@ -60,9 +60,19 @@ trap 'rm -f "$1.$suf1" "$2.$suf2"' 0 1 2 15
+ case `uname -s` in
+ Darwin)
+   # The strip command on darwin does not remove all debug info.
+-  # Fortunately, we can use ld to do it instead.
+-  ld -S -r -no_uuid "$1" -o "$1.$suf1"
+-  ld -S -r -no_uuid "$2" -o "$2.$suf2"
++  # Fortunately, we can use ld to do it instead, but even ld on earlier
++  # system versions can be fussy about what it finds - make sure we use
++  # a ld that understands coalesced sections.
++  case `uname -r` in
++  8*)
++    ld64 -S -r -no_uuid "$1" -o "$1.$suf1"
++    ld64 -S -r -no_uuid "$2" -o "$2.$suf2"
++    ;;
++  *)
++    ld -S -r -no_uuid "$1" -o "$1.$suf1"
++    ld -S -r -no_uuid "$2" -o "$2.$suf2"
++    ;;
++  esac
+   ;;
+ *)
+   cp "$1" "$1.$suf1"
 diff --git fixincludes/configure fixincludes/configure
 index 6e2d67b..b3bca66 100755
 --- fixincludes/configure
@@ -495,28 +530,57 @@ index 6be36df..126e09b 100644
  m4_include([../libtool.m4])
  m4_include([../ltoptions.m4])
  m4_include([../ltsugar.m4])
+diff --git gcc/ada/Makefile.rtl gcc/ada/Makefile.rtl
+index aaf853e..b202183 100644
+--- gcc/ada/Makefile.rtl
++++ gcc/ada/Makefile.rtl
+@@ -2822,6 +2822,15 @@ ifeq ($(strip $(filter-out darwin%,$(target_os))),)
+   TOOLS_TARGET_PAIRS = indepsw.adb<indepsw-darwin.adb
+ 
+   EH_MECHANISM=-gcc
++  # Darwin 8 does not support rpaths / @rpath.
++  ifeq ($(strip $(filter-out darwin8%,$(target_os))),)
++    GNATLIB_INSTALL_PREFIX = '$(ADA_RTL_DSO_DIR)'
++    GNATLIB_ADD_RPATHS =
++  else
++    GNATLIB_INSTALL_PREFIX = '@rpath'
++    GNATLIB_ADD_RPATHS = -nodefaultrpaths -Wl,-rpath,@loader_path/,-rpath,@loader_path/.. \
++		-Wl,-rpath,@loader_path/../../../../
++  endif
+   GNATLIB_SHARED = gnatlib-shared-darwin
+   GMEM_LIB = gmemlib
+   LIBRARY_VERSION := $(LIB_VERSION)
 diff --git gcc/ada/gcc-interface/Makefile.in gcc/ada/gcc-interface/Makefile.in
-index 1e9801a..89c4207 100644
+index 1e9801a..0ab3960 100644
 --- gcc/ada/gcc-interface/Makefile.in
 +++ gcc/ada/gcc-interface/Makefile.in
-@@ -796,13 +796,16 @@ gnatlib-shared-darwin:
+@@ -795,14 +795,15 @@ gnatlib-shared-darwin:
+ 		-o libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
  		$(GNATRTL_NONTASKING_OBJS) $(LIBGNAT_OBJS) \
  		$(SO_OPTS) \
- 		-Wl,-install_name,@rpath/libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
+-		-Wl,-install_name,@rpath/libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
 -		$(MISCLIB)
-+		-nodefaultrpaths -Wl,-rpath,@loader_path/,-rpath,@loader_path/.. \
-+		-Wl,-rpath,@loader_path/../../../../ $(MISCLIB)
++		-Wl,-install_name,$(GNATLIB_INSTALL_PREFIX)/libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		$(GNATLIB_ADD_RPATHS) $(MISCLIB)
  	cd $(RTSDIR); `echo "$(GCC_FOR_TARGET)" \
                  | sed -e 's,\./xgcc,../../xgcc,' -e 's,-B\./,-B../../,'` -dynamiclib $(PICFLAG_FOR_TARGET) \
  		-o libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
  		$(GNATRTL_TASKING_OBJS) \
  		$(SO_OPTS) \
- 		-Wl,-install_name,@rpath/libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
-+		-nodefaultrpaths -Wl,-rpath,@loader_path/,-rpath,@loader_path/.. \
-+		-Wl,-rpath,@loader_path/../../../../ \
+-		-Wl,-install_name,@rpath/libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		-Wl,-install_name,$(GNATLIB_INSTALL_PREFIX)/libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext) \
++		$(GNATLIB_ADD_RPATHS) \
  		$(THREADSLIB) -Wl,libgnat$(hyphen)$(LIBRARY_VERSION)$(soext)
  	cd $(RTSDIR); $(LN_S) libgnat$(hyphen)$(LIBRARY_VERSION)$(soext) \
  		libgnat$(soext)
+@@ -811,6 +812,7 @@ gnatlib-shared-darwin:
+ 	cd $(RTSDIR); $(DSYMUTIL_FOR_TARGET) libgnat$(hyphen)$(LIBRARY_VERSION)$(soext)
+ 	cd $(RTSDIR); $(DSYMUTIL_FOR_TARGET) libgnarl$(hyphen)$(LIBRARY_VERSION)$(soext)
+ 
++
+ gnatlib-shared:
+ 	$(MAKE) $(FLAGS_TO_PASS) \
+              GNATLIBFLAGS="$(GNATLIBFLAGS)" \
 diff --git gcc/builtins.def gcc/builtins.def
 index 005976f..e2cd65e 100644
 --- gcc/builtins.def
@@ -530,6 +594,19 @@ index 005976f..e2cd65e 100644
  
  /* Implementing __builtin_setjmp.  */
  DEF_BUILTIN_STUB (BUILT_IN_SETJMP_SETUP, "__builtin_setjmp_setup")
+diff --git gcc/c-family/c-opts.cc gcc/c-family/c-opts.cc
+index a341a06..b584a05 100644
+--- gcc/c-family/c-opts.cc
++++ gcc/c-family/c-opts.cc
+@@ -1068,7 +1068,7 @@ c_common_post_options (const char **pfilename)
+ 
+   if (flag_extern_tls_init)
+     {
+-      if (!TARGET_SUPPORTS_ALIASES || !SUPPORTS_WEAK)
++      if (!SUPPORTS_WEAK)
+ 	{
+ 	  /* Lazy TLS initialization for a variable in another TU requires
+ 	     alias and weak reference support.  */
 diff --git gcc/calls.cc gcc/calls.cc
 index 4d0bc45..208648a 100644
 --- gcc/calls.cc
@@ -757,13 +834,13 @@ index 64c27c9..5cd26ca 100644
  #ifndef USED_FOR_TARGET
  #undef ICONV_CONST
 diff --git gcc/config/aarch64/aarch64-builtins.cc gcc/config/aarch64/aarch64-builtins.cc
-index c21476d..8485cf0 100644
+index 1b0db67..549c9d2 100644
 --- gcc/config/aarch64/aarch64-builtins.cc
 +++ gcc/config/aarch64/aarch64-builtins.cc
-@@ -613,6 +613,10 @@ enum aarch64_builtins
-   AARCH64_LS64_BUILTIN_ST64B,
-   AARCH64_LS64_BUILTIN_ST64BV,
-   AARCH64_LS64_BUILTIN_ST64BV0,
+@@ -619,6 +619,10 @@ enum aarch64_builtins
+   AARCH64_RBIT,
+   AARCH64_RBITL,
+   AARCH64_RBITLL,
 +  /* OS-specific */
 +  AARCH64_BUILTIN_CFSTRING,
 +  AARCH64_BUILTIN_HUGE_VALQ,
@@ -771,7 +848,7 @@ index c21476d..8485cf0 100644
    AARCH64_BUILTIN_MAX
  };
  
-@@ -732,6 +736,9 @@ tree aarch64_fp16_ptr_type_node = NULL_TREE;
+@@ -738,6 +742,9 @@ tree aarch64_fp16_ptr_type_node = NULL_TREE;
  tree aarch64_bf16_type_node = NULL_TREE;
  tree aarch64_bf16_ptr_type_node = NULL_TREE;
  
@@ -781,7 +858,7 @@ index c21476d..8485cf0 100644
  /* Wrapper around add_builtin_function.  NAME is the name of the built-in
     function, TYPE is the function type, CODE is the function subcode
     (relative to AARCH64_BUILTIN_GENERAL), and ATTRS is the function
-@@ -1474,6 +1481,40 @@ aarch64_init_bf16_types (void)
+@@ -1480,6 +1487,40 @@ aarch64_init_bf16_types (void)
    aarch64_bf16_ptr_type_node = build_pointer_type (aarch64_bf16_type_node);
  }
  
@@ -822,7 +899,7 @@ index c21476d..8485cf0 100644
  /* Pointer authentication builtins that will become NOP on legacy platform.
     Currently, these builtins are for internal use only (libgcc EH unwinder).  */
  
-@@ -1731,8 +1772,9 @@ aarch64_general_init_builtins (void)
+@@ -1767,8 +1808,9 @@ aarch64_general_init_builtins (void)
    aarch64_init_fpsr_fpcr_builtins ();
  
    aarch64_init_fp16_types ();
@@ -833,7 +910,7 @@ index c21476d..8485cf0 100644
  
    {
      aarch64_simd_switcher simd;
-@@ -1765,6 +1807,14 @@ aarch64_general_init_builtins (void)
+@@ -1802,6 +1844,14 @@ aarch64_general_init_builtins (void)
      aarch64_init_memtag_builtins ();
  }
  
@@ -848,7 +925,7 @@ index c21476d..8485cf0 100644
  /* Implement TARGET_BUILTIN_DECL for the AARCH64_BUILTIN_GENERAL group.  */
  tree
  aarch64_general_builtin_decl (unsigned code, bool)
-@@ -2730,6 +2780,15 @@ aarch64_general_fold_builtin (unsigned int fcode, tree type,
+@@ -2801,6 +2851,15 @@ aarch64_general_fold_builtin (unsigned int fcode, tree type,
  	if (aarch64_fold_builtin_lane_check (args[0], args[1], args[2]))
  	  return void_node;
  	break;
@@ -878,7 +955,7 @@ index 767ee0c..55ffdbd 100644
 +#endif
  }
 diff --git gcc/config/aarch64/aarch64-protos.h gcc/config/aarch64/aarch64-protos.h
-index 2ac781d..dd03d90 100644
+index df31181..b84bc8e 100644
 --- gcc/config/aarch64/aarch64-protos.h
 +++ gcc/config/aarch64/aarch64-protos.h
 @@ -108,6 +108,14 @@ enum aarch64_symbol_type
@@ -921,7 +998,7 @@ index 2ac781d..dd03d90 100644
  gimple *aarch64_general_gimple_fold_builtin (unsigned int, gcall *,
  					     gimple_stmt_iterator *);
 diff --git gcc/config/aarch64/aarch64.cc gcc/config/aarch64/aarch64.cc
-index f650abb..5bbd138 100644
+index 5c9e779..91258c9 100644
 --- gcc/config/aarch64/aarch64.cc
 +++ gcc/config/aarch64/aarch64.cc
 @@ -292,8 +292,10 @@ static bool aarch64_vfp_is_call_or_return_candidate (machine_mode,
@@ -1786,7 +1863,7 @@ index f650abb..5bbd138 100644
    unsigned int code = DECL_MD_FUNCTION_CODE (fndecl);
    unsigned int subcode = code >> AARCH64_BUILTIN_SHIFT;
    tree type = TREE_TYPE (TREE_TYPE (fndecl));
-@@ -18330,10 +18842,14 @@ initialize_aarch64_code_model (struct gcc_options *opts)
+@@ -18326,10 +18838,14 @@ initialize_aarch64_code_model (struct gcc_options *opts)
  	}
        break;
      case AARCH64_CMODEL_LARGE:
@@ -1803,7 +1880,7 @@ index f650abb..5bbd138 100644
  	sorry ("code model %qs not supported in ilp32 mode", "large");
        break;
      case AARCH64_CMODEL_TINY_PIC:
-@@ -19256,7 +19772,9 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
+@@ -19252,7 +19768,9 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
  	case AARCH64_CMODEL_SMALL_SPIC:
  	case AARCH64_CMODEL_SMALL_PIC:
  	case AARCH64_CMODEL_SMALL:
@@ -1814,7 +1891,7 @@ index f650abb..5bbd138 100644
  
  	default:
  	  gcc_unreachable ();
-@@ -19292,10 +19810,22 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
+@@ -19288,10 +19806,22 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
  
  	  return SYMBOL_TINY_ABSOLUTE;
  
@@ -1838,7 +1915,7 @@ index f650abb..5bbd138 100644
  	  if ((flag_pic || SYMBOL_REF_WEAK (x))
  	      && !aarch64_symbol_binds_local_p (x))
  	    return aarch64_cmodel == AARCH64_CMODEL_SMALL_SPIC
-@@ -19307,7 +19837,8 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
+@@ -19303,7 +19833,8 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
  		|| offset_within_block_p (x, offset)))
  	    return SYMBOL_FORCE_TO_MEM;
  
@@ -1848,7 +1925,7 @@ index f650abb..5bbd138 100644
  
  	case AARCH64_CMODEL_LARGE:
  	  /* This is alright even in PIC code as the constant
-@@ -19437,7 +19968,10 @@ static GTY(()) tree va_list_type;
+@@ -19433,7 +19964,10 @@ static GTY(()) tree va_list_type;
       void *__vr_top;
       int   __gr_offs;
       int   __vr_offs;
@@ -1860,7 +1937,7 @@ index f650abb..5bbd138 100644
  
  static tree
  aarch64_build_builtin_va_list (void)
-@@ -19445,6 +19979,13 @@ aarch64_build_builtin_va_list (void)
+@@ -19441,6 +19975,13 @@ aarch64_build_builtin_va_list (void)
    tree va_list_name;
    tree f_stack, f_grtop, f_vrtop, f_groff, f_vroff;
  
@@ -1874,7 +1951,7 @@ index f650abb..5bbd138 100644
    /* Create the type.  */
    va_list_type = lang_hooks.types.make_type (RECORD_TYPE);
    /* Give it the required name.  */
-@@ -19516,6 +20057,13 @@ aarch64_expand_builtin_va_start (tree valist, rtx nextarg ATTRIBUTE_UNUSED)
+@@ -19512,6 +20053,13 @@ aarch64_expand_builtin_va_start (tree valist, rtx nextarg ATTRIBUTE_UNUSED)
    int vr_save_area_size = cfun->va_list_fpr_size;
    int vr_offset;
  
@@ -1888,7 +1965,7 @@ index f650abb..5bbd138 100644
    cum = &crtl->args.info;
    if (cfun->va_list_gpr_size)
      gr_save_area_size = MIN ((NUM_ARG_REGS - cum->aapcs_ncrn) * UNITS_PER_WORD,
-@@ -19606,6 +20154,9 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
+@@ -19602,6 +20150,9 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
    HOST_WIDE_INT size, rsize, adjust, align;
    tree t, u, cond1, cond2;
  
@@ -1898,7 +1975,7 @@ index f650abb..5bbd138 100644
    indirect_p = pass_va_arg_by_reference (type);
    if (indirect_p)
      type = build_pointer_type (type);
-@@ -19790,8 +20341,18 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
+@@ -19786,8 +20337,18 @@ aarch64_gimplify_va_arg_expr (tree valist, tree type, gimple_seq *pre_p,
  	  field_ptr_t = double_ptr_type_node;
  	  break;
  	case E_TFmode:
@@ -1919,7 +1996,7 @@ index f650abb..5bbd138 100644
  	  break;
  	case E_HFmode:
  	  field_t = aarch64_fp16_type_node;
-@@ -19862,6 +20423,9 @@ aarch64_setup_incoming_varargs (cumulative_args_t cum_v,
+@@ -19858,6 +20419,9 @@ aarch64_setup_incoming_varargs (cumulative_args_t cum_v,
    int gr_saved = cfun->va_list_gpr_size;
    int vr_saved = cfun->va_list_fpr_size;
  
@@ -1929,7 +2006,7 @@ index f650abb..5bbd138 100644
    /* The caller has advanced CUM up to, but not beyond, the last named
       argument.  Advance a local copy of CUM past the last "real" named
       argument, to find out how many registers are left over.  */
-@@ -20689,6 +21253,12 @@ aarch64_autovectorize_vector_modes (vector_modes *modes, bool)
+@@ -20685,6 +21249,12 @@ aarch64_autovectorize_vector_modes (vector_modes *modes, bool)
  static const char *
  aarch64_mangle_type (const_tree type)
  {
@@ -1942,7 +2019,7 @@ index f650abb..5bbd138 100644
    /* The AArch64 ABI documents say that "__va_list" has to be
       mangled as if it is in the "std" namespace.  */
    if (lang_hooks.types_compatible_p (CONST_CAST_TREE (type), va_list_type))
-@@ -20703,6 +21273,10 @@ aarch64_mangle_type (const_tree type)
+@@ -20699,6 +21269,10 @@ aarch64_mangle_type (const_tree type)
  	return "Dh";
      }
  
@@ -1953,7 +2030,7 @@ index f650abb..5bbd138 100644
    /* Mangle AArch64-specific internal types.  TYPE_NAME is non-NULL_TREE for
       builtin types.  */
    if (TYPE_NAME (type) != NULL)
-@@ -21393,7 +21967,8 @@ aarch64_mov_operand_p (rtx x, machine_mode mode)
+@@ -21389,7 +21963,8 @@ aarch64_mov_operand_p (rtx x, machine_mode mode)
  
    /* GOT accesses are valid moves.  */
    if (SYMBOL_REF_P (x)
@@ -1963,7 +2040,7 @@ index f650abb..5bbd138 100644
      return true;
  
    if (SYMBOL_REF_P (x) && mode == DImode && CONSTANT_ADDRESS_P (x))
-@@ -22553,7 +23128,9 @@ aarch64_declare_function_name (FILE *stream, const char* name,
+@@ -22549,7 +23124,9 @@ aarch64_declare_function_name (FILE *stream, const char* name,
    aarch64_asm_output_variant_pcs (stream, fndecl, name);
  
    /* Don't forget the type directive for ELF.  */
@@ -1973,7 +2050,7 @@ index f650abb..5bbd138 100644
    ASM_OUTPUT_LABEL (stream, name);
  
    cfun->machine->label_is_assembled = true;
-@@ -22588,12 +23165,17 @@ aarch64_print_patchable_function_entry (FILE *file,
+@@ -22584,12 +23161,17 @@ aarch64_print_patchable_function_entry (FILE *file,
  /* Implement ASM_OUTPUT_DEF_FROM_DECLS.  Output .variant_pcs for aliases.  */
  
  void
@@ -1992,7 +2069,7 @@ index f650abb..5bbd138 100644
  }
  
  /* Implement ASM_OUTPUT_EXTERNAL.  Output .variant_pcs for undefined
-@@ -23211,6 +23793,16 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
+@@ -23213,6 +23795,16 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
      }
  
    gcc_assert (CONST_INT_P (info.u.mov.value));
@@ -2009,7 +2086,7 @@ index f650abb..5bbd138 100644
  
    if (which == AARCH64_CHECK_MOV)
      {
-@@ -23219,16 +23811,16 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
+@@ -23221,16 +23813,16 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
  		  ? "msl" : "lsl");
        if (lane_count == 1)
  	snprintf (templ, sizeof (templ), "%s\t%%d0, " HOST_WIDE_INT_PRINT_HEX,
@@ -2029,7 +2106,7 @@ index f650abb..5bbd138 100644
      }
    else
      {
-@@ -23237,12 +23829,12 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
+@@ -23239,12 +23831,12 @@ aarch64_output_simd_mov_immediate (rtx const_vector, unsigned width,
        if (info.u.mov.shift)
  	snprintf (templ, sizeof (templ), "%s\t%%0.%d%c, #"
  		  HOST_WIDE_INT_PRINT_DEC ", %s #%d", mnemonic, lane_count,
@@ -2044,7 +2121,7 @@ index f650abb..5bbd138 100644
      }
    return templ;
  }
-@@ -26353,12 +26945,12 @@ aarch64_libgcc_floating_mode_supported_p (scalar_float_mode mode)
+@@ -26355,12 +26947,12 @@ aarch64_libgcc_floating_mode_supported_p (scalar_float_mode mode)
  }
  
  /* Implement TARGET_SCALAR_MODE_SUPPORTED_P - return TRUE
@@ -2059,7 +2136,7 @@ index f650abb..5bbd138 100644
  	  ? true
  	  : default_scalar_mode_supported_p (mode));
  }
-@@ -27116,19 +27708,37 @@ aarch64_sls_emit_shared_blr_thunks (FILE *out_file)
+@@ -27118,19 +27710,37 @@ aarch64_sls_emit_shared_blr_thunks (FILE *out_file)
  	continue;
  
        const char *name = indirect_symbol_names[regnum];
@@ -2100,7 +2177,7 @@ index f650abb..5bbd138 100644
      }
  }
  
-@@ -27321,6 +27931,15 @@ aarch64_run_selftests (void)
+@@ -27323,6 +27933,15 @@ aarch64_run_selftests (void)
  #undef TARGET_ASM_ALIGNED_SI_OP
  #define TARGET_ASM_ALIGNED_SI_OP "\t.word\t"
  
@@ -2116,7 +2193,7 @@ index f650abb..5bbd138 100644
  #undef TARGET_ASM_CAN_OUTPUT_MI_THUNK
  #define TARGET_ASM_CAN_OUTPUT_MI_THUNK \
    hook_bool_const_tree_hwi_hwi_const_tree_true
-@@ -27407,6 +28026,12 @@ aarch64_run_selftests (void)
+@@ -27409,6 +28028,12 @@ aarch64_run_selftests (void)
  #undef TARGET_FUNCTION_ARG_BOUNDARY
  #define TARGET_FUNCTION_ARG_BOUNDARY aarch64_function_arg_boundary
  
@@ -2129,7 +2206,7 @@ index f650abb..5bbd138 100644
  #undef TARGET_FUNCTION_ARG_PADDING
  #define TARGET_FUNCTION_ARG_PADDING aarch64_function_arg_padding
  
-@@ -27734,7 +28359,7 @@ aarch64_libgcc_floating_mode_supported_p
+@@ -27736,7 +28361,7 @@ aarch64_libgcc_floating_mode_supported_p
  
  /* The architecture reserves bits 0 and 1 so use bit 2 for descriptors.  */
  #undef TARGET_CUSTOM_FUNCTION_DESCRIPTORS
@@ -2218,7 +2295,7 @@ index 359b6e85..db5fe44 100644
     So in order to unwind a function using a frame pointer, the very first
     function that is unwound must save the frame pointer.  That way the frame
 diff --git gcc/config/aarch64/aarch64.md gcc/config/aarch64/aarch64.md
-index f5c6359..dc0ec3e 100644
+index 34b8059..c356d30 100644
 --- gcc/config/aarch64/aarch64.md
 +++ gcc/config/aarch64/aarch64.md
 @@ -303,6 +303,7 @@
@@ -2285,7 +2362,7 @@ index f5c6359..dc0ec3e 100644
     adr\\t%x0, %c1
     adrp\\t%x0, %A1
     fmov\\t%d0, %x1
-@@ -6850,7 +6882,10 @@
+@@ -6857,7 +6889,10 @@
  	(lo_sum:P (match_operand:P 1 "register_operand" "r")
  		  (match_operand 2 "aarch64_valid_symref" "S")))]
    ""
@@ -3163,50 +3240,11 @@ index 0000000..a8bfcff
 +# FIXME - figure out what multilib provisions we should make for 
 +# a) arm64e
 +# b) arm64_32
-diff --git gcc/config/darwin-c.cc gcc/config/darwin-c.cc
-index 3770857..923434d 100644
---- gcc/config/darwin-c.cc
-+++ gcc/config/darwin-c.cc
-@@ -691,7 +691,8 @@ macosx_version_as_macro (void)
-   if (!version_array)
-     goto fail;
- 
--  if (version_array[MAJOR] < 10 || version_array[MAJOR] > 12)
-+  /* System tools accept up to 99 as a major version.  */
-+  if (version_array[MAJOR] < 10 || version_array[MAJOR] > 99)
-     goto fail;
- 
-   if (version_array[MAJOR] == 10 && version_array[MINOR] < 10)
 diff --git gcc/config/darwin-driver.cc gcc/config/darwin-driver.cc
-index 30e0e64..6df85f5 100644
+index 00287f3..6df85f5 100644
 --- gcc/config/darwin-driver.cc
 +++ gcc/config/darwin-driver.cc
-@@ -160,19 +160,13 @@ darwin_find_version_from_kernel (void)
-     goto parse_failed;
- 
-   /* Darwin20 sees a transition to macOS 11.  In this, it seems that the
--     mapping to macOS minor version is now shifted to the kernel minor
--     version - 1 (at least for the initial releases).  */
-+     mapping to macOS minor version and patch level is now always 0, 0
-+     (at least for macOS 11 and 12).  */
-   if (major_vers >= 20)
-     {
--      int minor_vers = *version_p++ - '0';
--      if (ISDIGIT (*version_p))
--	minor_vers = minor_vers * 10 + (*version_p++ - '0');
--      if (*version_p++ != '.')
--	goto parse_failed;
--      if (minor_vers > 0)
--	minor_vers -= 1; /* Kernel 20.3 => macOS 11.2.  */
--      /* It's not yet clear whether patch level will be considered.  */
--      asprintf (&new_flag, "%d.%02d.00", major_vers - 9, minor_vers);
-+      /* Apple clang doesn't include the minor version or the patch level
-+	 in the object file, nor does it pass it to ld  */
-+      asprintf (&new_flag, "%d.00.00", major_vers - 9);
-     }
-   else if (major_vers - 4 <= 4)
-     /* On 10.4 and earlier, the old linker is used which does not
-@@ -274,14 +268,21 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -268,14 +268,21 @@ darwin_driver_init (unsigned int *decoded_options_count,
    bool seenX86_64 = false;
    bool seenPPC = false;
    bool seenPPC64 = false;
@@ -3228,7 +3266,7 @@ index 30e0e64..6df85f5 100644
  
    for (i = 1; i < *decoded_options_count; i++)
      {
-@@ -302,6 +303,12 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -296,6 +303,12 @@ darwin_driver_init (unsigned int *decoded_options_count,
  	    seenPPC = true;
  	  else if (!strcmp ((*decoded_options)[i].arg, "ppc64"))
  	    seenPPC64 = true;
@@ -3241,7 +3279,7 @@ index 30e0e64..6df85f5 100644
  	  else
  	    error ("this compiler does not support %qs",
  		   (*decoded_options)[i].arg);
-@@ -315,7 +322,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -309,7 +322,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
  	  --i;
  	  --*decoded_options_count; 
  	  break;
@@ -3250,7 +3288,7 @@ index 30e0e64..6df85f5 100644
  	case OPT_m32:
  	  seenM32 = true;
  	  break;
-@@ -323,6 +330,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -317,6 +330,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
  	case OPT_m64:
  	  seenM64 = true;
  	  break;
@@ -3258,7 +3296,7 @@ index 30e0e64..6df85f5 100644
  
  	case OPT_mmacosx_version_min_:
  	  seen_version_min = true;
-@@ -355,8 +363,16 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -349,8 +363,16 @@ darwin_driver_init (unsigned int *decoded_options_count,
  	  gcc_checking_assert ((*decoded_options)[i].arg);
  	  if (startswith ((*decoded_options)[i].arg, "-exported_symbol"))
  	    noexport_p = false;
@@ -3275,7 +3313,7 @@ index 30e0e64..6df85f5 100644
  	default:
  	  break;
  	}
-@@ -372,6 +388,9 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -366,6 +388,9 @@ darwin_driver_init (unsigned int *decoded_options_count,
    if (seenPPC || seenPPC64)
      warning (0, "this compiler does not support PowerPC"
  		" (%<-arch%> option ignored)");
@@ -3285,7 +3323,7 @@ index 30e0e64..6df85f5 100644
    if (seenX86)
      {
        if (seenX86_64 || seenM64)
-@@ -395,6 +414,9 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -389,6 +414,9 @@ darwin_driver_init (unsigned int *decoded_options_count,
    if (seenX86 || seenX86_64)
      warning (0, "this compiler does not support x86"
  		" (%<-arch%> option ignored)");
@@ -3295,7 +3333,7 @@ index 30e0e64..6df85f5 100644
    if (seenPPC)
      {
        if (seenPPC64 || seenM64)
-@@ -414,12 +436,20 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -408,12 +436,20 @@ darwin_driver_init (unsigned int *decoded_options_count,
        if (! seenM64) /* Add -m64 if the User didn't. */
  	appendM64 = true;
      }
@@ -3316,7 +3354,7 @@ index 30e0e64..6df85f5 100644
    if (appendM32 || appendM64)
      {
        ++*decoded_options_count;
-@@ -429,6 +459,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -423,6 +459,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
        generate_option (appendM32 ? OPT_m32 : OPT_m64, NULL, 1, CL_DRIVER,
  		       &(*decoded_options)[*decoded_options_count - 1]);
      }
@@ -3324,7 +3362,7 @@ index 30e0e64..6df85f5 100644
  
    if (!seen_sysroot_p)
      {
-@@ -496,4 +527,16 @@ darwin_driver_init (unsigned int *decoded_options_count,
+@@ -490,4 +527,16 @@ darwin_driver_init (unsigned int *decoded_options_count,
        generate_option (OPT_nodefaultexport, NULL, 1, CL_DRIVER,
  		       &(*decoded_options)[*decoded_options_count - 1]);
      }
@@ -3402,7 +3440,7 @@ index f065a13..7cd684c 100644
      {
        /* These sections are only used for kernel code.  */
 diff --git gcc/config/darwin.h gcc/config/darwin.h
-index 3682bd2..13ba6e6 100644
+index 51e257d..13ba6e6 100644
 --- gcc/config/darwin.h
 +++ gcc/config/darwin.h
 @@ -42,6 +42,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
@@ -3413,35 +3451,7 @@ index 3682bd2..13ba6e6 100644
  
  #define OBJECT_FORMAT_MACHO 1
  
-@@ -143,10 +144,7 @@ extern GTY(()) int darwin_ms_struct;
-    Right now there's no mechanism to split up the "variable portion" (%*) of
-    the matched spec string, so where we have some driver specs that take 2
-    or 3 arguments, these cannot be processed here, but are deferred until the
--   LINK_SPEC, where they are copied verbatim.
--   We have a "safe" version of the MacOS version string, that's been sanity-
--   checked and truncated to minor version.  If the 'tiny' (3rd) portion of the
--   value is not significant, it's better to use this in version-compare().  */
-+   LINK_SPEC, where they are copied verbatim.  */
- 
- #undef SUBTARGET_DRIVER_SELF_SPECS
- #define SUBTARGET_DRIVER_SELF_SPECS					\
-@@ -220,13 +218,8 @@ extern GTY(()) int darwin_ms_struct;
-   "%{image_base*:-Xlinker -image_base -Xlinker %*} %<image_base*",	\
-   "%{init*:-Xlinker -init -Xlinker %*} %<init*",			\
-   "%{multi_module:-Xlinker -multi_module} %<multi_module",		\
--  "%{multiply_defined*:-Xlinker -multiply_defined -Xlinker %*; \
--     :%{shared-libgcc: \
--       %:version-compare(< 10.5 asm_macosx_version_min= -Xlinker) \
--       %:version-compare(< 10.5 asm_macosx_version_min= -multiply_defined) \
--       %:version-compare(< 10.5 asm_macosx_version_min= -Xlinker) \
--       %:version-compare(< 10.5 asm_macosx_version_min= suppress)}} \
--     %<multiply_defined*",						\
-+  "%{multiply_defined*:-Xlinker -multiply_defined -Xlinker %*} \
-+     %<multiply_defined* ",						\
-   "%{multiplydefinedunused*:\
-      -Xlinker -multiply_defined_unused -Xlinker %*} \
-      %<multiplydefinedunused* ",					\
-@@ -304,6 +297,31 @@ extern GTY(()) int darwin_ms_struct;
+@@ -296,6 +297,31 @@ extern GTY(()) int darwin_ms_struct;
  #define DARWIN_CC1_SPEC							\
    "%<dynamic %<dynamiclib %<force_cpusubtype_ALL "
  
@@ -3473,7 +3483,7 @@ index 3682bd2..13ba6e6 100644
  #define SUBSUBTARGET_OVERRIDE_OPTIONS					\
    do {									\
      darwin_override_options ();						\
-@@ -395,7 +413,9 @@ extern GTY(()) int darwin_ms_struct;
+@@ -387,7 +413,9 @@ extern GTY(()) int darwin_ms_struct;
      DARWIN_NOPIE_SPEC \
      DARWIN_RDYNAMIC \
      DARWIN_NOCOMPACT_UNWIND \
@@ -3484,17 +3494,7 @@ index 3682bd2..13ba6e6 100644
  
  /* Spec that controls whether the debug linker is run automatically for
     a link step.  This needs to be done if there is a source file on the
-@@ -458,6 +478,9 @@ extern GTY(()) int darwin_ms_struct;
-    %{!force_cpusubtype_ALL:-arch %(darwin_subarch)} "\
-    LINK_SYSROOT_SPEC \
-   "%{mmacosx-version-min=*:-macosx_version_min %*} \
-+   %{!multiply_defined*:%{shared-libgcc: \
-+     %:version-compare(< 10.5 mmacosx-version-min= -multiply_defined) \
-+     %:version-compare(< 10.5 mmacosx-version-min= suppress) }} \
-    %{sectalign*} %{sectcreate*} %{sectobjectsymbols*}  %{sectorder*} \
-    %{segaddr*} %{segcreate*} %{segprot*} "
- 
-@@ -470,34 +493,19 @@ extern GTY(()) int darwin_ms_struct;
+@@ -465,34 +493,19 @@ extern GTY(()) int darwin_ms_struct;
     This is because,in general, we need to unwind through system libraries that
     are linked with the shared unwinder in libunwind (or libgcc_s for 10.4/5).
  
@@ -3535,7 +3535,7 @@ index 3682bd2..13ba6e6 100644
     Otherwise, we just link the shared version of gcc_s.1.1 and pick up
     exceptions:
       * Prior to 10.3.9, then we have to link the static eh lib, since there
-@@ -507,6 +515,10 @@ extern GTY(()) int darwin_ms_struct;
+@@ -502,6 +515,10 @@ extern GTY(()) int darwin_ms_struct;
  
     In all cases, libgcc_s.1.1 will be installed with the compiler, or any app
     built using it, so we can link the builtins and emutls shared on all.
@@ -3546,7 +3546,7 @@ index 3682bd2..13ba6e6 100644
  */
  #undef REAL_LIBGCC_SPEC
  #define REAL_LIBGCC_SPEC \
-@@ -514,8 +526,7 @@ extern GTY(()) int darwin_ms_struct;
+@@ -509,8 +526,7 @@ extern GTY(()) int darwin_ms_struct;
      %:version-compare(!> 10.6 mmacosx-version-min= -lgcc_eh)		  \
      %:version-compare(>= 10.6 mmacosx-version-min= -lemutls_w);		  \
     shared-libgcc|fexceptions|fobjc-exceptions|fgnu-runtime:		  \
@@ -3556,7 +3556,7 @@ index 3682bd2..13ba6e6 100644
      %:version-compare(!> 10.3.9 mmacosx-version-min= -lgcc_eh)		  \
      %:version-compare(>< 10.3.9 10.5 mmacosx-version-min= -lgcc_s.10.4)   \
      %:version-compare(>< 10.5 10.6 mmacosx-version-min= -lgcc_s.10.5);	  \
-@@ -550,7 +561,8 @@ extern GTY(()) int darwin_ms_struct;
+@@ -545,7 +561,8 @@ extern GTY(()) int darwin_ms_struct;
    { "darwin_crt2", DARWIN_CRT2_SPEC },					\
    { "darwin_crt3", DARWIN_CRT3_SPEC },					\
    { "darwin_dylib1", DARWIN_DYLIB1_SPEC },				\
@@ -3566,7 +3566,7 @@ index 3682bd2..13ba6e6 100644
  
  #define DARWIN_CRT1_SPEC						\
    "%:version-compare(!> 10.5 mmacosx-version-min= -lcrt1.o)		\
-@@ -576,6 +588,17 @@ extern GTY(()) int darwin_ms_struct;
+@@ -571,6 +588,17 @@ extern GTY(()) int darwin_ms_struct;
  "%{!static:%:version-compare(< 10.6 mmacosx-version-min= -lbundle1.o)	\
  	   %{fgnu-tm: -lcrttms.o}}"
  
@@ -3615,10 +3615,10 @@ index a55f6b2..36a3286 100644
 +  (!flag_off_stack_trampolines && !flag_trampolines) ? 1 : 0
 +
 diff --git gcc/config/i386/i386.cc gcc/config/i386/i386.cc
-index b16df5b..7e03559 100644
+index 9dd9fa6..5cd4b5c 100644
 --- gcc/config/i386/i386.cc
 +++ gcc/config/i386/i386.cc
-@@ -24726,7 +24726,7 @@ ix86_libgcc_floating_mode_supported_p
+@@ -24698,7 +24698,7 @@ ix86_libgcc_floating_mode_supported_p
  #define TARGET_HARD_REGNO_SCRATCH_OK ix86_hard_regno_scratch_ok
  
  #undef TARGET_CUSTOM_FUNCTION_DESCRIPTORS
@@ -3645,7 +3645,7 @@ index 363082b..5f56d7a 100644
  #define TARGET_PTRMEMFUNC_VBIT_LOCATION ptrmemfunc_vbit_in_pfn
  
 diff --git gcc/configure gcc/configure
-index 5ce0557..81b9abf 100755
+index 5ce0557..dbc127c 100755
 --- gcc/configure
 +++ gcc/configure
 @@ -634,6 +634,7 @@ LIBOBJS
@@ -3710,7 +3710,36 @@ index 5ce0557..81b9abf 100755
    --with-plugin-ld=[ARG]  specify the plugin linker
    --with-glibc-version=M.N
                            assume GCC used with glibc version M.N or later
-@@ -17867,6 +17880,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -3766,15 +3779,24 @@ if test x${gcc_gxx_libcxx_include_dir} != x; then
+ $as_echo "#define ENABLE_STDLIB_OPTION 1" >>confdefs.h
+ 
+ else
+-  $as_echo "#define ENABLE_STDLIB_OPTION 0" >>confdefs.h
++  case $target in
++    *-darwin1[1-9]* | *-darwin2*)
++       # Default this on for Darwin versions which default to libcxx.
++       $as_echo "#define ENABLE_STDLIB_OPTION 1" >>confdefs.h
+ 
++       ;;
++    *)
++       $as_echo "#define ENABLE_STDLIB_OPTION 0" >>confdefs.h
++
++       ;;
++  esac
+ fi
+-# ??? This logic must match libstdc++-v3/acinclude.m4:GLIBCXX_EXPORT_INSTALL_INFO.
++
+ if test x${gcc_gxx_libcxx_include_dir} = x; then
++  libcxx_incdir='include/c++/v1'
+   if test x${enable_version_specific_runtime_libs} = xyes; then
+-    gcc_gxx_libcxx_include_dir='${libsubdir}/libc++_include/c++/v1'
++    gcc_gxx_libcxx_include_dir='${libsubdir}/$libcxx_incdir'
+   else
+-    libcxx_incdir='libc++_include/c++/$(version)/v1'
+     if test x$host != x$target; then
+        libcxx_incdir="$target_alias/$libcxx_incdir"
+     fi
+@@ -17867,6 +17889,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
      darwin* | rhapsody*)
  
  
@@ -3758,7 +3787,7 @@ index 5ce0557..81b9abf 100755
    archive_cmds_need_lc=no
    hardcode_direct=no
    hardcode_automatic=yes
-@@ -17884,10 +17938,19 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -17884,10 +17947,19 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
    esac
    if test "$_lt_dar_can_shared" = "yes"; then
      output_verbose_link_cmd=func_echo_all
@@ -3782,25 +3811,25 @@ index 5ce0557..81b9abf 100755
  
    else
    ld_shlibs=no
-@@ -19673,7 +19736,7 @@ else
+@@ -19673,7 +19745,7 @@ else
    lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
    lt_status=$lt_dlunknown
    cat > conftest.$ac_ext <<_LT_EOF
 -#line 19676 "configure"
-+#line 19739 "configure"
++#line 19748 "configure"
  #include "confdefs.h"
  
  #if HAVE_DLFCN_H
-@@ -19779,7 +19842,7 @@ else
+@@ -19779,7 +19851,7 @@ else
    lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
    lt_status=$lt_dlunknown
    cat > conftest.$ac_ext <<_LT_EOF
 -#line 19782 "configure"
-+#line 19845 "configure"
++#line 19854 "configure"
  #include "confdefs.h"
  
  #if HAVE_DLFCN_H
-@@ -20655,6 +20718,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -20655,6 +20727,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
        darwin* | rhapsody*)
  
  
@@ -3848,7 +3877,7 @@ index 5ce0557..81b9abf 100755
    archive_cmds_need_lc_CXX=no
    hardcode_direct_CXX=no
    hardcode_automatic_CXX=yes
-@@ -20672,12 +20776,25 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -20672,12 +20785,25 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
    esac
    if test "$_lt_dar_can_shared" = "yes"; then
      output_verbose_link_cmd=func_echo_all
@@ -3879,7 +3908,7 @@ index 5ce0557..81b9abf 100755
        archive_expsym_cmds_CXX="sed 's,^,_,' < \$export_symbols > \$output_objdir/\${libname}-symbols.expsym~\$CC -r -keep_private_externs -nostdlib -o \${lib}-master.o \$libobjs~\$CC -dynamiclib \$allow_undefined_flag -o \$lib \${lib}-master.o \$deplibs \$compiler_flags -install_name \$rpath/\$soname \$verstring${_lt_dar_export_syms}${_lt_dsymutil}"
      fi
  
-@@ -23028,6 +23145,35 @@ ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+@@ -23028,6 +23154,35 @@ ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
  
  
  
@@ -3915,7 +3944,7 @@ index 5ce0557..81b9abf 100755
  # Identify the assembler which will work hand-in-glove with the newly
  # built GCC, so that we can examine its features.  This is the assembler
  # which will be driven by the driver program.
-@@ -32429,6 +32575,22 @@ $as_echo "#define ENABLE_DEFAULT_PIE 1" >>confdefs.h
+@@ -32429,6 +32584,22 @@ $as_echo "#define ENABLE_DEFAULT_PIE 1" >>confdefs.h
  fi
  
  
@@ -3938,7 +3967,7 @@ index 5ce0557..81b9abf 100755
  # Check if -fno-PIE works.
  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -fno-PIE option" >&5
  $as_echo_n "checking for -fno-PIE option... " >&6; }
-@@ -32966,6 +33128,10 @@ LTLIBOBJS=$ac_ltlibobjs
+@@ -32966,6 +33137,10 @@ LTLIBOBJS=$ac_ltlibobjs
  
  
  
@@ -3950,10 +3979,37 @@ index 5ce0557..81b9abf 100755
  : "${CONFIG_STATUS=./config.status}"
  ac_write_fail=0
 diff --git gcc/configure.ac gcc/configure.ac
-index 23bee70..44f78a5 100644
+index 23bee70..2d91599 100644
 --- gcc/configure.ac
 +++ gcc/configure.ac
-@@ -2559,6 +2559,21 @@ AC_PROG_LIBTOOL
+@@ -249,14 +249,22 @@ if test x${gcc_gxx_libcxx_include_dir} != x; then
+   AC_DEFINE(ENABLE_STDLIB_OPTION, 1,
+             [Define if the -stdlib= option should be enabled.])
+ else
+-  AC_DEFINE(ENABLE_STDLIB_OPTION, 0)
++  case $target in
++    *-darwin1[[1-9]]* | *-darwin2*)
++       # Default this on for Darwin versions which default to libcxx.
++       AC_DEFINE(ENABLE_STDLIB_OPTION, 1)
++       ;;
++    *)
++       AC_DEFINE(ENABLE_STDLIB_OPTION, 0)
++       ;;
++  esac
+ fi
+-# ??? This logic must match libstdc++-v3/acinclude.m4:GLIBCXX_EXPORT_INSTALL_INFO.
++
+ if test x${gcc_gxx_libcxx_include_dir} = x; then
++  libcxx_incdir='include/c++/v1'
+   if test x${enable_version_specific_runtime_libs} = xyes; then
+-    gcc_gxx_libcxx_include_dir='${libsubdir}/libc++_include/c++/v1'
++    gcc_gxx_libcxx_include_dir='${libsubdir}/$libcxx_incdir'
+   else
+-    libcxx_incdir='libc++_include/c++/$(version)/v1'
+     if test x$host != x$target; then
+        libcxx_incdir="$target_alias/$libcxx_incdir"
+     fi
+@@ -2559,6 +2567,21 @@ AC_PROG_LIBTOOL
  AC_SUBST(objdir)
  AC_SUBST(enable_fast_install)
  
@@ -3975,7 +4031,7 @@ index 23bee70..44f78a5 100644
  # Identify the assembler which will work hand-in-glove with the newly
  # built GCC, so that we can examine its features.  This is the assembler
  # which will be driven by the driver program.
-@@ -7646,6 +7661,19 @@ if test x$enable_default_pie = xyes ; then
+@@ -7646,6 +7669,19 @@ if test x$enable_default_pie = xyes ; then
  fi
  AC_SUBST([enable_default_pie])
  
@@ -3995,6 +4051,85 @@ index 23bee70..44f78a5 100644
  # Check if -fno-PIE works.
  AC_CACHE_CHECK([for -fno-PIE option],
    [gcc_cv_c_no_fpie],
+diff --git gcc/cp/decl2.cc gcc/cp/decl2.cc
+index d7e9980..ff2a1f6 100644
+--- gcc/cp/decl2.cc
++++ gcc/cp/decl2.cc
+@@ -3653,9 +3653,8 @@ get_tls_init_fn (tree var)
+   if (!flag_extern_tls_init && DECL_EXTERNAL (var))
+     return NULL_TREE;
+ 
+-  /* If the variable is internal, or if we can't generate aliases,
+-     call the local init function directly.  */
+-  if (!TREE_PUBLIC (var) || !TARGET_SUPPORTS_ALIASES)
++  /* If the variable is internal call the local init function directly.  */
++  if (!TREE_PUBLIC (var))
+     return get_local_tls_init_fn (DECL_SOURCE_LOCATION (var));
+ 
+   tree sname = mangle_tls_init_fn (var);
+@@ -4801,22 +4800,24 @@ handle_tls_init (void)
+   finish_expr_stmt (cp_build_modify_expr (loc, guard, NOP_EXPR,
+ 					  boolean_true_node,
+ 					  tf_warning_or_error));
++  auto_vec<tree> direct_calls;
+   for (; vars; vars = TREE_CHAIN (vars))
+     {
+       tree var = TREE_VALUE (vars);
+       tree init = TREE_PURPOSE (vars);
+       one_static_initialization_or_destruction (var, init, true);
+ 
+-      /* Output init aliases even with -fno-extern-tls-init.  */
+-      if (TARGET_SUPPORTS_ALIASES && TREE_PUBLIC (var))
++      /* Output inits even with -fno-extern-tls-init.
++	 We save the list here and output either an alias or a stub function
++	 below.  */
++      if (TREE_PUBLIC (var))
+ 	{
+-          tree single_init_fn = get_tls_init_fn (var);
++	  tree single_init_fn = get_tls_init_fn (var);
+ 	  if (single_init_fn == NULL_TREE)
+ 	    continue;
+-	  cgraph_node *alias
+-	    = cgraph_node::get_create (fn)->create_same_body_alias
+-		(single_init_fn, fn);
+-	  gcc_assert (alias != NULL);
++	  if (single_init_fn == fn)
++	    continue;
++	  direct_calls.safe_push (single_init_fn);
+ 	}
+     }
+ 
+@@ -4824,6 +4825,30 @@ handle_tls_init (void)
+   finish_if_stmt (if_stmt);
+   finish_function_body (body);
+   expand_or_defer_fn (finish_function (/*inline_p=*/false));
++
++  /* For each TLS var that we have an init function, we either emit an alias
++     between that and the tls_init, or a stub function that just calls the
++     tls_init.  */
++  while (!direct_calls.is_empty())
++    {
++      tree single_init_fn = direct_calls.pop ();
++      if (TARGET_SUPPORTS_ALIASES)
++	{
++	  cgraph_node *alias
++	     = cgraph_node::get_create (fn)->create_same_body_alias
++		(single_init_fn, fn);
++	  gcc_assert (alias != NULL);
++	}
++      else
++	{
++	  start_preparsed_function (single_init_fn, NULL_TREE, SF_PRE_PARSED);
++	  tree body = begin_function_body ();
++	  tree r = build_call_expr (fn, 0);
++	  finish_expr_stmt (r);
++	  finish_function_body (body);
++	  expand_or_defer_fn (finish_function (/*inline_p=*/false));
++	}
++    }
+ }
+ 
+ /* We're at the end of compilation, so generate any mangling aliases that
 diff --git gcc/cp/g++spec.cc gcc/cp/g++spec.cc
 index 8174d65..2e1e06e 100644
 --- gcc/cp/g++spec.cc
@@ -4039,7 +4174,7 @@ index 0000000..b60928e
 +
 +#endif /* GCC_CUMULATIVE_ARGS_H */
 diff --git gcc/doc/invoke.texi gcc/doc/invoke.texi
-index 07b4401..61f6108 100644
+index ff6c338..55c8ba8 100644
 --- gcc/doc/invoke.texi
 +++ gcc/doc/invoke.texi
 @@ -670,6 +670,7 @@ Objective-C and Objective-C++ Dialects}.
@@ -4347,10 +4482,18 @@ index 79e296d..a9caa04 100644
  #endif
  } max_align_t;
 diff --git gcc/jit/Make-lang.in gcc/jit/Make-lang.in
-index 6e10abf..d177107 100644
+index 6e10abf..5a39342 100644
 --- gcc/jit/Make-lang.in
 +++ gcc/jit/Make-lang.in
-@@ -59,7 +59,7 @@ LIBGCCJIT_AGE = 1
+@@ -43,6 +43,7 @@
+ LIBGCCJIT_VERSION_NUM = 0
+ LIBGCCJIT_MINOR_NUM = 0
+ LIBGCCJIT_RELEASE_NUM = 1
++COMMA := ,
+ 
+ ifneq (,$(findstring mingw,$(target)))
+ LIBGCCJIT_FILENAME = libgccjit-$(LIBGCCJIT_VERSION_NUM).dll
+@@ -59,22 +60,18 @@ LIBGCCJIT_AGE = 1
  LIBGCCJIT_BASENAME = libgccjit
  
  LIBGCCJIT_SONAME = \
@@ -4359,6 +4502,36 @@ index 6e10abf..d177107 100644
  LIBGCCJIT_FILENAME = $(LIBGCCJIT_BASENAME).$(LIBGCCJIT_VERSION_NUM).dylib
  LIBGCCJIT_LINKER_NAME = $(LIBGCCJIT_BASENAME).dylib
  
+-# Conditionalize the use of the LD_VERSION_SCRIPT_OPTION and
+-# LD_SONAME_OPTION depending if configure found them, using $(if)
+-# We have to define a COMMA here, otherwise the commas in the "true"
+-# result are treated as separators by the $(if).
+-COMMA := ,
+-LIBGCCJIT_VERSION_SCRIPT_OPTION = \
+-	$(if $(LD_VERSION_SCRIPT_OPTION),\
+-	  -Wl$(COMMA)$(LD_VERSION_SCRIPT_OPTION)$(COMMA)$(srcdir)/jit/libgccjit.map)
++# TODO: translate the libgccjit.map into a form usable by Darwin's linker and
++# then check for linker support for -exported_symbols_list=.  Omitting this
++# means that all symbols in the libgccjit library will be visible.
++LIBGCCJIT_VERSION_SCRIPT_OPTION =
+ 
+-LIBGCCJIT_SONAME_OPTION = \
+-	$(if $(LD_SONAME_OPTION), \
+-	     -Wl$(COMMA)$(LD_SONAME_OPTION)$(COMMA)$(LIBGCCJIT_SONAME))
++# This is a work-around fix for cross-compilation where the target linker
++# is ld and the host is ld64.
++LIBGCCJIT_SONAME_OPTION = -Wl,-install_name,$(LIBGCCJIT_SONAME)
+ 
+ LIBGCCJIT_SONAME_SYMLINK = $(LIBGCCJIT_FILENAME)
+ LIBGCCJIT_LINKER_NAME_SYMLINK = $(LIBGCCJIT_LINKER_NAME)
+@@ -98,7 +95,6 @@ LIBGCCJIT_SONAME_SYMLINK = $(LIBGCCJIT_SONAME)
+ # LD_SONAME_OPTION depending if configure found them, using $(if)
+ # We have to define a COMMA here, otherwise the commas in the "true"
+ # result are treated as separators by the $(if).
+-COMMA := ,
+ LIBGCCJIT_VERSION_SCRIPT_OPTION = \
+ 	$(if $(LD_VERSION_SCRIPT_OPTION),\
+ 	  -Wl$(COMMA)$(LD_VERSION_SCRIPT_OPTION)$(COMMA)$(srcdir)/jit/libgccjit.map)
 diff --git gcc/objc/objc-next-runtime-abi-02.cc gcc/objc/objc-next-runtime-abi-02.cc
 index e50ca6e..9ea63b1 100644
 --- gcc/objc/objc-next-runtime-abi-02.cc
@@ -4539,6 +4712,75 @@ index 4f6f3a4..ff9fd8b 100644
 +// { dg-final { scan-assembler "\n_Z1gSt9__va_listS_:" { target { ! *-*-darwin* } } } }
 +// { dg-final { scan-assembler "\n__Z1gPcS_:" { target *-*-darwin* } } }
  void g(va_list, va_list) {}
+diff --git gcc/testsuite/g++.dg/cpp0x/pr106435-b.cc gcc/testsuite/g++.dg/cpp0x/pr106435-b.cc
+new file mode 100644
+index 0000000..4f58169
+--- /dev/null
++++ gcc/testsuite/g++.dg/cpp0x/pr106435-b.cc
+@@ -0,0 +1,17 @@
++// PR c++/106435
++#include "pr106435.h"
++
++//#include <iostream>
++
++Foo::Foo() {
++  ++num_calls;
++//  std::cout << "Foo::Foo(this=" << this << ")\n";
++}
++
++int Foo::func() {
++//  std::cout << "Foo::func(this=" << this << ")\n";
++  return num_calls;
++}
++
++thread_local Foo Bar::foo;
++thread_local Foo Bar::baz;
+diff --git gcc/testsuite/g++.dg/cpp0x/pr106435.C gcc/testsuite/g++.dg/cpp0x/pr106435.C
+new file mode 100644
+index 0000000..d600976
+--- /dev/null
++++ gcc/testsuite/g++.dg/cpp0x/pr106435.C
+@@ -0,0 +1,20 @@
++// PR c++/106435
++// { dg-do run { target c++11 } }
++// { dg-additional-sources "pr106435-b.cc" }
++
++#include "pr106435.h"
++
++int num_calls = 0;
++
++extern "C" __attribute__((__noreturn__)) void abort();
++
++thread_local Foo Bar::bat;
++
++int main() {
++  int v = Bar::foo.func();
++  if (v != 2)
++    abort();
++  v = Bar::bat.func();
++  if (v != 3)
++    abort();
++}
+diff --git gcc/testsuite/g++.dg/cpp0x/pr106435.h gcc/testsuite/g++.dg/cpp0x/pr106435.h
+new file mode 100644
+index 0000000..240de1e
+--- /dev/null
++++ gcc/testsuite/g++.dg/cpp0x/pr106435.h
+@@ -0,0 +1,14 @@
++// PR c++/106435
++#pragma once
++
++extern int num_calls;
++struct Foo {
++  Foo();
++  int func();
++};
++
++struct Bar {
++  thread_local static Foo foo;
++  thread_local static Foo baz;
++  thread_local static Foo bat;
++};
 diff --git gcc/testsuite/g++.dg/ext/arm-bf16/bf16-mangle-aarch64-1.C gcc/testsuite/g++.dg/ext/arm-bf16/bf16-mangle-aarch64-1.C
 index 5426a18..a017ce8 100644
 --- gcc/testsuite/g++.dg/ext/arm-bf16/bf16-mangle-aarch64-1.C
@@ -7558,10 +7800,10 @@ index d09cd51..280ce39 100644
    verbose -log "LD_RUN_PATH=[getenv LD_RUN_PATH]"
    verbose -log "SHLIB_PATH=[getenv SHLIB_PATH]"
 diff --git gcc/testsuite/lib/target-supports.exp gcc/testsuite/lib/target-supports.exp
-index 2d5d053..c70feb8 100644
+index 244fe23..7558191 100644
 --- gcc/testsuite/lib/target-supports.exp
 +++ gcc/testsuite/lib/target-supports.exp
-@@ -8455,7 +8455,7 @@ proc check_effective_target_section_anchors { } {
+@@ -8485,7 +8485,7 @@ proc check_effective_target_section_anchors { } {
      return [check_cached_effective_target section_anchors {
        expr { [istarget powerpc*-*-*]
  	     || [istarget arm*-*-*]
@@ -7570,7 +7812,7 @@ index 2d5d053..c70feb8 100644
  }
  
  # Return 1 if the target supports atomic operations on "int_128" values.
-@@ -11496,6 +11496,15 @@ proc check_effective_target_arm_thumb2_ok_no_arm_v8_1_lob { } {
+@@ -11526,6 +11526,15 @@ proc check_effective_target_arm_thumb2_ok_no_arm_v8_1_lob { } {
      return 0
  }
  
@@ -7877,10 +8119,10 @@ index 078ceab..0308f55 100644
  
    /* If a chain_decl was created, then it needs to be registered with
 diff --git gcc/tree.cc gcc/tree.cc
-index 3c39be4..4b3d0e5 100644
+index 4cf3785..5cba2ab 100644
 --- gcc/tree.cc
 +++ gcc/tree.cc
-@@ -9745,6 +9745,23 @@ build_common_builtin_nodes (void)
+@@ -9766,6 +9766,23 @@ build_common_builtin_nodes (void)
  			"__builtin_nonlocal_goto",
  			ECF_NORETURN | ECF_NOTHROW);
  
@@ -7919,15 +8161,16 @@ index 162d973..9c8b133 100755
  	# PIC is the default.
  	;;
 diff --git libatomic/Makefile.am libatomic/Makefile.am
-index d88515e..f29890d 100644
+index d88515e..3c0b486 100644
 --- libatomic/Makefile.am
 +++ libatomic/Makefile.am
-@@ -65,8 +65,12 @@ libatomic_version_script =
+@@ -65,8 +65,13 @@ libatomic_version_script =
  libatomic_version_dep =
  endif
  libatomic_version_info = -version-info $(libtool_VERSION)
 +if ENABLE_DARWIN_AT_RPATH
-+libatomic_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libatomic_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libatomic_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
  
 -libatomic_la_LDFLAGS = $(libatomic_version_info) $(libatomic_version_script) $(lt_host_flags)
@@ -7937,15 +8180,16 @@ index d88515e..f29890d 100644
  	fenv.c fence.c flag.c
  
 diff --git libatomic/Makefile.in libatomic/Makefile.in
-index 80d2565..da4579d 100644
+index 80d2565..5a8dd01 100644
 --- libatomic/Makefile.in
 +++ libatomic/Makefile.in
-@@ -403,7 +403,10 @@ noinst_LTLIBRARIES = libatomic_convenience.la
+@@ -403,7 +403,11 @@ noinst_LTLIBRARIES = libatomic_convenience.la
  @LIBAT_BUILD_VERSIONED_SHLIB_GNU_TRUE@@LIBAT_BUILD_VERSIONED_SHLIB_TRUE@libatomic_version_dep = $(top_srcdir)/libatomic.map
  @LIBAT_BUILD_VERSIONED_SHLIB_SUN_TRUE@@LIBAT_BUILD_VERSIONED_SHLIB_TRUE@libatomic_version_dep = libatomic.map-sun
  libatomic_version_info = -version-info $(libtool_VERSION)
 -libatomic_la_LDFLAGS = $(libatomic_version_info) $(libatomic_version_script) $(lt_host_flags)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libatomic_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libatomic_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
 +libatomic_la_LDFLAGS = $(libatomic_version_info) $(libatomic_version_script) \
 +	$(lt_host_flags) $(libatomic_darwin_rpath) 
 +
@@ -8149,6 +8393,24 @@ index 08cdd21..8898251 100644
  
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions are
+diff --git libbacktrace/backtrace.c libbacktrace/backtrace.c
+index d28575e..cf64916 100644
+--- libbacktrace/backtrace.c
++++ libbacktrace/backtrace.c
+@@ -70,6 +70,13 @@ unwind (struct _Unwind_Context *context, void *vdata)
+   uintptr_t pc;
+   int ip_before_insn = 0;
+ 
++#ifdef __APPLE__
++# undef HAVE_GETIPINFO
++# if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1050
++#  define HAVE_GETIPINFO 1
++# endif
++#endif
++
+ #ifdef HAVE_GETIPINFO
+   pc = _Unwind_GetIPInfo (context, &ip_before_insn);
+ #else
 diff --git libbacktrace/configure libbacktrace/configure
 index 17f470a..957095a 100755
 --- libbacktrace/configure
@@ -8309,55 +8571,79 @@ index 597c970..7f89bf3 100644
  AC_SYS_LARGEFILE
  
  backtrace_supported=yes
+diff --git libbacktrace/simple.c libbacktrace/simple.c
+index 6a1a1c9..811255a 100644
+--- libbacktrace/simple.c
++++ libbacktrace/simple.c
+@@ -65,6 +65,13 @@ simple_unwind (struct _Unwind_Context *context, void *vdata)
+   uintptr_t pc;
+   int ip_before_insn = 0;
+ 
++#ifdef __APPLE__
++# undef HAVE_GETIPINFO
++# if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 1050
++#  define HAVE_GETIPINFO 1
++# endif
++#endif
++
+ #ifdef HAVE_GETIPINFO
+   pc = _Unwind_GetIPInfo (context, &ip_before_insn);
+ #else
 diff --git libcc1/Makefile.am libcc1/Makefile.am
-index 6e3a34f..7ca4739 100644
+index 6e3a34f..5657b6e 100644
 --- libcc1/Makefile.am
 +++ libcc1/Makefile.am
-@@ -55,6 +55,9 @@ marshall_c_source = marshall-c.hh
+@@ -55,6 +55,10 @@ marshall_c_source = marshall-c.hh
  marshall_cxx_source = marshall-cp.hh
  
  libcc1plugin_la_LDFLAGS = -module -export-symbols $(srcdir)/libcc1plugin.sym
 +if ENABLE_DARWIN_AT_RPATH
-+libcc1plugin_la_LDFLAGS += -nodefaultrpaths -Wl,-rpath,@loader_path
++libcc1plugin_la_LDFLAGS += -Wc,-nodefaultrpaths,-nodefaultexport
++libcc1plugin_la_LDFLAGS += -Wl,-rpath,@loader_path
 +endif
  libcc1plugin_la_SOURCES = libcc1plugin.cc context.cc context.hh \
  	$(shared_source) $(marshall_c_source)
  libcc1plugin.lo_CPPFLAGS = $(CPPFLAGS_FOR_C)
-@@ -65,6 +68,9 @@ libcc1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
+@@ -65,6 +69,10 @@ libcc1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
  	$(CXXFLAGS) $(libcc1plugin_la_LDFLAGS) $(LTLDFLAGS) -o $@
  
  libcp1plugin_la_LDFLAGS = -module -export-symbols $(srcdir)/libcp1plugin.sym
 +if ENABLE_DARWIN_AT_RPATH
++libcp1plugin_la_LDFLAGS += -Wc,-nodefaultrpaths,-nodefaultexport
 +libcp1plugin_la_LDFLAGS += -Wl,-rpath,@loader_path
 +endif
  libcp1plugin_la_SOURCES = libcp1plugin.cc context.cc context.hh \
  	$(shared_source) $(marshall_cxx_source)
  libcp1plugin.lo_CPPFLAGS = $(CPPFLAGS_FOR_CXX)
-@@ -76,6 +82,9 @@ libcp1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
+@@ -76,6 +84,10 @@ libcp1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
  
  LTLDFLAGS = $(shell $(SHELL) $(top_srcdir)/../libtool-ldflags $(LDFLAGS))
  libcc1_la_LDFLAGS = -module -export-symbols $(srcdir)/libcc1.sym
 +if ENABLE_DARWIN_AT_RPATH
-+libcc1_la_LDFLAGS += -nodefaultrpaths -Wl,-rpath,@loader_path
++libcc1_la_LDFLAGS += -Wc,-nodefaultrpaths,-nodefaultexport
++libcc1_la_LDFLAGS += -Wl,-rpath,@loader_path
 +endif
  libcc1_la_SOURCES = findcomp.cc libcc1.cc libcp1.cc \
  		compiler.cc compiler.hh names.cc names.hh $(shared_source) \
  		$(marshall_c_source) $(marshall_cxx_source)
 diff --git libcc1/Makefile.in libcc1/Makefile.in
-index f8f590d..8f66638 100644
+index f8f590d..3ff2944 100644
 --- libcc1/Makefile.in
 +++ libcc1/Makefile.in
-@@ -90,6 +90,9 @@ build_triplet = @build@
+@@ -90,6 +90,12 @@ build_triplet = @build@
  host_triplet = @host@
  target_triplet = @target@
  @DARWIN_DYNAMIC_LOOKUP_TRUE@am__append_1 = -Wl,-undefined,dynamic_lookup
-+@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_2 = -nodefaultrpaths -Wl,-rpath,@loader_path
-+@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_3 = -Wl,-rpath,@loader_path
-+@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_4 = -nodefaultrpaths -Wl,-rpath,@loader_path
++@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_2 = -Wc,-nodefaultrpaths,-nodefaultexport \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
++@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_3 = -Wc,-nodefaultrpaths,-nodefaultexport \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
++@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_4 = -Wc,-nodefaultrpaths,-nodefaultexport \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
  subdir = .
  ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
  am__aclocal_m4_deps = $(top_srcdir)/../config/acx.m4 \
-@@ -405,7 +408,8 @@ shared_source = callbacks.cc callbacks.hh connection.cc connection.hh \
+@@ -405,7 +411,8 @@ shared_source = callbacks.cc callbacks.hh connection.cc connection.hh \
  
  marshall_c_source = marshall-c.hh
  marshall_cxx_source = marshall-cp.hh
@@ -8367,7 +8653,7 @@ index f8f590d..8f66638 100644
  libcc1plugin_la_SOURCES = libcc1plugin.cc context.cc context.hh \
  	$(shared_source) $(marshall_c_source)
  
-@@ -416,7 +420,8 @@ libcc1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
+@@ -416,7 +423,8 @@ libcc1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
  	$(LIBTOOLFLAGS) --mode=link $(CXXLD) $(AM_CXXFLAGS) \
  	$(CXXFLAGS) $(libcc1plugin_la_LDFLAGS) $(LTLDFLAGS) -o $@
  
@@ -8377,7 +8663,7 @@ index f8f590d..8f66638 100644
  libcp1plugin_la_SOURCES = libcp1plugin.cc context.cc context.hh \
  	$(shared_source) $(marshall_cxx_source)
  
-@@ -428,7 +433,8 @@ libcp1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
+@@ -428,7 +436,8 @@ libcp1plugin_la_LINK = $(LIBTOOL) --tag=CXX $(AM_LIBTOOLFLAGS) \
  	$(CXXFLAGS) $(libcp1plugin_la_LDFLAGS) $(LTLDFLAGS) -o $@
  
  LTLDFLAGS = $(shell $(SHELL) $(top_srcdir)/../libtool-ldflags $(LDFLAGS))
@@ -9207,7 +9493,7 @@ index 0000000..c8b8368
 +    }
 +}
 diff --git libgcc/config/aarch64/lse.S libgcc/config/aarch64/lse.S
-index c353ec2..4fb6309 100644
+index 9c29cf0..97b68c4 100644
 --- libgcc/config/aarch64/lse.S
 +++ libgcc/config/aarch64/lse.S
 @@ -58,7 +58,11 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
@@ -9222,7 +9508,7 @@ index c353ec2..4fb6309 100644
  
  /* Turn size and memory model defines into mnemonic fragments.  */
  #if SIZE == 1
-@@ -139,6 +143,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+@@ -164,6 +168,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
  #define BTI_C	hint	34
  
  /* Start and end a function.  */
@@ -9230,7 +9516,7 @@ index c353ec2..4fb6309 100644
  .macro	STARTFN name
  	.text
  	.balign	16
-@@ -162,6 +167,29 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+@@ -187,6 +192,29 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
  	cbz	w(tmp0), \label
  .endm
  
@@ -9607,14 +9893,17 @@ index 0000000..9efc9dc
 +DARWIN_MIN_CRT_VERSION = -mmacosx-version-min=10.8
 diff --git libgcc/config/t-darwin-rpath libgcc/config/t-darwin-rpath
 new file mode 100644
-index 0000000..e73d7f3
+index 0000000..951539d
 --- /dev/null
 +++ libgcc/config/t-darwin-rpath
-@@ -0,0 +1,2 @@
+@@ -0,0 +1,5 @@
 +# Use @rpath and add a search path to exes and dylibs that depend on this.
 +SHLIB_RPATH = @rpath
++
++# Enable the libgcc_s.1.dylib compatibility lib to find the dependent 1.1.dylib.
++SHLIB_LOADER_PATH = -Wl,-rpath,@loader_path
 diff --git libgcc/config/t-slibgcc-darwin libgcc/config/t-slibgcc-darwin
-index a8f6966..878b5c6 100644
+index a8f6966..ee449de 100644
 --- libgcc/config/t-slibgcc-darwin
 +++ libgcc/config/t-slibgcc-darwin
 @@ -1,4 +1,4 @@
@@ -9631,7 +9920,7 @@ index a8f6966..878b5c6 100644
  
  SHLIB_MKMAP = $(srcdir)/mkmap-flat.awk
  SHLIB_MKMAP_OPTS = -v leading_underscore=1
-@@ -23,11 +22,16 @@ SHLIB_SONAME = @shlib_base_name@$(SHLIB_EXT)
+@@ -23,11 +22,20 @@ SHLIB_SONAME = @shlib_base_name@$(SHLIB_EXT)
  # subdir.  The code under MULTIBUILDTOP combines these into a single FAT
  # library, that is what we eventually install.
  
@@ -9639,6 +9928,10 @@ index a8f6966..878b5c6 100644
 +# this and dylibs that depend on this.  So this def must come first and be
 +# overridden in a make fragment that depends on the rpath setting.
 +SHLIB_RPATH = $(slibdir)
++
++# Likewise, we only want to add an @loader_path to the shared libs when
++# we have enable_darwin_at_rpath.
++SHLIB_LOADER_PATH =
 +
  SHLIB_LINK = $(CC) $(LIBGCC2_CFLAGS) $(LDFLAGS) -dynamiclib -nodefaultlibs \
 -	-install_name $(SHLIB_INSTALL_DIR)/$(SHLIB_INSTALL_NAME) \
@@ -9650,7 +9943,7 @@ index a8f6966..878b5c6 100644
  	@multilib_flags@ @shlib_objs@ $(SHLIB_LC)
  
  # we do our own thing
-@@ -63,9 +67,9 @@ EHS_INSTNAME = libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+@@ -63,9 +71,9 @@ EHS_INSTNAME = libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)
  libgcc_ehs$(SHLIB_EXT): $(LIBEHSOBJS) $(extra-parts)
  	mkdir -p $(MULTIDIR)
  	$(CC) $(LIBGCC2_CFLAGS) $(LDFLAGS) -dynamiclib -nodefaultlibs \
@@ -9662,12 +9955,13 @@ index a8f6966..878b5c6 100644
  
  all: libgcc_ehs$(SHLIB_EXT)
  
-@@ -121,12 +125,12 @@ libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) \
+@@ -121,12 +129,13 @@ libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT) \
  	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_ehs$(SHLIB_EXT)  \
  	    ./libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
  	  arch=`$(LIPO) -info libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} | sed -e 's/.*:\ //'` ; \
 -	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib \
 +	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib -nodefaultrpaths \
++	    $(SHLIB_LOADER_PATH) \
  	    -o libgcc_s.1$(SHLIB_EXT)_T_$${mlib} \
  	    -Wl,-reexport_library,libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
  	    -Wl,-reexport_library,libgcc_ehs.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
@@ -9678,12 +9972,13 @@ index a8f6966..878b5c6 100644
  	done
  	$(LIPO) -output libgcc_s.1$(SHLIB_EXT) -create libgcc_s.1$(SHLIB_EXT)_T*
  	rm libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T*
-@@ -140,13 +144,13 @@ libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
+@@ -140,13 +149,14 @@ libgcc_s.1.dylib: all-multi libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)
  	  cp ../$${mlib}/libgcc/$${mlib}/libgcc_s$(SHLIB_EXT)  \
  	    ./libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} || exit 1 ; \
  	  arch=`$(LIPO) -info libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} | sed -e 's/.*:\ //'` ; \
 -	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib \
 +	  $(CC) -arch $${arch} -nodefaultlibs -dynamiclib -nodefaultrpaths \
++	    $(SHLIB_LOADER_PATH) \
  	    -o libgcc_s.1$(SHLIB_EXT)_T_$${mlib} \
  	    -Wl,-reexport_library,libgcc_s.$(SHLIB_SOVERSION)$(SHLIB_EXT)_T_$${mlib} \
  	    -lSystem \
@@ -9871,39 +10166,48 @@ index fc24ac3..536e517 100644
  extern void __clear_cache (void *, void *);
  extern void __eprintf (const char *, const char *, unsigned int, const char *)
 diff --git libgfortran/Makefile.am libgfortran/Makefile.am
-index 5ce0cd7..cf2aac6 100644
+index 5ce0cd7..0b31cbf 100644
 --- libgfortran/Makefile.am
 +++ libgfortran/Makefile.am
-@@ -37,6 +37,10 @@ else
+@@ -37,6 +37,11 @@ else
  version_arg =
  version_dep =
  endif
++extra_darwin_ldflags_libgfortran = @extra_ldflags_libgfortran@
 +if ENABLE_DARWIN_AT_RPATH
-+extra_ldflags_libgfortran += -nodefaultrpaths -nodefaultexports
-+extra_ldflags_libgfortran += -Wl,-rpath,@loader_path/
++extra_darwin_ldflags_libgfortran += -Wc,-nodefaultexport,-nodefaultrpaths 
++extra_darwin_ldflags_libgfortran += -Wl,-rpath,@loader_path
 +endif
  
  gfor_c_HEADERS = ISO_Fortran_binding.h
  gfor_cdir = $(libdir)/gcc/$(target_alias)/$(gcc_version)/include
+@@ -50,7 +55,7 @@ libgfortran_la_LINK = $(LINK) $(libgfortran_la_LDFLAGS)
+ libgfortran_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
+ 	$(LTLDFLAGS) $(LIBQUADLIB) ../libbacktrace/libbacktrace.la \
+ 	$(HWCAP_LDFLAGS) \
+-	$(LIBM) $(extra_ldflags_libgfortran) \
++	$(LIBM) $(extra_darwin_ldflags_libgfortran) \
+ 	$(version_arg) -Wc,-shared-libgcc
+ libgfortran_la_DEPENDENCIES = $(version_dep) libgfortran.spec $(LIBQUADLIB_DEP)
+ 
 diff --git libgfortran/Makefile.in libgfortran/Makefile.in
-index 7ac6bfb..2d2348a 100644
+index 7ac6bfb..6eff852 100644
 --- libgfortran/Makefile.in
 +++ libgfortran/Makefile.in
-@@ -91,8 +91,11 @@ POST_UNINSTALL = :
+@@ -91,8 +91,10 @@ POST_UNINSTALL = :
  build_triplet = @build@
  host_triplet = @host@
  target_triplet = @target@
 -@LIBGFOR_MINIMAL_TRUE@am__append_1 = -DLIBGFOR_MINIMAL
 -@LIBGFOR_MINIMAL_FALSE@am__append_2 = \
-+@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_1 = -nodefaultrpaths \
-+@ENABLE_DARWIN_AT_RPATH_TRUE@	-nodefaultexports \
-+@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@am__append_1 = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
 +@LIBGFOR_MINIMAL_TRUE@am__append_2 = -DLIBGFOR_MINIMAL
 +@LIBGFOR_MINIMAL_FALSE@am__append_3 = \
  @LIBGFOR_MINIMAL_FALSE@io/close.c \
  @LIBGFOR_MINIMAL_FALSE@io/file_pos.c \
  @LIBGFOR_MINIMAL_FALSE@io/format.c \
-@@ -110,7 +113,7 @@ target_triplet = @target@
+@@ -110,7 +112,7 @@ target_triplet = @target@
  @LIBGFOR_MINIMAL_FALSE@io/fbuf.c \
  @LIBGFOR_MINIMAL_FALSE@io/async.c
  
@@ -9912,7 +10216,7 @@ index 7ac6bfb..2d2348a 100644
  @LIBGFOR_MINIMAL_FALSE@intrinsics/access.c \
  @LIBGFOR_MINIMAL_FALSE@intrinsics/c99_functions.c \
  @LIBGFOR_MINIMAL_FALSE@intrinsics/chdir.c \
-@@ -143,9 +146,9 @@ target_triplet = @target@
+@@ -143,9 +145,9 @@ target_triplet = @target@
  @LIBGFOR_MINIMAL_FALSE@intrinsics/umask.c \
  @LIBGFOR_MINIMAL_FALSE@intrinsics/unlink.c
  
@@ -9925,7 +10229,7 @@ index 7ac6bfb..2d2348a 100644
  @LIBGFOR_MINIMAL_FALSE@runtime/backtrace.c \
  @LIBGFOR_MINIMAL_FALSE@runtime/convert_char.c \
  @LIBGFOR_MINIMAL_FALSE@runtime/environ.c \
-@@ -157,7 +160,7 @@ target_triplet = @target@
+@@ -157,7 +159,7 @@ target_triplet = @target@
  
  
  # dummy sources for libtool
@@ -9934,7 +10238,7 @@ index 7ac6bfb..2d2348a 100644
  subdir = .
  ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
  am__aclocal_m4_deps = $(top_srcdir)/../config/depstand.m4 \
-@@ -589,7 +592,7 @@ AMTAR = @AMTAR@
+@@ -589,7 +591,7 @@ AMTAR = @AMTAR@
  
  # Some targets require additional compiler options for IEEE compatibility.
  AM_CFLAGS = @AM_CFLAGS@ -fcx-fortran-rules $(SECTION_FLAGS) \
@@ -9943,16 +10247,24 @@ index 7ac6bfb..2d2348a 100644
  AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
  AM_FCFLAGS = @AM_FCFLAGS@ $(IEEE_FLAGS)
  AR = @AR@
-@@ -693,7 +696,8 @@ dvidir = @dvidir@
- enable_shared = @enable_shared@
- enable_static = @enable_static@
- exec_prefix = @exec_prefix@
--extra_ldflags_libgfortran = @extra_ldflags_libgfortran@
-+extra_ldflags_libgfortran = @extra_ldflags_libgfortran@ \
+@@ -748,6 +750,8 @@ gcc_version := $(shell @get_gcc_base_ver@ $(top_srcdir)/../gcc/BASE-VER)
+ @LIBGFOR_USE_SYMVER_FALSE@version_dep = 
+ @LIBGFOR_USE_SYMVER_GNU_TRUE@@LIBGFOR_USE_SYMVER_TRUE@version_dep = gfortran.ver
+ @LIBGFOR_USE_SYMVER_SUN_TRUE@@LIBGFOR_USE_SYMVER_TRUE@version_dep = gfortran.ver-sun gfortran.ver
++extra_darwin_ldflags_libgfortran = @extra_ldflags_libgfortran@ \
 +	$(am__append_1)
- get_gcc_base_ver = @get_gcc_base_ver@
- host = @host@
- host_alias = @host_alias@
+ gfor_c_HEADERS = ISO_Fortran_binding.h
+ gfor_cdir = $(libdir)/gcc/$(target_alias)/$(gcc_version)/include
+ LTLDFLAGS = $(shell $(SHELL) $(top_srcdir)/../libtool-ldflags $(LDFLAGS)) \
+@@ -759,7 +763,7 @@ libgfortran_la_LINK = $(LINK) $(libgfortran_la_LDFLAGS)
+ libgfortran_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
+ 	$(LTLDFLAGS) $(LIBQUADLIB) ../libbacktrace/libbacktrace.la \
+ 	$(HWCAP_LDFLAGS) \
+-	$(LIBM) $(extra_ldflags_libgfortran) \
++	$(LIBM) $(extra_darwin_ldflags_libgfortran) \
+ 	$(version_arg) -Wc,-shared-libgcc
+ 
+ libgfortran_la_DEPENDENCIES = $(version_dep) libgfortran.spec $(LIBQUADLIB_DEP)
 @@ -780,7 +784,7 @@ AM_CPPFLAGS = -iquote$(srcdir)/io -I$(srcdir)/$(MULTISRCTOP)../gcc \
  	      -I$(MULTIBUILDTOP)../libbacktrace \
  	      -I../libbacktrace
@@ -9992,7 +10304,7 @@ index 7ac6bfb..2d2348a 100644
  	$(gfor_helper_src) $(gfor_ieee_src) $(gfor_io_headers) $(gfor_specific_src)
  
 diff --git libgfortran/configure libgfortran/configure
-index ae64dca..56fda91 100755
+index ae64dca..f288af8 100755
 --- libgfortran/configure
 +++ libgfortran/configure
 @@ -655,6 +655,8 @@ extra_ldflags_libgfortran
@@ -10198,9 +10510,11 @@ index ae64dca..56fda91 100755
  
    else
    ld_shlibs_FC=no
-@@ -16191,8 +16304,8 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
+@@ -16190,9 +16303,10 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
+ 
  
  # extra LD Flags which are required for targets
++extra_ldflags_libgfortran=
  case "${host}" in
 -  *-darwin*)
 -    # Darwin needs -single_module when linking libgfortran
@@ -10209,7 +10523,7 @@ index ae64dca..56fda91 100755
      extra_ldflags_libgfortran=-Wl,-single_module
      ;;
  esac
-@@ -28519,6 +28632,10 @@ if test -z "${HAVE_HWCAP_TRUE}" && test -z "${HAVE_HWCAP_FALSE}"; then
+@@ -28519,6 +28633,10 @@ if test -z "${HAVE_HWCAP_TRUE}" && test -z "${HAVE_HWCAP_FALSE}"; then
    as_fn_error $? "conditional \"HAVE_HWCAP\" was never defined.
  Usually this means the macro was only invoked conditionally." "$LINENO" 5
  fi
@@ -10221,7 +10535,7 @@ index ae64dca..56fda91 100755
    as_fn_error $? "conditional \"LIBGFOR_BUILD_QUAD\" was never defined.
  Usually this means the macro was only invoked conditionally." "$LINENO" 5
 diff --git libgfortran/configure.ac libgfortran/configure.ac
-index 97cc490..d96a584 100644
+index 97cc490..a21f566 100644
 --- libgfortran/configure.ac
 +++ libgfortran/configure.ac
 @@ -282,6 +282,7 @@ LT_LIB_M
@@ -10232,9 +10546,11 @@ index 97cc490..d96a584 100644
  #AC_MSG_NOTICE([====== Finished libtool configuration]) ; sleep 10
  
  # We need gfortran to compile parts of the library
-@@ -291,8 +292,8 @@ AC_PROG_FC(gfortran)
+@@ -290,9 +291,10 @@ FC="$GFORTRAN"
+ AC_PROG_FC(gfortran)
  
  # extra LD Flags which are required for targets
++extra_ldflags_libgfortran=
  case "${host}" in
 -  *-darwin*)
 -    # Darwin needs -single_module when linking libgfortran
@@ -10313,17 +10629,18 @@ index 7e2b98b..7b0222b 100644
  CC_FOR_BUILD=${CC_FOR_BUILD:-gcc}
  AC_SUBST(CC_FOR_BUILD)
 diff --git libgomp/Makefile.am libgomp/Makefile.am
-index f8b2a06..c88bcd0 100644
+index f8b2a06..7153818 100644
 --- libgomp/Makefile.am
 +++ libgomp/Makefile.am
-@@ -53,9 +53,13 @@ else
+@@ -53,9 +53,14 @@ else
  libgomp_version_script =
  libgomp_version_dep =
  endif
 +
  libgomp_version_info = -version-info $(libtool_VERSION)
 +if ENABLE_DARWIN_AT_RPATH
-+libgomp_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libgomp_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libgomp_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
  libgomp_la_LDFLAGS = $(libgomp_version_info) $(libgomp_version_script) \
 -        $(lt_host_flags)
@@ -10332,23 +10649,15 @@ index f8b2a06..c88bcd0 100644
  libgomp_la_LINK = $(LINK) $(libgomp_la_LDFLAGS)
  
 diff --git libgomp/Makefile.in libgomp/Makefile.in
-index 22cb213..14d1714 100644
+index 6f0cb71..cf54dc9 100644
 --- libgomp/Makefile.in
 +++ libgomp/Makefile.in
-@@ -16,7 +16,7 @@
- 
- # Plugins for offload execution, Makefile.am fragment.
- #
--# Copyright (C) 2014-2021 Free Software Foundation, Inc.
-+# Copyright (C) 2014-2022 Free Software Foundation, Inc.
- #
- # Contributed by Mentor Embedded.
- #
-@@ -546,8 +546,9 @@ nodist_toolexeclib_HEADERS = libgomp.spec
+@@ -546,8 +546,10 @@ nodist_toolexeclib_HEADERS = libgomp.spec
  @LIBGOMP_BUILD_VERSIONED_SHLIB_GNU_TRUE@@LIBGOMP_BUILD_VERSIONED_SHLIB_TRUE@libgomp_version_dep = libgomp.ver
  @LIBGOMP_BUILD_VERSIONED_SHLIB_SUN_TRUE@@LIBGOMP_BUILD_VERSIONED_SHLIB_TRUE@libgomp_version_dep = libgomp.ver-sun
  libgomp_version_info = -version-info $(libtool_VERSION)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libgomp_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libgomp_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
  libgomp_la_LDFLAGS = $(libgomp_version_info) $(libgomp_version_script) \
 -        $(lt_host_flags)
 +        $(lt_host_flags) $(libgomp_darwin_rpath)
@@ -10356,7 +10665,7 @@ index 22cb213..14d1714 100644
  libgomp_la_DEPENDENCIES = $(libgomp_version_dep)
  libgomp_la_LINK = $(LINK) $(libgomp_la_LDFLAGS)
 diff --git libgomp/configure libgomp/configure
-index 5ef071e..e724e9c 100755
+index 85fdb4d..71b5987 100755
 --- libgomp/configure
 +++ libgomp/configure
 @@ -692,6 +692,8 @@ FC
@@ -10725,32 +11034,37 @@ index 84a7b37..4dad84e 100644
  dnl AM_CONFIG_HEADER(config.h:config.in)
  AC_CONFIG_HEADER(config.h:config.in)
 diff --git libitm/Makefile.am libitm/Makefile.am
-index 3f31ad3..712aeec 100644
+index 3f31ad3..74b05b5 100644
 --- libitm/Makefile.am
 +++ libitm/Makefile.am
-@@ -54,7 +54,10 @@ libitm_version_info = -version-info $(libtool_VERSION)
+@@ -54,7 +54,12 @@ libitm_version_info = -version-info $(libtool_VERSION)
  # want or need libstdc++.
  libitm_la_DEPENDENCIES = $(libitm_version_dep)
  libitm_la_LINK = $(LINK) $(libitm_la_LDFLAGS)
 -libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script)
 +if ENABLE_DARWIN_AT_RPATH
-+libitm_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libitm_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libitm_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
-+libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script) $(libitm_darwin_rpath)
++libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script) \
++  $(libitm_darwin_rpath)
  
  libitm_la_SOURCES = \
  	aatree.cc alloc.cc alloc_c.cc alloc_cpp.cc barrier.cc beginend.cc \
 diff --git libitm/Makefile.in libitm/Makefile.in
-index 7f53ea9..53e1151 100644
+index 7f53ea9..c17a07c 100644
 --- libitm/Makefile.in
 +++ libitm/Makefile.in
-@@ -481,7 +481,8 @@ libitm_version_info = -version-info $(libtool_VERSION)
+@@ -481,7 +481,11 @@ libitm_version_info = -version-info $(libtool_VERSION)
  # want or need libstdc++.
  libitm_la_DEPENDENCIES = $(libitm_version_dep)
  libitm_la_LINK = $(LINK) $(libitm_la_LDFLAGS)
 -libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libitm_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
-+libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script) $(libitm_darwin_rpath)
++@ENABLE_DARWIN_AT_RPATH_TRUE@libitm_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
++libitm_la_LDFLAGS = $(libitm_version_info) $(libitm_version_script) \
++  $(libitm_darwin_rpath)
++
  libitm_la_SOURCES = aatree.cc alloc.cc alloc_c.cc alloc_cpp.cc \
  	barrier.cc beginend.cc clone.cc eh_cpp.cc local.cc query.cc \
  	retry.cc rwlock.cc useraction.cc util.cc sjlj.S tls.cc \
@@ -11113,38 +11427,50 @@ index f92aa09..295c5bd 100644
  }
  
  # All done.
-diff --git libobjc/Makefile.in libobjc/Makefile.in
-index 0a8764c..8d96446 100644
---- libobjc/Makefile.in
-+++ libobjc/Makefile.in
-@@ -264,12 +264,14 @@ LTLDFLAGS = $(shell $(SHELL) $(top_srcdir)/../libtool-ldflags $(LDFLAGS))
- libobjc$(libsuffix).la: $(OBJS)
- 	$(LIBTOOL_LINK) $(CC) -o $@ $(OBJS) \
- 		-Wc,-shared-libgcc -rpath $(toolexeclibdir) \
-+		 -nodefaultrpaths -Wl,-rpath,@loader_path/ \
- 		-version-info $(LIBOBJC_VERSION) $(extra_ldflags_libobjc) \
- 		$(LTLDFLAGS)
+diff --git libobjc/aclocal.m4 libobjc/aclocal.m4
+index 9ac0f64..c1d5b6e 100644
+--- libobjc/aclocal.m4
++++ libobjc/aclocal.m4
+@@ -145,13 +145,13 @@ AC_DEFUN([_AM_SUBST_NOTMAKE])
+ # Public sister of _AM_SUBST_NOTMAKE.
+ AC_DEFUN([AM_SUBST_NOTMAKE], [_AM_SUBST_NOTMAKE($@)])
  
- libobjc_gc$(libsuffix).la: $(OBJS_GC)
- 	$(LIBTOOL_LINK) $(CC) -o $@ $(OBJS_GC) $(OBJC_BOEHM_GC_LIBS) \
- 		-Wc,-shared-libgcc -rpath $(toolexeclibdir) \
-+		-nodefaultrpaths -Wl,-rpath,@loader_path/  \
- 		-version-info $(LIBOBJC_GC_VERSION) $(extra_ldflags_libobjc) \
- 		$(LTLDFLAGS)
- 
+-m4_include([../ltoptions.m4])
+-m4_include([../ltsugar.m4])
+-m4_include([../ltversion.m4])
+-m4_include([../lt~obsolete.m4])
+ m4_include([../config/cet.m4])
+ m4_include([../config/lthostflags.m4])
+ m4_include([../config/multi.m4])
+ m4_include([../config/override.m4])
+ m4_include([../config/toolexeclibdir.m4])
++m4_include([../ltoptions.m4])
++m4_include([../ltsugar.m4])
++m4_include([../ltversion.m4])
++m4_include([../lt~obsolete.m4])
+ m4_include([acinclude.m4])
 diff --git libobjc/configure libobjc/configure
-index 5d1b424..616ed94 100755
+index 5d1b424..a56c2b0 100755
 --- libobjc/configure
 +++ libobjc/configure
-@@ -636,6 +636,8 @@ OBJC_BOEHM_GC_LIBS
+@@ -636,6 +636,9 @@ OBJC_BOEHM_GC_LIBS
  OBJC_BOEHM_GC_INCLUDES
  OBJC_BOEHM_GC
  OBJC_GCFLAGS
++extra_ldflags_libobjc
 +ENABLE_DARWIN_AT_RPATH_FALSE
 +ENABLE_DARWIN_AT_RPATH_TRUE
  SET_MAKE
  CPP
  OTOOL64
+@@ -667,7 +670,6 @@ RANLIB
+ AR
+ AS
+ XCFLAGS
+-extra_ldflags_libobjc
+ lt_host_flags
+ OBJEXT
+ EXEEXT
 @@ -755,6 +757,7 @@ with_pic
  enable_fast_install
  with_gnu_ld
@@ -11162,30 +11488,25 @@ index 5d1b424..616ed94 100755
    --enable-tls            Use thread-local storage [default=yes]
    --enable-objc-gc        enable use of Boehm's garbage collector with the GNU
                            Objective-C runtime
-@@ -3431,10 +3436,20 @@ esac
+@@ -3430,17 +3435,6 @@ esac
  
  
- case "${host}" in
+ 
+-case "${host}" in
 -  *-darwin*)
 -    # Darwin needs -single_module when linking libobjc
-+  *-darwin[4567]*)
-+    # Earlier Darwin versions need -single_module when linking libobjc; they
-+    # do not support @rpath.
-     extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
-     ;;
-+  *-darwin*)
-+    # Otherwise, single_module is the default and multi-module is ignored and
-+    # obsolete.
-+    if test "x$enable_darwin_at_rpath" = "xyes"; then
-+      extra_ldflags_libobjc='$(lt_host_flags) -Wl,-rpath,@loader_path'
-+    else
-+      extra_ldflags_libobjc='$(lt_host_flags)'
-+    fi
-+    ;;
-   *-cygwin*|*-mingw*)
-     # Tell libtool to build DLLs on Windows
-     extra_ldflags_libobjc='$(lt_host_flags)'
-@@ -3466,7 +3481,7 @@ case "$host" in
+-    extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
+-    ;;
+-  *-cygwin*|*-mingw*)
+-    # Tell libtool to build DLLs on Windows
+-    extra_ldflags_libobjc='$(lt_host_flags)'
+-    ;;
+-esac
+-
+ 
+ # Add CET specific flags if CET is enabled
+ 
+@@ -3466,7 +3460,7 @@ case "$host" in
      case "$enable_cet" in
        auto)
  	# Check if target supports multi-byte NOPs
@@ -11194,7 +11515,7 @@ index 5d1b424..616ed94 100755
  	cet_save_CFLAGS="$CFLAGS"
  	CFLAGS="$CFLAGS -fcf-protection"
  	cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-@@ -8944,6 +8959,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -8944,6 +8938,47 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
      darwin* | rhapsody*)
  
  
@@ -11242,7 +11563,7 @@ index 5d1b424..616ed94 100755
    archive_cmds_need_lc=no
    hardcode_direct=no
    hardcode_automatic=yes
-@@ -8961,10 +9017,19 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
+@@ -8961,10 +8996,19 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
    esac
    if test "$_lt_dar_can_shared" = "yes"; then
      output_verbose_link_cmd=func_echo_all
@@ -11266,25 +11587,25 @@ index 5d1b424..616ed94 100755
  
    else
    ld_shlibs=no
-@@ -10771,7 +10836,7 @@ else
+@@ -10771,7 +10815,7 @@ else
    lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
    lt_status=$lt_dlunknown
    cat > conftest.$ac_ext <<_LT_EOF
 -#line 10784 "configure"
-+#line 10839 "configure"
++#line 10818 "configure"
  #include "confdefs.h"
  
  #if HAVE_DLFCN_H
-@@ -10877,7 +10942,7 @@ else
+@@ -10877,7 +10921,7 @@ else
    lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
    lt_status=$lt_dlunknown
    cat > conftest.$ac_ext <<_LT_EOF
 -#line 10890 "configure"
-+#line 10945 "configure"
++#line 10924 "configure"
  #include "confdefs.h"
  
  #if HAVE_DLFCN_H
-@@ -11149,6 +11214,15 @@ $as_echo "no" >&6; }
+@@ -11149,6 +11193,39 @@ $as_echo "no" >&6; }
  fi
  
  
@@ -11297,10 +11618,34 @@ index 5d1b424..616ed94 100755
 +fi
 +
 +
++# Must come after libtool is initialized.
++case "${host}" in
++  *-darwin[4567]*)
++    # Earlier Darwin versions need -single_module when linking libobjc; they
++    # do not support @rpath.
++    extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
++    ;;
++  *-darwin*)
++    # Otherwise, single_module is the default and multi-module is ignored and
++    # obsolete.
++    extra_ldflags_libobjc='$(lt_host_flags)'
++    if test "x$enable_darwin_at_rpath" = "xyes"; then
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wc,-nodefaultexport"
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wc,-nodefaultrpaths"
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wl,-rpath,@loader_path"
++    fi
++    ;;
++  *-cygwin*|*-mingw*)
++    # Tell libtool to build DLLs on Windows
++    extra_ldflags_libobjc='$(lt_host_flags)'
++    ;;
++esac
++
++
  # -------
  # Headers
  # -------
-@@ -11890,6 +11964,10 @@ if test -z "${MAINTAINER_MODE_TRUE}" && test -z "${MAINTAINER_MODE_FALSE}"; then
+@@ -11890,6 +11967,10 @@ if test -z "${MAINTAINER_MODE_TRUE}" && test -z "${MAINTAINER_MODE_FALSE}"; then
    as_fn_error $? "conditional \"MAINTAINER_MODE\" was never defined.
  Usually this means the macro was only invoked conditionally." "$LINENO" 5
  fi
@@ -11312,37 +11657,56 @@ index 5d1b424..616ed94 100755
  : "${CONFIG_STATUS=./config.status}"
  ac_write_fail=0
 diff --git libobjc/configure.ac libobjc/configure.ac
-index f8f577c..e37eb34 100644
+index f8f577c..f2bba23 100644
 --- libobjc/configure.ac
 +++ libobjc/configure.ac
-@@ -148,10 +148,20 @@ m4_rename_force([real_PRECIOUS],[_AC_ARG_VAR_PRECIOUS])
+@@ -147,17 +147,6 @@ m4_rename_force([real_PRECIOUS],[_AC_ARG_VAR_PRECIOUS])
+ 
  # extra LD Flags which are required for targets
  ACX_LT_HOST_FLAGS
- case "${host}" in
+-case "${host}" in
 -  *-darwin*)
 -    # Darwin needs -single_module when linking libobjc
-+  *-darwin[[4567]]*)
-+    # Earlier Darwin versions need -single_module when linking libobjc; they
-+    # do not support @rpath.
-     extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
-     ;;
-+  *-darwin*)
-+    # Otherwise, single_module is the default and multi-module is ignored and
-+    # obsolete.
-+    if test "x$enable_darwin_at_rpath" = "xyes"; then
-+      extra_ldflags_libobjc='$(lt_host_flags) -Wl,-rpath,@loader_path'
-+    else
-+      extra_ldflags_libobjc='$(lt_host_flags)'
-+    fi
-+    ;;
-   *-cygwin*|*-mingw*)
-     # Tell libtool to build DLLs on Windows
-     extra_ldflags_libobjc='$(lt_host_flags)'
-@@ -182,6 +192,8 @@ AM_PROG_CC_C_O
+-    extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
+-    ;;
+-  *-cygwin*|*-mingw*)
+-    # Tell libtool to build DLLs on Windows
+-    extra_ldflags_libobjc='$(lt_host_flags)'
+-    ;;
+-esac
+-AC_SUBST(extra_ldflags_libobjc)
+ 
+ # Add CET specific flags if CET is enabled
+ GCC_CET_FLAGS(CET_FLAGS)
+@@ -182,6 +171,32 @@ AM_PROG_CC_C_O
  
  AC_PROG_MAKE_SET
  
 +AM_CONDITIONAL([ENABLE_DARWIN_AT_RPATH], [test x$enable_darwin_at_rpath = xyes])
++
++# Must come after libtool is initialized.
++case "${host}" in
++  *-darwin[[4567]]*)
++    # Earlier Darwin versions need -single_module when linking libobjc; they
++    # do not support @rpath.
++    extra_ldflags_libobjc='$(lt_host_flags) -Wl,-single_module'
++    ;;
++  *-darwin*)
++    # Otherwise, single_module is the default and multi-module is ignored and
++    # obsolete.
++    extra_ldflags_libobjc='$(lt_host_flags)'
++    if test "x$enable_darwin_at_rpath" = "xyes"; then
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wc,-nodefaultexport"
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wc,-nodefaultrpaths"
++      extra_ldflags_libobjc="${extra_ldflags_libobjc} -Wl,-rpath,@loader_path"
++    fi
++    ;;
++  *-cygwin*|*-mingw*)
++    # Tell libtool to build DLLs on Windows
++    extra_ldflags_libobjc='$(lt_host_flags)'
++    ;;
++esac
++AC_SUBST(extra_ldflags_libobjc)
 +
  # -------
  # Headers
@@ -12284,16 +12648,17 @@ index 6f58fee..212ea24 100644
  @ENABLE_LIBDRUNTIME_ONLY_FALSE@libgphobos_la_LIBADD = \
  @ENABLE_LIBDRUNTIME_ONLY_FALSE@    ../libdruntime/libgdruntime_convenience.la $(LIBZ)
 diff --git libquadmath/Makefile.am libquadmath/Makefile.am
-index 35dffb4..42ba160 100644
+index 35dffb4..4dd27ed 100644
 --- libquadmath/Makefile.am
 +++ libquadmath/Makefile.am
-@@ -36,8 +36,12 @@ endif
+@@ -36,8 +36,13 @@ endif
  
  toolexeclib_LTLIBRARIES = libquadmath.la
  libquadmath_la_LIBADD = 
 +
 +if ENABLE_DARWIN_AT_RPATH
-+libquadmath_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libquadmath_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libquadmath_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
  libquadmath_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 -			 $(version_arg) $(lt_host_flags) -lm
@@ -12302,7 +12667,7 @@ index 35dffb4..42ba160 100644
  
  nodist_libsubinclude_HEADERS = quadmath.h quadmath_weak.h
 diff --git libquadmath/Makefile.in libquadmath/Makefile.in
-index 8c01121..600cdcf 100644
+index 8c01121..fb8e399 100644
 --- libquadmath/Makefile.in
 +++ libquadmath/Makefile.in
 @@ -355,6 +355,7 @@ INSTALL_SCRIPT = @INSTALL_SCRIPT@
@@ -12313,11 +12678,12 @@ index 8c01121..600cdcf 100644
  LIBOBJS = @LIBOBJS@
  LIBS = @LIBS@
  LIBTOOL = @LIBTOOL@
-@@ -463,8 +464,9 @@ AUTOMAKE_OPTIONS = foreign info-in-builddir
+@@ -463,8 +464,10 @@ AUTOMAKE_OPTIONS = foreign info-in-builddir
  @BUILD_LIBQUADMATH_TRUE@@LIBQUAD_USE_SYMVER_SUN_TRUE@@LIBQUAD_USE_SYMVER_TRUE@version_dep = quadmath.map-sun
  @BUILD_LIBQUADMATH_TRUE@toolexeclib_LTLIBRARIES = libquadmath.la
  @BUILD_LIBQUADMATH_TRUE@libquadmath_la_LIBADD = 
-+@BUILD_LIBQUADMATH_TRUE@@ENABLE_DARWIN_AT_RPATH_TRUE@libquadmath_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@BUILD_LIBQUADMATH_TRUE@@ENABLE_DARWIN_AT_RPATH_TRUE@libquadmath_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@BUILD_LIBQUADMATH_TRUE@@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
  @BUILD_LIBQUADMATH_TRUE@libquadmath_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 -@BUILD_LIBQUADMATH_TRUE@			 $(version_arg) $(lt_host_flags) -lm
 +@BUILD_LIBQUADMATH_TRUE@	$(version_arg) $(lt_host_flags) $(LIBM) $(libquadmath_darwin_rpath) 
@@ -12668,16 +13034,17 @@ index aab88de..65e7f2e 100644
  sharedstatedir = @sharedstatedir@
  srcdir = @srcdir@
 diff --git libsanitizer/asan/Makefile.am libsanitizer/asan/Makefile.am
-index 4f802f7..268fd7f 100644
+index 4f802f7..0258e16 100644
 --- libsanitizer/asan/Makefile.am
 +++ libsanitizer/asan/Makefile.am
-@@ -60,7 +60,11 @@ libasan_la_LIBADD += $(top_builddir)/libbacktrace/libsanitizer_libbacktrace.la
+@@ -60,7 +60,12 @@ libasan_la_LIBADD += $(top_builddir)/libbacktrace/libsanitizer_libbacktrace.la
  endif
  libasan_la_LIBADD += $(LIBSTDCXX_RAW_CXX_LDFLAGS)
  
 -libasan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_libasan)
 +if ENABLE_DARWIN_AT_RPATH
-+libasan_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libasan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libasan_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
 +libasan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_libasan) $(libasan_darwin_rpath)
@@ -12685,7 +13052,7 @@ index 4f802f7..268fd7f 100644
  libasan_preinit.o: asan_preinit.o
  	cp $< $@
 diff --git libsanitizer/asan/Makefile.in libsanitizer/asan/Makefile.in
-index 2476fbc..b78873f 100644
+index 2476fbc..5925bee 100644
 --- libsanitizer/asan/Makefile.in
 +++ libsanitizer/asan/Makefile.in
 @@ -399,7 +399,6 @@ pdfdir = @pdfdir@
@@ -12696,12 +13063,13 @@ index 2476fbc..b78873f 100644
  sbindir = @sbindir@
  sharedstatedir = @sharedstatedir@
  srcdir = @srcdir@
-@@ -466,7 +465,10 @@ libasan_la_LIBADD =  \
+@@ -466,7 +465,11 @@ libasan_la_LIBADD =  \
  	$(top_builddir)/sanitizer_common/libsanitizer_common.la \
  	$(top_builddir)/lsan/libsanitizer_lsan.la $(am__append_2) \
  	$(am__append_3) $(LIBSTDCXX_RAW_CXX_LDFLAGS)
 -libasan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_libasan)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libasan_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libasan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
 +libasan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_libasan) $(libasan_darwin_rpath)
 +
@@ -13013,17 +13381,18 @@ index ece4f11..c0243fa 100644
  sharedstatedir = @sharedstatedir@
  srcdir = @srcdir@
 diff --git libsanitizer/lsan/Makefile.am libsanitizer/lsan/Makefile.am
-index 6ff28ff..34a9f7b9 100644
+index 6ff28ff..18e81f0 100644
 --- libsanitizer/lsan/Makefile.am
 +++ libsanitizer/lsan/Makefile.am
-@@ -41,8 +41,11 @@ if LIBBACKTRACE_SUPPORTED
+@@ -41,8 +41,12 @@ if LIBBACKTRACE_SUPPORTED
  liblsan_la_LIBADD += $(top_builddir)/libbacktrace/libsanitizer_libbacktrace.la
  endif
  liblsan_la_LIBADD += $(LIBSTDCXX_RAW_CXX_LDFLAGS)
 -liblsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_liblsan)
 -
 +if ENABLE_DARWIN_AT_RPATH
-+liblsan_darwin_rpath = -Wl,-rpath,@loader_path
++liblsan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++liblsan_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
 +liblsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_liblsan) $(liblsan_darwin_rpath)
@@ -13031,7 +13400,7 @@ index 6ff28ff..34a9f7b9 100644
  	cp $< $@
  
 diff --git libsanitizer/lsan/Makefile.in libsanitizer/lsan/Makefile.in
-index 857f244..2572466 100644
+index 857f244..d7068fd 100644
 --- libsanitizer/lsan/Makefile.in
 +++ libsanitizer/lsan/Makefile.in
 @@ -362,7 +362,6 @@ pdfdir = @pdfdir@
@@ -13042,19 +13411,20 @@ index 857f244..2572466 100644
  sbindir = @sbindir@
  sharedstatedir = @sharedstatedir@
  srcdir = @srcdir@
-@@ -414,7 +413,10 @@ liblsan_la_LIBADD =  \
+@@ -414,7 +413,11 @@ liblsan_la_LIBADD =  \
  	$(top_builddir)/sanitizer_common/libsanitizer_common.la \
  	$(top_builddir)/interception/libinterception.la \
  	$(am__append_1) $(LIBSTDCXX_RAW_CXX_LDFLAGS)
 -liblsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_liblsan)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@liblsan_darwin_rpath = -Wl,-rpath,@loader_path
++@ENABLE_DARWIN_AT_RPATH_TRUE@liblsan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
 +liblsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_liblsan) $(liblsan_darwin_rpath)
 +
  
  # Work around what appears to be a GNU make bug handling MAKEFLAGS
  # values defined in terms of make variables, as is the case for CC and
-@@ -789,7 +791,6 @@ uninstall-am: uninstall-nodist_toolexeclibHEADERS \
+@@ -789,7 +792,6 @@ uninstall-am: uninstall-nodist_toolexeclibHEADERS \
  
  .PRECIOUS: Makefile
  
@@ -13116,16 +13486,17 @@ index 538d2e8..d6efff7 100644
  # Work around what appears to be a GNU make bug handling MAKEFLAGS
  # values defined in terms of make variables, as is the case for CC and
 diff --git libsanitizer/ubsan/Makefile.am libsanitizer/ubsan/Makefile.am
-index d480f26..75aceec 100644
+index d480f26..2de51e2 100644
 --- libsanitizer/ubsan/Makefile.am
 +++ libsanitizer/ubsan/Makefile.am
-@@ -36,7 +36,11 @@ if LIBBACKTRACE_SUPPORTED
+@@ -36,7 +36,12 @@ if LIBBACKTRACE_SUPPORTED
  libubsan_la_LIBADD += $(top_builddir)/libbacktrace/libsanitizer_libbacktrace.la
  endif
  libubsan_la_LIBADD += $(LIBSTDCXX_RAW_CXX_LDFLAGS)
 -libubsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_libubsan)
 +if ENABLE_DARWIN_AT_RPATH
-+libubsan_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libubsan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libubsan_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
 +libubsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_libubsan) $(libubsan_darwin_rpath)
@@ -13133,7 +13504,7 @@ index d480f26..75aceec 100644
  # Use special rules for files that require RTTI support.
  ubsan_handlers_cxx.% ubsan_type_hash.% ubsan_type_hash_itanium.% : AM_CXXFLAGS += -frtti
 diff --git libsanitizer/ubsan/Makefile.in libsanitizer/ubsan/Makefile.in
-index 497e033..1cc3b1b 100644
+index 497e033..7d20638 100644
 --- libsanitizer/ubsan/Makefile.in
 +++ libsanitizer/ubsan/Makefile.in
 @@ -356,7 +356,6 @@ pdfdir = @pdfdir@
@@ -13144,12 +13515,13 @@ index 497e033..1cc3b1b 100644
  sbindir = @sbindir@
  sharedstatedir = @sharedstatedir@
  srcdir = @srcdir@
-@@ -401,7 +400,10 @@ libubsan_la_SOURCES = $(ubsan_files)
+@@ -401,7 +400,11 @@ libubsan_la_SOURCES = $(ubsan_files)
  libubsan_la_LIBADD =  \
  	$(top_builddir)/sanitizer_common/libsanitizer_common.la \
  	$(am__append_1) $(am__append_2) $(LIBSTDCXX_RAW_CXX_LDFLAGS)
 -libubsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` $(link_libubsan)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libubsan_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libubsan_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
 +libubsan_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 +	$(link_libubsan) $(libubsan_darwin_rpath)
 +
@@ -13157,15 +13529,16 @@ index 497e033..1cc3b1b 100644
  # Work around what appears to be a GNU make bug handling MAKEFLAGS
  # values defined in terms of make variables, as is the case for CC and
 diff --git libssp/Makefile.am libssp/Makefile.am
-index 945dc3c..0b99d97 100644
+index 945dc3c..3a686d7 100644
 --- libssp/Makefile.am
 +++ libssp/Makefile.am
-@@ -49,8 +49,11 @@ libssp_la_SOURCES = \
+@@ -49,8 +49,12 @@ libssp_la_SOURCES = \
  	vsnprintf-chk.c vsprintf-chk.c
  libssp_la_LIBADD = 
  libssp_la_DEPENDENCIES = $(version_dep) $(libssp_la_LIBADD)
 +if ENABLE_DARWIN_AT_RPATH
-+libssp_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libssp_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libssp_darwin_rpath += -Wl,-rpath,@loader_path
 +endif
  libssp_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 -		    $(version_arg) $(lt_host_flags)
@@ -13174,14 +13547,15 @@ index 945dc3c..0b99d97 100644
  libssp_nonshared_la_SOURCES = \
  	ssp-local.c
 diff --git libssp/Makefile.in libssp/Makefile.in
-index bc8a0dc..0732270 100644
+index bc8a0dc..a116417 100644
 --- libssp/Makefile.in
 +++ libssp/Makefile.in
-@@ -376,8 +376,9 @@ libssp_la_SOURCES = \
+@@ -376,8 +376,10 @@ libssp_la_SOURCES = \
  
  libssp_la_LIBADD = 
  libssp_la_DEPENDENCIES = $(version_dep) $(libssp_la_LIBADD)
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libssp_darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libssp_darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
  libssp_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 -		    $(version_arg) $(lt_host_flags)
 +		    $(version_arg) $(lt_host_flags) $(libssp_darwin_rpath)
@@ -13358,7 +13732,7 @@ index f30f81c..90778e2 100644
  # Also toolexecdir, though it's only used in toolexeclibdir
  case ${version_specific_libs} in
 diff --git libstdc++-v3/configure libstdc++-v3/configure
-index 9b94fd7..de17a66 100755
+index eac6039..bdaa160 100755
 --- libstdc++-v3/configure
 +++ libstdc++-v3/configure
 @@ -786,6 +786,8 @@ GLIBCXX_HOSTED_TRUE
@@ -13625,7 +13999,7 @@ index 9b94fd7..de17a66 100755
  template<typename T1, typename T2>
    struct same
    { typedef T2 type; };
-@@ -78983,6 +79100,10 @@ if test -z "${MAINTAINER_MODE_TRUE}" && test -z "${MAINTAINER_MODE_FALSE}"; then
+@@ -79038,6 +79155,10 @@ if test -z "${MAINTAINER_MODE_TRUE}" && test -z "${MAINTAINER_MODE_FALSE}"; then
    as_fn_error $? "conditional \"MAINTAINER_MODE\" was never defined.
  Usually this means the macro was only invoked conditionally." "$LINENO" 5
  fi
@@ -13648,65 +14022,33 @@ index e59bcdb..f3dda5a 100644
  
  if test "$enable_vtable_verify" = yes; then
    predep_objects_CXX="${predep_objects_CXX} ${glibcxx_builddir}/../libgcc/vtv_start.o"
-diff --git libstdc++-v3/include/experimental/bits/fs_path.h libstdc++-v3/include/experimental/bits/fs_path.h
-index b0825ba..19d2461 100644
---- libstdc++-v3/include/experimental/bits/fs_path.h
-+++ libstdc++-v3/include/experimental/bits/fs_path.h
-@@ -140,10 +140,10 @@ namespace __detail
-     inline _Source
-     _S_range_begin(_Source __begin) { return __begin; }
- 
--  struct __null_terminated { };
-+  struct __nul_terminated { };
- 
-   template<typename _Source>
--    inline __null_terminated
-+    inline __nul_terminated
-     _S_range_end(_Source) { return {}; }
- 
-   template<typename _CharT, typename _Traits, typename _Alloc>
-@@ -459,11 +459,11 @@ namespace __detail
-       struct _Cvt;
- 
-     static string_type
--    _S_convert(value_type* __src, __detail::__null_terminated)
-+    _S_convert(value_type* __src, __detail::__nul_terminated)
-     { return string_type(__src); }
- 
-     static string_type
--    _S_convert(const value_type* __src, __detail::__null_terminated)
-+    _S_convert(const value_type* __src, __detail::__nul_terminated)
-     { return string_type(__src); }
- 
-     template<typename _Iter>
-@@ -477,7 +477,7 @@ namespace __detail
- 
-     template<typename _InputIterator>
-       static string_type
--      _S_convert(_InputIterator __src, __detail::__null_terminated)
-+      _S_convert(_InputIterator __src, __detail::__nul_terminated)
-       {
- 	auto __s = _S_string_from_iter(__src);
- 	return _S_convert(__s.c_str(), __s.c_str() + __s.size());
-@@ -504,7 +504,7 @@ namespace __detail
- 
-     template<typename _InputIterator>
-       static string_type
--      _S_convert_loc(_InputIterator __src, __detail::__null_terminated,
-+      _S_convert_loc(_InputIterator __src, __detail::__nul_terminated,
- 		     const std::locale& __loc)
-       {
- 	const std::string __s = _S_string_from_iter(__src);
+diff --git libstdc++-v3/configure.host libstdc++-v3/configure.host
+index ec32980..da5b157 100644
+--- libstdc++-v3/configure.host
++++ libstdc++-v3/configure.host
+@@ -234,11 +234,6 @@ case "${host_os}" in
+   darwin8 | darwin8.* )
+     # For 8+ compatibility is better if not -flat_namespace.
+     OPT_LDFLAGS="${OPT_LDFLAGS} -Wl,-single_module"
+-    case "${host_cpu}" in
+-      i[34567]86 | x86_64)
+-        OPTIMIZE_CXXFLAGS="${OPTIMIZE_CXXFLAGS} -fvisibility-inlines-hidden"
+-        ;;
+-    esac
+     os_include_dir="os/bsd/darwin"
+     ;;
+   darwin*)
 diff --git libstdc++-v3/src/Makefile.am libstdc++-v3/src/Makefile.am
-index 9c3f4ac..c695ee7 100644
+index 9c3f4ac..944ec06 100644
 --- libstdc++-v3/src/Makefile.am
 +++ libstdc++-v3/src/Makefile.am
-@@ -133,8 +133,12 @@ libstdc___la_DEPENDENCIES = \
+@@ -133,8 +133,13 @@ libstdc___la_DEPENDENCIES = \
  	$(top_builddir)/src/c++17/libc++17convenience.la \
  	$(top_builddir)/src/c++20/libc++20convenience.la
  
 +if ENABLE_DARWIN_AT_RPATH
-+libstdc___darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++libstdc___darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths
++libstdc___darwin_rpath += -Wl,-rpath,@loader_path
 +endif
 +
  libstdc___la_LDFLAGS = \
@@ -13716,14 +14058,15 @@ index 9c3f4ac..c695ee7 100644
  libstdc___la_LINK = $(CXXLINK) $(libstdc___la_LDFLAGS) $(lt_host_flags)
  
 diff --git libstdc++-v3/src/Makefile.in libstdc++-v3/src/Makefile.in
-index 4a06f6c..e3dfcde 100644
+index 4a06f6c..cc39ffa 100644
 --- libstdc++-v3/src/Makefile.in
 +++ libstdc++-v3/src/Makefile.in
-@@ -546,8 +546,9 @@ libstdc___la_DEPENDENCIES = \
+@@ -546,8 +546,10 @@ libstdc___la_DEPENDENCIES = \
  	$(top_builddir)/src/c++17/libc++17convenience.la \
  	$(top_builddir)/src/c++20/libc++20convenience.la
  
-+@ENABLE_DARWIN_AT_RPATH_TRUE@libstdc___darwin_rpath = -nodefaultrpaths -Wl,-rpath,@loader_path/
++@ENABLE_DARWIN_AT_RPATH_TRUE@libstdc___darwin_rpath = -Wc,-nodefaultexport,-nodefaultrpaths \
++@ENABLE_DARWIN_AT_RPATH_TRUE@	-Wl,-rpath,@loader_path
  libstdc___la_LDFLAGS = \
 -	-version-info $(libtool_VERSION) ${version_arg} -lm
 +	-version-info $(libtool_VERSION) ${version_arg} -lm $(libstdc___darwin_rpath)

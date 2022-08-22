@@ -155,8 +155,7 @@ proc crossbinutils.setup {target version} {
         --enable-install-libiberty=${prefix}/${crossbinutils.target}/host \
         --infodir=${prefix}/share/info/${target} \
         --mandir=${prefix}/share/man \
-        --datarootdir=${prefix}/share/${crossbinutils.target} \
-        
+        --datarootdir=${prefix}/share/${crossbinutils.target}
 
     build.dir ${workpath}/build
 

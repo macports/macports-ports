@@ -59,7 +59,7 @@ proc crossgdb.setup {target version} {
 
         dist_subdir         gdb[lindex [split ${version} .] 0]
         distfiles           gdb-${version}${extract.suffix}:gdb
-        
+
         worksrcdir          gdb-${version}
 
         # These dependencies are listed under depends_lib rather than
