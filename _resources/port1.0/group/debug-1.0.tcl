@@ -52,7 +52,7 @@ proc debug::post_destroot {} {
 
 proc debug::pg_callback {} {
     set debug_enabled [variant_isset debug]
-    ui_debug "debug::setup_callback: debug enabled: ${debug_enabled}"
+    ui_debug "debug::pg_callback: debug enabled: ${debug_enabled}"
 
     if { ${debug_enabled} } {
         setup_debug
