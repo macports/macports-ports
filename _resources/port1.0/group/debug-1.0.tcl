@@ -8,8 +8,18 @@
 #
 #===================================================================================================
 
+namespace eval debug {}
+
+if { [variant_exists debug] } {
+    error "pg_debug: variant 'debug' already exists"
+}
+
 ui_debug "pg_debug: adding variant"
-variant debug description {Enable debug flags and symbols} {
+variant debug description {Enable debug flags and symbols} {}
+
+proc debug::setup_debug {} {
+    ui_debug "debug::setup_debug: configuring for debug build"
+
     configure.cflags-delete       -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
     configure.cppflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
     configure.cxxflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
@@ -27,11 +37,27 @@ variant debug description {Enable debug flags and symbols} {
     configure.fflags-append       -g -O0
     configure.f90flags-append     -g -O0
     configure.fcflags-append      -g -O0
+
+    post-destroot {
+        debug::post_destroot
+    }
 }
 
-post-destroot {
-  if {[variant_isset debug]} {
-      ui_debug "pg_debug: Generating the .dSYM bundles because of +debug: find ${destroot}${prefix} -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
-      system -W ${destroot}${prefix} "find . -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
-  }
+proc debug::post_destroot {} {
+    global destroot prefix
+
+    ui_debug "debug::post_destroot: Generating the .dSYM bundles"
+    system -W ${destroot}${prefix} "find . -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
 }
+
+proc debug::pg_callback {} {
+    set debug_enabled [variant_isset debug]
+    ui_debug "debug::setup_callback: debug enabled: ${debug_enabled}"
+
+    if { ${debug_enabled} } {
+        setup_debug
+    }
+}
+
+# callback after port is parsed
+port::register_callback debug::pg_callback
