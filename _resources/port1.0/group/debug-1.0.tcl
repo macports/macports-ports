@@ -69,7 +69,7 @@ proc debug::pg_callback {} {
     ui_debug "debug::pg_callback: debug enabled: ${debug_enabled}"
 
     if { ${debug_enabled} } {
-        setup_debug
+        debug::setup_debug
     }
 }
 
