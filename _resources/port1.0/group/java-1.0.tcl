@@ -59,7 +59,9 @@ namespace eval java {
             # as required, as currently these are the only ones supporting arm.
             # To be reviewed as support for arm comes for the other versions.
             # Following regex matches openjdk<version> only.
-            if { [option configure.build_arch] eq "arm64" &&
+            # Keep in mind that configure.build_arch isn't available here
+            global os.arch
+            if { ${os.arch} eq "arm" &&
                  [regexp {openjdk(\d{1,2}$)} ${java.fallback}] } {
                 set newjdk ${java.fallback}-zulu
                 ui_debug "Redefining java fallback ${java.fallback} to ${newjdk} for arm compatibility"
