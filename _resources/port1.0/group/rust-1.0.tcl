@@ -388,6 +388,14 @@ proc rust.marcports_arch {rarch} {
 proc cargo.rust_platform {{arch ""}} {
     if {${arch} eq ""} {
         set arch [option muniversal.build_arch]
+        # muniversal.build_arch is empty if we are not doing a universal build
+        if {${arch} eq ""} {
+            set arch [option configure.build_arch]
+            if {${arch} eq ""} {
+                error "No build arch configured"
+            }
+        }
+        
     }
     return [option triplet.${arch}]
 }
