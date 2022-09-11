@@ -8,11 +8,10 @@ proc yelp.add_dependencies {} {
     global os.platform os.major subport
 
     if { ([variant_exists quartz] && [variant_isset quartz]) ||
-         (${os.platform} eq "darwin" && ${os.major} <= 10) } {
-        notes-append "
-        ${subport} offers in-app documentation via Yelp, which is not available on
-        your system. Some buttons or menu items related to Help may not work
-        as expected."
+            (${os.platform} eq "darwin" && ${os.major} <= 10) } {
+        notes-append \
+            "${subport} offers in-app documentation via Yelp, which is not available on\
+            your system. Some buttons or menu items related to Help may not work as expected."
     } else {
         depends_run-append port:yelp
     }
