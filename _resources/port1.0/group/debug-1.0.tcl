@@ -14,29 +14,43 @@ if { [variant_exists debug] } {
     error "pg_debug: variant 'debug' already exists"
 }
 
+default debug.configure \
+    [list \
+        cflags \
+        cppflags \
+        cxxflags \
+        objcflags \
+        objcxxflags \
+        fflags \
+        f90flags \
+        fcflags \
+    ]
+
+default debug.flags.delete \
+    [list -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1]
+
+default debug.flags.add \
+    [list -g -O0]
+
 ui_debug "pg_debug: adding variant"
 variant debug description {Enable debug flags and symbols} {}
 
 proc debug::setup_debug {} {
     ui_debug "debug::setup_debug: configuring for debug build"
 
-    configure.cflags-delete       -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cppflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cxxflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.objcflags-delete    -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.objcxxflags-delete  -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fflags-delete       -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.f90flags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fcflags-delete      -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+    set conf_names   [option debug.configure]
+    set flags_delete [option debug.flags.delete]
+    set flags_add    [option debug.flags.add]
 
-    configure.cflags-append       -g -O0
-    configure.cppflags-append     -g -O0
-    configure.cxxflags-append     -g -O0
-    configure.objcflags-append    -g -O0
-    configure.objcxxflags-append  -g -O0
-    configure.fflags-append       -g -O0
-    configure.f90flags-append     -g -O0
-    configure.fcflags-append      -g -O0
+    foreach c ${conf_names} {
+        foreach f ${flags_delete} {
+            configure.${c}-delete ${f}
+        }
+
+        foreach f ${flags_add} {
+            configure.${c}-append ${f}
+        }
+    }
 
     post-destroot {
         debug::post_destroot
@@ -55,7 +69,7 @@ proc debug::pg_callback {} {
     ui_debug "debug::pg_callback: debug enabled: ${debug_enabled}"
 
     if { ${debug_enabled} } {
-        setup_debug
+        debug::setup_debug
     }
 }
 

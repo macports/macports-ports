@@ -166,7 +166,7 @@ configure.args-append \
 variant docs description "Install documentation" {
     # texlive-latex not needed from 3.9.0.0
     depends_build-append \
-        port:doxygen \
+        path:bin/doxygen:doxygen \
         path:bin/dot:graphviz \
         port:py${active_python_version_no_dot}-sphinx \
         port:texlive-latex

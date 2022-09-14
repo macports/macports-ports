@@ -139,7 +139,7 @@
 #define NSCustomPaletteModeColorPanel        NSColorPanelModeCustomPalette
 /* #define NSDefaultTokenStyle                  NSTokenStyleDefault */
 #define NSDeviceIndependentModifierFlagsMask NSEventModifierFlagDeviceIndependentFlagsMask
-#define NSEventModifierFlagCapsLock          NSAlphaShiftKeyMask
+#define NSAlphaShiftKeyMask                  NSEventModifierFlagCapsLock
 #define NSDeviceNColorSpaceModel             NSColorSpaceModelDeviceN
 #define NSDisclosureBezelStyle               NSBezelStyleDisclosure
 #define NSDocModalWindowMask                 NSWindowStyleMaskDocModalWindow

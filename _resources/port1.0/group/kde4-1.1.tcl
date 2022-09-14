@@ -81,8 +81,8 @@ proc kde4::configure_build {} {
                             -DGETTEXT_LIBRARY=${prefix}/lib/libgettextlib.dylib \
                             -DGIF_INCLUDE_DIR=${prefix}/include \
                             -DGIF_LIBRARY=${prefix}/lib/libgif.dylib \
-                            -DJASPER_INCLUDE_DIR=${prefix}/include \
-                            -DJASPER_LIBRARY=${prefix}/lib/libjasper.dylib \
+                            -DJASPER_INCLUDE_DIR=${prefix}/libexec/jasper2/include \
+                            -DJASPER_LIBRARY=${prefix}/libexec/jasper2/lib/libjasper.dylib \
                             -DJPEG_INCLUDE_DIR=${prefix}/include \
                             -DJPEG_LIBRARY=${prefix}/lib/libjpeg.dylib \
                             -DLBER_LIBRARIES=${prefix}/lib/liblber.dylib \

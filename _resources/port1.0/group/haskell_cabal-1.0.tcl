@@ -23,14 +23,27 @@
 #   The root path for cabal. Defaults to ${workpath}/.home/.cabal .
 
 proc haskell_cabal.add_dependencies {} {
-    global name
-    if { ${name} ne "cabal" } {
+    global name haskell_cabal.use_prebuilt
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        depends_build-append \
+            port:cabal-prebuilt \
+            port:ghc-prebuilt
+    } else {
         depends_build-append \
             port:cabal \
             port:ghc
     }
 }
 port::register_callback haskell_cabal.add_dependencies
+
+proc haskell_cabal.getcabalbin {} {
+    global prefix haskell_cabal.use_prebuilt
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        return ${prefix}/bin/cabal-prebuilt
+    } else {
+        return ${prefix}/bin/cabal
+    }
+}
 
 options haskell_cabal.cabal_root
 default haskell_cabal.cabal_root {${workpath}/.home/.cabal}
@@ -96,90 +109,120 @@ post-extract {
     close ${cabal_config_fd}
 }
 
-# libHSbase shipped with GHC links against system libiconv, which provides the
-# 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
-# process statically links libHSbase.a, we must have /usr/lib in the library
-# search path first :/
-compiler.library_path
-compiler.cpath
+# cabal builds arm64 and x86_64 binaries
+supported_archs     arm64 x86_64
 
-options haskell_cabal.bin haskell_cabal.env
+options haskell_cabal.bin \
+        haskell_cabal.env \
+        haskell_cabal.global_flags \
+        haskell_cabal.build_dir \
+        haskell_cabal.use_prebuilt
 
-default haskell_cabal.bin ${prefix}/bin/cabal
+default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 
 default haskell_cabal.env \
-    {CABAL_CONFIG=[option haskell_cabal.cabal_root]/config}
+        {CABAL_CONFIG=[option haskell_cabal.cabal_root]/config}
+
+default haskell_cabal.global_flags {\
+                    --config-file=[option haskell_cabal.cabal_root]/config\
+                    --logs-dir=[option haskell_cabal.cabal_root]/logs\
+                    --store-dir=[option haskell_cabal.cabal_root]/store\
+                    }
+
+default haskell_cabal.build_dir     {${workpath}/dist}
+
+# use to install prebuilt binaries for bootstrapping
+default haskell_cabal.use_prebuilt  {no}
+
+post-patch {
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        xinstall -d ${haskell_cabal.cabal_root}/bin
+        foreach f {\
+            cabal\
+            ghc\
+            ghc-pkg\
+            ghci\
+            haddock\
+            hp2ps\
+            hpc\
+            hsc2hs\
+            runghc\
+            runhaskell\
+            } {
+            ln -s   ${prefix}/bin/${f}-prebuilt \
+                    ${haskell_cabal.cabal_root}/bin/${f}
+        }
+
+        haskell_cabal.env-append \
+                "GHC=${prefix}/bin/ghc-prebuilt" \
+                "PATH=${haskell_cabal.cabal_root}/bin:$env(PATH)"
+        foreach phase {configure build destroot test} {
+            ${phase}.env-append \
+                "GHC=${prefix}/bin/ghc-prebuilt" \
+                "PATH=${haskell_cabal.cabal_root}/bin:$env(PATH)"
+        }
+    }
+}
 
 pre-configure {
     system -W ${worksrcpath} \
-        "env ${haskell_cabal.env} ${haskell_cabal.bin} new-update"
+        "env ${haskell_cabal.env} ${haskell_cabal.bin} ${haskell_cabal.global_flags} update"
 }
 
-default configure.cmd       {${haskell_cabal.bin}}
+default configure.cmd       {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
-default configure.args      {new-configure}
+default configure.args      {configure}
 default configure.env       {${haskell_cabal.env}}
 
-default build.cmd           {${haskell_cabal.bin}}
-default build.target        {new-build}
+default build.type          {cabal}
+default build.cmd           {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default build.target        {${subport}}
+default build.pre_args      {build}
+default build.args          {${build.target}}
+default build.post_args     {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                                --prefix=${destroot}${prefix}\
+                            }
 default build.env           {${haskell_cabal.env}}
 
+default destroot.cmd        {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default destroot.target     {${build.target}}
+default destroot.pre_args   {install}
+default destroot.args       {${destroot.target}}
+default destroot.post_args  {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                                --installdir=${destroot}${prefix}/bin\
+                                --prefix=${destroot}${prefix}\
+                            }
 default destroot.env        {${haskell_cabal.env}}
 
-default test.cmd            {${haskell_cabal.bin}}
-default test.target         {new-test}
+default test.cmd            {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default test.target         {${build.target}}
+default test.pre_args       {test}
+default test.args           {${test.target}}
+default test.post_args      {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                            }
 default test.env            {${haskell_cabal.env}}
 
-# destroot: Avoid recompilation with a call to new-install
-
-destroot {
-    # install binary
-    set cabal_build ${worksrcpath}/dist-newstyle/build
-    fs-traverse f ${cabal_build} {
-        if { [file isdirectory ${f}]
-            && [file tail ${f}] eq "${name}-${version}" } {
-            set cabal_build ${f}
-            break
-        }
+proc haskell_cabal.build_getjobsarg {args} {
+    global build.jobs use_parallel_build
+    if {![exists build.jobs] || ![tbool use_parallel_build]} {
+        return ""
     }
-    fs-traverse f ${cabal_build} {
-        if { [file isfile ${f}]
-            && [file executable ${f}]
-            && [file tail ${f}] eq "${name}"
-            && [file tail [file dirname ${f}]] eq "${name}" } {
-            xinstall -m 0755 ${f} ${destroot}${prefix}/bin/${name}
-        }
+    
+    set jobs [option build.jobs]
+    if {![string is integer -strict $jobs] || $jobs < 1} {
+        return ""
     }
-
-    # install documentation
-    if { [file isdirectory ${cabal_build}/doc] } {
-        xinstall -d ${destroot}${prefix}/share/doc/${name}
-        fs-traverse f_or_d ${cabal_build}/doc {
-            set subpath [strsed ${f_or_d} "s|${cabal_build}/doc||"]
-            if { ${subpath} ne "" } {
-                if { [file isdirectory ${f_or_d}] } {
-                    xinstall -d \
-                        ${destroot}${prefix}/share/doc/${name}${subpath}
-                } elseif { [file isfile ${f_or_d}] } {
-                    xinstall -m 0644 ${f_or_d} \
-                        ${destroot}${prefix}/share/doc/${name}${subpath}
-                }
-            }
-        }
-    }
-
-    # install cabal data-files
-    if { [file exists ${worksrcpath}/data]
-        && [file isdirectory ${worksrcpath}/data] } {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        foreach f_or_d [glob -nocomplain ${worksrcpath}/data/*] {
-            if { [file isfile ${f_or_d}] } {
-                xinstall -m 0644 ${f_or_d} ${destroot}${prefix}/share/${name}
-            } elseif { [file isdirectory ${f_or_d}] } {
-                copy ${f_or_d} ${destroot}${prefix}/share/${name}
-            }
-        }
-    }
+    return "-j$jobs"
 }
 
 default livecheck.type      {regex}
