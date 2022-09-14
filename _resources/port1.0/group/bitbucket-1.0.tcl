@@ -45,7 +45,7 @@ proc bitbucket.livecheck_regex {} {
             return "\\\"${dist_pattern}\\\""
         }
         default {
-            return ${dir}/${dist_pattern}[quotemeta [quotemeta ${extract.suffix}]]
+            return ${bitbucket.tarball_from}/${dist_pattern}[quotemeta [quotemeta ${extract.suffix}]]
         }
     }
 }
