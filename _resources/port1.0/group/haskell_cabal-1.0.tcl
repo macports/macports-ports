@@ -86,6 +86,8 @@ post-extract {
                       "relocatable: True" \
                       "install-method: copy" \
                       "installdir: ${prefix}/bin" \
+                      "logs-dir: [option haskell_cabal.cabal_root]/logs" \
+                      "store-dir: [option haskell_cabal.cabal_root]/store" \
                       "" \
                       "install-dirs global" \
                       "  prefix: ${prefix}" \
@@ -123,11 +125,8 @@ default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 default haskell_cabal.env \
         {CABAL_CONFIG=[option haskell_cabal.cabal_root]/config}
 
-default haskell_cabal.global_flags {\
-                    --config-file=[option haskell_cabal.cabal_root]/config\
-                    --logs-dir=[option haskell_cabal.cabal_root]/logs\
-                    --store-dir=[option haskell_cabal.cabal_root]/store\
-                    }
+default haskell_cabal.global_flags \
+        {--config-file=[option haskell_cabal.cabal_root]/config}
 
 default haskell_cabal.build_dir     {${workpath}/dist}
 
@@ -137,29 +136,39 @@ default haskell_cabal.use_prebuilt  {no}
 post-patch {
     if {[tbool haskell_cabal.use_prebuilt]} {
         xinstall -d ${haskell_cabal.cabal_root}/bin
+        # bootstrap from *-prebuilt
+        # the link to exedir_prebuilt got ghc and ghc-pkg is a hac
+        # to accommodate cabal's hack method of locating ghc-pkg
+        # https://github.com/haskell/cabal/blob/master/release-notes/Cabal-3.6.1.0.md
+        set ghc_prebuilt_version \
+                    [lindex [regexp -all -inline {[0-9.]+} [exec ${prefix}/bin/ghc-prebuilt --version]] 0]
+
+        set exedir_prebuilt ${prefix}/lib/ghc-${ghc_prebuilt_version}-prebuilt/bin
+        ln -s       ${exedir_prebuilt}/ghc-${ghc_prebuilt_version} \
+                    ${haskell_cabal.cabal_root}/bin/ghc
+        ln -s       ${exedir_prebuilt}/ghc-pkg-${ghc_prebuilt_version} \
+                    ${haskell_cabal.cabal_root}/bin/ghc-pkg
+        # provides symlinks to ${prefix}/bin/*-prebuilt for the rest
         foreach f {\
-            cabal\
-            ghc\
-            ghc-pkg\
-            ghci\
-            haddock\
-            hp2ps\
-            hpc\
-            hsc2hs\
-            runghc\
-            runhaskell\
-            } {
-            ln -s   ${prefix}/bin/${f}-prebuilt \
-                    ${haskell_cabal.cabal_root}/bin/${f}
-        }
+             cabal\
+             ghci\
+             haddock\
+             hp2ps\
+             hpc\
+             hsc2hs\
+             runghc\
+             runhaskell\
+             } {
+             ln -s   ${prefix}/bin/${f}-prebuilt \
+                     ${haskell_cabal.cabal_root}/bin/${f}
+         }
 
         haskell_cabal.env-append \
-                "GHC=${prefix}/bin/ghc-prebuilt" \
-                "PATH=${haskell_cabal.cabal_root}/bin:$env(PATH)"
+                    "GHC=${haskell_cabal.cabal_root}/bin/ghc" \
+                    "PATH=${haskell_cabal.cabal_root}/bin:$env(PATH)"
         foreach phase {configure build destroot test} {
-            ${phase}.env-append \
-                "GHC=${prefix}/bin/ghc-prebuilt" \
-                "PATH=${haskell_cabal.cabal_root}/bin:$env(PATH)"
+            ${phase}.env \
+                    {*}${haskell_cabal.env}
         }
     }
 }
