@@ -32,6 +32,11 @@ proc haskell_cabal.add_dependencies {} {
         depends_build-append \
             port:cabal \
             port:ghc
+        depends_lib-append \
+            port:gmp \
+            port:libiconv \
+            port:ncurses \
+            port:zlib
     }
 }
 port::register_callback haskell_cabal.add_dependencies
@@ -133,7 +138,7 @@ default haskell_cabal.build_dir     {${workpath}/dist}
 # use to install prebuilt binaries for bootstrapping
 default haskell_cabal.use_prebuilt  {no}
 
-post-patch {
+post-extract {
     if {[tbool haskell_cabal.use_prebuilt]} {
         xinstall -d ${haskell_cabal.cabal_root}/bin
         # bootstrap from *-prebuilt
@@ -161,7 +166,7 @@ post-patch {
              } {
              ln -s   ${prefix}/bin/${f}-prebuilt \
                      ${haskell_cabal.cabal_root}/bin/${f}
-         }
+        }
 
         haskell_cabal.env-append \
                     "GHC=${haskell_cabal.cabal_root}/bin/ghc" \
