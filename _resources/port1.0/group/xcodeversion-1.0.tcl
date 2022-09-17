@@ -16,18 +16,17 @@ default minimum_xcodeversions {}
 
 platform macosx {
     pre-extract {
-        foreach {darwin_major minimum_xcodeversion} [join ${minimum_xcodeversions}] {
+        foreach {darwin_major minimum_xcodeversion} [concat {*}${minimum_xcodeversions}] {
             if {${darwin_major} == ${os.major}} {
                 if {![info exists xcodeversion] || $xcodeversion eq "none"} {
                     ui_error "Couldn't determine your Xcode version (from '/usr/bin/xcodebuild -version')."
                     ui_error ""
-                    ui_error "On macOS ${macosx_version}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have none installed."
+                    ui_error "On macOS ${macos_version_major}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have none installed."
                     ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     ui_error ""
                     return -code error "unable to find Xcode"
-                }
-                if {[vercmp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
-                    ui_error "On macOS ${macosx_version}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
+                } elseif {[vercmp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
+                    ui_error "On macOS ${macos_version_major}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
                     ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     return -code error "incompatible Xcode version"
                 }
