@@ -12,6 +12,11 @@
 
 global os.major
 
+# For now clang-15 only available on Darwin 14 and newer.
+if {${os.major} >= 14} {
+    lappend compilers macports-clang-15
+}
+
 if {${os.major} >= 11} {
     lappend compilers macports-clang-14 \
                       macports-clang-13 \
