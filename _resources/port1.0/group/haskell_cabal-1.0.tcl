@@ -273,8 +273,8 @@ post-destroot {
                 continue
             }
             xinstall -m 0755 \
-                    ${binfile} \
-                    ${binfile}.slash_hack
+                ${binfile} \
+                ${binfile}.slash_hack
             foreach build_datadir ${build_datadirs} {
                 set extra_slashes \
                     [expr [string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]]
@@ -293,11 +293,16 @@ post-destroot {
                             ${binfile}.slash_hack"
                 }
             }
-            delete  ${binfile}
-            xinstall -m 0755 \
+            if {[file size ${binfile}.slash_hack] == [file size ${binfile}]} {
+                delete  ${binfile}
+                xinstall -m 0755 \
                     ${binfile}.slash_hack \
                     ${binfile}
+            }
             delete  ${binfile}.slash_hack
+            if {${configure.build_arch} eq {arm64}} {
+                system "codesign -f -s - ${binfile}"
+            }
         }
     }
 }
