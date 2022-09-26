@@ -179,10 +179,10 @@ if { ${os.arch} ne "arm" } {
 if { ${os.major} >= 10 } {
     lappend clang_versions 11
     if { ${os.major} >= 11 } {
-        lappend clang_versions 12 13 14
+        lappend clang_versions 12 13 14 15
     }
     if { ${os.major} >= 14 } {
-        lappend clang_versions 15 devel
+        lappend clang_versions devel
     }
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
