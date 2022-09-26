@@ -327,8 +327,8 @@ proc mpi.setup {args} {
             lappend ::mpi.disabled_compilers -gcc9
         }
 
-        # Clang 15 only available on 10.10 and later
-        if {${os.major} < 14} {
+        # Clang 15 only available on 10.7 and later
+        if {${os.major} < 11} {
             lappend ::mpi.disabled_compilers -clang15
         }
 
