@@ -1,4 +1,5 @@
 # add all working Clang compilers to the variable compilers based on ${os.major}
+# (and temporarily compiler.cxx_standard)
 
 # When adding a new clang version here, make sure to update the
 # clang_dependency PortGroup, and add it to any new dependencies of the
@@ -11,6 +12,16 @@
 # Clang 9.0 and newer only on 11+ (Darwin 20)
 
 global os.major
+global compiler.cxx_standard
+
+# For now clang-15 only available on Darwin 14 and newer.
+# Also for now, limit to ports requiring c++17 or newer to reduce exposure to
+# the newest compiler. To be relaxed at some later date.
+if {${os.major} >= 14} {
+    if {${compiler.cxx_standard} >= 2017} {
+        lappend compilers macports-clang-15
+    }
+}
 
 if {${os.major} >= 11} {
     lappend compilers macports-clang-14 \

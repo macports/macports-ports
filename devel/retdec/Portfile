@@ -7,7 +7,7 @@ PortGroup           openssl 1.0
 PortGroup           compiler_blacklist_versions 1.0
 
 github.setup        avast retdec 4.0 v
-revision            5
+revision            8
 conflicts           ${name}-devel
 
 categories          devel
@@ -29,27 +29,65 @@ post-patch {
     reinplace "s|DESTINATION \${SUPPORT_TARGET_DIR}/|DESTINATION \${RETDEC_INSTALL_SUPPORT_DIR}|" ${worksrcpath}/support/CMakeLists.txt
 }
 
+set python_branch   3.10
+set python_version  [string map {. {}} ${python_branch}]
+
+configure.python    ${prefix}/bin/python${python_branch}
+
+# It can't be linked only against libc++
+# this force is OK as node does not link against any other c++ libs
+depends_lib-append   port:libcxx
+configure.cxx_stdlib libc++
+
 if {${name} eq ${subport}} {
     patch.pre_args  -p1
     patchfiles      patch-hardcoded-make-v40.diff \
                     patch-python3.diff \
+                    cmake-libtool-v4.0.diff \
                     patch-system-openssl.diff \
-                    patch-yara-syntax-error.diff
+                    patch-yara-syntax-error.diff \
+                    yara-inherits-linker-flags-v40.diff
 
     # 4.0's yara uses std::variant<>, which is broken on macOS <= 10.12
     if {${os.platform} eq "darwin" && ${os.major} <= 16} {
         depends_lib-append          port:macports-libcxx
-        configure.cxxflags-append   -nostdinc++ -I${prefix}/include/libcxx/v1
+        configure.cxxflags-append   -nostdinc++ -isystem${prefix}/include/libcxx/v1
         configure.ldflags-append    -L${prefix}/lib/libcxx
     }
 }
+
+subport retdec-devel {
+    conflicts       $name
+
+    github.setup    avast retdec aecb4d0857380659af67a0bb9eb133fffa92b87d
+    version         20220920
+    revision        0
+    epoch           1
+
+    checksums       rmd160  4976a1281b10ed8ef38404fb78c4b14be0432516 \
+                    sha256  2038e8505773226f0b5eca824c51fcc7afa17242e6e78994eb86f4ba6843c7cc \
+                    size    27189686
+
+    # NOTE: patch-hardcoded-make-devel.diff was merged and reverted
+    # See: https://github.com/avast/retdec/commit/a1d7a5793d590bec9fce3ee33cd4f0eacb47eda6
+    patch.pre_args  -p1
+    patchfiles      patch-hardcoded-make-devel.diff
+
+    # Before Catalina it also requires macports-libcxx
+    if {${os.platform} eq "darwin" && ${os.major} < 19} {
+        depends_lib-append          port:macports-libcxx
+        configure.cxxflags-append   -nostdinc++ -isystem${prefix}/include/libcxx/v1
+        configure.ldflags-append    -L${prefix}/lib/libcxx
+    }
+}
+
 
 compiler.cxx_standard \
                     2017
 
 # Extend blacklist to cover macOS10.13
 compiler.blacklist-append \
-                    {clang < 1100} {macports-clang-[4-9].0}
+                    {clang < 1100} {macports-clang-[4-9].0} macports-clang-10
 
 build.args-append   CC=${configure.cc} \
                     CXX=${configure.cxx}
@@ -60,23 +98,88 @@ build.env-append    CC=${configure.cc} \
 depends_build-append \
                     port:autoconf \
                     port:automake \
+                    port:cctools \
                     port:git \
                     port:gmake \
-                    port:libtool
+                    port:ld64
 
-depends_lib-append  port:python39 \
+depends_lib-append  port:python${python_version} \
                     port:zlib
 
 depends_run-append  path:bin/dot:graphviz \
                     path:bin/upx:upx
 
-# error: /usr/bin/ranlib: unknown option character `n' in: -no_warning_for_no_symbols
-if {${os.platform} eq "darwin" && ${os.major} < 13} {
-    depends_build-append \
-                    port:cctools
+# NOTE: both available PG legacysupport brokes build with error
+# libstdc++ version must be at least 4.8.
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    depends_lib-append \
+                    path:lib/libMacportsLegacySupport.dylib:legacy-support
+
+    configure.cflags-append \
+                    -isystem${prefix}/include/LegacySupport
+    configure.cxxflags-append \
+                    -isystem${prefix}/include/LegacySupport
+    configure.ldflags-append \
+                    -L${prefix}/lib -lMacportsLegacySupport
+
+    # NOTE: bin2pat and pat2yara compilation by MacPort's clang-11 is failed on 10.6 as
+    # clang: error: unable to execute command: Segmentation fault
+    # Right now it is impossible to disable specified project.
+    # Here the list of projects for 4.0 and devel version.
+    # See: https://github.com/avast/retdec/issues/1112
     configure.args-append \
-                    -DCMAKE_RANLIB=${prefix}/bin/ranlib
+                    -DRETDEC_ENABLE_ALL:BOOL=OFF \
+                    -DRETDEC_ENABLE_AR_EXTRACTOR:BOOL=ON \
+                    -DRETDEC_ENABLE_AR_EXTRACTORTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_BIN2LLVMIR:BOOL=ON \
+                    -DRETDEC_ENABLE_BIN2LLVMIRTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_BIN2PAT:BOOL=OFF \
+                    -DRETDEC_ENABLE_CAPSTONE2LLVMIR:BOOL=ON \
+                    -DRETDEC_ENABLE_CAPSTONE2LLVMIRTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_COMMON:BOOL=ON \
+                    -DRETDEC_ENABLE_CONFIG:BOOL=ON \
+                    -DRETDEC_ENABLE_CONFIGTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_CPDETECT:BOOL=ON \
+                    -DRETDEC_ENABLE_CRYPTO:BOOL=ON \
+                    -DRETDEC_ENABLE_CTYPES:BOOL=ON \
+                    -DRETDEC_ENABLE_CTYPESPARSER:BOOL=ON \
+                    -DRETDEC_ENABLE_DEBUGFORMAT:BOOL=ON \
+                    -DRETDEC_ENABLE_DEMANGLER:BOOL=ON \
+                    -DRETDEC_ENABLE_DEMANGLERTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_FILEFORMAT:BOOL=ON \
+                    -DRETDEC_ENABLE_FILEINFO:BOOL=ON \
+                    -DRETDEC_ENABLE_GETSIG:BOOL=ON \
+                    -DRETDEC_ENABLE_IDR2PAT:BOOL=ON \
+                    -DRETDEC_ENABLE_LLVMIR2HLL:BOOL=ON \
+                    -DRETDEC_ENABLE_LLVMIR2HLLTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_LLVMIR_EMUL:BOOL=ON \
+                    -DRETDEC_ENABLE_LLVM_SUPPORT:BOOL=ON \
+                    -DRETDEC_ENABLE_LOADER:BOOL=ON \
+                    -DRETDEC_ENABLE_MACHO_EXTRACTOR:BOOL=ON \
+                    -DRETDEC_ENABLE_MACHO_EXTRACTORTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_PAT2YARA:BOOL=OFF \
+                    -DRETDEC_ENABLE_PATTERNGEN:BOOL=ON \
+                    -DRETDEC_ENABLE_PDBPARSER:BOOL=ON \
+                    -DRETDEC_ENABLE_PELIB:BOOL=ON \
+                    -DRETDEC_ENABLE_RETDEC:BOOL=ON \
+                    -DRETDEC_ENABLE_RETDECTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_RETDEC_DECOMPILER:BOOL=ON \
+                    -DRETDEC_ENABLE_RTTI_FINDER:BOOL=ON \
+                    -DRETDEC_ENABLE_SERDES:BOOL=ON \
+                    -DRETDEC_ENABLE_STACOFIN:BOOL=ON \
+                    -DRETDEC_ENABLE_STACOFINTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_UNPACKER:BOOL=ON \
+                    -DRETDEC_ENABLE_UNPACKERTOOL:BOOL=ON \
+                    -DRETDEC_ENABLE_UTILS:BOOL=ON \
+                    -DRETDEC_ENABLE_YARACPP:BOOL=ON
 }
+
+# error: /usr/bin/ranlib: unknown option character `n' in: -no_warning_for_no_symbols
+# error: /Developer/usr/bin/libtool: malformed object (unknown load command 2)
+configure.args-append \
+                    -DCMAKE_LINKER=${prefix}/bin/ld \
+                    -DCMAKE_RANLIB=${prefix}/bin/ranlib \
+                    -DCMAKE_LIBTOOL=${prefix}/bin/libtool
 
 # NOTE: Force use of gmake; otherwise, macOS' make will be used for top-level
 # subprocesses, while gmake will be used for lower-level ones. And jobserver
@@ -84,30 +187,13 @@ if {${os.platform} eq "darwin" && ${os.major} < 13} {
 # jobs!
 # See: https://trac.macports.org/ticket/63999
 build.cmd           ${prefix}/bin/gmake
-build.args-append   MAKE=${prefix}/bin/gmake
-build.env-append    MAKE=${prefix}/bin/gmake
+configure.args-append \
+                    -DCMAKE_MAKE_PROGRAM=${prefix}/bin/gmake
 
-subport retdec-devel {
-    conflicts       $name
-
-    github.setup    avast retdec 0749a46b2490c8d499d64f08629271e16c311d82
-    version         20220624
-    revision        0
-    epoch           1
-
-    checksums       rmd160  6ab04b25f819f57600a6772b69392dc86443de5c \
-                    sha256  5c4f8c3ce7848bf356fddd43301868dac5c1c4536f33bf852651fd943e8584bb \
-                    size    27192035
-
-    patch.pre_args  -p1
-    patchfiles      patch-hardcoded-make-devel.diff
-
-    # Before Catalina it also requires macports-libcxx
-    if {${os.platform} eq "darwin" && ${os.major} < 19} {
-        depends_lib-append          port:macports-libcxx
-        configure.cxxflags-append   -nostdinc++ -I${prefix}/include/libcxx/v1
-        configure.ldflags-append    -L${prefix}/lib/libcxx
-    }
+post-destroot {
+    reinplace "s|^#!/usr/bin/env python3|#!${configure.python}|" \
+        {*}[glob ${destroot}${prefix}/bin/*.py]
 }
+
 
 github.livecheck.regex  {([^"v]+)}
