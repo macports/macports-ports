@@ -1,64 +1,3 @@
-diff --git a/clang-tools-extra/clangd/index/Background.h b/clang-tools-extra/clangd/index/Background.h
-index 688c09814cd2..29869f38a43e 100644
---- a/clang-tools-extra/clangd/index/Background.h
-+++ b/clang-tools-extra/clangd/index/Background.h
-@@ -72,7 +72,7 @@ public:
-     explicit Task(std::function<void()> Run) : Run(std::move(Run)) {}
- 
-     std::function<void()> Run;
--    llvm::ThreadPriority ThreadPri = llvm::ThreadPriority::Low;
-+    llvm::ThreadPriority ThreadPri = llvm::ThreadPriority::Background;
-     unsigned QueuePri = 0; // Higher-priority tasks will run first.
-     std::string Tag;       // Allows priority to be boosted later.
-     uint64_t Key = 0;      // If the key matches a previous task, drop this one.
-diff --git a/clang/tools/libclang/CIndex.cpp b/clang/tools/libclang/CIndex.cpp
-index 9356dd4a2377..19d0d950fa9e 100644
---- a/clang/tools/libclang/CIndex.cpp
-+++ b/clang/tools/libclang/CIndex.cpp
-@@ -9229,9 +9229,7 @@ void clang::setThreadBackgroundPriority() {
-     return;
- 
- #if LLVM_ENABLE_THREADS
--  // The function name setThreadBackgroundPriority is for historical reasons;
--  // Low is more appropriate.
--  llvm::set_thread_priority(llvm::ThreadPriority::Low);
-+  llvm::set_thread_priority(llvm::ThreadPriority::Background);
- #endif
- }
- 
-diff --git a/llvm/include/llvm/Support/Threading.h b/llvm/include/llvm/Support/Threading.h
-index 1e7e5f7b8f50..b158a57a1a21 100644
---- a/llvm/include/llvm/Support/Threading.h
-+++ b/llvm/include/llvm/Support/Threading.h
-@@ -233,20 +233,16 @@ bool llvm_is_multithreaded();
-   unsigned get_cpus();
- 
-   enum class ThreadPriority {
--    /// Lower the current thread's priority as much as possible. Can be used
--    /// for long-running tasks that are not time critical; more energy-
--    /// efficient than Low.
-     Background = 0,
-+    Low        = 0,
--
--    /// Lower the current thread's priority such that it does not affect
--    /// foreground tasks significantly. This is a good default for long-
--    /// running, latency-insensitive tasks to make sure cpu is not hogged
--    /// by this task.
--    Low = 1,
--
--    /// Restore the current thread's priority to default scheduling priority.
--    Default = 2,
-+    Default = 1,
-   };
-+  /// If priority is Background tries to lower current threads priority such
-+  /// that it does not affect foreground tasks significantly. Can be used for
-+  /// long-running, latency-insensitive tasks to make sure cpu is not hogged by
-+  /// this task.
-+  /// If the priority is default tries to restore current threads priority to
-+  /// default scheduling priority.
-   enum class SetThreadPriorityResult { FAILURE, SUCCESS };
-   SetThreadPriorityResult set_thread_priority(ThreadPriority Priority);
- }
 diff --git a/llvm/lib/Support/Unix/Threading.inc b/llvm/lib/Support/Unix/Threading.inc
 index 99f64b4f553d..5de1cf071ba9 100644
 --- a/llvm/lib/Support/Unix/Threading.inc
@@ -71,26 +10,10 @@ index 99f64b4f553d..5de1cf071ba9 100644
  #endif
  
  #include <pthread.h>
-@@ -261,29 +260,27 @@
-   // SCHED_OTHER   the standard round-robin time-sharing policy;
-   return !pthread_setschedparam(
-              pthread_self(),
--             // FIXME: consider SCHED_BATCH for Low
--             Priority == ThreadPriority::Default ? SCHED_OTHER : SCHED_IDLE,
-+             Priority == ThreadPriority::Background ? SCHED_IDLE : SCHED_OTHER,
-              &priority)
-              ? SetThreadPriorityResult::SUCCESS
-              : SetThreadPriorityResult::FAILURE;
- #elif defined(__APPLE__) && defined(PRIO_DARWIN_THREAD) && defined(PRIO_DARWIN_BG)
--  // https://developer.apple.com/documentation/apple-silicon/tuning-your-code-s-performance-for-apple-silicon
--  //
--  // Background - Applies to work that isn’t visible to the user and may take significant
--  // time to complete. Examples include indexing, backing up, or synchronizing data. This
--  // class emphasizes energy efficiency.
--  //
--  // Utility - Applies to work that takes anywhere from a few seconds to a few minutes to
--  // complete. Examples include downloading a document or importing data. This class
--  // offers a balance between responsiveness, performance, and energy efficiency.
+@@ -276,14 +275,8 @@
+   // Utility - Applies to work that takes anywhere from a few seconds to a few minutes to
+   // complete. Examples include downloading a document or importing data. This class
+   // offers a balance between responsiveness, performance, and energy efficiency.
 -  const auto qosClass = [&](){
 -    switch (Priority) {
 -      case ThreadPriority::Background: return QOS_CLASS_BACKGROUND;
@@ -99,38 +22,8 @@ index 99f64b4f553d..5de1cf071ba9 100644
 -    }
 -  }();
 -  return !pthread_set_qos_class_self_np(qosClass, 0)
-+  // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/getpriority.2.html
-+  // When setting a thread into background state the scheduling priority is set
-+  // to lowest value, disk and network IO are throttled. Network IO will be
-+  // throttled for any sockets the thread opens after going into background
-+  // state. Any previously opened sockets are not affected.
-+
-+  // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/getiopolicy_np.3.html
-+  // I/Os with THROTTLE policy are called THROTTLE I/Os. If a THROTTLE I/O
-+  // request occurs within a small time window (usually a fraction of a second)
-+  // of another NORMAL I/O request, the thread that issues the THROTTLE I/O is
-+  // forced to sleep for a certain interval. This slows down the thread that
-+  // issues the THROTTLE I/O so that NORMAL I/Os can utilize most of the disk
-+  // I/O bandwidth.
 +  return !setpriority(PRIO_DARWIN_THREAD, 0,
-+                      Priority == ThreadPriority::Background ? PRIO_DARWIN_BG
-+                                                             : 0)
++                      Priority == ThreadPriority::Default ? 0 : PRIO_DARWIN_BG)
               ? SetThreadPriorityResult::SUCCESS
               : SetThreadPriorityResult::FAILURE;
  #endif
-diff --git a/llvm/lib/Support/Windows/Threading.inc b/llvm/lib/Support/Windows/Threading.inc
-index 11f34817dbbf..78047ab8bbbd 100644
---- a/llvm/lib/Support/Windows/Threading.inc
-+++ b/llvm/lib/Support/Windows/Threading.inc
-@@ -120,10 +120,8 @@ SetThreadPriorityResult llvm::set_thread_priority(ThreadPriority Priority) {
-   // End background processing mode. The system restores the resource scheduling
-   // priorities of the thread as they were before the thread entered background
-   // processing mode.
--  //
--  // FIXME: consider THREAD_PRIORITY_BELOW_NORMAL for Low
-   return SetThreadPriority(GetCurrentThread(),
--                           Priority != ThreadPriority::Default
-+                           Priority == ThreadPriority::Background
-                                ? THREAD_MODE_BACKGROUND_BEGIN
-                                : THREAD_MODE_BACKGROUND_END)
-              ? SetThreadPriorityResult::SUCCESS
