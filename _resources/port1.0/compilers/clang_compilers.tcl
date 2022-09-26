@@ -14,10 +14,10 @@
 global os.major
 global compiler.cxx_standard
 
-# For now clang-15 only available on Darwin 14 and newer.
-# Also for now, limit to ports requiring c++17 or newer to reduce exposure to
-# the newest compiler. To be relaxed at some later date.
-if {${os.major} >= 14} {
+# For now clang-15 only available on Darwin 11 and newer.
+if {${os.major} >= 11} {
+    # Also for now, limit to ports requiring c++17 or newer to reduce exposure
+    # to the newest compiler. To be relaxed at some later date.
     if {${compiler.cxx_standard} >= 2017} {
         lappend compilers macports-clang-15
     }
