@@ -3,10 +3,10 @@
 # https://trac.macports.org/ticket/57135
 # https://trac.macports.org/ticket/61636
 
-global os.major os.arch
+global os.major os.arch os.platform
 
 #3 GCC 10 and above on OSX10.6+
-if { ${os.major} >= 10 } {
+if {${os.major} >= 10 || ${os.platform} ne "darwin"} {
     lappend compilers macports-gcc-12 macports-gcc-11 macports-gcc-10
 }
 

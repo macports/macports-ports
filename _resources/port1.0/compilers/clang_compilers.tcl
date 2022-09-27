@@ -11,19 +11,14 @@
 # Clang 11 and newer only on Apple Silicon
 # Clang 9.0 and newer only on 11+ (Darwin 20)
 
-global os.major
-global compiler.cxx_standard
+global os.major os.platform
 
-# For now clang-15 only available on Darwin 11 and newer.
-if {${os.major} >= 11} {
-    # Also for now, limit to ports requiring c++17 or newer to reduce exposure
+if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
+    # For now, limit to ports requiring c++17 or newer to reduce exposure
     # to the newest compiler. To be relaxed at some later date.
-    if {${compiler.cxx_standard} >= 2017} {
+    if {[option compiler.cxx_standard] >= 2017} {
         lappend compilers macports-clang-15
     }
-}
-
-if {${os.major} >= 11} {
     lappend compilers macports-clang-14 \
                       macports-clang-13 \
                       macports-clang-12
