@@ -132,9 +132,9 @@ default     openssl.branch      {}
 proc rust.add_bootstrap_components {architectures {components {rust-std rustc cargo}}} {
     global extract.suffix os.major subport
 
-    set version_current         1.61.0
-    set version_m1              1.60.0
-    set version_m2              1.59.0
+    set version_current         1.64.0
+    set version_m1              1.63.0
+    set version_m2              1.62.1
 
     master_sites-append         https://static.rust-lang.org/dist:apple_vendor \
                                 https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${version_current}:macports_vendor \
@@ -212,18 +212,19 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
     }
 
     # upstream binaries
+    # XXX M1 hashes not updated!
     checksums-append        rust-std-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  143d2efeab58174df9a1b71fc75c1912bdc7347c \
-                            sha256  1cdd56c95d27b954f5fda8c5527d2edb4e3f17cf17c5553b8b3b57f8dfc77eee \
-                            size    39947593 \
-                            rustc-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  6de0b0ded933b2790cf19a63efc01a526e410b62 \
-                            sha256  6569aa1b0959fa7f73fea4d6dd01059132c83d1d8c06216726077cf9e6883857 \
-                            size    82915939 \
-                            cargo-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  5002a7687a166956c2d576ca1847dcfbde964115 \
-                            sha256  fd479595f3c4035a555357c0bebffdf6fb5e244d590dc6b7eb2880dd71091cca \
-                            size    6665646 \
+                            rmd160  45f8fbce526ab9a8afd0e7f2dab22b0930672be5 \
+                            sha256  a8653b57d0efbccf3e95953cfb9c7a2ddaa68ba789edc8378c5b0b8200cc3be5 \
+                            size    40445814 \
+                            rustc-1.63.0-x86_64-apple-darwin.tar.gz \
+                            rmd160  c2ad4d9215b2b5b46fd7dd8fdd665fa7602c3ce8 \
+                            sha256  47cd3aac451fe69a131d452023578d6da2fe954b4a90b2d65177c217628f2faa \
+                            size    82008260 \
+                            cargo-1.63.0-x86_64-apple-darwin.tar.gz \
+                            rmd160  62bb02fb86c616171a55d86c640d5bc9e934fcfe \
+                            sha256  91fe0d3477036b0630b09db2a9ef340c29b8be56c48ed244428e2490043ca841 \
+                            size    7088592 \
                             rust-std-${version_m1}-aarch64-apple-darwin${extract.suffix} \
                             rmd160  f2af395c4216a099602929d7bdc43cff7d5f5385 \
                             sha256  ca99a455d930147d9383da282e6db4f0de2a013099555b551ab381d58fd82732 \
