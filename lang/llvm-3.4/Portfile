@@ -9,19 +9,16 @@ PortGroup compiler_blacklist_versions 1.0
 set llvm_version        3.4
 set llvm_version_no_dot 34
 name                    llvm-${llvm_version}
-revision                13
-subport                 clang-${llvm_version} { revision 14 }
+revision                16
+subport                 clang-${llvm_version} { revision 17 }
 set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
-# prefix for deps using libstdc++ on a libc++ system
-set bootstrap_prefix    ${prefix}/libexec/libcxx-bootstrap
 dist_subdir             llvm
 categories              lang
 platforms               darwin
 license                 NCSA
-maintainers             {jeremyhu @jeremyhu} {larryv @larryv} {kencu @kencu}
+maintainers             {jeremyhu @jeremyhu} {larryv @larryv}
 
-# work around a bug in base -- REMOVE ME when base is fixed
 #see https://trac.macports.org/ticket/59677
 #see https://trac.macports.org/ticket/58779
 if { !${use_xcode} && ![file exists ${configure.developer_dir}/SDKs] } {
@@ -39,6 +36,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
                         the LLVM intermediate representation ("LLVM IR").
 
     depends_lib         port:libffi port:ncurses port:zlib
+    depends_build       port:python27
     depends_run         bin:perl:perl5 port:llvm_select
 } elseif {${subport} eq "clang-${llvm_version}"} {
     homepage            https://clang.llvm.org/
@@ -66,7 +64,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
         default_variants    +analyzer
     }
 
-    # port:libxml2 depends on port:icu which now needs a C++11 compiler
+    # libxml2 depends on icu, which now needs a C++11 compiler
     # this is problematic for bootstrapping, and clang in fact does not require libxml2
     # (although c-index-test will optionally use it if it is installed)
     # remove the dependency, and force any installed version of libxml2 to
@@ -77,31 +75,18 @@ if {${subport} eq "llvm-${llvm_version}"} {
     }
 }
 
-if {${os.platform} eq "darwin" && ${os.major} < 12 && ${cxx_stdlib} eq "libc++"} {
-    if {${os.major} < 11} {
-        configure.cxx_stdlib    libstdc++
-        # Have to also use bootstrap versions of deps that use libstdc++ in
-        # order to be able to build libc++.
-        depends_lib-replace port:python27 port:python27-bootstrap \
-                            port:ncurses port:ncurses-bootstrap
-    }
-    configure.cppflags-prepend  -I${bootstrap_prefix}/include
-    configure.ldflags-prepend   -L${bootstrap_prefix}/lib
-    configure.env-append    PATH=${bootstrap_prefix}/bin:$::env(PATH)
-}
+set python27 ${prefix}/bin/python2.7
 
-#fetch.type              svn
-#svn.revision            198150
-#
-#set compiler_rt_rev     ${svn.revision}
-#set libcxx_rev          ${svn.revision}
-#set clang-modernize_rev ${svn.revision}
-#version                 ${llvm_version}-r${svn.revision}
-#worksrcdir              trunk
-#svn.url                 http://llvm.org/svn/llvm-project/llvm/trunk
-#worksrcdir              release_${llvm_version_no_dot}
-#svn.url                 http://llvm.org/svn/llvm-project/llvm/branches/release_${llvm_version_no_dot}
-#default_variants-append +assertions
+if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
+    configure.cxx_stdlib        libstdc++
+    # Have to also use bootstrap versions of deps that use libstdc++ in
+    # order to be able to build libc++.
+    depends_build-replace       port:python27 port:python27-bootstrap
+    depends_lib-replace         port:python27 port:python27-bootstrap
+    depends_lib-delete          port:ncurses
+
+    set python27 ${prefix}/libexec/python27-bootstrap/bin/python2.7
+}
 
 version                 ${llvm_version}.2
 epoch                   1
@@ -135,7 +120,6 @@ checksums           llvm-3.4.2.src.tar.gz \
 patch.pre_args  -p1
 patchfiles \
         0001-MacPorts-Only-Update-install-targets-for-clang-subpo.patch \
-        0002-MacPorts-Only-Skip-checking-for-python-in-configure.patch \
         0003-MacPorts-Only-Fix-sample-project-regex-to-work-with-.patch \
         0004-Set-the-Mach-O-CPU-Subtype-to-ppc7400-when-targeting.patch \
         0005-_CS_DARWIN_USER-macros-available-on-darwin-9.-Thanks.patch \
@@ -166,11 +150,6 @@ if {${subport} eq "clang-${llvm_version}"} {
         3005-implement-atomic-using-mutex-lock_guard-for-64b-ops-.patch \
         compiler_rt-toolchain.patch
 
-    # I'm not sure if we need to delete this.  It seems to build fine with it
-    # present, but we used to explicitly only use this patch for the llvm subport.
-    patchfiles-delete \
-        0002-MacPorts-Only-Skip-checking-for-python-in-configure.patch
-
     # Introduces a failure during build (-arch ?? passed to ld), to be investigated:
     patchfiles-delete \
         1005-Call-powerpc-darwin-external-tools-with-arch-ppc.patch
@@ -195,8 +174,12 @@ configure.cmd           ${worksrcpath}/configure
 configure.pre_args-delete --prefix=${prefix}
 configure.args          --enable-bindings=none --enable-libffi --enable-shared --enable-jit \
                         --enable-optimized --disable-profiling --enable-pic \
-                        --enable-debug-symbols --disable-debug-runtime \
-                        --prefix="${sub_prefix}" --disable-assertions
+                        --disable-debug-symbols --disable-debug-runtime \
+                        --prefix="${sub_prefix}" --disable-assertions \
+                        --with-python=${python27}
+
+# need arm target or compiler-rt build fails
+configure.args-append   --enable-targets=x86,powerpc,arm
 
 if {${subport} eq "llvm-${llvm_version}"} {
     select.group        llvm
@@ -204,12 +187,6 @@ if {${subport} eq "llvm-${llvm_version}"} {
 } elseif {${subport} eq "clang-${llvm_version}"} {
     select.group        clang
     select.file         ${filespath}/mp-${subport}
-
-    if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
-        configure.args-append --with-python=${bootstrap_prefix}/bin/python2.7
-    } else {
-        configure.args-append --with-python=${prefix}/bin/python2.7
-    }
 }
 
 # g++-4.0 fails to build some of the newer C++ for ppc. Intel looks ok, but I prefer using gcc-4.2 for consistency
@@ -219,6 +196,10 @@ compiler.blacklist gcc-4.0 {gcc-4.2 <= 5577} {clang < 421}
 
 # avoid dependency cycles
 compiler.blacklist-append   macports-clang-*
+
+platform darwin {
+    supported_archs ppc ppc64 i386 x86_64
+}
 
 variant universal {
     build.env-append \
@@ -265,6 +246,18 @@ platform darwin {
         patchfiles-append leopard-no-asan.patch leopard-no-blocks.patch
     }
 
+    # fix build on a G3 #63304 -- absence of Altivec is not automatically detected
+    if {${subport} eq "clang-${llvm_version}" && ${os.major} < 9 && ${build_arch} eq "ppc"} {
+        if {[catch {sysctl hw.vectorunit} result] || $result == 0} {
+
+            # if this machine is a G3, force a local build so we don't download a buildbot-built
+            # version possibly built on a G4+ or cross-compiled from an Intel system
+            archive_sites
+
+            patchfiles-append 1013-clang-lib-lex-dont-assume-altivec.diff
+        }
+    }
+
     # TODO: The llvm build system sets a 10.1 deployment target on Yosemite
     if {[vercmp ${macosx_deployment_target} 10.10] >= 0} {
         macosx_deployment_target 10.9
@@ -289,27 +282,18 @@ platform darwin {
 
 post-extract {
     if {${subport} eq "clang-${llvm_version}"} {
-        if {${worksrcdir} eq "trunk"} {
-            system "cd ${worksrcpath}/tools && svn co -r ${svn.revision} http://llvm.org/svn/llvm-project/cfe/trunk clang"
-            system "cd ${worksrcpath}/projects && svn co -r ${compiler_rt_rev} http://llvm.org/svn/llvm-project/compiler-rt/trunk compiler-rt"
-            system "cd ${worksrcpath}/projects && svn co -r ${libcxx_rev} http://llvm.org/svn/llvm-project/libcxx/trunk libcxx"
-            system "cd ${worksrcpath}/tools/clang/tools && svn co -r ${clang-modernize_rev} http://llvm.org/svn/llvm-project/clang-tools-extra/trunk extra"
-        } elseif {${worksrcdir} eq "release_${llvm_version_no_dot}" } {
-            system "cd ${worksrcpath}/tools && svn co -r ${svn.revision} http://llvm.org/svn/llvm-project/cfe/branches/release_${llvm_version_no_dot} clang"
-            system "cd ${worksrcpath}/projects && svn co -r ${compiler_rt_rev} http://llvm.org/svn/llvm-project/compiler-rt/branches/release_${llvm_version_no_dot} compiler-rt"
-            system "cd ${worksrcpath}/projects && svn co -r ${libcxx_rev} http://llvm.org/svn/llvm-project/libcxx/branches/release_${llvm_version_no_dot} libcxx"
-            system "cd ${worksrcpath}/tools/clang/tools && svn co -r ${clang-modernize_rev} http://llvm.org/svn/llvm-project/clang-tools-extra/branches/release_${llvm_version_no_dot} extra"
-        } else {
-            file rename ${workpath}/cfe-${version}.src ${worksrcpath}/tools/clang
-            file rename ${workpath}/compiler-rt-${llvm_version} ${worksrcpath}/projects/compiler-rt
-            file rename ${workpath}/libcxx-${version}.src ${worksrcpath}/projects/libcxx
-            file rename ${workpath}/clang-tools-extra-${llvm_version} ${worksrcpath}/tools/clang/tools/extra
-        }
+        file rename ${workpath}/cfe-${version}.src ${worksrcpath}/tools/clang
+        file rename ${workpath}/compiler-rt-${llvm_version} ${worksrcpath}/projects/compiler-rt
+        file rename ${workpath}/libcxx-${version}.src ${worksrcpath}/projects/libcxx
+        file rename ${workpath}/clang-tools-extra-${llvm_version} ${worksrcpath}/tools/clang/tools/extra
     }
 }
 
 post-patch {
-    if {${subport} eq "clang-${llvm_version}"} {
+    if {${subport} eq "llvm-${llvm_version}"} {
+        reinplace "s|/usr/bin/env python|${python27}|g" \
+            ${worksrcpath}/utils/llvm-build/llvm-build
+    } elseif {${subport} eq "clang-${llvm_version}"} {
         # http://trac.macports.org/ticket/33272
         if {![variant_isset arm_runtime]} {
             reinplace {/^SubDirs/ s/arm//} ${worksrcpath}/projects/compiler-rt/lib/Makefile.mk
@@ -378,7 +362,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
                 ${worksrcpath}/tools/clang/tools/scan-build/ccc-analyzer \
                 ${worksrcpath}/tools/clang/tools/scan-build/c++-analyzer \
                 ${worksrcpath}/tools/clang/tools/scan-build/scan-build
-            reinplace "s|/usr/bin/env python|${prefix}/bin/python2.7|g" \
+            reinplace "s|/usr/bin/env python|${python27}|g" \
                 ${worksrcpath}/tools/clang/tools/scan-build/set-xcode-analyzer \
                 ${worksrcpath}/tools/clang/tools/scan-view/scan-view
         }

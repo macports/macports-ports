@@ -1,0 +1,140 @@
+From 23607a359ba60a751476c88f6806a80f3c328949 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Mon, 7 Feb 2022 15:36:35 +0000
+Subject: [PATCH] LRA, rs6000, Darwin: Amend lo_sum use for forced constants
+ [PR104117].
+
+Two issues resulted in this PR, which manifests when we force a constant into
+memory in LRA (in PIC code on Darwin).  The presence of such forced constants
+is quite dependent on other RTL optimisations, and it is easy for the issue to
+become latent for a specific case.
+
+First, in the Darwin-specific rs6000 backend code, we were not being careful
+enough in rejecting invalid symbolic addresses.  Specifically, when generating
+PIC code, we require a SYMBOL_REF to be wrapped in an UNSPEC_MACHOPIC_OFFSET.
+
+Second, LRA was attempting to load a register using an invalid lo_sum address.
+
+Signed-off-by: Iain Sandoe <iain@sandoe.co.uk>
+Co-authored-by: Vladimir Makarov <vmakarov@redhat.com>
+
+	PR target/104117
+
+gcc/ChangeLog:
+
+	* config/rs6000/rs6000.cc (darwin_rs6000_legitimate_lo_sum_const_p):
+	Check for UNSPEC_MACHOPIC_OFFSET wrappers on symbolic addresses when
+	emitting PIC code.
+	(legitimate_lo_sum_address_p): Likewise.
+	* lra-constraints.cc (process_address_1): Do not attempt to emit a reg
+	load from an invalid lo_sum address.
+
+(cherry picked from commit 4c3792d448964f7bd99e7eac2c29c9eb7c2bfb84)
+---
+ gcc/config/rs6000/rs6000.c | 38 ++++++++++++++++++++++++++++++++++++--
+ gcc/lra-constraints.c      | 17 ++---------------
+ 2 files changed, 38 insertions(+), 17 deletions(-)
+
+diff --git gcc/config/rs6000/rs6000.c gcc/config/rs6000/rs6000.c
+index a6dc1156994..51fe77d145d 100644
+--- gcc/config/rs6000/rs6000.c
++++ gcc/config/rs6000/rs6000.c
+@@ -7551,8 +7551,14 @@ darwin_rs6000_legitimate_lo_sum_const_p (rtx x, machine_mode mode)
+   if (GET_CODE (x) == CONST)
+     x = XEXP (x, 0);
+ 
++  /* If we are building PIC code, then any symbol must be wrapped in an
++     UNSPEC_MACHOPIC_OFFSET so that it will get the picbase subtracted.  */
++  bool machopic_offs_p = false;
+   if (GET_CODE (x) == UNSPEC && XINT (x, 1) == UNSPEC_MACHOPIC_OFFSET)
+-    x =  XVECEXP (x, 0, 0);
++    {
++      x =  XVECEXP (x, 0, 0);
++      machopic_offs_p = true;
++    }
+ 
+   rtx sym = NULL_RTX;
+   unsigned HOST_WIDE_INT offset = 0;
+@@ -7583,6 +7589,9 @@ darwin_rs6000_legitimate_lo_sum_const_p (rtx x, machine_mode mode)
+   if (sym)
+     {
+       tree decl = SYMBOL_REF_DECL (sym);
++      /* As noted above, PIC code cannot use a bare SYMBOL_REF.  */
++      if (TARGET_MACHO && flag_pic && !machopic_offs_p)
++	return false;
+ #if TARGET_MACHO
+       if (MACHO_SYMBOL_INDIRECTION_P (sym))
+       /* The decl in an indirection symbol is the original one, which might
+@@ -8170,7 +8179,7 @@ legitimate_lo_sum_address_p (machine_mode mode, rtx x, int strict)
+     return false;
+   x = XEXP (x, 1);
+ 
+-  if (TARGET_ELF || TARGET_MACHO)
++  if (TARGET_ELF)
+     {
+       bool large_toc_ok;
+ 
+@@ -8196,7 +8205,32 @@ legitimate_lo_sum_address_p (machine_mode mode, rtx x, int strict)
+ 
+       return CONSTANT_P (x) || large_toc_ok;
+     }
++  else if (TARGET_MACHO)
++    {
++      if (GET_MODE_NUNITS (mode) != 1)
++	return false;
++      if (GET_MODE_SIZE (mode) > UNITS_PER_WORD
++	  && !(/* see above  */
++	       TARGET_HARD_FLOAT && (mode == DFmode || mode == DDmode)))
++	return false;
++#if TARGET_MACHO
++      if (MACHO_DYNAMIC_NO_PIC_P || !flag_pic)
++	return CONSTANT_P (x);
++#endif
++      /* Macho-O PIC code from here.  */
++      if (GET_CODE (x) == CONST)
++	x = XEXP (x, 0);
++
++      /* SYMBOL_REFs need to be wrapped in an UNSPEC_MACHOPIC_OFFSET.  */
++      if (SYMBOL_REF_P (x))
++	return false;
+ 
++      /* So this is OK if the wrapped object is const.  */
++      if (GET_CODE (x) == UNSPEC
++	  && XINT (x, 1) == UNSPEC_MACHOPIC_OFFSET)
++	return CONSTANT_P (XVECEXP (x, 0, 0));
++      return CONSTANT_P (x);
++    }
+   return false;
+ }
+ 
+diff --git gcc/lra-constraints.c gcc/lra-constraints.c
+index 7cc479b3042..0adcc2b6654 100644
+--- gcc/lra-constraints.c
++++ gcc/lra-constraints.c
+@@ -3473,21 +3473,8 @@ process_address_1 (int nop, bool check_only_p,
+ 		  *ad.inner = gen_rtx_LO_SUM (Pmode, new_reg, addr);
+ 		  if (!valid_address_p (op, &ad, cn))
+ 		    {
+-		      /* Try to put lo_sum into register.  */
+-		      insn = emit_insn (gen_rtx_SET
+-					(new_reg,
+-					 gen_rtx_LO_SUM (Pmode, new_reg, addr)));
+-		      code = recog_memoized (insn);
+-		      if (code >= 0)
+-			{
+-			  *ad.inner = new_reg;
+-			  if (!valid_address_p (op, &ad, cn))
+-			    {
+-			      *ad.inner = addr;
+-			      code = -1;
+-			    }
+-			}
+-
++		      *ad.inner = addr; /* Punt.  */
++		      code = -1;
+ 		    }
+ 		}
+ 	      if (code < 0)
+-- 
+2.35.1
+

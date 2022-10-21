@@ -1,26 +1,37 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
-#
+
+#===============================================================================
+# app 1.0
+#-------------------------------------------------------------------------------
 # This PortGroup helps create an application bundle the user can open from the
 # Finder or the Dock. This is useful for ports that install a program built
 # with an SDK like SDL or Qt that, when launched, causes an icon to appear in
 # the Dock and opens a proper macOS GUI, but that do not build their own
 # app bundle to easily launch it.
+#-------------------------------------------------------------------------------
+# NOTE: This is the original version, which doesn't use the port callback
+# mechanism.
+#===============================================================================
 
 
+#-------------------------------------------------------------------------------
 # app.create: whether to create the app bundle at all
 #
 # The default is yes.
+#-------------------------------------------------------------------------------
 
 options app.create
 default app.create yes
 
 
+#-------------------------------------------------------------------------------
 # app.name: the name of the app that users will see in the Finder
 #
 # The default is based on ${name}: if ${name} contains any uppercase letters,
 # ${name} is used, otherwise the first character of ${name} is uppercased.
 #
 # Info.plist key CFBundleName.
+#-------------------------------------------------------------------------------
 
 options app.name
 default app.name {[app.get_default_name]}
@@ -34,6 +45,7 @@ proc app.get_default_name {} {
 }
 
 
+#-------------------------------------------------------------------------------
 # app.executable: the program the app will run
 #
 # The default is ${name}; relative paths are relative to ${prefix}/bin. If you
@@ -47,11 +59,13 @@ proc app.get_default_name {} {
 # be copied from there.
 #
 # Relates to Info.plist key CFBundleExecutable.
+#-------------------------------------------------------------------------------
 
 options app.executable
 default app.executable {${name}}
 
 
+#-------------------------------------------------------------------------------
 # app.icon: the icon the app will have
 #
 # The default is empty; if no icon graphic is available for this software, this
@@ -63,33 +77,39 @@ default app.executable {${name}}
 # Paths may be absolute or relative to ${worksrcpath}.
 #
 # Relates to Info.plist key CFBundleIconFile.
+#-------------------------------------------------------------------------------
 
 options app.icon
 default app.icon ""
 
 
+#-------------------------------------------------------------------------------
 # app.short_version_string: the version number
 #
 # The default is ${version}. This is fine for most ports, but ports that list
 # both version and build number in ${version} may wish to separate these here.
 #
 # Info.plist key CFBundleShortVersionString.
+#-------------------------------------------------------------------------------
 
 options app.short_version_string
 default app.short_version_string {${version}}
 
 
+#-------------------------------------------------------------------------------
 # app.version: the build number
 #
 # The default is ${version}. This is fine for most ports, but ports that list
 # both version and build number in ${version} may wish to separate these here.
 #
 # Info.plist key CFBundleVersion.
+#-------------------------------------------------------------------------------
 
 options app.version
 default app.version {${version}}
 
 
+#-------------------------------------------------------------------------------
 # app.identifier: the app's unique bundle identifier
 #
 # The default is computed based on ${homepage} and ${app.name}. For most ports
@@ -97,6 +117,7 @@ default app.version {${version}}
 # established bundle identifier outside of MacPorts, you can set it here.
 #
 # Info.plist key CFBundleIdentifier.
+#-------------------------------------------------------------------------------
 
 options app.identifier
 default app.identifier {[app.get_default_identifier]}
@@ -117,86 +138,101 @@ proc app.get_default_identifier {} {
 }
 
 
+#-------------------------------------------------------------------------------
 # app.retina: whether the app supports Retina display resolutions
 #
 # The default is no.
 #
 # Info.plist key NSHighResolutionCapable.
+#-------------------------------------------------------------------------------
 
 options app.retina
 default app.retina no
 
 
+#-------------------------------------------------------------------------------
 # app.dark_mode: whether the app supports dark mode
 #
 # The default is yes.
 #
 # Info.plist key NSRequiresAquaSystemAppearance.
+#-------------------------------------------------------------------------------
 
 options app.dark_mode
 default app.dark_mode yes
 
 
+#-------------------------------------------------------------------------------
 # app.privacy_microphone: whether the app needs microphone access
 #
 # The default is empty and therefore disabled. To enable write a
 # message that tells the user why the app is requesting access to the
-# device’s microphone.
+# device's microphone.
 #
 # Info.plist key NSMicrophoneUsageDescription.
+#-------------------------------------------------------------------------------
 
 options app.privacy_microphone
 default app.privacy_microphone ""
 
 
+#-------------------------------------------------------------------------------
 # app.privacy_camera: whether the app needs camera access
 #
 # The default is empty and therefore disabled. To enable write a
 # message that tells the user why the app is requesting access to the
-# device’s camera.
+# device's camera.
 #
 # Info.plist key NSCameraUsageDescription.
+#-------------------------------------------------------------------------------
 
 options app.privacy_camera
 default app.privacy_camera ""
 
 
+#-------------------------------------------------------------------------------
 # app.privacy_contacts: whether the app needs contacts access
 #
 # The default is empty and therefore disabled. To enable write a
 # message that tells the user why the app is requesting access to the
-# user’s contacts.
+# user's contacts.
 #
 # Info.plist key NSContactsUsageDescription.
+#-------------------------------------------------------------------------------
 
 options app.privacy_contacts
 default app.privacy_contacts ""
 
 
+#-------------------------------------------------------------------------------
 # app.privacy_calendars: whether the app needs calendars access
 #
 # The default is empty and therefore disabled. To enable write a
 # message that tells the user why the app is requesting access to the
-# user’s calendar data.
+# user's calendar data.
 #
 # Info.plist key NSCalendarsUsageDescription.
+#-------------------------------------------------------------------------------
 
 options app.privacy_calendars
 default app.privacy_calendars ""
 
 
+#-------------------------------------------------------------------------------
 # app.privacy_photo: whether the app needs photo access
 #
 # The default is empty and therefore disabled. To enable write a
 # message that tells the user why the app is requesting access to the
-# user’s photo library.
+# user's photo library.
 #
 # Info.plist key NSPhotoLibraryUsageDescription.
+#-------------------------------------------------------------------------------
 
 options app.privacy_photo
 default app.privacy_photo ""
 
 
+#-------------------------------------------------------------------------------
 # app.hide_dock_icon: hide the Dock icon
 #
 # SDKs like SDL and Qt use the necessary macOS APIs to implement proper Dock
@@ -208,6 +244,7 @@ default app.privacy_photo ""
 # enabled it.
 #
 # Info.plist key LSUIElement.
+#-------------------------------------------------------------------------------
 
 options app.hide_dock_icon
 default app.hide_dock_icon  {[app.get_default_hide_dock_icon]}
@@ -217,13 +254,15 @@ proc app.get_default_hide_dock_icon {} {
 }
 
 
-# app.use_launch_script: use a Bash launch script instead of a symlink to the executable
+#-------------------------------------------------------------------------------
+# app.use_launch_script: use shell launch script instead of symlink to executable
 #
 # The default behaviour is to symlink the executable into the bundle. However,
 # this has two issues: OS X 10.8 and earlier pass a `-psn` argument (the process
 # serial number) to the executable, which some programs can't handle. Also, it
 # doesn't modify the PATH, e.g. to add ${prefix}/bin to it. Using a launch
 # script solves both of these issues.
+#-------------------------------------------------------------------------------
 
 options app.use_launch_script
 default app.use_launch_script  no
@@ -255,14 +294,14 @@ platform macosx {
 
             if {${app.icon} ne ""} {
                 # Turn relative app.icon paths into absolute ones.
-                set icon ${app.icon}
+                set icon [join ${app.icon}]
                 if {[string index ${icon} 0] ne "/"} {
                     set icon ${worksrcpath}/${icon}
                 }
 
                 # Ensure app.icon exists.
                 if {![file exists ${icon}]} {
-                    return -code error "app.icon ${app.icon} does not exist"
+                    return -code error "app.icon '[join ${app.icon}]' does not exist"
                 }
 
                 # If app.icon is an .icns file, copy it.
@@ -275,18 +314,18 @@ platform macosx {
                     foreach w {16 32 128 256 512} {
                         lappend makeicnsargs -$w ${worksrcpath}/${w}.png
 
-                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w ${icon} > ${worksrcpath}/$w.png" }]} {
-                            return -code error "app.icon ${app.icon} could not be converted to png: $::errorInfo"
+                        if {[catch {system -W ${worksrcpath} "${prefix}/bin/rsvg-convert -w $w -h $w [shellescape ${icon}] > ${worksrcpath}/$w.png" }]} {
+                            return -code error "app.icon '[join ${app.icon}]' could not be converted to png: $::errorInfo"
                         }
                     }
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns $makeicnsargs -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
                         return -code error "app.icns could not be created: $::errorInfo"
                     }
 
                 # If app.icon is another type of image file, convert it.
                 } else {
-                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in ${icon} -out \"${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns\" 2>&1"}]} {
-                        return -code error "app.icon ${app.icon} could not be converted to ${app.name}.icns: $::errorInfo"
+                    if {[catch {system -W ${worksrcpath} "${prefix}/bin/makeicns -in [shellescape ${icon}] -out [shellescape ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${app.name}.icns] 2>&1"}]} {
+                        return -code error "app.icon '[join ${app.icon}]' could not be converted to ${app.name}.icns: $::errorInfo"
                     }
                 }
             }
@@ -406,12 +445,12 @@ trace variable app.icon w app._icon_trace
 proc app._icon_trace {optionName unusedIndex unusedOperation} {
     global depends_build
     upvar ${optionName} option
-    set needs_dep [expr {[file extension ${option}] ne ".icns"}]
+    set needs_dep [expr {[file extension [join ${option}]] ne ".icns"}]
     if {${needs_dep}} {
         depends_build-delete port:makeicns
         depends_build-append port:makeicns
     }
-    set needs_dep [expr {[file extension ${option}] eq ".svg"}]
+    set needs_dep [expr {[file extension [join ${option}]] eq ".svg"}]
     if {${needs_dep}} {
         depends_build-delete port:librsvg
         depends_build-append port:librsvg
@@ -432,13 +471,13 @@ proc app._resolve_symlink {path destroot} {
 
 # Write a launch script for the executable into the bundle, modifying PATH to
 # allow the executable to find other executables installed with MacPorts.
-proc app._write_launch_script  {executable app_destination} {
+proc app._write_launch_script {executable app_destination} {
     global prefix
     set launch_script [open ${app_destination} w]
 
     puts ${launch_script} "#!/bin/bash
 export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
-exec ${executable}
+exec [shellescape ${executable}]
 "
     close ${launch_script}
     file attributes ${app_destination} -permissions 0755

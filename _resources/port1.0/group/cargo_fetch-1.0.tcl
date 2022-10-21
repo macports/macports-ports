@@ -118,12 +118,39 @@ proc cargo._write_cargo_checksum {cdirname chksum} {
     close $chkfile
 }
 
+proc cargo._old_macos_compatibility {cname cversion} {
+    global os.platform os.major cargo.home
+    if {${os.platform} ne "darwin" || ${os.major} >= 12} {
+        return
+    }
+
+    switch ${cname} {
+        "crypto-hash" {
+            # switch crypto-hash to use openssl instead of commoncrypto
+            # See: https://github.com/malept/crypto-hash/issues/23
+            reinplace "s|target_os = \"macos\"|target_os = \"macos_disabled\"|g" \
+                ${cargo.home}/macports/crypto-hash-${cversion}/src/lib.rs
+            reinplace "s|macos|macos_disabled|g" \
+                ${cargo.home}/macports/crypto-hash-${cversion}/Cargo.toml
+        }
+        "curl-sys" {
+            # curl-sys requires CCDigestGetOutputSizeFromRef which is available since macOS 10.8
+            # disable USE_SECTRANSP to avoid calling of CCDigestGetOutputSizeFromRef
+            # See: https://github.com/alexcrichton/curl-rust/issues/429
+            reinplace "s|USE_SECTRANSP|USE_SECTRANSP_DISABLED|g" \
+                ${cargo.home}/macports/curl-sys-${cversion}/build.rs
+        }
+    }
+
+}
+
 proc cargo._import_crate {cname cversion chksum cratefile} {
     global cargo.home
 
     ui_info "Adding ${cratefile} to cargo home"
     cargo._extract_crate ${cratefile}
     cargo._write_cargo_checksum "${cname}-${cversion}" "\"${chksum}\""
+    cargo._old_macos_compatibility ${cname} ${cversion}
 }
 
 proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
@@ -135,6 +162,7 @@ proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
     ui_info "Adding ${cratefile} from github to cargo home"
     cargo._extract_crate ${cratefile}
     cargo._write_cargo_checksum ${cdirname} "null"
+    cargo._old_macos_compatibility ${cname} ${cversion}
 }
 
 # The distfiles of the main port will also be stored in this directory,
@@ -257,10 +285,13 @@ proc cargo.append_envs { var {phases {configure build destroot}} } {
 }
 
 # see https://trac.macports.org/wiki/UsingTheRightCompiler
-cargo.append_envs CC=${configure.cc}   {build destroot}
-cargo.append_envs CXX=${configure.cxx} {build destroot}
-
-cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
+proc cargo.set_compiler_envs {} {
+    global configure.cc configure.cxx
+    cargo.append_envs CC=${configure.cc}   {build destroot}
+    cargo.append_envs CXX=${configure.cxx} {build destroot}
+    cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
+}
+port::register_callback cargo.set_compiler_envs
 
 # Is build caching enabled ?
 # WIP for now ...
@@ -274,20 +305,20 @@ cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
 
 # do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
 proc cargo.environments {} {
-    global os.major prefix
+    global os.major prefix configure.pkg_config_path
     global configure.cc configure.cxx subport configure.build_arch configure.universal_archs
     global merger_configure_env merger_build_env merger_destroot_env worksrcpath
 
     set cargo_ld ${configure.cc}
-    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-        # Use wrapped rust compilers
-        depends_build-append port:rust-compiler-wrap
-        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
-        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
-        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
-    }
+#    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+#        # Use wrapped rust compilers
+#        depends_build-append port:rust-compiler-wrap
+#        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
+#        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+#        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
+#        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
+#        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
+#    }
 
     cargo.append_envs     CC=${configure.cc}   {build destroot}
     cargo.append_envs     CXX=${configure.cxx} {build destroot}
@@ -295,6 +326,12 @@ proc cargo.environments {} {
     cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}"
     cargo.append_envs     "RUST_BACKTRACE=1"
     cargo.append_envs     "CARGO_BUILD_RUSTC=${prefix}/bin/rustc"
+
+    # Propagate pkgconfig path to build and destroot phases as well
+    # Needed to work with openssl PG
+    if { ${configure.pkg_config_path} ne "" } {
+        cargo.append_envs "PKG_CONFIG_PATH=${configure.pkg_config_path}" {build destroot}
+    }
 
     # CARGO_BUILD_TARGET does not work correctly
     # see the patchfile path-dyld.diff in cargo Portfile

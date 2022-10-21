@@ -13,7 +13,7 @@
 #
 # Example:
 #
-#   PortGroup               unspelldict 1.0
+#   PortGroup               hunspelldict 1.0
 #   hunspelldict.setup      en_US 2006-02-07 {English (United States)} ooo
 
 options hunspelldict.locale
@@ -32,7 +32,7 @@ proc hunspelldict.setup {locale version lang {source {}}} {
     description {*}${lang} dictionary for hunspell
     long_description ${description}
 
-    homepage    http://wiki.services.openoffice.org/wiki/Dictionaries
+    homepage    https://wiki.openoffice.org/wiki/Dictionaries
 
     if {${source} eq "ooo"} {
         dist_subdir ${name}/${version}

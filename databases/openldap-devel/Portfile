@@ -1,0 +1,149 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           muniversal 1.0
+PortGroup           legacysupport 1.1
+
+name                openldap-devel
+conflicts           openldap
+set my_name         openldap
+version             2.6.3
+revision            5
+
+categories          databases
+license             openldap
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         OpenLDAP Software
+long_description    OpenLDAP Software is an open source implementation \
+                    of the Lightweight Directory Access Protocol.
+homepage            https://www.openldap.org/
+
+master_sites        https://www.openldap.org/software/download/OpenLDAP/openldap-release/
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+extract.suffix      .tgz
+
+checksums           rmd160  1e82b197be3e511d50f2b151e1619c85f9421c35 \
+                    sha256  d2a2a1d71df3d77396b1c16ad7502e674df446e06072b0e5a4e941c3d06c0d46 \
+                    size    6474169
+
+# Needed for _posix_memalign
+# See: https://trac.macports.org/ticket/46236
+# See: https://trac.macports.org/ticket/47630
+# Needed for clock_gettime
+legacysupport.newest_darwin_requires_legacy \
+                    16
+
+depends_lib-append  path:bin/perl:perl5 \
+                    port:tcp_wrappers \
+                    port:cyrus-sasl2 \
+                    port:libfetch \
+                    path:lib/libssl.dylib:openssl \
+                    port:db48 \
+                    path:lib/pkgconfig/icu-uc.pc:icu
+
+# Needed for `gdate` on older macOS releases
+depends_test-append path:libexec/coreutils/libstdbuf.so:coreutils
+
+patchfiles-append   patch-ltmain.diff
+patchfiles-append   patch-dynamic_lookup-11.diff
+patchfiles-append   patch-fix_implicit.diff
+patchfiles-append   patch-libressl.diff
+# Use 'gdate', rather than 'date', for tests
+patchfiles-append   patch-tests-gdate.diff
+
+configure.env-append        LANG=C
+configure.cppflags-append   -I${prefix}/include/db48 -I${prefix}/include/openssl -DBIND_8_COMPAT
+
+platform darwin {
+    configure.cppflags-append -DMDB_FDATASYNC=fsync
+    if {${os.major} <= 9} {
+        configure.cppflags-append -DMDB_DSYNC=O_SYNC
+    }
+
+    if {${os.major} >= 22} {
+        # The openldap build uses soelim from groff, and newer OS versions do
+        # not provide groff as part of the base OS install.
+        depends_build-append port:groff
+    }
+}
+
+configure.ldflags-append    -L${prefix}/lib/db48
+
+configure.args-append \
+                    --mandir=${prefix}/share/man \
+                    --localstatedir=${prefix}/var \
+                    --with-cyrus-sasl \
+                    --with-fetch \
+                    --with-tls \
+                    --enable-wrappers \
+                    --enable-crypt \
+                    --enable-syncprov \
+                    --enable-ipv6
+
+startupitem.create  yes
+startupitem.name    slapd
+startupitem.init    "PID=${prefix}/var/run/slapd.pid"
+startupitem.start   "${prefix}/libexec/slapd -u ldap -f ${prefix}/etc/openldap/slapd.conf"
+startupitem.stop    "\[ -r \${PID} \] && kill \$(cat \${PID})"
+
+variant aci description {Enable per-object ACIs (experimental)} {
+    configure.args-append \
+                    --enable-aci
+}
+
+variant overlays description {Enable all available overlays} {
+    configure.args-append \
+                    --enable-overlays
+}
+
+variant backends description {Enable additional backends} {
+    configure.args-append \
+                    --enable-asyncmeta \
+                    --enable-ldap \
+                    --enable-mdb \
+                    --enable-meta \
+                    --enable-null \
+                    --enable-relay \
+                    --enable-sock
+}
+
+pre-build {
+    set dirs {}
+    if {[variant_exists universal] && [variant_isset universal]} {
+        foreach arch ${universal_archs_to_use} {
+            lappend dirs ${worksrcpath}-${arch}
+        }
+    } else {
+        lappend dirs ${worksrcpath}
+    }
+    foreach dir ${dirs} {
+        system -W ${dir} "make depend"
+    }
+}
+
+add_users ldap group=ldap
+
+destroot.keepdirs   "${destroot}${prefix}/var/run/openldap-data"
+
+post-destroot {
+    if {[geteuid] == 0} {
+        xinstall -d -g ldap -m 700 -o ldap \
+            "${destroot}${prefix}/var/run/openldap-data"
+    } else {
+        xinstall -d -m 700 \
+            "${destroot}${prefix}/var/run/openldap-data"
+    }
+
+    # Delete the duplicate .conf files (leaves .conf.default) so upgrades won't overwrite .conf files.
+    file delete -force ${destroot}${prefix}/etc/openldap/slapd.conf
+    file delete -force ${destroot}${prefix}/etc/openldap/ldap.conf
+}
+
+test.run            yes
+test.target         check
+
+livecheck.type      regex
+livecheck.url       https://www.openldap.org/software/download/OpenLDAP/openldap-release/
+livecheck.regex     "${my_name}-(\\d+(?:\\.\\d+)*)${extract.suffix}"

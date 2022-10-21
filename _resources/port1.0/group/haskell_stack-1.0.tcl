@@ -70,12 +70,18 @@ post-extract {
     xinstall -m 0755 -d "[option haskell_stack.stack_root]"
 }
 
+# stack builds x86_64 binaries
+supported_archs     x86_64
+
 # libHSbase shipped with GHC links against system libiconv, which provides the
 # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
 # process statically links libHSbase.a, we must have /usr/lib in the library
 # search path first :/
 compiler.library_path
 compiler.cpath
+
+# Builds (sometimes) fail if ccache is enabled in MacPorts
+configure.ccache    no
 
 options haskell_stack.bin haskell_stack.default_args
 default haskell_stack.bin   ${prefix}/bin/stack

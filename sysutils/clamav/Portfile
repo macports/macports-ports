@@ -1,10 +1,10 @@
 PortSystem 1.0
-PortGroup muniversal 1.0
 PortGroup legacysupport 1.0
+PortGroup cmake 1.1
 
 name			clamav
-version		 	0.103.2
-categories	  	sysutils
+version		 	0.104.4
+categories		sysutils
 maintainers	 	{geeklair.net:dluke @danielluke}
 description	 	clamav antivirus software
 license			{GPL-2 OpenSSLException}
@@ -15,27 +15,21 @@ long_description	Clam AntiVirus is a GPL anti-virus toolkit for UNIX. The \
 
 homepage		http://www.clamav.net
 master_sites		http://www.clamav.net/downloads/production
-checksums	rmd160	c85f82c4c1f4988936d4c2db31842cf257ee5c20 \
-		sha256	d4b5d0ac666262e423a326fb54778caa7c69624d6c3f9542895feb8478271bd2 \
-		size	13387954
+checksums	rmd160	9158544048971e28c71ebf60ea39b42afcb8ce04 \
+		sha256	8ac32e910aa744cc7f921c5122ba523ef1ffbbbf94545f94fc4a976b502be74b \
+		size	12027448
 
-platforms	   	darwin
+platforms		darwin
 
-configure.args  	--mandir=${prefix}/share/man \
-			--with-zlib=${prefix} \
-			--with-openssl=${prefix} \
-			--with-pcre=${prefix} \
-			--with-xml=${prefix} \
-			--with-libcurl=${prefix} \
-			--with-libjson=${prefix} \
-			--disable-silent-rules \
-			--enable-llvm=no
-#- disable llvm because of upstream bug
-#- https://bugzilla.clamav.net/show_bug.cgi?id=11309
+# Disable tests to avoid extra dependencies
+configure.args-append	-DENABLE_TESTS=OFF
 
-use_parallel_build	yes
+#Parallel build causes build failures as of 0.104.0
+#use_parallel_build	yes
 
-depends_build		port:pkgconfig
+depends_build		path:bin/cmake:cmake \
+			port:pkgconfig \
+			bin:git:git
 
 depends_lib		port:libiconv \
 			port:zlib \
@@ -45,54 +39,59 @@ depends_lib		port:libiconv \
 			port:pcre2 \
 			port:libxml2 \
 			port:curl \
-			port:json-c
-
-#- makefile hack to build even when chmlib is installed with its own lzx.h
-#- configure hack to use pkgc-config for libxml2 libraries because
-#- xml2-config includes the icu libraries and we overlink otherwiwse
-patchfiles	patch-libclamav-Makefile.diff patch-configure.diff
+			port:json-c \
+			port:libtool
 
 ## older systems support
-# use linux version of openssl cert util on systems < 10.7 that don't support the macOS version
-# ./shared/linux/cert_util_linux.c -> ./shared/mac/cert_util_mac.m
-# passes all tests. See: https://trac.macports.org/ticket/59168
 post-extract {
  if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
-    ui_msg "replacing mac security with linux security"
-    delete ${worksrcpath}/shared/mac/cert_util_mac.m
-    copy   ${worksrcpath}/shared/linux/cert_util_linux.c \
-           ${worksrcpath}/shared/mac/cert_util_mac.m
-  }
+
+	# use linux version of openssl cert util on systems < 10.7 that don't support the macOS version
+	# ./common/linux/cert_util_linux.c -> ./common/mac/cert_util_mac.m
+	# passes all tests. See: https://trac.macports.org/ticket/59168
+
+	ui_msg	"replacing mac security with linux security"
+	delete	${worksrcpath}/common/mac/cert_util_mac.m
+	copy	${worksrcpath}/common/linux/cert_util_linux.c \
+		${worksrcpath}/common/mac/cert_util_mac.m
+
+	# remove two switchs not supported by the older gcc versions often used on these systems
+	reinplace "s/-Wno-logical-op-parentheses//g"	${worksrcpath}/libclamunrar/CMakeLists.txt
+	reinplace "s/-Wno-dangling-else//g"		${worksrcpath}/libclamunrar/CMakeLists.txt
+ }
 }
 
-test.run		yes
-test.target		check
-
-set merger_dont_diff	${prefix}/bin/clamav-config
-
 platform darwin 8 {
-			configure.cflags {-O0}
-		}
-
-post-destroot {
-			#muniversal should allow this to be hooked in some way that's less gross
-			#this code copied from nspr's portfile
-			if {[variant_exists universal] && [variant_isset universal]} {
-				copy ${destroot}${prefix}/bin/${build_arch}-clamav-config ${destroot}${prefix}/bin/bak-config
-				foreach file [glob ${destroot}${prefix}/bin/*clamav-config] {
-					delete $file
-					}
-				move ${destroot}${prefix}/bin/bak-config ${destroot}${prefix}/bin/clamav-config
-				reinplace "s|-arch ${build_arch}||g" ${destroot}${prefix}/bin/clamav-config
-				reinplace "s|-L\$\{exec_prefix\}/lib/${build_arch}||g" ${destroot}${prefix}/bin/clamav-config
-				}
-			reinplace "s|-R${prefix}/lib||g" ${destroot}${prefix}/bin/clamav-config
-		}
+	configure.args-append	-DOPTIMIZE=OFF
+}
 
 variant clamav_milter description {build with libmilter support} {
-			depends_lib-append port:libmilter
-			configure.args-append --enable-milter
-		}
+	depends_lib-append port:libmilter
+	configure.args-append	-DENABLE_MILTER=ON
+}
+
+pre-test {
+    if {![variant_isset tests]} {
+        ui_error "'tests' variant must be activated to enable test support"
+        error "Please enable the 'tests' variant and try again"
+    }
+}
+
+variant tests description {Enable running 'port test'} {
+	ui_msg "Tests run using the installed version of this port."
+
+	depends_test	port:check \
+			port:py39-pytest
+
+	configure.args-delete	-DENABLE_TESTS=OFF
+	configure.pre_args-replace	-DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+					-DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+
+	test.run yes
+	test.cmd ctest
+	test.target --rerun-failed --output-on-failure
+}
 
 livecheck.type		regex
 livecheck.url		http://www.clamav.net/downloads

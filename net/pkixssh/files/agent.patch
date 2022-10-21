@@ -1,0 +1,154 @@
+diff --git a/ssh-agent.c b/ssh-agent.c
+index 8bb4ee3..5a1cf2f 100644
+--- a/ssh-agent.c
++++ b/ssh-agent.c
+@@ -76,6 +76,10 @@
+ #include <time.h>
+ #include <string.h>
+ #include <unistd.h>
++#ifdef __APPLE_LAUNCHD__
++#include <launch.h>
++#include <AvailabilityMacros.h>
++#endif
+ #ifdef HAVE_UTIL_H
+ # include <util.h>
+ #endif
+@@ -1247,6 +1251,9 @@ int
+ main(int ac, char **av)
+ {
+ 	int c_flag = 0, d_flag = 0, D_flag = 0, k_flag = 0, s_flag = 0;
++	#ifdef __APPLE_LAUNCHD__
++	int l_flag = 0;
++	#endif
+ 	int sock, ch, result, saved_errno;
+ 	char *shell, *format, *pidstr, *agentsocket = NULL;
+ 	extern int optind;
+@@ -1292,7 +1299,11 @@ main(int ac, char **av)
+ 
+ 	seed_rng();
+ 
++#ifdef __APPLE_LAUNCHD__
++	while ((ch = getopt(ac, av, "cDdklsE:a:P:t:")) != -1) {
++#else
+ 	while ((ch = getopt(ac, av, "cDdksE:a:P:t:")) != -1) {
++#endif
+ 		switch (ch) {
+ 		case 'E':
+ 			fingerprint_hash = ssh_digest_alg_by_name(optarg);
+@@ -1312,6 +1323,11 @@ main(int ac, char **av)
+ 				fatal("-P option already specified");
+ 			allowed_providers = xstrdup(optarg);
+ 			break;
++#ifdef __APPLE_LAUNCHD__
++		case 'l':
++			l_flag++;
++			break;
++#endif
+ 		case 's':
+ 			if (c_flag)
+ 				usage();
+@@ -1430,6 +1446,75 @@ main(int ac, char **av)
+ 	 * Create socket early so it will exist before command gets run from
+ 	 * the parent.
+ 	 */
++#ifdef __APPLE_LAUNCHD__
++	if (l_flag) {
++#if ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11))
++		int *fds = NULL;
++		size_t count = 0;
++		result = launch_activate_socket("Listeners", &fds, &count);
++
++		if (result != 0 || fds == NULL || count < 1) {
++			errno = result;
++			perror("launch_activate_socket()");
++			exit(1);
++		}
++
++		size_t i;
++		for (i = 0; i < count; i++) {
++			new_socket(AUTH_SOCKET, fds[i]);
++		}
++
++		if (fds)
++			free(fds);
++
++		goto skip2;
++#else /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++		launch_data_t resp, msg, tmp;
++		size_t listeners_i;
++
++		msg = launch_data_new_string(LAUNCH_KEY_CHECKIN);
++
++		resp = launch_msg(msg);
++
++		if (NULL == resp) {
++			perror("launch_msg");
++			exit(1);
++		}
++		launch_data_free(msg);
++		switch (launch_data_get_type(resp)) {
++		case LAUNCH_DATA_ERRNO:
++			errno = launch_data_get_errno(resp);
++			perror("launch_msg response");
++			exit(1);
++		case LAUNCH_DATA_DICTIONARY:
++			break;
++		default:
++			fprintf(stderr, "launch_msg unknown response");
++			exit(1);
++		}
++		tmp = launch_data_dict_lookup(resp, LAUNCH_JOBKEY_SOCKETS);
++
++		if (NULL == tmp) {
++			fprintf(stderr, "no sockets\n");
++			exit(1);
++		}
++
++		tmp = launch_data_dict_lookup(tmp, "Listeners");
++
++		if (NULL == tmp) {
++			fprintf(stderr, "no known listeners\n");
++			exit(1);
++		}
++
++		for (listeners_i = 0; listeners_i < launch_data_array_get_count(tmp); listeners_i++) {
++			launch_data_t obj_at_ind = launch_data_array_get_index(tmp, listeners_i);
++			new_socket(AUTH_SOCKET, launch_data_get_fd(obj_at_ind));
++		}
++
++		launch_data_free(resp);
++#endif /* ((defined (MAC_OS_X_VERSION_10_11)) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)) */
++	} else {
++#endif
+ 	prev_mask = umask(0177);
+ 	sock = unix_listener(socket_name, SSH_LISTEN_BACKLOG, 0);
+ 	if (sock < 0) {
+@@ -1437,7 +1522,18 @@ main(int ac, char **av)
+ 		*socket_name = '\0'; /* Don't unlink any existing file */
+ 		cleanup_exit(1);
+ 	}
++
+ 	umask(prev_mask);
++#ifdef __APPLE_LAUNCHD__
++	}
++#endif
++
++#ifdef __APPLE_LAUNCHD__
++#if ((!(defined (MAC_OS_X_VERSION_10_11))) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_11))
++	if (l_flag)
++		goto skip2;
++#endif /* ((!(defined (MAC_OS_X_VERSION_10_11))) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_11)) */
++#endif /* defined (__APPLE_LAUNCHD__) */
+ 
+ 	/*
+ 	 * Fork, and have the parent execute the command, if any, or present
+@@ -1512,6 +1608,9 @@ skip:
+ 	pkcs11_init(0);
+ #endif
+ 	new_socket(AUTH_SOCKET, sock);
++#ifdef __APPLE_LAUNCHD__
++skip2:
++#endif
+ 	if (ac > 0)
+ 		parent_alive_interval = 10;
+ 	idtab_init();

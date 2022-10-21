@@ -3,14 +3,29 @@
 PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           cmake 1.1
+PortGroup           boost 1.0
+PortGroup           openssl 1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
 
-github.setup        facebook folly 2019.09.16.00 v
+legacysupport.newest_darwin_requires_legacy 19
+
+if {[string match *clang* ${configure.compiler}]} {
+    # Don't use libcxx with gcc.
+    legacysupport.use_mp_libcxx yes
+}
+
+# NB: Facebook does not do API stabiilty, apparently, so please don't
+# upgrade without also upgrading its dependents, as listed by:
+# port list rdepends:folly
+github.setup        facebook folly 2022.08.08.00 v
 revision            0
+checksums           rmd160  aaaf802ce3318fb2a666201779d8d254a53e6dec \
+                    sha256  a8915c7191f36d5529a49b89c3fe6847db840e5e28a9456149352c0238a5776d \
+                    size    3684846
 
 categories          devel
-platforms           darwin
 license             Apache-2
-
 maintainers         nomaintainer
 
 description         An open-source C++ library developed and used at Facebook.
@@ -27,14 +42,15 @@ long_description    Folly (acronymed loosely after Facebook Open Source Library)
                     more idiosyncratic than they would otherwise be (see e.g. PackedSyncPtr.h, SmallLocks.h). \
                     Good performance at large scale is a unifying theme in all of Folly.
 
-checksums           rmd160  4146c1e95e307ae755f0997a27a879891dd73f51 \
-                    sha256  3f7daeb1755246a92b890079dd3881070be8478e1ccfb0dc21037a54de87edbb \
-                    size    3033459
+github.tarball_from releases
+distname            ${name}-v${version}
+extract.mkdir       yes
 
-# doesn't build with libressl as of 2016-09-05
-depends_lib-append  port:boost \
-                    port:bzip2 \
-                    port:python27 \
+set port_libfmt     libfmt9
+cmake.module_path-append \
+                    ${prefix}/lib/${port_libfmt}/cmake
+
+depends_lib-append  port:bzip2 \
                     port:gflags \
                     port:google-glog \
                     port:double-conversion \
@@ -43,25 +59,60 @@ depends_lib-append  port:boost \
                     port:lz4 \
                     port:lzma \
                     port:xz \
-                    path:lib/libssl.dylib:openssl \
                     port:zlib \
                     port:zstd \
-                    port:libsodium
+                    port:libsodium \
+                    port:libunwind \
+                    port:${port_libfmt}
+
+cmake.generator     Ninja
+
+patchfiles          patch-cmakelists.diff
+
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    patchfiles-append patch-older-systems.diff
+}
+
+if {${build_arch} in [list ppc ppc64]} {
+    patchfiles-append patch-darwin-ppc.diff
+}
 
 configure.args-append -DBUILD_SHARED_LIBS=ON -DFOLLY_USE_JEMALLOC=0
 
-compiler.cxx_standard   2014
-configure.cxxflags-append -std=c++14
+compiler.cxx_standard   2017
+configure.cxxflags-append -std=c++17
+
+# error: TARGET_OS_xxx not defined, evaluates to 0
+configure.cppflags-append -Wno-undef-prefix
+
+# error: typedef redefinition with different types ('uint8_t' (aka 'unsigned char') vs 'enum clockid_t')
+compiler.blacklist-append {clang < 1100}
+# error: 'path' is unavailable: introduced in macOS 10.15
+compiler.blacklist-append {macports-clang-[5-9].0}
 
 platform darwin {
     # https://github.com/facebook/folly/issues/864
     if {${os.major} <= 16} {
         configure.args-append     -DCOMPILER_HAS_F_ALIGNED_NEW=OFF
-        configure.cxxflags-append -fno-aligned-allocation
+        # gcc does not recognize -fno-aligned-allocation
+        if {[string match *clang* ${configure.compiler}]} {
+            configure.cxxflags-append \
+                                  -fno-aligned-allocation
+        }
+    }
+    # https://kumasento.github.io/2020-06-12-glog-gflags-and-c-abi/
+    if {${os.major} < 16} {
+        configure.cxxflags-append -D_GLIBCXX_USE_CXX11_ABI=0
     }
     # Support for TCP fast-open was only added to macOS 10.11+
     if {${os.major} < 15} {
         configure.cxxflags-append -DFOLLY_ALLOW_TFO=0
+    }
+    if {[string match *gcc* ${configure.compiler}]} {
+        # ___atomic_fetch_sub_8, ___atomic_load_8, ___atomic_exchange_8, ___atomic_store_8, ___atomic_compare_exchange_8, ___atomic_fetch_add_8
+        configure.ldflags-append  -latomic
+        # https://github.com/macports/macports-ports/pull/15689#issuecomment-1212969969
+        configure.ldflags-append  -L${prefix}/lib -lgflags
     }
 }
 
@@ -73,5 +124,14 @@ variant jemalloc description {Use je_malloc} {
 }
 
 variant native description {Build with best native support for local CPU capabilities} {
-    configure.cxxflags-append -march=native
+    if {${build_arch} ni [list ppc ppc64]} {
+        # This flag is unsupported for PPC:
+        configure.cxxflags-append -march=native
+    }
+    if {${build_arch} eq "ppc"} {
+        configure.cxxflags-append -mtune=G4
+    }
+    if {${build_arch} eq "ppc64"} {
+        configure.cxxflags-append -mtune=G5
+    }
 }

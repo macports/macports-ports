@@ -67,12 +67,9 @@ LAUNCHD_PLISTS=( \
         org.macports.@NAME@-dshield \
         org.macports.@NAME@-emergingthreats \
         org.macports.@NAME@-proxy \
-        org.macports.@NAME@-proxy.squid-rotate \
-        org.macports.@NAME@-easylistpac \
         org.macports.@NAME@-hosts \
         org.macports.adblock2privoxy \
         org.macports.adblock2privoxy-nginx \
-        org.macports.Squid \
         org.macports.Privoxy \
     )
 
@@ -192,17 +189,15 @@ EOF
 PROXY_FILES=( \
 	"${PROXY_PAC_DIRECTORY}/proxy.pac.orig" \
 	"${PROXY_PAC_DIRECTORY}/proxy.pac" \
-	@PREFIX@/bin/easylist_pac.py \
 	@PREFIX@/bin/adblock2privoxy \
         @PREFIX@/etc/@NAME@/proxy.pac \
 	@PREFIX@/etc/adblock2privoxy/nginx.conf \
         @PREFIX@/etc/adblock2privoxy/css/default.html \
+        @PREFIX@/etc/@NAME@/@NAME@-hosts.action \
         @PREFIX@/etc/adblock2privoxy/privoxy/ab2p.action \
         @PREFIX@/etc/adblock2privoxy/privoxy/ab2p.filter \
         @PREFIX@/etc/adblock2privoxy/privoxy/ab2p.system.action \
         @PREFIX@/etc/adblock2privoxy/privoxy/ab2p.system.filter \
-        @PREFIX@/etc/squid/squid.conf \
-        @PREFIX@/var/squid/logs/cache.log \
         @PREFIX@/etc/privoxy/config \
         @PREFIX@/var/log/privoxy/logfile \
 )
@@ -217,23 +212,6 @@ done
 Checking proxy status…
 EOF
 
-# squid
-if [[ `"${SUDO}" "${LSOF}" -i ':3128' | "${TAIL}" -1` && `"${PS}" -ef | "${GREP}" "@PREFIX@/sbin/squid -s" | "${EGREP}" -v '(grep|daemondo)' | "${WC}" -l` -eq 1 ]]; then
-    echo "[✅] Squid is running properly"
-else
-    "${CAT}" <<EOF
-[❌] Squid isn't running properly! Troubleshooting:
-
-sudo squid -k check
-sudo less @PREFIX@/var/squid/logs/cache.log
-sudo port unload squid4
-sudo killall '(squid-1)'
-sudo killall 'squid'
-sleep 5
-sudo port load squid4
-EOF
-fi
-
 # privoxy
 if [[ `"${SUDO}" "${LSOF}" -i ':8118' | "${TAIL}" -1` ]]; then
     echo "[✅] Privoxy is running properly"
@@ -247,11 +225,11 @@ EOF
 fi
 
 # Privoxy configuration http://p.p/ via proxy server
-if [[ `( http_proxy=http://${PROXY_HOSTNAME}:3128; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
-    echo "[✅] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:3128 is running properly"
+if [[ `( http_proxy=http://${PROXY_HOSTNAME}:8118; "${CURL}" -s --head http://p.p/ | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.\d [23]\d\d" )` ]]; then
+    echo "[✅] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:8118 is running properly"
 else
     "${CAT}" <<EOF
-[❌] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:3128 isn't running properly! Troubleshooting:
+[❌] Privoxy config http://p.p/ via http://${PROXY_HOSTNAME}:8118 isn't running properly! Troubleshooting:
 
 sudo less @PREFIX@/var/log/privoxy/logfile
 sudo port reload privoxy
@@ -294,11 +272,11 @@ EOF
 fi
 
 # blackhole on proxy server
-if [[ `"${CURL}" -s --head "http://${PROXY_HOSTNAME}:8119/" | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.[01] [23]\d\d"` ]]; then
-    echo "[✅] Blackhole server for http://${PROXY_HOSTNAME}:8119/ is running properly"
+if [[ `"${CURL}" -s --head "https://${PROXY_HOSTNAME}:8119/" | "${HEAD}" -n 1 | "${GREP}" "HTTP/1.[01] [23]\d\d"` ]]; then
+    echo "[✅] Blackhole server for https://${PROXY_HOSTNAME}:8119/ is running properly"
 else
     "${CAT}" <<EOF
-[❌] Blackhole server for http://${PROXY_HOSTNAME}:8119/ isn't running properly! Troubleshooting:
+[❌] Blackhole server for https://${PROXY_HOSTNAME}:8119/ isn't running properly! Troubleshooting:
 
 sudo ps -f \`cat @PREFIX@/var/run/nginx/nginx-adblock2privoxy.pid\`
 sudo port reload org.macports.adblock2privoxy-nginx

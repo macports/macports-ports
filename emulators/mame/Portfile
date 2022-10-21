@@ -16,11 +16,8 @@ PortGroup           compiler_blacklist_versions 1.0
 
 name                mame
 categories          emulators
-platforms           darwin
 license             GPL-2+
-
-maintainers         {@mascguy} \
-                    openmaintainer
+maintainers         {mascguy @mascguy} openmaintainer
 
 description         Multiple Arcade Machine Emulator
 long_description    \
@@ -29,6 +26,7 @@ long_description    \
     software from being lost and forgotten. This is achieved by documenting the \
     hardware and how it functions. The source code to MAME serves as this \
     documentation.
+
 homepage            https://www.mamedev.org
 
 #------------------------------------------------------------------------------
@@ -46,36 +44,57 @@ if {[info exists mame.override.os.major]} {
         ${os.major}
 }
 
-# Mame versions > 0.226 require C++ 2017, and specifically aligned allocation
-# support. That's only supported by MacOS system libc++ from 10.13 onward.
-# However, once MacPorts provides a custom libc++ for all ports, Mame will
-# support older MacOS releases.
-#
-# NOTE: Due to our current MacPorts build infrastructure for macOS 10.13 -
-# which uses Xcode 9.4.1, rather than Xcode 10.1 - we must revert to 0.226.
-# Not exactly ideal, but far better than forcing users to build from source.
-if {${g_mame_os_major} >= 18} {
-    set g_mame_latest yes
+# Developer-only override, allowing easy testing of desired behavior:
+# - mame.override.fallback=yes - Force use of fallback release
+# - mame.override.fallback=no  - Force use of latest release
+if {[info exists mame.override.fallback]} {
+    if {[string is boolean -strict ${mame.override.fallback}]} {
+        ui_msg "mame.override.fallback specified: ${mame.override.fallback}"
+        set g_mame_fallback \
+            [string is true -strict ${mame.override.fallback}]
+    } else {
+        error "mame.override.fallback must be specified as a valid boolean value"
+    }
 } else {
-    set g_mame_latest no
+    # Mame versions > 0.226 require C++ 2017, and specifically aligned allocation
+    # support. That's only supported by MacOS system libc++ from 10.13 onward.
+    # However, once MacPorts provides a custom libc++ for all ports, Mame will
+    # support older MacOS releases.
+    #
+    # NOTE: Due to our current MacPorts build infrastructure for macOS 10.13 -
+    # which uses Xcode 9.4.1, rather than Xcode 10.1 - we must revert to 0.226.
+    # Not exactly ideal, but far better than forcing users to build from source.
+
+    if {${os.platform} eq "darwin" && ${g_mame_os_major} < 18} {
+        set g_mame_fallback yes
+    } else {
+        set g_mame_fallback no
+    }
 }
+
+set g_mame_latest \
+    [expr { !${g_mame_fallback} }]
 
 if {${g_mame_latest}} {
     set g_mame_release \
-                    "0232"
+                    "0248"
 
     revision        0
+    epoch           1
 
-    checksums       \
-                    rmd160  8478869e6b2be1e7edf6de2cd86af2908690fe7d \
-                    sha256  c6b464f33b9e0eb7afb528fac52619b073525ded86f35afc36cca4dd0363fe4d \
-                    size    196219536
+    # Mame 0.240+: Disable PDF generation, which is problematic. (And not desired.)
+    patchfiles-append \
+                    mame-patch-0240-dist.mak-disable-pdf.diff
+
+    checksums       rmd160  4dde07c607e8edd0a58091dabb3218cd0f377424 \
+                    sha256  7eef82527a4b66647e02625948d42e3502f13183192ea48e6fc2786d6f9222a0 \
+                    size    185875556
 
 } else {
     set g_mame_release \
                     "0226"
 
-    revision        5
+    revision        6
 
     # Mame 0.226: Fix errors during translation build phase.
     # Merged into Mame releases from 0.227 onward. Tracked by issue:
@@ -110,6 +129,18 @@ github.tarball_from archive
 # Note: Version declaration must occur after 'github.setup', as the latter
 # sets our version whether we want it or not.
 version             ${g_mame_version_string}
+
+if {!${g_mame_latest}} {
+    # Disable livecheck for older version
+    livecheck.type  none
+}
+
+#------------------------------------------------------------------------------
+# Python Version
+#------------------------------------------------------------------------------
+
+set g_mame_pyver_major     3
+set g_mame_pyver_minor     10
 
 #------------------------------------------------------------------------------
 # Port-Specific Globals
@@ -184,6 +215,7 @@ set g_mame_build_args_dist_list \
 
 depends_build-append \
                     port:asio \
+                    port:gettext \
                     port:gmake \
                     port:pkgconfig
 
@@ -203,7 +235,7 @@ depends_lib-append  \
 
 # Note: Port 'coreutils' needed for 'grealpath', used in launcher script.
 depends_run-append  \
-                    port:coreutils
+                    path:libexec/coreutils/libstdbuf.so:coreutils
 
 #------------------------------------------------------------------------------
 # Build Options
@@ -236,6 +268,10 @@ if {${g_mame_latest}} {
                     2014
 }
 
+# Ensure local project headers take priority over others
+configure.cflags \
+                    -isystem${prefix}/include
+
 # Note: Compiler optimization level is controlled by makefile variable 'OPTIMIZE', below.
 configure.cxxflags-delete \
                     -O1 -O2 -O3 -Os
@@ -253,26 +289,25 @@ if {${g_mame_os_major} >= 11} {
 }
 
 if {[tbool configure.ccache]} {
-    configure.cc    ccache \
-                    ${configure.cc}
-    configure.cxx   ccache \
-                    ${configure.cxx}
+    configure.cc-prepend \
+                    ${prefix}/bin/ccache
+    configure.cxx-prepend \
+                    ${prefix}/bin/ccache
 }
 
 build.args-append   \
                     ARCHOPTS="${configure.cxxflags}" \
                     CC="${configure.cc}" \
                     CXX="${configure.cxx}" \
-                    OVERRIDE_CC="${configure.cc}" \
-                    OVERRIDE_CXX="${configure.cxx}" \
-                    CFLAGS="-isystem${prefix}/include" \
-                    LDOPTS="-L${prefix}/lib" \
+                    CFLAGS="${configure.cflags}" \
+                    LDOPTS="${configure.ldflags}" \
                     PRECOMPILE=1 \
                     TESTS=0 \
                     BENCHMARKS=0 \
                     DEBUG=0 \
                     OPTIMIZE=2 \
                     NOWERROR=1 \
+                    DEPRECATED=0 \
                     VERBOSE=1 \
                     USE_LIBSDL=1 \
                     USE_SYSTEM_LIB_ASIO=1 \
@@ -578,32 +613,13 @@ variant tools \
     mame_variant_tools_setup
 }
 
-variant python37 \
-        description {Use python 3.7 for build} \
-        conflicts python38 python39 {
-    mame_variant_python_setup 3 7
-}
-
-variant python38 \
-        description {Use python 3.8 for build} \
-        conflicts python37 python39 {
-    mame_variant_python_setup 3 8
-}
-
-variant python39 \
-        description {Use python 3.9 for build} \
-        conflicts python37 python38 {
-    mame_variant_python_setup 3 9
-}
-
 default_variants-append \
     +tools
 
-# Ensure one python* variant is selected by default, if not specified by user
-if {![variant_isset python37] && ![variant_isset python38] && ![variant_isset python39]} {
-    default_variants-append \
-        +python38
-}
+# Python variants eliminated; setup via default Python version
+mame_variant_python_setup \
+    ${g_mame_pyver_major} \
+    ${g_mame_pyver_minor}
 
 #------------------------------------------------------------------------------
 # Phases
@@ -896,28 +912,20 @@ post-destroot {
 #------------------------------------------------------------------------------
 
 notes {
-    Mame is launched via command 'mame'.
-
-    If a blank screen is encountered, press ESC to exit, and then re-launch\
-    with an alternative video option.
-
-    Examples:
+    * Mame is launched via command 'mame'.
+    * If a blank screen is encountered, press ESC to exit, and then re-launch\
+    with an alternative video option. For example:
         mame -video accel
         mame -video opengl
-
-    If you're new to Mame, our tutorial will quickly walk you through the\
+    * If you're new to Mame, our tutorial will quickly walk you through the\
     process of setting up a new game:
-
-    https://trac.macports.org/wiki/howto/Mame
+        https://trac.macports.org/wiki/howto/Mame
 }
 
 if {[variant_isset tools]} {
     notes-append {
-    --------------------------------------------------------------------------
-    Mame tools are installed. Each has a prefix of 'mame-', to avoid\
-    conflicts with system tools.
-
-    Examples:
+    * Mame tools are also installed. Each has a prefix of 'mame-', to avoid\
+    conflicts with system tools. For example:
         mame-imgtool
         mame-split
     }

@@ -1,0 +1,311 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           boost 1.0
+
+github.setup        ArmagetronAd armagetronad 0.2.9.1.0 v
+github.tarball_from releases
+use_bzip2           yes
+extract.suffix      .tbz
+
+set pretty_name     "Armagetron Advanced"
+# 'year_released' is the year that the tarball was published
+# on GitHub, not the year that we are currently in.
+set year_released   2021
+
+categories          games
+license             GPL-2+
+maintainers         @jasonliu-- openmaintainer
+                    #  v Note: https site has an expired certificate
+homepage            http://www.${name}.org
+description         $pretty_name, a 3-D Tron-like light cycle game
+long_description    $pretty_name is a 3-D snake game, based on the \
+                    light cycle sequence from the movie Tron. You can \
+                    play against AI opponents, against other human \
+                    users over the network, or a mixture of both.
+
+subport ${name}-common {
+    supported_archs noarch
+    description     common files for the $pretty_name packages
+    long_description-append \
+                    \n\nThis package contains files that are common to \
+                    both the ${name} and ${name}-dedicated packages.
+}
+subport ${name}-dedicated {
+    description     dedicated game server for $pretty_name
+    long_description-append \
+                    \n\nThis package installs the dedicated network \
+                    server for the $pretty_name game. It allows you to \
+                    host games that other online players can connect \
+                    to, and play multi-player matches. You can also \
+                    host online multi-player matches directly from \
+                    inside the game, but the dedicated server allows \
+                    you to continue hosting matches while not actively \
+                    running the game.
+}
+
+checksums           ${distfiles} \
+                    rmd160  76eed9dd9fe6d888eba0fae67696040ec1eccb7d \
+                    sha256  59b6c7c01ce3f8cca5437e33f974a637529541a11aa4f52c1a5c17499e26f6a1 \
+                    size    1943758
+
+extract.only        ${distfiles}
+distfiles           ${distfiles}:${name}
+master_sites        ${master_sites}:${name}
+
+if {$subport ne "${name}-common"} {
+    master_sites-append debian:a/${name}:debian_pkg
+    set debfile         ${name}_${version}-2.debian.tar.xz
+    distfiles-append    ${debfile}:debian_pkg
+    checksums-append    ${debfile} \
+                        rmd160  cc1151617b372d61b6b02b647adb699fdfba3ea0 \
+                        sha256  28b778440ee2d7a8657fec2a8a468723017645a98259a7afac9fa67841a6c36f \
+                        size    29852
+    depends_extract-append \
+                        bin:xz:xz
+    post-extract {
+        system -W ${workpath} "xz -dc [shellescape ${distpath}/${debfile}] | ${portutil::autoconf::tar_command} -xf -"
+    }
+}
+
+depends_build-append    port:autoconf \
+                        port:automake \
+                        port:pkgconfig
+
+if {$subport eq "${name}-common"} {
+    set depends_type    build
+    boost.depends_type  $depends_type
+} else {
+    set depends_type    lib
+}
+depends_$depends_type-append \
+                        port:libxml2
+if {$subport ne "${name}-dedicated"} {
+    depends_$depends_type-append \
+                        port:freetype \
+                        port:libsdl \
+                        port:libsdl_image \
+                        port:libsdl_mixer \
+                        port:libpng
+}
+if {$subport ne "${name}-common"} {
+    depends_run-append  port:${name}-common
+}
+
+post-patch {
+    if {$subport ne "${name}-dedicated"} {
+        reinplace "/LIBS -framework GLU/a\\
+            \\        LIBS=\"\$LIBS -framework OpenGL\"\\
+        " \
+            ${worksrcpath}/configure.ac
+    }
+
+    # Avoid "error: use of undeclared identifier 'SOCK_CLOEXEC'".
+    # SOCK_CLOEXEC doesn't exist in macOS (Reference:
+    # https://www.mail-archive.com/libguestfs@redhat.com/msg22188.html)
+    reinplace \
+        {/socktype = socktype_/,/socktype |= SOCK_CLOEXEC/s/ndef WIN32/def SOCK_CLOEXEC/} \
+        ${worksrcpath}/src/network/nSocket.cpp
+
+    # Avoid "error: use of undeclared identifier 'finite'; did you mean
+    # 'isfinite'?" on Apple arm64 (Reference: see Ryan's comment
+    # "[2018-10-16 01:07 UTC] php-bugs-2018 at ryandesign dot com" at
+    # https://bugs.php.net/bug.php?id=76826)
+    if {${os.platform} eq "darwin" && ${build_arch} eq "arm64" || \
+        ${os.major} <= 11} \
+    {
+        reinplace "/#include.*math.h/a\\
+            #define finite isfinite\\
+        " \
+            ${worksrcpath}/src/tools/tMath.h
+    }
+
+    # Fix "Internal Error: Language British English not found."
+    # Reference: https://forums3.armagetronad.net/viewtopic.php?t=24632
+    reinplace "/include definition for top source directory/a\\
+        #undef MACOSX\\
+    " \
+        ${worksrcpath}/src/tools/tDirectories.cpp
+
+    if {$subport eq "${name}-dedicated"} {
+        reinplace "/CONFIG=.*sysconfdir/a\\
+            DATADIR=@aa_datadir@\\
+        " \
+            ${worksrcpath}/batch/rcd_config.in
+        foreach re [list \
+            "/CONFIG=.*sysconfdir/a\\
+                \[ X\"\${DATADIR}\" = X\"\" \] && DATADIR=@aa_datadir@\\
+            " \
+            "s/\(--userdatadir\)/--datadir \${DATADIR} \\1/" \
+        ] {
+            reinplace -E $re ${worksrcpath}/batch/serverstarter.in
+        }
+
+        # Avoid runtime error "nohup: can't detach from console:
+        # Inappropriate ioctl for device". (Reference:
+        # https://stackoverflow.com/questions/29112446/nohup-doesnt-work-with-os-x-yosmite-get-error-cant-detach-from-console-no-s)
+        reinplace {s/nohup //} ${worksrcpath}/batch/rcd_startstop.in
+    }
+}
+
+compiler.cxx_standard       2011
+
+configure.args-append       --enable-music \
+                            --disable-useradd \
+                            --disable-uninstall \
+                            --disable-games
+if {${os.platform} eq "darwin"} {
+    configure.args-append   --disable-etc
+}
+if {$subport ne ${name}} {
+    configure.args-append   --disable-desktop
+}
+if {$subport eq "${name}-dedicated"} {
+    configure.args-append   --enable-dedicated
+    if {${os.platform} eq "darwin"} {
+        configure.args-append   --disable-initscripts
+    }
+}
+
+if {$subport eq "${name}-dedicated"} {
+    if {${os.platform} eq "darwin" && ${os.major} >= 19} {
+        set usershell /bin/zsh
+    } else {
+        set usershell /bin/bash
+    }
+    add_users   ${name} group=${name} shell=$usershell \
+                realname=[shellescape $pretty_name]
+
+    startupitem.create      yes
+    startupitem.autostart   no
+    startupitem.name        $subport
+    foreach action [list start stop restart] {
+        startupitem.$action \
+            "${prefix}/share/$subport/scripts/rcd_server $action"
+    }
+    set vardir  ${prefix}/var
+    startupitem.pidfile     auto $vardir/run/$subport/${subport}.pid
+    startupitem.logfile     $vardir/log/$subport/${name}.log
+    startupitem.logevents   yes
+}
+
+if {$subport eq ${name}} {
+    PortGroup               app 1.0
+
+    # For names with spaces, we have to expand the variable in order to
+    # use it for app.name. See: https://trac.macports.org/ticket/64326
+    app.name                {*}$pretty_name
+    app.icon                MacOS/${pretty_name}.icns
+    app.retina              yes
+    app.use_launch_script   yes
+
+    post-destroot {
+        set app_contents ${applications_dir}/${pretty_name}.app/Contents
+        set app_resources $app_contents/Resources
+        copy ${worksrcpath}/src/macosx/English.lproj \
+             ${destroot}$app_resources/
+        set infoplist_strings \
+            $app_resources/English.lproj/InfoPlist.strings
+        move ${destroot}${infoplist_strings}.in \
+             ${destroot}${infoplist_strings}
+        reinplace "s/@version@/${version}/g;s/@year@/$year_released/g" \
+            ${destroot}$infoplist_strings
+    }
+}
+
+post-destroot {
+    if {$subport eq "${name}-common"} {
+        set module_dir  ${name}
+    } else {
+        set module_dir  $subport
+    }
+    set scriptsdir      share/$module_dir/scripts
+    set rc_config       etc/$module_dir/rc.config
+    set settings_cfg    etc/$module_dir/settings_dedicated.cfg
+    if {$subport eq "${name}-dedicated"} {
+        delete {*}[glob -directory ${destroot}${prefix}/$scriptsdir \
+            relocate sysinstall]
+    }
+    if {$subport eq "${name}-dedicated"} {
+        # Temporarily relocate the server scripts to a safe location,
+        # since the entire parent directory is about to be deleted
+        # in the code below.
+        move {*}[glob -directory ${destroot}${prefix} \
+             $scriptsdir $rc_config $settings_cfg] \
+             ${destroot}${prefix}/
+    } else {
+        delete {*}[glob -directory ${destroot}${prefix} \
+            $scriptsdir $rc_config $settings_cfg]
+    }
+
+    if {$subport eq ${name}} {
+        # Temporarily relocate desktop-related items to a safe location,
+        # since the entire parent directory is about to be deleted
+        # in the code below.
+        move ${destroot}${prefix}/share/$subport/desktop \
+             ${destroot}${prefix}/
+    }
+
+    if {$subport ne "${name}-common"} {
+        # Delete files that are common to both the client and server
+        delete {*}[glob -directory ${destroot}${prefix} \
+            etc/$subport share/$subport share/doc/$subport]
+    }
+
+    if {$subport eq "${name}-dedicated"} {
+        reinplace -E \
+            "s/\((CONFIG|DATADIR)=.*\)$subport/\\1${name}/" \
+            {*}[glob -directory ${destroot}${prefix}/scripts \
+            rcd_config serverstarter]
+
+        # Restore the server scripts to their original location
+        xinstall -d ${destroot}${prefix}/share/$subport
+        move ${destroot}${prefix}/scripts \
+             ${destroot}${prefix}/share/$subport/
+        xinstall -d ${destroot}${prefix}/etc/${name}
+        move {*}[glob -directory ${destroot}${prefix} \
+             rc.config settings_dedicated.cfg] \
+             ${destroot}${prefix}/etc/${name}/
+    } elseif {$subport eq ${name}} {
+        # Restore the desktop-related items to their original location
+        xinstall -d ${destroot}${prefix}/share/$subport
+        move ${destroot}${prefix}/desktop \
+             ${destroot}${prefix}/share/$subport/
+    }
+
+    if {$subport eq "${name}-common"} {
+        delete {*}[glob -directory ${destroot}${prefix} \
+            bin/${name} share/${name}/desktop \
+            share/${name}/language/update.py]
+    }
+
+    if {$subport ne "${name}-common"} {
+        if {$subport eq "${name}-dedicated"} {
+            foreach re [list \
+                "s|\(/etc\)|${prefix}\\1|" \
+                "s|etc/init.d/$subport|share/$subport/scripts/rcd_server|" \
+                "s|default/$subport|${name}/rc.config|" \
+                "s|/usr|${prefix}|" \
+                "s/${name}-common/${name}/" \
+            ] {
+                reinplace -E $re ${workpath}/debian/man/${subport}.6
+            }
+        } elseif {$subport eq ${name}} {
+            reinplace -E \
+                "s|/usr\(/share/doc/\)${name}-common|${prefix}\\1${name}|" \
+                ${workpath}/debian/man/${subport}.6
+        }
+        xinstall -m 644 ${workpath}/debian/man/${subport}.6 \
+            ${destroot}${prefix}/share/man/man6
+    }
+}
+
+if {$subport ne "${name}-common"} {
+    variant zthreads \
+        description {Build with support for zthreads multi-threading} \
+    {
+        depends_lib-append      port:zthread
+        configure.args-append   --disable-zthreadtest
+    }
+}

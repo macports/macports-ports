@@ -77,6 +77,10 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup github 1.0"
             github.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
+        gitlab.com {
+            uplevel "PortGroup gitlab 1.0"
+            gitlab.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         bitbucket.org {
             uplevel "PortGroup bitbucket 1.0"
             bitbucket.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix}
@@ -85,8 +89,12 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup sourcehut 1.0"
             sourcehut.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
+        gitea.com {
+            uplevel "PortGroup gitea 1.0"
+            gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         default {
-            if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${go.project}))} {
+            if {![info exists PortInfo(name)]} {
                 name    ${go.project}
             }
             version     ${go.version}
@@ -184,8 +192,8 @@ proc go.append_env {} {
         # To then prevent 'clang linker input unused' errors we must append -Wno-error at the end.
         # Also remove '-static' from compilation options as this is not supported on older systems.
         compwrap.compiler_args_forward \$\{\@\//-static/\}
-        compwrap.compiler_pre_flags    ${configure.ldflags}
-        compwrap.compiler_post_flags   -Wno-error
+        compwrap.compiler_pre_flags-append    ${configure.ldflags}
+        compwrap.compiler_post_flags-append   -Wno-error
     }
     post-extract {
         build.env-append \
@@ -273,7 +281,7 @@ proc handle_set_go_vendors {vendors_str} {
                 switch ${vdomain} {
                     github.com {
                         set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
-                        set master_site https://github.com/${vauthor}/${vproject}/tarball/${vversion}
+                        set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
                     }
                     bitbucket.org {
                         set distfile ${vversion}.tar.gz
@@ -283,6 +291,10 @@ proc handle_set_go_vendors {vendors_str} {
                     salsa.debian.org {
                         set distfile ${vproject}-${vversion}.tar.gz
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
+                    }
+                    git.sr.ht {
+                        set distfile ${vversion}.tar.gz
+                        set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
@@ -336,6 +348,8 @@ post-extract {
         if {[file exists [glob -nocomplain ${workpath}/${go.author}-${go.project}-*]]} {
             # GitHub and Bitbucket follow this path
             move [glob ${workpath}/${go.author}-${go.project}-*] ${worksrcpath}
+        } elseif  {[file exists ${workpath}/${go.project}]} {
+            move ${workpath}/${go.project} ${worksrcpath}
         } else {
             # GitLab follows this path
             move [glob ${workpath}/${go.project}-*] ${worksrcpath}
@@ -345,13 +359,27 @@ post-extract {
 
     foreach vlist ${go.vendors_internal} {
         lassign ${vlist} sha1_short vpackage vresolved
+        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved})"
 
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
         if {${sha1_short} ne ""} {
             move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
         } else {
             lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
-            move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
+            # In some cases, this can match multiple folders, e.g.,
+            # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
+            # We want the one that does not have any dashes in the wildcard of
+            # our glob expression, so use regex to identify that.
+            set candidates [glob ${workpath}/${vauthor}-${vproject}-*]
+            foreach candidate $candidates {
+                if {[regexp -nocase "^[quotemeta $workpath]/[quotemeta $vauthor]-[quotemeta $vproject]-\[^-\]*$" $candidate]} {
+                    ui_debug "Choosing $candidate for ${workpath}/${vauthor}-${vproject}-*"
+                    move $candidate ${gopath}/src/${vpackage}
+                    break
+                } else {
+                    ui_debug "Rejecting $candidate for ${workpath}/${vauthor}-${vproject}-* because it contains dashes in the wildcard match"
+                }
+            }
         }
     }
 }

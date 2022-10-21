@@ -2,10 +2,15 @@
 
 PortSystem          1.0
 PortGroup           select 1.0
+PortGroup           openssl 1.0
+PortGroup           deprecated 1.0
+
+# Reached EOL on 2022-04-12
+deprecated.upstream_support no
 
 name                ruby26
-version             2.6.7
-revision            1
+version             2.6.10
+revision            0
 
 categories          lang ruby
 maintainers         {kimuraw @kimuraw} openmaintainer
@@ -16,7 +21,7 @@ long_description    Ruby is the interpreted scripting language for quick \
                     and easy object-oriented programming. It has many \
                     features to process text files and to do system \
                     management tasks (as in Perl). It is simple, \
-                    straight-forward, extensible, and portable.
+                    straightforward, extensible, and portable.
 
 homepage            https://www.ruby-lang.org/
 license             {Ruby BSD}
@@ -26,15 +31,16 @@ use_bzip2           yes
 distname            ruby-${version}
 dist_subdir         ruby26
 
-checksums           md5 46f24740181f91247c72f19d52334379 \
-                    rmd160 bdda3463189143649b2ff006eac1d9aee1d5310f \
-                    sha1 826bcbe83fde9c813a88e5d42155ea8fa6ffb017 \
-                    sha256 775a5d47b73ce3ee5d600f993badd7b640a2caca138573326db6632858517710
+checksums           md5 6ad76db639ab308e3b6c19408729a0cf \
+                    rmd160 ca3dd27234c1413ac7cf480e93aa34dab65f1ebb \
+                    sha1 ece89ec43e107a80efe35b3b7879dbe07e1a636f \
+                    sha256 399e1f13e7fedc3c6ae2ff541bbf26c44dfb63b07b6c186fdd15b4e526e27e9c \
+                    size 14136083
 
-use_parallel_build  no
+# ruby/openssl does not support openssl-3
+openssl.branch      1.1
 
 depends_lib         port:readline \
-                    path:lib/libssl.dylib:openssl \
                     port:zlib \
                     port:libyaml \
                     port:libffi \
@@ -54,17 +60,29 @@ configure.args      --enable-shared \
                     --without-gmp \
                     --with-opt-dir="${prefix}" \
                     --program-suffix=2.6 \
-                    --with-rubylibprefix="${prefix}/lib/ruby2.6"
+                    --with-rubylibprefix="${prefix}/lib/ruby2.6" \
+                    --with-openssl-include=[openssl::include_dir] \
+                    --with-openssl-lib=[openssl::lib_dir]
 
 # patch-configure_cxx11.diff: fix "invalid suffix on literal" with C++11
 #                             from RUBY_ARCH and RUBY_PLATFORM in config.h
 #                             https://trac.macports.org/ticket/58255
+# Note that this patches the output of autoconf, rather than the input, but
+# at present, rerunning autonconf produces a broken configure.
 patchfiles          patch-configure_cxx11.diff
 # Fix test failure at ext/fiddle
 patchfiles-append   patch-test-fiddle-helper.rb.diff
 # avoid build error with apple clang 12 (implicit declaration of function)
 # https://bugs.ruby-lang.org/issues/17777
 patchfiles-append   patch-ruby_issue_17777.diff
+# Fix build on 10.4
+patchfiles-append   patch-tiger.diff
+# Fix build on < 10.6
+patchfiles-append   patch-osversions.diff
+# Fix build with pre-C99 compilers and some locale settings
+patchfiles-append   patch-c99check.diff
+# Fix ext/openssl uses wrong pkgconfig (#63845)
+patchfiles-append   patch-ext-openssl-extconf.rb.diff
 
 # [NOTE] workaround for mismatch of sdk versions on macOS 11.x,
 # such as MacOSX11.0.sdk (buildbot) <=> MacOSX11.1.sdk (user's Mac).
@@ -77,11 +95,11 @@ post-build {
         # rewrite MacOSX11.1.sdk -> MacOSX.sdk in rbconfig.rb
         file copy ${worksrcpath}/rbconfig.rb ${worksrcpath}/rbconfig.rb.orig
         reinplace -E -q {s|(/MacOSX)[0-9\.]+(\.sdk[\'\"]?[[:blank:]])|\1\2|g} \
-		    ${worksrcpath}/rbconfig.rb \
-		    ${worksrcpath}/ruby-2.6.pc
+            ${worksrcpath}/rbconfig.rb \
+            ${worksrcpath}/ruby-2.6.pc
         reinplace -E -q {s|(/MacOSX)[0-9\.]+(\.sdk[\'\"]?)$|\1\2|g} \
-		    ${worksrcpath}/rbconfig.rb \
-		    ${worksrcpath}/ruby-2.6.pc
+            ${worksrcpath}/rbconfig.rb \
+            ${worksrcpath}/ruby-2.6.pc
     }
 }
 
@@ -110,6 +128,12 @@ post-destroot {
     destroot.keepdirs-append ${destroot}${prefix}/libexec/ruby2.6
 }
 
+notes-append "
+To make this the default Ruby (i.e., the version run by\
+the 'ruby', 'gem' or 'bundle' commands), run:
+    sudo port select --set ruby $name
+"
+
 variant doc description "Install rdoc indexes and C API documents" {
         configure.args-delete   --disable-install-doc
 }
@@ -126,6 +150,10 @@ variant jemalloc description "use jemalloc" {
 }
 
 variant universal {
+        # Disable parallel builds for Universal case
+        # See: https://trac.macports.org/ticket/24240
+        use_parallel_build      no
+
         # use ruby built-in universal mechanism.
         configure.args-append   --with-arch=[join ${universal_archs} ,]
         # clear macports' universal flags
@@ -140,7 +168,7 @@ variant relative description "Enable relative loading of libraries to allow for 
         configure.args-append  --enable-load-relative
 }
 
-# legacy systems suport
+# legacy systems support
 platform darwin {
 
     # Build requires 10.8 SDK when targeting 10.7
@@ -163,11 +191,28 @@ platform darwin {
         configure.cflags-append -std=c99
     }
 
+    # Xcode gcc 4.2 building x86_64 assembler code passes "-arch i386" to the
+    # assembler, breaking x86_64 builds, unless we override it.
+    if {[string match *gcc-4.2 ${configure.compiler}]
+        && "x86_64" in [get_canonical_archs]} {
+        configure.env-append    ASFLAGS=[get_canonical_archflags]
+    }
+
+    # Building for 10.5 x86_64 fails if libunwind-headers is active.
+    # It's unknown why only this one case fails.
+    if {${os.major} == 9 && "x86_64" in [get_canonical_archs]} {
+        PortGroup    conflicts_build 1.0
+
+        conflicts_build-append libunwind-headers
+    }
+
     if {${os.major} == 8} {
         configure.cppflags-append -DCPU_SUBTYPE_MASK=0xff000000
     }
 }
 
+test.run        yes
+test.target     check
 
 livecheck.type  regex
 livecheck.url   https://cache.ruby-lang.org/pub/ruby/2.6/

@@ -1,0 +1,160 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                librsvg-devel
+set my_name         librsvg
+conflicts           librsvg
+
+categories          graphics gnome
+license             {GPL-2+ LGPL-2+}
+maintainers         {mascguy @mascguy} openmaintainer
+
+description         GNOME implementation of rsvg.
+long_description    {*}${description}
+homepage            https://wiki.gnome.org/Projects/LibRsvg
+
+depends_build-append port:pkgconfig
+
+depends_lib-append  path:lib/pkgconfig/glib-2.0.pc:glib2 \
+                    path:lib/pkgconfig/cairo.pc:cairo \
+                    path:lib/pkgconfig/pango.pc:pango \
+                    path:lib/pkgconfig/gdk-pixbuf-2.0.pc:gdk-pixbuf2 \
+                    port:libxml2 \
+                    path:bin/vala:vala
+
+license_noconflict  gobject-introspection \
+                    rust \
+                    vala
+
+set min_darwin_for_rust 10
+
+#----------------------------------------------------------------------------------------
+# Developer-only override, allowing easy testing of desired behavior:
+# - librsvg.override.fallback=yes - Force use of fallback release
+# - librsvg.override.fallback=no  - Force use of latest release
+#----------------------------------------------------------------------------------------
+if {[info exists librsvg.override.fallback]} {
+    if {[string is boolean -strict ${librsvg.override.fallback}]} {
+        ui_msg "librsvg.override.fallback specified: ${librsvg.override.fallback}"
+        set librsvg_fallback \
+            [string is true -strict ${librsvg.override.fallback}]
+    } else {
+        error "librsvg.override.fallback must be specified as a valid boolean value"
+    }
+} else {
+    if {${os.platform} eq "darwin" && (
+            ${os.major} < ${min_darwin_for_rust}
+            || ${configure.build_arch} in "ppc ppc64"
+            || ${universal_possible} && [variant_isset universal] && ("ppc" in ${configure.universal_archs} || "ppc64" in ${configure.universal_archs})
+        )} {
+        set librsvg_fallback yes
+    } else {
+        set librsvg_fallback no
+    }
+}
+
+if {${librsvg_fallback}} {
+    # revert to latest pre-cargo version
+    PortGroup       gobject_introspection 1.0
+
+    version         2.40.20
+    revision        5
+    epoch           1
+
+    checksums       rmd160  e697e1220779f77e81a890718ef5cda5b5e6b740 \
+                    sha256  cff4dd3c3b78bfe99d8fcfad3b8ba1eee3289a0823c0e118d78106be6b84c92b \
+                    size    1796376
+
+    # pre-cargo versions still use libcroco
+    depends_lib-append \
+                    port:libcroco
+
+    # variant viewer disabled by default in an attempt to avoid loading
+    # gtk3 by those who are using it strictly as a library outside of GTK+/GNOME.
+    # https://trac.macports.org/ticket/43328
+    # https://trac.macports.org/ticket/47443
+    # https://trac.macports.org/ticket/47596
+    variant viewer description "Build the rsvg-view-3 viewer utility." {
+        depends_lib-append  path:lib/pkgconfig/gtk+-3.0.pc:gtk3
+        depends_run-append  port:adwaita-icon-theme
+    }
+    if {![variant_isset viewer]} {
+        patchfiles-append   patch-disable-viewer-pre-cargo.diff
+    }
+} else {
+    # rust PG modifies `configure.ldflags` in callback function
+    # gobject_introspection uses `configure.ldflags` in callback function
+    # therefore, rust PG must precede gobject_introspection PG
+    PortGroup       rust 1.0
+    PortGroup       gobject_introspection 1.0
+
+    version         2.54.5
+    revision        0
+    epoch           2
+
+    checksums       rmd160  29bda185e483ab5b44dac00e9eba6322277c2f3e \
+                    sha256  4f03190f45324d1fa1f52a79dfcded1f64eaf49b3ae2f88eedab0c07617cae6e \
+                    size    22412260
+
+    # when CARGO_BUILD_TARGET is set, directory structure changes
+    patchfiles-append \
+                    patch-configure-rust_target_subdir.diff
+
+    if { ${os.major} < 11 } {
+        # Mac OS X Lion seems to have introduced new functionality to the Objective-C runtime
+        patchfiles-append \
+                    patch-no_objc.diff
+    }
+
+}
+
+set branch          [join [lrange [split ${version} .] 0 1] .]
+master_sites        gnome:sources/${my_name}/${branch}/
+distname            ${my_name}-${version}
+dist_subdir         ${my_name}
+use_xz              yes
+
+gobject_introspection yes
+
+configure.args      --enable-vala=yes \
+                    --disable-gtk-doc \
+                    --disable-silent-rules \
+                    --disable-Bsymbolic
+
+configure.ldflags-append    -lobjc
+
+test.run            yes
+test.dir            ${worksrcpath}/tests
+test.target         check
+
+post-destroot {
+    set docdir ${prefix}/share/doc/${name}
+    xinstall -d ${destroot}${docdir}
+    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING.LIB \
+        ${destroot}${docdir}
+
+    if {${librsvg_fallback}} {
+        xinstall -m 644 -W ${worksrcpath} COPYING \
+            ${destroot}${docdir}
+    }
+
+    xinstall -m 755 -W ${filespath} svg2pdf \
+        ${destroot}${prefix}/bin
+
+    set badfile ${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.a
+    if {[file exists ${destroot}${badfile}]} {
+        file delete ${destroot}${badfile}
+    }
+}
+
+post-activate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+post-deactivate {
+    system "${prefix}/bin/gdk-pixbuf-query-loaders --update-cache"
+}
+
+livecheck.type      gnome
+livecheck.name      ${my_name}

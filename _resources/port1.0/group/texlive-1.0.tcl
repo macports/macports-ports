@@ -135,7 +135,7 @@ proc texlive.texmfport {} {
 
     master_sites    https://www.ambulatoryclam.net/texlive/ \
                     https://giraffe.cs.washington.edu/texlive/ \
-                    https://alpaca.cs.washington.edu/texlive/ 
+                    https://alpaca.cs.washington.edu/texlive/
     use_xz          yes
 
     global name master_sites distname extract.suffix

@@ -23,13 +23,6 @@ proc mpiutil_add_subports {name subport clist clist_unsupported clist_obsolete} 
 
 proc mpiutil_add_subport {name subport cname} {
     subport ${name}-${cname} {}
-
-    # TODO: Remove all traces of -devel on or after Janurary 2022
-    subport ${name}-devel-${cname} {
-        set msg "${subport}: Devel subports no longer supported"
-        mpiutil_set_subport_obsolete \
-            ${name} ${subport} ${cname} ${msg}
-    }
 }
 
 proc mpiutil_set_subport_obsolete {name subport cname msg} {
@@ -67,12 +60,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     global configure.compiler compiler.command_line_tools_version
 
     set subport_enabled no
-    if {[string match "${name}-devel-*" ${subport}]} {
-        ui_debug "mpiutil_validate_subport: disable devel-related subport: ${subport}"
-
-        # Note: Nothing else needed, as subport obsoleted, etc, when defined earlier
-
-    } elseif {${cname} in ${clist_unsupported}} {
+    if {${cname} in ${clist_unsupported}} {
         ui_debug "mpiutil_validate_subport: fail unsupported subport: ${subport}"
 
         set msg "${subport} is not supported on ${os.platform} ${os.major}"
@@ -128,23 +116,28 @@ proc mpiutil_add_depends {subport cname} {
 }
 
 proc mpiutil_add_depends_build {subport cname} {
-    global os.major
+    global os.major os.arch
 
     set add_clang90 no
 
-    if {${os.major} <= 12} {
-        # For gcc builds on MacOS 10.8 and earlier, add clang-90 as a build
+    if {(${os.major} >= 10) && (${os.major} <= 12)} {
+        # For gcc builds on MacOS 10.6 through 10.8, add clang-90 as a build
         # dependency. This provides a modern version of 'as', allowing the port
         # to build successfully.
         if {[string match "gcc*" ${cname}]} {
-            set add_clang90 yes
+            # Exclude PPC builds, however
+            if {${os.arch} ne "powerpc"} {
+                set add_clang90 yes
+            }
         }
     }
 
     if {${add_clang90}} {
         ui_debug "mpiutil_add_depends_build: ${subport}: adding clang90 build dependency for gcc build"
+
         depends_build-append \
             port:clang-9.0
+
     } else {
         ui_debug "mpiutil_add_depends_build: ${subport}: non-gcc build, nothing to do"
     }
@@ -183,7 +176,10 @@ proc mpiutil_add_depends_lib_compilers {subport cname} {
 
     if {${cport_name} ne ""} {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Adding compiler to depends_lib: ${cport_name}"
-        depends_lib-append      port:${cport_name}
+
+        depends_lib-append \
+            port:${cport_name}
+
     } else {
         ui_debug "mpiutil_add_depends_lib_compilers: ${subport}: Not adding compiler to depends_lib; cname: ${cname}"
     }
@@ -202,7 +198,9 @@ proc mpiutil_set_binary_eligibility {subport cname} {
         # Force local builds with Xcode-provided compilers (avoid issues with
         # different Xcode versions on buildbot and user machines)
         ui_debug "mpiutil_set_binary_eligibility: ${subport}: Disabling binary use"
+
         archive_sites
+
     } else {
         ui_debug "mpiutil_set_binary_eligibility: ${subport}: Not disabling binary use"
     }

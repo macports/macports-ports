@@ -1,0 +1,276 @@
+--- cpu_features/CMakeLists.txt.orig
++++ cpu_features/CMakeLists.txt
+@@ -57,10 +57,10 @@
+ 
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^mips")
+   set(PROCESSOR_IS_MIPS TRUE)
++elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(^aarch64)|(arm64)")
++  set(PROCESSOR_IS_AARCH64 TRUE)
+ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+   set(PROCESSOR_IS_ARM TRUE)
+-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64")
+-  set(PROCESSOR_IS_AARCH64 TRUE)
+ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
+   set(PROCESSOR_IS_X86 TRUE)
+ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(powerpc|ppc)")
+@@ -146,10 +146,8 @@
+ target_include_directories(cpu_features
+   PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/cpu_features>
+ )
+-if(PROCESSOR_IS_X86)
+-  if(APPLE)
+-    target_compile_definitions(cpu_features PRIVATE HAVE_SYSCTLBYNAME)
+-  endif()
++if(APPLE AND (PROCESSOR_IS_X86 OR PROCESSOR_IS_AARCH64))
++   target_compile_definitions(cpu_features PRIVATE HAVE_SYSCTLBYNAME)
+ endif()
+ add_library(CpuFeature::cpu_features ALIAS cpu_features)
+ 
+--- cpu_features/README.md.orig
++++ cpu_features/README.md
+@@ -146,7 +146,7 @@
+ | Android | yes² |   yes¹  |   yes¹  |  yes¹  |   N/A   |
+ | iOS     |  N/A | not yet | not yet |   N/A  |   N/A   |
+ | Linux   | yes² |   yes¹  |   yes¹  |  yes¹  |   yes¹  |
+-| MacOs   | yes² |   N/A   | not yet |   N/A  |    no   |
++| macOS   | yes² |   N/A   | yes² |   N/A  |    no   |
+ | Windows | yes² | not yet | not yet |   N/A  |   N/A   |
+ 
+ 1.  **Features revealed from Linux.** We gather data from several sources
+--- cpu_features/include/cpu_features_macros.h.orig
++++ cpu_features/include/cpu_features_macros.h
+@@ -39,7 +39,7 @@
+ #define CPU_FEATURES_ARCH_ARM
+ #endif
+ 
+-#if defined(__aarch64__)
++#if (defined(__aarch64__) || (defined(__APPLE__) && defined(__arm64__)))
+ #define CPU_FEATURES_ARCH_AARCH64
+ #endif
+ 
+--- cpu_features/src/cpuinfo_aarch64.c.orig
++++ cpu_features/src/cpuinfo_aarch64.c
+@@ -22,6 +22,31 @@
+ #include "internal/stack_line_reader.h"
+ #include "internal/string_view.h"
+ 
++#if defined(CPU_FEATURES_OS_DARWIN)
++#if !defined(HAVE_SYSCTLBYNAME)
++#error "Darwin needs support for sysctlbyname"
++#endif
++#include <sys/sysctl.h>
++
++#if defined(CPU_FEATURES_MOCK_CPUID_ARM64)
++extern bool GetDarwinSysCtlByName(const char*);
++extern int GetDarwinSysCtlByNameValue(const char*);
++#else  // CPU_FEATURES_MOCK_CPUID_ARM64
++static bool GetDarwinSysCtlByName(const char* name) {
++  int enabled;
++  size_t enabled_len = sizeof(enabled);
++  const int failure = sysctlbyname(name, &enabled, &enabled_len, NULL, 0);
++  return failure ? false : enabled;
++}
++static int GetDarwinSysCtlByNameValue(const char* name) {
++  int enabled;
++  size_t enabled_len = sizeof(enabled);
++  const int failure = sysctlbyname(name, &enabled, &enabled_len, NULL, 0);
++  return failure ? 0 : enabled;
++}
++#endif
++#endif  // CPU_FEATURES_OS_DARWIN
++
+ // Generation of feature's getters/setters functions and kGetters, kSetters,
+ // kCpuInfoFlags and kHardwareCapabilities global tables.
+ #define DEFINE_TABLE_FEATURES                                                 \
+@@ -79,6 +104,8 @@
+ #define DEFINE_TABLE_FEATURE_TYPE Aarch64Features
+ #include "define_tables.h"
+ 
++#if !defined(CPU_FEATURES_OS_DARWIN)
++
+ static bool HandleAarch64Line(const LineResult result,
+                               Aarch64Info* const info) {
+   StringView line = result.line;
+@@ -116,6 +143,8 @@
+   }
+ }
+ 
++#endif /* !CPU_FEATURES_OS_DARWIN */
++
+ static const Aarch64Info kEmptyAarch64Info;
+ 
+ Aarch64Info GetAarch64Info(void) {
+@@ -124,6 +153,24 @@
+   // /proc/cpuinfo).
+   Aarch64Info info = kEmptyAarch64Info;
+ 
++#if defined(CPU_FEATURES_OS_DARWIN)
++
++  // Handling Darwin platform through sysctlbyname
++  info.implementer = GetDarwinSysCtlByNameValue("hw.cputype");
++  info.variant = GetDarwinSysCtlByNameValue("hw.cpusubtype");
++  info.part = GetDarwinSysCtlByNameValue("hw.cpufamily");
++  info.revision = GetDarwinSysCtlByNameValue("hw.cpusubfamily");
++
++  info.features.fp = GetDarwinSysCtlByName("hw.optional.floatingpoint");
++  info.features.fphp = GetDarwinSysCtlByName("hw.optional.neon_hpfp");
++  info.features.sha512 = GetDarwinSysCtlByName("hw.optional.armv8_2_sha512");
++  info.features.atomics = GetDarwinSysCtlByName("hw.optional.armv8_1_atomics");
++  info.features.asimdfhm = GetDarwinSysCtlByName("hw.optional.armv8_2_fhm");
++  info.features.sha3 = GetDarwinSysCtlByName("hw.optional.armv8_2_sha3");
++  info.features.crc32 = GetDarwinSysCtlByName("hw.optional.armv8_crc32");
++
++#else
++
+   FillProcCpuInfoData(&info);
+   const HardwareCapabilities hwcaps = CpuFeatures_GetHardwareCapabilities();
+   for (size_t i = 0; i < AARCH64_LAST_; ++i) {
+@@ -132,6 +179,8 @@
+     }
+   }
+ 
++#endif
++
+   return info;
+ }
+ 
+--- cpu_features/test/CMakeLists.txt.orig
++++ cpu_features/test/CMakeLists.txt
+@@ -66,6 +66,10 @@
+ ## cpuinfo_aarch64_test
+ if(PROCESSOR_IS_AARCH64)
+   add_executable(cpuinfo_aarch64_test cpuinfo_aarch64_test.cc ../src/cpuinfo_aarch64.c)
++  if(APPLE)
++    target_compile_definitions(cpuinfo_aarch64_test PUBLIC CPU_FEATURES_MOCK_CPUID_ARM64)
++    target_compile_definitions(cpuinfo_aarch64_test PRIVATE HAVE_SYSCTLBYNAME)
++  endif()
+   target_link_libraries(cpuinfo_aarch64_test all_libraries)
+   add_test(NAME cpuinfo_aarch64_test COMMAND cpuinfo_aarch64_test)
+ endif()
+--- cpu_features/test/cpuinfo_aarch64_test.cc.orig
++++ cpu_features/test/cpuinfo_aarch64_test.cc
+@@ -21,6 +21,116 @@
+ namespace cpu_features {
+ namespace {
+ 
++#if defined(CPU_FEATURES_OS_DARWIN)
++
++class FakeCpu {
++ public:
++  bool GetDarwinSysCtlByName(std::string name) const {
++    return darwin_sysctlbyname_.count(name);
++  }
++
++  int GetDarwinSysCtlByNameValue(std::string name) const {
++    std::map<std::string, int>::const_iterator iter =
++        darwin_sysctlbynamevalue_.find(name);
++    if (iter != std::end(darwin_sysctlbynamevalue_)) {
++      return iter->second;
++    }
++
++    return 0;
++  }
++
++  void SetDarwinSysCtlByName(std::string name) {
++    darwin_sysctlbyname_.insert(name);
++  }
++
++  void SetDarwinSysCtlByNameValue(std::string name, int value) {
++    darwin_sysctlbynamevalue_[name] = value;
++  }
++
++ private:
++  std::set<std::string> darwin_sysctlbyname_;
++  std::map<std::string, int> darwin_sysctlbynamevalue_;
++};
++
++FakeCpu* g_fake_cpu = nullptr;
++
++extern "C" bool GetDarwinSysCtlByName(const char* name) {
++  return g_fake_cpu->GetDarwinSysCtlByName(name);
++}
++
++extern "C" int GetDarwinSysCtlByNameValue(const char* name) {
++  return g_fake_cpu->GetDarwinSysCtlByNameValue(name);
++}
++
++class CpuinfoAarch64Test : public ::testing::Test {
++ protected:
++  void SetUp() override { g_fake_cpu = new FakeCpu(); }
++  void TearDown() override { delete g_fake_cpu; }
++};
++
++TEST_F(CpuinfoAarch64Test, FromDarwinSysctlFromName) {
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.floatingpoint");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.neon");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.neon_hpfp");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.neon_fp16");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.armv8_1_atomics");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.armv8_crc32");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.armv8_2_fhm");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.armv8_2_sha512");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.armv8_2_sha3");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.amx_version");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.ucnormal_mem");
++  g_fake_cpu->SetDarwinSysCtlByName("hw.optional.arm64");
++
++  g_fake_cpu->SetDarwinSysCtlByNameValue("hw.cputype", 16777228);
++  g_fake_cpu->SetDarwinSysCtlByNameValue("hw.cpusubtype", 2);
++  g_fake_cpu->SetDarwinSysCtlByNameValue("hw.cpu64bit", 1);
++  g_fake_cpu->SetDarwinSysCtlByNameValue("hw.cpufamily", 458787763);
++  g_fake_cpu->SetDarwinSysCtlByNameValue("hw.cpusubfamily", 2);
++
++  const auto info = GetAarch64Info();
++
++  EXPECT_EQ(info.implementer, 0x100000C);
++  EXPECT_EQ(info.variant, 2);
++  EXPECT_EQ(info.part, 0x1B588BB3);
++  EXPECT_EQ(info.revision, 2);
++
++  EXPECT_TRUE(info.features.fp);
++  EXPECT_FALSE(info.features.asimd);
++  EXPECT_FALSE(info.features.evtstrm);
++  EXPECT_FALSE(info.features.aes);
++  EXPECT_FALSE(info.features.pmull);
++  EXPECT_FALSE(info.features.sha1);
++  EXPECT_FALSE(info.features.sha2);
++  EXPECT_TRUE(info.features.crc32);
++  EXPECT_TRUE(info.features.atomics);
++  EXPECT_TRUE(info.features.fphp);
++  EXPECT_FALSE(info.features.asimdhp);
++  EXPECT_FALSE(info.features.cpuid);
++  EXPECT_FALSE(info.features.asimdrdm);
++  EXPECT_FALSE(info.features.jscvt);
++  EXPECT_FALSE(info.features.fcma);
++  EXPECT_FALSE(info.features.lrcpc);
++  EXPECT_FALSE(info.features.dcpop);
++  EXPECT_TRUE(info.features.sha3);
++  EXPECT_FALSE(info.features.sm3);
++  EXPECT_FALSE(info.features.sm4);
++  EXPECT_FALSE(info.features.asimddp);
++  EXPECT_TRUE(info.features.sha512);
++  EXPECT_FALSE(info.features.sve);
++  EXPECT_TRUE(info.features.asimdfhm);
++  EXPECT_FALSE(info.features.dit);
++  EXPECT_FALSE(info.features.uscat);
++  EXPECT_FALSE(info.features.ilrcpc);
++  EXPECT_FALSE(info.features.flagm);
++  EXPECT_FALSE(info.features.ssbs);
++  EXPECT_FALSE(info.features.sb);
++  EXPECT_FALSE(info.features.paca);
++  EXPECT_FALSE(info.features.pacg);
++}
++
++#else
++
+ void DisableHardwareCapabilities() { SetHardwareCapabilities(0, 0); }
+ 
+ TEST(CpuinfoAarch64Test, FromHardwareCap) {
+@@ -167,5 +277,7 @@
+   EXPECT_FALSE(info.features.bti);
+ }
+ 
++#endif
++
+ }  // namespace
+ }  // namespace cpu_features

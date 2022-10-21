@@ -2,26 +2,27 @@
 
 PortSystem              1.0
 PortGroup               active_variants 1.1
-PortGroup               gobject_introspection 1.0
+PortGroup               meson 1.0
 
 # Please keep the pango and pango-devel ports as similar as possible.
+# Note: Stable Pango releases have an even-numbered minor version.
 
 name                    pango-devel
 conflicts               pango
 set my_name             pango
-version                 1.42.4
-revision                3
-checksums               rmd160  e91880e0e9a459bbc2c280ac747ab31f80352000 \
-                        sha256  1d2b74cd63e8bd41961f2f8d952355aa0f9be6002b52c8aa7699d9f5da597c9d \
-                        size    833876
+epoch                   1
+version                 1.50.7
+revision                0
+checksums               rmd160  c9fba0b53d3fb05add38e01e2f19a678ae3a7965 \
+                        sha256  0477f369a3d4c695df7299a6989dc004756a7f4de27eecac405c6790b7e3ad33 \
+                        size    4294752
 
 set branch              [join [lrange [split ${version} .] 0 1] .]
 categories              x11
-maintainers             {ryandesign @ryandesign} openmaintainer
+maintainers             {ryandesign @ryandesign} {mascguy @mascguy} openmaintainer
 license                 LGPL-2+
 homepage                https://www.pango.org/
 master_sites            gnome:sources/${my_name}/${branch}
-platforms               darwin
 distname                ${my_name}-${version}
 dist_subdir             ${my_name}
 use_xz                  yes
@@ -36,30 +37,63 @@ long_description \
     of internationalized text.
 
 depends_build \
-    port:pkgconfig
+    port:pkgconfig \
+    path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection \
+    port:help2man
 
 depends_lib \
     path:lib/pkgconfig/glib-2.0.pc:glib2 \
     path:lib/pkgconfig/cairo.pc:cairo \
     port:fribidi \
-    port:harfbuzz
+    path:lib/pkgconfig/harfbuzz.pc:harfbuzz
 
-patchfiles-append       fix-pango_layout_get_pixel_extents-crash.patch
+configure.args-append   -Dxft=disabled \
+                        -Dintrospection=enabled
 
-configure.args          --enable-static \
-                        --disable-silent-rules \
-                        --without-xft
+configure.cflags-append \
+                        -Wno-error,-Wimplicit-fallthrough
 
-gobject_introspection   yes
+compiler.cxx_standard   2011
+configure.cxxflags-append \
+                        -std=c++11
 
 license_noconflict      gobject-introspection
 
-platform macosx {
+# gobject-introspection uses g-ir-scanner, which uses $CC from env
+if {${universal_possible} && [variant_isset universal]} {
+    foreach arch ${configure.universal_archs} {
+        lappend merger_build_env(${arch}) \
+                        "CC=${configure.cc} -arch ${arch}"
+        lappend merger_destroot_env(${arch}) \
+                        "CC=${configure.cc} -arch ${arch}"
+    }
+} else {
+    build.env-append    "CC=${configure.cc} ${configure.cc_archflags}"
+    destroot.env-append "CC=${configure.cc} ${configure.cc_archflags}"
+}
+
+# Fix help2man invocation on Tiger
+platform darwin 8 {
+    # meson on Tiger cannot use rpaths, so we workaround with this to find dylib
+    build.env-append    "DYLD_LIBRARY_PATH=${build_dir}/pango"
+}
+
+# Fix build errors on 10.4 and 10.5, caused by outdated 'nm'
+# Issue: https://trac.macports.org/ticket/60253
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    depends_build-append \
+                        port:cctools
+    configure.env-append \
+                        NM=${prefix}/bin/nm
+}
+
+if {${os.platform} eq "darwin" && ${os.subplatform} eq "macosx" && ${os.major} > 8} {
     variant quartz {
         # Although this variant does nothing, pango will automatically build
-        # itself differently depending on whether or not cairo is installed with
-        # the quartz variant. Therefore this variant is necessary to be able to
-        # distinguish whether an installed pango has Quartz support or not.
+        # itself differently depending on whether or not cairo is installed
+        # with the quartz variant and whether CoreText is available. Therefore
+        # this variant is necessary to be able to distinguish whether an
+        # installed pango has Quartz support or not.
     }
 
     default_variants    +quartz
@@ -73,16 +107,16 @@ platform macosx {
 }
 
 variant x11 {
-    depends_lib-append      port:Xft2
-    configure.args-delete   --without-xft
-    configure.args-append   --x-include=${prefix}/include \
-                            --x-lib=${prefix}/lib
+    depends_lib-append \
+                        port:Xft2
+    configure.args-replace \
+                        -Dxft=disabled -Dxft=enabled
 }
 
 default_variants        +x11
-if {${os.platform} ne "darwin" || ${os.subplatform} ne "macosx"} {
-    # When not on macOS, don't allow X11 support to be disabled, since it is the
-    # only available option.
+if {${os.platform} ne "darwin" || ${os.subplatform} ne "macosx" || ${os.major} <= 8} {
+    # When not on macOS 10.5+, don't allow X11 support to be disabled, since it
+    # is the only available option.
     variant_set         x11
 }
 
@@ -90,15 +124,22 @@ if {[variant_isset x11]} {
     require_active_variants path:lib/pkgconfig/cairo.pc:cairo x11
 }
 
+pre-configure {
+    delete ${worksrcpath}/subprojects/glib ${worksrcpath}/subprojects/glib.wrap
+
+    # Fix for issue 56409: pango-view.1 man page not generated
+    delete ${worksrcpath}/pango-view/pango-view.1.in
+}
+
 post-destroot {
     set docdir ${prefix}/share/doc/${my_name}
     xinstall -d ${destroot}${docdir}
-    xinstall -m 0644 -W ${worksrcpath} AUTHORS ChangeLog COPYING MAINTAINERS NEWS README THANKS \
+    xinstall -m 0644 -W ${worksrcpath} CODING_STYLE.md COPYING NEWS README.md  THANKS \
         ${destroot}${docdir}
 }
 
 test.run                yes
-test.target             check
+test.target             test
 
 livecheck.type          gnome-with-unstable
 livecheck.name          ${my_name}

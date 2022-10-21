@@ -1,0 +1,227 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+
+name                openjdk8
+# use format based on macports:
+# https://guide.macports.org/chunked/reference.portgroup.html#reference.portgroup.java
+# https://github.com/openjdk/jdk8u/tags
+# Tags: https://github.com/openjdk/jdk8u/tags
+# remove 'jdk' from the latest tag without '-ga' that has commit that corresponds to the latest tag with '-ga'
+set major 8
+set update 345
+set build 01
+version             ${major}u${update}
+revision            0
+categories          java devel
+platforms           darwin
+supported_archs     ppc x86_64
+license             GPL-2+
+maintainers         {outlook.com:usersword123 @usersxx} openmaintainer
+description         OpenJDK 8
+long_description    JDK 8 and JRE 8 builds of OpenJDK, the Open-Source implementation \
+                    of the Java Platform, Standard Edition, and related projects.
+homepage            https://openjdk.java.net/
+master_sites        https://git.openjdk.java.net/jdk8u/archive/refs/tags/
+distname            jdk${major}u${update}-b${build}
+
+checksums           rmd160  a5f2ee5ee3db4b42b5640c3364a026523a0af8c7 \
+                    sha256  0b7cd73c6ad6c07cbcdd4b37559b8a49a5d43be2c8e2b922c41d4761108779c4 \
+                    size    88179096
+
+patchfiles          0001-8181503-Can-t-compile-hotspot-with-c-11.patch \
+                    0002-Support-XCode-3-14.patch \
+                    0003-Ignore-__NSAutoreleaseNoPool-errors.patch \
+                    0004-8030812-Change-the-solaris-DTrace-implementation-to-.patch \
+                    0005-os_perf_bsd-allow-to-compile-with-ZERO-CPU.patch \
+                    0006-Disable-C-11-warnings.patch \
+                    0007-Added-macosx-bin-zero-jvm.cfg.patch \
+                    0008-ExtendedOptionsImpl.c-define-TCP_KEEPINTVL-and-TCP_K.patch
+
+# NSFullSizeContentViewWindowMask is available since 10.10
+if {${os.platform} eq "darwin" && ${os.major} < 14} {
+    patchfiles-append \
+                    0009-Revert-8211301-macos-support-full-window-content-opt.patch
+}
+
+depends_lib         port:freetype
+depends_build       port:autoconf \
+                    port:gmake \
+                    port:pkgconfig \
+                    port:bash
+
+set tpath /Library/Java
+use_xcode           yes
+use_configure    yes
+if {${configure.build_arch} eq "ppc"} {
+    set datamodel 32
+} elseif {${configure.build_arch} eq "x86_64"} {
+    set datamodel 64
+}
+configure.cmd       ${prefix}/bin/bash ./configure
+configure.pre_args  --prefix=${tpath}
+set bug_url "https://trac.macports.org/newticket?port=${name}"
+# default configure args
+configure.args      --with-boot-jdk \
+                    --with-debug-level=release \
+                    --with-freetype-include=${prefix}/include/freetype2 \
+                    --with-freetype-lib=${prefix}/lib \
+                    --with-target-bits=${datamodel} \
+                    --with-extra-cflags="${configure.cflags}" \
+                    --with-extra-cxxflags="${configure.cxxflags}" \
+                    --with-extra-ldflags="${configure.ldflags}" \
+                    --with-milestone=fcs \
+                    --with-vendor-name="OpenJDK Porters Group" \
+                    --with-vendor-url="${homepage}" \
+                    --with-vendor-bug-url="${bug_url}" \
+                    --with-vendor-vm-bug-url="${bug_url}" \
+                    --with-update-version=${update} \
+                    --with-conf-name=openjdk8 \
+                    --with-native-debug-symbols=none
+
+if { [string match *clang* ${configure.compiler}] } {
+    configure.args-append \
+                    --with-toolchain-type=clang
+} elseif { [string match *gcc* ${configure.compiler}] } {
+    configure.args-append \
+                    --with-toolchain-type=gcc
+}
+
+build.pre_args-prepend \
+                    COMPILER_WARNINGS_FATAL=false
+
+post-patch {
+    # NOTE: JDK had hardcoded MACOSX_VERSION_MIN as 10.9.0 when uses clang toolchain
+    # and 10.7.0 for gcc toolchain.
+    if {${os.platform} eq "darwin" && ${os.major} < 13} {
+        reinplace "s|MACOSX_VERSION_MIN=10.9.0|MACOSX_VERSION_MIN=10.7.0|g" \
+            ${worksrcpath}/common/autoconf/flags.m4 \
+            ${worksrcpath}/common/autoconf/generated-configure.sh
+    }
+}
+
+if {${configure.build_arch} eq "ppc"} {
+    depends_build-append       port:openjdk7-bootstrap
+    configure.args-replace      --with-boot-jdk --with-boot-jdk=/Library/Java/JavaVirtualMachines/openjdk7-bootstrap
+    configure.post_args --disable-headful
+    post-patch {
+        reinplace "s|WARNINGS_ARE_ERRORS = -Werror|WARNING_FLAGS =|g" hotspot/make/bsd/makefiles/gcc.make
+        reinplace "s|WARNING_FLAGS = -Wpointer-arith -Wsign-compare -Wundef -Wunused-function -Wformat=2|WARNING_FLAGS = |g" hotspot/make/bsd/makefiles/gcc.make
+        reinplace "s|@ZERO_ARCHDEF@|PPC|g" hotspot/make/bsd/platform_zero.in
+        reinplace "s|@ZERO_LIBARCH@|ppc|g" hotspot/make/bsd/platform_zero.in
+        reinplace "s|dtraceCheck| |g" hotspot/make/bsd/makefiles/vm.make
+        reinplace "s|LP64=1|LP64=0|g" hotspot/make/bsd/Makefile
+    }
+} elseif {${configure.build_arch} eq "x86_64" } {
+    if {${os.platform} eq "darwin" && ${os.major} < 11} {
+        # NOTE: openjdk8-bootstrap's doesn't work enough to bootstrap openjdk on 10.6
+        # It is fails with errors like:
+        #   2022-10-01 01:35:43.344 java[12281:1d03] *** NSInvocation: warning: object 0x11478b468 of class 'ThreadUtilities' does not implement methodSignatureForSelector: -- trouble ahead
+        #   2022-10-01 01:35:43.345 java[12281:1d03] *** NSInvocation: warning: object 0x11478b468 of class 'ThreadUtilities' does not implement doesNotRecognizeSelector: -- abort
+        depends_lib
+        depends_build
+        known_fail      yes
+        pre-fetch {
+            ui_error "${name} @${version} requires OS X 10.7 or greater."
+            return -code error "incompatible Mac OS X version"
+        }
+    }
+
+    depends_build-append       port:openjdk8-bootstrap
+    configure.args-replace      --with-boot-jdk --with-boot-jdk=/Library/Java/JavaVirtualMachines/openjdk8-bootstrap/Contents/Home
+}
+
+variant server \
+    conflicts core zero zeroshark \
+    description {JVM with normal interpreter and a tiered C1/C2 compiler} {
+    configure.args-append  --with-jvm-variants=server
+}
+
+variant release \
+    conflicts debug \
+    description {OpenJDK with no debug information, all optimizations and no asserts} {
+    configure.args-append  --with-debug-level=release 
+}
+
+variant debug \
+    conflicts release \
+    description {OpenJDK with debug information, all optimizations and all asserts} {
+    configure.args-append  --with-debug-level=fastdebug
+    configure.args-delete   --with-native-debug-symbols=none
+}
+
+variant core \
+    conflicts server \
+    description {JVM with interpreter only and no compiler} {
+    configure.args-append   --with-jvm-variants=core
+}
+
+variant zero \
+    conflicts core zeroshark server \
+    description {JVM with no assembler, no machine code interpreter and no compiler} {
+    set archuc [string toupper ${configure.build_arch}]
+    depends_lib-append         port:libffi
+    configure.args-append  --with-jvm-variants=zero \
+                           --with-extra-cflags="${configure.cflags} -I${prefix}/include -arch ${configure.build_arch}"
+    configure.args-delete  --with-extra-cflags="${configure.cflags}"
+}
+
+variant zeroshark \
+    conflicts core zero server \
+    description {JVM with no assembler, zero interpreter and shark/llvm compiler backend} {
+    set archuc [string toupper ${configure.build_arch}]
+    depends_lib-append         port:libffi
+    configure.args-append  --with-jvm-variants=zero \
+                           --with-extra-cflags="${configure.cflags} -I${prefix}/include -arch ${configure.build_arch}"
+    configure.args-delete  --with-extra-cflags="${configure.cflags}"
+}
+
+if {![variant_isset debug] && ![variant_isset release]} {
+    default_variants-append +release
+}
+
+if {![variant_isset core] && ![variant_isset zeroshark] && ![variant_isset zero] && ![variant_isset server]} {
+    if {${os.major} < 14} {
+        default_variants-append +zero
+    } else {
+        default_variants-append +server
+    }
+}
+
+build.type          gnu
+build.target        images
+use_parallel_build  no
+worksrcdir          openjdk8
+set jdkn jdk1.${major}.0_${update}.jdk
+set jren jre1.${major}.0_${update}.jre
+set jdk_bundle_dir build/openjdk8/images/j2sdk-bundle/${jdkn}/Contents
+set jre_bundle_dir build/openjdk8/images/j2re-bundle/${jren}/Contents
+set jdk_path ${tpath}/JavaVirtualMachines/${name}
+set jre_path ${tpath}/JavaVirtualMachines/${name}-jre
+
+test.run            yes
+test.cmd            ${jdk_bundle_dir}/Home/bin/java
+test.target         --version
+
+destroot {
+    xinstall -m 755 -d ${destroot}${jdk_path}
+    xinstall -m 755 -d ${destroot}${jre_path}
+    copy ${worksrcpath}/${jdk_bundle_dir} ${destroot}${jdk_path}
+    copy ${worksrcpath}/${jre_bundle_dir} ${destroot}${jre_path}
+}
+destroot.violate_mtree      yes
+
+post-destroot {
+    delete ${worksrcpath}
+}
+
+notes "
+If you want to make ${name} the default JDK, add this to shell profile:
+export JAVA_HOME=${jdk_path}/Contents/Home
+If you want to make the JRE installed by the ${name} the default JRE, add this to shell profile:
+export JAVA_HOME=${jre_path}/Contents/Home
+"
+    
+livecheck.type      regex
+livecheck.url       https://github.com/openjdk/jdk8u/tags
+livecheck.regex     jdk(8u\[0-9\]+)-ga

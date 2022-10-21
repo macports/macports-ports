@@ -3,8 +3,11 @@
 PortSystem      1.0
 PortGroup       active_variants 1.1
 
-name            emacs
+# Need openat()
+PortGroup       legacysupport 1.1
+legacysupport.newest_darwin_requires_legacy 13
 
+name            emacs
 categories      editors
 license         GPL-3+
 maintainers     {dports @drkp} openmaintainer
@@ -43,7 +46,7 @@ configure.args  --disable-silent-rules \
                 --without-gconf \
                 --without-libotf \
                 --without-m17n-flt \
-                --with-gmp \
+                --with-libgmp \
                 --with-gnutls \
                 --with-json \
                 --with-xml2 \
@@ -53,7 +56,7 @@ configure.args  --disable-silent-rules \
 depends_build-append   port:pkgconfig \
                        port:texinfo
 depends_lib-append     port:gmp \
-                       port:gnutls \
+                       path:lib/pkgconfig/gnutls.pc:gnutls \
                        port:jansson \
                        port:libxml2 \
                        port:ncurses
@@ -78,57 +81,53 @@ platform darwin {
         } elseif {${os.major} > 10} {
             configure.ldflags-append -Wl,-no_pie
         }
+        # Without this flag, there are more than 90000 warnings if the
+        # system's `clang` compiler is used, increasing the log file
+        # size by a factor of 200, see
+        # https://debbugs.gnu.org/cgi/bugreport.cgi?bug=56736
+        if {${os.major} >= 11 || ${os.major} <= 12} {
+            configure.cflags-append -Wno-attributes
+        }
     }
 }
 
 if {$subport eq $name || $subport eq "emacs-app"} {
-    version         27.2
+    version         28.2
     revision        0
 
-    checksums       rmd160  5cf2927984b34cfd611114190c8b7f498093e994 \
-                    sha256  80ff6118fb730a6d8c704dccd6915a6c0e0a166ab1daeef9fe68afa9073ddb73 \
-                    size    67153050
+    checksums       rmd160  4690d9ab3e7878cbb25eb19c2931c587f971b3bd \
+                    sha256  a6912b14ef4abb1edab7f88191bfd61c3edd7085e084de960a4f86485cb7cad8 \
+                    size    71332149
 }
 
 if {$subport eq "emacs-devel" || $subport eq "emacs-app-devel"} {
-    # Need openat()
-    PortGroup       legacysupport 1.1
-    legacysupport.newest_darwin_requires_legacy 13
-
-    set date        2021-04-30
-    epoch           4
+    set date        2022-09-20
+    epoch           5
     version         [string map {- {}} ${date}]
-    revision        1
+    revision        0
 
     fetch.type      git
     git.url         --shallow-since=${date}T00:00:00 https://github.com/emacs-mirror/emacs.git
-    git.branch      04266a2cacc0f0705d0d1abaada464b402cc7b07
+    git.branch      e5de29aa47e96f675b7f4ef3a7f84bd30d68ea0f
 
     # --shallow-since needs a newer version of git than on some older systems
     # So use MacPorts version
     depends_fetch-append port:git
     git.cmd         ${prefix}/bin/git
 
+    configure.args-append \
+        --with-sqlite3 \
+        --with-webp
+
+    depends_lib-append \
+        port:sqlite3 \
+        port:webp
+
     pre-configure {
         system -W ${worksrcpath} "sh ./autogen.sh"
     }
 
     livecheck.type none
-
-    variant nativecomp description {Builds emacs with native compilation support} {
-        depends_lib-append       port:gcc11
-
-        configure.args-append    --with-native-compilation
-
-        compiler.cpath-prepend   ${prefix}/include/gcc11
-        compiler.library_path-prepend \
-                                 ${prefix}/lib/gcc11
-
-        build.args-append        NATIVE_FULL_AOT=1 \
-            {BYTE_COMPILE_EXTRA_FLAGS='--eval "(setq comp-speed 2)"'}
-    }
-
-    default_variants-append +nativecomp
 } else {
     livecheck.type  regex
     livecheck.url   https://ftp.gnu.org/gnu/emacs/?C=M&O=D
@@ -160,7 +159,7 @@ if {$subport eq $name || $subport eq "emacs-devel"} {
             port:libpng \
             port:lcms2 \
             port:Xft2 \
-            port:harfbuzz
+            path:lib/pkgconfig/harfbuzz.pc:harfbuzz
 
         # autoconf appears to be dropping linker flags for freetype &
         # fontconfig; work around this. See #28083
@@ -180,10 +179,10 @@ if {$subport eq $name || $subport eq "emacs-devel"} {
         configure.args-append   --with-x-toolkit=gtk3
         configure.args-append   --with-gconf
         configure.args-append   --with-rsvg
-        depends_lib-append      port:gtk3 \
+        depends_lib-append      path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
                                 path:lib/pkgconfig/glib-2.0.pc:glib2 \
                                 port:gconf \
-                                port:librsvg
+                                path:lib/pkgconfig/librsvg-2.0.pc:librsvg
         # see #21917
         require_active_variants gtk2 x11
     }
@@ -203,10 +202,14 @@ if {$subport eq $name || $subport eq "emacs-devel"} {
         depends_lib-append       port:dbus
     }
 
+    variant xwidgets requires gtk description {Enable use of xwidgets in Emacs buffers} {
+        configure.args-append  --with-xwidgets
+    }
+
     post-destroot {
-        xinstall -m 755 -d ${destroot}${prefix}/include/emacs
-        xinstall -m 644 ${worksrcpath}/src/emacs-module.h \
-                        ${destroot}${prefix}/include/emacs
+        xinstall -m 0755 -d ${destroot}${prefix}/include/emacs
+        xinstall -m 0644 ${worksrcpath}/src/emacs-module.h \
+            ${destroot}${prefix}/include/emacs
     }
 }
 
@@ -226,18 +229,15 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
 
     universal_variant   no
 
-    if {$subport eq "emacs-app-devel"} {
-        patchfiles-append   patch-Info.plist.in-devel.diff
-    } else {
-        patchfiles-append   patch-Info.plist.in.diff
-    }
+    patchfiles-append   patch-Info.plist.in.diff
+
     post-patch {
         reinplace "s,@PATH@,${prefix}/bin:${prefix}/sbin:/usr/bin:/bin:/usr/sbin:/sbin," ${worksrcpath}/nextstep/templates/Info.plist.in
     }
 
     destroot {
         system -W ${worksrcpath} "make install"
-        xinstall -m 755 -d ${destroot}${applications_dir}
+        xinstall -m 0755 -d ${destroot}${applications_dir}
         file copy ${worksrcpath}/nextstep/Emacs.app \
             ${destroot}${applications_dir}
         # fix read-permission to resources
@@ -255,22 +255,26 @@ if {$subport eq "emacs-app" || $subport eq "emacs-app-devel"} {
     }
 
     variant rsvg description {Use librsvg} {
-        depends_lib-append     port:librsvg
+        depends_lib-append     path:lib/pkgconfig/librsvg-2.0.pc:librsvg
         configure.args-delete  --without-rsvg
         configure.args-append  --with-rsvg
+    }
+
+    variant xwidgets description {Enable use of xwidgets in Emacs buffers} {
+        configure.args-append  --with-xwidgets
     }
 
     default_variants-append +rsvg
 }
 
-if {$subport eq $name || $subport eq "emacs-devel"} {
-    variant xwidgets requires gtk description {Enable use of xwidgets in Emacs buffers} {
-        configure.args-append  --with-xwidgets
-    }
-} elseif {$subport eq "emacs-app-devel"} {
-    # Quartz support was added after 27.1 had released via commit: d089c4fbfc8be432dc3015a99b4044dab0a0de97
-    # As soon as the next version is released it should support also emacs-app
-    variant xwidgets description {Enable use of xwidgets in Emacs buffers} {
-        configure.args-append  --with-xwidgets
-    }
+variant nativecomp description {Builds emacs with native compilation support} {
+    set gcc_v                      12
+    depends_lib-append             port:gcc${gcc_v}
+    configure.args-append          --with-native-compilation
+    compiler.cpath-prepend         ${prefix}/include/gcc${gcc_v}
+    compiler.library_path-prepend  ${prefix}/lib/gcc${gcc_v}
+    configure.ldflags-append       "-Wl,-rpath ${prefix}/lib/gcc${gcc_v}"
+    build.args-append              NATIVE_FULL_AOT=1
 }
+
+default_variants-append +nativecomp

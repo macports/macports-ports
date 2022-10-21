@@ -1,46 +1,77 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+#===================================================================================================
 #
-# This PortGroup sets up default variants for projects that want m
+# This PortGroup defines a debug variant, for ports not based on CMake, Meson, etc.
 #
 # Usage:
-#
 #   PortGroup               debug 1.0
+#
+#===================================================================================================
 
-configure.cflags-append    -mtune=native
-configure.cxxflags-append  -mtune=native
-configure.fflags-append    -mtune=native
-configure.f90flags-append  -mtune=native
-configure.fcflags-append   -mtune=native
-configure.cppflags-append  -mtune=native
+namespace eval debug {}
 
-ui_debug "adding the default debug variant"
-variant debug description {Enable debug flags and symbols} {
-    configure.cflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cxxflags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.cppflags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fflags-delete     -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.f90flags-delete   -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
-    configure.fcflags-delete    -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1
+if { [variant_exists debug] } {
+    error "pg_debug: variant 'debug' already exists"
+}
 
-    # certain options break the way cmake configures, so test for cmake variable
-    if {[info exists cmake_share_module_dir]} {
-        configure.args-delete   -DCMAKE_BUILD_TYPE=Release
-        configure.args-append   -DCMAKE_BUILD_TYPE=debugFull
-    } else {
-        configure.args-delete   --disable-debug
-        configure.args-append   --enable-debug
+default debug.configure \
+    [list \
+        cflags \
+        cppflags \
+        cxxflags \
+        objcflags \
+        objcxxflags \
+        fflags \
+        f90flags \
+        fcflags \
+    ]
+
+default debug.flags.delete \
+    [list -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1]
+
+default debug.flags.add \
+    [list -g -O0]
+
+ui_debug "pg_debug: adding variant"
+variant debug description {Enable debug flags and symbols} {}
+
+proc debug::setup_debug {} {
+    ui_debug "debug::setup_debug: configuring for debug build"
+
+    set conf_names   [option debug.configure]
+    set flags_delete [option debug.flags.delete]
+    set flags_add    [option debug.flags.add]
+
+    foreach c ${conf_names} {
+        foreach f ${flags_delete} {
+            configure.${c}-delete ${f}
+        }
+
+        foreach f ${flags_add} {
+            configure.${c}-append ${f}
+        }
     }
 
-    configure.cflags-append     -g -O0
-    configure.cxxflags-append   -g -O0
-    configure.fflags-append     -g -O0
-    configure.f90flags-append   -g -O0
-    configure.fcflags-append    -g -O0
+    post-destroot {
+        debug::post_destroot
+    }
 }
 
-post-destroot {
-  if {[variant_isset debug]} {
-      ui_debug "Generating the .dSYM bundles because of +debug: find ${destroot}${prefix} -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
-      system -W ${destroot}${prefix} "find . -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
-  }
+proc debug::post_destroot {} {
+    global destroot prefix
+
+    ui_debug "debug::post_destroot: Generating the .dSYM bundles"
+    system -W ${destroot}${prefix} "find . -type f '(' -name '*.dylib' -or -name '*.so' ')' -exec dsymutil {} +"
 }
+
+proc debug::pg_callback {} {
+    set debug_enabled [variant_isset debug]
+    ui_debug "debug::pg_callback: debug enabled: ${debug_enabled}"
+
+    if { ${debug_enabled} } {
+        debug::setup_debug
+    }
+}
+
+# callback after port is parsed
+port::register_callback debug::pg_callback

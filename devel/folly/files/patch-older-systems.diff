@@ -1,0 +1,158 @@
+# https://github.com/macports/macports-ports/pull/15689#issuecomment-1211163024
+# https://github.com/facebook/folly/issues/1833
+--- folly/File.cpp.orig	2022-07-30 03:08:35.000000000 +0545
++++ folly/File.cpp	2022-08-11 19:15:42.000000000 +0545
+@@ -120,8 +120,10 @@
+     int fd;
+ #ifdef _WIN32
+     fd = ::dup(fd_);
+-#else
++#elseif defined(F_DUPFD_CLOEXEC)
+     fd = ::fcntl(fd_, F_DUPFD_CLOEXEC, 0);
++#else
++    fd = ::dup(fd_);
+ #endif
+     checkUnixError(fd, "dup() failed");
+ 
+
+# TASK_INFO: https://github.com/bear-metal/tunemygc/commit/9652a759ab4eba7caa7a333383ebd7461e3040cf
+# Can CLOCK_PROCESS_CPUTIME_ID and CLOCK_THREAD_CPUTIME_ID be borrowed?
+# https://opensource.apple.com/source/Libc/Libc-1158.50.2/gen/clock_gettime.c.auto.html
+--- folly/portability/Time.cpp.orig	2022-07-30 03:08:35.000000000 +0545
++++ folly/portability/Time.cpp	2022-08-12 00:53:36.000000000 +0545
+@@ -37,11 +37,13 @@
+ #if !FOLLY_HAVE_CLOCK_GETTIME || FOLLY_FORCE_CLOCK_GETTIME_DEFINITION
+ #if __MACH__
+ #include <errno.h>
++#include <sys/types.h>
+ #include <mach/mach_init.h> // @manual
+ #include <mach/mach_port.h> // @manual
+ #include <mach/mach_time.h> // @manual
+ #include <mach/mach_types.h> // @manual
+ #include <mach/task.h> // @manual
++#include <mach/task_info.h> // for MacOS <= Lion
+ #include <mach/thread_act.h> // @manual
+ #include <mach/vm_map.h> // @manual
+ 
+@@ -64,6 +66,7 @@
+   }
+ 
+   // Get CPU usage for terminated threads.
++#ifdef MACH_TASK_BASIC_INFO
+   mach_task_basic_info task_basic_info;
+   mach_msg_type_number_t task_basic_info_count = MACH_TASK_BASIC_INFO_COUNT;
+   kern_result = task_info(
+@@ -74,6 +77,18 @@
+   if (UNLIKELY(kern_result != KERN_SUCCESS)) {
+     return -1;
+   }
++#else
++  task_basic_info task_basic_info;
++  mach_msg_type_number_t task_basic_info_count = TASK_BASIC_INFO_COUNT;
++  kern_result = task_info(
++      mach_task_self(),
++      TASK_BASIC_INFO,
++      (thread_info_t)&task_basic_info,
++      &task_basic_info_count);
++  if (UNLIKELY(kern_result != KERN_SUCCESS)) {
++    return -1;
++  }
++#endif
+ 
+   auto cputime = time_value_to_ns(thread_times_info.user_time) +
+       time_value_to_ns(thread_times_info.system_time) +
+@@ -99,6 +114,7 @@
+   return 0;
+ }
+ 
++#if defined(__APPLE__) && __MAC_OS_X_VERSION_MIN_REQUIRED > 101100
+ FOLLY_ATTR_WEAK int clock_gettime(clockid_t clk_id, struct timespec* ts) {
+   switch (folly::to_underlying(clk_id)) {
+     case CLOCK_REALTIME: {
+@@ -120,6 +136,7 @@
+       return -1;
+   }
+ }
++#endif
+ 
+ int clock_getres(clockid_t clk_id, struct timespec* ts) {
+   if (clk_id != CLOCK_MONOTONIC) {
+@@ -190,6 +207,7 @@
+       res->tv_nsec = time_t(perSec * kNsPerSec);
+       return 0;
+     }
++#if defined(__APPLE__) && __MAC_OS_X_VERSION_MIN_REQUIRED > 101100
+     case CLOCK_PROCESS_CPUTIME_ID:
+     case CLOCK_THREAD_CPUTIME_ID: {
+       DWORD adj, timeIncrement;
+@@ -198,12 +216,11 @@
+         errno = EINVAL;
+         return -1;
+       }
+-
+       res->tv_sec = 0;
+       res->tv_nsec = long(timeIncrement * 100);
+       return 0;
+     }
+-
++#endif
+     default:
+       errno = EINVAL;
+       return -1;
+@@ -236,6 +253,7 @@
+       duration_to_ts(now, tp);
+       return 0;
+     }
++#if defined(__APPLE__) && __MAC_OS_X_VERSION_MIN_REQUIRED > 101100
+     case CLOCK_PROCESS_CPUTIME_ID: {
+       if (!GetProcessTimes(
+               GetCurrentProcess(),
+@@ -268,7 +286,7 @@
+           filetimeToUnsignedNanos(kernalTime) +
+               filetimeToUnsignedNanos(userTime));
+     }
+-
++#endif
+     default:
+       errno = EINVAL;
+       return -1;
+
+
+--- folly/system/ThreadId.cpp.orig	2022-07-30 03:08:35.000000000 +0545
++++ folly/system/ThreadId.cpp	2022-08-12 00:37:48.000000000 +0545
+@@ -40,9 +40,18 @@
+ 
+ uint64_t getOSThreadIDSlow() {
+ #if __APPLE__
+-  uint64_t tid;
+-  pthread_threadid_np(nullptr, &tid);
+-  return tid;
++    #if MAC_OS_X_VERSION_MAX_ALLOWED < 1070
++         uint64_t tid;
++         tid = pthread_mach_thread_np(pthread_self());
++     #elif MAC_OS_X_VERSION_MIN_REQUIRED < 1070
++             uint64_t tid;
++             tid = pthread_mach_thread_np(pthread_self());
++         }
++     #else
++        uint64_t tid;
++        pthread_threadid_np(nullptr, &tid);
++        return tid;
++     #endif
+ #elif defined(_WIN32)
+   return uint64_t(GetCurrentThreadId());
+ #elif defined(__FreeBSD__)
+
+
+--- folly/net/TcpInfoTypes.h.orig	2022-08-06 08:35:42.000000000 +0700
++++ folly/net/TcpInfoTypes.h	2022-08-14 19:19:26.000000000 +0700
+@@ -179,7 +179,7 @@
+   __u32 tcpi_total_retrans;
+ };
+ 
+-#elif defined(__APPLE__)
++#elif defined(__APPLE__) && MAC_OS_X_VERSION_MIN_REQUIRED > 101003
+ #define FOLLY_HAVE_TCP_INFO 1
+ using tcp_info = ::tcp_connection_info;
+ const int tcp_info_sock_opt = TCP_CONNECTION_INFO;
+

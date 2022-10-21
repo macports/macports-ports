@@ -3,8 +3,8 @@
 PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           cmake 1.1
-PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
 
 name                z3
 categories          math science
@@ -15,15 +15,16 @@ long_description    High performance SMT solver from Microsoft Research.
 # FStar-qualified Z3 release?
 if {${subport} eq "${name}-fstar"} {
     github.setup        Z3Prover z3 4.8.5 Z3-
-    revision            4
+    revision            5
     checksums           rmd160  cb3509b35dc3a428019950df2e2f94c555a7ee94 \
                         sha256  4e8e232887ddfa643adb6a30dcd3743cb2fa6591735fbd302b49f7028cdc0363 \
                         size    4177051
 } else {
-    github.setup        Z3Prover z3 4.8.10 z3-
-    checksums           rmd160  28de36660ddbd100d861ff2336f70f3e79014ff9 \
-                        sha256  12cce6392b613d3133909ce7f93985d2470f0d00138837de06cf7eb2992886b4 \
-                        size    4731869
+    github.setup        Z3Prover z3 4.8.17 z3-
+    revision            0
+    checksums           rmd160  e2039c4c94c09e7eb5367b2f3bc4dfa53347a4cd \
+                        sha256  1e57637ce8d5212fd38453df28e2730a18e0a633f723682267be87f5b858a126 \
+                        size    5232392
 }
 
 platforms           darwin freebsd
@@ -42,10 +43,43 @@ worksrcdir          ${name}-${github.tag_prefix}${version}
 cmake.build_type    Release
 cmake.generator     Ninja
 
+# Build requires -std=gnu++17
+compiler.cxx_standard   2017
+
 # Don't overide z3's default optimization flags 
 configure.optflags
 
 destroot.target     install
+
+# +polly requires a supported compiler (>= macports-clang-12).
+#
+# Note that the +polly variant does blacklist unsupported compilers, but if
+# this results in all compilers being blacklisted (as is the case on 10.6, where
+# macports-clang-12 is not available), a non-polly-enabled compiler fallback
+# will be selected, and the build will break.
+proc z3.polly_supported_compiler {compiler} {
+        if {![regexp {macports-clang-(.*)} ${compiler} -> llvm_ver]} {
+            return 0
+        }
+
+        if {[vercmp ${llvm_ver} "12"] >= 0} {
+            return 1
+        }
+
+        return 0
+}
+
+proc z3.polly_compiler_available {} {
+    global compiler.fallback
+
+    foreach compiler ${compiler.fallback} {
+        if {[z3.polly_supported_compiler ${compiler}]} {
+            return 1
+        }
+    }
+
+    return 0
+}
 
 # Common variants
 variant debug description {Enable the debug build configuration} {
@@ -54,14 +88,22 @@ variant debug description {Enable the debug build configuration} {
 
 # Options not shared with our language-binding subports
 if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
-    depends_build-append    port:python27 \
+
+    set py_ver              3.10
+    set py_ver_nodot        [string map {. {}} ${py_ver}]
+
+    depends_build-append    port:python${py_ver_nodot} \
                             port:bash
 
-    compiler.fallback       macports-clang-11
+    patchfiles-append       build-z3-qprofdiff.diff
 
-    compiler.cxx_standard   2011
+    # z3 4.8.11 and later use std::variant<>, which is broken on macOS <= 10.12;
+    # use macports' libc++ instead
+    if {[vercmp ${version} "4.8.11"] >= 0 && ${os.platform} eq "darwin" && ${os.major} <= 16} {
+        legacysupport.use_mp_libcxx                 yes
+    }
 
-    configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python2.7
+    configure.args-append   -DPYTHON_EXECUTABLE=${prefix}/bin/python${py_ver}
 
     if {[vercmp ${version} "4.8.7"] >= 0} {
         configure.args-append   -DZ3_ENABLE_EXAMPLE_TARGETS=ON
@@ -93,11 +135,15 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
     #   os      {FreeBSD 12.0-RELEASE-p9}
     # }
     #
-    # TODO: polly variant disabled until/if we can get it enabled by default in llvm-8.0,
-    # or provided as an LLVM subport
-    if {[vercmp ${version} "4.8.6"] >= 0}  {
-#       default_variants        +threads +polly +polly_late +polly_vector
-        default_variants        +threads
+
+    # +polly requires a supported compiler (>= macports-clang-12).
+    if {[z3.polly_compiler_available]} {
+        default_variants-append +polly +polly_late +polly_vector
+    }
+
+    # Unsupported prior to 4.8.6
+    if {[vercmp ${version} "4.8.6"] >= 0} {
+        default_variants-append +threads
     }
 
     # LTO is broken on <= macOS 10.6:
@@ -114,17 +160,11 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
     }
 
     variant lto conflicts debug description {Enable link-time (interprocedural) optimization} {
-        configure.args-append           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+        configure.args-append           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+                                        -DCMAKE_POLICY_DEFAULT_CMP0069=NEW
 
-        if {[vercmp ${version} "4.8.8"] < 0} {
-            # We need cmake 3.9 behavior to be able to use CMAKE_INTERPROCEDURAL_OPTIMIZATION
-            # This can be removed after z3-fstar adopts 4.8.8 or later, which includes
-            # cmake_minimum_required >= 3.9
-            configure.args-append           -DCMAKE_POLICY_DEFAULT_CMP0069=NEW
-        }
-
-        # Untested with gcc
-        compiler.blacklist-append       *gcc*
+        # Require clang (LTO may work with GCC, but is untested)
+        compiler.blacklist-append       {*gcc*} cc
 
         # I don't believe -flto was supported by clang until Xcode 9
         platform darwin {
@@ -156,7 +196,7 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
         configure.optflags-append   -fprofile-instr-generate=/dev/null
 
         # Require clang
-        compiler.blacklist-append   {*gcc*}
+        compiler.blacklist-append   {*gcc*} cc
 
         notes-append "
         ${name} has been built with profiling instrumentation enabled; note\
@@ -180,20 +220,14 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
     }
 
     variant polly conflicts debug description {Perform loop and data-locality optimization using LLVM's Polly optimizer} {
-        # We need a clang+llvm pair that can be built with Polly support
-        # We've only tested this with clang-8.0, so for now, require 8.0 as the minimum version
-        compiler.blacklist-append   {macports-clang-[0-9]\..*} \
+        # We need llvm built with polly support; this available by default as of our llvm-12 port,
+        # so make that our minimum version.
+        compiler.blacklist-append   {cc} \
+                                    {clang} \
+                                    {macports-clang-[0-9].*} \
+                                    {macports-clang-10} \
+                                    {macports-clang-11} \
                                     {*gcc*}
-
-        # Map the selected compiler to its corresponding LLVM port version
-        # TODO: Should we expose [portconfigure::compiler_port_name] as ${compiler.port} ?
-        if {![regexp {macports-clang-(.*)} ${configure.compiler} -> llvm_ver]} {
-            ui_error "Unsupported compiler: ${configure.compiler}"
-        }
-
-        # LLVM must be built with Polly support
-        depends_build-append        port:llvm-${llvm_ver}
-        require_active_variants     port:llvm-${llvm_ver} polly
 
         configure.optflags-append   -O3 -mllvm -polly
     }
@@ -221,6 +255,12 @@ if {${subport} eq ${name} || ${subport} eq "${name}-fstar"} {
     }
 
     pre-configure {
+        # Verify that a polly-supporting compiler was actually selected 
+        if {[variant_isset polly] && ![z3.polly_supported_compiler ${configure.compiler}]} {
+            ui_error "${name} @${version}: +polly requires macports-clang-12 or later"
+            return -code error "incompatible compiler selected"
+        }
+
         #
         # If we enable +lto in combination with a variant (e.g. +polly) that
         # selects MacPorts' clang compiler, CMake fails to locate the llvm-ar and llvm-ranlib
@@ -275,34 +315,32 @@ subport ${name}-fstar {
         #       -o ${filespath}/z3-fstar.profdata.tar.xz \
         #       -j <njobs> \
         #       <everest-src>
-        distfiles-append            ${subport}.profdata.tar.xz
         configure.optflags-append   -fprofile-instr-use=${workpath}/${subport}.profdata
+        depends_extract-append      bin:xz:xz
+        post-extract {
+            set tar [findBinary tar ${portutil::autoconf::tar_command}]
+            set xz [findBinary xz ${portutil::autoconf::xz_path}]
+            system "${xz} -cd ${filespath}/${subport}.profdata.tar.xz | ${tar} -C ${workpath} --no-same-owner -xf -"
+        }
     }
 }
 
-set pyversions {27 37 38}
+set pyversions {27 37 38 39 310}
 
 # Create a top-level Python binding metaport
 subport py-${name} {
     PortGroup   python 1.0
+    PortGroup   stub   1.0
 
+    supported_archs     noarch
     categories-append   python
 
     description         Python bindings for the Z3 theorem prover
     long_description    Python bindings for the Z3 SMT solver library from Microsoft Research.
 
-    supported_archs     noarch
     python.default_version [lindex ${pyversions} end]
     depends_lib         port:${name} \
                         port:py${python.version}-${name}
-
-    distfiles
-    patch       {}
-    configure   {}
-    build       {}
-    destroot    {
-        system "echo ${subport} is a stub port > ${destroot}${prefix}/share/doc/${subport}/README"
-    }
 }
 
 # Create Python subports for each supported Python version

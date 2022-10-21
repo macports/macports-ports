@@ -1,0 +1,922 @@
+From 7f47b12289d44de089feb7fcb80c9412b3138ec5 Mon Sep 17 00:00:00 2001
+From: "Kirill A. Korinsky" <kirill@korins.ky>
+Date: Tue, 30 Aug 2022 14:34:44 +0200
+Subject: [PATCH] [clang] Implement the using_if_exists attribute
+
+Backport from https://reviews.llvm.org/D90188
+---
+ clang/include/clang/AST/DeclCXX.h             |  22 ++
+ clang/include/clang/AST/RecursiveASTVisitor.h |   2 +
+ clang/include/clang/Basic/Attr.td             |   8 +
+ clang/include/clang/Basic/AttrDocs.td         |  25 ++
+ clang/include/clang/Basic/DeclNodes.td        |   1 +
+ .../clang/Basic/DiagnosticSemaKinds.td        |   6 +
+ clang/include/clang/Sema/Sema.h               |  13 +-
+ .../include/clang/Serialization/ASTBitCodes.h |   3 +
+ clang/lib/AST/DeclBase.cpp                    |   3 +
+ clang/lib/AST/DeclCXX.cpp                     |  19 ++
+ clang/lib/CodeGen/CGDecl.cpp                  |   1 +
+ clang/lib/Sema/SemaDecl.cpp                   |  23 +-
+ clang/lib/Sema/SemaDeclAttr.cpp               |   4 +
+ clang/lib/Sema/SemaDeclCXX.cpp                |  47 +++-
+ clang/lib/Sema/SemaExpr.cpp                   |  16 +-
+ .../lib/Sema/SemaTemplateInstantiateDecl.cpp  |  24 +-
+ clang/lib/Sema/TreeTransform.h                |   6 +-
+ clang/lib/Serialization/ASTCommon.cpp         |   1 +
+ clang/lib/Serialization/ASTReaderDecl.cpp     |   9 +
+ clang/lib/Serialization/ASTWriterDecl.cpp     |   7 +
+ clang/test/Parser/using-if-exists-attr.cpp    |  27 +++
+ clang/test/SemaCXX/attr-deprecated.cpp        |  12 +
+ clang/test/SemaCXX/using-if-exists.cpp        | 226 ++++++++++++++++++
+ clang/tools/libclang/CIndex.cpp               |   1 +
+ 24 files changed, 480 insertions(+), 26 deletions(-)
+ create mode 100644 clang/test/Parser/using-if-exists-attr.cpp
+ create mode 100644 clang/test/SemaCXX/using-if-exists.cpp
+
+diff --git a/clang/include/clang/AST/DeclCXX.h b/clang/include/clang/AST/DeclCXX.h
+index 2b8d7e879a0a..266c6c1d3f51 100644
+--- a/clang/include/clang/AST/DeclCXX.h
++++ b/clang/include/clang/AST/DeclCXX.h
+@@ -3788,6 +3788,28 @@ public:
+   static bool classofKind(Kind K) { return K == UnresolvedUsingTypename; }
+ };
+ 
++/// This node is generated when a using-declaration that was annotated with
++/// __attribute__((using_if_exists)) failed to resolve to a known declaration.
++/// In that case, Sema builds a UsingShadowDecl whose target is an instance of
++/// this declaration, adding it to the current scope. Referring to this
++/// declaration in any way is an error.
++class UnresolvedUsingIfExistsDecl final : public NamedDecl {
++  UnresolvedUsingIfExistsDecl(DeclContext *DC, SourceLocation Loc,
++                              DeclarationName Name);
++
++  void anchor() override;
++
++public:
++  static UnresolvedUsingIfExistsDecl *Create(ASTContext &Ctx, DeclContext *DC,
++                                             SourceLocation Loc,
++                                             DeclarationName Name);
++  static UnresolvedUsingIfExistsDecl *CreateDeserialized(ASTContext &Ctx,
++                                                         unsigned ID);
++
++  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
++  static bool classofKind(Kind K) { return K == Decl::UnresolvedUsingIfExists; }
++};
++
+ /// Represents a C++11 static_assert declaration.
+ class StaticAssertDecl : public Decl {
+   llvm::PointerIntPair<Expr *, 1, bool> AssertExprAndFailed;
+diff --git a/clang/include/clang/AST/RecursiveASTVisitor.h b/clang/include/clang/AST/RecursiveASTVisitor.h
+index 3dcfc9fee629..2c04eae7c03e 100644
+--- a/clang/include/clang/AST/RecursiveASTVisitor.h
++++ b/clang/include/clang/AST/RecursiveASTVisitor.h
+@@ -1816,6 +1816,8 @@ DEF_TRAVERSE_DECL(UnresolvedUsingTypenameDecl, {
+   // source.
+ })
+ 
++DEF_TRAVERSE_DECL(UnresolvedUsingIfExistsDecl, {})
++
+ DEF_TRAVERSE_DECL(EnumDecl, {
+   TRY_TO(TraverseDeclTemplateParameterLists(D));
+ 
+diff --git a/clang/include/clang/Basic/Attr.td b/clang/include/clang/Basic/Attr.td
+index 60eaee7839e2..1bc86e43b6e6 100644
+--- a/clang/include/clang/Basic/Attr.td
++++ b/clang/include/clang/Basic/Attr.td
+@@ -3421,6 +3421,14 @@ def NoBuiltin : Attr {
+   let Documentation = [NoBuiltinDocs];
+ }
+ 
++def UsingIfExists : InheritableAttr {
++  let Spellings = [Clang<"using_if_exists", 0>];
++  let Subjects = SubjectList<[Using,
++                              UnresolvedUsingTypename,
++                              UnresolvedUsingValue], ErrorDiag>;
++  let Documentation = [UsingIfExistsDocs];
++}
++
+ // FIXME: This attribute is not inheritable, it will not be propagated to
+ // redecls. [[clang::lifetimebound]] has the same problems. This should be
+ // fixed in TableGen (by probably adding a new inheritable flag).
+diff --git a/clang/include/clang/Basic/AttrDocs.td b/clang/include/clang/Basic/AttrDocs.td
+index 833127ed44eb..46929ce49599 100644
+--- a/clang/include/clang/Basic/AttrDocs.td
++++ b/clang/include/clang/Basic/AttrDocs.td
+@@ -4820,6 +4820,31 @@ once.
+   }];
+ }
+ 
++def UsingIfExistsDocs : Documentation {
++  let Category = DocCatDecl;
++  let Content = [{
++The ``using_if_exists`` attribute applies to a using-declaration. It allows
++programmers to import a declaration that potentially does not exist, instead
++deferring any errors to the point of use. For instance:
++
++.. code-block:: c++
++
++  namespace empty_namespace {};
++  __attribute__((using_if_exists))
++  using empty_namespace::does_not_exist; // no error!
++
++  does_not_exist x; // error: use of unresolved 'using_if_exists'
++
++The C++ spelling of the attribte (`[[clang::using_if_exists]]`) is also
++supported as a clang extension, since ISO C++ doesn't support attributes in this
++position. If the entity referred to by the using-declaration is found by name
++lookup, the attribute has no effect. This attribute is useful for libraries
++(primarily, libc++) that wish to redeclare a set of declarations in another
++namespace, when the availability of those declarations is difficult or
++impossible to detect at compile time with the preprocessor.
++  }];
++}
++
+ def HandleDocs : DocumentationCategory<"Handle Attributes"> {
+   let Content = [{
+ Handles are a way to identify resources like files, sockets, and processes.
+diff --git a/clang/include/clang/Basic/DeclNodes.td b/clang/include/clang/Basic/DeclNodes.td
+index 866988ee3f01..c7d3f513b7d5 100644
+--- a/clang/include/clang/Basic/DeclNodes.td
++++ b/clang/include/clang/Basic/DeclNodes.td
+@@ -74,6 +74,7 @@ def Named : DeclNode<Decl, "named declarations", 1>;
+   def UsingPack : DeclNode<Named>;
+   def UsingShadow : DeclNode<Named>;
+     def ConstructorUsingShadow : DeclNode<UsingShadow>;
++  def UnresolvedUsingIfExists : DeclNode<Named>;
+   def ObjCMethod : DeclNode<Named, "Objective-C methods">, DeclContext;
+   def ObjCContainer : DeclNode<Named, "Objective-C containers", 1>, DeclContext;
+     def ObjCCategory : DeclNode<ObjCContainer>;
+diff --git a/clang/include/clang/Basic/DiagnosticSemaKinds.td b/clang/include/clang/Basic/DiagnosticSemaKinds.td
+index 941f2cafc372..0581296ac802 100644
+--- a/clang/include/clang/Basic/DiagnosticSemaKinds.td
++++ b/clang/include/clang/Basic/DiagnosticSemaKinds.td
+@@ -548,6 +548,12 @@ def err_using_decl_conflict_reverse : Error<
+ def note_using_decl : Note<"%select{|previous }0using declaration">;
+ def err_using_decl_redeclaration_expansion : Error<
+   "using declaration pack expansion at block scope produces multiple values">;
++def err_use_of_empty_using_if_exists : Error<
++  "reference to unresolved using declaration">;
++def note_empty_using_if_exists_here : Note<
++  "using declaration annotated with 'using_if_exists' here">;
++def err_using_if_exists_on_ctor : Error<
++  "'using_if_exists' attribute cannot be applied to an inheriting constructor">;
+ 
+ def warn_access_decl_deprecated : Warning<
+   "access declarations are deprecated; use using declarations instead">,
+diff --git a/clang/include/clang/Sema/Sema.h b/clang/include/clang/Sema/Sema.h
+index 16a7084f6b08..89d7730d2420 100644
+--- a/clang/include/clang/Sema/Sema.h
++++ b/clang/include/clang/Sema/Sema.h
+@@ -5399,11 +5399,14 @@ public:
+                                const DeclarationNameInfo &NameInfo,
+                                SourceLocation NameLoc);
+ 
+-  NamedDecl *BuildUsingDeclaration(
+-      Scope *S, AccessSpecifier AS, SourceLocation UsingLoc,
+-      bool HasTypenameKeyword, SourceLocation TypenameLoc, CXXScopeSpec &SS,
+-      DeclarationNameInfo NameInfo, SourceLocation EllipsisLoc,
+-      const ParsedAttributesView &AttrList, bool IsInstantiation);
++  NamedDecl *BuildUsingDeclaration(Scope *S, AccessSpecifier AS,
++                                   SourceLocation UsingLoc,
++                                   bool HasTypenameKeyword,
++                                   SourceLocation TypenameLoc, CXXScopeSpec &SS,
++                                   DeclarationNameInfo NameInfo,
++                                   SourceLocation EllipsisLoc,
++                                   const ParsedAttributesView &AttrList,
++                                   bool IsInstantiation, bool IsUsingIfExists);
+   NamedDecl *BuildUsingPackDecl(NamedDecl *InstantiatedFrom,
+                                 ArrayRef<NamedDecl *> Expansions);
+ 
+diff --git a/clang/include/clang/Serialization/ASTBitCodes.h b/clang/include/clang/Serialization/ASTBitCodes.h
+index c6f9f1d1a08f..737023e7d1dc 100644
+--- a/clang/include/clang/Serialization/ASTBitCodes.h
++++ b/clang/include/clang/Serialization/ASTBitCodes.h
+@@ -1423,6 +1423,9 @@ public:
+       /// \brief A ConceptDecl record.
+       DECL_CONCEPT,
+ 
++      /// An UnresolvedUsingIfExistsDecl record.
++      DECL_UNRESOLVED_USING_IF_EXISTS,
++
+       /// \brief A StaticAssertDecl record.
+       DECL_STATIC_ASSERT,
+ 
+diff --git a/clang/lib/AST/DeclBase.cpp b/clang/lib/AST/DeclBase.cpp
+index f4314d0bd961..7e5ace6c111b 100644
+--- a/clang/lib/AST/DeclBase.cpp
++++ b/clang/lib/AST/DeclBase.cpp
+@@ -812,6 +812,9 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
+     case TypeAliasTemplate:
+       return IDNS_Ordinary | IDNS_Tag | IDNS_Type;
+ 
++    case UnresolvedUsingIfExists:
++      return IDNS_Type | IDNS_Ordinary;
++
+     case OMPDeclareReduction:
+       return IDNS_OMPReduction;
+ 
+diff --git a/clang/lib/AST/DeclCXX.cpp b/clang/lib/AST/DeclCXX.cpp
+index 6f1fd2f14ede..e7fa4849063f 100644
+--- a/clang/lib/AST/DeclCXX.cpp
++++ b/clang/lib/AST/DeclCXX.cpp
+@@ -3085,6 +3085,25 @@ UnresolvedUsingTypenameDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
+       SourceLocation(), nullptr, SourceLocation());
+ }
+ 
++UnresolvedUsingIfExistsDecl *
++UnresolvedUsingIfExistsDecl::Create(ASTContext &Ctx, DeclContext *DC,
++                                    SourceLocation Loc, DeclarationName Name) {
++  return new (Ctx, DC) UnresolvedUsingIfExistsDecl(DC, Loc, Name);
++}
++
++UnresolvedUsingIfExistsDecl *
++UnresolvedUsingIfExistsDecl::CreateDeserialized(ASTContext &Ctx, unsigned ID) {
++  return new (Ctx, ID)
++      UnresolvedUsingIfExistsDecl(nullptr, SourceLocation(), DeclarationName());
++}
++
++UnresolvedUsingIfExistsDecl::UnresolvedUsingIfExistsDecl(DeclContext *DC,
++                                                         SourceLocation Loc,
++                                                         DeclarationName Name)
++    : NamedDecl(Decl::UnresolvedUsingIfExists, DC, Loc, Name) {}
++
++void UnresolvedUsingIfExistsDecl::anchor() {}
++
+ void StaticAssertDecl::anchor() {}
+ 
+ StaticAssertDecl *StaticAssertDecl::Create(ASTContext &C, DeclContext *DC,
+diff --git a/clang/lib/CodeGen/CGDecl.cpp b/clang/lib/CodeGen/CGDecl.cpp
+index 1729c7ed3c31..d149756c3f48 100644
+--- a/clang/lib/CodeGen/CGDecl.cpp
++++ b/clang/lib/CodeGen/CGDecl.cpp
+@@ -99,6 +99,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
+   case Decl::ConstructorUsingShadow:
+   case Decl::ObjCTypeParam:
+   case Decl::Binding:
++  case Decl::UnresolvedUsingIfExists:
+     llvm_unreachable("Declaration should not be in declstmts!");
+   case Decl::Function:  // void X();
+   case Decl::Record:    // struct/union/class X;
+diff --git a/clang/lib/Sema/SemaDecl.cpp b/clang/lib/Sema/SemaDecl.cpp
+index 5b0417fa8859..1de95feb0f25 100644
+--- a/clang/lib/Sema/SemaDecl.cpp
++++ b/clang/lib/Sema/SemaDecl.cpp
+@@ -434,12 +434,14 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
+     // Look to see if we have a type anywhere in the list of results.
+     for (LookupResult::iterator Res = Result.begin(), ResEnd = Result.end();
+          Res != ResEnd; ++Res) {
+-      if (isa<TypeDecl>(*Res) || isa<ObjCInterfaceDecl>(*Res) ||
+-          (AllowDeducedTemplate && getAsTypeTemplateDecl(*Res))) {
++      NamedDecl *RealRes = (*Res)->getUnderlyingDecl();
++      if (isa<TypeDecl, ObjCInterfaceDecl, UnresolvedUsingIfExistsDecl>(
++              RealRes) ||
++          (AllowDeducedTemplate && getAsTypeTemplateDecl(RealRes))) {
+         if (!IIDecl ||
+-            (*Res)->getLocation().getRawEncoding() <
+-              IIDecl->getLocation().getRawEncoding())
+-          IIDecl = *Res;
++            // Make the selection of the recovery decl deterministic.
++            RealRes->getLocation() < IIDecl->getLocation())
++          IIDecl = RealRes;
+       }
+     }
+ 
+@@ -488,6 +490,10 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
+     (void)DiagnoseUseOfDecl(IDecl, NameLoc);
+     if (!HasTrailingDot)
+       T = Context.getObjCInterfaceType(IDecl);
++  } else if (auto *UD = dyn_cast<UnresolvedUsingIfExistsDecl>(IIDecl)) {
++    (void)DiagnoseUseOfDecl(UD, NameLoc);
++    // Recover with 'int'
++    T = Context.IntTy;
+   } else if (AllowDeducedTemplate) {
+     if (auto *TD = getAsTypeTemplateDecl(IIDecl))
+       T = Context.getDeducedTemplateSpecializationType(TemplateName(TD),
+@@ -504,7 +510,7 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
+   // constructor or destructor name (in such a case, the scope specifier
+   // will be attached to the enclosing Expr or Decl node).
+   if (SS && SS->isNotEmpty() && !IsCtorOrDtorName &&
+-      !isa<ObjCInterfaceDecl>(IIDecl)) {
++      !isa<ObjCInterfaceDecl, UnresolvedUsingIfExistsDecl>(IIDecl)) {
+     if (WantNontrivialTypeSourceInfo) {
+       // Construct a type with type-source information.
+       TypeLocBuilder Builder;
+@@ -1163,6 +1169,11 @@ Corrected:
+     return NameClassification::Concept(
+         TemplateName(cast<TemplateDecl>(FirstDecl)));
+ 
++  if (auto *EmptyD = dyn_cast<UnresolvedUsingIfExistsDecl>(FirstDecl)) {
++    (void)DiagnoseUseOfDecl(EmptyD, NameLoc);
++    return NameClassification::Error();
++  }
++
+   // We can have a type template here if we're classifying a template argument.
+   if (isa<TemplateDecl>(FirstDecl) && !isa<FunctionTemplateDecl>(FirstDecl) &&
+       !isa<VarTemplateDecl>(FirstDecl))
+diff --git a/clang/lib/Sema/SemaDeclAttr.cpp b/clang/lib/Sema/SemaDeclAttr.cpp
+index a9a2a19b4797..3cff1937e221 100644
+--- a/clang/lib/Sema/SemaDeclAttr.cpp
++++ b/clang/lib/Sema/SemaDeclAttr.cpp
+@@ -7450,6 +7450,10 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
+   case ParsedAttr::AT_UseHandle:
+     handleHandleAttr<UseHandleAttr>(S, D, AL);
+     break;
++
++  case ParsedAttr::AT_UsingIfExists:
++    handleSimpleAttribute<UsingIfExistsAttr>(S, D, AL);
++    break;
+   }
+ }
+ 
+diff --git a/clang/lib/Sema/SemaDeclCXX.cpp b/clang/lib/Sema/SemaDeclCXX.cpp
+index 22bf35dbd0cb..710fe3bce6ef 100644
+--- a/clang/lib/Sema/SemaDeclCXX.cpp
++++ b/clang/lib/Sema/SemaDeclCXX.cpp
+@@ -11495,10 +11495,11 @@ Decl *Sema::ActOnUsingDeclaration(Scope *S, AccessSpecifier AS,
+     }
+   }
+ 
+-  NamedDecl *UD =
+-      BuildUsingDeclaration(S, AS, UsingLoc, TypenameLoc.isValid(), TypenameLoc,
+-                            SS, TargetNameInfo, EllipsisLoc, AttrList,
+-                            /*IsInstantiation*/false);
++  NamedDecl *UD = BuildUsingDeclaration(
++      S, AS, UsingLoc, TypenameLoc.isValid(), TypenameLoc, SS, TargetNameInfo,
++      EllipsisLoc, AttrList,
++      /*IsInstantiation=*/false,
++      AttrList.hasAttribute(ParsedAttr::AT_UsingIfExists));
+   if (UD)
+     PushOnScopeChains(UD, S, /*AddToContext*/ false);
+ 
+@@ -11518,6 +11519,12 @@ IsEquivalentForUsingDecl(ASTContext &Context, NamedDecl *D1, NamedDecl *D2) {
+       return Context.hasSameType(TD1->getUnderlyingType(),
+                                  TD2->getUnderlyingType());
+ 
++  // Two using_if_exists using-declarations are equivalent if both are
++  // unresolved.
++  if (isa<UnresolvedUsingIfExistsDecl>(D1) &&
++      isa<UnresolvedUsingIfExistsDecl>(D2))
++    return true;
++
+   return false;
+ }
+ 
+@@ -11628,6 +11635,20 @@ bool Sema::CheckUsingShadowDecl(UsingDecl *Using, NamedDecl *Orig,
+   if (FoundEquivalentDecl)
+     return false;
+ 
++  // Always emit a diagnostic for a mismatch between an unresolved
++  // using_if_exists and a resolved using declaration in either direction.
++  if (isa<UnresolvedUsingIfExistsDecl>(Target) !=
++      (isa_and_nonnull<UnresolvedUsingIfExistsDecl>(NonTag))) {
++    if (!NonTag && !Tag)
++      return false;
++    Diag(Using->getLocation(), diag::err_using_decl_conflict);
++    Diag(Target->getLocation(), diag::note_using_decl_target);
++    Diag((NonTag ? NonTag : Tag)->getLocation(),
++         diag::note_using_decl_conflict);
++    Using->setInvalidDecl();
++    return true;
++  }
++
+   if (FunctionDecl *FD = Target->getAsFunction()) {
+     NamedDecl *OldDecl = nullptr;
+     switch (CheckOverload(nullptr, FD, Previous, OldDecl,
+@@ -11892,7 +11913,8 @@ NamedDecl *Sema::BuildUsingDeclaration(
+     Scope *S, AccessSpecifier AS, SourceLocation UsingLoc,
+     bool HasTypenameKeyword, SourceLocation TypenameLoc, CXXScopeSpec &SS,
+     DeclarationNameInfo NameInfo, SourceLocation EllipsisLoc,
+-    const ParsedAttributesView &AttrList, bool IsInstantiation) {
++    const ParsedAttributesView &AttrList, bool IsInstantiation,
++    bool IsUsingIfExists) {
+   assert(!SS.isInvalid() && "Invalid CXXScopeSpec.");
+   SourceLocation IdentLoc = NameInfo.getLoc();
+   assert(IdentLoc.isValid() && "Invalid TargetName location.");
+@@ -11961,6 +11983,13 @@ NamedDecl *Sema::BuildUsingDeclaration(
+                               IdentLoc))
+     return nullptr;
+ 
++  // 'using_if_exists' doesn't make sense on an inherited constructor.
++  if (IsUsingIfExists && UsingName.getName().getNameKind() ==
++                             DeclarationName::CXXConstructorName) {
++    Diag(UsingLoc, diag::err_using_if_exists_on_ctor);
++    return nullptr;
++  }
++
+   DeclContext *LookupContext = computeDeclContext(SS);
+   NamedDecl *D;
+   NestedNameSpecifierLoc QualifierLoc = SS.getWithLocInContext(Context);
+@@ -12015,6 +12044,11 @@ NamedDecl *Sema::BuildUsingDeclaration(
+ 
+   LookupQualifiedName(R, LookupContext);
+ 
++  if (R.empty() && IsUsingIfExists)
++    R.addDecl(UnresolvedUsingIfExistsDecl::Create(Context, CurContext, UsingLoc,
++                                                  UsingName.getName()),
++              AS_public);
++
+   // Try to correct typos if possible. If constructor name lookup finds no
+   // results, that means the named class has no explicit constructors, and we
+   // suppressed declaring implicit ones (probably because it's dependent or
+@@ -12089,7 +12123,8 @@ NamedDecl *Sema::BuildUsingDeclaration(
+ 
+   if (HasTypenameKeyword) {
+     // If we asked for a typename and got a non-type decl, error out.
+-    if (!R.getAsSingle<TypeDecl>()) {
++    if (!R.getAsSingle<TypeDecl>() &&
++        !R.getAsSingle<UnresolvedUsingIfExistsDecl>()) {
+       Diag(IdentLoc, diag::err_using_typename_non_type);
+       for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
+         Diag((*I)->getUnderlyingDecl()->getLocation(),
+diff --git a/clang/lib/Sema/SemaExpr.cpp b/clang/lib/Sema/SemaExpr.cpp
+index d301e6c732ab..807e5e33dd45 100644
+--- a/clang/lib/Sema/SemaExpr.cpp
++++ b/clang/lib/Sema/SemaExpr.cpp
+@@ -82,6 +82,9 @@ bool Sema::CanUseDecl(NamedDecl *D, bool TreatUnavailableAsInvalid) {
+       cast<Decl>(CurContext)->getAvailability() != AR_Unavailable)
+     return false;
+ 
++  if (isa<UnresolvedUsingIfExistsDecl>(D))
++    return false;
++
+   return true;
+ }
+ 
+@@ -348,6 +351,12 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
+     return true;
+   }
+ 
++  if (const auto *EmptyD = dyn_cast<UnresolvedUsingIfExistsDecl>(D)) {
++    Diag(Loc, diag::err_use_of_empty_using_if_exists);
++    Diag(EmptyD->getLocation(), diag::note_empty_using_if_exists_here);
++    return true;
++  }
++
+   DiagnoseAvailabilityOfDecl(D, Locs, UnknownObjCClass, ObjCPropertyAccess,
+                              AvoidPartialAvailabilityChecks, ClassReceiver);
+ 
+@@ -3123,8 +3132,7 @@ ExprResult Sema::BuildDeclarationNameExpr(
+   }
+ 
+   // Make sure that we're referring to a value.
+-  ValueDecl *VD = dyn_cast<ValueDecl>(D);
+-  if (!VD) {
++  if (!isa<ValueDecl, UnresolvedUsingIfExistsDecl>(D)) {
+     Diag(Loc, diag::err_ref_non_value)
+       << D << SS.getRange();
+     Diag(D->getLocation(), diag::note_declared_at);
+@@ -3135,9 +3143,11 @@ ExprResult Sema::BuildDeclarationNameExpr(
+   // this check when we're going to perform argument-dependent lookup
+   // on this function name, because this might not be the function
+   // that overload resolution actually selects.
+-  if (DiagnoseUseOfDecl(VD, Loc))
++  if (DiagnoseUseOfDecl(D, Loc))
+     return ExprError();
+ 
++  auto *VD = cast<ValueDecl>(D);
++
+   // Only create DeclRefExpr's for valid Decl's.
+   if (VD->isInvalidDecl() && !AcceptInvalidDecl)
+     return ExprError();
+diff --git a/clang/lib/Sema/SemaTemplateInstantiateDecl.cpp b/clang/lib/Sema/SemaTemplateInstantiateDecl.cpp
+index 7e6efe6105bf..248b8293eb41 100644
+--- a/clang/lib/Sema/SemaTemplateInstantiateDecl.cpp
++++ b/clang/lib/Sema/SemaTemplateInstantiateDecl.cpp
+@@ -3000,9 +3000,15 @@ Decl *TemplateDeclInstantiator::VisitUsingDecl(UsingDecl *D) {
+       if (auto *BaseShadow = CUSD->getNominatedBaseClassShadowDecl())
+         OldTarget = BaseShadow;
+ 
+-    NamedDecl *InstTarget =
+-        cast_or_null<NamedDecl>(SemaRef.FindInstantiatedDecl(
+-            Shadow->getLocation(), OldTarget, TemplateArgs));
++    NamedDecl *InstTarget = nullptr;
++    if (auto *EmptyD =
++            dyn_cast<UnresolvedUsingIfExistsDecl>(Shadow->getTargetDecl())) {
++      InstTarget = UnresolvedUsingIfExistsDecl::Create(
++          SemaRef.Context, Owner, EmptyD->getLocation(), EmptyD->getDeclName());
++    } else {
++      InstTarget = cast_or_null<NamedDecl>(SemaRef.FindInstantiatedDecl(
++          Shadow->getLocation(), OldTarget, TemplateArgs));
++    }
+     if (!InstTarget)
+       return nullptr;
+ 
+@@ -3125,13 +3131,16 @@ Decl *TemplateDeclInstantiator::instantiateUnresolvedUsingDecl(
+   SourceLocation EllipsisLoc =
+       InstantiatingSlice ? SourceLocation() : D->getEllipsisLoc();
+ 
++  bool IsUsingIfExists = D->template hasAttr<UsingIfExistsAttr>();
+   NamedDecl *UD = SemaRef.BuildUsingDeclaration(
+       /*Scope*/ nullptr, D->getAccess(), D->getUsingLoc(),
+       /*HasTypename*/ TD, TypenameLoc, SS, NameInfo, EllipsisLoc,
+       ParsedAttributesView(),
+-      /*IsInstantiation*/ true);
+-  if (UD)
++      /*IsInstantiation*/ true, IsUsingIfExists);
++  if (UD) {
++    SemaRef.InstantiateAttrs(TemplateArgs, D, UD);
+     SemaRef.Context.setInstantiatedFromUsingDecl(UD, D);
++  }
+ 
+   return UD;
+ }
+@@ -3146,6 +3155,11 @@ Decl *TemplateDeclInstantiator::VisitUnresolvedUsingValueDecl(
+   return instantiateUnresolvedUsingDecl(D);
+ }
+ 
++Decl *TemplateDeclInstantiator::VisitUnresolvedUsingIfExistsDecl(
++    UnresolvedUsingIfExistsDecl *D) {
++  llvm_unreachable("referring to unresolved decl out of UsingShadowDecl");
++}
++
+ Decl *TemplateDeclInstantiator::VisitUsingPackDecl(UsingPackDecl *D) {
+   SmallVector<NamedDecl*, 8> Expansions;
+   for (auto *UD : D->expansions()) {
+diff --git a/clang/lib/Sema/TreeTransform.h b/clang/lib/Sema/TreeTransform.h
+index ae0e9f1119b4..091be27e3d17 100644
+--- a/clang/lib/Sema/TreeTransform.h
++++ b/clang/lib/Sema/TreeTransform.h
+@@ -14052,7 +14052,11 @@ QualType TreeTransform<Derived>::RebuildUnresolvedUsingType(SourceLocation Loc,
+ 
+     // A valid resolved using typename decl points to exactly one type decl.
+     assert(++Using->shadow_begin() == Using->shadow_end());
+-    Ty = cast<TypeDecl>((*Using->shadow_begin())->getTargetDecl());
++
++    NamedDecl *Target = Using->shadow_begin()->getTargetDecl();
++    if (SemaRef.DiagnoseUseOfDecl(Target, Loc))
++      return QualType();
++    Ty = cast<TypeDecl>(Target);
+   } else {
+     assert(isa<UnresolvedUsingTypenameDecl>(D) &&
+            "UnresolvedUsingTypenameDecl transformed to non-using decl");
+diff --git a/clang/lib/Serialization/ASTCommon.cpp b/clang/lib/Serialization/ASTCommon.cpp
+index bf583b02f96b..165d96fd4d85 100644
+--- a/clang/lib/Serialization/ASTCommon.cpp
++++ b/clang/lib/Serialization/ASTCommon.cpp
+@@ -416,6 +416,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
+   case Decl::Concept:
+   case Decl::LifetimeExtendedTemporary:
+   case Decl::RequiresExprBody:
++  case Decl::UnresolvedUsingIfExists:
+     return false;
+ 
+   // These indirectly derive from Redeclarable<T> but are not actually
+diff --git a/clang/lib/Serialization/ASTReaderDecl.cpp b/clang/lib/Serialization/ASTReaderDecl.cpp
+index c0bf240464f7..c2390403900c 100644
+--- a/clang/lib/Serialization/ASTReaderDecl.cpp
++++ b/clang/lib/Serialization/ASTReaderDecl.cpp
+@@ -325,6 +325,7 @@ namespace clang {
+     void VisitTypedefDecl(TypedefDecl *TD);
+     void VisitTypeAliasDecl(TypeAliasDecl *TD);
+     void VisitUnresolvedUsingTypenameDecl(UnresolvedUsingTypenameDecl *D);
++    void VisitUnresolvedUsingIfExistsDecl(UnresolvedUsingIfExistsDecl *D);
+     RedeclarableResult VisitTagDecl(TagDecl *TD);
+     void VisitEnumDecl(EnumDecl *ED);
+     RedeclarableResult VisitRecordDeclImpl(RecordDecl *RD);
+@@ -1689,6 +1690,11 @@ void ASTDeclReader::VisitUnresolvedUsingTypenameDecl(
+   mergeMergeable(D);
+ }
+ 
++void ASTDeclReader::VisitUnresolvedUsingIfExistsDecl(
++    UnresolvedUsingIfExistsDecl *D) {
++  VisitNamedDecl(D);
++}
++
+ void ASTDeclReader::ReadCXXDefinitionData(
+     struct CXXRecordDecl::DefinitionData &Data, const CXXRecordDecl *D) {
+   #define FIELD(Name, Width, Merge) \
+@@ -3841,6 +3847,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
+   case DECL_UNRESOLVED_USING_TYPENAME:
+     D = UnresolvedUsingTypenameDecl::CreateDeserialized(Context, ID);
+     break;
++  case DECL_UNRESOLVED_USING_IF_EXISTS:
++    D = UnresolvedUsingIfExistsDecl::CreateDeserialized(Context, ID);
++    break;
+   case DECL_CXX_RECORD:
+     D = CXXRecordDecl::CreateDeserialized(Context, ID);
+     break;
+diff --git a/clang/lib/Serialization/ASTWriterDecl.cpp b/clang/lib/Serialization/ASTWriterDecl.cpp
+index eecdf89c791a..7b65fdd7eb8d 100644
+--- a/clang/lib/Serialization/ASTWriterDecl.cpp
++++ b/clang/lib/Serialization/ASTWriterDecl.cpp
+@@ -69,6 +69,7 @@ namespace clang {
+     void VisitTypedefDecl(TypedefDecl *D);
+     void VisitTypeAliasDecl(TypeAliasDecl *D);
+     void VisitUnresolvedUsingTypenameDecl(UnresolvedUsingTypenameDecl *D);
++    void VisitUnresolvedUsingIfExistsDecl(UnresolvedUsingIfExistsDecl *D);
+     void VisitTagDecl(TagDecl *D);
+     void VisitEnumDecl(EnumDecl *D);
+     void VisitRecordDecl(RecordDecl *D);
+@@ -1337,6 +1338,12 @@ void ASTDeclWriter::VisitUnresolvedUsingTypenameDecl(
+   Code = serialization::DECL_UNRESOLVED_USING_TYPENAME;
+ }
+ 
++void ASTDeclWriter::VisitUnresolvedUsingIfExistsDecl(
++    UnresolvedUsingIfExistsDecl *D) {
++  VisitNamedDecl(D);
++  Code = serialization::DECL_UNRESOLVED_USING_IF_EXISTS;
++}
++
+ void ASTDeclWriter::VisitCXXRecordDecl(CXXRecordDecl *D) {
+   VisitRecordDecl(D);
+ 
+diff --git a/clang/test/Parser/using-if-exists-attr.cpp b/clang/test/Parser/using-if-exists-attr.cpp
+new file mode 100644
+index 000000000000..ba34b9beb6bc
+--- /dev/null
++++ b/clang/test/Parser/using-if-exists-attr.cpp
+@@ -0,0 +1,27 @@
++// RUN: %clang_cc1 -std=c++20 -fsyntax-only %s -pedantic -verify
++
++#define UIE __attribute__((using_if_exists))
++
++namespace NS {
++typedef int x;
++}
++
++using NS::x __attribute__((using_if_exists));
++
++using NS::x [[clang::using_if_exists]]; // expected-warning{{ISO C++ does not allow an attribute list to appear here}}
++
++[[clang::using_if_exists]] // expected-warning{{ISO C++ does not allow an attribute list to appear here}}
++using NS::not_there,
++    NS::not_there2;
++
++using NS::not_there3,                          // expected-error {{no member named 'not_there3' in namespace 'NS'}}
++    NS::not_there4 [[clang::using_if_exists]]; // expected-warning{{C++ does not allow an attribute list to appear here}}
++
++[[clang::using_if_exists]] using NS::not_there5 [[clang::using_if_exists]]; // expected-warning 2 {{ISO C++ does not allow}}
++
++struct Base {};
++struct Derived : Base {
++  [[clang::using_if_exists]] using Base::x;          // expected-warning {{ISO C++ does not allow an attribute list to appear here}}
++  using Base::y [[clang::using_if_exists]];          // expected-warning {{ISO C++ does not allow an attribute list to appear here}}
++  [[clang::using_if_exists]] using Base::z, Base::q; // expected-warning {{C++ does not allow an attribute list to appear here}}
++};
+diff --git a/clang/test/SemaCXX/attr-deprecated.cpp b/clang/test/SemaCXX/attr-deprecated.cpp
+index 5ba55f0c23b5..5c427ad8fef1 100644
+--- a/clang/test/SemaCXX/attr-deprecated.cpp
++++ b/clang/test/SemaCXX/attr-deprecated.cpp
+@@ -256,3 +256,15 @@ typedef struct TDS {
+ } TDS __attribute__((deprecated)); // expected-note {{'TDS' has been explicitly marked deprecated here}}
+ TDS tds; // expected-warning {{'TDS' is deprecated}}
+ struct TDS tds2; // no warning, attribute only applies to the typedef.
++
++namespace test8 {
++struct A {
++  // expected-note@+1 {{'B' has been explicitly marked deprecated here}}
++  struct __attribute__((deprecated)) B {};
++};
++template <typename T> struct D : T {
++  using typename T::B;
++  B b; // expected-warning {{'B' is deprecated}}
++};
++D<A> da; // expected-note {{in instantiation of template class}}
++} // namespace test8
+diff --git a/clang/test/SemaCXX/using-if-exists.cpp b/clang/test/SemaCXX/using-if-exists.cpp
+new file mode 100644
+index 000000000000..36fbbb171fb9
+--- /dev/null
++++ b/clang/test/SemaCXX/using-if-exists.cpp
+@@ -0,0 +1,226 @@
++// RUN: %clang_cc1 -std=c++20 -fsyntax-only %s -verify
++
++#define UIE __attribute__((using_if_exists))
++
++namespace test_basic {
++namespace NS {}
++
++using NS::x UIE; // expected-note{{using declaration annotated with 'using_if_exists' here}}
++x usex();        // expected-error{{reference to unresolved using declaration}}
++
++using NotNS::x UIE; // expected-error{{use of undeclared identifier 'NotNS'}}
++
++using NS::NotNS::x UIE; // expected-error{{no member named 'NotNS' in namespace 'test_basic::NS'}}
++} // namespace test_basic
++
++namespace test_redecl {
++namespace NS {}
++
++using NS::x UIE;
++using NS::x UIE;
++
++namespace NS1 {}
++namespace NS2 {}
++namespace NS3 {
++int A();     // expected-note{{target of using declaration}}
++struct B {}; // expected-note{{target of using declaration}}
++int C();     // expected-note{{conflicting declaration}}
++struct D {}; // expected-note{{conflicting declaration}}
++} // namespace NS3
++
++using NS1::A UIE;
++using NS2::A UIE; // expected-note{{using declaration annotated with 'using_if_exists' here}} expected-note{{conflicting declaration}}
++using NS3::A UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}}
++int i = A();      // expected-error{{reference to unresolved using declaration}}
++
++using NS1::B UIE;
++using NS2::B UIE; // expected-note{{conflicting declaration}} expected-note{{using declaration annotated with 'using_if_exists' here}}
++using NS3::B UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}}
++B myB;            // expected-error{{reference to unresolved using declaration}}
++
++using NS3::C UIE;
++using NS2::C UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}} expected-note{{target of using declaration}}
++int j = C();
++
++using NS3::D UIE;
++using NS2::D UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}} expected-note{{target of using declaration}}
++D myD;
++} // namespace test_redecl
++
++namespace test_dependent {
++template <class B>
++struct S : B {
++  using B::mf UIE;          // expected-note 3 {{using declaration annotated with 'using_if_exists' here}}
++  using typename B::mt UIE; // expected-note{{using declaration annotated with 'using_if_exists' here}}
++};
++
++struct BaseEmpty {
++};
++struct BaseNonEmpty {
++  void mf();
++  typedef int mt;
++};
++
++template <class Base>
++struct UseCtor : Base {
++  using Base::Base UIE; // expected-error{{'using_if_exists' attribute cannot be applied to an inheriting constructor}}
++};
++struct BaseCtor {};
++
++void f() {
++  S<BaseEmpty> empty;
++  S<BaseNonEmpty> nonempty;
++  empty.mf(); // expected-error {{reference to unresolved using declaration}}
++  nonempty.mf();
++  (&empty)->mf(); // expected-error {{reference to unresolved using declaration}}
++  (&nonempty)->mf();
++
++  S<BaseEmpty>::mt y; // expected-error {{reference to unresolved using declaration}}
++  S<BaseNonEmpty>::mt z;
++
++  S<BaseEmpty>::mf(); // expected-error {{reference to unresolved using declaration}}
++
++  UseCtor<BaseCtor> usector;
++}
++
++template <class B>
++struct Implicit : B {
++  using B::mf UIE;          // expected-note {{using declaration annotated with 'using_if_exists' here}}
++  using typename B::mt UIE; // expected-note 2 {{using declaration annotated with 'using_if_exists' here}}
++
++  void use() {
++    mf(); // expected-error {{reference to unresolved using declaration}}
++    mt x; // expected-error {{reference to unresolved using declaration}}
++  }
++
++  mt alsoUse(); // expected-error {{reference to unresolved using declaration}}
++};
++
++void testImplicit() {
++  Implicit<BaseNonEmpty> nonempty;
++  Implicit<BaseEmpty> empty; // expected-note {{in instantiation}}
++  nonempty.use();
++  empty.use(); // expected-note {{in instantiation}}
++}
++
++template <class>
++struct NonDep : BaseEmpty {
++  using BaseEmpty::x UIE; // expected-note{{using declaration annotated with 'using_if_exists' here}}
++  x y();                  // expected-error{{reference to unresolved using declaration}}
++};
++} // namespace test_dependent
++
++namespace test_using_pack {
++template <class... Ts>
++struct S : Ts... {
++  using typename Ts::x... UIE; // expected-error 2 {{target of using declaration conflicts with declaration already in scope}} expected-note{{conflicting declaration}} expected-note{{target of using declaration}}
++};
++
++struct E1 {};
++struct E2 {};
++S<E1, E2> a;
++
++struct F1 {
++  typedef int x; // expected-note 2 {{conflicting declaration}}
++};
++struct F2 {
++  typedef int x; // expected-note 2 {{target of using declaration}}
++};
++S<F1, F2> b;
++
++S<E1, F2> c; // expected-note{{in instantiation of template class}}
++S<F1, E2> d; // expected-note{{in instantiation of template class}}
++
++template <class... Ts>
++struct S2 : Ts... {
++  using typename Ts::x... UIE; // expected-error 2 {{target of using declaration conflicts with declaration already in scope}} expected-note 3 {{using declaration annotated with 'using_if_exists' here}} expected-note{{conflicting declaration}} expected-note{{target of using declaration}}
++
++  x mem(); // expected-error 3 {{reference to unresolved using declaration}}
++};
++
++S2<E1, E2> e; // expected-note{{in instantiation of template class}}
++S2<F1, F2> f;
++S2<E1, F2> g; // expected-note{{in instantiation of template class}}
++S2<F1, E2> h; // expected-note{{in instantiation of template class}}
++
++template <class... Ts>
++struct S3 : protected Ts... {
++  using Ts::m... UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}} expected-note{{target of using declaration}}
++};
++struct B1 {
++  enum { m }; // expected-note{{conflicting declaration}}
++};
++struct B2 {};
++
++S3<B1, B2> i; // expected-note{{in instantiation of template}}
++S<B2, B1> j;
++
++} // namespace test_using_pack
++
++namespace test_nested {
++namespace NS {}
++
++using NS::x UIE; // expected-note {{using declaration annotated with 'using_if_exists' here}}
++
++namespace NS2 {
++using ::test_nested::x UIE;
++}
++
++NS2::x y; // expected-error {{reference to unresolved using declaration}}
++} // namespace test_nested
++
++namespace test_scope {
++int x; // expected-note{{conflicting declaration}}
++void f() {
++  int x; // expected-note{{conflicting declaration}}
++  {
++    using ::x UIE; // expected-note {{using declaration annotated with 'using_if_exists' here}}
++    (void)x;       // expected-error {{reference to unresolved using declaration}}
++  }
++
++  {
++    using test_scope::x;
++    using ::x UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}} expected-note{{target of using declaration}}
++    (void)x;
++  }
++
++  (void)x;
++
++  using ::x UIE; // expected-error{{target of using declaration conflicts with declaration already in scope}} expected-note{{target of using declaration}}
++  (void)x;
++}
++} // namespace test_scope
++
++namespace test_appertains_to {
++namespace NS {
++typedef int x;
++}
++
++// FIXME: This diagnostics is wrong.
++using alias UIE = NS::x; // expected-error {{'using_if_exists' attribute only applies to named declarations, types, and value declarations}}
++
++template <class>
++using template_alias UIE = NS::x; // expected-error {{'using_if_exists' attribute only applies to named declarations, types, and value declarations}}
++
++void f() UIE; // expected-error {{'using_if_exists' attribute only applies to named declarations, types, and value declarations}}
++
++using namespace NS UIE; // expected-error {{'using_if_exists' attribute only applies to named declarations, types, and value declarations}}
++} // namespace test_appertains_to
++
++typedef int *fake_FILE;
++int fake_printf();
++
++namespace std {
++using ::fake_FILE UIE;
++using ::fake_printf UIE;
++using ::fake_fopen UIE;  // expected-note {{using declaration annotated with 'using_if_exists' here}}
++using ::fake_size_t UIE; // expected-note {{using declaration annotated with 'using_if_exists' here}}
++} // namespace std
++
++int main() {
++  std::fake_FILE file;
++  file = std::fake_fopen(); // expected-error {{reference to unresolved using declaration}} expected-error{{incompatible integer to pointer}}
++  std::fake_size_t size;    // expected-error {{reference to unresolved using declaration}}
++  size = fake_printf();
++  size = std::fake_printf();
++}
+diff --git a/clang/tools/libclang/CIndex.cpp b/clang/tools/libclang/CIndex.cpp
+index 93f9797a965e..e533703e5158 100644
+--- a/clang/tools/libclang/CIndex.cpp
++++ b/clang/tools/libclang/CIndex.cpp
+@@ -6406,6 +6406,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
+   case Decl::Concept:
+   case Decl::LifetimeExtendedTemporary:
+   case Decl::RequiresExprBody:
++  case Decl::UnresolvedUsingIfExists:
+     return C;
+ 
+   // Declaration kinds that don't make any sense here, but are
+-- 
+2.37.2
+

@@ -118,14 +118,14 @@ proc universal_setup {args} {
         } elseif {${os.arch} eq "i386"} {
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
+            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             }
         } else {
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 0} {
+            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             }
         }
@@ -290,7 +290,7 @@ variant universal {
                 # check if building for a word length we can't run
                 set bits_differ 0
                 if {${arch} in [list ppc64 x86_64] &&
-                    (${os.major} < 9 || [sysctl hw.cpu64bit_capable] == 0)} {
+                    (${os.major} < 9 || (![catch {sysctl hw.cpu64bit_capable} result] && $result == 0))} {
                     set bits_differ 1
                 }
 
@@ -598,6 +598,11 @@ variant universal {
             reinplace -q -E {s:-arch +[0-9a-zA-Z_]+::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
             reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
+
+            # also strip out host information and stray space runs
+            reinplace -q -E {s:--host=[^ ]+::g}     ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:host_alias=[^ ]+::g} ${tempfile1} ${tempfile2}
+            reinplace -q -E {s:  +: :g}             ${tempfile1} ${tempfile2}
 
             if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
                 # modified files are identical
