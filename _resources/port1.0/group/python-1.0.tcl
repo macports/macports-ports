@@ -121,6 +121,7 @@ proc python_set_versions {option action args} {
 
             # set up py-foo as a stub port
             supported_archs noarch
+            platforms       any
             global python.version
             unset python.version
             patch {}
@@ -303,7 +304,7 @@ default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
-default python.pep517   no
+default python.pep517   {[expr {[info exists python.version] && ${python.version} >= 311}]}
 default python.pep517_backend   setuptools
 
 default python.test_framework   pytest
