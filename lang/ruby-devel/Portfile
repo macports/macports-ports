@@ -1,0 +1,181 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           select 1.0
+PortGroup           openssl 1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           conflicts_build 1.0
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
+
+# MAP_ANONYMOUS
+legacysupport.newest_darwin_requires_legacy 14
+
+github.setup        ruby ruby 8dfe3bdf48ff73052de1262e4644c08742abd8e6
+
+set ruby_ver        3.2
+set ruby_patch      0
+set ruby_ver_nodot  [string map {. {}} ${ruby_ver}]
+name                ruby-devel
+version             2022.10.23
+revision            0
+
+categories          lang ruby
+maintainers         {@barracuda156 gmail.com:vital.had} {kimuraw @kimuraw} openmaintainer
+
+description         Powerful and clean object-oriented scripting language
+long_description    Ruby is the interpreted scripting language \
+                    for quick and easy object-oriented programming. \
+                    It has many features to process text files \
+                    and to do system management tasks (as in Perl). \
+                    It is simple, straight-forward, extensible and portable.
+
+homepage            https://www.ruby-lang.org/
+license             {Ruby BSD}
+
+checksums           rmd160  c20c4ffcea6fd5e53a8d96a14c5e0971918ac889 \
+                    sha256  d44f9c5c6ff5a36dd65621c6533f3b0038f83627b70097af72afb067e0efa531 \
+                    size    15463281
+
+universal_variant   no
+
+# ruby/openssl does not support openssl-3
+openssl.branch      1.1
+
+# We need baseruby to build from upstream/master.
+# Minimum required version is 2.7. However ruby27 is broken on PPC: https://trac.macports.org/ticket/64906
+# Since this is a devel port, let it depend on recent a Ruby version.
+# Darwin PPC support was re-introduced from 3.1.
+set baseruby_ver    3.1
+set baseruby_ver_nodot \
+                    [string map {. {}} ${baseruby_ver}]
+
+use_autoreconf      yes
+autoreconf.cmd      ./autogen.sh
+
+depends_lib-append  port:gdbm \
+                    port:libffi \
+                    port:libyaml \
+                    port:readline \
+                    port:zlib
+
+depends_build-append \
+                    port:autoconf \
+                    port:automake \
+                    port:bison \
+                    port:cctools \
+                    port:gperf \
+                    port:libtool \
+                    port:ruby${baseruby_ver_nodot}
+
+depends_run-append  port:ruby_select
+
+depends_skip_archcheck pkgconfig
+
+select.group        ruby
+select.file         ${filespath}/ruby${ruby_ver_nodot}
+
+patch.pre_args      -p1
+patchfiles-append   0001-Use-numerical-macOS-versions.patch
+
+post-patch {
+    # rewrite "gem" to "gem${ruby_ver}"
+    # def gem_command
+    #  ENV["GEM_COMMAND"]&.shellsplit || ["gem"]
+    # end
+    reinplace -E "s/(shellsplit .. .)(\"gem\")/\\1\"gem${ruby_ver}\"/g" ${worksrcpath}/lib/bundler/gem_helper.rb
+}
+
+compiler.blacklist-append {clang < 901}
+
+compiler.thread_local_storage yes
+
+if { [string match macports-clang-* ${configure.compiler}] } {
+    # clang-mp-14 => dsymutil-mp-14; fix POSTLINK
+    configure.env-append dsymutil=[string map {clang dsymutil} ${configure.cc}]
+}
+
+configure.args-append \
+                    --enable-shared \
+                    --enable-install-static-library \
+                    --disable-install-doc \
+                    --mandir="${prefix}/share/man" \
+                    --enable-pthread \
+                    --without-gmp \
+                    --with-opt-dir="${prefix}" \
+                    --program-suffix=${ruby_ver} \
+                    --with-rubyhdrdir=${prefix}/include/ruby-${ruby_ver}.${ruby_patch} \
+                    --with-rubylibprefix="${prefix}/lib/ruby${ruby_ver}" \
+                    --with-openssl-dir=[openssl::install_area] \
+                    --with-baseruby=${prefix}/bin/ruby${baseruby_ver}
+
+# prefer Apple cctools to GNU binutils, build with binutils may fail.
+configure.args-append   AR=${prefix}/bin/ar RANLIB=${prefix}/bin/ranlib
+
+# Add the architecture flag as required
+if {[info exists build_arch] && ${build_arch} != ""} {
+    configure.args-append "--with-arch=${build_arch}"
+}
+
+platform darwin {
+    if {${os.major} < 11} {
+        depends_build-append    port:gmake
+        build.cmd               ${prefix}/bin/gmake
+        configure.args-append   --disable-dtrace
+        configure.cflags-append -std=c99
+    }
+
+    if {${os.major} < 9} {
+        known_fail   yes
+        pre-fetch {
+            ui_error "${name} is not supported on Darwin ${os.major}"
+            return -code error "incompatible macOS version"
+        }
+    }
+}
+
+# https://github.com/ruby/ruby/pull/5975#issuecomment-1279751636
+conflicts_build-append libunwind-headers
+
+post-destroot {
+    foreach type {site vendor} {
+        set libdir ${destroot}${prefix}/lib/ruby${ruby_ver}/${type}_ruby/${version}
+        xinstall -m 0755 -d ${libdir}
+        foreach subdir [exec find ${libdir} -type d -empty] {
+            destroot.keepdirs-append ${subdir}
+        }
+    }
+
+    # install destination of commands from port:rb32*
+    xinstall -m 0755 -d ${destroot}${prefix}/libexec/ruby${ruby_ver}
+    destroot.keepdirs-append ${destroot}${prefix}/libexec/ruby${ruby_ver}
+}
+
+variant doc description "Install rdoc indexes and C API documents" {
+        configure.args-delete   --disable-install-doc
+}
+
+variant gmp description "use gmp" {
+        configure.args-delete   --without-gmp
+        depends_lib-append      port:gmp
+}
+
+variant jemalloc description "use jemalloc" {
+        configure.args-delete   --without-jemalloc
+        configure.args-append   --with-jemalloc
+        depends_lib-append      port:jemalloc
+}
+
+variant relative description "Enable relative loading of libraries to allow for relocation of binaries" {
+        #enable relative loading
+        configure.args-append  --enable-load-relative
+}
+
+notes-append "
+To make this the default Ruby (i.e., the version run \
+by the 'ruby', 'gem' or 'bundle' commands), run:
+    sudo port select --set ruby $name
+"
+
+test.run        yes
+test.target     check
