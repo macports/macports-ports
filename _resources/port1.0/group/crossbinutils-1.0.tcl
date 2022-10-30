@@ -139,6 +139,9 @@ proc crossbinutils.setup {target version} {
             ${worksrcpath}/libiberty/Makefile.in
     }
 
+    depends_build \
+        bin:makeinfo:texinfo
+
     depends_lib \
         port:gettext \
         port:zlib
