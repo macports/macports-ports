@@ -130,7 +130,7 @@ pre-configure {
             "'try; pkg build -verbose -nodeps ${workpath}/tmp-build ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
 
         # fortran arch flag is not set automatically
-        if {${configure.build_arch} eq "x86_64" || ${configure.build_arch} eq "ppc64"} {
+        if {${configure.build_arch} in [list arm64 ppc64 x86_64]} {
             configure.fflags-append -m64
         } else {
             configure.fflags-append -m32
