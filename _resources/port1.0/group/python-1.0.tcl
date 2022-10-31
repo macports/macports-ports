@@ -20,7 +20,7 @@
 #   "flit", "hatch", or "poetry"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
-#   "nose", or "unittest"
+#   "nose", "unittest", or <empty string>
 #
 # Note: setting these options requires name to be set beforehand
 
