@@ -47,7 +47,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.inode.at/modules/by-module/
     http://cpan.inspire.net.nz/modules/by-module/
     http://cpan.ip-connect.vn.ua/modules/by-module/
-    http://cpan.llarian.net/modules/by-module/
     http://cpan.lnx.sk/modules/by-module/
     http://cpan.mines-albi.fr/modules/by-module/
     https://cpan.mirror.ac.za/modules/by-module/
