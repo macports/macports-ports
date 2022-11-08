@@ -19,8 +19,6 @@
 #
 #   xcode_workaround.os_versions: major Darwin versions to attempt to apply workarounds
 
-PortGroup cltversion 1.0
-
 namespace eval xcode_workaround {
 }
 
@@ -37,8 +35,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
     global \
         os.major \
         xcodeversion \
-        cltversion \
-        developerversion \
+        xcodecltversion \
         xcode_workaround.type \
         xcode_workaround.fixed_xcode_version \
         xcode_workaround.os_versions \
@@ -65,7 +62,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
     if { ${attempt_fix} } {
 
         # Check if Xcode is newer than defined fixed version
-        # N.B. vercmp should properly handle none or "" for $xcodeversion or $cltversion
+        # N.B. vercmp should properly handle none or "" for $xcodeversion or $xcodecltversion
         set xcode_is_ok [vercmp $xcodeversion >= ${xcode_workaround.fixed_xcode_version}]
 
         # Check flag from cltversion PG to see if Xcode or CLT should be used
@@ -73,7 +70,7 @@ proc xcode_workaround::xcode_workaround.appy_fix {} {
             set attempt_fix [expr {!${xcode_is_ok}}]
         } else {
             # Check if CLT version is fixed or not
-            set clt_is_ok [vercmp $cltversion >= ${xcode_workaround.fixed_xcode_version}]
+            set clt_is_ok [vercmp $xcodecltversion >= ${xcode_workaround.fixed_xcode_version}]
             # If broken, but Xcode OK, use that instead
             if {${xcode_is_ok} && !${clt_is_ok}} {
                 # MacPorts defaults to CLTs, but Xcode can easily be ahead
