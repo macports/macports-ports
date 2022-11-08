@@ -275,16 +275,16 @@ proc perl5_convert_version {vers} {
         set start 0
     }
     set index [string first . $vers]
-    set other_dot [string first . [string range $vers [expr {$index + 1}] end]]
+    set other_dot [string first . [string range $vers ${index}+1 end]]
     if {$index == -1 || $other_dot != -1} {
         return [string range $vers $start end]
     }
-    set ret [string range $vers $start [expr {$index - 1}]]
+    set ret [string range $vers $start ${index}-1]
     incr index
     set fractional [string range $vers $index end]
     set index 0
     while {$index < [string length $fractional] || $index < 6} {
-        set sub [string range $fractional $index [expr {$index + 2}]]
+        set sub [string range $fractional $index ${index}+2]
         if {[string length $sub] < 3} {
             append sub [string repeat "0" [expr {3 - [string length $sub]}]]
         }
