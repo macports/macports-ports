@@ -18,7 +18,7 @@ default minimum_developerversions {}
 
 platform macosx {
     pre-extract {
-        foreach {darwin_major minimum_developerversion} [join ${minimum_developerversions}] {
+        foreach {darwin_major minimum_developerversion} [concat {*}${minimum_developerversions}] {
             if {${darwin_major} == ${os.major}} {
                 if {![info exists developerversion] || $developerversion eq "none" || $developerversion eq ""} {
                     ui_error "Couldn't determine your Developer Tools version."
@@ -27,7 +27,7 @@ platform macosx {
                     ui_error ""
                     return -code error "unable to find Developer Tools"
                 }
-                if {[vercmp ${developerversion} ${minimum_developerversion}] < 0} {
+                if {[vercmp ${developerversion} < ${minimum_developerversion}]} {
                     ui_error "On macOS ${macosx_version}, ${subport} @${version} requires Developer Tools ${minimum_developerversion} or later, but you have Developer Tools ${developerversion}."
                     return -code error "incompatible Developer Tools"
                 }

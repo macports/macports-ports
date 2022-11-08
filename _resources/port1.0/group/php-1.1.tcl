@@ -377,7 +377,7 @@ proc php.add_port_code {} {
     depends_lib-append      port:${php}
 
     platform darwin {
-        if {[vercmp ${php.branch} 7.0] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
+        if {[vercmp ${php.branch} < 7.0] && [vercmp ${xcodeversion} >= 12.0]} {
             # Implicit function declarations. Need to backport upstream fixes from php73+.
             # https://bugs.php.net/80176
             # https://trac.macports.org/ticket/60988

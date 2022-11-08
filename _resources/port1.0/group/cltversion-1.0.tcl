@@ -38,7 +38,7 @@ proc cltversion::get_default_cltversion {} {
     # There are reports of pkgutil returning (null) for version.
     # It is unclear why this is or how common it is.
     # Ensure $result is a valid version number.
-    if {[vercmp ${result} 0] >= 0} {
+    if {[vercmp ${result} >= 0]} {
         ui_debug "cltversion: Found Command Line Tools Version ${result}"
     } else {
         ui_debug "cltversion: Unable to Find Command Line Tools using pkgutil"

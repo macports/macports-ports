@@ -48,10 +48,10 @@ global qt_qmake_spec_32
 global qt_qmake_spec_64
 compiler.blacklist-append *gcc*
 
-if {[vercmp ${qt5.version} 5.15]>=0} {
+if {[vercmp ${qt5.version} >= 5.15]} {
     # only qt5 5.15.x has so far been built as arm64 on MacPorts
     default supported_archs "x86_64 arm64"
-} elseif {[vercmp ${qt5.version} 5.10]>=0} {
+} elseif {[vercmp ${qt5.version} >= 5.10]} {
     # see https://bugreports.qt.io/browse/QTBUG-58401
     default supported_archs x86_64
 } else {
@@ -60,7 +60,7 @@ if {[vercmp ${qt5.version} 5.15]>=0} {
     default supported_archs "i386 x86_64"
 }
 
-if {[vercmp ${qt5.version} 5.9]>=0} {
+if {[vercmp ${qt5.version} >= 5.9]} {
     # in version 5.9, QT changed how it handles multiple architectures
     # see http://web.archive.org/web/20170621174843/http://doc.qt.io/qt-5/osx.html
 
@@ -235,10 +235,10 @@ namespace eval qt5pg {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
-                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                    if {[vercmp ${qt5.version} >= ${version_intro}]} {
                         depends_lib-append path:${path}:${qt5.name}-${component}
                     } else {
-                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                        if {[vercmp ${qt5.version} >= ${qt5.min_version}]} {
                             ui_warn "${component} does not exist in Qt ${qt5.version}"
                         } else {
                             # port will fail during pre-fetch
@@ -253,10 +253,10 @@ namespace eval qt5pg {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
-                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                    if {[vercmp ${qt5.version} >= ${version_intro}]} {
                         depends_build-append path:${path}:${qt5.name}-${component}
                     } else {
-                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                        if {[vercmp ${qt5.version} >= ${qt5.min_version}]} {
                             ui_warn "${component} does not exist in Qt ${qt5.version}"
                         } else {
                             # port will fail during pre-fetch
@@ -271,10 +271,10 @@ namespace eval qt5pg {
                     set component_info $qt5pg::qt5_component_lib(${component})
                     set path           [lindex ${component_info} 2]
                     set version_intro  [lindex ${component_info} 0]
-                    if {[vercmp ${qt5.version} ${version_intro}] >= 0} {
+                    if {[vercmp ${qt5.version} >= ${version_intro}]} {
                         depends_run-append path:${path}:${qt5.name}-${component}
                     } else {
-                        if {[vercmp ${qt5.version} ${qt5.min_version}] >= 0} {
+                        if {[vercmp ${qt5.version} >= ${qt5.min_version}]} {
                             ui_warn "${component} does not exist in Qt ${qt5.version}"
                         } else {
                             # port will fail during pre-fetch
@@ -294,7 +294,7 @@ if {!${private_building_qt5}} {
 
 proc qt5pg::check_min_version {} {
     global qt5.version qt5.min_version
-    if {[vercmp ${qt5.version} ${qt5.min_version}] < 0} {
+    if {[vercmp ${qt5.version} < ${qt5.min_version}]} {
         known_fail yes
         pre-fetch {
             ui_error "Qt version ${qt5.min_version} or above is required, but Qt version ${qt5.version} is installed"

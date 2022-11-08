@@ -149,7 +149,7 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
     set rustc_version           ${version_m1}; # ensure value is always set (see https://trac.macports.org/ticket/65183)
     foreach arch ${architectures} {
         # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-        if { ${arch} in [option rust.upstream_archs] && [vercmp [option macosx_deployment_target] [option rust.upstream_deployment_target]] >= 0 } {
+        if { ${arch} in [option rust.upstream_archs] && [vercmp [option macosx_deployment_target] >= [option rust.upstream_deployment_target]]} {
             set build_vendor        apple
             if { ${is_bootstrap} } {
                 set rustc_version   ${version_m2}
@@ -546,7 +546,7 @@ proc rust::old_macos_compatibility {cname cversion} {
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] 10.8] >= 0} {
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.8]} {
         return
     }
 
@@ -576,7 +576,7 @@ proc rust::old_macos_compatibility {cname cversion} {
         }
     }
 
-    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] 10.6] >= 0} {
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.6]} {
         return
     }
 
@@ -776,7 +776,7 @@ proc rust::rust_pg_callback {} {
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] 10.6] < 0 } {
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.6]} {
         # __Unwind_RaiseException
         depends_lib-delete              port:libunwind
         depends_lib-append              port:libunwind

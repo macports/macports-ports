@@ -120,11 +120,11 @@ foreach ver ${gcc_versions} {
         set cdb(gcc$ver_nodot,dependsa) gcc-devel
     } else {
         set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
-        if {[vercmp ${ver} 4.6] < 0} {
+        if {[vercmp ${ver} < 4.6]} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
-        } elseif {[vercmp ${ver} 7] < 0} {
+        } elseif {[vercmp ${ver} < 7]} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
-        } elseif {[vercmp ${ver} ${gcc_main_version}] < 0}  {
+        } elseif {[vercmp ${ver} < ${gcc_main_version}]}  {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
         } else {
             # Do not depend directly on primary runtime port, as implied by libgcc
@@ -146,7 +146,7 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
     # The devel port, and starting with version 10, GCC will support using -stdlib=libc++,
     # so use it for improved compatibility with clang builds
-    if { $ver eq "devel" || [vercmp ${ver} 10] >= 0 } {
+    if { $ver eq "devel" || [vercmp ${ver} >= 10]} {
         set cdb(gcc$ver_nodot,cxx_stdlib) libc++
     } else {
         set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
