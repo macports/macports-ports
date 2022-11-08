@@ -11,6 +11,8 @@
 # for macOS 10.12 Sierra) and minimum_developerversion is the minimum version
 # of the developer tools (either Xcode or the Command Line Tools) the port requires (e.g. 3.1).
 
+namespace eval developerversion {}
+
 options minimum_developerversions \
         developerversion
 default minimum_developerversions {}
