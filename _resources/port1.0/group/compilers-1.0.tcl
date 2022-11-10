@@ -334,9 +334,29 @@ proc compilers.setup_variants {variants} {
             # see https://trac.macports.org/ticket/59199 for setting configure.cxx_stdlib
             # see https://trac.macports.org/ticket/59329 for compilers.is_fortran_only
             if {![compilers.is_fortran_only] && $cdb($variant,cxx_stdlib) ne ""} {
+                set mystdlib $cdb($variant,cxx_stdlib)
                 append body "
-                    configure.cxx_stdlib $cdb($variant,cxx_stdlib)
+                    configure.cxx_stdlib ${mystdlib}
                 "
+                set set_stdlib no
+                # If variant is gcc10+ pass -stdlib option to correctly handle libc++ versus libstdc++
+                if {[string match gcc* $variant]} {
+                    if { [regexp {gcc(.*)} ${variant} -> gcc_v] } {
+                        if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
+                            set set_stdlib yes
+                        }
+                    }
+                }
+                # Always set with clang
+                if {[string match clang* $variant]} {
+                    set set_stdlib yes
+                }
+                if { ${set_stdlib} eq "yes" } {
+                    append body "
+                        configure.cxxflags-append -stdlib=${mystdlib}
+                        configure.ldflags-append  -stdlib=${mystdlib}
+                    "
+                }
             }
 
             variant ${variant} description \
