@@ -41,13 +41,13 @@ default muniversal.dont_diff {}
 # utilites
 ##########################################################################################
 
-if {${os.version} >= 22} {
+if {${os.platform} eq "darwin" && ${os.version} >= 22} {
     depends_build-append port:diffutils-for-muniversal
 }
 
 proc muniversal_get_diff_to_use {} {
     global prefix os.version
-    if {${os.version} >= 22} {
+    if {${os.platform} eq "darwin" && ${os.version} >= 22} {
       return "${prefix}/libexec/diffutils/bin/diff"
     } else {
       return "/usr/bin/diff"
