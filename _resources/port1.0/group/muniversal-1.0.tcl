@@ -33,6 +33,19 @@ default merger_no_3_archs no
 default merger_arch_flag yes
 default merger_arch_compiler no
 
+if {${os.version} >= 22} {
+    depends_build-append port:diffutils-for-muniversal
+}
+
+proc muniversal_get_diff_to_use {} {
+    global prefix os.version
+    if {${os.version} >= 22} {
+      return "${prefix}/libexec/diffutils/bin/diff"
+    } else {
+      return "/usr/bin/diff"
+    }
+}
+
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
     return [regexp {^gcc-4|llvm|apple|clang} ${configure.compiler}]
@@ -702,7 +715,7 @@ variant universal {
 
                                     ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                                    system "/usr/bin/diff -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                                    system "[muniversal_get_diff_to_use] -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
@@ -806,7 +819,7 @@ variant universal {
                                             if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                                 # Shell script, hopefully striping out arch flags works...
                                                 mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
-                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
+                                            } elseif { ! [catch {system "[muniversal_get_diff_to_use] -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                                 # diff worked
                                                 ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                             } else {
