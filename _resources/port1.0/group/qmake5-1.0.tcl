@@ -52,21 +52,28 @@ pre-configure {
         }
     }
 
-    # starting with Xcode 7.0, the SDK for build OS version might not be available
-    # see https://trac.macports.org/ticket/53597
-    #
-    # avoid --show-sdk-path since it is not available on all platforms
-    # see https://github.com/macports/macports-ports/commit/9887e90d69f4265f9056cddc45e41551d7400235#commitcomment-49824261
-    if {[catch {exec -ignorestderr /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld  > /dev/null 2>@1}]} {
+    platform darwin {
+        # qt calls xcrun to find the SDK to use, so make sure this call will succeed
+        # TODO: should we just always use the generic SDK on new systems?
 
-        # if no specific sdk can be found, check for a generic macosx sdk
-        if {[catch {exec -ignorestderr /usr/bin/xcrun --sdk macosx --find ld > /dev/null 2>@1}]} {
-            ui_error "qmake5 PortGroup: no usable SDK can be found"
-            return -code error "no usable SDK can be found"
+        ui_debug "qt5 Portfile: the initial SDK value is: macosx${configure.sdk_version}"
+        ui_debug "qt5 Portfile: testing for system-specific SDK:"
+        # first try for a system-specific SDK
+        if {[catch {exec -ignorestderr /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld  > /dev/null 2>@1}]} {
+
+            ui_debug "qt5 Portfile: system-specific SDK was not found, looking for generic SDK."
+            # if no specific sdk found, check for a generic macosx sdk
+            if {[catch {exec -ignorestderr /usr/bin/xcrun --sdk macosx --find ld > /dev/null 2>@1}]} {
+                ui_error "${subport}: no usable SDK can be found"
+                return -code error "no usable SDK can be found"
+            } else {
+                ui_debug "${subport}: using generic macosx SDK as macosx${configure.sdk_version} was not found"
+                configure.sdk_version
+            }
         } else {
-            ui_debug "qmake5 PortGroup: using generic macosx SDK as macosx${configure.sdk_version} does not exist"
-            configure.sdk_version
+            ui_debug "qt5 Portfile: system-specific SDK was found."
         }
+        ui_debug "qt5 Portfile: the final SDK value is: macosx${configure.sdk_version}"
     }
 
     # set QT and QMAKE values in a cache file
