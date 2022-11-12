@@ -33,13 +33,13 @@ default merger_no_3_archs no
 default merger_arch_flag yes
 default merger_arch_compiler no
 
-if {${os.version} > 21} {
+if {${os.version} >= 22} {
     depends_build-append port:diffutils-for-muniversal
 }
 
 proc muniversal_get_diff_to_use {} {
     global prefix os.version
-    if {${os.version} > 21} {
+    if {${os.version} >= 22} {
       return "${prefix}/libexec/diffutils/bin/diff"
     } else {
       return "/usr/bin/diff"
