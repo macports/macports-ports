@@ -46,7 +46,7 @@ if {${os.platform} eq "darwin" && ${os.version} >= 22} {
 }
 
 proc muniversal_get_diff_to_use {} {
-    global prefix os.version
+    global prefix os.version os.platform
     if {${os.platform} eq "darwin" && ${os.version} >= 22} {
       return "${prefix}/libexec/diffutils/bin/diff"
     } else {
