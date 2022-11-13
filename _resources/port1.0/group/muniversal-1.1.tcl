@@ -212,6 +212,8 @@ proc muniversal::get_triplets {arch} {
 
     if { [file tail [option configure.cmd]] eq "cmake" }  { return "" }
 
+    if { [file tail [option configure.cmd]] eq "meson" }  { return "" }
+
     set ret ""
 
     if { ${triplet.add_host} eq "all"
