@@ -163,7 +163,7 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
             set rustc_version       ${version_m1}
         } else {
             set build_vendor        macports
-            if { ${os.major} >= 11 } {
+            if { ${os.major} >= 11 || [option os.platform] ne "darwin" } {
                 set rustc_version   ${version_m1}+0
                 set build_major     ""
             } elseif { ${os.major} >= 10 } {
