@@ -146,8 +146,12 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
     # The devel port, and starting with version 10, GCC will support using -stdlib=libc++,
     # so use it for improved compatibility with clang builds
-    if { $ver eq "devel" || [vercmp ${ver} >= 10]} {
-        set cdb(gcc$ver_nodot,cxx_stdlib) libc++
+    if { ${build_arch} ni [list ppc ppc64] } {
+        if { $ver eq "devel" || [vercmp ${ver} >= 10]} {
+            set cdb(gcc$ver_nodot,cxx_stdlib) libc++
+        } else {
+            set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+        }
     } else {
         set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
     }
@@ -269,6 +273,7 @@ proc compilers.setup_variants {variants} {
     global compilers.my_fortran_variants compilers.list
     global compilers.variants_conflict
     global compilers.clear_archflags
+    global build_arch
 
     set compilers.my_fortran_variants {}
     foreach variant $variants {
@@ -339,17 +344,19 @@ proc compilers.setup_variants {variants} {
                     configure.cxx_stdlib ${mystdlib}
                 "
                 set set_stdlib no
-                # If variant is gcc10+ pass -stdlib option to correctly handle libc++ versus libstdc++
-                if {[string match gcc* $variant]} {
-                    if { [regexp {gcc(.*)} ${variant} -> gcc_v] } {
-                        if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
-                            set set_stdlib yes
+                if { ${build_arch} ni [list ppc ppc64] } {
+                    # If variant is gcc10+ pass -stdlib option to correctly handle libc++ versus libstdc++
+                    if {[string match gcc* $variant]} {
+                        if { [regexp {gcc(.*)} ${variant} -> gcc_v] } {
+                            if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
+                                set set_stdlib yes
+                            }
                         }
                     }
-                }
-                # Always set with clang
-                if {[string match clang* $variant]} {
-                    set set_stdlib yes
+                    # Always set with clang
+                    if {[string match clang* $variant]} {
+                        set set_stdlib yes
+                    }
                 }
                 if { ${set_stdlib} eq "yes" } {
                     append body "
