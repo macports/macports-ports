@@ -442,6 +442,7 @@ set pek.cn      ${letsencrypt_https_or_http}
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
 set ywg.ca      ${letsencrypt_https_or_http}
+set fcix.net    http
 
 set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
     ${fastly}://distfiles.macports.org/:mirror
@@ -460,6 +461,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
     ${ywg.ca}://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
+    ${fcix.net}://mirror.fcix.net/macports/distfiles/:mirror
 " {:*}]
 
 # MySQL
