@@ -27,5 +27,6 @@ Have you
 - [ ] tried existing tests with `sudo port test`?
 - [ ] tried a full install with `sudo port -vst install`?
 - [ ] tested basic functionality of all binary files?
+- [ ] checked that the Portfile's most important [variants](https://trac.macports.org/wiki/Variants) haven't been broken?
 
 <!-- Use "skip notification" (surrounded with []) to avoid notifying maintainers -->
