@@ -97,11 +97,19 @@ set qt_qmake_cmd        ${qt_dir}/bin/qmake
 
 # standard moc command location
 global qt_moc_cmd
-set qt_moc_cmd          ${qt_dir}/moc
+set qt_moc_cmd          ${qt_dir}/bin/moc
 
 # standard uic command location
 global qt_uic_cmd
-set qt_uic_cmd          ${qt_dir}/uic
+set qt_uic_cmd          ${qt_dir}/bin/uic
+
+# standard lrelease command location
+global qt_lrelease_cmd
+set qt_lrelease_cmd     ${qt_dir}/bin/lrelease
+
+# standard lupdate command location
+global qt_lupdate_cmd
+set qt_lupdate_cmd     ${qt_dir}/bin/lupdate
 
 namespace eval qt6pg {
     ###############################################################################
@@ -118,38 +126,140 @@ namespace eval qt6pg {
     #
     ###############################################################################
     array set qt6_component_lib {
+        qt3d {
+            6.1
+            7.0
+            lib/cmake/Qt63DCore
+            ""
+        }
+        qt5compat {
+            6.0
+            7.0
+            lib/cmake/Qt6Core5Compat
+            ""
+        }
         qtbase {
+            6.0
+            7.0
+            libexec/qt6/lib/QtCore.framework/Versions/A/QtCore
+            ""
+        }
+        qtcharts {
+            6.1
+            7.0
+            lib/cmake/Qt6Charts
+            ""
+        }
+        qtconnectivity {
             6.2
             7.0
-            lib/pkgconfig/Qt6Core.pc
+            libexec/qt6/lib/QtBluetooth.framework/Versions/A/QtBluetooth
+            ""
+        }
+        qtdeclarative {
+            6.0
+            7.0
+            lib/cmake/Qt6Qml/Qt6QmlMacros.cmake
+            ""
+        }
+        qtimageformats {
+            6.1
+            7.0
+            lib/cmake/Qt6/FindLibmng.cmake
+            ""
+        }
+        qtmultimedia {
+            6.2
+            7.0
+            lib/cmake/Qt6Multimedia
+            ""
+        }
+        qtnetworkauth {
+            6.1
+            7.0
+            libexec/qt6/lib/QtNetworkAuth.framework/Versions/A/QtNetworkAuth
+            ""
+        }
+        qtpositioning {
+            6.2
+            7.0
+            lib/cmake/Qt6Positioning
+            ""
+        }
+        qtremoteobjects {
+            6.2
+            7.0
+            lib/cmake/Qt6RemoteObjects
+            ""
+        }
+        qtsensors {
+            6.2
+            7.0
+            lib/cmake/Qt6Sensors
+            ""
+        }
+        qtserialbus {
+            6.2
+            7.0
+            lib/cmake/Qt6SerialBus
+            ""
+        }
+        qtserialport {
+            6.2
+            7.0
+            libexec/qt6/lib/QtSerialPort.framework/Versions/A/QtSerialPort
+            ""
+        }
+        qtshadertools {
+            6.0
+            7.0
+            libexec/qt6/lib/QtShaderTools.framework/Versions/A/QtShaderTools
+            ""
+        }
+        qtsvg {
+            6.0
+            7.0
+            libexec/qt6/lib/QtSvgWidgets.framework/Versions/A/QtSvgWidgets
             ""
         }
         qttools {
-            6.2
+            6.0
             7.0
-            lib/cmake/Qt6Designer
+            libexec/qt6/lib/QtUiTools.framework/Versions/A/QtUiTools
             ""
         }
         qttranslations {
-            6.2
+            6.0
             7.0
             libexec/qt6/translations/qt_ar.qm
             ""
         }
-        sqlite-plugin {
+        qtwebchannel {
             6.2
+            7.0
+            lib/cmake/Qt6WebChannel
+            ""
+        }
+        qtwebsockets {
+            6.2
+            7.0
+            lib/cmake/Qt6WebSockets
+            ""
+        }
+        sqlite-plugin {
+            6.0
             7.0
             lib/cmake/Qt6Sql/Qt6Sql_QSQLiteDriverPlugin.cmake
             "-plugin"
         }
         psql-plugin {
-            6.2
+            6.0
             7.0
             lib/cmake/Qt6Sql/Qt6Sql_QPSQLDriverPlugin.cmake
             "-plugin"
         }
         mysql-plugin {
-            6.2
+            6.0
             7.0
             lib/cmake/Qt6Sql/Qt6Sql_QMYSQLDriverPlugin.cmake
             "-plugin"
