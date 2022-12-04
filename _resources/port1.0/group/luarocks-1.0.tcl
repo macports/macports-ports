@@ -133,6 +133,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 luarocks.link_binaries no
                 distfiles
                 supported_archs noarch
+                platforms       any
                 use_configure no
                 depends_lib port:lua[join [split ${luarocks.default_branch} .] {}][string trimleft $name lua]
                 build {}
@@ -248,6 +249,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
         }
         all.rock {
             supported_archs noarch
+            platforms       any
             use_configure no
             set distname    ${luarocks.distname}
             extract.suffix .all.rock
