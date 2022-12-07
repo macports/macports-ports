@@ -45,6 +45,8 @@ proc php._set_branches {option action args} {
             # Set up stub port.
             if {${name} eq ${subport}} {
                 supported_archs     noarch
+                platforms           any
+
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
 
                 # Ensure the stub port does not do anything with distfiles—not
