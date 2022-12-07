@@ -232,7 +232,7 @@ option_proc legacysupport.legacysupport.use_static      legacysupport::legacysup
 
 # see https://trac.macports.org/ticket/59832
 post-destroot {
-    if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} eq "macports-libstdc++"} {
+    if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
         foreach rbin ${legacysupport.redirect_bins} {
             set dir [file dirname ${rbin}]
             if {${dir} eq "."} {
