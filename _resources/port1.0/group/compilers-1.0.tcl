@@ -837,11 +837,13 @@ proc compilers::add_fortran_legacy_support {} {
 port::register_callback compilers::add_fortran_legacy_support
 
 proc compilers::add_gcc_rpath_support {} {
-    global prefix  
+    global prefix os.platform os.major
     set gcc_v [compilers::get_current_gcc_version]
     if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
-        configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
-        configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
+        if {${os.platform} eq "darwin" && ${os.major} > 8} {
+            configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
+            configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
+        }
     }
 }
 
