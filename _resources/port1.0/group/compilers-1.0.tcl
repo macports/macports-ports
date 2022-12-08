@@ -816,6 +816,7 @@ proc compilers::get_current_gcc_version {} {
     if { [regexp {gcc(.*)} ${fortran_compiler} -> gcc_v] } {
         return ${gcc_v}
     }
+    ui_debug "compilers PG: GCC version reports being UNKNOWN to MacPorts"
     return UNKNOWN
 }
 
@@ -841,6 +842,7 @@ proc compilers::add_gcc_rpath_support {} {
     set gcc_v [compilers::get_current_gcc_version]
     if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
         if {${os.platform} eq "darwin" && ${os.major} > 8} {
+            ui_debug "compilers PG: RPATH added to ldflags as GCC version is ${gcc_v}"
             configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
             configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
         }
