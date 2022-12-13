@@ -173,6 +173,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             if {$subport eq $name} {
                 ruby.link_binaries no
                 distfiles
+                platforms       any
                 supported_archs noarch
                 use_configure no
                 build {}
