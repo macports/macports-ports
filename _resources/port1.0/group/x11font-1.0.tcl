@@ -18,6 +18,7 @@ proc x11font.setup {myportname myportversion myfontsubdir} {
     version          ${myportversion}
     categories       x11 x11-font graphics
     supported_archs  noarch
+    platforms        any
     installs_libs    no
     homepage         https://www.x.org/
     master_sites     xorg:individual/font/
