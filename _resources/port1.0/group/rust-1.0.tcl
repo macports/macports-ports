@@ -521,7 +521,7 @@ proc rust::old_macos_compatibility {cname cversion} {
 
     switch ${cname} {
         "kqueue" {
-            if { "i386" in [option muniversal.architectures] } {
+            if { [vercmp ${cversion} < 1.0.5] && "i386" in [option muniversal.architectures] } {
                 # see https://gitlab.com/worr/rust-kqueue/-/merge_requests/10
                 reinplace {s|all(target_os = "freebsd", target_arch = "x86")|all(any(target_os = "freebsd", target_os = "macos"), any(target_arch = "x86", target_arch = "powerpc"))|g} \
                     ${cargo.home}/macports/${cname}-${cversion}/src/time.rs
@@ -529,6 +529,7 @@ proc rust::old_macos_compatibility {cname cversion} {
             }
         }
         "curl-sys" {
+            if { [vercmp ${cversion} < 0.4.56] } {
                 # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
                 # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
                 # see https://trac.macports.org/ticket/64146#comment:16
@@ -542,6 +543,7 @@ proc rust::old_macos_compatibility {cname cversion} {
                 reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
                     ${cargo.home}/macports/${cname}-${cversion}/build.rs
             }
+        }
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
