@@ -395,7 +395,6 @@ proc cargo.rust_platform {{arch ""}} {
                 error "No build arch configured"
             }
         }
-        
     }
     return [option triplet.${arch}]
 }
@@ -530,19 +529,19 @@ proc rust::old_macos_compatibility {cname cversion} {
             }
         }
         "curl-sys" {
-            # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
-            # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
-            # see https://trac.macports.org/ticket/64146#comment:16
-            #
-            # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
-            # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
-            # see https://github.com/alexcrichton/curl-rust/issues/279
-            #
-            # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
-            #
-            reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
-                ${cargo.home}/macports/${cname}-${cversion}/build.rs
-        }
+                # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
+                # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
+                # see https://trac.macports.org/ticket/64146#comment:16
+                #
+                # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
+                # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
+                # see https://github.com/alexcrichton/curl-rust/issues/279
+                #
+                # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
+                #
+                reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/build.rs
+            }
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
