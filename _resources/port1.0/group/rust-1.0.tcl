@@ -793,8 +793,7 @@ proc rust::rust_pg_callback {} {
             # code should mimic legacy-support
             # see https://github.com/macports/macports-ports/blob/master/devel/legacy-support/Portfile
             set max_darwin_reexport 19
-            set max_darwin_optool   20
-            if { !( [option configure.build_arch] ne "arm64" && [option os.major] > ${max_darwin_reexport} && [option os.major] <= ${max_darwin_optool} ) } {
+            if { [option configure.build_arch] eq "arm64" || [option os.major] > ${max_darwin_reexport} } {
                 # ${prefix}/lib/libMacportsLegacySystem.B.dylib does not exist
                 # see https://trac.macports.org/ticket/65255
                 known_fail              yes
