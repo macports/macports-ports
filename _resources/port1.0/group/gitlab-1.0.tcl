@@ -48,6 +48,11 @@ proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_su
     default master_sites    {${gitlab.master_sites}}
     distname                ${gitlab.project}-${gitlab.version}
     use_bzip2               yes
+    # https://trac.macports.org/ticket/66415
+    # remove the 'if' clause with the next 'port' release
+    if {[exists extract.rename]} {
+        extract.rename      yes
+    }
 
 # I don't _think_ we need this bit from the github portgroup, but keeping
 # around until we have more use cases...
