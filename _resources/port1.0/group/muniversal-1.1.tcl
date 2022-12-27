@@ -41,16 +41,18 @@ default muniversal.dont_diff {}
 # utilites
 ##########################################################################################
 
-if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-    depends_build-append port:diffutils-for-muniversal
-}
-
-proc muniversal_get_diff_to_use {} {
-    global prefix os.major os.platform
+if {[option universal_possible] && [variant_isset universal]} {
     if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-      return "${prefix}/libexec/diffutils/bin/diff"
-    } else {
-      return "/usr/bin/diff"
+        depends_build-append port:diffutils-for-muniversal
+    }
+
+    proc muniversal_get_diff_to_use {} {
+        global prefix os.major os.platform
+        if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+          return "${prefix}/libexec/diffutils/bin/diff"
+        } else {
+          return "/usr/bin/diff"
+        }
     }
 }
 
