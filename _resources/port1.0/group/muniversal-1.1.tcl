@@ -166,7 +166,7 @@ default triplet.add_host    {cross}
 
 # possible values: none, all, cross, or a list of architectures
 options triplet.add_build
-default triplet.add_build   {none}
+default triplet.add_build   {cross}
 
 foreach arch {arm64 x86_64 i386 ppc ppc64} {
     options triplet.cpu.${arch}
