@@ -1,0 +1,136 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+PortGroup               boost 1.0
+PortGroup               cmake 1.1
+PortGroup               github 1.0
+PortGroup               legacysupport 1.1
+PortGroup               openssl 1.0
+
+github.setup            PurpleI2P i2pd 2.44.0
+revision                1
+categories              security net
+maintainers             {@barracuda156 gmail.com:vital.had} {@catap korins.ky:kirill} openmaintainer
+license                 BSD
+description             End-to-End encrypted and anonymous Internet
+long_description        ${description}
+homepage                https://i2pd.website \
+                        https://i2pd.readthedocs.io
+checksums               rmd160  c7caf1c00ec99208af76f084fe9df523d368cebb \
+                        sha256  4feb50418dc484cf21612a18f7305000e19162af8f75d921e133e85c78afa854 \
+                        size    648654
+
+depends_lib-append      port:zlib
+
+patch.pre_args          -p1
+patchfiles-append       0001-i2pd.conf-adjust-for-MacPorts.patch
+
+set i2pddir             ${prefix}/var/db/${name}
+
+post-patch {
+    reinplace "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/contrib/i2pd.conf \
+        ${worksrcpath}/contrib/i2pd.logrotate
+    reinplace "s|@I2PDDIR@|${i2pddir}|g" ${worksrcpath}/contrib/i2pd.conf
+}
+
+set i2pduser            _i2pd
+add_users               ${i2pduser} group=${i2pduser} realname=I2PD\ user
+
+cmake.source_dir        ${worksrcpath}/build
+
+# Minimum required is C++11, C++17 used if supported.
+compiler.cxx_standard   2011
+
+# https://github.com/PurpleI2P/i2pd/issues/1798
+compiler.blacklist-append \
+                        {clang < 600}
+
+# These are defaults, but better have them explicit:
+configure.args-append   -DWITH_LIBRARY=ON \
+                        -DWITH_BINARY=ON \
+                        -DWITH_STATIC=OFF
+
+if {${build_arch} in [list ppc ppc64]} {
+    configure.args-append \
+                        -Dppc_support=TRUE \
+                        -DWITH_AESNI=OFF
+    # Temporary fix: use std::atomic in place of GCC builtins.
+    # See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107590
+    # https://github.com/PurpleI2P/i2pd/issues/1726
+    # https://github.com/boostorg/smart_ptr/issues/105
+    configure.cxxflags-append \
+                        -DBOOST_SP_USE_STD_ATOMIC
+}
+
+post-destroot {
+    xinstall -d ${destroot}${prefix}/etc/${name}
+    foreach item {i2pd.conf subscriptions.txt tunnels.conf tunnels.d} {
+        move ${worksrcpath}/contrib/${item} ${destroot}${prefix}/etc/${name}/${item}.default
+    }
+
+    xinstall -d ${destroot}${prefix}/share/${name}
+    foreach item {i2pd.logrotate certificates} {
+        move ${worksrcpath}/contrib/${item} ${destroot}${prefix}/share/${name}
+    }
+
+    xinstall -d ${destroot}${prefix}/share/doc/${name}
+    xinstall -W ${worksrcpath} -m 0644 ChangeLog LICENSE README.md ${destroot}${prefix}/share/doc/${name}
+
+    xinstall -d ${destroot}${prefix}/var/log/${name}
+    xinstall -d ${destroot}${prefix}/var/run/${name}
+
+    xinstall -d ${destroot}${i2pddir}
+    ln -sf ${prefix}/share/${name}/certificates ${destroot}${i2pddir}/certificates
+    ln -sf ${prefix}/etc/${name}/tunnels.d ${destroot}${i2pddir}/tunnels.d
+    ln -sf ${prefix}/etc/${name}/i2pd.conf ${destroot}${i2pddir}/i2pd.conf
+    ln -sf ${prefix}/etc/${name}/subscriptions.txt ${destroot}${i2pddir}/subscriptions.txt
+    ln -sf ${prefix}/etc/${name}/tunnels.conf ${destroot}${i2pddir}/tunnels.conf
+}
+
+notes "
+i2pd status can be checked at: http://127.0.0.1:7070
+You may edit i2pd settings in ${prefix}/etc/i2pd
+See also: https://i2pd.readthedocs.io/en/latest/user-guide/configuration
+Re using i2pd with web-browser: https://github.com/PurpleI2P/i2pdbrowser
+"
+
+post-activate {
+    if {![file exists ${prefix}/etc/logrotate.d/i2pd] && [variant_isset logrotate]} {
+        xinstall -d ${destroot}${prefix}/etc/logrotate.d
+        copy ${prefix}/share/${name}/i2pd.logrotate ${prefix}/etc/logrotate.d/i2pd
+    }
+
+    foreach item {i2pd.conf subscriptions.txt tunnels.conf tunnels.d} {
+        if {![file exists ${prefix}/etc/${name}/${item}]} {
+            copy ${prefix}/etc/${name}/${item}.default ${prefix}/etc/${name}/${item}
+        }
+    }
+
+    fs-traverse item "${i2pddir} ${prefix}/var/log/${name} ${prefix}/var/run/${name}" {
+        file attributes ${item} -owner ${i2pduser} -group ${i2pduser}
+    }
+}
+
+startupitem.create      yes
+startupitem.user        ${i2pduser}
+startupitem.group       ${i2pduser}
+startupitem.executable  ${prefix}/bin/${name} --datadir=${i2pddir}
+startupitem.pidfile     clean ${prefix}/var/run/${name}/${name}.pid
+startupitem.logfile     ${prefix}/var/log/${name}/${name}.log
+
+destroot.keepdirs       ${destroot}${i2pddir} \
+                        ${destroot}${prefix}/var/run/${name} \
+                        ${destroot}${prefix}/var/log/${name}
+
+variant upnp description "Support for UPNP" {
+    depends_lib-append  port:miniupnpc
+    configure.args-append \
+                        -DWITH_UPNP=ON
+}
+
+variant logrotate description "Logrotate configuration" {
+    depends_run-append  port:logrotate
+}
+
+default_variants        +upnp +logrotate

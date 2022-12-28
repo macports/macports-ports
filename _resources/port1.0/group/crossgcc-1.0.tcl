@@ -285,7 +285,7 @@ proc crossgcc.setup {target version} {
 
         # https://trac.macports.org/ticket/29104
         # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
-        if {[vercmp ${xcodeversion} 4.3] < 0} {
+        if {[vercmp ${xcodeversion} < 4.3]} {
             compiler.blacklist llvm-gcc-4.2
         }
         # Failed to build with clang from Xcode 4.5
@@ -293,12 +293,12 @@ proc crossgcc.setup {target version} {
         compiler.blacklist  {clang >= 421 < 422}
 
         # Opportunistic links zstd for LTO byte code compression
-        if {[vercmp ${version} "10.0"] >= 0} {
+        if {[vercmp ${version} >= "10.0"]} {
             depends_lib-append  port:zstd
         }
 
         # Section taken from gcc11 Portfile
-        if {[vercmp ${version} "11.0"] >= 0} {
+        if {[vercmp ${version} >= "11.0"]} {
             # https://trac.macports.org/ticket/29067
             # https://trac.macports.org/ticket/29104
             # https://trac.macports.org/ticket/47996

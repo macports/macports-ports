@@ -80,5 +80,5 @@ proc compiler_blacklist_versions._version_matches {compiler comparison_operator 
     if {${actual_version} eq ""} {
         return 1
     }
-    return [expr [vercmp ${actual_version} ${test_version}] ${comparison_operator} 0]
+    return [vercmp ${actual_version} ${comparison_operator} ${test_version}]
 }

@@ -36,9 +36,9 @@ default compwrap.ccache_supported_compilers [list cc objc cxx objcxx]
 
 proc compwrap::use_ccache {tag} {
     global prefix
-    return [ expr [option configure.ccache] && \
-                 [file exists ${prefix}/bin/ccache] && \
-                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 ]
+    return [ expr {[option configure.ccache] &&
+                 [file exists ${prefix}/bin/ccache] &&
+                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0} ]
 }
 
 proc compwrap::get_ccache_dir {} {

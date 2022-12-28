@@ -1,0 +1,2284 @@
+From 3ab9c8ce51c75a71914036b4b738283e455da154 Mon Sep 17 00:00:00 2001
+From: Fabian Groffen <grobian@gentoo.org>
+Date: Mon, 28 Dec 2020 14:13:30 +0100
+Subject: [PATCH] [tapilite] add TAPI emulation library
+
+TAPI is a project with close ties to LLVM, which means one needs it to
+build a linker.
+On systems where no LLVM is used (like older Darwin), or systems where
+GCC is in use instead, this means TAPI cannot be built.
+On recent Darwin systems, a linker that does not do TAPI, cannot do
+much, since all system libraries are .tbd (TAPI stubs).
+
+Hence, to e.g. bootstrap LLVM, we need to be able to build a linker that
+understands TAPI, without having TAPI (the host may not supply it
+either).
+
+This introduces TAPIlite, an implementation of those classes ld64 uses,
+with help of libyaml.  This is very limited at this point, and whether
+or not it works is very brittle.  Further development here is likely
+necessary.
+
+Signed-off-by: Fabian Groffen <grobian@gentoo.org>
+---
+ CMakeLists.txt                              |   19 +-
+ ld64/src/ld/CMakeLists.txt                  |   15 +-
+ tapilite/CMakeLists.txt                     |   26 +
+ tapilite/LICENSE.TXT                        |   62 ++
+ tapilite/README                             |    6 +
+ tapilite/include/tapi/Defines.h             |   32 +
+ tapilite/include/tapi/LinkerInterfaceFile.h |  496 +++++++++
+ tapilite/include/tapi/PackedVersion32.h     |  109 ++
+ tapilite/include/tapi/Symbol.h              |  136 +++
+ tapilite/include/tapi/Version.h             |   63 ++
+ tapilite/include/tapi/tapi.h                |   34 +
+ tapilite/src/CMakeLists.txt                 |   12 +
+ tapilite/src/LinkerInterfaceFile.cpp        | 1057 +++++++++++++++++++
+ tapilite/src/Version.cpp                    |   48 +
+ 14 files changed, 2109 insertions(+), 6 deletions(-)
+ create mode 100644 tapilite/CMakeLists.txt
+ create mode 100644 tapilite/LICENSE.TXT
+ create mode 100644 tapilite/README
+ create mode 100644 tapilite/include/tapi/Defines.h
+ create mode 100644 tapilite/include/tapi/LinkerInterfaceFile.h
+ create mode 100644 tapilite/include/tapi/PackedVersion32.h
+ create mode 100644 tapilite/include/tapi/Symbol.h
+ create mode 100644 tapilite/include/tapi/Version.h
+ create mode 100644 tapilite/include/tapi/tapi.h
+ create mode 100644 tapilite/src/CMakeLists.txt
+ create mode 100644 tapilite/src/LinkerInterfaceFile.cpp
+ create mode 100644 tapilite/src/Version.cpp
+
+diff --git CMakeLists.txt CMakeLists.txt
+index f223eea..79bc676 100644
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -64,7 +64,10 @@ else()
+   message(STATUS "*Top Level* NO LTO")
+ endif()
+ 
+-if(XTOOLS_TAPI_PATH AND
++if(XTOOLS_USE_TAPILITE)
++  option(XTOOLS_TAPI_SUPPORT "Support TAPI in ld64." ON)
++  message(STATUS "*Top Level* WITH TAPIlite")
++elseif(XTOOLS_TAPI_PATH AND
+    EXISTS ${XTOOLS_TAPI_PATH}/include/tapi AND
+    EXISTS ${XTOOLS_TAPI_PATH}/lib/libtapi.dylib)
+   configure_file(
+@@ -128,8 +131,13 @@ include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/macho-target-includes")
+ include_directories(BEFORE SYSTEM "${CMAKE_BINARY_DIR}/include")
+ include_directories(BEFORE SYSTEM "${CMAKE_BINARY_DIR}/host-includes")
+ if(XTOOLS_TAPI_SUPPORT)
+-  include_directories(BEFORE SYSTEM "${XTOOLS_TAPI_PATH}/include")
+-  message(STATUS "*Top Level* including ${XTOOLS_TAPI_PATH}/include")
++  if(XTOOLS_USE_TAPILITE)
++    include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/tapilite/include")
++    message(STATUS "*Top Level* including ${CMAKE_SOURCE_DIR}/tapilite/include")
++  else()
++    include_directories(BEFORE SYSTEM "${XTOOLS_TAPI_PATH}/include")
++    message(STATUS "*Top Level* including ${XTOOLS_TAPI_PATH}/include")
++  endif()
+ endif()
+ 
+ if (EXISTS ${CMAKE_BINARY_DIR}/lib)
+@@ -160,6 +168,11 @@ if (NOT XTOOLS_HAS_MODERNXAR)
+                 COPYONLY)
+ endif()
+ 
++# build tapilite first, so ld64 can link against it
++if(XTOOLS_USE_TAPILITE)
++  add_subdirectory(tapilite)
++endif()
++
+ # Evaluate first so that we find out about libprunetrie.
+ if( EXISTS ${CMAKE_SOURCE_DIR}/ld64/CMakeLists.txt )
+   add_subdirectory(ld64)
+diff --git ld64/src/ld/CMakeLists.txt ld64/src/ld/CMakeLists.txt
+index c314ff4..79037a3 100644
+--- ld64/src/ld/CMakeLists.txt
++++ ld64/src/ld/CMakeLists.txt
+@@ -51,8 +51,13 @@ configure_file (
+   )
+ 
+ if(XTOOLS_TAPI_SUPPORT)
+-  include_directories("${XTOOLS_TAPI_PATH}/include")
+-  message(STATUS "*LD64* including ${XTOOLS_TAPI_PATH}/include")
++  if(XTOOLS_USE_TAPILITE)
++    include_directories("${CMAKE_SOURCE_DIR}/tapilite/include")
++    message(STATUS "*LD64* including ${CMAKE_SOURCE_DIR}/tapilite/include")
++  else()
++    include_directories("${XTOOLS_TAPI_PATH}/include")
++    message(STATUS "*LD64* including ${XTOOLS_TAPI_PATH}/include")
++  endif()
+ endif()
+ 
+ include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
+@@ -63,7 +68,11 @@ if(XTOOLS_LTO_SUPPORT)
+ endif()
+ 
+ if(XTOOLS_TAPI_SUPPORT)
+-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ltapi")
++  if(XTOOLS_USE_TAPILITE)
++    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ltapilite -lyaml")
++  else()
++    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ltapi")
++  endif()
+ endif()
+ 
+ add_definitions(-DLD_VERS="xtools-ld64-${LD64_VERSION_NUM}")
+diff --git tapilite/CMakeLists.txt tapilite/CMakeLists.txt
+new file mode 100644
+index 0000000..c83334c
+--- /dev/null
++++ tapilite/CMakeLists.txt
+@@ -0,0 +1,26 @@
++
++set(TAPI_FULL_VERSION "2.0.3" CACHE STRING "Specify tapi version.")
++message(STATUS "TAPI version: ${TAPI_FULL_VERSION}")
++
++set(TAPI_APPLE_VERSION "1000.10.8" CACHE STRING "Specify tapi version.")
++message(STATUS "APPLE Tapi version: ${TAPI_APPLE_VERSION}")
++
++set(TAPI_REPOSITORY_STRING "https://github.com/grobian/darwin-xtools.git" CACHE STRING
++  "Vendor-specific text for showing the repository the source is taken from.")
++
++if(TAPI_REPOSITORY_STRING)
++  add_definitions(-DTAPI_REPOSITORY_STRING="${TAPI_REPOSITORY_STRING}")
++endif()
++
++set(TAPI_VENDOR "tapilite" CACHE STRING
++  "Vendor-specific text for showing with version information.")
++
++if (TAPI_VENDOR)
++  add_definitions( -DTAPI_VENDOR="${TAPI_VENDOR} ")
++endif()
++
++if (TAPI_APPLE_VERSION)
++  add_definitions( -DAPPLE_VERSION="${TAPI_APPLE_VERSION}")
++endif ()
++
++add_subdirectory(src)
+diff --git tapilite/LICENSE.TXT tapilite/LICENSE.TXT
+new file mode 100644
+index 0000000..06e331e
+--- /dev/null
++++ tapilite/LICENSE.TXT
+@@ -0,0 +1,62 @@
++==============================================================================
++tapi License
++==============================================================================
++University of Illinois/NCSA
++Open Source License
++
++Copyright (c) 2011-2014 by the contributors listed in CREDITS.TXT
++All rights reserved.
++
++Developed by:
++
++    LLVM Team
++
++    University of Illinois at Urbana-Champaign
++
++    http://llvm.org
++
++Permission is hereby granted, free of charge, to any person obtaining a copy of
++this software and associated documentation files (the "Software"), to deal with
++the Software without restriction, including without limitation the rights to
++use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
++of the Software, and to permit persons to whom the Software is furnished to do
++so, subject to the following conditions:
++
++    * Redistributions of source code must retain the above copyright notice,
++      this list of conditions and the following disclaimers.
++
++    * Redistributions in binary form must reproduce the above copyright notice,
++      this list of conditions and the following disclaimers in the
++      documentation and/or other materials provided with the distribution.
++
++    * Neither the names of the LLVM Team, University of Illinois at
++      Urbana-Champaign, nor the names of its contributors may be used to
++      endorse or promote products derived from this Software without specific
++      prior written permission.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
++FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
++CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
++SOFTWARE.
++
++==============================================================================
++The lld software contains code written by third parties.  Such software will
++have its own individual LICENSE.TXT file in the directory in which it appears.
++This file will describe the copyrights, license, and restrictions which apply
++to that code.
++
++The disclaimer of warranty in the University of Illinois Open Source License
++applies to all code in the lld Distribution, and nothing in any of the
++other licenses gives permission to use the names of the LLVM Team or the
++University of Illinois to endorse or promote products derived from this
++Software.
++
++The following pieces of software have additional or alternate copyrights,
++licenses, and/or restrictions:
++
++Program             Directory
++-------             ---------
++<none yet>
+diff --git tapilite/README tapilite/README
+new file mode 100644
+index 0000000..a28fe13
+--- /dev/null
++++ tapilite/README
+@@ -0,0 +1,6 @@
++This is a very minimal, LLVM-independent implementation of TAPI, such
++that we can compile (and bootstrap) a linker that will be usable on
++recent macOS without the need for LLVM.
++
++dependencies: libyaml
++provides: required interfaces from ld64/src/ld/parsers/textstub_dylib_file
+diff --git tapilite/include/tapi/Defines.h tapilite/include/tapi/Defines.h
+new file mode 100644
+index 0000000..00f6f2f
+--- /dev/null
++++ tapilite/include/tapi/Defines.h
+@@ -0,0 +1,32 @@
++//===-- tapi/Defines.h - TAPI C++ Library Defines ---------------*- C++ -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief TAPI C++ library defines.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_DEFINES_H
++#define TAPI_DEFINES_H
++
++#define TAPI_INTERNAL tapi::internal
++#define TAPI_NAMESPACE_INTERNAL_BEGIN namespace tapi { namespace internal {
++#define TAPI_NAMESPACE_INTERNAL_END } }
++
++#define TAPI_NAMESPACE_V1_BEGIN namespace tapi { inline namespace v1 {
++#define TAPI_NAMESPACE_V1_END } }
++
++#define TAPI_PUBLIC __attribute__((visibility ("default")))
++
++#endif // TAPI_DEFINES_H
++
+diff --git tapilite/include/tapi/LinkerInterfaceFile.h tapilite/include/tapi/LinkerInterfaceFile.h
+new file mode 100644
+index 0000000..51b8263
+--- /dev/null
++++ tapilite/include/tapi/LinkerInterfaceFile.h
+@@ -0,0 +1,496 @@
++//===-- tapi/LinkerInterfaceFile.h - TAPI File Interface --------*- C++ -*-===*\
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief API for reading TAPI files.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_LINKER_INTERFACE_FILE_H
++#define TAPI_LINKER_INTERFACE_FILE_H
++
++#include <memory>
++#include <string>
++#include <tapi/Defines.h>
++#include <vector>
++
++///
++/// \defgroup TAPI_LINKER_INTERFACE_FILE TAPI File APIs
++/// \ingroup TAPI_CPP_API
++///
++/// @{
++///
++
++using cpu_type_t = int;
++using cpu_subtype_t = int;
++
++TAPI_NAMESPACE_V1_BEGIN
++
++class PackedVersion32;
++class Symbol;
++
++///
++/// \brief Defines a list of supported platforms.
++/// \since 1.0
++///
++enum class Platform : unsigned {
++  /// \brief Unknown platform
++  /// \since 1.0
++  Unknown = 0,
++
++  /// \brief Mac OS X
++  /// \since 1.0
++  OSX = 1,
++
++  /// \brief iOS
++  /// \since 1.0
++  iOS = 2,
++
++  /// \brief watchOS
++  /// \since 1.0
++  watchOS = 3,
++
++  /// \brief tvOS
++  /// \since 1.0
++  tvOS = 4,
++
++  /// \brief bridgeOS
++  /// \since 1.2
++  bridgeOS = 5,
++
++  /// \brief zippered
++  /// \since 2.0
++  zippered = 6,
++};
++
++///
++/// \brief Defines a list of Objective-C constraints.
++/// \since 1.0
++///
++enum class ObjCConstraint : unsigned {
++  /// \brief No constraint.
++  /// \since 1.0
++  None = 0,
++
++  /// \brief Retain/Release.
++  /// \since 1.0
++  Retain_Release = 1,
++
++  /// \brief Retain/Release for Simulator.
++  /// \since 1.0
++  Retain_Release_For_Simulator = 2,
++
++  /// \brief Retain/Release or Garbage Collection.
++  /// \since 1.0
++  Retain_Release_Or_GC = 3,
++
++  /// \brief Garbage Collection.
++  /// \since 1.0
++  GC = 4,
++};
++
++///
++/// \brief Defines a list of supported file types.
++/// \since 1.0
++///
++enum class FileType : unsigned {
++  /// \brief Unsupported file type.
++  /// \since 1.0
++  Unsupported = 0,
++
++  /// \brief Text-based Dynamic Library Stub File (.tbd) version 1.0
++  /// \since 1.0
++  TBD_V1 = 1,
++
++  /// \brief Text-based stub file (.tbd) version 2.0
++  /// \since 1.0
++  TBD_V2 = 2,
++
++  /// \brief Text-based stub file (.tbd) version 3.0
++  /// \since 1.3
++  TBD_V3 = 3,
++
++  /// format as seen on Big Sur
++  TBD_V4 = 4,
++};
++
++///
++/// \brief Defines the cpu subtype matching mode.
++/// \since 1.0
++///
++enum class CpuSubTypeMatching : unsigned {
++  /// \brief Fall-back to an ABI compatible slice if an exact match cannot be
++  ///        found.
++  /// \since 1.0
++  ABI_Compatible = 0,
++
++  /// \brief Only accept a slice if the sub type matches.
++  /// \since 1.0
++  Exact = 1,
++};
++
++///
++/// \brief Defines flags that control the parsing of text-based stub files.
++/// \since 1.1
++///
++enum ParsingFlags : unsigned {
++  /// \brief Default flags.
++  /// \since 1.1
++  None = 0,
++
++  /// \brief Only accept a slice if the sub type matches. ABI fall-back mode is
++  ///        the default.
++  /// \since 1.1
++  ExactCpuSubType = 1U << 0,
++
++  /// \brief Disallow weak imported symbols. This adds weak imported symbols to
++  ///        the ignore exports list.
++  /// \since 1.1
++  DisallowWeakImports = 1U << 1,
++};
++
++inline ParsingFlags operator|(ParsingFlags lhs, ParsingFlags rhs) noexcept {
++  return static_cast<ParsingFlags>(static_cast<unsigned>(lhs) |
++                                   static_cast<unsigned>(rhs));
++}
++
++inline ParsingFlags operator|=(ParsingFlags &lhs, ParsingFlags rhs) noexcept {
++  lhs = lhs | rhs;
++  return lhs;
++}
++
++///
++/// \brief TAPI File APIs
++/// \since 1.0
++///
++class TAPI_PUBLIC LinkerInterfaceFile {
++public:
++  ///
++  /// \brief Returns a list of supported file extensions.
++  ///
++  /// \returns a list of supported file extensions.
++  /// \since 1.0
++  ///
++  static std::vector<std::string> getSupportedFileExtensions() noexcept;
++
++  ///
++  /// \brief Indicate if the provided buffer is a supported Text-based Dynamic
++  ///        Library Stub file.
++  ///
++  /// Checks if the buffer is a supported format. This doesn't check for
++  /// malformed buffer content.
++  ///
++  /// \param[in] path full path to the file.
++  /// \param[in] data raw pointer to start of buffer.
++  /// \param[in] size size of the buffer in bytes.
++  /// \returns true if the format is supported.
++  /// \since 1.0
++  ///
++  static bool isSupported(const std::string &path, const uint8_t *data,
++                          size_t size) noexcept;
++
++  ///
++  /// \brief Check if we should prefer the text-based stub file.
++  ///
++  /// \param[in] path full path to the text-based stub file.
++  /// \returns true if the tex-based stub file should be prefered over any
++  ///          dynamic library.
++  /// \since 1.0
++  ///
++  static bool shouldPreferTextBasedStubFile(const std::string &path) noexcept;
++
++  ///
++  /// \brief Check if the text-based stub file and the MachO dynamic library
++  ///        file are in sync.
++  ///
++  /// This validates both files against each other and checks if both files are
++  /// still in sync.
++  ///
++  /// \param[in] tbdPath full path to the text-based stub file.
++  /// \param[in] dylibPath full path to the MachO dynamic library file.
++  /// \returns true if both files are in sync.
++  /// \since 1.0
++  ///
++  static bool areEquivalent(const std::string &tbdPath,
++                            const std::string &dylibPath) noexcept;
++
++  ///
++  /// \brief Create a LinkerInterfaceFile from the provided buffer.
++  ///
++  /// Parses the content of the provided buffer with the given constrains for
++  /// cpu type, cpu sub-type, matching requirement, and minimum deployment
++  /// version.
++  ///
++  /// \param[in] path path to the file (for error message only).
++  /// \param[in] data raw pointer to start of buffer.
++  /// \param[in] size size of the buffer in bytes.
++  /// \param[in] cpuType The cpu type / architecture to check the file for.
++  /// \param[in] cpuSubType The cpu sub type / sub architecture to check the
++  ///            file for.
++  /// \param[in] matchingMode Specified the cpu subtype matching mode.
++  /// \param[in] minOSVersion The minimum OS version / deployment target.
++  /// \param[out] errorMessage holds an error message when the return value is a
++  ///             nullptr.
++  /// \return nullptr on error
++  /// \since 1.0
++  /// \deprecated 1.1
++  ///
++  static LinkerInterfaceFile *
++  create(const std::string &path, const uint8_t *data, size_t size,
++         cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++         CpuSubTypeMatching matchingMode, PackedVersion32 minOSVersion,
++         std::string &errorMessage) noexcept;
++
++  ///
++  /// \brief Create a LinkerInterfaceFile from the provided buffer.
++  ///
++  /// Parses the content of the provided buffer with the given constrains for
++  /// cpu type, cpu sub-type, flags, and minimum deployment version.
++  ///
++  /// \param[in] path path to the file (for error message only).
++  /// \param[in] data raw pointer to start of buffer.
++  /// \param[in] size size of the buffer in bytes.
++  /// \param[in] cpuType The cpu type / architecture to check the file for.
++  /// \param[in] cpuSubType The cpu sub type / sub architecture to check the
++  ///            file for.
++  /// \param[in] flags Flags that control the parsing behavior.
++  /// \param[in] minOSVersion The minimum OS version / deployment target.
++  /// \param[out] errorMessage holds an error message when the return value is a
++  ///             nullptr.
++  /// \return nullptr on error
++  /// \since 1.1
++  /// \deprecated 1.3
++  ///
++  static LinkerInterfaceFile *
++  create(const std::string &path, const uint8_t *data, size_t size,
++         cpu_type_t cpuType, cpu_subtype_t cpuSubType, ParsingFlags flags,
++         PackedVersion32 minOSVersion, std::string &errorMessage) noexcept;
++
++  ///
++  /// \brief Create a LinkerInterfaceFile from a file.
++  ///
++  /// Parses the content of the file with the given constrains for cpu type,
++  /// cpu sub-type, flags, and minimum deployment version.
++  ///
++  /// \param[in] path path to the file.
++  /// \param[in] cpuType The cpu type / architecture to check the file for.
++  /// \param[in] cpuSubType The cpu sub type / sub architecture to check the
++  ///            file for.
++  /// \param[in] flags Flags that control the parsing behavior.
++  /// \param[in] minOSVersion The minimum OS version / deployment target.
++  /// \param[out] errorMessage holds an error message when the return value is a
++  ///             nullptr.
++  /// \return nullptr on error
++  /// \since 1.3
++  ///
++  static LinkerInterfaceFile *
++  create(const std::string &path, cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++         ParsingFlags flags, PackedVersion32 minOSVersion,
++         std::string &errorMessage) noexcept;
++
++  ///
++  /// \brief Query the file type.
++  /// \return Returns the file type this TAPI file represents.
++  /// \since 1.0
++  ///
++  FileType getFileType() const noexcept;
++
++  ///
++  /// \brief Query the platform
++  /// \return Returns the platform supported by the TAPI file.
++  /// \since 1.0
++  ///
++  Platform getPlatform() const noexcept;
++
++  ///
++  /// \brief Query the install name.
++  /// \return Returns the install name of the TAPI file.
++  /// \since 1.0
++  ///
++  const std::string &getInstallName() const noexcept;
++
++  ///
++  /// \brief Query the install name is version specifc.
++  /// \return True if the install name has been adjusted for the provided
++  ///         minimum OS version.
++  /// \since 1.0
++  ///
++  bool isInstallNameVersionSpecific() const noexcept;
++
++  ///
++  /// \brief Query the current library version.
++  /// \return Returns the current library version as 32bit packed version.
++  /// \since 1.0
++  ///
++  PackedVersion32 getCurrentVersion() const noexcept;
++
++  ///
++  /// \brief Query the compatibility library version.
++  /// \return Returns the compatibility library version as 32bit packed version.
++  /// \since 1.0
++  ///
++  PackedVersion32 getCompatibilityVersion() const noexcept;
++
++  ///
++  /// \brief Query the Swift ABI version.
++  /// \return Returns the Swift ABI version as unsigned integer.
++  /// \since 1.0
++  ///
++  unsigned getSwiftVersion() const noexcept;
++
++  ///
++  /// \brief Query the Objective-C Constraint.
++  /// \return Returns the Objetive-C constraint.
++  /// \since 1.0
++  ///
++  ObjCConstraint getObjCConstraint() const noexcept;
++
++  ///
++  /// \brief Query if the library has two level namespace.
++  /// \return Returns true if the library has two level namespace.
++  /// \since 1.0
++  ///
++  bool hasTwoLevelNamespace() const noexcept;
++
++  ///
++  /// \brief Query if the library is Applicatiuon Extension Safe.
++  /// \return Returns true if the library is Application Extension Safe.
++  /// \since 1.0
++  ///
++  bool isApplicationExtensionSafe() const noexcept;
++
++  ///
++  /// \brief Query if the library has any allowable clients.
++  /// \return Return true if there are any allowable clients.
++  /// \since 1.0
++  ///
++  bool hasAllowableClients() const noexcept;
++
++  ///
++  /// \brief Query if the library has any re-exported libraries.
++  /// \return Return true if there are any re-exported libraries.
++  /// \since 1.0
++  ///
++  bool hasReexportedLibraries() const noexcept;
++
++  ///
++  /// \brief Query if the library has any weak defined exports.
++  /// \return Return true if there are any weak defined exports.
++  /// \since 1.0
++  ///
++  bool hasWeakDefinedExports() const noexcept;
++
++  ///
++  /// \brief Obtain the name of the parent framework (umbrella framework).
++  /// \return Returns the name of the parent framework (if it exists), otherwise
++  ///         an empty string.
++  /// \since 1.0
++  ///
++  const std::string &getParentFrameworkName() const noexcept;
++
++  ///
++  /// \brief Obtain the list of allowable clients.
++  /// \return Returns a list of allowable clients.
++  /// \since 1.0
++  ///
++  const std::vector<std::string> &allowableClients() const noexcept;
++
++  ///
++  /// \brief Obtain the list of re-exported libraries.
++  /// \return Returns a list of re-exported libraries.
++  /// \since 1.0
++  ///
++  const std::vector<std::string> &reexportedLibraries() const noexcept;
++
++  ///
++  /// \brief Obtain a list of all symbols to be ignored.
++  /// \return Returns a list of all symbols that should be ignored.
++  /// \since 1.0
++  ///
++  const std::vector<std::string> &ignoreExports() const noexcept;
++
++  ///
++  /// \brief Obtain a list of all exported symbols.
++  /// \return Returns a list of all exported symbols.
++  /// \since 1.0
++  ///
++  const std::vector<Symbol> &exports() const noexcept;
++
++  ///
++  /// \brief Obtain a list of all undefined symbols.
++  /// \return Returns a list of all undefined symbols.
++  /// \since 1.0
++  ///
++  const std::vector<Symbol> &undefineds() const noexcept;
++
++  ///
++  /// \brief Obtain a list of all inlined frameworks.
++  /// \return Returns a list of install names of all inlined frameworks.
++  /// \since 1.3
++  ///
++  const std::vector<std::string> &inlinedFrameworkNames() const noexcept;
++
++  ///
++  /// \brief Create a LinkerInterfaceFile from the specified inlined framework.
++  ///
++  /// Creates a LinkerInterfaceFile with the given constrains for cpu type,
++  /// cpu sub-type, flags, and minimum deployment version.
++  ///
++  /// \param[in] installName install name of the inlined framework.
++  /// \param[in] cpuType The cpu type / architecture to check the file for.
++  /// \param[in] cpuSubType The cpu sub type / sub architecture to check the
++  ///            file for.
++  /// \param[in] flags Flags that control the parsing behavior.
++  /// \param[in] minOSVersion The minimum OS version / deployment target.
++  /// \param[out] errorMessage holds an error message when the return value is a
++  ///             nullptr.
++  /// \return nullptr on error
++  /// \since 1.3
++  ///
++  LinkerInterfaceFile *
++  getInlinedFramework(const std::string &installName, cpu_type_t cpuType,
++                      cpu_subtype_t cpuSubType, ParsingFlags flags,
++                      PackedVersion32 minOSVersion,
++                      std::string &errorMessage) const noexcept;
++
++  ///
++  /// \brief Destructor.
++  /// \since 1.0
++  ///
++  ~LinkerInterfaceFile() noexcept;
++
++  ///
++  /// \brief Copy constructor (deleted).
++  /// \since 1.0
++  ///
++  LinkerInterfaceFile(const LinkerInterfaceFile &) noexcept = delete;
++  LinkerInterfaceFile &operator=(const LinkerInterfaceFile &) noexcept = delete;
++
++  ///
++  /// \brief Move constructor.
++  /// \since 1.0
++  ///
++  LinkerInterfaceFile(LinkerInterfaceFile &&) noexcept;
++  LinkerInterfaceFile &operator=(LinkerInterfaceFile &&) noexcept;
++
++private:
++  LinkerInterfaceFile() noexcept;
++
++  class Impl;
++  class ImplData;
++  std::unique_ptr<Impl> _pImpl;
++};
++
++TAPI_NAMESPACE_V1_END
++
++#endif // TAPI_LINKER_INTERFACE_FILE_H
+diff --git tapilite/include/tapi/PackedVersion32.h tapilite/include/tapi/PackedVersion32.h
+new file mode 100644
+index 0000000..f8d96d0
+--- /dev/null
++++ tapilite/include/tapi/PackedVersion32.h
+@@ -0,0 +1,109 @@
++//===-- tapi/PackedVersion32.h - TAPI Packed Version 32 ---------*- C++ -*-===*\
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief Defines the packed version number.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_PACKED_VERSION_32_H
++#define TAPI_PACKED_VERSION_32_H
++
++#include <tapi/Defines.h>
++
++///
++/// \defgroup TAPI_PACKED_VERSION_32 Packed Version handling
++/// \ingroup TAPI_CPP_API
++///
++/// @{
++///
++
++TAPI_NAMESPACE_V1_BEGIN
++
++///
++/// \brief Packed Version Number Encoding.
++///
++/// The Mach-O version numbers are commonly encoded as a 32bit value, where the
++/// upper 16 bit quantity is used for the major version number and the lower two
++/// 8 bit quantities as minor version number and patch version number.
++///
++/// \since 1.0
++///
++class TAPI_PUBLIC PackedVersion32 {
++private:
++  uint32_t _version;
++
++public:
++  ///
++  /// \brief Default construct a PackedVersion32.
++  /// \since 1.0
++  ///
++  PackedVersion32() = default;
++
++  ///
++  /// \brief Construct a PackedVersion32 with a raw value.
++  /// \since 1.0
++  ///
++  PackedVersion32(uint32_t rawVersion) : _version(rawVersion) {}
++
++  ///
++  /// \brief Construct a PackedVersion32 with the provided major, minor, and
++  /// patch version number.
++  /// \since 1.0
++  ///
++  PackedVersion32(unsigned major, unsigned minor, unsigned patch)
++      : _version((major << 16) | ((minor & 0xff) << 8) | (patch & 0xff)) {}
++
++  ///
++  /// \brief Get the major version number.
++  /// \return The major version number as unsigned integer.
++  /// \since 1.0
++  ///
++  unsigned getMajor() const { return _version >> 16; }
++
++  ///
++  /// \brief Get the minor version number.
++  /// \return The minor version number as unsigned integer.
++  /// \since 1.0
++  ///
++  unsigned getMinor() const { return (_version >> 8) & 0xff; }
++
++  ///
++  /// \brief Get the patch version number.
++  /// \return The patch version number as unsigned integer.
++  /// \since 1.0
++  ///
++  unsigned getPatch() const { return _version & 0xff; }
++
++  bool operator<(const PackedVersion32 &rhs) const {
++    return _version < rhs._version;
++  }
++
++  bool operator==(const PackedVersion32 &rhs) const {
++    return _version == rhs._version;
++  }
++
++  bool operator!=(const PackedVersion32 &rhs) const {
++    return _version != rhs._version;
++  }
++
++  operator unsigned() const { return _version; }
++};
++
++TAPI_NAMESPACE_V1_END
++
++///
++/// @}
++///
++
++#endif // TAPI_PACKED_VERSION_32_H
+diff --git tapilite/include/tapi/Symbol.h tapilite/include/tapi/Symbol.h
+new file mode 100644
+index 0000000..cb79919
+--- /dev/null
++++ tapilite/include/tapi/Symbol.h
+@@ -0,0 +1,136 @@
++//===-- tapi/Symbol.h - TAPI Symbol -----------------------------*- C++ -*-===*\
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief Defines a symbol.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_SYMBOL_H
++#define TAPI_SYMBOL_H
++
++#include <tapi/Defines.h>
++
++///
++/// \defgroup TAPI_SYMBOL Symbol API
++/// \ingroup TAPI_CPP_API
++///
++/// @{
++///
++
++TAPI_NAMESPACE_V1_BEGIN
++
++///
++/// \brief Symbol flags.
++/// \since 1.0
++///
++enum class SymbolFlags : unsigned {
++  /// \brief No flags
++  /// \since 1.0
++  None = 0,
++
++  /// \brief Thread-local value symbol
++  /// \since 1.0
++  ThreadLocalValue = 1U << 0,
++
++  /// \brief Weak defined symbol
++  /// \since 1.0
++  WeakDefined = 1U << 1,
++
++  /// \brief Weak referenced symbol
++  /// \since 1.0
++  WeakReferenced = 1U << 2,
++};
++
++enum class SymbolKind : unsigned {
++  GlobalSymbol,
++  ObjectiveCClass,
++  ObjectiveCClassEHType,
++  ObjectiveCInstanceVariable,
++};
++
++inline SymbolFlags operator&(const SymbolFlags &lhs,
++                             const SymbolFlags &rhs) noexcept {
++  return static_cast<SymbolFlags>(static_cast<unsigned>(lhs) &
++                                  static_cast<unsigned>(rhs));
++}
++
++///
++/// \brief Provides query methods for symbols.
++/// \since 1.0
++///
++class TAPI_PUBLIC Symbol {
++public:
++  template <typename Tp>
++  Symbol(Tp &&name, SymbolFlags flags = SymbolFlags::None,
++      SymbolKind kind = SymbolKind::GlobalSymbol)
++      : _name(std::forward<Tp>(name)), _flags(flags), _kind(kind) {}
++
++  SymbolKind getKind() const { return _kind; }
++
++  ///
++  /// \brief Get the symbol name as string.
++  /// \return A string with the symbol name.
++  /// \since 1.0
++  ///
++  inline const std::string &getName() const noexcept { return _name; }
++
++  ///
++  /// \brief Obtain the symbol flags.
++  /// \return Returns the symbol flags.
++  /// \since 1.0
++  ///
++  inline SymbolFlags getFlags() const noexcept { return _flags; }
++
++  ///
++  /// \brief Query if the symbol is thread-local.
++  /// \return True if the symbol is a thread-local value, false otherwise.
++  /// \since 1.0
++  ///
++  inline bool isThreadLocalValue() const noexcept {
++    return (_flags & SymbolFlags::ThreadLocalValue) ==
++           SymbolFlags::ThreadLocalValue;
++  }
++
++  ///
++  /// \brief Query if the symbol is weak defined.
++  /// \return True if the symbol is weak defined, false otherwise.
++  /// \since 1.0
++  ///
++  inline bool isWeakDefined() const noexcept {
++    return (_flags & SymbolFlags::WeakDefined) == SymbolFlags::WeakDefined;
++  }
++
++  ///
++  /// \brief Query if the symbol is weak referenced.
++  /// \return True if the symbol is weak referenced, false otherwise.
++  /// \since 1.0
++  ///
++  inline bool isWeakReferenced() const noexcept {
++    return (_flags & SymbolFlags::WeakReferenced) ==
++           SymbolFlags::WeakReferenced;
++  }
++
++private:
++  SymbolKind _kind;
++  std::string _name;
++  SymbolFlags _flags;
++};
++
++TAPI_NAMESPACE_V1_END
++
++///
++/// @}
++///
++
++#endif // TAPI_SYMBOL_H
+diff --git tapilite/include/tapi/Version.h tapilite/include/tapi/Version.h
+new file mode 100644
+index 0000000..6fcbda4
+--- /dev/null
++++ tapilite/include/tapi/Version.h
+@@ -0,0 +1,63 @@
++//===-- tapi/Version.h - TAPI Version Interface -----------------*- C++ -*-===*\
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief Access the TAPI version information.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_VERSION_H
++#define TAPI_VERSION_H
++
++#include <string>
++#include <tapi/Defines.h>
++
++///
++/// \defgroup TAPI_VERSION Version methods
++/// \ingroup TAPI_CPP_API
++///
++/// @{
++///
++
++namespace tapi {
++
++///
++/// \brief Access to version related information about the TAPI dynamic library.
++/// \since 1.0
++///
++class TAPI_PUBLIC Version {
++public:
++  ///
++  /// \name Version Number Methods
++  /// @{
++  ///
++
++  ///
++  /// \brief Get the full library name and version as string.
++  /// \return A string with the program name and version number.
++  /// \since 1.0
++  ///
++  static std::string getFullVersionAsString() noexcept;
++
++  ///
++  /// @}
++  ///
++};
++
++} // namespace tapi
++
++///
++/// @}
++///
++
++#endif // TAPI_VERSION_H
+diff --git tapilite/include/tapi/tapi.h tapilite/include/tapi/tapi.h
+new file mode 100644
+index 0000000..6cc2fd6
+--- /dev/null
++++ tapilite/include/tapi/tapi.h
+@@ -0,0 +1,34 @@
++//===-- tapi/tapi.h - TAPI C++ Library Interface ----------------*- C++ -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief This is the umbrella header for the TAPI C++ Library Interface.
++/// \since 1.0
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#ifndef TAPI_H
++#define TAPI_H
++
++///
++/// \defgroup TAPI_CPP_API TAPI C++ API
++///
++/// The C++ Application Programming Interface (API) for the TAPI library
++///
++
++#include <tapi/Defines.h>
++#include <tapi/LinkerInterfaceFile.h>
++#include <tapi/PackedVersion32.h>
++#include <tapi/Symbol.h>
++#include <tapi/Version.h>
++
++#endif // TAPI_H
+diff --git tapilite/src/CMakeLists.txt tapilite/src/CMakeLists.txt
+new file mode 100644
+index 0000000..4765f3a
+--- /dev/null
++++ tapilite/src/CMakeLists.txt
+@@ -0,0 +1,12 @@
++
++set(TAPILITE_SOURCES
++	LinkerInterfaceFile.cpp
++	Version.cpp
++)
++
++add_library(tapilite ${TAPILITE_SOURCES})
++
++include_directories("${CMAKE_SOURCE_DIR}/tapilite/include")
++include_directories("${CMAKE_SOURCE_DIR}/ld64/src/abstraction")
++# for configure.h
++include_directories("${CMAKE_BINARY_DIR}/ld64")
+diff --git tapilite/src/LinkerInterfaceFile.cpp tapilite/src/LinkerInterfaceFile.cpp
+new file mode 100644
+index 0000000..ad6407f
+--- /dev/null
++++ tapilite/src/LinkerInterfaceFile.cpp
+@@ -0,0 +1,1057 @@
++//===- libtapi/LinkerInterfaceFile.cpp - TAPI File Interface ----*- C++ -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief Implements the C++ linker interface file API.
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#include <string>
++#include <tapi/LinkerInterfaceFile.h>
++#include <tapi/PackedVersion32.h>
++#include <tapi/Symbol.h>
++#include <vector>
++#include <iterator>
++#include <fstream>
++#include <algorithm>
++
++#include <yaml.h>
++
++#include <MachOFileAbstraction.hpp>
++
++TAPI_NAMESPACE_V1_BEGIN
++
++//using namespace tapi::internal;
++
++static PackedVersion32 parseVersion32(std::string str) {
++  size_t    len = 0;
++  uint32_t  version = 0;
++  size_t    num = 0;
++
++  if (str.empty())
++    return 0;
++
++  len = str.find_first_of(".");
++  if (len == std::string::npos)
++    return 0;
++
++  num = std::stoull(str, &len, 10);
++  if (len == 0)
++    return 0;
++
++  if (num > UINT16_MAX)
++    return 0;
++
++  version = num << 16;
++  str = str.substr(len + 1);
++
++  len = str.find_first_of(".");
++  if (len != std::string::npos) {
++    num = std::stoull(str, &len, 10);
++    if (len == 0)
++      return 0;
++
++    if (num > UINT8_MAX)
++      return 0;
++
++    version |= (num << 8);
++    str = str.substr(len + 1);
++  }
++
++  if (!str.empty()) {
++    num = std::stoull(str, &len, 10);
++    if (len == 0)
++      return 0;
++
++    if (num > UINT8_MAX)
++      return 0;
++
++    version |= num;
++  }
++
++  return version;
++}
++
++class LinkerInterfaceFile::ImplData {
++public:
++  std::string _path;
++  FileType _fileType{FileType::Unsupported};
++  Platform _platform{Platform::Unknown};
++  std::string _installName;
++
++  PackedVersion32 _currentVersion;
++  PackedVersion32 _compatibilityVersion;
++  unsigned _swiftABIVersion;
++  ObjCConstraint _objcConstraint;
++
++  std::vector<std::string> _reexportedLibraries;
++  std::vector<std::string> _allowableClients;
++  std::vector<Symbol *> _exports;
++  std::vector<Symbol *> _undefineds;
++
++  std::vector<std::string> _arches;
++  std::string _selectedArch;
++
++  ImplData() noexcept = default;
++
++  static LinkerInterfaceFile::ImplData *
++    loadFile(const std::string &path, const uint8_t *data, size_t size,
++        cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++        std::string &errorMessage);
++};
++
++class LinkerInterfaceFile::Impl {
++public:
++  std::shared_ptr<const LinkerInterfaceFile::ImplData> _data;
++
++  std::string _installName;
++  std::string _parentFrameworkName;
++  PackedVersion32 _compatibilityVersion;
++  std::vector<std::string> _ignoreExports;
++  std::vector<std::string> _inlinedFrameworkNames;
++  std::vector<Symbol> _exports;
++  std::vector<Symbol> _undefineds;
++
++  bool _hasTwoLevelNamespace{false};
++  bool _isAppExtensionSafe{false};
++  bool _hasWeakDefExports{false};
++  bool _installPathOverride{false};
++
++  Impl() noexcept = default;
++
++  bool init(const std::shared_ptr<const LinkerInterfaceFile::ImplData> &data,
++            cpu_type_t cpuType, cpu_subtype_t cpuSubType, ParsingFlags flags,
++            PackedVersion32 minOSVersion, std::string &errorMessage) noexcept;
++
++  template <typename T> void addSymbol(T &&name, SymbolFlags flags) {
++    if (std::find(_ignoreExports.begin(), _ignoreExports.end(),
++				name) == _ignoreExports.end())
++      _exports.emplace_back(std::forward<T>(name), flags);
++  }
++
++  void processSymbol(std::string name, PackedVersion32 minOSVersion,
++                     bool disallowWeakImports) {
++    // $ld$ <action> $ <condition> $ <symbol-name>
++    if (name.substr(0, sizeof("$ld$") - 1).compare("$ld$") != 0)
++      return;
++
++    name = name.substr(sizeof("$ld$") - 1);
++
++    size_t pos = name.find_first_of("$");
++    if (pos == std::string::npos)
++      return;
++    auto action = name.substr(0, pos);
++    name = name.substr(pos + 1);
++
++    pos = name.find_first_of("$");
++    if (pos == std::string::npos)
++      return;
++    auto condition = name.substr(0, pos);
++    name = name.substr(pos + 1);
++
++    if (name.empty())
++      return;
++    auto symbolName = name; 
++
++    if (condition.substr(0, sizeof("os") - 1).compare("os") != 0)
++      return;
++
++    auto version = parseVersion32(condition.substr(sizeof("os") - 1));
++    if (version != minOSVersion)
++      return;
++
++    if (action.compare("hide") == 0) {
++      _ignoreExports.emplace_back(symbolName);
++      return;
++    }
++
++    if (action.compare("add") == 0) {
++      _exports.emplace_back(symbolName);
++      return;
++    }
++
++    if (action.compare("weak") == 0) {
++      if (disallowWeakImports)
++        _ignoreExports.emplace_back(symbolName);
++
++      return;
++    }
++
++    if (action.compare("install_name") == 0) {
++      _installName = symbolName;
++      _installPathOverride = true;
++      if (_installName == "/System/Library/Frameworks/"
++                          "ApplicationServices.framework/Versions/A/"
++                          "ApplicationServices") {
++        _compatibilityVersion = parseVersion32("1.0");
++      }
++      return;
++    }
++
++    if (action.compare("compatibility_version") == 0) {
++      _compatibilityVersion = parseVersion32(symbolName);
++      return;
++    }
++  }
++};
++
++static std::string getArchForCPU(cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++                                  bool enforceCpuSubType) {
++  /* this function is deliberately stupid, for the fine details of
++   * subtypes we need more checking, which isn't necessary for the
++   * general case */
++
++  switch (cpuType) {
++    case CPU_TYPE_I386:
++      return "i386";
++    case CPU_TYPE_X86_64:
++      return "x86_64";
++    case CPU_TYPE_ARM:
++      return "arm";
++    case CPU_TYPE_POWERPC:
++      return "ppc";
++    case CPU_TYPE_POWERPC64:
++      return "ppc64";
++    case CPU_TYPE_ARM64:
++      return "arm64";
++	case CPU_TYPE_ANY:
++	  return "";  /* meant to match first arch */
++    default:
++      return "unsupported";
++  }
++}
++
++LinkerInterfaceFile::LinkerInterfaceFile() noexcept
++    : _pImpl{new LinkerInterfaceFile::Impl} {}
++LinkerInterfaceFile::~LinkerInterfaceFile() noexcept = default;
++LinkerInterfaceFile::LinkerInterfaceFile(LinkerInterfaceFile &&) noexcept =
++    default;
++LinkerInterfaceFile &
++LinkerInterfaceFile::operator=(LinkerInterfaceFile &&) noexcept = default;
++
++std::vector<std::string>
++LinkerInterfaceFile::getSupportedFileExtensions() noexcept {
++  return {".tbd"};
++}
++
++
++/// \brief Load and parse the provided TBD file in the buffer and return on
++///        success the interface file.
++LinkerInterfaceFile::ImplData *LinkerInterfaceFile::ImplData::loadFile(
++    const std::string &path, const uint8_t *data, size_t size,
++    cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++    std::string &errorMessage) {
++  auto          ret = new LinkerInterfaceFile::ImplData;
++  yaml_parser_t parser;
++  yaml_event_t  event;
++  yaml_char_t  *p;
++  bool          selectSection = false;
++
++  ret->_path = path;
++
++  /* Because platform isn't passed onto us by ld, we cannot know what to
++   * select -- this is probably the problem meant to be solved by TAPIv4
++   * which explicitly refers to targets such that arm64-macos is
++   * different from arm64-ios.  Alas, for now it seems this mix isn't
++   * there for (system) tbd files, so we just ignore platform, and
++   * return the first one that matches the cpu specification. */
++  std::string myarch = getArchForCPU(cpuType, cpuSubType, false);
++
++  enum {
++    TAPILITE_INIT,
++    TAPILITE_HEADER,
++    TAPILITE_EXPORTS,
++    TAPILITE_UNDEFINEDS,
++    TAPILITE_REEXPORTS,
++    TAPILITE_DONE
++  }             state = TAPILITE_INIT;
++  enum {
++    TAPILITE_FINDKEY,
++    TAPILITE_ARCHS,
++    TAPILITE_UUIDS,
++    TAPILITE_PLATFORM,
++    TAPILITE_FLAGS,
++    TAPILITE_INSTALLNAME,
++    TAPILITE_CURVERSION,
++    TAPILITE_COMPATVERSION,
++    TAPILITE_SWIFTVERSION,
++    TAPILITE_OBJCCONSTR,
++    TAPILITE_PARENTUMBR,
++    TAPILITE_ALLOWED_CLNTS,
++    TAPILITE_SYMBOLS,
++    TAPILITE_RE_EXPORTS,
++    TAPILITE_OBJCCLASSES,
++    TAPILITE_OBJCEHTYPES,
++    TAPILITE_OBJCIVARS,
++    TAPILITE_WEAKDEFSYMS,
++    TAPILITE_THRLOCSYMS,
++    TAPILITE_VERSION
++  }             substate = TAPILITE_FINDKEY;
++  enum {
++    TAPILITE_V_INVALID,
++    TAPILITE_V1,
++    TAPILITE_V2,
++    TAPILITE_V3,
++    TAPILITE_V4_OR_LATER,
++    TAPILITE_V4
++  }             version = TAPILITE_V1;  /* default for tagless */
++
++  yaml_parser_initialize(&parser);
++  yaml_parser_set_input_string(&parser,
++      reinterpret_cast<const unsigned char *>(data), size);
++
++#define error(...) { \
++  char errbuf[256]; \
++  snprintf(errbuf, sizeof(errbuf), __VA_ARGS__); \
++  errorMessage = errbuf; \
++  return nullptr; \
++}
++  /* syntax:
++   * https://github.com/apple/llvm-project/blob/apple/main/llvm/lib/TextAPI/MachO/TextStub.cpp */
++  while (state != TAPILITE_DONE) {
++    if (state != TAPILITE_INIT)
++      yaml_event_delete(&event);
++    else
++      state = TAPILITE_HEADER;
++
++    if (!yaml_parser_parse(&parser, &event))
++      break;
++
++#define ymlcmp(X, Y) strcmp((char *)X, Y)
++#define ymlncmp(X, Y, Z) strncmp((char *)X, Y, Z)
++    /* process */
++    switch (event.type) {
++      case YAML_STREAM_END_EVENT:
++        state = TAPILITE_DONE;
++        break;
++      case YAML_SCALAR_EVENT:
++#define yamlscalar event.data.scalar
++        if (yamlscalar.value != NULL && substate == TAPILITE_FINDKEY) {
++          switch (state) {
++            case TAPILITE_HEADER:
++              if (ymlcmp(yamlscalar.value, "archs") == 0)
++                substate = TAPILITE_ARCHS;
++              if (ymlcmp(yamlscalar.value, "targets") == 0)
++                substate = TAPILITE_ARCHS;
++              else if (ymlcmp(yamlscalar.value, "platform") == 0)
++                substate = TAPILITE_PLATFORM;
++              else if (ymlcmp(yamlscalar.value, "install-name") == 0)
++                substate = TAPILITE_INSTALLNAME;
++              else if (ymlcmp(yamlscalar.value, "current-version") == 0)
++                substate = TAPILITE_CURVERSION;
++              else if (ymlcmp(yamlscalar.value, "compatibility-version") == 0)
++                substate = TAPILITE_COMPATVERSION;
++              else if (ymlcmp(yamlscalar.value, "swift-version") == 0)
++                substate = TAPILITE_SWIFTVERSION;
++              else if (ymlcmp(yamlscalar.value, "swift-abi-version") == 0)
++                substate = TAPILITE_SWIFTVERSION;
++              else if (ymlcmp(yamlscalar.value, "objc-constraint") == 0)
++                substate = TAPILITE_OBJCCONSTR;
++              else if (ymlcmp(yamlscalar.value, "uuids") == 0)
++                substate = TAPILITE_UUIDS;
++              else if (ymlcmp(yamlscalar.value, "parent-umbrella") == 0)
++                substate = TAPILITE_PARENTUMBR;
++              else if (ymlcmp(yamlscalar.value, "allowable-clients") == 0)
++                substate = TAPILITE_ALLOWED_CLNTS;
++              else if (ymlcmp(yamlscalar.value, "flags") == 0)
++                substate = TAPILITE_FLAGS;
++              else if (ymlcmp(yamlscalar.value, "tbd-version") == 0)
++                substate = TAPILITE_VERSION;
++              else if (ymlcmp(yamlscalar.value, "exports") == 0)
++                state = TAPILITE_EXPORTS;
++              else if (ymlcmp(yamlscalar.value, "undefineds") == 0)
++                state = TAPILITE_UNDEFINEDS;
++              break;
++            case TAPILITE_EXPORTS:
++            case TAPILITE_REEXPORTS:
++              if (ymlcmp(yamlscalar.value, "archs") == 0)
++                substate = TAPILITE_ARCHS;
++              if (ymlcmp(yamlscalar.value, "targets") == 0)
++                substate = TAPILITE_ARCHS;
++              else if (ymlcmp(yamlscalar.value, "allowed-clients") == 0)
++                substate = TAPILITE_ALLOWED_CLNTS;
++              else if (ymlcmp(yamlscalar.value, "re-exports") == 0)
++                substate = TAPILITE_RE_EXPORTS;
++              else if (ymlcmp(yamlscalar.value, "symbols") == 0)
++                substate = TAPILITE_SYMBOLS;
++              else if (ymlcmp(yamlscalar.value, "objc-classes") == 0)
++                substate = TAPILITE_OBJCCLASSES;
++              else if (ymlcmp(yamlscalar.value, "objc-eh-types") == 0)
++                substate = TAPILITE_OBJCEHTYPES;
++              else if (ymlcmp(yamlscalar.value, "objc-ivars") == 0)
++                substate = TAPILITE_OBJCIVARS;
++              else if (ymlcmp(yamlscalar.value, "weak-def-symbols") == 0)
++                substate = TAPILITE_WEAKDEFSYMS;
++              else if (ymlcmp(yamlscalar.value, "weak-symbols") == 0)
++                substate = TAPILITE_WEAKDEFSYMS;
++              else if (ymlcmp(yamlscalar.value, "thread-local-symbols") == 0)
++                substate = TAPILITE_THRLOCSYMS;
++              break;
++            case TAPILITE_UNDEFINEDS:
++              if (ymlcmp(yamlscalar.value, "archs") == 0)
++                substate = TAPILITE_ARCHS;
++              if (ymlcmp(yamlscalar.value, "targets") == 0)
++                substate = TAPILITE_ARCHS;
++              else if (ymlcmp(yamlscalar.value, "symbols") == 0)
++                substate = TAPILITE_SYMBOLS;
++              else if (ymlcmp(yamlscalar.value, "objc-classes") == 0)
++                substate = TAPILITE_OBJCCLASSES;
++              else if (ymlcmp(yamlscalar.value, "objc-eh-types") == 0)
++                substate = TAPILITE_OBJCEHTYPES;
++              else if (ymlcmp(yamlscalar.value, "objc-ivars") == 0)
++                substate = TAPILITE_OBJCIVARS;
++              else if (ymlcmp(yamlscalar.value, "weak-ref-symbols") == 0)
++                substate = TAPILITE_WEAKDEFSYMS;
++              else if (ymlcmp(yamlscalar.value, "weak-symbols") == 0)
++                substate = TAPILITE_WEAKDEFSYMS;
++              break;
++          }
++
++          /* reset selection selector */
++          if (substate == TAPILITE_ARCHS)
++            selectSection = false;
++        } else if (substate != TAPILITE_FINDKEY) {
++          /* we have a real value, need to append it to whatever is
++           * currently the open thing we're writing for */
++          switch (state) {
++            case TAPILITE_HEADER:
++              switch (substate) {
++                case TAPILITE_VERSION:
++                  if (version == TAPILITE_V4_OR_LATER) {
++                    if (ymlcmp(yamlscalar.value, "4") == 0)
++                      version = TAPILITE_V4;
++                    else
++                      error("unsupported TAPI version %s", yamlscalar.value);
++                  } else {
++                    error("found tbd-version for TAPI version <v4");
++                  }
++                  break;
++                case TAPILITE_ARCHS:
++                  /* this is the point where version needs to be set */
++                  if (version == TAPILITE_V4_OR_LATER ||
++                      version == TAPILITE_V_INVALID)
++                    error("unknown tbd file, unknown version specified");
++
++                  if (ret->_fileType == FileType::Unsupported) {
++                    /* apply defaults for various settings based on the
++                     * TAPI version */
++                    switch (version) {
++                      case TAPILITE_V1:
++                        ret->_currentVersion = parseVersion32("1.0");
++                        ret->_compatibilityVersion = parseVersion32("1.0");
++                        ret->_swiftABIVersion = 0;
++                        ret->_objcConstraint = ObjCConstraint::None;
++                        break;
++                      case TAPILITE_V2:
++                      case TAPILITE_V3:
++                      case TAPILITE_V4:
++                        ret->_currentVersion = parseVersion32("1.0");
++                        ret->_compatibilityVersion = parseVersion32("1.0");
++                        ret->_swiftABIVersion = 0;
++                        ret->_objcConstraint = ObjCConstraint::Retain_Release;
++                        break;
++                    }
++
++                    if (version == TAPILITE_V1)
++                      ret->_fileType == FileType::TBD_V1;
++                    else if (version == TAPILITE_V2)
++                      ret->_fileType == FileType::TBD_V2;
++                    else if (version == TAPILITE_V3)
++                      ret->_fileType == FileType::TBD_V3;
++                    else if (version == TAPILITE_V4)
++                      ret->_fileType == FileType::TBD_V4;
++                  }
++
++                  ret->_arches.emplace_back(
++                      std::string((const char *)yamlscalar.value));
++                  if (!ret->_selectedArch.empty())
++                    break;  /* take first matching arch */
++
++                  switch (version) {
++                    case TAPILITE_V4:
++                      {
++                        /* extract arch, platform out of target, set
++                         * platform if arch matches */
++                        size_t len = myarch.length();
++                        if (ymlncmp(yamlscalar.value, myarch.c_str(), len) == 0
++                            && yamlscalar.value[len] == '-')
++                        {
++                          ret->_selectedArch =
++                            std::string((const char *)yamlscalar.value);
++                          /* this is a copy of the PLATFORM case below */
++                          if (ymlcmp(yamlscalar.value + len + 1, "macosx") == 0)
++                            ret->_platform = Platform::OSX;
++                          else if (ymlcmp(yamlscalar.value + len + 1,
++                                "ios") == 0)
++                            ret->_platform = Platform::iOS;
++                          /* TODO: see below */
++                        }
++                      }
++                      break;
++                    default:
++                      /* see if arch matches */
++                      if (ymlcmp(yamlscalar.value, myarch.c_str()))
++                        ret->_selectedArch = myarch;
++                      break;
++                  }
++                  break;
++                case TAPILITE_PLATFORM:
++                  if (ymlcmp(yamlscalar.value, "macosx") == 0)
++                    ret->_platform = Platform::OSX;
++                  else if (ymlcmp(yamlscalar.value, "ios") == 0)
++                    ret->_platform = Platform::iOS;
++                  /* TODO: does it really make a difference to check for
++                   * the rest? */
++                  break;
++                case TAPILITE_INSTALLNAME:
++                  ret->_installName =
++                    std::string((const char *)yamlscalar.value);
++                  break;
++                case TAPILITE_CURVERSION:
++                  ret->_currentVersion =
++                    parseVersion32((const char *)yamlscalar.value);
++                  break;
++                case TAPILITE_COMPATVERSION:
++                  ret->_compatibilityVersion =
++                    parseVersion32((const char *)yamlscalar.value);
++                  break;
++                case TAPILITE_SWIFTVERSION:
++                  ret->_swiftABIVersion =
++                    std::stoull((const char *)yamlscalar.value, NULL, 10);
++                  break;
++                case TAPILITE_OBJCCONSTR:
++                  if (ymlcmp(yamlscalar.value, "none") == 0)
++                    ret->_objcConstraint = ObjCConstraint::None;
++                  else if (ymlcmp(yamlscalar.value, "retain_release") == 0)
++                    ret->_objcConstraint = ObjCConstraint::Retain_Release;
++                  else if (ymlcmp(yamlscalar.value,
++                        "retain_release_for_simulator") == 0)
++                    ret->_objcConstraint =
++                      ObjCConstraint::Retain_Release_For_Simulator;
++                  else if (ymlcmp(yamlscalar.value,
++                        "retain_release_or_gc") == 0)
++                    ret->_objcConstraint =
++                      ObjCConstraint::Retain_Release_Or_GC;
++                  else if (ymlcmp(yamlscalar.value, "gc") == 0)
++                    ret->_objcConstraint = ObjCConstraint::GC;
++                  break;
++                case TAPILITE_ALLOWED_CLNTS:
++                  ret->_allowableClients.emplace_back(
++                      std::string((const char *)yamlscalar.value));
++                  break;
++                case TAPILITE_UUIDS:
++                case TAPILITE_PARENTUMBR:
++                case TAPILITE_FLAGS:
++                  /* ignored: there's currently no consumer for it from
++                   * ld64 */
++                  break;
++              }
++              break;
++            case TAPILITE_EXPORTS:
++            case TAPILITE_REEXPORTS:
++              switch (substate) {
++                case TAPILITE_ARCHS:
++                  /* remember: for V4, we store target in selectedArch */
++                  if (ymlcmp(yamlscalar.value, ret->_selectedArch.c_str()) == 0)
++                    selectSection = true;
++                  break;
++                case TAPILITE_ALLOWED_CLNTS:
++                  /* should respect this, but for now we just ignore it */
++                  break;
++                case TAPILITE_RE_EXPORTS:
++                case TAPILITE_SYMBOLS:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::GlobalSymbol));
++                  break;
++                case TAPILITE_OBJCCLASSES:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::ObjectiveCClass));
++                  break;
++                case TAPILITE_OBJCEHTYPES:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::ObjectiveCClassEHType));
++                  break;
++                case TAPILITE_OBJCIVARS:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None,
++                      SymbolKind::ObjectiveCInstanceVariable));
++                  break;
++                case TAPILITE_WEAKDEFSYMS:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::WeakDefined, SymbolKind::GlobalSymbol));
++                  break;
++                case TAPILITE_THRLOCSYMS:
++                  if (!selectSection)
++                    break;
++                  ret->_exports.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::ThreadLocalValue, SymbolKind::GlobalSymbol));
++                  break;
++              }
++              break;
++            case TAPILITE_UNDEFINEDS:
++              switch (substate) {
++                case TAPILITE_ARCHS:
++                  /* remember: for V4, we store target in selectedArch */
++                  if (ymlcmp(yamlscalar.value, ret->_selectedArch.c_str()) == 0)
++                    selectSection = true;
++                  break;
++                case TAPILITE_SYMBOLS:
++                  if (!selectSection)
++                    break;
++                  ret->_undefineds.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::GlobalSymbol));
++                  break;
++                case TAPILITE_OBJCCLASSES:
++                  if (!selectSection)
++                    break;
++                  ret->_undefineds.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::ObjectiveCClass));
++                  break;
++                case TAPILITE_OBJCEHTYPES:
++                  if (!selectSection)
++                    break;
++                  ret->_undefineds.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None, SymbolKind::ObjectiveCClassEHType));
++                  break;
++                case TAPILITE_OBJCIVARS:
++                  if (!selectSection)
++                    break;
++                  ret->_undefineds.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::None,
++                      SymbolKind::ObjectiveCInstanceVariable));
++                  break;
++                case TAPILITE_WEAKDEFSYMS:
++                  if (!selectSection)
++                    break;
++                  ret->_undefineds.emplace_back(new Symbol(
++                      std::string((const char *)yamlscalar.value),
++                      SymbolFlags::WeakReferenced, SymbolKind::GlobalSymbol));
++                  break;
++              }
++              break;
++          }
++        }
++        break;
++      case YAML_SEQUENCE_START_EVENT:
++        break;
++      case YAML_SEQUENCE_END_EVENT:
++        substate = TAPILITE_FINDKEY;
++        break;
++      case YAML_MAPPING_START_EVENT:
++#define yamlms event.data.mapping_start
++        switch (state) {
++          case TAPILITE_HEADER:
++            if (yamlms.tag == NULL)
++              break;
++            if (ymlncmp(yamlms.tag, "!tapi-tbd",
++                  sizeof("!tapi-tbd") - 1) != 0)
++              break;
++            p = yamlms.tag += sizeof("!tapi-tbd") - 1;
++            if (*p == '\0') {
++              /* this could be version 4 or later, in which case we
++               * expect a tbd-version key */
++              version = TAPILITE_V4_OR_LATER;
++            } else if (*p == '-' && p[1] == 'v') {
++              p += 2;
++              switch (*p) {
++                case '1':
++                  /* technically shouldn't be in use */
++                  version = TAPILITE_V1;
++                  break;
++                case '2':
++                  version = TAPILITE_V2;
++                  break;
++                case '3':
++                  version = TAPILITE_V3;
++                  break;
++                default:
++                  version = TAPILITE_V_INVALID;
++                  break;
++              }
++            }
++            break;
++          default:
++            /* ignore */
++            break;
++        }
++        substate = TAPILITE_FINDKEY;
++        break;
++      case YAML_MAPPING_END_EVENT:
++      /* TODO: could use this to close list pointers or something */
++      default:
++        break;
++    }
++  }
++
++  yaml_event_delete(&event);
++  yaml_parser_delete(&parser);
++#undef error
++
++  return ret;
++}
++
++bool LinkerInterfaceFile::isSupported(const std::string &path,
++    const uint8_t *data,
++    size_t size) noexcept {
++  std::string err;
++  auto file = LinkerInterfaceFile::ImplData::loadFile(
++      path, data, size, CPU_TYPE_ANY, CPU_SUBTYPE_MULTIPLE, err);
++  
++  return file && file->_platform != Platform::Unknown;
++}
++
++bool LinkerInterfaceFile::shouldPreferTextBasedStubFile(
++    const std::string &path) noexcept {
++  std::string err;
++  std::ifstream ifs;
++  ifs.open(path, std::ifstream::in);
++  auto data = std::string(std::istreambuf_iterator<char>{ifs}, {});
++  auto file = LinkerInterfaceFile::ImplData::loadFile(
++      path, (const uint8_t *)data.c_str(), data.length(),
++	  CPU_TYPE_ANY, CPU_SUBTYPE_MULTIPLE, err);
++
++  return file && file->_platform != Platform::Unknown;
++}
++
++bool LinkerInterfaceFile::areEquivalent(const std::string &tbdPath,
++                                        const std::string &dylibPath) noexcept {
++  // Simple decision, always prefer dylib over textstub if it exists,
++  // don't check anything, so we don't have to implement Mach-O reading
++  // to check that UUIDs match
++  return false;
++}
++
++bool LinkerInterfaceFile::Impl::init(
++    const std::shared_ptr<const LinkerInterfaceFile::ImplData> &data,
++    cpu_type_t cpuType, cpu_subtype_t cpuSubType, ParsingFlags flags,
++    PackedVersion32 minOSVersion, std::string &errorMessage) noexcept {
++  _data = data;
++  bool enforceCpuSubType = flags & ParsingFlags::ExactCpuSubType;
++  auto arch = getArchForCPU(cpuType, cpuSubType, enforceCpuSubType);
++  if (arch.compare("unsupported") == 0) {
++    auto count = data->_arches.size();
++    if (count > 1)
++      errorMessage = "missing required architecture " +
++                     arch + " in file " +
++                     data->_path + " (" + std::to_string(count) +
++                     " slices)";
++    else
++      errorMessage = "missing required architecture " +
++                     arch + " in file " +
++                     data->_path;
++    return false;
++  }
++
++  _compatibilityVersion = data->_compatibilityVersion;
++
++  // Remove the patch level.
++  minOSVersion =
++      PackedVersion32(minOSVersion.getMajor(), minOSVersion.getMinor(), 0);
++
++  // Pre-scan for special linker symbols.
++  for (auto *symbol : _data->_exports) {
++    if (symbol->getKind() != SymbolKind::GlobalSymbol)
++      continue;
++
++    processSymbol(symbol->getName(), minOSVersion,
++                  flags & ParsingFlags::DisallowWeakImports);
++  }
++  std::sort(_ignoreExports.begin(), _ignoreExports.end());
++  auto last = std::unique(_ignoreExports.begin(), _ignoreExports.end());
++  _ignoreExports.erase(last, _ignoreExports.end());
++
++  bool useObjC1ABI =
++      (data->_platform == Platform::OSX) && (arch.compare("i386") == 0);
++  for (const auto *symbol : data->_exports) {
++    switch (symbol->getKind()) {
++    case SymbolKind::GlobalSymbol:
++      if (symbol->getName().substr(0, 4).compare("$ld$") == 0)
++        continue;
++      addSymbol(symbol->getName(), symbol->getFlags());
++      break;
++    case SymbolKind::ObjectiveCClass:
++      if (useObjC1ABI) {
++        addSymbol(".objc_class_name_" + symbol->getName(),
++                  symbol->getFlags());
++      } else {
++        addSymbol("_OBJC_CLASS_$_" + symbol->getName(),
++                  symbol->getFlags());
++        addSymbol("_OBJC_METACLASS_$_" + symbol->getName(),
++                  symbol->getFlags());
++      }
++      break;
++    case SymbolKind::ObjectiveCClassEHType:
++      addSymbol("_OBJC_EHTYPE_$_" + symbol->getName(),
++                symbol->getFlags());
++      break;
++    case SymbolKind::ObjectiveCInstanceVariable:
++      addSymbol("_OBJC_IVAR_$_" + symbol->getName(), symbol->getFlags());
++      break;
++    }
++
++    if (symbol->isWeakDefined())
++      _hasWeakDefExports = true;
++  }
++
++  for (const auto *symbol : data->_undefineds) {
++    switch (symbol->getKind()) {
++    case SymbolKind::GlobalSymbol:
++      _undefineds.emplace_back(symbol->getName(), symbol->getFlags());
++      break;
++    case SymbolKind::ObjectiveCClass:
++      if (useObjC1ABI) {
++        _undefineds.emplace_back(".objc_class_name_" + symbol->getName(),
++                                 symbol->getFlags());
++      } else {
++        _undefineds.emplace_back("_OBJC_CLASS_$_" + symbol->getName(),
++                                 symbol->getFlags());
++        _undefineds.emplace_back("_OBJC_METACLASS_$_" + symbol->getName(),
++                                 symbol->getFlags());
++      }
++      break;
++    case SymbolKind::ObjectiveCClassEHType:
++      _undefineds.emplace_back("_OBJC_EHTYPE_$_" + symbol->getName(),
++                               symbol->getFlags());
++      break;
++    case SymbolKind::ObjectiveCInstanceVariable:
++      _undefineds.emplace_back("_OBJC_IVAR_$_" + symbol->getName(),
++                               symbol->getFlags());
++      break;
++    }
++  }
++
++  /* TODO we don't handle multiple documents, vague how it works/what it is
++  for (auto &file : interface->_documents) {
++    auto framework = std::static_pointer_cast<const InterfaceFile>(file);
++    _inlinedFrameworkNames.emplace_back(framework->getInstallName());
++    _inlinedFrameworks.emplace_back(framework);
++  }
++  */
++
++  return true;
++}
++
++LinkerInterfaceFile *LinkerInterfaceFile::create(
++    const std::string &path, const uint8_t *data, size_t size,
++    cpu_type_t cpuType, cpu_subtype_t cpuSubType,
++    CpuSubTypeMatching matchingMode, PackedVersion32 minOSVersion,
++    std::string &errorMessage) noexcept {
++
++  ParsingFlags flags = (matchingMode == CpuSubTypeMatching::Exact)
++                           ? ParsingFlags::ExactCpuSubType
++                           : ParsingFlags::None;
++
++  return create(path, data, size, cpuType, cpuSubType, flags, minOSVersion,
++                errorMessage);
++}
++
++LinkerInterfaceFile *LinkerInterfaceFile::create(
++    const std::string &path, const uint8_t *data, size_t size,
++    cpu_type_t cpuType, cpu_subtype_t cpuSubType, ParsingFlags flags,
++    PackedVersion32 minOSVersion, std::string &errorMessage) noexcept {
++
++  if (path.empty() || data == nullptr || size < 8) {
++    errorMessage = "invalid argument";
++    return nullptr;
++  }
++
++  auto impldata = LinkerInterfaceFile::ImplData::loadFile(
++      path, data, size, cpuType, cpuSubType, errorMessage);
++  if (impldata == nullptr)
++    return nullptr;
++
++  auto file = new LinkerInterfaceFile;
++  if (file == nullptr) {
++    errorMessage = "could not allocate memory";
++    return nullptr;
++  }
++
++  if (file->_pImpl->init(
++        std::shared_ptr<LinkerInterfaceFile::ImplData>(impldata),
++        cpuType, cpuSubType, flags, minOSVersion, errorMessage)) {
++    return file;
++  }
++
++  delete file;
++  return nullptr;
++}
++
++LinkerInterfaceFile *
++LinkerInterfaceFile::create(const std::string &path, cpu_type_t cpuType,
++                            cpu_subtype_t cpuSubType, ParsingFlags flags,
++                            PackedVersion32 minOSVersion,
++                            std::string &errorMessage) noexcept {
++  std::ifstream ifs;
++  ifs.open(path, std::ifstream::in);
++  auto buf = std::string(std::istreambuf_iterator<char>{ifs}, {});
++  auto data = LinkerInterfaceFile::ImplData::loadFile(
++      path, (const uint8_t *)buf.c_str(), buf.length(),
++      cpuType, cpuSubType, errorMessage);
++  if (data == nullptr)
++    return nullptr;
++
++  auto file = new LinkerInterfaceFile;
++  if (file == nullptr) {
++    errorMessage = "could not allocate memory";
++    return nullptr;
++  }
++
++  if (file->_pImpl->init(
++			  std::shared_ptr<LinkerInterfaceFile::ImplData>(data),
++			  cpuType, cpuSubType, flags, minOSVersion, errorMessage)) {
++    return file;
++  }
++
++  delete file;
++  return nullptr;
++}
++
++FileType LinkerInterfaceFile::getFileType() const noexcept {
++  return _pImpl->_data->_fileType;
++}
++
++Platform LinkerInterfaceFile::getPlatform() const noexcept {
++  return _pImpl->_data->_platform;
++}
++
++const std::string &LinkerInterfaceFile::getInstallName() const noexcept {
++  return _pImpl->_installName;
++}
++
++bool LinkerInterfaceFile::isInstallNameVersionSpecific() const noexcept {
++  return _pImpl->_installPathOverride;
++}
++
++PackedVersion32 LinkerInterfaceFile::getCurrentVersion() const noexcept {
++  return _pImpl->_data->_currentVersion;
++}
++
++PackedVersion32 LinkerInterfaceFile::getCompatibilityVersion() const noexcept {
++  return _pImpl->_compatibilityVersion;
++}
++
++unsigned LinkerInterfaceFile::getSwiftVersion() const noexcept {
++  return _pImpl->_data->_swiftABIVersion;
++}
++
++ObjCConstraint LinkerInterfaceFile::getObjCConstraint() const noexcept {
++  return _pImpl->_data->_objcConstraint;
++}
++
++bool LinkerInterfaceFile::hasTwoLevelNamespace() const noexcept {
++  return _pImpl->_hasTwoLevelNamespace;
++}
++
++bool LinkerInterfaceFile::isApplicationExtensionSafe() const noexcept {
++  return _pImpl->_isAppExtensionSafe;
++}
++
++bool LinkerInterfaceFile::hasAllowableClients() const noexcept {
++  return !_pImpl->_data->_allowableClients.empty();
++}
++
++bool LinkerInterfaceFile::hasReexportedLibraries() const noexcept {
++  return !_pImpl->_data->_reexportedLibraries.empty();
++}
++
++bool LinkerInterfaceFile::hasWeakDefinedExports() const noexcept {
++  return _pImpl->_hasWeakDefExports;
++}
++
++const std::string &LinkerInterfaceFile::getParentFrameworkName() const
++    noexcept {
++  return _pImpl->_parentFrameworkName;
++}
++
++const std::vector<std::string> &LinkerInterfaceFile::allowableClients() const
++    noexcept {
++  return _pImpl->_data->_allowableClients;
++}
++
++const std::vector<std::string> &LinkerInterfaceFile::reexportedLibraries() const
++    noexcept {
++  return _pImpl->_data->_reexportedLibraries;
++}
++
++const std::vector<std::string> &LinkerInterfaceFile::ignoreExports() const
++    noexcept {
++  return _pImpl->_ignoreExports;
++}
++
++const std::vector<Symbol> &LinkerInterfaceFile::exports() const noexcept {
++  return _pImpl->_exports;
++}
++
++const std::vector<Symbol> &LinkerInterfaceFile::undefineds() const noexcept {
++  return _pImpl->_undefineds;
++}
++
++const std::vector<std::string> &
++LinkerInterfaceFile::inlinedFrameworkNames() const noexcept {
++  return _pImpl->_inlinedFrameworkNames;
++}
++
++LinkerInterfaceFile *LinkerInterfaceFile::getInlinedFramework(
++    const std::string &installName, cpu_type_t cpuType,
++    cpu_subtype_t cpuSubType, ParsingFlags flags, PackedVersion32 minOSVersion,
++    std::string &errorMessage) const noexcept {
++
++  /*
++  auto it = std::find_if(_pImpl->_inlinedFrameworksNames.begin(),
++                         _pImpl->_inlinedFrameworks.end(),
++                         [&](const std::shared_ptr<const InterfaceFile> &it) {
++                           return it->getInstallName() == installName;
++                         });
++
++  if (it == _pImpl->_inlinedFrameworks.end()) {
++    errorMessage = "no such inlined framework";
++    return nullptr;
++  }
++
++  auto file = new LinkerInterfaceFile;
++  if (file == nullptr) {
++    errorMessage = "could not allocate memory";
++    return nullptr;
++  }
++
++  if (file->_pImpl->init(*it, cpuType, cpuSubType, flags, minOSVersion,
++                         errorMessage))
++    return file;
++
++  delete file;
++  */
++  return nullptr;
++}
++
++TAPI_NAMESPACE_V1_END
++
++/* vim:set ts=2 sw=2 expandtab: */
+diff --git tapilite/src/Version.cpp tapilite/src/Version.cpp
+new file mode 100644
+index 0000000..6ae2c26
+--- /dev/null
++++ tapilite/src/Version.cpp
+@@ -0,0 +1,48 @@
++//===- libtapi/Version.cpp - TAPI Version Interface -------------*- C++ -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++///
++/// \file
++/// \brief Implements the C++ version interface.
++///
++//===----------------------------------------------------------------------===//
++//
++// Modified version for "tapilite", a standalone just enough
++// implementation for use without LLVM
++//
++#include <tapi/Version.h>
++#include <tuple>
++
++/// \brief Helper macro for TAPI_VERSION_STRING.
++#define TAPI_MAKE_STRING2(X) #X
++
++/// \brief A string that describes the TAPI version number, e.g., "1.0.0".
++#define TAPI_MAKE_STRING(X) TAPI_MAKE_STRING2(X)
++
++namespace tapi {
++
++std::string Version::getFullVersionAsString() noexcept {
++  std::string result;
++#ifdef TAPI_VENDOR
++  result += TAPI_VENDOR;
++#endif
++#ifdef TAPI_VERSION
++  result += TAPI_MAKE_STRING(TAPI_VERSION);
++#endif
++  result += " based on Apple TAPI";
++#ifdef APPLE_VERSION
++  result += " version " APPLE_VERSION;
++#endif
++#ifdef TAPI_REPOSITORY_STRING
++  result += " (" TAPI_REPOSITORY_STRING ")";
++#endif
++
++  return result;
++}
++
++} // end namespace tapi.
+-- 
+2.38.1
+

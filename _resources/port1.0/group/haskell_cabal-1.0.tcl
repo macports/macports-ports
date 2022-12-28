@@ -277,10 +277,10 @@ post-destroot {
                 ${binfile}.slash_hack
             foreach build_datadir ${build_datadirs} {
                 set extra_slashes \
-                    [expr [string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]]
+                    [expr {[string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]}]
                 if {${extra_slashes} >= 0} {
                     set slash_hack \
-                        [string repeat / [expr ${extra_slashes} + 1]]
+                        [string repeat / [expr {${extra_slashes} + 1}]]
                     set datadir_slash_hack \
                         [strsed ${prefix}/${haskell_cabal.datadir} "g|/${haskell_cabal.datadir}\$|${slash_hack}${haskell_cabal.datadir}|"]
                     set build_datadir_esc \

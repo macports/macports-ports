@@ -201,6 +201,19 @@ variant universal {
         }
     }
 
+    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+        depends_build-append port:diffutils-for-muniversal
+    }
+
+    proc muniversal_get_diff_to_use {} {
+        global prefix os.platform os.major
+        if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+          return "${prefix}/libexec/diffutils/bin/diff"
+        } else {
+          return "/usr/bin/diff"
+        }
+    }
+
     # Disabling dependency tracking is only required when building for
     # multiple architectures simultaneously.
     configure.universal_args-delete --disable-dependency-tracking
@@ -286,7 +299,7 @@ variant universal {
                 if {$merger_host($arch) ne ""} {
                     set host  --host=$merger_host($arch)
                 }
-            } elseif {[file tail ${configure.cmd}] ne "cmake"} {
+            } elseif {([file tail ${configure.cmd}] ne "cmake") && ([file tail ${configure.cmd}] ne "meson")} {
                 # check if building for a word length we can't run
                 set bits_differ 0
                 if {${arch} in [list ppc64 x86_64] &&
@@ -702,7 +715,7 @@ variant universal {
 
                                     ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                                    system "/usr/bin/diff -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                                    system "[muniversal_get_diff_to_use] -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                                     copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                                     copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
@@ -806,7 +819,7 @@ variant universal {
                                             if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                                 # Shell script, hopefully striping out arch flags works...
                                                 mergeStripArchFlags ${dir1} ${dir2} ${dir} ${fl}
-                                            } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
+                                            } elseif { ! [catch {system "[muniversal_get_diff_to_use] -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                                 # diff worked
                                                 ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                             } else {

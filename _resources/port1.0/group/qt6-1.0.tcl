@@ -121,10 +121,10 @@ namespace eval qt6pg {
                 set component_info $qt6pg::qt6_component_lib(${component})
                 set path           [lindex ${component_info} 2]
                 set version_intro  [lindex ${component_info} 0]
-                if {[vercmp ${qt6.version} ${version_intro}] >= 0} {
+                if {[vercmp ${qt6.version} >= ${version_intro}]} {
                     depends_lib-append path:${path}:${qt6.name}-${component}
                 } else {
-                    if {[vercmp ${qt6.version} ${qt6.min_version}] >= 0} {
+                    if {[vercmp ${qt6.version} >= ${qt6.min_version}]} {
                         ui_warn "${component} does not exist in Qt ${qt6.version}"
                     } else {
                         # port will fail during pre-fetch
@@ -139,10 +139,10 @@ namespace eval qt6pg {
                 set component_info $qt6pg::qt6_component_lib(${component})
                 set path           [lindex ${component_info} 2]
                 set version_intro  [lindex ${component_info} 0]
-                if {[vercmp ${qt6.version} ${version_intro}] >= 0} {
+                if {[vercmp ${qt6.version} >= ${version_intro}]} {
                     depends_build-append path:${path}:${qt6.name}-${component}
                 } else {
-                    if {[vercmp ${qt6.version} ${qt6.min_version}] >= 0} {
+                    if {[vercmp ${qt6.version} >= ${qt6.min_version}]} {
                         ui_warn "${component} does not exist in Qt ${qt6.version}"
                     } else {
                         # port will fail during pre-fetch
@@ -157,10 +157,10 @@ namespace eval qt6pg {
                 set component_info $qt6pg::qt6_component_lib(${component})
                 set path           [lindex ${component_info} 2]
                 set version_intro  [lindex ${component_info} 0]
-                if {[vercmp ${qt6.version} ${version_intro}] >= 0} {
+                if {[vercmp ${qt6.version} >= ${version_intro}]} {
                     depends_run-append path:${path}:${qt6.name}-${component}
                 } else {
-                    if {[vercmp ${qt6.version} ${qt6.min_version}] >= 0} {
+                    if {[vercmp ${qt6.version} >= ${qt6.min_version}]} {
                         ui_warn "${component} does not exist in Qt ${qt6.version}"
                     } else {
                         # port will fail during pre-fetch
@@ -179,7 +179,7 @@ if {!${private_building_qt6}} {
 
 proc qt6pg::check_min_version {} {
     global qt6.version qt6.min_version
-    if {[vercmp ${qt6.version} ${qt6.min_version}] < 0} {
+    if {[vercmp ${qt6.version} < ${qt6.min_version}]} {
         known_fail yes
         pre-fetch {
             ui_error "Qt version ${qt6.min_version} or above is required, but Qt version ${qt6.version} is installed"

@@ -25,7 +25,7 @@ platform macosx {
                     ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     ui_error ""
                     return -code error "unable to find Xcode"
-                } elseif {[vercmp ${xcodeversion} ${minimum_xcodeversion}] < 0} {
+                } elseif {[vercmp ${xcodeversion} < ${minimum_xcodeversion}]} {
                     ui_error "On macOS ${macos_version_major}, ${name} @${version} requires Xcode ${minimum_xcodeversion} or later but you have Xcode ${xcodeversion}."
                     ui_error "See https://guide.macports.org/chunked/installing.xcode.html for download links."
                     return -code error "incompatible Xcode version"

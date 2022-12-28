@@ -52,14 +52,6 @@ default cargo.crates_github {}
 compiler.cxx_standard       2017
 compiler.blacklist-append   {macports-clang-[4-9].0}
 
-# please remove when 8a088c3 has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/8a088c30d80c7c3eca10848f28835e1c180229b1
-if {"shellescape" ni [info commands shellescape]} {
-    proc shellescape {arg} {
-        return [regsub -all -- {[^A-Za-z0-9.:@%/+=_-]} $arg {\\&}]
-    }
-}
-
 option_proc cargo.crates handle_cargo_crates
 proc handle_cargo_crates {option action {value ""}} {
     if {${action} eq "set"} {

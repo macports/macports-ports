@@ -11,7 +11,7 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2
 #
 # For unified ports, setting php.branches will create the subports.
 #
@@ -45,6 +45,8 @@ proc php._set_branches {option action args} {
             # Set up stub port.
             if {${name} eq ${subport}} {
                 supported_archs     noarch
+                platforms           any
+
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
 
                 # Ensure the stub port does not do anything with distfiles—not
@@ -101,7 +103,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 8.1
+default php.latest_stable_branch 8.2
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
@@ -377,7 +379,7 @@ proc php.add_port_code {} {
     depends_lib-append      port:${php}
 
     platform darwin {
-        if {[vercmp ${php.branch} 7.0] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
+        if {[vercmp ${php.branch} < 7.0] && [vercmp ${xcodeversion} >= 12.0]} {
             # Implicit function declarations. Need to backport upstream fixes from php73+.
             # https://bugs.php.net/80176
             # https://trac.macports.org/ticket/60988

@@ -83,7 +83,7 @@ proc openssl::check_branch {} {
 }
 
 proc openssl::is_enabled {} {
-    return [expr [openssl::check_branch] && {[option openssl.branch] != "no_version"} ]
+    return [expr {[openssl::check_branch] && [option openssl.branch] != "no_version"}]
 }
 
 proc openssl::set_openssl_dependency {} {

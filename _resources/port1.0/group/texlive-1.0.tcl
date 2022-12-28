@@ -128,7 +128,7 @@ default texlive.use_mktexlsr_on_deactivate yes
 
 proc texlive.texmfport {} {
     homepage        https://www.tug.org/texlive/
-    platforms       darwin
+    platforms       any
 
     supported_archs noarch
     installs_libs   no
