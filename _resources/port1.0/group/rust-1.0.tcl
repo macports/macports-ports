@@ -186,6 +186,11 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
                 if {$build_major != 8} {
                     distfiles-append    ${component}-${binTag}${extract.suffix}:${build_vendor}_vendor
                 }
+                # mirroring workaround for Snow Leopard i386 files
+                if {[variant_exists mirror_i386] && [variant_isset mirror_i386]} {
+                    set extrabintag     ${rustc_version}-[option triplet.cpu.i386]-${build_vendor}-[option triplet.os]10
+                    distfiles-append    ${component}-${extrabintag}${extract.suffix}:${build_vendor}_vendor
+                }
             }
         } else {
             depends_extract-delete          port:rust-bootstrap-transition
