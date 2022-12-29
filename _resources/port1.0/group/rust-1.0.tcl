@@ -181,7 +181,11 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
         if { ${build_vendor} ne "transition" } {
             foreach component ${components} {
                 set binTag          ${rustc_version}-[option triplet.cpu.${arch}]-${build_vendor}-[option triplet.os]${build_major}
-                distfiles-append    ${component}-${binTag}${extract.suffix}:${build_vendor}_vendor
+                # bootstrap binaries not currently available for Tiger
+                # https://trac.macports.org/ticket/65184
+                if {$build_major != 8} {
+                    distfiles-append    ${component}-${binTag}${extract.suffix}:${build_vendor}_vendor
+                }
             }
         } else {
             depends_extract-delete          port:rust-bootstrap-transition
