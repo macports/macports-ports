@@ -188,7 +188,7 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
                 }
                 # mirroring workaround for Snow Leopard i386 files
                 if {[variant_exists mirror_i386] && [variant_isset mirror_i386]} {
-                    set extrabintag     ${rustc_version}-[option triplet.cpu.i386]-${build_vendor}-[option triplet.os]10
+                    set extrabintag     ${version_m1}+0-[option triplet.cpu.i386]-${build_vendor}-[option triplet.os]10
                     distfiles-append    ${component}-${extrabintag}${extract.suffix}:macports_vendor
                 }
             }
