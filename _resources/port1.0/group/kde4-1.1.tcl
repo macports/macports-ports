@@ -7,11 +7,6 @@
 PortGroup               cmake 1.1
 PortGroup               qt4 1.0
 
-# kde relies on qt4-mac; qt4-mac can only build for the arches below at present
-# so all the kde family is also constrained to these arches at maximum
-# individual ports may restrict these arches further as needed.
-supported_archs         ppc ppc64 i386 x86_64
-
 # Install the kdelibs headerfiles in their own directory to prevent clashes with KF5 headers
 set kde4.include_prefix KDE4
 set kde4.include_dirs   ${prefix}/include/${kde4.include_prefix}
