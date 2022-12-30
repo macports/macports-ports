@@ -182,6 +182,9 @@ namespace eval muniversal {}
 # internal procedures
 ####################################################################################################################################
 
+# the diff utility in macOS Ventura does not have the same functionality as previous versions
+# see https://trac.macports.org/ticket/66103
+# see https://trac.macports.org/ticket/66163
 proc muniversal::muniversal_get_diff_to_use {} {
     global prefix os.major os.platform
     if {${os.platform} eq "darwin" && ${os.major} >= 22} {
@@ -364,7 +367,7 @@ proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
 
 # merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
 #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
-#    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
+#    merger_dont_diff: list of files for which diff ${diffFormat} will not merge correctly
 #          diffFormat: format used by diff to merge two text files
 proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff diffFormat} {
     set dir1  ${base1}/${prefixDir}
@@ -974,7 +977,7 @@ proc portdestroot::destroot_finish {args} {
     global  workpath \
             muniversal.dont_diff
 
-    # /usr/bin/diff can merge two C/C++ files
+    # GNU diff can merge two C/C++ files
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
     set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
