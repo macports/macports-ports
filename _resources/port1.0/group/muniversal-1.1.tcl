@@ -42,7 +42,7 @@ default muniversal.dont_diff {}
 ##########################################################################################
 
 if {[option universal_possible] && [variant_isset universal]} {
-    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+    if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
         depends_build-append port:diffutils-for-muniversal
     }
 }
@@ -186,8 +186,7 @@ namespace eval muniversal {}
 # see https://trac.macports.org/ticket/66103
 # see https://trac.macports.org/ticket/66163
 proc muniversal::muniversal_get_diff_to_use {} {
-    global prefix os.major os.platform
-    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+    if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
         return "${prefix}/libexec/diffutils/bin/diff"
     } else {
         return "/usr/bin/diff"
