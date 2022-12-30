@@ -41,12 +41,6 @@ default muniversal.dont_diff {}
 # utilites
 ##########################################################################################
 
-if {[option universal_possible] && [variant_isset universal]} {
-    if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
-        depends_build-append port:diffutils-for-muniversal
-    }
-}
-
 # allow `foreach arch ${muniversal.architectures} { ... }` to be used regardless of whether +universal set or not
 options muniversal.architectures
 default muniversal.architectures {[expr {[option universal_possible] && [variant_isset universal] ? ${configure.universal_archs} : ${configure.build_arch}}]}
@@ -1035,6 +1029,12 @@ proc muniversal::add_compiler_flags {} {
         # configure.cpp is intentionally left out
         foreach tool {cxx objcxx cc objc fc f90 f77} {
             configure.${tool}-append   {*}[option configure.${tool}_archflags.[option configure.build_arch]]
+        }
+    }
+
+    if {[option universal_possible] && [variant_isset universal]} {
+        if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+            depends_build-append port:diffutils-for-muniversal
         }
     }
 }
