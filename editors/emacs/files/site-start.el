@@ -14,3 +14,7 @@
 ;; Use the OS X Emoji font for Emoticons
 (when (fboundp 'set-fontset-font)
   (set-fontset-font t 'emoji '("Apple Color Emoji" . "iso10646-1") nil 'prepend))
+
+;; Look in MacPorts ${prefix} for tree-sitter parser libraries
+(when (boundp 'treesit-extra-load-path)
+  (setq treesit-extra-load-path (cons "__PREFIX__/lib" treesit-extra-load-path)))
