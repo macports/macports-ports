@@ -180,6 +180,7 @@ namespace eval muniversal {}
 # see https://trac.macports.org/ticket/66103
 # see https://trac.macports.org/ticket/66163
 proc muniversal::muniversal_get_diff_to_use {} {
+    global prefix
     if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
         return "${prefix}/libexec/diffutils/bin/diff"
     } else {
