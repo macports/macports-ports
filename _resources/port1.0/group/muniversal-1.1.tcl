@@ -37,6 +37,10 @@ default muniversal.no_3_archs {no}
 options muniversal.dont_diff
 default muniversal.dont_diff {}
 
+# list of file name whose contents just need to be interlaced
+options muniversal.combine
+default muniversal.combine  {}
+
 ##########################################################################################
 # utilites
 ##########################################################################################
@@ -362,8 +366,9 @@ proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
 # merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
 #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
 #    merger_dont_diff: list of files for which diff ${diffFormat} will not merge correctly
+#      merger_combine: list of files whose different contents just need to be interlaced
 #          diffFormat: format used by diff to merge two text files
-proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff diffFormat} {
+proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff merger_combine diffFormat} {
     set dir1  ${base1}/${prefixDir}
     set dir2  ${base2}/${prefixDir}
     set dir   ${base}/${prefixDir}
@@ -407,7 +412,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                 }
             } elseif { [file isdirectory ${dir1}/${fl}] } {
                 # files are directories (but not links), so recursively call function
-                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
+                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${merger_combine} ${diffFormat}
             } else {
                 # files are neither directories nor links
                 if { ! [catch {system "/usr/bin/cmp -s \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
@@ -442,6 +447,11 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
 
                             copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                             copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
+                        } elseif {"${prefixDir}/${fl}" in ${merger_combine}} {
+                            # user has specified that contents just need to be interlaced
+                            set diffFormatCombine {--old-group-format='%<' --new-group-format='%>' --unchanged-group-format='%=' --changed-group-format='%<%>'}
+                            ui_debug "universal: merge: created ${prefixDir}/${fl} by combining ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
+                            system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormatCombine} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
                         } else {
                             # files could not be merged into a fat binary
                             # handle known file types
@@ -969,7 +979,8 @@ proc portdestroot::destroot_start {args} {
 rename portdestroot::destroot_finish portdestroot::destroot_finish_real
 proc portdestroot::destroot_finish {args} {
     global  workpath \
-            muniversal.dont_diff
+            muniversal.dont_diff \
+            muniversal.combine
 
     # GNU diff can merge two C/C++ files
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
@@ -1010,10 +1021,10 @@ proc portdestroot::destroot_finish {args} {
 %>#endif
 '}
 
-    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${diffFormatProc}
-    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${diffFormatArmElse}
+    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatProc}
+    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatArmElse}
 
     portdestroot::destroot_finish_real ${args}
 }
