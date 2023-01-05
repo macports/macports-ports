@@ -304,4 +304,20 @@ proc qt5pg::check_min_version {} {
 }
 port::register_callback qt5pg::check_min_version
 
+# get a valid vallue for Qt variable QMAKE_MAC_SDK_PATH
+proc qt5pg::qmake_mac_sdk {} {
+    global  configure.sdkroot \
+            configure.sdk_version
+
+    if {${configure.sdkroot} eq "" || [file tail ${configure.sdkroot}] eq "MacOSX.sdk"} {
+        return "macosx"
+    } elseif {[string first . ${configure.sdk_version}] == -1} {
+        set sdks [lsort -command vercmp -decreasing [glob -nocomplain [file rootname ${configure.sdkroot}]*.sdk]]
+        set best_sdk_version [string map {MacOSX ""} [file rootname [file tail [lindex $sdks 0]]]]
+        return macosx${best_sdk_version}
+    } else {
+        return macosx${configure.sdk_version}
+    }
+}
+
 unset private_building_qt5
