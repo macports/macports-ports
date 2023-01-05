@@ -55,7 +55,7 @@ pre-configure {
     platform macosx {
         # qt calls xcrun to find the SDK to use, so make sure this call will succeed
 
-        ui_debug "qt5 Portfile: the initial SDK value is: macosx${configure.sdk_version}"
+        ui_debug "qmake5 Portfile: the initial SDK value is: macosx${configure.sdk_version}"
         # first try for a system-specific SDK
         if {[string first . ${configure.sdk_version}] == -1 && ${configure.sdkroot} ne ""} {
             # xcrun doesn't like major version only (e.g. macosx11), try to find a full version
@@ -63,10 +63,10 @@ pre-configure {
             configure.sdk_version [string map {MacOSX ""} [file rootname [file tail [lindex $sdks 0]]]]
             ui_debug "using possibly more specific SDK version: ${configure.sdk_version}"
         }
-        ui_debug "qt5 Portfile: testing for system-specific SDK:"
+        ui_debug "qmake5 Portfile: testing for system-specific SDK:"
         if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld  > /dev/null 2>@1}]} {
 
-            ui_debug "qt5 Portfile: system-specific SDK was not found, looking for generic SDK."
+            ui_debug "qmake5 Portfile: system-specific SDK was not found, looking for generic SDK."
             # if no specific sdk found, check for a generic macosx sdk
             if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx --find ld > /dev/null 2>@1}]} {
                 ui_error "${subport}: no usable SDK can be found"
@@ -76,9 +76,9 @@ pre-configure {
                 configure.sdk_version
             }
         } else {
-            ui_debug "qt5 Portfile: system-specific SDK was found."
+            ui_debug "qmake5 Portfile: system-specific SDK was found."
         }
-        ui_debug "qt5 Portfile: the final SDK value is: macosx${configure.sdk_version}"
+        ui_debug "qmake5 Portfile: the final SDK value is: macosx${configure.sdk_version}"
     }
 
     # set QT and QMAKE values in a cache file
