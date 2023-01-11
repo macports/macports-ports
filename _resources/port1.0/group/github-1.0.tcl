@@ -44,8 +44,7 @@ proc handle_tarball_from {option action args} {
             archive {
                 github.master_sites ${github.homepage}/archive/${git.branch}
                 if {[exists extract.rename]} {
-                    default extract.rename no
-                    default worksrcdir {${github.project}-${git.branch}}
+                    default extract.rename yes
                 }
             }
             tarball {
