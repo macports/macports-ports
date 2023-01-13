@@ -25,10 +25,15 @@
 proc haskell_cabal.add_dependencies {} {
     global name haskell_cabal.use_prebuilt
     if {[tbool haskell_cabal.use_prebuilt]} {
+        depends_patch-append \
+            port:cabal-prebuilt \
+            port:ghc-prebuilt
         depends_build-append \
             port:cabal-prebuilt \
             port:ghc-prebuilt
     } else {
+        depends_patch-append \
+            port:cabal
         depends_build-append \
             port:cabal \
             port:ghc
@@ -77,7 +82,7 @@ proc haskell_cabal.get_env {} {
 options haskell_cabal.cabal_root
 default haskell_cabal.cabal_root {${workpath}/.home/.cabal}
 
-post-extract {
+post-patch {
     xinstall -m 0755 -d [option haskell_cabal.cabal_root]
     set cabal_config_fd [open ${haskell_cabal.cabal_root}/config w+]
     set cabal_versions [regexp -all -inline {[0-9.]+} [exec ${haskell_cabal.bin} --version]]
@@ -165,7 +170,7 @@ default haskell_cabal.use_prebuilt  {no}
 
 default haskell_cabal.datadir       {share/${subport}}
 
-post-extract {
+post-patch {
     if {[tbool haskell_cabal.use_prebuilt]} {
         xinstall -d ${haskell_cabal.cabal_root}/bin
         # bootstrap from *-prebuilt
