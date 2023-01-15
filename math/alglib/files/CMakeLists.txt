@@ -24,4 +24,16 @@ target_link_libraries(test_i alglib)
 # target_link_libraries(test_x alglib)
 
 install(TARGETS alglib LIBRARY DESTINATION lib${LIB_SUFFIX})
-install(FILES ${HDR} DESTINATION include/alglib)
+install(FILES ${HDR} DESTINATION include/libalglib)
+
+# DPorts installs headers in include/libalglib.
+# See https://github.com/DragonFlyBSD/DPorts/blob/master/math/alglib/pkg-plist
+#
+# Fedora and Homebrew install headers in include/alglib.
+# See https://packages.fedoraproject.org/pkgs/alglib/alglib-devel/fedora-rawhide.html#files
+# See https://github.com/brewsci/homebrew-science/blob/master/Formula/alglib.rb
+#
+# Gentoo seems to install headers in include.
+# See https://gitweb.gentoo.org/repo/gentoo.git/tree/sci-libs/alglib/files/CMakeLists.txt-3.8.2
+#
+# Gmsh expects headers in include/libalglib, so use that.
