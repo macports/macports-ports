@@ -13,6 +13,8 @@
 #   always set this (even if you have your own subport blocks)
 # python.default_version: which version will be installed if the user asks
 #   for py-foo rather than pyXY-foo
+# Note: setting these options requires name to be set beforehand
+#
 # python.consistent_destroot: set consistent environment values in build and destroot phases
 #
 # python.pep517: build using PEP517 (default is "no")
@@ -21,8 +23,6 @@
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
-#
-# Note: setting these options requires name to be set beforehand
 
 categories      python
 
@@ -80,7 +80,7 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 310
+    set def_v 311
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}

@@ -190,3 +190,18 @@ proc qt6pg::check_min_version {} {
 port::register_callback qt6pg::check_min_version
 
 unset private_building_qt6
+
+# If using Portgroup cmake + qt6 it means configure.cmd is set to cmake (for example by use of cmake porgroup),
+# So that qt6 finds itself correctly, we use the helper script 'qt-cmake' provided by Qt
+# This will permit configuration step to succeed & find the Qt6 modules
+if { [string equal ${configure.cmd} "${prefix}/bin/cmake"] } {
+    configure.cmd   ${qt_bins_dir}/qt-cmake
+}
+
+# Qt6 makes uses of rpath. This is managed correctly when building with qmake, but with cmake
+# we have to set -DCMAKE_INSTALL_RPATH=${qt_libs_dir}
+# Actually the cmake portgroup sets CMAKE_INSTALL_RPATH to a value that doesn't fit for Qt6
+# This will result in a correct LC_RPATH in the binaries
+if { [string equal ${configure.cmd} "${qt_bins_dir}/qt-cmake"] } {
+    configure.args-append   -DCMAKE_INSTALL_RPATH=${qt_libs_dir}
+}

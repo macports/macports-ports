@@ -80,7 +80,6 @@ set portfetch::mirror_sites::sites(cpan) {
     http://cpan.uni-altai.ru/modules/by-module/
     http://cpan.webdesk.ru/modules/by-module/
     https://cpan.zbr.pt/modules/by-module/
-    http://download.xs4all.nl/CPAN/modules/by-module/
     http://httpupdate118.cpanel.net/CPAN/modules/by-module/
     http://httpupdate127.cpanel.net/CPAN/modules/by-module/
     http://kartolo.sby.datautama.net.id/CPAN/modules/by-module/

@@ -52,35 +52,6 @@ pre-configure {
         }
     }
 
-    platform macosx {
-        # qt calls xcrun to find the SDK to use, so make sure this call will succeed
-
-        ui_debug "qt5 Portfile: the initial SDK value is: macosx${configure.sdk_version}"
-        # first try for a system-specific SDK
-        if {[string first . ${configure.sdk_version}] == -1 && ${configure.sdkroot} ne ""} {
-            # xcrun doesn't like major version only (e.g. macosx11), try to find a full version
-            set sdks [lsort -command vercmp -decreasing [glob -nocomplain [file rootname ${configure.sdkroot}]*.sdk]]
-            configure.sdk_version [string map {MacOSX ""} [file rootname [file tail [lindex $sdks 0]]]]
-            ui_debug "using possibly more specific SDK version: ${configure.sdk_version}"
-        }
-        ui_debug "qt5 Portfile: testing for system-specific SDK:"
-        if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld  > /dev/null 2>@1}]} {
-
-            ui_debug "qt5 Portfile: system-specific SDK was not found, looking for generic SDK."
-            # if no specific sdk found, check for a generic macosx sdk
-            if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx --find ld > /dev/null 2>@1}]} {
-                ui_error "${subport}: no usable SDK can be found"
-                return -code error "no usable SDK can be found"
-            } else {
-                ui_debug "${subport}: using generic macosx SDK as macosx${configure.sdk_version} was not found"
-                configure.sdk_version
-            }
-        } else {
-            ui_debug "qt5 Portfile: system-specific SDK was found."
-        }
-        ui_debug "qt5 Portfile: the final SDK value is: macosx${configure.sdk_version}"
-    }
-
     # set QT and QMAKE values in a cache file
     # previously, they were set using configure.args
     # a cache file is used for two reasons
@@ -126,7 +97,7 @@ pre-configure {
         puts ${cache} "}"
     }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
+    puts ${cache} "QMAKE_MAC_SDK=[qt5pg::qmake_mac_sdk]"
 
     # https://github.com/qt/qtbase/commit/d64940891dffcb951f4b76426490cbc94fb4aba7
     # Enable ccache support if active and available in given qt5 version

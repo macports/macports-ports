@@ -77,7 +77,7 @@ options compilers.allow_arguments_mismatch
 default compilers.allow_arguments_mismatch no
 
 # Set a default gcc version
-if {${os.major} < 10} {
+if {${os.major} < 10 && ${os.platform} eq "darwin" } {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } else {
@@ -88,7 +88,7 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
-if { ${os.arch} eq "arm" } {
+if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
     set gcc_versions {10 11 12 devel}
 } else {
     set gcc_versions {}
@@ -101,7 +101,7 @@ if { ${os.arch} eq "arm" } {
 }
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-if { ${os.major} < 10 } {
+if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
     set gcc_main_version 7
 } else {
     set gcc_main_version 12
@@ -160,7 +160,7 @@ foreach ver ${gcc_versions} {
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
 set clang_versions {}
-if { ${os.arch} ne "arm" } {
+if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
         if {${os.major} < 9} {
             lappend clang_versions 3.3
@@ -180,9 +180,9 @@ if { ${os.arch} ne "arm" } {
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 10 } {
+if { ${os.major} >= 10 || ${os.platform} ne "darwin" } {
     lappend clang_versions 11
-    if { ${os.major} >= 11 } {
+    if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
         lappend clang_versions 12 13 14 15
     }
     if { ${os.major} >= 14 } {
@@ -816,6 +816,7 @@ proc compilers::get_current_gcc_version {} {
     if { [regexp {gcc(.*)} ${fortran_compiler} -> gcc_v] } {
         return ${gcc_v}
     }
+    ui_debug "compilers PG: GCC version reports being UNKNOWN to MacPorts"
     return UNKNOWN
 }
 
@@ -837,11 +838,14 @@ proc compilers::add_fortran_legacy_support {} {
 port::register_callback compilers::add_fortran_legacy_support
 
 proc compilers::add_gcc_rpath_support {} {
-    global prefix  
+    global prefix os.platform os.major
     set gcc_v [compilers::get_current_gcc_version]
     if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
-        configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
-        configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
+        if {${os.platform} eq "darwin" && ${os.major} > 8} {
+            ui_debug "compilers PG: RPATH added to ldflags as GCC version is ${gcc_v}"
+            configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
+            configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
+        }
     }
 }
 

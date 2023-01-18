@@ -5,8 +5,8 @@ PortGroup               compiler_blacklist_versions 1.0
 PortGroup               github 1.0
 
 epoch                   5
-github.setup            textmate textmate 2.0.6 v
-revision                2
+github.setup            textmate textmate 2.0.23 v
+revision                0
 
 maintainers             {cal @neverpanic} openmaintainer
 name                    textmate2
@@ -20,8 +20,7 @@ long_description        ${description}\
     TextMate is well-known for its large number of bundles adding support, snippets, completions \
     and commands for a huge number of file types.
 
-platforms               darwin
-supported_archs         x86_64
+platforms               {darwin >= 18}
 license                 GPL-3+
 use_xcode               yes
 
@@ -30,27 +29,9 @@ post-fetch {
     system -W ${worksrcpath} "${git.cmd} submodule update --init"
 }
 
-patchfiles              patch-Applications_commit_target.diff \
-                        patch-configure-versionnumber.diff \
-                        patch-Frameworks_plist_src_ascii.rl-work-around-ragel7-bugs.diff \
-                        patch-workaround-missing-capnp-dependency.diff
-
-post-patch {
-    reinplace "s/@VERSION@/${version}/" ${worksrcpath}/configure
-    fs-traverse file ${worksrcpath} {
-        if {[file tail ${file}] == "target"} {
-            reinplace -q "/TESTS *=/d" ${file}
-            reinplace -q "/TEST_SOURCES *=/d" ${file}
-        }
-    }
-    reinplace "s|xcrun clang\\+\\+|${configure.cxx}|g" ${worksrcpath}/bin/gen_build
-    reinplace "s|xcrun clang|${configure.cc}|g" ${worksrcpath}/bin/gen_build
-}
-
 depends_build-append    path:lib/libssl.dylib:openssl \
                         path:share/curl/curl-ca-bundle.crt:curl-ca-bundle \
                         port:boost \
-                        port:capnproto \
                         port:multimarkdown \
                         port:ninja \
                         port:proctools \
@@ -59,79 +40,43 @@ depends_build-append    path:lib/libssl.dylib:openssl \
 
 depends_skip_archcheck  ninja ragel proctools
 
-depends_lib-append      port:curl \
+depends_lib-append      port:capnproto \
+                        port:curl \
                         port:libiconv \
                         port:sqlite3 \
                         port:zlib
 
-if {${os.platform} ne "darwin" || ${os.major} < 18} {
-    # Fails to build on 10.13:
-    #
-    # Undefined symbols for architecture x86_64:
-    #   "_NSAppearanceNameDarkAqua", referenced from:
-    #       -[OakToolTip init] in lto.o
-    depends_fetch
-    depends_build
-    depends_lib
-    pre-fetch {
-        ui_error "${name} @${version} only works with macOS 10.14 Mojave or later."
-        return -code error "incompatible Mac OS X version"
-    }
-}
-
 # Needs support for -std=c++2a.
 compiler.blacklist      {clang < 920}
-
-# Release notes say "SDK:  (requires 10.12)"
-if {[vercmp ${configure.sdk_version} 10.12] < 0} {
-    configure.sdk_version   10.12
-    if {[catch {set configure.sdkroot} sdkroot] || $sdkroot eq ""} {
-        # avoid error in dependency adding callback, https://trac.macports.org/ticket/60465
-        configure.sdk_version
-        pre-fetch {
-            ui_error "${name} @${version} requires the OS X 10.12 SDK or later."
-            return -code error "incompatible SDK version"
-        }
-    }
-}
-
-if {![catch {set configure.sdkroot} sdkroot] && $sdkroot ne ""} {
-    # The configure script only passes along CC/CXX, not *FLAGS.
-    configure.cc-append     -isysroot${sdkroot}
-    configure.cxx-append    -isysroot${sdkroot}
-}
 
 # The build system forces the use of libc++. This is ok because the port
 # doesn't provide any C++ libraries nor use any C++ libraries from deps.
 configure.cxx_stdlib    libc++
 
-configure.env-append    boostdir=${prefix}/include/boost \
-                        builddir=${worksrcpath}/build \
-                        capnp_prefix=${prefix} \
-                        libressl_prefix=${prefix} \
-                        sparsedir=${prefix}/include/sparsehash
+# Patch needed during build for download of bundles; will revert later and
+# rebuild
+patchfiles              patch-Frameworks__io__src__path.cc-use-home-from-env.diff \
+                        patch-Applications__TextMate__src__RMateServer.mm-non-objc-ptr-cast-with-arc.diff
 
 pre-configure {
+    copy ${filespath}/local.rave ${worksrcpath}
+    reinplace "s|@@PREFIX@@|${prefix}|g" ${worksrcpath}/local.rave
+
     # the textmate build expects this to be present
-    file mkdir $env(HOME)/Library/Caches/com.macromates.TextMate
-    # patch the code to use $HOME from env rather than from getpwent(3)
-    system -W ${worksrcpath} "patch -p0 <${filespath}/patch-Frameworks__io__src__path.cc-use-home-from-env.diff"
-}
-post-configure {
-    # revert the patch
-    system -W ${worksrcpath} "patch -R -p0 <${filespath}/patch-Frameworks__io__src__path.cc-use-home-from-env.diff"
+    file mkdir $env(HOME)/Library/Caches/com.macromates.TextMate/Bundles
 }
 
 build.cmd               ninja
 build.args              -v -j${build.jobs}
-build.target            TextMate mate
+build.target            TextMate
 
-destroot {
-    copy ${worksrcpath}/build/Applications/TextMate/TextMate.app ${destroot}${applications_dir}
-    xinstall -m 0755 ${worksrcpath}/build/Applications/mate/mate ${destroot}${prefix}/bin
+post-build {
+    # Revert the patch, retrigger the build
+    system -W ${worksrcpath} "patch -R -p0 <${filespath}/patch-Frameworks__io__src__path.cc-use-home-from-env.diff"
+    command_exec build
 }
 
-livecheck.type          regex
-livecheck.regex         "^(.\*)\$"
-livecheck.url           https://api.textmate.org/releases/release/version
-livecheck.version       $version
+destroot {
+    copy [glob ${workpath}/.home/build/textmate-*/release/Applications/TextMate/TextMate.app] ${destroot}${applications_dir}
+    ln -s ${applications_dir}/TextMate.app/Contents/MacOS/mate ${destroot}${prefix}/bin/mate
+}

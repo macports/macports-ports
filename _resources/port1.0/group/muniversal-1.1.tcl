@@ -37,22 +37,13 @@ default muniversal.no_3_archs {no}
 options muniversal.dont_diff
 default muniversal.dont_diff {}
 
+# list of file name whose contents just need to be interlaced
+options muniversal.combine
+default muniversal.combine  {}
+
 ##########################################################################################
 # utilites
 ##########################################################################################
-
-if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-    depends_build-append port:diffutils-for-muniversal
-}
-
-proc muniversal_get_diff_to_use {} {
-    global prefix os.major os.platform
-    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-      return "${prefix}/libexec/diffutils/bin/diff"
-    } else {
-      return "/usr/bin/diff"
-    }
-}
 
 # allow `foreach arch ${muniversal.architectures} { ... }` to be used regardless of whether +universal set or not
 options muniversal.architectures
@@ -188,6 +179,18 @@ namespace eval muniversal {}
 ####################################################################################################################################
 # internal procedures
 ####################################################################################################################################
+
+# the diff utility in macOS Ventura does not have the same functionality as previous versions
+# see https://trac.macports.org/ticket/66103
+# see https://trac.macports.org/ticket/66163
+proc muniversal::muniversal_get_diff_to_use {} {
+    global prefix
+    if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+        return "${prefix}/libexec/diffutils/bin/diff"
+    } else {
+        return "/usr/bin/diff"
+    }
+}
 
 # a version of `sysctl hw.cpu64bit_capable` that works on older systems
 # see https://trac.macports.org/ticket/25873
@@ -362,9 +365,10 @@ proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
 
 # merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
 #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
-#    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
+#    merger_dont_diff: list of files for which diff ${diffFormat} will not merge correctly
+#      merger_combine: list of files whose different contents just need to be interlaced
 #          diffFormat: format used by diff to merge two text files
-proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff diffFormat} {
+proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff merger_combine diffFormat} {
     set dir1  ${base1}/${prefixDir}
     set dir2  ${base2}/${prefixDir}
     set dir   ${base}/${prefixDir}
@@ -408,7 +412,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                 }
             } elseif { [file isdirectory ${dir1}/${fl}] } {
                 # files are directories (but not links), so recursively call function
-                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
+                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${merger_combine} ${diffFormat}
             } else {
                 # files are neither directories nor links
                 if { ! [catch {system "/usr/bin/cmp -s \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
@@ -439,10 +443,15 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
 
                             ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                            system "[muniversal_get_diff_to_use] -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                            system "[muniversal::muniversal_get_diff_to_use] -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                             copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                             copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
+                        } elseif {"${prefixDir}/${fl}" in ${merger_combine}} {
+                            # user has specified that contents just need to be interlaced
+                            set diffFormatCombine {--old-group-format='%<' --new-group-format='%>' --unchanged-group-format='%=' --changed-group-format='%<%>'}
+                            ui_debug "universal: merge: created ${prefixDir}/${fl} by combining ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
+                            system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormatCombine} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
                         } else {
                             # files could not be merged into a fat binary
                             # handle known file types
@@ -546,7 +555,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                     if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                         # shell script, hopefully striping out arch flags works...
                                         muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
-                                    } elseif { ! [catch {system "[muniversal_get_diff_to_use] -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
+                                    } elseif { ! [catch {system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                         # diff worked
                                         ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                     } else {
@@ -970,9 +979,10 @@ proc portdestroot::destroot_start {args} {
 rename portdestroot::destroot_finish portdestroot::destroot_finish_real
 proc portdestroot::destroot_finish {args} {
     global  workpath \
-            muniversal.dont_diff
+            muniversal.dont_diff \
+            muniversal.combine
 
-    # /usr/bin/diff can merge two C/C++ files
+    # GNU diff can merge two C/C++ files
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
     set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
@@ -1011,10 +1021,10 @@ proc portdestroot::destroot_finish {args} {
 %>#endif
 '}
 
-    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${diffFormatProc}
-    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${diffFormatArmElse}
+    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatProc}
+    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatArmElse}
 
     portdestroot::destroot_finish_real ${args}
 }
@@ -1031,6 +1041,12 @@ proc muniversal::add_compiler_flags {} {
         # configure.cpp is intentionally left out
         foreach tool {cxx objcxx cc objc fc f90 f77} {
             configure.${tool}-append   {*}[option configure.${tool}_archflags.[option configure.build_arch]]
+        }
+    }
+
+    if {[option universal_possible] && [variant_isset universal]} {
+        if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+            depends_build-append port:diffutils-for-muniversal
         }
     }
 }

@@ -24,8 +24,9 @@ proc aspelldict.setup {locale version lang {aspell-version {}}} {
     version              ${version}
     categories           textproc
     supported_archs      noarch
+    platforms            any
 
-    description         "{*}${lang} dictionary for aspell"
+    description         {*}${lang} dictionary for aspell
     long_description    {*}${description}
     homepage            https://aspell.net/
 

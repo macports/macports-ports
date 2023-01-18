@@ -33,19 +33,6 @@ default merger_no_3_archs no
 default merger_arch_flag yes
 default merger_arch_compiler no
 
-if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-    depends_build-append port:diffutils-for-muniversal
-}
-
-proc muniversal_get_diff_to_use {} {
-    global prefix os.platform os.major
-    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
-      return "${prefix}/libexec/diffutils/bin/diff"
-    } else {
-      return "/usr/bin/diff"
-    }
-}
-
 proc muniversal_arch_flag_supported {args} {
     global configure.compiler
     return [regexp {^gcc-4|llvm|apple|clang} ${configure.compiler}]
@@ -211,6 +198,19 @@ variant universal {
     foreach arch ${configure.universal_archs} {
         foreach lang {c cxx objc objcxx cpp ld} {
             configure.universal_${lang}flags-delete -arch ${arch}
+        }
+    }
+
+    if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+        depends_build-append port:diffutils-for-muniversal
+    }
+
+    proc muniversal_get_diff_to_use {} {
+        global prefix os.platform os.major
+        if {${os.platform} eq "darwin" && ${os.major} >= 22} {
+          return "${prefix}/libexec/diffutils/bin/diff"
+        } else {
+          return "/usr/bin/diff"
         }
     }
 
