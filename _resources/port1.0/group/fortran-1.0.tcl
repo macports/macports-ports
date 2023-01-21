@@ -21,8 +21,9 @@ if {${os.major} < 14} {
 	git.cmd                 ${prefix}/bin/git
 }
 
+# Clang of 10.7 fails with multiple packages: error: invalid instruction mnemonic 'cvtsi2sdl'
 compiler.blacklist-append \
-                    *gcc-4.*
+                    *gcc-4.* {clang < 500}
 
 platform darwin powerpc {
     compiler.blacklist-append *clang*
