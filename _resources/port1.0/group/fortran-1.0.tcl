@@ -53,7 +53,7 @@ build.target
 options             fortran.profile
 global              prefix
 default profile     release
-build.cmd-append    --prefix="${workpath}${prefix}" --profile="${profile}"
+build.cmd-append    --verbose --prefix="${workpath}${prefix}" --profile="${profile}"
 
 global name
 destroot {
@@ -100,4 +100,5 @@ test.cmd            ${prefix}/bin/fpm test
 test.target
 test.cmd-append     --flag="-I${destroot}${prefix}/include" \
                     --link-flag="-L${destroot}${prefix}/lib" \
-                    --profile="${profile}"
+                    --profile="${profile}" \
+                    --verbose
