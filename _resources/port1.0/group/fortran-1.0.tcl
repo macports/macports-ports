@@ -98,7 +98,7 @@ pre-test {
 
 test.cmd            ${prefix}/bin/fpm test
 test.target
-test.cmd-append     --flag="-I${destroot}${prefix}/include" \
-                    --link-flag="-L${destroot}${prefix}/lib" \
+test.cmd-append     --flag="-I${workpath}${prefix}/include" \
+                    --link-flag="-L${workpath}${prefix}/lib" \
                     --profile="${profile}" \
                     --verbose
