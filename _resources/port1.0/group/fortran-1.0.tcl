@@ -21,8 +21,9 @@ if {${os.major} < 14} {
 	git.cmd                 ${prefix}/bin/git
 }
 
+# Clang of 10.7 fails with multiple packages: error: invalid instruction mnemonic 'cvtsi2sdl'
 compiler.blacklist-append \
-                    *gcc-4.*
+                    *gcc-4.* {clang < 500}
 
 platform darwin powerpc {
     compiler.blacklist-append *clang*
@@ -52,7 +53,7 @@ build.target
 options             fortran.profile
 global              prefix
 default profile     release
-build.cmd-append    --prefix="${workpath}${prefix}" --profile="${profile}"
+build.cmd-append    --verbose --prefix="${workpath}${prefix}" --profile="${profile}"
 
 global name
 destroot {
@@ -97,6 +98,7 @@ pre-test {
 
 test.cmd            ${prefix}/bin/fpm test
 test.target
-test.cmd-append     --flag="-I${destroot}${prefix}/include" \
-                    --link-flag="-L${destroot}${prefix}/lib" \
-                    --profile="${profile}"
+test.cmd-append     --flag="-I${workpath}${prefix}/include" \
+                    --link-flag="-L${workpath}${prefix}/lib" \
+                    --profile="${profile}" \
+                    --verbose
