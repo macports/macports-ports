@@ -1,7 +1,27 @@
-diff --git CMakeLists.txt CMakeLists.txt
---- CMakeLists.txt
-+++ CMakeLists.txt
-@@ -342,10 +342,10 @@ find_package(
+From c92684a617284e628ad2c748051b1fbdc2ea0755 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Tue, 31 Jan 2023 02:45:22 +0800
+Subject: [PATCH 1/3] revert optionset move
+
+---
+ CMakeLists.txt                          |   9 +-
+ build/fbcode_builder/manifests/watchman |   4 +-
+ watchman/Client.cpp                     |  23 +--
+ watchman/Client.h                       |  22 ---
+ watchman/CommandRegistry.h              |   4 +-
+ watchman/OptionSet.h                    | 207 ++++++++++++++++++++++++
+ watchman/PendingCollection.h            |   4 +-
+ watchman/cmds/debug.cpp                 |  40 +----
+ watchman/test/OptionSetTest.cpp         |  90 +++++++++++
+ 9 files changed, 308 insertions(+), 95 deletions(-)
+ create mode 100644 watchman/OptionSet.h
+ create mode 100644 watchman/test/OptionSetTest.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 850ebdc4d..97671a487 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -342,7 +342,6 @@ find_package(
  find_package(LibEvent REQUIRED)
  get_filename_component(LIBEVENT_LIBDIR "${LIBEVENT_LIB}" DIRECTORY)
  link_directories(${LIBEVENT_LIBDIR})
@@ -9,11 +29,15 @@ diff --git CMakeLists.txt CMakeLists.txt
  find_package(fmt CONFIG REQUIRED)
  find_package(folly CONFIG REQUIRED)
  
-+
- if (ENABLE_EDEN_SUPPORT)
-   find_package(fizz CONFIG REQUIRED)
-   find_package(wangle CONFIG REQUIRED)
-@@ -450,7 +450,6 @@ target_link_libraries(third_party_deps I
+@@ -352,6 +351,7 @@ if (ENABLE_EDEN_SUPPORT)
+   find_package(FBThrift CONFIG REQUIRED)
+   find_package(fb303 CONFIG REQUIRED)
+   find_package(cpptoml CONFIG REQUIRED)
++  find_package(edencommon CONFIG REQUIRED)
+   include_directories(${FB303_INCLUDE_DIR})
+ endif()
+ if(DEFINED ENV{NODE_BIN})
+@@ -455,7 +455,6 @@ target_link_libraries(third_party_deps INTERFACE
    gflags
    ${Boost_LIBRARIES}
    fmt::fmt
@@ -21,7 +45,22 @@ diff --git CMakeLists.txt CMakeLists.txt
  )
  target_include_directories(third_party_deps INTERFACE
    ${FOLLY_INCLUDE_DIR}
-@@ -773,6 +772,7 @@ t_test(ignore watchman/test/BserTest.cpp
+@@ -464,12 +463,11 @@ target_include_directories(third_party_deps INTERFACE
+   ${Boost_INCLUDE_DIRS}
+ )
+ if (ENABLE_EDEN_SUPPORT)
+-  target_link_libraries(
+-    third_party_deps
+-    INTERFACE
++  target_link_libraries(third_party_deps INTERFACE
+     ${YARPL_LIBRARIES}
+     FBThrift::thriftcpp2
+     cpptoml
++    edencommon::edencommon_utils
+   )
+ endif()
+ if(PCRE2_FOUND)
+@@ -774,6 +772,7 @@ t_test(ignore watchman/test/BserTest.cpp)
  #t_test(inmemoryview watchman/test/InMemoryViewTest.cpp)
  t_test(log watchman/test/LogTest.cpp)
  t_test(maputil watchman/test/MapUtilTest.cpp)
@@ -29,9 +68,10 @@ diff --git CMakeLists.txt CMakeLists.txt
  t_test(pendingcollection watchman/test/PendingCollectionTest.cpp)
  # Linking this test needs the targets graph to be cleaned up.
  #t_test(perfsample watchman/test/PerfSampleTest.cpp)
-diff --git build/fbcode_builder/manifests/watchman build/fbcode_builder/manifests/watchman
---- build/fbcode_builder/manifests/watchman
-+++ build/fbcode_builder/manifests/watchman
+diff --git a/build/fbcode_builder/manifests/watchman b/build/fbcode_builder/manifests/watchman
+index b733a0c09..d50eafd45 100644
+--- a/build/fbcode_builder/manifests/watchman
++++ b/build/fbcode_builder/manifests/watchman
 @@ -13,7 +13,6 @@ builder = cmake
  [dependencies]
  boost
@@ -40,9 +80,25 @@ diff --git build/fbcode_builder/manifests/watchman build/fbcode_builder/manifest
  fb303
  fbthrift
  folly
-diff --git watchman/Client.cpp watchman/Client.cpp
---- watchman/Client.cpp
-+++ watchman/Client.cpp
+@@ -26,13 +25,12 @@ rust
+ [shipit.pathmap]
+ fbcode/watchman = watchman
+ fbcode/watchman/oss = .
+-fbcode/eden/fs = eden/fs
+ 
+ [shipit.strip]
+ ^fbcode/eden/fs/(?!.*\.thrift|service/shipit_test_file\.txt)
+ 
+ [cmake.defines.fb=on]
+-ENABLE_EDEN_SUPPORT=ON
++ENABLE_EDEN_SUPPORT=OFF
+ IS_FB_BUILD=ON
+ 
+ # FB macos specific settings
+diff --git a/watchman/Client.cpp b/watchman/Client.cpp
+index 10ef94397..568045756 100644
+--- a/watchman/Client.cpp
++++ b/watchman/Client.cpp
 @@ -23,17 +23,6 @@ namespace watchman {
  
  namespace {
@@ -61,7 +117,7 @@ diff --git watchman/Client.cpp watchman/Client.cpp
  constexpr size_t kResponseLogLimit = 0;
  
  folly::Synchronized<std::unordered_set<UserClient*>> clients;
-@@ -220,10 +209,7 @@ void UserClient::create(std::unique_ptr<
+@@ -220,10 +209,7 @@ void UserClient::create(std::unique_ptr<watchman_stream> stm) {
  }
  
  UserClient::UserClient(PrivateBadge, std::unique_ptr<watchman_stream> stm)
@@ -73,7 +129,7 @@ diff --git watchman/Client.cpp watchman/Client.cpp
    clients.wlock()->insert(this);
  }
  
-@@ -260,13 +246,6 @@ std::vector<ClientDebugStatus> UserClien
+@@ -260,13 +246,6 @@ std::vector<ClientDebugStatus> UserClient::getStatusForAllClients() {
  ClientDebugStatus UserClient::getDebugStatus() const {
    ClientDebugStatus rv;
    rv.state = status_.getName();
@@ -87,25 +143,22 @@ diff --git watchman/Client.cpp watchman/Client.cpp
    return rv;
  }
  
-diff --git watchman/Client.h watchman/Client.h
---- watchman/Client.h
-+++ watchman/Client.h
-@@ -6,14 +6,9 @@
-  */
+diff --git a/watchman/Client.h b/watchman/Client.h
+index da19a9670..70fcad348 100644
+--- a/watchman/Client.h
++++ b/watchman/Client.h
+@@ -7,10 +7,7 @@
  
  #pragma once
--
+ 
 -#include <eden/common/utils/ProcessNameCache.h>
- #include <fmt/format.h>
+ #include <fmt/core.h>
 -
 -#include <chrono>
  #include <deque>
  #include <unordered_map>
--
- #include "watchman/Clock.h"
- #include "watchman/CommandRegistry.h"
- #include "watchman/Logging.h"
-@@ -159,27 +154,12 @@ class ClientStatus {
+ 
+@@ -159,27 +156,12 @@ class ClientStatus {
    std::atomic<State> state_{THREAD_STARTING};
  };
  
@@ -133,7 +186,7 @@ diff --git watchman/Client.h watchman/Client.h
    }
  };
  
-@@ -234,10 +214,6 @@ class UserClient final : public Client {
+@@ -234,10 +216,6 @@ class UserClient final : public Client {
  
    void clientThread() noexcept;
  
@@ -144,9 +197,10 @@ diff --git watchman/Client.h watchman/Client.h
    ClientStatus status_;
  };
  
-diff --git watchman/CommandRegistry.h watchman/CommandRegistry.h
---- watchman/CommandRegistry.h
-+++ watchman/CommandRegistry.h
+diff --git a/watchman/CommandRegistry.h b/watchman/CommandRegistry.h
+index e0915449f..465a2c4ca 100644
+--- a/watchman/CommandRegistry.h
++++ b/watchman/CommandRegistry.h
 @@ -12,7 +12,7 @@
  
  // TODO: We could avoid the Client dependency fi CommandHandler returned a
@@ -165,16 +219,17 @@ diff --git watchman/CommandRegistry.h watchman/CommandRegistry.h
  
  inline constexpr auto CMD_DAEMON = CommandFlags::raw(1);
  inline constexpr auto CMD_CLIENT = CommandFlags::raw(2);
-diff --git watchman/OptionSet.h watchman/OptionSet.h
+diff --git a/watchman/OptionSet.h b/watchman/OptionSet.h
 new file mode 100644
+index 000000000..976f128ad
 --- /dev/null
-+++ watchman/OptionSet.h
++++ b/watchman/OptionSet.h
 @@ -0,0 +1,207 @@
 +/*
 + * Copyright (c) Meta Platforms, Inc. and affiliates.
 + *
-+ * This source code is licensed under the MIT license found in the
-+ * LICENSE file in the root directory of this source tree.
++ * This source code is licensed under the MIT license found
++ * in the LICENSE file in the root directory of this source tree.
 + */
 +
 +#pragma once
@@ -377,9 +432,10 @@ new file mode 100644
 +};
 +
 +} // namespace watchman
-diff --git watchman/PendingCollection.h watchman/PendingCollection.h
---- watchman/PendingCollection.h
-+++ watchman/PendingCollection.h
+diff --git a/watchman/PendingCollection.h b/watchman/PendingCollection.h
+index 2dd43af8f..47617cd58 100644
+--- a/watchman/PendingCollection.h
++++ b/watchman/PendingCollection.h
 @@ -11,7 +11,7 @@
  #include <folly/futures/Promise.h>
  #include <chrono>
@@ -398,21 +454,23 @@ diff --git watchman/PendingCollection.h watchman/PendingCollection.h
    using OptionSet::OptionSet;
    static const NameTable table;
  };
-diff --git watchman/cmds/debug.cpp watchman/cmds/debug.cpp
---- watchman/cmds/debug.cpp
-+++ watchman/cmds/debug.cpp
-@@ -5,10 +5,7 @@
-  * LICENSE file in the root directory of this source tree.
-  */
+diff --git a/watchman/cmds/debug.cpp b/watchman/cmds/debug.cpp
+index 9042616b1..e5e39e641 100644
+--- a/watchman/cmds/debug.cpp
++++ b/watchman/cmds/debug.cpp
+@@ -7,11 +7,7 @@
+ 
+ #include <unordered_map>
  
 -#include <fmt/chrono.h>
+-
 -#include <folly/String.h>
  #include <folly/chrono/Conv.h>
 -#include <folly/system/Shell.h>
- #include <unordered_map>
+ 
  #include "watchman/Client.h"
  #include "watchman/InMemoryView.h"
-@@ -260,28 +257,6 @@ W_CMD_REG(
+@@ -263,28 +259,6 @@ W_CMD_REG(
      CMD_DAEMON,
      w_cmd_realpath_root);
  
@@ -441,7 +499,7 @@ diff --git watchman/cmds/debug.cpp watchman/cmds/debug.cpp
  struct DebugStatusCommand : PrettyCommand<DebugStatusCommand> {
    static constexpr std::string_view name = "debug-status";
  
-@@ -328,19 +303,7 @@ struct DebugStatusCommand : PrettyComman
+@@ -331,25 +305,13 @@ struct DebugStatusCommand : PrettyCommand<DebugStatusCommand> {
  
      fmt::print("CLIENTS\n-------\n");
      for (auto& client : response.clients) {
@@ -459,18 +517,26 @@ diff --git watchman/cmds/debug.cpp watchman/cmds/debug.cpp
        fmt::print("  - state: {}\n", client.state);
 -      fmt::print("\n");
      }
+     // fmt does not flush, so when the stream is not line buffered the stream
+     // needs to be manually flushed (or else nothing is written to stdout).
+     // eventually this can be fmt::flush instead:
+     // https://github.com/vgc/vgc/issues/519
+-    // TODO(T136788014): why doesn't macOS do this for us.
++    // TODO (T136788014): why doesn't macOS do this for us.
+     fflush(stdout);
    }
  };
-diff --git watchman/test/OptionSetTest.cpp watchman/test/OptionSetTest.cpp
+diff --git a/watchman/test/OptionSetTest.cpp b/watchman/test/OptionSetTest.cpp
 new file mode 100644
+index 000000000..ede31d735
 --- /dev/null
-+++ watchman/test/OptionSetTest.cpp
++++ b/watchman/test/OptionSetTest.cpp
 @@ -0,0 +1,90 @@
 +/*
 + * Copyright (c) Meta Platforms, Inc. and affiliates.
 + *
-+ * This source code is licensed under the MIT license found in the
-+ * LICENSE file in the root directory of this source tree.
++ * This source code is licensed under the MIT license found
++ * in the LICENSE file in the root directory of this source tree.
 + */
 +
 +#include "watchman/OptionSet.h"
@@ -556,3 +622,6 @@ new file mode 100644
 +  EXPECT_FALSE((CM_RED | CM_GREEN).containsNoneOf(CM_GREEN | CM_BLUE));
 +  EXPECT_TRUE(CM_RED.containsNoneOf(CM_GREEN | CM_BLUE));
 +}
+-- 
+2.39.1
+
