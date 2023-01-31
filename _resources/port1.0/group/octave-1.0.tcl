@@ -90,6 +90,9 @@ post-extract {
         delete ${workpath}/${octave.module}
         move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
+    if {[exec /bin/ls ${workpath} | grep -c "-"] == 2} {
+        move [glob ${workpath}/*-*] ${workpath}/${octave.module}
+    }
 
 #     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
 #     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
