@@ -240,6 +240,10 @@ proc handle_set_go_vendors {vendors_str} {
         set checksum_types $portchecksum::checksum_types
     }
     set num_tokens [llength ${vendors_str}]
+    if {[exists extract.rename] && $num_tokens > 0} {
+        # portgroups like github may set this - can't be used with multiple distfiles
+        extract.rename  no
+    }
     for {set ix 0} {${ix} < ${num_tokens}} {incr ix} {
         # Get the Go package ID
         set vpackage [lindex ${vendors_str} ${ix}]
