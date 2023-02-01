@@ -2,20 +2,18 @@
 
 PortSystem          1.0
 PortGroup           select 1.0
-PortGroup           openssl 1.0
 PortGroup           clang_dependency 1.0
 
 name                python27
 epoch               2
 # Remember to keep py27-tkinter and py27-gdbm's versions sync'd with this
 version             2.7.18
-revision            5
+revision            10
 
 set major           [lindex [split $version .] 0]
 set branch          [join [lrange [split ${version} .] 0 1] .]
 categories          lang
 license             PSF
-platforms           darwin
 
 maintainers         {jmr @jmroot} openmaintainer
 
@@ -27,7 +25,9 @@ homepage            https://www.python.org/
 master_sites        ${homepage}ftp/python/${version}/
 
 distname            Python-${version}
+if {$subport eq $name} {
 use_xz              yes
+}
 
 checksums           md5     fd6cc8ec0a78c44036f825e739f36e5a \
                     rmd160  40a514bb05c9e631454ea8466e28f5bb229428ad \
@@ -47,54 +47,57 @@ patchfiles          patch-Makefile.pre.in.diff \
                     implicit.patch \
                     openssl_ver.patch
 
-depends_build       port:pkgconfig
-depends_lib         port:bzip2 \
+if {${os.platform} eq "darwin" && ${os.major} >= 21} {
+    patchfiles-append patch-getpath.diff
+}
+
+if {${subport} eq ${name}} {
+    PortGroup       openssl 1.0
+
+    depends_build   port:pkgconfig
+    depends_lib     port:bzip2 \
                     port:db48 \
                     port:expat \
-                    port:gettext \
+                    port:gettext-runtime \
                     port:libedit \
                     port:libffi \
                     port:ncurses \
                     port:sqlite3 \
                     port:zlib
-depends_run         port:python_select \
+    depends_run     port:python_select \
                     port:python2_select
 
-openssl.branch      1.1
+
+    openssl.branch  1.1
+}
 
 # This port is used by clang-3.4 to bootstrap libcxx
 subport ${name}-bootstrap {
-    revision                6
-    set stdprefix ${prefix}
-    prefix ${prefix}/libexec/libcxx-bootstrap
+    depends_extract         port:xz-bootstrap
+    depends_skip_archcheck-append \
+                            xz-bootstrap
+    extract.suffix          .tar.xz
+    extract.cmd             ${prefix}/libexec/xz-bootstrap/bin/xz
+
+    prefix                  ${prefix}/libexec/${subport}
     set frameworks_dir      ${prefix}/Library/Frameworks
     set applications_dir    ${prefix}/Applications
-    configure.cppflags-append   -I${stdprefix}/include
-    configure.ldflags-append    -L${stdprefix}/lib
-    configure.env-append    PATH=${prefix}/bin:$::env(PATH)
+
+    patchfiles-delete       patch-libedit.diff
+
+    # Avoid macports-clang dep (doesn't use C++ anyway)
     configure.cxx_stdlib
     compiler.whitelist      clang llvm-gcc-4.2 gcc-4.2 apple-gcc-4.2
-    patchfiles-delete       patch-libedit.diff
-    depends_build-replace   port:pkgconfig port:pkgconfig-bootstrap
-    depends_lib-replace     port:ncurses port:ncurses-bootstrap
-    depends_lib-delete      port:db48 \
-                            port:gettext \
-                            port:libedit \
-                            port:sqlite3
-    # no need to be 'port select'able
-    depends_run
-    use_xz              no
-    depends_extract     port:xz-bootstrap
-    depends_skip_archcheck-append   xz-bootstrap
-    extract.suffix      .tar.xz
-    extract.cmd         ${prefix}/bin/xz
-    if {${os.platform} eq "darwin" && ${os.major} >= 18} {
-        # libstdc++ can't be used on Mojave and later
-        known_fail          yes
-    }
-    configure.args      ac_cv_header_libintl_h=no \
-                        ac_cv_lib_intl_textdomain=no \
-                        ac_cv_search_bind_textdomain_codeset=no
+
+    # sterilize MacPorts build environment; we want nothing picked up from MP prefix
+    compiler.cpath
+    compiler.library_path
+
+    configure.distcc        no
+
+    # sterilize PATH
+    configure.env-append    PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    build.env-append        PATH=/usr/bin:/bin:/usr/sbin:/sbin
 }
 # Also needed by later clangs.
 if {${os.platform} eq "darwin" && ${os.major} < 11 && ${cxx_stdlib} eq "libc++"} {
@@ -107,8 +110,13 @@ configure.args-append \
                     --with-system-expat \
                     --with-system-ffi
 
-configure.cppflags-append -I${prefix}/include/db48
-configure.ldflags-append -L${prefix}/lib/db48
+if {${subport} eq ${name}} {
+    configure.cppflags-append -I${prefix}/include/db48
+    configure.ldflags-append -L${prefix}/lib/db48
+
+    # pkg-config removes -I flags for paths in CPATH, which confuses python.
+    configure.env-append    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+}
 
 configure.ccache    no
 
@@ -121,7 +129,9 @@ post-patch {
 }
 
 post-configure {
+    set oldmtime [file mtime ${worksrcpath}/pyconfig.h]
     reinplace "s;/* #undef PY_FORMAT_LONG_LONG */;#define PY_FORMAT_LONG_LONG \"ll\";" ${worksrcpath}/pyconfig.h
+    file mtime ${worksrcpath}/pyconfig.h $oldmtime
 }
 
 build.target        all
@@ -159,28 +169,10 @@ platform darwin {
         # poll() misbehaves on 10.8 and older
         # See https://trac.macports.org/ticket/18376
         if {${os.major} <= 12} {
+            set oldmtime [file mtime ${worksrcpath}/pyconfig.h]
             system -W ${worksrcpath} "ed - pyconfig.h < ${filespath}/pyconfig.ed"
+            file mtime ${worksrcpath}/pyconfig.h $oldmtime
         }
-    }
-
-    post-build {
-        set buildlibdir [lindex [glob -directory ${worksrcpath}/build lib.*-*-*-${branch}] 0]
-        # preserve mtime of _sysconfigdata.py to avoid rebuilding things after changing it
-        set oldmtime [file mtime ${buildlibdir}/_sysconfigdata.py]
-
-        # change LINKFORSHARED to support dependents that incorrectly use it
-        system -W ${buildlibdir} "awk -F : \
-            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/config\
-            -lpython${branch} -ldl -framework CoreFoundation',\\n\\\", \\\$1; next} {print}\"\
-            _sysconfigdata.py > _sysconfigdata.py.new"
-        file rename -force ${buildlibdir}/_sysconfigdata.py.new \
-            ${buildlibdir}/_sysconfigdata.py
-
-        # remove -arch flags from the config
-        reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${buildlibdir}/_sysconfigdata.py
-
-        file mtime ${buildlibdir}/_sysconfigdata.py $oldmtime
     }
 
     post-destroot {
@@ -192,17 +184,39 @@ platform darwin {
         ln -s ${framewdir}/Python ${destroot}${prefix}/lib/libpython${branch}.dylib
         ln -s ${framewdir}/lib/pkgconfig/python-${branch}.pc ${destroot}${prefix}/lib/pkgconfig/
 
+        set libdir ${destroot}${framewdir}/lib/python${branch}
+        # change LINKFORSHARED to support dependents that incorrectly use it
+        system -W ${libdir} "awk -F : \
+            \"/'LINKFORSHARED'/ {printf \\\"%s: '-L${framewdir}/lib/python${branch}/config\
+            -lpython${branch} -ldl -framework CoreFoundation',\\n\\\", \\\$1; next} {print}\"\
+            _sysconfigdata.py > _sysconfigdata.py.new"
+        file rename -force ${libdir}/_sysconfigdata.py.new \
+            ${libdir}/_sysconfigdata.py
+
+        # remove -arch flags from the config
+        reinplace -E {s|-arch [a-z0-9_]+||g} \
+            ${libdir}/_sysconfigdata.py
+
+        # recompile the modified file
+        set python_for_build python.exe
+        # executable differs depending on filesystem case sensitivity
+        if {![file exists ${worksrcpath}/${python_for_build}]} {
+            set python_for_build python
+        }
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata.py]"
+        system -W ${worksrcpath} "env DYLD_FRAMEWORK_PATH=. ./${python_for_build} -E -O -m compileall -d [shellescape ${framewdir}/lib/python${branch}] [shellescape ${libdir}/_sysconfigdata.py]"
+
         # Without this, LINKFORSHARED is set to
         # ... $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)
         # (this becomes Python.framework/Versions/2.7/Python) which doesn't
         # quite work (see ticket #15099); instead we mirror the behavior of
         # `python-config --ldflags` here.
         reinplace {s|^\(LINKFORSHARED=\).*$|\1 -L$(LIBPL) -lpython$(VERSION) $(LIBS) $(SYSLIBS)|} \
-            ${destroot}${framewdir}/lib/python${branch}/config/Makefile
+            ${libdir}/config/Makefile
 
         # remove -arch flags from the config
         reinplace -E {s|-arch [a-z0-9_]+||g} \
-            ${destroot}${framewdir}/lib/python${branch}/config/Makefile
+            ${libdir}/config/Makefile
     }
 }
 
@@ -219,11 +233,7 @@ variant universal {
             "s|__UNIVERSAL_ARCHFLAGS__|${configure.universal_cflags}|" \
             ${worksrcpath}/configure
     }
-    if {${configure.sdkroot} ne ""} {
-        configure.args-append   --enable-universalsdk=${configure.sdkroot}
-    } else {
-        configure.args-append   --enable-universalsdk=/
-    }
+    configure.args-append   --enable-universalsdk=${configure.sysroot}
 }
 
 variant ucs4 description {Enable support for UCS4 (breaks ABI)} {

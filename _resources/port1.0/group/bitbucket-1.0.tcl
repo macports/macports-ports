@@ -9,9 +9,12 @@
 
 options bitbucket.author bitbucket.project bitbucket.version bitbucket.tag_prefix
 options bitbucket.homepage bitbucket.master_sites bitbucket.tarball_from
-options bitbucket.livecheck_branch
+options bitbucket.livecheck_branch bitbucket.api_endpoint
 
 default bitbucket.homepage {https://bitbucket.org/${bitbucket.author}/${bitbucket.project}}
+
+# Reference: https://developer.atlassian.com/cloud/bitbucket/rest/
+default bitbucket.api_endpoint {https://api.bitbucket.org/2.0}
 
 # Later code assumes that bitbucket.master_sites is a simple string, not a list.
 default bitbucket.master_sites {${bitbucket.homepage}/get}
@@ -35,26 +38,27 @@ proc handle_tarball_from {option action args} {
 
 proc bitbucket.livecheck_regex {} {
     global bitbucket.tag_prefix bitbucket.tarball_from distname extract.suffix version
+
+    set dist_pattern [regsub -- [quotemeta ${version}] ${distname} {([0-9.]+)}]
     switch ${bitbucket.tarball_from} {
         tags {
-            set dir get
+            return "\\\"${dist_pattern}\\\""
         }
         default {
-            set dir ${bitbucket.tarball_from}
+            return ${bitbucket.tarball_from}/${dist_pattern}[quotemeta [quotemeta ${extract.suffix}]]
         }
     }
-    return ${dir}/[regsub -- [quotemeta ${version}] ${distname} {([0-9.]+)}][quotemeta [quotemeta ${extract.suffix}]]
 }
 
 proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
-    global bitbucket.author bitbucket.homepage bitbucket.master_sites bitbucket.project bitbucket.tag_prefix bitbucket.version extract.suffix PortInfo
+    global bitbucket.author bitbucket.homepage bitbucket.master_sites bitbucket.project bitbucket.tag_prefix bitbucket.version PortInfo bitbucket.api_endpoint
 
     bitbucket.author        ${bb_author}
     bitbucket.project       ${bb_project}
     bitbucket.version       ${bb_version}
     bitbucket.tag_prefix    ${bb_tag_prefix}
 
-    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${bitbucket.project}))} {
+    if {![info exists PortInfo(name)]} {
         name                ${bitbucket.project}
     }
     version                 ${bitbucket.version}
@@ -76,16 +80,9 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
         }
     }
 
-    if {[join ${bitbucket.tag_prefix}] eq "" && \
-        [regexp "^\[0-9a-f\]{9,}\$" ${bitbucket.version}]} {
-        default livecheck.type      regexm
-        default livecheck.url       {${bitbucket.homepage}/atom}
-        default livecheck.regex     {<id>changeset:(\[0-9a-f\]{[string length ${bitbucket.version}]})\[0-9a-f\]*</id>}
-    } else {
-        default livecheck.type      regex
-        default livecheck.url       {${bitbucket.homepage}/downloads?tab=tags}
-        default livecheck.regex     {[bitbucket.livecheck_regex]}
-    }
+    default livecheck.type      regex
+    default livecheck.url       {${bitbucket.api_endpoint}/repositories/${bitbucket.author}/${bitbucket.project}/refs/tags?sort=-target.date}
+    default livecheck.regex     {[bitbucket.livecheck_regex]}
 
     default livecheck.version   {${bitbucket.version}}
 }
@@ -94,9 +91,9 @@ proc bitbucket.setup {bb_author bb_project bb_version {bb_tag_prefix ""}} {
 # commits (meant to be used when the version is a hash); to be called *after*
 # bitbucket.setup
 proc bitbucket.livecheck {bb_branch} {
-    global bitbucket.homepage bitbucket.author bitbucket.project bitbucket.version
+    global bitbucket.author bitbucket.project bitbucket.version bitbucket.api_endpoint
 
-    livecheck.url       ${bitbucket.homepage}/commits/branch/${bb_branch}
-    livecheck.type      regexm
-    livecheck.regex     <a  class="hash execute" href="/${bitbucket.author}/${bitbucket.project}/commits/(\[0-9a-f\]{[string length ${bitbucket.version}]}).*"
+    livecheck.url       ${bitbucket.api_endpoint}/repositories/${bitbucket.author}/${bitbucket.project}/commits/${bb_branch}?pagelen=1&sort=-date&fields=values.hash
+    livecheck.type      regex
+    livecheck.regex     {"([0-9a-f]+)"}
 }

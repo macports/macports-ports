@@ -22,9 +22,7 @@ if { ${subport} eq "${name}-qtwebkit" ||
     set middle_name opensource
 }
 
-set just_want_qt5_variables yes
-PortGroup qt5 1.0
-unset just_want_qt5_variables
+PortGroup qt5_variables 1.0
 
 # get Qt's version numbers
 set branch          [join [lrange [split ${version} .] 0 1] .]
@@ -53,7 +51,7 @@ foreach {qt_test_name qt_test_info} [array get available_qt_versions] {
 }
 
 # qt511-qtbase replaces qt5-qtbase, so can not conflict
-if { ${os.major} == 15 } {
+if { ${os.platform} eq "darwin" && ${os.major} == 15 } {
     conflicts-delete qt5-qtbase
 }
 
@@ -159,12 +157,12 @@ array set modules {
             46997676
         }
         ""
-        "port:zlib port:libpng path:include/turbojpeg.h:libjpeg-turbo port:freetype path:bin/dbus-daemon:dbus path:lib/pkgconfig/glib-2.0.pc:glib2 port:icu port:pcre2 path:lib/pkgconfig/harfbuzz.pc:harfbuzz"
+        "port:zlib port:libpng path:include/turbojpeg.h:libjpeg-turbo port:freetype path:bin/dbus-daemon:dbus path:lib/pkgconfig/glib-2.0.pc:glib2 path:lib/pkgconfig/icu-uc.pc:icu port:pcre2 path:lib/pkgconfig/harfbuzz.pc:harfbuzz"
         ""
         {"Qt Core" "Qt GUI" "Qt Network" "Qt SQL" "Qt Test" "Qt Widgets" "Qt Concurrent" "Qt D-Bus" "Qt OpenGL" "Qt Platform Headers" "Qt Print Support" "Qt XML"}
         ""
         "variant overrides: "
-        "revision 7"
+        "revision 9"
         "License: "
     }
     qtcanvas3d {
@@ -299,7 +297,7 @@ array set modules {
         {"Qt Image Formats"}
         ""
         "variant overrides: "
-        "revision 0"
+        "revision 2"
         "License: "
     }
     qtlocation {
@@ -309,12 +307,12 @@ array set modules {
             5589440
         }
         ""
-        "port:icu port:zlib"
+        "path:lib/pkgconfig/icu-uc.pc:icu port:zlib"
         "qtbase qtdeclarative qtquickcontrols qtquickcontrols2 qtserialport"
         {"Qt Location" "Qt Positioning"}
         ""
         "variant overrides: "
-        "revision 3"
+        "revision 5"
         "License: "
     }
     qtmacextras {
@@ -623,13 +621,13 @@ array set modules {
             28a560becd800a4229bfac317c2e5407cd3cc95308bc4c3ca90dba2577b052cf
             35300628
         }
-        "port:python27"
-        "port:fontconfig port:icu port:leveldb port:webp port:libxml2 port:libxslt port:zlib port:sqlite3"
+        "port:python27 port:bison"
+        "port:fontconfig path:lib/pkgconfig/icu-uc.pc:icu port:leveldb port:webp port:libxml2 port:libxslt port:zlib port:sqlite3"
         "qtbase qtdeclarative qtlocation qtmultimedia qtsensors qtwebchannel qtxmlpatterns"
         {"Qt WebKit" "Qt WebKit Widgets"}
         "community support only (use Qt WebEngine)"
         "variant overrides: "
-        "revision 3"
+        "revision 5"
         "License: "
     }
     qtwebkit-examples {
@@ -789,7 +787,7 @@ build.env-append \
     PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 \
     PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
-if { ${os.major} < 15 } {
+if { ${os.platform} eq "darwin" && ${os.major} < 15 } {
     known_fail  yes
     pre-fetch {
         ui_error "${subport} requires OS X 10.11 or later"
@@ -838,17 +836,6 @@ foreach {module module_info} [array get modules] {
             }
         }
 
-        if {${os.platform} eq "darwin" && ${os.major} >= 20 && (${module} eq "qtbase" || "qtbase" in [lindex ${module_info} 3])} {
-            # Fails to find a working compiler and SDK
-            known_fail  yes
-            depends_lib
-            depends_build
-            pre-fetch {
-                ui_error "${subport} currently does not build on macOS 11 or later"
-                return -code error "incompatible OS version"
-            }
-        }
-
         description       Tools and Module(s) for Qt Tool Kit ${qt_major}
 
         set modules_provided_list [lindex ${module_info} 4]
@@ -892,7 +879,7 @@ foreach {module module_info} [array get modules] {
             patchfiles-append patch-find_rez.diff
             post-patch {
                 reinplace \
-                    "s|__MACPORTS_Rez__|[exec xcrun --find Rez]|g" \
+                    "s|__MACPORTS_Rez__|[exec -ignorestderr xcrun --find Rez]|g" \
                     mkspecs/common/mac.conf \
                     mkspecs/features/mac/rez.prf
             }
@@ -997,19 +984,35 @@ foreach {module module_info} [array get modules] {
                     ${worksrcpath}/mkspecs/common/gcc-base.conf
             }
 
-            # starting with Xcode 7.0, the SDK for build OS version might not be available
-            # see https://trac.macports.org/ticket/53597
-            if { ${use_xcode} } {
-                if {[vercmp $xcodeversion 4.3] < 0} {
-                    set sdks_dir ${configure.developer_dir}/SDKs
-                } else {
-                    set sdks_dir ${configure.developer_dir}/Platforms/MacOSX.platform/Developer/SDKs
+            platform darwin {
+                # qt calls xcrun to find the SDK to use, so make sure this call will succeed
+
+                ui_debug "qt511 Portfile: the initial SDK value is: macosx${configure.sdk_version}"
+                # first try for a system-specific SDK
+                if {[string first . ${configure.sdk_version}] == -1 && ${configure.sdkroot} ne ""} {
+                    # xcrun doesn't like major version only (e.g. macosx11), try to find a full version
+                    set sdks [lsort -command vercmp -decreasing [glob -nocomplain [file rootname ${configure.sdkroot}]*.sdk]]
+                    configure.sdk_version [string map {MacOSX ""} [file rootname [file tail [lindex $sdks 0]]]]
+                    ui_debug "using possibly more specific SDK version: ${configure.sdk_version}"
                 }
-            } else {
-                set sdks_dir ${configure.developer_dir}/SDKs
-            }
-            if { ![file exists ${sdks_dir}/MacOSX${configure.sdk_version}.sdk] } {
-                configure.sdk_version
+                ui_debug "qt511 Portfile: testing for system-specific SDK:"
+                if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld  > /dev/null 2>@1}]} {
+
+                    ui_debug "qt511 Portfile: system-specific SDK was not found, looking for generic SDK."
+                    # if no specific sdk found, check for a generic macosx sdk
+                    if {[catch {exec -ignorestderr env DEVELOPER_DIR=${configure.developer_dir} /usr/bin/xcrun --sdk macosx --find ld > /dev/null 2>@1}]} {
+                        pre-fetch {
+                            ui_error "${subport}: no usable SDK can be found"
+                            return -code error "no usable SDK can be found"
+                        }
+                    } else {
+                        ui_debug "${subport}: using generic macosx SDK as macosx${configure.sdk_version} was not found"
+                        configure.sdk_version
+                    }
+                } else {
+                    ui_debug "qt511 Portfile: system-specific SDK was found."
+                }
+                ui_debug "qt511 Portfile: the final SDK value is: macosx${configure.sdk_version}"
             }
 
             # respect configure.sdk_version
@@ -1209,7 +1212,7 @@ foreach {module module_info} [array get modules] {
             configure.universal_cxxflags
             configure.universal_cppflags
 
-            # cofigure script looks for perl but doesn't seem to use it for our configuration
+            # configure script looks for perl but doesn't seem to use it for our configuration
 
             # configure script uses gawk if it can find it,
             #    so require it for consistency
@@ -1341,6 +1344,11 @@ foreach {module module_info} [array get modules] {
             ###############################################################################
 
             # special case
+            if { ${module} eq "qtconnectivity" } {
+                patchfiles-append patch-qtconnectivity_qtbug_76847.diff
+            }
+
+            # special case
             if { ${module} eq "qtdoc" } {
                 build.target    docs
                 destroot.target install_docs
@@ -1370,6 +1378,11 @@ foreach {module module_info} [array get modules] {
 
             # special case
             if { ${module} eq "qtlocation" } {
+                PortGroup       conflicts_build 1.0
+
+                # do not allow ${prefix}/include/boost to conflict with bundled boost (in bundled mapbox-gl-native)
+                conflicts_build boost
+
                 # qtlocation uses
                 #    Gypsy (https://gypsy.freedesktop.org/wiki/)
                 #    if they can be found
@@ -1378,6 +1391,15 @@ foreach {module module_info} [array get modules] {
                     foreach test { gypsy } {
                         reinplace "s|return 0;|return 0;\\\n#error turn off test|g" ${worksrcpath}/config.tests/${test}/main.cpp
                     }
+                }
+
+                # see https://trac.macports.org/ticket/61031
+                patchfiles-append patch-qtlocation-mbgl-optional.diff
+                post-patch {
+                    set experimental_dir \
+                        ${worksrcpath}/src/3rdparty/mapbox-gl-native/deps/optional/f5b56b71/include/experimental/
+                    file mkdir ${experimental_dir}
+                    copy ${filespath}/optional.hpp ${experimental_dir}/optional
                 }
 
                 # std::auto_ptr was removed in C++17
@@ -1416,6 +1438,11 @@ foreach {module module_info} [array get modules] {
 
                 # see https://bugs.webkit.org/show_bug.cgi?id=171612
                 patchfiles-append patch-qtwebkit_fix_icu.diff
+
+                # backport upstream WebKit changes to avoid
+                # error: "Unsupported PAGE_SHIFT amount"
+                # see https://trac.macports.org/ticket/62027#comment:49
+                patchfiles-append patch-qtwebkit_fix_page_shift.diff
 
                 # work around https://trac.macports.org/ticket/60975
                 patchfiles-append patch-webkit_XPathGrammar.y.diff
@@ -1473,7 +1500,7 @@ foreach {module module_info} [array get modules] {
                 # see https://doc.qt.io/qt-5/qtwebengine-platform-notes.html
                 PortGroup           xcodeversion 1.0
                 minimum_xcodeversions   {15 7.3}
-                if { ${os.major} < 15 } {
+                if { ${os.platform} eq "darwin" && ${os.major} < 15 } {
                     pre-fetch {
                         ui_error "${subport} requires OS X 10.11 or later"
                         return -code error "incompatible OS version"
@@ -1516,7 +1543,7 @@ foreach {module module_info} [array get modules] {
 
                 # In the file config.tests/openal/openal.pro, defining HEADER_OPENAL_PREFIX means
                 #    include directives use macOS OpenAL Framework.
-                # In src/multimedia/configure.json, pkgconfg is relied upon, which finds MacPorts openal
+                # In src/multimedia/configure.json, pkgconfig is relied upon, which finds MacPorts openal
                 #    for linking.
                 # We must choose one or the other.
                 # see https://trac.macports.org/ticket/54592
@@ -1566,10 +1593,19 @@ foreach {module module_info} [array get modules] {
                 # see https://trac.macports.org/ticket/54453
                 patchfiles-append patch-qtscript_ceil.diff
 
+                # error: meaningless 'volatile' on asm outside function
+                patchfiles-append patch-qtscript_no_asm_volatile.diff
+
                 # See https://code.qt.io/cgit/qt/qt5.git/commit/?id=758d922716ebdedeaa6fa26369c8dbb9dff4bae4
                 if {[variant_isset examples]} {
                     depends_lib-append  port:${name}-qttools
                 }
+            }
+
+            # special case
+            if { ${module} eq "qtimageformats" } {
+                # https://trac.macports.org/ticket/65821
+                patchfiles-append patch-qtimageformats-qjp2handler.cpp.diff
             }
         }
     }

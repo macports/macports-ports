@@ -1,17 +1,16 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem              1.0
-PortGroup               compiler_blacklist_versions 1.0
 PortGroup               active_variants 1.1
 
 name                    libcxx
 epoch                   1
 version                 5.0.1
-revision                4
+revision                5
 categories              lang
 platforms               darwin
 license                 MIT NCSA
-maintainers             {jeremyhu @jeremyhu}
+maintainers             {jeremyhu @jeremyhu} {@catap korins.ky:kirill}
 description             libc++ is a new implementation of the C++ standard library with support for C++11 and portions of C++14.
 long_description        ${description} \
                         Because objects cannot be passed between different versions of the C++ runtime, this port must \
@@ -25,18 +24,11 @@ homepage                https://libcxx.llvm.org/
 master_sites            https://releases.llvm.org/${version}/
 dist_subdir             llvm
 
-if {${os.platform} eq "darwin" && ${os.major} < 11 && ${configure.cxx_stdlib} eq "libc++"} {
-    # Bootstrap problem, libcxx is indirectly used by the normal xz port.
-    depends_extract     port:xz-bootstrap
-    depends_skip_archcheck-append   xz-bootstrap
-    extract.suffix      .tar.xz
-    extract.cmd         ${prefix}/libexec/libcxx-bootstrap/bin/xz
-    # And having the stdlib set to libc++ on 10.6 causes a
-    # macports-clang compiler to be selected.
-    configure.cxx_stdlib
-} else {
-    use_xz              yes
-}
+depends_extract         port:xz-bootstrap
+depends_skip_archcheck-append\
+                        xz-bootstrap
+extract.suffix          .tar.xz
+extract.cmd             ${prefix}/libexec/xz-bootstrap/bin/xz
 
 set libcxxabi_distname  libcxxabi-${version}.src
 set libcxx_distname     libcxx-${version}.src
@@ -71,7 +63,7 @@ platform darwin {
                     # The Tiger SDK has an u after the version number,
                     set sdk_name MacOSX10.4u.sdk
                 } else {
-                    set sdk_name MacOSX[join [lrange [split ${macosx_version} .] 0 1] .].sdk
+                    set sdk_name MacOSX${macos_version_major}.sdk
                 }
                 lappend dirs ${developer_dir}/SDKs/${sdk_name}
             }
@@ -94,42 +86,20 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
         configure.universal_archs i386 x86_64
     }
 
+    # Use clang-11-bootstrap as bootstrap compiler
+    depends_build-append port:clang-11-bootstrap
+    depends_skip_archcheck-append \
+                        clang-11-bootstrap
+    configure.cc        ${prefix}/libexec/clang-11-bootstrap/bin/clang
+    configure.cxx       ${prefix}/libexec/clang-11-bootstrap/bin/clang++
+    configure.cxx_stdlib
+    configure.compiler.add_deps \
+                        no
+
     if {${os.major} < 11} {
         variant emulated_tls description {build libcxxabi and libcxx with support for emulated thread_local storage} {}
 
-        # only selected clang versions support emulated_tls, and the emulated_tls variant
-        # needs to be enabled to build libcxx with emulated_tls support
-        foreach clang_c ${compiler.fallback} {
-            if {[string match macports-clang-* $clang_c]} {
-                # Extract version number from macports clang compiler name
-                set clang_v [lindex [split $clang_c -] 2]
-                if { ${clang_v} >= 5.0 } {
-                    if {[file exists ${prefix}/bin/clang-mp-${clang_v}]} {
-                        if {[active_variants clang-${clang_v} emulated_tls]} {
-                            ui_debug "Adding ${clang_c} to compiler whitelist"
-                            default_variants-append +emulated_tls
-                            compiler.whitelist-prepend ${clang_c}
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    compiler.blacklist *gcc* {clang < 500}
-
-    # clang 3.5 and newer are conditionally blacklisted to prevent dependency cycles
-    foreach clang_c ${compiler.fallback} {
-        if {[string match macports-clang-* $clang_c]} {
-            # Extract version number from macports clang compiler name
-            set clang_v [lindex [split $clang_c -] 2]
-            if { ${clang_v} >= 3.5 } {
-                if {![file exists ${prefix}/bin/clang-mp-${clang_v}]} {
-                    ui_debug "Adding ${clang_c} to compiler blacklist"
-                    compiler.blacklist-append ${clang_c}
-                }
-            }
-        }
+        default_variants-append +emulated_tls
     }
 
     post-extract {
@@ -142,6 +112,9 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
             # cmake doesn't include this for darwin builds, so nuke it here as well
             # however, this file is essential for emulated-tls to function
             delete ${libcxxabi_worksrcpath}/src/cxa_thread_atexit.cpp
+        } else {
+            require_active_variants \
+                    port:clang-11-bootstrap emulated_tls
         }
 
         file mkdir ${workpath}/build
@@ -192,6 +165,13 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
                 reinplace "s|Availability.h|AvailabilityMacros.h|g" ${header}
             }
         }
+
+        if {${os.major} < 10} {
+            # debug symbols produced by clang-11-bootstrap cause a Bus error inside ld on Leopard
+            reinplace "s|-c -g|-c|g" \
+                ${libcxx_worksrcpath}/lib/buildit \
+                ${libcxxabi_worksrcpath}/lib/buildit
+        }
     }
 
     build.dir ${workpath}/build
@@ -231,22 +211,10 @@ if {${os.major} < 11 || [variant_isset replacemnt_libcxx]} {
         system -W ${destroot}${roots_path}/${root_name} "tar czf ../${root_name}.tgz ."
         delete ${destroot}${roots_path}/${root_name}
     }
-
-    if {![variant_isset emulated_tls] && ${os.major} < 11} {
-    notes "
-    The libcxx you have installed is functional but does not have thread_local support.\
-    To rebuild libcxx with full thread_local support, please install clang-9.0 or any\
-    macports-clang >= clang-5.0 and then rebuild libcxx like this:
-
-    sudo port -v -n upgrade --force --enforce-variants libcxx +emulated_tls
-
-    and you will have a fully-functional libcxx installation.
-    "
-    }
-
 } else {
     supported_archs noarch
     distfiles
+    depends_extract
     build {}
     destroot {
         xinstall -d ${destroot}${prefix}/share/doc/${name}

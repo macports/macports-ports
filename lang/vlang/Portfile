@@ -1,0 +1,165 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
+PortGroup           makefile 1.0
+
+# clock_gettime
+legacysupport.newest_darwin_requires_legacy 15
+
+github.setup        vlang v weekly.2022.47
+github.tarball_from archive
+revision            0
+
+name                vlang
+# Remove weekly from version number
+version             [string range ${version} 7 end]
+homepage            https://vlang.io/
+
+description         Simple, fast, safe, compiled language for developing maintainable software
+long_description    {*}${description}. Compiles itself in <1s with zero library dependencies. This port \
+                    provides weekly builds of Vlang.
+
+license             MIT
+categories          lang
+maintainers         {harens @harens} openmaintainer
+
+# Install the V compiler as a separate distfile.
+# Based on https://github.com/macports/macports-ports/blob/master/games/minetest/Portfile
+set vc_commit       21d0c00ca4d35303853ee6002eb6fa4821c4de47
+set main_distfile   ${distfiles}
+set vc_distfile     ${vc_commit}${extract.suffix}
+set vc_mastersite   https://github.com/vlang/vc/archive
+
+distfiles           ${main_distfile}:main \
+                    ${vc_distfile}:vc
+
+master_sites        ${github.master_sites}:main \
+                    ${vc_mastersite}:vc
+
+checksums           ${main_distfile} \
+                    rmd160  18345c4cbcbd71c2f3a708cffc6f368b22547942 \
+                    sha256  9b0bb6e18ef7e7511ac6b09083585bb1fd5d1405460c1402facdb76e0ec26823 \
+                    size    6102634 \
+                    ${vc_distfile} \
+                    rmd160  d68731e3253ff791465cb88ed3933335b350c3e7 \
+                    sha256  9283faf28bb4f9dcebf79823e58396cd4645766de563ca22a15ffe8fe90d8ad9 \
+                    size    1545058
+
+# Optional runtime dependency to use the net.http and net.websocket modules
+depends_run         path:lib/libssl.dylib:openssl
+
+depends_lib         port:boehmgc
+
+# https://trac.macports.org/ticket/64913
+if {${build_arch} in "ppc ppc64"} {
+    configure.ldflags-append -latomic
+}
+
+# Path to V compiler
+set vc_path ${workpath}/vc-${vc_commit}
+
+# ./thirdparty/stdatomic/nix/atomic.h:12:10: fatal error: 'stdatomic.h' file not found
+# Based on cmus port: compatible compilers are Xcode > Xcode 7, clang > 3.7, and gcc > 4.8
+compiler.c_standard 2011
+compiler.blacklist-append {clang < 700} macports-clang-3.*
+
+# Stop V from looking in Homebrew directories, and remove hardcoded MacPorts prefix.
+# V has built-in font rendering, but users can optionally use freetype.
+patchfiles          patch-boehmgc-prefix.diff \
+                    patch-freetype2-prefix.diff \
+                    patch-openssl-prefix.diff \
+                    patch-pkgconfig-prefix.diff \
+                    patch-postgresql-prefix.diff
+
+# See https://github.com/vlang/v/issues/6605
+# Header file <sys/errno.h>, needed for module `sync` was not found
+if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+    # Use LegacySupport with the time module
+    patchfiles-append patch-clock-gettime.diff \
+                      patch-legacysupport-makefile.diff
+
+    # Header file <sys/errno.h>, needed for module `sync` was not found
+    if { ${os.major} <= 9 } {
+        patchfiles-append patch-errno-header.diff
+    }
+}
+
+post-patch {
+    # https://github.com/vlang/v/issues/10796 - Set correct deployment target.
+    foreach f [list ${worksrcpath}/vlib/v/builder/cc.v ${vc_path}/v.c] {
+        reinplace "s|-mmacosx-version-min=10.7|-mmacosx-version-min=${macosx_deployment_target}|" ${f}
+    }
+
+    # Disable vlang self update feature.
+    copy -force ${filespath}/vup.v ${worksrcpath}/cmd/tools
+
+    foreach f [list net/openssl/c.v fontstash/a_d_use_freetype.v pg/pg.v v/pkgconfig/pkgconfig.v builtin/builtin_d_gcboehm.c.v] {
+        reinplace -W ${worksrcpath} "s|@PREFIX@|${prefix}|g" vlib/${f}
+    }
+
+    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
+        reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/vlib/time/time_nix.c.v
+    }
+}
+
+# -cg, -showcc and -show-c-output allows for better error debugging
+# local prevents fetching the V compiler during the build
+build.args-append   local=true \
+                    VFLAGS="-v -cg -showcc -show-c-output -prod -cc ${configure.cc} -cflags [shellescape ${configure.cflags}]" \
+                    VC=${vc_path}
+
+# See https://trac.macports.org/ticket/64913
+# In case _developer group doesn't exist
+add_users vlang group=_developer
+
+destroot {
+    set library_path ${destroot}${prefix}/lib/${name}
+    set examples_path ${destroot}${prefix}/share/examples
+
+    xinstall -d ${examples_path}
+    move ${worksrcpath}/examples ${examples_path}/${name}
+
+    xinstall -d ${library_path}
+    foreach f {cmd thirdparty v v.mod vlib} {
+        move ${worksrcpath}/${f} ${library_path}/${f}
+    }
+
+    ln -s ${prefix}/lib/${name}/v ${destroot}${prefix}/bin
+
+    # Vlang compiles the subcommands in the tools dir on first runtime usage (e.g. v doctor).
+    # Allow running Vlang to those in the _developer group, rather than running sudo each time.
+    # See https://github.com/vlang/v/issues/10324
+
+    # Majority of subcommands only require ${library_path}/cmd/tools to be writable but v self requires
+    # all of ${library_path}
+
+    fs-traverse item ${library_path} {
+        file attributes ${item} -group _developer -permissions g+w
+    }
+}
+
+# Delete leftover subcommands compiled during runtime
+post-deactivate {
+    delete ${prefix}/lib/${name}
+}
+
+# Based on various Android ports - don't make files world-writable.
+# e.g. https://github.com/macports/macports-ports/blob/master/java/android/Portfile
+notes "
+The Vlang library directory is group _developer writable. You need to be a member of the
+_developer group to use Vlang. If you are not, run:
+
+sudo dscl . append /Groups/_developer GroupMembership <username>
+
+Optionally, to use the V PostgreSQL module, install PostgreSQL and set the POSTGRESQL_VERSION
+environment variable. For PostgreSQL 14:
+
+export POSTGRESQL_VERSION=14
+"
+
+# Check for weekly versions only
+livecheck.version ${version}
+livecheck.regex weekly.(\[0-9.\]+\[0-9\])

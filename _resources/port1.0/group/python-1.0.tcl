@@ -15,9 +15,14 @@
 #   for py-foo rather than pyXY-foo
 # python.consistent_destroot: set consistent environment values in build and destroot phases
 #
+# python.pep517: build using PEP517 (default is "no")
+# python.pep517_backend: specify the backend to use; one of "setuptools" (default),
+#   "flit", "hatch", or "poetry"
+#
+# python.test_framework: specify the test framework to use; one of "pytest" (default),
+#   "nose", "unittest", or <empty string>
+#
 # Note: setting these options requires name to be set beforehand
-
-PortGroup       compiler_wrapper 1.0
 
 categories      python
 
@@ -75,7 +80,7 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 39
+    set def_v 310
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}
@@ -84,17 +89,6 @@ proc python_get_default_version {} {
         }
     } else {
         return ${def_v}
-    }
-}
-
-proc python_set_env_compilers {phase} {
-    if {[option supported_archs] eq "noarch"} {
-        return
-    }
-    foreach tag [option compwrap.compilers_to_wrap] {
-        if {[option configure.${tag}] ne ""} {
-            ${phase}.env-append [string toupper $tag]=[compwrap::wrap_compiler ${tag}]
-        }
     }
 }
 
@@ -127,6 +121,7 @@ proc python_set_versions {option action args} {
 
             # set up py-foo as a stub port
             supported_archs noarch
+            platforms       any
             global python.version
             unset python.version
             patch {}
@@ -134,6 +129,7 @@ proc python_set_versions {option action args} {
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
+            test {}
         } else {
             set addcode 1
         }
@@ -185,7 +181,20 @@ proc python_set_versions {option action args} {
                 build.env-append        OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler}} {
-                python_set_env_compilers build
+                # compiler_wrapper portgroup support
+                if {[exists compwrap.compilers_to_wrap]} {
+                    foreach var [option compwrap.compilers_to_wrap] {
+                        if {[set configure.${var}] ne ""} {
+                            build.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
+                        }
+                    }
+                } else {
+                    foreach var [list cc objc cxx fc f77 f90] {
+                        if {[set configure.${var}] ne ""} {
+                            build.env-append [string toupper $var]=[set configure.${var}]
+                        }
+                    }
+                }
             }
         }
         pre-destroot {
@@ -232,7 +241,20 @@ proc python_set_versions {option action args} {
                 destroot.env-append     OBJCFLAGS=$pyobjcflags
             }
             if {${python.set_compiler} && ${python.consistent_destroot}} {
-                python_set_env_compilers destroot
+                # compiler_wrapper portgroup support
+                if {[exists compwrap.compilers_to_wrap]} {
+                    foreach var [option compwrap.compilers_to_wrap] {
+                        if {[set configure.${var}] ne ""} {
+                            destroot.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
+                        }
+                    }
+                } else {
+                    foreach var [list cc objc cxx fc f77 f90] {
+                        if {[set configure.${var}] ne ""} {
+                            destroot.env-append [string toupper $var]=[set configure.${var}]
+                        }
+                    }
+                }
             }
         }
         post-destroot {
@@ -266,7 +288,8 @@ proc python_set_default_version {option action args} {
 
 
 options python.branch python.prefix python.bin python.lib python.libdir \
-        python.include python.pkgd python.pep517 python.add_dependencies
+        python.include python.pkgd python.pep517 python.pep517_backend \
+        python.test_framework python.add_dependencies
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
 default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
 default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
@@ -281,12 +304,18 @@ default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
-default python.pep517   no
+default python.pep517   {[expr {[info exists python.version] && ${python.version} >= 311}]}
+default python.pep517_backend   setuptools
+
+default python.test_framework   pytest
+default test.cmd        {[python_get_defaults test_cmd]}
+default test.target     {}
+default test.args       {[python_get_defaults test_args]}
 
 default python.add_dependencies yes
 proc python_add_dependencies {} {
     if {[option python.add_dependencies]} {
-        global subport python.version python.default_version
+        global subport python.version python.default_version test.run
         if {[string match py-* $subport]} {
             # set up py-foo as a stub port that depends on the default pyXY-foo
             depends_lib-delete port:py${python.default_version}[string trimleft $subport py]
@@ -295,10 +324,49 @@ proc python_add_dependencies {} {
             depends_lib-delete port:python${python.version}
             depends_lib-append port:python${python.version}
             if {[option python.pep517]} {
-                depends_build-delete    port:py${python.version}-build \
-                                        port:py${python.version}-python-install
-                depends_build-append    port:py${python.version}-build \
-                                        port:py${python.version}-python-install
+                depends_build-delete    port:py${python.version}-build
+                depends_build-append    port:py${python.version}-build
+                if {${python.version} >= 37} {
+                    depends_build-delete    port:py${python.version}-installer
+                    depends_build-append    port:py${python.version}-installer
+                } else {
+                    depends_build-delete    port:py${python.version}-python-install
+                    depends_build-append    port:py${python.version}-python-install
+                }
+                switch -- [option python.pep517_backend] {
+                    setuptools {
+                        depends_build-delete    port:py${python.version}-setuptools \
+                                                port:py${python.version}-wheel
+                        depends_build-append    port:py${python.version}-setuptools \
+                                                port:py${python.version}-wheel
+                    }
+                    flit {
+                        depends_build-delete    port:py${python.version}-flit_core
+                        depends_build-append    port:py${python.version}-flit_core
+                    }
+                    hatch {
+                        depends_build-delete    port:py${python.version}-hatchling
+                        depends_build-append    port:py${python.version}-hatchling
+                    }
+                    poetry {
+                        depends_build-delete    port:py${python.version}-poetry-core
+                        depends_build-append    port:py${python.version}-poetry-core
+                    }
+                    default {}
+                }
+            }
+            if {[tbool test.run]} {
+                switch -- [option python.test_framework] {
+                    pytest {
+                        depends_test-delete    port:py${python.version}-pytest
+                        depends_test-append    port:py${python.version}-pytest
+                    }
+                    nose {
+                        depends_test-delete    port:py${python.version}-nose
+                        depends_test-append    port:py${python.version}-nose
+                    }
+                    default {}
+                }
             }
         }
     }
@@ -307,7 +375,7 @@ port::register_callback python_add_dependencies
 
 
 proc python_get_defaults {var} {
-    global python.version python.branch python.prefix python.bin python.pep517 workpath
+    global python.version python.branch python.prefix python.bin python.pep517 workpath python.test_framework
     switch -- $var {
         binary_suffix {
             if {[string match py-* [option name]]} {
@@ -332,7 +400,12 @@ proc python_get_defaults {var} {
         }
         destroot_cmd {
             if {${python.pep517}} {
-                return "${python.bin} -m install --verbose"
+                if {${python.version} >= 37} {
+                    set args installer
+                } else {
+                    set args "install --verbose"
+                }
+                return "${python.bin} -m ${args}"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
             }
@@ -350,6 +423,28 @@ proc python_get_defaults {var} {
                 return [glob -nocomplain -directory ${workpath} *.whl]
             } else {
                 return install
+            }
+        }
+        test_cmd {
+            switch -- [option python.test_framework] {
+                pytest {
+                    return  py.test-${python.branch}
+                }
+                nose {
+                    return  nosetests-${python.branch}
+                }
+                unittest {
+                    return  "${python.bin} -m unittest discover"
+                }
+                default {}
+            }
+        }
+        test_args {
+            switch -- [option python.test_framework] {
+                pytest {
+                    return   "-o addopts=''"
+                }
+                default {}
             }
         }
         include {
@@ -400,3 +495,33 @@ default python.link_binaries_suffix {[python_get_defaults binary_suffix]}
 
 default python.move_binaries no
 default python.move_binaries_suffix {[python_get_defaults binary_suffix]}
+
+# python._first_version: keep track of the first version line in the port.
+global python._first_version
+option_proc version python._set_version
+
+proc python._set_version {option action args} {
+    if {"set" ne ${action}} {
+        return
+    }
+
+    global python._first_version
+
+    if {![info exists python._first_version]} {
+        set python._first_version [option ${option}]
+    }
+}
+
+# if no subport of a py-* port has not changed the version, disable livecheck.
+pre-livecheck {
+    global name subport version python._first_version
+    if {[string match py-* [option name]] && ${name} ne ${subport} && ${version} eq ${python._first_version}} {
+        livecheck.type  none
+    }
+}
+
+
+pre-test {
+    # set PYTHONPATH
+    test.env-append PYTHONPATH=[join [glob -nocomplain ${worksrcpath}/build/lib*] :]
+}

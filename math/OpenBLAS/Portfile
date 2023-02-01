@@ -4,8 +4,6 @@ PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           muniversal 1.0
 PortGroup           compilers 1.0
-PortGroup           xcodeversion 1.0
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           xcode_workaround 1.0
 PortGroup           makefile 1.0
 
@@ -15,16 +13,22 @@ license             BSD
 maintainers         {nicos @NicosPavlov} {michaelld @michaelld} openmaintainer
 description         OpenBLAS is an optimized BLAS library based on GotoBLAS2
 long_description    ${description}
-platforms           darwin
 
 # block compilers that do not support thread-local storage.
 compiler.cxx_standard 2011
 compiler.c_standard   2011
 compiler.thread_local_storage yes
 
+# 10.6 supports down to Intel Core (32-bit) and Core 2 (64-bit)
 #OS 10.7-10.11 supports down to iMac 7,1, with Intel Core 2 Duo architecture
 #OS 10.12-13 supports down to iMac 10,1, with Intel Core 2 Duo architecture
-if {${os.major} >= 11 && ${os.major} <= 17} {
+if {${os.major} == 10} {
+    if {$build_arch eq "x86_64"} {
+        set blas_arch "CORE2"
+    } elseif {$build_arch eq "i386"} {
+        set blas_arch "YONAH"
+    }
+} elseif {${os.major} >= 11 && ${os.major} <= 17} {
     set blas_arch "CORE2"
 }
 #OS 10.14 supports down to Mac Pro 5,1 that has Nehalem architecture
@@ -43,18 +47,19 @@ if {![info exists blas_arch]} {
 subport OpenBLAS-devel {}
 if {[string first "-devel" $subport] > 0} {
 
-    github.setup    xianyi OpenBLAS ec4daf420fad31347401df52ad72b9cf625fc3ac
-    version         20211119-[string range ${github.version} 0 7]
-    checksums       rmd160  2eb3f83d3ca393d75ff402187d14767fb385a433 \
-                    sha256  ab0915eff2f21d71ef9fb9a4fc42ec1b95ac200e2081c5ca4bb7c2133c087ed2 \
-                    size    12645438
+    github.setup    xianyi  OpenBLAS 8c10f0abbaabdccf3b289222073356001081a003
+    version         20221021-[string range ${github.version} 0 7]
+    checksums       rmd160  c273b4a7a5ebbd68e24dc74730180aef98fcb3f4 \
+                    sha256  e1a39df29538fd47a79ce97aed78456f073178e78877b7d623bf74f1f87901a0 \
+                    size    23741278
     revision        0
 
     name            ${github.project}-devel
     conflicts       OpenBLAS
 
     patchfiles      patch-libnoarch.devel.diff \
-                    patch-OpenBLAS-i386-Apple.diff
+                    patch-OpenBLAS-i386-Apple.diff \
+                    patch-MacOSX-mktemp.diff
 
     github.livecheck.branch develop
 
@@ -63,16 +68,17 @@ if {[string first "-devel" $subport] > 0} {
 
 } else {
 
-    github.setup    xianyi OpenBLAS 0.3.18 v
-    checksums       rmd160  ff7326f99e76bd345a06028bc6ee13eb32a72bc0 \
-                    sha256  a422463a113e0fb1b946289dce05de2bca83e7acbc85628f8f42da3a8c0b4ecc \
-                    size    12623804
-    revision        0
+    github.setup    xianyi  OpenBLAS 0.3.21 v
+    checksums       rmd160  97287bb040acbf4b671559577cc8e94615b38ce2 \
+                    sha256  1357fbdbace8e7cba92f52c2af1d9c1a861c8ad5a03ac84e4e953d3db59f60c6 \
+                    size    23738989
+    revision        1
 
     conflicts       OpenBLAS-devel
 
     patchfiles      patch-libnoarch.release.diff \
-                    patch-OpenBLAS-i386-Apple.diff
+                    patch-OpenBLAS-i386-Apple.diff \
+                    patch-MacOSX-mktemp.diff
 
     if {![variant_isset native]} {
         notes "
@@ -80,17 +86,6 @@ if {[string first "-devel" $subport] > 0} {
         which may not be optimized for your system. To build a version
         customized for your machine, use the +native variant"
     }
-}
-
-# https://build.macports.org/builders/ports-11_arm64-builder/builds/20461/steps/install-port/logs/stdio
-# Library not loaded: @rpath/libgfortran.5.dylib
-#   Referenced from: /opt/local/lib/libopenblas-r1.dylib
-#   Reason: image not found
-# Currently only affects arm builds, but in principle will affect all builds once changes in the gcc
-# branch used on arm hit the intel builds, so do this across the board.
-depends_build-append port:cctools
-post-destroot {
-    system "install_name_tool -add_rpath ${prefix}/lib/libgcc ${destroot}${prefix}/lib/libopenblas-r1.dylib"
 }
 
 compilers.choose    fc
@@ -137,9 +132,11 @@ pre-build {
             }
 
             if {![variant_isset native]} {
-                #We set a minimal target in case native variant is not set
-                if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+                # We set a minimal target in case native variant is not set
+                if {${build_arch} eq "ppc"} {
                     puts $makeINC "TARGET = PPCG4"
+                } elseif {${build_arch} eq "ppc64"} {
+                    puts $makeINC "TARGET = PPC970"
                 } else {
                     if {[info exists blas_arch]} {
                         puts $makeINC "TARGET = ${blas_arch}"
@@ -197,9 +194,24 @@ pre-build {
             puts $makeINC "NO_LAPACK = 1"
         }
 
-        if { (![variant_isset native]) && [info exists blas_arch] } {
+        if {![variant_isset native]} {
             # We set a minimal target in case native variant is not set
-            puts $makeINC "TARGET = ${blas_arch}"
+            # ppc64 needs G5
+            if {${build_arch} eq "ppc"} {
+                puts $makeINC "TARGET = PPCG4"
+            } elseif {${build_arch} eq "ppc64"} {
+                puts $makeINC "TARGET = PPC970"
+            } else {
+                if {[info exists blas_arch]} {
+                    puts $makeINC "TARGET = ${blas_arch}"
+                }
+            }
+        }
+
+        if {${os.major} == 10 && ${build_arch} eq "ppc"} {
+            # This fixes Rosetta build: https://trac.macports.org/ticket/64986
+            puts $makeINC "HOSTARCH = PPCG4"
+            puts $makeINC "TARGET = PPCG4"
         }
 
         #Setting up build flags
@@ -238,6 +250,7 @@ pre-build {
 }
 
 build.args          "AR=${prefix}/bin/ar RANLIB=${prefix}/bin/ranlib"
+depends_build-append        path:libexec/coreutils/libstdbuf.so:coreutils
 
 platform darwin 8 {
     depends_build-append    port:gmake
@@ -250,9 +263,6 @@ platform darwin 8 {
 
 destroot.args       "PREFIX=${prefix}"
 
-if {![info exists universal_possible]} {
-    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
-}
 if {${universal_possible} && [variant_isset universal]} {
     merger-post-destroot {
         foreach arch ${universal_archs_to_use} {

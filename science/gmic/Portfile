@@ -2,23 +2,23 @@
 
 PortSystem          1.0
 
-PortGroup           conflicts_build 1.0
-if {${subport} eq "gmic-clib"} {
-    PortGroup       makefile        1.0
-} else {
+PortGroup           compiler_blacklist_versions 1.0
+
+if {${subport} eq "gmic-gimp" || ${subport} eq "gmic-qt"} {
     PortGroup       cmake           1.1
-}
-if {${subport} ne "gmic" && ${subport} ne "gmic-clib"} {
     PortGroup       qt5             1.0
     PortGroup       active_variants 1.1
+} else {
+    PortGroup       makefile        1.0
+    
+    patchfiles      patch-src-Makefile.diff
 }
 
 name                gmic
-version             2.9.9
+version             3.1.6
 revision            1
 license             CeCILL
 categories          science graphics
-platforms           darwin
 maintainers         {mps @Schamschula} openmaintainer
 
 description         G'MIC is an interpreter of image processing macros
@@ -28,41 +28,35 @@ long_description    G'MIC stands for GREYC's Magic Image Converter. It is \
                     converting, manipulating, filtering and visualizing \
                     generic 1d/2d/3d multi-spectral image datasets. This \
                     includes classical color images, but also more complex \
-                    data as image sequences or 3D volumetric images. G'MIC \
-                    has been designed with portability in mind and runs on \
-                    different platforms (Windows, Unix, Mac OS X).
+                    data as image sequences or 3D volumetric images.
 
 homepage            https://gmic.eu
 master_sites        https://gmic.eu/files/source/
 
-# gmic will pick up include files from opencv, opencv3 dods not conflict
-conflicts_build     opencv
-
 distfiles           ${name}_${version}${extract.suffix}
 
-checksums           rmd160  b784f86851f7ba337de81f86dcbd186932d01c82 \
-                    sha256  9f053338752ec96a6b619718037767682c5fd58e2471c08f3740fdb070605bc0 \
-                    size    7325061
+checksums           rmd160  1fecdc7d4c1c9e2138872c1f2e8de84959161fd2 \
+                    sha256  e73d63ba6520637c782b6e5e6805037a27b6255c011c9e2a60a56f9c28822ce4 \
+                    size    10843311
 
 depends_lib         port:curl \
                     path:lib/libavcodec.dylib:ffmpeg \
                     port:fftw-3 \
                     port:GraphicsMagick \
                     port:ilmbase \
+                    port:libheif \
                     path:include/turbojpeg.h:libjpeg-turbo \
                     port:libpng \
                     port:openexr \
                     port:tiff \
                     port:zlib
 
-patchfiles          patch-CMakeLists.txt.diff \
-                    patch-src-Makefile.diff
-
+compiler.blacklist              {clang < 902}
 compiler.cxx_standard           2011
 
 # Uses more memory per compile process than we can accommodate on our
 # automated build system. See https://github.com/dtschump/gmic/issues/325
-use_parallel_build              no
+#use_parallel_build              no
 
 subport ${name}-qt {
     description-append          (GUI application)
@@ -74,44 +68,34 @@ subport ${name}-gimp {
     description-append          (GIMP plug-in).
 
     configure.args-append       -DGMIC_QT_HOST=gimp
-    depends_lib-append          port:gimp2
+    depends_lib-append          path:lib/pkgconfig/gimp-2.0.pc:gimp2
 }
 
 subport ${name}-clib {
     description-append          (C library).
 }
 
+subport ${name}-lib {
+    description-append          (C++ library).
+}
+
 if {${subport} eq ${name}} {
-    description-append          (C++ library and stand-alone binary).
+    description-append          (Stand-alone binary).
 
     depends_build-append        port:pkgconfig
 
-    # CMakeLists.txt assumes variables CMAKE_CXX_FLAGS_${cmake.build_type}
-    #    (CMAKE_CXX_FLAGS_DEBUG and CMAKE_CXX_FLAGS_RELEASE)
-    if {[variant_isset debug]} {
-        cmake.build_type        Debug
-    } else {
-        cmake.build_type        Release
-    }
+    depends_lib-append          port:${name}-lib
 
-    configure.args-append       -DCUSTOM_CFLAGS=ON \
-                                -DENABLE_OPENMP=OFF \
-                                -DENABLE_X=OFF
+    build.dir                   ${worksrcpath}/src
+    build.target                cli
+
+    installs_libs               no
 
     variant opencv4 description {compile with OpenCV support} {
-        configure.args-append   -DENABLE_OPENCV=ON
-        configure.ldflags-append \
-                                -L${prefix}/lib/opencv4
-        configure.pkg_config_path-append \
-                                ${prefix}/lib/opencv4/pkgconfig
-
         depends_lib-append      path:lib/opencv4/libopencv_core.dylib:opencv4
     }
 
     variant x11 {
-        configure.args-replace  -DENABLE_X=OFF \
-                                -DENABLE_X=ON
-
         depends_lib-append      port:xorg-libX11 \
                                 port:xorg-libXext \
                                 port:xorg-libXcursor \
@@ -120,10 +104,38 @@ if {${subport} eq ${name}} {
     }
     default_variants-append     +x11
 
+    pre-build {
+        # see ${worksrcpath}/src/Makefile
+        if {[variant_isset x11]} {
+            set x11_cflags     "-Dcimg_display=1 [exec ${prefix}/bin/pkg-config --cflags x11]"
+            set x11_libs       "[exec ${prefix}/bin/pkg-config --libs x11] -lpthread"
+        } else {
+            set x11_cflags     "-Dcimg_display=0"
+            set x11_libs       "-lpthread"
+        }
+        build.args-append       X11_CFLAGS="${x11_cflags}" \
+                                X11_LIBS="${x11_libs}"
+    }
+    build.args-append           NO_STDLIB=Yes \
+                                OPT_CFLAGS=""
+
+    post-destroot {
+        delete ${destroot}${prefix}/include/gmic_libc.h
+        delete ${destroot}/plug-ins
+    }
+
+    pre-activate {
+        if {![catch {set installed [lindex [registry_active gmic] 0]}]} {
+            set _version [lindex $installed 1]
+            if {[vercmp $_version 3.1.1] < 0} {
+                registry_deactivate_composite gmic "" [list ports_nodepcheck 1]
+            }
+        }
+    }
+
     livecheck.url               https://gmic.eu/files/source/
     livecheck.regex             ${name}_(\[0-9.\]+)${extract.suffix}
 } elseif {${subport} eq "${name}-clib"} {
-    # see SOVERSION in ${worksrcpath}/CMakeLists.txt
     set soversion               1
 
     depends_build-append        port:pkgconfig
@@ -133,6 +145,9 @@ if {${subport} eq ${name}} {
 
     makefile.override-append    PREFIX
     makefile.prefix_name        USR
+
+    # parallel build fails
+    use_parallel_build          no
 
     variant x11 {
         depends_lib-append      port:xorg-libX11
@@ -161,6 +176,51 @@ if {${subport} eq ${name}} {
         xinstall -m 0755 ${worksrcpath}/src/libcgmic.${soversion}.dylib ${destroot}${prefix}/lib
         ln       -s      libcgmic.${soversion}.dylib                    ${destroot}${prefix}/lib/libcgmic.dylib
     }
+
+    livecheck.type  none
+} elseif {${subport} eq "${name}-lib"} {
+    set soversion               1
+
+    depends_build-append        port:pkgconfig
+
+    build.dir                   ${worksrcpath}/src
+    build.target                lib
+
+    makefile.override-append    PREFIX
+    makefile.prefix_name        USR
+
+    # parallel build fails
+    use_parallel_build          no
+
+    variant x11 {
+        depends_lib-append      port:xorg-libX11
+    }
+    default_variants-append     +x11
+
+    pre-build {
+        # see ${worksrcpath}/src/Makefile
+        if {[variant_isset x11]} {
+            set x11_cflags     "-Dcimg_display=1 [exec ${prefix}/bin/pkg-config --cflags x11]"
+            set x11_libs       "[exec ${prefix}/bin/pkg-config --libs x11] -lpthread"
+        } else {
+            set x11_cflags     "-Dcimg_display=0"
+            set x11_libs       "-lpthread"
+        }
+        build.args-append       X11_CFLAGS="${x11_cflags}" \
+                                X11_LIBS="${x11_libs}"
+    }
+    build.args-append           NO_STDLIB=Yes \
+                                OPT_CFLAGS="" \
+                                SOVERSION=${soversion}
+
+    destroot {
+        xinstall -m 0644 ${worksrcpath}/src/gmic.h                      ${destroot}${prefix}/include
+        xinstall -m 0644 ${worksrcpath}/src/libgmic.a                   ${destroot}${prefix}/lib
+        xinstall -m 0755 ${worksrcpath}/src/libgmic.${soversion}.dylib  ${destroot}${prefix}/lib
+        ln       -s      libgmic.${soversion}.dylib                     ${destroot}${prefix}/lib/libgmic.dylib
+    }
+
+    livecheck.type  none
 } else {
     # CMakeLists.txt assumes variables CMAKE_CXX_FLAGS_${cmake.build_type}
     #    (CMAKE_CXX_FLAGS_DEBUG and CMAKE_CXX_FLAGS_RELEASE)
@@ -174,16 +234,31 @@ if {${subport} eq ${name}} {
 
     configure.args-append       -DENABLE_DYNAMIC_LINKING=ON \
                                 -DENABLE_LTO=OFF \
-                                -DENABLE_OPENMP=OFF \
+                                -DENABLE_SYSTEM_GMIC=OFF \
                                 -DGMIC_PATH=${worksrcpath}/src
 
     qt5.depends_build_component qttools
 
-    depends_lib-append          port:${name} \
+    depends_lib-append          port:${name}-lib \
                                 port:xorg-libX11 \
                                 port:xorg-libXext \
                                 port:xorg-libice \
                                 port:xorg-libsm
 
     require_active_variants     ${name} x11
+
+    if {${os.major} < 12} {
+        pre-fetch {
+            ui_error "${subport} @${version} requires at least OS X 10.8 Mountain Lion"
+            return -code error "incompatible OS X version"
+        }
+        known_fail  yes
+    }
+
+    if {${os.major} < 17} {
+        # cmake test for openmp can't be disabled by switch
+        patchfiles-append       patch-gmic-qt-CMakeLists.txt.diff
+    }
+
+    livecheck.type  none
 }

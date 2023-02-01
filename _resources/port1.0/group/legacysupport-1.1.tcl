@@ -154,6 +154,7 @@ set ls_cache_cppflags [list]
 proc legacysupport::add_legacysupport {} {
     global prefix os.platform os.major
     global ls_cache_incpath ls_cache_ldflags ls_cache_cppflags
+    global configure.cxx_stdlib
 
     if { ${os.platform} eq "darwin" && ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
 
@@ -175,7 +176,7 @@ proc legacysupport::add_legacysupport {} {
         set ls_cache_cppflags "[legacysupport::get_cpp_flags]"
 
         # Flags for using MP libcxx
-        if { [option legacysupport.use_mp_libcxx] } {
+        if { [option legacysupport.use_mp_libcxx] && ${configure.cxx_stdlib} eq "libc++" } {
             legacysupport::add_once depends_lib append port:macports-libcxx
             append ls_cache_incpath  " ${prefix}/include/libcxx/v1"
             append ls_cache_ldflags  " -L${prefix}/lib/libcxx"

@@ -36,7 +36,7 @@ proc handle_tarball_from {option action args} {
                 github.master_sites ${github.homepage}/releases/download/${git.branch}
             }
             archive {
-                github.master_sites https://codeload.github.com/${github.author}/${github.project}/tar.gz/refs/tags/${git.branch}?dummy=
+                github.master_sites ${github.homepage}/archive/${git.branch}
             }
             tarball {
                 github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
@@ -67,7 +67,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     github.tag_prefix       ${gh_tag_prefix}
     github.tag_suffix       ${gh_tag_suffix}
 
-    if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${github.project}))} {
+    if {![info exists PortInfo(name)]} {
         name                ${github.project}
     }
 
@@ -87,9 +87,10 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
         # It is assumed that github.master_sites is a simple string, not a list.
         # Here be dragons.
         if {![file exists ${worksrcpath}] && \
+                ${github.tarball_from} eq "tarball" && \
                 ${fetch.type} eq "standard" && \
                 ${github.master_sites} in ${master_sites} && \
-                [llength ${distfiles}] > 0 && \
+                [llength ${extract.only}] > 0 && \
                 [llength [glob -nocomplain ${workpath}/*]] > 0} {
             if {[file exists [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]] && \
                 [file isdirectory [glob -nocomplain ${workpath}/${github.author}-${github.project}-*]]} {
@@ -117,7 +118,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     } else {
         livecheck.type          regex
         default livecheck.url   {${github.homepage}/tags}
-        default livecheck.regex {[list archive/refs/tags/[join ${github.tag_prefix}][join ${github.livecheck.regex}][join ${github.tag_suffix}]\\.tar\\.gz]}
+        default livecheck.regex {[list archive/refs/tags/[quotemeta [join ${github.tag_prefix}]][join ${github.livecheck.regex}][quotemeta [join ${github.tag_suffix}]]\\.tar\\.gz]}
     }
     livecheck.version       ${github.version}
 }

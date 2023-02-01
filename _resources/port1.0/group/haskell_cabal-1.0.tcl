@@ -23,14 +23,56 @@
 #   The root path for cabal. Defaults to ${workpath}/.home/.cabal .
 
 proc haskell_cabal.add_dependencies {} {
-    global name
-    if { ${name} ne "cabal" } {
+    global name haskell_cabal.use_prebuilt
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        depends_build-append \
+            port:cabal-prebuilt \
+            port:ghc-prebuilt
+    } else {
         depends_build-append \
             port:cabal \
             port:ghc
+        depends_lib-append \
+            port:gmp \
+            port:libiconv
     }
+    depends_build-append \
+        port:gsed
 }
 port::register_callback haskell_cabal.add_dependencies
+
+proc haskell_cabal.getcabalbin {} {
+    global prefix haskell_cabal.use_prebuilt
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        return ${prefix}/bin/cabal-prebuilt
+    } else {
+        return ${prefix}/bin/cabal
+    }
+}
+
+proc haskell_cabal.build_getjobsarg {args} {
+    global build.jobs use_parallel_build
+    if {![exists build.jobs] || ![tbool use_parallel_build]} {
+        return ""
+    }
+    
+    set jobs [option build.jobs]
+    if {![string is integer -strict $jobs] || $jobs < 1} {
+        return ""
+    }
+    return "-j$jobs"
+}
+
+proc haskell_cabal.get_env {} {
+    global haskell_cabal.cabal_root haskell_cabal.use_prebuilt
+    set myenv [list CABAL_CONFIG=${haskell_cabal.cabal_root}/config]
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        lappend myenv \
+                    GHC=${haskell_cabal.cabal_root}/bin/ghc \
+                    PATH=${haskell_cabal.cabal_root}/bin:$::env(PATH)
+    }
+    return $myenv
+}
 
 options haskell_cabal.cabal_root
 default haskell_cabal.cabal_root {${workpath}/.home/.cabal}
@@ -42,150 +84,228 @@ post-extract {
     set cabal_install_version [lindex ${cabal_versions} 0]
     set cabal_library_version [lindex ${cabal_versions} end]
     foreach line [list \
-                      "-- This is the configuration file for the 'cabal' command line tool." \
-                      "--" \
-                      "-- The available configuration options are listed below." \
-                      "-- Some of them have default values listed." \
-                      "--" \
-                      "-- Lines (like this one) beginning with '--' are comments." \
-                      "-- Be careful with spaces and indentation because they are" \
-                      "-- used to indicate layout for nested sections." \
-                      "--" \
-                      "-- This config file was generated using the following versions" \
-                      "-- of Cabal and cabal-install:" \
-                      "-- Cabal library version: ${cabal_library_version}" \
-                      "-- cabal-install version: ${cabal_install_version}" \
-                      "" \
-                      "" \
-                      "-- cabal default configuration settings (MacPorts modified):" \
-                      "repository hackage.haskell.org" \
-                      "  url: https://hackage.haskell.org/" \
-                      "  secure: True" \
-                      "" \
-                      "remote-repo-cache: ${haskell_cabal.cabal_root}/packages" \
-                      "world-file: ${haskell_cabal.cabal_root}/world" \
-                      "extra-prog-path: ${haskell_cabal.cabal_root}/bin" \
-                      "build-summary: ${haskell_cabal.cabal_root}/logs/build.log" \
-                      "remote-build-reporting: none" \
-                      "jobs: \$ncpus" \
-                      "documentation: True" \
-                      "doc-index-file: \$htmldir/html/${name}/index.html" \
-                      "relocatable: True" \
-                      "install-method: copy" \
-                      "installdir: ${prefix}/bin" \
-                      "" \
-                      "install-dirs global" \
-                      "  prefix: ${prefix}" \
-                      "  bindir: ${prefix}/bin" \
-                      "  libdir: ${prefix}/lib" \
-                      "  libsubdir: ${name}" \
-                      "  dynlibdir: ${prefix}/lib" \
-                      "  libexecdir: ${prefix}/libexec" \
-                      "  libexecsubdir: ${name}" \
-                      "  datadir: ${prefix}/share/${name}" \
-                      "  docdir: ${prefix}/share/doc/${name}" \
-                      "  htmldir: ${prefix}/share/doc/${name}" \
-                      "  haddockdir: \$htmldir" \
-                      "  sysconfdir: ${prefix}/etc/${name}" \
-                      "" \
-                      "program-locations" \
-                      "  gcc-location: ${configure.cc}" \
-                     ] {
+                    "-- This is the configuration file for the 'cabal' command line tool." \
+                    "--" \
+                    "-- The available configuration options are listed below." \
+                    "-- Some of them have default values listed." \
+                    "--" \
+                    "-- Lines (like this one) beginning with '--' are comments." \
+                    "-- Be careful with spaces and indentation because they are" \
+                    "-- used to indicate layout for nested sections." \
+                    "--" \
+                    "-- This config file was generated using the following versions" \
+                    "-- of Cabal and cabal-install:" \
+                    "-- Cabal library version: ${cabal_library_version}" \
+                    "-- cabal-install version: ${cabal_install_version}" \
+                    "" \
+                    "" \
+                    "-- cabal default configuration settings (MacPorts modified):" \
+                    "repository hackage.haskell.org" \
+                    "  url: https://hackage.haskell.org/" \
+                    "  secure: True" \
+                    "" \
+                    "remote-repo-cache: ${haskell_cabal.cabal_root}/packages" \
+                    "world-file: ${haskell_cabal.cabal_root}/world" \
+                    "extra-prog-path: ${haskell_cabal.cabal_root}/bin" \
+                    "build-summary: ${haskell_cabal.cabal_root}/logs/build.log" \
+                    "remote-build-reporting: none" \
+                    "jobs: \$ncpus" \
+                    "documentation: True" \
+                    "doc-index-file: \$htmldir/html/${subport}/index.html" \
+                    "relocatable: True" \
+                    "install-method: copy" \
+                    "installdir: ${prefix}/bin" \
+                    "logs-dir: [option haskell_cabal.cabal_root]/logs" \
+                    "store-dir: [option haskell_cabal.cabal_root]/store" \
+                    "" \
+                    "install-dirs global" \
+                    "  prefix: ${prefix}" \
+                    "  bindir: ${prefix}/bin" \
+                    "  libdir: ${prefix}/lib" \
+                    "  libsubdir: ${subport}" \
+                    "  dynlibdir: ${prefix}/lib" \
+                    "  libexecdir: ${prefix}/libexec" \
+                    "  libexecsubdir: ${subport}" \
+                    "  datadir: ${prefix}/share/${subport}" \
+                    "  docdir: ${prefix}/share/doc/${subport}" \
+                    "  htmldir: ${prefix}/share/doc/${subport}" \
+                    "  haddockdir: \$htmldir" \
+                    "  sysconfdir: ${prefix}/etc/${subport}" \
+                    "" \
+                    "program-locations" \
+                    "  gcc-location: ${configure.cc}" \
+                    ] {
         puts ${cabal_config_fd} ${line}
     }
     close ${cabal_config_fd}
 }
 
-# libHSbase shipped with GHC links against system libiconv, which provides the
-# 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
-# process statically links libHSbase.a, we must have /usr/lib in the library
-# search path first :/
-compiler.library_path
-compiler.cpath
+# cabal builds arm64 and x86_64 binaries
+supported_archs     arm64 x86_64
 
-options haskell_cabal.bin haskell_cabal.env
+options haskell_cabal.bin \
+        haskell_cabal.env \
+        haskell_cabal.global_flags \
+        haskell_cabal.build_dir \
+        haskell_cabal.use_prebuilt \
+        haskell_cabal.datadir
 
-default haskell_cabal.bin ${prefix}/bin/cabal
+default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 
 default haskell_cabal.env \
-    {CABAL_CONFIG=[option haskell_cabal.cabal_root]/config}
+        {[haskell_cabal.get_env]}
+
+default haskell_cabal.global_flags \
+        {--config-file=[option haskell_cabal.cabal_root]/config}
+
+default haskell_cabal.build_dir     {${workpath}/dist}
+
+# use to install prebuilt binaries for bootstrapping
+default haskell_cabal.use_prebuilt  {no}
+
+default haskell_cabal.datadir       {share/${subport}}
+
+post-extract {
+    if {[tbool haskell_cabal.use_prebuilt]} {
+        xinstall -d ${haskell_cabal.cabal_root}/bin
+        # bootstrap from *-prebuilt
+        # the link to exedir_prebuilt got ghc and ghc-pkg is a hac
+        # to accommodate cabal's hack method of locating ghc-pkg
+        # https://github.com/haskell/cabal/blob/master/release-notes/Cabal-3.6.1.0.md
+        set ghc_prebuilt_version \
+                    [lindex [regexp -all -inline {[0-9.]+} [exec ${prefix}/bin/ghc-prebuilt --version]] 0]
+
+        set exedir_prebuilt ${prefix}/lib/ghc-${ghc_prebuilt_version}-prebuilt/bin
+        ln -s       ${exedir_prebuilt}/ghc-${ghc_prebuilt_version} \
+                    ${haskell_cabal.cabal_root}/bin/ghc
+        ln -s       ${exedir_prebuilt}/ghc-pkg-${ghc_prebuilt_version} \
+                    ${haskell_cabal.cabal_root}/bin/ghc-pkg
+        # provides symlinks to ${prefix}/bin/*-prebuilt for the rest
+        foreach f {\
+             cabal\
+             ghci\
+             haddock\
+             hp2ps\
+             hpc\
+             hsc2hs\
+             runghc\
+             runhaskell\
+             } {
+             ln -s  ${prefix}/bin/${f}-prebuilt \
+                    ${haskell_cabal.cabal_root}/bin/${f}
+        }
+    }
+}
 
 pre-configure {
     system -W ${worksrcpath} \
-        "env ${haskell_cabal.env} ${haskell_cabal.bin} new-update"
+        "env ${haskell_cabal.env} ${haskell_cabal.bin} ${haskell_cabal.global_flags} update"
 }
 
-default configure.cmd       {${haskell_cabal.bin}}
+default configure.cmd       {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
-default configure.args      {new-configure}
+default configure.args      {configure}
 default configure.env       {${haskell_cabal.env}}
 
-default build.cmd           {${haskell_cabal.bin}}
-default build.target        {new-build}
+default build.type          {cabal}
+default build.cmd           {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default build.target        {${subport}}
+default build.pre_args      {build}
+default build.args          {${build.target}}
+default build.post_args     {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                                --prefix=${destroot}${prefix}\
+                                --enable-relocatable\
+                            }
 default build.env           {${haskell_cabal.env}}
 
+default destroot.cmd        {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default destroot.target     {${build.target}}
+default destroot.pre_args   {install}
+default destroot.args       {${destroot.target}}
+default destroot.post_args  {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                                --installdir=${destroot}${prefix}/bin\
+                                --prefix=${destroot}${prefix}\
+                                --enable-relocatable\
+                            }
 default destroot.env        {${haskell_cabal.env}}
 
-default test.cmd            {${haskell_cabal.bin}}
-default test.target         {new-test}
+default test.cmd            {${haskell_cabal.bin}\
+                                ${haskell_cabal.global_flags}}
+default test.target         {${build.target}}
+default test.pre_args       {test}
+default test.args           {${test.target}}
+default test.post_args      {\
+                                [haskell_cabal.build_getjobsarg]\
+                                --builddir=${haskell_cabal.build_dir}\
+                            }
 default test.env            {${haskell_cabal.env}}
-
-# destroot: Avoid recompilation with a call to new-install
-
-destroot {
-    # install binary
-    set cabal_build ${worksrcpath}/dist-newstyle/build
-    fs-traverse f ${cabal_build} {
-        if { [file isdirectory ${f}]
-            && [file tail ${f}] eq "${name}-${version}" } {
-            set cabal_build ${f}
-            break
-        }
-    }
-    fs-traverse f ${cabal_build} {
-        if { [file isfile ${f}]
-            && [file executable ${f}]
-            && [file tail ${f}] eq "${name}"
-            && [file tail [file dirname ${f}]] eq "${name}" } {
-            xinstall -m 0755 ${f} ${destroot}${prefix}/bin/${name}
-        }
-    }
-
-    # install documentation
-    if { [file isdirectory ${cabal_build}/doc] } {
-        xinstall -d ${destroot}${prefix}/share/doc/${name}
-        fs-traverse f_or_d ${cabal_build}/doc {
-            set subpath [strsed ${f_or_d} "s|${cabal_build}/doc||"]
-            if { ${subpath} ne "" } {
-                if { [file isdirectory ${f_or_d}] } {
-                    xinstall -d \
-                        ${destroot}${prefix}/share/doc/${name}${subpath}
-                } elseif { [file isfile ${f_or_d}] } {
-                    xinstall -m 0644 ${f_or_d} \
-                        ${destroot}${prefix}/share/doc/${name}${subpath}
-                }
-            }
-        }
-    }
-
-    # install cabal data-files
-    if { [file exists ${worksrcpath}/data]
-        && [file isdirectory ${worksrcpath}/data] } {
-        xinstall -d ${destroot}${prefix}/share/${name}
-        foreach f_or_d [glob -nocomplain ${worksrcpath}/data/*] {
-            if { [file isfile ${f_or_d}] } {
-                xinstall -m 0644 ${f_or_d} ${destroot}${prefix}/share/${name}
-            } elseif { [file isdirectory ${f_or_d}] } {
-                copy ${f_or_d} ${destroot}${prefix}/share/${name}
-            }
-        }
-    }
-}
 
 default livecheck.type      {regex}
 default livecheck.url       {https://hackage.haskell.org/package/${name}}
 default livecheck.regex     {"/package/[quotemeta ${name}]-\\\[^/\\\]+/[quotemeta ${name}]-(\\\[^\\\"\\\]+)[quotemeta ${extract.suffix}]"}
 
+
+# binary sed hack to address unfixed cabal datadir issue:
+# replace hardwired datadir in build directory with path
+# of the same length using repeated /'s
+# https://github.com/haskell/cabal/issues/3586
+post-destroot {
+    # find cabal data-files
+    set build_datadirs {}
+    if {[file isdirectory ${haskell_cabal.cabal_root}/store]} {
+        fs-traverse f ${haskell_cabal.cabal_root}/store {
+            if { [file isdirectory ${f}]
+                && [file tail ${f}] eq {share}} {
+                lappend build_datadirs ${f}
+            }
+        }
+    }
+    if {[llength ${build_datadirs}] > 0} {
+        foreach binfile [glob -nocomplain ${destroot}${prefix}/bin/*] {
+            if {!([file isfile ${binfile}] && [file type ${binfile}] eq {file})} {
+                continue
+            }
+            xinstall -m 0755 \
+                ${binfile} \
+                ${binfile}.slash_hack
+            foreach build_datadir ${build_datadirs} {
+                set extra_slashes \
+                    [expr {[string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]}]
+                if {${extra_slashes} >= 0} {
+                    set slash_hack \
+                        [string repeat / [expr {${extra_slashes} + 1}]]
+                    set datadir_slash_hack \
+                        [strsed ${prefix}/${haskell_cabal.datadir} "g|/${haskell_cabal.datadir}\$|${slash_hack}${haskell_cabal.datadir}|"]
+                    set build_datadir_esc \
+                        [strsed ${build_datadir} {g|/|\\/|}]
+                    set datadir_slash_hack_esc \
+                        [strsed ${datadir_slash_hack} {g|/|\\/|}]
+                    system -W ${destroot}${prefix}/bin \
+                        "gsed -i -e\
+                            's/${build_datadir_esc}/${datadir_slash_hack_esc}/g'\
+                            ${binfile}.slash_hack"
+                }
+            }
+            if {[file size ${binfile}.slash_hack] == [file size ${binfile}]} {
+                delete  ${binfile}
+                xinstall -m 0755 \
+                    ${binfile}.slash_hack \
+                    ${binfile}
+            }
+            delete  ${binfile}.slash_hack
+            if {${configure.build_arch} eq {arm64}} {
+                system "codesign -f -s - ${binfile}"
+            }
+        }
+    }
+}
 
 # Default cabal configuration file with available options
 

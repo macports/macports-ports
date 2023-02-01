@@ -12,6 +12,6 @@ if {!$has_homepage || ${livecheck.url} eq ${homepage}} {
             https://pypi.org/pypi/${livecheck.name}/json
 }
 if {${livecheck.regex} eq ""} {
-    livecheck.regex {"version":"([^"]+)"[,\}]}
+    livecheck.regex {"version": *"([^"]+)"[,\}]}
 }
 set livecheck.type "regex"

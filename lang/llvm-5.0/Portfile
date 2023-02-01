@@ -10,14 +10,13 @@ set llvm_version        5.0
 set clang_executable_version 5.0
 set lldb_executable_version 5.0.2
 name                    llvm-${llvm_version}
-revision                3
-subport                 clang-${llvm_version} { revision 4 }
+revision                4
+subport                 clang-${llvm_version} { revision 5 }
 subport                 lldb-${llvm_version} { revision 2 }
 set suffix              mp-${llvm_version}
 set sub_prefix          ${prefix}/libexec/llvm-${llvm_version}
 dist_subdir             llvm
 categories              lang
-platforms               darwin
 license                 NCSA
 maintainers             {jeremyhu @jeremyhu}
 
@@ -79,7 +78,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
     long_description    Lldb is the "LLVM native" debugger.
 
     depends_lib         port:libxml2 port:libomp port:llvm-${llvm_version} port:ncurses
-    depends_build-append port:swig-python port:doxygen
+    depends_build-append port:swig-python path:bin/doxygen:doxygen
 
     # Clang doesn't actually use any of these, but the LLVM makefile
     # system overlinks its binaries. Remove (or convert to build deps?)
@@ -314,16 +313,17 @@ if {${os.platform} eq "darwin" && ${os.major} >= 11} {
 configure.args-append   -DPYTHON_EXECUTABLE=${pythonfullpath}
 
 platform darwin {
+    # libcxx is untested on PPC
+    if {${build_arch} ni [list ppc ppc64]} {
+        configure.cxx_stdlib libc++
+        depends_lib-append port:libcxx
 
-    configure.cxx_stdlib libc++
-    depends_lib-append port:libcxx
-    supported_archs i386 x86_64
-
-    pre-fetch {
-        if {${os.major} < 11} {
-            if {![file exists /usr/lib/libc++.dylib]} {
-                ui_error "$name requires a C++11 runtime, which your configuration does not allow"
-                error "unsupported configuration"
+        pre-fetch {
+            if {${os.major} < 11} {
+                if {![file exists /usr/lib/libc++.dylib]} {
+                    ui_error "$name requires a C++11 runtime, which your configuration does not allow"
+                    error "unsupported configuration"
+                }
             }
         }
     }
@@ -370,6 +370,12 @@ platform darwin {
 
         # https://llvm.org/bugs/show_bug.cgi?id=25680
         configure.cxxflags-append -U__STRICT_ANSI__
+        
+        # Wrong type in OrcRemoteTargetClient.h
+        # error: could not convert 'Src->((llvm::orc::remote::OrcRemoteTargetClient<ChannelT>*)this)->callB<llvm::orc::remote::OrcRemoteTargetRPCAPI::ReadMem>(Size)'
+        # from 'Expected<vector<unsigned char,allocator<unsigned char>>>' to 'Expected<vector<char,allocator<char>>>'
+        # Patch borrows from llvm-7.1: https://github.com/iains/LLVM-7-branch/blob/7.1.1-Darwin-WIP/llvm/include/llvm/ExecutionEngine/Orc/OrcRemoteTargetClient.h
+        patchfiles-append patch-include-orc.diff
     }
 
     # https://llvm.org/bugs/show_bug.cgi?id=25674
@@ -439,13 +445,12 @@ if {${subport} eq "lldb-${llvm_version}"} {
         xinstall -m 755 -d ${destroot}${prefix}/share/doc/lldb-${llvm_version}
         xinstall -m 644 ${worksrcpath}/tools/lldb/docs/code-signing.txt ${destroot}${prefix}/share/doc/lldb-${llvm_version}/
     }
-    post-activate {
-        ui_msg "Please follow the instructions in ${prefix}/share/doc/lldb-${llvm_version}/code-signing.txt and then codesign the debugserver with:"
-        if {${os.major} >= 13} {
-            ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/debugserver"
-        } else {
-            ui_msg "   sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/debugserver"
-        }
+
+    notes "Please follow the instructions in ${prefix}/share/doc/lldb-${llvm_version}/code-signing.txt and then codesign the debugserver with:\n--------------------\n"
+    if {${os.major} >= 13} {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements,flags,team-identifier --sign <identity> ${sub_prefix}/bin/debugserver"
+    } else {
+        notes-append "sudo codesign --force --deep --preserve-metadata=identifier,entitlements,resource-rules,requirements --sign <identity> ${sub_prefix}/bin/debugserver"
     }
 }
 
@@ -537,10 +542,7 @@ if {${subport} eq "llvm-${llvm_version}"} {
         patchfiles-append \
             9000-patch-clang-support-emulated-tls.diff
     }
-    if {${os.major} < 11} {
-        default_variants-append +emulated_tls
-    }
-
+    default_variants-append +emulated_tls
 
     variant defaultlibcxx description {default to -stdlib=libc++ on all systems}  {
         #patch clang to always default to -stdlib=libc++ if not otherwise specified
@@ -553,58 +555,55 @@ if {${subport} eq "llvm-${llvm_version}"} {
         default_variants-append +defaultlibcxx
     }
 
-    variant libstdcxx description {-stdlib=macports-libstdc++ searches for MacPorts libstdc++} {
+    variant libstdcxx description {-stdlib=libstdc++_macports searches for MacPorts libstdc++} {
 
         patchfiles-append 9001-macports-libstdcxx.diff
 
         post-patch {
             reinplace "s|@@MACPORTS_GCC_INCLUDE_DIR@@|${prefix}/include/gcc/c++|g" \
                 ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
-            reinplace "s|@@MACPORTS_HOST_NAME@@|${build_arch}-apple-darwin${os.major}|g" \
+            reinplace "s|@@MACPORTS_HOST_NAME@@|${configure.build_arch}-apple-darwin${os.major}|g" \
                 ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
             reinplace "s|@@MACPORTS_libstdc++@@|${prefix}/lib/libgcc/libstdc++.6.dylib|g" \
                 ${worksrcpath}/tools/clang/lib/Driver/ToolChains/Darwin.cpp
 
-            # GCC was built for ${build_arch}-apple-darwin${os.major}
+            # GCC was built for ${configure.build_arch}-apple-darwin${os.major}
             # if GCC was also built universal, it has an extra include directory
-            # if ${build_arch} is 32-bit, there is an extra 64-bit subdirectory
-            # if ${build_arch} is 64-bit, there is an extra 32-bit subdirectory
-            # MacPorts GCC can not compile across platforms
-            switch ${build_arch} {
+            # if ${configure.build_arch} is 32-bit, there is an extra 64-bit subdirectory
+            # if ${configure.build_arch} is 64-bit, there is an extra 32-bit subdirectory
+            # MacPorts GCC cannot compile across platforms
+            switch ${configure.build_arch} {
                 x86_64 {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   "i386"
-                    set gcc_subdirectory_x86_64 ""
+                    reinplace {s|@@MACPORTS_32bit_DIR@@|i386|g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                    reinplace {s|@@MACPORTS_64bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
                 }
                 i386 {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_32bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                    reinplace {s|@@MACPORTS_64bit_DIR@@|x86_64|g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
                 }
                 ppc64 {
-                    set gcc_subdirectory_ppc    "ppc"
-                    set gcc_subdirectory_ppc64  ""
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_32bit_DIR@@|ppc|g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                    reinplace {s|@@MACPORTS_64bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
                 }
                 ppc {
-                    set gcc_subdirectory_ppc    ""
-                    set gcc_subdirectory_ppc64  "ppc64"
-                    set gcc_subdirectory_i386   ""
-                    set gcc_subdirectory_x86_64 "x86_64"
+                    reinplace {s|@@MACPORTS_32bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                    reinplace {s|@@MACPORTS_64bit_DIR@@|ppc64|g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                }
+                arm64 {
+                    reinplace {s|@@MACPORTS_32bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
+                    reinplace {s|@@MACPORTS_64bit_DIR@@||g} \
+                        ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
                 }
             }
-
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_x86_64@@|${gcc_subdirectory_x86_64}|g" \
-                ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_i386@@|${gcc_subdirectory_i386}|g" \
-                ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc64@@|${gcc_subdirectory_ppc64}|g" \
-                ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
-            reinplace "s|@@MACPORTS_GCC_SUBDIRECTORY_ppc@@|${gcc_subdirectory_ppc}|g" \
-                ${worksrcpath}/tools/clang/lib/Frontend/InitHeaderSearch.cpp
         }
     }
     default_variants-append +libstdcxx

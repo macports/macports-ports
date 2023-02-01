@@ -76,12 +76,12 @@
 /********************************************************************
  *                          IMPORTANT NOTE                          *
  *                                                                  *
- * This wrapper file is currently being used by two ports: Blender  *
- * and MaterialX. This file will eventually be added to the         *
- * MacPorts legacy support package. After it gets added, we will be *
- * able to remove this file from the ports and simply add the       *
- * MacPorts legacy support package as a dependency in the portfiles *
- * for Blender and MaterialX.                                       *
+ * This wrapper file is currently being used by a few ports:        *
+ * Blender, MaterialX, and Godot. This file will eventually be      *
+ * added to the MacPorts legacy support package. After it gets      *
+ * added, we will be able to remove this file from the ports and    *
+ * simply add the MacPorts legacy support package as a dependency   *
+ * in the portfiles for Blender, MaterialX, and Godot.              *
  ********************************************************************/
 
 #if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 101200

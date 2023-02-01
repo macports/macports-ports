@@ -5,17 +5,13 @@ PortGroup           gpg_verify 1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.1
 
-# Disable on all systems, we just need the libraries for the binary patching
-legacysupport.newest_darwin_requires_legacy 5
-
 name                ghc
-version             8.10.7
+version             9.4.3
 revision            0
 categories          lang haskell
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
 license             BSD
 platforms           darwin
-supported_archs     x86_64
 
 description         The Glorious Glasgow Haskell Compilation System
 long_description    The Glasgow Haskell Compiler is a robust, \
@@ -32,152 +28,155 @@ long_description    The Glasgow Haskell Compiler is a robust, \
                     generational garbage collector, and a space and \
                     time profiler.
 
-homepage            http://haskell.org/${name}
+homepage            https://haskell.org/${name}
 
-# Bootstrapped ghc is the default build
-variant prebuilt \
-    description {Do not bootstrap ghc; install the pre-built binary.} {
-    # https://gitlab.haskell.org/ghc/ghc/-/issues/19646
-    set workpath_destdir_pattern /Users/builder/Desktop/builds
-}
+# https://gitlab.haskell.org/ghc/ghc/-/wikis/building/hadrian
+# https://www.haskell.org/ghc/blog/20220805-make-to-hadrian.html
 
-# https://www.haskell.org/ghcup/
-# https://gitlab.haskell.org/haskell/ghcup/blob/master/README.md#manual-install
 use_xz              yes
 master_sites        https://downloads.haskell.org/~${name}/${version}
-distfiles           ${distname}-x86_64-apple-darwin${extract.suffix} \
-                    ${distname}-testsuite${extract.suffix}
 
-checksums           ${distname}-x86_64-apple-darwin${extract.suffix} \
-                    rmd160  0869c97fa384e1ffe414792c805050b64b0fe314 \
-                    sha256  287db0f9c338c9f53123bfa8731b0996803ee50f6ee847fe388092e5e5132047 \
-                    size    189784784 \
+platform arm {
+    set ghc_build_arch  aarch64
+}
+platform i386 {
+    set ghc_build_arch  x86_64
+}
+platform powerpc {
+    set ghc_build_arch  ppc
+}
+
+if {${os.arch} ni [list arm i386]} {
+    known_fail      yes
+    pre-fetch {
+        ui_error "GHC is only available on macOS \
+            with [join ${supported_archs} " or "] architectures."
+        error {unsupported platform}
+    }
+}
+
+set ghc_version     ${version}
+set ghc_distname    ${distname}-${ghc_build_arch}-apple-darwin
+
+# set build_arch by hand on arm64/x86_64 systems to get x86_64/arm64 checksums
+# sudo port -d checksum ghc-prebuilt os.arch=arm build_arch=arm64
+# run `port clean --all ghc-prebuilt` afterwards
+if {${build_arch} eq {arm64}} {
+    checksums       ${ghc_distname}${extract.suffix} \
+                    rmd160  01f156c3b58c2aa4e7889ea903b19c6298767c4b \
+                    sha256  531c0a4708655bc8707ba88b8a72d34b5958fddc519a12359613f6db62f0eb82 \
+                    size    196392720
+} elseif {${build_arch} eq {x86_64}} {
+    checksums       ${ghc_distname}${extract.suffix} \
+                    rmd160  e47f087da4d1c8f504c87ac1587d5ce3abe0f78b \
+                    sha256  501d264f2f73faa63b4e6d9569dc7d12ad97af11827c7b55d346cc6795ff5e04 \
+                    size    186641884
+}
+set ghc_source_checksums [list \
+                    ${distname}-src${extract.suffix} \
+                    rmd160  492f217158c773dbc32d5b763d14ecafc3371fd5 \
+                    sha256  eaf63949536ede50ee39179f2299d5094eb9152d87cc6fb2175006bc98e8905a \
+                    size    28576840 \
+                    ]
+set ghc_testsuite_checksums [list \
                     ${distname}-testsuite${extract.suffix} \
-                    rmd160  ea29da92a5c6d6abb6ccb2128b615cf04e0a78a3 \
-                    sha256  df8627dc50b9182dec96085afeb005ccf5a0adc56c40340330a5df65de2b82fe \
-                    size    2266208
+                    rmd160  18cbb61b625f021a095abcd7c34b6518f5cb798e \
+                    sha256  d4a089a97743a795928b23a5f2ac1705b707316175bf72f912af1a7cc7d077f5 \
+                    size    3393188 \
+                    ]
 
-gpg_verify.use_gpg_verification \
+# https://bgamari.github.io/media/ben@well-typed.com.asc
+set gpg_keyid       ffeb7ce81e16a36b3e2ded6f2de04d4e97db64ad
+
+if {${name} eq ${subport}} {
+    PortGroup       haskell_cabal 1.0
+
+    haskell_cabal.use_prebuilt  yes
+
+    haskell_cabal.env \
+                    "CABAL_CONFIG=${haskell_cabal.cabal_root}/config" \
+                    "GHC=${haskell_cabal.cabal_root}/bin/ghc" \
+                    "PATH=${workpath}/bin:${haskell_cabal.cabal_root}/bin:$env(PATH)"
+
+    # https://trac.macports.org/ticket/65899
+    # https://trac.macports.org/wiki/UsingTheRightCompiler#testing
+    foreach phase {build destroot test} {
+        ${phase}.env-append \
+                    CC=${configure.cc} \
+                    "CFLAGS=${configure.cflags}" \
+                    CPP=${configure.cpp} \
+                    "CPPFLAGS=${configure.cppflags}" \
+                    CXX=${configure.cxx} \
+                    "CXXFLAGS=${configure.cxxflags}" \
+                    "LDFLAGS=${configure.ldflags}"
+    }
+
+    configure.cmd   ./configure
+    configure.pre_args \
+                    --prefix=${prefix}
+    configure.args
+
+    build.cmd       hadrian
+    build.target    binary-dist-dir
+    build.pre_args
+    build.post_args [haskell_cabal.build_getjobsarg]
+
+    destroot.cmd    hadrian
+    destroot.target install
+    destroot.pre_args \
+                    --prefix=${destroot}${prefix}
+    destroot.post_args
+
+    test.cmd        hadrian
+    test.target     test
+    test.pre_args
+    test.post_args  [haskell_cabal.build_getjobsarg]
+
+    distfiles       [lindex ${ghc_source_checksums} 0] \
+                    [lindex ${ghc_testsuite_checksums} 0]
+    checksums       {*}${ghc_source_checksums} \
+                    {*}${ghc_testsuite_checksums}
+    extract.only    [lindex ${ghc_source_checksums} 0] \
+                    [lindex ${ghc_testsuite_checksums} 0]
+
+    variant prebuilt \
+        description {This variant is deprecated.} {
+        ui_error "Please install the port ${name}-prebuilt."
+        return -code error "deprecated variant."
+    }
+
+    gpg_verify.use_gpg_verification \
                     yes
 
-if {[option gpg_verify.use_gpg_verification]} {
-    distfiles-append \
-                    ${distname}-x86_64-apple-darwin${extract.suffix}.sig \
+    if {[option gpg_verify.use_gpg_verification]} {
+        distfiles-append \
                     ${distname}-testsuite${extract.suffix}.sig
-    checksums-append \
-                    ${distname}-x86_64-apple-darwin${extract.suffix}.sig \
-                    size    438 \
+        checksums-append \
                     ${distname}-testsuite${extract.suffix}.sig \
-                    size    438
+                    size    586
 
-    post-checksum {
-        # check GPG signature: https://www.haskell.org/ghc/download_ghc_8_6_5.html
-        set gpg_keyid 588764fbe22d19c4
-
-        gpg_verify.verify_gpg_signature \
-            ${filespath}/keyid-${gpg_keyid}.txt \
-            ${distpath}/${distname}-x86_64-apple-darwin${extract.suffix}.sig \
-            ${distpath}/${distname}-x86_64-apple-darwin${extract.suffix}
-
-        gpg_verify.verify_gpg_signature \
-            ${filespath}/keyid-${gpg_keyid}.txt \
-            ${distpath}/${distname}-testsuite${extract.suffix}.sig \
-            ${distpath}/${distname}-testsuite${extract.suffix}
-    }
-}
-
-extract.only        ${distname}-x86_64-apple-darwin${extract.suffix} \
-                    ${distname}-testsuite${extract.suffix}
-
-# If legacy support is active, patch the bootstrap binaries to redirect libSystem.B.dylib
-# to MacPorts wrapped implementation which reexports the system library, adding
-# each missing in each OS.
-if {${os.platform} eq "darwin" && ${os.major} <= [legacysupport::get_newest_darwin_with_missing_symbols]} {
-    depends_lib-append [legacysupport::get_dependency]
-    post-extract {
-        foreach f [ exec find ${workpath}/ -type f -and -name "*.dylib" -or -name "*ghc*" -and -not -name "*stderr"] {
-            if {[string match "application/*" [lindex [exec /usr/bin/file --mime-type ${f}] end]]} {
-                set sLib /usr/lib/libSystem.B.dylib
-                set lLib ${prefix}/lib/libMacportsLegacySystem.B.dylib
-                system "install_name_tool -change ${sLib} ${lLib} ${f} > /dev/null 2>&1 ; true"
-            }
+        post-checksum {
+            gpg_verify.verify_gpg_signature \
+                    ${filespath}/keyid-${gpg_keyid}.txt \
+                    ${distpath}/${distname}-testsuite${extract.suffix}.sig \
+                    ${distpath}/${distname}-testsuite${extract.suffix}
         }
     }
-}
 
-# Build requires C11
-compiler.c_standard 2011
-# On OSX 10.{8,9} with clang 503, 600
-#   :info:build dtrace: failed to open td=gnu11/usr/bin/clang -std=gnu11 -E ...
-compiler.blacklist-append {clang < 700}
+    use_xcode       yes
 
-# use these to specify python versions, python3 required
-# use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
-set python3_version 39
-set python3_branch [string index ${python3_version} 0].[string range ${python3_version} 1 end]
+    # Build requires C11
+    compiler.c_standard 2011
+    # On OSX 10.{8,9} with clang 503, 600
+    #   :info:build dtrace: failed to open td=gnu11/usr/bin/clang -std=gnu11 -E ...
+    compiler.blacklist-append {clang < 700}
 
-set srcpath ${workpath}/src
-
-# get the objdump rpath names that match ${workpath} in the binary
-proc get_workpath_list { binname workpath_destdir_pattern } {
-    return [exec bash -c "otool -l \"${binname}\" 2>/dev/null \
-        | grep -E -A 2 -e '\[\[:space:]]+cmd\[\[:space:]]+LC_RPATH' \
-        | grep -E -e '\[\[:space:]]+path\[\[:space:]]+' \
-        | grep -E -o -e '(${workpath_destdir_pattern}\[^ ]+)' || true"]
-}
-
-# fix ${workpath} rpath dirs
-proc fix_workpath_rpath { binname workpath_destdir_pattern libdir_glob rpath_re } {
-    global destroot
-    set workpath_list \
-        [get_workpath_list ${binname} ${workpath_destdir_pattern}]
-    foreach path [lreverse ${workpath_list}] {
-        system "install_name_tool -delete_rpath \"${path}\" \"${binname}\" || true"
-    }
-    foreach rpath [exec bash -c \
-        "otool -L \"${binname}\" | grep -E -o -e '${rpath_re}' || true"] {
-        set libname [strsed ${rpath} "s|^@rpath/||"]
-        set libpath [glob -nocomplain "${destroot}${libdir_glob}/${libname}"]
-        if { ${libpath} ne "" } {
-            set libprefixpath \
-                [strsed [file dirname ${libpath}] "s|${destroot}||"]
-            system "install_name_tool -add_rpath \"${libprefixpath}\" \"${binname}\" || true"
-        }
-    }
-}
-
-# `make install` in bootstrap build cannot use a parallel build.
-# Also during the main build the 'ghc-stage1' processes can use huge amounts
-# of memory, leading to build failures (particularly on the buildbots or VMs
-# with limited resources). So disable parallel builds there as well, at the
-# expense of a longer build time (mitigated by fact most users will then get
-# the binary installation).
-use_parallel_build  no
-
-# Note: ghc has DESTDIR; however, specifying --prefix=${prefix} installs
-# binaries into ${prefix}, not DESTDIR.  Work around this by setting
-# --prefix=${destroot}${prefix} and not setting DESTDIR
-
-if { [variant_isset "prebuilt"] } {
-    set bootstrap_dir ${destroot}${prefix}
-
-    # install the initial bootstrap compiler to destroot
-    configure.pre_args \
-                    --prefix=${bootstrap_dir}
-
-    # the PATH environment must provide the bootstrap path
-    build.env-append \
-                    "PATH=$env(PATH):${bootstrap_dir}/bin"
-} else {
-    set bootstrap_dir ${workpath}/bootstrap
-
-    distfiles-append \
-                    ${distname}-src${extract.suffix}
-    checksums-append \
-                    ${distname}-src${extract.suffix} \
-                    rmd160  c8ce8ca9d952511438d5e8af25c689fd38f11fed \
-                    sha256  e3eef6229ce9908dfe1ea41436befb0455fefb1932559e860ad4c606b0d03c9d \
-                    size    19932668
+    # use these to specify python versions, python3 required
+    # use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+    set python3_version 310
+    set python3_branch  [string index ${python3_version} 0].[string range ${python3_version} 1 end]
+    set python3_prefix  ${frameworks_dir}/Python.framework/Versions/${python3_branch}
+    set python3_bin     ${python3_prefix}/bin/python${python3_branch}
 
     depends_build-append \
                     port:alex \
@@ -187,6 +186,7 @@ if { [variant_isset "prebuilt"] } {
                     port:bzip2 \
                     port:cctools \
                     port:gzip \
+                    port:hadrian \
                     port:happy \
                     port:HsColour \
                     port:python${python3_version} \
@@ -197,161 +197,108 @@ if { [variant_isset "prebuilt"] } {
                     port:texlive-latex-extra \
                     port:xz
 
-    # Add these MacPorts dependencies after this issue is fixed:
-    # https://gitlab.haskell.org/ghc/ghc/-/issues/18752
-    # depends_lib-append \
-    #                 port:gmp \
-    #                 port:libffi \
-    #                 port:libiconv
+    depends_lib-append  \
+                    port:gmp \
+                    port:libiconv \
+                    port:ncurses
+    
+    # build depends upon these x86_64 binaries
+    depends_skip_archcheck-append \
+                    alex \
+                    hadrian \
+                    happy \
+                    HsColour
 
     post-extract {
-        # test: move extracted testsuite directory to src
-        xinstall -m 0755 -d ${srcpath}/${distname}
-        move        ${worksrcpath}/testsuite ${srcpath}/${distname}/testsuite
+        xinstall -d ${workpath}/bin
+        ln -s       ${python3_bin} \
+                    ${workpath}/bin/python3
+        ln -s       ${prefix}/bin/sphinx-build-${python3_branch} \
+                    ${workpath}/bin/sphinx-build
+        # avoid this cabal/sed error in macOS 10 and earlier:
+        # checking for version of sphinx-build... sed: illegal option -- r
+        ln -s       ${prefix}/bin/gsed \
+                    ${workpath}/bin/sed
     }
 
-    # libHSbase shipped with GHC links against system libiconv, which provides the
-    # 'iconv' symbol, but not the 'libiconv' symbol. Because the compilation
-    # process statically links libHSbase.a, we must have /usr/lib in the library
-    # search path first :/
-    compiler.library_path
-    compiler.cpath
-
-    # install the initial bootstrap compiler to destroot
-    configure.pre_args \
-                    --prefix=${bootstrap_dir}
-
-    # Add these MacPorts dependencies after this issue is fixed:
-    # https://gitlab.haskell.org/ghc/ghc/-/issues/18752
-    #                 --with-ffi-includes=${prefix}/include \
-    #                 --with-ffi-libraries=${prefix}/lib \
-    #                 --with-gmp-includes=${prefix}/include \
-    #                 --with-gmp-libraries=${prefix}/lib \
-    #                 --with-iconv-includes=${prefix}/include \
-    #                 --with-iconv-libraries=${prefix}/lib
-
-    # add the bootstrap binary and the sphinx-build binary to PATH
-    configure.env-append \
-        GHC=${bootstrap_dir}/bin/ghc \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
-
-    pre-configure {
-        xinstall -m 0755 -d ${bootstrap_dir}
-    }
-
-    # the PATH environment must provide the bootstrap path
-    build.env \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
-
-    post-build {
-        # bootstrap build/destroot from ${distname}-src${extract.suffix}
-
-        # extract
-        extract.dir     ${srcpath}
-        extract.only    ${distname}-src${extract.suffix}
-        portextract::extract_main
+    post-patch {
+        if { ![file exists ${worksrcpath}/boot] } {
+            xinstall \
+                    ${worksrcpath}/boot.source \
+                    ${worksrcpath}/boot
+        }
 
         # fix DejaVu texlive fonts names, e.g. "\setmonofont{DejaVu Sans Mono}"
-        foreach f "\
-            ${srcpath}/${distname}/libraries/Cabal/Cabal/doc/conf.py \
-            ${srcpath}/${distname}/docs/users_guide/conf.py \
-            " {
+        foreach f [list \
+            ${worksrcpath}/libraries/Cabal/doc/conf.py \
+            ${worksrcpath}/docs/users_guide/conf.py \
+            ] {
             reinplace -E "s|(\{DejaVu\[\[:alnum:]_]*)\[\[:space:]]+|\\1|g" \
-                ${f}
+                    ${f}
             reinplace -E "s|(\{DejaVu\[\[:alnum:]_]*)\[\[:space:]]+|\\1|g" \
-                ${f}
+                    ${f}
             reinplace -E "s|\{(DejaVu\[\[:alnum:]_]*)\}|\{\\1.ttf\}|g" \
-                ${f}
-        }
-        # fix python3 executable name
-        foreach f "\
-            ${srcpath}/${distname}/boot \
-            ${srcpath}/${distname}/utils/checkUniques/check-uniques.py \
-            " {
-            reinplace -E "s|^(#!/usr/bin/env python)3|\\1${python3_branch}|" \
-                ${f}
-        }
-
-        # see https://trac.macports.org/wiki/UsingTheRightCompiler
-        configure.env-append    CC=${configure.cc} \
-                                CXX=${configure.cxx}
-        build.env-append        CC=${configure.cc} \
-                                CXX=${configure.cxx}
-        # diff -Naur ghc ghc-patched | sed -E -e 's/ghc(-patched)?\//.\//g' > patch-gmp-ghc.mk.diff
-        system -W ${srcpath}/${distname} "patch -p0 < ${filespath}/patch-gmp-ghc.mk.diff"
-
-        system -W ${srcpath}/${distname} \
-                    "export ${configure.env} ;\
-                    ./boot"
-
-        # configure
-        # install the final compiler to destroot
-        configure.pre_args-replace \
-                    --prefix=${bootstrap_dir} \
-                    --prefix=${destroot}${prefix}
-        configure.dir   ${srcpath}/${distname}
-        system -W ${srcpath}/${distname} \
-            "export ${configure.env};\
-            ${configure.cmd} ${configure.pre_args}"
-
-        # build and destroot the second stage: `make && make install`
-        system -W ${srcpath}/${distname} \
-            "export ${build.env};\
-            ${build.cmd} [portbuild::build_getjobsarg]"
-        system -W ${srcpath}/${distname} \
-            "export ${build.env};\
-            ${build.cmd} ${destroot.pre_args}"
-    }
-}
-
-build.target        install
-
-destroot {
-    xinstall -W ${filespath} -m 0644 ./ghci.conf ${destroot}${prefix}/etc
-}
-
-# https://gitlab.haskell.org/ghc/ghc/-/issues/19646
-set workpath_destdir_pattern ${workpath}
-post-destroot {
-    # fix rpath searches
-    foreach f [concat \
-        [glob -type f ${destroot}${prefix}/lib/${name}-${version}/bin/*] \
-        [glob -type f ${destroot}${prefix}/lib/${name}-${version}/*/*.dylib]] {
-        if {[file executable ${f}]
-            || [string match *.dylib ${f}]} {
-            fix_workpath_rpath ${f} \
-                ${workpath_destdir_pattern} \
-                ${prefix}/lib/${name}-${version}/* \
-                {@rpath/lib.+\.dylib}
+                    ${f}
         }
     }
-}
 
-post-destroot {
-    # delete any destroot path appearing in text files
-    fs-traverse f ${destroot}${prefix} {
-        if {[file isfile ${f}]} {
-            if {[string match "text/*" [lindex [exec /usr/bin/file --mime-type ${f}] end]]} {
-                reinplace -q "s|${destroot}||g" ${f}
+    pre-configure {
+        system -W ${worksrcpath} \
+            "env ${haskell_cabal.env} ./boot"
+    }
+
+    use_autoconf    yes
+
+    # https://gitlab.haskell.org/ghc/ghc/-/issues/22118
+    configure.pre_args-append \
+                    --with-gmp-includes=${prefix}/include \
+                    --with-gmp-libraries=${prefix}/lib \
+                    --with-iconv-includes=${prefix}/include \
+                    --with-iconv-libraries=${prefix}/lib
+
+    post-build {
+        system -W ${build.dir} \
+            "env ${haskell_cabal.env} ${build.cmd} docs [haskell_cabal.build_getjobsarg]"
+    }
+
+    pre-destroot {
+        # mk/install_script.sh isn't automatically created by hadrian
+        set bindist_mkdir [glob ${worksrcpath}/_build/bindist/${distname}-*/mk]
+        if {![file exists ${bindist_mkdir}/install_script.sh]} {
+            xinstall -W ${worksrcpath} mk/install_script.sh ${bindist_mkdir}
+        }
+    }
+
+    # documentation
+    post-destroot {
+        xinstall -W ${filespath} -m 0644 ./ghci.conf ${destroot}${prefix}/etc
+
+        delete      ${destroot}${prefix}/share/share/doc/${distname}/archives
+
+        xinstall -d ${destroot}${prefix}/share/man/man1
+        xinstall -m 0644 \
+                    ${worksrcpath}/_build/doc/users_guide/build-man/${name}.1 \
+                    ${destroot}${prefix}/share/man/man1
+    }
+
+    post-destroot {
+        # delete any destroot path appearing in text files
+        fs-traverse f ${destroot}${prefix} {
+            if {[file isfile ${f}] && [file type ${f}] eq {file}} {
+                if {[string match "text/*" [lindex [exec /usr/bin/file --mime-type ${f}] end]]} {
+                    reinplace -q "s|${destroot}||g" ${f}
+                }
             }
         }
     }
-}
 
-post-activate {
-    system "${prefix}/bin/ghc-pkg recache"
-}
+    test.run        yes
 
-pre-test {
-    test.env-append \
-        "PATH=$env(PATH):${bootstrap_dir}/bin:${frameworks_dir}/Python.framework/Versions/${python3_branch}/bin"
-}
+    post-activate {
+        system "${prefix}/bin/ghc-pkg recache"
+    }
 
-test.run            yes
-test.dir            ${srcpath}/${distname}/testsuite
-test.target         test
-
-notes "The GHC User Manual is available at:
+    notes "The GHC User Manual is available at:
 
     file://${prefix}/share/doc/${distname}/html/index.html
     ${prefix}/share/doc/${distname}/users_guide.pdf
@@ -359,8 +306,135 @@ notes "The GHC User Manual is available at:
 Copy/edit ${prefix}/etc/ghci.conf to your directory ~/.ghc
 for a user-specific startup configuration."
 
-# livecheck broken on downloads.haskell.org
-# See: https://lists.macports.org/pipermail/macports-dev/2019-December/041581.html
-#livecheck.type      regex
-#livecheck.url       https://downloads.haskell.org/~${name}
-#livecheck.regex     (\\d+(?:\\.\\d+){1,3})
+    # livecheck broken on downloads.haskell.org
+    # See: https://lists.macports.org/pipermail/macports-dev/2019-December/041581.html
+    #livecheck.type      regex
+    #livecheck.url       https://downloads.haskell.org/~${name}
+    #livecheck.regex     (\\d+(?:\\.\\d+){1,3})
+}
+
+subport ghc-prebuilt {
+    revision        0
+    supported_archs arm64 x86_64
+
+    worksrcdir      ${ghc_distname}
+    distfiles       ${ghc_distname}${extract.suffix}
+
+    gpg_verify.use_gpg_verification \
+                    yes
+
+    if {[option gpg_verify.use_gpg_verification]} {
+        distfiles-append \
+                    ${ghc_distname}${extract.suffix}.sig
+        checksums-append \
+                    ${ghc_distname}${extract.suffix}.sig \
+                    size    586
+
+        post-checksum {
+            gpg_verify.verify_gpg_signature \
+                    ${filespath}/keyid-${gpg_keyid}.txt \
+                    ${distpath}/${ghc_distname}${extract.suffix}.sig \
+                    ${distpath}/${ghc_distname}${extract.suffix}
+        }
+    }
+
+    extract.only    ${ghc_distname}${extract.suffix}
+
+    # Build requires C11
+    compiler.c_standard 2011
+    # On OSX 10.{8,9} with clang 503, 600
+    #   :info:build dtrace: failed to open td=gnu11/usr/bin/clang -std=gnu11 -E ...
+    compiler.blacklist-append {clang < 700}
+
+    distname        ${name}-${ghc_version}
+    worksrcdir      ${distname}
+
+    build           {}
+
+    post-destroot {
+        # rename installed files to *-prebuilt
+        set exedir ${prefix}/lib/${distname}
+        set docdir ${prefix}/share/doc/${distname}
+        foreach f [glob ${destroot}${prefix}/bin/*] {
+            if {[file isfile ${f}] && [file type ${f}] eq {file}
+                && [string match "text/*" [lindex [exec /usr/bin/file --mime-type ${f}] end]]} {
+                reinplace -E -q \
+                    "s|^(exeprog=\".+)(\")\$|\\1-prebuilt\\2|" \
+                    ${f}
+                foreach d [list ${exedir} ${docdir}] {
+                    reinplace -E -q "s|(${d})|\\1-prebuilt|g" ${f}
+                }
+                move ${f} ${f}-prebuilt
+            } elseif {[file type ${f}] eq {link}} {
+                set flink [file readlink ${f}]
+                ln -s ${flink}-prebuilt ${f}-prebuilt
+                delete ${f}
+            }
+        }
+        foreach d [list ${destroot}${exedir} ${destroot}${docdir}] {
+            move    ${d} ${d}-prebuilt
+        }
+
+        delete -force \
+                    ${destroot}${docdir}/archives
+    }
+}
+
+subport hadrian {
+    # find ${worksrcpath} -type f -exec egrep -E -o '"pkg-name":"shake","pkg-version":"[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+"' {} ';'
+    version         0.19.6
+    revision        2
+
+    distname        ${name}-${ghc_version}
+    distfiles       [lindex ${ghc_source_checksums} 0]
+    checksums       {*}${ghc_source_checksums}
+    extract.only    [lindex ${ghc_source_checksums} 0]
+
+    worksrcdir      ${distname}
+    set worksrcpath ${workpath}/${worksrcdir}/${subport}
+
+    variant stack \
+        description {Use stack to build.} {}
+
+    if { [variant_isset "stack"] } {
+        PortGroup   haskell_stack 1.0
+
+        post-extract {
+            # Fix for cabal data-files hardcoded path in binary
+            # See:
+            # https://github.com/commercialhaskell/stack/issues/848
+            # https://github.com/commercialhaskell/stack/issues/4857
+            # https://github.com/haskell/cabal/issues/462
+            # https://github.com/haskell/cabal/issues/3586
+            xinstall -m 0644 -W ${worksrcpath} \
+                ${filespath}/Paths_${subport}.hs ./src/Paths_${subport}.hs
+
+            reinplace "s|@PREFIX@|${prefix}|g" \
+                ${worksrcpath}/src/Paths_${subport}.hs
+            reinplace "s|@NAME@|${subport}|g" \
+                ${worksrcpath}/src/Paths_${subport}.hs
+            reinplace -E "s|(Version\[\[:space:\]\]+)\\\[\[\[:digit:\]\]+(,\[\[:digit:\]\]+){1,4}\\\]|\\1\[[join [split ${version} .] ,]\]|" \
+                ${worksrcpath}/src/Paths_${subport}.hs
+        }
+    } else {
+        PortGroup   haskell_cabal 1.0
+
+        variant haskell_cabal_use_prebuilt \
+            description {Use prebuilt cabal and ghc. This is a necessary\
+                default variant because hadrian is used to bootstrap ghc\
+                and ghc is used to bootstrap cabal.} {
+            haskell_cabal.use_prebuilt  yes
+        }
+        default_variants-append \
+                    +haskell_cabal_use_prebuilt
+
+        # patch to allow compilation with ghc 9.4.2
+        # please remove after next upgrade
+        # https://gitlab.haskell.org/ghc/ghc/-/issues/21980#note_447726
+        patchfiles-append \
+                    patch-cabal_project.diff
+
+        build.target-append \
+                    --project-file=cabal.project
+    }
+}

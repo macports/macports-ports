@@ -13,6 +13,4 @@
 
 ;; Use the OS X Emoji font for Emoticons
 (when (fboundp 'set-fontset-font)
-  (set-fontset-font "fontset-default"
-                    'symbol
-                    (font-spec :name "Apple Color Emoji") nil 'prepend))
+  (set-fontset-font t 'emoji '("Apple Color Emoji" . "iso10646-1") nil 'prepend))

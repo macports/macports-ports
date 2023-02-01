@@ -1,0 +1,136 @@
+--- absl/copts/AbseilConfigureCopts.cmake.orig	2022-09-03 07:16:44.000000000 +0700
++++ absl/copts/AbseilConfigureCopts.cmake	2022-09-03 07:21:50.000000000 +0700
+@@ -52,13 +52,13 @@
+   if(ABSL_RANDOM_RANDEN_COPTS AND NOT ABSL_RANDOM_RANDEN_COPTS_WARNING)
+     list(APPEND ABSL_RANDOM_RANDEN_COPTS "-Wno-unused-command-line-argument")
+   endif()
+-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
++elseif(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64|amd64|AMD64")
+   if (MSVC)
+     set(ABSL_RANDOM_RANDEN_COPTS "${ABSL_RANDOM_HWAES_MSVC_X64_FLAGS}")
+   else()
+     set(ABSL_RANDOM_RANDEN_COPTS "${ABSL_RANDOM_HWAES_X64_FLAGS}")
+   endif()
+-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm.*|aarch64")
++elseif(CMAKE_OSX_ARCHITECTURES MATCHES "arm.*|aarch64")
+   if (CMAKE_SIZEOF_VOID_P STREQUAL "8")
+     set(ABSL_RANDOM_RANDEN_COPTS "${ABSL_RANDOM_HWAES_ARM64_FLAGS}")
+   elseif(CMAKE_SIZEOF_VOID_P STREQUAL "4")
+@@ -66,6 +66,8 @@
+   else()
+     message(WARNING "Value of CMAKE_SIZEOF_VOID_P (${CMAKE_SIZEOF_VOID_P}) is not supported.")
+   endif()
++elseif(CMAKE_OSX_ARCHITECTURES MATCHES "ppc|ppc64")
++  set(ABSL_RANDOM_RANDEN_COPTS "${ABSL_RANDOM_HWAES_PPC_FLAGS}")
+ else()
+   message(WARNING "Value of CMAKE_SYSTEM_PROCESSOR (${CMAKE_SYSTEM_PROCESSOR}) is unknown and cannot be used to set ABSL_RANDOM_RANDEN_COPTS")
+   set(ABSL_RANDOM_RANDEN_COPTS "")
+
+--- absl/copts/copts.py.orig	2022-09-01 00:15:21.000000000 +0700
++++ absl/copts/copts.py	2022-09-03 06:17:38.000000000 +0700
+@@ -162,5 +162,6 @@
+         "-maes",
+         "-msse4.1",
+     ],
++    "ABSL_RANDOM_HWAES_PPC_FLAGS": [],
+     "ABSL_RANDOM_HWAES_MSVC_X64_FLAGS": [],
+ }
+
+--- absl/copts/configure_copts.bzl.orig	2022-06-23 22:22:47.000000000 +0400
++++ absl/copts/configure_copts.bzl	2022-07-22 20:56:32.000000000 +0400
+@@ -45,7 +45,7 @@
+ ABSL_RANDOM_RANDEN_COPTS = select({
+     # APPLE
+     ":cpu_darwin_x86_64": ABSL_RANDOM_HWAES_X64_FLAGS,
+-    ":cpu_darwin": ABSL_RANDOM_HWAES_X64_FLAGS,
++    ":cpu_darwin_ppc": ABSL_RANDOM_HWAES_PPC_FLAGS,
+     ":cpu_x64_windows_msvc": ABSL_RANDOM_HWAES_MSVC_X64_FLAGS,
+     ":cpu_x64_windows": ABSL_RANDOM_HWAES_MSVC_X64_FLAGS,
+     ":cpu_k8": ABSL_RANDOM_HWAES_X64_FLAGS,
+@@ -68,7 +68,7 @@
+         "ppc",
+         "k8",
+         "darwin_x86_64",
+-        "darwin",
++        "darwin_ppc",
+         "x64_windows_msvc",
+         "x64_windows",
+         "aarch64",
+
+--- absl/random/internal/randen_detect.cc.orig	2022-09-01 00:15:21.000000000 +0700
++++ absl/random/internal/randen_detect.cc	2022-09-03 07:03:35.000000000 +0700
+@@ -39,6 +39,8 @@
+ #elif defined(__linux__) && defined(ABSL_HAVE_GETAUXVAL)
+ #define ABSL_INTERNAL_USE_LINUX_GETAUXVAL
+ #define ABSL_INTERNAL_USE_GETAUXVAL
++#elif defined(__APPLE__) && defined(ABSL_ARCH_PPC)
++#define ABSL_INTERNAL_USE_PPC_CPUINFO
+ #endif
+ #endif
+ 
+@@ -56,6 +58,11 @@
+ #endif
+ #endif  // ABSL_INTERNAL_USE_X86_CPUID
+ 
++#if defined(ABSL_INTERNAL_USE_PPC_CPUINFO)
++#include <mach/mach.h>
++#include <mach/machine.h>
++#endif // ABSL_INTERNAL_USE_PPC_CPUINFO
++
+ // On linux, just use the c-library getauxval call.
+ #if defined(ABSL_INTERNAL_USE_LINUX_GETAUXVAL)
+ 
+--- absl/random/internal/platform.h.orig	2022-09-01 00:15:21.000000000 +0700
++++ absl/random/internal/platform.h	2022-09-03 06:56:21.000000000 +0700
+@@ -67,8 +67,8 @@
+ #define ABSL_ARCH_AARCH64
+ #elif defined(__arm__) || defined(__ARMEL__) || defined(_M_ARM)
+ #define ABSL_ARCH_ARM
+-#elif defined(__powerpc64__) || defined(__PPC64__) || defined(__powerpc__) || \
+-    defined(__ppc__) || defined(__PPC__)
++#elif defined(__powerpc64__) || defined(__PPC64__) || defined(__ppc64__) || \
++     defined(__powerpc__) || defined(__PPC__) || defined(__ppc__)
+ #define ABSL_ARCH_PPC
+ #else
+ // Unsupported architecture.
+@@ -105,9 +105,11 @@
+ 
+ #elif defined(ABSL_ARCH_PPC)
+ 
++#if defined(__APPLE__)
++#undef ABSL_HAVE_ACCELERATED_AES
++#define ABSL_HAVE_ACCELERATED_AES 0
+ // Rely on VSX and CRYPTO extensions for vcipher on PowerPC.
+-#if (defined(__VEC__) || defined(__ALTIVEC__)) && defined(__VSX__) && \
+-    defined(__CRYPTO__)
++#elif (defined(__VEC__) || defined(__ALTIVEC__)) && defined(__VSX__) && defined(__CRYPTO__)
+ #undef ABSL_HAVE_ACCELERATED_AES
+ #define ABSL_HAVE_ACCELERATED_AES 1
+ #endif
+@@ -151,6 +153,10 @@
+ // (This captures a lot of Android configurations.)
+ #undef ABSL_RANDOM_INTERNAL_AES_DISPATCH
+ #define ABSL_RANDOM_INTERNAL_AES_DISPATCH 1
++#elif defined(__APPLE__) && defined(ABSL_ARCH_PPC)
++// Darwin PPC
++#undef ABSL_RANDOM_INTERNAL_AES_DISPATCH
++#define ABSL_RANDOM_INTERNAL_AES_DISPATCH 0
+ #endif
+ 
+ // NaCl does not allow dispatch.
+
+--- absl/debugging/internal/examine_stack.cc.orig	2022-06-23 22:22:47.000000000 +0400
++++ absl/debugging/internal/examine_stack.cc	2022-07-23 19:11:23.000000000 +0400
+@@ -223,6 +232,12 @@
+ #else
+     return reinterpret_cast<void*>(signal_ucontext->uc_mcontext->ss.rip);
+ #endif
++#elif defined(__ppc__) || defined(__ppc64__)
++#if __DARWIN_UNIX03
++    return reinterpret_cast<void*>(signal_ucontext->uc_mcontext->__ss.__srr0);
++#else
++    return reinterpret_cast<void*>(signal_ucontext->uc_mcontext->ss.srr0);
++#endif
+ #endif
+   }
+ #elif defined(__akaros__)
