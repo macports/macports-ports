@@ -28,6 +28,7 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             master_sites    https://cran.r-project.org/src/contrib \
                             https://cran.r-project.org/src/contrib/Archive/${R.package}
             distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
             livecheck.type  regex
             livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
         }
