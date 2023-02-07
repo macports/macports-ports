@@ -90,6 +90,9 @@ post-extract {
         delete ${workpath}/${octave.module}
         move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
+    if {[exec /bin/ls ${workpath} | grep -c "-"] == 2} {
+        move [glob ${workpath}/*-*] ${workpath}/${octave.module}
+    }
 
 #     set worksrcdir_name [exec /bin/ls ${workpath} | grep -v -E "^\\."]
 #     if {[string equal ${worksrcdir_name} ${octave.module}] == 0} {
@@ -130,7 +133,7 @@ pre-configure {
             "'try; pkg build -verbose -nodeps ${workpath}/tmp-build ${workpath}/${distname}.tar.gz; catch; disp(lasterror.message); exit(1); end_try_catch;'"
 
         # fortran arch flag is not set automatically
-        if {${configure.build_arch} eq "x86_64" || ${configure.build_arch} eq "ppc64"} {
+        if {${configure.build_arch} in [list arm64 ppc64 x86_64]} {
             configure.fflags-append -m64
         } else {
             configure.fflags-append -m32
@@ -163,13 +166,13 @@ pre-destroot {
     destroot.pre_args -q -f -H --eval
 
     if { ${os.arch} eq "i386" } {
-        if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
             set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
         } else {
             set short_host_name i686-apple-${os.platform}${os.major}.x.x
         }
     } else {
-        if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
             set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
         } else {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x

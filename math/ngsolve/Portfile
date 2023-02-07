@@ -7,9 +7,8 @@ PortGroup               github          1.0
 PortGroup               cmake           1.1
 PortGroup               active_variants 1.1
 
-github.setup            NGSolve ngsolve 6.2.2004 v
-revision                2
-platforms               darwin
+github.setup            NGSolve ngsolve 6.2.2301 v
+revision                0
 categories              math
 license                 LGPL-2
 maintainers             {mcalhoun @MarcusCalhoun-Lopez} openmaintainer
@@ -21,9 +20,9 @@ long_description        NGSolve is a general purpose Finite Element Library \
                         particular application classes.
 homepage                https://ngsolve.org/
 
-checksums               rmd160  282f5888ebc7be0379c60654a5df7a9b0a13aeb2 \
-                        sha256  01b78d47b616a685cde7adca54ca7932bc7d278ebe6a06bc074f8977560f0505 \
-                        size    15180583
+checksums               rmd160  4694b5f9240deb6da828a57ef50e002aebbbaaa7 \
+                        sha256  74d052483c906a7cd8c6675f148a8d4ba00d34ca67559cf15b238932ad6ebeeb \
+                        size    17549018
 
 compiler.cxx_standard   2017
 
@@ -31,7 +30,9 @@ compilers.choose        cc cxx
 compilers.setup
 
 # avoid conflict with atlas
-patchfiles-append       patch-clapack.h.diff
+# avoid adding -linterface to link flags
+patchfiles-append       patch-clapack.h.diff \
+                        patch-interface.diff
 post-extract {
     move    ${worksrcpath}/basiclinalg/clapack.h \
             ${worksrcpath}/basiclinalg/ng_clapack.h
@@ -51,7 +52,9 @@ depends_lib-append      port:SuiteSparse_AMD \
 
 configure.args-append   -DNETGEN_DIR=${prefix} \
                         -DBUILD_UMFPACK=NO \
-                        -DUSE_NATIVE_ARCH=NO
+                        -DUSE_NATIVE_ARCH=NO \
+                        -DUSE_PYTHON=OFF \
+                        -DUSE_SUPERBUILD=OFF
 
 # avoid depends_lib-append port:bash
 configure.args-append   -DBASH=/bin/bash
@@ -61,7 +64,7 @@ pre-configure {
     configure.args-append ${cmake_linalglib}
 }
 
-set pythonversions      {3.7 3.8 3.9}
+set pythonversions      {3.7 3.8 3.9 3.10 3.11}
 set any_python          no
 foreach pdv ${pythonversions} {
     set pv [join [lrange [split ${pdv} .] 0 1] ""]
@@ -78,49 +81,36 @@ foreach pdv ${pythonversions} {
     }
 }
 if {!${any_python}} {
-    default_variants    +python39
+    default_variants    +python311
 }
 set any_python          no
 foreach pdv ${pythonversions} {
     set pv [join [lrange [split ${pdv} .] 0 1] ""]
-    # settings that depend on loop variables must be set in an appropriate if, not in the
-    # variant declaration scope.
     if {[variant_isset python${pv}]} {
         depends_lib-append      port:python${pv}
         depends_build-append    port:pybind11 \
                                 port:py${pv}-pybind11-stubgen
 
+        configure.args-replace  -DUSE_PYTHON=OFF \
+                                -DUSE_PYTHON=ON
 
-        # during destroot, must find pybind11-stubgen binary, ngsolve Python module, and NGSolve library, so
-        # must modify PATH, PYTHONPATH, and DYLD_LIBRARY_PATH
-        #
-        # however, DYLD environment variables are not inherited by subprocesses
-        #
-        # see https://lists.macports.org/pipermail/macports-dev/2021-April/043222.html
-        post-extract {
-            xinstall            -d -m 0755 ${cmake.build_dir}/macports_bin/bin
-            xinstall            -m 0755 ${filespath}/pybind11-stubgen ${cmake.build_dir}/macports_bin/bin
-        }
-        post-patch {
-            reinplace           "s|__MACPORTS_PYTHONPATH__|${destroot}${prefix}/lib/python${pdv}/site-packages/|g" \
-                                ${cmake.build_dir}/macports_bin/bin/pybind11-stubgen
-            reinplace           "s|__MACPORTS_DYLD_LIBRARY_PATH__|${destroot}${prefix}/lib|g" \
-                                ${cmake.build_dir}/macports_bin/bin/pybind11-stubgen
-            reinplace           "s|__MACPORTS_PYTHON_BIN__|${frameworks_dir}/Python.framework/Versions/${pdv}/bin|g" \
-                                ${cmake.build_dir}/macports_bin/bin/pybind11-stubgen
-        }
-        build.env-append        PATH=${cmake.build_dir}/macports_bin/bin:$env(PATH)
-        destroot.env-append     PATH=${cmake.build_dir}/macports_bin/bin:$env(PATH)
+        # for reasons that are not entirely clear, stub files break the build
+        # see https://ngsolve.org/forum/ngspy-forum/1655-ngsolve-stubs-cmake-error
+        configure.args-append   -DBUILD_STUB_FILES=OFF
+
+        destroot.args-append    DYLD_LIBRARY_PATH=${destroot}${prefix}/lib \
+                                PYTHONPATH=${destroot}${prefix}/lib/python${pdv}/site-packages
 
         set any_python          yes
         require_active_variants netgen python${pv}
 
         post-destroot {
             xinstall    -d -m 0755 \
-                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib/python${pdv}/site-packages
-            ln -s       ${prefix}/lib/python${pdv}/site-packages/ngsolve \
-                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib/python${pdv}/site-packages/
+                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib
+            move        ${destroot}${prefix}/lib/python${pdv} \
+                        ${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib
         }
+        break
     }
 }
 if {!${any_python}} {
@@ -132,4 +122,23 @@ if {!${any_python}} {
 
 post-destroot {
     delete ${destroot}${prefix}/Netgen.icns
+    if {[file exists ${destroot}${prefix}/bin/pde_tester]} {
+        # if no Python variant exists, extra binary is installed
+        delete ${destroot}${prefix}/bin/pde_tester
+    }
+}
+
+variant tests description {Enable tests} {
+    test.run                yes
+    configure.args-append   -DENABLE_UNIT_TESTS=ON
+    test.args-append        DYLD_LIBRARY_PATH=${cmake.build_dir}/solve:${cmake.build_dir}/comp:${cmake.build_dir}/fem:${cmake.build_dir}/linalg:${cmake.build_dir}/basiclinalg:${cmake.build_dir}/ngstd
+
+    if {${any_python}} {
+        # tests fail
+        # see https://github.com/NGSolve/netgen/issues/77
+
+        # this is not good, but it is unclear what PYTHONPATH should be if destroot has not run
+        target_requires     ${org.macports.test} main fetch checksum extract patch configure build destroot
+        test.args-append    PYTHONPATH=${destroot}${frameworks_dir}/Python.framework/Versions/${pdv}/lib/python${pdv}/site-packages
+    }
 }

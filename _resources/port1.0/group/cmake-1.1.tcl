@@ -290,8 +290,8 @@ pre-configure {
     }
 
     # The environment variable CPPFLAGS is not considered by CMake.
-    # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
-    # <https://www.cmake.org/Bug/view.php?id=12928>).
+    # (CMake upstream ticket #12928 "Add support for CPPFLAGS environment variable"
+    # <https://gitlab.kitware.com/cmake/cmake/-/issues/12928>).
     #
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.
@@ -313,23 +313,20 @@ pre-configure {
 
     # process ${configure.cppflags} because CMake ignores $CPPFLAGS
     if {${configure.cppflags} ne ""} {
-        set cppflags [split ${configure.cppflags}]
-        # reset configure.cppflags; we don't want options in double in CPPFLAGS and CFLAGS/CXXFLAGS
-        configure.cppflags
         # copy the cppflags arguments one by one into cflags and family
         # CMake does have an INCLUDE_DIRECTORIES variable but setting it from the commandline
         # doesn't have the intended effect (any longer).
-        foreach flag ${cppflags} {
-            configure.cflags-append     ${flag}
-            configure.cxxflags-append   ${flag}
-            # append to the ObjC flags too, even if CMake ignores them:
-            configure.objcflags-append  ${flag}
-            configure.objcxxflags-append   ${flag}
-        }
-        ui_debug "CPPFLAGS=\"${cppflags}\" inserted into CFLAGS=\"${configure.cflags}\" CXXFLAGS=\"${configure.cxxflags}\""
+        configure.cflags-append     {*}${configure.cppflags}
+        configure.cxxflags-append   {*}${configure.cppflags}
+        # append to the ObjC flags too, even if CMake ignores them:
+        configure.objcflags-append  {*}${configure.cppflags}
+        configure.objcxxflags-append   {*}${configure.cppflags}
+        ui_debug "CPPFLAGS=\"[join ${configure.cppflags}]\" inserted into CFLAGS=\"[join ${configure.cflags}]\" CXXFLAGS=\"[join ${configure.cxxflags}]\""
+        # reset configure.cppflags; we don't want options in double in CPPFLAGS and CFLAGS/CXXFLAGS
+        configure.cppflags
     }
 
-    configure.pre_args-prepend "-G \"[join ${cmake.generator}]\""
+    configure.pre_args-prepend -G \"[join ${cmake.generator}]\"
     # undo a counterproductive action from the debug PG:
     configure.args-delete -DCMAKE_BUILD_TYPE=debugFull
 
@@ -350,7 +347,7 @@ pre-configure {
 post-configure {
     # restore configure.ccache:
     if {[info exists cmake::ccache_cache]} {
-        configure.ccache    ${cmake::ccache_cache}
+        configure.ccache    {*}${cmake::ccache_cache}
         ui_debug "configure.ccache restored to ${cmake::ccache_cache}"
     }
     # either compile_commands.json was created because of -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
@@ -367,10 +364,10 @@ post-configure {
 proc cmake.save_configure_cmd {{save_log_too ""}} {
     if {${save_log_too} ne ""} {
         pre-configure {
-            configure.pre_args-prepend "-cf '${configure.cmd} "
-            configure.post_args-append "|& tee ${workpath}/.macports.${subport}.configure.log'"
-            configure.cmd "/bin/csh"
-            ui_debug "configure command set to `${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}`"
+            configure.pre_args-prepend -cf '${configure.cmd}
+            configure.post_args-append |& tee ${workpath}/.macports.${subport}.configure.log'
+            configure.cmd /bin/csh
+            ui_debug "configure command set to `[join [concat ${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}]]`"
         }
     }
     post-configure {
@@ -378,29 +375,29 @@ proc cmake.save_configure_cmd {{save_log_too ""}} {
             foreach var [array names ::env] {
                 puts ${fd} "${var}=$::env(${var})"
             }
-            puts ${fd} "[join [lrange [split ${configure.env} " "] 0 end] "\n"]"
+            puts ${fd} [join ${configure.env} \n]
             # the following variables are no longer set in the environment at this point:
-            puts ${fd} "CPP=\"${configure.cpp}\""
+            puts ${fd} CPP=\"[join ${configure.cpp}]\"
             # these are particularly relevant because referenced in the configure.pre_args:
-            puts ${fd} "CC=\"${configure.cc}\""
-            puts ${fd} "CXX=\"${configure.cxx}\""
+            puts ${fd} CC=\"[join ${configure.cc}]\"
+            puts ${fd} CXX=\"[join ${configure.cxx}]\"
             if {${configure.objcxx} ne ${configure.cxx}} {
-                puts ${fd} "OBJCXX=\"${configure.objcxx}\""
+                puts ${fd} OBJCXX=\"[join ${configure.objcxx}]\"
             }
-            puts ${fd} "CFLAGS=\"${configure.cflags}\""
-            puts ${fd} "CXXFLAGS=\"${configure.cxxflags}\""
+            puts ${fd} CFLAGS=\"[join ${configure.cflags}]\"
+            puts ${fd} CXXFLAGS=\"[join ${configure.cxxflags}]\"
             if {${configure.objcflags} ne ${configure.cflags}} {
-                puts ${fd} "OBJCFLAGS=\"${configure.objcflags}\""
+                puts ${fd} OBJCFLAGS=\"[join ${configure.objcflags}]\"
             }
             if {${configure.objcxxflags} ne ${configure.cxxflags}} {
-                puts ${fd} "OBJCXXFLAGS=\"${configure.objcxxflags}\""
+                puts ${fd} OBJCXXFLAGS=\"[join ${configure.objcxxflags}]\"
             }
-            puts ${fd} "LDFLAGS=\"${configure.ldflags}\""
+            puts ${fd} LDFLAGS=\"[join ${configure.ldflags}]\"
             if {${configure.optflags} ne ""} {
-                puts ${fd} "configure.optflags=\"${configure.optflags}\""
+                puts ${fd} configure.optflags=\"[join ${configure.optflags}]\"
             }
             puts ${fd} "\ncd ${worksrcpath}"
-            puts ${fd} "${configure.cmd} [join ${configure.pre_args}] [join ${configure.args}] [join ${configure.post_args}]"
+            puts ${fd} "[join [concat ${configure.cmd} ${configure.pre_args} ${configure.args} ${configure.post_args}]]"
             close ${fd}
             unset fd
         }
@@ -412,12 +409,16 @@ proc cmake.save_configure_cmd {{save_log_too ""}} {
 }
 
 platform darwin {
-    set cmake._archflag_vars {cc_archflags cxx_archflags ld_archflags objc_archflags objcxx_archflags \
-        universal_cflags universal_cxxflags universal_ldflags universal_objcflags universal_objcxxflags}
+    set cmake._archflag_vars [list cc_archflags cxx_archflags ld_archflags objc_archflags objcxx_archflags \
+        universal_cflags universal_cxxflags universal_ldflags universal_objcflags universal_objcxxflags]
     pre-configure {
         # cmake will add the correct -arch flag(s) based on the value of CMAKE_OSX_ARCHITECTURES.
         if {[variant_exists universal] && [variant_isset universal]} {
-            if {[info exists universal_archs_supported]} {
+            if {[info exists muniversal.arch_flag]} {
+                foreach arch ${muniversal.architectures} {
+                    configure.args.${arch}-append -DCMAKE_OSX_ARCHITECTURES=${arch}
+                }
+            } elseif {[info exists universal_archs_supported]} {
                 merger_arch_compiler no
                 merger_arch_flag no
                 if {${cmake.set_osx_architectures}} {
@@ -468,11 +469,7 @@ platform darwin {
 
         configure.args-append -DCMAKE_OSX_DEPLOYMENT_TARGET="${macosx_deployment_target}"
 
-        if {${configure.sdkroot} ne ""} {
-            configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sdkroot}"
-        } else {
-            configure.args-append -DCMAKE_OSX_SYSROOT="/"
-        }
+        configure.args-append -DCMAKE_OSX_SYSROOT="${configure.sysroot}"
     }
     post-configure {
         # Although cmake wants us not to set -arch flags ourselves when we run cmake,
@@ -498,15 +495,15 @@ variant debug description "Enable debug binaries" {
         configure.ldflags-replace        -O2 -O0
         # get most if not all possible debug info
         if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
-            set cmake::debugopts "-g -fno-limit-debug-info -DDEBUG"
+            set cmake::debugopts [list -g -fno-limit-debug-info -DDEBUG]
         } else {
-            set cmake::debugopts "-g -DDEBUG"
+            set cmake::debugopts [list -g -DDEBUG]
         }
-        configure.cflags-append         ${cmake::debugopts}
-        configure.cxxflags-append       ${cmake::debugopts}
-        configure.objcflags-append      ${cmake::debugopts}
-        configure.objcxxflags-append    ${cmake::debugopts}
-        configure.ldflags-append        ${cmake::debugopts}
+        configure.cflags-append         {*}${cmake::debugopts}
+        configure.cxxflags-append       {*}${cmake::debugopts}
+        configure.objcflags-append      {*}${cmake::debugopts}
+        configure.objcxxflags-append    {*}${cmake::debugopts}
+        configure.ldflags-append        {*}${cmake::debugopts}
         # try to ensure that info won't get stripped
         configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
     }

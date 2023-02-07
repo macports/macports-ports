@@ -77,39 +77,34 @@ options compilers.allow_arguments_mismatch
 default compilers.allow_arguments_mismatch no
 
 # Set a default gcc version
-if {${os.major} < 10} {
+if {${os.major} < 10 && ${os.platform} eq "darwin" } {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } else {
-    if { ${os.arch} eq "arm" } {
-        # GCC 11 still problematic on arm
-        set compilers.gcc_default gccdevel
-    } else {
-        set compilers.gcc_default gcc11
-    }
+    set compilers.gcc_default gcc12
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
 
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
-if { ${os.arch} eq "arm" } {
-    set gcc_versions {10 11 devel}
+if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
+    set gcc_versions {10 11 12 devel}
 } else {
     set gcc_versions {}
-    if { ${os.major} < 20 } {
-        lappend gcc_versions 5 6 7
+    if { ${os.major} < 15 } {
+        lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 8 9 10 11 devel
+        lappend gcc_versions 10 11 12 devel
     }
 }
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-if { ${os.major} < 10 } {
+if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 11
+    set gcc_main_version 12
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
@@ -125,11 +120,11 @@ foreach ver ${gcc_versions} {
         set cdb(gcc$ver_nodot,dependsa) gcc-devel
     } else {
         set cdb(gcc$ver_nodot,depends)  port:gcc$ver_nodot
-        if {[vercmp ${ver} 4.6] < 0} {
+        if {[vercmp ${ver} < 4.6]} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc45"
-        } elseif {[vercmp ${ver} 7] < 0} {
+        } elseif {[vercmp ${ver} < 7]} {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc6"
-        } elseif {[vercmp ${ver} ${gcc_main_version}] < 0}  {
+        } elseif {[vercmp ${ver} < ${gcc_main_version}]}  {
             set cdb(gcc$ver_nodot,dependsl) "path:share/doc/libgcc/README:libgcc port:libgcc${ver_nodot}"
         } else {
             # Do not depend directly on primary runtime port, as implied by libgcc
@@ -149,13 +144,23 @@ foreach ver ${gcc_versions} {
     set cdb(gcc$ver_nodot,fc)       ${prefix}/bin/gfortran-mp-$ver
     set cdb(gcc$ver_nodot,f77)      ${prefix}/bin/gfortran-mp-$ver
     set cdb(gcc$ver_nodot,f90)      ${prefix}/bin/gfortran-mp-$ver
-    set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+    # The devel port, and starting with version 10, GCC will support using -stdlib=libc++,
+    # so use it for improved compatibility with clang builds
+    if { ${build_arch} ni [list ppc ppc64] } {
+        if { $ver eq "devel" || [vercmp ${ver} >= 10]} {
+            set cdb(gcc$ver_nodot,cxx_stdlib) libc++
+        } else {
+            set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+        }
+    } else {
+        set cdb(gcc$ver_nodot,cxx_stdlib) libstdc++
+    }
 }
 
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
 set clang_versions {}
-if { ${os.arch} ne "arm" } {
+if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
         if {${os.major} < 9} {
             lappend clang_versions 3.3
@@ -175,12 +180,14 @@ if { ${os.arch} ne "arm" } {
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 10 } {
+if { ${os.major} >= 10 || ${os.platform} ne "darwin" } {
     lappend clang_versions 11
-    if { ${os.major} >= 11 } {
-        lappend clang_versions 12 13
+    if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+        lappend clang_versions 12 13 14 15
     }
-    lappend clang_versions devel
+    if { ${os.major} >= 14 } {
+        lappend clang_versions devel
+    }
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
 foreach ver ${clang_versions} {
@@ -266,6 +273,7 @@ proc compilers.setup_variants {variants} {
     global compilers.my_fortran_variants compilers.list
     global compilers.variants_conflict
     global compilers.clear_archflags
+    global build_arch
 
     set compilers.my_fortran_variants {}
     foreach variant $variants {
@@ -331,9 +339,31 @@ proc compilers.setup_variants {variants} {
             # see https://trac.macports.org/ticket/59199 for setting configure.cxx_stdlib
             # see https://trac.macports.org/ticket/59329 for compilers.is_fortran_only
             if {![compilers.is_fortran_only] && $cdb($variant,cxx_stdlib) ne ""} {
+                set mystdlib $cdb($variant,cxx_stdlib)
                 append body "
-                    configure.cxx_stdlib $cdb($variant,cxx_stdlib)
+                    configure.cxx_stdlib ${mystdlib}
                 "
+                set set_stdlib no
+                if { ${build_arch} ni [list ppc ppc64] } {
+                    # If variant is gcc10+ pass -stdlib option to correctly handle libc++ versus libstdc++
+                    if {[string match gcc* $variant]} {
+                        if { [regexp {gcc(.*)} ${variant} -> gcc_v] } {
+                            if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
+                                set set_stdlib yes
+                            }
+                        }
+                    }
+                    # Always set with clang
+                    if {[string match clang* $variant]} {
+                        set set_stdlib yes
+                    }
+                }
+                if { ${set_stdlib} eq "yes" } {
+                    append body "
+                        configure.cxxflags-append -stdlib=${mystdlib}
+                        configure.ldflags-append  -stdlib=${mystdlib}
+                    "
+                }
             }
 
             variant ${variant} description \
@@ -776,16 +806,25 @@ pre-configure {
 namespace eval compilers {
 }
 
+proc compilers::get_current_gcc_version {} {
+    global compilers.gcc_default
+    if {[fortran_variant_name] eq "gfortran"} {
+        set fortran_compiler    ${compilers.gcc_default}
+    } else {
+        set fortran_compiler    [fortran_variant_name]
+    }
+    if { [regexp {gcc(.*)} ${fortran_compiler} -> gcc_v] } {
+        return ${gcc_v}
+    }
+    ui_debug "compilers PG: GCC version reports being UNKNOWN to MacPorts"
+    return UNKNOWN
+}
+
 proc compilers::add_fortran_legacy_support {} {
-    global compilers.allow_arguments_mismatch \
-           compilers.gcc_default
+    global compilers.allow_arguments_mismatch
     if {${compilers.allow_arguments_mismatch}} {
-        if {[fortran_variant_name] eq "gfortran"} {
-            set fortran_compiler    ${compilers.gcc_default}
-        } else {
-            set fortran_compiler    [fortran_variant_name]
-        }
-        if {${fortran_compiler} in "gcc11 gcc10 gccdevel"} {
+        set gcc_v [compilers::get_current_gcc_version]
+        if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
             configure.fflags-delete     -fallow-argument-mismatch
             configure.fcflags-delete    -fallow-argument-mismatch
             configure.f90flags-delete   -fallow-argument-mismatch
@@ -797,6 +836,20 @@ proc compilers::add_fortran_legacy_support {} {
 }
 
 port::register_callback compilers::add_fortran_legacy_support
+
+proc compilers::add_gcc_rpath_support {} {
+    global prefix os.platform os.major
+    set gcc_v [compilers::get_current_gcc_version]
+    if { ${gcc_v} >= 10 || ${gcc_v} == "devel" } {
+        if {${os.platform} eq "darwin" && ${os.major} > 8} {
+            ui_debug "compilers PG: RPATH added to ldflags as GCC version is ${gcc_v}"
+            configure.ldflags-delete  -Wl,-rpath,${prefix}/lib/libgcc
+            configure.ldflags-append  -Wl,-rpath,${prefix}/lib/libgcc
+        }
+    }
+}
+
+port::register_callback compilers::add_gcc_rpath_support
 
 proc compilers::fortran_legacy_support_proc {option action args} {
     if {$action ne  "set"} return

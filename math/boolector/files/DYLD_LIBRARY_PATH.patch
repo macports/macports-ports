@@ -1,0 +1,134 @@
+Set DYLD_LIBRARY_PATH so the test runners can find and use the library
+that was just built.
+--- contrib/btorcheckmodel.py.orig	2021-05-27 19:47:11.000000000 -0500
++++ contrib/btorcheckmodel.py	2022-01-06 09:52:14.000000000 -0600
+@@ -14,14 +14,15 @@
+   evalstring= "%0" + str(len) + "d"
+   return evalstring % int(binary)
+ 
+-if len(sys.argv) != 4:
+-  print("Usage: ./btorcheckmodel <btor-file> <btor-output-model-file> <boolector-binary>")
++if len(sys.argv) != 5:
++  print("Usage: ./btorcheckmodel <btor-file> <btor-output-model-file> <boolector-binary> <boolector-library-path>")
+   sys.exit(2)
+ 
+ pid = os.getpid();
+ foutname = "/tmp/btorcheckmodel" + str(pid) +".btor"
+ # get absolute path to boolector binary
+ boolector = sys.argv[3]
++boolector_library_path = sys.argv[4]
+ 
+ 
+ def cleanup():
+@@ -206,7 +207,7 @@
+ fout.write(str(id) + " root 1 -" + str(lastid) + "\n")
+ fout.close()
+ 
+-ret = os.popen (boolector + " -rwl 0 " + foutname)
++ret = os.popen ("DYLD_LIBRARY_PATH=" + boolector_library_path + " " + boolector + " -rwl 0 " + foutname)
+ result = ret.readline().strip()
+ if result == "sat":
+   print("Invalid")
+--- contrib/btorcheckmodelsmt2.sh.orig	2021-05-27 19:47:11.000000000 -0500
++++ contrib/btorcheckmodelsmt2.sh	2022-01-06 09:53:19.000000000 -0600
+@@ -24,7 +24,7 @@
+ do
+   case $1 in
+     -h|--help)
+-      echo -n "usage: $(basename $0) [<option>] <infile> <model> <boolector-binary>"
++      echo -n "usage: $(basename $0) [<option>] <infile> <model> <boolector-binary> <boolector-library-path>"
+       echo
+       echo "  options:"
+       echo "    -h, --help    print this message and exit"
+@@ -46,6 +46,7 @@
+ 
+ MODEL="$1"
+ BOOLECTOR="$2"
++BOOLECTOR_LIBRARY_PATH="$3"
+ 
+ [ -z "$BOOLECTOR" ] && die "no Boolector binary specified"
+ [ ! -e "$BOOLECTOR" ] && die "given Boolector binary does not exist"
+@@ -54,6 +55,7 @@
+ cat $MODEL | sed 's/sat//' >> $TMPFILE
+ echo "(check-sat)" >> $TMPFILE
+ echo "(exit)" >> $TMPFILE
++DYLD_LIBRARY_PATH="$BOOLECTOR_LIBRARY_PATH" \
+ "${BOOLECTOR}" ${TMPFILE}
+ ret=$?
+ if [[ $ret = 10 ]]; then
+--- test/CMakeLists.txt.orig	2022-01-06 08:01:44.000000000 -0600
++++ test/CMakeLists.txt	2022-01-06 08:14:31.000000000 -0600
+@@ -53,6 +53,7 @@
+   target_link_libraries(test${test} GTest::gtest_main)
+   set_target_properties(test${test} PROPERTIES OUTPUT_NAME test${test})
+   add_test(${test} ${CMAKE_BINARY_DIR}/bin/tests/test${test})
++  set_tests_properties(${test} PROPERTIES ENVIRONMENT DYLD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib)
+ endforeach()
+ 
+ set(sat_testcases
+@@ -1019,6 +1019,7 @@
+       ${RUN_TEST_CASE_SCRIPT}
+       ${option}
+       ${BOOLECTOR_BINARY}
++      ${CMAKE_BINARY_DIR}/lib
+       ${tcase}
+       ${CMAKE_CURRENT_BINARY_DIR}
+   )
+--- test/run-test-case.py.orig	2021-05-27 19:47:11.000000000 -0500
++++ test/run-test-case.py	2022-01-06 10:14:19.000000000 -0600
+@@ -47,6 +47,7 @@
+     #print(sys.argv)
+     ap = argparse.ArgumentParser()
+     ap.add_argument('binary')
++    ap.add_argument('library_path')
+     ap.add_argument('testcase')
+     ap.add_argument('output_dir')
+     ap.add_argument('--check-sat', action='store_true', default=False)
+@@ -66,6 +67,7 @@
+     print("Running test case '{}'".format(' '.join(cmd_args)))
+ 
+     proc = subprocess.Popen(cmd_args,
++                            env={'DYLD_LIBRARY_PATH': args.library_path},
+                             stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+--- test/test_modelgen.cpp.orig	2021-05-27 19:47:11.000000000 -0500
++++ test/test_modelgen.cpp	2022-01-06 09:56:27.000000000 -0600
+@@ -13,6 +13,8 @@
+ #include "btorconfig.h"
+ }
+ 
++#include <stdlib.h>
++
+ class TestModelGen : public TestFile
+ {
+  protected:
+@@ -42,7 +44,7 @@
+     std::stringstream ss_cmd;
+     ss_cmd << BTOR_CONTRIB_DIR << "btorcheckmodel.py " << BTOR_OUT_DIR << name
+            << ext << " " << d_log_file_name << " " << BTOR_BIN_DIR
+-           << "boolector > /dev/null";
++           << "boolector " << getenv("DYLD_LIBRARY_PATH") << " > /dev/null";
+     ret_val = system (ss_cmd.str ().c_str ());
+     ASSERT_EQ (ret_val, 0);
+ #endif
+--- test/test_modelgensmt2.cpp.orig	2021-05-27 19:47:11.000000000 -0500
++++ test/test_modelgensmt2.cpp	2022-01-06 09:56:33.000000000 -0600
+@@ -13,6 +13,8 @@
+ #include "btorconfig.h"
+ }
+ 
++#include <stdlib.h>
++
+ class TestModelGenSMT2 : public TestFile
+ {
+  protected:
+@@ -43,7 +45,7 @@
+     std::stringstream ss_cmd;
+     ss_cmd << BTOR_CONTRIB_DIR << "btorcheckmodelsmt2.sh " << BTOR_OUT_DIR
+            << name << ext << " " << d_log_file_name << " " << BTOR_BIN_DIR
+-           << "boolector > /dev/null";
++           << "boolector " << getenv("DYLD_LIBRARY_PATH") << " > /dev/null";
+     ret_val = system (ss_cmd.str ().c_str ());
+     ASSERT_EQ (ret_val, 0);
+ #endif

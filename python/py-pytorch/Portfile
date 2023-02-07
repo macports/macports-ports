@@ -7,32 +7,31 @@ PortGroup           mpi 1.0
 PortGroup           python 1.0
 
 name                py-pytorch
-version             1.8.1
-revision            1
+version             1.13.1
+revision            0
 github.setup        pytorch pytorch ${version} v
 fetch.type          git
 
-platforms           darwin
-supported_archs     x86_64
+supported_archs     arm64 x86_64
 
 license             BSD
 
 maintainers         nomaintainer
 
-description         Tensors and dynamic neural networks in Python\
+description         Tensors and dynamic neural networks in Python \
                     with strong GPU acceleration
 
-long_description    PyTorch is a Python package that provides two\
-                    high-level features: Tensor computation (like\
-                    NumPy) with strong GPU acceleration\; Deep neural\
-                    networks built on a tape-based autograd\
-                    system. You can reuse your favorite Python\
-                    packages such as NumPy, SciPy and Cython to extend\
+long_description    PyTorch is a Python package that provides two \
+                    high-level features: Tensor computation (like \
+                    NumPy) with strong GPU acceleration\; Deep neural \
+                    networks built on a tape-based autograd \
+                    system. You can reuse your favorite Python \
+                    packages such as NumPy, SciPy and Cython to extend \
                     PyTorch when needed.
 
 homepage            https://pytorch.org/
 
-python.versions     37 38 39
+python.versions     37 38 39 310
 
 patch.pre_args      -p1
 
@@ -44,13 +43,47 @@ compiler.cxx_standard 2017
 compiler.blacklist-append *gcc* {clang < 800} {macports-clang-3.[0-9]} macports-clang-4.0
 
 variant mkl description {Enable Intel Math Kernel Library support} { }
-default_variants-append +mkl
 
-if {${os.platform} eq "darwin" && ${os.major} <= 15} {
-    known_fail yes
-    pre-fetch {
-        ui_error "$subport is not supported on OS X 10.11 and older."
-        return -code error "unsupported platform"
+if {${configure.build_arch} eq "x86_64" && !($universal_possible && [variant_isset universal])} {
+    default_variants-append +mkl
+}
+
+platform darwin {
+    if {${os.major} <= 15} {
+        known_fail yes
+        pre-fetch {
+            ui_error "$subport is not supported on OS X 10.11 and older."
+            return -code error "unsupported platform"
+        }
+    }
+
+    # MPS support added in 10.13
+    if {${os.major} >= 17} {
+        variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
+            use_xcode       yes
+
+            build.env-append \
+                APPLE=ON \
+                USE_MPS=ON \
+                USE_PYTORCH_METAL=ON \
+                USE_PYTORCH_METAL_EXPORT=ON
+
+            notes-append \
+"
+The port ${subport} is built with Apple Metal Performance Shaders (MPS)\
+support for GPU hardware acceleration. To enable Apple GPU devices,\
+use device \"mps\". Matrix multiplication example:
+
+    import torch
+
+    mpsDevice = torch.device(\"mps\" if\
+        torch.backends.mps.is_available() else \"cpu\")
+    x = torch.randn((10_000, 1_000), device=mpsDevice)
+    cov = (x.T @ x)/x.shape\[0]
+"
+        }
+
+        default_variants-append +mps
     }
 }
 
@@ -58,7 +91,7 @@ if {${name} ne ${subport}} {
 
     depends_build-append \
         port:git \
-        port:doxygen \
+        path:bin/doxygen:doxygen \
         port:cctools \
         path:bin/cmake:cmake \
         port:py${python.version}-setuptools
@@ -84,18 +117,20 @@ if {${name} ne ${subport}} {
         port:py${python.version}-numpy \
         port:py${python.version}-pybind11 \
         port:py${python.version}-typing_extensions \
-        port:py${python.version}-yaml 
+        port:py${python.version}-yaml
 
-    if { ${python.version} < 37 } {
-        depends_lib-append  port:py${python.version}-dataclasses
-    }
-    
     depends_run-append \
         port:py${python.version}-onnx
 
     post-fetch {
         system -W ${worksrcpath} "git submodule update --init --recursive"
     }
+
+    # Patch to fix init issue with google-glog 0.5.0, caused by breaking API change.
+    # Refer to patch header for detailed background.
+    # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/58054
+    # diff -NaurdwB ./py-pytorch-orig/c10/util/Logging.cpp ./py-pytorch-new/c10/util/Logging.cpp | sed -E -e 's/\.\/py-pytorch-(orig|new)/\.\//' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-glog-init-check.diff
+    patchfiles-append        patch-glog-init-check.diff
 
     # Use Intel Math kernel Library
     if {[variant_isset mkl]} {
@@ -112,26 +147,30 @@ if {${name} ne ${subport}} {
         depends_lib-append   port:py${python.version}-mkl
         depends_build-append port:py${python.version}-mkl-include
     }
-    
-    # ZSTD support broke with 1.2.0-1.3.1. Check with future releases.
+
+    configure.ccache    yes
+
+    # ZSTD support broke with 1.2.0-1.12.0. Check with future releases.
     build.env-append \
-        CMAKE_LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
-        LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
-        OpenCV_DIR=${prefix}/libexec/opencv4/cmake \
-        USE_CUDA=OFF \
-        USE_GFLAGS=ON \
-        USE_GLOG=ON \
-        USE_LEVELDB=ON \
-        USE_LITE_PROTO=ON \
-        USE_LMDB=ON \
-        USE_METAL=ON \
-        USE_NCCL=ON \
-        USE_OPENCV=ON \
-        USE_OPENMP=ON \
-        USE_ROCM=ON \
-        USE_TBB=ON \
-        USE_ZMQ=ON \
-        USE_ZSTD=OFF
+                    CMAKE_LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
+                    CMAKE_CXX_FLAGS=-Wno-error=bitwise-instead-of-logical \
+                    LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
+                    OpenCV_DIR=${prefix}/libexec/opencv4/cmake \
+                    USE_CCACHE=OFF \
+                    USE_CUDA=OFF \
+                    USE_GFLAGS=ON \
+                    USE_GLOG=ON \
+                    USE_LEVELDB=ON \
+                    USE_LITE_PROTO=ON \
+                    USE_LMDB=ON \
+                    USE_METAL=ON \
+                    USE_NCCL=ON \
+                    USE_OPENCV=ON \
+                    USE_OPENMP=ON \
+                    USE_ROCM=OFF \
+                    USE_TBB=ON \
+                    USE_ZMQ=ON \
+                    USE_ZSTD=OFF
 
     build.dir       ${worksrcpath}
     build.post_args
@@ -152,16 +191,8 @@ if {${name} ne ${subport}} {
     }
 
     # pytorch's tests all use GPU compilation
-    if { [lsearch build.env {USE_CUDA=OFF}] != -1 } {
-        depends_test-append \
-                    port:py${python.version}-pytest
-        pre-test {
-            test.env \
-                    PYTHONPATH=[glob -nocomplain ${worksrcpath}/build/lib*]
-        }
+    if { [lsearch ${build.env} {USE_CUDA=OFF}] != -1 } {
         test.run    yes
-        test.cmd    py.test-${python.branch}
-        test.target test/run_test.py
     }
     
     livecheck.type  none

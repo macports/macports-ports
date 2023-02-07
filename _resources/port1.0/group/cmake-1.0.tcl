@@ -101,8 +101,8 @@ default configure.post_args {${worksrcpath}}
 
 pre-configure {
     # The environment variable CPPFLAGS is not considered by CMake.
-    # (CMake upstream ticket #12928 "CMake silently ignores CPPFLAGS"
-    # <https://www.cmake.org/Bug/view.php?id=12928>).
+    # (CMake upstream ticket #12928 "Add support for CPPFLAGS environment variable"
+    # <https://gitlab.kitware.com/cmake/cmake/-/issues/12928>).
     #
     # But adding -I${prefix}/include to CFLAGS/CXXFLAGS is a bad idea.
     # If any other flags are needed, we need to add them.

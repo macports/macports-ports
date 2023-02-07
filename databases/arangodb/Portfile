@@ -1,0 +1,176 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           github 1.0
+PortGroup           openssl 1.0
+
+github.setup        arangodb arangodb 3.8.5.1 v
+revision            0
+categories-append   databases math
+license             Apache-2
+maintainers         nomaintainer
+supported_archs     x86_64
+
+description         Multi-model database for documents, graphs, and key-values
+
+long_description    🥑 ArangoDB is a native multi-model database with \
+                    flexible data models for documents, graphs, and \
+                    key-values. Build high performance applications \
+                    using a convenient SQL-like query language or \
+                    JavaScript extensions.
+
+homepage            https://www.arangodb.com/
+
+checksums           rmd160  64449522fc63197f5000a45a16cbe43d3da9c2f2 \
+                    sha256  591f6ce28c4ded7648e945e4c32164e1d2a388fae0608b62b15ba9959f4cb297 \
+                    size    166184200
+
+# use these to specify python versions, python3 required
+# use ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/ports/_resources/port1.0/group/python-1.0.tcl
+set python_version  39
+set python_branch   [string index ${python_version} 0].[string range ${python_version} 1 end]
+set python_prefix   ${frameworks_dir}/Python.framework/Versions/${python_branch}
+set python_bin      ${python_prefix}/bin/python${python_branch}
+
+depends_build-append \
+                    port:ccache \
+                    port:pkgconfig \
+                    port:python${python_version}
+
+depends_lib-append  port:boehmgc
+
+openssl.branch      1.1
+
+set arangodbGroup   arangodb
+set arangodbUser    arangodb
+add_users           ${arangodbUser} group=${arangodbGroup}
+
+# necessary to prevent linking errors
+configure.ldflags-delete \
+                    -L${prefix}/lib
+
+configure.ccache    no
+# 3rdParty builds use ccache
+set ccache_dir      ${workpath}/.ccache
+
+# Build requires -std=gnu++17
+compiler.cxx_standard \
+                    2017
+
+cmake.build_type    Release
+
+platform i386 {
+    configure.args-append \
+                    -DTARGET_ARCHITECTURE=westmere
+}
+
+configure.args-append \
+                    -DCMAKE_SKIP_RPATH=On \
+                    -DOPENSSL_USE_STATIC_LIBS=On \
+                    -DPACKAGING=Bundle \
+                    -DUSE_CATCH_TESTS=Off \
+                    -DUSE_CCACHE=Off \
+                    -DUSE_GOOGLE_TESTS=Off \
+                    -DUSE_ENTERPRISE=Off \
+                    -DUSE_JEMALLOC=Off \
+                    -DUSE_MAINTAINER_MODE=Off \
+                    -DUSE_STRICT_OPENSSL_VERSION=Off
+
+pre-configure {
+    xinstall -d     ${ccache_dir} \
+                    ${workpath}/bin
+    ln -s           ${python_bin} ${workpath}/bin/python3
+}
+
+post-configure {
+    # fix directory transposition error in _SYSCONFDIR_
+    reinplace "s|/etc${prefix}|${prefix}/etc|g" \
+                    ${cmake.build_dir}/lib/Basics/directories.h
+}
+
+configure.env-append \
+                    CCACHE_DIR=${ccache_dir} \
+                    "PATH=${workpath}/bin:$env(PATH)" \
+                    PYTHON=${python_bin}
+
+build.env-append    CCACHE_DIR=${ccache_dir} \
+                    "PATH=${workpath}/bin:$env(PATH)" \
+                    PYTHON=${python_bin}
+
+destroot.env-append CCACHE_DIR=${ccache_dir} \
+                    "PATH=${workpath}/bin:$env(PATH)" \
+                    PYTHON=${python_bin}
+
+destroot.target     install
+
+set namemajorversion \
+                    ${name}[lindex [split ${version} .] 0]
+
+post-destroot {
+    foreach sd [list \
+            lib/${namemajorversion} \
+            lib/${namemajorversion}-apps \
+            log/${namemajorversion} \
+            run \
+        ] {
+        xinstall -d ${destroot}${prefix}/var/${sd}
+        destroot.keepdirs-append \
+                    ${destroot}${prefix}/var/${sd}
+    }
+
+    if {[existsuser ${arangodbUser}] != 0 && [existsgroup ${arangodbGroup}] != 0} {
+        # Make sure log directory owned by arangodb user/group
+        foreach sd [list \
+                lib/${namemajorversion} \
+                lib/${namemajorversion}-apps \
+                log/${namemajorversion} \
+            ] {
+            file attributes ${destroot}${prefix}/var/${sd} \
+                -group ${arangodbGroup} -owner ${arangodbUser}
+        }
+    }
+
+    # edit macOS bundle location
+    reinplace "s|@HOME@/Library/ArangoDB||g" \
+                    ${destroot}${prefix}/etc/${namemajorversion}/arangod.conf
+
+    # set the process user and group id
+    reinplace -E "s|^\[\[:space:]]*#\[\[:space:]]*(uid\[\[:space:]]*=\[\[:space:]]*${arangodbUser})|\\1|" \
+                    ${destroot}${prefix}/etc/${namemajorversion}/arangod.conf
+    reinplace -E "s|^\[\[:space:]]*#\[\[:space:]]*(gid\[\[:space:]]*=\[\[:space:]]*${arangodbGroup})|\\1|" \
+                    ${destroot}${prefix}/etc/${namemajorversion}/arangod.conf
+}
+
+pre-test {
+    xinstall -d     ${workpath}/test
+    copy            ${cmake.build_dir}/etc/${namemajorversion}/arangosh.conf \
+                    ${workpath}/test
+    reinplace -E "s|^(startup-directory\[\[:space:]]*=\[\[:space:]]*)@ROOTDIR@/share/arangodb3|\\1${worksrcpath}|" \
+                    ${workpath}/test/arangosh.conf
+}
+
+test.run            yes
+test.dir            ${workpath}/test
+test.cmd            ${cmake.build_dir}/bin/arangosh
+test.pre_args       --server.password \
+                    {""} \
+                    --javascript.execute-string \
+                    {"require('@arangodb').print('It works!')"}
+test.target
+
+startupitem.create      yes
+startupitem.name        ArangoDB
+startupitem.executable  ${prefix}/sbin/arangod
+startupitem.pidfile     manual ${prefix}/var/run/arangod.pid
+
+post-activate {
+    ui_msg "The default root password is empty. This account can be \
+    secured by executing ${prefix}/sbin/arango-secure-installation."
+}
+
+notes-append "To interact with the default ArangoDB Web Interface,\
+browse to http://127.0.0.1:8529.
+
+The default root password is empty. This account can be\
+secured by executing ${prefix}/sbin/arango-secure-installation."

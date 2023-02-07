@@ -11,7 +11,7 @@ default categories              php
 # built. For unified extension ports (name begins with "php-") setting
 # php.branches is mandatory; there is no default. Example:
 #
-#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0
+#   php.branches                5.3 5.4 5.5 5.6 7.0 7.1 7.2 7.3 7.4 8.0 8.1 8.2
 #
 # For unified ports, setting php.branches will create the subports.
 #
@@ -45,6 +45,8 @@ proc php._set_branches {option action args} {
             # Set up stub port.
             if {${name} eq ${subport}} {
                 supported_archs     noarch
+                platforms           any
+
                 depends_run         port:php[php.suffix_from_branch ${php.default_branch}]-${php.rootname}
 
                 # Ensure the stub port does not do anything with distfiles—not
@@ -101,7 +103,7 @@ proc php._set_name {option action args} {
 # when the php port is updated.
 
 options php.latest_stable_branch
-default php.latest_stable_branch 8.1
+default php.latest_stable_branch 8.2
 
 
 # php.default_branch: the branch of PHP for which the port should be installed
@@ -367,7 +369,7 @@ pre-livecheck {
 
 proc php.add_port_code {} {
     global php php.branch php.branches php.build_dirs php.config php.extension_ini php.extensions php.ini_dir php.rootname
-    global destroot macosx_deployment_target name os.major subport version xcodeversion
+    global destroot name subport version xcodeversion
 
     # Set up distfiles default for non-bundled extensions.
     default distname        {${php.rootname}-${version}}
@@ -377,13 +379,7 @@ proc php.add_port_code {} {
     depends_lib-append      port:${php}
 
     platform darwin {
-        # PHP's libtool.m4 has the macOS 11+ bug; use the compatibility
-        # deployment target for now.
-        if {[vercmp ${macosx_deployment_target} 11] >= 0} {
-            macosx_deployment_target 10.[expr {${os.major} - 4}]
-        }
-
-        if {[vercmp ${php.branch} 7.0] < 0 && [vercmp ${xcodeversion} 12.0] >= 0} {
+        if {[vercmp ${php.branch} < 7.0] && [vercmp ${xcodeversion} >= 12.0]} {
             # Implicit function declarations. Need to backport upstream fixes from php73+.
             # https://bugs.php.net/80176
             # https://trac.macports.org/ticket/60988

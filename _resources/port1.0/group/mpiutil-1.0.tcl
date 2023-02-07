@@ -80,7 +80,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
         if {${cname} eq "default"} {
             if {${configure.compiler} eq "clang"} {
                 set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
-                if {[vercmp 421.11.66 ${compiler_version}] <= 0 && [vercmp ${compiler_version} 425.0.24] < 0} {
+                if {[vercmp 421.11.66 <= ${compiler_version}] && [vercmp ${compiler_version} < 425.0.24]} {
                     ui_debug "mpiutil_validate_subport: apple clang segfault potential; fail subport: ${subport}"
 
                     # Linker for Apple clang version 421.11.66 segfaults
@@ -116,7 +116,7 @@ proc mpiutil_add_depends {subport cname} {
 }
 
 proc mpiutil_add_depends_build {subport cname} {
-    global os.major
+    global os.major os.arch
 
     set add_clang90 no
 
@@ -125,7 +125,10 @@ proc mpiutil_add_depends_build {subport cname} {
         # dependency. This provides a modern version of 'as', allowing the port
         # to build successfully.
         if {[string match "gcc*" ${cname}]} {
-            set add_clang90 yes
+            # Exclude PPC builds, however
+            if {${os.arch} ne "powerpc"} {
+                set add_clang90 yes
+            }
         }
     }
 

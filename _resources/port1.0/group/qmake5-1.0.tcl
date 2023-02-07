@@ -39,7 +39,7 @@ pre-configure {
     # -spec specifies build configuration (compiler, 32-bit/64-bit, etc.)
     #
     if { [tbool qt5.add_spec] } {
-        if {[vercmp ${qt5.version} 5.9]>=0} {
+        if {[vercmp ${qt5.version} >= 5.9]} {
             configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
         } else {
             if {[variant_exists universal] && [variant_isset universal]} {
@@ -50,15 +50,6 @@ pre-configure {
                 configure.args-append "${qt5.spec_cmd}${qt_qmake_spec}"
             }
         }
-    }
-
-    # starting with Xcode 7.0, the SDK for build OS version might not be available
-    # see https://trac.macports.org/ticket/53597
-    #
-    # avoid --show-sdk-path since it is not available on all platforms
-    # see https://github.com/macports/macports-ports/commit/9887e90d69f4265f9056cddc45e41551d7400235#commitcomment-49824261
-    if {[catch {exec /usr/bin/xcrun --sdk macosx${configure.sdk_version} --find ld} result]} {
-        configure.sdk_version
     }
 
     # set QT and QMAKE values in a cache file
@@ -75,7 +66,7 @@ pre-configure {
     set cache_file "${qt5.top_level}/.qmake.cache"
     set cache [open ${cache_file} w 0644]
     ui_debug "QT5 Qmake Cache ${cache_file}"
-    if {[vercmp ${qt5.version} 5.9] >= 0} {
+    if {[vercmp ${qt5.version} >= 5.9]} {
         if {[variant_exists universal] && [variant_isset universal]} {
             puts ${cache} "QMAKE_APPLE_DEVICE_ARCHS=${configure.universal_archs}"
         } elseif { ${configure.build_arch} ne "" } {
@@ -106,11 +97,11 @@ pre-configure {
         puts ${cache} "}"
     }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    puts ${cache} "QMAKE_MAC_SDK=macosx${configure.sdk_version}"
+    puts ${cache} "QMAKE_MAC_SDK=[qt5pg::qmake_mac_sdk]"
 
     # https://github.com/qt/qtbase/commit/d64940891dffcb951f4b76426490cbc94fb4aba7
     # Enable ccache support if active and available in given qt5 version
-    if { [option configure.ccache] && [vercmp ${qt5.version} 5.9.2] >= 0 } {
+    if { [option configure.ccache] && [vercmp ${qt5.version} >= 5.9.2]} {
         puts ${cache} "CONFIG+=ccache"
     }
 
@@ -147,7 +138,7 @@ pre-configure {
     set qmake5_c_flags     [join ${qmake5_c_flags}     " "]
     set qmake5_l_flags     [join ${qmake5_l_flags}     " "]
 
-    if { [vercmp ${qt5.version} 5.6] >= 0 } {
+    if { [vercmp ${qt5.version} >= 5.6]} {
         # see https://trac.macports.org/ticket/59128 for `${configure.cxx_stdlib} ne ""` test
         if { ${configure.cxx_stdlib} ne "libc++" && ${configure.cxx_stdlib} ne "" } {
             # override C++ flags set in ${prefix}/libexec/qt5/mkspecs/common/clang-mac.conf
@@ -160,7 +151,7 @@ pre-configure {
         if {${qmake5_cxx11_flags} ne ""} {
             puts ${cache} QMAKE_CXXFLAGS+="${qmake5_cxx11_flags}"
         }
-    } elseif { [vercmp ${qt5.version} 5.5] >= 0 } {
+    } elseif { [vercmp ${qt5.version} >= 5.5]} {
 
         # always use the same standard library
         puts ${cache} QMAKE_CXXFLAGS+=-stdlib=${configure.cxx_stdlib}
@@ -244,7 +235,7 @@ pre-configure {
     }
 
     # respect configure.optflags
-    if {[vercmp ${qt5.version} 5.9] >= 0} {
+    if {[vercmp ${qt5.version} >= 5.9]} {
         puts ${cache} "CONFIG+=optimize_size"
         puts ${cache} "QMAKE_CFLAGS_OPTIMIZE_SIZE=${configure.optflags}"
     } else {

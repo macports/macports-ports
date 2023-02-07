@@ -1,0 +1,295 @@
+diff --git a/squashfs-tools/Makefile b/squashfs-tools/Makefile
+index 5795d0d..bcba141 100755
+--- a/squashfs-tools/Makefile
++++ b/squashfs-tools/Makefile
+@@ -153,6 +153,7 @@ REPRODUCIBLE_DEFAULT = 1
+ ###############################################
+ 
+ INCLUDEDIR = -I.
++DESTDIR =
+ INSTALL_DIR = /usr/local/bin
+ 
+ MKSQUASHFS_OBJS = mksquashfs.o read_fs.o action.o swap.o pseudo.o compressor.o \
+@@ -403,8 +404,8 @@ clean:
+ 
+ .PHONY: install
+ install: mksquashfs unsquashfs
+-	mkdir -p $(INSTALL_DIR)
+-	cp mksquashfs $(INSTALL_DIR)
+-	cp unsquashfs $(INSTALL_DIR)
+-	ln -fs $(INSTALL_DIR)/unsquashfs $(INSTALL_DIR)/sqfscat
+-	ln -fs $(INSTALL_DIR)/mksquashfs $(INSTALL_DIR)/sqfstar
++	mkdir -p ${DESTDIR}$(INSTALL_DIR)
++	cp mksquashfs ${DESTDIR}$(INSTALL_DIR)
++	cp unsquashfs ${DESTDIR}$(INSTALL_DIR)
++	ln -fs $(INSTALL_DIR)/unsquashfs ${DESTDIR}$(INSTALL_DIR)/sqfscat
++	ln -fs $(INSTALL_DIR)/mksquashfs ${DESTDIR}$(INSTALL_DIR)/sqfstar
+diff --git a/squashfs-tools/action.c b/squashfs-tools/action.c
+index 75495c6..487c4dd 100644
+--- a/squashfs-tools/action.c
++++ b/squashfs-tools/action.c
+@@ -2414,9 +2414,12 @@ static char *get_start(char *s, int n)
+ 
+ static int subpathname_fn(struct atom *atom, struct action_data *action_data)
+ {
+-	return fnmatch(atom->argv[0], get_start(strdupa(action_data->subpath),
+-		count_components(atom->argv[0])),
++	char *subpath = strdup(action_data->subpath);
++	int ret = fnmatch(atom->argv[0],
++		get_start(subpath, count_components(atom->argv[0])),
+ 		FNM_PATHNAME|FNM_EXTMATCH) == 0;
++	free(subpath);
++	return ret;
+ }
+ 
+ /*
+diff --git a/squashfs-tools/info.c b/squashfs-tools/info.c
+index 216b979..933851f 100644
+--- a/squashfs-tools/info.c
++++ b/squashfs-tools/info.c
+@@ -141,6 +141,59 @@ void dump_state()
+ }
+ 
+ 
++#ifdef __APPLE__
++int sigwaitinfo(const sigset_t *set, siginfo_t *info)
++{
++	int sig;
++	int ret = sigwait(set, &sig);
++	if (ret < 0) {
++		return ret;
++	}
++	return sig;
++}
++
++int sigtimedwait(const sigset_t *set, siginfo_t *info,
++	const struct timespec *timeout)
++{
++	struct itimerval timerval = {
++		.it_interval = { .tv_sec = 0, .tv_usec = 0 },
++		.it_value = {
++			.tv_sec = timeout->tv_sec,
++			.tv_usec = timeout->tv_nsec / 1000
++		}
++	};
++	int ret = setitimer(ITIMER_REAL, &timerval, NULL);
++	if (ret < 0) {
++		return ret;
++	}
++	sigset_t mask1 = *set;
++	sigaddset(&mask1, SIGALRM);
++	ret = sigwaitinfo(&mask1, NULL);
++
++	// Clean up the itimer to make sure it's not delivered elsewhere.
++	timerclear(&timerval.it_value);
++	setitimer(ITIMER_REAL, &timerval, NULL);
++	sigset_t mask2;
++	sigemptyset(&mask2);
++	sigpending(&mask2);
++	if (sigismember(&mask2, SIGALRM)) {
++		sigemptyset(&mask2);
++		sigaddset(&mask2, SIGALRM);
++		int sig;
++		sigwait(&mask2, &sig);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++	if (ret == SIGALRM) {
++		return EAGAIN;
++	}
++	return ret;
++}
++#endif
++
++
+ void *info_thrd(void *arg)
+ {
+ 	sigset_t sigmask;
+diff --git a/squashfs-tools/mksquashfs.c b/squashfs-tools/mksquashfs.c
+index aaa4b00..217a60a 100644
+--- a/squashfs-tools/mksquashfs.c
++++ b/squashfs-tools/mksquashfs.c
+@@ -35,7 +35,6 @@
+ #include <stddef.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+-#include <sys/sysmacros.h>
+ #include <fcntl.h>
+ #include <errno.h>
+ #include <dirent.h>
+@@ -50,9 +49,11 @@
+ #include <sys/wait.h>
+ #include <limits.h>
+ #include <ctype.h>
+-#include <sys/sysinfo.h>
+ 
+-#ifndef linux
++#ifdef linux
++#include <sys/sysmacros.h>
++#include <sys/sysinfo.h>
++#else
+ #include <sys/sysctl.h>
+ #endif
+ 
+@@ -531,7 +532,7 @@ long long read_bytes(int fd, void *buff, long long bytes)
+ 	long long res, count;
+ 
+ 	for(count = 0; count < bytes; count += res) {
+-		int len = (bytes - count) > SSIZE_MAX ? SSIZE_MAX : bytes - count;
++		ssize_t len = (bytes - count) > SSIZE_MAX ? SSIZE_MAX : bytes - count;
+ 
+ 		res = read(fd, buff + count, len);
+ 		if(res < 1) {
+@@ -580,7 +581,7 @@ int write_bytes(int fd, void *buff, long long bytes)
+ 	long long res, count;
+ 
+ 	for(count = 0; count < bytes; count += res) {
+-		int len = (bytes - count) > SSIZE_MAX ? SSIZE_MAX : bytes - count;
++		ssize_t len = (bytes - count) > SSIZE_MAX ? SSIZE_MAX : bytes - count;
+ 
+ 		res = write(fd, buff + count, len);
+ 		if(res == -1) {
+@@ -5748,6 +5749,7 @@ static int get_physical_memory()
+ 	int phys_mem;
+ 
+ 	if(num_pages == -1 || page_size == -1) {
++#ifdef linux
+ 		struct sysinfo sys;
+ 		int res = sysinfo(&sys);
+ 
+@@ -5756,6 +5758,9 @@ static int get_physical_memory()
+ 
+ 		num_pages = sys.totalram;
+ 		page_size = sys.mem_unit;
++#else
++		return 0;
++#endif
+ 	}
+ 
+ 	phys_mem = num_pages * page_size >> 20;
+diff --git a/squashfs-tools/unsquashfs.c b/squashfs-tools/unsquashfs.c
+index 7b590bd..87dfa86 100644
+--- a/squashfs-tools/unsquashfs.c
++++ b/squashfs-tools/unsquashfs.c
+@@ -32,8 +32,12 @@
+ #include "stdarg.h"
+ #include "fnmatch_compat.h"
+ 
++#if linux
+ #include <sys/sysinfo.h>
+ #include <sys/sysmacros.h>
++#else
++#include <sys/sysctl.h>
++#endif
+ #include <sys/types.h>
+ #include <sys/time.h>
+ #include <sys/resource.h>
+diff --git a/squashfs-tools/unsquashfs_info.c b/squashfs-tools/unsquashfs_info.c
+index e906eaf..1a6eeb7 100644
+--- a/squashfs-tools/unsquashfs_info.c
++++ b/squashfs-tools/unsquashfs_info.c
+@@ -93,6 +93,59 @@ void dump_state()
+ }
+ 
+ 
++#ifdef __APPLE__
++int sigwaitinfo(const sigset_t *set, siginfo_t *info)
++{
++	int sig;
++	int ret = sigwait(set, &sig);
++	if (ret < 0) {
++		return ret;
++	}
++	return sig;
++}
++
++int sigtimedwait(const sigset_t *set, siginfo_t *info,
++	const struct timespec *timeout)
++{
++	struct itimerval timerval = {
++		.it_interval = { .tv_sec = 0, .tv_usec = 0 },
++		.it_value = {
++			.tv_sec = timeout->tv_sec,
++			.tv_usec = timeout->tv_nsec / 1000
++		}
++	};
++	int ret = setitimer(ITIMER_REAL, &timerval, NULL);
++	if (ret < 0) {
++		return ret;
++	}
++	sigset_t mask1 = *set;
++	sigaddset(&mask1, SIGALRM);
++	ret = sigwaitinfo(&mask1, NULL);
++
++	// Clean up the itimer to make sure it's not delivered elsewhere.
++	timerclear(&timerval.it_value);
++	setitimer(ITIMER_REAL, &timerval, NULL);
++	sigset_t mask2;
++	sigemptyset(&mask2);
++	sigpending(&mask2);
++	if (sigismember(&mask2, SIGALRM)) {
++		sigemptyset(&mask2);
++		sigaddset(&mask2, SIGALRM);
++		int sig;
++		sigwait(&mask2, &sig);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++	if (ret == SIGALRM) {
++		return EAGAIN;
++	}
++	return ret;
++}
++#endif
++
++
+ void *info_thrd(void *arg)
+ {
+ 	sigset_t sigmask;
+diff --git a/squashfs-tools/unsquashfs_xattr.c b/squashfs-tools/unsquashfs_xattr.c
+index 08145d3..091ded4 100644
+--- a/squashfs-tools/unsquashfs_xattr.c
++++ b/squashfs-tools/unsquashfs_xattr.c
+@@ -34,6 +34,14 @@ extern int user_xattrs;
+ extern int ignore_errors;
+ extern int strict_errors;
+ 
++#ifdef __APPLE__
++int lsetxattr (const char *path, const char *name,
++	const void *value, size_t size, int flags)
++{
++	return setxattr(path, name, value, size, 0, flags | XATTR_NOFOLLOW);
++}
++#endif
++
+ int write_xattr(char *pathname, unsigned int xattr)
+ {
+ 	unsigned int count;
+diff --git a/squashfs-tools/xattr.c b/squashfs-tools/xattr.c
+index 8cfb8d5..69b1663 100644
+--- a/squashfs-tools/xattr.c
++++ b/squashfs-tools/xattr.c
+@@ -92,6 +92,19 @@ extern struct xattr_list *get_xattr(int, unsigned int *, int *);
+ extern struct prefix prefix_table[];
+ 
+ 
++#ifdef __APPLE__
++ssize_t llistxattr (const char *path, char *list, size_t size)
++{
++	return listxattr(path, list, size, XATTR_NOFOLLOW);
++}
++ssize_t lgetxattr (const char *path, const char *name,
++	void *value, size_t size)
++{
++	return getxattr(path, name, value, size, 0, XATTR_NOFOLLOW);
++}
++#endif
++
++
+ int xattr_get_prefix(struct xattr_list *xattr, char *name)
+ {
+ 	int i;

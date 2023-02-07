@@ -114,6 +114,14 @@ subport ld64-127 {
         PR-13282463.patch \
         PR-29117886.patch \
         ld64-ppc-9610466.patch
+
+    if {${os.major} >= 17} {
+        known_fail yes
+        pre-fetch {
+            ui_error "$subport is not supported on High Sierra or later."
+            error "unsupported platform"
+        }
+    }
 }
 
 subport ld64-236 {
@@ -157,6 +165,8 @@ subport ld64-236 {
 }
 
 subport ld64-274 {
+    PortGroup legacysupport 1.1
+
     # Xcode 8.2.1
     version             274.2
     revision            0
@@ -185,6 +195,18 @@ subport ld64-274 {
     depends_lib-append port:libcxx
     configure.cxx_stdlib libc++
     configure.cxxflags-append -std=c++11
+
+    # Avoid `error: unknown type name 'uuid_string_t'`
+    legacysupport.newest_darwin_requires_legacy 9
+
+    # see https://trac.macports.org/ticket/65575
+    configure.cppflags-append -DTARGET_OS_WATCH=0 -DTARGET_OS_BRIDGE=0
+
+    if { ${os.platform} eq "darwin" && ${os.major} <= 9 } {
+        depends_lib-append          port:libblocksruntime
+        configure.cxxflags-append   -fblocks
+        configure.ldflags-append    -lBlocksRuntime
+    }
 
     supported_archs i386 x86_64
 }
@@ -230,6 +252,10 @@ subport ld64-xcode {
     version             2
 }
 
+subport ld64-xtools {
+    version             1
+}
+
 variant universal {}
 
 if {${subport} eq ${name}} {
@@ -239,14 +265,15 @@ if {${subport} eq ${name}} {
     # avoid cyclic macports-clang dep on 10.6/libc++
     configure.cxx_stdlib
 
-    variant ld64_97 conflicts ld64_127 ld64_236 ld64_274 ld64_xcode description {Use ld64-97 as the default linker (last version that works on Tiger)} {}
-    variant ld64_127 conflicts ld64_97 ld64_236 ld64_274 ld64_xcode description {Use ld64-127 as the default linker (last version that supports ppc and works on Leopard)} {}
-    variant ld64_236 conflicts ld64_97 ld64_127 ld64_274 ld64_xcode description {Use ld64-236 as the default linker (last version that builds against OS X's libstdc++)} {}
-    variant ld64_274 conflicts ld64_97 ld64_127 ld64_236 ld64_xcode description {Use ld64-274 as the default linker (last version that builds without libtapi support)} {}
-    variant ld64_xcode conflicts ld64_97 ld64_127 ld64_236 ld64_274 description {Use ld64-xcode as the default linker (version provided by the selected Xcode.app toolchain)} {}
+    variant ld64_97 conflicts ld64_127 ld64_236 ld64_274 ld64_xcode ld64_xtools description {Use ld64-97 as the default linker (last version that works on Tiger)} {}
+    variant ld64_127 conflicts ld64_97 ld64_236 ld64_274 ld64_xcode ld64_xtools description {Use ld64-127 as the default linker (last version that supports ppc and works on Leopard)} {}
+    variant ld64_236 conflicts ld64_97 ld64_127 ld64_274 ld64_xcode ld64_xtools description {Use ld64-236 as the default linker (last version that builds against OS X's libstdc++)} {}
+    variant ld64_274 conflicts ld64_97 ld64_127 ld64_236 ld64_xcode ld64_xtools description {Use ld64-274 as the default linker (last version that builds without libtapi support)} {}
+    variant ld64_xcode conflicts ld64_97 ld64_127 ld64_236 ld64_274 ld64_xtools description {Use ld64-xcode as the default linker (version provided by the selected Xcode.app toolchain)} {}
+    variant ld64_xtools conflicts ld64_97 ld64_127 ld64_236 ld64_274 ld64_xcode description {Use ld64-xtools as the default linker (version provided by installed darwin-xtools port)} {}
 
-    if {![variant_isset ld64_97] && ![variant_isset ld64_127] && ![variant_isset ld64_236] && ![variant_isset ld64_274] && ![variant_isset ld64_xcode]} {
-        if {${os.major} < 9} {
+    if {![variant_isset ld64_97] && ![variant_isset ld64_127] && ![variant_isset ld64_236] && ![variant_isset ld64_274] && ![variant_isset ld64_xcode] && ![variant_isset ld64_xtools]} {
+        if {${os.major} < 9 || (${build_arch} in [list ppc ppc64])} {
             default_variants +ld64_97
         } elseif {${os.major} < 11} {
             # os versions < 11 can't build newer ld64 versions with their stock xcode compilers
@@ -287,6 +314,8 @@ if {${subport} eq ${name}} {
         set ld64_ver 274
     } elseif {[variant_isset ld64_xcode]} {
         set ld64_ver xcode
+    } elseif {[variant_isset ld64_xtools]} {
+        set ld64_ver xtools
     } else {
         set ld64_ver latest
     }
@@ -315,6 +344,18 @@ if {${subport} eq ${name}} {
         file mkdir ${destroot}${prefix}/libexec/ld64
         xinstall -m 755 ${filespath}/ld-xcode ${destroot}${prefix}/libexec/ld64/ld-xcode
         ln -s ../libexec/ld64/ld-xcode ${destroot}${prefix}/bin/ld-xcode
+    }
+} elseif {${subport} eq "${name}-xtools"} {
+    configure.cxx_stdlib
+    depends_run         port:darwin-xtools
+    distfiles
+    use_configure no
+    build {}
+    destroot {
+        set xtools_cmds {ld dyldinfo machocheck ObjectDump unwinddump}
+        foreach xtools_cmd $xtools_cmds {
+            ln -s ../libexec/darwin-xtools/bin/${xtools_cmd} ${destroot}${prefix}/bin/${xtools_cmd}-xtools
+        }
     }
 } else {
     distfiles           dyld-${dyld_version}.tar.gz ${name}-${version}.tar.gz
@@ -457,7 +498,7 @@ if {${subport} eq ${name}} {
     }
 
     set cxx_stdlibflags {}
-    if {[string match *clang* ${configure.cxx}]} {
+    if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
         set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
 
         # On Leopard, we want to make sure we pick up our newer libunwind (in libc++abi.dylib) instead of the one in libgcc_s.10.5.dylib
@@ -530,9 +571,6 @@ if {"${configure.sdkroot}" eq ""} {
     configure.sdkroot "/"
 }
 
-if {![info exists universal_possible]} {
-    set universal_possible [expr {${os.universal_supported} && [llength ${configure.universal_archs}] >= 2}]
-}
 # for a universal build, we need to run the tests for each arch and clean between
 if {!${universal_possible} || ![variant_isset universal]} {
     test.run    yes

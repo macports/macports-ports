@@ -17,6 +17,7 @@ depends_skip_archcheck-append \
 
 # TODO: --buildtype=plain tells Meson not to add its own flags to the command line. This gives the packager total control on used flags.
 default configure.cmd       {${prefix}/bin/meson}
+default configure.pre_args  {setup --prefix=${prefix}}
 default configure.post_args {[meson::get_post_args]}
 configure.universal_args-delete \
                             --disable-dependency-tracking
@@ -33,8 +34,16 @@ default destroot.post_args  ""
 namespace eval meson { }
 
 proc meson::get_post_args {} {
-    global configure.dir build_dir muniversal.current_arch
-    if {[info exists muniversal.current_arch]} {
+    global configure.dir build_dir build.dir muniversal.current_arch muniversal.build_arch
+    if {[info exists muniversal.build_arch]} {
+        # muniversal 1.1 PG is being used
+        if {[option muniversal.is_cross.[option muniversal.build_arch]]} {
+            return "${configure.dir} ${build.dir} --cross-file=[option muniversal.build_arch]-darwin"
+        } else {
+            return "${configure.dir} ${build.dir}"
+        }
+    } elseif {[info exists muniversal.current_arch]} {
+        # muniversal 1.0 PG is being used
         return "${configure.dir} ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin"
     } else {
         return "${configure.dir} ${build_dir}"

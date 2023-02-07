@@ -7,18 +7,21 @@
 PortSystem          1.0
 PortGroup           active_variants 1.1
 PortGroup           cmake 1.1
+PortGroup           legacysupport 1.1
 
 compiler.cxx_standard 2017
 cmake.generator     Ninja
+# Fix compilation for Angle subproject: platform.h: error: 'TARGET_OS_OSX' is not defined
+legacysupport.newest_darwin_requires_legacy 15
 
 name                webkit2-gtk-devel
 conflicts           webkit2-gtk
-version             2.27.3
-revision            3
+version             2.28.2
+revision            2
 
 description         Apple's WebKit2 HTML rendering library for GTK+3
 long_description    ${description}
-maintainers         {devans @dbevans}
+maintainers         {devans @dbevans} {mascguy @mascguy}
 categories          www gnome
 platforms           darwin freebsd
 license             LGPL-2+ BSD
@@ -30,13 +33,14 @@ distname            webkitgtk-${version}
 
 dist_subdir         webkit-gtk
 
-checksums           rmd160  b297a1aaae881d702d4b95f15fffc261c2608087 \
-                    sha256  5390d0b41957834202893887f1ac04e3264b6a3d98160d4166e3c8c16bdb7492 \
-                    size    20912420
+checksums           rmd160  a626f58cf30b6dd1ef8a63c165ce85770c4da675 \
+                    sha256  b9d23525cfd8d22c37b5d964a9fe9a8ce7583042a2f8d3922e71e6bbc68c30bd \
+                    size    21427772
 
 depends_build-append \
                     port:gperf \
                     port:gtk-doc \
+                    port:perl5.34 \
                     port:pkgconfig \
                     port:python27 \
                     port:py27-simplejson
@@ -51,7 +55,7 @@ depends_lib-append  port:atk \
                     port:enchant2 \
                     port:geoclue2 \
                     path:lib/pkgconfig/glib-2.0.pc:glib2 \
-                    port:gobject-introspection \
+                    path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection \
                     port:gstreamer1 \
                     port:gstreamer1-gst-plugins-bad \
                     port:gstreamer1-gst-plugins-base \
@@ -59,11 +63,12 @@ depends_lib-append  port:atk \
                     path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
                     path:lib/pkgconfig/harfbuzz-icu.pc:harfbuzz-icu \
                     port:hyphen \
-                    port:icu \
+                    path:lib/pkgconfig/icu-uc.pc:icu \
+                    path:include/turbojpeg.h:libjpeg-turbo \
                     port:libnotify \
                     port:libpng \
                     port:libsecret \
-                    port:libsoup \
+                    path:lib/pkgconfig/libsoup-2.4.pc:libsoup \
                     port:libxml2 \
                     port:libxslt \
                     port:sqlite3 \
@@ -82,6 +87,12 @@ patchfiles-append   patch-webkit2gtk-macports.diff
 # and a few more for webkit2-gtk-2.27.2
 patchfiles-append   patch-webkit2gtk-272-macports.diff
 
+# and a few more for 282
+patchfiles-append   patch-webkit2gtk-2282-unprotected-egl-changes.diff
+
+# os log is only available on newer systems.
+patchfiles-append   patch-webkit2gtk-2282-os-log-availability.diff
+
 # enable Netscape plugin architecture on macOS
 # or can be explicitly disabled with the following addition if preferred
 # configure.args-append -DENABLE_NETSCAPE_PLUGIN_API=OFF
@@ -91,35 +102,39 @@ patchfiles-append    patch-enable-plugin-architecture-unix.diff
 # runs without this patch.
 patchfiles-append    patch-bundle-link-webcore.diff
 
-# allow the webkit executables typically located in libexec to be
-# dynamically located, this is useful for app bundling
-patchfiles-append    process-executable-path.diff
+# Fix incompatibility with XCode 12:
+# https://bugs.webkit.org/show_bug.cgi?id=207871
+patchfiles-append    patch-WTF-wtf-getVTablePointer.diff
 
-# add new sources for NSApplicationActivationPolicy.mm
-patchfiles-append    patch-sources-gtk.diff
+# Fix build errors due to -WWc++11-narrowing
+# https://bugs.webkit.org/show_bug.cgi?id=211193
+patchfiles-append    patch-bool_narrowed.diff
 
-# patch web process to add call to SetActivationPolicyProhibited
-patchfiles-append    patch-web-process-main.diff
+# Explicitly specify installed dylib paths to g-ir-compile
+# Fixes dlopen errors in apps using webkit2gtk introspection
+patchfiles-append    patch-webkit2gtk-specify-installed-dylibs.diff
+
+# Backport https://github.com/WebKit/WebKit/commit/b83958928838b8a997c12a8de06f89377df0a903
+patchfiles-append    patch-icu-68-true-false.diff
+
+# Reduce compilation warnings
+configure.cppflags-append \
+    -Wno-deprecated-declarations
 
 # it is preferred to use the WebKit built in bmalloc if it builds on a given os.
 # it has improved security features, but not all systems can build it at present.
-
 configure.args-append \
     -DPORT=GTK \
     -DENABLE_INTROSPECTION=ON \
     -DENABLE_MINIBROWSER=OFF \
     -DENABLE_VIDEO=ON \
-    -DUSE_SYSTEM_MALLOC=OFF
+    -DUSE_SYSTEM_MALLOC=OFF \
+    -DPERL_EXECUTABLE=${prefix}/bin/perl5.34
 
 pre-configure {
     if {![variant_isset quartz] && ![variant_isset x11]} {
         error "Either +x11 or +quartz is required"
     }
-}
-
-post-patch {
-    file copy ${filespath}/NSApplicationActivationPolicy.h ${worksrcpath}/Source/WebKit/WebProcess/gtk/NSApplicationActivationPolicy.h
-    file copy ${filespath}/NSApplicationActivationPolicy.mm ${worksrcpath}/Source/WebKit/WebProcess/gtk/NSApplicationActivationPolicy.mm
 }
 
 if {![variant_isset quartz]} {
@@ -170,6 +185,11 @@ variant minibrowser description {Build and install MiniBrowser (for testing)} {
 # help wanted, if suitably motivated
 universal_variant   no
 
+# Fix builds if ccache happens to be installed when configure.ccache=no
+if {![option configure.ccache]} {
+    build.env-append        CCACHE_DIR=${workpath}/.ccache
+}
+
 # the above code presently builds as-in on 10.13 and up
 if {${os.platform} eq "darwin" && ${os.major} <= 16} {
 
@@ -178,7 +198,7 @@ if {${os.platform} eq "darwin" && ${os.major} <= 16} {
     patchfiles-append       patch-ramsize.diff
 
     # Source/WTF/wtf/unix/CPUTimeUnix.cpp : add back a previous Darwin compat version
-     patchfiles-append      patch-source-wtf-wtf-unix-cputimeunix-cpp-darwin-version-restore.diff
+    patchfiles-append       patch-source-wtf-wtf-unix-cputimeunix-cpp-darwin-version-restore.diff
 
     # some Darwin versions don't have MAP_JIT; only use it if available
     patchfiles-append       patch-source-wtf-wtf-osallocatorposix-cpp-map-jit.diff

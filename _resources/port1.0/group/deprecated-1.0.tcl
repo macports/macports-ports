@@ -33,7 +33,7 @@ proc deprecated.deprecate_port {} {
            os.platform \
            os.major \
            xcodeversion
-    if {${os.platform} eq "darwin" && (${deprecated.maximum_osmajor} ne {}) && ([vercmp ${os.major} ${deprecated.maximum_osmajor}] > 0)} {
+    if {${os.platform} eq "darwin" && (${deprecated.maximum_osmajor} ne {}) && ([vercmp ${os.major} > ${deprecated.maximum_osmajor}])} {
         depends_lib
         depends_run
         archive_sites
@@ -42,7 +42,7 @@ proc deprecated.deprecate_port {} {
             ui_error "building ${name} is not supported on OS version greater than ${deprecated.maximum_osmajor}"
             return -code error {unsupported platform}
         }
-    } elseif {${os.platform} eq "darwin" && (${deprecated.maximum_xcodeversion} ne {}) && ([vercmp ${xcodeversion} ${deprecated.maximum_xcodeversion}] > 0)} {
+    } elseif {${os.platform} eq "darwin" && (${deprecated.maximum_xcodeversion} ne {}) && ([vercmp ${xcodeversion} > ${deprecated.maximum_xcodeversion}])} {
         depends_lib
         depends_run
         archive_sites

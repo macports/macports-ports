@@ -2,16 +2,16 @@
 
 PortSystem 1.0
 PortGroup compiler_blacklist_versions 1.0
+PortGroup legacysupport 1.1
 
-# https://trac.macports.org/ticket/58700
-PortGroup legacysupport 1.0
+# clock_gettime
+legacysupport.newest_darwin_requires_legacy 16
 
 name                    qemu
-version                 6.1.0
-revision                0
+version                 7.1.0
+revision                1
 categories              emulators
 license                 GPL-2+
-platforms               darwin
 maintainers             {raimue @raimue} \
                         openmaintainer
 
@@ -25,9 +25,9 @@ homepage                https://www.qemu.org
 master_sites            https://download.qemu.org/
 use_xz                  yes
 
-checksums               rmd160  00f21e102c9ca70c154b770d0094fd48568bbdd5 \
-                        sha256  eebc089db3414bbeedf1e464beda0a7515aad30f73261abc246c9b27503a3c96 \
-                        size    111258808
+checksums               rmd160  01c82bed8b0219935c00981e16b573004b3802d0 \
+                        sha256  a0634e536bded57cf38ec8a751adb124b89c776fe0846f21ab6c6728f1cbbbe6 \
+                        size    121833004
 
 depends_build           port:texinfo \
                         port:libtool \
@@ -46,11 +46,23 @@ depends_lib             path:lib/pkgconfig/glib-2.0.pc:glib2 \
                         path:lib/pkgconfig/pixman-1.pc:libpixman
 
 # This patch sets the python interpreter from meson's shebang line
-patchfiles              patch-qemu-configure.diff
+patchfiles-append       patch-qemu-configure.diff
+
+# "error: unknown type name 'fpunchhole_t'" pre-10.12.4
+patchfiles-append       patch-qemu-punchhole.diff
+
+# IPPROTO workarounds
+patchfiles-append       patch-qemu-net-colo.diff
+
+# MADV_DONTNEED workaround
+patchfiles-append       patch-qemu-include-qemu-madvise_h.diff
+
+# MAP_JIT workaround
+patchfiles-append       patch-qemu-tcg-region.diff
 
 # "ERROR: You need at least GCC v7.5 or Clang v6.0 (or XCode Clang v10.0)"
 compiler.blacklist      {clang < 1000} {macports-clang-[3-5].*} {macports-gcc-[56]} {*gcc-[34].*}
-if {${os.platform} eq "darwin" && ${os.major} < 11} {
+if {${os.platform} eq "darwin" && ${os.major} < 11 && [string match *clang* ${configure.compiler}]} {
     # Emulated TLS needed, which was added in LLVM 3.8
     configure.cflags-append     -femulated-tls
 }
@@ -81,11 +93,13 @@ configure.args-append   --disable-cocoa \
                         --disable-gtk \
                         --disable-opengl \
                         --enable-bzip2 \
+                        --enable-hvf \
                         --disable-curl \
                         --disable-attr \
                         --disable-vde \
                         --disable-brlapi \
                         --disable-cap-ng \
+                        --disable-spice-protocol \
                         --disable-spice \
                         --disable-libiscsi \
                         --disable-rbd \
@@ -106,7 +120,23 @@ configure.args-append   --disable-cocoa \
                         --disable-snappy \
                         --disable-lzo \
                         --disable-lzfse \
-                        --disable-zstd
+                        --disable-png \
+                        --disable-zstd \
+                        --disable-dbus-display \
+                        --enable-virtfs
+
+# Use 'smbd' installed by samba port, rather than macOS; latter does not work with qemu.
+configure.args-append   --smbd=${prefix}/sbin/smbd
+
+# Hypervisor.framework introduced in 10.10
+if {${os.platform} eq "darwin" && ${os.major} < 14} {
+    configure.args-replace --enable-hvf --disable-hvf
+}
+
+# pthread_fchdir_np introduced in 10.12
+if {${os.platform} eq "darwin" && ${os.major} < 16} {
+    configure.args-replace --enable-virtfs --disable-virtfs
+}
 
 # libtool: unknown option character `-' in: --mode=compile
 configure.env-append   LIBTOOL=${prefix}/bin/glibtool
@@ -141,6 +171,11 @@ build.args-append       V=1
 
 default_variants        +usb
 
+# https://trac.macports.org/ticket/62164#comment:10
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+    default_variants-append +curses
+}
+
 foreach t {i386 x86_64 alpha {arm aarch64} cris hppa m68k {microblaze microblazeel} {mips mipsel mips64 mips64el} \
            nios2 moxie or1k {ppc ppc64} riscv32 riscv64 rx s390x {sh4 sh4eb} {sparc sparc64} tricore {xtensa xtensaeb}} {
     variant target_[lindex $t 0] description "Add target support for [join $t {, }]" "append target_list \",[join $t -softmmu,]-softmmu\""
@@ -163,32 +198,15 @@ variant curses description {Use the curses text-only user interface} {
 
 # XXX: gtk/sdl need libepoxy for OpenGL
 
-# XXX: Builds, but does not work as expected at runtime
-#variant gtk3 description {Build GTK+ GUI for GTK+ 3 (experimental)} conflicts cocoa curses gtk2 sdl sdl2 {
-#    configure.args-replace --disable-gtk --enable-gtk
-#    configure.args-append --with-gtkabi=3.0
-#    depends_lib-append     path:lib/pkgconfig/gtk+-3.0.pc:gtk3 port:vte
-#}
+variant gtk3 description {Use the GTK+3 graphical user interface} conflicts cocoa {
+    configure.args-replace --disable-gtk --enable-gtk
+    depends_lib-append     path:lib/pkgconfig/gtk+-3.0.pc:gtk3 port:vte
+}
 
-# XXX: Builds, but user input does not work at runtime
-#variant gtk2 description {Use the GTK+ 2 graphical user interface} conflicts cocoa curses gtk3 sdl sdl2 {
-#    configure.args-replace --disable-gtk --enable-gtk
-#    configure.args-append  --with-gtkabi=2.0
-#    depends_lib-append     path:lib/pkgconfig/gtk+-2.0.pc:gtk2 port:vte
-#}
-
-# XXX: Build broken due to missing X11 symbols
-#variant sdl description {Use the SDL graphical user interface} conflicts cocoa curses gtk2 gtk3 sdl sdl2 {
-#    configure.args-replace --disable-sdl --enable-sdl
-#    depends_lib-append      port:libsdl
-#}
-
-# XXX: Broken at runtime, screen flickers and input does not work
-#variant sdl2 description {Use the SDL 2 graphical user interface} conflicts cocoa curses {
-#    configure.args-replace --disable-sdl --enable-sdl
-#    configure.args-append --with-sdlabi=2.0
-#    depends_lib-append      port:libsdl2
-#}
+variant sdl2 description {Use the SDL 2 graphical user interface} conflicts cocoa {
+    configure.args-replace --disable-sdl --enable-sdl
+    depends_lib-append      port:libsdl2
+}
 
 variant usb description {Support forwarding of USB devices to the guest} {
     configure.args-replace  --disable-libusb --enable-libusb
@@ -204,15 +222,27 @@ variant curl description {Support network block devices using CURL} {
 }
 
 variant vnc description {Support VNC server} {
-    configure.args-replace  --disable-vnc --enable-vnc
+    configure.args-replace  --disable-png --enable-png \
+                            --disable-vnc --enable-vnc
     configure.args-append   --enable-gnutls \
-                            --enable-vnc-sasl \
                             --enable-vnc-jpeg \
-                            --enable-vnc-png
-    depends_lib-append      port:gnutls \
+                            --enable-vnc-sasl
+    depends_lib-append      path:lib/pkgconfig/gnutls.pc:gnutls \
                             port:cyrus-sasl2 \
                             path:include/turbojpeg.h:libjpeg-turbo \
                             port:libpng
+}
+
+variant spice_protocol description {Support Spice protocol} {
+    configure.args-replace  --disable-spice-protocol --enable-spice-protocol
+    depends_lib-append      port:spice-protocol
+}
+
+variant spice requires spice_protocol description {Support Spice server} {
+    configure.args-replace  --disable-spice --enable-spice
+    configure.args-append   --enable-gnutls
+    depends_lib-append      path:lib/pkgconfig/gnutls.pc:gnutls \
+                            port:spice-server
 }
 
 variant vde description {Support VDE networking} {
@@ -243,6 +273,11 @@ variant zstd description {Support zstd compression} {
 variant ssh description {Support remote block devices over SSH} {
     configure.args-replace  --disable-libssh --enable-libssh
     depends_lib-append      port:libssh
+}
+
+variant dbus description {Export the VM display through D-Bus} {
+    configure.args-replace  --disable-dbus-display --enable-dbus-display
+    configure.args-append   --enable-modules
 }
 
 # Default universal variant does not work

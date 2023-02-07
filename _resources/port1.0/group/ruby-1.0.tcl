@@ -173,6 +173,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             if {$subport eq $name} {
                 ruby.link_binaries no
                 distfiles
+                platforms       any
                 supported_archs noarch
                 use_configure no
                 build {}
@@ -185,6 +186,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
     } else {
         switch ${implementation} {
+            ruby31 { ruby.branch 3.1 }
             ruby30 { ruby.branch 3.0 }
             ruby27 { ruby.branch 2.7 }
             ruby26 { ruby.branch 2.6 }
@@ -197,7 +199,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             ruby19 { ruby.branch 1.9 }
             ruby   { ruby.branch 1.8 }
             default {
-                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby30, ruby27, ruby26, ruby25, ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
+                ui_error "ruby.setup: unknown implementation '${implementation}' specified (ruby31, ruby30, ruby27, ruby26, ruby25, ruby24, ruby23, ruby22, ruby21, ruby20, ruby19 or ruby possible)"
                 return -code error "ruby.setup failed"
             }
         }
@@ -418,7 +420,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             if {${ruby.branch} eq "1.8"} {
                 depends_lib-append  port:rb-rubygems
                 if {${ruby.module} ne "rake"} {
-                    depends_build-append    port:rb-rake
+                    depends_build-append    port:rb18-rake
                 }
             }
 
@@ -477,7 +479,11 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
         }
         # Install documentation files (if specified)
         if {[llength ${ruby.docs}] > 0} {
-            set docPath ${prefix}/share/doc/${name}
+            if {$subport ne ""} {
+                set docPath ${prefix}/share/doc/${subport}
+            } else {
+                set docPath ${prefix}/share/doc/${name}
+            }
             xinstall -d -m 0755 ${destroot}${docPath}
             foreach docitem ${ruby.docs} {
                 set docitem [file join ${worksrcpath} ${docitem}]

@@ -41,9 +41,9 @@ pre-build {
 default build.cmd               {${prefix}/bin/jpm}
 default build.args              {--verbose
                                  --offline
-                                 --compiler=[compwrap::wrapped_compiler_path cc]
-                                 --cpp-compiler=[compwrap::wrapped_compiler_path cxx]
-                                 --archiver=[janetpg::get_default_ar]
+                                 --cc=[compwrap::wrapped_compiler_path cc]
+                                 --c++=[compwrap::wrapped_compiler_path cxx]
+                                 --ar=[janetpg::get_default_ar]
                                  build
                                 }
 default build.target            {}
@@ -59,6 +59,7 @@ default destroot.destdir        {}
 
 pre-destroot {
     xinstall -d -m 0755         ${destroot}${prefix}/lib/janet
+    xinstall -d -m 0755         ${destroot}${prefix}/lib/jpm/.manifests
 }
 
 post-destroot {
@@ -71,8 +72,11 @@ post-destroot {
 
 proc janetpg::janet_setup {} {
     destroot.env-append         JANET_PATH=[option destroot][option prefix]/lib/janet
+    destroot.env-append         JANET_MODPATH=[option destroot][option prefix]/lib/jpm
     depends_lib-delete          port:janet
+    depends_lib-delete          port:jpm
     depends_lib-append          port:janet
+    depends_lib-append          port:jpm
 }
 
 port::register_callback janetpg::janet_setup

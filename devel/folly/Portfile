@@ -4,22 +4,29 @@ PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           cmake 1.1
 PortGroup           boost 1.0
+PortGroup           openssl 1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.1
 
-# Need to use macports libc++ on macOS 10.14 and older in
-# order to have support for std filesystem.
-legacysupport.newest_darwin_requires_legacy 18
-legacysupport.use_mp_libcxx                 yes
+legacysupport.newest_darwin_requires_legacy 19
 
-github.setup        facebook folly 2021.09.20.00 v
-revision            1
+if {[string match *clang* ${configure.compiler}]} {
+    # Don't use libcxx with gcc.
+    legacysupport.use_mp_libcxx yes
+}
+
+# NB: Facebook does not do API stabiilty, apparently, so please don't
+# upgrade without also upgrading its dependents, as listed by:
+# port list rdepends:folly
+github.setup        facebook folly 2023.01.30.00 v
+revision            0
+checksums           rmd160  b5170cc7a49851456dfae482c058bb6a1be5137f \
+                    sha256  2f4b6da55d1009807ad3072655d680b31beb3c25b987a6e1dc32c30f6aac648a \
+                    size    3789531
 
 categories          devel
-platforms           darwin
 license             Apache-2
-
-maintainers         nomaintainer
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 
 description         An open-source C++ library developed and used at Facebook.
 long_description    Folly (acronymed loosely after Facebook Open Source Library) is a library of \
@@ -30,68 +37,100 @@ long_description    Folly (acronymed loosely after Facebook Open Source Library)
                     It complements (as opposed to competing against) offerings such as Boost and of course \
                     std. In fact, we embark on defining our own component only when something we need is \
                     either not available, or does not meet the needed performance profile. We endeavor to \
-                    remove things from folly if or when std or Boost obsoletes them.\
+                    remove things from folly if or when std or Boost obsoletes them. \
                     Performance concerns permeate much of Folly, sometimes leading to designs that are \
                     more idiosyncratic than they would otherwise be (see e.g. PackedSyncPtr.h, SmallLocks.h). \
                     Good performance at large scale is a unifying theme in all of Folly.
 
-checksums           rmd160  5ef9b149f625ba1480514854613210dd767f7d8f \
-                    sha256  20d60ac4773153483b447981c5e63438eb97922407486aae9328c40096648a13 \
-                    size    3487346
+github.tarball_from releases
+distname            ${name}-v${version}
+extract.mkdir       yes
 
-depends_build-append \
-                    port:ninja
+set port_libfmt     libfmt9
+cmake.module_path-append \
+                    ${prefix}/lib/${port_libfmt}/cmake
 
-# doesn't build with libressl as of 2016-09-05
 depends_lib-append  port:bzip2 \
-                    port:python27 \
+                    port:double-conversion \
                     port:gflags \
                     port:google-glog \
-                    port:double-conversion \
                     port:libevent \
-                    port:snappy \
-                    port:lz4 \
-                    port:lzma \
-                    port:xz \
-                    path:lib/libssl.dylib:openssl \
-                    port:zlib \
-                    port:zstd \
                     port:libsodium \
                     port:libunwind \
-                    port:libfmt
+                    port:lz4 \
+                    port:lzma \
+                    port:snappy \
+                    port:xz \
+                    port:zlib \
+                    port:zstd \
+                    port:${port_libfmt}
 
 cmake.generator     Ninja
 
-configure.args-append -DBUILD_SHARED_LIBS=ON -DFOLLY_USE_JEMALLOC=0
+patchfiles-append   patch-older-systems.diff
+
+configure.args-append   -DBUILD_SHARED_LIBS=ON \
+                        -DFOLLY_USE_JEMALLOC=0
 
 compiler.cxx_standard   2017
-configure.cxxflags-append -std=c++17
+configure.cxxflags-append \
+                        -std=c++17
+
+# error: TARGET_OS_xxx not defined, evaluates to 0
+configure.cppflags-append \
+                        -Wno-undef-prefix
 
 # error: typedef redefinition with different types ('uint8_t' (aka 'unsigned char') vs 'enum clockid_t')
 compiler.blacklist-append {clang < 1100}
 # error: 'path' is unavailable: introduced in macOS 10.15
 compiler.blacklist-append {macports-clang-[5-9].0}
+# Temporary blacklist; current gcc 12.2.0 fails with undefined symbols, while gcc 11.3.0 works fine.
+compiler.blacklist-append macports-gcc-12
 
 platform darwin {
     # https://github.com/facebook/folly/issues/864
     if {${os.major} <= 16} {
-        configure.args-append     -DCOMPILER_HAS_F_ALIGNED_NEW=OFF
-        configure.cxxflags-append -fno-aligned-allocation
+        configure.args-append   -DCOMPILER_HAS_F_ALIGNED_NEW=OFF
+        # gcc does not recognize -fno-aligned-allocation
+        if {[string match *clang* ${configure.compiler}]} {
+            configure.cxxflags-append \
+                                -fno-aligned-allocation
+        }
     }
     # Support for TCP fast-open was only added to macOS 10.11+
     if {${os.major} < 15} {
-        configure.cxxflags-append -DFOLLY_ALLOW_TFO=0
+        configure.cxxflags-append \
+                                -DFOLLY_ALLOW_TFO=0
     }
-    configure.cxxflags-append -DFOLLY_MOBILE=0
+    if {[string match *gcc* ${configure.compiler}]} {
+        # ThreadName.cpp: error: invalid conversion from 'std::array<char, 16>::size_type' {aka 'long unsigned int'} to 'size_t*' {aka 'long unsigned int*'}
+        configure.cxxflags-append \
+                                -fpermissive
+        # https://github.com/macports/macports-ports/pull/15689#issuecomment-1212969969
+        configure.ldflags-append \
+                                -L${prefix}/lib -lgflags
+    }
+    # Fix for building in Rosetta, so that x86 SSE is not invoked:
+    if {${os.major} == 10 && ${build_arch} eq "ppc"} {
+        configure.args-append   -DCMAKE_LIBRARY_ARCHITECTURE="ppc" \
+                                -DIS_X86_64_ARCH=OFF
+    }
 }
 
 variant jemalloc description {Use je_malloc} {
-    depends_lib-append       port:jemalloc
-    configure.args-append    -DFOLLY_HAVE_WEAK_SYMBOLS=ON
-    configure.args-replace   -DFOLLY_USE_JEMALLOC=0 -DFOLLY_USE_JEMALLOC=1
-    configure.ldflags-append -ljemalloc
+    depends_lib-append          port:jemalloc
+    configure.args-append       -DFOLLY_HAVE_WEAK_SYMBOLS=ON
+    configure.args-replace      -DFOLLY_USE_JEMALLOC=0 -DFOLLY_USE_JEMALLOC=1
+    configure.ldflags-append    -ljemalloc
 }
 
 variant native description {Build with best native support for local CPU capabilities} {
-    configure.cxxflags-append -march=native
+    if {${build_arch} in [list ppc ppc64]} {
+        # -march= flag is unsupported for PPC:
+        configure.cxxflags-append \
+                                -mtune=native
+    } else {
+        configure.cxxflags-append \
+                                -march=native
+    }
 }

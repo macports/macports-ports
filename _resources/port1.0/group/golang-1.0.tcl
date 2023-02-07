@@ -77,6 +77,10 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             uplevel "PortGroup github 1.0"
             github.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
+        gitlab.com {
+            uplevel "PortGroup gitlab 1.0"
+            gitlab.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
+        }
         bitbucket.org {
             uplevel "PortGroup bitbucket 1.0"
             bitbucket.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix}
@@ -90,7 +94,7 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
             gitea.setup ${go.author} ${go.project} ${go_version} ${go_tag_prefix} ${go_tag_suffix}
         }
         default {
-            if {!([info exists PortInfo(name)] && (${PortInfo(name)} ne ${go.project}))} {
+            if {![info exists PortInfo(name)]} {
                 name    ${go.project}
             }
             version     ${go.version}
@@ -236,6 +240,10 @@ proc handle_set_go_vendors {vendors_str} {
         set checksum_types $portchecksum::checksum_types
     }
     set num_tokens [llength ${vendors_str}]
+    if {[exists extract.rename] && $num_tokens > 0} {
+        # portgroups like github may set this - can't be used with multiple distfiles
+        extract.rename  no
+    }
     for {set ix 0} {${ix} < ${num_tokens}} {incr ix} {
         # Get the Go package ID
         set vpackage [lindex ${vendors_str} ${ix}]
@@ -355,13 +363,27 @@ post-extract {
 
     foreach vlist ${go.vendors_internal} {
         lassign ${vlist} sha1_short vpackage vresolved
+        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved})"
 
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
         if {${sha1_short} ne ""} {
             move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
         } else {
             lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
-            move [glob ${workpath}/${vauthor}-${vproject}-*] ${gopath}/src/${vpackage}
+            # In some cases, this can match multiple folders, e.g.,
+            # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
+            # We want the one that does not have any dashes in the wildcard of
+            # our glob expression, so use regex to identify that.
+            set candidates [glob ${workpath}/${vauthor}-${vproject}-*]
+            foreach candidate $candidates {
+                if {[regexp -nocase "^[quotemeta $workpath]/[quotemeta $vauthor]-[quotemeta $vproject]-\[^-\]*$" $candidate]} {
+                    ui_debug "Choosing $candidate for ${workpath}/${vauthor}-${vproject}-*"
+                    move $candidate ${gopath}/src/${vpackage}
+                    break
+                } else {
+                    ui_debug "Rejecting $candidate for ${workpath}/${vauthor}-${vproject}-* because it contains dashes in the wildcard match"
+                }
+            }
         }
     }
 }

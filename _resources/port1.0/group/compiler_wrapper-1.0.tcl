@@ -34,18 +34,11 @@ default compwrap.compilers_to_wrap [list cc objc cxx objcxx fc f77 f90]
 options compwrap.ccache_supported_compilers
 default compwrap.ccache_supported_compilers [list cc objc cxx objcxx]
 
-# please remove when a86f95c has been in a released MacPorts version for at least two weeks
-# see https://github.com/macports/macports-base/commit/a86f95c5ab86ee52c8fec2271e005591179731de
-if {![info exists compiler.limit_flags]} {
-    options compiler.limit_flags
-    default compiler.limit_flags        no
-}
-
 proc compwrap::use_ccache {tag} {
     global prefix
-    return [ expr [option configure.ccache] && \
-                 [file exists ${prefix}/bin/ccache] && \
-                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 ]
+    return [ expr {[option configure.ccache] &&
+                 [file exists ${prefix}/bin/ccache] &&
+                 [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0} ]
 }
 
 proc compwrap::get_ccache_dir {} {
@@ -88,7 +81,7 @@ proc compwrap::wrapped_compiler_path {tag} {
     # Get the underlying compiler
     set comp [option configure.${tag}]
     # If not defined, or tag not in list of known compilers to wrap, just return
-    if {${comp} eq "" || [lsearch -exact [option compwrap.compilers_to_wrap] ${tag}] < 0} {
+    if {${comp} eq "" || ${tag} ni [option compwrap.compilers_to_wrap]} {
         return ${comp}
     }
     return [compwrap::wrapped_command_path ${tag} ${comp}]
@@ -106,78 +99,92 @@ proc compwrap::wrap_compiler {tag} {
         return ${comp}
     }
 
-    # Create the directory for the wrapper.
-    set wrapdir [file dirname ${wrapcomp}]
-    if {![file exists ${wrapdir}]} {
-        xinstall -d ${wrapdir}
-    }
-
-    # Force recreate in case underlying compiler has changed
-    file delete -force ${wrapcomp}
-    ui_debug "compiler_wrapper: Creating ${wrapcomp}"
-
-    # The list of compiler flags to construct
-    set comp_opts [list]
-
-    # Add MP compiler flags ?
-    if { [option compwrap.add_compiler_flags] } {
-        # standard options
-        set flag [compwrap::comp_flags ${tag}]
-        ui_debug "compiler_wrapper:  -> Comp Flags: Will embed '${flag}' in ${tag} wrapper script"
-        append comp_opts " ${flag}"
-        # isysroot
-        if {[option configure.sdkroot] ne "" && \
-                ![option compiler.limit_flags] && \
-                [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
-            set sdk -isysroot[option configure.sdkroot]
-            ui_debug "compiler_wrapper:  -> SDK: Will embed '${sdk}' in ${tag} wrapper script"
-            append comp_opts " ${sdk}"
-        }
-        # pipe
-        if { [option configure.pipe] } {
-            ui_debug "compiler_wrapper:  -> Will embed -pipe in ${tag} wrapper script"
-            append comp_opts " -pipe"
-        }
-    }
-
-    # Add legacy support env vars
-    if { [option compwrap.add_legacysupport_flags] } {
-        ui_debug "compiler_wrapper:  -> Will embed legacysupport flags in ${tag} wrapper script"
-        append comp_opts " \$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
-    }
-
-    # Basic option, to pass on all command line arguments
-    if { [llength [option compwrap.compiler_pre_flags]] > 0 } {
-        ui_debug "compiler_wrapper:  -> Pre Flags: Will embed '[option compwrap.compiler_pre_flags]' in ${tag} wrapper script"
-        append comp_opts " [join [option compwrap.compiler_pre_flags]]"
-    }
-    append comp_opts " \"[join [option compwrap.compiler_args_forward]]\""
-    if { [llength [option compwrap.compiler_post_flags]] > 0 } {
-        ui_debug "compiler_wrapper:  -> Post Flags: Will embed '[option compwrap.compiler_post_flags]' in ${tag} wrapper script"
-        append comp_opts " [join [option compwrap.compiler_post_flags]]"
-    }
-
-    # Prepend ccache launcher if active
-    if { [compwrap::use_ccache ${tag}] } {
-        ui_debug "compiler_wrapper:  -> Will use ccache compiler launcher in ${tag} wrapper script"
-        set comp "${prefix}/bin/ccache ${comp}"
-    }
-
-    # Finally create the wrapper script
-    set f [open ${wrapcomp} w 0755]
-    puts ${f} "#!/bin/bash"
-    # If ccache active make sure correct CCACHE_DIR is used as not all build systems
-    # (looking at you Bazel) propagate this flag.
-    if { [compwrap::use_ccache ${tag}] } {
-        puts ${f} "export CCACHE_DIR=[compwrap::get_ccache_dir]"
-    }
-    if {[option compwrap.print_compiler_command]} {
-        puts ${f} "echo ${comp} ${comp_opts}"
-    }
-    puts ${f} "exec ${comp} ${comp_opts}"
-    close ${f}
-    
     return ${wrapcomp}
+}
+
+post-extract {
+    foreach tag [option compwrap.compilers_to_wrap] {
+
+        # Get the underlying compiler
+        set comp [option configure.${tag}]
+
+        # Get the wrapper path
+        set wrapcomp [compwrap::wrapped_compiler_path ${tag}]
+        if { ${wrapcomp} eq ${comp} } {
+            continue
+        }
+
+        # Create the directory for the wrapper.
+        set wrapdir [file dirname ${wrapcomp}]
+        if {![file exists ${wrapdir}]} {
+            xinstall -d ${wrapdir}
+        }
+
+        # Force recreate in case underlying compiler has changed
+        file delete -force ${wrapcomp}
+        ui_debug "compiler_wrapper: Creating ${wrapcomp}"
+
+        # The list of compiler flags to construct
+        set comp_opts [list]
+
+        # Add MP compiler flags ?
+        if { [option compwrap.add_compiler_flags] } {
+            # standard options
+            set flag [compwrap::comp_flags ${tag}]
+            ui_debug "compiler_wrapper:  -> Comp Flags: Will embed '${flag}' in ${tag} wrapper script"
+            append comp_opts " ${flag}"
+            # isysroot
+            if {[option configure.sdkroot] ne "" && \
+                    ![option compiler.limit_flags] && \
+                    [lsearch -exact [option compwrap.ccache_supported_compilers] ${tag}] >= 0 } {
+                set sdk -isysroot[option configure.sdkroot]
+                ui_debug "compiler_wrapper:  -> SDK: Will embed '${sdk}' in ${tag} wrapper script"
+                append comp_opts " ${sdk}"
+            }
+            # pipe
+            if { [option configure.pipe] } {
+                ui_debug "compiler_wrapper:  -> Will embed -pipe in ${tag} wrapper script"
+                append comp_opts " -pipe"
+            }
+        }
+
+        # Add legacy support env vars
+        if { [option compwrap.add_legacysupport_flags] } {
+            ui_debug "compiler_wrapper:  -> Will embed legacysupport flags in ${tag} wrapper script"
+            append comp_opts " \$\{MACPORTS_LEGACY_SUPPORT_CPPFLAGS\}"
+        }
+
+        # Basic option, to pass on all command line arguments
+        if { [llength [option compwrap.compiler_pre_flags]] > 0 } {
+            ui_debug "compiler_wrapper:  -> Pre Flags: Will embed '[option compwrap.compiler_pre_flags]' in ${tag} wrapper script"
+            append comp_opts " [join [option compwrap.compiler_pre_flags]]"
+        }
+        append comp_opts " \"[join [option compwrap.compiler_args_forward]]\""
+        if { [llength [option compwrap.compiler_post_flags]] > 0 } {
+            ui_debug "compiler_wrapper:  -> Post Flags: Will embed '[option compwrap.compiler_post_flags]' in ${tag} wrapper script"
+            append comp_opts " [join [option compwrap.compiler_post_flags]]"
+        }
+
+        # Prepend ccache launcher if active
+        if { [compwrap::use_ccache ${tag}] } {
+            ui_debug "compiler_wrapper:  -> Will use ccache compiler launcher in ${tag} wrapper script"
+            set comp "${prefix}/bin/ccache ${comp}"
+        }
+
+        # Finally create the wrapper script
+        set f [open ${wrapcomp} w 0755]
+        puts ${f} "#!/bin/bash"
+        # If ccache active make sure correct CCACHE_DIR is used as not all build systems
+        # (looking at you Bazel) propagate this flag.
+        if { [compwrap::use_ccache ${tag}] } {
+            puts ${f} "export CCACHE_DIR=[compwrap::get_ccache_dir]"
+        }
+        if {[option compwrap.print_compiler_command]} {
+            puts ${f} "echo ${comp} ${comp_opts}"
+        }
+        puts ${f} "exec ${comp} ${comp_opts}"
+        close ${f}
+    }
 }
 
 # Set various env vars
