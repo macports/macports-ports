@@ -132,7 +132,7 @@ default     openssl.branch      {}
 proc rust.add_bootstrap_components {architectures {components {rust-std rustc cargo}}} {
     global extract.suffix os.major subport
 
-    set version_current         1.67.0
+    set version_current         1.67.1
     set version_m1              1.66.1
     set version_m2              1.65.0
 
