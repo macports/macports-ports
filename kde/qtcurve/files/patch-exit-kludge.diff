@@ -1,0 +1,166 @@
+diff --git qt5/style/qtcurve.cpp qt5/style/qtcurve.cpp
+index ca9965a2126d3d9b6f4b586394c759ba65e21ce5..f8a69ff5522007440489b770cbcc34cdf593b8a7 100644
+--- qt5/style/qtcurve.cpp
++++ qt5/style/qtcurve.cpp
+@@ -95,6 +95,16 @@ public:
+         , m_dbusConnected(false)
+     {}
+     ~DBusHelper()
++    {
++        disconnect();
++    }
++    void init()
++    {
++        if(!m_dBus) {
++            m_dBus = new QDBusInterface("org.kde.kwin", "/QtCurve", "org.kde.QtCurve");
++        }
++    }
++    void disconnect()
+     {
+         if (m_dBus) {
+             m_dBus->disconnect();
+@@ -363,6 +373,7 @@ Style::Style() :
+     m_blurHelper(new BlurHelper(this)),
+     m_shortcutHandler(new ShortcutHandler(this))
+ {
++    qtcInfo("New style instance %p\n", this);
+     const char *env = getenv(QTCURVE_PREVIEW_CONFIG);
+ #ifdef QTC_QT5_ENABLE_KDE
+     m_configFile = KSharedConfig::openConfig();
+@@ -413,18 +424,7 @@ void Style::init(bool initial)
+             // prepare the cleanup handler
+             if (QCoreApplication::instance()) {
+                 std::call_once(m_dBusHelper->m_aboutToQuitInit, [this] {
+-                    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] () {
+-                            // disconnect from the session DBus. We're no longer interested in the
+-                            // information it might send when the app we're serving is shutting down.
+-                            disconnectDBus();
+-                            // Stop listening to select signals. We shouldn't stop emitting signals
+-                            // (like QObject::destroyed) but we can reduce the likelihood that pending
+-                            // signals will be sent to us post-mortem.
+-#ifdef QTC_QT5_ENABLE_KDE
+-                            disconnect(KWindowSystem::self(), &KWindowSystem::compositingChanged,
+-                                       this, &Style::compositingToggled);
+-#endif
+-                        } );
++                    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &Style::aboutToQuit);
+                 } );
+             }
+         }
+@@ -700,7 +700,14 @@ void Style::connectDBus()
+ {
+     if (m_dBusHelper->m_dbusConnected)
+         return;
+-    auto bus = QDBusConnection::sessionBus();
++    if (appName == QStringLiteral("rkward") || appName == QStringLiteral("mscore")
++        || qApp->applicationName() == QStringLiteral("Affinic Debugger")) {
++        // these have a way of juggling styles that interferes with our cleanup and can cause a hang just before exit;
++        // avoid that by not connecting to any DBus signals. The only thing they lose is runtime reflection of
++        // theming changes; a small price to pay.
++        return;
++    }
++    QDBusConnection bus(QDBusConnection::sessionBus());
+     if (bus.isConnected()) {
+         m_dBusHelper->m_dbusConnected = true;
+         bus.connect(QString(), "/KGlobalSettings", "org.kde.KGlobalSettings",
+@@ -732,12 +739,12 @@ void Style::disconnectDBus()
+ {
+     if (!m_dBusHelper->m_dbusConnected)
+         return;
+-    auto bus = QDBusConnection::sessionBus();
++    QDBusConnection bus(QDBusConnection::sessionBus());
+     if (!bus.isConnected())
+         return;
+     m_dBusHelper->m_dbusConnected = false;
+     if (getenv("QTCURVE_DEBUG")) {
+-        qWarning() << Q_FUNC_INFO << this << "Disconnecting from" << bus.name() << "/" << bus.baseService();
++        qWarning() << Q_FUNC_INFO << this << appName << "disconnecting from" << bus.name() << "/" << bus.baseService();
+         dumpObjectInfo();
+     }
+     bus.disconnect(QString(), "/KGlobalSettings", "org.kde.KGlobalSettings",
+@@ -764,6 +771,33 @@ void Style::disconnectDBus()
+     }
+ }
+ 
++void Style::aboutToQuit()
++{
++    // be prepared for the global takedown. In particular, try to avoid having
++    // to deal with events and signals when it is no longer safe to do so, in
++    // an attempt to address the crashing on exit in certain applications.
++    if (getenv("QTCURVE_DEBUG")) {
++        qWarning() << Q_FUNC_INFO << this << appName << "is about to quit";
++    }
++    // disconnect from the session DBus. We're no longer interested in the
++    // information it might send when the app we're serving is shutting down.
++    disconnectDBus();
++    m_dBusHelper->disconnect();
++    // Stop listening to select signals. We shouldn't stop emitting signals
++    // (like QObject::destroyed) but we can reduce the likelihood that pending
++    // signals will be sent to us post-mortem.
++#ifdef QTC_QT5_ENABLE_KDE
++    disconnect(KWindowSystem::self(), &KWindowSystem::compositingChanged,
++               this, &Style::compositingToggled);
++#endif
++    if (QGuiApplication::platformName() != QLatin1String("cocoa")) {
++        // let's process all pending events now, rather than allow them to come
++        // in later when they can no longer be handled safely. Don't do this
++        // when running under Apple Cocoa (MuseScore can crash because of it).
++        QCoreApplication::processEvents();
++    }
++}
++
+ Style::~Style()
+ {
+     qtcInfo("Deleting style instance %p\n", this);
+@@ -4481,11 +4515,11 @@ void Style::emitMenuSize(QWidget *w, unsigned short size, bool force)
+         if (oldSize != size) {
+             w->setProperty(constMenuSizeProperty, size);
+             qtcX11SetMenubarSize(wid, size);
+-            if(!m_dBusHelper->m_dBus)
+-                m_dBusHelper->m_dBus = new QDBusInterface("org.kde.kwin", "/QtCurve",
+-                                             "org.kde.QtCurve");
++#ifndef Q_OS_MACOS
++            m_dBusHelper->init();
+             m_dBusHelper->m_dBus->call(QDBus::NoBlock, "menuBarSize",
+                           (unsigned int)wid, (int)size);
++#endif
+         }
+     }
+ }
+@@ -4493,12 +4527,12 @@ void Style::emitMenuSize(QWidget *w, unsigned short size, bool force)
+ void Style::emitStatusBarState(QStatusBar *sb)
+ {
+     if (opts.statusbarHiding & HIDE_KWIN) {
+-        if (!m_dBusHelper->m_dBus)
+-            m_dBusHelper->m_dBus = new QDBusInterface("org.kde.kwin", "/QtCurve",
+-                                        "org.kde.QtCurve");
++#ifndef Q_OS_MACOS
++        m_dBusHelper->init();
+         m_dBusHelper->m_dBus->call(QDBus::NoBlock, "statusBarState",
+                      (unsigned int)qtcGetWid(sb->window()),
+                      sb->isVisible());
++#endif
+     }
+ }
+ }
+diff --git qt5/style/qtcurve.h qt5/style/qtcurve.h
+index 00072d4e1a5a528e8401499e8bdbafca3fe27859..8272604f083e43394f6df01e1f759b50819b2bed 100644
+--- qt5/style/qtcurve.h
++++ qt5/style/qtcurve.h
+@@ -187,6 +187,7 @@ public:
+ private:
+     void init(bool initial);
+     void connectDBus();
++    void disconnectDBus();
+     void freeColor(QSet<QColor*> &freedColors, QColor **cols);
+     void freeColors();
+     void polishFormLayout(QFormLayout *layout);
+@@ -361,7 +362,7 @@ private:
+     int getFrameRound(const QWidget *widget) const;
+ 
+ private slots:
+-    void disconnectDBus();
++    void aboutToQuit();
+     void kdeGlobalSettingsChange(int type, int);
+     void borderSizesChanged();
+     void toggleMenuBar(unsigned int xid);
