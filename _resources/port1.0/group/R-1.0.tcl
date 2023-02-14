@@ -136,3 +136,10 @@ destroot.target
 post-destroot {
     delete ${destroot}${packages}/${R.package}_${version}${suffix}
 }
+
+# Default can be changed once the majority of packages implement testing:
+default test.run    no
+
+test {
+    system -W ${worksrcpath} "${r.cmd} CMD check ./${R.package}_${version}${suffix}"
+}
