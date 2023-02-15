@@ -1,0 +1,202 @@
+--- .gdbinit.orig	2022-11-24 04:42:08.000000000 -0800
++++ .gdbinit	2023-02-05 19:50:17.000000000 -0800
+@@ -1,4 +1,5 @@
+-set startup-with-shell off
++# Move this to end, so failure on older gdbs doesn't blow the rest
++# set startup-with-shell off
+ 
+ define hook-run
+   set $color_type = 0
+@@ -1344,3 +1345,6 @@ define print_flags
+   printf "RUBY_FL_USER17      : %s\n", ((struct RBasic*)($arg0))->flags & RUBY_FL_USER17 ? "1" : "0"
+   printf "RUBY_FL_USER18      : %s\n", ((struct RBasic*)($arg0))->flags & RUBY_FL_USER18 ? "1" : "0"
+ end
++
++# Moved from beginning, since it fails on older gdbs
++set startup-with-shell off
+--- configure.ac.orig	2022-11-24 04:42:08.000000000 -0800
++++ configure.ac	2023-02-05 19:50:17.000000000 -0800
+@@ -2329,6 +2329,15 @@ AS_CASE([$rb_cv_coroutine], [yes|''], [
+         [arm64-darwin*], [
+             rb_cv_coroutine=arm64
+         ],
++        [*86-darwin*], [
++            rb_cv_coroutine=x86
++        ],
++        [ppc*-darwin8*], [
++            rb_cv_coroutine=copy
++        ],
++        [universal-darwin8*], [
++            rb_cv_coroutine=copy
++        ],
+         [x*64-linux*], [
+             AS_CASE(["$ac_cv_sizeof_voidp"],
+                 [8], [ rb_cv_coroutine=amd64 ],
+--- dln.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ dln.c	2023-02-05 19:50:17.000000000 -0800
+@@ -1347,8 +1347,7 @@ dln_load(const char *file)
+ 	    if (dln_incompatible_library_p(handle)) {
+ 
+ #   if defined __APPLE__ && \
+-    defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
+-    (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_11)
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 101100
+ 		/* dlclose() segfaults */
+ 		rb_fatal("%s - %s", incompatible, file);
+ #   else
+--- error.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ error.c	2023-02-05 19:50:17.000000000 -0800
+@@ -519,7 +519,7 @@ preface_dump(FILE *out)
+ 	"-- Crash Report log information "
+ 	"--------------------------------------------\n"
+ 	"   See Crash Report log file under the one of following:\n"
+-# if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_6
++# if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+ 	"     * ~/Library/Logs/CrashReporter\n"
+ 	"     * /Library/Logs/CrashReporter\n"
+ # endif
+@@ -544,7 +544,7 @@ postscript_dump(FILE *out)
+ 	"[IMPORTANT]"
+ 	/*" ------------------------------------------------"*/
+ 	"\n""Don't forget to include the Crash Report log file under\n"
+-# if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_6
++# if MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+ 	"CrashReporter or "
+ # endif
+ 	"DiagnosticReports directory in bug reports.\n"
+--- file.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ file.c	2023-02-05 19:50:17.000000000 -0800
+@@ -156,6 +156,23 @@ int flock(int, int);
+ #include <stdlib.h>
+ #endif
+ 
++#if defined HAVE_REALPATH && defined __APPLE__ && \
++    __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ < 1060
++/* realpath() on OSX < 10.6 doesn't implement automatic allocation */
++#include <sys/syslimits.h>
++static char *
++realpath_wrapper(const char *file_name, char *resolved_name)
++{
++    if (resolved_name == NULL) {
++        resolved_name = malloc(PATH_MAX);
++        if (resolved_name == NULL) return NULL;
++    }
++    return realpath(file_name, resolved_name);
++}
++#else
++#define realpath_wrapper realpath
++#endif
++
+ VALUE rb_cFile;
+ VALUE rb_mFileTest;
+ VALUE rb_cStat;
+@@ -4417,7 +4434,8 @@ rb_check_realpath_internal(VALUE basedir
+     }
+     if (origenc) unresolved_path = TO_OSPATH(unresolved_path);
+ 
+-    if ((resolved_ptr = realpath(RSTRING_PTR(unresolved_path), NULL)) == NULL) {
++    if ((resolved_ptr = realpath_wrapper(RSTRING_PTR(unresolved_path), NULL))
++        == NULL) {
+         /* glibc realpath(3) does not allow /path/to/file.rb/../other_file.rb,
+            returning ENOTDIR in that case.
+            glibc realpath(3) can also return ENOENT for paths that exist,
+--- io.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ io.c	2023-02-05 19:50:17.000000000 -0800
+@@ -119,6 +119,15 @@
+ # include <copyfile.h>
+ #endif
+ 
++/*
++ * Some OSes (e.g., OSX < 10.6) implement fcopyfile() but not
++ * COPYFILE_STATE_COPIED.  Since the only use of the former here
++ * requires the latter, we disable the former when the latter is undefined.
++ */
++#ifndef COPYFILE_STATE_COPIED
++#undef HAVE_FCOPYFILE
++#endif
++
+ #include "ruby/util.h"
+ 
+ #ifndef O_ACCMODE
+--- random.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ random.c	2023-02-05 19:50:17.000000000 -0800
+@@ -340,6 +340,11 @@ fill_random_bytes_urandom(void *seed, si
+ #if 0
+ #elif defined MAC_OS_X_VERSION_10_7 && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_7
+ #include <Security/Security.h>
++#ifndef kSecRandomDefault
++/* hack for missing kSecRandomDefault.
++   some old macOS SDKs do not import SecRandom.h in Security.h */
++#include <Security/SecRandom.h>
++#endif
+ 
+ static int
+ fill_random_bytes_syscall(void *seed, size_t size, int unused)
+--- signal.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ signal.c	2023-02-05 19:50:17.000000000 -0800
+@@ -824,7 +824,8 @@ check_stack_overflow(int sig, const uint
+     const greg_t bp = mctx->gregs[REG_EBP];
+ #   endif
+ # elif defined __APPLE__
+-#   if __DARWIN_UNIX03
++#   include <AvailabilityMacros.h>
++#   if MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+ #     define MCTX_SS_REG(reg) __ss.__##reg
+ #   else
+ #     define MCTX_SS_REG(reg) ss.reg
+--- template/Makefile.in.orig	2022-11-24 04:42:08.000000000 -0800
++++ template/Makefile.in	2023-02-05 19:50:17.000000000 -0800
+@@ -210,7 +210,7 @@ AR            = @AR@
+ ARFLAGS       = @ARFLAGS@$(empty)
+ RANLIB        = @RANLIB@
+ AS            = @AS@
+-ASFLAGS       = @ASFLAGS@ $(INCFLAGS)
++ASFLAGS       = @ASFLAGS@ $(ARCH_FLAG) $(INCFLAGS)
+ IFCHANGE      = $(srcdir)/tool/ifchange
+ OBJDUMP       = @OBJDUMP@
+ OBJCOPY       = @OBJCOPY@
+--- tool/m4/ruby_default_arch.m4.orig	2022-11-24 04:42:08.000000000 -0800
++++ tool/m4/ruby_default_arch.m4	2023-02-05 19:50:17.000000000 -0800
+@@ -4,6 +4,7 @@ AC_MSG_CHECKING([arch option])
+ AS_CASE([$1],
+ 	[*64],        [ARCH_FLAG=-m64],
+ 	[[i[3-6]86]], [ARCH_FLAG=-m32],
++	[ppc], [ARCH_FLAG=-m32],
+ 	[AC_MSG_ERROR(unknown target architecture: $target_archs)]
+ 	)
+ AC_MSG_RESULT([$ARCH_FLAG])
+--- tool/transform_mjit_header.rb.orig	2022-11-24 04:42:08.000000000 -0800
++++ tool/transform_mjit_header.rb	2023-02-05 19:50:17.000000000 -0800
+@@ -176,7 +176,9 @@ module MJITHeader
+   def self.conflicting_types?(code, cc, cflags)
+     with_code(code) do |path|
+       cmd = "#{cc} #{cflags} #{path}"
+-      out = IO.popen(cmd, err: [:child, :out], &:read)
++      # As per gcc docs, set LC_ALL=C to avoid curly quotes in messages
++      cmd_env = {"LC_ALL" => "C"}
++      out = IO.popen(cmd_env, cmd, err: [:child, :out], &:read)
+       !$?.success? &&
+         (out.match?(/error: conflicting types for '[^']+'/) ||
+          out.match?(/error: redefinition of parameter '[^']+'/))
+--- vm_dump.c.orig	2022-11-24 04:42:08.000000000 -0800
++++ vm_dump.c	2023-02-05 19:50:17.000000000 -0800
+@@ -459,7 +459,8 @@ rb_vmdebug_thread_dump_state(VALUE self)
+ }
+ 
+ #if defined __APPLE__
+-# if __DARWIN_UNIX03
++# include <AvailabilityMacros.h>
++# if MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+ #   define MCTX_SS_REG(reg) __ss.__##reg
+ # else
+ #   define MCTX_SS_REG(reg) ss.reg
+@@ -470,7 +471,8 @@ rb_vmdebug_thread_dump_state(VALUE self)
+ # ifdef HAVE_LIBUNWIND
+ #  undef backtrace
+ #  define backtrace unw_backtrace
+-# elif defined(__APPLE__) && defined(__x86_64__) && defined(HAVE_LIBUNWIND_H)
++# elif defined(__APPLE__) && defined(__x86_64__) && defined(HAVE_LIBUNWIND_H) \
++       && MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
+ #  define UNW_LOCAL_ONLY
+ #  include <libunwind.h>
+ #  include <sys/mman.h>
