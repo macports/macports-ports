@@ -9,6 +9,8 @@ PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           compilers 1.0
 
+# For packages from CRAN and Bioconductor R.author can be set to anything;
+# it is desirable however to use GitHub/GitLab author in this field, if available.
 options             R.domain R.author R.package R.tag_prefix R.tag_suffix
 
 proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}} {
@@ -23,10 +25,22 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             uplevel "PortGroup github 1.0"
             github.setup ${R.author} ${R.package} ${version} ${R_tag_prefix} ${R_tag_suffix}
         }
+        gitlab {
+            uplevel "PortGroup gitlab 1.0"
+            gitlab.setup ${R.author} ${R.package} ${version} ${R_tag_prefix} ${R_tag_suffix}
+        }
         cran {
             homepage        https://cran.r-project.org/package=${R.package}
             master_sites    https://cran.r-project.org/src/contrib \
                             https://cran.r-project.org/src/contrib/Archive/${R.package}
+            distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
+            livecheck.type  regex
+            livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
+        }
+        bioconductor {
+            homepage        https://bioconductor.org/packages/${R.package}
+            master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  regex
