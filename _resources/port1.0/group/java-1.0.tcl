@@ -18,11 +18,12 @@
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
-options java.version java.home java.fallback
+options java.version java.home java.fallback java.deptypes
 
 default java.version  {}
 default java.home     {}
 default java.fallback {}
+default java.deptypes lib
 
 # allow PortGroup to be used inside a variant (e.g. octave)
 global java_version_not_found
@@ -125,7 +126,9 @@ namespace eval java {
         # Add dependency if required
         if { ${java_version_not_found} && ${java.fallback} ne "" } {
             ui_debug "Adding dependency on JDK fallback ${java.fallback}"
-            depends_lib-append port:${java.fallback}
+            foreach deptype [option java.deptypes] {
+                depends_${deptype}-append port:${java.fallback}
+            }
         }
 
         return $home_value
