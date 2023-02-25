@@ -240,7 +240,7 @@ proc handle_set_go_vendors {vendors_str} {
         set checksum_types $portchecksum::checksum_types
     }
     set num_tokens [llength ${vendors_str}]
-    if {[exists extract.rename] && $num_tokens > 0} {
+    if {$num_tokens > 0} {
         # portgroups like github may set this - can't be used with multiple distfiles
         extract.rename  no
     }
