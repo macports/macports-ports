@@ -39,11 +39,11 @@ proc handle_tarball_from {option action args} {
             }
             archive {
                 github.master_sites ${github.homepage}/archive/${git.branch}
-                default extract.rename yes
+                default extract.rename {[expr {[llength ${extract.only}] == 1}]}
             }
             tarball {
                 github.master_sites https://codeload.github.com/${github.author}/${github.project}/legacy.tar.gz/${git.branch}?dummy=
-                default extract.rename yes
+                default extract.rename {[expr {[llength ${extract.only}] == 1}]}
             }
             tags {
                 return -code error "the value \"tags\" is deprecated for github.tarball_from. Please use \"tarball\" instead."
@@ -82,7 +82,7 @@ proc github.setup {gh_author gh_project gh_version {gh_tag_prefix ""} {gh_tag_su
     default master_sites    {${github.master_sites}}
     distname                ${github.project}-${github.version}
 
-    default extract.rename  yes
+    default extract.rename  {[expr {[llength ${extract.only}] == 1}]}
 
     # If the version is composed entirely of hex characters, and is at least 7
     # characters long, and is not exactly 8 decimal digits (which might be a
