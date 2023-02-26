@@ -22,7 +22,7 @@ options java.version java.home java.fallback java.deptypes
 
 default java.version  {}
 default java.home     {}
-default java.fallback {}
+default java.fallback {[java::java_get_default_fallback]}
 default java.deptypes lib
 
 # allow PortGroup to be used inside a variant (e.g. octave)
@@ -132,6 +132,20 @@ namespace eval java {
         }
 
         return $home_value
+    }
+
+    proc java_get_default_fallback {} {
+        global os.major java.version
+        if {[option os.platform] eq "darwin"} {
+            if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
+                return openjdk17
+            } elseif {${os.major} >= 15 && [vercmp ${java.version} < 12]} {
+                return openjdk11
+            } elseif {${os.major} >= 11 && [vercmp ${java.version} < 9]} {
+                return openjdk8
+            }
+        }
+        return {}
     }
 
     proc java_set_env {} {
