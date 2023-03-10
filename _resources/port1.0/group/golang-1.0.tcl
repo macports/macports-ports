@@ -70,7 +70,12 @@ proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     # It is assumed in this portgroup that go.{domain,author,project} will
     # remain consistent with the distfile; this is needed when moving the source
     # into the GOPATH in the post-extract block later on.
-    lassign [go._translate_package_id ${go_package}] go.domain go.author go.project
+    lassign [go._translate_package_id ${go_package}] go.domain go.author go.project subproject
+
+    if {${subproject} ne ""} {
+        ui_error "go.setup cannot handle subprojects yet"
+        error "unhandled subproject"
+    }
 
     switch ${go.domain} {
         github.com {
@@ -108,6 +113,8 @@ proc go._translate_package_id {package_id} {
     set domain [lindex ${parts} 0]
     set author [lindex ${parts} 1]
     set project [lindex ${parts} 2]
+    # possibly empty
+    set subproject [lindex ${parts} 3]
 
     switch ${domain} {
         golang.org {
@@ -132,7 +139,7 @@ proc go._translate_package_id {package_id} {
             set author [string trim ${author} ~]
         }
     }
-    return [list ${domain} ${author} ${project}]
+    return [list ${domain} ${author} ${project} ${subproject}]
 }
 
 proc go._strip_gopkg_version {str} {
@@ -269,7 +276,7 @@ proc handle_set_go_vendors {vendors_str} {
                 incr ix
 
                 # Split up the package ID
-                lassign [go._translate_package_id ${vresolved}] vdomain vauthor vproject
+                lassign [go._translate_package_id ${vresolved}] vdomain vauthor vproject vsubproject
 
                 if {[string match v* ${vversion}]} {
                     set sha1_short {}
@@ -284,21 +291,46 @@ proc handle_set_go_vendors {vendors_str} {
 
                 switch ${vdomain} {
                     github.com {
-                        set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
-                        set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
+                        if {${vsubproject} eq ""} {
+                            set distfile ${vauthor}-${vproject}-${vversion}.tar.gz
+                            set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vversion}?dummy=
+                        } else {
+                            set distfile ${vauthor}-${vproject}-${vsubproject}-${vversion}.tar.gz
+                            set master_site https://codeload.github.com/${vauthor}/${vproject}/legacy.tar.gz/${vsubproject}/${vversion}?dummy=
+                        }
                     }
                     bitbucket.org {
+                        if {${vsubproject} ne ""} {
+                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
+                            error "unsupported dependency domain"
+                        }
                         set distfile ${vversion}.tar.gz
                         set master_site https://bitbucket.org/${vauthor}/${vproject}/get
                     }
                     gitlab.com -
                     salsa.debian.org {
+                        if {${vsubproject} ne ""} {
+                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
+                            error "unsupported dependency domain"
+                        }
                         set distfile ${vproject}-${vversion}.tar.gz
                         set master_site https://${vdomain}/${vauthor}/${vproject}/-/archive/${vversion}
                     }
                     git.sr.ht {
+                        if {${vsubproject} ne ""} {
+                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
+                            error "unsupported dependency domain"
+                        }
                         set distfile ${vversion}.tar.gz
                         set master_site https://${vdomain}/~${vauthor}/${vproject}/archive
+                    }
+                    go.googlesource.com {
+                        if {${vsubproject} ne ""} {
+                            ui_error "go.vendors can't handle subprojects from ${vdomain} yet"
+                            error "unsupported dependency domain"
+                        }
+                        set distfile ${vversion}.tar.gz
+                        set master_site https://${vdomain}/${vauthor}/+archive/refs/tags
                     }
                     default {
                         ui_error "go.vendors can't handle dependencies from ${vdomain}"
