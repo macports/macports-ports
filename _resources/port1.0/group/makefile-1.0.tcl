@@ -23,13 +23,13 @@
 #     variable name used to set the prefix
 #
 # muniversal.arch_tools
-#     extra compiler tools whose values (e.g. MPICXX) must have
+#     extra compiler tools whose values (e.g., MPICXX) must have
 #     -arch flags set by the muniversal PG
 #
 
 PortGroup compiler_wrapper      1.0
-# By default (for this PG) do not embedded compiler flags in wrappers
-compwrap.add_compiler_flags     no
+# By default (for this PG), do not embedded compiler flags in wrappers
+default compwrap.add_compiler_flags     no
 
 options makefile.override
 default makefile.override       {CC CXX OBJC OBJCXX FC F77 F90 JAVAC PERL PYTHON RUBY INSTALL AWK BISON PKG_CONFIG}
@@ -41,13 +41,12 @@ options makefile.prefix_name
 default makefile.prefix_name    PREFIX
 
 options muniversal.arch_tools
-default muniversal.arch_tools  {}
+default muniversal.arch_tools   {}
 
 default use_configure           no
 default universal_variant       yes
 
-namespace eval makefile_pg {
-}
+namespace eval makefile_pg      {}
 
 # utility procedure to map tool name to appropriate variable name
 proc makefile_pg::map_tool_to_environment_variable {tool} {
