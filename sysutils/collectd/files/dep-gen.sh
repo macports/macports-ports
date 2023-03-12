@@ -373,8 +373,8 @@ echo
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	if [ -z "${OSX_BLACKLIST[$plugin]}" ]; then
 		printf "variant %s description {%s} {\n" "$plugin" "${PLUGINS[$plugin]}"
-		printf "    configure.args-delete --disable-$plugin\n"
-		printf "    configure.args-append --enable-$plugin\n"
+		printf "    configure.args-replace  --disable-$plugin \\\\\n"
+		printf "                            --enable-$plugin\n"
 		if [ -n "${EXTRA_CODE[$plugin]}" ]; then
 			echo
 			echo "    ${EXTRA_CODE[$plugin]}"
