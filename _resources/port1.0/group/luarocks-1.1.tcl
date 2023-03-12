@@ -49,6 +49,11 @@ default luarocks.lua_path                       {?.lua ../?.lua ../src/?.lua}
 options luarocks.lua_cpath
 default luarocks.lua_cpath                      {?.so ../?.so}
 
+# indicates that the rock requires information from the versioned Lua directory
+# e.g., lua.h
+options luarocks.search_lua_dir
+default luarocks.search_lua_dir                 {no}
+
 # set defaults appropriate for rocks downloaded from luarocks.org
 
 default build.cmd                               {${prefix}/bin/luarocks}
@@ -153,7 +158,6 @@ proc luarocks::callback {} {
     foreach branch [option luarocks.branches] {
         set branch_no_dot                       [join [split ${branch} .] ""]
         set subport_name                        lua${branch_no_dot}-${subname}
-        set lua_dir                             [option prefix]/libexec/lua${branch_no_dot}
 
         subport                                 ${subport_name} {}
 
@@ -174,6 +178,44 @@ proc luarocks::callback {} {
 
             # do not run livecheck on subports
             livecheck.type                      none
+
+            if {[option luarocks.search_lua_dir]} {
+                # attempt to have port find correct Lua version
+                set lua_dir                     [option prefix]/libexec/lua${branch_no_dot}
+
+                configure.cppflags-delete       -I${lua_dir}/include
+                configure.cppflags-prepend      -I${lua_dir}/include
+
+                configure.ldflags-delete        -L${lua_dir}/lib
+                configure.ldflags-prepend       -L${lua_dir}/lib
+
+                compiler.cpath-delete           ${lua_dir}/include
+                compiler.cpath-prepend          ${lua_dir}/include
+
+                compiler.library_path-delete    ${lua_dir}/lib
+                compiler.library_path-prepend   ${lua_dir}/lib
+
+                configure.pkg_config_path-delete    ${lua_dir}/lib/pkgconfig
+                configure.pkg_config_path-prepend   ${lua_dir}/lib/pkgconfig
+
+                foreach stage {configure build destroot test} {
+                    set path_save               ""
+                    if {[exists ${stage}.env]} {
+                        foreach e [option ${stage}.env] {
+                            if {[string range ${e} 0 4] eq "PATH="} {
+                                set path_save   [string range ${e} 5 end]
+                                break
+                            }
+                        }
+                    }
+                    if {${path_save} ne ""} {
+                        ${stage}.env-replace    PATH=${path_save} \
+                                                PATH=${lua_dir}/bin:${path_save}
+                    } else {
+                        ${stage}.env-append     PATH=${lua_dir}/bin:$env(PATH)
+                    }
+                }
+            }
         }
     }
 
