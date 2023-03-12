@@ -83,8 +83,10 @@ proc lua::callback {} {
     }
 
     # CMake modules FindLua.cmake and FindLua51.cmake use LUA_DIR
-    configure.env-delete                    LUA_DIR=${prefix}
-    configure.env-append                    LUA_DIR=${prefix}
+    if {${lua.dir} ne ""} {
+        configure.env-delete                LUA_DIR=${lua.dir}
+        configure.env-append                LUA_DIR=${lua.dir}
+    }
 
     # attempt to have port find correct Lua version
     if {${lua.version} ne "" && ${lua.dir} ne ""} {
