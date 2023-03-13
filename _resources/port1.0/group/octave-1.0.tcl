@@ -90,7 +90,7 @@ post-extract {
         delete ${workpath}/${octave.module}
         move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
-    if {[exec /bin/ls ${workpath} | grep -c "-"] == 2} {
+    if {[exec /bin/ls ${workpath} | grep -c "-"] == 2 && ![string match [glob ${workpath}/*-*] ${workpath}/${octave.module}]} {
         move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
 
