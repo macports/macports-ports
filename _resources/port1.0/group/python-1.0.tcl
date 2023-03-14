@@ -430,14 +430,14 @@ proc python_get_defaults {var} {
         }
         build_cmd {
             if {${python.pep517}} {
-                return "${python.bin} -m build --wheel --no-isolation --outdir ${workpath}"
+                return "${python.bin} -m build --no-isolation"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
             }
         }
         build_target {
             if {${python.pep517}} {
-                return ""
+                return "--wheel --outdir [shellescape ${workpath}]"
             } else {
                 return build[python_get_defaults jobs_arg]
             }
