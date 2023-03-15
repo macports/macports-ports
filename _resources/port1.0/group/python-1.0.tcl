@@ -571,6 +571,11 @@ pre-livecheck {
 
 
 pre-test {
-    # set PYTHONPATH
-    test.env-append PYTHONPATH=[join [glob -nocomplain ${worksrcpath}/build/lib*] :]
+    # set PYTHONPATH if not already set
+    if {[lsearch ${test.env} PYTHONPATH=*] == -1} {
+        set libdirs [glob -nocomplain -directory ${worksrcpath}/build lib*]
+        if {$libdirs ne ""} {
+            test.env-append PYTHONPATH=[join $libdirs :]
+        }
+    }
 }
