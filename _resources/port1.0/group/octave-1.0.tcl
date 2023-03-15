@@ -42,7 +42,7 @@ proc octave.set_module {opt action args} {
     }
 }
 
-default categories   "math science"
+default categories   "octave math science"
 default master_sites [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
                         sourceforge:octave]
 default distname     {${octave.module}-${version}}
