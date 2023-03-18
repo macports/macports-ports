@@ -63,6 +63,14 @@ default     cargo.offline_cmd   {--frozen}
 # so offer the option of running cargo-update
 default     cargo.update        {no}
 
+# use `--remap-path-prefix` to prevent build information from bing included installed binaries
+options     rust.remap
+default     rust.remap          {${cargo.home} "" ${worksrcpath} ""}
+
+# flags to be passed to the rust compiler
+options     rust.flags
+default     rust.flags          {}
+
 options     rust.upstream_deployment_target \
             rust.upstream_archs \
             rust.use_cctools \
@@ -669,6 +677,9 @@ post-extract {
 
         puts $conf "\[build\]"
         puts $conf "rustc = \"${prefix}/bin/rustc\""
+        if {[option rust.flags] ne ""} {
+            puts $conf "rustflags = \[\"[join [option rust.flags] {", "}]\"\]"
+        }
 
         # be sure to include all architectures in case, e.g., a 64-bit Cargo compiles a 32-bit port
         foreach arch {arm64 x86_64 i386 ppc ppc64} {
@@ -741,6 +752,10 @@ proc rust::rust_pg_callback {} {
 
     if { ${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap" } {
         # port is *not* building Rust
+
+        foreach {f s} [option rust.remap] {
+            rust.flags-prepend          --remap-path-prefix=${f}=${s}
+        }
 
         depends_build-delete            port:rust
         depends_build-append            port:rust
