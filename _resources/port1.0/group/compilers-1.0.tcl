@@ -185,8 +185,11 @@ if { ${os.major} >= 10 || ${os.platform} ne "darwin" } {
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
         lappend clang_versions 12 13 14 15
     }
+    if { ${os.major} >= 12 } {
+        lappend clang_versions 16
+    }
     if { ${os.major} >= 14 } {
-        lappend clang_versions 16 devel
+        lappend clang_versions devel
     }
 }
 ui_debug "Clang versions for Darwin ${os.major} ${os.arch} - ${clang_versions}"
