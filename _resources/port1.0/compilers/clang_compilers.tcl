@@ -22,9 +22,9 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
     lappend compilers macports-clang-14 \
                       macports-clang-13 \
                       macports-clang-12
-    # clang 16 only available (for now) on 10.10 and newer
+    # clang 16 only available (for now) on 10.8 and newer
     # add to end of list for a while for testing
-    if {${os.major} >= 14} {
+    if {${os.major} >= 12} {
         lappend compilers macports-clang-16
     }
 }
