@@ -66,6 +66,13 @@ compiler.cxx_standard       2011
 
 # Avoid Apple clangs:
 compiler.blacklist-append   {clang}
+# Blacklist macports-clang-16+. See discussion in
+#   https://trac.macports.org/ticket/67144
+# for rationale. The decision when to migrate to a new compiler is then in the
+# hands of the R maintainers and will not change from the current defaults when
+# these get bumped centrally.
+# NOTE : Keep this setting in sync with the one in the R port.
+compiler.blacklist-append   {macports-clang-1[6-9]}
 
 port::register_callback R.add_dependencies
 
