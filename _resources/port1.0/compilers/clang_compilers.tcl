@@ -5,10 +5,6 @@
 # clang_dependency PortGroup, and add it to any new dependencies of the
 # new version.
 
-# Please also revbump R port if compilers settings are modified here,
-# because R saves a compiler used to build it into Makevars file,
-# which is used in turn for R packages. See: https://trac.macports.org/ticket/67144
-
 global os.major os.platform
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
