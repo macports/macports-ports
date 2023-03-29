@@ -8,12 +8,16 @@
 global os.major os.platform
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
+    if {[option compiler.cxx_standard] >= 2020} {
+        # clang 16 is the first to have 'decent' c++20 support so use this
+        # For now limit exposure to this compiler for older standards.
+        # To be relaxed once clang-16 matures a bit.
+        lappend compilers macports-clang-16
+    }
     lappend compilers macports-clang-15 \
                       macports-clang-14 \
                       macports-clang-13 \
                       macports-clang-12
-    # add latest to end of list for a while for testing
-    lappend compilers macports-clang-16
 }
 
 if {${os.major} >= 10} {
