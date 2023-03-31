@@ -68,6 +68,7 @@ options     rust.remap
 default     rust.remap          {${cargo.home} "" ${worksrcpath} ""}
 
 # flags to be passed to the rust compiler
+# --remap-path-prefix=... is eventually added unless rust.remap is empty
 options     rust.flags
 default     rust.flags          {}
 
