@@ -5,7 +5,8 @@
 
 global available_qt_versions
 array set available_qt_versions {
-    qt6 {qt6-qtbase 6.2}
+    qt6   {qt6-qtbase   6.5}
+    qt62  {qt62-qtbase  6.2}
 }
 
 # Qt has what is calls reference configurations, which are said to be thoroughly tested
@@ -18,12 +19,20 @@ proc qt6.get_default_name {} {
 
     # see https://doc.qt.io/qt-6/supported-platforms-and-configurations.html
     # for older versions, see https://web.archive.org/web/*/http://doc.qt.io/qt-6/supported-platforms-and-configurations.html
-    #
-    # macOS Mojave (10.14) and later
-    #
-    # # Qt 6.0 - 6.2: Supported
-    #
-    return qt6
+    if { ${os.major} <= 19} {
+        #
+        # macOS Mojave (10.14) and later
+        #
+        # 6.2: Supported
+        # 6.5: Support dropped for versions prior to Big Sur
+        #
+        return qt62
+    } else {
+        #
+        # macOS ??? (???)
+        #
+        return qt6
+    }
 }
 
 global qt6.name qt6.base_port qt6.version

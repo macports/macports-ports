@@ -156,16 +156,46 @@ namespace eval qt6pg {
             libexec/qt6/lib/QtBluetooth.framework/Versions/A/QtBluetooth
             ""
         }
+        qtdatavis3d {
+            6.5
+            7.0
+            lib/cmake/Qt6DataVisualization/Qt6DataVisualizationConfig
+            ""
+        }
         qtdeclarative {
             6.0
             7.0
             lib/cmake/Qt6Qml/Qt6QmlMacros.cmake
             ""
         }
+        qtgrpc {
+            6.5
+            7.0
+            lib/cmake/Qt6/Qt6GrpcConfig
+            ""
+        }
+        qthttpserver {
+            6.5
+            7.0
+            lib/cmake/Qt6/Qt6GrpcConfig
+            ""
+        }
         qtimageformats {
             6.1
             7.0
             lib/cmake/Qt6/FindLibmng.cmake
+            ""
+        }
+        qtlanguageserver {
+            6.5
+            7.0
+            lib/cmake/Qt6LanguageServer
+            ""
+        }
+        qtlocation {
+            6.5
+            7.0
+            lib/cmake/Qt6Location
             ""
         }
         qtmultimedia {
@@ -186,6 +216,42 @@ namespace eval qt6pg {
             lib/cmake/Qt6Positioning
             ""
         }
+        qtquick3d {
+            6.5
+            7.0
+            lib/cmake/Qt6Quick3D
+            ""
+        }
+        qtquick3dphysics {
+            6.5
+            7.0
+            lib/cmake/Qt6Quick3DPhysics
+            ""
+        }
+        qtquickeffectmaker {
+            6.5
+            7.0
+            lib/cmake/Qt6QuickEffectMaker
+            ""
+        }
+        qtquicktimeline {
+            6.5
+            7.0
+            lib/cmake/Qt6QuickTimeLine
+            ""
+        }
+        qtquicktimeline {
+            6.5
+            7.0
+            lib/cmake/Qt6QuickTimeLine
+            ""
+        }
+        qtquicktimeline {
+            6.5
+            7.0
+            lib/cmake/Qt6QuickTimeLine
+            ""
+        }
         qtremoteobjects {
             6.2
             7.0
@@ -196,6 +262,12 @@ namespace eval qt6pg {
             6.2
             7.0
             lib/cmake/Qt6Sensors
+            ""
+        }
+        qtscxml {
+            6.5
+            7.0
+            lib/cmake/Qt6Scxml
             ""
         }
         qtserialbus {
@@ -216,6 +288,12 @@ namespace eval qt6pg {
             libexec/qt6/lib/QtShaderTools.framework/Versions/A/QtShaderTools
             ""
         }
+        qtspeech {
+            6.5
+            7.0
+            lib/cmake/Qt6Speech
+            ""
+        }
         qtsvg {
             6.0
             7.0
@@ -234,16 +312,34 @@ namespace eval qt6pg {
             libexec/qt6/translations/qt_ar.qm
             ""
         }
+        qtvirtualkeyboard {
+            6.5
+            7.0
+            lib/cmake/Qt6VirtualKeyboard
+            ""
+        }
         qtwebchannel {
             6.2
             7.0
             lib/cmake/Qt6WebChannel
             ""
         }
+        qtwebengine {
+            6.5
+            7.0
+            lib/cmake/Qt6WebEngine
+            ""
+        }
         qtwebsockets {
             6.2
             7.0
             lib/cmake/Qt6WebSockets
+            ""
+        }
+        qtwebview {
+            6.5
+            7.0
+            lib/cmake/Qt6WebView
             ""
         }
         sqlite-plugin {
