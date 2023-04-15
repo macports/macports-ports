@@ -6,7 +6,6 @@
 # PortGroup         R 1.0
 
 PortGroup           active_variants 1.1
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           compilers 1.0
 
 # For packages from CRAN and Bioconductor R.author can be set to anything;
