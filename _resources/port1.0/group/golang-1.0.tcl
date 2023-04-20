@@ -210,7 +210,7 @@ proc go.append_env {} {
             "OBJCXX=[compwrap::wrap_compiler objcxx]" \
             "FC=[compwrap::wrap_compiler fc]" \
             "F90=[compwrap::wrap_compiler f90]" \
-            "F77=[compwrap::wrap_compiler f77]" 
+            "F77=[compwrap::wrap_compiler f77]"
         if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
             build.env-append \
                 "GO_EXTLINK_ENABLED=1" \
