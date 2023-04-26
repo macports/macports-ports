@@ -88,6 +88,30 @@ jobs:
           echo "subportlist=${subportlist}" >> $GITHUB_OUTPUT
         env:
           portlist: ${{ steps.portlist.outputs.portlist }}
+      - name: Determine list of ports which depends on changed subports
+        id: dependslist
+        run: |
+          set -eu
+
+          echo "#### Depends Ports" >> $GITHUB_STEP_SUMMARY
+
+          dependslist=""
+          for port in $subportlist; do
+            echo "::group::Listing depends for ${port}"
+            new_subports=$(port echo depends:$port | tr '\n' ' ')
+            for subport in $new_subports; do
+              echo "$subport"
+              echo "- ${subport}" >> $GITHUB_STEP_SUMMARY
+              dependslist="$dependslist $subport"
+            done
+            echo "::endgroup::"
+          done
+
+          dependslist=$(echo $dependslist | tr ' ' '\n' | sort | uniq | tr '\n' ' ')
+
+          echo "dependslist=${dependslist}" >> $GITHUB_OUTPUT
+        env:
+          subportlist: ${{ steps.subportlist.outputs.subportlist }}
       - name: Run port lint for all changed subports
         run: |
           set -eu
@@ -210,6 +234,93 @@ jobs:
           exit "$fail"
         env:
           subportlist: ${{ steps.subportlist.outputs.subportlist }}
+      - name: Install ports which depends on changed subports
+        run: |
+          set -eu
+
+          echo "buildfromsource never" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+          echo "revupgrade_autorun no" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+          echo "revupgrade_mode report" | sudo tee -a /opt/local/etc/macports/macports.conf >/dev/null
+
+          echo "#### Install Depends Results" >> $GITHUB_STEP_SUMMARY
+
+          fail=0
+          for port in $dependslist; do
+            workdir="/tmp/mpbb/deps-$port"
+            mkdir -p "$workdir/logs"
+            echo "##### ${port}" >> $GITHUB_STEP_SUMMARY
+            touch "$workdir/logs/dependencies-progress.txt"
+
+            echo "::group::Cleaning up between ports"
+            sudo mpbb --work-dir "$workdir" cleanup
+            echo "::endgroup::"
+
+            echo "::group::Installing dependencies for ${port}"
+            sudo mpbb \
+              --work-dir "$workdir" \
+              install-dependencies \
+              "$port" >"$workdir/logs/install-dependencies.log" 2>&1 &
+            deps_pid=$!
+
+            tail -f "$workdir/logs/dependencies-progress.txt" 2>/dev/null &
+            tail_pid=$!
+
+            set +e
+            wait "$deps_pid"
+            deps_exit=$?
+            set -e
+
+            kill "$tail_pid" || true
+
+            if [ "$deps_exit" -ne 0 ]; then
+              echo "::endgroup::"
+              echo "::error::Failed to install dependencies for ${port}"
+
+              echo "⚠️ Failed to install dependencies" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+            echo "::endgroup::"
+
+            echo "::group::Installing ${port}"
+
+            set +e
+            sudo mpbb \
+              --work-dir "$workdir" \
+              install-port \
+              "$port"
+            install_exit=$?
+            set -e
+            if [ "$install_exit" -ne 0 ]; then
+              echo "::endgroup::"
+              echo "::error::Failed to install ${port}"
+
+              echo "⚠️ Failed to install from binary archive" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            set +e
+            sudo port rev-upgrade > $workdir/logs/rev-upgrade.txt
+            tail -n 1 $workdir/logs/rev-upgrade.txt | grep 'No broken ports found'
+            rev_upgrade_exit=$?
+            set -e
+
+            if [ "$rev_upgrade_exit" -ne 0 ]; then
+              echo "::endgroup::"
+              echo "::error::Failed to rev-upgrade ${port}"
+
+              echo "❌ Failed to run rev-upgrade, see the log for more details" >> $GITHUB_STEP_SUMMARY
+
+              fail=1
+              continue
+            fi
+
+            echo "✅ Successfully install" >> $GITHUB_STEP_SUMMARY
+            echo "::endgroup::"
+          done
+
+          exit "$fail"
+        env:
+          dependslist: ${{ steps.dependslist.outputs.dependslist }}
       - name: Make logfiles readable
         if: always()
         run: |
