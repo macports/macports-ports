@@ -37,7 +37,7 @@ default stub.readme yes
 
 proc stub::post_destroot {} {
     set create_readme [option stub.readme]
-    if {${create_readme}} {
+    if { ${create_readme} } {
         global destroot prefix
 
         set subport_name [option stub.subport_name]
