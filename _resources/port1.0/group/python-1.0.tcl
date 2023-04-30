@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "no")
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", or "poetry"
+#   "flit", "hatch", "poetry", or "maturin"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -395,6 +395,12 @@ proc python_add_dependencies {} {
                     poetry {
                         depends_build-delete    port:py${python.version}-poetry-core
                         depends_build-append    port:py${python.version}-poetry-core
+                    }
+                    maturin {
+                        depends_build-delete    port:py${python.version}-maturin \
+                                                port:py${python.version}-setuptools-rust
+                        depends_build-append    port:py${python.version}-maturin \
+                                                port:py${python.version}-setuptools-rust
                     }
                     default {}
                 }
