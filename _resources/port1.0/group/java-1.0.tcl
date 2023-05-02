@@ -193,7 +193,7 @@ namespace eval java {
                 # where it was found this could happen with the CI tests.
                 # By using 'dict set' instead you get the last value encountered...
                 if { [dict exists $version_path_dict $vers] } {
-                    ui_warn "java-portgroup: Found multiple installations for JVM $vers"
+                    ui_debug "java-portgroup: Found multiple installations for JVM $vers"
                 }
                 dict set version_path_dict $vers $path
             }
