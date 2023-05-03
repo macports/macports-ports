@@ -8,8 +8,8 @@
 global os.major os.platform
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
-    if {[option compiler.cxx_standard] >= 2017} {
-        # Limit exposure of clang-16 to ports needing c++17 or newer
+    if {[option compiler.cxx_standard] >= 2014} {
+        # For now limit exposure of clang-16 to ports needing c++14 or newer
         lappend compilers macports-clang-16
     }
     lappend compilers macports-clang-15 \
