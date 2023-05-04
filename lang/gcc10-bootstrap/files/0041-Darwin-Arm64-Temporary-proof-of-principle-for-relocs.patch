@@ -1,0 +1,243 @@
+From e1720c4be089d10cb659a79273769b77578568e0 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Tue, 25 Aug 2020 19:33:49 +0100
+Subject: [PATCH] Darwin, Arm64 : Temporary proof-of-principle for
+ relocs+addends.
+
+At present, we are generating  _foo+123@PAGE and we should have _foo@PAGE+123
+etc.  This can probably be fixed better with symbol flags and use of
+ASM_OUTPUT_SYMBOL_REF but that needs more work.  Right now we're also
+stuck with GCC producing _foo@PAGE-1 as an example ... and the assmbler
+doesn't like it.
+
+(cherry picked from commit 36767eccb8a65b6b57eedca4907100e702b3b829)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config/aarch64/aarch64.c  | 153 ++++++++++++++++++++++++++++++++--
+ gcc/config/aarch64/aarch64.md |   4 +-
+ 2 files changed, 148 insertions(+), 9 deletions(-)
+
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index 3cb8cb8b16d..b8c51e24bd6 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -10303,6 +10303,136 @@ sizetochar (int size)
+     }
+ }
+ 
++static void
++output_macho_postfix_expr (FILE *file, rtx x, const char *postfix)
++{
++  char buf[256];
++
++ restart:
++  switch (GET_CODE (x))
++    {
++    case PC:
++      putc ('.', file);
++      break;
++
++    case SYMBOL_REF:
++      if (SYMBOL_REF_DECL (x))
++	assemble_external (SYMBOL_REF_DECL (x));
++      assemble_name (file, XSTR (x, 0));
++      fprintf (file, "@%s", postfix);
++      break;
++
++    case LABEL_REF:
++      x = label_ref_label (x);
++      /* Fall through.  */
++    case CODE_LABEL:
++      ASM_GENERATE_INTERNAL_LABEL (buf, "L", CODE_LABEL_NUMBER (x));
++      assemble_name (file, buf);
++      break;
++
++    case CONST_INT:
++      fprintf (file, HOST_WIDE_INT_PRINT_DEC, INTVAL (x));
++      break;
++
++    case CONST:
++      /* This used to output parentheses around the expression,
++	 but that does not work on the 386 (either ATT or BSD assembler).  */
++      output_macho_postfix_expr (file, XEXP (x, 0), postfix);
++      break;
++
++    case CONST_WIDE_INT:
++      /* We do not know the mode here so we have to use a round about
++	 way to build a wide-int to get it printed properly.  */
++      {
++	wide_int w = wide_int::from_array (&CONST_WIDE_INT_ELT (x, 0),
++					   CONST_WIDE_INT_NUNITS (x),
++					   CONST_WIDE_INT_NUNITS (x)
++					   * HOST_BITS_PER_WIDE_INT,
++					   false);
++	print_decs (w, file);
++      }
++      break;
++
++    case CONST_DOUBLE:
++      if (CONST_DOUBLE_AS_INT_P (x))
++	{
++	  /* We can use %d if the number is one word and positive.  */
++	  if (CONST_DOUBLE_HIGH (x))
++	    fprintf (file, HOST_WIDE_INT_PRINT_DOUBLE_HEX,
++		     (unsigned HOST_WIDE_INT) CONST_DOUBLE_HIGH (x),
++		     (unsigned HOST_WIDE_INT) CONST_DOUBLE_LOW (x));
++	  else if (CONST_DOUBLE_LOW (x) < 0)
++	    fprintf (file, HOST_WIDE_INT_PRINT_HEX,
++		     (unsigned HOST_WIDE_INT) CONST_DOUBLE_LOW (x));
++	  else
++	    fprintf (file, HOST_WIDE_INT_PRINT_DEC, CONST_DOUBLE_LOW (x));
++	}
++      else
++	/* We can't handle floating point constants;
++	   PRINT_OPERAND must handle them.  */
++	output_operand_lossage ("floating constant misused");
++      break;
++
++    case CONST_FIXED:
++      fprintf (file, HOST_WIDE_INT_PRINT_DEC, CONST_FIXED_VALUE_LOW (x));
++      break;
++
++    case PLUS:
++      /* Some assemblers need integer constants to appear last (eg masm).  */
++      if (CONST_INT_P (XEXP (x, 0)))
++	{
++	  output_macho_postfix_expr (file, XEXP (x, 1), postfix);
++	  if (INTVAL (XEXP (x, 0)) >= 0)
++	    fprintf (file, "+");
++	  output_addr_const (file, XEXP (x, 0));
++	}
++      else
++	{
++	  output_macho_postfix_expr (file, XEXP (x, 0), postfix);
++	  if (!CONST_INT_P (XEXP (x, 1))
++	      || INTVAL (XEXP (x, 1)) >= 0)
++	    fprintf (file, "+");
++	  output_addr_const (file, XEXP (x, 1));
++	}
++      break;
++
++    case MINUS:
++      /* Avoid outputting things like x-x or x+5-x,
++	 since some assemblers can't handle that.  */
++      x = simplify_subtraction (x);
++      if (GET_CODE (x) != MINUS)
++	goto restart;
++
++      output_macho_postfix_expr (file, XEXP (x, 0), postfix);
++      fprintf (file, "-");
++      if ((CONST_INT_P (XEXP (x, 1)) && INTVAL (XEXP (x, 1)) >= 0)
++	  || GET_CODE (XEXP (x, 1)) == PC
++	  || GET_CODE (XEXP (x, 1)) == SYMBOL_REF)
++	output_addr_const (file, XEXP (x, 1));
++      else
++	{
++	  fputs (targetm.asm_out.open_paren, file);
++	  output_addr_const (file, XEXP (x, 1));
++	  fputs (targetm.asm_out.close_paren, file);
++	}
++      break;
++
++    case ZERO_EXTEND:
++    case SIGN_EXTEND:
++    case SUBREG:
++    case TRUNCATE:
++      output_addr_const (file, XEXP (x, 0));
++      break;
++
++    default:
++      if (targetm.asm_out.output_addr_const_extra (file, x))
++	break;
++
++      output_operand_lossage ("invalid expression as operand");
++    }
++
++}
++
+ /* Print operand X to file F in a target specific manner according to CODE.
+    The acceptable formatting commands given by CODE are:
+      'c':		An integer or symbol address without a preceding #
+@@ -10371,6 +10501,12 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+ 	}
+       break;
+ 
++    case 'K':
++      output_macho_postfix_expr (f, x, "PAGEOFF");
++      break;
++    case 'O':
++      output_macho_postfix_expr (f, x, "GOTPAGEOFF");
++      break;
+     case 'e':
+       {
+ 	x = unwrap_const_vec_duplicate (x);
+@@ -10721,20 +10857,23 @@ aarch64_print_operand (FILE *f, rtx x, int code)
+ 	default:
+ 	  break;
+ 	}
+-#endif
+       output_addr_const (asm_out_file, x);
++#endif
+ #if TARGET_MACHO
+   // FIXME update classify symbolic expression to handle macho.
+       switch (aarch64_classify_symbolic_expression (x))
+ 	{
+ 	case SYMBOL_MO_SMALL_PCR:
+-	  asm_fprintf (asm_out_file, "@PAGE;mopcr");
++	  output_macho_postfix_expr (asm_out_file, x, "PAGE");
++//	  asm_fprintf (asm_out_file, "@PAGE;mopcr");
+ 	  break;
+ 	case SYMBOL_MO_SMALL_GOT:
+-	  asm_fprintf (asm_out_file, "@GOTPAGE;mosg");
++	  output_macho_postfix_expr (asm_out_file, x, "GOTPAGE");
++//	  asm_fprintf (asm_out_file, "@GOTPAGE;mosg");
+ 	  break;
+ 	default:
+-	  asm_fprintf (asm_out_file, "@BLEAH");
++	  output_macho_postfix_expr (asm_out_file, x, "BLEAH");
++//	  asm_fprintf (asm_out_file, "@BLEAH");
+ 	  break;
+ 	}
+ #endif
+@@ -10943,13 +11082,13 @@ aarch64_print_address_internal (FILE *f, machine_mode mode, rtx x,
+       case ADDRESS_LO_SUM:
+ #if TARGET_MACHO
+ 	asm_fprintf (f, "[%s, #", reg_names [REGNO (addr.base)]);
+-	output_addr_const (f, addr.offset);
+-	asm_fprintf (f, "@PAGEOFF]");
++	output_macho_postfix_expr (f, addr.offset, "PAGEOFF");
++//	output_addr_const (f, addr.offset);
+ #else
+ 	asm_fprintf (f, "[%s, #:lo12:", reg_names [REGNO (addr.base)]);
+ 	output_addr_const (f, addr.offset);
+-	asm_fprintf (f, "]");
+ #endif
++	asm_fprintf (f, "]");
+ 	return true;
+ 
+       case ADDRESS_SYMBOLIC:
+diff --git gcc/config/aarch64/aarch64.md gcc/config/aarch64/aarch64.md
+index 2340176ecc1..b6059b09fa8 100644
+--- gcc/config/aarch64/aarch64.md
++++ gcc/config/aarch64/aarch64.md
+@@ -6505,7 +6505,7 @@ (define_insn "add_losym_<mode>"
+ 		  (match_operand 2 "aarch64_valid_symref" "S")))]
+   ""
+   { return TARGET_MACHO
+-    ? "add\\t%<w>0, %<w>1, %c2@PAGEOFF;momd"
++    ? "add\\t%<w>0, %<w>1, %K2;momd"
+     : "add\\t%<w>0, %<w>1, :lo12:%c2";
+   }
+   [(set_attr "type" "alu_imm")]
+@@ -6519,7 +6519,7 @@ (define_insn "ldr_got_small_<mode>"
+ 		    UNSPEC_GOTSMALLPIC))]
+   ""
+   { return TARGET_MACHO
+-    ? "ldr\\t%<w>0, [%1, %c2@GOTPAGEOFF];momd"
++    ? "ldr\\t%<w>0, [%1, %O2];momd"
+     : "ldr\\t%<w>0, [%1, #:got_lo12:%c2]";
+   }
+   [(set_attr "type" "load_<ldst_sz>")]
+-- 
+2.40.1
+
