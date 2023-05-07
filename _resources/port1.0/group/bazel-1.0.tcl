@@ -162,8 +162,8 @@ if {![variant_isset native]} {
     configure.env-append CC_OPT_FLAGS=${base_march}
     build.env-append     CC_OPT_FLAGS=${base_march}
     destroot.env-append  CC_OPT_FLAGS=${base_march}
-    notes "This version is built based on a base architecture for convenience,
-           which may not be optimized for your system. To build a version
+    notes "* This version is built based on a base architecture for convenience,\
+           which may not be optimized for your system. To build a version\
            customized for your machine, use the +native variant"
 }
 
