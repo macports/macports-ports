@@ -44,7 +44,7 @@ options bazel.max_ram_fraction
 default bazel.max_ram_fraction 0.5
 
 options bazel.limit_build_jobs
-default bazel.limit_build_jobs yes
+default bazel.limit_build_jobs no
 
 options bazel.extra_build_cmd_opts
 default bazel.extra_build_cmd_opts ""
