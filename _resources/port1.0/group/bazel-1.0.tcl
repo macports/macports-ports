@@ -14,7 +14,7 @@ options bazel.version
 default bazel.version "latest"
 
 options bazel.min_xcode
-default bazel.min_xcode 12.2
+default bazel.min_xcode 10.3
 
 options bazel.build_cmd
 default bazel.build_cmd {[bazel::get_bazel_executable]}
