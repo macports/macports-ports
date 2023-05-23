@@ -37,6 +37,14 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             livecheck.type  regex
             livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
         }
+        r-universe {
+            homepage        https://${R.author}.r-universe.dev
+            master_sites    https://${R.author}.r-universe.dev/src/contrib
+            distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
+            livecheck.type  regex
+            livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
+        }
         bioconductor {
             homepage        https://bioconductor.org/packages/${R.package}
             master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/
