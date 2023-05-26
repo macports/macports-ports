@@ -1,65 +1,86 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=2:ts=2:sts=2
 
 PortSystem          1.0
+PortGroup           github 1.0
 
 name                gdal-grass
 categories          gis
-version             2.2.0
-revision            2
-maintainers         {vince @Veence}
-description         This plugin allows GDAL to read GRASS files
-long_description    This plugin allows GDAL to read GRASS files
 
-homepage            http://grass.osgeo.org/
+# Due to upstream reset of version numbering after split from GDAL source repo,
+# do not (re-)publish 1.4.3_0, 2.1.0_0, 2.1.0_1, 2.2.0_0, 2.2.0_1, or 2.2.0_2
+github.setup        OSGeo gdal-grass 1.0.2
+github.tarball_from archive
+revision            1
+epoch               1
+
+maintainers         {vince @Veence}
+description         GRASS Drivers for GDAL and OGR.
+long_description    This plugin allows GDAL to read GRASS raster and vector files.
+
 license             MIT
 
 platforms           darwin
 
 depends_lib         port:gdal \
-                    port:grass7
+                    port:grass
 
-master_sites        http://download.osgeo.org/gdal/${version}
+checksums           rmd160  316d2faf2c66aecbec9d340ef37e799600f7a89c \
+                    sha256  91c45b3c316ed923f4fccb7e7e88fba131c883a6c92f950ec0c1a8b04a7bd851 \
+                    size    58045
 
-checksums           md5     c8f2c9f0243ce651404f68d16fa9b499 \
-                    rmd160  733e8918561d3d5aead3ce2d98a41c9b636e32f5 \
-                    sha256  0eb2b541e87db4c0d1b3cdc61512b88631e6f7d39db5986eeb773aada0a7995f \
-                    size    54973
+compiler.cxx_standard     2011
+configure.cxxflags-append -std=c++11
 
-use_configure       yes
+pre-configure {
+    set grass_gisbase [exec ${prefix}/bin/grass --config path]
+
+    configure.args-append --with-grass=${grass_gisbase}
+
+    # retrieve include path to <proj.h> from GRASS
+    set fp [open ${grass_gisbase}/include/Make/Platform.make r]
+    foreach line [split [read $fp] "\n"] {
+         if {[string match PROJINC* ${line}]} {
+             configure.cppflags-append [string trim [lindex [split ${line} "="] 1]]
+         }
+    }
+    close $fp
+
+    reinplace "s|CXXFLAGS = @CXX_WFLAGS@|CXXFLAGS = @CXXFLAGS@ @CXX_WFLAGS@|" \
+        ${worksrcpath}/Makefile.in
+}
 
 configure.args-append   --with-gdal=${prefix}/bin/gdal-config
-configure.args-append   --with-grass=${prefix}/share/grass-7.4.0
 
-variant postgresql10 conflicts postgresql96 postgresql95 description {Enable PostgreSQL 10 support} {
-  depends_build-append  port:postgresql10
-  configure.args-append --with-postgres-includes=${prefix}/include/postgresql10
+# PostGreSQL variants (from the GDAL port)
+set postgresql_suffixes {95 96 10 11 12 13 14 15}
+
+set postgresql_variants {}
+foreach suffix ${postgresql_suffixes} {
+    lappend postgresql_variants postgresql${suffix}
 }
 
-variant postgresql96 conflicts postgresql10 postgresql95 description {Enable PostgreSQL 9.6 support} {
-  depends_build-append  port:postgresql96
-  configure.args-append --with-postgres-includes=${prefix}/include/postgresql96
+foreach suffix ${postgresql_suffixes} {
+    set vrt postgresql${suffix}
+    set pgversion [string index ${suffix} 0].[string index ${suffix} 1]
+    set index [lsearch -exact ${postgresql_variants} ${vrt}]
+    set conf [lreplace ${postgresql_variants} ${index} ${index}]
+
+    variant ${vrt} description "Use PostgreSQL ${pgversion}" conflicts {*}${conf} "
+        depends_lib-append      port:${vrt}
+        configure.args-append   --with-postgres-includes=${prefix}/include/${vrt}
+    "
 }
 
-variant postgresql95 conflicts postgresql10 postgresql96 description {Enable PostgreSQL 9.5 support} {
-  depends_build-append  port:postgresql95
-  configure.args-append --with-postgres-includes=${prefix}/include/postgresql95
+# PostGreSQL default
+set pgdefault "if {"
+
+foreach suffix ${postgresql_suffixes} {
+    set pgdefault "${pgdefault}!\[variant_isset postgresql${suffix}\] && "
 }
 
-post-configure {
-    if {[variant_exists universal] && [variant_isset universal]} {
-        # Enforce universal flags
-        reinplace -E "s|^(CXXFLAGS.*)|\\1 ${configure.universal_cxxflags}|" \
-            ${worksrcpath}/Makefile
-        reinplace -E "s|^(LD_SHARED.*)|\\1 ${configure.universal_cxxflags}|" \
-            ${worksrcpath}/Makefile
-    }
+set pgdefault [string range ${pgdefault} 0 end-4]
+set pgdefault "${pgdefault}} { default_variants +postgresql${suffix} }"
 
-    # Fixes destroot issues
-    reinplace -E "s|^(GRASSTABLES_DIR\[^/]*)(.*)|\\1${destroot}\\2|" \
-        ${worksrcpath}/Makefile
-    reinplace -E "s|^(AUTOLOAD_DIR\[^/]*)(.*)|\\1${destroot}\\2|" \
-        ${worksrcpath}/Makefile
-    reinplace "s|mkdir|mkdir -p|" ${worksrcpath}/Makefile
-}
+eval ${pgdefault}
 
-build.target
+build.target            default

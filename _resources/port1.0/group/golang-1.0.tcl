@@ -210,7 +210,7 @@ proc go.append_env {} {
             "OBJCXX=[compwrap::wrap_compiler objcxx]" \
             "FC=[compwrap::wrap_compiler fc]" \
             "F90=[compwrap::wrap_compiler f90]" \
-            "F77=[compwrap::wrap_compiler f77]" 
+            "F77=[compwrap::wrap_compiler f77]"
         if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
             build.env-append \
                 "GO_EXTLINK_ENABLED=1" \
@@ -394,14 +394,23 @@ post-extract {
     }
 
     foreach vlist ${go.vendors_internal} {
-        lassign ${vlist} sha1_short vpackage vresolved
-        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved})"
+        lassign ${vlist} sha1_short vpackage vresolved vversion
+        ui_debug "Processing vendored dependency (sha1_short: ${sha1_short}, vpackage: ${vpackage}, vresolved: ${vresolved}, vversion: ${vversion})"
 
         file mkdir ${gopath}/src/[file dirname ${vpackage}]
-        if {${sha1_short} ne ""} {
+
+        # Next is a big bag of heuristics to try to move the extracted
+        # dependencies into the gopath. We have to try to accommodate all naming
+        # schemes used by the various "forges" (GitHub, Gitlab, etc.).
+
+        lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
+        set gitlab_workdir ${vproject}-${vversion}
+
+        if {[file exists ${workpath}/${gitlab_workdir}]} {
+            move ${workpath}/${gitlab_workdir} ${gopath}/src/${vpackage}
+        } elseif {${sha1_short} ne ""} {
             move [glob ${workpath}/*-${sha1_short}*] ${gopath}/src/${vpackage}
         } else {
-            lassign [go._translate_package_id ${vresolved}] _ vauthor vproject
             # In some cases, this can match multiple folders, e.g.,
             # gopkg.in/src-d/go-git.v4 and gopkg.in/src-d/go-git-fixtures.v3.
             # We want the one that does not have any dashes in the wildcard of

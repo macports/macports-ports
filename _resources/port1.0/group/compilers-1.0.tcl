@@ -159,6 +159,7 @@ foreach ver ${gcc_versions} {
 
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
+# Also do not forget to add support of new llvm into cctools
 set clang_versions {}
 if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {

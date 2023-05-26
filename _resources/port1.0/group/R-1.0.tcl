@@ -6,7 +6,6 @@
 # PortGroup         R 1.0
 
 PortGroup           active_variants 1.1
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           compilers 1.0
 
 # For packages from CRAN and Bioconductor R.author can be set to anything;
@@ -33,6 +32,14 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             homepage        https://cran.r-project.org/package=${R.package}
             master_sites    https://cran.r-project.org/src/contrib \
                             https://cran.r-project.org/src/contrib/Archive/${R.package}
+            distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
+            livecheck.type  regex
+            livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
+        }
+        r-universe {
+            homepage        https://${R.author}.r-universe.dev
+            master_sites    https://${R.author}.r-universe.dev/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  regex
@@ -125,7 +132,7 @@ if {${os.platform} eq "darwin" && (${build_arch} in [list ppc ppc64])} {
 
 global prefix frameworks_dir
 # Please update R version here:
-set Rversion        4.2.2
+set Rversion        4.3.0
 set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz

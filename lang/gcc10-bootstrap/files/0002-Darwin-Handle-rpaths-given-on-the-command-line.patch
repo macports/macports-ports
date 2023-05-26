@@ -1,0 +1,130 @@
+From 51743c0d8feeadf18788dcd8d3647b9b50cc6c0f Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 28 Mar 2021 14:48:17 +0100
+Subject: [PATCH] Darwin : Handle rpaths given on the command line.
+
+We want to produce a situation where a default rpath can be added
+to each executable (or dylib), but that can be overridden by any
+specific rpath provided by the user.
+
+gcc/ChangeLog:
+
+	* config.gcc: Include rpath.opt/
+	* config/darwin-driver.c (darwin_driver_init): Detect cases
+	where the user has added rpaths via a -Wl or -Xlinker command
+	and suppress default rpaths in that case.
+	* config/darwin.h (DRIVER_SELF_SPECS): Handle -rpath.
+	(DARWIN_RPATH_SPEC): Adjust.
+	* config/darwin.opt: Add nodefaultrpath option.
+
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config.gcc             |  2 +-
+ gcc/config/darwin-driver.c | 13 +++++++++++++
+ gcc/config/darwin.h        | 11 +++++------
+ gcc/config/darwin.opt      |  4 ++++
+ 4 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git gcc/config.gcc gcc/config.gcc
+index 7fc88087c15..470de525bf4 100644
+--- gcc/config.gcc
++++ gcc/config.gcc
+@@ -722,7 +722,7 @@ case ${target} in
+   tm_file="${tm_file} ${cpu_type}/darwin.h"
+   tm_p_file="${tm_p_file} darwin-protos.h"
+   target_gtfiles="$target_gtfiles \$(srcdir)/config/darwin.c"
+-  extra_options="${extra_options} darwin.opt"
++  extra_options="${extra_options} rpath.opt darwin.opt"
+   c_target_objs="${c_target_objs} darwin-c.o"
+   cxx_target_objs="${cxx_target_objs} darwin-c.o"
+   fortran_target_objs="darwin-f.o"
+diff --git gcc/config/darwin-driver.c gcc/config/darwin-driver.c
+index f96af2c0262..9fc40f6680f 100644
+--- gcc/config/darwin-driver.c
++++ gcc/config/darwin-driver.c
+@@ -276,6 +276,7 @@ darwin_driver_init (unsigned int *decoded_options_count,
+   bool seen_version_min = false;
+   bool seen_sysroot_p = false;
+   bool noexport_p = true;
++  bool seen_rpath_p = false;
+ 
+   for (i = 1; i < *decoded_options_count; i++)
+     {
+@@ -349,6 +350,8 @@ darwin_driver_init (unsigned int *decoded_options_count,
+ 	  gcc_checking_assert ((*decoded_options)[i].arg);
+ 	  if (strncmp ((*decoded_options)[i].arg, "-exported_symbol", 16) == 0)
+ 	    noexport_p = false;
++	  if (strncmp ((*decoded_options)[i].arg, "-rpath", 6) == 0)
++	    seen_rpath_p = true;
+ 	  break;
+ 
+ 	default:
+@@ -482,4 +485,14 @@ darwin_driver_init (unsigned int *decoded_options_count,
+       generate_option (OPT_nodefaultexport, NULL, 1, CL_DRIVER,
+ 		       &(*decoded_options)[*decoded_options_count - 1]);
+     }
++
++  if (seen_rpath_p)
++    {
++      ++*decoded_options_count;
++      *decoded_options = XRESIZEVEC (struct cl_decoded_option,
++				     *decoded_options,
++				     *decoded_options_count);
++      generate_option (OPT_nodefaultrpath, NULL, 1, CL_DRIVER,
++		       &(*decoded_options)[*decoded_options_count - 1]);
++    }
+ }
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index e1d98873ccb..afd6cace4bd 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -208,6 +208,7 @@ extern GTY(()) int darwin_ms_struct;
+   "%{framework*:-Xlinker -framework -Xlinker %*} %<framework*",		\
+   "%{gfull:-g -fno-eliminate-unused-debug-symbols} %<gfull",		\
+   "%{gused:-g -feliminate-unused-debug-symbols} %<gused",		\
++  "%{rpath*: -Xlinker -rpath -Xlinker %*}",					\
+   "%{gsplit-dwarf:%ngsplit-dwarf is not supported on this platform} \
+     %<gsplit-dwarf",							\
+   "%{headerpad_max_install_names:-Xlinker -headerpad_max_install_names}\
+@@ -381,8 +382,8 @@ extern GTY(()) int darwin_ms_struct;
+     DARWIN_NOPIE_SPEC \
+     DARWIN_RDYNAMIC \
+     DARWIN_NOCOMPACT_UNWIND \
+-    "%{!r:%{!nostdlib:%{!rpath:%(darwin_rpaths)}}}" \
+-    "}}}}}}} %<pie %<no-pie %<rdynamic "
++    "%{!r:%{!nostdlib:%{!rpath:%{!nodefaultrpath:%(darwin_rpaths)}}}} " \
++    "}}}}}}} %<pie %<no-pie %<rdynamic %<rpath "
+ 
+ /* Spec that controls whether the debug linker is run automatically for
+    a link step.  This needs to be done if there is a source file on the
+@@ -570,10 +571,8 @@ extern GTY(()) int darwin_ms_struct;
+ /* FIXME: it would be great to have a version-compare that accepts multiple
+    arguments.  */
+ #define DARWIN_RPATH_SPEC \
+-  "%:version-compare(>= 10.5 mmacosx-version-min= -rpath)		\
+-   %:version-compare(>= 10.5 mmacosx-version-min= @loader_path/.)	\
+-   %:version-compare(>= 10.5 mmacosx-version-min= -rpath)		\
+-   %:version-compare(>= 10.5 mmacosx-version-min= @loader_path/../lib)	\
++  "%:version-compare(>= 10.5 mmacosx-version-min= -rpath) \
++   %:version-compare(>= 10.5 mmacosx-version-min= @loader_path) \
+    %P "
+ 
+ #ifdef HAVE_AS_MMACOSX_VERSION_MIN_OPTION
+diff --git gcc/config/darwin.opt gcc/config/darwin.opt
+index 55b6897f55e..c354317886c 100644
+--- gcc/config/darwin.opt
++++ gcc/config/darwin.opt
+@@ -237,6 +237,10 @@ nodefaultexport
+ Driver RejectNegative
+ Do not add a default symbol exports to modules or dynamic libraries.
+ 
++nodefaultrpath
++Driver RejectNegative
++Do not add a default rpath to executables, modules or dynamic libraries.
++
+ nofixprebinding
+ Driver RejectNegative
+ (Obsolete after 10.3.9) Set MH_NOPREFIXBINDING, in an executable.
+-- 
+2.40.1
+

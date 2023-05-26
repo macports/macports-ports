@@ -179,6 +179,7 @@ namespace eval java {
             # %3=0 -> Regex match, ignored.
             # %3=1 -> Version
             # %3=2 -> JAVA_HOME.
+            set version_path_dict {}
             for {set idx 0} {$idx < [llength $vm_versions]} {incr idx 3} {
                 set vers [lindex $vm_versions $idx+1]
                 # Normalize version 1.x -> x
@@ -186,7 +187,15 @@ namespace eval java {
                 # Extract major version
                 set vers [regsub {(\.\d+)+} $vers ""]
                 set path [lindex $vm_versions $idx+2]
-                dict append version_path_dict $vers $path
+                # Note, using [dict set ...] here instead of [dict append ...] to handle scenario the
+                # system could have multiple installations of the JVM for exactly the same version.
+                # See e.g. https://github.com/macports/macports-ports/pull/16149
+                # where it was found this could happen with the CI tests.
+                # By using 'dict set' instead you get the last value encountered...
+                if { [dict exists $version_path_dict $vers] } {
+                    ui_debug "java-portgroup: Found multiple installations for JVM $vers"
+                }
+                dict set version_path_dict $vers $path
             }
         } else {
             set details [dict get $options -errorcode]

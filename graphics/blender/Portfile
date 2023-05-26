@@ -7,8 +7,8 @@ PortGroup           active_variants 1.1
 PortGroup           boost 1.0
 
 name                blender
-version             2.91.2
-revision            7
+version             2.93.17
+revision            1
 categories          graphics multimedia
 platforms           darwin
 license             GPL-2+
@@ -28,9 +28,9 @@ long_description    Blender is a ${description}. It contains a set of \
 
 master_sites        https://download.blender.org/source/
 use_xz              yes
-checksums           rmd160  f49173e5478d16c8a2b70df5fdb41bd0fed4ef01 \
-                    sha256  185cbc4cd7f2f614a7594221d8237170ade7f389d16858cee22ad778c26fcc70 \
-                    size    42057100
+checksums           rmd160  7c7ddbe88702b3d7836e5a59374f3d7eaeeeec03 \
+                    sha256  040e1381c8a37bb22e684b15ba4fecb78817fd13f1e4709d6d8c20800ac7cbfb \
+                    size    43033860
 
 minimum_xcodeversions-append {15 8.2 16 8.2}
 if {${os.platform} eq "darwin" && ${os.major} < 15} {
@@ -48,6 +48,11 @@ compiler.cxx_standard 2017
 # also not included in Xcode.)
 # (Reference: https://stackoverflow.com/questions/32959627/where-is-the-system-llvm-config-on-macos)
 compiler.blacklist-append clang {macports-clang-[5-8].0}
+
+# Blacklist macports-clang-16+ to prevent
+#  error: no template named 'unary_function' in namespace 'std'
+compiler.blacklist-append {macports-clang-1[6-9]}
+
 # Even though we need to blacklist Xcode Clang/LLVM, we still need to
 # make the rest of Xcode available to the build system. If we don't set
 # use_xcode to yes, then the build will fail, because Blender's CMake
@@ -56,8 +61,13 @@ compiler.blacklist-append clang {macports-clang-[5-8].0}
 use_xcode yes
 cmake.install_prefix ${applications_dir}
 
-set py_ver          3.9
+# error: TARGET_OS_xxx not defined, evaluates to 0
+configure.cppflags-append \
+                        -Wno-undef-prefix
+
+set py_ver          3.11
 set py_ver_nodot    [string map {. {}} ${py_ver}]
+require_active_variants [boost::depends_portname] python${py_ver_nodot}
 
 depends_lib-append  port:python${py_ver_nodot} \
                     port:openal-soft \
@@ -69,7 +79,7 @@ depends_lib-append  port:python${py_ver_nodot} \
                     port:fftw-3 \
                     port:zlib \
                     port:freetype \
-                    port:openexr \
+                    port:openexr2 \
                     path:lib/libavcodec.dylib:ffmpeg \
                     port:opencollada \
                     port:pcre \
@@ -104,9 +114,28 @@ if { ${llvm_version} eq "" } {
     depends_lib-append  port:llvm-$llvm_version
 }
 
+configure.env-append    OPENEXR_ROOT_DIR=${prefix}/libexec/openexr2
+
 patchfiles          patch-macports-libs-creator.diff \
                     patch-macports-libs-platform_apple.diff \
-                    patch-unix-or-apple.diff
+                    patch-unix-or-apple.diff \
+                    patch-openvdb10.diff \
+                    patch-openimageio24.diff \
+                    patch-pythin311.diff
+
+platform darwin {
+    if {${os.major} < 16} {
+        # NSWindow.allowsAutomaticWindowTabbing is introduced at macOS 10.12
+        patchfiles-append \
+                    patch-before-macOS10.12.diff
+    }
+
+    if {${os.major} < 20} {
+        # Fix of locations at 11.4 introduced a crash before, revert it
+        patchfiles-append \
+                    patch-before-macOS11.diff
+    }
+}
 
 post-patch {
     set platform_apple.cmake \
@@ -275,9 +304,7 @@ list(APPEND USD_LIBRARIES\\
     ] {
         reinplace $re ${platform_apple.cmake}
     }
-    if {$py_ver > 3.7} {
-        reinplace -E {s/(PYTHON_VERSION.)m/\1/} ${platform_apple.cmake}
-    }
+
     reinplace "s/@@llvm_version@@/$llvm_version/g" \
         ${worksrcpath}/source/creator/CMakeLists.txt
     reinplace -E {s/(llvm-config-)/\1mp-/} \
@@ -286,10 +313,12 @@ list(APPEND USD_LIBRARIES\\
         ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
     reinplace -E "/find_program.LLVM_CONFIG llvm-config.$/s|(llvm-config)|\\1 HINTS ${prefix}/libexec/llvm-\${LLVM_VERSION}/bin|" \
         ${worksrcpath}/build_files/cmake/Modules/FindLLVM.cmake
+    reinplace -E "s|/opt/local/lib|${prefix}/libexec/llvm-\${LLVM_VERSION}|" \
+        ${worksrcpath}/build_files/cmake/Modules/FindClang.cmake
 
     # Prevent Blender's CMake scripts from attempting to set the
     # MACOSX_DEPLOYMENT_TARGET. MacPorts base already sets this.
-    reinplace {/if.CMAKE_OSX_DEPLOYMENT_TARGET/,$s/^/#/g} \
+    reinplace {/set.CMAKE_OSX_DEPLOYMENT_TARGET/,$s/^/#/g} \
         ${platform_apple_xcode.cmake}
 
     if {${os.major} >= 18} {
@@ -331,6 +360,10 @@ if {${os.major} < 16} {
     configure.objcxxflags-prepend   -isystem ${filespath}/old_appkit_compat
 }
 
+# modern compiler and legacy CoreAudio.framework leads to
+# error: non-defining declaration of enumeration with a fixed underlying type
+configure.cxxflags-append           -Wno-elaborated-enum-base
+
 # Use of the name LIBDIR in the Blender source is not a very good one,
 # since it doesn't actually point to the lib directory.
 #                         vvvvvv
@@ -371,6 +404,11 @@ configure.args-append   -DWITH_SYSTEM_GLEW=ON \
 # By default, Blender prefers static llvm build on Apple, but they state
 # that dynamic builds are also possible
 configure.args-append   -DLLVM_STATIC=OFF
+
+# MacPorts hasn't got NanoVDB from Nvidia, disable it
+configure.args-append   -DWITH_NANOVDB=OFF
+
+configure.args-append   -DTBB_ROOT_DIR=${prefix}/libexec/tbb
 
 post-destroot {
     # Make sure that an addons_contrib folder makes it into the final

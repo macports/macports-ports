@@ -327,9 +327,10 @@ proc mpi.setup {args} {
             lappend ::mpi.disabled_compilers -gcc9
         }
 
-        # Clang 15 only available on 10.7 and later
+        # Clang 15 and 16 only available on 10.7 and later
         if {${os.major} < 11} {
-            lappend ::mpi.disabled_compilers -clang15
+            lappend ::mpi.disabled_compilers \
+                -clang15 -clang16
         }
 
         if {${os.arch} eq "arm"} {

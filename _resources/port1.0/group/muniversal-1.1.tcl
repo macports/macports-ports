@@ -52,11 +52,7 @@ default muniversal.architectures {[expr {[option universal_possible] && [variant
 # procedures (pre-configure, configure, post-configure, etc.) will be run for each architecture
 # muniversal.build_arch will be set to the current architecture
 options muniversal.build_arch
-if {[option universal_possible] && [variant_isset universal]} {
-    default muniversal.build_arch {}
-} else {
-    default muniversal.build_arch {[expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}
-}
+default muniversal.build_arch {[expr {[option universal_possible] && [variant_isset universal] ? "" : [expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}]}
 
 # if yes, system can run 64-bit binaries
 options os.cpu64bit_capable

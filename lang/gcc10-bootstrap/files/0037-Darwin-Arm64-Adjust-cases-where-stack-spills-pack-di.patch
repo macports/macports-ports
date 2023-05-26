@@ -1,0 +1,128 @@
+From b8985963e30ab5efeb52d66034b2dbb1f9447334 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 23 Aug 2020 16:02:01 +0100
+Subject: [PATCH] Darwin, Arm64 : Adjust cases where stack spills pack
+ differently.
+
++ Temporary handling for complex values.
+
+Complex values with a total size less than one stack slot might
+conceivably be packed in the same manner as other small values.
+
+However, this is not done - and we need to override the process
+for them.
+
++ Don't pack small structs either.
+
+Darwinpcs doesn't mention some things - and one is small structs.
+
+These are put into regs - but, when they spill to the stack, they don't
+pack in the manner of char, int et. al.
+
++ Handle HFA cases that have packed stack layout.
+
+bleah! (not sure this is complete).
+
++ Exclude unions from packing rule.
+
++ Hide an unused function.
+
+We are not using aarch64_vfp_is_call_candidate so wrap it
+in an #ifdef.
+
++ Fix a build error.
+
+Drop an unused var.
+
+(cherry picked from commit b4b0a28a4936c0559da7c8aa5ca53dada40d6f54)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config/aarch64/aarch64.c | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index 1b57b71eab4..f25cff0d504 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -5912,6 +5912,7 @@ aarch64_return_in_memory (const_tree type, const_tree fndecl ATTRIBUTE_UNUSED)
+   gcc_unreachable ();
+ }
+ 
++#if !TARGET_MACHO
+ static bool
+ aarch64_vfp_is_call_candidate (cumulative_args_t pcum_v, machine_mode mode,
+ 			       const_tree type, int *nregs)
+@@ -5921,6 +5922,7 @@ aarch64_vfp_is_call_candidate (cumulative_args_t pcum_v, machine_mode mode,
+ 						  &pcum->aapcs_vfp_rmode,
+ 						  nregs, NULL, pcum->silent_p);
+ }
++#endif
+ 
+ /* Given MODE and TYPE of a function argument, return the alignment in
+    bits.  The idea is to suppress any stronger alignment requested by
+@@ -6064,10 +6066,18 @@ aarch64_layout_arg (cumulative_args_t pcum_v, const function_arg_info &arg)
+   size = ROUND_UP (size, UNITS_PER_WORD);
+ 
+   allocate_ncrn = (type) ? !(FLOAT_TYPE_P (type)) : !FLOAT_MODE_P (mode);
++  bool is_ha = false;
++#if !TARGET_MACHO
+   allocate_nvrn = aarch64_vfp_is_call_candidate (pcum_v,
+ 						 mode,
+ 						 type,
+ 						 &nregs);
++#else
++  allocate_nvrn = aarch64_vfp_is_call_or_return_candidate (mode, type,
++						  &pcum->aapcs_vfp_rmode,
++						  &nregs, &is_ha,
++						  pcum->silent_p);
++#endif
+   gcc_assert (!sve_p || !allocate_nvrn);
+ 
+   /* allocate_ncrn may be false-positive, but allocate_nvrn is quite reliable.
+@@ -6223,9 +6233,15 @@ on_stack:
+ 	 at the end.  When the current position is 0 - any allocation needs
+ 	 a stack slot.  CHECKME: do we need to align 16byte entities?
+ 
+-	 but we don't do this for unnamed parms in variadic functions, they
++	 but we don't do this for:
++	  * unnamed parms in variadic functions
++	  * complex types smaller than 4 bytes
+ 	 each get their own slot.  */
+-      if (!arg.named)
++      if (!arg.named
++	  || TREE_CODE (type) == COMPLEX_TYPE
++	  || (TREE_CODE (type) == RECORD_TYPE
++	      && !is_ha && !SCALAR_FLOAT_MODE_P (pcum->aapcs_vfp_rmode))
++	  || TREE_CODE (type) == UNION_TYPE)
+ 	{
+ 	  pcum->aapcs_stack_words = size / UNITS_PER_WORD;
+ 	  pcum->darwinpcs_sub_word_offset = 0;
+@@ -6316,6 +6332,7 @@ aarch64_init_cumulative_args (CUMULATIVE_ARGS *pcum,
+   pcum->darwinpcs_sub_word_offset = 0;
+   pcum->darwinpcs_sub_word_pos = 0;
+   pcum->silent_p = silent_p;
++  pcum->aapcs_vfp_rmode = VOIDmode;
+ 
+   if (!silent_p
+       && !TARGET_FLOAT
+@@ -6395,6 +6412,17 @@ aarch64_function_arg_boundary (machine_mode mode, const_tree type)
+   unsigned int alignment = aarch64_function_arg_alignment (mode, type,
+ 							   &abi_break);
+ #if TARGET_MACHO
++  /* Temporary fudge to put some non-scalar types in distinct stack slots.  */
++  machine_mode comp_mode = VOIDmode;
++  int nregs;
++  bool is_ha;
++  aarch64_vfp_is_call_or_return_candidate (mode, type, &comp_mode, &nregs,
++					   &is_ha, /*silent*/true);
++  if (TREE_CODE (type) == COMPLEX_TYPE
++      || (TREE_CODE (type) == RECORD_TYPE
++	  && !is_ha && !SCALAR_FLOAT_MODE_P (comp_mode))
++      || TREE_CODE (type) == UNION_TYPE)
++    return MIN (MAX (alignment, PARM_BOUNDARY), STACK_BOUNDARY);
+   return MIN (alignment, STACK_BOUNDARY);
+ #else
+   if (abi_break & warn_psabi)
+-- 
+2.40.1
+
