@@ -105,6 +105,11 @@ subport                     lua51 {
 # TODO: also add lua50 here
 
 set branch                  [join [lrange [split ${version} .] 0 1] .]
+if { ${subport} eq ${name} } {
+    set branch_name         ""
+} else {
+    set branch_name         ${branch}
+}
 
 use_parallel_build          no
 
@@ -140,34 +145,50 @@ if {${os.platform} eq "darwin"} {
 }
 
 build.args-append           MACPORTS_PREFIX=${prefix} \
-                            MYCFLAGS="\$CPPFLAGS \$CFLAGS" \
                             MYLDFLAGS="\$LDFLAGS" \
-                            MACPORTS_VERSION=${version}
+                            MACPORTS_VERSION=${version} \
+                            TO_LIB=liblua${branch_name}.a
 
 destroot.args-append        INSTALL_TOP=${destroot}${prefix} \
-                            MACPORTS_VERSION=${version} \
-                            INSTALL_MAN=${destroot}${prefix}/share/man/man1
+                            INSTALL_MAN=${destroot}${prefix}/share/man/man1 \
+                            TO_LIB=liblua${branch_name}.a
 
 if {${subport} ne ${name}} {
-    build.args-append       MACPORTS_SHARED_LIB=liblua${branch}.${dylib_suffix} \
-                            MACPORTS_BRANCH=${branch} \
-                            TO_LIB=liblua${branch}.a \
-                            LUA_A=liblua${branch}.a
-
-    destroot.args-append    MACPORTS_SHARED_LIB=liblua${branch}.${dylib_suffix} \
-                            INSTALL_INC=${destroot}${prefix}/include/lua${branch} \
-                            TO_LIB=liblua${branch}.a \
-                            LUA_A=liblua${branch}.a
+    build.args-append       MACPORTS_BRANCH=${branch}
+    destroot.args-append    INSTALL_INC=${destroot}${prefix}/include/lua${branch}
 } else {
-    build.args-append       MACPORTS_SHARED_LIB=liblua.${dylib_suffix} \
-                            MACPORTS_BRANCH=${compat_branch}
-
-    destroot.args-append    MACPORTS_SHARED_LIB=liblua.${dylib_suffix}
+    build.args-append       MACPORTS_BRANCH=${compat_branch}
 }
+
+makefile.override-delete    CC
+
+set proc_build              [ditem_key ${org.macports.build} procedure]
+rename                      ${proc_build} \
+                            ${proc_build}_orig
+proc ${proc_build} {{args ""}} "
+    build.args-append       CC=${configure.cxx} \
+                            MYCFLAGS=\"\\\$CPPFLAGS \\\$CXXFLAGS\" \
+                            MYLDFLAGS=\"\\\$LDFLAGS \[portconfigure::construct_cxxflags {}\]\" \
+                            LUA_A=liblua${branch_name}-c++.a \
+                            MACPORTS_SHARED_LIB=liblua${branch_name}-c++.${dylib_suffix}
+
+    ${proc_build}_orig
+
+    delete file             {*}\[glob ${worksrcpath}/src/*.o\] \
+                            ${worksrcpath}/src/lua \
+                            ${worksrcpath}/src/luac
+
+    build.args-append       CC=${configure.cc} \
+                            MYCFLAGS=\"\\\$CPPFLAGS \\\$CFLAGS\" \
+                            MYLDFLAGS=\"\\\$LDFLAGS\" \
+                            LUA_A=liblua${branch_name}.a \
+                            MACPORTS_SHARED_LIB=liblua${branch_name}.${dylib_suffix}
+    ${proc_build}_orig
+"
 
 post-destroot {
     # documentation
-    set docdir ${prefix}/share/doc/${subport}
+    set docdir              ${prefix}/share/doc/${subport}
 
     xinstall -d -m 0755     ${destroot}${docdir}
     foreach f {COPYRIGHT README} { if {[file exists ${worksrcpath}/${f}]} {
@@ -175,35 +196,44 @@ post-destroot {
                             ${destroot}${docdir}
     }}
 
-    xinstall -d -m 0755 ${destroot}${docdir}/html
+    xinstall -d -m 0755     ${destroot}${docdir}/html
     foreach f [glob -directory ${worksrcpath}/doc *.html *.css *.gif *.png] {
         xinstall -m 0644    ${f} \
                             ${destroot}${docdir}/html
     }
 
-    if {${subport} ne ${name}} {
-        set pcinfile        lua_branch.pc
-        set pcfile          lua${branch}.pc
-        set libs            ${worksrcpath}/src/liblua${branch}.${dylib_suffix}
-    } else {
-        set pcinfile        lua.pc
-        set pcfile          lua.pc
-        set libs            ${worksrcpath}/src/liblua.${dylib_suffix}
-    }
-
-    # install shared library
-    foreach f ${libs} {
+    # install shared libraries
+    foreach f [glob  ${worksrcpath}/src/*.${dylib_suffix}] {
         xinstall -m 0755    ${f} \
                             ${destroot}${prefix}/lib/
     }
 
-    # install pkgconfig file
+    # install C++ static library
+    foreach f [glob  ${worksrcpath}/src/*-c++.a] {
+        xinstall -m 0644    ${f} \
+                            ${destroot}${prefix}/lib/
+    }
+
+    if {${subport} ne ${name}} {
+        set pcinfile        lua_branch.pc
+    } else {
+        set pcinfile        lua.pc
+    }
+
+    # install pkgconfig files
     xinstall -m 0644        ${filespath}/${pcinfile} \
-                            ${destroot}${prefix}/lib/pkgconfig/${pcfile}
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}.pc
+    xinstall -m 0644        ${filespath}/${pcinfile} \
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}-c++.pc
     foreach {var val} "@BRANCH@ ${branch} @VERSION@ ${version} @PREFIX@ ${prefix}" {
         reinplace           "s|${var}|${val}|g" \
-                            ${destroot}${prefix}/lib/pkgconfig/${pcfile}
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}.pc \
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}-c++.pc
     }
+    reinplace               "s|@LANGUAGE@||g" \
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}.pc
+    reinplace               "s|@LANGUAGE@|-c++|g" \
+                            ${destroot}${prefix}/lib/pkgconfig/lua${branch_name}-c++.pc
 
     if {${subport} ne ${name}} {
         # in case port needs all lua files in one directory
@@ -222,6 +252,8 @@ post-destroot {
         xinstall -d -m 0755 ${destroot}${prefix}/libexec/${subport}/lib/pkgconfig
         ln -s               ${prefix}/lib/pkgconfig/lua${branch}.pc \
                             ${destroot}${prefix}/libexec/${subport}/lib/pkgconfig/lua.pc
+        ln -s               ${prefix}/lib/pkgconfig/lua${branch}-c++.pc \
+                            ${destroot}${prefix}/libexec/${subport}/lib/pkgconfig/lua-c++.pc
 
         xinstall -d -m 0755 ${destroot}${prefix}/libexec/${subport}/bin
         foreach f [glob -tail -directory ${destroot}${prefix}/bin *] {
