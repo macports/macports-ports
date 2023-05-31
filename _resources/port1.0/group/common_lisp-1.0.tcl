@@ -11,15 +11,23 @@
 # Produced port is stricly noarch and shouldn't contain any binary image,
 # to avoid mass revbump of ports for each update of any lisp.
 
+PortGroup                       active_variants 1.1
+
 options common_lisp.prefix
 default common_lisp.prefix      {${prefix}/share/common-lisp}
 
 options common_lisp.build
 default common_lisp.build       {${workpath}/build}
 
-options common_lisp.use_sbcl
+options common_lisp.sbcl
 # See: https://trac.macports.org/ticket/66002
-default common_lisp.use_sbcl    [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
+default common_lisp.sbcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
+
+options common_lisp.ecl
+default common_lisp.ecl         yes
+
+options common_lisp.clisp
+default common_lisp.clisp       yes
 
 categories                      lisp
 
@@ -32,14 +40,36 @@ universal_variant               no
 
 default test.run                yes
 
-proc common_lisp.add_dependencies {} {
-    if {[option common_lisp.use_sbcl]} {
+namespace eval common_lisp      {}
+
+proc common_lisp::add_dependencies {} {
+    global common_lisp.sbcl
+    global common_lisp.ecl
+    global common_lisp.clisp
+
+    if {[option common_lisp.sbcl]} {
         depends_build-delete    port:sbcl
         depends_build-append    port:sbcl
     }
+
+    if {[option common_lisp.ecl]} {
+        depends_build-delete    port:ecl
+        depends_build-append    port:ecl
+    }
+
+    if {${common_lisp.clisp} eq "threads"} {
+        if {[catch {common_lisp.clisp [active_variants clisp threads]}]} {
+            common_lisp.clisp   no
+        }
+    }
+
+    if {[option common_lisp.clisp]} {
+        depends_build-delete    port:clisp
+        depends_build-append    port:clisp
+    }
 }
 
-port::register_callback common_lisp.add_dependencies
+port::register_callback common_lisp::add_dependencies
 
 build {
     file delete -force ${common_lisp.build}/source
@@ -54,10 +84,8 @@ build {
         ln -sf ../source/${subport}/$f ${common_lisp.build}/system/$f
     }
 
-    if {[option common_lisp.use_sbcl]} {
-        foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-            common_lisp.sbcl_load "load-op" [string range ${item} 0 end-4]
-        }
+    foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
+        common_lisp::asdf_operate "load-op" [string range ${item} 0 end-4]
     }
  }
 
@@ -74,28 +102,67 @@ test {
         return
     }
 
-    if {[option common_lisp.use_sbcl]} {
-        foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-            common_lisp.sbcl_load "test-op" [string range ${item} 0 end-4]
-        }
+    foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
+        common_lisp::asdf_operate "test-op" [string range ${item} 0 end-4]
     }
 }
 
-proc common_lisp.sbcl_load {op name} {
-    global workpath prefix common_lisp.build common_lisp.prefix
+proc common_lisp::asdf_operate {op name} {
+    global common_lisp.sbcl
+    global common_lisp.ecl
+    global common_lisp.clisp
 
-    ui_info "Execute ${op} at ${name} by SBCL"
+    if {[option common_lisp.sbcl]} {
+        common_lisp::sbcl_asdf_operate ${op} ${name}
+    }
+
+    if {[option common_lisp.ecl]} {
+        common_lisp::ecl_asdf_operate ${op} ${name}
+    }
+
+    if {[option common_lisp.clisp]} {
+        common_lisp::clisp_asdf_operate ${op} ${name}
+    }
+}
+
+proc common_lisp::sbcl_asdf_operate {op name} {
+    global prefix
+    ui_info "Execute asdf:${op} at ${name} by SBCL"
+
+    common_lisp::run "${prefix}/bin/sbcl --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name}
+}
+
+proc common_lisp::ecl_asdf_operate {op name} {
+    global prefix
+    ui_info "Execute asdf:${op} at ${name} by ECL"
+
+    common_lisp::run "${prefix}/bin/ecl -q" "--eval" ${op} ${name}
+}
+
+proc common_lisp::clisp_asdf_operate {op name} {
+    global prefix
+    ui_info "Execute asdf:${op} at ${name} by CLISP"
+
+    common_lisp::run "${prefix}/bin/clisp --quiet --quiet" "-x" ${op} ${name}
+}
+
+proc common_lisp::run {lisp eval_arg op name} {
+    global workpath common_lisp.build common_lisp.prefix
 
     set lisp-system-path "#p\"${common_lisp.prefix}/system/\""
     set lisp-build-system-path "#p\"${common_lisp.build}/system/\""
 
-    set loadcmd ${prefix}/bin/sbcl
+    set loadcmd ${lisp}
 
-    append loadcmd " --no-userinit "
-    append loadcmd " --non-interactive"
-    append loadcmd " --eval '(require \"asdf\")'"
-    append loadcmd " --eval '(setf asdf:*central-registry* (list* (quote *default-pathname-defaults*) ${lisp-build-system-path} ${lisp-system-path} asdf:*central-registry*))'"
-    append loadcmd " --eval '(asdf:operate (quote asdf:${op}) (quote ${name}))'"
+    append loadcmd " ${eval_arg} '(require \"asdf\")'"
+    append loadcmd " ${eval_arg} '(setf asdf:*central-registry* (list* (quote *default-pathname-defaults*) ${lisp-build-system-path} ${lisp-system-path} asdf:*central-registry*))'"
+    append loadcmd " ${eval_arg} '(asdf:operate (quote asdf:${op}) (quote ${name}))'"
 
-    system -W ${workpath} "${loadcmd}"
+    set tempdir [mkdtemp "/tmp/common_lisp.XXXXXXXX"]
+    if { ! [catch {system -W ${tempdir} "${loadcmd} 2>&1"}] } {
+        file delete -force ${tempdir}
+    } else {
+        file delete -force ${tempdir}
+        return -code error "asdf:${op} cannot be executed"
+    }
 }
