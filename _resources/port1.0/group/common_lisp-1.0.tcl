@@ -19,9 +19,11 @@ default common_lisp.prefix      {${prefix}/share/common-lisp}
 options common_lisp.build
 default common_lisp.build       {${workpath}/build}
 
+options common_lisp.threads
+default common_lisp.threads     no
+
 options common_lisp.sbcl
-# See: https://trac.macports.org/ticket/66002
-default common_lisp.sbcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
+default common_lisp.sbcl        yes
 
 options common_lisp.ecl
 default common_lisp.ecl         yes
@@ -57,12 +59,6 @@ proc common_lisp::add_dependencies {} {
         depends_build-append    port:ecl
     }
 
-    if {${common_lisp.clisp} eq "threads"} {
-        if {[catch {common_lisp.clisp [active_variants clisp threads]}]} {
-            common_lisp.clisp   no
-        }
-    }
-
     if {[option common_lisp.clisp]} {
         depends_build-delete    port:clisp
         depends_build-append    port:clisp
@@ -70,6 +66,40 @@ proc common_lisp::add_dependencies {} {
 }
 
 port::register_callback common_lisp::add_dependencies
+
+proc common_lisp::respect_threads_support {} {
+    global common_lisp.sbcl
+    global common_lisp.ecl
+    global common_lisp.clisp
+
+    if {[option common_lisp.threads] && [option common_lisp.sbcl]} {
+        common_lisp.sbcl    no
+
+        catch {common_lisp.sbcl [active_variants sbcl threads]}
+
+        if {![option common_lisp.sbcl]} {
+            catch {common_lisp.sbcl [active_variants sbcl fancy]}
+        }
+
+        if {![option common_lisp.sbcl]} {
+            ui_debug "Exclude SBCL because it doesn't support threads"
+        }
+    }
+
+    if {[option common_lisp.threads] && [option common_lisp.clisp]} {
+        common_lisp.clisp   no
+
+        catch {common_lisp.clisp [active_variants clisp threads]}
+
+        if {![option common_lisp.clisp]} {
+            ui_debug "Exclude CLISP because it doesn't support threads"
+        }
+    }
+}
+
+pre-build {
+    common_lisp::respect_threads_support
+}
 
 build {
     file delete -force ${common_lisp.build}/source
