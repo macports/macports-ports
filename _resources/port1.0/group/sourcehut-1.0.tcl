@@ -40,8 +40,7 @@ proc sourcehut.setup {srht_author srht_project srht_version {srht_tag_prefix ""}
     git.url                 ${sourcehut.homepage}
     git.branch              [join ${sourcehut.tag_prefix}]${sourcehut.version}[join ${sourcehut.tag_suffix}]
     default master_sites    {${sourcehut.master_sites}}
-    default distname        {${git.branch}}
-    default worksrcdir      {${sourcehut.project}-${git.branch}}
+    distname                [join ${sourcehut.tag_prefix}]${sourcehut.version}[join ${sourcehut.tag_suffix}]
 
     # If the version is composed entirely of hex characters, and is at least 7
     # characters long, and is not exactly 8 decimal digits (which might be a

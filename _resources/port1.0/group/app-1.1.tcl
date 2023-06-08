@@ -505,7 +505,7 @@ proc app::write_launch_script {executable app_destination} {
     global prefix
     set launch_script [open ${app_destination} w]
 
-    puts ${launch_script} "#!/bin/sh
+    puts ${launch_script} "#!/bin/bash
 export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
 exec [shellescape ${executable}]
 "

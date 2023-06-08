@@ -41,10 +41,6 @@ default muniversal.dont_diff {}
 options muniversal.combine
 default muniversal.combine  {}
 
-# list of file names whose contents are equivalent but not byte by byte the same
-options muniversal.equivalent
-default muniversal.equivalent {}
-
 ##########################################################################################
 # utilites
 ##########################################################################################
@@ -56,7 +52,11 @@ default muniversal.architectures {[expr {[option universal_possible] && [variant
 # procedures (pre-configure, configure, post-configure, etc.) will be run for each architecture
 # muniversal.build_arch will be set to the current architecture
 options muniversal.build_arch
-default muniversal.build_arch {[expr {[option universal_possible] && [variant_isset universal] ? "" : [expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}]}
+if {[option universal_possible] && [variant_isset universal]} {
+    default muniversal.build_arch {}
+} else {
+    default muniversal.build_arch {[expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}
+}
 
 # if yes, system can run 64-bit binaries
 options os.cpu64bit_capable
@@ -368,7 +368,7 @@ proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
 #    merger_dont_diff: list of files for which diff ${diffFormat} will not merge correctly
 #      merger_combine: list of files whose different contents just need to be interlaced
 #          diffFormat: format used by diff to merge two text files
-proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff merger_combine merger_equivalent diffFormat} {
+proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff merger_combine diffFormat} {
     set dir1  ${base1}/${prefixDir}
     set dir2  ${base2}/${prefixDir}
     set dir   ${base}/${prefixDir}
@@ -412,7 +412,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                 }
             } elseif { [file isdirectory ${dir1}/${fl}] } {
                 # files are directories (but not links), so recursively call function
-                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${merger_combine} ${merger_equivalent} ${diffFormat}
+                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${merger_combine} ${diffFormat}
             } else {
                 # files are neither directories nor links
                 if { ! [catch {system "/usr/bin/cmp -s \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
@@ -452,10 +452,6 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                             set diffFormatCombine {--old-group-format='%<' --new-group-format='%>' --unchanged-group-format='%=' --changed-group-format='%<%>'}
                             ui_debug "universal: merge: created ${prefixDir}/${fl} by combining ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
                             system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormatCombine} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
-                        } elseif {"${prefixDir}/${fl}" in ${merger_equivalent}} {
-                            # user has specified that contents  are equivalent even though they are not byte by byte the same
-                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} the differences have been marked as trivial"
-                            copy ${dir1}/${fl} ${dir}
                         } else {
                             # files could not be merged into a fat binary
                             # handle known file types
@@ -984,8 +980,7 @@ rename portdestroot::destroot_finish portdestroot::destroot_finish_real
 proc portdestroot::destroot_finish {args} {
     global  workpath \
             muniversal.dont_diff \
-            muniversal.combine \
-            muniversal.equivalent
+            muniversal.combine
 
     # GNU diff can merge two C/C++ files
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
@@ -1026,10 +1021,10 @@ proc portdestroot::destroot_finish {args} {
 %>#endif
 '}
 
-    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatProc}
-    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatArmElse}
+    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatProc}
+    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${diffFormatArmElse}
 
     portdestroot::destroot_finish_real ${args}
 }

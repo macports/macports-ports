@@ -42,7 +42,7 @@ proc octave.set_module {opt action args} {
     }
 }
 
-default categories   "octave math science"
+default categories   "math science"
 default master_sites [list sourceforge:project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases \
                         sourceforge:octave]
 default distname     {${octave.module}-${version}}
@@ -88,9 +88,6 @@ post-extract {
 
     if {[exec /bin/ls ${workpath} | grep -v -E "^\\." | awk "END \{print NR\}"] == 2} {
         delete ${workpath}/${octave.module}
-        move [glob ${workpath}/*-*] ${workpath}/${octave.module}
-    }
-    if {[exec /bin/ls ${workpath} | grep -c "-"] == 2 && ![string match [glob ${workpath}/*-*] ${workpath}/${octave.module}]} {
         move [glob ${workpath}/*-*] ${workpath}/${octave.module}
     }
 
