@@ -18,11 +18,12 @@
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
 
-options java.version java.home java.fallback
+options java.version java.home java.fallback java.deptypes
 
 default java.version  {}
 default java.home     {}
-default java.fallback {}
+default java.fallback {[java::java_get_default_fallback]}
+default java.deptypes lib
 
 # allow PortGroup to be used inside a variant (e.g. octave)
 global java_version_not_found
@@ -125,10 +126,26 @@ namespace eval java {
         # Add dependency if required
         if { ${java_version_not_found} && ${java.fallback} ne "" } {
             ui_debug "Adding dependency on JDK fallback ${java.fallback}"
-            depends_lib-append port:${java.fallback}
+            foreach deptype [option java.deptypes] {
+                depends_${deptype}-append port:${java.fallback}
+            }
         }
 
         return $home_value
+    }
+
+    proc java_get_default_fallback {} {
+        global os.major java.version
+        if {[option os.platform] eq "darwin"} {
+            if {${os.major} >= 18 && [vercmp ${java.version} < 18]} {
+                return openjdk17
+            } elseif {${os.major} >= 15 && [vercmp ${java.version} < 12]} {
+                return openjdk11
+            } elseif {${os.major} >= 11 && [vercmp ${java.version} < 9]} {
+                return openjdk8
+            }
+        }
+        return {}
     }
 
     proc java_set_env {} {
@@ -162,6 +179,7 @@ namespace eval java {
             # %3=0 -> Regex match, ignored.
             # %3=1 -> Version
             # %3=2 -> JAVA_HOME.
+            set version_path_dict {}
             for {set idx 0} {$idx < [llength $vm_versions]} {incr idx 3} {
                 set vers [lindex $vm_versions $idx+1]
                 # Normalize version 1.x -> x
@@ -169,7 +187,15 @@ namespace eval java {
                 # Extract major version
                 set vers [regsub {(\.\d+)+} $vers ""]
                 set path [lindex $vm_versions $idx+2]
-                dict append version_path_dict $vers $path
+                # Note, using [dict set ...] here instead of [dict append ...] to handle scenario the
+                # system could have multiple installations of the JVM for exactly the same version.
+                # See e.g. https://github.com/macports/macports-ports/pull/16149
+                # where it was found this could happen with the CI tests.
+                # By using 'dict set' instead you get the last value encountered...
+                if { [dict exists $version_path_dict $vers] } {
+                    ui_debug "java-portgroup: Found multiple installations for JVM $vers"
+                }
+                dict set version_path_dict $vers $path
             }
         } else {
             set details [dict get $options -errorcode]

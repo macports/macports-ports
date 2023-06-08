@@ -6,12 +6,14 @@ PortGroup           xcodeversion 1.0
 PortGroup           active_variants 1.1
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           legacysupport 1.1
+PortGroup           meson 1.0
+PortGroup           debug 1.0
 
 name                gtk3
 conflicts           gtk3-devel
 set my_name         gtk3
-version             3.24.34
-revision            2
+version             3.24.38
+revision            0
 epoch               1
 
 set proj_name       gtk+
@@ -22,46 +24,63 @@ maintainers         {mascguy @mascguy} openmaintainer
 platforms           darwin
 
 description         GTK+ widget toolkit
-
 long_description    GTK+ is a highly usable, feature-rich toolkit for creating graphical user \
                     interfaces, which boasts cross-platform compatibility and an easy-to-use \
                     API. GTK+ is written in C, but has bindings to many other popular \
                     programming languages, such as C++, Python and C#, among others.
-
 homepage            http://www.gtk.org/
+
 distname            ${proj_name}-${version}
 dist_subdir         ${my_name}
 use_xz              yes
 master_sites        gnome:sources/${proj_name}/${branch}/
 
-checksums           rmd160  2060a89575f9adf938bf91e4f06935ea619f7577 \
-                    sha256  dbc69f90ddc821b8d1441f00374dc1da4323a2eafa9078e61edbe5eeefa852ec \
-                    size    21587592
+checksums           rmd160  4b48beab01bc1337c5e5120a68c390ab95e9af16 \
+                    sha256  ce11decf018b25bdd8505544a4f87242854ec88be054d9ade5f3a20444dd8ee7 \
+                    size    12398104
 
 minimum_xcodeversions {9 3.1}
 
-depends_build       port:gtk-doc \
+depends_build-append \
+                    port:gtk-doc \
                     path:bin/pkg-config:pkgconfig
 
-depends_lib         port:atk \
-                    path:lib/pkgconfig/pango.pc:pango \
+depends_lib-append \
+                    port:atk \
                     path:lib/pkgconfig/gdk-pixbuf-2.0.pc:gdk-pixbuf2 \
                     path:lib/pkgconfig/glib-2.0.pc:glib2 \
                     path:lib/pkgconfig/gobject-introspection-1.0.pc:gobject-introspection \
-                    port:libepoxy
+                    path:lib/pkgconfig/harfbuzz.pc:harfbuzz \
+                    port:iso-codes \
+                    port:libepoxy \
+                    path:lib/pkgconfig/pango.pc:pango
 
 # mesa required to configure both +x11, +quartz (not just +x11) due to their dependency on libepoxy
 depends_lib-append  port:mesa
                     
-depends_run         port:shared-mime-info \
+depends_run-append \
+                    port:shared-mime-info \
                     port:hicolor-icon-theme
+
+compiler.cxx_standard 2011
 
 # darwin 10 and earlier requires legacy support for O_CLOEXEC
 legacysupport.newest_darwin_requires_legacy 10
 
-# use autoreconf to deal with dependency tracking issues in configure
-use_autoreconf      yes
-autoreconf.args     -fvi
+# Upstream disables X11 for macOS; disable that behavior
+patchfiles-append   patch-meson.build-x11-enabled.diff
+
+# Quartz patch to fix QuartzCore linking and compiling with 10.11
+# Upstream merge request: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/4298
+patchfiles-append   patch-quartz-calayer-contentsformat.diff
+
+# Quartz patch to eliminate hard-coded use of NSEventTypeApplicationDefined
+# Upstream merge request: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5958
+patchfiles-append   patch-quartz-nseventtype.diff
+
+# Quartz patch to make CoreGraphics optional; not available for 10.7 and earlier
+# Upstream merge request: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5959
+patchfiles-append   patch-quartz-meson-appleframeworks.diff
 
 # gtk3 +quartz uses instancetype which is not available
 # before approximately Xcode 4.6 (#49391)
@@ -83,11 +102,6 @@ if {${universal_possible} && [variant_isset universal]} {
         lappend merger_destroot_args(${arch})  CC='${configure.cc} -arch ${arch}'
         lappend merger_destroot_args(${arch})  CC_FOR_BUILD='${configure.cc} -arch ${arch}'
     }
-} else {
-    build.args-append       CC="${configure.cc} ${configure.cc_archflags}" \
-                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
-    destroot.args-append    CC="${configure.cc} ${configure.cc_archflags}" \
-                            CC_FOR_BUILD="${configure.cc} ${configure.cc_archflags}"
 }
 
 pre-configure {
@@ -96,31 +110,26 @@ pre-configure {
     }
 }
 
-configure.ccache    no
-
 configure.cppflags-append \
                     -DX_LOCALE
 
 configure.cflags-append \
                     -fstrict-aliasing
 
-configure.args      --enable-static \
-                    --disable-glibtest \
-                    --enable-introspection \
-                    --disable-wayland-backend \
-                    --disable-schemas-compile \
-                    gio_can_sniff=yes
-
-build.args-append   V=1 \
-                    CPP_FOR_BUILD="${configure.cpp}"
-
-test.run            yes
-test.target         check
+configure.args-append \
+                    -Dtests=false \
+                    -Dgtk_doc=false \
+                    -Dman=true \
+                    -Dintrospection=true \
+                    -Ddemos=false \
+                    -Dexamples=false \
+                    -Dprofiler=false \
+                    -Dwayland_backend=false
 
 post-destroot {
     set docdir ${prefix}/share/doc/${name}
     xinstall -d ${destroot}${docdir}
-    xinstall -m 644 -W ${worksrcpath} AUTHORS COPYING HACKING NEWS README \
+    xinstall -m 644 -W ${worksrcpath} CONTRIBUTING.md COPYING NEWS README.md \
         ${destroot}${docdir}
 
     # avoid conflict with the gtk-update-icon-cache installed by gtk2
@@ -137,16 +146,9 @@ post-destroot {
 
 platform darwin {
     if {${os.major} <= 8} {
-        # The rules enabled by gobject-introspection require GNU make 3.81+
-        depends_build-append    port:gmake
-        build.cmd               ${prefix}/bin/gmake
-
         if {[variant_isset quartz] || ![variant_isset x11]} {
             configure.ldflags-append  -framework Cocoa -framework Carbon
         }
-
-        # https://trac.macports.org/ticket/63151
-        configure.args-append --disable-dependency-tracking
     }
 
     if {${os.major} <= 10} {
@@ -155,9 +157,16 @@ platform darwin {
             patchfiles-append   patch-gdk_quartz_gdkcursor-quartz-10_6_compat.diff
         }
     }
+
+    if {${os.major} <= 11} {
+        # Drop linking to 'CoreGraphics', not available for 10.7 and earlier
+        patchfiles-append patch-quartz-disable-coregraphics.diff
+    }
+
     if {${os.major} <= 12} {
         # requires cups 1.7
-        configure.args-append --disable-cups
+        configure.args-append \
+            -Dprint_backends=file,lpr,test
     }
 }
 
@@ -236,30 +245,54 @@ if {${universal_possible} && [variant_isset universal]} {
     configure.cc "${configure.cc} ${configure.cc_archflags}"
 }
 
+variant tests description {Enable tests} {
+    configure.args-replace \
+                            -Dtests=false \
+                            -Dtests=true
+
+    test.run                yes
+    test.target             test
+}
+
+variant demos description {Build demos and examples} {
+    configure.args-replace \
+                            -Ddemos=false \
+                            -Ddemos=true
+    configure.args-replace \
+                            -Dexamples=false \
+                            -Dexamples=true
+}
+
 variant quartz conflicts x11 {
     require_active_variants path:lib/pkgconfig/cairo.pc:cairo quartz
     require_active_variants path:lib/pkgconfig/pango.pc:pango quartz
 
-    configure.args-append   --enable-quartz-backend
+    configure.args-append \
+                            -Dx11_backend=false \
+                            -Dquartz_backend=true \
+                            -Dxinerama=no
 }
 
 variant x11 conflicts quartz {
     require_active_variants path:lib/pkgconfig/cairo.pc:cairo x11
     require_active_variants path:lib/pkgconfig/pango.pc:pango x11
 
-    depends_lib-append      port:xorg-libXi \
+    depends_lib-append \
+                            port:at-spi2-atk \
+                            port:fontconfig \
+                            port:libxkbcommon-x11 \
+                            port:xorg-libXi \
                             port:xorg-libXrandr \
                             port:xorg-libXcursor \
                             port:xorg-libXinerama \
                             port:xorg-libXdamage \
                             port:xorg-libXcomposite \
-                            port:xorg-libXfixes \
-                            port:at-spi2-atk
+                            port:xorg-libXfixes
 
-    configure.args-append   --enable-xinerama \
-                            --x-include=${prefix}/include \
-                            --x-lib=${prefix}/lib \
-                            --enable-x11-backend
+    configure.args-append \
+                            -Dx11_backend=true \
+                            -Dquartz_backend=false \
+                            -Dxinerama=yes
 }
 
 if {![variant_isset quartz]} {

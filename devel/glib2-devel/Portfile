@@ -6,41 +6,39 @@ PortGroup                   clang_dependency 1.0
 PortGroup                   meson 1.0
 PortGroup                   muniversal 1.0
 
-# to get past the aligned memory access error
-PortGroup                   legacysupport 1.1
-
 # Please keep the glib2 and glib2-devel ports as similar as possible.
 
 name                        glib2-devel
-conflicts                   glib2 glib2-upstream
+conflicts                   glib2
 set my_name                 glib
-version                     2.72.3
+version                     2.76.3
 revision                    0
-checksums                   rmd160  a2432f98501fe132d14e5ae1c44367d4030529c4 \
-                            sha256  4a39a2f624b8512d500d5840173eda7fa85f51c109052eae806acece85d345f0 \
-                            size    4893484
+epoch                       0
+checksums                   rmd160  dfaaaddce999a7ae6531f26ecc899ca9a6d04ffc \
+                            sha256  c0be444e403d7c3184d1f394f89f0b644710b5e9331b54fa4e8b5037813ad32a \
+                            size    5273460
 
 set branch                  [join [lrange [split ${version} .] 0 1] .]
 categories                  devel
 maintainers                 {mascguy @mascguy} openmaintainer
 license                     LGPL-2+
 homepage                    https://wiki.gnome.org/Projects/GLib
-platforms                   darwin
 dist_subdir                 glib2
 distname                    ${my_name}-${version}
 use_xz                      yes
 use_parallel_build          yes
 
 description                 Library with data structure functions and other constructs
-
 long_description            Glib is a library which includes support routines \
                             for C, such as lists, trees, hashes, memory \
                             allocation, and many other things.
 
 master_sites                gnome:sources/${my_name}/${branch}/
 
-patchfiles                  libintl.patch \
+patchfiles-append           libintl.patch \
                             patch-gio-tests-meson.build.diff \
+                            patch-glib_gmem.c.diff \
+                            patch-glib_gspawn.c.diff \
                             patch-glib_gunicollate.c.diff \
                             patch-gio_xdgmime_xdgmime.c.diff \
                             patch-get-launchd-dbus-session-address.diff \
@@ -51,11 +49,6 @@ patchfiles                  libintl.patch \
                             universal.patch \
                             patch-glib2-findfolders-before-SL.diff \
                             patch-declarations.diff
-
-# patch for old gccs not accepting pragmas inside functions
-if {[string match *gcc* ${configure.compiler}]} {
-    patchfiles-append       patch-glib2-pragmas-old-gcc.diff
-}
 
 platform darwin {
     if {${os.major} < 11} {
@@ -73,19 +66,21 @@ depends_build-append        port:gettext \
                             bin:xmllint:libxml2 \
                             port:pkgconfig
 
-set py_ver                  3.10
+set py_ver                  3.11
 set py_ver_nodot            [string map {. {}} ${py_ver}]
 
-depends_lib                 port:gettext-runtime \
+depends_lib-append          port:gettext-runtime \
                             port:libffi \
                             port:libiconv \
-                            port:pcre \
+                            port:pcre2 \
                             port:python${py_ver_nodot} \
                             port:zlib
 
 # Python only needed for scripts
 depends_skip_archcheck-append \
                             python${py_ver_nodot}
+
+compiler.cxx_standard       2011
 
 if {[vercmp ${macosx_deployment_target} 10.9] < 0} {
     # fatal error: error in backend: Cannot select: 0x103357f10: i8,ch = AtomicLoad 0x10334b410, 0x103354b10<Volatile LD1[@is_running.b]> [ID=18]
@@ -123,10 +118,31 @@ if {${universal_possible} && [variant_isset universal]} {
 }
 
 post-patch {
-    reinplace -W ${worksrcpath} "s|@PYTHON@|${configure.python}|" meson.build
-    reinplace -W ${worksrcpath} "s|@PREFIX@|${prefix}|g" gio/xdgmime/xdgmime.c glib/gi18n-lib.h glib/gi18n.h gio/gdbusaddress.c
-    reinplace "s|data_dirs = \"/usr|data_dirs = \"${prefix}/share:/usr|g" ${worksrcpath}/glib/gutils.c
-    reinplace "s|path = \"/bin|path = \"${prefix}/bin:/bin|g" ${worksrcpath}/glib/gutils.c ${worksrcpath}/glib/gspawn.c
+    reinplace -W ${worksrcpath} "s|@PYTHON@|${configure.python}|" \
+        meson.build
+
+    reinplace -W ${worksrcpath} "s|@PREFIX@|${prefix}|g" \
+        gio/xdgmime/xdgmime.c \
+        glib/gi18n-lib.h \
+        glib/gi18n.h \
+        gio/gdbusaddress.c
+
+    reinplace -W ${worksrcpath} "s|data_dirs = \"/usr|data_dirs = \"${prefix}/share:/usr|g" \
+        glib/gutils.c
+
+    reinplace -W ${worksrcpath} "s|path = \"/bin|path = \"${prefix}/bin:/bin|g" \
+        glib/gutils.c \
+        glib/gspawn.c
+
+    # Upstream mixes three variations of Python shebangs, so account for all
+    fs-traverse f ${worksrcpath} {
+        if {[string match *.py ${f}]} {
+            ui_info "patching testpath: ${f}"
+            reinplace -q "s|/usr/bin/python3$|${configure.python}|" ${f}
+            reinplace -q "s|/usr/bin/env python$|${configure.python}|" ${f}
+            reinplace -q "s|/usr/bin/env python3$|${configure.python}|" ${f}
+        }
+    }
 }
 
 # this edit does not, for some reason, apply against the build-arm64 config.h
@@ -162,7 +178,7 @@ post-destroot {
 
     set docdir ${prefix}/share/doc/${my_name}
     xinstall -d ${destroot}${docdir}
-    xinstall -m 0644 -W ${worksrcpath} AUTHORS COPYING HACKING NEWS README.md \
+    xinstall -m 0644 -W ${worksrcpath} COPYING NEWS README.md \
         ${destroot}${docdir}
 }
 
@@ -176,6 +192,9 @@ platform darwin {
 }
 
 platform darwin 8 {
+    # https://trac.macports.org/ticket/67307
+    configure.cflags-append -D__DARWIN_NON_CANCELABLE=1
+
     # meson on Tiger cannot use rpaths, so we workaround with this to find dylibs
     foreach my_phase {build test destroot} {
         ${my_phase}.env-append  "DYLD_LIBRARY_PATH=${build_dir}/glib:${build_dir}/gobject:${build_dir}/gio:${build_dir}/gthread:${build_dir}/gmodule"

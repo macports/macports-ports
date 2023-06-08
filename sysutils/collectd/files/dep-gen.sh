@@ -186,7 +186,6 @@ PLUGIN_DEPS=(
 	[dns]="port:libpcap"
 	[gmond]="port:ganglia"
 	[log_logstash]="port:yajl"
-	[lua]="port:lua"
 	[memcachec]="port:libmemcached"
 	[memcached]="port:libmemcached"
 	[mysql]="path:lib/mysql5/mysql/libmysqlclient.dylib:mysql5"
@@ -323,6 +322,14 @@ OSX_STANDARD=(
 	write_http
 )
 
+declare -A EXTRA_PRE_CODE
+read -r -d '' LUA_PRE_EXTRA <<'EOF'
+    PortGroup lua 1.0
+EOF
+EXTRA_PRE_CODE=(
+	[lua]="$LUA_PRE_EXTRA"
+)
+
 declare -A EXTRA_CODE
 read -r -d '' PERL_EXTRA <<'EOF'
     configure.args-append --with-perl=${prefix}/bin/perl5.26
@@ -373,8 +380,12 @@ echo
 for plugin in $(printf "%s\n" ${!PLUGINS[@]} | sort); do
 	if [ -z "${OSX_BLACKLIST[$plugin]}" ]; then
 		printf "variant %s description {%s} {\n" "$plugin" "${PLUGINS[$plugin]}"
-		printf "    configure.args-delete --disable-$plugin\n"
-		printf "    configure.args-append --enable-$plugin\n"
+		if [ -n "${EXTRA_PRE_CODE[$plugin]}" ]; then
+			echo "    ${EXTRA_PRE_CODE[$plugin]}"
+			echo
+		fi
+		printf "    configure.args-replace  --disable-$plugin \\\\\n"
+		printf "                            --enable-$plugin\n"
 		if [ -n "${EXTRA_CODE[$plugin]}" ]; then
 			echo
 			echo "    ${EXTRA_CODE[$plugin]}"

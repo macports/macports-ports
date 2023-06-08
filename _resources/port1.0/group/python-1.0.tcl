@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "no")
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", or "poetry"
+#   "flit", "hatch", "poetry", or "maturin"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -138,47 +138,68 @@ proc python_set_versions {option action args} {
     }
     if {[info exists addcode] && ![info exists python._addedcode]} {
         pre-build {
-            set pycflags ""
-            set pycxxflags ""
-            set pyobjcflags ""
+            foreach var {pycflags pycxxflags pyf77flags pyf90flags pyfcflags pyobjcflags pyldflags} {
+                set $var [list]
+            }
+            if {${python.add_cflags}} {
+                lappend pycflags {*}${configure.cflags}
+                lappend pyobjcflags {*}${configure.objcflags}
+            }
+            if {${python.add_cxxflags}} {
+                lappend pycxxflags {*}${configure.cxxflags}
+            }
+            if {${python.add_fflags}} {
+                lappend pyf77flags {*}${configure.fflags}
+                lappend pyf90flags {*}${configure.f90flags}
+                lappend pyfcflags {*}${configure.fcflags}
+            }
+            if {${python.add_ldflags}} {
+                lappend pyldflags {*}${configure.ldflags}
+            }
             if {${python.add_archflags}} {
                 if {[variant_exists universal] && [variant_isset universal]} {
-                    build.env-append    LDFLAGS=${configure.universal_ldflags}
-                    set pycflags ${configure.universal_cflags}
-                    set pycxxflags ${configure.universal_cxxflags}
-                    set pyobjcflags ${configure.universal_cflags}
+                    lappend pyldflags {*}${configure.universal_ldflags}
+                    lappend pycflags {*}${configure.universal_cflags}
+                    lappend pycxxflags {*}${configure.universal_cxxflags}
+                    lappend pyobjcflags {*}${configure.universal_cflags}
                 } else {
-                    build.env-append    FFLAGS=${configure.f77_archflags} \
-                                        F90FLAGS=${configure.f90_archflags} \
-                                        FCFLAGS=${configure.fc_archflags} \
-                                        LDFLAGS=${configure.ld_archflags}
-                    set pycflags ${configure.cc_archflags}
-                    set pycxxflags ${configure.cxx_archflags}
-                    set pyobjcflags ${configure.objc_archflags}
+                    lappend pyf77flags {*}${configure.f77_archflags}
+                    lappend pyf90flags {*}${configure.f90_archflags}
+                    lappend pyfcflags  {*}${configure.fc_archflags}
+                    lappend pyldflags {*}${configure.ld_archflags}
+                    lappend pycflags {*}${configure.cc_archflags}
+                    lappend pycxxflags {*}${configure.cxx_archflags}
+                    lappend pyobjcflags {*}${configure.objc_archflags}
                 }
             }
             if {${python.set_cxx_stdlib}} {
                 set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
             }
             if {${python.set_sdkroot}} {
-                if {${configure.sdkroot} ne ""} {
-                    append pycflags " -isysroot${configure.sdkroot}"
-                    append pycxxflags " -isysroot${configure.sdkroot}"
-                    append pyobjcflags " -isysroot${configure.sdkroot}"
-                } else {
-                    append pycflags " -isysroot/"
-                    append pycxxflags " -isysroot/"
-                    append pyobjcflags " -isysroot/"
-                }
+                lappend pycflags -isysroot${configure.sysroot}
+                lappend pycxxflags -isysroot${configure.sysroot}
+                lappend pyobjcflags -isysroot${configure.sysroot}
             }
             if {$pycflags ne ""} {
-                build.env-append        CFLAGS=$pycflags
+                build.env-append        CFLAGS=[join $pycflags]
             }
             if {$pycxxflags ne ""} {
-                build.env-append        CXXFLAGS=$pycxxflags
+                build.env-append        CXXFLAGS=[join $pycxxflags]
             }
             if {$pyobjcflags ne ""} {
-                build.env-append        OBJCFLAGS=$pyobjcflags
+                build.env-append        OBJCFLAGS=[join $pyobjcflags]
+            }
+            if {$pyf77flags ne ""} {
+                build.env-append        FFLAGS=[join $pyf77flags]
+            }
+            if {$pyf90flags ne ""} {
+                build.env-append        F90FLAGS=[join $pyf90flags]
+            }
+            if {$pyfcflags ne ""} {
+                build.env-append        FCFLAGS=[join $pyfcflags]
+            }
+            if {$pyldflags ne ""} {
+                build.env-append        LDFLAGS=[join $pyldflags]
             }
             if {${python.set_compiler}} {
                 # compiler_wrapper portgroup support
@@ -198,60 +219,83 @@ proc python_set_versions {option action args} {
             }
         }
         pre-destroot {
-            set pycflags ""
-            set pycxxflags ""
-            set pyobjcflags ""
-            if {${python.add_archflags} && ${python.consistent_destroot}} {
-                if {[variant_exists universal] && [variant_isset universal]} {
-                    destroot.env-append LDFLAGS=${configure.universal_ldflags}
-                    set pycflags ${configure.universal_cflags}
-                    set pycxxflags ${configure.universal_cxxflags}
-                    set pyobjcflags ${configure.universal_cflags}
-                } else {
-                    destroot.env-append FFLAGS=${configure.f77_archflags} \
-                                        F90FLAGS=${configure.f90_archflags} \
-                                        FCFLAGS=${configure.fc_archflags} \
-                                        LDFLAGS=${configure.ld_archflags}
-                    set pycflags ${configure.cc_archflags}
-                    set pycxxflags ${configure.cxx_archflags}
-                    set pyobjcflags ${configure.objc_archflags}
+            if {!${python.pep517} && ${python.consistent_destroot}} {
+                foreach var {pycflags pycxxflags pyf77flags pyf90flags pyfcflags pyobjcflags pyldflags} {
+                    set $var [list]
                 }
-            }
-            if {${python.set_cxx_stdlib} && ${python.consistent_destroot}} {
-                set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
-            }
-            if {${python.set_sdkroot} && ${python.consistent_destroot}} {
-                if {${configure.sdkroot} ne ""} {
-                    append pycflags " -isysroot${configure.sdkroot}"
-                    append pycxxflags " -isysroot${configure.sdkroot}"
-                    append pyobjcflags " -isysroot${configure.sdkroot}"
-                } else {
-                    append pycflags " -isysroot/"
-                    append pycxxflags " -isysroot/"
-                    append pyobjcflags " -isysroot/"
+                if {${python.add_cflags}} {
+                    lappend pycflags {*}${configure.cflags}
+                    lappend pyobjcflags {*}${configure.objcflags}
                 }
-            }
-            if {$pycflags ne ""} {
-                destroot.env-append     CFLAGS=$pycflags
-            }
-            if {$pycxxflags ne ""} {
-                destroot.env-append     CXXFLAGS=$pycxxflags
-            }
-            if {$pyobjcflags ne ""} {
-                destroot.env-append     OBJCFLAGS=$pyobjcflags
-            }
-            if {${python.set_compiler} && ${python.consistent_destroot}} {
-                # compiler_wrapper portgroup support
-                if {[exists compwrap.compilers_to_wrap]} {
-                    foreach var [option compwrap.compilers_to_wrap] {
-                        if {[set configure.${var}] ne ""} {
-                            destroot.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
-                        }
+                if {${python.add_cxxflags}} {
+                    lappend pycxxflags {*}${configure.cxxflags}
+                }
+                if {${python.add_fflags}} {
+                    lappend pyf77flags {*}${configure.fflags}
+                    lappend pyf90flags {*}${configure.f90flags}
+                    lappend pyfcflags {*}${configure.fcflags}
+                }
+                if {${python.add_ldflags}} {
+                    lappend pyldflags {*}${configure.ldflags}
+                }
+                if {${python.add_archflags}} {
+                    if {[variant_exists universal] && [variant_isset universal]} {
+                        lappend pyldflags {*}${configure.universal_ldflags}
+                        lappend pycflags {*}${configure.universal_cflags}
+                        lappend pycxxflags {*}${configure.universal_cxxflags}
+                        lappend pyobjcflags {*}${configure.universal_cflags}
+                    } else {
+                        lappend pyf77flags {*}${configure.f77_archflags}
+                        lappend pyf90flags {*}${configure.f90_archflags}
+                        lappend pyfcflags  {*}${configure.fc_archflags}
+                        lappend pyldflags {*}${configure.ld_archflags}
+                        lappend pycflags {*}${configure.cc_archflags}
+                        lappend pycxxflags {*}${configure.cxx_archflags}
+                        lappend pyobjcflags {*}${configure.objc_archflags}
                     }
-                } else {
-                    foreach var [list cc objc cxx fc f77 f90] {
-                        if {[set configure.${var}] ne ""} {
-                            destroot.env-append [string toupper $var]=[set configure.${var}]
+                }
+                if {${python.set_cxx_stdlib}} {
+                    set pycxxflags [portconfigure::construct_cxxflags $pycxxflags]
+                }
+                if {${python.set_sdkroot}} {
+                    lappend pycflags -isysroot${configure.sysroot}
+                    lappend pycxxflags -isysroot${configure.sysroot}
+                    lappend pyobjcflags -isysroot${configure.sysroot}
+                }
+                if {$pycflags ne ""} {
+                    destroot.env-append        CFLAGS=[join $pycflags]
+                }
+                if {$pycxxflags ne ""} {
+                    destroot.env-append        CXXFLAGS=[join $pycxxflags]
+                }
+                if {$pyobjcflags ne ""} {
+                    destroot.env-append        OBJCFLAGS=[join $pyobjcflags]
+                }
+                if {$pyf77flags ne ""} {
+                    destroot.env-append        FFLAGS=[join $pyf77flags]
+                }
+                if {$pyf90flags ne ""} {
+                    destroot.env-append        F90FLAGS=[join $pyf90flags]
+                }
+                if {$pyfcflags ne ""} {
+                    destroot.env-append        FCFLAGS=[join $pyfcflags]
+                }
+                if {$pyldflags ne ""} {
+                    destroot.env-append        LDFLAGS=[join $pyldflags]
+                }
+                if {${python.set_compiler}} {
+                    # compiler_wrapper portgroup support
+                    if {[exists compwrap.compilers_to_wrap]} {
+                        foreach var [option compwrap.compilers_to_wrap] {
+                            if {[set configure.${var}] ne ""} {
+                                destroot.env-append [string toupper $var]=[compwrap::wrap_compiler ${var}]
+                            }
+                        }
+                    } else {
+                        foreach var [list cc objc cxx fc f77 f90] {
+                            if {[set configure.${var}] ne ""} {
+                                destroot.env-append [string toupper $var]=[set configure.${var}]
+                            }
                         }
                     }
                 }
@@ -352,6 +396,12 @@ proc python_add_dependencies {} {
                         depends_build-delete    port:py${python.version}-poetry-core
                         depends_build-append    port:py${python.version}-poetry-core
                     }
+                    maturin {
+                        depends_build-delete    port:py${python.version}-maturin \
+                                                port:py${python.version}-setuptools-rust
+                        depends_build-append    port:py${python.version}-maturin \
+                                                port:py${python.version}-setuptools-rust
+                    }
                     default {}
                 }
             }
@@ -386,14 +436,14 @@ proc python_get_defaults {var} {
         }
         build_cmd {
             if {${python.pep517}} {
-                return "${python.bin} -m build --wheel --no-isolation --outdir ${workpath}"
+                return "${python.bin} -m build --no-isolation"
             } else {
                 return "${python.bin} setup.py --no-user-cfg"
             }
         }
         build_target {
             if {${python.pep517}} {
-                return ""
+                return "--wheel --outdir [shellescape ${workpath}]"
             } else {
                 return build[python_get_defaults jobs_arg]
             }
@@ -480,12 +530,17 @@ proc python_get_defaults {var} {
     }
 }
 
-options python.add_archflags python.set_compiler \
+options python.add_archflags python.add_cflags python.add_cxxflags \
+        python.add_fflags python.add_ldflags python.set_compiler \
         python.set_cxx_stdlib python.set_sdkroot \
         python.link_binaries python.link_binaries_suffix \
         python.move_binaries python.move_binaries_suffix
 
 default python.add_archflags yes
+default python.add_cflags no
+default python.add_cxxflags no
+default python.add_fflags no
+default python.add_ldflags no
 default python.set_compiler yes
 default python.set_cxx_stdlib yes
 default python.set_sdkroot yes
@@ -522,6 +577,11 @@ pre-livecheck {
 
 
 pre-test {
-    # set PYTHONPATH
-    test.env-append PYTHONPATH=[join [glob -nocomplain ${worksrcpath}/build/lib*] :]
+    # set PYTHONPATH if not already set
+    if {![exists test.env] || [lsearch ${test.env} PYTHONPATH=*] == -1} {
+        set libdirs [glob -nocomplain -directory ${worksrcpath}/build lib*]
+        if {$libdirs ne ""} {
+            test.env-append PYTHONPATH=[join $libdirs :]
+        }
+    }
 }

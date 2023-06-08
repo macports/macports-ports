@@ -1,19 +1,20 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
 PortGroup           mpi 1.0
 PortGroup           python 1.0
+PortGroup           xcodeversion 1.0
 
 name                py-pytorch
-version             1.13.0
-revision            0
+version             2.0.0
+revision            1
 github.setup        pytorch pytorch ${version} v
 fetch.type          git
 
-platforms           darwin
 supported_archs     arm64 x86_64
+# third_party/pthreadpool needs DISPATCH_APPLY_AUTO (as of torch 2.0.0)
+platforms           {darwin >= 16}
 
 license             BSD
 
@@ -32,32 +33,24 @@ long_description    PyTorch is a Python package that provides two \
 
 homepage            https://pytorch.org/
 
-python.versions     37 38 39 310
-
-patch.pre_args      -p1
+python.versions     38 39 310
 
 mpi.setup
 
 # Compiler selection
 compiler.cxx_standard 2017
 
-compiler.blacklist-append *gcc* {clang < 800} {macports-clang-3.[0-9]} macports-clang-4.0
+compiler.blacklist-append *gcc*
 
 variant mkl description {Enable Intel Math Kernel Library support} { }
 
-if {${os.arch} in [list i386]} {
+# py-mkl supports x86_64 and 10.12 and later only
+if {${configure.build_arch} eq "x86_64" && !($universal_possible && [variant_isset universal])
+        && !(${os.platform} eq "darwin" && ${os.major} <= 15)} {
     default_variants-append +mkl
 }
 
 platform darwin {
-    if {${os.major} <= 15} {
-        known_fail yes
-        pre-fetch {
-            ui_error "$subport is not supported on OS X 10.11 and older."
-            return -code error "unsupported platform"
-        }
-    }
-
     # MPS support added in 10.13
     if {${os.major} >= 17} {
         variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
@@ -86,6 +79,12 @@ use device \"mps\". Matrix multiplication example:
 
         default_variants-append +mps
     }
+
+    # fix on macOS 12 with Xcode 14:
+    # error: redefinition of 'MPSGraphResizeNearestRoundingMode'
+    if { (${os.major} == 21) && [vercmp ${xcodeversion} 14] >= 0} {
+        patchfiles-append        patch-macOS12-xcode14.diff
+    }
 }
 
 if {${name} ne ${subport}} {
@@ -105,7 +104,6 @@ if {${name} ne ${subport}} {
         path:lib/opencv4/libopencv_core.dylib:opencv4 \
         port:zmq \
         port:zstd \
-        port:tbb \
         port:google-glog \
         port:gflags \
         port:leveldb \
@@ -114,7 +112,6 @@ if {${name} ne ${subport}} {
         port:py${python.version}-click \
         port:py${python.version}-cffi \
         port:py${python.version}-future \
-        port:py${python.version}-gmpy \
         port:py${python.version}-numpy \
         port:py${python.version}-pybind11 \
         port:py${python.version}-typing_extensions \
@@ -132,6 +129,9 @@ if {${name} ne ${subport}} {
     # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/58054
     # diff -NaurdwB ./py-pytorch-orig/c10/util/Logging.cpp ./py-pytorch-new/c10/util/Logging.cpp | sed -E -e 's/\.\/py-pytorch-(orig|new)/\.\//' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-glog-init-check.diff
     patchfiles-append        patch-glog-init-check.diff
+
+    # Disable -Werror in third_party/fbgemm
+    patchfiles-append       Werror.patch
 
     # Use Intel Math kernel Library
     if {[variant_isset mkl]} {
@@ -154,7 +154,6 @@ if {${name} ne ${subport}} {
     # ZSTD support broke with 1.2.0-1.12.0. Check with future releases.
     build.env-append \
                     CMAKE_LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
-                    CMAKE_CXX_FLAGS=-Wno-error=bitwise-instead-of-logical \
                     LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
                     OpenCV_DIR=${prefix}/libexec/opencv4/cmake \
                     USE_CCACHE=OFF \

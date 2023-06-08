@@ -1,0 +1,627 @@
+From c92684a617284e628ad2c748051b1fbdc2ea0755 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Tue, 31 Jan 2023 02:45:22 +0800
+Subject: [PATCH 1/3] revert optionset move
+
+---
+ CMakeLists.txt                          |   9 +-
+ build/fbcode_builder/manifests/watchman |   4 +-
+ watchman/Client.cpp                     |  23 +--
+ watchman/Client.h                       |  22 ---
+ watchman/CommandRegistry.h              |   4 +-
+ watchman/OptionSet.h                    | 207 ++++++++++++++++++++++++
+ watchman/PendingCollection.h            |   4 +-
+ watchman/cmds/debug.cpp                 |  40 +----
+ watchman/test/OptionSetTest.cpp         |  90 +++++++++++
+ 9 files changed, 308 insertions(+), 95 deletions(-)
+ create mode 100644 watchman/OptionSet.h
+ create mode 100644 watchman/test/OptionSetTest.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 850ebdc4d..97671a487 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -342,7 +342,6 @@ find_package(
+ find_package(LibEvent REQUIRED)
+ get_filename_component(LIBEVENT_LIBDIR "${LIBEVENT_LIB}" DIRECTORY)
+ link_directories(${LIBEVENT_LIBDIR})
+-find_package(edencommon CONFIG REQUIRED)
+ find_package(fmt CONFIG REQUIRED)
+ find_package(folly CONFIG REQUIRED)
+ 
+@@ -352,6 +351,7 @@ if (ENABLE_EDEN_SUPPORT)
+   find_package(FBThrift CONFIG REQUIRED)
+   find_package(fb303 CONFIG REQUIRED)
+   find_package(cpptoml CONFIG REQUIRED)
++  find_package(edencommon CONFIG REQUIRED)
+   include_directories(${FB303_INCLUDE_DIR})
+ endif()
+ if(DEFINED ENV{NODE_BIN})
+@@ -455,7 +455,6 @@ target_link_libraries(third_party_deps INTERFACE
+   gflags
+   ${Boost_LIBRARIES}
+   fmt::fmt
+-  edencommon::edencommon_utils
+ )
+ target_include_directories(third_party_deps INTERFACE
+   ${FOLLY_INCLUDE_DIR}
+@@ -464,12 +463,11 @@ target_include_directories(third_party_deps INTERFACE
+   ${Boost_INCLUDE_DIRS}
+ )
+ if (ENABLE_EDEN_SUPPORT)
+-  target_link_libraries(
+-    third_party_deps
+-    INTERFACE
++  target_link_libraries(third_party_deps INTERFACE
+     ${YARPL_LIBRARIES}
+     FBThrift::thriftcpp2
+     cpptoml
++    edencommon::edencommon_utils
+   )
+ endif()
+ if(PCRE2_FOUND)
+@@ -774,6 +772,7 @@ t_test(ignore watchman/test/BserTest.cpp)
+ #t_test(inmemoryview watchman/test/InMemoryViewTest.cpp)
+ t_test(log watchman/test/LogTest.cpp)
+ t_test(maputil watchman/test/MapUtilTest.cpp)
++t_test(optionset watchman/test/OptionSetTest.cpp)
+ t_test(pendingcollection watchman/test/PendingCollectionTest.cpp)
+ # Linking this test needs the targets graph to be cleaned up.
+ #t_test(perfsample watchman/test/PerfSampleTest.cpp)
+diff --git a/build/fbcode_builder/manifests/watchman b/build/fbcode_builder/manifests/watchman
+index b733a0c09..d50eafd45 100644
+--- a/build/fbcode_builder/manifests/watchman
++++ b/build/fbcode_builder/manifests/watchman
+@@ -13,7 +13,6 @@ builder = cmake
+ [dependencies]
+ boost
+ cpptoml
+-edencommon
+ fb303
+ fbthrift
+ folly
+@@ -26,13 +25,12 @@ rust
+ [shipit.pathmap]
+ fbcode/watchman = watchman
+ fbcode/watchman/oss = .
+-fbcode/eden/fs = eden/fs
+ 
+ [shipit.strip]
+ ^fbcode/eden/fs/(?!.*\.thrift|service/shipit_test_file\.txt)
+ 
+ [cmake.defines.fb=on]
+-ENABLE_EDEN_SUPPORT=ON
++ENABLE_EDEN_SUPPORT=OFF
+ IS_FB_BUILD=ON
+ 
+ # FB macos specific settings
+diff --git a/watchman/Client.cpp b/watchman/Client.cpp
+index 10ef94397..568045756 100644
+--- a/watchman/Client.cpp
++++ b/watchman/Client.cpp
+@@ -23,17 +23,6 @@ namespace watchman {
+ 
+ namespace {
+ 
+-using namespace facebook::eden;
+-
+-ProcessNameCache& getProcessNameCache() {
+-  static auto* pnc = new ProcessNameCache;
+-  return *pnc;
+-}
+-
+-ProcessNameHandle lookupProcessName(pid_t pid) {
+-  return getProcessNameCache().lookup(pid);
+-}
+-
+ constexpr size_t kResponseLogLimit = 0;
+ 
+ folly::Synchronized<std::unordered_set<UserClient*>> clients;
+@@ -220,10 +209,7 @@ void UserClient::create(std::unique_ptr<watchman_stream> stm) {
+ }
+ 
+ UserClient::UserClient(PrivateBadge, std::unique_ptr<watchman_stream> stm)
+-    : Client{std::move(stm)},
+-      since_{std::chrono::system_clock::now()},
+-      peerPid_{this->stm->getPeerProcessID()},
+-      peerName_{lookupProcessName(peerPid_)} {
++    : Client(std::move(stm)) {
+   clients.wlock()->insert(this);
+ }
+ 
+@@ -260,13 +246,6 @@ std::vector<ClientDebugStatus> UserClient::getStatusForAllClients() {
+ ClientDebugStatus UserClient::getDebugStatus() const {
+   ClientDebugStatus rv;
+   rv.state = status_.getName();
+-  if (peerPid_) {
+-    rv.peer.emplace();
+-    rv.peer->pid = peerPid_;
+-    // May briefly, once, block on the ProcessNameCache thread.
+-    rv.peer->name = peerName_.get();
+-  }
+-  rv.since = std::chrono::system_clock::to_time_t(since_);
+   return rv;
+ }
+ 
+diff --git a/watchman/Client.h b/watchman/Client.h
+index da19a9670..70fcad348 100644
+--- a/watchman/Client.h
++++ b/watchman/Client.h
+@@ -7,10 +7,7 @@
+ 
+ #pragma once
+ 
+-#include <eden/common/utils/ProcessNameCache.h>
+ #include <fmt/core.h>
+-
+-#include <chrono>
+ #include <deque>
+ #include <unordered_map>
+ 
+@@ -159,27 +156,12 @@ class ClientStatus {
+   std::atomic<State> state_{THREAD_STARTING};
+ };
+ 
+-struct PeerInfo : serde::Object {
+-  int32_t pid;
+-  std::string name;
+-
+-  template <typename X>
+-  void map(X& x) {
+-    x("pid", pid);
+-    x("name", name);
+-  }
+-};
+-
+ struct ClientDebugStatus : serde::Object {
+   std::string state;
+-  std::optional<PeerInfo> peer;
+-  std::optional<int64_t> since;
+ 
+   template <typename X>
+   void map(X& x) {
+     x("state", state);
+-    x("peer", peer);
+-    x("since", since);
+   }
+ };
+ 
+@@ -234,10 +216,6 @@ class UserClient final : public Client {
+ 
+   void clientThread() noexcept;
+ 
+-  const std::chrono::system_clock::time_point since_;
+-  const pid_t peerPid_;
+-  const facebook::eden::ProcessNameHandle peerName_;
+-
+   ClientStatus status_;
+ };
+ 
+diff --git a/watchman/CommandRegistry.h b/watchman/CommandRegistry.h
+index e0915449f..465a2c4ca 100644
+--- a/watchman/CommandRegistry.h
++++ b/watchman/CommandRegistry.h
+@@ -12,7 +12,7 @@
+ 
+ // TODO: We could avoid the Client dependency fi CommandHandler returned a
+ // json_ref response or error rather than taking a Client.
+-#include "eden/common/utils/OptionSet.h"
++#include "watchman/OptionSet.h"
+ #include "watchman/Serde.h"
+ #include "watchman/thirdparty/jansson/jansson.h"
+ #include "watchman/watchman_preprocessor.h"
+@@ -101,7 +101,7 @@ using CommandHandler =
+  */
+ using ResultPrinter = void (*)(const json_ref& result);
+ 
+-struct CommandFlags : facebook::eden::OptionSet<CommandFlags, uint8_t> {};
++struct CommandFlags : OptionSet<CommandFlags, uint8_t> {};
+ 
+ inline constexpr auto CMD_DAEMON = CommandFlags::raw(1);
+ inline constexpr auto CMD_CLIENT = CommandFlags::raw(2);
+diff --git a/watchman/OptionSet.h b/watchman/OptionSet.h
+new file mode 100644
+index 000000000..976f128ad
+--- /dev/null
++++ b/watchman/OptionSet.h
+@@ -0,0 +1,207 @@
++/*
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found
++ * in the LICENSE file in the root directory of this source tree.
++ */
++
++#pragma once
++
++#include <assert.h>
++#include <string.h>
++#include <initializer_list>
++#include <iosfwd>
++#include <string>
++#include <string_view>
++#include <utility>
++
++namespace watchman {
++
++/**
++ * Typed wrapper around bit sets. Inspired by Swift's OptionSet.
++ *
++ * See OptionSetTest.cpp for example usage.
++ */
++template <typename Derived, typename Underlying>
++class OptionSet {
++  static_assert(std::is_integral_v<Underlying>);
++  using zero_t = struct zero_t***;
++
++ public:
++  using UnderlyingType = Underlying;
++  using NameTable = std::initializer_list<std::pair<Derived, std::string_view>>;
++
++  constexpr OptionSet() = default;
++
++  /**
++   * Allows initialization from literal 0.
++   */
++  /* implicit */ constexpr OptionSet(zero_t) {}
++
++  ///* implicit */ constexpr OptionSet(Derived v) : value_{v.value_} {}
++
++  /* implicit */ constexpr OptionSet(std::initializer_list<Derived> args) {
++    for (Derived v : args) {
++      value_ |= v;
++    }
++  }
++
++  constexpr static Derived raw(Underlying raw) {
++    Derived d;
++    d.value_ = raw;
++    return d;
++  }
++
++  explicit operator bool() const {
++    return value_ != 0;
++  }
++
++  /**
++   * Returns the raw bits.
++   */
++  Underlying asRaw() const {
++    return value_;
++  }
++
++  /**
++   * Returns true if every bit in `set` is set here too.
++   *
++   * Alias for `containsAllOf`.
++   */
++  bool contains(Derived set) const {
++    return containsAllOf(set);
++  }
++
++  /**
++   * Returns true if every bit in `set` is set here too.
++   */
++  bool containsAllOf(Derived set) const {
++    return (value_ & set.value_) == set.value_;
++  }
++
++  /**
++   * Returns true if any bit in `set` in set here too.
++   */
++  bool containsAnyOf(Derived set) const {
++    return (value_ & set.value_) != 0;
++  }
++
++  /**
++   * Returns true if all bits in `set` are unset here.
++   */
++  bool containsNoneOf(Derived set) const {
++    return (value_ & set.value_) == 0;
++  }
++
++  /**
++   * Returns true if no bits are set.
++   */
++  bool empty() const {
++    return value_ == 0;
++  }
++
++  /**
++   * Turns on the specified bits.
++   */
++  void set(Derived set) {
++    value_ |= set.value_;
++  }
++
++  /**
++   * Clears the specified bits.
++   */
++  void clear(Derived set) {
++    value_ &= ~set.value_;
++  }
++
++  /**
++   * Returns a space-delimited string representing the names of each set bit.
++   * The name mapping is defined by `Derived::table`.
++   */
++  std::string format() const {
++    // TODO: It might be nice to move the implementation of this function behind
++    // a template on Raw to reduce the number of possible expansions. That would
++    // require some sort of constexpr mapping from Derived onto Raw. Perhaps
++    // that's as easy as asserting they have the same representation and casting
++    // pointers.
++
++    constexpr const NameTable& table = Derived::table;
++
++    if (empty() || std::empty(table)) {
++      return {};
++    }
++
++    // Precompute the length to avoid multiple allocations.
++    size_t length = 0;
++    for (auto [bit, name] : table) {
++      // TODO: Should this assert bits are exact powers of two?
++      if (containsAllOf(bit)) {
++        if (length) {
++          length++;
++        }
++        length += name.size();
++      }
++    }
++
++    std::string result(length, 0);
++    char* p = result.data();
++
++    for (auto [bit, name] : table) {
++      if (containsAllOf(bit)) {
++        if (p != result.data()) {
++          *p++ = ' ';
++        }
++        memcpy(p, name.data(), name.size());
++        p += name.size();
++      }
++    }
++
++    assert(static_cast<size_t>(p - result.data()) == length);
++
++    return result;
++  }
++
++  template <typename... A>
++  friend std::basic_ostream<A...>& operator<<(
++      std::basic_ostream<A...>& out,
++      const OptionSet& opts) {
++    return out << opts.format();
++  }
++
++  Derived& operator|=(Derived that) {
++    value_ |= that.value_;
++    return static_cast<Derived&>(*this);
++  }
++
++  Derived& operator&=(Derived that) {
++    value_ &= that.value_;
++    return static_cast<Derived&>(*this);
++  }
++
++  /**
++   * Returns the union of both sets.
++   */
++  constexpr friend Derived operator|(Derived lhs, Derived rhs) {
++    return raw(lhs.value_ | rhs.value_);
++  }
++
++  /**
++   * Returns the intersection of both sets.
++   */
++  constexpr friend Derived operator&(Derived lhs, Derived rhs) {
++    return raw(lhs.value_ & rhs.value_);
++  }
++
++  constexpr friend bool operator==(Derived lhs, Derived rhs) {
++    return lhs.value_ == rhs.value_;
++  }
++
++  constexpr friend bool operator!=(Derived lhs, Derived rhs) {
++    return lhs.value_ != rhs.value_;
++  }
++
++ private:
++  Underlying value_{};
++};
++
++} // namespace watchman
+diff --git a/watchman/PendingCollection.h b/watchman/PendingCollection.h
+index 2dd43af8f..47617cd58 100644
+--- a/watchman/PendingCollection.h
++++ b/watchman/PendingCollection.h
+@@ -11,7 +11,7 @@
+ #include <folly/futures/Promise.h>
+ #include <chrono>
+ #include <condition_variable>
+-#include "eden/common/utils/OptionSet.h"
++#include "watchman/OptionSet.h"
+ #include "watchman/thirdparty/libart/src/art.h"
+ #include "watchman/watchman_string.h"
+ 
+@@ -19,7 +19,7 @@ struct watchman_dir;
+ 
+ namespace watchman {
+ 
+-struct PendingFlags : facebook::eden::OptionSet<PendingFlags, uint8_t> {
++struct PendingFlags : OptionSet<PendingFlags, uint8_t> {
+   using OptionSet::OptionSet;
+   static const NameTable table;
+ };
+diff --git a/watchman/cmds/debug.cpp b/watchman/cmds/debug.cpp
+index 9042616b1..e5e39e641 100644
+--- a/watchman/cmds/debug.cpp
++++ b/watchman/cmds/debug.cpp
+@@ -7,11 +7,7 @@
+ 
+ #include <unordered_map>
+ 
+-#include <fmt/chrono.h>
+-
+-#include <folly/String.h>
+ #include <folly/chrono/Conv.h>
+-#include <folly/system/Shell.h>
+ 
+ #include "watchman/Client.h"
+ #include "watchman/InMemoryView.h"
+@@ -263,28 +259,6 @@ W_CMD_REG(
+     CMD_DAEMON,
+     w_cmd_realpath_root);
+ 
+-namespace {
+-
+-std::string shellQuoteCommand(std::string_view command) {
+-  std::vector<std::string> argv;
+-  folly::split('\0', command, argv);
+-
+-  // Every argument in a command line is null-terminated. Remove the last, empty
+-  // argument.
+-  if (argv.size() && argv.back().empty()) {
+-    argv.pop_back();
+-  }
+-
+-  for (auto& arg : argv) {
+-    // TODO: shellQuote is not particularly good. It always brackets with ' and
+-    // does not handle non-printable characters. We should write our own.
+-    arg = folly::shellQuote(arg);
+-  }
+-  return folly::join(' ', argv);
+-}
+-
+-} // namespace
+-
+ struct DebugStatusCommand : PrettyCommand<DebugStatusCommand> {
+   static constexpr std::string_view name = "debug-status";
+ 
+@@ -331,25 +305,13 @@ struct DebugStatusCommand : PrettyCommand<DebugStatusCommand> {
+ 
+     fmt::print("CLIENTS\n-------\n");
+     for (auto& client : response.clients) {
+-      if (client.peer) {
+-        fmt::print(
+-            "{}: {}\n", client.peer->pid, shellQuoteCommand(client.peer->name));
+-      } else {
+-        fmt::print("unknown peer\n");
+-      }
+-      if (client.since) {
+-        fmt::print(
+-            "  - since: {}\n",
+-            std::chrono::system_clock::from_time_t(client.since.value()));
+-      }
+       fmt::print("  - state: {}\n", client.state);
+-      fmt::print("\n");
+     }
+     // fmt does not flush, so when the stream is not line buffered the stream
+     // needs to be manually flushed (or else nothing is written to stdout).
+     // eventually this can be fmt::flush instead:
+     // https://github.com/vgc/vgc/issues/519
+-    // TODO(T136788014): why doesn't macOS do this for us.
++    // TODO (T136788014): why doesn't macOS do this for us.
+     fflush(stdout);
+   }
+ };
+diff --git a/watchman/test/OptionSetTest.cpp b/watchman/test/OptionSetTest.cpp
+new file mode 100644
+index 000000000..ede31d735
+--- /dev/null
++++ b/watchman/test/OptionSetTest.cpp
+@@ -0,0 +1,90 @@
++/*
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found
++ * in the LICENSE file in the root directory of this source tree.
++ */
++
++#include "watchman/OptionSet.h"
++#include <folly/portability/GTest.h>
++
++using namespace watchman;
++
++namespace {
++
++struct ColorSet : OptionSet<ColorSet, uint8_t> {
++  using OptionSet::OptionSet;
++  static const NameTable table;
++};
++
++constexpr inline auto CM_RED = ColorSet::raw(1);
++constexpr inline auto CM_GREEN = ColorSet::raw(2);
++constexpr inline auto CM_BLUE = ColorSet::raw(4);
++
++const ColorSet::NameTable ColorSet::table = {
++    {CM_RED, "RED"},
++    {CM_GREEN, "GREEN"},
++    {CM_BLUE, "BLUE"},
++};
++
++} // namespace
++
++TEST(OptionSet, initialization_from_zero) {
++  ColorSet set = 0;
++  set = 0;
++
++  // Does not compile:
++  // set = 1;
++
++  // Does not compile:
++  // int i = 0;
++  // set = i;
++}
++
++TEST(OptionSet, default_is_empty) {
++  ColorSet set;
++  EXPECT_FALSE(set);
++}
++
++TEST(OptionSet, assignment_operators) {
++  ColorSet set;
++  set |= CM_RED;
++  EXPECT_EQ(CM_RED, set);
++  set &= CM_GREEN;
++  EXPECT_EQ(ColorSet{}, set);
++}
++
++TEST(OptionSet, format) {
++  EXPECT_EQ("", ColorSet{}.format());
++  EXPECT_EQ("RED", CM_RED.format());
++  EXPECT_EQ("GREEN", CM_GREEN.format());
++  EXPECT_EQ("BLUE", CM_BLUE.format());
++  EXPECT_EQ("RED GREEN", (CM_RED | CM_GREEN).format());
++  EXPECT_EQ("GREEN BLUE", (CM_GREEN | CM_BLUE).format());
++  EXPECT_EQ("RED GREEN BLUE", (CM_RED | CM_GREEN | CM_BLUE).format());
++}
++
++TEST(OptionSet, containsAllOf) {
++  EXPECT_TRUE((CM_RED | CM_GREEN).contains(CM_RED));
++  EXPECT_FALSE((CM_RED | CM_GREEN).contains(CM_BLUE));
++  EXPECT_FALSE((CM_RED | CM_GREEN).contains(CM_RED | CM_BLUE));
++
++  EXPECT_TRUE((CM_RED | CM_GREEN).containsAllOf(CM_RED));
++  EXPECT_FALSE((CM_RED | CM_GREEN).containsAllOf(CM_BLUE));
++  EXPECT_FALSE((CM_RED | CM_GREEN).containsAllOf(CM_RED | CM_BLUE));
++}
++
++TEST(OptionSet, intersect) {
++  EXPECT_FALSE(CM_RED & CM_BLUE);
++  EXPECT_EQ(CM_GREEN, (CM_RED | CM_GREEN) & (CM_GREEN | CM_BLUE));
++}
++
++TEST(OptionSet, containsAnyOf) {
++  EXPECT_TRUE((CM_RED | CM_GREEN).containsAnyOf(CM_GREEN | CM_BLUE));
++  EXPECT_FALSE((CM_RED | CM_GREEN).containsAnyOf(CM_BLUE));
++}
++
++TEST(OptionSet, containsNoneOf) {
++  EXPECT_FALSE((CM_RED | CM_GREEN).containsNoneOf(CM_GREEN | CM_BLUE));
++  EXPECT_TRUE(CM_RED.containsNoneOf(CM_GREEN | CM_BLUE));
++}
+-- 
+2.39.1
+

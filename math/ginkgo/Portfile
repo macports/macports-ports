@@ -5,38 +5,40 @@ PortGroup           cmake 1.1
 PortGroup           github 1.0
 PortGroup           mpi 1.0
 
-github.setup        ginkgo-project ginkgo 1.5.0 v
+github.setup        ginkgo-project ginkgo e3467eb0145c0ac87d20515e0a2bbf4a8b75b228
+version             1.6.0
 revision            0
-categories          math
+categories          math parallel
 license             BSD
 maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 description         Numerical linear algebra software package
 long_description    A numerical linear algebra library targeting many-core architectures.
 homepage            https://ginkgo-project.github.io
-checksums           rmd160  44582d50b1dcb0108438a52d240eb37be1d936a6 \
-                    sha256  3a6bfdbf3d343bdf30c05a1a7ea913d36e15e484cea8afbc509238718ad2076b \
-                    size    9508712
+checksums           rmd160  6b76c4fed0f71c0613174ce9e339fb624f1d36cc \
+                    sha256  6bdb29670e8904b079805ea17838675f204b9405dd59213d705e91cdfcf3a89c \
+                    size    12781152
 
-# Needed for tests:
-cmake.out_of_source no
+cmake.build_type    Release
 
 if {${os.platform} eq "darwin" && ${os.arch} eq "powerpc"} {
     mpi.setup       require require_fortran \
-                    -gcc44 -gcc45 -gcc46 -gcc47 -gcc48 -gcc49 -gcc5 -gcc6 \
+                    -gcc44 -gcc45 -gcc46 -gcc47 -gcc48 -gcc49 -gcc5 \
                     -clang -fortran
 } else {
     mpi.setup       require require_fortran \
-                    -gcc44 -gcc45 -gcc46 -gcc47 -gcc48 -gcc49 -gcc5 -gcc6
+                    -gcc44 -gcc45 -gcc46 -gcc47 -gcc48 -gcc49 -gcc5
 }
 
-compiler.openmp_version 3.0
+depends_lib-append  port:metis
+
+compiler.cxx_standard   2014
 
 configure.args-append \
                     -DBUILD_SHARED_LIBS=ON \
                     -DGINKGO_MIXED_PRECISION=ON \
                     -DGINKGO_BUILD_MPI=ON \
                     -DGINKGO_BUILD_REFERENCE=ON \
-                    -DGINKGO_BUILD_TESTS=ON \
+                    -DGINKGO_BUILD_TESTS=OFF \
                     -DGINKGO_BUILD_BENCHMARKS=OFF \
                     -DGINKGO_BUILD_CUDA=OFF \
                     -DGINKGO_BUILD_DPCPP=OFF \
@@ -50,18 +52,20 @@ configure.args-append \
                     -DGINKGO_DOC_GENERATE_PDF=OFF \
                     -DGINKGO_JACOBI_FULL_OPTIMIZATIONS=OFF \
                     -DGINKGO_WITH_CCACHE=OFF \
-                    -DGTEST_SRC_DIR=${prefix}/src/googletest/
+                    -DMPIEXEC_EXECUTABLE=${prefix}/bin/${mpi.exec}
 
-# Even though compilation succeeds, OMP module does not build correctly on PPC.
-if {${build_arch} ni [list ppc ppc64]} {
+if {${configure.ccache}} {
     configure.args-replace \
-                    -DGINKGO_BUILD_OMP=OFF -DGINKGO_BUILD_OMP=ON
+                    -DGINKGO_WITH_CCACHE=OFF \
+                    -DGINKGO_WITH_CCACHE=ON
 }
 
-if {[string match *clang* ${configure.compiler}]} {
-    configure.ldflags-append \
-                    -L${prefix}/lib/libomp \
-                    -lomp
+# Ginkgo does not support HWLOC on MacOS:
+if {${os.platform} ne "darwin"} {
+    depends_lib-append \
+                    port:hwloc
+    configure.args-replace \
+                    -DGINKGO_BUILD_HWLOC=OFF -DGINKGO_BUILD_HWLOC=ON
 }
 
 # ___atomic_compare_exchange_8
@@ -69,7 +73,50 @@ if {${build_arch} in [list i386 ppc] && [string match *gcc* ${configure.compiler
     configure.ldflags-append -latomic
 }
 
-depends_test-append port:gtest
+variant openmp description "Use OpenMP" {
+    compiler.openmp_version 3.0
 
-test.run            yes
-test.cmd            ctest
+    configure.args-replace \
+                    -DGINKGO_BUILD_OMP=OFF \
+                    -DGINKGO_BUILD_OMP=ON
+
+    if {[string match *clang* ${configure.compiler}]} {
+        configure.ldflags-append \
+                    -L${prefix}/lib/libomp \
+                    -lomp
+    }
+}
+
+# FIXME: Upstream has broken this in 1.6.0 for Clang.
+# default_variants    +openmp
+
+variant tests description "Enable testing" {
+    depends_test-append port:gtest
+
+    configure.pre_args-replace \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+    configure.args-replace \
+                    -DGINKGO_BUILD_TESTS=OFF \
+                    -DGINKGO_BUILD_TESTS=ON
+
+    configure.args-append \
+                    -DGTEST_SRC_DIR=${prefix}/src/googletest/
+
+    if {${os.arch} eq "powerpc"} {
+        # There is some problem with the new hydra on PPC, is freezes at bindings test.
+        test.env-append \
+                    OMP_NUM_THREADS=1
+    }
+
+    test.run        yes
+    test.cmd        ctest
+}
+
+platform darwin powerpc {
+    # FIXME: Something in multigrid tests freezes the OS badly.
+    post-patch {
+        reinplace "s|add_subdirectory(multigrid)||" ${worksrcpath}/test/CMakeLists.txt
+    }
+}

@@ -4,11 +4,13 @@ PortSystem 1.0
 PortGroup compilers 1.0
 PortGroup compiler_blacklist_versions 1.0
 PortGroup active_variants 1.1
+PortGroup legacysupport 1.1
 
 name                        R
 # Remember to set revision to 0 when bumping version
-version                     4.2.2
-revision                    3
+# And also to update Rversion in R PortGroup
+version                     4.3.0
+revision                    2
 
 set branch                  [join [lrange [split ${version} .] 0 1] .]
 categories                  math science
@@ -30,15 +32,48 @@ homepage                    https://www.r-project.org/
 master_sites                https://cran.rstudio.com/src/base/R-4/ \
                             https://cran.r-project.org/src/base/R-4/
 
-checksums                   rmd160  8cd37cfb2694c75e21e6ea1f9dc734e7b39d8a2e \
-                            sha256  0ff62b42ec51afa5713caee7c4fde7a0c45940ba39bef8c5c9487fef0c953df5 \
-                            size    33987014
+checksums                   rmd160  b7231b0aa0819233cf76b901e9c7e1b2cc8932f8 \
+                            sha256  45dcc48b6cf27d361020f77fde1a39209e997b81402b3663ca1c010056a6a609 \
+                            size    34821768
 
-# Fails to configure with Xcode clang 4.6.3
-compiler.blacklist-append   {clang < 500}
+# Avoid Apple clangs:
+compiler.blacklist-append   {clang}
+# Blacklist macports-clang-16+. See discussion in
+#   https://trac.macports.org/ticket/67144
+# for rationale. The decision when to migrate to a new compiler is then in the
+# hands of the R maintainers and will not change from the current defaults when
+# these get bumped centrally.
+# NOTE : Keep this setting in sync with the one in the R portgroup.
+compiler.blacklist-append   {macports-clang-1[6-9]}
 
 compilers.choose            fc f77
 compilers.setup             require_fortran
+
+# https://trac.macports.org/ticket/67298
+# See related: https://skia.googlesource.com/skia/+/3490263287e9432119c501884e45840de4d986bc
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    patchfiles-append       patch-fix-10.6.diff
+}
+
+# We wanna ensure the same compiler is used for R itself and R packages.
+# See R PortGroup.
+if {[string match macports-clang-* ${configure.compiler}]} {
+    set clang_v [
+        string range ${configure.compiler} [
+            string length macports-clang-
+        ] end
+    ]
+    depends_build-append    port:clang-${clang_v}
+    depends_run-append      port:clang-${clang_v}
+} elseif {[string match macports-gcc-* ${configure.compiler}]} {
+    set gcc_v [
+        string range ${configure.compiler} [
+            string length macports-gcc-
+        ] end
+    ]
+    depends_build-append    port:gcc${gcc_v}
+    depends_run-append      port:gcc${gcc_v}
+}
 
 depends_build               port:pkgconfig
 
@@ -60,6 +95,8 @@ depends_lib                 port:readline \
                             port:unzip \
                             port:gnutar \
                             port:xz
+
+legacysupport.newest_darwin_requires_legacy 10
 
 # avoid finding ${prefix}/bin/xdg-open first
 configure.env-append        R_PDFVIEWER=/usr/bin/open \
@@ -88,7 +125,7 @@ post-patch {
     }
 }
 
-# Note: gcc cannot be used for the C compiler. It will give:
+# Note: gcc may not be used for the C compiler on some OS X versions. It will give:
 #:info:build In file included from /usr/include/dispatch/dispatch.h:51:0,
 #:info:build                  from /System/Library/Frameworks/CoreFoundation.framework/Headers/CFStream.h:15,
 #:info:build                  from /System/Library/Frameworks/CoreFoundation.framework/Headers/CFPropertyList.h:13,
@@ -100,6 +137,7 @@ post-patch {
 #:info:build    dispatch_block_t notification_block);
 #:info:build    ^
 # However, use of compiler.blacklist *gcc* would remove the GCC Fortran compilers too.
+# gcc works fine on < 10.7. See also: https://trac.macports.org/ticket/66453
 
 configure.pre_args          --prefix=${frameworks_dir}
 
@@ -227,10 +265,11 @@ variant quartz conflicts x11 {
 
 variant java description {enable Java} {
     PortGroup java 1.0
+
     configure.args-replace --disable-java --enable-java
 }
 
-default_variants +cairo +recommended +openmp
+default_variants +cairo +tcltk +recommended +openmp
 
 if {![variant_isset quartz]} {
     default_variants-append +x11
@@ -256,7 +295,7 @@ test.target                 check
 destroot.destdir prefix=${destroot}${frameworks_dir}
 
 post-destroot {
-    copy ${destroot}${frameworks_dir}/lib/pkgconfig/libR.pc ${destroot}${prefix}/lib/pkgconfig/libR.pc
+    copy ${destroot}${frameworks_dir}/R.framework/Resources/lib/pkgconfig/libR.pc ${destroot}${prefix}/lib/pkgconfig/libR.pc
 
     foreach v { "rhome" "rincludedir" } {
         reinplace "s|${v}=${destroot}|${v}=|" "${destroot}${prefix}/lib/pkgconfig/libR.pc"
@@ -296,6 +335,38 @@ post-destroot {
         ${destroot}${resources}/bin/exec/R"
     system "install_name_tool -change ${destroot}${resources}/lib/libRblas.dylib ${resources}/lib/libRblas.dylib \
         ${destroot}${resources}/bin/exec/R"
+
+    platform darwin {
+        # LegacySupport magic does not work automatically. Re-implement it by hand:
+        set rexec ${resources}/bin/exec/R
+
+        if {${os.major} < 11} {
+            legacysupport::relink_libSystem ${destroot}${rexec}
+        }
+
+        if {${configure.cxx_stdlib} ne "libc++"} {
+            # We can’t do it in a sane way, since R build system in its wisdom assumes
+            # that R and R-orig are archs, and then package installation gets broken.
+            set rexec_orig ${resources}/bin/exec_orig/R
+
+            xinstall -d ${destroot}${resources}/bin/exec_orig
+
+            move ${destroot}${rexec} ${destroot}${rexec_orig}
+
+            set  wrapper    [open "${destroot}${rexec}" w 0755]
+            puts ${wrapper} "#!/bin/bash"
+            puts ${wrapper} ""
+            puts ${wrapper} {if [ -n "$DYLD_LIBRARY_PATH" ]; then}
+            puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc:\${DYLD_LIBRARY_PATH}"
+            puts ${wrapper} {else}
+            puts ${wrapper} "   DYLD_LIBRARY_PATH=${prefix}/lib/libgcc"
+            puts ${wrapper} {fi}
+            puts ${wrapper} {export DYLD_LIBRARY_PATH}
+            puts ${wrapper} ""
+            puts ${wrapper} "exec ${rexec_orig} \"\$@\""
+            close $wrapper
+        }
+    }
 
     ln -s ${resources}/bin/R ${destroot}${prefix}/bin/R
     ln -s ${resources}/bin/Rscript ${destroot}${prefix}/bin/Rscript

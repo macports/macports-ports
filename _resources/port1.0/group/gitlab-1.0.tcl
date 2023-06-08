@@ -51,9 +51,7 @@ proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_su
 
     # When fetching from a tag, the extracted directory name will contain a
     # truncated commit hash.
-    if {[exists extract.rename]} {
-        default extract.rename yes
-    }
+    default extract.rename  {[expr {[llength ${extract.only}] == 1}]}
 
     # If the version is composed entirely of hex characters, and is at least 7
     # characters long, and is not exactly 8 decimal digits (which might be a
