@@ -1,0 +1,207 @@
+From 6928d6cf896af97596228e3bd1e30437c0b159a0 Mon Sep 17 00:00:00 2001
+From: "Kirill A. Korinsky" <kirill@korins.ky>
+Date: Tue, 6 Jun 2023 23:40:14 +0200
+Subject: [PATCH] x86/Darwin: Revert "Perform darwin-related housekeeping"
+
+This reverts commit f5386462b3ad5548763bc7de21d71cb723352af7.
+---
+ src/runtime/interrupt.c  |  7 +++++
+ src/runtime/x86-arch.c   |  2 ++
+ src/runtime/x86-assem.S  | 56 +++++++++++++++++++++++++++++++++++++++-
+ src/runtime/x86-bsd-os.c | 23 +++++++++++++++--
+ 4 files changed, 85 insertions(+), 3 deletions(-)
+
+diff --git src/runtime/interrupt.c src/runtime/interrupt.c
+index af66f5839..477af6171 100644
+--- src/runtime/interrupt.c
++++ src/runtime/interrupt.c
+@@ -1571,6 +1571,7 @@ extern int *os_context_flags_addr(os_context_t *context);
+ 
+ extern lispobj call_into_lisp(lispobj fun, lispobj *args, int nargs);
+ extern void post_signal_tramp(void);
++extern void call_into_lisp_tramp(void);
+ 
+ void
+ arrange_return_to_c_function(os_context_t *context,
+@@ -1759,7 +1760,13 @@ arrange_return_to_c_function(os_context_t *context,
+ void
+ arrange_return_to_lisp_function(os_context_t *context, lispobj function)
+ {
++#if defined(LISP_FEATURE_DARWIN) && defined(LISP_FEATURE_X86)
++    arrange_return_to_c_function(context,
++                                 (call_into_lisp_lookalike)call_into_lisp_tramp,
++                                 function);
++#else
+     arrange_return_to_c_function(context, call_into_lisp, function);
++#endif
+ }
+ 
+ // These have undefined_alien_function tramp in x-assem.S
+diff --git src/runtime/x86-arch.c src/runtime/x86-arch.c
+index 8969326d4..a662d758e 100644
+--- src/runtime/x86-arch.c
++++ src/runtime/x86-arch.c
+@@ -80,6 +80,8 @@ os_context_flags_addr(os_context_t *context)
+     return &context->uc_mcontext.mc_eflags;
+ #elif defined __OpenBSD__
+     return &context->sc_eflags;
++#elif defined LISP_FEATURE_DARWIN
++    return (int *)(&context->uc_mcontext->SS.EFLAGS);
+ #elif defined __NetBSD__
+     return &(context->uc_mcontext.__gregs[_REG_EFL]);
+ #elif defined LISP_FEATURE_WIN32
+diff --git src/runtime/x86-assem.S src/runtime/x86-assem.S
+index 974c1b10a..f92bde899 100644
+--- src/runtime/x86-assem.S
++++ src/runtime/x86-assem.S
+@@ -62,7 +62,7 @@
+  * that are defined to be no-ops on win32. Hopefully this still works on
+  * other platforms.
+  */
+-#if !defined(LISP_FEATURE_WIN32)
++#if !defined(LISP_FEATURE_WIN32) && !defined(LISP_FEATURE_DARWIN)
+ #define TYPE(name) .type name,@function
+ #define SIZE(name) .size name,.-name
+ #else
+@@ -614,6 +614,56 @@ GNAME(exception_handler_wrapper):
+ 	SIZE(GNAME(exception_handler_wrapper))
+ #endif
+ 
++#ifdef LISP_FEATURE_DARWIN
++        .align align_16byte
++        .globl GNAME(call_into_lisp_tramp)
++        TYPE(GNAME(call_into_lisp_tramp))
++GNAME(call_into_lisp_tramp):
++        /* 1. build the stack frame from the block that's pointed to by ECX
++           2. free the block
++           3. set ECX to 0
++           4. call the function via call_into_lisp
++        */
++        pushl   0(%ecx)          /* return address */
++
++        pushl   %ebp
++        movl    %esp, %ebp
++
++        pushl   32(%ecx)         /* eflags */
++        pushl   28(%ecx)         /* EAX */
++        pushl   20(%ecx)         /* ECX */
++        pushl   16(%ecx)         /* EDX */
++        pushl   24(%ecx)         /* EBX */
++        pushl   $0                /* popal is going to ignore esp */
++        pushl   %ebp              /* is this right?? */
++        pushl   12(%ecx)         /* ESI */
++        pushl   8(%ecx)          /* EDI */
++        pushl   $0                /* args for call_into_lisp */
++        pushl   $0
++        pushl   4(%ecx)          /* function to call */
++
++        /* free our save block */
++        pushl   %ecx              /* reserve sufficient space on stack for args */
++        pushl   %ecx
++        andl    $0xfffffff0, %esp  /* align stack */
++        movl    $0x40, 4(%esp)
++        movl    %ecx, (%esp)
++        call    GNAME(os_alloc_gc_space)
++
++        /* call call_into_lisp */
++        leal    -48(%ebp), %esp
++        call    GNAME(call_into_lisp)
++
++        /* Clean up our mess */
++        leal    -36(%ebp), %esp
++        popal
++        popfl
++        leave
++        ret
++
++        SIZE(call_into_lisp_tramp)
++#endif
++
+ 	.align	align_16byte,0x90
+ 	.globl	GNAME(post_signal_tramp)
+ 	TYPE(GNAME(post_signal_tramp))
+@@ -624,6 +674,10 @@ GNAME(post_signal_tramp):
+ 	addl $12,%esp  	/* clear call_into_lisp args from stack */
+ 	popal           /* restore registers */
+         popfl
++#ifdef LISP_FEATURE_DARWIN
++        /* skip two padding words */
++        addl $8,%esp
++#endif
+ 	leave
+ 	ret
+ 	SIZE(GNAME(post_signal_tramp))
+diff --git src/runtime/x86-bsd-os.c src/runtime/x86-bsd-os.c
+index d6ffafd9b..a1cd0b33d 100644
+--- src/runtime/x86-bsd-os.c
++++ src/runtime/x86-bsd-os.c
+@@ -6,8 +6,14 @@
+ 
+ 
+ #ifdef LISP_FEATURE_SB_THREAD
++#ifdef LISP_FEATURE_DARWIN
++#include <architecture/i386/table.h>
++#include <i386/user_ldt.h>
++#include <mach/mach_init.h>
++#else
+ #include <machine/segments.h>
+ #include <machine/sysarch.h>
++#endif /* LISP_FEATURE_DARWIN */
+ #endif
+ 
+ #if defined(LISP_FEATURE_FREEBSD) || defined(LISP_FEATURE_DRAGONFLY)
+@@ -28,7 +34,11 @@
+  * almost every line of code. It would be nice to find some way to
+  * factor out the commonality better; failing that, it might be best
+  * just to split this generic-BSD code into one variant for each BSD.
+- */
++ *
++ * KLUDGE II: this split has begun with the addition of the Darwin BSD
++ * flavour, with the cross-architecture complications that this
++ * entails; unfortunately, currently the situation is worse, not
++ * better, than in the above paragraph. */
+ 
+ #ifdef LISP_FEATURE_NETBSD
+ #define _REG_eax _REG_EAX
+@@ -80,7 +90,7 @@ os_context_fp_addr(os_context_t *context)
+     return (int *)CONTEXT_ADDR_FROM_STEM(ebp);
+ }
+ 
+-#if defined(LISP_FEATURE_FREEBSD) || defined(__OpenBSD__) || defined(__DragonFly__)
++#if defined(LISP_FEATURE_FREEBSD) || defined(__OpenBSD__) || defined(LISP_FEATURE_DARWIN) || defined(__DragonFly__)
+ int *
+ os_context_sp_addr(os_context_t *context)
+ {
+@@ -107,6 +117,11 @@ os_flush_icache(os_vm_address_t address, os_vm_size_t length)
+ {
+ }
+ 
++/* Note: the Darwin versions of arch_os_thread_init found in
++ * x86-darwin-os.c
++*/
++#if !defined(LISP_FEATURE_DARWIN)
++
+ #ifdef LISP_FEATURE_SB_THREAD
+ 
+ void set_data_desc_size(struct segment_descriptor* desc, unsigned long size)
+@@ -121,6 +136,9 @@ void set_data_desc_addr(struct segment_descriptor* desc, void* addr)
+     desc->sd_hibase = ((unsigned int)addr & 0xff000000) >> 24;
+ }
+ 
++#endif
++
++#ifdef LISP_FEATURE_SB_THREAD
+ void
+ arch_os_load_ldt(struct thread *thread)
+ {
+@@ -184,6 +202,7 @@ int arch_os_thread_cleanup(struct thread *thread) {
+     return 1;                  /* success */
+ }
+ 
++#endif /* !LISP_FEATURE_DARWIN */
+ 
+ #if defined(LISP_FEATURE_FREEBSD)
+ #if defined(LISP_FEATURE_RESTORE_TLS_SEGMENT_REGISTER_FROM_CONTEXT)
+-- 
+2.41.0
+
