@@ -3,6 +3,7 @@
 PortSystem      1.0
 
 PortGroup       legacysupport 1.1
+PortGroup       compiler_blacklist_versions 1.0
 
 name            sbcl
 
@@ -41,42 +42,40 @@ checksums       rmd160  95a02d7a489137602ebba333b83bfc1d9eb794be \
                 sha256  89c90720cf9d05dbcd90d690e381a2514c0f1807159e0d7222220c5a8c2d5186 \
                 size    7474392
 
-# NOTE: keep so-called legacy version of SBCL on everything before 10.7
-# Historically 2.2.5 was the last version with support x86/Darwin, and 2.2.2 was
-# the last version with ppc/Darwin. We had backported support of ppc/Darwin to
-# 2.2.5 and use it as baseline for legacy version.
-if {${os.platform} eq "darwin" && ${os.major} < 11} {
-    version     2.2.5
-    revision    1
-    epoch       1
+# NOTE: Historically, the last version to support x86/Darwin and ppc/Darwin was
+# 2.2.5 and 2.2.2. Here, we have backported it to nearly the latest version. On
+# such platforms, we have a different epoch and versioning.
+#
+# Please do not update it without testing.
+if {${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc i386]} {
+    version     2.3.5
+    revision    0
+    epoch       [ expr ${epoch} + 1 ]
 
-    checksums   rmd160  55225af6c20d39db1b158b7c07685ff6e3a8d5bf \
-                sha256  8584b541370fd6ad6e58d3f97982077dfcab240f30d4e9b18f15da91c2f13ed1 \
-                size    7029912
+    checksums   rmd160  95a02d7a489137602ebba333b83bfc1d9eb794be \
+                sha256  89c90720cf9d05dbcd90d690e381a2514c0f1807159e0d7222220c5a8c2d5186 \
+                size    7474392
 
     # See: https://github.com/catap/sbcl/tree/macports-legacy
     patchfiles-append \
-                1001-Darwin-disable-custom-nanosleep-before-10.6.patch \
-                1002-Darwin-recovery-support-non-dispatch-semaphores.patch \
-                1003-x86-Darwin-mask-out-O_LARGEFILE-in-fcntl.1-test.patch \
-                1004-x86-Darwin-revert-OS_THREAD_STACK.patch \
-                1005-x86-Darwin-fix-build-by-old-preprocessor.patch \
-                1006-x86-Darwin-disable-failing-stat-mode-tests.patch \
-                1007-x86-Darwin-add-missed-OS_CONTEXT_PC.patch \
-                1008-x86-Darwin-fix-syntax-typos.patch \
-                1009-ppc-Darwin-Revert-Delete-support-for-and-darwin-ppc.patch \
-                1010-ppc-Darwin-Config.ppc-use-right-compiler-and-deploym.patch \
-                1011-ppc-Darwin-ppc-assem.S-fix-wrong-assembler-code-chun.patch \
-                1012-ppc-Darwin-Misc-fixes-for-PPC.patch \
-                1013-ppc-Darwin-make-config.sh-use-gcc-tls-for-ppc.patch \
-                1014-ppc-Darwin-ppc-assem-a-minor-fix-to-assembler-syntax.patch
-
-    # NOTE: Mach exception handler was a pain and was removed since 2.2.9,
-    # let me disabled it anyway that makes things more consistent and allows to
-    # avoid issues by different SDK / XCode version for legacy systems.
-    # See: https://github.com/sbcl/sbcl/commit/7026bb841aa63c4d43339afb49d837a4497c468a
-    build.post_args-append \
-                --without-mach-exception-handler
+                1001-x86-Darwin-Revert-x86-darwin-files.patch \
+                1002-x86-Darwin-Revert-Perform-darwin-related-housekeepin.patch \
+                1003-x86-Darwin-Remove-mach-exception-handler.patch \
+                1004-Darwin-disable-custom-nanosleep-before-10.6.patch \
+                1005-Darwin-recovery-support-non-dispatch-semaphores.patch \
+                1006-x86-Darwin-mask-out-O_LARGEFILE-in-fcntl.1-test.patch \
+                1007-x86-Darwin-revert-OS_THREAD_STACK.patch \
+                1008-x86-Darwin-fix-build-by-old-preprocessor.patch \
+                1009-x86-Darwin-disable-failing-stat-mode-tests.patch \
+                1010-x86-Darwin-add-missed-OS_CONTEXT_PC.patch \
+                1011-x86-Darwin-fix-syntax-typos.patch \
+                1012-ppc-Darwin-Revert-Delete-support-for-and-darwin-ppc.patch \
+                1013-ppc-Darwin-Config.ppc-follow-up-changes.patch \
+                1014-ppc-Darwin-ppc-assem.S-fix-wrong-assembler-code-chun.patch \
+                1015-ppc-Darwin-Misc-fixes-for-PPC.patch \
+                1016-ppc-Darwin-ppc-assem-a-minor-fix-to-assembler-syntax.patch \
+                1017-Fix-building-by-lisp-without-endian-features.patch \
+                1018-Darwin-implement-os_tsd_get_direct-for-macOS-before-.patch
 }
 
 distfiles       ${name}-${version}-source${extract.suffix}
@@ -84,12 +83,19 @@ worksrcdir      ${name}-${version}
 
 depends_build-append \
                 port:sbcl-bootstrap
+depends_skip_archcheck-append \
+                sbcl-bootstrap
 
 # clock_gettime
 legacysupport.newest_darwin_requires_legacy 15
 # NOTE: check that it can be removed
 patchfiles-append \
                 0003-Use-CLOCK_MONOTONIC-when-CLOCK_PROCESS_CPUTIME_ID-un.patch
+
+# Uses: __attribute__((aligned(8)))
+# See: https://bugs.launchpad.net/sbcl/+bug/1991485
+compiler.blacklist-append \
+                *gcc-3.* *gcc-4.*
 
 post-patch {
     reinplace "s|@@PREFIX@@|${prefix}|g" \
@@ -178,18 +184,12 @@ variant threads description {Enable multi-threaded runtime using the Mach pthrea
 
 variant fancy conflicts threads description {Configure SBCL compilation with all available compatible options (including threading).} {
     build.args-append   --fancy
-    # Before 2.2.6 it ueses lz to compress core
-    depends_lib-append  port:zlib
     # As of version 2.2.6, zstd is used for core compression.
-    if {[vercmp ${version} 2.2.6] >= 0} {
-        depends_lib-delete  port:zlib
-        depends_lib-append  port:zstd
-        patchfiles-append   0005-Use-MacPorts-zstd.patch
-
-        post-patch {
-            reinplace -W ${worksrcpath} "s|@@PREFIX@@|${prefix}|g" \
-                {*}[glob ${worksrcpath}/src/runtime/Config.*-darwin]
-        }
+    depends_lib-append  port:zstd
+    post-patch {
+        reinplace -W ${worksrcpath} \
+            "s|  OS_LIBS += -lzstd|  OS_LIBS += -L${prefix}/lib -lzstd\\\n  DEPEND_FLAGS += -I${prefix}/include\\\n  CFLAGS += -I${prefix}/include|g" \
+            {*}[glob ${worksrcpath}/src/runtime/Config.*-darwin]
     }
 }
 
