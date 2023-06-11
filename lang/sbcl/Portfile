@@ -12,7 +12,7 @@ name            sbcl
 # Please bump the revision of math/maxima (and when it exists
 # math/maxima-devel) and fricas when this port changes.
 version         2.3.5
-revision        1
+revision        2
 
 categories      lang
 license         BSD
@@ -49,7 +49,7 @@ checksums       rmd160  95a02d7a489137602ebba333b83bfc1d9eb794be \
 # Please do not update it without testing.
 if {${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc i386]} {
     version     2.3.5
-    revision    0
+    revision    1
     epoch       [ expr ${epoch} + 1 ]
 
     checksums   rmd160  95a02d7a489137602ebba333b83bfc1d9eb794be \
@@ -61,7 +61,7 @@ if {${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc i386]} {
                 1001-x86-Darwin-Revert-x86-darwin-files.patch \
                 1002-x86-Darwin-Revert-Perform-darwin-related-housekeepin.patch \
                 1003-x86-Darwin-Remove-mach-exception-handler.patch \
-                1004-Darwin-disable-custom-nanosleep-before-10.6.patch \
+                1004-Darwin-use-libc-nanosleep-before-10.6-and-on-PPC.patch \
                 1005-Darwin-recovery-support-non-dispatch-semaphores.patch \
                 1006-x86-Darwin-mask-out-O_LARGEFILE-in-fcntl.1-test.patch \
                 1007-x86-Darwin-revert-OS_THREAD_STACK.patch \
@@ -75,7 +75,8 @@ if {${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc i386]} {
                 1015-ppc-Darwin-Misc-fixes-for-PPC.patch \
                 1016-ppc-Darwin-ppc-assem-a-minor-fix-to-assembler-syntax.patch \
                 1017-Fix-building-by-lisp-without-endian-features.patch \
-                1018-Darwin-implement-os_tsd_get_direct-for-macOS-before-.patch
+                1018-Darwin-implement-os_tsd_get_direct-for-macOS-before-.patch \
+                1019-ppc-Darwin-fix-threads-support.patch
 }
 
 distfiles       ${name}-${version}-source${extract.suffix}
@@ -104,19 +105,15 @@ post-patch {
     reinplace "s|/usr/local/lib/${name}|${prefix}/lib/${name}|g" \
                 ${worksrcpath}/doc/sbcl.1
 
-    # Enable legacy support when it required
-    set legacy_support_cpp_flags [legacysupport::get_cpp_flags]
-    set legacy_support_link_flags [legacysupport::get_library_link_flags]
-    if {${legacy_support_cpp_flags} ne "" || ${legacy_support_link_flags} ne ""} {
-        set config_path ${worksrcpath}/src/runtime
-        foreach f [glob -tails -directory ${config_path} Config.*-darwin] {
-            ui_debug "Adding LegacySupport into ${f}"
-            set config [open ${config_path}/$f a]
-            puts ${config} "CFLAGS += ${legacy_support_cpp_flags}"
-            puts ${config} "DEPEND_FLAGS += ${legacy_support_cpp_flags}"
-            puts ${config} "OS_LIBS += ${legacy_support_link_flags}"
-            close ${config}
-        }
+    # This is the way to bypass path to MacPorts includes into sbcl.mk
+    set config_path ${worksrcpath}/src/runtime
+    foreach f [glob -tails -directory ${config_path} Config.*-darwin] {
+        ui_debug "Adding MacPorts paths into ${f}"
+        set config [open ${config_path}/$f a]
+        puts ${config} "CFLAGS += -I${prefix}/include [legacysupport::get_cpp_flags]"
+        puts ${config} "DEPEND_FLAGS += -I${prefix}/include [legacysupport::get_cpp_flags]"
+        puts ${config} "OS_LIBS += -L${prefix}/lib [legacysupport::get_library_link_flags]"
+        close ${config}
     }
 }
 
@@ -154,22 +151,43 @@ if {${configure.build_arch} eq "i386"} {
                 --arch=${configure.build_arch}
 }
 
+platform darwin arm 20 {
+    # SBCL 2.3.5 unconditionally switched on FUTEX on all arm macOS
+    # unfortunately it use an assembler block of code from macOS SDK
+    # that doesn't work on BigSur and brokes the build.
+    # Error: GC invariant lost, file "thread.c", line 256
+    # See: https://github.com/sbcl/sbcl/blob/sbcl-2.3.5/src/runtime/thread.c#L245-L259
+    build.args-append \
+                --without-sb-futex
+}
+
+# SBCL enables SIMD only when host CPU supports AVX2 which may not be true for buildbot.
+# To make build consistent, let disable it by default and enable via variant.
+# See: https://trac.macports.org/ticket/67437
+build.args-append \
+                --without-sb-simd
+variant simd description {Enable build of SIMD extention, that fails on CPU without AVX2 support.} {
+    build.args-replace --without-sb-simd --with-sb-simd
+}
+
 post-build {
     if {[variant_isset html] || [variant_isset pdf]} {
         system -W ${worksrcpath}/doc "INSTALL_ROOT=${destroot}${prefix} sh ${worksrcpath}/doc/make-doc.sh"
     }
 }
 
-# NOTE seems that threads never works on PowerPC
-# See: https://github.com/sbcl/sbcl/commit/33a6b2817f3e2a8cf98d162a2b40c50d259295c4
-if {![variant_isset threads] && ${configure.build_arch} ne "ppc"} {
+if {![variant_isset threads]} {
     default_variants +fancy
 }
 
 variant html conflicts pdf description {Installs documentation in HTML and Info formats.} {
-    patchfiles-append    0004-Disable-pdf-manual.patch
     depends_build-append bin:texi2dvi:texinfo
     depends_build-append bin:makeinfo:texinfo
+    post-patch {
+        reinplace -W ${worksrcpath} \
+            {s|$GNUMAKE html pdf info|$GNUMAKE html info|g} \
+            doc/make-doc.sh
+    }
 }
 
 variant pdf conflicts html description {Installs documentation in PDF, HTML and Info formats.  Involves the installation of a TexLive dependency chain, which can dramatically slow down the installation of the SBCL port.} {
@@ -186,11 +204,6 @@ variant fancy conflicts threads description {Configure SBCL compilation with all
     build.args-append   --fancy
     # As of version 2.2.6, zstd is used for core compression.
     depends_lib-append  port:zstd
-    post-patch {
-        reinplace -W ${worksrcpath} \
-            "s|  OS_LIBS += -lzstd|  OS_LIBS += -L${prefix}/lib -lzstd\\\n  DEPEND_FLAGS += -I${prefix}/include\\\n  CFLAGS += -I${prefix}/include|g" \
-            {*}[glob ${worksrcpath}/src/runtime/Config.*-darwin]
-    }
 }
 
 test.run        yes
