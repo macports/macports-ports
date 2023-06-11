@@ -1,0 +1,89 @@
+From 6998e9a125e6778330ac7cd4a6d6a0a2ef54ce05 Mon Sep 17 00:00:00 2001
+From: "Kirill A. Korinsky" <kirill@korins.ky>
+Date: Sun, 11 Jun 2023 12:14:51 +0200
+Subject: [PATCH] ppc/Darwin: fix threads support
+
+---
+ src/cold/shared.lisp        |  2 +-
+ src/runtime/arch.h          |  4 ++++
+ src/runtime/ppc-assem.S     |  6 +++---
+ src/runtime/ppc-darwin-os.c | 12 ++++++++----
+ 4 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git src/cold/shared.lisp src/cold/shared.lisp
+index ae707807e..8c2af3973 100644
+--- src/cold/shared.lisp
++++ src/cold/shared.lisp
+@@ -308,7 +308,7 @@
+           (pushnew :immobile-code sb-xc:*features*))
+         (when (target-featurep :64-bit)
+           (push :compact-symbol sb-xc:*features*))
+-        (when (target-featurep '(:and :sb-thread (:or (:and :darwin (:not :x86)) :openbsd)))
++        (when (target-featurep '(:and :sb-thread (:or (:and :darwin (:not (:or :ppc :x86))) :openbsd)))
+           (push :os-thread-stack sb-xc:*features*))
+         (when (target-featurep '(:and :x86 :int4-breakpoints))
+           ;; 0xCE is a perfectly good 32-bit instruction,
+diff --git src/runtime/arch.h src/runtime/arch.h
+index 26f7f2269..5bb8efe46 100644
+--- src/runtime/arch.h
++++ src/runtime/arch.h
+@@ -41,6 +41,10 @@ extern int arch_os_thread_init(struct thread *thread);
+ #if defined(LISP_FEATURE_X86) && defined(LISP_FEATURE_SB_THREAD)
+ extern void arch_os_load_ldt(struct thread *thread);
+ #endif
++#if defined(LISP_FEATURE_PPC) && defined(LISP_FEATURE_SB_THREAD)
++/* pthread_key_t is always unsigned long on PPC/Darwin */
++extern void *arch_os_thread_getspecific(unsigned long key);
++#endif
+ extern int arch_os_thread_cleanup(struct thread *thread);
+ 
+ extern lispobj funcall0(lispobj function);
+diff --git src/runtime/ppc-assem.S src/runtime/ppc-assem.S
+index d902d6e86..58106058c 100644
+--- src/runtime/ppc-assem.S
++++ src/runtime/ppc-assem.S
+@@ -347,9 +347,9 @@ x:
+ 
+ 	/* Call out to obtain our TLS block. */
+ 	load(reg_NL0,CSYMBOL(current_thread))
+-#ifdef LISP_FEATURE_DARWIN /* FIXME: should it be lis/ori or lis/addi? */
+-	lis reg_CFUNC,hi16(CSYMBOL(pthread_getspecific))
+-	ori reg_CFUNC,reg_CFUNC,lo16(CSYMBOL(pthread_getspecific))
++#ifdef LISP_FEATURE_DARWIN
++	lis reg_CFUNC,hi16(CSYMBOL(arch_os_thread_getspecific))
++	ori reg_CFUNC,reg_CFUNC,lo16(CSYMBOL(arch_os_thread_getspecific))
+ #else
+  	lis reg_CFUNC,CSYMBOL(pthread_getspecific)@h
+  	ori reg_CFUNC,reg_CFUNC,CSYMBOL(pthread_getspecific)@l
+diff --git src/runtime/ppc-darwin-os.c src/runtime/ppc-darwin-os.c
+index 9258e273b..781e65250 100644
+--- src/runtime/ppc-darwin-os.c
++++ src/runtime/ppc-darwin-os.c
+@@ -24,16 +24,20 @@
+ #include "arch.h"
+ #include "interr.h"                     /* for declaration of lose */
+ 
+-#ifdef LISP_FEATURE_SB_THREAD
+-#error "Define threading support functions"
+-#else
+ int arch_os_thread_init(struct thread *thread) {
+     return 1;                   /* success */
+ }
++
++#ifdef LISP_FEATURE_SB_THREAD
++/* fix for "ld: absolute address to symbol _pthread_getspecific in a different linkage unit not supported" */
++void *arch_os_thread_getspecific(pthread_key_t key) {
++    return pthread_getspecific(key);
++}
++#endif
++
+ int arch_os_thread_cleanup(struct thread *thread) {
+     return 1;                   /* success */
+ }
+-#endif
+ 
+ os_context_register_t   *
+ os_context_register_addr(os_context_t *context, int offset)
+-- 
+2.41.0
+
