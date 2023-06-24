@@ -293,7 +293,7 @@ proc app::pre_destroot {} {
 
 
 proc app::post_destroot {} {
-    global prefix destroot worksrcpath applications_dir
+    global prefix destroot filespath workpath worksrcpath applications_dir
     set app_create               [option app.create]
     set app_dark_mode            [option app.dark_mode]
     set app_executable           [option app.executable]
