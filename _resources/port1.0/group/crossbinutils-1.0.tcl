@@ -150,7 +150,7 @@ proc crossbinutils.setup {target version} {
     }
 
     depends_build \
-        bin:makeinfo:texinfo
+        port:texinfo
 
     depends_lib \
         port:gettext \
