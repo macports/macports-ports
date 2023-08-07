@@ -32,6 +32,9 @@ default common_lisp.ecl         [expr { ${os.platform} eq "darwin" && ${os.major
 options common_lisp.clisp
 default common_lisp.clisp       yes
 
+options common_lisp.build_run
+default common_lisp.build_run   yes
+
 categories                      lisp
 
 use_configure                   no
@@ -115,8 +118,10 @@ build {
         ln -sf ../source/${subport}/$f ${common_lisp.build}/system/$f
     }
 
-    foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-        common_lisp::asdf_operate "load-op" [string range ${item} 0 end-4]
+    if {[option common_lisp.build_run]} {
+        foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
+            common_lisp::asdf_operate "load-op" [string range ${item} 0 end-4]
+        }
     }
  }
 
