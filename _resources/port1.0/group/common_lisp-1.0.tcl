@@ -124,7 +124,7 @@ build {
 
     if {[option common_lisp.build_run]} {
         foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-            common_lisp::asdf_operate "load-op" [string range ${item} 0 end-4]
+            common_lisp::asdf_operate "build-op" [string range ${item} 0 end-4]
         }
     }
  }
