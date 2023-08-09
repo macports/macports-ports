@@ -105,6 +105,10 @@ pre-build {
     common_lisp::respect_threads_support
 }
 
+pre-test {
+    common_lisp::respect_threads_support
+}
+
 build {
     file delete -force ${common_lisp.build}/source
     file delete -force ${common_lisp.build}/system
