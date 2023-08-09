@@ -1,0 +1,167 @@
+#==================================================================================================
+# From 98a5cf03578b8bb81e5222549851cd865754f658 Mon Sep 17 00:00:00 2001
+# From: Emmanuel Stapf <manuseiffel@users.noreply.github.com>
+# Date: Mon, 11 Jul 2016 07:42:11 +0900
+# Subject: [PATCH 1/1] Add support for 1-bpp images
+#
+# https://gitlab.gnome.org/GNOME/gtk/-/issues/580
+# https://gitlab.gnome.org/GNOME/gtk/uploads/2a194d81de8e8346a81816870264b3bf/gdkimage.patch
+#==================================================================================================
+---
+ gdk/quartz/gdkimage-quartz.c | 66 +++++++++++++++++++++++++++++---------------
+ 1 file changed, 43 insertions(+), 23 deletions(-)
+
+diff --git a/gdk/quartz/gdkimage-quartz.c b/gdk/quartz/gdkimage-quartz.c
+index 493efba..d96b70c 100644
+--- gdk/quartz/gdkimage-quartz.c
++++ gdk/quartz/gdkimage-quartz.c
+@@ -37,15 +37,16 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+ 				 gint         height)
+ {
+   GdkScreen *screen;
++  int depth;
+   
+   g_return_val_if_fail (GDK_IS_DRAWABLE_IMPL_QUARTZ (drawable), NULL);
+   g_return_val_if_fail (image != NULL || (dest_x == 0 && dest_y == 0), NULL);
+ 
+   screen = gdk_drawable_get_screen (drawable);
++  depth = gdk_drawable_get_depth (drawable);
+   if (!image)
+     image = _gdk_image_new_for_depth (screen, GDK_IMAGE_FASTEST, NULL, 
+-				      width, height,
+-				      gdk_drawable_get_depth (drawable));
++				      width, height, depth);
+   
+   if (GDK_IS_PIXMAP_IMPL_QUARTZ (drawable))
+     {
+@@ -63,7 +64,7 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+           return image;
+         }
+ 
+-      switch (gdk_drawable_get_depth (drawable))
++      switch (depth)
+         {
+         case 24:
+           bytes_per_row = pix_impl->width * 4;
+@@ -112,7 +113,7 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+               for (x = 0; x < width; x++)
+                 {
+                   gint32 pixel;
+-	  
++
+                   /* 8 bits */
+                   pixel = src[0];
+                   src++;
+@@ -123,7 +124,7 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+           break;
+ 
+         default:
+-          g_warning ("Unsupported bit depth %d\n", gdk_drawable_get_depth (drawable));
++          g_warning ("Unsupported bit depth %d\n", depth);
+           return image;
+         }
+     }
+@@ -146,7 +147,7 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+       if (GDK_WINDOW_IMPL_QUARTZ (drawable) == GDK_WINDOW_IMPL_QUARTZ (GDK_WINDOW_OBJECT (_gdk_root)->impl))
+         {
+           /* Special case for the root window. */
+-	  CGRect rect = CGRectMake (src_x, src_y, width, height);
++          CGRect rect = CGRectMake (src_x, src_y, width, height);
+           CGImageRef root_image_ref = CGWindowListCreateImage (rect,
+                                                                kCGWindowListOptionOnScreenOnly,
+                                                                kCGNullWindowID,
+@@ -173,7 +174,7 @@ _gdk_quartz_image_copy_to_image (GdkDrawable *drawable,
+         }
+       else
+         {
+-	  NSRect rect = NSMakeRect (src_x, src_y, width, height);
++          NSRect rect = NSMakeRect (src_x, src_y, width, height);
+           view = GDK_WINDOW_IMPL_QUARTZ (drawable)->view;
+ 
+           /* We return the image even if we can't copy to it. */
+@@ -322,7 +323,7 @@ _gdk_image_new_for_depth (GdkScreen    *screen,
+   if (visual)
+     depth = visual->depth;
+ 
+-  g_assert (depth == 24 || depth == 32);
++  g_assert((depth == 1) || (depth == 24) || (depth == 32));
+ 
+   image = g_object_new (gdk_image_get_type (), NULL);
+   image->type = type;
+@@ -333,11 +334,16 @@ _gdk_image_new_for_depth (GdkScreen    *screen,
+ 
+   image->byte_order = (G_BYTE_ORDER == G_LITTLE_ENDIAN) ? GDK_LSB_FIRST : GDK_MSB_FIRST;
+ 
+-  /* We only support images with bpp 4 */
+-  image->bpp = 4;
+-  image->bpl = image->width * image->bpp;
+-  image->bits_per_pixel = image->bpp * 8;
+-  
++  if (depth == 1) {
++    image->bpp = 1;
++    image->bpl = (image->width >> 3) + 1;
++    image->bits_per_pixel = 1;
++  } else {
++      image->bpp = 4;
++      image->bpl = image->width * image->bpp;
++      image->bits_per_pixel = image->bpp * 8;
++  }
++
+   image->mem = g_malloc (image->bpl * image->height);
+   memset (image->mem, 0x00, image->bpl * image->height);
+ 
+@@ -355,9 +361,14 @@ gdk_image_get_pixel (GdkImage *image,
+   g_return_val_if_fail (x >= 0 && x < image->width, 0);
+   g_return_val_if_fail (y >= 0 && y < image->height, 0);
+ 
+-  ptr = image->mem + y * image->bpl + x * image->bpp;
+-
+-  return *(guint32 *)ptr;
++  ptr = image->mem + y * image->bpl;
++  if (image->depth == 1) {
++    guchar data = (image->byte_order == GDK_MSB_FIRST ? (0x80 >> (x & 7)) : (1 << (x & 7)));
++    return (ptr[x >> 3] & data) ? 0x1 : 0x0;
++  } else {
++    ptr += x * image->bpp;
++    return *(guint32 *)ptr;
++  }
+ }
+ 
+ void
+@@ -366,18 +377,27 @@ gdk_image_put_pixel (GdkImage *image,
+ 		     gint y,
+ 		     guint32 pixel)
+ {
+-  guchar *ptr;
+-
+-  ptr = image->mem + y * image->bpl + x * image->bpp;
+-
+-  *(guint32 *)ptr = pixel;
++  guchar *ptr = image->mem + y * image->bpl;
++  if (image->depth == 1) {
++    guchar data = (image->byte_order == GDK_MSB_FIRST ? (0x80 >> (x & 7)) : (1 << (x & 7)));
++    if (pixel) {
++        ptr[x >> 3] |= data;
++    } else {
++        ptr[x >> 3] &= ~data;
++    }
++  } else {
++    ptr += x * image->bpp;
++    *(guint32 *)ptr = pixel;
++  }
+ }
+ 
+ gint
+ _gdk_windowing_get_bits_for_depth (GdkDisplay *display,
+-				   gint        depth)
++                                  gint        depth)
+ {
+-  if (depth == 24 || depth == 32)
++  if (depth == 1)
++	return 1;
++  else if (depth == 24 || depth == 32)
+     return 32;
+   else
+     g_assert_not_reached ();
+-- 
+2.9.0.windows.1

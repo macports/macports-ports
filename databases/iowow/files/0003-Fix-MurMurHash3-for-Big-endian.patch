@@ -1,0 +1,177 @@
+From 40ba6c0dfcc51b4fc76b70eae88e0e74426b097b Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Mon, 31 Jul 2023 13:45:53 +0800
+Subject: [PATCH 3/3] Fix MurMurHash3 for Big-endian
+
+---
+ src/utils/iwhmap.c  |  6 ++---
+ src/utils/murmur3.c | 56 +++++++++++++++++++++++++++------------------
+ 2 files changed, 37 insertions(+), 25 deletions(-)
+
+diff --git src/utils/iwhmap.c src/utils/iwhmap.c
+index 07ae953..025fb81 100644
+--- src/utils/iwhmap.c
++++ src/utils/iwhmap.c
+@@ -109,13 +109,13 @@ IW_INLINE uint32_t _hash_uint64(uint64_t x) {
+ }
+ 
+ IW_INLINE uint32_t _hash_uint64_key(const void *key) {
+-  if (sizeof(uintptr_t) >= sizeof(uint64_t)) {
++  #ifdef IW_64
+     return _hash_uint64((uint64_t) key);
+-  } else {
++  #else
+     uint64_t lv;
+     memcpy(&lv, key, sizeof(lv));
+     return _hash_uint64(lv);
+-  }
++  #endif
+ }
+ 
+ IW_INLINE uint32_t _hash_uint32_key(const void *key) {
+diff --git src/utils/murmur3.c src/utils/murmur3.c
+index c09bf73..c9da471 100644
+--- src/utils/murmur3.c
++++ src/utils/murmur3.c
+@@ -7,7 +7,7 @@
+ #include "murmur3.h"
+ #include <string.h>
+ 
+-#if !defined(__x86_64__) || defined(IW_TESTS)
++#if !defined(IW_64) || defined(IW_TESTS)
+ 
+ IW_INLINE uint32_t rotl32(uint32_t x, int8_t r) {
+   return (x << r) | (x >> (32 - r));
+@@ -22,10 +22,28 @@ IW_INLINE uint64_t rotl64(uint64_t x, int8_t r) {
+ #define ROTL32(x, y) rotl32(x, y)
+ #define ROTL64(x, y) rotl64(x, y)
+ 
++IW_INLINE uint32_t getblock32 (const uint32_t * p, size_t i)
++{
++#ifndef IW_BIGENDIAN
++  return p[i];
++#else
++  return IW_SWAB32(p[i]);
++#endif
++}
++
++IW_INLINE uint64_t getblock64 (const uint64_t * p, size_t i)
++{
++#ifndef IW_BIGENDIAN
++  return p[i];
++#else
++  return IW_SWAB64(p[i]);
++#endif
++}
++
+ static uint32_t seed_value = 0x2fa1bca;
+ 
+ // Finalization mix - force all bits of a hash block to avalanche
+-#if !defined(__x86_64__) || defined(IW_TESTS)
++#if !defined(IW_64) || defined(IW_TESTS)
+ 
+ IW_INLINE uint32_t fmix32(uint32_t h) {
+   h ^= h >> 16;
+@@ -47,21 +65,20 @@ IW_INLINE uint64_t fmix64(uint64_t k) {
+   return k;
+ }
+ 
+-#if !defined(__x86_64__) || defined(IW_TESTS)
++#if !defined(IW_64) || defined(IW_TESTS)
+ 
+ void murmur3_x86_32(const void *key, size_t len, uint32_t seed, void *out) {
+   const uint8_t *data = (const uint8_t*) key;
+   const size_t nblocks = len / 4;
+   size_t i;
++
+   uint32_t h1 = seed;
+   uint32_t c1 = 0xcc9e2d51;
+   uint32_t c2 = 0x1b873593;
+ 
+   const uint32_t *blocks = (const uint32_t*) (data + nblocks * 4);
+   for (i = -nblocks; i; i++) {
+-    uint32_t k1;
+-
+-    memcpy(&k1, blocks + i, sizeof(k1));
++    uint32_t k1 = getblock32(blocks, i);
+ 
+     k1 *= c1;
+     k1 = ROTL32(k1, 15);
+@@ -87,8 +104,7 @@ void murmur3_x86_32(const void *key, size_t len, uint32_t seed, void *out) {
+       k1 *= c2;
+       h1 ^= k1;
+       /* fallthrough */
+-  }
+-  ;
++  };
+ 
+   h1 ^= (uint32_t) len;
+   h1 = fmix32(h1);
+@@ -96,9 +112,9 @@ void murmur3_x86_32(const void *key, size_t len, uint32_t seed, void *out) {
+ }
+ 
+ void murmur3_x86_128(const void *key, const size_t len, uint32_t seed, void *out) {
+-  size_t i;
+   const uint8_t *data = (const uint8_t*) key;
+   const size_t nblocks = len / 16;
++  size_t i;
+ 
+   uint32_t h1 = seed;
+   uint32_t h2 = seed;
+@@ -113,12 +129,10 @@ void murmur3_x86_128(const void *key, const size_t len, uint32_t seed, void *out
+   const uint32_t *blocks = (const uint32_t*) (data + nblocks * 16);
+ 
+   for (i = -nblocks; i; i++) {
+-    uint32_t k1, k2, k3, k4;
+-
+-    memcpy(&k1, blocks + i * 4 + 0, sizeof(k1));
+-    memcpy(&k2, blocks + i * 4 + 1, sizeof(k2));
+-    memcpy(&k3, blocks + i * 4 + 2, sizeof(k3));
+-    memcpy(&k4, blocks + i * 4 + 3, sizeof(k4));
++    uint32_t k1 = getblock32(blocks, i * 4 + 0);
++    uint32_t k2 = getblock32(blocks, i * 4 + 1);
++    uint32_t k3 = getblock32(blocks, i * 4 + 2);
++    uint32_t k4 = getblock32(blocks, i * 4 + 3);
+ 
+     k1 *= c1;
+     k1 = ROTL32(k1, 15);
+@@ -257,6 +271,7 @@ void murmur3_x64_128(const void *key, const size_t len, const uint32_t seed, voi
+   const uint8_t *data = (const uint8_t*) key;
+   const size_t nblocks = len / 16;
+   size_t i;
++
+   uint64_t h1 = seed;
+   uint64_t h2 = seed;
+   uint64_t c1 = 0x87c37b91114253d5LLU;
+@@ -264,10 +279,8 @@ void murmur3_x64_128(const void *key, const size_t len, const uint32_t seed, voi
+ 
+   const uint64_t *blocks = (const uint64_t*) (data);
+   for (i = 0; i < nblocks; i++) {
+-    uint64_t k1, k2;
+-
+-    memcpy(&k1, blocks + i * 2 + 0, sizeof(k1));
+-    memcpy(&k2, blocks + i * 2 + 1, sizeof(k2));
++    uint64_t k1 = getblock64(blocks, i * 2 + 0);
++    uint64_t k2 = getblock64(blocks, i * 2 + 1);
+ 
+     k1 *= c1;
+     k1 = ROTL64(k1, 31);
+@@ -342,8 +355,7 @@ void murmur3_x64_128(const void *key, const size_t len, const uint32_t seed, voi
+       k1 *= c2;
+       h1 ^= k1;
+       /* fallthrough */
+-  }
+-  ;
++  };
+ 
+   h1 ^= (uint64_t) len;
+   h2 ^= (uint64_t) len;
+@@ -358,7 +370,7 @@ void murmur3_x64_128(const void *key, const size_t len, const uint32_t seed, voi
+ }
+ 
+ uint32_t murmur3(const char *keyptr, size_t len) {
+-#ifdef __x86_64__
++#ifdef IW_64
+   uint64_t hash[2];
+   murmur3_x64_128(keyptr, len, seed_value, hash);
+   return (uint32_t) hash[1];

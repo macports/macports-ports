@@ -1,0 +1,360 @@
+From bbd9e317ffc9d990ea281aacac36cb495d5dcb66 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Wed, 17 May 2023 16:17:12 +0800
+Subject: [PATCH 2/4] Revert "Per-request telemetry (5/x): Implement
+ writeStarting() and add raw byte offset to write events"
+
+This reverts commit 8e2d236c882857c0e42bd2a403f7660bb3fcf349.
+---
+ .../rocket/server/RocketServerConnection.cpp  | 33 +++----
+ .../rocket/server/RocketServerConnection.h    |  5 +-
+ .../server/RocketServerConnectionObserver.h   | 12 +--
+ .../transport/rocket/test/network/Mocks.h     |  6 +-
+ .../rocket/test/network/RocketNetworkTest.cpp | 87 ++++++-------------
+ 5 files changed, 41 insertions(+), 102 deletions(-)
+
+diff --git thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
+index 438c25d3c5..966fbaa0ed 100644
+--- thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
++++ thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.cpp
+@@ -155,6 +155,16 @@ void RocketServerConnection::flushWrites(
+   DestructorGuard dg(this);
+   DVLOG(10) << fmt::format("write: {} B", writes->computeChainDataLength());
+ 
++  if (auto observerContainer = getObserverContainer();
++      observerContainer && observerContainer->numObservers()) {
++    for (const auto& writeEvent : context.writeEvents) {
++      observerContainer->invokeInterfaceMethodAllObservers(
++          [&](auto observer, auto observed) {
++            observer->writeReady(observed, writeEvent);
++          });
++    }
++  }
++
+   inflightWritesQueue_.push_back(std::move(context));
+   socket_->writeChain(this, std::move(writes));
+ }
+@@ -736,24 +746,6 @@ void RocketServerConnection::closeWhenIdle() {
+       "Closing due to imminent shutdown"));
+ }
+ 
+-void RocketServerConnection::writeStarting() noexcept {
+-  DestructorGuard dg(this);
+-  DCHECK(!inflightWritesQueue_.empty());
+-  auto& context = inflightWritesQueue_.front();
+-  DCHECK(!context.writeEventsContext.startRawByteOffset.has_value());
+-  context.writeEventsContext.startRawByteOffset = socket_->getRawBytesWritten();
+-
+-  if (auto observerContainer = getObserverContainer();
+-      observerContainer && observerContainer->numObservers()) {
+-    for (const auto& writeEvent : context.writeEvents) {
+-      observerContainer->invokeInterfaceMethodAllObservers(
+-          [&](auto observer, auto observed) {
+-            observer->writeStarting(observed, writeEvent);
+-          });
+-    }
+-  }
+-}
+-
+ void RocketServerConnection::writeSuccess() noexcept {
+   DestructorGuard dg(this);
+   DCHECK(!inflightWritesQueue_.empty());
+@@ -763,16 +755,13 @@ void RocketServerConnection::writeSuccess() noexcept {
+        --processingCompleteCount) {
+     frameHandler_->requestComplete();
+   }
+-  DCHECK(!context.writeEventsContext.endRawByteOffset.has_value());
+-  context.writeEventsContext.endRawByteOffset = socket_->getRawBytesWritten();
+ 
+   if (auto observerContainer = getObserverContainer();
+       observerContainer && observerContainer->numObservers()) {
+     for (const auto& writeEvent : context.writeEvents) {
+       observerContainer->invokeInterfaceMethodAllObservers(
+           [&](auto observer, auto observed) {
+-            observer->writeSuccess(
+-                observed, writeEvent, context.writeEventsContext);
++            observer->writeSuccess(observed, writeEvent);
+           });
+     }
+   }
+diff --git thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.h thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.h
+index 68e9240c98..7fc092bc48 100644
+--- thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.h
++++ thrift/lib/cpp2/transport/rocket/server/RocketServerConnection.h
+@@ -118,7 +118,6 @@ class RocketServerConnection final
+   void close(folly::exception_wrapper ew);
+ 
+   // AsyncTransport::WriteCallback implementation
+-  void writeStarting() noexcept final;
+   void writeSuccess() noexcept final;
+   void writeErr(
+       size_t bytesWritten,
+@@ -299,7 +298,7 @@ class RocketServerConnection final
+    * @return             Attached observers of type T.
+    */
+   template <typename T = Observer>
+-  std::vector<T*> findObservers() const {
++  std::vector<T*> findObservers() {
+     if (auto list = getObserverContainer()) {
+       return list->findObservers<T>();
+     }
+@@ -353,8 +352,6 @@ class RocketServerConnection final
+     std::vector<apache::thrift::MessageChannel::SendCallbackPtr> sendCallbacks;
+     // the WriteEvent objects associated with each write in the batch
+     std::vector<RocketServerConnectionObserver::WriteEvent> writeEvents;
+-    // the raw byte offset at the beginning and end of the inflight write
+-    RocketServerConnectionObserver::WriteEventBatchContext writeEventsContext;
+   };
+   // The size of the queue is equal to the total number of inflight writes to
+   // the underlying transport, i.e., writes for which the
+diff --git thrift/lib/cpp2/transport/rocket/server/RocketServerConnectionObserver.h thrift/lib/cpp2/transport/rocket/server/RocketServerConnectionObserver.h
+index eee8bde872..19bd9aad13 100644
+--- thrift/lib/cpp2/transport/rocket/server/RocketServerConnectionObserver.h
++++ thrift/lib/cpp2/transport/rocket/server/RocketServerConnectionObserver.h
+@@ -31,13 +31,6 @@ class RocketServerConnectionObserver {
+     WriteEvents = 1,
+   };
+ 
+-  struct WriteEventBatchContext {
+-    // the raw byte offset at the beginning of the batch of writes
+-    folly::Optional<size_t> startRawByteOffset;
+-    // the raw byte offset at the end of the batch of writes
+-    folly::Optional<size_t> endRawByteOffset;
+-  };
+-
+   struct WriteEvent {
+     // the stream id of the write
+     const StreamId streamId;
+@@ -60,7 +53,7 @@ class RocketServerConnectionObserver {
+    * writeReady() is invoked when a new response is ready to be written to
+    * the underlying transport
+    */
+-  virtual void writeStarting(
++  virtual void writeReady(
+       RocketServerConnection* /* connection */,
+       const WriteEvent& /* writeEvent */) {}
+ 
+@@ -70,8 +63,7 @@ class RocketServerConnectionObserver {
+    */
+   virtual void writeSuccess(
+       RocketServerConnection* /* connection */,
+-      const WriteEvent& /* writeEvent */,
+-      const WriteEventBatchContext& /* writeEventBatchContext */) {}
++      const WriteEvent& /* writeEvent */) {}
+ };
+ 
+ } // namespace rocket
+diff --git thrift/lib/cpp2/transport/rocket/test/network/Mocks.h thrift/lib/cpp2/transport/rocket/test/network/Mocks.h
+index dd1d87f3f0..be0e999ef8 100644
+--- thrift/lib/cpp2/transport/rocket/test/network/Mocks.h
++++ thrift/lib/cpp2/transport/rocket/test/network/Mocks.h
+@@ -31,15 +31,13 @@ class MockRocketServerConnectionObserver
+   using RocketServerConnection::ManagedObserver::ManagedObserver;
+   MOCK_METHOD(
+       void,
+-      writeStarting,
++      writeReady,
+       (RocketServerConnection*, const WriteEvent&),
+       (override));
+   MOCK_METHOD(
+       void,
+       writeSuccess,
+-      (RocketServerConnection*,
+-       const WriteEvent&,
+-       const WriteEventBatchContext&),
++      (RocketServerConnection*, const WriteEvent&),
+       (override));
+ };
+ 
+diff --git thrift/lib/cpp2/transport/rocket/test/network/RocketNetworkTest.cpp thrift/lib/cpp2/transport/rocket/test/network/RocketNetworkTest.cpp
+index a220506a77..a405f09af8 100644
+--- thrift/lib/cpp2/transport/rocket/test/network/RocketNetworkTest.cpp
++++ thrift/lib/cpp2/transport/rocket/test/network/RocketNetworkTest.cpp
+@@ -1397,25 +1397,12 @@ TEST_F(RocketNetworkTest, ObserverIsNotInstalledWhenFlagIsFalse) {
+   });
+ }
+ 
+-MATCHER_P3(WriteStartingMatcher, id, bytes, offset, "") {
++MATCHER_P3(WriteEventMatcher, id, bytes, offset, "") {
+   return arg.streamId == StreamId(id) &&
+       arg.totalBytesInWrite == (size_t)bytes &&
+       arg.batchOffset == (size_t)offset;
+ }
+ 
+-MATCHER_P3(WriteSuccessMatcher, id, bytes, offset, "") {
+-  return arg.streamId == StreamId(id) &&
+-      arg.totalBytesInWrite == (size_t)bytes &&
+-      arg.batchOffset == (size_t)offset;
+-}
+-
+-MATCHER_P2(WriteEventContextMatcher, startRawOffset, endRawOffset, "") {
+-  return arg.startRawByteOffset.has_value() &&
+-      arg.startRawByteOffset.value() == startRawOffset &&
+-      arg.endRawByteOffset.has_value() &&
+-      arg.endRawByteOffset.value() == endRawOffset;
+-}
+-
+ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+   THRIFT_FLAG_SET_MOCK(enable_rocket_connection_observers, true);
+   this->withClient([&](RocketTestClient& client) {
+@@ -1443,21 +1430,19 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+     constexpr size_t kSetupFrameSize(14);
+     constexpr size_t kSetupFrameStreamId(0);
+ 
+-    // send a request and check the event notifications when the
+-    // response is ready and written to the socket
++    // send a request and check the event notifications when the response is
++    // ready and written to the socket
+     {
+       constexpr folly::StringPiece kMetadata("metadata");
+       constexpr folly::StringPiece kData("data");
+-      const unsigned int startOffsetBatch1 = 0;
+-      const unsigned int endOffsetBatch1 = kSetupFrameSize + 24;
+ 
+-      // responses to setup frame (stream id = 0) and to the first
+-      // request (stream id = 1) are batched together
++      // responses to setup frame (stream id = 0) and to the first request
++      // (stream id = 1) are batched together
+       EXPECT_CALL(
+           *observer,
+-          writeStarting(
++          writeReady(
+               _,
+-              WriteStartingMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId /* streamId */,
+                   kSetupFrameSize /* totalBytesWritten */,
+                   0 /* batchOffset */)));
+@@ -1465,18 +1450,15 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+           *observer,
+           writeSuccess(
+               _,
+-              WriteSuccessMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId /* streamId */,
+                   kSetupFrameSize /* totalBytesWritten */,
+-                  0 /* batchOffset */),
+-              WriteEventContextMatcher(
+-                  startOffsetBatch1 /* startRawByteOffset */,
+-                  endOffsetBatch1 /* endRawByteOffset */)));
++                  0 /* batchOffset */)));
+       EXPECT_CALL(
+           *observer,
+-          writeStarting(
++          writeReady(
+               _,
+-              WriteStartingMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId + 1 /* streamId */,
+                   24 /* totalBytesWritten */,
+                   kSetupFrameSize /* batchOffset */)));
+@@ -1484,13 +1466,10 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+           *observer,
+           writeSuccess(
+               _,
+-              WriteSuccessMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId + 1 /* streamId */,
+                   24 /* totalBytesWritten */,
+-                  kSetupFrameSize /* batchOffset */),
+-              WriteEventContextMatcher(
+-                  startOffsetBatch1 /* startRawByteOffset */,
+-                  endOffsetBatch1 /* endRawByteOffset */)));
++                  kSetupFrameSize /* batchOffset */)));
+ 
+       client.sendRequestResponseSync(
+           Payload::makeFromMetadataAndData(kMetadata, kData),
+@@ -1503,16 +1482,11 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+     {
+       constexpr folly::StringPiece kNewMetadata("new_metadata");
+       constexpr folly::StringPiece kNewData("new_data");
+-      const unsigned int startOffsetBatch2 =
+-          kSetupFrameSize + 24 /* 24 is the size of the first response */;
+-      const unsigned int endOffsetBatch2 =
+-          startOffsetBatch2 + 32 /* 32 is the size of the second response */;
+-
+       EXPECT_CALL(
+           *observer,
+-          writeStarting(
++          writeReady(
+               _,
+-              WriteStartingMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId + 3 /* streamId */,
+                   32 /* totalBytesWritten */,
+                   0 /* batchOffset */)));
+@@ -1520,13 +1494,10 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestResponse) {
+           *observer,
+           writeSuccess(
+               _,
+-              WriteSuccessMatcher(
++              WriteEventMatcher(
+                   kSetupFrameStreamId + 3 /* streamId */,
+                   32 /* totalBytesWritten */,
+-                  0 /* batchOffset */),
+-              WriteEventContextMatcher(
+-                  startOffsetBatch2 /* startRawByteOffset */,
+-                  endOffsetBatch2 /* endRawByteOffset */)));
++                  0 /* batchOffset */)));
+ 
+       client.sendRequestResponseSync(
+           Payload::makeFromMetadataAndData(kNewMetadata, kNewData),
+@@ -1575,14 +1546,12 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestStream) {
+     constexpr folly::StringPiece kMetadata("metadata");
+     const auto data =
+         folly::to<std::string>("generate:", kNumRequestedPayloads);
+-    const unsigned int startOffsetBatch = 0;
+-    const unsigned int endOffsetBatch = kSetupFrameSize + 16;
+ 
+     EXPECT_CALL(
+         *observer,
+-        writeStarting(
++        writeReady(
+             _,
+-            WriteStartingMatcher(
++            WriteEventMatcher(
+                 kSetupFrameStreamId /* streamId */,
+                 kSetupFrameSize /* totalBytesWritten */,
+                 0 /* batchOffset */)));
+@@ -1590,18 +1559,15 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestStream) {
+         *observer,
+         writeSuccess(
+             _,
+-            WriteSuccessMatcher(
++            WriteEventMatcher(
+                 kSetupFrameStreamId /* streamId */,
+                 kSetupFrameSize /* totalBytesWritten */,
+-                0 /* batchOffset */),
+-            WriteEventContextMatcher(
+-                startOffsetBatch /* startRawByteOffset */,
+-                endOffsetBatch /* endRawByteOffset */)));
++                0 /* batchOffset */)));
+     EXPECT_CALL(
+         *observer,
+-        writeStarting(
++        writeReady(
+             _,
+-            WriteStartingMatcher(
++            WriteEventMatcher(
+                 kSetupFrameStreamId + 1 /* streamId */,
+                 16 /* totalBytesWritten */,
+                 kSetupFrameSize /* batchOffset */)));
+@@ -1609,13 +1575,10 @@ TEST_F(RocketNetworkTest, ObserverIsNotifiedOnWriteSuccessRequestStream) {
+         *observer,
+         writeSuccess(
+             _,
+-            WriteSuccessMatcher(
++            WriteEventMatcher(
+                 kSetupFrameStreamId + 1 /* streamId */,
+                 16 /* totalBytesWritten */,
+-                kSetupFrameSize /* batchOffset */),
+-            WriteEventContextMatcher(
+-                startOffsetBatch /* startRawByteOffset */,
+-                endOffsetBatch /* endRawByteOffset */)));
++                kSetupFrameSize /* batchOffset */)));
+ 
+     auto stream = client.sendRequestStreamSync(
+         Payload::makeFromMetadataAndData(kMetadata, folly::StringPiece{data}));
+-- 
+2.40.1
+

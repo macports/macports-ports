@@ -6,8 +6,8 @@ PortGroup           python 1.0
 PortGroup           openssl 1.0
 
 name                ntpsec
-version             1.2.1
-revision            4
+version             1.2.2
+revision            1
 categories          sysutils net
 maintainers         {fwright.net:fw @fhgwright} openmaintainer
 description         A secure, hardened, and improved implementation of NTP
@@ -20,9 +20,9 @@ homepage            https://www.ntpsec.org/
 conflicts           ntp openntpd
 
 master_sites        ftp://ftp.ntpsec.org/pub/releases/
-checksums           rmd160  ca5d758bf6572b460ba8e8c8e70f09b8a7417fd0 \
-                    sha256  f2684835116c80b8f21782a5959a805ba3c44e3a681dd6c17c7cb00cc242c27a \
-                    size    2681237
+checksums           rmd160  60b8c64a75d27d8e34db51c17050ccecc182f972 \
+                    sha256  2f2848760b915dfe185b9217f777738b36ceeb78a7fc208b7e74e039dec22df5 \
+                    size    2710329
 
 # 10.5 x86_64 builds successfully and passes all build tests, but doesn't
 # actually work.  This has apparently been true forever, but until recently,
@@ -30,39 +30,80 @@ checksums           rmd160  ca5d758bf6572b460ba8e8c8e70f09b8a7417fd0 \
 # and not really a regression, we simply disallow it for now.  It's unknown
 # whether 10.4 x86_64 has the same issue, but we also disallow that out of
 # conservatism.  This should be removed once the code is fixed.
+#
+# This bug has been verified as still present as of 1.2.2.
 if { ${os.platform} eq "darwin" && ${os.major} < 10 } {
     supported_archs     i386 ppc
 }
 
-# To avoid breaking any code that uses our Python package, keep the Python
-# version at 2.7 until we add variants for Python versions.  The upstream
-# code itself works with 2.6, 2.7, and 3.3+.
-python.versions     27
+# ntpsec requires Python 2.6, 2.7, or 3.3+.
+# We skip 2.6 and 3.3, but keep 2.7 and 3.4+.
+# Some variants may force a more restricted list.
+#
+set pythons_suffixes {27 34 35 36 37 38 39 310 311}
 
-# Note that the upstream --python option may not work correctly, so waf
-# must be run with the target Python version.  The waf PortGroup doesn't
-# currently allow selecting its Python version, but since it's hard-coded
-# for 2.7, we can ignore this for now.
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
 
-# Also note that the new ffi-based Python client library doesn't work properly
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string range ${s} 1 99]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
+}
+
+# Default to +python27
+#
+# Since this port provides Python modules that may be used by users, changing
+# the Python version may break existing user code.  Since earlier versions of
+# this port had no pythonXX variant, there is no established default variant
+# to avoid such a switch on an upgrade.  Hence, the default should remain at
+# +python27 for a while.
+#
+set pyver_no_dot "27"
+
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+default_variants +python${pyver_no_dot}
+
+# make sure some python variant is selected
+set pyver_no_dot ""
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+pre-fetch {
+    if {${pyver_no_dot} eq ""} {
+        ui_error "\n\nYou must select one of the Python variants (+pythonXY).\n"
+    return -code error "Invalid Python variant selection"
+    }
+}
+
+python.version          ${pyver_no_dot}
+waf.python_branch       ${python.branch}
+
+# Avoid treating python311+ differently from earlier versions.
+# In particular, avoid clobbering destroot.target and adding superfluous
+# dependencies.
+python.pep517       no
+
+# Note that the new ffi-based Python client library doesn't work properly
 # on the Mac, so we use the old extension-based version.
 
-# The installed ntpsec code builds correctly with openssl3, though one of
-# the "attic" programs included (erroneously) in the default build does not.
-# Although this is easily fixed, openssl3 itself currently fails to build
-# in certain cases, so we keep this on openssl11 for now.
-#
-# Since OpenSSL 1.1 is still fully supported, adequate for ntpsec, and has no
-# licensing issues for ntpsec, there's no rush to move to OpenSSL 3, which might
-# as well wait for the next ntpsec release (or later, if openssl3 isn't fully
-# fixed by then).
-openssl.branch      1.1
+openssl.branch      3
 # NOTE: doesn't work with libressl
 
 depends_build-append port:bison port:pkgconfig
-depends_lib-append  port:python${python.version}
+#depends_lib-append  port:python${pyver_no_dot}
 
-# Consolidated patchfile, based on GitHub/fhgwwight/macports-releases
+# Consolidated patchfile, based on GitHub/fhgwright/macports-releases
 patchfiles          patch-allfixes.diff
 
 use_configure       yes
@@ -75,6 +116,7 @@ configure.args      --alltests \
                     --pyshebang=${python.bin} \
                     --pythondir=${python.pkgd} \
                     --pythonarchdir=${python.pkgd}
+
 # Make sure we use waf, not setup.py for build
 build.cmd           ${waf.python} ./waf
 destroot.cmd        ${build.cmd}
@@ -82,6 +124,10 @@ destroot.cmd        ${build.cmd}
 # Although the normal build procedure includes the tests, we also allow
 # them separately so that "port test" works.
 test.run            yes
+# Avoid unnecessary dependency on pyXX-test
+python.test_framework
+# Override the python portgroup's inappropriate test.cmd
+test.cmd            ${build.cmd}
 test.target         check
 
 default_variants    +doc
@@ -116,6 +162,10 @@ post-destroot {
     destroot.keepdirs \
         ${destroot}${prefix}/var/db \
         ${destroot}${prefix}/var/run
+
+    # The install script inappropriately installs the runtests program
+    # See https://gitlab.com/NTPsec/ntpsec/-/issues/786
+    delete "${destroot}${prefix}/bin/runtests"
 }
 post-activate {
     if {![file exists ${prefix}/etc/ntp.conf]} {

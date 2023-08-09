@@ -51,11 +51,11 @@ proc linalg.setup {args} {
 }
 
 if {![variant_isset accelerate] && ![variant_isset atlas] && ![variant_isset openblas]} {
-    if { ${os.platform} eq "darwin" && ${os.major} > 20 } {
+    if {${os.platform} eq "darwin" && ${os.major} < 21} {
         # see https://trac.macports.org/ticket/65260
-        default_variants-append +openblas
-    } else {
         default_variants-append +accelerate
+    } else {
+        default_variants-append +openblas
     }
 }
 

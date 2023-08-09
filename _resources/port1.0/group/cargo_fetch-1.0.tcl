@@ -37,144 +37,79 @@
 #    baz    author/baz  branch  abcdef12345678...commit...abcdef12345678  fedcba654321...
 #
 
-PortGroup compiler_blacklist_versions 1.0
-PortGroup legacysupport 1.1
+PortGroup   muniversal          1.1
+PortGroup   compiler_wrapper    1.0
+# ideally, we would like to add the openssl PG, however
+#     its use of `option_proc` makes changing the default value of `openssl.branch` difficult, and
+#     it interferes with our intended use of compiler_wrapper PG
+# for now, create an option `openssl.branch` in this PG
+# Cargo's interaction with OpenSSL is a bit delicate
+# see, e.g., https://trac.macports.org/ticket/65011
+#
+# similarly for legacysupport PG
 
-options cargo.bin cargo.home cargo.crates cargo.crates_github
+options cargo.bin \
+        cargo.home \
+        cargo.dir \
+        cargo.crates \
+        cargo.offline_cmd \
+        cargo.crates_github cargo.update
 
 default cargo.bin           {${prefix}/bin/cargo}
 default cargo.home          {${workpath}/.home/.cargo}
+default cargo.dir           {${worksrcpath}}
 default cargo.crates        {}
 default cargo.crates_github {}
 
+# if a dependency has been patched, `--offline` might be a reasonable choice
+default     cargo.offline_cmd   {--frozen}
+
+# some packags do not provide Cargo.lock,
+# so offer the option of running cargo-update
+default     cargo.update        {no}
+
+# use `--remap-path-prefix` to prevent build information from bing included installed binaries
+options     rust.remap
+default     rust.remap          {${cargo.home} "" ${worksrcpath} ""}
+
+# flags to be passed to the rust compiler
+# --remap-path-prefix=... is eventually added unless rust.remap is empty
+options     rust.flags
+default     rust.flags          {}
+
 # As building with rust uses the same underlying compiler as used to build it
 # replicate the same compiler selection options here
-compiler.cxx_standard       2017
-compiler.blacklist-append   {macports-clang-[4-9].0}
+default compiler.cxx_standard           2017
+default compiler.thread_local_storage   yes
 
-option_proc cargo.crates handle_cargo_crates
-proc handle_cargo_crates {option action {value ""}} {
-    if {${action} eq "set"} {
-        foreach {cname cversion chksum} ${value} {
-            set cratefile       ${cname}-${cversion}.crate
-            # The same crate name can appear with multiple versions. Use
-            # a combination of crate name and checksum as unique identifier.
-            # As the :disttag cannot contain dots, the version number cannot be
-            # used.
-            #
-            # To download the crate file curl-0.4.11.crate, the URL is
-            #    https://crates.io/api/v1/crates/curl/0.4.11/download.
-            # Use ?dummy= to ignore ${distfile}
-            # see https://trac.macports.org/wiki/PortfileRecipes#fetchwithgetparams
-            set cratetag        crate-${cname}-${chksum}
-            distfiles-append    ${cratefile}:${cratetag}
-            master_sites-append https://crates.io/api/v1/crates/${cname}/${cversion}/download?dummy=:${cratetag}
-            checksums-append    ${cratefile} sha256 ${chksum}
-        }
-    }
-}
+# do not include os.major in target triplet
+default triplet.os          {${os.platform}}
 
-option_proc cargo.crates_github handle_cargo_crates_github
-proc handle_cargo_crates_github {option action {value ""}} {
-    if {${action} eq "set"} {
-        foreach {cname cgithub cbranch crevision chksum} ${value} {
-            set cratefile       ${cname}-${crevision}.tar.gz
-            # The same crate name can appear with multiple versions. Use
-            # a combination of crate name and checksum as unique identifier.
-            # As the :disttag cannot contain dots, the version number cannot be
-            # used.
-            set cratetag        crate-${cname}-${chksum}
-            distfiles-append    ${cratefile}:${cratetag}
-            master_sites-append https://github.com/${cgithub}/archive/${crevision}.tar.gz?dummy=:${cratetag}
-            checksums-append    ${cratefile} sha256 ${chksum}
-        }
-    }
-}
+# Rust does not easily pass external flags to compilers, so add them to compiler wrappers
+default     compwrap.compilers_to_wrap          {cc cxx ld}
+default     compwrap.ccache_supported_compilers {}
 
-proc cargo._extract_crate {cratefile} {
-    global cargo.home distpath
+# possible OpenSSL versions: empty, 3, 1.1, and 1.0
+options     openssl.branch
+default     openssl.branch      {}
 
-    set tar [findBinary tar ${portutil::autoconf::tar_path}]
-    system -W "${cargo.home}/macports" "$tar -xf [shellescape ${distpath}/${cratefile}]"
-}
-
-proc cargo._write_cargo_checksum {cdirname chksum} {
-    global cargo.home
-
-    # although cargo will never see the .crate, it expects to find the sha256 checksum here
-    set chkfile [open "${cargo.home}/macports/${cdirname}/.cargo-checksum.json" "w"]
-    puts $chkfile "{"
-    puts $chkfile "    \"package\": ${chksum},"
-    puts $chkfile "    \"files\": {}"
-    puts $chkfile "}"
-    close $chkfile
-}
-
-proc cargo._old_macos_compatibility {cname cversion} {
-    global os.platform os.major cargo.home
-    if {${os.platform} ne "darwin" || ${os.major} >= 12} {
-        return
-    }
-
-    switch ${cname} {
-        "crypto-hash" {
-            # switch crypto-hash to use openssl instead of commoncrypto
-            # See: https://github.com/malept/crypto-hash/issues/23
-            reinplace "s|target_os = \"macos\"|target_os = \"macos_disabled\"|g" \
-                ${cargo.home}/macports/crypto-hash-${cversion}/src/lib.rs
-            reinplace "s|macos|macos_disabled|g" \
-                ${cargo.home}/macports/crypto-hash-${cversion}/Cargo.toml
-        }
-        "curl-sys" {
-            # curl-sys requires CCDigestGetOutputSizeFromRef which is available since macOS 10.8
-            # disable USE_SECTRANSP to avoid calling of CCDigestGetOutputSizeFromRef
-            # See: https://github.com/alexcrichton/curl-rust/issues/429
-            reinplace "s|USE_SECTRANSP|USE_SECTRANSP_DISABLED|g" \
-                ${cargo.home}/macports/curl-sys-${cversion}/build.rs
-        }
-    }
-
-}
-
-proc cargo._import_crate {cname cversion chksum cratefile} {
-    global cargo.home
-
-    ui_info "Adding ${cratefile} to cargo home"
-    cargo._extract_crate ${cratefile}
-    cargo._write_cargo_checksum "${cname}-${cversion}" "\"${chksum}\""
-    cargo._old_macos_compatibility ${cname} ${cversion}
-}
-
-proc cargo._import_crate_github {cname cgithub crevision chksum cratefile} {
-    global cargo.home
-
-    set crepo [lindex [split ${cgithub} "/"] 1]
-    set cdirname "${crepo}-${crevision}"
-
-    ui_info "Adding ${cratefile} from github to cargo home"
-    cargo._extract_crate ${cratefile}
-    cargo._write_cargo_checksum ${cdirname} "null"
-    cargo._old_macos_compatibility ${cname} ${cversion}
-}
-
-# The distfiles of the main port will also be stored in this directory,
+# the distfiles of the main port will also be stored in this directory,
 # but this is the only way to allow reusing the same crates across multiple ports.
-default dist_subdir     {[cargo._dist_subdir]}
+default     dist_subdir             {[expr {[llength ${cargo.crates}] > 0 || [llength ${cargo.crates_github}] > 0 ? "cargo-crates" : ${name}}]}
+default     extract.only            {[rust::disttagclean $distfiles]}
 
-proc cargo._dist_subdir {} {
-    global name cargo.crates cargo.crates_github
-    if {[llength ${cargo.crates}] > 0 || [llength ${cargo.crates_github}]>0} {
-        return cargo-crates
-    } else {
-        return ${name}
-    }
-}
+# to wrap linker, compiler_wrapper PG required existence of configure.ld
+options     configure.ld
+default     configure.ld            {${configure.cc}}
 
-default extract.only    {[cargo._disttagclean $distfiles]}
+####################################################################################################################################
+# internal procedures
+####################################################################################################################################
+
+namespace eval rust {}
 
 # based on portextract::disttagclean from portextract.tcl
-proc cargo._disttagclean {list} {
-    global cargo.crates cargo.crates_github
+proc rust::disttagclean {list} {
     if {$list eq ""} {
         return $list
     }
@@ -182,13 +117,13 @@ proc cargo._disttagclean {list} {
         set name [getdistname ${fname}]
 
         set is_crate no
-        foreach {cname cversion chksum} ${cargo.crates} {
+        foreach {cname cversion chksum} [option cargo.crates] {
             set cratefile ${cname}-${cversion}.crate
             if {${name} eq ${cratefile}} {
                 set is_crate yes
             }
         }
-        foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
+        foreach {cname cgithub cbranch crevision chksum} [option cargo.crates_github] {
             set cratefile ${cname}-${crevision}.tar.gz
             if {${name} eq ${cratefile}} {
                 set is_crate yes
@@ -201,14 +136,148 @@ proc cargo._disttagclean {list} {
     return $val
 }
 
-if {${subport} ne "cargo-bootstrap" && ${subport} ne "cargo-stage1" && ${subport} ne "cargo"} {
-    depends_build-append port:cargo
-    # do not force all Portfiles to switch from depends_build to depends_build-append
-    proc cargo.add_dependencies {} {
-        depends_build-delete port:cargo
-        depends_build-append port:cargo
+proc rust::handle_crates {} {
+    foreach {cname cversion chksum} [option cargo.crates] {
+        # The same crate name can appear with multiple versions. Use
+        # a combination of crate name and checksum as unique identifier.
+        # As the :disttag cannot contain dots, the version number cannot be
+        # used.
+        #
+        # To download the crate file curl-0.4.11.crate, the URL is
+        #    https://crates.io/api/v1/crates/curl/0.4.11/download.
+        # Use ?dummy= to ignore ${distfile}
+        # see https://trac.macports.org/wiki/PortfileRecipes#fetchwithgetparams
+        set cratefile       ${cname}-${cversion}.crate
+        set cratetag        crate-${cname}-${chksum}
+        distfiles-append    ${cratefile}:${cratetag}
+        master_sites-append https://crates.io/api/v1/crates/${cname}/${cversion}/download?dummy=:${cratetag}
+        checksums-append    ${cratefile} sha256 ${chksum}
     }
-    port::register_callback cargo.add_dependencies
+
+    foreach {cname cgithub cbranch crevision chksum} [option cargo.crates_github] {
+        set cratefile       ${cname}-${crevision}.tar.gz
+        set cratetag        crate-${cname}-${chksum}
+        distfiles-append    ${cratefile}:${cratetag}
+        master_sites-append https://github.com/${cgithub}/archive/${crevision}.tar.gz?dummy=:${cratetag}
+        checksums-append    ${cratefile} sha256 ${chksum}
+    }
+}
+port::register_callback rust::handle_crates
+
+proc rust::extract_crate {cratefile} {
+    set tar [findBinary tar ${portutil::autoconf::tar_path}]
+    system -W "[option cargo.home]/macports" "$tar -xf [shellescape [option distpath]/${cratefile}]"
+}
+
+proc rust::write_cargo_checksum {cdirname chksum} {
+    # although cargo will never see the .crate, it expects to find the sha256 checksum here
+    set chkfile [open "[option cargo.home]/macports/${cdirname}/.cargo-checksum.json" "w"]
+    puts $chkfile "{"
+    puts $chkfile "    \"package\": ${chksum},"
+    puts $chkfile "    \"files\": {}"
+    puts $chkfile "}"
+    close $chkfile
+}
+proc rust::old_macos_compatibility {cname cversion} {
+    global cargo.home subport
+
+    switch ${cname} {
+        "kqueue" {
+            if { [vercmp ${cversion} < 1.0.5] && "i386" in [option muniversal.architectures] } {
+                # see https://gitlab.com/worr/rust-kqueue/-/merge_requests/10
+                reinplace {s|all(target_os = "freebsd", target_arch = "x86")|all(any(target_os = "freebsd", target_os = "macos"), any(target_arch = "x86", target_arch = "powerpc"))|g} \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/time.rs
+                cargo.offline_cmd-replace --frozen --offline
+            }
+        }
+        "curl-sys" {
+            if { [vercmp ${cversion} < 0.4.56] } {
+                # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
+                # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
+                # see https://trac.macports.org/ticket/64146#comment:16
+                #
+                # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
+                # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
+                # see https://github.com/alexcrichton/curl-rust/issues/279
+                #
+                # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
+                #
+                reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/build.rs
+            }
+        }
+    }
+
+    # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.8]} {
+        return
+    }
+
+    switch ${cname} {
+        "crypto-hash" {
+            # switch crypto-hash to use openssl instead of commoncrypto
+            # See: https://github.com/malept/crypto-hash/issues/23
+            reinplace "s|target_os = \"macos\"|target_os = \"macos_disabled\"|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/src/lib.rs
+            reinplace "s|macos|macos_disabled|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/Cargo.toml
+        }
+        "curl-sys" {
+            # curl-sys requires CCDigestGetOutputSizeFromRef which is only available since macOS 10.8
+            # disable USE_SECTRANSP to avoid calling of CCDigestGetOutputSizeFromRef and use OpenSSL instead
+            # See: https://github.com/alexcrichton/curl-rust/issues/429
+            reinplace "s|else if target.contains(\"-apple-\")|else if target.contains(\"-apple_disabled-\")|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/build.rs
+            reinplace "s|macos|macos_disabled|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/Cargo.toml
+        }
+        "libgit2-sys" {
+            # libgit2-sys requires SSLCreateContext which is only available since macOS 10.8
+            # disable GIT_SECURE_TRANSPORT to avoid calling of SSLCreateContext and use OpenSSL instead
+            reinplace "s|else if target.contains(\"apple\")|else if target.contains(\"apple_disabled\")|g" \
+                ${cargo.home}/macports/${cname}-${cversion}/build.rs
+        }
+    }
+
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.6]} {
+        return
+    }
+
+    switch ${cname} {
+        "notify" {
+            reinplace {s|default = \["macos_fsevent"\]|default = \["macos_kqueue"\]|g} \
+                ${cargo.home}/macports/${cname}-${cversion}/Cargo.toml
+        }
+        "cargo-util" {
+            reinplace {s|#\[cfg(not(target_os = "macos"))\]|#\[cfg(not(target_os = "macos_temp"))\]|g} \
+                ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
+            reinplace {s|#\[cfg(target_os = "macos")\]|#\[cfg(not(target_os = "macos"))\]|g} \
+                ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
+            reinplace {s|#\[cfg(not(target_os = "macos_temp"))\]|#\[cfg(target_os = "macos")\]|g} \
+                ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
+        }
+    }
+}
+
+proc rust::import_crate {cname cversion chksum cratefile} {
+    global cargo.home
+
+    ui_info "Adding ${cratefile} to cargo home"
+    rust::extract_crate ${cratefile}
+    rust::write_cargo_checksum "${cname}-${cversion}" "\"${chksum}\""
+    rust::old_macos_compatibility ${cname} ${cversion}
+}
+
+proc rust::import_crate_github {cname cgithub crevision chksum cratefile} {
+    global cargo.home
+
+    set crepo [lindex [split ${cgithub} "/"] 1]
+    set cdirname "${crepo}-${crevision}"
+
+    ui_info "Adding ${cratefile} from github to cargo home"
+    rust::extract_crate ${cratefile}
+    rust::write_cargo_checksum ${cdirname} "null"
+    rust::old_macos_compatibility ${cname} ${crevision}
 }
 
 post-extract {
@@ -218,7 +287,7 @@ post-extract {
         # avoid downloading files from online repository during build phase
         # use a replacement for crates.io
         # https://doc.rust-lang.org/cargo/reference/source-replacement.html
-        set conf [open "${cargo.home}/config" "w"]
+        set conf [open "${cargo.home}/config.toml" "w"]
         puts $conf "\[source\]"
         puts $conf "\[source.macports\]"
         puts $conf "directory = \"${cargo.home}/macports\""
@@ -236,111 +305,193 @@ post-extract {
         # import all crates
         foreach {cname cversion chksum} ${cargo.crates} {
             set cratefile ${cname}-${cversion}.crate
-            cargo._import_crate ${cname} ${cversion} ${chksum} ${cratefile}
+            rust::import_crate ${cname} ${cversion} ${chksum} ${cratefile}
         }
         foreach {cname cgithub cbranch crevision chksum} ${cargo.crates_github} {
             set cratefile ${cname}-${crevision}.tar.gz
-            cargo._import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
+            rust::import_crate_github ${cname} ${cgithub} ${crevision} ${chksum} ${cratefile}
         }
     }
-}
 
-# MacPorts use the name i386 for 32-bit Intel architecture
-# Cargo and Rust use the name i686
-proc cargo.translate_arch_name {arch} {
-    if {${arch} eq "i386"} {
-        return "i686"
-    } elseif {${arch} eq "arm64"} {
-        return "aarch64"
-    } else {
-        return ${arch}
-    }
-}
+    if {${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap"} {
 
-proc cargo.rust_platform {{arch ""}} {
-    global os.platform configure.build_arch muniversal.current_arch
-    if {${arch} eq ""} {
-        if {[info exists muniversal.current_arch]} {
-            set arch ${muniversal.current_arch}
-        } else {
-            set arch ${configure.build_arch}
+        # see comment below concerning RUSTC and RUSTFLAGS
+
+        file mkdir "${cargo.home}"
+        set conf [open "${cargo.home}/config.toml" "a"]
+
+        puts $conf "\[build\]"
+        puts $conf "rustc = \"${prefix}/bin/rustc\""
+        if {[option rust.flags] ne ""} {
+            puts $conf "rustflags = \[\"[join [option rust.flags] {", "}]\"\]"
         }
+
+        # be sure to include all architectures in case, e.g., a 64-bit Cargo compiles a 32-bit port
+        foreach arch {arm64 x86_64 i386 ppc ppc64} {
+            puts $conf "\[target.[option triplet.${arch}]\]"
+            puts $conf "linker = \"[compwrap::wrap_compiler ld]\""
+        }
+        close $conf
     }
-    return [cargo.translate_arch_name ${arch}]-apple-${os.platform}
 }
 
-proc cargo.append_envs { var {phases {configure build destroot}} } {
+proc rust::append_envs { var {phases {configure build destroot}} } {
     foreach phase ${phases} {
         ${phase}.env-delete ${var}
         ${phase}.env-append ${var}
     }
 }
 
-# see https://trac.macports.org/wiki/UsingTheRightCompiler
-proc cargo.set_compiler_envs {} {
-    global configure.cc configure.cxx
-    cargo.append_envs CC=${configure.cc}   {build destroot}
-    cargo.append_envs CXX=${configure.cxx} {build destroot}
-    cargo.append_envs "RUSTFLAGS=-C linker=${configure.cc}"
-}
-port::register_callback cargo.set_compiler_envs
-
 # Is build caching enabled ?
 # WIP for now ...
 #if {[tbool configure.ccache]} {
 #    # Enable sccache for rust caching
 #    depends_build-append port:sccache
-#    cargo.append_envs    RUSTC_WRAPPER=${prefix}/bin/sccache
-#    cargo.append_envs    SCCACHE_CACHE_SIZE=2G
-#    cargo.append_envs    SCCACHE_DIR=${workpath}/.sccache
+#    rust::append_envs    RUSTC_WRAPPER=${prefix}/bin/sccache
+#    rust::append_envs    SCCACHE_CACHE_SIZE=2G
+#    rust::append_envs    SCCACHE_DIR=${workpath}/.sccache
 #}
 
-# do not force all Portfiles to switch from ${stage}.env to ${stage}.env-append
-proc cargo.environments {} {
-    global os.major prefix configure.pkg_config_path
-    global configure.cc configure.cxx subport configure.build_arch configure.universal_archs
-    global merger_configure_env merger_build_env merger_destroot_env worksrcpath
+proc rust::set_environment {} {
+    global prefix configure.pkg_config_path
+    global subport configure.build_arch configure.universal_archs
 
-    set cargo_ld ${configure.cc}
-#    if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
-#        # Use wrapped rust compilers
-#        depends_build-append port:rust-compiler-wrap
-#        configure.cc      ${prefix}/libexec/rust-compiler-wrap/bin/clang
-#        configure.cxx     ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-#        configure.objc    ${prefix}/libexec/rust-compiler-wrap/bin/clang
-#        configure.objcxx  ${prefix}/libexec/rust-compiler-wrap/bin/clang++
-#        set cargo_ld      ${prefix}/libexec/rust-compiler-wrap/bin/ld-rust
-#    }
+    rust::append_envs     "RUST_BACKTRACE=1"
 
-    cargo.append_envs     CC=${configure.cc}   {build destroot}
-    cargo.append_envs     CXX=${configure.cxx} {build destroot}
+    rust::append_envs     CC=[compwrap::wrap_compiler cc]   {build destroot}
+    rust::append_envs     CXX=[compwrap::wrap_compiler cxx] {build destroot}
 
-    cargo.append_envs     "RUSTFLAGS=-C linker=${cargo_ld}"
-    cargo.append_envs     "RUST_BACKTRACE=1"
-    cargo.append_envs     "CARGO_BUILD_RUSTC=${prefix}/bin/rustc"
-
-    # Propagate pkgconfig path to build and destroot phases as well
-    # Needed to work with openssl PG
-    if { ${configure.pkg_config_path} ne "" } {
-        cargo.append_envs "PKG_CONFIG_PATH=${configure.pkg_config_path}" {build destroot}
+    if { [option openssl.branch] ne "" } {
+        set openssl_ver                     [string map {. {}} [option openssl.branch]]
+        rust::append_envs                   OPENSSL_DIR=${prefix}/libexec/openssl${openssl_ver}
+        compiler.cpath-prepend              ${prefix}/libexec/openssl${openssl_ver}/include
+        compiler.library_path-prepend       ${prefix}/libexec/openssl${openssl_ver}/lib
+        configure.pkg_config_path-prepend   ${prefix}/libexec/openssl${openssl_ver}/lib/pkgconfig
     }
 
-    # CARGO_BUILD_TARGET does not work correctly
-    # see the patchfile path-dyld.diff in cargo Portfile
-    if {${subport} ne "cargo-stage1"} {
-        if {![variant_exists universal] || ![variant_isset universal]} {
-            cargo.append_envs CARGO_BUILD_TARGET=[cargo.rust_platform ${configure.build_arch}] {configure build destroot}
-        } else {
-            foreach stage {configure build destroot} {
-                foreach arch ${configure.universal_archs} {
-                    lappend merger_${stage}_env(${arch}) \
-                        CARGO_BUILD_TARGET=[cargo.rust_platform ${arch}]
-                }
+    # Propagate pkgconfig path to build and destroot phases as well.
+    # Needed to work with openssl PG.
+    if { ${configure.pkg_config_path} ne "" } {
+        rust::append_envs "PKG_CONFIG_PATH=[join ${configure.pkg_config_path} :]" {build destroot}
+    }
+
+    if {${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap"} {
+
+        # when CARGO_BUILD_TARGET is set or `--target` is used, RUSTFLAGS and RUSTC are ignored
+        #     rust::append_envs     "RUSTFLAGS=-C linker=[compwrap::wrap_compiler ld]"
+        #     rust::append_envs     "RUSTC=${prefix}/bin/rustc"
+        # see https://github.com/rust-lang/cargo/issues/4423
+
+        foreach stage {configure build destroot} {
+            foreach arch [option muniversal.architectures] {
+                ${stage}.env.${arch}-append "CARGO_BUILD_TARGET=[option triplet.${arch}]"
             }
         }
     }
 }
-port::register_callback cargo.environments
+port::register_callback rust::set_environment
 
-# see https://trac.macports.org/ticket/51643 for a similar case
-PortGroup muniversal 1.0
+proc rust::rust_pg_callback {} {
+    global  subport \
+            prefix
+
+    if { ${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap" } {
+        # port is *not* building Rust
+
+        foreach {f s} [option rust.remap] {
+            rust.flags-prepend          --remap-path-prefix=${f}=${s}
+        }
+
+        depends_build-delete            port:rust
+        depends_build-append            port:rust
+
+        if { ${subport} ne "cargo" } {
+            # port is building neither Rust nor Cargo
+            depends_build-delete        port:cargo
+            depends_build-append        port:cargo
+            depends_skip_archcheck-delete   cargo
+            depends_skip_archcheck-append   cargo
+        }
+    } else {
+        # port is building Rust
+
+        if { [option rust.llvm.legacy] } {
+            depends_build-delete        path:lib/libMacportsLegacySupport.a:legacy-support
+            depends_build-append        path:lib/libMacportsLegacySupport.a:legacy-support
+        }
+
+        if { [option rust.use_cctools] } {
+            depends_build-delete        port:cctools
+            depends_build-append        port:cctools
+            depends_skip_archcheck-delete   cctools
+            depends_skip_archcheck-append   cctools
+        }
+    }
+
+    if { [option openssl.branch] ne "" } {
+        set openssl_ver                 [string map {. {}} [option openssl.branch]]
+        depends_lib-delete              port:openssl${openssl_ver}
+        depends_lib-append              port:openssl${openssl_ver}
+    }
+
+    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
+        # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
+        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
+        depends_build-delete            port:ld64-274
+        depends_build-append            port:ld64-274
+        depends_skip_archcheck-delete   ld64-274
+        depends_skip_archcheck-append   ld64-274
+        configure.ldflags-delete        -fuse-ld=${prefix}/bin/ld-274
+        configure.ldflags-append        -fuse-ld=${prefix}/bin/ld-274
+    }
+
+    # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.6]} {
+        # __Unwind_RaiseException
+        depends_lib-delete              port:libunwind
+        depends_lib-append              port:libunwind
+        configure.ldflags-delete        -lunwind
+        configure.ldflags-append        -lunwind
+
+        if { [join [lrange [split ${subport} -] 0 1] -] eq "rust-bootstrap" } {
+            # Bootstrap compilers are building on newer machines to be run on older ones.
+            # Use libMacportsLegacySystem.B.dylib since it is able to use the `__asm("$ld$add$os10.5$...")` trick for symbols that are part of legacy-support *only* on older systems.
+            set legacyLib               libMacportsLegacySystem.B.dylib
+            set dep_type                lib
+
+            # code should mimic legacy-support
+            # see https://github.com/macports/macports-ports/blob/master/devel/legacy-support/Portfile
+            set max_darwin_reexport 19
+            if { [option configure.build_arch] eq "arm64" || [option os.major] > ${max_darwin_reexport} } {
+                # ${prefix}/lib/libMacportsLegacySystem.B.dylib does not exist
+                # see https://trac.macports.org/ticket/65255
+                known_fail              yes
+                pre-fetch {
+                    ui_error "${subport} requires libMacportsLegacySystem.B.dylib, which is provided by legacy-support"
+                    return -code error "incompatible system configuration"
+                }
+            }
+        } else {
+            # Use the static library since the Rust compiler looks up certain symbols at *runtime* (e.g. `openat`).
+            # Normally, we would want the additional functionality provided by MacPorts.
+            # However, for reasons yet unknown, the Rust file system (sys/unix/fs.rs) functions fail when they try to use MacPorts system calls.
+            set legacyLib               libMacportsLegacySupport.a
+            set dep_type                build
+        }
+
+        # LLVM: CFPropertyListCreateWithStream, uuid_string_t
+        # Rust: _posix_memalign, extended _realpath, _pthread_setname_np, _copyfile_state_get
+        depends_${dep_type}-delete      path:lib/${legacyLib}:legacy-support
+        depends_${dep_type}-append      path:lib/${legacyLib}:legacy-support
+        configure.ldflags-delete        -Wl,${prefix}/lib/${legacyLib}
+        configure.ldflags-append        -Wl,${prefix}/lib/${legacyLib}
+    }
+
+    # sometimes Cargo.lock does not exist
+    post-extract {
+        if { ${cargo.update} } {
+            system -W ${cargo.dir} "${cargo.bin} --offline update"
+        }
+    }
+}
+port::register_callback rust::rust_pg_callback

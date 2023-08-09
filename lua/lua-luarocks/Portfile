@@ -2,11 +2,11 @@
 
 PortSystem          1.0
 PortGroup           github 1.0
-PortGroup           select 1.0
+PortGroup           lua 1.0
 
-github.setup        luarocks luarocks 3.7.0 v
 name                lua-luarocks
-revision            1
+github.setup        luarocks luarocks 3.9.2 v
+revision            0
 license             MIT
 categories          lua devel
 maintainers         {l2dy @l2dy} openmaintainer
@@ -23,91 +23,69 @@ long_description    \
 
 homepage            https://luarocks.org/
 
-checksums           rmd160  b978643a6b43668fb219240edfc5be9052192a1e \
-                    sha256  70015144ed97665dcee7560c96c084ad0586d742417485a9d3fc1e49fbe97559 \
-                    size    5386555
+checksums           rmd160  4ddf475e1934d6c6de351b91d7787750b84afa9a \
+                    sha256  1097a4c8394454b8777823a72e44e88e1bd8015f5022ac8101af6333a315864e \
+                    size    5350213
 
-options lua.branch
-option_proc lua.branch lua_set_branch
-proc lua_set_branch {option action args} {
-    if {$action ne "set"} {
-        return
-    }
-    global prefix lua.branch \
-        lua.suffix lua.includedir lua.libdir
-
-    # Compile against the standard Lua headers to maintain ABI compatibility.
-    # https://luajit.org/extensions.html
-    set lua.includedir      "${prefix}/include/lua-${lua.branch}"
-    set lua.libdir          "${prefix}/lib/lua-${lua.branch}"
-    if {${lua.branch} eq "5.1"} {
-        set lua.libdir      "${prefix}/lib"
-    }
-
-    set lua.suffix         [join [split ${lua.branch} .] {}]
-    if {${lua.branch} eq "5.3"} {
-        set lua.suffix      ""
-        set lua.includedir  "${prefix}/include"
-        set lua.libdir      "${prefix}/lib"
-    }
+patchfiles          patch-src_luarocks_core_cfg.diff
+post-patch {
+    reinplace       "s|%PREFIX%|${prefix}|g" ${worksrcpath}/src/luarocks/core/cfg.lua
 }
 
-set branches {5.1 5.2 5.3}
-set default_version 53
+use_parallel_build  no
 
-foreach branch ${branches} {
-    set port_suffix [join [split ${branch} .] {}]
+foreach branch          ${lua.branches} {
+    subport lua[join [split ${branch} .] ""]-luarocks {
+        lua.version     ${branch}
 
-    subport lua${port_suffix}-luarocks {
-        lua.branch          ${branch}
-        depends_lib         port:lua${lua.suffix}
-        depends_run         port:luarocks_select
-
-        configure.args      --with-lua=${prefix} \
-                            --with-lua-bin=${prefix}/bin \
-                            --with-lua-include=${lua.includedir} \
-                            --with-lua-lib=${lua.libdir} \
-                            --lua-version=${lua.branch} \
-                            --rocks-tree=${prefix}/share/luarocks
-
-        # The 5.1 branch uses LuaJIT runtime because lua51 does not support io.popen,
-        # which is required by LuaRocks.
-        if {${lua.branch} eq "5.1"} {
-            depends_lib-append \
-                            path:lib/libluajit-5.1.2.dylib:luajit
-            configure.args-append \
-                            --with-lua-interpreter=luajit
-        }
-
-        patchfiles          patch-src_luarocks_core_cfg.diff
-        post-patch {
-            reinplace       "s|%PREFIX%|${prefix}|g" ${worksrcpath}/src/luarocks/core/cfg.lua
-            reinplace       "s|%CC%|${configure.cc}|g" ${worksrcpath}/src/luarocks/core/cfg.lua
-        }
-
-        use_parallel_build  no
-
-        destroot.keepdirs   ${destroot}${prefix}/share/luarocks
         post-destroot {
-            foreach f [glob -tails -directory ${destroot}${prefix}/bin luarocks*] {
-                move ${destroot}${prefix}/bin/${f} ${destroot}${prefix}/bin/${f}-${lua.branch}
+            # only install the Lua module files
+            foreach dir {bin etc} {
+                delete  ${destroot}${prefix}/${dir}
             }
         }
 
-        select.entries      [list luarocks ${subport} ${subport}]
-
-        notes-append "
-To make this the default LuaRocks (i.e., the version run by\
-the 'luarocks' or 'luarocks-admin' commands), run:
-
-    sudo port select --set luarocks ${subport}
-"
+        livecheck.type  none
     }
 }
 
-if {$subport eq $name} {
-    PortGroup   stub 1.0
+subport lua-luarocks {
+    destroot.keepdirs   ${destroot}${prefix}/share/luarocks
+    depends_run-append  port:lua[join [split ${lua.default_version} .] ""]-luarocks
+    post-destroot {
+        # delete the Lua module files since they are provided by a dependency
+        delete          ${destroot}${prefix}/share/lua
 
-    # lua-luarocks as a stub port that depends on the latest luaXY-luarocks
-    depends_lib port:lua${default_version}-luarocks
+        # rebuild with version specific values
+        delete          ${build.dir}/build/config-${lua.default_version}.lua \
+                        ${destroot}${prefix}/etc/luarocks/config-${lua.default_version}.lua
+
+        # create config files for all Lua versions so that `luarocks --version` works properly
+        foreach branch ${lua.branches} {
+            lua.version ${branch} ; # this is dangerous because it is *not* correct for the rest of the build
+            system      -W ${worksrcpath} \
+                        "make -w install-config \
+                        DESTDIR=${destroot} \
+                        LUA_VERSION=${branch} \
+                        LUA_BINDIR=[file dirname ${lua.bin}] \
+                        LUA_DIR=${lua.dir} \
+                        LUA_INCDIR=${lua.dir}/include \
+                        LUA_LIBDIR=${lua.dir}/lib \
+                        LUA_INTERPRETER=[file tail ${lua.bin}]"
+
+            # this is for compatibly only
+            # once all ports have been successfully moved to the new structure, this can be removed
+            foreach bin {luarocks luarocks-admin} {
+                ln -s   ${prefix}/bin/${bin} \
+                        ${destroot}${prefix}/bin/${bin}-${branch}
+            }
+        }
+    }
 }
+
+configure.args      --with-lua-bin=[file dirname ${lua.bin}] \
+                    --with-lua=${lua.dir} \
+                    --with-lua-include=${lua.dir}/include \
+                    --with-lua-lib=${lua.dir}/lib \
+                    --with-lua-interpreter=[file tail ${lua.bin}] \
+                    --rocks-tree=${prefix}/share/luarocks

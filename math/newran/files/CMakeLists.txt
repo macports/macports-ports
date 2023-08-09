@@ -4,10 +4,10 @@ PROJECT(NEWRAN)
 #  extreal.cpp hist.cpp myexcept.cpp newran.cpp tryrand.cpp tryrand1.cpp 
 #  tryrand2.cpp tryrand3.cpp tryrand4.cpp tryrand5.cpp)
 SET(NEWRAN_SOURCES 
-    hist.cpp newran.cpp extreal.cpp myexcept.cpp 
+    newran1.cpp newran2.cpp myexcept.cpp simpstr.cpp extreal.cpp
 )
 SET(TRYRAND_SOURCES
-  tryrand.cpp tryrand1.cpp tryrand2.cpp tryrand3.cpp tryrand4.cpp tryrand5.cpp
+    tryrand.cpp format.cpp utility.cpp tryrand1.cpp tryrand2.cpp tryrand3.cpp tryrand4.cpp tryrand5.cpp tryrand6.cpp str.cpp test_out.cpp
 )
 
 ADD_LIBRARY(newran STATIC ${NEWRAN_SOURCES})

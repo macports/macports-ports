@@ -1,52 +1,113 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
-PortSystem          1.0
+PortSystem              1.0
+PortGroup               github 1.0
 
-name                bahamut
-conflicts           expect whois
-version             2.0.7
-revision            3
-maintainers         ryandesign openmaintainer
-categories          irc
-platforms           darwin
-license             GPL
+github.setup            DALnet bahamut 2.2.2 v
+revision                0
+checksums               rmd160  22c5022130dbdb3fe5671891c4855916c5dacb13 \
+                        sha256  825a5fb8b6ceefbada76ad9f9c66d6aa44f8432304a647467a1294088e284f63 \
+                        size    809222
 
-description         Bahamut is an Internet Relay Chat Daemon (IRCd) designed for DALnet.
+conflicts               expect whois
+maintainers             {ryandesign @ryandesign} openmaintainer
+categories              irc
+license                 GPL
 
-long_description    ${description}
+description             Bahamut is an Internet Relay Chat Daemon (IRCd) designed for DALnet.
 
-homepage            http://www.dal.net/?page=Bahamut
-master_sites        http://code.dal.net/release/
+long_description        ${description}
 
-checksums           rmd160  4280b8229a99d56e1334e6fc68023661a2a35ad5 \
-                    sha256  4c085425c31c48b241b63a85bc693510732051b79636b341cdc4f1ee534dc4b8
+github.tarball_from     releases
 
-depends_lib         path:lib/libssl.dylib:openssl
+depends_lib             path:lib/libssl.dylib:openssl \
+                        port:zlib
 
-patchfiles          patch-CPPFLAGS.diff \
-                    patch-support.c.diff
+patchfiles              patch-CPPFLAGS.diff \
+                        externs.patch \
+                        implicit.patch \
+                        make-cert.patch
 
-# Undefined symbols:
-#  "_first_visible_channel", referenced from:
-#      _m_who in m_who.o
-patchfiles-append   patch-src-m_who.c.diff
+post-patch {
+    # Use real system headers not bundled macOS-incompatible copies.
+    # https://github.com/DALnet/bahamut/issues/230
+    set regexps [list]
+    set headers [list arpa/inet.h arpa/nameser.h resolv.h sys/cdefs.h sys/queue.h]
+    foreach header ${headers} {
+        set headertail [file tail ${header}]
+        delete ${worksrcpath}/include/${headertail}
+        reinplace -q "s| \.\./include/${headertail}||" ${worksrcpath}/src/Makefile.in
+        lappend regexps "s|^\[\[:space:\]\]*#include\[\[:space:\]\]*\"${headertail}\"|#include <${header}>|"
+    }
+    set sources [glob ${worksrcpath}/include/*.h ${worksrcpath}/src/*.c]
+    reinplace -E -q -locale C [join ${regexps} {;}] {*}${sources}
+}
 
-configure.args      --enable-openssl=${prefix}
+# The code uses the HEADER struct and maybe other old stuff.
+# https://github.com/DALnet/bahamut/issues/230
+configure.cppflags-append \
+                        -DBIND_8_COMPAT
+
+configure.args          --enable-openssl=${prefix}
 
 configure.universal_args-delete --disable-dependency-tracking
 
-destroot.destdir    INSTALL_DIR=${destroot}${prefix}
+set bins                [list tools/mkpasswd]
+set sbins               [list src/ircd]
+set confs               [list ircd.motd ircd.smotd make-cert.cnf opers.txt reference.conf template.conf]
 
-post-destroot {
-    foreach f {ircd mkpasswd make-cert.sh} {
-        move ${destroot}${prefix}/${f} ${destroot}${prefix}/bin
+set bindir              ${prefix}/bin
+set sbindir             ${prefix}/sbin
+set confdir             ${prefix}/etc/${name}
+
+post-build {
+    # make exits with 0 status even if build failed.
+    # https://github.com/DALnet/bahamut/issues/221
+    foreach f [list {*}${bins} {*}${sbins}] {
+        if {![file exists ${worksrcpath}/${f}]} {
+            return -code error "${f} did not get built"
+        }
     }
-    foreach f {ircd.motd make-cert.cnf opers.txt reference.conf template.conf} {
-        move ${destroot}${prefix}/${f} ${destroot}${prefix}/etc
-    }
-    reinplace "s|${destroot}${prefix}|${prefix}/etc|g" ${destroot}${prefix}/bin/make-cert.sh
 }
 
-livecheck.type      regex
-livecheck.url       [lindex ${master_sites} 0]
-livecheck.regex     ${name}-(\[0-9.\]+)${extract.suffix}
+# Doesn't support DESTDIR.
+# https://github.com/DALnet/bahamut/issues/231
+destroot.destdir        INSTALL_DIR=${destroot}${prefix}
+
+post-destroot {
+    # Everything gets installed into the same directory.
+    # https://github.com/DALnet/bahamut/issues/234
+    foreach f [list {*}${bins} make-cert.sh] {
+        move ${destroot}${prefix}/[file tail ${f}] ${destroot}${bindir}
+    }
+    foreach f ${sbins} {
+        move ${destroot}${prefix}/[file tail ${f}] ${destroot}${sbindir}
+    }
+    xinstall -d ${destroot}${confdir}
+    foreach f ${confs} {
+        move ${destroot}${prefix}/${f} ${destroot}${confdir}
+    }
+    reinplace "s|${destroot}${prefix}|${confdir}|g" ${destroot}${prefix}/bin/make-cert.sh
+}
+
+platform darwin {
+    # Fix detection of res_mkquery: it *is* in libresolv on macOS.
+    # https://github.com/DALnet/bahamut/issues/229
+    configure.args-append \
+                        ac_cv_func___res_mkquery=no \
+                        ac_cv_func_res_mkquery=no \
+                        ac_cv_lib_resolv___res_mkquery=no \
+                        ac_cv_lib_resolv_res_mkquery=yes
+}
+
+startupitem.create      yes
+startupitem.executable  ${sbindir}/ircd -t -f ${confdir}/ircd.conf
+startupitem.pidfile     clean ${confdir}/ircd.pid
+
+notes "
+To configure ${name}, copy ${confdir}/template.conf to ${confdir}/ircd.conf and make changes.
+
+To create the certificate, run:
+
+    sudo ${bindir}/make-cert.sh
+"

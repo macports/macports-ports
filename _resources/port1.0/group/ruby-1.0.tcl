@@ -420,7 +420,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
             if {${ruby.branch} eq "1.8"} {
                 depends_lib-append  port:rb-rubygems
                 if {${ruby.module} ne "rake"} {
-                    depends_build-append    port:rb-rake
+                    depends_build-append    port:rb18-rake
                 }
             }
 

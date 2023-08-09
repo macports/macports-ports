@@ -17,7 +17,6 @@ legacysupport.use_static              yes
 legacysupport.disable_function_wrap   yes
 
 categories              lang
-platforms               darwin
 license                 NCSA
 maintainers             nomaintainer
 
@@ -28,8 +27,8 @@ version                 ${llvm_version}.0.6
 name                    llvm-${llvm_version}
 revision                0
 subport                 mlir-${llvm_version}  { revision 0 }
-subport                 clang-${llvm_version} { revision 0 }
-subport                 lldb-${llvm_version}  { revision 0 }
+subport                 clang-${llvm_version} { revision 1 }
+subport                 lldb-${llvm_version}  { revision 1 }
 subport                 flang-${llvm_version} { revision 0 }
 
 checksums               rmd160  2b8b71bbb9fa5718c85f78924a0aa7e700cbd2ee \
@@ -211,6 +210,9 @@ if {${subport} eq "mlir-${llvm_version}"} {
                         reduce the cost of building domain specific compilers, and aid \
                         in connecting existing compilers together.
 
+    # i386 build fails: https://trac.macports.org/ticket/63734
+    supported_archs     arm64 x86_64
+
     depends_lib-append  port:llvm-${llvm_version}
 
     configure.args-append \
@@ -227,16 +229,9 @@ if { ${subport} eq "clang-${llvm_version}" } {
     homepage            https://clang.llvm.org/
 
     description         C, C++, Objective C and Objective C++ compiler
-    long_description    Clang is an "LLVM native" C/C++/Objective-C compiler, \
-                        which aims to deliver amazingly fast compiles (e.g. \
-                        about 3x faster than GCC when compiling Objective-C \
-                        code in a debug configuration), extremely useful error \
-                        and warning messages and to provide a platform for \
-                        building great source level tools. The included Clang \
-                        Static Analyzer is a tool that automatically finds bugs in \
-                        your code, and is a great example of the sort of tool \
-                        that can be built using the Clang frontend as a \
-                        library to parse C/C++ code.
+    long_description    The Clang project provides a language front-end and tooling infrastructure \
+                        for languages in the C language family (C, C++, Objective C/C++, OpenCL, \
+                        CUDA, and RenderScript) for the LLVM project.
 
     depends_run-append  port:clang_select port:cctools
     select.group        clang
@@ -264,6 +259,9 @@ if { ${subport} eq "flang-${llvm_version}" } {
     description         LLVM Fortran compiler
     long_description    {*}${description}
 
+    # has to match mlir's archs
+    supported_archs     arm64 x86_64
+
     configure.args-append \
         -DLLVM_ENABLE_PROJECTS="clang\;flang\;compiler-rt\;mlir" \
         -DLIBCXX_ENABLE_SHARED=OFF          \
@@ -290,17 +288,7 @@ if { ${subport} eq "clang-${llvm_version}" ||
      ${subport} eq "mlir-${llvm_version}" ||
      ${subport} eq "flang-${llvm_version}" } {
     # temporarily restrict to newer systems until older systems can be rigorously vetted
-    if {${os.platform} eq "darwin" && ${os.major} < 10} {
-        depends_build
-        depends_lib
-        depends_run
-        archive_sites
-        known_fail yes
-        pre-fetch {
-            ui_error "${subport} is not supported on Darwin ${os.major} at present."
-            return -code error {unsupported platform}
-        }
-    }
+    platforms {darwin >= 10}
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
@@ -330,7 +318,9 @@ if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_versio
         # TODO: apply this always to all systems?
         if {${configure.sdkroot} eq ""} {set configure.sdkroot "/"}
         configure.args-append    -DDARWIN_osx_SYSROOT="${configure.sdkroot}"
+    }
 
+    if {${os.platform} eq "darwin" && ${os.major} <= 15} {
         # sanitizers in compiler_rt fail to build on older systems
         # might be fixable with the use of newer SDK and/or effort if motivated
         # all three toggles are needed to force them off
@@ -361,20 +351,13 @@ if {${subport} eq "lldb-${llvm_version}"} {
     depends_lib-append  port:libedit port:libffi port:ncurses path:lib/libxar.dylib:xar port:zlib
     depends_lib-append  port:llvm-${llvm_version} port:clang-${llvm_version}
     depends_build-append port:swig-python path:bin/doxygen:doxygen
+    depends_run-append  port:lldb_select
+
+    select.group        lldb
+    select.file         ${filespath}/mp-${subport}
 
     # error: use of undeclared identifier 'CPU_SUBTYPE_ARM64E
-    if {${os.platform} eq "darwin" && ${os.major} <= 17} {
-    # see Note 1 below
-        depends_build
-        depends_lib
-        depends_run
-        archive_sites
-        known_fail yes
-        pre-fetch {
-            ui_error "${subport} is not supported on Darwin ${os.major} at present."
-            return -code error {unsupported platform}
-        }
-    }
+    platforms {darwin >= 18}
 
     configure.args-append \
         -DLLDB_CODESIGN_IDENTITY=- \
@@ -500,19 +483,16 @@ if {${subport} eq "clang-${llvm_version}"} {
     variant libstdcxx description {-stdlib=libstdc++_macports searches for MacPorts libstdc++} {
 
         patchfiles-append 0005-clang-support-macports-libstdcxx.patch
+        if {${os.major} < 11} {
+            # see https://trac.macports.org/ticket/61778
+            depends_run-append  port:libstdcxx_clang_fix
+        }
 
         post-patch {
-            if { ${configure.build_arch} eq "arm64" } {
-                # see https://github.com/macports/macports-ports/commit/be1e11a368f672d927a7bdb381f2fa71a79ba483
-                set gcc_arch    aarch64
-            } else {
-                set gcc_arch    ${configure.build_arch}
-            }
-
             reinplace "s|@@MACPORTS_GCC_INCLUDE_DIR@@|${prefix}/include/gcc/c++|g" \
                 ${patch.dir}/clang/lib/Lex/InitHeaderSearch.cpp \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
-            reinplace "s|@@MACPORTS_HOST_NAME@@|${gcc_arch}-apple-darwin${os.major}|g" \
+            reinplace "s|@@MACPORTS_HOST_NAME@@|${configure.build_arch}-apple-darwin${os.major}|g" \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
             reinplace "s|@@MACPORTS_libstdc++@@|${prefix}/lib/libgcc/libstdc++.6.dylib|g" \
                 ${patch.dir}/clang/lib/Driver/ToolChains/Darwin.cpp
@@ -546,7 +526,9 @@ if {${subport} eq "clang-${llvm_version}"} {
             }
         }
     }
-    default_variants-append +libstdcxx
+    if { ${cxx_stdlib} eq "libstdc++" } {
+        default_variants-append +libstdcxx
+    }
 }
 
 livecheck.type      regex

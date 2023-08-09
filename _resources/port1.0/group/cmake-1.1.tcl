@@ -414,7 +414,11 @@ platform darwin {
     pre-configure {
         # cmake will add the correct -arch flag(s) based on the value of CMAKE_OSX_ARCHITECTURES.
         if {[variant_exists universal] && [variant_isset universal]} {
-            if {[info exists universal_archs_supported]} {
+            if {[info exists muniversal.arch_flag]} {
+                foreach arch ${muniversal.architectures} {
+                    configure.args.${arch}-append -DCMAKE_OSX_ARCHITECTURES=${arch}
+                }
+            } elseif {[info exists universal_archs_supported]} {
                 merger_arch_compiler no
                 merger_arch_flag no
                 if {${cmake.set_osx_architectures}} {

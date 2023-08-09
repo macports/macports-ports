@@ -1,0 +1,239 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem              1.0
+
+name                    strip7
+
+# Xcode 8.1 - matching cctools
+version                 895
+revision                0
+set ld64_version        274.1
+categories              devel
+maintainers             nomaintainer
+license                 {APSL-2 GPL-2+}
+installs_libs           no
+description             A modified version of strip that ignores variant n_sects
+long_description        ${name}. Useful only for building TenFourFox with modern gcc versions.
+
+homepage                https://opensource.apple.com/source/cctools/
+master_sites            https://github.com/apple-oss-distributions/cctools/archive:main \
+                        https://github.com/apple-oss-distributions/ld64/archive:ld64
+
+distfiles               ld64-${ld64_version}.tar.gz:ld64 cctools-${version}.tar.gz:main
+
+checksums               ld64-274.1.tar.gz \
+                        rmd160  3d8f0c1d739f08bd13d699678f4e0d8aa58fa804 \
+                        sha256  8416c20f6cf6dce94ae1ae5f22ed8b60e1425e239329f15ac70bff5b022c255f \
+                        size    674542 \
+                        cctools-895.tar.gz \
+                        rmd160  2f0f6da7e85f8a69b627b80a279724cb8cc05297 \
+                        sha256  24cd06fd8e7e31170f4a260d6443de640ef1603bdb324b3277ae76b91b9c4093 \
+                        size    1726980
+
+if {${os.major} > 15} {
+    known_fail  yes
+    pre-fetch {
+        ui_error "${name} requires MacOS 10.11 or earlier"
+        return -code error "incompatible OS version"
+    }
+}
+
+patchfiles              cctools-829-lto.patch \
+                        PR-37520.patch \
+                        cctools-839-static-dis_info.patch \
+                        PR-12400897.patch \
+                        cctools-862-prunetrie.patch \
+                        cctools-895-big_endian.patch \
+                        cctools-895-OFILE_LLVM_BITCODE.patch \
+                        not-clang.patch
+
+# tenfourfox special strip7 modification
+patchfiles-append       patch-strip-ignore-zero-nsects.diff
+
+if {${os.major} < 11} {
+    patchfiles-append snowleopard-strnlen.patch
+}
+
+depends_build           port:libunwind-headers
+
+set all_llvm_variants {llvm39 llvm40 llvm50 llvmdev}
+if {${os.major} < 12} {
+    lappend all_llvm_variants llvm34
+}
+if {${os.major} < 14} {
+    lappend all_llvm_variants llvm37
+}
+array set llvm_variant_version {llvm34 3.4 llvm37 3.7 llvm39 3.9 llvm40 4.0 llvm50 5.0 llvmdev devel}
+set llvm_version {}
+
+foreach variantname $all_llvm_variants {
+    set this_llvm_version $llvm_variant_version($variantname)
+    variant $variantname  description "Use llvm-${this_llvm_version} for libLTO, llvm-mc, llvm-size, and llvm-nm" "
+        set llvm_version        $this_llvm_version
+        depends_lib-append      port:llvm-${this_llvm_version}
+    "
+}
+
+proc some_llvm_variant_set {} {
+    global all_llvm_variants
+    foreach variantname $all_llvm_variants {
+        if {[variant_isset $variantname]} {
+            return yes
+        }
+    }
+    return no
+}
+
+if { ![some_llvm_variant_set] } {
+    if {${os.major} == 12 || ${os.major} == 13} {
+        # Using llvm-3.7 to break a dependency cycle (https://trac.macports.org/ticket/53138)
+        default_variants +llvm37
+    } elseif {${os.major} == 10 || ${os.major} == 11} {
+        default_variants +llvm34
+    } elseif {${os.major} == 9} {
+        # Using llvm-3.3 to break dependency cycle (https://trac.macports.org/ticket/52091)
+        default_variants +llvm33
+    }
+    if {![some_llvm_variant_set] && ${os.major} >= 10} {
+        default_variants +llvm50
+    }
+}
+
+destroot.args           RAW_DSTROOT=${destroot} DSTROOT=${destroot}${prefix} RC_ProjectSourceVersion=${version}
+
+worksrcdir cctools-cctools-${version}
+
+post-extract {
+    file copy ${worksrcpath}/../ld64-ld64-${ld64_version}/src/other/PruneTrie.cpp ${worksrcpath}/misc
+    system "touch ${worksrcpath}/../ld64-ld64-${ld64_version}/src/abstraction/configure.h"
+}
+
+post-patch {
+    # We don't want to build cctools ld. We want to use ld64
+    reinplace "/^SUBDIRS_32/s/ld//" ${worksrcpath}/Makefile
+    reinplace "/^COMMON_SUBDIRS/s/ ld / /" ${worksrcpath}/Makefile
+
+    # Use our chosen version of llvm
+    if {${llvm_version} ne ""} {
+        reinplace "s:\"llvm-objdump\":\"llvm-objdump-mp-${llvm_version}\":" ${worksrcpath}/otool/main.c
+        reinplace "s:\"llvm-mc\":\"llvm-mc-mp-${llvm_version}\":" ${worksrcpath}/as/driver.c
+        reinplace "s:@@LLVM_LIBDIR@@:${prefix}/libexec/llvm-${llvm_version}/lib:" ${worksrcpath}/libstuff/lto.c
+    }
+
+    foreach file [glob ${worksrcpath}/{*/,}Makefile] {
+        reinplace "s:/usr/local:@PREFIX@:g" ${file}
+        reinplace "s:/usr:@PREFIX@:g" ${file}
+        reinplace "s:@PREFIX@:${prefix}:g" ${file}
+        reinplace "s:${prefix}/efi:${prefix}:g" ${file}
+        reinplace "s:/Developer${prefix}:${prefix}:g" ${file}
+        reinplace "s:${prefix}/man:${prefix}/share/man:g" ${file}
+
+        # Don't strip installed binaries
+        reinplace "s:\\(install .*\\)-s :\\1:g" ${file}
+
+        if {${os.major} < 10} {
+            reinplace "s:${prefix}/bin/mig:/usr/bin/mig:g" ${file}
+        }
+    }
+}
+
+use_configure           no
+use_parallel_build      yes
+
+# https://trac.macports.org/ticket/43745
+configure.cflags-append -std=gnu99
+
+build.target            all
+
+set cxx_stdlibflags {}
+if {[string match *clang* ${configure.cxx}]} {
+    set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
+}
+
+configure.cppflags-append \
+                        -I${worksrcpath}/../ld64-ld64-${ld64_version}/src/abstraction \
+                        -I${worksrcpath}/../ld64-ld64-${ld64_version}/src/other \
+                        -I${worksrcpath}/include
+
+pre-build {
+    if {![variant_isset xcode]} {
+        build.args-append \
+            RC_ProjectSourceVersion=${version} \
+            USE_DEPENDENCY_FILE=NO \
+            BUILD_DYLIBS=NO \
+            CC="${configure.cc} ${configure.cflags}" \
+            CXX="${configure.cxx} ${configure.cxxflags}" \
+            CXXLIB="${cxx_stdlibflags}" \
+            TRIE=-DTRIE_SUPPORT \
+            RC_ARCHS="[get_canonical_archs]" \
+            SDK="${configure.cppflags}"
+
+        if {${llvm_version} ne ""} {
+            build.args-append \
+                LTO=-DLTO_SUPPORT \
+                RC_CFLAGS="[get_canonical_archflags] `llvm-config-mp-${llvm_version} --cflags`" \
+                LLVM_MC="llvm-mc-mp-${llvm_version}"
+        } else {
+            build.args-append \
+                LTO= \
+                RC_CFLAGS="[get_canonical_archflags]"
+        }
+    }
+}
+
+pre-destroot {
+    if {![variant_isset xcode]} {
+        destroot.args-append \
+            RC_ProjectSourceVersion=${version} \
+            USE_DEPENDENCY_FILE=NO \
+            BUILD_DYLIBS=NO \
+            CC="${configure.cc} ${configure.cflags}" \
+            CXX="${configure.cxx} ${configure.cxxflags}" \
+            CXXLIB="${cxx_stdlibflags}" \
+            TRIE=-DTRIE_SUPPORT \
+            RC_ARCHS="[get_canonical_archs]" \
+            SDK="${configure.cppflags}"
+
+        if {${llvm_version} ne ""} {
+            destroot.args-append \
+                LTO=-DLTO_SUPPORT \
+                RC_CFLAGS="[get_canonical_archflags] `llvm-config-mp-${llvm_version} --cflags`" \
+                LLVM_MC="llvm-mc-mp-${llvm_version}"
+        } else {
+            destroot.args-append \
+                LTO= \
+                RC_CFLAGS="[get_canonical_archflags]"
+        }
+    }
+}
+
+platform macosx {
+    build.args-append RC_OS="macos"
+    destroot.args-append RC_OS="macos"
+}
+
+destroot.target install_tools
+destroot.args-append DSTROOT=${destroot}
+
+post-destroot {
+    file delete -force ${destroot}${prefix}/OpenSourceLicenses
+    file delete -force ${destroot}${prefix}/OpenSourceVersions
+    file delete -force ${destroot}${prefix}/RelNotes
+    file delete -force ${destroot}${prefix}/share
+    file delete -force ${destroot}${prefix}/libexec
+
+    if {${os.major} < 10} {
+        file delete -force ${destroot}/Developer
+    }
+
+    # Provided by port:cctools-headers
+    file delete -force ${destroot}${prefix}/include
+
+    set xcode_cmds {ar as bitcode_strip check_dylib checksyms cmpdylib codesign_allocate ctf_insert indr install_name_tool libtool lipo llvm-otool mtoc nm nm-classic nmedit otool otool-classic pagestuff ranlib redo_prebinding seg_addr_table seg_hack segedit size size-classic strings}
+    foreach xcode_cmd $xcode_cmds {
+        file delete -force ${destroot}${prefix}/bin/${xcode_cmd}
+    }
+    move ${destroot}${prefix}/bin/strip ${destroot}${prefix}/bin/strip7
+}
+
+livecheck.type          none

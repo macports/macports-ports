@@ -154,6 +154,11 @@ set qt_cmake_defines    \
 options qt_arch_types
 default qt_arch_types {[string map {i386 x86} [get_canonical_archs]]}
 
+# qt4-mac can only build for the arches below at present
+# so the qt4 family is also constrained to these arches at maximum.
+# individual ports may restrict these arches further as needed.
+supported_archs         ppc ppc64 i386 x86_64
+
 # allow for depending on either qt4-mac and qt4-mac-devel, simultaneously
 
 if {![info exists building_qt4]} {

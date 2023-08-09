@@ -1,0 +1,1593 @@
+# https://tmkk.undo.jp/lame/lame-3.100-neon-20230418.diff
+
+--- libmp3lame/fft.c.orig	2017-09-07 04:33:36
++++ libmp3lame/fft.c	2023-04-12 19:30:22
+@@ -45,9 +45,18 @@
+ #include "fft.h"
+ 
+ #include "vector/lame_intrin.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vcopyq_laneq_f32(a, lane1, b, lane2) vsetq_lane_f32(vgetq_lane_f32(b, lane2), a, lane1)
++#if !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfmsq_f32 vmlsq_f32
++#endif
++#endif
++#endif
+ 
+ 
+-
+ #define TRI_SIZE (5-1)  /* 1024 =  4**5 */
+ 
+ /* fft.c    */
+@@ -103,6 +112,9 @@
+         } while (fi < fn);
+         c1 = tri[0];
+         s1 = tri[1];
++#if defined(__aarch64__) || defined(__arm__)
++        if (kx < 4) {
++#endif
+         for (i = 1; i < kx; i++) {
+             FLOAT   c2, s2;
+             c2 = 1 - (2 * s1) * s1;
+@@ -142,6 +154,143 @@
+             c1 = c2 * tri[0] - s1 * tri[1];
+             s1 = c2 * tri[1] + s1 * tri[0];
+         }
++#if defined(__aarch64__) || defined(__arm__)
++        } else {
++            FLOAT   c2, s2;
++            float cs[16] __attribute__ ((aligned (16)));
++            float32x4_t vc1, vc2, vs1, vs2;
++            for(i = 1; i < 4; i++) {
++                c2 = 1 - (2*s1)*s1;
++                s2 = (2*s1)*c1;
++                cs[i] = c1;
++                cs[i+4] = c2;
++                cs[i+8] = s1;
++                cs[i+12] = s2;
++                c2 = c1;
++                c1 = c2 * tri[0] - s1 * tri[1];
++                s1 = c2 * tri[1] + s1 * tri[0];
++            }
++            cs[0] = cs[4] = cs[8] = cs[12] = 0;
++            vc1 = vld1q_f32(cs);
++            vc2 = vld1q_f32(cs+4);
++            vs1 = vld1q_f32(cs+8);
++            vs2 = vld1q_f32(cs+12);
++            fi = fz;
++            gi = fz + k1;
++            do {
++                float32x4_t vfi0, vfi1, vfi2, vfi3, vgi0, vgi1, vgi2, vgi3;
++                float32x4_t va0, va1, vb0, vb1, vf0, vf1, vf2, vf3, vg0, vg1, vg2, vg3;
++                vfi0 = vld1q_f32(fi);
++                vfi1 = vld1q_f32(fi+k1);
++                vfi2 = vld1q_f32(fi+k2);
++                vfi3 = vld1q_f32(fi+k3);
++                vgi0 = vrev64q_f32(vld1q_f32(gi-3));
++                vgi1 = vrev64q_f32(vld1q_f32(gi+k1-3));
++                vgi2 = vrev64q_f32(vld1q_f32(gi+k2-3));
++                vgi3 = vrev64q_f32(vld1q_f32(gi+k3-3));
++                vgi0 = vextq_f32(vgi0, vgi0, 2);
++                vgi1 = vextq_f32(vgi1, vgi1, 2);
++                vgi2 = vextq_f32(vgi2, vgi2, 2);
++                vgi3 = vextq_f32(vgi3, vgi3, 2);
++                va0 = vfmaq_f32(vmulq_f32(vfi1, vc2), vgi1, vs2);
++                vb0 = vfmsq_f32(vmulq_f32(vfi1, vs2), vgi1, vc2);
++                va1 = vfmaq_f32(vmulq_f32(vfi3, vc2), vgi3, vs2);
++                vb1 = vfmsq_f32(vmulq_f32(vfi3, vs2), vgi3, vc2);
++                vf0 = vaddq_f32(vfi0, va0);
++                vf1 = vsubq_f32(vfi0, va0);
++                vg0 = vaddq_f32(vgi0, vb0);
++                vg1 = vsubq_f32(vgi0, vb0);
++                vf2 = vaddq_f32(vfi2, va1);
++                vf3 = vsubq_f32(vfi2, va1);
++                vg2 = vaddq_f32(vgi2, vb1);
++                vg3 = vsubq_f32(vgi2, vb1);
++                va0 = vfmaq_f32(vmulq_f32(vf2, vc1), vg3, vs1);
++                vb0 = vfmsq_f32(vmulq_f32(vf2, vs1), vg3, vc1);
++                va1 = vfmaq_f32(vmulq_f32(vg2, vs1), vf3, vc1);
++                vb1 = vfmsq_f32(vmulq_f32(vg2, vc1), vf3, vs1);
++                vst1q_f32(fi, vcopyq_laneq_f32(vaddq_f32(vf0, va0), 0, vfi0, 0));
++                vst1q_f32(fi+k1, vcopyq_laneq_f32(vaddq_f32(vf1, vb1), 0, vfi1, 0));
++                vst1q_f32(fi+k2, vcopyq_laneq_f32(vsubq_f32(vf0, va0), 0, vfi2, 0));
++                vst1q_f32(fi+k3, vcopyq_laneq_f32(vsubq_f32(vf1, vb1), 0, vfi3, 0));
++                vgi0 = vrev64q_f32(vcopyq_laneq_f32(vaddq_f32(vg0, va1), 0, vgi0, 0));
++                vgi1 = vrev64q_f32(vcopyq_laneq_f32(vaddq_f32(vg1, vb0), 0, vgi1, 0));
++                vgi2 = vrev64q_f32(vcopyq_laneq_f32(vsubq_f32(vg0, va1), 0, vgi2, 0));
++                vgi3 = vrev64q_f32(vcopyq_laneq_f32(vsubq_f32(vg1, vb0), 0, vgi3, 0));
++                vst1q_f32(gi-3, vextq_f32(vgi0, vgi0, 2));
++                vst1q_f32(gi+k1-3, vextq_f32(vgi1, vgi1, 2));
++                vst1q_f32(gi+k2-3, vextq_f32(vgi2, vgi2, 2));
++                vst1q_f32(gi+k3-3, vextq_f32(vgi3, vgi3, 2));
++                gi += k4;
++                fi += k4;
++            } while (fi<fn);
++            for (i = 4; i < kx; i += 4) {
++                int j;
++                for(j = 0; j < 4; j++) {
++                    c2 = 1 - (2*s1)*s1;
++                    s2 = (2*s1)*c1;
++                    cs[j] = c1;
++                    cs[j+4] = c2;
++                    cs[j+8] = s1;
++                    cs[j+12] = s2;
++                    c2 = c1;
++                    c1 = c2 * tri[0] - s1 * tri[1];
++                    s1 = c2 * tri[1] + s1 * tri[0];
++                }
++                vc1 = vld1q_f32(cs);
++                vc2 = vld1q_f32(cs+4);
++                vs1 = vld1q_f32(cs+8);
++                vs2 = vld1q_f32(cs+12);
++                fi = fz + i;
++                gi = fz + k1 - i;
++                do {
++                    float32x4_t vfi0, vfi1, vfi2, vfi3, vgi0, vgi1, vgi2, vgi3;
++                    float32x4_t va0, va1, vb0, vb1, vf0, vf1, vf2, vf3, vg0, vg1, vg2, vg3;
++                    vfi0 = vld1q_f32(fi);
++                    vfi1 = vld1q_f32(fi+k1);
++                    vfi2 = vld1q_f32(fi+k2);
++                    vfi3 = vld1q_f32(fi+k3);
++                    vgi0 = vrev64q_f32(vld1q_f32(gi-3));
++                    vgi1 = vrev64q_f32(vld1q_f32(gi+k1-3));
++                    vgi2 = vrev64q_f32(vld1q_f32(gi+k2-3));
++                    vgi3 = vrev64q_f32(vld1q_f32(gi+k3-3));
++                    vgi0 = vextq_f32(vgi0, vgi0, 2);
++                    vgi1 = vextq_f32(vgi1, vgi1, 2);
++                    vgi2 = vextq_f32(vgi2, vgi2, 2);
++                    vgi3 = vextq_f32(vgi3, vgi3, 2);
++                    va0 = vfmaq_f32(vmulq_f32(vfi1, vc2), vgi1, vs2);
++                    vb0 = vfmsq_f32(vmulq_f32(vfi1, vs2), vgi1, vc2);
++                    va1 = vfmaq_f32(vmulq_f32(vfi3, vc2), vgi3, vs2);
++                    vb1 = vfmsq_f32(vmulq_f32(vfi3, vs2), vgi3, vc2);
++                    vf0 = vaddq_f32(vfi0, va0);
++                    vf1 = vsubq_f32(vfi0, va0);
++                    vg0 = vaddq_f32(vgi0, vb0);
++                    vg1 = vsubq_f32(vgi0, vb0);
++                    vf2 = vaddq_f32(vfi2, va1);
++                    vf3 = vsubq_f32(vfi2, va1);
++                    vg2 = vaddq_f32(vgi2, vb1);
++                    vg3 = vsubq_f32(vgi2, vb1);
++                    va0 = vfmaq_f32(vmulq_f32(vf2, vc1), vg3, vs1);
++                    vb0 = vfmsq_f32(vmulq_f32(vf2, vs1), vg3, vc1);
++                    va1 = vfmaq_f32(vmulq_f32(vg2, vs1), vf3, vc1);
++                    vb1 = vfmsq_f32(vmulq_f32(vg2, vc1), vf3, vs1);
++                    vst1q_f32(fi, vaddq_f32(vf0, va0));
++                    vst1q_f32(fi+k1, vaddq_f32(vf1, vb1));
++                    vst1q_f32(fi+k2, vsubq_f32(vf0, va0));
++                    vst1q_f32(fi+k3, vsubq_f32(vf1, vb1));
++                    vgi0 = vrev64q_f32(vaddq_f32(vg0, va1));
++                    vgi1 = vrev64q_f32(vaddq_f32(vg1, vb0));
++                    vgi2 = vrev64q_f32(vsubq_f32(vg0, va1));
++                    vgi3 = vrev64q_f32(vsubq_f32(vg1, vb0));
++                    vst1q_f32(gi-3, vextq_f32(vgi0, vgi0, 2));
++                    vst1q_f32(gi+k1-3, vextq_f32(vgi1, vgi1, 2));
++                    vst1q_f32(gi+k2-3, vextq_f32(vgi2, vgi2, 2));
++                    vst1q_f32(gi+k3-3, vextq_f32(vgi3, vgi3, 2));
++                    gi += k4;
++                    fi += k4;
++                } while (fi<fn);
++            }
++        }
++#endif
+         tri += 2;
+     } while (k4 < n);
+ }
+--- libmp3lame/gain_analysis.c.orig	2017-10-11 04:08:39
++++ libmp3lame/gain_analysis.c	2023-04-12 19:32:02
+@@ -99,6 +99,20 @@
+ #include "lame.h"
+ #include "machine.h"
+ #include "gain_analysis.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vaddvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#if !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfmsq_f32 vmlsq_f32
++#endif
++#endif
++#endif
+ 
+ /* for each filter: */
+ /* [0] 48 kHz, [1] 44.1 kHz, [2] 32 kHz, [3] 24 kHz, [4] 22050 Hz, [5] 16 kHz, [6] 12 kHz, [7] is 11025 Hz, [8] 8 kHz */
+@@ -109,6 +123,33 @@
+ 
+ 
+ /*lint -save -e736 loss of precision */
++#if defined(__aarch64__) || defined(__arm__)
++static const Float_t ABYule[9][multiple_of(4, 2 * YULE_ORDER + 1)] __attribute__ ((aligned (16))) = {
++    /* 20                 18                 16                 14                 12                 10                 8                  6                  4                  2                 0                 19                 17                 15                 13                 11                 9                  7                  5                  3                  1              */
++    { 0.00288463683916,  0.00012025322027,  0.00306428023191,  0.00594298065125, -0.02074045215285,  0.02161526843274, -0.01655260341619, -0.00009291677959, -0.00123395316851, -0.02160367184185, 0.03857599435200, 0, 0.13919314567432, -0.86984376593551,  2.75465861874613, -5.87257861775999,  9.48293806319790,-12.28759895145294, 13.05504219327545,-11.34170355132042,  7.81501653005538, -3.84664617118067, 0, 0},
++    {-0.00187763777362,  0.00674613682247, -0.00240879051584,  0.01624864962975, -0.02596338512915,  0.02245293253339, -0.00834990904936, -0.00851165645469, -0.00848709379851, -0.02911007808948, 0.05418656406430, 0, 0.13149317958808, -0.75104302451432,  2.19611684890774, -4.39470996079559,  6.85401540936998, -8.81498681370155,  9.47693607801280, -8.54751527471874,  6.36317777566148, -3.47845948550071, 0, 0},
++    {-0.00881362733839,  0.00651420667831, -0.01390589421898,  0.03174092540049,  0.00222312597743,  0.04781476674921, -0.05588393329856,  0.02163541888798, -0.06247880153653, -0.09331049056315, 0.15457299681924, 0, 0.02347897407020, -0.05032077717131,  0.16378164858596, -0.45953458054983,  1.00595954808547, -1.67148153367602,  2.23697657451713, -2.64577170229825,  2.84868151156327, -2.37898834973084, 0, 0},
++    {-0.02950134983287,  0.00205861885564, -0.00000828086748,  0.06276101321749, -0.00584456039913, -0.02364141202522, -0.00915702933434,  0.03282930172664, -0.08587323730772, -0.22613988682123, 0.30296907319327, 0, 0.00302439095741,  0.02005851806501,  0.04500235387352, -0.22138138954925,  0.39120800788284, -0.22638893773906, -0.16276719120440, -0.25656257754070,  1.07977492259970, -1.61273165137247, 0, 0},
++    {-0.01760176568150, -0.01635381384540,  0.00832043980773,  0.05724228140351, -0.00589500224440, -0.00469977914380, -0.07834489609479,  0.11921148675203, -0.11828570177555, -0.25572241425570, 0.33642304856132, 0, 0.02977207319925, -0.04237348025746,  0.08333755284107, -0.04067510197014, -0.12453458140019,  0.47854794562326, -0.80774944671438,  0.12205022308084,  0.87350271418188, -1.49858979367799, 0, 0},
++    { 0.00541907748707, -0.03193428438915, -0.01863887810927,  0.10478503600251,  0.04097565135648, -0.12398163381748,  0.04078262797139, -0.01419140100551, -0.22784394429749, -0.14351757464547, 0.44915256608450, 0, 0.03222754072173,  0.05784820375801,  0.06747620744683,  0.00613424350682,  0.22199650564824, -0.42029820170918,  0.00213767857124, -0.37256372942400,  0.29661783706366, -0.62820619233671, 0, 0},
++    {-0.00588215443421, -0.03788984554840,  0.08647503780351,  0.00647310677246, -0.27562961986224,  0.30931782841830, -0.18901604199609,  0.16744243493672,  0.16242137742230, -0.75464456939302, 0.56619470757641, 0, 0.01807364323573,  0.01639907836189, -0.04784254229033,  0.06739368333110, -0.33032403314006,  0.45054734505008,  0.00819999645858, -0.26806001042947,  0.29156311971249, -1.04800335126349, 0, 0},
++    {-0.00749618797172, -0.03721611395801,  0.06920467763959,  0.01628462406333, -0.25344790059353,  0.15558449135573,  0.02377945217615,  0.17520704835522, -0.14289799034253, -0.53174909058578, 0.58100494960553, 0, 0.01818801111503,  0.02442357316099, -0.02505961724053, -0.05246019024463, -0.23313271880868,  0.38952639978999,  0.14728154134330, -0.20256413484477, -0.31863563325245, -0.51035327095184, 0, 0},
++    {-0.02217936801134,  0.04788665548180, -0.04060034127000, -0.11202315195388, -0.02459864859345,  0.14590772289388, -0.10214864179676,  0.04267842219415, -0.00275953611929, -0.42163034350696, 0.53648789255105, 0, 0.04704409688120,  0.05477720428674, -0.18823009262115, -0.17556493366449,  0.15113130533216,  0.26408300200955, -0.04678328784242, -0.03424681017675, -0.43193942311114, -0.25049871956020, 0, 0}
++};
++
++static const Float_t ABButter[9][multiple_of(4, 2 * BUTTER_ORDER + 1)] __attribute__ ((aligned (16))) = {
++    /* 5                3                  1                  4                 2              */
++    {0.98621192462708, -1.97242384925416, 0.98621192462708, 0, 0.97261396931306, -1.97223372919527, 0, 0},
++    {0.98500175787242, -1.97000351574484, 0.98500175787242, 0, 0.97022847566350, -1.96977855582618, 0, 0},
++    {0.97938932735214, -1.95877865470428, 0.97938932735214, 0, 0.95920349965459, -1.95835380975398, 0, 0},
++    {0.97531843204928, -1.95063686409857, 0.97531843204928, 0, 0.95124613669835, -1.95002759149878, 0, 0},
++    {0.97316523498161, -1.94633046996323, 0.97316523498161, 0, 0.94705070426118, -1.94561023566527, 0, 0},
++    {0.96454515552826, -1.92909031105652, 0.96454515552826, 0, 0.93034775234268, -1.92783286977036, 0, 0},
++    {0.96009142950541, -1.92018285901082, 0.96009142950541, 0, 0.92177618768381, -1.91858953033784, 0, 0},
++    {0.95856916599601, -1.91713833199203, 0.95856916599601, 0, 0.91885558323625, -1.91542108074780, 0, 0},
++    {0.94597685600279, -1.89195371200558, 0.94597685600279, 0, 0.89487434461664, -1.88903307939452, 0, 0}
++};
++#else
+ static const Float_t ABYule[9][multiple_of(4, 2 * YULE_ORDER + 1)] = {
+     /* 20                 18                 16                 14                 12                 10                 8                  6                  4                  2                 0                 19                 17                 15                 13                 11                 9                  7                  5                  3                  1              */
+     { 0.00288463683916,  0.00012025322027,  0.00306428023191,  0.00594298065125, -0.02074045215285,  0.02161526843274, -0.01655260341619, -0.00009291677959, -0.00123395316851, -0.02160367184185, 0.03857599435200, 0.13919314567432, -0.86984376593551,  2.75465861874613, -5.87257861775999,  9.48293806319790,-12.28759895145294, 13.05504219327545,-11.34170355132042,  7.81501653005538, -3.84664617118067},
+@@ -134,6 +175,7 @@
+     {0.95856916599601, 0.91885558323625, -1.91713833199203, -1.91542108074780, 0.95856916599601},
+     {0.94597685600279, 0.89487434461664, -1.89195371200558, -1.88903307939452, 0.94597685600279}
+ };
++#endif
+ 
+ /*lint -restore */
+ 
+@@ -143,7 +185,62 @@
+ 
+ /* When calling this procedure, make sure that ip[-order] and op[-order] point to real data! */
+ 
++#if defined(__aarch64__) || defined(__arm__)
+ static void
++filterIntegrated(const Float_t * input, Float_t * output1, Float_t * output2, size_t nSamples, const Float_t * const kernel1, const Float_t * const kernel2)
++{
++    float32x4_t vk1 = vld1q_f32(kernel1);
++    float32x4_t vk2 = vld1q_f32(kernel1+4);
++    float32x4_t vk3 = vld1q_f32(kernel1+8);
++    float32x4_t vk4 = vld1q_f32(kernel1+12);
++    float32x4_t vk5 = vld1q_f32(kernel1+16);
++    float32x4_t vk6 = vld1q_f32(kernel1+20);
++    float32x4_t vk7 = vld1q_f32(kernel2);
++    float32x4_t vk8 = vld1q_f32(kernel2+4);
++    float32x4_t vi1 = vld1q_f32(input-10);
++    float32x4_t vi2 = vld1q_f32(input-6);
++    float32x4_t vi3 = vcombine_f32(vld1_f32(input-2), vdup_n_f32(0));
++    float32x4_t vo1 = vld1q_f32(output1-10);
++    float32x4_t vo2 = vld1q_f32(output1-6);
++    float32x4_t vo3 = vcombine_f32(vld1_f32(output1-2), vdup_n_f32(0));
++    float32x4_t vo4 = vcombine_f32(vld1_f32(output2-2), vdup_n_f32(0));
++    goto start;
++    while (1) {
++        float32x4_t vsum1, vsum2;
++        vi1 = vextq_f32(vi1, vi2, 1);
++        vi2 = vextq_f32(vi2, vi3, 1);
++        vi3 = vld1q_lane_f32(input, vi3, 3);
++        vi3 = vextq_f32(vi3, vi3, 1);
++        vo1 = vextq_f32(vo1, vo2, 1);
++        vo2 = vextq_f32(vo2, vo3, 1);
++        vo3 = vextq_f32(vo3, vo3, 1);
++        vo4 = vextq_f32(vo4, vo4, 1);
++start:
++        vsum1 = vmulq_f32(       vi1, vk1);
++        vsum2 = vmulq_f32(       vo1, vk4);
++        vsum1 = vfmaq_f32(vsum1, vi2, vk2);
++        vsum2 = vfmaq_f32(vsum2, vo2, vk5);
++        vsum1 = vfmaq_f32(vsum1, vi3, vk3);
++        vsum2 = vfmaq_f32(vsum2, vo3, vk6);
++        vsum1 = vsubq_f32(vsum1, vsum2);
++        vsum2 = vfmsq_f32(vdupq_n_f32(0), vo4, vk8);
++        float out = vaddvq_f32(vsum1);
++        vo3 = vsetq_lane_f32(out, vo3, 2);
++        output1[0] = out;
++
++        vsum2 = vfmaq_f32(vsum2, vo3, vk7);
++        out = vaddvq_f32(vsum2);
++        vo4 = vsetq_lane_f32(out, vo4, 2);
++        output2[0] = out;
++
++        ++output1;
++        ++output2;
++        ++input;
++        if (--nSamples == 0) break;
++    }
++}
++#else
++static void
+ filterYule(const Float_t * input, Float_t * output, size_t nSamples, const Float_t * const kernel)
+ {
+     while (nSamples--) {
+@@ -188,6 +285,7 @@
+         ++input;
+     }
+ }
++#endif
+ 
+ 
+ 
+@@ -323,6 +421,12 @@
+             curright = right_samples + cursamplepos;
+         }
+ 
++#if defined(__aarch64__) || defined(__arm__)
++        filterIntegrated(curleft, rgData->lstep + rgData->totsamp, rgData->lout + rgData->totsamp, cursamples,
++                    ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
++        filterIntegrated(curright, rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples,
++                    ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
++#else
+         YULE_FILTER(curleft, rgData->lstep + rgData->totsamp, cursamples,
+                     ABYule[rgData->freqindex]);
+         YULE_FILTER(curright, rgData->rstep + rgData->totsamp, cursamples,
+@@ -332,6 +436,7 @@
+                       ABButter[rgData->freqindex]);
+         BUTTER_FILTER(rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples,
+                       ABButter[rgData->freqindex]);
++#endif
+ 
+         curleft = rgData->lout + rgData->totsamp; /* Get the squared values */
+         curright = rgData->rout + rgData->totsamp;
+--- libmp3lame/newmdct.c.orig	2011-05-08 01:05:17
++++ libmp3lame/newmdct.c	2023-04-12 19:33:49
+@@ -35,6 +35,13 @@
+ #include "encoder.h"
+ #include "util.h"
+ #include "newmdct.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__) && !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfmsq_f32 vmlsq_f32
++#endif
++#endif
+ 
+ 
+ 
+@@ -435,6 +442,95 @@
+ 
+     const sample_t *x2 = &x1[238 - 14 - 286];
+ 
++#if defined(__aarch64__) || defined(__arm__)
++    for (i = 0; i < 16; i+=4) {
++        float32x4x4_t vw;
++        float32x4_t vs, vt, vx;
++        vw = vld4q_lane_f32(wp-10, vw, 0);
++        vw = vld4q_lane_f32(wp+ 8, vw, 1);
++        vw = vld4q_lane_f32(wp+26, vw, 2);
++        vw = vld4q_lane_f32(wp+44, vw, 3);
++        vx = vrev64q_f32(  vld1q_f32(x1+224-3));
++        vs = vmulq_f32(    vld1q_f32(x2-224  ),  vw.val[0]);
++        vt = vmulq_f32(    vextq_f32(vx, vx, 2), vw.val[0]);
++        vx = vrev64q_f32(  vld1q_f32(x1+160-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2-160  ),  vw.val[1]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[1]);
++        vx = vrev64q_f32(  vld1q_f32(x1+ 96-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2- 96  ),  vw.val[2]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[2]);
++        vx = vrev64q_f32(  vld1q_f32(x1+ 32-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2- 32  ),  vw.val[3]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[3]);
++        vw = vld4q_lane_f32(wp- 6, vw, 0);
++        vw = vld4q_lane_f32(wp+12, vw, 1);
++        vw = vld4q_lane_f32(wp+30, vw, 2);
++        vw = vld4q_lane_f32(wp+48, vw, 3);
++        vx = vrev64q_f32(  vld1q_f32(x1- 32-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2+ 32  ),  vw.val[0]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[0]);
++        vx = vrev64q_f32(  vld1q_f32(x1- 96-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2+ 96  ),  vw.val[1]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[1]);
++        vx = vrev64q_f32(  vld1q_f32(x1-160-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2+160  ),  vw.val[2]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[2]);
++        vx = vrev64q_f32(  vld1q_f32(x1-224-3));
++        vs = vfmaq_f32(vs, vld1q_f32(x2+224  ),  vw.val[3]);
++        vt = vfmaq_f32(vt, vextq_f32(vx, vx, 2), vw.val[3]);
++        
++        vw = vld4q_lane_f32(wp- 2, vw, 0);
++        vw = vld4q_lane_f32(wp+16, vw, 1);
++        vw = vld4q_lane_f32(wp+34, vw, 2);
++        vw = vld4q_lane_f32(wp+52, vw, 3);
++        vx = vrev64q_f32(  vld1q_f32(x1-256-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2+256  ),  vw.val[0]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[0]);
++        vx = vrev64q_f32(  vld1q_f32(x1-192-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2+192  ),  vw.val[1]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[1]);
++        vx = vrev64q_f32(  vld1q_f32(x1-128-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2+128  ),  vw.val[2]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[2]);
++        vx = vrev64q_f32(  vld1q_f32(x1- 64-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2+ 64  ),  vw.val[3]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[3]);
++        vw = vld4q_lane_f32(wp+ 2, vw, 0);
++        vw = vld4q_lane_f32(wp+20, vw, 1);
++        vw = vld4q_lane_f32(wp+38, vw, 2);
++        vw = vld4q_lane_f32(wp+56, vw, 3);
++        vx = vrev64q_f32(  vld1q_f32(x1+  0-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2-  0  ),  vw.val[0]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[0]);
++        vx = vrev64q_f32(  vld1q_f32(x1+ 64-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2- 64  ),  vw.val[1]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[1]);
++        vx = vrev64q_f32(  vld1q_f32(x1+128-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2-128  ),  vw.val[2]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[2]);
++        vx = vrev64q_f32(  vld1q_f32(x1+192-3));
++        vt = vfmsq_f32(vt, vld1q_f32(x2-192  ),  vw.val[3]);
++        vs = vfmaq_f32(vs, vextq_f32(vx, vx, 2), vw.val[3]);
++        
++        float32x4x2_t vw2;
++        vw2 = vld2q_lane_f32(wp+ 6, vw2, 0);
++        vw2 = vld2q_lane_f32(wp+24, vw2, 1);
++        vw2 = vld2q_lane_f32(wp+42, vw2, 2);
++        vw2 = vld2q_lane_f32(wp+60, vw2, 3);
++        vs = vmulq_f32(vs, vw2.val[0]);
++        vx = vsubq_f32(vt, vs);
++        vw2.val[0] = vaddq_f32(vt, vs);
++        vw2.val[1] = vmulq_f32(vx, vw2.val[1]);
++        vst2q_f32(a+i*2 ,vw2);
++        
++        x1 -= 4;
++        x2 += 4;
++        wp += 18*4;
++    }
++    x1++;
++    x2--;
++    wp -= 18;
++#else
+     for (i = -15; i < 0; i++) {
+         FLOAT   w, s, t;
+ 
+@@ -501,6 +597,7 @@
+         x1--;
+         x2++;
+     }
++#endif
+     {
+         FLOAT   s, t, u, v;
+         t = x1[-16] * wp[-10];
+--- libmp3lame/psymodel.c.orig	2017-09-07 04:38:23
++++ libmp3lame/psymodel.c	2023-04-12 19:48:58
+@@ -154,6 +154,24 @@
+ #include "lame_global_flags.h"
+ #include "fft.h"
+ #include "lame-analysis.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vcopyq_laneq_f32(a, lane1, b, lane2) vsetq_lane_f32(vgetq_lane_f32(b, lane2), a, lane1)
++#define vaddvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#if !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfmsq_f32 vmlsq_f32
++#define vfmaq_n_f32 vmlaq_n_f32
++#elif !defined(__clang__)
++#define vfmaq_n_f32 vmlaq_n_f32
++#endif
++#endif
++#endif
+ 
+ 
+ #define NSFIRLEN 21
+@@ -662,6 +680,7 @@
+ }
+ 
+ 
++#if defined(__aarch64__) || defined(__arm__)
+ static void
+ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
+                      int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
+@@ -691,6 +710,192 @@
+     fftenergy[0] = wsamp_l[0][0];
+     fftenergy[0] *= fftenergy[0];
+ 
++    float32x4_t venergy = vdupq_n_f32(0);
++    for (j = 0; j < 64; j++) {
++        float32x4_t v0 = vld1q_f32(wsamp_l[0]+j*8+1);
++        float32x4_t v1 = vld1q_f32(wsamp_l[0]+j*8+5);
++        float32x4_t v2 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*8+1020));
++        float32x4_t v3 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*8+1016));
++        v2 = vextq_f32(v2, v2, 2);
++        v3 = vextq_f32(v3, v3, 2);
++        v0 = vmulq_f32(v0, v0);
++        v1 = vmulq_f32(v1, v1);
++        v0 = vfmaq_f32(v0, v2, v2);
++        v1 = vfmaq_f32(v1, v3, v3);
++        v0 = vmulq_n_f32(v0, 0.5f);
++        v1 = vmulq_n_f32(v1, 0.5f);
++        venergy = vaddq_f32(venergy, v0);
++        venergy = vaddq_f32(venergy, v1);
++        vst1q_f32(fftenergy+j*8+1, v0);
++        vst1q_f32(fftenergy+j*8+5, v1);
++    }
++    /* total energy */
++    {
++        FLOAT   totalenergy = vaddvq_f32(venergy) - fftenergy[512];
++        for (j = 1; j < 11; j++)
++            totalenergy -= fftenergy[j];
++
++        psv->tot_ener[chn] = totalenergy;
++    }
++
++    if (plt) {
++        for (j = 0; j < HBLKSIZE; j++) {
++            plt->energy[gr_out][chn][j] = plt->energy_save[chn][j];
++            plt->energy_save[chn][j] = fftenergy[j];
++        }
++    }
++}
++
++static void
++vbrpsy_compute_fft_l_js(lame_internal_flags * gfc, const sample_t * const buffer[2],
++                     int gr_out, FLOAT fftenergy_m[HBLKSIZE], FLOAT fftenergy_s[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
++{
++    SessionConfig_t const *const cfg = &gfc->cfg;
++    PsyStateVar_t *psv = &gfc->sv_psy;
++    plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
++    int     j;
++
++    /*********************************************************************
++    *  compute energies
++    *********************************************************************/
++    FLOAT const sqrt2_half = SQRT2 * 0.5f;
++    /* FFT data for mid and side channel is derived from L & R */
++    float32x4_t v0, v1, v2, v3, v4, v5;
++    float32x4_t venergy_m = vdupq_n_f32(0);
++    float32x4_t venergy_s = vdupq_n_f32(0);
++    /* 1st loop : wsamp_l[*][0] .. wsamp_l[*][3], wsamp_l[*][1021] .. wsamp_l[*][1023] */
++    v0 = vld1q_f32(wsamp_l[0]); /* {[0][0], [0][1], [0][2], [0][3]} */
++    v1 = vld1q_f32(wsamp_l[1]); /* {[1][0], [1][1], [1][2], [1][3]} */
++    v2 = vcombine_f32(vdup_n_f32(0), vrev64_f32(vld1_f32(wsamp_l[0]+1021))); /* {0, 0, [0][1022], [0][1021]} */
++    v2 = vld1q_lane_f32(wsamp_l[0]+1023, v2, 1); /* {0, [0][1023], [0][1022], [0][1021]} */
++    v3 = vcombine_f32(vdup_n_f32(0), vrev64_f32(vld1_f32(wsamp_l[1]+1021))); /* {0, 0, [1][1022], [1][1021]} */
++    v3 = vld1q_lane_f32(wsamp_l[1]+1023, v3, 1); /* {0, [1][1023], [1][1022], [1][1021]} */
++    v4 = vaddq_f32(v0, v1);
++    v5 = vaddq_f32(v2, v3);
++    v0 = vsubq_f32(v0, v1);
++    v2 = vsubq_f32(v2, v3);
++    v4 = vmulq_n_f32(v4, sqrt2_half);
++    v5 = vmulq_n_f32(v5, sqrt2_half);
++    v0 = vmulq_n_f32(v0, sqrt2_half);
++    v2 = vmulq_n_f32(v2, sqrt2_half);
++    /*vst1q_f32(wsamp_l[0], v4);
++    vst1q_f32(wsamp_l[1], v0);
++    v1 = vrev64q_f32(v5);
++    v3 = vrev64q_f32(v2);
++    v1 = vextq_f32(v1, v1, 2);
++    v3 = vextq_f32(v3, v3, 2);
++    vst1_f32(wsamp_l[0]+1021, vget_low_f32(v1));
++    vst1_f32(wsamp_l[1]+1021, vget_low_f32(v3));
++    vst1q_lane_f32(wsamp_l[0]+1023, v1, 2);
++    vst1q_lane_f32(wsamp_l[1]+1023, v3, 2);*/
++    v5 = vcopyq_laneq_f32(v5, 0, v4, 0); /* {[0][0], [0][1023], [0][1022], [0][1021]} */
++    v2 = vcopyq_laneq_f32(v2, 0, v0, 0); /* {[1][0], [1][1023], [1][1022], [1][1021]} */
++    v4 = vmulq_f32(v4, v4);
++    v0 = vmulq_f32(v0, v0);
++    v4 = vfmaq_f32(v4, v5, v5);
++    v0 = vfmaq_f32(v0, v2, v2);
++    v4 = vmulq_n_f32(v4, 0.5f);
++    v0 = vmulq_n_f32(v0, 0.5f);
++    vst1q_f32(fftenergy_m, v4);
++    vst1q_f32(fftenergy_s, v0);
++    //venergy_m = vaddq_f32(venergy_m, v4); /* sum of fftenergy_m[0..3] is not needed */
++    //venergy_s = vaddq_f32(venergy_s, v0); /* sum of fftenergy_s[0..3] is not needed */
++    /* 2nd to 128th loop : wsamp_l[*][4] to wsamp_l[*][511], wsamp_l[*][1020] to wsamp_l[*][513] */
++    for (j = 1; j < 128; j++) {
++        v0 = vld1q_f32(wsamp_l[0]+j*4);
++        v1 = vld1q_f32(wsamp_l[1]+j*4);
++        v2 = vrev64q_f32(vld1q_f32(wsamp_l[0]-j*4+1021));
++        v3 = vrev64q_f32(vld1q_f32(wsamp_l[1]-j*4+1021));
++        v2 = vextq_f32(v2, v2, 2);
++        v3 = vextq_f32(v3, v3, 2);
++        v4 = vaddq_f32(v0, v1);
++        v5 = vaddq_f32(v2, v3);
++        v0 = vsubq_f32(v0, v1);
++        v2 = vsubq_f32(v2, v3);
++        v4 = vmulq_n_f32(v4, sqrt2_half);
++        v5 = vmulq_n_f32(v5, sqrt2_half);
++        v0 = vmulq_n_f32(v0, sqrt2_half);
++        v2 = vmulq_n_f32(v2, sqrt2_half);
++        /*vst1q_f32(wsamp_l[0]+j*4, v4);
++        vst1q_f32(wsamp_l[1]+j*4, v0);
++        v1 = vrev64q_f32(v5);
++        v3 = vrev64q_f32(v2);
++        v1 = vextq_f32(v1, v1, 2);
++        v3 = vextq_f32(v3, v3, 2);
++        vst1q_f32(wsamp_l[0]-j*4+1021, v1);
++        vst1q_f32(wsamp_l[1]-j*4+1021, v3);*/
++        v4 = vmulq_f32(v4, v4);
++        v0 = vmulq_f32(v0, v0);
++        v4 = vfmaq_f32(v4, v5, v5);
++        v0 = vfmaq_f32(v0, v2, v2);
++        v4 = vmulq_n_f32(v4, 0.5f);
++        v0 = vmulq_n_f32(v0, 0.5f);
++        vst1q_f32(fftenergy_m+j*4, v4);
++        vst1q_f32(fftenergy_s+j*4, v0);
++        venergy_m = vaddq_f32(venergy_m, v4);
++        venergy_s = vaddq_f32(venergy_s, v0);
++    }
++    /* finally: wsamp_l[*][512] */
++    FLOAT l = wsamp_l[0][512];
++    FLOAT r = wsamp_l[1][512];
++    FLOAT m = (l + r) * sqrt2_half;
++    FLOAT s = (l - r) * sqrt2_half;
++    //wsamp_l[0][512] = m;
++    //wsamp_l[1][512] = s;
++    fftenergy_m[512] = m * m;
++    fftenergy_s[512] = s * s;
++
++    /* total energy */
++    {
++        FLOAT   totalenergy = vaddvq_f32(venergy_m);
++        for (j = 4; j < 11; j++)
++            totalenergy -= fftenergy_m[j];
++        psv->tot_ener[2] = totalenergy;
++        totalenergy = vaddvq_f32(venergy_s);
++        for (j = 4; j < 11; j++)
++            totalenergy -= fftenergy_s[j];
++        psv->tot_ener[3] = totalenergy;
++    }
++
++    if (plt) {
++        for (j = 0; j < HBLKSIZE; j++) {
++            plt->energy[gr_out][2][j] = plt->energy_save[2][j];
++            plt->energy_save[2][j] = fftenergy_m[j];
++            plt->energy[gr_out][3][j] = plt->energy_save[3][j];
++            plt->energy_save[3][j] = fftenergy_s[j];
++        }
++    }
++}
++#else
++static void
++vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
++                     int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
++{
++    SessionConfig_t const *const cfg = &gfc->cfg;
++    PsyStateVar_t *psv = &gfc->sv_psy;
++    plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
++    int     j;
++
++    if (chn < 2) {
++        fft_long(gfc, *wsamp_l, chn, buffer);
++    }
++    else if (chn == 2) {
++        FLOAT const sqrt2_half = SQRT2 * 0.5f;
++        /* FFT data for mid and side channel is derived from L & R */
++        for (j = BLKSIZE - 1; j >= 0; --j) {
++            FLOAT const l = wsamp_l[0][j];
++            FLOAT const r = wsamp_l[1][j];
++            wsamp_l[0][j] = (l + r) * sqrt2_half;
++            wsamp_l[1][j] = (l - r) * sqrt2_half;
++        }
++    }
++
++    /*********************************************************************
++    *  compute energies
++    *********************************************************************/
++    fftenergy[0] = wsamp_l[0][0];
++    fftenergy[0] *= fftenergy[0];
++
+     for (j = BLKSIZE / 2 - 1; j >= 0; --j) {
+         FLOAT const re = (*wsamp_l)[BLKSIZE / 2 - j];
+         FLOAT const im = (*wsamp_l)[BLKSIZE / 2 + j];
+@@ -712,6 +917,7 @@
+         }
+     }
+ }
++#endif
+ 
+ 
+ static void
+@@ -772,7 +978,7 @@
+                         FLOAT energy[4], FLOAT sub_short_factor[4][3], int ns_attacks[4][4],
+                         int uselongblock[2])
+ {
+-    FLOAT   ns_hpfsmpl[2][576];
++    FLOAT   ns_hpfsmpl[2][576] __attribute__ ((aligned (16)));
+     SessionConfig_t const *const cfg = &gfc->cfg;
+     PsyStateVar_t *const psv = &gfc->sv_psy;
+     plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
+@@ -793,6 +999,66 @@
+         /* apply high pass filter of fs/4 */
+         const sample_t *const firbuf = &buffer[chn][576 - 350 - NSFIRLEN + 192];
+         assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
++#if defined(__aarch64__) || defined(__arm__)
++        float32x4_t vbuf1, vbuf2, vbuf3, vbuf4, vbuf5, vbuf6, vbuf7;
++        vbuf1 = vld1q_f32(firbuf);
++        vbuf2 = vld1q_f32(firbuf+4);
++        vbuf3 = vld1q_f32(firbuf+8);
++        vbuf4 = vld1q_f32(firbuf+12);
++        vbuf5 = vld1q_f32(firbuf+16);
++        vbuf6 = vld1q_f32(firbuf+20);
++        for (i = 0; ; i += 4) {
++            float32x4_t vsum1, vsum2, v0, v1, v2, v3;
++            vsum1 = vld1q_f32(firbuf+i+10);
++            vbuf7 = vld1q_f32(firbuf+i+24);
++            /*
++            (firbuf[0][1][2][3] + firbuf[21][22][23][24]) * fircoef[0]
++            (firbuf[1][2][3][4] + firbuf[20][21][22][23]) * fircoef[1]
++            :
++            (firbuf[8][9][10][11] + firbuf[13][14][15][16]) * fircoef[8]
++            (firbuf[9][10][11][12] + firbuf[12][13][14][15]) * fircoef[9]
++            */
++            v0 = vextq_f32(vbuf6, vbuf7, 1);
++            v1 = vextq_f32(vbuf1, vbuf2, 1);
++            v0 = vaddq_f32(vbuf1, v0);
++            v1 = vaddq_f32(v1, vbuf6);
++            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[0]);
++            vsum2 = vmulq_n_f32(       v1, fircoef[1]);
++            v0 = vextq_f32(vbuf1, vbuf2, 2);
++            v1 = vextq_f32(vbuf5, vbuf6, 3);
++            v2 = vextq_f32(vbuf1, vbuf2, 3);
++            v3 = vextq_f32(vbuf5, vbuf6, 2);
++            v0 = vaddq_f32(v0, v1);
++            v2 = vaddq_f32(v2, v3);
++            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[2]);
++            vsum2 = vfmaq_n_f32(vsum2, v2, fircoef[3]);
++            v0 = vextq_f32(vbuf5, vbuf6, 1);
++            v1 = vextq_f32(vbuf2, vbuf3, 1);
++            v0 = vaddq_f32(vbuf2, v0);
++            v1 = vaddq_f32(v1, vbuf5);
++            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[4]);
++            vsum2 = vfmaq_n_f32(vsum2, v1, fircoef[5]);
++            v0 = vextq_f32(vbuf2, vbuf3, 2);
++            v1 = vextq_f32(vbuf4, vbuf5, 3);
++            v2 = vextq_f32(vbuf2, vbuf3, 3);
++            v3 = vextq_f32(vbuf4, vbuf5, 2);
++            v0 = vaddq_f32(v0, v1);
++            v2 = vaddq_f32(v2, v3);
++            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[6]);
++            vsum2 = vfmaq_n_f32(vsum2, v2, fircoef[7]);
++            v0 = vextq_f32(vbuf4, vbuf5, 1);
++            v1 = vextq_f32(vbuf3, vbuf4, 1);
++            v0 = vaddq_f32(vbuf3, v0);
++            v1 = vaddq_f32(v1, vbuf4);
++            vsum1 = vfmaq_n_f32(vsum1, v0, fircoef[8]);
++            vsum2 = vfmaq_n_f32(vsum2, v1, fircoef[9]);
++            vsum1 = vaddq_f32(vsum1, vsum2);
++            vst1q_f32(ns_hpfsmpl[chn]+i, vsum1);
++            if (i == 572) break;
++            vbuf1 = vbuf2; vbuf2 = vbuf3; vbuf3 = vbuf4;
++            vbuf4 = vbuf5; vbuf5 = vbuf6; vbuf6 = vbuf7;
++        }
++#else
+         for (i = 0; i < 576; i++) {
+             FLOAT   sum1, sum2;
+             sum1 = firbuf[i + 10];
+@@ -803,6 +1069,7 @@
+             }
+             ns_hpfsmpl[chn][i] = sum1 + sum2;
+         }
++#endif
+         masking_ratio[gr_out][chn].en = psv->en[chn];
+         masking_ratio[gr_out][chn].thm = psv->thm[chn];
+         if (n_chn_psy > 2) {
+@@ -1423,9 +1690,9 @@
+     /* fft and energy calculation   */
+     FLOAT(*wsamp_l)[BLKSIZE];
+     FLOAT(*wsamp_s)[3][BLKSIZE_s];
+-    FLOAT   fftenergy[HBLKSIZE];
++    FLOAT   fftenergy[HBLKSIZE] __attribute__ ((aligned (16)));
+     FLOAT   fftenergy_s[3][HBLKSIZE_s];
+-    FLOAT   wsamp_L[2][BLKSIZE];
++    FLOAT   wsamp_L[2][BLKSIZE] __attribute__ ((aligned (16)));
+     FLOAT   wsamp_S[2][3][BLKSIZE_s];
+     FLOAT   eb[4][CBANDS], thr[4][CBANDS];
+ 
+@@ -1457,6 +1724,26 @@
+ 
+     /* LONG BLOCK CASE */
+     {
++#if defined(__aarch64__) || defined(__arm__)
++        for (chn = 0; chn < cfg->channels_out; chn++) {
++            int const ch01 = chn & 0x01;
++
++            wsamp_l = wsamp_L + ch01;
++            vbrpsy_compute_fft_l(gfc, buffer, chn, gr_out, fftenergy, wsamp_l);
++            vbrpsy_compute_loudness_approximation_l(gfc, gr_out, chn, fftenergy);
++            vbrpsy_compute_masking_l(gfc, fftenergy, eb[chn], thr[chn], chn);
++        }
++        if (cfg->mode == JOINT_STEREO) {
++            FLOAT   fftenergy_side[HBLKSIZE] __attribute__ ((aligned (16)));
++            vbrpsy_compute_fft_l_js(gfc, buffer, gr_out, fftenergy, fftenergy_side, wsamp_L);
++            vbrpsy_compute_masking_l(gfc, fftenergy, eb[2], thr[2], 2);
++            vbrpsy_compute_masking_l(gfc, fftenergy_side, eb[3], thr[3], 3);
++            if ((uselongblock[0] + uselongblock[1]) == 2) {
++                vbrpsy_compute_MS_thresholds(const_eb, thr, gdl->mld_cb, gfc->ATH->cb_l,
++                                             ath_factor, cfg->msfix, gdl->npart);
++            }
++        }
++#else
+         for (chn = 0; chn < n_chn_psy; chn++) {
+             int const ch01 = chn & 0x01;
+ 
+@@ -1471,6 +1758,7 @@
+                                              ath_factor, cfg->msfix, gdl->npart);
+             }
+         }
++#endif
+         /* TODO: apply adaptive ATH masking here ?? */
+         for (chn = 0; chn < n_chn_psy; chn++) {
+             convert_partition2scalefac_l(gfc, eb[chn], thr[chn], chn);
+--- libmp3lame/quantize.c.orig	2017-08-15 22:40:45
++++ libmp3lame/quantize.c	2023-04-12 16:11:34
+@@ -40,6 +40,29 @@
+ #ifdef HAVE_XMMINTRIN_H
+ #include "vector/lame_intrin.h"
+ #endif
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vaddvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#define vsqrtq_f32(a) ({ \
++    float32x4_t b = vmaxq_f32(a, vreinterpretq_f32_u32(vdupq_n_u32(0x00800000))); \
++    float32x4_t e = vrsqrteq_f32(b); \
++    e = vmulq_f32(vrsqrtsq_f32(vmulq_f32(b, e), e), e); \
++    e = vmulq_f32(vrsqrtsq_f32(vmulq_f32(b, e), e), e); \
++    vmulq_f32(a, e); \
++})
++#define vmaxnmq_f32 vmaxq_f32
++#define vmaxnmvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vmaxq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vmax_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#endif
++#endif
+ 
+ 
+ 
+@@ -72,10 +95,45 @@
+ static void
+ init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT * sum)
+ {
+-    int     i;
++    int     i = 0;
+     FLOAT   tmp;
+     *sum = 0;
+-    for (i = 0; i <= upper; ++i) {
++#if defined(__aarch64__) || defined(__arm__)
++    float32x4_t vsum = vdupq_n_f32(0);
++    float32x4_t vmax = vdupq_n_f32(0);
++    for (i = 0; i <= upper - 15; i += 16) {
++        float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+i));
++        float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+i+4));
++        float32x4_t v2 = vabsq_f32(vld1q_f32(cod_info->xr+i+8));
++        float32x4_t v3 = vabsq_f32(vld1q_f32(cod_info->xr+i+12));
++        vsum = vaddq_f32(vsum, v0);
++        vsum = vaddq_f32(vsum, v1);
++        vsum = vaddq_f32(vsum, v2);
++        vsum = vaddq_f32(vsum, v3);
++        v0 = vsqrtq_f32(vmulq_f32(v0, vsqrtq_f32(v0)));
++        v1 = vsqrtq_f32(vmulq_f32(v1, vsqrtq_f32(v1)));
++        v2 = vsqrtq_f32(vmulq_f32(v2, vsqrtq_f32(v2)));
++        v3 = vsqrtq_f32(vmulq_f32(v3, vsqrtq_f32(v3)));
++        vmax = vmaxnmq_f32(vmax, v0);
++        vmax = vmaxnmq_f32(vmax, v1);
++        vmax = vmaxnmq_f32(vmax, v2);
++        vmax = vmaxnmq_f32(vmax, v3);
++        vst1q_f32(xrpow+i, v0);
++        vst1q_f32(xrpow+i+4, v1);
++        vst1q_f32(xrpow+i+8, v2);
++        vst1q_f32(xrpow+i+12, v3);
++    }
++    for (; i <= upper - 3; i += 4) {
++        float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+i));
++        vsum = vaddq_f32(vsum, v0);
++        v0 = vsqrtq_f32(vmulq_f32(v0, vsqrtq_f32(v0)));
++        vmax = vmaxnmq_f32(vmax, v0);
++        vst1q_f32(xrpow+i, v0);
++    }
++    cod_info->xrpow_max = vmaxnmvq_f32(vmax);
++    *sum = vaddvq_f32(vsum);
++#endif
++    for (; i <= upper; ++i) {
+         tmp = fabs(cod_info->xr[i]);
+         *sum += tmp;
+         xrpow[i] = sqrt(tmp * sqrt(tmp));
+@@ -1495,7 +1553,7 @@
+     EncResult_t *const eov = &gfc->ov_enc;
+     FLOAT   l3_xmin[2][2][SFBMAX];
+ 
+-    FLOAT   xrpow[576];
++    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
+     int     bands[2][2];
+     int     frameBits[15];
+     int     used_bits;
+@@ -1904,7 +1962,7 @@
+     SessionConfig_t const *const cfg = &gfc->cfg;
+     EncResult_t *const eov = &gfc->ov_enc;
+     FLOAT   l3_xmin[SFBMAX];
+-    FLOAT   xrpow[576];
++    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
+     int     targ_bits[2][2];
+     int     mean_bits, max_frame_bits;
+     int     ch, gr, ath_over;
+@@ -1991,7 +2049,7 @@
+ {
+     SessionConfig_t const *const cfg = &gfc->cfg;
+     FLOAT   l3_xmin[SFBMAX];
+-    FLOAT   xrpow[576];
++    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
+     int     targ_bits[2];
+     int     mean_bits, max_bits;
+     int     gr, ch;
+--- libmp3lame/quantize_pvt.c.orig	2017-09-07 04:33:36
++++ libmp3lame/quantize_pvt.c	2023-04-12 19:35:58
+@@ -36,6 +36,22 @@
+ #include "reservoir.h"
+ #include "lame-analysis.h"
+ #include <float.h>
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vaddvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#define vceqzq_s32(a) vceqq_s32(a, vdupq_n_s32(0))
++#define vceqz_s32(a) vceq_s32(a, vdup_n_s32(0))
++#if !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfma_f32 vmla_f32
++#endif
++#endif
++#endif
+ 
+ 
+ #define NSATHSCALE 100  /* Assuming dynamic range=96dB, this value should be 92 */
+@@ -767,6 +783,33 @@
+         }
+     }
+     else if (j > cod_info->big_values) {
++#if defined(__aarch64__) || defined(__arm__)
++        float32x4_t vnoise = vdupq_n_f32(0);
++        float32x4_t vstep = vdupq_n_f32(step);
++        for (; l - 3 > 0; l -= 4, j += 8) {
++            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
++            float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+j+4));
++            float32x4_t v2 = vsubq_f32(v0, vstep);
++            float32x4_t v3 = vsubq_f32(v1, vstep);
++            v0 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j)), v0, v2);
++            v1 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j+4)), v1, v3);
++            vnoise = vfmaq_f32(vnoise, v0, v0);
++            vnoise = vfmaq_f32(vnoise, v1, v1);
++        }
++        for (; l - 1 > 0; l -= 2, j += 4) {
++            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
++            float32x4_t v1 = vsubq_f32(v0, vstep);
++            v0 = vbslq_f32(vceqzq_s32(vld1q_s32(ix+j)), v0, v1);
++            vnoise = vfmaq_f32(vnoise, v0, v0);
++        }
++        for (; l > 0; l--, j += 2) {
++            float32x2_t v0 = vabs_f32(vld1_f32(cod_info->xr+j));
++            float32x2_t v1 = vsub_f32(v0, vget_low_f32(vstep));
++            v0 = vbsl_f32(vceqz_s32(vld1_s32(ix+j)), v0, v1);
++            vnoise = vcombine_f32(vfma_f32(vget_low_f32(vnoise), v0, v0), vget_high_f32(vnoise));
++        }
++        noise += vaddvq_f32(vnoise);
++#else
+         FLOAT   ix01[2];
+         ix01[0] = 0;
+         ix01[1] = step;
+@@ -779,8 +822,33 @@
+             j++;
+             noise += temp * temp;
+         }
++#endif
+     }
+     else {
++#if 0
++        float32x4_t vnoise = vdupq_n_f32(0);
++        for (; l - 3 > 0; l -= 4, j += 8) {
++            float32x4_t v0 = vabsq_f32(vld1q_f32(cod_info->xr+j));
++            float32x4_t v1 = vabsq_f32(vld1q_f32(cod_info->xr+j+4));
++            int32x4_t v2 = vld1q_s32(ix+j);
++            int32x4_t v3 = vld1q_s32(ix+j+4);
++            float32x4_t v4 = vdupq_n_f32(0);
++            float32x4_t v5 = vdupq_n_f32(0);
++            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 0), v4, 0);
++            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 0), v5, 0);
++            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 1), v4, 1);
++            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 1), v5, 1);
++            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 2), v4, 2);
++            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 2), v5, 2);
++            v4 = vld1q_lane_f32(pow43+vgetq_lane_s32(v2, 3), v4, 3);
++            v5 = vld1q_lane_f32(pow43+vgetq_lane_s32(v3, 3), v5, 3);
++            v0 = vfmsq_n_f32(v0, v4, step);
++            v1 = vfmsq_n_f32(v1, v5, step);
++            vnoise = vfmaq_f32(vnoise, v0, v0);
++            vnoise = vfmaq_f32(vnoise, v1, v1);
++        }
++        noise += vaddvq_f32(vnoise);
++#endif
+         while (l--) {
+             FLOAT   temp;
+             temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;
+--- libmp3lame/tables.c.orig	2011-05-08 01:05:17
++++ libmp3lame/tables.c	2023-04-12 12:30:32
+@@ -240,7 +240,7 @@
+     7, 7, 8, 9
+ };
+ 
+-static const uint8_t t7l[] = {
++static const uint8_t t7l[48] __attribute__ ((aligned (16))) = {
+     1, 4, 7, 9, 9, 10,
+     4, 6, 8, 9, 9, 10,
+     7, 7, 9, 10, 10, 11,
+@@ -249,7 +249,7 @@
+     9, 10, 11, 12, 12, 12
+ };
+ 
+-static const uint8_t t8l[] = {
++static const uint8_t t8l[48] __attribute__ ((aligned (16))) = {
+     2, 4, 7, 9, 9, 10,
+     4, 4, 6, 10, 10, 10,
+     7, 6, 8, 10, 10, 11,
+@@ -258,7 +258,7 @@
+     10, 10, 11, 11, 13, 13
+ };
+ 
+-static const uint8_t t9l[] = {
++static const uint8_t t9l[48] __attribute__ ((aligned (16))) = {
+     3, 4, 6, 7, 9, 10,
+     4, 5, 6, 7, 8, 10,
+     5, 6, 7, 8, 9, 10,
+@@ -267,7 +267,7 @@
+     9, 9, 10, 10, 11, 11
+ };
+ 
+-static const uint8_t t10l[] = {
++static const uint8_t t10l[] __attribute__ ((aligned (16))) = {
+     1, 4, 7, 9, 10, 10, 10, 11,
+     4, 6, 8, 9, 10, 11, 10, 10,
+     7, 8, 9, 10, 11, 12, 11, 11,
+@@ -278,7 +278,7 @@
+     10, 10, 11, 12, 12, 13, 13, 13
+ };
+ 
+-static const uint8_t t11l[] = {
++static const uint8_t t11l[] __attribute__ ((aligned (16))) = {
+     2, 4, 6, 8, 9, 10, 9, 10,
+     4, 5, 6, 8, 10, 10, 9, 10,
+     6, 7, 8, 9, 10, 11, 10, 10,
+@@ -289,7 +289,7 @@
+     9, 9, 10, 11, 12, 12, 12, 12
+ };
+ 
+-static const uint8_t t12l[] = {
++static const uint8_t t12l[] __attribute__ ((aligned (16))) = {
+     4, 4, 6, 8, 9, 10, 10, 10,
+     4, 5, 6, 7, 9, 9, 10, 10,
+     6, 6, 7, 8, 9, 10, 9, 10,
+--- libmp3lame/takehiro.c.orig	2017-09-07 04:33:36
++++ libmp3lame/takehiro.c	2023-04-12 16:32:51
+@@ -33,6 +33,22 @@
+ #include "util.h"
+ #include "quantize_pvt.h"
+ #include "tables.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vaddvq_u32(a) ({ \
++    uint32x4x2_t b = vtrnq_u32(a, a); \
++    uint32x4_t c = vaddq_u32(b.val[0], b.val[1]); \
++    vget_lane_u32(vadd_u32(vget_high_u32(c), vget_low_u32(c)), 0); \
++})
++#define vaddv_u32(a) (vget_lane_u32(vpadd_u32(a, a), 0))
++#define vmaxvq_s32(a) ({ \
++    int32x4x2_t b = vtrnq_s32(a, a); \
++    int32x4_t c = vmaxq_s32(b.val[0], b.val[1]); \
++    vget_lane_s32(vmax_s32(vget_high_s32(c), vget_low_s32(c)), 0); \
++})
++#endif
++#endif
+ 
+ 
+ static const struct {
+@@ -572,7 +588,309 @@
+     return t;  
+ }
+ 
++#if defined(__aarch64__)
++inline static int
++count_bit_noESC_from3_neon_7to9(const int *ix, const int *end, int max, unsigned int * s)
++{
++    int t1 = huf_tbl_noESC[max - 1];
++    /* No ESC-words */
++    unsigned int sum1 = 0;
++    unsigned int sum2 = 0;
++    unsigned int sum3 = 0;
++    const unsigned int xlen = 6;
++    const uint8_t *const hlen1 = ht[7].hlen;
++    const uint8_t *const hlen2 = ht[8].hlen;
++    const uint8_t *const hlen3 = ht[9].hlen;
++    int     t;
+ 
++    uint8x16x3_t vt7, vt8, vt9;
++    uint16x8_t vsum1, vsum2, vsum3;
++    vt7.val[0] = vld1q_u8(hlen1);
++    vt7.val[1] = vld1q_u8(hlen1+16);
++    vt7.val[2] = vld1q_u8(hlen1+32);
++    vt8.val[0] = vld1q_u8(hlen2);
++    vt8.val[1] = vld1q_u8(hlen2+16);
++    vt8.val[2] = vld1q_u8(hlen2+32);
++    vt9.val[0] = vld1q_u8(hlen3);
++    vt9.val[1] = vld1q_u8(hlen3+16);
++    vt9.val[2] = vld1q_u8(hlen3+32);
++    vsum1 = vsum2 = vsum3 = vdupq_n_u16(0);
++    /*for (;ix < end - 32; ix += 32) {
++        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
++        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
++        uint32x4x2_t vx3 = vld2q_u32((const unsigned int *)ix+16);
++        uint32x4x2_t vx4 = vld2q_u32((const unsigned int *)ix+24);
++        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 6);
++        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 6);
++        uint32x4_t v2 = vmlaq_n_u32(vx3.val[1], vx3.val[0], 6);
++        uint32x4_t v3 = vmlaq_n_u32(vx4.val[1], vx4.val[0], 6);
++        uint16x8_t v4 = vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1));
++        uint16x8_t v5 = vuzp1q_u16(vreinterpretq_u16_u32(v2), vreinterpretq_u16_u32(v3));
++        uint8x16_t v6 = vuzp1q_u8(vreinterpretq_u8_u16(v4), vreinterpretq_u8_u16(v5));
++        uint8x16_t v7 = vqtbl3q_u8(vt7, v6);
++        uint8x16_t v8 = vqtbl3q_u8(vt8, v6);
++        uint8x16_t v9 = vqtbl3q_u8(vt9, v6);
++        vsum1 = vaddw_u8(vsum1, vget_low_u8(vpaddq_u8(v7, v7)));
++        vsum2 = vaddw_u8(vsum2, vget_low_u8(vpaddq_u8(v8, v8)));
++        vsum3 = vaddw_u8(vsum3, vget_low_u8(vpaddq_u8(v9, v9)));
++    }*/
++    for (;ix < end - 15; ix += 16) {
++        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
++        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
++        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 6);
++        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 6);
++        uint8x8_t v2 = vmovn_u16(vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1)));
++        vsum1 = vaddw_u8(vsum1, vqtbl3_u8(vt7, v2));
++        vsum2 = vaddw_u8(vsum2, vqtbl3_u8(vt8, v2));
++        vsum3 = vaddw_u8(vsum3, vqtbl3_u8(vt9, v2));
++    }
++    for (;ix < end - 7; ix += 8) {
++        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
++        uint32x4_t v0 = vmlaq_n_u32(vx.val[1], vx.val[0], 6);
++        uint16x4_t v1 = vmovn_u32(v0);
++        uint8x8_t v2 = vmovn_u16(vcombine_u16(v1, v1));
++        vsum1 = vaddw_u8(vsum1, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt7, v2)), 1)));
++        vsum2 = vaddw_u8(vsum2, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt8, v2)), 1)));
++        vsum3 = vaddw_u8(vsum3, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl3_u8(vt9, v2)), 1)));
++    }
++    sum1 += vaddlvq_u16(vsum1);
++    sum2 += vaddlvq_u16(vsum2);
++    sum3 += vaddlvq_u16(vsum3);
++    for (;ix < end - 1;) {
++        unsigned int x0 = *ix++;
++        unsigned int x1 = *ix++;
++        unsigned int x = x0 * xlen + x1;
++        sum1 += hlen1[x];
++        sum2 += hlen2[x];
++        sum3 += hlen3[x];
++    }
++
++    t = t1;
++    if (sum1 > sum2) {
++        sum1 = sum2;
++        t++;
++    }
++    if (sum1 > sum3) {
++        sum1 = sum3;
++        t = t1 + 2;
++    }
++    *s += sum1;
++
++    return t;  
++}
++
++inline static int
++count_bit_noESC_from3_neon_10to12(const int *ix, const int *end, int max, unsigned int * s)
++{
++    int t1 = huf_tbl_noESC[max - 1];
++    /* No ESC-words */
++    unsigned int sum1 = 0;
++    unsigned int sum2 = 0;
++    unsigned int sum3 = 0;
++    const unsigned int xlen = 8;
++    const uint8_t *const hlen1 = ht[10].hlen;
++    const uint8_t *const hlen2 = ht[11].hlen;
++    const uint8_t *const hlen3 = ht[12].hlen;
++    int     t;
++
++    uint8x16x4_t vt10, vt11, vt12;
++    uint16x8_t vsum1, vsum2, vsum3;
++    vt10.val[0] = vld1q_u8(hlen1);
++    vt10.val[1] = vld1q_u8(hlen1+16);
++    vt10.val[2] = vld1q_u8(hlen1+32);
++    vt10.val[3] = vld1q_u8(hlen1+48);
++    vt11.val[0] = vld1q_u8(hlen2);
++    vt11.val[1] = vld1q_u8(hlen2+16);
++    vt11.val[2] = vld1q_u8(hlen2+32);
++    vt11.val[3] = vld1q_u8(hlen2+48);
++    vt12.val[0] = vld1q_u8(hlen3);
++    vt12.val[1] = vld1q_u8(hlen3+16);
++    vt12.val[2] = vld1q_u8(hlen3+32);
++    vt12.val[3] = vld1q_u8(hlen3+48);
++    vsum1 = vsum2 = vsum3 = vdupq_n_u16(0);
++    for (;ix < end - 15; ix += 16) {
++        uint32x4x2_t vx1 = vld2q_u32((const unsigned int *)ix);
++        uint32x4x2_t vx2 = vld2q_u32((const unsigned int *)ix+8);
++        uint32x4_t v0 = vmlaq_n_u32(vx1.val[1], vx1.val[0], 8);
++        uint32x4_t v1 = vmlaq_n_u32(vx2.val[1], vx2.val[0], 8);
++        uint8x8_t v2 = vmovn_u16(vuzp1q_u16(vreinterpretq_u16_u32(v0), vreinterpretq_u16_u32(v1)));
++        vsum1 = vaddw_u8(vsum1, vqtbl4_u8(vt10, v2));
++        vsum2 = vaddw_u8(vsum2, vqtbl4_u8(vt11, v2));
++        vsum3 = vaddw_u8(vsum3, vqtbl4_u8(vt12, v2));
++    }
++    for (;ix < end - 7; ix += 8) {
++        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
++        uint32x4_t v0 = vmlaq_n_u32(vx.val[1], vx.val[0], 8);
++        uint16x4_t v1 = vmovn_u32(v0);
++        uint8x8_t v2 = vmovn_u16(vcombine_u16(v1, v1));
++        vsum1 = vaddw_u8(vsum1, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt10, v2)), 1)));
++        vsum2 = vaddw_u8(vsum2, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt11, v2)), 1)));
++        vsum3 = vaddw_u8(vsum3, vreinterpret_u8_u32(vset_lane_u32(0, vreinterpret_u32_u8(vqtbl4_u8(vt12, v2)), 1)));
++    }
++    sum1 += vaddlvq_u16(vsum1);
++    sum2 += vaddlvq_u16(vsum2);
++    sum3 += vaddlvq_u16(vsum3);
++    for (;ix < end - 1;) {
++        unsigned int x0 = *ix++;
++        unsigned int x1 = *ix++;
++        unsigned int x = x0 * xlen + x1;
++        sum1 += hlen1[x];
++        sum2 += hlen2[x];
++        sum3 += hlen3[x];
++    }
++
++    t = t1;
++    if (sum1 > sum2) {
++        sum1 = sum2;
++        t++;
++    }
++    if (sum1 > sum3) {
++        sum1 = sum3;
++        t = t1 + 2;
++    }
++    *s += sum1;
++
++    return t;  
++}
++#endif
++
++#if defined(__aarch64__) || defined(__arm__)
++static const uint32_t table131415[16 * 16] = {
++    0x00030101, 0x00050505, 0x00060707, 0x00080908, 0x00080a09, 0x00090a0a, 0x000a0b0a, 0x000a0b0b, 
++    0x000a0c0a, 0x000b0c0b, 0x000b0c0c, 0x000c0d0c, 0x000c0d0d, 0x000c0d0d, 0x000d0e0e, 0x000e0b0e, 
++    0x00050404, 0x00050606, 0x00070808, 0x00080909, 0x00090a0a, 0x00090b0a, 0x000a0b0b, 0x000a0b0b, 
++    0x000a0c0b, 0x000b0c0b, 0x000b0c0c, 0x000c0d0c, 0x000c0e0d, 0x000c0d0e, 0x000d0e0e, 0x000d0b0e, 
++    0x00060707, 0x00070808, 0x00070909, 0x00080a0a, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 
++    0x000a0d0b, 0x000b0c0c, 0x000b0d0c, 0x000c0d0d, 0x000c0d0d, 0x000d0e0e, 0x000d0e0f, 0x000d0c0f, 
++    0x00070908, 0x00080909, 0x00080a0a, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 0x000b0c0c, 
++    0x000b0d0c, 0x000b0d0d, 0x000c0e0d, 0x000c0e0d, 0x000c0e0d, 0x000d0f0e, 0x000d0f0f, 0x000d0d0f, 
++    0x00080a09, 0x00080a09, 0x00090b0b, 0x00090b0b, 0x000a0c0c, 0x000a0c0c, 0x000b0d0d, 0x000b0d0d, 
++    0x000b0d0c, 0x000b0e0d, 0x000c0e0d, 0x000c0e0e, 0x000c0f0e, 0x000d0f0f, 0x000d0f0f, 0x000d0c10, 
++    0x00090a0a, 0x00090a0a, 0x00090b0b, 0x000a0b0c, 0x000a0c0c, 0x000a0d0c, 0x000b0d0d, 0x000b0e0d, 
++    0x000b0d0d, 0x000b0e0d, 0x000c0e0e, 0x000c0f0d, 0x000d0f0f, 0x000d0f0f, 0x000d1010, 0x000e0d10, 
++    0x000a0b0a, 0x00090b0b, 0x000a0b0c, 0x000a0c0c, 0x000a0d0d, 0x000b0d0d, 0x000b0d0d, 0x000b0d0d, 
++    0x000b0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0e0e, 0x000d0f0f, 0x000d0f0f, 0x000e1010, 0x000e0d10, 
++    0x000a0b0b, 0x000a0b0b, 0x000a0c0c, 0x000b0c0d, 0x000b0d0d, 0x000b0d0d, 0x000b0d0e, 0x000c0e0e, 
++    0x000c0e0e, 0x000c0f0e, 0x000c0f0f, 0x000c0f0f, 0x000d0f0f, 0x000d1110, 0x000d1112, 0x000e0d12, 
++    0x000a0b0a, 0x000a0c0a, 0x000a0c0b, 0x000b0d0c, 0x000b0d0c, 0x000b0d0d, 0x000b0e0d, 0x000c0e0e, 
++    0x000c0f0e, 0x000c0f0e, 0x000c0f0e, 0x000d0f0f, 0x000d100f, 0x000e1010, 0x000e1011, 0x000e0d11, 
++    0x000a0c0b, 0x000a0c0b, 0x000b0c0c, 0x000b0d0c, 0x000b0d0d, 0x000b0e0d, 0x000c0e0d, 0x000c0f0f, 
++    0x000c0f0e, 0x000d0f0f, 0x000d0f0f, 0x000d1010, 0x000d0f10, 0x000e1010, 0x000e0f12, 0x000e0e11, 
++    0x000b0c0b, 0x000b0d0c, 0x000b0c0c, 0x000b0d0d, 0x000c0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0e0f, 
++    0x000c0f0e, 0x000d100f, 0x000d1010, 0x000d100f, 0x000d1110, 0x000e1111, 0x000f1012, 0x000e0d13, 
++    0x000b0d0c, 0x000b0d0c, 0x000b0d0c, 0x000b0d0d, 0x000c0e0e, 0x000c0e0e, 0x000c0f0e, 0x000c100e, 
++    0x000d100f, 0x000d100f, 0x000d100f, 0x000d1010, 0x000e1011, 0x000e0f11, 0x000e1011, 0x000f0e12, 
++    0x000c0d0c, 0x000c0e0d, 0x000b0e0d, 0x000c0e0e, 0x000c0e0e, 0x000c0f0f, 0x000d0f0e, 0x000d0f0f, 
++    0x000d0f10, 0x000d1110, 0x000d1011, 0x000d1011, 0x000e1011, 0x000e1012, 0x000f1212, 0x000f0e12, 
++    0x000c0f0d, 0x000c0e0d, 0x000c0e0e, 0x000c0e0f, 0x000c0f0f, 0x000d0f0f, 0x000d1010, 0x000d1010, 
++    0x000d1010, 0x000e1210, 0x000e1110, 0x000e1111, 0x000e1112, 0x000e1311, 0x000f1112, 0x000f0e12, 
++    0x000d0e0e, 0x000d0f0e, 0x000d0d0e, 0x000d0e0f, 0x000d100f, 0x000d100f, 0x000d0f11, 0x000d1010, 
++    0x000e1010, 0x000e1113, 0x000e1211, 0x000e1111, 0x000f1311, 0x000f1113, 0x000e1012, 0x000f0e12, 
++    0x000d0b0d, 0x000d0b0e, 0x000d0b0f, 0x000d0c10, 0x000d0c10, 0x000d0d10, 0x000d0d11, 0x000e0d10, 
++    0x000e0e11, 0x000e0e11, 0x000e0e12, 0x000e0e12, 0x000f0e15, 0x000f0e14, 0x000f0e15, 0x000f0c12
++};
++
++inline static int
++count_bit_noESC_from3_neon_13to15(const int *ix, const int *end, int max, unsigned int * s)
++{
++    int t1 = huf_tbl_noESC[max - 1];
++    /* No ESC-words */
++    unsigned int sum1 = 0;
++    unsigned int sum2 = 0;
++    unsigned int sum3 = 0;
++    int     t;
++
++    int32x4_t vxlen = vreinterpretq_s32_s64(vdupq_n_s64(4));
++    uint16x8_t vsum = vdupq_n_u16(0);
++    for (;ix < end - 3; ix += 4) {
++        uint32x4_t vx = vshlq_u32(vld1q_u32((const unsigned int *)ix), vxlen);
++        uint64x2_t v0 = vpaddlq_u32(vx);
++        uint32x2_t v1 = vdup_n_u32(0);
++        v1 = vset_lane_u32(table131415[vgetq_lane_u64(v0, 0)], v1, 0);
++        v1 = vset_lane_u32(table131415[vgetq_lane_u64(v0, 1)], v1, 1);
++        vsum = vaddw_u8(vsum, vreinterpret_u8_u32(v1));
++    }
++    for (;ix < end - 1; ix += 2) {
++         uint32x2_t vx = vshl_u32(vld1_u32((const unsigned int *)ix), vget_low_s32(vxlen));
++         uint32x2_t v1 = vdup_n_u32(0);
++         v1 = vset_lane_u32(table131415[vaddv_u32(vx)], v1, 0);
++         vsum = vaddw_u8(vsum, vreinterpret_u8_u32(v1));
++    }
++    uint16x4_t vsums = vadd_u16(vget_low_u16(vsum), vget_high_u16(vsum));
++    sum1 = vget_lane_u16(vsums, 0);
++    sum2 = vget_lane_u16(vsums, 1);
++    sum3 = vget_lane_u16(vsums, 2);
++
++    t = t1;
++    if (sum1 > sum2) {
++        sum1 = sum2;
++        t++;
++    }
++    if (sum1 > sum3) {
++        sum1 = sum3;
++        t = t1 + 2;
++    }
++    *s += sum1;
++
++    return t;  
++}
++
++static int
++count_bit_ESC_neon(const int *ix, const int *const end, int t1, const int t2, unsigned int *const s)
++{
++    /* ESC-table is used */
++    unsigned int const linbits = ht[t1].xlen * 65536u + ht[t2].xlen;
++    unsigned int sum = 0, sum2;
++
++    uint32x4_t vlimit = vdupq_n_u32(15);
++    uint32x4_t vlinbits = vdupq_n_u32(linbits);
++    uint32x4_t vsum = vdupq_n_u32(0);
++    for(; ix < end - 7; ix += 8) {
++        uint32x4x2_t vx = vld2q_u32((const unsigned int *)ix);
++        uint32x4_t v0 = vcgeq_u32(vx.val[0], vlimit);
++        uint32x4_t v1 = vcgeq_u32(vx.val[1], vlimit);
++        uint32x4_t v2 = vminq_u32(vx.val[0], vlimit);
++        uint32x4_t v3 = vminq_u32(vx.val[1], vlimit);
++        vsum = vaddq_u32(vsum, vandq_u32(vlinbits, v0));
++        vsum = vaddq_u32(vsum, vandq_u32(vlinbits, v1));
++        v2 = vaddq_u32(vshlq_n_u32(v2, 4), v3);
++        sum += largetbl[v2[0]];
++        sum += largetbl[v2[1]];
++        sum += largetbl[v2[2]];
++        sum += largetbl[v2[3]];
++    }
++    sum += vaddvq_u32(vsum);
++    for(; ix < end - 1;) {
++        unsigned int x = *ix++;
++        unsigned int y = *ix++;
++
++        if (x >= 15u) {
++            x = 15u;
++            sum += linbits;
++        }
++        if (y >= 15u) {
++            y = 15u;
++            sum += linbits;
++        }
++        x <<= 4u;
++        x += y;
++        sum += largetbl[x];
++    }
++
++    sum2 = sum & 0xffffu;
++    sum >>= 16u;
++
++    if (sum > sum2) {
++        sum = sum2;
++        t1 = t2;
++    }
++
++    *s += sum;
++    return t1;
++}
++#endif
++
++
+ /*************************************************************************/
+ /*	      choose table						 */
+ /*************************************************************************/
+@@ -601,10 +919,27 @@
+ , &count_bit_noESC
+ , &count_bit_noESC_from2
+ , &count_bit_noESC_from2
++#if defined(__aarch64__) || defined(__arm__)
++#if defined(__aarch64__)
++, &count_bit_noESC_from3_neon_7to9
++, &count_bit_noESC_from3_neon_7to9
++, &count_bit_noESC_from3_neon_10to12
++, &count_bit_noESC_from3_neon_10to12
++#else
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
++#endif
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++, &count_bit_noESC_from3_neon_13to15
++#else
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
+@@ -613,6 +948,11 @@
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
+ , &count_bit_noESC_from3
++, &count_bit_noESC_from3
++, &count_bit_noESC_from3
++, &count_bit_noESC_from3
++, &count_bit_noESC_from3
++#endif
+ };
+ 
+ static int
+@@ -621,7 +961,27 @@
+     unsigned int* s = (unsigned int*)_s;
+     unsigned int  max;
+     int     choice, choice2;
++#if defined(__aarch64__) || defined(__arm__)
++    const int *ixp = ix;
++    int32x4_t vmax = vdupq_n_s32(0);
++    for (; ixp < end - 7; ixp += 8) {
++        int32x4_t v0 = vld1q_s32(ixp);
++        int32x4_t v1 = vld1q_s32(ixp+4);
++        v0 = vmaxq_s32(v0, v1);
++        vmax = vmaxq_s32(vmax, v0);
++    }
++    for (; ixp < end - 3; ixp += 4) {
++        int32x4_t v0 = vld1q_s32(ixp);
++        vmax = vmaxq_s32(vmax, v0);
++    }
++    for (; ixp < end - 1; ixp += 2) {
++        int32x2_t v0 = vld1_s32(ixp);
++        vmax = vcombine_s32(vmax_s32(vget_low_s32(vmax), v0), vget_high_s32(vmax));
++    }
++    max = vmaxvq_s32(vmax);
++#else
+     max = ix_max(ix, end);
++#endif
+ 
+     if (max <= 15) {
+       return count_fncs[max](ix, end, max, s);
+@@ -643,7 +1003,11 @@
+             break;
+         }
+     }
++#if defined(__aarch64__) || defined(__arm__)
++    return count_bit_ESC_neon(ix, end, choice, choice2, s);
++#else
+     return count_bit_ESC(ix, end, choice, choice2, s);
++#endif
+ }
+ 
+ 
+--- libmp3lame/vbrquantize.c.orig	2012-02-07 22:36:35
++++ libmp3lame/vbrquantize.c	2023-04-12 19:50:11
+@@ -33,6 +33,33 @@
+ #include "util.h"
+ #include "vbrquantize.h"
+ #include "quantize_pvt.h"
++#if defined(__aarch64__) || defined(__arm__)
++#include <arm_neon.h>
++#if !defined(__aarch64__)
++#define vaddvq_f32(a) ({ \
++    float32x4x2_t b = vtrnq_f32(a, a); \
++    float32x4_t c = vaddq_f32(b.val[0], b.val[1]); \
++    vget_lane_f32(vadd_f32(vget_high_f32(c), vget_low_f32(c)), 0); \
++})
++#define vuzp1q_f32(a, b) ({ \
++    float32x4x2_t c = vuzpq_f32(a, b); \
++    c.val[0]; \
++})
++#define vuzp2q_f32(a, b) ({ \
++    float32x4x2_t c = vuzpq_f32(a, b); \
++    c.val[1]; \
++})
++#if !defined(__ARM_FEATURE_FMA)
++#define vfmaq_f32 vmlaq_f32
++#define vfmaq_n_f32 vmlaq_n_f32
++#define vfmsq_n_f32 vmlsq_n_f32
++#elif !defined(__clang__)
++#define vfmaq_n_f32 vmlaq_n_f32
++#define vfmsq_n_f32 vmlsq_n_f32
++#endif
++#endif
++#endif
++#undef TAKEHIRO_IEEE754_HACK
+ 
+ 
+ 
+@@ -226,7 +253,55 @@
+     unsigned int i = bw >> 2u;
+     unsigned int const remaining = (bw & 0x03u);
+ 
++#if defined(__aarch64__) || defined(__arm__)
++    float32x4_t verr = vdupq_n_f32(0);
++    for (;i > 1; i -= 2) {
++        float32x4_t vxr34_1 = vmulq_n_f32(vld1q_f32(xr34), sfpow34);
++        float32x4_t vxr34_2 = vmulq_n_f32(vld1q_f32(xr34+4), sfpow34);
++        float32x4_t vxr_1 = vabsq_f32(vld1q_f32(xr));
++        float32x4_t vxr_2 = vabsq_f32(vld1q_f32(xr+4));
++        float32x4_t vxrn_1 = vnegq_f32(vxr_1);
++        float32x4_t vxrn_2 = vnegq_f32(vxr_2);
++        int32x4_t vix_1 = vcvtq_s32_f32(vxr34_1);
++        int32x4_t vix_2 = vcvtq_s32_f32(vxr34_2);
++        float32x4_t v0 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_1, 0)), vld1_f32(pow43+vgetq_lane_s32(vix_1, 1)));
++        float32x4_t v1 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_1, 2)), vld1_f32(pow43+vgetq_lane_s32(vix_1, 3)));
++        float32x4_t v2 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_2, 0)), vld1_f32(pow43+vgetq_lane_s32(vix_2, 1)));
++        float32x4_t v3 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix_2, 2)), vld1_f32(pow43+vgetq_lane_s32(vix_2, 3)));
++        float32x4_t v4 = vuzp1q_f32(v0, v1);
++        float32x4_t v5 = vuzp2q_f32(v0, v1);
++        float32x4_t v6 = vuzp1q_f32(v2, v3);
++        float32x4_t v7 = vuzp2q_f32(v2, v3);
++        float32x4_t verr1_1 = vfmsq_n_f32(vxr_1, v4, sfpow);
++        float32x4_t verr2_1 = vfmaq_n_f32(vxrn_1, v5, sfpow);
++        float32x4_t verr1_2 = vfmsq_n_f32(vxr_2, v6, sfpow);
++        float32x4_t verr2_2 = vfmaq_n_f32(vxrn_2, v7, sfpow);
++        verr1_1 = vminq_f32(verr1_1, verr2_1);
++        verr1_2 = vminq_f32(verr1_2, verr2_2);
++        verr = vfmaq_f32(verr, verr1_1, verr1_1);
++        verr = vfmaq_f32(verr, verr1_2, verr1_2);
++        xr += 8;
++        xr34 += 8;
++    }
+     while (i-- > 0) {
++        float32x4_t vxr34 = vmulq_n_f32(vld1q_f32(xr34), sfpow34);
++        float32x4_t vxr = vabsq_f32(vld1q_f32(xr));
++        float32x4_t vxrn = vnegq_f32(vxr);
++        int32x4_t vix = vcvtq_s32_f32(vxr34);
++        float32x4_t v0 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix, 0)), vld1_f32(pow43+vgetq_lane_s32(vix, 1)));
++        float32x4_t v1 = vcombine_f32(vld1_f32(pow43+vgetq_lane_s32(vix, 2)), vld1_f32(pow43+vgetq_lane_s32(vix, 3)));
++        float32x4_t v2 = vuzp1q_f32(v0, v1);
++        float32x4_t v3 = vuzp2q_f32(v0, v1);
++        float32x4_t verr1 = vfmsq_n_f32(vxr, v2, sfpow);
++        float32x4_t verr2 = vfmaq_n_f32(vxrn, v3, sfpow);
++        verr1 = vminq_f32(verr1, verr2);
++        verr = vfmaq_f32(verr, verr1, verr1);
++        xr += 4;
++        xr34 += 4;
++    }
++    xfsf += vaddvq_f32(verr);
++#else
++    while (i-- > 0) {
+         x[0] = sfpow34 * xr34[0];
+         x[1] = sfpow34 * xr34[1];
+         x[2] = sfpow34 * xr34[2];
+@@ -243,6 +318,7 @@
+         xr += 4;
+         xr34 += 4;
+     }
++#endif
+     if (remaining) {
+         x[0] = x[1] = x[2] = x[3] = 0;
+         switch( remaining ) {
