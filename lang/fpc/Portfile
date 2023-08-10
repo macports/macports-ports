@@ -45,6 +45,10 @@ universal_variant   no
 
 set fpcbasepath     ${prefix}/libexec/${name}
 
+if {${os.major} >= 13} { # Ventura, fix obsolete linker options
+    patchfiles-append   t_darwin.pas.patch
+}
+
 subport "chmcmd-${name}" {
     revision        0
 
@@ -73,6 +77,9 @@ subport "chmcmd-${name}" {
     configure.pre_args
     configure.args  -r -v Makefile.fpc.fpcmake
     configure.post_args
+
+    patchfiles-delete   t_darwin.pas.patch
+
     build.env       PREFIX=${prefix}
     build.target
     build.post_args-append \
@@ -95,6 +102,7 @@ subport "${name}-cross" {
 
     worksrcdir      ${name}build-${version}/fpcsrc/compiler
     use_configure   no
+    patch.pre_args  -p1
     build.args      OPT="-ap -v0"
     build.target    aarch64 arm avr i386 i8086 jvm m68k mips mipsel powerpc powerpc64 sparc x86_64
     switch ${build_arch} {
@@ -253,28 +261,35 @@ if {${subport} eq "${name}"} {
         }
     }
 
-    # os.major = 20 is macOS = 11 (BigSur)
-    if {${os.major} >= 20} {
-        set linkerOptions -XR${configure.sdkroot}
-    } else {
-        set linkerOptions ""
+    if       {${os.major} >= 11}   { # Big Sur
+        set otherOptions "-WM11.0 -XR${configure.sdkroot}"
+    } elseif {[vercmp ${os.version} 10.9] >= 0} { # Mavericks
+        set otherOptions "-WM10.9"
+    } else   {
+        set otherOptions ""
     }
 
     worksrcdir          ${name}build-${version}/fpcsrc
     build.env           PP=${workpath}/${bootstrapCompiler} \
                         PREFIX=${destroot}${fpcbasepath}
-    build.args          OPT="-ap -v0 ${linkerOptions}" CPU_TARGET=${cpuTarget} UTILS=1
+    build.args          OPT="-v0 -ap ${otherOptions}" CPU_TARGET=${cpuTarget} UTILS=1
 
     destroot.args       {*}${build.args}
     destroot.env        {*}${build.env}
+
+    # codesign for older systems does not have a --remove-signature option
+    # work around: replace codesign by a dummy.
+    if {[vercmp ${os.version} 10.11] <= 0} { # El Capitan
+        build.args-append   CODESIGN=/usr/bin/true
+    }
 
     # build the compiler utilities msgdif and msg2inc
     post-build {
         system -W ${worksrcpath}/compiler/utils \
                "../${compiler} -ap -v0 -Fu../../rtl/units/${cpuTarget}-darwin \
-                  -WM${macosx_deployment_target} ${linkerOptions} msgdif.pp && \
+                  ${otherOptions} msgdif.pp && \
                 ../${compiler} -ap -v0 -Fu../../rtl/units/${cpuTarget}-darwin \
-                  -WM${macosx_deployment_target} ${linkerOptions} msg2inc.pp"
+                  ${otherOptions} msg2inc.pp"
     }
 
     post-destroot {
@@ -285,7 +300,7 @@ if {${subport} eq "${name}"} {
             system -W ${worksrcpath} \
                    "make utils_install FPC=${worksrcpath}/compiler/${compiler} \
                        PREFIX=${destroot}${fpcbasepath} \
-                       OPT=\"-Furtl/units/${cpuTarget}-darwin -ap -v0 ${linkerOptions}\""
+                       OPT=\"-Furtl/units/${cpuTarget}-darwin -ap -v0 ${otherOptions}\""
         }
         # generate a configuration file
         xinstall -d ${destroot}${fpcbasepath}/etc
@@ -293,6 +308,16 @@ if {${subport} eq "${name}"} {
                "bin/fpcmkcfg -d basepath=${fpcbasepath}/lib/${name}/${version} -o etc/fpc.cfg"
         ln -s ${fpcbasepath}/etc/fpc.cfg ${destroot}${prefix}/etc
         system "patch ${destroot}${fpcbasepath}/etc/fpc.cfg ${filespath}/fpc.cfg.patch"
+
+        # remove the -WM option for older systems or update it as needed
+        if {[vercmp ${os.version} 10.7] < 0} { # Lion
+            reinplace "s|-WM10.9||g" ${destroot}${fpcbasepath}/etc/fpc.cfg
+        } elseif {${os.major} >=  11} { # Big Sur
+            reinplace "s|-WM10.9|-WM11.0|g" ${destroot}${fpcbasepath}/etc/fpc.cfg
+        }
+
+        # set prefix of search path for qt4pas
+        reinplace "s|PREFIX|${prefix}|g" ${destroot}${fpcbasepath}/etc/fpc.cfg
 
         # install man
         xinstall -d ${destroot}${fpcbasepath}/man
