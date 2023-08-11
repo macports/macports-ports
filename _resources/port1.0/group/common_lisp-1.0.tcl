@@ -35,6 +35,12 @@ default common_lisp.clisp       yes
 options common_lisp.build_run
 default common_lisp.build_run   yes
 
+options common_lisp.system
+default common_lisp.system      {*.asd}
+
+options common_lisp.test_system
+default common_lisp.test_system {}
+
 categories                      lisp
 
 use_configure                   no
@@ -110,21 +116,28 @@ pre-test {
 }
 
 build {
-    file delete -force ${common_lisp.build}/source
-    file delete -force ${common_lisp.build}/system
+    file delete -force ${common_lisp.build}
 
     xinstall -m 0755 -d ${common_lisp.build}/source
     xinstall -m 0755 -d ${common_lisp.build}/system
+    xinstall -m 0755 -d ${common_lisp.build}/test_system
 
     file copy ${worksrcpath} ${common_lisp.build}/source/${subport}
 
-    foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails *.asd] {
-        ln -sf ../source/${subport}/$f ${common_lisp.build}/system/$f
+    foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails {*}[option common_lisp.system]] {
+        ln -sf ../source/${subport}/$f ${common_lisp.build}/system
+        ln -sf ../source/${subport}/$f ${common_lisp.build}/test_system
+    }
+
+    if {[llength [option common_lisp.test_system]]} {
+        foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails {*}[option common_lisp.test_system]] {
+            ln -sf ../source/${subport}/$f ${common_lisp.build}/test_system
+        }
     }
 
     if {[option common_lisp.build_run]} {
         foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-            common_lisp::asdf_operate "build-op" [string range ${item} 0 end-4]
+            common_lisp::asdf_operate "build-op" [string range ${item} 0 end-4] ${common_lisp.build}/system
         }
     }
  }
@@ -142,55 +155,55 @@ test {
         return
     }
 
-    foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
-        common_lisp::asdf_operate "test-op" [string range ${item} 0 end-4]
+    foreach item [glob -dir ${common_lisp.build}/test_system -tails *.asd] {
+        common_lisp::asdf_operate "test-op" [string range ${item} 0 end-4] ${common_lisp.build}/test_system
     }
 }
 
-proc common_lisp::asdf_operate {op name} {
+proc common_lisp::asdf_operate {op name build_system_path} {
     global common_lisp.sbcl
     global common_lisp.ecl
     global common_lisp.clisp
 
     if {[option common_lisp.sbcl]} {
-        common_lisp::sbcl_asdf_operate ${op} ${name}
+        common_lisp::sbcl_asdf_operate ${op} ${name} ${build_system_path}
     }
 
     if {[option common_lisp.ecl]} {
-        common_lisp::ecl_asdf_operate ${op} ${name}
+        common_lisp::ecl_asdf_operate ${op} ${name} ${build_system_path}
     }
 
     if {[option common_lisp.clisp]} {
-        common_lisp::clisp_asdf_operate ${op} ${name}
+        common_lisp::clisp_asdf_operate ${op} ${name} ${build_system_path}
     }
 }
 
-proc common_lisp::sbcl_asdf_operate {op name} {
+proc common_lisp::sbcl_asdf_operate {op name build_system_path} {
     global prefix
     ui_info "Execute asdf:${op} at ${name} by SBCL"
 
-    common_lisp::run "${prefix}/bin/sbcl --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name}
+    common_lisp::run "${prefix}/bin/sbcl --no-sysinit --no-userinit --non-interactive" "--eval" ${op} ${name} ${build_system_path}
 }
 
-proc common_lisp::ecl_asdf_operate {op name} {
+proc common_lisp::ecl_asdf_operate {op name build_system_path} {
     global prefix
     ui_info "Execute asdf:${op} at ${name} by ECL"
 
-    common_lisp::run "${prefix}/bin/ecl -q" "--eval" ${op} ${name}
+    common_lisp::run "${prefix}/bin/ecl -q" "--eval" ${op} ${name} ${build_system_path}
 }
 
-proc common_lisp::clisp_asdf_operate {op name} {
+proc common_lisp::clisp_asdf_operate {op name build_system_path} {
     global prefix
     ui_info "Execute asdf:${op} at ${name} by CLISP"
 
-    common_lisp::run "${prefix}/bin/clisp --quiet --quiet" "-x" ${op} ${name}
+    common_lisp::run "${prefix}/bin/clisp --quiet --quiet" "-x" ${op} ${name} ${build_system_path}
 }
 
-proc common_lisp::run {lisp eval_arg op name} {
+proc common_lisp::run {lisp eval_arg op name build_system_path} {
     global workpath common_lisp.build common_lisp.prefix
 
     set lisp-system-path "#p\"${common_lisp.prefix}/system/\""
-    set lisp-build-system-path "#p\"${common_lisp.build}/system/\""
+    set lisp-build-system-path "#p\"${build_system_path}/\""
 
     set loadcmd ${lisp}
 
