@@ -41,7 +41,7 @@ default common_lisp.system      {*.asd}
 options common_lisp.test_system
 default common_lisp.test_system {}
 
-categories                      lisp
+categories-append               lisp
 
 use_configure                   no
 
