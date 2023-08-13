@@ -35,11 +35,8 @@ default common_lisp.clisp       yes
 options common_lisp.build_run
 default common_lisp.build_run   yes
 
-options common_lisp.system
-default common_lisp.system      {*.asd}
-
-options common_lisp.test_system
-default common_lisp.test_system {}
+options common_lisp.systems
+default common_lisp.systems     {*.asd}
 
 categories-append               lisp
 
@@ -120,19 +117,11 @@ build {
 
     xinstall -m 0755 -d ${common_lisp.build}/source
     xinstall -m 0755 -d ${common_lisp.build}/system
-    xinstall -m 0755 -d ${common_lisp.build}/test_system
 
     file copy ${worksrcpath} ${common_lisp.build}/source/${subport}
 
-    foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails {*}[option common_lisp.system]] {
+    foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails {*}[option common_lisp.systems]] {
         ln -sf ../source/${subport}/$f ${common_lisp.build}/system
-        ln -sf ../source/${subport}/$f ${common_lisp.build}/test_system
-    }
-
-    if {[llength [option common_lisp.test_system]]} {
-        foreach f [glob -dir ${common_lisp.build}/source/${subport} -tails {*}[option common_lisp.test_system]] {
-            ln -sf ../source/${subport}/$f ${common_lisp.build}/test_system
-        }
     }
 
     if {[option common_lisp.build_run]} {
@@ -155,8 +144,8 @@ test {
         return
     }
 
-    foreach item [glob -dir ${common_lisp.build}/test_system -tails *.asd] {
-        common_lisp::asdf_operate "test-op" [string range ${item} 0 end-4] ${common_lisp.build}/test_system
+    foreach item [glob -dir ${common_lisp.build}/system -tails *.asd] {
+        common_lisp::asdf_operate "test-op" [string range ${item} 0 end-4] ${common_lisp.build}/system
     }
 }
 
