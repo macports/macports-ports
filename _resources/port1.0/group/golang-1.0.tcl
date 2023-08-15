@@ -231,14 +231,9 @@ proc go.append_env {} {
         ui_debug "Disabling offline building for Go"
 
         configure.env-delete \
-                            GO111MODULE=off
-        build.env-delete    GO111MODULE=off
-        test.env-delete     GO111MODULE=off
-
-        configure.env-replace \
-                            GOPROXY=off GOPROXY=https://proxy.golang.org
-        build.env-replace   GOPROXY=off GOPROXY=https://proxy.golang.org
-        test.env-replace    GOPROXY=off GOPROXY=https://proxy.golang.org
+                            GO111MODULE=off GOPROXY=off
+        build.env-delete    GO111MODULE=off GOPROXY=off
+        test.env-delete     GO111MODULE=off GOPROXY=off
     }
 }
 port::register_callback go.append_env
