@@ -22,6 +22,9 @@ default common_lisp.build       {${workpath}/build}
 options common_lisp.threads
 default common_lisp.threads     no
 
+options common_lisp.ffi
+default common_lisp.ffi         no
+
 options common_lisp.sbcl
 default common_lisp.sbcl        yes
 
@@ -31,6 +34,14 @@ default common_lisp.ecl         [expr { ${os.platform} eq "darwin" && ${os.major
 
 options common_lisp.clisp
 default common_lisp.clisp       yes
+
+options common_lisp.ccl
+# CLL doesn't support arm64 yet
+default common_lisp.ccl         [expr { ${os.arch} ne "arm" }]
+
+options common_lisp.abcl
+# ABCL requires java and support OpenJDK 11 before 10.14 fragile
+default common_lisp.abcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
 
 options common_lisp.build_run
 default common_lisp.build_run   yes
@@ -55,6 +66,8 @@ proc common_lisp::add_dependencies {} {
     global common_lisp.sbcl
     global common_lisp.ecl
     global common_lisp.clisp
+    global common_lisp.abcl
+    global common_lisp.ccl
 
     if {[option common_lisp.sbcl]} {
         depends_build-delete    port:sbcl
@@ -69,6 +82,16 @@ proc common_lisp::add_dependencies {} {
     if {[option common_lisp.clisp]} {
         depends_build-delete    port:clisp
         depends_build-append    port:clisp
+    }
+
+    if {[option common_lisp.abcl]} {
+        depends_build-delete    port:abcl
+        depends_build-append    port:abcl
+    }
+
+    if {[option common_lisp.ccl]} {
+        depends_build-delete    port:ccl
+        depends_build-append    port:ccl
     }
 }
 
@@ -100,6 +123,16 @@ proc common_lisp::respect_threads_support {} {
 
         if {![option common_lisp.clisp]} {
             ui_debug "Exclude CLISP because it doesn't support threads"
+        }
+    }
+
+    if {[option common_lisp.ffi] && [option common_lisp.abcl]} {
+        common_lisp.abcl   no
+
+        catch {common_lisp.abcl [active_variants abcl ffi]}
+
+        if {![option common_lisp.abcl]} {
+            ui_debug "Exclude ABCL because it doesn't support FFI"
         }
     }
 }
@@ -153,6 +186,8 @@ proc common_lisp::asdf_operate {op name build_system_path} {
     global common_lisp.sbcl
     global common_lisp.ecl
     global common_lisp.clisp
+    global common_lisp.abcl
+    global common_lisp.ccl
 
     if {[option common_lisp.sbcl]} {
         common_lisp::sbcl_asdf_operate ${op} ${name} ${build_system_path}
@@ -164,6 +199,14 @@ proc common_lisp::asdf_operate {op name build_system_path} {
 
     if {[option common_lisp.clisp]} {
         common_lisp::clisp_asdf_operate ${op} ${name} ${build_system_path}
+    }
+
+    if {[option common_lisp.abcl]} {
+        common_lisp::abcl_asdf_operate ${op} ${name} ${build_system_path}
+    }
+
+    if {[option common_lisp.ccl]} {
+        common_lisp::ccl_asdf_operate ${op} ${name} ${build_system_path}
     }
 }
 
@@ -188,6 +231,26 @@ proc common_lisp::clisp_asdf_operate {op name build_system_path} {
     common_lisp::run "${prefix}/bin/clisp --quiet --quiet" "-x" ${op} ${name} ${build_system_path}
 }
 
+proc common_lisp::abcl_asdf_operate {op name build_system_path} {
+    global prefix
+    ui_info "Execute asdf:${op} at ${name} by ABCL"
+
+    # cleaner approach is somehow enforce different value to NSHomeDirectory
+    common_lisp::run "env XDG_CACHE_HOME=\$HOME/.cache ${prefix}/bin/abcl --noinit --batch" "--eval" ${op} ${name} ${build_system_path}
+}
+
+proc common_lisp::ccl_asdf_operate {op name build_system_path} {
+    global prefix configure.build_arch
+    ui_info "Execute asdf:${op} at ${name} by CCL"
+
+    set ccl ccl64
+    if { ${configure.build_arch} in [list i386 ppc] } {
+        set ccl ccl
+    }
+
+    # cleaner approach is somehow enforce different value to NSHomeDirectory
+    common_lisp::run "${prefix}/bin/${ccl} --no-init --batch" "--eval" ${op} ${name} ${build_system_path}
+}
 proc common_lisp::run {lisp eval_arg op name build_system_path} {
     global workpath common_lisp.build common_lisp.prefix
 
