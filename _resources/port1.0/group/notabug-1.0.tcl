@@ -69,7 +69,7 @@ proc notabug.setup {notabug_author notabug_project notabug_version {notabug_tag_
     } else {
         livecheck.type          regex
         default livecheck.url   {${notabug.homepage}/releases}
-        default livecheck.regex {[list /${notabug.author}/${notabug.project}/archive/[join ${notabug.tag_prefix}][join ${notabug.livecheck.regex}][join ${notabug.tag_suffix}]]}
+        default livecheck.regex {[list /${notabug.author}/${notabug.project}/archive/[join ${notabug.tag_prefix}][join ${notabug.livecheck.regex}${extract.suffix}][join ${notabug.tag_suffix}]]}
     }
     livecheck.version       ${notabug.version}
 }
