@@ -75,8 +75,12 @@ proc common_lisp::add_dependencies {} {
     }
 
     if {[option common_lisp.ecl]} {
-        depends_build-delete    port:ecl
-        depends_build-append    port:ecl
+        depends_build-delete    port:ecl \
+                                port:ecl-devel \
+                                path:bin/ecl:ecl \
+                                path:bin/ecl:ecl-devel
+
+        depends_build-append    path:bin/ecl:ecl
     }
 
     if {[option common_lisp.clisp]} {
