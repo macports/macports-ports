@@ -17,13 +17,17 @@
 # - "+" and "*" wildcards are supported
 #
 # If the required Java cannot be found, an error will be thrown at pre-fetch.
+#
+# Sometimes a port hard code inside produces scripts and other files used JVM,
+# then its true use java.enforce to enforce dependency.
 
-options java.version java.home java.fallback java.deptypes
+options java.version java.home java.fallback java.deptypes java.enforce
 
 default java.version  {}
 default java.home     {}
 default java.fallback {[java::java_get_default_fallback]}
 default java.deptypes lib
+default java.enforce  no
 
 # allow PortGroup to be used inside a variant (e.g. octave)
 global java_version_not_found
@@ -124,7 +128,7 @@ namespace eval java {
         }
 
         # Add dependency if required
-        if { ${java_version_not_found} && ${java.fallback} ne "" } {
+        if { (${java_version_not_found} || [option java.enforce]) && ${java.fallback} ne "" } {
             ui_debug "Adding dependency on JDK fallback ${java.fallback}"
             foreach deptype [option java.deptypes] {
                 depends_${deptype}-append port:${java.fallback}
