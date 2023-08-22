@@ -236,11 +236,13 @@ proc common_lisp::clisp_asdf_operate {op name build_system_path} {
 }
 
 proc common_lisp::abcl_asdf_operate {op name build_system_path} {
-    global prefix
+    global prefix workpath
     ui_info "Execute asdf:${op} at ${name} by ABCL"
 
-    # cleaner approach is somehow enforce different value to NSHomeDirectory
-    common_lisp::run "env XDG_CACHE_HOME=\$HOME/.cache ${prefix}/bin/abcl --noinit --batch" "--eval" ${op} ${name} ${build_system_path}
+    # ABCL runs on java and java uses NSHomeDirectory which ignores HOME env
+    # here I redefine user-homedir-pathname to use expected home folder everywhere
+    # See: https://github.com/armedbear/abcl/issues/614
+    common_lisp::run "${prefix}/bin/abcl --noinit --eval '(defun user-homedir-pathname () #p\"${workpath}/.home/\")'" "--eval" ${op} ${name} ${build_system_path}
 }
 
 proc common_lisp::ccl_asdf_operate {op name build_system_path} {
@@ -263,7 +265,7 @@ proc common_lisp::run {lisp eval_arg op name build_system_path} {
 
     set loadcmd ${lisp}
 
-    append loadcmd " ${eval_arg} '(require \"asdf\")'"
+    append loadcmd " ${eval_arg} '(require :asdf)'"
     append loadcmd " ${eval_arg} '(setf asdf:*central-registry* (list* (quote *default-pathname-defaults*) ${lisp-build-system-path} ${lisp-system-path} asdf:*central-registry*))'"
     append loadcmd " ${eval_arg} '(asdf:operate (quote asdf:${op}) (quote ${name}))'"
 
