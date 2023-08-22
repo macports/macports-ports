@@ -132,7 +132,7 @@ if {${os.platform} eq "darwin" && (${build_arch} in [list ppc ppc64])} {
 
 global prefix frameworks_dir
 # Please update R version here:
-set Rversion        4.3.0
+set Rversion        4.3.1
 set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz
