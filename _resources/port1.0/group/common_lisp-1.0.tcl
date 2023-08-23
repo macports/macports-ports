@@ -265,7 +265,10 @@ proc common_lisp::run {lisp eval_arg op name build_system_path} {
 
     set loadcmd ${lisp}
 
-    append loadcmd " ${eval_arg} '(require :asdf)'"
+    # CLisp has a bug which leads to loading upper case system name when it defines via :
+    # to avoid that the system name should be double quoted.
+    # See: https://gitlab.com/gnu-clisp/clisp/-/issues/46
+    append loadcmd " ${eval_arg} '(require \"asdf\")'"
     append loadcmd " ${eval_arg} '(setf asdf:*central-registry* (list* (quote *default-pathname-defaults*) ${lisp-build-system-path} ${lisp-system-path} asdf:*central-registry*))'"
     append loadcmd " ${eval_arg} '(asdf:operate (quote asdf:${op}) (quote ${name}))'"
 
