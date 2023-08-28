@@ -1,7 +1,12 @@
 # -*- coding: utf-8; mode: tcl; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 4; truncate-lines: t -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+#===================================================================================================
 #
 # Usage:
 # PortGroup     cmake 1.1
+#
+#===================================================================================================
+
+PortGroup debug 1.0
 
 namespace eval cmake {
     # our directory:
@@ -20,8 +25,7 @@ options                             cmake.build_dir \
                                     cmake.out_of_source \
                                     cmake.set_osx_architectures \
                                     cmake.set_c_standard \
-                                    cmake.set_cxx_standard \
-                                    cmake.debugopts
+                                    cmake.set_cxx_standard
 
 ## Explanation of and default values for the options defined above ##
 
@@ -59,11 +63,6 @@ default cmake.module_path           {}
 # Propagate c/c++ standards to the build
 default cmake.set_c_standard        no
 default cmake.set_cxx_standard      no
-# Set cmake.debugopts to the desired compiler debug options (or an empty string) if you want to
-# use custom options with the +debug variant.
-# Example: `cmake.debugopts-delete -DDEBUG` .
-# See: https://trac.macports.org/ticket/62642
-default cmake.debugopts             {[cmake::debugopts]}
 
 # CMake provides several different generators corresponding to different utilities
 # (and IDEs) used for building the sources. We support "Unix Makefiles" (the default)
@@ -211,16 +210,6 @@ proc cmake::handle_generator {option action args} {
                 }
             }
         }
-    }
-}
-
-proc cmake::debugopts {} {
-    global configure.cxx configure.cc
-    # get most if not all possible debug info
-    if {[string match *clang* ${configure.cxx}] || [string match *clang* ${configure.cc}]} {
-        return "-g -fno-limit-debug-info -fstandalone-debug -DDEBUG"
-    } else {
-        return "-g -DDEBUG"
     }
 }
 
@@ -510,35 +499,9 @@ platform darwin {
 
 configure.universal_args-delete --disable-dependency-tracking
 
-variant debug description "Enable debug binaries" {
-    pre-configure {
-        # this PortGroup uses a custom CMAKE_BUILD_TYPE giving complete control over
-        # the compiler flags. We use that here: replace the default -O2 or -Os with -O0, add
-        # debugging options and do otherwise an exactly identical build.
-        configure.cflags-replace         -O2 -O0
-        configure.cxxflags-replace       -O2 -O0
-        configure.objcflags-replace      -O2 -O0
-        configure.objcxxflags-replace    -O2 -O0
-        configure.ldflags-replace        -O2 -O0
-        configure.cflags-replace         -Os -O0
-        configure.cxxflags-replace       -Os -O0
-        configure.objcflags-replace      -Os -O0
-        configure.objcxxflags-replace    -Os -O0
-        configure.ldflags-replace        -Os -O0
-
-        if {${cmake.debugopts} ne [cmake::debugopts]} {
-            ui_debug "+debug variant uses custom cmake.debugopts=\"${cmake.debugopts}\""
-        } else {
-            ui_debug "+debug variant uses default cmake.debugopts=\"${cmake.debugopts}\""
-        }
-
-        configure.cflags-append         {*}${cmake.debugopts}
-        configure.cxxflags-append       {*}${cmake.debugopts}
-        configure.objcflags-append      {*}${cmake.debugopts}
-        configure.objcxxflags-append    {*}${cmake.debugopts}
-        configure.ldflags-append        {*}${cmake.debugopts}
-
+pre-configure {
+    if {[variant_isset debug] || [variant_isset debugoptimized]} {
         # try to ensure that info won't get stripped
-        configure.args-append           -DCMAKE_STRIP:FILEPATH=/bin/echo
+        configure.args-append -DCMAKE_STRIP:FILEPATH=/bin/echo
     }
 }
