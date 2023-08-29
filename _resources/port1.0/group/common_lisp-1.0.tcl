@@ -29,8 +29,8 @@ options common_lisp.sbcl
 default common_lisp.sbcl        yes
 
 options common_lisp.ecl
-# ECL doesn't support i386 and PPC, as an easy way enable it only on 10.7+
-default common_lisp.ecl         [expr { ${os.platform} eq "darwin" && ${os.major} >= 11 }]
+# ECL doesn't support PPC
+default common_lisp.ecl         [expr { ${os.arch} ne "powerpc" }]
 
 options common_lisp.clisp
 default common_lisp.clisp       yes
