@@ -15,7 +15,7 @@ set my_name         gtk4
 # GNOME project name
 set gname           gtk
 
-version             4.10.4
+version             4.12.1
 revision            0
 
 categories          gnome
@@ -35,13 +35,54 @@ distname            ${gname}-${version}
 dist_subdir         ${my_name}
 use_xz              yes
 
-checksums           rmd160  6b15945742e4aabd1f998062c146f1e8e665e3ea \
-                    sha256  7725400482e0685e28265e226c62847f4e73cfca9e9b416ac5838207f5377a24 \
-                    size    20526652
+checksums           rmd160  c69026bb52170581196ce1c990a57ccc3fcc62c2 \
+                    sha256  b8b61d6cf94fac64bf3a0bfc7af137c9dd2f8360033fdeb0cfe9612b77a99a72 \
+                    size    16924668
+
+# Disable unexpected download of subprojects
+meson.wrap_mode     nodownload
 
 set python_branch   3.11
 set python_version  [string map {. {}} ${python_branch}]
 set port_ver_major  [lindex [split ${version} .] 0]
+
+# Specify name of executable for 'rst2man'. MacPorts-specific.
+patchfiles-append   patch-docs-rst2man.diff
+
+# Don't allow build to promote warnings to errors. Full details in patchfile.
+# See: https://trac.macports.org/ticket/67985
+patchfiles-append   patch-meson-build-debug.diff
+
+# Fix builds for 10.12 and earlier, due to use of NSPasteboardType.
+# See: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5813
+patchfiles-append   patch-quartz-nspasteboardtype.diff
+
+# Upstream patch to fix conflicting declarations between libepoxy/OpenGL
+# See: https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/6208
+patchfiles-append   patch-epoxy-opengl.diff
+
+post-patch {
+    reinplace "s|@@PYTHON_VERSION@@|${python_branch}|" \
+        docs/reference/gtk/meson.build
+
+    # build assumes python3 exists
+    reinplace "s|^#!/usr/bin/env python3|#!${prefix}/bin/python${python_branch}|" \
+        build-aux/meson/dist-data.py \
+        build-aux/meson/gen-demo-header.py \
+        build-aux/meson/gen-visibility-macros.py \
+        demos/gtk-demo/geninclude.py \
+        gdk/broadway/gen-c-array.py \
+        gdk/gen-gdk-gresources-xml.py \
+        gsk/gen-gsk-gresources-xml.py \
+        gtk/gen-gtk-gresources-xml.py \
+        gtk/gentypefuncs.py \
+        tools/generate-uac-manifest.py
+
+    # these two are slightly different
+    reinplace "s|python3|${prefix}/bin/python${python_branch}|" \
+        testsuite/introspection/api.py \
+        examples/squares.py
+}
 
 depends_build-append \
                     port:docbook-xml \
@@ -65,54 +106,25 @@ depends_lib-append \
                     port:libepoxy \
                     path:include/turbojpeg.h:libjpeg-turbo \
                     port:libpng \
+                    path:lib/pkgconfig/librsvg-2.0.pc:librsvg \
                     port:mesa \
                     path:lib/pkgconfig/pango.pc:pango \
                     port:tiff
 
 license_noconflict  gobject-introspection
 
-# Specify name of executable for 'rst2man'
-patchfiles-append   patch-docs-rst2man.diff
-
-#patchfiles-append   patch-testsuite-python.diff
-
-patchfiles-append   patch-meson-dont-werror-on-missing-declarations.diff
-
-patchfiles-append   patch-quartz-nspasteboardtype.diff
-
-post-patch {
-    reinplace "s|@@PYTHON_VERSION@@|${python_branch}|" \
-        docs/reference/gtk/meson.build  \
-        testsuite/introspection/meson.build
-
-    # build assumes python3 exists
-    reinplace "s|^#!/usr/bin/env python3|#!${prefix}/bin/python${python_branch}|" \
-        gdk/gen-gdk-gresources-xml.py \
-        gdk/broadway/gen-c-array.py \
-        build-aux/meson/dist-data.py \
-        build-aux/meson/gen-demo-header.py \
-        tools/generate-uac-manifest.py \
-        gsk/gen-gsk-gresources-xml.py \
-        gtk/gentypefuncs.py \
-        gtk/gen-gtk-gresources-xml.py \
-        demos/gtk-demo/geninclude.py
-
-    # these two are slightly different
-    reinplace "s|python3|${prefix}/bin/python${python_branch}|" \
-        testsuite/introspection/api.py \
-        examples/squares.py
-}
-
 compiler.c_standard 2011
+compiler.cxx_standard 2017
 
 configure.args-append \
-  -Dbuild-examples=false \
-  -Dbuild-tests=false \
-  -Dgtk_doc=false \
-  -Dintrospection=enabled \
-  -Dman-pages=true \
-  -Dmedia-gstreamer=disabled \
-  -Dprint-cups=disabled
+    -Dbuild-examples=false \
+    -Dbuild-tests=false \
+    -Dbuild-testsuite=false \
+    -Ddocumentation=false \
+    -Dintrospection=enabled \
+    -Dman-pages=true \
+    -Dmedia-gstreamer=disabled \
+    -Dprint-cups=disabled
 
 # gobject-introspection uses g-ir-scanner, which uses $CC from env
 if {${universal_possible} && [variant_isset universal]} {
@@ -125,6 +137,10 @@ if {${universal_possible} && [variant_isset universal]} {
 } else {
     build.env-append       "CC=${configure.cc} ${configure.cc_archflags}"
     destroot.env-append    "CC=${configure.cc} ${configure.cc_archflags}"
+}
+
+variant broadway description {Enable the broadway (HTML5) gdk backend} {
+    configure.args-append   -Dbroadway-backend=true
 }
 
 variant quartz conflicts x11 {
@@ -177,8 +193,17 @@ if {![variant_isset quartz]} {
 }
 
 variant tests description "build tests" {
+    depends_test-append      port:py${python_version}-gobject3
+
     # NB. Most of the tests fail if gtk4 has already been installed before running them
-    configure.args-replace -Dbuild-tests=false -Dbuild-tests=true
+    configure.args-replace   -Dbuild-tests=false \
+                             -Dbuild-tests=true
+    configure.args-replace   -Dbuild-testsuite=false \
+                             -Dbuild-testsuite=true
+
+    test.run                 yes
+    test.cmd                 meson
+    test.target              test
 }
 
 platform darwin 8 {
@@ -186,11 +211,6 @@ platform darwin 8 {
     build.env-append       "DYLD_LIBRARY_PATH=${build_dir}/${gname}"
     destroot.env-append    "DYLD_LIBRARY_PATH=${build_dir}/${gname}"
 }
-
-depends_test-append port:py${python_version}-gobject3
-test.run            yes
-test.cmd            meson
-test.target         test
 
 livecheck.type      gnome
 livecheck.name      ${gname}
