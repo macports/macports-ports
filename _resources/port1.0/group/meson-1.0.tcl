@@ -8,11 +8,6 @@
 #
 
 
-# Wrap mode handling for subprojects.
-# Possible values: default, nofallback, nodownload, forcefallback, nopromote
-options meson.wrap_mode
-default meson.wrap_mode     {default}
-
 # meson builds need to be done out-of-source
 default build_dir           {${workpath}/build}
 
@@ -43,15 +38,15 @@ proc meson::get_post_args {} {
     if {[info exists muniversal.build_arch]} {
         # muniversal 1.1 PG is being used
         if {[option muniversal.is_cross.[option muniversal.build_arch]]} {
-            return "${configure.dir} ${build.dir} --cross-file=[option muniversal.build_arch]-darwin --wrap-mode=[option meson.wrap_mode]"
+            return "${configure.dir} ${build.dir} --cross-file=[option muniversal.build_arch]-darwin"
         } else {
-            return "${configure.dir} ${build.dir} --wrap-mode=[option meson.wrap_mode]"
+            return "${configure.dir} ${build.dir}"
         }
     } elseif {[info exists muniversal.current_arch]} {
         # muniversal 1.0 PG is being used
-        return "${configure.dir} ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin --wrap-mode=[option meson.wrap_mode]"
+        return "${configure.dir} ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin"
     } else {
-        return "${configure.dir} ${build_dir} --wrap-mode=[option meson.wrap_mode]"
+        return "${configure.dir} ${build_dir}"
     }
 }
 

@@ -7,11 +7,6 @@
 
 global os.major os.platform
 
-# clang is useless on Darwin / PowerPC, let disable it globally
-if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc64]} {
-    return
-}
-
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
     if {[option compiler.cxx_standard] >= 2014} {
         # For now limit exposure of clang-16 to ports needing c++14 or newer

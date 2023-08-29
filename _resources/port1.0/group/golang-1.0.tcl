@@ -54,7 +54,7 @@
 PortGroup legacysupport    1.1
 PortGroup compiler_wrapper 1.0
 
-options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix go.offline_build
+options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
 
 proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
     global go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
@@ -150,8 +150,6 @@ options go.bin go.vendors
 
 default go.bin          {${prefix}/bin/go}
 default go.vendors      {}
-default go.offline_build \
-                        true
 
 platforms               darwin freebsd linux
 supported_archs         arm64 i386 x86_64
@@ -193,7 +191,6 @@ default configure.env ${go_env}
 proc go.append_env {} {
     global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags configure.cppflags
     global os.major build.env workpath
-    global go.offline_build
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
@@ -225,15 +222,6 @@ proc go.append_env {} {
         }
         configure.env-append ${build.env}
         test.env-append      ${build.env}
-    }
-
-    if { ! ${go.offline_build} } {
-        ui_debug "Disabling offline building for Go"
-
-        configure.env-delete \
-                            GO111MODULE=off GOPROXY=off
-        build.env-delete    GO111MODULE=off GOPROXY=off
-        test.env-delete     GO111MODULE=off GOPROXY=off
     }
 }
 port::register_callback go.append_env
