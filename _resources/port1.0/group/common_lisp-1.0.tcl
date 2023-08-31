@@ -70,8 +70,12 @@ proc common_lisp::add_dependencies {} {
     global common_lisp.ccl
 
     if {[option common_lisp.sbcl]} {
-        depends_build-delete    port:sbcl
-        depends_build-append    port:sbcl
+        depends_build-delete    port:sbcl \
+                                port:sbcl-devel \
+                                path:bin/sbcl:sbcl \
+                                path:bin/sbcl:sbcl-devel
+
+        depends_build-append    path:bin/sbcl:sbcl
     }
 
     if {[option common_lisp.ecl]} {
