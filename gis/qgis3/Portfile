@@ -27,7 +27,7 @@ subport ${name-ltr} {}
 if {${subport} eq ${name}} {
     # Latest version
     github.setup    qgis QGIS 3_32_2 final-
-    revision        0
+    revision        1
     conflicts       ${name-ltr}
 
     checksums       rmd160  ddfec56299bc5bcd2bd574533daeab5db2e5978b \
@@ -36,7 +36,7 @@ if {${subport} eq ${name}} {
 } else {
     # LTR version
     github.setup    qgis QGIS 3_28_10 final-
-    revision        0
+    revision        1
     conflicts       ${name}
     description     {*}${description} (LTR)
 
@@ -112,22 +112,24 @@ post-patch {
 
 cmake.install_prefix    ${applications_dir}
 
-#HD5/MPI related things
-if {![catch {set result [active_variants hdf5 mpich]}]} {
-    if {$result} {
-        PortGroup           mpi 1.0
-
-        mpi.setup
-        mpi.enforce_variant hdf5
-    }
-}
-
-if {![catch {set result [active_variants hdf5 openmpi]}]} {
-    if {$result} {
-        PortGroup           mpi 1.0
-
-        mpi.setup
-        mpi.enforce_variant openmpi
+pre-configure {
+    # If GDAL is built with +hdf5 variant, QGIS needs to know the path to "mpi.h"
+    if {[active_variants gdal hdf5]} {
+        # Figure out HDF5's mpi include directory
+        set mpl_include_dir ""
+        if {![catch {set result [active_variants hdf5 openmpi]}]} {
+            if {$result} {
+                set mpl_include_dir "-I${prefix}/include/openmpi-mp"
+            }
+        }
+        if {![catch {set result [active_variants hdf5 mpich]}]} {
+            if {$result} {
+                set mpl_include_dir "-I${prefix}/include/mpich-mp"
+            }
+        }
+        if {$mpl_include_dir ne ""} {
+            configure.cxxflags-append ${mpl_include_dir}
+        }
     }
 }
 
@@ -169,7 +171,6 @@ variant server description "Builds with the server (FCGI) option" {
     configure.args-replace  -DWITH_SERVER=OFF -DWITH_SERVER=ON
 }
 
-
 # PostgreSQL variants (from the GDAL port)
 set postgresql_suffixes {15 14 13 12 11 10 95 96}
 
@@ -180,7 +181,8 @@ foreach suffix ${postgresql_suffixes} {
 
 foreach suffix ${postgresql_suffixes} {
     set vrt postgresql${suffix}
-    set pgversion [string index ${suffix} 0].[string index ${suffix} 1]
+    set dot [expr {[string index ${suffix} 0] eq "9"} ? {"."} : {""}]
+    set pgversion [string index ${suffix} 0]${dot}[string index ${suffix} 1]
     set index [lsearch -exact ${postgresql_variants} ${vrt}]
     set conf [lreplace ${postgresql_variants} ${index} ${index}]
 
@@ -208,9 +210,11 @@ eval ${pgdefault}
 
 set python_suffixes {37 38 39 310 311}
 set python_variants {}
+set plugin_variants {}
 
 foreach pyver ${python_suffixes} {
     lappend python_variants python${pyver}
+    lappend plugin_variants plugin_support${pyver}
 }
 
 foreach pyver ${python_suffixes} {
@@ -219,101 +223,121 @@ foreach pyver ${python_suffixes} {
     set index [lsearch -exact ${python_variants} ${vrt}]
     set conf [lreplace ${python_variants} ${index} ${index}]
 
-        variant ${vrt} description "Use Python ${pyversion}" conflicts {*}${conf} "
-            depends_lib-append      port:python${pyver} \
-                                    port:py${pyver}-pyqt5 \
-                                    port:py${pyver}-pyqt5-scintilla \
-                                    port:py${pyver}-gdal \
-                                    port:py${pyver}-six \
-                                    port:py${pyver}-protobuf3
+    variant ${vrt} description "Use Python ${pyversion} bindings" conflicts {*}${conf} "
+        depends_lib-append      port:python${pyver} \
+                                port:py${pyver}-pyqt5 \
+                                port:py${pyver}-pyqt5-scintilla \
+                                port:py${pyver}-gdal \
+                                port:py${pyver}-six \
+                                port:py${pyver}-protobuf3
 
-            depends_build-append    port:py${pyver}-pyqt-builder \
-                                    path:${frameworks_dir}/Python.framework/Versions/${pyversion}/bin/sip-build:py${pyver}-sip
+        depends_build-append    port:py${pyver}-pyqt-builder \
+                                path:${frameworks_dir}/Python.framework/Versions/${pyversion}/bin/sip-build:py${pyver}-sip
 
-            depends_run-append      port:py${pyver}-psycopg2 \
-                                    port:py${pyver}-requests \
-                                    port:py${pyver}-owslib \
-                                    port:py${pyver}-yaml \
-                                    port:py${pyver}-jinja2 \
-                                    port:py${pyver}-pygments
+        depends_run-append      port:py${pyver}-psycopg2 \
+                                port:py${pyver}-requests \
+                                port:py${pyver}-owslib \
+                                port:py${pyver}-yaml \
+                                port:py${pyver}-jinja2 \
+                                port:py${pyver}-pygments
 
-            configure.env-append    PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
-            build.env-append        PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
-            destroot.env-append     PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
+        configure.env-append    PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
+        build.env-append        PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
+        destroot.env-append     PATH=${frameworks_dir}/Python.framework/Versions/${pyversion}/bin:$env(PATH)
 
-            configure.args-append   -DPython_EXECUTABLE=${prefix}/bin/python${pyversion}
-            configure.args-append   -DWITH_BINDINGS=ON
-            configure.args-append   -DPYUIC_PROGRAM=${prefix}/bin/pyuic5-${pyversion}
-            configure.args-append   -DPYRCC_PROGRAM=${prefix}/bin/pyrcc5-${pyversion}
-            configure.args-append   -DQSCI_SIP_DIR=${frameworks_dir}/Python.framework/Versions/${pyversion}/lib/python${pyversion}/site-packages/PyQt5/bindings
+        configure.args-append   -DPython_EXECUTABLE=${prefix}/bin/python${pyversion}
+        configure.args-append   -DWITH_BINDINGS=ON
+        configure.args-append   -DPYUIC_PROGRAM=${prefix}/bin/pyuic5-${pyversion}
+        configure.args-append   -DPYRCC_PROGRAM=${prefix}/bin/pyrcc5-${pyversion}
+        configure.args-append   -DQSCI_SIP_DIR=${frameworks_dir}/Python.framework/Versions/${pyversion}/lib/python${pyversion}/site-packages/PyQt5/bindings
 
-            variant plugin_support description \"Add common Python modules for QGIS plugins\" {
-                depends_run-append  port:py${pyver}-affine \
-                                    port:py${pyver}-cycler \
-                                    port:py${pyver}-dateutil \
-                                    port:py${pyver}-fiona \
-                                    port:py${pyver}-geojson \
-                                    port:py${pyver}-h5py \
-                                    port:py${pyver}-llvmlite \
-                                    port:py${pyver}-markupsafe \
-                                    port:py${pyver}-matplotlib \
-                                    port:py${pyver}-netcdf4 \
-                                    port:py${pyver}-numpy \
-                                    port:py${pyver}-opencv4 \
-                                    port:py${pyver}-pandas \
-                                    port:py${pyver}-patsy \
-                                    port:py${pyver}-Pillow \
-                                    port:py${pyver}-plotly \
-                                    port:py${pyver}-psycopg2 \
-                                    port:py${pyver}-pyproj \
-                                    port:py${pyver}-pysal \
-                                    port:py${pyver}-rasterio \
-                                    port:py${pyver}-requests \
-                                    port:py${pyver}-rsgislib \
-                                    port:py${pyver}-rtree \
-                                    port:py${pyver}-scikit-learn \
-                                    port:py${pyver}-scipy \
-                                    port:py${pyver}-seaborn \
-                                    port:py${pyver}-shapely \
-                                    port:py${pyver}-sip \
-                                    port:py${pyver}-statsmodels \
-                                    port:py${pyver}-termcolor
+        post-patch {
+            # Complies with py-gdal layout
+            set gdal_py_prefix \"${worksrcpath}/python/plugins/processing/algs/gdal\"
+            foreach file    {\"AssignProjection\" \
+                             \"fillnodata\" \
+                             \"gdal2tiles\" \
+                             \"gdal2xyz\" \
+                             \"gdalcalc\" \
+                             \"merge\" \
+                             \"pansharp\" \
+                             \"pct2rgb\" \
+                             \"polygonize\" \
+                             \"proximity\" \
+                             \"retile\" \
+                             \"rgb2pct\" \
+                             \"sieve\" } {
+                reinplace -E \"s|else '.py'|else '.py-${pyversion}'|\" \${gdal_py_prefix}/\${file}.py
             }
-            default_variants +plugin_support
+        }
+    "
 
-            post-patch {
-                # Complies with py-gdal layout
-                set gdal_py_prefix \"${worksrcpath}/python/plugins/processing/algs/gdal\"
-                foreach file    {\"AssignProjection\" \
-                                 \"fillnodata\" \
-                                 \"gdal2tiles\" \
-                                 \"gdal2xyz\" \
-                                 \"gdalcalc\" \
-                                 \"merge\" \
-                                 \"pansharp\" \
-                                 \"pct2rgb\" \
-                                 \"polygonize\" \
-                                 \"proximity\" \
-                                 \"retile\" \
-                                 \"rgb2pct\" \
-                                 \"sieve\" } {
-                    reinplace -E \"s|else '.py'|else '.py-${pyversion}'|\" \${gdal_py_prefix}/\${file}.py
-                }
-            }
-        "
+    set vrt2 plugin_support${pyver}
+    set index2 [lsearch -exact ${plugin_variants} ${vrt2}]
+    set conf2 [lreplace ${plugin_variants} ${index2} ${index2}]
+
+    variant ${vrt2} description "Add common Python ${pyversion} modules for QGIS plugins" conflicts {*}${conf2} "
+        depends_run-append  port:py${pyver}-affine \
+                            port:py${pyver}-cycler \
+                            port:py${pyver}-dateutil \
+                            port:py${pyver}-fiona \
+                            port:py${pyver}-geojson \
+                            port:py${pyver}-h5py \
+                            port:py${pyver}-llvmlite \
+                            port:py${pyver}-markupsafe \
+                            port:py${pyver}-matplotlib \
+                            port:py${pyver}-numpy \
+                            port:py${pyver}-opencv4 \
+                            port:py${pyver}-pandas \
+                            port:py${pyver}-patsy \
+                            port:py${pyver}-Pillow \
+                            port:py${pyver}-plotly \
+                            port:py${pyver}-pyproj \
+                            port:py${pyver}-pysal \
+                            port:py${pyver}-rasterio \
+                            port:py${pyver}-rsgislib \
+                            port:py${pyver}-rtree \
+                            port:py${pyver}-scikit-learn \
+                            port:py${pyver}-scipy \
+                            port:py${pyver}-seaborn \
+                            port:py${pyver}-shapely \
+                            port:py${pyver}-sip \
+                            port:py${pyver}-statsmodels \
+                            port:py${pyver}-termcolor
+    "
 }
 
 # Python default
 set python_default "if {"
-
 foreach pyver ${python_suffixes} {
     set python_default "${python_default}!\[variant_isset python${pyver}\] && "
 }
-
 set python_default [string range ${python_default} 0 end-4]
-set python_default "${python_default}} { default_variants +python311 }"
-
+set python_default "${python_default}} { default_variants +python311 +plugin_support311}"
 eval ${python_default}
+
+# Python support default
+set python_default "if {"
+foreach pyver ${python_suffixes} {
+    set python_default "${python_default}!\[variant_isset python${pyver}\] && "
+}
+set python_default [string range ${python_default} 0 end-4]
+set python_default "${python_default}} { default_variants +python311 +plugin_support311}"
+eval ${python_default}
+
+# Assert +pythonXY and +plugin_supportXY variants are in sync
+set supp_py_list [list]
+set pyth_py_list [list]
+foreach pyver ${python_suffixes} {
+    if {[variant_isset plugin_support${pyver}]} {lappend supp_py_list ${pyver}}
+    if {[variant_isset python${pyver}]} {lappend pyth_py_list ${pyver}}
+}
+if { [expr ([llength $supp_py_list] > 0) && ([llength $pyth_py_list] > 0)] &&
+     [lindex $supp_py_list 0] != [lindex $pyth_py_list 0] } {
+         set pyv [lindex $pyth_py_list 0]
+         ui_error "${subport} +pythonXY and +plugin_supportXY variants must be in sync"
+         return -code error "Try running `port install ${subport} +python${pyv} +plugin_support${pyv}`"
+}
 
 # PROJ variants
 
@@ -327,12 +351,12 @@ foreach proj_ver ${proj_versions} {
     set index [lsearch -exact ${proj_variants} proj${proj_ver}]
     set cflcts [lreplace ${proj_variants} ${index} ${index}]
 
-        variant proj${proj_ver} description "Use Proj${proj_ver}" conflicts {*}${cflcts} "
+    variant proj${proj_ver} description "Use Proj${proj_ver}" conflicts {*}${cflcts} "
 
-            depends_lib-append      port:proj${proj_ver}
-            configure.args-append   -DPROJ_INCLUDE_DIR=${prefix}/lib/proj${proj_ver}/include \
-                                    -DPROJ_LIBRARY=${prefix}/lib/proj${proj_ver}/lib/libproj.dylib
-        "
+        depends_lib-append      port:proj${proj_ver}
+        configure.args-append   -DPROJ_INCLUDE_DIR=${prefix}/lib/proj${proj_ver}/include \
+                                -DPROJ_LIBRARY=${prefix}/lib/proj${proj_ver}/lib/libproj.dylib
+    "
 }
 
 set projdf "if {"
@@ -346,28 +370,32 @@ eval ${projdf}
 # GRASS variants
 
 variant grass7 conflicts grass description "Build GRASS 7 plugin" {
-    depends_lib-append      port:grass7
+    depends_build-append    port:grass7
     global grass_version
     set grass_version       78
-    set grass_gis_base      [exec ${prefix}/bin/grass${grass_version} --config path]
-    
+    global grass_gis_base
+    pre-configure {
+        configure.args-replace  -DWITH_GRASS7=OFF -DWITH_GRASS7=ON
+        configure.args-append   -DGRASS_PREFIX7=${grass_gis_base}
+    }
     post-patch {
         reinplace "s|command = None|command = '${prefix}/bin/grass${grass_version}'|g" \
             ${worksrcpath}/python/plugins/grassprovider/Grass7Utils.py
     }
-    configure.args-replace  -DWITH_GRASS7=OFF -DWITH_GRASS7=ON
-    configure.args-append   -DGRASS_PREFIX7=${grass_gis_base}
 }
 
 variant grass conflicts grass7 description "Build GRASS (latest) plugin" {
-    depends_lib-append      port:grass
-    set grass_gis_base      [exec ${prefix}/bin/grass --config path]
+    depends_build-append    port:grass
+    global grass_gis_base
+    pre-configure {
+        set grass_gis_base      [exec ${prefix}/bin/grass --config path]
+        configure.args-replace  -DWITH_GRASS8=OFF -DWITH_GRASS8=ON
+        configure.args-append   -DGRASS_PREFIX8=${grass_gis_base}
+    }
     post-patch {
         reinplace "s|command = None|command = '${prefix}/bin/grass'|g" \
             ${worksrcpath}/python/plugins/grassprovider/Grass7Utils.py
     }
-    configure.args-replace  -DWITH_GRASS8=OFF -DWITH_GRASS8=ON
-    configure.args-append   -DGRASS_PREFIX8=${grass_gis_base}
 }
 
 # Configure steps
@@ -403,3 +431,9 @@ if {${subport} eq ${name-ltr}} {
     livecheck.version ${version}
     livecheck.regex #QGIS Version \[0-9\]{5}|Visit https://download.qgis.org to get your copy of version (\[0-9.\]+)|<html><body>
 }
+
+notes-append \
+    "Some QGIS plugins may fail with error message noting missing PyQt5.QtWebKit\
+    module, this could be solved by manually installing the module with e.g.\
+    `sudo port install py311-pyqt5 +webkit` (just make sure you use the same Python\
+    version for py-pyqt5 as for the QGIS Python bindings)."
