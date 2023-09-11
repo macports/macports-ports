@@ -1,0 +1,170 @@
+From 00f3036db523b2163374bae0a38539d01d6445f9 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Mon, 16 Sep 2019 15:11:00 +0100
+Subject: [PATCH] CFI-handling : Add a hook to allow target-specific
+ Personality and LSDA indirections.
+
+At present, the output of .cfi_personality and .cfi_lsda assumes
+ELF semantics for indirections.  This isn't suitable for all targets
+and is one blocker to moving Darwin to use .cfi_xxxx.
+
+The patch adds a target hook that allows non-ELF targets to use
+indirections appropriate to their needs.
+
+gcc/ChangeLog:
+
+	* config/darwin-protos.h (darwin_make_eh_symbol_indirect): New.
+	* config/darwin.c (darwin_make_eh_symbol_indirect): New. Use
+	Mach-O semantics for personality and ldsa indirections.
+	* config/darwin.h (TARGET_ASM_MAKE_EH_SYMBOL_INDIRECT): New.
+	* doc/tm.texi: Regenerate.
+	* doc/tm.texi.in: Add TARGET_ASM_MAKE_EH_SYMBOL_INDIRECT hook.
+	* dwarf2out.c (dwarf2out_do_cfi_startproc): If the target defines
+	a hook for indirecting personality and ldsa references, use that
+	otherwise default to ELF semantics.
+	* target.def (make_eh_symbol_indirect): New target hook.
+
+(cherry picked from commit 5d46ec3db21d8c8926f15a634b2d6570536db5f1)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config/darwin-protos.h |  1 +
+ gcc/config/darwin.c        | 11 +++++++++++
+ gcc/config/darwin.h        |  3 +++
+ gcc/doc/tm.texi            |  4 ++++
+ gcc/doc/tm.texi.in         |  2 ++
+ gcc/dwarf2out.c            | 14 ++++++++++++--
+ gcc/target.def             | 10 ++++++++++
+ 7 files changed, 43 insertions(+), 2 deletions(-)
+
+diff --git gcc/config/darwin-protos.h gcc/config/darwin-protos.h
+index 0829b7ea232..74db4144f91 100644
+--- gcc/config/darwin-protos.h
++++ gcc/config/darwin-protos.h
+@@ -69,6 +69,7 @@ extern void darwin_non_lazy_pcrel (FILE *, rtx);
+ 
+ extern void darwin_emit_unwind_label (FILE *, tree, int, int);
+ extern void darwin_emit_except_table_label (FILE *);
++extern rtx darwin_make_eh_symbol_indirect (rtx, bool);
+ extern bool darwin_should_restore_cfa_state (void);
+ 
+ extern void darwin_pragma_ignore (struct cpp_reader *);
+diff --git gcc/config/darwin.c gcc/config/darwin.c
+index ba226e9fa13..0bdc1f0d7f5 100644
+--- gcc/config/darwin.c
++++ gcc/config/darwin.c
+@@ -2241,6 +2241,17 @@ darwin_emit_except_table_label (FILE *file)
+   ASM_OUTPUT_LABEL (file, section_start_label);
+ }
+ 
++rtx
++darwin_make_eh_symbol_indirect (rtx orig, bool ARG_UNUSED (pubvis))
++{
++  if (DARWIN_PPC == 0 && TARGET_64BIT)
++    return orig;
++
++  return gen_rtx_SYMBOL_REF (Pmode,
++			     machopic_indirection_name (orig,
++							/*stub_p=*/false));
++}
++
+ /* The unwinders in earlier Darwin versions are based on an old version
+    of libgcc_s and need current frame address stateto be reset after a
+    DW_CFA_restore_state recovers the register values.  */
+diff --git gcc/config/darwin.h gcc/config/darwin.h
+index baf1cd1ab8d..125d9be4186 100644
+--- gcc/config/darwin.h
++++ gcc/config/darwin.h
+@@ -738,6 +738,9 @@ ASM_OPTIONS ASM_MMACOSX_VERSION_MIN_SPEC
+ /* Emit a label to separate the exception table.  */
+ #define TARGET_ASM_EMIT_EXCEPT_TABLE_LABEL darwin_emit_except_table_label
+ 
++/* Make an EH (personality or LDSA) symbol indirect as needed.  */
++#define TARGET_ASM_MAKE_EH_SYMBOL_INDIRECT darwin_make_eh_symbol_indirect
++
+ /* Some of Darwin's unwinders need current frame address state to be reset
+    after a DW_CFA_restore_state recovers the register values.  */
+ #undef TARGET_ASM_SHOULD_RESTORE_CFA_STATE
+diff --git gcc/doc/tm.texi gcc/doc/tm.texi
+index 0adf4722188..5774023da55 100644
+--- gcc/doc/tm.texi
++++ gcc/doc/tm.texi
+@@ -9553,6 +9553,10 @@ given instruction.  This is only used when @code{TARGET_EXCEPT_UNWIND_INFO}
+ returns @code{UI_TARGET}.
+ @end deftypefn
+ 
++@deftypefn {Target Hook} rtx TARGET_ASM_MAKE_EH_SYMBOL_INDIRECT (rtx @var{origsymbol}, bool @var{pubvis})
++If necessary, modify personality and LSDA references to handle indirection.  The original symbol is in @code{origsymbol} and if @code{pubvis} is true  the symbol is visible outside the TU.
++@end deftypefn
++
+ @deftypevr {Target Hook} bool TARGET_ASM_UNWIND_EMIT_BEFORE_INSN
+ True if the @code{TARGET_ASM_UNWIND_EMIT} hook should be called before the assembly for @var{insn} has been emitted, false if the hook should be called afterward.
+ @end deftypevr
+diff --git gcc/doc/tm.texi.in gcc/doc/tm.texi.in
+index ff4de7e1fa5..f642bc04b85 100644
+--- gcc/doc/tm.texi.in
++++ gcc/doc/tm.texi.in
+@@ -6454,6 +6454,8 @@ the jump-table.
+ 
+ @hook TARGET_ASM_UNWIND_EMIT
+ 
++@hook TARGET_ASM_MAKE_EH_SYMBOL_INDIRECT
++
+ @hook TARGET_ASM_UNWIND_EMIT_BEFORE_INSN
+ 
+ @hook TARGET_ASM_SHOULD_RESTORE_CFA_STATE
+diff --git gcc/dwarf2out.c gcc/dwarf2out.c
+index fea0a4b899f..95c59d98a9b 100644
+--- gcc/dwarf2out.c
++++ gcc/dwarf2out.c
+@@ -991,7 +991,12 @@ dwarf2out_do_cfi_startproc (bool second)
+ 	 in the assembler.  Further, the assembler can't handle any
+ 	 of the weirder relocation types.  */
+       if (enc & DW_EH_PE_indirect)
+-	ref = dw2_force_const_mem (ref, true);
++	{
++	  if (targetm.asm_out.make_eh_symbol_indirect != NULL)
++	    ref = targetm.asm_out.make_eh_symbol_indirect (ref, true);
++	  else
++	    ref = dw2_force_const_mem (ref, true);
++	}
+ 
+       fprintf (asm_out_file, "\t.cfi_personality %#x,", enc);
+       output_addr_const (asm_out_file, ref);
+@@ -1009,7 +1014,12 @@ dwarf2out_do_cfi_startproc (bool second)
+       SYMBOL_REF_FLAGS (ref) = SYMBOL_FLAG_LOCAL;
+ 
+       if (enc & DW_EH_PE_indirect)
+-	ref = dw2_force_const_mem (ref, true);
++	{
++	  if (targetm.asm_out.make_eh_symbol_indirect != NULL)
++	    ref = targetm.asm_out.make_eh_symbol_indirect (ref, true);
++	  else
++	    ref = dw2_force_const_mem (ref, true);
++	}
+ 
+       fprintf (asm_out_file, "\t.cfi_lsda %#x,", enc);
+       output_addr_const (asm_out_file, ref);
+diff --git gcc/target.def gcc/target.def
+index 6b2c3e17346..5482f2c9d19 100644
+--- gcc/target.def
++++ gcc/target.def
+@@ -185,6 +185,16 @@ DEFHOOK
+  void, (rtx personality),
+  NULL)
+ 
++/* If necessary, modify personality and LSDA references to handle
++   indirection.  This is used when the assembler supports CFI directives.  */
++DEFHOOK
++(make_eh_symbol_indirect,
++ "If necessary, modify personality and LSDA references to handle indirection.\
++  The original symbol is in @code{origsymbol} and if @code{pubvis} is true\
++  the symbol is visible outside the TU.",
++ rtx, (rtx origsymbol, bool pubvis),
++ NULL)
++
+ /* Emit any directives required to unwind this instruction.  */
+ DEFHOOK
+ (unwind_emit,
+-- 
+2.40.1
+

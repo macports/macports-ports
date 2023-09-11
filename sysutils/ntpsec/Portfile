@@ -6,7 +6,7 @@ PortGroup           python 1.0
 PortGroup           openssl 1.0
 
 name                ntpsec
-version             1.2.2
+version             1.2.2a
 revision            0
 categories          sysutils net
 maintainers         {fwright.net:fw @fhgwright} openmaintainer
@@ -20,9 +20,9 @@ homepage            https://www.ntpsec.org/
 conflicts           ntp openntpd
 
 master_sites        ftp://ftp.ntpsec.org/pub/releases/
-checksums           rmd160  60b8c64a75d27d8e34db51c17050ccecc182f972 \
-                    sha256  2f2848760b915dfe185b9217f777738b36ceeb78a7fc208b7e74e039dec22df5 \
-                    size    2710329
+checksums           rmd160  a00b6cddeb16087bd2c139340142519f68fefd5b \
+                    sha256  e0ce93af222a0a9860e6f5a51aadba9bb5ca601d80b2aea118a62f0a3226950e \
+                    size    2710790
 
 # 10.5 x86_64 builds successfully and passes all build tests, but doesn't
 # actually work.  This has apparently been true forever, but until recently,
@@ -36,26 +36,74 @@ if { ${os.platform} eq "darwin" && ${os.major} < 10 } {
     supported_archs     i386 ppc
 }
 
-# To avoid breaking any code that uses our Python package, keep the Python
-# version at 2.7 until we add variants for Python versions.  The upstream
-# code itself works with 2.6, 2.7, and 3.3+.
-python.versions     27
+# ntpsec requires Python 2.6, 2.7, or 3.3+.
+# We skip 2.6 and 3.3, but keep 2.7 and 3.4+.
+# Some variants may force a more restricted list.
+#
+set pythons_suffixes {27 34 35 36 37 38 39 310 311}
 
-# Note that the upstream --python option may not work correctly, so waf
-# must be run with the target Python version.  The waf PortGroup doesn't
-# currently allow selecting its Python version, but since it's hard-coded
-# for 2.7, we can ignore this for now.
+set pythons_ports {}
+foreach s ${pythons_suffixes} {
+    lappend pythons_ports python${s}
+}
 
-# Also note that the new ffi-based Python client library doesn't work properly
+foreach s ${pythons_suffixes} {
+    set p python${s}
+    set v [string index ${s} 0].[string range ${s} 1 99]
+    set i [lsearch -exact ${pythons_ports} ${p}]
+    set c [lreplace ${pythons_ports} ${i} ${i}]
+    variant ${p} description "Build ${name} to use Python ${v}" conflicts {*}${c} ""
+}
+
+# Default to +python27
+#
+# Since this port provides Python modules that may be used by users, changing
+# the Python version may break existing user code.  Since earlier versions of
+# this port had no pythonXX variant, there is no established default variant
+# to avoid such a switch on an upgrade.  Hence, the default should remain at
+# +python27 for a while.
+#
+set pyver_no_dot "27"
+
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+default_variants +python${pyver_no_dot}
+
+# make sure some python variant is selected
+set pyver_no_dot ""
+foreach s ${pythons_suffixes} {
+    if {[variant_isset python${s}]} {
+        set pyver_no_dot ${s}
+    }
+}
+pre-fetch {
+    if {${pyver_no_dot} eq ""} {
+        ui_error "\n\nYou must select one of the Python variants (+pythonXY).\n"
+    return -code error "Invalid Python variant selection"
+    }
+}
+
+python.version          ${pyver_no_dot}
+waf.python_branch       ${python.branch}
+
+# Avoid treating python311+ differently from earlier versions.
+# In particular, avoid clobbering destroot.target and adding superfluous
+# dependencies.
+python.pep517       no
+
+# Note that the new ffi-based Python client library doesn't work properly
 # on the Mac, so we use the old extension-based version.
 
 openssl.branch      3
 # NOTE: doesn't work with libressl
 
 depends_build-append port:bison port:pkgconfig
-depends_lib-append  port:python${python.version}
+#depends_lib-append  port:python${pyver_no_dot}
 
-# Consolidated patchfile, based on GitHub/fhgwwight/macports-releases
+# Consolidated patchfile, based on GitHub/fhgwright/macports-releases
 patchfiles          patch-allfixes.diff
 
 use_configure       yes
@@ -68,6 +116,7 @@ configure.args      --alltests \
                     --pyshebang=${python.bin} \
                     --pythondir=${python.pkgd} \
                     --pythonarchdir=${python.pkgd}
+
 # Make sure we use waf, not setup.py for build
 build.cmd           ${waf.python} ./waf
 destroot.cmd        ${build.cmd}
@@ -75,6 +124,8 @@ destroot.cmd        ${build.cmd}
 # Although the normal build procedure includes the tests, we also allow
 # them separately so that "port test" works.
 test.run            yes
+# Avoid unnecessary dependency on pyXX-test
+python.test_framework
 # Override the python portgroup's inappropriate test.cmd
 test.cmd            ${build.cmd}
 test.target         check
@@ -111,6 +162,10 @@ post-destroot {
     destroot.keepdirs \
         ${destroot}${prefix}/var/db \
         ${destroot}${prefix}/var/run
+
+    # The install script inappropriately installs the runtests program
+    # See https://gitlab.com/NTPsec/ntpsec/-/issues/786
+    delete "${destroot}${prefix}/bin/runtests"
 }
 post-activate {
     if {![file exists ${prefix}/etc/ntp.conf]} {
@@ -127,3 +182,6 @@ notes-append "Configuration is in ${prefix}/etc/ntp.conf."
 startupitem.create      yes
 startupitem.netchange   yes
 startupitem.executable  ${prefix}/sbin/ntpd -n -g -p ${prefix}/var/run/ntpd.pid -f ${prefix}/var/db/ntp.drift -c ${prefix}/etc/ntp.conf
+
+# Allow an optional letter after the version for patch releases
+livecheck.regex ${name}-(\\d+(?:\\.\\d+)*\\w+)

@@ -293,7 +293,7 @@ proc app::pre_destroot {} {
 
 
 proc app::post_destroot {} {
-    global prefix destroot worksrcpath applications_dir
+    global prefix destroot filespath workpath worksrcpath applications_dir
     set app_create               [option app.create]
     set app_dark_mode            [option app.dark_mode]
     set app_executable           [option app.executable]
@@ -505,7 +505,7 @@ proc app::write_launch_script {executable app_destination} {
     global prefix
     set launch_script [open ${app_destination} w]
 
-    puts ${launch_script} "#!/bin/bash
+    puts ${launch_script} "#!/bin/sh
 export PATH=\"${prefix}/bin:${prefix}/sbin:\$PATH\"
 exec [shellescape ${executable}]
 "

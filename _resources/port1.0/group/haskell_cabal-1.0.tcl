@@ -222,7 +222,7 @@ default build.args          {${build.target}}
 default build.post_args     {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
-                                --prefix=${destroot}${prefix}\
+                                --prefix=${prefix}\
                                 --enable-relocatable\
                             }
 default build.env           {${haskell_cabal.env}}
@@ -236,7 +236,6 @@ default destroot.post_args  {\
                                 [haskell_cabal.build_getjobsarg]\
                                 --builddir=${haskell_cabal.build_dir}\
                                 --installdir=${destroot}${prefix}/bin\
-                                --prefix=${destroot}${prefix}\
                                 --enable-relocatable\
                             }
 default destroot.env        {${haskell_cabal.env}}

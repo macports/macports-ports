@@ -14,6 +14,10 @@ if { [variant_exists debug] } {
     error "pg_debug: variant 'debug' already exists"
 }
 
+if { [variant_exists debugoptimized] } {
+    error "pg_debug: variant 'debugoptimized' already exists"
+}
+
 default debug.configure \
     [list \
         cflags \
@@ -28,19 +32,24 @@ default debug.configure \
 
 default debug.flags.delete \
     [list -O1 -O2 -O3 -Os -mtune=native -DNDEBUG -DNDEBUG=1]
-
 default debug.flags.add \
     [list -g -O0]
 
-ui_debug "pg_debug: adding variant"
-variant debug description {Enable debug flags and symbols} {}
+default debugoptimized.flags.delete \
+    [list]
+default debugoptimized.flags.add \
+    [list -g]
 
-proc debug::setup_debug {} {
-    ui_debug "debug::setup_debug: configuring for debug build"
+ui_debug "pg_debug: adding variants"
+variant debug conflicts debugoptimized description {Enable debug flags and symbols} {}
+variant debugoptimized conflicts debug description {Enable debug flags and symbols, while building optimized code} {}
+
+proc debug::setup_debug {p_debug_mode} {
+    ui_debug "debug::setup_debug: configuring for debug mode: ${p_debug_mode}"
 
     set conf_names   [option debug.configure]
-    set flags_delete [option debug.flags.delete]
-    set flags_add    [option debug.flags.add]
+    set flags_delete [option ${p_debug_mode}.flags.delete]
+    set flags_add    [option ${p_debug_mode}.flags.add]
 
     foreach c ${conf_names} {
         foreach f ${flags_delete} {
@@ -65,11 +74,21 @@ proc debug::post_destroot {} {
 }
 
 proc debug::pg_callback {} {
-    set debug_enabled [variant_isset debug]
-    ui_debug "debug::pg_callback: debug enabled: ${debug_enabled}"
+    set debug_enabled          [variant_isset debug]
+    set debugoptimized_enabled [variant_isset debugoptimized]
 
     if { ${debug_enabled} } {
-        debug::setup_debug
+        set debug_mode debug
+    } elseif { ${debugoptimized_enabled} } {
+        set debug_mode debugoptimized
+    } else {
+        set debug_mode disabled
+    }
+
+    ui_debug "debug::pg_callback: debug mode: ${debug_mode}"
+
+    if { ${debug_mode} ne "disabled" } {
+        debug::setup_debug ${debug_mode}
     }
 }
 

@@ -97,7 +97,7 @@ pre-configure {
         puts ${cache} "}"
     }
     puts ${cache} "QMAKE_MACOSX_DEPLOYMENT_TARGET=${macosx_deployment_target}"
-    puts ${cache} "QMAKE_MAC_SDK=[qt5pg::qmake_mac_sdk]"
+    puts ${cache} "QMAKE_MAC_SDK=${qt5.mac_sdk}"
 
     # https://github.com/qt/qtbase/commit/d64940891dffcb951f4b76426490cbc94fb4aba7
     # Enable ccache support if active and available in given qt5 version

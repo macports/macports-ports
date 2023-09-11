@@ -35,6 +35,10 @@ default qt5.kde_variant no
 options qt5.min_version
 default qt5.min_version 5.0
 
+# valid value for Qt variable QMAKE_MAC_SDK
+options qt5.mac_sdk
+default qt5.mac_sdk     {[qt5pg::qmake_mac_sdk]}
+
 # use PKGCONFIG for Qt discovery in configure scripts
 depends_build-delete    port:pkgconfig
 depends_build-append    port:pkgconfig
@@ -304,7 +308,7 @@ proc qt5pg::check_min_version {} {
 }
 port::register_callback qt5pg::check_min_version
 
-# get a valid vallue for Qt variable QMAKE_MAC_SDK_PATH
+# get a valid value for Qt variable QMAKE_MAC_SDK
 proc qt5pg::qmake_mac_sdk {} {
     global  configure.sdkroot \
             configure.sdk_version

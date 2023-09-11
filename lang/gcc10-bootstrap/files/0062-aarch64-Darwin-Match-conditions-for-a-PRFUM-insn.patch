@@ -1,0 +1,147 @@
+From d6a676557a2379fbd996b4a02682f64a96bcdc53 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sat, 20 Feb 2021 13:19:10 +0000
+Subject: [PATCH] aarch64, Darwin : Match conditions for a PRFUM insn.
+
+This unpessimizes the prefetch cases for Darwin where the assembler
+is not able to substitute the prfum instructions automagically.
+
+This improves the fix for Issue #43.
+
+	* config/aarch64/aarch64-protos.h
+	* config/aarch64/aarch64.c
+	* config/aarch64/aarch64.md
+	* config/aarch64/constraints.md
+	* config/aarch64/predicates.md
+
+(cherry picked from commit bd796f1b0d4f8ff170ce51831916e9038dd8b1b9)
+Signed-off-by: Kirill A. Korinsky <kirill@korins.ky>
+---
+ gcc/config/aarch64/aarch64-protos.h |  1 +
+ gcc/config/aarch64/aarch64.c        | 23 +++++++++++++++++++++
+ gcc/config/aarch64/aarch64.md       | 31 +++++++++++++++++++++++++++++
+ gcc/config/aarch64/constraints.md   |  5 +++++
+ gcc/config/aarch64/predicates.md    |  3 +++
+ 5 files changed, 63 insertions(+)
+
+diff --git gcc/config/aarch64/aarch64-protos.h gcc/config/aarch64/aarch64-protos.h
+index 2a3aeba8665..7c80179642b 100644
+--- gcc/config/aarch64/aarch64-protos.h
++++ gcc/config/aarch64/aarch64-protos.h
+@@ -501,6 +501,7 @@ void aarch64_post_cfi_startproc (void);
+ poly_int64 aarch64_initial_elimination_offset (unsigned, unsigned);
+ int aarch64_get_condition_code (rtx);
+ bool aarch64_address_valid_for_prefetch_p (rtx, bool);
++bool aarch64_address_valid_for_unscaled_prefetch_p (rtx, bool);
+ bool aarch64_bitmask_imm (HOST_WIDE_INT val, machine_mode);
+ unsigned HOST_WIDE_INT aarch64_and_split_imm1 (HOST_WIDE_INT val_in);
+ unsigned HOST_WIDE_INT aarch64_and_split_imm2 (HOST_WIDE_INT val_in);
+diff --git gcc/config/aarch64/aarch64.c gcc/config/aarch64/aarch64.c
+index 469b0254388..82f58221d2c 100644
+--- gcc/config/aarch64/aarch64.c
++++ gcc/config/aarch64/aarch64.c
+@@ -9663,6 +9663,29 @@ aarch64_address_valid_for_prefetch_p (rtx x, bool strict_p)
+   return addr.type != ADDRESS_REG_WB;
+ }
+ 
++/* Return true if the address X is valid for a PRFUM instruction.
++   STRICT_P is true if we should do strict checking with
++   aarch64_classify_address.  */
++
++bool
++aarch64_address_valid_for_unscaled_prefetch_p (rtx x, bool strict_p)
++{
++  struct aarch64_address_info addr;
++
++  /* PRFUM accepts the same addresses as DImode, but constrained to a range
++     -256..255.  */
++  bool res = aarch64_classify_address (&addr, x, DImode, strict_p);
++  if (!res)
++    return false;
++
++  if (addr.offset && ((INTVAL (addr.offset) > 255)
++		       || (INTVAL (addr.offset) < -256)))
++     return false;
++
++  /* ... except writeback forms.  */
++  return addr.type != ADDRESS_REG_WB;
++}
++
+ bool
+ aarch64_symbolic_address_p (rtx x)
+ {
+diff --git gcc/config/aarch64/aarch64.md gcc/config/aarch64/aarch64.md
+index b6059b09fa8..2b02f04f873 100644
+--- gcc/config/aarch64/aarch64.md
++++ gcc/config/aarch64/aarch64.md
+@@ -828,6 +828,37 @@ (define_insn "prefetch"
+   [(set_attr "type" "load_4")]
+ )
+ 
++(define_insn "prefetch_unscaled"
++  [(prefetch (match_operand:DI 0 "aarch64_unscaled_prefetch_operand" "Du")
++            (match_operand:QI 1 "const_int_operand" "")
++            (match_operand:QI 2 "const_int_operand" ""))]
++  ""
++  {
++    const char * pftype[2][4] =
++    {
++      {"prfum\\tPLDL1STRM, %0",
++       "prfum\\tPLDL3KEEP, %0",
++       "prfum\\tPLDL2KEEP, %0",
++       "prfum\\tPLDL1KEEP, %0"},
++      {"prfum\\tPSTL1STRM, %0",
++       "prfum\\tPSTL3KEEP, %0",
++       "prfum\\tPSTL2KEEP, %0",
++       "prfum\\tPSTL1KEEP, %0"},
++    };
++
++    int locality = INTVAL (operands[2]);
++
++    gcc_assert (IN_RANGE (locality, 0, 3));
++
++    /* PRFUM accepts the same addresses as a 64-bit LDR so wrap
++       the address into a DImode MEM so that aarch64_print_operand knows
++       how to print it.  */
++    operands[0] = gen_rtx_MEM (DImode, operands[0]);
++    return pftype[INTVAL(operands[1])][locality];
++  }
++  [(set_attr "type" "load_4")]
++)
++
+ (define_insn "trap"
+   [(trap_if (const_int 1) (const_int 8))]
+   ""
+diff --git gcc/config/aarch64/constraints.md gcc/config/aarch64/constraints.md
+index 98c1f41c490..ef57d1944fe 100644
+--- gcc/config/aarch64/constraints.md
++++ gcc/config/aarch64/constraints.md
+@@ -474,6 +474,11 @@ (define_address_constraint "Dp"
+  An address valid for a prefetch instruction."
+  (match_test "aarch64_address_valid_for_prefetch_p (op, true)"))
+ 
++(define_address_constraint "Du"
++  "@internal
++ An address valid for a prefetch instruction with an unscaled offset."
++ (match_test "aarch64_address_valid_for_unscaled_prefetch_p (op, true)"))
++
+ (define_constraint "vgb"
+   "@internal
+    A constraint that matches an immediate offset valid for SVE LD1B
+diff --git gcc/config/aarch64/predicates.md gcc/config/aarch64/predicates.md
+index 91b51483f33..63c14c6dccd 100644
+--- gcc/config/aarch64/predicates.md
++++ gcc/config/aarch64/predicates.md
+@@ -255,6 +255,9 @@ (define_predicate "aarch64_mem_pair_lanes_operand"
+ (define_predicate "aarch64_prefetch_operand"
+   (match_test "aarch64_address_valid_for_prefetch_p (op, false)"))
+ 
++(define_predicate "aarch64_unscaled_prefetch_operand"
++  (match_test "aarch64_address_valid_for_unscaled_prefetch_p (op, false)"))
++
+ (define_predicate "aarch64_valid_symref"
+   (match_code "const, symbol_ref, label_ref")
+ {
+-- 
+2.40.1
+

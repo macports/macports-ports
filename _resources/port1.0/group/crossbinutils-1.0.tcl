@@ -86,6 +86,11 @@ array set crossbinutils.versions_info {
         sha256  0f8a4c272d7f17f369ded10a4aca28b8e304828e95526da482b0ccc4dfc9d8e1 \
         size    25241484
     }}
+    2.41 {xz {
+        rmd160  17d22bc99e0eee2dc8b77083f16634a634057927 \
+        sha256  ae9a5789e23459e59606e6714723f2d3ffc31c03174191ef0d015bdf06007450 \
+        size    26765692
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -145,7 +150,7 @@ proc crossbinutils.setup {target version} {
     }
 
     depends_build \
-        bin:makeinfo:texinfo
+        port:texinfo
 
     depends_lib \
         port:gettext \

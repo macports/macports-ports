@@ -1,14 +1,17 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           cmake   1.1
+PortGroup           github  1.0
 
-name                csound
-set branch          5.16
-version             ${branch}.6
+github.setup        csound csound 6.18.1
+github.tarball_from archive
+revision            2
 categories          audio
-platforms           darwin
 license             LGPL-2.1+
 maintainers         nomaintainer
+
+homepage            https://www.csound.com
 
 description         A language that is used to describe sound synthesizers.
 
@@ -18,63 +21,66 @@ long_description    Csound is a computer programming language for dealing with \
                     predecessors. Csound was written at MIT by Barry Vercoe, \
                     based on an earlier language called Music360.
 
-homepage            http://www.csounds.com/
-master_sites        sourceforge:project/csound/csound5/csound${branch}
-distname            Csound${version}
-# no bz2 for 5.16.6
-#use_bzip2           yes
-checksums           md5     bfca0a5e521781e253fe8ae457bbb9c3 \
-                    sha1    28bbf5d34ee5bb11dc1d50fb122b5a706d317c33 \
-                    rmd160  49f3f7af3cfca6e129750564822698f4d2433329
+checksums           rmd160  3702ec791eb5f98f807aed6ec3de7f4eb9deab77 \
+                    sha256  b84be8237fa9258ef60fdddf36fae27b20c11665811bf5ed12540da9a9a4414e \
+                    size    31925161
 
-depends_build       port:scons
-
-depends_lib         path:bin/fltk-config:fltk \
+depends_build-append \
                     port:gettext \
+                    port:flex \
+                    port:bison
+
+depends_lib         port:curl \
+                    port:gettext-runtime \
+                    port:liblo \
                     port:libsndfile
 
-# fltk is 32-bit only
-supported_archs     i386 ppc
+patchfiles          MAC_OS_X_VERSION.patch
 
-patchfiles          SConstruct.patch \
-                    pluginSDK_SConstruct.patch \
-                    custom-osx.py.patch \
-                    InOut_widgets.cpp.patch \
-                    CoreMIDI_case.patch
+# https://github.com/csound/csound/pull/1732
+patchfiles-append   0001-Use-correct-clang-options-in-CMakeLists.patch \
+                    0002-Altivec-code-is-broken-for-Darwin-so-disable-it-ther.patch
 
-post-patch {
-    reinplace "s|__PREFIX__|${prefix}|" ${worksrcpath}/custom-osx.py
-    reinplace "s|__CFLAGS__|${configure.cflags}|" ${worksrcpath}/custom-osx.py
-    reinplace "s|__CXXFLAGS__|${configure.cxxflags}|" ${worksrcpath}/custom-osx.py
-    reinplace "s|__ARCHFLAGS__|'[join ${configure.cc_archflags} "', '"]'|" ${worksrcpath}/custom-osx.py
-    reinplace "s|__FRAMEWORKS_DIR__|${frameworks_dir}|g" ${worksrcpath}/SConstruct
-    platform darwin {
-        copy ${worksrcpath}/custom-osx.py ${worksrcpath}/custom.py
+cmake.out_of_source yes
+compiler.cxx_standard   2011
+
+configure.args-append   -DFAIL_MISSING=ON \
+                        -DBUILD_DSSI_OPCODES=OFF \
+                        -DBUILD_JAVA_INTERFACE=OFF \
+                        -DBUILD_LUA_INTERFACE=OFF \
+                        -DBUILD_TESTS=OFF \
+                        -DCS_FRAMEWORK_DEST=${frameworks_dir} \
+                        -DUSE_ALSA=OFF \
+                        -DUSE_JACK=OFF \
+                        -DUSE_PORTAUDIO=OFF \
+                        -DUSE_PORTMIDI=OFF \
+                        -DUSE_PULSEAUDIO=OFF
+
+# CMake Error at CMakeLists.txt:146 (message): BUILD_TESTS is enabled, but BUILD_STATIC_LIBRARY="OFF"
+# Building static lib does not hurt even without tests enabled, since dylib is still built as well.
+configure.args-append   -DBUILD_STATIC_LIBRARY=ON
+
+post-destroot {
+    # While this is not immediately obvious upon install, dylib and binaries are built with wrong paths:
+    # /opt/local/lib/CsoundLib64.framework/Versions/6.0/CsoundLib64
+    # At the same time this is installed correctly into the framework directory, so the path points to nothing.
+    # CMakeLists are a mess, and it is unclear what in particular breaks this. Fix paths in destroot:
+    set csoundlib CsoundLib64.framework/Versions/6.0/CsoundLib64
+    system -W ${destroot}${prefix}/lib "install_name_tool -change ${prefix}/lib/${csoundlib} ${frameworks_dir}/${csoundlib} ./libcsnd6.6.0.dylib"
+    foreach bin [glob ${destroot}${prefix}/bin/*] {
+        system "install_name_tool -change ${prefix}/lib/${csoundlib} ${frameworks_dir}/${csoundlib} ${bin}"
     }
 }
 
-use_configure       no
+variant tests description "Build tests" {
+    depends_build-append    port:cunit
+    configure.args-replace  -DBUILD_TESTS=OFF \
+                            -DBUILD_TESTS=ON
 
-build.cmd           ${prefix}/bin/scons
-build.target
-build.args          prefix=${prefix} \
-                    CC=${configure.cc} \
-                    CXX=${configure.cxx} \
-                    usePortAudio=0 \
-                    usePortMIDI=0 \
-                    useJack=0 \
-                    useFLTK=1 \
-                    buildCsound5GUI=1 \
-                    buildRelease=1 \
-                    dynamicCsoundLibrary=1 \
-                    instdir=${destroot}
-build.post_args     install=0
-
-destroot.args       ${build.args}
-destroot.target     install=1 install
-destroot.destdir
-
-post-destroot {
-    copy ${worksrcpath}/frontends/fltk_gui/Csound5GUI.app \
-         ${destroot}${applications_dir}
+    # Otherwise libraries are looked for in the prefix, which fails, if the port has not been installed earlier.
+    test.env-append         DYLD_LIBRARY_PATH=${cmake.build_dir}:${cmake.build_dir}/CsoundLib64.framework/Versions/6.0
+    test.run                yes
 }
+
+# Note: fltk functionality has moved to a separate 'plugins' repo upstream.
+# Ports could be created for some or all of those plugins if desired.

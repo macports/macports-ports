@@ -23,6 +23,7 @@
 #
 # PG Options:
 #   * stub.subport_name - override subport name, for README location
+#   * stub.readme       - whether to create README; defaults to yes
 #
 #===================================================================================================
 
@@ -31,13 +32,19 @@ namespace eval stub {}
 options stub.subport_name
 default stub.subport_name ${subport}
 
-proc stub::post_destroot {} {
-    global destroot prefix
+options stub.readme
+default stub.readme yes
 
-    set subport_name [option stub.subport_name]
-    set docdir ${destroot}${prefix}/share/doc/${subport_name}
-    xinstall -d ${docdir}
-    system "echo ${subport_name} is a stub port > ${docdir}/README"
+proc stub::post_destroot {} {
+    set create_readme [option stub.readme]
+    if { ${create_readme} } {
+        global destroot prefix
+
+        set subport_name [option stub.subport_name]
+        set docdir ${destroot}${prefix}/share/doc/${subport_name}
+        xinstall -d ${docdir}
+        system "echo ${subport_name} is a stub port > ${docdir}/README"
+    }
 }
 
 proc stub::setup_stub {} {

@@ -1,0 +1,133 @@
+diff --git README.md README.md
+index bece058..31035f0 100644
+--- README.md
++++ README.md
+@@ -101,6 +101,7 @@ Bugs, issues and contributions can be requested to both the mailing list or the
+ * Python v3+
+ * rfc6555 (required)
+ * imaplib2 >= 3.5
++* keyring
+ * gssapi (optional), for Kerberos authentication
+ * portalocker (optional), if you need to run offlineimap in Cygwin for Windows
+ 
+diff --git offlineimap/imapserver.py offlineimap/imapserver.py
+index 79015a6..e733899 100644
+--- offlineimap/imapserver.py
++++ offlineimap/imapserver.py
+@@ -56,6 +56,8 @@ class IMAPServer:
+         self.ui = getglobalui()
+         self.repos = repos
+         self.config = repos.getconfig()
++        self.ignore_keyring = self.config.getboolean('general', 'ignore-keyring')
++        self.update_keyring = self.config.getboolean('general', 'update-keyring')
+ 
+         self.preauth_tunnel = repos.getpreauthtunnel()
+         self.transport_tunnel = repos.gettransporttunnel()
+@@ -176,8 +178,10 @@ class IMAPServer:
+             return self.password  # non-failed preconfigured one
+ 
+         # get 1) configured password first 2) fall back to asking via UI
+-        self.password = self.repos.getpassword() or \
++        self.password = self.repos.getpassword(self.ignore_keyring) or \
+                         self.ui.getpass(self.username, self.config, self.passworderror)
++        if self.update_keyring:
++            self.repos.updatepassword(self.password)
+         self.passworderror = None
+         return self.password
+ 
+diff --git offlineimap/init.py offlineimap/init.py
+index fe7aaae..713ae6d 100644
+--- offlineimap/init.py
++++ offlineimap/init.py
+@@ -196,6 +196,14 @@ class OfflineImap:
+                           action="store_true", dest="mbnames_prune", default=False,
+                           help="remove mbnames entries for accounts not in accounts")
+ 
++        parser.add_option("--ignore-keyring",
++                          action="store_true", dest="ignore_keyring", default=False,
++                          help="Ignore password which is stored in system keyring")
++
++        parser.add_option("--update-keyring",
++                          action="store_true", dest="update_keyring", default=False,
++                          help="Update system keyring with used password")
++
+         (options, args) = parser.parse_args()
+         glob.set_options(options)
+ 
+@@ -273,6 +281,16 @@ class OfflineImap:
+             config.set('general', 'dry-run', 'True')
+         config.set_if_not_exists('general', 'dry-run', 'False')
+ 
++        # ignore_keyring? Set [general]ignore_keyring=True.
++        if options.ignore_keyring:
++            config.set('general', 'ignore-keyring', 'True')
++        config.set_if_not_exists('general', 'ignore-keyring', 'False')
++
++        # update_keyring? Set [general]update_keyring=True.
++        if options.update_keyring:
++            config.set('general', 'update-keyring', 'True')
++        config.set_if_not_exists('general', 'update-keyring', 'False')
++
+         try:
+             # Create the ui class.
+             self.ui = UI_LIST[ui_type.lower()](config)
+diff --git offlineimap/repository/IMAP.py offlineimap/repository/IMAP.py
+index 5b29b21..0b6bce6 100644
+--- offlineimap/repository/IMAP.py
++++ offlineimap/repository/IMAP.py
+@@ -22,6 +22,9 @@ import netrc
+ import errno
+ from sys import exc_info
+ from threading import Event
++
++import keyring
++
+ from offlineimap import folder, imaputil, imapserver, OfflineImapError
+ from offlineimap.repository.Base import BaseRepository
+ from offlineimap.threadutil import ExitNotifyThread
+@@ -565,7 +568,7 @@ class IMAPRepository(BaseRepository):
+         """
+         return self.getconfboolean('expunge', True)
+ 
+-    def getpassword(self):
++    def getpassword(self, ignore_keyring):
+         """Return the IMAP password for this repository.
+ 
+         It tries to get passwords in the following order:
+@@ -647,9 +650,22 @@ class IMAPRepository(BaseRepository):
+                 user = self.getuser()
+                 if user is None or user == netrcentry[0]:
+                     return netrcentry[2]
+-        # No strategy yielded a password!
++
++        # 5. Read from keyring as the last option
++        if not ignore_keyring:
++            return keyring.get_password(self.gethost(), self.getuser())
+         return None
+ 
++    def updatepassword(self, password):
++        """
++        This function update provided password into system keyring.
++        None means to remove it.
++        """
++        if password is None:
++            keyring.delete_password(self.gethost(), self.getuser())
++        else:
++            keyring.set_password(self.gethost(), self.getuser(), password)
++
+     def getfolder(self, foldername, decode=True):
+         """Return instance of OfflineIMAP representative folder."""
+ 
+diff --git requirements.txt requirements.txt
+index e580f5f..fa885db 100644
+--- requirements.txt
++++ requirements.txt
+@@ -3,7 +3,7 @@ gssapi[kerberos]
+ portalocker[cygwin]
+ rfc6555
+ distro
+-
++keyring
+ imaplib2>=3.5
+ urllib3~=1.25.9
+ certifi~=2020.6.20
