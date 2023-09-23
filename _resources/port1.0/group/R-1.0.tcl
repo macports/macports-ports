@@ -37,6 +37,14 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             livecheck.type  regex
             livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
         }
+        r-forge {
+            homepage        https://r-forge.r-project.org/projects/${R.package}
+            master_sites    https://download.r-forge.r-project.org/src/contrib/
+            distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
+            livecheck.type  none
+        }
+        # r-universe is a development & testing site; generally, it should not be used as a source.
         r-universe {
             homepage        https://${R.author}.r-universe.dev
             master_sites    https://${R.author}.r-universe.dev/src/contrib
@@ -45,6 +53,8 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             livecheck.type  regex
             livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
         }
+        # Packages seem to get updated on Bioconductor in bulk few times a year.
+        # Up-to-date versions can be found on GitHub instead.
         bioconductor {
             homepage        https://bioconductor.org/packages/${R.package}
             master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/
