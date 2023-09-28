@@ -21,10 +21,15 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
         # For now limit exposure of clang-16 to ports needing c++14 or newer
         lappend compilers macports-clang-16
     }
-    lappend compilers macports-clang-15 \
-                      macports-clang-14 \
-                      macports-clang-13 \
-                      macports-clang-12
+    lappend compilers macports-clang-15
+    if {${os.major} < 23} {
+        # https://trac.macports.org/ticket/68257
+        # clang-14 (and probably older) have build issues on macOS14+
+        # Until resolved do not append to fallback list
+        lappend compilers macports-clang-14 \
+                          macports-clang-13 \
+                          macports-clang-12
+    }
 }
 
 if {${os.major} >= 10} {
