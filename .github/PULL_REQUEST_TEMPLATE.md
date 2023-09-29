@@ -25,7 +25,7 @@ Have you
 - [ ] referenced existing tickets on [Trac](https://trac.macports.org/wiki/Tickets) with full URL? <!-- Please don't open a new Trac ticket if you are submitting a pull request. -->
 - [ ] checked your Portfile with `port lint --nitpick`?
 - [ ] tried existing tests with `sudo port test`?
-- [ ] tried a full install with `sudo port -vst install`?
+- [ ] tried a full install with `sudo port -vs install`?
 - [ ] tested basic functionality of all binary files?
 - [ ] checked that the Portfile's most important [variants](https://trac.macports.org/wiki/Variants) haven't been broken?
 
