@@ -348,7 +348,7 @@ default destroot.cmd    {[python_get_defaults destroot_cmd]}
 default destroot.destdir {[python_get_defaults destroot_destdir]}
 default destroot.target {[python_get_defaults destroot_target]}
 
-default python.pep517   {[expr {[info exists python.version] && ${python.version} >= 311}]}
+default python.pep517   {[expr {[info exists python.version] && ${python.version} >= 37}]}
 default python.pep517_backend   setuptools
 
 default python.test_framework   pytest
