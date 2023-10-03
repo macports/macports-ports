@@ -81,7 +81,7 @@ if {${os.major} < 10 && ${os.platform} eq "darwin" } {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } else {
-    set compilers.gcc_default gcc12
+    set compilers.gcc_default gcc13
 }
 
 set compilers.list {cc cxx cpp objc fc f77 f90}
@@ -89,14 +89,14 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
-    set gcc_versions {10 11 12 devel}
+    set gcc_versions {10 11 12 13 devel}
 } else {
     set gcc_versions {}
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 10 11 12 devel
+        lappend gcc_versions 10 11 12 13 devel
     }
 }
 # GCC version providing the primary runtime
