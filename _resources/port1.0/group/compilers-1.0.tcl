@@ -104,7 +104,7 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
 if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 12
+    set gcc_main_version 13
 }
 ui_debug "GCC versions for Darwin ${os.major} ${os.arch} - ${gcc_versions}"
 foreach ver ${gcc_versions} {
