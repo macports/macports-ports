@@ -92,7 +92,7 @@ compiler.blacklist-append   {clang}
 compiler.blacklist-append   {macports-clang-1[6-9]}
 # Also avoid any new GCC versions beyond gcc12. Again, it is then up to the R
 # maintainers when to migrate to a newer version.
-compilers.setup             -gcc13
+compilers.setup             -gcc13 -gfortran
 compiler.blacklist-append   {macports-gcc-1[3-9]}
 
 port::register_callback R.add_dependencies
