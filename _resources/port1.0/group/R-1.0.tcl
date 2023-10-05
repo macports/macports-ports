@@ -90,7 +90,9 @@ compiler.blacklist-append   {clang}
 # these get bumped centrally.
 # NOTE : Keep this setting in sync with the one in the R port.
 compiler.blacklist-append   {macports-clang-1[6-9]}
-# manually select gcc12 variant of the compilers PG
+# Similarly, for gcc select the gcc12 variant of the compilers PG.
+# This setting should also be kept in sync with that in the R Port.
+# Updates should be coordinated with the R maintainers.
 default_variants-append     +gcc12
 
 port::register_callback R.add_dependencies
