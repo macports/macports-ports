@@ -5,12 +5,12 @@
 # Usage:
 # PortGroup         R 1.0
 
-PortGroup           active_variants 1.1
 PortGroup           compilers 1.0
 
 # For packages from CRAN and Bioconductor R.author can be set to anything;
 # it is desirable however to use GitHub/GitLab author in this field, if available.
-options             R.domain R.author R.package R.tag_prefix R.tag_suffix
+options             R.domain R.author R.package R.tag_prefix R.tag_suffix R.recommended
+default R.recommended   no
 
 proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}} {
     global          R.domain R.author R.package R.tag_prefix R.tag_suffix
@@ -50,8 +50,7 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             master_sites    https://${R.author}.r-universe.dev/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
-            livecheck.type  regex
-            livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
+            livecheck.type  none
         }
         # Packages seem to get updated on Bioconductor in bulk few times a year.
         # Up-to-date versions can be found on GitHub instead.
@@ -97,7 +96,7 @@ default_variants-append     +gcc12
 port::register_callback R.add_dependencies
 
 proc R.add_dependencies {} {
-    global              configure.compiler
+    global              configure.compiler R.recommended
     if {[string match macports-clang-* ${configure.compiler}]} {
         set clang_v [
             string range ${configure.compiler} [
@@ -122,9 +121,13 @@ proc R.add_dependencies {} {
     depends_build-append \
                         port:R
     depends_run-append  port:R
+
+    if {![option R.recommended]} {
+        # The following is a meta-port installing recommended packages:
+        depends_lib-append \
+                        port:R-CRAN-recommended
+    }
 }
-# R installs few basic packages as recommended, and those are needed for some other packages.
-require_active_variants R recommended
 
 # General fixes for PPC:
 global build_arch os.platform
