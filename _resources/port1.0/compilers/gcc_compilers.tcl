@@ -7,7 +7,7 @@ global os.major os.arch os.platform
 
 #3 GCC 10 and above on OSX10.6+
 if {${os.major} >= 10 || ${os.platform} ne "darwin"} {
-    lappend compilers macports-gcc-12 macports-gcc-11 macports-gcc-10
+    lappend compilers macports-gcc-13 macports-gcc-12 macports-gcc-11 macports-gcc-10
 }
 
 # GCC 9 and older only on OSX10.10 and older
