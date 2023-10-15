@@ -28,10 +28,20 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             uplevel "PortGroup gitlab 1.0"
             gitlab.setup ${R.author} ${R.package} ${version} ${R_tag_prefix} ${R_tag_suffix}
         }
+        bitbucket {
+            uplevel "PortGroup bitbucket 1.0"
+            bitbucket.setup ${R.author} ${R.package} ${version}
+        }
         cran {
             homepage        https://cran.r-project.org/package=${R.package}
             master_sites    https://cran.r-project.org/src/contrib \
-                            https://cran.r-project.org/src/contrib/Archive/${R.package}
+                            https://cran.r-project.org/src/contrib/Archive/${R.package} \
+                            https://cran.ism.ac.jp/src/contrib \
+                            https://cran.irsn.fr/src/contrib \
+                            https://cran.ma.imperial.ac.uk/src/contrib \
+                            https://cran.ms.unimelb.edu.au/src/contrib \
+                            http://cran.csie.ntu.edu.tw/src/contrib \
+                            http://lib.stat.cmu.edu/R/CRAN/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  regex
