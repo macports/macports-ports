@@ -13,12 +13,12 @@ if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc
 }
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
-    if {[option compiler.cxx_standard] >= 2020} {
-        # For now limit exposure of clang-17 to ports needing c++20 or newer
+    if {[option compiler.cxx_standard] >= 2017} {
+        # For now limit exposure of clang-17 to ports needing c++17 or newer
         lappend compilers macports-clang-17
     }
-    if {[option compiler.cxx_standard] >= 2014} {
-        # For now limit exposure of clang-16 to ports needing c++14 or newer
+    if {[option compiler.cxx_standard] >= 2011} {
+        # For now limit exposure of clang-16 to ports needing c++11 or newer
         lappend compilers macports-clang-16
     }
     lappend compilers macports-clang-15 \
