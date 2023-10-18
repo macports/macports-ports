@@ -1,0 +1,207 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           github 1.0
+PortGroup           cmake 1.1
+
+github.setup        google shaderc 2023.7 v
+github.tarball_from archive
+revision            0
+
+categories          graphics
+license             Apache-2
+maintainers         @jasonliu--
+
+description         a collection of tools, libraries, and tests for \
+                    shader compilation
+long_description    Shaderc is ${description}. It includes glslc, a \
+                    command line compiler for GLSL/HLSL to SPIR-V, and \
+                    lib${name}, a library API for accessing glslc \
+                    functionality.
+
+checksums           rmd160  47cb65cae31bd3cbc7432e38dc72f927554962ea \
+                    sha256  681e1340726a0bf46bea7e31f10cbfe78e01e4446a35d90fedc2b78d400fcdeb \
+                    size    227360
+
+compiler.cxx_standard 2017
+
+set py_ver          3.11
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+
+depends_build-append \
+                    port:python${py_ver_nodot} \
+                    port:spirv-headers
+depends_lib-append  port:glslang \
+                    port:spirv-tools
+
+# The Shaderc project generates a file that contains the version numbers
+# of all of Shaderc's dependencies, which then gets #include'd by the
+# GLSL compiler (glslc). The project uses a Python script to do this,
+# but the script assumes that all of the dependencies' sources are
+# downloaded locally into the Shaderc project and get compiled along
+# with Shaderc itself. Since all of Shaderc's dependencies are already
+# available as MacPorts packages, we use the following Tcl procedure to
+# generate the file using MacPorts, instead of the Python script.
+proc generate_versions_file {} {
+    global name version prefix worksrcpath
+
+    set   versions_file [open ${worksrcpath}/build-version.inc w]
+    puts $versions_file "\"${name} v${version}\\n\""
+    foreach library [list spirv-tools glslang] {
+        set ver_num [exec ${prefix}/bin/port -q info --version $library]
+        puts $versions_file "\"$library $ver_num\\n\""
+    }
+    close $versions_file
+}
+
+post-patch {
+    # Don't allow the project to compile any third-party dependencies;
+    # all dependencies are already available as MacPorts packages
+    reinplace {/^add_subdirectory.third_party/s/^/#/} \
+        ${worksrcpath}/CMakeLists.txt
+    reinplace "/add_subdirectory.third_party/a\\
+        \\
+        find_host_package(glslang REQUIRED)\\
+        if(\${glslang_FOUND})\\
+        \\  message(STATUS \"Found glslang: TRUE\")\\
+        endif()\\
+        \\
+        find_host_package(SPIRV-Headers REQUIRED)\\
+        if(\${SPIRV-Headers_FOUND})\\
+        \\  message(STATUS \"Found SPIRV-Headers: TRUE\")\\
+        endif()\\
+        \\
+        find_host_package(SPIRV-Tools REQUIRED)\\
+        if(\${SPIRV-Tools_FOUND})\\
+        \\  message(STATUS \"Found SPIRV-Tools: TRUE\")\\
+        endif()\\
+    " \
+        ${worksrcpath}/CMakeLists.txt
+    foreach re [list \
+        "s|\${glslang_SOURCE_DIR}|${prefix}/include/glslang|" \
+        "s|\${spirv-tools_SOURCE_DIR}/include|${prefix}/include/spirv-tools|" \
+        "s|\${SPIRV-Headers_SOURCE_DIR}/include|${prefix}/include/spirv|" \
+        {s/\(glslang\).*glslang/\1/} \
+    ] {
+        reinplace -q $re \
+            ${worksrcpath}/CMakeLists.txt \
+            ${worksrcpath}/lib${name}_util/CMakeLists.txt \
+            ${worksrcpath}/lib${name}/CMakeLists.txt \
+            ${worksrcpath}/glslc/CMakeLists.txt
+    }
+
+    # Generate the build-version.inc file using our Tcl procedure,
+    # instead of the upstream project's included Python script.
+    reinplace {/add_custom_target.build-version/,/Update build-version.inc/s/^/#/} \
+        ${worksrcpath}/CMakeLists.txt
+    reinplace "/Update build-version.inc/a\\
+        add_custom_target(build-version\\
+        \\  COMMAND \${CMAKE_COMMAND} -E copy\\
+        \\          \${CMAKE_SOURCE_DIR}/build-version.inc\\
+        \\          \${CMAKE_CURRENT_BINARY_DIR}/build-version.inc\\
+        )\\
+    " \
+        ${worksrcpath}/CMakeLists.txt
+    generate_versions_file
+}
+
+configure.python        ${prefix}/bin/python${py_ver}
+configure.args-append   -DPYTHON_EXECUTABLE:FILEPATH=${configure.python}
+
+configure.args-append   -DSHADERC_SKIP_TESTS=ON \
+                        -DSHADERC_SKIP_EXAMPLES=ON
+
+pre-test {
+    if {![variant_isset tests]} {
+        ui_error "'tests' variant must be activated to enable test support"
+        error "Please enable the 'tests' variant and try again"
+    }
+}
+
+variant tests description {Build unit tests} {
+    depends_lib-append  port:gtest
+
+    post-patch {
+        reinplace "/add_subdirectory.libshaderc_util/i\\
+            find_host_package(GTest REQUIRED)\\
+            \\
+        " \
+            ${worksrcpath}/CMakeLists.txt
+
+        reinplace {s/\(gmock\) \(gtest_main\)/\1 gtest \2/} \
+            ${worksrcpath}/cmake/utils.cmake
+
+        reinplace "/add_test.NAME shaderc_expect_unittests/i\\
+            # SPIRV-Tools-tools provides spirv-dis\\
+            find_host_package(SPIRV-Tools-tools)\\
+            if(\${SPIRV-Tools-tools_FOUND})\\
+            \\  message(STATUS \"Found SPIRV-Tools-tools: TRUE\")\\
+            endif()\\
+            \\
+        " \
+            ${worksrcpath}/glslc/test/CMakeLists.txt
+
+        reinplace {s/\(SPIRV-Tools-opt\)/SPIRV-Tools \1/} \
+            ${worksrcpath}/lib${name}_util/CMakeLists.txt
+        reinplace {s/\(LINK_LIBS shaderc_combined\)/\1 shaderc_util/} \
+            ${worksrcpath}/lib${name}/CMakeLists.txt
+    }
+
+    configure.args-delete   -DSHADERC_SKIP_TESTS=ON
+    test.run    yes
+}
+
+variant docs description {Build documentation} {
+    depends_build-append    port:asciidoctor
+
+    post-build {
+        # For some unknown reason, the documentation is not getting
+        # generated by the CMake build, as specified by the
+        # 'shaderc_add_asciidoc' function in
+        # ${worksrcpath}/cmake/utils.cmake and called in
+        # ${worksrcpath}/glslc/CMakeLists.txt.
+        # So we manually generate it ourselves instead.
+        system [join [list \
+            "${prefix}/bin/asciidoctor -a toc" \
+            "-o ${build.dir}/glslc/README.html" \
+            "${worksrcpath}/glslc/README.asciidoc"
+        ]]
+        # Asciidoctor throws an error when trying to generate a
+        # manpage. This issue has already been reported upstream:
+        # https://github.com/google/shaderc/issues/1266
+        system [join [list \
+            "${prefix}/bin/asciidoctor -b manpage" \
+            "-o ${build.dir}/glslc/glslc.1" \
+            "${worksrcpath}/glslc/README.asciidoc"
+        ]]
+        system [join [list \
+            "/usr/bin/gzip -n -c" \
+            "${build.dir}/glslc/glslc.1 >" \
+            "${build.dir}/glslc/glslc.1.gz"
+        ]]
+    }
+
+    post-destroot {
+        set sharedir ${prefix}/share
+        set docdir $sharedir/doc/${name}
+        set mandir $sharedir/man/man1
+
+        xinstall -d ${destroot}$docdir/glslc
+        copy ${build.dir}/glslc/README.html ${destroot}$docdir/glslc/
+        xinstall -d ${destroot}$mandir
+        copy ${build.dir}/glslc/glslc.1.gz ${destroot}$mandir/
+    }
+}
+
+variant examples description {Build examples} {
+    configure.args-delete   -DSHADERC_SKIP_EXAMPLES=ON
+
+    post-destroot {
+        set examples_dir ${prefix}/share/${name}/examples
+        xinstall -d ${destroot}$examples_dir/online-compile
+        copy ${build.dir}/examples/online-compile/${name}-online-compile \
+             ${destroot}$examples_dir/online-compile/
+    }
+}
+
+default_variants    +docs +examples
