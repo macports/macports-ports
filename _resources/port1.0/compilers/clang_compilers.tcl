@@ -17,11 +17,8 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
         # For now limit exposure of clang-17 to ports needing c++14 or newer
         lappend compilers macports-clang-17
     }
-    if {[option compiler.cxx_standard] >= 2011} {
-        # For now limit exposure of clang-16 to ports needing c++11 or newer
-        lappend compilers macports-clang-16
-    }
-    lappend compilers macports-clang-15 \
+    lappend compilers macports-clang-16 \
+                      macports-clang-15 \
                       macports-clang-14
     if {${os.major} < 23 || ${os.platform} ne "darwin"} {
         # https://trac.macports.org/ticket/68257
