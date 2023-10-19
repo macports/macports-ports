@@ -4,14 +4,43 @@ PortSystem          1.0
 PortGroup           gitlab 1.0
 PortGroup           meson 1.0
 
-gitlab.instance     https://gitlab.freedesktop.org
-gitlab.setup        xdg shared-mime-info 2.2
-revision            8
+name                shared-mime-info
 
-checksums           rmd160  c8efc1e91c23b82c37d9f78f6d9b1ffbf7be8a11 \
+set ver_latest      yes
+platform darwin {
+    # Version 2.2 is last version not requiring std::filesystem
+    # Fallback to it, for 10.5 and earlier
+    if { ${os.major} >= 10 } {
+        PortGroup   legacysupport 1.1
+
+        # Needed for std::filesystem
+        legacysupport.newest_darwin_requires_legacy 18
+        legacysupport.use_mp_libcxx                 yes
+    } else {
+        set ver_latest no
+    }
+}
+
+if { ${ver_latest} } {
+    version         2.3
+    revision        0
+
+    checksums       rmd160  13e0fef9299f820466ac83cbfb91814fb7b556ae \
+                    sha256  96ac085d82e2e654e40e34c13d97b74f6657357ee6b443d922695adcf548961c \
+                    size    6643480
+} else {
+    version         2.2
+    revision        9
+
+    checksums       rmd160  c8efc1e91c23b82c37d9f78f6d9b1ffbf7be8a11 \
                     sha256  418c480019d9865f67f922dfb88de00e9f38bf971205d55cdffab50432919e61 \
                     size    6428871
+}
 
+gitlab.instance     https://gitlab.freedesktop.org
+gitlab.setup        xdg ${name} ${version}
+
+platforms           darwin linux
 categories          devel
 license             GPL-2+
 maintainers         {mascguy @mascguy} openmaintainer
@@ -24,6 +53,27 @@ long_description    The core database of common types and the \
 homepage            https://www.freedesktop.org/wiki/Software/shared-mime-info/
 
 installs_libs       no
+
+# Disable unexpected download of subprojects
+meson.wrap_mode     nodownload
+
+set script_orig     update-mime-database
+set script_real     update-mime-database-real
+
+set startupitem_file \
+                    org.macports.shared-mime-info-updater.plist
+
+post-extract {
+    copy ${filespath}/${startupitem_file} ${worksrcpath}
+    reinplace -locale C "s|@PREFIX@|${prefix}|g" \
+        ${worksrcpath}/${startupitem_file}
+}
+
+if { ${ver_latest} } {
+    # Replace use of fdatasync(), with fsync()
+    patchfiles-append \
+                    patch-fdatasync-to-fsync.diff
+}
 
 depends_build-append \
                     port:gettext \
@@ -43,16 +93,24 @@ if {${os.platform} eq "darwin"} {
                     path:libexec/coreutils/libstdbuf.so:coreutils
 }
 
-set script_orig     update-mime-database
-set script_real     update-mime-database-real
+configure.args-append \
+                    -Dbuild-tools=true \
+                    -Dwarning_level=0 \
+                    -Dupdate-mimedb=false
 
-set startupitem_file \
-                    org.macports.shared-mime-info-updater.plist
+if { ${ver_latest} } {
+    compiler.cxx_standard 2017
 
-post-extract {
-    copy ${filespath}/${startupitem_file} ${worksrcpath}
-    reinplace -locale C "s|@PREFIX@|${prefix}|g" \
-        ${worksrcpath}/${startupitem_file}
+    if { [string match *clang* ${configure.compiler}] } {
+        configure.cxxflags-append \
+                    -Wno-reserved-user-defined-literal \
+                    -Wno-error=unknown-warning-option \
+                    -Wno-unknown-warning-option
+    }
+
+    configure.args-append \
+                    -Dbuild-tests=false \
+                    -Dbuild-translations=true
 }
 
 # add an entry for Objective C++
@@ -76,7 +134,10 @@ post-destroot {
     if {${os.platform} eq "darwin"} {
         # Copy in stub script, which initiates update by touching mime area
         copy ${filespath}/${script_orig} ${bin_dir}
+
         reinplace "s|@PREFIX@|${prefix}|g" \
+            ${bin_dir}/${script_orig}
+        reinplace "s|@SCRIPT_REAL@|${script_real}|g" \
             ${bin_dir}/${script_orig}
     } else {
         # For non-Darwin, symlink stub to real script

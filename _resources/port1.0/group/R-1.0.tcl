@@ -5,12 +5,12 @@
 # Usage:
 # PortGroup         R 1.0
 
-PortGroup           active_variants 1.1
 PortGroup           compilers 1.0
 
 # For packages from CRAN and Bioconductor R.author can be set to anything;
 # it is desirable however to use GitHub/GitLab author in this field, if available.
-options             R.domain R.author R.package R.tag_prefix R.tag_suffix
+options             R.domain R.author R.package R.tag_prefix R.tag_suffix R.recommended
+default R.recommended   no
 
 proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}} {
     global          R.domain R.author R.package R.tag_prefix R.tag_suffix
@@ -28,23 +28,42 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             uplevel "PortGroup gitlab 1.0"
             gitlab.setup ${R.author} ${R.package} ${version} ${R_tag_prefix} ${R_tag_suffix}
         }
+        bitbucket {
+            uplevel "PortGroup bitbucket 1.0"
+            bitbucket.setup ${R.author} ${R.package} ${version}
+        }
         cran {
             homepage        https://cran.r-project.org/package=${R.package}
             master_sites    https://cran.r-project.org/src/contrib \
-                            https://cran.r-project.org/src/contrib/Archive/${R.package}
+                            https://cran.r-project.org/src/contrib/Archive/${R.package} \
+                            https://cran.ism.ac.jp/src/contrib \
+                            https://cran.irsn.fr/src/contrib \
+                            https://cran.ma.imperial.ac.uk/src/contrib \
+                            https://cran.ms.unimelb.edu.au/src/contrib \
+                            http://cran.csie.ntu.edu.tw/src/contrib \
+                            http://lib.stat.cmu.edu/R/CRAN/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  regex
             livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
         }
+        r-forge {
+            homepage        https://r-forge.r-project.org/projects/${R.package}
+            master_sites    https://download.r-forge.r-project.org/src/contrib/
+            distname        ${R.package}_${version}
+            worksrcdir      ${R.package}
+            livecheck.type  none
+        }
+        # r-universe is a development & testing site; generally, it should not be used as a source.
         r-universe {
             homepage        https://${R.author}.r-universe.dev
             master_sites    https://${R.author}.r-universe.dev/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
-            livecheck.type  regex
-            livecheck.regex [quotemeta ${R.package}]_(\[0-9.\]+).tar.gz
+            livecheck.type  none
         }
+        # Packages seem to get updated on Bioconductor in bulk few times a year.
+        # Up-to-date versions can be found on GitHub instead.
         bioconductor {
             homepage        https://bioconductor.org/packages/${R.package}
             master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/
@@ -73,18 +92,28 @@ compiler.cxx_standard       2011
 
 # Avoid Apple clangs:
 compiler.blacklist-append   {clang}
-# Blacklist macports-clang-16+. See discussion in
-#   https://trac.macports.org/ticket/67144
-# for rationale. The decision when to migrate to a new compiler is then in the
-# hands of the R maintainers and will not change from the current defaults when
-# these get bumped centrally.
+# Blacklist macports-clang-16+. See discussion: https://trac.macports.org/ticket/67144
+# for rationale. The decision when to migrate to a new compiler
+# is then in the hands of the R maintainers and will not change
+# from the current defaults when these get bumped centrally.
 # NOTE : Keep this setting in sync with the one in the R port.
 compiler.blacklist-append   {macports-clang-1[6-9]}
+# Similarly, for gcc select the gcc12 variant of the compilers PG.
+# This setting should also be kept in sync with that in the R Port.
+# Updates should be coordinated with the R maintainers.
+# NOTE: upon the update to gcc13, please add a blacklist of newer gccs,
+# like it is done for clangs. We would prefer using the same version of gcc and gfortran.
+if {${os.platform} eq "darwin" && ${os.major} < 10} {
+    # Until old platforms are switched to the new libgcc.
+    default_variants-append +gcc7
+} else {
+    default_variants-append +gcc12
+}
 
 port::register_callback R.add_dependencies
 
 proc R.add_dependencies {} {
-    global              configure.compiler
+    global              configure.compiler R.recommended
     if {[string match macports-clang-* ${configure.compiler}]} {
         set clang_v [
             string range ${configure.compiler} [
@@ -109,9 +138,13 @@ proc R.add_dependencies {} {
     depends_build-append \
                         port:R
     depends_run-append  port:R
+
+    if {![option R.recommended]} {
+        # The following is a meta-port installing recommended packages:
+        depends_lib-append \
+                        port:R-CRAN-recommended
+    }
 }
-# R installs few basic packages as recommended, and those are needed for some other packages.
-require_active_variants R recommended
 
 # General fixes for PPC:
 global build_arch os.platform

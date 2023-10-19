@@ -13,39 +13,52 @@ if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc
 }
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
-    if {[option compiler.cxx_standard] >= 2014} {
-        # For now limit exposure of clang-16 to ports needing c++14 or newer
+    if {[option compiler.cxx_standard] >= 2017} {
+        # For now limit exposure of clang-17 to ports needing c++17 or newer
+        lappend compilers macports-clang-17
+    }
+    if {[option compiler.cxx_standard] >= 2011} {
+        # For now limit exposure of clang-16 to ports needing c++11 or newer
         lappend compilers macports-clang-16
     }
     lappend compilers macports-clang-15 \
-                      macports-clang-14 \
-                      macports-clang-13 \
-                      macports-clang-12
+                      macports-clang-14
+    if {${os.major} < 23 || ${os.platform} ne "darwin"} {
+        # https://trac.macports.org/ticket/68257
+        # Versions of clang older than clang-14 probably have build issues on
+        # macOS14+. Until resolved do not append to fallback list.
+        lappend compilers macports-clang-13 \
+                          macports-clang-12
+    }
 }
 
-if {${os.major} >= 10} {
-    lappend compilers macports-clang-11
-    if {[option build_arch] ne "arm64"} {
-        lappend compilers macports-clang-10 macports-clang-9.0
-        if {${os.major} < 20} {
-            lappend compilers macports-clang-8.0
+if {${os.platform} eq "darwin"} {
+
+    if {${os.major} >= 10} {
+        lappend compilers macports-clang-11
+        if {[option build_arch] ne "arm64"} {
+            lappend compilers macports-clang-10 macports-clang-9.0
+            if {${os.major} < 20} {
+                lappend compilers macports-clang-8.0
+            }
         }
     }
-}
 
-if {${os.major} >= 9 && ${os.major} < 20} {
-    lappend compilers macports-clang-7.0 \
-                      macports-clang-6.0 \
-                      macports-clang-5.0
-}
+    if {${os.major} >= 9 && ${os.major} < 20} {
+        lappend compilers macports-clang-7.0 \
+            macports-clang-6.0 \
+            macports-clang-5.0
+    }
 
-if {${os.major} < 16} {
-    # The Sierra SDK requires a toolchain that supports class properties
-    if {${os.major} >= 9} {
-        lappend compilers macports-clang-3.7
+    if {${os.major} < 16} {
+        # The Sierra SDK requires a toolchain that supports class properties
+        if {${os.major} >= 9} {
+            lappend compilers macports-clang-3.7
+        }
+        lappend compilers macports-clang-3.4
+        if {${os.major} < 9} {
+            lappend compilers macports-clang-3.3
+        }
     }
-    lappend compilers macports-clang-3.4
-    if {${os.major} < 9} {
-        lappend compilers macports-clang-3.3
-    }
+
 }

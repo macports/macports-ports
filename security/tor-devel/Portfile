@@ -1,13 +1,14 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           openssl 1.0
 
 name                tor-devel
 conflicts           tor
-version             0.4.5.2-alpha
-revision            1
-categories          security
-platforms           darwin
+version             0.4.8.7
+revision            0
+categories          security net
 maintainers         nomaintainer
 license             BSD
 
@@ -22,17 +23,28 @@ long_description    Tor provides a distributed network of servers \
 
 homepage            https://www.torproject.org/
 master_sites        https://dist.torproject.org/
-distname            tor-${version}
 
-checksums           rmd160  04b2406c7c34b9787239f5b76f5ffc775f673a5d \
-                    sha256  4308a5024f11e5cbb9f6cc2acabea13e111ba36f5f7520d17ce0c1358aaee6ae \
-                    size    7909432
+set real_name       tor
 
-depends_lib         port:libevent \
-                    path:lib/libssl.dylib:openssl \
+distname            ${real_name}-${version}
+checksums           rmd160  1ba0490fbb453e18ae6aad7a7ef7fd5587b12a43 \
+                    sha256  b20d2b9c74db28a00c07f090ee5b0241b2b684f3afdecccc6b8008931c557491 \
+                    size    8322562
+
+depends_lib-append  port:libevent \
                     port:zlib
 
-configure.args      --disable-silent-rules
+set torUser         _tor
+set torGroup        _tor
+add_users           ${torUser} group=${torGroup} home=${prefix}/var/lib/${real_name}
+
+# src/core/or/conflux_pool.h:39: error: redefinition of typedef ‘conflux_t’
+# src/core/or/conflux.h:15: error: previous declaration of ‘conflux_t’ was here
+compiler.blacklist-append \
+                    {*gcc-[34].*} {clang < 400}
+
+configure.args-append \
+                    --disable-silent-rules
 
 # https://gitweb.torproject.org/torspec.git/tree/proposals/278-directory-compression-scheme-negotiation.txt
 # All clients should aim at supporting the same set of supported compression schemes to avoid fingerprinting.
@@ -40,9 +52,79 @@ configure.args-append \
                     --disable-lzma \
                     --disable-zstd
 
+# Xcode 14: ld: archive member '__.SYMDEF SORTED' is not mach-o or llvm bitcode file
+patchfiles-append   patch-remove-symdef.patch
+
+post-destroot {
+    # Create a working torrc file with basic, locked-down permissions
+    xinstall -o ${torUser} -g ${torGroup} -m 0640 ${destroot}${prefix}/etc/${real_name}/torrc.sample ${destroot}${prefix}/etc/${real_name}/torrc
+    system -W ${destroot}${prefix}/etc/${real_name} "cat >> torrc <<LOCAL_TOR_CONFIGURATION
+
+# Local Tor configuration
+SocksPolicy accept 127.0.0.1  # accept only localhost connections
+SocksPolicy reject *
+ExitPolicy reject *:*  # no exits allowed
+DataDirectory ${prefix}/var/lib/${real_name}
+PidFile ${prefix}/var/run/${real_name}/${real_name}.pid
+# tor process uid
+User ${torUser}
+LOCAL_TOR_CONFIGURATION"
+    # backup torrc files
+    if {[file exists ${prefix}/etc/${real_name}/torrc]} {
+        move ${destroot}${prefix}/etc/${real_name}/torrc \
+                    ${destroot}${prefix}/etc/${real_name}/torrc.new
+        copy ${prefix}/etc/${real_name}/torrc \
+                    ${destroot}${prefix}/etc/${real_name}/torrc.mp_backup
+        file attributes ${destroot}${prefix}/etc/${real_name}/torrc.mp_backup \
+                    -owner ${torUser} -group ${torGroup} \
+                    -permissions 0660
+    }
+}
+
+post-activate {
+    # DataDirectory and PID file Ddirectory permissions
+    system "chown ${torUser}:${torGroup} ${prefix}/var/lib/${real_name}"
+    system "chmod 0750 ${prefix}/var/lib/${real_name}"
+    system "chown ${torUser}:${torGroup} ${prefix}/var/run/${real_name}"
+    system "chmod 0750 ${prefix}/var/run/${real_name}"
+
+    if {![file exists ${prefix}/etc/${real_name}/torrc]} {
+        # restore config files
+        if {[file exists ${prefix}/etc/${real_name}/torrc.mp_backup]} {
+            copy ${prefix}/etc/${real_name}/torrc.mp_backup \
+                    ${prefix}/etc/${real_name}/torrc
+        } else {
+            copy ${prefix}/etc/${real_name}/torrc.new \
+                    ${prefix}/etc/${real_name}/torrc
+        }
+        file attributes ${prefix}/etc/${real_name}/torrc \
+                    -owner ${torUser} -group ${torGroup} \
+                    -permissions 0660
+    }
+}
+
 test.run            yes
 test.target         check
 
+platform darwin {
+    startupitem.create          yes
+    startupitem.name            Tor
+    startupitem.start           "\[ -f \"${prefix}/etc/${real_name}/torrc\" \] \\"
+    startupitem.start-append    "\t&& ${prefix}/bin/${real_name} \\"
+    startupitem.start-append    "\t\t-f ${prefix}/etc/${real_name}/torrc 2>/dev/null"
+    startupitem.stop            "if \[ -f \"${prefix}/var/run/${real_name}/${real_name}.pid\" \]; then"
+    startupitem.stop-append     "\tkill `cat ${prefix}/var/run/${real_name}/${real_name}.pid` \\"
+    startupitem.stop-append     "\t\t&& rm -f ${prefix}/var/run/${real_name}/${real_name}.pid"
+    startupitem.stop-append     "else"
+    startupitem.stop-append     "\t/usr/bin/killall -SIGUSR1 ${real_name} 2>/dev/null"
+    startupitem.stop-append     "fi"
+    startupitem.pidfile         none ${prefix}/var/run/${real_name}/${real_name}.pid
+}
+
+destroot.keepdirs   ${destroot}${prefix}/var/lib/${real_name} \
+                    ${destroot}${prefix}/var/run/${real_name} \
+                    ${destroot}${prefix}/var/log/${real_name}
+
 livecheck.type      regex
 livecheck.url       ${master_sites}?C=M\;O=D
-livecheck.regex     tor-(\\d+\\.\\d+\\.\\d+\\.\\d+(-alpha|-beta|-rc)?)${extract.suffix}
+livecheck.regex     ${real_name}-(\\d+\\.\\d+\\.\\d+\\.\\d+)${extract.suffix}
