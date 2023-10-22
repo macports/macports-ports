@@ -56,15 +56,11 @@ namespace eval java {
         if { ${java.version} ne "" } {
             ui_debug "java-portgroup: Trying to find JVM version: ${java.version}"
 
-            # If on arm automatically adjust to the *-zulu fallback versions
-            # as required, as currently these are the only ones supporting arm.
-            # To be reviewed as support for arm comes for the other versions.
-            # Following regex matches openjdk<version> only.
+            # If on arm automatically adjust openjdk8 to openjdk8-zulu, because openjdk8 doesn't support arm yet
             # Keep in mind that configure.build_arch isn't available here
             global os.arch
-            if { ${os.arch} eq "arm" &&
-                 [regexp {openjdk(\d{1,2}$)} ${java.fallback}] } {
-                set newjdk ${java.fallback}-zulu
+            if { ${os.arch} eq "arm" && ${java.fallback} eq "openjdk8" } {
+                set newjdk openjdk8-zulu
                 ui_debug "Redefining java fallback ${java.fallback} to ${newjdk} for arm compatibility"
                 java.fallback ${newjdk}
             }
