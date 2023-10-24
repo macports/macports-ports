@@ -77,7 +77,7 @@ options compilers.allow_arguments_mismatch
 default compilers.allow_arguments_mismatch no
 
 # Set a default gcc version
-if {${os.major} < 10 && ${os.platform} eq "darwin" } {
+if {${os.major} < 9 && ${os.platform} eq "darwin" } {
     # see https://trac.macports.org/ticket/57135
     set compilers.gcc_default gcc7
 } else {
@@ -95,13 +95,13 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
-    if { ${os.major} >= 10 } {
+    if { ${os.major} >= 9 } {
         lappend gcc_versions 10 11 12 13 devel
     }
 }
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port.
-if { ${os.major} < 10 && ${os.platform} eq "darwin" } {
+if { ${os.major} < 9 && ${os.platform} eq "darwin" } {
     set gcc_main_version 7
 } else {
     set gcc_main_version 13
