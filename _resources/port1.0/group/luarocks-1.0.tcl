@@ -85,7 +85,7 @@ default luarocks.link_binaries yes
 default luarocks.link_binaries_suffix {-${luarocks.branch}}
 
 # luarocks group setup procedure
-proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {implementation "luarocks"}} {
+proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {implementation "lua"}} {
     global name subport luarocks.branches luarocks.default_branch luarocks.dependencies
     global destroot prefix distpath distname worksrcpath os.platform
     global configure.cc configure.cflags configure.ldflags
@@ -146,8 +146,10 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
         }
     } else {
         switch ${implementation} {
-            lua52 { luarocks.branch 5.2 }
             lua { luarocks.branch 5.3 }
+            lua52 { luarocks.branch 5.2 }
+            lua53 { luarocks.branch 5.3 }
+            lua54 { luarocks.branch 5.4 }
             default {
                 ui_error "luarocks.setup: unknown implementation '${implementation}' specified"
                 return -code error "luarocks.setup failed"
@@ -201,7 +203,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      make --deps-mode none
             destroot.post_args ${distpath}/${luarocks.distname}.rockspec
 
@@ -231,7 +233,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      build --deps-mode none
             destroot.post_args ${worksrcpath}/${luarocks.distname}.src.rock
 
@@ -263,7 +265,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      build --deps-mode none
             destroot.post_args ${worksrcpath}/${luarocks.distname}.all.rock
 
