@@ -213,9 +213,7 @@ proc muniversal::cpu64bit_capable {} {
 proc muniversal::get_triplets {arch} {
     global triplet.add_host triplet.add_build os.arch os.cpu64bit_capable
 
-    if { [file tail [option configure.cmd]] eq "cmake" }  { return "" }
-
-    if { [file tail [option configure.cmd]] eq "meson" }  { return "" }
+    if { [file tail [option configure.cmd]] in [list cmake meson printenv] }  { return "" }
 
     set ret ""
 

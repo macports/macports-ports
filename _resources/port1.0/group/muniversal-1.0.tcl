@@ -299,7 +299,7 @@ variant universal {
                 if {$merger_host($arch) ne ""} {
                     set host  --host=$merger_host($arch)
                 }
-            } elseif {([file tail ${configure.cmd}] ne "cmake") && ([file tail ${configure.cmd}] ne "meson")} {
+            } elseif {([file tail ${configure.cmd}] ni [list cmake meson printenv])} {
                 # check if building for a word length we can't run
                 set bits_differ 0
                 if {${arch} in [list ppc64 x86_64] &&
