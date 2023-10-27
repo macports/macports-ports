@@ -62,7 +62,7 @@ proc luarocks_set_branch {option action args} {
     global prefix luarocks.branch \
            luarocks.bin luarocks.bindir luarocks.rocksdir \
            luarocks.suffix luarocks.branch
-    set luarocks.bin            ${prefix}/bin/luarocks-${luarocks.branch}
+    set luarocks.bin            ${prefix}/bin/luarocks
     set luarocks.bindir         ${prefix}/libexec/lua${luarocks.branch}
     set luarocks.rocksdir       ${prefix}/lib/luarocks/rocks-${luarocks.branch}
     set luarocks.suffix         [join [split ${luarocks.branch} .] {}]
@@ -195,7 +195,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             }
             port::register_callback luarocks.add_distfiles
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             post-extract {
                 copy -force ${distpath}/${luarocks.distname}.rockspec ${worksrcpath}/${luarocks.distname}.rockspec
@@ -224,7 +224,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             set distname    ${luarocks.distname}
             extract.suffix .src.rock
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             extract.mkdir       yes
             extract {
@@ -256,7 +256,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             set distname    ${luarocks.distname}
             extract.suffix .all.rock
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             extract.mkdir       yes
             extract {
