@@ -31,13 +31,17 @@ begingroup "Fetching files"
 # Download resources in background ASAP but use later.
 # Use /usr/bin/curl so that we don't use Homebrew curl.
 echo "Fetching getopt..."
-/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
+#/usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
+# Temporarily prefer mirror: https://trac.macports.org/ticket/68563
+/usr/bin/curl -fsSLO "https://mirror.fcix.net/macports/distfiles/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
 echo "Fetching PortIndex..."
-/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+#/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+# Temporarily prefer mirror: https://trac.macports.org/ticket/68563#comment:13
+/usr/bin/curl -fsSLo ports/PortIndex "https://mirror.fcix.net/macports/release/tarballs/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
 curl_portindex_pid=$!
 endgroup
 
