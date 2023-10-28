@@ -66,7 +66,9 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
         # Up-to-date versions can be found on GitHub instead.
         bioconductor {
             homepage        https://bioconductor.org/packages/${R.package}
-            master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/
+            master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/ \
+                            https://www.bioconductor.org/packages/release/data/experiment/src/contrib/ \
+                            https://www.bioconductor.org/packages/devel/data/experiment/src/contrib/
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  regex
