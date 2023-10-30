@@ -441,10 +441,6 @@ set pek.cn      ${letsencrypt_https_or_http}
 set ykf.ca      http
 set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
-# Temporarily disabled due to 503 errors
-# https://trac.macports.org/ticket/68563
-set fastly      ""
-set nue.de      ""
 
 set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inline -not "
     ${fastly}://distfiles.macports.org/:mirror

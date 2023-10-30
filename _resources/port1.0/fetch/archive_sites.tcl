@@ -35,10 +35,6 @@ set pek.cn      ${letsencrypt_https_or_http}
 set ykf.ca      http
 set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
-# Temporarily disabled due to 503 errors
-# https://trac.macports.org/ticket/68563
-set fastly      ""
-set nue.de      ""
 
 # Keep the primary packages server first in the list
 set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inline -not "
