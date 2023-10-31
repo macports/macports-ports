@@ -54,17 +54,19 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
             worksrcdir      ${R.package}
             livecheck.type  none
         }
-        # r-universe is a development & testing site; generally, it should not be used as a source.
         r-universe {
+        # r-universe is a development & testing site; generally, it should not be used as a source.
             homepage        https://${R.author}.r-universe.dev
             master_sites    https://${R.author}.r-universe.dev/src/contrib
             distname        ${R.package}_${version}
             worksrcdir      ${R.package}
             livecheck.type  none
         }
-        # Packages seem to get updated on Bioconductor in bulk few times a year.
-        # Up-to-date versions can be found on GitHub instead.
         bioconductor {
+        # Packages normally get updated on Bioconductor in bulk twice a year.
+        # Development versions can be found on GitHub. However, Bioconductor upstream recommends
+        # to keep its packages in sync pegged to a current Bioconductor release
+        # for the sake of better compatibility.
             homepage        https://bioconductor.org/packages/${R.package}
             master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/ \
                             https://www.bioconductor.org/packages/release/data/experiment/src/contrib/ \
@@ -180,8 +182,9 @@ configure.pre_args-delete \
 # It does by default try to produce documentation, however, which introduces extra dependencies.
 configure.cmd       ${r.cmd} CMD build .
 
-configure.post_args --no-manual --no-build-vignettes
-
+# Re --keep-empty-dirs see discussion in: https://github.com/Bioconductor/BSgenomeForge/issues/35
+configure.post_args --no-manual --no-build-vignettes --keep-empty-dirs
+                    
 # We build in destroot.
 build { }
 
@@ -193,7 +196,10 @@ pre-destroot {
 
 destroot.cmd        ${r.cmd} CMD INSTALL .
 
-destroot.post_args --library=${destroot}${packages}
+# Notice that while we install tests to make them available to the user,
+# in a case of testthat running test_check("${R.package}") from within R session will not work.
+# It has been left broken by upstream for years, see: https://github.com/r-lib/testthat/issues/205
+destroot.post_args --library=${destroot}${packages} --install-tests
 destroot.target
 
 post-destroot {
@@ -203,6 +209,8 @@ post-destroot {
 # Default can be changed once the majority of packages implement testing:
 default test.run    no
 
+# We do not need to check rebuilding vignettes, since that often requires Tex and even Pandoc,
+# and we do not want these as dependencies for tests. It also wastes time.
 test {
-    system -W ${worksrcpath} "${r.cmd} CMD check ./${R.package}_${version}${suffix}"
+    system -W ${worksrcpath} "${r.cmd} CMD check ./${R.package}_${version}${suffix} --ignore-vignettes"
 }
