@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "no")
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", "poetry", or "maturin"
+#   "flit", "hatch", "poetry", "maturin", or "meson"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -401,6 +401,10 @@ proc python_add_dependencies {} {
                                                 port:py${python.version}-setuptools-rust
                         depends_build-append    port:py${python.version}-maturin \
                                                 port:py${python.version}-setuptools-rust
+                    }
+                    meson {
+                        depends_build-delete    port:py${python.version}-meson-python
+                        depends_build-append    port:py${python.version}-meson-python
                     }
                     default {}
                 }
