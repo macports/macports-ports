@@ -7,7 +7,7 @@ global os.major os.platform
 if {${os.platform} eq "darwin" && ${os.major} < 10} {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 11
+    set gcc_main_version 13
 }
 
 # compiler links against libraries in libgcc\d* and/or libgcc-devel
