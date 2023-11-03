@@ -4,7 +4,7 @@ global os.major os.platform
 
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port and compilers PG
-if {${os.platform} eq "darwin" && ${os.major} < 10} {
+if {${os.platform} eq "darwin" && ${os.major} < 9} {
     set gcc_main_version 7
 } else {
     set gcc_main_version 13
