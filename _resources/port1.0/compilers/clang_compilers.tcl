@@ -13,8 +13,11 @@ if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc
 }
 
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
-    if {[option compiler.cxx_standard] >= 2014} {
+    if {[option compiler.cxx_standard] >= 2014 && ${os.major} >= 22} {
         # For now limit exposure of clang-17 to ports needing c++14 or newer
+        # and only on macOS13 or newer due to issues like
+        # https://github.com/macports/macports-ports/pull/21051
+        # https://trac.macports.org/ticket/68640
         lappend compilers macports-clang-17
     }
     lappend compilers macports-clang-16 \
