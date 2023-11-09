@@ -232,6 +232,17 @@ pre-configure {
             return -code error "Install ${mpi.name} +$need"
         }
     }
+
+    if {[mpi_variant_isset] && ([mpi_variant_name] eq "mpich" || [mpi_variant_name] eq "mpich-devel")} {
+        # The new linker in Xcode 15 is buggy, causing build failures for many (but not all)
+        # ports that link to mpich. The -Wl,-ld_classic option below reverts to the
+        # classic linker.
+        #
+        # TODO: This is a temporary solution, the classic linker will be removed in a future release by Apple.
+        if { ( [vercmp ${xcodeversion} 15 ] >= 0 ) || ( [vercmp ${xcodecltversion} 15 ] >= 0 ) } {
+            configure.ldflags-append    -Wl,-ld_classic
+        }
+    }
 }
 
 proc mpi_variant_isset {} {
