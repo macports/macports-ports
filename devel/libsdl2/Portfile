@@ -21,8 +21,9 @@ homepage        https://www.libsdl.org/
 
 github.tarball_from releases
 distname        SDL2-${version}
-checksums       rmd160 e6035fed80a1b290f902b04314eeab3b57c1a73b \
-                sha256 332cb37d0be20cb9541739c61f79bae5a477427d79ae85e352089afdaf6666e4
+checksums       rmd160  e6035fed80a1b290f902b04314eeab3b57c1a73b \
+                sha256  332cb37d0be20cb9541739c61f79bae5a477427d79ae85e352089afdaf6666e4 \
+                size    7345355
 
 configure.args  --without-x \
                 --disable-jack \
@@ -32,7 +33,7 @@ configure.args  --without-x \
                 --disable-dbus
 build.args      V=1
 
-if {${os.subplatform} eq "macosx" && ${os.major} <= 10} {
+if {${os.subplatform} eq "macosx" && ${os.major} <= 10 && (${configure.build_arch} ni [list ppc ppc64])} {
     depends_lib   port:libsdl2-snowleopard
     distfiles
     patchfiles
@@ -42,29 +43,46 @@ if {${os.subplatform} eq "macosx" && ${os.major} <= 10} {
         xinstall -d ${destroot}${prefix}/share/doc/${name}
         system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
     }
+} elseif {${os.subplatform} eq "macosx" && ${os.major} <= 12 && (${configure.build_arch} ni [list ppc ppc64])} {
+    # Patch to revert fix for issue: https://github.com/libsdl-org/SDL/issues/6948
+    # Necessary to fix builds for 10.7/10.8
+    patchfiles-append patch-revert-issue-6948.diff
 } else {
     conflicts libsdl2-snowleopard
 
 platform macosx {
-    if {${os.major} <= 12} {
-        # Patch to revert fix for issue: https://github.com/libsdl-org/SDL/issues/6948
-        # Necessary to fix builds for 10.7/10.8
-        patchfiles-append patch-revert-issue-6948.diff
-    }
-    # Uses ObjC ARC, which can't be used with the legacy runtime (as
-    # used on 32-bit) before LLVM 3.8, which is roughly Xcode 7.3.
-    compiler.blacklist *gcc*
-    if {(!($universal_possible && [variant_isset universal]) && ${configure.build_arch} eq "i386")
-        || (($universal_possible && [variant_isset universal]) && "i386" in ${configure.universal_archs})} {
-        compiler.blacklist-append   {clang < 703}
+    if {${configure.build_arch} ni [list ppc ppc64]} {
+        # Uses ObjC ARC, which can't be used with the legacy runtime (as
+        # used on 32-bit) before LLVM 3.8, which is roughly Xcode 7.3.
+        compiler.blacklist *gcc*
+        if {(!($universal_possible && [variant_isset universal]) && ${configure.build_arch} eq "i386")
+            || (($universal_possible && [variant_isset universal]) && "i386" in ${configure.universal_archs})} {
+            compiler.blacklist-append   {clang < 703}
+        } else {
+            compiler.blacklist-append   {clang < 211}
+        }
     } else {
-        compiler.blacklist-append   {clang < 211}
+        PortGroup conflicts_build 1.0
+
+        # These are only for Darwin PowerPC:
+        compiler.blacklist *clang* *gcc-4.*
+        patchfiles-append \
+            0001-Fixes-for-PowerPC.patch \
+            0002-hidapi-revert-a-commit-that-triggers-ICE-with-GCC.patch
+
+        conflicts_build mesa
+        # We have to disable joystick, until GCC upstream fixes this: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105522
+        # Unlike with hidapi, there is no clear solution otherwise.
+        configure.args-append \
+                          --disable-joystick \
+                          --disable-video-cocoa
     }
 }
 
-variant x11 {
+variant x11 description "Use X11 back-end" {
     configure.args-delete --without-x
-    configure.args-append --x-includes=${prefix}/include \
+    configure.args-append --enable-video-x11 \
+                          --x-includes=${prefix}/include \
                           --x-libraries=${prefix}/lib \
                           --disable-x11-shared
     depends_lib-append \
@@ -77,8 +95,17 @@ variant x11 {
         port:xorg-libXScrnSaver \
         port:xorg-libXxf86vm \
         port:xrender
+
+    patchfiles-append \
+        0003-fix-x11.diff
+
+    # Config header hardcodes wrong paths.
+    post-patch {
+        reinplace "s|@PREFIX@|${prefix}|g" ${worksrcpath}/include/SDL_config_macosx.h ${worksrcpath}/src/video/x11/SDL_x11opengl.c
+    }
 }
-if {${os.subplatform} ne "macosx"} {
+# On Darwin PowerPC Cocoa video backend is broken, so use X11 instead.
+if {${os.subplatform} ne "macosx" || (${os.subplatform} eq "macosx" && ${configure.build_arch} in [list ppc ppc64])} {
     default_variants +x11
 }
 
