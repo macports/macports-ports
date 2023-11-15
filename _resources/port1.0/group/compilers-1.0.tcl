@@ -174,14 +174,14 @@ if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if { ${os.major} >= 9 && ${os.major} < 20 } {
         lappend clang_versions 5.0 6.0 7.0
     }
-    if { ${os.major} >= 10 } {
+    if { ${os.major} >= 9 } {
         if { ${os.major} < 20 } {
             lappend clang_versions 8.0
         }
         lappend clang_versions 9.0 10
     }
 }
-if { ${os.major} >= 10 || ${os.platform} ne "darwin" } {
+if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
     lappend clang_versions 11
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
         lappend clang_versions 12 13 14 15 16 17
