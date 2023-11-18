@@ -132,7 +132,7 @@ proc universal_setup {args} {
     }
 
     # set universal_archs_to_use as the intersection of universal_archs and universal_archs_supported
-    set universal_archs_to_use {}
+    set universal_archs_to_use [list]
     foreach arch ${configure.universal_archs} {
         if {${arch} in ${universal_archs_supported}} {
             lappend universal_archs_to_use ${arch}
@@ -871,7 +871,7 @@ variant universal {
 '}
 
         if { ![info exists merger_dont_diff] } {
-            set merger_dont_diff {}
+            set merger_dont_diff [list]
         }
 
         merge2Dir  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${merger_dont_diff}  ${diffFormatM}

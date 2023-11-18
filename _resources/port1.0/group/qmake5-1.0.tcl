@@ -116,10 +116,10 @@ pre-configure {
     }
 
     # save certain configure flags
-    set qmake5_cxx11_flags ""
-    set qmake5_cxx_flags   ""
-    set qmake5_c_flags     ""
-    set qmake5_l_flags     ""
+    set qmake5_cxx11_flags [list]
+    set qmake5_cxx_flags   [list]
+    set qmake5_c_flags     [list]
+    set qmake5_l_flags     [list]
     foreach flag ${configure.cxxflags} {
         if { ${flag} eq "-D_GLIBCXX_USE_CXX11_ABI=0" } {
             lappend qmake5_cxx11_flags ${flag}

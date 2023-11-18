@@ -91,7 +91,7 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
     set gcc_versions {10 11 12 13 devel}
 } else {
-    set gcc_versions {}
+    set gcc_versions [list]
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
@@ -160,7 +160,7 @@ foreach ver ${gcc_versions} {
 # build database of clang compiler attributes
 # Should match those in compilers/clang_compilers.tcl
 # Also do not forget to add support of new llvm into cctools
-set clang_versions {}
+set clang_versions [list]
 if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     if {${os.major} < 16} {
         if {${os.major} < 9} {
@@ -276,7 +276,7 @@ proc compilers.setup_variants {variants} {
     global compilers.clear_archflags
     global build_arch
 
-    set compilers.my_fortran_variants {}
+    set compilers.my_fortran_variants [list]
     foreach variant $variants {
         if {$cdb($variant,f77) ne ""} {
             lappend compilers.my_fortran_variants $variant
@@ -554,7 +554,7 @@ proc compilers.choose {args} {
     }
 
     # zero out the variable before and append args
-    set compilers.list {}
+    set compilers.list [list]
     foreach v $args {
         lappend compilers.list $v
     }
@@ -663,7 +663,7 @@ proc compilers.setup {args} {
         os.major os.arch
 
     if {!${compilers.setup_done}} {
-        set add_list {}
+        set add_list [list]
         set remove_list ${compilers.variants}
 
         # if we are only setting fortran compilers, then we are in "only
@@ -742,7 +742,7 @@ proc compilers.setup {args} {
         }
 
         # remove duplicates
-        set duplicates {}
+        set duplicates [list]
         foreach foo $remove_list {
             if {$foo in $add_list} {
                 lappend duplicates $foo

@@ -150,17 +150,16 @@ proc _check_require_active_variants {method} {
 	global _require_active_variants_list PortInfo
 
 	# build a list of all dependencies to be checked in this pass
-	set depends {}
-	set deptypes {}
+	set depends [list]
 
 	# determine the type of dependencies we need to consider
 	switch $method {
 		source {
-			set deptypes "depends_fetch depends_extract depends_lib depends_build depends_run"
+			set deptypes [list depends_fetch depends_extract depends_lib depends_build depends_run]
 		}
-	        activate -
-	        archivefetch {
-			set deptypes "depends_lib depends_run"
+		activate -
+		archivefetch {
+			set deptypes [list depends_lib depends_run]
 		}
 		default {
 			error "active_variants 1.1: internal error: _check_require_active_variants called with unsupported \$method"

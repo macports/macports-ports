@@ -236,9 +236,9 @@ proc muniversal::cpu64bit_capable {} {
 proc muniversal::get_triplets {arch} {
     global triplet.add_host triplet.add_build os.arch os.cpu64bit_capable
 
-    if { [file tail [option configure.cmd]] in [list cmake meson printenv] }  { return "" }
+    if { [file tail [option configure.cmd]] in [list cmake meson printenv] }  { return [list] }
 
-    set ret ""
+    set ret [list]
 
     if { ${triplet.add_host} eq "all"
          || ${arch} in ${triplet.add_host}
@@ -799,7 +799,7 @@ rename portpatch::patch_main portpatch::patch_main_real
 proc portpatch::patch_main {args} {
     global UI_PREFIX
 
-    set patches ""
+    set patches [list]
 
     if {[exists patchfiles]} {
         lappend patches {*}[option patchfiles]

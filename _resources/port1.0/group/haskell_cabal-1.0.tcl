@@ -262,7 +262,7 @@ default livecheck.regex     {"/package/[quotemeta ${name}]-\\\[^/\\\]+/[quotemet
 # https://github.com/haskell/cabal/issues/3586
 post-destroot {
     # find cabal data-files
-    set build_datadirs {}
+    set build_datadirs [list]
     if {[file isdirectory ${haskell_cabal.cabal_root}/store]} {
         fs-traverse f ${haskell_cabal.cabal_root}/store {
             if { [file isdirectory ${f}]

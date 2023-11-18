@@ -438,7 +438,7 @@ proc php.add_port_code {} {
     post-destroot {
         # Get the list of extensions that got installed by the port.
         set installed_extension_files [lsort [glob -nocomplain -tails -directory ${destroot}${php.extension_dir} *.so]]
-        set installed_extensions {}
+        set installed_extensions [list]
         foreach installed_extension_file ${installed_extension_files} {
             lappend installed_extensions [file rootname ${installed_extension_file}]
         }
@@ -447,7 +447,7 @@ proc php.add_port_code {} {
         # load all of them.
         if {![info exists php.extensions]} {
             if {0 < [llength ${php.extensions.zend}]} {
-                set php.extensions {}
+                set php.extensions [list]
             } else {
                 set php.extensions ${installed_extensions}
             }

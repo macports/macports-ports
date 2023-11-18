@@ -335,7 +335,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
 }
 
 proc trimroot {root path} {
-    set acc {}
+    set acc [list]
     set skiproot no
     foreach rootf [file split $root] pathf [file split $path] {
         if {$pathf eq ""} {

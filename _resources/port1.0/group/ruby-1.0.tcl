@@ -510,7 +510,7 @@ proc ruby.setup {module vers {type "install.rb"} {docs {}} {source "custom"} {im
 }
 
 proc trimroot {root path} {
-    set acc {}
+    set acc [list]
     set skiproot no
     foreach rootf [file split $root] pathf [file split $path] {
         if {$pathf eq ""} {

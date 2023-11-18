@@ -253,9 +253,9 @@ proc mpi.setup {args} {
     global cdb mpidb mpi.variants mpi.require mpi.default compilers.variants \
         name os.major os.arch
 
-    set add_list {}
+    set add_list [list]
     set remove_list ${mpi.variants}
-    set cl {}
+    set cl [list]
 
     foreach variant $args {
         # keep original commandname

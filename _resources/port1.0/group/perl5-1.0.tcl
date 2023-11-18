@@ -57,7 +57,7 @@ default perl5.conflict_variants {true}
 default perl5.require_variant {false}
 # Get variant names from branches
 proc perl5.get_variant_names {branches} {
-    set ret {}
+    set ret [list]
     foreach branch ${branches} {
         lappend ret "perl[string map {. _} ${branch}]"
     }
@@ -71,7 +71,7 @@ proc perl5.create_variants {branches} {
         set index [lsearch -exact ${branches} ${branch}]
         set variant [lindex ${perl5.variants} ${index}]
 # Add conflicts
-        set filtered {}
+        set filtered [list]
         if {${perl5.conflict_variants}} {
             set filtered [lreplace ${perl5.variants} ${index} ${index}]
         }
