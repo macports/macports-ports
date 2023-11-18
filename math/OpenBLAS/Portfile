@@ -5,7 +5,7 @@ PortGroup           github 1.0
 PortGroup           muniversal 1.1
 PortGroup           compilers 1.0
 PortGroup           xcode_workaround 1.0
-PortGroup           makefile 1.0
+PortGroup           cmake 1.1
 
 name                OpenBLAS
 categories          math science
@@ -27,13 +27,13 @@ if {${os.major} < 9} {
 subport OpenBLAS-devel {}
 if {[string first "-devel" $subport] > 0} {
 
-    github.setup    OpenMathLib OpenBLAS 48b1b7cbc917bffa6f320b11783578ca6b525f38
+    github.setup    OpenMathLib OpenBLAS 864c65b526945604597ef9da1571a2f36b408054
     github.tarball_from archive
-    version         20230921-[string range ${github.version} 0 7]
-    checksums       rmd160  5910b6fdc4cb67f8e32f12fab303156aca5b330b \
-                    sha256  4fededf4eecb0def7d27217d098f44ba7029618fb46539b39e528de3a75c420b \
-                    size    24303945
-    revision        1
+    version         20231119-[string range ${github.version} 0 7]
+    checksums       rmd160  30577718a2f6880b2c9a799fa0dcf8830ef91c47 \
+                    sha256  7be7acf6cc22c55a36980953942e1f6fecadf993bd6e02b793b70e15fbd25e9e \
+                    size    24307835
+    revision        0
 
     conflicts       OpenBLAS
 
@@ -52,11 +52,12 @@ if {[string first "-devel" $subport] > 0} {
     checksums       rmd160  eea6fe2c33762df4c47c7241808dabbdb085eed3 \
                     sha256  4c25cb30c4bb23eddca05d7d0a85997b8db6144f5464ba7f8c09ce91e2f35543 \
                     size    24073168
-    revision        1
+    revision        2
 
     conflicts       OpenBLAS-devel
 
     patchfiles      patch-libnoarch.release.diff \
+                    patch-xcode15-fix.diff \
                     patch-OpenBLAS-i386-Apple.diff
 
     if {![variant_isset native]} {
@@ -79,122 +80,103 @@ variant native description "Force compilation on machine to get fully optimized 
     archive_sites
 }
 
-use_configure       no
-
 # Workaround for test failure :-
 # > ./sblat2 < ./sblat2.dat
 # Program received signal SIGSEGV: Segmentation fault - invalid memory reference.
 xcode_workaround.fixed_xcode_version 11.2
 xcode_workaround.type append_to_compiler_name
 
-pre-build {
-    set makeINC [open ${build.dir}/Makefile.rule "w"]
-    puts $makeINC "VERSION = 1"
-    puts $makeINC "LIBNAMESUFFIX = "
-
-    puts $makeINC "CC = ${configure.cc}"
-    puts $makeINC "FC = ${configure.fc}"
-
-    if {${muniversal.build_arch} in [list arm64 ppc64 x86_64]} {
-        puts $makeINC "BINARY = 64"
-    } else {
-        puts $makeINC "BINARY = 32"
-    }
-
-    puts $makeINC "COMMON_OPT = -O3"
-    puts $makeINC "COMMON_PROF = -pg"
-
-    if {![variant_isset lapack]} {
-        puts $makeINC "NO_LAPACK = 1"
-    }
-
-    if {![variant_isset native]} {
-        # Do not limit threads to the number on buildbots
-        puts $makeINC "NUM_THREADS = 56"
-
-        switch ${muniversal.build_arch} {
-            arm64 {
-                puts $makeINC "TARGET = ARMV8"
-            }
-            x86_64 {
-                if {${os.major} >= 18} {
-                    puts $makeINC "TARGET = NEHALEM"
-                } else {
-                    puts $makeINC "TARGET = CORE2"
-                }
-            }
-            i386 {
-                puts $makeINC "TARGET = YONAH"
-            }
-            ppc {
-                puts $makeINC "TARGET = PPCG4"
-            }
-            ppc64 {
-                puts $makeINC "TARGET = PPC970"
-            }
-            default {
-
-            }
-        }
-    }
-
-    # This fixes Rosetta build: https://trac.macports.org/ticket/64986
-    if {${os.platform} eq "darwin" && ${os.major} == 10 && ${muniversal.build_arch} eq "ppc"} {
-        puts $makeINC "HOSTARCH = PPCG4"
-    }
-
-    if {${muniversal.build_arch} ni [list i386 x86_64]} {
-        # not on x86 of some sort; just disable AVX
-        puts $makeINC "NO_AVX = 1"
-        puts $makeINC "NO_AVX2 = 1"
-        puts $makeINC "NO_AVX512 = 1"
-    } else {
-        if {![avx_compiler_isset]} {
-            puts $makeINC "NO_AVX = 1"
-        }
-        # Disable AVX2 on OSX10.6 and older only.
-        # On newer platforms AVX2 is now supported via
-        # https://github.com/macports/macports-ports/pull/3486
-        if { ${os.major} <= 10 } {
-            puts $makeINC "NO_AVX2 = 1"
-        }
-        # Deactivating AVX512 instructions which do not build
-        # at this point. Keeping them in -devel subport. See
-        # https://trac.macports.org/ticket/57912
-        if {[string first "-devel" $subport] < 1} {
-            puts $makeINC "NO_AVX512 = 1"
-        }
-    }
-    # Add configurations to build (not configurable yet as per original Makefile.rule)
-    puts $makeINC "BUILD_SINGLE = 1"
-    puts $makeINC "BUILD_DOUBLE = 1"
-    puts $makeINC "BUILD_COMPLEX = 1"
-    puts $makeINC "BUILD_COMPLEX16 = 1"
-    close $makeINC
+if {${muniversal.build_arch} in [list arm64 ppc64 x86_64]} {
+    configure.args-append \
+                    -DBINARY64=ON
 }
 
-build.args          "AR=${prefix}/bin/ar RANLIB=${prefix}/bin/ranlib"
+configure.cflags    -O3
+configure.args-append \
+                    -DCOMMON_PROF=-pg
+
+if {![variant_isset lapack]} {
+    configure.args-append \
+                    -DBUILD_WITHOUT_LAPACK=ON
+}
+
+if {![variant_isset native]} {
+    # Do not limit threads to the number on buildbots
+    configure.args-append \
+                    -DNUM_THREADS=56
+
+    switch ${muniversal.build_arch} {
+        arm64 {
+            configure.args-append \
+                    -DTARGET=ARMV8
+        }
+        x86_64 {
+            if {${os.major} >= 18} {
+                configure.args-append \
+                    -DTARGET=NEHALEM
+            } else {
+                configure.args-append \
+                    -DTARGET=CORE2
+            }
+        }
+        i386 {
+            configure.args-append \
+                    -DTARGET=YONAH
+        }
+        ppc {
+            configure.args-append \
+                    -DTARGET=PPCG4
+        }
+        ppc64 {
+            configure.args-append \
+                    -DTARGET=PPC970
+        }
+        default {
+
+        }
+    }
+}
+
+if {${muniversal.build_arch} ni [list i386 x86_64]} {
+    # not on x86 of some sort; just disable AVX
+    configure.args-append \
+                    -DNO_AVX=ON \
+                    -DNO_AVX2=ON \
+                    -DNO_AVX512=ON
+} else {
+    if {![avx_compiler_isset]} {
+            configure.args-append \
+                    -DNO_AVX=ON
+    }
+    # Disable AVX2 on OSX10.6 and older only.
+    # On newer platforms AVX2 is now supported via
+    # https://github.com/macports/macports-ports/pull/3486
+    if { ${os.major} <= 10 } {
+        configure.args-append \
+                    -DNO_AVX2=ON
+    }
+    # Deactivating AVX512 instructions which do not build
+    # at this point. Keeping them in -devel subport. See
+    # https://trac.macports.org/ticket/57912
+    if {[string first "-devel" $subport] < 1} {
+        configure.args-append \
+                    -DNO_AVX512=ON
+    }
+}
+
+configure.args-append \
+                    -DCMAKE_AR=${prefix}/bin/ar \
+                    -DCMAKE_RANLIB=${prefix}/bin/ranlib
+
 depends_build-append        path:libexec/coreutils/libstdbuf.so:coreutils \
                             port:cctools
 depends_skip_archcheck      coreutils \
                             cctools
 
-platform darwin 8 {
-    depends_build-append    port:gmake
-    build.cmd               ${prefix}/bin/gmake
-
-    depends_test-append     port:gmake
-    test.cmd                build.cmd
-}
-
 muniversal.combine          ${prefix}/lib/pkgconfig/openblas.pc
 
-# Avoid conflict with Atlas
-build.args-append           OPENBLAS_INCLUDE_DIR=${prefix}/include/openblas
-destroot.args-append        OPENBLAS_INCLUDE_DIR=${prefix}/include/openblas
-
-muniversal.equivalent       ${prefix}/lib/cmake/OpenBLASConfig.cmake \
-                            ${prefix}/lib/cmake/OpenBLASConfigVersion.cmake
+# Build a shared library, not static!
+configure.args-append       -DBUILD_SHARED_LIBS=ON
 
 post-destroot {
     # For compatibility, put header files in ${prefix}/include
@@ -209,9 +191,4 @@ post-destroot {
     if {${muniversal.build_arch} ne ${configure.build_arch}} {
         reinplace "s|^openblas_config=|#openblas_config=|" ${destroot}${prefix}/lib/pkgconfig/openblas.pc
     }
-
-    # Correct library name
-    system "install_name_tool -id \
-        ${prefix}/lib/libopenblas-r1.dylib \
-        ${destroot}${prefix}/lib/libopenblas-r1.dylib"
 }
