@@ -96,22 +96,22 @@ compiler.cxx_standard       2011
 
 # Avoid Apple clangs:
 compiler.blacklist-append   {clang}
-# Blacklist macports-clang-16+. See discussion: https://trac.macports.org/ticket/67144
+# Blacklist macports-clang-17+. See discussion: https://trac.macports.org/ticket/67144
 # for rationale. The decision when to migrate to a new compiler
 # is then in the hands of the R maintainers and will not change
 # from the current defaults when these get bumped centrally.
-# NOTE : Keep this setting in sync with the one in the R port.
-compiler.blacklist-append   {macports-clang-1[6-9]}
-# Similarly, for gcc select the gcc12 variant of the compilers PG.
-# This setting should also be kept in sync with that in the R Port.
+# NOTE: Keep this setting in sync with the one in the R port.
+compiler.blacklist-append   {macports-clang-1[7-9]}
+# Similarly, for gcc select the gcc13 variant of the compilers PG.
+# This setting should also be kept in sync with that in the R port.
 # Updates should be coordinated with the R maintainers.
-# NOTE: upon the update to gcc13, please add a blacklist of newer gccs,
-# like it is done for clangs. We would prefer using the same version of gcc and gfortran.
+compiler.blacklist-append   {macports-gcc-1[4-9]}
+
 if {${os.platform} eq "darwin" && ${os.major} < 10} {
     # Until old platforms are switched to the new libgcc.
     default_variants-append +gcc7
 } else {
-    default_variants-append +gcc12
+    default_variants-append +gcc13
 }
 
 port::register_callback R.add_dependencies
