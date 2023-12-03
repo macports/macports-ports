@@ -1,10 +1,8 @@
 # set library dependencies of  GCC compilers to the variable libgccs based on gcc_version
 
-global os.major os.platform
-
 # GCC version providing the primary runtime
 # Note settings here *must* match those in the lang/libgcc port and compilers PG
-if {${os.platform} eq "darwin" && ${os.major} < 10} {
+if {[option os.platform] eq "darwin" && [option os.major] < 10} {
     set gcc_main_version 7
 } else {
     set gcc_main_version 13

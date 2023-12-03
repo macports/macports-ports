@@ -5,7 +5,7 @@
 # clang_dependency PortGroup, and add it to any new dependencies of the
 # new version.
 
-global os.major os.platform
+global os.platform
 
 # clang is useless on Darwin / PowerPC, let disable it globally
 if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc64]} {
