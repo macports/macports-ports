@@ -40,7 +40,7 @@ options common_lisp.ccl
 default common_lisp.ccl         [expr { ${os.platform} eq "darwin" && ${os.major} >= 14  && ${os.arch} ne "arm" }]
 
 options common_lisp.abcl
-# ABCL requires java and support OpenJDK 11 before 10.14 fragile
+# ABCL requires java and support OpenJDK 21 before 10.14 fragile
 default common_lisp.abcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
 
 options common_lisp.build_run
