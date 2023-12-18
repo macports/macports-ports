@@ -185,10 +185,14 @@ proc universal_setup {args} {
         }
     }
 
+    # Err on the side of creating the variant, as the environment can change
+    # between the port being indexed and being built.
+    # https://trac.macports.org/ticket/68685
+    set orig_num_archs [llength ${configure.universal_archs}]
     # ensure correct archs are recorded in the registry, archive name, etc
     configure.universal_archs {*}${universal_archs_to_use}
 
-    if {[llength ${configure.universal_archs}] < 2} {
+    if {$orig_num_archs < 2} {
         ui_debug "muniversal: < 2 archs supported, not adding universal variant"
     } else {
 
