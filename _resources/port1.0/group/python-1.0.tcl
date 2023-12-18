@@ -126,6 +126,7 @@ proc python_set_versions {option action args} {
             unset python.version
             patch {}
             build {}
+            build.cmd   true
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
