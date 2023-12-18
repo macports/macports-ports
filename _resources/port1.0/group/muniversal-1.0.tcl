@@ -118,14 +118,14 @@ proc universal_setup {args} {
         } elseif {${os.arch} eq "i386"} {
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
+            if {${os.major} < 11 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             }
         } else {
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
+            if {![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             }
         }
