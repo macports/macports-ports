@@ -141,9 +141,9 @@ default     openssl.branch      {}
 proc rust.add_bootstrap_components {architectures {components {rust-std rustc cargo}}} {
     global extract.suffix os.major subport
 
-    set version_current         1.71.1
-    set version_m1              1.70.0
-    set version_m2              1.69.0
+    set version_current         1.75.0
+    set version_m1              1.74.0
+    set version_m2              1.73.0
 
     master_sites-append         https://static.rust-lang.org/dist:apple_vendor \
                                 https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${version_current}:macports_vendor \
@@ -231,29 +231,29 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
 
     # upstream binaries
     checksums-append        rust-std-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  d1620d5bcd9a5e86a4794848f547dd32484f52c1 \
-                            sha256  0bce6e0abf5b7375ae4e78ec59d3036100267c300cb999dc6e665356bce6e3b2 \
-                            size    44978754 \
+                            rmd160  3a37030aa11531f969c134b4586890625b0eeb41 \
+                            sha256  ffd3de3b29d324d7c8b8b57569c11bf3749fc6313ec0b2638ef38997bdbdb6fc \
+                            size    41948644 \
                             rustc-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  bfe1a33979dd6d33eae8569f52b6afbfa6cc4106 \
-                            sha256  b4b6fa6605dac66c38008020ea11b59a06bcc1cdbac66a17204ff38aa7115221 \
-                            size    91444261 \
+                            rmd160  f31cec9a10d05d5ea499587b0ea74849acb3016d \
+                            sha256  3919989c194b2a6674702f0323cac4229d7c6939c933acf4e4451c144f69c8ed \
+                            size    91230594 \
                             cargo-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  c15fad1fbf3d0da04a17d544c3e84923caab9bd5 \
-                            sha256  e8f67154ae8faefb81be06b8804658cdde39d96e8fbd6b5240a9ef9d95f49f57 \
-                            size    8607683 \
+                            rmd160  490bc0cb6c5b5f301cbd7ded44edef14166f7357 \
+                            sha256  f45dec402a07acf072f1f58064cb3d21cd795914182e8260d88fce73f082b577 \
+                            size    9984570 \
                             rust-std-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  5efbab74af2376a619a84d00e6fa6bd2dc388f1b \
-                            sha256  7fa4b1390784ab83cdef0b1dcacba9710024bb47867b72d09d6b9a711bebceb6 \
-                            size    41922676 \
+                            rmd160  a6735b637e21304f261e1cac3e08d8872b4ba9de \
+                            sha256  5c02396eb7cfe1a3c12b01dffd758cf862c4264df6280727798745b98f245082 \
+                            size    40113695 \
                             rustc-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  ac2cb4cb93666d8d2e4470ae22c1fd964d285467 \
-                            sha256  efad5373622c83dc301c4c045bc3b0ad5cb271409f89c839864f4c3af1510cc8 \
-                            size    96608181 \
+                            rmd160  8396773736e005cba5c6b59e55c76d6eb7063f7c \
+                            sha256  03a8e33693d4e532368708cff5fafbde71e612c0e5c5f14b5fb80be0d7817a8a \
+                            size    101571677 \
                             cargo-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  0a99954fa31ac4527691c4d09bc2c03df0dd4138 \
-                            sha256  42eee022368b143c45cd86905d1c9b5ac28fe0608288a805b508a0435c1433e6 \
-                            size    8051884
+                            rmd160  b8350c6b7b5f74d27bb29ea03d8cf58fc34a8bed \
+                            sha256  b7e4c2a829bd8bc90101067ba96b71ecd73fe130401b2478b095047bd8acb469 \
+                            size    9442407
 
     # upstream binaries
     checksums-append        rust-std-${version_m2}-x86_64-apple-darwin${extract.suffix} \
@@ -269,17 +269,17 @@ proc rust.add_bootstrap_components {architectures {components {rust-std rustc ca
                             sha256  3ed0b5eaaf7e908f196b4882aad757cb2a623ca3c8e8e74471422df5e93ebfb0 \
                             size    7379771 \
                             rust-std-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  200e0aaf3eab63c0b0fb4dfd8d6cbcec7688cd39 \
-                            sha256  00307d648acc269a0874ba8de4f8eb3bd3b85a0f10e3da59ba1ff8c840e92b34 \
-                            size    42521697 \
+                            rmd160  2aca579bc99ece76ffdfd4b110212fe4ca82e656 \
+                            sha256  651d9ccf5282c67b4f5bcf0eb194b0d29750667271144c3921016a018e33e3c5 \
+                            size    40836286 \
                             rustc-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  0ab0a1e48871bf7f919cde6a76026a6cd3207f9d \
-                            sha256  aaecbc9591591b42f02befedb5c4a04c8faeecfacbaffb5c9ee4ad1f77b0a3ed \
-                            size    94232290 \
+                            rmd160  bfdb11a317401146484dc5eba074ea41b99dade1 \
+                            sha256  f5c938b2aedaf3451e41b696875aab7f66c435d8245af3af1f61ec636b0e64ee \
+                            size    101863654 \
                             cargo-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  7bbdbae8e74ed5b774c12837cee6e8446dfefdb4 \
-                            sha256  b185ea41a0ad76ac23b08744732c51e4811528291f7193d612a42e3e54ecd535 \
-                            size    6824595
+                            rmd160  b361e49a5d09da64a694f72fa0ca2cbd387883f7 \
+                            sha256  370496a66ccadb3d07800949eee01f0088b3efb220fa80973a7ff7e68b1097c8 \
+                            size    8946256
 
     # MacPorts bootstrap binaries for older system
     checksums-append        rust-std-${version_m1}+0-x86_64-macports-darwin${extract.suffix} \
