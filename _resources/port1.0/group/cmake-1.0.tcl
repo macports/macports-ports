@@ -49,6 +49,15 @@ proc cmake_ccaching_flags {} {
     }
 }
 
+proc cmake_ignore_prefix_paths {} {
+    set sdkroot [option configure.sysroot]
+    if {${sdkroot} eq ""} {
+        set sdkroot "/"
+    }
+    set paths [list /Library/Frameworks /usr/local]
+    return "[join ${paths} \;]\;${sdkroot}[join ${paths} \;${sdkroot}]"
+}
+
 configure.cmd       ${prefix}/bin/cmake
 
 default configure.pre_args {-DCMAKE_INSTALL_PREFIX='${cmake.install_prefix}'}
@@ -72,6 +81,9 @@ default configure.args {[list \
                     -DCMAKE_MAKE_PROGRAM=${build.cmd} \
                     -DCMAKE_MODULE_PATH=${cmake_share_module_dir} \
                     -DCMAKE_SYSTEM_PREFIX_PATH="${cmake.install_prefix}\;${prefix}\;/usr" \
+                    -DCMAKE_SYSTEM_FRAMEWORK_PATH="${cmake.install_prefix}/Library/Frameworks\;${prefix}/Library/Frameworks\;/System/Library/Frameworks" \
+                    -DCMAKE_SYSTEM_IGNORE_PREFIX_PATH="[cmake_ignore_prefix_paths]" \
+                    -DCMAKE_SYSTEM_IGNORE_PATH="[cmake_ignore_prefix_paths]" \
                     -DCMAKE_VERBOSE_MAKEFILE=ON \
                     -DCMAKE_POLICY_DEFAULT_CMP0025=NEW \
                     -Wno-dev
