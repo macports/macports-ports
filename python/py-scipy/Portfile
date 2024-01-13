@@ -13,7 +13,7 @@ PortGroup               python 1.0
 legacysupport.newest_darwin_requires_legacy 12
 
 github.setup            scipy scipy 1.11.4 v
-revision                0
+revision                1
 
 checksums               rmd160  8120272e76e1065f8f6b5aaf3fa7fd450d56e4c3 \
                         sha256  90a2b78e7f5733b9de748f589f09225013685f9b218275257f8a8168ededaeaa \
@@ -30,10 +30,6 @@ long_description        {*}${description}
 homepage                https://www.scipy.org/
 
 python.versions         38 39 310 311 312
-
-# When updating to meson.build later, please do it conditionally,
-# unless build is confirmed on older systems as well.
-python.pep517           no
 
 python.add_archflags    no
 universal_variant       no
@@ -114,29 +110,20 @@ if {${name} ne ${subport}} {
         reinplace "s|@MACOS_V@|${macosx_deployment_target}|g" ${worksrcpath}/scipy/_build_utils/compiler_helper.py
     }
 
-    if {${python.version} == 312} {
-        python.pep517   yes
-        python.pep517_backend meson
+    if {${python.version} >= 312} {
+        python.pep517_backend   meson
 
-        depends_build-append \
-                            port:pkgconfig
+        depends_build-append    port:pkgconfig
 
-        # TODO: implement variants with different BLAS/LAPACK implementations; these need to be fixed in the
-        #       py-numpy port as well after the switch to meson
-        depends_lib-append  path:lib/libopenblas.dylib:OpenBLAS
-
-        patchfiles-append   patch-pyproject.toml.diff
+        patchfiles-append       patch-pyproject.toml.diff
 
         configure.fflags-append -fno-second-underscore
 
-        # meson build systems is looking for default filenames without the version suffix
-        pre-build {
-            ln -s ${prefix}/bin/pybind11-config-${python.branch} ${worksrcpath}/pybind11-config
-            ln -s ${prefix}/bin/cython-${python.branch} ${worksrcpath}/cython
-            ln -s ${prefix}/bin/pythran-${python.branch} ${worksrcpath}/pythran
-        build.env-append    PATH=$env(PATH):${worksrcpath}
-        }
+        build.env-append        PATH=${python.prefix}/bin:$env(PATH) \
+                                PKG_CONFIG_PATH=${python.pkgd}/pybind11/share/pkgconfig:${filespath}/pkgconfig
     } else {
+        python.pep517           no
+
         worksrcdir              ${distname}
         build.env-append        "CCFLAGS=-I${prefix}/include -L${prefix}/lib"
         destroot.env-append     "CCFLAGS=-I${prefix}/include -L${prefix}/lib"
@@ -162,120 +149,161 @@ if {${name} ne ${subport}} {
                                 CXXFLAGS=${configure.cxx_archflags} \
                                 CPPFLAGS=${configure.cppflags}
         }
+    }
 
-        post-destroot {
-            # for some reason read-world is not set
-            system "chmod -R a+r ${destroot}${prefix}"
-        }
+    post-destroot {
+        # for some reason read-world is not set
+        system "chmod -R a+r ${destroot}${prefix}"
+    }
 
-        variant atlas conflicts openblas mkl description "Use MacPorts ATLAS libraries" {
-            depends_lib-append  port:atlas
-        }
+    variant atlas conflicts openblas mkl description "Use MacPorts ATLAS libraries" {
+        depends_lib-append  port:atlas
+    }
 
-        variant openblas conflicts atlas mkl description "Use MacPorts OpenBLAS Libraries" {
-            depends_lib-append  path:lib/libopenblas.dylib:OpenBLAS
-        }
+    variant openblas conflicts atlas mkl description "Use MacPorts OpenBLAS Libraries" {
+        depends_lib-append  path:lib/libopenblas.dylib:OpenBLAS
+    }
 
-        variant mkl conflicts atlas openblas description "Use MacPorts MKL Libraries" {
-            depends_lib-append  port:py${python.version}-mkl \
-                                port:py${python.version}-mkl-include
-        }
+    variant mkl conflicts atlas openblas description "Use MacPorts MKL Libraries" {
+        depends_lib-append  port:py${python.version}-mkl \
+                            port:py${python.version}-mkl-include
+    }
 
-        # Make +openblas a default variant, at least temporarily, to
-        # overcome issues with Apple's /usr/lib/libblas.* and
-        # /usr/lib/liblapack.* missing a symbol. see also:
-        # https://trac.macports.org/ticket/57829
-        if {![variant_isset atlas] &&
-            ![variant_isset openblas] &&
-            ![variant_isset mkl]} {
-            default_variants +openblas
-        }
+    # Make +openblas a default variant, at least temporarily, to
+    # overcome issues with Apple's /usr/lib/libblas.* and
+    # /usr/lib/liblapack.* missing a symbol. see also:
+    # https://trac.macports.org/ticket/57829
+    if {![variant_isset atlas] &&
+        ![variant_isset openblas] &&
+        ![variant_isset mkl]} {
+        default_variants +openblas
+    }
 
-        if {[variant_isset atlas]} {
-            # use MacPorts atlas
-            build.env-append    OPENBLAS=None \
-                                MKLROOT=None \
-                                ATLAS=${prefix}/lib \
-                                LAPACK=${prefix}/lib \
-                                BLAS=${prefix}/lib
-            destroot.env-append OPENBLAS=None \
-                                MKLROOT=None \
-                                ATLAS=${prefix}/lib \
-                                LAPACK=${prefix}/lib \
-                                BLAS=${prefix}/lib
-
-            pre-fetch {
-                # scipy needs fortran; so we only need to check if atlas is
-                # compiled with +nofortran
-                if {![catch {set result [active_variants atlas "" nofortran]}]} {
-                    if {!$result} {
-                        return -code error \
-    "You have selected the +atlas variant but atlas was built with +nofortran.\
-    scipy needs a fortran enabled atlas. Please rebuild atlas without the +nofortran\
-    variant."
-                    }
-                }
-
-                # also check that numpy has the atlas variant active
-                if {![catch {set result [active_variants py${python.version}-numpy atlas ""]}]} {
-                    if {!$result} {
-
-                        return -code error \
-    "You have selected the +atlas variant but py${python.version}-numpy does not\
-    have the +atlas variant active. Please ensure that numpy is activated with the\
-    +atlas variant."
-                    }
-                }
-            }
-
-        } elseif {[variant_isset openblas]} {
-            # use MacPorts OpenBLAS
-            build.env-append    OPENBLAS=${prefix}/lib \
-                                ATLAS=None \
-                                MKLROOT=None
-            destroot.env-append OPENBLAS=${prefix}/lib \
-                                ATLAS=None \
-                                MKLROOT=None
-
-        } elseif {[variant_isset mkl]} {
-            # use MacPorts MKL
-            build.env-append    OPENBLAS=None \
-                                ATLAS=None \
-                                MKLROOT=${python.prefix}
-            destroot.env-append OPENBLAS=None \
-                                ATLAS=None \
-                                MKLROOT=${python.prefix}
-
-            pre-fetch {
-                # check that numpy has the mkl variant active
-                if {![catch {set result [active_variants py${python.version}-numpy mkl ""]}]} {
-                    if {!$result} {
-
-                        return -code error \
-    "You have selected the +mkl variant but py${python.version}-numpy does not\
-    have the +mkl variant active. Please ensure that numpy is activated with the\
-    +mkl variant."
-                    }
-                }
-            }
-
-            # set absolute path to remove references to @rpath/libmkl_rt.2.dylib
-            post-destroot {
-                foreach soname [exec find ${destroot}${python.pkgd}/scipy -name "*.so"] {
-                    system "install_name_tool -change @rpath/libmkl_rt.2.dylib ${python.prefix}/lib/libmkl_rt.2.dylib ${soname}"
-                    }
-            }
-
+    if {[variant_isset atlas]} {
+        # use MacPorts atlas
+        if {${python.version} >= 312} {
+            build.args-append \
+                            -Csetup-args=-Dblas=atlas \
+                            -Csetup-args=-Dlapack=atlas
         } else {
-            # use Accelerate BLAS
-            build.env-append    OPENBLAS=None \
-                                ATLAS=None \
-                                LAPACK=/usr/lib \
-                                BLAS=/usr/lib
-            destroot.env-append OPENBLAS=None \
-                                ATLAS=None \
-                                LAPACK=/usr/lib \
-                                BLAS=/usr/lib
+            build.env-append \
+                            OPENBLAS=None \
+                            MKLROOT=None \
+                            ATLAS=${prefix}/lib \
+                            LAPACK=${prefix}/lib \
+                            BLAS=${prefix}/lib
+            destroot.env-append \
+                            OPENBLAS=None \
+                            MKLROOT=None \
+                            ATLAS=${prefix}/lib \
+                            LAPACK=${prefix}/lib \
+                            BLAS=${prefix}/lib
+        }
+
+        pre-fetch {
+            # scipy needs fortran; so we only need to check if atlas is
+            # compiled with +nofortran
+            if {![catch {set result [active_variants atlas "" nofortran]}]} {
+                if {!$result} {
+                    return -code error \
+"You have selected the +atlas variant but atlas was built with +nofortran.\
+scipy needs a fortran enabled atlas. Please rebuild atlas without the +nofortran\
+variant."
+                }
+            }
+
+            # also check that numpy has the atlas variant active
+            if {![catch {set result [active_variants py${python.version}-numpy atlas ""]}]} {
+                if {!$result} {
+
+                    return -code error \
+"You have selected the +atlas variant but py${python.version}-numpy does not\
+have the +atlas variant active. Please ensure that numpy is activated with the\
++atlas variant."
+                }
+            }
+        }
+
+    } elseif {[variant_isset openblas]} {
+        # use MacPorts OpenBLAS
+        if {${python.version} >= 312} {
+            build.args-append \
+                            -Csetup-args=-Dblas=openblas \
+                            -Csetup-args=-Dlapack=openblas
+        } else {
+            build.env-append \
+                            OPENBLAS=${prefix}/lib \
+                            ATLAS=None \
+                            MKLROOT=None
+            destroot.env-append \
+                            OPENBLAS=${prefix}/lib \
+                            ATLAS=None \
+                            MKLROOT=None
+        }
+
+    } elseif {[variant_isset mkl]} {
+        # use MacPorts MKL
+        if {${python.version} >= 312} {
+            build.args-append \
+                            -Csetup-args=-Dblas=mkl \
+                            -Csetup-args=-Dlapack=mkl
+            build.env-append \
+                            "LDFLAGS=-L${python.prefix}/lib"
+        } else {
+            build.env-append \
+                            OPENBLAS=None \
+                            ATLAS=None \
+                            MKLROOT=${python.prefix}
+            destroot.env-append \
+                            OPENBLAS=None \
+                            ATLAS=None \
+                            MKLROOT=${python.prefix}
+        }
+
+        pre-fetch {
+            # check that numpy has the mkl variant active
+            if {![catch {set result [active_variants py${python.version}-numpy mkl ""]}]} {
+                if {!$result} {
+
+                    return -code error \
+"You have selected the +mkl variant but py${python.version}-numpy does not\
+have the +mkl variant active. Please ensure that numpy is activated with the\
++mkl variant."
+                }
+            }
+        }
+
+        # set absolute path to remove references to @rpath/libmkl_rt.2.dylib
+        post-destroot {
+            foreach soname [exec find ${destroot}${python.pkgd}/scipy -name "*.so"] {
+                system "install_name_tool -change @rpath/libmkl_rt.2.dylib ${python.prefix}/lib/libmkl_rt.2.dylib ${soname}"
+                }
+        }
+
+    } else {
+        # use Accelerate BLAS (macOS 13.3 and later)
+        if {${python.version} >= 312} {
+            build.args-append \
+                            -Csetup-args=-Dblas=accelerate \
+                            -Csetup-args=-Dlapack=accelerate
+        } else {
+            build.env-append \
+                            OPENBLAS=None \
+                            ATLAS=None \
+                            LAPACK=/usr/lib \
+                            BLAS=/usr/lib
+            destroot.env-append \
+                            OPENBLAS=None \
+                            ATLAS=None \
+                            LAPACK=/usr/lib \
+                            BLAS=/usr/lib
+        }
+        pre-fetch {
+            if {${os.major} < 22 || (${os.major} == 22 && ${os.minor} < 4)} {
+                return -code error \
+"Fallback on Accelerate BLAS requires macOS 13.3 or later. Please select a\
+BLAS variant"
+            }
         }
     }
 }
