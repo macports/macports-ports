@@ -270,7 +270,12 @@ proc rust_build::callback {} {
         foreach arch [option configure.universal_archs] {
             lassign [rust_build.stage0_info ${arch}] stage0_version stage0_arch stage0_vendor stage0_os_version
             if { ${stage0_vendor} ne "" } {
-                set binTag              ${stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
+                if { ${stage0_vendor} eq "macports" } {
+                    set full_stage0_version ${stage0_version}+0
+                } else {
+                    set full_stage0_version ${stage0_version}
+                }
+                set binTag              ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
                 distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
                 distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
             }
