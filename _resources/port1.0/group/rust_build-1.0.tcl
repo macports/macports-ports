@@ -267,17 +267,24 @@ proc rust_build::callback {} {
     }
 
     if { [variant_exists mirror_all_architectures] && [variant_isset mirror_all_architectures] } {
-        foreach arch [option configure.universal_archs] {
-            lassign [rust_build.stage0_info ${arch}] stage0_version stage0_arch stage0_vendor stage0_os_version
-            if { ${stage0_vendor} ne "" } {
-                if { ${stage0_vendor} eq "macports" } {
-                    set full_stage0_version ${stage0_version}+0
-                } else {
-                    set full_stage0_version ${stage0_version}
+        foreach arch {arm64 i386 x86_64} {
+            if {$arch eq "arm64"} {
+                set mdts [list 11.0]
+            } else {
+                set mdts [list 10.5 10.6 10.7 10.12]
+            }
+            foreach mdt $mdts {
+                lassign [rust_build.stage0_info ${arch} ${mdt}] stage0_version stage0_arch stage0_vendor stage0_os_version
+                if { ${stage0_vendor} ne "" } {
+                    if { ${stage0_vendor} eq "macports" } {
+                        set full_stage0_version ${stage0_version}+0
+                    } else {
+                        set full_stage0_version ${stage0_version}
+                    }
+                    set binTag              ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
+                    distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                    distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
                 }
-                set binTag              ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
-                distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
-                distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
             }
         }
     }
@@ -316,7 +323,11 @@ port::register_callback         rust_build::callback
 #     stage0_arch: architecture of the stage0 compiler
 #     stage0_vendor: apple (upstream), macports (built via MacPorts port rust-bootstrap), or "" (use locally built port)
 #     stage0_os_version: append to operatingsystem part of target triplet machine-vendor-operatingsystem in name of stage0 compiler
-proc rust_build.stage0_info {arch} {
+proc rust_build.stage0_info {arch {mdt {}}} {
+
+    if {$mdt eq {}} {
+        set mdt [option macosx_deployment_target]
+    }
 
     # are we building a stage0 compiler or just using one?
     if { [join [lrange [split [option subport] -] 0 1] -] eq "rust-bootstrap" } {
@@ -339,7 +350,7 @@ proc rust_build.stage0_info {arch} {
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] >= "10.12"] } {
+    if { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.12"] } {
         if { ${arch} in "arm64 x86_64" } {
             # upstream support
             # see https://doc.rust-lang.org/nightly/rustc/platform-support.html
@@ -358,7 +369,7 @@ proc rust_build.stage0_info {arch} {
                 return  [list ${stage0_version} ${arch} "macports" ""]
             }
         }
-    } elseif { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] >= "10.7"] } {
+    } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.7"] } {
         if { ${building_stage0} } {
             # use `platforms` in rust-bootstap port to ensure upstream compiler runs
             return      [list ${stage0_version} "x86_64" "apple" ""]
@@ -366,7 +377,7 @@ proc rust_build.stage0_info {arch} {
             # no upstream support; use MacPorts compiler
             return      [list ${stage0_version} ${arch} "macports" "11"]
         }
-    } elseif { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] >= "10.6"] } {
+    } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.6"] } {
         if { ${building_stage0} } {
             # use local port since it must be build without thread-local storage even of OS supports it
             return      [list [option rust_build.version] [option configure.build_arch] "" ""]
@@ -374,7 +385,7 @@ proc rust_build.stage0_info {arch} {
             # no upstream support; use MacPorts compiler
             return      [list ${stage0_version} ${arch} "macports" "10"]
         }
-    } elseif { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] >= "10.5"] } {
+    } elseif { [option os.platform] eq "darwin" && [vercmp $mdt >= "10.5"] } {
         if { ${building_stage0} } {
             # use local port since it must be built without thread-local storage even of OS supports it
             return       [list [option rust_build.version] [option configure.build_arch] "" ""]
