@@ -114,15 +114,6 @@ variant openblas conflicts accelerate atlas blis flexiblas description {Build wi
     }
     linalglib               -lopenblas
     cmake_linalglib         -DBLA_VENDOR=OpenBLAS
-
-    # The new linker in Xcode 15 is buggy, causing build failures for many (but not all)
-    # ports that link to OpenBLAS. The -Wl,-ld_classic option below reverts to the
-    # classic linker.
-    #
-    # TODO: This is a temporary solution, the classic linker will be removed in a future release by Apple.
-    if { ( [vercmp ${xcodeversion} 15 ] >= 0 ) || ( [vercmp ${xcodecltversion} 15 ] >= 0 ) } {
-        linalglib-append    -Wl,-ld_classic
-    }
 }
 
 if {![variant_isset accelerate] && ![variant_isset openblas] && ![variant_isset atlas] \
