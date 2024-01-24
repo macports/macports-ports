@@ -282,8 +282,10 @@ proc rust_build::callback {} {
                         set full_stage0_version ${stage0_version}
                     }
                     set binTag              ${full_stage0_version}-[option triplet.cpu.${stage0_arch}]-${stage0_vendor}-[option triplet.os]${stage0_os_version}
-                    distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
-                    distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                    foreach component [option rust_build.components] {
+                        distfiles-delete        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                        distfiles-append        ${component}-${binTag}${extract.suffix}:${stage0_vendor}_vendor
+                    }
                 }
             }
         }
