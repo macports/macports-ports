@@ -42,7 +42,10 @@ proc haskell_cabal.add_dependencies {} {
             port:libiconv
     }
     depends_build-append \
-        port:gsed
+        port:cctools \
+        port:file \
+        port:gsed \
+        path:bin/openssl:openssl
 }
 port::register_callback haskell_cabal.add_dependencies
 
@@ -153,7 +156,8 @@ options haskell_cabal.bin \
         haskell_cabal.global_flags \
         haskell_cabal.build_dir \
         haskell_cabal.use_prebuilt \
-        haskell_cabal.datadir
+        haskell_cabal.datadir \
+        haskell_cabal.bindirs
 
 default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 
@@ -169,6 +173,8 @@ default haskell_cabal.build_dir     {${workpath}/dist}
 default haskell_cabal.use_prebuilt  {no}
 
 default haskell_cabal.datadir       {share/${subport}}
+
+default haskell_cabal.bindirs       {${destroot}${prefix}/bin}
 
 post-patch {
     if {[tbool haskell_cabal.use_prebuilt]} {
@@ -237,6 +243,7 @@ default destroot.post_args  {\
                                 --builddir=${haskell_cabal.build_dir}\
                                 --installdir=${destroot}${prefix}/bin\
                                 --enable-relocatable\
+                                --overwrite-policy=always\
                             }
 default destroot.env        {${haskell_cabal.env}}
 
@@ -256,11 +263,30 @@ default livecheck.url       {https://hackage.haskell.org/package/${name}}
 default livecheck.regex     {"/package/[quotemeta ${name}]-\\\[^/\\\]+/[quotemeta ${name}]-(\\\[^\\\"\\\]+)[quotemeta ${extract.suffix}]"}
 
 
-# binary sed hack to address unfixed cabal datadir issue:
-# replace hardwired datadir in build directory with path
-# of the same length using repeated /'s
-# https://github.com/haskell/cabal/issues/3586
 post-destroot {
+    # strip binaries
+    foreach bindir ${haskell_cabal.bindirs} {
+        foreach binfile [glob -nocomplain ${bindir}/*] {
+            if {([file isfile ${binfile}]
+                && [file type ${binfile}] eq {file}
+                && [file executable ${binfile}]
+                && [regexp -nocase -- \
+                    {application/x-.*(binary|executable)} \
+                        [lindex [exec file --mime-type ${binfile}] end]])} {
+                system -W ${bindir} \
+                        "strip ${binfile}"
+                if {${configure.build_arch} eq {arm64}} {
+                    system -W ${bindir} \
+                        "codesign -f -s - ${binfile}"
+                }
+            }
+        }
+    }
+
+    # binary sed hack to address unfixed cabal datadir issue:
+    # replace hardwired datadir in build directory with path
+    # of the same length using repeated /'s
+    # https://github.com/haskell/cabal/issues/3586
     # find cabal data-files
     set build_datadirs [list]
     if {[file isdirectory ${haskell_cabal.cabal_root}/store]} {
@@ -272,40 +298,51 @@ post-destroot {
         }
     }
     if {[llength ${build_datadirs}] > 0} {
-        foreach binfile [glob -nocomplain ${destroot}${prefix}/bin/*] {
-            if {!([file isfile ${binfile}] && [file type ${binfile}] eq {file})} {
-                continue
-            }
-            xinstall -m 0755 \
-                ${binfile} \
-                ${binfile}.slash_hack
-            foreach build_datadir ${build_datadirs} {
-                set extra_slashes \
-                    [expr {[string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]}]
-                if {${extra_slashes} >= 0} {
-                    set slash_hack \
-                        [string repeat / [expr {${extra_slashes} + 1}]]
-                    set datadir_slash_hack \
-                        [strsed ${prefix}/${haskell_cabal.datadir} "g|/${haskell_cabal.datadir}\$|${slash_hack}${haskell_cabal.datadir}|"]
-                    set build_datadir_esc \
-                        [strsed ${build_datadir} {g|/|\\/|}]
-                    set datadir_slash_hack_esc \
-                        [strsed ${datadir_slash_hack} {g|/|\\/|}]
-                    system -W ${destroot}${prefix}/bin \
-                        "gsed -i -e\
-                            's/${build_datadir_esc}/${datadir_slash_hack_esc}/g'\
-                            ${binfile}.slash_hack"
+        foreach bindir ${haskell_cabal.bindirs} {
+            foreach binfile [glob -nocomplain ${bindir}/*] {
+                if {!([file isfile ${binfile}]
+                      && [file type ${binfile}] eq {file}
+                      && [file executable ${binfile}]
+                      && [regexp -nocase -- \
+                          {application/x-.*(binary|executable)} \
+                          [lindex [exec file --mime-type ${binfile}] end]])} {
+                    continue
                 }
-            }
-            if {[file size ${binfile}.slash_hack] == [file size ${binfile}]} {
-                delete  ${binfile}
                 xinstall -m 0755 \
-                    ${binfile}.slash_hack \
-                    ${binfile}
-            }
-            delete  ${binfile}.slash_hack
-            if {${configure.build_arch} eq {arm64}} {
-                system "codesign -f -s - ${binfile}"
+                    ${binfile} \
+                    ${binfile}.slash_hack
+                foreach build_datadir ${build_datadirs} {
+                    set extra_slashes \
+                        [expr {[string length ${build_datadir}] - [string length ${prefix}/${haskell_cabal.datadir}]}]
+                    if {${extra_slashes} >= 0} {
+                        set slash_hack \
+                            [string repeat / [expr {${extra_slashes} + 1}]]
+                        set datadir_slash_hack \
+                            [strsed ${prefix}/${haskell_cabal.datadir} "g|/${haskell_cabal.datadir}\$|${slash_hack}${haskell_cabal.datadir}|"]
+                        set build_datadir_esc \
+                            [strsed ${build_datadir} {g|/|\\/|}]
+                        set datadir_slash_hack_esc \
+                            [strsed ${datadir_slash_hack} {g|/|\\/|}]
+                        system -W ${bindir} \
+                            "gsed -i -e\
+                            's/${build_datadir_esc}/${datadir_slash_hack_esc}/g'\
+                                ${binfile}.slash_hack"
+                    }
+                }
+                if {([file size ${binfile}.slash_hack] \
+                        == [file size ${binfile}])
+                    && ([exec openssl dgst -ripemd160 ${binfile}.slash_hack] \
+                        ne [exec openssl dgst -ripemd160 ${binfile}])} {
+                    # gsed created a different file of the same size
+                    delete  ${binfile}
+                    xinstall -m 0755 \
+                        ${binfile}.slash_hack \
+                        ${binfile}
+                }
+                delete  ${binfile}.slash_hack
+                if {${configure.build_arch} eq {arm64}} {
+                    system "codesign -f -s - ${binfile}"
+                }
             }
         }
     }
