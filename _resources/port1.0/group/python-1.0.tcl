@@ -17,7 +17,7 @@
 #
 # python.consistent_destroot: set consistent environment values in build and destroot phases
 #
-# python.pep517: build using PEP517 (default is "no")
+# python.pep517: build using PEP517 (default is "yes" for Python 3.7+)
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
 #   "flit", "hatch", "poetry", "maturin", or "meson"
 #
