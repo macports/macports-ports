@@ -1,0 +1,101 @@
+From ca10b1e678e651f62afe67c6abd9c1d9f44daf9f Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Sun, 4 Feb 2024 15:06:38 +0800
+Subject: [PATCH] Revert "* iwn_poller_poll_in_thread() now waits poller thread
+ starts"
+
+This reverts commit 414ce1adc6484c6518ac8587107ff2905328f8de.
+---
+ src/poller/iwn_poller.c | 31 +++++++++----------------------
+ 1 file changed, 9 insertions(+), 22 deletions(-)
+
+diff --git src/poller/iwn_poller.c src/poller/iwn_poller.c
+index a8f4627..5cf268c 100644
+--- src/poller/iwn_poller.c
++++ src/poller/iwn_poller.c
+@@ -56,10 +56,8 @@ struct iwn_poller {
+   IWHMAP *slots;
+   char   *thread_name;
+ 
+-  pthread_mutex_t    mtx;
+-  pthread_barrier_t  _barrier_poll; ///< Poll-in-thread barrier
+-  pthread_barrier_t *barrier_poll;
+-  uint32_t flags;                 ///< Poller mode flags. See iwn_poller_flags_set()
++  pthread_mutex_t mtx;
++  uint32_t flags; ///< Poller mode flags. See iwn_poller_flags_set()
+ 
+   volatile bool stop;
+   volatile bool housekeeping;          ///< CAS barrier for timeout cleaner
+@@ -129,7 +127,7 @@ IW_INLINE void _rw_fd_unsubscribe(struct poller_slot *s) {
+   if (!(s->flags & SLOT_UNSUBSCRIBED)) {
+     s->flags |= SLOT_UNSUBSCRIBED;
+     struct kevent ev[] = {
+-      { s->fd, EVFILT_READ, EV_DELETE },
++      { s->fd, EVFILT_READ,  EV_DELETE },
+       { s->fd, EVFILT_WRITE, EV_DELETE },
+     };
+     kevent(s->poller->fd, ev, sizeof(ev) / sizeof(ev[0]), 0, 0, 0);
+@@ -376,11 +374,11 @@ static void _timer_ready_impl(struct iwn_poller *p) {
+ #elif defined(IWN_KQUEUE)
+   {
+     struct kevent ev = {
+-      .ident = p->fd,
++      .ident  = p->fd,
+       .filter = EVFILT_TIMER,
+-      .flags = EV_ADD | EV_ENABLE | EV_CLEAR | EV_ONESHOT,
++      .flags  = EV_ADD | EV_ENABLE | EV_CLEAR | EV_ONESHOT,
+       .fflags = NOTE_SECONDS,
+-      .data = timeout_next - ctime,
++      .data   = timeout_next - ctime,
+     };
+     if (kevent(p->fd, &ev, 1, 0, 0, 0) == -1) {
+       iwrc rc = iwrc_set_errno(IW_ERROR_ERRNO, errno);
+@@ -520,7 +518,7 @@ static iwrc _poller_timeout_add(struct poller_slot *s) {
+   }
+   if (timerfd_settime(s->fd, 0, &(struct itimerspec) {
+     .it_value = {
+-      .tv_sec = s->timeout / 1000,
++      .tv_sec  = s->timeout / 1000,
+       .tv_nsec = (int64_t) (s->timeout % 1000) * 1000000
+     }
+   }, 0) < 0) {
+@@ -683,9 +681,9 @@ void iwn_poller_poke(struct iwn_poller *p) {
+     struct kevent ev[] = {
+       { p->fd, EVFILT_USER, EV_ADD | EV_ONESHOT },
+ #if defined(NOTE_TRIGGER)
+-      { p->fd, EVFILT_USER, 0, NOTE_TRIGGER }
++      { p->fd, EVFILT_USER, 0, NOTE_TRIGGER     }
+ #elif defined(EV_TRIGGER)
+-      { p->fd, EVFILT_USER, EV_TRIGGER, 0 }
++      { p->fd, EVFILT_USER, EV_TRIGGER, 0       }
+ #else
+ #error "Either NOTE_TRIGGER or EV_TRIGGER is required."
+ #endif
+@@ -958,16 +956,9 @@ iwrc iwn_poller_poll_in_thread(struct iwn_poller *p, const char *thr_name, pthre
+   if (thr_name) {
+     p->thread_name = strdup(thr_name);
+   }
+-  RCN(finish, pthread_barrier_init(&p->_barrier_poll, 0, 2));
+-  p->barrier_poll = &p->_barrier_poll;
+   RCN(finish, pthread_create(out_thr, 0, _poll_worker, p));
+-  pthread_barrier_wait(p->barrier_poll);
+ 
+ finish:
+-  if (p->barrier_poll) {
+-    pthread_barrier_destroy(p->barrier_poll);
+-    p->barrier_poll = 0;
+-  }
+   return rc;
+ }
+ 
+@@ -998,10 +989,6 @@ void iwn_poller_poll(struct iwn_poller *p) {
+     p->stop = false;
+   }
+ 
+-  if (p->barrier_poll) {
+-    pthread_barrier_wait(p->barrier_poll);
+-  }
+-
+   while (!p->stop) {
+ #if defined(IWN_KQUEUE)
+     int nfds = kevent(p->fd, 0, 0, event, max_events, 0);
