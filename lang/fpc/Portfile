@@ -7,7 +7,9 @@ version             3.2.2
 categories          lang pascal
 platforms           macosx
 license             {GPL-2 LGPL-2}
-maintainers         {@kamischi web.de:karl-michael.schindler} openmaintainer
+maintainers         {@kamischi web.de:karl-michael.schindler} \
+                    {@barracuda156 gmail.com:vital.had} \
+                    openmaintainer
 description         Free Pascal, an open source Pascal and Object Pascal compiler.
 long_description    Free Pascal is a 32, 64 and 16 bit professional Pascal compiler. \
                     It can target many processor architectures: Intel x86 (including 8086), \
@@ -15,22 +17,39 @@ long_description    Free Pascal is a 32, 64 and 16 bit professional Pascal compi
                     Supported operating systems include Linux, FreeBSD, Mac OS X/iOS/iPhoneSimulator/Darwin, \
                     Win32, Win64, WinCE and Android.
 homepage            https://www.freepascal.org
+
+# TODO: add support for i386
+supported_archs     x86_64 arm64 ppc ppc64
+
+# Bootstrap compiler version
+set boot_v          3.0.4
+
 master_sites        sourceforge:freepascal:main \
-                    ftp://ftp.freepascal.org/pub/fpc/dist/3.0.4/bootstrap/:bootstrap
+                    https://downloads.freepascal.org/fpc/dist/${boot_v}/bootstrap/:bootstrap \
+                    https://downloads.freepascal.org/fpc/dist/${boot_v}/powerpc-macosx/:bootstrap
 
 set src             ${name}build-${version}.tar.gz
-# the 3.0.4 bootstrap compiler
-set pp              x86_64-macosx-10.9-ppcx64.tar.bz2
-distfiles           ${src}:main ${pp}:bootstrap
 checksums           ${src} \
                     rmd160  3106b4aff1adc4cd08dfdd39cc3ef4e800888255 \
                     sha256  85ef993043bb83f999e2212f1bca766eb71f6f973d362e2290475dbaaf50161f \
-                    size    84195619 \
+                    size    84195619
+# PowerPC compiler is only available as a dmg
+if {${configure.build_arch} in [list ppc ppc64]} {
+    set pp          fpc-${boot_v}.powerpc-macosx.dmg
+    checksums-append \
+                    ${pp} \
+                    rmd160  c1dbe7fb71382a69146023b2cdac768e05fea8e3 \
+                    sha256  587a6ae199d2fb992794c6b4ff9a7aa0c4646687ed5bbab5a6c96bdc322ba53c \
+                    size    98748823
+} else {
+    set pp          x86_64-macosx-10.9-ppcx64.tar.bz2
+    checksums-append \
                     ${pp} \
                     rmd160  7c5327aa6f4fd8616d78bc4f708463b9fb3e8844 \
                     sha256  0515ad4251c51fa7e5c0ff9b1d90ea50f41530b56276cc72b73798fae437b3b4 \
                     size    1556308
-supported_archs     x86_64 arm64
+}
+distfiles           ${src}:main ${pp}:bootstrap
 
 # doesn't install shared libraries
 installs_libs       no
@@ -233,7 +252,20 @@ if {${subport} eq "${name}"} {
 
     installs_libs       yes
 
-    extract.only-append ${pp}
+    if {${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc ppc64]} {
+        post-extract {
+            xinstall -d ${workpath}/tmp/boot
+            system "hdiutil attach ${distpath}/${pp} -private -nobrowse -mountpoint ${workpath}/tmp/boot"
+            copy ${workpath}/tmp/boot/${name}-${boot_v}.powerpc-macosx.pkg ${workpath}/pkg
+            system "hdiutil detach ${workpath}/tmp/boot -force"
+            delete -force ${workpath}/tmp/boot
+            system -W ${workpath} "gunzip -d pkg/Contents/Archive.pax.gz"
+            system -W ${workpath}/pkg "pax -r < Contents/Archive.pax"
+            copy ${workpath}/pkg/usr/local/lib/${name}/${boot_v}/${bootstrapCompiler} ${workpath}
+        }
+    } else {
+        extract.only-append ${pp}
+    }
 
     post-patch {
         # adjust the path "codfilepath" for plex from /usr/local to MacPort's prefix.
@@ -254,6 +286,16 @@ if {${subport} eq "${name}"} {
             set cpuTarget aarch64
             set compiler ppca64
         }
+        ppc {
+            set bootstrapCompiler ppcppc
+            set cpuTarget powerpc
+            set compiler ppcppc
+        }
+        ppc64 {
+            set bootstrapCompiler ppcppc64
+            set cpuTarget powerpc64
+            set compiler ppcppc64
+        }
         default {
             set bootstrapCompiler unsupported
             set cpuTarget unsupported
@@ -266,6 +308,35 @@ if {${subport} eq "${name}"} {
             set otherOptions "-WM11.0 -XR${configure.sdkroot}"
         } elseif {${os.major} >= 13} { # 10.9, Mavericks
             set otherOptions "-WM10.9"
+        } elseif {${configure.build_arch} in [list ppc ppc64]} {
+            # Relevant only for macOS PowerPC
+            patchfiles-append patch-powerpc.diff
+            # On Tiger building is trivial
+            if {${os.major} == 8} {
+                set otherOptions "-WM10.4"
+            } else {
+                # At the moment linking fails for pas2js on 10.5 and 10.6
+                # with the system or cctools ld. ld_classic works,
+                # but it does not link against 10.5+ SDK. Therefore,
+                # use 10.4 SDK for all PowerPC. See:
+                # https://gitlab.com/freepascal.org/fpc/source/-/issues/40625
+                macosx_deployment_target 10.4
+                set tiger_sdkpath ${developer_dir}/SDKs/MacOSX10.4u.sdk
+                if {![file exists $tiger_sdkpath]} {
+                    pre-fetch {ui_error "Building ${name} @${version} requires 10.4 SDK"}
+                }
+                # We use symlinks to needed tools, but make sure those
+                # have not been created already:
+                set binutils_path ${workpath}/bin
+                pre-build {
+                    if {![file exists $binutils_path]} {
+                        xinstall -m 0755 -d ${workpath}/bin
+                        ln -s /usr/bin/as ${workpath}/bin/as
+                        ln -s /usr/bin/ld_classic ${workpath}/bin/ld
+                    }
+                }
+                set otherOptions "-WM${macosx_deployment_target} -XR${tiger_sdkpath} -Fl=/usr/lib -FD${binutils_path}"
+            }
         } else   {
             set otherOptions ""
         }
@@ -313,10 +384,15 @@ if {${subport} eq "${name}"} {
 
         # remove the -WM option for older systems or update it as needed
         if {${os.platform} eq "darwin"} {
-            if       {${os.major} < 11}   { # 10.7, Lion
+            if {${configure.build_arch} in [list ppc ppc64]} { # macOS PowerPC
+                reinplace "s|-WM10.9|-WM10.4|g" ${destroot}${fpcbasepath}/etc/fpc.cfg
+            } elseif {${os.major} < 11}   { # 10.7, Lion
                 reinplace "s|-WM10.9||g" ${destroot}${fpcbasepath}/etc/fpc.cfg
             } elseif {${os.major} >=  20} { # 11, Big Sur
                 reinplace "s|-WM10.9|-WM11.0|g" ${destroot}${fpcbasepath}/etc/fpc.cfg
+            }
+            if {${os.major} < 13} {
+                reinplace "s|/Applications/Xcode.app/Contents/Developer||g" ${destroot}${fpcbasepath}/etc/fpc.cfg
             }
         }
 
