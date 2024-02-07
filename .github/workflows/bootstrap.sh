@@ -41,7 +41,7 @@ echo "Fetching MacPorts..."
 curl_mpbase_pid=$!
 PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
 echo "Fetching PortIndex from $PORTINDEX_URL ..."
-/usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
+/usr/bin/curl -fsSLo ports/PortIndex -o ports/PortIndex.quick "$PORTINDEX_URL" "${PORTINDEX_URL}.quick" &
 curl_portindex_pid=$!
 endgroup
 
@@ -120,12 +120,12 @@ begingroup "Updating PortIndex"
 git -C ports/ remote add macports https://github.com/macports/macports-ports.git
 git -C ports/ fetch macports master
 git -C ports/ checkout -qf macports/master~10
-git -C ports/ checkout -qf -
-git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
-## Ignore portindex errors on common ancestor
 if ! wait $curl_portindex_pid; then
     echo "Fetching PortIndex failed: $?"
 fi
+git -C ports/ checkout -qf -
+git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
+## Ignore portindex errors on common ancestor
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
