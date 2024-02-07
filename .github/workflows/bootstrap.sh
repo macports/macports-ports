@@ -15,13 +15,16 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.8.1
+MACPORTS_VERSION=2.9.1
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
 case "$OS_ARCH" in
     i586|i686|x86_64)
         OS_ARCH=i386
+        ;;
+    arm64)
+        OS_ARCH=arm
         ;;
 esac
 
