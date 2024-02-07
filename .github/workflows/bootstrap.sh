@@ -39,8 +39,9 @@ curl_getopt_pid=$!
 echo "Fetching MacPorts..."
 /usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
-echo "Fetching PortIndex..."
-/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
+echo "Fetching PortIndex from $PORTINDEX_URL ..."
+/usr/bin/curl -fsSLo ports/PortIndex "$PORTINDEX_URL" &
 curl_portindex_pid=$!
 endgroup
 
@@ -76,7 +77,9 @@ endgroup
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
-wait $curl_getopt_pid
+if ! wait $curl_getopt_pid; then
+    echo "Fetching getopt failed: $?"
+fi
 echo "Extracting..."
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 rm -f "getopt-v1.1.6.tar.bz2"
@@ -85,7 +88,9 @@ endgroup
 
 begingroup "Installing MacPorts"
 # Install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
-wait $curl_mpbase_pid
+if ! wait $curl_mpbase_pid; then
+    echo "Fetching base failed: $?"
+fi
 echo "Extracting..."
 sudo tar -xpf "${MACPORTS_FILENAME}" -C /
 rm -f "${MACPORTS_FILENAME}"
@@ -118,7 +123,9 @@ git -C ports/ checkout -qf macports/master~10
 git -C ports/ checkout -qf -
 git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
-wait $curl_portindex_pid
+if ! wait $curl_portindex_pid; then
+    echo "Fetching PortIndex failed: $?"
+fi
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)
