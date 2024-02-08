@@ -15,26 +15,41 @@ epoch               3
 # tested the candidate version using the `go-devel` port, to verify how it
 # builds against current and older versions of macOS.
 
-# Go 1.22 does not build on macOS 10.12 and older
+# Go 1.22 does not build on macOS 10.12 and older.
+# 1.14.x is the last branch to support i386 on macOS.
+# However past 1.11.x everything is broken.
+# FIXME: consider implementing support for PowerPC.
 if {${os.platform} eq "darwin" && ${os.major} < 17} {
-    version         1.17.13
-    set unsupported_macos true
-    revision        0
+    if {${build_arch} eq "i386"} {
+        version     1.11.13
+        revision    0
+        set unsupported_macos_386 true
+        set unsupported_macos false
+    } else {
+        version     1.17.13
+        revision    0
+        set unsupported_macos true
+        set unsupported_macos_386 false
+    }
 } else {
     version         1.22.0
     set unsupported_macos false
+    set unsupported_macos_386 false
     revision        0
 }
-
-set legacy_build    false
 
 # Subport for Go Unstable Version
 subport ${name}-devel {
     version         1.22.0
     revision        0
     epoch           1
+}
 
-    set legacy_build false
+if {${os.platform} eq "darwin" \
+    && (${os.major} < 11 || ${configure.build_arch} eq "i386")} {
+    set legacy_build    true
+} else {
+    set legacy_build    false
 }
 
 homepage            https://go.dev
@@ -82,7 +97,17 @@ if {$subport eq "${name}-devel"} {
 } else {
     # Go (RELEASE)
 
-    if {${unsupported_macos}} {
+    if {${unsupported_macos_386}} {
+        # 1.11
+        checksums   ${go_src_dist} \
+                    rmd160  19d71fb4c196bd5bb03cab40cc99b35f312aaefc \
+                    sha256  5032095fd3f641cafcce164f551e5ae873785ce7b07ca7c143aecd18f7ba4076 \
+                    size    21114296
+
+        notes-append "
+            Please note: Go 1.22 does not build on macOS 10.6 and older, so Go ${version} has been installed.
+        "
+    } elseif {${unsupported_macos}} {
         # 1.17
         checksums   ${go_src_dist} \
                     rmd160  6d8a13da5112ee67bb886eca0fec77ffaab27a5f \
@@ -159,6 +184,7 @@ build.env           GOROOT=${GOROOT} \
                     GOOS=darwin \
                     GOROOT_FINAL=${GOROOT_FINAL} \
                     CC=${configure.cc}
+
 # Set build.jobs to -1 to disable MacPorts from adding the -j flag for
 # parallel builds, since the build.cmd contains "make".
 build.jobs          -1
@@ -168,12 +194,12 @@ if {${os.platform} eq "darwin" && ${os.major} <= ${legacysupport.newest_darwin_r
     # since go doesn't use the standard CFLAGS/CXXFLAGS.
     # We need to patch the build system and set up env variables manually.
 
-    if {[vercmp ${version} < 1.19]} {
-    # Older compilers don't support the -Wno-nullability-completeness flag and if
-    # that's the case, they won't need it anyway, so just patch it out.
-    # Upstream no longer uses the flag as of 1.19beta1.
-    # https://github.com/golang/go/commit/bf19163a545c3117ab3c309a691f32a42cf29efd
-    patchfiles-append   patch-cgo-drop-no-nullability-completeness.diff
+    if {[vercmp ${version} < 1.19] && !${legacy_build}} {
+        # Older compilers don't support the -Wno-nullability-completeness flag and if
+        # that's the case, they won't need it anyway, so just patch it out.
+        # Upstream no longer uses the flag as of 1.19beta1.
+        # https://github.com/golang/go/commit/bf19163a545c3117ab3c309a691f32a42cf29efd
+        patchfiles-append   patch-cgo-drop-no-nullability-completeness.diff
     }
 
     # Fix building with the -x flag ("show all commands as they are executed"),
@@ -214,9 +240,13 @@ if {${os.platform} eq "darwin" && ${os.major} <= ${legacysupport.newest_darwin_r
     }]
 }
 
-if {${os.platform} eq "darwin" && ${os.major} eq 10} {
-    # The branch https://github.com/catap/go/tree/macos-10.6
-    patchfiles-append   patch-macOS-10.6.diff
+if {${os.platform} eq "darwin" && ${os.major} == 10} {
+    if {${configure.build_arch} eq "x86_64"} {
+        # The branch https://github.com/catap/go/tree/macos-10.6
+        patchfiles-append   patch-macOS-10.6.diff
+    } elseif {${configure.build_arch} eq "i386"} {
+        patchfiles-append   patch-1.11.13-for-10.6-i386.diff
+    }
 }
 
 use_parallel_build  no
@@ -237,7 +267,7 @@ if {${configure.build_arch} eq "arm64"} {
             "${extract.cmd} ${extract.pre_args} ${distpath}/${go_armbin_dist} ${extract.post_args}"
     }
 
-} elseif {(${configure.build_arch} eq "x86_64" && ${os.major} >= 21) || !${legacy_build}} {
+} elseif {${configure.build_arch} eq "x86_64" && (${os.major} >= 21 || !${legacy_build})} {
 
     # Use a temporary installation of the binary AMD64 Go distribution to
     # build Go for AMD64 on macOS 12 since go-1.4 fails to build
@@ -255,7 +285,9 @@ if {${configure.build_arch} eq "arm64"} {
 
 } else {
 
-    build.env-append        GOROOT_BOOTSTRAP=${prefix}/lib/go-1.4
+    # https://trac.macports.org/ticket/69160
+    build.env-append        GOROOT_BOOTSTRAP=${prefix}/lib/go-1.4 \
+                            GOHOSTARCH=${GOARCH}
 
     depends_build-append    port:go-1.4
 }
@@ -300,9 +332,12 @@ destroot {
         LICENSE \
         README.md \
         PATENTS \
-        SECURITY.md \
         VERSION \
         ${docdir}
+
+    if {!${legacy_build}} {
+        xinstall -m 0644 -W ${worksrcpath} SECURITY.md ${docdir}
+    }
 
     copy {*}[glob -directory ${worksrcpath}/doc *] ${docdir}
 
