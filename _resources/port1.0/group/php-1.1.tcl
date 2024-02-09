@@ -507,7 +507,7 @@ proc php.add_port_code {} {
 # php.suffix_from_branch: calculates the suffix from the given branch.
 
 proc php.suffix_from_branch {branch} {
-    return [strsed ${branch} {g/\\.//}]
+    return [string map {. ""} ${branch}]
 }
 
 

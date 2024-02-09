@@ -29,8 +29,9 @@ options common_lisp.sbcl
 default common_lisp.sbcl        yes
 
 options common_lisp.ecl
-# ECL doesn't support PPC
-default common_lisp.ecl         [expr { ${os.arch} ne "powerpc" }]
+# boehmgc has random failures on macOS which makes ECL useless
+# See: https://github.com/ivmai/bdwgc/issues/103
+default common_lisp.ecl         no
 
 options common_lisp.clisp
 default common_lisp.clisp       yes
@@ -40,7 +41,7 @@ options common_lisp.ccl
 default common_lisp.ccl         [expr { ${os.platform} eq "darwin" && ${os.major} >= 14  && ${os.arch} ne "arm" }]
 
 options common_lisp.abcl
-# ABCL requires java and support OpenJDK 11 before 10.14 fragile
+# ABCL requires java and support OpenJDK 21 before 10.14 fragile
 default common_lisp.abcl        [expr { ${os.platform} eq "darwin" && ${os.major} >= 18 }]
 
 options common_lisp.build_run

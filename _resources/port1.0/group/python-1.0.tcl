@@ -17,7 +17,7 @@
 #
 # python.consistent_destroot: set consistent environment values in build and destroot phases
 #
-# python.pep517: build using PEP517 (default is "no")
+# python.pep517: build using PEP517 (default is "yes" for Python 3.7+)
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
 #   "flit", "hatch", "poetry", "maturin", or "meson"
 #
@@ -80,7 +80,7 @@ proc python_get_version {} {
 
 proc python_get_default_version {} {
     global python.versions
-    set def_v 311
+    set def_v 312
     if {[info exists python.versions]} {
         if {${def_v} in ${python.versions}} {
             return ${def_v}
@@ -126,6 +126,7 @@ proc python_set_versions {option action args} {
             unset python.version
             patch {}
             build {}
+            build.cmd   true
             destroot {
                 system "echo $name is a stub port > ${destroot}${prefix}/share/doc/${name}/README"
             }
@@ -417,7 +418,13 @@ proc python_add_dependencies {} {
                     }
                     nose {
                         depends_test-delete    port:py${python.version}-nose
-                        depends_test-append    port:py${python.version}-nose
+                        depends_test-delete    port:py${python.version}-pynose
+                        if {${python.version} >= 312} {
+                            depends_test-append \
+                                                port:py${python.version}-pynose
+                        } else {
+                            depends_test-append    port:py${python.version}-nose
+                        }
                     }
                     default {}
                 }

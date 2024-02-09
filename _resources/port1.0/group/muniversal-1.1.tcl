@@ -222,7 +222,10 @@ proc muniversal::cpu64bit_capable {} {
         # Doesn't really matter what we return here.
         return 1
     }
-    if {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
+    if {[option os.major] >= 11} {
+        # 10.7 and later only support 64-bit hardware
+        return 1
+    } elseif {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
         return $result
     } elseif {(![catch {sysctl hw.optional.x86_64} is_x86_64] && ${is_x86_64})
               || (![catch {sysctl hw.optional.64bitops} is_ppc64] && ${is_ppc64})} {

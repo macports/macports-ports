@@ -2,17 +2,18 @@
 
 PortSystem          1.0
 PortGroup           cmake 1.1
+PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
 PortGroup           legacysupport 1.1
 PortGroup           openssl 1.0
 
-# _getline
+# _getline, filesystem
 legacysupport.newest_darwin_requires_legacy 19
 
 # See discussion in: https://github.com/macports/macports-ports/pull/19686
 legacysupport.use_mp_libcxx yes
 
-github.setup        TileDB-Inc TileDB 2.17.3
+github.setup        TileDB-Inc TileDB 2.19.1
 name                tiledb
 revision            0
 categories          databases
@@ -21,9 +22,9 @@ maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 description         The universal storage engine
 long_description    {*}${description}
 homepage            https://tiledb.com
-checksums           rmd160  718f36c8206ea5963d7197cf630b0daeac7c06f5 \
-                    sha256  5e6cb409622f246117713ea79592b3044e712d050fdbc63505e85d892add9813 \
-                    size    4418439
+checksums           rmd160  5090fbe9f0b49a499e3a1a313e49b5b25e58ca7e \
+                    sha256  b6a73b1b7d2ee5305f919d9f94883abc68e8c948257e22ce8771a72a22b46d95 \
+                    size    4386342
 github.tarball_from archive
 
 # Notice that 32-bit platforms are not supported by upstream, and there are reports elsewhere
@@ -58,25 +59,42 @@ if {${os.platform} eq "darwin" && ${os.major} < 13} {
     git.cmd                 ${prefix}/bin/git
 }
 
-if {${os.platform} eq "darwin" && ${os.major} < 11} {
+if {${os.platform} eq "darwin" && ${os.major} < 20} {
     # This trickery is intended. Normal passing of flags to CMake fails to have a desired effect.
     # Non-Apple OS on ppc will need libatomic linking too, but leave it until tested.
     patchfiles-append \
-                    patch-linking.diff \
-                    0001-Add-a-fix-for-32-bit.patch
+                    patch-linking.diff
 
     post-patch {
         reinplace "s,@PREFIX@,${prefix},g" ${worksrcpath}/cmake/Modules/FindMagic_EP.cmake
     }
 }
 
-compiler.cxx_standard   2020
+# This should be dropped with the next release.
+# Fixes here are either already in upstream/dev or to-become-irrelevant.
+patchfiles-append   patch-2.19.1.diff
+
+# https://github.com/TileDB-Inc/TileDB/pull/4690
+patchfiles-append   patch-random.diff
+
+# Verify if still broken in the next release. Relevant only for build with +tests:
+# https://github.com/TileDB-Inc/TileDB/issues/4590
+patchfiles-append   patch-unit_capi_error_tree.cc-temporary-fix.diff
+
+# Can be rewritten unconditionally, but no point in making a patch more complex:
+if {[string match *gcc* ${configure.compiler}] && ${configure.build_arch} in [list arm i386 ppc]} {
+    patchfiles-append \
+                    patch-libatomic-32-bit.diff
+}
+
+compiler.cxx_standard       2020
+# https://github.com/TileDB-Inc/TileDB/issues/4566
+compiler.blacklist-append   {clang < 1400}
 
 # config modules are defunct.
 # https://github.com/TileDB-Inc/TileDB/issues/4070
 configure.args-append \
                     -DCATCH_INCLUDE_DIR:STRING=${prefix}/include \
-                    -DTILEDB_ABSEIL=OFF \
                     -DTILEDB_ASSERIONS=OFF \
                     -DTILEDB_AZURE=OFF \
                     -DTILEDB_CPP_API=ON \
@@ -84,6 +102,7 @@ configure.args-append \
                     -DTILEDB_SERIALIZATION=OFF \
                     -DTILEDB_TESTS=OFF \
                     -DTILEDB_TOOLS=OFF \
+                    -DTILEDB_VCPKG=OFF \
                     -DTILEDB_VERBOSE=ON \
                     -DTILEDB_WEBP=OFF \
                     -DTILEDB_WERROR=OFF
@@ -108,13 +127,27 @@ if {${build_arch} eq "i386" && [string match *clang* ${configure.compiler}]} {
 
 destroot.target     install-tiledb
 
+# FIXME: ppc32 tests build, but fail to pass. Possibly size of bool issue?
+# ppc64 tests are much better, though not clean. See above.
 variant tests description "Enable testing" {
+    # This is needed only if a bundled Catch2 is used:
+    # PortGroup       conflicts_build 1.0
+
     if {${configure.build_arch} in [list i386 ppc]} {
         cmake.build_type    Debug
     }
 
+    # This is a tricky part. We may need to switch between
+    # Macports-provided Catch2 and a bundled one. Related:
+    # https://github.com/TileDB-Inc/TileDB/issues/4590
+    # https://github.com/TileDB-Inc/TileDB/issues/4095
     depends_build-append \
                     port:catch2
+    # As of 2.19.1, bundled one is broken:
+    # :info:build Undefined symbols:
+    # :info:build   "__ZN5Catch29formatReconstructedExpressionERSoRKSsNS_9StringRefES2_", referenced from:
+    # :info:build       __ZNK5Catch10BinaryExprIRKN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEES9_E29streamReconstructedExpressionERSo in test_assert.cc.o
+    # conflicts_build catch2
 
     configure.pre_args-replace \
                     -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \

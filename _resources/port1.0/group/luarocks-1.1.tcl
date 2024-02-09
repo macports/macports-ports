@@ -221,6 +221,8 @@ proc luarocks::callback {} {
 
     # have ${name} subport do nothing without requiring conditional code in the main Portfile
     subport ${name} {
+        platforms                               any
+        supported_archs                         noarch
         distfiles
         patchfiles
         use_configure                           no

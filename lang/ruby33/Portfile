@@ -1,0 +1,175 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           select 1.0
+PortGroup           openssl 1.0
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
+
+# MAP_ANONYMOUS
+legacysupport.newest_darwin_requires_legacy 14
+
+set ruby_ver        3.3
+set ruby_patch      0
+set ruby_ver_nodot  [string map {. {}} ${ruby_ver}]
+name                ruby${ruby_ver_nodot}
+version             ${ruby_ver}.${ruby_patch}
+revision            0
+
+categories          lang ruby
+maintainers         {kimuraw @kimuraw} openmaintainer
+platforms           darwin
+
+description         Powerful and clean object-oriented scripting language
+long_description    Ruby is the interpreted scripting language for quick \
+                    and easy object-oriented programming. It has many \
+                    features to process text files and to do system \
+                    management tasks (as in Perl). It is simple, \
+                    straight-forward, extensible, and portable.
+
+homepage            https://www.ruby-lang.org/
+license             {Ruby BSD}
+
+master_sites        ruby:${ruby_ver}
+distname            ruby-${version}
+dist_subdir         ruby${ruby_ver_nodot}
+
+checksums           rmd160 693d3a70b0b79f3dd61435b3b0537d0d95c94bbc \
+                    sha256 96518814d9832bece92a85415a819d4893b307db5921ae1f0f751a9a89a56b7d \
+                    size 22065999
+
+universal_variant   no
+
+# ruby/openssl since ruby-3.2 supports openssl-3
+openssl.branch      3
+
+depends_lib         port:zlib \
+                    port:libyaml \
+                    port:libffi \
+                    port:gdbm
+depends_run         port:ruby_select
+depends_build       port:pkgconfig port:cctools
+depends_skip_archcheck pkgconfig
+
+select.group        ruby
+select.file         ${filespath}/ruby${ruby_ver_nodot}
+
+#----------------------------------------------------------------------------------------
+# Fix compilation on buildbots for 10.12 and earlier.
+# Issue: 62183: error: use of undeclared identifier 'fmt'; did you mean 'fma'?
+#----------------------------------------------------------------------------------------
+compiler.blacklist-append \
+                    { clang < 901 }
+
+if { [string match macports-clang-* ${configure.compiler}] } {
+    # clang-mp-14 => dsymutil-mp-14; fix POSTLINK
+    configure.env-append dsymutil=[string map {clang dsymutil} ${configure.cc}]
+}
+
+compiler.thread_local_storage yes
+
+configure.args      --enable-shared \
+                    --enable-install-static-library \
+                    --disable-install-doc \
+                    --mandir="${prefix}/share/man" \
+                    --enable-pthread \
+                    --disable-yjit \
+                    --disable-rjit \
+                    --without-gmp \
+                    --enable-mkmf-verbose \
+                    --with-opt-dir="${prefix}" \
+                    --program-suffix=${ruby_ver} \
+                    --with-rubyhdrdir=${prefix}/include/ruby-${version} \
+                    --with-rubylibprefix="${prefix}/lib/ruby${ruby_ver}" \
+                    --with-openssl-dir=[openssl::install_area] \
+                    --without-baseruby
+# prefer Apple cctools to GNU binutils, build with binutils may fail.
+configure.args-append   AR=${prefix}/bin/ar RANLIB=${prefix}/bin/ranlib
+
+# Add the architecture flag as required
+if {[info exists build_arch] && ${build_arch} != ""} {
+    configure.args-append "--with-arch=${build_arch}"
+}
+
+post-patch {
+    # rewrite "gem" to "gem${ruby_ver}"
+    # def gem_command
+    #   ENV["GEM_COMMAND"]&.shellsplit || ["gem"]
+    # end
+    reinplace -E "s/(shellsplit .. .)(\"gem\")/\\1\"gem${ruby_ver}\"/g" \
+        ${worksrcpath}/lib/bundler/gem_helper.rb
+}
+
+post-destroot {
+    foreach type {site vendor} {
+        set libdir ${destroot}${prefix}/lib/ruby${ruby_ver}/${type}_ruby/${version}
+        xinstall -m 0755 -d ${libdir}
+        foreach subdir [exec find ${libdir} -type d -empty] {
+            destroot.keepdirs-append ${subdir}
+        }
+    }
+
+    # install destination of commands from port:rb32*
+    xinstall -m 0755 -d ${destroot}${prefix}/libexec/ruby${ruby_ver}
+    destroot.keepdirs-append ${destroot}${prefix}/libexec/ruby${ruby_ver}
+}
+
+notes-append "
+To make this the default Ruby (i.e., the version run by\
+the 'ruby', 'gem' or 'bundle' commands), run:
+    sudo port select --set ruby $name
+"
+
+variant doc description "Install rdoc indexes and C API documents" {
+        configure.args-delete   --disable-install-doc
+}
+
+variant gmp description "use gmp" {
+        configure.args-delete   --without-gmp
+        depends_lib-append      port:gmp
+}
+
+variant jemalloc description "use jemalloc" {
+        configure.args-delete   --without-jemalloc
+        configure.args-append   --with-jemalloc
+        depends_lib-append      port:jemalloc
+}
+
+variant yjit description "enable YJIT" {
+        configure.args-delete   --disable-yjit
+        configure.args-append   --enable-yjit
+        depends_build-append    port:rust
+}
+# yjit supports x86_64 or arm64
+if {${os.major} >= 19 && [info exists build_arch]} {
+    if {$build_arch in [list x86_64 arm64]} {
+        default_variants-append +yjit
+    }
+}
+
+
+variant relative description "Enable relative loading of libraries to allow for relocation of binaries." {
+        #enable relative loading
+        configure.args-append  --enable-load-relative
+}
+
+# legacy systems support
+platform darwin {
+    if {${os.major} < 11} {
+        depends_build-append    port:gmake
+        build.cmd               ${prefix}/bin/gmake
+        configure.args-append   --disable-dtrace
+        configure.cflags-append -std=c99
+    }
+
+    if {${os.major} == 8} {
+        configure.cppflags-append -DCPU_SUBTYPE_MASK=0xff000000
+    }
+}
+
+test.run        yes
+test.target     check
+
+livecheck.type  regex
+livecheck.url   https://cache.ruby-lang.org/pub/ruby/${ruby_ver}/
+livecheck.regex ruby-(3\\.2\\.\\d+)[quotemeta ${extract.suffix}]

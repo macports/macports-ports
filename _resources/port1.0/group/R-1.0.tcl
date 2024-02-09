@@ -174,6 +174,7 @@ set branch          [join [lrange [split ${Rversion} .] 0 1] .]
 set packages        ${frameworks_dir}/R.framework/Versions/${branch}/Resources/library
 set suffix          .tar.gz
 set r.cmd           ${prefix}/bin/R
+set builddir        ${workpath}/build
 
 # Get rid of unrecognized args:
 configure.pre_args-delete \
@@ -184,26 +185,23 @@ configure.cmd       ${r.cmd} CMD build .
 
 # Re --keep-empty-dirs see discussion in: https://github.com/Bioconductor/BSgenomeForge/issues/35
 configure.post_args --no-manual --no-build-vignettes --keep-empty-dirs
-                    
-# We build in destroot.
-build { }
 
 global package version
-pre-destroot {
-    xinstall -d -m 0755 ${destroot}${packages}
-    move ${worksrcpath}/${R.package}_${version}${suffix} ${destroot}${packages}
+pre-build {
+    xinstall -d -m 0755 ${builddir}
 }
 
-destroot.cmd        ${r.cmd} CMD INSTALL .
+build.cmd           ${r.cmd} CMD INSTALL .
 
 # Notice that while we install tests to make them available to the user,
 # in a case of testthat running test_check("${R.package}") from within R session will not work.
 # It has been left broken by upstream for years, see: https://github.com/r-lib/testthat/issues/205
-destroot.post_args --library=${destroot}${packages} --install-tests
-destroot.target
+build.post_args     --library=${builddir} --install-tests
+build.target
 
-post-destroot {
-    delete ${destroot}${packages}/${R.package}_${version}${suffix}
+destroot {
+    xinstall -d -m 0755 ${destroot}${packages}
+    move ${builddir}/${R.package} ${destroot}${packages}
 }
 
 # Default can be changed once the majority of packages implement testing:
@@ -212,5 +210,5 @@ default test.run    no
 # We do not need to check rebuilding vignettes, since that often requires Tex and even Pandoc,
 # and we do not want these as dependencies for tests. It also wastes time.
 test {
-    system -W ${worksrcpath} "${r.cmd} CMD check ./${R.package}_${version}${suffix} --ignore-vignettes"
+    system -W ${worksrcpath} "${r.cmd} CMD check ./${R.package}_${version}${suffix} --no-manual --no-build-vignettes"
 }

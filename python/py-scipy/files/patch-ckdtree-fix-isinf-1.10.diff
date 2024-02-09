@@ -1,0 +1,252 @@
+From f2b7fee97d665364e0c2502d44874155d93bd6b8 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Wed, 20 Dec 2023 21:44:14 +0800
+Subject: [PATCH 1/2] ckdtree: fix isinf
+
+Partly revert a breaking commit: https://github.com/scipy/scipy/commit/a77855a8a00137e06fee5f011be4b0526a20fb14
+That does not work because _ckdtree.cxx is generated with isinf and not std::isinf. Earlier version is broken either, since it does not define isinf to std::isinf at all.
+---
+ scipy/spatial/_ckdtree.pyx                     |  4 +++-
+ scipy/spatial/ckdtree/src/ckdtree_decl.h       |  1 +
+ scipy/spatial/ckdtree/src/count_neighbors.cxx  |  4 ++--
+ scipy/spatial/ckdtree/src/query.cxx            | 12 ++++++------
+ scipy/spatial/ckdtree/src/query_ball_point.cxx |  4 ++--
+ scipy/spatial/ckdtree/src/query_ball_tree.cxx  |  4 ++--
+ scipy/spatial/ckdtree/src/query_pairs.cxx      |  4 ++--
+ scipy/spatial/ckdtree/src/rectangle.h          |  6 +++---
+ scipy/spatial/ckdtree/src/sparse_distances.cxx |  6 +++---
+ 9 files changed, 24 insertions(+), 21 deletions(-)
+
+diff --git scipy/spatial/_ckdtree.pyx scipy/spatial/_ckdtree.pyx
+index bbc996574..e66c90bae 100644
+--- scipy/spatial/_ckdtree.pyx
++++ scipy/spatial/_ckdtree.pyx
+@@ -15,7 +15,6 @@
+ from cpython.mem cimport PyMem_Malloc, PyMem_Free
+ from libcpp.vector cimport vector
+ from libcpp cimport bool
+-from libc.math cimport isinf
+ 
+ cimport cython
+ import os
+@@ -39,6 +38,8 @@
+ # ===================
+ 
+ cdef extern from "ckdtree_decl.h":
++    int isinf(np.float64_t x) nogil
++
+     struct ckdtreenode:
+         np.intp_t split_dim
+         np.intp_t children
+diff --git scipy/spatial/ckdtree/src/ckdtree_decl.h scipy/spatial/ckdtree/src/ckdtree_decl.h
+index 3c28a49cb..b31e60b6d 100644
+--- scipy/spatial/ckdtree/src/ckdtree_decl.h
++++ scipy/spatial/ckdtree/src/ckdtree_decl.h
+@@ -12,6 +12,7 @@
+ #define CKDTREE_PREFETCH(x, rw, loc)  NPY_PREFETCH(x, rw, loc)
+ 
+ #define ckdtree_intp_t npy_intp
++#define isinf(x)   std::isinf(x)
+ #define ckdtree_fmin(x, y)   fmin(x, y)
+ #define ckdtree_fmax(x, y)   fmax(x, y)
+ #define ckdtree_fabs(x)   fabs(x)
+diff --git scipy/spatial/ckdtree/src/count_neighbors.cxx scipy/spatial/ckdtree/src/count_neighbors.cxx
+index fd0ff5e26..598a922b9 100644
+--- scipy/spatial/ckdtree/src/count_neighbors.cxx
++++ scipy/spatial/ckdtree/src/count_neighbors.cxx
+@@ -213,13 +213,13 @@ count_neighbors(struct CNBParams *params,
+     if (CKDTREE_LIKELY(self->raw_boxsize_data == NULL)) {
+         HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+         HANDLE(p == 1, MinkowskiDistP1)
+-        HANDLE(std::isinf(p), MinkowskiDistPinf)
++        HANDLE(isinf(p), MinkowskiDistPinf)
+         HANDLE(1, MinkowskiDistPp)
+         {}
+     } else {
+         HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+         HANDLE(p == 1, BoxMinkowskiDistP1)
+-        HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++        HANDLE(isinf(p), BoxMinkowskiDistPinf)
+         HANDLE(1, BoxMinkowskiDistPp)
+         {}
+     }
+diff --git scipy/spatial/ckdtree/src/query.cxx scipy/spatial/ckdtree/src/query.cxx
+index a8aeba469..c24037f38 100644
+--- scipy/spatial/ckdtree/src/query.cxx
++++ scipy/spatial/ckdtree/src/query.cxx
+@@ -133,7 +133,7 @@ struct nodeinfo {
+     }
+ 
+     inline void update_side_distance(const int d, const double new_side_distance, const double p) {
+-        if (CKDTREE_UNLIKELY(std::isinf(p))) {
++        if (CKDTREE_UNLIKELY(isinf(p))) {
+             min_distance = ckdtree_fmax(min_distance, new_side_distance);
+         } else {
+             min_distance += new_side_distance - side_distances()[d];
+@@ -267,7 +267,7 @@ query_single_point(const ckdtree *self,
+     }
+     else if (eps == 0.)
+         epsfac = 1.;
+-    else if (std::isinf(p))
++    else if (isinf(p))
+         epsfac = 1. / (1. + eps);
+     else
+         epsfac = 1. / std::pow((1. + eps), p);
+@@ -277,7 +277,7 @@ query_single_point(const ckdtree *self,
+         double tmp = distance_upper_bound;
+         distance_upper_bound = tmp*tmp;
+     }
+-    else if ((!std::isinf(p)) && (!std::isinf(distance_upper_bound)))
++    else if ((!isinf(p)) && (!isinf(distance_upper_bound)))
+         distance_upper_bound = std::pow(distance_upper_bound,p);
+ 
+     for(;;) {
+@@ -457,7 +457,7 @@ query_single_point(const ckdtree *self,
+             result_indices[i] = neighbor.contents.intdata;
+             if (CKDTREE_LIKELY(p == 2.0))
+                 result_distances[i] = std::sqrt(-neighbor.priority);
+-            else if ((p == 1.) || (std::isinf(p)))
++            else if ((p == 1.) || (isinf(p)))
+                 result_distances[i] = -neighbor.priority;
+             else
+                 result_distances[i] = std::pow((-neighbor.priority),(1./p));
+@@ -495,7 +495,7 @@ query_knn(const ckdtree      *self,
+             const double *xx_row = xx + (i*m);
+             HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+             HANDLE(p == 1, MinkowskiDistP1)
+-            HANDLE(std::isinf(p), MinkowskiDistPinf)
++            HANDLE(isinf(p), MinkowskiDistPinf)
+             HANDLE(1, MinkowskiDistPp)
+             {}
+         }
+@@ -512,7 +512,7 @@ query_knn(const ckdtree      *self,
+             }
+             HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+             HANDLE(p == 1, BoxMinkowskiDistP1)
+-            HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++            HANDLE(isinf(p), BoxMinkowskiDistPinf)
+             HANDLE(1, BoxMinkowskiDistPp) {}
+         }
+ 
+diff --git scipy/spatial/ckdtree/src/query_ball_point.cxx scipy/spatial/ckdtree/src/query_ball_point.cxx
+index 77ed1beee..4d5dc938b 100644
+--- scipy/spatial/ckdtree/src/query_ball_point.cxx
++++ scipy/spatial/ckdtree/src/query_ball_point.cxx
+@@ -128,7 +128,7 @@ query_ball_point(const ckdtree *self, const double *x,
+             Rectangle point(m, x + i * m, x + i * m);
+             HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+             HANDLE(p == 1, MinkowskiDistP1)
+-            HANDLE(std::isinf(p), MinkowskiDistPinf)
++            HANDLE(isinf(p), MinkowskiDistPinf)
+             HANDLE(1, MinkowskiDistPp)
+             {}
+         } else {
+@@ -139,7 +139,7 @@ query_ball_point(const ckdtree *self, const double *x,
+             }
+             HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+             HANDLE(p == 1, BoxMinkowskiDistP1)
+-            HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++            HANDLE(isinf(p), BoxMinkowskiDistPinf)
+             HANDLE(1, BoxMinkowskiDistPp)
+             {}
+         }
+diff --git scipy/spatial/ckdtree/src/query_ball_tree.cxx scipy/spatial/ckdtree/src/query_ball_tree.cxx
+index bea17eb7e..9338618aa 100644
+--- scipy/spatial/ckdtree/src/query_ball_tree.cxx
++++ scipy/spatial/ckdtree/src/query_ball_tree.cxx
+@@ -198,13 +198,13 @@ query_ball_tree(const ckdtree *self, const ckdtree *other,
+     if(CKDTREE_LIKELY(self->raw_boxsize_data == NULL)) {
+         HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+         HANDLE(p == 1, MinkowskiDistP1)
+-        HANDLE(std::isinf(p), MinkowskiDistPinf)
++        HANDLE(isinf(p), MinkowskiDistPinf)
+         HANDLE(1, MinkowskiDistPp)
+         {}
+     } else {
+         HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+         HANDLE(p == 1, BoxMinkowskiDistP1)
+-        HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++        HANDLE(isinf(p), BoxMinkowskiDistPinf)
+         HANDLE(1, BoxMinkowskiDistPp)
+         {}
+     }
+diff --git scipy/spatial/ckdtree/src/query_pairs.cxx scipy/spatial/ckdtree/src/query_pairs.cxx
+index 5cc81594f..c4af434b6 100644
+--- scipy/spatial/ckdtree/src/query_pairs.cxx
++++ scipy/spatial/ckdtree/src/query_pairs.cxx
+@@ -218,13 +218,13 @@ query_pairs(const ckdtree *self,
+     if(CKDTREE_LIKELY(self->raw_boxsize_data == NULL)) {
+         HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+         HANDLE(p == 1, MinkowskiDistP1)
+-        HANDLE(std::isinf(p), MinkowskiDistPinf)
++        HANDLE(isinf(p), MinkowskiDistPinf)
+         HANDLE(1, MinkowskiDistPp)
+         {}
+     } else {
+         HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+         HANDLE(p == 1, BoxMinkowskiDistP1)
+-        HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++        HANDLE(isinf(p), BoxMinkowskiDistPinf)
+         HANDLE(1, BoxMinkowskiDistPp)
+         {}
+     }
+diff --git scipy/spatial/ckdtree/src/rectangle.h scipy/spatial/ckdtree/src/rectangle.h
+index 39e9e0591..a349f50d1 100644
+--- scipy/spatial/ckdtree/src/rectangle.h
++++ scipy/spatial/ckdtree/src/rectangle.h
+@@ -130,7 +130,7 @@ template<typename MinMaxDist>
+         /* internally we represent all distances as distance ** p */
+         if (CKDTREE_LIKELY(p == 2.0))
+             upper_bound = _upper_bound * _upper_bound;
+-        else if ((!std::isinf(p)) && (!std::isinf(_upper_bound)))
++        else if ((!isinf(p)) && (!isinf(_upper_bound)))
+             upper_bound = std::pow(_upper_bound,p);
+         else
+             upper_bound = _upper_bound;
+@@ -142,7 +142,7 @@ template<typename MinMaxDist>
+         }
+         else if (eps == 0.)
+             epsfac = 1.;
+-        else if (std::isinf(p))
++        else if (isinf(p))
+             epsfac = 1. / (1. + eps);
+         else
+             epsfac = 1. / std::pow((1. + eps), p);
+@@ -153,7 +153,7 @@ template<typename MinMaxDist>
+ 
+         /* Compute initial min and max distances */
+         MinMaxDist::rect_rect_p(tree, rect1, rect2, p, &min_distance, &max_distance);
+-        if(std::isinf(max_distance)) {
++        if(isinf(max_distance)) {
+             const char *msg = "Encountering floating point overflow. "
+                               "The value of p too large for this dataset; "
+                               "For such large p, consider using the special case p=np.inf . ";
+diff --git scipy/spatial/ckdtree/src/sparse_distances.cxx scipy/spatial/ckdtree/src/sparse_distances.cxx
+index 14ccf25a3..984e2c4ab 100644
+--- scipy/spatial/ckdtree/src/sparse_distances.cxx
++++ scipy/spatial/ckdtree/src/sparse_distances.cxx
+@@ -66,7 +66,7 @@ traverse(const ckdtree *self, const ckdtree *other,
+                     if (d <= tub) {
+                         if (CKDTREE_LIKELY(p == 2.0))
+                             d = std::sqrt(d);
+-                        else if ((p != 1) && (!std::isinf(p)))
++                        else if ((p != 1) && (!isinf(p)))
+                             d = std::pow(d, 1. / p);
+ 
+                         coo_entry e = {sindices[i], oindices[j], d};
+@@ -139,13 +139,13 @@ sparse_distance_matrix(const ckdtree *self, const ckdtree *other,
+     if(CKDTREE_LIKELY(self->raw_boxsize_data == NULL)) {
+         HANDLE(CKDTREE_LIKELY(p == 2), MinkowskiDistP2)
+         HANDLE(p == 1, MinkowskiDistP1)
+-        HANDLE(std::isinf(p), MinkowskiDistPinf)
++        HANDLE(isinf(p), MinkowskiDistPinf)
+         HANDLE(1, MinkowskiDistPp)
+         {}
+     } else {
+         HANDLE(CKDTREE_LIKELY(p == 2), BoxMinkowskiDistP2)
+         HANDLE(p == 1, BoxMinkowskiDistP1)
+-        HANDLE(std::isinf(p), BoxMinkowskiDistPinf)
++        HANDLE(isinf(p), BoxMinkowskiDistPinf)
+         HANDLE(1, BoxMinkowskiDistPp)
+         {}
+     }

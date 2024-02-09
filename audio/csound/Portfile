@@ -6,10 +6,10 @@ PortGroup           github  1.0
 
 github.setup        csound csound 6.18.1
 github.tarball_from archive
-revision            2
+revision            4
 categories          audio
 license             LGPL-2.1+
-maintainers         nomaintainer
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 
 homepage            https://www.csound.com
 
@@ -38,19 +38,24 @@ depends_lib         port:curl \
 patchfiles          MAC_OS_X_VERSION.patch
 
 # https://github.com/csound/csound/pull/1732
+# https://github.com/csound/csound/issues/1733#issuecomment-1668096257
 patchfiles-append   0001-Use-correct-clang-options-in-CMakeLists.patch \
-                    0002-Altivec-code-is-broken-for-Darwin-so-disable-it-ther.patch
+                    0002-patch-fix-Altivec.diff
 
-cmake.out_of_source yes
 compiler.cxx_standard   2011
 
-configure.args-append   -DFAIL_MISSING=ON \
+configure.args-append   -DBUILD_CXX_INTERFACE=ON \
                         -DBUILD_DSSI_OPCODES=OFF \
                         -DBUILD_JAVA_INTERFACE=OFF \
                         -DBUILD_LUA_INTERFACE=OFF \
                         -DBUILD_TESTS=OFF \
+                        -DBUILD_UTILITIES=ON \
                         -DCS_FRAMEWORK_DEST=${frameworks_dir} \
+                        -DFAIL_MISSING=ON \
                         -DUSE_ALSA=OFF \
+                        -DUSE_CURL=ON \
+                        -DUSE_DOUBLE=OFF \
+                        -DUSE_GETTEXT=ON \
                         -DUSE_JACK=OFF \
                         -DUSE_PORTAUDIO=OFF \
                         -DUSE_PORTMIDI=OFF \
@@ -60,16 +65,67 @@ configure.args-append   -DFAIL_MISSING=ON \
 # Building static lib does not hurt even without tests enabled, since dylib is still built as well.
 configure.args-append   -DBUILD_STATIC_LIBRARY=ON
 
+if {${configure.build_arch} ni [list arm i386 ppc]} {
+    default_variants-append +double
+}
+
+if {${configure.build_arch} in [list ppc ppc64]} {
+    # We do not want to add -mcpu= here, that is not safe.
+    configure.optflags-append -mtune=native
+    # Absence of altivec is not automatically detected.
+    if {[catch {sysctl hw.vectorunit} result] || $result == 0} {
+        configure.cppflags-append \
+                        -DPFFFT_SIMD_DISABLE
+    }
+    # In either case, enforce a local build.
+    archive_sites
+}
+
+if [variant_isset double] {
+    set libname         CsoundLib64
+} else {
+    set libname         CsoundLib
+}
+
+set cs_framework_path   ${libname}.framework/Versions/6.0
+set csoundlib           ${cs_framework_path}/${libname}
+
 post-destroot {
     # While this is not immediately obvious upon install, dylib and binaries are built with wrong paths:
     # /opt/local/lib/CsoundLib64.framework/Versions/6.0/CsoundLib64
     # At the same time this is installed correctly into the framework directory, so the path points to nothing.
     # CMakeLists are a mess, and it is unclear what in particular breaks this. Fix paths in destroot:
-    set csoundlib CsoundLib64.framework/Versions/6.0/CsoundLib64
+    system -W ${destroot}${frameworks_dir} "install_name_tool -id ${frameworks_dir}/${csoundlib} ./${csoundlib}"
     system -W ${destroot}${prefix}/lib "install_name_tool -change ${prefix}/lib/${csoundlib} ${frameworks_dir}/${csoundlib} ./libcsnd6.6.0.dylib"
     foreach bin [glob ${destroot}${prefix}/bin/*] {
         system "install_name_tool -change ${prefix}/lib/${csoundlib} ${frameworks_dir}/${csoundlib} ${bin}"
     }
+    # Existing targets also omit headers from /interfaces, which are needed for some dependents:
+    # https://github.com/CsoundQt/CsoundQt/issues/392
+    xinstall -d ${destroot}${prefix}/include/${name}
+    fs-traverse f ${worksrcpath}/interfaces {
+        if {[file isfile ${f}] && ([file extension ${f}] == ".h" || [file extension ${f}] == ".hpp")} {
+            copy ${f} ${destroot}${prefix}/include/${name}/
+        }
+    }
+}
+
+variant double description "Use double precision" {
+    # See: http://www.csounds.com/manual/html/MiscCsound64.html
+    configure.args-replace  -DUSE_DOUBLE=OFF \
+                            -DUSE_DOUBLE=ON
+}
+
+variant portaudio conflicts pulseaudio description "Use PortAudio" {
+    depends_build-append    port:portaudio
+    configure.args-replace  -DUSE_PORTAUDIO=OFF \
+                            -DUSE_PORTAUDIO=ON
+}
+
+variant pulseaudio conflicts portaudio description "Use PulseAudio" {
+    depends_build-append    port:pulseaudio
+    configure.args-replace  -DUSE_PULSEAUDIO=OFF \
+                            -DUSE_PULSEAUDIO=ON
 }
 
 variant tests description "Build tests" {
@@ -78,7 +134,7 @@ variant tests description "Build tests" {
                             -DBUILD_TESTS=ON
 
     # Otherwise libraries are looked for in the prefix, which fails, if the port has not been installed earlier.
-    test.env-append         DYLD_LIBRARY_PATH=${cmake.build_dir}:${cmake.build_dir}/CsoundLib64.framework/Versions/6.0
+    test.env-append         DYLD_LIBRARY_PATH=${cmake.build_dir}:${cmake.build_dir}/${cs_framework_path}
     test.run                yes
 }
 

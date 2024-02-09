@@ -118,14 +118,14 @@ proc universal_setup {args} {
         } elseif {${os.arch} eq "i386"} {
             set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
+            if {${os.major} < 11 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             }
         } else {
             set universal_archs_supported [ldelete ${universal_archs_supported} "i386"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "x86_64"]
             set universal_archs_supported [ldelete ${universal_archs_supported} "arm64"]
-            if {${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
+            if {![catch {sysctl hw.cpu64bit_capable} result] && $result == 0} {
                 set universal_archs_supported [ldelete ${universal_archs_supported} "ppc64"]
             }
         }
@@ -185,10 +185,14 @@ proc universal_setup {args} {
         }
     }
 
+    # Err on the side of creating the variant, as the environment can change
+    # between the port being indexed and being built.
+    # https://trac.macports.org/ticket/68685
+    set orig_num_archs [llength ${configure.universal_archs}]
     # ensure correct archs are recorded in the registry, archive name, etc
     configure.universal_archs {*}${universal_archs_to_use}
 
-    if {[llength ${configure.universal_archs}] < 2} {
+    if {$orig_num_archs < 2} {
         ui_debug "muniversal: < 2 archs supported, not adding universal variant"
     } else {
 

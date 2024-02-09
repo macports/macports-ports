@@ -50,6 +50,7 @@
 #   ensure Fortran code accepts "calls to external procedures with mismatches between the calls and the procedure definition"
 #   the use of this option is "strongly discouraged" as the code should be made to be "standard-conforming"
 #   see https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
+# compilers.add_gcc_rpath_support: enforce adding -rpath,${prefix}/lib/libgcc
 #
 # The compilers.gcc_default variable may be useful for setting a default compiler variant
 # even in ports that do not use this PortGroup's automatic creation of variants.
@@ -75,6 +76,9 @@ default compilers.clear_archflags no
 
 options compilers.allow_arguments_mismatch
 default compilers.allow_arguments_mismatch no
+
+options compilers.add_gcc_rpath_support
+default compilers.add_gcc_rpath_support yes
 
 # Set a default gcc version
 if {${os.major} < 10 && ${os.platform} eq "darwin" } {
@@ -802,6 +806,9 @@ pre-configure {
     compilers.action_enforce_c ${compilers.required_c}
     compilers.action_enforce_f ${compilers.required_f}
     compilers.action_enforce_some_f ${compilers.required_some_f}
+    if {${compilers.add_gcc_rpath_support}} {
+        compilers::add_gcc_rpath_support
+    }
 }
 
 namespace eval compilers {
@@ -849,8 +856,6 @@ proc compilers::add_gcc_rpath_support {} {
         }
     }
 }
-
-port::register_callback compilers::add_gcc_rpath_support
 
 proc compilers::fortran_legacy_support_proc {option action args} {
     if {$action ne  "set"} return

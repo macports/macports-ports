@@ -1,20 +1,37 @@
-# At the moment, there is no ocamlopt on PPC due to broken assembler implementation in OCaml.
-# Compilation freezes, since ocamlopt cannot be found.
+There is no bytecode-only target, and build system is incapable of detecting
+that ocamlopt is unavailable. So for now we just cut it out by hand.
+https://github.com/ocaml/num/issues/39
 
-# Not to be used on officially supported by OCaml platforms.
-
---- src/Makefile.orig	2020-11-10 00:22:09.000000000 +0800
-+++ src/Makefile	2022-11-20 19:52:31.000000000 +0800
+--- Makefile.common	2023-12-15 20:29:24.000000000 +0800
++++ Makefile.common	2024-01-28 23:21:11.000000000 +0800
 @@ -1,5 +1,4 @@
  OCAMLC=ocamlc
 -OCAMLOPT=ocamlopt
  OCAMLDEP=ocamldep
  OCAMLMKLIB=ocamlmklib
  OCAMLFIND=ocamlfind
-@@ -20,39 +19,20 @@
+@@ -13,14 +12,7 @@
  
- CAMLCFLAGS=-w +a-4-9-41-42-44-45-48 -warn-error A -bin-annot -g \
-           -safe-string -strict-sequence -strict-formats
+ include $(STDLIBDIR)/Makefile.config
+ 
+-ifeq "$(NATIVE_COMPILER)" ""
+-# $(NATIVE_COMPILER) was added in 4.09: use $(ARCH) for 4.06-4.08
+-ifeq "$(ARCH)" "none"
+ NATIVE_COMPILER = false
+-else
+-NATIVE_COMPILER = true
+-endif
+-endif
+ 
+ # PROFILE=dev or PROFILE=release
+ PROFILE ?= auto
+
+--- src/Makefile	2023-12-15 20:29:24.000000000 +0800
++++ src/Makefile	2024-01-28 23:27:14.000000000 +0800
+@@ -11,15 +11,10 @@
+ 
+ CAMLCFLAGS=-w +a-4-9-41-42-44-45-48 $(WARN_ERROR) -bin-annot -g \
+           -safe-string -strict-sequence -strict-formats -I +compiler-libs
 -CAMLOPTFLAGS=$(CAMLCFLAGS)
 -ifeq "$(FLAMBDA)" "true"
 -CAMLOPTFLAGS+=-O3
@@ -26,9 +43,12 @@
 -CMXS=$(CMOS:.cmo=.cmx)
  COBJS=bng.$(O) nat_stubs.$(O)
  
- all:: libnums.$(A) nums.cma
+ MODULES_NUM_TOP=num_top_printers num_top
+@@ -30,14 +25,6 @@
+ all:: libnums.$(A) nums.cma num_top.cma META.legacy META.modern META.top \
+       num-legacy.install num-modern.install
  
--ifneq "$(ARCH)" "none"
+-ifeq "$(NATIVE_COMPILER)" "true"
 -all:: nums.cmxa
 -endif
 -
@@ -36,9 +56,24 @@
 -all:: nums.cmxs
 -endif
 -
- libnums.$(A): $(COBJS)
- 	$(OCAMLMKLIB) -oc nums $(COBJS)
+ META.top: META.num-top.in
+ 	echo 'version = "$(VERSION)"' > $@
+ 	cat $^ >> $@
+@@ -55,13 +42,7 @@
+ 	@echo '  version = "$(VERSION)"' >> $@
+ 	@echo '  browse_interfaces = ""' >> $@
+ 	@echo '  archive(byte) = "nums.cma"' >> $@
+-ifneq "$(ARCH)" "none"
+-	@echo '  archive(native) = "nums.cmxa"' >> $@
+-endif
+ 	@echo '  plugin(byte) = "nums.cma"' >> $@
+-ifeq "$(NATDYNLINK)" "true"
+-	@echo '  plugin(native) = "nums.cmxs"' >> $@
+-endif
+ 	@echo ')' >> $@
  
+ libnums.$(A): $(COBJS)
+@@ -70,12 +51,6 @@
  nums.cma: $(CMOS)
  	$(OCAMLMKLIB) -o nums -oc nums -linkall $(CMOS)
  
@@ -48,10 +83,10 @@
 -nums.cmxs: nums.cmxa libnums.$(A)
 -	$(OCAMLOPT) $(CAMLOPTFLAGS) -I . -shared -o nums.cmxs nums.cmxa
 -
- # We hard-code the C dependencies rather than having them generated
- # because the dependencies are so simple.
- bng.$(O): bng.h bng_*.c
-@@ -62,8 +42,6 @@
+ num_top.cma: $(CMOS_NUM_TOP)
+ 	$(OCAMLC) $(CAMLCFLAGS) -a -o $@ $^
+ 
+@@ -88,8 +63,6 @@
  	$(OCAMLC) $(CAMLCFLAGS) -c $*.mli
  %.cmo: %.ml
  	$(OCAMLC) $(CAMLCFLAGS) -c $*.ml
@@ -60,48 +95,55 @@
  %.$(O): %.c
  	$(OCAMLC) -ccopt -DBNG_ARCH_$(BNG_ARCH) -c $*.c
  
-@@ -71,12 +49,6 @@
+@@ -97,14 +70,7 @@
  # is installed via findlib
  
  TOINSTALL=nums.cma libnums.$(A) $(CMIS) $(CMIS:.cmi=.mli) $(CMIS:.cmi=.cmti)
--ifneq "$(ARCH)" "none"
+-ifeq "$(NATIVE_COMPILER)" "true"
 -TOINSTALL+=nums.cmxa nums.$(A) $(CMXS)
 -endif
 -ifeq "$(NATDYNLINK)" "true"
--TOINSTALL+=nums.cmxs
+-TOINSTALL_CMXS=nums.cmxs
+-else
+ TOINSTALL_CMXS=
 -endif
  ifeq "$(SUPPORTS_SHARED_LIBRARIES)" "true"
  TOINSTALL_STUBS=dllnums$(EXT_DLL)
  else
-@@ -111,7 +83,7 @@
+@@ -169,9 +135,6 @@
+ 	$(OCAMLFIND) install num META
+ 	rm -f META
+ 	$(INSTALL_DATA) $(TOINSTALL) $(DESTDIR)$(STDLIBDIR)
+-ifeq "$(NATDYNLINK)" "true"
+-	$(INSTALL_DLL) $(TOINSTALL_CMXS) $(DESTDIR)$(STDLIBDIR)
+-endif
+ ifeq "$(SUPPORTS_SHARED_LIBRARIES)" "true"
+ 	$(INSTALL_DIR) $(DESTDIR)$(STDLIBDIR)/stublibs
+ 	$(INSTALL_DLL) $(TOINSTALL_STUBS) $(DESTDIR)$(STDLIBDIR)/stublibs
+@@ -200,7 +163,7 @@
  endif
  
  clean:
--	rm -f *.cm[ioxta] *.cmx[as] *.cmti *.$(O) *.$(A) *$(EXT_DLL)
-+	rm -f *.cm[ioxta] *.cmti *.$(O) *.$(A) *$(EXT_DLL)
+-	rm -f *.cm[ioxta] *.cmx[as] *.cmti *.$(O) *.$(A) *$(EXT_DLL) \
++	rm -f *.cm[ioxta] *.cmti *.$(O) *.$(A) *$(EXT_DLL) \
+         META.top META.legacy META.modern $(SOURCES_NUM_TOP) \
+         num-legacy.install num-modern.install
  
- depend:
- 	$(OCAMLDEP) -slash *.mli *.ml > .depend
-
---- test/Makefile.orig	2020-11-10 00:22:09.000000000 +0800
-+++ test/Makefile	2022-11-20 19:42:30.000000000 +0800
-@@ -1,11 +1,9 @@
- OCAMLC=ocamlc
--OCAMLOPT=ocamlopt
- OCAMLRUN=ocamlrun
- 
- include $(shell $(OCAMLC) -where)/Makefile.config
+--- test/Makefile	2023-12-15 20:29:24.000000000 +0800
++++ test/Makefile	2024-01-28 23:28:23.000000000 +0800
+@@ -1,7 +1,6 @@
+ include ../Makefile.common
  
  CAMLCFLAGS=
 -CAMLOPTFLAGS=$(CAMLCFLAGS)
  
  FILES=test.ml test_nats.ml test_big_ints.ml test_ratios.ml test_nums.ml test_io.ml end_test.ml
  
-@@ -13,24 +11,13 @@
+@@ -9,24 +8,13 @@
  	@echo "----- Testing in bytecode..."
  	$(OCAMLRUN) -I ../src ./test.byt
  
--ifneq "$(ARCH)" "none"
+-ifeq "$(NATIVE_COMPILER)" "true"
 -all:: test.exe
 -	@echo "----- Testing in native code..."
 -	./test.exe
