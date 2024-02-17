@@ -166,7 +166,11 @@ options haskell_cabal.bin \
         haskell_cabal.installdir_args \
         haskell_cabal.bindirs
 
-default master_sites    {https://hackage.haskell.org/package/${subport}-${version}}
+# default master_sites for non-GitHub ports
+if {![info exists github.master_sites]} {
+    default master_sites \
+        {https://hackage.haskell.org/package/${subport}-${version}}
+}
 
 default haskell_cabal.bin {[haskell_cabal.getcabalbin]}
 
@@ -385,15 +389,15 @@ post-destroot {
                     && ([exec openssl dgst -ripemd160 ${binfile}.slash_hack] \
                             ne [exec openssl dgst -ripemd160 ${binfile}])} {
                     # gsed created a different file of the same size
-                    delete  ${binfile}
+                    delete ${binfile}
                     xinstall -m 0755 \
                         ${binfile}.slash_hack \
                         ${binfile}
+                    if {${configure.build_arch} eq {arm64}} {
+                        system "codesign -f -s - ${binfile}"
+                    }
                 }
-                delete  ${binfile}.slash_hack
-                if {${configure.build_arch} eq {arm64}} {
-                    system "codesign -f -s - ${binfile}"
-                }
+                delete ${binfile}.slash_hack
             }
         }
     }
