@@ -52,23 +52,18 @@ pre-checksum {
     }
 }
 
-# Remove this proc and switch to shellescape once MacPorts 2.7.0 is released.
-proc gpg_verify.shellescape {arg} {
-    return [regsub -all -- {[^A-Za-z0-9.:@%/+=_-]} $arg {\\&}]
-}
-
 proc gpg_verify.verify_gpg_signature {pubkey_file signature_file test_file} {
     # pre-load public key to avoid keyserver downtime issues
     # https://pgp.mit.edu/pks/lookup?op=get&search=0x${gpg_keyid}
     # note: tcl exec will return error if error messages not directed to /dev/null
     system "[option gpg_verify.gpg] \
-        --homedir [gpg_verify.shellescape [option gpg_verify.gpg_homedir]] \
-        --import [gpg_verify.shellescape ${pubkey_file}] 2>/dev/null || /usr/bin/true"
+        --homedir [shellescape [option gpg_verify.gpg_homedir]] \
+        --import [shellescape ${pubkey_file}] 2>/dev/null || /usr/bin/true"
     set gpg_verification [exec /bin/sh -c \
-        "if [gpg_verify.shellescape [option gpg_verify.gpg]] \
-            --homedir [gpg_verify.shellescape [option gpg_verify.gpg_homedir]] \
-            --verify [gpg_verify.shellescape ${signature_file}] \
-            [gpg_verify.shellescape ${test_file}] 2>/dev/null; \
+        "if [shellescape [option gpg_verify.gpg]] \
+            --homedir [shellescape [option gpg_verify.gpg_homedir]] \
+            --verify [shellescape ${signature_file}] \
+            [shellescape ${test_file}] 2>/dev/null; \
             then echo 'VERIFIED'; else echo 'UNVERIFIED'; fi"]
     if {[string trim ${gpg_verification}] ne "VERIFIED"} {
         error "GPG signature verification failed on ${test_file} with pubkey file ${pubkey_file}."
