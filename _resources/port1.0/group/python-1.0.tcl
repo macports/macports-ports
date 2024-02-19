@@ -304,8 +304,14 @@ proc python_set_versions {option action args} {
         }
         post-destroot {
             if {${python.link_binaries}} {
-                foreach bin [glob -nocomplain -tails -directory "${destroot}${python.prefix}/bin" *] {
+                ui_msg "Do python.link_binaries:"
+                ui_msg "  \$destroot         = ${destroot}"
+                ui_msg "  \$python.prefix    = ${python.prefix}"
+                ui_msg "  \$python.absprefix = ${python.absprefix}"
+                foreach bin [glob -nocomplain -tails -directory "${destroot}${python.absprefix}/bin" *] {
+                    ui_msg "    \$bin = ${bin}"
                     if {[catch {file type "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"}]} {
+                        ui_msg "      Creating link: ${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
                         ln -s "${python.prefix}/bin/${bin}" "${destroot}${prefix}/bin/${bin}${python.link_binaries_suffix}"
                     }
                 }
@@ -337,7 +343,12 @@ options python.branch python.prefix python.bin python.lib python.libdir \
         python.test_framework python.add_dependencies
 # for pythonXY, python.branch is X.Y, for pythonXYZ, it's X.YZ
 default python.branch   {[string index ${python.version} 0].[string range ${python.version} 1 end]}
-default python.prefix   {${frameworks_dir}/Python.framework/Versions/${python.branch}}
+
+# Need a normalized python.prefix, in case frameworks_dir has a sym link.
+set     frameworks_abs   [file normalize ${frameworks_dir}]
+default python.prefix    {${frameworks_dir}/Python.framework/Versions/${python.branch}}
+default python.absprefix {${frameworks_abs}/Python.framework/Versions/${python.branch}}
+
 default python.bin      {${python.prefix}/bin/python${python.branch}}
 default python.lib      {${python.prefix}/Python}
 default python.pkgd     {${python.prefix}/lib/python${python.branch}/site-packages}
