@@ -151,8 +151,8 @@ proc R.add_dependencies {} {
 }
 
 # General fixes for PPC:
-global build_arch os.platform
-if {${os.platform} eq "darwin" && (${build_arch} in [list ppc ppc64])} {
+global configure.cxx_stdlib os.platform
+if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
     # Avoid multiple malloc errors. See: https://github.com/iains/darwin-toolchains-start-here/discussions/20
     configure.env-append \
                     DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
