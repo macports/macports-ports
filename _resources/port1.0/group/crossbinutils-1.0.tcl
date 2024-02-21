@@ -106,7 +106,6 @@ proc crossbinutils.setup {target version} {
     name            ${target}-binutils
     version         ${version}
     categories      cross devel
-    platforms       darwin
     license         GPL-3+
     maintainers     nomaintainer
 

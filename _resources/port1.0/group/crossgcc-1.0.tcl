@@ -162,7 +162,6 @@ proc crossgcc.setup {target version} {
         name            ${crossgcc.target}-gcc
         version         ${crossgcc.version}
         categories      cross devel
-        platforms       darwin
         license         GPL-3+
         maintainers     nomaintainer
 

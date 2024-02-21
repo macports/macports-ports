@@ -12,7 +12,6 @@ PortGroup           cmake 1.1
 PortGroup           boost 1.0
 
 categories          science comms
-platforms           darwin macosx
 
 # declare which gnuradio are you using
 options gnuradio.type
