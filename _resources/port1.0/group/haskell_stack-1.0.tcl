@@ -52,6 +52,12 @@ options \
     haskell_stack.use_init \
     haskell_stack.yaml
 
+# default master_sites for non-GitHub ports
+if {![info exists github.master_sites]} {
+    default master_sites \
+        {https://hackage.haskell.org/package/${subport}-${version}}
+} 
+
 default haskell_stack.system_ghc    {no}
 default haskell_stack.bindirs       {${destroot}${prefix}/bin}
 
