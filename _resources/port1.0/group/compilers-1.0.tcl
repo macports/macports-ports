@@ -188,7 +188,7 @@ if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
 if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
     lappend clang_versions 11
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 12 13 14 15 16 17
+        lappend clang_versions 12 13 14 15 16 17 18
     }
     if { ${os.major} >= 14 } {
         lappend clang_versions devel
