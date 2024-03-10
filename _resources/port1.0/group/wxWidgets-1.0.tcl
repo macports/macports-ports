@@ -72,8 +72,8 @@
 # * add the appropriate configure flags
 #   (depending on the project configuration/requirements)
 #
-# For adding appropirate configure flags you can you use any of the
-# following variables:
+# For adding appropriate configure flags you can use any of the following
+# variables:
 #
 # * wxWidgets.prefix
 # * wxWidgets.wxdir
@@ -115,7 +115,7 @@
 #
 #       -DwxWidgets_wxrc_EXECUTABLE=${wxWidgets.wxrc}
 #
-# Sometimes enviromental variables are required, like:
+# Sometimes environment variables are required, like:
 #
 #   configure.env[-append] \
 #       WX_CONFIG=${wxWidgets.wxconfig}
