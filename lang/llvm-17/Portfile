@@ -27,7 +27,7 @@ set clang_exe_version   ${llvm_version}
 version                 ${llvm_version}.0.6
 
 name                    llvm-${llvm_version}
-revision                0
+revision                1
 subport                 mlir-${llvm_version}  { revision [ expr ${revision} + 0 ] }
 subport                 clang-${llvm_version} { revision [ expr ${revision} + 0 ] }
 subport                 lldb-${llvm_version}  { revision [ expr ${revision} + 0 ] }
@@ -56,8 +56,7 @@ compiler.blacklist      *gcc* {clang < 1001} macports-clang-3.*
 compiler.blacklist-append {clang < 1204} {macports-clang-[5-9].0} {macports-clang-1[0-3]}
 compiler.fallback       clang macports-clang-14 macports-clang-15
 
-# We can't use Ninja with our custom destrooting plan for llvm
-#cmake.generator         Ninja
+cmake.generator         Ninja
 cmake.install_prefix    ${sub_prefix}
 cmake.build_type        Release
 
@@ -275,12 +274,6 @@ if {${subport} eq "mlir-${llvm_version}"} {
 
     configure.args-append \
                         -DLLVM_ENABLE_PROJECTS="mlir"
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/mlir && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "clang-${llvm_version}" } {
@@ -300,16 +293,6 @@ if { ${subport} eq "clang-${llvm_version}" } {
         -DLLVM_ENABLE_RUNTIMES="libcxx\;libcxxabi" \
         -DLIBCXX_ENABLE_SHARED=ON    \
         -DLIBCXX_INSTALL_LIBRARY=ON
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/clang                      && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/tools/lld                        && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/projects/compiler-rt             && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/runtimes/runtimes-bins/libcxx    && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-        system "cd ${destroot.dir}/runtimes/runtimes-bins/libcxxabi && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "flang-${llvm_version}" } {
@@ -327,12 +310,6 @@ if { ${subport} eq "flang-${llvm_version}" } {
         -DLIBCXX_INSTALL_LIBRARY=OFF
 
     depends_lib-append  port:clang-${llvm_version} port:mlir-${llvm_version}
-
-    destroot {
-        # we have to run the destroot like this, because individual targets for each of the
-        # components we want to install are not available; we want "everything but llvm"
-        system "cd ${destroot.dir}/tools/flang && ${destroot.cmd} ${destroot.pre_args} ${destroot.target} ${destroot.post_args}"
-    }
 }
 
 if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
@@ -442,10 +419,17 @@ variant tests description {Enable building of test code} {
 
 post-destroot {
 
-    if {${subport} eq "clang-${llvm_version}"} {
+    if {[file exists ${destroot}${sub_prefix}/bin/clang]} {
         # remove the clang symlink and replace it with the actual binary
         delete      ${destroot}${sub_prefix}/bin/clang
         file rename ${destroot}${sub_prefix}/bin/clang-${clang_exe_version} ${destroot}${sub_prefix}/bin/clang
+    }
+
+    # If only 'flang-new' created, link to 'flang'
+    if {[file exists ${destroot}${sub_prefix}/bin/flang-new]} {
+        if {![file exists ${destroot}${sub_prefix}/bin/flang]} {
+            ln -s ${sub_prefix}/bin/flang-new ${destroot}${sub_prefix}/bin/flang
+        }
     }
 
     # generate a versioned wrapper script for each file in the bin directory
@@ -468,11 +452,13 @@ post-destroot {
         ln -s LLVMPolly.so ${destroot}${sub_prefix}/lib/LLVMPolly.dylib
     }
 
-    if {${subport} eq "clang-${llvm_version}"} {
+    if {[file exists ${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake]} {
         # fix the cmake scripts to point to the versioned files
         reinplace "s|/bin/clang-${clang_exe_version}|/bin/clang|g" \
                   "${destroot}${sub_prefix}/lib/cmake/clang/ClangTargets-release.cmake"
+    }
 
+    if { ${subport} eq "clang-${llvm_version}" || ${subport} eq "flang-${llvm_version}" } {
         # http://trac.macports.org/ticket/33207
         ln -s ${prefix}/libexec/ld64/ld ${destroot}${sub_prefix}/bin/ld
     }
@@ -486,6 +472,24 @@ post-destroot {
         xinstall -m 755 -W ${lldb_scripts_srcdir} \
             macos-setup-codesign.sh \
             ${lldb_scripts_destdir}
+    }
+
+    if {${subport} ne "llvm-${llvm_version}"} {
+        # Need to deactivate current version before traversing destroot to remove
+        # 'already installed' files
+        if {![catch {set installed [lindex [registry_active ${subport}] 0]}]} {
+            registry_deactivate_composite ${subport} "" [list ports_nodepcheck 1]
+        }
+        # Then search for files in destroot provided by other local (sub)ports deps and remove
+        fs-traverse destroot_f ${destroot} {
+            if {![file isdirectory $destroot_f]} {
+                set f [string replace $destroot_f 0 [string length $destroot]-1]
+                if {[file exists ${f}]} {
+                    ui_debug "${f} already exists -> Removed from destroot"
+                    file delete ${destroot_f}
+                }
+            }
+        }
     }
 }
 
