@@ -9,13 +9,8 @@ options perl5.default_branch perl5.branches
 default perl5.default_branch {[perl5_get_default_branch]}
 
 proc perl5_get_default_branch {} {
-    global prefix perl5.branches
-    # use whatever ${prefix}/bin/perl5 was chosen, and if none, fall back to 5.34
-    if {![catch {set val [lindex [split [exec ${prefix}/bin/perl5 -V:version] {'}] 1]}]} {
-        set ret [join [lrange [split $val .] 0 1] .]
-    } else {
-        set ret 5.34
-    }
+    global perl5.branches
+    set ret 5.34
     # if the above default is not supported by this module, use the latest it does support
     if {[info exists perl5.branches] && $ret ni ${perl5.branches}} {
         set ret [lindex ${perl5.branches} end]
