@@ -579,7 +579,15 @@ destroot {
     }
 }
 
+# Most of our OCaml ports do not have test dependencies,
+# so disable tests by default.
+default test.run    no
+
 test {
+    if {![option test.run]} {
+        ui_info "Tests are disabled."
+        return
+    }
     switch -- ${ocaml.build_type} {
         dune {
             command_exec dune.test
