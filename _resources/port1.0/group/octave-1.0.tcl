@@ -17,6 +17,9 @@
 #   where module is the name of the module w/o the octave- prefix
 #   (e.g. communications)
 
+# see octave Portfile
+set package_version 9.x.x
+
 options octave.author octave.module octave.config_h
 
 # do not use this option unless absolutely necessary
@@ -136,6 +139,9 @@ proc octave.add_env {} {
     configure.env-delete DL_LD=${configure.cxx}
     configure.env-append DL_LD=${configure.cxx}
 }
+# this is needed for octave 9.x.x
+configure.env-append    LDFLAGS=-L${prefix}/lib/octave/${package_version}
+
 port::register_callback octave.add_env
 
 post-extract {
