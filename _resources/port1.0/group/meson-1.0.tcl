@@ -34,6 +34,7 @@ default build.target        ""
 
 # remove DESTDIR= from arguments, but rather take it from environmental variable
 destroot.env-append         DESTDIR=${destroot}
+default destroot.cmd        {${prefix}/bin/meson}
 default destroot.post_args  ""
 
 namespace eval meson { }
