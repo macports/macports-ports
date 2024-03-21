@@ -2,15 +2,15 @@
 
 PortSystem              1.0
 PortGroup               active_variants 1.1
-PortGroup               compiler_blacklist_versions 1.0
+PortGroup               legacysupport 1.1
+PortGroup               openssl 1.0
 
 name                    VLC2
 
 platforms               {darwin < 16}
 
 categories              multimedia devel
-maintainers             {gmail.com:rjvbertin @RJVB} \
-                        {@barracuda156 gmail.com:vital.had} \
+maintainers             {@barracuda156 gmail.com:vital.had} \
                         openmaintainer
 
 description             VLC is a cross-platform media player and streaming server
@@ -50,7 +50,7 @@ universal_variant       no
 ##
 if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     version             2.2.8
-    revision            16
+    revision            17
     license             GPL-2+
 
     master_sites        https://download.videolan.org/pub/videolan/vlc/${version}/
@@ -62,7 +62,8 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                         sha256  9bf046848fb56d93518881b39099b8288ee005d5ba0ddf705b6f6643b8d562ec \
                         size    22137276
 
-    depends_build       port:pkgconfig
+    depends_build-append \
+                        port:pkgconfig
 
     depends_lib-append  port:a52dec \
                         port:avahi \
@@ -116,6 +117,7 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                         path:lib/pkgconfig/vpx.pc:libvpx \
                         port:libxml2 \
                         port:live555 \
+                        port:minizip \
                         port:ncurses \
                         port:nettle \
                         port:openjpeg15 \
@@ -130,7 +132,9 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
                         port:twolame \
                         port:vcdimager \
                         port:x264 \
-                        port:x265
+                        port:x265 \
+                        port:zlib \
+                        port:zvbi
 
     depends_run-append  port:libaacs \
                         port:libbdplus
@@ -145,28 +149,56 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
     depends_lib-append  port:lua
 
-    compiler.blacklist-append \
-                        gcc-4.2 llvm-gcc-4.2 {clang < 300}
+    # Some plugins require C++11
+    compiler.cxx_standard 2011
 
     patchfiles          patch-buildsystem.diff \
                         PR-34741-no__clang_version__.patch \
-                        patch-static_assert.diff \
                         no-sparkle.patch \
                         patch-vlc-no-O4.diff \
                         patch-soundfont-path.diff
 
+    if {[string match *clang* ${configure.compiler}]} {
+        patchfiles-append \
+                        patch-static_assert.diff \
+                        patch-buildsystem-fp-flags.diff
+    } elseif {[string match *gcc* ${configure.compiler}]} {
+        patchfiles-append \
+                        0001-Fixes-for-modern-GCC.patch
+    }
+
     # FFMpeg 3 compatibility (see attributions in the patchfile)
     patchfiles-append   patch-ffmpeg3-compat.diff
+
     platform darwin {
         patchfiles-append \
                         patch-vda-ffmpeg34+.diff
+        if {${os.major} < 11} {
+            patchfiles-append \
+                        0002-Fix-for-Qt4-module.patch \
+                        0003-Alt-fix-for-searchlineedit-in-Qt4.patch \
+                        0004-Enable-gnutls-on-macOS.patch \
+                        0005-Do-not-build-a-broken-securetransport-module.patch \
+                        0006-Fix-macosx.m-in-video_output.patch \
+                        0007-Makefile.am-avoid-breaking-destroot.patch \
+        }
     }
+
+    # Notice, VLC2 assumes SDL1, not SDL2. It will not build against SDL2,
+    # unless needed changes are backported.
+    patchfiles-append   0008-Allow-SDL-out.patch \
+                        0009-Do-not-err-out-on-no-acceleration.patch
+
+    # https://bugs.gentoo.org/795798
+    patchfiles-append   0010-Get-addr-by-ref.-from-getConnectionEndpointAddress.patch
+
     # FFMpeg 4 compatibility (by RJVB)
     patchfiles-append   patch-ffmpeg4-compat.diff
 
     # libx264 api changed slightly
     patchfiles-append   patch-modules-codec-x264-new-api.diff \
-                        patch-build-on-post-1012.diff
+                        patch-build-on-post-1012.diff \
+                        patch-vlc-for-macports.diff
 
     patchfiles-append   patch-for-lua53.diff
 
@@ -191,18 +223,28 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     autoreconf.args
     depends_build-append port:autoconf port:automake port:libtool
 
+    # live555 is installed to a weird location.
+    # Explicit linking to OpenSSL is needed for its module to build.
     configure.env-append \
                         "CXXCPP=${configure.cxx} -E" \
-                        "MATROSKA_CFLAGS=${prefix}/include/ebml" \
-                        "MATROSKA_LIBS=-lmatroska -lebml"
+                        "LIVE555_CFLAGS=-I${prefix}/lib/live/BasicUsageEnvironment/include \
+                                -I${prefix}/lib/live/groupsock/include \
+                                -I${prefix}/lib/live/liveMedia/include \
+                                -I${prefix}/lib/live/UsageEnvironment/include" \
+                        "LIVE555_LIBS=-L${prefix}/lib/live/BasicUsageEnvironment -lBasicUsageEnvironment \
+                                -L${prefix}/lib/live/groupsock -lgroupsock \
+                                -L${prefix}/lib/live/liveMedia -lliveMedia \
+                                -L${prefix}/lib/live/UsageEnvironment -lUsageEnvironment \
+                                -L[openssl::install_area]/lib -lssl -lcrypto" \
+                        "MATROSKA_CFLAGS=-I${prefix}/include/ebml" \
+                        "MATROSKA_LIBS=-lmatroska -lebml" \
+                        "SDL_CFLAGS=-I${prefix}/include/SDL" \
+                        "SDL_LIBS=-lSDL"
 
     build.args-append   DESTDIR=${worksrcpath}/dest_ignore V=1
 
     # gl.c:121:3: error: Platform not recognized.
     configure.cppflags-append -D__unix__=1
-
-    # live555 is installed to a weird location
-    configure.cppflags-append -I${prefix}/lib/live/liveMedia/include
 
     # Configure options: misc
     configure.args-append \
@@ -316,9 +358,19 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         configure.args-replace  --disable-realrtsp --enable-realrtsp
     }
 
+    variant aalib description "Enable AA-lib support" {
+        depends_lib-append      port:aalib
+        configure.args-append   --enable-aa
+    }
+
     variant dbus description "Enable DBus support" {
         depends_lib-append      port:dbus
         configure.args-replace  --disable-dbus --enable-dbus
+    }
+
+    variant fluidsynth description "Enable FluidSynth support" {
+        depends_lib-append      port:fluidsynth
+        configure.args-replace  --disable-fluidsynth --enable-fluidsynth
     }
 
     # VLC is not currently compatible with FreeRDP 2
@@ -332,6 +384,13 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         configure.args-replace  --disable-freerdp --enable-freerdp
     }
 
+    # GStreamer variant builds, but not enabling by default until updated:
+    # https://github.com/macports/macports-ports/pull/22425
+    variant gstreamer description "Enable GStreamer support" {
+        depends_lib-append      port:gstreamer1
+        configure.args-replace  --disable-gst-decode --enable-gst-decode
+    }
+
     # 20150209: Jack really would require a newer variant than what's currently in MacPorts
     # Also do not enable by default with gcc until this is fixed:
     # https://github.com/jackaudio/jack2/issues/950
@@ -339,6 +398,11 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
         depends_lib-append      port:jack \
                                 port:portaudio
         configure.args-replace  --disable-jack --enable-jack
+    }
+
+    variant notify description "Enable notifications via libnotify" {
+        depends_lib-append      port:libnotify
+        configure.args-replace  --disable-notify --enable-notify
     }
 
     variant pulse description "Enable PulseAudio support" {
@@ -373,11 +437,15 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
     }
 
     # Variants for graphics:
+    variant qt4 description "Enable Qt4 support" {
+        PortGroup               qt4 1.0
+
+        configure.args-replace  --disable-qt --enable-qt
+    }
+
     variant quartz {
         depends_lib-delete      port:libsamplerate
         depends_lib-append      port:BGHUDAppKit
-
-        patchfiles-append       patch-vlc-for-macports.diff
 
         configure.args-replace  --disable-macosx --enable-macosx \
                                 --disable-macosx-quartztext --enable-macosx-quartztext \
@@ -405,29 +473,56 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 
         configure.args-delete   --x-includes=${destroot} --x-libraries=${destroot}
         configure.args-replace  --disable-xcb --enable-xcb \
-                                --disable-xvideo --enable-xvideo \
                                 --without-x --with-x
+
+        if {${os.platform} ne "darwin"} {
+            # Xvideo output does not seem to be functional on macOS.
+            configure.args-replace \
+                                --disable-xvideo --enable-xvideo
+        }
     }
 
+    # This is a generic Unix-like installation:
+    if {![variant_isset quartz]} {
+        depends_lib-append      port:desktop-file-utils
+    }
+
+    # Combo variants:
     variant huge \
-        requires jack shout svg \
-        description "Enable all variants except quartz, smb, freerdp and x11" {}
+        requires aalib fluidsynth notify pulse jack shout svg \
+        description "Enable all variants except freerdp, gstreamer, qt4, quartz, smb and x11" {}
 
     if {${subport} ne "lib${name}"} {
         variant full \
             requires huge quartz smb \
-            description "Enable all variants except x11 (and except freerdp, currently)" {}
+            description "Enable all variants except gstreamer, qt4 and x11 (and except freerdp, currently)" {}
     } else {
         variant full \
             requires huge quartz smb \
-            description "Enable all variants except x11 (and except freerdp, currently)" {}
+            description "Enable all variants except gstreamer, qt4 and x11 (and except freerdp, currently)" {}
     }
 
+    # Variant for PowerPC systems:
+    variant power \
+        requires aalib fluidsynth notify pulse qt4 shout smb svg x11 \
+        description "Enable all variants except dbus, freerdp, gstreamer, jack, qtkit and quartz" {}
+
     platform macosx {
-        default_variants-append +quartz
-        if {${os.major} <= 15} {
+        if {${configure.build_arch} in [list arm64 x86_64]} {
+            default_variants-append +quartz
+        } else {
+            default_variants-append +x11 +qt4
+        }
+
+        if {${os.major} <= 15 && [variant_isset quartz]} {
             default_variants-append +qtkit
         }
+
+        if {[string match macports-gcc* ${configure.compiler}]} {
+            configure.objcflags-append \
+                                -fobjc-exceptions
+        }
+
         build.args-prepend      "XCODEFLAGS=-UseModernBuildSystem=NO"
 
         patchfiles-append       patch-use-NSGetEnviron.diff
@@ -453,10 +548,18 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
             }
         }
 
-        configure.args-replace  --disable-macosx-eyetv --enable-macosx-eyetv
+        if {${os.major} > 10} {
+            configure.args-replace \
+                                --disable-macosx-eyetv --enable-macosx-eyetv
 
-        if {${subport} ne "lib${name}"} {
-            configure.args-replace  --disable-macosx-vlc-app --enable-macosx-vlc-app
+            if {${subport} ne "lib${name}"} {
+                configure.args-replace \
+                                --disable-macosx-vlc-app --enable-macosx-vlc-app
+            }
+        }
+
+        if {${subport} ne "lib${name}" && ![variant_isset quartz]} {
+            legacysupport.redirect_bins vlc vlc-wrapper
         }
 
         post-destroot {
@@ -514,7 +617,12 @@ if {(${subport} eq ${name}) || (${subport} eq "lib${name}")} {
 #                 ${destroot}${vlcprefix}/lib/pkgconfig/vlc-plugin.pc
         }
         post-activate {
-            system "${prefix}/lib/vlc/vlc-cache-gen -f ${prefix}/lib/vlc"
+            system "${vlcprefix}/lib/vlc/vlc-cache-gen -f ${vlcprefix}/lib/vlc"
+
+            if {![variant_isset quartz]} {
+                system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"
+                system "${prefix}/bin/update-mime-database ${prefix}/share/mime"
+            }
         }
     }
     notes-append "MIDI support requires installing one or more SoundFont files,\
