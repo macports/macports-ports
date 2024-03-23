@@ -226,17 +226,20 @@ pre-destroot {
 
     destroot.pre_args -q -f -H --eval
 
-    if { ${os.arch} eq "i386" } {
-        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
-            set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
-        } else {
-            set short_host_name i686-apple-${os.platform}${os.major}.x.x
-        }
-    } else {
-        if { ${os.major} >= 9 && ![catch {sysctl hw.cpu64bit_capable} result] && $result == 1 } {
-            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
-        } else {
+    platform darwin {
+        # Keep ppc before i386, so that Rosetta builds for ppc.
+        # Also, use build_arch and not sysctl:
+        # https://trac.macports.org/ticket/69573
+        if { ${configure.build_arch} eq "ppc" } {
             set short_host_name powerpc-apple-${os.platform}${os.major}.x.x
+        } elseif { ${configure.build_arch} eq "ppc64" } {
+            set short_host_name powerpc64-apple-${os.platform}${os.major}.x.x
+        } elseif { ${os.arch} eq "i386" } {
+            if { ${os.major} >= 9 && [sysctl hw.cpu64bit_capable] == 1 } {
+                set short_host_name x86_64-apple-${os.platform}${os.major}.x.x
+            } else {
+                set short_host_name i686-apple-${os.platform}${os.major}.x.x
+            }
         }
     }
 
