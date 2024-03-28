@@ -307,7 +307,7 @@ proc rust::old_macos_compatibility {cname cversion} {
             }
         }
         "rustix" {
-            if { [vercmp ${cversion} < 99999.0.0] && [vercmp ${cversion} >= 0.0] && "i386" in [option muniversal.architectures] } {
+            if { [vercmp ${cversion} < 0.38.31] && [vercmp ${cversion} >= 0.0] && "i386" in [option muniversal.architectures] } {
                 # see https://github.com/bytecodealliance/rustix/issues/991
                 reinplace "s|utimensat_old(dirfd, path, times, flags)|//utimensat_old(dirfd, path, times, flags)|g" \
                     ${cargo.home}/macports/${cname}-${cversion}/src/backend/libc/fs/syscalls.rs
@@ -535,25 +535,8 @@ proc rust::rust_pg_callback {} {
         depends_lib-append              port:openssl${openssl_ver}
     }
 
-    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
-        # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
-        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
-        depends_build-delete            port:ld64-274
-        depends_build-append            port:ld64-274
-        depends_skip_archcheck-delete   ld64-274
-        depends_skip_archcheck-append   ld64-274
-        configure.ldflags-delete        -fuse-ld=${prefix}/bin/ld-274
-        configure.ldflags-append        -fuse-ld=${prefix}/bin/ld-274
-    }
-
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.6]} {
-        # __Unwind_RaiseException
-        depends_lib-delete              port:libunwind
-        depends_lib-append              port:libunwind
-        configure.ldflags-delete        -lunwind
-        configure.ldflags-append        -lunwind
-
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.12]} {
         if { [join [lrange [split ${subport} -] 0 1] -] eq "rust-bootstrap" } {
             # Bootstrap compilers are building on newer machines to be run on older ones.
             # Use libMacportsLegacySystem.B.dylib since it is able to use the `__asm("$ld$add$os10.5$...")` trick for symbols that are part of legacy-support *only* on older systems.
@@ -586,6 +569,26 @@ proc rust::rust_pg_callback {} {
         depends_${dep_type}-append      path:lib/${legacyLib}:legacy-support
         configure.ldflags-delete        -Wl,${prefix}/lib/${legacyLib}
         configure.ldflags-append        -Wl,${prefix}/lib/${legacyLib}
+    }
+
+    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
+        # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
+        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
+        depends_build-delete            port:ld64-274
+        depends_build-append            port:ld64-274
+        depends_skip_archcheck-delete   ld64-274
+        depends_skip_archcheck-append   ld64-274
+        configure.ldflags-delete        -fuse-ld=${prefix}/bin/ld-274
+        configure.ldflags-append        -fuse-ld=${prefix}/bin/ld-274
+    }
+
+    # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.6]} {
+        # __Unwind_RaiseException
+        depends_lib-delete              port:libunwind
+        depends_lib-append              port:libunwind
+        configure.ldflags-delete        -lunwind
+        configure.ldflags-append        -lunwind
     }
 
     # sometimes Cargo.lock does not exist
