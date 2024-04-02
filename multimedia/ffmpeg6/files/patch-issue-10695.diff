@@ -1,0 +1,146 @@
+#==================================================================================================
+#
+# Patches for ffmpeg6 build issues, on macOS 10.12 and earlier. Specifically related to use of
+# identifier 'kVTCompressionPropertyKey_EncoderID', when targeting macOS < 10.13.
+#
+# Upstream Ticket: https://trac.ffmpeg.org/ticket/10695
+# MacPorts Ticket: https://trac.macports.org/ticket/68720
+#
+# Note that this patch includes two upstream commits:
+# - https://github.com/FFmpeg/FFmpeg/commit/cb049d377f54f6b747667a93e4b719380c3e9475.patch
+# - https://github.com/FFmpeg/FFmpeg/commit/d526a34c20647f54a2cd8f5871b7dc24214578fe.patch
+#
+#==================================================================================================
+From cb049d377f54f6b747667a93e4b719380c3e9475 Mon Sep 17 00:00:00 2001
+From: Zhao Zhili <zhilizhao@tencent.com>
+Date: Sat, 25 Nov 2023 12:06:01 +0800
+Subject: [PATCH] avcodec/videotoolboxenc: Fix build failure due to
+ PropertyKey_EncoderID
+
+Signed-off-by: Zhao Zhili <zhilizhao@tencent.com>
+---
+ libavcodec/videotoolboxenc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/videotoolboxenc.c b/libavcodec/videotoolboxenc.c
+index b0e827d14a8b5..b8a07e4e44273 100644
+--- libavcodec/videotoolboxenc.c
++++ libavcodec/videotoolboxenc.c
+@@ -119,6 +119,7 @@ static struct{
+     CFStringRef kVTCompressionPropertyKey_TargetQualityForAlpha;
+     CFStringRef kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality;
+     CFStringRef kVTCompressionPropertyKey_ConstantBitRate;
++    CFStringRef kVTCompressionPropertyKey_EncoderID;
+ 
+     CFStringRef kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder;
+     CFStringRef kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder;
+@@ -191,6 +192,7 @@ static void loadVTEncSymbols(void){
+     GET_SYM(kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
+             "PrioritizeEncodingSpeedOverQuality");
+     GET_SYM(kVTCompressionPropertyKey_ConstantBitRate, "ConstantBitRate");
++    GET_SYM(kVTCompressionPropertyKey_EncoderID, "EncoderID");
+ 
+     GET_SYM(kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder,
+             "EnableHardwareAcceleratedVideoEncoder");
+@@ -1178,7 +1180,7 @@ static int vtenc_create_encoder(AVCodecContext   *avctx,
+     {
+         CFStringRef encoderID = NULL;
+         status = VTSessionCopyProperty(vtctx->session,
+-                                       kVTCompressionPropertyKey_EncoderID,
++                                       compat_keys.kVTCompressionPropertyKey_EncoderID,
+                                        kCFAllocatorDefault,
+                                        &encoderID);
+         if (status == noErr) {
+From d526a34c20647f54a2cd8f5871b7dc24214578fe Mon Sep 17 00:00:00 2001
+From: Zhao Zhili <zhilizhao@tencent.com>
+Date: Sat, 25 Nov 2023 12:06:02 +0800
+Subject: [PATCH] avcodec/videotoolboxenc: refactor dump encoder name
+
+Signed-off-by: Zhao Zhili <zhilizhao@tencent.com>
+---
+ libavcodec/videotoolboxenc.c | 65 +++++++++++++++++++++---------------
+ 1 file changed, 38 insertions(+), 27 deletions(-)
+
+diff --git a/libavcodec/videotoolboxenc.c b/libavcodec/videotoolboxenc.c
+index b8a07e4e44273..fbd33fd3f965c 100644
+--- libavcodec/videotoolboxenc.c
++++ libavcodec/videotoolboxenc.c
+@@ -280,6 +280,41 @@ typedef struct VTEncContext {
+     int max_ref_frames;
+ } VTEncContext;
+ 
++static int vt_dump_encoder(AVCodecContext *avctx)
++{
++    VTEncContext *vtctx = avctx->priv_data;
++    CFStringRef encoder_id = NULL;
++    int status;
++    CFIndex length, max_size;
++    char *name;
++
++    status = VTSessionCopyProperty(vtctx->session,
++                                   compat_keys.kVTCompressionPropertyKey_EncoderID,
++                                   kCFAllocatorDefault,
++                                   &encoder_id);
++    // OK if not supported
++    if (status != noErr)
++        return 0;
++
++    length = CFStringGetLength(encoder_id);
++    max_size = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
++    name = av_malloc(max_size);
++    if (!name) {
++        CFRelease(encoder_id);
++        return AVERROR(ENOMEM);
++    }
++
++    CFStringGetCString(encoder_id,
++                       name,
++                       max_size,
++                       kCFStringEncodingUTF8);
++    av_log(avctx, AV_LOG_DEBUG, "Init the encoder: %s\n", name);
++    av_freep(&name);
++    CFRelease(encoder_id);
++
++    return 0;
++}
++
+ static int vtenc_populate_extradata(AVCodecContext   *avctx,
+                                     CMVideoCodecType codec_type,
+                                     CFStringRef      profile_level,
+@@ -1176,33 +1211,9 @@ static int vtenc_create_encoder(AVCodecContext   *avctx,
+     }
+ #endif
+ 
+-    // Dump the init encoder
+-    {
+-        CFStringRef encoderID = NULL;
+-        status = VTSessionCopyProperty(vtctx->session,
+-                                       compat_keys.kVTCompressionPropertyKey_EncoderID,
+-                                       kCFAllocatorDefault,
+-                                       &encoderID);
+-        if (status == noErr) {
+-            CFIndex length   = CFStringGetLength(encoderID);
+-            CFIndex max_size = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
+-            char *name       = av_malloc(max_size);
+-            if (!name) {
+-                CFRelease(encoderID);
+-                return AVERROR(ENOMEM);
+-            }
+-
+-            CFStringGetCString(encoderID,
+-                               name,
+-                               max_size,
+-                               kCFStringEncodingUTF8);
+-            av_log(avctx, AV_LOG_DEBUG, "Init the encoder: %s\n", name);
+-
+-            av_freep(&name);
+-        }
+-        if (encoderID != NULL)
+-            CFRelease(encoderID);
+-    }
++    status = vt_dump_encoder(avctx);
++    if (status < 0)
++        return status;
+ 
+     if (avctx->flags & AV_CODEC_FLAG_QSCALE && !vtenc_qscale_enabled()) {
+         av_log(avctx, AV_LOG_ERROR, "Error: -q:v qscale not available for encoder. Use -b:v bitrate instead.\n");
