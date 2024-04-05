@@ -1,0 +1,161 @@
+This fixes this compile error:
+
+../deps/v8/src/base/bit-field.h:43:29: error: integer value 31 is outside the valid range of values [0, 15] for this enumeration type [-Wenum-constexpr-conversion]
+  static constexpr T kMax = static_cast<T>(kNumValues - 1);
+                            ^
+1 error generated.
+
+See:
+
+  https://github.com/nodejs/node/issues/52230
+  https://github.com/nodejs/node/pull/52337
+  https://github.com/nodejs/node/commit/f7a319eb22d956c11c71fd203243c3fb7fa2094e.patch?full_index=1
+
+The only changes made to this patch was for a/... paths to add .orig
+to the end and drop the a/ and for b/... paths to drop the b/.
+
+From f7a319eb22d956c11c71fd203243c3fb7fa2094e Mon Sep 17 00:00:00 2001
+From: Bo Anderson <mail@boanderson.me>
+Date: Tue, 2 Apr 2024 22:55:25 +0100
+Subject: [PATCH] deps: V8: cherry-pick d15d49b09dc7
+
+Original commit message:
+
+    Make bitfields only as wide as necessary for enums
+
+    clang now complains when a BitField for an enum is too wide.
+    We could suppress this, but it seems kind of useful from an
+    uninformed distance, so I made a few bitfields smaller instead.
+
+    (For AddressingMode, since its size is target-dependent, I added
+    an explicit underlying type to the enum instead, which suppresses
+    the diag on a per-enum basis.)
+
+    This is without any understanding of the code I'm touching.
+    Especially the change in v8-internal.h feels a bit risky to me.
+
+    Bug: chromium:1348574
+    Change-Id: I73395de593045036b72dadf4e3147b5f7e13c958
+    Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/3794708
+    Commit-Queue: Nico Weber <thakis@chromium.org>
+    Reviewed-by: Leszek Swirski <leszeks@chromium.org>
+    Reviewed-by: Hannes Payer <hpayer@chromium.org>
+    Auto-Submit: Nico Weber <thakis@chromium.org>
+    Cr-Commit-Position: refs/heads/main@{#82109}
+
+Refs: https://github.com/v8/v8/commit/d15d49b09dc7aef9edcc4cf6a0cb2b77a0db203f
+---
+ common.gypi                                      | 2 +-
+ deps/v8/src/ast/ast.h                            | 2 +-
+ deps/v8/src/base/bit-field.h                     | 5 +++++
+ deps/v8/src/compiler/backend/instruction-codes.h | 4 ++--
+ deps/v8/src/compiler/backend/instruction.h       | 4 ++--
+ deps/v8/src/maglev/maglev-ir.h                   | 2 +-
+ deps/v8/src/wasm/wasm-code-manager.h             | 2 +-
+ 7 files changed, 13 insertions(+), 8 deletions(-)
+
+diff --git common.gypi.orig common.gypi
+index 38471d4639eb5e3ee5c0da4e117f716b7cc06177..ec92c9df4c1ea25eaa85fec1862f55cd04e81a1a 100644
+--- common.gypi.orig
++++ common.gypi
+@@ -36,7 +36,7 @@
+ 
+     # Reset this number to 0 on major V8 upgrades.
+     # Increment by one for each non-official patch applied to deps/v8.
+-    'v8_embedder_string': '-node.36',
++    'v8_embedder_string': '-node.37',
+ 
+     ##### V8 defaults for Node.js #####
+ 
+diff --git deps/v8/src/ast/ast.h.orig deps/v8/src/ast/ast.h
+index 971a2b0ec1321efc1ca993906dc89ec22da0602a..be1fe09ee438ad0f04ccc62df5b2d7a5b3724184 100644
+--- deps/v8/src/ast/ast.h.orig
++++ deps/v8/src/ast/ast.h
+@@ -999,7 +999,7 @@ class Literal final : public Expression {
+   friend class AstNodeFactory;
+   friend Zone;
+ 
+-  using TypeField = Expression::NextBitField<Type, 4>;
++  using TypeField = Expression::NextBitField<Type, 3>;
+ 
+   Literal(int smi, int position) : Expression(position, kLiteral), smi_(smi) {
+     bit_field_ = TypeField::update(bit_field_, kSmi);
+diff --git deps/v8/src/base/bit-field.h.orig deps/v8/src/base/bit-field.h
+index 63142a20fa2c29edce9faaea408cbebeb2ee9315..9605c41c14f8ce60c9b6cd5a45dca8410cf78fbe 100644
+--- deps/v8/src/base/bit-field.h.orig
++++ deps/v8/src/base/bit-field.h
+@@ -40,6 +40,11 @@ class BitField final {
+   static constexpr U kNumValues = U{1} << kSize;
+ 
+   // Value for the field with all bits set.
++  // If clang complains
++  // "constexpr variable 'kMax' must be initialized by a constant expression"
++  // on this line, then you're creating a BitField for an enum with more bits
++  // than needed for the enum values. Either reduce the BitField size,
++  // or give the enum an explicit underlying type.
+   static constexpr T kMax = static_cast<T>(kNumValues - 1);
+ 
+   template <class T2, int size2>
+diff --git deps/v8/src/compiler/backend/instruction-codes.h.orig deps/v8/src/compiler/backend/instruction-codes.h
+index b06b522287f2d1d109754847a33144cb86b9b536..19cb21d041b8971c0face3b781935808f85d6d3b 100644
+--- deps/v8/src/compiler/backend/instruction-codes.h.orig
++++ deps/v8/src/compiler/backend/instruction-codes.h
+@@ -195,7 +195,7 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
+   V(None)                       \
+   TARGET_ADDRESSING_MODE_LIST(V)
+ 
+-enum AddressingMode {
++enum AddressingMode : uint8_t {
+ #define DECLARE_ADDRESSING_MODE(Name) kMode_##Name,
+   ADDRESSING_MODE_LIST(DECLARE_ADDRESSING_MODE)
+ #undef DECLARE_ADDRESSING_MODE
+@@ -306,7 +306,7 @@ using MiscField = base::BitField<int, 22, 10>;
+ // LaneSizeField and AccessModeField are helper types to encode/decode a lane
+ // size, an access mode, or both inside the overlapping MiscField.
+ using LaneSizeField = base::BitField<int, 22, 8>;
+-using AccessModeField = base::BitField<MemoryAccessMode, 30, 2>;
++using AccessModeField = base::BitField<MemoryAccessMode, 30, 1>;
+ // TODO(turbofan): {HasMemoryAccessMode} is currently only used to guard
+ // decoding (in CodeGenerator and InstructionScheduler). Encoding (in
+ // InstructionSelector) is not yet guarded. There are in fact instructions for
+diff --git deps/v8/src/compiler/backend/instruction.h.orig deps/v8/src/compiler/backend/instruction.h
+index 89394b2c2427d3ea1a2a3e3d83dbb0411bac597a..66a6232c32a8d0a50e174bb352c1274c6ef2b949 100644
+--- deps/v8/src/compiler/backend/instruction.h.orig
++++ deps/v8/src/compiler/backend/instruction.h
+@@ -586,8 +586,8 @@ class LocationOperand : public InstructionOperand {
+   }
+ 
+   STATIC_ASSERT(KindField::kSize == 3);
+-  using LocationKindField = base::BitField64<LocationKind, 3, 2>;
+-  using RepresentationField = base::BitField64<MachineRepresentation, 5, 8>;
++  using LocationKindField = base::BitField64<LocationKind, 3, 1>;
++  using RepresentationField = LocationKindField::Next<MachineRepresentation, 8>;
+   using IndexField = base::BitField64<int32_t, 35, 29>;
+ };
+ 
+diff --git deps/v8/src/maglev/maglev-ir.h.orig deps/v8/src/maglev/maglev-ir.h
+index 1f7c5471de025db2c1d9d4453bb788cde0828a3c..9ff1a3085790c812cfebc7811ffb46fd838234ef 100644
+--- deps/v8/src/maglev/maglev-ir.h.orig
++++ deps/v8/src/maglev/maglev-ir.h
+@@ -196,7 +196,7 @@ class OpProperties {
+   }
+ 
+   constexpr bool is_pure() const {
+-    return (bitfield_ | kPureMask) == kPureValue;
++    return (bitfield_ & kPureMask) == kPureValue;
+   }
+   constexpr bool is_required_when_unused() const {
+     return can_write() || non_memory_side_effects();
+diff --git deps/v8/src/wasm/wasm-code-manager.h.orig deps/v8/src/wasm/wasm-code-manager.h
+index 137c3074d503f074da2845ab2e8feb25f94a8738..c6e878a1db508e2c86bd86107d01b82a72172aa6 100644
+--- deps/v8/src/wasm/wasm-code-manager.h.orig
++++ deps/v8/src/wasm/wasm-code-manager.h
+@@ -474,7 +474,7 @@ class V8_EXPORT_PRIVATE WasmCode final {
+   int trap_handler_index_ = -1;
+ 
+   // Bits encoded in {flags_}:
+-  using KindField = base::BitField8<Kind, 0, 3>;
++  using KindField = base::BitField8<Kind, 0, 2>;
+   using ExecutionTierField = KindField::Next<ExecutionTier, 2>;
+   using ForDebuggingField = ExecutionTierField::Next<ForDebugging, 2>;
+ 
