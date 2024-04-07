@@ -239,8 +239,10 @@ pre-configure {
         # classic linker.
         #
         # TODO: This is a temporary solution, the classic linker will be removed in a future release by Apple.
-        if { ( [vercmp ${xcodeversion} 15 ] >= 0 ) || ( [vercmp ${xcodecltversion} 15 ] >= 0 ) } {
-            configure.ldflags-append    -Wl,-ld_classic
+        if { ${os.platform} eq "darwin" && ${os.major} == 23 } {
+            if { ( [vercmp ${xcodeversion} 15 ] >= 0 ) || ( [vercmp ${xcodecltversion} 15 ] >= 0 ) } {
+                configure.ldflags-append    -Wl,-ld_classic
+            }
         }
     }
 }
