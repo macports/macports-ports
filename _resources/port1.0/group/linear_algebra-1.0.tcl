@@ -38,13 +38,15 @@ default veclibfort yes
 default set_default_variants yes
 
 proc linalg.setup {args} {
-    global blas_only, veclibfort
+    global blas_only, veclibfort, set_default_variants
 
     foreach v $args {
         if {$v eq "blas_only"} {
             blas_only yes
         } elseif {$v eq "noveclibfort"} {
             veclibfort no
+        } elseif {$v eq "no_default_variants"} {
+            set_default_variants no
         } else {
             ui_error "Internal error: Unknown argument '$v' to linalg.setup."
             return -code error "Internal error: Unknown argument '$v' to linalg.setup."
@@ -94,10 +96,20 @@ variant atlas conflicts accelerate blis flexiblas openblas description {Build wi
 
 variant blis conflicts accelerate atlas flexiblas openblas description {Build with linear algebra from BLIS} {
     depends_lib-append      port:blis
-    linalglib               -lblis
-    cmake_linalglib         -DBLAS_LIBRARIES=blis \
-                            -DLAPACK_LIBRARIES=blis
-    # cmake_linalglib         -DBLA_VENDOR=FLAME
+    if {!$blas_only} {
+        depends_lib-append  port:libflame
+        linalglib           -lblis -lflame
+        cmake_linalglib     -DBLAS_LIBRARIES=blis \
+                            -DLAPACK_LIBRARIES=flame
+        # Notice, that some ports may link against blis + lapack instead.
+        # depends_lib-append  port:lapack
+        # linalglib           -lblis -llapack
+        # cmake_linalglib     -DBLAS_LIBRARIES=blis \
+        #                     -DLAPACK_LIBRARIES=lapack
+    } else {
+        linalglib           -lblis
+        cmake_linalglib     -DBLAS_LIBRARIES=blis
+    }
 }
 
 variant flexiblas conflicts accelerate atlas blis openblas description {Build with linear algebra from FlexiBLAS} {
