@@ -1,0 +1,163 @@
+From 34d23f752c7076d4bb1055c44029f452a486e477 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Tue, 16 May 2017 08:12:56 +0100
+Subject: [PATCH] [llvm, Darwin] Allow CPU SubType override from
+ assembler files.
+
+---
+ llvm/include/llvm/MC/MCAssembler.h                |  9 +++++++++
+ llvm/include/llvm/MC/MCMachObjectWriter.h         |  3 ++-
+ llvm/lib/MC/MCAssembler.cpp                       |  4 +++-
+ llvm/lib/MC/MachObjectWriter.cpp                  | 15 ++++++++++++---
+ .../PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp      |  7 +++++--
+ llvm/tools/dsymutil/MachOUtils.cpp                |  3 ++-
+ 6 files changed, 33 insertions(+), 8 deletions(-)
+
+diff --git a/llvm/include/llvm/MC/MCAssembler.h b/llvm/include/llvm/MC/MCAssembler.h
+index 0f9499d705e..8a17f474e5f 100644
+--- a/llvm/include/llvm/MC/MCAssembler.h
++++ b/llvm/include/llvm/MC/MCAssembler.h
+@@ -152,6 +152,11 @@ private:
+ 
+   VersionInfoType VersionInfo;
+ 
++  /// MachO cpusubtype override.
++  //  To be able to set this from assembler directives.
++  unsigned MachOCpuSubTypeOverride;
++
++private:
+   /// Evaluate a fixup to a relocatable expression and the value which should be
+   /// placed into the fixup.
+   ///
+@@ -271,6 +276,10 @@ public:
+     VersionInfo.Update = Update;
+   }
+ 
++  /// MachO CPU subtype override.
++  unsigned getCPUSubType() const { return MachOCpuSubTypeOverride; }
++  void setCPUSubType(unsigned SubT) { MachOCpuSubTypeOverride = SubT; }
++
+   /// Reuse an assembler instance
+   ///
+   void reset();
+diff --git a/llvm/include/llvm/MC/MCMachObjectWriter.h b/llvm/include/llvm/MC/MCMachObjectWriter.h
+index 22fbeb72a4e..8f0179649ae 100644
+--- a/llvm/include/llvm/MC/MCMachObjectWriter.h
++++ b/llvm/include/llvm/MC/MCMachObjectWriter.h
+@@ -173,7 +173,8 @@ public:
+   /// @}
+ 
+   void writeHeader(MachO::HeaderFileType Type, unsigned NumLoadCommands,
+-                   unsigned LoadCommandsSize, bool SubsectionsViaSymbols);
++                   unsigned LoadCommandsSize, bool SubsectionsViaSymbols,
++                   unsigned CPUSubTypeOverride);
+ 
+   /// Write a segment load command.
+   ///
+diff --git a/llvm/lib/MC/MCAssembler.cpp b/llvm/lib/MC/MCAssembler.cpp
+index 1e23b6d816e..9d2db308e39 100644
+--- a/llvm/lib/MC/MCAssembler.cpp
++++ b/llvm/lib/MC/MCAssembler.cpp
+@@ -90,7 +90,8 @@ MCAssembler::MCAssembler(MCContext &Context,
+     : Context(Context), Backend(std::move(Backend)),
+       Emitter(std::move(Emitter)), Writer(std::move(Writer)),
+       BundleAlignSize(0), RelaxAll(false), SubsectionsViaSymbols(false),
+-      IncrementalLinkerCompatible(false), ELFHeaderEFlags(0) {
++      IncrementalLinkerCompatible(false), ELFHeaderEFlags(0),
++      MachOCpuSubTypeOverride(0)  {
+   VersionInfo.Major = 0; // Major version == 0 for "none specified"
+ }
+ 
+@@ -109,6 +110,7 @@ void MCAssembler::reset() {
+   SubsectionsViaSymbols = false;
+   IncrementalLinkerCompatible = false;
+   ELFHeaderEFlags = 0;
++  MachOCpuSubTypeOverride = 0;
+   LOHContainer.reset();
+   VersionInfo.Major = 0;
+ 
+diff --git a/llvm/lib/MC/MachObjectWriter.cpp b/llvm/lib/MC/MachObjectWriter.cpp
+index 2664528909a..6525992ba99 100644
+--- a/llvm/lib/MC/MachObjectWriter.cpp
++++ b/llvm/lib/MC/MachObjectWriter.cpp
+@@ -132,8 +132,10 @@ uint64_t MachObjectWriter::getPaddingSize(const MCSection *Sec,
+ void MachObjectWriter::writeHeader(MachO::HeaderFileType Type,
+                                    unsigned NumLoadCommands,
+                                    unsigned LoadCommandsSize,
+-                                   bool SubsectionsViaSymbols) {
++                                   bool SubsectionsViaSymbols,
++                                   unsigned CPUSubTypeOverride) {
+   uint32_t Flags = 0;
++  uint32_t SubType = TargetObjectWriter->getCPUSubtype();
+ 
+   if (SubsectionsViaSymbols)
+     Flags |= MachO::MH_SUBSECTIONS_VIA_SYMBOLS;
+@@ -147,7 +149,12 @@ void MachObjectWriter::writeHeader(MachO::HeaderFileType Type,
+   W.write<uint32_t>(is64Bit() ? MachO::MH_MAGIC_64 : MachO::MH_MAGIC);
+ 
+   W.write<uint32_t>(TargetObjectWriter->getCPUType());
+-  W.write<uint32_t>(TargetObjectWriter->getCPUSubtype());
++
++  // To match behaviour of cctools 'as' we allow a lower set CPU type in
++  // a .machine directive to trump the -arch set on the command line.
++  if (CPUSubTypeOverride)
++    SubType = (uint32_t) CPUSubTypeOverride;
++  W.write<uint32_t>(SubType);
+ 
+   W.write<uint32_t>(Type);
+   W.write<uint32_t>(NumLoadCommands);
+@@ -747,6 +754,8 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
+   const MCAssembler::VersionInfoType &VersionInfo =
+     Layout.getAssembler().getVersionInfo();
+ 
++  unsigned CPUSubTypeOverride = Layout.getAssembler().getCPUSubType();
++
+   // The section data starts after the header, the segment load command (and
+   // section headers) and the symbol table.
+   unsigned NumLoadCommands = 1;
+@@ -823,7 +832,7 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
+ 
+   // Write the prolog, starting with the header and load command...
+   writeHeader(MachO::MH_OBJECT, NumLoadCommands, LoadCommandsSize,
+-              Asm.getSubsectionsViaSymbols());
++              Asm.getSubsectionsViaSymbols(), CPUSubTypeOverride);
+   uint32_t Prot =
+       MachO::VM_PROT_READ | MachO::VM_PROT_WRITE | MachO::VM_PROT_EXECUTE;
+   writeSegmentLoadCommand("", NumSections, 0, VMSize, SectionDataStart,
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
+index 81035e2723f..33540eb6b83 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
+@@ -204,13 +204,16 @@ class PPCTargetMachOStreamer : public PPCTargetStreamer {
+ public:
+   PPCTargetMachOStreamer(MCStreamer &S) : PPCTargetStreamer(S) {}
+ 
++  MCObjectStreamer &getStreamer() {
++    return static_cast<MCObjectStreamer &>(Streamer);
++  }
+   void emitTCEntry(const MCSymbol &S) override {
+     report_fatal_error("Unknown pseudo-op: .tc");
+   }
+ 
+   void emitMachine(StringRef CPU) override {
+-    // FIXME: We should update the CPUType, CPUSubType in the Object file if
+-    // the new values are different from the defaults.
++    MCAssembler &MCA = getStreamer().getAssembler();
++    MCA.setCPUSubType(PPC::cpuSubTypeFromString(CPU));
+   }
+ 
+   void emitAbiVersion(int AbiVersion) override {
+diff --git a/llvm/tools/dsymutil/MachOUtils.cpp b/llvm/tools/dsymutil/MachOUtils.cpp
+index fc498cc49c1..11594e9631f 100644
+--- a/llvm/tools/dsymutil/MachOUtils.cpp
++++ b/llvm/tools/dsymutil/MachOUtils.cpp
+@@ -446,7 +446,8 @@ bool generateDsymCompanion(const DebugMap &DM, MCStreamer &MS,
+   SymtabStart = alignTo(SymtabStart, 0x1000);
+ 
+   // We gathered all the information we need, start emitting the output file.
+-  Writer.writeHeader(MachO::MH_DSYM, NumLoadCommands, LoadCommandSize, false);
++  Writer.writeHeader(MachO::MH_DSYM, NumLoadCommands, LoadCommandSize,
++                     false, 0 /*subtype override*/);
+ 
+   // Write the load commands.
+   assert(OutFile.tell() == HeaderSize);

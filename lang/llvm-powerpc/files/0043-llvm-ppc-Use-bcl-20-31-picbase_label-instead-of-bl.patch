@@ -1,0 +1,115 @@
+From 6886ea3d445bdeb022e9ac2002cc73c50c441a58 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 19 Oct 2014 22:34:29 +0100
+Subject: [PATCH]  [llvm, ppc] Use bcl 20,31 <picbase_label> instead of
+ bl.
+
+Using bl to obtain the picbase pessimises code by polluting the link register use (at least on older 32b devices). The pattern bcl 20,31 specifically provides a way to avoid this, and is claimed to be no penalty on 64b - so we just apply it unconditionally.
+---
+ llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp     | 19 ++++++++++-------
+ llvm/test/CodeGen/PowerPC/darwin-ppc32-pic.ll | 21 +++++++++++++++++++
+ llvm/test/CodeGen/PowerPC/mcm-5.ll            |  2 +-
+ llvm/test/CodeGen/PowerPC/ppc32-pic-large.ll  |  2 +-
+ llvm/test/CodeGen/PowerPC/pr33547.ll          |  2 +-
+ 5 files changed, 35 insertions(+), 11 deletions(-)
+ create mode 100644 llvm/test/CodeGen/PowerPC/darwin-ppc32-pic.ll
+
+diff --git a/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp b/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
+index a9da64cc216..3a3186392b7 100644
+--- a/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
++++ b/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
+@@ -569,17 +569,20 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+   case PPC::MovePCtoLR:
+   case PPC::MovePCtoLR8: {
+     // Transform %lr = MovePCtoLR
+-    // Into this, where the label is the PIC base:
+-    //     bl L1$pb
++    // Into this:
++    //     bcl 20,31,L1$pb
+     // L1$pb:
++    // where the label "L1$pb" is the PIC base
++    // Note that bcl 20,31,L1$pb is preferable to bl L1$pb because (at least
++    // for some PPC variants) it is recognised specially and does not pollute
++    // the link stack.
+     MCSymbol *PICBase = MF->getPICBaseSymbol();
+ 
+-    // Emit the 'bl'.
+-    EmitToStreamer(*OutStreamer,
+-                   MCInstBuilder(PPC::BL)
+-                       // FIXME: We would like an efficient form for this, so we
+-                       // don't have to do a lot of extra uniquing.
+-                       .addExpr(MCSymbolRefExpr::create(PICBase, OutContext)));
++    // Emit the 'bcl 20,31'.
++    EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::BCLalways)
++      // FIXME: We would like an efficient form for this, so we don't have to do
++      // a lot of extra uniquing.
++      .addExpr(MCSymbolRefExpr::create(PICBase, OutContext)));
+ 
+     // Emit the label.
+     OutStreamer->EmitLabel(PICBase);
+diff --git a/llvm/test/CodeGen/PowerPC/darwin-ppc32-pic.ll b/llvm/test/CodeGen/PowerPC/darwin-ppc32-pic.ll
+new file mode 100644
+index 00000000000..f55775823e9
+--- /dev/null
++++ b/llvm/test/CodeGen/PowerPC/darwin-ppc32-pic.ll
+@@ -0,0 +1,21 @@
++; RUN: llc < %s -mtriple=powerpc-apple-darwin9 -relocation-model=pic | FileCheck %s
++@foobar = common global i32 0, align 4
++
++define i32 @foo() {
++entry:
++  %0 = load i32, i32* @foobar, align 4
++  ret i32 %0
++}
++
++; CHECK_LABEL: _foo
++; CHECK: bcl 20, 31, [[PB:L[0-9]+\$pb]]
++; CHECK-NEXT: [[PB]]:
++; CHECK-NEXT: mflr [[PREG:r[0-9]+]]
++; CHECK-NEXT: addis [[PREG]], [[PREG]], ha16(L_foobar$non_lazy_ptr-[[PB]])
++; CHECK-NEXT: lwz [[REG:r[0-9]+]], lo16(L_foobar$non_lazy_ptr-[[PB]])([[PREG]])
++; CHECK-NEXT: lwz r3, 0([[REG]])
++
++; CHECK_LABEL: L_foobar$non_lazy_ptr
++; CHECK: .indirect_symbol _foobar
++
++; CHECK: .comm _foobar,4,2
+diff --git a/llvm/test/CodeGen/PowerPC/mcm-5.ll b/llvm/test/CodeGen/PowerPC/mcm-5.ll
+index a4bb2af6dc1..a56dd734b4d 100644
+--- a/llvm/test/CodeGen/PowerPC/mcm-5.ll
++++ b/llvm/test/CodeGen/PowerPC/mcm-5.ll
+@@ -64,7 +64,7 @@ sw.epilog:                                        ; preds = %sw.bb3, %sw.default
+ ; CHECK-NEXT: .long	.LBB0_{{[0-9]+}}-.LJTI0_0
+ 
+ ; LARGE-LABEL: test_jump_table:
+-; LARGE:       bl .L0$pb
++; LARGE:       bcl 20, 31, .L0$pb
+ ; LARGE-NEXT:  .L0$pb:
+ ; LARGE:       mflr [[REGBASE:[0-9]+]]
+ 
+diff --git a/llvm/test/CodeGen/PowerPC/ppc32-pic-large.ll b/llvm/test/CodeGen/PowerPC/ppc32-pic-large.ll
+index d6e491ea273..f023618e1ee 100644
+--- a/llvm/test/CodeGen/PowerPC/ppc32-pic-large.ll
++++ b/llvm/test/CodeGen/PowerPC/ppc32-pic-large.ll
+@@ -18,7 +18,7 @@ entry:
+ ; LARGE-BSS-NEXT:  foo:
+ ; LARGE-BSS:         stwu 1, -32(1)
+ ; LARGE-BSS:         stw 30, 24(1)
+-; LARGE-BSS:         bl [[PB]]
++; LARGE-BSS:         bcl 20, 31, [[PB]]
+ ; LARGE-BSS-NEXT:  [[PB]]:
+ ; LARGE-BSS:         mflr 30
+ ; LARGE-BSS:         lwz [[REG:[0-9]+]], [[POFF]]-[[PB]](30)
+diff --git a/llvm/test/CodeGen/PowerPC/pr33547.ll b/llvm/test/CodeGen/PowerPC/pr33547.ll
+index 166b5c6327e..39200d38e66 100644
+--- a/llvm/test/CodeGen/PowerPC/pr33547.ll
++++ b/llvm/test/CodeGen/PowerPC/pr33547.ll
+@@ -30,7 +30,7 @@ define void @testFunc(i64* nocapture %r, i64* nocapture readonly %k) {
+ ; CHECK-LABEL: testFunc
+ ; CHECK: mflr 0
+ ; CHECK: std 0, 16(1)
+-; CHECK: bl .[[BRANCHNEXT:[L0-9\$a-z]+]]
++; CHECK: bcl 20, 31, [[BRANCHNEXT:.L[0-9\$a-z]+]]
+ ; CHECK-NEXT: [[BRANCHNEXT]]
+ L.entry:
+   %0 = bitcast i64* %k to i32*
