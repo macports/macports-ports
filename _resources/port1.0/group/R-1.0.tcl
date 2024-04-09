@@ -209,12 +209,7 @@ default test.run    no
 
 # We do not need to check rebuilding vignettes, since that often requires Tex and even Pandoc,
 # and we do not want these as dependencies for tests. It also wastes time.
-test {
-    if {![option test.run]} {
-        ui_info "Tests are disabled."
-        return
-    }
-    system -W ${worksrcpath} "export _R_CHECK_FORCE_SUGGESTS_=0 \
-        && ${r.cmd} CMD check ./${R.package}_${version}${suffix} \
-            --no-manual --no-build-vignettes"
-}
+default test.env    _R_CHECK_FORCE_SUGGESTS_=0
+default test.cmd    {${r.cmd}}
+default test.target {CMD check ./${R.package}_${version}${suffix}}
+default test.args   {--no-manual --no-build-vignettes}
