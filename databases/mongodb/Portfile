@@ -3,6 +3,7 @@
 PortSystem          1.0
 PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
+PortGroup           legacysupport 1.1
 PortGroup           muniversal 1.0
 
 # Please keep the mongodb and mongodb-devel ports as similar as possible.
@@ -106,7 +107,6 @@ name                mongodb
 conflicts           mongodb-devel
 license             SSPL
 categories          databases
-platforms           {darwin >= 18}
 maintainers         {ryandesign @ryandesign}
 
 description         high-performance, schema-free, document-oriented (\"NoSQL\") database
@@ -167,6 +167,11 @@ post-extract {
 patchfiles          compile.req.patch \
                     platform.req.patch
 
+if {[string match *gcc* ${configure.compiler}]} {
+    patchfiles-append \
+                    gcc13-build.patch
+}
+
 pre-configure {
     # Upstream recommends installing specific versions of the required
     # Python modules modules in a virtualenv. They do not support using
@@ -211,10 +216,8 @@ build.args          CC="${configure.cc}" \
                     --disable-warnings-as-errors=source \
                     --enable-http-client=on \
                     --install-action=hardlink \
-                    --libc++ \
                     --opt=size \
                     --release \
-                    --ssl=on \
                     --use-sasl-client \
                     --use-system-pcre \
                     --use-system-snappy \
@@ -223,6 +226,96 @@ build.args          CC="${configure.cc}" \
                     --use-system-zlib \
                     --use-system-zstd \
                     --wiredtiger=on
+
+# Do not force libc++ on systems where libstdc++ is used.
+if {${configure.cxx_stdlib} eq "libc++"} {
+    build.args-append \
+                   --libc++
+}
+
+if {${configure.build_arch} in [list i386 ppc]} {
+    # With debugging info libraries build to outrageous size,
+    # and libtool is having trouble with some:
+    # libtool: can't vm_allocate() buffer for output file
+    # of size 1218661592 ((os/kern) no space available)
+    build.args-append \
+                   --dbg=off
+    # Wiredtiger is not supported on 32-bit platforms.
+    build.args-replace \
+                   --wiredtiger=on --wiredtiger=off
+    # Yet, the code is incoherent, and some components invoke
+    # wiredtiger unconditionally. So we need to fix that too:
+    patchfiles-append \
+                    patch-no-wiredtiger.diff
+
+    notes "
+    Notice, 32-bit platforms are not officially supported.
+    Testing and contributions are welcome.
+    "
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    patchfiles-append \
+                    patch-enable-strndup.diff
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 13} {
+    # It is on by default, we only need it if disabling.
+    # Apple SSL fails at the moment:
+    # src/mongo/util/net/ssl/apple.hpp: error:
+    # 'kTLSProtocol12' was not declared in this scope
+    # FIXME: switch to OpenSSL backend, that one should work.
+    build.args-append \
+                    --ssl=off
+
+    # Unfortunetely, build system may ignore settings
+    # and still force compiling broken Apple crypto code:
+    # src/mongo/crypto/symmetric_crypto_apple.cpp:
+    # error: 'CCMode' was not declared in this scope; did you mean 'Code'?
+    # So enforce the right one.
+    # It also ignores MONGO_CRYPTO in environment and fails
+    # to build tomcrypt fallback libs, which breaks linkage.
+    # Therefore, we manually define tomcrypt in scons build files.
+    patchfiles-append \
+                    patch-enforce-correct-crypto.diff
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 18} {
+    # Disable mozjs:
+    build.args-append \
+                    --js-engine=none
+}
+
+platform darwin powerpc {
+    # Notice, if s2 gets updated, we will likely need to borrow
+    # the patch from s2geometry port.
+    patchfiles-append \
+                    patch-powerpc-abseil.diff \
+                    patch-powerpc-darwin.diff \
+                    patch-powerpc-SConstruct.diff
+
+    # This is a poorly written library. Some things are expected
+    # not to work correctly. It was not working perfectly even
+    # on supported platforms: https://github.com/prisma/prisma-engines/issues/2600
+    # Maybe worth disabling it in fact.
+    patchfiles-append \
+                    patch-IntelRDFPMathLib-architecture.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_cbrt.c.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_ops_64.c.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_ops.c.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_radian_reduce.c.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_sqrt.c.diff \
+                    patch-IntelRDFPMathLib-dpml_ux_trig.c.diff \
+                    patch-IntelRDFPMathLib-private.diff
+
+    if {${configure.build_arch} eq "ppc"} {
+        patchfiles-append \
+                    patch-IntelRDFPMathLib-ppc32.diff
+    }
+
+    build.args-append \
+                    --use-libunwind=off
+}
 
 # error: no template named 'unary_function' in namespace 'std'; did you mean '__unary_function'?
 # https://jira.mongodb.org/browse/SERVER-85779
@@ -243,11 +336,15 @@ build.args-append   --use-system-mongo-c=off
 # "Argument list too long"; see https://jira.mongodb.org/browse/SERVER-13829
 build.args-append   VARIANT_DIR=MP
 
+legacysupport.redirect_bins mongod mongos
+
 # i386 was never supported on macOS.
 # See https://jira.mongodb.org/browse/SERVER-22810
-supported_archs     arm64 x86_64
+# Notice that PowerPC is not supported by upstream.
+supported_archs     arm64 x86_64 ppc ppc64
 
-array set merger_build_args {arm64 "TARGET_ARCH=aarch64" x86_64 "TARGET_ARCH=x86_64"}
+array set merger_build_args \
+    {arm64 "TARGET_ARCH=aarch64" x86_64 "TARGET_ARCH=x86_64" ppc "TARGET_ARCH=ppc" ppc64 "TARGET_ARCH=ppc64"}
 foreach a ${supported_archs} {
     lappend merger_build_args($a) \
                     CCFLAGS="-arch ${a}" \

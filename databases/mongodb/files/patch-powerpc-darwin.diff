@@ -1,0 +1,156 @@
+--- src/mongo/platform/atomic_word.h
++++ src/mongo/platform/atomic_word.h	2024-04-01 06:07:37.000000000 +0800
+@@ -125,8 +125,9 @@
+     }
+ 
+ protected:
+-    // At least with GCC 10, this assertion fails for small types like bool.
+-#if !defined(__riscv)
++    // At least with GCC 10, this assertion fails for small types like bool on RISC-V.
++    // It will fail for 8-byte types on ppc.
++#if !defined(__riscv) && !defined(__ppc__)
+     MONGO_STATIC_ASSERT(std::atomic<WordType>::is_always_lock_free);  // NOLINT
+ #endif
+ 
+
+--- site_scons/site_tools/libtool.py
++++ site_scons/site_tools/libtool.py	2024-04-01 07:02:00.000000000 +0800
+@@ -27,7 +27,7 @@
+ 
+     env["AR"] = "libtool"
+     env["ARCOM"] = "$AR -static -o $TARGET $ARFLAGS $SOURCES"
+-    env["ARFLAGS"] = ["-s", "-no_warning_for_no_symbols"]
++    env["ARFLAGS"] = "-s"
+ 
+     # Disable running ranlib, since we added 's' above
+     env["RANLIBCOM"] = ""
+
+
+--- src/mongo/db/exec/sbe/values/value.h
++++ src/mongo/db/exec/sbe/values/value.h	2024-04-01 08:53:40.000000000 +0800
+@@ -357,7 +357,9 @@
+ 
+     if constexpr (std::is_pointer_v<T>) {
+         // Casting from integer value to pointer is OK.
+-        static_assert(sizeof(Value) == sizeof(T));
++        #ifndef __ppc__
++            static_assert(sizeof(Value) == sizeof(T));
++        #endif
+         return reinterpret_cast<T>(in);
+     } else if constexpr (std::is_integral_v<T>) {
+         // Values are converted to native integer types using static_cast. If sizeof(T) is less
+@@ -365,7 +367,9 @@
+         static_assert(sizeof(Value) >= sizeof(T));
+         return static_cast<T>(in);
+     } else if constexpr (std::is_same_v<Decimal128, T>) {
+-        static_assert(sizeof(Value) == sizeof(T*));
++        #ifndef __ppc__
++            static_assert(sizeof(Value) == sizeof(T*));
++        #endif
+         return readDecimal128FromMemory(ConstDataView{getRawPointerView(in)});
+     } else {
+         static_assert(sizeof(Value) >= sizeof(T));
+
+
+--- src/mongo/platform/process_id.cpp
++++ src/mongo/platform/process_id.cpp	2024-04-01 10:03:48.000000000 +0800
+@@ -48,6 +48,10 @@
+ #include <limits>
+ #include <sstream>
+ 
++#ifdef __APPLE__
++#include <AvailabilityMacros.h>
++#endif
++
+ #include "mongo/base/static_assert.h"
+ #include "mongo/util/assert_util.h"
+ 
+@@ -74,7 +78,11 @@
+ inline NativeProcessId getCurrentNativeThreadId() {
+     // macOS deprecated syscall in 10.12.
+     uint64_t tid;
++#if MAC_OS_X_VERSION_MAX_ALLOWED < 1060 || defined(__POWERPC__)
++    tid = pthread_mach_thread_np(pthread_self());
++#else
+     invariant(::pthread_threadid_np(NULL, &tid) == 0);
++#endif
+     return tid;
+ }
+ #elif __FreeBSD__
+
+
+--- src/mongo/platform/pause.h
++++ src/mongo/platform/pause.h	2024-04-03 00:45:26.000000000 +0800
+@@ -51,7 +51,11 @@
+ 
+ #define MONGO_YIELD_CORE_FOR_SMT() _mm_pause()
+ 
+-#elif defined(__PPC64__) || defined(PPC64)
++#elif defined(__POWERPC__) && defined(__APPLE__)
++
++#define MONGO_YIELD_CORE_FOR_SMT() __asm__ volatile("or r27,r27,r27" ::: "memory")
++
++#elif defined(__PPC64__) || defined(PPC64) || defined(__powerpc64__)
+ 
+ /* ori 0,0,0 is the PPC64 noop instruction */
+ #define MONGO_YIELD_CORE_FOR_SMT() __asm__ volatile("ori 0,0,0" ::: "memory")
+
+
+--- src/third_party/wiredtiger/src/include/gcc.h
++++ src/third_party/wiredtiger/src/include/gcc.h	2024-04-03 03:35:42.000000000 +0800
+@@ -207,9 +207,13 @@
+         __asm__ volatile("sync; ld $0, %0" ::"m"(*(long *)0xffffffff80000000) : "memory"); \
+     } while (0)
+ 
+-#elif defined(__PPC64__) || defined(PPC64)
++#elif defined(__PPC64__) || defined(PPC64) || defined(__powerpc64__) || defined(__POWERPC__)
++#ifdef __APPLE__
++#define WT_PAUSE() __asm__ volatile("or r27,r27,r27" ::: "memory")
++#else
+ /* ori 0,0,0 is the PPC64 noop instruction */
+ #define WT_PAUSE() __asm__ volatile("ori 0,0,0" ::: "memory")
++#endif
+ #define WT_FULL_BARRIER()                      \
+     do {                                       \
+         __asm__ volatile("sync" ::: "memory"); \
+
+
+--- src/third_party/IntelRDFPMathLib20U1/SConscript
++++ src/third_party/IntelRDFPMathLib20U1/SConscript	2024-04-01 06:10:07.000000000 +0800
+@@ -320,6 +320,16 @@
+ elif processor == 's390x':
+     cpp_defines['s390x'] = '1'
+     cpp_defines['BID_BIG_ENDIAN'] = '1'
++# Darwin ppc64 build is untested
++elif processor == 'ppc64':
++    cpp_defines['efi2'] = '1'
++    cpp_defines['EFI2'] = '1'
++    cpp_defines['BID_BIG_ENDIAN'] = '1'
++# Using 32-bit big endian
++# TODO: do we need IA32 defines too?
++elif processor == 'ppc':
++    cpp_defines['D32'] = '1'
++    cpp_defines['BID_BIG_ENDIAN'] = '1'
+ else:
+     assert False, "Unsupported architecture: " + processor
+ 
+
+--- src/third_party/wiredtiger/build_darwin/wiredtiger_config.h
++++ src/third_party/wiredtiger/build_darwin/wiredtiger_config.h	2024-04-03 06:53:56.000000000 +0800
+@@ -129,15 +129,7 @@
+ 
+ /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
+    significant byte first (like Motorola and SPARC, unlike Intel). */
+-#if defined AC_APPLE_UNIVERSAL_BUILD
+-# if defined __BIG_ENDIAN__
+-#  define WORDS_BIGENDIAN 1
+-# endif
+-#else
+-# ifndef WORDS_BIGENDIAN
+-/* #  undef WORDS_BIGENDIAN */
+-# endif
+-#endif
++#define WORDS_BIGENDIAN 1
+ 
+ /* Default alignment of buffers used for I/O */
+ #define WT_BUFFER_ALIGNMENT_DEFAULT 0
