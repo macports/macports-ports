@@ -247,6 +247,7 @@ default configure.pre_args {[list \
                     -DCMAKE_FIND_FRAMEWORK=LAST \
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                     -DCMAKE_MAKE_PROGRAM=${build.cmd} \
+                    -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON \
                     {*}[cmake::module_path] \
                     {*}[cmake::rpath_flags] \
                     -Wno-dev
