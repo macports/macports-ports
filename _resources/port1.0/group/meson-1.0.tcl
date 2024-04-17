@@ -59,6 +59,8 @@ proc meson::get_post_args {} {
 }
 
 proc meson::add_depends {} {
+    depends_build-delete    port:meson \
+                            port:ninja
     depends_build-append    port:meson \
                             port:ninja
 }
