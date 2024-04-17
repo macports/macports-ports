@@ -37,6 +37,27 @@ destroot.env-append         DESTDIR=${destroot}
 default destroot.cmd        {${prefix}/bin/meson}
 default destroot.post_args  ""
 
+# There shouldn't be any need to change the name of the native file.
+options meson.native_file
+default meson.native_file   {${workpath}/meson_native.ini}
+
+# To override the results of find_program, add key/value pairs, e.g.:
+# meson.native.binaries-append m4=${prefix}/bin/gm4
+options meson.native.binaries
+default meson.native.binaries {}
+
+pre-configure {
+    if {[option meson.native.binaries] ne {}} {
+        set fp [open [option meson.native_file] w]
+        puts ${fp} {[binaries]}
+        foreach kv [option meson.native.binaries] {
+            set kv [split ${kv} =]
+            puts ${fp} "[lindex ${kv} 0]='[lindex ${kv} 1]'"
+        }
+        close ${fp}
+    }
+}
+
 namespace eval meson { }
 
 proc meson::get_post_args {} {
@@ -53,6 +74,9 @@ proc meson::get_post_args {} {
         lappend args ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin
     } else {
         lappend args ${build_dir}
+    }
+    if {[option meson.native.binaries] ne {}} {
+        lappend args --native-file=[option meson.native_file]
     }
     lappend args --wrap-mode=[option meson.wrap_mode]
     return ${args}
