@@ -41,19 +41,21 @@ namespace eval meson { }
 
 proc meson::get_post_args {} {
     global configure.dir build_dir build.dir muniversal.current_arch muniversal.build_arch
+    set args [list ${configure.dir}]
     if {[info exists muniversal.build_arch]} {
         # muniversal 1.1 PG is being used
+        lappend args ${build.dir}
         if {[option muniversal.is_cross.[option muniversal.build_arch]]} {
-            return "${configure.dir} ${build.dir} --cross-file=[option muniversal.build_arch]-darwin --wrap-mode=[option meson.wrap_mode]"
-        } else {
-            return "${configure.dir} ${build.dir} --wrap-mode=[option meson.wrap_mode]"
+            lappend args --cross-file=[option muniversal.build_arch]-darwin
         }
     } elseif {[info exists muniversal.current_arch]} {
         # muniversal 1.0 PG is being used
-        return "${configure.dir} ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin --wrap-mode=[option meson.wrap_mode]"
+        lappend args ${build_dir}-${muniversal.current_arch} --cross-file=${muniversal.current_arch}-darwin
     } else {
-        return "${configure.dir} ${build_dir} --wrap-mode=[option meson.wrap_mode]"
+        lappend args ${build_dir}
     }
+    lappend args --wrap-mode=[option meson.wrap_mode]
+    return ${args}
 }
 
 proc meson::add_depends {} {
