@@ -32,7 +32,7 @@ default build.cmd           {${prefix}/bin/ninja}
 default build.post_args     {-v}
 default build.target        ""
 
-# remove DESTDIR= from arguments, but rather take it from environmental variable
+# remove DESTDIR= from arguments, but rather take it from environment variable
 destroot.env-append         DESTDIR=${destroot}
 default destroot.cmd        {${prefix}/bin/meson}
 default destroot.post_args  ""

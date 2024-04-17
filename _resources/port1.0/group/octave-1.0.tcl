@@ -121,7 +121,7 @@ proc octave.add_dependencies {} {
 port::register_callback octave.add_dependencies
 
 # configure_make.m calls "make --jobs n ..."
-# use environmental variable to set the number of jobs to 1
+# use environment variable to set the number of jobs to 1
 # parallel build is a problem for octave-optiminterp
 configure.env-append OMP_NUM_THREADS=1
 # do not force all Portfiles to switch from configure.env to configure.env-append
