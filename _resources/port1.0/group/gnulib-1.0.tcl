@@ -15,7 +15,7 @@ proc gnulib::setup {} {
         # Override configure tests that causes problems on older macOS.
         # https://trac.macports.org/ticket/62994
         configure.args-append \
-            gl_cv_func_getcwd_path_max=yes \
+            gl_cv_func_getcwd_path_max="yes, but with shorter paths" \
             gl_cv_func_getcwd_succeeds_beyond_4k=no
     }
 }
