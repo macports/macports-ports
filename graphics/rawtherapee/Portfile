@@ -4,6 +4,10 @@ PortSystem          1.0
 PortGroup           github 1.0
 PortGroup           cmake 1.1
 PortGroup           active_variants 1.1
+PortGroup           legacysupport 1.1
+
+# Used to provide wrappers, see below.
+legacysupport.newest_darwin_requires_legacy 0
 
 github.setup        Beep6581 RawTherapee 5.10
 github.tarball_from releases
@@ -11,7 +15,6 @@ name                rawtherapee
 revision            0
 
 categories          graphics
-supported_archs     x86_64 arm64
 license             GPL-3
 maintainers         @jasonliu-- openmaintainer
 
@@ -37,7 +40,6 @@ depends_lib-append      path:lib/pkgconfig/glib-2.0.pc:glib2 \
                         port:glibmm-2.4 \
                         path:lib/pkgconfig/gtk+-3.0.pc:gtk3 \
                         port:gtkmm3 \
-                        port:gtk-osx-application-gtk3 \
                         port:adwaita-icon-theme \
                         path:lib/pkgconfig/cairo.pc:cairo \
                         path:lib/pkgconfig/cairomm-1.0.pc:cairomm-1.0 \
@@ -54,31 +56,24 @@ depends_lib-append      path:lib/pkgconfig/glib-2.0.pc:glib2 \
                         port:tiff \
                         port:zlib
 
-require_active_variants gtk3    quartz
-require_active_variants gtkmm3  quartz
-
 patchfiles-append       no-modified-project_source_dir.diff \
                         patch-config_h_in.diff
 
-post-patch {
-    copy ${filespath}/FindGtkMacIntegration.cmake \
-         ${worksrcpath}/cmake/modules/
-    reinplace {s/MacIntegration/GtkMacIntegration/} \
-        ${worksrcpath}/rtgui/CMakeLists.txt
+pre-configure {
+    if {![variant_isset quartz] && ![variant_isset x11]} {
+        error "Either +x11 or +quartz is required"
+    }
 }
 
-set app_contents ${applications_dir}/${github.project}.app/Contents
-
-configure.args-append   -DBUNDLE_BASE_INSTALL_DIR=$app_contents/MacOS \
-                        -DDATADIR=$app_contents/Resources \
-                        -DLIBDIR=$app_contents/Frameworks \
-                        -DBUILD_SHARED=ON \
+configure.args-append   -DBUILD_SHARED=ON \
                         -DOPTION_OMP=OFF
 
-if {${build_arch} eq "x86_64"} {
+# FIXME: rawtherapee-cli works fine on PowerPC,
+# but GUI segfaults: https://github.com/Beep6581/RawTherapee/issues/7052
+if {${configure.build_arch} eq "x86_64"} {
     configure.args-append   -DPROC_TARGET_NUMBER=1 \
                             -DPROC_LABEL="generic processor"
-} elseif {${build_arch} eq "arm64"} {
+} elseif {${configure.build_arch} in [list arm64 ppc ppc64]} {
     configure.args-append   -DPROC_TARGET_NUMBER=2
 }
 
@@ -104,6 +99,57 @@ variant openmp description "Enable OpenMP" {
                         -DOPTION_OMP=OFF -DOPTION_OMP=ON
 }
 
+# No point in this on ppc at the moment.
+variant quartz conflicts x11 {
+    supported_archs     x86_64 arm64
+
+    depends_lib-append  port:gtk-osx-application-gtk3
+
+    post-patch {
+        copy ${filespath}/FindGtkMacIntegration.cmake \
+            ${worksrcpath}/cmake/modules/
+        reinplace {s/MacIntegration/GtkMacIntegration/} \
+            ${worksrcpath}/rtgui/CMakeLists.txt
+    }
+
+    set app_contents ${applications_dir}/${github.project}.app/Contents
+
+    configure.args-append \
+                        -DBUNDLE_BASE_INSTALL_DIR=$app_contents/MacOS \
+                        -DDATADIR=$app_contents/Resources \
+                        -DLIBDIR=$app_contents/Frameworks
+
+    require_active_variants gtk3    quartz
+    require_active_variants gtkmm3  quartz
+}
+
+variant x11 conflicts quartz {
+    legacysupport.redirect_bins rawtherapee rawtherapee-cli
+
+    configure.args-append   -DMACOS_NATIVE=OFF
+
+    require_active_variants gtk3    x11
+    require_active_variants gtkmm3  x11
+
+    patchfiles-append   0001-Do-not-force-Cocoa-build.patch \
+                        0002-Allow-non-Cocoa-code-in-sources.patch
+}
+
+if {${configure.build_arch} in [list ppc ppc64]} {
+    patchfiles-append   0003-Fix-PowerPC-processor-target.patch
+
+    # It is off by default, but just in case.
+    # We do not want LTO on PowerPC builds.
+    configure.args-append \
+                        -DWITH_LTO=OFF
+
+    default_variants-append \
+                        +x11
+} elseif {![variant_isset x11]} {
+    default_variants-append \
+                        +quartz
+}
+
 post-destroot {
     # The following steps somewhat mimic certain parts of the
     # ${worksrcpath}/tools/osx/macosx_bundle.sh script. However, we only
@@ -118,70 +164,76 @@ post-destroot {
     # used to generate a fully portable installer for distribution.
 
     # XDG = X Desktop Group, now known as freedesktop.org
-    set xdg_share_root ${destroot}${prefix}/share
 
-    set rt_data_home $xdg_share_root/${name}
-    ln -s $app_contents/Resources $rt_data_home
+    # Technically, we can build app bundle with gtk+x11,
+    # but that would complicate making wrappers for libstdc++ systems,
+    # while perhaps all users of modern macOS will use +quartz anyway.
+    if {[variant_isset quartz]} {
+        set xdg_share_root ${destroot}${prefix}/share
 
-    set xdg_desktop_entries $xdg_share_root/applications
-    xinstall -d $xdg_desktop_entries
-    ln -s $app_contents/Resources/applications/${name}.desktop \
-          $xdg_desktop_entries/
+        set rt_data_home $xdg_share_root/${name}
+        ln -s $app_contents/Resources $rt_data_home
 
-    set xdg_desktop_icons $xdg_share_root/icons/hicolor
-    xinstall -d $xdg_desktop_icons
-    set icon_resolutions [list \
-        16x16 24x24 32x32 48x48 64x64 128x128 256x256 scalable \
-    ]
-    foreach ico_res $icon_resolutions {
-        xinstall -d $xdg_desktop_icons/$ico_res/apps
-        ln -s $app_contents/Resources/icons/hicolor/$ico_res/apps/${name}.png \
-              $xdg_desktop_icons/$ico_res/apps/
+        set xdg_desktop_entries $xdg_share_root/applications
+        xinstall -d $xdg_desktop_entries
+        ln -s $app_contents/Resources/applications/${name}.desktop \
+            $xdg_desktop_entries/
+
+        set xdg_desktop_icons $xdg_share_root/icons/hicolor
+        xinstall -d $xdg_desktop_icons
+        set icon_resolutions [list \
+            16x16 24x24 32x32 48x48 64x64 128x128 256x256 scalable \
+        ]
+        foreach ico_res $icon_resolutions {
+            xinstall -d $xdg_desktop_icons/$ico_res/apps
+            ln -s $app_contents/Resources/icons/hicolor/$ico_res/apps/${name}.png \
+                $xdg_desktop_icons/$ico_res/apps/
+        }
+
+        set xdg_metainfo $xdg_share_root/metainfo
+        xinstall -d $xdg_metainfo
+        ln -s $app_contents/Resources/metainfo/com.${name}.${github.project}.appdata.xml \
+            $xdg_metainfo/
+
+        set relative_manpath man/man1
+        ln -s $app_contents/Resources/$relative_manpath/${name}.1 \
+            $xdg_share_root/$relative_manpath/
+
+        set osx_tools ${worksrcpath}/tools/osx
+
+        copy $osx_tools/PkgInfo ${destroot}$app_contents/
+
+        # We overwrite the Info.plist file generated by the CMake build
+        # with the one provided in the RawTherapee source code, because the
+        # one provided by the devs is more complete than the one generated
+        # during the course of the build.
+        xinstall -m 644 $osx_tools/Info.plist.in \
+            ${destroot}$app_contents/Info.plist
+        set regexes [list \
+            "s/@minimum_arm64_version@/11.0/" \
+            "s/@minimum_x86_64_version@/10.6/" \
+            "s/@version@/${version}/" \
+            "s/@shortVersion@/${version}/" \
+            "/XDG_CONFIG_HOME/,/XDG_DATA_DIRS/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
+            "/XDG_DATA_HOME/,/GSETTINGS_SCHEMA_DIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
+            "s|/Applications/${github.project}.app/Contents/Resources|${prefix}|" \
+            "/GDK_PIXBUF_MODULEDIR/,/LIBDIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders\\2|" \
+            "/DATADIR/,/GDK_RENDERING/s|${prefix}|$app_contents/Resources|" \
+        ]
+        foreach re $regexes {
+            reinplace -E $re ${destroot}$app_contents/Info.plist
+        }
+
+        # Copy the .icns files into the app bundle
+        set icns_files [list ${name} profile]
+        foreach icns_file $icns_files {
+            copy $osx_tools/${icns_file}.icns \
+                ${destroot}$app_contents/Resources/
+        }
+
+        ln -s $app_contents/MacOS/${name}     ${destroot}${prefix}/bin/
+        ln -s $app_contents/MacOS/${name}-cli ${destroot}${prefix}/bin/
     }
-
-    set xdg_metainfo $xdg_share_root/metainfo
-    xinstall -d $xdg_metainfo
-    ln -s $app_contents/Resources/metainfo/com.${name}.${github.project}.appdata.xml \
-          $xdg_metainfo/
-
-    set relative_manpath man/man1
-    ln -s $app_contents/Resources/$relative_manpath/${name}.1 \
-          $xdg_share_root/$relative_manpath/
-
-    set osx_tools ${worksrcpath}/tools/osx
-
-    copy $osx_tools/PkgInfo ${destroot}$app_contents/
-
-    # We overwrite the Info.plist file generated by the CMake build
-    # with the one provided in the RawTherapee source code, because the
-    # one provided by the devs is more complete than the one generated
-    # during the course of the build.
-    xinstall -m 644 $osx_tools/Info.plist.in \
-        ${destroot}$app_contents/Info.plist
-    set regexes [list \
-        "s/@minimum_arm64_version@/11.0/" \
-        "s/@minimum_x86_64_version@/10.6/" \
-        "s/@version@/${version}/" \
-        "s/@shortVersion@/${version}/" \
-        "/XDG_CONFIG_HOME/,/XDG_DATA_DIRS/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
-        "/XDG_DATA_HOME/,/GSETTINGS_SCHEMA_DIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/share/${name}\\2|" \
-        "s|/Applications/${github.project}.app/Contents/Resources|${prefix}|" \
-        "/GDK_PIXBUF_MODULEDIR/,/LIBDIR/s|\(<string>\).*\(</string>\)|\\1${prefix}/lib/gdk-pixbuf-2.0/2.10.0/loaders\\2|" \
-        "/DATADIR/,/GDK_RENDERING/s|${prefix}|$app_contents/Resources|" \
-    ]
-    foreach re $regexes {
-        reinplace -E $re ${destroot}$app_contents/Info.plist
-    }
-
-    # Copy the .icns files into the app bundle
-    set icns_files [list ${name} profile]
-    foreach icns_file $icns_files {
-        copy $osx_tools/${icns_file}.icns \
-             ${destroot}$app_contents/Resources/
-    }
-
-    ln -s $app_contents/MacOS/${name}     ${destroot}${prefix}/bin/
-    ln -s $app_contents/MacOS/${name}-cli ${destroot}${prefix}/bin/
 }
 
 proc update_desktop_env {} {
