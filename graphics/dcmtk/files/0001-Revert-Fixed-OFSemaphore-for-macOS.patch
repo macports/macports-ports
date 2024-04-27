@@ -1,0 +1,214 @@
+From 0729bc2cd5a1ad90a2a224a47c15ecd8a4751886 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Sun, 28 Apr 2024 04:03:47 +0800
+Subject: [PATCH] Revert "Fixed OFSemaphore for macOS."
+
+This reverts commit 9ce775bba51fe65f47b59d66165e548cb9ff95db.
+---
+ ofstd/include/dcmtk/ofstd/ofthread.h | 11 ++++++
+ ofstd/libsrc/ofthread.cc             | 55 ++++++----------------------
+ ofstd/tests/tthread.cc               |  9 +++++
+ 3 files changed, 32 insertions(+), 43 deletions(-)
+
+diff --git ofstd/include/dcmtk/ofstd/ofthread.h ofstd/include/dcmtk/ofstd/ofthread.h
+index c839db623..00c055215 100644
+--- ofstd/include/dcmtk/ofstd/ofthread.h
++++ ofstd/include/dcmtk/ofstd/ofthread.h
+@@ -248,6 +248,14 @@ private:
+   OFThreadSpecificData& operator=(const OFThreadSpecificData& arg);
+ };
+ 
++
++/* Mac OS X only permits named Semaphores. The code below compiles on Mac OS X
++   but does not work. This will be corrected in the next snapshot. For now, the
++   semaphore code is completely disabled for that OS (it is not used in other
++   parts of the toolkit so far.
++ */
++#ifndef _DARWIN_C_SOURCE
++
+ /** provides an operating system independent abstraction for semaphores.
+  *  A semaphore is a non-negative integer counter that is used
+  *  to coordinate access to resources. The initial and maximum value of the counter
+@@ -317,6 +325,9 @@ private:
+   OFSemaphore& operator=(const OFSemaphore& arg);
+ };
+ 
++
++#endif // _DARWIN_C_SOURCE
++
+ /** provides an operating system independent abstraction for mutexes
+  *  (mutual exclusion locks).
+  *  Mutexes prevent multiple threads from simultaneously executing critical
+diff --git ofstd/libsrc/ofthread.cc ofstd/libsrc/ofthread.cc
+index 6b590c84c..777b0681a 100644
+--- ofstd/libsrc/ofthread.cc
++++ ofstd/libsrc/ofthread.cc
+@@ -30,13 +30,6 @@
+ 
+ #include "dcmtk/ofstd/ofstd.h"
+ 
+-#ifdef _DARWIN_C_SOURCE
+-#define DARWIN_INTERFACE
+-extern "C" {
+-#include <dispatch/dispatch.h>
+-}
+-#endif /* _DARWIN_C_SOURCE */
+-
+ #ifdef HAVE_WINDOWS_H
+ #define WINDOWS_INTERFACE
+ #define WIN32_LEAN_AND_MEAN
+@@ -399,10 +392,15 @@ void OFThreadSpecificData::errorstr(OFString& description, int /* code */ )
+ 
+ /* ------------------------------------------------------------------------- */
+ 
++/* Mac OS X only permits named Semaphores. The code below compiles on Mac OS X
++   but does not work. This will be corrected in the next snapshot. For now, the
++   semaphore code is completely disabled for that OS (it is not used in other
++   parts of the toolkit so far.
++ */
++#ifndef _DARWIN_C_SOURCE
++
+ #ifdef WINDOWS_INTERFACE
+   const int OFSemaphore::busy = -1;
+-#elif defined(DARWIN_INTERFACE)
+-  const int OFSemaphore::busy = EAGAIN;
+ #elif defined(POSIX_INTERFACE)
+   const int OFSemaphore::busy = EAGAIN;  // Posix returns EAGAIN instead of EBUSY in trywait.
+ #elif defined(SOLARIS_INTERFACE)
+@@ -412,7 +410,7 @@ void OFThreadSpecificData::errorstr(OFString& description, int /* code */ )
+ #endif
+ 
+ 
+-#if defined(WINDOWS_INTERFACE) || defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE) || defined(DARWIN_INTERFACE)
++#if defined(WINDOWS_INTERFACE) || defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE)
+ OFSemaphore::OFSemaphore(unsigned int numResources)
+ #else
+ OFSemaphore::OFSemaphore(unsigned int /* numResources */ )
+@@ -421,14 +419,6 @@ OFSemaphore::OFSemaphore(unsigned int /* numResources */ )
+ {
+ #ifdef WINDOWS_INTERFACE
+   theSemaphore = OFstatic_cast(void *, CreateSemaphore(NULL, numResources, numResources, NULL));
+-#elif defined(DARWIN_INTERFACE)
+-  dispatch_semaphore_t *sem = new dispatch_semaphore_t;
+-  if (sem)
+-  {
+-    *sem = dispatch_semaphore_create(numResources);
+-    if (*sem == NULL) delete sem;
+-    else theSemaphore = sem;
+-  }
+ #elif defined(POSIX_INTERFACE)
+   sem_t *sem = new sem_t;
+   if (sem)
+@@ -451,8 +441,6 @@ OFSemaphore::~OFSemaphore()
+ {
+ #ifdef WINDOWS_INTERFACE
+   CloseHandle(OFthread_cast(HANDLE, theSemaphore));
+-#elif defined(DARWIN_INTERFACE)
+-  delete OFthread_cast(dispatch_semaphore_t *, theSemaphore);
+ #elif defined(POSIX_INTERFACE)
+   if (theSemaphore) sem_destroy(OFthread_cast(sem_t *, theSemaphore));
+   delete OFthread_cast(sem_t *, theSemaphore);
+@@ -478,12 +466,6 @@ int OFSemaphore::wait()
+ #ifdef WINDOWS_INTERFACE
+   if (WaitForSingleObject(OFthread_cast(HANDLE, theSemaphore), INFINITE) == WAIT_OBJECT_0) return 0;
+   else return OFstatic_cast(int, GetLastError());
+-#elif defined(DARWIN_INTERFACE)
+-  if (theSemaphore)
+-  {
+-    // Always succeeds (returns zero) if the timeout is DISPATCH_TIME_FOREVER.
+-    return dispatch_semaphore_wait(*OFthread_cast(dispatch_semaphore_t *, theSemaphore), DISPATCH_TIME_FOREVER);
+-  } else return EINVAL;
+ #elif defined(POSIX_INTERFACE)
+   if (theSemaphore)
+   {
+@@ -503,14 +485,6 @@ int OFSemaphore::trywait()
+   if (result == WAIT_OBJECT_0) return 0;
+   else if (result == WAIT_TIMEOUT) return OFSemaphore::busy;
+   else return OFstatic_cast(int, GetLastError());
+-#elif defined(DARWIN_INTERFACE)
+-  if (theSemaphore)
+-  {
+-    if (dispatch_semaphore_wait(*OFthread_cast(dispatch_semaphore_t *, theSemaphore), DISPATCH_TIME_NOW) != 0)
+-      return EAGAIN;
+-    else
+-      return 0;
+-  } else return EINVAL;
+ #elif defined(POSIX_INTERFACE)
+   if (theSemaphore)
+   {
+@@ -527,13 +501,6 @@ int OFSemaphore::post()
+ {
+ #ifdef WINDOWS_INTERFACE
+   if (ReleaseSemaphore(OFthread_cast(HANDLE, theSemaphore), 1, NULL)) return 0; else return OFstatic_cast(int, GetLastError());
+-#elif defined(DARWIN_INTERFACE)
+-  if (theSemaphore)
+-  {
+-    // Always succeeds.
+-    dispatch_semaphore_signal(*OFthread_cast(dispatch_semaphore_t *, theSemaphore));
+-    return 0;
+-  } else return EINVAL;
+ #elif defined(POSIX_INTERFACE)
+   if (theSemaphore)
+   {
+@@ -546,7 +513,7 @@ int OFSemaphore::post()
+ #endif
+ }
+ 
+-#if defined(WINDOWS_INTERFACE) || defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE) || defined(DARWIN_INTERFACE)
++#if defined(WINDOWS_INTERFACE) || defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE)
+ void OFSemaphore::errorstr(OFString& description, int code)
+ #else
+ void OFSemaphore::errorstr(OFString& description, int /* code */ )
+@@ -563,7 +530,7 @@ void OFSemaphore::errorstr(OFString& description, int /* code */ )
+     if (buf) description = OFreinterpret_cast(const char *, buf);
+     LocalFree(buf);
+   }
+-#elif defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE) || defined(DARWIN_INTERFACE)
++#elif defined(POSIX_INTERFACE) || defined(SOLARIS_INTERFACE)
+   char buf[256];
+   const char *str = OFStandard::strerror(code, buf, sizeof(buf));
+   if (str) description = str; else description.clear();
+@@ -573,6 +540,8 @@ void OFSemaphore::errorstr(OFString& description, int /* code */ )
+   return;
+ }
+ 
++#endif // _DARWIN_C_SOURCE
++
+ /* ------------------------------------------------------------------------- */
+ 
+ 
+diff --git ofstd/tests/tthread.cc ofstd/tests/tthread.cc
+index 587c27316..1cfc2f3e9 100644
+--- ofstd/tests/tthread.cc
++++ ofstd/tests/tthread.cc
+@@ -137,6 +137,11 @@ static void mutex_test()
+   delete mutex;
+ }
+ 
++/* Currently OFSemaphore is not working and disabled on Mac OS X. Thus,
++ * it is not tested on Mac OS X.
++ */
++#ifndef _DARWIN_C_SOURCE
++
+ static OFSemaphore *semaphore=NULL;
+ static volatile int sem_cond1=0;
+ static volatile int sem_cond2=0;
+@@ -246,6 +251,8 @@ static void semaphore_test()
+   delete semaphore;
+ }
+ 
++#endif //_DARWIN_C_SOURCE
++
+ static OFReadWriteLock *rwlock=NULL;
+ static OFMutex *mutex2=NULL;
+ static volatile int rw_cond1=0;
+@@ -656,7 +663,9 @@ OFTEST(ofstd_thread)
+ {
+   // This makes sure tests are executed in the expected order
+   mutex_test();
++#ifndef _DARWIN_C_SOURCE
+   semaphore_test(); // may assume that mutexes work correctly
++#endif
+   rwlock_test();    // may assume that mutexes and semaphores work correctly
+   rwlocker_test();  // may assume that mutexes, semaphores and read/write locks work correctly
+   tsdata_test();
