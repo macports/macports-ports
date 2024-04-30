@@ -75,7 +75,7 @@ foreach py_ver ${gnuradio.python_versions} {
 }
 
 depends_build-append \
-    port:pkgconfig
+    path:bin/pkg-config:pkgconfig
 
 depends_lib-append \
     port:fftw-3-single \

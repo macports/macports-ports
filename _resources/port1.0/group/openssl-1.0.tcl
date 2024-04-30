@@ -179,8 +179,8 @@ proc openssl::configure_build {} {
                         pkgconfig {
                             ui_debug "openssl: -> Setting openssl pkgconfig configuration"
                             configure.pkg_config_path-prepend [openssl::pkgconfig_dir]
-                            depends_build-delete port:pkgconfig
-                            depends_build-append port:pkgconfig
+                            depends_build-delete path:bin/pkg-config:pkgconfig port:pkgconfig
+                            depends_build-append path:bin/pkg-config:pkgconfig
                         }
                         build_flags {
                             ui_debug "openssl: -> Setting openssl build flags configuration"
