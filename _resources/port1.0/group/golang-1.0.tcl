@@ -57,7 +57,7 @@ PortGroup compiler_wrapper 1.0
 options go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix go.offline_build
 
 proc go.setup {go_package go_version {go_tag_prefix ""} {go_tag_suffix ""}} {
-    global go.package go.domain go.author go.project go.version go.tag_prefix go.tag_suffix
+    global go.domain go.author go.project go.version
 
     go.package          ${go_package}
     go.version          ${go_version}
@@ -191,9 +191,7 @@ default test.env      ${go_env}
 default configure.env ${go_env}
 
 proc go.append_env {} {
-    global configure.cc configure.cxx configure.ldflags configure.cflags configure.cxxflags configure.cppflags
-    global os.major build.env workpath
-    global go.offline_build
+    global configure.ldflags os.major build.env go.offline_build
     # Create a wrapper scripts around compiler commands to enforce use of MacPorts flags
     # and to aid use of MacPorts legacysupport library as required.
     if { ${os.major} <= [option legacysupport.newest_darwin_requires_legacy] } {
@@ -254,10 +252,8 @@ proc handle_go_vendors {option action {vendors_str ""}} {
 }
 
 proc handle_set_go_vendors {vendors_str} {
-    global go.vendors_internal checksum_types
-    if {![info exists checksum_types]} {
-        set checksum_types $portchecksum::checksum_types
-    }
+    global go.vendors_internal portchecksum::checksum_types
+
     set num_tokens [llength ${vendors_str}]
     if {$num_tokens > 0} {
         # portgroups like github may set this - can't be used with multiple distfiles
