@@ -348,12 +348,13 @@ proc handle_set_go_vendors {vendors_str} {
                 set tag [regsub -all {[^[:alpha:][:digit:]]} ${vpackage}-${vversion} -]
                 master_sites-append ${master_site}:${tag}
                 distfiles-append    ${distfile}:${tag}
+                checksums-append    ${distfile}
             } elseif {${token} in ${checksum_types}} {
                 # Handle checksum values
                 incr ix
                 set csumval [lindex ${vendors_str} ${ix}]
                 incr ix
-                checksums-append    ${distfile} ${token} ${csumval}
+                checksums-append    ${token} ${csumval}
             } else {
                 # This wasn't a checksum token, but rather the next vendor package
                 incr ix -1
