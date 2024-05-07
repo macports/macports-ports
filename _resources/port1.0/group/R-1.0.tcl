@@ -66,9 +66,11 @@ proc R.setup {domain author package version {R_tag_prefix ""} {R_tag_suffix ""}}
         # Packages normally get updated on Bioconductor in bulk twice a year.
         # Development versions can be found on GitHub. However, Bioconductor upstream recommends
         # to keep its packages in sync pegged to a current Bioconductor release
-        # for the sake of better compatibility.
+        # for the sake of better compatibility. MacPorts follows this policy now.
+            set bioc_release    3.19
             homepage        https://bioconductor.org/packages/${R.package}
             master_sites    https://www.bioconductor.org/packages/release/bioc/src/contrib/ \
+                            https://bioconductor.org/packages/${bioc_release}/bioc/src/contrib/Archive/${R.package}/ \
                             https://www.bioconductor.org/packages/release/data/experiment/src/contrib/ \
                             https://www.bioconductor.org/packages/devel/data/experiment/src/contrib/
             distname        ${R.package}_${version}
