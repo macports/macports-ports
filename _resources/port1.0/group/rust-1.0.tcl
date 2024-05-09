@@ -282,6 +282,13 @@ proc rust::old_macos_compatibility {cname cversion} {
     global cargo.home subport
 
     switch ${cname} {
+        "cc" {
+            if { [vercmp ${cversion} < 1.0.94] && [vercmp ${cversion} >= 1.0.85] } {
+                # see https://github.com/rust-lang/cc-rs/pull/1007
+                reinplace "s|--show-sdk-platform-version|--show-sdk-version|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/lib.rs
+            }
+        }
         "curl-sys" {
             if { [vercmp ${cversion} < 0.4.56] } {
                 # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
@@ -329,6 +336,18 @@ proc rust::old_macos_compatibility {cname cversion} {
     }
 
     switch ${cname} {
+        "cc" {
+            if {[vercmp ${cversion} >= 1.0.85]} {
+                # cc ignores `MACOSX_DEPLOYMENT_TARGET` if it is too low (see https://github.com/rust-lang/cc-rs/commit/0a0ce5726d0b42d383bb50079bdb680dfddcc076)
+                # instead, cc runs `xcrun --show-sdk-platform-version` or `xcrun --show-sdk-version`, depening on the version of cc
+                # `xcrun --show-sdk-platform-version` was a mistake (see https://github.com/rust-lang/cc-rs/pull/1007)
+                # `xcrun --show-sdk-version` is only supported on 10.8 or above
+                # if `xcrun` fails, cc sets MACOSX_DEPLOYMENT_TARGET to a hardcoded value
+                # cc may remove `xcrun` in the future (see https://github.com/rust-lang/cc-rs/pull/1009)
+                reinplace "s|let default = \"10.7\";|let default = \"[option macosx_deployment_target]\";|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/lib.rs
+            }
+        }
         "crypto-hash" {
             # switch crypto-hash to use openssl instead of commoncrypto
             # See: https://github.com/malept/crypto-hash/issues/23
@@ -455,6 +474,84 @@ proc rust::append_envs { var {phases {configure build destroot}} } {
         ${phase}.env-delete ${var}
         ${phase}.env-append ${var}
     }
+}
+
+# utility procedure to find SDK
+proc rust::get_sdkroot {sdk_version} {
+    if {[option os.platform] ne "darwin"} {
+        # only valid empty return
+        return {}
+    }
+
+    if {[option configure.sdkroot] ne ""} {
+        # SDK from base was found, so trust it
+        return [option configure.sdkroot]
+    }
+
+    if {![option use_xcode]} {
+        set sdks_dir        [option configure.developer_dir]/SDKs
+    } else {
+        if {[vercmp [option xcodeversion] < 4.3]} {
+            set sdks_dir    [option configure.developer_dir]/SDKs
+        } else {
+            set sdks_dir    [option configure.developer_dir]/Platforms/MacOSX.platform/Developer/SDKs
+        }
+    }
+
+    if {$sdk_version eq "10.4"} {
+        set sdk ${sdks_dir}/MacOSX10.4u.sdk
+    } else {
+        set sdk ${sdks_dir}/MacOSX${sdk_version}.sdk
+    }
+    if {[file exists ${sdk}]} {
+        # exact SDK was found
+        return ${sdk}
+    }
+
+    set sdk_major [lindex [split $sdk_version .] 0]
+
+    set sdks [glob -nocomplain -directory ${sdks_dir} MacOSX${sdk_major}*.sdk]
+    foreach sdk [lreverse [lsort -command vercmp $sdks]] {
+        # Sanity check - mostly empty SDK directories are known to exist
+        if {[file exists ${sdk}/usr/include/sys/cdefs.h]} {
+            # SDK with same OS version found
+            return ${sdk}
+        }
+    }
+
+    if {$sdk_major >= 11 && $sdk_major == [option macos_version_major]} {
+        set try_versions [list ${sdk_major}.0 [option macos_version]]
+    } elseif {[option os.major] >= 12} {
+        set try_versions [list $sdk_version]
+    } else {
+        # `xcrun --show-sdk-path` fails prior to 10.8
+        set try_versions [list]
+    }
+    foreach try_version $try_versions {
+        if {![catch {exec env DEVELOPER_DIR=[option configure.developer_dir] xcrun --sdk macosx${try_version} --show-sdk-path 2> /dev/null} sdk]} {
+            # xcrun found SDK with same OS version
+            return ${sdk}
+        }
+    }
+
+    set sdk ${sdks_dir}/MacOSX.sdk
+    if {[file exists ${sdk}]} {
+        # unversioned SDK found
+        ui_warn "Rust PG: Unversioned SDK ${sdk} used for ${sdk_version}"
+        return ${sdk}
+    }
+
+    if {[option os.major] >= 12} {
+        # `xcrun --show-sdk-path` fails prior to 10.8
+        if {![catch {exec xcrun --sdk macosx --show-sdk-path 2> /dev/null} sdk]} {
+            # xcrun found unversioned SDK
+            ui_warn "Rust PG: Unversioned SDK ${sdk} used for ${sdk_version}"
+            return ${sdk}
+        }
+    }
+
+    ui_error "Rust PG: unable to find SDK for ${sdk_version}"
+    return -code error {}
 }
 
 # Is build caching enabled ?
