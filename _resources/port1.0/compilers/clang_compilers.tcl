@@ -17,8 +17,8 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
         # For now limit exposure of clang-17+ to macOS13+ due to issues like
         # https://github.com/macports/macports-ports/pull/21051
         # https://trac.macports.org/ticket/68640
-        if {[option compiler.cxx_standard] >= 2020} {
-            # Limit clang 18 to c++20 or newer
+        if {[option compiler.cxx_standard] >= 2017} {
+            # Limit clang 18 to c++17 or newer
             lappend compilers macports-clang-18
         }
         if {[option compiler.cxx_standard] >= 2014} {

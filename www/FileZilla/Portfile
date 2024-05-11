@@ -1,15 +1,19 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           wxWidgets 1.0
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           legacysupport 1.1
+PortGroup           wxWidgets 1.0
+
+# LegacySupport only used for providing wrappers here.
+legacysupport.newest_darwin_requires_legacy 0
 
 name                FileZilla
-version             3.66.4
+version             3.67.0
+revision            0
 
 categories          www aqua
-platforms           darwin
-maintainers         nomaintainer
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 license             GPL-2+
 
 description         Open-source FTP, FTPS, and SFTP client
@@ -21,17 +25,47 @@ long_description    FileZilla Client is a fast and reliable cross-platform \
 homepage            https://filezilla-project.org/
 master_sites        https://download.filezilla-project.org/client
 
-checksums           rmd160  950e44a39b4464cd47888295eb20cb394b8df6fd \
-                    sha256  a40f04e02efaae7b50d1515ee1c36c4b0e445818566c450e440bfd6c70e9b203 \
-                    size    4057952
+checksums           rmd160  598141c7af251fbeec751bbaf7e6573d0f0e40af \
+                    sha256  e5dadc807db999ceb464984f974d3ef59b562c59546658057e9b201183adaf9a \
+                    size    4058264
 
-# wxWidgets-3.0 with support for C++11 on < 10.9
-wxWidgets.use       wxWidgets-3.0-cxx11
+# FileZilla 3.67 dropped support for wxWidgets < 3.2.1.
+# However, wxWidgets-3.2 does not build on < 10.11,
+# and wxWidgets-3.0* does not work correctly on < 10.8.
+# So for older macOS (and non-Darwin) use wxGTK.
+if {${os.platform} eq "darwin" && ${os.major} > 15} {
+    wxWidgets.use   wxWidgets-3.2
+} elseif {${os.platform} eq "darwin" && ${os.major} > 11} {
+    wxWidgets.use   wxWidgets-3.0-cxx11
+} else {
+    wxWidgets.use   wxGTK-3.0-cxx11
 
-depends_build       port:pkgconfig \
-                    port:gettext
+    depends_lib-append \
+                    port:desktop-file-utils
 
-depends_lib         port:dbus \
+    legacysupport.redirect_bins filezilla
+
+    # Contrary to documentation, FZ_DATADIR does nothing
+    # on macOS, since assumption of app bundle is hardcoded.
+    patchfiles-append \
+                    patch-fix-fz_datadir.diff
+}
+
+if {${wxWidgets.version} < 3.2} {
+    # Here we just restore macOS-relevant fallbacks from 3.66.4.
+    patchfiles-append \
+                    patch-relax-wxwidgets-version.diff \
+                    patch-wx3.0.diff
+}
+
+depends_build-append \
+                    port:autoconf \
+                    port:automake \
+                    port:gettext \
+                    port:libtool \
+                    port:pkgconfig
+
+depends_lib-append  port:dbus \
                     path:lib/pkgconfig/gnutls.pc:gnutls \
                     port:libfilezilla \
                     port:libidn \
@@ -40,12 +74,19 @@ depends_lib         port:dbus \
                     port:xdg-utils \
                     port:${wxWidgets.port}
 
+if {[string match *gcc* ${configure.compiler}]} {
+    # checking for whether we need to use Boost Regex due GCC bug 86164
+    # configure: error: Boost Regex 1.76 or higher not found.
+    depends_build-append \
+                    port:boost
+}
+
 distname            ${name}_${version}_src
 
 use_xz              yes
 worksrcdir          filezilla-${version}
 
-patchfiles          patch-src-commonui-buildinfo.cpp.diff \
+patchfiles-append   patch-src-commonui-buildinfo.cpp.diff \
                     patch-src-engine-version.cpp.diff \
                     patch-src-interface-mainfrm.cpp.diff \
                     patch-src-interface-toolbar.mm.diff \
@@ -54,6 +95,11 @@ patchfiles          patch-src-commonui-buildinfo.cpp.diff \
                     patch-paths-1050.diff
 
 platform darwin {
+    # Condition is wrong in the source, since this object is required
+    # for linking on macOS, whether or not app bundle is built.
+    patchfiles-append \
+                    patch-fix-mac-wxgtk.diff
+
     if {${os.major} < 11} {
         # O_CLOEXEC was added in Mac OS X 10.7. Only apply this patch on
         # system versions which need it because it could create a race
@@ -64,7 +110,8 @@ platform darwin {
 
 # http://trac.filezilla-project.org/ticket/5473
 # http://sourceforge.net/p/tinyxml/patches/51/
-configure.args      --with-tinyxml=builtin \
+configure.args-append \
+                    --with-tinyxml=builtin \
                     --with-pugixml=builtin \
                     --disable-manualupdatecheck \
                     --disable-autoupdatecheck \
@@ -78,9 +125,21 @@ compiler.thread_local_storage   yes
 # https://trac.macports.org/ticket/59805
 compiler.blacklist-append {clang < 1000}
 
-destroot {
-    copy ${worksrcpath}/FileZilla.app ${destroot}${applications_dir}
+# We only override destroot for app bundle build.
+if {${os.platform} eq "darwin" && ${os.major} > 11} {
+    destroot {
+        copy ${worksrcpath}/FileZilla.app ${destroot}${applications_dir}
+    }
+} else {
+    post-activate {
+        system "${prefix}/bin/update-desktop-database ${prefix}/share/applications"
+    }
 }
+
+depends_test-append port:cppunit
+
+test.run            yes
+test.target         check
 
 livecheck.type      regex
 livecheck.url       ${master_sites}

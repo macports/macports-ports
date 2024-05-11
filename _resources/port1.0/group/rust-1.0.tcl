@@ -542,19 +542,6 @@ proc rust::rust_pg_callback {} {
             # Use libMacportsLegacySystem.B.dylib since it is able to use the `__asm("$ld$add$os10.5$...")` trick for symbols that are part of legacy-support *only* on older systems.
             set legacyLib               libMacportsLegacySystem.B.dylib
             set dep_type                lib
-
-            # code should mimic legacy-support
-            # see https://github.com/macports/macports-ports/blob/master/devel/legacy-support/Portfile
-            set max_darwin_reexport 19
-            if { [option configure.build_arch] eq "arm64" || [option os.major] > ${max_darwin_reexport} } {
-                # ${prefix}/lib/libMacportsLegacySystem.B.dylib does not exist
-                # see https://trac.macports.org/ticket/65255
-                known_fail              yes
-                pre-fetch {
-                    ui_error "${subport} requires libMacportsLegacySystem.B.dylib, which is provided by legacy-support"
-                    return -code error "incompatible system configuration"
-                }
-            }
         } else {
             # Use the static library since the Rust compiler looks up certain symbols at *runtime* (e.g. `openat`).
             # Normally, we would want the additional functionality provided by MacPorts.

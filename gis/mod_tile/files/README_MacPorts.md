@@ -42,13 +42,18 @@ Optionally, you can download and apply incremental updates to the database by
 running an import script which can be scheduled with:
 
 	$ sudo launchctl load -w \
-	/Library/LaunchAgents/org.macports.fetch-osm-db-updates.plist
+	/Library/LaunchDaemons/org.macports.fetch-osm-db-updates.plist
 
 This script downloads an hourly snapshot, so it has to be run at least that
 frequently to keep up-to-date.  The default installation runs it more
 frequently to allow it to catch up, allowing for a little downtime.  Depending
 on your requirements, it may be better not to run this process at all and just
 refresh the entire region every few months or so.
+
+If the daemon is loaded you can use the following command to immediately
+initiate the process before the next scheduled session.
+
+	$ sudo launchctl kickstart -p system/org.macports.fetch-osm-db-updates
 
 The output of the various scripts and utilities are written to log files under
 `@PREFIX@/var/log/renderd`.  A configuration file for `logrotate` is
@@ -100,7 +105,7 @@ configuration files:
 
 - `@PREFIX@/etc/mod_tile/osm-tiles-update.conf`
 - `@PREFIX@/etc/openstreetmap-carto/external-data.yml`
-- `@PREFIX@/etc/openstreetmap-carto/mapnik.xml`
+- `@PREFIX@/etc/renderd/mapnik.xml`
 
 The `mapnik.xml` configuration file repeatedly defines the database name for
 every style.  It may be easier to re-create the entire configuration file from
@@ -113,7 +118,7 @@ its original source file as follows:
     source file:
 
 		$ sudo port install carto
-		$ carto project.mml | sudo tee @PREFIX@/etc/openstreetmap-carto/mapnik.xml
+		$ carto project.mml | sudo tee @PREFIX@/etc/renderd/mapnik.xml
 
 ## Useful Resources
 
