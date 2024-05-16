@@ -130,6 +130,7 @@ pre-configure {
 default configure.cmd       {${haskell_stack.bin}}
 default configure.pre_args  {}
 default configure.args      {setup ${haskell_stack.default_args}}
+default configure.universal_args {}
 default configure.env       {${haskell_stack.env}}
 
 default build.cmd           {${haskell_stack.bin}}
