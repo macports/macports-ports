@@ -243,6 +243,7 @@ default configure.cmd       {${haskell_cabal.bin}\
                                 ${haskell_cabal.global_flags}}
 default configure.pre_args  {}
 default configure.args      {configure}
+default configure.universal_args {}
 default configure.env       {${haskell_cabal.env}}
 
 default build.type          {cabal}
