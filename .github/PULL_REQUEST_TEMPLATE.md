@@ -24,6 +24,7 @@ Have you
 - [ ] checked that there aren't other open [pull requests](https://github.com/macports/macports-ports/pulls) for the same change?
 - [ ] referenced existing tickets on [Trac](https://trac.macports.org/wiki/Tickets) with full URL in commit message? <!-- Please don't open a new Trac ticket if you are submitting a pull request. -->
 - [ ] checked your Portfile with `port lint --nitpick`?
+- [ ] checked checksums of binary packages for all supported architectures with `port -d checksum <portname> build_arch=<arch>`?
 - [ ] tried existing tests with `sudo port test`?
 - [ ] tried a full install with `sudo port -vst install`?
 - [ ] tested basic functionality of all binary files?
