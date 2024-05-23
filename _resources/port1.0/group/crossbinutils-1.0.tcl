@@ -174,6 +174,11 @@ proc crossbinutils.setup {target version} {
         --mandir=${prefix}/share/man \
         --datarootdir=${prefix}/share/${crossbinutils.target}
 
+    # Opportunistic links zstd for compression
+    if {[vercmp ${version} >= "2.40"]} {
+        depends_lib-append  port:zstd
+    }
+
     build.dir ${workpath}/build
 
     destroot.violate_mtree yes
