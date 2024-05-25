@@ -488,13 +488,15 @@ proc rust::get_sdkroot {sdk_version} {
         return [option configure.sdkroot]
     }
 
-    if {![option use_xcode]} {
-        set sdks_dir        [option configure.developer_dir]/SDKs
+    if {![option use_xcode] && [file exists "/Library/Developer/CommandLineTools/SDKs"]} {
+        set sdks_dir        /Library/Developer/CommandLineTools/SDKs
     } else {
+        # `configure.developer_dir` is not used in case `use_xcode` is true but SDKs directory does not exist
+        # early command line tools did not install SDKs
         if {[vercmp [option xcodeversion] < 4.3]} {
-            set sdks_dir    [option configure.developer_dir]/SDKs
+            set sdks_dir    [option developer_dir]/SDKs
         } else {
-            set sdks_dir    [option configure.developer_dir]/Platforms/MacOSX.platform/Developer/SDKs
+            set sdks_dir    [option developer_dir]/Platforms/MacOSX.platform/Developer/SDKs
         }
     }
 
