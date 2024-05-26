@@ -1,0 +1,941 @@
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index 1aeb8f55257..956fd6c679f 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -504,6 +504,46 @@ done:
+     return ret;
+ }
+ 
++static const WCHAR *hack_append_command_line( const WCHAR *cmd, const WCHAR *cmd_line )
++{
++    /* CROSSOVER HACK: bug 13322 (winehq bug 39403)
++     * Insert --no-sandbox in command line of Steam's web helper process to
++     * work around rendering problems.
++     * CROSSOVER HACK: bug 17315
++     * Insert --in-process-gpu in command line of Steam's web helper process to
++     * work around page rendering problems.
++     * CROSSOVER HACK: bug 21883
++     * Insert --disable-gpu as well.
++     */
++
++    static const struct
++    {
++        const WCHAR *exe_name;
++        const WCHAR *append;
++        const WCHAR *required_args;
++        const WCHAR *forbidden_args;
++    }
++    options[] =
++    {
++        {L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu", NULL, L"--type=crashpad-handler"},
++    };
++    unsigned int i;
++
++    if (!cmd) return NULL;
++
++    for (i = 0; i < ARRAY_SIZE(options); ++i)
++    {
++        if (wcsstr( cmd, options[i].exe_name )
++            && (!options[i].required_args || wcsstr(cmd_line, options[i].required_args))
++            && (!options[i].forbidden_args || !wcsstr(cmd_line, options[i].forbidden_args)))
++        {
++            FIXME( "HACK: appending %s to command line.\n", debugstr_w(options[i].append) );
++            return options[i].append;
++        }
++    }
++    return NULL;
++}
++
+ /**********************************************************************
+  *           CreateProcessInternalW   (kernelbase.@)
+  */
+@@ -520,6 +560,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+     RTL_USER_PROCESS_PARAMETERS *params = NULL;
+     RTL_USER_PROCESS_INFORMATION rtl_info;
+     HANDLE parent = 0, debug = 0;
++    const WCHAR *append;
+     ULONG nt_flags = 0;
+     USHORT machine = 0;
+     NTSTATUS status;
+@@ -545,6 +586,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+         app_name = name;
+     }
+ 
++    /* CROSSOVER HACK */
++    if ((append = hack_append_command_line( app_name, tidy_cmdline )))
++    {
++        WCHAR *new_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
++                                              sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
++        lstrcpyW(new_cmdline, tidy_cmdline);
++        lstrcatW(new_cmdline, append);
++        if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
++        tidy_cmdline = new_cmdline;
++    }
++    /* end CROSSOVER HACK */
++
++    TRACE( "app %s cmdline %s after all hacks\n", debugstr_w(app_name), debugstr_w(tidy_cmdline) );
++
+     /* Warn if unsupported features are used */
+ 
+     if (flags & (IDLE_PRIORITY_CLASS | HIGH_PRIORITY_CLASS | REALTIME_PRIORITY_CLASS |
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index 59624bc70f8..99d70a74248 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -2693,6 +2693,331 @@ static WINE_MODREF *find_existing_module( HMODULE module )
+     return NULL;
+ }
+ 
++#ifdef __x86_64__
++/* CW HACK 19487: Patch out %gs:8h accesses in various versions of libcef.dll */
++static void patch_libcef( const WCHAR* libname, WINE_MODREF** pwm )
++{
++    static const char before_85_3_9_0[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0xc3,                                                 /* ret */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0x48, 0x83, 0xec, 0x28,                               /* sub rsp, 0x28 */
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0x48, 0x83, 0xc0, 0xf8                                /* add rax, 0xfffffffffffffff8 */
++    };
++    static const char after_85_3_9_0[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x30] */
++        0x48, 0x8b, 0x40, 0x08,                               /* mov rax, qword [rax+8] */
++        0xc3,                                                 /* ret */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0x48, 0x83, 0xec, 0x28,                               /* sub rsp, 0x28 */
++        0xe8, 0xe7, 0xff, 0xff, 0xff,                         /* call 0xfffffffffffffffe */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x48, 0x83, 0xc0, 0xf8                                /* add rax,0xfffffffffffffff8 */
++    };
++    C_ASSERT( sizeof(before_85_3_9_0) == sizeof(after_85_3_9_0) );
++
++
++    /* The first patch needed for 85.3.11 is the same as 85_3_9_0, just at a different offset. */
++
++    static const char before_85_3_11_1[] =
++    {
++        0x48, 0x8b, 0x44, 0x24, 0x28,  /* mov rax, qword ptr [rsp + 0x28] */
++        0x65, 0x48, 0x8b, 0x34, 0x25, 0x08, 0x00, 0x00, 0x00,  /* mov rsi, qword ptr gs:[0x8] */
++        0x48, 0x85, 0xf6,              /* test rsi, rsi */
++        0x74, 0x2e                     /* jz 0x028c525b */
++
++    };
++    static const char after_85_3_11_1[] =
++    {
++        /* Taking a cue from after_72_0_3626_121_2 - overwriting the test and jump to make room. */
++        0x48, 0x8b, 0x44, 0x24, 0x28,  /* mov rax, qword ptr [rsp + 0x28] */
++        0x65, 0x48, 0x8b, 0x34, 0x25, 0x30, 0x00, 0x00, 0x00,  /* mov rsi, qword ptr gs:[0x30] */
++        0x48, 0x8b, 0x76, 0x08,        /* mov rsi, qword ptr [rsi+8] */
++        0x90,                          /* nop */
++    };
++    C_ASSERT( sizeof(before_85_3_11_1) == sizeof(after_85_3_11_1) );
++
++
++    static const char before_72_0_3626_121_1[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0xc3,                                                 /* ret */
++        0x48, 0x83, 0xec, 0x28,                               /* sub rsp, 0x28 */
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0x48, 0x83, 0xc0, 0xf8,                               /* add rax, 0xfffffffffffffff8 */
++    };
++    static const char after_72_0_3626_121_1[] =
++    {
++        0xe8, 0xb7, 0x00, 0x00, 0x00, /* call 0xbc */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0xc3,                         /* ret */
++        0x48, 0x83, 0xec, 0x28,       /* sub rsp, 0x28 */
++        0xe8, 0xa9, 0x00, 0x00, 0x00, /* call 0xae */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0x90,                         /* nop */
++        0x48, 0x83, 0xc0, 0xf8,       /* add rax, 0xfffffffffffffff8 */
++    };
++    C_ASSERT( sizeof(before_72_0_3626_121_1) == sizeof(after_72_0_3626_121_1) );
++
++    static const char before_72_0_3626_121_2[] =
++    {
++        0x48, 0x8b, 0x46, 0x08,                                 /* mov rax, qword [rsi+8] */
++        0x65, 0x48, 0x8b, 0x34, 0x25, 0x08, 0x00, 0x00, 0x00,   /* mov rsi, qword [gs:0x8] */
++        0x48, 0x85, 0xf6,                                       /* test rsi, rsi */
++        0x74, 0x2e,                                             /* je 0x30 */
++    };
++    static const char after_72_0_3626_121_2[] =
++    {
++        0x48, 0x8b, 0x46, 0x08,                                 /* mov rax, qword [rsi+8] */
++        0x65, 0x48, 0x8b, 0x34, 0x25, 0x30, 0x00, 0x00, 0x00,   /* mov rsi, qword [gs:0x30] */
++        0x48, 0x8b, 0x76, 0x08,                                 /* mov rsi, qword [rsi+8] */
++        0x90,                                                   /* nop */
++    };
++    C_ASSERT( sizeof(before_72_0_3626_121_2) == sizeof(after_72_0_3626_121_2) );
++
++    static const char before_72_0_3626_121_3[] =
++    {
++        0xcc,       /* int3 */
++        0x0f, 0x0b, /* ud2 */
++        0x6a, 0x1c, /* push 0x1c */
++        0x0f, 0x0b, /* ud2 */
++        0xcc,       /* int3 */
++        0x0f, 0x0b, /* ud2 */
++        0x6a, 0x1d, /* push 0x1d */
++        0x0f, 0x0b  /* ud2 */
++    };
++    static const char after_72_0_3626_121_3[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x30] */
++        0x48, 0x8b, 0x40, 0x08,                               /* mov rax, qword [rax+8] */
++        0xc3,                                                 /* ret */
++    };
++    C_ASSERT( sizeof(before_72_0_3626_121_3) == sizeof(after_72_0_3626_121_3) );
++
++    static const char before_qt_5_15_2_0_1[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0xc3,                                                 /* ret */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0x48, 0x83, 0xec, 0x28,                               /* sub rsp, 0x28 */
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0x48, 0x83, 0xe8, 0x08                                /* sub rax, 0x8 */
++    };
++    static const char after_qt_5_15_2_0_1[] =
++    {
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x30] */
++        0x48, 0x8b, 0x40, 0x08,                               /* mov rax, qword [rax+8] */
++        0xc3,                                                 /* ret */
++        0xcc,                                                 /* int3 */
++        0xcc,                                                 /* int3 */
++        0x48, 0x83, 0xec, 0x28,                               /* sub rsp, 0x28 */
++        0xe8, 0xe7, 0xff, 0xff, 0xff,                         /* call 0xfffffffffffffffe */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x90,                                                 /* nop */
++        0x48, 0x83, 0xe8, 0x08                                /* sub rax,0x8 */
++    };
++    C_ASSERT( sizeof(before_qt_5_15_2_0_1) == sizeof(after_qt_5_15_2_0_1) );
++
++    static const char before_qt_5_15_2_0_2[] = {
++        0xff, 0x15, 0xd5, 0xb4, 0x6e, 0x02,                   /* call [KERNEL32.DLL::VirtualQuery] */
++        0x65, 0x48, 0x8b, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00, /* mov rax, qword [gs:0x8] */
++        0x48, 0x8b, 0x4c, 0x24, 0x28                          /* mov rcx, qword [rsp+0x28] */
++    };
++    static const char after_qt_5_15_2_0_2[] = {
++        0xff, 0x15, 0xd5, 0xb4, 0x6e, 0x02, /* call [KERNEL32.DLL::VirtualQuery] */
++        0xe8, 0x78, 0xff, 0xff, 0xff,       /* call 0xfffffffffffffffe */
++        0x90,                               /* nop */
++        0x90,                               /* nop */
++        0x90,                               /* nop */
++        0x90,                               /* nop */
++        0x48, 0x8b, 0x4c, 0x24, 0x28        /* mov rcx, qword [rsp+0x28] */
++    };
++    C_ASSERT( sizeof(before_qt_5_15_2_0_2) == sizeof(after_qt_5_15_2_0_2) );
++
++    struct
++    {
++        const WCHAR *libname;
++        const char *name;
++        const void *before, *after;
++        size_t size;
++        ULONG_PTR offset;
++        BOOL stop_patching_after_success;
++    } static const patches[] =
++    {
++        /* CW HACK 22584L
++         * libcef.dll 85.3.11, for an updated Rockstar Games Social Club/Launcher.
++         */
++        {
++            L"libcef.dll",
++            "85.3.11-0",
++            /* This patch is identical to the one for 85.3.9, just at a different offset. */
++            before_85_3_9_0, after_85_3_9_0,
++            sizeof(before_85_3_9_0),
++            0x28c5190,
++            FALSE
++        },
++        {
++            L"libcef.dll",
++            "85.3.11-1",
++            before_85_3_11_1, after_85_3_11_1,
++            sizeof(before_85_3_11_1),
++            0x28c521a,
++            TRUE
++        },
++
++        /* CW HACK 18582:
++         * libcef.dll 85.3.9.0 used by the Rockstar Games Social Club/Launcher
++         * (and downloadable from
++         * https://cef-builds.spotifycdn.com/index.html#windows64).
++         */
++        {
++            L"libcef.dll",
++            "85.3.9.0",
++            before_85_3_9_0, after_85_3_9_0,
++            sizeof(before_85_3_9_0),
++            0x28c4b30,
++            TRUE
++        },
++
++        /* CW HACK 19114:
++         * libcef.dll 72.0.3626.121 used by the game beamNG.drive.
++         * Patch also works for version downloadable from CEF builds.
++         */
++        {
++            L"libcef.dll",
++            "72.0.3626.121",
++            before_72_0_3626_121_1, after_72_0_3626_121_1,
++            sizeof(before_72_0_3626_121_1),
++            0x23bb2ad,
++            FALSE
++        },
++        {
++            L"libcef.dll",
++            "72.0.3626.121",
++            before_72_0_3626_121_2, after_72_0_3626_121_2,
++            sizeof(before_72_0_3626_121_2),
++            0x23bb329,
++            FALSE
++        },
++        {
++            L"libcef.dll",
++            "72.0.3626.121",
++            before_72_0_3626_121_3, after_72_0_3626_121_3,
++            sizeof(before_72_0_3626_121_3),
++            0x23bb369,
++            TRUE
++        },
++
++        /* CW HACK 16900:
++         * libcef.dll 72.0.3626.96 used by the game Wizard101.
++         * Patch also works for version 3.3626.1886.g162fdec downloadable from CEF builds.
++         */
++        {
++            L"libcef.dll",
++            "72.0.3626.96",
++            /* This patch is identical to the one for 72.0.3626.121, just at a different offset. */
++            before_72_0_3626_121_1, after_72_0_3626_121_1,
++            sizeof(before_72_0_3626_121_1),
++            0x23bb82d,
++            FALSE
++        },
++        {
++            L"libcef.dll",
++            "72.0.3626.96",
++            before_72_0_3626_121_2, after_72_0_3626_121_2,
++            sizeof(before_72_0_3626_121_2),
++            0x23bb8a9,
++            FALSE
++        },
++        {
++            L"libcef.dll",
++            "72.0.3626.96",
++            before_72_0_3626_121_3, after_72_0_3626_121_3,
++            sizeof(before_72_0_3626_121_3),
++            0x23bb8e9,
++            TRUE
++        },
++
++        /* CW HACK 21548:
++         * Qt5WebEngineCore.dll 5.15.2.0 used by the EA Launcher.
++         * Based on CEF 83.0.4103.122, but has different offsets.
++         */
++        {
++            L"Qt5WebEngineCore.dll",
++            "5.15.2.0",
++            before_qt_5_15_2_0_1, after_qt_5_15_2_0_1,
++            sizeof(before_qt_5_15_2_0_1),
++            0x2810f10,
++            FALSE
++        },
++        {
++            L"Qt5WebEngineCore.dll",
++            "5.15.2.0",
++            before_qt_5_15_2_0_2, after_qt_5_15_2_0_2,
++            sizeof(before_qt_5_15_2_0_2),
++            0x2810f8d,
++            TRUE
++        }
++    };
++
++    unsigned int i;
++    SIZE_T pagesize = page_size;
++
++    for (i = 0; i < ARRAY_SIZE(patches); i++)
++    {
++        DWORD old_prot;
++        void *dllbase = (*pwm)->ldr.DllBase;
++        void *target = (void *)((ULONG_PTR)dllbase + patches[i].offset);
++        void *target_page = (void *)((ULONG_PTR)target & ~(page_size-1));
++
++        if (wcscmp( libname, patches[i].libname ))
++            continue;
++
++        if ((*pwm)->ldr.SizeOfImage < patches[i].offset)
++        {
++            TRACE( "%s too small to be %s\n", debugstr_w(libname), patches[i].name );
++            continue;
++        }
++        if (memcmp( target, patches[i].before, patches[i].size ))
++        {
++            TRACE( "%s doesn't match %s\n", debugstr_w(libname), patches[i].name );
++            continue;
++        }
++
++        TRACE( "Found %s %s, patching out gs:0x8 accesses\n", debugstr_w(libname), patches[i].name );
++        NtProtectVirtualMemory( NtCurrentProcess(), &target_page, &pagesize, PAGE_EXECUTE_READWRITE, &old_prot );
++        memcpy( target, patches[i].after, patches[i].size );
++        NtProtectVirtualMemory( NtCurrentProcess(), &target_page, &pagesize, old_prot, &old_prot );
++
++        if (patches[i].stop_patching_after_success)
++            break;
++    }
++}
++#endif
+ 
+ /******************************************************************************
+  *	load_native_dll  (internal)
+@@ -3272,6 +3597,10 @@ static NTSTATUS load_dll( const WCHAR *load_path, const WCHAR *libname, DWORD fl
+ 
+     case STATUS_SUCCESS:  /* valid PE file */
+         nts = load_native_dll( load_path, &nt_name, mapping, &image_info, &id, flags, system, pwm );
++#ifdef __x86_64__
++        if (nts == STATUS_SUCCESS && (!wcscmp( libname, L"libcef.dll" ) || !wcscmp( libname, L"Qt5WebEngineCore.dll" )))
++            patch_libcef( libname, pwm );
++#endif
+         break;
+     }
+ 
+@@ -4260,6 +4589,18 @@ static void release_address_space(void)
+ #endif
+ }
+ 
++#ifdef __x86_64__
++extern void CDECL wine_get_host_version( const char **sysname, const char **release );
++
++static BOOL is_macos(void)
++{
++    const char *sysname;
++
++    wine_get_host_version( &sysname, NULL );
++    return !strcmp( sysname, "Darwin" );
++}
++#endif
++
+ /******************************************************************
+  *		loader_init
+  *
+@@ -4337,6 +4678,24 @@ void loader_init( CONTEXT *context, void **entry )
+     }
+     else wm = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
+ 
++#ifdef __x86_64__
++        if (is_macos() && !NtCurrentTeb()->WowTebOffset)
++        {
++            /* CW HACK 18756 */
++            /* Preallocate TlsExpansionSlots.  Otherwise, kernelbase will
++               allocate it on demand, but won't be able to do the Mac-specific poking to the
++               %gs-relative address. */
++            if (!NtCurrentTeb()->TlsExpansionSlots)
++                NtCurrentTeb()->TlsExpansionSlots = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, 8 * sizeof(NtCurrentTeb()->Peb->TlsExpansionBitmapBits) * sizeof(void*) );
++            __asm__ volatile ("movq %0,%%gs:%c1"
++                              :
++                              : "r" (NtCurrentTeb()->TlsExpansionSlots), "n" (FIELD_OFFSET(TEB, TlsExpansionSlots)));
++
++            if (!attach_done) /* only the first time */
++                while (RtlFindClearBitsAndSet(NtCurrentTeb()->Peb->TlsBitmap, 1, 1) != ~0U);
++        }
++#endif
++
+ #ifdef _WIN64
+     if (NtCurrentTeb()->WowTebOffset) init_wow64( context );
+ #endif
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 803d8079213..b1723851e97 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1797,6 +1797,48 @@ static ULONG_PTR get_image_address(void)
+     return 0;
+ }
+ 
++#if defined(__APPLE__) && defined(__x86_64__)
++static __thread struct tm localtime_tls;
++struct tm *my_localtime(const time_t *timep)
++{
++    return localtime_r(timep, &localtime_tls);
++}
++
++static void hook(void *to_hook, const void *replace)
++{
++    size_t offset;
++
++    struct hooked_function
++    {
++        char jmp[8];
++        const void *dst;
++    } *hooked_function = to_hook;
++    ULONG_PTR intval = (UINT_PTR)to_hook;
++
++    intval -= (intval % 4096);
++    mprotect((void *)intval, 0x2000, PROT_EXEC | PROT_READ | PROT_WRITE);
++
++    /* The offset is from the end of the jmp instruction (6 bytes) to the start of the destination. */
++    offset = offsetof(struct hooked_function, dst) - offsetof(struct hooked_function, jmp) - 0x6;
++
++    /* jmp *(rip + offset) */
++    hooked_function->jmp[0] = 0xff;
++    hooked_function->jmp[1] = 0x25;
++    hooked_function->jmp[2] = offset;
++    hooked_function->jmp[3] = 0x00;
++    hooked_function->jmp[4] = 0x00;
++    hooked_function->jmp[5] = 0x00;
++    /* Filler */
++    hooked_function->jmp[6] = 0xcc;
++    hooked_function->jmp[7] = 0xcc;
++    /* Dest address absolute */
++    hooked_function->dst = replace;
++
++    //size = sizeof(*hooked_function);
++    //NtProtectVirtualMemory(proc, (void **)hooked_function, &size, old_protect, &old_protect);
++}
++#endif
++
+ /***********************************************************************
+  *           start_main_thread
+  */
+@@ -1819,6 +1861,13 @@ static void start_main_thread(void)
+     load_ntdll();
+     load_wow64_ntdll( main_image_info.Machine );
+     load_apiset_dll();
++
++#if defined(__APPLE__) && defined(__x86_64__)
++    /* This is necessary because we poke PEB into pthread TLS at offset 0x60. It is normally in use by
++     * localtime(), which is called a lot by system libraries. Make localtime() go away. */
++    hook(localtime, my_localtime);
++#endif
++
+     server_init_process_done();
+ }
+ 
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index ab544908883..e433d69ce97 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -1004,7 +1004,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+         ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_AMD64 );
+ #ifdef __APPLE__
+         if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
+-            WARN_(seh)( "Setting debug registers is not supported under Rosetta\n" );
++        {
++            /* CW HACK 22131 */
++            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
++            ret = STATUS_SUCCESS;
++        }
+ #endif
+         if (ret || !self) return ret;
+         if (flags & CONTEXT_DEBUG_REGISTERS)
+@@ -1214,6 +1218,14 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
+     if (!self)
+     {
+         NTSTATUS ret = set_thread_context( handle, context, &self, IMAGE_FILE_MACHINE_I386 );
++#ifdef __APPLE__
++        if ((flags & CONTEXT_DEBUG_REGISTERS) && (ret == STATUS_UNSUCCESSFUL))
++        {
++            /* CW HACK 22131 */
++            WARN_(seh)( "Setting debug registers is not supported under Rosetta, faking success\n" );
++            ret = STATUS_SUCCESS;
++        }
++#endif
+         if (ret || !self) return ret;
+         if (flags & CONTEXT_I386_DEBUG_REGISTERS)
+         {
+@@ -1701,6 +1713,135 @@ NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status
+     user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
+ }
+ 
++#ifdef __APPLE__
++/***********************************************************************
++ *           handle_cet_nop
++ *
++ * Check if the fault location is an Intel CET instruction that should be treated as a NOP.
++ * Rosetta on Big Sur throws an exception for this, but is fixed in Monterey.
++ * CW HACK 20186
++ */
++static inline BOOL handle_cet_nop( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[16];
++    unsigned int i, prefix_count = 0;
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    for (i = 0; i < len; i++) switch (instr[i])
++    {
++    /* instruction prefixes */
++    case 0x2e:  /* %cs: */
++    case 0x36:  /* %ss: */
++    case 0x3e:  /* %ds: */
++    case 0x26:  /* %es: */
++    case 0x40:  /* rex */
++    case 0x41:  /* rex */
++    case 0x42:  /* rex */
++    case 0x43:  /* rex */
++    case 0x44:  /* rex */
++    case 0x45:  /* rex */
++    case 0x46:  /* rex */
++    case 0x47:  /* rex */
++    case 0x48:  /* rex */
++    case 0x49:  /* rex */
++    case 0x4a:  /* rex */
++    case 0x4b:  /* rex */
++    case 0x4c:  /* rex */
++    case 0x4d:  /* rex */
++    case 0x4e:  /* rex */
++    case 0x4f:  /* rex */
++    case 0x64:  /* %fs: */
++    case 0x65:  /* %gs: */
++    case 0x66:  /* opcode size */
++    case 0x67:  /* addr size */
++    case 0xf0:  /* lock */
++    case 0xf2:  /* repne */
++    case 0xf3:  /* repe */
++        if (++prefix_count >= 15) return FALSE;
++        continue;
++
++    case 0x0f: /* extended instruction */
++        if (i == len - 1) return 0;
++        switch (instr[i + 1])
++        {
++        case 0x1E:
++            /* RDSSPD/RDSSPQ: (prefixes) 0F 1E (modrm) */
++            RIP_sig(sigcontext) += prefix_count + 3;
++            TRACE_(seh)( "skipped RDSSPD/RDSSPQ instruction\n" );
++            return TRUE;
++        }
++        break;
++    default:
++        return FALSE;
++    }
++    return FALSE;
++}
++#endif
++
++
++#ifdef __APPLE__
++/***********************************************************************
++ *           handle_fndisi
++ *
++ * Check if the fault location is an x87 FNDISI instruction that should be treated as a NOP.
++ */
++static inline BOOL handle_fndisi( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[16];
++    unsigned int i, prefix_count = 0;
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    for (i = 0; i < len; i++) switch (instr[i])
++    {
++    /* instruction prefixes */
++    case 0x2e:  /* %cs: */
++    case 0x36:  /* %ss: */
++    case 0x3e:  /* %ds: */
++    case 0x26:  /* %es: */
++    case 0x40:  /* rex */
++    case 0x41:  /* rex */
++    case 0x42:  /* rex */
++    case 0x43:  /* rex */
++    case 0x44:  /* rex */
++    case 0x45:  /* rex */
++    case 0x46:  /* rex */
++    case 0x47:  /* rex */
++    case 0x48:  /* rex */
++    case 0x49:  /* rex */
++    case 0x4a:  /* rex */
++    case 0x4b:  /* rex */
++    case 0x4c:  /* rex */
++    case 0x4d:  /* rex */
++    case 0x4e:  /* rex */
++    case 0x4f:  /* rex */
++    case 0x64:  /* %fs: */
++    case 0x65:  /* %gs: */
++    case 0x66:  /* opcode size */
++    case 0x67:  /* addr size */
++    case 0xf0:  /* lock */
++    case 0xf2:  /* repne */
++    case 0xf3:  /* repe */
++        if (++prefix_count >= 15) return FALSE;
++        continue;
++
++    case 0xdb:
++        if (i == len - 1) return 0;
++        switch (instr[i + 1])
++        {
++        case 0xe1:
++            /* RDSSPD/RDSSPQ: (prefixes) DB E1 */
++            RIP_sig(sigcontext) += prefix_count + 2;
++            TRACE_(seh)( "skipped FNDISI instruction\n" );
++            return TRUE;
++        }
++        break;
++    default:
++        return FALSE;
++    }
++    return FALSE;
++}
++#endif
++
+ 
+ /***********************************************************************
+  *           is_privileged_instr
+@@ -1942,7 +2083,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+         rec.ExceptionCode = EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
+         break;
+     case TRAP_x86_PRIVINFLT:   /* Invalid opcode exception */
++#ifdef __APPLE__
++        /* CW HACK 20186 */
++        if (handle_cet_nop( ucontext, &context.c )) return;
++#endif
+         rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
++#ifdef __APPLE__
++	if (handle_fndisi( ucontext, &context.c )) return;
++#endif
+         break;
+     case TRAP_x86_STKFLT:  /* Stack fault */
+         rec.ExceptionCode = EXCEPTION_STACK_OVERFLOW;
+@@ -2492,6 +2640,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+     __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+     thread_data->pthread_teb = mac_thread_gsbase();
++    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
++    amd64_thread_data()->pthread_teb = mac_thread_gsbase();
+     /* alloc_tls_slot() needs to poke a value to an address relative to each
+        thread's gsbase.  Have each thread record its gsbase pointer into its
+        TEB so alloc_tls_slot() can find it. */
+diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
+index 9e84ec3cc96..95b862a56d7 100644
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -1084,6 +1084,16 @@ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
+     close( ntdll_get_thread_data()->wait_fd[1] );
+     close( ntdll_get_thread_data()->reply_fd );
+     close( ntdll_get_thread_data()->request_fd );
++
++#if defined(__APPLE__) && defined(__x86_64__)
++    /* Remove the PEB from the localtime field in %gs, or MacOS might try
++     * to free() the pointer and crash. That happens for processes that are
++     * using the alt loader for dock integration. */
++    __asm__ volatile (".byte 0x65\n\tmovq %q0,%c1"
++                      :
++                      : "r" (NULL), "n" (FIELD_OFFSET(TEB, Peb)));
++#endif
++
+     pthread_exit( UIntToPtr(status) );
+ }
+ 
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index abe1b4dc4ec..724db5c7862 100644
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -5906,6 +5906,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+     return status;
+ }
+ 
++#ifdef __APPLE__
++static int is_apple_silicon(void)
++{
++    static int apple_silicon_status, did_check = 0;
++    if (!did_check)
++    {
++        /* returns 0 for native process or on error, 1 for translated */
++        int ret = 0;
++        size_t size = sizeof(ret);
++        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
++            apple_silicon_status = 0;
++        else
++            apple_silicon_status = ret;
++
++        did_check = 1;
++    }
++
++    return apple_silicon_status;
++}
++
++/* CW HACK 18947
++ * If mach_vm_write() is used to modify code cross-process (which is how we implement
++ * NtWriteVirtualMemory), Rosetta won't notice the change and will execute the "old" code.
++ *
++ * To work around this, after the write completes,
++ * toggle the executable bit (from inside the target process) on/off for any executable
++ * pages that were modified, to force Rosetta to re-translate it.
++ */
++static void toggle_executable_pages_for_rosetta( HANDLE process, void *addr, SIZE_T size )
++{
++    MEMORY_BASIC_INFORMATION info;
++    NTSTATUS status;
++    SIZE_T ret;
++
++    if (!is_apple_silicon())
++        return;
++
++    status = NtQueryVirtualMemory( process, addr, MemoryBasicInformation, &info, sizeof(info), &ret );
++
++    if (!status && (info.AllocationProtect & 0xf0))
++    {
++        DWORD origprot, noexec;
++        noexec = info.AllocationProtect & ~0xf0;
++        if (!noexec) noexec = PAGE_NOACCESS;
++
++        NtProtectVirtualMemory( process, &addr, &size, noexec, &origprot );
++        NtProtectVirtualMemory( process, &addr, &size, origprot, &noexec );
++    }
++}
++#endif
+ 
+ /***********************************************************************
+  *             NtWriteVirtualMemory   (NTDLL.@)
+@@ -5926,6 +5976,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
+             if ((status = wine_server_call( req ))) size = 0;
+         }
+         SERVER_END_REQ;
++
++#ifdef __APPLE__
++        toggle_executable_pages_for_rosetta( process, addr, size );
++#endif
+     }
+     else
+     {
+diff --git a/dlls/wow64cpu/cpu.c b/dlls/wow64cpu/cpu.c
+index a613c73d29f..26c471ff778 100644
+--- a/dlls/wow64cpu/cpu.c
++++ b/dlls/wow64cpu/cpu.c
+@@ -38,6 +38,15 @@ struct thunk_32to64
+     DWORD op;
+     DWORD addr;
+     WORD  cs;
++
++    BYTE add;
++    BYTE add_modrm;
++    BYTE add_op;
++
++    BYTE jmp;
++    BYTE jmp_modrm;
++    DWORD jmp_op;
++    ULONG64 jmp_addr;
+ };
+ struct thunk_opcodes
+ {
+@@ -207,7 +216,18 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
+                    "movl %edx,4(%rsp)\n\t"
+                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
+                    "xchgq %r14,%rsp\n\t"
+-                   "ljmp *(%r14)\n"
++
++                   /* CW HACK 20760:
++                    * Use lretq rather than ljmp to work around a Rosetta SIGUSR1 race condition.
++                    */
++                   "subq $0x10,%rsp\n\t"
++                   "movl 4(%r14),%ebx\n\t"
++                   "movq %rbx,0x8(%rsp)\n\t"
++                   "movl 0(%r14),%ebx\n\t"
++                   "movq %rbx,(%rsp)\n\t"
++                   "movl 0xa4(%r13),%ebx\n\t"   /* context->Ebx */
++                   "lretq\n"
++
+                    ".Lsyscall_32to64_return:\n\t"
+                    "movq %rsp,%r14\n\t"
+                    "movl 0xa8(%r13),%edx\n\t"   /* context->Edx */
+@@ -261,7 +281,16 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
+                    "movl %edx,4(%rsp)\n\t"
+                    "movl 0xc4(%r13),%r14d\n\t"  /* context->Esp */
+                    "xchgq %r14,%rsp\n\t"
+-                   "ljmp *(%r14)" )
++
++                   /* CW HACK 20760:
++                    * Use lretq rather than ljmp to work around a Rosetta SIGUSR1 race condition.
++                    */
++                   "subq $0x10,%rsp\n\t"
++                   "movl 4(%r14),%edx\n\t"
++                   "movq %rdx,0x8(%rsp)\n\t"
++                   "movl 0(%r14),%edx\n\t"
++                   "movq %rdx,(%rsp)\n\t"
++                   "lretq" )
+ 
+ 
+ /**********************************************************************
+@@ -308,22 +337,53 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
+     ds64_sel = context.SegDs;
+     fs32_sel = context.SegFs;
+ 
+-    thunk->syscall_thunk.ljmp  = 0xff;
+-    thunk->syscall_thunk.modrm = 0x2d;
++    /* CW HACK 20760:
++     * Use lcall rather than ljmp to work around a Rosetta SIGUSR1 race condition.
++     */
++    thunk->syscall_thunk.ljmp  = 0xff;      /* call far, absolute indirect */
++    thunk->syscall_thunk.modrm = 0x1d;      /* address=disp32, opcode=3 */
+     thunk->syscall_thunk.op    = PtrToUlong( &thunk->syscall_thunk.addr );
+-    thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
++    thunk->syscall_thunk.addr  = PtrToUlong( &thunk->syscall_thunk.add );
+     thunk->syscall_thunk.cs    = cs64_sel;
+ 
++    /* We are now in 64-bit. */
++    /* add $0x08,%esp to remove the addr/segment pushed on the stack by the lcall */
++    thunk->syscall_thunk.add = 0x83;
++    thunk->syscall_thunk.add_modrm = 0xc4;
++    thunk->syscall_thunk.add_op = 0x08;
++
++    /* jmp to syscall_32to64 */
++    thunk->syscall_thunk.jmp = 0xff;
++    thunk->syscall_thunk.jmp_modrm = 0x25;
++    thunk->syscall_thunk.jmp_op = 0x00;
++    thunk->syscall_thunk.jmp_addr = PtrToUlong( syscall_32to64 );
++
++
++    /* CW HACK 20760:
++     * Use lcall rather than ljmp to work around a Rosetta SIGUSR1 race condition.
++     */
+     thunk->unix_thunk.pushl   = 0x68;
+     thunk->unix_thunk.dispatcher_high = (ULONG_PTR)*p__wine_unix_call_dispatcher >> 32;
+     thunk->unix_thunk.pushl2  = 0x68;
+     thunk->unix_thunk.dispatcher_low = (ULONG_PTR)*p__wine_unix_call_dispatcher;
+-    thunk->unix_thunk.t.ljmp  = 0xff;
+-    thunk->unix_thunk.t.modrm = 0x2d;
++    thunk->unix_thunk.t.ljmp  = 0xff;       /* call far, absolute indirect */
++    thunk->unix_thunk.t.modrm = 0x1d;       /* address=disp32, opcode=3 */
+     thunk->unix_thunk.t.op    = PtrToUlong( &thunk->unix_thunk.t.addr );
+-    thunk->unix_thunk.t.addr  = PtrToUlong( unix_call_32to64 );
++    thunk->unix_thunk.t.addr  = PtrToUlong( &thunk->unix_thunk.t.add );
+     thunk->unix_thunk.t.cs    = cs64_sel;
+ 
++    /* We are now in 64-bit. */
++    /* add $0x08,%esp to remove the addr/segment pushed on the stack by the lcall */
++    thunk->unix_thunk.t.add = 0x83;
++    thunk->unix_thunk.t.add_modrm = 0xc4;
++    thunk->unix_thunk.t.add_op = 0x08;
++
++    /* jmp to unix_call_32to64 */
++    thunk->unix_thunk.t.jmp = 0xff;
++    thunk->unix_thunk.t.jmp_modrm = 0x25;
++    thunk->unix_thunk.t.jmp_op = 0x00;
++    thunk->unix_thunk.t.jmp_addr = PtrToUlong( unix_call_32to64 );
++
+     NtProtectVirtualMemory( GetCurrentProcess(), (void **)&thunk, &size, PAGE_EXECUTE_READ, &old_prot );
+     return STATUS_SUCCESS;
+ }
