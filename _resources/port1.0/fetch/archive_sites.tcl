@@ -34,6 +34,7 @@ set pek.cn      ${letsencrypt_https_or_http}
 set ykf.ca      http
 set ywg.ca      ${letsencrypt_https_or_http}
 set fcix.net    http
+set sjtu.edu.cn ${letsencrypt_https_only}
 
 # Keep the primary packages server first in the list
 set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inline -not "
@@ -49,6 +50,7 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${kmq.jp}://kmq.jp.packages.macports.org/:nosubdir
     ${mse.uk}://mse.uk.packages.macports.org/:nosubdir
     ${pek.cn}://pek.cn.packages.macports.org/macports/packages/:nosubdir
+    ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/packages/:nosubdir
     ${ywg.ca}://ywg.ca.packages.macports.org/mirror/macports/packages/:nosubdir
 " {:*}]
 
