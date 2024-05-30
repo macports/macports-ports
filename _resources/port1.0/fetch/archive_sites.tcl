@@ -17,6 +17,9 @@ set fastly      ${letsencrypt_https_or_http}
 #set aarnet.au   ${letsencrypt_https_or_http}
 set aarnet.au   http
 set atl.us      http
+# bos.us letsencrypt certs not set up yet, update when they are
+# (and also remove separate mirrors.mit.edu entry)
+set bos.us      http
 set cph.dk      ${letsencrypt_https_or_http}
 set cjj.kr      http
 # cert doesn't have macports.org SANs; admin notified
@@ -42,6 +45,8 @@ set portfetch::mirror_sites::sites(macports_archives) [lsearch -all -glob -inlin
     ${nue.de}://nue.de.packages.macports.org/:nosubdir
     ${fcix.net}://mirror.fcix.net/macports/packages/:nosubdir
     ${atl.us}://atl.us.packages.macports.org/:nosubdir
+    https://mirrors.mit.edu/macports/packages/:nosubdir
+    ${bos.us}://bos.us.packages.macports.org/:nosubdir
     ${cph.dk}://cph.dk.packages.macports.org/:nosubdir
     ${fco.it}://fco.it.packages.macports.org/:nosubdir
     ${fra.de}://fra.de.packages.macports.org/:nosubdir
