@@ -138,7 +138,7 @@ default muniversal.is_cross.ppc64   {[expr { ${os.arch} ne "powerpc" || !${os.cp
 # see https://wiki.osdev.org/Target_Triplet
 ##########################################################################################
 options triplet.vendor
-default triplet.vendor      {apple}
+default triplet.vendor      {[expr {${os.platform} eq "darwin" ? "apple" : "unknown"}]}
 
 options triplet.os
 default triplet.os          {${os.platform}${os.major}}
