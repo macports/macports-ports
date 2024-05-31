@@ -1079,6 +1079,7 @@ proc muniversal::add_compiler_flags {} {
 
     if {[option universal_possible] && [variant_isset universal]} {
         if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+            depends_build-delete port:diffutils-for-muniversal
             depends_build-append port:diffutils-for-muniversal
         }
     }
