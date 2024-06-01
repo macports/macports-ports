@@ -438,6 +438,7 @@ set kmq.jp      ${letsencrypt_https_or_http}
 set mse.uk      ${letsencrypt_https_or_http}
 set nue.de      ${letsencrypt_https_or_http}
 set pek.cn      ${letsencrypt_https_or_http}
+set vie.at      ${letsencrypt_https_or_http}
 # cert doesn't have macports.org SANs; admin notified
 #set ykf.ca      ${letsencrypt_https_or_http}
 set ykf.ca      http
@@ -463,6 +464,7 @@ set portfetch::mirror_sites::sites(macports_distfiles) [lsearch -all -glob -inli
     ${mse.uk}://mse.uk.distfiles.macports.org/:mirror
     ${pek.cn}://pek.cn.distfiles.macports.org/macports/distfiles/:mirror
     ${sjtu.edu.cn}://mirror.sjtu.edu.cn/macports/distfiles/:mirror
+    ${vie.at}://vie.at.distfiles.macports.org/:mirror
     ${ykf.ca}://ykf.ca.distfiles.macports.org/MacPorts/mpdistfiles/:mirror
     ${ywg.ca}://ywg.ca.distfiles.macports.org/mirror/macports/distfiles/:mirror
 " {:*}]
