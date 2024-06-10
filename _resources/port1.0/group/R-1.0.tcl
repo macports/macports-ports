@@ -156,9 +156,15 @@ proc R.add_dependencies {} {
 global configure.cxx_stdlib os.platform
 if {${os.platform} eq "darwin" && ${configure.cxx_stdlib} ne "libc++"} {
     # Avoid multiple malloc errors. See: https://github.com/iains/darwin-toolchains-start-here/discussions/20
+    # Normally should not be needed at configure stage,
+    # however R still builds some stuff there occasionally.
     configure.env-append \
                     DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
     configure.cmd-prepend \
+                    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
+    build.env-append \
+                    DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
+    build.cmd-prepend \
                     DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
     destroot.env-append \
                     DYLD_LIBRARY_PATH=${prefix}/lib/libgcc
