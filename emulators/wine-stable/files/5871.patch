@@ -1,0 +1,127 @@
+From 306e8d2c145b678d117174dbc3cd3b0b1761f271 Mon Sep 17 00:00:00 2001
+From: Brendan Shanks <bshanks@codeweavers.com>
+Date: Tue, 18 Jun 2024 10:35:03 -0700
+Subject: [PATCH] ntdll: Fix macOS build errors with Xcode 16.
+
+LLVM no longer allows non-private labels to appear between
+.cfi_startproc/endproc when targeting Mach-O.
+
+Similar fixes as in commit 295d521b11644fb76c36854336b13c2155bb7d79.
+---
+ dlls/ntdll/unix/signal_arm64.c  | 16 ++++++++++++----
+ dlls/ntdll/unix/signal_x86_64.c | 13 +++++++++----
+ 2 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
+index 58911d9b1f2..49d54b11f91 100644
+--- a/dlls/ntdll/unix/signal_arm64.c
++++ b/dlls/ntdll/unix/signal_arm64.c
+@@ -1017,10 +1017,12 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
+     }
+     else
+     {
++        extern typeof(__wine_syscall_dispatcher_return) *__wine_syscall_dispatcher_return_ptr;
++
+         TRACE( "returning to user mode ip=%p ret=%08x\n", (void *)frame->pc, rec->ExceptionCode );
+         REGn_sig(0, context) = (ULONG_PTR)frame;
+         REGn_sig(1, context) = rec->ExceptionCode;
+-        PC_sig(context)      = (ULONG_PTR)__wine_syscall_dispatcher_return;
++        PC_sig(context)      = (ULONG_PTR)__wine_syscall_dispatcher_return_ptr;
+     }
+     return TRUE;
+ }
+@@ -1381,6 +1383,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     CONTEXT *ctx, context = { CONTEXT_ALL };
+     I386_CONTEXT *i386_context;
+     ARM_CONTEXT *arm_context;
++    extern typeof(__wine_syscall_dispatcher_return) *__wine_syscall_dispatcher_return_ptr;
+ 
+     thread_data->syscall_table = KeServiceDescriptorTable;
+ 
+@@ -1440,7 +1443,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     syscall_frame_fixup_for_fastpath( frame );
+ 
+     pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
+-    __wine_syscall_dispatcher_return( frame, 0 );
++    __wine_syscall_dispatcher_return_ptr( frame, 0 );
+ }
+ 
+ 
+@@ -1608,12 +1611,17 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                    "4:\tmov x0, #0xc0000000\n\t" /* STATUS_INVALID_PARAMETER */
+                    "movk x0, #0x000d\n\t"
+                    "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
+-                   ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
+-                   __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
++                   __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return_label") ":\n\t"
+                    "mov sp, x0\n\t"
+                    "mov x0, x1\n\t"
+                    "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
+ 
++asm( ".data\n\t"
++     ".align 4\n\t"
++     ".globl " __ASM_NAME("__wine_syscall_dispatcher_return_ptr") "\n"
++     __ASM_NAME("__wine_syscall_dispatcher_return_ptr") ":\n\t"
++     ".quad " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return_label") "\n\t"
++     ".text\n\t" );
+ 
+ /***********************************************************************
+  *           __wine_unix_call_dispatcher
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index a163d5d0b33..894ddee9348 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -1880,10 +1880,12 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
+     }
+     else
+     {
++        extern typeof(__wine_syscall_dispatcher_return) *__wine_syscall_dispatcher_return_ptr;
++
+         TRACE_(seh)( "returning to user mode ip=%016lx ret=%08x\n", frame->rip, rec->ExceptionCode );
+         RDI_sig(sigcontext) = (ULONG_PTR)frame;
+         RSI_sig(sigcontext) = rec->ExceptionCode;
+-        RIP_sig(sigcontext) = (ULONG_PTR)__wine_syscall_dispatcher_return;
++        RIP_sig(sigcontext) = (ULONG_PTR)__wine_syscall_dispatcher_return_ptr;
+     }
+     return TRUE;
+ }
+@@ -2513,6 +2515,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
+     CONTEXT *ctx, context = { 0 };
+     I386_CONTEXT *wow_context;
++    extern typeof(__wine_syscall_dispatcher_return) *__wine_syscall_dispatcher_return_ptr;
+ 
+     thread_data->syscall_table = KeServiceDescriptorTable;
+     thread_data->xstate_features_mask = xstate_supported_features_mask;
+@@ -2592,7 +2595,7 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+     frame->syscall_cfa   = syscall_cfa;
+ 
+     pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
+-    __wine_syscall_dispatcher_return( frame, 0 );
++    __wine_syscall_dispatcher_return_ptr( frame, 0 );
+ }
+ 
+ 
+@@ -2877,8 +2880,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                    "5:\tmovl $0xc000000d,%eax\n\t" /* STATUS_INVALID_PARAMETER */
+                    "movq %rsp,%rcx\n\t"
+                    "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
+-                   ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
+-                   __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
++                   __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return_label") ":\n\t"
+                    "movq %rdi,%rcx\n\t"
+                    "movl 0xb0(%rcx),%r14d\n\t"     /* frame->syscall_flags */
+                    "movq %rsi,%rax\n\t"
+@@ -2994,6 +2996,9 @@ asm( ".data\n\t"
+      ".globl " __ASM_NAME("__wine_unix_call_dispatcher_prolog_end_ptr") "\n"
+      __ASM_NAME("__wine_unix_call_dispatcher_prolog_end_ptr") ":\n\t"
+      ".quad " __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_prolog_end") "\n\t"
++     ".globl " __ASM_NAME("__wine_syscall_dispatcher_return_ptr") "\n"
++     __ASM_NAME("__wine_syscall_dispatcher_return_ptr") ":\n\t"
++     ".quad " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return_label") "\n\t"
+      ".text\n\t" );
+ 
+ #endif  /* __x86_64__ */
+-- 
+GitLab
+
