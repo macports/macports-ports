@@ -19,7 +19,7 @@
 #
 # python.pep517: build using PEP517 (default is "yes" for Python 3.7+)
 # python.pep517_backend: specify the backend to use; one of "setuptools" (default),
-#   "flit", "hatch", "poetry", "maturin", or "meson"
+#   "flit", "hatch", "poetry", "maturin", "meson", or "pdm"
 #
 # python.test_framework: specify the test framework to use; one of "pytest" (default),
 #   "nose", "unittest", or <empty string>
@@ -406,6 +406,10 @@ proc python_add_dependencies {} {
                     meson {
                         depends_build-delete    port:py${python.version}-meson-python
                         depends_build-append    port:py${python.version}-meson-python
+                    }
+                    pdm {
+                        depends_build-delete    port:py${python.version}-pdm-backend
+                        depends_build-append    port:py${python.version}-pdm-backend
                     }
                     default {}
                 }
