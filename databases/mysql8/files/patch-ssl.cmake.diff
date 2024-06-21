@@ -1,0 +1,153 @@
+--- a/cmake/ssl.cmake	2024-06-21 09:47:38
++++ b/cmake/ssl.cmake	2024-06-21 09:49:11
+@@ -46,19 +46,21 @@
+ #     https://brew.sh
+ #     https://formulae.brew.sh/formula/openssl@1.1
+ #     https://formulae.brew.sh/formula/openssl@3
+-#     we give a hint ${HOMEBREW_HOME}/openssl to find_package(OpenSSL)
++#     we give a hint ${HOMEBREW_HOME}/openssl
+ #
+ # On Windows, we treat this "system" library as if cmake had been
+ # invoked with -DWITH_SSL=</path/to/custom/openssl>
+ #
+ # On macOS we treat it as a system library, which means that the generated
+-# binaries end up having dependencies on Homebrew libraries.
++# binaries end up having dependencies on Homebrew or MacPorts libraries.
+ # Note that 'cmake -DWITH_SSL=<some path>'
+ # is NOT handled in the same way as 'cmake -DWITH_SSL=system'
+ # which means that for
+ # 'cmake -DWITH_SSL=/usr/local/opt/openssl'
+ #    or, on Apple silicon:
+ # 'cmake -DWITH_SSL=/opt/homebrew/opt/openssl'
++#     or, on MacPorts
++# 'cmake -DWITH_SSL=/opt/local/libexec/openssl3'
+ # we will treat the libraries as external, and copy them into our build tree.
+ #
+ # On el7:
+@@ -350,9 +352,26 @@
+ # For all non-windows platforms, use the standard FIND_PACKAGE utility
+ # to locate OpenSSL.
+ FUNCTION(FIND_SYSTEM_OPENSSL)
+-  # For APPLE we set the hint ${HOMEBREW_HOME}/openssl
+-  IF(APPLE AND NOT OPENSSL_ROOT_DIR)
+-    SET(OPENSSL_ROOT_DIR "${HOMEBREW_HOME}/openssl")
++  # MacPorts or Homebrew?
++  execute_process(
++    COMMAND which port
++    RESULT_VARIABLE DETECT_MACPORTS
++    OUTPUT_VARIABLE PKGMGR_PREFIX
++    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
++  execute_process(
++    COMMAND brew --prefix
++    RESULT_VARIABLE DETECT_HOMEBREW
++    OUTPUT_VARIABLE PKGMGR_PREFIX
++    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
++
++  IF(DETECT_MACPORTS EQUAL 0)
++    SET(OPENSSL_ROOT_DIR "${PKGMGR_PREFIX}/libexec/openssl3")
++    SET(OPENSSL_ALT_ROOT_DIR "${PKGMGR_PREFIX}/openssl11")
++    SET(MYSQL_LIB_DIR "${PKGMGR_PREFIX}/libexec/mysql8/mysql")
++  ELSEIF(DETECT_HOMEBREW EQUAL 0)
++    SET(OPENSSL_ROOT_DIR "${PKGMGR_PREFIX}/openssl")
++    SET(OPENSSL_ALT_ROOT_DIR "${PKGMGR_PREFIX}/openssl@1.1")
++    SET(MYSQL_LIB_DIR "../lib")
+   ENDIF()
+ 
+   # Will set OPENSSL_FOUND, OPENSSL_INCLUDE_DIR and others.
+@@ -360,8 +379,8 @@
+ 
+   # Re-try, in case the symlink is not found.
+   IF(NOT OPENSSL_FOUND AND APPLE AND
+-      OPENSSL_ROOT_DIR STREQUAL "${HOMEBREW_HOME}/openssl")
+-    SET(OPENSSL_ROOT_DIR "${HOMEBREW_HOME}/openssl@1.1")
++      OPENSSL_ROOT_DIR STREQUAL "${OPENSSL_ROOT_DIR}")
++    SET(OPENSSL_ROOT_DIR "${OPENSSL_ALT_ROOT_DIR}")
+     FIND_PACKAGE(OpenSSL)
+   ENDIF()
+ 
+@@ -372,7 +391,7 @@
+ 
+   FIND_OPENSSL_VERSION()
+ 
+-  # Homebrew "system" OpenSSL needs:
++  # Homebrew/Macports "system" OpenSSL needs:
+   IF(NOT OPENSSL_INCLUDE_DIR STREQUAL "/usr/include")
+     INCLUDE_DIRECTORIES(BEFORE SYSTEM ${OPENSSL_INCLUDE_DIR})
+   ENDIF()
+@@ -632,8 +651,13 @@
+     ENDIF(APPLE)
+ 
+     IF(APPLE_WITH_CUSTOM_SSL)
++      # on Homebrew
+       # CRYPTO_LIBRARY is .../lib/libcrypto.dylib
+-      # CRYPTO_VERSION is .../lib/libcrypto.1.0.0.dylib
++      # CRYPTO_VERSION is .../lib/libcrypto.3.dylib
++      # on Macports
++      # CRYPTO_LIBRARY is ${MACPORTS_PREFIX}/lib/libcrypto.dylib
++      # CRYPTO_VERSION is ${MACPORTS_PREFIX}/lib/libcrypto.3.dylib
++
+       EXECUTE_PROCESS(
+         COMMAND readlink "${CRYPTO_LIBRARY}" OUTPUT_VARIABLE CRYPTO_VERSION
+         OUTPUT_STRIP_TRAILING_WHITESPACE)
+@@ -641,7 +665,7 @@
+         COMMAND readlink "${OPENSSL_LIBRARY}" OUTPUT_VARIABLE OPENSSL_VERSION
+         OUTPUT_STRIP_TRAILING_WHITESPACE)
+ 
+-      # Replace dependency "/Volumes/.../lib/libcrypto.1.0.0.dylib
++      # Replace dependency "*/libcrypto.3.dylib
+       EXECUTE_PROCESS(
+         COMMAND otool -L "${OPENSSL_LIBRARY}"
+         OUTPUT_VARIABLE OTOOL_OPENSSL_DEPS)
+@@ -702,9 +726,9 @@
+       # Create symlinks for plugins, see MYSQL_ADD_PLUGIN/install_name_tool
+       ADD_CUSTOM_TARGET(link_openssl_dlls ALL
+         COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../lib/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
++          "${MYSQL_LIB_DIR}/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
+         COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../lib/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
++          "${MYSQL_LIB_DIR}/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/plugin_output_directory"
+ 
+         BYPRODUCTS
+@@ -715,9 +739,9 @@
+       IF(NOT BUILD_IS_SINGLE_CONFIG)
+         ADD_CUSTOM_TARGET(link_openssl_dlls_cmake_cfg_intdir ALL
+           COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../../lib/${CMAKE_CFG_INTDIR}/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
++          "../${MYSQL_LIB_DIR}/${CMAKE_CFG_INTDIR}/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
+           COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../../lib/${CMAKE_CFG_INTDIR}/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
++          "../${MYSQL_LIB_DIR}/${CMAKE_CFG_INTDIR}/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
+           WORKING_DIRECTORY
+           "${CMAKE_BINARY_DIR}/plugin_output_directory/${CMAKE_CFG_INTDIR}"
+ 
+@@ -728,13 +752,13 @@
+       ENDIF()
+ 
+       # Directory layout after 'make install' is different.
+-      # Create some symlinks from lib/plugin/*.dylib to ../../lib/*.dylib
++      # Create some symlinks from mysql/plugin/*.dylib to ../../mysql/*.dylib
+       FILE(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/plugin_output_directory/plugin")
+       ADD_CUSTOM_TARGET(link_openssl_dlls_for_install ALL
+         COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../../lib/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
++          "../${MYSQL_LIB_DIR}/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
+         COMMAND ${CMAKE_COMMAND} -E create_symlink
+-          "../../lib/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
++          "../${MYSQL_LIB_DIR}/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/plugin_output_directory/plugin"
+         )
+       # See INSTALL_DEBUG_TARGET used for installing debug versions of plugins.
+@@ -742,9 +766,9 @@
+         FILE(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/plugin_output_directory/plugin/debug")
+         ADD_CUSTOM_TARGET(link_openssl_dlls_for_install_debug ALL
+           COMMAND ${CMAKE_COMMAND} -E create_symlink
+-            "../../../lib/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
++            "../../${MYSQL_LIB_DIR}/${CRYPTO_VERSION}" "${CRYPTO_VERSION}"
+           COMMAND ${CMAKE_COMMAND} -E create_symlink
+-            "../../../lib/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
++            "../../${MYSQL_LIB_DIR}/${OPENSSL_VERSION}" "${OPENSSL_VERSION}"
+           WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/plugin_output_directory/plugin/debug"
+         )
+       ENDIF()
