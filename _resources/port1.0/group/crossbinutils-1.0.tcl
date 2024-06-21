@@ -103,11 +103,11 @@ proc crossbinutils.setup {target version} {
 
     crossbinutils.target ${target}
 
-    name            ${target}-binutils
-    version         ${version}
-    categories      cross devel
-    license         GPL-3+
-    maintainers     nomaintainer
+    default name        ${target}-binutils
+    version             ${version}
+    default categories  {cross devel}
+    default license     GPL-3+
+    default maintainers nomaintainer
 
     description     FSF Binutils for ${target} cross development
     long_description \
