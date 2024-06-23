@@ -750,10 +750,88 @@ index 9e84ec3cc96..95b862a56d7 100644
  }
  
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index abe1b4dc4ec..724db5c7862 100644
+index abe1b4dc4ec..9838650847c 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -5906,6 +5906,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
+@@ -62,6 +62,7 @@
+ #if defined(__APPLE__)
+ # include <mach/mach_init.h>
+ # include <mach/mach_vm.h>
++# include <sys/utsname.h> /* CrossOver Hack #22011 */
+ #endif
+ 
+ #include "ntstatus.h"
+@@ -1714,6 +1715,42 @@ static void mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+     if (count) mprotect_exec( addr, count << page_shift, prot );
+ }
+ 
++static BOOL is_catalina_or_later(void)
++{
++#ifdef __APPLE__
++    static int result = -1;
++    struct utsname name;
++    unsigned major, minor;
++
++    if (result == -1)
++    {
++        result = (uname(&name) == 0 &&
++                  sscanf(name.release, "%u.%u", &major, &minor) == 2 &&
++                  major >= 19 /* macOS 10.15 Catalina */);
++    }
++    return (result == 1) ? TRUE : FALSE;
++#else
++    return FALSE;
++#endif
++}
++
++static void *wine_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
++{
++#if defined(__APPLE__) && defined(__x86_64__)
++    // In Catalina-and-later, mapping files with execute permissions can make
++    // Gatekeeper prompt the user, or just fail outright.
++    if (!(flags & MAP_ANON) && fd >= 0 && prot & PROT_EXEC && is_catalina_or_later())
++    {
++        void *ret = mmap(addr, len, prot & ~PROT_EXEC, flags, fd, offset);
++
++        if (ret != MAP_FAILED && mprotect(ret, len, prot))
++            WARN("failed to mprotect region: %d\n", errno);
++        return ret;
++    }
++#endif
++    return mmap(addr, len, prot, flags, fd, offset);
++}
++
+ 
+ /***********************************************************************
+  *           set_vprot
+@@ -2085,7 +2122,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
+     /* only try mmap if media is not removable (or if we require write access) */
+     if (!removable || (flags & MAP_SHARED))
+     {
+-        if (mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != MAP_FAILED)
++        if (wine_mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != MAP_FAILED)
+             goto done;
+ 
+         switch (errno)
+@@ -2413,7 +2450,7 @@ static NTSTATUS map_pe_header( void *ptr, size_t size, int fd, BOOL *removable )
+ 
+     if (!*removable)
+     {
+-        if (mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
++        if (wine_mmap( ptr, size, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_FIXED|MAP_PRIVATE, fd, 0 ) != MAP_FAILED)
+             return STATUS_SUCCESS;
+ 
+         switch (errno)
+@@ -3892,7 +3929,7 @@ void virtual_map_user_shared_data(void)
+         exit(1);
+     }
+     if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
+-        (user_shared_data != mmap( user_shared_data, page_size, PROT_READ, MAP_SHARED|MAP_FIXED, fd, 0 )))
++        (user_shared_data != wine_mmap( user_shared_data, page_size, PROT_READ, MAP_SHARED|MAP_FIXED, fd, 0 )))
+     {
+         ERR( "failed to remap the process USD: %d\n", res );
+         exit(1);
+@@ -5906,6 +5943,56 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
      return status;
  }
  
@@ -810,7 +888,7 @@ index abe1b4dc4ec..724db5c7862 100644
  
  /***********************************************************************
   *             NtWriteVirtualMemory   (NTDLL.@)
-@@ -5926,6 +5976,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
+@@ -5926,6 +6013,10 @@ NTSTATUS WINAPI NtWriteVirtualMemory( HANDLE process, void *addr, const void *bu
              if ((status = wine_server_call( req ))) size = 0;
          }
          SERVER_END_REQ;
