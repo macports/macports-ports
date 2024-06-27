@@ -1,0 +1,705 @@
+From 8e1b29dd4d47f3e440d9c83ccfe8adaf4a33418c Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Fri, 27 Nov 2015 09:11:05 +0000
+Subject: [PATCH] Initial Version on 7.0.0
+
+---
+ llvm/tools/LLVMBuild.txt       |   1 +
+ llvm/tools/llas/CMakeLists.txt |  13 +
+ llvm/tools/llas/LLVMBuild.txt  |  23 ++
+ llvm/tools/llas/Makefile       |  17 +
+ llvm/tools/llas/llas.cpp       | 599 +++++++++++++++++++++++++++++++++
+ 5 files changed, 653 insertions(+)
+ create mode 100644 llvm/tools/llas/CMakeLists.txt
+ create mode 100644 llvm/tools/llas/LLVMBuild.txt
+ create mode 100644 llvm/tools/llas/Makefile
+ create mode 100644 llvm/tools/llas/llas.cpp
+
+diff --git a/llvm/tools/LLVMBuild.txt b/llvm/tools/LLVMBuild.txt
+index 1732ea0cb8a..ad6cc30effe 100644
+--- a/llvm/tools/LLVMBuild.txt
++++ b/llvm/tools/LLVMBuild.txt
+@@ -21,6 +21,7 @@ subdirectories =
+  dsymutil
+  llc
+  lli
++ llas
+  llvm-ar
+  llvm-as
+  llvm-bcanalyzer
+diff --git a/llvm/tools/llas/CMakeLists.txt b/llvm/tools/llas/CMakeLists.txt
+new file mode 100644
+index 00000000000..50cfd25e0be
+--- /dev/null
++++ b/llvm/tools/llas/CMakeLists.txt
+@@ -0,0 +1,13 @@
++set(LLVM_LINK_COMPONENTS
++  AllTargetsAsmPrinters
++  AllTargetsAsmParsers
++  AllTargetsDescs
++  AllTargetsInfos
++  MC
++  MCParser
++  Support
++  )
++
++add_llvm_tool(llas
++  llas.cpp
++  )
+diff --git a/llvm/tools/llas/LLVMBuild.txt b/llvm/tools/llas/LLVMBuild.txt
+new file mode 100644
+index 00000000000..67d42b15845
+--- /dev/null
++++ b/llvm/tools/llas/LLVMBuild.txt
+@@ -0,0 +1,23 @@
++;===- ./tools/llas/LLVMBuild.txt ----------------------------*- Conf -*--===;
++;
++;                     The LLVM Compiler Infrastructure
++;
++; This file is distributed under the University of Illinois Open Source
++; License. See LICENSE.TXT for details.
++;
++;===------------------------------------------------------------------------===;
++;
++; This is an LLVMBuild description file for the components in this subdirectory.
++;
++; For more information on the LLVMBuild system, please see:
++;
++;   http://llvm.org/docs/LLVMBuild.html
++;
++;===------------------------------------------------------------------------===;
++
++[component_0]
++type = Tool
++name = llas
++parent = Tools
++required_libraries = MC  MCParser Support all-targets
++; MCDisassembler
+diff --git a/llvm/tools/llas/Makefile b/llvm/tools/llas/Makefile
+new file mode 100644
+index 00000000000..9a73efb3b7a
+--- /dev/null
++++ b/llvm/tools/llas/Makefile
+@@ -0,0 +1,17 @@
++##===- tools/llvm-mc/Makefile ------------------------------*- Makefile -*-===##
++#
++#                     The LLVM Compiler Infrastructure
++#
++# This file is distributed under the University of Illinois Open Source
++# License. See LICENSE.TXT for details.
++#
++##===----------------------------------------------------------------------===##
++
++LEVEL := ../..
++TOOLNAME := llvm-mc
++LINK_COMPONENTS := all-targets MCDisassembler MCParser MC support
++
++# This tool has no plugins, optimize startup time.
++TOOL_NO_EXPORTS := 1
++
++include $(LEVEL)/Makefile.common
+diff --git a/llvm/tools/llas/llas.cpp b/llvm/tools/llas/llas.cpp
+new file mode 100644
+index 00000000000..3d6b91dc2de
+--- /dev/null
++++ b/llvm/tools/llas/llas.cpp
+@@ -0,0 +1,599 @@
++//===-- llvm-mc.cpp - Machine Code Hacking Driver ---------------*- C++ -*-===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This utility is a simple driver that allows command line hacking on machine
++// code.
++//
++//===----------------------------------------------------------------------===//
++
++#include "llvm/MC/MCAsmBackend.h"
++#include "llvm/MC/MCAsmInfo.h"
++#include "llvm/MC/MCCodeEmitter.h"
++#include "llvm/MC/MCContext.h"
++#include "llvm/MC/MCInstPrinter.h"
++#include "llvm/MC/MCInstrInfo.h"
++#include "llvm/MC/MCObjectFileInfo.h"
++#include "llvm/MC/MCObjectWriter.h"
++#include "llvm/MC/MCParser/AsmLexer.h"
++#include "llvm/MC/MCParser/MCTargetAsmParser.h"
++#include "llvm/MC/MCRegisterInfo.h"
++#include "llvm/MC/MCSectionMachO.h"
++#include "llvm/MC/MCStreamer.h"
++#include "llvm/MC/MCSubtargetInfo.h"
++#include "llvm/MC/MCTargetOptionsCommandFlags.inc"
++#include "llvm/Support/CommandLine.h"
++#include "llvm/Support/Compression.h"
++#include "llvm/Support/FileUtilities.h"
++#include "llvm/Support/FormattedStream.h"
++#include "llvm/Support/Host.h"
++#include "llvm/Support/ManagedStatic.h"
++#include "llvm/Support/MemoryBuffer.h"
++#include "llvm/Support/PrettyStackTrace.h"
++#include "llvm/Support/Signals.h"
++#include "llvm/Support/SourceMgr.h"
++#include "llvm/Support/TargetRegistry.h"
++#include "llvm/Support/TargetSelect.h"
++#include "llvm/Support/ToolOutputFile.h"
++
++#include "llvm/Support/Debug.h"
++#define DEBUG_TYPE "cl-options"
++
++using namespace llvm;
++using namespace llvm::cl;
++
++static OptionCategory LLASCategory("Specific Options");
++
++static opt<std::string>
++InputFilename(Positional, desc("<input file>"), init("-"), cat(LLASCategory));
++
++static opt<std::string>
++OutputFilename("o", desc("Output filename"),
++               value_desc("filename"), cat(LLASCategory));
++
++static opt<bool>
++ShowEncoding("show-encoding", desc("Show instruction encodings"), Hidden);
++
++static opt<DebugCompressionType> CompressDebugSections(
++    "compress-debug-sections", ValueOptional,
++    init(DebugCompressionType::None),
++    desc("Choose DWARF debug sections compression:"),
++    values(clEnumValN(DebugCompressionType::None, "none", "No compression"),
++               clEnumValN(DebugCompressionType::Z, "zlib",
++                          "Use zlib compression"),
++               clEnumValN(DebugCompressionType::GNU, "zlib-gnu",
++                          "Use zlib-gnu compression (deprecated)")));
++
++static opt<bool>
++ShowInst("show-inst", desc("Show internal instruction representation"), Hidden);
++
++static opt<bool>
++ShowInstOperands("show-inst-operands",
++                 desc("Show instructions operands as parsed"), Hidden);
++
++static opt<unsigned>
++OutputAsmVariant("output-asm-variant",
++                 desc("Syntax variant to use for output printing"), Hidden);
++
++static opt<bool>
++PrintImmHex("print-imm-hex", init(false),
++            desc("Prefer hex format for immediate values"), Hidden);
++
++static list<std::string>
++DefineSymbol("defsym", desc("Defines a symbol to be an integer constant"), Hidden);
++
++enum OutputFileType {
++  OFT_Null,
++  OFT_AssemblyFile,
++  OFT_ObjectFile
++};
++
++static opt<OutputFileType>
++FileType("filetype", init(OFT_ObjectFile),
++  desc("Choose an output file type:"),
++  values(
++       clEnumValN(OFT_AssemblyFile, "asm",
++                  "Emit an assembly ('.s') file"),
++       clEnumValN(OFT_Null, "null",
++                  "Don't emit anything (for timing purposes)"),
++       clEnumValN(OFT_ObjectFile, "obj",
++                  "Emit a native object ('.o') file")));
++
++static opt<std::string>
++TripleName("triple", desc("Target triple to assemble for, "
++                              "see -version for available targets"),
++                              Hidden);
++
++static opt<std::string>
++MCPU("mcpu",
++     desc("Target a specific cpu type (-mcpu=help for details)"),
++     value_desc("cpu-name"), Hidden,
++     init(""));
++
++static list<std::string>
++MAttrs("mattr",
++  CommaSeparated,
++  desc("Target specific attributes (-mattr=help for details)"),
++  value_desc("a1,+a2,-a3,..."), Hidden);
++
++static opt<bool>
++    LargeCodeModel("large-code-model",
++                   desc("Create cfi directives that assume the code might "
++                            "be more than 2gb away"));
++
++static opt<std::string>
++DebugCompilationDir("fdebug-compilation-dir",
++                    desc("Specifies the debug info's compilation dir"),
++                    Hidden);
++
++static opt<std::string>
++MainFileName("main-file-name",
++             desc("Specifies the name we should consider the input file"),
++             Hidden);
++
++static opt<bool> SaveTempLabels("save-temp-labels",
++                                    desc("Don't discard temporary labels"));
++
++static opt<bool> NoExecStack("no-exec-stack",
++                                 desc("File doesn't need an exec stack"),
++                                 Hidden);
++                                
++// cctools options.
++
++static opt<std::string>
++MacOSVersionMin("mmacosx-version-min",
++                desc("Version of MacOS X to target."), ZeroOrMore, cat(LLASCategory));
++
++static list<std::string>
++IncludeDirs("I", desc("Directory of include files"),
++            value_desc("directory"), Prefix, cat(LLASCategory));
++
++static opt<std::string>
++ArchName("arch", desc("Target arch to assemble for, "
++                          "see -version for available targets"), cat(LLASCategory));
++
++static opt<bool>
++NoInitialTextSection("n", desc("Don't assume assembly file starts "
++                                   "in the text section"), init(false), cat(LLASCategory));
++
++static opt<bool>
++GenDwarfForAssembly("g", desc("Generate dwarf debugging info for assembly "
++                                  "source files"), init(false), cat(LLASCategory));
++
++enum RelocStyle {
++  RS_Dynamic,
++  RS_Static
++};
++
++static opt<RelocStyle>
++RelocMode(desc("Relocation style :"),
++          init(RS_Dynamic),
++          values(clEnumValN(RS_Dynamic, "dynamic",
++                             "enable dynamic linking features"
++                             " [cctools assembler option] (default)"),
++                     clEnumValN(RS_Static, "static",
++                             "error on dynamic linking features"
++                             " [cctools assembler option]")), cat(LLASCategory));
++
++// This is supposed to signal that the input assembly doesn't need 'assembler
++// pre-processing', which (probably) only really has meaning to the GNU
++// assembler.
++static opt<bool>
++NoApp("f", desc("don't use the assembler preprocessor"
++                    " [cctools assembler compatibility option]"),
++           init(false), ZeroOrMore);
++
++static opt<bool>
++ForceAll("force_cpusubtype_ALL",
++          desc("allow instructions for any CPU variant"),
++          init(false), ZeroOrMore, cat(LLASCategory));
++
++enum AssemblerStyle {
++  AS_LLVM,
++  AS_CCTOOLS
++};
++
++static opt<AssemblerStyle>
++AssemblerBackEnd(desc(" Use the assembler provided by:"),
++          init(AS_LLVM),
++          values(clEnumValN(AS_LLVM, "q",
++                             "LLVM (default)"),
++                     clEnumValN(AS_CCTOOLS, "Q",
++                             "cctools")), cat(LLASCategory));
++
++// FIXME: this should do something...
++static opt<bool>
++ArchMultiple("arch_multiple", desc("identify the arch in messages"),
++             init(false));
++
++static opt<bool>
++ShowVersV("v", desc("show version info and carry on with assembly"), ZeroOrMore , cat(LLASCategory));
++
++// FIXME: this should do something...
++static opt<bool>
++ShowInvocation("V", desc("show the actual assembler invocation"), ZeroOrMore, cat(LLASCategory));
++
++alias SaveLocals("L", desc("Alias for -save-temp-labels"),
++                     aliasopt(SaveTempLabels), ZeroOrMore, cat(LLASCategory));
++
++// Stolen from Triple.cpp
++static unsigned EatNumber(StringRef &Str) {
++  assert(!Str.empty() && Str[0] >= '0' && Str[0] <= '9' && "Not a number");
++  unsigned Result = 0;
++  do {
++    // Consume the leading digit.
++    Result = Result*10 + (Str[0] - '0');
++    // Eat the digit.
++    Str = Str.substr(1);
++  } while (!Str.empty() && Str[0] >= '0' && Str[0] <= '9');
++  return Result;
++}
++
++static const Target *GetTarget(const char *ProgName) {
++  // Figure out the target triple.
++  if (TripleName.empty())
++    TripleName = sys::getDefaultTargetTriple();
++
++  Triple TheTriple(Triple::normalize(TripleName));
++
++  if (TheTriple.isMacOSX() && !ArchName.empty()) {
++    // Translate Darwin -arch names into the ones used by the LLVM back-end
++    // splitting it into arch + MCPU.
++    // Command line MCPU settings can be over-ridden by .machine directives.
++    std::pair<const char *, const char *> Trans = 
++      StringSwitch<std::pair<const char *, const char *>>(ArchName)
++      .Case(   "i386", std::make_pair("x86", "i386"))
++      .Case(   "i686", std::make_pair("x86", "i686"))
++      .Case( "x86_64", std::make_pair("x86-64", ""))
++      .Case("x86_64h", std::make_pair("x86-64", ""))
++      .Case(  "ppc64", std::make_pair("ppc64", ""))
++      .Case( "ppc601", std::make_pair("ppc32", "601"))
++      .Case( "ppc602", std::make_pair("ppc32", "602"))
++      .Case( "ppc603", std::make_pair("ppc32", "603"))
++      .Case( "ppc750", std::make_pair("ppc32", "750"))
++      .Case("ppc7400", std::make_pair("ppc32", "7400"))
++      .Case("ppc7450", std::make_pair("ppc32", "7450"))
++      .Case( "ppc970", std::make_pair("ppc32", "970"))
++      .Case(    "ppc", std::make_pair("ppc32", ""))
++      .Default(std::make_pair("", ""));
++
++    if (strlen(Trans.second) != 0){
++      if (!MCPU.empty() &&  MCPU.compare(Trans.second) != 0)
++        errs() << ProgName << ": " << "arch " << ArchName
++               << " doesn't agree with " << MCPU << "\n";
++      MCPU = Trans.second;
++    }
++    if (strlen(Trans.first) != 0)
++      ArchName = Trans.first;
++
++  }
++  // -force_cpusubtype_ALL prevents .machine from overriding the CPU sub-type.
++  // It's only relevant for m32 PPC at present.
++  //if (TheTriple.isMacOSX() && ForceAll) {
++  //  MCPU = "all";
++  //}
++  std::string Error;
++  const Target *TheTarget = TargetRegistry::lookupTarget(ArchName, TheTriple,
++                                                         Error);
++  if (!TheTarget) {
++    errs() << ProgName << ": " << Error;
++    return nullptr;
++  }
++
++  // Update the triple name and return the found target.
++  TripleName = TheTriple.getTriple();
++  
++  if (TheTriple.isMacOSX()) {
++    unsigned Major, Minor, Micro;
++    if (!MacOSVersionMin.empty()) {
++      Major = Minor = Micro = 0;
++      unsigned *Components[3] = {&Major, &Minor, &Micro};
++      StringRef Vers = MacOSVersionMin;
++      for (unsigned i = 0; i != 3; ++i) {
++        if (Vers.empty() && i == 2)
++          break; // We'll allow a XX.YY without a micro and default that to 0.
++        if (Vers.empty()
++            || Vers[0] < '0' 
++            || Vers[0] > '9') {
++          errs() << ProgName 
++                 << ": mmacosx-version-min needs a version number of form XX.YY.ZZ\n";
++          Major=10;
++          Minor=4; // Set a fall-back default.
++          break;
++        }
++        // Consume the leading number.
++        *Components[i] = EatNumber(Vers);
++        // Consume the separator, if present.
++        if (Vers.startswith("."))
++          Vers = Vers.substr(1);
++      }
++LLVM_DEBUG(dbgs() << ProgName << ": mmacosx-version-min overrode " << TripleName);
++    } else {
++      TheTriple.getMacOSXVersion(Major, Minor, Micro);
++LLVM_DEBUG(dbgs() << ProgName << ": converted " << TripleName);
++    }
++    std::string str;
++    llvm::raw_string_ostream OS(str);
++    OS << "-macosx" << Major << '.' << Minor;
++    if (Micro != 0)
++    OS << '.' << Micro;
++    SmallString<64> NewName;
++    NewName += TheTriple.getArchName();
++    NewName += "-";
++    NewName += TheTriple.getVendorName();
++    NewName += OS.str();
++LLVM_DEBUG(dbgs() << " to " << NewName.str() << "\n");
++    TripleName = NewName.str();
++  }
++
++  return TheTarget;
++}
++
++static std::unique_ptr<ToolOutputFile> GetOutputStream() {
++  if (OutputFilename == "")
++    OutputFilename = "-";
++
++  std::error_code EC;
++  auto Out =
++      llvm::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::F_None);
++  if (EC) {
++    errs() << EC.message() << '\n';
++    return nullptr;
++  }
++
++  return Out;
++}
++
++static std::string DwarfDebugFlags;
++static void setDwarfDebugFlags(int argc, char **argv) {
++  if (!getenv("RC_DEBUG_OPTIONS"))
++    return;
++  for (int i = 0; i < argc; i++) {
++    DwarfDebugFlags += argv[i];
++    if (i + 1 < argc)
++      DwarfDebugFlags += " ";
++  }
++}
++
++static std::string DwarfDebugProducer;
++static void setDwarfDebugProducer() {
++  if(!getenv("DEBUG_PRODUCER"))
++    return;
++  DwarfDebugProducer += getenv("DEBUG_PRODUCER");
++}
++
++
++static int fillCommandLineSymbols(MCAsmParser &Parser){
++  for(auto &I: DefineSymbol){
++    auto Pair = StringRef(I).split('=');
++    if(Pair.second.empty()){
++      errs() << "error: defsym must be of the form: sym=value: " << I;
++      return 1;
++    }
++    int64_t Value;
++    if(Pair.second.getAsInteger(0, Value)){
++      errs() << "error: Value is not an integer: " << Pair.second;
++      return 1;
++    }
++    auto &Context = Parser.getContext();
++    auto Symbol = Context.getOrCreateSymbol(Pair.first);
++    Parser.getStreamer().EmitAssignment(Symbol,
++                                        MCConstantExpr::create(Value, Context));
++  }
++  return 0;
++}
++
++static int AssembleInput(const char *ProgName, const Target *TheTarget,
++                         SourceMgr &SrcMgr, MCContext &Ctx, MCStreamer &Str,
++                         MCAsmInfo &MAI, MCSubtargetInfo &STI,
++                         MCInstrInfo &MCII, MCTargetOptions &MCOptions) {
++  std::unique_ptr<MCAsmParser> Parser(
++      createMCAsmParser(SrcMgr, Ctx, Str, MAI));
++  std::unique_ptr<MCTargetAsmParser> TAP(
++      TheTarget->createMCAsmParser(STI, *Parser, MCII, MCOptions));
++
++  if (!TAP) {
++    errs() << ProgName
++           << ": error: this target does not support assembly parsing.\n";
++    return 1;
++  }
++
++  int SymbolResult = fillCommandLineSymbols(*Parser);
++  if(SymbolResult)
++    return SymbolResult;
++  Parser->setShowParsedOperands(ShowInstOperands);
++  Parser->setTargetParser(*TAP);
++
++  int Res = Parser->Run(NoInitialTextSection);
++
++  return Res;
++}
++
++int main(int argc, char **argv) {
++  const char *ProgName = argv[0];
++  // Print a stack trace if we signal out.
++  sys::PrintStackTraceOnErrorSignal(ProgName);
++  PrettyStackTraceProgram X(argc, argv);
++  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
++
++  HideUnrelatedOptions(LLASCategory);
++
++  // Initialize targets and assembly printers/parsers.
++  llvm::InitializeAllTargetInfos();
++  llvm::InitializeAllTargetMCs();
++  llvm::InitializeAllAsmParsers();
++
++  // Register the target printer for --version.
++  AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
++
++  ParseCommandLineOptions(argc, argv, "llvm cctools-compatible assembler\n");
++
++  MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
++  TripleName = Triple::normalize(TripleName);
++
++  setDwarfDebugFlags(argc, argv);
++  setDwarfDebugProducer();
++
++  if (AssemblerBackEnd == AS_CCTOOLS) {
++    errs() << ProgName << ": cctools mode unimplemented so far, sorry.\n";
++    return 1;
++  }
++
++  const Target *TheTarget = GetTarget(ProgName);
++  if (!TheTarget)
++    return 1;
++
++  // Now that GetTarget() has (potentially) replaced TripleName, it's safe to
++  // construct the Triple object.
++  Triple TheTriple(TripleName);
++
++LLVM_DEBUG(dbgs() << TheTarget->getName() << " triple named " \
++             <<  TripleName << " is OSX " << TheTriple.isMacOSX() \
++             << " OS : " << TheTriple.getOS() << "\n");
++
++  ErrorOr<std::unique_ptr<MemoryBuffer>> BufferPtr =
++      MemoryBuffer::getFileOrSTDIN(InputFilename);
++  if (std::error_code EC = BufferPtr.getError()) {
++    errs() << InputFilename << ": " << EC.message() << '\n';
++    return 1;
++  }
++//  MemoryBuffer *Buffer = BufferPtr->get();
++
++  SourceMgr SrcMgr;
++
++  // Tell SrcMgr about this buffer, which is what the parser will pick up.
++  SrcMgr.AddNewSourceBuffer(std::move(*BufferPtr), SMLoc());
++
++  // Record the location of the include directories so that the lexer can find
++  // it later.
++  SrcMgr.setIncludeDirs(IncludeDirs);
++
++  std::unique_ptr<MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
++  assert(MRI && "Unable to create target register info!");
++
++  std::unique_ptr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
++  assert(MAI && "Unable to create target asm info!");
++
++  if (CompressDebugSections != DebugCompressionType::None) {
++    if (!zlib::isAvailable()) {
++      errs() << ProgName
++             << ": build tools with zlib to enable -compress-debug-sections";
++      return 1;
++    }
++    MAI->setCompressDebugSections(CompressDebugSections);
++  }
++
++  // FIXME: This is not pretty. MCContext has a ptr to MCObjectFileInfo and
++  // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
++  MCObjectFileInfo MOFI;
++  MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr);
++  bool PIC = RelocMode == RS_Static ? false : true;
++  MOFI.InitMCObjectFileInfo(TheTriple, PIC, Ctx, LargeCodeModel);
++
++  if (SaveTempLabels)
++    Ctx.setAllowTemporaryLabels(false);
++
++  Ctx.setGenDwarfForAssembly(GenDwarfForAssembly);
++  // Default to 4 for dwarf version.
++  unsigned DwarfVersion = MCOptions.DwarfVersion ? MCOptions.DwarfVersion : 4;
++  if (DwarfVersion < 2 || DwarfVersion > 4) {
++    errs() << ProgName << ": Dwarf version " << DwarfVersion
++           << " is not supported." << '\n';
++    return 1;
++  }
++
++  if(ShowVersV || ShowInvocation) {
++    errs() << ProgName << ": cctools-compatible LLVM-based assembler\n";
++    PrintVersionMessage();
++    errs().flush();
++  }
++
++  Ctx.setDwarfVersion(DwarfVersion);
++  if (!DwarfDebugFlags.empty())
++    Ctx.setDwarfDebugFlags(StringRef(DwarfDebugFlags));
++  if (!DwarfDebugProducer.empty())
++    Ctx.setDwarfDebugProducer(StringRef(DwarfDebugProducer));
++  if (!DebugCompilationDir.empty())
++    Ctx.setCompilationDir(DebugCompilationDir);
++  if (!MainFileName.empty())
++    Ctx.setMainFileName(MainFileName);
++
++  // Package up features to be passed to target/subtarget
++  std::string FeaturesStr;
++  if (MAttrs.size()) {
++    SubtargetFeatures Features;
++    for (unsigned i = 0; i != MAttrs.size(); ++i)
++      Features.AddFeature(MAttrs[i]);
++    FeaturesStr = Features.getString();
++  }
++
++  std::unique_ptr<ToolOutputFile> Out = GetOutputStream();
++  if (!Out)
++    return 1;
++
++  std::unique_ptr<buffer_ostream> BOS;
++  raw_pwrite_stream *OS = &Out->os();
++  std::unique_ptr<MCStreamer> Str;
++
++  std::unique_ptr<MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
++  std::unique_ptr<MCSubtargetInfo> STI(
++      TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
++
++  MCInstPrinter *IP = nullptr;
++  if (FileType == OFT_AssemblyFile) {
++    IP = TheTarget->createMCInstPrinter(Triple(TripleName), OutputAsmVariant,
++                                        *MAI, *MCII, *MRI);
++
++    // Set the display preference for hex vs. decimal immediates.
++    IP->setPrintImmHex(PrintImmHex);
++
++    // Set up the AsmStreamer.
++    std::unique_ptr<MCCodeEmitter> CE;
++    if (ShowEncoding)
++      CE.reset(TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx));
++
++    std::unique_ptr<MCAsmBackend> MAB(
++        TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
++    auto FOut = llvm::make_unique<formatted_raw_ostream>(*OS);
++    Str.reset(TheTarget->createAsmStreamer(
++        Ctx, std::move(FOut), /*asmverbose*/ true,
++        /*useDwarfDirectory*/ true, IP,
++        std::move(CE), std::move(MAB), ShowInst));
++
++  } else if (FileType == OFT_Null) {
++    Str.reset(TheTarget->createNullStreamer(Ctx));
++  } else {
++    assert(FileType == OFT_ObjectFile && "Invalid file type!");
++
++    // Don't waste memory on names of temp labels.
++    Ctx.setUseNamesOnTempLabels(false);
++
++    if (!Out->os().supportsSeeking()) {
++      BOS = make_unique<buffer_ostream>(Out->os());
++      OS = BOS.get();
++    }
++
++    MCCodeEmitter *CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx);
++    MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions);
++    Str.reset(TheTarget->createMCObjectStreamer(
++        TheTriple, Ctx, std::unique_ptr<MCAsmBackend>(MAB),
++        MAB->createObjectWriter(*OS), std::unique_ptr<MCCodeEmitter>(CE),
++        *STI, MCOptions.MCRelaxAll, MCOptions.MCIncrementalLinkerCompatible,
++        /*DWARFMustBeAtTheEnd*/ false));
++    if (NoExecStack)
++      Str->InitSections(true);
++  }
++  
++  int Res = AssembleInput(ProgName, TheTarget, SrcMgr, Ctx, *Str, *MAI, *STI,
++                        *MCII, MCOptions);
++
++  // Keep output if no errors.
++  if (Res == 0)
++    Out->keep();
++  return Res;
++}

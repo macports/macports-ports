@@ -1,0 +1,129 @@
+From 7b9c96a5716a789ac64ccd9886d01a974584aca3 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sun, 2 Sep 2018 20:20:29 +0100
+Subject: [PATCH] [dsymutil, WIP, DEBUG] work on GCC LTO problem
+
+---
+ llvm/tools/dsymutil/DebugMap.cpp            |  7 ++++
+ llvm/tools/dsymutil/DwarfLinker.cpp         |  7 +++-
+ llvm/tools/dsymutil/MachODebugMapParser.cpp | 38 +++++++++++++++++++--
+ 3 files changed, 49 insertions(+), 3 deletions(-)
+
+diff --git a/llvm/tools/dsymutil/DebugMap.cpp b/llvm/tools/dsymutil/DebugMap.cpp
+index 26137773a4e..302bb0f8bc7 100644
+--- a/llvm/tools/dsymutil/DebugMap.cpp
++++ b/llvm/tools/dsymutil/DebugMap.cpp
+@@ -33,6 +33,8 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "llvm/Support/Debug.h"
++
+ namespace llvm {
+ 
+ namespace dsymutil {
+@@ -92,9 +94,14 @@ DebugMap::addDebugMapObject(StringRef ObjectFilePath,
+ 
+ const DebugMapObject::DebugMapEntry *
+ DebugMapObject::lookupSymbol(StringRef SymbolName) const {
++dbgs () << "looking for " << SymbolName;
+   StringMap<SymbolMapping>::const_iterator Sym = Symbols.find(SymbolName);
+   if (Sym == Symbols.end())
++    {
++      dbgs () << " NO\n";
+     return nullptr;
++    }
++  dbgs () << " OK\n";
+   return &*Sym;
+ }
+ 
+diff --git a/llvm/tools/dsymutil/DwarfLinker.cpp b/llvm/tools/dsymutil/DwarfLinker.cpp
+index 430e8e063e3..a9e8a9a053e 100644
+--- a/llvm/tools/dsymutil/DwarfLinker.cpp
++++ b/llvm/tools/dsymutil/DwarfLinker.cpp
+@@ -973,7 +973,12 @@ unsigned DwarfLinker::DIECloner::cloneDieReferenceAttribute(
+   }
+ 
+   if (!RefInfo.Clone) {
+-    assert(Ref > InputDIE.getOffset());
++//    assert(Ref > InputDIE.getOffset());
++   if (Ref <= InputDIE.getOffset()) {
++dbgs() << format(" Ref : %u ID offst : %u ", Ref, InputDIE.getOffset());
++dbgs() << "inpdie: "; InputDIE.dump();
++dbgs() << "refdie: ";RefDie.dump();
++   }
+     // We haven't cloned this DIE yet. Just create an empty one and
+     // store it. It'll get really cloned when we process it.
+     RefInfo.Clone = DIE::get(DIEAlloc, dwarf::Tag(RefDie.getTag()));
+diff --git a/llvm/tools/dsymutil/MachODebugMapParser.cpp b/llvm/tools/dsymutil/MachODebugMapParser.cpp
+index 48155b40204..edcf92d22f5 100644
+--- a/llvm/tools/dsymutil/MachODebugMapParser.cpp
++++ b/llvm/tools/dsymutil/MachODebugMapParser.cpp
+@@ -15,6 +15,8 @@
+ #include "llvm/Support/Path.h"
+ #include "llvm/Support/WithColor.h"
+ #include "llvm/Support/raw_ostream.h"
++#include "llvm/Support/Debug.h"
++#include "llvm/Support/Format.h"
+ 
+ namespace {
+ using namespace llvm;
+@@ -151,6 +153,7 @@ void MachODebugMapParser::switchToNewDebugMapObject(
+ 
+   CurrentDebugMapObject =
+       &Result->addDebugMapObject(Path, Timestamp, MachO::N_OSO);
++dbgs () << " loading symbols for : " + Path.str() + "\n";
+   loadCurrentObjectFileSymbols(*Object);
+ }
+ 
+@@ -454,6 +457,7 @@ void MachODebugMapParser::loadCurrentObjectFileSymbols(
+     uint64_t Addr = Sym.getValue();
+     Expected<StringRef> Name = Sym.getName();
+     if (!Name) {
++dbgs() << " <empty name>\n";
+       // TODO: Actually report errors helpfully.
+       consumeError(Name.takeError());
+       continue;
+@@ -466,10 +470,40 @@ void MachODebugMapParser::loadCurrentObjectFileSymbols(
+     // relocations will use the symbol itself, and won't need an
+     // object file address. The object file address field is optional
+     // in the DebugMap, leave it unassigned for these symbols.
+-    if (Sym.getFlags() & (SymbolRef::SF_Absolute | SymbolRef::SF_Common))
++    if (Sym.getFlags() & (SymbolRef::SF_Absolute | SymbolRef::SF_Common)) {
+       CurrentObjectAddresses[*Name] = None;
+-    else
++      continue;
++    } else
+       CurrentObjectAddresses[*Name] = Addr;
++    Expected<SymbolRef::Type> TypeOrErr = Sym.getType();
++    if (!TypeOrErr) {
++dbgs() << " bade type?\n";
++      // TODO: Actually report errors helpfully.
++      consumeError(TypeOrErr.takeError());
++      continue;
++    }
++    SymbolRef::Type Type = *TypeOrErr;
++    if (Type == SymbolRef::ST_Debug || Type == SymbolRef::ST_Unknown)
++      continue;
++    uint8_t SymType =
++        Obj.getSymbolTableEntry(Sym.getRawDataRefImpl()).n_type;
++    if (!(SymType & (MachO::N_EXT | MachO::N_PEXT)))
++      continue;
++    Expected<section_iterator> SectionOrErr = Sym.getSection();
++    if (!SectionOrErr) {
++      // TODO: Actually report errors helpfully.
++      consumeError(SectionOrErr.takeError());
++      continue;
++    }
++    section_iterator Section = *SectionOrErr;
++    //if (!Section->isDebug()) how to do this?
++    //  continue;
++    StringRef SectName;
++    Section->getName(SectName);
++    if (SectName == "__debug_info") {
++dbgs() << *Name << " " << SectName << format(" 0x%llx\n", Addr);
++      CurrentDebugMapObject->addSymbol(*Name, Addr, 0, 0);
++    }
+   }
+ }
+ 
