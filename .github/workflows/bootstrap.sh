@@ -76,6 +76,14 @@ test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1
 hash -r
 endgroup
 
+begingroup "Selecting Xcode version"
+case "$OS_MAJOR" in
+    22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
+        ;;
+    23) sudo xcode-select --switch /Applications/Xcode_15.3.app/Contents/Developer
+        ;;
+esac
+endgroup
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
