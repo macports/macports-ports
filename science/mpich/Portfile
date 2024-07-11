@@ -89,6 +89,8 @@ compiler.blacklist-append   *gcc-4.*
 
 # Only enable default (gcc), and Xcode clang, for MacOS 10.7 and later
 dict set clist default {}
+dict set clist fortran {}
+dict set clist lib {}
 
 if { ${os.major} >= 11 } {
     dict set clist clang   {clang}
@@ -135,12 +137,12 @@ set subport_enabled \
 # General Subport Logic
 #-------------------------------------------------------------------------------
 
-if {${subport} eq "mpich-default"} {
+if {${subport} eq "mpich-lib"} {
     PortGroup select 1.0
     PortGroup muniversal 1.0
     PortGroup legacysupport 1.1
 
-    set sub_prefix          ${prefix}/libexec/mpich-default
+    set sub_prefix          ${prefix}/libexec/mpich-lib
     set cname "mp"
 
     # Add various dependencies: build, lib, and run
@@ -154,31 +156,29 @@ if {${subport} eq "mpich-default"} {
     depends_build-append        port:pkgconfig
     depends_lib-append          port:libxml2
 
-    if {${os.major} == 10} {
-        # Make every attempt to avoid MacPorts compilers on 10.6
-        configure.cxx_stdlib libstdc++
-    }
+    # mpich-lib (C and Fortran code; c++ is disabled) are built with the
+    # "default" GCC compiler now.
+    configure.compiler $cdb(${compilers.gcc_default},compiler)
 
     # ch4 is hanging in finalize https://github.com/pmodels/mpich/issues/6584
     # always use ch3 for now.
 
-    configure.args  --disable-dependency-tracking    \
-                    --disable-fortran                \
-                    --disable-f08                    \
+    configure.args  --disable-collalgo-tests         \
+                    --disable-cxx                    \
+                    --disable-dependency-tracking    \
                     --disable-silent-rules           \
                     --enable-base-cache              \
                     --enable-cache                   \
-                    --disable-cxx                    \
+                    --enable-f08                     \
                     --enable-fast=O2                 \
+                    --enable-fortran                 \
                     --enable-shared                  \
-                    --enable-versioning              \
                     --enable-timer-type=mach_absolute_time \
-                    --with-pm=hydra                  \
-                    --with-thread-package=posix      \
+                    --enable-versioning              \
+                    --with-device=ch4:ofi:tcp        \
                     --with-hwloc-prefix=${prefix}    \
-                    --disable-collalgo-tests         \
-                    --with-device=ch4:ofi:tcp
-
+                    --with-pm=hydra                  \
+                    --with-thread-package=posix
 
     if {${os.platform} eq "darwin" && ${os.major} < 12} {
         # MPICH requires OpenCL version 1.2, which was not introduced until OS X Mountain Lion
@@ -214,7 +214,7 @@ if {${subport} eq "mpich-default"} {
     configure.pre_args          --prefix=${sub_prefix}
 
     select.group                mpi
-    select.file                 ${filespath}/portselect/${name}-${cname}
+    select.file                 ${filespath}/portselect/${name}-lib-fortran
 
     # Prevent "ccache" and "distcc" from being baked into the wrapper scripts.
     configure.ccache            no
@@ -266,6 +266,14 @@ if {${subport} eq "mpich-default"} {
              echo 'exec ${sub_prefix}/bin/mpiexec \"\$@\"' >> mpiexec-wrap &&
              chmod 755 mpiexec-wrap"
 
+        # Since we don't depends_lib on the gcc compiler for mpich-lib, disable
+        # the compiler wrappers when called with MPICH_** vars. Individual
+        # mpich-_compiler_ subports provide working wrapers with
+        # appropriate compiler dependencies.
+        system -W ${destroot}${sub_prefix}/bin \
+            "sed -i '' -E 's^(.+)=\"${prefix}.*^\\1=/usr/bin/false^' mpicc mpicxx mpif77 mpifort "
+        
+             
         # This version doesn't supply doc/manpages
         if {[file isdirectory ${destroot}${sub_prefix}/share/man]} {
             delete ${destroot}${sub_prefix}/share/man
@@ -287,34 +295,17 @@ if {${subport} eq "mpich-default"} {
     compilers.choose   fc f77 f90
     compilers.setup    default_fortran
 
-    if {[fortran_variant_isset]} {
-        set fortran_enabled yes
-
-        # Ask the portgroup for the correct dependency - the Fortran
-        # variants gccX and g95 match the name of the ports but
-        # gccdevel does not.
-        depends_lib-append      [fortran_variant_depends]
-
-        if {[variant_isset g95]} {
-            configure.args-append lt_cv_ld_force_load=no
-        }
+    if {[variant_isset g95]} {
+        configure.args-append lt_cv_ld_force_load=no
     }
 
-    if {${fortran_enabled}} {
-        configure.args-replace  --disable-fortran --enable-fortran
-
-        # avoid
-        #     Python 3 is required to generate F90 bindings but not found!
-        set python_branch       3.12
-        set python_version      [string map {. {}} ${python_branch}]
-        depends_build-append    port:python${python_version}
-        depends_skip_archcheck-append   port:python${python_version}
-        configure.python        ${prefix}/bin/python${python_branch}
-
-        select.file             ${filespath}/portselect/${name}-${cname}-fortran
-    }
-
-    unset fortran_enabled
+    # avoid
+    #     Python 3 is required to generate F90 bindings but not found!
+    set python_branch       3.12
+    set python_version      [string map {. {}} ${python_branch}]
+    depends_build-append    port:python${python_version}
+    depends_skip_archcheck-append   port:python${python_version}
+    configure.python        ${prefix}/bin/python${python_branch}
 
     #---------------------------------------------------------------------------
     # Universal Build Support
@@ -386,11 +377,6 @@ if {${subport} eq "mpich-default"} {
         }
     }
 
-    variant f08 description {Support f08 (build with CC=gcc)} {
-        configure.compiler $cdb(${compilers.gcc_default},compiler)
-        configure.args-replace  --disable-f08 --enable-f08
-    }
-
     #---------------------------------------------------------------------------
     # Notes
     #---------------------------------------------------------------------------
@@ -401,18 +387,26 @@ if {${subport} eq "mpich-default"} {
 } elseif {${subport_enabled}} {
     PortGroup select 1.0
 
-    set compiler            [dict get ${clist} ${cname}]
-    configure.compiler      [lindex ${compiler} 0]
-    unset compiler
+    if {${subport} eq "mpich-default"} {
+        set sub_prefix          ${prefix}/libexec/mpich-mp
+    } elseif {${subport} eq "mpich-fortran"} {
+        configure.compiler $cdb(${compilers.gcc_default},compiler)
+        depends_lib-append port:$cdb(${compilers.gcc_default},depends)
+        set sub_prefix          ${prefix}/libexec/mpich-fortran
+    } else {
+        set compiler            [dict get ${clist} ${cname}]
+        configure.compiler      [lindex ${compiler} 0]
+        unset compiler
 
-    set sub_prefix          ${prefix}/libexec/${subport}
-    set def_prefix          ${prefix}/libexec/mpich-default
-
-    if {[regexp {clang([0-9]+)} ${subport} comp cver]} {
-        depends_lib-append port:clang-${cver}
-    } elseif {[regexp {gcc([0-9]+)} ${subport} comp]} {
-        depends_lib-append port:${comp}
+        if {[regexp {clang([0-9]+)} ${subport} comp cver]} {
+            depends_lib-append port:clang-${cver}
+        } elseif {[regexp {gcc([0-9]+)} ${subport} comp]} {
+            depends_lib-append port:${comp}
+        }
+        set sub_prefix          ${prefix}/libexec/${subport}
     }
+
+    set def_prefix          ${prefix}/libexec/mpich-lib
 
     long_description-append \
         "\n\nThis subport uses compilers from ${cname} for mpicc, mpicxx, ...\n"
@@ -424,10 +418,10 @@ if {${subport} eq "mpich-default"} {
     default_variants +fortran
 
     if {[variant_isset fortran]} {
-        depends_lib-append          path:bin/mpif77-mpich-mp:${name}-default
+        depends_lib-append          path:libexec/mpich-lib/bin/mpif77-mpich-mp:${name}-lib
         select.file                 ${filespath}/portselect/${subport}-fortran
     } else {
-        depends_lib-append          port:${name}-default
+        depends_lib-append          port:${name}-lib
         select.file                 ${filespath}/portselect/${subport}
     }
 
@@ -459,14 +453,15 @@ if {${subport} eq "mpich-default"} {
         # Build wrapper scripts that set the required compiler env. var.
         dict for {exname info} ${xlist} {
             system -W ${destroot}${sub_prefix}/bin \
-                # Build wrapper scripts that set the required compiler env. var.
                 "echo '#!/bin/bash' > ${exname} &&
                  echo '[lindex ${info} 0]=\"[lindex ${info} 1]\" exec ${def_prefix}/bin/${exname} \"\$@\"' >> ${exname}"
         }
         system -W ${destroot}${sub_prefix}/bin "chmod a+x mpi*"
 
         system -W ${destroot}${sub_prefix} "for x in ${def_prefix}/*; do \[ ! -e \${x##*/} \] && ln -s \$x; done"
-        system -W ${destroot}${sub_prefix}/bin "for x in ${def_prefix}/bin/*; do \[ \${x/mpif/} == \${x} \] && \[ ! -e \${x##*/} \] && ln -s \$x; done"
+        system -W ${destroot}${sub_prefix}/bin "for x in ${def_prefix}/bin/*; do
+          \[ \${x/mpif/} == \${x} \] && \[ \${x/wrap/} == \${x} \] && \[ ! -e \${x##*/} \] && ln -s \$x;
+          done"
 
     }
 
