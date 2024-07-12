@@ -77,7 +77,7 @@ proc mpiutil_validate_subport {name subport cname clist clist_unsupported clist_
     } elseif {${subport} ne ${name}} {
         set subport_enabled yes
 
-        if {${cname} eq "default"} {
+        if {${cname} eq "lib" } {
             if {${configure.compiler} eq "clang"} {
                 set compiler_version [compiler.command_line_tools_version ${configure.compiler}]
                 if {[vercmp 421.11.66 <= ${compiler_version}] && [vercmp ${compiler_version} < 425.0.24]} {

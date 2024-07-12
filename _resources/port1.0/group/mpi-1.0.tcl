@@ -117,19 +117,19 @@ proc mpi.setup_variants {variants} {
                     set mpi.name $mpidb($variant,name)-\$d_name
 
                     foreach compiler {cc cxx f77 f90 exec} {
-                        set mpi.\$compiler mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                        set mpi.\$compiler \${prefix}/libexec/$mpidb($variant,name)-\$p_name/bin/mpi\${compiler}
                     }
-                    set mpi.fc mpif90-$mpidb($variant,name)-\$p_name
+                    set mpi.fc \${prefix}/libexec/$mpidb($variant,name)-\$p_name/bin/mpif90
 
                     # there is no mpicpp or mpiobj
                     # if more compilers are added in compilers portgroup, need to be added here
                     foreach compiler \${compilers.list} {
                         if {\$compiler ne \"fc\" && \$compiler ne \"cpp\" && \$compiler ne \"objc\"} {
-                            configure.\$compiler \${prefix}/bin/mpi\${compiler}-$mpidb($variant,name)-\$p_name
+                            configure.\$compiler \${prefix}/libexec/$mpidb($variant,name)-\$p_name/bin/mpi\${compiler}
                         }
                     }
                     if {\"fc\" in \${compilers.list}} {
-                        set configure.fc \${prefix}/bin/mpif90-$mpidb($variant,name)-\$p_name
+                        set configure.fc \${prefix}/libexec/$mpidb($variant,name)-\$p_name/bin/mpif90
                     }
                 }
 
