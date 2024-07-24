@@ -81,6 +81,21 @@ array set crossbinutils.versions_info {
         sha256  645c25f563b8adc0a81dbd6a41cffbf4d37083a382e02d5d3df4f65c09516d00 \
         size    25167756
     }}
+    2.40 {xz {
+        rmd160  3ba72b8be2349251a51108e59cdb03bb4382fa45 \
+        sha256  0f8a4c272d7f17f369ded10a4aca28b8e304828e95526da482b0ccc4dfc9d8e1 \
+        size    25241484
+    }}
+    2.41 {xz {
+        rmd160  17d22bc99e0eee2dc8b77083f16634a634057927 \
+        sha256  ae9a5789e23459e59606e6714723f2d3ffc31c03174191ef0d015bdf06007450 \
+        size    26765692
+    }}
+    2.42 {xz {
+        rmd160  1aecf0d749c7eb0941f7e1f0be0006d8a8833dd8 \
+        sha256  f6e4d41fd5fc778b06b7891457b3620da5ecea1006c6a4a41ae998109f85a800 \
+        size    27567160
+    }}
 }
 
 proc crossbinutils.setup {target version} {
@@ -88,12 +103,11 @@ proc crossbinutils.setup {target version} {
 
     crossbinutils.target ${target}
 
-    name            ${target}-binutils
-    version         ${version}
-    categories      cross devel
-    platforms       darwin
-    license         GPL-3+
-    maintainers     nomaintainer
+    default name        ${target}-binutils
+    version             ${version}
+    default categories  {cross devel}
+    default license     GPL-3+
+    default maintainers nomaintainer
 
     description     FSF Binutils for ${target} cross development
     long_description \
@@ -139,6 +153,9 @@ proc crossbinutils.setup {target version} {
             ${worksrcpath}/libiberty/Makefile.in
     }
 
+    depends_build \
+        port:texinfo
+
     depends_lib \
         port:gettext \
         port:zlib
@@ -155,8 +172,12 @@ proc crossbinutils.setup {target version} {
         --enable-install-libiberty=${prefix}/${crossbinutils.target}/host \
         --infodir=${prefix}/share/info/${target} \
         --mandir=${prefix}/share/man \
-        --datarootdir=${prefix}/share/${crossbinutils.target} \
-        
+        --datarootdir=${prefix}/share/${crossbinutils.target}
+
+    # Opportunistic links zstd for compression
+    if {[vercmp ${version} >= "2.40"]} {
+        depends_lib-append  port:zstd
+    }
 
     build.dir ${workpath}/build
 

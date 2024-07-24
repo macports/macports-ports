@@ -1,23 +1,21 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           compiler_blacklist_versions 1.0
 PortGroup           github 1.0
 PortGroup           mpi 1.0
 PortGroup           python 1.0
 
-name                py-pytorch
-version             1.12.0
-revision            1
-github.setup        pytorch pytorch ${version} v
+github.setup        pytorch pytorch 2.3.0 v
+revision            0
+name                py-${github.project}
+license             BSD
+maintainers         nomaintainer
+supported_archs     arm64 x86_64
 fetch.type          git
 
-platforms           darwin
-supported_archs     arm64 x86_64
-
-license             BSD
-
-maintainers         nomaintainer
+# third_party/pthreadpool needs DISPATCH_APPLY_AUTO (as of torch 2.0.0), requiring 10.12+
+# But builds fail for 10.12 - 10.14, so exclude those too
+platforms           {darwin >= 19}
 
 description         Tensors and dynamic neural networks in Python \
                     with strong GPU acceleration
@@ -32,34 +30,37 @@ long_description    PyTorch is a Python package that provides two \
 
 homepage            https://pytorch.org/
 
-python.versions     37 38 39 310
-
-patch.pre_args      -p1
+python.versions     38 39 310 311 312
 
 mpi.setup
 
 # Compiler selection
 compiler.cxx_standard 2017
 
-compiler.blacklist-append *gcc* {clang < 800} {macports-clang-3.[0-9]} macports-clang-4.0
+compiler.blacklist-append *gcc*
 
 variant mkl description {Enable Intel Math Kernel Library support} { }
 
-if {${os.arch} in [list i386]} {
+# py-mkl supports x86_64 and 10.12 and later only
+if {${configure.build_arch} eq "x86_64" && !($universal_possible && [variant_isset universal])
+        && !(${os.platform} eq "darwin" && ${os.major} <= 15)} {
     default_variants-append +mkl
 }
 
-variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
-    use_xcode       yes
+platform darwin {
+    # MPS support added in 10.13
+    if {${os.major} >= 17} {
+        variant mps description {Enable Apple Metal Performance Shaders (MPS) support} {
+            use_xcode       yes
 
-    build.env-append \
-                    APPLE=ON \
-                    USE_MPS=ON \
-                    USE_PYTORCH_METAL=ON \
-                    USE_PYTORCH_METAL_EXPORT=ON
+            build.env-append \
+                APPLE=ON \
+                USE_MPS=ON \
+                USE_PYTORCH_METAL=ON \
+                USE_PYTORCH_METAL_EXPORT=ON
 
-    notes-append \
-        "
+            notes-append \
+"
 The port ${subport} is built with Apple Metal Performance Shaders (MPS)\
 support for GPU hardware acceleration. To enable Apple GPU devices,\
 use device \"mps\". Matrix multiplication example:
@@ -71,35 +72,39 @@ use device \"mps\". Matrix multiplication example:
     x = torch.randn((10_000, 1_000), device=mpsDevice)
     cov = (x.T @ x)/x.shape\[0]
 "
-}
-default_variants-append +mps
+        }
 
-if {${os.platform} eq "darwin" && ${os.major} <= 15} {
-    known_fail yes
-    pre-fetch {
-        ui_error "$subport is not supported on OS X 10.11 and older."
-        return -code error "unsupported platform"
+        default_variants-append +mps
+    }
+
+    # fix on macOS 12-13 with Xcode 14:
+    if { ${os.major} == 21 && [vercmp ${xcodeversion} 14] >= 0 } {
+        patchfiles-append   patch-macOS12-xcode14.diff
+    } elseif { ${os.major} == 22 && [vercmp ${xcodeversion} 14] >= 0 } {
+        patchfiles-append   patch-macOS13-xcode14.diff
     }
 }
 
 if {${name} ne ${subport}} {
-
     depends_build-append \
         port:git \
         path:bin/doxygen:doxygen \
         port:cctools \
         path:bin/cmake:cmake \
+        path:bin/ninja:ninja \
+        port:py${python.version}-astunparse \
+        port:py${python.version}-requests \
         port:py${python.version}-setuptools
 
     depends_lib-append \
-        port:eigen3 \
+        path:share/pkgconfig/eigen3.pc:eigen3 \
         port:gmp \
         port:mpfr \
-        port:OpenBLAS \
+        path:lib/libopenblas.dylib:OpenBLAS \
         path:lib/opencv4/libopencv_core.dylib:opencv4 \
         port:zmq \
         port:zstd \
-        port:tbb \
+        port:onetbb \
         port:google-glog \
         port:gflags \
         port:leveldb \
@@ -108,7 +113,6 @@ if {${name} ne ${subport}} {
         port:py${python.version}-click \
         port:py${python.version}-cffi \
         port:py${python.version}-future \
-        port:py${python.version}-gmpy \
         port:py${python.version}-numpy \
         port:py${python.version}-pybind11 \
         port:py${python.version}-typing_extensions \
@@ -117,23 +121,26 @@ if {${name} ne ${subport}} {
     depends_run-append \
         port:py${python.version}-onnx
 
-    post-fetch {
-        system -W ${worksrcpath} "git submodule update --init --recursive"
+    pre-fetch {
+        # error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL
+        system -W ${workpath} "${git.cmd} config --global http.postBuffer 16777216"
     }
 
-    # Resolve issue with Clang 13: warning option 'unused-but-set' not available.
-    # Fixed by upstream, and will be included in future release.
-    # See: https://trac.macports.org/ticket/65501
-    patchfiles-append        patch-cmake-clang-unused-but-set.diff
+    post-fetch {
+        system -W ${worksrcpath} "${git.cmd} submodule update --init --recursive"
+    }
+
+    # diff -Naur ./py-pytorch_orig ./py-pytorch_new | sed -E -e 's/\.\/py-pytorch_(orig|new)/\./g' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-pyproject_toml.diff
+    patchfiles-append       patch-pyproject_toml.diff
 
     # Patch to fix init issue with google-glog 0.5.0, caused by breaking API change.
     # Refer to patch header for detailed background.
     # Upstream PyTorch issue: https://github.com/pytorch/pytorch/issues/58054
     # diff -NaurdwB ./py-pytorch-orig/c10/util/Logging.cpp ./py-pytorch-new/c10/util/Logging.cpp | sed -E -e 's/\.\/py-pytorch-(orig|new)/\.\//' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-glog-init-check.diff
-    patchfiles-append        patch-glog-init-check.diff
+    patchfiles-append       patch-glog-init-check.diff
 
-    # diff -NaurdwB ./py-pytorch-orig/torch/csrc/jit/tensorexpr/bounds_overlap.h ./py-pytorch-new/torch/csrc/jit/tensorexpr/bounds_overlap.h | sed -E -e 's/\.\/py-pytorch-(orig|new)/\.\//' | sed -E -e 's|/opt/local|@@PREFIX@@|g' > ~/Downloads/patch-bounds_overlap-h.diff
-    patchfiles-append        patch-bounds_overlap-h.diff
+    # Disable -Werror in third_party/fbgemm
+    patchfiles-append       Werror.patch
 
     # Use Intel Math kernel Library
     if {[variant_isset mkl]} {
@@ -147,16 +154,24 @@ if {${name} ne ${subport}} {
             reinplace "s|MACPORTS_PREFIX|${prefix}|g" \
                 cmake/Modules/FindMKL.cmake
         }
-        depends_lib-append   port:py${python.version}-mkl
-        depends_build-append port:py${python.version}-mkl-include
+        depends_lib-append      port:py${python.version}-mkl
+        depends_build-append    port:py${python.version}-mkl-include
     }
+
+    compiler.cpath-append \
+                    ${prefix}/include/libomp
+
+    compiler.library_path-append \
+                    ${prefix}/lib/libomp
+
+    configure.cppflags-append \
+                    -I${prefix}/include/libomp
 
     configure.ccache    yes
 
     # ZSTD support broke with 1.2.0-1.12.0. Check with future releases.
     build.env-append \
                     CMAKE_LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
-                    LIBRARY_PATH=${prefix}/lib:${prefix}/lib/libomp \
                     OpenCV_DIR=${prefix}/libexec/opencv4/cmake \
                     USE_CCACHE=OFF \
                     USE_CUDA=OFF \
@@ -171,14 +186,9 @@ if {${name} ne ${subport}} {
                     USE_OPENMP=ON \
                     USE_ROCM=OFF \
                     USE_TBB=ON \
+                    USE_SYSTEM_TBB=ON \
                     USE_ZMQ=ON \
                     USE_ZSTD=OFF
-
-    build.dir       ${worksrcpath}
-    build.post_args
-
-    destroot.dir    ${worksrcpath}
-    destroot.target install
 
     post-destroot {
         set py_torch_root ${python.pkgd}/torch
@@ -195,14 +205,9 @@ if {${name} ne ${subport}} {
     # pytorch's tests all use GPU compilation
     if { [lsearch ${build.env} {USE_CUDA=OFF}] != -1 } {
         test.run    yes
-    }
-    
-    livecheck.type  none
-
+    }    
 } else {
-
     # overload the github livecheck regex to look for versions that
     # are just numbers and '.', no letters (e.g., "3.7.3_rc2").
     github.livecheck.regex  {([0-9.]+)}
-
 }

@@ -1,0 +1,136 @@
+From 0b9460cc026fe69ece6d6a96740bbc1d31c91d31 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <vital.had@gmail.com>
+Date: Tue, 28 Mar 2023 01:24:42 +0700
+Subject: [PATCH 5/5] Filesystem: replacement for fmemopen
+
+---
+ src/Filesystem.cc | 94 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/Filesystem.hh | 13 +++++++
+ 2 files changed, 107 insertions(+)
+
+diff --git a/src/Filesystem.cc b/src/Filesystem.cc
+index 884128b..36d2764 100644
+--- src/Filesystem.cc
++++ src/Filesystem.cc
+@@ -678,3 +678,97 @@ unordered_map<int, short> Poll::poll(int timeout_ms) {
+   }
+   return ret;
+ }
++
++#ifdef __APPLE__
++#include <AvailabilityMacros.h>
++#if MAC_OS_X_VERSION_MAX_ALLOWED < 101300
++// https://github.com/NimbusKit/memorymapping/blob/master/src/fmemopen.c
++
++#include <sys/mman.h>
++
++struct fmem {
++  size_t pos;
++  size_t size;
++  char *buffer;
++};
++typedef struct fmem fmem_t;
++
++static int readfn(void *handler, char *buf, int size) {
++  fmem_t *mem = handler;
++  size_t available = mem->size - mem->pos;
++  
++  if (size > available) {
++    size = available;
++  }
++  memcpy(buf, mem->buffer + mem->pos, sizeof(char) * size);
++  mem->pos += size;
++  
++  return size;
++}
++
++static int writefn(void *handler, const char *buf, int size) {
++  fmem_t *mem = handler;
++  size_t available = mem->size - mem->pos;
++
++  if (size > available) {
++    size = available;
++  }
++  memcpy(mem->buffer + mem->pos, buf, sizeof(char) * size);
++  mem->pos += size;
++
++  return size;
++}
++
++static fpos_t seekfn(void *handler, fpos_t offset, int whence) {
++  size_t pos;
++  fmem_t *mem = handler;
++
++  switch (whence) {
++    case SEEK_SET: {
++      if (offset >= 0) {
++        pos = (size_t)offset;
++      } else {
++        pos = 0;
++      }
++      break;
++    }
++    case SEEK_CUR: {
++      if (offset >= 0 || (size_t)(-offset) <= mem->pos) {
++        pos = mem->pos + (size_t)offset;
++      } else {
++        pos = 0;
++      }
++      break;
++    }
++    case SEEK_END: pos = mem->size + (size_t)offset; break;
++    default: return -1;
++  }
++
++  if (pos > mem->size) {
++    return -1;
++  }
++
++  mem->pos = pos;
++  return (fpos_t)pos;
++}
++
++static int closefn(void *handler) {
++  free(handler);
++  return 0;
++}
++
++FILE *fmemopen(void *buf, size_t size, const char *mode) {
++  // This data is released on fclose.
++  fmem_t* mem = (fmem_t *) malloc(sizeof(fmem_t));
++
++  // Zero-out the structure.
++  memset(mem, 0, sizeof(fmem_t));
++
++  mem->size = size;
++  mem->buffer = buf;
++
++  // funopen's man page: https://developer.apple.com/library/mac/#documentation/Darwin/Reference/ManPages/man3/funopen.3.html
++  return funopen(mem, readfn, writefn, seekfn, closefn);
++}
++#endif
++#endif
+diff --git a/src/Filesystem.hh b/src/Filesystem.hh
+index fcaf9b8..63ebbf2 100644
+--- src/Filesystem.hh
++++ src/Filesystem.hh
+@@ -20,6 +20,19 @@
+ #include <utility>
+ #include <vector>
+ 
++#ifdef __APPLE__
++  #include <AvailabilityMacros.h>
++  #if MAC_OS_X_VERSION_MAX_ALLOWED < 101300
++  // https://github.com/NimbusKit/memorymapping/blob/master/src/fmemopen.h
++    #if defined __cplusplus
++      extern "C" {
++    #endif
++    FILE *fmemopen(void *buf, size_t size, const char *mode);
++    #ifdef __cplusplus
++      }
++    #endif
++  #endif
++#endif
+ 
+ 
+ std::string basename(const std::string& filename);

@@ -28,8 +28,8 @@ options gitlab.livecheck.regex
 default gitlab.livecheck.regex {(\[0-9]\[^<]+)}
 
 proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_suffix ""}} {
-    global extract.suffix gitlab.author gitlab.project gitlab.version gitlab.tag_prefix gitlab.tag_suffix
-    global gitlab.homepage gitlab.master_sites gitlab.livecheck.branch PortInfo
+    global extract.suffix gitlab.author gitlab.project gitlab.version gitlab.tag_prefix gitlab.tag_suffix \
+           gitlab.homepage gitlab.master_sites gitlab.livecheck.branch PortInfo
 
     gitlab.author           ${gl_author}
     gitlab.project          ${gl_project}
@@ -49,31 +49,9 @@ proc gitlab.setup {gl_author gl_project gl_version {gl_tag_prefix ""} {gl_tag_su
     distname                ${gitlab.project}-${gitlab.version}
     use_bzip2               yes
 
-# I don't _think_ we need this bit from the github portgroup, but keeping
-# around until we have more use cases...
-#    post-extract {
-#        # When fetching from a tag, the extracted directory name will contain a
-#        # truncated commit hash. So that the port author need not specify what
-#        # that hash is every time the version number changes, rename the
-#        # directory to the value of distname (not worksrcdir: ports may want to
-#        # set worksrcdir to a subdirectory of the extracted directory).
-#        # It is assumed that gitlab.master_sites is a simple string, not a list.
-#        # Here be dragons.
-#        if {![file exists ${worksrcpath}] && \
-#                ${fetch.type} eq "standard" && \
-#                ${gitlab.master_sites} in ${master_sites} && \
-#                [llength ${distfiles}] > 0 && \
-#                [llength [glob -nocomplain ${workpath}/*]] > 0} {
-#            if {[file exists [glob -nocomplain ${workpath}/${gitlab.author}-${gitlab.project}-*]] && \
-#                [file isdirectory [glob -nocomplain ${workpath}/${gitlab.author}-${gitlab.project}-*]]} {
-#                move [glob ${workpath}/${gitlab.author}-${gitlab.project}-*] ${workpath}/${distname}
-#            } else {
-#                # tarball is not "${gitlab.author}-${gitlab.project}-*"
-#                ui_error "\n\ngitlab PortGroup: Error: \${worksrcpath} does not exist after extracting distfiles. This might indicate that the author or project is different than set in the Portfile due to a rename at GitHub. Please examine the extracted directory in ${workpath} and try to correct the Portfile by either changing the author or project or adding the worksrcdir option with the correct directory name.\n"
-#                return -code error "Unexpected gitlab tarball extract."
-#            }
-#        }
-#    }
+    # When fetching from a tag, the extracted directory name will contain a
+    # truncated commit hash.
+    default extract.rename  {[expr {[llength ${extract.only}] == 1}]}
 
     # If the version is composed entirely of hex characters, and is at least 7
     # characters long, and is not exactly 8 decimal digits (which might be a

@@ -63,23 +63,14 @@ default     cargo.offline_cmd   {--frozen}
 # so offer the option of running cargo-update
 default     cargo.update        {no}
 
-options     rust.upstream_deployment_target \
-            rust.upstream_archs \
-            rust.use_cctools \
-            rust.archiver \
-            rust.ranlib
+# use `--remap-path-prefix` to prevent build information from bing included installed binaries
+options     rust.remap
+default     rust.remap          {${cargo.home} "" ${worksrcpath} ""}
 
-# default macosx_deployment_target value of Rust function macos_default_deployment_target
-# see https://github.com/rust-lang/rust/blob/master/compiler/rustc_target/src/spec/apple_base.rs
-default     rust.upstream_deployment_target {[expr {${os.arch} eq "arm" ? 11.0 : 10.7}]}
-
-# architectures for which an upstream bootstrap compiler is available
-default     rust.upstream_archs     {[expr {${os.platform} eq "darwin" && ${os.major} >= 13 ? {arm64 x86_64} : {}}]}
-
-# some tools provided by system are too old, so use MacPorts version instead
-default     rust.use_cctools        {[expr {${os.platform} eq "darwin" && ${os.major} < 11 ? "yes" : "no"}]}
-default     rust.archiver           {[expr {${rust.use_cctools} ? "${prefix}/bin/ar" : "/usr/bin/ar"}]}
-default     rust.ranlib             {[expr {${rust.use_cctools} ? "${prefix}/bin/ranlib" : "/usr/bin/ranlib"}]}
+# flags to be passed to the rust compiler
+# --remap-path-prefix=... is eventually added unless rust.remap is empty
+options     rust.flags
+default     rust.flags          {}
 
 # compiler runtime library
 #     N.B.: `configure.ldflags-append {*}${rust.rt_static_libs}` might be insufficient
@@ -113,8 +104,8 @@ proc        portconfigure::should_add_stdlib  {} {return no}
 proc        portconfigure::should_add_cxx_abi {} {return no}
 
 # enforce same compiler settings as used by rust
-default compiler.cxx_standard           2017
-default compiler.thread_local_storage   yes
+default     compiler.cxx_standard           2017
+default     compiler.thread_local_storage   yes
 
 # do not include os.major in target triplet
 default     triplet.os              {${os.platform}}
@@ -126,235 +117,6 @@ default     compwrap.ccache_supported_compilers {}
 # possible OpenSSL versions: empty, 3, 1.1, and 1.0
 options     openssl.branch
 default     openssl.branch      {}
-
-# utility method to get bootstrap compilers
-# should only be needed by Rust/Cargo ports
-proc rust.add_bootstrap_components {architectures {components {rust-std rustc cargo}}} {
-    global extract.suffix os.major subport
-
-    set version_current         1.61.0
-    set version_m1              1.60.0
-    set version_m2              1.59.0
-
-    master_sites-append         https://static.rust-lang.org/dist:apple_vendor \
-                                https://github.com/MarcusCalhoun-Lopez/rust/releases/download/${version_current}:macports_vendor \
-                                file://[option prefix]/libexec/rust-bootstrap:transition_vendor
-
-    if { [join [lrange [split ${subport} -] 0 1] -] eq "rust-bootstrap" } {
-        set is_bootstrap        yes
-    } else {
-        set is_bootstrap        no
-    }
-
-    set rustc_version           ${version_m1}; # ensure value is always set (see https://trac.macports.org/ticket/65183)
-    foreach arch ${architectures} {
-        # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-        if { ${arch} in [option rust.upstream_archs] && [vercmp [option macosx_deployment_target] [option rust.upstream_deployment_target]] >= 0 } {
-            set build_vendor        apple
-            if { ${is_bootstrap} } {
-                set rustc_version   ${version_m2}
-            } else {
-                set rustc_version   ${version_m1}
-            }
-            set build_major         ""
-        } elseif { ${arch} in [option rust.upstream_archs] && ${is_bootstrap} && ${subport} ne "rust-bootstrap-transition" } {
-            set build_vendor        transition
-            set build_major         ""
-            set rustc_version       ${version_m1}
-        } else {
-            set build_vendor        macports
-            if { ${os.major} >= 11 } {
-                set rustc_version   ${version_m1}+0
-                set build_major     ""
-            } elseif { ${os.major} >= 10 } {
-                set rustc_version   ${version_m1}+0
-                set build_major     10
-            } elseif { ${os.major} >= 9 } {
-                set rustc_version   ${version_m1}+0
-                set build_major     9
-            } elseif { ${os.major} >= 8 } {
-                set rustc_version   ${version_m1}+0
-                set build_major     8
-            }
-        }
-
-        if { ${build_vendor} ne "transition" } {
-            foreach component ${components} {
-                set binTag          ${rustc_version}-[option triplet.cpu.${arch}]-${build_vendor}-[option triplet.os]${build_major}
-                distfiles-append    ${component}-${binTag}${extract.suffix}:${build_vendor}_vendor
-            }
-        } else {
-            depends_extract-delete          port:rust-bootstrap-transition
-            depends_extract-append          port:rust-bootstrap-transition
-            depends_build-delete            port:rust-bootstrap-transition
-            depends_build-append            port:rust-bootstrap-transition
-            depends_skip_archcheck-delete   rust-bootstrap-transition
-            depends_skip_archcheck-append   rust-bootstrap-transition
-
-            if {[option muniversal.is_cross.[option configure.build_arch]]} {
-                # if os.arch is arm and subport is rust-bootstrap-10.6, avoid
-                #     Error: Cannot install rust-bootstrap-10.6 for the arch 'x86_64' because
-                #     Error: its dependency rust-bootstrap-transition does not build for the required arch by default
-                #     Error: and does not have a universal variant.
-                known_fail                  yes
-                pre-fetch {
-                    ui_error "${subport} does not support cross-compilation"
-                    return -code error "incompatible OS configuration"
-                }
-            }
-
-            foreach component ${components} {
-                set binTag          ${rustc_version}+0-[option triplet.cpu.${arch}]-${build_vendor}-[option triplet.os]${build_major}
-                set distfile        [option prefix]/libexec/rust-bootstrap/${component}-${binTag}${extract.suffix}
-                post-extract        "system -W \${workpath} \"\${extract.cmd} \${extract.pre_args} ${distfile} \${extract.post_args}\""
-            }
-        }
-    }
-
-    # upstream binaries
-    checksums-append        rust-std-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  143d2efeab58174df9a1b71fc75c1912bdc7347c \
-                            sha256  1cdd56c95d27b954f5fda8c5527d2edb4e3f17cf17c5553b8b3b57f8dfc77eee \
-                            size    39947593 \
-                            rustc-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  6de0b0ded933b2790cf19a63efc01a526e410b62 \
-                            sha256  6569aa1b0959fa7f73fea4d6dd01059132c83d1d8c06216726077cf9e6883857 \
-                            size    82915939 \
-                            cargo-${version_m1}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  5002a7687a166956c2d576ca1847dcfbde964115 \
-                            sha256  fd479595f3c4035a555357c0bebffdf6fb5e244d590dc6b7eb2880dd71091cca \
-                            size    6665646 \
-                            rust-std-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  f2af395c4216a099602929d7bdc43cff7d5f5385 \
-                            sha256  ca99a455d930147d9383da282e6db4f0de2a013099555b551ab381d58fd82732 \
-                            size    39295115 \
-                            rustc-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  1ea607d0c8ab15d6554de8511423b18b66bbee58 \
-                            sha256  fc864d34c78b4d2509d13c10680321946b87ddd0b2f6d4c6c5bb711db461dd17 \
-                            size    84680855 \
-                            cargo-${version_m1}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  2d95fee4ecc55143304e13c03c122f83f1c6d344 \
-                            sha256  6839526ce51c47162e678e6329d90f04b565e2214f9864e15e14fe794d047a73 \
-                            size    5994294
-
-    # upstream binaries
-    checksums-append        rust-std-${version_m2}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  420c6ae0086a68aa018c31f79b96eb2d1c556537 \
-                            sha256  959af8bafbc9f3916a1d1111d7378fdd7aa459410cdd2d3bbfc2d9d9a6db0683 \
-                            size    39328167 \
-                            rustc-${version_m2}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  70eb8715fb4219be33d430e708883e5b035ad111 \
-                            sha256  eb5b613800c75882bed9e3bb48c325aac0e5ce418ae2b19f51e4ccf7e4781e0b \
-                            size    81261773 \
-                            cargo-${version_m2}-x86_64-apple-darwin${extract.suffix} \
-                            rmd160  5c968f1dd476d0e7a340a23a03fa918aee17d3cb \
-                            sha256  d0202b50b4f3d0e943a5d7e8d14420afeac8cf36e6136e8d5b7ddefb3538d62a \
-                            size    6424124 \
-                            rust-std-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  79767785ff058ea7173b234232f9f238b1a7c7b6 \
-                            sha256  e70bd0c56f8f716238a1395c54dd9d993a3168e2764e404dc65553babf7aa127 \
-                            size    38541530 \
-                            rustc-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  18cb2608f941741b3dabe66a0668b6b3cf366994 \
-                            sha256  caac78491d8f0844bb9a512989a409c35ff681a131495e7ebfacb69ba006bbc1 \
-                            size    82983805 \
-                            cargo-${version_m2}-aarch64-apple-darwin${extract.suffix} \
-                            rmd160  d2a4638a1509d051f0bce03ae043eccc4c612b0c \
-                            sha256  4bdcb77ea084364b551a5cf969e263beb09afa39627f6dead262c8e2a7aed9c1 \
-                            size    5750407
-
-    # MacPorts bootstrap binaries for older system
-    checksums-append        rust-std-${version_m1}+0-x86_64-macports-darwin${extract.suffix} \
-                            rmd160  772271a68ca74dcd3cda4bbed7d365e57a25e87c \
-                            sha256  64a8a47951f6f3e7eba3d8e6c19213d9478833aa4dfb631d05d94c4939a19f33 \
-                            size    35222629 \
-                            rustc-${version_m1}+0-x86_64-macports-darwin${extract.suffix} \
-                            rmd160  5bfc6f956bc760aa77df2c0b1f34b52446005305 \
-                            sha256  95416c0b97d6fdfe46fa2ee350f1a6ede7dfd2470f988c5a1ce536eea452fc56 \
-                            size    45537014 \
-                            cargo-${version_m1}+0-x86_64-macports-darwin${extract.suffix} \
-                            rmd160  74f81da05a57291abaeae4434c35a96814803c70 \
-                            sha256  5050e581854ea31c573166984c0742f730c116cac81853a254178b7af4f8dfaf \
-                            size    6029491 \
-                            rust-std-${version_m1}+0-i686-macports-darwin${extract.suffix} \
-                            rmd160  26f9a40b2e5b0aa57c2045fd46cb90af57d3b75b \
-                            sha256  651559fe7fa3169d67d811b1843ce2458a51735d75b4871f6ff61635c7c9a6b4 \
-                            size    34869393 \
-                            rustc-${version_m1}+0-i686-macports-darwin${extract.suffix} \
-                            rmd160  fa6ceba21f9fb9b05dca8754511a3a90121c4a63 \
-                            sha256  7e1f501f2fbc1bae0b5cfb59a62320ad64c34892cbe08f0a5ba03428ee248309 \
-                            size    55181716 \
-                            cargo-${version_m1}+0-i686-macports-darwin${extract.suffix} \
-                            rmd160  c5b5791b8867bcca2b41abe577f7a4d8b8e0ce37 \
-                            sha256  f9ec398f76b772bb994fb2d1ac4fa80a4337602e6cb2569a2d9d1a5b31bbe5ca \
-                            size    5996390 \
-                            rust-std-${version_m1}+0-x86_64-macports-darwin10${extract.suffix} \
-                            rmd160  c8004f129f00025f23aee919136f4f8ab9ac269e \
-                            sha256  262d9fd7b73d1a7c52f0cb2a9ed330219ed3195c2a8c7f7a84931e9ce38a5abe \
-                            size    35236642 \
-                            rustc-${version_m1}+0-x86_64-macports-darwin10${extract.suffix} \
-                            rmd160  66af0b61984e25d25c3b458b3ddcc7fae01e1faa \
-                            sha256  84bf956d5b40573775c4261b68291d7bbf9de88f6ee59b60e9c58e461586e002 \
-                            size    45627028 \
-                            cargo-${version_m1}+0-x86_64-macports-darwin10${extract.suffix} \
-                            rmd160  11f811c2f6c2a1261d0c5e5cb819de3601b5907a \
-                            sha256  cb92e27d3f9e9e87409cc31fbe7a981f033aed75ea13da9080db174ad2662d02 \
-                            size    6041759 \
-                            rust-std-${version_m1}+0-i686-macports-darwin10${extract.suffix} \
-                            rmd160  bde12e503357443acef2ed005fe8ea5aab44426b \
-                            sha256  d222b210bc7afec63ad3f80618f0654fc54c9ab3c9e79988e2bdf5ede01ee590 \
-                            size    34855986 \
-                            rustc-${version_m1}+0-i686-macports-darwin10${extract.suffix} \
-                            rmd160  0fd32ea319a126e37814b9cd7b503d8a53b7677c \
-                            sha256  b0c5013c3e5dd5e579941e9247685862f73bc78f3586df0f1b1c742e3a7ea626 \
-                            size    55246015 \
-                            cargo-${version_m1}+0-i686-macports-darwin10${extract.suffix} \
-                            rmd160  309abdbe7006d3c424cb1a4580be9f2101dd4eff \
-                            sha256  e4a6d399f78b5cf517ef26149adb039cae471b7dd3d06f80b74801bc00f3dcee \
-                            size    6000178 \
-                            rust-std-${version_m1}+0-x86_64-macports-darwin9${extract.suffix} \
-                            rmd160  1a1f3ed791b676c9324e2b92b4a86e84f4df003e \
-                            sha256  58fea494774e5836352b9585c62217014390ff4cc46b70d8d07b96a5c8196bd1 \
-                            size    35066669 \
-                            rustc-${version_m1}+0-x86_64-macports-darwin9${extract.suffix} \
-                            rmd160  b9bdc090fe8a69b99e81db758fa902b7f842ecf8 \
-                            sha256  9a506a1f34374f8e2653f678f0ca2a3d3da64a3efc30c6aa3bba652f38ad312d \
-                            size    45420286 \
-                            cargo-${version_m1}+0-x86_64-macports-darwin9${extract.suffix} \
-                            rmd160  2545700d3457246231cc477109d7d927f44fe38e \
-                            sha256  2440521aa7391aac3ff4e2b14b877ea241e0e928dce8cd5c74cdc9d80680d90d \
-                            size    5954922 \
-                            rust-std-${version_m1}+0-i686-macports-darwin9${extract.suffix} \
-                            rmd160  df23f3b07f27a3d11426501c4460ccb6a596a39f \
-                            sha256  c57109a9550a43aed5228afd84c00d16c43718e041a333978b433f13483b9951 \
-                            size    34708109 \
-                            rustc-${version_m1}+0-i686-macports-darwin9${extract.suffix} \
-                            rmd160  42ce006c9958bedda5ce2544d6a51819be75c79c \
-                            sha256  5af984da6d54f08037b4679fdf7707e8683047070dc6c050076a67e2e8c0434c \
-                            size    53901654 \
-                            cargo-${version_m1}+0-i686-macports-darwin9${extract.suffix} \
-                            rmd160  5ad7aadcfffd0bc6fa9b15f4c85c4230b46300bf \
-                            sha256  34648fdf663140661bd8ce0d4705622e042587cc8aeefebf6abb0442a02d36d4 \
-                            size    5914833
-
-    return                  [lindex [split ${rustc_version} +] 0]
-}
-
-####################################################################################################################################
-# for building LLVM as part of building the Rust compiler
-####################################################################################################################################
-
-options     rust.llvm.legacy
-default     rust.llvm.legacy        {[expr {${os.major} < 11}]}
-
-options     rust.llvm.cflags
-default     rust.llvm.cflags        {[portconfigure::configure_get_cppflags] ${configure.optflags} [expr {${rust.llvm.legacy} ? "-isystem${prefix}/include/LegacySupport" : ""}]}
-
-options     rust.llvm.cxxflags
-default     rust.llvm.cxxflags      {[portconfigure::configure_get_cppflags] ${configure.optflags} [expr {${rust.llvm.legacy} ? "-isystem${prefix}/include/LegacySupport" : ""}]}
-
-options     rust.llvm.ldflags
-default     rust.llvm.ldflags       {[portconfigure::configure_get_ldflags] [expr {${rust.llvm.legacy} ? "${prefix}/lib/libMacportsLegacySupport.a" : ""}]}
 
 ####################################################################################################################################
 # utility procedures
@@ -388,6 +150,13 @@ proc rust.marcports_arch {rarch} {
 proc cargo.rust_platform {{arch ""}} {
     if {${arch} eq ""} {
         set arch [option muniversal.build_arch]
+        # muniversal.build_arch is empty if we are not doing a universal build
+        if {${arch} eq ""} {
+            set arch [option configure.build_arch]
+            if {${arch} eq ""} {
+                error "No build arch configured"
+            }
+        }
     }
     return [option triplet.${arch}]
 }
@@ -513,36 +282,72 @@ proc rust::old_macos_compatibility {cname cversion} {
     global cargo.home subport
 
     switch ${cname} {
+        "cc" {
+            if { [vercmp ${cversion} < 1.0.94] && [vercmp ${cversion} >= 1.0.85] } {
+                # see https://github.com/rust-lang/cc-rs/pull/1007
+                reinplace "s|--show-sdk-platform-version|--show-sdk-version|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/lib.rs
+            }
+        }
+        "curl-sys" {
+            if { [vercmp ${cversion} < 0.4.56] } {
+                # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
+                # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
+                # see https://trac.macports.org/ticket/64146#comment:16
+                #
+                # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
+                # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
+                # see https://github.com/alexcrichton/curl-rust/issues/279
+                #
+                # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
+                #
+                reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/build.rs
+            }
+        }
         "kqueue" {
-            if { "i386" in [option muniversal.architectures] } {
+            if { [vercmp ${cversion} < 1.0.5] && "i386" in [option muniversal.architectures] } {
                 # see https://gitlab.com/worr/rust-kqueue/-/merge_requests/10
                 reinplace {s|all(target_os = "freebsd", target_arch = "x86")|all(any(target_os = "freebsd", target_os = "macos"), any(target_arch = "x86", target_arch = "powerpc"))|g} \
                     ${cargo.home}/macports/${cname}-${cversion}/src/time.rs
                 cargo.offline_cmd-replace --frozen --offline
             }
         }
-        "curl-sys" {
-            # on Mac OS X 10.6, clang exists, but `clang --print-search-dirs` returns an empty library directory
-            # see https://github.com/alexcrichton/curl-rust/commit/b3a3ce876921f2e82a145d9abd539cd8f9b7ab7b
-            # see https://trac.macports.org/ticket/64146#comment:16
-            #
-            # on other systems, we want the static library of the compiler we are using and not necessarily the system compiler
-            # see https://github.com/alexcrichton/curl-rust/commit/a6969c03b1e8f66bc4c801914327176ed38f44c5
-            # see https://github.com/alexcrichton/curl-rust/issues/279
-            #
-            # for upstream pull request, see https://github.com/alexcrichton/curl-rust/pull/451
-            #
-            reinplace "s|Command::new(\"clang\")|cc::Build::new().get_compiler().to_command()|g" \
-                ${cargo.home}/macports/${cname}-${cversion}/build.rs
+        "rustix" {
+            if { [vercmp ${cversion} < 0.38.31] && [vercmp ${cversion} >= 0.0] && "i386" in [option muniversal.architectures] } {
+                # see https://github.com/bytecodealliance/rustix/issues/991
+                reinplace "s|utimensat_old(dirfd, path, times, flags)|//utimensat_old(dirfd, path, times, flags)|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/backend/libc/fs/syscalls.rs
+                reinplace "s|futimens_old(fd, times)|//futimens_old(fd, times)|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/backend/libc/fs/syscalls.rs
+                reinplace "s|pub last_access: Timespec,|pub last_access: c::timespec,|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/fs/fd.rs
+                reinplace "s|pub last_modification: Timespec|pub last_modification: c::timespec|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/fs/fd.rs
+                reinplace -E "s|^(//! Functions which operate on file descriptors\.)|\\1\\\nuse crate::backend::c;|" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/fs/fd.rs
+            }
         }
     }
 
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] 10.8] >= 0} {
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.8]} {
         return
     }
 
     switch ${cname} {
+        "cc" {
+            if {[vercmp ${cversion} >= 1.0.85]} {
+                # cc ignores `MACOSX_DEPLOYMENT_TARGET` if it is too low (see https://github.com/rust-lang/cc-rs/commit/0a0ce5726d0b42d383bb50079bdb680dfddcc076)
+                # instead, cc runs `xcrun --show-sdk-platform-version` or `xcrun --show-sdk-version`, depening on the version of cc
+                # `xcrun --show-sdk-platform-version` was a mistake (see https://github.com/rust-lang/cc-rs/pull/1007)
+                # `xcrun --show-sdk-version` is only supported on 10.8 or above
+                # if `xcrun` fails, cc sets MACOSX_DEPLOYMENT_TARGET to a hardcoded value
+                # cc may remove `xcrun` in the future (see https://github.com/rust-lang/cc-rs/pull/1009)
+                reinplace "s|let default = \"10.7\";|let default = \"[option macosx_deployment_target]\";|g" \
+                    ${cargo.home}/macports/${cname}-${cversion}/src/lib.rs
+            }
+        }
         "crypto-hash" {
             # switch crypto-hash to use openssl instead of commoncrypto
             # See: https://github.com/malept/crypto-hash/issues/23
@@ -568,15 +373,11 @@ proc rust::old_macos_compatibility {cname cversion} {
         }
     }
 
-    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] 10.6] >= 0} {
+    if {[option os.platform] ne "darwin" || [vercmp [option macosx_deployment_target] >= 10.6]} {
         return
     }
 
     switch ${cname} {
-        "notify" {
-            reinplace {s|default = \["macos_fsevent"\]|default = \["macos_kqueue"\]|g} \
-                ${cargo.home}/macports/${cname}-${cversion}/Cargo.toml
-        }
         "cargo-util" {
             reinplace {s|#\[cfg(not(target_os = "macos"))\]|#\[cfg(not(target_os = "macos_temp"))\]|g} \
                 ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
@@ -584,6 +385,10 @@ proc rust::old_macos_compatibility {cname cversion} {
                 ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
             reinplace {s|#\[cfg(not(target_os = "macos_temp"))\]|#\[cfg(target_os = "macos")\]|g} \
                 ${cargo.home}/macports/${cname}-${cversion}/src/paths.rs
+        }
+        "notify" {
+            reinplace {s|default = \["macos_fsevent"\]|default = \["macos_kqueue"\]|g} \
+                ${cargo.home}/macports/${cname}-${cversion}/Cargo.toml
         }
     }
 }
@@ -651,6 +456,9 @@ post-extract {
 
         puts $conf "\[build\]"
         puts $conf "rustc = \"${prefix}/bin/rustc\""
+        if {[option rust.flags] ne ""} {
+            puts $conf "rustflags = \[\"[join [option rust.flags] {", "}]\"\]"
+        }
 
         # be sure to include all architectures in case, e.g., a 64-bit Cargo compiles a 32-bit port
         foreach arch {arm64 x86_64 i386 ppc ppc64} {
@@ -666,6 +474,86 @@ proc rust::append_envs { var {phases {configure build destroot}} } {
         ${phase}.env-delete ${var}
         ${phase}.env-append ${var}
     }
+}
+
+# utility procedure to find SDK
+proc rust::get_sdkroot {sdk_version} {
+    if {[option os.platform] ne "darwin"} {
+        # only valid empty return
+        return {}
+    }
+
+    if {[option configure.sdkroot] ne ""} {
+        # SDK from base was found, so trust it
+        return [option configure.sdkroot]
+    }
+
+    if {![option use_xcode] && [file exists "/Library/Developer/CommandLineTools/SDKs"]} {
+        set sdks_dir        /Library/Developer/CommandLineTools/SDKs
+    } else {
+        # `configure.developer_dir` is not used in case `use_xcode` is true but SDKs directory does not exist
+        # early command line tools did not install SDKs
+        if {[vercmp [option xcodeversion] < 4.3]} {
+            set sdks_dir    [option developer_dir]/SDKs
+        } else {
+            set sdks_dir    [option developer_dir]/Platforms/MacOSX.platform/Developer/SDKs
+        }
+    }
+
+    if {$sdk_version eq "10.4"} {
+        set sdk ${sdks_dir}/MacOSX10.4u.sdk
+    } else {
+        set sdk ${sdks_dir}/MacOSX${sdk_version}.sdk
+    }
+    if {[file exists ${sdk}]} {
+        # exact SDK was found
+        return ${sdk}
+    }
+
+    set sdk_major [lindex [split $sdk_version .] 0]
+
+    set sdks [glob -nocomplain -directory ${sdks_dir} MacOSX${sdk_major}*.sdk]
+    foreach sdk [lreverse [lsort -command vercmp $sdks]] {
+        # Sanity check - mostly empty SDK directories are known to exist
+        if {[file exists ${sdk}/usr/include/sys/cdefs.h]} {
+            # SDK with same OS version found
+            return ${sdk}
+        }
+    }
+
+    if {$sdk_major >= 11 && $sdk_major == [option macos_version_major]} {
+        set try_versions [list ${sdk_major}.0 [option macos_version]]
+    } elseif {[option os.major] >= 12} {
+        set try_versions [list $sdk_version]
+    } else {
+        # `xcrun --show-sdk-path` fails prior to 10.8
+        set try_versions [list]
+    }
+    foreach try_version $try_versions {
+        if {![catch {exec env DEVELOPER_DIR=[option configure.developer_dir] xcrun --sdk macosx${try_version} --show-sdk-path 2> /dev/null} sdk]} {
+            # xcrun found SDK with same OS version
+            return ${sdk}
+        }
+    }
+
+    set sdk ${sdks_dir}/MacOSX.sdk
+    if {[file exists ${sdk}]} {
+        # unversioned SDK found
+        ui_warn "Rust PG: Unversioned SDK ${sdk} used for ${sdk_version}"
+        return ${sdk}
+    }
+
+    if {[option os.major] >= 12} {
+        # `xcrun --show-sdk-path` fails prior to 10.8
+        if {![catch {exec xcrun --sdk macosx --show-sdk-path 2> /dev/null} sdk]} {
+            # xcrun found unversioned SDK
+            ui_warn "Rust PG: Unversioned SDK ${sdk} used for ${sdk_version}"
+            return ${sdk}
+        }
+    }
+
+    ui_error "Rust PG: unable to find SDK for ${sdk_version}"
+    return -code error {}
 }
 
 # Is build caching enabled ?
@@ -724,6 +612,10 @@ proc rust::rust_pg_callback {} {
     if { ${subport} ne "rust" && [join [lrange [split ${subport} -] 0 1] -] ne "rust-bootstrap" } {
         # port is *not* building Rust
 
+        foreach {f s} [option rust.remap] {
+            rust.flags-prepend          --remap-path-prefix=${f}=${s}
+        }
+
         depends_build-delete            port:rust
         depends_build-append            port:rust
 
@@ -734,20 +626,6 @@ proc rust::rust_pg_callback {} {
             depends_skip_archcheck-delete   cargo
             depends_skip_archcheck-append   cargo
         }
-    } else {
-        # port is building Rust
-
-        if { [option rust.llvm.legacy] } {
-            depends_build-delete        path:lib/libMacportsLegacySupport.a:legacy-support
-            depends_build-append        path:lib/libMacportsLegacySupport.a:legacy-support
-        }
-
-        if { [option rust.use_cctools] } {
-            depends_build-delete        port:cctools
-            depends_build-append        port:cctools
-            depends_skip_archcheck-delete   cctools
-            depends_skip_archcheck-append   cctools
-        }
     }
 
     if { [option openssl.branch] ne "" } {
@@ -756,44 +634,13 @@ proc rust::rust_pg_callback {} {
         depends_lib-append              port:openssl${openssl_ver}
     }
 
-    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
-        # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
-        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
-        depends_build-delete            port:ld64-274
-        depends_build-append            port:ld64-274
-        depends_skip_archcheck-delete   ld64-274
-        depends_skip_archcheck-append   ld64-274
-        configure.ldflags-delete        -fuse-ld=${prefix}/bin/ld-274
-        configure.ldflags-append        -fuse-ld=${prefix}/bin/ld-274
-    }
-
     # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
-    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] 10.6] < 0 } {
-        # __Unwind_RaiseException
-        depends_lib-delete              port:libunwind
-        depends_lib-append              port:libunwind
-        configure.ldflags-delete        -lunwind
-        configure.ldflags-append        -lunwind
-
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.12]} {
         if { [join [lrange [split ${subport} -] 0 1] -] eq "rust-bootstrap" } {
             # Bootstrap compilers are building on newer machines to be run on older ones.
             # Use libMacportsLegacySystem.B.dylib since it is able to use the `__asm("$ld$add$os10.5$...")` trick for symbols that are part of legacy-support *only* on older systems.
             set legacyLib               libMacportsLegacySystem.B.dylib
             set dep_type                lib
-
-            # code should mimic legacy-support
-            # see https://github.com/macports/macports-ports/blob/master/devel/legacy-support/Portfile
-            set max_darwin_reexport 19
-            set max_darwin_optool   20
-            if { !( [option configure.build_arch] ne "arm64" && [option os.major] > ${max_darwin_reexport} && [option os.major] <= ${max_darwin_optool} ) } {
-                # ${prefix}/lib/libMacportsLegacySystem.B.dylib does not exist
-                # see https://trac.macports.org/ticket/65255
-                known_fail              yes
-                pre-fetch {
-                    ui_error "${subport} requires libMacportsLegacySystem.B.dylib, which is provided by legacy-support"
-                    return -code error "incompatible system configuration"
-                }
-            }
         } else {
             # Use the static library since the Rust compiler looks up certain symbols at *runtime* (e.g. `openat`).
             # Normally, we would want the additional functionality provided by MacPorts.
@@ -808,6 +655,26 @@ proc rust::rust_pg_callback {} {
         depends_${dep_type}-append      path:lib/${legacyLib}:legacy-support
         configure.ldflags-delete        -Wl,${prefix}/lib/${legacyLib}
         configure.ldflags-append        -Wl,${prefix}/lib/${legacyLib}
+    }
+
+    if { [string match "macports-clang*" [option configure.compiler]] && [option os.major] < 11 } {
+        # by default, ld64 uses ld64-127 when 9 <= ${os.major} < 11
+        # Rust fails to build when architecture is x86_64 and ld64 uses ld64-127
+        depends_build-delete            port:ld64-274
+        depends_build-append            port:ld64-274
+        depends_skip_archcheck-delete   ld64-274
+        depends_skip_archcheck-append   ld64-274
+        configure.ldflags-delete        -fuse-ld=${prefix}/bin/ld-274
+        configure.ldflags-append        -fuse-ld=${prefix}/bin/ld-274
+    }
+
+    # rust-bootstrap requires `macosx_deployment_target` instead of `os.major`
+    if { [option os.platform] eq "darwin" && [vercmp [option macosx_deployment_target] < 10.6]} {
+        # __Unwind_RaiseException
+        depends_lib-delete              port:libunwind
+        depends_lib-append              port:libunwind
+        configure.ldflags-delete        -lunwind
+        configure.ldflags-append        -lunwind
     }
 
     # sometimes Cargo.lock does not exist

@@ -5,38 +5,64 @@ PortGroup           compiler_blacklist_versions 1.0
 
 name                ghc-bootstrap
 set canonicalname   ghc
-# Note: 7.6.3 doesn't have a i386 darwin version at http://www.haskell.org/ghc/dist/7.6.3
-version             7.6.2
-revision            2
+version             7.6.3
+revision            0
 categories          lang haskell
-maintainers         {cal @neverpanic} openmaintainer
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
 license             BSD
-platforms           darwin
-supported_archs     i386 x86_64
+# ppc64 will need cross-compilation, not enabled for now.
+supported_archs     i386 x86_64 ppc
 universal_variant   no
 installs_libs       no
 
 description         The Glorious Glasgow Haskell Compilation System
-long_description    \
-                    This is a package that installs a binary \
+long_description    This is a package that installs a binary \
                     bootstrap ghc compiler.
 
-homepage            http://haskell.org/${canonicalname}
+homepage            https://haskell.org/${canonicalname}
 master_sites        ${homepage}/dist/${version}/
-distname            ${canonicalname}-${version}-${build_arch}-apple-darwin
+
+if {${configure.build_arch} in [list ppc ppc64]} {
+    distname        ${canonicalname}-${version}-src
+} else {
+    distname        ${canonicalname}-${version}-${build_arch}-apple-darwin
+}
+
 worksrcdir          ${canonicalname}-${version}
 use_bzip2           yes
 
 checksums           ${canonicalname}-${version}-i386-apple-darwin${extract.suffix} \
-                        rmd160  232b3aa4ed9e2ff09d520f4ae02fa572a671178a \
-                        sha256  c1da502fa7d99f3d87370c65d705a7e8ee4c900fdb62df6f71696c5432047059 \
+                        rmd160  aca3ff527969cfaf1e4ebcbf304dd49e264b0ad7 \
+                        sha256  b212acd6ef99df87a4a6f2fb68b1de35071527889743bbd69b9c9ab2d301b178 \
+                        size    158867690 \
                     ${canonicalname}-${version}-x86_64-apple-darwin${extract.suffix} \
-                        rmd160  b0870a4a292fae7248f9b0be485affa4a5a76a2d \
-                        sha256  eb0dd19bd5a6eede332d58de219437b9c2b186c72a1fc0c60fa1095b0c2d2789
+                        rmd160  2ed57694bcf505e13fa69a7c84a83cb49040ea0c \
+                        sha256  f7a35bea69b6cae798c5f603471a53b43c4cc5feeeeb71733815db6e0a280945 \
+                        size    151929866 \
+                    ${canonicalname}-${version}-src${extract.suffix} \
+                        rmd160  82a673ed38b7cf9a59afeb01057625fc761a822b \
+                        sha256  bd43823d31f6b5d0b2ca7b74151a8f98336ab0800be85f45bb591c9c26aac998 \
+                        size    110763823
 
-post-extract {
-    # Copy clang-wrapper for re-inplace during configure
-    xinstall -m 644 ${filespath}/clang-wrapper ${workpath}/clang-wrapper
+# There are no ready-built binaries of GHC 7.6.x for PPC. We use 7.0.4 to build 7.6.3 from source.
+platform darwin powerpc {
+    PortGroup active_variants 1.1
+
+    depends_build-append \
+                    port:ghc-ppc-bootstrap \
+                    port:libxslt
+
+    depends_lib-append \
+                    port:gmp \
+                    port:libiconv \
+                    port:ncurses
+
+    patchfiles-append \
+                    patch-configure.diff \
+                    patch-utils__mkdirhier__mkdirhier.sh.diff \
+                    patch-includes_HsFFI.h.diff \
+                    validate-settings.diff \
+                    patch-10.6.diff
 }
 
 # Compilation (of the final non-bootstrap GHC, which uses the C compiler
@@ -47,58 +73,194 @@ post-extract {
 # Also avoid LLVM GCC 4.2 and GCC 4.2, which are before MacPorts' clang 3.4
 # in the fallback list on some systems.
 compiler.blacklist-append \
+                    *gcc-4.0 \
                     llvm-gcc-4.2 \
-                    gcc-4.2 \
                     {clang < 503.0.38} \
                     macports-clang-3.3
 
-# ghc needs a build and runtime dependency on the compiler used to build it
-# same is also set in ghc-bootstrap. clang-4.0 works, is needed on older systems anyway
-# also /usr/bin/clang does not work on 10.11, so override it there
-if { ${os.platform} eq "darwin" && ( ${os.major} < 13 || ${os.major} == 15 ) } {
-    compiler.whitelist    macports-clang-8.0
-    depends_run-append    port:clang-8.0
+if {${configure.build_arch} ni [list ppc ppc64]} {
+    # There seems to be no reason to blacklist this, since it should work on every released version of macOS where present,
+    # and has been reported to work, but since the port was set up this way earlier, we retain it.
+    compiler.blacklist-append \
+                    *gcc-4.2
 }
 
-configure.pre_args  --prefix=${prefix}/share/ghc-bootstrap
-configure.args      --with-gcc=${configure.cc}
+platform darwin {
+    if {${configure.build_arch} ni [list ppc ppc64]} {
+        post-extract {
+            # Copy clang-wrapper for re-inplace during configure
+            xinstall -m 644 ${filespath}/clang-wrapper ${workpath}/clang-wrapper
+        }
+        # ghc needs a build and runtime dependency on the compiler used to build it.
+        # Same is also set in ghc-bootstrap. clang-9.0 works, is needed on older systems anyway.
+        # Also /usr/bin/clang does not work on 10.11, so override it there.
+        if {${os.major} < 13 || ${os.major} == 15} {
+            depends_run-append      port:clang-9.0
+            compiler.whitelist      macports-clang-9.0
+        }
+    } else {
+        # This is PPC:
+        compiler.blacklist-append   *clang*
 
-pre-configure {
-    # OK so because this binary has been prebuilt for libraries
-    # in /usr/lib we search these before macports stuff so (hopefully)
-    # weird things don't happen
-    configure.ldflags  -L/usr/lib
-    configure.cppflags -I/usr/include
+        # Newer gcc do not build it. Restriction to gcc7 is on purpose.
 
-    # patch clang-wrapper and make sure it is used by patching settings.in
-    reinplace "s#@clang@#${configure.cc}#g" ${workpath}/clang-wrapper
-    reinplace "s#@SettingsCCompilerCommand@#${prefix}/share/ghc-bootstrap/libexec/clang-wrapper#g" ${worksrcpath}/settings.in
-}
+        variant gcc7 conflicts gcc42 description {Compile with gcc 7} {
+            configure.compiler      macports-gcc-7
+            depends_run-append      port:gcc7
+            require_active_variants ghc-ppc-bootstrap gcc7
+            configure.args-append   --with-gcc=${configure.cc}
+        }
 
-build {}
+        variant gcc42 conflicts gcc7 description {Compile with Xcode gcc 4.2} {
+            configure.compiler      gcc-4.2
+            require_active_variants ghc-ppc-bootstrap gcc42
+            configure.args-append   --with-gcc=${configure.cc}
+        }
 
-post-destroot {
-    # install clang-wrapper to libexec
-    xinstall -d -m 755 ${destroot}${prefix}/share/ghc-bootstrap/libexec
-    xinstall -m 755 ${workpath}/clang-wrapper ${destroot}${prefix}/share/ghc-bootstrap/libexec
-
-    # Delete all .dylib files, because their load commands would have to be
-    # fixed or rev-upgrade complains and tries to rebuild the port. However, we
-    # cannot correctly fix all .dylibs, because the have not been built with
-    # -headerpad_max_install_names. Deleting them fixes the problem and GHC
-    # still seems to compile correctly.
-
-    # We also delete all the .html files, because we really don't need the
-    # documentation in a bootstrap port.
-
-    fs-traverse f ${destroot}${prefix} {
-        if {[file isfile ${f}]} {
-            set ext [file extension ${f}]
-            if {${ext} eq ".html" || ${ext} eq ".dylib"} {
-                delete ${f}
-            }
+        if {![variant_isset gcc7] && ![variant_isset gcc42]} {
+            default_variants +gcc42
         }
     }
 }
 
-livecheck.type      none
+configure.pre_args      --prefix=${prefix}/share/ghc-bootstrap
+
+platform darwin {
+    if {${configure.build_arch} ni [list ppc ppc64]} {
+        pre-configure {
+            # OK so because this binary has been prebuilt for libraries in /usr/lib
+            # We search these before macports stuff so (hopefully) weird things don't happen
+            configure.ldflags  -L/usr/lib
+            configure.cppflags -I/usr/include
+
+            # patch clang-wrapper and make sure it is used by patching settings.in
+            reinplace "s#@clang@#${configure.cc}#g" ${workpath}/clang-wrapper
+            reinplace "s#@SettingsCCompilerCommand@#${prefix}/share/ghc-bootstrap/libexec/clang-wrapper#g" ${worksrcpath}/settings.in
+        }
+
+        build {}
+    } else {
+        # Here we ghc-ppc-bootstrap port to build GHC.
+        # The build is quite fragile; do not modify settings unnecessarily.
+        set bootstraproot ${prefix}/share/ghc-ppc-bootstrap
+
+        configure.args-append \
+                    --with-ghc=${bootstraproot}/bin/ghc \
+                    --with-iconv-includes=${prefix}/include \
+                    --with-iconv-libraries=${prefix}/lib \
+                    --with-gmp-includes=${prefix}/include \
+                    --with-gmp-libraries=${prefix}/lib \
+                    --with-macosx-deployment-target=${macosx_deployment_target}
+
+        # OK so because the bootstrap binary has been prebuilt for libraries
+        # in /usr/lib we search these before macports stuff to prevent
+        # link errors, ghc _should_ actually compile itself in stage2
+        # using paths from the command line arguments
+        compiler.cpath          /usr/include
+        compiler.library_path   /usr/lib
+    }
+}
+
+platform darwin {
+    if {${configure.build_arch} ni [list ppc ppc64]} {
+        post-destroot {
+            # install clang-wrapper to libexec
+            xinstall -d -m 755 ${destroot}${prefix}/share/ghc-bootstrap/libexec
+            xinstall -m 755 ${workpath}/clang-wrapper ${destroot}${prefix}/share/ghc-bootstrap/libexec
+
+            # Delete all .dylib files, because their load commands would have to be
+            # fixed or rev-upgrade complains and tries to rebuild the port. However,
+            # we cannot correctly fix all .dylibs, because the have not been built
+            # with -headerpad_max_install_names. Deleting them fixes the problem
+            # and GHC still seems to compile correctly.
+
+            # We also delete all the .html files, because we really don't need
+            # the documentation in a bootstrap port.
+
+            fs-traverse f ${destroot}${prefix} {
+                if {[file isfile ${f}]} {
+                    set ext [file extension ${f}]
+                    if {${ext} eq ".html" || ${ext} eq ".dylib"} {
+                        delete ${f}
+                    }
+                }
+            }
+        }
+    } else {
+        post-destroot {
+            set prefixlib   ${prefix}/share/ghc-bootstrap/lib/${worksrcdir}
+            set destlib     ${destroot}/${prefixlib}
+            set libver      ${canonicalname}${version}
+
+            variable libs [ list                               \
+                            libHSrts-${libver}.dylib           \
+                            libHSrts_debug-${libver}.dylib     \
+                            libHSrts_thr-${libver}.dylib       \
+                            libHSrts_thr_debug-${libver}.dylib ]
+
+            system "install_name_tool -id ${prefixlib}/libffi.dylib ${destlib}/libffi.dylib"
+
+            foreach lib $libs {
+              regexp -line {[^[:space:]]*/libffi.*\.dylib} [exec otool -L ${destlib}/${lib}] oldlib
+              system "install_name_tool -change ${oldlib} ${prefixlib}/libffi.dylib ${destlib}/$lib"
+            }
+        }
+
+        pre-activate {
+            # Legacy port deactivation hack added 2012-12-08
+            if {![catch {set platform_ghc_installed [lindex [registry_active hs-platform-ghc] 0]}]} {
+                # hs-platform-ghc is installed and active
+                # force deactivation
+                registry_deactivate_composite hs-platform-ghc "" [list ports_nodepcheck 1]
+            }
+            # Legacy port deactivation hack added 2013-08-11, hs-process is provided by base
+            if {![catch {set hs_process_installed [lindex [registry_active hs-process] 0]}]} {
+                # hs-process is installed and active
+                # force deactivation
+                registry_deactivate_composite hs-process "" [list ports_nodepcheck 1]
+            }
+            # Legacy port deactivation hack added 2013-08-14, hs-template-haskell is provided by base
+            if {![catch {set hs_template_haskell_installed [lindex [registry_active hs-template-haskell] 0]}]} {
+                # hs-template-haskell is installed and active
+                # force deactivation
+                registry_deactivate_composite hs-template-haskell "" [list ports_nodepcheck 1]
+            }
+        }
+
+        post-activate {
+            set libprefix "${prefix}/share/ghc-bootstrap/lib/${canonicalname}-${version}"
+            set packageconfd "${libprefix}/package.conf.d"
+            set deletefiles [list]
+
+            # files that were not correctly unregistered due to --force missing in the haskell portgroup,
+            # leaving package registrations of packages that still had dependents in place
+
+            # added 2013-12-14
+            lappend deletefiles "${packageconfd}/Cabal-1.16.0.3-*.conf"
+            lappend deletefiles "${packageconfd}/cereal-0.3.5.2-*.conf"
+            lappend deletefiles "${packageconfd}/cpphs-1.16-*.conf"
+            lappend deletefiles "${packageconfd}/entropy-0.2.2.2-*.conf"
+            lappend deletefiles "${packageconfd}/highlighting-kate-0.5.3.9-*.conf"
+            lappend deletefiles "${packageconfd}/language-c-0.3.2.1-*.conf"
+            lappend deletefiles "${packageconfd}/nats-0.1-*.conf"
+            lappend deletefiles "${packageconfd}/primitive-0.5.0.1-*.conf"
+            lappend deletefiles "${packageconfd}/semigroups-0.11-*.conf"
+            lappend deletefiles "${packageconfd}/semigroups-0.9.2-*.conf"
+            lappend deletefiles "${packageconfd}/template-haskell-2.8.0.0-10af654f73a6befd48e3430f5bf44c21.conf"
+            lappend deletefiles "${packageconfd}/uniplate-1.6.10-*.conf"
+
+            fs-traverse file $packageconfd {
+                foreach pattern $deletefiles {
+                    if {[string match $pattern $file]} {
+                        ui_debug "Removing remnant package registration file ${file}"
+                        delete $file
+                    }
+                }
+            }
+
+            catch {system "${prefix}/share/ghc-bootstrap/bin/ghc-pkg -v recache"}
+        }
+    }
+}
+
+livecheck.type     none

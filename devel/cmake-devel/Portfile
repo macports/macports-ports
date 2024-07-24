@@ -7,9 +7,9 @@ if { ${os.platform} eq "darwin" && ${os.major} >= 20 && ${build_arch} eq "x86_64
     universal_variant no
 } else {
     PortGroup       muniversal 1.0
+
 }
 
-PortGroup           xcodeversion 1.0
 PortGroup           gitlab 1.0
 PortGroup           legacysupport 1.1
 
@@ -36,24 +36,21 @@ homepage            https://cmake.org
 platforms           darwin freebsd
 gitlab.instance     https://gitlab.kitware.com
 
-gitlab.setup        cmake   cmake 4be24f031a4829db75b85062cc67125035d8831e
-version             20220804-3.24.0-[string range ${gitlab.version} 0 7]
-checksums           rmd160  8bc02c4569a909a44275112df8628b748ad5b4e6 \
-                    sha256  9f1d2eb2950f479dd062af769c460a561712dfccde6cbba48103f8e4fd5cc54e \
-                    size    7959352
+gitlab.setup        cmake   cmake facfba088f3487a44cadf8288af47ca3383c03a0
+version             20240611-3.29.5-[string range ${gitlab.version} 0 7]
+checksums           rmd160  d4558f31dc1cffabe91b3fd1d14b11fe432fd784 \
+                    sha256  bcfe494d244d6d8fb7fc8830a012f931cdb1f48ca4d682548b015c41dd7ca395 \
+                    size    8605994
 revision            0
-
-# switched from "3.23.0" to "date-ver-hash"
 epoch               1
 
 dist_subdir         ${my_name}
 
 compiler.cxx_standard \
-                    2011
+                    2014
 
 platform darwin {
-    if {!((${os.major} < 9) || ${build_arch} eq "ppc" ||
-          ${build_arch} eq "ppc64")} {
+    if {!((${os.major} < 9) || ${build_arch} eq "ppc" || ${build_arch} eq "ppc64")} {
         depends_lib-append port:libcxx
         configure.cxx_stdlib libc++
     }
@@ -70,7 +67,6 @@ long_description ${base_long_description} \
     The ${subport} release port is updated roughly every few months.
 
 patchfiles-append \
-    patch-Modules-noArchCheck.diff \
     patch-CMakeFindFrameworks.cmake.diff \
     patch-Source_Modules_FindLibUV.cmake.diff \
     patch-fix_cxx14_17_checks.diff \
@@ -78,7 +74,15 @@ patchfiles-append \
     patch-cmake-leopard-tiger.diff \
     patch-fix-clock_gettime-test.diff \
     patch-qt5gui.diff \
-    patch-cmake-cmInstallRuntime-initializer-fix.diff
+    patch-cmake-cmInstallRuntime-initializer-fix.diff \
+    patch-libuv-legacy-systems.diff \
+    patch-cmakeroot-with-app.diff \
+    patch-remove-homebrew-references.diff
+
+platform darwin 8 {
+    # Tiger doesn't have _DARWIN_C_SOURCE macro so have to disable _POSIX_C_SOURCE instead
+    patchfiles-append patch-cmake-3290-posixcsource.diff
+}
 
 depends_lib-append \
     port:curl \
@@ -86,8 +90,7 @@ depends_lib-append \
     port:zlib \
     port:bzip2 \
     port:libarchive \
-    port:ncurses \
-    port:libuv
+    port:ncurses
 
 # configure is just a shell script that passes directly to bootstrap
 configure.cmd ./bootstrap
@@ -101,15 +104,6 @@ configure.env-append \
     CMAKE_PREFIX_PATH=${prefix} \
     CMAKE_INCLUDE_PATH=${prefix}/include/ncurses \
     CMAKE_LIBRARY_PATH=${prefix}/lib
-
-# On Lion, Clang 3.3 produces bad stream reading code when using
-# libc++.  See https://trac.macports.org/ticket/44129 . Clang 3.4
-# works. But Clang 3.7 doesn't work.
-if {${os.platform} eq "darwin" && ${os.major} == 11 &&
-    ${configure.cxx_stdlib} eq "libc++"} {
-    compiler.whitelist \
-        macports-clang-3.4
-}
 
 # clang 3.4 can't build certain parts of the
 # cmake self-testing infrastructure
@@ -144,6 +138,18 @@ platform darwin {
         configure.cxxflags-append \
             -D_DARWIN_C_SOURCE
     }
+
+    if { ${os.major} == 8 } {
+        # prevent conflicting opentransport header from being pulled in
+        configure.cxxflags-append -D__OPENTRANSPORTPROVIDERS__
+    }
+
+}
+
+# https://trac.macports.org/ticket/67943
+if {[string match *gcc* ${configure.compiler}]} {
+    configure.ldflags-append \
+        -latomic
 }
 
 # jsoncpp 1.0+ requires CMake for building; circular dependencies
@@ -160,7 +166,9 @@ configure.args-append \
     --system-libs \
     --no-qt-gui \
     --no-system-jsoncpp \
-    --no-system-librhash
+    --no-system-librhash \
+    --no-system-libuv \
+    --no-system-cppdap
 
 configure.universal_args
 
@@ -192,7 +200,8 @@ post-patch {
     # patch PREFIX
     reinplace "s|__PREFIX__|${prefix}|g" \
         ${worksrcpath}/macports.cmake \
-        ${worksrcpath}/Modules/Platform/Darwin.cmake
+        ${worksrcpath}/Modules/Platform/Darwin.cmake \
+        ${worksrcpath}/Source/cmSystemTools.cxx
 
     # patch FRAMEWORKS
     reinplace "s|__FRAMEWORKS_DIR__|${frameworks_dir}|g" \
@@ -264,14 +273,17 @@ subport ${subport_docs} {
     description \
         CMake Documentation
     long_description \
-        "${description}"
+        {*}${description}
+
+    platforms       any
+    supported_archs noarch
 
     post-patch {
         reinplace "s|__PYTHON_VERSION_WITH_DOT__|${PYTHON_VERSION_WITH_DOT}|g" ${worksrcpath}/macports.cmake
     }
 
     # Supported pythons
-    set python_versions {27 35 36 37 38 39}
+    set python_versions {38 39 310 311 312}
 
     # declare all +python* variants, with conflicts
     foreach pyver ${python_versions} {
@@ -305,7 +317,7 @@ subport ${subport_docs} {
     # set default +python* variant if none were already selected
     if {!${python_isset}} {
         set python_isset true
-        default_variants +python39
+        default_variants +python312
     }
 
     # make sure one of the +python* variants is set
@@ -357,14 +369,23 @@ subport ${subport_docs} {
             ui_info "${subport}: deleting dir: ${d}"
             delete ${d}
         }
+
+        # installed by the cmake-gui port
+        delete ${destroot}${prefix}/share/doc/cmake
+
     }
 }
 
 if {${subport} eq ${name}} {
     notes "\
-        The CMake Gui and Docs are now provided as subports '${subport_gui}' and '${subport_docs}', respectively.
+        The CMake GUI and Docs are now provided as subports '${subport_gui}' and '${subport_docs}', respectively.
     "
-}
 
-# Ignore RC versions
-gitlab.livecheck.regex  {([0-9.]+)}
+    test.run                yes
+    test.target             test
+
+    # Ignore RC versions
+    gitlab.livecheck.regex  {([0-9.]+)}
+} else {
+    livecheck.type          none
+}

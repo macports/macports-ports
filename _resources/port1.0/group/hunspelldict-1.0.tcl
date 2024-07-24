@@ -26,11 +26,11 @@ proc hunspelldict.setup {locale version lang {source {}}} {
     name        hunspell-dict-${locale}
     version     ${version}
     categories  textproc
-    platforms   darwin
+    platforms   any
     supported_archs noarch
 
     description {*}${lang} dictionary for hunspell
-    long_description ${description}
+    long_description {*}${description}
 
     homepage    https://wiki.openoffice.org/wiki/Dictionaries
 

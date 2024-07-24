@@ -1,0 +1,259 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:filetype=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           clang_dependency 1.0
+
+name                icu-devel
+set my_name         icu
+
+# Please keep the icu and icu-devel ports as similar as possible.
+
+#===============================================================================
+# *** IMPORTANT NOTE ***
+#
+# Any updates to this port require coordination with all maintainers, as the
+# number of downstream dependents is very large. And it shouldn't be updated,
+# without prior communication (and approval) via the Dev mailing list.
+#===============================================================================
+
+# Please increase the revision number of the dependents whenever the library
+# version number changes. To find dependencies, use:
+#  port file all | sort -u | xargs grep -El ':icu( |$)' | rev | cut -d / -f 2 | rev | sort -u
+#
+# Please confirm that all ports and its subport can be build. To find the list, use:
+#  port file all | sort -u | xargs grep -El ':icu( |$)' | rev | cut -d / -f 2 | rev | xargs port info --name --subport | cut -d : -f 2 | tr ',' ' ' | grep -v '\-\-' | tr ' ' '\n' | sort -u
+
+version             74.2
+revision            0
+epoch               1
+subport             ${name}-docs         { revision 0 }
+subport             ${name}-lx           { revision 0 }
+
+conflicts           icu icu-lx icu-docs
+
+categories          devel textproc
+platforms           darwin freebsd
+maintainers         {@catap korins.ky:kirill} openmaintainer
+license             Permissive
+
+description         International Components for Unicode
+
+long_description \
+    The International Components for Unicode (ICU) libraries provide robust \
+    and full-featured Unicode services on a wide variety of platforms. ICU \
+    supports the most current version of the Unicode standard, and they provide \
+    support for supplementary Unicode characters (needed for GB 18030 repertoire support).
+
+homepage            https://icu.unicode.org/
+master_sites        https://github.com/unicode-org/icu/releases/download/release-[string map {. -} [string map {.rc -rc} ${version}]]/
+dist_subdir         ${my_name}
+set docdir          ${prefix}/share/doc/${my_name}
+
+if {${subport} eq ${name} || ${subport} eq "${name}-lx"} {
+
+    # we will only use the muniversal PG on < 10.14. (see footnote 1).
+    set using_muniversal_PG false
+    if {${os.platform} eq "darwin" && ${os.major} < 18} {
+
+        set using_muniversal_PG true
+        PortGroup muniversal 1.0
+
+        # ICU needs to run binaries when building, to generate its data. (see footnote 2).
+        merger_must_run_binaries yes
+    }
+
+    distname            icu4c-[string map {. _} [string map {.rc rc} ${version}]]-src
+    extract.suffix      .tgz
+    worksrcdir          icu/source
+
+    # tar.gz from 74.2 is broken and contains symlink into ../LICENSE instead of LICENSE
+    # create a file which cintains link to license
+    # See: https://unicode-org.atlassian.net/browse/ICU-22601
+    pre-extract {
+        set license_file [open ${workpath}/LICENSE w]
+        puts ${license_file} "https://raw.githubusercontent.com/unicode-org/icu/main/LICENSE"
+        close ${license_file}
+    }
+
+    # please also update the icu-docs checksums at the bottom of the Portfile
+    checksums           rmd160  df2b06b3556ff21176858c27fc46f2d1e2bbe0ec \
+                        sha256  5e4fb11d6a3e6b85afb55de8da8a71538f1d8fd64fce893986b37d60e5bb0091 \
+                        size    26618071
+
+    # use full pathnames to libraries in tools
+    patchfiles-append   patch-i18n-formatted_string_builder.h.diff
+
+    # fix rpath mess
+    patchfiles-append patch-config-mh-darwin.diff
+
+    compiler.cxx_standard   2011
+
+    # prevent ICU from finding installed icu when upgrading (#11981).
+    compiler.cpath
+    compiler.library_path
+    configure.cppflags-delete -I${prefix}/include
+    configure.ldflags-delete  -L${prefix}/lib
+
+    configure.args      --disable-layoutex \
+                        --disable-samples \
+                        --disable-rpath \
+                        --enable-static
+
+    configure.universal_args-delete --disable-dependency-tracking
+
+    build.type      gnu
+    build.args      VERBOSE=1
+
+    post-build {
+        if {[variant_exists universal] && [variant_isset universal] && ${using_muniversal_PG}} {
+            set dirs {}
+            foreach arch ${universal_archs_to_use} {
+                lappend dirs ${worksrcpath}-${arch}
+            }
+        } else {
+            set dirs ${worksrcpath}
+        }
+        foreach dir ${dirs} {
+            # Remove architecture-specific differences to allow merging. (See footnote 3).
+            reinplace -q {s| -DSIZEOF_VOID_P=[48]||g}               ${dir}/config/Makefile.inc \
+                                                                    ${dir}/config/icu-config
+            reinplace -q -E {s| -arch +[^ ]+||g}                    ${dir}/config/pkgdata.inc
+            reinplace -q {s|host=\".*\"|host=\"\"|g}                ${dir}/config/icu-config
+            reinplace -q {s|host_alias=\".*\"|host_alias=\"\"|g}    ${dir}/config/icu-config
+            reinplace -q {s|host_cpu=\".*\"|host_cpu=\"\"|g}        ${dir}/config/icu-config
+        }
+    }
+
+    test.run        yes
+    test.target     check
+    test.args       VERBOSE=1
+
+    # icu4c requires python2.7+ regardless of configure:
+    #   checking for python3...
+    # libxml2 which is used to compile llvm/clang depends on icu,
+    # and adding MacPorts' python may introduce a dependency loop.
+    # See: https://unicode-org.atlassian.net/browse/ICU-20301
+    # See: https://trac.macports.org/ticket/65870
+    if {${os.platform} eq "darwin" && ${os.major} < 11} {
+        depends_build-append    port:python27
+        license_noconflict      python27
+        configure.python        ${prefix}/bin/python2.7
+    } elseif {${os.platform} eq "darwin" && ${os.major} >= 19} {
+        configure.python        /usr/bin/python3
+    } else {
+        configure.python        /usr/bin/python
+    }
+
+    if {${build_arch} eq "ppc" || ${build_arch} eq "ppc64"} {
+        # (#59514) TODO: still needed?
+        post-extract {
+            xinstall -d -m 0755 ${worksrcpath}/data/out
+        }
+    }
+
+    platform darwin 8 {
+        patchfiles-append patch-common-putil.cpp.diff
+    }
+
+    platform freebsd {
+        configure.cmd   ./runConfigureICU FreeBSD
+        build.env       MAKE=/usr/local/bin/gmake
+        destroot.env    MAKE=/usr/local/bin/gmake
+    }
+}
+
+if {${subport} eq ${name}} {
+    post-destroot {
+        xinstall -d ${destroot}${docdir}
+        xinstall -m 0644 {*}[glob ${worksrcpath}/../*.{css,html,txt}] ${destroot}${docdir}
+    }
+}
+
+if {${subport} eq "${name}-lx"} {
+
+    # http://userguide.icu-project.org/layoutengine/paragraph
+    description             ICU paragraph layout library
+    long_description        {*}${description}
+
+    depends_build-append    port:pkgconfig
+    depends_lib-append      port:${name} \
+                            port:icu-le-hb
+
+    configure.args-replace  --disable-layoutex --enable-layoutex
+
+    destroot.dir            ${worksrcpath}/layoutex
+}
+
+if {${subport} eq "${name}-docs"} {
+    supported_archs         noarch
+    platforms               any
+
+    description-append      (documentation)
+    long_description-append Documentation.
+
+    use_zip                 yes
+    distname                icu4c-[string map {. _} [string map {.rc rc} ${version}]]-docs
+    checksums               rmd160  1baf0c68241757b24f73ce6784185dc1887efd60 \
+                            sha256  5b8acafb087fce1c607d9719161ab305ce1350858cb3cf40e7cb1d2e457aeb84 \
+                            size    8532437
+
+    extract.dir             ${worksrcpath}/doc/html
+    use_configure           no
+    build {}
+    destroot {
+        xinstall -m 755 -d ${destroot}${docdir}
+        copy ${worksrcpath}/doc/html ${destroot}${docdir}
+    }
+}
+
+if {${subport} eq ${name}} {
+    livecheck.name      ${my_name}
+    livecheck.version   [string map {. -} ${version}]
+    livecheck.url       https://api.github.com/repos/unicode-org/icu/releases?per_page=100
+    livecheck.regex     \".+releases/tag/release-(\\d+(?:\-\\d+)?(?:-rc)?)\"
+} else {
+    livecheck.type      none
+}
+
+# Note 1:
+    # prior to 10.14, universal means different library bit depths or endianness,
+    # so we had to build separately and lipo together using the muniversal PG
+
+    # We can't easily use the muniversal PG on darwin20+ (footnote 2), however we don't
+    # need to use it because the universal build there has the same library bit
+    # depth and endianness on both Intel and arm64. Therefore we can build universal in
+    # one pass using clang's ability to generate both archs at once.
+
+
+# Note 2:
+    # ICU needs to run binaries when building, to generate its data.
+    # Simply disallowing cross compiling is the simplest solution, however
+    # that means that an x86_64/arm64 universal version can never be built on an Intel Mac.
+    # ancient refs: #29904, ancient solutions tried (r79660, r73865, and r73849)
+
+# Note 3:
+    # Remove architecture-specific differences to allow merging. (See note 2).
+    # we do not believe icu-config uses SIZEOF_VOID_P. Projects using Makefile
+    # include files may experience problems. The developers of ICU suggest using
+    # pkg-config over both icu-config and the Makefile includes.
+    # calling icu-config for the host information is not mentioned in any
+    # icu man pages, differs between architectures, and can't be merged
+
+    # ICU has three mechanisms to aid other projects in building properly
+    #     1) .pc files for pkg-config
+    #     2) shell script icu-config that can output compiler flags
+    #     3) Makefile include files Makefile.inc and pkgdata.inc
+    # For a time, all three assumed other projects would want to be
+    #     built as ICU had been built, regardless of whether it was appropriate.
+    # For the most part, the extraneous flags have been removed.
+    #     1) They have been removed completely from the .pc files.
+    #        pkg-config is the recommended way of building against ICU.
+    #     2) icu-config does not print them out, but they are still contained in the script itself.
+    #     3) They still exist in the Makefile include files.
+    #
+    # for descriptions of the problem, see r101578, (#40069)
+    #     https://bugs.gentoo.org/show_bug.cgi?id=202059
+    #
+    # for upstream reports and discussion, see
+    #    http://bugs.icu-project.org/trac/ticket/10308
+    #    http://bugs.icu-project.org/trac/ticket/6102

@@ -1,0 +1,512 @@
+From b99c6de26ff7177aa6e845b31dff24fe0fca34ee Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Sat, 23 Dec 2023 20:50:50 +0800
+Subject: [PATCH] Revert some broken code
+
+FIXME: This likely can be improved.
+
+diff --git src/gui/CMakeLists.txt src/gui/CMakeLists.txt
+index c8e77f8b..1ee4f913 100644
+--- src/gui/CMakeLists.txt
++++ src/gui/CMakeLists.txt
+@@ -124,7 +124,7 @@ if(USE_TAGLIB)
+     list(APPEND GUI_SRC TagEditor.cpp)
+ endif()
+ 
+-if(NOT APPLE)
++if(APPLE)
+     add_definitions(-DQMPLAY2_ALLOW_ONLY_ONE_INSTANCE)
+ endif()
+ 
+diff --git src/gui/Main.cpp src/gui/Main.cpp
+index d0e235b8..3aa66874 100644
+--- src/gui/Main.cpp
++++ src/gui/Main.cpp
+@@ -42,9 +42,6 @@
+ #if QT_VERSION < 0x050000
+ 	#include <QTextCodec>
+ #endif
+-#ifdef Q_OS_MAC
+-	#include <QProcess>
+-#endif
+ 
+ #include <csignal>
+ #include <ctime>
+@@ -52,10 +49,6 @@
+ static QPair<QStringList, QStringList> g_arguments;
+ static ScreenSaver *g_screenSaver = nullptr;
+ static bool g_useGui = true;
+-#ifdef Q_OS_MAC
+-	static QByteArray g_rcdPath("/System/Library/LaunchAgents/com.apple.rcd.plist");
+-	static bool g_rcdLoad;
+-#endif
+ 
+ /**/
+ 
+@@ -312,17 +305,8 @@ static bool writeToSocket(IPCSocket &socket)
+ 	return ret;
+ }
+ 
+-static inline void exitProcedure()
++static inline void unInhibitScreenSaver()
+ {
+-#ifdef Q_OS_MAC
+-	if (g_rcdLoad)
+-	{
+-		// Load RCD service again (allow to run iTunes on "Play" key)
+-		QProcess::startDetached("launchctl load " + g_rcdPath);
+-		g_rcdLoad = false;
+-	}
+-#endif
+-
+ 	delete g_screenSaver;
+ 	g_screenSaver = nullptr;
+ }
+@@ -342,12 +326,12 @@ static inline void forceKill()
+ #else
+ 	const int s = SIGKILL;
+ #endif
+-	exitProcedure();
++	unInhibitScreenSaver();
+ 	raise(s);
+ }
+ static inline void callDefaultSignalHandler(int s)
+ {
+-	exitProcedure();
++	unInhibitScreenSaver();
+ 	signal(s, SIG_DFL);
+ 	raise(s);
+ }
+@@ -454,7 +438,7 @@ int main(int argc, char *argv[])
+ #endif
+ 	signal(SIGSEGV, signal_handler);
+ 	signal(SIGTERM, signal_handler);
+-	atexit(exitProcedure);
++	atexit(unInhibitScreenSaver);
+ 
+ #if (defined(Q_OS_MAC) || defined(Q_OS_WIN)) && (QT_VERSION >= QT_VERSION_CHECK(5, 6, 0))
+ 	QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+@@ -585,16 +569,6 @@ int main(int argc, char *argv[])
+ 	HHOOK keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, MMKeysHookProc, GetModuleHandle(nullptr), 0);
+ #endif
+ 
+-#ifdef Q_OS_MAC
+-	// Unload RCD service (prevent run iTunes on "Play" key)
+-	{
+-		QProcess launchctl;
+-		launchctl.start("launchctl unload " + g_rcdPath);
+-		if (launchctl.waitForFinished() && launchctl.exitStatus() == QProcess::NormalExit)
+-			g_rcdLoad = !launchctl.readAllStandardError().startsWith(g_rcdPath);
+-	}
+-#endif
+-
+ 	qsrand(time(nullptr));
+ 
+ 	do
+@@ -752,7 +726,7 @@ int main(int argc, char *argv[])
+ 	UnhookWindowsHookEx(keyboardHook);
+ #endif
+ 
+-	exitProcedure();
++	unInhibitScreenSaver();
+ 
+ #ifdef QT5_NOT_WIN
+ 	if (canDeleteApp)
+diff --git src/gui/MainWidget.cpp src/gui/MainWidget.cpp
+index 73b52bbb..2e497c39 100644
+--- src/gui/MainWidget.cpp
++++ src/gui/MainWidget.cpp
+@@ -30,11 +30,6 @@
+ #include <QFileDialog>
+ #include <QTreeWidget>
+ #include <QListWidget>
+-#ifdef Q_OS_MAC
+-	#include <QProcess>
+-	#include <QScreen>
+-	#include <QWindow>
+-#endif
+ #include <qevent.h>
+ 
+ /* QMPlay2 gui */
+@@ -416,22 +411,11 @@ MainWidget::MainWidget(QPair<QStringList, QStringList> &arguments) :
+ 			playStateChanged(false);
+ 	}
+ 
+-#ifdef Q_OS_MAC
+-	qApp->installEventFilter(this);
+-	fileOpenTimer.setSingleShot(true);
+-	connect(&fileOpenTimer, &QTimer::timeout, this, &MainWidget::fileOpenTimerTimeout);
+-	if (QMPlay2GUI.pipe) // Register media keys only for first QMPlay2 instance
+-		QMPlay2MacExtensions::registerMacOSMediaKeys(std::bind(&MainWidget::processParam, this, std::placeholders::_1, QString()));
+-#endif
+-
+ 	if (settings.getBool("AutoUpdates"))
+ 		updater.downloadUpdate();
+ }
+ MainWidget::~MainWidget()
+ {
+-#ifdef Q_OS_MAC
+-	QMPlay2MacExtensions::unregisterMacOSMediaKeys();
+-#endif
+ 	QMPlay2Extensions::closeExtensions();
+ 	emit QMPlay2Core.restoreCursor();
+ 	Notifies::finalize();
+@@ -661,20 +645,11 @@ void MainWidget::resetRotate90()
+ 
+ void MainWidget::visualizationFullScreen()
+ {
+-	QWidget *senderW = (QWidget *)sender();
+-	const auto maybeGoFullScreen = [this, senderW] {
+-		if (!fullScreen)
+-		{
+-			videoDock->setWidget(senderW);
+-			toggleFullScreen();
+-		}
+-	};
+-#ifdef Q_OS_MAC
+-	// On macOS if full screen is toggled to fast after double click, mouse remains in clicked state...
+-	QTimer::singleShot(200, maybeGoFullScreen);
+-#else
+-	maybeGoFullScreen();
+-#endif
++	if (!fullScreen)
++	{
++		videoDock->setWidget((QWidget *)sender());
++		toggleFullScreen();
++	}
+ }
+ void MainWidget::hideAllExtensions()
+ {
+@@ -871,7 +846,7 @@ void MainWidget::createMenuBar()
+ 	copyMenu(secondMenu, menuBar->help);
+ 	if (tray)
+ 		tray->setContextMenu(secondMenu);
+-#else //On OS X add only the most important menu actions to dock menu
++#else // On OS X add only the most important menu actions to dock menu
+ 	secondMenu->addAction(menuBar->player->togglePlay);
+ 	secondMenu->addAction(menuBar->player->stop);
+ 	secondMenu->addAction(menuBar->player->next);
+@@ -879,17 +854,7 @@ void MainWidget::createMenuBar()
+ 	secondMenu->addSeparator();
+ 	secondMenu->addAction(menuBar->player->toggleMute);
+ 	secondMenu->addSeparator();
+-	// Copy action, because PreferencesRole doesn't show in dock menu.
+-	QAction *settings = new QAction(menuBar->options->settings->icon(), menuBar->options->settings->text(), menuBar->options->settings->parent());
+-	connect(settings, &QAction::triggered, menuBar->options->settings, &QAction::trigger);
+-	secondMenu->addAction(settings);
+-
+-	QAction *newInstanceAct = new QAction(tr("New window"), secondMenu);
+-	connect(newInstanceAct, &QAction::triggered, [] {
+-		QProcess::startDetached(QCoreApplication::applicationFilePath(), {"-noplay"}, QCoreApplication::applicationDirPath());
+-	});
+-	secondMenu->addSeparator();
+-	secondMenu->addAction(newInstanceAct);
++	secondMenu->addAction(menuBar->options->settings);
+ 
+ 	qt_mac_set_dock_menu(secondMenu);
+ #endif
+@@ -956,13 +921,6 @@ void MainWidget::toggleFullScreen()
+ 	static bool visible, compact_view, tb_movable;
+ #ifndef Q_OS_ANDROID
+ 	static bool maximized;
+-#endif
+-#ifdef Q_OS_MAC
+-	if (isFullScreen())
+-	{
+-		showNormal();
+-		return;
+-	}
+ #endif
+ 	if (!fullScreen)
+ 	{
+@@ -1024,14 +982,7 @@ void MainWidget::toggleFullScreen()
+ 		menuBar->window->toggleFullScreen->setShortcuts(QList<QKeySequence>() << menuBar->window->toggleFullScreen->shortcut() << QKeySequence("ESC"));
+ 		fullScreen = true;
+ 
+-#ifndef Q_OS_MAC
+ 		showFullScreen();
+-#else
+-		setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+-		setGeometry(window()->windowHandle()->screen()->geometry());
+-		QMPlay2MacExtensions::showSystemUi(windowHandle(), false);
+-		show();
+-#endif
+ 
+ 		if (playC.isPlaying())
+ 			QMPlay2GUI.screenSaver->inhibit(1);
+@@ -1048,21 +999,11 @@ void MainWidget::toggleFullScreen()
+ 		fullScreen = false;
+ 
+ #ifndef Q_OS_ANDROID
+-#ifdef Q_OS_MAC
+-		QMPlay2MacExtensions::showSystemUi(windowHandle(), true);
+-		setWindowFlags(Qt::Window);
+-#else
+ 		showNormal();
+-#endif // Q_OS_MAC
+ 		if (maximized)
+ 			showMaximized();
+ 		else
+-		{
+-#ifdef Q_OS_MAC
+-			showNormal();
+-#endif
+ 			setGeometry(savedGeo);
+-		}
+ #else // Q_OS_ANDROID
+ 		showMaximized();
+ #endif
+@@ -1610,24 +1551,3 @@ void MainWidget::hideEvent(QHideEvent *)
+ #endif
+ 	menuBar->window->toggleVisibility->setText(tr("&Show"));
+ }
+-
+-#ifdef Q_OS_MAC
+-bool MainWidget::eventFilter(QObject *obj, QEvent *event)
+-{
+-	if (event->type() == QEvent::FileOpen)
+-	{
+-		filesToAdd.append(((QFileOpenEvent *)event)->file());
+-		fileOpenTimer.start(10);
+-	}
+-	return QMainWindow::eventFilter(obj, event);
+-}
+-
+-void MainWidget::fileOpenTimerTimeout()
+-{
+-	if (filesToAdd.count() == 1)
+-		playlistDock->addAndPlay(filesToAdd.at(0));
+-	else
+-		playlistDock->addAndPlay(filesToAdd);
+-	filesToAdd.clear();
+-}
+-#endif
+diff --git src/gui/MainWidget.hpp src/gui/MainWidget.hpp
+index c8fd2396..8acb23dc 100644
+--- src/gui/MainWidget.hpp
++++ src/gui/MainWidget.hpp
+@@ -134,15 +134,6 @@ private:
+ 	void showEvent(QShowEvent *) override final;
+ 	void hideEvent(QHideEvent *) override final;
+ 
+-#ifdef Q_OS_MAC
+-	bool eventFilter(QObject *obj, QEvent *event) override final;
+-
+-	void fileOpenTimerTimeout();
+-
+-	QTimer fileOpenTimer;
+-	QStringList filesToAdd;
+-#endif
+-
+ 	MenuBar *menuBar;
+ 	QToolBar *mainTB;
+ 	QStatusBar *statusBar;
+diff --git src/gui/MenuBar.cpp src/gui/MenuBar.cpp
+index f1e1f12a..e8364819 100644
+--- src/gui/MenuBar.cpp
++++ src/gui/MenuBar.cpp
+@@ -29,9 +29,6 @@
+ #include <QInputDialog>
+ #include <QMainWindow>
+ #include <QDir>
+-#ifdef Q_OS_MAC
+-	#include <QTimer>
+-#endif
+ 
+ static QAction *newAction(const QString &txt, QMenu *parent, QAction *&act, bool autoRepeat, const QIcon &icon, bool checkable, QAction::MenuRole role = QAction::NoRole)
+ {
+@@ -362,27 +359,6 @@ MenuBar::Playback::VideoFilters::VideoFilters(QMenu *parent) :
+ 	widgetAction->setDefaultWidget(QMPlay2GUI.videoAdjustment);
+ 	QMPlay2GUI.videoAdjustment->setObjectName(videoAdjustmentMenu->title().remove('&'));
+ 	videoAdjustmentMenu->addAction(widgetAction);
+-#ifdef Q_OS_MAC
+-	// Update visibility and update geometry of video adjustment widget
+-	connect(videoAdjustmentMenu, &VideoFilters::aboutToShow, [] {
+-		QWidget *parent = QMPlay2GUI.videoAdjustment->parentWidget();
+-		if (parent)
+-		{
+-			const QString parentObject = parent->metaObject()->className();
+-			if (parentObject == "QMacNativeWidget")
+-			{
+-				QMPlay2GUI.videoAdjustment->update();
+-				QMPlay2GUI.videoAdjustment->show();
+-			}
+-			if (parentObject == "QMacNativeWidget" || parentObject == "QMenu")
+-			{
+-				QTimer::singleShot(1, [parent] {
+-					QMPlay2GUI.videoAdjustment->setGeometry(parent->rect());
+-				});
+-			}
+-		}
+-	});
+-#endif
+ 	/**/
+ 	addSeparator();
+ 	newAction(VideoFilters::tr("&Spherical view"), this, spherical, true, QIcon(), true);
+diff --git src/gui/VideoDock.cpp src/gui/VideoDock.cpp
+index 7f23d58e..a726b275 100644
+--- src/gui/VideoDock.cpp
++++ src/gui/VideoDock.cpp
+@@ -334,16 +334,7 @@ bool VideoDock::event(QEvent *e)
+ void VideoDock::popup(const QPoint &p)
+ {
+ 	if (canPopup)
+-	{
+-#ifdef Q_OS_MAC
+-		// Move parent of video adjustment widget from native Mac widget to QMenu
+-		QWidget *videoAdj = (QWidget *)QMPlay2GUI.videoAdjustment;
+-		QWidget *parent = videoAdj->parentWidget();
+-		if (parent && qstrcmp(parent->metaObject()->className(), "QMacNativeWidget") == 0)
+-			videoAdj->setParent(QMPlay2GUI.menuBar->playback->videoFilters->videoAdjustmentMenu);
+-#endif
+ 		popupMenu->popup(mapToGlobal(p));
+-	}
+ }
+ void VideoDock::hideCursor()
+ {
+diff --git src/gui/macOS/QMPlay2MacExtensions.hpp src/gui/macOS/QMPlay2MacExtensions.hpp
+index 74b9a6d5..38740e6c 100644
+--- src/gui/macOS/QMPlay2MacExtensions.hpp
++++ src/gui/macOS/QMPlay2MacExtensions.hpp
+@@ -18,19 +18,7 @@
+ 
+ #pragma once
+ 
+-#include <functional>
+-
+-class QString;
+-class QWindow;
+-
+ namespace QMPlay2MacExtensions
+ {
+-	using MediaKeysCallback = std::function<void(const QString &param)>;
+-
+ 	void setApplicationVisible(bool visible);
+-
+-	void registerMacOSMediaKeys(const MediaKeysCallback &fn);
+-	void unregisterMacOSMediaKeys();
+-
+-	void showSystemUi(QWindow *mainWindow, bool visible);
+ }
+diff --git src/gui/macOS/QMPlay2MacExtensions.mm src/gui/macOS/QMPlay2MacExtensions.mm
+index 5c729222..7260c44c 100644
+--- src/gui/macOS/QMPlay2MacExtensions.mm
++++ src/gui/macOS/QMPlay2MacExtensions.mm
+@@ -1,66 +1,6 @@
+ #include "QMPlay2MacExtensions.hpp"
+ 
+-#include <QAbstractNativeEventFilter>
+-#include <QGuiApplication>
+-#include <QWindow>
+-
+-#include <IOKit/hidsystem/ev_keymap.h>
+-#include <AppKit/NSApplication.h>
+-#include <AppKit/NSScreen.h>
+-#include <AppKit/NSEvent.h>
+-
+-class MediaKeysFilter : public QAbstractNativeEventFilter
+-{
+-public:
+-	MediaKeysFilter(const QMPlay2MacExtensions::MediaKeysCallback &cb) :
+-		m_mediaKeysCallback(cb)
+-	{}
+-
+-private:
+-	bool nativeEventFilter(const QByteArray &eventType, void *message, long *result) override final
+-	{
+-		Q_UNUSED(result)
+-		if (eventType == "mac_generic_NSEvent")
+-		{
+-			NSEvent *event = static_cast<NSEvent *>(message);
+-#if defined(MAC_OS_X_VERSION_10_12) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_12)
+-			if ([event type] == NSEventTypeSystemDefined)
+-#else
+-			if ([event type] == NSSystemDefined)
+-#endif
+-			{
+-				const int  keyCode   = ([event data1] & 0xFFFF0000) >> 16;
+-				const int  keyFlags  = ([event data1] & 0x0000FFFF);
+-				const int  keyState  = (((keyFlags & 0xFF00) >> 8) == 0xA);
+-				const bool keyRepeat = (keyFlags & 0x1);
+-				Q_UNUSED(keyRepeat)
+-
+-				if (keyState == 1)
+-				{
+-					switch (keyCode)
+-					{
+-						case NX_KEYTYPE_PLAY:
+-							m_mediaKeysCallback("toggle");
+-							return true;
+-						case NX_KEYTYPE_NEXT:
+-						case NX_KEYTYPE_FAST:
+-							m_mediaKeysCallback("next");
+-							return true;
+-						case NX_KEYTYPE_PREVIOUS:
+-						case NX_KEYTYPE_REWIND:
+-							m_mediaKeysCallback("prev");
+-							return true;
+-					}
+-				}
+-			}
+-		}
+-		return false;
+-	}
+-
+-	QMPlay2MacExtensions::MediaKeysCallback m_mediaKeysCallback;
+-} static *g_mediaKeysFilter;
+-
+-/**/
++#include <AppKit/AppKit.h>
+ 
+ void QMPlay2MacExtensions::setApplicationVisible(bool visible)
+ {
+@@ -70,35 +10,3 @@ void QMPlay2MacExtensions::setApplicationVisible(bool visible)
+ 	else
+ 		[app hide:nil];
+ }
+-
+-void QMPlay2MacExtensions::registerMacOSMediaKeys(const MediaKeysCallback &cb)
+-{
+-	if (!g_mediaKeysFilter)
+-	{
+-		g_mediaKeysFilter = new MediaKeysFilter(cb);
+-		QCoreApplication::instance()->installNativeEventFilter(g_mediaKeysFilter);
+-	}
+-}
+-void QMPlay2MacExtensions::unregisterMacOSMediaKeys()
+-{
+-	if (g_mediaKeysFilter)
+-	{
+-		QCoreApplication::instance()->removeNativeEventFilter(g_mediaKeysFilter);
+-		delete g_mediaKeysFilter;
+-		g_mediaKeysFilter = nullptr;
+-	}
+-}
+-
+-void QMPlay2MacExtensions::showSystemUi(QWindow *mainWindow, bool visible)
+-{
+-#if defined(MAC_OS_X_VERSION_10_9) && (MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_9)
+-	if (mainWindow && mainWindow->screen() != QGuiApplication::primaryScreen() && ![NSScreen screensHaveSeparateSpaces])
+-		return;
+-#endif
+-	unsigned long flags;
+-	if (visible)
+-		flags = NSApplicationPresentationDefault;
+-	else
+-		flags = NSApplicationPresentationHideDock | NSApplicationPresentationAutoHideMenuBar;
+-	[NSApp setPresentationOptions:flags];
+-}
+diff --git src/qmplay2/IPC_Unix.cpp src/qmplay2/IPC_Unix.cpp
+index 974e8d26..890804fa 100644
+--- src/qmplay2/IPC_Unix.cpp
++++ src/qmplay2/IPC_Unix.cpp
+@@ -98,8 +98,7 @@ bool IPCSocket::open(QIODevice::OpenMode mode)
+ 
+ 	if (m_priv->fd > 0)
+ 	{
+-		const u_long on = 1;
+-		ioctl(m_priv->fd, FIONBIO, &on);
++		ioctl(m_priv->fd, FIONBIO, "\xFF\xFF\xFF\xFF");
+ 		m_priv->socketNotifier = new QSocketNotifier(m_priv->fd, QSocketNotifier::Read, this);
+ 		connect(m_priv->socketNotifier, SIGNAL(activated(int)), this, SLOT(socketReadActive()));
+ 		return QIODevice::open(mode);

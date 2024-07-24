@@ -62,7 +62,7 @@ proc luarocks_set_branch {option action args} {
     global prefix luarocks.branch \
            luarocks.bin luarocks.bindir luarocks.rocksdir \
            luarocks.suffix luarocks.branch
-    set luarocks.bin            ${prefix}/bin/luarocks-${luarocks.branch}
+    set luarocks.bin            ${prefix}/bin/luarocks
     set luarocks.bindir         ${prefix}/libexec/lua${luarocks.branch}
     set luarocks.rocksdir       ${prefix}/lib/luarocks/rocks-${luarocks.branch}
     set luarocks.suffix         [join [split ${luarocks.branch} .] {}]
@@ -85,7 +85,7 @@ default luarocks.link_binaries yes
 default luarocks.link_binaries_suffix {-${luarocks.branch}}
 
 # luarocks group setup procedure
-proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {implementation "luarocks"}} {
+proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {implementation "lua"}} {
     global name subport luarocks.branches luarocks.default_branch luarocks.dependencies
     global destroot prefix distpath distname worksrcpath os.platform
     global configure.cc configure.cflags configure.ldflags
@@ -133,6 +133,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
                 luarocks.link_binaries no
                 distfiles
                 supported_archs noarch
+                platforms       any
                 use_configure no
                 depends_lib port:lua[join [split ${luarocks.default_branch} .] {}][string trimleft $name lua]
                 build {}
@@ -145,8 +146,10 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
         }
     } else {
         switch ${implementation} {
-            lua52 { luarocks.branch 5.2 }
             lua { luarocks.branch 5.3 }
+            lua52 { luarocks.branch 5.2 }
+            lua53 { luarocks.branch 5.3 }
+            lua54 { luarocks.branch 5.4 }
             default {
                 ui_error "luarocks.setup: unknown implementation '${implementation}' specified"
                 return -code error "luarocks.setup failed"
@@ -192,7 +195,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             }
             port::register_callback luarocks.add_distfiles
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             post-extract {
                 copy -force ${distpath}/${luarocks.distname}.rockspec ${worksrcpath}/${luarocks.distname}.rockspec
@@ -200,7 +203,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      make --deps-mode none
             destroot.post_args ${distpath}/${luarocks.distname}.rockspec
 
@@ -221,7 +224,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             set distname    ${luarocks.distname}
             extract.suffix .src.rock
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             extract.mkdir       yes
             extract {
@@ -230,7 +233,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      build --deps-mode none
             destroot.post_args ${worksrcpath}/${luarocks.distname}.src.rock
 
@@ -248,11 +251,12 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
         }
         all.rock {
             supported_archs noarch
+            platforms       any
             use_configure no
             set distname    ${luarocks.distname}
             extract.suffix .all.rock
 
-            depends_build-append    port:lua${suffix}-luarocks
+            depends_build-append    port:lua-luarocks
 
             extract.mkdir       yes
             extract {
@@ -261,7 +265,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
             build {}
 
             destroot.cmd       ${luarocks.bin}
-            destroot.pre_args  --tree ${destroot}${prefix}
+            destroot.pre_args  --lua-version ${luarocks.branch} --tree ${destroot}${prefix}
             destroot.args      build --deps-mode none
             destroot.post_args ${worksrcpath}/${luarocks.distname}.all.rock
 
@@ -331,7 +335,7 @@ proc luarocks.setup {module vers {type "src.rock"} {docs {}} {source "custom"} {
 }
 
 proc trimroot {root path} {
-    set acc {}
+    set acc [list]
     set skiproot no
     foreach rootf [file split $root] pathf [file split $path] {
         if {$pathf eq ""} {

@@ -24,8 +24,9 @@ proc aspelldict.setup {locale version lang {aspell-version {}}} {
     version              ${version}
     categories           textproc
     supported_archs      noarch
+    platforms            any
 
-    description         "{*}${lang} dictionary for aspell"
+    description         {*}${lang} dictionary for aspell
     long_description    {*}${description}
     homepage            https://aspell.net/
 
@@ -34,7 +35,7 @@ proc aspelldict.setup {locale version lang {aspell-version {}}} {
     master_sites        gnu:aspell/dict/${locale}
 
     depends_build-append port:aspell
-    configure.pre_args  {}
+    configure.pre_args
     configure.args      --vars \
                         ASPELL=${prefix}/bin/aspell \
                         WORD_LIST_COMPRESS=${prefix}/bin/word-list-compress

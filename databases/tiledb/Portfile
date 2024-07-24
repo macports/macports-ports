@@ -1,0 +1,158 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           legacysupport 1.1
+PortGroup           openssl 1.0
+
+# _getline, filesystem
+legacysupport.newest_darwin_requires_legacy 19
+
+# See discussion in: https://github.com/macports/macports-ports/pull/19686
+legacysupport.use_mp_libcxx yes
+
+github.setup        TileDB-Inc TileDB 2.24.1
+name                tiledb
+revision            0
+categories          databases
+license             MIT
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
+description         The universal storage engine
+long_description    {*}${description}
+homepage            https://tiledb.com
+checksums           rmd160  f6b1d30808790f042f222c5a2a8cfa72116af58d \
+                    sha256  c04d1a75b1241388de1da7e6d4022d997acf061f4042ea5ecf9cecb7abe14dda \
+                    size    4473586
+github.tarball_from archive
+
+# Notice that 32-bit platforms are not supported by upstream, and there are reports elsewhere
+# that some targets are broken or fail tests. It may or may not work at any given moment,
+# but seems to require substantial effort to have it properly fixed.
+# ppc64 works much better than ppc32, though some tests fail.
+# I do not disable 32-bit archs in order to facilitate testing and possible fix-ups.
+# Do not expect it to work as-is. See also: https://github.com/TileDB-Inc/TileDB/issues/4096
+
+set libfmt_ver      10
+
+cmake.module_path-append \
+                    ${prefix}/lib/libfmt${libfmt_ver}/cmake
+
+depends_lib-append  port:bzip2 \
+                    port:file \
+                    port:libfmt${libfmt_ver} \
+                    port:lz4 \
+                    port:spdlog \
+                    port:zlib \
+                    port:zstdConfig.cmake
+
+depends_build-append \
+                    port:gmake
+
+if {${os.platform} eq "darwin" && ${os.major} < 13} {
+    # Lion+ (with Xcode 4.1+) have git; earlier need to bring their own.
+    # On 10.8.5 git fetch fails with ssl error.
+    depends_build-append    port:git
+    git.cmd                 ${prefix}/bin/git
+}
+
+if {${os.platform} eq "darwin" && ${os.major} < 20} {
+    # This trickery is intended. Normal passing of flags to CMake fails to have a desired effect.
+    # Non-Apple OS on ppc will need libatomic linking too, but leave it until tested.
+    patchfiles-append \
+                    patch-linking.diff
+
+    post-patch {
+        reinplace "s,@PREFIX@,${prefix},g" ${worksrcpath}/cmake/Modules/FindMagic_EP.cmake
+    }
+}
+
+# Can be rewritten unconditionally, but no point in making a patch more complex:
+if {[string match *gcc* ${configure.compiler}] && ${configure.build_arch} in [list arm i386 ppc]} {
+    patchfiles-append \
+                    patch-libatomic-32-bit.diff
+}
+
+# Patch TileDB to find lz4 manually, because the lz4 package does not provide CMake configs.
+# Updating the lz4 port is blocked on lz4 releasing a new version, with some official
+# linkage-agnostic targets.
+patchfiles-append   lz4_fix.diff
+
+compiler.cxx_standard       2020
+# https://github.com/TileDB-Inc/TileDB/issues/4566
+compiler.blacklist-append   {clang < 1400}
+
+# config modules are defunct.
+# https://github.com/TileDB-Inc/TileDB/issues/4070
+configure.args-append \
+                    -DCATCH_INCLUDE_DIR:STRING=${prefix}/include \
+                    -DTILEDB_ASSERIONS=OFF \
+                    -DTILEDB_AZURE=OFF \
+                    -DTILEDB_CPP_API=ON \
+                    -DTILEDB_EXPERIMENTAL_FEATURES=OFF \
+                    -DTILEDB_GCS=OFF \
+                    -DTILEDB_HDFS=OFF \
+                    -DTILEDB_SERIALIZATION=OFF \
+                    -DTILEDB_SUPERBUILD=OFF \
+                    -DTILEDB_TESTS=OFF \
+                    -DTILEDB_TOOLS=OFF \
+                    -DTILEDB_VERBOSE=ON \
+                    -DTILEDB_WEBP=OFF \
+                    -DTILEDB_WERROR=OFF
+
+# Disable auto-downloading of vcpkg. All dependencies will be provided by MacPorts.
+configure.env-append \
+                    TILEDB_DISABLE_AUTO_VCPKG=1
+
+configure.cflags-append \
+                    -DSPDLOG_FMT_EXTERNAL=1
+
+configure.ldflags-append \
+                    -L${prefix}/lib/libfmt${libfmt_ver} -lfmt
+
+platform darwin {
+    if {${os.major} < 11 && [string match *gcc* ${configure.compiler}]} {
+        configure.args-append \
+                    -DCOMPILER_SUPPORTS_AVX2=OFF
+    }
+}
+
+if {${build_arch} eq "i386" && [string match *clang* ${configure.compiler}]} {
+    configure.cxxflags-append \
+                    -Wno-c++11-narrowing
+}
+
+# FIXME: ppc32 tests build, but fail to pass. Possibly size of bool issue?
+# ppc64 tests are much better, though not clean. See above.
+variant tests description "Enable testing" {
+    # This is needed only if a bundled Catch2 is used:
+    # PortGroup       conflicts_build 1.0
+
+    if {${configure.build_arch} in [list i386 ppc]} {
+        cmake.build_type    Debug
+    }
+
+    # This is a tricky part. We may need to switch between
+    # Macports-provided Catch2 and a bundled one. Related:
+    # https://github.com/TileDB-Inc/TileDB/issues/4590
+    # https://github.com/TileDB-Inc/TileDB/issues/4095
+    depends_build-append \
+                    port:catch2 \
+                    port:libpng
+    # As of 2.19.1, bundled one is broken:
+    # :info:build Undefined symbols:
+    # :info:build   "__ZN5Catch29formatReconstructedExpressionERSoRKSsNS_9StringRefES2_", referenced from:
+    # :info:build       __ZNK5Catch10BinaryExprIRKN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEES9_E29streamReconstructedExpressionERSo in test_assert.cc.o
+    # conflicts_build catch2
+
+    configure.pre_args-replace \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+    configure.args-replace \
+                    -DTILEDB_TESTS=OFF -DTILEDB_TESTS=ON
+
+    test.run        yes
+    test.target     check
+}

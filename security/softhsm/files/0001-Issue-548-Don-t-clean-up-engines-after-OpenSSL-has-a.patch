@@ -1,0 +1,128 @@
+From c2cc0652b4c4829fc6ba186469f4e324af77dfe8 Mon Sep 17 00:00:00 2001
+From: David Woodhouse <dwmw2@infradead.org>
+Date: Mon, 4 May 2020 17:36:22 +0100
+Subject: [PATCH 1/2] Issue #548: Don't clean up engines after OpenSSL has
+ already shut down
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+As of 1.1.0, OpenSSL registers its own atexit() handler to call
+OPENSSL_cleanup(). If our own code subsequently tries to, for example,
+unreference an ENGINE, then it'll crash or deadlock with a use after
+free.
+
+Fix it by registering a callback with OPENSSL_atexit() to be called when
+OPENSSL_cleanup() is called. It sets a flag which prevents any further
+touching of OpenSSL objects — which would otherwise happen fairly much
+immediately thereafter when our own OSSLCryptoFactory destructor gets
+called by the C++ runtime's own atexit() handler.
+
+Fixes: #548
+
+diff --git src/lib/crypto/OSSLCryptoFactory.cpp src/lib/crypto/OSSLCryptoFactory.cpp
+index 32daca2..81d080a 100644
+--- src/lib/crypto/OSSLCryptoFactory.cpp
++++ src/lib/crypto/OSSLCryptoFactory.cpp
+@@ -77,6 +77,7 @@ bool OSSLCryptoFactory::FipsSelfTestStatus = false;
+ 
+ static unsigned nlocks;
+ static Mutex** locks;
++static bool ossl_shutdown;
+ 
+ // Mutex callback
+ void lock_callback(int mode, int n, const char* file, int line)
+@@ -101,6 +102,26 @@ void lock_callback(int mode, int n, const char* file, int line)
+ 	}
+ }
+ 
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++void ossl_factory_shutdown(void)
++{
++	/*
++	 * As of 1.1.0, OpenSSL registers its own atexit() handler
++	 * to call OPENSSL_cleanup(). If our own atexit() handler
++	 * subsequently tries to, for example, unreference an
++	 * ENGINE, then it'll crash or deadlock with a use-after-free.
++	 *
++	 * This hook into the OpenSSL_atexit() handlers will get called
++	 * when OPENSSL_cleanup() is called, and sets a flag which
++	 * prevents any further touching of OpenSSL objects — which
++	 * would otherwise happen fairly much immediately thereafter
++	 * when our own OSSLCryptoFactory destructor gets called by
++	 * the C++ runtime's own atexit() handler.
++	 */
++	ossl_shutdown = true;
++}
++#endif
++
+ // Constructor
+ OSSLCryptoFactory::OSSLCryptoFactory()
+ {
+@@ -119,6 +140,9 @@ OSSLCryptoFactory::OSSLCryptoFactory()
+ 		CRYPTO_set_locking_callback(lock_callback);
+ 		setLockingCallback = true;
+ 	}
++#else
++	// Mustn't dereference engines after OpenSSL itself has shut down
++	OPENSSL_atexit(ossl_factory_shutdown);
+ #endif
+ 
+ #ifdef WITH_FIPS
+@@ -226,31 +250,35 @@ err:
+ // Destructor
+ OSSLCryptoFactory::~OSSLCryptoFactory()
+ {
+-#ifdef WITH_GOST
+-	// Finish the GOST engine
+-	if (eg != NULL)
++	// Don't do this if OPENSSL_cleanup() has already happened
++	if (!ossl_shutdown)
+ 	{
+-		ENGINE_finish(eg);
+-		ENGINE_free(eg);
+-		eg = NULL;
+-	}
++#ifdef WITH_GOST
++		// Finish the GOST engine
++		if (eg != NULL)
++		{
++			ENGINE_finish(eg);
++			ENGINE_free(eg);
++			eg = NULL;
++		}
+ #endif
+ 
+-	// Finish the rd_rand engine
+-	ENGINE_finish(rdrand_engine);
+-	ENGINE_free(rdrand_engine);
+-	rdrand_engine = NULL;
++		// Finish the rd_rand engine
++		ENGINE_finish(rdrand_engine);
++		ENGINE_free(rdrand_engine);
++		rdrand_engine = NULL;
+ 
++		// Recycle locks
++#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
++		if (setLockingCallback)
++		{
++			CRYPTO_set_locking_callback(NULL);
++		}
++#endif
++	}
+ 	// Destroy the one-and-only RNG
+ 	delete rng;
+ 
+-	// Recycle locks
+-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+-	if (setLockingCallback)
+-	{
+-		CRYPTO_set_locking_callback(NULL);
+-	}
+-#endif
+ 	for (unsigned i = 0; i < nlocks; i++)
+ 	{
+ 		MutexFactory::i()->recycleMutex(locks[i]);
+-- 
+2.40.1
+

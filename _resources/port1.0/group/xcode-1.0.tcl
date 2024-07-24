@@ -100,7 +100,7 @@ proc xcode::get_project_path {} {
 # fix resource dependencies (with Xcode >= 2.1).
 proc xcode::fix_resource_dependencies {} {
     global xcodeversion xcode.configuration
-    if {[vercmp $xcodeversion 2.1] >= 0} {
+    if {[vercmp $xcodeversion >= 2.1]} {
         set build_path "[xcode::get_project_path]/build/"
         set config_build_path "[xcode::get_project_path]/build/${xcode.configuration}/"
         if {[file isdirectory ${config_build_path}]} {
@@ -118,7 +118,7 @@ proc xcode::fix_resource_dependencies {} {
 proc xcode::get_configuration_arg { style } {
     global xcodeversion
     if {${style} ne ""} {
-        if {[vercmp ${xcodeversion} 2.1] >= 0} {
+        if {[vercmp ${xcodeversion} >= 2.1]} {
             return "-configuration ${style}"
         } else {
             return "-buildstyle ${style}"

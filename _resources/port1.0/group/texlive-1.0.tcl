@@ -128,7 +128,7 @@ default texlive.use_mktexlsr_on_deactivate yes
 
 proc texlive.texmfport {} {
     homepage        https://www.tug.org/texlive/
-    platforms       darwin
+    platforms       any
 
     supported_archs noarch
     installs_libs   no
@@ -357,7 +357,7 @@ proc texlive.texmfport {} {
                 puts $langluafile "\t\tloader = '$langfile',"
                 puts $langluafile "\t\tlefthyphenmin = $langlhmin,"
                 puts $langluafile "\t\trighthyphenmin = $langrhmin,"
-                set qsyns {}
+                set qsyns [list]
                 foreach syn $langsyns {
                     lappend qsyns "'$syn'"
                 }

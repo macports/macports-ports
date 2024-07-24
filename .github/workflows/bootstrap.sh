@@ -15,7 +15,7 @@ endgroup() {
     printtag "endgroup"
 }
 
-MACPORTS_VERSION=2.7.2
+MACPORTS_VERSION=2.9.3
 
 OS_MAJOR=$(uname -r | cut -f 1 -d .)
 OS_ARCH=$(uname -m)
@@ -23,8 +23,12 @@ case "$OS_ARCH" in
     i586|i686|x86_64)
         OS_ARCH=i386
         ;;
+    arm64)
+        OS_ARCH=arm
+        ;;
 esac
 
+MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${OS_MAJOR}.tar.bz2
 
 begingroup "Fetching files"
 # Download resources in background ASAP but use later.
@@ -33,10 +37,11 @@ echo "Fetching getopt..."
 /usr/bin/curl -fsSLO "https://distfiles.macports.org/_ci/getopt/getopt-v1.1.6.tar.bz2" &
 curl_getopt_pid=$!
 echo "Fetching MacPorts..."
-/usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/MacPorts-${OS_MAJOR}.tar.bz2" &
+/usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
-echo "Fetching PortIndex..."
-/usr/bin/curl -fsSLo ports/PortIndex "https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex" &
+PORTINDEX_URL="https://ftp.fau.de/macports/release/ports/PortIndex_darwin_${OS_MAJOR}_${OS_ARCH}/PortIndex"
+echo "Fetching PortIndex from $PORTINDEX_URL ..."
+/usr/bin/curl -fsSLo ports/PortIndex -o ports/PortIndex.quick "$PORTINDEX_URL" "${PORTINDEX_URL}.quick" &
 curl_portindex_pid=$!
 endgroup
 
@@ -56,23 +61,35 @@ endgroup
 
 
 begingroup "Uninstalling Homebrew"
-# Move directories to /opt/off
+# Move directories to /opt/*-off
 echo "Moving directories..."
-sudo mkdir /opt/off
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/off/ \;
+sudo mkdir /opt/local-off /opt/homebrew-off
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/local-off/ \;
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/homebrew-off/ \;
 
 # Unlink files
 echo "Removing files..."
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type f -print -delete
 
 # Rehash to forget about the deleted files
 hash -r
 endgroup
 
+begingroup "Selecting Xcode version"
+case "$OS_MAJOR" in
+    22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
+        ;;
+    23) sudo xcode-select --switch /Applications/Xcode_15.3.app/Contents/Developer
+        ;;
+esac
+endgroup
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb
-wait $curl_getopt_pid
+if ! wait $curl_getopt_pid; then
+    echo "Fetching getopt failed: $?"
+fi
 echo "Extracting..."
 sudo tar -xpf "getopt-v1.1.6.tar.bz2" -C /
 rm -f "getopt-v1.1.6.tar.bz2"
@@ -81,10 +98,12 @@ endgroup
 
 begingroup "Installing MacPorts"
 # Install MacPorts built by https://github.com/macports/macports-base/tree/master/.github
-wait $curl_mpbase_pid
+if ! wait $curl_mpbase_pid; then
+    echo "Fetching base failed: $?"
+fi
 echo "Extracting..."
-sudo tar -xpf "MacPorts-${OS_MAJOR}.tar.bz2" -C /
-rm -f "MacPorts-${OS_MAJOR}.tar.bz2"
+sudo tar -xpf "${MACPORTS_FILENAME}" -C /
+rm -f "${MACPORTS_FILENAME}"
 endgroup
 
 
@@ -111,10 +130,12 @@ begingroup "Updating PortIndex"
 git -C ports/ remote add macports https://github.com/macports/macports-ports.git
 git -C ports/ fetch macports master
 git -C ports/ checkout -qf macports/master~10
+if ! wait $curl_portindex_pid; then
+    echo "Fetching PortIndex failed: $?"
+fi
 git -C ports/ checkout -qf -
 git -C ports/ checkout -qf "$(git -C ports/ merge-base macports/master HEAD)"
 ## Ignore portindex errors on common ancestor
-wait $curl_portindex_pid
 (cd ports/ && portindex)
 git -C ports/ checkout -qf -
 (cd ports/ && portindex -e)

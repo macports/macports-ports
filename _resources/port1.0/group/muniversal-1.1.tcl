@@ -37,6 +37,14 @@ default muniversal.no_3_archs {no}
 options muniversal.dont_diff
 default muniversal.dont_diff {}
 
+# list of file name whose contents just need to be interlaced
+options muniversal.combine
+default muniversal.combine  {}
+
+# list of file names whose contents are equivalent but not byte by byte the same
+options muniversal.equivalent
+default muniversal.equivalent {}
+
 ##########################################################################################
 # utilites
 ##########################################################################################
@@ -48,11 +56,7 @@ default muniversal.architectures {[expr {[option universal_possible] && [variant
 # procedures (pre-configure, configure, post-configure, etc.) will be run for each architecture
 # muniversal.build_arch will be set to the current architecture
 options muniversal.build_arch
-if {[option universal_possible] && [variant_isset universal]} {
-    default muniversal.build_arch {}
-} else {
-    default muniversal.build_arch {[expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}
-}
+default muniversal.build_arch {[expr {[option universal_possible] && [variant_isset universal] ? "" : [expr {$supported_archs ne "noarch" ? ${configure.build_arch} : ${build_arch}}]}]}
 
 # if yes, system can run 64-bit binaries
 options os.cpu64bit_capable
@@ -69,6 +73,10 @@ default muniversal.arch_flag {yes}
 # if yes, append architecture flag to compiler name
 options muniversal.arch_compiler
 default muniversal.arch_compiler {no}
+
+# if yes, append architecture flag to build compiler name
+options muniversal.arch_build_compiler
+default muniversal.arch_build_compiler  {${muniversal.arch_compiler}}
 
 ##########################################################################################
 # MacPorts options for different architectures
@@ -134,7 +142,7 @@ default muniversal.is_cross.ppc64   {[expr { ${os.arch} ne "powerpc" || !${os.cp
 # see https://wiki.osdev.org/Target_Triplet
 ##########################################################################################
 options triplet.vendor
-default triplet.vendor      {apple}
+default triplet.vendor      {[expr {${os.platform} eq "darwin" ? "apple" : "unknown"}]}
 
 options triplet.os
 default triplet.os          {${os.platform}${os.major}}
@@ -170,11 +178,46 @@ foreach arch {arm64 x86_64 i386 ppc ppc64} {
 }
 unset arch
 
+##########################################################################################
+# for cross-compiling, some configure scripts recognize
+#     CPPFLAGS_FOR_BUILD
+#     CFLAGS_FOR_BUILD
+#     CXXFLAGS_FOR_BUILD
+#     LDFLAGS_FOR_BUILD
+##########################################################################################
+options configure.cppflags_for_build
+default configure.cppflags_for_build                {${configure.cppflags}}
+
+options configure.cflags_for_build
+default configure.cflags_for_build                  {${configure.cflags}}
+
+options configure.cxxflags_for_build
+default configure.cxxflags_for_build                {${configure.cxxflags}}
+
+options configure.ldflags_for_build
+default configure.ldflags_for_build                 {${configure.ldflags}}
+
+# this is a seldom needed feature where XFLAGS_FOR_BUILD are appended to the X compiler
+options configure.append_build_flags_to_compiler
+default configure.append_build_flags_to_compiler    {no}
+
 namespace eval muniversal {}
 
 ####################################################################################################################################
 # internal procedures
 ####################################################################################################################################
+
+# the diff utility in macOS Ventura does not have the same functionality as previous versions
+# see https://trac.macports.org/ticket/66103
+# see https://trac.macports.org/ticket/66163
+proc muniversal::muniversal_get_diff_to_use {} {
+    global prefix
+    if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+        return "${prefix}/libexec/diffutils/bin/diff"
+    } else {
+        return "/usr/bin/diff"
+    }
+}
 
 # a version of `sysctl hw.cpu64bit_capable` that works on older systems
 # see https://trac.macports.org/ticket/25873
@@ -183,7 +226,10 @@ proc muniversal::cpu64bit_capable {} {
         # Doesn't really matter what we return here.
         return 1
     }
-    if {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
+    if {[option os.major] >= 11} {
+        # 10.7 and later only support 64-bit hardware
+        return 1
+    } elseif {[option os.major] >= 9 && ![catch {sysctl hw.cpu64bit_capable} result]} {
         return $result
     } elseif {(![catch {sysctl hw.optional.x86_64} is_x86_64] && ${is_x86_64})
               || (![catch {sysctl hw.optional.64bitops} is_ppc64] && ${is_ppc64})} {
@@ -197,9 +243,9 @@ proc muniversal::cpu64bit_capable {} {
 proc muniversal::get_triplets {arch} {
     global triplet.add_host triplet.add_build os.arch os.cpu64bit_capable
 
-    if { [file tail [option configure.cmd]] eq "cmake" }  { return "" }
+    if { [file tail [option configure.cmd]] in [list cmake meson printenv] }  { return [list] }
 
-    set ret ""
+    set ret [list]
 
     if { ${triplet.add_host} eq "all"
          || ${arch} in ${triplet.add_host}
@@ -301,18 +347,12 @@ proc muniversal::strip_arch_flags {dir1 dir2 dir fl} {
     copy ${dir1}/${fl} ${tempfile1}
     copy ${dir2}/${fl} ${tempfile2}
 
-    reinplace -q -E {s:-arch +[0-9a-zA-Z_]+::g} ${tempfile1} ${tempfile2}
-    reinplace -q {s:-m32::g} ${tempfile1} ${tempfile2}
-    reinplace -q {s:-m64::g} ${tempfile1} ${tempfile2}
-
-    # also strip out host information and stray space runs
-    reinplace -q -E {s:--host=[^ ]+::g}     ${tempfile1} ${tempfile2}
-    reinplace -q -E {s:host_alias=[^ ]+::g} ${tempfile1} ${tempfile2}
-    reinplace -q -E {s:  +: :g}             ${tempfile1} ${tempfile2}
+    set re {(-m32|-m64|-arch +[0-9a-zA-Z_]+|(--host|host_alias)=[0-9a-zA-Z_.-]+)}
+    reinplace -q -E "s: *(${re}|'${re}'|\"${re}\")::g" ${tempfile1} ${tempfile2}
 
     if { ! [catch {system "/usr/bin/cmp -s \"${tempfile1}\" \"${tempfile2}\""}] } {
         # modified files are identical
-        ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -m32, -m64, and -arch XXX"
+        ui_debug "universal: merge: ${fl} differs in ${dir1} and ${dir2} but are the same when stripping out -m32, -m64, -arch *, --host=*, and host_alias=*"
         copy ${tempfile1} ${dir}/${fl}
         delete ${tempfile1} ${tempfile2} ${tempdir}
     } else {
@@ -347,9 +387,10 @@ proc muniversal::strip_dir_arch {arch1 arch2 dir1 dir2 dir fl} {
 
 # merge ${base1}/${prefixDir} and ${base2}/${prefixDir} into dir ${base}/${prefixDir}
 #        arch1, arch2: names to prepend to files if a diff merge of two files is forbidden by merger_dont_diff
-#    merger_dont_diff: list of files for which /usr/bin/diff ${diffFormat} will not merge correctly
+#    merger_dont_diff: list of files for which diff ${diffFormat} will not merge correctly
+#      merger_combine: list of files whose different contents just need to be interlaced
 #          diffFormat: format used by diff to merge two text files
-proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff diffFormat} {
+proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff merger_combine merger_equivalent diffFormat} {
     set dir1  ${base1}/${prefixDir}
     set dir2  ${base2}/${prefixDir}
     set dir   ${base}/${prefixDir}
@@ -393,7 +434,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                 }
             } elseif { [file isdirectory ${dir1}/${fl}] } {
                 # files are directories (but not links), so recursively call function
-                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${diffFormat}
+                muniversal::merge ${base1} ${base2} ${base} ${prefixDir}/${fl} ${arch1} ${arch2} ${merger_dont_diff} ${merger_combine} ${merger_equivalent} ${diffFormat}
             } else {
                 # files are neither directories nor links
                 if { ! [catch {system "/usr/bin/cmp -s \"${dir1}/${fl}\" \"${dir2}/${fl}\" && /bin/cp -v \"${dir1}/${fl}\" \"${dir}\""}] } {
@@ -424,10 +465,19 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
 
                             ui_debug "universal: merge: created ${prefixDir}/${fl} to include ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
 
-                            system "/usr/bin/diff -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                            system "[muniversal::muniversal_get_diff_to_use] -d ${diffFormat} \"${dir}/${arch1}-${fl}\" \"${dir}/${arch2}-${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
 
                             copy -force ${dir1}/${fl} ${dir}/${arch1}-${fl}
                             copy -force ${dir2}/${fl} ${dir}/${arch2}-${fl}
+                        } elseif {"${prefixDir}/${fl}" in ${merger_combine}} {
+                            # user has specified that contents just need to be interlaced
+                            set diffFormatCombine {--old-group-format='%<' --new-group-format='%>' --unchanged-group-format='%=' --changed-group-format='%<%>'}
+                            ui_debug "universal: merge: created ${prefixDir}/${fl} by combining ${prefixDir}/${arch1}-${fl} ${prefixDir}/${arch1}-${fl}"
+                            system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormatCombine} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"
+                        } elseif {"${prefixDir}/${fl}" in ${merger_equivalent}} {
+                            # user has specified that contents  are equivalent even though they are not byte by byte the same
+                            ui_debug "universal: merge: ${prefixDir}/${fl} differs in ${base1} and ${base2} the differences have been marked as trivial"
+                            copy ${dir1}/${fl} ${dir}
                         } else {
                             # files could not be merged into a fat binary
                             # handle known file types
@@ -531,7 +581,7 @@ proc muniversal::merge {base1 base2 base prefixDir arch1 arch2 merger_dont_diff 
                                     if { ! [catch {system "test \"`head -c2 ${dir1}/${fl}`\" = '#!'"}] } {
                                         # shell script, hopefully striping out arch flags works...
                                         muniversal::strip_arch_flags ${dir1} ${dir2} ${dir} ${fl}
-                                    } elseif { ! [catch {system "/usr/bin/diff -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
+                                    } elseif { ! [catch {system "[muniversal::muniversal_get_diff_to_use] -dw ${diffFormat} \"${dir1}/${fl}\" \"${dir2}/${fl}\" > \"${dir}/${fl}\"; test \$? -le 1"}] } {
                                         # diff worked
                                         ui_debug "universal: merge: used diff to create ${prefixDir}/${fl}"
                                     } else {
@@ -676,22 +726,32 @@ proc parse_environment {command} {
     if { ${command} eq "configure" } {
         append_to_environment_value     ${command}  CPP_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cpp]"
         append_to_environment_value     ${command}  CXXCPP_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cpp]"
-        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags]
+        append_to_environment_value     ${command}  CPPFLAGS_FOR_BUILD  {*}[option configure.cppflags_for_build]
 
-        if { [option muniversal.arch_compiler] } {
-            append_to_environment_value ${command}  CC_FOR_BUILD        {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
-            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+        if { [option muniversal.arch_build_compiler] } {
+            if { [option configure.append_build_flags_to_compiler] } {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc] [option configure.cflags_for_build]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx] [option configure.cxxflags_for_build]"
+            } else {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [portconfigure::configure_get_archflags cc]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [portconfigure::configure_get_archflags cxx]"
+            }
 
-            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}[option configure.cflags]
-            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags]
-            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags]
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags_for_build]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}[option configure.cxxflags_for_build]
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}[option configure.ldflags_for_build]
         } else {
-            append_to_environment_value ${command}  CC_FOR_BUILD        {*}[portconfigure::configure_get_compiler cc]
-            append_to_environment_value ${command}  CXX_FOR_BUILD       {*}[portconfigure::configure_get_compiler cxx]
+            if { [option configure.append_build_flags_to_compiler] } {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]  [option configure.cflags_for_build]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx] [option configure.cxxflags_for_build]"
+            } else {
+                append_to_environment_value ${command}  CC_FOR_BUILD    {*}"[portconfigure::configure_get_compiler cc]"
+                append_to_environment_value ${command}  CXX_FOR_BUILD   {*}"[portconfigure::configure_get_compiler cxx]"
+            }
 
-            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags] [portconfigure::configure_get_archflags cc]"
-            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags] [portconfigure::configure_get_archflags cxx]"
-            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags] [portconfigure::configure_get_archflags ld]"
+            append_to_environment_value ${command}  CFLAGS_FOR_BUILD    {*}"[option configure.cflags_for_build] [portconfigure::configure_get_archflags cc]"
+            append_to_environment_value ${command}  CXXFLAGS_FOR_BUILD  {*}"[option configure.cxxflags_for_build] [portconfigure::configure_get_archflags cxx]"
+            append_to_environment_value ${command}  LDFLAGS_FOR_BUILD   {*}"[option configure.ldflags_for_build] [portconfigure::configure_get_archflags ld]"
         }
     }
 
@@ -746,7 +806,7 @@ rename portpatch::patch_main portpatch::patch_main_real
 proc portpatch::patch_main {args} {
     global UI_PREFIX
 
-    set patches ""
+    set patches [list]
 
     if {[exists patchfiles]} {
         lappend patches {*}[option patchfiles]
@@ -955,9 +1015,11 @@ proc portdestroot::destroot_start {args} {
 rename portdestroot::destroot_finish portdestroot::destroot_finish_real
 proc portdestroot::destroot_finish {args} {
     global  workpath \
-            muniversal.dont_diff
+            muniversal.dont_diff \
+            muniversal.combine \
+            muniversal.equivalent
 
-    # /usr/bin/diff can merge two C/C++ files
+    # GNU diff can merge two C/C++ files
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#If-then-else
     # See https://www.gnu.org/software/diffutils/manual/html_mono/diff.html#Detailed%20If-then-else
     set diffFormatProc {--old-group-format='#if (defined(__ppc__) || defined(__ppc64__))
@@ -996,10 +1058,10 @@ proc portdestroot::destroot_finish {args} {
 %>#endif
 '}
 
-    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${diffFormatM}
-    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${diffFormatProc}
-    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${diffFormatArmElse}
+    muniversal::merge  ${workpath}/destroot-ppc      ${workpath}/destroot-ppc64     ${workpath}/destroot-powerpc   ""  ppc ppc64      ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-i386     ${workpath}/destroot-x86_64    ${workpath}/destroot-intel     ""  i386 x86_64    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatM}
+    muniversal::merge  ${workpath}/destroot-powerpc  ${workpath}/destroot-intel     ${workpath}/destroot-ppc-intel ""  powerpc x86    ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatProc}
+    muniversal::merge  ${workpath}/destroot-arm64    ${workpath}/destroot-ppc-intel ${workpath}/destroot           ""  arm64 ppcintel ${muniversal.dont_diff}  ${muniversal.combine} ${muniversal.equivalent} ${diffFormatArmElse}
 
     portdestroot::destroot_finish_real ${args}
 }
@@ -1016,6 +1078,13 @@ proc muniversal::add_compiler_flags {} {
         # configure.cpp is intentionally left out
         foreach tool {cxx objcxx cc objc fc f90 f77} {
             configure.${tool}-append   {*}[option configure.${tool}_archflags.[option configure.build_arch]]
+        }
+    }
+
+    if {[option universal_possible] && [variant_isset universal]} {
+        if { [option os.platform] eq "darwin" && [option os.major] >= 22 } {
+            depends_build-delete port:diffutils-for-muniversal
+            depends_build-append port:diffutils-for-muniversal
         }
     }
 }

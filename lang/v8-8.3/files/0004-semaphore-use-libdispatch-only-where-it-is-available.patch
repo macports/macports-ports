@@ -1,0 +1,130 @@
+From b9d27426543f9b221da8735698c12e8fe71de4fe Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Thu, 9 Nov 2023 02:59:04 +0800
+Subject: [PATCH 04/12] semaphore: use libdispatch only where it is available
+
+---
+ src/base/platform/semaphore.cc | 59 +++++++++++++++++++++++++++++++++-
+ src/base/platform/semaphore.h  |  9 ++++++
+ 2 files changed, 67 insertions(+), 1 deletion(-)
+
+diff --git a/src/base/platform/semaphore.cc b/src/base/platform/semaphore.cc
+index 66464d8258d..fd1c864b51a 100644
+--- a/v8/src/base/platform/semaphore.cc
++++ b/v8/src/base/platform/semaphore.cc
+@@ -5,7 +5,13 @@
+ #include "src/base/platform/semaphore.h"
+ 
+ #if V8_OS_MACOSX
++#include <AvailabilityMacros.h>
++#if MAC_OS_X_VERSION_MIN_REQUIRED > 1050 && !defined(__ppc__)
+ #include <dispatch/dispatch.h>
++#else
++#include <mach/mach_init.h>
++#include <mach/task.h>
++#endif
+ #endif
+ 
+ #include <errno.h>
+@@ -18,6 +24,7 @@ namespace v8 {
+ namespace base {
+ 
+ #if V8_OS_MACOSX
++#if MAC_OS_X_VERSION_MIN_REQUIRED > 1050 && !defined(__ppc__)
+ 
+ Semaphore::Semaphore(int count) {
+   native_handle_ = dispatch_semaphore_create(count);
+@@ -32,13 +39,63 @@ void Semaphore::Wait() {
+   dispatch_semaphore_wait(native_handle_, DISPATCH_TIME_FOREVER);
+ }
+ 
+-
+ bool Semaphore::WaitFor(const TimeDelta& rel_time) {
+   dispatch_time_t timeout =
+       dispatch_time(DISPATCH_TIME_NOW, rel_time.InNanoseconds());
+   return dispatch_semaphore_wait(native_handle_, timeout) == 0;
+ }
+ 
++#else // Fallback code for macOS with no libdispatch borrowed from nodejs12
++
++Semaphore::Semaphore(int count) {
++  kern_return_t result = semaphore_create(
++      mach_task_self(), &native_handle_, SYNC_POLICY_FIFO, count);
++  DCHECK_EQ(KERN_SUCCESS, result);
++  USE(result);
++}
++
++Semaphore::~Semaphore() {
++  kern_return_t result = semaphore_destroy(mach_task_self(), native_handle_);
++  DCHECK_EQ(KERN_SUCCESS, result);
++  USE(result);
++}
++
++void Semaphore::Signal() {
++  kern_return_t result = semaphore_signal(native_handle_);
++  DCHECK_EQ(KERN_SUCCESS, result);
++  USE(result);
++}
++
++void Semaphore::Wait() {
++  while (true) {
++    kern_return_t result = semaphore_wait(native_handle_);
++    if (result == KERN_SUCCESS) return;  // Semaphore was signalled.
++    DCHECK_EQ(KERN_ABORTED, result);
++  }
++}
++
++bool Semaphore::WaitFor(const TimeDelta& rel_time) {
++  TimeTicks now = TimeTicks::Now();
++  TimeTicks end = now + rel_time;
++  while (true) {
++    mach_timespec_t ts;
++    if (now >= end) {
++      // Return immediately if semaphore was not signalled.
++      ts.tv_sec = 0;
++      ts.tv_nsec = 0;
++    } else {
++      ts = (end - now).ToMachTimespec();
++    }
++    kern_return_t result = semaphore_timedwait(native_handle_, ts);
++    if (result == KERN_SUCCESS) return true;  // Semaphore was signalled.
++    if (result == KERN_OPERATION_TIMED_OUT) return false;  // Timeout.
++    DCHECK_EQ(KERN_ABORTED, result);
++    now = TimeTicks::Now();
++  }
++}
++
++#endif
++
+ #elif V8_OS_POSIX
+ 
+ Semaphore::Semaphore(int count) {
+diff --git a/src/base/platform/semaphore.h b/src/base/platform/semaphore.h
+index c4937acadd1..74435a36ae7 100644
+--- a/v8/src/base/platform/semaphore.h
++++ b/v8/src/base/platform/semaphore.h
+@@ -12,7 +12,12 @@
+ #endif
+ 
+ #if V8_OS_MACOSX
++#include <AvailabilityMacros.h>
++#if MAC_OS_X_VERSION_MIN_REQUIRED > 1050 && !defined(__ppc__)
+ #include <dispatch/dispatch.h>  // NOLINT
++#else
++#include <mach/semaphore.h>  // NOLINT
++#endif
+ #elif V8_OS_POSIX
+ #include <semaphore.h>  // NOLINT
+ #endif
+@@ -50,7 +55,11 @@ class V8_BASE_EXPORT Semaphore final {
+   bool WaitFor(const TimeDelta& rel_time) V8_WARN_UNUSED_RESULT;
+ 
+ #if V8_OS_MACOSX
++#if MAC_OS_X_VERSION_MIN_REQUIRED > 1050 && !defined(__ppc__)
+   using NativeHandle = dispatch_semaphore_t;
++#else
++  using NativeHandle = semaphore_t;
++#endif
+ #elif V8_OS_POSIX
+   using NativeHandle = sem_t;
+ #elif V8_OS_WIN

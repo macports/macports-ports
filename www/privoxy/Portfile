@@ -3,12 +3,12 @@
 PortSystem          1.0
 
 name                privoxy
-version             3.0.33
-revision            3
+version             3.0.34
+revision            1
 categories          www security net
-platforms           darwin
 license             GPL-2
 maintainers         {ieee.org:s.t.smith @essandess} openmaintainer
+supported_archs     arm64 x86_64
 
 description         Advanced filtering web proxy
 
@@ -31,6 +31,24 @@ set privoxyGroup    privoxy
 set privoxyUser     privoxy
 add_users           ${privoxyUser} group=${privoxyGroup}
 
+# https://trac.macports.org/ticket/45461
+configure.asroot    yes
+pre-configure {
+    # ${prefix}/var/macports/sources/rsync.macports.org/macports/release/tarballs/base/src/port1.0/portutil.tcl
+    if {[getuid] != 0} {
+        ui_warn "dscl only works when running as root."
+        ui_warn "The PrimaryGroupID of '$privoxyUser' was not changed."
+    } elseif {${os.platform} eq "darwin" \
+        && [existsuser ${privoxyUser}] != -1 \
+        && [existsgroup ${privoxyGroup}] != -1} {
+        set dscl [findBinary dscl $portutil::autoconf::dscl_path]
+        set privoxyUser_gid [strsed [exec -ignorestderr $dscl . -read /Users/${privoxyUser} PrimaryGroupID] {g|^PrimaryGroupID: ||}]
+        if {${privoxyUser_gid} ne [existsgroup ${privoxyGroup}]} {
+            exec -ignorestderr $dscl . -change /Users/${privoxyUser} PrimaryGroupID ${privoxyUser_gid} [existsgroup ${privoxyGroup}]
+        }
+    }
+}
+
 proc plutil_startup {plcmds label} {
     global prefix startupitem.location
     foreach cmd ${plcmds} {
@@ -49,9 +67,9 @@ if {${name} eq ${subport}} {
     extract.only    ${distname}${extract.suffix}
 
     checksums       ${distname}${extract.suffix} \
-                    rmd160  4d01969cc52686c268a5e07e74e48c36bc4aa10b \
-                    sha256  04b104e70dac61561b9dd110684b250fafc8c13dbe437a60fae18ddd9a881fae \
-                    size    1579540
+                    rmd160  8ca1e475c112bfad1e8d556b12e5a6b51a122c47 \
+                    sha256  e6ccbca1656f4e616b4657f8514e33a70f6697e9d7294356577839322a3c5d2c \
+                    size    1589785
 
     gpg_verify.use_gpg_verification \
                     yes
@@ -71,10 +89,9 @@ if {${name} eq ${subport}} {
         }
     }
 
-    set perl5_major_min 5.28
-    if {${perl5.major} eq "" || ${perl5.major} < ${perl5_major_min}} {
-        perl5.major ${perl5_major_min}
-    }
+    # Please use MacPorts default perl5 version in:
+    # https://github.com/macports/macports-ports/blob/master/_resources/port1.0/group/perl5-1.0.tcl
+    perl5.major     5.34
 
     worksrcdir      ${name}-${version}-stable
 
@@ -334,7 +351,7 @@ if {${name} eq ${subport}} {
                 "sh <<TLS_PRIVOXY_ROOT_CA
                 # initialize
                 touch index.txt
-                echo 1000 > serial
+                echo '01' > serial
 
                 # CA encrypted key
                 # EC
@@ -351,7 +368,7 @@ if {${name} eq ${subport}} {
 
                 # CA certificate
                 openssl req -config openssl.cnf \\
-                    -new -x509 -days 1460 -sha256 \\
+                    -new -x509 -days 1460 -sha384 \\
                     -extensions v3_ca \\
                     -out certs/ca.cert.pem -key private/ca.key.pem \\
                     -passin file:private/passphrase.txt -batch
@@ -362,12 +379,14 @@ if {${name} eq ${subport}} {
                 # Convert to .cer DER and .p12 for other uses
                 openssl x509 -outform der -in certs/ca.cert.pem -out certs/ca.cer
 
-                openssl pkcs12 -export -out certs/ca.p12 \\
+                # https://developer.apple.com/forums/thread/697030
+                openssl pkcs12 -legacy -export -out certs/ca.p12 \\
                     -inkey private/ca.key.pem -in certs/ca.cert.pem \\
                     -passin file:private/passphrase.txt \\
                     -passout file:private/passphrase.txt
                 # verify .p12 passphrase
-                openssl pkcs12 -noout -in certs/ca.p12 -passin file:private/passphrase.txt
+                openssl pkcs12 -legacy -noout \\
+                    -in certs/ca.p12 -passin file:private/passphrase.txt
 TLS_PRIVOXY_ROOT_CA
 "
 
@@ -436,17 +455,18 @@ TLS_PRIVOXY_ROOT_CA
             #     -pass file:private/passphrase.txt
 
             # Certificate PEM, DER, and P12
-            openssl req -config openssl.cnf -new -x509 -days 3650 -sha256 \\
+            openssl req -config openssl.cnf -new -x509 -days 3650 -sha384 \\
                 -extensions v3_ca -out certs/ca.cert.pem \\
                 -key private/ca.key.pem -passin file:private/passphrase.txt \\
                 -batch
             openssl verify -CAfile certs/ca.cert.pem certs/ca.cert.pem
             openssl x509 -outform der -in certs/ca.cert.pem -out certs/ca.cer
-            openssl pkcs12 -export -out certs/ca.p12 -inkey private/ca.key.pem \\
+            # https://developer.apple.com/forums/thread/697030
+            openssl pkcs12 -legacy -export -out certs/ca.p12 -inkey private/ca.key.pem \\
                 -in certs/ca.cert.pem -passin file:private/passphrase.txt \\
                 -passout file:private/passphrase.txt
             # verify .p12 passphrase
-            openssl pkcs12 -noout -in certs/ca.p12 \\
+            openssl pkcs12 -legacy -noout -in certs/ca.p12 \\
                 -passin file:private/passphrase.txt
 
             # Install the Privoxy PKI
@@ -548,9 +568,11 @@ TLS_PRIVOXY_ROOT_CA
 
 subport ${name}-pki-bundle {
     # Please increase the revision whenever curl-ca-bundle contents change
-    revision        2
+    revision        3
 
     license         MIT
+    supported_archs noarch
+    platforms       any
 
     description     PKI Bundle for ${name}
     long_description \

@@ -101,6 +101,26 @@ array set crossgcc.versions_info {
         sha256  62fd634889f31c02b64af2c468f064b47ad1ca78411c45abe6ac4b5f8dd19c7b \
         size    82701928
     }}
+    12.2.0 {xz {
+        rmd160  76d30c411227d6c3e87dd4f0a8ea1ae5d8ab9ffd \
+        sha256  e549cf9cf3594a00e27b6589d4322d70e0720cdd213f39beb4181e06926230ff \
+        size    84645292
+    }}
+    13.1.0 {xz {
+        rmd160  685ae181bad5121afb132e2744fde13296a6982f \
+        sha256  61d684f0aa5e76ac6585ad8898a2427aade8979ed5e7f85492286c4dfc13ee86 \
+        size    87451196
+    }}
+    13.2.0 {xz {
+        rmd160  a6d646ed9765f973d3f63ef560edf4a50cf686c3 \
+        sha256  e275e76442a6067341a27f04c5c6b83d8613144004c0413528863dc6b5c743da \
+        size    87858592
+    }}
+    14.1.0 {xz {
+        rmd160  7ef2f86a35529c52a71107ae4e82400ce3c90758 \
+        sha256  e283c654987afe3de9d8080bc0bd79534b5ca0d681a73a11ff2b5d3767426840 \
+        size    92265736
+    }}
 }
 
 array set newlib.versions_info {
@@ -124,6 +144,16 @@ array set newlib.versions_info {
         sha256  f296e372f51324224d387cc116dc37a6bd397198756746f93a2b02e9a5d40154 \
         size    18648429
     }}
+    4.2.0.20211231 {gz {
+        rmd160  c44e40af51b2d6a213ff1501b9a4f080ba911408 \
+        sha256  c3a0e8b63bc3bef1aeee4ca3906b53b3b86c8d139867607369cb2915ffc54435 \
+        size    18921589
+    }}
+    4.3.0.20230120 {gz {
+        rmd160  9ff036934a1a7e9c5aa114c4a26a52008e463ec3 \
+        sha256  83a62a99af59e38eb9b0c58ed092ee24d700fff43a22c03e433955113ef35150 \
+        size    8832922
+    }}
 }
 
 proc crossgcc.setup {target version} {
@@ -137,7 +167,6 @@ proc crossgcc.setup {target version} {
         name            ${crossgcc.target}-gcc
         version         ${crossgcc.version}
         categories      cross devel
-        platforms       darwin
         license         GPL-3+
         maintainers     nomaintainer
 
@@ -275,7 +304,7 @@ proc crossgcc.setup {target version} {
 
         # https://trac.macports.org/ticket/29104
         # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=48301
-        if {[vercmp ${xcodeversion} 4.3] < 0} {
+        if {[vercmp ${xcodeversion} < 4.3]} {
             compiler.blacklist llvm-gcc-4.2
         }
         # Failed to build with clang from Xcode 4.5
@@ -283,12 +312,12 @@ proc crossgcc.setup {target version} {
         compiler.blacklist  {clang >= 421 < 422}
 
         # Opportunistic links zstd for LTO byte code compression
-        if {[vercmp ${version} "10.0"] >= 0} {
+        if {[vercmp ${version} >= "10.0"]} {
             depends_lib-append  port:zstd
         }
 
         # Section taken from gcc11 Portfile
-        if {[vercmp ${version} "11.0"] >= 0} {
+        if {[vercmp ${version} >= "11.0"]} {
             # https://trac.macports.org/ticket/29067
             # https://trac.macports.org/ticket/29104
             # https://trac.macports.org/ticket/47996

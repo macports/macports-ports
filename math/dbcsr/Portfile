@@ -1,0 +1,111 @@
+# -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim:fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
+
+PortSystem          1.0
+PortGroup           cmake 1.1
+PortGroup           compiler_blacklist_versions 1.0
+PortGroup           github 1.0
+PortGroup           linear_algebra 1.0
+PortGroup           mpi 1.0
+
+github.setup        cp2k dbcsr 2.6.0 v
+revision            0
+categories          math
+license             GPL-2
+maintainers         {@barracuda156 gmail.com:vital.had} openmaintainer
+description         Distributed Block Compressed Sparse Row matrix library
+long_description    DBCSR is a library designed to efficiently perform \
+                    sparse matrix-matrix multiplication, among other operations. \
+                    It is MPI and OpenMP parallel and can exploit Nvidia and AMD GPUs \
+                    via CUDA and HIP.
+homepage            https://cp2k.github.io/dbcsr
+checksums           rmd160  63e902419c60974400ca6764f576369267654e44 \
+                    sha256  c67b02ff9abc7c1f529af446a9f01f3ef9e5b0574f220259128da8d5ca7e9dc6 \
+                    size    2964461
+github.tarball_from releases
+cmake.generator     Ninja
+
+set py_ver          3.11
+set py_ver_nodot    [string map {. {}} ${py_ver}]
+depends_build-append \
+                    port:py${py_ver_nodot}-fypp \
+                    port:python${py_ver_nodot}
+
+# We need gcc with this port. See upstream on the compiler choice:
+# https://github.com/cp2k/dbcsr/issues/740#issuecomment-1858000876
+mpi.setup           require require_fortran \
+                    -gcc44 -gcc45 -gcc46 -gcc47 -gcc48 -gcc49 -gcc5 -gcc6 \
+                    -clang -fortran
+
+compiler.cxx_standard   2014
+compiler.openmp_version 4.5
+
+# Xcode clang on 10.7 fails with error: invalid instruction mnemonic 'cvtsi2sdl'
+compiler.blacklist-append {clang < 500}
+
+# OpenBLAS is not properly supported for Apple yet:
+# https://github.com/cp2k/dbcsr/issues/645
+# It is confirmed to be broken on PPC.
+if {[variant_isset accelerate]} {
+    patchfiles-append \
+                    patch-accelerate.diff
+}
+
+# For now, disabling because of this:
+# https://github.com/cp2k/dbcsr/issues/645#issuecomment-1382381278
+# pre-configure {
+#     configure.args-append \
+#                     -DMPI_RUN_COMMAND=${prefix}/bin/${mpi.exec} \
+#                     -DMPIEXEC_EXECUTABLE=${prefix}/bin/${mpi.exec} \
+# }
+
+# Needed in order for correct version of BLAS to be picked.
+# See also: https://trac.macports.org/ticket/66714
+pre-configure {
+    configure.args-append ${cmake_linalglib}
+    if {[variant_isset openblas]} {
+        # PG passes only -DBLA_VENDOR=OpenBLAS, but it is not recognized by configure:
+        # https://github.com/macports/macports-ports/pull/17394#issuecomment-1397688236
+        # Pass args manually:
+        configure.args-append  \
+                    -DBLAS_LIBRARIES=${prefix}/lib/libopenblas.dylib \
+                    -DLAPACK_LIBRARIES=${prefix}/lib/libopenblas.dylib
+    }
+}
+
+configure.args-append \
+                    -DPython_EXECUTABLE=${prefix}/bin/python${py_ver} \
+                    -DFYPP_EXECUTABLE=${prefix}/bin/fypp-${py_ver} \
+                    -DUSE_MPI=ON \
+                    -DUSE_MPI_F08=ON \
+                    -DUSE_OPENMP=ON \
+                    -DUSE_SMM=blas \
+                    -DWITH_C_API=ON \
+                    -DWITH_CUDA_PROFILING=OFF \
+                    -DBUILD_TESTING=OFF \
+                    -DTEST_OMP_THREADS=2 \
+                    -DTEST_MPI_RANKS=4 \
+                    -DWITH_EXAMPLES=OFF
+
+# https://github.com/cp2k/dbcsr/issues/645#issuecomment-1397645624
+if {${os.platform} eq "darwin" && ${os.major} < 11} {
+    configure.args-replace \
+                    -DTEST_MPI_RANKS=4 -DTEST_MPI_RANKS=2
+}
+
+variant tests description "Enable testing" {
+
+    configure.pre_args-replace \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON \
+                    -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=OFF
+
+    configure.args-replace \
+                    -DDBUILD_TESTING=OFF DBUILD_TESTING=ON
+
+    pre-test {
+        # test infrastructure uses /bin/ps, which is forbidden by sandboxing
+        append portsandbox_profile " (allow process-exec (literal \"/bin/ps\") (with no-profile))"
+    }
+
+    test.run        yes
+    test.cmd        ctest
+}

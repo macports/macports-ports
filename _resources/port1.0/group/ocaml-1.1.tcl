@@ -43,7 +43,7 @@
 # ocaml.use_findlib     <bool>
 #   If set to yes, `port:ocamlfind` will be appended
 #   to `depends_lib`, and the `OCAMLFIND_DESTDIR` and
-#   `OCAMLFIND_LDCONF` environmental variables will be
+#   `OCAMLFIND_LDCONF` environment variables will be
 #   configured appropriately prior to execution of the
 #   build and destroot targets.
 #
@@ -404,7 +404,13 @@ commands    dune.build \
 options     dune.build.target
 
 default     dune.build.cmd          {${prefix}/bin/dune}
-default     dune.build.env          {}
+# See: https://github.com/ocaml/dune/issues/8941
+global      os.major
+if {${os.major} < 11} {
+    default dune.build.env          DUNE_CONFIG__COPY_FILE=portable
+} else {
+    default dune.build.env          {}
+}
 default     dune.build.dir          {${build.dir}}
 default     dune.build.nice         {${build.nice}}
 default     dune.build.target       {@install}
@@ -531,7 +537,7 @@ pre-destroot {
         ${destroot}${ocaml.stublib_dir}
 }
 
-# Environmental variables required by ocamlfind
+# Environment variables required by ocamlfind
 proc ocaml::findlib_env {} {
     global destroot ocaml.package_dir
 
@@ -573,7 +579,15 @@ destroot {
     }
 }
 
+# Most of our OCaml ports do not have test dependencies,
+# so disable tests by default.
+default test.run    no
+
 test {
+    if {![option test.run]} {
+        ui_info "Tests are disabled."
+        return
+    }
     switch -- ${ocaml.build_type} {
         dune {
             command_exec dune.test

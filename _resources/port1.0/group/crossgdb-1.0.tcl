@@ -26,6 +26,11 @@ array set crossgdb.version_info {
         sha256  0e1793bf8f2b54d53f46dea84ccfd446f48f81b297b28c4f7fc017b818d69fed \
         size    22470332
     }}
+    13.1 {xz {
+        rmd160  ac5732b3a6e943070e308086be89cccc96394da0 \
+        sha256  115ad5c18d69a6be2ab15882d365dda2a2211c14f480b3502c6eba576e2e95a0 \
+        size    23665472
+    }}
 }
 
 proc crossgdb.setup {target version} {
@@ -38,7 +43,6 @@ proc crossgdb.setup {target version} {
         name                ${crossgdb.target}-gdb
         version             ${crossgdb.version}
         categories          cross devel
-        platforms           darwin
         license             GPL-3+
         maintainers         nomaintainer
 
@@ -59,7 +63,7 @@ proc crossgdb.setup {target version} {
 
         dist_subdir         gdb[lindex [split ${version} .] 0]
         distfiles           gdb-${version}${extract.suffix}:gdb
-        
+
         worksrcdir          gdb-${version}
 
         # These dependencies are listed under depends_lib rather than
@@ -120,6 +124,7 @@ proc crossgdb.setup {target version} {
         }
 
         # gdb is not supported on macOS ARM now
+        # See https://inbox.sourceware.org/gdb/3185c3b8-8a91-4beb-a5d5-9db6afb93713@Spark
         supported_archs x86_64 i386
 
         # Needs C++11; halfway redundant due to the blacklist above, but make

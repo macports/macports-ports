@@ -45,7 +45,7 @@ compiler.blacklist-append {clang < 1000}
 depends_lib-append \
                 port:bzip2 \
                 port:expat \
-                port:icu \
+                path:lib/pkgconfig/icu-uc.pc:icu \
                 port:libiconv \
                 port:lzma \
                 port:zlib \
@@ -121,10 +121,18 @@ post-patch {
     reinplace "s|__MACPORTS_CXX__|${configure.cxx}|g" ${worksrcpath}/tools/build/src/tools/clang-darwin.jam
 }
 
+# Define BOOST_CLANG_VERSION correctly when LLVM.org clang is used instead of Apple clang.
+# https://github.com/boostorg/config/pull/487
+patchfiles-append patch-boost-clang-version-llvmorg-on-apple.diff
+
 # Build issue on some older systems
 # ld: warning: option -s is obsolete and being ignored
 # ld: internal error: atom not found in symbolIndex(__ZNSt3__1plIcNS_11char_traitsIcEENS_9allocatorIcEEEENS_12basic_stringIT_T0_T1_EERKS9_SB_) for architecture x86_64
 patchfiles-append patch-b2-build-older-OSes.diff
+
+# Upstream fix to allow building Boost with Clang 16+. Included in versions v181+.
+# https://trac.macports.org/ticket/67324
+patchfiles-append patch-boost-clang16-cpp17-compat.diff
 
 proc write_jam s {
     global worksrcpath
@@ -143,6 +151,12 @@ mpi.setup          -gcc
 # and requiring it does make such building easier for those ports.
 configure.cxxflags-append -std=gnu++11
 compiler.cxx_standard   2011
+
+# Error: integer value is outside the valid range of values for this enumeration type
+# See: https://trac.macports.org/ticket/69103
+configure.cxxflags-append \
+                    -Wno-enum-constexpr-conversion \
+                    -Wno-unknown-warning-option
 
 # This flag fixes the return type of unsetenv(3)
 # See: https://trac.macports.org/ticket/63121
@@ -169,7 +183,7 @@ if {[string match *gcc* ${configure.compiler}]} {
 # makecontext/swapcontext introduced in 10.6
 # In 10.6.x Rosetta they do not work: https://trac.macports.org/ticket/64978
 platform darwin {
-    if {${os.major} < 10 || (${os.major} == 10 && ${build_arch} eq "ppc")} {
+    if {${os.major} < 10 || (${os.major} == 10 && ${configure.build_arch} eq "ppc")} {
         configure.args-append   --without-libraries=context \
                                 --without-libraries=coroutine
     }
@@ -188,7 +202,7 @@ post-configure {
     }
 
     set cxx_stdlibflags {}
-    if {[string match *clang* ${configure.cxx}]} {
+    if {[string match *clang* ${configure.cxx}] && ${configure.cxx_stdlib} ne ""} {
         set cxx_stdlibflags -stdlib=${configure.cxx_stdlib}
     }
 
@@ -252,7 +266,7 @@ post-destroot {
     }
 }
 
-set pythons_versions {2.7 3.5 3.6 3.7 3.8 3.9 3.10}
+set pythons_versions {2.7 3.5 3.6 3.7 3.8 3.9 3.10 3.11 3.12}
 
 set pythons_ports {}
 foreach v ${pythons_versions} {
@@ -287,8 +301,9 @@ foreach v ${pythons_versions} {
         configure.args-delete   --without-libraries=python
         configure.args-append   --with-python=${prefix}/bin/python${v} --with-python-root=${prefix}/bin/python${v}
 
-        patchfiles-append   ${bppatch} patch-tools-build-src-tools-python.jam.diff \
-                            patch-tools-build-src-tools-python-2.jam.diff
+        patchfiles-append   ${bppatch} patch-tools-build-src-tools-python.jam.diff
+        patchfiles-append   patch-tools-build-src-tools-python-2.jam.diff
+        patchfiles-append   patch-python-enum_type.diff
 
         post-patch {
             reinplace s|@FRAMEWORKS_DIR@|${frameworks_dir}| ${worksrcpath}/tools/build/src/tools/python.jam
@@ -297,7 +312,7 @@ foreach v ${pythons_versions} {
 }
 
 if {![variant_isset debug]} {
-    set selected_python python310
+    set selected_python python311
     foreach v ${pythons_versions} {
         set s [string map {. {}} ${v}]
         if {[variant_isset python${s}]} {
@@ -334,7 +349,7 @@ variant no_single description {Disable building single-threaded libraries} {
 }
 
 subport ${name}-numpy {
-    revision 0
+    revision 4
     description Boost.Numpy library
     long_description {*}${description}
     depends_lib port:boost${tag}
@@ -359,7 +374,7 @@ subport ${name}-numpy {
 
 if {$subport eq $name} {
 
-    revision 1
+    revision 8
 
     patchfiles-append patch-disable-numpy-extension.diff
 
@@ -446,23 +461,23 @@ if {$subport eq $name} {
 }
 
 if {!${universal_possible} || ![variant_isset universal]} {
-    if {[lsearch ${build_arch} arm*] != -1} {
+    if {[lsearch ${configure.build_arch} arm*] != -1} {
         build.args-append address-model=64 architecture=arm
     } else {
-        if {[lsearch ${build_arch} ppc*] != -1} {
+        if {[lsearch ${configure.build_arch} ppc*] != -1} {
             build.args-append architecture=power
             if {${os.arch} ne "powerpc"} {
                 build.args-append --disable-long-double
             }
         } else {
-            if {[lsearch ${build_arch} *86*] != -1} {
+            if {[lsearch ${configure.build_arch} *86*] != -1} {
                 build.args-append architecture=x86
             } else {
                 pre-fetch {
-                    error "Current value of 'build_arch' (${build_arch}) is not supported."
+                    error "Current value of 'configure.build_arch' (${configure.build_arch}) is not supported."
                 }
             }
-            if {[lsearch ${build_arch} *64] != -1} {
+            if {[lsearch ${configure.build_arch} *64] != -1} {
                 build.args-append address-model=64
             } else {
                 build.args-append address-model=32
@@ -476,6 +491,10 @@ variant universal {
 
     if {[lsearch ${configure.universal_archs} arm*] != -1} {
         build.args-append address-model=64 architecture=combined
+
+        # patch in arm/Intel universal support
+        patchfiles-append patch-boost-universal-arm-intel.diff
+
     } else {
         if {[lsearch ${configure.universal_archs} ppc*] != -1} {
             if {[lsearch ${configure.universal_archs} *86*] != -1} {

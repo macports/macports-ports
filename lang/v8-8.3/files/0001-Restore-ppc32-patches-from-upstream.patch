@@ -1,0 +1,1318 @@
+From a1d5068ede0752f11ce190f4d3fb8aeec0c11129 Mon Sep 17 00:00:00 2001
+From: barracuda156 <vital.had@gmail.com>
+Date: Fri, 3 Nov 2023 18:21:34 +0800
+Subject: [PATCH 01/12] Restore ppc32 patches from upstream
+
+---
+ src/codegen/ppc/macro-assembler-ppc.cc        |  24 ++
+ src/codegen/ppc/register-ppc.h                |   6 +-
+ src/compiler/backend/instruction-codes.h      |   4 +-
+ src/compiler/backend/instruction-selector.cc  |   9 +-
+ .../backend/ppc/code-generator-ppc.cc         | 150 +++++++++++-
+ .../backend/ppc/instruction-codes-ppc.h       |  25 +-
+ .../backend/ppc/instruction-scheduler-ppc.cc  |  47 ++--
+ .../backend/ppc/instruction-selector-ppc.cc   | 194 ++++++++++++++--
+ .../backend/ppc64/instruction-codes-ppc64.h   | 213 ++++++++++++++++++
+ src/compiler/c-linkage.cc                     |   2 +-
+ src/diagnostics/eh-frame.cc                   |   2 +-
+ src/diagnostics/perf-jit.h                    |   3 +
+ src/diagnostics/ppc/eh-frame-ppc.cc           |   4 +
+ src/execution/ppc/simulator-ppc.cc            |  10 +
+ src/objects/code.h                            |   3 +
+ src/wasm/jump-table-assembler.cc              |   2 +-
+ src/wasm/jump-table-assembler.h               |   5 +
+ test/cctest/cctest.status                     |   6 +-
+ test/cctest/wasm/test-jump-table-assembler.cc |   2 +-
+ test/mjsunit/mjsunit.status                   |  11 +-
+ 20 files changed, 655 insertions(+), 67 deletions(-)
+ create mode 100644 src/compiler/backend/ppc64/instruction-codes-ppc64.h
+
+diff --git a/src/codegen/ppc/macro-assembler-ppc.cc b/src/codegen/ppc/macro-assembler-ppc.cc
+index ca6d472c93f..99d1e819f75 100644
+--- a/v8/src/codegen/ppc/macro-assembler-ppc.cc
++++ b/v8/src/codegen/ppc/macro-assembler-ppc.cc
+@@ -2434,9 +2434,17 @@ void TurboAssembler::LoadP(Register dst, const MemOperand& mem,
+       // Todo: enhance to use scratch if dst is unsuitable
+       DCHECK_NE(dst, r0);
+       addi(dst, mem.ra(), Operand(adj));
++#if V8_TARGET_ARCH_PPC64
+       ld(dst, MemOperand(dst, alignedOffset));
++#else
++      lwz(dst, MemOperand(dst, alignedOffset));
++#endif
+     } else {
++#if V8_TARGET_ARCH_PPC64
+       ld(dst, mem);
++#else
++      lwz(dst, mem);
++#endif
+     }
+   }
+ }
+@@ -2898,7 +2906,11 @@ void TurboAssembler::JumpIfLessThan(Register x, int32_t y, Label* dest) {
+ }
+ 
+ void TurboAssembler::LoadEntryFromBuiltinIndex(Register builtin_index) {
++#if V8_TARGET_ARCH_PPC64
+   STATIC_ASSERT(kSystemPointerSize == 8);
++#else
++  STATIC_ASSERT(kSystemPointerSize == 4);
++#endif
+   STATIC_ASSERT(kSmiTagSize == 1);
+   STATIC_ASSERT(kSmiTag == 0);
+ 
+@@ -3027,15 +3039,27 @@ void TurboAssembler::CallForDeoptimization(Address target, int deopt_id,
+ }
+ 
+ void TurboAssembler::ZeroExtByte(Register dst, Register src) {
++#if V8_TARGET_ARCH_PPC64
+   clrldi(dst, src, Operand(56));
++#else
++  clrlwi(dst, src, Operand(24));
++#endif
+ }
+ 
+ void TurboAssembler::ZeroExtHalfWord(Register dst, Register src) {
++#if V8_TARGET_ARCH_PPC64
+   clrldi(dst, src, Operand(48));
++#else
++  clrlwi(dst, src, Operand(16));
++#endif
+ }
+ 
+ void TurboAssembler::ZeroExtWord32(Register dst, Register src) {
++#if V8_TARGET_ARCH_PPC64
+   clrldi(dst, src, Operand(32));
++#else
++  // makes no sense on 32 bit architecture
++#endif
+ }
+ 
+ void TurboAssembler::Trap() { stop(); }
+diff --git a/src/codegen/ppc/register-ppc.h b/src/codegen/ppc/register-ppc.h
+index 8c89aecec7a..54e40bde93d 100644
+--- a/v8/src/codegen/ppc/register-ppc.h
++++ b/v8/src/codegen/ppc/register-ppc.h
+@@ -140,7 +140,11 @@ const int kNumCalleeSavedDoubles = 18;
+ // The following constants describe the stack frame linkage area as
+ // defined by the ABI.  Note that kNumRequiredStackFrameSlots must
+ // satisfy alignment requirements (rounding up if required).
+-#if V8_TARGET_ARCH_PPC64 &&     \
++#if V8_TARGET_ARCH_PPC
++const int kNumRequiredStackFrameSlots = 4;
++const int kStackFrameLRSlot = 1;
++const int kStackFrameExtraParamSlot = 2;
++#elif V8_TARGET_ARCH_PPC64 &&   \
+     (V8_TARGET_LITTLE_ENDIAN || \
+      (defined(_CALL_ELF) && _CALL_ELF == 2))  // ELFv2 ABI
+ // [0] back chain
+diff --git a/src/compiler/backend/instruction-codes.h b/src/compiler/backend/instruction-codes.h
+index 84d5d249b83..5d0581fe361 100644
+--- a/v8/src/compiler/backend/instruction-codes.h
++++ b/v8/src/compiler/backend/instruction-codes.h
+@@ -19,8 +19,10 @@
+ #include "src/compiler/backend/mips64/instruction-codes-mips64.h"
+ #elif V8_TARGET_ARCH_X64
+ #include "src/compiler/backend/x64/instruction-codes-x64.h"
+-#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
++#elif V8_TARGET_ARCH_PPC
+ #include "src/compiler/backend/ppc/instruction-codes-ppc.h"
++#elif V8_TARGET_ARCH_PPC64
++#include "src/compiler/backend/ppc64/instruction-codes-ppc64.h"
+ #elif V8_TARGET_ARCH_S390
+ #include "src/compiler/backend/s390/instruction-codes-s390.h"
+ #else
+diff --git a/src/compiler/backend/instruction-selector.cc b/src/compiler/backend/instruction-selector.cc
+index 7d72dbbf2d0..9aa3103cdd7 100644
+--- a/v8/src/compiler/backend/instruction-selector.cc
++++ b/v8/src/compiler/backend/instruction-selector.cc
+@@ -2534,7 +2534,8 @@ void InstructionSelector::VisitWord32PairShr(Node* node) { UNIMPLEMENTED(); }
+ void InstructionSelector::VisitWord32PairSar(Node* node) { UNIMPLEMENTED(); }
+ #endif  // V8_TARGET_ARCH_64_BIT
+ 
+-#if !V8_TARGET_ARCH_IA32 && !V8_TARGET_ARCH_ARM && !V8_TARGET_ARCH_MIPS
++#if !V8_TARGET_ARCH_IA32 && !V8_TARGET_ARCH_ARM && !V8_TARGET_ARCH_MIPS && \
++    !V8_TARGET_ARCH_PPC
+ void InstructionSelector::VisitWord32AtomicPairLoad(Node* node) {
+   UNIMPLEMENTED();
+ }
+@@ -2571,6 +2572,7 @@ void InstructionSelector::VisitWord32AtomicPairCompareExchange(Node* node) {
+   UNIMPLEMENTED();
+ }
+ #endif  // !V8_TARGET_ARCH_IA32 && !V8_TARGET_ARCH_ARM && !V8_TARGET_ARCH_MIPS
++        // && !V8_TARGET_ARCH_PPC
+ 
+ #if !V8_TARGET_ARCH_X64 && !V8_TARGET_ARCH_ARM64 && !V8_TARGET_ARCH_MIPS64 && \
+     !V8_TARGET_ARCH_S390 && !V8_TARGET_ARCH_PPC64
+@@ -2597,8 +2599,9 @@ void InstructionSelector::VisitWord64AtomicExchange(Node* node) {
+ void InstructionSelector::VisitWord64AtomicCompareExchange(Node* node) {
+   UNIMPLEMENTED();
+ }
+-#endif  // !V8_TARGET_ARCH_X64 && !V8_TARGET_ARCH_ARM64 && !V8_TARGET_ARCH_PPC64
+-        // !V8_TARGET_ARCH_MIPS64 && !V8_TARGET_ARCH_S390
++#endif  // !V8_TARGET_ARCH_X64 && !V8_TARGET_ARCH_ARM64 &&
++        // !V8_TARGET_ARCH_MIPS64 && !V8_TARGET_ARCH_S390 &&
++        // !V8_TARGET_ARCH_PPC64
+ 
+ #if !V8_TARGET_ARCH_IA32 && !V8_TARGET_ARCH_ARM
+ // This is only needed on 32-bit to split the 64-bit value into two operands.
+diff --git a/src/compiler/backend/ppc/code-generator-ppc.cc b/src/compiler/backend/ppc/code-generator-ppc.cc
+index addbd76ffba..24858da6ece 100644
+--- a/v8/src/compiler/backend/ppc/code-generator-ppc.cc
++++ b/v8/src/compiler/backend/ppc/code-generator-ppc.cc
+@@ -680,6 +680,50 @@ void EmitWordLoadPoisoningIfNeeded(CodeGenerator* codegen, Instruction* instr,
+     __ sync();                                                               \
+   } while (false)
+ 
++#define ASSEMBLE_ATOMIC_PAIR_BINOP(instr)                                    \
++  do {                                                                       \
++    Label binop;                                                             \
++    __ lwsync();                                                             \
++    __ bind(&binop);                                                         \
++    MemOperand operand = MemOperand(i.InputRegister(0), i.InputRegister(1)); \
++    __ lwarx(i.OutputRegister(0), operand);                                  \
++    __ instr(kScratchReg, i.OutputRegister(0), i.InputRegister(2));          \
++    __ stwcx(kScratchReg, operand);                                          \
++    __ bne(&binop, cr0);                                                     \
++    __ addi(i.TempRegister(0), i.InputRegister(1), Operand(4));              \
++    operand = MemOperand(i.InputRegister(0), i.TempRegister(0));             \
++    __ lwarx(i.OutputRegister(1), operand);                                  \
++    __ instr(kScratchReg, i.OutputRegister(1), i.InputRegister(3));          \
++    __ stwcx(kScratchReg, operand);                                          \
++    __ bne(&binop, cr0);                                                     \
++    __ sync();                                                               \
++  } while (false)
++
++#define ASSEMBLE_ATOMIC_PAIR_COMPARE_EXCHANGE(instr)                         \
++  do {                                                                       \
++    Label loop;                                                              \
++    Label exit;                                                              \
++    __ ZeroExtWord32(r0, i.InputRegister(2));                                \
++    __ ZeroExtWord32(r0, i.InputRegister(3));                                \
++    __ lwsync();                                                             \
++    __ bind(&loop);                                                          \
++    MemOperand operand = MemOperand(i.InputRegister(0), i.InputRegister(1)); \
++    __ lwarx(i.OutputRegister(0), operand);                                  \
++    __ cmpw(i.OutputRegister(0), r0, cr0);                                   \
++    __ bne(&exit, cr0);                                                      \
++    __ stwcx(i.InputRegister(3), operand);                                   \
++    __ bne(&loop, cr0);                                                      \
++    __ addi(i.TempRegister(0), i.InputRegister(1), Operand(4));              \
++    operand = MemOperand(i.InputRegister(0), i.TempRegister(0));             \
++    __ lwarx(i.OutputRegister(1), operand);                                  \
++    __ cmpw(i.OutputRegister(1), r0, cr0);                                   \
++    __ bne(&exit, cr0);                                                      \
++    __ stwcx(i.InputRegister(2), operand);                                   \
++    __ bne(&loop, cr0);                                                      \
++    __ bind(&exit);                                                          \
++    __ sync();                                                               \
++  } while (false)
++
+ void CodeGenerator::AssembleDeconstructFrame() {
+   __ LeaveFrame(StackFrame::MANUAL);
+   unwinding_info_writer_.MarkFrameDeconstructed(__ pc_offset());
+@@ -2016,11 +2060,13 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+     case kWord32AtomicLoadInt16:
+     case kPPC_AtomicLoadUint16:
+     case kPPC_AtomicLoadWord32:
+-    case kPPC_AtomicLoadWord64:
+     case kPPC_AtomicStoreUint8:
+     case kPPC_AtomicStoreUint16:
+     case kPPC_AtomicStoreWord32:
++#if V8_TARGET_ARCH_PPC64
++    case kPPC_AtomicLoadWord64:
+     case kPPC_AtomicStoreWord64:
++#endif
+       UNREACHABLE();
+     case kWord32AtomicExchangeInt8:
+       ASSEMBLE_ATOMIC_EXCHANGE_INTEGER(lbarx, stbcx);
+@@ -2039,9 +2085,11 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+     case kPPC_AtomicExchangeWord32:
+       ASSEMBLE_ATOMIC_EXCHANGE_INTEGER(lwarx, stwcx);
+       break;
++#if V8_TARGET_ARCH_PPC64
+     case kPPC_AtomicExchangeWord64:
+       ASSEMBLE_ATOMIC_EXCHANGE_INTEGER(ldarx, stdcx);
+       break;
++#endif
+     case kWord32AtomicCompareExchangeInt8:
+       ASSEMBLE_ATOMIC_COMPARE_EXCHANGE_SIGN_EXT(cmp, lbarx, stbcx, extsb);
+       break;
+@@ -2057,11 +2105,13 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+     case kPPC_AtomicCompareExchangeWord32:
+       ASSEMBLE_ATOMIC_COMPARE_EXCHANGE(cmpw, lwarx, stwcx, ZeroExtWord32);
+       break;
++#if V8_TARGET_ARCH_PPC64
+     case kPPC_AtomicCompareExchangeWord64:
+       ASSEMBLE_ATOMIC_COMPARE_EXCHANGE(cmp, ldarx, stdcx, mr);
+       break;
++#endif
+ 
+-#define ATOMIC_BINOP_CASE(op, inst)                            \
++#define ATOMIC_BINOP_CASE_COMMON(op, inst)                     \
+   case kPPC_Atomic##op##Int8:                                  \
+     ASSEMBLE_ATOMIC_BINOP_SIGN_EXT(inst, lbarx, stbcx, extsb); \
+     break;                                                     \
+@@ -2079,11 +2129,18 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+     break;                                                     \
+   case kPPC_Atomic##op##Uint32:                                \
+     ASSEMBLE_ATOMIC_BINOP(inst, lwarx, stwcx);                 \
+-    break;                                                     \
+-  case kPPC_Atomic##op##Int64:                                 \
+-  case kPPC_Atomic##op##Uint64:                                \
+-    ASSEMBLE_ATOMIC_BINOP(inst, ldarx, stdcx);                 \
+     break;
++
++#if V8_TARGET_ARCH_PPC64
++#define ATOMIC_BINOP_CASE(op, inst)            \
++  ATOMIC_BINOP_CASE_COMMON(op, inst)           \
++  case kPPC_Atomic##op##Int64:                 \
++  case kPPC_Atomic##op##Uint64:                \
++    ASSEMBLE_ATOMIC_BINOP(inst, ldarx, stdcx); \
++    break;
++#else
++#define ATOMIC_BINOP_CASE(op, inst) ATOMIC_BINOP_CASE_COMMON(op, inst)
++#endif
+       ATOMIC_BINOP_CASE(Add, add)
+       ATOMIC_BINOP_CASE(Sub, sub)
+       ATOMIC_BINOP_CASE(And, and_)
+@@ -2094,7 +2151,11 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+     case kPPC_ByteRev32: {
+       Register input = i.InputRegister(0);
+       Register output = i.OutputRegister();
++#if V8_TARGET_ARCH_PPC64
+       Register temp1 = r0;
++#else
++      Register temp1 = output;
++#endif
+       __ rotlwi(temp1, input, 8);
+       __ rlwimi(temp1, input, 24, 0, 7);
+       __ rlwimi(temp1, input, 24, 16, 23);
+@@ -2120,6 +2181,83 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
+       break;
+     }
+ #endif  // V8_TARGET_ARCH_PPC64
++#ifdef V8_TARGET_ARCH_PPC
++    case kPPC_AtomicPairLoadWord32: {
++      Label atomic_pair_load;
++      __ lwsync();
++      __ bind(&atomic_pair_load);
++      __ addi(i.TempRegister(0), i.InputRegister(1), Operand(4));
++      __ lwarx(i.OutputRegister(0),
++               MemOperand(i.InputRegister(0), i.InputRegister(1)));
++      __ lwsync();
++      __ lwz(i.OutputRegister(1),
++             MemOperand(i.InputRegister(0), i.TempRegister(0)));
++      __ lwsync();
++      __ stwcx(i.OutputRegister(0),
++               MemOperand(i.InputRegister(0), i.InputRegister(1)));
++      __ bne(&atomic_pair_load, cr0);
++      __ sync();
++      break;
++    }
++    case kPPC_AtomicPairStoreWord32: {
++      Label atomic_pair_store;
++      __ lwsync();
++      __ bind(&atomic_pair_store);
++      __ addi(i.TempRegister(0), i.InputRegister(1), Operand(4));
++      __ lwarx(kScratchReg, MemOperand(i.InputRegister(0), i.InputRegister(1)));
++      __ lwsync();
++      __ stw(i.InputRegister(3),
++             MemOperand(i.InputRegister(0), i.TempRegister(0)));
++      __ lwsync();
++      __ stwcx(i.InputRegister(2),
++               MemOperand(i.InputRegister(0), i.InputRegister(1)));
++      __ bne(&atomic_pair_store, cr0);
++      __ sync();
++      DCHECK_EQ(LeaveRC, i.OutputRCBit());
++      break;
++    }
++    case kPPC_AtomicPairAddWord32: {
++      ASSEMBLE_ATOMIC_PAIR_BINOP(add);
++      break;
++    }
++    case kPPC_AtomicPairSubWord32: {
++      ASSEMBLE_ATOMIC_PAIR_BINOP(sub);
++      break;
++    }
++    case kPPC_AtomicPairAndWord32: {
++      ASSEMBLE_ATOMIC_PAIR_BINOP(and_);
++      break;
++    }
++    case kPPC_AtomicPairOrWord32: {
++      ASSEMBLE_ATOMIC_PAIR_BINOP(orx);
++      break;
++    }
++    case kPPC_AtomicPairXorWord32: {
++      ASSEMBLE_ATOMIC_PAIR_BINOP(xor_);
++      break;
++    }
++    case kPPC_AtomicPairExchangeWord32: {
++      do {
++        Label exchange;
++        __ lwsync();
++        __ bind(&exchange);
++        MemOperand operand = MemOperand(i.InputRegister(0), i.InputRegister(1));
++        __ lwarx(i.OutputRegister(0), operand);
++        __ stwcx(i.InputRegister(2), operand);
++        __ addi(i.TempRegister(0), i.InputRegister(1), Operand(4));
++        operand = MemOperand(i.InputRegister(0), i.TempRegister(0));
++        __ lwarx(i.OutputRegister(1), operand);
++        __ stwcx(i.InputRegister(3), operand);
++        __ bne(&exchange, cr0);
++        __ sync();
++      } while (false);
++      break;
++    }
++    case kPPC_AtomicPairCompareExchangeWord32: {
++      ASSEMBLE_ATOMIC_PAIR_COMPARE_EXCHANGE(cmpw);
++      break;
++    }
++#endif
+     default:
+       UNREACHABLE();
+   }
+diff --git a/src/compiler/backend/ppc/instruction-codes-ppc.h b/src/compiler/backend/ppc/instruction-codes-ppc.h
+index 82d1d40b5bc..2ca15843557 100644
+--- a/v8/src/compiler/backend/ppc/instruction-codes-ppc.h
++++ b/v8/src/compiler/backend/ppc/instruction-codes-ppc.h
+@@ -118,13 +118,11 @@ namespace compiler {
+   V(PPC_LoadWordU16)                 \
+   V(PPC_LoadWordS32)                 \
+   V(PPC_LoadWordU32)                 \
+-  V(PPC_LoadWord64)                  \
+   V(PPC_LoadFloat32)                 \
+   V(PPC_LoadDouble)                  \
+   V(PPC_StoreWord8)                  \
+   V(PPC_StoreWord16)                 \
+   V(PPC_StoreWord32)                 \
+-  V(PPC_StoreWord64)                 \
+   V(PPC_StoreFloat32)                \
+   V(PPC_StoreDouble)                 \
+   V(PPC_ByteRev32)                   \
+@@ -135,59 +133,54 @@ namespace compiler {
+   V(PPC_AtomicStoreUint8)            \
+   V(PPC_AtomicStoreUint16)           \
+   V(PPC_AtomicStoreWord32)           \
+-  V(PPC_AtomicStoreWord64)           \
+   V(PPC_AtomicLoadUint8)             \
+   V(PPC_AtomicLoadUint16)            \
+   V(PPC_AtomicLoadWord32)            \
+-  V(PPC_AtomicLoadWord64)            \
+   V(PPC_AtomicExchangeUint8)         \
+   V(PPC_AtomicExchangeUint16)        \
+   V(PPC_AtomicExchangeWord32)        \
+-  V(PPC_AtomicExchangeWord64)        \
+   V(PPC_AtomicCompareExchangeUint8)  \
+   V(PPC_AtomicCompareExchangeUint16) \
+   V(PPC_AtomicCompareExchangeWord32) \
+-  V(PPC_AtomicCompareExchangeWord64) \
+   V(PPC_AtomicAddUint8)              \
+   V(PPC_AtomicAddUint16)             \
+   V(PPC_AtomicAddUint32)             \
+-  V(PPC_AtomicAddUint64)             \
+   V(PPC_AtomicAddInt8)               \
+   V(PPC_AtomicAddInt16)              \
+   V(PPC_AtomicAddInt32)              \
+-  V(PPC_AtomicAddInt64)              \
+   V(PPC_AtomicSubUint8)              \
+   V(PPC_AtomicSubUint16)             \
+   V(PPC_AtomicSubUint32)             \
+-  V(PPC_AtomicSubUint64)             \
+   V(PPC_AtomicSubInt8)               \
+   V(PPC_AtomicSubInt16)              \
+   V(PPC_AtomicSubInt32)              \
+-  V(PPC_AtomicSubInt64)              \
+   V(PPC_AtomicAndUint8)              \
+   V(PPC_AtomicAndUint16)             \
+   V(PPC_AtomicAndUint32)             \
+-  V(PPC_AtomicAndUint64)             \
+   V(PPC_AtomicAndInt8)               \
+   V(PPC_AtomicAndInt16)              \
+   V(PPC_AtomicAndInt32)              \
+-  V(PPC_AtomicAndInt64)              \
+   V(PPC_AtomicOrUint8)               \
+   V(PPC_AtomicOrUint16)              \
+   V(PPC_AtomicOrUint32)              \
+-  V(PPC_AtomicOrUint64)              \
+   V(PPC_AtomicOrInt8)                \
+   V(PPC_AtomicOrInt16)               \
+   V(PPC_AtomicOrInt32)               \
+-  V(PPC_AtomicOrInt64)               \
+   V(PPC_AtomicXorUint8)              \
+   V(PPC_AtomicXorUint16)             \
+   V(PPC_AtomicXorUint32)             \
+-  V(PPC_AtomicXorUint64)             \
+   V(PPC_AtomicXorInt8)               \
+   V(PPC_AtomicXorInt16)              \
+   V(PPC_AtomicXorInt32)              \
+-  V(PPC_AtomicXorInt64)
++  V(PPC_AtomicPairLoadWord32)        \
++  V(PPC_AtomicPairStoreWord32)       \
++  V(PPC_AtomicPairAddWord32)         \
++  V(PPC_AtomicPairSubWord32)         \
++  V(PPC_AtomicPairAndWord32)         \
++  V(PPC_AtomicPairOrWord32)          \
++  V(PPC_AtomicPairXorWord32)         \
++  V(PPC_AtomicPairExchangeWord32)    \
++  V(PPC_AtomicPairCompareExchangeWord32)
+ 
+ // Addressing modes represent the "shape" of inputs to an instruction.
+ // Many instructions support multiple addressing modes. Addressing modes
+diff --git a/src/compiler/backend/ppc/instruction-scheduler-ppc.cc b/src/compiler/backend/ppc/instruction-scheduler-ppc.cc
+index 3062dfb53d0..d967b2bce83 100644
+--- a/v8/src/compiler/backend/ppc/instruction-scheduler-ppc.cc
++++ b/v8/src/compiler/backend/ppc/instruction-scheduler-ppc.cc
+@@ -121,80 +121,97 @@ int InstructionScheduler::GetTargetInstructionFlags(
+     case kPPC_LoadWordU16:
+     case kPPC_LoadWordS32:
+     case kPPC_LoadWordU32:
+-    case kPPC_LoadWord64:
+     case kPPC_LoadFloat32:
+     case kPPC_LoadDouble:
+     case kPPC_AtomicLoadUint8:
+     case kPPC_AtomicLoadUint16:
+     case kPPC_AtomicLoadWord32:
+-    case kPPC_AtomicLoadWord64:
+     case kPPC_Peek:
++#ifdef V8_TARGET_ARCH_PPC64
++    case kPPC_LoadWord64:
++    case kPPC_AtomicLoadWord64:
++#else
++    case kPPC_AtomicPairLoadWord32:
++#endif
+       return kIsLoadOperation;
+ 
+     case kPPC_StoreWord8:
+     case kPPC_StoreWord16:
+     case kPPC_StoreWord32:
+-    case kPPC_StoreWord64:
+     case kPPC_StoreFloat32:
+     case kPPC_StoreDouble:
+     case kPPC_Push:
+     case kPPC_PushFrame:
+     case kPPC_StoreToStackSlot:
+     case kPPC_Sync:
++#ifdef V8_TARGET_ARCH_PPC64
++    case kPPC_StoreWord64:
++#endif
+       return kHasSideEffect;
+ 
+     case kPPC_AtomicStoreUint8:
+     case kPPC_AtomicStoreUint16:
+     case kPPC_AtomicStoreWord32:
+-    case kPPC_AtomicStoreWord64:
+     case kPPC_AtomicExchangeUint8:
+     case kPPC_AtomicExchangeUint16:
+     case kPPC_AtomicExchangeWord32:
+-    case kPPC_AtomicExchangeWord64:
+     case kPPC_AtomicCompareExchangeUint8:
+     case kPPC_AtomicCompareExchangeUint16:
+     case kPPC_AtomicCompareExchangeWord32:
+-    case kPPC_AtomicCompareExchangeWord64:
+     case kPPC_AtomicAddUint8:
+     case kPPC_AtomicAddUint16:
+     case kPPC_AtomicAddUint32:
+-    case kPPC_AtomicAddUint64:
+     case kPPC_AtomicAddInt8:
+     case kPPC_AtomicAddInt16:
+     case kPPC_AtomicAddInt32:
+-    case kPPC_AtomicAddInt64:
+     case kPPC_AtomicSubUint8:
+     case kPPC_AtomicSubUint16:
+     case kPPC_AtomicSubUint32:
+-    case kPPC_AtomicSubUint64:
+     case kPPC_AtomicSubInt8:
+     case kPPC_AtomicSubInt16:
+     case kPPC_AtomicSubInt32:
+-    case kPPC_AtomicSubInt64:
+     case kPPC_AtomicAndUint8:
+     case kPPC_AtomicAndUint16:
+     case kPPC_AtomicAndUint32:
+-    case kPPC_AtomicAndUint64:
+     case kPPC_AtomicAndInt8:
+     case kPPC_AtomicAndInt16:
+     case kPPC_AtomicAndInt32:
+-    case kPPC_AtomicAndInt64:
+     case kPPC_AtomicOrUint8:
+     case kPPC_AtomicOrUint16:
+     case kPPC_AtomicOrUint32:
+-    case kPPC_AtomicOrUint64:
+     case kPPC_AtomicOrInt8:
+     case kPPC_AtomicOrInt16:
+     case kPPC_AtomicOrInt32:
+-    case kPPC_AtomicOrInt64:
+     case kPPC_AtomicXorUint8:
+     case kPPC_AtomicXorUint16:
+     case kPPC_AtomicXorUint32:
+-    case kPPC_AtomicXorUint64:
+     case kPPC_AtomicXorInt8:
+     case kPPC_AtomicXorInt16:
+     case kPPC_AtomicXorInt32:
++#ifdef V8_TARGET_ARCH_PPC64
++    case kPPC_AtomicStoreWord64:
++    case kPPC_AtomicExchangeWord64:
++    case kPPC_AtomicCompareExchangeWord64:
++    case kPPC_AtomicAddUint64:
++    case kPPC_AtomicAddInt64:
++    case kPPC_AtomicSubUint64:
++    case kPPC_AtomicSubInt64:
++    case kPPC_AtomicAndUint64:
++    case kPPC_AtomicAndInt64:
++    case kPPC_AtomicOrUint64:
++    case kPPC_AtomicOrInt64:
++    case kPPC_AtomicXorUint64:
+     case kPPC_AtomicXorInt64:
++#else
++    case kPPC_AtomicPairStoreWord32:
++    case kPPC_AtomicPairAddWord32:
++    case kPPC_AtomicPairSubWord32:
++    case kPPC_AtomicPairAndWord32:
++    case kPPC_AtomicPairOrWord32:
++    case kPPC_AtomicPairXorWord32:
++    case kPPC_AtomicPairExchangeWord32:
++    case kPPC_AtomicPairCompareExchangeWord32:
++#endif
+       return kHasSideEffect;
+ 
+ #define CASE(Name) case k##Name:
+diff --git a/src/compiler/backend/ppc/instruction-selector-ppc.cc b/src/compiler/backend/ppc/instruction-selector-ppc.cc
+index 7e29b00c312..84693b2d79f 100644
+--- a/v8/src/compiler/backend/ppc/instruction-selector-ppc.cc
++++ b/v8/src/compiler/backend/ppc/instruction-selector-ppc.cc
+@@ -174,6 +174,7 @@ void InstructionSelector::VisitLoad(Node* node) {
+   Node* offset = node->InputAt(1);
+   InstructionCode opcode = kArchNop;
+   ImmediateMode mode = kInt16Imm;
++
+   switch (load_rep.representation()) {
+     case MachineRepresentation::kFloat32:
+       opcode = kPPC_LoadFloat32;
+@@ -188,9 +189,15 @@ void InstructionSelector::VisitLoad(Node* node) {
+     case MachineRepresentation::kWord16:
+       opcode = load_rep.IsSigned() ? kPPC_LoadWordS16 : kPPC_LoadWordU16;
+       break;
++#if !V8_TARGET_ARCH_PPC64
++    case MachineRepresentation::kTaggedSigned:   // Fall through.
++    case MachineRepresentation::kTaggedPointer:  // Fall through.
++    case MachineRepresentation::kTagged:         // Fall through.
++#endif
+     case MachineRepresentation::kWord32:
+       opcode = kPPC_LoadWordU32;
+       break;
++#if V8_TARGET_ARCH_PPC64
+     case MachineRepresentation::kTaggedSigned:   // Fall through.
+     case MachineRepresentation::kTaggedPointer:  // Fall through.
+     case MachineRepresentation::kTagged:         // Fall through.
+@@ -198,6 +205,9 @@ void InstructionSelector::VisitLoad(Node* node) {
+       opcode = kPPC_LoadWord64;
+       mode = kInt16Imm_4ByteAligned;
+       break;
++#else
++    case MachineRepresentation::kWord64:
++#endif
+     case MachineRepresentation::kCompressedPointer:  // Fall through.
+     case MachineRepresentation::kCompressed:         // Fall through.
+     case MachineRepresentation::kSimd128:  // Fall through.
+@@ -1561,6 +1571,7 @@ void InstructionSelector::VisitWordCompareZero(Node* user, Node* value,
+       case IrOpcode::kFloat32LessThanOrEqual:
+         cont->OverwriteAndNegateIfEqual(kUnsignedLessThanOrEqual);
+         return VisitFloat32Compare(this, value, cont);
++#if V8_TARGET_ARCH_PPC64
+       case IrOpcode::kFloat64Equal:
+         cont->OverwriteAndNegateIfEqual(kEqual);
+         return VisitFloat64Compare(this, value, cont);
+@@ -1570,6 +1581,7 @@ void InstructionSelector::VisitWordCompareZero(Node* user, Node* value,
+       case IrOpcode::kFloat64LessThanOrEqual:
+         cont->OverwriteAndNegateIfEqual(kUnsignedLessThanOrEqual);
+         return VisitFloat64Compare(this, value, cont);
++#endif
+       case IrOpcode::kProjection:
+         // Check if this is the overflow output projection of an
+         // <Operation>WithOverflow node.
+@@ -1864,15 +1876,19 @@ void InstructionSelector::VisitMemoryBarrier(Node* node) {
+ 
+ void InstructionSelector::VisitWord32AtomicLoad(Node* node) { VisitLoad(node); }
+ 
++#ifdef V8_TARGET_ARCH_PPC64
+ void InstructionSelector::VisitWord64AtomicLoad(Node* node) { VisitLoad(node); }
++#endif
+ 
+ void InstructionSelector::VisitWord32AtomicStore(Node* node) {
+   VisitStore(node);
+ }
+ 
++#ifdef V8_TARGET_ARCH_PPC64
+ void InstructionSelector::VisitWord64AtomicStore(Node* node) {
+   VisitStore(node);
+ }
++#endif
+ 
+ void VisitAtomicExchange(InstructionSelector* selector, Node* node,
+                          ArchOpcode opcode) {
+@@ -1913,6 +1929,7 @@ void InstructionSelector::VisitWord32AtomicExchange(Node* node) {
+   VisitAtomicExchange(this, node, opcode);
+ }
+ 
++#ifdef V8_TARGET_ARCH_PPC64
+ void InstructionSelector::VisitWord64AtomicExchange(Node* node) {
+   ArchOpcode opcode = kArchNop;
+   MachineType type = AtomicOpType(node->op());
+@@ -1930,6 +1947,7 @@ void InstructionSelector::VisitWord64AtomicExchange(Node* node) {
+   }
+   VisitAtomicExchange(this, node, opcode);
+ }
++#endif
+ 
+ void VisitAtomicCompareExchange(InstructionSelector* selector, Node* node,
+                                 ArchOpcode opcode) {
+@@ -1976,6 +1994,7 @@ void InstructionSelector::VisitWord32AtomicCompareExchange(Node* node) {
+   VisitAtomicCompareExchange(this, node, opcode);
+ }
+ 
++#ifdef V8_TARGET_ARCH_PPC64
+ void InstructionSelector::VisitWord64AtomicCompareExchange(Node* node) {
+   MachineType type = AtomicOpType(node->op());
+   ArchOpcode opcode = kArchNop;
+@@ -1993,12 +2012,17 @@ void InstructionSelector::VisitWord64AtomicCompareExchange(Node* node) {
+   }
+   VisitAtomicCompareExchange(this, node, opcode);
+ }
++#endif
+ 
+ void VisitAtomicBinaryOperation(InstructionSelector* selector, Node* node,
+                                 ArchOpcode int8_op, ArchOpcode uint8_op,
+                                 ArchOpcode int16_op, ArchOpcode uint16_op,
+-                                ArchOpcode int32_op, ArchOpcode uint32_op,
+-                                ArchOpcode int64_op, ArchOpcode uint64_op) {
++                                ArchOpcode int32_op, ArchOpcode uint32_op
++#if V8_TARGET_ARCH_PPC64
++                                ,
++                                ArchOpcode int64_op, ArchOpcode uint64_op
++#endif
++) {
+   PPCOperandGenerator g(selector);
+   Node* base = node->InputAt(0);
+   Node* index = node->InputAt(1);
+@@ -2019,10 +2043,12 @@ void VisitAtomicBinaryOperation(InstructionSelector* selector, Node* node,
+     opcode = int32_op;
+   } else if (type == MachineType::Uint32()) {
+     opcode = uint32_op;
++#if V8_TARGET_ARCH_PPC64
+   } else if (type == MachineType::Int64()) {
+     opcode = int64_op;
+   } else if (type == MachineType::Uint64()) {
+     opcode = uint64_op;
++#endif
+   } else {
+     UNREACHABLE();
+     return;
+@@ -2058,14 +2084,33 @@ void InstructionSelector::VisitWord64AtomicBinaryOperation(
+   UNREACHABLE();
+ }
+ 
+-#define VISIT_ATOMIC_BINOP(op)                                     \
++#if V8_TARGET_ARCH_PPC64
++#define VISIT_ATOMIC_BINOP32(
++    op) void InstructionSelector::VisitWord32Atomic##op(Node* node) {
++      VisitAtomicBinaryOperation(
++          this, node, kPPC_Atomic##op##Int8, kPPC_Atomic##op##Uint8,
++          kPPC_Atomic##op##Int16, kPPC_Atomic##op##Uint16,
++          kPPC_Atomic##op##Int32, kPPC_Atomic##op##Uint32,
++          kPPC_Atomic##op##Int64, kPPC_Atomic##op##Uint64);
++    }
++#else
++#define VISIT_ATOMIC_BINOP32(op)                                   \
+   void InstructionSelector::VisitWord32Atomic##op(Node* node) {    \
+     VisitAtomicBinaryOperation(                                    \
+         this, node, kPPC_Atomic##op##Int8, kPPC_Atomic##op##Uint8, \
+         kPPC_Atomic##op##Int16, kPPC_Atomic##op##Uint16,           \
+-        kPPC_Atomic##op##Int32, kPPC_Atomic##op##Uint32,           \
+-        kPPC_Atomic##op##Int64, kPPC_Atomic##op##Uint64);          \
+-  }                                                                \
++        kPPC_Atomic##op##Int32, kPPC_Atomic##op##Uint32);          \
++  }
++#endif
++    VISIT_ATOMIC_BINOP32(Add)
++    VISIT_ATOMIC_BINOP32(Sub)
++    VISIT_ATOMIC_BINOP32(And)
++    VISIT_ATOMIC_BINOP32(Or)
++    VISIT_ATOMIC_BINOP32(Xor)
++#undef VISIT_ATOMIC_BINOP32
++
++#ifdef V8_TARGET_ARCH_PPC64
++#define VISIT_ATOMIC_BINOP64(op)                                   \
+   void InstructionSelector::VisitWord64Atomic##op(Node* node) {    \
+     VisitAtomicBinaryOperation(                                    \
+         this, node, kPPC_Atomic##op##Int8, kPPC_Atomic##op##Uint8, \
+@@ -2073,16 +2118,17 @@ void InstructionSelector::VisitWord64AtomicBinaryOperation(
+         kPPC_Atomic##op##Int32, kPPC_Atomic##op##Uint32,           \
+         kPPC_Atomic##op##Int64, kPPC_Atomic##op##Uint64);          \
+   }
+-VISIT_ATOMIC_BINOP(Add)
+-VISIT_ATOMIC_BINOP(Sub)
+-VISIT_ATOMIC_BINOP(And)
+-VISIT_ATOMIC_BINOP(Or)
+-VISIT_ATOMIC_BINOP(Xor)
+-#undef VISIT_ATOMIC_BINOP
+-
+-void InstructionSelector::VisitInt32AbsWithOverflow(Node* node) {
+-  UNREACHABLE();
+-}
++    VISIT_ATOMIC_BINOP64(Add)
++    VISIT_ATOMIC_BINOP64(Sub)
++    VISIT_ATOMIC_BINOP64(And)
++    VISIT_ATOMIC_BINOP64(Or)
++    VISIT_ATOMIC_BINOP64(Xor)
++#undef VISIT_ATOMIC_BINOP64
++#endif
++
++    void InstructionSelector::VisitInt32AbsWithOverflow(Node* node) {
++      UNREACHABLE();
++    }
+ 
+ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
+   UNREACHABLE();
+@@ -2485,6 +2531,122 @@ InstructionSelector::AlignmentRequirements() {
+       FullUnalignedAccessSupport();
+ }
+ 
++#if V8_TARGET_ARCH_PPC
++void InstructionSelector::VisitWord32AtomicPairLoad(Node* node) {
++  PPCOperandGenerator g(this);
++  Node* base = node->InputAt(0);
++  Node* offset = node->InputAt(1);
++  InstructionCode opcode = kPPC_AtomicPairLoadWord32;
++
++  if (node->opcode() == IrOpcode::kPoisonedLoad &&
++      poisoning_level_ != PoisoningMitigationLevel::kDontPoison) {
++    opcode |= MiscField::encode(kMemoryAccessPoisoned);
++  }
++
++  Node* projection0 = NodeProperties::FindProjection(node, 0);
++  Node* projection1 = NodeProperties::FindProjection(node, 1);
++
++  InstructionOperand inputs[] = {g.UseUniqueRegister(base),
++                                 g.UseUniqueRegister(offset)};
++
++  InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r3),
++                                  g.DefineAsFixed(projection1, r4)};
++
++  InstructionOperand temps[] = {g.TempRegister()};
++
++  Emit(opcode, arraysize(outputs), outputs, arraysize(inputs), inputs,
++       arraysize(temps), temps);
++}
++
++void InstructionSelector::VisitWord32AtomicPairStore(Node* node) {
++  PPCOperandGenerator g(this);
++  Node* base = node->InputAt(0);
++  Node* offset = node->InputAt(1);
++  Node* value_low = node->InputAt(2);
++  Node* value_high = node->InputAt(3);
++
++  InstructionCode opcode = kPPC_AtomicPairStoreWord32;
++
++  InstructionOperand inputs[] = {
++      g.UseUniqueRegister(base), g.UseUniqueRegister(offset),
++      g.UseUniqueRegister(value_low), g.UseUniqueRegister(value_high)};
++
++  InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
++
++  Emit(opcode, 0, nullptr, arraysize(inputs), inputs, arraysize(temps), temps);
++}
++
++void VisitWord32AtomicPairBinOp(InstructionSelector* selector, Node* node,
++                                ArchOpcode opcode) {
++  PPCOperandGenerator g(selector);
++  Node* base = node->InputAt(0);
++  Node* offset = node->InputAt(1);
++  Node* value_low = node->InputAt(2);
++  Node* value_high = node->InputAt(3);
++
++  InstructionCode code = opcode;
++
++  InstructionOperand inputs[] = {
++      g.UseFixed(value_low, r3), g.UseFixed(value_high, r4),
++      g.UseUniqueRegister(base), g.UseUniqueRegister(offset)};
++
++  Node* projection0 = NodeProperties::FindProjection(node, 0);
++  Node* projection1 = NodeProperties::FindProjection(node, 1);
++
++  InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r3),
++                                  g.DefineAsFixed(projection1, r4)};
++
++  InstructionOperand temps[] = {g.TempRegister()};
++
++  selector->Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
++                 arraysize(temps), temps);
++}
++
++void InstructionSelector::VisitWord32AtomicPairAdd(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairAddWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairSub(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairSubWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairAnd(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairAndWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairOr(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairOrWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairXor(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairXorWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairExchange(Node* node) {
++  VisitWord32AtomicPairBinOp(this, node, kPPC_AtomicPairExchangeWord32);
++}
++
++void InstructionSelector::VisitWord32AtomicPairCompareExchange(Node* node) {
++  PPCOperandGenerator g(this);
++  AddressingMode addressing_mode = kMode_MRI;
++  InstructionOperand inputs[] = {g.UseFixed(node->InputAt(2), r5),
++                                 g.UseFixed(node->InputAt(3), r6),
++                                 g.UseFixed(node->InputAt(4), r7),
++                                 g.UseFixed(node->InputAt(5), r8),
++                                 g.UseUniqueRegister(node->InputAt(0)),
++                                 g.UseUniqueRegister(node->InputAt(1))};
++  InstructionCode code = kPPC_AtomicPairCompareExchangeWord32 |
++                         AddressingModeField::encode(addressing_mode);
++  Node* projection0 = NodeProperties::FindProjection(node, 0);
++  Node* projection1 = NodeProperties::FindProjection(node, 1);
++  InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r3),
++                                  g.DefineAsFixed(projection1, r4)};
++  InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
++  Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
++       arraysize(temps), temps);
++}
++#endif
++
+ }  // namespace compiler
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/compiler/backend/ppc64/instruction-codes-ppc64.h b/src/compiler/backend/ppc64/instruction-codes-ppc64.h
+new file mode 100644
+index 00000000000..87a330599ed
+--- /dev/null
++++ b/v8/src/compiler/backend/ppc64/instruction-codes-ppc64.h
+@@ -0,0 +1,213 @@
++// Copyright 2014 the V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef V8_COMPILER_BACKEND_PPC64_INSTRUCTION_CODES_PPC64_H_
++#define V8_COMPILER_BACKEND_PPC64_INSTRUCTION_CODES_PPC64_H_
++
++namespace v8 {
++namespace internal {
++namespace compiler {
++
++// PPC-specific opcodes that specify which assembly sequence to emit.
++// Most opcodes specify a single instruction.
++#define TARGET_ARCH_OPCODE_LIST(V)   \
++  V(PPC_Peek)                        \
++  V(PPC_Sync)                        \
++  V(PPC_And)                         \
++  V(PPC_AndComplement)               \
++  V(PPC_Or)                          \
++  V(PPC_OrComplement)                \
++  V(PPC_Xor)                         \
++  V(PPC_ShiftLeft32)                 \
++  V(PPC_ShiftLeft64)                 \
++  V(PPC_ShiftLeftPair)               \
++  V(PPC_ShiftRight32)                \
++  V(PPC_ShiftRight64)                \
++  V(PPC_ShiftRightPair)              \
++  V(PPC_ShiftRightAlg32)             \
++  V(PPC_ShiftRightAlg64)             \
++  V(PPC_ShiftRightAlgPair)           \
++  V(PPC_RotRight32)                  \
++  V(PPC_RotRight64)                  \
++  V(PPC_Not)                         \
++  V(PPC_RotLeftAndMask32)            \
++  V(PPC_RotLeftAndClear64)           \
++  V(PPC_RotLeftAndClearLeft64)       \
++  V(PPC_RotLeftAndClearRight64)      \
++  V(PPC_Add32)                       \
++  V(PPC_Add64)                       \
++  V(PPC_AddWithOverflow32)           \
++  V(PPC_AddPair)                     \
++  V(PPC_AddDouble)                   \
++  V(PPC_Sub)                         \
++  V(PPC_SubWithOverflow32)           \
++  V(PPC_SubPair)                     \
++  V(PPC_SubDouble)                   \
++  V(PPC_Mul32)                       \
++  V(PPC_Mul32WithHigh32)             \
++  V(PPC_Mul64)                       \
++  V(PPC_MulHigh32)                   \
++  V(PPC_MulHighU32)                  \
++  V(PPC_MulPair)                     \
++  V(PPC_MulDouble)                   \
++  V(PPC_Div32)                       \
++  V(PPC_Div64)                       \
++  V(PPC_DivU32)                      \
++  V(PPC_DivU64)                      \
++  V(PPC_DivDouble)                   \
++  V(PPC_Mod32)                       \
++  V(PPC_Mod64)                       \
++  V(PPC_ModU32)                      \
++  V(PPC_ModU64)                      \
++  V(PPC_ModDouble)                   \
++  V(PPC_Neg)                         \
++  V(PPC_NegDouble)                   \
++  V(PPC_SqrtDouble)                  \
++  V(PPC_FloorDouble)                 \
++  V(PPC_CeilDouble)                  \
++  V(PPC_TruncateDouble)              \
++  V(PPC_RoundDouble)                 \
++  V(PPC_MaxDouble)                   \
++  V(PPC_MinDouble)                   \
++  V(PPC_AbsDouble)                   \
++  V(PPC_Cntlz32)                     \
++  V(PPC_Cntlz64)                     \
++  V(PPC_Popcnt32)                    \
++  V(PPC_Popcnt64)                    \
++  V(PPC_Cmp32)                       \
++  V(PPC_Cmp64)                       \
++  V(PPC_CmpDouble)                   \
++  V(PPC_Tst32)                       \
++  V(PPC_Tst64)                       \
++  V(PPC_Push)                        \
++  V(PPC_PushFrame)                   \
++  V(PPC_StoreToStackSlot)            \
++  V(PPC_ExtendSignWord8)             \
++  V(PPC_ExtendSignWord16)            \
++  V(PPC_ExtendSignWord32)            \
++  V(PPC_Uint32ToUint64)              \
++  V(PPC_Int64ToInt32)                \
++  V(PPC_Int64ToFloat32)              \
++  V(PPC_Int64ToDouble)               \
++  V(PPC_Uint64ToFloat32)             \
++  V(PPC_Uint64ToDouble)              \
++  V(PPC_Int32ToFloat32)              \
++  V(PPC_Int32ToDouble)               \
++  V(PPC_Uint32ToFloat32)             \
++  V(PPC_Uint32ToDouble)              \
++  V(PPC_Float32ToDouble)             \
++  V(PPC_Float64SilenceNaN)           \
++  V(PPC_DoubleToInt32)               \
++  V(PPC_DoubleToUint32)              \
++  V(PPC_DoubleToInt64)               \
++  V(PPC_DoubleToUint64)              \
++  V(PPC_DoubleToFloat32)             \
++  V(PPC_DoubleExtractLowWord32)      \
++  V(PPC_DoubleExtractHighWord32)     \
++  V(PPC_DoubleInsertLowWord32)       \
++  V(PPC_DoubleInsertHighWord32)      \
++  V(PPC_DoubleConstruct)             \
++  V(PPC_BitcastInt32ToFloat32)       \
++  V(PPC_BitcastFloat32ToInt32)       \
++  V(PPC_BitcastInt64ToDouble)        \
++  V(PPC_BitcastDoubleToInt64)        \
++  V(PPC_LoadWordS8)                  \
++  V(PPC_LoadWordU8)                  \
++  V(PPC_LoadWordS16)                 \
++  V(PPC_LoadWordU16)                 \
++  V(PPC_LoadWordS32)                 \
++  V(PPC_LoadWordU32)                 \
++  V(PPC_LoadWord64)                  \
++  V(PPC_LoadFloat32)                 \
++  V(PPC_LoadDouble)                  \
++  V(PPC_StoreWord8)                  \
++  V(PPC_StoreWord16)                 \
++  V(PPC_StoreWord32)                 \
++  V(PPC_StoreWord64)                 \
++  V(PPC_StoreFloat32)                \
++  V(PPC_StoreDouble)                 \
++  V(PPC_ByteRev32)                   \
++  V(PPC_ByteRev64)                   \
++  V(PPC_CompressSigned)              \
++  V(PPC_CompressPointer)             \
++  V(PPC_CompressAny)                 \
++  V(PPC_AtomicStoreUint8)            \
++  V(PPC_AtomicStoreUint16)           \
++  V(PPC_AtomicStoreWord32)           \
++  V(PPC_AtomicStoreWord64)           \
++  V(PPC_AtomicLoadUint8)             \
++  V(PPC_AtomicLoadUint16)            \
++  V(PPC_AtomicLoadWord32)            \
++  V(PPC_AtomicLoadWord64)            \
++  V(PPC_AtomicExchangeUint8)         \
++  V(PPC_AtomicExchangeUint16)        \
++  V(PPC_AtomicExchangeWord32)        \
++  V(PPC_AtomicExchangeWord64)        \
++  V(PPC_AtomicCompareExchangeUint8)  \
++  V(PPC_AtomicCompareExchangeUint16) \
++  V(PPC_AtomicCompareExchangeWord32) \
++  V(PPC_AtomicCompareExchangeWord64) \
++  V(PPC_AtomicAddUint8)              \
++  V(PPC_AtomicAddUint16)             \
++  V(PPC_AtomicAddUint32)             \
++  V(PPC_AtomicAddUint64)             \
++  V(PPC_AtomicAddInt8)               \
++  V(PPC_AtomicAddInt16)              \
++  V(PPC_AtomicAddInt32)              \
++  V(PPC_AtomicAddInt64)              \
++  V(PPC_AtomicSubUint8)              \
++  V(PPC_AtomicSubUint16)             \
++  V(PPC_AtomicSubUint32)             \
++  V(PPC_AtomicSubUint64)             \
++  V(PPC_AtomicSubInt8)               \
++  V(PPC_AtomicSubInt16)              \
++  V(PPC_AtomicSubInt32)              \
++  V(PPC_AtomicSubInt64)              \
++  V(PPC_AtomicAndUint8)              \
++  V(PPC_AtomicAndUint16)             \
++  V(PPC_AtomicAndUint32)             \
++  V(PPC_AtomicAndUint64)             \
++  V(PPC_AtomicAndInt8)               \
++  V(PPC_AtomicAndInt16)              \
++  V(PPC_AtomicAndInt32)              \
++  V(PPC_AtomicAndInt64)              \
++  V(PPC_AtomicOrUint8)               \
++  V(PPC_AtomicOrUint16)              \
++  V(PPC_AtomicOrUint32)              \
++  V(PPC_AtomicOrUint64)              \
++  V(PPC_AtomicOrInt8)                \
++  V(PPC_AtomicOrInt16)               \
++  V(PPC_AtomicOrInt32)               \
++  V(PPC_AtomicOrInt64)               \
++  V(PPC_AtomicXorUint8)              \
++  V(PPC_AtomicXorUint16)             \
++  V(PPC_AtomicXorUint32)             \
++  V(PPC_AtomicXorUint64)             \
++  V(PPC_AtomicXorInt8)               \
++  V(PPC_AtomicXorInt16)              \
++  V(PPC_AtomicXorInt32)              \
++  V(PPC_AtomicXorInt64)
++
++// Addressing modes represent the "shape" of inputs to an instruction.
++// Many instructions support multiple addressing modes. Addressing modes
++// are encoded into the InstructionCode of the instruction and tell the
++// code generator after register allocation which assembler method to call.
++//
++// We use the following local notation for addressing modes:
++//
++// R = register
++// O = register or stack slot
++// D = double register
++// I = immediate (handle, external, int32)
++// MRI = [register + immediate]
++// MRR = [register + register]
++#define TARGET_ADDRESSING_MODE_LIST(V) \
++  V(MRI) /* [%r0 + K] */               \
++  V(MRR) /* [%r0 + %r1] */
++
++}  // namespace compiler
++}  // namespace internal
++}  // namespace v8
++
++#endif  // V8_COMPILER_BACKEND_PPC64_INSTRUCTION_CODES_PPC64_H_
+diff --git a/src/compiler/c-linkage.cc b/src/compiler/c-linkage.cc
+index 4967f2bbfa1..3b282b54115 100644
+--- a/v8/src/compiler/c-linkage.cc
++++ b/v8/src/compiler/c-linkage.cc
+@@ -98,7 +98,7 @@ namespace {
+ #define CALLEE_SAVE_FP_REGISTERS \
+   f20.bit() | f22.bit() | f24.bit() | f26.bit() | f28.bit() | f30.bit()
+ 
+-#elif V8_TARGET_ARCH_PPC64
++#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+ // ===========================================================================
+ // == ppc & ppc64 ============================================================
+ // ===========================================================================
+diff --git a/src/diagnostics/eh-frame.cc b/src/diagnostics/eh-frame.cc
+index 35cb529f094..ae59f2d9015 100644
+--- a/v8/src/diagnostics/eh-frame.cc
++++ b/v8/src/diagnostics/eh-frame.cc
+@@ -11,7 +11,7 @@
+ 
+ #if !defined(V8_TARGET_ARCH_X64) && !defined(V8_TARGET_ARCH_ARM) &&     \
+     !defined(V8_TARGET_ARCH_ARM64) && !defined(V8_TARGET_ARCH_S390X) && \
+-    !defined(V8_TARGET_ARCH_PPC64)
++    !defined(V8_TARGET_ARCH_PPC) && !defined(V8_TARGET_ARCH_PPC64)
+ 
+ // Placeholders for unsupported architectures.
+ 
+diff --git a/src/diagnostics/perf-jit.h b/src/diagnostics/perf-jit.h
+index dbe78ddf2d8..acf7148dcf8 100644
+--- a/v8/src/diagnostics/perf-jit.h
++++ b/v8/src/diagnostics/perf-jit.h
+@@ -85,6 +85,7 @@ class PerfJitLogger : public CodeEventLogger {
+   static const uint32_t kElfMachMIPS64 = 8;
+   static const uint32_t kElfMachARM64 = 183;
+   static const uint32_t kElfMachS390x = 22;
++  static const uint32_t kElfMachPPC = 20;
+   static const uint32_t kElfMachPPC64 = 21;
+ 
+   uint32_t GetElfMach() {
+@@ -102,6 +103,8 @@ class PerfJitLogger : public CodeEventLogger {
+     return kElfMachARM64;
+ #elif V8_TARGET_ARCH_S390X
+     return kElfMachS390x;
++#elif V8_TARGET_ARCH_PPC
++    return kElfMachPPC;
+ #elif V8_TARGET_ARCH_PPC64
+     return kElfMachPPC64;
+ #else
+diff --git a/src/diagnostics/ppc/eh-frame-ppc.cc b/src/diagnostics/ppc/eh-frame-ppc.cc
+index 148d01116df..933533f572e 100644
+--- a/v8/src/diagnostics/ppc/eh-frame-ppc.cc
++++ b/v8/src/diagnostics/ppc/eh-frame-ppc.cc
+@@ -10,7 +10,11 @@ namespace internal {
+ 
+ const int EhFrameConstants::kCodeAlignmentFactor = 4;
+ // all PPC are 4 bytes instruction
++#ifdef V8_TARGET_ARCH_PPC64
+ const int EhFrameConstants::kDataAlignmentFactor = -8;  // 64-bit always -8
++#else
++const int EhFrameConstants::kDataAlignmentFactor = -4;
++#endif
+ 
+ void EhFrameWriter::WriteReturnAddressRegisterCode() {
+   WriteULeb128(kLrDwarfCode);
+diff --git a/src/execution/ppc/simulator-ppc.cc b/src/execution/ppc/simulator-ppc.cc
+index 2a9aa6486be..ad8aa0eee59 100644
+--- a/v8/src/execution/ppc/simulator-ppc.cc
++++ b/v8/src/execution/ppc/simulator-ppc.cc
+@@ -922,8 +922,18 @@ bool Simulator::OverflowFrom(int32_t alu_out, int32_t left, int32_t right,
+ }
+ 
+ static void decodeObjectPair(ObjectPair* pair, intptr_t* x, intptr_t* y) {
++#if V8_HOST_ARCH_64_BIT
+   *x = static_cast<intptr_t>(pair->x);
+   *y = static_cast<intptr_t>(pair->y);
++#else
++#if V8_TARGET_BIG_ENDIAN
++  *x = static_cast<int32_t>(*pair >> 32);
++  *y = static_cast<int32_t>(*pair);
++#else
++  *x = static_cast<int32_t>(*pair);
++  *y = static_cast<int32_t>(*pair >> 32);
++#endif
++#endif
+ }
+ 
+ // Calls into the V8 runtime.
+diff --git a/src/objects/code.h b/src/objects/code.h
+index d80e72fa038..a3322ca1790 100644
+--- a/v8/src/objects/code.h
++++ b/v8/src/objects/code.h
+@@ -420,6 +420,9 @@ class Code : public HeapObject {
+   static constexpr int kHeaderPaddingSize = 20;
+ #elif V8_TARGET_ARCH_MIPS
+   static constexpr int kHeaderPaddingSize = 20;
++#elif V8_TARGET_ARCH_PPC
++  static constexpr int kHeaderPaddingSize =
++      FLAG_enable_embedded_constant_pool ? 16 : 0;
+ #elif V8_TARGET_ARCH_PPC64
+   static constexpr int kHeaderPaddingSize =
+       FLAG_enable_embedded_constant_pool ? 28 : 0;
+diff --git a/src/wasm/jump-table-assembler.cc b/src/wasm/jump-table-assembler.cc
+index 90cdad4672b..f89792d3250 100644
+--- a/v8/src/wasm/jump-table-assembler.cc
++++ b/v8/src/wasm/jump-table-assembler.cc
+@@ -268,7 +268,7 @@ void JumpTableAssembler::NopBytes(int bytes) {
+   }
+ }
+ 
+-#elif V8_TARGET_ARCH_PPC64
++#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+ void JumpTableAssembler::EmitLazyCompileJumpSlot(uint32_t func_index,
+                                                  Address lazy_compile_target) {
+   int start = pc_offset();
+diff --git a/src/wasm/jump-table-assembler.h b/src/wasm/jump-table-assembler.h
+index 253f0bc0182..3108a7ebb4f 100644
+--- a/v8/src/wasm/jump-table-assembler.h
++++ b/v8/src/wasm/jump-table-assembler.h
+@@ -200,6 +200,11 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
+   static constexpr int kJumpTableSlotSize = 14;
+   static constexpr int kFarJumpTableSlotSize = 14;
+   static constexpr int kLazyCompileTableSlotSize = 20;
++#elif V8_TARGET_ARCH_PPC
++  static constexpr int kJumpTableLineSize = 24;
++  static constexpr int kJumpTableSlotSize = 16;
++  static constexpr int kFarJumpTableSlotSize = 16;
++  static constexpr int kLazyCompileTableSlotSize = 12 * kInstrSize;
+ #elif V8_TARGET_ARCH_PPC64
+   static constexpr int kJumpTableLineSize = 64;
+   static constexpr int kJumpTableSlotSize = 7 * kInstrSize;
+diff --git a/test/cctest/cctest.status b/test/cctest/cctest.status
+index 444ec9d8ecc..a48e6709e37 100644
+--- a/v8/test/cctest/cctest.status
++++ b/v8/test/cctest/cctest.status
+@@ -333,10 +333,10 @@
+ }],  # '(arch == mipsel or arch == mips64el or arch == mips or arch == mips64) and not simd_mips'
+ 
+ ##############################################################################
+-['arch == mips or arch == mips64', {
++['arch == mips or arch == mips64 or arch == ppc', {
+   # TODO(mips-team): Implement I64Atomic operations on MIPS
+   'test-run-wasm-atomics64/*': [SKIP],
+-}],  # 'arch == mipsel or arch == mips64el or arch == mips or arch == mips64'
++}],  # 'arch == mips or arch == mips64 or arch == ppc'
+ 
+ ##############################################################################
+ ['mips_arch_variant == r6', {
+@@ -399,7 +399,7 @@
+ 
+ }],  # 'arch == ppc or arch == ppc64 or arch == s390 or arch == s390x'
+ 
+-['arch == ppc64', {
++['arch == ppc64 or arch == ppc', {
+   # https://crbug.com/v8/8766
+   'test-bytecode-generator/WideRegisters': [SKIP],
+ }],
+diff --git a/test/cctest/wasm/test-jump-table-assembler.cc b/test/cctest/wasm/test-jump-table-assembler.cc
+index 5ff91bc7786..dc8658fe1ed 100644
+--- a/v8/test/cctest/wasm/test-jump-table-assembler.cc
++++ b/v8/test/cctest/wasm/test-jump-table-assembler.cc
+@@ -107,7 +107,7 @@ void CompileJumpTableThunk(Address thunk, Address jump_target) {
+   __ Tbnz(scratch, 0, &exit);
+   __ Mov(scratch, Immediate(jump_target, RelocInfo::NONE));
+   __ Br(scratch);
+-#elif V8_TARGET_ARCH_PPC64
++#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+   __ mov(scratch, Operand(stop_bit_address, RelocInfo::NONE));
+   __ LoadP(scratch, MemOperand(scratch));
+   __ cmpi(scratch, Operand::Zero());
+diff --git a/test/mjsunit/mjsunit.status b/test/mjsunit/mjsunit.status
+index 989c0979080..b99894ec95d 100644
+--- a/v8/test/mjsunit/mjsunit.status
++++ b/v8/test/mjsunit/mjsunit.status
+@@ -432,12 +432,12 @@
+ 
+ ##############################################################################
+ # 32-bit platforms
+-['arch in (ia32, arm, mips, mipsel)', {
++['arch in (ia32, arm, mips, mipsel, ppc)', {
+   # Needs >2GB of available contiguous memory.
+   'wasm/grow-huge-memory': [SKIP],
+   'wasm/huge-memory': [SKIP],
+   'wasm/huge-typedarray': [SKIP],
+-}],  # 'arch in (ia32, arm, mips, mipsel)'
++}],  # 'arch in (ia32, arm, mips, mipsel, ppc)'
+ 
+ ##############################################################################
+ ['arch == arm64', {
+@@ -661,6 +661,13 @@
+   'wasm/atomics': [PASS, SLOW],
+ }],  # 'arch == arm
+ 
++##############################################################################
++['arch == ppc', {
++  # do not run 64bit stress tests on 32bit
++  'wasm/atomics64-stress': [SKIP],
++  'wasm/compare-exchange64-stress': [SKIP],
++}],  # 'arch == ppc'
++
+ ##############################################################################
+ ['arch in (mipsel, mips, mips64el, mips64) and not simulator_run', {
+   # These tests fail occasionally on the buildbots because they consume
