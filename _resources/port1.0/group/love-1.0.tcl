@@ -49,9 +49,9 @@ default love {love-${love.branch}}
 options love.exe
 default love.exe {${prefix}/bin/${love}}
 
-# Override app portgroup default to use love executable.
+# Override app portgroup default to use a launch script.
 # Ports should not need to override this.
-default app.executable {${love.exe}}
+default app.executable {${workpath}/launcher}
 
 # Override app portgroup default to enable Retina display support.
 # Ports should not need to override this.
@@ -86,7 +86,15 @@ post-extract {
     }
 }
 
-build {}
+build {
+    if {${app.executable} eq "${workpath}/launcher"} {
+        set fp [open ${app.executable} w]
+        puts ${fp} {#!/bin/sh}
+        puts ${fp} {cd "$(dirname "$0")"/../Resources}
+        puts ${fp} "exec [shellescape ${love.exe}] [shellescape ${love.file}]"
+        close ${fp}
+    }
+}
 
 destroot {
     set cmd [list zip -9 -r ${destroot}${applications_dir}/${app.name}.app/Contents/Resources/${love.file} .]
