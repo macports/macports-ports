@@ -23,8 +23,8 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
             lappend compilers macports-clang-18
         }
     }
-    if {${compiler.cxx_standard} >= 2014} {
-        # Limit clang 17 to c++14 or newer
+    if {${compiler.cxx_standard} >= 2011} {
+        # Limit clang 17 to c++11 or newer
         lappend compilers macports-clang-17
     }
 }
