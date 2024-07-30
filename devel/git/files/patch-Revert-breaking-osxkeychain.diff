@@ -1,25 +1,23 @@
-From d467d79c362cb07dc10df074d94c3b13ae547d0d Mon Sep 17 00:00:00 2001
-From: Sergey Fedorov <vital.had@gmail.com>
-Date: Tue, 30 Apr 2024 06:53:17 +0800
-Subject: [PATCH] Revert "osxkeychain: store new attributes"
+From b03bfe5fdf5e7d19b90afd268f6aaf3fee69a845 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Fri, 19 Jul 2024 08:54:09 +0800
+Subject: [PATCH] Revert commits breaking macOS keychain
+
+This reverts commit e1ab45b2dab51f94db9548666dfd7af626d2aa7e.
+
+This reverts commit fcf5b74e59c1c0d18a8e8e939475007b3b5f83ad.
 
 This reverts commit d5b35bba86e6fdf0484ea71bf5b8ef1167f14015.
 
-Revert "osxkeychain: erase matching passwords only"
-
 This reverts commit e3cef40db89f5a7c91f4e9d6c4959ca1e41f4647.
 
-Revert "osxkeychain: erase all matching credentials"
-
 This reverts commit 9032bcad82f45a403e4a8de86e1fcb4bfd1ab282.
-
-Revert "osxkeychain: replace deprecated SecKeychain API"
 
 This reverts commit 9abe31f5f161be4d69118bdfae00103cd6efa510.
 ---
  contrib/credential/osxkeychain/Makefile       |   3 +-
- .../osxkeychain/git-credential-osxkeychain.c  | 376 ++++--------------
- 2 files changed, 69 insertions(+), 310 deletions(-)
+ .../osxkeychain/git-credential-osxkeychain.c  | 390 +++---------------
+ 2 files changed, 69 insertions(+), 324 deletions(-)
 
 diff --git contrib/credential/osxkeychain/Makefile contrib/credential/osxkeychain/Makefile
 index 238f5f8c36..4b3a08a2ba 100644
@@ -36,10 +34,10 @@ index 238f5f8c36..4b3a08a2ba 100644
  git-credential-osxkeychain.o: git-credential-osxkeychain.c
  	$(CC) -c $(CFLAGS) $<
 diff --git contrib/credential/osxkeychain/git-credential-osxkeychain.c contrib/credential/osxkeychain/git-credential-osxkeychain.c
-index 6a40917b1e..5f2e5f16c8 100644
+index 6ce22a28ed..5f2e5f16c8 100644
 --- a/contrib/credential/osxkeychain/git-credential-osxkeychain.c
 +++ b/contrib/credential/osxkeychain/git-credential-osxkeychain.c
-@@ -3,51 +3,14 @@
+@@ -3,52 +3,14 @@
  #include <stdlib.h>
  #include <Security/Security.h>
  
@@ -52,6 +50,7 @@ index 6a40917b1e..5f2e5f16c8 100644
 -static CFDataRef password;
 -static CFDataRef password_expiry_utc;
 -static CFDataRef oauth_refresh_token;
+-static int state_seen;
 -
 -static void clear_credential(void)
 -{
@@ -99,7 +98,7 @@ index 6a40917b1e..5f2e5f16c8 100644
  static void die(const char *err, ...)
  {
  	char msg[4096];
-@@ -56,199 +19,70 @@ static void die(const char *err, ...)
+@@ -57,202 +19,70 @@ static void die(const char *err, ...)
  	vsnprintf(msg, sizeof(msg), err, params);
  	fprintf(stderr, "%s\n", msg);
  	va_end(params);
@@ -222,7 +221,10 @@ index 6a40917b1e..5f2e5f16c8 100644
 -	CFDictionaryRef item;
 -	CFDataRef data;
 -	OSStatus result;
--
++	void *buf;
++	UInt32 len;
++	SecKeychainItemRef item;
+ 
 -	attrs = CREATE_SEC_ATTRIBUTES(kSecMatchLimit, kSecMatchLimitOne,
 -				      kSecReturnAttributes, kCFBooleanTrue,
 -				      kSecReturnData, kCFBooleanTrue,
@@ -231,10 +233,7 @@ index 6a40917b1e..5f2e5f16c8 100644
 -	if (result) {
 -		goto out;
 -	}
-+	void *buf;
-+	UInt32 len;
-+	SecKeychainItemRef item;
- 
+-
 -	data = CFDictionaryGetValue(item, kSecValueData);
 +	if (SecKeychainFindInternetPassword(KEYCHAIN_ARGS, &len, &buf, &item))
 +		return;
@@ -247,6 +246,9 @@ index 6a40917b1e..5f2e5f16c8 100644
  		find_username_in_item(item);
  
 -	CFRelease(item);
+-
+-	write_item("capability[]", "state", strlen("state"));
+-	write_item("state[]", "osxkeychain:seen=1", strlen("osxkeychain:seen=1"));
 -
 -out:
 -	CFRelease(attrs);
@@ -332,7 +334,7 @@ index 6a40917b1e..5f2e5f16c8 100644
  
  	/*
  	 * Require at least a protocol and host for removal, which is what git
-@@ -256,69 +90,25 @@ static OSStatus delete_internet_password(void)
+@@ -260,72 +90,25 @@ static OSStatus delete_internet_password(void)
  	 * Keychain manager.
  	 */
  	if (!protocol || !host)
@@ -368,6 +370,9 @@ index 6a40917b1e..5f2e5f16c8 100644
 -	CFMutableDataRef data;
 -	CFDictionaryRef attrs;
 -	OSStatus result;
+-
+-	if (state_seen)
+-		return errSecSuccess;
 -
  	/* Only store complete credentials */
  	if (!protocol || !host || !username || !password)
@@ -413,7 +418,7 @@ index 6a40917b1e..5f2e5f16c8 100644
  }
  
  static void read_credential(void)
-@@ -341,60 +131,36 @@ static void read_credential(void)
+@@ -348,64 +131,36 @@ static void read_credential(void)
  
  		if (!strcmp(buf, "protocol")) {
  			if (!strcmp(v, "imap"))
@@ -483,11 +488,15 @@ index 6a40917b1e..5f2e5f16c8 100644
 -			oauth_refresh_token = CFDataCreate(kCFAllocatorDefault,
 -							   (UInt8 *)v,
 -							   strlen(v));
+-		else if (!strcmp(buf, "state[]")) {
+-			if (!strcmp(v, "osxkeychain:seen=1"))
+-				state_seen = 1;
+-		}
 +			password = xstrdup(v);
  		/*
  		 * Ignore other lines; we don't know what they mean, but
  		 * this future-proofs us when later versions of git do
-@@ -407,7 +173,6 @@ static void read_credential(void)
+@@ -418,30 +173,21 @@ static void read_credential(void)
  
  int main(int argc, const char **argv)
  {
@@ -495,7 +504,12 @@ index 6a40917b1e..5f2e5f16c8 100644
  	const char *usage =
  		"usage: git credential-osxkeychain <get|store|erase>";
  
-@@ -417,17 +182,12 @@ int main(int argc, const char **argv)
+ 	if (!argv[1])
+ 		die("%s", usage);
+ 
+-	if (open(argv[0], O_RDONLY | O_EXLOCK) == -1)
+-		die("failed to lock %s", argv[0]);
+-
  	read_credential();
  
  	if (!strcmp(argv[1], "get"))
