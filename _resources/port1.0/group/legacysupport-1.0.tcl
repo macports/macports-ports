@@ -4,9 +4,9 @@
 # on older macOS releases.
 
 # Newest Darwin version that requires legacy support.
-# Currently OS X 10.12 ( Sierra, Darwin 16) due to utimensat, fsgetpath, setattrlistat
+# Currently OS X 10.14 ( Mojave, Darwin 18) due to timespec_get
 options legacysupport.newest_darwin_requires_legacy
-default legacysupport.newest_darwin_requires_legacy 16
+default legacysupport.newest_darwin_requires_legacy 18
 
 # allow static linking of legacysupport if preferred (e.g. compilers)
 options legacysupport.use_static
