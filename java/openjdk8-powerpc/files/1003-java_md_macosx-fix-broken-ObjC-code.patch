@@ -1,0 +1,85 @@
+From 323781fe5fe16612591dfdfbec7482e3787c7110 Mon Sep 17 00:00:00 2001
+From: Sergey Fedorov <barracuda@macos-powerpc.org>
+Date: Tue, 9 Jul 2024 02:37:36 +0800
+Subject: [PATCH] java_md_macosx: fix broken ObjC code
+
+---
+ jdk/src/macosx/bin/java_md_macosx.c | 56 +++++++++++++++++++----------
+ 1 file changed, 38 insertions(+), 18 deletions(-)
+
+diff --git jdk/src/macosx/bin/java_md_macosx.c jdk/src/macosx/bin/java_md_macosx.c
+index 854d848f81..89210cb708 100644
+--- jdk/src/macosx/bin/java_md_macosx.c
++++ jdk/src/macosx/bin/java_md_macosx.c
+@@ -1026,6 +1026,32 @@ SetXStartOnFirstThreadArg()
+     setenv(envVar, "1", 1);
+ }
+ 
++/* This class is made for performSelectorOnMainThread when java main
++ * should be launched on main thread.
++ * We cannot use dispatch_sync here, because it blocks the main dispatch queue
++ * which is used inside Cocoa
++ */
++@interface JavaLaunchHelper : NSObject {
++    int _returnValue;
++}
++- (void) launchJava:(NSValue*)argsValue;
++- (int) getReturnValue;
++@end
++
++@implementation JavaLaunchHelper
++
++- (void) launchJava:(NSValue*)argsValue
++{
++    _returnValue = JavaMain([argsValue pointerValue]);
++}
++
++- (int) getReturnValue
++{
++    return _returnValue;
++}
++
++@end
++
+ // MacOSX we may continue in the same thread
+ int
+ JVMInit(InvocationFunctions* ifn, jlong threadStackSize,
+@@ -1035,26 +1061,20 @@ JVMInit(InvocationFunctions* ifn, jlong threadStackSize,
+         JLI_TraceLauncher("In same thread\n");
+         // need to block this thread against the main thread
+         // so signals get caught correctly
+-        __block int rslt = 0;
++        JavaMainArgs args;
++        args.argc = argc;
++        args.argv = argv;
++        args.mode = mode;
++        args.what = what;
++        args.ifn  = *ifn;
++        int rslt;
+         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+         {
+-            NSBlockOperation *op = [NSBlockOperation blockOperationWithBlock: ^{
+-                JavaMainArgs args;
+-                args.argc = argc;
+-                args.argv = argv;
+-                args.mode = mode;
+-                args.what = what;
+-                args.ifn  = *ifn;
+-                rslt = JavaMain(&args);
+-            }];
+-
+-            /*
+-             * We cannot use dispatch_sync here, because it blocks the main dispatch queue.
+-             * Using the main NSRunLoop allows the dispatch queue to run properly once
+-             * SWT (or whatever toolkit this is needed for) kicks off it's own NSRunLoop
+-             * and starts running.
+-             */
+-            [op performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:YES];
++            JavaLaunchHelper* launcher = [[[JavaLaunchHelper alloc] init] autorelease];
++            [launcher performSelectorOnMainThread:@selector(launchJava:)
++                                       withObject:[NSValue valueWithPointer:(void*)&args]
++                                    waitUntilDone:YES];
++            rslt = [launcher getReturnValue];
+         }
+         [pool drain];
+         return rslt;
