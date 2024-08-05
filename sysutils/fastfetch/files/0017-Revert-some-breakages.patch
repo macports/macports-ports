@@ -1,7 +1,18 @@
-From f6061f58992f50e0897edcbe7a405482f952b3f4 Mon Sep 17 00:00:00 2001
+From 26ed419ce4220362012b9f6d39c9f45142154955 Mon Sep 17 00:00:00 2001
 From: Sergey Fedorov <barracuda@macos-powerpc.org>
-Date: Sun, 4 Aug 2024 05:41:15 +0800
-Subject: [PATCH] Revert some display-related breakages
+Date: Tue, 6 Aug 2024 03:26:01 +0800
+Subject: [PATCH 17/19] Revert some breakages
+
+---
+ src/detection/displayserver/displayserver.c   |  36 +++--
+ src/detection/displayserver/displayserver.h   |  15 +-
+ .../displayserver/displayserver_apple.c       | 139 +++++++-----------
+ src/detection/font/font_apple.m               |   1 +
+ src/detection/monitor/monitor.h               |   1 -
+ src/detection/monitor/monitor_apple.m         |  18 +--
+ src/modules/display/display.c                 |  64 ++------
+ src/modules/monitor/monitor.c                 |   8 +-
+ 8 files changed, 98 insertions(+), 184 deletions(-)
 
 diff --git src/detection/displayserver/displayserver.c src/detection/displayserver/displayserver.c
 index 73f1cd0c..20a36623 100644
@@ -107,9 +118,9 @@ index aa0bd900..ffe46466 100644
 +    uint64_t id);
 diff --git src/detection/displayserver/displayserver_apple.c src/detection/displayserver/displayserver_apple.c
 index d2e87ecf..7402ea1a 100644
---- src/detection/displayserver/displayserver_apple.c.orig	2024-07-26 10:27:31.000000000 +0800
-+++ src/detection/displayserver/displayserver_apple.c	2024-08-04 11:11:20.000000000 +0800
-@@ -1,117 +1,78 @@
+--- src/detection/displayserver/displayserver_apple.c
++++ src/detection/displayserver/displayserver_apple.c
+@@ -1,111 +1,78 @@
  #include "displayserver.h"
  #include "util/apple/cf_helpers.h"
 -#include "util/stringUtils.h"
@@ -171,7 +182,11 @@ index d2e87ecf..7402ea1a 100644
 -        {
 -            //https://github.com/glfw/glfw/commit/aab08712dd8142b642e2042e7b7ba563acd07a45
 -            double refreshRate = CGDisplayModeGetRefreshRate(mode);
--
++        int modeID;
++        CGSGetCurrentDisplayMode(screens[i], &modeID);
++        modes_D4 mode;
++        CGSGetDisplayModeDescriptionOfLength(screens[i], modeID, &mode, 0xD4);
+ 
 -            if (refreshRate == 0)
 -            {
 -                CVDisplayLinkRef link;
@@ -179,7 +194,7 @@ index d2e87ecf..7402ea1a 100644
 -                {
 -                    const CVTime time = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link);
 -                    if (!(time.flags & kCVTimeIsIndefinite))
--                        refreshRate = time.timeScale / (double) time.timeValue + 0.5; //59.97...
+-                        refreshRate = time.timeScale / (double) time.timeValue; //59.97...
 -                    CVDisplayLinkRelease(link);
 -                }
 -            }
@@ -228,30 +243,19 @@ index d2e87ecf..7402ea1a 100644
 -            );
 -            if (display)
 -            {
--                // Shitty code
--                uint8_t bitDepth = 0;
--                FF_CFTYPE_AUTO_RELEASE CFStringRef desc = CFCopyDescription(mode);
--                CFRange start = CFStringFind(desc, CFSTR("BitsPerSample = "), 0);
--                if (start.location != kCFNotFound)
+-                // https://stackoverflow.com/a/33519316/9976392
+-                // Also shitty, but better than parsing `CFCopyDescription(mode)`
+-                CFDictionaryRef dict = (CFDictionaryRef) *((int64_t *)mode + 2);
+-                if (CFGetTypeID(dict) == CFDictionaryGetTypeID())
 -                {
--                    for (CFIndex idx = start.location + start.length; idx < CFStringGetLength(desc); ++idx)
--                    {
--                        UniChar ch = CFStringGetCharacterAtIndex(desc, idx);
--                        if (!ffCharIsDigit((char) ch))
--                            break;
--                        bitDepth = (uint8_t) (bitDepth * 10 + (ch - '0'));
--                    }
+-                    int32_t bitDepth;
+-                    ffCfDictGetInt(dict, kCGDisplayBitsPerSample, &bitDepth);
+-                    display->bitDepth = (uint8_t) bitDepth;
 -                }
--                display->bitDepth = bitDepth;
 -            }
 -            CGDisplayModeRelease(mode);
 -        }
 -        CGDisplayRelease(screen);
-+        int modeID;
-+        CGSGetCurrentDisplayMode(screens[i], &modeID);
-+        modes_D4 mode;
-+        CGSGetDisplayModeDescriptionOfLength(screens[i], modeID, &mode, 0xD4);
-+
 +        double refreshRate = ffdsParseRefreshRate(mode.derived.freq);
 +        ffdsAppendDisplay(ds,
 +            mode.derived.width,
@@ -281,17 +285,53 @@ index d2e87ecf..7402ea1a 100644
          if (port)
          {
              ffStrbufSetStatic(&ds->wmProcessName, "WindowServer");
-
+diff --git src/detection/font/font_apple.m src/detection/font/font_apple.m
+index 618d1287..06920e31 100644
+--- src/detection/font/font_apple.m
++++ src/detection/font/font_apple.m
+@@ -2,6 +2,7 @@
+ #include "common/io/io.h"
+ #include "font.h"
+ 
++#include <Foundation/Foundation.h>
+ #include <AppKit/NSFont.h>
+ #include <AvailabilityMacros.h>
+ 
+diff --git src/detection/monitor/monitor.h src/detection/monitor/monitor.h
+index 4066f117..a6150e5d 100644
+--- src/detection/monitor/monitor.h
++++ src/detection/monitor/monitor.h
+@@ -5,7 +5,6 @@ typedef struct FFMonitorResult
+     FFstrbuf name;
+     uint32_t width; // native / maximum resolution, in pixels
+     uint32_t height; // native / maximum resolution, in pixels
+-    double refreshRate;// maximum refresh rate in native resolution, in Hz
+     uint32_t physicalWidth; // in mm
+     uint32_t physicalHeight; // in mm
+     bool hdrCompatible;
 diff --git src/detection/monitor/monitor_apple.m src/detection/monitor/monitor_apple.m
-index c6219fe5..f2bd2245 100644
+index da9f41f4..3e4c9f36 100644
 --- src/detection/monitor/monitor_apple.m
 +++ src/detection/monitor/monitor_apple.m
-@@ -106,9 +106,10 @@ const char* ffDetectMonitor(FFlist* results)
+@@ -116,22 +116,10 @@ const char* ffDetectMonitor(FFlist* results)
          monitor->physicalHeight = (uint32_t) (size.height + 0.5);
          monitor->hdrCompatible = CFDictionaryContainsKey(displayInfo, CFSTR("ReferencePeakHDRLuminance")) ||
              detectHdrSupportWithNSScreen(display);
 -        monitor->serial = CGDisplaySerialNumber((CGDirectDisplayID) display->id);
  
+-        FF_CFTYPE_AUTO_RELEASE CFArrayRef modes = CGDisplayCopyAllDisplayModes((CGDirectDisplayID) display->id, NULL);
+-        double maxRefreshRate = 0;
+-        for (uint32_t j = 0; j < CFArrayGetCount(modes); ++j)
+-        {
+-            CGDisplayModeRef mode = (CGDisplayModeRef) CFArrayGetValueAtIndex(modes, j);
+-            if (CGDisplayModeGetWidth(mode) == (uint32_t) width && CGDisplayModeGetHeight(mode) == (uint32_t) height)
+-            {
+-                double refreshRate = CGDisplayModeGetRefreshRate(mode);
+-                if (refreshRate > maxRefreshRate) maxRefreshRate = refreshRate;
+-            }
+-        }
+-        monitor->refreshRate = maxRefreshRate;
+-
 -        int64_t year, week;
 +        int64_t serial, year, week;
 +        if (ffCfDictGetInt64(displayInfo, CFSTR("DisplaySerialNumber"), &serial) == NULL)
@@ -300,7 +340,7 @@ index c6219fe5..f2bd2245 100644
              monitor->manufactureYear = (uint16_t) year;
          if (ffCfDictGetInt64(displayInfo, CFSTR("DisplayWeekManufacture"), &week) == NULL)
 diff --git src/modules/display/display.c src/modules/display/display.c
-index d89a042a..008f4ce6 100644
+index d89a042a..7e18c0c9 100644
 --- src/modules/display/display.c
 +++ src/modules/display/display.c
 @@ -4,9 +4,7 @@
@@ -314,16 +354,7 @@ index d89a042a..008f4ce6 100644
  
  static int sortByNameAsc(FFDisplayResult* a, FFDisplayResult* b)
  {
-@@ -91,55 +89,42 @@ void ffPrintDisplay(FFDisplayOptions* options)
-         }
-         else
-         {
--            FF_PARSE_FORMAT_STRING_CHECKED(&key, &options->moduleArgs.key, 4, ((FFformatarg[]){
-+            FF_PARSE_FORMAT_STRING_CHECKED(&key, &options->moduleArgs.key, 3, ((FFformatarg[]){
-                 {FF_FORMAT_ARG_TYPE_UINT, &moduleIndex, "index"},
-                 {FF_FORMAT_ARG_TYPE_STRBUF, &result->name, "name"},
-                 {FF_FORMAT_ARG_TYPE_STRING, displayType, "type"},
--                {FF_FORMAT_ARG_TYPE_STRBUF, &options->moduleArgs.keyIcon, "icon"},
+@@ -99,47 +97,35 @@ void ffPrintDisplay(FFDisplayOptions* options)
              }));
          }
  
@@ -378,7 +409,7 @@ index d89a042a..008f4ce6 100644
              FF_PRINT_FORMAT_CHECKED(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY, FF_DISPLAY_NUM_FORMAT_ARGS, ((FFformatarg[]) {
                  {FF_FORMAT_ARG_TYPE_UINT, &result->width, "width"},
                  {FF_FORMAT_ARG_TYPE_UINT, &result->height, "height"},
-@@ -150,13 +135,6 @@ void ffPrintDisplay(FFDisplayOptions* options)
+@@ -150,13 +136,6 @@ void ffPrintDisplay(FFDisplayOptions* options)
                  {FF_FORMAT_ARG_TYPE_STRING, displayType, "type"},
                  {FF_FORMAT_ARG_TYPE_UINT, &result->rotation, "rotation"},
                  {FF_FORMAT_ARG_TYPE_BOOL, &result->primary, "is-primary"},
@@ -392,7 +423,7 @@ index d89a042a..008f4ce6 100644
              }));
          }
      }
-@@ -306,28 +284,15 @@ void ffGenerateDisplayJsonResult(FF_MAYBE_UNUSED FFDisplayOptions* options, yyjs
+@@ -306,27 +285,15 @@ void ffGenerateDisplayJsonResult(FF_MAYBE_UNUSED FFDisplayOptions* options, yyjs
      FF_LIST_FOR_EACH(FFDisplayResult, item, dsResult->displays)
      {
          yyjson_mut_val* obj = yyjson_mut_arr_add_obj(doc, arr);
@@ -419,13 +450,12 @@ index d89a042a..008f4ce6 100644
 -        yyjson_mut_obj_add_uint(doc, obj, "bitDepth", item->bitDepth);
 -        yyjson_mut_obj_add_bool(doc, obj, "hdrEnabled", item->hdrEnabled);
 -        yyjson_mut_obj_add_bool(doc, obj, "wcgEnabled", item->wcgEnabled);
--
 +        yyjson_mut_obj_add_uint(doc, obj, "scaledHeight", item->scaledHeight);
 +        yyjson_mut_obj_add_uint(doc, obj, "scaledWidth", item->scaledWidth);
+ 
          switch (item->type)
          {
-             case FF_DISPLAY_TYPE_BUILTIN:
-@@ -355,13 +320,6 @@ void ffPrintDisplayHelpFormat(void)
+@@ -355,13 +322,6 @@ void ffPrintDisplayHelpFormat(void)
          "Screen type (builtin, external or unknown) - type",
          "Screen rotation (in degrees) - rotation",
          "True if being the primary screen - is-primary",
@@ -439,3 +469,53 @@ index d89a042a..008f4ce6 100644
      }));
  }
  
+diff --git src/modules/monitor/monitor.c src/modules/monitor/monitor.c
+index 6fdd53eb..27d31cca 100644
+--- src/modules/monitor/monitor.c
++++ src/modules/monitor/monitor.c
+@@ -6,7 +6,7 @@
+ 
+ #include <math.h>
+ 
+-#define FF_MONITOR_NUM_FORMAT_ARGS 11
++#define FF_MONITOR_NUM_FORMAT_ARGS 10
+ 
+ void ffPrintMonitor(FFMonitorOptions* options)
+ {
+@@ -53,8 +53,6 @@ void ffPrintMonitor(FFMonitorOptions* options)
+             ffPrintLogoAndKey(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY);
+ 
+             printf("%ux%u px", display->width, display->height);
+-            if (display->refreshRate > 0)
+-                printf(" @ %g Hz", ((int) (display->refreshRate * 1000 + 0.5)) / 1000.0);
+             if (inch > 0)
+                 printf(" - %ux%u mm (%.2f inches, %.2f ppi)\n", display->physicalWidth, display->physicalHeight, inch, ppi);
+             else
+@@ -82,7 +80,6 @@ void ffPrintMonitor(FFMonitorOptions* options)
+                 {FF_FORMAT_ARG_TYPE_UINT16, &display->manufactureYear, "manufacture-year"},
+                 {FF_FORMAT_ARG_TYPE_UINT16, &display->manufactureWeek, "manufacture-week"},
+                 {FF_FORMAT_ARG_TYPE_STRING, buf, "serial"},
+-                {FF_FORMAT_ARG_TYPE_DOUBLE, buf, "refresh-rate"},
+             }));
+         }
+ 
+@@ -157,8 +154,6 @@ void ffGenerateMonitorJsonResult(FF_MAYBE_UNUSED FFMonitorOptions* options, yyjs
+             yyjson_mut_obj_add_uint(doc, physical, "height", item->physicalHeight);
+             yyjson_mut_obj_add_uint(doc, physical, "width", item->physicalWidth);
+ 
+-            yyjson_mut_obj_add_real(doc, obj, "refreshRate", item->refreshRate);
+-
+             if (item->manufactureYear)
+             {
+                 yyjson_mut_val* manufactureDate = yyjson_mut_obj_add_obj(doc, obj, "manufactureDate");
+@@ -196,7 +191,6 @@ void ffPrintMonitorHelpFormat(void)
+         "Year of manufacturing - manufacture-year",
+         "Nth week of manufacturing in the year - manufacture-week",
+         "Serial number - serial",
+-        "Maximum refresh rate in Hz - refresh-rate",
+     }));
+ }
+ 
+-- 
+2.46.0
+
