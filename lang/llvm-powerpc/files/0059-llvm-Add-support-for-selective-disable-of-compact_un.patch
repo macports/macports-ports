@@ -1,0 +1,145 @@
+From 26665a78f442495d029d1813996ec78924bbbb0b Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Wed, 17 Apr 2019 22:35:44 +0530
+Subject: [PATCH] [llvm] Add support for selective disable of
+ compact_unwind.
+
+This doesn't currently work properly with some GCC output
+and the simple immediate solution is to emit the DWARF
+only which is (a) correct and (b) compatible with more tools
+---
+ llvm/include/llvm/MC/MCObjectFileInfo.h            |  7 ++++---
+ llvm/include/llvm/MC/MCTargetOptions.h             |  1 +
+ .../llvm/MC/MCTargetOptionsCommandFlags.inc        |  5 +++++
+ llvm/lib/MC/MCObjectFileInfo.cpp                   | 14 +++++++-------
+ llvm/lib/MC/MCTargetOptions.cpp                    |  2 +-
+ 5 files changed, 18 insertions(+), 11 deletions(-)
+
+diff --git a/llvm/include/llvm/MC/MCObjectFileInfo.h b/llvm/include/llvm/MC/MCObjectFileInfo.h
+index 3a27ef8c8fe..23c738ed407 100644
+--- a/llvm/include/llvm/MC/MCObjectFileInfo.h
++++ b/llvm/include/llvm/MC/MCObjectFileInfo.h
+@@ -209,8 +209,9 @@ protected:
+   MCSection *GFIDsSection;
+ 
+ public:
+-  void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
+-                            bool LargeCodeModel = false);
++  void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx, 
++                            bool LargeCodeModel = false,
++                            bool UseCompactUnwind = true);
+ 
+   bool getSupportsWeakOmittedEHFrame() const {
+     return SupportsWeakOmittedEHFrame;
+@@ -387,7 +388,7 @@ private:
+   MCContext *Ctx;
+   Triple TT;
+ 
+-  void initMachOMCObjectFileInfo(const Triple &T);
++  void initMachOMCObjectFileInfo(const Triple &T, bool UseCompactUnwind);
+   void initELFMCObjectFileInfo(const Triple &T, bool Large);
+   void initCOFFMCObjectFileInfo(const Triple &T);
+   void initWasmMCObjectFileInfo(const Triple &T);
+diff --git a/llvm/include/llvm/MC/MCTargetOptions.h b/llvm/include/llvm/MC/MCTargetOptions.h
+index f5d330fbeb2..ba47a490eb7 100644
+--- a/llvm/include/llvm/MC/MCTargetOptions.h
++++ b/llvm/include/llvm/MC/MCTargetOptions.h
+@@ -54,6 +54,7 @@ public:
+   bool ShowMCEncoding : 1;
+   bool ShowMCInst : 1;
+   bool AsmVerbose : 1;
++  bool CompactUnwind : 1;
+ 
+   /// Preserve Comments in Assembly.
+   bool PreserveAsmComments : 1;
+diff --git a/llvm/include/llvm/MC/MCTargetOptionsCommandFlags.inc b/llvm/include/llvm/MC/MCTargetOptionsCommandFlags.inc
+index 5172fa44511..c0529e0b2d6 100644
+--- a/llvm/include/llvm/MC/MCTargetOptionsCommandFlags.inc
++++ b/llvm/include/llvm/MC/MCTargetOptionsCommandFlags.inc
+@@ -56,6 +56,10 @@ static cl::alias NoWarnW("W", cl::desc("Alias for --no-warn"), cl::aliasopt(NoWa
+ static cl::opt<bool> NoDeprecatedWarn("no-deprecated-warn",
+                                cl::desc("Suppress all deprecated warnings"));
+ 
++static cl::opt<bool> NoCompactUnwind("no_compact_unwind",
++                               cl::desc("Don't emit compact unwind, just DWARF"),
++                               cl::init(false));
++
+ static cl::opt<std::string>
+ ABIName("target-abi", cl::Hidden,
+         cl::desc("The name of the ABI to be targeted from the backend."),
+@@ -74,6 +78,7 @@ static MCTargetOptions InitMCTargetOptionsFromFlags() {
+   Options.MCFatalWarnings = FatalWarnings;
+   Options.MCNoWarn = NoWarn;
+   Options.MCNoDeprecatedWarn = NoDeprecatedWarn;
++  Options.CompactUnwind = !NoCompactUnwind;
+   return Options;
+ }
+ 
+diff --git a/llvm/lib/MC/MCObjectFileInfo.cpp b/llvm/lib/MC/MCObjectFileInfo.cpp
+index b88d2d80182..fe65d00cd32 100644
+--- a/llvm/lib/MC/MCObjectFileInfo.cpp
++++ b/llvm/lib/MC/MCObjectFileInfo.cpp
+@@ -47,7 +47,7 @@ static bool useCompactUnwind(const Triple &T) {
+   return false;
+ }
+ 
+-void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
++void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T, bool UseCompactUnwind) {
+   // MachO
+   SupportsWeakOmittedEHFrame = false;
+ 
+@@ -58,10 +58,10 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
+       SectionKind::getReadOnly());
+ 
+   if (T.isOSDarwin() && T.getArch() == Triple::aarch64)
+-    SupportsCompactUnwindWithoutEHFrame = true;
++    SupportsCompactUnwindWithoutEHFrame = UseCompactUnwind;
+ 
+   if (T.isWatchABI())
+-    OmitDwarfIfHaveCompactUnwind = true;
++    OmitDwarfIfHaveCompactUnwind = UseCompactUnwind;
+ 
+   PersonalityEncoding = dwarf::DW_EH_PE_indirect | dwarf::DW_EH_PE_pcrel
+     | dwarf::DW_EH_PE_sdata4;
+@@ -190,7 +190,7 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(const Triple &T) {
+   COFFDebugTypesSection = nullptr;
+   COFFGlobalTypeHashesSection = nullptr;
+ 
+-  if (useCompactUnwind(T)) {
++  if (UseCompactUnwind && useCompactUnwind(T)) {
+     CompactUnwindSection =
+         Ctx->getMachOSection("__LD", "__compact_unwind", MachO::S_ATTR_DEBUG,
+                              SectionKind::getReadOnly());
+@@ -897,8 +897,8 @@ void MCObjectFileInfo::initWasmMCObjectFileInfo(const Triple &T) {
+ }
+ 
+ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple, bool PIC,
+-                                            MCContext &ctx,
+-                                            bool LargeCodeModel) {
++                                            MCContext &ctx, bool LargeCodeModel,
++                                            bool UseCompactUnwind) {
+   PositionIndependent = PIC;
+   Ctx = &ctx;
+ 
+@@ -925,7 +925,7 @@ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple, bool PIC,
+   switch (TT.getObjectFormat()) {
+   case Triple::MachO:
+     Env = IsMachO;
+-    initMachOMCObjectFileInfo(TT);
++    initMachOMCObjectFileInfo(TT, UseCompactUnwind);
+     break;
+   case Triple::COFF:
+     if (!TT.isOSWindows())
+diff --git a/llvm/lib/MC/MCTargetOptions.cpp b/llvm/lib/MC/MCTargetOptions.cpp
+index b85e53db5d6..e1114731023 100644
+--- a/llvm/lib/MC/MCTargetOptions.cpp
++++ b/llvm/lib/MC/MCTargetOptions.cpp
+@@ -18,7 +18,7 @@ MCTargetOptions::MCTargetOptions()
+       MCSaveTempLabels(false), MCUseDwarfDirectory(false),
+       MCIncrementalLinkerCompatible(false), MCPIECopyRelocations(false),
+       ShowMCEncoding(false), ShowMCInst(false), AsmVerbose(false),
+-      PreserveAsmComments(true) {}
++      CompactUnwind(true), PreserveAsmComments(true) {}
+ 
+ StringRef MCTargetOptions::getABIName() const {
+   return ABIName;

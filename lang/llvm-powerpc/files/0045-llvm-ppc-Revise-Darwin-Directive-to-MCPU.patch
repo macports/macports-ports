@@ -1,0 +1,1250 @@
+From c4071566a3baf6715a48566bfd63850641227432 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Sat, 24 Dec 2016 12:58:17 +0000
+Subject: [PATCH] =?UTF-8?q?[llvm,=20ppc]=20Revise=20=E2=80=9CDarwin?=
+ =?UTF-8?q?=20Directive=E2=80=9D=20to=20=E2=80=9CMCPU=E2=80=9D.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+‘Darwin Directive’ really has very little to do with OS X / Darwin specifically.  It is mostly about having a mechanism to test for functionality that depends on the MCPU value without repeated string tests.
+
+The one ‘darwin specific’ aspect is that the .machine directives in older darwin assembler files are like “ppc7400” where the current style is like “7400”.  We cater for parsing legacy assembler files, but switch to using the new form for written files (the current assembler output from LLVM is already incompatible with cctools ‘as’).
+
+The MCPU values and strings have been re-synced.  Note that ELF platforms do not currently act on the MCPU value in .machine directives (except to parse and ignore “any” “push” and “pop”).
+---
+ .../Target/PowerPC/AsmParser/PPCAsmParser.cpp |  53 +++++--
+ .../PowerPC/MCTargetDesc/CMakeLists.txt       |   1 +
+ .../PowerPC/MCTargetDesc/PPCAsmBackend.cpp    |  13 +-
+ .../PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp  |  13 +-
+ .../Target/PowerPC/MCTargetDesc/PPCMcpu.cpp   | 135 +++++++++++++++++
+ llvm/lib/Target/PowerPC/PPC.td                | 138 +++++++++---------
+ llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp     |  68 ++++-----
+ .../Target/PowerPC/PPCHazardRecognizers.cpp   |  15 +-
+ llvm/lib/Target/PowerPC/PPCISelLowering.cpp   |  67 ++++-----
+ llvm/lib/Target/PowerPC/PPCInstrInfo.cpp      |  49 ++++---
+ llvm/lib/Target/PowerPC/PPCMcpu.h             |  66 +++++++++
+ llvm/lib/Target/PowerPC/PPCSubtarget.cpp      |   3 +-
+ llvm/lib/Target/PowerPC/PPCSubtarget.h        |  42 +-----
+ .../Target/PowerPC/PPCTargetTransformInfo.cpp |  23 +--
+ 14 files changed, 448 insertions(+), 238 deletions(-)
+ create mode 100644 llvm/lib/Target/PowerPC/MCTargetDesc/PPCMcpu.cpp
+ create mode 100644 llvm/lib/Target/PowerPC/PPCMcpu.h
+
+diff --git a/llvm/lib/Target/PowerPC/AsmParser/PPCAsmParser.cpp b/llvm/lib/Target/PowerPC/AsmParser/PPCAsmParser.cpp
+index 04c11950285..208474021d3 100644
+--- a/llvm/lib/Target/PowerPC/AsmParser/PPCAsmParser.cpp
++++ b/llvm/lib/Target/PowerPC/AsmParser/PPCAsmParser.cpp
+@@ -10,6 +10,7 @@
+ #include "MCTargetDesc/PPCMCExpr.h"
+ #include "MCTargetDesc/PPCMCTargetDesc.h"
+ #include "PPCTargetStreamer.h"
++#include "PPCMcpu.h"
+ #include "llvm/ADT/STLExtras.h"
+ #include "llvm/ADT/StringSwitch.h"
+ #include "llvm/ADT/Twine.h"
+@@ -263,6 +264,7 @@ struct PPCOperand;
+ class PPCAsmParser : public MCTargetAsmParser {
+   bool IsPPC64;
+   bool IsDarwin;
++  bool ForceCPUSubTypeAll;
+ 
+   void Warning(SMLoc L, const Twine &Msg) { getParser().Warning(L, Msg); }
+ 
+@@ -313,6 +315,7 @@ public:
+     IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
+                TheTriple.getArch() == Triple::ppc64le);
+     IsDarwin = TheTriple.isMacOSX();
++    ForceCPUSubTypeAll = STI.getCPU().equals("all"); 
+     // Initialize the set of available features.
+     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
+   }
+@@ -1888,23 +1891,53 @@ bool PPCAsmParser::ParseDirectiveMachine(SMLoc L) {
+ bool PPCAsmParser::ParseDarwinDirectiveMachine(SMLoc L) {
+   MCAsmParser &Parser = getParser();
+   if (Parser.getTok().isNot(AsmToken::Identifier) &&
+-      Parser.getTok().isNot(AsmToken::String))
++      Parser.getTok().isNot(AsmToken::String) &&
++      Parser.getTok().isNot(AsmToken::Integer))
+     return Error(L, "unexpected token in directive");
+ 
+-  StringRef CPU = Parser.getTok().getIdentifier();
++  
++  StringRef CPU;
++  if (Parser.getTok().is(AsmToken::Integer)) {
++    CPU = Parser.getTok().getString();
++  } else {
++    CPU = Parser.getTok().getIdentifier();
++  }
+   Parser.Lex();
+ 
+-  // FIXME: this is only the 'default' set of cpu variants.
+-  // However we don't act on this information at present, this is simply
+-  // allowing parsing to proceed with minimal sanity checking.
+-  if (check(CPU != "ppc7400" && CPU != "ppc" && CPU != "ppc64", L,
+-            "unrecognized cpu type") ||
+-      check(isPPC64() && (CPU == "ppc7400" || CPU == "ppc"), L,
++  unsigned Mcpu = PPC::mcpuEnumFromString(CPU);
++  if(check(Mcpu == PPC::MCPU_BAD, L,  "unrecognised CPU specified"))
++    return addErrorSuffix(" in '.machine' directive");
++
++  if (ForceCPUSubTypeAll) {
++    parseToken(AsmToken::EndOfStatement);
++    return false; // Any valid CPU variant is ok.
++  }
++
++  // Although Darwin has used other PPC CPUs, these are the only ones
++  // supported at present.
++
++  bool OSX_OK = Mcpu == PPC::MCPU_32 || Mcpu == PPC::MCPU_64 ||
++                (Mcpu >= PPC::MCPU_601 && Mcpu <= PPC::MCPU_970);
++
++  // It might seem surprising that ppc970 is _not_ a valid ppc64 value (since
++  // it's a 64b-capable processor).  However, in this case the intent was to
++  // permit the use of 64b instructions between calls in otherwise 32b code
++  // (the kernel preserves the 64b state for exceptions and interrupts).
++
++  if (check(!OSX_OK, L, "unrecognized cpu type for") ||
++      check(isPPC64() && (Mcpu != PPC::MCPU_64), L,
+             "wrong cpu type specified for 64bit") ||
+-      check(!isPPC64() && CPU == "ppc64", L,
++      check(!isPPC64() && (Mcpu == PPC::MCPU_64), L,
+             "wrong cpu type specified for 32bit") ||
+       parseToken(AsmToken::EndOfStatement))
+-    return addErrorSuffix(" in '.machine' directive");
++    return addErrorSuffix(" macOS X/Darwin in '.machine' directive");
++
++  PPCTargetStreamer &TStreamer =
++      *static_cast<PPCTargetStreamer *>(
++           getParser().getStreamer().getTargetStreamer());
++  // We convert the input (possibly legacy) string to the new one.
++  TStreamer.emitMachine(PPC::mcpuStringFromEnum(Mcpu));
++
+   return false;
+ }
+ 
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/CMakeLists.txt b/llvm/lib/Target/PowerPC/MCTargetDesc/CMakeLists.txt
+index 3cea65ee4de..00a4f8b0582 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/CMakeLists.txt
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/CMakeLists.txt
+@@ -4,6 +4,7 @@ add_llvm_library(LLVMPowerPCDesc
+   PPCMCAsmInfo.cpp
+   PPCMCCodeEmitter.cpp
+   PPCMCExpr.cpp
++  PPCMcpu.cpp
+   PPCPredicates.cpp
+   PPCMachObjectWriter.cpp
+   PPCELFObjectWriter.cpp
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCAsmBackend.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCAsmBackend.cpp
+index a405dd70c30..22fca8c3e65 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCAsmBackend.cpp
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCAsmBackend.cpp
+@@ -7,6 +7,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++#include "PPCMcpu.h"
+ #include "MCTargetDesc/PPCFixupKinds.h"
+ #include "MCTargetDesc/PPCMCTargetDesc.h"
+ #include "llvm/BinaryFormat/ELF.h"
+@@ -197,20 +198,24 @@ public:
+ };
+ } // end anonymous namespace
+ 
+-
+ // FIXME: This should be in a separate file.
+ namespace {
++
+   class DarwinPPCAsmBackend : public PPCAsmBackend {
++    uint32_t InitialSubType;
+   public:
+-    DarwinPPCAsmBackend(const Target &T) : PPCAsmBackend(T, support::big) { }
++    DarwinPPCAsmBackend(const Target &T, StringRef CPU)
++        : PPCAsmBackend(T, support::big),
++          InitialSubType(PPC::cpuSubTypeFromString(CPU)) { }
+ 
+     std::unique_ptr<MCObjectTargetWriter>
+     createObjectTargetWriter() const override {
+       bool is64 = getPointerSize() == 8;
++      /* The only subtype value that is recognized for 64b is 'all'.  */
+       return createPPCMachObjectWriter(
+           /*Is64Bit=*/is64,
+           (is64 ? MachO::CPU_TYPE_POWERPC64 : MachO::CPU_TYPE_POWERPC),
+-          MachO::CPU_SUBTYPE_POWERPC_ALL);
++          (is64 ? MachO::CPU_SUBTYPE_POWERPC_ALL : InitialSubType));
+     }
+   };
+ 
+@@ -236,7 +241,7 @@ MCAsmBackend *llvm::createPPCAsmBackend(const Target &T,
+                                         const MCTargetOptions &Options) {
+   const Triple &TT = STI.getTargetTriple();
+   if (TT.isOSDarwin())
+-    return new DarwinPPCAsmBackend(T);
++    return new DarwinPPCAsmBackend(T, STI.getCPU());
+ 
+   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TT.getOS());
+   bool IsLittleEndian = TT.getArch() == Triple::ppc64le;
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
+index a1e4e07b25a..81035e2723f 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCTargetDesc.cpp
+@@ -11,9 +11,10 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
+-#include "MCTargetDesc/PPCMCTargetDesc.h"
+ #include "InstPrinter/PPCInstPrinter.h"
+ #include "MCTargetDesc/PPCMCAsmInfo.h"
++#include "MCTargetDesc/PPCMCTargetDesc.h"
++#include "PPCMcpu.h"
+ #include "PPCTargetStreamer.h"
+ #include "llvm/ADT/StringRef.h"
+ #include "llvm/ADT/Triple.h"
+@@ -24,6 +25,7 @@
+ #include "llvm/MC/MCELFStreamer.h"
+ #include "llvm/MC/MCExpr.h"
+ #include "llvm/MC/MCInstrInfo.h"
++#include "llvm/MC/MCObjectStreamer.h"
+ #include "llvm/MC/MCRegisterInfo.h"
+ #include "llvm/MC/MCStreamer.h"
+ #include "llvm/MC/MCSubtargetInfo.h"
+@@ -36,6 +38,9 @@
+ #include "llvm/Support/TargetRegistry.h"
+ #include "llvm/Support/raw_ostream.h"
+ 
++#include "llvm/Support/Format.h"
++#include "llvm/Support/Debug.h"
++
+ using namespace llvm;
+ 
+ #define GET_INSTRINFO_MC_DESC
+@@ -200,7 +205,7 @@ public:
+   PPCTargetMachOStreamer(MCStreamer &S) : PPCTargetStreamer(S) {}
+ 
+   void emitTCEntry(const MCSymbol &S) override {
+-    llvm_unreachable("Unknown pseudo-op: .tc");
++    report_fatal_error("Unknown pseudo-op: .tc");
+   }
+ 
+   void emitMachine(StringRef CPU) override {
+@@ -209,11 +214,11 @@ public:
+   }
+ 
+   void emitAbiVersion(int AbiVersion) override {
+-    llvm_unreachable("Unknown pseudo-op: .abiversion");
++    report_fatal_error("Unknown pseudo-op: .abiversion");
+   }
+ 
+   void emitLocalEntry(MCSymbolELF *S, const MCExpr *LocalOffset) override {
+-    llvm_unreachable("Unknown pseudo-op: .localentry");
++    report_fatal_error("Unknown pseudo-op: .localentry");
+   }
+ };
+ 
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMcpu.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMcpu.cpp
+new file mode 100644
+index 00000000000..f8cdddc2c75
+--- /dev/null
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMcpu.cpp
+@@ -0,0 +1,135 @@
++//===-- PPCMcpu.cpp - mcpu and machine directive string utils -*- C++ -*--===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// Implement some utility functions to convert mcpu strings to and from the
++// relevant enumerations.
++//
++//===----------------------------------------------------------------------===//
++
++#include "PPCMcpu.h"
++#include "llvm/ADT/StringRef.h"
++#include "llvm/ADT/StringSwitch.h"
++#include "llvm/BinaryFormat/MachO.h"
++
++namespace llvm {
++
++/// All of this needs to stay in sync with the enum in PPCMcpu.h.
++
++namespace PPC {
++
++static const char *const CPUNames[] = {
++    "",
++    "ppc",
++    "440",
++    "601",
++    "602",
++    "603",
++    "750",
++    "7400",
++    "7450",
++    "970",
++    "e500mc",
++    "e5500",
++    "a2",
++    "pwr3",
++    "pwr4",
++    "pwr5",
++    "pwr5x",
++    "pwr6",
++    "pwr6x",
++    "pwr7",
++    "pwr8",
++    "pwr9",
++    "ppc64",
++    "ppc64le",
++    "any"
++};
++
++/// When -mcpu is used on the command line, it uses the TableGen'd code to match
++/// the value to a CPU, outside of that case, it's sometimes necessary to
++/// convert the enum back to the string.
++StringRef mcpuStringFromEnum(unsigned MCPU) {
++  assert(MCPU < array_lengthof(CPUNames) &&
++         "CPUNames[] might not be up-to-date!");
++  return CPUNames[MCPU];
++}
++
++/// This equates the CPU name as string to the enum.
++/// It caters for both the regular ELF case e.g. "7400" and the MachO version
++/// e.g. ppc7400, this allows us to parse legacy MachO code, but use the
++/// same as ELF going forward.
++
++unsigned mcpuEnumFromString(StringRef CPUName) {
++  unsigned Mcpu = StringSwitch<unsigned>(CPUName)
++   .Case(       "", MCPU_NONE)
++   .Case(    "ppc", MCPU_32)
++   .Case(    "440", MCPU_440)
++   .Cases(   "601",  "ppc601", MCPU_601)
++   .Cases(   "602",  "ppc602", MCPU_602)
++   .Cases(   "603",  "ppc603", MCPU_603)
++   .Cases(   "750",  "ppc750", MCPU_750)
++   .Cases(  "7400", "ppc7400", MCPU_7400)
++   .Cases(  "7450", "ppc7450", MCPU_7450)
++   .Cases(   "970",  "ppc970", MCPU_970)
++   .Case( "e500mc", MCPU_E500mc)
++   .Case(  "e5500", MCPU_E5500)
++   .Case(     "a2", MCPU_A2)
++   .Case(   "pwr3", MCPU_PWR3)
++   .Case(   "pwr4", MCPU_PWR4)
++   .Case(   "pwr5", MCPU_PWR5)
++   .Case(  "pwr5x", MCPU_PWR5X)
++   .Case(   "pwr6", MCPU_PWR6)
++   .Case(  "pwr6x", MCPU_PWR6X)
++   .Case(   "pwr7", MCPU_PWR7)
++   .Case(   "pwr8", MCPU_PWR8)
++   .Case(   "pwr9", MCPU_PWR9)
++   .Case(  "ppc64", MCPU_64)
++   .Case("ppc64le", MCPU_64LE)
++   .Case(    "any", MCPU_ANY)
++   .Default(MCPU_BAD);
++   return Mcpu;
++}
++
++// Possible values, not all currently implemented.
++// CPU_SUBTYPE_POWERPC_ALL
++// CPU_SUBTYPE_POWERPC_601
++// CPU_SUBTYPE_POWERPC_602
++// CPU_SUBTYPE_POWERPC_603
++// CPU_SUBTYPE_POWERPC_603e
++// CPU_SUBTYPE_POWERPC_603ev
++// CPU_SUBTYPE_POWERPC_604
++// CPU_SUBTYPE_POWERPC_604e
++// CPU_SUBTYPE_POWERPC_620
++// CPU_SUBTYPE_POWERPC_750
++// CPU_SUBTYPE_POWERPC_7400
++// CPU_SUBTYPE_POWERPC_7450
++// CPU_SUBTYPE_POWERPC_970
++
++unsigned cpuSubTypeFromString(StringRef CPUName) {
++  unsigned Mcpu = StringSwitch<unsigned>(CPUName)
++   .Case(       "", MachO::CPU_SUBTYPE_POWERPC_ALL)
++   .Case(    "ppc", MachO::CPU_SUBTYPE_POWERPC_ALL)
++   .Cases(   "601",  "ppc601", MachO::CPU_SUBTYPE_POWERPC_601)
++   .Cases(   "602",  "ppc602", MachO::CPU_SUBTYPE_POWERPC_602)
++   .Cases(   "603",  "ppc603", MachO::CPU_SUBTYPE_POWERPC_603)
++   .Cases(   "750",  "ppc750", MachO::CPU_SUBTYPE_POWERPC_750)
++   .Cases(  "7400", "ppc7400", MachO::CPU_SUBTYPE_POWERPC_7400)
++   .Cases(  "7450", "ppc7450", MachO::CPU_SUBTYPE_POWERPC_7450)
++   .Cases(   "970",  "ppc970", MachO::CPU_SUBTYPE_POWERPC_970)
++   .Case(  "ppc64", MachO::CPU_SUBTYPE_POWERPC_ALL)
++   .Case(    "all", MachO::CPU_SUBTYPE_POWERPC_ALL)
++   .Case(    "any", MachO::CPU_SUBTYPE_POWERPC_ALL)
++   .Default(MachO::CPU_SUBTYPE_POWERPC_ALL);
++   return Mcpu;
++
++
++}
++
++} // PPC
++} // llvm
+diff --git a/llvm/lib/Target/PowerPC/PPC.td b/llvm/lib/Target/PowerPC/PPC.td
+index 80ad4962a20..6c22b600bf7 100644
+--- a/llvm/lib/Target/PowerPC/PPC.td
++++ b/llvm/lib/Target/PowerPC/PPC.td
+@@ -23,35 +23,31 @@ include "llvm/Target/Target.td"
+ // CPU Directives                                                             //
+ //===----------------------------------------------------------------------===//
+ 
+-def Directive440 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_440", "">;
+-def Directive601 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_601", "">;
+-def Directive602 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_602", "">;
+-def Directive603 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_603", "">;
+-def Directive604 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_603", "">;
+-def Directive620 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_603", "">;
+-def Directive7400: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_7400", "">;
+-def Directive750 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_750", "">;
+-def Directive970 : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_970", "">;
+-def Directive32  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_32", "">;
+-def Directive64  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_64", "">;
+-def DirectiveA2  : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_A2", "">;
+-def DirectiveE500   : SubtargetFeature<"", "DarwinDirective",
+-                                       "PPC::DIR_E500", "">;
+-def DirectiveE500mc : SubtargetFeature<"", "DarwinDirective",
+-                                       "PPC::DIR_E500mc", "">;
+-def DirectiveE5500  : SubtargetFeature<"", "DarwinDirective",
+-                                       "PPC::DIR_E5500", "">;
+-def DirectivePwr3: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR3", "">;
+-def DirectivePwr4: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR4", "">;
+-def DirectivePwr5: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR5", "">;
+-def DirectivePwr5x
+-    : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR5X", "">;
+-def DirectivePwr6: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR6", "">;
+-def DirectivePwr6x
+-    : SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR6X", "">;
+-def DirectivePwr7: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR7", "">;
+-def DirectivePwr8: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR8", "">;
+-def DirectivePwr9: SubtargetFeature<"", "DarwinDirective", "PPC::DIR_PWR9", "">;
++def Mcpu440    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_440", "">;
++def Mcpu601    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_601", "">;
++def Mcpu602    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_602", "">;
++def Mcpu603    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_603", "">;
++def Mcpu604    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_603", "">;
++def Mcpu620    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_603", "">;
++def Mcpu7400   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_7400", "">;
++def Mcpu7450   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_7450", "">;
++def Mcpu750    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_750", "">;
++def Mcpu970    : SubtargetFeature<"", "Mcpu", "PPC::MCPU_970", "">;
++def McpuPPC32  : SubtargetFeature<"", "Mcpu", "PPC::MCPU_32", "">;
++def McpuPPC64  : SubtargetFeature<"", "Mcpu", "PPC::MCPU_64", "">;
++def McpuA2     : SubtargetFeature<"", "Mcpu", "PPC::MCPU_A2", "">;
++def McpuE500   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_E500", "">;
++def McpuE500mc : SubtargetFeature<"", "Mcpu", "PPC::MCPU_E500mc", "">;
++def McpuE5500  : SubtargetFeature<"", "Mcpu", "PPC::MCPU_E5500", "">;
++def McpuPwr3   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR3", "">;
++def McpuPwr4   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR4", "">;
++def McpuPwr5   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR5", "">;
++def McpuPwr5x  : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR5X", "">;
++def McpuPwr6   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR6", "">;
++def McpuPwr6x  : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR6X", "">;
++def McpuPwr7   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR7", "">;
++def McpuPwr8   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR8", "">;
++def McpuPwr9   : SubtargetFeature<"", "Mcpu", "PPC::MCPU_PWR9", "">;
+ 
+ def Feature64Bit     : SubtargetFeature<"64bit","Has64BitSupport", "true",
+                                         "Enable 64-bit instructions">;
+@@ -207,7 +203,7 @@ def FeatureP9Vector  : SubtargetFeature<"power9-vector", "HasP9Vector", "true",
+ // used elsewhere.
+ def ProcessorFeatures {
+   list<SubtargetFeature> Power7FeatureList =
+-      [DirectivePwr7, FeatureAltivec, FeatureVSX,
++      [McpuPwr7, FeatureAltivec, FeatureVSX,
+        FeatureMFOCRF, FeatureFCPSGN, FeatureFSqrt, FeatureFRE,
+        FeatureFRES, FeatureFRSQRTE, FeatureFRSQRTES,
+        FeatureRecipPrec, FeatureSTFIWX, FeatureLFIWAX,
+@@ -217,13 +213,13 @@ def ProcessorFeatures {
+        FeatureBPERMD, FeatureExtDiv,
+        FeatureMFTB, DeprecatedDST];
+   list<SubtargetFeature> Power8SpecificFeatures =
+-      [DirectivePwr8, FeatureP8Altivec, FeatureP8Vector, FeatureP8Crypto,
++      [McpuPwr8, FeatureP8Altivec, FeatureP8Vector, FeatureP8Crypto,
+        FeatureHTM, FeatureDirectMove, FeatureICBT, FeaturePartwordAtomic,
+        FeatureFusion];
+   list<SubtargetFeature> Power8FeatureList =
+       !listconcat(Power7FeatureList, Power8SpecificFeatures);
+   list<SubtargetFeature> Power9SpecificFeatures =
+-      [DirectivePwr9, FeatureP9Altivec, FeatureP9Vector, FeatureISA3_0];
++      [McpuPwr9, FeatureP9Altivec, FeatureP9Vector, FeatureISA3_0];
+   list<SubtargetFeature> Power9FeatureList =
+       !listconcat(Power8FeatureList, Power9SpecificFeatures);
+ }
+@@ -301,82 +297,82 @@ include "PPCSchedule.td"
+ // PowerPC processors supported.
+ //
+ 
+-def : Processor<"generic", G3Itineraries, [Directive32, FeatureHardFloat,
++def : Processor<"generic", G3Itineraries, [McpuPPC32, FeatureHardFloat,
+                                            FeatureMFTB]>;
+-def : ProcessorModel<"440", PPC440Model, [Directive440, FeatureISEL,
++def : ProcessorModel<"440", PPC440Model, [Mcpu440, FeatureISEL,
+                                           FeatureFRES, FeatureFRSQRTE,
+                                           FeatureICBT, FeatureBookE, 
+                                           FeatureMSYNC, FeatureMFTB]>;
+-def : ProcessorModel<"450", PPC440Model, [Directive440, FeatureISEL,
++def : ProcessorModel<"450", PPC440Model, [Mcpu440, FeatureISEL,
+                                           FeatureFRES, FeatureFRSQRTE,
+                                           FeatureICBT, FeatureBookE, 
+                                           FeatureMSYNC, FeatureMFTB]>;
+-def : Processor<"601", G3Itineraries, [Directive601, FeatureFPU]>;
+-def : Processor<"602", G3Itineraries, [Directive602, FeatureFPU,
++def : Processor<"601", G3Itineraries, [Mcpu601, FeatureFPU]>;
++def : Processor<"602", G3Itineraries, [Mcpu602, FeatureFPU,
+                                        FeatureMFTB]>;
+-def : Processor<"603", G3Itineraries, [Directive603,
++def : Processor<"603", G3Itineraries, [Mcpu603,
+                                        FeatureFRES, FeatureFRSQRTE,
+                                        FeatureMFTB]>;
+-def : Processor<"603e", G3Itineraries, [Directive603,
++def : Processor<"603e", G3Itineraries, [Mcpu603,
+                                         FeatureFRES, FeatureFRSQRTE,
+                                         FeatureMFTB]>;
+-def : Processor<"603ev", G3Itineraries, [Directive603,
++def : Processor<"603ev", G3Itineraries, [Mcpu603,
+                                          FeatureFRES, FeatureFRSQRTE,
+                                          FeatureMFTB]>;
+-def : Processor<"604", G3Itineraries, [Directive604,
++def : Processor<"604", G3Itineraries, [Mcpu604,
+                                        FeatureFRES, FeatureFRSQRTE,
+                                        FeatureMFTB]>;
+-def : Processor<"604e", G3Itineraries, [Directive604,
++def : Processor<"604e", G3Itineraries, [Mcpu604,
+                                         FeatureFRES, FeatureFRSQRTE,
+                                         FeatureMFTB]>;
+-def : Processor<"620", G3Itineraries, [Directive620,
++def : Processor<"620", G3Itineraries, [Mcpu620,
+                                        FeatureFRES, FeatureFRSQRTE,
+                                        FeatureMFTB]>;
+-def : Processor<"750", G4Itineraries, [Directive750,
++def : Processor<"750", G4Itineraries, [Mcpu750,
+                                        FeatureFRES, FeatureFRSQRTE,
+                                        FeatureMFTB]>;
+-def : Processor<"g3", G3Itineraries, [Directive750,
++def : Processor<"g3", G3Itineraries, [Mcpu750,
+                                       FeatureFRES, FeatureFRSQRTE,
+                                       FeatureMFTB]>;
+-def : Processor<"7400", G4Itineraries, [Directive7400, FeatureAltivec,
++def : Processor<"7400", G4Itineraries, [Mcpu7400, FeatureAltivec,
+                                         FeatureFRES, FeatureFRSQRTE,
+                                         FeatureMFTB]>;
+-def : Processor<"g4", G4Itineraries, [Directive7400, FeatureAltivec,
++def : Processor<"7450", G4Itineraries, [Mcpu7450, FeatureAltivec,
++                                        FeatureFRES, FeatureFRSQRTE,
++                                        FeatureMFTB]>;
++def : Processor<"g4", G4Itineraries, [Mcpu7400, FeatureAltivec,
+                                       FeatureFRES, FeatureFRSQRTE,
+                                       FeatureMFTB]>;
+-def : Processor<"7450", G4PlusItineraries, [Directive7400, FeatureAltivec,
+-                                            FeatureFRES, FeatureFRSQRTE,
+-                                            FeatureMFTB]>;
+-def : Processor<"g4+", G4PlusItineraries, [Directive7400, FeatureAltivec,
++def : Processor<"g4+", G4PlusItineraries, [Mcpu7400, FeatureAltivec,
+                                            FeatureFRES, FeatureFRSQRTE, 
+                                            FeatureMFTB]>;
+ 
+ def : ProcessorModel<"970", G5Model,
+-                  [Directive970, FeatureAltivec,
++                  [Mcpu970, FeatureAltivec,
+                    FeatureMFOCRF, FeatureFSqrt,
+                    FeatureFRES, FeatureFRSQRTE, FeatureSTFIWX,
+                    Feature64Bit /*, Feature64BitRegs */,
+                    FeatureMFTB]>;
+ def : ProcessorModel<"g5", G5Model,
+-                  [Directive970, FeatureAltivec,
++                  [Mcpu970, FeatureAltivec,
+                    FeatureMFOCRF, FeatureFSqrt, FeatureSTFIWX,
+                    FeatureFRES, FeatureFRSQRTE,
+                    Feature64Bit /*, Feature64BitRegs */,
+                    FeatureMFTB, DeprecatedDST]>;
+ def : ProcessorModel<"e500", PPCE500Model,
+-                  [DirectiveE500,
++                  [McpuE500,
+                    FeatureICBT, FeatureBookE,
+                    FeatureISEL, FeatureMFTB]>;
+ def : ProcessorModel<"e500mc", PPCE500mcModel,
+-                  [DirectiveE500mc,
++                  [McpuE500mc,
+                    FeatureSTFIWX, FeatureICBT, FeatureBookE, 
+                    FeatureISEL, FeatureMFTB]>;
+ def : ProcessorModel<"e5500", PPCE5500Model,
+-                  [DirectiveE5500, FeatureMFOCRF, Feature64Bit,
++                  [McpuE5500, FeatureMFOCRF, Feature64Bit,
+                    FeatureSTFIWX, FeatureICBT, FeatureBookE, 
+                    FeatureISEL, FeatureMFTB]>;
+ def : ProcessorModel<"a2", PPCA2Model,
+-                  [DirectiveA2, FeatureICBT, FeatureBookE, FeatureMFOCRF,
++                  [McpuA2, FeatureICBT, FeatureBookE, FeatureMFOCRF,
+                    FeatureFCPSGN, FeatureFSqrt, FeatureFRE, FeatureFRES,
+                    FeatureFRSQRTE, FeatureFRSQRTES, FeatureRecipPrec,
+                    FeatureSTFIWX, FeatureLFIWAX,
+@@ -384,7 +380,7 @@ def : ProcessorModel<"a2", PPCA2Model,
+                    FeatureSlowPOPCNTD, FeatureCMPB, FeatureLDBRX,
+                    Feature64Bit /*, Feature64BitRegs */, FeatureMFTB]>;
+ def : ProcessorModel<"a2q", PPCA2Model,
+-                  [DirectiveA2, FeatureICBT, FeatureBookE, FeatureMFOCRF,
++                  [McpuA2, FeatureICBT, FeatureBookE, FeatureMFOCRF,
+                    FeatureFCPSGN, FeatureFSqrt, FeatureFRE, FeatureFRES,
+                    FeatureFRSQRTE, FeatureFRSQRTES, FeatureRecipPrec,
+                    FeatureSTFIWX, FeatureLFIWAX,
+@@ -393,34 +389,34 @@ def : ProcessorModel<"a2q", PPCA2Model,
+                    Feature64Bit /*, Feature64BitRegs */, FeatureQPX,
+                    FeatureMFTB]>;
+ def : ProcessorModel<"pwr3", G5Model,
+-                  [DirectivePwr3, FeatureAltivec,
++                  [McpuPwr3, FeatureAltivec,
+                    FeatureFRES, FeatureFRSQRTE, FeatureMFOCRF,
+                    FeatureSTFIWX, Feature64Bit]>;
+ def : ProcessorModel<"pwr4", G5Model,
+-                  [DirectivePwr4, FeatureAltivec, FeatureMFOCRF,
++                  [McpuPwr4, FeatureAltivec, FeatureMFOCRF,
+                    FeatureFSqrt, FeatureFRES, FeatureFRSQRTE,
+                    FeatureSTFIWX, Feature64Bit, FeatureMFTB]>;
+ def : ProcessorModel<"pwr5", G5Model,
+-                  [DirectivePwr5, FeatureAltivec, FeatureMFOCRF,
++                  [McpuPwr5, FeatureAltivec, FeatureMFOCRF,
+                    FeatureFSqrt, FeatureFRE, FeatureFRES,
+                    FeatureFRSQRTE, FeatureFRSQRTES,
+                    FeatureSTFIWX, Feature64Bit,
+                    FeatureMFTB, DeprecatedDST]>;
+ def : ProcessorModel<"pwr5x", G5Model,
+-                  [DirectivePwr5x, FeatureAltivec, FeatureMFOCRF,
++                  [McpuPwr5x, FeatureAltivec, FeatureMFOCRF,
+                    FeatureFSqrt, FeatureFRE, FeatureFRES,
+                    FeatureFRSQRTE, FeatureFRSQRTES,
+                    FeatureSTFIWX, FeatureFPRND, Feature64Bit,
+                    FeatureMFTB, DeprecatedDST]>;
+ def : ProcessorModel<"pwr6", G5Model,
+-                  [DirectivePwr6, FeatureAltivec,
++                  [McpuPwr6, FeatureAltivec,
+                    FeatureMFOCRF, FeatureFCPSGN, FeatureFSqrt, FeatureFRE,
+                    FeatureFRES, FeatureFRSQRTE, FeatureFRSQRTES,
+                    FeatureRecipPrec, FeatureSTFIWX, FeatureLFIWAX, FeatureCMPB,
+                    FeatureFPRND, Feature64Bit /*, Feature64BitRegs */,
+                    FeatureMFTB, DeprecatedDST]>;
+ def : ProcessorModel<"pwr6x", G5Model,
+-                  [DirectivePwr5x, FeatureAltivec, FeatureMFOCRF,
++                  [McpuPwr5x, FeatureAltivec, FeatureMFOCRF,
+                    FeatureFCPSGN, FeatureFSqrt, FeatureFRE, FeatureFRES,
+                    FeatureFRSQRTE, FeatureFRSQRTES, FeatureRecipPrec,
+                    FeatureSTFIWX, FeatureLFIWAX, FeatureCMPB,
+@@ -429,16 +425,24 @@ def : ProcessorModel<"pwr6x", G5Model,
+ def : ProcessorModel<"pwr7", P7Model, ProcessorFeatures.Power7FeatureList>;
+ def : ProcessorModel<"pwr8", P8Model, ProcessorFeatures.Power8FeatureList>;
+ def : ProcessorModel<"pwr9", P9Model, ProcessorFeatures.Power9FeatureList>; 
+-def : Processor<"ppc", G3Itineraries, [Directive32, FeatureHardFloat,
++def : Processor<"ppc", G3Itineraries, [McpuPPC32, FeatureHardFloat,
+                                        FeatureMFTB]>;
+-def : Processor<"ppc32", G3Itineraries, [Directive32, FeatureHardFloat,
++def : Processor<"ppc32", G3Itineraries, [McpuPPC32, FeatureHardFloat,
+                                          FeatureMFTB]>;
+ def : ProcessorModel<"ppc64", G5Model,
+-                  [Directive64, FeatureAltivec,
++                  [McpuPPC64, FeatureAltivec,
++                   FeatureMFOCRF, FeatureFSqrt, FeatureFRES,
++                   FeatureFRSQRTE, FeatureSTFIWX,
++                   Feature64Bit /*, Feature64BitRegs */,
++                   FeatureMFTB]>;
++
++def : ProcessorModel<"all", G5Model,
++                  [McpuPPC64, FeatureAltivec,
+                    FeatureMFOCRF, FeatureFSqrt, FeatureFRES,
+                    FeatureFRSQRTE, FeatureSTFIWX,
+                    Feature64Bit /*, Feature64BitRegs */,
+                    FeatureMFTB]>;
++                  
+ def : ProcessorModel<"ppc64le", P8Model, ProcessorFeatures.Power8FeatureList>;
+ 
+ //===----------------------------------------------------------------------===//
+diff --git a/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp b/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
+index 3a3186392b7..257ac36d2cd 100644
+--- a/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
++++ b/llvm/lib/Target/PowerPC/PPCAsmPrinter.cpp
+@@ -26,6 +26,7 @@
+ #include "PPCSubtarget.h"
+ #include "PPCTargetMachine.h"
+ #include "PPCTargetStreamer.h"
++#include "PPCMcpu.h"
+ #include "llvm/ADT/MapVector.h"
+ #include "llvm/ADT/StringRef.h"
+ #include "llvm/ADT/Triple.h"
+@@ -1503,56 +1504,39 @@ void PPCLinuxAsmPrinter::EmitFunctionBodyEnd() {
+   }
+ }
+ 
++/// EmitStartOfAsmFile - a custom version for Darwin that emits a .machine
++/// directive.
++/// Since we do not expect the cctools assembler to be able to parse the LLVM
++/// output, we will choose to emit the same machine directives as for ELF.
++
+ void PPCDarwinAsmPrinter::EmitStartOfAsmFile(Module &M) {
+-  static const char *const CPUDirectives[] = {
+-    "",
+-    "ppc",
+-    "ppc440",
+-    "ppc601",
+-    "ppc602",
+-    "ppc603",
+-    "ppc7400",
+-    "ppc750",
+-    "ppc970",
+-    "ppcA2",
+-    "ppce500",
+-    "ppce500mc",
+-    "ppce5500",
+-    "power3",
+-    "power4",
+-    "power5",
+-    "power5x",
+-    "power6",
+-    "power6x",
+-    "power7",
+-    // FIXME: why is power8 missing here?
+-    "ppc64",
+-    "ppc64le",
+-    "power9"
+-  };
+ 
+-  // Get the numerically largest directive.
+-  // FIXME: How should we merge darwin directives?
+-  unsigned Directive = PPC::DIR_NONE;
++  // This is going to emit a .machine directive representative of the 'highest'
++  // specification of CPU we find attached to any function.
++
++  unsigned Mcpu = PPC::MCPU_NONE;
+   for (const Function &F : M) {
+     const PPCSubtarget &STI = TM.getSubtarget<PPCSubtarget>(F);
+-    unsigned FDir = STI.getDarwinDirective();
+-    Directive = Directive > FDir ? FDir : STI.getDarwinDirective();
+-    if (STI.hasMFOCRF() && Directive < PPC::DIR_970)
+-      Directive = PPC::DIR_970;
+-    if (STI.hasAltivec() && Directive < PPC::DIR_7400)
+-      Directive = PPC::DIR_7400;
+-    if (STI.isPPC64() && Directive < PPC::DIR_64)
+-      Directive = PPC::DIR_64;
++    unsigned FDir = STI.getMcpu();
++    Mcpu = Mcpu > FDir ? Mcpu : FDir;
++    if (STI.hasMFOCRF() && Mcpu < PPC::MCPU_970)
++      Mcpu = PPC::MCPU_970;
++    if (STI.hasAltivec() && Mcpu < PPC::MCPU_7400)
++      Mcpu = PPC::MCPU_7400;
++    if (STI.isPPC64() && Mcpu < PPC::MCPU_64)
++      Mcpu = PPC::MCPU_64;
+   }
+ 
+-  assert(Directive <= PPC::DIR_64 && "Directive out of range.");
+-
+-  assert(Directive < array_lengthof(CPUDirectives) &&
+-         "CPUDirectives[] might not be up-to-date!");
+   PPCTargetStreamer &TStreamer =
+       *static_cast<PPCTargetStreamer *>(OutStreamer->getTargetStreamer());
+-  TStreamer.emitMachine(CPUDirectives[Directive]);
++
++  if (Mcpu > PPC::MCPU_NONE) 
++    TStreamer.emitMachine(PPC::mcpuStringFromEnum(Mcpu));
++  else if (!TM.getTargetCPU().empty()) {
++    // We could have a module without functions, fall back to the Target CPU
++    // as determined from the command line.
++    TStreamer.emitMachine(TM.getTargetCPU());
++  } // else we have no info on the variant, so nothing to say.
+ 
+   // Prime text sections so they are adjacent.  This reduces the likelihood a
+   // large data or debug section causes a branch to exceed 16M limit.
+diff --git a/llvm/lib/Target/PowerPC/PPCHazardRecognizers.cpp b/llvm/lib/Target/PowerPC/PPCHazardRecognizers.cpp
+index 793a4dd7f62..908c1fa34c1 100644
+--- a/llvm/lib/Target/PowerPC/PPCHazardRecognizers.cpp
++++ b/llvm/lib/Target/PowerPC/PPCHazardRecognizers.cpp
+@@ -15,6 +15,7 @@
+ #include "PPC.h"
+ #include "PPCInstrInfo.h"
+ #include "PPCTargetMachine.h"
++#include "PPCMcpu.h"
+ #include "llvm/CodeGen/ScheduleDAG.h"
+ #include "llvm/Support/Debug.h"
+ #include "llvm/Support/ErrorHandling.h"
+@@ -159,12 +160,12 @@ unsigned PPCDispatchGroupSBHazardRecognizer::PreEmitNoops(SUnit *SU) {
+   // only be a second branch, and otherwise the next instruction will start a
+   // new group.
+   if (isLoadAfterStore(SU) && CurSlots < 6) {
+-    unsigned Directive =
+-        DAG->MF.getSubtarget<PPCSubtarget>().getDarwinDirective();
++    unsigned Mcpu =
++        DAG->MF.getSubtarget<PPCSubtarget>().getMcpu();
+     // If we're using a special group-terminating nop, then we need only one.
+     // FIXME: the same for P9 as previous gen until POWER9 scheduling is ready
+-    if (Directive == PPC::DIR_PWR6 || Directive == PPC::DIR_PWR7 ||
+-        Directive == PPC::DIR_PWR8 || Directive == PPC::DIR_PWR9)
++    if (Mcpu == PPC::MCPU_PWR6 || Mcpu == PPC::MCPU_PWR7 ||
++        Mcpu == PPC::MCPU_PWR8 || Mcpu == PPC::MCPU_PWR9)
+       return 1;
+ 
+     return 5 - CurSlots;
+@@ -221,12 +222,12 @@ void PPCDispatchGroupSBHazardRecognizer::Reset() {
+ 
+ void PPCDispatchGroupSBHazardRecognizer::EmitNoop() {
+   unsigned Directive =
+-      DAG->MF.getSubtarget<PPCSubtarget>().getDarwinDirective();
++      DAG->MF.getSubtarget<PPCSubtarget>().getMcpu();
+   // If the group has now filled all of its slots, or if we're using a special
+   // group-terminating nop, the group is complete.
+   // FIXME: the same for P9 as previous gen until POWER9 scheduling is ready
+-  if (Directive == PPC::DIR_PWR6 || Directive == PPC::DIR_PWR7 ||
+-      Directive == PPC::DIR_PWR8 || Directive == PPC::DIR_PWR9 ||
++  if (Directive == PPC::MCPU_PWR6 || Directive == PPC::MCPU_PWR7 ||
++      Directive == PPC::MCPU_PWR8 || Directive == PPC::MCPU_PWR9 ||
+       CurSlots == 6) {
+     CurGroup.clear();
+     CurSlots = CurBranches = 0;
+diff --git a/llvm/lib/Target/PowerPC/PPCISelLowering.cpp b/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
+index b5bdf47ce37..137eb13cb6a 100644
+--- a/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
++++ b/llvm/lib/Target/PowerPC/PPCISelLowering.cpp
+@@ -19,6 +19,7 @@
+ #include "PPCFrameLowering.h"
+ #include "PPCInstrInfo.h"
+ #include "PPCMachineFunctionInfo.h"
++#include "PPCMcpu.h"
+ #include "PPCPerfectShuffle.h"
+ #include "PPCRegisterInfo.h"
+ #include "PPCSubtarget.h"
+@@ -1128,21 +1129,21 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
+   if (Subtarget.isDarwin())
+     setPrefFunctionAlignment(4);
+ 
+-  switch (Subtarget.getDarwinDirective()) {
++  switch (Subtarget.getMcpu()) {
+   default: break;
+-  case PPC::DIR_970:
+-  case PPC::DIR_A2:
+-  case PPC::DIR_E500:
+-  case PPC::DIR_E500mc:
+-  case PPC::DIR_E5500:
+-  case PPC::DIR_PWR4:
+-  case PPC::DIR_PWR5:
+-  case PPC::DIR_PWR5X:
+-  case PPC::DIR_PWR6:
+-  case PPC::DIR_PWR6X:
+-  case PPC::DIR_PWR7:
+-  case PPC::DIR_PWR8:
+-  case PPC::DIR_PWR9:
++  case PPC::MCPU_970:
++  case PPC::MCPU_A2:
++  case PPC::MCPU_E500:
++  case PPC::MCPU_E500mc:
++  case PPC::MCPU_E5500:
++  case PPC::MCPU_PWR4:
++  case PPC::MCPU_PWR5:
++  case PPC::MCPU_PWR5X:
++  case PPC::MCPU_PWR6:
++  case PPC::MCPU_PWR6X:
++  case PPC::MCPU_PWR7:
++  case PPC::MCPU_PWR8:
++  case PPC::MCPU_PWR9:
+     setPrefFunctionAlignment(4);
+     setPrefLoopAlignment(4);
+     break;
+@@ -1157,15 +1158,15 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
+ 
+   // The Freescale cores do better with aggressive inlining of memcpy and
+   // friends. GCC uses same threshold of 128 bytes (= 32 word stores).
+-  if (Subtarget.getDarwinDirective() == PPC::DIR_E500mc ||
+-      Subtarget.getDarwinDirective() == PPC::DIR_E5500) {
++  if (Subtarget.getMcpu() == PPC::MCPU_E500mc ||
++      Subtarget.getMcpu() == PPC::MCPU_E5500) {
+     MaxStoresPerMemset = 32;
+     MaxStoresPerMemsetOptSize = 16;
+     MaxStoresPerMemcpy = 32;
+     MaxStoresPerMemcpyOptSize = 8;
+     MaxStoresPerMemmove = 32;
+     MaxStoresPerMemmoveOptSize = 8;
+-  } else if (Subtarget.getDarwinDirective() == PPC::DIR_A2) {
++  } else if (Subtarget.getMcpu() == PPC::MCPU_A2) {
+     // The A2 also benefits from (very) aggressive inlining of memcpy and
+     // friends. The overhead of a the function call, even when warm, can be
+     // over one hundred cycles.
+@@ -10865,14 +10866,14 @@ unsigned PPCTargetLowering::combineRepeatedFPDivisors() const {
+   // Combine multiple FDIVs with the same divisor into multiple FMULs by the
+   // reciprocal if there are two or more FDIVs (for embedded cores with only
+   // one FP pipeline) for three or more FDIVs (for generic OOO cores).
+-  switch (Subtarget.getDarwinDirective()) {
++  switch (Subtarget.getMcpu()) {
+   default:
+     return 3;
+-  case PPC::DIR_440:
+-  case PPC::DIR_A2:
+-  case PPC::DIR_E500:
+-  case PPC::DIR_E500mc:
+-  case PPC::DIR_E5500:
++  case PPC::MCPU_440:
++  case PPC::MCPU_A2:
++  case PPC::MCPU_E500:
++  case PPC::MCPU_E500mc:
++  case PPC::MCPU_E5500:
+     return 2;
+   }
+ }
+@@ -13189,17 +13190,17 @@ void PPCTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
+ }
+ 
+ unsigned PPCTargetLowering::getPrefLoopAlignment(MachineLoop *ML) const {
+-  switch (Subtarget.getDarwinDirective()) {
++  switch (Subtarget.getMcpu()) {
+   default: break;
+-  case PPC::DIR_970:
+-  case PPC::DIR_PWR4:
+-  case PPC::DIR_PWR5:
+-  case PPC::DIR_PWR5X:
+-  case PPC::DIR_PWR6:
+-  case PPC::DIR_PWR6X:
+-  case PPC::DIR_PWR7:
+-  case PPC::DIR_PWR8:
+-  case PPC::DIR_PWR9: {
++  case PPC::MCPU_970:
++  case PPC::MCPU_PWR4:
++  case PPC::MCPU_PWR5:
++  case PPC::MCPU_PWR5X:
++  case PPC::MCPU_PWR6:
++  case PPC::MCPU_PWR6X:
++  case PPC::MCPU_PWR7:
++  case PPC::MCPU_PWR8:
++  case PPC::MCPU_PWR9: {
+     if (!ML)
+       break;
+ 
+diff --git a/llvm/lib/Target/PowerPC/PPCInstrInfo.cpp b/llvm/lib/Target/PowerPC/PPCInstrInfo.cpp
+index 0930f7d3b8d..7aad0125d20 100644
+--- a/llvm/lib/Target/PowerPC/PPCInstrInfo.cpp
++++ b/llvm/lib/Target/PowerPC/PPCInstrInfo.cpp
+@@ -18,6 +18,7 @@
+ #include "PPCInstrBuilder.h"
+ #include "PPCMachineFunctionInfo.h"
+ #include "PPCTargetMachine.h"
++#include "PPCMcpu.h"
+ #include "llvm/ADT/STLExtras.h"
+ #include "llvm/ADT/Statistic.h"
+ #include "llvm/CodeGen/LiveIntervals.h"
+@@ -110,9 +111,9 @@ ScheduleHazardRecognizer *
+ PPCInstrInfo::CreateTargetHazardRecognizer(const TargetSubtargetInfo *STI,
+                                            const ScheduleDAG *DAG) const {
+   unsigned Directive =
+-      static_cast<const PPCSubtarget *>(STI)->getDarwinDirective();
+-  if (Directive == PPC::DIR_440 || Directive == PPC::DIR_A2 ||
+-      Directive == PPC::DIR_E500mc || Directive == PPC::DIR_E5500) {
++      static_cast<const PPCSubtarget *>(STI)->getMcpu();
++  if (Directive == PPC::MCPU_440 || Directive == PPC::MCPU_A2 ||
++      Directive == PPC::MCPU_E500mc || Directive == PPC::MCPU_E5500) {
+     const InstrItineraryData *II =
+         static_cast<const PPCSubtarget *>(STI)->getInstrItineraryData();
+     return new ScoreboardHazardRecognizer(II, DAG);
+@@ -127,15 +128,15 @@ ScheduleHazardRecognizer *
+ PPCInstrInfo::CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
+                                                  const ScheduleDAG *DAG) const {
+   unsigned Directive =
+-      DAG->MF.getSubtarget<PPCSubtarget>().getDarwinDirective();
++      DAG->MF.getSubtarget<PPCSubtarget>().getMcpu();
+ 
+   // FIXME: Leaving this as-is until we have POWER9 scheduling info
+-  if (Directive == PPC::DIR_PWR7 || Directive == PPC::DIR_PWR8)
++  if (Directive == PPC::MCPU_PWR7 || Directive == PPC::MCPU_PWR8)
+     return new PPCDispatchGroupSBHazardRecognizer(II, DAG);
+ 
+   // Most subtargets use a PPC970 recognizer.
+-  if (Directive != PPC::DIR_440 && Directive != PPC::DIR_A2 &&
+-      Directive != PPC::DIR_E500mc && Directive != PPC::DIR_E5500) {
++  if (Directive != PPC::MCPU_440 && Directive != PPC::MCPU_A2 &&
++      Directive != PPC::MCPU_E500mc && Directive != PPC::MCPU_E5500) {
+     assert(DAG->TII && "No InstrInfo?");
+ 
+     return new PPCHazardRecognizer970(*DAG);
+@@ -204,20 +205,20 @@ int PPCInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
+ 
+     // On some cores, there is an additional delay between writing to a condition
+     // register, and using it from a branch.
+-    unsigned Directive = Subtarget.getDarwinDirective();
++    unsigned Directive = Subtarget.getMcpu();
+     switch (Directive) {
+     default: break;
+-    case PPC::DIR_7400:
+-    case PPC::DIR_750:
+-    case PPC::DIR_970:
+-    case PPC::DIR_E5500:
+-    case PPC::DIR_PWR4:
+-    case PPC::DIR_PWR5:
+-    case PPC::DIR_PWR5X:
+-    case PPC::DIR_PWR6:
+-    case PPC::DIR_PWR6X:
+-    case PPC::DIR_PWR7:
+-    case PPC::DIR_PWR8:
++    case PPC::MCPU_7400:
++    case PPC::MCPU_750:
++    case PPC::MCPU_970:
++    case PPC::MCPU_E5500:
++    case PPC::MCPU_PWR4:
++    case PPC::MCPU_PWR5:
++    case PPC::MCPU_PWR5X:
++    case PPC::MCPU_PWR6:
++    case PPC::MCPU_PWR6X:
++    case PPC::MCPU_PWR7:
++    case PPC::MCPU_PWR8:
+     // FIXME: Is this needed for POWER9?
+       Latency += 2;
+       break;
+@@ -457,15 +458,15 @@ void PPCInstrInfo::insertNoop(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator MI) const {
+   // This function is used for scheduling, and the nop wanted here is the type
+   // that terminates dispatch groups on the POWER cores.
+-  unsigned Directive = Subtarget.getDarwinDirective();
++  unsigned Directive = Subtarget.getMcpu();
+   unsigned Opcode;
+   switch (Directive) {
+   default:            Opcode = PPC::NOP; break;
+-  case PPC::DIR_PWR6: Opcode = PPC::NOP_GT_PWR6; break;
+-  case PPC::DIR_PWR7: Opcode = PPC::NOP_GT_PWR7; break;
+-  case PPC::DIR_PWR8: Opcode = PPC::NOP_GT_PWR7; break; /* FIXME: Update when P8 InstrScheduling model is ready */
++  case PPC::MCPU_PWR6: Opcode = PPC::NOP_GT_PWR6; break;
++  case PPC::MCPU_PWR7: Opcode = PPC::NOP_GT_PWR7; break;
++  case PPC::MCPU_PWR8: Opcode = PPC::NOP_GT_PWR7; break; /* FIXME: Update when P8 InstrScheduling model is ready */
+   // FIXME: Update when POWER9 scheduling model is ready.
+-  case PPC::DIR_PWR9: Opcode = PPC::NOP_GT_PWR7; break;
++  case PPC::MCPU_PWR9: Opcode = PPC::NOP_GT_PWR7; break;
+   }
+ 
+   DebugLoc DL;
+diff --git a/llvm/lib/Target/PowerPC/PPCMcpu.h b/llvm/lib/Target/PowerPC/PPCMcpu.h
+new file mode 100644
+index 00000000000..f2c0a92a5db
+--- /dev/null
++++ b/llvm/lib/Target/PowerPC/PPCMcpu.h
+@@ -0,0 +1,66 @@
++//===-- PPCMcpu.h - Define recognised CPU variants for PPC ----*- C++ -*--===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is distributed under the University of Illinois Open Source
++// License. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// This file declares the PowerPC CPU models recognised by the backend.
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_LIB_TARGET_POWERPC_PPCMCPU_H
++#define LLVM_LIB_TARGET_POWERPC_PPCMCPU_H
++
++// GCC #defines PPC on Linux but we use it as our namespace name
++#undef PPC
++
++namespace llvm {
++class StringRef;
++
++/// This needs to stay in sync with the enum in PPCMcpu.cpp.
++
++namespace PPC {
++  enum {
++    MCPU_NONE,
++    MCPU_32,
++    MCPU_440,
++    MCPU_601,
++    MCPU_602,
++    MCPU_603,
++    MCPU_750,
++    MCPU_7400,
++    MCPU_7450,
++    MCPU_970,
++    MCPU_E500,
++    MCPU_E500mc,
++    MCPU_E5500,
++    MCPU_A2,
++    MCPU_PWR3,
++    MCPU_PWR4,
++    MCPU_PWR5,
++    MCPU_PWR5X,
++    MCPU_PWR6,
++    MCPU_PWR6X,
++    MCPU_PWR7,
++    MCPU_PWR8,
++    MCPU_PWR9,
++    MCPU_64,
++    MCPU_64LE,
++    MCPU_ANY,
++    MCPU_BAD // must be last
++  };
++
++StringRef mcpuStringFromEnum(unsigned MCPU);
++
++unsigned mcpuEnumFromString(StringRef CPUName);
++
++/// MachO CPU SubType for file headers.
++unsigned cpuSubTypeFromString(StringRef CPUName);
++
++} // PPC
++
++} // llvm
++#endif // LLVM_LIB_TARGET_POWERPC_PPCMCPU_H
+diff --git a/llvm/lib/Target/PowerPC/PPCSubtarget.cpp b/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
+index c0cbfd779cb..c6b44d95f60 100644
+--- a/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
++++ b/llvm/lib/Target/PowerPC/PPCSubtarget.cpp
+@@ -15,6 +15,7 @@
+ #include "PPC.h"
+ #include "PPCRegisterInfo.h"
+ #include "PPCTargetMachine.h"
++#include "PPCMcpu.h"
+ #include "llvm/CodeGen/MachineFunction.h"
+ #include "llvm/CodeGen/MachineScheduler.h"
+ #include "llvm/IR/Attributes.h"
+@@ -57,7 +58,7 @@ PPCSubtarget::PPCSubtarget(const Triple &TT, const std::string &CPU,
+ 
+ void PPCSubtarget::initializeEnvironment() {
+   StackAlignment = 16;
+-  DarwinDirective = PPC::DIR_NONE;
++  Mcpu = PPC::MCPU_NONE;
+   HasMFOCRF = false;
+   Has64BitSupport = false;
+   Use64BitRegs = false;
+diff --git a/llvm/lib/Target/PowerPC/PPCSubtarget.h b/llvm/lib/Target/PowerPC/PPCSubtarget.h
+index c56f254d6be..397ab30b20a 100644
+--- a/llvm/lib/Target/PowerPC/PPCSubtarget.h
++++ b/llvm/lib/Target/PowerPC/PPCSubtarget.h
+@@ -33,35 +33,6 @@
+ namespace llvm {
+ class StringRef;
+ 
+-namespace PPC {
+-  // -m directive values.
+-  enum {
+-    DIR_NONE,
+-    DIR_32,
+-    DIR_440,
+-    DIR_601,
+-    DIR_602,
+-    DIR_603,
+-    DIR_7400,
+-    DIR_750,
+-    DIR_970,
+-    DIR_A2,
+-    DIR_E500,
+-    DIR_E500mc,
+-    DIR_E5500,
+-    DIR_PWR3,
+-    DIR_PWR4,
+-    DIR_PWR5,
+-    DIR_PWR5X,
+-    DIR_PWR6,
+-    DIR_PWR6X,
+-    DIR_PWR7,
+-    DIR_PWR8,
+-    DIR_PWR9,
+-    DIR_64
+-  };
+-}
+-
+ class GlobalValue;
+ class TargetMachine;
+ 
+@@ -84,8 +55,9 @@ protected:
+   /// Selected instruction itineraries (one entry per itinerary class.)
+   InstrItineraryData InstrItins;
+ 
+-  /// Which cpu directive was used.
+-  unsigned DarwinDirective;
++  /// The "mcpu" that's in force (either set explicitly by -mcpu or by
++  /// a .machine xxxx directive).
++  unsigned Mcpu;
+ 
+   /// Used by the ISel to turn in optimizations for POWER4-derived architectures
+   bool HasMFOCRF;
+@@ -166,10 +138,10 @@ public:
+   /// function for this subtarget.
+   unsigned getStackAlignment() const { return StackAlignment; }
+ 
+-  /// getDarwinDirective - Returns the -m directive specified for the cpu.
+-  ///
+-  unsigned getDarwinDirective() const { return DarwinDirective; }
+-
++  /// getMcpu - Returns the CPU variant in force, either from -mcpu or from a
++  /// .machine directive, where that is supported.
++  unsigned getMcpu() const { return Mcpu; }
++  
+   /// getInstrItins - Return the instruction itineraries based on subtarget
+   /// selection.
+   const InstrItineraryData *getInstrItineraryData() const override {
+diff --git a/llvm/lib/Target/PowerPC/PPCTargetTransformInfo.cpp b/llvm/lib/Target/PowerPC/PPCTargetTransformInfo.cpp
+index b0da9b5a6d7..873c0f74865 100644
+--- a/llvm/lib/Target/PowerPC/PPCTargetTransformInfo.cpp
++++ b/llvm/lib/Target/PowerPC/PPCTargetTransformInfo.cpp
+@@ -8,6 +8,7 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "PPCTargetTransformInfo.h"
++#include "PPCMcpu.h"
+ #include "llvm/Analysis/TargetTransformInfo.h"
+ #include "llvm/CodeGen/BasicTTIImpl.h"
+ #include "llvm/CodeGen/CostTable.h"
+@@ -207,7 +208,7 @@ unsigned PPCTTIImpl::getUserCost(const User *U,
+ 
+ void PPCTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
+                                          TTI::UnrollingPreferences &UP) {
+-  if (ST->getDarwinDirective() == PPC::DIR_A2) {
++  if (ST->getMcpu() == PPC::MCPU_A2) {
+     // The A2 is in-order with a deep pipeline, and concatenation unrolling
+     // helps expose latency-hiding opportunities to the instruction scheduler.
+     UP.Partial = UP.Runtime = true;
+@@ -233,7 +234,7 @@ bool PPCTTIImpl::enableAggressiveInterleaving(bool LoopHasReductions) {
+   // on combining the loads generated for consecutive accesses, and failure to
+   // do so is particularly expensive. This makes it much more likely (compared
+   // to only using concatenation unrolling).
+-  if (ST->getDarwinDirective() == PPC::DIR_A2)
++  if (ST->getMcpu() == PPC::MCPU_A2)
+     return true;
+ 
+   return LoopHasReductions;
+@@ -281,9 +282,9 @@ unsigned PPCTTIImpl::getCacheLineSize() {
+     return CacheLineSize;
+ 
+   // On P7, P8 or P9 we have a cache line size of 128.
+-  unsigned Directive = ST->getDarwinDirective();
+-  if (Directive == PPC::DIR_PWR7 || Directive == PPC::DIR_PWR8 ||
+-      Directive == PPC::DIR_PWR9)
++  unsigned Mcpu = ST->getMcpu();
++  if (Mcpu == PPC::MCPU_PWR7 || Mcpu == PPC::MCPU_PWR8 ||
++      Mcpu == PPC::MCPU_PWR9)
+     return 128;
+ 
+   // On other processors return a default of 64 bytes.
+@@ -297,26 +298,26 @@ unsigned PPCTTIImpl::getPrefetchDistance() {
+ }
+ 
+ unsigned PPCTTIImpl::getMaxInterleaveFactor(unsigned VF) {
+-  unsigned Directive = ST->getDarwinDirective();
++  unsigned Mcpu = ST->getMcpu();
+   // The 440 has no SIMD support, but floating-point instructions
+   // have a 5-cycle latency, so unroll by 5x for latency hiding.
+-  if (Directive == PPC::DIR_440)
++  if (Mcpu == PPC::MCPU_440)
+     return 5;
+ 
+   // The A2 has no SIMD support, but floating-point instructions
+   // have a 6-cycle latency, so unroll by 6x for latency hiding.
+-  if (Directive == PPC::DIR_A2)
++  if (Mcpu == PPC::MCPU_A2)
+     return 6;
+ 
+   // FIXME: For lack of any better information, do no harm...
+-  if (Directive == PPC::DIR_E500mc || Directive == PPC::DIR_E5500)
++  if (Mcpu == PPC::MCPU_E500mc || Mcpu == PPC::MCPU_E5500)
+     return 1;
+ 
+   // For P7 and P8, floating-point instructions have a 6-cycle latency and
+   // there are two execution units, so unroll by 12x for latency hiding.
+   // FIXME: the same for P9 as previous gen until POWER9 scheduling is ready
+-  if (Directive == PPC::DIR_PWR7 || Directive == PPC::DIR_PWR8 ||
+-      Directive == PPC::DIR_PWR9)
++  if (Mcpu == PPC::MCPU_PWR7 || Mcpu == PPC::MCPU_PWR8 ||
++      Mcpu == PPC::MCPU_PWR9)
+     return 12;
+ 
+   // For most things, modern systems have two execution units (and

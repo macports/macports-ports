@@ -1,0 +1,1640 @@
+From 36548ee6594870e1dcb158593d6d346ad885acc5 Mon Sep 17 00:00:00 2001
+From: Iain Sandoe <iain@sandoe.co.uk>
+Date: Thu, 24 Apr 2014 01:20:41 +0100
+Subject: [PATCH] [llvm, Darwin, ppc] Improve support for Mach-O relocs.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Scattered data relocs are needed to implement EH (as a minimum) plus there are a number of incorrect code-gen cases in the existing implementation.
+
+Essentially, other than adding support for .quad, Darwin ppc64 relocs are the same as ppc32 ones, so there’s no need to exclude ppc64 from MC layer (at least).
+
+Amend MachOObjectFile and tests to reflect this.
+Fix symbol+offset case for H* relocs.
+Add tests.
+---
+ llvm/lib/Object/MachOObjectFile.cpp           |   1 +
+ .../PowerPC/MCTargetDesc/PPCMCAsmInfo.cpp     |   3 +-
+ .../MCTargetDesc/PPCMachObjectWriter.cpp      | 437 +++++++++++-------
+ llvm/test/MC/MachO/PowerPC/branch-relocs.s    | 155 +++++++
+ llvm/test/MC/MachO/PowerPC/data-relocs-1.s    | 127 +++++
+ llvm/test/MC/MachO/PowerPC/data-relocs-2.s    | 103 +++++
+ llvm/test/MC/MachO/PowerPC/eh-frame-relocs.s  |  23 +
+ llvm/test/MC/MachO/PowerPC/eh-symbol.s        |  14 +
+ .../MC/MachO/PowerPC/half-relocs-1-ppc64.s    |  90 ++++
+ llvm/test/MC/MachO/PowerPC/half-relocs-1.s    |  88 ++++
+ llvm/test/MC/MachO/PowerPC/half-relocs-2.s    | 113 +++++
+ llvm/test/MC/MachO/PowerPC/large-relocs.s     |  33 ++
+ llvm/test/tools/llvm-readobj/relocations.test |  20 +-
+ .../test/tools/llvm-readobj/sections-ext.test |  20 +-
+ 14 files changed, 1033 insertions(+), 194 deletions(-)
+ create mode 100644 llvm/test/MC/MachO/PowerPC/branch-relocs.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/data-relocs-1.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/data-relocs-2.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/eh-frame-relocs.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/eh-symbol.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/half-relocs-1-ppc64.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/half-relocs-1.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/half-relocs-2.s
+ create mode 100644 llvm/test/MC/MachO/PowerPC/large-relocs.s
+
+diff --git a/llvm/lib/Object/MachOObjectFile.cpp b/llvm/lib/Object/MachOObjectFile.cpp
+index e422903f280..f595705935e 100644
+--- a/llvm/lib/Object/MachOObjectFile.cpp
++++ b/llvm/lib/Object/MachOObjectFile.cpp
+@@ -2188,6 +2188,7 @@ void MachOObjectFile::getRelocationTypeName(
+         res = Table[RType];
+       break;
+     }
++    case Triple::ppc64: // PPC64 and PPC share relocations.
+     case Triple::ppc: {
+       static const char *const Table[] =  {
+         "PPC_RELOC_VANILLA",
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCAsmInfo.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCAsmInfo.cpp
+index 7fbef776e63..c4172288245 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCAsmInfo.cpp
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMCAsmInfo.cpp
+@@ -32,8 +32,7 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple& T) {
+ 
+   ExceptionsType = ExceptionHandling::DwarfCFI;
+ 
+-  if (!is64Bit)
+-    Data64bitsDirective = nullptr; // We can't emit a 64-bit unit in PPC32 mode.
++  Data64bitsDirective = is64Bit ? "\t.quad\t" : nullptr;
+ 
+   AssemblerDialect = 1;           // New-Style mnemonics.
+   SupportsDebugInformation= true; // Debug information.
+diff --git a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMachObjectWriter.cpp b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMachObjectWriter.cpp
+index ff6cf584da2..237b682db0e 100644
+--- a/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMachObjectWriter.cpp
++++ b/llvm/lib/Target/PowerPC/MCTargetDesc/PPCMachObjectWriter.cpp
+@@ -20,21 +20,27 @@
+ #include "llvm/Support/ErrorHandling.h"
+ #include "llvm/Support/Format.h"
+ 
++#include "llvm/Support/Debug.h"
++
++#define DEBUG_TYPE "macho-relocs"
++
+ using namespace llvm;
+ 
+ namespace {
+ class PPCMachObjectWriter : public MCMachObjectTargetWriter {
+-  bool recordScatteredRelocation(MachObjectWriter *Writer,
++  void recordScatteredRelocation(MachObjectWriter *Writer,
+                                  const MCAssembler &Asm,
+                                  const MCAsmLayout &Layout,
+                                  const MCFragment *Fragment,
+                                  const MCFixup &Fixup, MCValue Target,
+-                                 unsigned Log2Size, uint64_t &FixedValue);
++                                 uint64_t &FixedValue, const MCFixupKind FK);
+ 
+-  void RecordPPCRelocation(MachObjectWriter *Writer, const MCAssembler &Asm,
+-                           const MCAsmLayout &Layout,
+-                           const MCFragment *Fragment, const MCFixup &Fixup,
+-                           MCValue Target, uint64_t &FixedValue);
++  void recordRegularRelocation(MachObjectWriter *Writer,
++                               const MCAssembler &Asm,
++                               const MCAsmLayout &Layout,
++                               const MCFragment *Fragment,
++                               const MCFixup &Fixup, MCValue Target,
++                               uint64_t &FixedValue, const MCFixupKind FK);
+ 
+ public:
+   PPCMachObjectWriter(bool Is64Bit, uint32_t CPUType, uint32_t CPUSubtype)
+@@ -44,42 +50,52 @@ public:
+                         const MCAsmLayout &Layout, const MCFragment *Fragment,
+                         const MCFixup &Fixup, MCValue Target,
+                         uint64_t &FixedValue) override {
+-    if (Writer->is64Bit()) {
+-      report_fatal_error("Relocation emission for MachO/PPC64 unimplemented.");
+-    } else
+-      RecordPPCRelocation(Writer, Asm, Layout, Fragment, Fixup, Target,
+-                          FixedValue);
++
++    /// Mach-O can handle relocations of forms up to "A-B+offset" (with some
++    /// limitations).  To do this (for ppc and ppc64) we use two kinds of
++    /// relocation entry:
++    /// 1. A "regular" type which is used for cases where there is no
++    ///       subtracted symbol and:
++    /// 1.a A is an undefined external symbol (optionally with an offset)
++    /// 1.b A is a defined symbol without any offset.
++    /// 1.c A is a defined symbol where the offset exceeds the value that can
++    ///       be encoded in a scattered relocation - this is acknowledged as a
++    ///       risky scenario, but isn't reported as a warning/error currently.
++
++    /// 2. A "scattered" type which is used for all other cases, including
++    /// those where there are subtractions of two symbols, although both of
++    /// the symbols must be define in the TU for these to work.
++
++    const MCFixupKind FK = Fixup.getKind();
++    bool ADefined = false;
++    const MCSymbol *A = nullptr;
++    int32_t AOffs = 0;
++    if (Target.getSymA())
++      A = &Target.getSymA()->getSymbol();
++    if (A != nullptr && A->getFragment() != nullptr) {
++      ADefined = true;
++      AOffs = Target.getConstant() + Layout.getFragmentOffset(Fragment);
++    }
++
++    if (!Target.getSymB() && 
++         (!ADefined /*1.a*/ || Target.getConstant() == 0 /*1.b*/||
++           AOffs > 0x00ffffff /*1.c*/))
++      recordRegularRelocation(Writer, Asm, Layout, Fragment, Fixup, Target,
++                              FixedValue, FK);
++    else if (!ADefined)
++      report_fatal_error("target symbol '"
++                         + ((A != nullptr) ? A->getName() : "") +
++                       "' can not be undefined in a subtraction expression");
++    else /*2*/
++      recordScatteredRelocation(Writer, Asm, Layout, Fragment, Fixup, Target,
++                                FixedValue, FK);
+   }
+ };
+-}
++} // anonymous namespace.
+ 
+-/// computes the log2 of the size of the relocation,
+-/// used for relocation_info::r_length.
+-static unsigned getFixupKindLog2Size(unsigned Kind) {
+-  switch (Kind) {
+-  default:
+-    report_fatal_error("log2size(FixupKind): Unhandled fixup kind!");
+-  case FK_PCRel_1:
+-  case FK_Data_1:
+-    return 0;
+-  case FK_PCRel_2:
+-  case FK_Data_2:
+-    return 1;
+-  case FK_PCRel_4:
+-  case PPC::fixup_ppc_brcond14:
+-  case PPC::fixup_ppc_half16:
+-  case PPC::fixup_ppc_br24:
+-  case FK_Data_4:
+-    return 2;
+-  case FK_PCRel_8:
+-  case FK_Data_8:
+-    return 3;
+-  }
+-  return 0;
+-}
++// Supporting functions.
+ 
+ /// Translates generic PPC fixup kind to Mach-O/PPC relocation type enum.
+-/// Outline based on PPCELFObjectWriter::getRelocType().
+ static unsigned getRelocType(const MCValue &Target,
+                              const MCFixupKind FixupKind, // from
+                                                           // Fixup.getKind()
+@@ -87,77 +103,101 @@ static unsigned getRelocType(const MCValue &Target,
+   const MCSymbolRefExpr::VariantKind Modifier =
+       Target.isAbsolute() ? MCSymbolRefExpr::VK_None
+                           : Target.getSymA()->getKind();
+-  // determine the type of the relocation
+-  unsigned Type = MachO::GENERIC_RELOC_VANILLA;
+-  if (IsPCRel) { // relative to PC
++  // Determine the type of the relocation.
++  // Default to vanilla.
++  unsigned Type = MachO::PPC_RELOC_VANILLA;
++  if (IsPCRel) {
+     switch ((unsigned)FixupKind) {
+-    default:
+-      report_fatal_error("Unimplemented fixup kind (relative)");
+     case PPC::fixup_ppc_br24:
+       Type = MachO::PPC_RELOC_BR24; // R_PPC_REL24
+       break;
+     case PPC::fixup_ppc_brcond14:
+       Type = MachO::PPC_RELOC_BR14;
+       break;
+-    case PPC::fixup_ppc_half16:
+-      switch (Modifier) {
+-      default:
+-        llvm_unreachable("Unsupported modifier for half16 fixup");
+-      case MCSymbolRefExpr::VK_PPC_HA:
+-        Type = MachO::PPC_RELOC_HA16;
+-        break;
+-      case MCSymbolRefExpr::VK_PPC_LO:
+-        Type = MachO::PPC_RELOC_LO16;
+-        break;
+-      case MCSymbolRefExpr::VK_PPC_HI:
+-        Type = MachO::PPC_RELOC_HI16;
+-        break;
+-      }
++    case FK_PCRel_8:
++    case FK_PCRel_4:
++    case FK_PCRel_2:
++    case FK_PCRel_1:
+       break;
++     default:
++      report_fatal_error("Unimplemented fixup kind (PC-relative)");
++     break;
+     }
+   } else {
+     switch ((unsigned)FixupKind) {
+-    default:
+-      report_fatal_error("Unimplemented fixup kind (absolute)!");
++    case FK_Data_8:
++    case FK_Data_4:
++    case FK_Data_2:
++    case FK_Data_1:
++      break;
+     case PPC::fixup_ppc_half16:
++    case PPC::fixup_ppc_half16ds:
+       switch (Modifier) {
+       default:
+         llvm_unreachable("Unsupported modifier for half16 fixup");
+       case MCSymbolRefExpr::VK_PPC_HA:
+-        Type = MachO::PPC_RELOC_HA16_SECTDIFF;
+-        break;
+-      case MCSymbolRefExpr::VK_PPC_LO:
+-        Type = MachO::PPC_RELOC_LO16_SECTDIFF;
++        Type = MachO::PPC_RELOC_HA16;
+         break;
+       case MCSymbolRefExpr::VK_PPC_HI:
+-        Type = MachO::PPC_RELOC_HI16_SECTDIFF;
++        Type = MachO::PPC_RELOC_HI16;
++        break;
++      case MCSymbolRefExpr::VK_PPC_LO:
++        Type = (unsigned)FixupKind == PPC::fixup_ppc_half16ds
++               ? MachO::PPC_RELOC_LO14
++               : MachO::PPC_RELOC_LO16;
+         break;
+       }
+       break;
+-    case FK_Data_4:
+-      break;
+-    case FK_Data_2:
++    default:
++      report_fatal_error("Unimplemented fixup kind (absolute)!");
+       break;
+     }
+   }
+   return Type;
+ }
+ 
++/// computes the log2 of the size of the relocation,
++/// used for relocation_info::r_length.
++static unsigned getFixupKindLog2Size(unsigned Kind) {
++  switch (Kind) {
++  default:
++    report_fatal_error("log2size(FixupKind): Unhandled fixup kind! (%d)", Kind);
++  case FK_PCRel_1:
++  case FK_Data_1:
++    return 0;
++  case FK_PCRel_2:
++  case FK_Data_2:
++    return 1;
++  case FK_PCRel_4:
++  case FK_Data_4:
++  case PPC::fixup_ppc_brcond14:
++  case PPC::fixup_ppc_br24:
++  case PPC::fixup_ppc_half16:
++  case PPC::fixup_ppc_half16ds:
++    return 2;
++  case FK_PCRel_8:
++  case FK_Data_8:
++    return 3;
++  }
++  return 0;
++}
++
++// See llvm/Support/Macho.h, 
++// Mac OS X ABI Mach-O File Format Reference : Relocation Data Structures
++// Mach-O Programming Topics : Position independent code.
++
++// Here we shift the fields into position, avoiding the need to have
++// endian-specific code to manipulate them.
+ static void makeRelocationInfo(MachO::any_relocation_info &MRE,
+                                const uint32_t FixupOffset, const uint32_t Index,
+                                const unsigned IsPCRel, const unsigned Log2Size,
+                                const unsigned IsExtern, const unsigned Type) {
+   MRE.r_word0 = FixupOffset;
+-  // The bitfield offsets that work (as determined by trial-and-error)
+-  // are different than what is documented in the mach-o manuals.
+-  // This appears to be an endianness issue; reversing the order of the
+-  // documented bitfields in <llvm/BinaryFormat/MachO.h> fixes this (but
+-  // breaks x86/ARM assembly).
+-  MRE.r_word1 = ((Index << 8) |    // was << 0
+-                 (IsPCRel << 7) |  // was << 24
+-                 (Log2Size << 5) | // was << 25
+-                 (IsExtern << 4) | // was << 27
+-                 (Type << 0));     // was << 28
++  MRE.r_word1 = ((Index << 8) | // r_symbolnum = (extern)?symbol#:section#
++                 (IsPCRel << 7) | // r_pcrel
++                 (Log2Size << 5) | // r_size log2(size) #3 is special.
++                 (IsExtern << 4) | // r_extern - symbol is in the symtab
++                 (Type << 0)); // r_type = relocation type.
+ }
+ 
+ static void
+@@ -165,10 +205,11 @@ makeScatteredRelocationInfo(MachO::any_relocation_info &MRE,
+                             const uint32_t Addr, const unsigned Type,
+                             const unsigned Log2Size, const unsigned IsPCRel,
+                             const uint32_t Value2) {
+-  // For notes on bitfield positions and endianness, see:
+-  // https://developer.apple.com/library/mac/documentation/developertools/conceptual/MachORuntime/Reference/reference.html#//apple_ref/doc/uid/20001298-scattered_relocation_entry
+-  MRE.r_word0 = ((Addr << 0) | (Type << 24) | (Log2Size << 28) |
+-                 (IsPCRel << 30) | MachO::R_SCATTERED);
++  MRE.r_word0 = ((Addr << 0) |
++                 (Type << 24) |
++                 (Log2Size << 28) |
++                 (IsPCRel << 30) |
++                 MachO::R_SCATTERED);
+   MRE.r_word1 = Value2;
+ }
+ 
+@@ -179,41 +220,33 @@ static uint32_t getFixupOffset(const MCAsmLayout &Layout,
+   uint32_t FixupOffset = Layout.getFragmentOffset(Fragment) + Fixup.getOffset();
+   // On Mach-O, ppc_fixup_half16 relocations must refer to the
+   // start of the instruction, not the second halfword, as ELF does
+-  if (unsigned(Fixup.getKind()) == PPC::fixup_ppc_half16)
++  if (unsigned(Fixup.getKind()) == PPC::fixup_ppc_half16 ||
++      unsigned(Fixup.getKind()) == PPC::fixup_ppc_half16ds)
+     FixupOffset &= ~uint32_t(3);
+   return FixupOffset;
+ }
+ 
+-/// \return false if falling back to using non-scattered relocation,
+-/// otherwise true for normal scattered relocation.
+-/// based on X86MachObjectWriter::recordScatteredRelocation
+-/// and ARMMachObjectWriter::recordScatteredRelocation
+-bool PPCMachObjectWriter::recordScatteredRelocation(
++/// Record a scattered relocation or fail.
++
++void PPCMachObjectWriter::recordScatteredRelocation(
+     MachObjectWriter *Writer, const MCAssembler &Asm, const MCAsmLayout &Layout,
+     const MCFragment *Fragment, const MCFixup &Fixup, MCValue Target,
+-    unsigned Log2Size, uint64_t &FixedValue) {
+-  // caller already computes these, can we just pass and reuse?
+-  const uint32_t FixupOffset = getFixupOffset(Layout, Fragment, Fixup);
+-  const MCFixupKind FK = Fixup.getKind();
+-  const unsigned IsPCRel = Writer->isFixupKindPCRel(Asm, FK);
+-  const unsigned Type = getRelocType(Target, FK, IsPCRel);
++    uint64_t &FixedValue, const MCFixupKind FK ) {
+ 
+-  // Is this a local or SECTDIFF relocation entry?
+-  // SECTDIFF relocation entries have symbol subtractions,
+-  // and require two entries, the first for the add-symbol value,
+-  // the second for the subtract-symbol value.
++  const uint32_t FixupOffset = getFixupOffset(Layout, Fragment, Fixup);
++  const unsigned Log2Size = getFixupKindLog2Size(FK);
++  const bool IsPCRel = Writer->isFixupKindPCRel(Asm, FK);
++  unsigned Type = getRelocType(Target, FK, IsPCRel);
++  bool IsBr = (unsigned) FK == PPC::fixup_ppc_br24 ||
++              (unsigned) FK == PPC::fixup_ppc_brcond14;
+ 
+-  // See <reloc.h>.
++  // We've already checked that A is defined.
+   const MCSymbol *A = &Target.getSymA()->getSymbol();
+-
+-  if (!A->getFragment())
+-    report_fatal_error("symbol '" + A->getName() +
+-                       "' can not be undefined in a subtraction expression");
+-
+   uint32_t Value = Writer->getSymbolAddress(*A, Layout);
+   uint64_t SecAddr = Writer->getSectionAddress(A->getFragment()->getParent());
+-  FixedValue += SecAddr;
++  FixedValue += SecAddr; // Address of A.
+   uint32_t Value2 = 0;
++  MachO::any_relocation_info MRE;
+ 
+   if (const MCSymbolRefExpr *B = Target.getSymB()) {
+     const MCSymbol *SB = &B->getSymbol();
+@@ -222,124 +255,158 @@ bool PPCMachObjectWriter::recordScatteredRelocation(
+       report_fatal_error("symbol '" + SB->getName() +
+                          "' can not be undefined in a subtraction expression");
+ 
+-    // FIXME: is Type correct? see include/llvm/BinaryFormat/MachO.h
++    if (IsBr)
++      report_fatal_error("symbol '" + SB->getName() +
++                         "' can not be subtracted in a branch instruction");
++
++    // Select the appropriate difference relocation type.
++    //
++    // Note that there is no longer any semantic difference between these two
++    // relocation types from the linkers point of view, this is done solely
++    // for pedantic compatibility with 'cctools as'.
++
++    switch (Type) {
++    case MachO::PPC_RELOC_VANILLA:
++      Type = A->isExternal() ? (unsigned)MachO::PPC_RELOC_SECTDIFF
++                             : (unsigned)MachO::PPC_RELOC_LOCAL_SECTDIFF;
++      break;
++    case MachO::PPC_RELOC_HI16:
++      dbgs() << "The linker doesn't expect HI16_SECTDIFF scattered relocs?\n";
++      Type = MachO::PPC_RELOC_HI16_SECTDIFF;
++      break;
++    case MachO::PPC_RELOC_HA16:
++      Type = MachO::PPC_RELOC_HA16_SECTDIFF;
++      break;
++    case MachO::PPC_RELOC_LO16:
++      Type = MachO::PPC_RELOC_LO16_SECTDIFF;
++      break;
++    case MachO::PPC_RELOC_LO14:
++      Type = MachO::PPC_RELOC_LO14_SECTDIFF;
++      break;
++    default:
++      dbgs() << "Unhandled relocation type in scattered relocs.\n";
++      break;
++    }
++
++    // Address of B in its section.
+     Value2 = Writer->getSymbolAddress(*SB, Layout);
++    // Subtract out the section start for B.
+     FixedValue -= Writer->getSectionAddress(SB->getFragment()->getParent());
+-  }
+-  // FIXME: does FixedValue get used??
+-
+-  // Relocations are written out in reverse order, so the PAIR comes first.
+-  if (Type == MachO::PPC_RELOC_SECTDIFF ||
+-      Type == MachO::PPC_RELOC_HI16_SECTDIFF ||
+-      Type == MachO::PPC_RELOC_LO16_SECTDIFF ||
+-      Type == MachO::PPC_RELOC_HA16_SECTDIFF ||
+-      Type == MachO::PPC_RELOC_LO14_SECTDIFF ||
+-      Type == MachO::PPC_RELOC_LOCAL_SECTDIFF) {
+-    // X86 had this piece, but ARM does not
++
++    // Value = Addr (A)
++    // Value2 = Addr (B)
++    // FixedValue = A + sect(A) - sect(B).
++
+     // If the offset is too large to fit in a scattered relocation,
+     // we're hosed. It's an unfortunate limitation of the MachO format.
+-    if (FixupOffset > 0xffffff) {
++    if (FixupOffset > 0x00ffffff) {
+       char Buffer[32];
+       format("0x%x", FixupOffset).print(Buffer, sizeof(Buffer));
+       Asm.getContext().reportError(Fixup.getLoc(),
+                                   Twine("Section too large, can't encode "
+-                                        "r_address (") +
+-                                      Buffer + ") into 24 bits of scattered "
++                                        "r_address (") + Buffer +
++                                        ") into 24 bits of scattered "
+                                                "relocation entry.");
+-      return false;
++      return;
+     }
+ 
+-    // Is this supposed to follow MCTarget/PPCAsmBackend.cpp:adjustFixupValue()?
+-    // see PPCMCExpr::evaluateAsRelocatableImpl()
+-    uint32_t other_half = 0;
++    uint32_t OtherHalf = 0;
+     switch (Type) {
++    case MachO::PPC_RELOC_SECTDIFF:
++    case MachO::PPC_RELOC_LOCAL_SECTDIFF:
++      break;
+     case MachO::PPC_RELOC_LO16_SECTDIFF:
+-      other_half = (FixedValue >> 16) & 0xffff;
++    case MachO::PPC_RELOC_LO14_SECTDIFF:
++      OtherHalf = (FixedValue >> 16) & 0xffff;
+       // applyFixupOffset longer extracts the high part because it now assumes
+-      // this was already done.
+-      // It looks like this is not true for the FixedValue needed with Mach-O
+-      // relocs.
+-      // So we need to adjust FixedValue again here.
++      // this was already done.   It looks like this is not true for the
++      // FixedValue needed with Mach-O relocs. So we need to adjust FixedValue
++      // again here.
+       FixedValue &= 0xffff;
+       break;
+     case MachO::PPC_RELOC_HA16_SECTDIFF:
+-      other_half = FixedValue & 0xffff;
++      OtherHalf = FixedValue & 0xffff;
+       FixedValue =
+           ((FixedValue >> 16) + ((FixedValue & 0x8000) ? 1 : 0)) & 0xffff;
+       break;
+     case MachO::PPC_RELOC_HI16_SECTDIFF:
+-      other_half = FixedValue & 0xffff;
++      OtherHalf = FixedValue & 0xffff;
+       FixedValue = (FixedValue >> 16) & 0xffff;
+       break;
+     default:
+       llvm_unreachable("Invalid PPC scattered relocation type.");
+       break;
+     }
+-
+-    MachO::any_relocation_info MRE;
+-    makeScatteredRelocationInfo(MRE, other_half, MachO::GENERIC_RELOC_PAIR,
+-                                Log2Size, IsPCRel, Value2);
++    // We always need a pair here.
++    // Relocations are written out in reverse order, so the PAIR comes first.
++    makeScatteredRelocationInfo(MRE, OtherHalf, MachO::PPC_RELOC_PAIR, Log2Size,
++                                IsPCRel, Value2);
+     Writer->addRelocation(nullptr, Fragment->getParent(), MRE);
+   } else {
+-    // If the offset is more than 24-bits, it won't fit in a scattered
+-    // relocation offset field, so we fall back to using a non-scattered
+-    // relocation. This is a bit risky, as if the offset reaches out of
+-    // the block and the linker is doing scattered loading on this
+-    // symbol, things can go badly.
+-    //
+-    // Required for 'as' compatibility.
+-    if (FixupOffset > 0xffffff)
+-      return false;
++    // At this point, we either have A+offset, a branch or a "vanilla" type.
++    uint32_t OtherHalf = 0;
++    bool NeedRegularPair = true;
++    switch (Type) {
++    case MachO::PPC_RELOC_LO16:
++    case MachO::PPC_RELOC_LO14:
++      OtherHalf = (FixedValue >> 16) & 0xffff;
++      // see comment above.
++      FixedValue &= 0xffff;
++      break;
++    case MachO::PPC_RELOC_HA16:
++      OtherHalf = FixedValue & 0xffff;
++      FixedValue =
++          ((FixedValue >> 16) + ((FixedValue & 0x8000) ? 1 : 0)) & 0xffff;
++      break;
++    case MachO::PPC_RELOC_HI16:
++      OtherHalf = FixedValue & 0xffff;
++      FixedValue = (FixedValue >> 16) & 0xffff;
++      break;
++    default:
++      assert((IsBr || Type == MachO::PPC_RELOC_VANILLA) &&
++             "No subtractor and not a branch or Vanilla?");
++      NeedRegularPair = false;
++      break;
++    }
++
++    if (NeedRegularPair) {
++      // This is the case where we have Sym+offset and the PAIR is non-
++      // scattered.
++      makeRelocationInfo(MRE, OtherHalf, 0 /*Index*/, IsPCRel, Log2Size,
++                         false /*IsExtern*/, MachO::PPC_RELOC_PAIR);
++      Writer->addRelocation(nullptr, Fragment->getParent(), MRE);
++    }
+   }
+-  MachO::any_relocation_info MRE;
++
++  // CHECKME: why not "FixedValue".
+   makeScatteredRelocationInfo(MRE, FixupOffset, Type, Log2Size, IsPCRel, Value);
+   Writer->addRelocation(nullptr, Fragment->getParent(), MRE);
+-  return true;
+ }
+ 
+-// see PPCELFObjectWriter for a general outline of cases
+-void PPCMachObjectWriter::RecordPPCRelocation(
++/// Record a regular relocation or fail.
++
++void PPCMachObjectWriter::recordRegularRelocation(
+     MachObjectWriter *Writer, const MCAssembler &Asm, const MCAsmLayout &Layout,
+     const MCFragment *Fragment, const MCFixup &Fixup, MCValue Target,
+-    uint64_t &FixedValue) {
+-  const MCFixupKind FK = Fixup.getKind(); // unsigned
++    uint64_t &FixedValue, const MCFixupKind FK) {
+   const unsigned Log2Size = getFixupKindLog2Size(FK);
+   const bool IsPCRel = Writer->isFixupKindPCRel(Asm, FK);
+   const unsigned RelocType = getRelocType(Target, FK, IsPCRel);
+ 
+-  // If this is a difference or a defined symbol plus an offset, then we need a
+-  // scattered relocation entry. Differences always require scattered
+-  // relocations.
+-  if (Target.getSymB() &&
+-      // Q: are branch targets ever scattered?
+-      RelocType != MachO::PPC_RELOC_BR24 &&
+-      RelocType != MachO::PPC_RELOC_BR14) {
+-    recordScatteredRelocation(Writer, Asm, Layout, Fragment, Fixup, Target,
+-                              Log2Size, FixedValue);
+-    return;
+-  }
++  // Get the symbol data, if it exists.
+ 
+-  // this doesn't seem right for RIT_PPC_BR24
+-  // Get the symbol data, if any.
+   const MCSymbol *A = nullptr;
+   if (Target.getSymA())
+     A = &Target.getSymA()->getSymbol();
+ 
+   // See <reloc.h>.
+   const uint32_t FixupOffset = getFixupOffset(Layout, Fragment, Fixup);
+-  unsigned Index = 0;
++  unsigned Index = 0; // extern = 0 && Index = 0 => R_ABS.
+   unsigned Type = RelocType;
+ 
+   const MCSymbol *RelSymbol = nullptr;
+-  if (Target.isAbsolute()) { // constant
+-                             // SymbolNum of 0 indicates the absolute section.
+-                             //
+-    // FIXME: Currently, these are never generated (see code below). I cannot
+-    // find a case where they are actually emitted.
+-    report_fatal_error("FIXME: relocations to absolute targets "
+-                       "not yet implemented");
+-    // the above line stolen from ARM, not sure
+-  } else {
++  if (!Target.isAbsolute()) {
++    assert (A != nullptr && "missing symbol A");
+     // Resolve constant variables.
+     if (A->isVariable()) {
+       int64_t Res;
+@@ -368,8 +435,34 @@ void PPCMachObjectWriter::RecordPPCRelocation(
+       FixedValue -= Writer->getSectionAddress(Fragment->getParent());
+   }
+ 
+-  // struct relocation_info (8 bytes)
++  uint32_t OtherHalf = 0;
++  bool NeedsPair = true;
++  switch (Type) {
++  default:
++    NeedsPair = false;
++   break;
++  case MachO::PPC_RELOC_LO16:
++  case MachO::PPC_RELOC_LO14:
++      OtherHalf = (FixedValue >> 16) & 0xffff;
++      FixedValue &= 0xffff;
++      break;
++  case MachO::PPC_RELOC_HA16:
++      OtherHalf = FixedValue & 0xffff;
++      FixedValue =
++          ((FixedValue >> 16) + ((FixedValue & 0x8000) ? 1 : 0)) & 0xffff;
++      break;
++  case MachO::PPC_RELOC_HI16:
++      OtherHalf = FixedValue & 0xffff;
++      FixedValue = (FixedValue >> 16) & 0xffff;
++      break;
++  }
++
+   MachO::any_relocation_info MRE;
++  if (NeedsPair) {
++    makeRelocationInfo(MRE, OtherHalf, 0, IsPCRel, Log2Size, false, MachO::PPC_RELOC_PAIR);
++    Writer->addRelocation(RelSymbol, Fragment->getParent(), MRE);
++  }
++  // struct relocation_info (8 bytes)
+   makeRelocationInfo(MRE, FixupOffset, Index, IsPCRel, Log2Size, false, Type);
+   Writer->addRelocation(RelSymbol, Fragment->getParent(), MRE);
+ }
+diff --git a/llvm/test/MC/MachO/PowerPC/branch-relocs.s b/llvm/test/MC/MachO/PowerPC/branch-relocs.s
+new file mode 100644
+index 00000000000..ce256a4aa0a
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/branch-relocs.s
+@@ -0,0 +1,155 @@
++// RUN: llvm-mc -triple powerpc-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC
++// RUN: llvm-mc -triple powerpc64-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC64
++
++# Test that we generate the correct relocation entries for branches.
++
++	.text
++
++# extern
++	b _external_undefined
++
++	.globl _see_me
++_see_me:
++	nop
++# A local target.
++Lcross_target:
++
++# local to section
++	b _bar
++	b _baz
++	b Lfoo
++# one that needs no reloc.
++	b Lcross_target
++
++# between sections
++	b _bar1
++	b _baz1
++	b Lfoo1
++
++# common pic-base load.
++	bcl 20, 31, Lpicbase
++Lpicbase:
++	nop
++
++_visible:
++
++# Branch across a possible atom break (FIXME: should have a reloc).
++	b Lcross_target
++	b _see_me
++
++# these produce scattered relocs.
++	b _table+8
++	bcl 20, 31, _table+4
++
++# Special case for direct objc method call (absolute value).
++#	b 0x123454 	
++
++Lfoo:
++	blr
++
++	.globl _bar
++_bar:
++	blr
++
++	.private_extern _baz
++_baz:
++	blr
++
++	.section __TEXT,__another_sect
++	.globl _bar1
++_bar1:
++	blr
++
++	.private_extern _baz1
++_baz1:
++	blr
++
++Lfoo1:
++	blr
++
++# Some of the target assembler uses tables of function entry points accessed as
++# _extern_sym + offset.
++
++_table:
++	nop
++	nop
++	nop
++	nop
++	blr
++
++	.subsections_via_symbols
++
++# CHECK-PPC: Format: Mach-O 32-bit ppc
++# CHECK-PPC: Arch: powerpc
++# CHECK-PPC: AddressSize: 32bit
++# CHECK-PPC64: Format: Mach-O 64-bit ppc64
++# CHECK-PPC64: Arch: powerpc64
++# CHECK-PPC64: AddressSize: 64bit
++# CHECK: Sections [
++# CHECK:   Section {
++# CHECK:     Index: 0
++# CHECK:     Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x0
++# CHECK:     Size: 0x48
++# CHECK-PPC:     Offset: 324
++# CHECK-PPC64:     Offset: 368
++# CHECK:     Alignment: 0
++# CHECK-PPC:     RelocationOffset: 0x1AC
++# CHECK-PPC64:     RelocationOffset: 0x1D8
++# CHECK:     RelocationCount: 9
++# CHECK:     Type: 0x0
++# CHECK:     Attributes [ (0x800004)
++# CHECK:       PureInstructions (0x800000)
++# CHECK:       SomeInstructions (0x4)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK:     SectionData (
++# CHECK:      0000: 48000000 60000000 48000038 48000038  |H...`...H..8H..8|
++# CHECK:      0010: 4800002C 4BFFFFF4 48000030 48000030  |H..,K...H..0H..0|
++# CHECK:      0020: 48000030 429F0005 60000000 4BFFFFDC  |H..0B...`...K...|
++# CHECK:      0030: 4BFFFFD4 48000028 429F0021 4E800020  |K...H..(B..!N.. |
++# CHECK:      0040: 4E800020 4E800020                    |N.. N.. |
++# CHECK:     )
++# CHECK:   }
++# CHECK:   Section {
++# CHECK:     Index: 1
++# CHECK:     Name: __another_sect (5F 5F 61 6E 6F 74 68 65 72 5F 73 65 63 74 00 00)
++# CHECK:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x48
++# CHECK:     Size: 0x20
++# CHECK-PPC:     Offset: 396
++# CHECK-PPC64:     Offset: 440
++# CHECK:     Alignment: 0
++# CHECK:     RelocationOffset: 0x0
++# CHECK:     RelocationCount: 0
++# CHECK:     Type: 0x0
++# CHECK:     Attributes [ (0x4)
++# CHECK:       SomeInstructions (0x4)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK:     SectionData (
++# CHECK:       0000: 4E800020 4E800020 4E800020 60000000  |N.. N.. N.. `...|
++# CHECK:       0010: 60000000 60000000 60000000 4E800020  |`...`...`...N.. |
++# CHECK:     )
++# CHECK:   }
++# CHECK: ]
++# CHECK: Relocations [
++# CHECK:   Section __text {
++# CHECK:    0x38 1 2 n/a PPC_RELOC_BR14 1 0x54
++# CHECK:    0x34 1 2 n/a PPC_RELOC_BR24 1 0x54
++# CHECK:    0x30 1 2 0 PPC_RELOC_BR24 0 __text
++# CHECK:    0x20 1 2 0 PPC_RELOC_BR24 0 __another_sect
++# CHECK:    0x1C 1 2 0 PPC_RELOC_BR24 0 __another_sect
++# CHECK:    0x18 1 2 0 PPC_RELOC_BR24 0 __another_sect
++# CHECK:    0xC 1 2 0 PPC_RELOC_BR24 0 __text
++# CHECK:    0x8 1 2 0 PPC_RELOC_BR24 0 __text
++# CHECK:    0x0 1 2 1 PPC_RELOC_BR24 0 _external_undefined
++# CHECK-PPC:   }
++# CHECK: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/data-relocs-1.s b/llvm/test/MC/MachO/PowerPC/data-relocs-1.s
+new file mode 100644
+index 00000000000..c5aed706e7e
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/data-relocs-1.s
+@@ -0,0 +1,127 @@
++// RUN: llvm-mc -triple powerpc-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC
++// RUN: llvm-mc -triple powerpc64-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC64
++
++_b:	.byte 1
++
++	.byte _a
++	.byte _a+6
++	.byte _a-6
++
++# The next two are not allowed (undefined symbols in subtraction).
++#	.byte _a-.
++#	.byte .-_a
++
++# This forces a relocations for the pc-symbol and symbol-pc cases, if it
++# is not present, the compiler will resolve the offset as a constant.
++# This is an enhancement of the LLVM-based assembler (cctools will apply
++# the relocation always).
++_force_reloca:
++
++	.byte _b
++	.byte _b-.
++	.byte _b+6
++	.byte _b-6
++
++_d:	.short 2
++
++	.short _c
++	.short _c+6
++	.short _c-6
++# The next two are not allowed (undefined symbols in subtraction).
++#	.short _c-.
++#	.short .-_c
++
++_force_relocb:
++
++	.short _d
++	.short _d-.
++	.short _d+6
++	.short _d-6
++
++_f:	.long 3
++
++	.long _e
++	.long _e+6
++	.long _e-6
++# The next two are not allowed (undefined symbols in subtraction).
++#	.long _e-.
++#	.long _.-_e
++
++_force_relocc:
++	.long _f
++	.long _f-.
++	.long $-_f
++	.long _f+6
++	.long _f-6
++
++# Not allowed for 32b.
++#	.quad _h
++
++ 	.subsections_via_symbols
++
++# CHECK-PPC:  Format: Mach-O 32-bit ppc
++# CHECK-PPC: Arch: powerpc
++# CHECK-PPC: AddressSize: 32bit
++# CHECK-PPC64: Format: Mach-O 64-bit ppc64
++# CHECK-PPC64: Arch: powerpc64
++# CHECK-PPC64: AddressSize: 64bit
++# CHECK: Sections [
++# CHECK:   Section {
++# CHECK:      Index: 0
++# CHECK:     Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x0
++# CHECK:     Size: 0x3C
++# CHECK-PPC:     Offset: 256
++# CHECK-PPC64:     Offset: 288
++# CHECK:     Alignment: 0
++# CHECK-PPC:     RelocationOffset: 0x13C
++# CHECK-PPC64:     RelocationOffset: 0x15C
++# CHECK:     RelocationCount: 26
++# CHECK:     Type: 0x0
++# CHECK:     Attributes [ (0x800000)
++# CHECK:       PureInstructions (0x800000)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK:     SectionData (
++# CHECK:       0000: 010006FA 00FB06FA 00020000 0006FFFA  |................|
++# CHECK:       0010: 0008FFF6 000E0002 00000003 00000000  |................|
++# CHECK:       0020: 00000006 FFFFFFFA 00000018 FFFFFFEC  |................|
++# CHECK:       0030: 00000018 0000001E 00000012           |............|
++# CHECK:     )
++# CHECK:   }
++# CHECK: ]
++# CHECK: Relocations [
++# CHECK:   Section __text {
++# CHECK:     0x38 0 2 n/a PPC_RELOC_VANILLA 1 0x18
++# CHECK:     0x34 0 2 n/a PPC_RELOC_VANILLA 1 0x18
++# CHECK:     0x30 0 2 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x30
++# CHECK:     0x0 0 2 n/a PPC_RELOC_PAIR 1 0x18
++# CHECK:     0x2C 0 2 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x18
++# CHECK:     0x0 0 2 n/a PPC_RELOC_PAIR 1 0x2C
++# CHECK:     0x28 0 2 0 PPC_RELOC_VANILLA 0 __text
++# CHECK:     0x24 0 2 1 PPC_RELOC_VANILLA 0 _e
++# CHECK:     0x20 0 2 1 PPC_RELOC_VANILLA 0 _e
++# CHECK:     0x1C 0 2 1 PPC_RELOC_VANILLA 0 _e
++# CHECK:     0x16 0 1 n/a PPC_RELOC_VANILLA 1 0x8
++# CHECK:     0x14 0 1 n/a PPC_RELOC_VANILLA 1 0x8
++# CHECK:     0x12 0 1 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x8
++# CHECK:     0x0 0 1 n/a PPC_RELOC_PAIR 1 0x12
++# CHECK:     0x10 0 1 0 PPC_RELOC_VANILLA 0 __text
++# CHECK:     0xE 0 1 1 PPC_RELOC_VANILLA 0 _c
++# CHECK:     0xC 0 1 1 PPC_RELOC_VANILLA 0 _c
++# CHECK:     0xA 0 1 1 PPC_RELOC_VANILLA 0 _c
++# CHECK:     0x7 0 0 n/a PPC_RELOC_VANILLA 1 0x0
++# CHECK:     0x6 0 0 n/a PPC_RELOC_VANILLA 1 0x0
++# CHECK:     0x5 0 0 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x0
++# CHECK:     0x0 0 0 n/a PPC_RELOC_PAIR 1 0x5
++# CHECK:     0x4 0 0 0 PPC_RELOC_VANILLA 0 __text
++# CHECK:     0x3 0 0 1 PPC_RELOC_VANILLA 0 _a
++# CHECK:     0x2 0 0 1 PPC_RELOC_VANILLA 0 _a
++# CHECK:     0x1 0 0 1 PPC_RELOC_VANILLA 0 _a
++# CHECK:   }
++# CHECK: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/data-relocs-2.s b/llvm/test/MC/MachO/PowerPC/data-relocs-2.s
+new file mode 100644
+index 00000000000..952ed012cf6
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/data-relocs-2.s
+@@ -0,0 +1,103 @@
++// RUN: llvm-mc -triple powerpc64-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++// RUN: FileCheck %s --check-prefix=CHECK-PPC64
++
++# These are only relevant for ppc64
++
++	.globl _h
++_h:	.quad 3
++Local:	.quad 6
++
++	.quad _g	; V, non-scattered
++	.quad _g+7	; V, non-scattered
++	.quad _g-8	; V, non-scattered
++
++# These should not produce relocations, for LLVM (but they do for cctools).
++#	.quad Local
++#	.quad Local+9
++#	.quad Local-10
++
++	.quad $-11	; V, scattered
++	.quad $+12	; V, scattered
++
++
++# This forces a relocations for the pc-symbol and symbol-pc cases, if it
++# is not present, the compiler will resolve the offset as a constant.
++# This is an enhancement of the LLVM-based assembler (cctools will apply
++# the relocation always).
++_force_reloc:
++	.quad _h	; V, non-scattered
++	.quad _h-$	; secdiff, scattered
++	.quad $-_h	; locsdiff, scattered
++	.quad _h+13	; V, scattered
++	.quad _h-14	; V, scattered
++
++	.quad Local	; non-scattered
++	.quad Local-$	; locsdiff, scattered
++	.quad $-Local	; locsdiff, scattered
++	.quad Local+15	; V, scattered
++	.quad Local-16	; V, scattered
++
++# Not allowed because undefined symbols and not permitted in a non-
++# constant subtraction.
++#	.quad _g-.
++#	.quad .-_g
++
++ 	.subsections_via_symbols
++
++# CHECK-PPC64: Format: Mach-O 64-bit ppc64
++# CHECK-PPC64: Arch: powerpc64
++# CHECK-PPC64: AddressSize: 64bit
++# CHECK-PPC64: Sections [
++# CHECK-PPC64:   Section {
++# CHECK-PPC64:     Index: 0
++# CHECK-PPC64:     Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK-PPC64:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK-PPC64:     Address: 0x0
++# CHECK-PPC64:     Size: 0x88
++# CHECK-PPC64:     Offset: 288
++# CHECK-PPC64:     Alignment: 0
++# CHECK-PPC64:     RelocationOffset: 0x1A8
++# CHECK-PPC64:     RelocationCount: 19
++# CHECK-PPC64:     Type: 0x0
++# CHECK-PPC64:     Attributes [ (0x800000)
++# CHECK-PPC64:       PureInstructions (0x800000)
++# CHECK-PPC64:     ]
++# CHECK-PPC64:     Reserved1: 0x0
++# CHECK-PPC64:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK-PPC64:     SectionData (
++# CHECK-PPC64:       0000: 00000000 00000003 00000000 00000006  |................|
++# CHECK-PPC64:       0010: 00000000 00000000 00000000 00000007  |................|
++# CHECK-PPC64:       0020: FFFFFFFF FFFFFFF8 00000000 0000001D  |................|
++# CHECK-PPC64:       0030: 00000000 0000003C 00000000 00000000  |.......<........|
++# CHECK-PPC64:       0040: FFFFFFFF FFFFFFC0 00000000 00000048  |...............H|
++# CHECK-PPC64:       0050: 00000000 0000000D FFFFFFFF FFFFFFF2  |................|
++# CHECK-PPC64:       0060: 00000000 00000008 FFFFFFFF FFFFFFA0  |................|
++# CHECK-PPC64:       0070: 00000000 00000068 00000000 00000017  |.......h........|
++# CHECK-PPC64:       0080: FFFFFFFF FFFFFFF8                    |........|
++# CHECK-PPC64:     )
++# CHECK-PPC64:   }
++# CHECK-PPC64: ]
++# CHECK-PPC64: Relocations [
++# CHECK-PPC64:   Section __text {
++# CHECK-PPC64:     0x80 0 3 n/a PPC_RELOC_VANILLA 1 0x8
++# CHECK-PPC64:     0x78 0 3 n/a PPC_RELOC_VANILLA 1 0x8
++# CHECK-PPC64:     0x70 0 3 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x70
++# CHECK-PPC64:     0x0 0 3 n/a PPC_RELOC_PAIR 1 0x8
++# CHECK-PPC64:     0x68 0 3 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x8
++# CHECK-PPC64:     0x0 0 3 n/a PPC_RELOC_PAIR 1 0x68
++# CHECK-PPC64:     0x60 0 3 0 PPC_RELOC_VANILLA 0 __text
++# CHECK-PPC64:     0x58 0 3 n/a PPC_RELOC_VANILLA 1 0x0
++# CHECK-PPC64:     0x50 0 3 n/a PPC_RELOC_VANILLA 1 0x0
++# CHECK-PPC64:     0x48 0 3 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x48
++# CHECK-PPC64:     0x0 0 3 n/a PPC_RELOC_PAIR 1 0x0
++# CHECK-PPC64:     0x40 0 3 n/a PPC_RELOC_SECTDIFF 1 0x0
++# CHECK-PPC64:     0x0 0 3 n/a PPC_RELOC_PAIR 1 0x40
++# CHECK-PPC64:     0x38 0 3 0 PPC_RELOC_VANILLA 0 __text
++# CHECK-PPC64:     0x30 0 3 n/a PPC_RELOC_VANILLA 1 0x30
++# CHECK-PPC64:     0x28 0 3 n/a PPC_RELOC_VANILLA 1 0x28
++# CHECK-PPC64:     0x20 0 3 1 PPC_RELOC_VANILLA 0 _g
++# CHECK-PPC64:     0x18 0 3 1 PPC_RELOC_VANILLA 0 _g
++# CHECK-PPC64:     0x10 0 3 1 PPC_RELOC_VANILLA 0 _g
++# CHECK-PPC64:   }
++# CHECK-PPC64: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/eh-frame-relocs.s b/llvm/test/MC/MachO/PowerPC/eh-frame-relocs.s
+new file mode 100644
+index 00000000000..f904a792501
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/eh-frame-relocs.s
+@@ -0,0 +1,23 @@
++// RUN: llvm-mc < %s -triple powerpc-darwin -filetype=obj | llvm-readobj -r |\
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC
++// RUN: llvm-mc < %s -triple powerpc64-darwin -filetype=obj | llvm-readobj -r |\
++// RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC64
++
++
++# x86 no longer uses relocations for EH frames, but (for now) to be backward-
++# compatible with older tools, we will continue to use them for ppc/ppc64.
++
++	.globl	_bar
++	.align	4
++_bar:
++	.cfi_startproc
++	.cfi_endproc
++
++// CHECK:      Relocations [
++// CHECK:  Section __eh_frame {
++// CHECK-PPC:    0x1C 0 2 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x0
++// CHECK-PPC:    0x0 0 2 n/a PPC_RELOC_PAIR 1 0x1C
++// CHECK-PPC64:    0x1C 0 3 n/a PPC_RELOC_LOCAL_SECTDIFF 1 0x0
++// CHECK-PPC64:    0x0 0 3 n/a PPC_RELOC_PAIR 1 0x1C
++// CHECK:  }
++// CHECK: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/eh-symbol.s b/llvm/test/MC/MachO/PowerPC/eh-symbol.s
+new file mode 100644
+index 00000000000..4b8b1c8a53d
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/eh-symbol.s
+@@ -0,0 +1,14 @@
++// RUN: llvm-mc -triple powerpc-darwin %s -filetype=obj -o - | llvm-nm - | FileCheck %s
++
++// test that we don't produce foo.eh symbols in a debug_frame section.
++// CHECK-NOT: _f.eh
++// CHECK: T _f
++// CHECK-NOT: _f.eh
++
++	.globl	_f
++_f:
++	.cfi_startproc
++	blr
++	.cfi_endproc
++
++	.cfi_sections .debug_frame
+diff --git a/llvm/test/MC/MachO/PowerPC/half-relocs-1-ppc64.s b/llvm/test/MC/MachO/PowerPC/half-relocs-1-ppc64.s
+new file mode 100644
+index 00000000000..7ad4225d1b9
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/half-relocs-1-ppc64.s
+@@ -0,0 +1,90 @@
++# RUN: llvm-mc -triple powerpc64-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++# RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC64
++
++	.text
++#PIC
++_fun:
++	bcl 20, 31, Lx
++Lx:
++	mflr r10
++        addis r2,r10,ha16(L_x$non_lazy_ptr-Lx)
++        lwz r2,lo16(L_x$non_lazy_ptr-Lx)(r2)
++        lwz r3,0(r2)
++        blr
++        
++# dynamic-no-pic
++_fun1:
++        lis r2,ha16(L_x$non_lazy_ptr)
++        lwz r2,lo16(L_x$non_lazy_ptr)(r2)
++        lwz r3,0(r2)
++        blr
++
++
++	.comm _x,4,2
++        .non_lazy_symbol_pointer
++L_x$non_lazy_ptr:
++        .indirect_symbol _x
++        .quad   0
++        .subsections_via_symbols
++
++# CHECK-PPC64: Format: Mach-O 64-bit ppc64
++# CHECK-PPC64: Arch: powerpc
++# CHECK-PPC64: AddressSize: 64bit
++# CHECK: Sections [
++# CHECK:   Section {
++# CHECK:     Index: 0
++# CHECK:     Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x0
++# CHECK-PPC64:     Size: 0x28
++# CHECK-PPC64:     Offset: 368
++# CHECK:     Alignment: 0
++# CHECK-PPC64:     RelocationOffset: 0x1A0
++# CHECK:     RelocationCount: 8
++# CHECK:     Type: 0x0
++# CHECK:     Attributes [ (0x800004)
++# CHECK:       PureInstructions (0x800000)
++# CHECK:       SomeInstructions (0x4)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK:     SectionData (
++# CHECK:       0000: 429F0005 7D4802A6 3C4A0000 80420024  |B...}H..<J...B.$|
++# CHECK:       0010: 80620000 4E800020 3C400000 80420028  |.b..N.. <@...B.(|
++# CHECK:       0020: 80620000 4E800020                    |.b..N.. |
++# CHECK:     )
++# CHECK:   }
++# CHECK:   Section {
++# CHECK:     Index: 1
++# CHECK:     Name: __nl_symbol_ptr (5F 5F 6E 6C 5F 73 79 6D 62 6F 6C 5F 70 74 72 00)
++# CHECK:     Segment: __DATA (5F 5F 44 41 54 41 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x28
++# CHECK-PPC64:     Size: 0x8
++# CHECK-PPC64:     Offset: 408
++# CHECK:     Alignment: 2
++# CHECK:     RelocationOffset: 0x0
++# CHECK:     RelocationCount: 0
++# CHECK:     Type: 0x6
++# CHECK:     Attributes [ (0x0)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK-PPC64:     Reserved3: 0x0
++# CHECK:     SectionData (
++# CHECK-PPC64:       0000: 00000000 00000000                    |........|
++# CHECK:     )
++# CHECK:   }
++# CHECK: ]
++# CHECK: Relocations [
++# CHECK:   Section __text {
++# CHECK:     0x1C 0 2 0 PPC_RELOC_LO16 0 __nl_symbol_ptr
++# CHECK:     0x0 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:     0x18 0 2 0 PPC_RELOC_HA16 0 __nl_symbol_ptr
++# CHECK:     0x28 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:     0xC 0 2 n/a PPC_RELOC_LO16_SECTDIFF 1 0x28
++# CHECK:     0x0 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:     0x8 0 2 n/a PPC_RELOC_HA16_SECTDIFF 1 0x28
++# CHECK:     0x24 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:   }
++# CHECK: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/half-relocs-1.s b/llvm/test/MC/MachO/PowerPC/half-relocs-1.s
+new file mode 100644
+index 00000000000..0ee1bb02b56
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/half-relocs-1.s
+@@ -0,0 +1,88 @@
++# RUN: llvm-mc -triple powerpc-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++# RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC
++
++	.text
++#PIC
++_fun:
++	bcl 20, 31, Lx
++Lx:
++	mflr r10
++        addis r2,r10,ha16(L_x$non_lazy_ptr-Lx)
++        lwz r2,lo16(L_x$non_lazy_ptr-Lx)(r2)
++        lwz r3,0(r2)
++        blr
++        
++# dynamic-no-pic
++_fun1:
++        lis r2,ha16(L_x$non_lazy_ptr)
++        lwz r2,lo16(L_x$non_lazy_ptr)(r2)
++        lwz r3,0(r2)
++        blr
++
++
++	.comm _x,4,2
++        .non_lazy_symbol_pointer
++L_x$non_lazy_ptr:
++        .indirect_symbol _x
++        .long   0
++        .subsections_via_symbols
++
++# CHECK-PPC: Format: Mach-O 32-bit ppc
++# CHECK-PPC: Arch: powerpc
++# CHECK-PPC: AddressSize: 32bit
++# CHECK: Sections [
++# CHECK:   Section {
++# CHECK:     Index: 0
++# CHECK:     Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x0
++# CHECK-PPC:     Size: 0x28
++# CHECK-PPC:     Offset: 324
++# CHECK:     Alignment: 0
++# CHECK-PPC:     RelocationOffset: 0x170
++# CHECK:     RelocationCount: 8
++# CHECK:     Type: 0x0
++# CHECK:     Attributes [ (0x800004)
++# CHECK:       PureInstructions (0x800000)
++# CHECK:       SomeInstructions (0x4)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK:     SectionData (
++# CHECK:       0000: 429F0005 7D4802A6 3C4A0000 80420024  |B...}H..<J...B.$|
++# CHECK:       0010: 80620000 4E800020 3C400000 80420028  |.b..N.. <@...B.(|
++# CHECK:       0020: 80620000 4E800020                    |.b..N.. |
++# CHECK:     )
++# CHECK:   }
++# CHECK:   Section {
++# CHECK:     Index: 1
++# CHECK:     Name: __nl_symbol_ptr (5F 5F 6E 6C 5F 73 79 6D 62 6F 6C 5F 70 74 72 00)
++# CHECK:     Segment: __DATA (5F 5F 44 41 54 41 00 00 00 00 00 00 00 00 00 00)
++# CHECK:     Address: 0x28
++# CHECK-PPC:     Size: 0x4
++# CHECK-PPC:     Offset: 364
++# CHECK:     Alignment: 2
++# CHECK:     RelocationOffset: 0x0
++# CHECK:     RelocationCount: 0
++# CHECK:     Type: 0x6
++# CHECK:     Attributes [ (0x0)
++# CHECK:     ]
++# CHECK:     Reserved1: 0x0
++# CHECK:     Reserved2: 0x0
++# CHECK:     SectionData (
++# CHECK:       0000: 00000000                             |....|
++# CHECK:     )
++# CHECK:   }
++# CHECK: ]
++# CHECK: Relocations [
++# CHECK:   Section __text {
++# CHECK:     0x1C 0 2 0 PPC_RELOC_LO16 0 __nl_symbol_ptr
++# CHECK:     0x0 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:     0x18 0 2 0 PPC_RELOC_HA16 0 __nl_symbol_ptr
++# CHECK:     0x28 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:     0xC 0 2 n/a PPC_RELOC_LO16_SECTDIFF 1 0x28
++# CHECK:     0x0 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:     0x8 0 2 n/a PPC_RELOC_HA16_SECTDIFF 1 0x28
++# CHECK:     0x24 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:   }
++# CHECK: ]
+diff --git a/llvm/test/MC/MachO/PowerPC/half-relocs-2.s b/llvm/test/MC/MachO/PowerPC/half-relocs-2.s
+new file mode 100644
+index 00000000000..b543ccef6ee
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/half-relocs-2.s
+@@ -0,0 +1,113 @@
++# RUN: llvm-mc -triple powerpc-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++# RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC
++# RUN: llvm-mc -triple powerpc64-darwin -filetype=obj %s -o - | llvm-readobj -r -s -sd | \
++# RUN: FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-PPC64
++
++# corresponding to -fno-common, data accesses.
++
++	.text
++#PIC
++_fun:
++	bcl 20, 31, Lx
++Lx:
++	mflr r10
++        addis r2,r10,ha16(_x-Lx)
++        lwz r2,lo16(_x-Lx)(r2)
++# Not sure if any compiler will currently generate this, but it"s
++# supposed to work.
++        addis r2,r10,ha16(_x-Lx+4)
++        lwz r2,lo16(_x-Lx+4)(r2)
++        lwz r3,0(r2)
++        blr
++        
++# dynamic-no-pic
++_fun1:
++        lis r2,ha16(_x)
++        lwz r2,lo16(_x)(r2)
++        lis r2,ha16(_x+4)
++        lwz r2,lo16(_x+4)(r2)
++        lwz r3,0(r2)
++        blr
++
++	.globl _x
++	.data
++_x:
++	.long 0
++	.long 1
++
++        .subsections_via_symbols
++
++# CHECK-PPC: Format: Mach-O 32-bit ppc
++# CHECK-PPC: Arch: powerpc
++# CHECK-PPC: AddressSize: 32bit
++# CHECK-PPC64: Format: Mach-O 64-bit ppc64
++# CHECK-PPC64: Arch: powerpc
++# CHECK-PPC64: AddressSize: 64bit
++# CHECK: Sections [
++# CHECK:  Section {
++# CHECK:    Index: 0
++# CHECK:    Name: __text (5F 5F 74 65 78 74 00 00 00 00 00 00 00 00 00 00)
++# CHECK:    Segment: __TEXT (5F 5F 54 45 58 54 00 00 00 00 00 00 00 00 00 00)
++# CHECK:    Address: 0x0
++# CHECK:    Size: 0x38
++# CHECK-PPC:    Offset: 324
++# CHECK-PPC64:     Offset: 368
++# CHECK:    Alignment: 0
++# CHECK-PPC:    RelocationOffset: 0x184
++# CHECK-PPC64:    RelocationOffset: 0x1B0
++# CHECK:    RelocationCount: 16
++# CHECK:    Type: 0x0
++# CHECK:    Attributes [ (0x800004)
++# CHECK:      PureInstructions (0x800000)
++# CHECK:      SomeInstructions (0x4)
++# CHECK:    ]
++# CHECK:    Reserved1: 0x0
++# CHECK:    Reserved2: 0x0
++# CHECK:    SectionData (
++# CHECK:      0000: 429F0005 7D4802A6 3C4A0000 80420034  |B...}H..<J...B.4|
++# CHECK:      0010: 3C4A0000 80420038 80620000 4E800020  |<J...B.8.b..N.. |
++# CHECK:      0020: 3C400000 80420038 3C400000 8042003C  |<@...B.8<@...B.<|
++# CHECK:      0030: 80620000 4E800020                    |.b..N.. |
++# CHECK:    )
++# CHECK:  }
++# CHECK:  Section {
++# CHECK:    Index: 1
++# CHECK:    Name: __data (5F 5F 64 61 74 61 00 00 00 00 00 00 00 00 00 00)
++# CHECK:    Segment: __DATA (5F 5F 44 41 54 41 00 00 00 00 00 00 00 00 00 00)
++# CHECK:    Address: 0x38
++# CHECK:    Size: 0x8
++# CHECK-PPC:    Offset: 380
++# CHECK-PPC64:     Offset: 424
++# CHECK:    Alignment: 0
++# CHECK:    RelocationOffset: 0x0
++# CHECK:    RelocationCount: 0
++# CHECK:    Type: 0x0
++# CHECK:    Attributes [ (0x0)
++# CHECK:    ]
++# CHECK:    Reserved1: 0x0
++# CHECK:    Reserved2: 0x0
++# CHECK:    SectionData (
++# CHECK:      0000: 00000000 00000001                    |........|
++# CHECK:    )
++# CHECK:  }
++# CHECK:]
++# CHECK:Relocations [
++# CHECK:  Section __text {
++# CHECK:    0x2C 0 2 n/a PPC_RELOC_LO16 1 0x38
++# CHECK:    0x0 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:    0x28 0 2 n/a PPC_RELOC_HA16 1 0x38
++# CHECK:    0x3C 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:    0x24 0 2 0 PPC_RELOC_LO16 0 __data
++# CHECK:    0x0 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:    0x20 0 2 0 PPC_RELOC_HA16 0 __data
++# CHECK:    0x38 0 2 0 PPC_RELOC_PAIR 0 -
++# CHECK:    0x14 0 2 n/a PPC_RELOC_LO16_SECTDIFF 1 0x38
++# CHECK:    0x0 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:    0x10 0 2 n/a PPC_RELOC_HA16_SECTDIFF 1 0x38
++# CHECK:    0x38 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:    0xC 0 2 n/a PPC_RELOC_LO16_SECTDIFF 1 0x38
++# CHECK:    0x0 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:    0x8 0 2 n/a PPC_RELOC_HA16_SECTDIFF 1 0x38
++# CHECK:    0x34 0 2 n/a PPC_RELOC_PAIR 1 0x4
++# CHECK:  }
++# CHECK:]
+diff --git a/llvm/test/MC/MachO/PowerPC/large-relocs.s b/llvm/test/MC/MachO/PowerPC/large-relocs.s
+new file mode 100644
+index 00000000000..192dcc677bb
+--- /dev/null
++++ b/llvm/test/MC/MachO/PowerPC/large-relocs.s
+@@ -0,0 +1,33 @@
++// RUN: llvm-mc -triple powerpc-darwin %s -filetype=obj -o - | llvm-readobj -r | \
++// RUN: FileCheck %s
++// RUN: llvm-mc -triple powerpc64-darwin %s -filetype=obj -o - | llvm-readobj -r | \
++// RUN: FileCheck %s
++
++.space 0x1ed280
++       .section        __DATA,__const
++       .align  4
++.space 0x5181020
++_foo:
++       .long   _bar
++       .long   0
++       .long   _bar+8
++       .long   _bar+24
++       .long   0
++       .long   _bar+16
++
++.zerofill __DATA,__bss,__dummy,0x5d780
++.zerofill __DATA,__bss,_bar,48,4
++
++// Normally scattered relocations are used for sym+offset expressions. When
++// the value exceeds 24-bits, however, it's outside what MachO can encode,
++// so the assembler falls back to non-scattered relocations.
++// rdar://12358909
++
++// CHECK: Relocations [
++// CHECK:   Section __const {
++// CHECK:     0x5181034 0 2 0 PPC_RELOC_VANILLA 0 __bss
++// CHECK:     0x518102C 0 2 0 PPC_RELOC_VANILLA 0 __bss
++// CHECK:     0x5181028 0 2 0 PPC_RELOC_VANILLA 0 __bss
++// CHECK:     0x5181020 0 2 0 PPC_RELOC_VANILLA 0 __bss
++// CHECK:   }
++// CHECK: ]
+diff --git a/llvm/test/tools/llvm-readobj/relocations.test b/llvm/test/tools/llvm-readobj/relocations.test
+index be298130408..4169f6d580b 100644
+--- a/llvm/test/tools/llvm-readobj/relocations.test
++++ b/llvm/test/tools/llvm-readobj/relocations.test
+@@ -144,35 +144,35 @@ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x24
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (14)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_LO14_SECTDIFF (14)
+ MACHO-PPC64-NEXT:       Value: 0x64
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x0
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (1)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:       Value: 0xC
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x1C
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (12)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_HA16_SECTDIFF (12)
+ MACHO-PPC64-NEXT:       Value: 0x64
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x58
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (1)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:       Value: 0xC
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x18
+ MACHO-PPC64-NEXT:       PCRel: 1
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (3)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_BR24 (3)
+ MACHO-PPC64-NEXT:       Section: __picsymbolstub1 (2)
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:   }
+@@ -181,28 +181,28 @@ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x14
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (14)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_LO14_SECTDIFF (14)
+ MACHO-PPC64-NEXT:       Value: 0x6C
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x0
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (1)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:       Value: 0x48
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0xC
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (12)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_HA16_SECTDIFF (12)
+ MACHO-PPC64-NEXT:       Value: 0x6C
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x24
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 2
+-MACHO-PPC64-NEXT:       Type:  (1)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:       Value: 0x48
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:   }
+@@ -211,7 +211,7 @@ MACHO-PPC64-NEXT:     Relocation {
+ MACHO-PPC64-NEXT:       Offset: 0x0
+ MACHO-PPC64-NEXT:       PCRel: 0
+ MACHO-PPC64-NEXT:       Length: 3
+-MACHO-PPC64-NEXT:       Type:  (0)
++MACHO-PPC64-NEXT:       Type: PPC_RELOC_VANILLA (0)
+ MACHO-PPC64-NEXT:       Symbol: dyld_stub_binding_helper (5)
+ MACHO-PPC64-NEXT:     }
+ MACHO-PPC64-NEXT:   }
+diff --git a/llvm/test/tools/llvm-readobj/sections-ext.test b/llvm/test/tools/llvm-readobj/sections-ext.test
+index 70ae0f22a0e..d0718740120 100644
+--- a/llvm/test/tools/llvm-readobj/sections-ext.test
++++ b/llvm/test/tools/llvm-readobj/sections-ext.test
+@@ -522,35 +522,35 @@ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x24
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (14)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_LO14_SECTDIFF (14)
+ MACHO-PPC64-NEXT:         Value: 0x64
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x0
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (1)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:         Value: 0xC
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x1C
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (12)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_HA16_SECTDIFF (12)
+ MACHO-PPC64-NEXT:         Value: 0x64
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x58
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (1)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:         Value: 0xC
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x18
+ MACHO-PPC64-NEXT:         PCRel: 1
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (3)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_BR24 (3)
+ MACHO-PPC64-NEXT:         Section: __picsymbolstub1 (2)
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:     ]
+@@ -596,28 +596,28 @@ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x14
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (14)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_LO14_SECTDIFF (14)
+ MACHO-PPC64-NEXT:         Value: 0x6C
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x0
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (1)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:         Value: 0x48
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0xC
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (12)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_HA16_SECTDIFF (12)
+ MACHO-PPC64-NEXT:         Value: 0x6C
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x24
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 2
+-MACHO-PPC64-NEXT:         Type:  (1)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_PAIR (1)
+ MACHO-PPC64-NEXT:         Value: 0x48
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:     ]
+@@ -707,7 +707,7 @@ MACHO-PPC64-NEXT:       Relocation {
+ MACHO-PPC64-NEXT:         Offset: 0x0
+ MACHO-PPC64-NEXT:         PCRel: 0
+ MACHO-PPC64-NEXT:         Length: 3
+-MACHO-PPC64-NEXT:         Type:  (0)
++MACHO-PPC64-NEXT:         Type: PPC_RELOC_VANILLA (0)
+ MACHO-PPC64-NEXT:         Symbol: dyld_stub_binding_helper (5)
+ MACHO-PPC64-NEXT:       }
+ MACHO-PPC64-NEXT:     ]
