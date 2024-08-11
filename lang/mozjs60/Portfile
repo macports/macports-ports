@@ -1,13 +1,12 @@
 # -*- coding: utf-8; mode: tcl; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- vim: fenc=utf-8:ft=tcl:et:sw=4:ts=4:sts=4
 
 PortSystem          1.0
-PortGroup           muniversal 1.0
 PortGroup           compiler_blacklist_versions 1.0
+PortGroup           muniversal 1.0
 
 name                mozjs60
 version             60.8.0
 categories          lang
-platforms           darwin
 license             {MPL-2 LGPL-2.1+}
 maintainers         {devans @dbevans} openmaintainer
 description         JavaScript-C Engine
@@ -27,7 +26,7 @@ checksums           rmd160  babfc85cd14308a1494d719a5c281b3d392a046c \
                     size    32802956
 
 depends_build       port:autoconf213 \
-                    port:pkgconfig \
+                    path:bin/pkg-config:pkgconfig \
                     port:python27 \
                     port:yasm
 
@@ -36,12 +35,15 @@ depends_lib         port:nspr \
                     port:xorg-libXt
 
 # requires C++14 compiler to build
-compiler.cxx_standard 2014
-compiler.blacklist  *gcc-3.* *gcc-4.* {clang < 700}
+compiler.cxx_standard \
+                    2014
+compiler.blacklist  {clang < 700}
 
 if { ${os.platform} eq "darwin" && ${os.major} < 11 } {
-    depends_build-append port:cctools
-    configure.env-append AR=${prefix}/bin/ar
+    depends_build-append \
+                    port:cctools
+    configure.env-append \
+                    AR=${prefix}/bin/ar
 }
 
 patchfiles          patch-js.pc.in.diff \
@@ -62,13 +64,13 @@ configure.env-append \
 configure.dir       ${worksrcpath}/js/src/obj
 configure.cmd       ../configure
 
-configure.args      --with-system-nspr \
-                    --disable-readline
+configure.args      --disable-readline \
+                    --with-system-nspr
 
 configure.universal_args-delete --disable-dependency-tracking
 
 if { ${os.platform} eq "darwin" && ${os.major} < 13 } {
-    configure.args-append   --disable-xcode-checks
+    configure.args-append       --disable-xcode-checks
 }
 
 build.env-append    SHELL=/bin/bash
@@ -112,15 +114,50 @@ if {${universal_possible} && [variant_isset universal]} {
     }
 }
 
-# Now for 10.4/10.5...
-if { ${os.platform} eq "darwin" && ${os.major} < 10 } {
+if { [string match *gcc* ${configure.compiler}] && ${configure.cxx_stdlib} ne "libc++" } {
+
+    patchfiles-append \
+                    patch-libatomic.diff \
+                    patch-no-libc++.diff
+}
+
+if { ${os.platform} eq "darwin" && ${configure.build_arch} in [list ppc ppc64] } {
+
+    # The C API is littered with bools and references to bools, so we need to
+    # make sure clients (including gjs and policykit) also use the magic flag.
+    # We do this via pkg-config and js-config; note that with this approach
+    # there is some danger that distinct compilation units within the same
+    # project may end up with different bool sizes (for example, if a project's
+    # Makefile only applies the result of `pkg-config --cflags` to source files
+    # that actually consume <jsapi.h>), so some care is needed when compiling
+    # against this library. The benefit of this approach is that projects using
+    # pkg-config don't need to remember this flag, and well-designed projects
+    # can "contain" one-byte bools and not have to expose them downstream.
+
+    patchfiles-append \
+                    patch-config-powerpc.diff \
+                    patch-powerpc.diff
+
+    # Make structs size-compatible with Intel (fixes several static_asserts)
+    configure.cxxflags-append \
+                    -mone-byte-bool
+
+    notes-append "
+    In order to run on PowerPC, ${name} has been compiled with the special
+    compiler flag, -mone-byte-bool. Most users are unaffected; however, if you
+    are a software developer compiling against the SpiderMonkey C API (jsapi.h),
+    you will need to add this compiler flag to your own projects, or prepare to
+    encounter unexpected program behavior. The flag will be added automatically
+    to projects that use pkg-config or js-config."
+}
+
+# Now for 10.4/10.5 and Rosetta
+if { ${os.platform} eq "darwin" && ${os.major} < 10 \
+    || (${os.major} == 10 && ${configure.build_arch} eq "ppc") } {
 
     patchfiles-append \
                     patch-malloc_default_purgeable_zone.diff \
-                    patch-no-libc++.diff \
                     patch-js-shell.diff \
-                    patch-libatomic.diff \
-                    patch-powerpc.diff \
                     patch-pthread_setname_np.diff
 
     post-configure {
@@ -131,40 +168,18 @@ if { ${os.platform} eq "darwin" && ${os.major} < 10 } {
 
     if { ${os.major} == 8 } {
         # Tiger ships with Make 3.80; need 3.81 or later
-        depends_build-append port:gmake
-        build.cmd            gmake
-        configure.cppflags-append -D__DARWIN_UNIX03
+        depends_build-append \
+                            port:gmake
+        build.cmd           gmake
+        configure.cppflags-append \
+                            -D__DARWIN_UNIX03
     }
 
     # the old gas assembler doesn't like the included ICU files.
     # Also there's a run-time failure in u_init(), so just
     # disable ICU until someone wants to sort it out.
-    configure.args-append     --without-intl-api
+    configure.args-append   --without-intl-api
 
-    if {[string match *gcc* ${configure.compiler}] && ${os.arch} eq "powerpc" } {
-        # Make structs size-compatible with Intel (fixes several static_asserts)
-        configure.cxxflags-append -mone-byte-bool
-
-        # The C API is littered with bools and references to bools, so we need to
-        # make sure clients (including gjs and policykit) also use the magic flag.
-        # We do this via pkg-config and js-config; note that with this approach
-        # there is some danger that distinct compilation units within the same
-        # project may end up with different bool sizes (for example, if a project's
-        # Makefile only applies the result of `pkg-config --cflags` to source files
-        # that actually consume <jsapi.h>), so some care is needed when compiling
-        # against this library. The benefit of this approach is that projects using
-        # pkg-config don't need to remember this flag, and well-designed projects
-        # can "contain" one-byte bools and not have to expose them downstream.
-        patchfiles-append patch-config-powerpc.diff
-
-        notes-append "
-        In order to run on PowerPC, ${name} has been compiled with the special
-        compiler flag, -mone-byte-bool. Most users are unaffected; however, if you
-        are a software developer compiling against the SpiderMonkey C API (jsapi.h),
-        you will need to add this compiler flag to your own projects, or prepare to
-        encounter unexpected program behavior. The flag will be added automatically
-        to projects that use pkg-config or js-config."
-    }
 }
 
 livecheck.type      none

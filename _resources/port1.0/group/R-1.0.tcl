@@ -107,7 +107,8 @@ compiler.blacklist-append   {macports-clang-1[7-9]}
 # Similarly, for gcc select the gcc13 variant of the compilers PG.
 # This setting should also be kept in sync with that in the R Port.
 # Updates should be coordinated with the R maintainers.
-# NOTE: upon the update to gcc14, please add a blacklist of newer gccs,
+compiler.blacklist-append   {macports-gcc-1[4-9]}
+# NOTE: upon the update to gcc14, please update the blacklist accordingly,
 # like it is done for clangs. We would prefer using the same version of gcc and gfortran.
 if {${os.platform} eq "darwin" && ${os.major} < 10} {
     # Until old platforms are switched to the new libgcc.

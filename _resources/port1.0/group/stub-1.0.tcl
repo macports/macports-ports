@@ -62,6 +62,7 @@ proc stub::setup_stub {} {
         license         Permissive
     }
 
+    fetch.type          standard
     distfiles
     patchfiles
     use_configure       no

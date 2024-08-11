@@ -537,7 +537,7 @@ index 803d8079213..b1723851e97 100644
  }
  
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index ab544908883..e433d69ce97 100644
+index ab544908883..231c7f0ede0 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
 @@ -1004,7 +1004,11 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
@@ -719,7 +719,53 @@ index ab544908883..e433d69ce97 100644
          break;
      case TRAP_x86_STKFLT:  /* Stack fault */
          rec.ExceptionCode = EXCEPTION_STACK_OVERFLOW;
-@@ -2492,6 +2640,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
+@@ -2170,6 +2318,34 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+ }
+ 
+ 
++#ifdef __APPLE__
++/* CW HACK 22350 */
++/**********************************************************************
++ *		sigsys_handler
++ *
++ * Handler for SIGSYS, signals that a non-existent system call was invoked.
++ * Only called on macOS 14 Sonoma and later.
++ */
++static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
++{
++    extern const void *__wine_syscall_dispatcher_prolog_end_ptr;
++    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
++    ucontext_t *ctx = sigcontext;
++
++    TRACE_(seh)("SIGSYS, rax %#llx, rip %#llx.\n", RAX_sig(ctx), RIP_sig(ctx));
++
++    frame->rip = RIP_sig(ctx) + 0xb;
++    frame->rcx = RIP_sig(ctx);
++    frame->eflags = EFL_sig(ctx);
++    frame->restore_flags = 0;
++    RCX_sig(ctx) = (ULONG_PTR)frame;
++    R11_sig(ctx) = frame->eflags;
++    EFL_sig(ctx) &= ~0x100;  /* clear single-step flag */
++    RIP_sig(ctx) = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
++}
++#endif
++
++
+ /***********************************************************************
+  *           LDT support
+  */
+@@ -2460,6 +2636,10 @@ void signal_init_process(void)
+     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
+     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
+     if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
++#ifdef __APPLE__
++    sig_act.sa_sigaction = sigsys_handler;
++    if (sigaction( SIGSYS, &sig_act, NULL ) == -1) goto error;
++#endif
+     return;
+ 
+  error:
+@@ -2492,6 +2672,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
      __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
      __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
      thread_data->pthread_teb = mac_thread_gsbase();

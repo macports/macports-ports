@@ -5,7 +5,7 @@
 if {[option os.platform] eq "darwin" && [option os.major] < 10} {
     set gcc_main_version 7
 } else {
-    set gcc_main_version 13
+    set gcc_main_version 14
 }
 
 # compiler links against libraries in libgcc\d* and/or libgcc-devel

@@ -61,19 +61,29 @@ endgroup
 
 
 begingroup "Uninstalling Homebrew"
-# Move directories to /opt/off
+# Move directories to /opt/*-off
 echo "Moving directories..."
-sudo mkdir /opt/off
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/off/ \;
+sudo mkdir /opt/local-off /opt/homebrew-off
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/local-off/ \;
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/homebrew-off/ \;
 
 # Unlink files
 echo "Removing files..."
-/usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /usr/local || /usr/bin/sudo /usr/bin/find /usr/local -mindepth 1 -maxdepth 1 -type f -print -delete
+test ! -d /opt/homebrew || /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type f -print -delete
 
 # Rehash to forget about the deleted files
 hash -r
 endgroup
 
+begingroup "Selecting Xcode version"
+case "$OS_MAJOR" in
+    22) sudo xcode-select --switch /Applications/Xcode_14.3.1.app/Contents/Developer
+        ;;
+    23) sudo xcode-select --switch /Applications/Xcode_15.3.app/Contents/Developer
+        ;;
+esac
+endgroup
 
 begingroup "Installing getopt"
 # Install getopt required by mpbb

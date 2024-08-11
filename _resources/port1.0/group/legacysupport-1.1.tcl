@@ -21,8 +21,8 @@ namespace eval legacysupport {
 }
 
 # Newest Darwin version that requires legacy support.
-# Currently OS X 10.12 ( Sierra, Darwin 16) due to utimensat, fsgetpath, setattrlistat
-set ls_max_darwin_support 16
+# Currently OS X 10.14 ( Mojave, Darwin 18) due to timespec_get
+set ls_max_darwin_support 18
 options legacysupport.newest_darwin_requires_legacy
 default legacysupport.newest_darwin_requires_legacy ${ls_max_darwin_support}
 
