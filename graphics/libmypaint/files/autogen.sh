@@ -9,10 +9,10 @@
 # tools and you shouldn't use this script.  Just call ./configure
 # directly.
 
-ACLOCAL=${ACLOCAL-aclocal-1.16}
+ACLOCAL=${ACLOCAL-aclocal}
 AUTOCONF=${AUTOCONF-autoconf}
 AUTOHEADER=${AUTOHEADER-autoheader}
-AUTOMAKE=${AUTOMAKE-automake-1.16}
+AUTOMAKE=${AUTOMAKE-automake}
 LIBTOOLIZE=${LIBTOOLIZE-libtoolize}
 PYTHON=${PYTHON-python}
 
