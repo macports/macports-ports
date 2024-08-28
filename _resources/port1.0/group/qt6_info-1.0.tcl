@@ -88,8 +88,13 @@ proc qt6::base {} {
 
 proc qt6::version {} {
     array set qt_info [list {*}${qt6::available_versions}]
-    return [lindex $qt_info([option qt6.base]) 0]
+    if {[info exists qt_info([option qt6.base])]} {
+        return [lindex $qt_info([option qt6.base]) 0]
+    } else {
+        return []
+    }
 }
+
 proc qt6::read_only_option {opt action args} {
     if {${action} eq "set"} {
         return -code error "${opt} is read-only"
