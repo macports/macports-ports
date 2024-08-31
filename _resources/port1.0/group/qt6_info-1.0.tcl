@@ -91,7 +91,7 @@ proc qt6::version {} {
     if {[info exists qt_info([option qt6.base])]} {
         return [lindex $qt_info([option qt6.base]) 0]
     } else {
-        return []
+        return {}
     }
 }
 
