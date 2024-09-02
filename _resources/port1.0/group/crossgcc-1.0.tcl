@@ -331,7 +331,7 @@ proc crossgcc.setup {target version} {
 
             # https://build.macports.org/builders/ports-10.13_x86_64-builder/builds/105513/steps/install-port/logs/stdio
             # c++/v1/functional:1408:2: error: no member named 'fancy_abort' in namespace 'std::__1'; did you mean simply 'fancy_abort'?
-            compiler.blacklist-append {clang < 1000}
+            compiler.blacklist-append {clang < 1001}
         }
 
         universal_variant no
