@@ -12,27 +12,27 @@ if {${os.platform} eq "darwin" && [option configure.build_arch] in [list ppc ppc
     return
 }
 
-# clang-17 (and older ?) is currently seen to not build on macOS15(+) (Darwin24)
-# https://trac.macports.org/ticket/70779
-# For now, limit fallbacks on this OS to clang-18 (or newer).
-
 # Clang 17+ (currently) only available on Darwin11 and newer
 if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
+    # For now limit exposure of clang-18+ to macOS13+ due to issues like
+    # https://github.com/macports/macports-ports/pull/21051
+    # https://trac.macports.org/ticket/68640
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
+        # Always allow clang-18+ on macOS15+ due to issues with clang-17 and older
+        # https://trac.macports.org/ticket/70779
+        # Elsewhere limit to c++17 or newer
         if { ${os.platform} ne "darwin" || ${os.major} >= 24 || ${compiler.cxx_standard} >= 2017 } {
-            # For now limit exposure of clang-18+ to macOS13+ due to issues like
-            # https://github.com/macports/macports-ports/pull/21051
-            # https://trac.macports.org/ticket/68640
-            # Also limit clang 18 to c++17 or newer (unless darwin24+)
-            lappend compilers macports-clang-18
+            lappend compilers macports-clang-19 macports-clang-18
         }
     }
+    # exclude clang-17 on macOS15+
     if { ${os.major} <= 23 && ${compiler.cxx_standard} >= 2011 } {
         # Limit clang 17 to c++11 or newer
         lappend compilers macports-clang-17
     }
 }
 
+ # exclude clang-16 and older on macOS15+
 if { ( ${os.major} <= 23 && ${os.major} >= 10 ) || ${os.platform} ne "darwin"} {
     # On Darwin10 only use selection here if c++20+ required
     if { ${os.platform} ne "darwin" || ${os.major} >= 11 || ${compiler.cxx_standard} >= 2020 } {
