@@ -93,14 +93,21 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # build database of gcc compiler attributes
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
-    set gcc_versions {10 11 12 13 14 devel}
+    set gcc_versions [list]
+    if { ${os.major} <= 23 } {
+        lappend gcc_versions 10 11 12 13
+    }
+    lappend gcc_versions 14 devel
 } else {
     set gcc_versions [list]
     if { ${os.major} < 15 } {
         lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        lappend gcc_versions 10 11 12 13 14 devel
+        if { ${os.major} <= 23 } {
+            lappend gcc_versions 10 11 12 13
+        }
+        lappend gcc_versions 14 devel
     }
 }
 # GCC version providing the primary runtime
@@ -186,9 +193,14 @@ if { ${os.arch} ne "arm" && ${os.platform} eq "darwin" } {
     }
 }
 if { ${os.major} >= 9 || ${os.platform} ne "darwin" } {
-    lappend clang_versions 11
+    if { ${os.major} <= 23 || ${os.platform} ne "darwin"} {
+        lappend clang_versions 11
+        if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
+            lappend clang_versions 12 13 14 15 16 17
+        }
+    }
     if { ${os.major} >= 11 || ${os.platform} ne "darwin"} {
-        lappend clang_versions 12 13 14 15 16 17 18 19
+        lappend clang_versions 18 19
     }
     if { ${os.major} >= 14 } {
         lappend clang_versions devel
