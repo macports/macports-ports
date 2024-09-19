@@ -18,11 +18,11 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
     # https://github.com/macports/macports-ports/pull/21051
     # https://trac.macports.org/ticket/68640
     if {${os.major} >= 22 || ${os.platform} ne "darwin"} {
-        # Always allow clang-18+ on macOS15+ due to issues with clang-17 and older
-        # https://trac.macports.org/ticket/70779
-        if { ${os.platform} ne "darwin" || ${os.major} >= 24 || ${compiler.cxx_standard} >= 2017 } {
+        if { ${os.platform} ne "darwin" || ${compiler.cxx_standard} >= 2017 } {
             lappend compilers macports-clang-19
         }
+        # Always allow clang-18 on macOS15+ due to issues with clang-17 and older
+        # https://trac.macports.org/ticket/70779
         if { ${os.platform} ne "darwin" || ${os.major} >= 24 || ${compiler.cxx_standard} >= 2014 } {
             lappend compilers macports-clang-18
         }
