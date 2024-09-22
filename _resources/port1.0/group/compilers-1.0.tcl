@@ -94,7 +94,7 @@ set compilers.list {cc cxx cpp objc fc f77 f90}
 # Should match those in compilers/gcc_compilers.tcl
 if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
     set gcc_versions [list]
-    if { ${os.major} <= 23 } {
+    if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
         lappend gcc_versions 10 11 12 13
     }
     lappend gcc_versions 14 devel
@@ -104,7 +104,7 @@ if { ${os.arch} eq "arm" || ${os.platform} ne "darwin" } {
         lappend gcc_versions 5 6 7 8 9
     }
     if { ${os.major} >= 10 } {
-        if { ${os.major} <= 23 } {
+        if { [vercmp ${xcodeversion} < 16.0] && [vercmp ${xcodecltversion} < 16.0] } {
             lappend gcc_versions 10 11 12 13
         }
         lappend gcc_versions 14 devel
