@@ -252,6 +252,14 @@ default configure.pre_args {[list \
                     -Wno-dev
 ]}
 
+# On macOS install destination on libraries is set by CMAKE_INSTALL_NAME_DIR.
+# On non-Apple platforms that setting has no effect. In result, at least on Linux
+# CMake may install libraries in ${prefix}/lib64, which we do not want to happen.
+if {${os.platform} ne "darwin"} {
+    configure.pre_args-append \
+                    -DCMAKE_INSTALL_LIBDIR="${cmake.install_prefix}/lib"
+}
+
 # make sure configure.args is set but don't reset it
 configure.args-append
 
