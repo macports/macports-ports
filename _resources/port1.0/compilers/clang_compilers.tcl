@@ -29,19 +29,21 @@ if {${os.major} >= 11 || ${os.platform} ne "darwin"} {
     lappend compilers macports-clang-17
 }
 
- # exclude clang-16 and older on macOS15+
-if { ( ${os.major} <= 23 && ${os.major} >= 10 ) || ${os.platform} ne "darwin"} {
+if { ${os.major} >= 10 || ${os.platform} ne "darwin"} {
     # On Darwin10 only use selection here if c++20+ required
     if { ${os.platform} ne "darwin" || ${os.major} >= 11 || ${compiler.cxx_standard} >= 2020 } {
-        lappend compilers macports-clang-16 \
-                          macports-clang-15 \
-                          macports-clang-14
-        if {${os.major} < 23 || ${os.platform} ne "darwin"} {
-            # https://trac.macports.org/ticket/68257
-            # Versions of clang older than clang-14 probably have build issues on
-            # macOS14+. Until resolved do not append to fallback list.
-            # Unlikely they will ever really be needed here though.
-            lappend compilers macports-clang-13 macports-clang-12
+        # These are allowed still on macOS15+
+        lappend compilers macports-clang-16
+        if { ${os.major} < 24 || ${os.platform} ne "darwin"} {
+            # Still have some issues on macOS15+ so disallow as 'official' fallbacks
+            lappend compilers macports-clang-15 macports-clang-14
+            if {${os.major} < 23 || ${os.platform} ne "darwin"} {
+                # https://trac.macports.org/ticket/68257
+                # Versions of clang older than clang-14 probably have build issues on
+                # macOS14+. Until resolved do not append to fallback list.
+                # Unlikely they will ever really be needed here though.
+                lappend compilers macports-clang-13 macports-clang-12
+            }
         }
     }
 }
