@@ -30,7 +30,8 @@ proc handle_tarball_from {option action args} {
         github.tarball_from ${args}
         switch ${args} {
             downloads {
-                github.master_sites https://github.com/downloads/${github.author}/${github.project}
+                # GitHub no longer hosts downloads on their servers.
+                github.master_sites macports_distfiles
                 default extract.rename no
             }
             releases {
